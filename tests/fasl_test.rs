@@ -140,7 +140,7 @@ fn rebuild_protects_its_intermediates_from_mid_rebuild_gc() {
 
 use typelisp::fasl::{registry_mark, source_hash, Fasl};
 use typelisp::{
-    completion_candidates, load_compiler, load_prelude, Checker, EvalError, Interp, TopLevel,
+    completion_candidates, load_compiler, load_prelude, Checker, EvalError, Interp,
 };
 
 /// Load the prelude by source into a fresh environment.
@@ -166,7 +166,8 @@ fn prelude_fasl() -> Fasl {
     let interp = Interp::new();
     let mark = registry_mark(&chk);
 
-    // Reproduce `load_prelude` but keeping the checked TopLevels for capture.
+    // Reproduce `load_prelude` but keeping the checked top-level forms for
+    // capture.
     // `predeclare_program` is part of that: since the two-pass top level
     // (2026-08-01), the prelude relies on forward references between its own
     // `defun`s, so a loop that skips the pass is not "load_prelude" at all —
@@ -344,18 +345,24 @@ fn fasl_loaded_prelude_offers_the_same_completions() {
     assert_eq!(src_names, fasl_names, "prelude completion surface differs");
 }
 
-/// The captured/loaded `TopLevel` list is exactly the checked prelude forms —
+/// The captured/loaded top-level list is exactly the checked prelude forms —
 /// a cheap structural sanity check that capture kept them in order.
 #[test]
 fn fasl_top_levels_match_a_direct_prelude_check() {
     let fasl = prelude_fasl();
-    // Non-empty and every entry is a real registration form (no bare Expr).
+    // Non-empty and every entry is a real registration form (no bare `expr`).
     assert!(!fasl.top_levels.is_empty());
     for tl in &fasl.top_levels {
-        assert!(
-            !matches!(tl, TopLevel::Expr(_)),
-            "prelude should contain only definitions, found a bare expression"
-        );
+        // A captured form is an `OwnedForm`, not a live heap value, so the tag
+        // is read straight off the cons cell's `car`.
+        let tag = match tl {
+            OwnedForm::Cons { cells, .. } => match cells.first().map(|c| &c.form) {
+                Some(OwnedForm::Sym(name)) => name.as_str(),
+                other => panic!("a top-level form's tag is a symbol, got {:?}", other),
+            },
+            other => panic!("a top-level form is a tagged list, got {:?}", other),
+        };
+        assert_ne!(tag, "expr", "prelude should contain only definitions, found a bare expression");
     }
 }
 

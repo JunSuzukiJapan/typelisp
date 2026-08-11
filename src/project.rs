@@ -63,7 +63,8 @@ use std::path::{Path as FsPath, PathBuf};
 use std::rc::Rc;
 
 use crate::fasl::{registry_mark, source_hash, Fasl, RegistryMark};
-use crate::{Checker, Error, Heap, Interp, Path, Reader, TopLevel, Value, MONO_BUNDLE_MODULE};
+use crate::check::core;
+use crate::{Checker, Error, Heap, Interp, Path, Reader, TopLevelForm, Value, MONO_BUNDLE_MODULE};
 
 /// A cached fasl for one dependency file, keyed by its path in
 /// [`ModuleCache`]. Shared (via `Rc`) across `Loader` instances so a caller
@@ -187,7 +188,7 @@ pub struct Loader {
     /// documents an entry's diagnostics actually depend on, so editing one
     /// of them can trigger re-diagnosing the ones that loaded it.
     loaded_files: HashSet<PathBuf>,
-    pending: Vec<TopLevel>,
+    pending: Vec<TopLevelForm>,
     /// In-editor buffer contents, keyed by filesystem path, consulted before
     /// disk for every dependency load — an unsaved edit to a file another
     /// file `use`s should be visible immediately, not only after a save.
@@ -256,7 +257,7 @@ impl Loader {
     /// The checked-but-unexecuted top-level forms accumulated by loads so
     /// far, in dependency order. The driver must execute these (only) after
     /// the heap's read roots are back to their pre-load mark.
-    pub fn take_pending(&mut self) -> Vec<TopLevel> {
+    pub fn take_pending(&mut self) -> Vec<TopLevelForm> {
         std::mem::take(&mut self.pending)
     }
 
@@ -412,14 +413,21 @@ impl Loader {
                 // `(load ...)` loads inline (so subsequent forms see the
                 // definitions), preferring a compiled fasl — see
                 // `load_file_flat`.
-                Ok(TopLevel::Load { path: load_path }) => {
+                Ok(tl) if core::op(heap, tl) == Some("load") => {
                     cacheable = false;
+                    let load_path = match load_path_of(heap, tl) {
+                        Some(p) => p,
+                        None => {
+                            check_err = Some(Error::TypeError("load: expected a path string".into()));
+                            break;
+                        }
+                    };
                     if let Err(e) = load_file_flat(heap, reader, checker, interp, &file_dir, &load_path) {
                         check_err = Some(e);
                         break;
                     }
                 }
-                Ok(tl) if needs_immediate_exec(&tl) => {
+                Ok(tl) if needs_immediate_exec(heap, tl) => {
                     let _ = interp.exec(heap, tl);
                 }
                 Ok(tl) => body.push(tl),
@@ -437,7 +445,15 @@ impl Loader {
         if self.loaded_files.len() != loaded_files_before_body {
             cacheable = false;
         }
-        self.pending.push(TopLevel::Module { path, body });
+        // `(module PATH BODY...)` — the file's own definitions as one unit.
+        // Built here rather than by the checker because the *driver* is what
+        // knows a file's forms belong together.
+        let wrapper = match crate::check::core::tagged_module(heap, &path, &body) {
+            Ok(v) => v,
+            Err(e) => return Err(Error::TypeError(format!("load: {}", e))),
+        };
+        heap.push_permanent_root(wrapper);
+        self.pending.push(wrapper);
         Ok(LoadOutcome { cacheable })
     }
 
@@ -683,7 +699,7 @@ impl Loader {
         checker: &Checker,
         mark: &RegistryMark,
         file: &FsPath,
-        top_levels: Vec<TopLevel>,
+        top_levels: Vec<TopLevelForm>,
         files_before: &HashSet<PathBuf>,
         cache: &ModuleCache,
     ) -> Result<(), Error> {
@@ -811,7 +827,11 @@ pub fn load_source_flat(
     checker.predeclare_program(heap, &forms.iter().map(|(v, _)| *v).collect::<Vec<_>>());
     for (v, loc) in forms {
         match checker.check_form_at(heap, &*interp, v, Some(loc)) {
-            Ok(TopLevel::Load { path }) => {
+            Ok(tl) if core::op(heap, tl) == Some("load") => {
+                let Some(path) = load_path_of(heap, tl) else {
+                    result = Err(Error::TypeError("load: expected a path string".into()));
+                    break;
+                };
                 if let Err(e) = load_file_flat(heap, reader, checker, interp, &dir, &path) {
                     result = Err(e);
                     break;
@@ -854,12 +874,35 @@ fn value_path_segs(heap: &Heap, v: Value) -> Option<Vec<String>> {
 /// the root stack mid-batch" invariant this module and `main.rs` rely on. A
 /// user-written `module` is deliberately *not* matched — executing one early
 /// would run arbitrary body expressions out of order.
-pub fn needs_immediate_exec(tl: &TopLevel) -> bool {
-    match tl {
-        TopLevel::Defmacro { .. } => true,
-        TopLevel::Module { path, body } if *path == Path::root(MONO_BUNDLE_MODULE) => {
-            body.iter().any(needs_immediate_exec)
+pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
+    match core::op(heap, tl) {
+        Some("defmacro") => true,
+        Some("module") => {
+            let bundle = match core::field(heap, tl, 0) {
+                Some(Value::Path(id)) => crate::types::path_from_id(heap, id) == Path::root(MONO_BUNDLE_MODULE),
+                Some(Value::Symbol(id)) => heap.symbol_name(id) == MONO_BUNDLE_MODULE,
+                _ => false,
+            };
+            bundle
+                && core::fields(heap, tl)
+                    .map(|fs| fs.iter().skip(1).any(|f| needs_immediate_exec(heap, *f)))
+                    .unwrap_or(false)
         }
         _ => false,
+    }
+}
+
+/// The path string a `(load "PATH")` form names, or `None` for any other form.
+///
+/// The tag check is part of the answer, not a precondition: every driver
+/// (`main.rs`'s two, this module's two) has a top-level form in hand and wants
+/// to know "is this a load, and of what?" as one question.
+pub fn load_path_of(heap: &Heap, tl: TopLevelForm) -> Option<String> {
+    if core::op(heap, tl) != Some("load") {
+        return None;
+    }
+    match core::field(heap, tl, 0)? {
+        Value::Str(id) => Some(heap.string(id).to_string()),
+        _ => None,
     }
 }

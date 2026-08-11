@@ -1,104 +1,94 @@
 //! Cursor-position lookups over a checked document, for the LSP's hover and
 //! goto-definition (`src/bin/lsp.rs`).
 //!
-//! `Typed::loc` (`ast.rs`) is a source *span*: for a list-form node it covers
-//! the opening through closing parenthesis (`Heap::cons_loc`); for a bare atom
-//! checked as an *element of some enclosing list* (e.g. an argument, a `let`
-//! binding value, a function body form) it's the span the reader recorded
-//! for that specific occurrence (the spine cell's own `car_loc`, read back by
-//! `Heap::list_to_vec_locs` and threaded through the checker as
-//! `arg_locs`/`Checker::check_at`) — this is what lets a `Var`
-//! (local variable) reference be found in its own right. A bare atom at top
-//! level gets its span from the reader directly
-//! (`Reader::read_all_in_spanned` -> `Checker::check_form_at`).
+//! A located node is a core form, and its span is the cell's own `self_loc`
+//! (`Heap::cons_loc`): for a list read from source that covers the opening
+//! through closing parenthesis, and for a node the checker built it is the span
+//! of the form it was lowered from. A bare atom checked as an *element of some
+//! enclosing list* (an argument, a `let` binding value, a body form) is lowered
+//! to a node of its own — `(var x)`, `(int 1)` — which carries that
+//! occurrence's own span, and that is what lets a local-variable reference be
+//! found in its own right.
 //!
 //! [`locate_node`] prefers true containment: among every node whose span
 //! contains the cursor (`Loc::contains`), the one with the greatest start
-//! position is the innermost (contained nodes form a nesting chain; ties —
-//! a wrapper node sharing its first child's exact position — are broken
-//! toward the deeper node). A node with a *degenerate* span (end unknown —
-//! e.g. one synthesized by macro expansion) can never contain a cursor, so
-//! when nothing contains it the search falls back to the pre-span behavior:
-//! the greatest start position `<=` cursor. That keeps positions past a
-//! form's end (or in macro-synthesized trees) resolving to *something*
-//! rather than nothing — `completion_locals` depends on that.
+//! position is the innermost (contained nodes form a nesting chain; ties — a
+//! wrapper node sharing its first child's exact position — are broken toward
+//! the deeper node). A node with a *degenerate* span (end unknown — e.g. one
+//! synthesized by macro expansion) can never contain a cursor, so when nothing
+//! contains it the search falls back to the greatest start position `<=`
+//! cursor. That keeps positions past a form's end resolving to *something*
+//! rather than nothing — [`completion_locals`] depends on that.
+//!
+//! # Why this module got smaller
+//!
+//! Over the `Typed` tree, descending needed a 44-line table naming every
+//! `Expr` variant's children, and the top level needed a second one per
+//! `TopLevel` variant. A core form's children are just its fields, so the
+//! descent is uniform and both tables are gone. The one thing a walk must
+//! still know is where data stops being program: [`is_opaque`].
 
-use crate::{CompileTarget, DefLocs, Docs, Expr, Loc, Pattern, Registry, TopLevel, Typed};
+use typelisp_mem::{Heap, Value};
+
+use crate::check::core;
+use crate::{DefLocs, Docs, Loc, Path, Registry, TopLevelForm};
+
+/// Tags whose fields are *not* sub-expressions, so a walk must not descend
+/// into them.
+///
+/// `quote` is the only place user data appears in a lowered program, and a
+/// quoted `(call ...)` datum is data — descending would report a hover for a
+/// node that does not exist. The pattern tags are the other case: a
+/// `(pat-lit (int 1))`'s literal is part of the pattern, not an expression
+/// evaluated at that position, and a pattern binds rather than refers.
+fn is_opaque(tag: &str) -> bool {
+    matches!(tag, "quote" | "pat-wild" | "pat-bind" | "pat-lit" | "pat-ctor" | "pat-typetest")
+}
 
 /// The innermost candidates seen so far during [`locate_node`]'s walk: one
 /// among nodes whose span truly contains the cursor, one among nodes that
-/// merely start at or before it (the pre-span behavior, kept as a fallback —
-/// see the module doc comment). Each entry is (start position, depth, node).
+/// merely start at or before it. Each entry is (start position, depth, node).
 #[derive(Default)]
-struct Nearest<'a> {
-    contained: Option<((u32, u32), usize, &'a Typed)>,
-    preceding: Option<((u32, u32), usize, &'a Typed)>,
+struct Nearest {
+    contained: Option<((u32, u32), usize, Value)>,
+    preceding: Option<((u32, u32), usize, Value)>,
 }
 
 /// Find the smallest node in `body` whose span contains `(line, col)` in
 /// `file`, falling back to the closest-preceding node when nothing does —
 /// see the module doc comment. `line`/`col` are 1-based, matching [`Loc`].
-pub fn locate_node<'a>(body: &'a [TopLevel], file: &str, line: u32, col: u32) -> Option<&'a Typed> {
+pub fn locate_node(heap: &Heap, body: &[TopLevelForm], file: &str, line: u32, col: u32) -> Option<Value> {
     let cursor = (line, col);
     let mut best = Nearest::default();
     for tl in body {
-        visit_top_level(tl, file, cursor, 0, &mut best);
+        visit(heap, *tl, file, cursor, 0, &mut best);
     }
     best.contained.or(best.preceding).map(|(_, _, t)| t)
 }
 
-fn visit_top_level<'a>(
-    tl: &'a TopLevel,
-    file: &str,
-    cursor: (u32, u32),
-    depth: usize,
-    best: &mut Nearest<'a>,
-) {
-    match tl {
-        TopLevel::Defun { body, .. } | TopLevel::Defmethod { body, .. } => {
-            for t in body {
-                visit_typed(t, file, cursor, depth, best);
-            }
-        }
-        TopLevel::Defmacro { body, lambda, .. } => {
-            // `&optional`/`&key` default-value forms are checked expressions
-            // too, so goto/hover can land inside them.
-            for d in lambda.optionals.iter().chain(lambda.keys.iter().map(|(_, d)| d)) {
-                for t in d {
-                    visit_typed(t, file, cursor, depth, best);
-                }
-            }
-            for t in body {
-                visit_typed(t, file, cursor, depth, best);
-            }
-        }
-        TopLevel::Defvar { value, .. } => visit_typed(value, file, cursor, depth, best),
-        TopLevel::Module { body, .. } => {
-            for tl in body {
-                visit_top_level(tl, file, cursor, depth, best);
-            }
-        }
-        TopLevel::Expr(t) => visit_typed(t, file, cursor, depth, best),
-        // `Load` carries only a path string — nothing typed to locate into.
-        TopLevel::Use { .. } | TopLevel::Defstruct { .. } | TopLevel::Defenum { .. } | TopLevel::Load { .. } => {}
+/// Consider `form` as a candidate, then descend into its fields.
+///
+/// Every node is considered, the top-level ones included: a `(defun ...)`'s own
+/// span is a legitimate hover target, and its fields are its body — so unlike
+/// the `Typed` walk there is nothing to special-case about the top level.
+fn visit(heap: &Heap, form: Value, file: &str, cursor: (u32, u32), depth: usize, best: &mut Nearest) {
+    if !matches!(form, Value::Cons(_)) {
+        return;
     }
-}
-
-fn visit_typed<'a>(t: &'a Typed, file: &str, cursor: (u32, u32), depth: usize, best: &mut Nearest<'a>) {
-    if let Some(loc) = &t.loc {
+    if let Some(loc) = heap.cons_loc(form) {
         if &*loc.file == file {
             let key = (loc.line, loc.col);
             if key <= cursor {
                 // "Greatest start (ties broken deeper) wins" — the same rule
                 // for both candidate kinds; contained nodes form a nesting
                 // chain, so among them this picks the innermost.
-                let update = |slot: &mut Option<((u32, u32), usize, &'a Typed)>| {
+                let update = |slot: &mut Option<((u32, u32), usize, Value)>| {
                     let better = match slot {
                         None => true,
                         Some((bk, bd, _)) => key > *bk || (key == *bk && depth > *bd),
                     };
                     if better {
-                        *slot = Some((key, depth, t));
+                        *slot = Some((key, depth, form));
                     }
                 };
                 update(&mut best.preceding);
@@ -108,85 +98,58 @@ fn visit_typed<'a>(t: &'a Typed, file: &str, cursor: (u32, u32), depth: usize, b
             }
         }
     }
-    for child in expr_children(&t.expr) {
-        visit_typed(child, file, cursor, depth + 1, best);
-    }
-}
-
-/// Every immediate `Typed` child of `e`, for [`visit_typed`]'s descent —
-/// covers every [`Expr`] variant; the leaf ones (literals, `Var`/`Global`/
-/// `FnRef`/`MethodRef` references, `Break`, `Quote`) have none.
-fn expr_children(e: &Expr) -> Vec<&Typed> {
-    match e {
-        Expr::If(a, b, c) => vec![a.as_ref(), b.as_ref(), c.as_ref()],
-        Expr::Let(binds, body) => binds.iter().map(|(_, t)| t).chain(body.iter()).collect(),
-        Expr::Call(_, args) => args.iter().collect(),
-        Expr::Lambda { body, .. } => body.iter().collect(),
-        Expr::Labels { defs, body } => defs.iter().flat_map(|(_, _, b)| b.iter()).chain(body.iter()).collect(),
-        Expr::Apply(f, args) => std::iter::once(f.as_ref()).chain(args.iter()).collect(),
-        Expr::Assoc { args, .. } => args.iter().collect(),
-        Expr::TraitCall { args, .. } => args.iter().collect(),
-        Expr::DynCall { args, .. } => args.iter().collect(),
-        Expr::DynBox { value, .. } => vec![value.as_ref()],
-        Expr::DynUpcast { value, .. } => vec![value.as_ref()],
-        Expr::DynValue(inner) => vec![inner.as_ref()],
-        Expr::Construct { args, .. } => args.iter().collect(),
-        Expr::FieldGet(e, _) => vec![e.as_ref()],
-        Expr::FieldSet(e, _, v) => vec![e.as_ref(), v.as_ref()],
-        Expr::Match(scrutinee, arms) => {
-            std::iter::once(scrutinee.as_ref()).chain(arms.iter().flat_map(|a| a.body.iter())).collect()
+    match core::op(heap, form) {
+        Some(tag) if is_opaque(tag) => return,
+        Some(_) => {
+            let Ok(fields) = core::fields(heap, form) else { return };
+            for f in fields {
+                visit(heap, f, file, cursor, depth + 1, best);
+            }
         }
-        Expr::Set(_, e) => vec![e.as_ref()],
-        Expr::SetGlobal(_, e) => vec![e.as_ref()],
-        Expr::Loop(body) => body.iter().collect(),
-        Expr::Return(opt) => opt.iter().map(|b| b.as_ref()).collect(),
-        Expr::Panic(e) => vec![e.as_ref()],
-        Expr::Int(_)
-        | Expr::Float(_)
-        | Expr::Bignum(_)
-        | Expr::Ratio(_)
-        | Expr::Bool(_)
-        | Expr::Char(_)
-        | Expr::Str(_)
-        | Expr::SymLit(_)
-        | Expr::Unit
-        | Expr::Var(_)
-        | Expr::Global(_)
-        | Expr::FnRef(_)
-        | Expr::MethodRef { .. }
-        | Expr::Break
-        | Expr::Quote(_)
-        | Expr::CompileFn(_) => vec![],
+        // A cons whose head is not a symbol is a *list* of nodes — a `match`
+        // arm, a `let` binding, a `labels` definition. Its elements are the
+        // nodes, so it is not itself a candidate's parent in the same sense;
+        // walking its elements at the same depth keeps the depth measuring
+        // expression nesting rather than list structure.
+        None => {
+            let Ok(items) = heap.list_to_vec(form) else { return };
+            for item in items {
+                visit(heap, item, file, cursor, depth, best);
+            }
+        }
     }
 }
 
 /// Where `node` refers to, if it's a reference this pass can resolve.
-/// `Global`/`Call`/`FnRef`/`Assoc`/`MethodRef`/`Construct` all already carry
-/// a fully-qualified [`crate::Path`] (resolved at check time), so this is a
-/// plain [`DefLocs`] lookup — no name resolution needed. A local variable
-/// reference (`Expr::Var`) resolves through `DefLocs::local_refs` instead,
-/// keyed by the reference's own position (`node.loc`, populated by
-/// `Checker::check_at` for any atom checked as a list element — see
-/// `check::locate`'s module doc comment) — that resolution already happened
-/// once at check time (`Checker::check_at`'s `Env::get_loc` lookup), so this
-/// is a lookup too, not a fresh scope search. A `Var` with no recorded
-/// position of its own (rare — only an atom with no enclosing list at all)
-/// falls through to `None`, same as any node this pass doesn't recognize as
-/// a resolvable reference.
-pub fn definition_target(node: &Typed, def_locs: &DefLocs) -> Option<Loc> {
-    match &node.expr {
-        Expr::Global(r) | Expr::SetGlobal(r, _) => def_locs.vars.get(&r.resolved).cloned(),
-        Expr::FnRef(r) | Expr::Call(r, _) => def_locs.fns.get(&r.resolved).cloned(),
-        Expr::MethodRef { type_name, method, .. } | Expr::Assoc { type_name, method, .. } => {
-            def_locs.methods.get(&(type_name.clone(), method.clone())).cloned()
+///
+/// `global`/`set-global`/`call`/`fnref`/`assoc`/`methodref`/`construct` all
+/// already carry a fully-qualified [`Path`] (resolved at check time), so this is
+/// a plain [`DefLocs`] lookup — no name resolution needed. A local variable
+/// reference (`var`) resolves through `DefLocs::local_refs` instead, keyed by
+/// the reference's own position: that resolution already happened once at check
+/// time (`Checker::check_at`'s `Env::get_loc` lookup), so this is a lookup too,
+/// not a fresh scope search. A `var` with no recorded position of its own falls
+/// through to `None`, same as any node this pass doesn't recognize.
+pub fn definition_target(heap: &Heap, node: Value, def_locs: &DefLocs) -> Option<Loc> {
+    match core::op(heap, node)? {
+        // `(global (WRITTEN...) (HOME...) PATH REPR)` and `set-global`'s same
+        // leading triple.
+        "global" | "set-global" => def_locs.vars.get(&path_at(heap, node, 2)?).cloned(),
+        // `(call (WRITTEN...) (HOME...) PATH ...)`, `fnref`'s same triple.
+        "call" | "fnref" => def_locs.fns.get(&path_at(heap, node, 2)?).cloned(),
+        // `(assoc PATH SYM ...)`, `(methodref PATH SYM ...)`.
+        "assoc" | "methodref" => {
+            def_locs.methods.get(&(path_at(heap, node, 0)?, sym_at(heap, node, 1)?)).cloned()
         }
-        Expr::Construct { type_name, .. } => def_locs.types.get(type_name).cloned(),
-        Expr::CompileFn(CompileTarget::Fn(r)) => def_locs.fns.get(&r.resolved).cloned(),
-        Expr::CompileFn(CompileTarget::Method { type_name, method, .. }) => {
-            def_locs.methods.get(&(type_name.clone(), method.clone())).cloned()
-        }
-        Expr::Var(_) => {
-            let l = node.loc.as_ref()?;
+        "construct" => def_locs.types.get(&path_at(heap, node, 0)?).cloned(),
+        // `(compile-fn ...)` names either a function or a method; which one is
+        // told by whether a method name follows the path.
+        "compile-fn" => match sym_at(heap, node, 1) {
+            Some(m) => def_locs.methods.get(&(path_at(heap, node, 0)?, m)).cloned(),
+            None => def_locs.fns.get(&path_at(heap, node, 0)?).cloned(),
+        },
+        "var" => {
+            let l = heap.cons_loc(node)?;
             def_locs.local_refs.get(&(l.line, l.col)).cloned()
         }
         _ => None,
@@ -195,117 +158,207 @@ pub fn definition_target(node: &Typed, def_locs: &DefLocs) -> Option<Loc> {
 
 /// `node`'s docstring, if it's a reference to a documented definition —
 /// [`definition_target`]'s `Docs` counterpart, over the identical set of
-/// resolved-`Path`-carrying `Expr` variants (a `Var` local has no docstring
-/// of its own, so unlike `definition_target` there's no `DefLocs::local_refs`
-/// analog to fall back to there).
-pub fn doc_for<'a>(node: &Typed, docs: &'a Docs) -> Option<&'a str> {
-    match &node.expr {
-        Expr::Global(r) | Expr::SetGlobal(r, _) => docs.vars.get(&r.resolved),
-        Expr::FnRef(r) | Expr::Call(r, _) => docs.fns.get(&r.resolved),
-        Expr::MethodRef { type_name, method, .. } | Expr::Assoc { type_name, method, .. } => {
-            docs.methods.get(&(type_name.clone(), method.clone()))
-        }
-        Expr::Construct { type_name, .. } => docs.types.get(type_name),
-        Expr::CompileFn(CompileTarget::Fn(r)) => docs.fns.get(&r.resolved),
-        Expr::CompileFn(CompileTarget::Method { type_name, method, .. }) => docs.methods.get(&(type_name.clone(), method.clone())),
+/// resolved-`Path`-carrying tags (a `var` local has no docstring of its own, so
+/// unlike `definition_target` there's no `local_refs` analog to fall back to).
+pub fn doc_for<'a>(heap: &Heap, node: Value, docs: &'a Docs) -> Option<&'a str> {
+    let found = match core::op(heap, node)? {
+        "global" | "set-global" => docs.vars.get(&path_at(heap, node, 2)?),
+        "call" | "fnref" => docs.fns.get(&path_at(heap, node, 2)?),
+        "assoc" | "methodref" => docs.methods.get(&(path_at(heap, node, 0)?, sym_at(heap, node, 1)?)),
+        "construct" => docs.types.get(&path_at(heap, node, 0)?),
+        "compile-fn" => match sym_at(heap, node, 1) {
+            Some(m) => docs.methods.get(&(path_at(heap, node, 0)?, m)),
+            None => docs.fns.get(&path_at(heap, node, 0)?),
+        },
         _ => None,
-    }
-    .map(|s| s.as_str())
+    };
+    found.map(|s| s.as_str())
 }
 
 /// Hover text for `node`: its checked type, plus its docstring (if any) —
-/// `doc_for`'s result appended below a blank line, the conventional LSP
-/// hover shape (signature/type first, prose after). `Type` has no `Display`
-/// impl anywhere in this crate — every existing type-mismatch message
-/// already formats it with `{:?}` (e.g. `Checker::check`'s "type mismatch:
-/// expected {:?}, found {:?}") — so this matches that existing convention
-/// rather than introducing a pretty-printer.
-pub fn hover_text(node: &Typed, docs: &Docs) -> String {
-    match doc_for(node, docs) {
-        Some(doc) => format!("{:?}\n\n{}", node.ty, doc),
-        None => format!("{:?}", node.ty),
+/// `doc_for`'s result appended below a blank line, the conventional LSP hover
+/// shape (signature/type first, prose after).
+///
+/// The type comes from `DefLocs::node_types`, keyed by the node's own position,
+/// rather than from the node: a lowered form does not carry its type (see
+/// `check::core::Checked`), so the checker records it where both are in hand.
+/// A node with no recorded type — one the checker synthesized without a source
+/// position — shows its docstring alone, or nothing.
+pub fn hover_text(heap: &Heap, node: Value, def_locs: &DefLocs, docs: &Docs) -> String {
+    let ty = heap
+        .cons_loc(node)
+        .and_then(|l| def_locs.node_types.get(&(l.line, l.col)))
+        .map(|t| format!("{:?}", t));
+    match (ty, doc_for(heap, node, docs)) {
+        (Some(ty), Some(doc)) => format!("{}\n\n{}", ty, doc),
+        (Some(ty), None) => ty,
+        (None, Some(doc)) => doc.to_string(),
+        (None, None) => String::new(),
     }
 }
 
-/// Every local (`let`/`let*`/`lambda`/`labels` binding, or a `defun`/
-/// `defmethod`/`defmacro`'s own parameter/receiver) in lexical scope at
-/// `(line, col)` in `file` — for the LSP's completion (`src/bin/lsp.rs`) to
-/// offer alongside [`completion_candidates`]'s `Registry`-derived names.
+/// Every local (`let`/`lambda`/`labels` binding, or a `defun`/`defmethod`/
+/// `defmacro`'s own parameter) in lexical scope at `(line, col)` in `file` —
+/// for the LSP's completion (`src/bin/lsp.rs`) to offer alongside
+/// [`completion_candidates`]'s `Registry`-derived names.
 ///
-/// First finds the cursor's smallest enclosing node with [`locate_node`],
-/// then re-walks `body` from the top, pushing each binding name it
-/// encounters as it descends into that binding's scope — stopping (by
-/// pointer identity, `body` being the same tree `locate_node` searched) at
-/// the target node and returning whatever names are on the stack at that
-/// point. A binding is only pushed once its own scope is entered — a `let`
-/// binding's *value* expression, for instance, is checked in the *outer*
-/// environment (CL `let`, not `let*`) and correctly does not see the name
-/// being bound, matching `Checker::check_let`'s own order. A `match` arm's
-/// pattern-bound names ([`pattern_bind_names`]) are pushed only for that
-/// arm's own body — the scrutinee and sibling arms never see them,
-/// matching `Checker::check_match`'s per-arm `extended_with_locs`.
-///
-/// Residual caveat (now limited to [`locate_node`]'s *fallback* path — a
-/// containment hit is exact): when nothing's span contains the cursor
-/// (e.g. a macro-synthesized tree with only degenerate spans), the cursor
-/// is matched against the *closest preceding* node's start, with no way to
-/// tell "inside that node's own span" from "already past it, nothing
-/// positioned here yet". A cursor sitting right at a `let`/`lambda`/
-/// `labels` scope boundary with *nothing at all* positioned in the new
-/// scope can therefore resolve to a node one scope out (e.g. a binding
-/// value), missing the boundary's own names. The LSP never hands in such a
-/// position anyway: `handle_completion` (`src/bin/lsp.rs`) splices its
-/// `(panic "")` placeholder at *exactly* the in-progress identifier's
-/// position (and a fresh `(` truncates to `()`, whose `Unit` node keeps the
-/// `(`'s own recorded element position), so the checked tree always has a
-/// node at — and thus a target in — the scope being completed in. Only a
-/// direct caller passing a position in a genuinely empty scope still sees
-/// the caveat.
-pub fn completion_locals(body: &[TopLevel], file: &str, line: u32, col: u32) -> Vec<String> {
-    let Some(target) = locate_node(body, file, line, col) else {
+/// First finds the cursor's smallest enclosing node with [`locate_node`], then
+/// re-walks `body` from the top, pushing each binding name it encounters as it
+/// descends into that binding's scope — stopping (by cell identity, `body`
+/// being the same forms `locate_node` searched) at the target node and
+/// returning whatever names are on the stack at that point. A binding is only
+/// pushed once its own scope is entered: a `let` binding's *value* is checked
+/// in the outer environment (CL `let`, not `let*`) and correctly does not see
+/// the name being bound, matching `Checker::check_let`'s own order. A `match`
+/// arm's pattern-bound names are pushed only for that arm's own body, matching
+/// `Checker::check_match`'s per-arm `extended_with_locs`.
+pub fn completion_locals(heap: &Heap, body: &[TopLevelForm], file: &str, line: u32, col: u32) -> Vec<String> {
+    let Some(target) = locate_node(heap, body, file, line, col) else {
         return Vec::new();
     };
-    let target: *const Typed = target;
     let mut scope: Vec<String> = Vec::new();
     for tl in body {
-        if scope_top_level(tl, target, &mut scope) {
+        if scope_walk(heap, *tl, target, &mut scope) {
             return scope;
         }
     }
     Vec::new()
 }
 
-/// [`completion_locals`]'s top-level-form half: seeds `scope` with a
-/// `defun`/`defmethod`/`defmacro`'s own parameters (and receiver, for a
-/// method) before descending into its body via [`scope_typed`]. Returns
-/// `true` once `target` is found — `scope` is left holding the accumulated
-/// names at that point (truncated back on a `false` return, so a sibling
-/// top-level form's search starts clean).
-fn scope_top_level(tl: &TopLevel, target: *const Typed, scope: &mut Vec<String>) -> bool {
+/// Descend toward `target`, keeping `scope` holding exactly the names in scope
+/// at the current point. Returns `true` once `target` is reached, leaving
+/// `scope` as it was there; on `false` every name this level pushed is popped,
+/// so a sibling's search starts clean.
+fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) -> bool {
+    if form == target {
+        return true;
+    }
+    if !matches!(form, Value::Cons(_)) {
+        return false;
+    }
+    let Some(tag) = core::op(heap, form).map(str::to_string) else {
+        // A list of nodes rather than a node: `match` arms, `let` bindings.
+        let Ok(items) = heap.list_to_vec(form) else { return false };
+        return items.into_iter().any(|item| scope_walk(heap, item, target, scope));
+    };
+    if is_opaque(&tag) {
+        return false;
+    }
     let mark = scope.len();
-    let found = match tl {
-        TopLevel::Defun { params, body, .. } => {
-            scope.extend(params.iter().map(|(n, _)| n.clone()));
-            body.iter().any(|t| scope_typed(t, target, scope))
+    let found = match tag.as_str() {
+        // `(defun PATH ((SYM R)...) RET-R PUBLIC E...)` — the parameters are in
+        // scope throughout the body. A `defmethod`'s receiver is simply its
+        // first parameter, so it needs no case of its own.
+        "defun" => {
+            scope.extend(param_names(heap, form, 1));
+            fields_from(heap, form, 4).into_iter().any(|f| scope_walk(heap, f, target, scope))
         }
-        TopLevel::Defmethod { self_name, params, body, .. } => {
-            scope.extend(self_name.iter().cloned());
-            scope.extend(params.iter().map(|(n, _)| n.clone()));
-            body.iter().any(|t| scope_typed(t, target, scope))
+        "defmethod" => {
+            scope.extend(param_names(heap, form, 3));
+            fields_from(heap, form, 6).into_iter().any(|f| scope_walk(heap, f, target, scope))
         }
-        TopLevel::Defmacro { params, body, lambda, .. } => {
-            scope.extend(params.iter().cloned());
-            lambda
-                .optionals
-                .iter()
-                .chain(lambda.keys.iter().map(|(_, d)| d))
-                .any(|d| d.iter().any(|t| scope_typed(t, target, scope)))
-                || body.iter().any(|t| scope_typed(t, target, scope))
+        // `(defmacro PATH (SYM...) REST LAMBDA PUBLIC E...)` — the parameters
+        // are bare symbols (a macro's are all `sexpr`). The `&optional`/`&key`
+        // default forms are checked expressions too, so a cursor can land in
+        // one.
+        "defmacro" => {
+            scope.extend(sym_list_at(heap, form, 1));
+            let lambda = core::field(heap, form, 3);
+            let in_defaults = lambda
+                .map(|l| scope_walk(heap, l, target, scope))
+                .unwrap_or(false);
+            in_defaults || fields_from(heap, form, 5).into_iter().any(|f| scope_walk(heap, f, target, scope))
         }
-        TopLevel::Defvar { value, .. } => scope_typed(value, target, scope),
-        TopLevel::Module { body, .. } => body.iter().any(|tl| scope_top_level(tl, target, scope)),
-        TopLevel::Expr(t) => scope_typed(t, target, scope),
-        TopLevel::Use { .. } | TopLevel::Defstruct { .. } | TopLevel::Defenum { .. } | TopLevel::Load { .. } => false,
+        // `(let ((SYM R E)...) E...)`. Each binding's value is checked in the
+        // *outer* scope, so this must not see the names being bound here.
+        "let" => {
+            let binds = core::field(heap, form, 0);
+            let in_values = binds
+                .map(|b| {
+                    heap.list_to_vec(b)
+                        .map(|bs| {
+                            bs.into_iter().any(|one| {
+                                core::field(heap, one, 1)
+                                    .map(|v| scope_walk(heap, v, target, scope))
+                                    .unwrap_or(false)
+                            })
+                        })
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            if in_values {
+                return true;
+            }
+            if let Some(b) = binds {
+                if let Ok(bs) = heap.list_to_vec(b) {
+                    for one in bs {
+                        if let Some(n) = list_head_sym(heap, one) {
+                            scope.push(n);
+                        }
+                    }
+                }
+            }
+            fields_from(heap, form, 1).into_iter().any(|f| scope_walk(heap, f, target, scope))
+        }
+        // `(lambda ((SYM R)...) RET-R E...)`.
+        "lambda" => {
+            scope.extend(param_names(heap, form, 0));
+            fields_from(heap, form, 2).into_iter().any(|f| scope_walk(heap, f, target, scope))
+        }
+        // `(labels ((SYM ((SYM R)...) RET-R E...)...) E...)`. Every function's
+        // name is visible to every body (its own included) and to the trailing
+        // body — see `Checker::check_labels`.
+        "labels" => {
+            let defs = core::field(heap, form, 0).and_then(|d| heap.list_to_vec(d).ok()).unwrap_or_default();
+            for d in &defs {
+                if let Some(n) = list_head_sym(heap, *d) {
+                    scope.push(n);
+                }
+            }
+            let mut hit = false;
+            for d in &defs {
+                let pmark = scope.len();
+                scope.extend(param_names(heap, *d, 0));
+                // A `labels` definition is a bare list, so its body starts
+                // after the name, parameters and return representation.
+                let body = heap.list_to_vec(*d).map(|v| v.into_iter().skip(3).collect::<Vec<_>>()).unwrap_or_default();
+                hit = body.into_iter().any(|f| scope_walk(heap, f, target, scope));
+                if hit {
+                    break;
+                }
+                scope.truncate(pmark);
+            }
+            hit || fields_from(heap, form, 1).into_iter().any(|f| scope_walk(heap, f, target, scope))
+        }
+        // `(match E R (P E...)...)`. The scrutinee is checked in the outer
+        // scope; each arm's pattern-bound names are visible only in that arm's
+        // own body.
+        "match" => {
+            if let Some(scrut) = core::field(heap, form, 0) {
+                if scope_walk(heap, scrut, target, scope) {
+                    return true;
+                }
+            }
+            let mut hit = false;
+            for arm in fields_from(heap, form, 2) {
+                let amark = scope.len();
+                let parts = heap.list_to_vec(arm).unwrap_or_default();
+                if let Some((pat, body)) = parts.split_first() {
+                    pattern_bind_names(heap, *pat, scope);
+                    hit = body.iter().any(|f| scope_walk(heap, *f, target, scope));
+                }
+                if hit {
+                    break;
+                }
+                scope.truncate(amark);
+            }
+            hit
+        }
+        // Every other node binds nothing; its fields are its sub-expressions.
+        _ => {
+            let Ok(fields) = core::fields(heap, form) else { return false };
+            fields.into_iter().any(|f| scope_walk(heap, f, target, scope))
+        }
     };
     if !found {
         scope.truncate(mark);
@@ -313,111 +366,92 @@ fn scope_top_level(tl: &TopLevel, target: *const Typed, scope: &mut Vec<String>)
     found
 }
 
-/// [`completion_locals`]'s expression half: `Let`/`Lambda`/`Labels` push
-/// their bound names before recursing into the scope those names are
-/// visible in; every other node just recurses into its children
-/// ([`expr_children`]) with no scope change. Returns `true` once `target`
-/// (compared by pointer identity — `node` is a descendant of the same tree
-/// [`completion_locals`] called [`locate_node`] on) is found.
-///
-/// The pointer-identity check happens *inside* each scope-introducing arm,
-/// after its names are pushed — not once, up front, before the `match` —
-/// because `target` can legitimately resolve to the scope-introducing node
-/// itself, not something inside it: `locate_node` returns the *smallest*
-/// node with a recorded position at or before the cursor, and when the
-/// cursor sits right after a `let`'s bindings list with nothing positioned
-/// between there and the next real token (e.g. completing the very first
-/// character of what will become the body — before that token exists to
-/// have a position of its own), the `Let` node itself is the closest match.
-/// An early, unconditional check here would return `true` before this arm's
-/// own names were ever pushed, silently dropping them from the offered
-/// scope.
-fn scope_typed(node: &Typed, target: *const Typed, scope: &mut Vec<String>) -> bool {
-    match &node.expr {
-        Expr::Match(scrutinee, arms) => {
-            // The scrutinee is checked in the outer scope; each arm's
-            // pattern-bound names are visible only in that arm's own body
-            // (`Checker::check_match`'s per-arm `extended_with_locs`).
-            if scope_typed(scrutinee, target, scope) || std::ptr::eq(node, target) {
-                return true;
+/// Every name a pattern binds, appended in source order. `pat-wild` and
+/// `pat-lit` bind nothing; a `pat-ctor`'s field sub-patterns can each bind
+/// (nested constructors included).
+fn pattern_bind_names(heap: &Heap, pat: Value, scope: &mut Vec<String>) {
+    match core::op(heap, pat) {
+        Some("pat-bind") => {
+            if let Some(n) = sym_at(heap, pat, 0) {
+                scope.push(n);
             }
-            for arm in arms {
-                let mark = scope.len();
-                pattern_bind_names(&arm.pat, scope);
-                if arm.body.iter().any(|t| scope_typed(t, target, scope)) {
-                    return true;
-                }
-                scope.truncate(mark);
-            }
-            false
         }
-        Expr::Let(binds, body) => {
-            // Each binding's value is checked in the *outer* scope (CL
-            // `let`) — see `Checker::check_let` — so this must not see the
-            // name(s) being bound here.
-            if binds.iter().any(|(_, val)| scope_typed(val, target, scope)) {
-                return true;
+        // `(pat-ctor PATH VARIANT DOWNCAST (REPR...) SUB...)`.
+        Some("pat-ctor") => {
+            for sub in fields_from(heap, pat, 4) {
+                pattern_bind_names(heap, sub, scope);
             }
-            let mark = scope.len();
-            scope.extend(binds.iter().map(|(n, _)| n.clone()));
-            let found = std::ptr::eq(node, target) || body.iter().any(|t| scope_typed(t, target, scope));
-            if !found {
-                scope.truncate(mark);
-            }
-            found
         }
-        Expr::Lambda { params, body } => {
-            let mark = scope.len();
-            scope.extend(params.iter().map(|(n, _)| n.clone()));
-            let found = std::ptr::eq(node, target) || body.iter().any(|t| scope_typed(t, target, scope));
-            if !found {
-                scope.truncate(mark);
+        // `(pat-typetest PATH SUB)`.
+        Some("pat-typetest") => {
+            if let Some(sub) = core::field(heap, pat, 1) {
+                pattern_bind_names(heap, sub, scope);
             }
-            found
         }
-        Expr::Labels { defs, body } => {
-            let mark = scope.len();
-            // Every function's name is visible to every body (including its
-            // own) and to the trailing `body` — see `Checker::check_labels`.
-            scope.extend(defs.iter().map(|(name, _, _)| name.clone()));
-            if std::ptr::eq(node, target) {
-                return true;
-            }
-            for (_, params, def_body) in defs {
-                let pmark = scope.len();
-                scope.extend(params.iter().map(|(n, _)| n.clone()));
-                let found = def_body.iter().any(|t| scope_typed(t, target, scope));
-                scope.truncate(pmark);
-                if found {
-                    return true;
-                }
-            }
-            let found = body.iter().any(|t| scope_typed(t, target, scope));
-            if !found {
-                scope.truncate(mark);
-            }
-            found
-        }
-        _ => std::ptr::eq(node, target) || expr_children(&node.expr).into_iter().any(|c| scope_typed(c, target, scope)),
+        _ => {}
     }
 }
 
-/// Every name a match pattern binds, appended to `scope` in source order —
-/// [`scope_typed`]'s `Match` arm pushes these for the arm body's walk.
-/// `Wildcard` and literal patterns bind nothing; a `Ctor`'s field
-/// sub-patterns can each bind (nested `Ctor`s included).
-fn pattern_bind_names(pat: &Pattern, scope: &mut Vec<String>) {
-    match pat {
-        Pattern::Bind(name, _) => scope.push(name.clone()),
-        Pattern::Ctor { args, .. } => {
-            for sub in args {
-                pattern_bind_names(sub, scope);
-            }
-        }
-        Pattern::TypeTest(_, inner) => pattern_bind_names(inner, scope),
-        Pattern::Wildcard | Pattern::Int(_) | Pattern::Bool(_) | Pattern::Char(_) => {}
+/// A node's fields from `skip` onward.
+fn fields_from(heap: &Heap, form: Value, skip: usize) -> Vec<Value> {
+    core::fields(heap, form).map(|fs| fs.get(skip..).unwrap_or(&[]).to_vec()).unwrap_or_default()
+}
+
+/// The names a parameter list `((SYM R)...)` at field `i` binds.
+fn param_names(heap: &Heap, form: Value, i: usize) -> Vec<String> {
+    let Some(list) = core::field(heap, form, i) else { return Vec::new() };
+    heap.list_to_vec(list)
+        .map(|ps| ps.into_iter().filter_map(|p| list_head_sym(heap, p)).collect())
+        .unwrap_or_default()
+}
+
+/// A bare symbol list `(SYM...)` at field `i`.
+fn sym_list_at(heap: &Heap, form: Value, i: usize) -> Vec<String> {
+    let Some(list) = core::field(heap, form, i) else { return Vec::new() };
+    heap.list_to_vec(list)
+        .map(|vs| {
+            vs.into_iter()
+                .filter_map(|v| match v {
+                    Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Field `i` as a path. A single-segment path reads back as a bare symbol (the
+/// reader only builds `Value::Path` when it sees `::`).
+fn path_at(heap: &Heap, form: Value, i: usize) -> Option<Path> {
+    match core::field(heap, form, i)? {
+        Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
+        Value::Symbol(id) => Some(Path::root(heap.symbol_name(id))),
+        _ => None,
     }
 }
+
+/// Field `i` of a *node* as a symbol name — `core::field`'s numbering, which
+/// counts past the tag.
+fn sym_at(heap: &Heap, form: Value, i: usize) -> Option<String> {
+    match core::field(heap, form, i)? {
+        Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
+        _ => None,
+    }
+}
+
+/// The first element of a *bare list* as a symbol name.
+///
+/// Deliberately separate from [`sym_at`]: a bare list has no tag, so its first
+/// element is its `car` and `core::field(_, 0)` is its *second*. A `let`
+/// binding `(SYM REPR FORM)`, a `labels` definition `(SYM PARAMS RET BODY...)`
+/// and a parameter `(SYM REPR)` all name themselves in that first position.
+fn list_head_sym(heap: &Heap, list: Value) -> Option<String> {
+    match heap.car(list).ok()? {
+        Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
+        _ => None,
+    }
+}
+
 
 /// What a [`CompletionCandidate`] names — mirrors the tables a
 /// [`crate::Namespace`] keeps, plus `Module` for a child module name (useful

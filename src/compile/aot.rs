@@ -10,11 +10,11 @@
 //! up front, in this file rather than per function), and links the result
 //! into a native executable via the system `cc`.
 //!
-//! Scope matches [`crate::compile::ast_bridge`]'s current translation
+//! Scope matches [`crate::compile::core_bridge`]'s current translation
 //! coverage: every `defun` in the file must be non-generic with a
 //! single-expression body using only literals/vars/`+`/`-`/`*`,
 //! `labels`-sibling/self calls, and top-level `defun`-to-`defun` calls
-//! including self-recursion (`Expr::Call`, labels/closures Stage 3) — a
+//! including self-recursion (`call`, labels/closures Stage 3) — a
 //! callee must already be defined earlier in the file, the same forward-
 //! reference restriction `Checker::resolve_fn` enforces at type-checking
 //! time regardless of AOT/JIT (see `compile::CompiledFn::new`'s doc comment
@@ -52,7 +52,8 @@ use inkwell::values::CallSiteValue;
 use inkwell::AddressSpace;
 use inkwell::OptimizationLevel;
 
-use crate::{Checker, Heap, Interp, Path, Reader, TopLevel, Typed};
+use crate::check::core;
+use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 
 const ENTRY_POINT_NAME: &str = "main";
 const ENTRY_POINT_INTERNAL_NAME: &str = "tl_main";
@@ -61,56 +62,63 @@ const ENTRY_POINT_INTERNAL_NAME: &str = "tl_main";
 /// [`compile_file`] must do with it: a compiled body to emit (`node_names`),
 /// a global to re-initialize at startup (`defvar_inits`), or nothing.
 ///
-/// Recurses into a `TopLevel::Module`, which covers three shapes at once —
-/// the monomorphization bundle a generic instantiation comes wrapped in, the
+/// Recurses into a `(module ...)`, which covers three shapes at once — the
+/// monomorphization bundle a generic instantiation comes wrapped in, the
 /// `(module ...)` a user writes, and the per-target-type grouping
 /// `Checker::check_impl` returns for an `impl` block. All three are just
 /// containers of the same items; the enclosing module is already baked into
 /// each item's own fully-qualified `Path`, so flattening loses nothing.
+///
+/// A generic template needs no special case any more: the checker emits an
+/// empty `(module PATH)` for one, which flattens to nothing here exactly as it
+/// registers nothing in `Interp::exec`.
 fn collect_aot_item(
     heap: &mut Heap,
     interp: &mut Interp,
-    tl: TopLevel,
+    tl: TopLevelForm,
     node_names: &mut Vec<(String, String)>,
-    defvar_inits: &mut Vec<(Path, Typed)>,
+    defvar_inits: &mut Vec<(Path, Value)>,
 ) -> Result<(), String> {
-    if let TopLevel::Module { body, .. } = tl {
-        for item in body {
+    let tag = core::op(heap, tl).map(str::to_string).unwrap_or_default();
+    if tag == "module" {
+        let body = core::fields(heap, tl).map_err(|e| e.to_string())?;
+        for item in body.into_iter().skip(1) {
             collect_aot_item(heap, interp, item, node_names, defvar_inits)?;
         }
         return Ok(());
     }
-    let defvar_meta = match &tl {
-        TopLevel::Defun { name, type_params, .. } => {
-            // A generic template has no code of its own — only its
-            // specializations (which arrive in the same bundle, already
-            // concrete) do. `Interp::exec` skips registering it for the same
-            // reason, so asking for its body later would fail outright.
-            if type_params.is_empty() {
-                let node = name.last_segment().to_string();
-                let symbol = crate::compile::ast_bridge::user_symbol_name(&node);
-                node_names.push((node, symbol));
-            }
+    let defvar_meta = match tag.as_str() {
+        "defun" => {
+            let path = path_at(heap, tl, 0).ok_or_else(|| "compile-file: defun without a name".to_string())?;
+            let node = path.last_segment().to_string();
+            let symbol = crate::compile::symbols::user_symbol_name(&node);
+            node_names.push((node, symbol));
             None
         }
-        TopLevel::Defmethod { type_name, method, type_params, .. } => {
-            if type_params.is_empty() {
-                let node = format!("{}::{}", type_name, method);
-                let symbol = crate::compile::ast_bridge::user_method_symbol_name(type_name, method);
-                node_names.push((node, symbol));
-            }
+        "defmethod" => {
+            let type_name = path_at(heap, tl, 0).ok_or_else(|| "compile-file: defmethod without a type".to_string())?;
+            let method = match core::field(heap, tl, 1) {
+                Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
+                _ => return Err("compile-file: defmethod without a name".to_string()),
+            };
+            let node = format!("{}::{}", type_name, method);
+            let symbol = crate::compile::symbols::user_method_symbol_name(&type_name, &method);
+            node_names.push((node, symbol));
             None
         }
-        TopLevel::Defvar { name, value, .. } => Some((name.clone(), value.clone())),
+        // The whole form travels, not just the initializer: the global's
+        // storage tagging is on the form (see `Interp::add_compiled_global_init`).
+        "defvar" => {
+            let name = path_at(heap, tl, 0).ok_or_else(|| "compile-file: defvar without a name".to_string())?;
+            Some((name, tl))
+        }
         // No codegen of their own. `exec` still runs: it records an enum's
-        // variant field types in `Interp::enum_defs` (which the
-        // `promote_global` an enum-typed `defvar` triggers reads) and a
-        // struct's `TypeEntry` (which `collect_struct_and_enum_types` hands
-        // to the AST bridge).
-        TopLevel::Defenum { .. } | TopLevel::Defstruct { .. } => None,
+        // variants and a struct's field representations, which
+        // `collect_struct_and_enum_types` hands to the compile bridge.
+        "defenum" | "defstruct" => None,
         other => {
             return Err(format!(
-                "compile-file only supports top-level `defun`/`defmethod`/`defvar`/`defconstant`/`defstruct`/`defenum`/`module`/`impl`, found {:?}",
+                "compile-file only supports top-level `defun`/`defmethod`/`defvar`/`defconstant`/`defstruct`/`defenum`/`module`/`impl`, found `{}`",
                 other
             ))
         }
@@ -119,11 +127,21 @@ fn collect_aot_item(
     // interpreter (unchanged — `promote_global` below reads back whatever
     // value it produced), same as it already does for every `defun`.
     interp.exec(heap, tl).map_err(|e| e.to_string())?;
-    if let Some((name, value)) = defvar_meta {
+    if let Some((name, form)) = defvar_meta {
         interp.promote_global(heap, &name).map_err(|e| e.to_string())?;
-        defvar_inits.push((name, value));
+        defvar_inits.push((name, form));
     }
     Ok(())
+}
+
+/// Field `i` of `form` as a path. A single-segment path reads back as a bare
+/// symbol (the reader only builds `Value::Path` when it sees `::`).
+fn path_at(heap: &Heap, form: Value, i: usize) -> Option<Path> {
+    match core::field(heap, form, i)? {
+        Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
+        Value::Symbol(id) => Some(Path::root(heap.symbol_name(id))),
+        _ => None,
+    }
 }
 
 /// Reads `source_path`, compiles every `defun` in it, and links a native
@@ -159,7 +177,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // name, or `type::method` for a `defmethod` — the same naming
     // `Interp::compile_scc` uses for the JIT's call graph.
     let mut node_names: Vec<(String, String)> = Vec::new(); // (node name, LLVM symbol)
-    let mut defvar_inits: Vec<(Path, Typed)> = Vec::new();
+    let mut defvar_inits: Vec<(Path, Value)> = Vec::new();
     chk.predeclare_program(&mut heap, &forms.iter().map(|(v, _)| *v).collect::<Vec<_>>());
     for (v, loc) in forms {
         let tl = chk.check_form_at(&mut heap, &interp, v, Some(loc)).map_err(|e| e.to_string())?;
@@ -220,9 +238,9 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // reproduces that exact numbering at its own runtime (see
     // `Interp::promote_global`'s doc comment).
     let mut global_init_names: Vec<String> = Vec::with_capacity(defvar_inits.len());
-    for (i, (_, value)) in defvar_inits.iter().enumerate() {
+    for (i, (_, form)) in defvar_inits.iter().enumerate() {
         let internal_name = format!("$global_init${}", i);
-        interp.add_compiled_global_init(&mut heap, module.clone(), &internal_name, value).map_err(|e| e.to_string())?;
+        interp.add_compiled_global_init(&mut heap, module.clone(), &internal_name, *form).map_err(|e| e.to_string())?;
         global_init_names.push(internal_name);
     }
 
@@ -296,7 +314,7 @@ fn build_main_wrapper(
             .map_err(|e| format!("failed to alloca vtable-set args: {}", e))?;
         for (id, slots) in vtables {
             for (slot, (type_name, method)) in slots.iter().enumerate() {
-                let symbol = crate::compile::ast_bridge::user_method_symbol_name(type_name, method);
+                let symbol = crate::compile::symbols::user_method_symbol_name(type_name, method);
                 let target = module.get_function(&symbol).ok_or_else(|| {
                     format!(
                         "compile-file: dyn dispatch target `{}::{}` was not compiled into this file",
@@ -482,7 +500,7 @@ mod tests {
     /// labels/closures already lets one JIT-compiled function call another
     /// by name. Bypasses the typelisp compiler entirely (hand-builds the
     /// module via inkwell) since this only needs to test the link step, not
-    /// anything `ast_bridge`/`compiler.rs` does.
+    /// anything `core_bridge`/`compiler.rs` does.
     #[test]
     fn aot_output_can_call_an_rt_extern_function() {
         let ctx = llvm_context();

@@ -2,9 +2,9 @@
 //! generalization of `dolist` (`docs/TODO.md`'s `doiter` entry).
 
 extern crate typelisp;
-use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
+use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
 
-fn check(src: &str) -> Result<TopLevel, Error> {
+fn check(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();

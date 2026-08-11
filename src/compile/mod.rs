@@ -17,11 +17,10 @@ pub fn runtime_function_names() -> Vec<&'static str> {
 }
 
 pub mod aot;
-pub mod ast_bridge;
 pub mod bootstrap;
 pub mod core_bridge;
 pub mod core_freevars;
-pub mod freevars;
+pub mod symbols;
 
 /// The shared Rust-only runtime library (`typelisp-rt`, a separate crate —
 /// see its doc comment for why) re-exported under its old in-crate path so
@@ -34,7 +33,7 @@ pub use typelisp_rt as runtime;
 /// name unprefixed. Without it, a user function whose name happens to
 /// collide with a libc symbol the LLVM backend itself calls into (`fmod`,
 /// the lowering target of the `frem` instruction `f64`'s `mod` compiles to —
-/// see `ast_bridge::translate_assoc`'s doc comment) would resolve to that
+/// see `core_bridge::translate_assoc`'s doc comment) would resolve to that
 /// libc symbol instead of the user's own compiled body, an infinite-
 /// recursion trap discovered compiling a test function literally named
 /// `fmod`. `rt_*` runtime shims (`typelisp_rt::rt_car` and friends) are
@@ -44,7 +43,7 @@ pub use typelisp_rt as runtime;
 /// is prefixed like any other and can't collide with the real `rt_cons`
 /// either.
 ///
-/// The single source of truth for this name is `ast_bridge`'s own
+/// The single source of truth for this name is `core_bridge`'s own
 /// `user_symbol_name`/`user_method_symbol_name` — every call/reference site
 /// (a `(call ...)`/`(assoc ...)` node's embedded name string,
 /// `Interp::compile_scc`'s `declare_external_function`/`externals`
@@ -105,7 +104,7 @@ pub struct CompiledFn {
 impl CompiledFn {
     /// JIT-compiles `fn_name` out of `module`. `externals` (labels/closures
     /// Stage 3) is `(name, address)` for every *other* already-`compile`d
-    /// top-level function `fn_name`'s body calls (`Expr::Call`): each must
+    /// top-level function `fn_name`'s body calls (`call`): each must
     /// already be forward-declared, with no body, in `module` under that
     /// same name — see [`crate::eval::interp::Interp::compile_function`]'s
     /// doc comment for why that declaration has to exist *before* the

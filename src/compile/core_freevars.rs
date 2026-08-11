@@ -250,23 +250,32 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: &str) -> Result<Vec<Value>, Er
         "call" => from(4),
         // type, method, instance, home, result, representations, then the rest.
         "assoc" => from(6),
-        // The callee, then (past the representations) the arguments.
+        // The callee, then (past the return representation and the argument
+        // representations) the arguments.
         "apply" => {
             let mut v = vec![parts.first().copied().unwrap_or(Value::Empty)];
-            v.extend(from(2));
+            v.extend(from(3));
             v
         }
         "loop" => from(0),
-        "return" | "panic" | "field-get" | "dyn-value" => from(0),
+        "return" | "panic" | "dyn-value" => from(0),
+        // `(field-get OBJ IDX REPR)` — the object only. The index is an
+        // integer and the representation is not a form at all: a parametric one
+        // (`(vector int)`, `(hashtable str int)`) is a *list* whose head is a
+        // symbol, so walking it looks exactly like walking a node and fails with
+        // "the free-variable walk does not know the tag `vector`".
+        "field-get" => parts.first().copied().into_iter().collect(),
         "dyn-upcast" => from(1),
         "field-set" => {
             let mut v = vec![parts.first().copied().unwrap_or(Value::Empty)];
             v.extend(from(3));
             v
         }
-        "construct" => from(3),
-        // The boxed value, past the vtable tables.
-        "dyn-new" => from(4),
+        // path, variant, mutable, field representations, then the fields.
+        "construct" => from(4),
+        // The boxed value, past the vtable tables and the value's own
+        // representation.
+        "dyn-new" => from(5),
         // type, method, slot, table, representations, then the arguments.
         "dyn-call" => from(5),
         other => {
@@ -285,7 +294,8 @@ fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymId>) -> Result
             out.insert(sym(heap, pat, 0)?);
         }
         "pat-ctor" => {
-            for p in core::fields(heap, pat)?.iter().skip(3) {
+            // path, variant, downcast, field representations, then sub-patterns.
+            for p in core::fields(heap, pat)?.iter().skip(4) {
                 pattern_bindings(heap, *p, out)?;
             }
         }

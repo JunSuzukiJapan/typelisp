@@ -34,7 +34,7 @@
 //! no waiting for the dependent's own `didChange`.
 //!
 //! Hover and goto-definition are served from a per-document `Analysis`
-//! (the last *successfully* checked `TopLevel` body plus `Registry::
+//! (the last *successfully* checked top-level body plus `Registry::
 //! def_locs`, see `check::locate`) cached alongside `docs`/`deps`. Both are
 //! best-effort: `check::locate::locate_node` only finds nodes with a
 //! recorded start location (list forms — see its doc comment for why bare
@@ -83,6 +83,7 @@ use lsp_types::{
     TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkDoneProgressOptions,
 };
 
+use typelisp::check::core;
 use typelisp::check::semantic::{encode, file_type_tokens, TypeKind, TypeToken};
 use typelisp::fasl::Fasl;
 use typelisp::project::{find_src_root, module_segs_for, Loader, ModuleCache};
@@ -349,13 +350,13 @@ fn publish_one(
 /// actually pulled in, so [`publish`] can tell which other open documents
 /// this one's diagnostics depend on — and, whenever the check produced a tree,
 /// an [`Analysis`] for hover/goto-definition (`None` only on a *read* error:
-/// there is no `Typed` tree to search, and [`publish_one`] leaves whatever
+/// there are no checked forms to search, and [`publish_one`] leaves whatever
 /// `Analysis` was cached from the last pass that did produce one in place
 /// rather than clearing it).
 ///
 /// The checker runs in error-recovery mode ([`Checker::set_recover`], enabled
 /// after the strict prelude load): a document with type errors still yields a
-/// partial `Typed` tree (so hover/goto keep working) and *all* of its type
+/// partial form list (so hover/goto keep working) and *all* of its type
 /// errors are reported at once (via [`Checker::take_errors`]) rather than only
 /// the first. `result` is `Err` only on a reader error, which stops the whole
 /// document (an s-expression reader can't resync past an unmatched paren).
@@ -391,23 +392,15 @@ fn diagnostics_for(
         diagnostics.push(error_diagnostic(&e, file));
     }
     let analysis = if result.is_ok() {
-        // The entry file's own `TopLevel::Module` is always the last one
-        // pushed: `Loader::load_source_inner` recurses into every `use`
-        // dependency (pushing each dependency's module first) before
-        // pushing its own — see that function's doc comment. In recover mode
-        // this tree is present even when the document has type errors.
-        let body = match loader.take_pending().pop() {
-            Some(TopLevel::Module { body, .. }) => body,
-            Some(other) => vec![other],
-            None => Vec::new(),
-        };
-        Some(Analysis {
-            file: file.to_string(),
-            body,
-            def_locs: checker.registry().def_locs.clone(),
-            docs: checker.registry().docs.clone(),
-            tokens: file_type_tokens(&checker.take_type_uses(), file),
-        })
+        // In recover mode this tree is present even when the document has
+        // type errors — see [`module_body`].
+        let body = module_body(&heap, loader.take_pending().pop());
+        let def_locs = checker.registry().def_locs.clone();
+        let docs = checker.registry().docs.clone();
+        let tokens = file_type_tokens(&checker.take_type_uses(), file);
+        // The tree is heap cells, so the `Analysis` takes the `Heap` with it —
+        // see its doc comment.
+        Some(Analysis { file: file.to_string(), heap, body, def_locs, docs, tokens })
     } else {
         None
     };
@@ -424,12 +417,24 @@ fn diagnostics_for(
 /// file's own checked top-level forms, and a snapshot of `Registry::def_locs`
 /// (the
 /// definition-site locations `check::locate::definition_target` resolves a
-/// reference against) as of that check. Self-contained — `Typed`/`TopLevel`
-/// own their `Loc`s directly (no live `Heap`/`Checker` reference needed) —
-/// so it outlives the `Heap`/`Checker` `diagnostics_for` built it from.
+/// reference against) as of that check.
+///
+/// The checked tree is cons cells, so this **owns the `Heap` those cells live
+/// in** — a snapshot of the IR is a snapshot of its heap. That is the whole
+/// reason `heap` is a field: `body`'s `Value`s are indices into it and mean
+/// nothing without it, so the heap cannot be the one `diagnostics_for` drops
+/// on the way out. Nothing conses on it again, so no collection can run and
+/// the tree stays put; the forms are permanently rooted besides
+/// (`Loader::load_source` roots each module wrapper).
+///
+/// The cost is one heap per open document. Acceptable for the handful of files
+/// an editor session holds, and the alternative — copying the tree into a
+/// heap-independent mirror — would need a second walker for every query.
 struct Analysis {
     file: String,
-    body: Vec<TopLevel>,
+    /// The heap `body` indexes into. Must outlive every query that reads it.
+    heap: Heap,
+    body: Vec<TopLevelForm>,
     def_locs: DefLocs,
     /// A snapshot of `Registry::docs` as of the same check — `hover_text`'s
     /// docstring lookup, alongside `def_locs`.
@@ -491,12 +496,14 @@ fn handle_hover(id: RequestId, params: serde_json::Value, analyses: &HashMap<Uri
         let uri = p.text_document_position_params.text_document.uri;
         let pos = p.text_document_position_params.position;
         let analysis = analyses.get(&uri)?;
-        let node = locate_node(&analysis.body, &analysis.file, pos.line + 1, pos.character + 1)?;
+        let heap = &analysis.heap;
+        let node = locate_node(heap, &analysis.body, &analysis.file, pos.line + 1, pos.character + 1)?;
         // The hovered node's own span, so the editor highlights exactly what
         // the type applies to. A degenerate span (macro-synthesized node)
         // would highlight a stray single character — omit the range instead.
-        let range = node.loc.as_ref().filter(|l| !l.is_degenerate()).map(loc_to_range);
-        let hover = Hover { contents: HoverContents::Scalar(MarkedString::String(hover_text(node, &analysis.docs))), range };
+        let range = heap.cons_loc(node).filter(|l| !l.is_degenerate()).map(|l| loc_to_range(&l));
+        let text = hover_text(heap, node, &analysis.def_locs, &analysis.docs);
+        let hover = Hover { contents: HoverContents::Scalar(MarkedString::String(text)), range };
         Some(serde_json::to_value(hover).expect("Hover always serializes"))
     })();
     Response { id, result, error: None }
@@ -513,8 +520,9 @@ fn handle_goto_definition(id: RequestId, params: serde_json::Value, analyses: &H
         let uri = p.text_document_position_params.text_document.uri;
         let pos = p.text_document_position_params.position;
         let analysis = analyses.get(&uri)?;
-        let node = locate_node(&analysis.body, &analysis.file, pos.line + 1, pos.character + 1)?;
-        let target = definition_target(node, &analysis.def_locs)?;
+        let heap = &analysis.heap;
+        let node = locate_node(heap, &analysis.body, &analysis.file, pos.line + 1, pos.character + 1)?;
+        let target = definition_target(heap, node, &analysis.def_locs)?;
         // Same file as the request: reuse its `Uri` rather than reparsing
         // (also sidesteps the percent-encoding gap `publish_one`'s doc
         // comment mentions). A dependency file's definition needs a fresh
@@ -616,8 +624,8 @@ fn handle_completion(
 /// instead of skipping locals on any error (which lost them inside, e.g., a
 /// non-catchall `match` arm, where truncating the source deletes the arms that
 /// made the match exhaustive) the checker records errors and still returns a
-/// best-effort partial `Typed` tree for `completion_locals` to search. `result`
-/// is `Err` only on a *reader* error, where the entry file's `TopLevel::Module`
+/// best-effort partial form list for `completion_locals` to search. `result`
+/// is `Err` only on a *reader* error, where the entry file's `(module ...)`
 /// was never pushed; `take_pending().pop()` then yields either nothing or a
 /// dependency's module, and `completion_locals` filters by `file` and returns
 /// empty — so no gate is needed.
@@ -647,18 +655,32 @@ fn candidates_for(
 
     let module_path = module_segs_for(fs_file, &src_root).unwrap_or_default();
     let mut candidates = completion_candidates(checker.registry(), &module_path);
-    // Same extraction `diagnostics_for` uses for `Analysis.body` — the entry
-    // file's own `TopLevel::Module` is always the last one pushed (empty on a
-    // reader error, which `completion_locals` handles by returning no names).
-    let body = match loader.take_pending().pop() {
-        Some(TopLevel::Module { body, .. }) => body,
-        Some(other) => vec![other],
-        None => Vec::new(),
-    };
-    for name in completion_locals(&body, file, line, col) {
+    // Same extraction `diagnostics_for` uses for `Analysis.body`. Unlike there,
+    // this heap is dropped at the end of the call — `completion_locals` returns
+    // owned names, so nothing outlives it.
+    let body = module_body(&heap, loader.take_pending().pop());
+    for name in completion_locals(&heap, &body, file, line, col) {
         candidates.push(CompletionCandidate { name, kind: CompletionKind::Variable, detail: "local".to_string() });
     }
     candidates
+}
+
+/// The entry file's own top-level forms, unwrapped from the `(module PATH
+/// BODY...)` the loader pushes last. `Loader::load_source_inner` recurses into
+/// every `use` dependency (pushing each dependency's module first) before
+/// pushing its own — see that function's doc comment — so the *last* pending
+/// form is always this file's. In recover mode it is present even when the
+/// document has type errors; on a reader error there is none at all, and both
+/// `locate_node` and `completion_locals` read an empty body as "no answer".
+fn module_body(heap: &Heap, last: Option<TopLevelForm>) -> Vec<TopLevelForm> {
+    match last {
+        // `(module PATH BODY...)` — drop the tag (`fields`) and the path.
+        Some(tl) if core::op(heap, tl) == Some("module") => {
+            core::fields(heap, tl).map(|f| f[1..].to_vec()).unwrap_or_default()
+        }
+        Some(other) => vec![other],
+        None => Vec::new(),
+    }
 }
 
 /// The 1-based `(line, col)` — matching [`Loc`]'s convention — of the char at

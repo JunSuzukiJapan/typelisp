@@ -12,6 +12,7 @@ use std::rc::Rc;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
+use typelisp::check::core;
 use typelisp::fasl::{registry_mark, source_hash, Fasl};
 use typelisp::project::{find_src_root, load_file_flat, needs_immediate_exec, Loader};
 use typelisp::*;
@@ -121,7 +122,7 @@ fn parse_heap_cells_value(v: &str) -> usize {
 /// `compile-module <file.typl> [-o <out.fasl>]`: checks `file` against a
 /// prelude-loaded environment and writes a fasl of the definitions it added.
 /// Does *not* run the file's top-level expressions (only registrations are
-/// captured — a `TopLevel::Expr` in the source is a compile error, since a
+/// captured — a top-level `(expr ...)` in the source is a compile error, since a
 /// fasl is a module of definitions, not a script). Returns an exit code.
 fn compile_module(args: &[String], heap_cells: usize, features: Vec<String>) -> i32 {
     let mut input: Option<&str> = None;
@@ -183,33 +184,33 @@ fn compile_module(args: &[String], heap_cells: usize, features: Vec<String>) -> 
     let mut top_levels = Vec::new();
     checker.predeclare_program(&mut heap, &forms.iter().map(|(v, _)| *v).collect::<Vec<_>>());
     for (v, loc) in forms {
-        match checker.check_form_at(&mut heap, &interp, v, Some(loc)) {
-            Ok(TopLevel::Expr(_)) => {
-                eprintln!("compile-module: `{}` contains a top-level expression; a module is definitions only", input);
-                return 1;
-            }
-            Ok(TopLevel::Load { path }) => {
-                // A `(load)` inside a compiled module is applied at compile
-                // time (its definitions become part of this module's own
-                // environment), the same as a source load.
-                let dir = PathBuf::from(input).parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
-                if let Err(e) = load_file_flat(&mut heap, &reader, &mut checker, &mut interp, &dir, &path) {
-                    eprintln!("compile-module: {}", e);
-                    return 1;
-                }
-            }
-            Ok(tl) => {
-                if let Err(e) = interp.exec(&mut heap, tl.clone()) {
-                    eprintln!("compile-module: exec: {}", e);
-                    return 1;
-                }
-                top_levels.push(tl);
-            }
+        let tl = match checker.check_form_at(&mut heap, &interp, v, Some(loc)) {
+            Ok(tl) => tl,
             Err(e) => {
                 eprintln!("compile-module: {}", e);
                 return 1;
             }
+        };
+        if core::op(&heap, tl) == Some("expr") {
+            eprintln!("compile-module: `{}` contains a top-level expression; a module is definitions only", input);
+            return 1;
         }
+        if let Some(path) = typelisp::project::load_path_of(&heap, tl) {
+            // A `(load)` inside a compiled module is applied at compile time
+            // (its definitions become part of this module's own environment),
+            // the same as a source load.
+            let dir = PathBuf::from(input).parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
+            if let Err(e) = load_file_flat(&mut heap, &reader, &mut checker, &mut interp, &dir, &path) {
+                eprintln!("compile-module: {}", e);
+                return 1;
+            }
+            continue;
+        }
+        if let Err(e) = interp.exec(&mut heap, tl) {
+            eprintln!("compile-module: exec: {}", e);
+            return 1;
+        }
+        top_levels.push(tl);
     }
     for w in checker.take_warnings() {
         eprintln!("{}", w);
@@ -443,37 +444,37 @@ fn try_run_pending(
     let mut checked = Vec::with_capacity(forms.len());
     let mut check_err = None;
     for (v, loc) in forms {
-        // Borrow the checker only for the check itself (`result` owns the
-        // `TopLevel`), so the borrow is released before any `interp.exec`
-        // below — a `defmacro`'s immediate exec, or the batch exec further
-        // down, must be free to let a runtime `(eval ...)` re-borrow the
-        // checker (`Interp::eval_form`).
+        // Borrow the checker only for the check itself, so the borrow is
+        // released before any `interp.exec` below — a `defmacro`'s immediate
+        // exec, or the batch exec further down, must be free to let a runtime
+        // `(eval ...)` re-borrow the checker (`Interp::eval_form`).
         let result = checker.borrow_mut().check_form_at(heap, &*interp, v, Some(loc));
         for w in checker.borrow_mut().take_warnings() {
             eprintln!("{}", w);
         }
-        match result {
-            // `(load "path")` loads inline, fasl-preferred, into the current
-            // (root) environment — resolved relative to the process cwd.
-            // (A `(load)`ed file whose *own* top-level contains `(eval ...)`
-            // is the one corner this borrow doesn't cover — `load_file_flat`
-            // execs inline while this `borrow_mut` is held; an ordinary
-            // module/fasl load never top-level-`eval`s, so it doesn't arise
-            // in practice.)
-            Ok(TopLevel::Load { path }) => {
-                if let Err(e) = load_file_flat(heap, reader, &mut checker.borrow_mut(), interp, FsPath::new("."), &path) {
-                    check_err = Some(e);
-                    break;
-                }
-            }
-            Ok(tl) if needs_immediate_exec(&tl) => {
-                let _ = interp.exec(heap, tl);
-            }
-            Ok(tl) => checked.push(tl),
+        let tl = match result {
+            Ok(tl) => tl,
             Err(e) => {
                 check_err = Some(e);
                 break;
             }
+        };
+        // `(load "path")` loads inline, fasl-preferred, into the current
+        // (root) environment — resolved relative to the process cwd.
+        // (A `(load)`ed file whose *own* top-level contains `(eval ...)`
+        // is the one corner this borrow doesn't cover — `load_file_flat`
+        // execs inline while this `borrow_mut` is held; an ordinary
+        // module/fasl load never top-level-`eval`s, so it doesn't arise
+        // in practice.)
+        if let Some(path) = typelisp::project::load_path_of(heap, tl) {
+            if let Err(e) = load_file_flat(heap, reader, &mut checker.borrow_mut(), interp, FsPath::new("."), &path) {
+                check_err = Some(e);
+                break;
+            }
+        } else if needs_immediate_exec(heap, tl) {
+            let _ = interp.exec(heap, tl);
+        } else {
+            checked.push(tl);
         }
     }
     while heap.root_count() > mark {

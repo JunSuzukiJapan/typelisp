@@ -41,6 +41,12 @@ use std::ptr;
 use crate::Error;
 use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, MemHashKey, PathId, StrId, StructPayload, SymId, Value};
 
+/// How far past its initial capacity a heap may grow by default — see
+/// [`Heap::with_capacity`]. Large enough that program text plus a working set
+/// never hits it, small enough that a runaway leak still stops loudly instead
+/// of being OOM-killed.
+pub const GROWTH_FACTOR: usize = 256;
+
 /// One owned run of cons cells. Chunks are only ever appended (see
 /// [`Heap::set_growth_limit`]) and never moved or freed individually, which is
 /// what lets a raw `*mut Cell` stay valid for the heap's whole lifetime.
@@ -156,15 +162,29 @@ impl Heap {
         (Chunk { base, len }, if len > 0 { base } else { tail })
     }
 
-    /// Create a heap with `capacity` cons cells pre-allocated. The arena is
-    /// fixed at that size unless [`Heap::set_growth_limit`] permits otherwise.
+    /// Create a heap with `capacity` cons cells pre-allocated, growing by
+    /// appended chunks up to [`GROWTH_FACTOR`] times that — call
+    /// `set_growth_limit(0)` for a strictly fixed arena.
+    ///
+    /// Growth is the default because the heap now holds the *program*, not just
+    /// its data: since the checker lowers code into cons cells, an initial
+    /// capacity cannot be chosen up front to fit a program whose size is only
+    /// known after reading it. Measured, the prelude alone has a live set of
+    /// ~53k cells and the prelude plus the compiler island ~118k — so the
+    /// historical `1 << 16` default did not even hold the two of them, and no
+    /// amount of collection would have helped: that is live data, not garbage.
+    ///
+    /// The initial capacity therefore means "allocate this much up front" and
+    /// the ceiling means "past here, call it a leak" — which is what the two
+    /// numbers should always have meant. Proportional rather than absolute so a
+    /// deliberately tiny heap stays deliberately tiny.
     pub fn with_capacity(capacity: usize) -> Heap {
         let (chunk, free) = Self::alloc_chunk(capacity, ptr::null_mut());
 
         Heap {
             chunks: vec![chunk],
             cap: capacity,
-            growth_limit: 0,
+            growth_limit: capacity.saturating_mul(GROWTH_FACTOR),
             free,
             free_count: capacity,
             gc_stress: false,

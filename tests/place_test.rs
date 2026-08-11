@@ -6,19 +6,21 @@
 //! covered elsewhere (`check_test.rs`'s `setf_*` tests, `struct_test.rs`).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
+use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Type, Value};
 
-fn check(src: &str) -> Result<TopLevel, Error> {
+/// Check every form and return the LAST one's expression type — `None` if that
+/// form was a definition. The type is no longer part of the checked form (see
+/// `check::core::Checked`), so it comes from `Checker::expr_type`.
+fn check(src: &str) -> Result<Option<Type>, Error> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = None;
     for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
+        chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
     }
-    Ok(last.expect("no forms"))
+    Ok(chk.expr_type().cloned())
 }
 
 fn run(src: &str) -> Result<Value, EvalError> {
@@ -103,7 +105,7 @@ fn rotatef_single_place_is_a_no_op() {
 #[test]
 fn rotatef_with_no_places_checks_as_unit() {
     let src = "(rotatef)";
-    assert!(matches!(check(src), Ok(TopLevel::Expr(t)) if t.ty == typelisp::Type::Unit));
+    assert_eq!(check(src).expect("check failed"), Some(Type::Unit));
 }
 
 #[test]

@@ -26,7 +26,7 @@
 //!   root (mirroring `Checker::ns_ancestors`, checker.rs:958-966) for a bare
 //!   name, or descend to an explicitly qualified module and apply the same
 //!   `pub`-or-`in_scope` gate `Checker::resolve_fn_path` does
-//!   (checker.rs:1078-1093). Used by `Expr::Call`/`Global`/`FnRef`/
+//!   (checker.rs:1078-1093). Used by `call`/`Global`/`FnRef`/
 //!   `SetGlobal` eval, and by `(compile name)` (see `Interp::method_key`'s
 //!   replacement).
 
@@ -48,8 +48,12 @@ use super::value::Slot;
 /// never needs a `pub`/`in_scope` check the way [`ModuleScope::resolve_fn`]
 /// does.
 pub(crate) enum TypeEntry {
-    /// A `defstruct` — mirrors old `struct_types` membership.
-    Struct,
+    /// A `defstruct`, with its fields' representations — what
+    /// `(defstruct PATH (REPR...))` publishes, and what the compile bridge
+    /// reads a `construct`'s and a pattern's field kinds from. A built-in that
+    /// reuses the struct representation but whose fields are internal
+    /// (`Vector<T>`) records an empty list: nothing ever names those fields.
+    Struct(Vec<crate::check::repr::Repr>),
     /// A `defenum` — carries the same per-variant field-type data
     /// `enum_defs` used to.
     Enum(EnumDef),
@@ -208,12 +212,6 @@ impl ModuleScope {
         Some(f.clone())
     }
 
-    /// A `defstruct`/`defenum`'s `TypeEntry`, found by direct descent to its
-    /// own `Path` — no visibility check (see [`TypeEntry`]'s doc comment).
-    pub(crate) fn find_type(&self, type_name: &Path) -> Option<&TypeEntry> {
-        self.find(type_name.parent())?.types.get(type_name.last_segment())
-    }
-
     /// A free function/macro's own `FnDef`, found by direct descent to its
     /// already-fully-qualified `Path` — no ancestor-chain search, no
     /// visibility check (registration is never a visibility decision, see
@@ -277,14 +275,16 @@ impl ModuleScope {
     }
 
     /// Flatten the whole tree's `TypeEntry`s back into the
-    /// `(HashSet<Path>, HashMap<Path, EnumDef>)` shape `compile::ast_bridge`
+    /// `(HashSet<Path>, HashMap<Path, EnumDef>)` shape `compile::core_bridge`
     /// (deliberately `Registry`-free, see that module's own doc comment)
     /// expects as a plain snapshot — the same "flatten once for the compile
     /// boundary" treatment `compiled_globals` already gets when cloned into
-    /// `ast_bridge::Ctx::globals`. Called once per JIT/AOT compile, not on
+    /// `core_bridge::Ctx::globals`. Called once per JIT/AOT compile, not on
     /// any interpreted hot path.
-    pub(crate) fn collect_struct_and_enum_types(&self) -> (std::collections::HashSet<Path>, HashMap<Path, EnumDef>) {
-        let mut structs = std::collections::HashSet::new();
+    pub(crate) fn collect_struct_and_enum_types(
+        &self,
+    ) -> (HashMap<Path, Vec<crate::check::repr::Repr>>, HashMap<Path, EnumDef>) {
+        let mut structs = HashMap::new();
         let mut enums = HashMap::new();
         self.collect_types_into(&[], &mut structs, &mut enums);
         (structs, enums)
@@ -293,7 +293,7 @@ impl ModuleScope {
     fn collect_types_into(
         &self,
         prefix: &[String],
-        structs: &mut std::collections::HashSet<Path>,
+        structs: &mut HashMap<Path, Vec<crate::check::repr::Repr>>,
         enums: &mut HashMap<Path, EnumDef>,
     ) {
         for (name, entry) in &self.types {
@@ -301,8 +301,8 @@ impl ModuleScope {
             segs.push(name.clone());
             let path = Path::from_segments(segs);
             match entry {
-                TypeEntry::Struct => {
-                    structs.insert(path);
+                TypeEntry::Struct(fields) => {
+                    structs.insert(path, fields.clone());
                 }
                 TypeEntry::Enum(def) => {
                     enums.insert(path, def.clone());

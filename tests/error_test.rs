@@ -5,28 +5,52 @@
 
 extern crate typelisp;
 use std::cell::RefCell;
-use typelisp::{load_prelude, Checker, Error, Heap, Interp, Path, Reader, Value, TopLevel, Type};
+use typelisp::check::core;
+use typelisp::{load_prelude, Checker, Error, Heap, Interp, Path, Reader, Type, Value};
 
-fn program(src: &str) -> Result<TopLevel, Error> {
+/// Check a sequence of forms; return the last one's tag and, for an `expr`
+/// form, the type the checker proved for it. A tag rather than the form itself:
+/// a checked form is cons cells in this helper's own `Heap`, which dies with the
+/// call.
+fn program(src: &str) -> Result<(String, Option<Type>), Error> {
     let mut h = Heap::with_capacity(4096);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = None;
+    let mut tag = String::new();
     for v in vs {
         // Strip any source-location wrapper so kind-based assertions
         // (`Err(Error::TypeError(_))`) still match.
-        last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
+        let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
+        tag = core::op(&h, tl).expect("every top-level form is a tagged list").to_string();
     }
-    Ok(last.expect("no forms"))
+    Ok((tag, chk.expr_type().cloned()))
 }
 
 fn ty(src: &str) -> Type {
-    match program(src).expect("check failed") {
-        TopLevel::Expr(t) => t.ty,
-        other => panic!("expected expression, got {:?}", other),
+    let (tag, ty) = program(src).expect("check failed");
+    ty.unwrap_or_else(|| panic!("expected expression, got a `{}` form", tag))
+}
+
+/// The return type the checker recorded for the root-level function `name` in
+/// `src`. Read from the registry, the declaration's own home — the core form
+/// carries only the return's *representation* (`check::repr::Repr`), which is
+/// deliberately coarser than its type.
+fn ret_of(src: &str, name: &str) -> Type {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    for v in vs {
+        chk.check_form(&mut h, &interp, v).expect("check failed");
     }
+    chk.registry()
+        .fn_sig(&Path::root(name))
+        .unwrap_or_else(|| panic!("`{}` was not registered", name))
+        .ret
+        .clone()
 }
 
 fn assert_type_error(src: &str) {
@@ -58,17 +82,14 @@ fn if_branch_may_panic() {
 #[test]
 fn defun_branch_may_panic() {
     let src = "(defun f ((b bool) (x i32)) i32 (if b (panic \"neg\") x))";
-    assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
+    assert_eq!(program(src).expect("check failed").0, "defun");
 }
 
 #[test]
 fn parses_never_type_annotation() {
     // A function whose body always diverges has return type `!`.
     let src = "(defun boom () ! (panic \"always\"))";
-    match program(src).unwrap() {
-        TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::Never),
-        other => panic!("expected defun, got {:?}", other),
-    }
+    assert_eq!(ret_of(src, "boom"), Type::Never);
 }
 
 // ---- Result / Error ---------------------------------------------------------
@@ -76,18 +97,13 @@ fn parses_never_type_annotation() {
 #[test]
 fn result_ok_infers_from_return_type() {
     let src = "(defun mk () Result<i32,ParseIntError> (result::ok 1))";
-    match program(src).unwrap() {
-        TopLevel::Defun { ret, .. } => {
-            assert_eq!(ret, Type::Named(Path::root("result"), vec![Type::I32, error_ty()]));
-        }
-        other => panic!("expected defun, got {:?}", other),
-    }
+    assert_eq!(ret_of(src, "mk"), Type::Named(Path::root("result"), vec![Type::I32, error_ty()]));
 }
 
 #[test]
 fn result_err_takes_error_value() {
     let src = "(defun bad () Result<i32,ParseIntError> (result::err (ParseIntError::ParseIntError \"boom\")))";
-    assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
+    assert_eq!(program(src).expect("check failed").0, "defun");
 }
 
 #[test]
@@ -95,10 +111,7 @@ fn match_result_exhaustive_with_panic_arm() {
     // Unwrapping a Result: the Err arm diverges, so the match has type i32.
     let src = "(defun unwrap-i ((r Result<i32,ParseIntError>)) i32 \
                  (match r ((Ok v) v) ((Err e) (panic \"unwrap on Err\"))))";
-    match program(src).unwrap() {
-        TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::I32),
-        other => panic!("expected defun, got {:?}", other),
-    }
+    assert_eq!(ret_of(src, "unwrap-i"), Type::I32);
 }
 
 #[test]

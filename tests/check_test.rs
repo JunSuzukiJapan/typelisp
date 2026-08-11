@@ -5,35 +5,70 @@
 //! non-exhaustive / type-mismatched forms are rejected.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, Expr, Heap, Interp, Path, Reader, TopLevel, Type, Typed, MONO_BUNDLE_MODULE};
+use typelisp::check::core;
+use typelisp::{load_prelude, Checker, Error, Heap, Interp, Path, Reader, TopLevelForm, Type, Value, MONO_BUNDLE_MODULE};
 
 /// Peels the checker's synthetic monomorphization bundle (if any), returning
 /// the primary form — always the bundle's *last* element (the
 /// specializations it needs come first). A form that instantiates no generic
 /// function is returned unchanged.
-fn primary(tl: TopLevel) -> TopLevel {
-    match tl {
-        TopLevel::Module { path, mut body } if path == Path::root(MONO_BUNDLE_MODULE) => {
-            body.pop().expect("a monomorph bundle always ends with its primary form")
-        }
-        other => other,
+fn primary(h: &Heap, tl: TopLevelForm) -> TopLevelForm {
+    if core::op(h, tl) != Some("module") {
+        return tl;
+    }
+    // `(module PATH BODY...)` — the path decides whether this is *the* bundle.
+    let fields = core::fields(h, tl).expect("a module's fields are a proper list");
+    let is_bundle = match fields[0] {
+        Value::Path(id) => typelisp::path_from_id(h, id) == Path::root(MONO_BUNDLE_MODULE),
+        Value::Symbol(id) => h.symbol_name(id) == MONO_BUNDLE_MODULE,
+        _ => false,
+    };
+    if is_bundle {
+        *fields.last().expect("a monomorph bundle always ends with its primary form")
+    } else {
+        tl
+    }
+}
+
+/// What a check leaves behind that a test can inspect once the helper's `Heap`
+/// is gone: the primary form's tag (`"expr"`, `"defun"`, ...), that form printed
+/// back as an s-expression, and — for an `expr` form — the type the checker
+/// proved for it.
+///
+/// Not the form itself: a checked form is cons cells in the helper's own `Heap`.
+/// Not the type off the form either — the type stops at the checker, so it comes
+/// from `Checker::expr_type`.
+#[derive(Debug)]
+struct Checked {
+    tag: String,
+    printed: String,
+    ty: Option<Type>,
+}
+
+fn finish(h: &Heap, chk: &Checker, tl: TopLevelForm) -> Checked {
+    let tl = primary(h, tl);
+    Checked {
+        tag: core::op(h, tl).expect("every top-level form is a tagged list").to_string(),
+        printed: core::print(h, tl),
+        ty: chk.expr_type().cloned(),
     }
 }
 
 /// Read one datum and check it as a single top-level form.
-fn form(src: &str) -> Result<TopLevel, Error> {
+fn form(src: &str) -> Result<Checked, Error> {
     let mut h = Heap::with_capacity(1024);
     let r = Reader::new();
     let v = r.read(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
     // Strip any source-location wrapper so kind-based assertions still match.
-    chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)
+    let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
+    Ok(finish(&h, &chk, tl))
 }
 
 /// Check a sequence of forms (e.g. a defun followed by a use of it), returning
 /// the result of the LAST form. Earlier forms (defuns) populate the registry.
-fn program(src: &str) -> Result<TopLevel, Error> {
+fn program(src: &str) -> Result<Checked, Error> {
     let mut h = Heap::with_capacity(4096);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
@@ -43,14 +78,14 @@ fn program(src: &str) -> Result<TopLevel, Error> {
     for v in vs {
         last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
     }
-    Ok(last.expect("no forms"))
+    Ok(finish(&h, &chk, last.expect("no forms")))
 }
 
 /// Like [`program`], but with the prelude loaded first — needed for `while`/
 /// `dotimes`/`dolist`/`when`/`unless`/`and`/`or`/`cond`/`if-let`, which are
 /// `defmacro`s in `src/prelude.rs` rather than checker-native special forms
 /// (see that file's "loop/branch primitive reduction" comment).
-fn program_with_prelude(src: &str) -> Result<TopLevel, Error> {
+fn program_with_prelude(src: &str) -> Result<Checked, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -61,23 +96,40 @@ fn program_with_prelude(src: &str) -> Result<TopLevel, Error> {
     for v in vs {
         last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
     }
-    Ok(last.expect("no forms"))
+    Ok(finish(&h, &chk, last.expect("no forms")))
+}
+
+/// The declared return type of the root-level function `name` in `src`. Read
+/// from the registry, the declaration's own home — the core form carries only
+/// the return's *representation* (`check::repr::Repr`), deliberately coarser
+/// than its type.
+fn ret_of(src: &str, name: &str) -> Type {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    for v in vs {
+        chk.check_form(&mut h, &interp, v).expect("check failed");
+    }
+    chk.registry()
+        .fn_sig(&Path::root(name))
+        .unwrap_or_else(|| panic!("`{}` was not registered", name))
+        .ret
+        .clone()
 }
 
 /// The synthesized type of a single expression form.
 fn ty(src: &str) -> Type {
-    match form(src).expect("check failed") {
-        TopLevel::Expr(t) => t.ty,
-        other => panic!("expected expression, got {:?}", other),
-    }
+    let c = form(src).expect("check failed");
+    c.ty.unwrap_or_else(|| panic!("expected expression, got a `{}` form", c.tag))
 }
 
 /// Like [`ty`], but with the prelude loaded first — see [`program_with_prelude`].
 fn ty_with_prelude(src: &str) -> Type {
-    match primary(program_with_prelude(src).expect("check failed")) {
-        TopLevel::Expr(t) => t.ty,
-        other => panic!("expected expression, got {:?}", other),
-    }
+    let c = program_with_prelude(src).expect("check failed");
+    c.ty.unwrap_or_else(|| panic!("expected expression, got a `{}` form", c.tag))
 }
 
 /// Assert that checking `src` fails with a `TypeError`.
@@ -165,13 +217,9 @@ fn unbound_variable_errors() {
 
 #[test]
 fn defun_registers_and_checks_body() {
-    match program("(defun id ((x i32)) i32 x)").unwrap() {
-        TopLevel::Defun { name, ret, .. } => {
-            assert_eq!(name, Path::root("id"));
-            assert_eq!(ret, Type::I32);
-        }
-        other => panic!("expected defun, got {:?}", other),
-    }
+    let c = program("(defun id ((x i32)) i32 x)").unwrap();
+    assert_eq!(c.tag, "defun");
+    assert_eq!(ret_of("(defun id ((x i32)) i32 x)", "id"), Type::I32);
 }
 
 #[test]
@@ -197,10 +245,8 @@ fn call_rejects_wrong_argument_type() {
 
 /// Like `ty` but over a multi-form program (last form's type).
 fn ty_program(src: &str) -> Type {
-    match primary(program(src).expect("check failed")) {
-        TopLevel::Expr(t) => t.ty,
-        other => panic!("expected expression, got {:?}", other),
-    }
+    let c = program(src).expect("check failed");
+    c.ty.unwrap_or_else(|| panic!("expected expression, got a `{}` form", c.tag))
 }
 
 // ---- constructors -----------------------------------------------------------
@@ -247,13 +293,8 @@ fn match_option_exhaustive_unwrap_or() {
                  (match opt \
                    ((Some v) v) \
                    ((None) default)))";
-    match program(src).unwrap() {
-        TopLevel::Defun { name, ret, .. } => {
-            assert_eq!(name, Path::root("unwrap-or"));
-            assert_eq!(ret, Type::I32);
-        }
-        other => panic!("expected defun, got {:?}", other),
-    }
+    assert_eq!(program(src).unwrap().tag, "defun");
+    assert_eq!(ret_of(src, "unwrap-or"), Type::I32);
 }
 
 #[test]
@@ -267,7 +308,7 @@ fn match_non_exhaustive_is_rejected() {
 fn match_wildcard_makes_exhaustive() {
     let src = "(defun f ((opt Option<i32>)) i32 \
                  (match opt ((Some v) v) (_ 0)))";
-    assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
+    assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
 #[test]
@@ -282,7 +323,7 @@ fn match_binds_constructor_fields() {
     // `v` is bound at i32 inside the Some arm, so returning it as i32 is fine.
     let src = "(defun f ((opt Option<i32>)) i32 \
                  (match opt ((Some v) v) ((None) 0)))";
-    assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
+    assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
 #[test]
@@ -304,7 +345,7 @@ fn match_arms_pool_a_results_two_type_arguments() {
                               ((ok v) (result::ok v)) \
                               ((err e) (result::err e))))) \
                    (match out ((ok v) v) ((err e) 0))))";
-    assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
+    assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
 #[test]
@@ -335,7 +376,7 @@ fn a_probed_arm_takes_its_type_from_a_concrete_sibling() {
                               ((ok v) (result::ok v)) \
                               ((err e) d)))) \
                    0))";
-    assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
+    assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
 #[test]
@@ -358,7 +399,7 @@ fn if_let_binds_in_then_branch() {
     // if-let binding is `(pattern value)`: here pattern `(Some v)`, value `opt`.
     let src = "(defun f ((opt Option<i32>)) i32 \
                  (if-let ((Some v) opt) v 0))";
-    assert!(matches!(program_with_prelude(src), Ok(TopLevel::Defun { .. })));
+    assert_eq!(program_with_prelude(src).expect("check failed").tag, "defun");
 }
 
 #[test]
@@ -490,10 +531,10 @@ fn rest_param_is_seen_as_a_sexpr_inside_the_body() {
     // `sexpr-car` only accepts a `Sexpr` argument — type-checking succeeds,
     // proving `xs` is bound to plain `Sexpr` (an ordinary Lisp list) inside
     // the body, not some homogeneous array type.
-    assert!(matches!(
-        form("(defun f ((a i32) &rest (xs i32)) Sexpr (sexpr-car xs))"),
-        Ok(TopLevel::Defun { .. })
-    ));
+    assert_eq!(
+        form("(defun f ((a i32) &rest (xs i32)) Sexpr (sexpr-car xs))").expect("check failed").tag,
+        "defun"
+    );
 }
 
 #[test]
@@ -684,14 +725,13 @@ fn nested_loop_break_targets_innermost() {
     assert_eq!(ty("(loop (loop (break)) (return 5))"), Type::I32);
 }
 
-// ---- typed AST shape --------------------------------------------------------
+// ---- core form shape --------------------------------------------------------
 
 #[test]
-fn typed_ast_records_expr_and_type() {
-    match form("(if true 1 2)").unwrap() {
-        TopLevel::Expr(Typed { expr: Expr::If(_, _, _), ty, .. }) => assert_eq!(ty, Type::I32),
-        other => panic!("unexpected: {:?}", other),
-    }
+fn a_checked_form_is_a_core_expression_with_a_type() {
+    let c = form("(if true 1 2)").unwrap();
+    assert_eq!(c.printed, "(expr (if (bool true) (int 1) (int 2)))");
+    assert_eq!(c.ty, Some(Type::I32));
 }
 
 // ---- the (type annotation) ---------------------------------------------------
@@ -704,12 +744,11 @@ fn the_overrides_an_integer_literals_default_type() {
 
 #[test]
 fn the_produces_the_same_expr_as_its_inner_form() {
-    // `the` contributes no AST node of its own — checking `(the i32 5)`
-    // yields exactly the same `Expr::Int` the bare literal would.
-    match form("(the i32 5)").unwrap() {
-        TopLevel::Expr(Typed { expr: Expr::Int(5), ty: Type::I32, .. }) => {}
-        other => panic!("unexpected: {:?}", other),
-    }
+    // `the` contributes no node of its own — checking `(the i32 5)` yields
+    // exactly the same `(int 5)` the bare literal would.
+    let c = form("(the i32 5)").unwrap();
+    assert_eq!(c.printed, "(expr (int 5))");
+    assert_eq!(c.ty, Some(Type::I32));
 }
 
 #[test]
@@ -738,10 +777,7 @@ fn exit_type_checks_as_never() {
     // `exit`'s actual process termination can only be observed
     // out-of-process — see `tests/exit_test.rs`. This only checks the type
     // level: `Never` satisfies any expected type, like `panic`.
-    match program("(defun f () i32 (if true 1 (exit 1)))").unwrap() {
-        TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::I32),
-        other => panic!("unexpected: {:?}", other),
-    }
+    assert_eq!(ret_of("(defun f () i32 (if true 1 (exit 1)))", "f"), Type::I32);
 }
 
 #[test]
@@ -754,14 +790,8 @@ fn exit_rejects_wrong_arity() {
 
 #[test]
 fn unreachable_and_todo_type_check_as_never() {
-    match program_with_prelude("(defun f () i32 (if true 1 (unreachable)))").unwrap() {
-        TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::I32),
-        other => panic!("unexpected: {:?}", other),
-    }
-    match program_with_prelude("(defun g () i32 (if true 1 (todo)))").unwrap() {
-        TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::I32),
-        other => panic!("unexpected: {:?}", other),
-    }
+    assert_eq!(ret_of("(defun f () i32 (if true 1 (unreachable)))", "f"), Type::I32);
+    assert_eq!(ret_of("(defun g () i32 (if true 1 (todo)))", "g"), Type::I32);
 }
 
 /// A type error carries the source location of the offending sub-form (down to

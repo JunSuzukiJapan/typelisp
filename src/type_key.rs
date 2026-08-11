@@ -12,7 +12,7 @@
 //! segment: `m::vector` and the built-in `vector` are different types.
 //!
 //! That agreement was broken twice on 2026-08-04 — the interpreter wrote
-//! `Path::to_string` while `ast_bridge` wrote `Path::last_segment`, so a value
+//! `Path::to_string` while `core_bridge` wrote `Path::last_segment`, so a value
 //! built by compiled code was unmatchable by interpreted code (and vice
 //! versa), printed as `<unknown-variant>`, and compared unequal to its own
 //! twin. Neither side was *wrong on its own*; they simply spelled the same
@@ -23,7 +23,7 @@
 //! The `crates/typelisp-rt` shims (`rt_data_new`, `rt_sexpr_instance_test`)
 //! are deliberately outside this rule: they receive the key as a string from
 //! compiled code, having no `Path` to work from. Their end of the agreement is
-//! held up by [`type_key_of`] being what `ast_bridge` compiles into the
+//! held up by [`type_key_of`] being what `core_bridge` compiles into the
 //! literal they are handed.
 
 use crate::mem::BoxId;

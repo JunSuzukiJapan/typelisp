@@ -9,10 +9,16 @@
 //! `Result::ok` in `namespace_test.rs`).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
+use typelisp::check::core;
+use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
-/// Check every form in `src` with one `Checker`; return the last result.
-fn check(src: &str) -> Result<TopLevel, Error> {
+/// Check every form in `src` with one `Checker`; return the last form's tag and
+/// — when that form is a `(module PATH BODY...)` — the tags of the forms it
+/// groups.
+///
+/// Tags rather than the forms themselves: a checked form is cons cells in this
+/// helper's own `Heap`, which dies with the call.
+fn check(src: &str) -> Result<(String, Vec<String>), Error> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
@@ -22,7 +28,19 @@ fn check(src: &str) -> Result<TopLevel, Error> {
     for v in vs {
         last = Some(chk.check_form(&mut h, &interp, v)?);
     }
-    Ok(last.expect("no forms"))
+    let tl = last.expect("no forms");
+    let tag = core::op(&h, tl).expect("every top-level form is a tagged list").to_string();
+    let inner = if tag == "module" {
+        // `(module PATH BODY...)` — skip the path.
+        core::fields(&h, tl)
+            .expect("a module's fields are a proper list")[1..]
+            .iter()
+            .map(|f| core::op(&h, *f).unwrap_or("<atom>").to_string())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Ok((tag, inner))
 }
 
 /// Check, then execute, every form in `src` with one (Heap, Checker, Interp);
@@ -73,17 +91,14 @@ fn run_with_heap(src: &str) -> Result<(Heap, Value), EvalError> {
 #[test]
 fn defstruct_registers_a_type() {
     // `check_defstruct` bundles the type registration with its synthesized
-    // field-getter `defmethod`s into one `TopLevel::Module` (a pure grouping
+    // field-getter `defmethod`s into one `(module ...)` (a pure grouping
     // device — see that function's doc comment) since `check_form` returns
-    // a single `TopLevel` per form.
+    // a single top-level form per source form.
     let src = "(defstruct point (x i32) (y i32))";
-    match check(src) {
-        Ok(TopLevel::Module { body, .. }) => {
-            assert!(matches!(body[0], TopLevel::Defstruct { .. }));
-            assert_eq!(body.len(), 5); // Defstruct + 2 fields * (getter + setter)
-        }
-        other => panic!("expected a Module, got {:?}", other),
-    }
+    let (tag, inner) = check(src).expect("check failed");
+    assert_eq!(tag, "module");
+    // defstruct + 2 fields * (getter + setter)
+    assert_eq!(inner, ["defstruct", "defmethod", "defmethod", "defmethod", "defmethod"]);
 }
 
 #[test]

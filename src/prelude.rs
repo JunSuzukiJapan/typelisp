@@ -65,7 +65,7 @@ use crate::{Checker, Heap, Interp, Reader};
 pub const SOURCE: &str = r##"
 ;; `not`: moved here from a Rust builtin (it has no dependency on the GC
 ;; heap or anything else Rust-only — a plain `if`/`bool` round trip) so it
-;; compiles through the ordinary `ast_bridge`/`compiler.rs` pipeline like any
+;; compiles through the ordinary `core_bridge`/`compiler.rs` pipeline like any
 ;; other `defun`, instead of needing a "compiled code calling a Rust
 ;; builtin" mechanism — see `compiler.rs`'s module doc comment's `loop`/
 ;; `break`/`return`/`setf` stage note (`while`'s own expansion calls `not`
@@ -320,7 +320,7 @@ pub const SOURCE: &str = r##"
 ;; CL's `keywordp`: is this symbol a keyword (`:name`)? Written as a plain
 ;; typelisp `defun` over `symbol->string` rather than a Rust builtin — the
 ;; leading colon *is* part of the interned name (there is no separate keyword
-;; package/table, see `Expr::SymLit`), so the test is textual and needs no
+;; package/table, see `sym`), so the test is textual and needs no
 ;; runtime support of its own. The reader has already rejected every
 ;; malformed spelling, so a leading `:` is both necessary and sufficient.
 (defun keywordp ((s symbol)) bool

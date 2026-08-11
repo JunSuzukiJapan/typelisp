@@ -16,7 +16,7 @@
 //! across an allocation: partially-built structures inside a builder, and
 //! arguments staged for a crossing into compiled code.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::rc::Rc;
@@ -32,11 +32,15 @@ use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
 use crate::check::registry::{EVAL_ERROR, PARSE_FLOAT_ERROR, PARSE_INT_ERROR, READ_ERROR};
-use crate::type_key::{alloc_typed_enum, alloc_typed_struct, heap_type_is, heap_type_path};
+use crate::type_key::{alloc_typed_enum, heap_type_path};
 use crate::types::{
     path_is_builtin, path_is_builtin_any, LLVM_METHOD_RECEIVER_TYPES, NATIVE_LOWERED_PRIMITIVES,
 };
-use crate::{BoxId, CompileTarget, Expr, Heap, Loc, MacroExpander, MacroLambda, Path, Pattern, QuotedSexpr, Ref, SymId, TopLevel, Type, Typed, Value};
+use typelisp_mem::RootScope;
+
+use crate::check::core;
+use crate::check::repr::Repr;
+use crate::{BoxId, CompileTarget, Heap, MacroExpander, MacroLambda, Path, Ref, SymId, Type, Value};
 
 use super::pprint;
 use super::scope;
@@ -55,11 +59,15 @@ mod core_eval;
 pub(crate) struct FnDef {
     /// Parameter names, including the receiver name first for instance methods.
     pub(crate) params: Vec<String>,
-    /// Each parameter's binding-slot routing, parallel to `params` — derived
-    /// once at registration from the declared parameter types (`sig`; a
-    /// `defmacro`'s parameters are all `Sexpr`, hence all `Heap`), so
-    /// `Interp::apply` needs no type information per call.
-    pub(crate) body: Vec<Typed>,
+    /// The body's core forms, in order.
+    ///
+    /// These are heap cells, which the old `Vec<Typed>` was not — so the
+    /// module tree is now a *source of GC roots*. `Interp::exec` permanently
+    /// roots the whole top-level form it registers (one root per definition,
+    /// covering the body, the parameter list and every representation
+    /// reachable from it); see `Heap::push_permanent_root`, which is
+    /// LIFO-independent for exactly this.
+    pub(crate) body: Vec<Value>,
     /// Only ever set for a `defmacro` with a trailing `&rest` parameter (see
     /// [`Interp::expand_macro`]); always `false` for `defun`/`defmethod`,
     /// which `apply` calls 1:1 regardless.
@@ -71,16 +79,19 @@ pub(crate) struct FnDef {
     /// still lists every binding name in order; this only adds how the
     /// non-required regions are filled.
     pub(crate) lambda: Option<MacroLambda>,
-    /// `(parameter types, return type)`, parallel to `params` — `None` for a
-    /// `defmacro` (every parameter and the implicit return are always
-    /// `Sexpr`, see `check::registry::MacroDef`'s doc comment) since a macro
-    /// is never a `compile` target. The tree-walking evaluator itself never
-    /// needs this (it's already erased everywhere else, see
-    /// `Checker::check_call`'s doc comment) — it exists solely so
-    /// `Interp::compile_function` can build an LLVM function signature
-    /// without the checker's `Registry` (which `Interp` otherwise has no
-    /// access to).
-    pub(crate) sig: Option<(Vec<Type>, Type)>,
+    /// `(parameter representations, return representation)`, parallel to
+    /// `params` — `None` for a `defmacro` (every parameter and the implicit
+    /// return are always `Sexpr`, see `check::registry::MacroDef`'s doc
+    /// comment) since a macro is never a `compile` target.
+    ///
+    /// Representations, not `Type`s: the type is gone from the IR by the time
+    /// a definition is registered, and what the two consumers actually need is
+    /// exactly what a `Repr` says. `Interp::compile_function` needs an LLVM
+    /// signature, and `encode_crossing_args` must be driven by the *declared*
+    /// shape rather than the runtime value's — see
+    /// `docs/dev/` and the crossing rule: whether a word is raw or tagged is
+    /// in the declaration only.
+    pub(crate) sig: Option<(Vec<Repr>, Repr)>,
     /// Whether this definition is `pub` — the runtime twin of
     /// `FnSig`/`VarInfo`/`AssocFn.sig`'s own `public` bit
     /// (`check::registry`), baked onto the `TopLevel` node by the checker
@@ -103,7 +114,7 @@ pub(crate) struct FnDef {
     /// Its own `RefCell`, separate from the rest of this struct (the tree
     /// stores `Rc<FnDef>`, not `Rc<RefCell<FnDef>>`): `Self::apply` holds a
     /// plain `&FnDef` borrowed out of that `Rc` for the *entire* recursive
-    /// evaluation of `body` (needed since `body`'s `Vec<Typed>` is too large
+    /// evaluation of `body` (needed since the body's form list is too large
     /// to clone per call) — if `compiled` needed the same outer `RefCell`,
     /// an inner `(compile name)` call reached from within that body (e.g. a
     /// self-referential or mutually-recursive JIT request) that tried to
@@ -127,19 +138,12 @@ pub(crate) struct FnDef {
 /// unread with it.
 #[derive(Clone)]
 pub(crate) struct EnumDef {
-    pub(crate) variants: Vec<crate::check::registry::Variant>,
-}
-
-/// A lexical environment: name -> slot, searched from the back (innermost).
-type Env = Vec<(String, Slot)>;
-
-/// The outcome of evaluating one step inside a loop body: either an
-/// ordinary value (discarded — only whether a step exited matters, not what
-/// it returned along the way), or a `break`/`return` already resolved to the
-/// value the loop should exit with (see [`Interp::eval_loop_step`]).
-enum Step {
-    Continue,
-    Exit(Value),
+    /// Each variant's name and its fields' representations, in declaration
+    /// order — everything the two consumers need: the printer wants the name
+    /// (`eval::format`), and the compiled-global boundary wants each field's
+    /// representation to decode a box back into an enum value. The core
+    /// `(defenum PATH (SYM...) ((REPR...)...))` form carries exactly this.
+    pub(crate) variants: Vec<(String, Vec<Repr>)>,
 }
 
 /// An in-progress pretty-printing session: what CL would call "the output
@@ -210,41 +214,17 @@ pub struct Interp {
     /// ordinary [`Slot`] in [`Self::globals`] untouched — see that
     /// method's doc comment for why only a promoted global's storage moves.
     compiled_globals: RefCell<HashMap<Path, usize>>,
-    /// Every closure "constructor" [`Self::jit_define_closure`] has ever
-    /// JIT-compiled, held forever so the `ExecutionEngine`/code backing each
-    /// one's `fn_ptr` is never dropped — the "engine graveyard" the
-    /// closure-unification plan calls for: a `BoxedObj::CompiledClosure`
-    /// only stores a bare `fn_ptr: usize` (see that variant's doc comment),
-    /// nothing else keeps the JIT engine that produced it alive once the
-    /// constructor call returns.
-    jit_graveyard: RefCell<Vec<Rc<crate::compile::CompiledFn>>>,
-    /// Definition-site cache for [`Self::jit_define_closure`]: `(Loc, debug
-    /// repr of the closure's `Type::Fn`)` -> the already-JIT'd constructor,
-    /// so evaluating the same `lambda` literal repeatedly (a loop body, a
-    /// hot function) JITs its constructor once. `Type` has no `Eq`/`Hash`
-    /// (`src/types.rs`), so the signature half of the key is its `Debug`
-    /// string rather than the `Type` itself — adequate for a cache (a false
-    /// miss only costs a redundant JIT, never incorrect reuse, since
-    /// `Debug` is structural). A node with no `Loc` (macro-synthesized, a
-    /// `labels` sibling — [`Self::jit_define_closure`] doesn't try to
-    /// synthesize one) is never cached, only ever freshly compiled.
-    jit_ctor_cache: RefCell<HashMap<(Loc, String), Rc<crate::compile::CompiledFn>>>,
-    /// Monotonic source for [`Self::jit_define_closure`]'s synthetic
-    /// constructor function names (`"closure_ctor$0"`, `"closure_ctor$1"`,
-    /// ...) — never reused, so two constructors can never collide even
-    /// across separate throwaway modules.
-    jit_ctor_counter: Cell<u64>,
     /// The open pretty-printing session, if any — see [`PrettySession`].
     pretty: RefCell<Option<PrettySession>>,
     /// The values currently being rendered by their own `print-object`
     /// method, innermost last — [`Self::print_object`]'s re-entry guard.
     printing: RefCell<Vec<Value>>,
     /// Trait-object vtables, interpreter tier: `vtable_id` -> the call
-    /// targets for the trait's methods, in slot order (`Expr::DynBox`'s
+    /// targets for the trait's methods, in slot order (`dyn-new`'s
     /// `slots`, which the checker laid out from `TraitDef::method_order`).
     /// Entries are `(owning type path, method name)` — resolved through the
     /// scope tree at call time, so a method that gets `compile`d later is
-    /// picked up automatically, exactly as for a static `Expr::Assoc`.
+    /// picked up automatically, exactly as for a static `assoc`.
     ///
     /// The compiled tier keeps a parallel table of raw function pointers in
     /// `typelisp_rt`, indexed by the same ids (which [`Self::vtable_id_for`]
@@ -258,16 +238,15 @@ pub struct Interp {
     vtables: RefCell<Vec<Vec<(Path, String)>>>,
     /// `(concrete type key, trait path)` -> `vtable_id`, so the same pair
     /// interns to one id however many times it is boxed. The key's first
-    /// half is `mangle_type`'s rendering (`Expr::DynBox::concrete_key`),
-    /// since `Type` has no `Hash` — the same substitution
-    /// [`Self::jit_ctor_cache`] makes.
+    /// half is `mangle_type`'s rendering (the `dyn-new` node's own concrete
+    /// key), since `Type` has no `Hash`.
     vtable_ids: RefCell<HashMap<(String, Path), u32>>,
     /// `(vtable id, trait id)` -> the vtable id the *same concrete type* uses
-    /// for that trait: the supertrait upcast table `Expr::DynUpcast` reads.
+    /// for that trait: the supertrait upcast table `dyn-upcast` reads.
     ///
     /// Keyed by the runtime vtable id because that is all an upcast site has
     /// — the concrete type, the other half of a vtable's identity, is gone by
-    /// then. Filled in at every boxing site from `Expr::DynBox::supers`
+    /// then. Filled in at every boxing site from `dyn-new`'s `SUPERS`
     /// ([`Self::register_dyn_box`]), which is where both halves are still in
     /// hand. The compiled tier keeps the same map under the same ids in
     /// `typelisp_rt` (`upcast_define`).
@@ -277,14 +256,14 @@ pub struct Interp {
     /// site names its vtable ([`Self::vtable_id_for`]). Interpreted upcasts
     /// go through the same ids, so both tiers agree by construction.
     trait_ids: RefCell<HashMap<Path, u32>>,
-    /// Traits some *compiled* body dispatches on (an `Expr::DynCall` in a
+    /// Traits some *compiled* body dispatches on (an `dyn-call` in a
     /// function that has been through `translate_and_compile`).
     ///
     /// A compiled `:dyn` call site reads a raw function pointer out of the
     /// vtable, so every implementation it could reach has to be compiled
-    /// too. `Expr::DynCall::impl_targets` covers the ones that existed when
+    /// too. `dyn-call`'s `IMPL_TARGETS` covers the ones that existed when
     /// the call site was checked; this set covers the rest, by telling
-    /// `Expr::DynBox`'s evaluation that boxing for *this* trait now has a
+    /// `dyn-new`'s evaluation that boxing for *this* trait now has a
     /// native consumer, so a slot method still lacking a compiled form must
     /// be compiled before the box escapes. Empty for any program that never
     /// compiles a dynamic dispatch — which is why boxing does not simply
@@ -293,8 +272,8 @@ pub struct Interp {
 }
 
 /// One outgoing edge of the top-level compile call graph
-/// [`Interp::compute_sccs`] walks: either a plain `Expr::Call` target (a
-/// `defun`) or an `Expr::Assoc` target (a `defmethod`, keyed the same way
+/// [`Interp::compute_sccs`] walks: either a plain `call` target (a
+/// `defun`) or an `assoc` target (a `defmethod`, keyed the same way
 /// [`Interp::method_key`] keys the scope tree's `methods`/`compiled`).
 /// Carries the full typed key (not just its string name) so
 /// [`Interp::compile_scc`] can reuse it directly to declare/wire the target
@@ -331,62 +310,6 @@ fn fn_path_from_node_name(name: &str) -> Path {
     }
 }
 
-/// Why a [`Interp::jit_define_closure`] attempt didn't produce a compiled
-/// closure — the classification that (from closure-unification Stage 9
-/// onward) is unconditional policy: it must escalate exactly the failures
-/// that represent actionable holes in compiled coverage, and nothing else.
-enum JitDecline {
-    /// A decline that is not itself a *coverage* gap — a setup/environment
-    /// condition rather than a hole in what the compiler can lower. Two cases
-    /// remain: a native-tier type (the self-hosted compiler island's own
-    /// `llvm-*`/`Scope<llvm-value>` closures — see [`Interp::is_jit_tier_ty`];
-    /// kept distinct so the reason string names the real cause), and the
-    /// compiler island not being loaded at all. Both are unreachable in
-    /// normal operation — since Stage 5 every `typl` entry point installs the
-    /// native island ([`crate::compiler::load_aot`]), which runs *compiled*,
-    /// so its own bodies never reach definition-time JIT, and no user type is
-    /// native-tier; "island not loaded" survives only for an embedder that
-    /// builds an `Interp` and skips island loading. Interp-closure removal
-    /// Stage 8c deleted the interpreted-closure fallback these used to select,
-    /// so [`Interp::jit_closure_from_result`] now escalates a `Benign` decline
-    /// to the same hard [`EvalError::Panic`] a `Gap` gets — there is no longer
-    /// a distinct behavior, only a distinct message. (`TYPELISP_CLOSURE_JIT=off`
-    /// and heap exhaustion mid-JIT were `Benign` too until Stage 7 retired
-    /// both; macro-expansion suppression until Stage 6.)
-    Benign(String),
-    /// A real, actionable hole in compiled coverage (an uncompiled call
-    /// target, a constructor-JIT failure, a JIT-time heap exhaustion, ...) —
-    /// always escalated to a hard [`EvalError::Panic`] (Stage 9 made this
-    /// unconditional; interp-closure removal Stage 7 folded heap exhaustion
-    /// mid-JIT in here too).
-    Gap(String),
-}
-
-impl JitDecline {
-    /// The human-readable reason, for `TYPELISP_CLOSURE_JIT_LOG` and the
-    /// `Gap` panic message.
-    fn reason(&self) -> &str {
-        match self {
-            JitDecline::Benign(r) | JitDecline::Gap(r) => r,
-        }
-    }
-
-    /// Classifies an error out of the constructor-JIT pipeline
-    /// ([`Interp::jit_compile_closure_ctor`]'s `translate_and_compile` →
-    /// `apply`(`compile-function`) → verify → JIT chain) as a real
-    /// [`JitDecline::Gap`] — a hard failure. Interp-closure removal Stage 7
-    /// retired the one former exception, heap exhaustion mid-JIT: it is no
-    /// longer classified [`JitDecline::Benign`] (which would silently fall
-    /// back to an interpreted closure), so like any other `Gap` it now
-    /// escalates to a hard [`EvalError::Panic`] — treating a JIT-time heap
-    /// exhaustion as the resource error it is, the same as a heap exhaustion
-    /// anywhere else, rather than papering over it with a slower interpreted
-    /// closure.
-    fn from_ctor_error(msg: String) -> JitDecline {
-        JitDecline::Gap(format!("constructor JIT failed: {}", msg))
-    }
-}
-
 impl Interp {
     pub fn new() -> Interp {
         // A fresh `Interp` always pairs with a fresh `Heap` (every caller in
@@ -404,7 +327,7 @@ impl Interp {
         crate::compile::runtime::reset_vtable_table();
         // `vector` is registered directly in `Registry::with_builtins`
         // (`registry::vector_def`) with `AdtKind::Struct`, so its
-        // `Expr::Construct` sites already get `mutable = true`
+        // `construct` sites already get `mutable = true`
         // (`Checker::check_construct`) — but it never executes a
         // `TopLevel::Defstruct`, the only other place a struct `TypeEntry`
         // gets populated, so it's seeded here by hand, directly at the root
@@ -412,9 +335,13 @@ impl Interp {
         // don't need this: both are `AdtKind::Sum` (`registry::hashtable_def`/
         // `scope_def`) with no `variants`/`field_names` of their own — user
         // code only ever builds one through its `::new()` assoc fn, never
-        // `Expr::Construct`, so there is no construct site to affect.
+        // `construct`, so there is no construct site to affect.
         let mut root = scope::ModuleScope::default();
-        root.types.insert("vector".to_string(), scope::TypeEntry::Struct);
+        // No field representations: `Vector<T>`'s storage is internal
+        // (`rt_struct_*`), it has no constructor-pattern shape, and nothing
+        // ever names one of its fields — so there is nothing for a `construct`
+        // or a pattern to read here.
+        root.types.insert("vector".to_string(), scope::TypeEntry::Struct(Vec::new()));
         // `Option`/`Result`/the four concrete error types are `AdtKind::Sum`
         // registrations in `Registry::with_builtins`
         // (`registry::builtin_sum_defs`, the single source both sides read)
@@ -426,21 +353,31 @@ impl Interp {
         // gap by construction rather than papering over it at the print site.
         for def in crate::check::registry::builtin_sum_defs() {
             let name = def.name;
-            root.register_enum(&name, EnumDef { variants: def.variants });
+            // The field types are the builtins' own declarations, so their
+            // representations come from the same classification a `defenum`'s
+            // do — `Repr::of_by` with no ADT lookup, since none of these
+            // mention a user type (`Option<T>`/`Result<T,E>`'s fields are type
+            // variables, an error type's are scalars).
+            let variants = def
+                .variants
+                .into_iter()
+                .map(|v| {
+                    let reprs = v.fields.iter().map(|t| Repr::of_by(t, &|_| None)).collect();
+                    (v.name, reprs)
+                })
+                .collect();
+            root.register_enum(&name, EnumDef { variants });
         }
         Interp {
             root: RefCell::new(root),
             checker: None,
             compiled_globals: RefCell::new(HashMap::new()),
-            jit_graveyard: RefCell::new(Vec::new()),
-            jit_ctor_cache: RefCell::new(HashMap::new()),
             streams: RefCell::new(Default::default()),
             vtables: RefCell::new(Vec::new()),
             vtable_ids: RefCell::new(HashMap::new()),
             dyn_upcasts: RefCell::new(HashMap::new()),
             trait_ids: RefCell::new(HashMap::new()),
             dyn_dispatch_compiled: RefCell::new(HashSet::new()),
-            jit_ctor_counter: Cell::new(0),
             pretty: RefCell::new(None),
             printing: RefCell::new(Vec::new()),
         }
@@ -485,24 +422,6 @@ impl Interp {
         Slot::new(heap.alloc_cell(v))
     }
 
-    /// Intern a vtable id for every trait object `body` boxes, so the
-    /// translator can bake each one in as a constant. The compiled-tier
-    /// counterpart of `promote_global`'s pre-pass, and idempotent for the
-    /// same reason: the ids are interned by (type, trait) pair, so a body
-    /// compiled after already running interpreted reuses the very ids its
-    /// `Expr::DynBox` evaluations assigned.
-    fn intern_dyn_vtables(&self, body: &Typed) {
-        for site in crate::compile::ast_bridge::collect_dyn_boxes(body) {
-            self.register_dyn_box(&site.concrete_key, &site.trait_path, &site.slots, &site.supers);
-        }
-        // An upcast site names its target trait by a baked-in id, so the
-        // trait has to be interned before translation for the same reason a
-        // vtable does. Its *target table* needs no pre-pass: that was
-        // interned wherever the value was boxed.
-        for trait_path in crate::compile::ast_bridge::collect_dyn_upcasts(body) {
-            self.trait_id_for(&trait_path);
-        }
-    }
 
     /// Publish every interned vtable to the compiled tier, resolving each
     /// slot to its method's current native entry point. Called after each
@@ -513,7 +432,7 @@ impl Interp {
     ///
     /// A slot whose method has no compiled form yet is published as 0, which
     /// `rt_vtable_slot` refuses to call. Compiled code can only reach a slot
-    /// through a boxing site, and `ast_bridge::collect_calls` puts every one
+    /// through a boxing site, and `core_bridge::collect_targets` puts every one
     /// of a boxing site's slots into the call graph — so a live 0 would mean
     /// that contract was broken, not that user code did something unusual.
     fn publish_vtables(&self) {
@@ -553,7 +472,7 @@ impl Interp {
     /// reuses one table. The sole source of vtable ids; the compiled tier's
     /// parallel table (`typelisp_rt`) is keyed by the same numbers.
     ///
-    /// `slots` comes from the checker (`Expr::DynBox`), already in
+    /// `slots` comes from the checker (`dyn-new`), already in
     /// `TraitDef::method_order` order and already monomorphized, so this only
     /// records it.
     pub(crate) fn vtable_id_for(&self, concrete_key: &str, trait_path: &Path, slots: &[(Path, String)]) -> u32 {
@@ -570,7 +489,7 @@ impl Interp {
 
     /// The id interning `trait_path` for upcast lookups — the trait half of
     /// [`Self::dyn_upcasts`]'s key, and the constant a compiled
-    /// `Expr::DynUpcast` bakes in. Ids are dense and per-`Interp`, like
+    /// `dyn-upcast` bakes in. Ids are dense and per-`Interp`, like
     /// vtable ids; nothing outside this pair of tables reads them.
     pub(crate) fn trait_id_for(&self, trait_path: &Path) -> u32 {
         if let Some(&id) = self.trait_ids.borrow().get(trait_path) {
@@ -583,7 +502,7 @@ impl Interp {
     }
 
     /// Intern a boxing site's vtable *and* every supertrait table it carries
-    /// (`Expr::DynBox::supers`), recording how to get from any one of them to
+    /// (`dyn-new`'s `SUPERS`), recording how to get from any one of them to
     /// any other. Returns the ids, the boxed trait's own first.
     ///
     /// Every pair is registered, not just (sub -> super): the entries only
@@ -629,345 +548,11 @@ impl Interp {
     }
 
 
-    /// Closure unification Stage 7's JIT tier judgment: whether `ty` has
-    /// *any* compiled representation at all — as opposed to
-    /// [`Self::heap_repr_kind`], which only decides *which* representation a
-    /// type that unconditionally has one gets. Every ordinary user type
-    /// (scalars, `Str`, `Fn`, `Sexpr`, structs, enums, `bignum`/`ratio`) is
-    /// `true`; the five LLVM FFI handle types and a `Scope<V>` of one of
-    /// them — used only inside the self-hosted compiler's own source
-    /// (`compiler.rs`'s embedded `SOURCE`) — are `false`. A `lambda`/
-    /// `labels`/`FnRef`/`MethodRef` whose parameter, return, or any captured
-    /// name's type fails this check cannot be JIT-compiled and declines
-    /// [`JitDecline::Benign`] — which kept the interpreted compiler island's
-    /// own `compile-lambda` (whose captures include `llvm-builder`/
-    /// `Scope<llvm-value>`) from a bootstrap paradox (JIT-compiling itself to
-    /// run itself), with no special-cased "is this the compiler island" check
-    /// needed: the type system alone decides. Since interp-closure removal
-    /// Stage 8c the island always runs *compiled*, so its own closures are
-    /// built by native code and never reach this classification (see
-    /// `Self::jit_define_closure`'s own note) — the check now only guards the
-    /// unreachable path, still without a special case. Reuses `ast_bridge::struct_field_kind`'s own
-    /// classification (kind `0` is its catch-all "not representable" arm —
-    /// every representable type has an explicit kind `1`-`6`), the same
-    /// table `tagged_sym_list`/`ast_to_sexpr` already commit to for any
-    /// value that actually does cross the compiled boundary.
-    fn is_jit_tier_ty(&self, ty: &Type) -> bool {
-        // LLVM handle types gained a compiled representation (kind `1`,
-        // interp-closure removal Stage 1) so the compiler island's own
-        // `defun`s can be whole-function compiled — but *closure* JIT must
-        // keep excluding them: an interpreted `compile-function` run would
-        // otherwise try to JIT its own `labels` siblings, recursing into
-        // itself. Once the island is AOT-loaded its closures are built by
-        // native code and never reach this classification at all.
-        if crate::check::repr::is_llvm_handle_ty(ty) {
-            return false;
-        }
-        let (struct_types, enum_defs) = self.root.borrow().collect_struct_and_enum_types();
-        let enum_types: HashSet<Path> = enum_defs.keys().cloned().collect();
-        crate::compile::ast_bridge::struct_field_kind(ty, &struct_types, &enum_types) != 0
-    }
-
-    /// Closure unification Stage 7's definition-time JIT driver. Attempts to
-    /// build `t` (an `Expr::Lambda`/`Expr::FnRef`/`Expr::MethodRef` node, or
-    /// a synthetic `Expr::Lambda` wrapper `Expr::Labels` builds for one
-    /// sibling — see that eval arm) as a *compiled* closure value — the only
-    /// kind there is since interp-closure removal Stage 8c. `captured` is
-    /// `t`'s free variables (name + declared type), `[]` for
-    /// `FnRef`/`MethodRef`. Never panics itself — every failure comes back as
-    /// `Err(reason)` so the caller can decide what to do with it; the failure
-    /// becomes a hard error only at the eval-arm call site
-    /// ([`Self::jit_closure_from_result`]), not here.
-    ///
-    /// The trick that avoids JIT-compiling any new self-hosted Lisp at all:
-    /// `t.ty` is already `Type::Fn(params, rest, ret)`, the exact shape
-    /// `compiler.rs`'s `compile-lambda` (reached by wrapping `t` as a
-    /// throwaway top-level `defun`'s *entire* body — a body that is
-    /// literally `(lambda ...)`, exactly what `ast_bridge::translate_lambda`
-    /// already emits for a real `Expr::Lambda`) already knows how to turn
-    /// into a `BoxedObj::CompiledClosure`. That throwaway "constructor"
-    /// function's own *parameters* are one per name in `captured`, each
-    /// declared `Type::Sexpr` regardless of its real type — not because the
-    /// value is a `Sexpr`, but because `Type::Sexpr`'s `struct_field_kind`
-    /// is the tagged-pointer-passthrough kind `6` (`bind-params` roots the
-    /// incoming word and binds it unchanged, no decode) — exactly the
-    /// existing GC cell reference (established at the binding site that
-    /// introduced this name — see `Self::apply`/`Expr::Let`) each argument
-    /// actually *is*. When
-    /// `compile-lambda`'s own outer half later builds its captured-value
-    /// array from the constructor's `env` for the *inner* (real) `lambda`,
-    /// it reads that exact same cell pointer back out unchanged and hands
-    /// it to `rt_closure_new` — so the constructor never re-boxes anything;
-    /// it exists purely to give the self-hosted compiler a `builder`/`env`
-    /// to compile `(lambda ...)` *in*. Calling the constructor (an ordinary
-    /// 2-argument-ABI `CompiledFn`, ABI-wise indistinguishable from any
-    /// other `(compile ...)`d top-level function) is then a single
-    /// `CompiledFn::call`, and its `i64` result is the finished
-    /// `BoxedObj::CompiledClosure`'s own tagged encoding — built once by
-    /// `rt_closure_new`, never touched by Rust at all.
-    fn jit_define_closure(&self, heap: &mut Heap, env: &Env, t: &Typed, captured: &[(String, Type)]) -> Result<Value, JitDecline> {
-        // No self-hosted compiler island loaded means there is nothing to
-        // JIT *with*. Since interp-closure removal Stage 5 every `typl`
-        // entry point (CLI `run_file`/REPL/`compile-module`) loads the island
-        // natively (`compiler::load_aot`), so this only fires for an *embedder*
-        // that builds an `Interp` and execs closure-defining code without
-        // loading any island — an expected environment, not a coverage gap.
-        if !self.root.borrow().fns.contains_key("compile-function") {
-            return Err(JitDecline::Benign("compiler island not loaded".to_string()));
-        }
-        let (param_tys, ret_ty) = match &t.ty {
-            Type::Fn(p, _rest, ret) => (p, ret),
-            other => return Err(JitDecline::Gap(format!("internal: closure value has non-Fn type {:?}", other))),
-        };
-        // `&rest` needs no special JIT handling (Stage 8, retiring Stage 7's
-        // blanket rejection): the checker already folded the rest parameter
-        // into the node's `params` as an ordinary `(name, Sexpr)` pair
-        // (`Checker::check_lambda`/`check_defun`'s shared treatment), and
-        // every call site packs surplus arguments into that single `Sexpr`
-        // list at *check* time (`wrap_rest_elem`/`cons_rest_list`) — so by
-        // the time anything is applied, arity always matches and the rest
-        // list crosses the compiled boundary like any other `Sexpr`
-        // argument. `t.ty`'s `rest` field still matters to those check-time
-        // call sites, just not here.
-        //
-        // `Unit` is a *return-position-only* allowance: `compile-unit`
-        // (`compiler.rs`) compiles a `Unit`-typed body tail to a plain `0`,
-        // so a `Unit`-returning closure JITs fine — but a `Unit`-typed
-        // parameter or capture has no crossing encoding
-        // (`struct_field_kind` kind `0`, no `encode_crossing_args` arm), so
-        // those checks below stay on the plain tier test.
-        if !self.is_jit_tier_ty(ret_ty) && !matches!(**ret_ty, Type::Unit) {
-            return Err(JitDecline::Benign(format!("return type {:?} has no compiled representation", ret_ty)));
-        }
-        for ty in param_tys {
-            if !self.is_jit_tier_ty(ty) {
-                return Err(JitDecline::Benign(format!("parameter type {:?} has no compiled representation", ty)));
-            }
-        }
-        for (name, ty) in captured {
-            if !self.is_jit_tier_ty(ty) {
-                return Err(JitDecline::Benign(format!("captured name \"{}\" has type {:?} with no compiled representation", name, ty)));
-            }
-        }
-        // Every captured name is bound to a GC cell, because every binding
-        // is. This used to be a promotion that only some binding sites
-        // performed, so the lookup below could legitimately find a
-        // non-cell — hence the clean `Gap` failure rather than a panic,
-        // which is kept for the genuinely-missing-name case.
-        let mut cell_ids: Vec<(String, Rc<BoxId>)> = Vec::with_capacity(captured.len());
-        for (name, _ty) in captured {
-            match env.iter().rev().find(|(n, _)| n == name) {
-                Some((_, s)) => cell_ids.push((name.clone(), s.cell().clone())),
-                None => return Err(JitDecline::Gap(format!("internal: captured name \"{}\" not found in env", name))),
-            }
-        }
-        // Every `Expr::Call`/`Expr::Assoc` target `t`'s body reaches must be
-        // JIT'd before the constructor's module can wire its forward
-        // declaration to a real address — so a not-yet-compiled target is
-        // *driven through* the same Tarjan SCC machinery `(compile name)`
-        // itself uses ([`Self::compile_function`], Stage 8) rather than
-        // declined: this is exactly the dependency-ordering role Stage 5
-        // built that machinery for ("needed once each `labels` sibling
-        // becomes an independent JIT unit" — its plan note). A target the
-        // machinery *can't* compile (an unsupported construct somewhere in
-        // its transitive graph) comes back as a graceful `Gap`, and the
-        // definition falls back to an interpreted closure as before.
-        // Filtering matches `Self::call_graph_edges`'s own exactly (see that
-        // method for the rationale of each exclusion): a known
-        // `rt`-shimmed/`vector-op`/`hashtable-op`/native-primitive-receiver
-        // target compiles with no external symbol at all, so requiring one
-        // here would reject perfectly JIT-able code.
-        let call_targets: Vec<Path> = crate::compile::ast_bridge::collect_call_targets(t)
-            .into_iter()
-            .filter(|p| !is_rt_builtin_name(p.last_segment()))
-            .collect();
-        for p in &call_targets {
-            if !self.root.borrow().fn_compiled(p) {
-                // The SCC machinery keys on a node name that is the callee's
-                // full `::`-joined path (`Path`'s own `Display`), so a
-                // module-qualified `defun` (`m::inc`) is transitively compiled
-                // and stored/linked under a name distinct from a same-named
-                // root function — the old "module-qualified is out of reach"
-                // Stage 5 limitation is gone (interp-closure removal).
-                self.compile_function(heap, &CompileTarget::Fn(Ref::synthetic(p.clone())))
-                    .map_err(|e| JitDecline::Gap(format!("transitive compile of call target \"{}\" failed: {}", p, e)))?;
-            }
-        }
-        let assoc_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(t)
-            .into_iter()
-            .filter(|key| {
-                if path_is_builtin(&key.0, "vector") && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
-                    return false;
-                }
-                if path_is_builtin(&key.0, "hashtable")
-                    && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
-                {
-                    return false;
-                }
-                // `llvm-*`/`scope` builtin methods are natively lowered to
-                // the `rt_llvm_call` dispatch shim (an `llvm-op` node,
-                // interp-closure removal Stage 1), never a method-call
-                // target. A *heap*-repr `Scope<V>` method has no compiled
-                // lowering, but excluding it here follows the existing
-                // convention for non-lowered builtins (see
-                // `call_graph_edges`' comment): it panics inside
-                // `compile-assoc-user`'s `get-function`, still at compile
-                // time.
-                if path_is_builtin_any(&key.0, &LLVM_METHOD_RECEIVER_TYPES) {
-                    return false;
-                }
-                self.root.borrow().has_method(&key.0, &key.1)
-                    || !path_is_builtin_any(&key.0, &NATIVE_LOWERED_PRIMITIVES)
-            })
-            .collect();
-        for (p, m) in &assoc_targets {
-            if !self.root.borrow().method_compiled(p, m) {
-                // Same transitive drive as the call targets above —
-                // `"type::method"` is exactly the name shape a standalone
-                // `(compile "type::method")` resolves via `Self::method_key`.
-                let target = CompileTarget::Method { type_name: p.clone(), method: m.clone(), home: p.parent().to_vec() };
-                self.compile_function(heap, &target)
-                    .map_err(|e| JitDecline::Gap(format!("transitive compile of method target \"{}::{}\" failed: {}", p, m, e)))?;
-            }
-        }
-
-        let cache_key = t.loc.as_ref().map(|loc| (loc.clone(), format!("{:?}", &t.ty)));
-        let cached = cache_key.as_ref().and_then(|k| self.jit_ctor_cache.borrow().get(k).cloned());
-        let ctor = match cached {
-            Some(c) => c,
-            None => {
-                let ctor = self
-                    .jit_compile_closure_ctor(heap, t, captured, &call_targets, &assoc_targets)
-                    .map_err(JitDecline::from_ctor_error)?;
-                let ctor = Rc::new(ctor);
-                if let Some(k) = cache_key {
-                    self.jit_ctor_cache.borrow_mut().insert(k, ctor.clone());
-                }
-                self.jit_graveyard.borrow_mut().push(ctor.clone());
-                ctor
-            }
-        };
-
-        let int_args: Vec<i64> = cell_ids.iter().map(|(_, id)| crate::compile::runtime::encode(Value::Boxed(**id))).collect();
-        // Every `CompiledFn::call` must register the active `Heap` first —
-        // see `Self::call_compiled`'s matching call for why (any `rt_*` the
-        // constructor's body transitively reaches, `rt_closure_new` above
-        // all, needs it).
-        crate::compile::runtime::set_active_heap(heap as *mut Heap);
-        let raw = ctor.call(&int_args);
-        Ok(crate::compile::runtime::decode(raw))
-    }
-
-    /// The actual JIT-compilation half of [`Self::jit_define_closure`] — see
-    /// that method's doc comment for the "wrap `t` as a throwaway top-level
-    /// function whose params are all `Type::Sexpr`" trick this builds.
-    /// Returns the finished, callable [`crate::compile::CompiledFn`]; never
-    /// caches or graveyards it (the caller does both, only for a fresh —
-    /// not cache-hit — compile).
-    fn jit_compile_closure_ctor(
-        &self,
-        heap: &mut Heap,
-        t: &Typed,
-        captured: &[(String, Type)],
-        call_targets: &[Path],
-        assoc_targets: &[(Path, String)],
-    ) -> Result<crate::compile::CompiledFn, String> {
-        let ctor_name = {
-            let n = self.jit_ctor_counter.get();
-            self.jit_ctor_counter.set(n + 1);
-            format!("closure_ctor${}", n)
-        };
-        let ctor_params: Vec<(String, Type)> =
-            captured.iter().map(|(name, _)| (name.clone(), Type::Named(Path::root("sexpr"), Vec::new()))).collect();
-        let exclude: HashSet<String> = captured.iter().map(|(name, _)| name.clone()).collect();
-
-        let module = {
-            let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-            let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("closure_ctor")));
-            for p in call_targets {
-                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(&p.to_string()));
-            }
-            for (p, m) in assoc_targets {
-                declare_external_function(&module, &crate::compile::ast_bridge::user_method_symbol_name(p, m));
-            }
-            for (rt_name, _) in rt_extern_functions() {
-                declare_external_function(&module, rt_name);
-            }
-            module
-        };
-
-        self.translate_and_compile(heap, module.clone(), &ctor_params, t, &ctor_name, &exclude)
-            .map_err(|e| e.to_string())?;
-
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        module.borrow().verify().map_err(|e| format!("module failed verification: {}", e))?;
-        let mut externals: Vec<(String, usize)> = Vec::new();
-        for p in call_targets {
-            let f = self.root.borrow().get_fn(p).expect("checked already-compiled above");
-            let addr = f.compiled.borrow().as_ref().expect("checked already-compiled above").address();
-            externals.push((crate::compile::ast_bridge::user_symbol_name(&p.to_string()), addr));
-        }
-        for (p, m) in assoc_targets {
-            let f = self.root.borrow().get_method(p, m).expect("checked already-compiled above");
-            let addr = f.compiled.borrow().as_ref().expect("checked already-compiled above").address();
-            externals.push((crate::compile::ast_bridge::user_method_symbol_name(p, m), addr));
-        }
-        externals.extend(rt_extern_functions().iter().map(|(n, a)| (n.to_string(), *a)));
-        let compiled_fn = crate::compile::CompiledFn::new(&module.borrow(), &ctor_name, &externals).map_err(|e| format!("JIT failed: {}", e))?;
-        Ok(compiled_fn)
-    }
-
-    /// The shared policy every `Expr::Lambda`/`Labels`/`FnRef`/`MethodRef`
-    /// eval arm applies around [`Self::jit_define_closure`]: on success, use
-    /// the compiled closure; on *any* decline, a hard [`EvalError::Panic`].
-    /// Interp-closure removal Stage 8c deleted the interpreted-closure
-    /// fallback (`make_closure`) this used to take, so there is nothing to
-    /// fall back *to* anymore — every closure value is a compiled one. A
-    /// [`JitDecline::Gap`] was already a hard error (Stage 9); the two
-    /// remaining [`JitDecline::Benign`] cases (a native-tier type, the island
-    /// not loaded) are both unreachable under the always-loaded AOT-native
-    /// island every entry point installs (Stage 5), so reaching one is a real
-    /// error — an embedder that skipped island loading, say — not a silent
-    /// downgrade. `EvalError::Panic` is a catchable interpreter error (not a
-    /// process abort), so a caller like `Interp::expand_macro` still surfaces
-    /// it as a diagnostic rather than crashing.
-    fn jit_closure(
-        &self,
-        heap: &mut Heap,
-        env: &Env,
-        t: &Typed,
-        captured: &[(String, Type)],
-    ) -> Result<Value, EvalError> {
-        let result = self.jit_define_closure(heap, env, t, captured);
-        self.jit_closure_from_result(result)
-    }
-
-    /// [`Self::jit_closure`]'s policy half, taking an already-computed
-    /// [`Self::jit_define_closure`] result rather than the inputs to compute
-    /// one — for a caller (`Expr::Lambda`/`Expr::Labels`' eval arms) that
-    /// builds the `Typed`/captured inputs itself before invoking the JIT.
-    fn jit_closure_from_result(&self, result: Result<Value, JitDecline>) -> Result<Value, EvalError> {
-        match result {
-            Ok(v) => Ok(v),
-            Err(decline) => Err(EvalError::Panic(format!("definition-time JIT failed: {}", decline.reason()))),
-        }
-    }
 
 
-    /// Whether `p` names an enum type — one whose runtime value is
-    /// *potentially* a boxed `BoxedObj::Enum`: the built-in
-    /// `Option`/`Result`/the concrete error types, or a user `defenum` — all
-    /// alike recorded as `TypeEntry::Enum` in the scope tree (`Self::new`
-    /// seeds the built-ins from `registry::builtin_sum_defs`, a `defenum`'s
-    /// own exec adds the rest — see `Self::exec`'s `TopLevel::Defenum` arm),
-    /// so one lookup covers every case. Every instantiation is heap-repr —
-    /// there is no longer a native fallback to distinguish — so identifying
-    /// the family is the whole job. The interpreter-side twin of the
-    /// checker's `Registry`-driven `AdtKind::Sum && !variants.is_empty()` test
-    /// in `Checker::is_heap_repr`.
-    fn is_enum_path(&self, p: &Path) -> bool {
-        matches!(self.root.borrow().find_type(p), Some(scope::TypeEntry::Enum(_)))
-    }
+
+
+
 
     /// Execute a checked top-level form. Definitions register and return `None`;
     /// a bare expression returns `Some(value)`.
@@ -1033,11 +618,11 @@ impl Interp {
         // defines; a `check_hash` load has a fresh `.bc` so all are present.
         let names: Vec<String> = island_defuns
             .iter()
-            .filter(|n| check_hash || module.get_function(&crate::compile::ast_bridge::user_symbol_name(n)).is_some())
+            .filter(|n| check_hash || module.get_function(&crate::compile::symbols::user_symbol_name(n)).is_some())
             .cloned()
             .collect();
         let internal_names: Vec<String> =
-            names.iter().map(|n| crate::compile::ast_bridge::user_symbol_name(n)).collect();
+            names.iter().map(|n| crate::compile::symbols::user_symbol_name(n)).collect();
         // Wire only the `rt_*` shims the module actually forward-declares. A
         // `check_hash` load has a fresh `.bc` that declares exactly the current
         // set, but the bootstrap snapshot chain installs the *committed* (older)
@@ -1061,147 +646,7 @@ impl Interp {
         Ok(())
     }
 
-    pub fn exec(&self, heap: &mut Heap, tl: TopLevel) -> Result<Option<Value>, EvalError> {
-        match tl {
-            TopLevel::Defun { name, type_params, params, ret, body, public } => {
-                // A generic defun's own body was checked with its type
-                // variables still abstract — a type-erased artifact kept only
-                // for definition-time diagnostics. It must never run: every
-                // call site was rewritten by the checker to a monomorphized
-                // specialization (`Checker::request_fn_specialization`), and
-                // registering the erased body here would leave a silently
-                // callable stale twin behind.
-                if !type_params.is_empty() {
-                    return Ok(None);
-                }
-                let (names, types): (Vec<String>, Vec<Type>) = params.into_iter().unzip();
-                let def = FnDef { params: names, body, rest: false, lambda: None, sig: Some((types, ret)), public, compiled: RefCell::new(None) };
-                self.root.borrow_mut().get_or_create(name.parent()).fns.insert(name.last_segment().to_string(), Rc::new(def));
-                Ok(None)
-            }
-            TopLevel::Defmethod { type_name, method, self_name, params, ret, body, type_params, public, .. } => {
-                // A generic-owner method's erased body is diagnostics-only,
-                // exactly like a generic `Defun`'s above — every call site
-                // was rewritten to a monomorphized specialization.
-                if !type_params.is_empty() {
-                    return Ok(None);
-                }
-                let mut names: Vec<String> = Vec::new();
-                let mut types: Vec<Type> = Vec::new();
-                if let Some(s) = self_name {
-                    names.push(s);
-                    types.push(Type::Named(type_name.clone(), vec![]));
-                }
-                for (n, t) in params {
-                    names.push(n);
-                    types.push(t);
-                }
-                let def = FnDef { params: names, body, rest: false, lambda: None, sig: Some((types, ret)), public, compiled: RefCell::new(None) };
-                self.root.borrow_mut().get_or_create(type_name.parent()).methods.insert((type_name.last_segment().to_string(), method), Rc::new(def));
-                Ok(None)
-            }
-            TopLevel::Defmacro { name, params, body, rest, lambda, public } => {
-                // A macro's body is callable exactly like a `defun`'s — see
-                // `MacroExpander`/`Self::expand_macro` — so it's stored in
-                // the very same `fns` table; no separate macro table exists.
-                let def = FnDef { params, body, rest, lambda: Some(lambda), sig: None, public, compiled: RefCell::new(None) };
-                self.root.borrow_mut().get_or_create(name.parent()).fns.insert(name.last_segment().to_string(), Rc::new(def));
-                Ok(None)
-            }
-            TopLevel::Use { .. } => Ok(None),
-            // The type itself was already registered in the checker's
-            // `Registry` at check time — there's nothing else for the
-            // interpreter to do, the same as `Option`/`Result` needing no
-            // runtime registration of their own. Recording `name` as a
-            // `TypeEntry::Struct` is the one exception (Stage 3 of the
-            // Sexpr/RtValue unification plan, `docs/implementation-log.md`
-            // — see `scope::TypeEntry`'s doc comment).
-            TopLevel::Defstruct { name } => {
-                self.root.borrow_mut().get_or_create(name.parent()).types.insert(name.last_segment().to_string(), scope::TypeEntry::Struct);
-                Ok(None)
-            }
-            // A `defenum` sum type is a check-time registration, like
-            // `Option`/`Result` (which reach this same table a different way —
-            // see `Self::new`). Unlike `Defstruct` it is *not* recorded as a
-            // `TypeEntry::Struct` (an enum instance is an immutable
-            // `RtValue::Data`, never a boxed struct) — but its variants'
-            // field types *are* recorded, as `TypeEntry::Enum`: the
-            // compiled-global boundary needs them to decode a box back into a
-            // `RtValue::Data` (see `scope::TypeEntry`'s doc comment), and the
-            // printer needs the variant names (`Self::render_ctx`). The same
-            // one-exception pattern `Defstruct` follows.
-            TopLevel::Defenum { name, variants, .. } => {
-                self.root.borrow_mut().register_enum(&name, EnumDef { variants });
-                Ok(None)
-            }
-            // `ty` is ignored: it used to pick the global's slot kind, which
-            // no longer varies.
-            TopLevel::Defvar { name, value, public, .. } => {
-                let v = self.eval(heap, &value, &Env::new())?;
-                let slot = self.slot(heap, v);
-                self.root.borrow_mut().get_or_create(name.parent()).globals.insert(name.last_segment().to_string(), scope::GlobalDef { slot, public });
-                Ok(None)
-            }
-            TopLevel::Module { path, body } => {
-                // Ensures the tree node for `path` exists (idempotent — a
-                // "mkdir -p") before its own body registers into it; doesn't
-                // need to *stay* "current" for anything else, since every
-                // nested `Defun`/`Defmethod`/`Defvar`/`Defmacro`'s own `name`/
-                // `type_name` is already absolute regardless of nesting (see
-                // `scope`'s module doc comment) — registration is direct
-                // descent from `self.root`, never relative to a live "current
-                // module" cursor. This also means a `Defmacro` already
-                // exec'd immediately (`project::needs_immediate_exec`, before
-                // this `Module` wrapper was even built) lands at the exact
-                // same node here, with no ordering dependency.
-                self.root.borrow_mut().get_or_create(path.segments());
-                let mut last = None;
-                for t in body {
-                    last = self.exec(heap, t)?;
-                }
-                Ok(last)
-            }
-            TopLevel::Expr(t) => {
-                let v = self.eval(heap, &t, &Env::new());
-                // A `pprint-logical-block` is normally closed by the `progn`
-                // the special form lowers to, but a `break`/`return` that
-                // jumps out of the block (or an error unwinding past it)
-                // skips that close and would leave the session open — every
-                // later `print` silently buffered into a document nobody
-                // flushes. A top-level form is the widest a block can ever
-                // span, so closing any still-open one here is both the right
-                // boundary and a complete safety net.
-                self.flush_pretty()?;
-                Ok(Some(v?))
-            }
-            // `(load ...)` is resolved and applied by the *driver* at check
-            // time (`project::load_file_flat`), never reaching the
-            // interpreter's exec phase — the driver consumes a `Load` inline
-            // rather than queuing it. Reaching here would be a driver bug.
-            TopLevel::Load { .. } => Err(EvalError::Internal(
-                "TopLevel::Load must be handled by the driver, not exec'd".into(),
-            )),
-        }
-    }
 
-    /// Evaluate `t`, tagging any real error with `t`'s source location.
-    ///
-    /// Thin wrapper over [`Self::eval_inner`]. Like the checker's `check`,
-    /// evaluation recurses into sub-expressions through here, so the *deepest*
-    /// failing node tags first and — since [`EvalError::at`] keeps the
-    /// innermost location — that precise spot is what the message reports. The
-    /// `Break`/`Return` control-flow signals pass through untagged (see
-    /// `EvalError::at`), so the loop that catches them still matches the bare
-    /// variant.
-    fn eval(&self, heap: &mut Heap, t: &Typed, env: &Env) -> Result<Value, EvalError> {
-        match self.eval_inner(heap, t, env) {
-            Ok(v) => Ok(v),
-            Err(e) => match &t.loc {
-                Some(loc) => Err(e.at(loc.clone())),
-                None => Err(e),
-            },
-        }
-    }
 
     /// Resolves a `Call`/`FnRef` [`Ref`]: tries the independent
     /// re-derivation first ([`scope::ModuleScope::resolve_fn`]), falling
@@ -1221,699 +666,9 @@ impl Interp {
         self.root.borrow().resolve_fn(&r.home, &r.written).or_else(|| self.root.borrow().get_fn(&r.resolved))
     }
 
-    /// [`Self::resolve_fn_ref`]'s twin for `Global`/`SetGlobal`.
-    fn resolve_global_ref(&self, r: &Ref) -> Option<Slot> {
-        self.root.borrow().resolve_global(&r.home, &r.written).or_else(|| self.root.borrow().get_global(&r.resolved))
-    }
-
-    fn eval_inner(&self, heap: &mut Heap, t: &Typed, env: &Env) -> Result<Value, EvalError> {
-        match &t.expr {
-            Expr::Int(n) => Ok(Value::Int(*n)),
-            Expr::Float(f) => Ok(float_rt(heap, *f)),
-            Expr::Bignum(n) => Ok(bignum_rt(heap, n.clone())),
-            Expr::Ratio(r) => Ok(ratio_rt(heap, r.clone())),
-            Expr::Bool(b) => Ok(Value::Bool(*b)),
-            Expr::Char(c) => Ok(Value::Char(*c)),
-            Expr::Str(s) => Ok(str_rt(heap, s.as_str())),
-            // A keyword literal is its own interned symbol — the same carrier
-            // a `Sexpr::Sym` holds, so `(eq :foo :foo)` is true for free.
-            Expr::SymLit(name) => Ok(heap.intern_symbol(name)),
-            Expr::Unit => Ok(Value::Empty),
-            Expr::Var(n) => env_get(env, n)
-                .map(|s| s.get(heap))
-                .ok_or_else(|| EvalError::Unbound(n.clone())),
-            // A promoted global (`Self::compiled_globals` — some `compile`d
-            // function reads/writes it via a permanent GC root, see
-            // `Self::promote_global`) must be read from that same storage
-            // here too, not the plain `Slot` below — otherwise an
-            // interpreted read could see a stale value a compiled write
-            // already updated, even though both sides name the same
-            // `defvar`.
-            Expr::Global(r) => {
-                if let Some(&id) = self.compiled_globals.borrow().get(&r.resolved) {
-                    // `id` (`Self::promote_global`'s return value) is *not*
-                    // the `Heap::permanent_root` position — see
-                    // `typelisp_rt::global_new`'s doc comment (an
-                    // `Option`/`Result` global's own heap-referencing field
-                    // pushes its own extra permanent root during encoding,
-                    // desyncing the two) — `global_perm_idx` resolves it the
-                    // same way `rt_global_get` does.
-                    let perm_idx = crate::compile::runtime::global_perm_idx(id)
-                        .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", r.resolved, id)))?;
-                    Ok(decode_field_typed(heap.permanent_root(perm_idx), &t.ty))
-                } else {
-                    self.resolve_global_ref(r)
-                        .map(|s| s.get(heap))
-                        .ok_or_else(|| EvalError::Unbound(r.resolved.to_string()))
-                }
-            }
-            Expr::FnRef(r) => match self.resolve_fn_ref(r) {
-                // Reify a user function as a closure with no captured
-                // environment. No captures means no cell-binding prerequisite
-                // at all, the simplest possible JIT (`Self::jit_closure`'s doc
-                // comment covers the mandatory-JIT policy shared by all four
-                // call sites since interp-closure removal Stage 8c).
-                Some(_) => self.jit_closure(heap, env, t, &[]),
-                // Otherwise a built-in operator (lives at the root, simple path).
-                None => Ok(heap.alloc_builtin_fn(None, r.resolved.last_segment())),
-            },
-            Expr::MethodRef { type_name, method, home, .. } => match self.root.borrow().resolve_method(home, type_name, method) {
-                Some(_) => self.jit_closure(heap, env, t, &[]),
-                None => {
-                    let recv = crate::types::intern_path_id(heap, type_name);
-                    Ok(heap.alloc_builtin_fn(Some(recv), method))
-                }
-            },
-            Expr::If(..) => {
-                // Walks a right-leaning `if`/`else-if` chain (`(if c1 b1 (if
-                // c2 b2 (if c3 b3 ...)))`, exactly what `cond`'s expansion —
-                // and `compiler.rs`'s own tag-dispatch `compile-value`,
-                // `compile-construct-sexpr`'s variant-`eq` chain, etc. —
-                // produce) iteratively instead of recursing once per link.
-                // Recursing (`self.eval(heap, els, env)` on an `els` that's
-                // itself another `If`) would re-enter this whole match via a
-                // *new* Rust call frame per chain link — with debug builds'
-                // large, uninlined `eval` frames, a `compile-value`-sized
-                // chain (~20 tags) nested a few `Construct`/`Match` levels
-                // deep was enough to blow even a worker thread's default
-                // stack (discovered compiling a `dolist`-based function,
-                // Stage 8 of the Sexpr-representation plan, `docs/implementation-log.md`).
-                // Only the condition's own (shallow) evaluation and whichever
-                // single leaf branch is ultimately taken still recurse.
-                let mut cur = t;
-                loop {
-                    let (c, then, els) = match &cur.expr {
-                        Expr::If(c, then, els) => (c, then, els),
-                        _ => unreachable!("loop only ever advances `cur` to another Expr::If"),
-                    };
-                    match self.eval(heap, c, env)? {
-                        Value::Bool(true) => break self.eval(heap, then, env),
-                        Value::Bool(false) => {
-                            if matches!(els.expr, Expr::If(..)) {
-                                cur = els;
-                            } else {
-                                break self.eval(heap, els, env);
-                            }
-                        }
-                        _ => break Err(EvalError::Internal("if condition is not a bool".into())),
-                    }
-                }
-            }
-            Expr::Let(binds, body) => {
-                // CL `let`: binding values are evaluated in the outer environment.
-                let mut child = env.clone();
-                for (name, val) in binds {
-                    let v = self.eval(heap, val, env)?;
-                    let s = self.slot(heap, v);
-                    child.push((name.clone(), s));
-                }
-                self.eval_seq(heap, body, &child)
-            }
-            Expr::Labels { defs, body } => {
-                // Give every function a placeholder slot *before* building any
-                // closure, so each closure's captured environment (`child`)
-                // already contains all of them — including its own slot, the
-                // self-reference `lambda` has no way to express. Only once
-                // `child` is complete does each slot get overwritten with the
-                // real closure that captured it.
-                //
-                // The placeholders are *heap cells* (unlike other
-                // function-typed bindings, which stay `Native` because a
-                // function value may also be a heap-less `RtValue::Builtin`):
-                // a labels sibling is always a closure, and a heap cell makes
-                // the whole mutual-recursion knot — cell -> closure box ->
-                // sibling cell -> ... — a plain heap cycle mark-sweep
-                // reclaims once the labels scope dies. (The old `Rc`-based
-                // representation leaked exactly this cycle by design.)
-                let mut child = env.clone();
-                let mut slots: Vec<Slot> = Vec::with_capacity(defs.len());
-                for (name, _, _) in defs {
-                    let s = self.slot(heap, Value::Empty);
-                    child.push((name.clone(), s.clone()));
-                    slots.push(s);
-                }
-                for ((_, params, fbody), slot) in defs.iter().zip(&slots) {
-                    // Closure unification Stage 7: each sibling is JIT'd
-                    // *independently* (no SCC/shared-module batching,
-                    // unlike `compiler.rs`'s own `compile-labels-bodies`,
-                    // which can only batch siblings compiled as part of the
-                    // *same* already-compiled outer function) — a
-                    // sibling-to-sibling call, including self-recursion,
-                    // is just an ordinary captured-name reference (this
-                    // block's own placeholder cells, above), reached
-                    // through the same `apply-indirect` path any other
-                    // escaping closure call uses. `lambda_free_vars` (not
-                    // `labels_free_vars`) is deliberate: the latter treats
-                    // sibling names as *direct calls* to exclude from the
-                    // captured list — correct only when every sibling
-                    // compiles into one shared module/`fn-env`, which
-                    // Stage 7's one-sibling-at-a-time JIT never does — so
-                    // every sibling name a body references must flow
-                    // through `captured`/the cell mechanism like any other
-                    // free variable, exactly what `lambda_free_vars` (whose
-                    // own doc comment notes it walks with an empty
-                    // siblings set) already does.
-                    // Cheap (`O(params)`, no body walk) pre-check before
-                    // `lambda_free_vars` — see `Expr::Lambda`'s matching
-                    // comment for why this ordering matters: the self-
-                    // hosted compiler's own `labels` siblings (`compile-
-                    // value` above all) always declare an `llvm-builder`/
-                    // `Scope<llvm-value>`/... param, so this alone already
-                    // excludes them before ever recursively walking a body
-                    // the size of that dispatcher.
-                    let ret_ty = fbody.last().expect("a labels def's body has at least one expression").ty.clone();
-                    // `Unit` return allowed for the same reason as
-                    // `jit_define_closure`'s own return-type check — see
-                    // the comment there.
-                    let jit_worth_trying = (self.is_jit_tier_ty(&ret_ty) || matches!(ret_ty, Type::Unit))
-                        && params.iter().all(|(_, ty)| self.is_jit_tier_ty(ty));
-                    let jit_result = if jit_worth_trying {
-                        let captured = crate::compile::freevars::lambda_free_vars(params, fbody);
-                        let fn_ty = Type::Fn(params.iter().map(|(_, ty)| ty.clone()).collect(), None, Box::new(ret_ty));
-                        let synthetic = Typed::new(Expr::Lambda { params: params.clone(), body: fbody.clone() }, fn_ty);
-                        self.jit_define_closure(heap, &child, &synthetic, &captured)
-                    } else {
-                        Err(JitDecline::Benign("a declared parameter or the return type has no compiled representation".to_string()))
-                    };
-                    let closure = self.jit_closure_from_result(jit_result)?;
-                    slot.set(heap, closure)?;
-                }
-                self.eval_seq(heap, body, &child)
-            }
-            Expr::Call(r, args) => {
-                let (argv, _slots) = self.eval_args(heap, args, env)?;
-                match self.resolve_fn_ref(r) {
-                    Some(f) => {
-                        // A `(compile name)`d function dispatches to native
-                        // code first — checked ahead of the tree-walked body
-                        // so a later recompile (not possible yet, but the
-                        // ordering is the cheap-to-get-right choice) would
-                        // naturally take precedence.
-                        let compiled = f.compiled.borrow().clone();
-                        if let Some(compiled) = compiled {
-                            // `compile_function` never populates `compiled`
-                            // without first going through `compiled_fn_body`,
-                            // which requires `f.sig` to be `Some` — so this
-                            // is an internal invariant, not a user-reachable
-                            // error.
-                            let sig = f.sig.as_ref().expect("a compiled function always has a type signature");
-                            return self.call_compiled(heap, &compiled, &argv, &sig.0, &sig.1);
-                        }
-                        self.apply(heap, &f, argv)
-                    }
-                    None if r.written.len() == 1 => match self.eval_builtin(heap, &r.written[0], &argv) {
-                        Some(result) => result,
-                        None => Err(EvalError::NoSuchFunction(r.resolved.to_string())),
-                    },
-                    None => Err(EvalError::NoSuchFunction(r.resolved.to_string())),
-                }
-            }
-            Expr::Assoc { type_name, method, args, home, .. } => {
-                let (argv, _slots) = self.eval_args(heap, args, env)?;
-                match self.root.borrow().resolve_method(home, type_name, method) {
-                    Some(f) => {
-                        // `Expr::Call`'s own `compiled` fast-path check above
-                        // — see `Self::call_compiled`'s doc comment for the
-                        // one extra risk a method's receiver carries that a
-                        // plain function's parameters never do.
-                        let compiled = f.compiled.borrow().clone();
-                        if let Some(compiled) = compiled {
-                            let sig = f.sig.as_ref().expect("a compiled method always has a type signature");
-                            return self.call_compiled(heap, &compiled, &argv, &sig.0, &sig.1);
-                        }
-                        self.apply(heap, &f, argv)
-                    }
-                    None => {
-                        let recv_ty = args.first().map(|a| &a.ty);
-                        match eval_builtin_method(heap, type_name, method, recv_ty, &argv, &t.ty) {
-                            Some(result) => result,
-                            None => Err(EvalError::NoSuchFunction(method_link_name(type_name, method))),
-                        }
-                    }
-                }
-            }
-            Expr::TraitCall { method, .. } => {
-                // The checker only produces this node inside a where-bounded
-                // *generic* body (`Checker::check_instance_method`'s
-                // type-variable branch) — which, post-monomorphization, is a
-                // diagnostics-only artifact that never executes: each
-                // specialization re-checks the same call with the receiver
-                // type concrete and resolves it statically to `Expr::Assoc`.
-                // The old runtime dispatch (reading the receiver value's own
-                // type tag) was the last value-shape fallback in the
-                // evaluator; reaching here now is a checker/interpreter bug.
-                Err(EvalError::Internal(format!(
-                    "TraitCall `{}` reached the evaluator — an erased generic body executed",
-                    method
-                )))
-            }
-            Expr::DynBox { concrete_key, trait_path, slots, supers, value } => {
-                let v = self.eval(heap, value, env)?;
-                // Interns this box's own table *and* the supertrait tables an
-                // `Expr::DynUpcast` of it may switch to — here, where the
-                // concrete type is still known.
-                let ids = self.register_dyn_box(concrete_key, trait_path, slots, supers);
-                let id = ids[0];
-                // If some compiled body dispatches on this trait, the box may
-                // be about to reach it, and a native call site can only read
-                // a *native* entry point out of the table — so any slot still
-                // interpreted has to be compiled now. Reached only by an
-                // `impl` that did not exist when that call site was checked
-                // (otherwise `Expr::DynCall::impl_targets` already pulled it
-                // in); an ordinary program never gets here at all.
-                // Bound to a local so the `RefCell` borrow is definitely
-                // released before `compile_function` below — which reaches
-                // `translate_and_compile`, and that borrows this same cell
-                // mutably.
-                let has_native_dispatcher = self.dyn_dispatch_compiled.borrow().contains(trait_path);
-                if has_native_dispatcher {
-                    for (type_name, method) in slots {
-                        if !self.root.borrow().method_compiled(type_name, method) {
-                            let target = CompileTarget::Method {
-                                type_name: type_name.clone(),
-                                method: method.clone(),
-                                home: type_name.parent().to_vec(),
-                            };
-                            self.compile_function(heap, &target)?;
-                        }
-                    }
-                }
-                // Publish to the compiled tier on every boxing, not just
-                // after a compilation: the value may be about to cross into
-                // *already*-compiled code that dispatches on it, and this is
-                // the only point where such a box comes into existence
-                // without any compilation having just happened.
-                // The supertrait tables go out too: an upcast of this box may
-                // hand one of them to compiled code, which reads entry points
-                // from the compiled tier's copy and nowhere else.
-                for id in &ids {
-                    self.publish_vtable(*id);
-                }
-                // `v` is anchored across the allocation: `alloc_dyn` can
-                // trigger a collection, and nothing else references `v` yet.
-                let slot = self.slot(heap, v);
-                let boxed = heap.alloc_dyn(id, v);
-                drop(slot);
-                Ok(boxed)
-            }
-            Expr::DynUpcast { to_trait, value } => {
-                let v = self.eval(heap, value, env)?;
-                let Value::Boxed(id) = v else {
-                    return Err(EvalError::Internal(format!(
-                        "DynUpcast to `{}`: not a trait object ({:?})",
-                        to_trait, v
-                    )));
-                };
-                if !heap.is_dyn(id) {
-                    return Err(EvalError::Internal(format!(
-                        "DynUpcast to `{}`: not a trait object ({:?})",
-                        to_trait, v
-                    )));
-                }
-                let from = heap.dyn_vtable_id(id);
-                let trait_id = self.trait_id_for(to_trait);
-                let to = self.dyn_upcasts.borrow().get(&(from, trait_id)).copied();
-                let Some(to) = to else {
-                    // The boxing site registers a table for every trait in
-                    // the closure the checker admits an upcast to, so a miss
-                    // is a compiler bug, not anything user code can provoke.
-                    return Err(EvalError::Internal(format!(
-                        "DynUpcast to `{}`: vtable {} has no supertrait table registered",
-                        to_trait, from
-                    )));
-                };
-                if to == from {
-                    return Ok(v);
-                }
-                let inner = heap.dyn_value(id);
-                self.publish_vtable(to);
-                // As in `DynBox`: `inner` is anchored across `alloc_dyn`,
-                // which can collect.
-                let slot = self.slot(heap, inner);
-                let boxed = heap.alloc_dyn(to, inner);
-                drop(slot);
-                Ok(boxed)
-            }
-            Expr::DynCall { trait_path, method, slot, args, .. } => {
-                let (argv, _slots) = self.eval_args(heap, args, env)?;
-                // The receiver is the fat box; the callee sees the concrete
-                // value, so it is an ordinary method body with an ordinary
-                // receiver — nothing about it knows it was reached dynamically.
-                let (vtable_id, inner) = match argv.first() {
-                    Some(Value::Boxed(id)) if heap.is_dyn(*id) => {
-                        (heap.dyn_vtable_id(*id), heap.dyn_value(*id))
-                    }
-                    other => {
-                        return Err(EvalError::Internal(format!(
-                            "DynCall `{}::{}`: receiver is not a trait object ({:?})",
-                            trait_path, method, other
-                        )))
-                    }
-                };
-                let target = self
-                    .vtables
-                    .borrow()
-                    .get(vtable_id as usize)
-                    .and_then(|s| s.get(*slot))
-                    .cloned();
-                let Some((type_name, target_method)) = target else {
-                    return Err(EvalError::Internal(format!(
-                        "DynCall `{}::{}`: vtable {} has no slot {}",
-                        trait_path, method, vtable_id, slot
-                    )));
-                };
-                let mut argv = argv;
-                argv[0] = inner;
-                // Visibility was settled where the value was boxed
-                // (`Checker::dyn_vtable_slots` went through the `impl`), so
-                // this is the direct lookup, not `resolve_method`'s
-                // `home`-relative one.
-                let f = self.root.borrow().get_method(&type_name, &target_method);
-                match f {
-                    Some(f) => {
-                        let compiled = f.compiled.borrow().clone();
-                        if let Some(compiled) = compiled {
-                            let sig = f.sig.as_ref().expect("a compiled method always has a type signature");
-                            return self.call_compiled(heap, &compiled, &argv, &sig.0, &sig.1);
-                        }
-                        self.apply(heap, &f, argv)
-                    }
-                    None => Err(EvalError::NoSuchFunction(method_link_name(&type_name, &target_method))),
-                }
-            }
-            Expr::DynValue(inner) => {
-                let v = self.eval(heap, inner, env)?;
-                match v {
-                    Value::Boxed(id) if heap.is_dyn(id) => Ok(heap.dyn_value(id)),
-                    other => Err(EvalError::Internal(format!("DynValue: not a trait object ({:?})", other))),
-                }
-            }
-            Expr::Construct { type_name, variant, args, mutable } => {
-                if is_sexpr_type(type_name) {
-                    self.construct_sexpr(heap, *variant, args, env)
-                } else if *mutable {
-                    let (fields, _slots) = self.eval_args(heap, args, env)?;
-                    let mem_fields = fields.iter().map(|f| rtvalue_to_struct_field(f)).collect();
-                    Ok(alloc_typed_struct(heap, type_name, mem_fields))
-                } else {
-                    // An enum value (`Option`/`Result`/user `defenum`) — see
-                    // `build_enum_value`'s doc comment for the heap/native
-                    // duality this goes through (the same one `Scope<V>`
-                    // already has, since `Option<llvm-value>` and friends
-                    // are exactly the (typelisp-hosted) compiler's own
-                    // native-only instantiation).
-                    let (fields, _slots) = self.eval_args(heap, args, env)?;
-                    Ok(build_enum_value(heap, type_name.clone(), *variant, fields))
-                }
-            }
-            Expr::Lambda { params, body } => {
-                // Closure unification Stage 7: try definition-time JIT
-                // first — but only bother computing `captured` (a full
-                // recursive walk of `body`, `freevars::lambda_free_vars`) if
-                // every *declared* param already passes the tier check —
-                // this shallow, O(params) test is what actually excludes
-                // the self-hosted compiler's own `lambda`/`labels` (whose
-                // params always include an `llvm-builder`/`Scope<llvm-
-                // value>`/... — see `Self::is_jit_tier_ty`'s doc comment)
-                // *before* ever descending into a body that, for something
-                // the size of `compiler.rs`'s own `compile-value`
-                // dispatcher, is deep and wide enough to overflow the stack
-                // on a plain recursive walk purely to compute a captured
-                // list that was always going to fail tier anyway.
-                let jit_worth_trying = params.iter().all(|(_, ty)| self.is_jit_tier_ty(ty));
-                let jit_result = if jit_worth_trying {
-                    let captured = crate::compile::freevars::lambda_free_vars(params, body);
-                    self.jit_define_closure(heap, env, t, &captured)
-                } else {
-                    Err(JitDecline::Benign("a declared parameter has no compiled representation".to_string()))
-                };
-                self.jit_closure_from_result(jit_result)
-            }
-            Expr::Apply(callee, args) => {
-                let f = self.eval(heap, callee, env)?;
-                // The callee is a GC-heap value now (a closure box) — anchor
-                // it before evaluating the arguments, whose own allocations
-                // may collect. Without this, an unnamed callee (e.g.
-                // `((make-adder 1) ...)`) has no binding keeping its box
-                // alive across the argument churn.
-                let _f_anchor = self.slot(heap, f);
-                let (argv, _slots) = self.eval_args(heap, args, env)?;
-                match f {
-                    // A closure callee is always a *compiled* closure now
-                    // (interp-closure removal Stage 8c deleted the interpreted
-                    // `BoxedObj::Closure` arm that used to precede this one):
-                    // every `lambda`/`labels`/`FnRef`/`MethodRef` value is
-                    // built by definition-time JIT. Reached whenever this
-                    // `Apply`'s callee was produced by compiled code — a
-                    // compiled function returning a `Fn` (decoded via
-                    // `is_boxed_sexpr_type`'s `Type::Fn` arm), or a compiled
-                    // closure the interpreter is threading through a chain of
-                    // `Expr::Apply`s it's driving (e.g. `((make-adder n) x)`
-                    // where `make-adder` is `compile`d). Marshals `argv`/
-                    // decodes the result exactly like a top-level
-                    // `call_compiled` call, via the same two halves that split
-                    // out of it.
-                    Value::Boxed(id) if heap.is_compiled_closure(id) => {
-                        // The callee's own declared type carries the parameter
-                        // types `encode_crossing_args` needs to tell an `f64`
-                        // parameter from a `Sexpr` one holding a float.
-                        let (param_tys, rest_ty) = match &callee.ty {
-                            Type::Fn(ps, rest, _) => (ps.as_slice(), rest.as_deref()),
-                            other => {
-                                return Err(EvalError::Internal(format!(
-                                    "compiled closure call: callee has type {:?}, not a function type",
-                                    other
-                                )))
-                            }
-                        };
-                        let (int_args, crossing_roots) =
-                            self.encode_crossing_args(heap, &argv, param_tys, rest_ty)?;
-                        crate::compile::runtime::set_active_heap(heap as *mut Heap);
-                        let raw = Self::call_closure_box(heap, id, &int_args);
-                        for _ in 0..crossing_roots {
-                            heap.pop_root();
-                        }
-                        self.decode_compiled_return(heap, raw, &t.ty)
-                    }
-                    // A built-in used as a function value — dispatched by name
-                    // through the very same `eval_builtin`/
-                    // `eval_builtin_method` a direct `(gensym)`/`(+ a b)` call
-                    // site goes through; the box carries only which name.
-                    Value::Boxed(id) if heap.is_builtin_fn(id) => {
-                        match heap.builtin_fn_recv(id) {
-                            None => {
-                                let name = heap.builtin_fn_name(id).to_string();
-                                match self.eval_builtin(heap, &name, &argv) {
-                                    Some(r) => r,
-                                    None => Err(EvalError::NoSuchFunction(name)),
-                                }
-                            }
-                            Some(pid) => {
-                                let type_name = crate::types::path_from_id(heap, pid);
-                                let method = heap.builtin_fn_name(id).to_string();
-                                let recv_ty = args.first().map(|a| &a.ty);
-                                match eval_builtin_method(heap, &type_name, &method, recv_ty, &argv, &t.ty) {
-                                    Some(r) => r,
-                                    None => Err(EvalError::NoSuchFunction(method_link_name(&type_name, &method))),
-                                }
-                            }
-                        }
-                    }
-                    _ => Err(EvalError::Internal("apply of a non-function value".into())),
-                }
-            }
-            Expr::FieldGet(obj, idx) => {
-                let id = expect_struct_box(&self.eval(heap, obj, env)?)?;
-                let raw = heap.struct_field(id, *idx);
-                // A `FieldGet`'s checked type *is* the field's declared type
-                // (`Checker::check_defstruct`'s accessor synthesis) — always
-                // concrete now that generic accessors are monomorphized —
-                // so the decode is fully type-directed; see
-                // `decode_field_typed`.
-                Ok(decode_field_typed(raw, &t.ty))
-            }
-            Expr::FieldSet(obj, idx, value) => {
-                let id = expect_struct_box(&self.eval(heap, obj, env)?)?;
-                let v = self.eval(heap, value, env)?;
-                let mv = rtvalue_to_struct_field(&v);
-                heap.struct_set_field(id, *idx, mv);
-                Ok(Value::Empty)
-            }
-            Expr::Match(scrut, arms) => {
-                let v = self.eval(heap, scrut, env)?;
-                for arm in arms {
-                    if let Some(binds) = match_pattern(heap, &arm.pat, &v) {
-                        // Each binding's slot routing was baked into the
-                        // pattern at check time (`Pattern::Bind`'s bool) —
-                        // the one binding site whose type the evaluator
-                        // can't read off its own AST node.
-                        let mut child = env.clone();
-                        for (n, bv) in binds {
-                            let s = self.slot(heap, bv);
-                            child.push((n, s));
-                        }
-                        return self.eval_seq(heap, &arm.body, &child);
-                    }
-                }
-                Err(EvalError::Internal("no matching match arm".into()))
-            }
-            Expr::Set(name, value) => {
-                let v = self.eval(heap, value, env)?;
-                let cell = env_get(env, name).ok_or_else(|| EvalError::Unbound(name.clone()))?.clone();
-                cell.set(heap, v.clone())?;
-                Ok(v)
-            }
-            // See `Expr::Global`'s arm above for why a promoted global must
-            // be written through the same permanent-root storage a
-            // compiled write would use, not the plain `Slot` below.
-            Expr::SetGlobal(r, value) => {
-                let v = self.eval(heap, value, env)?;
-                if let Some(&id) = self.compiled_globals.borrow().get(&r.resolved) {
-                    // See `Expr::Global`'s arm for why `id` needs resolving
-                    // through `global_perm_idx` rather than being used as
-                    // the `Heap::permanent_root` position directly.
-                    let perm_idx = crate::compile::runtime::global_perm_idx(id)
-                        .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", r.resolved, id)))?;
-                    let mv = rtvalue_to_struct_field(&v);
-                    heap.set_permanent_root(perm_idx, mv);
-                    Ok(v)
-                } else {
-                    let cell = self.resolve_global_ref(r).ok_or_else(|| EvalError::Unbound(r.resolved.to_string()))?;
-                    cell.set(heap, v.clone())?;
-                    Ok(v)
-                }
-            }
-            Expr::Loop(body) => loop {
-                if let Some(v) = self.eval_loop_body(heap, body, env)? {
-                    return Ok(v);
-                }
-            },
-            Expr::Break => Err(EvalError::Break),
-            Expr::Return(value) => {
-                let v = match value {
-                    Some(e) => self.eval(heap, e, env)?,
-                    None => Value::Empty,
-                };
-                Err(EvalError::Return(Box::new(v)))
-            }
-            Expr::Panic(msg) => match self.eval(heap, msg, env)? {
-                Value::Str(id) => Err(EvalError::Panic(heap.string(id).to_string())),
-                _ => Err(EvalError::Panic(String::new())),
-            },
-            Expr::Quote(qs) => alloc_quoted(heap, qs),
-            Expr::CompileFn(target) => self.compile_function(heap, target),
-        }
-    }
-
-    /// Construct a `Sexpr` value (see `check::registry::sexpr_def` for the
-    /// variant layout this mirrors), allocating into the GC-managed cons heap
-    /// rather than `RtValue::Data`.
-    fn construct_sexpr(
-        &self,
-        heap: &mut Heap,
-        variant: usize,
-        args: &[Typed],
-        env: &Env,
-    ) -> Result<Value, EvalError> {
-        let (vs, _slots) = self.eval_args(heap, args, env)?;
-        let v = match variant {
-            SEXPR_NIL => Value::Empty,
-            SEXPR_INT => Value::Int(rt_i64(&vs[0])?),
-            // The field value *is* a `BoxedObj::Float` since the scalar
-            // unification, so — like `SEXPR_SYM`/`SEXPR_BIGNUM` — the
-            // resulting `Sexpr::Float` node is that same box, not a re-box.
-            SEXPR_FLOAT => {
-                rt_f64(heap, &vs[0])?;
-                vs[0]
-            }
-            SEXPR_CHAR => Value::Char(rt_char(&vs[0])?),
-            SEXPR_BOOL => Value::Bool(rt_bool(&vs[0])?),
-            // `(Sym x)` where `x : Symbol`. A `Symbol` value is already carried
-            // as `RtValue::Sexpr(Value::Symbol(id))`, so the field value *is*
-            // the resulting `Sexpr::Sym` — extract its `Value::Symbol` directly
-            // (no re-interning through a string).
-            SEXPR_SYM => vs[0],
-            // Like `SEXPR_SYM`/`SEXPR_FLOAT`/`SEXPR_BIGNUM`: the field value
-            // *is* the heap string since the scalar unification, so the
-            // resulting `Sexpr::Str` node is that same `Value::Str`, not a
-            // fresh copy — which is what makes `(eq s (sexpr-str (sexpr-car
-            // (sexpr-cons (Str s) ()))))` true, as CL requires.
-            SEXPR_STR => {
-                rt_str(heap, &vs[0])?;
-                vs[0]
-            }
-            SEXPR_CONS => {
-                let car = vs[0];
-                let cdr = vs[1];
-                // `_slots` keeps `car`/`cdr` rooted (via the registry) through
-                // this allocation, which may trigger a GC.
-                heap.cons(car, cdr).map_err(|e| EvalError::Panic(e.to_string()))?
-            }
-            SEXPR_BIGNUM => { let n = rt_bignum(heap, &vs[0])?; heap.alloc_bignum(n) },
-            SEXPR_RATIO => { let r = rt_ratio(heap, &vs[0])?; heap.alloc_ratio(r) },
-            // `(Path segs)` where `segs : Sexpr` is a proper list of `sym`s —
-            // walks it into `Vec<SymId>` and re-interns, the inverse of
-            // `match_sexpr_ctor`'s `SEXPR_PATH` arm, which builds that same
-            // list fresh from an existing `Value::Path`'s interned segments.
-            SEXPR_PATH => {
-                let ids = sexpr_list_to_symbols(heap, vs[0])?;
-                heap.intern_path(&ids)
-            }
-            _ => return Err(EvalError::Internal("sexpr: unknown variant".into())),
-        };
-        Ok(v)
-    }
-
-    /// The outcome of evaluating one step (a body expression) of a `loop`:
-    /// either an ordinary value, or a `break`/`return` signal already
-    /// resolved to the loop's exit value.
-    fn eval_loop_step(&self, heap: &mut Heap, t: &Typed, env: &Env) -> Result<Step, EvalError> {
-        match self.eval(heap, t, env) {
-            Ok(_) => Ok(Step::Continue),
-            Err(EvalError::Break) => Ok(Step::Exit(Value::Empty)),
-            Err(EvalError::Return(v)) => Ok(Step::Exit(*v)),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Run one pass over a loop's body expressions. Returns `Some(exit_value)`
-    /// if a `break`/`return` ended the loop partway through, `None` to
-    /// continue iterating.
-    fn eval_loop_body(&self, heap: &mut Heap, body: &[Typed], env: &Env) -> Result<Option<Value>, EvalError> {
-        for e in body {
-            if let Step::Exit(v) = self.eval_loop_step(heap, e, env)? {
-                return Ok(Some(v));
-            }
-        }
-        Ok(None)
-    }
-
-    /// Apply a function/method body: bind its parameters to `args` (each
-    /// slot routed by the `FnDef`'s registration-time `kinds`) and run the
-    /// body.
-    fn apply(&self, heap: &mut Heap, def: &FnDef, args: Vec<Value>) -> Result<Value, EvalError> {
-        if def.params.len() != args.len() {
-            return Err(EvalError::Internal("arity mismatch".into()));
-        }
-        // Closure unification Stage 7 used to re-run
-        // `freevars::names_captured_by_nested` here on every single call, to
-        // find which params a nested `lambda`/`labels` captures and promote
-        // just those to GC cells — a walk of the whole body per call, which
-        // that code's own comment conceded was "correctness first" with
-        // per-`FnDef` caching left as a follow-up. Since every binding is a
-        // cell there is nothing to decide and nothing to cache: the walk is
-        // gone rather than memoized.
-        let mut env: Env = Vec::with_capacity(args.len());
-        for (name, v) in def.params.iter().zip(args) {
-            let s = self.slot(heap, v);
-            env.push((name.clone(), s));
-        }
-        self.eval_seq(heap, &def.body, &env)
-    }
-
     /// Runs already-evaluated `argv` (`param_tys`-typed, `ret_ty`-returning)
-    /// through `compiled` instead of tree-walking — shared by `Expr::Call`
-    /// and `Expr::Assoc`, the two places eval can reach a `(compile
+    /// through `compiled` instead of tree-walking — shared by `call`
+    /// and `assoc`, the two places eval can reach a `(compile
     /// "name")`d body from. Every parameter/return type is either `Sexpr`
     /// (`compile::runtime::encode`/`decode`, Stage 5 of the
     /// Sexpr-representation plan) or assumed already representable as a
@@ -1925,20 +680,20 @@ impl Interp {
     /// pre-existing, separate gap). Calling a compiled method on a receiver
     /// built by *pure* interpretation (a real boxed-struct `RtValue::Sexpr`,
     /// never touched by compiled code) hits the same wall an analogous top-level
-    /// `Expr::Call` already would for a general-ADT parameter — a clear
+    /// `call` already would for a general-ADT parameter — a clear
     /// internal error here, not a silent misread of unrelated bits.
     fn call_compiled(
         &self,
         heap: &mut Heap,
         compiled: &crate::compile::CompiledFn,
         argv: &[Value],
-        param_tys: &[Type],
-        ret_ty: &Type,
+        param_reprs: &[Repr],
+        ret: &Repr,
     ) -> Result<Value, EvalError> {
         // A `defun`/`defmethod`'s `sig` lists only its fixed parameters; a
         // `&rest` one that reached compilation would land in the "no declared
-        // type" error above rather than be guessed at.
-        let (int_args, crossing_roots) = self.encode_crossing_args(heap, argv, param_tys, None)?;
+        // representation" error above rather than be guessed at.
+        let (int_args, crossing_roots) = self.encode_crossing_args(heap, argv, param_reprs, false)?;
         // Registers `heap` as this thread's active `Heap` (see
         // `compile::runtime::set_active_heap`'s doc comment) so any
         // `rt-cons`/`rt-car`/... call the compiled code makes — directly or
@@ -1951,11 +706,11 @@ impl Interp {
         for _ in 0..crossing_roots {
             heap.pop_root();
         }
-        self.decode_compiled_return(heap, raw, ret_ty)
+        self.decode_compiled_return(heap, raw, ret)
     }
 
     /// [`Self::call_compiled`]'s argument-marshaling half, factored out so
-    /// [`Self::eval`]'s `Expr::Apply` arm can reuse it when the callee is a
+    /// [`Self::eval`]'s `apply` arm can reuse it when the callee is a
     /// `BoxedObj::CompiledClosure` rather than a top-level `(compile ...)`d
     /// function — both cross the exact same interp-`RtValue` -> compiled-ABI
     /// `i64` boundary. Returns the encoded `int_args` plus how many roots it
@@ -1965,21 +720,26 @@ impl Interp {
     /// `argv`'s own runtime shape rather than each parameter's static type,
     /// and why every heap-backed argument is rooted for the marshaling+call
     /// window.
-    /// `param_tys` are the callee's *declared* parameter types, and they are
-    /// required rather than advisory: since the scalar unification an `f64`
-    /// and a `Sexpr` holding a float are the same runtime shape
-    /// (`RtValue::Sexpr(Value::Boxed(float))`), and they cross the boundary
-    /// differently — an `f64` parameter takes raw `f64::to_bits`, a `Sexpr`
-    /// parameter takes the tagged box pointer. The value cannot say which;
-    /// only the declared type can. Reading it off the value instead made
-    /// `(which (Float 1.5))` miss its `(float _)` arm in compiled code while
-    /// the interpreted call still matched.
+    /// `param_reprs` are the callee's *declared* parameter representations, and
+    /// they are required rather than advisory: since the scalar unification an
+    /// `f64` and a `Sexpr` holding a float are the same runtime shape
+    /// (`Value::Boxed(float)`), and they cross the boundary differently — an
+    /// `f64` parameter takes raw `f64::to_bits`, a `Sexpr` parameter takes the
+    /// tagged box pointer. The value cannot say which; only the declaration
+    /// can. Reading it off the value instead made `(which (Float 1.5))` miss
+    /// its `(float _)` arm in compiled code while the interpreted call still
+    /// matched.
+    ///
+    /// A `Repr` rather than a `Type`, since Stage C: the type is gone from the
+    /// IR by the time a definition is registered, and every distinction this
+    /// function draws is one a `Repr` already makes. That is what a `Repr` is
+    /// — the residue of the type system the boundary needs.
     fn encode_crossing_args(
         &self,
         heap: &mut Heap,
         argv: &[Value],
-        param_tys: &[Type],
-        rest_ty: Option<&Type>,
+        param_reprs: &[Repr],
+        rest: bool,
     ) -> Result<(Vec<i64>, usize), EvalError> {
         let mut crossing_roots = 0usize;
         let mut int_args: Vec<i64> = Vec::with_capacity(argv.len());
@@ -2001,9 +761,6 @@ impl Interp {
             heap.push_root(*v);
             crossing_roots += 1;
         }
-        // The one type past the fixed parameters — see the `param_ty` binding
-        // below for why it is `Sexpr` and not the `&rest` element type.
-        let packed_rest_ty = Type::Named(Path::root("sexpr"), Vec::new());
         for (i, v) in argv.iter().enumerate() {
             // Past the fixed parameters there is exactly one more argument:
             // the `&rest` list. The checker packs every surplus argument into
@@ -2011,14 +768,14 @@ impl Interp {
             // (`wrap_rest_elem`/`cons_rest_list`), so what crosses here is the
             // whole list, and it crosses tagged like any other `Sexpr`.
             //
-            // Not the `&rest` *element* type — `Type::Fn`'s second field is
-            // the element, and using it here asked a list to be an `i32`
-            // ("expected an integer argument, got Cons"). The two are only
-            // distinguishable by the declared type, since a packed list and
-            // an ordinary `Sexpr` argument are the same kind of value.
-            let param_ty = match param_tys.get(i) {
-                Some(t) => Some(t),
-                None if rest_ty.is_some() => Some(&packed_rest_ty),
+            // `Repr::Sexpr`, not the `&rest` *element*'s representation:
+            // using the element here asked a list to be an `i32` ("expected
+            // an integer argument, got Cons"). The two are only
+            // distinguishable by the declaration, since a packed list and an
+            // ordinary `Sexpr` argument are the same kind of value.
+            let param_repr = match param_reprs.get(i) {
+                Some(r) => Some(r),
+                None if rest => Some(&Repr::Sexpr),
                 None => None,
             };
             let encoded = match v {
@@ -2057,18 +814,18 @@ impl Interp {
                 // So the whole dispatch is type-driven, and a parameter with
                 // no declared type to consult is an error rather than a
                 // guess: either encoding would corrupt the call silently.
-                _ => match param_ty {
+                _ => match param_repr {
                     // Raw machine words, by the encodings compiled code uses
                     // internally.
-                    Some(Type::I32) | Some(Type::I64) => match v {
+                    Some(Repr::Int) => match v {
                         Value::Int(n) => Ok(*n),
                         other => Err(EvalError::Internal(format!("compiled call: expected an integer argument, got {:?}", other))),
                     },
-                    Some(Type::Bool) => match v {
+                    Some(Repr::Bool) => match v {
                         Value::Bool(b) => Ok(i64::from(*b)),
                         other => Err(EvalError::Internal(format!("compiled call: expected a bool argument, got {:?}", other))),
                     },
-                    Some(Type::Char) => match v {
+                    Some(Repr::Char) => match v {
                         Value::Char(c) => Ok(*c as i64),
                         other => Err(EvalError::Internal(format!("compiled call: expected a char argument, got {:?}", other))),
                     },
@@ -2077,38 +834,38 @@ impl Interp {
                     // information, so the word is a placeholder the callee
                     // never reads; it just has to be the one both sides agree
                     // on.
-                    Some(Type::Unit) => Ok(0),
+                    Some(Repr::Unit) => Ok(0),
                     // An `f64` is its raw `f64::to_bits` pattern in an `i64`
                     // (`compile-float`/`llvm_builder_build_float_op`), the
-                    // inverse of the `Type::F64` return decode below.
-                    Some(Type::F64) => match v {
+                    // inverse of the `Repr::Float` return decode below.
+                    Some(Repr::Float) => match v {
                         Value::Boxed(id) if heap.is_float(*id) => Ok(heap.float_value(*id).to_bits() as i64),
                         other => Err(EvalError::Internal(format!("compiled call: expected an f64 argument, got {:?}", other))),
                     },
                     // An LLVM handle crosses as the *raw* registry index —
-                    // never tagged. These are `Type::Named`, so without this
-                    // arm they fall into the tagged catch-all below and the
-                    // callee reads `handle << 3` as a handle: passing the
-                    // island its own module as handle 1 made it look up
-                    // handle 8 and abort with "dangling llvm handle 8". Must
-                    // stay ahead of the catch-all, exactly as the matching
-                    // check in `decode_compiled_return` stays ahead of
-                    // `is_boxed_sexpr_type`.
-                    Some(t) if crate::check::repr::is_llvm_handle_ty(t) => match v {
+                    // never tagged. Without its own arm it would fall into the
+                    // tagged catch-all below and the callee would read
+                    // `handle << 3` as a handle: passing the island its own
+                    // module as handle 1 made it look up handle 8 and abort
+                    // with "dangling llvm handle 8". Must stay ahead of the
+                    // catch-all, exactly as the matching check in
+                    // `decode_compiled_return` does.
+                    Some(Repr::Handle) => match v {
                         Value::Int(h) => Ok(*h),
                         other => Err(EvalError::Internal(format!(
                             "compiled call: expected an llvm handle argument, got {:?}",
                             other
                         ))),
                     },
-                    // Every remaining type — `Sexpr`, `string`, `bignum`/
-                    // `ratio`, structs, enums, closures, trait objects, and a
-                    // `Scope<V>` (one heap object since Phase 1a) — is already
-                    // a heap `Value`, and crosses as the tagged `i64` the
-                    // `rt_*` shims read. Rooted by the pre-pass above.
+                    // Every remaining representation — `Sexpr`, `string`,
+                    // `bignum`/`ratio`, structs, enums, closures, trait
+                    // objects, and a `Scope<V>` (one heap object since Phase
+                    // 1a) — is already a heap `Value`, and crosses as the
+                    // tagged `i64` the `rt_*` shims read. Rooted by the
+                    // pre-pass above.
                     Some(_) => Ok(crate::compile::runtime::encode(*v)),
                     None => Err(EvalError::Internal(format!(
-                        "compiled call: no declared type for argument {} — cannot tell a raw scalar from a tagged heap word",
+                        "compiled call: no declared representation for argument {} — cannot tell a raw scalar from a tagged heap word",
                         i
                     ))),
                 },
@@ -2126,52 +883,48 @@ impl Interp {
         Ok((int_args, crossing_roots))
     }
 
-    /// [`Self::call_compiled`]'s return-value half, factored out for the
-    /// same reason as [`Self::encode_crossing_args`] — a direct
-    /// `Expr::Apply` on a `BoxedObj::CompiledClosure` decodes its raw `i64`
-    /// result exactly like a top-level compiled call's, by the callee's
-    /// declared (here: the closure's `Type::Fn` return) type.
-    fn decode_compiled_return(&self, heap: &mut Heap, raw: i64, ret_ty: &Type) -> Result<Value, EvalError> {
-        // An LLVM-handle-typed result is a raw registry index. For an LLVM
-        // object that is already the interpreter's own representation, so it
-        // just *is* the result; only a `Scope<llvm-*>` still has to be resolved
-        // back to the Rust-native `RtValue::Scope` the interpreter works with.
-        // Checked before every other arm since these are `Type::Named` and
-        // would otherwise be misread by `is_boxed_sexpr_type`'s catch-all.
-        if crate::check::repr::is_llvm_handle_ty(ret_ty) {
-            return match llvm_handle_get(raw) {
-                Some(_) => Ok(Value::Int(raw)),
-                None => Err(EvalError::Internal(format!("compiled call returned dangling llvm handle {}", raw))),
-            };
-        }
-        Ok(if self.is_boxed_sexpr_type(ret_ty) {
-            crate::compile::runtime::decode(raw)
-        } else if matches!(ret_ty, Type::Unit) {
+    /// [`Self::call_compiled`]'s return-value half, factored out for the same
+    /// reason as [`Self::encode_crossing_args`] — a direct `apply` on a
+    /// `BoxedObj::CompiledClosure` decodes its raw `i64` result exactly like a
+    /// top-level compiled call's, by the callee's declared return
+    /// representation.
+    ///
+    /// A `Repr` rather than a `Type` since Stage C, which collapsed the old
+    /// `is_boxed_sexpr_type` predicate into the classification itself: which
+    /// `Type::Named`s cross as a tagged word (a `defstruct`, an enum, a
+    /// `Scope<V>`, a trait object, a closure) was a rule spelled out at that
+    /// predicate; a `Repr` already *is* that rule's answer.
+    fn decode_compiled_return(&self, heap: &mut Heap, raw: i64, ret: &Repr) -> Result<Value, EvalError> {
+        Ok(match ret {
+            // A raw registry index, never a heap pointer. For an LLVM object
+            // that is already the interpreter's own representation, so it just
+            // *is* the result.
+            Repr::Handle => match llvm_handle_get(raw) {
+                Some(_) => Value::Int(raw),
+                None => {
+                    return Err(EvalError::Internal(format!(
+                        "compiled call returned dangling llvm handle {}",
+                        raw
+                    )))
+                }
+            },
+            // Raw machine words on the way out, mirroring the argument encode.
+            Repr::Int => Value::Int(raw),
             // A `Unit`-typed body compiles to a plain `0` (`compile-unit`) —
-            // decode it back to the real `RtValue::Unit` rather than
-            // surfacing the raw word as a bogus `RtValue::Int(0)` (the
-            // pre-Stage-8 fallthrough this arm replaces), so a
-            // `Unit`-returning compiled function/closure interoperates with
-            // interpreted code exactly like an interpreted one.
-            Value::Empty
-        } else if matches!(ret_ty, Type::Bool) {
+            // decode it back to the real unit value rather than surfacing the
+            // raw word as a bogus `Int(0)`, so a `Unit`-returning compiled
+            // function interoperates with interpreted code exactly like an
+            // interpreted one.
+            Repr::Unit => Value::Empty,
             // Compiled code represents a `bool` as a raw 0/1 `i64` (LLVM
-            // `icmp` results, zero-extended); decode it by the declared
-            // return type so an interpreted `if` over a compiled predicate
-            // (`i32::equals`, ...) sees a real `RtValue::Bool`.
-            Value::Bool(raw != 0)
-        } else if matches!(ret_ty, Type::Char) {
-            // A compiled `char` is a raw `i64` Unicode scalar value (the
-            // widened `char->int` payload `compile-char`/`compile-sexpr-field`
-            // produce — the exact inverse of the `*c as i64` a `char`
-            // *argument* crosses as, above). Decode it back to a real
-            // `RtValue::Char` so a `char`-returning compiled function
-            // (`(defun first-char (...) char ...)`) interoperates with the
-            // interpreter, rather than surfacing its code point as a bare
-            // `RtValue::Int`. A compiled `char` only ever holds a value that
-            // was a valid `char` on the way in, so a decode failure here is
-            // an internal-invariant break, not a user-reachable error.
-            match char::from_u32(raw as u32) {
+            // `icmp` results, zero-extended).
+            Repr::Bool => Value::Bool(raw != 0),
+            // A compiled `char` is a raw `i64` Unicode scalar value — the
+            // exact inverse of the `*c as i64` a `char` argument crosses as. A
+            // compiled `char` only ever holds a value that was a valid `char`
+            // on the way in, so a decode failure is an internal-invariant
+            // break, not a user-reachable error.
+            Repr::Char => match char::from_u32(raw as u32) {
                 Some(c) => Value::Char(c),
                 None => {
                     return Err(EvalError::Internal(format!(
@@ -2179,80 +932,53 @@ impl Interp {
                         raw
                     )))
                 }
-            }
-        } else if matches!(ret_ty, Type::F64) {
-            // A compiled `f64` result is its raw bit pattern in the `i64`
-            // return register (`llvm_builder_build_float_op`'s final
-            // `bitcast`); reinterpret it back to an `f64`, the inverse of the
-            // float argument encode above.
-            float_rt(heap, f64::from_bits(raw as u64))
-        } else if matches!(ret_ty, Type::Str) {
-            // A compiled `string` value is a tagged `Value::Str` word
-            // (`Type::Str`'s passthrough kind); `Type::Str` isn't
-            // `Type::Named`, so `is_boxed_sexpr_type` above never catches it
-            // — without this arm the tagged pointer fell through to the
-            // bare `RtValue::Int` case below (the formerly-documented gap
-            // `compile_of_a_function_referencing_a_str_option_global_...`'s
-            // doc comment used to note). Decoded to an interp-side
-            // string value exactly like the `sexpr-str` builtin does.
-            match crate::compile::runtime::decode(raw) {
+            },
+            // Raw `f64::to_bits` in the return register
+            // (`llvm_builder_build_float_op`'s final `bitcast`).
+            Repr::Float => float_rt(heap, f64::from_bits(raw as u64)),
+            // A tagged word whose decode must land on the shape the
+            // declaration promised — a mismatch here means the compiled side
+            // and this side disagree about the ABI, which is an internal
+            // error rather than anything a program can cause.
+            Repr::Str => match crate::compile::runtime::decode(raw) {
                 v @ Value::Str(_) => v,
-                other => {
-                    return Err(EvalError::Internal(format!(
-                        "compiled call returned {:?} for a string result, which is not a Str",
-                        other
-                    )))
-                }
-            }
-        } else if matches!(ret_ty, Type::Bignum | Type::Ratio) {
-            // `bignum`/`ratio` aren't `Type::Named` (unlike a `defstruct`/
-            // `Vector<T>`), so `is_boxed_sexpr_type` above never catches
-            // them — without this arm, `raw` (a tagged `TAG_BOXED` pointer)
-            // would silently fall through to the plain `RtValue::Int(raw)`
-            // case below and be misread as an ordinary integer. The box it
-            // decodes to *is* the value now, so this hands it straight back;
-            // it used to have to copy the `BigInt`/`BigRational` out into a
-            // fresh interpreter-side `Rc`.
-            match crate::compile::runtime::decode(raw) {
-                v @ Value::Boxed(id) if heap.is_bignum(id) || heap.is_ratio(id) => v,
-                other => {
-                    return Err(EvalError::Internal(format!(
-                        "compiled call returned {:?} for a bignum/ratio result, which is not a boxed bignum/ratio",
-                        other
-                    )))
-                }
-            }
-        } else if matches!(ret_ty, Type::Symbol) {
-            // `Type::Symbol` isn't `Type::Named` either, so `is_boxed_sexpr_type`
-            // never catches it — without this arm a compiled `Symbol` result
-            // (the tagged `Value::Symbol` word `compile-sexpr-field`'s `sym`
-            // passthrough / `compile-construct-sexpr`'s `rt_intern_symbol`
-            // already produce) would silently misdecode as a plain
-            // `RtValue::Int` below. A `Symbol`-typed interp value is always
-            // carried generically as `RtValue::Sexpr(Value::Symbol(_))` (see
-            // `match_sexpr_ctor`'s own `SEXPR_SYM` arm's doc comment) — which
-            // is also exactly why *argument* encoding needed no matching fix:
-            // `encode_crossing_args`' `RtValue::Sexpr(sv) => encode(*sv)` arm
-            // already covers a `Symbol` argument for free.
-            match crate::compile::runtime::decode(raw) {
+                other => return Err(crossing_mismatch("a string", other)),
+            },
+            Repr::Sym => match crate::compile::runtime::decode(raw) {
                 v @ Value::Symbol(_) => v,
-                other => {
-                    return Err(EvalError::Internal(format!(
-                        "compiled call returned {:?} for a Symbol result, which is not a Symbol",
-                        other
-                    )))
-                }
+                other => return Err(crossing_mismatch("a Symbol", other)),
+            },
+            Repr::Bignum | Repr::Ratio => match crate::compile::runtime::decode(raw) {
+                v @ Value::Boxed(id) if heap.is_bignum(id) || heap.is_ratio(id) => v,
+                other => return Err(crossing_mismatch("a bignum/ratio", other)),
+            },
+            // Every remaining representation is a heap value crossing as the
+            // tagged `i64` the `rt_*` shims read.
+            Repr::Sexpr
+            | Repr::Struct
+            | Repr::Enum
+            | Repr::Dyn
+            | Repr::Fn
+            | Repr::Scope(_)
+            | Repr::Vector(_)
+            | Repr::HashTable(..) => crate::compile::runtime::decode(raw),
+            // A still-generic type variable. Nothing compiled can return one:
+            // a generic body is monomorphized before it is compiled, so
+            // reaching here is a bug in whatever produced the signature.
+            Repr::None => {
+                return Err(EvalError::Internal(
+                    "compiled call has no declared return representation — a generic body was compiled unmonomorphized"
+                        .to_string(),
+                ))
             }
-        } else {
-            Value::Int(raw)
         })
     }
 
     /// Invokes a `BoxedObj::CompiledClosure` directly from interp Rust code
-    /// — the `Expr::Apply` counterpart of a top-level `(compile ...)`d
+    /// — the `apply` counterpart of a top-level `(compile ...)`d
     /// function call, for a callee produced by compiled code (returned
     /// across the boundary, or built and threaded through a chain of
-    /// `Expr::Apply`s the interpreter is itself driving). `args` are
+    /// `apply`s the interpreter is itself driving). `args` are
     /// already-encoded raw i64s ([`Self::encode_crossing_args`]'s output);
     /// the caller must already have called `compile::runtime::set_active_heap`
     /// (the closure's own body may call back into the `rt_*` runtime,
@@ -2289,44 +1015,6 @@ impl Interp {
         unsafe { f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32) }
     }
 
-    /// Whether `ty`'s compiled representation crosses the typelisp-call-
-    /// syntax/compiled-code boundary as a tagged `Sexpr`
-    /// (`compile::runtime::encode`/`decode`, [`Self::call_compiled`]) rather
-    /// than a plain `i64` — `Sexpr` itself, any `Type::Named` this `Interp`
-    /// has recorded in [`Self::struct_types`] (Stage 3 of the Sexpr/RtValue
-    /// unification plan, `docs/implementation-log.md`), an enum type
-    /// (`Option`/`Result`/`Error`/user `defenum`) — since the enum-
-    /// representation unification's compiler flip, a compiled function
-    /// returning e.g. `Option<i64>` really does hand back a tagged
-    /// `Value::Boxed` at a `BoxedObj::Enum`, not the raw box address the
-    /// pre-flip design left undecoded here (this is where that gap used to
-    /// surface a bare `RtValue::Int` for an enum-typed return) — or a
-    /// `Type::Fn`: since the closure-representation unification's compiled
-    /// flip (Stage 2), a compiled function returning a closure hands back a
-    /// tagged `Value::Boxed` at a `BoxedObj::CompiledClosure` exactly the
-    /// same way, so without this arm the same kind of gap would surface
-    /// (a bare `RtValue::Int` for a `Fn`-typed return). Every enum type
-    /// compiled code can ever mention is heap-repr by construction (see
-    /// `ast_bridge::struct_field_kind`'s doc comment), so `is_enum_path`
-    /// alone is enough. That used to be a *narrower* rule than the one
-    /// binding-slot routing applied, which asked whether every field type was
-    /// storable — the two disagreed for a `Symbol` field, harmlessly, because
-    /// only this one is load-bearing at a crossing. `is_heap_repr_ty` answers
-    /// the same "any enum" now, so they agree by construction.
-    fn is_boxed_sexpr_type(&self, ty: &Type) -> bool {
-        // `Scope<V>` is checked explicitly rather than falling out of the
-        // lookups below: `scope` is a built-in whose `AdtDef` has no variants
-        // and is never registered in the runtime scope tree, so neither
-        // `TypeEntry::Struct` nor `is_enum_path` recognizes it. Without this
-        // arm a compiled function returning a `Scope<V>` would have its
-        // tagged box word handed back as a bare `RtValue::Int`.
-        if matches!(ty, Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1) {
-            return true;
-        }
-        matches!(ty, Type::Fn(..))
-            || matches!(ty, Type::Named(p, _) if is_sexpr_type(p) || matches!(self.root.borrow().find_type(p), Some(scope::TypeEntry::Struct)) || self.is_enum_path(p))
-    }
-
     /// Finds the registered `(Path, String)` key for a `"type-path::method"`
     /// name — `None` for a plain name (no `"::"`) or a method that isn't
     /// registered. `name`'s *last* `"::"`-separated segment is always the
@@ -2337,7 +1025,7 @@ impl Interp {
     /// full path, not a whole-tree scan by local type name alone — two
     /// different types in different modules sharing both a local name and
     /// a method name must never collide on one key (this is also why
-    /// `ast_bridge.rs`'s `Expr::Assoc`/`Expr::MethodRef` translation and
+    /// `core_bridge.rs`'s `assoc`/`methodref` translation and
     /// `user_method_symbol_name`'s mangled LLVM symbol both embed the type's
     /// full path too, not just its local segment). Shared by
     /// [`Self::resolve_fn_def`] (the lookup) and [`Self::compile_function`]
@@ -2353,7 +1041,7 @@ impl Interp {
     /// Resolves a `(compile name)` argument against either the scope tree's
     /// free functions (a plain name, a top-level `defun`) or its methods (a
     /// `"type::method"` name, an instance/static `defmethod` — including a `defstruct`'s
-    /// auto-generated field accessor/setter, whose body is the `Expr::FieldGet`/
+    /// auto-generated field accessor/setter, whose body is the `field-get`/
     /// `FieldSet` `compile-field-get`/`compile-field-set` exist to compile in
     /// the first place). See [`Self::method_key`] for how `name` decides
     /// which of the two this is.
@@ -2381,8 +1069,8 @@ impl Interp {
     /// [`Self::resolve_fn_def`]), enforcing the one constraint every entry
     /// point into the compiler shares: a real type signature (so an LLVM
     /// function type can be built — never set for a `defmacro`). A multi-
-    /// expression body is collapsed to one `Typed` via
-    /// [`crate::compile::ast_bridge::single_body_expr`] (labels/closures
+    /// expression body is collapsed to one form via
+    /// [`crate::compile::symbols::single_body_expr`] (labels/closures
     /// Stage 6 — see that function's doc comment for why this needs no
     /// `compiler.rs` change). For an instance method, `params`/`sig.0`
     /// already carry the receiver as element `0` (`Checker::check_defmethod`
@@ -2391,16 +1079,19 @@ impl Interp {
     /// parameter here, no special-casing needed. Shared by
     /// [`Self::add_compiled_function`] (the actual AST-bridge step) and
     /// [`Self::compile_function`]/[`Self::call_graph_edges`] (which need the
-    /// body slightly earlier — to collect `Expr::Call` targets — before
+    /// body slightly earlier — to collect `call` targets — before
     /// `add_compiled_function` ever runs).
-    fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Type)>, Typed), EvalError> {
+    fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Repr)>, Vec<Value>), EvalError> {
         let f = self.resolve_fn_def(name)?;
         let sig = f
             .sig
             .as_ref()
-            .ok_or_else(|| EvalError::Panic(format!("compile: \"{}\" has no type signature (is it a defmacro?)", name)))?;
+            .ok_or_else(|| EvalError::Panic(format!("compile: \"{}\" has no signature (is it a defmacro?)", name)))?;
         let params = f.params.iter().cloned().zip(sig.0.iter().cloned()).collect();
-        Ok((params, crate::compile::ast_bridge::single_body_expr(&f.body)))
+        // The body's forms, not one spliced expression: `core_bridge` takes a
+        // sequence, so there is nothing for `single_body_expr`'s old
+        // wrap-in-a-`progn` to do.
+        Ok((params, f.body.clone()))
     }
 
     /// Ensures `path` (a global some compiled function's body references)
@@ -2421,7 +1112,7 @@ impl Interp {
     /// compiler flip retired the raw-box/shift-tagged special case this
     /// used to need (a `defvar`'s declared type is always one ordinary user
     /// source can write, and every such enum instantiation is heap-repr by
-    /// construction — see `ast_bridge::struct_field_kind`'s doc comment —
+    /// construction — see `Repr::field_kind`'s doc comment —
     /// so the native `RtValue::Data` fallback never actually reaches here).
     ///
     /// `pub(crate)`: `compile::aot::compile_file` calls this directly too,
@@ -2475,7 +1166,7 @@ impl Interp {
     /// captured it.
     ///
     /// Phase 1/2 scope: a non-generic `defun` whose single-expression body
-    /// only uses node shapes `compile::ast_bridge::ast_to_sexpr` has a real
+    /// only uses node shapes `compile::core_bridge::to_island` has a real
     /// translation for (`i64` literals/vars/`+`/`-`/`*`) — anything else
     /// surfaces as a `Panic` from the compiler body's own `"unsupported"`
     /// handling (`compiler.rs`'s `compile-value`), not a separate check
@@ -2518,8 +1209,8 @@ impl Interp {
         &self,
         heap: &mut Heap,
         module: Rc<RefCell<Module<'static>>>,
-        params: &[(String, Type)],
-        body: &Typed,
+        params: &[(String, Repr)],
+        body: &[Value],
         internal_name: &str,
         extra_exclude_from_cell_names: &HashSet<String>,
     ) -> Result<(), EvalError> {
@@ -2528,64 +1219,62 @@ impl Interp {
         // by id, not by name (see `Ctx::globals`'s doc comment), so there is
         // nothing to resolve lazily mid-translation the way `compile-call`'s
         // `get-function` can for an ordinary function name.
-        for target in crate::compile::ast_bridge::collect_global_targets(body) {
-            self.promote_global(heap, &target)?;
+        let targets = match crate::compile::core_bridge::collect_targets(heap, body) {
+            Ok(t) => t,
+            Err(e) => return Err(EvalError::Panic(e.to_string())),
+        };
+        for target in &targets.globals {
+            self.promote_global(heap, target)?;
         }
         // Every trait object this body boxes needs its vtable id before
         // translation starts, for the same reason a global needs its slot:
         // `ast_to_sexpr` bakes the id into the emitted IR as a constant.
-        self.intern_dyn_vtables(body);
-        for trait_path in crate::compile::ast_bridge::collect_dyn_dispatch_traits(body) {
-            self.dyn_dispatch_compiled.borrow_mut().insert(trait_path);
+        for site in &targets.dyn_boxes {
+            self.register_dyn_box(&site.concrete_key, &site.trait_path, &site.slots, &site.supers);
         }
+        for to_trait in &targets.dyn_upcasts {
+            self.trait_id_for(to_trait);
+        }
+        for trait_path in &targets.dyn_traits {
+            self.dyn_dispatch_compiled.borrow_mut().insert(trait_path.clone());
+        }
+        // `core_bridge` is deliberately `Registry`-free, so hand it the type
+        // definitions as a plain flattened snapshot of the scope tree —
+        // exactly what `exec` recorded there from each `defstruct`/`defenum`
+        // form. Collected fresh per compilation; compiling is rare enough that
+        // keeping a second always-current copy isn't worth it.
+        let defs = self.compile_definitions();
         let compiled_globals = self.compiled_globals.borrow();
         let vtable_ids = self.vtable_ids.borrow();
         let trait_ids = self.trait_ids.borrow();
-        let dyn_tables = crate::compile::ast_bridge::DynTables { vtables: &vtable_ids, trait_ids: &trait_ids };
-        // `ast_bridge` is deliberately `Registry`-free, so hand it the
-        // struct/enum classification as a plain flattened snapshot of the
-        // scope tree. Collected fresh per compilation — compiling is rare
-        // enough that keeping a second always-current copy isn't worth it.
-        let (struct_types, enum_defs) = self.root.borrow().collect_struct_and_enum_types();
-        let enum_types: HashSet<Path> = enum_defs.keys().cloned().collect();
-
-        // A top-level `defun` has no enclosing lexical scope to capture
-        // *from*, so its own `cell_names` (closure-representation
-        // unification, Stage 4) is exactly its own params/`let`-bindings
-        // that some nested `lambda`/`labels` in `body` captures — see
-        // `ast_bridge::names_captured_by_nested`'s doc comment.
-        let mut cell_names = crate::compile::freevars::names_captured_by_nested(std::slice::from_ref(body));
-        for n in extra_exclude_from_cell_names {
-            cell_names.remove(n);
-        }
-
-        // Builds `((a . kind) (b . kind) ...)`, the `Sexpr` list of typed
-        // name pairs `compiler.rs`'s `bind-params` walks to know which
-        // logical argument-array slot binds to which name — and, for the
-        // automatic `ClosureBox` retain/release insertion work (`kind = 1`)
-        // and the Sexpr GC-root insertion work (`kind = 2`, Stage 6 of the
-        // Sexpr-representation plan, `docs/implementation-log.md`), what kind of binding
-        // it is at all. Shares `ast_bridge::tagged_sym_list`'s exact
-        // construction (a `labels`/`lambda` parameter or captured-name list
-        // needs the identical shape) rather than re-deriving it here, so
-        // the two can never desync.
-        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, params, &struct_types, &enum_types, &cell_names) {
-            Ok(v) => v,
-            Err(e) => return Err(EvalError::Panic(e.to_string())),
-        };
-        heap.push_root(param_list);
-        let body_sexpr =
-            match crate::compile::ast_bridge::ast_to_sexpr(heap, body, &struct_types, &enum_types, &compiled_globals, &cell_names, dyn_tables)
-            {
+        let dyn_tables = crate::compile::symbols::DynTables { vtables: &vtable_ids, trait_ids: &trait_ids };
+        let cx = crate::compile::core_bridge::Ctx::with_dyn_tables(&defs, &compiled_globals, dyn_tables);
+        let excluded = intern_names(heap, extra_exclude_from_cell_names);
+        let params = intern_params(heap, params);
+        let (param_list, body_sexpr) =
+            match crate::compile::core_bridge::function_parts(heap, &params, body, cx, &excluded) {
                 Ok(v) => v,
-                Err(e) => {
-                    heap.pop_root(); // param_list
-                    return Err(EvalError::Panic(e.to_string()));
-                }
+                Err(e) => return Err(EvalError::Panic(e.to_string())),
             };
-        heap.pop_root(); // param_list
+        drop(compiled_globals);
+        drop(vtable_ids);
+        drop(trait_ids);
 
         self.run_compile_function(heap, module, internal_name, param_list, body_sexpr)
+    }
+
+    /// The scope tree's type definitions, in the shape the compile bridge
+    /// takes. See [`Self::translate_and_compile`] for why it is a snapshot.
+    fn compile_definitions(&self) -> crate::compile::core_bridge::Definitions {
+        let (structs, enums) = self.root.borrow().collect_struct_and_enum_types();
+        let mut defs = crate::compile::core_bridge::Definitions::new();
+        for (path, _fields) in structs {
+            defs.record_struct(path);
+        }
+        for (path, _def) in enums {
+            defs.record_enum(path);
+        }
+        defs
     }
 
     /// Drives the island's `compile-function` over one already-translated
@@ -2628,12 +1317,14 @@ impl Interp {
         })?;
         let compiled = compiler_def.compiled.borrow().clone();
         if let Some(cf) = compiled {
-            let ret_ty = Type::Named(Path::root("llvm-module"), Vec::new());
+            // The island's own entry point hands back an LLVM module, which
+            // crosses as a raw registry index.
+            let ret = Repr::Handle;
             let mark = llvm_handles_mark();
             let scope_mark = heap.session_root_count();
-            let param_tys =
-                &compiler_def.sig.as_ref().expect("the compiler body always has a type signature").0;
-            let r = self.call_compiled(heap, &cf, &argv, param_tys, &ret_ty);
+            let param_reprs =
+                &compiler_def.sig.as_ref().expect("the compiler body always has a signature").0;
+            let r = self.call_compiled(heap, &cf, &argv, param_reprs, &ret);
             llvm_handles_release(mark);
             // Scope boxes the island created during this compile are session
             // roots (see `LlvmRetK::Scope`); release them with the handles.
@@ -2660,7 +1351,7 @@ impl Interp {
     /// Mirrors `add_compiled_function`'s own translate-then-`compile-
     /// function` shape almost exactly, just with no parameters and a body
     /// wrapped as `(global-init kind value-form)`
-    /// ([`crate::compile::ast_bridge::ast_to_sexpr_for_global_init`],
+    /// ([`crate::compile::symbols::ast_to_sexpr_for_global_init`],
     /// `compiler.rs`'s `compile-global-init`) instead of an ordinary
     /// translated function body — `value` may itself reference other
     /// globals (an earlier `defvar`'s value), so the same promotion pass
@@ -2670,49 +1361,56 @@ impl Interp {
         heap: &mut Heap,
         module: Rc<RefCell<Module<'static>>>,
         internal_name: &str,
-        value: &Typed,
+        form: Value,
     ) -> Result<(), EvalError> {
-        for target in crate::compile::ast_bridge::collect_global_targets(value) {
-            self.promote_global(heap, &target)?;
+        // The whole `(defvar ...)` form, not just its initializer:
+        // `core_bridge::global_init` reads the declared representation off the
+        // form to know how the global's storage is tagged, which the
+        // initializer alone does not say.
+        let body = std::slice::from_ref(&form);
+        let targets = match crate::compile::core_bridge::collect_targets(heap, body) {
+            Ok(t) => t,
+            Err(e) => return Err(EvalError::Panic(e.to_string())),
+        };
+        // The initializer may reference *other* globals (an earlier `defvar`'s
+        // value), so the same promotion pass an ordinary body gets applies.
+        for target in &targets.globals {
+            self.promote_global(heap, target)?;
         }
-        self.intern_dyn_vtables(value);
+        for site in &targets.dyn_boxes {
+            self.register_dyn_box(&site.concrete_key, &site.trait_path, &site.slots, &site.supers);
+        }
+        for to_trait in &targets.dyn_upcasts {
+            self.trait_id_for(to_trait);
+        }
+        let defs = self.compile_definitions();
         let compiled_globals = self.compiled_globals.borrow();
         let vtable_ids = self.vtable_ids.borrow();
         let trait_ids = self.trait_ids.borrow();
-        let dyn_tables = crate::compile::ast_bridge::DynTables { vtables: &vtable_ids, trait_ids: &trait_ids };
-        // See `add_compiled_function`'s own copy of this for why the
-        // struct/enum classification crosses as a per-compilation snapshot.
-        let (struct_types, enum_defs) = self.root.borrow().collect_struct_and_enum_types();
-        let enum_types: HashSet<Path> = enum_defs.keys().cloned().collect();
-
-        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, &[], &struct_types, &enum_types, &HashSet::new()) {
-            Ok(v) => v,
+        let dyn_tables = crate::compile::symbols::DynTables { vtables: &vtable_ids, trait_ids: &trait_ids };
+        let cx = crate::compile::core_bridge::Ctx::with_dyn_tables(&defs, &compiled_globals, dyn_tables);
+        let body_sexpr = match crate::compile::core_bridge::global_init(heap, form, cx) {
+            Ok(Some(v)) => v,
+            Ok(None) => {
+                return Err(EvalError::Internal(
+                    "compile: a global initializer was built from something that is not a `defvar`".into(),
+                ))
+            }
             Err(e) => return Err(EvalError::Panic(e.to_string())),
         };
-        heap.push_root(param_list);
-        let body_sexpr =
-            match crate::compile::ast_bridge::ast_to_sexpr_for_global_init(
-                heap,
-                value,
-                &struct_types,
-                &enum_types,
-                &compiled_globals,
-                dyn_tables,
-            ) {
-                Ok(v) => v,
-                Err(e) => {
-                    heap.pop_root(); // param_list
-                    return Err(EvalError::Panic(e.to_string()));
-                }
-            };
-        heap.pop_root(); // param_list
-
-        self.run_compile_function(heap, module, internal_name, param_list, body_sexpr)
+        drop(compiled_globals);
+        drop(vtable_ids);
+        drop(trait_ids);
+        let mut s = RootScope::new(heap);
+        s.push_root(body_sexpr);
+        // A global initializer takes no parameters.
+        let param_list = Value::Empty;
+        self.run_compile_function(&mut s, module, internal_name, param_list, body_sexpr)
     }
 
     /// `(compile fn-name)` (or `(compile type::method)`): JIT-compiles a
     /// previously-defined `defun`/`defmethod` and marks the target `FnDef`
-    /// node compiled (see `FnDef::compiled`) so `Expr::Call`/`Expr::Assoc`
+    /// node compiled (see `FnDef::compiled`) so `call`/`assoc`
     /// dispatches to native code instead of tree-walking it from then on.
     /// `target` is already fully resolved by `Checker::check_compile` (a
     /// `Ref` re-verified here via `Self::resolve_fn_ref`, or a `type_name`+
@@ -2736,7 +1434,7 @@ impl Interp {
     /// group for mutual recursion across *separate* top-level functions —
     /// gets one throwaway module/engine per SCC ([`Self::compile_scc`]),
     /// processed leaf-SCC-first. Every target *outside* the current SCC
-    /// (`crate::compile::ast_bridge::collect_call_targets`/
+    /// (`crate::compile::symbols::collect_call_targets`/
     /// `collect_assoc_targets`, gathered via [`Self::call_graph_edges`]) is
     /// handled by hand, in three steps: (1) it must already be `compile`d by
     /// the time its SCC is processed — [`Self::compute_sccs`]'s finish-order
@@ -2756,8 +1454,8 @@ impl Interp {
     /// comment) already gives every sibling something to call before any
     /// body exists.
     ///
-    /// A user-defined method this body calls (`Expr::Assoc`,
-    /// `crate::compile::ast_bridge::collect_assoc_targets`) goes through the
+    /// A user-defined method this body calls (`assoc`,
+    /// `crate::compile::symbols::collect_assoc_targets`) goes through the
     /// exact same three steps, *keyed and named differently*: looked up in
     /// [`Self::methods`]/[`Self::compiled_methods`] instead of
     /// [`Self::fns`]/[`Self::compiled`], and forward-declared/wired under the
@@ -2798,7 +1496,7 @@ impl Interp {
         if already_compiled {
             return Ok(Value::Bool(true));
         }
-        for scc in self.compute_sccs(&name)? {
+        for scc in self.compute_sccs(heap, &name)? {
             self.compile_scc(heap, &scc)?;
         }
         Ok(Value::Bool(true))
@@ -2818,26 +1516,32 @@ impl Interp {
     /// the graph [`Self::compute_sccs`] walks. Shared by that graph walk and
     /// [`Self::compile_scc`] (which needs the same edges again, in typed
     /// form, to know what to forward-declare/wire as `externals`).
-    fn call_graph_edges(&self, name: &str) -> Result<Vec<CallEdge>, EvalError> {
+    fn call_graph_edges(&self, heap: &Heap, name: &str) -> Result<Vec<CallEdge>, EvalError> {
         let path = fn_path_from_node_name(name);
         let method_key = self.method_key(name);
         let (_, body) = self.compiled_fn_body(name)?;
+        let targets = match crate::compile::core_bridge::collect_targets(heap, &body) {
+            Ok(t) => t,
+            Err(e) => return Err(EvalError::Panic(e.to_string())),
+        };
         let mut edges = Vec::new();
 
         edges.extend(
-            crate::compile::ast_bridge::collect_call_targets(&body)
+            targets
+                .calls
                 .into_iter()
                 .filter(|p| *p != path && !is_rt_builtin_name(p.last_segment()))
                 .map(CallEdge::Fn),
         );
 
-        let method_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(&body)
+        let method_targets: Vec<(Path, String)> = targets
+            .methods
             .into_iter()
             .filter(|key| method_key.as_ref() != Some(key))
             .filter(|key| {
                 // `Vector<T>`'s field-backed builtin methods (`new`/`get`/
                 // `set`/`len`/`push`/`pop`) are lowered to a `vector-op` node
-                // (`ast_bridge::translate_vector_method` -> `rt_struct_*`),
+                // (`core_bridge::translate_vector_method` -> `rt_struct_*`),
                 // not a method call, so — like the native primitive methods
                 // below — they are never a real call target. `vector::iter`
                 // is deliberately excluded from this list: it is a genuine
@@ -2847,7 +1551,7 @@ impl Interp {
                     return false;
                 }
                 // `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op`
-                // node (`ast_bridge::translate_hashtable_method`) are likewise
+                // node (`core_bridge::translate_hashtable_method`) are likewise
                 // never a real call target. `iter` (a real `defmethod`) is
                 // deliberately absent so it's validated/transitively compiled
                 // normally.
@@ -2915,14 +1619,14 @@ impl Interp {
     /// self-loop is the common case (an ordinary, non-recursive-with-others
     /// function); a multi-member SCC is genuine mutual recursion across
     /// separate top-level functions, unsupported before this stage.
-    fn compute_sccs(&self, name: &str) -> Result<Vec<Vec<String>>, EvalError> {
+    fn compute_sccs(&self, heap: &Heap, name: &str) -> Result<Vec<Vec<String>>, EvalError> {
         let mut counter = 0usize;
         let mut indices: HashMap<String, usize> = HashMap::new();
         let mut lowlink: HashMap<String, usize> = HashMap::new();
         let mut on_stack: HashSet<String> = HashSet::new();
         let mut stack: Vec<String> = Vec::new();
         let mut sccs: Vec<Vec<String>> = Vec::new();
-        self.scc_strongconnect(name, &mut counter, &mut indices, &mut lowlink, &mut on_stack, &mut stack, &mut sccs)?;
+        self.scc_strongconnect(heap, name, &mut counter, &mut indices, &mut lowlink, &mut on_stack, &mut stack, &mut sccs)?;
         Ok(sccs)
     }
 
@@ -2932,8 +1636,10 @@ impl Interp {
     /// target is already compiled is skipped outright (never entered into
     /// `indices` at all), so it never contributes a spurious singleton SCC.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn scc_strongconnect(
         &self,
+        heap: &Heap,
         node: &str,
         counter: &mut usize,
         indices: &mut HashMap<String, usize>,
@@ -2948,7 +1654,7 @@ impl Interp {
         stack.push(node.to_string());
         on_stack.insert(node.to_string());
 
-        for edge in self.call_graph_edges(node)? {
+        for edge in self.call_graph_edges(heap, node)? {
             let already_compiled = match &edge {
                 CallEdge::Fn(p) => self.root.borrow().fn_compiled(p),
                 CallEdge::Method(p, m) => self.root.borrow().method_compiled(p, m),
@@ -2958,7 +1664,7 @@ impl Interp {
             }
             let target = edge.node_name();
             if !indices.contains_key(&target) {
-                self.scc_strongconnect(&target, counter, indices, lowlink, on_stack, stack, sccs)?;
+                self.scc_strongconnect(heap, &target, counter, indices, lowlink, on_stack, stack, sccs)?;
                 let merged = lowlink[node].min(lowlink[&target]);
                 lowlink.insert(node.to_string(), merged);
             } else if on_stack.contains(&target) {
@@ -2989,7 +1695,7 @@ impl Interp {
     /// other — into one shared, throwaway LLVM module, replacing the single-
     /// function-per-module shape every `compile_function_rec` call used
     /// before this stage. Every `members` name is forward-declared under its
-    /// real internal name (`ast_bridge::user_symbol_name`) *before* any of
+    /// real internal name (`core_bridge::user_symbol_name`) *before* any of
     /// their bodies are translated, exactly like an external call target
     /// always was — so a call from one member to a sibling still without a
     /// body yet resolves to that same declaration by name
@@ -3013,7 +1719,7 @@ impl Interp {
         let mut method_targets: Vec<(Path, String)> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         for member in members {
-            for edge in self.call_graph_edges(member)? {
+            for edge in self.call_graph_edges(heap, member)? {
                 let target_name = edge.node_name();
                 // A sibling within this same SCC resolves through the SCC's
                 // own internal forward declarations below, not `externals`.
@@ -3031,13 +1737,13 @@ impl Interp {
             let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
             let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")));
             for member in members {
-                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(member));
+                declare_external_function(&module, &crate::compile::symbols::user_symbol_name(member));
             }
             for target in &call_targets {
-                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(&target.to_string()));
+                declare_external_function(&module, &crate::compile::symbols::user_symbol_name(&target.to_string()));
             }
             for (type_name, method) in &method_targets {
-                declare_external_function(&module, &crate::compile::ast_bridge::user_method_symbol_name(type_name, method));
+                declare_external_function(&module, &crate::compile::symbols::user_method_symbol_name(type_name, method));
             }
             for (rt_name, _) in rt_extern_functions() {
                 declare_external_function(&module, rt_name);
@@ -3046,7 +1752,7 @@ impl Interp {
         };
 
         for member in members {
-            self.add_compiled_function(heap, module.clone(), member, &crate::compile::ast_bridge::user_symbol_name(member))?;
+            self.add_compiled_function(heap, module.clone(), member, &crate::compile::symbols::user_symbol_name(member))?;
         }
 
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
@@ -3055,13 +1761,13 @@ impl Interp {
             .map(|p| {
                 let f = self.root.borrow().get_fn(p).expect("Self::compute_sccs's finish order guarantees this is already compiled");
                 let addr = f.compiled.borrow().as_ref().expect("Self::compute_sccs's finish order guarantees this is already compiled").address();
-                (crate::compile::ast_bridge::user_symbol_name(&p.to_string()), addr)
+                (crate::compile::symbols::user_symbol_name(&p.to_string()), addr)
             })
             .collect();
         externals.extend(method_targets.iter().map(|(type_name, method)| {
             let f = self.root.borrow().get_method(type_name, method).expect("Self::compute_sccs's finish order guarantees this is already compiled");
             let addr = f.compiled.borrow().as_ref().expect("Self::compute_sccs's finish order guarantees this is already compiled").address();
-            (crate::compile::ast_bridge::user_method_symbol_name(type_name, method), addr)
+            (crate::compile::symbols::user_method_symbol_name(type_name, method), addr)
         }));
         externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
         // Mirrors `compile::aot::compile_file`'s own `verify()` call in the
@@ -3074,7 +1780,7 @@ impl Interp {
         // catchable Rust error. Verifying first turns that into a clean
         // `Panic` instead.
         module.borrow().verify().map_err(|e| EvalError::Panic(format!("compile: module failed verification: {}", e)))?;
-        let internal_names: Vec<String> = members.iter().map(|m| crate::compile::ast_bridge::user_symbol_name(m)).collect();
+        let internal_names: Vec<String> = members.iter().map(|m| crate::compile::symbols::user_symbol_name(m)).collect();
         let compiled_fns = crate::compile::CompiledFn::new_multi(&module.borrow(), &internal_names, &externals)
             .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
         for (member, compiled) in members.iter().zip(compiled_fns) {
@@ -3157,14 +1863,29 @@ impl Interp {
         let pos_end = raw_args.len().min(n_pos);
 
         let mut argv: Vec<Value> = Vec::with_capacity(f.params.len());
-        let mut env: Env = Vec::with_capacity(f.params.len());
+        // The environment the `&optional`/`&key` defaults are evaluated in: the
+        // ordinary heap chain `eval_core` walks, one frame per binding, so a
+        // default sees exactly the parameters bound before it and nothing after
+        // — `let*`, which is what CL specifies here.
+        //
+        // This is also what keeps the bound values alive: a frame is heap data
+        // the collector traces, so the protective per-parameter cells an earlier
+        // version built purely to anchor them are unnecessary. One mechanism,
+        // both jobs.
+        let roots_base = heap.root_count();
+        let mut env = Value::Empty;
         let mut pi = 0usize; // index into `f.params`
         // A closure would borrow `self`/`heap` mutably twice, so bind inline.
         macro_rules! bind {
             ($v:expr) => {{
                 let v = $v;
-                let s = self.slot(heap, v.clone());
-                env.push((f.params[pi].clone(), s));
+                heap.push_root(v);
+                let sym = match heap.intern_symbol(&f.params[pi]) {
+                    Value::Symbol(id) => id,
+                    other => unreachable!("intern_symbol returned {:?}", other),
+                };
+                env = self::core_eval::extend_env(heap, &[(sym, v)], env)?;
+                heap.push_root(env);
                 argv.push(v);
                 pi += 1;
             }};
@@ -3180,7 +1901,7 @@ impl Interp {
             let v = if arg_idx < pos_end {
                 raw_args[arg_idx]
             } else {
-                self.eval_macro_default(heap, default, &env)?
+                self.eval_macro_default(heap, default, env)?
             };
             bind!(v);
         }
@@ -3197,26 +1918,40 @@ impl Interp {
             for (kname, default) in &lambda.keys {
                 let v = match supplied.get(kname) {
                     Some(val) => *val,
-                    None => self.eval_macro_default(heap, default, &env)?,
+                    None => self.eval_macro_default(heap, default, env)?,
                 };
                 bind!(v);
             }
         } else if !f.rest && !tail.is_empty() {
+            heap.truncate_roots(roots_base);
             return Err(EvalError::Panic(format!("expected at most {} argument(s), got {}", n_pos, raw_args.len())));
         }
 
+        // The bound values are about to be re-bound by `apply` from `argv`, so
+        // the frames built here have done their job. `argv` itself is rooted by
+        // the caller (`expand_macro` roots the raw args, and every value in
+        // `argv` is either one of those or a default the caller roots next).
+        heap.truncate_roots(roots_base);
         Ok(argv)
     }
 
     /// Evaluate an `&optional`/`&key` default-value body to the `Sexpr` value
     /// bound when the argument is omitted — an empty body means `nil`
-    /// (`Sexpr::Nil`). Evaluated in `env`, which holds the params bound before
-    /// this one (see [`Self::bind_macro_args`]).
-    fn eval_macro_default(&self, heap: &mut Heap, default: &[Typed], env: &Env) -> Result<Value, EvalError> {
-        if default.is_empty() {
-            return Ok(Value::Empty);
+    /// (`Sexpr::Nil`).
+    ///
+    /// `env` holds the parameters bound before this one, which a default may
+    /// reference: `(defmacro dup (x &optional (y x)) ...)` copies `x` when `y`
+    /// is omitted. That is CL's rule, and `Checker::check_defmacro` checks each
+    /// default in exactly this environment — so dropping `env` here made the
+    /// checker accept a form the expander could not run (`macro `dup`: unbound
+    /// variable: x`).
+    fn eval_macro_default(&self, heap: &mut Heap, default: &[Value], env: Value) -> Result<Value, EvalError> {
+        // The empty body is "no default", which binds `nil` at expansion time.
+        let mut result = Value::Empty;
+        for form in default {
+            result = self.eval_core(heap, *form, env)?;
         }
-        self.eval_seq(heap, default, env)
+        Ok(result)
     }
 
     /// Build a fresh `Sexpr` list from `items`, rooting the growing tail
@@ -3242,7 +1977,7 @@ impl Interp {
         &self,
         heap: &Heap,
         tail: &[Value],
-        keys: &[(String, Vec<Typed>)],
+        keys: &[(String, Vec<Value>)],
     ) -> Result<HashMap<String, Value>, EvalError> {
         if tail.len() % 2 != 0 {
             return Err(EvalError::Panic("odd number of &key arguments (each key needs a value)".into()));
@@ -3266,32 +2001,7 @@ impl Interp {
         Ok(map)
     }
 
-    /// Evaluate each argument in turn, returning the values alongside the
-    /// slots they were registered in. The caller must keep the returned
-    /// `Vec<Slot>` alive (even if unused) for as long as it still needs the
-    /// values protected from a GC — e.g. across a subsequent allocation built
-    /// from them, such as `cons`.
-    fn eval_args(&self, heap: &mut Heap, args: &[Typed], env: &Env) -> Result<(Vec<Value>, Vec<Slot>), EvalError> {
-        let mut vs = Vec::with_capacity(args.len());
-        let mut slots = Vec::with_capacity(args.len());
-        for a in args {
-            let v = self.eval(heap, a, env)?;
-            // Not a program-visible binding — a pure GC-protection anchor;
-            // a cell is rooted by the heap's own `cell_registry` walk.
-            slots.push(self.slot(heap, v));
-            vs.push(v);
-        }
-        Ok((vs, slots))
-    }
 
-    /// Evaluate a body sequence, returning the last value (`Unit` if empty).
-    fn eval_seq(&self, heap: &mut Heap, body: &[Typed], env: &Env) -> Result<Value, EvalError> {
-        let mut result = Value::Empty;
-        for e in body {
-            result = self.eval(heap, e, env)?;
-        }
-        Ok(result)
-    }
 
     /// Evaluate a built-in operator. Returns `None` if `name` is not a
     /// builtin, so the caller can fall through to a "no such function" error.
@@ -3631,7 +2341,7 @@ impl Interp {
             // payload) — added alongside `compile-char`/the `char` dispatch tag
             // (compiled code previously had no way to build/read a bare `char`
             // literal at all, an oversight discovered while implementing
-            // `Expr::Quote`, whose `Char` leaf needs exactly this).
+            // `quote`, whose `Char` leaf needs exactly this).
             "sexpr-char" => match args.first() {
                 Some(Value::Char(c)) => Some(Ok(Value::Char(*c))),
                 Some(_) => Some(Err(EvalError::Panic("sexpr-char: expected a Char Sexpr node".into()))),
@@ -3723,7 +2433,8 @@ impl Interp {
             return Ok(None);
         };
         match f.sig.as_ref() {
-            Some((params, ret)) if params.len() == 2 && params[1] == Type::Bool && *ret == Type::Str => {}
+            Some((params, ret))
+                if params.len() == 2 && params[1] == Repr::Bool && *ret == Repr::Str => {}
             _ => return Ok(None),
         }
         self.printing.borrow_mut().push(v);
@@ -3992,13 +2703,22 @@ impl Interp {
         };
         // Decide the CL-style return before `exec` consumes `tl`: a definition
         // returns its own name symbol; an expression returns its value below.
-        let def_name: Option<String> = match &tl {
-            TopLevel::Defun { name, .. }
-            | TopLevel::Defvar { name, .. }
-            | TopLevel::Defmacro { name, .. }
-            | TopLevel::Defstruct { name }
-            | TopLevel::Defenum { name, .. } => Some(name.last_segment().to_string()),
-            TopLevel::Defmethod { method, .. } => Some(method.clone()),
+        let def_name: Option<String> = match core::op(heap, tl) {
+            // Every definition form but `defmethod` names itself in field 0;
+            // `defmethod` names its owner there and the method in field 1.
+            Some("defun") | Some("defvar") | Some("defmacro") | Some("defstruct") | Some("defenum") => {
+                match core::field(heap, tl, 0) {
+                    Some(Value::Path(id)) => {
+                        Some(crate::types::path_from_id(heap, id).last_segment().to_string())
+                    }
+                    Some(Value::Symbol(id)) => Some(heap.symbol_name(id).to_string()),
+                    _ => None,
+                }
+            }
+            Some("defmethod") => match core::field(heap, tl, 1) {
+                Some(Value::Symbol(id)) => Some(heap.symbol_name(id).to_string()),
+                _ => None,
+            },
             _ => None,
         };
         let out = self.exec(heap, tl)?;
@@ -4012,6 +2732,38 @@ impl Interp {
         };
         Ok(result_ok(heap, result))
     }
+}
+
+/// Intern a name set into the `SymId`s the core bridge compares by.
+fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<SymId> {
+    names
+        .iter()
+        .map(|n| match heap.intern_symbol(n) {
+            Value::Symbol(id) => id,
+            _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
+        })
+        .collect()
+}
+
+/// The same for a parameter list, keeping each name's representation.
+fn intern_params(heap: &mut Heap, params: &[(String, Repr)]) -> Vec<(SymId, Repr)> {
+    params
+        .iter()
+        .map(|(n, r)| {
+            let id = match heap.intern_symbol(n) {
+                Value::Symbol(id) => id,
+                _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
+            };
+            (id, r.clone())
+        })
+        .collect()
+}
+
+/// A compiled call handed back a word that does not decode to the shape its
+/// declared representation promised — the two sides disagree about the ABI, so
+/// this is an internal error rather than anything a program can cause.
+fn crossing_mismatch(what: &str, got: Value) -> EvalError {
+    EvalError::Internal(format!("compiled call returned {:?} for {} result", got, what))
 }
 
 impl MacroExpander for Interp {
@@ -4066,89 +2818,11 @@ impl Default for Interp {
     }
 }
 
-fn env_get<'a>(env: &'a Env, name: &str) -> Option<&'a Slot> {
-    env.iter().rev().find(|(n, _)| n == name).map(|(_, s)| s)
-}
-
-/// Allocate a [`QuotedSexpr`] literal into the GC-managed cons heap, fresh on
-/// every call (see [`Expr::Quote`] for why the literal is kept as an owned
-/// tree rather than a live heap pointer). Every intermediate cons cell built
-/// along the way is rooted via plain `push_root`/`pop_root` for exactly as
-/// long as it takes to link it into its parent — every push is popped before
-/// returning, so the recursion is balanced at every level. A free function,
-/// not an `Interp` method — it never touches `self`, only recurses on
-/// itself.
-fn alloc_quoted(heap: &mut Heap, qs: &QuotedSexpr) -> Result<Value, EvalError> {
-    match qs {
-        QuotedSexpr::Nil => Ok(Value::Empty),
-        QuotedSexpr::Int(n) => Ok(Value::Int(*n)),
-        QuotedSexpr::Float(f) => Ok(heap.alloc_float(*f)),
-        QuotedSexpr::Bignum(n) => Ok(heap.alloc_bignum(n.clone())),
-        QuotedSexpr::Ratio(r) => Ok(heap.alloc_ratio(r.clone())),
-        QuotedSexpr::Char(c) => Ok(Value::Char(*c)),
-        QuotedSexpr::Bool(b) => Ok(Value::Bool(*b)),
-        QuotedSexpr::Sym(s) => Ok(heap.intern_symbol(s)),
-        QuotedSexpr::Path(segs) => {
-            let sym_ids = segs
-                .iter()
-                .map(|s| match heap.intern_symbol(s) {
-                    Value::Symbol(id) => id,
-                    _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-                })
-                .collect::<Vec<_>>();
-            Ok(heap.intern_path(&sym_ids))
-        }
-        QuotedSexpr::Str(s) => Ok(heap.alloc_string(s.clone())),
-        QuotedSexpr::Cons(car, cdr) => {
-            let cv = alloc_quoted(heap, car)?;
-            heap.push_root(cv);
-            let dv = match alloc_quoted(heap, cdr) {
-                Ok(v) => v,
-                Err(e) => {
-                    heap.pop_root();
-                    return Err(e);
-                }
-            };
-            heap.push_root(dv);
-            let result = heap.cons(cv, dv).map_err(|e| EvalError::Panic(e.to_string()));
-            heap.pop_root(); // dv
-            heap.pop_root(); // cv
-            result
-        }
-    }
-}
-
 /// Whether `type_name` is the built-in `Sexpr` type, whose values are
 /// represented by [`RtValue::Sexpr`] (heap-backed) rather than
 /// [`RtValue::Data`].
 fn is_sexpr_type(type_name: &Path) -> bool {
     *type_name == Path::root("sexpr")
-}
-
-/// The `Type`-level counterpart of [`is_sexpr_type`] — whether a *declared*
-/// (checker-resolved) type is the built-in `Sexpr`. The one bit
-/// [`decode_field_typed`] needs: post-monomorphization every field/element
-/// read site carries a concrete declared type (`Expr::FieldGet`'s own node
-/// type, a builtin method's checked return type), so this fully decides the
-/// decode — no value-shape guessing remains.
-fn is_sexpr_ty(ty: &Type) -> bool {
-    matches!(ty, Type::Named(p, _) if is_sexpr_type(p))
-}
-
-/// The `V` in an `Option<V>` return type — `HashTable<K,V>::get`/`remove`'s
-/// checked return type (`hashtable_def`'s `option_of(tvar("v"))`) is always
-/// `Option<V>`, never `V` directly, so the stored value's declared type for
-/// [`decode_field_typed`] sits one layer down. Anything else here is a
-/// checker/interpreter bug (the builtin's registered signature guarantees
-/// the shape), hence `Internal` rather than a panic.
-fn option_payload_ty(ret_ty: &Type) -> Result<Type, EvalError> {
-    match ret_ty {
-        Type::Named(p, args) if *p == Path::root("option") && args.len() == 1 => Ok(args[0].clone()),
-        other => Err(EvalError::Internal(format!(
-            "expected an Option<V> return type at a HashTable get/remove or Vector pop site, got {:?}",
-            other
-        ))),
-    }
 }
 
 fn rt_i64(v: &Value) -> Result<i64, EvalError> {
@@ -4800,7 +3474,7 @@ fn format_float_for_print(f: f64) -> String {
 
 /// Reads a `pprint-*` builtin's keyword argument (`:linear`, `:block`, …).
 /// Keywords are ordinary interned symbols whose name keeps the leading colon
-/// (`Expr::SymLit`), so this is just "the symbol's name".
+/// (`sym`), so this is just "the symbol's name".
 fn pprint_keyword<'a>(heap: &'a Heap, v: &Value) -> Result<&'a str, EvalError> {
     match v {
         Value::Symbol(id) => Ok(heap.symbol_name(*id)),
@@ -4858,7 +3532,7 @@ fn eval_read(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
 /// have no `defmethod` body to run — currently `HashTable<K,V>`
 /// (`crate::check::registry`'s `hashtable_def`).
-/// Mirrors `Interp::eval_builtin` for free functions: `Expr::Assoc`'s eval arm
+/// Mirrors `Interp::eval_builtin` for free functions: `assoc`'s eval arm
 /// tries `Interp::methods` (user `defmethod`s) first, falling back to this.
 /// Argument count/types are trusted (the checker already validated them
 /// against the type's `AdtDef` signatures), so arms index `args` directly
@@ -4866,22 +3540,32 @@ fn eval_read(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// need) for `sexpr`'s `eql`, which must read a boxed `Sexpr::Float`'s
 /// actual value (`Heap::float_value`) to tell it apart from `eq`'s identity
 /// comparison — see `sexpr_eql`'s doc comment.
-/// `ret_ty` is the call site's checked return type (`Expr::Assoc`/
-/// `Expr::TraitCall`/`Expr::Apply`'s own node type) — [`vector_get`]
+/// `ret_ty` is the call site's checked return type (`assoc`/
+/// the unreachable-`panic` node a bounded generic's method call leaves behind) — [`vector_get`]
 /// consumes it to decode a `Vector<Sexpr>` element by its static type (see
 /// [`decode_field_typed`]), and `Scope::new` reads its `V` off it.
 /// `recv_ty` is the receiver argument's checked type (`args[0]`'s
-/// `Typed.ty` at the call site, `None` on a receiver-less static call) —
+/// the call site's checked type, `None` on a receiver-less static call) —
 /// what `Scope<V>`'s instance methods dispatch their representation on;
 /// see the `"scope"` arm. `interp` carries the `struct_types` that
 /// classification reads ([`Interp::scope_is_heap`]).
-fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty: Option<&Type>, args: &[Value], ret_ty: &Type) -> Option<Result<Value, EvalError>> {
+/// Dispatch a built-in type's method — a `defmethod` with no typelisp body, so
+/// the implementation lives here rather than in the registry.
+///
+/// Takes no types at all, which is the whole point: the container methods that
+/// return `Option<V>` (`HashTable::get`/`remove`, `Vector::pop`, `Scope::get`)
+/// used to be handed the call site's checked return type so the stored word
+/// could be decoded back into a Rust-side `RtValue` by its declared type. With
+/// one value world left, that decode is the identity — a stored field *is* the
+/// value — so `decode_field_typed`/`option_payload_ty`/`scope_elem_ty` are gone
+/// and nothing here needs to know `V`.
+fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
     if *type_name == Path::root("hashtable") {
         return match method {
             "new" => Some(Ok(heap.alloc_hashtable())),
-            "get" => Some(hashtable_get(heap, args, ret_ty)),
+            "get" => Some(hashtable_get(heap, args)),
             "set" => Some(hashtable_set(heap, args)),
-            "remove" => Some(hashtable_remove(heap, args, ret_ty)),
+            "remove" => Some(hashtable_remove(heap, args)),
             "count" => Some(hashtable_count(heap, args)),
             "clear" => Some(hashtable_clear(heap, args)),
             "keys" => Some(hashtable_keys(heap, args)),
@@ -4895,20 +3579,17 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty:
             // type-identity-ok: the built-in `Vector`, a root name spelled in full
             "new" => Some(Ok(heap.alloc_struct("vector".to_string(), Vec::new()))),
             "push" => Some(vector_push(heap, args)),
-            "get" => Some(vector_get(heap, args, ret_ty)),
+            "get" => Some(vector_get(heap, args)),
             "set" => Some(vector_set(heap, args)),
             "len" => Some(vector_len(heap, args)),
-            "pop" => Some(vector_pop(heap, args, ret_ty)),
+            "pop" => Some(vector_pop(heap, args)),
             _ => None,
         };
     }
     if *type_name == Path::root("scope") {
         // One representation: every `Scope<V>` is a `StructPayload::Frames`
-        // heap box. The element type `V` is still needed — to encode a value
-        // on the way in and decode it on the way out — and is read from the
-        // call site's checked types, never from the value's shape: the
-        // receiver's `Scope<V>` for an instance method, and for the
-        // receiver-less `new`/`get` the node's own return type.
+        // heap box, and the element needs no encode or decode, so `V` never
+        // enters into it — see this function's doc comment.
         if method == "new" {
             return Some(Ok(heap.alloc_scope()));
         }
@@ -4916,13 +3597,8 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty:
             "clone-frames" => Some(scope_clone_frames_heap(heap, args)),
             "push-frame" => Some(scope_push_frame_heap(heap, args)),
             "pop-frame" => Some(scope_pop_frame_heap(heap, args)),
-            // `get`'s own `Option<V>` return type carries `V`.
-            "get" => Some(scope_get_heap(heap, args, ret_ty)),
-            // `set` takes `V` from the receiver's `Scope<V>`.
-            "set" => Some(match scope_elem_ty(recv_ty) {
-                Ok(elem) => scope_set_heap(heap, args, &elem),
-                Err(e) => Err(e),
-            }),
+            "get" => Some(scope_get_heap(heap, args)),
+            "set" => Some(scope_set_heap(heap, args)),
             _ => None,
         };
     }
@@ -5276,7 +3952,7 @@ fn llvm_module_add_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalEr
 
 /// Forward-declares `name` in `module` with the standard compiled-function
 /// ABI but **no body** — [`Interp::compile_function`]'s JIT-only step
-/// (labels/closures Stage 3, `Expr::Call` to a different top-level function)
+/// (labels/closures Stage 3, `call` to a different top-level function)
 /// that lets `compiler.rs`'s `compile-call` find an already-`compile`d
 /// function via `get-function` before the real call target is wired in via
 /// `add_global_mapping` once the engine running this declaration's own
@@ -5629,7 +4305,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 118] {
 /// The captures counterpart of [`compiled_fn_type`]: `i64 name(i64* args,
 /// i32 argc, i64* env, i32 env_len)` — used for a `labels` sibling whenever
 /// its block's shared captured-name list
-/// (`compile::freevars::labels_free_vars`) is non-empty, and (labels/closures
+/// (`compile::core_freevars::free_vars`) is non-empty, and (labels/closures
 /// Stage 4) for *every* function ever wrapped into a `ClosureBox` via
 /// `build-make-closure`, capturing or not — see that builtin's doc comment
 /// (`registry::llvm_builder_def`) for why unifying on one ABI regardless of
@@ -6658,12 +5334,11 @@ fn expect_hashable_key(v: &Value) -> Result<(), EvalError> {
     }
 }
 
-fn hashtable_get(heap: &mut Heap, args: &[Value], ret_ty: &Type) -> Result<Value, EvalError> {
+fn hashtable_get(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
     let key = rtvalue_to_struct_field(&args[1]);
-    let val_ty = option_payload_ty(ret_ty)?;
-    let found = heap.hashtable_get(id, key).map(|v| decode_field_typed(v, &val_ty));
+    let found = heap.hashtable_get(id, key);
     Ok(option_value(heap, found))
 }
 
@@ -6676,12 +5351,11 @@ fn hashtable_set(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Empty)
 }
 
-fn hashtable_remove(heap: &mut Heap, args: &[Value], ret_ty: &Type) -> Result<Value, EvalError> {
+fn hashtable_remove(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
     let key = rtvalue_to_struct_field(&args[1]);
-    let val_ty = option_payload_ty(ret_ty)?;
-    let removed = heap.hashtable_remove(id, key).map(|v| decode_field_typed(v, &val_ty));
+    let removed = heap.hashtable_remove(id, key);
     Ok(option_value(heap, removed))
 }
 
@@ -6810,82 +5484,6 @@ pub(super) fn rtvalue_to_sexpr(v: &Value) -> Value {
     rtvalue_to_struct_field(v)
 }
 
-/// Decodes a `mem::Value` read out of a `BoxedObj::Struct` field (or
-/// `Vector<T>` element, `HashTable<K,V>` value, `defvar` global) as the
-/// slot's *declared* type directs — `rtvalue_to_struct_field`'s inverse,
-/// and the type-driven replacement for the value-shape heuristic that
-/// existed under type-erased generic evaluation. Post-monomorphization
-/// every reader has the concrete declared type in hand (an accessor's
-/// `FieldGet` node type, a builtin call site's checked return type), so
-/// the one genuine ambiguity — a `Sexpr`-declared slot holding a scalar
-/// datum, where a stored quoted `42` is a `Value::Int` that must come back
-/// as the `Sexpr` it is, not as `RtValue::Int` — is decided statically
-/// here, never guessed from the value. An enum-typed slot needs no arm of
-/// its own (unlike before the enum-representation unification's compiler
-/// flip): it's a `Value::Boxed` at a `BoxedObj::Enum`, which
-/// [`decode_nonsexpr_field`]'s catch-all already turns into `RtValue::Sexpr`
-/// correctly, the same as any other boxed value.
-///
-/// `Unit` is the one slot whose stored shape is *not* injective: it holds a
-/// `Value::Empty` that a `Sexpr`-declared slot could equally hold as the
-/// datum `()`. It needs no shape test for that reason — a `()`-declared slot
-/// has exactly one possible value, so the declared type alone decides, which
-/// is precisely what this function is for.
-pub(super) fn decode_field_typed(v: Value, ty: &Type) -> Value {
-    if matches!(ty, Type::Unit) {
-        Value::Empty
-    } else if is_sexpr_ty(ty) {
-        v
-    } else {
-        decode_nonsexpr_field(v)
-    }
-}
-
-/// [`decode_field_typed`] over the two per-field facts a `Pattern::Ctor`
-/// bakes at check time instead of a live `Type`: `sexpr` is its
-/// `sexpr_fields` bit and `ty` its `field_types` entry. Shared by the boxed
-/// *enum* and boxed *struct* destructuring arms of [`match_pattern`], which
-/// decode a field identically and would otherwise drift apart.
-fn decode_ctor_field(raw: Value, sexpr: bool, ty: Option<&Type>) -> Value {
-    if sexpr {
-        raw
-    } else if matches!(ty, Some(Type::Unit)) {
-        // The one field type the runtime shape can't recover on its own —
-        // see `decode_field_typed`, whose rule this mirrors.
-        Value::Empty
-    } else {
-        decode_nonsexpr_field(raw)
-    }
-}
-
-/// [`decode_field_typed`]'s non-`Sexpr` half: for every declared type
-/// *other than* `Sexpr`, `rtvalue_to_struct_field`'s encoding is injective —
-/// `Int`/`Bool`/`Char`/`Str` map straight back, and every `Boxed` (a float,
-/// a `bignum`/`ratio`, a nested `defstruct`/`Vector<T>`/`cons-cell<K,V>`/
-/// `HashTable<K,V>`/heap `Scope<V>`/closure, whose declared type is some
-/// concrete named heap-repr type) becomes `RtValue::Sexpr`, the same
-/// wrapper a top-level struct value itself uses — so the stored shape alone
-/// determines the result with no ambiguity. The float arm this used to need
-/// (`Heap::is_float`, copying the payload back out into a Rust-side
-/// `RtValue::Float`) went away with the scalar unification: the box already
-/// *is* the value. Also reached directly by `match_pattern`'s
-/// boxed-struct arm, whose per-field `Pattern::Ctor::sexpr_fields` (baked at
-/// check time, exact post-monomorphization) is precisely the
-/// "`Sexpr`-declared or not" bit `decode_field_typed` reads off a `Type`.
-fn decode_nonsexpr_field(v: Value) -> Value {
-    match v {
-        Value::Int(n) => Value::Int(n),
-        Value::Bool(b) => Value::Bool(b),
-        Value::Char(c) => Value::Char(c),
-        // Strings, floats, and `bignum`/`ratio` need no arm: the heap value
-        // the field already
-        // holds *is* the value's representation, so the catch-all passes it
-        // straight through. Each used to be copied back out here into a
-        // Rust-side variant (`f64` / an `Rc`-managed multi-precision value).
-        other => other,
-    }
-}
-
 fn expect_int_index(v: &Value) -> Result<usize, EvalError> {
     match v {
         Value::Int(n) if *n >= 0 => Ok(*n as usize),
@@ -6904,14 +5502,13 @@ fn vector_push(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// element type post-monomorphization (`Vector<Sexpr>`'s `get` returns
 /// `Sexpr` there), so the element decode is fully type-directed; see
 /// [`decode_field_typed`].
-fn vector_get(heap: &mut Heap, args: &[Value], ret_ty: &Type) -> Result<Value, EvalError> {
+fn vector_get(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let i = expect_int_index(&args[1])?;
     if i >= heap.struct_field_count(id) {
         return Err(EvalError::Panic(format!("Vector: index {} out of bounds", i)));
     }
-    let raw = heap.struct_field(id, i);
-    Ok(decode_field_typed(raw, ret_ty))
+    Ok(heap.struct_field(id, i))
 }
 
 fn vector_set(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
@@ -6936,10 +5533,9 @@ fn vector_len(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// "might not be there" result. `ret_ty` is the call site's checked
 /// `Option<T>` return type; [`option_payload_ty`] extracts `T` for
 /// [`decode_field_typed`]'s type-directed decode of the popped element.
-fn vector_pop(heap: &mut Heap, args: &[Value], ret_ty: &Type) -> Result<Value, EvalError> {
+fn vector_pop(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
-    let val_ty = option_payload_ty(ret_ty)?;
-    let popped = heap.struct_pop_field(id).map(|v| decode_field_typed(v, &val_ty));
+    let popped = heap.struct_pop_field(id);
     Ok(option_value(heap, popped))
 }
 
@@ -6950,7 +5546,7 @@ fn vector_pop(heap: &mut Heap, args: &[Value], ret_ty: &Type) -> Result<Value, E
 // LlvmModule`/`LlvmBuilder`/`LlvmFunction`/`LlvmBasicBlock`/`LlvmValue`)
 // and the native `RtValue::Scope` as an *LLVM handle*: an index into this
 // thread-local registry, carried as a plain untraced `i64`
-// (`ast_bridge::is_llvm_handle_ty` — kind `1`, the integer kind). That is
+// (`Repr::Handle` — kind `1`, the integer kind). That is
 // what makes the self-hosted compiler island's own `defun`s compilable:
 // their `llvm-*` method calls lower to a single generic shim,
 // [`rt_llvm_call`], which decodes handles back to `RtValue`s, dispatches
@@ -6979,7 +5575,7 @@ fn vector_pop(heap: &mut Heap, args: &[Value], ret_ty: &Type) -> Result<Value, E
 /// Keeping the object here and handing out an `i64` collapses that: at the
 /// language level an `llvm-value` is an integer like any other, and the same
 /// representation already crosses to compiled code
-/// (`ast_bridge::is_llvm_handle_ty`'s integer kind), so interpreted and
+/// (`Repr::Handle`'s integer kind), so interpreted and
 /// compiled tiers now agree by construction rather than by conversion. Type
 /// safety is unaffected — `LLVM_HANDLE_TYPES` keeps these distinct from `i32`
 /// statically, which is where it was always enforced.
@@ -7157,7 +5753,7 @@ enum LlvmRetK {
 }
 
 /// One dispatchable builtin: `(type_key, method)` plus its marshaling
-/// shape, keyed in [`llvm_op_table`] by [`ast_bridge::llvm_op_id`].
+/// shape, keyed in [`llvm_op_table`] by [`compile::symbols::llvm_op_id`].
 struct LlvmOp {
     type_key: &'static str,
     method: String,
@@ -7192,20 +5788,20 @@ fn llvm_ret_kind(ty: &Type) -> LlvmRetK {
     }
 }
 
-/// The `rt_llvm_call` dispatch table, keyed by [`ast_bridge::llvm_op_id`]'s
+/// The `rt_llvm_call` dispatch table, keyed by [`compile::symbols::llvm_op_id`]'s
 /// stable hash. The `llvm-*` entries are *derived* from the same
 /// `check::registry` `AdtDef`s the checker types these methods with —
 /// table and signatures cannot drift apart. The six `native-scope` entries
 /// are written out by hand because `scope_def`'s signatures are generic
 /// over `V` (here always an LLVM handle — see
-/// `ast_bridge::llvm_assoc_key`, which only routes a `Scope<V>` with an
+/// `core_bridge::llvm_assoc_key`, which only routes a `Scope<V>` with an
 /// LLVM-handle `V` to this table in the first place).
 fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
     static TABLE: std::sync::OnceLock<HashMap<i64, LlvmOp>> = std::sync::OnceLock::new();
     TABLE.get_or_init(|| {
         let mut t: HashMap<i64, LlvmOp> = HashMap::new();
         let insert = |t: &mut HashMap<i64, LlvmOp>, type_key: &'static str, method: String, args: Vec<LlvmArgK>, ret: LlvmRetK| {
-            let id = crate::compile::ast_bridge::llvm_op_id(type_key, &method);
+            let id = crate::compile::symbols::llvm_op_id(type_key, &method);
             if t.insert(id, LlvmOp { type_key, method, args, ret }).is_some() {
                 panic!("llvm_op_table: op id collision on {}", id);
             }
@@ -7247,7 +5843,7 @@ fn rt_llvm_fatal(msg: &str) -> ! {
 /// `(rt-llvm-call opid arg...)` for compiled code — the generic dispatch
 /// shim behind every compiled `llvm-*`/native-`Scope<V>` builtin method
 /// call (`compiler.rs`'s `compile-llvm-op`; interp-closure removal Stage
-/// 1). `args[0]` is the [`ast_bridge::llvm_op_id`] hash embedded at
+/// 1). `args[0]` is the [`compile::symbols::llvm_op_id`] hash embedded at
 /// translate time; the rest are marshaled per the matching
 /// [`llvm_op_table`] entry and dispatched into the *exact same*
 /// [`eval_llvm_builtin_method`]/native-scope builtins the interpreter
@@ -7398,23 +5994,10 @@ fn scope_pop_frame_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalEr
     Ok(Value::Empty)
 }
 
-/// The element type of a `Scope<V>` receiver type.
-fn scope_elem_ty(recv_ty: Option<&Type>) -> Result<Type, EvalError> {
-    match recv_ty {
-        Some(Type::Named(p, args)) if *p == Path::root("scope") && args.len() == 1 => Ok(args[0].clone()),
-        other => Err(EvalError::Internal(format!("expected a Scope<V> receiver type, got {:?}", other))),
-    }
-}
-
-fn scope_get_heap(heap: &mut Heap, args: &[Value], ret_ty: &Type) -> Result<Value, EvalError> {
+fn scope_get_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let name = expect_str(heap, &args[1])?;
-    let elem = option_payload_ty(ret_ty)?;
-    let raw = heap.scope_get(id, name);
-    let found = match raw {
-        Some(v) => Some(decode_field_typed(v, &elem)),
-        None => None,
-    };
+    let found = heap.scope_get(id, name);
     Ok(option_value(heap, found))
 }
 
@@ -7424,7 +6007,7 @@ fn scope_get_heap(heap: &mut Heap, args: &[Value], ret_ty: &Type) -> Result<Valu
 /// same `EvalError` the native `scope_set` does — the `expect_hashable_key`
 /// precedent of keeping a user-reachable condition a catchable evaluation
 /// error rather than a Rust panic.
-fn scope_set_heap(heap: &mut Heap, args: &[Value], _elem: &Type) -> Result<Value, EvalError> {
+fn scope_set_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let v = rtvalue_to_struct_field(&args[2]);
     scope_store(heap, args, v)
 }
@@ -7775,178 +6358,6 @@ fn sexpr_equalp(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Bool(sexpr_equalp_val(heap, a, b)))
 }
 
-/// Try to match a pattern against a value, returning the bindings on success.
-/// `heap` is needed to destructure `Sexpr` values (`RtValue::Sexpr`), which
-/// hold their `Cons`/`Str`/`Sym` payloads in the cons heap. `&mut` (not `&`)
-/// since `match_sexpr_ctor`'s `path` arm allocates a fresh `Sexpr` list of
-/// `sym`s while decomposing a `Value::Path` — the one arm across every
-/// variant that builds heap data rather than only reading already-resident
-/// data — and needs `Heap::push_root`/`cons` for that.
-fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &Value) -> Option<Vec<(String, Value)>> {
-    match pat {
-        Pattern::Wildcard => Some(Vec::new()),
-        // The `heap_bind` flag the checker baked in is dead: every binding
-        // is a cell now, so there is nothing left to route.
-        Pattern::Bind(n, _heap_bind) => Some(vec![(n.clone(), v.clone())]),
-        Pattern::Int(n) => match v {
-            Value::Int(m) if m == n => Some(Vec::new()),
-            _ => None,
-        },
-        Pattern::Bool(b) => match v {
-            Value::Bool(m) if m == b => Some(Vec::new()),
-            _ => None,
-        },
-        Pattern::Char(c) => match v {
-            Value::Char(m) if m == c => Some(Vec::new()),
-            _ => None,
-        },
-        Pattern::Ctor { type_name, variant, args, sexpr_fields, field_types, .. } => match v {
-            // An enum value (`Option`/`Result`/user `defenum`) is a boxed
-            // `BoxedObj::Enum`: tag-test its variant index, then decode each
-            // field exactly the way the struct arm below does. Guarded on
-            // `heap.is_enum` first (like the struct arm's own guard) so a
-            // genuine `Sexpr` datum falls through to the `RtValue::Sexpr`
-            // arm; a *matching-shape* enum whose variant differs also falls
-            // through, where `match_sexpr_ctor`'s own guards all fail —
-            // `None`, the same "try the next match arm" a wrong-variant
-            // `RtValue::Data` used to produce. The `type_name` string
-            // comparison is new (Sexpr-user-ADT design plan §2): once a
-            // heterogeneous `Sexpr` can hold *any* registered enum, a
-            // variant-index-and-field-count match alone could false-
-            // positive across two unrelated enums that happen to share a
-            // shape (e.g. two single-field-variant-0 enums) — this guard is
-            // a pure safety addition, a no-op for every pre-existing
-            // (non-`Sexpr`, checker-guaranteed) call site.
-            Value::Boxed(id)
-                if heap.is_enum(*id)
-                    && heap_type_is(heap, *id, type_name)
-                    && heap.enum_variant(*id) == *variant
-                    && heap.enum_field_count(*id) == args.len() =>
-            {
-                let mut binds = Vec::new();
-                for (i, p) in args.iter().enumerate() {
-                    let raw = heap.enum_field(*id, i);
-                    let f = decode_ctor_field(raw, sexpr_fields.get(i).copied().unwrap_or(false), field_types.get(i));
-                    binds.extend(match_pattern(heap, p, &f)?);
-                }
-                Some(binds)
-            }
-            // A `defstruct` has exactly one variant (`"new"`, index 0), so
-            // `variant` always matches here — only the field count/pattern
-            // shape can fail. Guarded on `heap.is_struct` first so a value
-            // that's a genuine `Sexpr` datum (not a boxed struct) falls
-            // through to the `RtValue::Sexpr` arm below instead. `type_name`
-            // guard: same rationale as the enum arm above — without it two
-            // unrelated structs with the same field count could false-
-            // match inside a heterogeneous `Sexpr` (design plan §2's
-            // `(point x y)` vs. an unrelated same-shape struct test).
-            Value::Boxed(id)
-                if heap.is_struct(*id)
-                    && heap_type_is(heap, *id, type_name)
-                    && *variant == 0
-                    && heap.struct_field_count(*id) == args.len() =>
-            {
-                let mut binds = Vec::new();
-                for (i, p) in args.iter().enumerate() {
-                    let raw = heap.struct_field(*id, i);
-                    // `sexpr_fields`/`field_types` (baked at check time,
-                    // exact now that generic patterns are checked
-                    // monomorphized) are what `decode_field_typed` reads off
-                    // a live `Type` — same type-directed decode, precomputed
-                    // per field.
-                    let f = decode_ctor_field(raw, sexpr_fields.get(i).copied().unwrap_or(false), field_types.get(i));
-                    binds.extend(match_pattern(heap, p, &f)?);
-                }
-                Some(binds)
-            }
-            // A downcast `Ctor` pattern's `type_name` names something other
-            // than `Sexpr` itself (`Checker::resolve_sexpr_downcast_ctor`),
-            // so a genuine `Sexpr` datum (`nil`/`cons`/`int`/...) must never
-            // fall through to `match_sexpr_ctor` — that function indexes by
-            // *bare* variant number, and a downcast pattern's `variant`
-            // (e.g. `0` for a struct's sole `new` variant, or an enum
-            // variant index) is meaningless there: `(point x y)` [variant
-            // 0] must not spuriously match `Sexpr::Nil` (also variant 0).
-            sv if *type_name == Path::root("sexpr") => match_sexpr_ctor(heap, *variant, args, *sv),
-            _ => None,
-        },
-        Pattern::TypeTest(ty, inner) => {
-            let want = match ty {
-                Type::Named(p, _) => p.clone(),
-                _ => return None,
-            };
-            if path_is_builtin(&want, "sexpr") {
-                return match_pattern(heap, inner, v);
-            }
-            match v {
-                Value::Boxed(id) if heap_type_is(heap, *id, &want) => {
-                    match_pattern(heap, inner, v)
-                }
-                _ => None,
-            }
-        }
-    }
-}
-
-/// Match a `Sexpr` constructor pattern against a heap-backed `Sexpr` value,
-/// destructuring through `heap` (`car`/`cdr`/`symbol_name`/`string`) rather
-/// than an `RtValue::Data` shape.
-fn match_sexpr_ctor(heap: &mut Heap, variant: usize, args: &[Pattern], v: Value) -> Option<Vec<(String, Value)>> {
-    match (variant, v) {
-        (SEXPR_NIL, Value::Empty) => Some(Vec::new()),
-        (SEXPR_INT, Value::Int(n)) => match_pattern(heap, &args[0], &Value::Int(n)),
-        // Like `bignum`/`ratio` below: the scrutinee box *is* the float
-        // since the scalar unification, so binding it is a passthrough.
-        (SEXPR_FLOAT, Value::Boxed(id)) if heap.is_float(id) => match_pattern(heap, &args[0], &v),
-        // The scrutinee box is already the `bignum`/`ratio` value; binding it
-        // is a passthrough, not a re-box.
-        (SEXPR_BIGNUM, Value::Boxed(id)) if heap.is_bignum(id) => {
-            match_pattern(heap, &args[0], &v)
-        }
-        (SEXPR_RATIO, Value::Boxed(id)) if heap.is_ratio(id) => {
-            match_pattern(heap, &args[0], &v)
-        }
-        (SEXPR_CHAR, Value::Char(c)) => match_pattern(heap, &args[0], &Value::Char(c)),
-        (SEXPR_BOOL, Value::Bool(b)) => match_pattern(heap, &args[0], &Value::Bool(b)),
-        (SEXPR_SYM, Value::Symbol(id)) => {
-            // `(Sym v)` binds `v : Symbol` — the symbol value itself, carried as
-            // `RtValue::Sexpr(Value::Symbol(id))`, not its textual name.
-            match_pattern(heap, &args[0], &Value::Symbol(id))
-        }
-        // The scrutinee *is* the heap string; binding it is a passthrough,
-        // like the `bignum`/`ratio`/float arms.
-        (SEXPR_STR, Value::Str(_)) => match_pattern(heap, &args[0], &v),
-        (SEXPR_CONS, Value::Cons(_)) => {
-            let car = heap.car(v).ok()?;
-            let cdr = heap.cdr(v).ok()?;
-            let mut binds = match_pattern(heap, &args[0], &car)?;
-            binds.extend(match_pattern(heap, &args[1], &cdr)?);
-            Some(binds)
-        }
-        // `(Path v)` binds `v : Sexpr` — a fresh proper list of the path's
-        // segments as `sym`s, in written order — the inverse of
-        // `construct_sexpr`'s `SEXPR_PATH` arm. The only `match_sexpr_ctor`
-        // arm that allocates: `path_segments` only borrows a permanent
-        // (non-GC) table, but the list linking those segments together is
-        // built fresh here, so the growing accumulator needs rooting across
-        // each `cons` call exactly like `alloc_quoted`'s `QuotedSexpr::Cons`
-        // case does — every element is a permanent `Value::Symbol` (never
-        // GC-collected), so only the `Cons` chain itself is at risk.
-        (SEXPR_PATH, Value::Path(id)) => {
-            let segs = heap.path_segments(id).to_vec();
-            let mut acc = Value::Empty;
-            for seg in segs.into_iter().rev() {
-                heap.push_root(acc);
-                let result = heap.cons(Value::Symbol(seg), acc);
-                heap.pop_root();
-                acc = result.ok()?;
-            }
-            match_pattern(heap, &args[0], &acc)
-        }
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod scc_tests {
     use super::*;
@@ -7976,32 +6387,33 @@ mod scc_tests {
         crate::load_compiler(&mut heap, &mut checker, &mut interp);
 
         // `(defun a () i64 (b))` / `(defun b () i64 (a))` — never checked,
-        // built directly as already-typed AST, so the checker's forward-
-        // reference restriction never comes into play.
-        interp.root.borrow_mut().fns.insert(
-            "a".to_string(),
-            Rc::new(FnDef {
-                params: vec![],
-                body: vec![Typed::new(Expr::Call(crate::check::ast::Ref::synthetic(Path::root("b")), vec![]), Type::I64)],
-                rest: false,
-                lambda: None,
-                sig: Some((vec![], Type::I64)),
-                public: true,
-                compiled: RefCell::new(None),
-            }),
-        );
-        interp.root.borrow_mut().fns.insert(
-            "b".to_string(),
-            Rc::new(FnDef {
-                params: vec![],
-                body: vec![Typed::new(Expr::Call(crate::check::ast::Ref::synthetic(Path::root("a")), vec![]), Type::I64)],
-                rest: false,
-                lambda: None,
-                sig: Some((vec![], Type::I64)),
-                public: true,
-                compiled: RefCell::new(None),
-            }),
-        );
+        // built directly as core forms, so the checker's forward-reference
+        // restriction never comes into play. Each body is a single
+        // `(call () () NAME ())`: no written/home segments (the callee is
+        // already fully resolved) and no arguments, hence no argument reprs.
+        for (name, callee) in [("a", "b"), ("b", "a")] {
+            let path = heap.intern_symbol(callee);
+            heap.push_root(path);
+            let call = core::tagged(&mut heap, "call", &[Value::Empty, Value::Empty, path, Value::Empty])
+                .expect("building a 4-field node cannot exhaust a 1<<16 heap");
+            // Registered `FnDef` bodies are reachable only through
+            // `Interp::fns`, which the collector does not scan — the same
+            // permanent root `Interp::exec` takes for a checked definition.
+            heap.push_permanent_root(call);
+            heap.pop_root();
+            interp.root.borrow_mut().fns.insert(
+                name.to_string(),
+                Rc::new(FnDef {
+                    params: vec![],
+                    body: vec![call],
+                    rest: false,
+                    lambda: None,
+                    sig: Some((vec![], Repr::Int)),
+                    public: true,
+                    compiled: RefCell::new(None),
+                }),
+            );
+        }
 
         interp
             .compile_function(&mut heap, &CompileTarget::Fn(crate::check::ast::Ref::synthetic(Path::root("a"))))

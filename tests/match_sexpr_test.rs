@@ -8,7 +8,7 @@
 //! compiled side (the latter exercised in `tests/compile_test.rs`).
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
 
 fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -100,7 +100,7 @@ fn eval_ok_with_prelude(src: &str) -> Value {
     run_with_prelude(src).expect("eval failed")
 }
 
-fn check(src: &str) -> Result<TopLevel, Error> {
+fn check(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");

@@ -4215,8 +4215,15 @@ pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
         for w in chk.take_warnings() {
             eprintln!("{}", w);
         }
-        if let crate::TopLevel::Defun { name, .. } = &tl {
-            island_defuns.push(name.last_segment().to_string());
+        if crate::check::core::op(heap, tl) == Some("defun") {
+            let name = match crate::check::core::field(heap, tl, 0) {
+                Some(typelisp_mem::Value::Path(id)) => Some(crate::types::path_from_id(heap, id).last_segment().to_string()),
+                Some(typelisp_mem::Value::Symbol(id)) => Some(heap.symbol_name(id).to_string()),
+                _ => None,
+            };
+            if let Some(name) = name {
+                island_defuns.push(name);
+            }
         }
         interp.exec(heap, tl).expect("compiler: eval failed");
     }

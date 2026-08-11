@@ -5,7 +5,7 @@
 //! orthogonal (Pattern A), rather than fusing the `match` into the loop.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
 
 // `dolist` is a pure-interpreter prelude macro (`let`/`while`/`match`/`setf`/
 // `sexpr-*`), so these tests only need `load_prelude` — not `load_compiler`.
@@ -30,7 +30,7 @@ fn run(src: &str) -> Result<Value, EvalError> {
     Ok(last)
 }
 
-fn check(src: &str) -> Result<TopLevel, Error> {
+fn check(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();

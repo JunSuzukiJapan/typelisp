@@ -11,10 +11,10 @@
 //! available; `match` itself is a checker special form and needs no prelude.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
 
 /// Check every form in `src` (with the prelude loaded); return the last node.
-fn check(src: &str) -> Result<TopLevel, Error> {
+fn check(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let mut chk = Checker::new();

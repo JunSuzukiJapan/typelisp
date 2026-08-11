@@ -94,14 +94,23 @@ pub struct OptKeyParam {
     /// time, in an environment with *no* other parameters bound (a default
     /// may not yet reference an earlier parameter — a real, documented
     /// restriction, not every CL implementation's full generality). Spliced
-    /// directly into the call site's argument list by `Checker::
-    /// check_call_opt_key` whenever the call omits this argument.
+    /// into the call site's argument list by `Checker::check_call_opt_key`
+    /// whenever the call omits this argument.
     /// `None` means "no default": the parameter's *effective* type (both in
     /// the callee's body and for a call site that omits it) is
     /// `Option<decl_ty>` instead — a caller who does supply this argument
     /// still writes a plain `decl_ty`-typed value, auto-wrapped into `Some`
     /// (never a literal `Option::some` call) by the same call-site logic.
-    pub default: Option<crate::check::ast::Typed>,
+    ///
+    /// Held as an [`OwnedForm`](crate::fasl::OwnedForm), not as the lowered
+    /// core form itself: a `Value` is an index into *a* heap, and this
+    /// signature outlives the checker's per-form root truncation and is
+    /// serialized into a fasl. Rebuilding it per call site with
+    /// `fasl::owned_to_value` is also the right splice semantics — each site
+    /// needs its own cells, not a shared subtree. `TraitDefault` makes the
+    /// same call for the same reason. The source position survives the round
+    /// trip because `OwnedForm::Cons` carries both of a cell's location slots.
+    pub default: Option<crate::fasl::OwnedForm>,
 }
 
 impl OptKeyParam {
@@ -456,8 +465,19 @@ pub struct DefLocs {
     /// (`Checker::check_at`, where both the reference's position and its
     /// binding's recorded position — `Env`'s third tuple element — are
     /// available together) rather than searched at query time. Consulted by
-    /// `check::locate::definition_target`'s `Expr::Var` arm.
+    /// `check::locate::definition_target`'s `var` arm.
     pub local_refs: HashMap<(u32, u32), Loc>,
+    /// The type the checker proved for the node at each source position — the
+    /// LSP's hover text.
+    ///
+    /// A side table because the type genuinely stops at the checker (see
+    /// `check::core::Checked`): it is not written into the lowered form and
+    /// nothing downstream can ask a node for it. Hover is the one consumer that
+    /// still wants it, so it is recorded where it is known — `Checker::check_at`
+    /// has the position and the type in hand at the same moment, exactly as it
+    /// does for `local_refs` — rather than by keeping types in the IR for one
+    /// query's sake.
+    pub node_types: HashMap<(u32, u32), crate::Type>,
 }
 
 /// Docstrings, keyed the same way [`DefLocs`] keys source locations — kept
@@ -709,7 +729,7 @@ impl Registry {
         // `panic`/etc. — never an ordinary call), so unlike `compile-file`
         // below it has no `root.fns` entry: its argument is an unevaluated
         // symbol or `::`-path, resolved directly against the current
-        // namespace into an `Expr::CompileFn(CompileTarget)` node.
+        // namespace into an `compile-fn`(CompileTarget)` node.
         // `compile-file`: AOT-compiles an independent source file to a
         // native executable (see `Interp::eval_builtin`'s `"compile-file"`
         // arm / `compile::aot::compile_file`). Same free-function shape as
@@ -791,7 +811,7 @@ impl Registry {
     /// *this* type implement it?"). Needed by trait objects (`Type::Dyn`):
     /// building a vtable per (concrete type, trait) pair means enumerating
     /// the pairs, and compiling a `:dyn` call site means knowing every
-    /// method body that could end up in one (`ast_bridge::collect_calls`).
+    /// method body that could end up in one (`core_bridge::collect_targets`).
     ///
     /// Sorted, because the namespace tree is walked through `HashMap`s whose
     /// iteration order varies between runs — an unsorted result would make
@@ -871,7 +891,7 @@ pub(crate) fn builtin_sum_defs() -> Vec<AdtDef> {
 /// The four concrete built-in error types, by (case-folded) type name — the
 /// one list every layer reads: [`builtin_error_defs`] registers them, the
 /// interpreter builds their values (`crate::eval::interp`'s `result_err`),
-/// and both the interpreter and `ast_bridge` classify a type as an enum by
+/// and both the interpreter and `core_bridge` classify a type as an enum by
 /// consulting [`is_builtin_error_type`]. Like `Option`/`Result` they must be
 /// recognizable by name outside the registry, since neither of those two
 /// layers holds a `Registry` to look a definition up in.
@@ -1394,7 +1414,7 @@ pub(crate) fn llvm_module_def() -> AdtDef {
     // ABI a `labels` block with outer-scope captures needs — `i64 name(i64*
     // args, i32 argc, i64* env, i32 env_len)` — used instead of
     // `add-function` exactly when that block's shared captured-name list
-    // (`compile::freevars::labels_free_vars`) is non-empty. Every sibling in
+    // (`compile::core_freevars::free_vars`) is non-empty. Every sibling in
     // such a block shares this one extended signature, even ones whose own
     // body doesn't reference every captured name (see `compiler.rs`'s
     // `compile-labels` doc comment for why captures aren't computed

@@ -6,44 +6,50 @@
 //! part actually worth covering.
 
 extern crate typelisp;
-use typelisp::{definition_target, hover_text, locate_node, Checker, DefLocs, Docs, Heap, Interp, Reader, TopLevel, Type};
+use typelisp::check::core;
+use typelisp::{
+    definition_target, hover_text, locate_node, Checker, DefLocs, Docs, Heap, Interp, Reader, TopLevelForm, Type,
+};
 
 const FILE: &str = "test.typl";
 
 /// Check every top-level form in `src` (in the root namespace, no prelude —
 /// matches `check_test.rs`'s `program` helper), returning them alongside a
-/// snapshot of the registry's definition-location table — everything
-/// [`locate_node`]/[`definition_target`] need, self-contained once the
-/// `Heap`/`Checker` this built them from goes out of scope.
-fn program(src: &str) -> (Vec<TopLevel>, DefLocs, Docs) {
+/// snapshot of the registry's definition-location and docstring tables —
+/// everything [`locate_node`]/[`definition_target`]/[`hover_text`] need.
+///
+/// The `Heap` comes back too: a checked form is cons cells, so the tree means
+/// nothing without the heap it lives in. `src/bin/lsp.rs`'s `Analysis` keeps
+/// the heap for exactly this reason.
+fn program(src: &str) -> (Heap, Vec<TopLevelForm>, DefLocs, Docs) {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let vs = r.read_all_in(&mut h, FILE, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
     let body = vs.into_iter().map(|v| chk.check_form(&mut h, &interp, v).expect("check failed")).collect();
-    (body, chk.registry().def_locs.clone(), chk.registry().docs.clone())
+    (h, body, chk.registry().def_locs.clone(), chk.registry().docs.clone())
 }
 
 #[test]
 fn locates_the_smallest_enclosing_call() {
     let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n(defun main () i32 (add 1 2))\n";
-    let (body, _, docs) = program(src);
+    let (h, body, def_locs, docs) = program(src);
     // Line 2: `(defun main () i32 (add 1 2))` — the `(add 1 2)` call form
     // starts at column 20; a cursor anywhere from there up to just before
     // its closing paren should resolve to that `Call` node, since its
     // integer-literal arguments carry no location of their own (see
     // `check::locate`'s module doc comment).
-    let node = locate_node(&body, FILE, 2, 22).expect("expected a located node");
-    assert_eq!(hover_text(node, &docs), format!("{:?}", Type::I32));
+    let node = locate_node(&h, &body, FILE, 2, 22).expect("expected a located node");
+    assert_eq!(hover_text(&h, node, &def_locs, &docs), format!("{:?}", Type::I32));
 }
 
 #[test]
 fn goto_definition_resolves_a_call_to_its_defun() {
     let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n(defun main () i32 (add 1 2))\n";
-    let (body, def_locs, _docs) = program(src);
-    let node = locate_node(&body, FILE, 2, 22).expect("expected a located node");
-    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    let (h, body, def_locs, _docs) = program(src);
+    let node = locate_node(&h, &body, FILE, 2, 22).expect("expected a located node");
+    let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
     // `(defun add ...)` is the very first form: line 1, column 1.
     assert_eq!(&*target.file, FILE);
     assert_eq!(target.line, 1);
@@ -59,9 +65,9 @@ fn goto_definition_on_a_parameter_reference_resolves_to_the_parameter() {
     // comment on where that resolution actually happens (once, at check
     // time).
     let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n";
-    let (body, def_locs, _docs) = program(src);
-    let node = locate_node(&body, FILE, 1, 37).expect("expected a located node");
-    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    let (h, body, def_locs, _docs) = program(src);
+    let node = locate_node(&h, &body, FILE, 1, 37).expect("expected a located node");
+    let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
     assert_eq!(&*target.file, FILE);
     assert_eq!(target.line, 1);
     assert_eq!(target.col, 14);
@@ -70,11 +76,11 @@ fn goto_definition_on_a_parameter_reference_resolves_to_the_parameter() {
 #[test]
 fn goto_definition_on_a_let_bound_reference_resolves_to_the_binding() {
     let src = "(defun f () i32 (let ((n 1)) n))\n";
-    let (body, def_locs, _docs) = program(src);
+    let (h, body, def_locs, _docs) = program(src);
     // `(let ((n 1)) n))` — `n`'s binding name is at column 24, its trailing
     // reference (the `let`'s body) at column 30.
-    let node = locate_node(&body, FILE, 1, 30).expect("expected a located node");
-    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    let node = locate_node(&h, &body, FILE, 1, 30).expect("expected a located node");
+    let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
     assert_eq!(target.line, 1);
     assert_eq!(target.col, 24);
 }
@@ -82,11 +88,11 @@ fn goto_definition_on_a_let_bound_reference_resolves_to_the_binding() {
 #[test]
 fn goto_definition_on_a_lambda_parameter_reference_resolves_to_the_parameter() {
     let src = "(defun f () i32 ((lambda ((y i32)) i32 y) 1))\n";
-    let (body, def_locs, _docs) = program(src);
+    let (h, body, def_locs, _docs) = program(src);
     // Column 40 is `y`'s reference in the lambda body; its parameter
     // declaration `(y i32)` is at column 28.
-    let node = locate_node(&body, FILE, 1, 40).expect("expected a located node");
-    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    let node = locate_node(&h, &body, FILE, 1, 40).expect("expected a located node");
+    let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
     assert_eq!(target.line, 1);
     assert_eq!(target.col, 28);
 }
@@ -94,30 +100,30 @@ fn goto_definition_on_a_lambda_parameter_reference_resolves_to_the_parameter() {
 #[test]
 fn goto_definition_on_a_labels_function_and_parameter_resolves_to_their_bindings() {
     let src = "(defun f () i32 (labels ((g ((z i32)) i32 z)) (g 1)))\n";
-    let (body, def_locs, _docs) = program(src);
+    let (h, body, def_locs, _docs) = program(src);
     // `z`'s reference inside `g`'s own body (column 43) resolves to its
     // parameter declaration (column 31).
-    let z_ref = locate_node(&body, FILE, 1, 43).expect("expected a located node");
-    let z_target = definition_target(z_ref, &def_locs).expect("expected a resolvable reference");
+    let z_ref = locate_node(&h, &body, FILE, 1, 43).expect("expected a located node");
+    let z_target = definition_target(&h, z_ref, &def_locs).expect("expected a resolvable reference");
     assert_eq!(z_target.col, 31);
     // `g`'s call in the trailing `(g 1)` (column 48) — a local function value
     // applied directly (`check_list`'s "local variable holding a function
     // value" branch builds an `Expr::Var`, not `Expr::Call`) — resolves to
     // its own `labels` binding (column 27).
-    let g_ref = locate_node(&body, FILE, 1, 48).expect("expected a located node");
-    let g_target = definition_target(g_ref, &def_locs).expect("expected a resolvable reference");
+    let g_ref = locate_node(&h, &body, FILE, 1, 48).expect("expected a located node");
+    let g_target = definition_target(&h, g_ref, &def_locs).expect("expected a resolvable reference");
     assert_eq!(g_target.col, 27);
 }
 
 #[test]
 fn goto_definition_on_a_match_pattern_bound_reference_resolves_to_the_pattern() {
     let src = "(defun f ((o Option<i32>)) i32 (match o ((Some x) x) (_ 0)))\n";
-    let (body, def_locs, _docs) = program(src);
+    let (h, body, def_locs, _docs) = program(src);
     // Column 51 is the arm body's `x` reference; its pattern binding — the
     // `x` inside `(Some x)` — is at column 48 (`check_ctor_pattern`'s
     // per-field element positions).
-    let node = locate_node(&body, FILE, 1, 51).expect("expected a located node");
-    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    let node = locate_node(&h, &body, FILE, 1, 51).expect("expected a located node");
+    let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
     assert_eq!(&*target.file, FILE);
     assert_eq!(target.line, 1);
     assert_eq!(target.col, 48);
@@ -126,11 +132,11 @@ fn goto_definition_on_a_match_pattern_bound_reference_resolves_to_the_pattern() 
 #[test]
 fn goto_definition_on_a_whole_arm_bind_pattern_reference_resolves_to_the_pattern() {
     let src = "(defun g ((o Option<i32>)) Option<i32> (match o (v v)))\n";
-    let (body, def_locs, _docs) = program(src);
+    let (h, body, def_locs, _docs) = program(src);
     // Column 52 is the arm body's `v` reference; the whole-arm variable
     // pattern `v` (the arm's own first element) is at column 50.
-    let node = locate_node(&body, FILE, 1, 52).expect("expected a located node");
-    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    let node = locate_node(&h, &body, FILE, 1, 52).expect("expected a located node");
+    let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
     assert_eq!(target.line, 1);
     assert_eq!(target.col, 50);
 }
@@ -146,10 +152,10 @@ fn hover_on_a_local_variable_reference_finds_the_variable_not_its_enclosing_call
     // resolved to the smallest node that *did* have one instead (the whole
     // `if` form).
     let src = "(defun f ((x bool)) i32 (if x 1 2))\n";
-    let (body, _, docs) = program(src);
+    let (h, body, def_locs, docs) = program(src);
     // Column 29 is `x` itself in `(if x 1 2)`.
-    let node = locate_node(&body, FILE, 1, 29).expect("expected a located node");
-    assert_eq!(hover_text(node, &docs), format!("{:?}", Type::Bool));
+    let node = locate_node(&h, &body, FILE, 1, 29).expect("expected a located node");
+    assert_eq!(hover_text(&h, node, &def_locs, &docs), format!("{:?}", Type::Bool));
 }
 
 #[test]
@@ -158,13 +164,13 @@ fn hover_on_a_let_bound_local_finds_its_own_type() {
     // `i32` (the trailing `1`) — a mismatch that would surface if hover
     // resolved to the enclosing `let` instead of the `n` reference itself.
     let src = "(defun f () i32 (let ((n true)) (if n 1 1)))\n";
-    let (body, _, docs) = program(src);
+    let (h, body, def_locs, docs) = program(src);
     // `(let ((n true)) (if n 1 1))` — `n` inside the `if` condition is at
     // column 37 exactly. (Column 38 — the space after it — used to resolve
     // to `n` too under the pre-span closest-preceding-start search, but with
     // true containment it correctly resolves to the enclosing `if` instead.)
-    let node = locate_node(&body, FILE, 1, 37).expect("expected a located node");
-    assert_eq!(hover_text(node, &docs), format!("{:?}", Type::Bool));
+    let node = locate_node(&h, &body, FILE, 1, 37).expect("expected a located node");
+    assert_eq!(hover_text(&h, node, &def_locs, &docs), format!("{:?}", Type::Bool));
 }
 
 #[test]
@@ -179,13 +185,12 @@ fn bare_toplevel_atom_gets_its_span_from_the_reader() {
     let interp = Interp::new();
     let (v, loc) = forms[0].clone();
     let tl = chk.check_form_at(&mut h, &interp, v, Some(loc)).expect("check failed");
-    match tl {
-        TopLevel::Expr(t) => {
-            let loc = t.loc.expect("bare atom should carry the reader's span");
-            assert_eq!((loc.line, loc.col, loc.end_line, loc.end_col), (1, 1, 1, 3));
-        }
-        other => panic!("expected an expression, got {:?}", other),
-    }
+    assert_eq!(core::op(&h, tl), Some("expr"));
+    // The span lands on the wrapped node itself — `(int 42)` — since that is
+    // what `check_at` builds and records `def_loc` on.
+    let node = core::field(&h, tl, 0).expect("`(expr FORM)` always has its form");
+    let loc = h.cons_loc(node).expect("bare atom should carry the reader's span");
+    assert_eq!((loc.line, loc.col, loc.end_line, loc.end_col), (1, 1, 1, 3));
 }
 
 #[test]
@@ -199,21 +204,21 @@ fn locate_prefers_true_containment_over_a_closer_preceding_start() {
     // this to the first sibling (`add`, line 1); containment resolves it
     // to the enclosing call (`wrap`, line 2).
     let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n(defun wrap ((a i32) (b i32)) i32 (+ a b))\n(defun main () i32 (wrap (add 1 2)  (add 3 4)))\n";
-    let (body, def_locs, _docs) = program(src);
+    let (h, body, def_locs, _docs) = program(src);
     // Line 3: `(wrap (add 1 2)  (add 3 4))` — the gap between siblings
     // (the second of the two spaces) is column 36.
-    let node = locate_node(&body, FILE, 3, 36).expect("expected a located node");
-    let target = definition_target(node, &def_locs).expect("the enclosing call resolves");
+    let node = locate_node(&h, &body, FILE, 3, 36).expect("expected a located node");
+    let target = definition_target(&h, node, &def_locs).expect("the enclosing call resolves");
     assert_eq!((target.line, target.col), (2, 1), "expected wrap's defun, not add's");
 }
 
 #[test]
 fn locate_inside_a_sibling_still_finds_it() {
     let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n(defun main () i32 (+ (add 1 2)  (add 3 4)))\n";
-    let (body, def_locs, _docs) = program(src);
+    let (h, body, def_locs, _docs) = program(src);
     // Column 35 is inside the second `(add 3 4)` call.
-    let node = locate_node(&body, FILE, 2, 35).expect("expected a located node");
-    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    let node = locate_node(&h, &body, FILE, 2, 35).expect("expected a located node");
+    let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
     assert_eq!((target.line, target.col), (1, 1)); // `add`'s defun
 }
 
@@ -224,6 +229,6 @@ fn locate_past_every_span_falls_back_to_the_closest_preceding_node() {
     // node rather than returning nothing — completion_locals depends on
     // locate_node finding *something* here.
     let src = "(defun main () i32 (+ 1 2))\n";
-    let (body, _, _) = program(src);
-    assert!(locate_node(&body, FILE, 3, 1).is_some());
+    let (h, body, _, _) = program(src);
+    assert!(locate_node(&h, &body, FILE, 3, 1).is_some());
 }

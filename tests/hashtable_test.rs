@@ -42,50 +42,36 @@ fn eval_string(src: &str) -> String {
     }
 }
 
-/// Like [`run_with_capacity`], but checks against a separate, generously
-/// sized heap with the prelude loaded — needed for `dotimes` (a `defmacro`
-/// in `src/prelude.rs`, expanded during checking, not a checker-native
-/// special form) — while still *executing* against a heap of exactly
-/// `capacity` cells, so a small `capacity` still stresses the GC the way
-/// `run_with_capacity` alone would. The execution phase reuses `check_interp`
-/// itself (its `Interp.fns` already has the prelude's `defun`s registered,
-/// `not` included — `not` moved from a Rust builtin to a plain prelude
-/// `defun` in the `loop`/`break`/`return`/`setf` stage, so unlike
-/// `loop`/`if`/`break`/`setf`/`set`/`quote`/... a fresh, prelude-less
-/// `Interp` can no longer evaluate `while`'s expansion) rather than a
-/// second, fresh `Interp::new()` — `Interp` carries no heap state of its
-/// own (every `exec` call takes one as an explicit argument), so this
-/// doesn't tie the GC-pressure heap to `check_heap`'s large one (see
-/// `eval_test.rs`'s `runtime_cons_cells_survive_gc_when_rooted` for the
-/// same fix).
+/// Runs `src` with the prelude loaded and **a collection before every
+/// allocation** (`gc_stress`), returning the heap alongside the value so a
+/// `Sexpr` result can be read out of it.
 ///
-/// All but the *last* form are also `exec`'d (cloned first) against
-/// `check_interp`/`check_heap` as they're checked, not just collected —
-/// `src` may define its own helper `defun`s/`defmacro`s used by a later
-/// form, and checking that later form needs the earlier one already
-/// registered, the same per-form check-then-exec interleaving
-/// `crate::prelude::load` itself uses.
-fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(Value, Heap), EvalError> {
-    let mut check_heap = Heap::with_capacity(1 << 16);
+/// There is no `capacity` parameter any more, and that absence is the point.
+/// These tests used to check against a roomy heap and then execute
+/// against a 96-cell one so the churn forced repeated collections; that is not
+/// expressible any more. Since the checker lowers code into cons cells, the
+/// checked program *is* cells in the heap it was checked against, and handing it
+/// to a second heap reads those cells through the wrong symbol/string tables
+/// (`sym_names` is empty there). A 96-cell heap could not hold the prelude, let
+/// alone the program. Stressing one heap is both the honest shape and strictly
+/// stronger pressure — a collection before *every* allocation, not only before
+/// the ones a small arena happens to block on. See `eval_test.rs`'s
+/// `eval_under_gc_pressure`, which this mirrors.
+///
+/// Stress goes on *after* the prelude loads: it is large, and collecting through
+/// it would dominate the runtime without testing anything these cases are about.
+fn run_with_prelude_under_gc_stress(src: &str) -> Result<(Value, Heap), EvalError> {
+    let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
-    let mut check_interp = Interp::new();
-    load_prelude(&mut check_heap, &mut chk, &mut check_interp);
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    h.set_gc_stress(true);
     let r = Reader::new();
-    let vs = r.read_all(&mut check_heap, src).expect("read failed");
-    let n = vs.len();
-    let mut tls = Vec::with_capacity(n);
-    for (i, v) in vs.into_iter().enumerate() {
-        let tl = chk.check_form(&mut check_heap, &check_interp, v).expect("check failed");
-        if i + 1 < n {
-            check_interp.exec(&mut check_heap, tl.clone()).expect("eval failed");
-        }
-        tls.push(tl);
-    }
-
-    let mut h = Heap::with_capacity(capacity);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for tl in tls {
-        if let Some(val) = check_interp.exec(&mut h, tl)? {
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl)? {
             last = val;
         }
     }
@@ -349,7 +335,7 @@ fn sexpr_values_survive_gc_pressure() {
                      (set h 1 (quote (x y z))))
                    (match (get h 0) ((Some v) v) ((None) (quote boom)))))
                (f)";
-    let (v, h) = run_with_capacity_and_prelude(src, 96).expect("eval failed");
+    let (v, h) = run_with_prelude_under_gc_stress(src).expect("eval failed");
     match v {
         sv => assert_eq!(sexpr_to_string(&h, sv), "(a b c d e)"),
     }

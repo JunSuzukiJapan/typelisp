@@ -10,19 +10,21 @@
 //! `&rest`/`format` args already did.
 
 extern crate typelisp;
-use typelisp::{load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
+use typelisp::{load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Type, Value};
 
-fn check(src: &str) -> Result<TopLevel, Error> {
+/// Check every form; return the last one's expression type — `None` if that
+/// form was a definition. The type is no longer part of the checked form (see
+/// `check::core::Checked`), so it comes from `Checker::expr_type`.
+fn check(src: &str) -> Result<Option<Type>, Error> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = None;
     for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v)?);
+        chk.check_form(&mut h, &interp, v)?;
     }
-    Ok(last.expect("no forms"))
+    Ok(chk.expr_type().cloned())
 }
 
 fn run_with_heap(src: &str) -> Result<(Heap, Value), EvalError> {
@@ -50,10 +52,10 @@ fn eval_ok(src: &str) -> Value {
 #[test]
 fn list_of_a_struct_instance_and_an_int_type_checks_as_sexpr() {
     let src = "(defstruct point (x i32) (y i32)) (list (point::new 1 2) 42)";
-    match check(src).expect("check failed") {
-        TopLevel::Expr(typed) => assert_eq!(typed.ty, typelisp::Type::Named(typelisp::Path::root("sexpr"), vec![])),
-        other => panic!("expected an Expr, got {:?}", other),
-    }
+    assert_eq!(
+        check(src).expect("check failed"),
+        Some(Type::Named(typelisp::Path::root("sexpr"), vec![]))
+    );
 }
 
 #[test]

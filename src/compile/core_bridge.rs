@@ -2,12 +2,12 @@
 //! self-hosted compiler in `crate::compiler` pattern-matches on.
 //!
 //! Both sides are cons cells, so this is a cons-to-cons rewrite rather than
-//! the tree-to-cons walk `compile::ast_bridge` does today. That is the whole
+//! the tree-to-cons walk `compile::core_bridge` does today. That is the whole
 //! point of the change: the checker used to lower cons cells into a Rust tree
 //! and the bridge turned that tree straight back into cons cells, and nothing
 //! in between needed the tree.
 //!
-//! Being additive, this is built one tag at a time while `ast_bridge` still
+//! Being additive, this is built one tag at a time while `core_bridge` still
 //! runs; nothing routes here yet. The tests read hand-written core forms
 //! through the reader, translate them, and — this being a bridge, whose whole
 //! job is to be *accepted* — hand the result to the real `compile-function`.
@@ -51,7 +51,7 @@
 //! Every node is built through `check::core`'s builders, which keep each
 //! finished field rooted until the node containing it exists. See that
 //! module's own comment for why hand-balanced `push_root`/`pop_root` pairs are
-//! not good enough — `ast_bridge` balances sixteen pops by hand in one
+//! not good enough — `core_bridge` balances sixteen pops by hand in one
 //! function, and one `?` skips them all.
 
 use std::collections::{HashMap, HashSet};
@@ -63,26 +63,29 @@ use crate::check::repr::Repr;
 use crate::type_key::type_key_of;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES};
 
-use super::ast_bridge::{
+use super::symbols::{
     fresh_lambda_name, llvm_op_id, user_method_symbol_name, user_symbol_name, DynTables,
     HASHTABLE_BUILTIN_METHODS, VECTOR_BUILTIN_METHODS,
 };
 use super::core_freevars::{free_vars, names_captured_by_nested};
 
-/// Every field representation of every type this translation can mention.
+/// Which types this translation can mention are `defstruct`s.
 ///
-/// A field's `Repr` is a property of the *type*, so the core IR records it
-/// once, on the `defstruct`/`defenum` — not once per `construct` and once more
-/// per pattern the way `Pattern::Ctor`'s `field_types`/`sexpr_fields` did. The
-/// price is that the bridge needs the definitions on hand, which is what this
-/// is: a snapshot taken from the same core forms, so there is still no live
-/// `Registry` anywhere in this module.
+/// The one question a type *definition* genuinely answers for the island: a
+/// struct has exactly one variant and so gets no tag test, only field
+/// extraction. This used to hold every field representation of every type as
+/// well, on the reasoning that a field's `Repr` is a property of its type and so
+/// belongs on the `defstruct`/`defenum` rather than once per `construct` and once
+/// per pattern. That is true only of a *monomorphic* type: `Option`'s `Some`
+/// field is declared `T`, and monomorphization erases, so `Maybe<i64>` and
+/// `Maybe<string>` both sit at the path `Maybe` and one table could never hold
+/// both. The representations travel with the site instead (see
+/// `translate_construct`), and what is left here needs no `Registry` — the same
+/// property this snapshot always had.
 #[derive(Default, Debug)]
 pub struct Definitions {
-    /// A `defstruct`'s fields.
-    structs: HashMap<Path, Vec<Repr>>,
-    /// A `defenum`'s fields, per variant.
-    enums: HashMap<Path, Vec<Vec<Repr>>>,
+    structs: HashSet<Path>,
+    enums: HashSet<Path>,
 }
 
 impl Definitions {
@@ -90,35 +93,44 @@ impl Definitions {
         Definitions::default()
     }
 
-    /// Record a `(defstruct PATH (R...))` or
-    /// `(defenum PATH (SYM...) ((R...)...))` core form.
+    /// Record a `defstruct` by path.
     ///
-    /// Anything else is ignored rather than refused: this is meant to be fed
-    /// a whole program's top level, and every other form there is simply not a
+    /// For the JIT driver, which reads the runtime module tree rather than a
+    /// program's top-level forms, so there is no form left to re-read.
+    pub fn record_struct(&mut self, path: Path) {
+        self.structs.insert(path);
+    }
+
+    /// [`Self::record_struct`]'s enum counterpart. Only the *name* is recorded;
+    /// a variant's fields travel with the site that mentions them.
+    pub fn record_enum(&mut self, path: Path) {
+        self.enums.insert(path);
+    }
+
+    /// Record a `(defstruct PATH (R...))` or `(defenum PATH (SYM...) (..))`
+    /// core form — the name only; a variant's fields travel with the site.
+    ///
+    /// Anything else is ignored rather than refused: this is meant to be fed a
+    /// whole program's top level, and every other form there is simply not a
     /// type definition.
     pub fn record(&mut self, heap: &Heap, form: Value) -> Result<(), Error> {
         let Some(tag) = core::op(heap, form) else { return Ok(()) };
         match tag {
             "defstruct" => {
                 let parts = core::fields(heap, form)?;
-                let [path, fields] = parts[..] else { return Err(malformed(heap, form)) };
+                let [path, _fields] = parts[..] else { return Err(malformed(heap, form)) };
                 let path = as_path(heap, path).ok_or_else(|| malformed(heap, form))?;
-                self.structs.insert(path, repr_list(heap, fields)?);
+                self.structs.insert(path);
             }
             "defenum" => {
                 let parts = core::fields(heap, form)?;
-                let [path, _variants, fields] = parts[..] else { return Err(malformed(heap, form)) };
+                let [path, _variants, _fields] = parts[..] else { return Err(malformed(heap, form)) };
                 let path = as_path(heap, path).ok_or_else(|| malformed(heap, form))?;
-                let per_variant = heap
-                    .list_to_vec(fields)?
-                    .into_iter()
-                    .map(|v| repr_list(heap, v))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.enums.insert(path, per_variant);
+                self.enums.insert(path);
             }
-            // A module's children are top-level forms too, and a type
-            // defined inside one is just as reachable from a body being
-            // compiled as one at the root.
+            // A module's children are top-level forms too, and a type defined
+            // inside one is just as reachable from a body being compiled as one
+            // at the root.
             "module" => {
                 for child in core::fields(heap, form)?.iter().skip(1) {
                     self.record(heap, *child)?;
@@ -129,21 +141,25 @@ impl Definitions {
         Ok(())
     }
 
-    /// The field representations of `path`'s `variant`, or `None` if this is
-    /// not a type with fields to read — a built-in `sexpr` constructor, whose
-    /// field shapes the island derives from the variant number itself.
-    fn fields_of(&self, path: &Path, variant: usize) -> Option<&[Repr]> {
-        if let Some(fs) = self.structs.get(path) {
-            return Some(fs);
+    /// Whether `path` is a `defstruct` rather than a `defenum`.
+    ///
+    /// A type that is *neither* is an error, not a default: the two get
+    /// different island lowerings (a struct has one variant and so no tag test),
+    /// so guessing would emit code that reads the wrong box shape. Refusing here
+    /// is what makes a body mentioning a type the driver forgot to record fail
+    /// loudly instead of at run time.
+    fn is_struct(&self, heap: &Heap, path: &Path) -> Result<bool, Error> {
+        if self.structs.contains(path) {
+            return Ok(true);
         }
-        self.enums.get(path)?.get(variant).map(Vec::as_slice)
-    }
-
-    /// Whether `path` is a `defstruct` — which the island needs because a
-    /// struct has exactly one variant and so gets no tag test, only field
-    /// extraction.
-    fn is_struct(&self, path: &Path) -> bool {
-        self.structs.contains_key(path)
+        if self.enums.contains(path) {
+            return Ok(false);
+        }
+        let _ = heap;
+        Err(Error::TypeError(format!(
+            "compile: no definition recorded for the type `{}` (internal error)",
+            path
+        )))
     }
 }
 
@@ -832,6 +848,211 @@ pub struct Function {
 /// have to be cells from the moment they are bound, and getting that wrong is
 /// invisible until a closure reads through a cell the binder never made. It is
 /// derivable from the body alone, so it is derived.
+/// Every external thing a body depends on, gathered in one walk.
+///
+/// The AST had six `collect_*` entry points, each running the same walker and
+/// returning one of its fields — six walks where one does. A core form needs no
+/// per-node knowledge to recurse, only to *record*, so the walk is uniform and
+/// there is no reason to split it.
+#[derive(Default)]
+pub struct Targets {
+    /// Free functions called (or reified with `fnref`), first-encounter order.
+    pub calls: Vec<Path>,
+    /// `(type, method)` pairs called as an instance/static method — including
+    /// every vtable slot a `dyn-new` lays out and every implementation a
+    /// `dyn-call` could dispatch to.
+    pub methods: Vec<(Path, String)>,
+    /// Globals read or assigned.
+    pub globals: Vec<Path>,
+    /// Trait objects boxed here: the emitted IR names a vtable by a *constant*
+    /// id, so each must be interned before translation starts.
+    pub dyn_boxes: Vec<DynBoxSite>,
+    /// Supertraits a trait object is upcast to — interned for the same reason.
+    pub dyn_upcasts: Vec<Path>,
+    /// Traits dispatched on dynamically.
+    pub dyn_traits: Vec<Path>,
+}
+
+/// One `dyn-new` site's vtable identity.
+pub struct DynBoxSite {
+    pub concrete_key: String,
+    pub trait_path: Path,
+    pub slots: Vec<(Path, String)>,
+    pub supers: Vec<(Path, Vec<(Path, String)>)>,
+}
+
+/// Collect everything `body`'s forms depend on externally.
+pub fn collect_targets(heap: &Heap, body: &[Value]) -> Result<Targets, Error> {
+    let mut t = Targets::default();
+    for form in body {
+        collect_into(heap, *form, &mut t)?;
+    }
+    Ok(t)
+}
+
+fn collect_into(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Error> {
+    if !matches!(form, Value::Cons(_)) {
+        return Ok(());
+    }
+    let tag = core::op(heap, form).map(|s| s.to_string());
+    let Some(tag) = tag else {
+        // A cons whose head is not a symbol: not a node but a *list* of them —
+        // a `match` arm (`(PATTERN BODY...)`), a `labels` definition. Walk its
+        // elements rather than treating it as a form with fields, which would
+        // skip everything past the head.
+        for e in heap.list_to_vec(form)? {
+            collect_into(heap, e, t)?;
+        }
+        return Ok(());
+    };
+    match tag.as_str() {
+        // The one fence in the whole walk. User data appears nowhere else, so
+        // this is the only place a cons can be something other than a node —
+        // and a quoted `(call ...)` datum is data, not a dependency.
+        "quote" => return Ok(()),
+        // `(call (WRITTEN...) (HOME...) PATH (REPR...) ARG...)`, and `fnref`'s
+        // first three fields are the same triple — the bridge turns a `fnref`
+        // into a forwarding call, so its target needs the same treatment.
+        "call" | "fnref" => {
+            if let Some(p) = path_at(heap, form, 2) {
+                push_unique(&mut t.calls, p);
+            }
+        }
+        // `(assoc PATH SYM ...)` / `(methodref PATH SYM ...)`.
+        "assoc" | "methodref" => {
+            if let (Some(p), Some(m)) = (path_at(heap, form, 0), sym_at(heap, form, 1)) {
+                push_unique(&mut t.methods, (p, m));
+            }
+        }
+        // `(global (WRITTEN...) (HOME...) PATH REPR)` and `set-global`'s same
+        // leading triple.
+        "global" | "set-global" => {
+            if let Some(p) = path_at(heap, form, 2) {
+                push_unique(&mut t.globals, p);
+            }
+        }
+        // Boxing a trait object is what pulls its whole vtable into the call
+        // graph: the *call* through it has no statically known target, but
+        // every target it could reach is right here in the slot list.
+        "dyn-new" => {
+            let key = match core::field(heap, form, 0) {
+                Some(Value::Str(id)) => heap.string(id).to_string(),
+                _ => return Ok(()),
+            };
+            let Some(trait_path) = path_at(heap, form, 1) else { return Ok(()) };
+            let slots = vtable_at(heap, form, 2)?;
+            let supers = supers_at(heap, form, 3)?;
+            for key in &slots {
+                push_unique(&mut t.methods, key.clone());
+            }
+            if !t.dyn_boxes.iter().any(|s| s.concrete_key == key && s.trait_path == trait_path) {
+                t.dyn_boxes.push(DynBoxSite { concrete_key: key, trait_path, slots, supers });
+            }
+        }
+        // The conversion calls nothing — it swaps the box's table for one the
+        // *boxing* site already registered. Only the target trait's id has to
+        // be interned before translation.
+        "dyn-upcast" => {
+            if let Some(p) = path_at(heap, form, 0) {
+                push_unique(&mut t.dyn_upcasts, p);
+            }
+        }
+        // `(dyn-call TRAIT SYM SLOT ((TYPE SYM)...) (REPR...) ARG...)` — no
+        // static target, but every implementation it could dispatch to must
+        // exist natively before this body can run natively.
+        "dyn-call" => {
+            if let Some(p) = path_at(heap, form, 0) {
+                push_unique(&mut t.dyn_traits, p);
+            }
+            for key in vtable_at(heap, form, 3)? {
+                push_unique(&mut t.methods, key);
+            }
+        }
+        _ => {}
+    }
+    for f in core::fields(heap, form)? {
+        collect_into(heap, f, t)?;
+    }
+    Ok(())
+}
+
+fn push_unique<T: PartialEq>(out: &mut Vec<T>, v: T) {
+    if !out.contains(&v) {
+        out.push(v);
+    }
+}
+
+/// Field `i` as a path, or `None` if it is not one. A single-segment path reads
+/// back as a bare `Value::Symbol` (the reader only builds `Value::Path` when it
+/// sees `::`), so both spellings mean the same one-segment path.
+fn path_at(heap: &Heap, form: Value, i: usize) -> Option<Path> {
+    match core::field(heap, form, i)? {
+        Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
+        Value::Symbol(id) => Some(Path::root(heap.symbol_name(id))),
+        _ => None,
+    }
+}
+
+fn sym_at(heap: &Heap, form: Value, i: usize) -> Option<String> {
+    match core::field(heap, form, i)? {
+        Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
+        _ => None,
+    }
+}
+
+/// Field `i` as a vtable `((TYPE SYM)...)`.
+fn vtable_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, String)>, Error> {
+    let Some(list) = core::field(heap, form, i) else { return Ok(Vec::new()) };
+    vtable_of(heap, list)
+}
+
+/// A vtable slot list `((TYPE SYM)...)`, read from the list itself.
+///
+/// Separate from [`vtable_at`] because a supertrait entry is a *bare* list with
+/// no tag, and [`core::field`] counts past a tag — so an index into one is off
+/// by one. Taking the list directly removes the arithmetic instead of getting it
+/// right twice. (Getting it wrong here emitted an empty supertrait vtable, and
+/// the only symptom was an AOT executable aborting with `rt_vtable_slot: vtable
+/// slot is empty`.)
+fn vtable_of(heap: &Heap, list: Value) -> Result<Vec<(Path, String)>, Error> {
+    let mut out = Vec::new();
+    for entry in heap.list_to_vec(list)? {
+        let parts = heap.list_to_vec(entry)?;
+        if let [ty, m] = parts.as_slice() {
+            let path = match ty {
+                Value::Path(id) => crate::types::path_from_id(heap, *id),
+                Value::Symbol(id) => Path::root(heap.symbol_name(*id)),
+                _ => continue,
+            };
+            if let Value::Symbol(id) = m {
+                out.push((path, heap.symbol_name(*id).to_string()));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Field `i` as a supertrait table list `((TRAIT ((TYPE SYM)...))...)`.
+#[allow(clippy::type_complexity)]
+fn supers_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, Vec<(Path, String)>)>, Error> {
+    let Some(list) = core::field(heap, form, i) else { return Ok(Vec::new()) };
+    let mut out = Vec::new();
+    for entry in heap.list_to_vec(list)? {
+        let parts = heap.list_to_vec(entry)?;
+        if let [ty, slots] = parts.as_slice() {
+            let path = match ty {
+                Value::Path(id) => crate::types::path_from_id(heap, *id),
+                Value::Symbol(id) => Path::root(heap.symbol_name(*id)),
+                _ => continue,
+            };
+            // The already-destructured element, not `core::field(entry, 1)` —
+            // see [`vtable_of`].
+            out.push((path, vtable_of(heap, *slots)?));
+        }
+    }
+    Ok(out)
+}
+
 pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Function>, Error> {
     let Some(tag) = core::op(heap, form).map(str::to_string) else {
         return Err(malformed(heap, form));
@@ -867,15 +1088,44 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
         return Err(malformed(heap, form));
     }
 
-    let cells = names_captured_by_nested(heap, &body)?;
+    let (param_list, body_v) = function_parts(heap, &params, &body, cx, empty_names())?;
+    Ok(Some(Function { name, params: param_list, body: body_v }))
+}
+
+/// [`top_level_function`]'s translation half, for a caller that already has the
+/// parameters and body rather than a definition form to read them from.
+///
+/// Two such callers exist: the JIT, which looks a registered body up by name,
+/// and the synthetic "closure constructor" a `lambda` is compiled through,
+/// whose parameters are a captured-cell reference per free variable and so
+/// belong to no `defun` at all.
+///
+/// `extra_non_cell` names parameters that must *not* be treated as captured
+/// cells even though the body's free-variable walk finds them so. The closure
+/// constructor needs it: its body literally is the `(lambda ...)` being
+/// compiled, so the walk "discovers" that the ctor's own parameters are
+/// captured by the very `lambda` it wraps and would box them a second time.
+/// They are declared to pass each cell reference through unchanged, for the
+/// inner `lambda`'s own separately-computed captured list to pick up as-is.
+pub fn function_parts(
+    heap: &mut Heap,
+    params: &[(SymId, Repr)],
+    body: &[Value],
+    cx: Ctx,
+    extra_non_cell: &HashSet<SymId>,
+) -> Result<(Value, Value), Error> {
+    let mut cells = names_captured_by_nested(heap, body)?;
+    for n in extra_non_cell {
+        cells.remove(n);
+    }
     let reprs = cx.extended(params.iter().cloned());
     let inner = Ctx { reprs: &reprs, ..cx }.with_cell_names(&cells);
 
     let mut s = RootScope::new(heap);
-    let param_list = name_kind_list(&mut s, &params, inner)?;
+    let param_list = name_kind_list(&mut s, params, inner)?;
     s.push_root(param_list);
-    let body_v = body_form(&mut s, &body, inner)?;
-    Ok(Some(Function { name, params: param_list, body: body_v }))
+    let body_v = body_form(&mut s, body, inner)?;
+    Ok((param_list, body_v))
 }
 
 /// `(defvar PATH R MUTABLE PUBLIC E)` -> `(global-init kind value)`, the node
@@ -1271,8 +1521,18 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     // recognize these names as sibling-derived.
     let visible: HashSet<SymId> = cx.visible_siblings.union(&siblings).copied().collect();
 
+    // The siblings' own names enter the representation scope as function
+    // values. A def's body never needs them (they are `direct`, called by name
+    // through the function environment), but a `lambda` nested inside one does:
+    // it walks its free variables with no sibling set at all, so a sibling it
+    // calls is an ordinary capture and something has to state its
+    // representation. Without this such a lambda failed with "`double` is
+    // referenced but no binder in scope states its representation".
+    let sibling_reprs = cx.extended(defs.iter().map(|d| (d.name, Repr::Fn)));
+
     let mut f = Items::new(heap);
     let base = Ctx {
+        reprs: &sibling_reprs,
         direct: &siblings,
         cell_names: &captured_cells,
         visible_siblings: &visible,
@@ -1324,7 +1584,7 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     f.finish("labels")
 }
 
-/// `(apply E (R...) E...)` -> one of three island nodes, on the callee's
+/// `(apply E RET-R (R...) E...)` -> one of three island nodes, on the callee's
 /// shape.
 ///
 /// A `labels` sibling is called directly through the function environment; a
@@ -1333,12 +1593,15 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
 /// is dispatched through the value at run time.
 fn translate_apply(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
-    if parts.len() < 2 {
+    if parts.len() < 3 {
         return Err(malformed(heap, form));
     }
     let callee = parts[0];
-    let reprs = repr_list(heap, parts[1])?;
-    let args = parts[2..].to_vec();
+    // Field 1 is the return representation, which only the interpreter reads
+    // (`Interp::apply_core`) — the island's `apply`/`apply-indirect` take
+    // argument pairs and nothing else.
+    let reprs = repr_list(heap, parts[2])?;
+    let args = parts[3..].to_vec();
 
     match (core::op(heap, callee), core::field(heap, callee, 0)) {
         (Some("var"), Some(Value::Symbol(name))) if cx.direct.contains(&name) => {
@@ -1349,7 +1612,7 @@ fn translate_apply(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             f.extend(pairs);
             f.finish("apply")
         }
-        (Some("lambda"), _) => translate_immediate_lambda_call(heap, callee, parts[1], &args, cx),
+        (Some("lambda"), _) => translate_immediate_lambda_call(heap, callee, parts[2], &args, cx),
         _ => {
             let mut f = Items::new(heap);
             let callee_v = to_island(f.heap(), callee, cx)?;
@@ -1395,11 +1658,13 @@ fn translate_immediate_lambda_call(
     s.push_root(def);
     let defs = core::list(&mut s, &[def])?;
     s.push_root(defs);
-    // `(apply (var NAME) (R...) ARG...)`
+    // `(apply (var NAME) RET-R (R...) ARG...)`. The return representation comes
+    // from the lambda's own declaration rather than being threaded in from the
+    // outer `apply` — same value, and this is the authoritative side of it.
     let callee = core::tagged(&mut s, "var", &[name])?;
     s.push_root(callee);
     let call = {
-        let mut items = vec![callee, arg_reprs];
+        let mut items = vec![callee, ret, arg_reprs];
         items.extend(args.iter().copied());
         core::tagged(&mut s, "apply", &items)?
     };
@@ -1528,19 +1793,23 @@ fn forwarding_lambda(
 /// flag the checker already resolved, which is what keeps `compiler.rs`
 /// registry-free.
 ///
-/// The fields' kinds come from the *type's* definition rather than from the
-/// argument expressions, which is the whole reason [`Definitions`] exists. A
-/// `sexpr` construct is the exception: its variants' shapes follow from the
-/// variant number, so the island derives them and the fields go untagged.
+/// The fields' kinds are the *declared* field representations the node carries,
+/// not the argument expressions' own — the declaration decides the shape a
+/// field is stored in, and an argument can be narrower. They come from the node
+/// rather than from the type's definition because a generic ADT's definition
+/// cannot answer: `Option`'s `Some` field is declared `T`. A `sexpr` construct
+/// is the exception: its variants' shapes follow from the variant number, so
+/// the island derives them and the fields go untagged.
 fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
-    if parts.len() < 3 {
+    if parts.len() < 4 {
         return Err(malformed(heap, form));
     }
     let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
     let Value::Int(variant) = parts[1] else { return Err(malformed(heap, form)) };
     let Value::Bool(mutable) = parts[2] else { return Err(malformed(heap, form)) };
-    let args = parts[3..].to_vec();
+    let field_reprs = repr_list(heap, parts[3])?;
+    let args = parts[4..].to_vec();
     let is_sexpr = path == Path::root("sexpr");
 
     // The *fully qualified* path, because this string is the value's runtime
@@ -1560,9 +1829,6 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
         }
         return f.finish("construct");
     }
-    let field_reprs = cx.defs.fields_of(&path, variant as usize).ok_or_else(|| {
-        Error::TypeError(format!("compile: no definition recorded for the type `{}` (internal error)", path))
-    })?;
     if field_reprs.len() != args.len() {
         return Err(Error::TypeError(format!(
             "compile: `{}` variant {} has {} fields, constructed with {} (internal error)",
@@ -1575,8 +1841,7 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     // A struct field and an enum field cross the same tagged boundary, so both
     // take `field_kind` — not `binding_kind`, which only says whether a root
     // is wanted. Here the exact tagged shape to build is what matters.
-    let kinds: Vec<Repr> = field_reprs.to_vec();
-    let pairs = arg_pairs_with(f.heap(), &kinds, &args, Repr::field_kind, cx)?;
+    let pairs = arg_pairs_with(f.heap(), &field_reprs, &args, Repr::field_kind, cx)?;
     f.extend(pairs);
     f.finish("construct")
 }
@@ -1735,21 +2000,22 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
     }
 }
 
-/// `(pat-ctor PATH N DOWNCAST P...)` -> `(pat-ctor variant (subpat...) kind
-/// (field-kind...) downcast type-name-form)`.
+/// `(pat-ctor PATH N DOWNCAST (REPR...) P...)` -> `(pat-ctor variant
+/// (subpat...) kind (field-kind...) downcast type-name-form)`.
 fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, pat)?;
-    if parts.len() < 3 {
+    if parts.len() < 4 {
         return Err(malformed(heap, pat));
     }
     let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, pat))?;
     let Value::Int(variant) = parts[1] else { return Err(malformed(heap, pat)) };
     let Value::Bool(downcast) = parts[2] else { return Err(malformed(heap, pat)) };
-    let subpats = parts[3..].to_vec();
+    let field_reprs = repr_list(heap, parts[3])?;
+    let subpats = parts[4..].to_vec();
 
     let kind = if path == Path::root("sexpr") {
         MATCH_KIND_SEXPR
-    } else if cx.defs.is_struct(&path) {
+    } else if cx.defs.is_struct(heap, &path)? {
         MATCH_KIND_STRUCT
     } else {
         MATCH_KIND_BOX
@@ -1776,19 +2042,16 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
     let kinds: Vec<Value> = if kind == MATCH_KIND_SEXPR {
         Vec::new()
     } else {
-        let reprs = cx.defs.fields_of(&path, variant as usize).ok_or_else(|| {
-            Error::TypeError(format!("compile: no definition recorded for the type `{}` (internal error)", path))
-        })?;
-        if reprs.len() != subpats.len() {
+        if field_reprs.len() != subpats.len() {
             return Err(Error::TypeError(format!(
                 "compile: `{}` variant {} has {} fields, matched with {} sub-patterns (internal error)",
                 path,
                 variant,
-                reprs.len(),
+                field_reprs.len(),
                 subpats.len()
             )));
         }
-        reprs.iter().map(|r| Value::Int(r.field_kind())).collect()
+        field_reprs.iter().map(|r| Value::Int(r.field_kind())).collect()
     };
     let kinds = core::list(f.heap(), &kinds)?;
     f.push(kinds);
@@ -1916,7 +2179,7 @@ mod tests {
     /// `gc_stress` is on throughout: the bridge conses for nearly every node,
     /// so every allocation collects, and an intermediate the builders failed
     /// to root would be reclaimed before the node holding it exists. That is
-    /// the failure mode `ast_bridge` shipped twice.
+    /// the failure mode `core_bridge` shipped twice.
     fn bridged(src: &str) -> String {
         bridged_with(&[], src)
     }
@@ -2178,32 +2441,53 @@ mod tests {
 
     // ---- data ------------------------------------------------------------
 
-    /// A construct's field kinds come from the *type*, not from the argument
-    /// expressions — which is why the bridge needs the definitions at all.
+    /// A construct's field kinds come from the node's own representation list,
+    /// not from the argument expressions and not from the type's definition —
+    /// see `translate_construct` for why the definition cannot answer.
     #[test]
-    fn a_construct_tags_its_fields_from_the_types_definition() {
+    fn a_construct_tags_its_fields_from_its_own_representations() {
         assert_eq!(
-            bridged_with(&DEFS, "(construct point 0 true (int 1) (int 2))"),
+            bridged_with(&DEFS, "(construct point 0 true (int int) (int 1) (int 2))"),
             r#"(construct false true (str (int 112) (int 111) (int 105) (int 110) (int 116)) 0 (1 int 1) (1 int 2))"#
         );
         // An enum field of `sexpr` is already tagged, hence the passthrough
-        // kind 6 — read off the variant's own field list.
+        // kind 6.
         assert_eq!(
-            bridged_with(&DEFS, "(construct option 1 false (var x))"),
+            bridged_with(&DEFS, "(construct option 1 false (sexpr) (var x))"),
             r#"(construct false false (str (int 111) (int 112) (int 116) (int 105) (int 111) (int 110)) 1 (6 var "x" false))"#
         );
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
-        assert_eq!(bridged_with(&DEFS, "(construct sexpr 7 false (int 1) (int 2))"), "(construct true false () 7 (int 1) (int 2))");
+        assert_eq!(bridged_with(&DEFS, "(construct sexpr 7 false (sexpr sexpr) (int 1) (int 2))"), "(construct true false () 7 (int 1) (int 2))");
     }
 
-    /// A construct whose arity disagrees with its definition is an internal
-    /// error: the island would tag a field with another field's kind.
+    /// A construct needs no definition on hand at all: the `MUTABLE` flag says
+    /// which box to build and the node carries its own field representations.
     #[test]
-    fn a_construct_that_disagrees_with_its_definition_is_refused() {
-        let e = refused_with(&DEFS, "(construct point 0 true (int 1))");
+    fn a_construct_needs_no_definition_recorded() {
+        assert_eq!(
+            bridged_with(&[], "(construct point 0 true (int int) (int 1) (int 2))"),
+            r#"(construct false true (str (int 112) (int 111) (int 105) (int 110) (int 116)) 0 (1 int 1) (1 int 2))"#
+        );
+    }
+
+    /// A construct whose representation list disagrees with its argument count
+    /// is an internal error: the island would tag a field with another field's
+    /// kind.
+    #[test]
+    fn a_construct_whose_arity_disagrees_with_its_representations_is_refused() {
+        let e = refused_with(&DEFS, "(construct point 0 true (int int) (int 1))");
         assert!(e.contains("has 2 fields, constructed with 1"), "{}", e);
-        let e = refused_with(&[], "(construct point 0 true (int 1) (int 2))");
+    }
+
+    /// A *pattern* does need the definition, and an unrecorded type is refused
+    /// rather than guessed at. There is no `MUTABLE` flag on a pattern, so this
+    /// is the only thing that tells a struct scrutinee (one variant, no tag
+    /// test) from an enum box — and guessing would emit code that reads the
+    /// wrong box shape.
+    #[test]
+    fn a_pattern_on_an_unrecorded_type_is_refused() {
+        let e = refused_with(&[], "(match (var v) struct ((pat-ctor point 0 false (int int) (pat-wild) (pat-wild)) (int 1)))");
         assert!(e.contains("no definition recorded"), "{}", e);
     }
 
@@ -2228,13 +2512,13 @@ mod tests {
     #[test]
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option 0 false) (int 0)) ((pat-ctor option 1 false (pat-bind x)) (var x)))"),
+            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option 0 false ()) (int 0)) ((pat-ctor option 1 false (sexpr) (pat-bind x)) (var x)))"),
             r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int 0) ((pat-ctor 1 ((pat-bind "x")) 1 (6) false ()) var "x" false)) 1)"#
         );
         // A struct scrutinee: kind 2, and the field kinds come from the
         // `defstruct`.
         assert_eq!(
-            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor point 0 false (pat-bind a) (pat-wild)) (var a)))"),
+            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor point 0 false (int int) (pat-bind a) (pat-wild)) (var a)))"),
             r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a") (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
         );
     }
@@ -2269,9 +2553,9 @@ mod tests {
     /// placeholder.
     #[test]
     fn only_a_downcast_pattern_carries_a_type_name() {
-        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point 0 false (pat-wild) (pat-wild)) (int 1)))");
+        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point 0 false (int int) (pat-wild) (pat-wild)) (int 1)))");
         assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (1 1) false ())"), "{}", plain);
-        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point 0 true (pat-wild) (pat-wild)) (int 1)))");
+        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point 0 true (int int) (pat-wild) (pat-wild)) (int 1)))");
         assert!(down.contains("true (str (int 112)"), "{}", down);
         // A whole-value type test always tests, so it always carries one.
         let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest point (pat-bind p)) (var p)))");
@@ -2408,7 +2692,7 @@ mod tests {
     #[test]
     fn labels_siblings_are_called_directly() {
         let printed =
-            bridged("(labels ((go ((i int)) int (var i))) (apply (var go) (int) (int 1)))");
+            bridged("(labels ((go ((i int)) int (var i))) (apply (var go) int (int) (int 1)))");
         assert_eq!(printed, r#"(labels () (("go" ((i . 0)) (var "i" false))) (apply "go" (0 int 1)))"#);
     }
 
@@ -2417,7 +2701,7 @@ mod tests {
     #[test]
     fn a_labels_block_captures_what_its_defs_refer_to() {
         let printed = bridged(
-            "(let ((k int (int 5))) (labels ((go ((i int)) int (var k))) (apply (var go) (int) (int 1))))",
+            "(let ((k int (int 5))) (labels ((go ((i int)) int (var k))) (apply (var go) int (int) (int 1))))",
         );
         assert!(printed.contains("(labels ((k . 11))"), "the captured list should be a cell: {}", printed);
         assert!(printed.contains(r#"(cellvar "k" 1)"#), "{}", printed);
@@ -2427,7 +2711,7 @@ mod tests {
     #[test]
     fn an_unknown_callee_is_dispatched_indirectly() {
         assert_eq!(
-            bridged("(let ((f fn (var g))) (apply (var f) (int) (int 1)))"),
+            bridged("(let ((f fn (var g))) (apply (var f) int (int) (int 1)))"),
             r#"(let (((f . 2) var "g" false)) (apply-indirect (var "f" false) (0 int 1)))"#
         );
     }
@@ -2437,7 +2721,7 @@ mod tests {
     /// at all.
     #[test]
     fn an_immediately_invoked_lambda_becomes_a_labels_block() {
-        let printed = bridged("(apply (lambda ((x int)) int (var x)) (int) (int 2))");
+        let printed = bridged("(apply (lambda ((x int)) int (var x)) int (int) (int 2))");
         assert!(printed.starts_with("(labels () ((\"__lambda$"), "{}", printed);
         assert!(printed.ends_with(r#"((x . 0)) (var "x" false))) (apply "__lambda$0" (0 int 2)))"#)
             || printed.contains(r#"((x . 0)) (var "x" false)))"#), "{}", printed);
@@ -2647,7 +2931,7 @@ mod tests {
         assert_eq!(
             bridged_with(
                 &["(module m (defstruct m::point (int sexpr)))"],
-                "(construct m::point 0 true (int 1) (quote ()))"
+                "(construct m::point 0 true (int sexpr) (int 1) (quote ()))"
             )
             .contains("(1 int 1)"),
             true

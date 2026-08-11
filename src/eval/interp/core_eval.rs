@@ -1,12 +1,11 @@
-//! The evaluator over *core forms* — the cons-cell program representation
-//! (`crate::check::core`) that replaces the Rust `Typed` tree.
+//! The evaluator, over the cons-cell core forms (`crate::check::core`) the
+//! checker produces.
 //!
-//! This is being built additively, one tag at a time, while the checker still
-//! produces `Typed` and [`Interp::eval`](super::Interp::eval) still walks it.
-//! Nothing routes here yet; the tests read hand-written core forms straight
-//! through the reader and evaluate them, so each tag can be finished and
-//! verified with the whole suite green. The two evaluators meet — and the old
-//! one is deleted — in the single commit that switches the checker over.
+//! The only evaluator: the Rust `Typed` tree it replaced, and the walker over
+//! it, are gone. It was built additively one tag at a time against
+//! hand-written core forms read straight through the reader — which is why its
+//! tests still read that way, and why they are the cheapest place to pin a
+//! tag's shape.
 //!
 //! # Roots
 //!
@@ -27,7 +26,7 @@
 //!
 //! `if` branches, a `let` body's last form and (from Stage A4) a call's body
 //! are *jumps*, not recursive calls: the loop reassigns `form`/`env` and
-//! continues. The old evaluator special-cased only `Expr::If` to survive long
+//! continues. The old evaluator special-cased only `if` to survive long
 //! `cond` chains; here every tail position is constant-stack, so mutual
 //! recursion through a tail call is too.
 //!
@@ -44,12 +43,18 @@
 //! frame the *most recently added* binding is found first, matching
 //! `env_get`'s `.rev()`.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use typelisp_mem::{Heap, RootScope, SymId, Value};
 
 use crate::check::core;
+use crate::check::repr::Repr;
 use crate::eval::value::EvalError;
+use crate::MacroLambda;
 
-use super::Interp;
+use super::scope;
+use super::{EnumDef, FnDef, Interp};
 
 /// A core form's operator, resolved from its tag symbol.
 ///
@@ -88,6 +93,13 @@ enum Op {
     DynNew,
     DynUpcast,
     DynValue,
+    Global,
+    SetGlobal,
+    Assoc,
+    DynCall,
+    FnRef,
+    MethodRef,
+    CompileFn,
 }
 
 impl Op {
@@ -130,6 +142,13 @@ impl Op {
             "dyn-new" => Op::DynNew,
             "dyn-upcast" => Op::DynUpcast,
             "dyn-value" => Op::DynValue,
+            "global" => Op::Global,
+            "set-global" => Op::SetGlobal,
+            "assoc" => Op::Assoc,
+            "dyn-call" => Op::DynCall,
+            "fnref" => Op::FnRef,
+            "methodref" => Op::MethodRef,
+            "compile-fn" => Op::CompileFn,
             _ => return None,
         })
     }
@@ -405,6 +424,17 @@ impl Interp {
             // undefined if one is destructively modified.
             Op::Quote => self.literal_field(heap, form).map(Step::Done),
 
+            // ---- globals -------------------------------------------------
+            Op::Global => self.global_core(heap, form).map(Step::Done),
+            Op::SetGlobal => self.set_global_core(heap, form, env).map(Step::Done),
+
+            // ---- methods and function values ------------------------------
+            Op::Assoc => self.assoc_core(heap, form, env).map(Step::Done),
+            Op::DynCall => self.dyn_call_core(heap, form, env).map(Step::Done),
+            Op::FnRef => self.fnref_core(heap, form).map(Step::Done),
+            Op::MethodRef => self.methodref_core(heap, form).map(Step::Done),
+            Op::CompileFn => self.compile_fn_core(heap, form).map(Step::Done),
+
             // ---- trait objects -------------------------------------------
             Op::DynNew => self.dyn_new_core(heap, form, env).map(Step::Done),
             Op::DynUpcast => self.dyn_upcast_core(heap, form, env).map(Step::Done),
@@ -445,7 +475,7 @@ impl Interp {
 
     /// `(construct PATH N MUTABLE E...)`.
     ///
-    /// Three shapes behind one tag, exactly as the old `Expr::Construct`:
+    /// Three shapes behind one tag, exactly as the old `construct`:
     /// the built-in `Sexpr`, whose "fields" are really constructor arguments
     /// for a datum; a mutable `defstruct` box; and an enum (`Option`,
     /// `Result`, a user `defenum`). `MUTABLE` is what tells the last two
@@ -455,11 +485,13 @@ impl Interp {
         let variant = int_field(heap, form, 1, "construct")? as usize;
         let mutable = bool_field(heap, form, 2, "construct")?;
 
+        // Field 3 is the per-field representation list, which only the bridge
+        // reads: the interpreter stores a field as the value it already is.
         let arg_forms = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (construct ..): {}", e)))?;
-        if arg_forms.len() < 3 {
+        if arg_forms.len() < 4 {
             return Err(EvalError::Internal(format!("eval: malformed construct: {}", core::print(heap, form))));
         }
-        let arg_forms = arg_forms[3..].to_vec();
+        let arg_forms = arg_forms[4..].to_vec();
 
         let mut s = RootScope::new(heap);
         let mut argv = Vec::with_capacity(arg_forms.len());
@@ -502,15 +534,55 @@ impl Interp {
 
         let v = self.eval_core(heap, value, env)?;
         let mut s = RootScope::new(heap);
-        // `alloc_dyn` cannot collect, but `register_dyn_box` reaches the
-        // compiler for a trait some compiled body dispatches on, and that
-        // can. The boxed value is reachable from nothing else meanwhile.
+        // `alloc_dyn` cannot collect, but compiling a slot below does, and the
+        // boxed value is reachable from nothing else meanwhile.
         s.push_root(v);
         let ids = self.register_dyn_box(&concrete_key, &trait_path, &slots, &supers);
         let id = *ids
             .first()
             .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) registered no vtable".to_string()))?;
-        self.publish_vtable(id);
+        // If some compiled body dispatches on this trait, the box may be about
+        // to reach it, and a native call site can only read a *native* entry
+        // point out of the table — so any slot still interpreted has to be
+        // compiled now, before `publish_vtable` reads the addresses.
+        //
+        // Not reachable for an ordinary program: a `dyn-call` site's own
+        // `((TYPE SYM)...)` table already pulled in every implementation it
+        // could dispatch to. What it does not pull in is an implementation
+        // whose owner is *generic* — `vector-iter<T>`'s `Iter` methods have no
+        // code until specialized, and which specialization is only known here,
+        // where a concrete instantiation is boxed. Also reached by an `impl`
+        // written after that call site was checked.
+        //
+        // The borrow is bound to a local so it is definitely released before
+        // `compile_function`, which reaches `translate_and_compile` and borrows
+        // this same cell mutably.
+        let has_native_dispatcher = self.dyn_dispatch_compiled.borrow().contains(&trait_path);
+        if has_native_dispatcher {
+            for (type_name, method) in &slots {
+                if !self.root.borrow().method_compiled(type_name, method) {
+                    let target = crate::CompileTarget::Method {
+                        type_name: type_name.clone(),
+                        method: method.clone(),
+                        home: type_name.parent().to_vec(),
+                    };
+                    self.compile_function(&mut s, &target)?;
+                }
+            }
+        }
+        // Published on every boxing, not only after a compilation: the value
+        // may be about to cross into *already*-compiled code that dispatches on
+        // it, and this is the only point where such a box comes into existence
+        // with no compilation having just happened.
+        //
+        // Every table, not just this box's own: an upcast of it hands compiled
+        // code one of the supertrait tables, and compiled code reads entry
+        // points from the compiled tier's copy and nowhere else. (Publishing
+        // only `ids[0]` left those empty and aborted with `rt_vtable_slot:
+        // vtable slot is empty`.)
+        for id in &ids {
+            self.publish_vtable(*id);
+        }
         Ok(s.alloc_dyn(id, v))
     }
 
@@ -614,7 +686,7 @@ impl Interp {
         Ok(Step::Tail(*last, env))
     }
 
-    /// `(apply E (R...) E...)` — call the value `E` produces.
+    /// `(apply E RET-R (R...) E...)` — call the value `E` produces.
     ///
     /// An interpreted closure's body is entered as a *tail jump*, so a
     /// self-call or a mutual call in tail position costs no stack. The old
@@ -624,12 +696,14 @@ impl Interp {
         let callee = core::field(heap, form, 0)
             .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no callee".to_string()))?;
         let arg_forms = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (apply ..): {}", e)))?;
-        // The callee, the argument representations (the bridge's, not read
-        // here), then the arguments.
-        if arg_forms.len() < 2 {
+        // The callee, the return representation, the argument representations,
+        // then the arguments.
+        if arg_forms.len() < 3 {
             return Err(EvalError::Internal(format!("eval: malformed apply: {}", core::print(heap, form))));
         }
-        let arg_forms = arg_forms[2..].to_vec();
+        let ret_repr_field = arg_forms[1];
+        let arg_reprs_field = arg_forms[2];
+        let arg_forms = arg_forms[3..].to_vec();
 
         let mut s = RootScope::new(heap);
         let f = self.eval_core(&mut s, callee, env)?;
@@ -645,16 +719,40 @@ impl Interp {
 
         let id = match f {
             Value::Boxed(id) if s.is_closure(id) => id,
+            // A closure that came *out* of compiled code. Its arguments cross
+            // the boundary and its result comes back, both driven by the
+            // declared representations this node carries.
             Value::Boxed(id) if s.is_compiled_closure(id) => {
-                return Err(EvalError::Internal(
-                    "eval: applying a compiled closure: not until the JIT is re-attached".to_string(),
-                ))
+                let arg_reprs = repr_list(&s, arg_reprs_field, "apply")?;
+                let ret = Repr::read(&s, ret_repr_field)
+                    .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no return representation".to_string()))?;
+                let (int_args, crossing_roots) = self.encode_crossing_args(&mut s, &argv, &arg_reprs, false)?;
+                crate::compile::runtime::set_active_heap(&mut *s as *mut Heap);
+                let raw = Interp::call_closure_box(&s, id, &int_args);
+                for _ in 0..crossing_roots {
+                    s.pop_root();
+                }
+                return self.decode_compiled_return(&mut s, raw, &ret).map(Step::Done);
             }
+            // A built-in used as a function value — dispatched by name through
+            // the very same `eval_builtin`/`eval_builtin_method` a direct
+            // `(gensym)`/`(+ a b)` call site goes through; the box carries only
+            // which name.
             Value::Boxed(id) if s.is_builtin_fn(id) => {
-                return Err(EvalError::Internal(
-                    "eval: applying a built-in used as a function value: not until the checker lowers function references"
-                        .to_string(),
-                ))
+                let name = s.builtin_fn_name(id).to_string();
+                return match s.builtin_fn_recv(id) {
+                    None => match self.eval_builtin(&mut s, &name, &argv) {
+                        Some(r) => r.map(Step::Done),
+                        None => Err(EvalError::NoSuchFunction(name)),
+                    },
+                    Some(pid) => {
+                        let type_name = crate::types::path_from_id(&s, pid);
+                        match super::eval_builtin_method(&mut s, &type_name, &name, &argv) {
+                            Some(r) => r.map(Step::Done),
+                            None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, name))),
+                        }
+                    }
+                };
             }
             other => return Err(EvalError::Internal(format!("eval: (apply ..) callee is not a function: {:?}", other))),
         };
@@ -815,19 +913,307 @@ impl Interp {
             argv.push(v);
         }
 
-        if self.root.borrow().resolve_fn(&home, &written).is_some() {
-            let name = written.join("::");
-            return Err(EvalError::Internal(format!(
-                "eval: call of the user-defined function `{}`: not until the checker lowers function bodies",
-                name
-            )));
+        let path = path_field(&s, form, 2, "call")?;
+        if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
+            return self.enter(&mut s, &f, argv);
         }
+        // Otherwise a built-in operator, which lives at the root and so is
+        // always spelled as a bare name.
         if written.len() == 1 {
             if let Some(result) = self.eval_builtin(&mut s, &written[0], &argv) {
                 return result;
             }
         }
-        Err(EvalError::NoSuchFunction(written.join("::")))
+        Err(EvalError::NoSuchFunction(path.to_string()))
+    }
+
+    /// `(assoc PATH SYM INSTANCE (HOME...) RET-REPR (REPR...) ARG...)` — a
+    /// method call. The receiver, when there is one, is `args[0]`.
+    ///
+    /// The two representation fields are the bridge's: evaluation is uniform
+    /// over `Value`, and even the built-in container methods need no element
+    /// type any more (see `eval_builtin_method`).
+    fn assoc_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        let type_name = path_field(heap, form, 0, "assoc")?;
+        let method = sym_field(heap, form, 1, "assoc")?;
+        let home = self.name_list(heap, form, 3, "assoc")?;
+
+        let mut s = RootScope::new(heap);
+        let argv = self.eval_rest(&mut s, form, 6, env, "assoc")?;
+
+        let f = self.root.borrow().resolve_method(&home, &type_name, &method);
+        match f {
+            Some(f) => self.enter(&mut s, &f, argv),
+            None => match super::eval_builtin_method(&mut s, &type_name, &method, &argv) {
+                Some(result) => result,
+                None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
+            },
+        }
+    }
+
+    /// `(dyn-call PATH SYM SLOT VTABLE (REPR...) ARG...)` — a call through a
+    /// trait object's vtable.
+    ///
+    /// `args[0]` is the fat box; the callee is an ordinary method body with an
+    /// ordinary receiver, so the concrete value is substituted in its place and
+    /// nothing about the callee knows it was reached dynamically.
+    fn dyn_call_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        let trait_path = path_field(heap, form, 0, "dyn-call")?;
+        let method = sym_field(heap, form, 1, "dyn-call")?;
+        let slot = int_field(heap, form, 2, "dyn-call")? as usize;
+
+        let mut s = RootScope::new(heap);
+        let mut argv = self.eval_rest(&mut s, form, 5, env, "dyn-call")?;
+
+        let (vtable_id, inner) = match argv.first() {
+            Some(Value::Boxed(id)) if s.is_dyn(*id) => (s.dyn_vtable_id(*id), s.dyn_value(*id)),
+            other => {
+                return Err(EvalError::Internal(format!(
+                    "eval: (dyn-call {}::{} ..): receiver is not a trait object ({:?})",
+                    trait_path, method, other
+                )))
+            }
+        };
+        let target = self.vtables.borrow().get(vtable_id as usize).and_then(|slots| slots.get(slot)).cloned();
+        let Some((target_type, target_method)) = target else {
+            return Err(EvalError::Internal(format!(
+                "eval: (dyn-call {}::{} ..): vtable {} has no slot {}",
+                trait_path, method, vtable_id, slot
+            )));
+        };
+        argv[0] = inner;
+        s.push_root(inner);
+        // Visibility was settled where the value was boxed
+        // (`Checker::dyn_vtable_slots` went through the `impl`), so this is the
+        // direct lookup, not `resolve_method`'s `home`-relative one.
+        let f = self.root.borrow().get_method(&target_type, &target_method);
+        match f {
+            Some(f) => self.enter(&mut s, &f, argv),
+            None => Err(EvalError::NoSuchFunction(format!("{}::{}", target_type, target_method))),
+        }
+    }
+
+    /// `(global (WRITTEN...) (HOME...) PATH REPR)` — read a `defvar`.
+    ///
+    /// A global some compiled function reads or writes lives in a permanent GC
+    /// root instead of an ordinary cell (`Interp::promote_global`), and must be
+    /// read from that same storage here — otherwise an interpreted read could
+    /// see a stale value a compiled write already updated, even though both
+    /// sides name the same `defvar`.
+    fn global_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
+        let written = self.name_list(heap, form, 0, "global")?;
+        let home = self.name_list(heap, form, 1, "global")?;
+        let path = path_field(heap, form, 2, "global")?;
+        if let Some(&id) = self.compiled_globals.borrow().get(&path) {
+            // `id` is *not* the permanent-root position — see
+            // `typelisp_rt::global_new`'s doc comment (an `Option`/`Result`
+            // global's own heap-referencing field pushes its own extra
+            // permanent root during encoding, desyncing the two) — so
+            // `global_perm_idx` resolves it the same way `rt_global_get` does.
+            let perm_idx = crate::compile::runtime::global_perm_idx(id)
+                .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id)))?;
+            // No decode: with one value world left, a stored word *is* the
+            // value (see `eval_builtin_method`'s doc comment).
+            return Ok(heap.permanent_root(perm_idx));
+        }
+        self.resolve_global_named(&home, &written, &path)
+            .map(|slot| slot.get(heap))
+            .ok_or_else(|| EvalError::Unbound(path.to_string()))
+    }
+
+    /// `(set-global (WRITTEN...) (HOME...) PATH REPR FORM)` — assign a
+    /// `defvar`. Returns unit, like every other assignment.
+    fn set_global_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        let written = self.name_list(heap, form, 0, "set-global")?;
+        let home = self.name_list(heap, form, 1, "set-global")?;
+        let path = path_field(heap, form, 2, "set-global")?;
+        let value = core::field(heap, form, 4)
+            .ok_or_else(|| EvalError::Internal("eval: (set-global ..) has no value form".to_string()))?;
+
+        let mut s = RootScope::new(heap);
+        let v = self.eval_core(&mut s, value, env)?;
+        s.push_root(v);
+        // See `global_core` for why a promoted global is written through the
+        // permanent root rather than its cell.
+        if let Some(&id) = self.compiled_globals.borrow().get(&path) {
+            let perm_idx = crate::compile::runtime::global_perm_idx(id)
+                .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id)))?;
+            s.set_permanent_root(perm_idx, v);
+            return Ok(Value::Empty);
+        }
+        match self.resolve_global_named(&home, &written, &path) {
+            Some(slot) => {
+                slot.set(&mut s, v)?;
+                Ok(Value::Empty)
+            }
+            None => Err(EvalError::Unbound(path.to_string())),
+        }
+    }
+
+    /// `(fnref (WRITTEN...) (HOME...) PATH (PARAM-REPR...))` — a named free
+    /// function as a value.
+    ///
+    /// A user function becomes an ordinary interpreted closure over its own
+    /// parameters and body with an *empty* captured environment: a top-level
+    /// `defun` has nothing to capture. A built-in becomes a `BoxedObj::Builtin`
+    /// naming it, which `apply_core` dispatches by name.
+    fn fnref_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
+        let written = self.name_list(heap, form, 0, "fnref")?;
+        let home = self.name_list(heap, form, 1, "fnref")?;
+        let path = path_field(heap, form, 2, "fnref")?;
+        match self.resolve_fn_named(&home, &written, &path) {
+            Some(f) => self.reify(heap, &f),
+            None => Ok(heap.alloc_builtin_fn(None, path.last_segment())),
+        }
+    }
+
+    /// `(methodref PATH SYM (HOME...) (PARAM-REPR...))` — [`Self::fnref_core`]
+    /// for a method.
+    fn methodref_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
+        let type_name = path_field(heap, form, 0, "methodref")?;
+        let method = sym_field(heap, form, 1, "methodref")?;
+        let home = self.name_list(heap, form, 2, "methodref")?;
+        let f = self.root.borrow().resolve_method(&home, &type_name, &method);
+        match f {
+            Some(f) => self.reify(heap, &f),
+            None => {
+                let recv = crate::types::intern_path_id(heap, &type_name);
+                Ok(heap.alloc_builtin_fn(Some(recv), &method))
+            }
+        }
+    }
+
+    /// `(compile-fn (fn (WRITTEN...) (HOME...) PATH))` or
+    /// `(compile-fn (method PATH SYM (HOME...)))` — the `(compile name)` form.
+    ///
+    /// The nested `(fn ..)`/`(method ..)` payload is read back into the
+    /// `CompileTarget` the compile driver takes. That type is a *resolution*,
+    /// not an AST node, which is why it outlived the typed AST.
+    fn compile_fn_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
+        let payload = core::field(heap, form, 0)
+            .ok_or_else(|| EvalError::Internal("eval: (compile-fn ..) has no target".to_string()))?;
+        let target = match core::op(heap, payload) {
+            Some("fn") => {
+                let written = self.name_list(heap, payload, 0, "compile-fn/fn")?;
+                let home = self.name_list(heap, payload, 1, "compile-fn/fn")?;
+                let resolved = path_field(heap, payload, 2, "compile-fn/fn")?;
+                crate::CompileTarget::Fn(crate::check::Ref { written, home, resolved })
+            }
+            Some("method") => {
+                let type_name = path_field(heap, payload, 0, "compile-fn/method")?;
+                let method = sym_field(heap, payload, 1, "compile-fn/method")?;
+                let home = self.name_list(heap, payload, 2, "compile-fn/method")?;
+                crate::CompileTarget::Method { type_name, method, home }
+            }
+            other => {
+                return Err(EvalError::Internal(format!(
+                    "eval: (compile-fn ..) target is `{:?}`, expected `fn` or `method`",
+                    other
+                )))
+            }
+        };
+        self.compile_function(heap, &target)
+    }
+
+    /// Evaluate a node's trailing argument forms, rooting each for the whole
+    /// run: an argument built three allocations ago is just as collectible as
+    /// the one being built now.
+    fn eval_rest(
+        &self,
+        s: &mut RootScope<'_>,
+        form: Value,
+        skip: usize,
+        env: Value,
+        what: &str,
+    ) -> Result<Vec<Value>, EvalError> {
+        let fields = core::fields(s, form).map_err(|e| EvalError::Internal(format!("eval: ({} ..): {}", what, e)))?;
+        if fields.len() < skip {
+            return Err(EvalError::Internal(format!("eval: malformed {}: {}", what, core::print(s, form))));
+        }
+        let arg_forms = fields[skip..].to_vec();
+        let mut argv = Vec::with_capacity(arg_forms.len());
+        for a in &arg_forms {
+            let v = self.eval_core(s, *a, env)?;
+            s.push_root(v);
+            argv.push(v);
+        }
+        Ok(argv)
+    }
+
+    /// Call `f` with already-evaluated `argv`: through its compiled body if it
+    /// has one, otherwise by tree-walking.
+    ///
+    /// The compiled check comes first so a later recompile would naturally take
+    /// precedence. `compile_function` never populates `compiled` without going
+    /// through `compiled_fn_body`, which requires `sig` — so the `expect` is an
+    /// internal invariant, not a user-reachable error.
+    fn enter(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<Value, EvalError> {
+        let compiled = f.compiled.borrow().clone();
+        if let Some(compiled) = compiled {
+            let sig = f.sig.as_ref().expect("a compiled function always has a type signature");
+            return self.call_compiled(heap, &compiled, &argv, &sig.0, &sig.1);
+        }
+        self.apply(heap, f, argv)
+    }
+
+    /// A registered function as a closure value, capturing nothing.
+    ///
+    /// A `defun`/`defmethod` body is closed over its parameters alone, so the
+    /// captured environment is empty — which is what lets a named function be
+    /// reified without any of `lambda`'s capture analysis.
+    ///
+    /// The parameter list is rebuilt in the *lambda* shape, `((SYM REPR) ...)`,
+    /// because that is what a closure box holds and what `apply_core` reads back
+    /// (`param_names` takes each entry's `car`). `FnDef` keeps names and
+    /// representations apart, so they are zipped back together here; a function
+    /// registered without a signature (a `defmacro` lambda) has no
+    /// representations to zip, and unit stands in — nothing reads them on this
+    /// path, since an interpreted apply is uniform over `Value`.
+    fn reify(&self, heap: &mut Heap, f: &Rc<FnDef>) -> Result<Value, EvalError> {
+        let mut s = RootScope::new(heap);
+        let reprs = f.sig.as_ref().map(|(ps, _)| ps.as_slice()).unwrap_or(&[]);
+        let mut params = Value::Empty;
+        for (i, name) in f.params.iter().enumerate().rev() {
+            let sym = s.intern_symbol(name);
+            s.push_root(sym);
+            let repr = match reprs.get(i) {
+                Some(r) => r.write(&mut s).map_err(heap_err)?,
+                None => Value::Empty,
+            };
+            s.push_root(repr);
+            s.push_root(params);
+            let one = s.cons(repr, Value::Empty).map_err(heap_err)?;
+            s.push_root(one);
+            let one = s.cons(sym, one).map_err(heap_err)?;
+            s.push_root(one);
+            params = s.cons(one, params).map_err(heap_err)?;
+        }
+        s.push_root(params);
+        let mut body = Value::Empty;
+        for form in f.body.iter().rev() {
+            s.push_root(body);
+            body = s.cons(*form, body).map_err(heap_err)?;
+        }
+        s.push_root(body);
+        Ok(s.alloc_closure(params, body, Value::Empty))
+    }
+
+    /// [`Interp::resolve_fn_ref`] from a core form's own three name fields.
+    ///
+    /// The `written`/`home` ancestor walk first, `resolved` only as the
+    /// fallback — see `resolve_fn_ref`'s doc comment for why both exist.
+    fn resolve_fn_named(&self, home: &[String], written: &[String], resolved: &crate::Path) -> Option<Rc<FnDef>> {
+        self.root.borrow().resolve_fn(home, written).or_else(|| self.root.borrow().get_fn(resolved))
+    }
+
+    /// [`Self::resolve_fn_named`]'s twin for `global`/`set-global`.
+    fn resolve_global_named(
+        &self,
+        home: &[String],
+        written: &[String],
+        resolved: &crate::Path,
+    ) -> Option<crate::eval::value::Slot> {
+        self.root.borrow().resolve_global(home, written).or_else(|| self.root.borrow().get_global(resolved))
     }
 
     /// A field holding a list of symbols (`written`, `home`), as strings.
@@ -852,7 +1238,7 @@ impl Interp {
 /// allocates a cell and two conses per binding, and any of them can collect.
 /// The result is *not* rooted — the caller roots it, or hands it straight to
 /// something that does.
-fn extend_env(heap: &mut Heap, binds: &[(SymId, Value)], env: Value) -> Result<Value, EvalError> {
+pub(crate) fn extend_env(heap: &mut Heap, binds: &[(SymId, Value)], env: Value) -> Result<Value, EvalError> {
     // No bindings, no frame. `progn` is `(let () ...)` and a `_` match arm
     // binds nothing, so this is the common case, not an edge one: consing an
     // empty frame for each would put an allocation (and so a possible
@@ -926,11 +1312,13 @@ fn match_core_pattern(heap: &mut Heap, pat: Value, v: Value) -> Result<Option<Ve
             // Field 2 is the downcast flag. The interpreter applies the type
             // guard below either way, so it changes nothing here; it is the
             // *compiled* side that emits an instance test only when it is set.
+            // Field 3 is the per-field representation list, for the bridge
+            // only — the interpreter binds a field as the value it already is.
             let subs = core::fields(heap, pat).map_err(|e| EvalError::Internal(format!("eval: (pat-ctor ..): {}", e)))?;
-            if subs.len() < 3 {
+            if subs.len() < 4 {
                 return Err(EvalError::Internal(format!("eval: malformed pattern: {}", core::print(heap, pat))));
             }
-            let subs = subs[3..].to_vec();
+            let subs = subs[4..].to_vec();
             match_ctor(heap, &path, variant, &subs, v)
         }
         "pat-typetest" => {
@@ -950,7 +1338,7 @@ fn match_core_pattern(heap: &mut Heap, pat: Value, v: Value) -> Result<Option<Ve
     }
 }
 
-/// `(pat-ctor PATH N DOWNCAST P...)` against `v`.
+/// `(pat-ctor PATH N DOWNCAST (REPR...) P...)` against `v`.
 ///
 /// The `PATH` guard is what keeps two unrelated ADTs that happen to share a
 /// shape apart once a heterogeneous `Sexpr` can hold either — a variant index
@@ -1291,6 +1679,418 @@ fn heap_err(e: typelisp_mem::Error) -> EvalError {
     EvalError::Internal(format!("eval: {}", e))
 }
 
+// ---- the top level -------------------------------------------------------
+
+impl Interp {
+    /// Execute one top-level core form: register a definition, or evaluate an
+    /// expression and return its value.
+    ///
+    /// The ten top-level tags (`tests/core_vocabulary_test.rs`'s `top_level`)
+    /// are the vocabulary `TopLevel`'s Rust enum used to be. Note what is
+    /// *absent*: there is no arm skipping a type-erased generic body. The
+    /// checker emits `(module PATH)` and nothing else for a generic template
+    /// (it keeps the raw reader form and emits only monomorphized
+    /// specializations), so the two "must never run" special cases the old
+    /// `exec` carried have nothing left to skip.
+    pub fn exec(&self, heap: &mut Heap, tl: Value) -> Result<Option<Value>, EvalError> {
+        let tag = match heap.car(tl) {
+            Ok(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
+            _ => {
+                return Err(EvalError::Internal(format!(
+                    "exec: not a top-level core form: {}",
+                    core::print(heap, tl)
+                )))
+            }
+        };
+        match tag.as_str() {
+            // `(defun PATH ((SYM REPR)...) RET-REPR PUBLIC BODY...)`
+            "defun" => {
+                let name = path_field(heap, tl, 0, "defun")?;
+                let (params, param_reprs) = param_list(heap, tl, 1, "defun")?;
+                let ret = repr_field(heap, tl, 2, "defun")?;
+                let public = bool_field(heap, tl, 3, "defun")?;
+                let body = body_forms(heap, tl, 4, "defun")?;
+                self.register_fn(heap, tl, name, params, param_reprs, ret, public, body, false, None);
+                Ok(None)
+            }
+            // `(defmethod PATH SYM INSTANCE ((SYM REPR)...) RET-REPR PUBLIC BODY...)`
+            //
+            // The receiver is simply the first parameter, so there is no
+            // `self_name` to splice in ahead of the rest the way the old node's
+            // separate field needed.
+            "defmethod" => {
+                let type_name = path_field(heap, tl, 0, "defmethod")?;
+                let method = sym_field(heap, tl, 1, "defmethod")?;
+                let _instance = bool_field(heap, tl, 2, "defmethod")?;
+                let (params, param_reprs) = param_list(heap, tl, 3, "defmethod")?;
+                let ret = repr_field(heap, tl, 4, "defmethod")?;
+                let public = bool_field(heap, tl, 5, "defmethod")?;
+                let body = body_forms(heap, tl, 6, "defmethod")?;
+                heap.push_permanent_root(tl);
+                let def = FnDef {
+                    params,
+                    body,
+                    rest: false,
+                    lambda: None,
+                    sig: Some((param_reprs, ret)),
+                    public,
+                    compiled: RefCell::new(None),
+                };
+                self.root
+                    .borrow_mut()
+                    .get_or_create(type_name.parent())
+                    .methods
+                    .insert((type_name.last_segment().to_string(), method), Rc::new(def));
+                Ok(None)
+            }
+            // `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...)) PUBLIC BODY...)`
+            //
+            // A macro's body is callable exactly like a `defun`'s — expanding
+            // it is calling it — so it goes in the very same `fns` table; no
+            // separate macro table exists.
+            "defmacro" => {
+                let name = path_field(heap, tl, 0, "defmacro")?;
+                let params = sym_list_field(heap, tl, 1, "defmacro")?;
+                let rest = bool_field(heap, tl, 2, "defmacro")?;
+                let lambda = macro_lambda(heap, tl, 3)?;
+                let public = bool_field(heap, tl, 4, "defmacro")?;
+                let body = body_forms(heap, tl, 5, "defmacro")?;
+                heap.push_permanent_root(tl);
+                let def = FnDef {
+                    params,
+                    body,
+                    rest,
+                    lambda: Some(lambda),
+                    sig: None,
+                    public,
+                    compiled: RefCell::new(None),
+                };
+                self.root
+                    .borrow_mut()
+                    .get_or_create(name.parent())
+                    .fns
+                    .insert(name.last_segment().to_string(), Rc::new(def));
+                Ok(None)
+            }
+            // `(defvar PATH REPR MUTABLE PUBLIC FORM)`
+            //
+            // The representation is not read: it used to pick the global's slot
+            // kind, which no longer varies. `mutable` is the checker's business
+            // (it rejects a write to a constant), not the runtime's.
+            "defvar" => {
+                let name = path_field(heap, tl, 0, "defvar")?;
+                let public = bool_field(heap, tl, 3, "defvar")?;
+                let value = core::field(heap, tl, 4)
+                    .ok_or_else(|| EvalError::Internal("exec: (defvar ..) has no initializer".to_string()))?;
+                let v = self.eval_core(heap, value, Value::Empty)?;
+                let mut s = RootScope::new(heap);
+                s.push_root(v);
+                let slot = self.slot(&mut s, v);
+                self.root
+                    .borrow_mut()
+                    .get_or_create(name.parent())
+                    .globals
+                    .insert(name.last_segment().to_string(), scope::GlobalDef { slot, public });
+                Ok(None)
+            }
+            // The type itself was registered in the checker's `Registry` at
+            // check time; recording the `TypeEntry` is all the interpreter
+            // needs (see `scope::TypeEntry`'s doc comment).
+            "defstruct" => {
+                let name = path_field(heap, tl, 0, "defstruct")?;
+                let fields = core::field(heap, tl, 1)
+                    .ok_or_else(|| EvalError::Internal("exec: (defstruct ..) has no field list".to_string()))?;
+                let fields = repr_list(heap, fields, "defstruct")?;
+                self.root
+                    .borrow_mut()
+                    .get_or_create(name.parent())
+                    .types
+                    .insert(name.last_segment().to_string(), scope::TypeEntry::Struct(fields));
+                Ok(None)
+            }
+            // `(defenum PATH (SYM...) ((REPR...)...))` — unlike `defstruct`
+            // this is *not* a `TypeEntry::Struct` (an enum instance is never a
+            // boxed struct), but its variants are recorded: the printer needs
+            // the names and the compiled-global boundary needs each field's
+            // representation.
+            "defenum" => {
+                let name = path_field(heap, tl, 0, "defenum")?;
+                let names = sym_list_field(heap, tl, 1, "defenum")?;
+                let per_variant = core::field(heap, tl, 2)
+                    .ok_or_else(|| EvalError::Internal("exec: (defenum ..) has no variant fields".to_string()))?;
+                let lists = heap
+                    .list_to_vec(per_variant)
+                    .map_err(|e| EvalError::Internal(format!("exec: (defenum ..) variant fields: {}", e)))?;
+                if lists.len() != names.len() {
+                    return Err(EvalError::Internal(format!(
+                        "exec: (defenum ..) has {} variant name(s) but {} field list(s)",
+                        names.len(),
+                        lists.len()
+                    )));
+                }
+                let mut variants = Vec::with_capacity(names.len());
+                for (n, fields) in names.into_iter().zip(lists) {
+                    variants.push((n, repr_list(heap, fields, "defenum")?));
+                }
+                self.root.borrow_mut().register_enum(&name, EnumDef { variants });
+                Ok(None)
+            }
+            // `(module PATH BODY...)` — ensures the tree node exists (a
+            // "mkdir -p") before its body registers into it. It does not have
+            // to *stay* current: every nested definition's own path is
+            // absolute regardless of nesting, so registration is direct
+            // descent from `self.root` rather than relative to a cursor.
+            //
+            // Not permanently rooted itself: each definition inside roots its
+            // own form, which is one root per definition and covers everything
+            // that outlives this call. The module's own spine does not.
+            "module" => {
+                let path = path_field(heap, tl, 0, "module")?;
+                self.root.borrow_mut().get_or_create(path.segments());
+                let body = body_forms(heap, tl, 1, "module")?;
+                let mut s = RootScope::new(heap);
+                s.push_root(tl);
+                let mut last = None;
+                for t in body {
+                    last = self.exec(&mut s, t)?;
+                }
+                Ok(last)
+            }
+            "use" => Ok(None),
+            // `(expr FORM)`
+            "expr" => {
+                let form = core::field(heap, tl, 0)
+                    .ok_or_else(|| EvalError::Internal("exec: (expr ..) has no form".to_string()))?;
+                let v = self.eval_core(heap, form, Value::Empty);
+                // A `pprint-logical-block` is normally closed by the `let` the
+                // special form lowers to, but a `break`/`return` that jumps out
+                // of the block (or an error unwinding past it) skips that close
+                // and would leave the session open — every later `print`
+                // silently buffered into a document nobody flushes. A top-level
+                // form is the widest a block can ever span, so closing any
+                // still-open one here is both the right boundary and a complete
+                // safety net.
+                self.flush_pretty()?;
+                Ok(Some(v?))
+            }
+            // `(load ...)` is resolved and applied by the *driver* at check
+            // time (`project::load_file_flat`), never reaching exec — the
+            // driver consumes it inline rather than queuing it. Reaching here
+            // would be a driver bug.
+            "load" => Err(EvalError::Internal(
+                "exec: (load ..) must be handled by the driver, not exec'd".to_string(),
+            )),
+            other => Err(EvalError::Internal(format!("exec: no top-level form `{}`", other))),
+        }
+    }
+
+    /// Apply a registered function/method body: bind its parameters to `args`
+    /// and run its core forms.
+    ///
+    /// The environment is a heap chain (`extend_env`), the same one a `lambda`'s
+    /// captured environment is, so a nested closure in the body captures the
+    /// parameters by the ordinary mechanism rather than a second one.
+    pub(crate) fn apply(&self, heap: &mut Heap, def: &FnDef, args: Vec<Value>) -> Result<Value, EvalError> {
+        if def.params.len() != args.len() {
+            return Err(EvalError::Internal(format!(
+                "apply: the body takes {} argument(s), given {}",
+                def.params.len(),
+                args.len()
+            )));
+        }
+        let mut s = RootScope::new(heap);
+        // The arguments are the only thing holding these values while the
+        // environment chain is built, and building it allocates.
+        for a in &args {
+            s.push_root(*a);
+        }
+        let binds: Vec<(SymId, Value)> = def
+            .params
+            .iter()
+            .zip(args)
+            .map(|(name, v)| {
+                let sym = match s.intern_symbol(name) {
+                    Value::Symbol(id) => id,
+                    _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
+                };
+                (sym, v)
+            })
+            .collect();
+        let env = extend_env(&mut s, &binds, Value::Empty)?;
+        s.push_root(env);
+        let Some((last, rest)) = def.body.split_last() else {
+            return Ok(Value::Empty);
+        };
+        for e in rest {
+            self.eval_core(&mut s, *e, env)?;
+        }
+        self.eval_core(&mut s, *last, env)
+    }
+
+    /// The shared tail of `defun` registration — see `FnDef::body` for why the
+    /// form is permanently rooted here.
+    #[allow(clippy::too_many_arguments)]
+    fn register_fn(
+        &self,
+        heap: &mut Heap,
+        tl: Value,
+        name: crate::Path,
+        params: Vec<String>,
+        param_reprs: Vec<Repr>,
+        ret: Repr,
+        public: bool,
+        body: Vec<Value>,
+        rest: bool,
+        lambda: Option<MacroLambda>,
+    ) {
+        heap.push_permanent_root(tl);
+        let def = FnDef { params, body, rest, lambda, sig: Some((param_reprs, ret)), public, compiled: RefCell::new(None) };
+        self.root
+            .borrow_mut()
+            .get_or_create(name.parent())
+            .fns
+            .insert(name.last_segment().to_string(), Rc::new(def));
+    }
+}
+
+/// A field holding an interned symbol, as a `String`.
+fn sym_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, EvalError> {
+    match core::field(heap, form, i) {
+        Some(Value::Symbol(id)) => Ok(heap.symbol_name(id).to_string()),
+        other => Err(EvalError::Internal(format!("exec: ({} ..) field {} is not a symbol: {:?}", what, i, other))),
+    }
+}
+
+/// A field holding a representation.
+fn repr_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Repr, EvalError> {
+    let v = core::field(heap, form, i)
+        .ok_or_else(|| EvalError::Internal(format!("exec: ({} ..) has no field {}", what, i)))?;
+    Repr::read(heap, v).ok_or_else(|| {
+        EvalError::Internal(format!("exec: ({} ..) field {} is not a representation: {}", what, i, core::print(heap, v)))
+    })
+}
+
+/// A list of representations, e.g. one variant's field reprs.
+fn repr_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<Repr>, EvalError> {
+    let vs = heap
+        .list_to_vec(list)
+        .map_err(|e| EvalError::Internal(format!("exec: ({} ..) representation list: {}", what, e)))?;
+    vs.into_iter()
+        .map(|v| {
+            Repr::read(heap, v).ok_or_else(|| {
+                EvalError::Internal(format!("exec: ({} ..) not a representation: {}", what, core::print(heap, v)))
+            })
+        })
+        .collect()
+}
+
+/// A field holding a parameter list `((SYM REPR)...)`, split into the names it
+/// binds and their representations.
+fn param_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<(Vec<String>, Vec<Repr>), EvalError> {
+    let list = core::field(heap, form, i)
+        .ok_or_else(|| EvalError::Internal(format!("exec: ({} ..) has no parameter list", what)))?;
+    let ps = heap
+        .list_to_vec(list)
+        .map_err(|e| EvalError::Internal(format!("exec: ({} ..) parameter list: {}", what, e)))?;
+    let mut names = Vec::with_capacity(ps.len());
+    let mut reprs = Vec::with_capacity(ps.len());
+    for p in ps {
+        let parts = heap
+            .list_to_vec(p)
+            .map_err(|e| EvalError::Internal(format!("exec: ({} ..) parameter: {}", what, e)))?;
+        match parts.as_slice() {
+            [Value::Symbol(sym), r] => {
+                names.push(heap.symbol_name(*sym).to_string());
+                reprs.push(Repr::read(heap, *r).ok_or_else(|| {
+                    EvalError::Internal(format!("exec: ({} ..) parameter representation: {}", what, core::print(heap, *r)))
+                })?);
+            }
+            _ => {
+                return Err(EvalError::Internal(format!(
+                    "exec: ({} ..) parameter is not (SYM REPR): {}",
+                    what,
+                    core::print(heap, p)
+                )))
+            }
+        }
+    }
+    Ok((names, reprs))
+}
+
+/// A field holding a bare symbol list `(SYM...)` — a `defmacro`'s parameters
+/// (all `Sexpr`, so no representations) or a `defenum`'s variant names.
+fn sym_list_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<String>, EvalError> {
+    let list = core::field(heap, form, i)
+        .ok_or_else(|| EvalError::Internal(format!("exec: ({} ..) has no field {}", what, i)))?;
+    let vs = heap
+        .list_to_vec(list)
+        .map_err(|e| EvalError::Internal(format!("exec: ({} ..) symbol list: {}", what, e)))?;
+    vs.into_iter()
+        .map(|v| match v {
+            Value::Symbol(id) => Ok(heap.symbol_name(id).to_string()),
+            other => Err(EvalError::Internal(format!("exec: ({} ..) not a symbol: {:?}", what, other))),
+        })
+        .collect()
+}
+
+/// Everything from field `skip` onward — a definition's body forms.
+fn body_forms(heap: &Heap, form: Value, skip: usize, what: &str) -> Result<Vec<Value>, EvalError> {
+    let all = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("exec: ({} ..): {}", what, e)))?;
+    Ok(all.get(skip..).unwrap_or(&[]).to_vec())
+}
+
+/// `(REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...))` — a `defmacro`'s
+/// `&optional`/`&key` structure.
+fn macro_lambda(heap: &Heap, form: Value, i: usize) -> Result<MacroLambda, EvalError> {
+    let v = core::field(heap, form, i)
+        .ok_or_else(|| EvalError::Internal("exec: (defmacro ..) has no lambda-list structure".to_string()))?;
+    let parts = heap
+        .list_to_vec(v)
+        .map_err(|e| EvalError::Internal(format!("exec: (defmacro ..) lambda list: {}", e)))?;
+    let [required, opts, keys] = parts.as_slice() else {
+        return Err(EvalError::Internal(format!(
+            "exec: (defmacro ..) lambda list is not (REQUIRED OPTIONALS KEYS): {}",
+            core::print(heap, v)
+        )));
+    };
+    let required = match required {
+        Value::Int(n) if *n >= 0 => *n as usize,
+        other => {
+            return Err(EvalError::Internal(format!(
+                "exec: (defmacro ..) required count is not a non-negative integer: {:?}",
+                other
+            )))
+        }
+    };
+    let opt_lists = heap
+        .list_to_vec(*opts)
+        .map_err(|e| EvalError::Internal(format!("exec: (defmacro ..) optionals: {}", e)))?;
+    let mut optionals = Vec::with_capacity(opt_lists.len());
+    for one in opt_lists {
+        optionals.push(
+            heap.list_to_vec(one)
+                .map_err(|e| EvalError::Internal(format!("exec: (defmacro ..) optional default: {}", e)))?,
+        );
+    }
+    let key_entries = heap
+        .list_to_vec(*keys)
+        .map_err(|e| EvalError::Internal(format!("exec: (defmacro ..) keys: {}", e)))?;
+    let mut key_defaults = Vec::with_capacity(key_entries.len());
+    for entry in key_entries {
+        let parts = heap
+            .list_to_vec(entry)
+            .map_err(|e| EvalError::Internal(format!("exec: (defmacro ..) key: {}", e)))?;
+        let Some((Value::Symbol(sym), default)) = parts.split_first().map(|(h, t)| (*h, t)) else {
+            return Err(EvalError::Internal(format!(
+                "exec: (defmacro ..) key is not (SYM BODY...): {}",
+                core::print(heap, entry)
+            )));
+        };
+        key_defaults.push((heap.symbol_name(sym).to_string(), default.to_vec()));
+    }
+    Ok(MacroLambda { required, optionals, keys: key_defaults })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1533,7 +2333,7 @@ mod tests {
     }
 
     /// The trampoline's reason for existing. The old evaluator had an
-    /// iterative special case for `Expr::If` alone, because a long `cond`
+    /// iterative special case for `if` alone, because a long `cond`
     /// expands into an `if` nested in the *else* position and recursing
     /// through it overflowed the stack. Here it is a jump, so the depth costs
     /// nothing.
@@ -1655,23 +2455,18 @@ mod tests {
         }
     }
 
-    /// A tag with no evaluation yet names itself, rather than being taken for
-    /// something else. That is what keeps the passing count an honest measure
-    /// of progress while the tags are implemented one at a time.
+    /// A tag with no evaluation names itself, rather than being taken for
+    /// something else.
     ///
-    /// The first example moves as stages land — it named `loop` until `loop`
-    /// was implemented, and this test failing for that reason is the measure
-    /// working, not breaking. `unlowered` is the fixed half: it is
-    /// scaffolding, so it never gets an evaluation at all.
+    /// This used to have two halves: one naming whichever vocabulary tag was
+    /// not implemented yet (it named `loop`, then `assoc`, each example moving
+    /// as a stage landed), and `unlowered`. **Every vocabulary tag now
+    /// evaluates**, so the moving half has nothing left to name and is gone —
+    /// which is the measure arriving, not breaking. `unlowered` is the fixed
+    /// half: it is scaffolding, so it never gets an evaluation at all.
     #[test]
     fn a_tag_with_no_evaluation_names_itself() {
         let mut h = stress_heap();
-        let e = eval_src(&mut h, "(assoc i64 + true () (int 1) (int 2))").unwrap_err();
-        assert!(
-            matches!(e.kind(), EvalError::Internal(m) if m.contains("`assoc`")),
-            "{:?}",
-            e
-        );
         let e = eval_src(&mut h, r#"(unlowered "CheckWhile")"#).unwrap_err();
         assert!(
             matches!(e.kind(), EvalError::Internal(m) if m.contains("`unlowered`")),
@@ -1689,13 +2484,13 @@ mod tests {
     fn a_struct_is_built_read_and_written_through_the_same_box() {
         let mut h = stress_heap();
         assert_eq!(
-            eval_ok(&mut h, "(field-get (construct point 0 true (int 1) (int 2)) 1 int)"),
+            eval_ok(&mut h, "(field-get (construct point 0 true (int int) (int 1) (int 2)) 1 int)"),
             Value::Int(2)
         );
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((p sexpr (construct point 0 true (int 1) (int 2))))
+                "(let ((p sexpr (construct point 0 true (int int) (int 1) (int 2))))
                    (let ((q sexpr (var p)))
                      (field-set (var q) 0 int (int 9))
                      (field-get (var p) 0 int)))",
@@ -1712,7 +2507,7 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((p sexpr (construct point 0 true (int 1) (int 2))))
+                "(let ((p sexpr (construct point 0 true (int int) (int 1) (int 2))))
                    (field-set (var p) 0 sexpr (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 8) (unit)))
                    (call (sexpr-car) () sexpr-car (sexpr) (field-get (var p) 0 int)))",
             ),
@@ -1725,7 +2520,7 @@ mod tests {
     #[test]
     fn an_enum_carries_its_variant_and_fields() {
         let mut h = stress_heap();
-        let v = eval_ok(&mut h, "(construct my-enum 2 false (int 41) (bool true))");
+        let v = eval_ok(&mut h, "(construct my-enum 2 false (int bool) (int 41) (bool true))");
         match v {
             Value::Boxed(id) => {
                 assert!(h.is_enum(id), "expected an enum box");
@@ -1744,10 +2539,10 @@ mod tests {
     #[test]
     fn constructing_a_sexpr_datum() {
         let mut h = stress_heap();
-        assert_eq!(eval_ok(&mut h, "(construct sexpr 0 false)"), Value::Empty);
-        assert_eq!(eval_ok(&mut h, "(construct sexpr 1 false (int 3))"), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, "(construct sexpr 0 false ())"), Value::Empty);
+        assert_eq!(eval_ok(&mut h, "(construct sexpr 1 false (int) (int 3))"), Value::Int(3));
 
-        let v = eval_ok(&mut h, "(construct sexpr 7 false (int 1) (int 2))");
+        let v = eval_ok(&mut h, "(construct sexpr 7 false (sexpr sexpr) (int 1) (int 2))");
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
 
@@ -1755,7 +2550,7 @@ mod tests {
         // datum is `eq` to the string it was built from.
         let v = eval_ok(
             &mut h,
-            r#"(let ((s sexpr (str "hi"))) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var s) (construct sexpr 6 false (var s))))"#,
+            r#"(let ((s sexpr (str "hi"))) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var s) (construct sexpr 6 false (str) (var s))))"#,
         );
         assert_eq!(h.car(v).unwrap(), h.cdr(v).unwrap());
     }
@@ -1818,17 +2613,17 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct point 0 true (int 1) (int 2)) struct
-                   ((pat-ctor point 0 false (pat-bind a) (pat-bind b)) (var b)))",
+                "(match (construct point 0 true (int int) (int 1) (int 2)) struct
+                   ((pat-ctor point 0 false (int int) (pat-bind a) (pat-bind b)) (var b)))",
             ),
             Value::Int(2)
         );
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct my-enum 1 false (int 42)) struct
-                   ((pat-ctor my-enum 0 false (pat-bind x)) (int 0))
-                   ((pat-ctor my-enum 1 false (pat-bind x)) (var x)))",
+                "(match (construct my-enum 1 false (int) (int 42)) struct
+                   ((pat-ctor my-enum 0 false (int) (pat-bind x)) (int 0))
+                   ((pat-ctor my-enum 1 false (int) (pat-bind x)) (var x)))",
             ),
             Value::Int(42)
         );
@@ -1843,8 +2638,8 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct point 0 true (int 1)) struct
-                   ((pat-ctor other 0 false (pat-bind a)) (int 10))
+                "(match (construct point 0 true (int int) (int 1)) struct
+                   ((pat-ctor other 0 false (int) (pat-bind a)) (int 10))
                    ((pat-wild) (int 99)))",
             ),
             Value::Int(99)
@@ -1858,13 +2653,13 @@ mod tests {
             eval_ok(
                 &mut h,
                 "(match (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1) (int 2)) sexpr
-                   ((pat-ctor sexpr 0 false) (int 100))
-                   ((pat-ctor sexpr 7 false (pat-bind a) (pat-bind d)) (var d)))",
+                   ((pat-ctor sexpr 0 false ()) (int 100))
+                   ((pat-ctor sexpr 7 false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))",
             ),
             Value::Int(2)
         );
         assert_eq!(
-            eval_ok(&mut h, "(match (unit) unit ((pat-ctor sexpr 0 false) (int 100)) ((pat-wild) (int 0)))"),
+            eval_ok(&mut h, "(match (unit) unit ((pat-ctor sexpr 0 false ()) (int 100)) ((pat-wild) (int 0)))"),
             Value::Int(100)
         );
     }
@@ -1900,7 +2695,7 @@ mod tests {
 
         let form = read1(
             &mut h,
-            "(match (var p) sexpr ((pat-ctor sexpr 10 false (pat-bind segs))
+            "(match (var p) sexpr ((pat-ctor sexpr 10 false (sexpr) (pat-bind segs))
                (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 0) (var segs))))",
         );
         h.push_root(form);
@@ -1945,9 +2740,9 @@ mod tests {
         let form = read1(
             &mut h,
             "(match (var v) sexpr
-               ((pat-ctor sexpr 7 false
-                  (pat-ctor sexpr 10 false (pat-bind l))
-                  (pat-ctor sexpr 10 false (pat-bind r)))
+               ((pat-ctor sexpr 7 false (sexpr sexpr)
+                  (pat-ctor sexpr 10 false (sexpr) (pat-bind l))
+                  (pat-ctor sexpr 10 false (sexpr) (pat-bind r)))
                  (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var l) (var r))))",
         );
         h.push_root(form);
@@ -1970,8 +2765,8 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(match (construct point 0 true (int 7) (int 8)) struct
-               ((pat-ctor point 0 false (pat-bind a) (pat-bind b))
+            "(match (construct point 0 true (int int) (int 7) (int 8)) struct
+               ((pat-ctor point 0 false (int int) (pat-bind a) (pat-bind b))
                  (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1) (int 2))
                  (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var a) (var b))))",
         );
@@ -2127,18 +2922,18 @@ mod tests {
     fn a_lambda_is_applied_to_its_arguments() {
         let mut h = stress_heap();
         assert_eq!(
-            eval_ok(&mut h, "(apply (lambda ((x int)) int (var x)) (int) (int 5))"),
+            eval_ok(&mut h, "(apply (lambda ((x int)) int (var x)) int (int) (int 5))"),
             Value::Int(5)
         );
         assert_eq!(
-            eval_ok(&mut h, "(apply (lambda () int (int 7)) () )"),
+            eval_ok(&mut h, "(apply (lambda () int (int 7)) int () )"),
             Value::Int(7)
         );
         // Parameters shadow an outer binding of the same name.
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((x int (int 1))) (apply (lambda ((x int)) int (var x)) (int) (int 2)))",
+                "(let ((x int (int 1))) (apply (lambda ((x int)) int (var x)) int (int) (int 2)))",
             ),
             Value::Int(2)
         );
@@ -2156,7 +2951,7 @@ mod tests {
                 "(let ((n int (int 10)))
                    (let ((f sexpr (lambda () int (var n))))
                      (let ((n int (int 99)))
-                       (apply (var f) ()))))",
+                       (apply (var f) int ()))))",
             ),
             Value::Int(10)
         );
@@ -2174,7 +2969,7 @@ mod tests {
                 "(let ((n int (int 1)))
                    (let ((f sexpr (lambda () int (var n))))
                      (set n (int 42))
-                     (apply (var f) ())))",
+                     (apply (var f) int ())))",
             ),
             Value::Int(42)
         );
@@ -2183,14 +2978,14 @@ mod tests {
     #[test]
     fn applying_the_wrong_number_of_arguments_says_so() {
         let mut h = stress_heap();
-        let e = eval_src(&mut h, "(apply (lambda ((x int)) int (var x)) ())").unwrap_err();
+        let e = eval_src(&mut h, "(apply (lambda ((x int)) int (var x)) int ())").unwrap_err();
         assert!(matches!(e.kind(), EvalError::Internal(m) if m.contains("arity mismatch")), "{:?}", e);
     }
 
     #[test]
     fn applying_something_that_is_not_a_function_says_so() {
         let mut h = stress_heap();
-        let e = eval_src(&mut h, "(apply (int 1) ())").unwrap_err();
+        let e = eval_src(&mut h, "(apply (int 1) int ())").unwrap_err();
         assert!(matches!(e.kind(), EvalError::Internal(m) if m.contains("not a function")), "{:?}", e);
     }
 
@@ -2202,9 +2997,9 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(labels ((f ((x int)) int (apply (var g) (int) (var x)))
+                "(labels ((f ((x int)) int (apply (var g) int (int) (var x)))
                           (g ((y int)) int (var y)))
-                   (apply (var f) (int) (int 3)))",
+                   (apply (var f) int (int) (int 3)))",
             ),
             Value::Int(3)
         );
@@ -2215,8 +3010,8 @@ mod tests {
                 "(labels ((f ((xs sexpr)) sexpr
                             (if (call (sexpr-null) () sexpr-null (sexpr) (var xs))
                                 (int 0)
-                                (apply (var f) (sexpr) (call (sexpr-cdr) () sexpr-cdr (sexpr) (var xs))))))
-                   (apply (var f) (sexpr) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1)
+                                (apply (var f) sexpr (sexpr) (call (sexpr-cdr) () sexpr-cdr (sexpr) (var xs))))))
+                   (apply (var f) sexpr (sexpr) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1)
                                     (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 2) (unit)))))",
             ),
             Value::Int(0)
@@ -2255,8 +3050,8 @@ mod tests {
             "(labels ((walk ((l sexpr)) sexpr
                         (if (call (sexpr-null) () sexpr-null (sexpr) (var l))
                             (int 0)
-                            (apply (var walk) (sexpr) (call (sexpr-cdr) () sexpr-cdr (sexpr) (var l))))))
-               (apply (var walk) (sexpr) (var xs)))",
+                            (apply (var walk) sexpr (sexpr) (call (sexpr-cdr) () sexpr-cdr (sexpr) (var l))))))
+               (apply (var walk) sexpr (sexpr) (var xs)))",
         );
         h.push_root(form);
 
@@ -2312,7 +3107,7 @@ mod tests {
         };
         let env = extend_env(&mut h, &[(name, f)], Value::Empty).unwrap();
         h.push_root(env);
-        let call = read1(&mut h, "(apply (var g) (int) (int 5))");
+        let call = read1(&mut h, "(apply (var g) int (int) (int 5))");
         h.push_root(call);
         h.gc();
 
@@ -2320,29 +3115,36 @@ mod tests {
         assert_eq!(v, Value::Int(5));
     }
 
-    /// A closure value is opaque to `apply`'s two other callee kinds, and
-    /// each says which one it is rather than being taken for a closure.
+    /// A built-in used as a function value is dispatched *by name* — the box
+    /// carries only which name (and, for a method, which receiver type), so it
+    /// goes through the very same `eval_builtin_method` a direct `(+ a b)` call
+    /// site does. `+` is a method on `i64`, not a free builtin, so the box
+    /// carries the receiver type.
+    ///
+    /// This test used to assert the opposite: that `apply` *refused* a
+    /// compiled closure and a built-in value, naming which kind each was. Both
+    /// refusals were Stage A scaffolding, and both are now real evaluation. The
+    /// compiled-closure half cannot be tested here at all — it needs a genuine
+    /// function pointer, and a fabricated one is jumped to and segfaults rather
+    /// than being rejected — so that case belongs to `compile_test`, which has
+    /// real compiled code to hand.
     #[test]
-    fn a_compiled_callee_is_named_rather_than_guessed_at() {
+    fn a_builtin_used_as_a_function_value_dispatches_by_name() {
         let mut h = stress_heap();
-        let form = read1(&mut h, "(apply (var f) ())");
+        let form = read1(&mut h, "(apply (var f) int (int int) (int 1) (int 2))");
         h.push_root(form);
-        let fake = h.alloc_compiled_closure(0, Vec::new(), 0);
-        h.push_root(fake);
+        let recv = crate::types::intern_path_id(&mut h, &crate::Path::root("i64"));
+        let plus = h.alloc_builtin_fn(Some(recv), "+");
+        h.push_root(plus);
         let name = match h.intern_symbol("f") {
             Value::Symbol(id) => id,
             _ => unreachable!(),
         };
-        let env = extend_env(&mut h, &[(name, fake)], Value::Empty).unwrap();
+        let env = extend_env(&mut h, &[(name, plus)], Value::Empty).unwrap();
         h.push_root(env);
 
         let interp = Interp::new();
-        let e = interp.eval_core(&mut h, form, env).unwrap_err();
-        assert!(
-            matches!(e.kind(), EvalError::Internal(m) if m.contains("compiled closure")),
-            "{:?}",
-            e
-        );
+        assert_eq!(interp.eval_core(&mut h, form, env).expect("applying `+` failed"), Value::Int(3));
     }
 
     // ---- quote -----------------------------------------------------------
@@ -2385,7 +3187,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            r#"(dyn-new "point" shape ((point area)) () struct (construct point 0 true (int 3)))"#,
+            r#"(dyn-new "point" shape ((point area)) () struct (construct point 0 true (int int) (int 3)))"#,
         );
         h.push_root(v);
         match v {
@@ -2394,7 +3196,7 @@ mod tests {
         }
         let inner = eval_ok(
             &mut h,
-            r#"(field-get (dyn-value (dyn-new "point" shape ((point area)) () struct (construct point 0 true (int 3)))) 0 int)"#,
+            r#"(field-get (dyn-value (dyn-new "point" shape ((point area)) () struct (construct point 0 true (int int) (int 3)))) 0 int)"#,
         );
         assert_eq!(inner, Value::Int(3));
     }
@@ -2409,7 +3211,7 @@ mod tests {
         let v = eval_ok(
             &mut h,
             r#"(dyn-upcast named
-                 (dyn-new "point" shape ((point area)) ((named ((point name)))) struct (construct point 0 true (int 3))))"#,
+                 (dyn-new "point" shape ((point area)) ((named ((point name)))) struct (construct point 0 true (int int) (int 3))))"#,
         );
         h.push_root(v);
         let inner = match v {
@@ -2439,7 +3241,7 @@ mod tests {
         let form = read1(
             &mut h,
             r#"(let ((b sexpr (dyn-new "point" shape ((point area)) ((named ((point name))))
-                                struct (construct point 0 true (int 3)))))
+                                struct (construct point 0 true (int int) (int 3)))))
                  (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var b) (dyn-upcast shape (var b))))"#,
         );
         h.push_root(form);
@@ -2459,7 +3261,7 @@ mod tests {
             &mut h,
             r#"(dyn-upcast never-registered
                  (dyn-new "point" shape ((point area)) ((named ((point name))))
-                   struct (construct point 0 true (int 3))))"#,
+                   struct (construct point 0 true (int int) (int 3))))"#,
         )
         .unwrap_err();
         assert!(

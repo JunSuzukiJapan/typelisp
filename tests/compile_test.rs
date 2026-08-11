@@ -5628,10 +5628,10 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
     let defs = ["(defstruct point (int int))", "(defenum maybe-int (none some) (() (int)))"];
     let body = bridge_to_island_text_with(
         &defs,
-        "(let ((p struct (construct point 0 true (var a) (var b))))
-           (match (construct maybe-int 1 false (field-get (var p) 1 int)) enum
-             ((pat-ctor maybe-int 0 false) (int -1))
-             ((pat-ctor maybe-int 1 false (pat-bind x)) (var x))))",
+        "(let ((p struct (construct point 0 true (int int) (var a) (var b))))
+           (match (construct maybe-int 1 false (int) (field-get (var p) 1 int)) enum
+             ((pat-ctor maybe-int 0 false ()) (int -1))
+             ((pat-ctor maybe-int 1 false (int) (pat-bind x)) (var x))))",
     );
     let src = compile_function_source("second", "((a . 0) (b . 0))", &body);
     let ir = eval_string_with_compiler(&format!("(to-string {})", src));
@@ -5701,10 +5701,10 @@ fn the_island_runs_a_bridged_labels_block() {
         "(labels ((go ((n int) (acc int)) int
                     (if (assoc i64 < true () bool (int int) (var n) (int 1))
                         (var acc)
-                        (apply (var go) (int int)
+                        (apply (var go) int (int int)
                           (assoc i64 - true () int (int int) (var n) (int 1))
                           (assoc i64 * true () int (int int) (var acc) (var n))))))
-           (apply (var go) (int int) (var a) (int 1)))",
+           (apply (var go) int (int int) (var a) (int 1)))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
         "fact",
@@ -5740,7 +5740,7 @@ fn the_island_accepts_a_bridged_escaping_closure() {
     let body = bridge_to_island_text(
         "(let ((n int (var a)))
            (let ((f fn (lambda ((x int)) int (assoc i64 + true () int (int int) (var x) (var n)))))
-             (apply (var f) (int) (int 1))))",
+             (apply (var f) int (int) (int 1))))",
     );
     // The capture really is a cell on both sides of the boundary.
     assert!(body.contains("(n . 11)"), "the captured binding should be a cell: {}", body);

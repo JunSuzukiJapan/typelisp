@@ -63,52 +63,36 @@ fn eval_ok_with_prelude(src: &str) -> (Value, Heap) {
     run_with_prelude(src).expect("eval failed")
 }
 
-/// Like [`run_with_capacity`], but checks against a separate, generously
-/// sized heap with the prelude loaded — needed for `dotimes`/`while` (now
-/// `defmacro`s in `src/prelude.rs`, expanded during checking, not
-/// checker-native special forms) — while still *executing* against a heap
-/// of exactly `capacity` cells, so a small `capacity` still stresses the GC
-/// the way `run_with_capacity` alone would. The execution phase reuses
-/// `check_interp` itself (its `Interp.fns` already has the prelude's
-/// `defun`s registered, `not` included — `not` moved from a Rust builtin to
-/// a plain prelude `defun` in the `loop`/`break`/`return`/`setf` stage, so
-/// unlike `loop`/`if`/`break`/`setf`/... a fresh, prelude-less `Interp` can
-/// no longer evaluate `while`'s expansion) rather than a second, fresh
-/// `Interp::new()` — `Interp` carries no heap state of its own (every `exec`
-/// call takes one as an explicit argument), so this doesn't tie the
-/// GC-pressure heap to `check_heap`'s large one (see `eval_test.rs`'s
-/// `runtime_cons_cells_survive_gc_when_rooted` for the same fix).
+/// Runs `src` with the prelude loaded and **a collection before every
+/// allocation** (`gc_stress`), returning the heap alongside the value so a
+/// `Sexpr` result can be read out of it.
 ///
-/// All but the *last* form are also `exec`'d (cloned first) against
-/// `check_interp`/`check_heap` as they're checked, not just collected —
-/// `src` may itself define a macro (e.g. `listify`) used by a later form
-/// (e.g. `build`), and `MacroExpander::expand_macro` needs that macro
-/// already registered in `check_interp` *before* the form using it is
-/// checked, the same per-form check-then-exec interleaving
-/// `crate::prelude::load` itself uses. The last form (the actual
-/// GC-stress loop) is deliberately left un-exec'd here — it only ever
-/// needs to run once, against the tiny heap below.
-fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(Value, Heap), EvalError> {
-    let mut check_heap = Heap::with_capacity(1 << 16);
+/// There is no `capacity` parameter any more, and that absence is the point.
+/// These tests used to check against a roomy heap and then execute
+/// against a 96-cell one so the churn forced repeated collections; that is not
+/// expressible any more. Since the checker lowers code into cons cells, the
+/// checked program *is* cells in the heap it was checked against, and handing it
+/// to a second heap reads those cells through the wrong symbol/string tables
+/// (`sym_names` is empty there). A 96-cell heap could not hold the prelude, let
+/// alone the program. Stressing one heap is both the honest shape and strictly
+/// stronger pressure — a collection before *every* allocation, not only before
+/// the ones a small arena happens to block on. See `eval_test.rs`'s
+/// `eval_under_gc_pressure`, which this mirrors.
+///
+/// Stress goes on *after* the prelude loads: it is large, and collecting through
+/// it would dominate the runtime without testing anything these cases are about.
+fn run_with_prelude_under_gc_stress(src: &str) -> Result<(Value, Heap), EvalError> {
+    let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
-    let mut check_interp = Interp::new();
-    load_prelude(&mut check_heap, &mut chk, &mut check_interp);
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    h.set_gc_stress(true);
     let r = Reader::new();
-    let vs = r.read_all(&mut check_heap, src).expect("read failed");
-    let n = vs.len();
-    let mut tls = Vec::with_capacity(n);
-    for (i, v) in vs.into_iter().enumerate() {
-        let tl = chk.check_form(&mut check_heap, &check_interp, v).expect("check failed");
-        if i + 1 < n {
-            check_interp.exec(&mut check_heap, tl.clone()).expect("eval failed");
-        }
-        tls.push(tl);
-    }
-
-    let mut h = Heap::with_capacity(capacity);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for tl in tls {
-        if let Some(val) = check_interp.exec(&mut h, tl)? {
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl)? {
             last = val;
         }
     }
@@ -190,13 +174,12 @@ fn quote_survives_gc_pressure() {
     // recursive build (each iteration's literal becomes garbage as soon as
     // the next iteration overwrites `last`, so the heap must actually reclaim
     // and reuse cells to keep up).
-    let (v, h) = run_with_capacity_and_prelude(
+    let (v, h) = run_with_prelude_under_gc_stress(
         "(defun build () Sexpr (quote (a (b c) (d (e f)) g)))
          (let ((last (quote ())))
            (dotimes (i 500)
              (setf last (build)))
            last)",
-        64,
     )
     .expect("eval failed");
     assert_eq!(as_sexpr_string(v, &h), "(a (b c) (d (e f)) g)");
@@ -357,14 +340,13 @@ fn macro_expansion_survives_gc_pressure() {
     // allocates via quasiquote's `Expr::Construct{Cons,..}` nodes, and the
     // expansion result must stay rooted across that) — the regression test
     // for `Interp::expand_macro`'s push_root/pop_root discipline.
-    let (v, h) = run_with_capacity_and_prelude(
+    let (v, h) = run_with_prelude_under_gc_stress(
         "(defmacro listify (a b c) `(list ,a ,b ,c))
          (defun build () Sexpr (listify (quote x) (quote y) (quote z)))
          (let ((last (quote ())))
            (dotimes (i 500)
              (setf last (build)))
            last)",
-        64,
     )
     .expect("eval failed");
     assert_eq!(as_sexpr_string(v, &h), "(x y z)");
@@ -441,14 +423,13 @@ fn rest_arg_list_construction_survives_gc_pressure() {
     // above, but targeting `&rest` collection specifically). The 5 trailing
     // args are bare symbols (not `(quote x)` forms) so the captured list is
     // a flat 5-cell spine, matching `listify`'s per-iteration cost above.
-    let (v, h) = run_with_capacity_and_prelude(
+    let (v, h) = run_with_prelude_under_gc_stress(
         "(defmacro capture (a &rest rest) `(quote ,rest))
          (defun build () Sexpr (capture 0 a b c d e))
          (let ((last (quote ())))
            (dotimes (i 500)
              (setf last (build)))
            last)",
-        96,
     )
     .expect("eval failed");
     assert_eq!(as_sexpr_string(v, &h), "(a b c d e)");
@@ -688,14 +669,13 @@ fn optional_default_construction_survives_gc_pressure() {
     // partially-built binding environment (`Interp::bind_macro_args`' Heap
     // cells) — the `&optional`/`&key` analogue of
     // `rest_arg_list_construction_survives_gc_pressure`.
-    let (v, h) = run_with_capacity_and_prelude(
+    let (v, h) = run_with_prelude_under_gc_stress(
         "(defmacro deflt (&optional (xs (quote (a b c)))) `(quote ,xs))
          (defun build () Sexpr (deflt))
          (let ((last (quote ())))
            (dotimes (i 500)
              (setf last (build)))
            last)",
-        96,
     )
     .expect("eval failed");
     assert_eq!(as_sexpr_string(v, &h), "(a b c)");

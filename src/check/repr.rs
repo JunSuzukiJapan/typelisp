@@ -9,7 +9,7 @@
 //! system that has to survive lowering, and this is it.
 //!
 //! Two properties are the point of putting it here rather than leaving the
-//! classification in `compile::ast_bridge`:
+//! classification in `compile::core_bridge`:
 //!
 //! * **The checker never learns the island's kind numbers.** It writes a
 //!   [`Repr`] and nothing else; turning one into the integer

@@ -4,13 +4,16 @@
 //! reference it — the interpreter never executes a type-erased generic body
 //! (`Interp::exec` skips registering one entirely).
 //!
-//! The specializations ride along in a synthetic `TopLevel::Module` bundle
+//! The specializations ride along in a synthetic `(module ...)` bundle
 //! (path `MONO_BUNDLE_MODULE`, specializations first, primary form last) so
 //! every existing check→exec pipeline picks them up unchanged — the shape
 //! tests below pin that contract down.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader, Value, TopLevel, MONO_BUNDLE_MODULE, Path};
+use typelisp::check::core;
+use typelisp::{
+    load_compiler, load_prelude, Checker, Error, Heap, Interp, Path, Reader, TopLevelForm, Value, MONO_BUNDLE_MODULE,
+};
 
 fn run(src: &str) -> Result<Value, Error> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -39,24 +42,60 @@ fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
-/// Check every form (without executing) and return each form's `TopLevel`.
-fn check_all(src: &str) -> Result<Vec<TopLevel>, Error> {
+/// Check every form (without executing) and return each form's core form, plus
+/// the `Heap` they live in — a checked form is cons cells, so the tree means
+/// nothing without its heap.
+fn check_all(src: &str) -> Result<(Heap, Vec<TopLevelForm>), Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    vs.into_iter().map(|v| chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)).collect()
+    let mut tls = Vec::new();
+    for v in vs {
+        tls.push(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
+    }
+    Ok((h, tls))
 }
 
-/// The specialization `Defun`s bundled with `tl` (empty if `tl` isn't a
-/// monomorph bundle).
-fn bundled_specs(tl: &TopLevel) -> Vec<&TopLevel> {
-    match tl {
-        TopLevel::Module { path, body } if *path == Path::root(MONO_BUNDLE_MODULE) => {
-            body[..body.len() - 1].iter().collect()
-        }
-        _ => Vec::new(),
+/// The specialization forms bundled with `tl` — everything but the primary form
+/// the bundle ends with. Empty if `tl` isn't a monomorph bundle.
+fn bundled_specs(h: &Heap, tl: TopLevelForm) -> Vec<TopLevelForm> {
+    if core::op(h, tl) != Some("module") {
+        return Vec::new();
+    }
+    // `(module PATH BODY...)` — the path decides whether this is *the* bundle.
+    let fields = core::fields(h, tl).expect("a module's fields are a proper list");
+    let is_bundle = match fields[0] {
+        Value::Path(id) => typelisp::path_from_id(h, id) == Path::root(MONO_BUNDLE_MODULE),
+        Value::Symbol(id) => h.symbol_name(id) == MONO_BUNDLE_MODULE,
+        _ => false,
+    };
+    if !is_bundle {
+        return Vec::new();
+    }
+    let body = &fields[1..];
+    body[..body.len() - 1].to_vec()
+}
+
+/// A `(defun PATH ...)` form's name.
+fn defun_name(h: &Heap, tl: TopLevelForm) -> Path {
+    assert_eq!(core::op(h, tl), Some("defun"), "expected a defun form");
+    match core::field(h, tl, 0).expect("a defun always names itself") {
+        Value::Path(id) => typelisp::path_from_id(h, id),
+        Value::Symbol(id) => Path::root(h.symbol_name(id)),
+        other => panic!("a defun's name is a path or symbol, got {:?}", other),
+    }
+}
+
+/// A `(defmethod PATH SYM ...)` form's method name.
+fn defmethod_name(h: &Heap, tl: TopLevelForm) -> Option<String> {
+    if core::op(h, tl) != Some("defmethod") {
+        return None;
+    }
+    match core::field(h, tl, 1).expect("a defmethod always names its method") {
+        Value::Symbol(id) => Some(h.symbol_name(id).to_string()),
+        other => panic!("a defmethod's method name is a symbol, got {:?}", other),
     }
 }
 
@@ -64,49 +103,47 @@ fn bundled_specs(tl: &TopLevel) -> Vec<&TopLevel> {
 
 #[test]
 fn an_instantiating_call_comes_back_bundled_with_its_specialization() {
-    let tls = check_all("(defun identity<T> ((x T)) T x) (identity 42)").unwrap();
-    // The generic definition itself needs no specializations.
-    assert!(matches!(&tls[0], TopLevel::Defun { type_params, .. } if !type_params.is_empty()));
-    // The call comes back as [specialization, call] — one concrete Defun.
-    let specs = bundled_specs(&tls[1]);
+    let (h, tls) = check_all("(defun identity<T> ((x T)) T x) (identity 42)").unwrap();
+    // The generic definition itself has no core form at all: an erased body is
+    // never executed, so it lowers to an empty `(module PATH)` — see
+    // `Checker::defun_form_unless_generic`.
+    assert_eq!(core::op(&h, tls[0]), Some("module"));
+    assert_eq!(core::fields(&h, tls[0]).unwrap().len(), 1, "path only, no body");
+    // The call comes back as [specialization, call] — one concrete defun.
+    let specs = bundled_specs(&h, tls[1]);
     assert_eq!(specs.len(), 1);
-    match specs[0] {
-        TopLevel::Defun { name, type_params, .. } => {
-            assert!(type_params.is_empty(), "a specialization is fully concrete");
-            assert!(
-                name.last_segment().contains(' '),
-                "mangled names contain a space so no reader token can collide: {:?}",
-                name
-            );
-        }
-        other => panic!("expected a specialized Defun, got {:?}", other),
-    }
+    let name = defun_name(&h, specs[0]);
+    assert!(
+        name.last_segment().contains(' '),
+        "mangled names contain a space so no reader token can collide: {:?}",
+        name
+    );
 }
 
 #[test]
 fn two_calls_at_the_same_type_in_one_form_share_one_specialization() {
-    let tls = check_all(
+    let (h, tls) = check_all(
         "(defun identity<T> ((x T)) T x) \
          (defun use2 () i32 (+ (identity 1) (identity 2)))",
     )
     .unwrap();
-    assert_eq!(bundled_specs(&tls[1]).len(), 1);
+    assert_eq!(bundled_specs(&h, tls[1]).len(), 1);
 }
 
 #[test]
 fn calls_at_different_types_get_independent_specializations() {
-    let tls = check_all(
+    let (h, tls) = check_all(
         "(defun identity<T> ((x T)) T x) \
          (defun use2 () i32 (if (identity true) (identity 1) 0))",
     )
     .unwrap();
-    assert_eq!(bundled_specs(&tls[1]).len(), 2);
+    assert_eq!(bundled_specs(&h, tls[1]).len(), 2);
 }
 
 #[test]
 fn a_non_generic_call_is_not_bundled() {
-    let tls = check_all("(defun id ((x i32)) i32 x) (id 7)").unwrap();
-    assert!(matches!(&tls[1], TopLevel::Expr(_)));
+    let (h, tls) = check_all("(defun id ((x i32)) i32 x) (id 7)").unwrap();
+    assert_eq!(core::op(&h, tls[1]), Some("expr"));
 }
 
 // ---- evaluation through specializations --------------------------------------
@@ -216,7 +253,7 @@ fn a_type_parameter_shadows_a_user_type_of_the_same_name() {
 
 #[test]
 fn a_method_on_a_generic_type_specializes_at_the_call_site() {
-    let tls = check_all(
+    let (h, tls) = check_all(
         "(defstruct box<T> (v T)) \
          (defmethod get-v ((self box<T>)) T self::v) \
          (get-v (box::new 42))",
@@ -224,17 +261,8 @@ fn a_method_on_a_generic_type_specializes_at_the_call_site() {
     .unwrap();
     // The call bundles the specialized `get-v` — and, transitively, the
     // specialized `v` field getter its body's `self::v` needs.
-    let specs = bundled_specs(&tls[2]);
-    let methods: Vec<&str> = specs
-        .iter()
-        .filter_map(|tl| match tl {
-            TopLevel::Defmethod { method, type_params, .. } => {
-                assert!(type_params.is_empty(), "specializations are concrete");
-                Some(method.as_str())
-            }
-            _ => None,
-        })
-        .collect();
+    let specs = bundled_specs(&h, tls[2]);
+    let methods: Vec<String> = specs.iter().filter_map(|tl| defmethod_name(&h, *tl)).collect();
     assert!(methods.iter().any(|m| m.starts_with("get-v <")), "specialized get-v in {:?}", methods);
     assert!(methods.iter().any(|m| m.starts_with("v <")), "transitively specialized getter in {:?}", methods);
 }
@@ -359,7 +387,8 @@ fn a_generic_function_value_without_type_context_is_a_check_error() {
     // annotation is mandatory.)
     match check_all("(defun identity<T> ((x T)) T x) (let ((f identity)) 0)") {
         Err(Error::TypeError(msg)) => assert!(msg.contains("generic function"), "unexpected: {}", msg),
-        other => panic!("expected TypeError, got {:?}", other),
+        Err(other) => panic!("expected TypeError, got {:?}", other),
+        Ok(_) => panic!("expected TypeError, got a successful check"),
     }
 }
 
@@ -380,7 +409,8 @@ fn a_generic_function_value_in_a_typed_defvar_specializes() {
 fn compiling_a_generic_function_is_a_check_error() {
     match check_all("(defun identity<T> ((x T)) T x) (compile identity)") {
         Err(Error::TypeError(msg)) => assert!(msg.contains("generic"), "unexpected: {}", msg),
-        other => panic!("expected TypeError, got {:?}", other),
+        Err(other) => panic!("expected TypeError, got {:?}", other),
+        Ok(_) => panic!("expected TypeError, got a successful check"),
     }
 }
 
@@ -427,6 +457,7 @@ fn polymorphic_recursion_is_a_type_error_not_a_hang() {
         Err(Error::TypeError(msg)) => {
             assert!(msg.contains("monomorphization"), "unexpected message: {}", msg)
         }
-        other => panic!("expected a TypeError, got {:?}", other),
+        Err(other) => panic!("expected a TypeError, got {:?}", other),
+        Ok(_) => panic!("expected a TypeError, got a successful check"),
     }
 }

@@ -14,7 +14,8 @@ use crate::{parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScop
 use crate::name_lexer::{NameLexer, NameTok};
 use super::semantic::{TypeKind, TypeUse};
 
-use super::ast::{Arm, CompileTarget, Expr, MacroLambda, Pattern, QuotedSexpr, Ref, Typed};
+use super::ast::{CompileTarget, Pattern, Ref};
+use super::core::{self, Checked, Items};
 use super::repr::Repr;
 use super::registry::{AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, VarInfo, Variant};
 
@@ -28,7 +29,7 @@ use super::registry::{AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Na
 /// Defined here (in `check`, not `eval`) and implemented by `Interp` in
 /// `eval/interp.rs`, so this module — pure static analysis otherwise — never
 /// has to name the concrete `Interp` type. `eval` already depends on
-/// `check`'s typed AST (`Expr`/`TopLevel`/`Typed`), so a direct `use
+/// `check`'s own resolution types (`Ref`/`CompileTarget`/`Pattern`), so a direct `use
 /// crate::eval::Interp` here would make the two modules mutually dependent;
 /// this trait keeps that dependency one-directional.
 /// Every Common Lisp comparison operator whose printed name contains a `<` or
@@ -111,97 +112,48 @@ pub trait MacroExpander {
     fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String>;
 }
 
-/// A checked top-level form.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum TopLevel {
-    /// A `defun`: fully-qualified [`Path`], typed parameters, return type, body.
-    /// `type_params` are the names declared by `(defun (name T1 T2...) ...)`
-    /// (empty for an ordinary, non-generic function) — the evaluator ignores
-    /// them (type information is erased before execution; see
-    /// `Checker::check_call`).
-    /// `params` includes a trailing `&rest` parameter's name last (bound to
-    /// a plain `Sexpr` list), exactly like `Defmacro::params` — see
-    /// `Checker::check_defun`/`parse_params_rest`.
-    Defun {
-        name: Path,
-        type_params: Vec<String>,
-        params: Vec<(String, Type)>,
-        ret: Type,
-        body: Vec<Typed>,
-        /// Whether this `defun` is `pub` — the runtime twin of `FnSig::public`
-        /// (`check::registry`), baked in here so `eval::scope::ModuleScope`'s
-        /// qualified-path resolution can enforce visibility without the
-        /// checker's `Registry` at runtime (see `eval::scope`'s module doc
-        /// comment).
-        public: bool,
-    },
-    /// A `defmethod`: instance or static associated function of a type.
-    Defmethod {
-        type_name: Path,
-        method: String,
-        instance: bool,
-        /// The receiver's variable name (e.g. `self`) for instance methods.
-        self_name: Option<String>,
-        params: Vec<(String, Type)>,
-        ret: Type,
-        body: Vec<Typed>,
-        /// The owner type's parameters as the receiver spelled them
-        /// (`(self Option<U>)` -> `["u"]`) when this is a *generic-owner*
-        /// method — the erased, diagnostics-only artifact `Interp::exec`
-        /// must skip, exactly like `Defun::type_params`; empty for a
-        /// concrete method or a generated specialization.
-        type_params: Vec<String>,
-        /// Whether this `defmethod` is `pub` — see `Defun::public`'s doc
-        /// comment; the runtime twin of `AssocFn.sig.public`.
-        public: bool,
-    },
-    /// A `defmacro`: a compile-time, `Sexpr`-to-`Sexpr` code transformer.
-    /// Stored as an ordinary callable body — calling it (at macro-expansion
-    /// time, via [`MacroExpander`]) is identical to calling a `defun`. `params`
-    /// lists every binding name in order: required, then `&optional`, then the
-    /// `&rest` name (when `rest` is true), then `&key` names — the `&optional`/
-    /// `&rest`/`&key` markers themselves dropped. `lambda` describes how the
-    /// non-required regions are filled at expansion time (default-value bodies,
-    /// keyword matching); see [`Checker::check_defmacro`] and [`MacroLambda`].
-    Defmacro { name: Path, params: Vec<String>, body: Vec<Typed>, rest: bool, lambda: MacroLambda, public: bool },
-    /// A `defvar`/`defconstant`: a global variable (`mutable`) or constant.
-    Defvar { name: Path, ty: Type, value: Typed, mutable: bool, public: bool },
-    /// A `module`: a namespace and its checked body forms.
-    Module { path: Path, body: Vec<TopLevel> },
-    /// A `use`: a name brought into the current scope (alias -> target path).
-    Use { alias: Path, target: Path },
-    /// A `defstruct`: registers a single-variant `AdtKind::Struct` type
-    /// (`Checker::check_defstruct`). Carries only the name — unlike
-    /// `Defun`/`Defmethod`, there's no body to run; the registry mutation
-    /// already happened at check time, and the constructor/field accessors
-    /// are ordinary `Type::ctor`/`defmethod` machinery reached through
-    /// `Expr::Construct`/`Assoc` at use sites, not through this node.
-    /// `Interp::exec` treats it as a no-op, the same as `Option`/`Result`
-    /// needing no runtime registration of their own.
-    Defstruct { name: Path },
-    /// A `defenum`: registers a multi-variant `AdtKind::Sum` type
-    /// (`Checker::check_defenum`). Variant construction/`match` are the same
-    /// `Expr::Construct`/`Expr::Match` machinery `Option`/`Result` already
-    /// use, and unlike `Defstruct` the name is *not* added to the
-    /// interpreter's `struct_types` set: an enum instance is an immutable
-    /// `RtValue::Data`, never a boxed struct. `params`/`variants` are the
-    /// type's declared parameters and each variant's field types, baked in
-    /// at check time (the checker always knows the types — the same
-    /// bake-into-the-AST principle `Expr::Construct`'s resolved fields
-    /// follow) so `Interp::exec` can record them in `Interp::enum_defs`:
-    /// the compiled-global boundary's box -> `RtValue::Data` decode
-    /// (`decode_data_value`) needs each variant's field types, and the
-    /// checker's `Registry` no longer exists by then.
-    Defenum { name: Path, params: Vec<String>, variants: Vec<Variant> },
-    /// A bare top-level expression.
-    Expr(Typed),
-    /// `(load "path")` — a CL-style flat load of another file's forms into
-    /// the *current* namespace (unlike `use`, which wraps a file in its own
-    /// module). The driver resolves `path` to a `.fasl` (compiled) or `.typl`
-    /// (source) file and loads it before checking subsequent forms; the
-    /// checker only records the request (it can't do file I/O itself). See
-    /// `crate::project::load_file_flat`.
-    Load { path: String },
+/// What checking a top-level form produces: a *core top-level form*, one of
+/// `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`/`defenum`/`module`/
+/// `use`/`load`/`expr` (`tests/core_vocabulary_test.rs` has an example of
+/// each).
+///
+/// This used to be a Rust `enum TopLevel`, and the change is the same one the
+/// expression side makes: the program is cons cells from the reader through to
+/// evaluation, so a definition is a form like any other. It buys two things
+/// beyond uniformity. The self-hosted compiler can be handed a definition
+/// directly — the old enum never reached the island, so the bridge had to
+/// express the boundary itself — and a `fasl` writes the same cons cells every
+/// other stored form is written as, with no second serialized shape.
+///
+/// Deliberately *not* in the vocabulary: a generic definition. The checker
+/// keeps those as raw reader forms in its own template tables and emits only
+/// monomorphized specializations, so nothing downstream needs a node for a
+/// body that must never run.
+pub type TopLevelForm = Value;
+
+/// The `&optional`/`&key` structure of a `defmacro` lambda list, beyond its
+/// leading required params (and any single trailing `&rest`, whose presence is
+/// tracked separately by the `rest` flag on the `defmacro` form).
+///
+/// The checker's own working shape while parsing a macro's lambda list; it is
+/// written into the `(defmacro ...)` form's own lambda field (see
+/// [`Checker::defmacro_form`]) and read back from there at expansion time, so
+/// this type does not outlive checking and needs no serialized form of its own.
+/// A default-value body is a list of core forms, evaluated when the argument is
+/// omitted in an environment where the earlier params are already bound (an
+/// empty body binds `nil`). A plain fixed-or-`&rest` macro carries a `required`
+/// equal to its fixed-param count with both `optionals` and `keys` empty (the
+/// common case).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MacroLambda {
+    /// Number of leading required (positional, non-defaulted) params — the
+    /// call's minimum argument count.
+    pub required: usize,
+    /// Default-value body for each `&optional` param, in order.
+    pub optionals: Vec<Vec<Value>>,
+    /// Each `&key` param's `(name, default-value body)`, in order — matched at
+    /// the call site by the keyword symbol `:name`.
+    pub keys: Vec<(String, Vec<Value>)>,
 }
 
 /// A `&rest` parameter's `(name, elem-type, name's source position)`, as
@@ -318,7 +270,7 @@ struct AssocCall<'a> {
     method: &'a str,
     /// `Some` for an instance call (already-checked receiver, fills the
     /// method's first parameter slot); `None` for a static call.
-    receiver: Option<Typed>,
+    receiver: Option<Checked>,
     /// The call site's expected type. Only consulted for a static call with
     /// no receiver to read concrete type arguments from (e.g. `HashTable::new`
     /// learning `K`/`V` the same way a field-less constructor like `None`
@@ -383,8 +335,8 @@ impl Definable for TraitDef {
 /// concrete instantiation — see [`Checker::specialize_defun`]. The checked
 /// `Typed` body can't serve this purpose: it was lowered once with the type
 /// variables still abstract, and everything the checker *derives* from types
-/// (`Expr::Construct::mutable`, `Pattern::Ctor::sexpr_fields`, method
-/// resolution, `Expr::TraitCall` vs `Expr::Assoc`) would have to be re-derived
+/// (`construct`'s `MUTABLE`, `Pattern::Ctor::sexpr_fields`, method
+/// resolution, an unresolved bounded-generic call vs `assoc`) would have to be re-derived
 /// anyway — re-running the checker on the source with the type variables
 /// bound (see `Checker::type_var_bindings`) gets all of that for free.
 #[derive(Clone)]
@@ -420,7 +372,7 @@ enum SpecRequest {
     Blanket { trait_path: Path, target: Type },
 }
 
-/// Everything a check records outside its returned [`Typed`] tree, captured
+/// Everything a check records outside its returned form, captured
 /// so a speculative check can be undone — see [`Checker::check_mark`] /
 /// [`Checker::rollback_to`].
 struct CheckMark {
@@ -556,7 +508,7 @@ pub struct Checker {
     /// `check_let`, `check_match`) an `Err` from a sub-check is recorded in
     /// [`Self::errors`] and replaced by a `Never`-typed hole node
     /// ([`Self::hole`]) so checking of the rest of the form/file continues and
-    /// a partial [`Typed`] tree still comes back. Defaults to `false`, which
+    /// a partial form still comes back. Defaults to `false`, which
     /// reproduces the strict "abort on first error" behaviour the CLI, REPL,
     /// prelude, and the test suite depend on — recovery is used only by the
     /// LSP (`diagnostics_for`/`candidates_for`), which needs a best-effort tree
@@ -577,6 +529,13 @@ pub struct Checker {
     /// boundary), so the registry's copy — the one the LSP snapshots — stays
     /// current without every recursive `check_*` helper needing `&mut self`.
     local_refs: RefCell<HashMap<(u32, u32), Loc>>,
+    /// Scratch accumulator for `DefLocs::node_types`, drained alongside
+    /// `local_refs` — same reason, same lifetime.
+    node_types: RefCell<HashMap<(u32, u32), Type>>,
+    /// The type of the top-level expression the last [`Self::check_form_at`]
+    /// checked, or `None` if that form was a definition — see
+    /// [`Self::expr_type`].
+    expr_ty: Option<Type>,
     /// Every generic `defun`'s retained source form, keyed by its
     /// fully-qualified path — see [`FnTemplate`].
     generic_fn_templates: HashMap<Path, FnTemplate>,
@@ -642,7 +601,7 @@ pub struct Checker {
     /// does know and its siblings can supply the rest ([`merge_holes`]).
     /// Never set while the retained tree is built: every probed arm that made
     /// a hole is re-checked with this clear, so a hole can only ever inform
-    /// an expectation, never survive into a `Typed` node.
+    /// an expectation, never survive into a lowered node.
     infer_probe: Cell<bool>,
     /// Holes ([`Self::infer_probe`]) made and still standing in the tree
     /// checked so far. Snapshotted around each probe and restored when the
@@ -664,6 +623,8 @@ impl Checker {
             recover: false,
             errors: RefCell::new(Vec::new()),
             local_refs: RefCell::new(HashMap::new()),
+            node_types: RefCell::new(HashMap::new()),
+            expr_ty: None,
             generic_fn_templates: HashMap::new(),
             generic_method_templates: HashMap::new(),
             spec_memo: RefCell::new(HashSet::new()),
@@ -742,37 +703,965 @@ impl Checker {
         self.repr(ty).write(heap)
     }
 
-    /// A `Never`-typed placeholder for a sub-expression that failed to check.
-    /// Reuses [`Expr::Panic`] (already `Never`-typed, already handled by every
-    /// downstream consumer — the interpreter, `ast_bridge`, `locate.rs`) rather
-    /// than adding a new `Expr` variant, so recovery needs no changes outside
-    /// the checker. `Type::Never` unifies with any expected type, so a hole
-    /// flowing into a typed position never produces a cascade of follow-on
-    /// errors. `loc` is the failing form's position, so `locate_node` can still
-    /// land the cursor on it for completion/hover.
-    fn hole(loc: Option<Loc>) -> Typed {
-        Typed {
-            expr: Expr::Panic(Box::new(Typed::new(Expr::Str("<check-error>".into()), Type::Str))),
-            ty: Type::Never,
-            loc,
+    /// One repr per type, as the parallel list every argument/parameter
+    /// position uses.
+    fn repr_forms(&self, heap: &mut Heap, tys: impl IntoIterator<Item = Type>) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        for ty in tys {
+            let r = self.repr(&ty).write(f.heap())?;
+            f.push(r);
         }
+        f.finish_list()
+    }
+
+    // ---- core-form builders -------------------------------------------
+    //
+    // One function per tag in `tests/core_vocabulary_test.rs`, so the shape a
+    // node is built in is written down exactly once and the reader who wants to
+    // know what `(assoc ...)`'s fields are can find the answer next to the
+    // consumers' own readers. Every one of them builds through `core::Items`,
+    // which keeps each finished field rooted until the node is assembled — see
+    // `check::core`'s module doc comment for why that is not optional.
+
+    /// `(var SYM)` — a reference to a local binding, by symbol identity.
+    /// **Returns a rooted form** — see [`Self::rooted`].
+    ///
+    /// Self-rooting, unlike most builders, because a `var`/`global` node is the
+    /// one kind routinely built *ahead* of the node that will hold it and then
+    /// kept in a Rust local while that node is assembled: it is the receiver of
+    /// a method call (`try_field_access`, `check_field_set`,
+    /// `check_setf_call_place`) or of a `sexpr` retype. `assoc_form` allocates a
+    /// type path, a method symbol, a `home` list, a return representation and
+    /// argument representations before `Items::extend` finally pushes the
+    /// receiver — so an unrooted receiver is collected and its cell recycled
+    /// into one of those, silently replacing `(var q)` with whatever was built
+    /// next. Rooting here rather than at each call site makes the rule
+    /// impossible to forget at the next one; the extra root-stack entry on the
+    /// ordinary path costs nothing, since `check_form_at`'s `truncate_roots`
+    /// releases them all at once regardless of how many there were.
+    fn var_form(&self, heap: &mut Heap, name: &str) -> Result<Value, Error> {
+        let sym = heap.intern_symbol(name);
+        let form = core::tagged(heap, "var", &[sym])?;
+        Ok(self.rooted(heap, form))
+    }
+
+    /// `(set SYM FORM)` — assignment to a local binding.
+    fn set_form(&self, heap: &mut Heap, name: &str, value: Value) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let sym = f.heap().intern_symbol(name);
+        f.push(sym);
+        f.push(value);
+        f.finish("set")
+    }
+
+    /// `(global (WRITTEN...) (HOME...) PATH REPR)`.
+    ///
+    /// Three names, because a global reference is three separate facts: what
+    /// was written at the reference site, the module it was written in, and the
+    /// absolute path the checker resolved it to. The evaluator re-derives the
+    /// target from the first two (see [`Ref`]); the compile pipeline, which has
+    /// no way to redo resolution, reads the third.
+    ///
+    /// **Returns a rooted form**, for the same reason [`Self::var_form`] does —
+    /// see there.
+    fn global_form(&self, heap: &mut Heap, r: &Ref, ty: &Type) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let written = sym_list(f.heap(), &r.written)?;
+        f.push(written);
+        let home = sym_list(f.heap(), &r.home)?;
+        f.push(home);
+        let path = path_form(f.heap(), &r.resolved);
+        f.push(path);
+        let repr = self.repr_form(f.heap(), ty)?;
+        f.push(repr);
+        let form = f.finish("global")?;
+        Ok(self.rooted(heap, form))
+    }
+
+    /// `(set-global (WRITTEN...) (HOME...) PATH REPR FORM)` — see
+    /// [`Self::global_form`] for the name triple.
+    fn set_global_form(&self, heap: &mut Heap, r: &Ref, ty: &Type, value: Value) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let written = sym_list(f.heap(), &r.written)?;
+        f.push(written);
+        let home = sym_list(f.heap(), &r.home)?;
+        f.push(home);
+        let path = path_form(f.heap(), &r.resolved);
+        f.push(path);
+        let repr = self.repr_form(f.heap(), ty)?;
+        f.push(repr);
+        f.push(value);
+        f.finish("set-global")
+    }
+
+    /// `(let ((SYM REPR FORM)...) BODY...)`.
+    ///
+    /// Also the only sequencing node: `progn` is `(let () ...)`, a `let` with
+    /// no bindings, so there is one shape for "run these in order" rather than
+    /// two.
+    fn let_form(&self, heap: &mut Heap, binds: &[(String, Type, Value)], body: &[Value]) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let mut bs = Items::new(f.heap());
+        for (name, ty, val) in binds {
+            let sym = bs.heap().intern_symbol(name);
+            let repr = self.repr_form(bs.heap(), ty)?;
+            let one = core::list(bs.heap(), &[sym, repr, *val])?;
+            bs.push(one);
+        }
+        let binds = bs.finish_list()?;
+        f.push(binds);
+        f.extend(body.iter().copied());
+        f.finish("let")
+    }
+
+    /// `(if C T E)`.
+    fn if_form(&self, heap: &mut Heap, cond: Value, then: Value, els: Value) -> Result<Value, Error> {
+        core::tagged(heap, "if", &[cond, then, els])
+    }
+
+    /// `(call (WRITTEN...) (HOME...) PATH (REPR...) ARG...)` — a call to a free
+    /// function.
+    ///
+    /// The representations are the *arguments'* own, one per argument in the
+    /// same order: the island reads them to decide the GC-root bookkeeping
+    /// around each argument as it crosses into a compiled frame.
+    fn call_form(&self, heap: &mut Heap, r: &Ref, args: &[Checked]) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let written = sym_list(f.heap(), &r.written)?;
+        f.push(written);
+        let home = sym_list(f.heap(), &r.home)?;
+        f.push(home);
+        let path = path_form(f.heap(), &r.resolved);
+        f.push(path);
+        let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
+        f.push(reprs);
+        f.extend(args.iter().map(|a| a.form));
+        f.finish("call")
+    }
+
+    /// `(assoc PATH SYM INSTANCE (HOME...) RET-REPR (REPR...) ARG...)` — an
+    /// instance method (`args[0]` is the receiver) or a static associated
+    /// function.
+    ///
+    /// `ret` is here for the receiver-less case: with no receiver to classify,
+    /// the result is the only thing that says whether `(vector::new)` is a
+    /// container operation the island open-codes or an ordinary call.
+    fn assoc_form(
+        &self,
+        heap: &mut Heap,
+        type_name: &Path,
+        method: &str,
+        instance: bool,
+        home: &[String],
+        ret: &Type,
+        args: &[Checked],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let ty_path = path_form(f.heap(), type_name);
+        f.push(ty_path);
+        let m = f.heap().intern_symbol(method);
+        f.push(m);
+        f.push(Value::Bool(instance));
+        let home = sym_list(f.heap(), home)?;
+        f.push(home);
+        let ret = self.repr_form(f.heap(), ret)?;
+        f.push(ret);
+        let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
+        f.push(reprs);
+        f.extend(args.iter().map(|a| a.form));
+        f.finish("assoc")
+    }
+
+    /// `(fnref (WRITTEN...) (HOME...) PATH (PARAM-REPR...))` — a named free
+    /// function reified as a value.
+    ///
+    /// The parameter representations are carried because the bridge turns this
+    /// into a closure construction, and there is no call site here to read them
+    /// from. A `&rest` parameter is simply the last entry (always `sexpr`), so
+    /// it needs no flag of its own.
+    fn fnref_form(&self, heap: &mut Heap, r: &Ref, params: &[Type]) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let written = sym_list(f.heap(), &r.written)?;
+        f.push(written);
+        let home = sym_list(f.heap(), &r.home)?;
+        f.push(home);
+        let path = path_form(f.heap(), &r.resolved);
+        f.push(path);
+        let reprs = self.repr_forms(f.heap(), params.to_vec())?;
+        f.push(reprs);
+        f.finish("fnref")
+    }
+
+    /// `(methodref PATH SYM (HOME...) (PARAM-REPR...))` — see
+    /// [`Self::fnref_form`] for the representation list.
+    fn methodref_form(
+        &self,
+        heap: &mut Heap,
+        type_name: &Path,
+        method: &str,
+        home: &[String],
+        params: &[Type],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let ty_path = path_form(f.heap(), type_name);
+        f.push(ty_path);
+        let m = f.heap().intern_symbol(method);
+        f.push(m);
+        let home = sym_list(f.heap(), home)?;
+        f.push(home);
+        let reprs = self.repr_forms(f.heap(), params.to_vec())?;
+        f.push(reprs);
+        f.finish("methodref")
+    }
+
+    /// `(apply CALLEE RET-REPR (REPR...) ARG...)` — applying a function *value*.
+    ///
+    /// The return representation is here for the same reason `assoc` carries
+    /// one: the callee may be a *compiled* closure, and a value coming back out
+    /// of compiled code has to be decoded by its declared representation, never
+    /// by its shape. Unlike a `call`, there is no name to look a signature up
+    /// by — the callee is a value — so the call site is the only place that
+    /// knows. The island ignores the field (`apply`/`apply-indirect` take
+    /// argument pairs only).
+    fn apply_form(&self, heap: &mut Heap, callee: Value, ret: &Type, args: &[Checked]) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        f.push(callee);
+        let r = self.repr_form(f.heap(), ret)?;
+        f.push(r);
+        let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
+        f.push(reprs);
+        f.extend(args.iter().map(|a| a.form));
+        f.finish("apply")
+    }
+
+    /// The declared field types of `adt`'s variant `variant`, with `args`
+    /// substituted for the definition's own type parameters — the instantiated
+    /// field types [`Self::construct_form`] takes.
+    ///
+    /// For a non-generic type (`Sexpr`, an error type) `args` is empty and this
+    /// is just the declaration. For a generic one it is the substitution that
+    /// makes the answer meaningful at all — see `construct_form`'s doc comment.
+    fn variant_field_tys(&self, adt: &Path, variant: usize, args: &[Type]) -> Vec<Type> {
+        let Some(def) = self.reg.type_def(adt) else { return Vec::new() };
+        let Some(v) = def.variants.get(variant) else { return Vec::new() };
+        let subst: HashMap<String, Type> =
+            def.params.iter().cloned().zip(args.iter().cloned()).collect();
+        v.fields.iter().map(|t| subst_apply(t, &subst)).collect()
+    }
+
+    /// `(construct PATH VARIANT MUTABLE (REPR...) ARG...)`.
+    ///
+    /// `field_tys` are the variant's *declared* field types with this site's
+    /// type arguments already substituted in — not the argument expressions'
+    /// own types, which can be narrower (a `!`-typed argument, a `Symbol` value
+    /// widening into a `Sexpr` field). Which of the two decides the shape a
+    /// field is stored in is settled: the declaration does, on both sides of
+    /// every boundary.
+    ///
+    /// The representations travel with the *site* rather than being read back
+    /// from the type's own `defstruct`/`defenum`, because for a generic ADT the
+    /// definition cannot answer the question: `Option`'s `Some` field is
+    /// declared `T`, and `T` has no representation. The instantiation is known
+    /// only here. A definition-keyed table cannot be patched to cover it
+    /// either — monomorphization erases, so `Maybe<i64>` and `Maybe<string>`
+    /// are both at the path `Maybe` and only one set of fields could be
+    /// recorded there. (Getting this wrong emitted field kind `0` and the
+    /// island aborted with `compile-sexpr-field: field type is not
+    /// representable in compiled code yet`.)
+    fn construct_form(
+        &self,
+        heap: &mut Heap,
+        type_name: &Path,
+        variant: usize,
+        mutable: bool,
+        field_tys: &[Type],
+        args: &[Value],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let path = path_form(f.heap(), type_name);
+        f.push(path);
+        f.push(Value::Int(variant as i64));
+        f.push(Value::Bool(mutable));
+        let reprs = self.repr_forms(f.heap(), field_tys.iter().cloned())?;
+        f.push(reprs);
+        f.extend(args.iter().copied());
+        f.finish("construct")
+    }
+
+    /// `(field-get OBJ IDX REPR)`.
+    ///
+    /// Unlike `construct` this *does* spell out a representation: it names only
+    /// an index, and the object is an arbitrary expression whose type is
+    /// exactly what the lowered form no longer carries.
+    fn field_get_form(&self, heap: &mut Heap, obj: Value, idx: usize, field_ty: &Type) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        f.push(obj);
+        f.push(Value::Int(idx as i64));
+        let repr = self.repr_form(f.heap(), field_ty)?;
+        f.push(repr);
+        f.finish("field-get")
+    }
+
+    /// `(field-set OBJ IDX REPR VALUE)` — see [`Self::field_get_form`].
+    fn field_set_form(
+        &self,
+        heap: &mut Heap,
+        obj: Value,
+        idx: usize,
+        field_ty: &Type,
+        value: Value,
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        f.push(obj);
+        f.push(Value::Int(idx as i64));
+        let repr = self.repr_form(f.heap(), field_ty)?;
+        f.push(repr);
+        f.push(value);
+        f.finish("field-set")
+    }
+
+    /// `(match SCRUT REPR (PAT BODY...)...)`.
+    ///
+    /// The scrutinee's representation is what a whole-value `(pat-bind x)`
+    /// binds at, since such a pattern names no type of its own.
+    fn match_form(
+        &self,
+        heap: &mut Heap,
+        scrut: Value,
+        scrut_ty: &Type,
+        arms: &[(Value, Vec<Value>)],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        f.push(scrut);
+        let repr = self.repr_form(f.heap(), scrut_ty)?;
+        f.push(repr);
+        for (pat, body) in arms {
+            let mut a = Items::new(f.heap());
+            a.push(*pat);
+            a.extend(body.iter().copied());
+            let arm = a.finish_list()?;
+            f.push(arm);
+        }
+        f.finish("match")
+    }
+
+    /// `(pat-wild)` / `(pat-bind SYM)` / `(pat-lit LITERAL)` /
+    /// `(pat-ctor PATH VARIANT DOWNCAST SUB...)` /
+    /// `(pat-typetest PATH SUB)`.
+    ///
+    /// A constructor pattern carries its type, its variant index and whether it
+    /// is a downcast — and nothing about its fields' representations. The AST's
+    /// `Pattern::Ctor` recorded `sexpr_fields` and `field_types` per pattern
+    /// site; a field's representation is a property of the *type*, so the
+    /// bridge reads it from that type's own `defstruct`/`defenum` form and the
+    /// same fact is recorded once instead of once per site. `Pattern::Bind`'s
+    /// inert `bool` disappears here for the same reason it existed —
+    /// nothing read it.
+    fn pattern_form(&self, heap: &mut Heap, pat: &Pattern) -> Result<Value, Error> {
+        let form = match pat {
+            Pattern::Wildcard => core::tagged(heap, "pat-wild", &[])?,
+            Pattern::Bind(name) => {
+                let sym = heap.intern_symbol(name);
+                core::tagged(heap, "pat-bind", &[sym])?
+            }
+            Pattern::Int(n) => {
+                let lit = core::tagged(heap, "int", &[Value::Int(*n)])?;
+                let mut s = RootScope::new(heap);
+                s.push_root(lit);
+                core::tagged(&mut s, "pat-lit", &[lit])?
+            }
+            Pattern::Bool(b) => {
+                let lit = core::tagged(heap, "bool", &[Value::Bool(*b)])?;
+                let mut s = RootScope::new(heap);
+                s.push_root(lit);
+                core::tagged(&mut s, "pat-lit", &[lit])?
+            }
+            Pattern::Char(c) => {
+                let lit = core::tagged(heap, "char", &[Value::Char(*c)])?;
+                let mut s = RootScope::new(heap);
+                s.push_root(lit);
+                core::tagged(&mut s, "pat-lit", &[lit])?
+            }
+            Pattern::Ctor { type_name, variant, args, field_types, downcast, .. } => {
+                let mut f = Items::new(heap);
+                let tp = path_form(f.heap(), type_name);
+                f.push(tp);
+                f.push(Value::Int(*variant as i64));
+                f.push(Value::Bool(*downcast));
+                // Per-field representations, for the same reason
+                // `construct` carries them — see `construct_form`.
+                let reprs = self.repr_forms(f.heap(), field_types.iter().cloned())?;
+                f.push(reprs);
+                for sub in args {
+                    let one = self.pattern_form(f.heap(), sub)?;
+                    f.push(one);
+                }
+                f.finish("pat-ctor")?
+            }
+            Pattern::TypeTest(ty, sub) => {
+                // The ADT path only: a heap box's `type_name` never encodes
+                // type arguments, so the runtime test cannot see them either.
+                let path = match ty {
+                    Type::Named(p, _) => p.clone(),
+                    other => prim_type_path(other).ok_or_else(|| {
+                        Error::TypeError(format!("(the {:?} pattern): not a named type", other))
+                    })?,
+                };
+                let mut f = Items::new(heap);
+                let tp = path_form(f.heap(), &path);
+                f.push(tp);
+                let one = self.pattern_form(f.heap(), sub)?;
+                f.push(one);
+                f.finish("pat-typetest")?
+            }
+        };
+        Ok(self.rooted(heap, form))
+    }
+
+    /// `(lambda ((SYM REPR)...) RET-REPR BODY...)`.
+    fn lambda_form(
+        &self,
+        heap: &mut Heap,
+        params: &[(String, Type)],
+        ret: &Type,
+        body: &[Value],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let ps = self.param_list_form(f.heap(), params)?;
+        f.push(ps);
+        let r = self.repr_form(f.heap(), ret)?;
+        f.push(r);
+        f.extend(body.iter().copied());
+        f.finish("lambda")
+    }
+
+    /// `((SYM REPR)...)` — a parameter list, shared by `lambda`/`labels` and
+    /// the top-level definition forms.
+    fn param_list_form(&self, heap: &mut Heap, params: &[(String, Type)]) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        for (name, ty) in params {
+            let sym = f.heap().intern_symbol(name);
+            let repr = self.repr_form(f.heap(), ty)?;
+            let one = core::list(f.heap(), &[sym, repr])?;
+            f.push(one);
+        }
+        f.finish_list()
+    }
+
+    /// `(labels ((SYM ((SYM REPR)...) RET-REPR BODY...)...) BODY...)` —
+    /// mutually recursive local functions, each of the same shape a `lambda`
+    /// has plus a name.
+    fn labels_form(
+        &self,
+        heap: &mut Heap,
+        defs: &[(String, Vec<(String, Type)>, Type, Vec<Value>)],
+        body: &[Value],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let mut ds = Items::new(f.heap());
+        for (name, params, ret, def_body) in defs {
+            let mut d = Items::new(ds.heap());
+            let sym = d.heap().intern_symbol(name);
+            d.push(sym);
+            let ps = self.param_list_form(d.heap(), params)?;
+            d.push(ps);
+            let r = self.repr_form(d.heap(), ret)?;
+            d.push(r);
+            d.extend(def_body.iter().copied());
+            let one = d.finish_list()?;
+            ds.push(one);
+        }
+        let defs = ds.finish_list()?;
+        f.push(defs);
+        f.extend(body.iter().copied());
+        f.finish("labels")
+    }
+
+    /// `(dyn-new "KEY" TRAIT ((TYPE SYM)...) ((TRAIT ((TYPE SYM)...))...) REPR
+    /// FORM)` — boxing a concrete value as a trait object.
+    ///
+    /// The trailing representation is the boxed value's own, and it cannot be
+    /// derived from the concrete type's *name* (all the rest of the node
+    /// carries): a struct and an enum differ in whether the island has to root
+    /// the value across the boxing call.
+    fn dyn_new_form(
+        &self,
+        heap: &mut Heap,
+        concrete_key: &str,
+        trait_path: &Path,
+        slots: &[(Path, String)],
+        supers: &[(Path, Vec<(Path, String)>)],
+        value_ty: &Type,
+        value: Value,
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let key = f.heap().alloc_string(concrete_key.to_string());
+        f.push(key);
+        let tp = path_form(f.heap(), trait_path);
+        f.push(tp);
+        let slot_list = vtable_form(f.heap(), slots)?;
+        f.push(slot_list);
+        let mut sup = Items::new(f.heap());
+        for (trait_path, slots) in supers {
+            let tp = path_form(sup.heap(), trait_path);
+            let mut one = Items::new(sup.heap());
+            one.push(tp);
+            let sl = vtable_form(one.heap(), slots)?;
+            one.push(sl);
+            let entry = one.finish_list()?;
+            sup.push(entry);
+        }
+        let supers = sup.finish_list()?;
+        f.push(supers);
+        let repr = self.repr_form(f.heap(), value_ty)?;
+        f.push(repr);
+        f.push(value);
+        f.finish("dyn-new")
+    }
+
+    /// `(quote DATUM)` — the datum, unevaluated.
+    ///
+    /// The one place user data appears in a lowered program, which is what
+    /// keeps it from ever being read as a node. The datum is the reader's own
+    /// value, kept as-is: it is a heap value reachable through the node, so
+    /// unlike the old `QuotedSexpr` there is nothing to copy into
+    /// heap-independent Rust memory (the collector could not see a raw pointer
+    /// baked into an `Expr`).
+    fn quote_form(&self, heap: &mut Heap, datum: Value) -> Result<Value, Error> {
+        core::tagged(heap, "quote", &[datum])
+    }
+
+    /// `(quote ())` — the empty list as a `sexpr` datum, the base case every
+    /// list construction ends in.
+    fn quote_nil(&self, heap: &mut Heap) -> Result<Value, Error> {
+        self.quote_form(heap, Value::Empty)
+    }
+
+    /// `(str "TEXT")` — a string literal node the checker synthesizes rather
+    /// than reads: a `pprint` layout name, a logical block's default affix.
+    fn str_lit_form(&self, heap: &mut Heap, text: &str) -> Result<Value, Error> {
+        let v = heap.alloc_string(text.to_string());
+        let form = core::tagged(heap, "str", &[v])?;
+        Ok(self.rooted(heap, form))
+    }
+
+    /// Root a finished node before handing it back, and leave it rooted.
+    ///
+    /// The same contract [`Self::check_at`] follows for every node it produces:
+    /// released in one place, by `check_form_at`'s `truncate_roots` at the end
+    /// of the top-level form. A helper that builds a node under an `Items` or
+    /// `RootScope` has *unrooted* it by the time it returns — the scope pops on
+    /// drop — so a caller that stores the node in a `Vec` and then calls
+    /// another builder hands it to code that allocates first: `call_form`,
+    /// `assoc_form` and `apply_form` all cons their `sym_list`/`repr_forms`
+    /// *before* rooting their argument forms. That window is where the four
+    /// historical root leaks in this file lived.
+    fn rooted(&self, heap: &mut Heap, form: Value) -> Value {
+        heap.push_root(form);
+        form
+    }
+
+    /// `(panic FORM)` — diverges with the message the form evaluates to.
+    fn panic_form(&self, heap: &mut Heap, msg: Value) -> Result<Value, Error> {
+        core::tagged(heap, "panic", &[msg])
+    }
+
+    /// The node a *never-executed* position in an erased generic body lowers
+    /// to: `(panic (str "..."))`.
+    ///
+    /// The old AST's `TraitCall` node filled this slot. It was diagnostics-only —
+    /// the evaluator answered it with an internal error and the bridge with
+    /// `(unsupported "TraitCall")` — because the checker only builds it where a
+    /// `where`-bounded *type variable* is the receiver, and each specialization
+    /// re-checks the same site with the type concrete (resolving it to a real
+    /// `assoc`/`dyn-new`). Since a generic definition emits no body at all
+    /// (`(module PATH)` and nothing else), this node is discarded rather than
+    /// run; giving it the vocabulary's own diverging node keeps the "cannot be
+    /// reached" property expressible without a tag whose only meaning is
+    /// "unreachable", and preserves today's behavior — an abort naming the
+    /// method — if the property is ever violated.
+    fn erased_generic_form(&self, heap: &mut Heap, what: &str) -> Result<Value, Error> {
+        let msg = self.str_lit_form(
+            heap,
+            &format!("`{}` reached the evaluator — an erased generic body executed", what),
+        )?;
+        let mut s = RootScope::new(heap);
+        s.push_root(msg);
+        self.panic_form(&mut s, msg)
+    }
+
+    /// `(loop BODY...)` — loop forever, exited by `break`/`return`.
+    fn loop_form(&self, heap: &mut Heap, body: &[Value]) -> Result<Value, Error> {
+        core::tagged(heap, "loop", body)
+    }
+
+    /// `(break)` — leave the nearest enclosing loop with no value.
+    fn break_form(&self, heap: &mut Heap) -> Result<Value, Error> {
+        core::tagged(heap, "break", &[])
+    }
+
+    /// `(return)` / `(return FORM)` — leave the nearest enclosing loop.
+    fn return_form(&self, heap: &mut Heap, value: Option<Value>) -> Result<Value, Error> {
+        match value {
+            Some(v) => core::tagged(heap, "return", &[v]),
+            None => core::tagged(heap, "return", &[]),
+        }
+    }
+
+    /// `(dyn-upcast TRAIT FORM)`.
+    fn dyn_upcast_form(&self, heap: &mut Heap, to_trait: &Path, value: Value) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let tp = path_form(f.heap(), to_trait);
+        f.push(tp);
+        f.push(value);
+        f.finish("dyn-upcast")
+    }
+
+    /// `(dyn-call TRAIT SYM SLOT ((TYPE SYM)...) (REPR...) ARG...)` — a call
+    /// through a trait object's vtable, `args[0]` the receiver.
+    ///
+    /// The implementation list is not what dispatches — that is the vtable's
+    /// job, and the point is that the target is unknown until run time — but it
+    /// tells the compiler which bodies must exist natively before this call
+    /// site can run natively.
+    fn dyn_call_form(
+        &self,
+        heap: &mut Heap,
+        trait_path: &Path,
+        method: &str,
+        slot: usize,
+        impl_targets: &[(Path, String)],
+        args: &[Checked],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let tp = path_form(f.heap(), trait_path);
+        f.push(tp);
+        let m = f.heap().intern_symbol(method);
+        f.push(m);
+        f.push(Value::Int(slot as i64));
+        let targets = vtable_form(f.heap(), impl_targets)?;
+        f.push(targets);
+        let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
+        f.push(reprs);
+        f.extend(args.iter().map(|a| a.form));
+        f.finish("dyn-call")
+    }
+
+    /// `(dyn-value FORM)` — the concrete value inside a trait object, typed as
+    /// `sexpr` so `match`ing a trait object back down reuses the existing
+    /// downcast patterns.
+    fn dyn_value_form(&self, heap: &mut Heap, value: Value) -> Result<Value, Error> {
+        core::tagged(heap, "dyn-value", &[value])
+    }
+
+    // ---- top-level form builders --------------------------------------
+
+    /// `(defun PATH ((SYM REPR)...) RET-REPR PUBLIC BODY...)`.
+    ///
+    /// `public` is baked in so `eval::scope`'s qualified-path resolution can
+    /// enforce visibility without the checker's `Registry` at runtime.
+    fn defun_form(
+        &self,
+        heap: &mut Heap,
+        name: &Path,
+        params: &[(String, Type)],
+        ret: &Type,
+        public: bool,
+        body: &[Value],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let path = path_form(f.heap(), name);
+        f.push(path);
+        let ps = self.param_list_form(f.heap(), params)?;
+        f.push(ps);
+        let r = self.repr_form(f.heap(), ret)?;
+        f.push(r);
+        f.push(Value::Bool(public));
+        f.extend(body.iter().copied());
+        f.finish("defun")
+    }
+
+    /// [`Self::defun_form`] unless this `defun` is *generic*, in which case an
+    /// empty `(module PATH)`.
+    ///
+    /// A generic definition has no core form (see [`TopLevelForm`]): its body
+    /// was checked with the type variables still abstract, for
+    /// definition-time diagnostics only, and every call site was rewritten to
+    /// a monomorphized specialization. Emitting it would leave a silently
+    /// callable stale twin behind — which is why the old evaluator opened with
+    /// a `type_params.is_empty()` guard on both definition arms. Emitting
+    /// nothing instead removes the guard *and* the reason for it: an empty
+    /// `module` is already the "this defined a name, there is nothing to run"
+    /// form (`deftrait`/`impl` produce one), so no new vocabulary is needed and
+    /// nothing downstream has to recognize a body it must refuse to register.
+    fn definition_form(
+        &self,
+        heap: &mut Heap,
+        name: &Path,
+        type_params: &[String],
+        params: &[(String, Type)],
+        ret: &Type,
+        public: bool,
+        body: &[Value],
+    ) -> Result<Value, Error> {
+        if !type_params.is_empty() {
+            return self.module_form(heap, name, &[]);
+        }
+        self.defun_form(heap, name, params, ret, public, body)
+    }
+
+    /// [`Self::defmethod_form`]'s counterpart of [`Self::definition_form`] —
+    /// same reasoning, for a generic *owner*'s method.
+    #[allow(clippy::too_many_arguments)]
+    fn method_definition_form(
+        &self,
+        heap: &mut Heap,
+        type_name: &Path,
+        method: &str,
+        instance: bool,
+        type_params: &[String],
+        params: &[(String, Type)],
+        ret: &Type,
+        public: bool,
+        body: &[Value],
+    ) -> Result<Value, Error> {
+        if !type_params.is_empty() {
+            return self.module_form(heap, type_name, &[]);
+        }
+        self.defmethod_form(heap, type_name, method, instance, params, ret, public, body)
+    }
+
+    /// `(defmethod PATH SYM INSTANCE ((SYM REPR)...) RET-REPR PUBLIC BODY...)`.
+    ///
+    /// The receiver is the first parameter for an instance method, not a field
+    /// of its own the way `TopLevel::Defmethod::self_name` was: `params` is
+    /// what the body binds, in order, and `instance` says whether the first
+    /// entry is the receiver.
+    fn defmethod_form(
+        &self,
+        heap: &mut Heap,
+        type_name: &Path,
+        method: &str,
+        instance: bool,
+        params: &[(String, Type)],
+        ret: &Type,
+        public: bool,
+        body: &[Value],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let path = path_form(f.heap(), type_name);
+        f.push(path);
+        let m = f.heap().intern_symbol(method);
+        f.push(m);
+        f.push(Value::Bool(instance));
+        let ps = self.param_list_form(f.heap(), params)?;
+        f.push(ps);
+        let r = self.repr_form(f.heap(), ret)?;
+        f.push(r);
+        f.push(Value::Bool(public));
+        f.extend(body.iter().copied());
+        f.finish("defmethod")
+    }
+
+    /// `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...)) PUBLIC BODY...)`.
+    ///
+    /// A macro is an ordinary callable body — expanding it is calling it — so
+    /// the only extra structure is how the non-required regions of its lambda
+    /// list are filled at expansion time.
+    fn defmacro_form(
+        &self,
+        heap: &mut Heap,
+        name: &Path,
+        params: &[String],
+        rest: bool,
+        lambda: &MacroLambda,
+        public: bool,
+        body: &[Value],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let path = path_form(f.heap(), name);
+        f.push(path);
+        let ps = sym_list(f.heap(), params)?;
+        f.push(ps);
+        f.push(Value::Bool(rest));
+        let lam = {
+            let mut l = Items::new(f.heap());
+            l.push(Value::Int(lambda.required as i64));
+            let mut opts = Items::new(l.heap());
+            for default in &lambda.optionals {
+                let one = core::list(opts.heap(), default)?;
+                opts.push(one);
+            }
+            let opts = opts.finish_list()?;
+            l.push(opts);
+            let mut keys = Items::new(l.heap());
+            for (name, default) in &lambda.keys {
+                let mut k = Items::new(keys.heap());
+                let sym = k.heap().intern_symbol(name);
+                k.push(sym);
+                k.extend(default.iter().copied());
+                let one = k.finish_list()?;
+                keys.push(one);
+            }
+            let keys = keys.finish_list()?;
+            l.push(keys);
+            l.finish_list()?
+        };
+        f.push(lam);
+        f.push(Value::Bool(public));
+        f.extend(body.iter().copied());
+        f.finish("defmacro")
+    }
+
+    /// `(defvar PATH REPR MUTABLE PUBLIC FORM)` — a global variable
+    /// (`mutable`) or constant.
+    fn defvar_form(
+        &self,
+        heap: &mut Heap,
+        name: &Path,
+        ty: &Type,
+        mutable: bool,
+        public: bool,
+        value: Value,
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let path = path_form(f.heap(), name);
+        f.push(path);
+        let r = self.repr_form(f.heap(), ty)?;
+        f.push(r);
+        f.push(Value::Bool(mutable));
+        f.push(Value::Bool(public));
+        f.push(value);
+        f.finish("defvar")
+    }
+
+    /// `(defstruct PATH (REPR...))` — the type's field representations, which
+    /// is where the bridge reads a `construct`'s and a pattern's field kinds
+    /// from.
+    fn defstruct_form(&self, heap: &mut Heap, name: &Path, fields: &[Type]) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let path = path_form(f.heap(), name);
+        f.push(path);
+        let reprs = self.repr_forms(f.heap(), fields.to_vec())?;
+        f.push(reprs);
+        f.finish("defstruct")
+    }
+
+    /// `(defenum PATH (SYM...) ((REPR...)...))` — the variant names, then each
+    /// variant's field representations.
+    fn defenum_form(&self, heap: &mut Heap, name: &Path, variants: &[Variant]) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let path = path_form(f.heap(), name);
+        f.push(path);
+        let names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+        let names = sym_list(f.heap(), &names)?;
+        f.push(names);
+        let mut vs = Items::new(f.heap());
+        for v in variants {
+            let reprs = self.repr_forms(vs.heap(), v.fields.to_vec())?;
+            vs.push(reprs);
+        }
+        let per_variant = vs.finish_list()?;
+        f.push(per_variant);
+        f.finish("defenum")
+    }
+
+    /// `(module PATH FORM...)` — a namespace and the forms defined in it.
+    ///
+    /// Also the grouping device for a definition that expands into several
+    /// (a `defstruct` and its accessors, a batch of monomorphized
+    /// specializations): every nested definition's own name is already
+    /// absolute, so the wrapper only has to ensure the namespace exists.
+    fn module_form(&self, heap: &mut Heap, path: &Path, body: &[Value]) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let p = path_form(f.heap(), path);
+        f.push(p);
+        f.extend(body.iter().copied());
+        f.finish("module")
+    }
+
+    /// `(use ALIAS TARGET)`.
+    fn use_form(&self, heap: &mut Heap, alias: &Path, target: &Path) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let a = path_form(f.heap(), alias);
+        f.push(a);
+        let t = path_form(f.heap(), target);
+        f.push(t);
+        f.finish("use")
+    }
+
+    /// `(load "PATH")` — recorded, not performed: the checker cannot do file
+    /// I/O, so the driver reads this and loads the file before checking on.
+    fn load_form(&self, heap: &mut Heap, path: &str) -> Result<Value, Error> {
+        let s = heap.alloc_string(path.to_string());
+        core::tagged(heap, "load", &[s])
+    }
+
+    /// `(expr FORM)` — a bare top-level expression, to be evaluated.
+    fn expr_form(&self, heap: &mut Heap, form: Value) -> Result<Value, Error> {
+        core::tagged(heap, "expr", &[form])
+    }
+
+    /// `(compile-fn (fn (WRITTEN...) (HOME...) PATH))` or
+    /// `(compile-fn (method PATH SYM (HOME...)))`.
+    fn compile_fn_form(&self, heap: &mut Heap, target: &CompileTarget) -> Result<Value, Error> {
+        let payload = match target {
+            CompileTarget::Fn(r) => {
+                let mut f = Items::new(heap);
+                let written = sym_list(f.heap(), &r.written)?;
+                f.push(written);
+                let home = sym_list(f.heap(), &r.home)?;
+                f.push(home);
+                let path = path_form(f.heap(), &r.resolved);
+                f.push(path);
+                f.finish("fn")?
+            }
+            CompileTarget::Method { type_name, method, home } => {
+                let mut f = Items::new(heap);
+                let tp = path_form(f.heap(), type_name);
+                f.push(tp);
+                let m = f.heap().intern_symbol(method);
+                f.push(m);
+                let home = sym_list(f.heap(), home)?;
+                f.push(home);
+                f.finish("method")?
+            }
+        };
+        core::tagged(heap, "compile-fn", &[payload])
+    }
+
+    /// A `Never`-typed placeholder for a sub-expression that failed to check.
+    ///
+    /// Reuses `panic` (already `Never`-typed, already handled by every
+    /// downstream consumer) rather than adding a tag of its own, so recovery
+    /// needs no changes outside the checker. `Type::Never` unifies with any
+    /// expected type, so a hole flowing into a typed position never produces a
+    /// cascade of follow-on errors. `loc` is recorded on the node so
+    /// `locate_node` can still land the cursor on it for completion/hover.
+    fn hole(&self, heap: &mut Heap, loc: Option<Loc>) -> Result<Checked, Error> {
+        let msg = heap.alloc_string("<check-error>".to_string());
+        let mut f = Items::new(heap);
+        let text = core::tagged(f.heap(), "str", &[msg])?;
+        f.push(text);
+        let form = f.finish_at("panic", loc)?;
+        Ok(Checked::new(form, Type::Never))
     }
 
     /// The single catch helper used at expression-level recovery boundaries: a
     /// pass-through in strict mode, and in `recover` mode it records a failing
     /// sub-check's error (tagged with `loc` if it lacks a more specific one)
     /// and substitutes a [`Self::hole`] so checking continues.
-    fn recovered(&self, r: Result<Typed, Error>, loc: Option<Loc>) -> Result<Typed, Error> {
+    fn recovered(&self, heap: &mut Heap, r: Result<Checked, Error>, loc: Option<Loc>) -> Result<Checked, Error> {
         match r {
             Err(e) if self.recover => {
                 self.push_recovered(e, loc.clone());
-                Ok(Self::hole(loc))
+                self.hole(heap, loc)
             }
             other => other,
         }
     }
 
-    /// Records a recoverable error at a boundary that has no `Typed` slot to
+    /// Records a recoverable error at a boundary that has no form slot to
     /// fill with a hole (a `match` arm that gets skipped, or the exhaustiveness
     /// check). Tags with `loc` (a no-op if the error already carries a more
     /// specific location) and pushes into [`Self::errors`]. Callers must have
@@ -885,7 +1774,7 @@ impl Checker {
     /// caller needs no new handling, and the bundle is self-contained: a
     /// form's specializations can never be separated from the form that
     /// needs them (see `spec_memo`'s doc comment for why that matters).
-    pub fn check_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value) -> Result<TopLevel, Error> {
+    pub fn check_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value) -> Result<TopLevelForm, Error> {
         self.check_form_at(heap, interp, v, None)
     }
 
@@ -895,7 +1784,7 @@ impl Checker {
     /// has no heap identity to key a location on — the reader hands its span
     /// alongside the value (`Reader::read_all_in_spanned`) and this is where
     /// it enters the checker. Mirrors [`Self::check_at`] vs [`Self::check`].
-    pub fn check_form_at(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, loc_hint: Option<Loc>) -> Result<TopLevel, Error> {
+    pub fn check_form_at(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, loc_hint: Option<Loc>) -> Result<TopLevelForm, Error> {
         debug_assert!(
             self.spec_pending.borrow().is_empty(),
             "specialization requests must never leak across check_form calls"
@@ -905,7 +1794,23 @@ impl Checker {
         // deeper location from `check`, and `Error::at` keeps that innermost
         // one — see its doc comment).
         let loc = heap.cons_loc(v).or(loc_hint);
+        // Where the root stack stood before any of this form's nodes were
+        // built. `check_at` roots every node it produces and pops none of them
+        // (see there for why); this is the single matching release, taken on
+        // every exit path below including the error ones.
+        let roots_base = heap.root_count();
+        // Belongs to *this* form: a definition must not report the previous
+        // form's expression type — see [`Self::expr_type`].
+        self.expr_ty = None;
         let primary = self.check_form_dispatch(heap, interp, v, loc.clone());
+        // Rooted before the drain below, not after: `drain_specializations`
+        // re-checks a whole template per instantiation, so it allocates heavily,
+        // and the top-level form builders (`defun_form`, `expr_form`, ...) hand
+        // back an unrooted node the way every core builder does. Held only in a
+        // Rust local, the primary form would be collected out from under the
+        // bundle — and, with the cell recycled, the bundle would end up holding a
+        // *fragment* of it. Released with everything else by `truncate_roots`.
+        let primary = primary.map(|tl| self.rooted(heap, tl));
         // Specialization-drain recovery boundary (B6): the primary form checked
         // fine, but instantiating a generic it calls failed. In `recover` mode
         // keep the primary form's typed tree (it's what completion/hover want)
@@ -939,11 +1844,12 @@ impl Checker {
         // checked form's earlier registry mutations, e.g. `def_locs.fns`,
         // aren't rolled back either).
         self.reg.def_locs.local_refs.extend(self.local_refs.borrow_mut().drain());
+        self.reg.def_locs.node_types.extend(self.node_types.borrow_mut().drain());
         let result = match bundled {
             Ok((specs, tl)) if specs.is_empty() => Ok(tl),
             Ok((mut specs, tl)) => {
                 specs.push(tl);
-                Ok(TopLevel::Module { path: Path::root(MONO_BUNDLE_MODULE), body: specs })
+                self.module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &specs)
             }
             Err(e) => {
                 self.spec_pending.borrow_mut().clear();
@@ -962,14 +1868,21 @@ impl Checker {
         // `spec_pending` clear mirrors the `Err(e)` arm above: without it the
         // `debug_assert!` at the top of the next `check_form` would fire on a
         // request that leaked out of a failed specialization drain.
-        match result {
+        let result = match result {
             Err(e) if self.recover => {
                 self.spec_pending.borrow_mut().clear();
                 self.errors.borrow_mut().push(e);
-                Ok(TopLevel::Expr(Self::hole(loc)))
+                let hole = self.hole(heap, loc)?;
+                self.expr_form(heap, hole.form)
             }
             other => other,
-        }
+        };
+        // The returned form is deliberately *not* left rooted: it belongs to
+        // the caller now, and every driver hands it straight to `Interp::exec`
+        // (which roots it) or to a `fasl` writer. A caller that allocates in
+        // between must root it first.
+        heap.truncate_roots(roots_base);
+        result
     }
 
     /// Pre-registers the *signatures* of every definition in `forms` (a whole
@@ -1129,7 +2042,7 @@ impl Checker {
     /// threaded down into whichever `check_def*` this form dispatches to so
     /// it can record where the name it registers was defined (`Registry::
     /// def_locs`, consulted by the LSP's goto-definition).
-    fn check_form_dispatch(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
+    fn check_form_dispatch(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
         if let Value::Cons(_) = v {
             let elems = heap.list_to_vec(v)?;
             // Per-element locations parallel to `elems`, so a `def*` body form
@@ -1182,7 +2095,25 @@ impl Checker {
         // form `check_at` prefers `cons_loc` (the same location) anyway, and
         // for a bare top-level atom it is the only location there is.
         let t = self.check_at(heap, interp, &env, v, None, def_loc)?;
-        Ok(TopLevel::Expr(t))
+        // The one place a top-level expression's type is in hand. It is gone
+        // from the form itself (see `core::Checked`), so record it here — see
+        // [`Self::expr_type`].
+        self.expr_ty = Some(t.ty.clone());
+        self.expr_form(heap, t.form)
+    }
+
+    /// The type the last [`Self::check_form_at`] proved for its top-level
+    /// expression, or `None` if that form was a definition (which has no
+    /// value).
+    ///
+    /// A separate output rather than part of the returned form: the type stops
+    /// at the checker (see [`core::Checked`]), so a caller that wants it has to
+    /// be *handed* it. It stays a field rather than a second return value
+    /// because every driver in the tree wants only the form — what it evaluates
+    /// to is self-describing at runtime — and asking afterwards keeps those
+    /// call sites unchanged.
+    pub fn expr_type(&self) -> Option<&Type> {
+        self.expr_ty.as_ref()
     }
 
     /// The type/constructor registry — exposed so a caller (e.g. the REPL)
@@ -1272,7 +2203,7 @@ impl Checker {
     }
 
     /// `(pub defun ...)` / `(pub defmethod ...)` etc. — mark the next definition public.
-    fn check_pub(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>], def_loc: Option<Loc>) -> Result<TopLevel, Error> {
+    fn check_pub(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>], def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("pub: expected a definition form".into()));
         }
@@ -1671,7 +2602,7 @@ impl Checker {
     /// this can't happen any earlier than this, since a generic `&rest`'s
     /// declared type may only resolve to something concrete at a given call
     /// site (see `Self::check_call`'s `subst_apply`).
-    fn wrap_rest_elem(&self, elem_ty: &Type, e: Typed) -> Result<Typed, Error> {
+    fn wrap_rest_elem(&self, heap: &mut Heap, elem_ty: &Type, e: Checked) -> Result<Checked, Error> {
         if *elem_ty == sexpr_ty() {
             return Ok(e);
         }
@@ -1681,7 +2612,9 @@ impl Checker {
         // this is runtime-cost-free. This is what lets `(println "~a" my-
         // struct)`/`(list p ...&rest)` accept a user ADT argument.
         if self.is_heap_repr(elem_ty) {
-            return Ok(Typed { loc: e.loc, expr: e.expr, ty: sexpr_ty() });
+            // A retype, not a node: the form is unchanged and only the
+            // checker's own view of its type widens.
+            return Ok(Checked::new(e.form, sexpr_ty()));
         }
         let ctor = sexpr_ctor_for(elem_ty).ok_or_else(|| {
             Error::TypeError(format!(
@@ -1690,27 +2623,34 @@ impl Checker {
             ))
         })?;
         let (type_name, variant) = self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
-        Ok(Typed { loc: None, expr: Expr::Construct { type_name, variant, args: vec![e], mutable: false }, ty: sexpr_ty() })
+        let field_tys = self.variant_field_tys(&type_name, variant, &[]);
+        let form = self.construct_form(heap, &type_name, variant, false, &field_tys, &[e.form])?;
+        Ok(Checked::new(self.rooted(heap, form), sexpr_ty()))
     }
 
     /// Collects already-checked `&rest` elements into one `Sexpr` list
     /// expression, back-to-front (mirroring `Interp::bind_macro_args`'s
     /// runtime construction of `defmacro`'s own `&rest` list) — `(cons
     /// (wrap e1) (cons (wrap e2) ... ()))`. The empty case is the `Nil`
-    /// literal, reusing the same `Expr::Quote(QuotedSexpr::Nil)` shape `()`
+    /// literal, reusing the same `(quote ())` shape `()`
     /// itself checks to.
-    fn cons_rest_list(&self, elem_ty: &Type, items: Vec<Typed>) -> Result<Typed, Error> {
+    fn cons_rest_list(&self, heap: &mut Heap, elem_ty: &Type, items: Vec<Checked>) -> Result<Checked, Error> {
         // `sexpr-cons`, not the free `cons` (which is the `cons<T,U>` pair
         // builder now — Symbol/Sexpr redesign Phase 4b): a `&rest` list is a
         // `Sexpr`, built through the island cons layer.
         let cons_path = Path::root("sexpr-cons");
-        items.into_iter().rev().try_fold(
-            Typed { loc: None, expr: Expr::Quote(QuotedSexpr::Nil), ty: sexpr_ty() },
-            |acc, item| {
-                let item = self.wrap_rest_elem(elem_ty, item)?;
-                Ok(Typed { loc: None, expr: Expr::Call(Ref::synthetic(cons_path.clone()), vec![item, acc]), ty: sexpr_ty() })
-            },
-        )
+        let r = Ref::synthetic(cons_path);
+        let nil = self.quote_nil(heap)?;
+        let mut acc = Checked::new(nil, sexpr_ty());
+        for item in items.into_iter().rev() {
+            let mut s = RootScope::new(heap);
+            s.push_root(acc.form);
+            let item = self.wrap_rest_elem(&mut s, elem_ty, item)?;
+            s.push_root(item.form);
+            let form = self.call_form(&mut s, &r, &[item, acc])?;
+            acc = Checked::new(form, sexpr_ty());
+        }
+        Ok(Checked::new(self.rooted(heap, acc.form), acc.ty))
     }
 
     /// Resolve a bare (unqualified) type name by walking the ancestor chain
@@ -1810,15 +2750,15 @@ impl Checker {
     /// Reify a bare free-function name as a function value (`FnRef`), if it names
     /// one. `Some(Err(..))` when the name resolves but is a generic function
     /// that can't be instantiated here — see [`Self::fn_ref_node`].
-    fn fn_value(&self, name: &str, expected: Option<&Type>) -> Option<Result<Typed, Error>> {
+    fn fn_value(&self, heap: &mut Heap, name: &str, expected: Option<&Type>) -> Option<Result<Checked, Error>> {
         let fq = self.resolve_fn(name)?;
-        Some(self.fn_ref_node(vec![name.to_string()], fq, expected))
+        Some(self.fn_ref_node(heap, vec![name.to_string()], fq, expected))
     }
 
     /// Reify a qualified free-function path as a function value (`FnRef`).
-    fn fn_path_value(&self, segs: &[String], expected: Option<&Type>) -> Option<Result<Typed, Error>> {
+    fn fn_path_value(&self, heap: &mut Heap, segs: &[String], expected: Option<&Type>) -> Option<Result<Checked, Error>> {
         let fq = self.resolve_fn_path(segs)?;
-        Some(self.fn_ref_node(segs.to_vec(), fq, expected))
+        Some(self.fn_ref_node(heap, segs.to_vec(), fq, expected))
     }
 
     /// Build an `FnRef` node carrying the function's `(fn ...)` type.
@@ -1832,13 +2772,24 @@ impl Checker {
     /// like a direct call's. With no expectation to resolve from this is a
     /// check-time error (previously it produced a type-variable-ridden
     /// `FnRef` that could never be applied anyway).
-    fn fn_ref_node(&self, written: Vec<String>, fq: Path, expected: Option<&Type>) -> Result<Typed, Error> {
+    fn fn_ref_node(&self, heap: &mut Heap, written: Vec<String>, fq: Path, expected: Option<&Type>) -> Result<Checked, Error> {
         let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
         let tmpl_ty = Type::Fn(sig.params.clone(), sig.rest.clone().map(Box::new), Box::new(sig.ret.clone()));
         let home = self.ns.clone();
+        // The referenced function's own parameter types, which the bridge
+        // needs to build a closure with no call site to read them from. A
+        // `&rest` parameter is the last entry, as a `sexpr`.
+        let ref_params = |sig: &FnSig| {
+            let mut ps = sig.params.clone();
+            if sig.rest.is_some() {
+                ps.push(sexpr_ty());
+            }
+            ps
+        };
         if sig.type_params.is_empty() {
             let r = Ref { written, home, resolved: fq };
-            return Ok(Typed { loc: None, expr: Expr::FnRef(r), ty: tmpl_ty });
+            let form = self.fnref_form(heap, &r, &ref_params(&sig))?;
+            return Ok(Checked::new(form, tmpl_ty));
         }
         if let Some(exp) = expected {
             let params: HashSet<String> = sig.type_params.iter().cloned().collect();
@@ -1856,19 +2807,39 @@ impl Checker {
                     // `Interp::exec` registers it, rather than re-searching
                     // for the (unspecialized) generic template by the
                     // original bare name.
-                    return Ok(Typed { loc: None, expr: Expr::FnRef(Ref::synthetic(mangled)), ty: resolved_ty });
+                    let r = Ref::synthetic(mangled);
+                    let params = match self.reg.fn_sig(&r.resolved) {
+                        Some(sig) => ref_params(sig),
+                        // The specialization is generated at the end of this
+                        // form, so its signature may not be registered yet;
+                        // the resolved type says the same thing.
+                        None => match &resolved_ty {
+                            Type::Fn(ps, rest, _) => {
+                                let mut ps = ps.clone();
+                                if rest.is_some() {
+                                    ps.push(sexpr_ty());
+                                }
+                                ps
+                            }
+                            _ => Vec::new(),
+                        },
+                    };
+                    let form = self.fnref_form(heap, &r, &params)?;
+                    return Ok(Checked::new(form, resolved_ty));
                 }
                 // Open type arguments: we're inside another generic
                 // function's diagnostics-only body check — the node is never
                 // executed, and that function's own specialization will
                 // re-check this reference with the types concrete.
                 let r = Ref { written, home, resolved: fq };
-                return Ok(Typed { loc: None, expr: Expr::FnRef(r), ty: resolved_ty });
+                let form = self.fnref_form(heap, &r, &ref_params(&sig))?;
+                return Ok(Checked::new(form, resolved_ty));
             }
             // Shape mismatch: hand back the generic node so `check`'s
             // ordinary expected-vs-actual reconciliation reports it.
             let r = Ref { written, home, resolved: fq };
-            return Ok(Typed { loc: None, expr: Expr::FnRef(r), ty: tmpl_ty });
+            let form = self.fnref_form(heap, &r, &ref_params(&sig))?;
+            return Ok(Checked::new(form, tmpl_ty));
         }
         Err(Error::TypeError(format!(
             "generic function `{}` used as a value needs a concrete function-type context \
@@ -1890,7 +2861,7 @@ impl Checker {
     /// mirroring [`Self::fn_ref_node`]. A generic method *without* a
     /// template (a Rust builtin like `HashTable::get`) still can't be
     /// reified and fails to match, as before.
-    fn method_value(&self, name: &str, expected: Option<&Type>) -> Option<Typed> {
+    fn method_value(&self, heap: &mut Heap, name: &str, expected: Option<&Type>) -> Option<Result<Checked, Error>> {
         let Type::Fn(params, _, _) = expected? else { return None };
         let type_fq = match params.first()? {
             Type::Named(n, _) => n.clone(),
@@ -1913,10 +2884,16 @@ impl Checker {
                     && self.generic_method_templates.contains_key(&(type_fq.clone(), name.to_string()))
                 {
                     let mangled = self.request_method_specialization(&type_fq, name, targs);
-                    return Some(Typed { loc: None,
-                        expr: Expr::MethodRef { type_name: type_fq, method: mangled, home: self.ns.clone() },
-                        ty: subst_apply(&ty, &subst),
-                    });
+                    let resolved_ty = subst_apply(&ty, &subst);
+                    let params = match &resolved_ty {
+                        Type::Fn(ps, _, _) => ps.clone(),
+                        _ => Vec::new(),
+                    };
+                    let home = self.ns.clone();
+                    return Some(
+                        self.methodref_form(heap, &type_fq, &mangled, &home, &params)
+                            .map(|form| Checked::new(form, resolved_ty)),
+                    );
                 }
             }
             return None;
@@ -1924,19 +2901,21 @@ impl Checker {
         if &ty != expected.unwrap() {
             return None;
         }
-        Some(Typed { loc: None, expr: Expr::MethodRef { type_name: type_fq, method: name.to_string(), home: self.ns.clone() }, ty })
+        let params = af.sig.params.clone();
+        let home = self.ns.clone();
+        Some(self.methodref_form(heap, &type_fq, name, &home, &params).map(|form| Checked::new(form, ty)))
     }
 
     /// `var::field`: if `segs` is `[recv, method]` and `recv` names a bound
     /// local or global whose type has an *instance* associated function
     /// called `method` (in practice always a `defstruct` field accessor —
     /// see `Checker::check_defstruct` — though this doesn't care how the
-    /// method came to exist), produces the same `Expr::Assoc` node a
+    /// method came to exist), produces the same `assoc` node a
     /// `(method recv)` call would. `None` (not an error) for any other
     /// shape, so the caller falls back to ordinary module/type-path
     /// resolution (`Checker::check`'s `Value::Path` case).
     /// Delegates to `Checker::check_assoc_call` (instead of building the
-    /// `Expr::Assoc` node directly) so a *generic* `defstruct`'s field type
+    /// `assoc` node directly) so a *generic* `defstruct`'s field type
     /// gets the receiver's concrete type arguments substituted in exactly
     /// the way any other instance-method call already does — building the
     /// node by hand here once produced an unsubstituted type variable as
@@ -1950,13 +2929,26 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         segs: &[String],
-    ) -> Option<Result<Typed, Error>> {
+    ) -> Option<Result<Checked, Error>> {
         let [recv_name, method] = segs else { return None };
+        // The receiver is held across the whole of `check_assoc_call`, which
+        // allocates plenty before `assoc_form` finally pushes it — so it has to
+        // stay rooted. `var_form`/`global_form` root what they return for
+        // exactly this reason; see `var_form`'s doc comment.
         let recv = if let Some(t) = env.get(recv_name) {
-            Typed { loc: None, expr: Expr::Var(recv_name.clone()), ty: t.clone() }
+            let ty = t.clone();
+            match self.var_form(heap, recv_name) {
+                Ok(form) => Checked::new(form, ty),
+                Err(e) => return Some(Err(e)),
+            }
         } else {
             let (path, vi) = self.resolve_global(recv_name)?;
-            Typed { loc: None, expr: Expr::Global(self.mk_ref(vec![recv_name.clone()], path)), ty: vi.ty }
+            let ty = vi.ty;
+            let r = self.mk_ref(vec![recv_name.clone()], path);
+            match self.global_form(heap, &r, &ty) {
+                Ok(form) => Checked::new(form, ty),
+                Err(e) => return Some(Err(e)),
+            }
         };
         let Type::Named(type_fq, _) = &recv.ty else { return None };
         let af = self.reg.type_def(type_fq)?.assoc.get(method)?;
@@ -2213,7 +3205,7 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         if parts.len() >= 2 && self.params_declare_opt_key(heap, parts[1])? {
             return self.check_defun_opt_key(heap, interp, parts, parts_locs, public, def_loc);
         }
@@ -2237,7 +3229,7 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         let (params, param_locs, rest, ret, bounds, body_start, doc) = self.parse_defun_sig(heap, parts, parts_locs)?;
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         let fq_name = self.fq(&name);
@@ -2310,7 +3302,7 @@ impl Checker {
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
-        Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body, public })
+        self.definition_form(heap, &fq_name, &type_params, &params, &ret, public, &body)
     }
 
     /// The `&optional`/`&key` `defun` path — `Self::check_defun` routes here
@@ -2322,11 +3314,11 @@ impl Checker {
     /// defaulted `&optional`/`&key` parameter's declared type may not
     /// reference this function's own type parameters (see the
     /// `type_has_param` check below) — a call site that omits such an
-    /// argument would splice the checked default `Typed` node in verbatim
+    /// argument would splice the checked default node in verbatim
     /// (`Self::check_call_opt_key`, no re-checking against the call's
     /// concrete types), and that node's `.ty` would then still name the
     /// abstract type parameter instead of the instantiation's concrete type,
-    /// which downstream compile-side code (`ast_bridge`'s `binding_kind`)
+    /// which downstream compile-side code (`core_bridge`'s `binding_kind`)
     /// reads to decide GC/boxing representation. A defaultless parameter
     /// has no such node to splice (an `Option::none` is synthesized fresh at
     /// the call site, already `subst_apply`-ed) so is unrestricted.
@@ -2355,7 +3347,7 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
@@ -2466,7 +3458,7 @@ impl Checker {
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
-        Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body, public })
+        self.definition_form(heap, &fq_name, &type_params, &params, &ret, public, &body)
     }
 
     /// Checks one `&optional`/`&key` default-value form (or none) for
@@ -2481,15 +3473,35 @@ impl Checker {
         _pname: &str,
         decl_ty: &Type,
         default_raw: Option<Value>,
-    ) -> Result<Option<Typed>, Error> {
+    ) -> Result<Option<crate::fasl::OwnedForm>, Error> {
         match default_raw {
             None => Ok(None),
             Some(form) => {
                 let env = Env::new();
-                let typed = self.check(heap, interp, &env, form, Some(decl_ty))?;
-                Ok(Some(typed))
+                let checked = self.check(heap, interp, &env, form, Some(decl_ty))?;
+                // Detached from the heap right here — see `OptKeyParam::
+                // default` for why the signature cannot hold a `Value`.
+                Ok(Some(crate::fasl::value_to_owned(heap, checked.form)?))
             }
         }
+    }
+
+    /// Rebuild an `&optional`/`&key` default's checked form into *this* call
+    /// site's own cells — the read side of [`Self::check_opt_key_default`].
+    ///
+    /// A fresh subtree per site, not a shared one: the sites are independent
+    /// programs and a shared subtree would give them one identity. `decl_ty` is
+    /// the type the default was checked against, so it is the type the spliced
+    /// argument has (`OptKeyParam::effective_ty` is `decl_ty` exactly when a
+    /// default exists).
+    fn splice_default(
+        &self,
+        heap: &mut Heap,
+        default: &crate::fasl::OwnedForm,
+        decl_ty: &Type,
+    ) -> Result<Checked, Error> {
+        let form = crate::fasl::owned_to_value(heap, default)?;
+        Ok(Checked::new(self.rooted(heap, form), decl_ty.clone()))
     }
 
     /// Parses a `defun` form's parameter list, return type, and optional
@@ -2558,7 +3570,7 @@ impl Checker {
     /// [`Self::request_fn_specialization`]'s method-side counterpart: records
     /// that `type_fq`'s method `base` needs generating at the owner's
     /// concrete type arguments `args`, returning the mangled method name for
-    /// the `Expr::Assoc` node to reference. Only ever called when a
+    /// the `assoc` node to reference. Only ever called when a
     /// [`MethodTemplate`] is retained for the pair.
     fn request_method_specialization(&self, type_fq: &Path, base: &str, args: Vec<Type>) -> String {
         let mangled = mangled_method_name(base, &args);
@@ -2583,7 +3595,7 @@ impl Checker {
         &mut self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
-    ) -> Result<Vec<TopLevel>, Error> {
+    ) -> Result<Vec<TopLevelForm>, Error> {
         let mut out = Vec::new();
         loop {
             let req = self.spec_pending.borrow_mut().pop();
@@ -2603,11 +3615,28 @@ impl Checker {
                     SPECIALIZATION_BUDGET, last
                 )));
             }
+            // Each finished specialization is rooted as it lands in `out`, and
+            // stays rooted: the drain runs until the queue is empty, and every
+            // later specialization allocates. A `Vec<Value>` is invisible to the
+            // collector, so without this an early specialization is freed while a
+            // later one is being built and its cells are handed straight back
+            // out — the bundle then holds a *fragment* of the form that used to
+            // be there (a body list where a `defun` belongs), which `exec`
+            // rejects as "not a top-level core form". Released with the rest of
+            // the form's roots by `check_form_at`'s single `truncate_roots`.
             match req {
-                SpecRequest::Fn { .. } => out.push(self.specialize_defun(heap, interp, &req)?),
-                SpecRequest::Method { .. } => out.push(self.specialize_method(heap, interp, &req)?),
+                SpecRequest::Fn { .. } => {
+                    let form = self.specialize_defun(heap, interp, &req)?;
+                    out.push(self.rooted(heap, form));
+                }
+                SpecRequest::Method { .. } => {
+                    let form = self.specialize_method(heap, interp, &req)?;
+                    out.push(self.rooted(heap, form));
+                }
                 SpecRequest::Blanket { trait_path, target } => {
-                    out.extend(self.materialize_blanket_impl(heap, interp, &trait_path, &target)?);
+                    for form in self.materialize_blanket_impl(heap, interp, &trait_path, &target)? {
+                        out.push(self.rooted(heap, form));
+                    }
                 }
             }
         }
@@ -2625,7 +3654,7 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         req: &SpecRequest,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         let SpecRequest::Fn { base, args, mangled } = req else {
             unreachable!("drain routes Fn requests here")
         };
@@ -2686,13 +3715,13 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         req: &SpecRequest,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         let SpecRequest::Method { type_fq, base, args, mangled } = req else {
             unreachable!("drain routes Method requests here")
         };
         // A specialization's own `public` mirrors the unspecialized template
         // method's — `Interp`'s scope tree gates visibility on this bit (see
-        // `Expr::Assoc`'s doc comment), so a generated specialization must
+        // `assoc`'s doc comment), so a generated specialization must
         // carry the same one its template declared, not a default.
         let public = self
             .reg
@@ -2714,8 +3743,8 @@ impl Checker {
                 self.exit_specialization(saved_ns, saved_loops, saved_bindings);
                 result
             }
-            MethodTemplate::Getter { index } => Ok(self.synthesize_accessor(type_fq, args, index, mangled, true, public)),
-            MethodTemplate::Setter { index } => Ok(self.synthesize_accessor(type_fq, args, index, mangled, false, public)),
+            MethodTemplate::Getter { index } => self.synthesize_accessor(heap, type_fq, args, index, mangled, true, public),
+            MethodTemplate::Setter { index } => self.synthesize_accessor(heap, type_fq, args, index, mangled, false, public),
         }
     }
 
@@ -2726,31 +3755,23 @@ impl Checker {
         parts: &[Value],
         mangled: &str,
         public: bool,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         let MethodSig { instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
             self.parse_defmethod_sig(heap, parts, &[])?;
-        let mut binds: Vec<(String, Type)> = Vec::new();
+        // The receiver is the first parameter, not a field beside them: the
+        // core form binds what the body binds, in order.
+        let mut all: Vec<(String, Type)> = Vec::new();
         if let Some(s) = &self_name {
-            binds.push((s.clone(), recv_ty));
+            all.push((s.clone(), recv_ty));
         }
-        binds.extend(params.clone());
+        all.extend(params);
         // Bounds are deliberately dropped here, mirroring
         // `specialize_defun_body`: with the owner's type variables concrete,
         // every bounded method call resolves against the real receiver type
         // (and was already validated at the call site).
-        let env = Env::new().extended(binds);
+        let env = Env::new().extended(all.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], &[], Some(&ret))?;
-        Ok(TopLevel::Defmethod {
-            type_name: type_fq,
-            method: mangled.to_string(),
-            instance,
-            self_name,
-            params,
-            ret,
-            body,
-            type_params: Vec::new(),
-            public,
-        })
+        self.defmethod_form(heap, &type_fq, mangled, instance, &all, &ret, public, &body)
     }
 
     /// Builds a concrete accessor `TopLevel::Defmethod` for a generic
@@ -2759,47 +3780,44 @@ impl Checker {
     /// synthesizes, minus any registry mutation.
     fn synthesize_accessor(
         &self,
+        heap: &mut Heap,
         type_fq: &Path,
         args: &[Type],
         index: usize,
         mangled: &str,
         getter: bool,
         public: bool,
-    ) -> TopLevel {
+    ) -> Result<TopLevelForm, Error> {
         let def = self.reg.type_def(type_fq).expect("an accessor template implies the type exists");
         let subst: HashMap<String, Type> =
             def.params.iter().cloned().zip(args.iter().cloned()).collect();
         let field_ty = subst_apply(&def.variants[0].fields[index], &subst);
         let recv_ty = Type::Named(type_fq.clone(), args.to_vec());
-        let self_var = Typed { loc: None, expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
+        let self_param = ("self".to_string(), recv_ty);
         if getter {
-            TopLevel::Defmethod {
-                type_name: type_fq.clone(),
-                method: mangled.to_string(),
-                instance: true,
-                self_name: Some("self".to_string()),
-                params: Vec::new(),
-                ret: field_ty.clone(),
-                body: vec![Typed { loc: None, expr: Expr::FieldGet(Box::new(self_var), index), ty: field_ty }],
-                type_params: Vec::new(),
-                public,
-            }
+            // Rooted for the same reason the setter branch below roots: the body
+            // form is built *before* `defmethod_form`, which then allocates its
+            // path, its method symbol, its parameter list and its return
+            // representation before `Items::extend` finally pushes the body — and
+            // any of those allocations can collect an unrooted form. (This arm
+            // did not root, and `gc_stress` caught it as `push_root given freed
+            // cell` inside `Items::push`.)
+            let self_var = self.var_form(heap, "self")?;
+            let mut s = RootScope::new(heap);
+            s.push_root(self_var);
+            let get = self.field_get_form(&mut s, self_var, index, &field_ty)?;
+            s.push_root(get);
+            self.defmethod_form(&mut s, type_fq, mangled, true, &[self_param], &field_ty, public, &[get])
         } else {
-            let value_var = Typed { loc: None, expr: Expr::Var("value".to_string()), ty: field_ty.clone() };
-            TopLevel::Defmethod {
-                type_name: type_fq.clone(),
-                method: mangled.to_string(),
-                instance: true,
-                self_name: Some("self".to_string()),
-                params: vec![("value".to_string(), field_ty)],
-                ret: Type::Unit,
-                body: vec![Typed { loc: None,
-                    expr: Expr::FieldSet(Box::new(self_var), index, Box::new(value_var)),
-                    ty: Type::Unit,
-                }],
-                type_params: Vec::new(),
-                public,
-            }
+            let self_var = self.var_form(heap, "self")?;
+            let mut s = RootScope::new(heap);
+            s.push_root(self_var);
+            let value_var = self.var_form(&mut s, "value")?;
+            s.push_root(value_var);
+            let set = self.field_set_form(&mut s, self_var, index, &field_ty, value_var)?;
+            s.push_root(set);
+            let params = [self_param, ("value".to_string(), field_ty)];
+            self.defmethod_form(&mut s, type_fq, mangled, true, &params, &Type::Unit, public, &[set])
         }
     }
 
@@ -2810,7 +3828,7 @@ impl Checker {
         tmpl: &FnTemplate,
         mangled: &Path,
         public: bool,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         if self.params_declare_opt_key(heap, tmpl.parts[1])? {
             return self.specialize_defun_body_opt_key(heap, interp, tmpl, mangled, public);
         }
@@ -2827,7 +3845,7 @@ impl Checker {
         }
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
-        Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body, public })
+        self.defun_form(heap, mangled, &params, &ret, public, &body)
     }
 
     /// [`Self::specialize_defun_body`]'s `&optional`/`&key` counterpart —
@@ -2845,7 +3863,7 @@ impl Checker {
     /// Every defaulted `&optional`/`&key` parameter's declared type is
     /// already guaranteed concrete (`Self::check_defun_opt_key`'s
     /// `type_has_param` restriction), so a default's freshly re-checked
-    /// `Typed` node here has a genuinely concrete `.ty` — see the module's
+    /// node checked here has a genuinely concrete type — see the module's
     /// `check_defun_opt_key` doc comment for why that matters downstream.
     ///
     /// The signature is not registered on `self.reg` — like
@@ -2860,7 +3878,7 @@ impl Checker {
         tmpl: &FnTemplate,
         mangled: &Path,
         public: bool,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         let (required, _required_locs, optionals_raw, rest, keys_raw) =
             self.parse_defun_params_full(heap, tmpl.parts[1])?;
         let ret = self.parse_type_here_at(heap, tmpl.parts[2], None)?;
@@ -2895,7 +3913,7 @@ impl Checker {
 
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
-        Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body, public })
+        self.defun_form(heap, mangled, &params, &ret, public, &body)
     }
 
     /// Whether a declared type's *runtime representation* is a heap value
@@ -3274,7 +4292,7 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError("defmacro: (defmacro name (params) body...)".into()));
         }
@@ -3334,7 +4352,7 @@ impl Checker {
         let mut bindings: Vec<(String, Type)> =
             required_names.iter().map(|n| (n.clone(), sexpr_ty.clone())).collect();
 
-        let mut opt_defaults: Vec<Vec<Typed>> = Vec::with_capacity(optionals.len());
+        let mut opt_defaults: Vec<Vec<Value>> = Vec::with_capacity(optionals.len());
         for (n, default) in &optionals {
             let checked = self.check_macro_default(heap, interp, &bindings, *default, &sexpr_ty)?;
             opt_defaults.push(checked);
@@ -3343,7 +4361,7 @@ impl Checker {
         if let Some(r) = &rest_name {
             bindings.push((r.clone(), sexpr_ty.clone()));
         }
-        let mut key_defaults: Vec<(String, Vec<Typed>)> = Vec::with_capacity(key_specs.len());
+        let mut key_defaults: Vec<(String, Vec<Value>)> = Vec::with_capacity(key_specs.len());
         for (n, default) in &key_specs {
             let checked = self.check_macro_default(heap, interp, &bindings, *default, &sexpr_ty)?;
             key_defaults.push((n.clone(), checked));
@@ -3354,12 +4372,12 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&sexpr_ty))?;
         let lambda = MacroLambda { required: required_names.len(), optionals: opt_defaults, keys: key_defaults };
-        Ok(TopLevel::Defmacro { name: fq_name, params, body, rest, lambda, public })
+        self.defmacro_form(heap, &fq_name, &params, rest, &lambda, public, &body)
     }
 
     /// Check one `&optional`/`&key` default-value form (or none) against
     /// `Sexpr`, in an environment holding the params bound before it. Returns
-    /// the checked body as a `Vec<Typed>` — a single-element vector for a
+    /// the checked body as a `Vec<Value>` — a single-element vector for a
     /// supplied default, or empty for "no default" (binds `nil` at expansion).
     fn check_macro_default(
         &self,
@@ -3368,13 +4386,13 @@ impl Checker {
         bindings: &[(String, Type)],
         default: Option<Value>,
         sexpr_ty: &Type,
-    ) -> Result<Vec<Typed>, Error> {
+    ) -> Result<Vec<Value>, Error> {
         match default {
             None => Ok(Vec::new()),
             Some(form) => {
                 let env = Env::new().extended(bindings.to_vec());
-                let typed = self.check(heap, interp, &env, form, Some(sexpr_ty))?;
-                Ok(vec![typed])
+                let checked = self.check(heap, interp, &env, form, Some(sexpr_ty))?;
+                Ok(vec![checked.form])
             }
         }
     }
@@ -3756,7 +4774,7 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError(
                 "deftrait: (deftrait Name (Super...) (type AssocName)... (method (params...) ret)...) \
@@ -3927,7 +4945,7 @@ impl Checker {
             parts_locs.first().and_then(|l| l.as_ref()),
             name.chars().count(),
         );
-        Ok(TopLevel::Module { path: fq_name, body: vec![] })
+        self.module_form(heap, &fq_name, &[])
     }
 
     /// `(impl TraitName TargetType (type AssocName ConcreteType)... (method-name (recv params...) Ret body...)...)`:
@@ -3959,7 +4977,7 @@ impl Checker {
     /// *own* default bodies, which are checked in the trait's namespace
     /// (`Checker::check_defmethod_in`'s `body_ns`) and so stood outside the
     /// implementing module by construction.
-    fn check_impl(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevel, Error> {
+    fn check_impl(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError("impl: (impl TraitName TargetType (type AssocName Type)... (method ...)...)".into()));
         }
@@ -4091,7 +5109,15 @@ impl Checker {
                 method_loc,
                 default_ns[mi].clone(),
             )?;
-            body.push(tl);
+            // Rooted as it lands: `body` is a `Vec<Value>`, which the collector
+            // cannot see, and the *next* method's checking allocates heavily.
+            // An unrooted earlier member is collected and its cell recycled, so
+            // the module bundle ends up holding a fragment of it — observed as
+            // `exec: not a top-level core form: (())` for `(impl charinput
+            // two-way-stream)`, whose first method vanished while the two
+            // defaulted ones behind it survived. Released with the rest of this
+            // top-level form by `check_form_at`'s `truncate_roots`.
+            body.push(self.rooted(heap, tl));
         }
         self.check_impl_conformance(&trait_fq, &target_fq, &target_ty, &written, &assoc_concrete)?;
         self.check_supertrait_impls(&trait_fq, &target_fq, &assoc_concrete)?;
@@ -4099,7 +5125,7 @@ impl Checker {
             def.impls.push(trait_fq.clone());
             def.trait_assoc.insert(trait_fq, assoc_concrete);
         }
-        Ok(TopLevel::Module { path: target_fq, body })
+        self.module_form(heap, &target_fq, &body)
     }
 
     /// Rewrite one `impl` method item's *type* positions through `subst`,
@@ -4421,7 +5447,7 @@ impl Checker {
     ///
     /// The definition does not exist yet — `type_implements` has queued it —
     /// so this cannot go through `check_assoc_call`, which reads
-    /// `AdtDef::assoc`. It emits the same `Expr::Assoc` node that lookup
+    /// `AdtDef::assoc`. It emits the same `assoc` node that lookup
     /// would have, naming the method the materialization will register.
     #[allow(clippy::too_many_arguments)]
     fn check_blanket_method_call(
@@ -4429,13 +5455,13 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        receiver: Typed,
+        receiver: Checked,
         type_fq: &Path,
         trait_path: &Path,
         method: &str,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let tdef = self
             .reg
             .trait_def(trait_path)
@@ -4460,17 +5486,10 @@ impl Checker {
             let expect = subst_apply(pty, &subst);
             typed.push(self.check_at(heap, interp, env, *a, Some(&expect), nth_loc(arg_locs, i))?);
         }
-        Ok(Typed {
-            loc: None,
-            expr: Expr::Assoc {
-                type_name: type_fq.clone(),
-                method: method.to_string(),
-                instance: true,
-                args: typed,
-                home: self.ns.clone(),
-            },
-            ty: subst_apply(&sig.ret, &subst),
-        })
+        let ty = subst_apply(&sig.ret, &subst);
+        let home = self.ns.clone();
+        let form = self.assoc_form(heap, type_fq, method, true, &home, &ty, &typed)?;
+        Ok(Checked::new(form, ty))
     }
 
     /// Generate a blanket `impl` at one concrete target type.
@@ -4488,7 +5507,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         trait_path: &Path,
         target: &Type,
-    ) -> Result<Vec<TopLevel>, Error> {
+    ) -> Result<Vec<TopLevelForm>, Error> {
         let Some(b) = self.reg.blanket_impl(trait_path) else { return Ok(Vec::new()) };
         let (target_var, ns) = (b.target_var.clone(), b.ns.clone());
         let mut items: Vec<Vec<crate::fasl::OwnedForm>> = Vec::new();
@@ -4535,9 +5554,12 @@ impl Checker {
         let checked = self.check_impl(heap, interp, &parts, &locs);
         let (sn, sl, sb) = saved;
         self.exit_specialization(sn, sl, sb);
-        match checked? {
-            TopLevel::Module { body, .. } => Ok(body),
-            other => Ok(vec![other]),
+        let checked = checked?;
+        // `check_impl` wraps its methods in a `module` purely as a grouping
+        // device; the caller wants the definitions themselves.
+        match core::op(heap, checked) {
+            Some("module") => Ok(core::fields(heap, checked)?.split_off(1)),
+            _ => Ok(vec![checked]),
         }
     }
 
@@ -4648,7 +5670,7 @@ impl Checker {
         parts: &[Value],
         parts_locs: &[Option<Loc>],
         head_params: Vec<String>,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError(
                 "impl: (impl<T> TraitName Target (where ...) (method ...)...)".into(),
@@ -4687,7 +5709,7 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         target_var: String,
         head_params: Vec<String>,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         let segs = self
             .path_to_segs(heap, parts[0])
             .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
@@ -4785,7 +5807,8 @@ impl Checker {
             &assoc_written,
             &method_forms,
         )?;
-        Ok(TopLevel::Module { path: self.fq("impl"), body: vec![] })
+        let path = self.fq("impl");
+        self.module_form(heap, &path, &[])
     }
 
     /// Type-check a blanket `impl`'s method bodies at its declaration, with
@@ -4796,7 +5819,7 @@ impl Checker {
     /// The bodies are checked exactly the way a generic `defun`'s body is:
     /// the target variable parses to an unresolved [`Type::Named`], and a
     /// method call on it resolves through `Env::bounds` to a diagnostics-only
-    /// `Expr::TraitCall` ([`Self::check_instance_method`]'s bounds branch).
+    /// the unreachable-`panic` node ([`Self::check_instance_method`]'s bounds branch).
     /// Two bound sets are in scope, matching what every materialization will
     /// have: the impl's own `(where ...)` — already merged into each method's
     /// clause by [`Self::subst_method_item`] — and the trait being
@@ -4874,7 +5897,7 @@ impl Checker {
     /// `Self` is *already* a type variable ([`is_self_tvar`]), so the body
     /// checks exactly the way a generic `defun`'s does — a method call on
     /// `self` resolves through `Env::bounds` to a diagnostics-only
-    /// [`Expr::TraitCall`]. The one bound needed is `Self: this trait`, which
+    /// an unreachable `panic`. The one bound needed is `Self: this trait`, which
     /// is what an implementor always satisfies; it covers the inherited
     /// methods too, since `Registry::trait_method` searches the supertrait
     /// chain.
@@ -5034,11 +6057,11 @@ impl Checker {
 
     /// Every implementation of `trait_path`'s `method` currently registered,
     /// as `(owning type, method name)` — what a compiled `:dyn` call site
-    /// needs compiled before it can run (see `Expr::DynCall::impl_targets`).
+    /// needs compiled before it can run (see `dyn-call`'s `IMPL_TARGETS`).
     ///
     /// Generic owners are skipped: their method has no code until it is
     /// specialized, and a specialization is only named once a concrete
-    /// instantiation is boxed — which is exactly where `Expr::DynBox`'s own
+    /// instantiation is boxed — which is exactly where `dyn-new`'s own
     /// slots (already monomorphized by `dyn_vtable_slots`) pull it in.
     fn dyn_impl_targets(&self, trait_path: &Path, method: &str) -> Vec<(Path, String)> {
         self.reg
@@ -5075,17 +6098,18 @@ impl Checker {
     /// For a second or later supertrait the prefix fails — `D(B,C)`'s vtable
     /// is `[B's..., C's..., D's...]`, so `C`'s slots start at a nonzero
     /// offset and a `:dyn C` call site's baked-in constant would index the
-    /// wrong entry. That case gets an [`Expr::DynUpcast`], which swaps the
-    /// box's table for the one `Expr::DynBox::supers` recorded for the same
+    /// wrong entry. That case gets an [`dyn-upcast`], which swaps the
+    /// box's table for the one `dyn-new`'s `SUPERS` recorded for the same
     /// concrete type.
     fn upcast_dyn(
         &self,
-        value: Typed,
+        heap: &mut Heap,
+        value: Checked,
         from: &Path,
         from_pins: &[Type],
         to: &Path,
         to_pins: &[Type],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let from_ty = Type::Dyn(from.clone(), from_pins.to_vec());
         let to_ty = Type::Dyn(to.clone(), to_pins.to_vec());
         let mismatch = |why: &str| {
@@ -5129,24 +6153,20 @@ impl Checker {
         // Prefix layouts: the box is already a valid `:dyn to`, so nothing
         // below the checker learns that an upcast happened.
         if fdef.vtable_order.starts_with(&tdef.vtable_order) {
-            return Ok(Typed { loc: value.loc.clone(), expr: value.expr, ty: to_ty });
+            return Ok(Checked::new(value.form, to_ty));
         }
         // Otherwise the target's slot numbering differs and the box has to
         // be re-made around `to`'s own table for this concrete type. Which
         // table that is depends on the value, not on this site, so the node
         // only names the target trait and the swap is a runtime lookup on
         // the box's vtable id.
-        let loc = value.loc.clone();
-        Ok(Typed {
-            loc,
-            expr: Expr::DynUpcast { to_trait: to.clone(), value: Box::new(value) },
-            ty: to_ty,
-        })
+        let form = self.dyn_upcast_form(heap, to, value.form)?;
+        Ok(Checked::new(form, to_ty))
     }
 
     /// Every transitive supertrait of `trait_path`, nearest first, without
     /// duplicates — the traits a `:dyn trait_path` value can be upcast to,
-    /// and hence the tables [`Expr::DynBox`] has to lay out alongside its
+    /// and hence the tables [`dyn-new`] has to lay out alongside its
     /// own (see that field's doc comment for why they are laid out at the
     /// boxing site).
     fn supertrait_closure(&self, trait_path: &Path) -> Vec<Path> {
@@ -5164,7 +6184,7 @@ impl Checker {
         out
     }
 
-    /// The supertrait vtables an [`Expr::DynBox`] carries: for each trait in
+    /// The supertrait vtables an [`dyn-new`] carries: for each trait in
     /// `trait_path`'s supertrait closure, the same concrete type's slot
     /// table for *it*.
     ///
@@ -5214,7 +6234,14 @@ impl Checker {
     /// `env` is consulted only for the erased-generic case: inside a generic
     /// function's definition-time body check the value's type may still be a
     /// `where`-bounded type variable, which has no vtable to lay out *yet*.
-    fn coerce_to_dyn(&self, env: &Env, value: Typed, trait_path: &Path, pins: &[Type]) -> Result<Typed, Error> {
+    fn coerce_to_dyn(
+        &self,
+        heap: &mut Heap,
+        env: &Env,
+        value: Checked,
+        trait_path: &Path,
+        pins: &[Type],
+    ) -> Result<Checked, Error> {
         // Re-boxing a trait object. Same-trait/same-pins never reaches here
         // (the types compare equal). A *supertrait* is an upcast, and along
         // the leftmost supertrait spine it is free: inherited methods occupy
@@ -5226,14 +6253,14 @@ impl Checker {
         //
         // Any other target needs a second vtable the source box cannot
         // supply, because the concrete type is gone by then.
-        if let Type::Dyn(from, from_pins) = &value.ty {
-            return self.upcast_dyn(value.clone(), from, from_pins, trait_path, pins);
+        if let Type::Dyn(from, from_pins) = value.ty.clone() {
+            return self.upcast_dyn(heap, value, &from, &from_pins, trait_path, pins);
         }
         // Boxing a `where`-bounded type variable (`(defun f<E> ... (where (Error E))
         // ... (as :dyn Error e))`): which vtable to build is only knowable once
         // `E` is concrete, so the generic body — diagnostics-only, never
         // executed — carries the same erased-generic placeholder a bounded
-        // method call leaves behind (`Expr::TraitCall`), and each
+        // method call leaves behind (an unreachable `panic`), and each
         // specialization re-checks this site with `E` substituted, taking the
         // real `dyn_vtable_slots` path below. The bound is what makes it
         // admissible: every instantiation must implement the trait, so the
@@ -5243,34 +6270,29 @@ impl Checker {
         if let Type::Named(p, targs) = &value.ty {
             let is_tvar = targs.is_empty() && p.is_simple() && self.reg.type_def(p).is_none();
             if is_tvar && env.bounds.get(p.last_segment()).is_some_and(|bs| bs.iter().any(|b| b.trait_path == *trait_path)) {
-                let loc = value.loc.clone();
-                return Ok(Typed {
-                    loc,
-                    expr: Expr::TraitCall { method: format!("as :dyn {}", trait_path), args: vec![value] },
-                    ty: Type::Dyn(trait_path.clone(), pins.to_vec()),
-                });
+                let what = format!("as :dyn {}", trait_path);
+                let form = self.erased_generic_form(heap, &what)?;
+                return Ok(Checked::new(form, Type::Dyn(trait_path.clone(), pins.to_vec())));
             }
         }
         let slots = self.dyn_vtable_slots(&value.ty, trait_path, pins)?;
         // The supertraits' tables, laid out here because this is the last
         // point where both halves of a vtable's identity — the concrete type
-        // and the trait — are in hand. A later `Expr::DynUpcast` of this box
+        // and the trait — are in hand. A later `dyn-upcast` of this box
         // only has the trait.
         let order = &self.check_object_safe(trait_path)?.vtable_order;
         let supers = self.dyn_super_vtables(trait_path, order, &slots);
         let concrete_key = mangle_type(&value.ty);
-        let loc = value.loc.clone();
-        Ok(Typed {
-            loc,
-            expr: Expr::DynBox {
-                concrete_key,
-                trait_path: trait_path.clone(),
-                slots,
-                supers,
-                value: Box::new(value),
-            },
-            ty: Type::Dyn(trait_path.clone(), pins.to_vec()),
-        })
+        let form = self.dyn_new_form(
+            heap,
+            &concrete_key,
+            trait_path,
+            &slots,
+            &supers,
+            &value.ty,
+            value.form,
+        )?;
+        Ok(Checked::new(form, Type::Dyn(trait_path.clone(), pins.to_vec())))
     }
 
     /// Check `(method dyn-receiver args...)` — a call through a trait
@@ -5284,13 +6306,13 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        receiver: Typed,
+        receiver: Checked,
         trait_path: &Path,
         pins: &[Type],
         method: &str,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let own_subst = self.dyn_assoc_subst(trait_path, pins)?;
         let tdef = self.check_object_safe(trait_path)?;
         let Some(slot) = tdef.vtable_order.iter().position(|n| n == method) else {
@@ -5335,17 +6357,9 @@ impl Checker {
         for (i, (arg, pty)) in args.iter().zip(expected_params.iter()).enumerate() {
             typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i))?);
         }
-        Ok(Typed {
-            loc: None,
-            expr: Expr::DynCall {
-                trait_path: trait_path.clone(),
-                method: method.to_string(),
-                slot,
-                impl_targets: self.dyn_impl_targets(trait_path, method),
-                args: typed,
-            },
-            ty: ret,
-        })
+        let targets = self.dyn_impl_targets(trait_path, method);
+        let form = self.dyn_call_form(heap, trait_path, method, slot, &targets, &typed)?;
+        Ok(Checked::new(form, ret))
     }
 
     /// Whether trait `trait_path` can be used as a trait object (`:dyn
@@ -5672,7 +6686,7 @@ impl Checker {
 
     // ---- module / defmethod / use -----------------------------------------
 
-    fn check_module(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value]) -> Result<TopLevel, Error> {
+    fn check_module(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value]) -> Result<TopLevelForm, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("module: (module path body...)".into()));
         }
@@ -5683,7 +6697,10 @@ impl Checker {
         let mut result = Ok(());
         for form in &parts[1..] {
             match self.check_form(heap, interp, *form) {
-                Ok(tl) => body.push(tl),
+                // Rooted as it lands, for the same reason `check_impl`'s member
+                // loop does it: `check_form` hands back an *unrooted* form by
+                // contract, and every later member's checking allocates.
+                Ok(tl) => body.push(self.rooted(heap, tl)),
                 Err(e) => {
                     result = Err(e);
                     break;
@@ -5692,7 +6709,7 @@ impl Checker {
         }
         self.exit_module(segs.len());
         result?;
-        Ok(TopLevel::Module { path, body })
+        self.module_form(heap, &path, &body)
     }
 
     /// Push `segs` onto the current namespace path and ensure the (possibly
@@ -5774,7 +6791,7 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         self.check_defmethod_in(heap, interp, parts, parts_locs, public, def_loc, None)
     }
 
@@ -5797,7 +6814,7 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
         body_ns: Option<Vec<String>>,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         let MethodSig { method, instance, self_name, self_name_loc, recv_ty, type_fq, params, param_locs, ret, bounds, body_start, doc } =
             self.parse_defmethod_sig(heap, parts, parts_locs)?;
 
@@ -5878,7 +6895,7 @@ impl Checker {
         // method call on a `where`-bounded type variable (e.g. `(equals
         // self::car other::car)` with `self::car : A` under `(where (Eq A))`)
         // resolves through `check_instance_method`'s bounds branch to a
-        // diagnostics-only `Expr::TraitCall`, exactly as in generic `defun`
+        // diagnostics-only unreachable `panic`, exactly as in generic `defun`
         // bodies.
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
@@ -5896,7 +6913,12 @@ impl Checker {
         }
         let (body, _) = checked?;
         let type_params = if is_generic_template { written_vars } else { Vec::new() };
-        Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body, type_params, public })
+        let mut all: Vec<(String, Type)> = Vec::new();
+        if let Some(s) = &self_name {
+            all.push((s.clone(), recv_ty));
+        }
+        all.extend(params);
+        self.method_definition_form(heap, &type_fq, &method, instance, &type_params, &all, &ret, public, &body)
     }
 
     /// Parses a `defmethod` form's name, receiver, parameters, and return
@@ -6005,8 +7027,8 @@ impl Checker {
     /// `defstruct` needs no changes to either.
     ///
     /// Beyond registering the type, this synthesizes one getter and one
-    /// setter `defmethod` per field: `f` reads `fields[i]` (`Expr::FieldGet`)
-    /// and `set-f` writes it (`Expr::FieldSet`, `set-car`/`set-cdr`'s prefix
+    /// setter `defmethod` per field: `f` reads `fields[i]` (`field-get`)
+    /// and `set-f` writes it (`field-set`, `set-car`/`set-cdr`'s prefix
     /// convention, no `!`), so `(f instance)`/`(set-f instance v)` — and,
     /// through `Checker::check`'s `Value::Path` sugar and `Checker::check_setf`,
     /// `instance::f`/`(setf instance::f v)` — work immediately; no separate
@@ -6016,7 +7038,7 @@ impl Checker {
     /// one `TopLevel::Module` — purely as a grouping device: `Interp::exec`'s
     /// `Module` arm just runs `body` in order and never reads `path`, so this
     /// carries none of an actual `(module ...)`'s namespace-nesting semantics.
-    fn check_defstruct(&mut self, heap: &Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
+    fn check_defstruct(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("defstruct: (defstruct name (field type)...)".into()));
         }
@@ -6071,7 +7093,15 @@ impl Checker {
         let recv_ty = Type::Named(type_fq.clone(), recv_targs);
 
         let mut assoc = HashMap::new();
-        let mut accessors = Vec::with_capacity(fields.len() * 2);
+        // The bundle's members, each rooted from the moment it is built. The
+        // loop below allocates once per accessor, so an accessor finished two
+        // fields ago is exactly as collectible as the one being built now —
+        // holding them in `Items` is what makes that automatic. The
+        // `(defstruct ...)` node goes first because the type has to exist
+        // before its methods.
+        let mut members = Items::new(heap);
+        let def_node = self.defstruct_form(members.heap(), &type_fq, &field_types)?;
+        members.push(def_node);
         for (i, (field_name, field_ty, field_public)) in fields.iter().enumerate() {
             let field_public = *field_public;
             let getter_sig = FnSig {
@@ -6086,18 +7116,28 @@ impl Checker {
                 keys: Vec::new(),
             };
             assoc.insert(field_name.clone(), AssocFn { sig: getter_sig, instance: true, builtin: false });
-            let self_var = Typed { loc: None, expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
-            accessors.push(TopLevel::Defmethod {
-                type_name: type_fq.clone(),
-                method: field_name.clone(),
-                instance: true,
-                self_name: Some("self".to_string()),
-                params: Vec::new(),
-                ret: field_ty.clone(),
-                body: vec![Typed { loc: None, expr: Expr::FieldGet(Box::new(self_var), i), ty: field_ty.clone() }],
-                type_params: type_params.clone(),
-                public: field_public,
-            });
+            let getter = {
+                // The intermediates (`self`, then the `field-get` around it)
+                // have to stay rooted until the method node holding them is
+                // finished; this scope releases them however it is left.
+                let mut s = RootScope::new(members.heap());
+                let self_var = self.var_form(&mut s, "self")?;
+                s.push_root(self_var);
+                let get = self.field_get_form(&mut s, self_var, i, field_ty)?;
+                s.push_root(get);
+                self.method_definition_form(
+                    &mut s,
+                    &type_fq,
+                    field_name,
+                    true,
+                    &type_params,
+                    &[("self".to_string(), recv_ty.clone())],
+                    field_ty,
+                    field_public,
+                    &[get],
+                )?
+            };
+            members.push(getter);
 
             // Setter (`set-car`/`set-cdr`'s `set-` prefix, no `!` — see
             // `Checker::check_setf`, which calls this via `(setf p::x v)`).
@@ -6114,22 +7154,27 @@ impl Checker {
                 keys: Vec::new(),
             };
             assoc.insert(setter_name.clone(), AssocFn { sig: setter_sig, instance: true, builtin: false });
-            let self_var = Typed { loc: None, expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
-            let value_var = Typed { loc: None, expr: Expr::Var("value".to_string()), ty: field_ty.clone() };
-            accessors.push(TopLevel::Defmethod {
-                type_name: type_fq.clone(),
-                method: setter_name.clone(),
-                instance: true,
-                self_name: Some("self".to_string()),
-                params: vec![("value".to_string(), field_ty.clone())],
-                ret: Type::Unit,
-                body: vec![Typed { loc: None,
-                    expr: Expr::FieldSet(Box::new(self_var), i, Box::new(value_var)),
-                    ty: Type::Unit,
-                }],
-                type_params: type_params.clone(),
-                public: field_public,
-            });
+            let setter = {
+                let mut s = RootScope::new(members.heap());
+                let self_var = self.var_form(&mut s, "self")?;
+                s.push_root(self_var);
+                let value_var = self.var_form(&mut s, "value")?;
+                s.push_root(value_var);
+                let set = self.field_set_form(&mut s, self_var, i, field_ty, value_var)?;
+                s.push_root(set);
+                self.method_definition_form(
+                    &mut s,
+                    &type_fq,
+                    &setter_name,
+                    true,
+                    &type_params,
+                    &[("self".to_string(), recv_ty.clone()), ("value".to_string(), field_ty.clone())],
+                    &Type::Unit,
+                    field_public,
+                    &[set],
+                )?
+            };
+            members.push(setter);
 
             // A generic defstruct's accessors mention the type parameters
             // through the field types, so — like every generic-owner method —
@@ -6173,9 +7218,11 @@ impl Checker {
             name.chars().count(),
         );
 
-        let mut body = vec![TopLevel::Defstruct { name: type_fq.clone() }];
-        body.extend(accessors);
-        Ok(TopLevel::Module { path: type_fq, body })
+        // `(module Name (defstruct ...) (defmethod ...)...)`: the definition
+        // and its accessors travel as one unit, so a caller that records this
+        // form records all of it.
+        let body: Vec<Value> = members.as_slice().to_vec();
+        self.module_form(members.heap(), &type_fq, &body)
     }
 
     /// `(defenum Name (Variant Type...)...)` — or generically
@@ -6193,7 +7240,7 @@ impl Checker {
     /// accessors/setters are synthesized: an enum value is immutable and its
     /// fields are positional, so there's nothing to run at exec time either —
     /// hence a bare `TopLevel::Defenum` rather than a `Module` bundle.
-    fn check_defenum(&mut self, heap: &Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
+    fn check_defenum(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("defenum: (defenum Name (Variant Type...)...)".into()));
         }
@@ -6291,24 +7338,27 @@ impl Checker {
             parts_locs.first().and_then(|l| l.as_ref()),
             name.chars().count(),
         );
-        Ok(TopLevel::Defenum { name: type_fq, params: type_params, variants })
+        self.defenum_form(heap, &type_fq, &variants)
     }
 
     /// `(load "path")` — records the flat-load request for the driver (see
     /// [`TopLevel::Load`]). The argument must be a string *literal* (the
     /// driver resolves it before any subsequent form is checked, so it can't
     /// depend on runtime values).
-    fn check_load(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+    fn check_load(&mut self, heap: &mut Heap, parts: &[Value]) -> Result<TopLevelForm, Error> {
         if parts.len() != 1 {
             return Err(Error::TypeError("load: (load \"path\")".into()));
         }
         match parts[0] {
-            Value::Str(id) => Ok(TopLevel::Load { path: heap.string(id).to_string() }),
+            Value::Str(id) => {
+                let path = heap.string(id).to_string();
+                self.load_form(heap, &path)
+            }
             _ => Err(Error::TypeError("load: expected a string-literal path".into())),
         }
     }
 
-    fn check_use(&mut self, heap: &Heap, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevel, Error> {
+    fn check_use(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
         if parts.len() != 1 {
             return Err(Error::TypeError("use: (use path)".into()));
         }
@@ -6319,7 +7369,8 @@ impl Checker {
         // Try: free function.
         if let Some(target) = self.resolve_fn_path(&segs) {
             self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
-            return Ok(TopLevel::Use { alias: self.fq(&bare), target });
+            let alias = self.fq(&bare);
+            return self.use_form(heap, &alias, &target);
         }
         // Try: type. Beyond the usual alias (so the bare name also resolves
         // in a type-annotation position, e.g. `(x Option)` — see
@@ -6368,13 +7419,15 @@ impl Checker {
                     .static_uses
                     .insert(name.clone(), (target.clone(), name.clone()));
             }
-            return Ok(TopLevel::Use { alias: self.fq(&bare), target });
+            let alias = self.fq(&bare);
+            return self.use_form(heap, &alias, &target);
         }
         // Try: module alias — `(use std::math)` makes `math` a short name for `std::math`.
         if let Some((abs, _)) = self.find_module(&segs) {
             let target_path = Path::from_segments(abs.clone());
             self.reg.root.module_mut(&self.ns).mod_aliases.insert(bare.clone(), abs);
-            return Ok(TopLevel::Use { alias: self.fq(&bare), target: target_path });
+            let alias = self.fq(&bare);
+            return self.use_form(heap, &alias, &target_path);
         }
         // Not a known function, type, or module. The path may name a module
         // in a source file that simply hasn't been loaded yet — surface a
@@ -6399,7 +7452,7 @@ impl Checker {
         env: &Env,
         v: Value,
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         self.check_at(heap, interp, env, v, expected, None)
     }
 
@@ -6425,30 +7478,68 @@ impl Checker {
         v: Value,
         expected: Option<&Type>,
         loc_hint: Option<Loc>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let loc = heap.cons_loc(v).or(loc_hint);
         match self.check_inner(heap, interp, env, v, expected) {
-            // Record `v`'s location on the checked node so the interpreter can
+            // Record `v`'s location on the lowered node so the interpreter can
             // report a *runtime* error there too. A recursive `check` on a
             // sub-form already tagged its own node, so only fill an empty slot.
-            Ok(mut typed) => {
-                if typed.loc.is_none() {
-                    typed.loc = loc;
+            //
+            // The position goes in `Heap`'s `code_locs` table, keyed by the
+            // node's own cons cell, rather than in a `loc` field of the node —
+            // there is no field any more, and a core form is data whose shape
+            // is fixed by the vocabulary. `core::tagged_at` is the same act
+            // performed at build time by a site that has the position in hand.
+            Ok(checked) => {
+                // Root the node for the rest of this top-level form, with no
+                // matching pop of its own (`check_form_at` truncates the stack
+                // back to where it started).
+                //
+                // This is what makes the checker GC-safe by construction
+                // rather than by discipline. A node lives in a Rust local
+                // between being built here and being pushed into its parent's
+                // `core::Items`, and `Heap::cons` can collect at any point in
+                // between — that window is precisely where the four historical
+                // root leaks in this file were (`subst_value`,
+                // `list_from_vec_locs`, `subst_method_sig`,
+                // `merge_where_clauses`). An enclosing `Items`/`RootScope`
+                // truncating past this push is harmless: by then the node is
+                // rooted by that scope, or reachable from the finished parent.
+                heap.push_root(checked.form);
+                if let Value::Cons(cr) = checked.form {
+                    if heap.cons_loc(checked.form).is_none() {
+                        if let Some(loc) = loc.clone() {
+                            heap.set_cons_loc(cr, loc);
+                        }
+                    }
                 }
                 // A local-variable reference that resolved against an `Env`
                 // binding with a recorded position: record the reference's own
                 // position -> the binding's position in `local_refs`, for
-                // `check::locate::definition_target`'s `Expr::Var` arm. Both
+                // `check::locate::definition_target`'s variable arm. Both
                 // positions are only available together right here — the
-                // reference's (`typed.loc`, just filled above) and the
-                // binding's (`env.get_loc`) — so this is resolved once now
-                // rather than searched again at query time.
-                if let (Expr::Var(name), Some(ref_loc)) = (&typed.expr, &typed.loc) {
-                    if let Some(bind_loc) = env.get_loc(name) {
-                        self.local_refs.borrow_mut().insert((ref_loc.line, ref_loc.col), bind_loc);
+                // reference's (just recorded above) and the binding's
+                // (`env.get_loc`) — so this is resolved once now rather than
+                // searched again at query time.
+                // The type the checker just proved, keyed by the position it
+                // was proved at — the only place both are in hand, since the
+                // type does not travel with the lowered form. See
+                // `DefLocs::node_types`.
+                if let Some(l) = &loc {
+                    self.node_types
+                        .borrow_mut()
+                        .entry((l.line, l.col))
+                        .or_insert_with(|| checked.ty.clone());
+                }
+                if let (Some("var"), Some(ref_loc)) = (core::op(heap, checked.form), loc) {
+                    if let Some(Value::Symbol(id)) = core::field(heap, checked.form, 0) {
+                        let name = heap.symbol_name(id).to_string();
+                        if let Some(bind_loc) = env.get_loc(&name) {
+                            self.local_refs.borrow_mut().insert((ref_loc.line, ref_loc.col), bind_loc);
+                        }
                     }
                 }
-                Ok(typed)
+                Ok(checked)
             }
             Err(e) => match loc {
                 Some(loc) => Err(e.at(loc)),
@@ -6464,27 +7555,32 @@ impl Checker {
         env: &Env,
         v: Value,
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let typed = match v {
-            Value::Int(n) => Typed { loc: None, expr: Expr::Int(n), ty: int_lit_ty(expected) },
+            Value::Int(n) => Checked::new(core::tagged(heap, "int", &[Value::Int(n)])?, int_lit_ty(expected)),
             // A `Value::Boxed` read-literal is `Sexpr::Float`, `bignum` (an
             // integer literal past `i64`'s range), or `ratio` (`n/d` syntax)
-            // — all heap-boxed for the same reason (`BoxedObj`'s doc
-            // comment). Each is extracted into an owned, heap-independent
-            // `Expr` payload exactly like `Float` already is; `bignum`/
-            // `ratio` have no `expected`-driven width family the way an
-            // integer/float literal does, so their type is always the one
-            // primitive `Type::Bignum`/`Type::Ratio`.
+            // — all heap-boxed for the same reason (`BoxedObj`'s doc comment).
+            // The literal node keeps the *same box* the reader made rather
+            // than a copy of the scalar: it is a heap value the collector
+            // reaches through the node, which is itself reachable from the
+            // registered function body, so there is nothing to keep
+            // heap-independent the way the old owned `Expr` payload had to be
+            // (`bignum` held a `BigInt`). `bignum`/`ratio` have no
+            // `expected`-driven width family the way an integer/float literal
+            // does, so their type is always the one primitive.
             Value::Boxed(id) if heap.is_bignum(id) => {
-                Typed { loc: None, expr: Expr::Bignum(heap.bignum_value(id).clone()), ty: Type::Bignum }
+                Checked::new(core::tagged(heap, "bignum", &[Value::Boxed(id)])?, Type::Bignum)
             }
             Value::Boxed(id) if heap.is_ratio(id) => {
-                Typed { loc: None, expr: Expr::Ratio(heap.ratio_value(id).clone()), ty: Type::Ratio }
+                Checked::new(core::tagged(heap, "ratio", &[Value::Boxed(id)])?, Type::Ratio)
             }
-            Value::Boxed(id) => Typed { loc: None, expr: Expr::Float(heap.float_value(id)), ty: float_lit_ty(expected) },
-            Value::Bool(b) => Typed { loc: None, expr: Expr::Bool(b), ty: Type::Bool },
-            Value::Char(c) => Typed { loc: None, expr: Expr::Char(c), ty: Type::Char },
-            Value::Str(s) => Typed { loc: None, expr: Expr::Str(heap.string(s).to_string()), ty: Type::Str },
+            Value::Boxed(id) => {
+                Checked::new(core::tagged(heap, "float", &[Value::Boxed(id)])?, float_lit_ty(expected))
+            }
+            Value::Bool(b) => Checked::new(core::tagged(heap, "bool", &[Value::Bool(b)])?, Type::Bool),
+            Value::Char(c) => Checked::new(core::tagged(heap, "char", &[Value::Char(c)])?, Type::Char),
+            Value::Str(s) => Checked::new(core::tagged(heap, "str", &[Value::Str(s)])?, Type::Str),
             Value::Empty => {
                 // The empty list `()` is the `None` value of `Option<T>` when an
                 // option type is expected, the `Nil` value of `Sexpr` when a
@@ -6509,10 +7605,11 @@ impl Checker {
                         }
                     }
                 }
-                Typed { loc: None, expr: Expr::Unit, ty: Type::Unit }
+                Checked::new(core::tagged(heap, "unit", &[])?, Type::Unit)
             }
             Value::Symbol(id) => {
-                let name = heap.symbol_name(id);
+                let name = heap.symbol_name(id).to_string();
+                let name = name.as_str();
                 // A keyword (`:name`) is self-evaluating (CL), so it is
                 // matched *before* every binding lookup below — it can never
                 // name a variable, global, function or method. `::foo` is the
@@ -6521,15 +7618,21 @@ impl Checker {
                 // the `!starts_with("::")` guard keeps that distinction
                 // explicit alongside `read::reader::validate_keyword`'s.
                 if name.starts_with(':') && !name.starts_with("::") {
-                    Typed { loc: None, expr: Expr::SymLit(name.to_string()), ty: Type::Symbol }
+                    // The interned symbol *including* the leading colon, so
+                    // "same name -> same object" falls out of the heap's own
+                    // interning with no separate keyword table.
+                    Checked::new(core::tagged(heap, "sym", &[Value::Symbol(id)])?, Type::Symbol)
                 } else if let Some(t) = env.get(name) {
-                    Typed { loc: None, expr: Expr::Var(name.to_string()), ty: t.clone() }
+                    let t = t.clone();
+                    Checked::new(self.var_form(heap, name)?, t)
                 } else if let Some((path, vi)) = self.resolve_global(name) {
-                    Typed { loc: None, expr: Expr::Global(self.mk_ref(vec![name.to_string()], path)), ty: vi.ty }
-                } else if let Some(t) = self.fn_value(name, expected) {
+                    let ty = vi.ty;
+                    let r = self.mk_ref(vec![name.to_string()], path);
+                    Checked::new(self.global_form(heap, &r, &ty)?, ty)
+                } else if let Some(t) = self.fn_value(heap, name, expected) {
                     t?
-                } else if let Some(t) = self.method_value(name, expected) {
-                    t
+                } else if let Some(t) = self.method_value(heap, name, expected) {
+                    t?
                 } else {
                     return Err(Error::TypeError(format!("unbound variable: {}", name)));
                 }
@@ -6552,8 +7655,10 @@ impl Checker {
                 if let Some(result) = self.try_field_access(heap, interp, env, &segs) {
                     result?
                 } else if let Some((path, vi)) = self.resolve_global_path(&segs) {
-                    Typed { loc: None, expr: Expr::Global(self.mk_ref(segs.clone(), path)), ty: vi.ty }
-                } else if let Some(t) = self.fn_path_value(&segs, expected) {
+                    let ty = vi.ty;
+                    let r = self.mk_ref(segs.clone(), path);
+                    Checked::new(self.global_form(heap, &r, &ty)?, ty)
+                } else if let Some(t) = self.fn_path_value(heap, &segs, expected) {
                     t?
                 } else {
                     return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::"))));
@@ -6580,7 +7685,7 @@ impl Checker {
                 // captured by a now-compiled macro-expansion lambda) aborts in
                 // `rt_intern_symbol`. A bare retype is correct for both tiers.
                 if *e == sexpr_ty() && typed.ty == Type::Symbol {
-                    return Ok(Typed { loc: typed.loc, expr: typed.expr, ty: sexpr_ty() });
+                    return Ok(Checked::new(typed.form, sexpr_ty()));
                 }
                 // A user ADT instance (`defstruct`/`defenum`, `Vector<T>`,
                 // `HashTable<K,V>`, `cons-cell<K,V>`) is a valid `Sexpr` datum
@@ -6590,7 +7695,7 @@ impl Checker {
                 // have. Exactly like the `Symbol` case just above, its
                 // runtime representation needs no conversion: every
                 // `is_heap_repr` type's instantiation already evaluates to
-                // `RtValue::Sexpr(Value::Boxed(_))` (`Expr::Construct`'s
+                // `RtValue::Sexpr(Value::Boxed(_))` (`construct`'s
                 // mutable/enum arms in `Interp::eval`; `rt_struct_new`/
                 // `rt_data_new` in compiled code — see `is_heap_repr`'s doc
                 // comment for the two-tier "tagged Sexpr" unification this
@@ -6607,10 +7712,11 @@ impl Checker {
                 // about. Checked before the general `is_heap_repr` retype
                 // below, which would otherwise claim it.
                 if *e == sexpr_ty() && matches!(typed.ty, Type::Dyn(..)) {
-                    return Ok(Typed { loc: typed.loc.clone(), expr: Expr::DynValue(Box::new(typed)), ty: sexpr_ty() });
+                    let form = self.dyn_value_form(heap, typed.form)?;
+                    return Ok(Checked::new(form, sexpr_ty()));
                 }
                 if *e == sexpr_ty() && self.is_heap_repr(&typed.ty) {
-                    return Ok(Typed { loc: typed.loc, expr: typed.expr, ty: sexpr_ty() });
+                    return Ok(Checked::new(typed.form, sexpr_ty()));
                 }
                 // A scalar (`i32`/`f64`/`bignum`/`ratio`/`char`/`bool`/`Str`)
                 // has no shared runtime shape with `Sexpr`, so — unlike the
@@ -6631,18 +7737,16 @@ impl Checker {
                 // return position, an annotated `let`), never a bare
                 // `(let ((x obj)) ...)`, which has no expectation at all.
                 if let Type::Dyn(trait_path, pins) = e {
-                    return self.coerce_to_dyn(env, typed, trait_path, pins);
+                    return self.coerce_to_dyn(heap, env, typed, trait_path, pins);
                 }
                 if *e == sexpr_ty() {
                     if let Some(ctor) = sexpr_ctor_for(&typed.ty) {
                         let (type_name, variant) =
                             self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
-                        let loc = typed.loc.clone();
-                        return Ok(Typed {
-                            loc,
-                            expr: Expr::Construct { type_name, variant, args: vec![typed], mutable: false },
-                            ty: sexpr_ty(),
-                        });
+                        let field_tys = self.variant_field_tys(&type_name, variant, &[]);
+                        let form =
+                            self.construct_form(heap, &type_name, variant, false, &field_tys, &[typed.form])?;
+                        return Ok(Checked::new(form, sexpr_ty()));
                     }
                 }
                 return Err(Error::TypeError(format!(
@@ -6662,7 +7766,7 @@ impl Checker {
         env: &Env,
         v: Value,
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let elems = heap.list_to_vec(v)?;
         // Per-element source locations parallel to `elems` (see
         // `Heap::list_to_vec_locs`), so each argument checked below can carry
@@ -6717,7 +7821,8 @@ impl Checker {
             "progn" => {
                 let (body, ty) = self.check_seq(heap, interp, env, args, arg_locs, expected)?;
                 // Represent progn as a let with no bindings.
-                return Ok(Typed { loc: None, expr: Expr::Let(Vec::new(), body), ty });
+                let form = self.let_form(heap, &[], &body)?;
+                return Ok(Checked::new(form, ty));
             }
             "setf" => return self.check_setf(heap, interp, env, args, arg_locs),
             "incf" => return self.check_incf_decf(heap, interp, env, args, "+"),
@@ -6725,7 +7830,7 @@ impl Checker {
             "rotatef" => return self.check_rotatef_shiftf(heap, interp, env, args, false),
             "shiftf" => return self.check_rotatef_shiftf(heap, interp, env, args, true),
             "loop" => return self.check_loop(heap, interp, env, args, arg_locs),
-            "break" => return self.check_break(args),
+            "break" => return self.check_break(heap, args),
             "return" => return self.check_return(heap, interp, env, args, arg_locs),
             "list" => return self.check_list_lit(heap, interp, env, args, arg_locs),
             "format" => return self.check_format(heap, interp, env, args, arg_locs),
@@ -6768,7 +7873,7 @@ impl Checker {
         // SPECIAL-FORM DISPATCH END
         // A local variable holding a function value is applied directly (locals
         // shadow free functions). Goes through `check_at` (not a hand-built
-        // `Typed`) so this callee reference gets its own position — the same
+        // node) so this callee reference gets its own position — the same
         // treatment the non-symbol-head branch above already gives its
         // callee — which is what lets e.g. a `labels`-bound function called
         // by name resolve goto-definition back to its own binding.
@@ -6835,7 +7940,9 @@ impl Checker {
         } else if let Some(fq) = self.resolve_fn(&head) {
             self.check_call(heap, interp, env, std::slice::from_ref(&head), &fq, args, arg_locs)
         } else if let Some((path, vi)) = self.resolve_global(&head) {
-            let callee = Typed { loc: None, expr: Expr::Global(self.mk_ref(vec![head.clone()], path)), ty: vi.ty };
+            let r = self.mk_ref(vec![head.clone()], path);
+            let form = self.global_form(heap, &r, &vi.ty)?;
+            let callee = Checked::new(form, vi.ty);
             self.check_apply(heap, interp, env, callee, args, arg_locs)
         } else {
             self.check_instance_method(heap, interp, env, &head, args, arg_locs)
@@ -6851,7 +7958,7 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.len() < 2 {
             return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
         }
@@ -6885,7 +7992,8 @@ impl Checker {
         let result = self.check_seq(heap, interp, &child, &args[2..], &arg_locs[2..], Some(&ret));
         self.loop_stack.replace(saved);
         let (body, _) = result?;
-        Ok(Typed { loc: None, expr: Expr::Lambda { params, body }, ty: fn_ty })
+        let form = self.lambda_form(heap, &params, &ret, &body)?;
+        Ok(Checked::new(form, fn_ty))
     }
 
     /// `(labels ((name (params) ret body...)...) body...)`: like several
@@ -6906,7 +8014,7 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.is_empty() {
             return Err(Error::TypeError(
                 "labels: (labels ((name (params) ret body...)...) body...)".into(),
@@ -6965,10 +8073,11 @@ impl Checker {
             let result = self.check_seq(heap, interp, &fn_env, &raw_body, &body_locs, Some(&ret));
             self.loop_stack.replace(saved);
             let (body, _) = result?;
-            defs.push((name, params, body));
+            defs.push((name, params, ret, body));
         }
         let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], &arg_locs[1..], expected)?;
-        Ok(Typed { loc: None, expr: Expr::Labels { defs, body }, ty })
+        let form = self.labels_form(heap, &defs, &body)?;
+        Ok(Checked::new(form, ty))
     }
 
     /// Type-check applying a function *value* `callee` to `args`. If
@@ -6982,10 +8091,10 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        callee: Typed,
+        callee: Checked,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let (params, rest, ret) = match &callee.ty {
             Type::Fn(p, r, ret) => (p.clone(), r.clone(), (**ret).clone()),
             other => return Err(Error::TypeError(format!("value is not callable: {:?}", other))),
@@ -7017,9 +8126,10 @@ impl Checker {
             for (i, arg) in args[fixed..].iter().enumerate() {
                 rest_typed.push(self.check_at(heap, interp, env, *arg, Some(elem_ty), nth_loc(arg_locs, fixed + i))?);
             }
-            typed.push(self.cons_rest_list(elem_ty, rest_typed)?);
+            typed.push(self.cons_rest_list(heap, elem_ty, rest_typed)?);
         }
-        Ok(Typed { loc: None, expr: Expr::Apply(Box::new(callee), typed), ty: ret })
+        let form = self.apply_form(heap, callee.form, &ret, &typed)?;
+        Ok(Checked::new(form, ret))
     }
 
     /// `(apply f arg1 ... argN rest-list)`: call the *variadic* function
@@ -7032,7 +8142,7 @@ impl Checker {
     /// checked against `Te` here — same as CL's `apply`, which never checks a
     /// list's contents either; the callee's own body is responsible for
     /// whatever it does with each element. Desugars to the very same
-    /// `Expr::Apply` shape `check_apply` produces for `(f arg1 .. argN e1 e2
+    /// `apply` shape `check_apply` produces for `(f arg1 .. argN e1 e2
     /// e3)` if `rest-list` were three literal elements `e1 e2 e3` instead of
     /// one dynamic list — so the interpreter needs no `apply`-specific
     /// evaluation at all.
@@ -7043,7 +8153,7 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.len() < 2 {
             return Err(Error::TypeError("apply: (apply function arg... rest-list)".into()));
         }
@@ -7071,7 +8181,8 @@ impl Checker {
         }
         let list_loc = nth_loc(arg_locs, args.len() - 1);
         typed.push(self.check_at(heap, interp, env, list_arg[0], Some(&sexpr_ty()), list_loc)?);
-        Ok(Typed { loc: None, expr: Expr::Apply(Box::new(callee), typed), ty: ret })
+        let form = self.apply_form(heap, callee.form, &ret, &typed)?;
+        Ok(Checked::new(form, ret))
     }
 
     /// A `::`-qualified call: a module-qualified macro, free function, or
@@ -7092,7 +8203,7 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         // A module-qualified macro call, e.g. `mod::my-macro` — checked
         // first, mirroring the bare-name case in `check_list` (a macro is a
         // purely compile-time name, resolved before any runtime call shape;
@@ -7181,7 +8292,7 @@ impl Checker {
         method: &str,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Option<Result<Typed, Error>> {
+    ) -> Option<Result<Checked, Error>> {
         let mut recv = self.check_at(heap, interp, env, *args.first()?, None, nth_loc(arg_locs, 0)).ok()?;
         // A trait-object receiver dispatches its trait's own methods through
         // the vtable, and everything else through the built-in `Sexpr`
@@ -7195,7 +8306,11 @@ impl Checker {
             if !self.sexpr_has_instance_method(method) {
                 return None;
             }
-            recv = Typed { loc: recv.loc.clone(), expr: Expr::DynValue(Box::new(recv)), ty: sexpr_ty() };
+            let form = match self.dyn_value_form(heap, recv.form) {
+                Ok(f) => f,
+                Err(e) => return Some(Err(e)),
+            };
+            recv = Checked::new(form, sexpr_ty());
         }
         let type_fq = match &recv.ty {
             Type::Named(n, _) => Some(n.clone()),
@@ -7230,7 +8345,7 @@ impl Checker {
         method: &str,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if !args.is_empty() {
             let mut recv = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
             // Trait-object receiver: one of the trait's own methods dispatches
@@ -7256,7 +8371,8 @@ impl Checker {
                         heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
                     );
                 }
-                recv = Typed { loc: recv.loc.clone(), expr: Expr::DynValue(Box::new(recv)), ty: sexpr_ty() };
+                let form = self.dyn_value_form(heap, recv.form)?;
+                recv = Checked::new(form, sexpr_ty());
             }
             let type_fq = match &recv.ty {
                 Type::Named(n, _) => Some(n.clone()),
@@ -7296,7 +8412,7 @@ impl Checker {
                 // (`Env::bounds`, keyed by the lowercase type-variable name,
                 // exactly what `type_fq.last_segment()` is for a bare `Type::Named`
                 // type variable like `t`). Search every trait it's bound to
-                // for a matching method; see `Expr::TraitCall`'s doc comment
+                // for a matching method; see `Checker::trait_call_panic_form`
                 // for why the implementing type is resolved at runtime
                 // instead of here.
                 if let Some(bound_traits) = env.bounds.get(type_fq.last_segment()) {
@@ -7316,9 +8432,11 @@ impl Checker {
                                 args.len() - 1
                             )));
                         }
-                        let mut typed_args = vec![recv];
+                        // Checked for their own diagnostics only — the node
+                        // they used to fill is never executed, so the lowered
+                        // forms are dropped here.
                         for (i, a) in args[1..].iter().enumerate() {
-                            typed_args.push(self.check_at(heap, interp, env, *a, None, nth_loc(&arg_locs[1..], i))?);
+                            self.check_at(heap, interp, env, *a, None, nth_loc(&arg_locs[1..], i))?;
                         }
                         // This bound's `where`-clause associated-type pins
                         // (e.g. `(Item i32)`) resolve the trait method
@@ -7338,10 +8456,8 @@ impl Checker {
                             )));
                         };
                         let ret_ty = subst_apply(&sig.ret, &assoc);
-                        return Ok(Typed { loc: None,
-                            expr: Expr::TraitCall { method: method.to_string(), args: typed_args },
-                            ty: ret_ty,
-                        });
+                        let form = self.erased_generic_form(heap, method)?;
+                        return Ok(Checked::new(form, ret_ty));
                     }
                 }
             }
@@ -7374,7 +8490,7 @@ impl Checker {
         call: AssocCall,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let AssocCall { type_fq, method, receiver, expected } = call;
         let instance = receiver.is_some();
         let def = self.reg.type_def(type_fq).expect("assoc type exists").clone();
@@ -7451,16 +8567,10 @@ impl Checker {
                 method_name = self.request_method_specialization(type_fq, method, targs);
             }
         }
-        Ok(Typed { loc: None,
-            expr: Expr::Assoc {
-                type_name: type_fq.clone(),
-                method: method_name,
-                instance,
-                args: typed,
-                home: self.ns.clone(),
-            },
-            ty: subst_apply(&af.sig.ret, &subst),
-        })
+        let ty = subst_apply(&af.sig.ret, &subst);
+        let home = self.ns.clone();
+        let form = self.assoc_form(heap, type_fq, &method_name, instance, &home, &ty, &typed)?;
+        Ok(Checked::new(form, ty))
     }
 
     fn check_if(
@@ -7471,7 +8581,7 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.len() != 3 {
             return Err(Error::TypeError("if: (if cond then else)".into()));
         }
@@ -7481,7 +8591,8 @@ impl Checker {
         let else_expected = non_never(&then.ty).or(expected);
         let els = self.check_at(heap, interp, env, args[2], else_expected, nth_loc(arg_locs, 2))?;
         let ty = join_types(&then.ty, &els.ty)?;
-        Ok(Typed { loc: None, expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)), ty })
+        let form = self.if_form(heap, cond.form, then.form, els.form)?;
+        Ok(Checked::new(form, ty))
     }
 
     fn check_panic(
@@ -7491,12 +8602,13 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("panic: (panic message)".into()));
         }
         let msg = self.check_at(heap, interp, env, args[0], Some(&Type::Str), nth_loc(arg_locs, 0))?;
-        Ok(Typed { loc: None, expr: Expr::Panic(Box::new(msg)), ty: Type::Never })
+        let form = self.panic_form(heap, msg.form)?;
+        Ok(Checked::new(form, Type::Never))
     }
 
     /// `(the Type expr)`: a type annotation, e.g. `(the i64 5)` to make an
@@ -7505,7 +8617,7 @@ impl Checker {
     /// would. Purely a checking-time hint with no runtime behavior of its
     /// own — `Type` simply becomes `expr`'s `expected` (the same role it
     /// plays for a `defun` parameter or `let` binding annotation), and the
-    /// returned `Typed` is exactly `expr`'s own (no new `Expr` variant; `the`
+    /// returned form is exactly `expr`'s own (no node of its own; `the`
     /// vanishes after checking).
     fn check_the(
         &self,
@@ -7514,7 +8626,7 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.len() != 2 {
             return Err(Error::TypeError("the: (the Type expr)".into()));
         }
@@ -7545,7 +8657,7 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
         try_variant: bool,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let form_name = if try_variant { "try-as" } else { "as" };
         if args.len() != 2 {
             return Err(Error::TypeError(format!("{}: ({} Type expr)", form_name, form_name)));
@@ -7555,7 +8667,7 @@ impl Checker {
 
         // Identity: same type, a no-op cast.
         if src.ty == target {
-            return Ok(if try_variant { wrap_some(src, target) } else { src });
+            return if try_variant { wrap_some(heap, self, src, target) } else { Ok(src) };
         }
         // `i32`<->`i64`: a pure relabel, no runtime effect. `RtValue::Int` is
         // uniformly `i64` regardless of which static width labels it (see
@@ -7564,8 +8676,8 @@ impl Checker {
         // for `as`/`try-as` to imitate, so crossing widths is total in both
         // directions.
         if matches!((&src.ty, &target), (Type::I32, Type::I64) | (Type::I64, Type::I32)) {
-            let relabeled = Typed { ty: target.clone(), ..src };
-            return Ok(if try_variant { wrap_some(relabeled, target) } else { relabeled });
+            let relabeled = Checked::new(src.form, target.clone());
+            return if try_variant { wrap_some(heap, self, relabeled, target) } else { Ok(relabeled) };
         }
         // Boxing as a trait object — the explicit spelling of the same
         // widening the expectation-driven coercion performs. Never a
@@ -7579,7 +8691,7 @@ impl Checker {
                     mangle_type(&target)
                 )));
             }
-            return self.coerce_to_dyn(env, src, trait_path, pins);
+            return self.coerce_to_dyn(heap, env, src, trait_path, pins);
         }
 
         let (panic_method, try_method) = as_conversion(&src.ty, &target).ok_or_else(|| {
@@ -7609,12 +8721,13 @@ impl Checker {
             match try_method {
                 Some(_) => Ok(if target == Type::I64 { retype_option(called, target) } else { called }),
                 None => {
-                    let called = if target == Type::I64 { Typed { ty: Type::I64, ..called } } else { called };
-                    Ok(wrap_some(called, target))
+                    let called =
+                        if target == Type::I64 { Checked::new(called.form, Type::I64) } else { called };
+                    wrap_some(heap, self, called, target)
                 }
             }
         } else if target == Type::I64 {
-            Ok(Typed { ty: Type::I64, ..called })
+            Ok(Checked::new(called.form, Type::I64))
         } else {
             Ok(called)
         }
@@ -7645,7 +8758,7 @@ impl Checker {
     /// `EvalError::NoSuchFunction` this has always surfaced through
     /// `Interp::resolve_fn_ref` at the actual `(compile ...)` call, not a
     /// check-time rejection.
-    fn check_compile(&self, heap: &Heap, args: &[Value]) -> Result<Typed, Error> {
+    fn check_compile(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("compile: (compile name) — expected exactly 1 argument".into()));
         }
@@ -7713,7 +8826,8 @@ impl Checker {
                 }
             }
         };
-        Ok(Typed { loc: None, expr: Expr::CompileFn(target), ty: Type::Bool })
+        let form = self.compile_fn_form(heap, &target)?;
+        Ok(Checked::new(form, Type::Bool))
     }
 
     /// `(documentation name)` / `(documentation Type::method)`: like
@@ -7733,7 +8847,7 @@ impl Checker {
     /// defer to, since this never produces a runtime lookup in the first
     /// place. Module-qualified free names (`mod::name`, as opposed to
     /// `Type::method`) are out of scope for now.
-    fn check_documentation(&self, heap: &Heap, args: &[Value]) -> Result<Typed, Error> {
+    fn check_documentation(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("documentation: (documentation name) — expected exactly 1 argument".into()));
         }
@@ -7751,54 +8865,74 @@ impl Checker {
                 ))
             }
         };
-        let opt_str_ty = Type::Named(Path::root("option"), vec![Type::Str]);
-        let found = |doc: Option<&String>| match doc {
-            Some(d) => wrap_some(Typed { loc: None, expr: Expr::Str(d.clone()), ty: Type::Str }, Type::Str),
-            None => option_none(opt_str_ty.clone()),
-        };
-        match name.rsplit_once("::") {
+        // Resolved to the docstring first, then built — `self.reg` lookups
+        // borrow `self` while `doc_option` needs `heap` mutably, so the two
+        // cannot be nested.
+        let doc: Option<Option<String>> = match name.rsplit_once("::") {
             None => {
                 if let Some((path, _)) = self.resolve_global(&name) {
-                    return Ok(found(self.reg.docs.vars.get(&path)));
+                    Some(self.reg.docs.vars.get(&path).cloned())
+                } else if let Some(path) = self.resolve_fn(&name) {
+                    Some(self.reg.docs.fns.get(&path).cloned())
+                } else if let Some(path) = self.resolve_bare_type(&name) {
+                    Some(self.reg.docs.types.get(&path).cloned())
+                } else if let Ok(path) = self.resolve_trait_name(&name) {
+                    Some(self.reg.docs.traits.get(&path).cloned())
+                } else if let Some((path, _)) = self.resolve_macro(&name) {
+                    Some(self.reg.docs.macros.get(&path).cloned())
+                } else {
+                    return Err(Error::TypeError(format!(
+                        "documentation: no definition named `{}`",
+                        name
+                    )));
                 }
-                if let Some(path) = self.resolve_fn(&name) {
-                    return Ok(found(self.reg.docs.fns.get(&path)));
-                }
-                if let Some(path) = self.resolve_bare_type(&name) {
-                    return Ok(found(self.reg.docs.types.get(&path)));
-                }
-                if let Ok(path) = self.resolve_trait_name(&name) {
-                    return Ok(found(self.reg.docs.traits.get(&path)));
-                }
-                if let Some((path, _)) = self.resolve_macro(&name) {
-                    return Ok(found(self.reg.docs.macros.get(&path)));
-                }
-                Err(Error::TypeError(format!("documentation: no definition named `{}`", name)))
             }
             Some((type_part, method)) => {
                 let type_segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
                 let type_fq = if type_segs.len() == 1 { self.resolve_bare_type(&type_segs[0]) } else { self.resolve_type_path(&type_segs) }
                     .filter(|tp| self.reg.type_def(tp).is_some_and(|def| def.assoc.contains_key(method)));
                 match type_fq {
-                    Some(type_fq) => Ok(found(self.reg.docs.methods.get(&(type_fq, method.to_string())))),
-                    None => Err(Error::TypeError(format!(
-                        "documentation: `{}` is not a known `Type::method` — module-qualified free names/types/traits/macros are not supported here",
-                        name
-                    ))),
+                    Some(type_fq) => {
+                        Some(self.reg.docs.methods.get(&(type_fq, method.to_string())).cloned())
+                    }
+                    None => {
+                        return Err(Error::TypeError(format!(
+                            "documentation: `{}` is not a known `Type::method` — module-qualified free names/types/traits/macros are not supported here",
+                            name
+                        )))
+                    }
                 }
+            }
+        };
+        self.doc_option(heap, doc.flatten())
+    }
+
+    /// `(documentation ...)`'s result baked in: `Option::some` of the
+    /// docstring, or `Option::none` at `Option<string>`.
+    fn doc_option(&self, heap: &mut Heap, doc: Option<String>) -> Result<Checked, Error> {
+        match doc {
+            Some(d) => {
+                let text = self.str_lit_form(heap, &d)?;
+                let inner = Checked::new(text, Type::Str);
+                wrap_some(heap, self, inner, Type::Str)
+            }
+            None => {
+                let ty = Type::Named(Path::root("option"), vec![Type::Str]);
+                option_none(heap, self, ty)
             }
         }
     }
 
-    /// `(quote datum)`: `datum` as a literal `Sexpr` value, unevaluated. See
-    /// [`Expr::Quote`] for why this converts to an owned [`QuotedSexpr`]
-    /// rather than keeping the raw read `Value`.
-    fn check_quote(&self, heap: &Heap, args: &[Value]) -> Result<Typed, Error> {
+    /// `(quote datum)`: `datum` as a literal `Sexpr` value, unevaluated.
+    ///
+    /// The datum travels as the reader's own heap value — see
+    /// [`Self::quote_form`] for why the lowered node needs no owned copy of it.
+    fn check_quote(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("quote: (quote datum)".into()));
         }
-        let qs = value_to_quoted(heap, args[0])?;
-        Ok(Typed { loc: None, expr: Expr::Quote(qs), ty: Type::Named(Path::root("sexpr"), vec![]) })
+        let form = self.quote_form(heap, args[0])?;
+        Ok(Checked::new(form, Type::Named(Path::root("sexpr"), vec![])))
     }
 
     /// `(quasiquote template)`: like `quote`, but `(unquote x)` sub-forms are
@@ -7811,7 +8945,7 @@ impl Checker {
     /// as-is); embedding a non-`Sexpr` runtime value as quoted data needs an
     /// explicit conversion (not provided yet — there is no `int->sexpr` etc.).
     /// A pure syntax-to-`Expr` desugaring — same idea as `list` building
-    /// nested `Expr::Construct{Cons,..}` (`check_list_lit`) — so it needs no
+    /// nested `construct`s of `Sexpr`'s `cons` variant (`check_list_lit`) — so it needs no
     /// new runtime machinery; `(unquote-splicing x)` (`,@x`) is the one
     /// exception, desugaring to a call to the prelude's `sexpr-append` (see
     /// `check_qq_template`'s doc comment) since the spliced list's length
@@ -7823,7 +8957,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("quasiquote: (quasiquote template)".into()));
         }
@@ -7853,7 +8987,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         v: Value,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
         if let Value::Cons(_) = v {
             let car = heap.car(v)?;
@@ -7885,10 +9019,9 @@ impl Checker {
                                         .into(),
                                 )
                             })?;
-                            return Ok(Typed { loc: None,
-                                expr: Expr::Call(self.mk_ref(vec!["sexpr-append".to_string()], append_fq), vec![spliced, rest]),
-                                ty: sexpr_ty,
-                            });
+                            let r = self.mk_ref(vec!["sexpr-append".to_string()], append_fq);
+                            let form = self.call_form(heap, &r, &[spliced, rest])?;
+                            return Ok(Checked::new(form, sexpr_ty));
                         }
                     }
                     return Err(Error::TypeError("unquote-splicing: (unquote-splicing datum)".into()));
@@ -7897,13 +9030,15 @@ impl Checker {
             let car_t = self.check_qq_template(heap, interp, env, car)?;
             let cdr_t = self.check_qq_template(heap, interp, env, cdr)?;
             let (adt, cons_idx) = self.sexpr_cons_ctor();
-            return Ok(Typed { loc: None,
-                expr: Expr::Construct { type_name: adt, variant: cons_idx, args: vec![car_t, cdr_t], mutable: false },
-                ty: sexpr_ty,
-            });
+            let field_tys = self.variant_field_tys(&adt, cons_idx, &[]);
+            let form =
+                self.construct_form(heap, &adt, cons_idx, false, &field_tys, &[car_t.form, cdr_t.form])?;
+            return Ok(Checked::new(self.rooted(heap, form), sexpr_ty));
         }
-        let qs = value_to_quoted(heap, v)?;
-        Ok(Typed { loc: None, expr: Expr::Quote(qs), ty: sexpr_ty })
+        // A leaf of the template: literal data, so the datum travels as the
+        // reader's own value — see `Self::quote_form`.
+        let form = self.quote_form(heap, v)?;
+        Ok(Checked::new(self.rooted(heap, form), sexpr_ty))
     }
 
     fn check_let(
@@ -7914,7 +9049,7 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.is_empty() {
             return Err(Error::TypeError("let: (let ((name val)...) body...)".into()));
         }
@@ -7941,10 +9076,8 @@ impl Checker {
             // with any later use) and the body — with all its bindings — stays
             // available to completion.
             let val_loc = pair_locs.get(1).and_then(|(_, l)| l.clone());
-            let val = self.recovered(
-                self.check_at(heap, interp, env, pair[1], None, val_loc.clone()),
-                val_loc,
-            )?;
+            let checked = self.check_at(heap, interp, env, pair[1], None, val_loc.clone());
+            let val = self.recovered(heap, checked, val_loc)?;
             binds.push((name, val));
         }
         let env_binds: Vec<(String, Type, Option<Loc>)> = binds
@@ -7954,7 +9087,10 @@ impl Checker {
             .collect();
         let child = env.extended_with_locs(env_binds);
         let (body, ty) = self.check_seq(heap, interp, &child, &args[1..], &arg_locs[1..], expected)?;
-        Ok(Typed { loc: None, expr: Expr::Let(binds, body), ty })
+        let node_binds: Vec<(String, Type, Value)> =
+            binds.into_iter().map(|(n, c)| (n, c.ty, c.form)).collect();
+        let form = self.let_form(heap, &node_binds, &body)?;
+        Ok(Checked::new(form, ty))
     }
 
     /// `let*`: like `let` but each binding sees the earlier ones. Desugars to
@@ -7967,7 +9103,7 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.is_empty() {
             return Err(Error::TypeError("let*: (let* ((name val)...) body...)".into()));
         }
@@ -7986,10 +9122,17 @@ impl Checker {
         body: &[Value],
         body_locs: &[Option<Loc>],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
+        // Every node this returns is rooted, because the recursive step holds
+        // the *inner* `let`'s form across building the outer one — and
+        // `let_form` allocates a binding list, an interned name and a
+        // representation before `Items::extend` pushes the body. Only a form
+        // `check_at` produced is rooted already; one a `*_form` builder returned
+        // is not (see [`Self::rooted`]).
         if binds.is_empty() {
             let (body, ty) = self.check_seq(heap, interp, env, body, body_locs, expected)?;
-            return Ok(Typed { loc: None, expr: Expr::Let(Vec::new(), body), ty });
+            let form = self.let_form(heap, &[], &body)?;
+            return Ok(Checked::new(self.rooted(heap, form), ty));
         }
         let pair_locs = heap.list_to_vec_locs(binds[0])?;
         let pair: Vec<Value> = pair_locs.iter().map(|(v, _)| *v).collect();
@@ -8003,14 +9146,13 @@ impl Checker {
         let name_loc = pair_locs.first().and_then(|(_, l)| l.clone());
         let val_loc = pair_locs.get(1).and_then(|(_, l)| l.clone());
         // Recovery boundary (B4): see `check_let`.
-        let val = self.recovered(
-            self.check_at(heap, interp, env, pair[1], None, val_loc.clone()),
-            val_loc,
-        )?;
+        let checked = self.check_at(heap, interp, env, pair[1], None, val_loc.clone());
+        let val = self.recovered(heap, checked, val_loc)?;
         let child = env.extended_with_locs(vec![(name.clone(), val.ty.clone(), name_loc)]);
         let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, body_locs, expected)?;
         let ty = inner.ty.clone();
-        Ok(Typed { loc: None, expr: Expr::Let(vec![(name, val)], vec![inner]), ty })
+        let form = self.let_form(heap, &[(name, val.ty, val.form)], &[inner.form])?;
+        Ok(Checked::new(self.rooted(heap, form), ty))
     }
 
     /// `(setf place value)`: three kinds of `place` are recognized — a bound
@@ -8032,7 +9174,7 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.len() != 2 {
             return Err(Error::TypeError("setf: (setf place value)".into()));
         }
@@ -8056,14 +9198,17 @@ impl Checker {
         };
         if let Some(ty) = env.get(&name).cloned() {
             let value = self.check_at(heap, interp, env, args[1], Some(&ty), value_loc)?;
-            return Ok(Typed { loc: None, expr: Expr::Set(name, Box::new(value)), ty });
+            let form = self.set_form(heap, &name, value.form)?;
+            return Ok(Checked::new(form, ty));
         }
         if let Some((path, vi)) = self.resolve_global(&name) {
             if !vi.mutable {
                 return Err(Error::TypeError(format!("setf: cannot assign to constant `{}`", name)));
             }
             let value = self.check_at(heap, interp, env, args[1], Some(&vi.ty), value_loc)?;
-            return Ok(Typed { loc: None, expr: Expr::SetGlobal(self.mk_ref(vec![name.clone()], path), Box::new(value)), ty: vi.ty });
+            let r = self.mk_ref(vec![name.clone()], path);
+            let form = self.set_global_form(heap, &r, &vi.ty, value.form)?;
+            return Ok(Checked::new(form, vi.ty));
         }
         Err(Error::TypeError(format!("setf: unbound variable: {}", name)))
     }
@@ -8074,7 +9219,7 @@ impl Checker {
     /// getter) and delegates to `Checker::check_assoc_call` exactly like
     /// `try_field_access` does, so a generic `defstruct`'s field type gets
     /// the receiver's concrete type arguments substituted (see that
-    /// function's doc comment for why building the `Expr::Assoc` node by
+    /// function's doc comment for why building the `assoc` node by
     /// hand here once got this wrong).
     fn check_field_set(
         &self,
@@ -8084,14 +9229,17 @@ impl Checker {
         segs: &[String],
         value: Value,
         value_loc: Option<Loc>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let [recv_name, field] = segs else {
             return Err(Error::TypeError(format!("setf: unresolved path: {}", segs.join("::"))));
         };
-        let recv = if let Some(t) = env.get(recv_name) {
-            Typed { loc: None, expr: Expr::Var(recv_name.clone()), ty: t.clone() }
+        let recv = if let Some(ty) = env.get(recv_name).cloned() {
+            let form = self.var_form(heap, recv_name)?;
+            Checked::new(form, ty)
         } else if let Some((path, vi)) = self.resolve_global(recv_name) {
-            Typed { loc: None, expr: Expr::Global(self.mk_ref(vec![recv_name.clone()], path)), ty: vi.ty }
+            let r = self.mk_ref(vec![recv_name.clone()], path);
+            let form = self.global_form(heap, &r, &vi.ty)?;
+            Checked::new(form, vi.ty)
         } else {
             return Err(Error::TypeError(format!("setf: unbound variable: {}", recv_name)));
         };
@@ -8147,7 +9295,7 @@ impl Checker {
         env: &Env,
         place: Value,
         value: Value,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let items = heap
             .list_to_vec(place)
             .map_err(|_| Error::TypeError("setf: place must be a proper list".into()))?;
@@ -8282,7 +9430,7 @@ impl Checker {
         env: &Env,
         args: &[Value],
         op: &str,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let form_name = if op == "+" { "incf" } else { "decf" };
         if args.is_empty() || args.len() > 2 {
             return Err(Error::TypeError(format!("{}: ({} place) or ({} place delta)", form_name, form_name, form_name)));
@@ -8318,7 +9466,7 @@ impl Checker {
         env: &Env,
         args: &[Value],
         is_shift: bool,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let (place_args, newvalue): (&[Value], Option<Value>) = if is_shift {
             let Some((last, rest)) = args.split_last() else {
                 return Err(Error::TypeError("shiftf: (shiftf place... newvalue)".into()));
@@ -8363,7 +9511,10 @@ impl Checker {
             } else {
                 value_names[0]
             };
-            body_forms.push(self.list_from_vec_locs(heap, &[(setf_sym, None), (places[i], None), (target, None)])?);
+            // Rooted as it lands: these are freshly built syntax lists held
+            // only in a `Vec<Value>`, and each later iteration allocates more.
+            let one = self.list_from_vec_locs(heap, &[(setf_sym, None), (places[i], None), (target, None)])?;
+            body_forms.push(self.rooted(heap, one));
         }
         body_forms.push(if is_shift { value_names.first().copied().unwrap_or(Value::Empty) } else { Value::Empty });
 
@@ -8393,7 +9544,7 @@ impl Checker {
         op: &str,
         args: &[Value],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let op_sym = heap.intern_symbol(op);
         let mut acc = args[0];
         for next in &args[1..] {
@@ -8422,7 +9573,7 @@ impl Checker {
         env: &Env,
         op: &str,
         args: &[Value],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let mut bindings: Vec<(Value, Value)> = Vec::with_capacity(args.len());
         let mut names: Vec<Value> = Vec::with_capacity(args.len());
         for a in args {
@@ -8491,7 +9642,7 @@ impl Checker {
         op: &str,
         x: Value,
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let tmp = heap.intern_symbol(&self.gensym_place());
         let op_sym = heap.intern_symbol(op);
         let self_op_self = self.list_from_vec_locs(heap, &[(op_sym, None), (tmp, None), (tmp, None)])?;
@@ -8529,7 +9680,7 @@ impl Checker {
         op: &str,
         args: &[Value],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let Some(&x) = args.first() else {
             let value = match op {
                 "+" | "logior" | "logxor" => 0,
@@ -8571,7 +9722,7 @@ impl Checker {
         env: &Env,
         args: &[Value],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let log_sym = heap.intern_symbol("log");
         let log_number = self.list_from_vec_locs(heap, &[(log_sym, None), (args[0], None)])?;
         let log_base = self.list_from_vec_locs(heap, &[(log_sym, None), (args[1], None)])?;
@@ -8600,7 +9751,7 @@ impl Checker {
         method: &str,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Option<Result<Typed, Error>> {
+    ) -> Option<Result<Checked, Error>> {
         if args.len() != 2 {
             return None;
         }
@@ -8627,7 +9778,7 @@ impl Checker {
         mutable: bool,
         public: bool,
         def_loc: Option<Loc>,
-    ) -> Result<TopLevel, Error> {
+    ) -> Result<TopLevelForm, Error> {
         if parts.len() != 2 && parts.len() != 3 {
             return Err(Error::TypeError(
                 "defvar/defconstant: (defvar (name Type) value) or (defvar (name Type) value \"doc\")".into(),
@@ -8680,7 +9831,7 @@ impl Checker {
         if let Some(doc) = doc {
             self.reg.docs.vars.insert(fq_name.clone(), doc);
         }
-        Ok(TopLevel::Defvar { name: fq_name, ty, value, mutable, public })
+        self.defvar_form(heap, &fq_name, &ty, mutable, public, value.form)
     }
 
     /// `(loop body...)`: an infinite loop, exited via `break`/`return`. Its
@@ -8693,9 +9844,10 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let (body, ty) = self.check_loop_body(heap, interp, env, args, arg_locs, Type::Never)?;
-        Ok(Typed { loc: None, expr: Expr::Loop(body), ty })
+        let form = self.loop_form(heap, &body)?;
+        Ok(Checked::new(form, ty))
     }
 
     /// Check a loop body sequence with a fresh loop-stack frame seeded at
@@ -8711,7 +9863,7 @@ impl Checker {
         body: &[Value],
         body_locs: &[Option<Loc>],
         seed: Type,
-    ) -> Result<(Vec<Typed>, Type), Error> {
+    ) -> Result<(Vec<Value>, Type), Error> {
         self.loop_stack.borrow_mut().push(seed);
         let result = self.check_seq(heap, interp, env, body, body_locs, None);
         let ty = self.loop_stack.borrow_mut().pop().expect("pushed above");
@@ -8721,12 +9873,13 @@ impl Checker {
 
     /// `(break)`: exit the nearest enclosing loop with no value (`Unit`). Type
     /// `Never` (diverges; satisfies any expectation).
-    fn check_break(&self, args: &[Value]) -> Result<Typed, Error> {
+    fn check_break(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
         if !args.is_empty() {
             return Err(Error::TypeError("break: (break), takes no arguments".into()));
         }
         self.contribute_loop_exit(Type::Unit)?;
-        Ok(Typed { loc: None, expr: Expr::Break, ty: Type::Never })
+        let form = self.break_form(heap)?;
+        Ok(Checked::new(form, Type::Never))
     }
 
     /// `(return)` / `(return value)`: exit the nearest enclosing loop,
@@ -8738,7 +9891,7 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.len() > 1 {
             return Err(Error::TypeError("return: (return) or (return value)".into()));
         }
@@ -8755,7 +9908,8 @@ impl Checker {
         };
         let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
         self.contribute_loop_exit(ty)?;
-        Ok(Typed { loc: None, expr: Expr::Return(value.map(Box::new)), ty: Type::Never })
+        let form = self.return_form(heap, value.map(|c| c.form))?;
+        Ok(Checked::new(form, Type::Never))
     }
 
     /// Unify a `break`/`return` value's type into the nearest enclosing loop's
@@ -8780,22 +9934,22 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
         let (adt, cons_idx) = self.sexpr_cons_ctor();
         let (_, nil_idx) = self.resolve_ctor("nil").expect("sexpr::nil is built in");
-        let mut acc = Typed { loc: None,
-            expr: Expr::Construct { type_name: adt.clone(), variant: nil_idx, args: Vec::new(), mutable: false },
-            ty: sexpr_ty.clone(),
-        };
+        let nil_tys = self.variant_field_tys(&adt, nil_idx, &[]);
+        let cons_tys = self.variant_field_tys(&adt, cons_idx, &[]);
+        let mut acc = self.construct_form(heap, &adt, nil_idx, false, &nil_tys, &[])?;
         for (i, &elem) in args.iter().enumerate().rev() {
-            let e = self.check_at(heap, interp, env, elem, Some(&sexpr_ty), nth_loc(arg_locs, i))?;
-            acc = Typed { loc: None,
-                expr: Expr::Construct { type_name: adt.clone(), variant: cons_idx, args: vec![e, acc], mutable: false },
-                ty: sexpr_ty.clone(),
-            };
+            // The accumulator is a finished node that the next element's own
+            // checking can collect, so it stays rooted across that step.
+            let mut s = RootScope::new(heap);
+            s.push_root(acc);
+            let e = self.check_at(&mut s, interp, env, elem, Some(&sexpr_ty), nth_loc(arg_locs, i))?;
+            acc = self.construct_form(&mut s, &adt, cons_idx, false, &cons_tys, &[e.form, acc])?;
         }
-        Ok(acc)
+        Ok(Checked::new(acc, sexpr_ty))
     }
 
     /// Collects a heterogeneous run of already-checked expressions into one
@@ -8806,15 +9960,20 @@ impl Checker {
     /// encoding by [`Self::wrap_rest_elem`] against its own inferred type (so a
     /// value whose type has no `Sexpr` encoding is the same clear `TypeError`
     /// a bad `&rest` element gets), then `sexpr-cons`-ed together back-to-front.
-    fn cons_hetero_sexpr(&self, items: Vec<Typed>) -> Result<Typed, Error> {
-        let cons_path = Path::root("sexpr-cons");
-        items.into_iter().rev().try_fold(
-            Typed { loc: None, expr: Expr::Quote(QuotedSexpr::Nil), ty: sexpr_ty() },
-            |acc, item| {
-                let item = self.wrap_rest_elem(&item.ty.clone(), item)?;
-                Ok(Typed { loc: None, expr: Expr::Call(Ref::synthetic(cons_path.clone()), vec![item, acc]), ty: sexpr_ty() })
-            },
-        )
+    fn cons_hetero_sexpr(&self, heap: &mut Heap, items: Vec<Checked>) -> Result<Checked, Error> {
+        let r = Ref::synthetic(Path::root("sexpr-cons"));
+        let nil = self.quote_nil(heap)?;
+        let mut acc = Checked::new(nil, sexpr_ty());
+        for item in items.into_iter().rev() {
+            let mut s = RootScope::new(heap);
+            s.push_root(acc.form);
+            let elem_ty = item.ty.clone();
+            let item = self.wrap_rest_elem(&mut s, &elem_ty, item)?;
+            s.push_root(item.form);
+            let form = self.call_form(&mut s, &r, &[item, acc])?;
+            acc = Checked::new(form, sexpr_ty());
+        }
+        Ok(Checked::new(self.rooted(heap, acc.form), acc.ty))
     }
 
     /// The `(format dest control &rest args)` special form — CL's `format`
@@ -8838,7 +9997,7 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.len() < 2 {
             return Err(Error::TypeError(
                 "format: expected at least a destination (bool or a `CharOutput` stream) and a control string"
@@ -8858,12 +10017,10 @@ impl Checker {
         for (i, &a) in args[2..].iter().enumerate() {
             items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, 2 + i))?);
         }
-        let list = self.cons_hetero_sexpr(items)?;
-        Ok(Typed {
-            loc: None,
-            expr: Expr::Call(Ref::synthetic(Path::root("format-rt")), vec![dest, control, list]),
-            ty: Type::Str,
-        })
+        let list = self.cons_hetero_sexpr(heap, items)?;
+        let r = Ref::synthetic(Path::root("format-rt"));
+        let form = self.call_form(heap, &r, &[dest, control, list])?;
+        Ok(Checked::new(form, Type::Str))
     }
 
     /// `(format stream control args…)` — CL's stream destination.
@@ -8893,7 +10050,7 @@ impl Checker {
         dest_ty: &Type,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         // A destination that is neither `bool` nor a stream is a mistake worth
         // naming as one, rather than reporting as a missing `write-string`
         // method. Only asked of a type that is definitely concrete: a bound
@@ -8949,7 +10106,7 @@ impl Checker {
         ret: Type,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.is_empty() {
             return Err(Error::TypeError(format!(
                 "{}: expected at least a control string",
@@ -8961,12 +10118,10 @@ impl Checker {
         for (i, &a) in args[1..].iter().enumerate() {
             items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, 1 + i))?);
         }
-        let list = self.cons_hetero_sexpr(items)?;
-        Ok(Typed {
-            loc: None,
-            expr: Expr::Call(Ref::synthetic(Path::root(builtin)), vec![control, list]),
-            ty: ret,
-        })
+        let list = self.cons_hetero_sexpr(heap, items)?;
+        let r = Ref::synthetic(Path::root(builtin));
+        let form = self.call_form(heap, &r, &[control, list])?;
+        Ok(Checked::new(form, ret))
     }
 
     /// The `pprint` family — `(pprint x)`, `(pprint-fill x)`,
@@ -8988,7 +10143,7 @@ impl Checker {
         form: &str,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let takes_colinc = form == "pprint-tabular";
         let max = if takes_colinc { 2 } else { 1 };
         if args.is_empty() || args.len() > max {
@@ -8999,25 +10154,18 @@ impl Checker {
             }));
         }
         let value = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
-        let value = self.wrap_rest_elem(&value.ty.clone(), value)?;
+        let elem_ty = value.ty.clone();
+        let value = self.wrap_rest_elem(heap, &elem_ty, value)?;
         // The column width is only meaningful to `pprint-tabular`; the other
         // three take the default (1) so one builtin serves all four.
         let colinc = match args.get(1) {
             Some(a) => self.check_at(heap, interp, env, *a, Some(&Type::I64), nth_loc(arg_locs, 1))?,
-            None => Typed { loc: None, expr: Expr::Int(0), ty: Type::I64 },
+            None => Checked::new(core::tagged(heap, "int", &[Value::Int(0)])?, Type::I64),
         };
-        Ok(Typed {
-            loc: None,
-            expr: Expr::Call(
-                Ref::synthetic(Path::root("pprint-rt")),
-                vec![
-                    Typed { loc: None, expr: Expr::Str(form.to_string()), ty: Type::Str },
-                    value,
-                    colinc,
-                ],
-            ),
-            ty: Type::Unit,
-        })
+        let which = Checked::new(self.str_lit_form(heap, form)?, Type::Str);
+        let r = Ref::synthetic(Path::root("pprint-rt"));
+        let node = self.call_form(heap, &r, &[which, value, colinc])?;
+        Ok(Checked::new(node, Type::Unit))
     }
 
     /// `(pprint-logical-block (obj :prefix "(" :suffix ")") body…)` — CLHS
@@ -9043,7 +10191,7 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.is_empty() {
             return Err(Error::TypeError(
                 "pprint-logical-block: (pprint-logical-block (obj :prefix p :suffix s) body...)".into(),
@@ -9055,21 +10203,26 @@ impl Checker {
                 "pprint-logical-block: the spec needs at least the object to iterate (write `()` for none)".into(),
             ));
         };
-        let obj = self.check_at(heap, interp, env, obj_form, Some(&sexpr_ty()), nth_loc(arg_locs, 0))?;
-        let str_lit = |s: &str| Typed { loc: None, expr: Expr::Str(s.to_string()), ty: Type::Str };
-        let mut prefix = str_lit("");
-        let mut suffix = str_lit("");
+        // The affix literals below are built here rather than read from
+        // source, so nothing else roots them — this scope does, for as long as
+        // the body checking that can collect them is still running.
+        let mut s = RootScope::new(heap);
+        let obj = self.check_at(&mut s, interp, env, obj_form, Some(&sexpr_ty()), nth_loc(arg_locs, 0))?;
+        let empty = self.str_lit_form(&mut s, "")?;
+        s.push_root(empty);
+        let mut prefix = Checked::new(empty, Type::Str);
+        let mut suffix = Checked::new(empty, Type::Str);
         let mut per_line = false;
         let mut opts = spec[1..].iter();
         while let Some(&key) = opts.next() {
             let name = match key {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                Value::Symbol(id) => s.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("pprint-logical-block: expected a keyword option".into())),
             };
             let Some(&value) = opts.next() else {
                 return Err(Error::TypeError(format!("pprint-logical-block: {} needs a value", name)));
             };
-            let value = self.check_at(heap, interp, env, value, Some(&Type::Str), None)?;
+            let value = self.check_at(&mut s, interp, env, value, Some(&Type::Str), None)?;
             match name.as_str() {
                 ":prefix" => prefix = value,
                 ":per-line-prefix" => {
@@ -9088,28 +10241,22 @@ impl Checker {
         // `(progn (open …) body… (close))`, represented the way `progn` is:
         // a `let` with no bindings. The block's own value is `unit` — the body
         // is run for its printing effect.
-        let mut seq = vec![Typed {
-            loc: None,
-            expr: Expr::Call(
-                Ref::synthetic(Path::root("pprint-block-start-rt")),
-                vec![
-                    obj,
-                    prefix,
-                    Typed { loc: None, expr: Expr::Bool(per_line), ty: Type::Bool },
-                    suffix,
-                ],
-            ),
-            ty: Type::Unit,
-        }];
+        let flag = Checked::new(core::tagged(&mut s, "bool", &[Value::Bool(per_line)])?, Type::Bool);
+        s.push_root(flag.form);
+        let start_r = Ref::synthetic(Path::root("pprint-block-start-rt"));
+        let start = self.call_form(&mut s, &start_r, &[obj, prefix, flag, suffix])?;
+        s.push_root(start);
+        let mut seq = vec![start];
         for (i, &form) in args[1..].iter().enumerate() {
-            seq.push(self.check_at(heap, interp, env, form, None, nth_loc(arg_locs, 1 + i))?);
+            let e = self.check_at(&mut s, interp, env, form, None, nth_loc(arg_locs, 1 + i))?;
+            seq.push(e.form);
         }
-        seq.push(Typed {
-            loc: None,
-            expr: Expr::Call(Ref::synthetic(Path::root("pprint-block-end-rt")), Vec::new()),
-            ty: Type::Unit,
-        });
-        Ok(Typed { loc: None, expr: Expr::Let(Vec::new(), seq), ty: Type::Unit })
+        let end_r = Ref::synthetic(Path::root("pprint-block-end-rt"));
+        let end = self.call_form(&mut s, &end_r, &[])?;
+        s.push_root(end);
+        seq.push(end);
+        let form = self.let_form(&mut s, &[], &seq)?;
+        Ok(Checked::new(form, Type::Unit))
     }
 
     // Same invariant checking context as `check_path_call` — see its comment.
@@ -9123,7 +10270,7 @@ impl Checker {
         name: &Path,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
         if !sig.optionals.is_empty() || !sig.keys.is_empty() {
             return self.check_call_opt_key(heap, interp, env, written, name, &sig, args, arg_locs);
@@ -9179,7 +10326,7 @@ impl Checker {
                 rest_typed.push(ta);
             }
             let resolved = subst_apply(elem_ty, &subst);
-            typed.push(self.cons_rest_list(&resolved, rest_typed)?);
+            typed.push(self.cons_rest_list(heap, &resolved, rest_typed)?);
         }
         // Associated-type pins participate in *inference*, not just
         // verification: when a `where` bound pins an associated type to one of
@@ -9269,7 +10416,7 @@ impl Checker {
         // declared on the outer function is real but currently unexercised
         // by any code in this repo (no `where`-bounded function forwards its
         // own type parameter into another `where`-bounded call), so it's
-        // left to the existing runtime `Expr::TraitCall` fallback, same as
+        // left to the unreachable-`panic` node, same as
         // before this validation existed. Note the skip only catches a bare
         // type variable (`T` itself) — a type variable *wrapped* in a
         // concrete type (e.g. `Vector<U>` for an outer `U`) is still
@@ -9306,16 +10453,18 @@ impl Checker {
         } else {
             self.mk_ref(written.to_vec(), call_path)
         };
-        Ok(Typed { loc: None, expr: Expr::Call(r, typed), ty: subst_apply(&sig.ret, &subst) })
+        let ty = subst_apply(&sig.ret, &subst);
+        let form = self.call_form(heap, &r, &typed)?;
+        Ok(Checked::new(form, ty))
     }
 
     /// [`Self::check_call`]'s `&optional`/`&key` path — routed to whenever
     /// `sig.optionals`/`sig.keys` is non-empty; at most one of the two is
     /// non-empty (never both — `Self::parse_defun_params_full`). Builds the
-    /// same flat, fully-saturated `Expr::Call(Ref, Vec<Typed>)` an ordinary
+    /// same flat, fully-saturated `call` an ordinary
     /// fixed-arity call produces — one actual argument per runtime
     /// parameter, in `TopLevel::Defun::params` order — so nothing
-    /// downstream (`Interp::apply`, the compile pipeline's `ast_bridge`/
+    /// downstream (`Interp::apply`, the compile pipeline's `core_bridge`/
     /// self-hosted `compile-call`) needs to know `&optional`/`&key` exist at
     /// all; an omitted argument is filled in right here with either the
     /// parameter's checked default expression or (no default) an
@@ -9335,7 +10484,7 @@ impl Checker {
     /// declared type can never depend on one of these anyway; only a
     /// defaultless (`Option<T>`-effective) parameter can, and omitting it
     /// simply produces `Option::none` at the call's own resolved `T` (built
-    /// fresh here via `subst_apply`, never reusing a stale `Typed` node).
+    /// fresh here via `subst_apply`, never reusing a stale node).
     #[allow(clippy::too_many_arguments)]
     fn check_call_opt_key(
         &self,
@@ -9347,7 +10496,7 @@ impl Checker {
         sig: &FnSig,
         args: &[Value],
         arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let required_n = sig.params.len();
         if args.len() < required_n {
             return Err(Error::TypeError(format!(
@@ -9374,10 +10523,10 @@ impl Checker {
         // `supplied_keys`/`supplied_opts` hold pass 1's already-checked
         // values (unify already applied) — pass 2 below only needs to fill
         // in whatever they're missing, using the now-final `subst`.
-        let mut supplied_keys: HashMap<String, Typed> = HashMap::new();
+        let mut supplied_keys: HashMap<String, Checked> = HashMap::new();
         let mut opt_supplied_n = 0usize;
-        let mut opt_supplied: Vec<Typed> = Vec::new();
-        let mut rest_typed: Vec<Typed> = Vec::new();
+        let mut opt_supplied: Vec<Checked> = Vec::new();
+        let mut rest_typed: Vec<Checked> = Vec::new();
 
         if !sig.keys.is_empty() {
             // `&key`: every trailing argument is a `:name value` pair,
@@ -9493,12 +10642,12 @@ impl Checker {
                             checked
                         } else {
                             let target = checked.ty.clone();
-                            wrap_some(checked, target)
+                            wrap_some(heap, self, checked, target)?
                         }
                     }
                     None => match &key.default {
-                        Some(d) => d.clone(),
-                        None => option_none(subst_apply(&key.effective_ty(), &subst)),
+                        Some(d) => self.splice_default(heap, d, &key.decl_ty)?,
+                        None => option_none(heap, self, subst_apply(&key.effective_ty(), &subst))?,
                     },
                 };
                 typed.push(val);
@@ -9512,19 +10661,19 @@ impl Checker {
                         checked
                     } else {
                         let target = checked.ty.clone();
-                        wrap_some(checked, target)
+                        wrap_some(heap, self, checked, target)?
                     }
                 } else {
                     match &opt.default {
-                        Some(d) => d.clone(),
-                        None => option_none(subst_apply(&opt.effective_ty(), &subst)),
+                        Some(d) => self.splice_default(heap, d, &opt.decl_ty)?,
+                        None => option_none(heap, self, subst_apply(&opt.effective_ty(), &subst))?,
                     }
                 };
                 typed.push(val);
             }
             if let Some(elem_ty) = &sig.rest {
                 let resolved = subst_apply(elem_ty, &subst);
-                typed.push(self.cons_rest_list(&resolved, rest_typed)?);
+                typed.push(self.cons_rest_list(heap, &resolved, rest_typed)?);
             }
         }
 
@@ -9533,7 +10682,9 @@ impl Checker {
         } else {
             self.mk_ref(written.to_vec(), call_path)
         };
-        Ok(Typed { loc: None, expr: Expr::Call(r, typed), ty: subst_apply(&sig.ret, &subst) })
+        let ty = subst_apply(&sig.ret, &subst);
+        let form = self.call_form(heap, &r, &typed)?;
+        Ok(Checked::new(form, ty))
     }
 
     /// Call-site `where`-bound validation shared by [`Self::check_call`]
@@ -9558,7 +10709,7 @@ impl Checker {
     ///   that same variable instead of silently skipping, so forwarding a
     ///   type parameter into a bounded call without declaring a matching
     ///   bound on it is now a real error instead of an opaque runtime
-    ///   `Expr::TraitCall` failure two calls later.
+    ///   an unreachable-`panic` failure two calls later.
     /// - `concrete` **wraps** a still-open type variable (e.g. `Vector<U>`
     ///   for an outer `U`) — trait-membership (`def.impls`) is still checked
     ///   strictly (a type *constructor*'s trait impls don't depend on which
@@ -9685,7 +10836,7 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         let (adt_name, variant) = ctor;
         let def = self.reg.type_def(adt_name).expect("indexed adt exists").clone();
         let fields = &def.variants[variant].fields;
@@ -9744,15 +10895,15 @@ impl Checker {
                 }
             }
         }
-        Ok(Typed { loc: None,
-            expr: Expr::Construct {
-                type_name: adt_name.clone(),
-                variant,
-                args: typed_args,
-                mutable: def.kind == AdtKind::Struct,
-            },
-            ty: Type::Named(adt_name.clone(), result_args),
-        })
+        let mutable = def.kind == AdtKind::Struct;
+        let arg_forms: Vec<Value> = typed_args.iter().map(|a| a.form).collect();
+        // The declared field types with *this* site's arguments substituted in.
+        // Recomputed after the loop above rather than reusing its own `st`: a
+        // later field's `unify` can be what determines an earlier one's type
+        // parameter, so only the finished `subst` is complete.
+        let field_tys: Vec<Type> = fields.iter().map(|f| subst_apply(f, &subst)).collect();
+        let form = self.construct_form(heap, adt_name, variant, mutable, &field_tys, &arg_forms)?;
+        Ok(Checked::new(self.rooted(heap, form), Type::Named(adt_name.clone(), result_args)))
     }
 
     // ---- match / if-let ---------------------------------------------------
@@ -9765,7 +10916,7 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
+    ) -> Result<Checked, Error> {
         if args.is_empty() {
             return Err(Error::TypeError("match: (match expr arms...)".into()));
         }
@@ -9779,7 +10930,8 @@ impl Checker {
         // catch-all arm is required — which falls out of `Sexpr`'s own
         // eleven-variant exhaustiveness rule with nothing added.
         if let Type::Dyn(..) = scrut.ty {
-            scrut = Typed { loc: scrut.loc.clone(), expr: Expr::DynValue(Box::new(scrut)), ty: sexpr_ty() };
+            let form = self.dyn_value_form(heap, scrut.form)?;
+            scrut = Checked::new(self.rooted(heap, form), sexpr_ty());
         }
         let (adt_name, _) = self.expect_adt(&scrut.ty)?;
         // `match` covers every sum type, `Sexpr` included. Symbol/Sexpr
@@ -9816,7 +10968,7 @@ impl Checker {
 
         // `Option` because a deferred arm's slot is filled by the second pass,
         // and arm order is match semantics — first match wins.
-        let mut arms: Vec<Option<Arm>> = Vec::new();
+        let mut arms: Vec<Option<(Pattern, Vec<Value>)>> = Vec::new();
         let mut covered: HashSet<usize> = HashSet::new();
         let mut catchall = false;
         let mut result_ty: Option<Type> = expected.cloned();
@@ -9938,7 +11090,7 @@ impl Checker {
                     Some(p) => merge_holes(&p, r).unwrap_or(p),
                 });
             }
-            arms.push(Some(Arm { pat, body }));
+            arms.push(Some((pat, body)));
         }
 
         // Second pass, for the arms the probe held back (B4). By now the arms
@@ -9977,7 +11129,7 @@ impl Checker {
                     Err(e) => return Err(e),
                 },
             });
-            arms[d.slot] = Some(Arm { pat: d.pat, body });
+            arms[d.slot] = Some((d.pat, body));
         }
 
         // Exhaustiveness (B1): in `recover` mode a non-exhaustive `match`
@@ -10006,8 +11158,16 @@ impl Checker {
             None if self.recover => Type::Never,
             None => return Err(Error::TypeError("match: no arms".into())),
         };
-        let arms: Vec<Arm> = arms.into_iter().flatten().collect();
-        Ok(Typed { loc: None, expr: Expr::Match(Box::new(scrut), arms), ty })
+        // Patterns are lowered here, at the end: `pattern_form` roots each
+        // node it returns, so the ones built earlier survive the allocations
+        // the later ones make.
+        let mut lowered: Vec<(Value, Vec<Value>)> = Vec::new();
+        for (pat, body) in arms.into_iter().flatten() {
+            let pat_form = self.pattern_form(heap, &pat)?;
+            lowered.push((pat_form, body));
+        }
+        let form = self.match_form(heap, scrut.form, &scrut.ty, &lowered)?;
+        Ok(Checked::new(form, ty))
     }
 
     /// Check a pattern against the type of the value it matches, returning the
@@ -10032,7 +11192,7 @@ impl Checker {
                     Ok((Pattern::Wildcard, Vec::new()))
                 } else {
                     Ok((
-                        Pattern::Bind(name.to_string(), self.is_heap_repr(expected)),
+                        Pattern::Bind(name.to_string()),
                         vec![(name.to_string(), expected.clone(), loc)],
                     ))
                 }
@@ -10236,24 +11396,18 @@ impl Checker {
         }
         let mut sub_pats = Vec::new();
         let mut binds = Vec::new();
-        let mut sexpr_fields = Vec::new();
         let mut field_types = Vec::new();
         for ((sub, sub_loc), field) in parts_locs[1..].iter().zip(fields.iter()) {
+            // The declared field type with *this* site's type arguments
+            // substituted in. Recorded here because here is the only place it is
+            // known — see `Pattern::Ctor::field_types`'s doc comment.
             let field_ty = subst_apply(field, &subst);
-            // Baked into the pattern here (where the instantiated field
-            // type is in hand) so the type-erased interpreter can decode a
-            // boxed struct's `Sexpr`-declared field faithfully — see
-            // `Pattern::Ctor::sexpr_fields`'s doc comment.
-            sexpr_fields.push(matches!(&field_ty, Type::Named(p, _) if *p == Path::root("sexpr")));
-            // Kept in full alongside `sexpr_fields` for compiled code's own
-            // per-field decode — see `Pattern::Ctor::field_types`'s doc
-            // comment.
             field_types.push(field_ty.clone());
             let (p, b) = self.check_pattern(heap, &field_ty, *sub, sub_loc.clone())?;
             sub_pats.push(p);
             binds.extend(b);
         }
-        Ok((Pattern::Ctor { type_name: adt_name, variant, args: sub_pats, sexpr_fields, field_types, downcast }, binds))
+        Ok((Pattern::Ctor { type_name: adt_name, variant, args: sub_pats, field_types, downcast }, binds))
     }
 
     // ---- helpers ----------------------------------------------------------
@@ -10269,7 +11423,7 @@ impl Checker {
         body: &[Value],
         body_locs: &[Option<Loc>],
         expected: Option<&Type>,
-    ) -> Result<(Vec<Typed>, Type), Error> {
+    ) -> Result<(Vec<Value>, Type), Error> {
         if body.is_empty() {
             if let Some(e) = expected {
                 if *e != Type::Unit {
@@ -10281,7 +11435,12 @@ impl Checker {
             }
             return Ok((Vec::new(), Type::Unit));
         }
-        let mut out = Vec::new();
+        // The lowered forms are held in a plain `Vec`, which the collector
+        // cannot see — but every node `check_at` produces is pushed onto the
+        // heap's root stack there and stays until `check_form_at` truncates it,
+        // so an element rooted three allocations ago is still rooted now.
+        let mut out: Vec<Value> = Vec::new();
+        let mut ty = Type::Unit;
         let last = body.len() - 1;
         for (i, expr) in body.iter().enumerate() {
             let exp = if i == last { expected } else { None };
@@ -10293,9 +11452,11 @@ impl Checker {
             // highest-leverage boundary: `check_seq` is the body checker for
             // `defun`/`defmethod`/`defmacro`/`lambda`/`let`/`labels`/`loop`
             // bodies and `match` arm bodies alike.
-            out.push(self.recovered(self.check_at(heap, interp, env, *expr, exp, loc.clone()), loc)?);
+            let one = self.check_at(heap, interp, env, *expr, exp, loc.clone());
+            let checked = self.recovered(heap, one, loc)?;
+            ty = checked.ty;
+            out.push(checked.form);
         }
-        let ty = out[last].ty.clone();
         Ok((out, ty))
     }
 
@@ -10325,37 +11486,6 @@ impl Default for Checker {
 /// bare atom argument's own source location into [`Checker::check_at`].
 fn nth_loc(locs: &[Option<Loc>], i: usize) -> Option<Loc> {
     locs.get(i).cloned().flatten()
-}
-
-/// Recursively convert a raw read `Value` into an owned [`QuotedSexpr`] (see
-/// [`Expr::Quote`] for why `quote` can't just keep the heap pointer). A
-/// `Value::Path` (a `::`-qualified token, e.g. `a::b`, appearing inside
-/// quoted data — most commonly inside a macro body that generates
-/// module-qualified code) mirrors to `QuotedSexpr::Path`, its segments in
-/// written order (see `docs/dev/language-design.md` §2.1 for `Value::Path`
-/// itself). `alloc_quoted` (`eval/interp.rs`) is this function's inverse.
-fn value_to_quoted(heap: &Heap, v: Value) -> Result<QuotedSexpr, Error> {
-    Ok(match v {
-        Value::Empty => QuotedSexpr::Nil,
-        Value::Int(n) => QuotedSexpr::Int(n),
-        // `Sexpr::Float`/`bignum`/`ratio` are all heap-boxed (`Value::Boxed`,
-        // see `BoxedObj`).
-        Value::Boxed(id) if heap.is_bignum(id) => QuotedSexpr::Bignum(heap.bignum_value(id).clone()),
-        Value::Boxed(id) if heap.is_ratio(id) => QuotedSexpr::Ratio(heap.ratio_value(id).clone()),
-        Value::Boxed(id) => QuotedSexpr::Float(heap.float_value(id)),
-        Value::Char(c) => QuotedSexpr::Char(c),
-        Value::Bool(b) => QuotedSexpr::Bool(b),
-        Value::Symbol(id) => QuotedSexpr::Sym(heap.symbol_name(id).to_string()),
-        Value::Str(id) => QuotedSexpr::Str(heap.string(id).to_string()),
-        Value::Cons(_) => {
-            let car = value_to_quoted(heap, heap.car(v)?)?;
-            let cdr = value_to_quoted(heap, heap.cdr(v)?)?;
-            QuotedSexpr::Cons(Box::new(car), Box::new(cdr))
-        }
-        Value::Path(id) => {
-            QuotedSexpr::Path(heap.path_segments(id).iter().map(|s| heap.symbol_name(*s).to_string()).collect())
-        }
-    })
 }
 
 /// Whether `v` is the symbol named `name`.
@@ -10400,29 +11530,80 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
     }
 }
 
-/// `Some(inner)` as a `Typed` — `Checker::check_as`'s `try-as` wrapper for a
-/// total conversion's already-computed result.
-fn wrap_some(inner: Typed, target: Type) -> Typed {
-    let ty = Type::Named(Path::root("option"), vec![target]);
-    Typed { loc: None, expr: Expr::Construct { type_name: Path::root("option"), variant: 0, args: vec![inner], mutable: false }, ty }
+/// A path, as a core form field writes one: a bare symbol for a single
+/// segment, a `::` path for more.
+///
+/// The asymmetry is the reader's, not a choice made here — reading `point`
+/// yields a `Value::Symbol` and only `a::b` yields a `Value::Path`. Writing a
+/// one-segment path as a `Value::Path` would print as `point` and read back as
+/// a symbol, so a form would not survive its own round trip
+/// (`tests/core_vocabulary_test.rs`). Both consumers accept either spelling.
+fn path_form(heap: &mut Heap, p: &Path) -> Value {
+    let segs = p.segments();
+    if segs.len() == 1 {
+        return heap.intern_symbol(&segs[0]);
+    }
+    let ids: Vec<_> = segs.iter().map(|s| match heap.intern_symbol(s) {
+        Value::Symbol(id) => id,
+        _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
+    }).collect();
+    heap.intern_path(&ids)
 }
 
-/// `Option::none` as a `Typed`, already at `ty` (an `Option<_>` type) —
+/// `(a b c)` — a list of symbols, for a reference's `written`/`home` name
+/// lists.
+///
+/// `home` is often empty: the root module has zero segments, which is exactly
+/// why these are lists of symbols rather than a `Path` (always at least one
+/// segment).
+fn sym_list(heap: &mut Heap, names: &[String]) -> Result<Value, Error> {
+    let mut f = Items::new(heap);
+    for n in names {
+        let sym = f.heap().intern_symbol(n);
+        f.push(sym);
+    }
+    f.finish_list()
+}
+
+/// `((TYPE SYM)...)` — a vtable's contents, or the implementation targets a
+/// `dyn-call` could reach: each entry the owning type's path and the method
+/// name.
+fn vtable_form(heap: &mut Heap, slots: &[(Path, String)]) -> Result<Value, Error> {
+    let mut f = Items::new(heap);
+    for (ty, method) in slots {
+        let tp = path_form(f.heap(), ty);
+        let m = f.heap().intern_symbol(method);
+        let one = core::list(f.heap(), &[tp, m])?;
+        f.push(one);
+    }
+    f.finish_list()
+}
+
+/// `Some(inner)` as a [`Checked`] — `Checker::check_as`'s `try-as` wrapper for a
+/// total conversion's already-computed result.
+fn wrap_some(heap: &mut Heap, checker: &Checker, inner: Checked, target: Type) -> Result<Checked, Error> {
+    let ty = Type::Named(Path::root("option"), vec![target.clone()]);
+    let form = checker.construct_form(heap, &Path::root("option"), 0, false, &[target], &[inner.form])?;
+    Ok(Checked::new(checker.rooted(heap, form), ty))
+}
+
+/// `Option::none` as a [`Checked`], already at `ty` (an `Option<_>` type) —
 /// `Checker::check_call_opt_key`'s filler for an omitted `&optional`/`&key`
 /// argument that has no default. `variant: 1` is `option`'s `none` variant
 /// (see `check::registry::option_def`), the CL-`nil` counterpart of
 /// `wrap_some`'s `variant: 0`.
-fn option_none(ty: Type) -> Typed {
-    Typed { loc: None, expr: Expr::Construct { type_name: Path::root("option"), variant: 1, args: Vec::new(), mutable: false }, ty }
+fn option_none(heap: &mut Heap, checker: &Checker, ty: Type) -> Result<Checked, Error> {
+    let form = checker.construct_form(heap, &Path::root("option"), 1, false, &[], &[])?;
+    Ok(Checked::new(checker.rooted(heap, form), ty))
 }
 
-/// Relabels an already-computed `Option<I32>` `Typed` (an `as_conversion`
+/// Relabels an already-computed `Option<I32>` [`Checked`] (an `as_conversion`
 /// `try_method` call's result) to `Option<inner_target>` — `Checker::check_as`'s
 /// `i64`-target counterpart of the plain relabel it does for a total
 /// conversion; see [`as_conversion`]'s doc comment for why the underlying
 /// `Option`'s runtime payload doesn't actually change.
-fn retype_option(opt: Typed, inner_target: Type) -> Typed {
-    Typed { ty: Type::Named(Path::root("option"), vec![inner_target]), ..opt }
+fn retype_option(opt: Checked, inner_target: Type) -> Checked {
+    Checked::new(opt.form, Type::Named(Path::root("option"), vec![inner_target]))
 }
 
 /// `Some(t)` unless `t` is `Never` (which never constrains an expectation).

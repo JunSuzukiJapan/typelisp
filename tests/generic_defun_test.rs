@@ -8,7 +8,7 @@
 //! (d) that non-generic `defun` keeps behaving exactly as before.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Heap, Interp, Reader, Value, TopLevel};
+use typelisp::{Checker, Error, Heap, Interp, Reader, Value, TopLevelForm};
 
 fn run(src: &str) -> Result<(Value, Heap), Error> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -33,7 +33,7 @@ fn eval_ok(src: &str) -> Value {
 /// Check (but don't evaluate) every form in `src`, returning the last form's
 /// checked result. Used to assert on type errors without needing a runnable
 /// program.
-fn check_program(src: &str) -> Result<TopLevel, Error> {
+fn check_program(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");

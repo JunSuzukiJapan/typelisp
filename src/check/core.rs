@@ -19,7 +19,7 @@
 //! empty, so *every* allocation can free anything not currently rooted. Building
 //! a node means allocating once per field, which means each finished field has
 //! to stay rooted while its siblings are built. Done by hand that is a
-//! `push_root`/`pop_root` pair per field — `compile::ast_bridge` balances
+//! `push_root`/`pop_root` pair per field — `compile::core_bridge` balances
 //! sixteen pops by hand in one function — and a single `?` on an error path
 //! skips them all.
 //!
@@ -62,7 +62,7 @@ impl Checked {
 /// rejects it with an internal error naming `what`, so anything still reaching
 /// it says exactly which construct is missing rather than misbehaving.
 ///
-/// The same convention `compile::ast_bridge` already uses for
+/// The same convention `compile::core_bridge` already uses for
 /// `(unsupported "<Variant>")`. Every one of these is gone by the end of
 /// Phase 2; `tests/` counts them as the progress measure.
 pub fn unlowered(heap: &mut Heap, what: &str) -> Result<Value, Error> {
@@ -198,6 +198,35 @@ pub fn op<'h>(heap: &'h Heap, form: Value) -> Option<&'h str> {
         Value::Symbol(id) => Some(heap.symbol_name(id)),
         _ => None,
     }
+}
+
+/// `(module PATH BODY...)` — a bundle of top-level forms.
+///
+/// Here rather than on `Checker` because the *driver* is what knows a group of
+/// forms belongs together: a file's own definitions, wrapped once the whole
+/// file has been checked.
+pub fn tagged_module(heap: &mut Heap, path: &crate::Path, body: &[Value]) -> Result<Value, Error> {
+    let mut s = RootScope::new(heap);
+    for form in body {
+        s.push_root(*form);
+    }
+    let segs = path.segments();
+    let p = if segs.len() == 1 {
+        s.intern_symbol(&segs[0])
+    } else {
+        let ids: Vec<_> = segs
+            .iter()
+            .map(|seg| match s.intern_symbol(seg) {
+                Value::Symbol(id) => id,
+                _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
+            })
+            .collect();
+        s.intern_path(&ids)
+    };
+    s.push_root(p);
+    let mut items = vec![p];
+    items.extend_from_slice(body);
+    tagged(&mut s, "module", &items)
 }
 
 /// A node's fields, in order (everything after the tag).

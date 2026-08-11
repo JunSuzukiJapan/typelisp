@@ -178,8 +178,11 @@ fn the_scan_covers_the_files_the_invariant_lives_in() {
         .iter()
         .map(|p| p.strip_prefix(repo_root()).unwrap().to_string_lossy().replace('\\', "/"))
         .collect();
+    // `src/compile/core_bridge.rs` stands where `ast_bridge.rs` did: it is the
+    // successor of the file one of the two original bugs was in, and the one that
+    // spells a runtime type name on the compiled side today.
     for expected in
-        ["src/types.rs", "src/type_key.rs", "src/eval/interp.rs", "src/compile/ast_bridge.rs"]
+        ["src/types.rs", "src/type_key.rs", "src/eval/interp.rs", "src/compile/core_bridge.rs"]
     {
         assert!(files.contains(&expected.to_string()), "scan missed {}", expected);
     }

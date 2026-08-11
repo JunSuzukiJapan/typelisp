@@ -34,7 +34,8 @@ use inkwell::module::Module;
 use inkwell::AddressSpace;
 
 use crate::fasl::source_hash;
-use crate::{Checker, Heap, Interp, Reader, TopLevel};
+use crate::check::core;
+use crate::{Checker, Heap, Interp, Reader, Value};
 
 /// The name of the i64 global the island bitcode carries its source hash in.
 /// Read back by [`read_embedded_source_hash`].
@@ -68,8 +69,8 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
         for w in chk.take_warnings() {
             eprintln!("{}", w);
         }
-        if let TopLevel::Defun { name, .. } = &tl {
-            fn_names.push(name.last_segment().to_string());
+        if let Some(name) = defun_name(&heap, tl) {
+            fn_names.push(name);
         }
         interp.exec(&mut heap, tl).map_err(|e| format!("island exec failed: {}", e))?;
     }
@@ -120,7 +121,7 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
         // in the shell declared here. This is the same shape `Interp::
         // compile_scc` already uses for a JIT'd cycle.
         for name in &fn_names {
-            let sym = crate::compile::ast_bridge::user_symbol_name(name);
+            let sym = crate::compile::symbols::user_symbol_name(name);
             if module.get_function(&sym).is_none() {
                 module.add_function(&sym, fn_ty, None);
             }
@@ -132,7 +133,7 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
     // run without the lock held — same constraint `aot::compile_file`
     // documents at its own loop.
     for name in &fn_names {
-        let internal_name = crate::compile::ast_bridge::user_symbol_name(name);
+        let internal_name = crate::compile::symbols::user_symbol_name(name);
         interp
             .add_compiled_function(&mut heap, module.clone(), name, &internal_name)
             .map_err(|e| format!("island compile of `{}` failed: {}", name, e))?;
@@ -152,4 +153,18 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
 pub fn read_embedded_source_hash(module: &Module<'static>) -> Option<u64> {
     let global = module.get_global(SOURCE_HASH_GLOBAL)?;
     global.get_initializer()?.into_int_value().get_zero_extended_constant()
+}
+
+/// The last segment of a `(defun PATH ...)` form's name, or `None` for anything
+/// else — the island is all `defun`s, and this is what names each one for
+/// `install_island_bitcode`'s symbol list.
+fn defun_name(heap: &Heap, tl: Value) -> Option<String> {
+    if core::op(heap, tl) != Some("defun") {
+        return None;
+    }
+    match core::field(heap, tl, 0)? {
+        Value::Path(id) => Some(crate::types::path_from_id(heap, id).last_segment().to_string()),
+        Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
+        _ => None,
+    }
 }

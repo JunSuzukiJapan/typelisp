@@ -14,9 +14,20 @@
 //! collector must not be observable in what the checker produces.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Heap, Interp, Reader, TopLevel};
+use typelisp::check::core;
+use typelisp::{Checker, Error, Heap, Interp, Reader};
 
-fn check_all(src: &str, stress: bool) -> Result<Vec<TopLevel>, Error> {
+/// Every checked form, **printed**.
+///
+/// Printed rather than returned as `Vec<TopLevelForm>`: a checked form is now
+/// cons cells, so a `TopLevelForm` is a heap index. Two runs against two heaps
+/// produce different indices for structurally identical trees, which would make
+/// the comparison below fail for a reason that has nothing to do with the
+/// collector. The old `Vec<TopLevel>` was heap-independent Rust data with a
+/// derived `PartialEq`, so comparing it directly was the structural comparison;
+/// for a cons IR, `core::print` is (`read(print(f)) == f` holds — see its doc
+/// comment).
+fn check_all(src: &str, stress: bool) -> Result<Vec<String>, Error> {
     let mut h = Heap::with_capacity(1 << 14);
     h.set_gc_stress(stress);
     let r = Reader::new();
@@ -26,10 +37,10 @@ fn check_all(src: &str, stress: bool) -> Result<Vec<TopLevel>, Error> {
     let mut out = Vec::new();
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v)?;
+        out.push(core::print(&h, tl));
         // Execute as we go so a `defmacro` is registered before a later form
         // calls it — macro expansion is part of what we are stressing.
-        interp.exec(&mut h, tl.clone()).map_err(|e| Error::TypeError(format!("exec: {}", e)))?;
-        out.push(tl);
+        interp.exec(&mut h, tl).map_err(|e| Error::TypeError(format!("exec: {}", e)))?;
     }
     Ok(out)
 }

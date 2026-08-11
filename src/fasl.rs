@@ -31,13 +31,13 @@ use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
 
 use crate::check::registry::{AdtDef, BlanketImpl, FnSig, MacroDef, Namespace, TraitDef, VarInfo};
-use crate::{Checker, Error, Heap, Interp, Loc, Path, TopLevel, Value};
+use crate::{Checker, Error, Heap, Interp, Loc, Path, TopLevelForm, Value};
 
 /// An owned, GC-heap-independent mirror of a *read form* (`Value`) — the
 /// serializable carrier for generic-template `parts`. The same idea as
-/// `QuotedSexpr` (see `check::ast`), plus the [`OwnedForm::Path`] variant
-/// `QuotedSexpr` deliberately lacks (quote strips `::`-paths during
-/// checking; raw template forms still contain them).
+/// the deleted `QuotedSexpr`, plus the [`OwnedForm::Path`] variant that one
+/// deliberately lacked (quote strips `::`-paths during checking; raw template
+/// forms still contain them).
 ///
 /// A `Cons` carries the two source spans its cell holds, because a location is
 /// a property of the datum and this is that datum written down: dropping them
@@ -63,10 +63,34 @@ pub enum OwnedForm {
     Float(f64),
     Bignum(BigInt),
     Ratio(BigRational),
-    /// A cons cell: `car`, `cdr`, then the spans the cell carries — the
-    /// element in its `car`, and the form it heads. `None` for a cell with
-    /// none (a synthesized or macro-expanded list).
-    Cons(Box<OwnedForm>, Box<OwnedForm>, Option<Loc>, Option<Loc>),
+    /// A cons chain, spine flattened: one entry per cell, then whatever the
+    /// last cell's `cdr` holds (`Empty` for a proper list, an atom for a dotted
+    /// one like `(a . b)`).
+    ///
+    /// Flat rather than the right-nested pair the cells actually are, because
+    /// the nesting is what a *list* costs in a depth-limited format: this
+    /// serializes as JSON, whose parser refuses past 128 levels of nesting, and
+    /// a right-nested pair makes a list of N elements N levels deep. A checked
+    /// body is a list now, and the prelude's own bodies exceeded the limit — no
+    /// fasl could be read back at all (`fasl parse: recursion limit exceeded`).
+    /// Depth here is structural nesting only. Raising the parser's limit instead
+    /// would have traded a clean error for a stack overflow, since the limit is
+    /// what stands between deep input and one; flattening removes the growth.
+    ///
+    /// Both walks iterate the spine for the same reason one level down: a
+    /// pair-at-a-time recursion spends one Rust stack frame per list element.
+    Cons { cells: Vec<OwnedCell>, tail: Box<OwnedForm> },
+}
+
+/// One cell of a flattened cons spine ([`OwnedForm::Cons`]): the element in the
+/// cell's `car`, plus the two spans the cell carries — its `car`'s own extent
+/// and the extent of the form this cell heads. `None` for a cell with none (a
+/// synthesized or macro-expanded list).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OwnedCell {
+    pub form: OwnedForm,
+    pub car_loc: Option<Loc>,
+    pub self_loc: Option<Loc>,
 }
 
 /// Converts a heap `Value` into its owned mirror. Read-only on `heap`.
@@ -88,12 +112,24 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
         Value::Path(id) => OwnedForm::Path(
             heap.path_segments(id).iter().map(|s| heap.symbol_name(*s).to_string()).collect(),
         ),
-        Value::Cons(cr) => {
-            let car = value_to_owned(heap, heap.car(v)?)?;
-            let cdr = value_to_owned(heap, heap.cdr(v)?)?;
-            let car_loc = heap.elem_loc(cr);
-            let self_loc = heap.cons_loc(v);
-            OwnedForm::Cons(Box::new(car), Box::new(cdr), car_loc, self_loc)
+        Value::Cons(_) => {
+            // The spine iteratively; only the elements recurse.
+            let mut cells = Vec::new();
+            let mut cur = v;
+            let tail = loop {
+                match cur {
+                    Value::Cons(cr) => {
+                        cells.push(OwnedCell {
+                            form: value_to_owned(heap, heap.car(cur)?)?,
+                            car_loc: heap.elem_loc(cr),
+                            self_loc: heap.cons_loc(cur),
+                        });
+                        cur = heap.cdr(cur)?;
+                    }
+                    other => break value_to_owned(heap, other)?,
+                }
+            };
+            OwnedForm::Cons { cells, tail: Box::new(tail) }
         }
         Value::Boxed(id) if heap.is_float(id) => OwnedForm::Float(heap.float_value(id)),
         Value::Boxed(id) if heap.is_bignum(id) => OwnedForm::Bignum(heap.bignum_value(id).clone()),
@@ -140,33 +176,39 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
         OwnedForm::Float(x) => heap.alloc_float(*x),
         OwnedForm::Bignum(n) => heap.alloc_bignum(n.clone()),
         OwnedForm::Ratio(r) => heap.alloc_ratio(r.clone()),
-        OwnedForm::Cons(car, cdr, car_loc, self_loc) => {
-            let car_v = owned_to_value(heap, car)?;
-            heap.push_root(car_v);
-            let cdr_v = match owned_to_value(heap, cdr) {
-                Ok(v) => v,
-                Err(e) => {
-                    heap.pop_root();
-                    return Err(e);
+        OwnedForm::Cons { cells, tail } => {
+            // Back to front, so each `cons` already has its cdr in hand — which
+            // is also what keeps the rooting to one intermediate: the growing
+            // tail is the only thing that has to survive the next allocation.
+            // Rooted for the whole arm and released on the way out, so an error
+            // partway through leaves no residue.
+            let roots_base = heap.root_count();
+            let built = (|| -> Result<Value, Error> {
+                let mut acc = owned_to_value(heap, tail)?;
+                heap.push_root(acc);
+                for cell in cells.iter().rev() {
+                    let car_v = owned_to_value(heap, &cell.form)?;
+                    heap.push_root(car_v);
+                    let consed = heap.cons(car_v, acc)?;
+                    heap.push_root(consed);
+                    // The spans go back into the rebuilt cell, not into a table
+                    // keyed by the old one's address — which is what makes them
+                    // survive at all, since that address belongs to a heap that
+                    // is gone.
+                    if let Value::Cons(cr) = consed {
+                        if let Some(loc) = &cell.car_loc {
+                            heap.set_elem_loc(cr, loc.clone());
+                        }
+                        if let Some(loc) = &cell.self_loc {
+                            heap.set_cons_loc(cr, loc.clone());
+                        }
+                    }
+                    acc = consed;
                 }
-            };
-            heap.push_root(cdr_v);
-            let cell = heap.cons(car_v, cdr_v);
-            heap.pop_root();
-            heap.pop_root();
-            let cell = cell?;
-            // The spans go back into the rebuilt cell, not into a table keyed
-            // by the old one's address — which is what makes them survive at
-            // all, since that address belongs to a heap that is gone.
-            if let Value::Cons(cr) = cell {
-                if let Some(loc) = car_loc {
-                    heap.set_elem_loc(cr, loc.clone());
-                }
-                if let Some(loc) = self_loc {
-                    heap.set_cons_loc(cr, loc.clone());
-                }
-            }
-            cell
+                Ok(acc)
+            })();
+            heap.truncate_roots(roots_base);
+            built?
         }
     })
 }
@@ -251,7 +293,7 @@ fn type_shape(def: &AdtDef) -> TypeShape {
 /// The parts of a `TraitDef` an edit can change without changing its name —
 /// see [`NamespaceKeys::traits`]. Deliberately *not* `PartialEq` on `TraitDef`
 /// itself: that would cascade through `FnSig::optionals` ->
-/// `OptKeyParam::default: Option<Typed>` and demand `PartialEq` across the
+/// `OptKeyParam::default` hold a checked form and demand `PartialEq` across the
 /// whole checked AST.
 #[derive(Default, PartialEq)]
 struct TraitShape {
@@ -416,7 +458,7 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 ///
 /// 3: added `QuotedSexpr::Path` (a `::`-qualified path inside quoted data,
 /// e.g. a `defmacro` body's `'(dep::head)`), reachable from any serialized
-/// `Expr::Quote`/`Typed` — 2026-07-15.
+/// `quote`/`Typed` — 2026-07-15.
 ///
 /// 4: re-added value-level `&rest`/`apply` (`FnSig.rest: Option<Type>`,
 /// `Type::Fn`'s second field), reachable from any serialized function
@@ -447,21 +489,20 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// `compiled_methods`/`struct_types`/`enum_defs` tables were replaced by a
 /// runtime module-scope tree (`eval::scope::ModuleScope`) that re-derives
 /// visibility independently instead of trusting a checker-baked `Path` as a
-/// lookup key. `Expr::Call`/`Global`/`FnRef`/`SetGlobal` now carry a `Ref`
+/// lookup key. `call`/`Global`/`FnRef`/`SetGlobal` now carry a `Ref`
 /// (`written`/`home`/`resolved`) instead of a bare `Path`, and
-/// `Expr::Assoc`/`MethodRef` gained a `home` field; `TopLevel::Defun`/
+/// `assoc`/`MethodRef` gained a `home` field; `TopLevel::Defun`/
 /// `Defmethod`/`Defvar`/`Defmacro` gained a `public` field. A stale cache
 /// serialized under the old `Expr`/`TopLevel` shapes would fail to
 /// deserialize — 2026-07-21.
 ///
 /// 9: `(compile name)`/`(compile type::method)` stopped being a disguised
-/// `Expr::Call` to a registered `compile` builtin taking a string argument —
-/// `Checker::check_compile` now builds a dedicated `Expr::CompileFn
-/// (CompileTarget)` node directly from its own `written`+`home`/`type_name`
+/// `call` to a registered `compile` builtin taking a string argument —
+/// `Checker::check_compile` now builds a dedicated `compile-fn` node directly from its own `written`+`home`/`type_name`
 /// resolution, the same independent re-resolution every other reference
 /// gets, instead of handing `Interp` a bare name string to re-resolve with
 /// an unqualified, module-blind search. A stale cache holding the old
-/// `Expr::Call`-shaped node would fail to deserialize (or, worse, silently
+/// `call`-shaped node would fail to deserialize (or, worse, silently
 /// keep the old module-blind resolution) — 2026-07-21.
 ///
 /// 10: `Pattern` gained a `TypeTest(Type, Box<Pattern>)` variant (the Sexpr-
@@ -535,7 +576,7 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// [`NamespaceKeys::traits`]), so an edited trait kept serving its old
 /// definition out of cache — 2026-08-01.
 /// 18: non-leftmost supertrait `:dyn` upcasting. `Expr` gained `DynUpcast`
-/// and `Expr::DynBox` gained `supers` (the supertrait vtables a boxing site
+/// and `dyn-new` gained `supers` (the supertrait vtables a boxing site
 /// lays out, which is what makes the conversion possible at all — see that
 /// field's doc comment). A cached `DynBox` from before this carries no
 /// `supers`, so an upcast of it would find no table registered and abort at
@@ -546,7 +587,14 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// fail to deserialize the new shape — and, if it somehow did not, would hand
 /// back forms whose positions were never written, silently costing every
 /// runtime error in a cached module its `file:line:col` — 2026-08-09.
-pub const FASL_FORMAT_VERSION: u32 = 19;
+/// 20: [`OwnedForm::Cons`] flattened its spine (`{ cells, tail }`, one entry
+/// per cell) from a right-nested pair. Not a change of *what* is recorded — the
+/// same cells and the same two spans each — but of how deeply it nests. Version
+/// 19 made a checked body a list of cons cells, and a right-nested pair makes a
+/// list of N elements N levels deep in JSON, so the prelude's own bodies blew
+/// past serde_json's 128-level parse limit and no fasl could be read back at
+/// all. A stale cache would fail to deserialize the new shape — 2026-08-11.
+pub const FASL_FORMAT_VERSION: u32 = 20;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.
@@ -561,9 +609,14 @@ pub struct Fasl {
     pub method_templates: Vec<(Path, String, MethodTemplateRepr)>,
     /// The checked top-level forms, in file order. Loading re-`exec`s them —
     /// the interpreter side (function/macro bodies, `defvar` initializers,
-    /// `struct_types`) rebuilds through the exact same path a source load
-    /// uses.
-    pub top_levels: Vec<TopLevel>,
+    /// type entries) rebuilds through the exact same path a source load uses.
+    ///
+    /// [`OwnedForm`]s, not the forms themselves: a checked top-level form is
+    /// cons cells since Stage C, and a `Value` is an index into *a* heap.
+    /// Rebuilding through the allocation API is also the only correct way back
+    /// — see [`owned_to_value`]. The source positions survive because
+    /// `OwnedForm::Cons` carries both of a cell's location slots.
+    pub top_levels: Vec<OwnedForm>,
 }
 
 /// The stale-detection hash for fasl files: `DefaultHasher` over the source
@@ -585,9 +638,13 @@ impl Fasl {
         heap: &Heap,
         checker: &Checker,
         mark: &RegistryMark,
-        top_levels: Vec<TopLevel>,
+        top_levels: Vec<TopLevelForm>,
         source_hash: u64,
     ) -> Result<Fasl, Error> {
+        let top_levels = top_levels
+            .into_iter()
+            .map(|tl| value_to_owned(heap, tl))
+            .collect::<Result<Vec<_>, _>>()?;
         let mut namespaces = Vec::new();
         diff_namespace(&checker.registry().root, &mut Vec::new(), mark, &mut namespaces);
         let dl = &checker.registry().def_locs;
@@ -660,8 +717,11 @@ impl Fasl {
         }
         checker.install_templates(heap, &self.fn_templates, &self.method_templates)?;
         for tl in &self.top_levels {
+            // Rebuilt in *this* heap's cells, then permanently rooted by
+            // `exec` exactly as a freshly-checked form is.
+            let form = owned_to_value(heap, tl)?;
             interp
-                .exec(heap, tl.clone())
+                .exec(heap, form)
                 .map_err(|e| Error::TypeError(format!("fasl load: exec failed: {}", e)))?;
         }
         Ok(())

@@ -4,9 +4,9 @@
 //! rejected the first time `Vector<T>` was attempted).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
+use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
 
-fn check(src: &str) -> Result<TopLevel, Error> {
+fn check(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");

@@ -4,14 +4,14 @@
 //! `doiter` is layered on top.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
 
 /// Checks `src` against a heap/checker/interp with the prelude already
 /// loaded — needed since `Iter`/`VectorIter<T>` are themselves defined in
 /// `src/prelude.rs` (`Checker::new()`/`Interp::new()` alone register only
 /// the Rust-builtin types, not the prelude's `deftrait`/`impl`/`defstruct`
 /// forms) — mirrors `hashtable_test.rs`'s `run_with_capacity_and_prelude`.
-fn check(src: &str) -> Result<TopLevel, Error> {
+fn check(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();

@@ -11,7 +11,7 @@
 use std::path::Path;
 
 fn main() {
-    // Building the bitcode drives `freevars::walk` over `compile-function`'s
+    // Building the bitcode drives `core_freevars`'s walk over `compile-function`'s
     // huge `labels` body — the same deep recursion the compile tests need
     // `RUST_MIN_STACK=32MB` for. `RUST_MIN_STACK` only sizes *spawned*
     // threads, not `main`, so run the work on a thread with an explicit

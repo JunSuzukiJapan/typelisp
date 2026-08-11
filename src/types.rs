@@ -161,7 +161,7 @@ pub fn path_is_builtin_any(p: &Path, names: &[&str]) -> bool {
     p.is_simple() && names.contains(&p.last_segment())
 }
 
-/// The LLVM handle *types* (`crate::compile::ast_bridge::is_llvm_handle_ty`):
+/// The LLVM handle *types* (`crate::compile::Repr::Handle`):
 /// values compiled code passes around as raw handles rather than heap boxes.
 /// A superset of [`LLVM_METHOD_RECEIVER_TYPES`] — `llvm-basic-block` and
 /// `llvm-value` are handles that carry no methods of their own.
@@ -169,7 +169,7 @@ pub const LLVM_HANDLE_TYPES: [&str; 5] =
     ["llvm-module", "llvm-function", "llvm-builder", "llvm-basic-block", "llvm-value"];
 
 /// The LLVM handle types that *have* methods, i.e. the receivers whose
-/// `Expr::Assoc` lowers to an `llvm-op` node (`llvm_assoc_key`) and is
+/// `assoc` lowers to an `llvm-op` node (`llvm_assoc_key`) and is
 /// therefore never a real call target (`Interp::compile_scc`'s filters).
 /// Deliberately not [`LLVM_HANDLE_TYPES`]: the two lists answer different
 /// questions and used to differ only by accident.
@@ -258,7 +258,7 @@ pub enum Type {
 impl Type {
     /// The ten built-in integer types (`i8`..`isize`, `u8`..`usize`). The one
     /// authoritative list, so callers that need to single out "an integer
-    /// type" (`Checker::int_lit_ty`/pattern checking, `ast_bridge`'s
+    /// type" (`Checker::int_lit_ty`/pattern checking, `core_bridge`'s
     /// struct-field classifier) share it instead of each re-enumerating all
     /// ten variants.
     pub fn is_integer(&self) -> bool {

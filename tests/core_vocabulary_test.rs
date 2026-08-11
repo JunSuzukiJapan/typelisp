@@ -216,7 +216,10 @@ fn calls() {
         "(assoc vector new false () (vector int) ())",
         "(fnref (f) () f (int int))",
         "(methodref point new () (int int))",
-        "(apply (var g) (int) (int 1))",
+        // The callee is a value, so the *return* representation rides on the
+        // node — a compiled closure's result has no name to look a signature
+        // up by. Then the argument representations, then the arguments.
+        "(apply (var g) int (int) (int 1))",
         "(compile-fn (fn (f) () f))",
         "(compile-fn (method point new ()))",
     ]);
@@ -231,17 +234,24 @@ fn calls() {
 /// mutable. Fields are read and written by index — the *name* was resolved at
 /// check time and is not needed again.
 ///
-/// `construct` needs no field representations: it names its type, and a
-/// field's representation is a property of the type, so the bridge reads them
-/// from that type's `defstruct`/`defenum`. `field-get`/`field-set` cannot do
-/// the same — they name only the *index*, and the object is an arbitrary
-/// expression whose type is exactly what the IR no longer carries — so each
-/// spells out the one field's representation it touches.
+/// It also spells out one representation per field. Those cannot be read back
+/// from the type's own `defstruct`/`defenum`, because for a *generic* ADT the
+/// definition has no answer: `Option`'s `Some` field is declared `T`, and a
+/// type variable has no representation. The instantiation is known only at the
+/// site — and a definition-keyed table could not be made to hold it either,
+/// since monomorphization erases and `Maybe<i64>`/`Maybe<string>` share the one
+/// path `Maybe`. The reprs are the *declared* field types with this site's type
+/// arguments substituted in, never the argument expressions' own types, which
+/// can be narrower.
+///
+/// `field-get`/`field-set` spell out the single representation they touch for a
+/// related but distinct reason — they name only an *index*, and their object is
+/// an arbitrary expression whose type the IR no longer carries.
 #[test]
 fn data() {
     all_round_trip(&[
-        "(construct point 0 false (int 1) (int 2))",
-        "(construct option 1 false (int 9))",
+        "(construct point 0 false (int int) (int 1) (int 2))",
+        "(construct option 1 false (int) (int 9))",
         "(field-get (var p) 0 int)",
         "(field-set (var p) 1 int (int 5))",
     ]);
@@ -259,21 +269,28 @@ fn data() {
 /// its own type, and a nested sub-pattern's may differ from its parent's, so
 /// the island reads the per-pattern one and ignores this.
 ///
-/// A constructor pattern carries only the type, the variant index, and whether
-/// it is a downcast. It does *not* carry its fields' representations: a
-/// field's `Repr` is a property of the *type*, so the bridge reads it from the
-/// `defstruct`/`defenum` form instead. That is a deliberate departure from the
-/// AST, where `Pattern::Ctor` carried `sexpr_fields` and `field_types` — the
-/// same fact recorded once per pattern site instead of once per type.
+/// A constructor pattern carries the type, the variant index, whether it is a
+/// downcast, and one representation per field — the reading half of what
+/// `construct` writes, and there for the same reason (see `data`): a generic
+/// ADT's definition declares `T`, so only the site knows. This is the surviving
+/// half of the AST's `Pattern::Ctor::field_types`; its companion `sexpr_fields`
+/// is not here, being that same fact reduced to a single bit.
+///
+/// Note what this test does and does not fix: `all_round_trip` compares
+/// `core::print` against the source text, so it pins the *tags* and these
+/// written examples, not the field layout in general — a builder that emitted
+/// its fields in another order would still round-trip. The layout is pinned by
+/// the one builder per tag in `Checker` and the field indices its two consumers
+/// read.
 #[test]
 fn patterns() {
     all_round_trip(&[
         "(match (var v) sexpr ((pat-wild) (int 0)))",
         "(match (var v) int ((pat-bind x) (var x)))",
         "(match (var v) sexpr ((pat-lit (int 1)) (int 10)) ((pat-wild) (int 0)))",
-        "(match (var v) enum ((pat-ctor option 0 false) (int 0)) ((pat-ctor option 1 false (pat-bind x)) (var x)))",
+        "(match (var v) enum ((pat-ctor option 0 false ()) (int 0)) ((pat-ctor option 1 false (int) (pat-bind x)) (var x)))",
         // A downcast arm, for matching a trait object against a concrete type.
-        "(match (var d) sexpr ((pat-ctor point 0 true (pat-bind p)) (var p)))",
+        "(match (var d) sexpr ((pat-ctor point 0 true (int int) (pat-bind p)) (var p)))",
         "(match (var d) sexpr ((pat-typetest point (pat-bind p)) (var p)))",
     ]);
     // Each pattern tag standalone as well: a pattern only ever appears nested
@@ -282,7 +299,7 @@ fn patterns() {
         "(pat-wild)",
         "(pat-bind x)",
         "(pat-lit (int 1))",
-        "(pat-ctor option 1 false (pat-bind x))",
+        "(pat-ctor option 1 false (int) (pat-bind x))",
         "(pat-typetest point (pat-bind p))",
     ]);
 }

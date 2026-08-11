@@ -2,27 +2,33 @@
 //! (`defmethod`, instance + static dispatch).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Heap, Interp, Path, Reader, TopLevel, Type};
+use typelisp::check::core;
+use typelisp::{Checker, Error, Heap, Interp, Path, Reader, Type};
 
-/// Check a sequence of forms with one checker; return the last form's result.
-fn program(src: &str) -> Result<TopLevel, Error> {
+/// Check a sequence of forms with one checker; return the last form's tag
+/// (`"expr"`, `"module"`, ...) and, for an `expr` form, the type the checker
+/// proved for it.
+///
+/// A tag rather than the form itself: a checked form is cons cells in this
+/// helper's own `Heap`, which dies with the call. The type is a separate
+/// output for the same reason it is on the checker — see `Checker::expr_type`.
+fn program(src: &str) -> Result<(String, Option<Type>), Error> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = None;
+    let mut tag = String::new();
     for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v)?);
+        let tl = chk.check_form(&mut h, &interp, v)?;
+        tag = core::op(&h, tl).expect("every top-level form is a tagged list").to_string();
     }
-    Ok(last.expect("no forms"))
+    Ok((tag, chk.expr_type().cloned()))
 }
 
 fn ty_program(src: &str) -> Type {
-    match program(src).expect("check failed") {
-        TopLevel::Expr(t) => t.ty,
-        other => panic!("expected expression, got {:?}", other),
-    }
+    let (tag, ty) = program(src).expect("check failed");
+    ty.unwrap_or_else(|| panic!("expected expression, got a `{}` form", tag))
 }
 
 // ---- modules ----------------------------------------------------------------
@@ -39,7 +45,7 @@ fn bare_name_resolves_current_then_root() {
     let src = "(module m \
                  (defun id ((x i32)) i32 x) \
                  (defun use-it ((y i32)) i32 (id y)))";
-    assert!(matches!(program(src), Ok(TopLevel::Module { .. })));
+    assert_eq!(program(src).expect("check failed").0, "module");
 }
 
 #[test]
@@ -170,7 +176,7 @@ fn use_hashtable_makes_its_static_new_callable_bare() {
     // `HashTable::new`/`Vector::new` call needs one (`let`'s binding value
     // is checked with `expected: None`, so `new` can't be inferred there).
     let src = "(use hashtable) (defun f () HashTable<i32,i32> (new)) (f)";
-    assert!(matches!(program(src), Ok(TopLevel::Expr(_))));
+    assert_eq!(program(src).expect("check failed").0, "expr");
 }
 
 #[test]

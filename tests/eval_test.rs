@@ -556,13 +556,11 @@ fn sexpr_cons_as_value() {
 
 #[test]
 fn runtime_cons_cells_survive_gc_when_rooted() {
-    // Read/check against a generously-sized heap, then evaluate against a
-    // tiny 2-cell one: one cell permanently held by `kept`, the other cycling
-    // through garbage the loop body builds and immediately discards each
-    // iteration. With only 2 cells, every other iteration must run a GC to
-    // free the previous iteration's garbage before it can allocate again. If
-    // `kept` weren't tracked as a GC root, one of those collections would
-    // eventually reclaim and corrupt it instead of the garbage.
+    // One heap, with a collection before every allocation
+    // (`eval_under_gc_pressure`'s doc comment explains why the old two-heap,
+    // two-cell arrangement is no longer expressible). If `kept` weren't tracked
+    // as a GC root, one of those collections would reclaim and corrupt it
+    // instead of the loop's garbage.
     let mut src_heap = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let src = "(let ((kept (cons (Int 1) (Nil)))) \
@@ -590,25 +588,20 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
         .into_iter()
         .map(|v| chk.check_form(&mut src_heap, &check_interp, v).expect("check failed"))
         .collect();
+    src_heap.set_gc_stress(true);
 
-    let mut rt_heap = Heap::with_capacity(2);
     let mut last = Value::Empty;
     for tl in tls {
-        if let Some(val) = check_interp.exec(&mut rt_heap, tl).expect("eval failed") {
+        if let Some(val) = check_interp.exec(&mut src_heap, tl).expect("eval failed") {
             last = val;
         }
     }
     assert_eq!(last, Value::Int(1));
-    // GC is lazy (it only runs when an allocation needs space), so one more
-    // collection reclaims whatever the evaluation left behind — *everything*:
-    // `kept`'s binding was a heap cell (`Slot::Heap`) whose liveness follows
-    // the binding itself (`Heap::alloc_cell`'s registry), so once the `let`
-    // scope ended nothing keeps its cons alive. (Before the two-tier `Slot`,
-    // `sync_roots`' stale post-evaluation root stack happened to keep it
-    // "live" here — the survival *during* the loop, which is what this test
-    // actually guards, is already proven by the `(car kept)` assertion above.)
-    rt_heap.gc();
-    assert_eq!(rt_heap.live_count(), 0);
+    // Nothing about the *program* is reclaimable — its cells are permanently
+    // rooted by `exec` — so a post-run `live_count() == 0` is no longer the
+    // right claim. What this test guards is `kept`'s survival *during* the
+    // loop, which the `(car kept)` assertion above already proves under a
+    // collection at every allocation.
 }
 
 // ---- global definitions: defvar / defconstant ------------------------------
@@ -820,27 +813,36 @@ fn todo_panics() {
 
 // ---- two-tier binding slots (Sexpr/RtValue unification Stage 6a) -------------
 
-/// Shared harness for the heap-cell binding tests below: read/check `src`
-/// against a roomy heap (with the prelude, for `dotimes`), then execute
-/// against a tiny `rt_cells`-cell heap so the churn forces repeated
-/// collections — any `Sexpr`-typed binding not protected by its heap cell
-/// (`Slot::Heap` / `Heap::alloc_cell`'s registry) would be corrupted.
-fn eval_under_gc_pressure(src: &str, rt_cells: usize) -> Value {
-    let mut src_heap = Heap::with_capacity(1 << 16);
+/// Shared harness for the heap-cell binding tests below: check and run `src`
+/// (with the prelude, for `dotimes`) against a collector that fires at every
+/// single `cons` — any binding not protected by its heap cell
+/// (`Heap::alloc_cell`'s registry) would be corrupted.
+///
+/// `gc_stress` rather than a tiny arena. These tests used to read and check
+/// against a roomy heap and then execute against a two- or three-cell one, so
+/// that the churn forced repeated collections. That is no longer expressible:
+/// since the checker lowers code into cons cells, the checked program *is* cells
+/// in the heap it was checked against, and handing it to a second heap reads
+/// those cells through the wrong symbol/string tables. A three-cell heap could
+/// not hold the program at all. Stressing one heap is both the honest shape and
+/// strictly stronger pressure: a collection before *every* allocation, not just
+/// before the ones a small arena happens to block on.
+///
+/// Stress goes on *after* the prelude and island load, which are large and would
+/// otherwise dominate the runtime without testing anything this file is about.
+fn eval_under_gc_pressure(src: &str) -> Value {
+    let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let mut chk = Checker::new();
     let mut interp = Interp::new();
-    load_prelude(&mut src_heap, &mut chk, &mut interp);
-    load_compiler(&mut src_heap, &mut chk, &mut interp);
-    let vs = r.read_all(&mut src_heap, src).expect("read failed");
-    let tls: Vec<_> = vs
-        .into_iter()
-        .map(|v| chk.check_form(&mut src_heap, &interp, v).expect("check failed"))
-        .collect();
-    let mut rt_heap = Heap::with_capacity(rt_cells);
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    h.set_gc_stress(true);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for tl in tls {
-        if let Some(val) = interp.exec(&mut rt_heap, tl).expect("eval failed") {
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
         }
     }
@@ -856,7 +858,7 @@ fn setf_on_a_sexpr_binding_survives_gc_and_releases_the_old_value() {
                  (setf s (cons (Int 5) (Nil))) \
                  (dotimes (i 40) (cons (Int 2) (Nil))) \
                  (car s))";
-    assert_eq!(eval_under_gc_pressure(src, 3), Value::Int(5));
+    assert_eq!(eval_under_gc_pressure(src), Value::Int(5));
 }
 
 #[test]
@@ -867,7 +869,7 @@ fn a_sexpr_car_bound_sexpr_survives_gc_pressure() {
     let src = "(let ((s (sexpr-cons (Int 8) (Nil)))) \
                  (let ((h (sexpr-car s))) \
                    (dotimes (i 40) (sexpr-cons (Int 2) (Nil))) h))";
-    assert_eq!(eval_under_gc_pressure(src, 4), Value::Int(8));
+    assert_eq!(eval_under_gc_pressure(src), Value::Int(8));
 }
 
 #[test]
@@ -875,7 +877,7 @@ fn a_defvar_sexpr_global_survives_gc_pressure_across_forms() {
     let src = "(defvar (g Sexpr) (sexpr-cons (Int 3) (Nil))) \
                (dotimes (i 40) (sexpr-cons (Int 2) (Nil))) \
                (sexpr-car g)";
-    assert_eq!(eval_under_gc_pressure(src, 3), Value::Int(3));
+    assert_eq!(eval_under_gc_pressure(src), Value::Int(3));
 }
 
 #[test]
@@ -890,7 +892,7 @@ fn a_lambda_captured_sexpr_binding_survives_gc_pressure() {
                  (let ((f (lambda () Sexpr (car s)))) \
                    (dotimes (i 200) (cons (Int 2) (Nil))) \
                    (f)))";
-    assert_eq!(eval_under_gc_pressure(src, 48), Value::Int(6));
+    assert_eq!(eval_under_gc_pressure(src), Value::Int(6));
 }
 
 // ---- heap-boxed closures (Sexpr/RtValue unification Stage 6b) ----------------
@@ -907,7 +909,7 @@ fn an_unnamed_callee_survives_argument_evaluation_under_gc_pressure() {
                  (let ((f (mk (sexpr-cons (Int 4) (Nil))))) \
                    (dotimes (i 200) (sexpr-cons (Int 2) (Nil))) \
                    (f 0)))";
-    assert_eq!(eval_under_gc_pressure(src, 48), Value::Int(4));
+    assert_eq!(eval_under_gc_pressure(src), Value::Int(4));
 }
 
 #[test]
@@ -922,7 +924,7 @@ fn labels_siblings_mutually_recurse_under_gc_pressure() {
                         (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1))))) \
                  (dotimes (i 200) (cons (Int 2) (Nil))) \
                  (if (is-even 10) (Int 1) (Int 0)))";
-    assert_eq!(eval_under_gc_pressure(src, 64), Value::Int(1));
+    assert_eq!(eval_under_gc_pressure(src), Value::Int(1));
 }
 
 #[test]

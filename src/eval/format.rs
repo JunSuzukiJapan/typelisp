@@ -1862,7 +1862,7 @@ impl Renderer {
                 let name = enums
                     .get(&type_path)
                     .and_then(|d| d.variants.get(variant))
-                    .map(|v| v.name.clone())
+                    .map(|(n, _)| n.clone())
                     .unwrap_or_else(|| "<unknown-variant>".to_string());
                 if heap.enum_field_count(id) == 0 {
                     out.push_str(&name);

@@ -1,8 +1,8 @@
-//! The type checker: read `Sexpr` -> typed AST, with checking against the
-//! built-in `Option<T>` / `Sexpr` data types and (later) user-defined ones.
+//! The type checker: read `Sexpr` -> cons-cell core IR, with checking against
+//! the built-in `Option<T>` / `Sexpr` data types and user-defined ones.
 //!
 //! See [`checker::Checker`] for the entry point. The checker produces a
-//! [`ast::Typed`] tree that the interpreter (step 4) walks.
+//! cons-cell core IR ([`core`]) that the interpreter (step 4) walks.
 
 pub mod ast;
 pub mod core;
@@ -12,9 +12,9 @@ pub mod checker;
 pub mod locate;
 pub mod semantic;
 
-pub use ast::{Arm, CompileTarget, Expr, LabelDef, MacroLambda, Pattern, QuotedSexpr, Ref, Typed};
+pub use ast::{CompileTarget, Pattern, Ref};
 pub use registry::{AdtDef, AdtKind, AssocFn, DefLocs, Docs, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
-pub use checker::{Checker, MacroExpander, RedefPolicy, TopLevel, MONO_BUNDLE_MODULE};
+pub use checker::{Checker, MacroExpander, MacroLambda, RedefPolicy, TopLevelForm, MONO_BUNDLE_MODULE};
 pub use locate::{
     completion_candidates, completion_locals, definition_target, doc_for, hover_text, locate_node, CompletionCandidate,
     CompletionKind,

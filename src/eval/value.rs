@@ -37,12 +37,6 @@ impl Slot {
         Slot(id)
     }
 
-    /// The cell this binding lives in — for the JIT, which hands compiled
-    /// code the cell directly so a capture is shared rather than copied.
-    pub fn cell(&self) -> &Rc<BoxId> {
-        &self.0
-    }
-
     /// The binding's current value.
     pub fn get(&self, heap: &Heap) -> Value {
         heap.cell_get(*self.0)

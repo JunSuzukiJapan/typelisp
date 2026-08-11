@@ -6,9 +6,10 @@
 //!   * the accounting invariant `free + live == capacity` holds after every op;
 //!   * every unreachable cell is reclaimed (including cycles — which reference
 //!     counting would leak);
-//!   * the arena never grows *by default* (exhaustion is an error, not a silent
-//!     realloc), and when growth is explicitly permitted it appends a chunk
-//!     without invalidating a single existing cons pointer;
+//!   * the arena grows only up to a bounded ceiling (past it, exhaustion is an
+//!     error rather than a silent climb toward an OOM kill), growth is refusable
+//!     outright, and a growth appends a chunk without invalidating a single
+//!     existing cons pointer;
 //!   * freed cells are reused;
 //!   * GC handles deep/long structures without a native-stack overflow.
 //!
@@ -259,11 +260,20 @@ fn deep_list_marks_without_stack_overflow() {
     assert_accounting(&h);
 }
 
-// ---- exhaustion (never grows) -------------------------------------------
+// ---- exhaustion ----------------------------------------------------------
 
+/// A heap told not to grow errors rather than growing.
+///
+/// `set_growth_limit(0)` is explicit here because growth is the *default* now
+/// (`Heap::GROWTH_FACTOR`): once the checker lowers code into cons cells, the
+/// program itself lives in the heap, so no caller can pick an initial capacity
+/// that is known to suffice — it depends on the size of a program not yet read.
+/// Initial capacity means "allocate this much up front" and the ceiling means
+/// "past here, call it a leak". A test that wants a fixed arena says so.
 #[test]
-fn exhaustion_errors_when_everything_is_rooted() {
+fn exhaustion_errors_when_growth_is_refused() {
     let mut h = Heap::with_capacity(3);
+    h.set_growth_limit(0);
     for i in 0..3 {
         let c = h.cons(Value::Int(i), Value::Empty).unwrap();
         h.push_root(c);
@@ -278,6 +288,8 @@ fn exhaustion_errors_when_everything_is_rooted() {
     assert_accounting(&h);
 }
 
+/// Growth is a last resort, never a first one: a collection runs first, and if
+/// it frees anything the arena stays the size it was.
 #[test]
 fn exhaustion_triggers_gc_then_succeeds_when_garbage_exists() {
     let mut h = Heap::with_capacity(3);
@@ -293,18 +305,48 @@ fn exhaustion_triggers_gc_then_succeeds_when_garbage_exists() {
     assert_accounting(&h);
 }
 
-// ---- opt-in bounded growth ----------------------------------------------
+// ---- bounded growth ------------------------------------------------------
 
+/// The default ceiling: a fresh heap may grow, up to `GROWTH_FACTOR` times the
+/// capacity it was asked for, and `0` turns growth off entirely.
 #[test]
-fn growth_is_refused_until_a_limit_is_set() {
-    let mut h = Heap::with_capacity(2);
+fn growth_is_permitted_by_default_and_bounded() {
+    let h = Heap::with_capacity(1000);
+    assert_eq!(h.growth_limit(), 1000 * typelisp_mem::heap::GROWTH_FACTOR, "growth must be on by default");
+
+    let mut off = Heap::with_capacity(2);
+    off.set_growth_limit(0);
     for i in 0..2 {
-        let c = h.cons(Value::Int(i), Value::Empty).unwrap();
-        h.push_root(c);
+        let c = off.cons(Value::Int(i), Value::Empty).unwrap();
+        off.push_root(c);
     }
-    assert_eq!(h.growth_limit(), 0, "growth must be off by default");
-    assert!(matches!(h.cons(Value::Int(9), Value::Empty), Err(Error::HeapExhausted)));
-    assert_eq!(h.capacity(), 2);
+    assert!(matches!(off.cons(Value::Int(9), Value::Empty), Err(Error::HeapExhausted)));
+    assert_eq!(off.capacity(), 2);
+    assert_accounting(&off);
+}
+
+/// A runaway still stops, loudly, at the default ceiling — which is what makes
+/// the ceiling a leak detector rather than decoration. Without it a rooting bug
+/// would grow the arena until the OS killed the process, and an OOM kill says
+/// nothing about which allocation was at fault.
+#[test]
+fn a_runaway_stops_at_the_default_ceiling() {
+    let mut h = Heap::with_capacity(4);
+    let ceiling = h.growth_limit();
+    // Every cell rooted, so no collection can ever reclaim one.
+    let mut n = 0u64;
+    loop {
+        match h.cons(Value::Int(0), Value::Empty) {
+            Ok(c) => {
+                h.push_root(c);
+                n += 1;
+                assert!(n <= ceiling as u64 + 1, "grew past the ceiling without erroring");
+            }
+            Err(Error::HeapExhausted) => break,
+            other => panic!("expected HeapExhausted at the ceiling, got {:?}", other),
+        }
+    }
+    assert!(h.capacity() <= ceiling, "capacity {} exceeded the ceiling {}", h.capacity(), ceiling);
     assert_accounting(&h);
 }
 
