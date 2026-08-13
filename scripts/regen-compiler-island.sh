@@ -5,8 +5,9 @@
 # artifact matches. Interp-closure removal Stage 3.
 #
 # Also run it after changing an `llvm-*` builder (eval_llvm_builtin_method):
-# that changes the emitted IR without changing SOURCE, and no test detects it
-# — the freshness hash covers SOURCE only.
+# that changes the emitted IR without changing SOURCE. The freshness hash
+# covers SOURCE only and won't notice, but
+# `the_committed_island_matches_a_fresh_build` compares the built bytes.
 #
 #   scripts/regen-compiler-island.sh
 #

@@ -22,18 +22,22 @@
 //! is worth a reader pass, and why `prelude`'s fasl cache still uses the
 //! byte-based [`crate::fasl::source_hash`] instead.
 //!
-//! **That guard covers one of the artifact's two inputs.** The bitcode is a
+//! **That hash covers one of the artifact's two inputs.** The bitcode is a
 //! compilation of `SOURCE` *by the Rust-side LLVM builders*
 //! (`eval_llvm_builtin_method`), so changing a builder changes the artifact
-//! just as changing `SOURCE` does — and nothing detects it. Regenerating after
-//! Stage D made this visible: with `SOURCE` untouched, the emitted indirect
-//! apply went from a `rt_closure_fnptr` + env-loop + indirect-call sequence to
-//! a single `rt_apply_any` call, and the committed `.bc` had been carrying the
-//! old one. Harmless there — a program compiled at runtime gets its IR from
-//! the *current* Rust builders, so only the island's own bodies lagged, and
-//! their callees are all compiled — but the general shape is worth knowing:
-//! this hash answers "does the artifact match the source", never "does it
-//! match the compiler that built it". Regenerate after touching a builder.
+//! just as changing `SOURCE` does. Regenerating after Stage D made this
+//! visible: with `SOURCE` untouched, the emitted indirect apply went from a
+//! `rt_closure_fnptr` + env-loop + indirect-call sequence to a single
+//! `rt_apply_any` call, and the committed `.bc` had been carrying the old one
+//! with nothing complaining.
+//!
+//! The other input is covered by comparing the *output* instead of guessing at
+//! inputs: `the_committed_island_matches_a_fresh_build`
+//! (`tests/island_artifacts_test.rs`) rebuilds the bitcode and diffs the
+//! bytes. That works because regeneration is a fixpoint — this function
+//! installs the committed `.bc` and drives *its* `compile-function`, yet what
+//! gets emitted is decided by `SOURCE` and the Rust builders rather than by
+//! which generation is driving, so building from the result reproduces it.
 //!
 //! Building this installs the *committed* (previous) `.bc` first and drives
 //! its **native** `compile-function` to emit each defun's IR — the snapshot

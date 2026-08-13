@@ -6,8 +6,9 @@
 //!
 //! Also re-run it after changing an `llvm-*` builder
 //! (`eval_llvm_builtin_method`), which changes the emitted IR without
-//! changing `SOURCE`. **Nothing detects that** — the freshness hash covers
-//! `SOURCE` only. See `compile::bootstrap`'s module doc comment.
+//! changing `SOURCE`. The freshness *hash* covers `SOURCE` only and will not
+//! notice; `the_committed_island_matches_a_fresh_build` compares the built
+//! bytes and will. See `compile::bootstrap`'s module doc comment.
 //!
 //! Paths are resolved from `CARGO_MANIFEST_DIR` (this crate's own root),
 //! never hardcoded — see the project's policy on machine-specific absolute
