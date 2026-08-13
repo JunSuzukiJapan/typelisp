@@ -16,6 +16,7 @@ use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern, Ref};
 use super::core::{self, Checked, Items};
+use super::forms;
 use super::repr::Repr;
 use super::registry::{AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, VarInfo, Variant};
 
@@ -723,36 +724,7 @@ impl Checker {
     // which keeps each finished field rooted until the node is assembled — see
     // `check::core`'s module doc comment for why that is not optional.
 
-    /// `(var SYM)` — a reference to a local binding, by symbol identity.
-    /// **Returns a rooted form** — see [`Self::rooted`].
-    ///
-    /// Self-rooting, unlike most builders, because a `var`/`global` node is the
-    /// one kind routinely built *ahead* of the node that will hold it and then
-    /// kept in a Rust local while that node is assembled: it is the receiver of
-    /// a method call (`try_field_access`, `check_field_set`,
-    /// `check_setf_call_place`) or of a `sexpr` retype. `assoc_form` allocates a
-    /// type path, a method symbol, a `home` list, a return representation and
-    /// argument representations before `Items::extend` finally pushes the
-    /// receiver — so an unrooted receiver is collected and its cell recycled
-    /// into one of those, silently replacing `(var q)` with whatever was built
-    /// next. Rooting here rather than at each call site makes the rule
-    /// impossible to forget at the next one; the extra root-stack entry on the
-    /// ordinary path costs nothing, since `check_form_at`'s `truncate_roots`
-    /// releases them all at once regardless of how many there were.
-    fn var_form(&self, heap: &mut Heap, name: &str) -> Result<Value, Error> {
-        let sym = heap.intern_symbol(name);
-        let form = core::tagged(heap, "var", &[sym])?;
-        Ok(self.rooted(heap, form))
-    }
 
-    /// `(set SYM FORM)` — assignment to a local binding.
-    fn set_form(&self, heap: &mut Heap, name: &str, value: Value) -> Result<Value, Error> {
-        let mut f = Items::new(heap);
-        let sym = f.heap().intern_symbol(name);
-        f.push(sym);
-        f.push(value);
-        f.finish("set")
-    }
 
     /// `(global (WRITTEN...) (HOME...) PATH REPR)`.
     ///
@@ -766,27 +738,27 @@ impl Checker {
     /// see there.
     fn global_form(&self, heap: &mut Heap, r: &Ref, ty: &Type) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let written = sym_list(f.heap(), &r.written)?;
+        let written = forms::sym_list(f.heap(), &r.written)?;
         f.push(written);
-        let home = sym_list(f.heap(), &r.home)?;
+        let home = forms::sym_list(f.heap(), &r.home)?;
         f.push(home);
-        let path = path_form(f.heap(), &r.resolved);
+        let path = forms::path_form(f.heap(), &r.resolved);
         f.push(path);
         let repr = self.repr_form(f.heap(), ty)?;
         f.push(repr);
         let form = f.finish("global")?;
-        Ok(self.rooted(heap, form))
+        Ok(forms::rooted(heap, form))
     }
 
     /// `(set-global (WRITTEN...) (HOME...) PATH REPR FORM)` — see
     /// [`Self::global_form`] for the name triple.
     fn set_global_form(&self, heap: &mut Heap, r: &Ref, ty: &Type, value: Value) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let written = sym_list(f.heap(), &r.written)?;
+        let written = forms::sym_list(f.heap(), &r.written)?;
         f.push(written);
-        let home = sym_list(f.heap(), &r.home)?;
+        let home = forms::sym_list(f.heap(), &r.home)?;
         f.push(home);
-        let path = path_form(f.heap(), &r.resolved);
+        let path = forms::path_form(f.heap(), &r.resolved);
         f.push(path);
         let repr = self.repr_form(f.heap(), ty)?;
         f.push(repr);
@@ -814,10 +786,6 @@ impl Checker {
         f.finish("let")
     }
 
-    /// `(if C T E)`.
-    fn if_form(&self, heap: &mut Heap, cond: Value, then: Value, els: Value) -> Result<Value, Error> {
-        core::tagged(heap, "if", &[cond, then, els])
-    }
 
     /// `(call (WRITTEN...) (HOME...) PATH (REPR...) ARG...)` — a call to a free
     /// function.
@@ -827,11 +795,11 @@ impl Checker {
     /// around each argument as it crosses into a compiled frame.
     fn call_form(&self, heap: &mut Heap, r: &Ref, args: &[Checked]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let written = sym_list(f.heap(), &r.written)?;
+        let written = forms::sym_list(f.heap(), &r.written)?;
         f.push(written);
-        let home = sym_list(f.heap(), &r.home)?;
+        let home = forms::sym_list(f.heap(), &r.home)?;
         f.push(home);
-        let path = path_form(f.heap(), &r.resolved);
+        let path = forms::path_form(f.heap(), &r.resolved);
         f.push(path);
         let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
         f.push(reprs);
@@ -857,12 +825,12 @@ impl Checker {
         args: &[Checked],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let ty_path = path_form(f.heap(), type_name);
+        let ty_path = forms::path_form(f.heap(), type_name);
         f.push(ty_path);
         let m = f.heap().intern_symbol(method);
         f.push(m);
         f.push(Value::Bool(instance));
-        let home = sym_list(f.heap(), home)?;
+        let home = forms::sym_list(f.heap(), home)?;
         f.push(home);
         let ret = self.repr_form(f.heap(), ret)?;
         f.push(ret);
@@ -881,11 +849,11 @@ impl Checker {
     /// it needs no flag of its own.
     fn fnref_form(&self, heap: &mut Heap, r: &Ref, params: &[Type]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let written = sym_list(f.heap(), &r.written)?;
+        let written = forms::sym_list(f.heap(), &r.written)?;
         f.push(written);
-        let home = sym_list(f.heap(), &r.home)?;
+        let home = forms::sym_list(f.heap(), &r.home)?;
         f.push(home);
-        let path = path_form(f.heap(), &r.resolved);
+        let path = forms::path_form(f.heap(), &r.resolved);
         f.push(path);
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
@@ -903,11 +871,11 @@ impl Checker {
         params: &[Type],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let ty_path = path_form(f.heap(), type_name);
+        let ty_path = forms::path_form(f.heap(), type_name);
         f.push(ty_path);
         let m = f.heap().intern_symbol(method);
         f.push(m);
-        let home = sym_list(f.heap(), home)?;
+        let home = forms::sym_list(f.heap(), home)?;
         f.push(home);
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
@@ -978,7 +946,7 @@ impl Checker {
         args: &[Value],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = path_form(f.heap(), type_name);
+        let path = forms::path_form(f.heap(), type_name);
         f.push(path);
         f.push(Value::Int(variant as i64));
         f.push(Value::Bool(mutable));
@@ -1084,7 +1052,7 @@ impl Checker {
             }
             Pattern::Ctor { type_name, variant, args, field_types, downcast, .. } => {
                 let mut f = Items::new(heap);
-                let tp = path_form(f.heap(), type_name);
+                let tp = forms::path_form(f.heap(), type_name);
                 f.push(tp);
                 f.push(Value::Int(*variant as i64));
                 f.push(Value::Bool(*downcast));
@@ -1108,14 +1076,14 @@ impl Checker {
                     })?,
                 };
                 let mut f = Items::new(heap);
-                let tp = path_form(f.heap(), &path);
+                let tp = forms::path_form(f.heap(), &path);
                 f.push(tp);
                 let one = self.pattern_form(f.heap(), sub)?;
                 f.push(one);
                 f.finish("pat-typetest")?
             }
         };
-        Ok(self.rooted(heap, form))
+        Ok(forms::rooted(heap, form))
     }
 
     /// `(lambda ((SYM REPR)...) RET-REPR BODY...)`.
@@ -1197,13 +1165,13 @@ impl Checker {
         let mut f = Items::new(heap);
         let key = f.heap().alloc_string(concrete_key.to_string());
         f.push(key);
-        let tp = path_form(f.heap(), trait_path);
+        let tp = forms::path_form(f.heap(), trait_path);
         f.push(tp);
         let slot_list = vtable_form(f.heap(), slots)?;
         f.push(slot_list);
         let mut sup = Items::new(f.heap());
         for (trait_path, slots) in supers {
-            let tp = path_form(sup.heap(), trait_path);
+            let tp = forms::path_form(sup.heap(), trait_path);
             let mut one = Items::new(sup.heap());
             one.push(tp);
             let sl = vtable_form(one.heap(), slots)?;
@@ -1219,103 +1187,15 @@ impl Checker {
         f.finish("dyn-new")
     }
 
-    /// `(quote DATUM)` — the datum, unevaluated.
-    ///
-    /// The one place user data appears in a lowered program, which is what
-    /// keeps it from ever being read as a node. The datum is the reader's own
-    /// value, kept as-is: it is a heap value reachable through the node, so
-    /// unlike the old `QuotedSexpr` there is nothing to copy into
-    /// heap-independent Rust memory (the collector could not see a raw pointer
-    /// baked into an `Expr`).
-    fn quote_form(&self, heap: &mut Heap, datum: Value) -> Result<Value, Error> {
-        core::tagged(heap, "quote", &[datum])
-    }
 
-    /// `(quote ())` — the empty list as a `sexpr` datum, the base case every
-    /// list construction ends in.
-    fn quote_nil(&self, heap: &mut Heap) -> Result<Value, Error> {
-        self.quote_form(heap, Value::Empty)
-    }
 
-    /// `(str "TEXT")` — a string literal node the checker synthesizes rather
-    /// than reads: a `pprint` layout name, a logical block's default affix.
-    fn str_lit_form(&self, heap: &mut Heap, text: &str) -> Result<Value, Error> {
-        let v = heap.alloc_string(text.to_string());
-        let form = core::tagged(heap, "str", &[v])?;
-        Ok(self.rooted(heap, form))
-    }
 
-    /// Root a finished node before handing it back, and leave it rooted.
-    ///
-    /// The same contract [`Self::check_at`] follows for every node it produces:
-    /// released in one place, by `check_form_at`'s `truncate_roots` at the end
-    /// of the top-level form. A helper that builds a node under an `Items` or
-    /// `RootScope` has *unrooted* it by the time it returns — the scope pops on
-    /// drop — so a caller that stores the node in a `Vec` and then calls
-    /// another builder hands it to code that allocates first: `call_form`,
-    /// `assoc_form` and `apply_form` all cons their `sym_list`/`repr_forms`
-    /// *before* rooting their argument forms. That window is where the four
-    /// historical root leaks in this file lived.
-    fn rooted(&self, heap: &mut Heap, form: Value) -> Value {
-        heap.push_root(form);
-        form
-    }
 
-    /// `(panic FORM)` — diverges with the message the form evaluates to.
-    fn panic_form(&self, heap: &mut Heap, msg: Value) -> Result<Value, Error> {
-        core::tagged(heap, "panic", &[msg])
-    }
 
-    /// The node a *never-executed* position in an erased generic body lowers
-    /// to: `(panic (str "..."))`.
-    ///
-    /// The old AST's `TraitCall` node filled this slot. It was diagnostics-only —
-    /// the evaluator answered it with an internal error and the bridge with
-    /// `(unsupported "TraitCall")` — because the checker only builds it where a
-    /// `where`-bounded *type variable* is the receiver, and each specialization
-    /// re-checks the same site with the type concrete (resolving it to a real
-    /// `assoc`/`dyn-new`). Since a generic definition emits no body at all
-    /// (`(module PATH)` and nothing else), this node is discarded rather than
-    /// run; giving it the vocabulary's own diverging node keeps the "cannot be
-    /// reached" property expressible without a tag whose only meaning is
-    /// "unreachable", and preserves today's behavior — an abort naming the
-    /// method — if the property is ever violated.
-    fn erased_generic_form(&self, heap: &mut Heap, what: &str) -> Result<Value, Error> {
-        let msg = self.str_lit_form(
-            heap,
-            &format!("`{}` reached the evaluator — an erased generic body executed", what),
-        )?;
-        let mut s = RootScope::new(heap);
-        s.push_root(msg);
-        self.panic_form(&mut s, msg)
-    }
 
-    /// `(loop BODY...)` — loop forever, exited by `break`/`return`.
-    fn loop_form(&self, heap: &mut Heap, body: &[Value]) -> Result<Value, Error> {
-        core::tagged(heap, "loop", body)
-    }
 
-    /// `(break)` — leave the nearest enclosing loop with no value.
-    fn break_form(&self, heap: &mut Heap) -> Result<Value, Error> {
-        core::tagged(heap, "break", &[])
-    }
 
-    /// `(return)` / `(return FORM)` — leave the nearest enclosing loop.
-    fn return_form(&self, heap: &mut Heap, value: Option<Value>) -> Result<Value, Error> {
-        match value {
-            Some(v) => core::tagged(heap, "return", &[v]),
-            None => core::tagged(heap, "return", &[]),
-        }
-    }
 
-    /// `(dyn-upcast TRAIT FORM)`.
-    fn dyn_upcast_form(&self, heap: &mut Heap, to_trait: &Path, value: Value) -> Result<Value, Error> {
-        let mut f = Items::new(heap);
-        let tp = path_form(f.heap(), to_trait);
-        f.push(tp);
-        f.push(value);
-        f.finish("dyn-upcast")
-    }
 
     /// `(dyn-call TRAIT SYM SLOT ((TYPE SYM)...) (REPR...) ARG...)` — a call
     /// through a trait object's vtable, `args[0]` the receiver.
@@ -1334,7 +1214,7 @@ impl Checker {
         args: &[Checked],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let tp = path_form(f.heap(), trait_path);
+        let tp = forms::path_form(f.heap(), trait_path);
         f.push(tp);
         let m = f.heap().intern_symbol(method);
         f.push(m);
@@ -1347,12 +1227,6 @@ impl Checker {
         f.finish("dyn-call")
     }
 
-    /// `(dyn-value FORM)` — the concrete value inside a trait object, typed as
-    /// `sexpr` so `match`ing a trait object back down reuses the existing
-    /// downcast patterns.
-    fn dyn_value_form(&self, heap: &mut Heap, value: Value) -> Result<Value, Error> {
-        core::tagged(heap, "dyn-value", &[value])
-    }
 
     // ---- top-level form builders --------------------------------------
 
@@ -1370,7 +1244,7 @@ impl Checker {
         body: &[Value],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = path_form(f.heap(), name);
+        let path = forms::path_form(f.heap(), name);
         f.push(path);
         let ps = self.param_list_form(f.heap(), params)?;
         f.push(ps);
@@ -1405,7 +1279,7 @@ impl Checker {
         body: &[Value],
     ) -> Result<Value, Error> {
         if !type_params.is_empty() {
-            return self.module_form(heap, name, &[]);
+            return forms::module_form(heap, name, &[]);
         }
         self.defun_form(heap, name, params, ret, public, body)
     }
@@ -1426,7 +1300,7 @@ impl Checker {
         body: &[Value],
     ) -> Result<Value, Error> {
         if !type_params.is_empty() {
-            return self.module_form(heap, type_name, &[]);
+            return forms::module_form(heap, type_name, &[]);
         }
         self.defmethod_form(heap, type_name, method, instance, params, ret, public, body)
     }
@@ -1449,7 +1323,7 @@ impl Checker {
         body: &[Value],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = path_form(f.heap(), type_name);
+        let path = forms::path_form(f.heap(), type_name);
         f.push(path);
         let m = f.heap().intern_symbol(method);
         f.push(m);
@@ -1463,55 +1337,6 @@ impl Checker {
         f.finish("defmethod")
     }
 
-    /// `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...)) PUBLIC BODY...)`.
-    ///
-    /// A macro is an ordinary callable body — expanding it is calling it — so
-    /// the only extra structure is how the non-required regions of its lambda
-    /// list are filled at expansion time.
-    fn defmacro_form(
-        &self,
-        heap: &mut Heap,
-        name: &Path,
-        params: &[String],
-        rest: bool,
-        lambda: &MacroLambda,
-        public: bool,
-        body: &[Value],
-    ) -> Result<Value, Error> {
-        let mut f = Items::new(heap);
-        let path = path_form(f.heap(), name);
-        f.push(path);
-        let ps = sym_list(f.heap(), params)?;
-        f.push(ps);
-        f.push(Value::Bool(rest));
-        let lam = {
-            let mut l = Items::new(f.heap());
-            l.push(Value::Int(lambda.required as i64));
-            let mut opts = Items::new(l.heap());
-            for default in &lambda.optionals {
-                let one = core::list(opts.heap(), default)?;
-                opts.push(one);
-            }
-            let opts = opts.finish_list()?;
-            l.push(opts);
-            let mut keys = Items::new(l.heap());
-            for (name, default) in &lambda.keys {
-                let mut k = Items::new(keys.heap());
-                let sym = k.heap().intern_symbol(name);
-                k.push(sym);
-                k.extend(default.iter().copied());
-                let one = k.finish_list()?;
-                keys.push(one);
-            }
-            let keys = keys.finish_list()?;
-            l.push(keys);
-            l.finish_list()?
-        };
-        f.push(lam);
-        f.push(Value::Bool(public));
-        f.extend(body.iter().copied());
-        f.finish("defmacro")
-    }
 
     /// `(defvar PATH REPR MUTABLE PUBLIC FORM)` — a global variable
     /// (`mutable`) or constant.
@@ -1525,7 +1350,7 @@ impl Checker {
         value: Value,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = path_form(f.heap(), name);
+        let path = forms::path_form(f.heap(), name);
         f.push(path);
         let r = self.repr_form(f.heap(), ty)?;
         f.push(r);
@@ -1540,7 +1365,7 @@ impl Checker {
     /// from.
     fn defstruct_form(&self, heap: &mut Heap, name: &Path, fields: &[Type]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = path_form(f.heap(), name);
+        let path = forms::path_form(f.heap(), name);
         f.push(path);
         let reprs = self.repr_forms(f.heap(), fields.to_vec())?;
         f.push(reprs);
@@ -1551,10 +1376,10 @@ impl Checker {
     /// variant's field representations.
     fn defenum_form(&self, heap: &mut Heap, name: &Path, variants: &[Variant]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = path_form(f.heap(), name);
+        let path = forms::path_form(f.heap(), name);
         f.push(path);
         let names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
-        let names = sym_list(f.heap(), &names)?;
+        let names = forms::sym_list(f.heap(), &names)?;
         f.push(names);
         let mut vs = Items::new(f.heap());
         for v in variants {
@@ -1566,86 +1391,11 @@ impl Checker {
         f.finish("defenum")
     }
 
-    /// `(module PATH FORM...)` — a namespace and the forms defined in it.
-    ///
-    /// Also the grouping device for a definition that expands into several
-    /// (a `defstruct` and its accessors, a batch of monomorphized
-    /// specializations): every nested definition's own name is already
-    /// absolute, so the wrapper only has to ensure the namespace exists.
-    fn module_form(&self, heap: &mut Heap, path: &Path, body: &[Value]) -> Result<Value, Error> {
-        let mut f = Items::new(heap);
-        let p = path_form(f.heap(), path);
-        f.push(p);
-        f.extend(body.iter().copied());
-        f.finish("module")
-    }
 
-    /// `(use ALIAS TARGET)`.
-    fn use_form(&self, heap: &mut Heap, alias: &Path, target: &Path) -> Result<Value, Error> {
-        let mut f = Items::new(heap);
-        let a = path_form(f.heap(), alias);
-        f.push(a);
-        let t = path_form(f.heap(), target);
-        f.push(t);
-        f.finish("use")
-    }
 
-    /// `(load "PATH")` — recorded, not performed: the checker cannot do file
-    /// I/O, so the driver reads this and loads the file before checking on.
-    fn load_form(&self, heap: &mut Heap, path: &str) -> Result<Value, Error> {
-        let s = heap.alloc_string(path.to_string());
-        core::tagged(heap, "load", &[s])
-    }
 
-    /// `(expr FORM)` — a bare top-level expression, to be evaluated.
-    fn expr_form(&self, heap: &mut Heap, form: Value) -> Result<Value, Error> {
-        core::tagged(heap, "expr", &[form])
-    }
 
-    /// `(compile-fn (fn (WRITTEN...) (HOME...) PATH))` or
-    /// `(compile-fn (method PATH SYM (HOME...)))`.
-    fn compile_fn_form(&self, heap: &mut Heap, target: &CompileTarget) -> Result<Value, Error> {
-        let payload = match target {
-            CompileTarget::Fn(r) => {
-                let mut f = Items::new(heap);
-                let written = sym_list(f.heap(), &r.written)?;
-                f.push(written);
-                let home = sym_list(f.heap(), &r.home)?;
-                f.push(home);
-                let path = path_form(f.heap(), &r.resolved);
-                f.push(path);
-                f.finish("fn")?
-            }
-            CompileTarget::Method { type_name, method, home } => {
-                let mut f = Items::new(heap);
-                let tp = path_form(f.heap(), type_name);
-                f.push(tp);
-                let m = f.heap().intern_symbol(method);
-                f.push(m);
-                let home = sym_list(f.heap(), home)?;
-                f.push(home);
-                f.finish("method")?
-            }
-        };
-        core::tagged(heap, "compile-fn", &[payload])
-    }
 
-    /// A `Never`-typed placeholder for a sub-expression that failed to check.
-    ///
-    /// Reuses `panic` (already `Never`-typed, already handled by every
-    /// downstream consumer) rather than adding a tag of its own, so recovery
-    /// needs no changes outside the checker. `Type::Never` unifies with any
-    /// expected type, so a hole flowing into a typed position never produces a
-    /// cascade of follow-on errors. `loc` is recorded on the node so
-    /// `locate_node` can still land the cursor on it for completion/hover.
-    fn hole(&self, heap: &mut Heap, loc: Option<Loc>) -> Result<Checked, Error> {
-        let msg = heap.alloc_string("<check-error>".to_string());
-        let mut f = Items::new(heap);
-        let text = core::tagged(f.heap(), "str", &[msg])?;
-        f.push(text);
-        let form = f.finish_at("panic", loc)?;
-        Ok(Checked::new(form, Type::Never))
-    }
 
     /// The single catch helper used at expression-level recovery boundaries: a
     /// pass-through in strict mode, and in `recover` mode it records a failing
@@ -1655,7 +1405,7 @@ impl Checker {
         match r {
             Err(e) if self.recover => {
                 self.push_recovered(e, loc.clone());
-                self.hole(heap, loc)
+                forms::hole(heap, loc)
             }
             other => other,
         }
@@ -1810,7 +1560,7 @@ impl Checker {
         // Rust local, the primary form would be collected out from under the
         // bundle — and, with the cell recycled, the bundle would end up holding a
         // *fragment* of it. Released with everything else by `truncate_roots`.
-        let primary = primary.map(|tl| self.rooted(heap, tl));
+        let primary = primary.map(|tl| forms::rooted(heap, tl));
         // Specialization-drain recovery boundary (B6): the primary form checked
         // fine, but instantiating a generic it calls failed. In `recover` mode
         // keep the primary form's typed tree (it's what completion/hover want)
@@ -1849,7 +1599,7 @@ impl Checker {
             Ok((specs, tl)) if specs.is_empty() => Ok(tl),
             Ok((mut specs, tl)) => {
                 specs.push(tl);
-                self.module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &specs)
+                forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &specs)
             }
             Err(e) => {
                 self.spec_pending.borrow_mut().clear();
@@ -1872,8 +1622,8 @@ impl Checker {
             Err(e) if self.recover => {
                 self.spec_pending.borrow_mut().clear();
                 self.errors.borrow_mut().push(e);
-                let hole = self.hole(heap, loc)?;
-                self.expr_form(heap, hole.form)
+                let hole = forms::hole(heap, loc)?;
+                forms::expr_form(heap, hole.form)
             }
             other => other,
         };
@@ -1955,7 +1705,7 @@ impl Checker {
                 if elems.len() < 2 {
                     return;
                 }
-                let Ok(segs) = self.path_to_segs(heap, elems[1]) else { return };
+                let Ok(segs) = path_to_segs(heap, elems[1]) else { return };
                 self.enter_module(&segs);
                 for form in &elems[2..] {
                     self.predeclare_form(heap, *form);
@@ -1985,7 +1735,7 @@ impl Checker {
         // would let a forward call see an incomplete one, which is worse than
         // not resolving at all. Such a `defun` keeps the old
         // define-before-use requirement.
-        if self.params_declare_opt_key(heap, params_form)? {
+        if params_declare_opt_key(heap, params_form)? {
             return Ok(());
         }
         let fq_name = self.fq(&name);
@@ -2099,7 +1849,7 @@ impl Checker {
         // from the form itself (see `core::Checked`), so record it here — see
         // [`Self::expr_type`].
         self.expr_ty = Some(t.ty.clone());
-        self.expr_form(heap, t.form)
+        forms::expr_form(heap, t.form)
     }
 
     /// The type the last [`Self::check_form_at`] proved for its top-level
@@ -2625,7 +2375,7 @@ impl Checker {
         let (type_name, variant) = self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
         let field_tys = self.variant_field_tys(&type_name, variant, &[]);
         let form = self.construct_form(heap, &type_name, variant, false, &field_tys, &[e.form])?;
-        Ok(Checked::new(self.rooted(heap, form), sexpr_ty()))
+        Ok(Checked::new(forms::rooted(heap, form), sexpr_ty()))
     }
 
     /// Collects already-checked `&rest` elements into one `Sexpr` list
@@ -2640,7 +2390,7 @@ impl Checker {
         // `Sexpr`, built through the island cons layer.
         let cons_path = Path::root("sexpr-cons");
         let r = Ref::synthetic(cons_path);
-        let nil = self.quote_nil(heap)?;
+        let nil = forms::quote_nil(heap)?;
         let mut acc = Checked::new(nil, sexpr_ty());
         for item in items.into_iter().rev() {
             let mut s = RootScope::new(heap);
@@ -2650,7 +2400,7 @@ impl Checker {
             let form = self.call_form(&mut s, &r, &[item, acc])?;
             acc = Checked::new(form, sexpr_ty());
         }
-        Ok(Checked::new(self.rooted(heap, acc.form), acc.ty))
+        Ok(Checked::new(forms::rooted(heap, acc.form), acc.ty))
     }
 
     /// Resolve a bare (unqualified) type name by walking the ancestor chain
@@ -2937,7 +2687,7 @@ impl Checker {
         // exactly this reason; see `var_form`'s doc comment.
         let recv = if let Some(t) = env.get(recv_name) {
             let ty = t.clone();
-            match self.var_form(heap, recv_name) {
+            match forms::var_form(heap, recv_name) {
                 Ok(form) => Checked::new(form, ty),
                 Err(e) => return Some(Err(e)),
             }
@@ -3182,18 +2932,6 @@ impl Checker {
         Ok(())
     }
 
-    /// The lowercase segments of a module/use path (a symbol or a `Value::Path`).
-    fn path_to_segs(&self, heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
-        match v {
-            Value::Symbol(id) => Ok(vec![heap.symbol_name(id).to_string()]),
-            Value::Path(id) => Ok(heap
-                .path_segments(id)
-                .iter()
-                .map(|s| heap.symbol_name(*s).to_string())
-                .collect()),
-            _ => Err(Error::TypeError("expected a name or `::` path".into())),
-        }
-    }
 
     // ---- defun ------------------------------------------------------------
 
@@ -3206,7 +2944,7 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevelForm, Error> {
-        if parts.len() >= 2 && self.params_declare_opt_key(heap, parts[1])? {
+        if parts.len() >= 2 && params_declare_opt_key(heap, parts[1])? {
             return self.check_defun_opt_key(heap, interp, parts, parts_locs, public, def_loc);
         }
         self.check_defun_fixed(heap, interp, parts, parts_locs, public, def_loc)
@@ -3358,12 +3096,12 @@ impl Checker {
         let mut body_start = 3;
         let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
         if let Some(form) = parts.get(3) {
-            if self.is_where_clause(heap, *form)? {
+            if is_where_clause(heap, *form)? {
                 bounds = self.parse_where_clause(heap, *form)?;
                 body_start = 4;
             }
         }
-        let doc = self.take_leading_docstring(heap, parts, body_start);
+        let doc = take_leading_docstring(heap, parts, body_start);
         if doc.is_some() {
             body_start += 1;
         }
@@ -3486,23 +3224,6 @@ impl Checker {
         }
     }
 
-    /// Rebuild an `&optional`/`&key` default's checked form into *this* call
-    /// site's own cells — the read side of [`Self::check_opt_key_default`].
-    ///
-    /// A fresh subtree per site, not a shared one: the sites are independent
-    /// programs and a shared subtree would give them one identity. `decl_ty` is
-    /// the type the default was checked against, so it is the type the spliced
-    /// argument has (`OptKeyParam::effective_ty` is `decl_ty` exactly when a
-    /// default exists).
-    fn splice_default(
-        &self,
-        heap: &mut Heap,
-        default: &crate::fasl::OwnedForm,
-        decl_ty: &Type,
-    ) -> Result<Checked, Error> {
-        let form = crate::fasl::owned_to_value(heap, default)?;
-        Ok(Checked::new(self.rooted(heap, form), decl_ty.clone()))
-    }
 
     /// Parses a `defun` form's parameter list, return type, and optional
     /// `(where ...)` clause (`parts` = everything after the `defun` keyword),
@@ -3533,12 +3254,12 @@ impl Checker {
         let mut body_start = 3;
         let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
         if let Some(form) = parts.get(3) {
-            if self.is_where_clause(heap, *form)? {
+            if is_where_clause(heap, *form)? {
                 bounds = self.parse_where_clause(heap, *form)?;
                 body_start = 4;
             }
         }
-        let doc = self.take_leading_docstring(heap, parts, body_start);
+        let doc = take_leading_docstring(heap, parts, body_start);
         if doc.is_some() {
             body_start += 1;
         }
@@ -3627,15 +3348,15 @@ impl Checker {
             match req {
                 SpecRequest::Fn { .. } => {
                     let form = self.specialize_defun(heap, interp, &req)?;
-                    out.push(self.rooted(heap, form));
+                    out.push(forms::rooted(heap, form));
                 }
                 SpecRequest::Method { .. } => {
                     let form = self.specialize_method(heap, interp, &req)?;
-                    out.push(self.rooted(heap, form));
+                    out.push(forms::rooted(heap, form));
                 }
                 SpecRequest::Blanket { trait_path, target } => {
                     for form in self.materialize_blanket_impl(heap, interp, &trait_path, &target)? {
-                        out.push(self.rooted(heap, form));
+                        out.push(forms::rooted(heap, form));
                     }
                 }
             }
@@ -3802,17 +3523,17 @@ impl Checker {
             // any of those allocations can collect an unrooted form. (This arm
             // did not root, and `gc_stress` caught it as `push_root given freed
             // cell` inside `Items::push`.)
-            let self_var = self.var_form(heap, "self")?;
+            let self_var = forms::var_form(heap, "self")?;
             let mut s = RootScope::new(heap);
             s.push_root(self_var);
             let get = self.field_get_form(&mut s, self_var, index, &field_ty)?;
             s.push_root(get);
             self.defmethod_form(&mut s, type_fq, mangled, true, &[self_param], &field_ty, public, &[get])
         } else {
-            let self_var = self.var_form(heap, "self")?;
+            let self_var = forms::var_form(heap, "self")?;
             let mut s = RootScope::new(heap);
             s.push_root(self_var);
-            let value_var = self.var_form(&mut s, "value")?;
+            let value_var = forms::var_form(&mut s, "value")?;
             s.push_root(value_var);
             let set = self.field_set_form(&mut s, self_var, index, &field_ty, value_var)?;
             s.push_root(set);
@@ -3829,7 +3550,7 @@ impl Checker {
         mangled: &Path,
         public: bool,
     ) -> Result<TopLevelForm, Error> {
-        if self.params_declare_opt_key(heap, tmpl.parts[1])? {
+        if params_declare_opt_key(heap, tmpl.parts[1])? {
             return self.specialize_defun_body_opt_key(heap, interp, tmpl, mangled, public);
         }
         // `bounds` deliberately dropped: the type variables are concrete
@@ -3884,7 +3605,7 @@ impl Checker {
         let ret = self.parse_type_here_at(heap, tmpl.parts[2], None)?;
         let mut body_start = 3;
         if let Some(form) = tmpl.parts.get(3) {
-            if self.is_where_clause(heap, *form)? {
+            if is_where_clause(heap, *form)? {
                 body_start = 4;
             }
         }
@@ -3984,27 +3705,7 @@ impl Checker {
         }
     }
 
-    /// Whether `v` is a `(where ...)` clause (vs. an ordinary body form) —
-    /// `Checker::check_defun` peeks at this to decide whether to consume it.
-    fn is_where_clause(&self, heap: &Heap, v: Value) -> Result<bool, Error> {
-        Ok(matches!(v, Value::Cons(_))
-            && matches!(heap.list_to_vec(v)?.first(), Some(Value::Symbol(id)) if heap.symbol_name(*id) == "where"))
-    }
 
-    /// Peeks `parts[at]` for a leading docstring — CL's rule for `defun`/
-    /// `defmacro`/`defmethod`: a string literal right before the body is a
-    /// docstring only when at least one more body form follows it, since a
-    /// *lone* trailing string is the function's return value, not
-    /// documentation, and the two are otherwise indistinguishable. Used by
-    /// `Self::parse_defun_sig`, `Self::check_defun_opt_key`,
-    /// `Self::parse_defmethod_sig` and `Self::check_defmacro`, each of which
-    /// bumps its own `body_start` by one when this returns `Some`.
-    fn take_leading_docstring(&self, heap: &Heap, parts: &[Value], at: usize) -> Option<String> {
-        match parts.get(at) {
-            Some(Value::Str(id)) if parts.len() > at + 1 => Some(heap.string(*id).to_string()),
-            _ => None,
-        }
-    }
 
     /// `(where (Trait1 T1 (Assoc1 Concrete1)...) (Trait2 T2)...)`: trait
     /// bounds on a generic `defun`'s type parameters, keyed by parameter
@@ -4308,7 +4009,7 @@ impl Checker {
         // each (enforced via the running section rank below).
         let param_vals = heap.list_to_vec(parts[1])?;
         let (required_names, optionals, rest_name, key_specs) =
-            self.parse_macro_lambda_list(heap, &param_vals)?;
+            parse_macro_lambda_list(heap, &param_vals)?;
         let rest = rest_name.is_some();
 
         // `params` lists every binding name in expansion order — required,
@@ -4337,7 +4038,7 @@ impl Checker {
         if let Some(loc) = def_loc {
             self.reg.def_locs.macros.insert(fq_name.clone(), loc);
         }
-        let doc = self.take_leading_docstring(heap, parts, 2);
+        let doc = take_leading_docstring(heap, parts, 2);
         let body_start = if doc.is_some() { 3 } else { 2 };
         if let Some(doc) = doc {
             self.reg.docs.macros.insert(fq_name.clone(), doc);
@@ -4372,7 +4073,7 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&sexpr_ty))?;
         let lambda = MacroLambda { required: required_names.len(), optionals: opt_defaults, keys: key_defaults };
-        self.defmacro_form(heap, &fq_name, &params, rest, &lambda, public, &body)
+        forms::defmacro_form(heap, &fq_name, &params, rest, &lambda, public, &body)
     }
 
     /// Check one `&optional`/`&key` default-value form (or none) against
@@ -4404,64 +4105,6 @@ impl Checker {
     /// (`required &optional &rest &key`), each marker at most once, and that
     /// `&rest` names exactly one parameter. See [`Self::check_defmacro`].
     #[allow(clippy::type_complexity)]
-    fn parse_macro_lambda_list(
-        &self,
-        heap: &Heap,
-        param_vals: &[Value],
-    ) -> Result<(Vec<String>, Vec<(String, Option<Value>)>, Option<String>, Vec<(String, Option<Value>)>), Error> {
-        // Section rank: required=0, &optional=1, &rest=2, &key=3. A marker may
-        // only advance the rank forward, so each appears at most once and in
-        // order.
-        let mut rank = 0u8;
-        let mut required_names: Vec<String> = Vec::new();
-        let mut optionals: Vec<(String, Option<Value>)> = Vec::new();
-        let mut rest_name: Option<String> = None;
-        let mut keys: Vec<(String, Option<Value>)> = Vec::new();
-
-        for p in param_vals {
-            if let Value::Symbol(id) = p {
-                match heap.symbol_name(*id) {
-                    "&optional" => {
-                        if rank >= 1 {
-                            return Err(Error::TypeError("defmacro: &optional must precede &rest and &key, and appear once".into()));
-                        }
-                        rank = 1;
-                        continue;
-                    }
-                    "&rest" => {
-                        if rank >= 2 {
-                            return Err(Error::TypeError("defmacro: &rest must precede &key, and appear once".into()));
-                        }
-                        rank = 2;
-                        continue;
-                    }
-                    "&key" => {
-                        if rank >= 3 {
-                            return Err(Error::TypeError("defmacro: &key may appear only once".into()));
-                        }
-                        rank = 3;
-                        continue;
-                    }
-                    _ => {}
-                }
-            }
-            match rank {
-                0 => required_names.push(Self::macro_param_name(heap, *p, "required")?),
-                1 => optionals.push(Self::macro_opt_key_spec(heap, *p, "&optional")?),
-                2 => {
-                    if rest_name.is_some() {
-                        return Err(Error::TypeError("defmacro: &rest takes exactly one parameter name".into()));
-                    }
-                    rest_name = Some(Self::macro_param_name(heap, *p, "&rest")?);
-                }
-                _ => keys.push(Self::macro_opt_key_spec(heap, *p, "&key")?),
-            }
-        }
-        if rank == 2 && rest_name.is_none() {
-            return Err(Error::TypeError("defmacro: &rest must be followed by exactly one parameter name".into()));
-        }
-        Ok((required_names, optionals, rest_name, keys))
-    }
 
     /// A bare-symbol lambda-list parameter name (`required`/`&rest`).
     fn macro_param_name(heap: &Heap, v: Value, section: &str) -> Result<String, Error> {
@@ -4484,7 +4127,7 @@ impl Checker {
                         section
                     )));
                 }
-                let name = Self::macro_param_name(heap, items[0], section)?;
+                let name = Checker::macro_param_name(heap, items[0], section)?;
                 Ok((name, items.get(1).copied()))
             }
             _ => Err(Error::TypeError(format!(
@@ -4579,17 +4222,6 @@ impl Checker {
         Ok((out, locs))
     }
 
-    /// Whether a `defun`/`lambda` raw parameter list declares an
-    /// `&optional` or `&key` section — `Checker::check_defun` uses this to
-    /// route to `Self::check_defun_opt_key` instead of the ordinary
-    /// fixed/`&rest`-only path; `Checker::check_lambda` uses it only to
-    /// reject the combination with a clear error (see that method).
-    fn params_declare_opt_key(&self, heap: &Heap, v: Value) -> Result<bool, Error> {
-        let elems = heap.list_to_vec(v)?;
-        Ok(elems.iter().any(|p| {
-            matches!(p, Value::Symbol(id) if matches!(heap.symbol_name(*id), "&optional" | "&key"))
-        }))
-    }
 
     /// An `&optional`/`&key` item for `defun`: `(name type)` or `(name type
     /// default-form)`. Returns `(name, type, name's loc, default raw form)` —
@@ -4864,7 +4496,7 @@ impl Checker {
             let mut at = 3;
             let mut bounds = HashMap::new();
             if let Some(f) = elems.get(at) {
-                if self.is_where_clause(heap, *f)? {
+                if is_where_clause(heap, *f)? {
                     bounds = self.parse_where_clause(heap, *f)?;
                     at += 1;
                 }
@@ -4872,7 +4504,7 @@ impl Checker {
             // The usual CL rule (`take_leading_docstring`): a string is a
             // docstring only when a body form follows, since a lone trailing
             // string is the default body's return value.
-            let mdoc = self.take_leading_docstring(heap, &elems, at);
+            let mdoc = take_leading_docstring(heap, &elems, at);
             if mdoc.is_some() {
                 at += 1;
             }
@@ -4945,7 +4577,7 @@ impl Checker {
             parts_locs.first().and_then(|l| l.as_ref()),
             name.chars().count(),
         );
-        self.module_form(heap, &fq_name, &[])
+        forms::module_form(heap, &fq_name, &[])
     }
 
     /// `(impl TraitName TargetType (type AssocName ConcreteType)... (method-name (recv params...) Ret body...)...)`:
@@ -4984,8 +4616,7 @@ impl Checker {
         // A bare name searches the ancestor module chain; a `::` path names
         // the module outright, which is the only way to implement a trait
         // that lives somewhere other than an ancestor of the `impl`.
-        let segs = self
-            .path_to_segs(heap, parts[0])
+        let segs = path_to_segs(heap, parts[0])
             .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
         let written = Path::from_segments(segs.clone());
         let trait_fq = self.resolve_trait_path(&written).ok_or_else(|| {
@@ -5031,7 +4662,7 @@ impl Checker {
         let mut item_start = 2;
         let mut impl_where: Option<Value> = None;
         if let Some(form) = parts.get(2) {
-            if self.is_where_clause(heap, *form)? {
+            if is_where_clause(heap, *form)? {
                 impl_where = Some(*form);
                 item_start = 3;
             }
@@ -5117,7 +4748,7 @@ impl Checker {
             // two-way-stream)`, whose first method vanished while the two
             // defaulted ones behind it survived. Released with the rest of this
             // top-level form by `check_form_at`'s `truncate_roots`.
-            body.push(self.rooted(heap, tl));
+            body.push(forms::rooted(heap, tl));
         }
         self.check_impl_conformance(&trait_fq, &target_fq, &target_ty, &written, &assoc_concrete)?;
         self.check_supertrait_impls(&trait_fq, &target_fq, &assoc_concrete)?;
@@ -5125,7 +4756,7 @@ impl Checker {
             def.impls.push(trait_fq.clone());
             def.trait_assoc.insert(trait_fq, assoc_concrete);
         }
-        self.module_form(heap, &target_fq, &body)
+        forms::module_form(heap, &target_fq, &body)
     }
 
     /// Rewrite one `impl` method item's *type* positions through `subst`,
@@ -5184,17 +4815,17 @@ impl Checker {
             // so the rebuilt signature still records/locates like the
             // written one; a substituted `Self` has no span of its own.
             let ty_loc = if new_ty == p[1] { p_locs[1].1.clone() } else { None };
-            let pair_form = self.list_from_vec_locs(heap, &[(p[0], p_locs[0].1.clone()), (new_ty, ty_loc)])?;
+            let pair_form = forms::list_from_vec_locs(heap, &[(p[0], p_locs[0].1.clone()), (new_ty, ty_loc)])?;
             heap.push_root(pair_form);
             new_recv_pairs.push((pair_form, pair_loc.clone()));
         }
-        let new_recv_list = self.list_from_vec_locs(heap, &new_recv_pairs)?;
+        let new_recv_list = forms::list_from_vec_locs(heap, &new_recv_pairs)?;
         heap.push_root(new_recv_list);
         let new_ret = Self::subst_value(heap, elems[2], subst)?;
         heap.push_root(new_ret);
         let ret_loc = if new_ret == elems[2] { elems_locs[2].1.clone() } else { None };
         let own_where = match elems.get(3) {
-            Some(f) if self.is_where_clause(heap, *f)? => Some(Self::subst_value(heap, *f, subst)?),
+            Some(f) if is_where_clause(heap, *f)? => Some(Self::subst_value(heap, *f, subst)?),
             _ => None,
         };
         if let Some(w) = own_where {
@@ -5296,7 +4927,7 @@ impl Checker {
             // naming a variable called `self` isn't rewritten twice.
             push_bounds(w, heap, &HashMap::new())?;
         }
-        Ok(Some(self.list_from_vec_locs(heap, &items)?))
+        Ok(Some(forms::list_from_vec_locs(heap, &items)?))
     }
 
     /// Verify that an `impl` actually implements its trait: every method
@@ -5710,8 +5341,7 @@ impl Checker {
         target_var: String,
         head_params: Vec<String>,
     ) -> Result<TopLevelForm, Error> {
-        let segs = self
-            .path_to_segs(heap, parts[0])
+        let segs = path_to_segs(heap, parts[0])
             .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
         let written = Path::from_segments(segs.clone());
         let trait_fq = self
@@ -5738,7 +5368,7 @@ impl Checker {
         let mut bounds = HashMap::new();
         let mut impl_where = None;
         if let Some(f) = parts.get(2) {
-            if self.is_where_clause(heap, *f)? {
+            if is_where_clause(heap, *f)? {
                 bounds = self.parse_where_clause(heap, *f)?;
                 impl_where = Some(*f);
                 at = 3;
@@ -5808,7 +5438,7 @@ impl Checker {
             &method_forms,
         )?;
         let path = self.fq("impl");
-        self.module_form(heap, &path, &[])
+        forms::module_form(heap, &path, &[])
     }
 
     /// Type-check a blanket `impl`'s method bodies at its declaration, with
@@ -6160,7 +5790,7 @@ impl Checker {
         // table that is depends on the value, not on this site, so the node
         // only names the target trait and the swap is a runtime lookup on
         // the box's vtable id.
-        let form = self.dyn_upcast_form(heap, to, value.form)?;
+        let form = forms::dyn_upcast_form(heap, to, value.form)?;
         Ok(Checked::new(form, to_ty))
     }
 
@@ -6271,7 +5901,7 @@ impl Checker {
             let is_tvar = targs.is_empty() && p.is_simple() && self.reg.type_def(p).is_none();
             if is_tvar && env.bounds.get(p.last_segment()).is_some_and(|bs| bs.iter().any(|b| b.trait_path == *trait_path)) {
                 let what = format!("as :dyn {}", trait_path);
-                let form = self.erased_generic_form(heap, &what)?;
+                let form = forms::erased_generic_form(heap, &what)?;
                 return Ok(Checked::new(form, Type::Dyn(trait_path.clone(), pins.to_vec())));
             }
         }
@@ -6623,35 +6253,6 @@ impl Checker {
         Ok(slots)
     }
 
-    /// Build a proper list `Value` from `items`, in order — the inverse of
-    /// `heap.list_to_vec`, used by `Checker::check_impl` to reassemble a
-    /// receiver/parameter form after substituting just its type position.
-    /// Build a list, tagging each spine cell with its element's source span
-    /// (`Heap::set_elem_loc`) — used by `check_impl`'s method-signature
-    /// rebuild so the elements carried over unchanged keep the positions
-    /// they were read with.
-    fn list_from_vec_locs(&self, heap: &mut Heap, items: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
-        // Both halves of this need rooting across the conses below, since every
-        // `cons` can collect: the partially-built tail, and the items
-        // themselves — an item is often a freshly substituted form
-        // (`Self::subst_value`) reachable from nowhere else yet.
-        let mut s = RootScope::new(heap);
-        for (item, _) in items {
-            s.push_root(*item);
-        }
-        let mut out = Value::Empty;
-        for (item, loc) in items.iter().rev() {
-            s.push_root(out);
-            // core-build-ok: rebuilds read syntax, not a core node, so it needs
-            // per-cell `set_elem_loc` that `core::list` does not do. Both the
-            // items and the growing tail are rooted in `s` above.
-            out = s.cons(*item, out)?;
-            if let (Value::Cons(cr), Some(l)) = (out, loc) {
-                s.set_elem_loc(cr, l.clone());
-            }
-        }
-        Ok(out)
-    }
 
     /// Rewrite a read `Value` tree, replacing every bare symbol whose
     /// (case-folded) name is a key of `subst` with the corresponding
@@ -6690,7 +6291,7 @@ impl Checker {
         if parts.is_empty() {
             return Err(Error::TypeError("module: (module path body...)".into()));
         }
-        let segs = self.path_to_segs(heap, parts[0])?;
+        let segs = path_to_segs(heap, parts[0])?;
         let path = self.enter_module(&segs);
 
         let mut body = Vec::new();
@@ -6700,7 +6301,7 @@ impl Checker {
                 // Rooted as it lands, for the same reason `check_impl`'s member
                 // loop does it: `check_form` hands back an *unrooted* form by
                 // contract, and every later member's checking allocates.
-                Ok(tl) => body.push(self.rooted(heap, tl)),
+                Ok(tl) => body.push(forms::rooted(heap, tl)),
                 Err(e) => {
                     result = Err(e);
                     break;
@@ -6709,7 +6310,7 @@ impl Checker {
         }
         self.exit_module(segs.len());
         result?;
-        self.module_form(heap, &path, &body)
+        forms::module_form(heap, &path, &body)
     }
 
     /// Push `segs` onto the current namespace path and ensure the (possibly
@@ -6999,12 +6600,12 @@ impl Checker {
         let mut body_start = 3;
         let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
         if let Some(form) = parts.get(3) {
-            if self.is_where_clause(heap, *form)? {
+            if is_where_clause(heap, *form)? {
                 bounds = self.parse_where_clause(heap, *form)?;
                 body_start = 4;
             }
         }
-        let doc = self.take_leading_docstring(heap, parts, body_start);
+        let doc = take_leading_docstring(heap, parts, body_start);
         if doc.is_some() {
             body_start += 1;
         }
@@ -7121,7 +6722,7 @@ impl Checker {
                 // have to stay rooted until the method node holding them is
                 // finished; this scope releases them however it is left.
                 let mut s = RootScope::new(members.heap());
-                let self_var = self.var_form(&mut s, "self")?;
+                let self_var = forms::var_form(&mut s, "self")?;
                 s.push_root(self_var);
                 let get = self.field_get_form(&mut s, self_var, i, field_ty)?;
                 s.push_root(get);
@@ -7156,9 +6757,9 @@ impl Checker {
             assoc.insert(setter_name.clone(), AssocFn { sig: setter_sig, instance: true, builtin: false });
             let setter = {
                 let mut s = RootScope::new(members.heap());
-                let self_var = self.var_form(&mut s, "self")?;
+                let self_var = forms::var_form(&mut s, "self")?;
                 s.push_root(self_var);
-                let value_var = self.var_form(&mut s, "value")?;
+                let value_var = forms::var_form(&mut s, "value")?;
                 s.push_root(value_var);
                 let set = self.field_set_form(&mut s, self_var, i, field_ty, value_var)?;
                 s.push_root(set);
@@ -7222,7 +6823,7 @@ impl Checker {
         // and its accessors travel as one unit, so a caller that records this
         // form records all of it.
         let body: Vec<Value> = members.as_slice().to_vec();
-        self.module_form(members.heap(), &type_fq, &body)
+        forms::module_form(members.heap(), &type_fq, &body)
     }
 
     /// `(defenum Name (Variant Type...)...)` — or generically
@@ -7345,6 +6946,9 @@ impl Checker {
     /// [`TopLevel::Load`]). The argument must be a string *literal* (the
     /// driver resolves it before any subsequent form is checked, so it can't
     /// depend on runtime values).
+    ///
+    /// Keeps its receiver for the same reason as [`Self::check_quote`]: one arm
+    /// of a dispatch table whose siblings all take one.
     fn check_load(&mut self, heap: &mut Heap, parts: &[Value]) -> Result<TopLevelForm, Error> {
         if parts.len() != 1 {
             return Err(Error::TypeError("load: (load \"path\")".into()));
@@ -7352,7 +6956,7 @@ impl Checker {
         match parts[0] {
             Value::Str(id) => {
                 let path = heap.string(id).to_string();
-                self.load_form(heap, &path)
+                forms::load_form(heap, &path)
             }
             _ => Err(Error::TypeError("load: expected a string-literal path".into())),
         }
@@ -7362,7 +6966,7 @@ impl Checker {
         if parts.len() != 1 {
             return Err(Error::TypeError("use: (use path)".into()));
         }
-        let segs = self.path_to_segs(heap, parts[0])?;
+        let segs = path_to_segs(heap, parts[0])?;
         let bare = segs.last().cloned().unwrap();
         let path_loc = parts_locs.first().and_then(|l| l.as_ref());
 
@@ -7370,7 +6974,7 @@ impl Checker {
         if let Some(target) = self.resolve_fn_path(&segs) {
             self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
             let alias = self.fq(&bare);
-            return self.use_form(heap, &alias, &target);
+            return forms::use_form(heap, &alias, &target);
         }
         // Try: type. Beyond the usual alias (so the bare name also resolves
         // in a type-annotation position, e.g. `(x Option)` — see
@@ -7420,14 +7024,14 @@ impl Checker {
                     .insert(name.clone(), (target.clone(), name.clone()));
             }
             let alias = self.fq(&bare);
-            return self.use_form(heap, &alias, &target);
+            return forms::use_form(heap, &alias, &target);
         }
         // Try: module alias — `(use std::math)` makes `math` a short name for `std::math`.
         if let Some((abs, _)) = self.find_module(&segs) {
             let target_path = Path::from_segments(abs.clone());
             self.reg.root.module_mut(&self.ns).mod_aliases.insert(bare.clone(), abs);
             let alias = self.fq(&bare);
-            return self.use_form(heap, &alias, &target_path);
+            return forms::use_form(heap, &alias, &target_path);
         }
         // Not a known function, type, or module. The path may name a module
         // in a source file that simply hasn't been loaded yet — surface a
@@ -7624,7 +7228,7 @@ impl Checker {
                     Checked::new(core::tagged(heap, "sym", &[Value::Symbol(id)])?, Type::Symbol)
                 } else if let Some(t) = env.get(name) {
                     let t = t.clone();
-                    Checked::new(self.var_form(heap, name)?, t)
+                    Checked::new(forms::var_form(heap, name)?, t)
                 } else if let Some((path, vi)) = self.resolve_global(name) {
                     let ty = vi.ty;
                     let r = self.mk_ref(vec![name.to_string()], path);
@@ -7712,7 +7316,7 @@ impl Checker {
                 // about. Checked before the general `is_heap_repr` retype
                 // below, which would otherwise claim it.
                 if *e == sexpr_ty() && matches!(typed.ty, Type::Dyn(..)) {
-                    let form = self.dyn_value_form(heap, typed.form)?;
+                    let form = forms::dyn_value_form(heap, typed.form)?;
                     return Ok(Checked::new(form, sexpr_ty()));
                 }
                 if *e == sexpr_ty() && self.is_heap_repr(&typed.ty) {
@@ -7962,7 +7566,7 @@ impl Checker {
         if args.len() < 2 {
             return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
         }
-        if self.params_declare_opt_key(heap, args[0])? {
+        if params_declare_opt_key(heap, args[0])? {
             return Err(Error::TypeError(
                 "lambda: &optional/&key are not yet supported for lambda (only defun)".into(),
             ));
@@ -8306,7 +7910,7 @@ impl Checker {
             if !self.sexpr_has_instance_method(method) {
                 return None;
             }
-            let form = match self.dyn_value_form(heap, recv.form) {
+            let form = match forms::dyn_value_form(heap, recv.form) {
                 Ok(f) => f,
                 Err(e) => return Some(Err(e)),
             };
@@ -8371,7 +7975,7 @@ impl Checker {
                         heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
                     );
                 }
-                let form = self.dyn_value_form(heap, recv.form)?;
+                let form = forms::dyn_value_form(heap, recv.form)?;
                 recv = Checked::new(form, sexpr_ty());
             }
             let type_fq = match &recv.ty {
@@ -8456,7 +8060,7 @@ impl Checker {
                             )));
                         };
                         let ret_ty = subst_apply(&sig.ret, &assoc);
-                        let form = self.erased_generic_form(heap, method)?;
+                        let form = forms::erased_generic_form(heap, method)?;
                         return Ok(Checked::new(form, ret_ty));
                     }
                 }
@@ -8591,7 +8195,7 @@ impl Checker {
         let else_expected = non_never(&then.ty).or(expected);
         let els = self.check_at(heap, interp, env, args[2], else_expected, nth_loc(arg_locs, 2))?;
         let ty = join_types(&then.ty, &els.ty)?;
-        let form = self.if_form(heap, cond.form, then.form, els.form)?;
+        let form = forms::if_form(heap, cond.form, then.form, els.form)?;
         Ok(Checked::new(form, ty))
     }
 
@@ -8607,7 +8211,7 @@ impl Checker {
             return Err(Error::TypeError("panic: (panic message)".into()));
         }
         let msg = self.check_at(heap, interp, env, args[0], Some(&Type::Str), nth_loc(arg_locs, 0))?;
-        let form = self.panic_form(heap, msg.form)?;
+        let form = forms::panic_form(heap, msg.form)?;
         Ok(Checked::new(form, Type::Never))
     }
 
@@ -8826,7 +8430,7 @@ impl Checker {
                 }
             }
         };
-        let form = self.compile_fn_form(heap, &target)?;
+        let form = forms::compile_fn_form(heap, &target)?;
         Ok(Checked::new(form, Type::Bool))
     }
 
@@ -8912,7 +8516,7 @@ impl Checker {
     fn doc_option(&self, heap: &mut Heap, doc: Option<String>) -> Result<Checked, Error> {
         match doc {
             Some(d) => {
-                let text = self.str_lit_form(heap, &d)?;
+                let text = forms::str_lit_form(heap, &d)?;
                 let inner = Checked::new(text, Type::Str);
                 wrap_some(heap, self, inner, Type::Str)
             }
@@ -8926,12 +8530,17 @@ impl Checker {
     /// `(quote datum)`: `datum` as a literal `Sexpr` value, unevaluated.
     ///
     /// The datum travels as the reader's own heap value — see
-    /// [`Self::quote_form`] for why the lowered node needs no owned copy of it.
+    /// [`forms::quote_form`] for why the lowered node needs no owned copy of it.
+    ///
+    /// Reads no checker state, and keeps its receiver anyway: it is one arm of
+    /// `check_special`'s dispatch table, where every sibling takes one. The
+    /// constructors that were in the same position moved to [`crate::check::forms`]
+    /// precisely because nothing held them to a shape; a dispatch family does.
     fn check_quote(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("quote: (quote datum)".into()));
         }
-        let form = self.quote_form(heap, args[0])?;
+        let form = forms::quote_form(heap, args[0])?;
         Ok(Checked::new(form, Type::Named(Path::root("sexpr"), vec![])))
     }
 
@@ -9033,12 +8642,12 @@ impl Checker {
             let field_tys = self.variant_field_tys(&adt, cons_idx, &[]);
             let form =
                 self.construct_form(heap, &adt, cons_idx, false, &field_tys, &[car_t.form, cdr_t.form])?;
-            return Ok(Checked::new(self.rooted(heap, form), sexpr_ty));
+            return Ok(Checked::new(forms::rooted(heap, form), sexpr_ty));
         }
         // A leaf of the template: literal data, so the datum travels as the
         // reader's own value — see `Self::quote_form`.
-        let form = self.quote_form(heap, v)?;
-        Ok(Checked::new(self.rooted(heap, form), sexpr_ty))
+        let form = forms::quote_form(heap, v)?;
+        Ok(Checked::new(forms::rooted(heap, form), sexpr_ty))
     }
 
     fn check_let(
@@ -9132,7 +8741,7 @@ impl Checker {
         if binds.is_empty() {
             let (body, ty) = self.check_seq(heap, interp, env, body, body_locs, expected)?;
             let form = self.let_form(heap, &[], &body)?;
-            return Ok(Checked::new(self.rooted(heap, form), ty));
+            return Ok(Checked::new(forms::rooted(heap, form), ty));
         }
         let pair_locs = heap.list_to_vec_locs(binds[0])?;
         let pair: Vec<Value> = pair_locs.iter().map(|(v, _)| *v).collect();
@@ -9152,7 +8761,7 @@ impl Checker {
         let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, body_locs, expected)?;
         let ty = inner.ty.clone();
         let form = self.let_form(heap, &[(name, val.ty, val.form)], &[inner.form])?;
-        Ok(Checked::new(self.rooted(heap, form), ty))
+        Ok(Checked::new(forms::rooted(heap, form), ty))
     }
 
     /// `(setf place value)`: three kinds of `place` are recognized — a bound
@@ -9198,7 +8807,7 @@ impl Checker {
         };
         if let Some(ty) = env.get(&name).cloned() {
             let value = self.check_at(heap, interp, env, args[1], Some(&ty), value_loc)?;
-            let form = self.set_form(heap, &name, value.form)?;
+            let form = forms::set_form(heap, &name, value.form)?;
             return Ok(Checked::new(form, ty));
         }
         if let Some((path, vi)) = self.resolve_global(&name) {
@@ -9234,7 +8843,7 @@ impl Checker {
             return Err(Error::TypeError(format!("setf: unresolved path: {}", segs.join("::"))));
         };
         let recv = if let Some(ty) = env.get(recv_name).cloned() {
-            let form = self.var_form(heap, recv_name)?;
+            let form = forms::var_form(heap, recv_name)?;
             Checked::new(form, ty)
         } else if let Some((path, vi)) = self.resolve_global(recv_name) {
             let r = self.mk_ref(vec![recv_name.clone()], path);
@@ -9385,7 +8994,7 @@ impl Checker {
                     new_items.push(tmp_sym);
                 }
                 let pairs: Vec<(Value, Option<Loc>)> = new_items.into_iter().map(|v| (v, None)).collect();
-                let new_place = self.list_from_vec_locs(heap, &pairs)?;
+                let new_place = forms::list_from_vec_locs(heap, &pairs)?;
                 Ok((bindings, new_place))
             }
             _ => Err(Error::TypeError(
@@ -9394,25 +9003,6 @@ impl Checker {
         }
     }
 
-    /// Wraps `body` in `(let* ((name0 val0) (name1 val1) ...) body)`, or
-    /// returns `body` unchanged when `bindings` is empty — the sequential-
-    /// binding counterpart `Self::place_dedup`'s temporaries need (a later
-    /// binding's `val` may itself reference the current place's own earlier
-    /// temporaries, e.g. `Self::check_rotatef_shiftf`'s value-reading
-    /// bindings reference the just-bound subform temporaries).
-    fn wrap_let_star(&self, heap: &mut Heap, bindings: Vec<(Value, Value)>, body: Value) -> Result<Value, Error> {
-        if bindings.is_empty() {
-            return Ok(body);
-        }
-        let mut binding_pairs = Vec::with_capacity(bindings.len());
-        for (name, val) in bindings {
-            let pair = self.list_from_vec_locs(heap, &[(name, None), (val, None)])?;
-            binding_pairs.push((pair, None));
-        }
-        let bindings_list = self.list_from_vec_locs(heap, &binding_pairs)?;
-        let let_star_sym = heap.intern_symbol("let*");
-        self.list_from_vec_locs(heap, &[(let_star_sym, None), (bindings_list, None), (body, None)])
-    }
 
     /// `(incf place)` / `(incf place delta)` and `(decf place)` /
     /// `(decf place delta)`: CL's increment/decrement-a-place macros.
@@ -9438,10 +9028,10 @@ impl Checker {
         let delta = args.get(1).copied().unwrap_or(Value::Int(1));
         let (bindings, place) = self.place_dedup(heap, args[0])?;
         let op_sym = heap.intern_symbol(op);
-        let value_form = self.list_from_vec_locs(heap, &[(op_sym, None), (place, None), (delta, None)])?;
+        let value_form = forms::list_from_vec_locs(heap, &[(op_sym, None), (place, None), (delta, None)])?;
         let setf_sym = heap.intern_symbol("setf");
-        let setf_form = self.list_from_vec_locs(heap, &[(setf_sym, None), (place, None), (value_form, None)])?;
-        let expansion = self.wrap_let_star(heap, bindings, setf_form)?;
+        let setf_form = forms::list_from_vec_locs(heap, &[(setf_sym, None), (place, None), (value_form, None)])?;
+        let expansion = forms::wrap_let_star(heap, bindings, setf_form)?;
         heap.push_root(expansion);
         let result = self.check(heap, interp, env, expansion, None);
         heap.pop_root();
@@ -9513,16 +9103,16 @@ impl Checker {
             };
             // Rooted as it lands: these are freshly built syntax lists held
             // only in a `Vec<Value>`, and each later iteration allocates more.
-            let one = self.list_from_vec_locs(heap, &[(setf_sym, None), (places[i], None), (target, None)])?;
-            body_forms.push(self.rooted(heap, one));
+            let one = forms::list_from_vec_locs(heap, &[(setf_sym, None), (places[i], None), (target, None)])?;
+            body_forms.push(forms::rooted(heap, one));
         }
         body_forms.push(if is_shift { value_names.first().copied().unwrap_or(Value::Empty) } else { Value::Empty });
 
         let progn_sym = heap.intern_symbol("progn");
         let mut progn_items: Vec<(Value, Option<Loc>)> = vec![(progn_sym, None)];
         progn_items.extend(body_forms.into_iter().map(|f| (f, None)));
-        let body = self.list_from_vec_locs(heap, &progn_items)?;
-        let expansion = self.wrap_let_star(heap, all_bindings, body)?;
+        let body = forms::list_from_vec_locs(heap, &progn_items)?;
+        let expansion = forms::wrap_let_star(heap, all_bindings, body)?;
         heap.push_root(expansion);
         let result = self.check(heap, interp, env, expansion, None);
         heap.pop_root();
@@ -9548,7 +9138,7 @@ impl Checker {
         let op_sym = heap.intern_symbol(op);
         let mut acc = args[0];
         for next in &args[1..] {
-            acc = self.list_from_vec_locs(heap, &[(op_sym, None), (acc, None), (*next, None)])?;
+            acc = forms::list_from_vec_locs(heap, &[(op_sym, None), (acc, None), (*next, None)])?;
         }
         heap.push_root(acc);
         let result = self.check(heap, interp, env, acc, expected);
@@ -9584,42 +9174,19 @@ impl Checker {
         let op_sym = heap.intern_symbol(op);
         let mut cmp_forms: Vec<(Value, Option<Loc>)> = Vec::with_capacity(names.len() - 1);
         for w in names.windows(2) {
-            cmp_forms.push((self.list_from_vec_locs(heap, &[(op_sym, None), (w[0], None), (w[1], None)])?, None));
+            cmp_forms.push((forms::list_from_vec_locs(heap, &[(op_sym, None), (w[0], None), (w[1], None)])?, None));
         }
         let and_sym = heap.intern_symbol("and");
         let mut and_items: Vec<(Value, Option<Loc>)> = vec![(and_sym, None)];
         and_items.extend(cmp_forms);
-        let and_form = self.list_from_vec_locs(heap, &and_items)?;
-        let expansion = self.wrap_let_star(heap, bindings, and_form)?;
+        let and_form = forms::list_from_vec_locs(heap, &and_items)?;
+        let expansion = forms::wrap_let_star(heap, bindings, and_form)?;
         heap.push_root(expansion);
         let result = self.check(heap, interp, env, expansion, None);
         heap.pop_root();
         result
     }
 
-    /// The 0-argument identity element for one of CL's variadic
-    /// arithmetic/bitwise operators: `(+) = 0`, `(*) = 1`, `(logior) =
-    /// (logxor) = 0`, `(logand) = -1` (all bits set — the identity for
-    /// AND). `value` is the caller-supplied integer form of that constant;
-    /// this just picks *which* numeric type's literal to build it as.
-    /// Follows `expected` when it names one of this language's five numeric
-    /// types, falling back to `i32` otherwise (a bare `Value::Int` — this
-    /// language's own default for a context-free integer literal, see
-    /// `Checker::int_lit_ty`) — there being no argument to infer a type from
-    /// is exactly the situation that fallback exists for. Builds a
-    /// heap-boxed float/bignum/ratio directly (`Heap::alloc_float`/
-    /// `alloc_bignum`/`alloc_ratio`) rather than a `(int->bignum 0)`-style
-    /// call form — the same representation the reader itself produces for a
-    /// literal, so `Self::check`'s existing `Value::Boxed` handling picks up
-    /// the right type with no special-casing needed here.
-    fn numeric_identity_literal(&self, heap: &mut Heap, expected: Option<&Type>, value: i64) -> Value {
-        match expected {
-            Some(Type::F64) => heap.alloc_float(value as f64),
-            Some(Type::Bignum) => heap.alloc_bignum(num_bigint::BigInt::from(value)),
-            Some(Type::Ratio) => heap.alloc_ratio(num_rational::BigRational::from_integer(num_bigint::BigInt::from(value))),
-            _ => Value::Int(value),
-        }
-    }
 
     /// `(- x)` (negation) / `(/ x)` (reciprocal): CL's unary forms of the
     /// otherwise-binary `-`/`/`. Neither can be spelled as `(- 0 x)`/`(/ 1
@@ -9645,9 +9212,9 @@ impl Checker {
     ) -> Result<Checked, Error> {
         let tmp = heap.intern_symbol(&self.gensym_place());
         let op_sym = heap.intern_symbol(op);
-        let self_op_self = self.list_from_vec_locs(heap, &[(op_sym, None), (tmp, None), (tmp, None)])?;
-        let outer = self.list_from_vec_locs(heap, &[(op_sym, None), (self_op_self, None), (tmp, None)])?;
-        let expansion = self.wrap_let_star(heap, vec![(tmp, x)], outer)?;
+        let self_op_self = forms::list_from_vec_locs(heap, &[(op_sym, None), (tmp, None), (tmp, None)])?;
+        let outer = forms::list_from_vec_locs(heap, &[(op_sym, None), (self_op_self, None), (tmp, None)])?;
+        let expansion = forms::wrap_let_star(heap, vec![(tmp, x)], outer)?;
         heap.push_root(expansion);
         let result = self.check(heap, interp, env, expansion, expected);
         heap.pop_root();
@@ -9688,7 +9255,7 @@ impl Checker {
                 "logand" => -1,
                 _ => return Err(Error::TypeError(format!("{}: requires at least 1 argument", op))),
             };
-            let lit = self.numeric_identity_literal(heap, expected, value);
+            let lit = forms::numeric_identity_literal(heap, expected, value);
             return self.check(heap, interp, env, lit, expected);
         };
         match op {
@@ -9696,7 +9263,7 @@ impl Checker {
             "-" | "/" => self.check_unary_negate_or_invert(heap, interp, env, op, x, expected),
             "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 let progn_sym = heap.intern_symbol("progn");
-                let expansion = self.list_from_vec_locs(heap, &[(progn_sym, None), (x, None), (Value::Bool(true), None)])?;
+                let expansion = forms::list_from_vec_locs(heap, &[(progn_sym, None), (x, None), (Value::Bool(true), None)])?;
                 heap.push_root(expansion);
                 let result = self.check(heap, interp, env, expansion, Some(&Type::Bool));
                 heap.pop_root();
@@ -9724,10 +9291,10 @@ impl Checker {
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
         let log_sym = heap.intern_symbol("log");
-        let log_number = self.list_from_vec_locs(heap, &[(log_sym, None), (args[0], None)])?;
-        let log_base = self.list_from_vec_locs(heap, &[(log_sym, None), (args[1], None)])?;
+        let log_number = forms::list_from_vec_locs(heap, &[(log_sym, None), (args[0], None)])?;
+        let log_base = forms::list_from_vec_locs(heap, &[(log_sym, None), (args[1], None)])?;
         let div_sym = heap.intern_symbol("/");
-        let expansion = self.list_from_vec_locs(heap, &[(div_sym, None), (log_number, None), (log_base, None)])?;
+        let expansion = forms::list_from_vec_locs(heap, &[(div_sym, None), (log_number, None), (log_base, None)])?;
         heap.push_root(expansion);
         let result = self.check(heap, interp, env, expansion, expected);
         heap.pop_root();
@@ -9846,7 +9413,7 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
         let (body, ty) = self.check_loop_body(heap, interp, env, args, arg_locs, Type::Never)?;
-        let form = self.loop_form(heap, &body)?;
+        let form = forms::loop_form(heap, &body)?;
         Ok(Checked::new(form, ty))
     }
 
@@ -9878,7 +9445,7 @@ impl Checker {
             return Err(Error::TypeError("break: (break), takes no arguments".into()));
         }
         self.contribute_loop_exit(Type::Unit)?;
-        let form = self.break_form(heap)?;
+        let form = forms::break_form(heap)?;
         Ok(Checked::new(form, Type::Never))
     }
 
@@ -9908,7 +9475,7 @@ impl Checker {
         };
         let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
         self.contribute_loop_exit(ty)?;
-        let form = self.return_form(heap, value.map(|c| c.form))?;
+        let form = forms::return_form(heap, value.map(|c| c.form))?;
         Ok(Checked::new(form, Type::Never))
     }
 
@@ -9962,7 +9529,7 @@ impl Checker {
     /// a bad `&rest` element gets), then `sexpr-cons`-ed together back-to-front.
     fn cons_hetero_sexpr(&self, heap: &mut Heap, items: Vec<Checked>) -> Result<Checked, Error> {
         let r = Ref::synthetic(Path::root("sexpr-cons"));
-        let nil = self.quote_nil(heap)?;
+        let nil = forms::quote_nil(heap)?;
         let mut acc = Checked::new(nil, sexpr_ty());
         for item in items.into_iter().rev() {
             let mut s = RootScope::new(heap);
@@ -9973,7 +9540,7 @@ impl Checker {
             let form = self.call_form(&mut s, &r, &[item, acc])?;
             acc = Checked::new(form, sexpr_ty());
         }
-        Ok(Checked::new(self.rooted(heap, acc.form), acc.ty))
+        Ok(Checked::new(forms::rooted(heap, acc.form), acc.ty))
     }
 
     /// The `(format dest control &rest args)` special form — CL's `format`
@@ -10077,11 +9644,11 @@ impl Checker {
         for (i, &a) in args[1..].iter().enumerate() {
             inner.push((a, nth_loc(arg_locs, 1 + i)));
         }
-        let inner = self.list_from_vec_locs(heap, &inner)?;
+        let inner = forms::list_from_vec_locs(heap, &inner)?;
         heap.push_root(inner);
         let write_string = heap.intern_symbol("write-string");
         let form =
-            self.list_from_vec_locs(heap, &[(write_string, None), (args[0], nth_loc(arg_locs, 0)), (inner, None)]);
+            forms::list_from_vec_locs(heap, &[(write_string, None), (args[0], nth_loc(arg_locs, 0)), (inner, None)]);
         let result = form.and_then(|form| {
             heap.push_root(form);
             let r = self.check(heap, interp, env, form, None);
@@ -10162,7 +9729,7 @@ impl Checker {
             Some(a) => self.check_at(heap, interp, env, *a, Some(&Type::I64), nth_loc(arg_locs, 1))?,
             None => Checked::new(core::tagged(heap, "int", &[Value::Int(0)])?, Type::I64),
         };
-        let which = Checked::new(self.str_lit_form(heap, form)?, Type::Str);
+        let which = Checked::new(forms::str_lit_form(heap, form)?, Type::Str);
         let r = Ref::synthetic(Path::root("pprint-rt"));
         let node = self.call_form(heap, &r, &[which, value, colinc])?;
         Ok(Checked::new(node, Type::Unit))
@@ -10208,7 +9775,7 @@ impl Checker {
         // the body checking that can collect them is still running.
         let mut s = RootScope::new(heap);
         let obj = self.check_at(&mut s, interp, env, obj_form, Some(&sexpr_ty()), nth_loc(arg_locs, 0))?;
-        let empty = self.str_lit_form(&mut s, "")?;
+        let empty = forms::str_lit_form(&mut s, "")?;
         s.push_root(empty);
         let mut prefix = Checked::new(empty, Type::Str);
         let mut suffix = Checked::new(empty, Type::Str);
@@ -10646,7 +10213,7 @@ impl Checker {
                         }
                     }
                     None => match &key.default {
-                        Some(d) => self.splice_default(heap, d, &key.decl_ty)?,
+                        Some(d) => forms::splice_default(heap, d, &key.decl_ty)?,
                         None => option_none(heap, self, subst_apply(&key.effective_ty(), &subst))?,
                     },
                 };
@@ -10665,7 +10232,7 @@ impl Checker {
                     }
                 } else {
                     match &opt.default {
-                        Some(d) => self.splice_default(heap, d, &opt.decl_ty)?,
+                        Some(d) => forms::splice_default(heap, d, &opt.decl_ty)?,
                         None => option_none(heap, self, subst_apply(&opt.effective_ty(), &subst))?,
                     }
                 };
@@ -10903,7 +10470,7 @@ impl Checker {
         // parameter, so only the finished `subst` is complete.
         let field_tys: Vec<Type> = fields.iter().map(|f| subst_apply(f, &subst)).collect();
         let form = self.construct_form(heap, adt_name, variant, mutable, &field_tys, &arg_forms)?;
-        Ok(Checked::new(self.rooted(heap, form), Type::Named(adt_name.clone(), result_args)))
+        Ok(Checked::new(forms::rooted(heap, form), Type::Named(adt_name.clone(), result_args)))
     }
 
     // ---- match / if-let ---------------------------------------------------
@@ -10930,8 +10497,8 @@ impl Checker {
         // catch-all arm is required — which falls out of `Sexpr`'s own
         // eleven-variant exhaustiveness rule with nothing added.
         if let Type::Dyn(..) = scrut.ty {
-            let form = self.dyn_value_form(heap, scrut.form)?;
-            scrut = Checked::new(self.rooted(heap, form), sexpr_ty());
+            let form = forms::dyn_value_form(heap, scrut.form)?;
+            scrut = Checked::new(forms::rooted(heap, form), sexpr_ty());
         }
         let (adt_name, _) = self.expect_adt(&scrut.ty)?;
         // `match` covers every sum type, `Sexpr` included. Symbol/Sexpr
@@ -11530,40 +11097,7 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
     }
 }
 
-/// A path, as a core form field writes one: a bare symbol for a single
-/// segment, a `::` path for more.
-///
-/// The asymmetry is the reader's, not a choice made here — reading `point`
-/// yields a `Value::Symbol` and only `a::b` yields a `Value::Path`. Writing a
-/// one-segment path as a `Value::Path` would print as `point` and read back as
-/// a symbol, so a form would not survive its own round trip
-/// (`tests/core_vocabulary_test.rs`). Both consumers accept either spelling.
-fn path_form(heap: &mut Heap, p: &Path) -> Value {
-    let segs = p.segments();
-    if segs.len() == 1 {
-        return heap.intern_symbol(&segs[0]);
-    }
-    let ids: Vec<_> = segs.iter().map(|s| match heap.intern_symbol(s) {
-        Value::Symbol(id) => id,
-        _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-    }).collect();
-    heap.intern_path(&ids)
-}
 
-/// `(a b c)` — a list of symbols, for a reference's `written`/`home` name
-/// lists.
-///
-/// `home` is often empty: the root module has zero segments, which is exactly
-/// why these are lists of symbols rather than a `Path` (always at least one
-/// segment).
-fn sym_list(heap: &mut Heap, names: &[String]) -> Result<Value, Error> {
-    let mut f = Items::new(heap);
-    for n in names {
-        let sym = f.heap().intern_symbol(n);
-        f.push(sym);
-    }
-    f.finish_list()
-}
 
 /// `((TYPE SYM)...)` — a vtable's contents, or the implementation targets a
 /// `dyn-call` could reach: each entry the owning type's path and the method
@@ -11571,7 +11105,7 @@ fn sym_list(heap: &mut Heap, names: &[String]) -> Result<Value, Error> {
 fn vtable_form(heap: &mut Heap, slots: &[(Path, String)]) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     for (ty, method) in slots {
-        let tp = path_form(f.heap(), ty);
+        let tp = forms::path_form(f.heap(), ty);
         let m = f.heap().intern_symbol(method);
         let one = core::list(f.heap(), &[tp, m])?;
         f.push(one);
@@ -11584,7 +11118,7 @@ fn vtable_form(heap: &mut Heap, slots: &[(Path, String)]) -> Result<Value, Error
 fn wrap_some(heap: &mut Heap, checker: &Checker, inner: Checked, target: Type) -> Result<Checked, Error> {
     let ty = Type::Named(Path::root("option"), vec![target.clone()]);
     let form = checker.construct_form(heap, &Path::root("option"), 0, false, &[target], &[inner.form])?;
-    Ok(Checked::new(checker.rooted(heap, form), ty))
+    Ok(Checked::new(forms::rooted(heap, form), ty))
 }
 
 /// `Option::none` as a [`Checked`], already at `ty` (an `Option<_>` type) —
@@ -11594,7 +11128,7 @@ fn wrap_some(heap: &mut Heap, checker: &Checker, inner: Checked, target: Type) -
 /// `wrap_some`'s `variant: 0`.
 fn option_none(heap: &mut Heap, checker: &Checker, ty: Type) -> Result<Checked, Error> {
     let form = checker.construct_form(heap, &Path::root("option"), 1, false, &[], &[])?;
-    Ok(Checked::new(checker.rooted(heap, form), ty))
+    Ok(Checked::new(forms::rooted(heap, form), ty))
 }
 
 /// Relabels an already-computed `Option<I32>` [`Checked`] (an `as_conversion`
@@ -12012,4 +11546,109 @@ mod header_tests {
         assert!(parse_generic_name_header("pair<a").is_err());
         assert!(parse_generic_name_header("pair<a,>").is_err());
     }
+}
+
+/// The lowercase segments of a module/use path (a symbol or a `Value::Path`).
+fn path_to_segs(heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
+    match v {
+        Value::Symbol(id) => Ok(vec![heap.symbol_name(id).to_string()]),
+        Value::Path(id) => Ok(heap
+            .path_segments(id)
+            .iter()
+            .map(|s| heap.symbol_name(*s).to_string())
+            .collect()),
+        _ => Err(Error::TypeError("expected a name or `::` path".into())),
+    }
+}
+
+/// Whether `v` is a `(where ...)` clause (vs. an ordinary body form) —
+/// `Checker::check_defun` peeks at this to decide whether to consume it.
+fn is_where_clause(heap: &Heap, v: Value) -> Result<bool, Error> {
+    Ok(matches!(v, Value::Cons(_))
+        && matches!(heap.list_to_vec(v)?.first(), Some(Value::Symbol(id)) if heap.symbol_name(*id) == "where"))
+}
+
+/// Peeks `parts[at]` for a leading docstring — CL's rule for `defun`/
+/// `defmacro`/`defmethod`: a string literal right before the body is a
+/// docstring only when at least one more body form follows it, since a
+/// *lone* trailing string is the function's return value, not
+/// documentation, and the two are otherwise indistinguishable. Used by
+/// `Self::parse_defun_sig`, `Self::check_defun_opt_key`,
+/// `Self::parse_defmethod_sig` and `Self::check_defmacro`, each of which
+/// bumps its own `body_start` by one when this returns `Some`.
+fn take_leading_docstring(heap: &Heap, parts: &[Value], at: usize) -> Option<String> {
+    match parts.get(at) {
+        Some(Value::Str(id)) if parts.len() > at + 1 => Some(heap.string(*id).to_string()),
+        _ => None,
+    }
+}
+
+fn parse_macro_lambda_list(
+    heap: &Heap,
+    param_vals: &[Value],
+) -> Result<(Vec<String>, Vec<(String, Option<Value>)>, Option<String>, Vec<(String, Option<Value>)>), Error> {
+    // Section rank: required=0, &optional=1, &rest=2, &key=3. A marker may
+    // only advance the rank forward, so each appears at most once and in
+    // order.
+    let mut rank = 0u8;
+    let mut required_names: Vec<String> = Vec::new();
+    let mut optionals: Vec<(String, Option<Value>)> = Vec::new();
+    let mut rest_name: Option<String> = None;
+    let mut keys: Vec<(String, Option<Value>)> = Vec::new();
+
+    for p in param_vals {
+        if let Value::Symbol(id) = p {
+            match heap.symbol_name(*id) {
+                "&optional" => {
+                    if rank >= 1 {
+                        return Err(Error::TypeError("defmacro: &optional must precede &rest and &key, and appear once".into()));
+                    }
+                    rank = 1;
+                    continue;
+                }
+                "&rest" => {
+                    if rank >= 2 {
+                        return Err(Error::TypeError("defmacro: &rest must precede &key, and appear once".into()));
+                    }
+                    rank = 2;
+                    continue;
+                }
+                "&key" => {
+                    if rank >= 3 {
+                        return Err(Error::TypeError("defmacro: &key may appear only once".into()));
+                    }
+                    rank = 3;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        match rank {
+            0 => required_names.push(Checker::macro_param_name(heap, *p, "required")?),
+            1 => optionals.push(Checker::macro_opt_key_spec(heap, *p, "&optional")?),
+            2 => {
+                if rest_name.is_some() {
+                    return Err(Error::TypeError("defmacro: &rest takes exactly one parameter name".into()));
+                }
+                rest_name = Some(Checker::macro_param_name(heap, *p, "&rest")?);
+            }
+            _ => keys.push(Checker::macro_opt_key_spec(heap, *p, "&key")?),
+        }
+    }
+    if rank == 2 && rest_name.is_none() {
+        return Err(Error::TypeError("defmacro: &rest must be followed by exactly one parameter name".into()));
+    }
+    Ok((required_names, optionals, rest_name, keys))
+}
+
+/// Whether a `defun`/`lambda` raw parameter list declares an
+/// `&optional` or `&key` section — `Checker::check_defun` uses this to
+/// route to `Self::check_defun_opt_key` instead of the ordinary
+/// fixed/`&rest`-only path; `Checker::check_lambda` uses it only to
+/// reject the combination with a clear error (see that method).
+fn params_declare_opt_key(heap: &Heap, v: Value) -> Result<bool, Error> {
+    let elems = heap.list_to_vec(v)?;
+    Ok(elems.iter().any(|p| {
+        matches!(p, Value::Symbol(id) if matches!(heap.symbol_name(*id), "&optional" | "&key"))
+    }))
 }

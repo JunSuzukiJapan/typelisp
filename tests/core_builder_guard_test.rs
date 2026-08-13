@@ -4,7 +4,7 @@
 //! but not yet reachable from a root can be freed by the *next* allocation.
 //! Nothing in the type system says so: `heap.cons(a, b)` compiles fine whether
 //! or not `a` survived being built. The consequences are real and were live in
-//! this repo — `Checker::subst_value` and `list_from_vec_locs` both dropped
+//! this repo — `Checker::subst_value` and `forms::list_from_vec_locs` both dropped
 //! freshly rebuilt syntax on the floor, which `tests/checker_gc_stress_test.rs`
 //! reproduces as a mangled `impl` receiver and a runaway `setf` expansion.
 //!
@@ -126,7 +126,7 @@ fn cons_calls_go_through_check_core() {
          allocation unless something roots it. Build core form nodes with \
          `core::tagged`/`core::Items`, and plain lists with `core::list` — they \
          root as they go. If this site is rewriting read syntax instead, root \
-         the intermediates yourself (see `Checker::list_from_vec_locs`) and add \
+         the intermediates yourself (see `check::forms::list_from_vec_locs`) and add \
          a `// core-build-ok: <how they stay rooted>` comment.\n\n",
     );
     for h in &hits {

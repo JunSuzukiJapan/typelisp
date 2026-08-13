@@ -6,6 +6,7 @@
 
 pub mod resolved;
 pub mod core;
+pub mod forms;
 pub mod repr;
 pub mod registry;
 pub mod checker;

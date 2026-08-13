@@ -2081,7 +2081,7 @@ fn arg_pairs(f: &mut Items, reprs: &[Repr], args: &[Value], cx: Ctx) -> Result<(
 /// root — at the `return`, so the pairs reached the caller unrooted and stayed
 /// that way until its `extend`. Nothing allocated in that window, which is why
 /// it never broke; nothing said so either, and a `Vec<Value>` is invisible to
-/// the collector (`Checker::list_from_vec_locs`'s history is the same story).
+/// the collector (`check::forms::list_from_vec_locs`'s history is the same story).
 /// Pushing straight into the caller's node removes the window instead of
 /// documenting it.
 fn arg_pairs_with(

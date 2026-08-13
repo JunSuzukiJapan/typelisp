@@ -52,7 +52,7 @@ fn assert_stress_agrees(src: &str) {
 }
 
 /// A variadic `+`/`*` folds into a chain of rebuilt list forms, one `cons`
-/// per cell (`Checker`'s `list_from_vec_locs`).
+/// per cell (`check::forms::list_from_vec_locs`).
 #[test]
 fn variadic_arithmetic_folds_survive_collection() {
     assert_stress_agrees("(defun f () i32 (+ 1 2 3 4 5 6 7 8))");
