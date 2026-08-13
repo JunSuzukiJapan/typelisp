@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Regenerates the committed compiler-island AOT artifacts
-# (src/compiler_island.bc + src/compiler_island.fasl) from compiler.rs's
-# SOURCE. Run this whenever you edit that SOURCE; the
-# `island_artifacts_are_fresh` test fails until the artifacts match.
-# Interp-closure removal Stage 3.
+# Regenerates the committed compiler-island AOT artifact
+# (src/compiler_island.bc) from compiler.rs's SOURCE. Run this whenever you
+# edit that SOURCE; the `island_artifacts_are_fresh` test fails until the
+# artifact matches. Interp-closure removal Stage 3.
+#
+# Also run it after changing an `llvm-*` builder (eval_llvm_builtin_method):
+# that changes the emitted IR without changing SOURCE, and no test detects it
+# — the freshness hash covers SOURCE only.
 #
 #   scripts/regen-compiler-island.sh
 #

@@ -7,10 +7,9 @@
 //! embedded in the bitcode (a `__typelisp_island_source_hash` global)
 //! against a fresh hash of the current `SOURCE`.
 
-use typelisp::compile::bootstrap::read_embedded_source_hash;
+use typelisp::compile::bootstrap::{island_source_hash, read_embedded_source_hash};
 use typelisp::compile::llvm_context;
 use typelisp::compiler;
-use typelisp::fasl::source_hash;
 
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::Module;
@@ -27,7 +26,7 @@ fn island_artifacts_are_fresh() {
         .expect("src/compiler_island.bc has no embedded source hash — run scripts/regen-compiler-island.sh");
     assert_eq!(
         embedded,
-        source_hash(compiler::SOURCE),
+        island_source_hash(compiler::SOURCE).expect("hashing SOURCE failed"),
         "compiler_island.bc is stale relative to compiler.rs's SOURCE — run scripts/regen-compiler-island.sh"
     );
 }

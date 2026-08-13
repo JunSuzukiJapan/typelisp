@@ -1,8 +1,13 @@
-//! Regenerates the committed compiler-island AOT artifacts
-//! (`src/compiler_island.bc` + `src/compiler_island.fasl`) — interp-closure
-//! removal Stage 3. Run through `scripts/regen-compiler-island.sh` (which
-//! supplies the LLVM environment) whenever `compiler.rs`'s `SOURCE` changes;
-//! the `island_artifacts_are_fresh` test fails until this is re-run.
+//! Regenerates the committed compiler-island AOT artifact
+//! (`src/compiler_island.bc`) — interp-closure removal Stage 3. Run through
+//! `scripts/regen-compiler-island.sh` (which supplies the LLVM environment)
+//! whenever `compiler.rs`'s `SOURCE` changes; the
+//! `island_artifacts_are_fresh` test fails until this is re-run.
+//!
+//! Also re-run it after changing an `llvm-*` builder
+//! (`eval_llvm_builtin_method`), which changes the emitted IR without
+//! changing `SOURCE`. **Nothing detects that** — the freshness hash covers
+//! `SOURCE` only. See `compile::bootstrap`'s module doc comment.
 //!
 //! Paths are resolved from `CARGO_MANIFEST_DIR` (this crate's own root),
 //! never hardcoded — see the project's policy on machine-specific absolute

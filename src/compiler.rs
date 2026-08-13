@@ -374,7 +374,7 @@ pub const SOURCE: &str = r#"
 ;; decode would degrade one to a plain `Int` at the JIT boundary), and
 ;; neither are `bignum`/`ratio`'s payloads (`Type::Bignum`/`Type::Ratio`
 ;; are heap objects with no `rt_bignum_*`/`rt_ratio_*` support yet — see
-;; `ast_bridge`'s `Expr::Bignum` note), so a `Bind` pattern trying to
+;; `core_bridge::bignum_form`), so a `Bind` pattern trying to
 ;; extract any of these panics clearly here rather than producing garbage --
 ;; never reached for a `Wildcard` sub-pattern (`compile-ctor-subpatterns`
 ;; skips the call entirely then), so tag-only dispatch on `(sym _)`/
@@ -408,7 +408,7 @@ pub const SOURCE: &str = r#"
                       v
                       (if (eq variant 5)
                           ;; A `sym`'s `Symbol` payload is already a fully
-                          ;; tagged immediate (`ast_bridge::struct_field_kind`'s
+                          ;; tagged immediate (`Repr::field_kind`'s
                           ;; `Type::Symbol => 6` passthrough kind) — the exact
                           ;; same shape a `Sexpr::Sym`'s own tagged word already
                           ;; is, so no bit manipulation is needed, same as
@@ -436,7 +436,7 @@ pub const SOURCE: &str = r#"
                                   ;; `unit`(11): never a real `Sexpr`
                                   ;; variant -- this number only ever
                                   ;; arrives as a *struct/enum field* kind
-                                  ;; (`ast_bridge::struct_field_kind`), the
+                                  ;; (`Repr::field_kind`), the
                                   ;; decode half of `compile-tag-struct-
                                   ;; field`'s constant `6`. The stored word
                                   ;; is discarded for the same reason it was
@@ -449,7 +449,7 @@ pub const SOURCE: &str = r#"
                                       (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))))))))
 
 ;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
-;; same `ast_bridge::struct_field_kind`/`Sexpr`-variant numbering (`1`=int
+;; same `Repr::field_kind`/`Sexpr`-variant numbering (`1`=int
 ;; `2`=float `3`=char `4`=bool `6`=str/`Sexpr`/nested-boxed-struct/`Fn`
 ;; passthrough — a `defstruct`/`Vector<T>`/`cons-cell<K,V>`/closure-typed
 ;; field's value is already a properly tagged `Sexpr`, so it passes through
@@ -493,7 +493,7 @@ pub const SOURCE: &str = r#"
                           (const-i64 builder 6)
                           (panic "compile-tag-struct-field: field type is not representable in compiled code yet"))))))))
 
-;; `names` is now a list of `(name . kind)` pairs (`ast_bridge::tagged_sym_list`
+;; `names` is now a list of `(name . kind)` pairs (`core_bridge::name_kind_list`
 ;; — `kind` generalized from a plain `is-fn` `Bool` to a 3-way `Int` tag in
 ;; Stage 6), not bare symbols — `kind` itself isn't needed here (binding a
 ;; value doesn't yet decide anything about its ownership; `retain-bindings`, called
@@ -520,7 +520,7 @@ pub const SOURCE: &str = r#"
 ;; simply never read.
 ;;
 ;; `kind >= 10` (closure-representation unification, Stage 4 — see
-;; `ast_bridge::tagged_sym_list`'s doc comment for the `10 + struct_field_kind`
+;; `core_bridge::name_kind_list`'s doc comment for the `10 + struct_field_kind`
 ;; numbering): this parameter is captured by some closure nested in its own
 ;; function body, so it must be a shared `BoxedObj::Cell` (`rt_cell_new`), not
 ;; a plain stack slot — a `setf` inside the capturing closure has to be
@@ -577,8 +577,8 @@ pub const SOURCE: &str = r#"
 ;; (no-capture) path this leaves untouched.
 ;;
 ;; Every entry `names` (`captured`/`lcaptured`) can ever hold is `kind >= 10`
-;; now (closure-representation unification, Stage 4 — `ast_bridge`'s shared
-;; captured-list builder tags *every* capture as cell-boxed, unconditionally
+;; now (closure-representation unification, Stage 4 — `core_bridge`'s shared
+;; captured-list builder `captured_with_reprs` tags *every* capture as cell-boxed,
 ;; — see `Ctx::cell_names`'s doc comment), so unlike `bind-params` there is no
 ;; plain-value branch to keep: the value copied out of the env array is
 ;; already a valid cell reference (whatever produced this closure's env array
@@ -614,7 +614,7 @@ pub const SOURCE: &str = r#"
 
 ;; Computes `build-make-closure`'s `sexpr_mask` argument (formerly
 ;; `fn_mask`): a bitmask, one bit per captured slot, set wherever that
-;; slot's `kind` tag (`ast_bridge::binding_kind` — `0`=plain, `2`=sexpr;
+;; slot's `kind` tag (`Repr::binding_kind` — `0`=plain, `2`=sexpr;
 ;; Stage 6 of the Sexpr-representation plan generalized this from a plain
 ;; `is-fn` `Bool`, see `tagged_sym_list`'s doc comment) is exactly `2`
 ;; (sexpr) — entirely a *host*-level computation (no LLVM IR involved,
@@ -1316,7 +1316,7 @@ pub const SOURCE: &str = r#"
 ;; `compile-struct-field`: field `idx` of a boxed enum value, fetched via
 ;; `rt_data_field` (the enum peer of `rt_struct_field_get`) then decoded
 ;; through `compile-sexpr-field` per this field's own `kind`
-;; (`ast_bridge::struct_field_kind`'s numbering — enum fields are tagged the
+;; (`Repr::field_kind`'s numbering — enum fields are tagged the
 ;; same way a struct's are now, see `translate_construct`'s doc comment).
 (defun compile-box-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind i64) (idx i32)) llvm-value
   (let ((args-ptr (alloca-args builder 2)))
@@ -1331,7 +1331,7 @@ pub const SOURCE: &str = r#"
 ;; `build-int-to-ptr` here) is fetched via `rt_struct_field_get` -- the exact
 ;; same call `compile-field-get` makes -- then decoded through
 ;; `compile-sexpr-field` per this field's own `kind`
-;; (`ast_bridge::struct_field_kind`'s numbering, reused verbatim; a scalar/
+;; (`Repr::field_kind`'s numbering, reused verbatim; a scalar/
 ;; passthrough kind's own `idx` parameter is unused, so `0` is passed, the
 ;; same convention `compile-field-get` follows).
 (defun compile-struct-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind i64) (idx i32)) llvm-value
@@ -1343,7 +1343,7 @@ pub const SOURCE: &str = r#"
 
 ;; The literal tagged `Sexpr::Str` "option", built directly from raw
 ;; Unicode scalar constants (`rt_str_new`'s own "raw char scalars"
-;; contract — no `ast_bridge::str_literal_form` AST node needed) — for a
+;; contract — no `core_bridge::str_form` AST node needed) — for a
 ;; natively-compiled builtin that must synthesize a real `Option<T>` value
 ;; with no corresponding source-level `Option::some`/`none` call site to
 ;; derive a type-name form from (`try-bignum->int`'s `rt_data_new` calls
@@ -1470,7 +1470,7 @@ pub const SOURCE: &str = r#"
 ;; `(float bits)` (Sexpr/RtValue unification, Stage 0)
 ;; -- a bare `f64` literal. `bits` is the literal's raw
 ;; `f64::to_bits` pattern embedded as a plain `Int`
-;; node by `ast_bridge::ast_to_sexpr_scoped`'s
+;; node by `core_bridge::to_island`'s
 ;; `Expr::Float` arm. Like `compile-int`, this returns
 ;; the *plain, untagged* bit pattern -- **not** a boxed
 ;; `Sexpr::Float` (that would be `rt_float_new`,
@@ -1483,7 +1483,7 @@ pub const SOURCE: &str = r#"
 ;; `compile-construct-sexpr`'s `build-shl`/tag-OR is
 ;; what actually makes it a `Sexpr::Int`).
 ;; `bits` arrives as two 32-bit halves `(float hi lo)`
-;; (`ast_bridge`'s `Expr::Float`, interp-closure removal
+;; (`core_bridge`'s `float` node, interp-closure removal
 ;; Stage 8a): a single tagged `Sexpr` `Int` would lose
 ;; the top 3 bits of a full-width `f64` pattern when
 ;; read back here (`sexpr-int` = `>> 3`), decoding e.g.
@@ -1500,7 +1500,7 @@ pub const SOURCE: &str = r#"
 ;; `(str (int c0) (int c1) ...)` (Stage 7 of the
 ;; Sexpr-representation plan, `docs/implementation-log.md`)
 ;; — a string literal's content, one `(int c)` node per
-;; character (`ast_bridge`'s `Expr::Str` doc comment
+;; character (`core_bridge::str_form`'s doc comment
 ;; explains why not a pre-allocated `Value::Str`: the
 ;; target program's `Heap` doesn't exist yet when this
 ;; IR is built). Builds a fresh `args-ptr` array of one
@@ -1536,7 +1536,7 @@ pub const SOURCE: &str = r#"
         ()))
 
 ;; `(bignum (int sign) (int d0) (int d1) ...)` —
-;; `ast_bridge::bignum_literal_form`'s doc comment.
+;; `core_bridge::bignum_form`'s doc comment.
 ;; Same shape as `compile-str`/`store-str-chars` (one
 ;; `(int _)` node per raw payload scalar, reused
 ;; verbatim to fill the args array), calling
@@ -1553,7 +1553,7 @@ pub const SOURCE: &str = r#"
           (build-call builder (get-function m "rt_bignum_new") args-ptr n)))))
 
 ;; `(ratio numer-form denom-form)` —
-;; `ast_bridge::ratio_literal_form`'s doc comment. Both
+;; `core_bridge`'s `ratio` arm. Both
 ;; sub-forms are themselves `(bignum ...)` nodes,
 ;; compiled via the ordinary `compile-value` dispatch
 ;; (so a `ratio` literal's numerator/denominator go
@@ -1582,7 +1582,7 @@ pub const SOURCE: &str = r#"
 ;; ordinary or a `labels` sibling/self referenced *as
 ;; a value* rather than called (e.g. a `labels`
 ;; block's own trailing body bare-returning one of
-;; its siblings — `ast_bridge::ast_to_sexpr_scoped`'s
+;; its siblings — `core_bridge::to_island`'s
 ;; `Expr::Var` arm never distinguishes the two: it
 ;; always emits `(var name is-fn)` regardless of
 ;; whether `name` happens to be a sibling,
@@ -1599,7 +1599,7 @@ pub const SOURCE: &str = r#"
     (resolve-value m fn-name builder env fn-env captured (sexpr-str (sexpr-car (sexpr-cdr e)))))
 
 ;; `(cellvar name kind)` — a reference to a cell-boxed
-;; name (`ast_bridge`'s `cx.cell_names`, closure-
+;; name (`core_bridge`'s `Ctx::cell_names`, closure-
 ;; representation unification Stage 4): unlike
 ;; `compile-var`, `env`'s slot holds a *cell reference*
 ;; (`bind-params`/`bind-let-values`/`bind-captures`'
@@ -1613,7 +1613,7 @@ pub const SOURCE: &str = r#"
 ;; captured binding), so unlike `resolve-value` there is
 ;; no `fn-env` fallback to try; a name absent from
 ;; `env` here is a genuine internal-invariant break
-;; (`ast_bridge` only ever emits this tag for a name it
+;; (`core_bridge` only ever emits this tag for a name it
 ;; already knows is a cell-boxed local/param/capture).
 (defun compile-cellvar ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (e Sexpr))llvm-value
     (let ((name (sexpr-str (sexpr-car (sexpr-cdr e)))))
@@ -1770,9 +1770,9 @@ pub const SOURCE: &str = r#"
 ;; side effects).
 ;; `args` is tagged the same `(kind . form)` way
 ;; `compile-call`'s own argument list is
-;; (`ast_bridge`'s `Expr::Assoc` translation switched
-;; from `ast_list_to_sexpr` to `tagged_ast_list_to_sexpr`
-;; for this), so a receiver/argument that's itself
+;; (`core_bridge::translate_assoc` builds them with
+;; `arg_pairs`, which pairs each argument with its
+;; repr), so a receiver/argument that's itself
 ;; `Fn`- or `Sexpr`-typed gets the same retain/GC-root
 ;; treatment `compile-call-args` already gives an
 ;; ordinary call's arguments — `args[0]` is the
@@ -2184,10 +2184,10 @@ pub const SOURCE: &str = r#"
 
 ;; `(llvm-op opid (kind . arg)...)` — an `llvm-*`/
 ;; native-`Scope<V>` builtin method call
-;; (`ast_bridge`'s `Expr::Assoc` lowering, interp-
+;; (`core_bridge::translate_assoc`'s lowering, interp-
 ;; closure removal Stage 1): one call to the generic
 ;; Rust-side dispatch shim `rt_llvm_call`, passing the
-;; translate-time-resolved op id (`ast_bridge::
+;; translate-time-resolved op id (`symbols::
 ;; llvm_op_id`'s stable hash) in slot 0 and the
 ;; compiled arguments after it. Argument handling is
 ;; exactly `compile-assoc-user`'s (`compile-call-args`
@@ -2211,7 +2211,7 @@ pub const SOURCE: &str = r#"
 ;; `(dyn-new vtable-id (kind . value-form))` — box a
 ;; concrete value as a trait object (`Expr::DynBox`,
 ;; TODO T4). The vtable id is a translate-time
-;; constant (`ast_bridge::translate_dyn_new`), so this
+;; constant (`core_bridge::translate_dyn_new`), so this
 ;; is just `rt_dyn_new(id, value)`. Argument handling
 ;; is `compile-llvm-op`'s: slot 0 holds the raw
 ;; constant, `compile-call-args` fills the rest and
@@ -2301,7 +2301,7 @@ pub const SOURCE: &str = r#"
 ;; Fills a previously-`alloca-args`'d array, one
 ;; compiled argument per slot, exactly as before —
 ;; each `forms` element is a `(kind . arg-form)` pair
-;; (`ast_bridge::tagged_ast_list_to_sexpr`), but no
+;; (`core_bridge::arg_pairs`), but no
 ;; retain/release bookkeeping is keyed on `kind`
 ;; anymore (the closure-representation unification
 ;; retired the `ClosureBox` refcount scheme a `kind =
@@ -2335,7 +2335,7 @@ pub const SOURCE: &str = r#"
         0))
 
 ;; `(apply name (is-fn . arg-form)...)` — a direct
-;; call to a name `ast_bridge::translate_apply`
+;; call to a name `core_bridge::translate_apply`
 ;; already proved (at bridge-translation time)
 ;; resolves to a currently in-scope `labels` sibling
 ;; or self; this only has to look it up in `fn-env`,
@@ -2380,7 +2380,7 @@ pub const SOURCE: &str = r#"
 ;; registered there. A top-level `defun` can never
 ;; capture an outer scope (`Checker::check_defun`
 ;; always starts from an empty `Env` — see
-;; `ast_bridge::translate_call`'s doc comment), so
+;; `core_bridge::translate_call`'s doc comment), so
 ;; unlike `compile-apply` this never needs an env
 ;; array: always a plain `build-call`.
 ;;
@@ -2436,7 +2436,7 @@ pub const SOURCE: &str = r#"
 ;; `(apply-indirect callee-form (is-fn . arg-form)...)`
 ;; — `Expr::Apply`, labels/closures Stage 4, the
 ;; general indirect-dispatch case
-;; (`ast_bridge::translate_indirect_apply`'s doc
+;; (`core_bridge::translate_apply`'s doc
 ;; comment explains why this is a *separate* tag from
 ;; `(apply name arg...)` rather than the plan's
 ;; originally sketched `(apply (direct|indirect ...)
@@ -2647,7 +2647,7 @@ pub const SOURCE: &str = r#"
 ;; `(lambda name ((captured . kind)...) ((param . kind)...) body)`
 ;; — `Expr::Lambda` (a standalone escaping value) or a
 ;; synthesized `Expr::FnRef` forwarding wrapper
-;; (`ast_bridge::translate_fnref`) — labels/closures
+;; (`core_bridge::translate_fnref`) — labels/closures
 ;; Stage 4. Unlike every other tag `compile-value`
 ;; dispatches on, this one's result is *itself* a
 ;; fresh function, not a value computed from existing
@@ -2660,7 +2660,7 @@ pub const SOURCE: &str = r#"
 ;; calling through), compiles its single-expression
 ;; body with a *fresh* env/fn-env (a `lambda` never
 ;; gets direct-call access to whatever `labels` scope
-;; encloses it — see `ast_bridge::translate_lambda`'s
+;; encloses it — see `core_bridge::translate_lambda`'s
 ;; doc comment), R1-pushing GC roots for its own
 ;; params/captures on entry and R2-popping them on
 ;; exit exactly like `compile-function`'s own
@@ -3021,7 +3021,7 @@ pub const SOURCE: &str = r#"
       (None (panic "compile-break: not inside a loop"))))
 
 ;; `(return is-fn value-form)` — `Expr::Return`,
-;; including the implicit `Unit` `ast_bridge` already
+;; including the implicit `Unit` `core_bridge` already
 ;; substitutes for a value-less `(return)`. Like
 ;; `compile-if-branch`'s own branch value, a
 ;; *borrowed* `Fn`-typed value needs an explicit
@@ -3086,7 +3086,7 @@ pub const SOURCE: &str = r#"
 ;; accepted, documented gap rather than a solved one.
 ;;
 ;; `kind` (generalized from a plain `is-fn` `Bool` —
-;; `ast_bridge::translate_set`'s doc comment): `kind =
+;; `core_bridge::translate_set`'s doc comment): `kind =
 ;; 1` still drives `compile-if-branch`'s existing
 ;; borrowed-`Fn`-retain logic exactly as `is-fn` did.
 ;; `kind = 2` is new — the target's own slot has a
@@ -3202,8 +3202,8 @@ pub const SOURCE: &str = r#"
                              (let ((field-kinds (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))
                                ;; `downcast`/`type-name-form`
                                ;; (Sexpr-user-ADT design plan
-                               ;; §4, `ast_bridge::
-                               ;; pattern_to_sexpr`'s trailing
+                               ;; §4, `core_bridge::
+                               ;; translate_pattern`'s trailing
                                ;; two fields): a Sexpr-downcast
                                ;; `pat-ctor` (the checker
                                ;; discovered this struct/enum
@@ -3232,9 +3232,9 @@ pub const SOURCE: &str = r#"
                            ;; `(pat-typetest type-name-form
                            ;; inner-pattern)` -- `(the Type
                            ;; pattern)`'s whole-value Sexpr
-                           ;; downcast (`ast_bridge::
-                           ;; pattern_to_sexpr`'s
-                           ;; `Pattern::TypeTest` arm). No
+                           ;; downcast (`core_bridge::
+                           ;; translate_pattern`'s
+                           ;; `the` arm). No
                            ;; variant restriction (`-1`):
                            ;; matches any variant of an
                            ;; enum `Type`, the whole point
@@ -3292,7 +3292,7 @@ pub const SOURCE: &str = r#"
 
 ;; `(match is-fn scrutinee-form ((pattern-form .
 ;; body-form)...) scrut-kind)` -- `Expr::Match`
-;; (`ast_bridge::translate_match`; any scrutinee type
+;; (`core_bridge::translate_match`; any scrutinee type
 ;; that isn't `Sexpr`/a sum-ADT box/a boxed struct
 ;; stays `unsupported`). Compiles the scrutinee
 ;; once, then tries each arm in textual order
@@ -3359,7 +3359,7 @@ pub const SOURCE: &str = r#"
       (let ((scrut-form (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
         (let ((arms (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
           ;; The node's trailing `scrut-kind` field
-          ;; (`ast_bridge::translate_match`) isn't read
+          ;; (`core_bridge::translate_match`) isn't read
           ;; here — every scrutinee kind now roots
           ;; identically (see this function's own doc
           ;; comment) — only `compile-pattern-test`'s
@@ -3438,7 +3438,7 @@ pub const SOURCE: &str = r#"
 ;; the Sexpr/RtValue unification plan —
 ;; `docs/implementation-log.md` — with `mutable`/
 ;; `type-name-str`) — `is-sexpr`/`mutable`
-;; (`ast_bridge::is_sexpr_type`/`translate_construct`'s
+;; (`Repr::Sexpr`/`translate_construct`'s
 ;; own `mutable` parameter, read off `Expr::Construct`'s
 ;; field) together dispatch between `Sexpr`'s own 8
 ;; variants (`compile-construct-sexpr`), a `mutable`
@@ -3449,7 +3449,7 @@ pub const SOURCE: &str = r#"
 ;; (`compile-construct-box`) — see those three
 ;; functions' doc comments.
 ;; `variant` `5`/`10` (quoted `Sym`/`Path` —
-;; `ast_bridge::translate_quote`'s doc comment) are
+;; `core_bridge::quoted_form`'s doc comment) are
 ;; peeled off *here*, before delegating to
 ;; `compile-construct-sexpr`, rather than folded into
 ;; that function's own already-deep dispatch chain —
@@ -3465,7 +3465,7 @@ pub const SOURCE: &str = r#"
         (let ((type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
           (let ((variant (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
             (let ((arg-forms (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
-              ;; `100`/`101` (`ast_bridge::QUOTE_SYM_MARKER`/
+              ;; `100`/`101` (`core_bridge::SEXPR_SYM`/
               ;; `QUOTE_PATH_MARKER`) are out-of-band markers a
               ;; quoted `Sym`/`Path` *literal* uses — deliberately
               ;; not the real `sym`/`path` Sexpr variant indices
@@ -3489,7 +3489,7 @@ pub const SOURCE: &str = r#"
                               (compile-construct-box m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name-form variant arg-forms)))))))))))
 
 ;; `(construct true false empty 100 name-form)` — a
-;; quoted symbol literal (`ast_bridge::translate_quote`'s
+;; quoted symbol literal (`core_bridge::quoted_form`'s
 ;; `Sym` arm, `QUOTE_SYM_MARKER`). `name-form` is an
 ;; ordinary `(str ...)` node (`str_literal_form`);
 ;; compiling it yields a fully tagged `Sexpr::Str`,
@@ -3503,7 +3503,7 @@ pub const SOURCE: &str = r#"
         (build-call builder (get-function m "rt_intern_symbol") args-ptr 1))))
 
 ;; `(construct true false empty 101 seg-form...)` — a
-;; quoted `::`-path literal (`ast_bridge::translate_quote`'s
+;; quoted `::`-path literal (`core_bridge::quoted_form`'s
 ;; `Path` arm, `QUOTE_PATH_MARKER`), one `(str ...)`
 ;; node per segment. `compile-construct-path-segs`
 ;; interns each segment (`rt_intern_symbol`, same as
@@ -3550,26 +3550,35 @@ pub const SOURCE: &str = r#"
 ;; `Str`, exactly what `compile-str` already produces).
 ;; Each remaining field is compiled then re-tagged by
 ;; `compile-tag-struct-field` per its own
-;; `ast_bridge::struct_field_kind`
+;; `Repr::field_kind`
 ;; (`compile-construct-boxed-struct-fields`) before
 ;; being handed to `rt_struct_new`, which expects
 ;; every argument after the type name to already be a
 ;; properly tagged `Sexpr` (that function's own
 ;; `decode()` call on each). The freshly built struct
 ;; is `push-permanent-sexpr-root`ed immediately —
-;; unlike a `let`/parameter binding's own scope-based
-;; `kind = 2` rooting (`ast_bridge::binding_kind`
-;; deliberately doesn't classify a `mutable` struct
-;; type as `KIND_SEXPR`: this permanent root already
-;; keeps every boxed struct alive from birth, so
-;; per-binding push/pop would only add redundant
-;; bookkeeping to every scope the value crosses),
-;; a permanent root is the same accepted-leak
-;; treatment `compile-construct-box-fields` already
-;; gives a general-ADT box's own `Sexpr`-typed fields,
-;; just applied to the struct itself rather than one
-;; of its fields — sidesteps needing to track this
-;; struct's own binding scope at all.
+;; the same accepted-leak treatment
+;; `compile-construct-box-fields` already gives a
+;; general-ADT box's own `Sexpr`-typed fields, just
+;; applied to the struct itself rather than to one of
+;; its fields, so this sidesteps tracking the struct's
+;; own binding scope at all.
+;;
+;; This root used to be the *only* thing keeping such a
+;; struct alive: `binding_kind` classified a struct
+;; binding `KIND_PLAIN`, on the argument that a
+;; permanent root already keeps every boxed struct alive
+;; from birth and per-binding push/pop would be
+;; redundant. True, but it made correctness rest on a
+;; leak — a permanent root is never popped, by design
+;; (`rt_push_permanent_sexpr_root`'s doc comment), so
+;; whoever gives compiled boxes real lifetimes would
+;; have removed the only thing standing between an
+;; unrooted binding and a collection. `Repr::class` now
+;; derives both kinds from one judgement, so a struct
+;; binding is `kind = 2` like any other reclaimable
+;; value and this root is redundant rather than load-
+;; bearing.
 (defun compile-construct-boxed-struct ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (type-name-form Sexpr) (arg-forms Sexpr))llvm-value
     (let ((argc (sexpr-list-length arg-forms)))
       (let ((args-ptr (alloca-args builder (+ argc 1))))
@@ -3587,8 +3596,8 @@ pub const SOURCE: &str = r#"
 ;; the boxed-struct analogue of
 ;; `compile-construct-box-fields`. Each `forms`
 ;; element is a `(kind . field-form)` pair
-;; (`ast_bridge::struct_field_ast_list_to_sexpr`,
-;; tagged by `ast_bridge::struct_field_kind` rather
+;; (`core_bridge::arg_pairs`,
+;; tagged by `Repr::field_kind` rather
 ;; than `binding_kind`); `compile-tag-struct-field`
 ;; turns the field's own compiled (untagged, for a
 ;; scalar kind) value into the tagged `Sexpr`
@@ -3618,12 +3627,12 @@ pub const SOURCE: &str = r#"
 ;; `i`-th field — reusing
 ;; `compile-construct-boxed-struct-fields` unchanged to
 ;; fill those (starting at `2` instead of `1`), since
-;; `ast_bridge::translate_construct`'s enum branch now
+;; `core_bridge::translate_construct`'s enum branch now
 ;; tags its fields by `struct_field_kind`
 ;; (`struct_field_ast_list_to_sexpr`) exactly like the
 ;; `mutable` branch does — every enum type compiled
 ;; code can ever mention is heap-repr by construction
-;; (see `ast_bridge::struct_field_kind`'s doc comment),
+;; (see `Repr::field_kind`'s doc comment),
 ;; so there is no longer a distinct "general-ADT field"
 ;; tagging scheme to keep separate. The freshly built
 ;; enum value is `push-permanent-sexpr-root`ed
@@ -3734,7 +3743,7 @@ pub const SOURCE: &str = r#"
 ;; `compile-construct-boxed-struct` built (this tag is
 ;; only ever synthesized by `Checker::check_defstruct`
 ;; as a field accessor's own body, never for a `Sexpr`
-;; — see `ast_bridge::translate_field_get`'s doc
+;; — see `core_bridge::translate_field`'s doc
 ;; comment, and every `defstruct` is `mutable`): the
 ;; object's own tagged value is handed straight to
 ;; `rt_struct_field_get` (which decodes/re-indexes it
@@ -3743,13 +3752,13 @@ pub const SOURCE: &str = r#"
 ;; raw `Sexpr` it returns is decoded back into this
 ;; field's own compiled representation by
 ;; `compile-sexpr-field` (reused verbatim — `kind`
-;; *is* `ast_bridge::struct_field_kind`'s value, the
+;; *is* `Repr::field_kind`'s value, the
 ;; same `Sexpr`-variant numbering `compile-sexpr-field`
 ;; already expects; its own `idx` parameter is unused
 ;; for every kind this can produce, so `0` is passed).
 ;; `idx` (the *field* index, unrelated to `kind`) is
 ;; recovered from `idx-unary-list`'s own length
-;; (`ast_bridge::idx_unary_list`'s doc comment
+;; (`core_bridge::translate_field`'s doc comment
 ;; explains why it isn't simply a `Sexpr` `Int`) — no
 ;; header offset here, unlike the general-ADT box
 ;; layout's own variant-tag slot: a `BoxedObj::Struct`'s
@@ -3790,8 +3799,8 @@ pub const SOURCE: &str = r#"
                       (const-i64 builder 0)))))))))))
 
 ;; `(vector-op method kind v-form arg-form...)` — a
-;; `Vector<T>` builtin method (`ast_bridge`'s
-;; `translate_vector_method`), lowered here rather than
+;; `Vector<T>` builtin method
+;; (`core_bridge::translate_vector_op`), lowered here rather than
 ;; through `compile-assoc` because these have no
 ;; compiled `defmethod` body. `kind` is `T`'s
 ;; `struct_field_kind`; the vector itself is a boxed
@@ -3928,8 +3937,8 @@ pub const SOURCE: &str = r#"
                                        (const-i64 builder 0)))))))))))))))))
 
 ;; `(hashtable-op method key-kind val-kind ht-form
-;; ...)` — a `HashTable<K,V>` builtin (`ast_bridge`'s
-;; `translate_hashtable_method`), lowered to the
+;; ...)` — a `HashTable<K,V>` builtin
+;; (`core_bridge::translate_hashtable_op`), lowered to the
 ;; `rt_hashtable_*` family (the mem layer owns the key
 ;; hashing). `new` builds an empty map (no operands);
 ;; `set` tags its key/value by `key-kind`/`val-kind`
@@ -4065,7 +4074,7 @@ pub const SOURCE: &str = r#"
 ;; `rt_global_get` call by id. The permanent root
 ;; always holds a properly *tagged* `Sexpr` (whatever
 ;; `Interp::promote_global` produced), so `kind`
-;; (`ast_bridge::struct_field_kind`'s numbering — the
+;; (`Repr::field_kind`'s numbering — the
 ;; same one `compile-field-get` already uses) untags
 ;; it back to the global's own declared representation
 ;; via `compile-sexpr-field` (this function's own

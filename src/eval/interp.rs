@@ -606,7 +606,7 @@ impl Interp {
         if check_hash {
             let embedded = crate::compile::bootstrap::read_embedded_source_hash(&module)
                 .ok_or_else(|| "compiler island bitcode has no embedded source hash".to_string())?;
-            if embedded != crate::fasl::source_hash(crate::compiler::SOURCE) {
+            if embedded != crate::compile::bootstrap::island_source_hash(crate::compiler::SOURCE)? {
                 return Err(
                     "compiler island bitcode is stale relative to compiler.rs's SOURCE — run scripts/regen-compiler-island.sh"
                         .to_string(),
