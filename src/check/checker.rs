@@ -2117,8 +2117,8 @@ impl Checker {
     }
 
     /// The type/constructor registry — exposed so a caller (e.g. the REPL)
-    /// can resolve an ADT variant's constructor name when printing a
-    /// `RtValue::Data` result.
+    /// can resolve an ADT variant's constructor name when printing an enum
+    /// result (the box stores the variant index, not its name).
     pub fn registry(&self) -> &Registry {
         &self.reg
     }
@@ -2594,7 +2594,7 @@ impl Checker {
     /// through its own `Sexpr` constructor (`sexpr_ctor_for`) exactly as if
     /// the caller had written e.g. `(Int e)` by hand — `construct_sexpr`
     /// (`crate::eval::interp`) only ever reads the field's *runtime* value
-    /// (an `i32`/`i64` argument both evaluate to the same `RtValue::Int`),
+    /// (an `i32`/`i64` argument both evaluate to the same `Value::Int`),
     /// so this never goes through the normal field-type validation
     /// `check_construct` would otherwise apply, but is sound for the same
     /// reason. An `elem_ty` with no `Sexpr` encoding (e.g. `Option<T>`) is a
@@ -3916,8 +3916,8 @@ impl Checker {
         self.defun_form(heap, mangled, &params, &ret, public, &body)
     }
 
-    /// Whether a declared type's *runtime representation* is a heap value
-    /// (`RtValue::Sexpr` wrapping a `mem::Value`) — the built-in `Sexpr`
+    /// Whether a declared type's *runtime representation* is a heap value —
+    /// the built-in `Sexpr`
     /// itself, any `AdtKind::Struct` type (`defstruct`/`Vector<T>`/
     /// `cons-cell<K,V>`), `HashTable<K,V>` (boxed since the unification's
     /// Stage 5, though its `AdtDef` still says `Sum` — a recorded historical
@@ -7021,7 +7021,7 @@ impl Checker {
     /// and never occupies a bare/flat name (the "don't pollute the
     /// namespace" design goal this whole redesign was scoped around).
     /// `check_construct` builds instances (reading `AdtKind::Struct` to
-    /// choose `RtValue::Struct` over `Data`) — generic substitution there
+    /// choose a mutable struct box over an enum one) — generic substitution there
     /// (and in `match`'s `check_ctor_pattern`) is already `AdtDef.params`-
     /// generic, shared with `Option`/`Result`/`HashTable`, so a generic
     /// `defstruct` needs no changes to either.
@@ -7234,7 +7234,7 @@ impl Checker {
     /// qualified (`Name::Variant`) or bare after `(use Name)`, exactly like the
     /// built-ins — `register_ctors` is deliberately *not* called, so no bare
     /// name is claimed until an explicit `use`. `match`/`if-let`, exhaustiveness
-    /// checking, generic instantiation, and the `RtValue::Data` runtime
+    /// checking, generic instantiation, and the enum-box runtime
     /// representation are all the shared sum-type machinery, unchanged (that is
     /// how `Option`/`Result` already work). Unlike `defstruct`, no field
     /// accessors/setters are synthesized: an enum value is immutable and its
@@ -7674,8 +7674,8 @@ impl Checker {
                 // A `Symbol` is a valid `Sexpr` datum wherever a `Sexpr` is
                 // expected (a `gensym`'d temp flowing into a `list`/`cons`/
                 // quasiquote code position). Its runtime representation is
-                // already exactly its `Sexpr::Sym` — `RtValue::Sexpr(Value::
-                // Symbol)`, see `construct_sexpr`'s SEXPR_SYM arm — so widening
+                // already exactly its `Sexpr::Sym` — a `Value::Symbol`, see
+                // `construct_sexpr`'s SEXPR_SYM arm — so widening
                 // the static type needs no runtime work. Emit a transparent
                 // *retype*, not a `Sexpr::Sym` constructor node: the
                 // interpreter treated that constructor as a no-op, but the
@@ -7695,7 +7695,7 @@ impl Checker {
                 // have. Exactly like the `Symbol` case just above, its
                 // runtime representation needs no conversion: every
                 // `is_heap_repr` type's instantiation already evaluates to
-                // `RtValue::Sexpr(Value::Boxed(_))` (`construct`'s
+                // a `Value::Boxed(_)` (`construct`'s
                 // mutable/enum arms in `Interp::eval`; `rt_struct_new`/
                 // `rt_data_new` in compiled code — see `is_heap_repr`'s doc
                 // comment for the two-tier "tagged Sexpr" unification this
@@ -8669,7 +8669,7 @@ impl Checker {
         if src.ty == target {
             return if try_variant { wrap_some(heap, self, src, target) } else { Ok(src) };
         }
-        // `i32`<->`i64`: a pure relabel, no runtime effect. `RtValue::Int` is
+        // `i32`<->`i64`: a pure relabel, no runtime effect. `Value::Int` is
         // uniformly `i64` regardless of which static width labels it (see
         // `registry::int_assoc`'s `int->float` doc comment) — there is no
         // real 32-bit-truncating representation anywhere in this codebase
@@ -11503,7 +11503,7 @@ fn is_symbol(heap: &Heap, v: Value, name: &str) -> bool {
 /// Every `to`-is-`i64` request is looked up as if `to` were `i32` instead:
 /// `float->int`/`bignum->int`/`char->int` (`registry.rs`) are always
 /// registered with a hardcoded `I32` return even though the underlying
-/// computation already produces a full `i64` (`RtValue::Int` is uniformly
+/// computation already produces a full `i64` (`Value::Int` is uniformly
 /// `i64` regardless of which static width labels it) — `check_as` relabels
 /// the result to `I64` afterward on that branch, so this table only ever
 /// needs to name the `i32` method once. An `i32`<->`i64` source/target pair

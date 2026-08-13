@@ -1,4 +1,4 @@
-//! Keeps cons-building inside the checker going through `check::core`.
+//! Keeps cons-building on the core-IR paths going through `check::core`.
 //!
 //! `Heap::cons` collects whenever the free list is empty, so every value built
 //! but not yet reachable from a root can be freed by the *next* allocation.
@@ -8,9 +8,10 @@
 //! freshly rebuilt syntax on the floor, which `tests/checker_gc_stress_test.rs`
 //! reproduces as a mangled `impl` receiver and a runaway `setf` expansion.
 //!
-//! `check::core`'s builders (`list`, `tagged`, `Items`) root as they go, so
-//! this test keeps new call sites pointed at them: a raw `.cons(` under
-//! `src/check/` has to say why it is not using them.
+//! `check::core`'s builders (`pair`, `list`, `tagged`, `Items`) root as they
+//! go, so this test keeps new call sites pointed at them: a raw `.cons(` in a
+//! scanned file has to say why it is not using them. See [`scanned_files`] for
+//! which files those are and why the set is not just the checker.
 //!
 //! **When this test fails**, the question to ask is what the site is building:
 //!
@@ -18,7 +19,8 @@
 //! |---|---|
 //! | a core form node `(tag field...)` | `core::tagged` / `core::Items` |
 //! | a bare list of already-built values | `core::list` |
-//! | read *syntax* being rewritten in place | root it yourself, and mark it |
+//! | a `(a . b)` pair that is not a list | `core::pair` |
+//! | read *syntax*, user data, or a runtime environment | root it yourself, and mark it |
 //!
 //! A site in the last row opts out with a `// core-build-ok: <reason>` comment
 //! on the offending line or in the comment block directly above it — and the
@@ -43,33 +45,55 @@ struct Hit {
     text: String,
 }
 
-/// Every `.rs` file under `src/check/`, except `core.rs` — the one place whose
-/// whole job is to cons correctly.
-fn checker_files() -> Vec<PathBuf> {
-    let dir = repo_root().join("src").join("check");
+/// Every `.rs` file that builds or restores core IR: the checker that emits it,
+/// the evaluator and bridge that consume and rebuild it, and the fasl that
+/// reads it back from disk.
+///
+/// `src/check/core.rs` is excluded — it is the one place whose whole job is to
+/// cons correctly. So is `src/read/`: the reader is where cells come from, and
+/// its subject is syntax rather than core forms.
+///
+/// The scan started at `src/check/` alone, which was narrower than the hazard.
+/// `Heap::cons` does not care which module calls it, and the two biggest
+/// consumers of the IR — `compile::core_bridge` and `eval::interp::core_eval`
+/// — were building the same nodes by hand, outside it.
+fn scanned_files() -> Vec<PathBuf> {
+    let root = repo_root().join("src");
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(&dir).expect("src/check/ is readable") {
-        let p = entry.expect("readable dir entry").path();
-        if p.extension().is_some_and(|e| e == "rs") && p.file_name().is_some_and(|n| n != "core.rs") {
-            out.push(p);
+    let mut stack = vec![root.join("check"), root.join("compile"), root.join("eval")];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{} is readable: {}", dir.display(), e)) {
+            let p = entry.expect("readable dir entry").path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|e| e == "rs") && p.file_name().is_some_and(|n| n != "core.rs") {
+                out.push(p);
+            }
         }
     }
+    out.push(root.join("fasl.rs"));
     out.sort();
-    assert!(out.len() >= 4, "src/check/ scan found only {} files — is the walk broken?", out.len());
+    assert!(out.len() >= 12, "the scan found only {} files — is the walk broken?", out.len());
     out
 }
 
 #[test]
-fn cons_calls_in_the_checker_go_through_check_core() {
+fn cons_calls_go_through_check_core() {
     let mut hits: Vec<Hit> = Vec::new();
 
-    for path in checker_files() {
+    for path in scanned_files() {
         let rel = path.strip_prefix(repo_root()).unwrap().to_string_lossy().replace('\\', "/");
         let src = std::fs::read_to_string(&path).expect("source is readable");
         let lines: Vec<&str> = src.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
+            // A test module builds fixtures on purpose, and its conses are read
+            // next to the assertions that depend on them. The rule is about the
+            // lowering paths, so the scan stops where those end.
+            if trimmed.starts_with("#[cfg(test)]") {
+                break;
+            }
             // Comments describe the rule at least as often as they break it.
             if trimmed.starts_with("//") {
                 continue;
@@ -97,7 +121,7 @@ fn cons_calls_in_the_checker_go_through_check_core() {
         return;
     }
     let mut msg = String::from(
-        "\nA cons in the checker is not going through `check::core`.\n\n\
+        "\nA cons is not going through `check::core`.\n\n\
          `Heap::cons` can collect, so a value built here dies at the next \
          allocation unless something roots it. Build core form nodes with \
          `core::tagged`/`core::Items`, and plain lists with `core::list` — they \

@@ -481,9 +481,8 @@ pub const SOURCE: &str = r#"
                       ;; `unit`(11): the slot holds a tagged `Value::Empty`
                       ;; -- `(IMMEDIATE_NIL << 3) | TAG_IMMEDIATE`, i.e. the
                       ;; constant `6` (`typelisp-rt`'s `encode`), the same
-                      ;; word `interp::rtvalue_to_struct_field` writes for a
-                      ;; `()` field so an interpreted and a compiled writer
-                      ;; produce identical boxes. `v` (the plain `0`
+                      ;; word an interpreted writer puts in a `()` field, so
+                      ;; the two produce identical boxes. `v` (the plain `0`
                       ;; `compile-unit` produced) is deliberately discarded:
                       ;; a unit type has one value, so the slot carries no
                       ;; information and only has to hold a word the GC can

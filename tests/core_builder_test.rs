@@ -296,16 +296,3 @@ fn print_reads_the_numeric_boxes_a_literal_carries() {
     h.push_root(b2);
     assert_ne!(core::print(&h, a), core::print(&h, b2));
 }
-
-/// `unlowered` is Phase 2's scaffolding marker — the placeholder a `check_*`
-/// carries while its own lowering is still being written. It has to name the
-/// construct, because the whole point is that a still-unconverted syntax says
-/// which one it is instead of misbehaving.
-#[test]
-fn unlowered_names_the_construct_it_stands_in_for() {
-    let mut h = stress_heap();
-    let node = core::unlowered(&mut h, "CheckIf").unwrap();
-    h.push_root(node);
-    assert_eq!(core::print(&h, node), r#"(unlowered "CheckIf")"#);
-    assert_eq!(core::op(&h, node), Some("unlowered"));
-}

@@ -42,16 +42,6 @@ pub fn is_llvm_handle_ty(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, _) if path_is_builtin_any(p, &LLVM_HANDLE_TYPES))
 }
 
-/// Whether `ty` is a `Scope<V>`, for any `V`.
-///
-/// Every scope is one heap object (`StructPayload::Frames`) regardless of its
-/// element type, so this needs no recursion — unlike the handle test above,
-/// which a `Scope<llvm-value>` used to satisfy back when such a scope was a
-/// Rust-native object behind a registry handle.
-pub fn is_scope_ty(ty: &Type) -> bool {
-    matches!(ty, Type::Named(p, args) if path_is_builtin(p, "scope") && args.len() == 1)
-}
-
 /// Whether `ty` is `Option`/`Result`/a built-in error type/a user `defenum`,
 /// the latter decided by `kind_of` (see [`Repr::of_by`]).
 ///
@@ -66,13 +56,6 @@ pub fn is_enum_ty_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> b
         Type::Named(p, _) => kind_of(p) == Some(AdtKind::Sum),
         _ => false,
     }
-}
-
-/// [`is_enum_ty_by`] over the pre-resolved set form — the shape the compile
-/// pipeline hands around, where a path is an enum exactly when it is in the
-/// set.
-pub fn is_enum_ty(ty: &Type, enums: &HashSet<Path>) -> bool {
-    is_enum_ty_by(ty, &|p| if enums.contains(p) { Some(AdtKind::Sum) } else { None })
 }
 
 /// A runtime representation.

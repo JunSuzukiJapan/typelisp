@@ -6198,3 +6198,68 @@ panic: compile-sexpr-field: field type is not representable in compiled code yet
 bitcode の符号化は LLVM のバージョン依存なので、LLVM 17 のパッチリリースが違うと
 バイト列も変わりうる。これは誤検出ではない——コミット済み成果物が手元と別のコンパイラで
 作られていた、という事実そのもの。
+
+## cons セル化のあとの片付け（2026-08-13）
+
+Phase 2 完了後、不要になったもの・重複・単純に書けるようになったものを洗い出して片付けた。
+
+### 到達不能なコードは警告に出ない
+
+`pub` な項目には dead-code 警告が出ない。**警告 0 は「未実装の TODO が無い」を意味するが
+「到達不能なコードが無い」は意味しない**（[[feedback-dead-code-warnings-are-the-todo-list]] の裏面）。
+定義以外に参照が 1 つも無かったもの:
+
+- `repr::is_scope_ty` / `repr::is_enum_ty` — `Repr::Scope` と `is_enum_ty_by` が引き継いだ後の残り
+- `Registry::trait_def_mut` — 可変版だけ未使用
+- `Error::read_error` — `Error::ReadError(s)` と同義の 1 行
+- `core::unlowered` — Phase 2 の足場。呼ぶ側が 0（テスト 3 本と doc だけ）
+
+`unlowered` を消すとき、それを使っていたテスト
+`a_tag_with_no_evaluation_names_itself` は**性質を残して被写体だけ差し替えた**。
+「未知のタグは自分の名前を言う」は足場と無関係に成り立つ性質で、宣言されていないタグ
+`(no-such-tag 1)` で同じだけ試せる。
+
+### 恒等関数が名前と 60 行の doc を連れて残っていた
+
+`interp::rtvalue_to_struct_field` は全アームが引数をそのまま返す**恒等関数**で、
+`rtvalue_to_sexpr` はそれを呼ぶだけだった。値世界の統合（[[typelisp-sexpr-rtvalue-unification]]）で
+中身が消えたのに、名前・10 箇所の呼び出し・境界越えを説明する 60 行の doc が残っていた。
+削除して呼び出し側に値を直接渡した。[[typelisp-decode-field-typed-was-identity]] と同じ形。
+
+**調査中に一度、この関数を「存在しない」と誤って報告した。** `grep ... | head -5` で
+定義行が出力から落ちていたのに、5 件の doc 参照だけを見て結論を出したため。
+消費者を最後まで辿る前に判断しない、という同じ教訓。
+
+### ガードの守備範囲が危険の範囲より狭かった
+
+`core_builder_guard_test` は `src/check/` の生 `.cons(` だけを禁じていた。しかし
+`Heap::cons` はどのモジュールから呼ばれたかを気にしない。同じ core IR を組む
+`compile::core_bridge` と `eval::interp::core_eval` は対象外で、生 cons が 19 箇所あった。
+
+- 走査対象を `src/check/` + `src/compile/` + `src/eval/` + `src/fasl.rs` に広げた
+- `core::pair` を新設（`(name . kind)` `(kind . form)` `(pattern . body)` — IR はリストでない
+  ペアだらけで、それぞれが手で `push_root` を書いていた）
+- `#[cfg(test)]` 以降は走査しない。テストのフィクスチャは自分のアサーションの隣で読まれる
+- 本番経路の例外 5 箇所に `core-build-ok:` と理由を書いた（`cons` 述語そのもの、
+  マクロの `&rest` 用ユーザデータ、実行時環境フレーム、fasl の復元）
+
+**ついでに実在した危険**: `arg_pairs_with` は `RootScope` の中でルートしたペアを `Vec` で
+返していた。`return` でスコープが drop してルートが外れるので、呼び出し側の `f.extend` までの
+間ペアは無防備だった。その窓の間に確保が無いので壊れていなかったが、そう書かれてもいなかった。
+呼び出し側の `Items` へ直接 push する形にして窓ごと消した。
+
+### 実装より生き残ったコメント
+
+- `RtValue`（統合で削除された型）への言及 110 箇所のうち、**現在形で語っていた約 45 箇所**を
+  現在の名前に直した。残りは過去形の記述か「Sexpr/RtValue 統合 Stage N」という**計画の名前**で、
+  歴史として正しいので残した
+- `ast_bridge`（Stage C で削除）への言及 8 箇所。うち 2 つは「削除したときに抜き出した」
+  「あの漏れを見つけた場所」という歴史記述なので残し、6 つを現在の名前に直した
+- `core.rs` の「`compile::core_bridge` が 1 関数で 16 個の pop を手で釣り合わせている」は
+  旧 `ast_bridge` の話。現在の `core_bridge` の `pop_root` は 0
+- `bootstrap_island.rs` と regen スクリプトが、実際には書かれない
+  `compiler_island.fasl` を成果物として挙げていた
+
+**`src/compiler.rs` の SOURCE 内のコメントも 1 つ直した**（存在しない関数名への参照）。
+同日の「島のハッシュを読んだ形に対して取る」変更の最初の見返りで、島の再生成は不要だった
+（ハッシュもバイト比較も無変更）。今朝なら 52 行の宿題に積まれていた種類の修正である。

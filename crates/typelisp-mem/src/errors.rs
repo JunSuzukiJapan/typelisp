@@ -95,10 +95,6 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn read_error(s: String) -> Error {
-        Error::ReadError(s)
-    }
-
     /// Attach a source location to this error. If the error already carries a
     /// location, it is returned unchanged — the first (innermost, most
     /// specific) location attached wins.

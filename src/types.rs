@@ -210,8 +210,7 @@ pub enum Type {
     /// The `random-state` type (CL's `random-state`): an opaque, mutable PRNG
     /// stream. Has no reader syntax and no arithmetic — only ever produced by
     /// `make-random-state-fresh`/`random-state-copy` and consumed by
-    /// `random-state-next` (`crate::eval::interp`'s `RtValue::RandomState`
-    /// holds the actual `Rc<Cell<u64>>` seed).
+    /// `random-state-next` (`BoxedObj::RandomState` holds the actual seed).
     RandomState,
     Bool,
     Char,

@@ -183,10 +183,8 @@ pub struct VarInfo {
 /// user ADT) from a `defstruct` product type. The two are otherwise the same
 /// `AdtDef`/`Variant` machinery (a struct registers exactly one variant,
 /// named `"new"` — see `Checker::check_defstruct`), but only a `Struct`
-/// constructs a mutable boxed struct (a `BoxedObj::Struct`, wrapped in
-/// [`crate::eval::RtValue::Sexpr`]) instead of an immutable
-/// [`crate::eval::RtValue::Data`] (`Checker::check_construct` decides which
-/// by this field) — see [`AdtDef::field_names`] for the other `Struct`-only
+/// constructs a *mutable* boxed struct (`BoxedObj::Struct`) rather than an
+/// immutable enum box (`Checker::check_construct` decides which by this field) — see [`AdtDef::field_names`] for the other `Struct`-only
 /// piece of metadata.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AdtKind {
@@ -762,11 +760,6 @@ impl Registry {
         self.root.module(path.parent())?.traits.get(path.last_segment())
     }
 
-    /// Mutable lookup of a `deftrait` by its fully-qualified [`Path`].
-    pub fn trait_def_mut(&mut self, path: &Path) -> Option<&mut TraitDef> {
-        self.root.module_mut(path.parent()).traits.get_mut(path.last_segment())
-    }
-
     /// Resolve `method` against `tdef` *including inherited methods*,
     /// returning the trait that declares it and its signature template.
     ///
@@ -1245,9 +1238,8 @@ fn vector_ty() -> Type {
 }
 
 /// `Vector<T>`: a builtin growable sequence. Reuses the same boxed-struct
-/// representation `defstruct` instances get (a `BoxedObj::Struct`, wrapped
-/// in [`crate::eval::RtValue::Sexpr`]) rather than a dedicated `RtValue`
-/// variant — a `Vector<T>` instance's fields are simply treated as
+/// representation `defstruct` instances get (`BoxedObj::Struct`) rather than
+/// a dedicated one of its own — a `Vector<T>`'s fields are simply treated as
 /// variable-length instead of the fixed, name-indexed layout a `defstruct`'s
 /// fields have (see `eval_builtin_method`'s `"vector"` arm).
 /// All methods here are metadata only — there is no `defmethod` body to
@@ -1682,8 +1674,8 @@ fn llvm_value_def() -> AdtDef {
 ///
 /// `eq`/`eql`/`equal`/`equalp` (see `docs/cl-equivalence-catalog.md`'s
 /// eq/eql/equal/equalp section for the full rationale): `eq`/`eql` are true
-/// CL identity (`Rc::ptr_eq` on `RtValue::Str`'s underlying `Rc<str>` —
-/// see that variant's own doc comment for why `Rc`, not a plain `String`, is
+/// CL identity (`Rc::ptr_eq` on a string's underlying `Rc<str>` —
+/// see `Heap`'s string table for why `Rc`, not a plain `String`, is
 /// what makes identity meaningful here at all); `eql` doesn't add anything
 /// beyond `eq` for strings in real CL either (it only extends numbers/
 /// characters), so it's a plain alias. Content comparison — what a naive
@@ -1779,7 +1771,7 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
     // `max`/`min` (CL) and the bitwise operators (`logand`/`logior`/`logxor`,
-    // infinite-two's-complement per CL §12.10 since `RtValue::Int` is a
+    // infinite-two's-complement per CL §12.10 since `Value::Int` is a
     // uniform `i64` regardless of whether the static type is `i32`/`i64` —
     // see `eval_int_builtin`'s doc comment) and `ash` (arithmetic shift,
     // positive = left) are all same-type binary ops like `+`/`-`/`*`.
@@ -1884,7 +1876,7 @@ fn float_assoc() -> HashMap<String, AssocFn> {
     // (Rust's `as i64`, same as CL's `truncate`) — the other half of
     // `int_assoc`'s `int->float`. Returns `i32` (this language's default
     // integer type, `Checker::int_lit_ty`'s fallback) even though the
-    // runtime value is a uniform `RtValue::Int(i64)` either way (see
+    // runtime value is a uniform `Value::Int(i64)` either way (see
     // `eval_int_builtin`'s doc comment).
     m.insert("float->int".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `float->bignum`: narrowing, truncating toward zero (`f64 as i64`'s

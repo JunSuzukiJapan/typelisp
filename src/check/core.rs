@@ -19,14 +19,16 @@
 //! empty, so *every* allocation can free anything not currently rooted. Building
 //! a node means allocating once per field, which means each finished field has
 //! to stay rooted while its siblings are built. Done by hand that is a
-//! `push_root`/`pop_root` pair per field — `compile::core_bridge` balances
-//! sixteen pops by hand in one function — and a single `?` on an error path
-//! skips them all.
+//! `push_root`/`pop_root` pair per field — the translator these builders
+//! replaced balanced sixteen pops by hand in one function — and a single `?` on
+//! an error path skips them all.
 //!
 //! So callers do not cons directly. [`Items`] roots each field as it is
-//! produced, [`tagged`] assembles the node, and a [`RootScope`] unwinds both on
-//! every exit path including `?`. `tests/core_builder_guard_test.rs` enforces
-//! that the checker keeps to this.
+//! produced, [`pair`]/[`list`]/[`tagged`] assemble the node, and a
+//! [`RootScope`] unwinds everything on every exit path including `?`.
+//! `tests/core_builder_guard_test.rs` enforces this across the checker that
+//! emits core IR, the evaluator and bridge that consume it, and the fasl that
+//! restores it.
 
 use typelisp_mem::{Error, Heap, Loc, RootScope, Value};
 
@@ -53,25 +55,6 @@ impl Checked {
     }
 }
 
-/// A `(unlowered "WHAT")` marker: this construct has no lowering yet.
-///
-/// Not a fallback, and not something a finished checker can emit — it is
-/// scaffolding for the one branch where the carrier type changes ahead of the
-/// lowerings, so `cargo build` stays green while the syntaxes are converted one
-/// at a time and the passing-test count climbs monotonically. The evaluator
-/// rejects it with an internal error naming `what`, so anything still reaching
-/// it says exactly which construct is missing rather than misbehaving.
-///
-/// The same convention `compile::core_bridge` already uses for
-/// `(unsupported "<Variant>")`. Every one of these is gone by the end of
-/// Phase 2; `tests/` counts them as the progress measure.
-pub fn unlowered(heap: &mut Heap, what: &str) -> Result<Value, Error> {
-    let s = heap.alloc_string(what.to_string());
-    let mut f = Items::new(heap);
-    f.push(s);
-    f.finish("unlowered")
-}
-
 /// Cons a proper list from `items`, in order.
 ///
 /// Both the items and every partially-built tail stay rooted for the whole
@@ -90,6 +73,21 @@ pub fn list(heap: &mut Heap, items: &[Value]) -> Result<Value, Error> {
         acc = s.cons(*item, acc)?;
     }
     Ok(acc)
+}
+
+/// Build the pair `(car . cdr)`.
+///
+/// One `cons`, but the one that still needs rooting: the allocation can
+/// collect, and until it returns neither half is reachable from anything the
+/// collector walks. The IR is full of pairs that are not lists — a binding's
+/// `(name . kind)`, an argument's `(kind . form)`, a `match` arm's
+/// `(pattern . body)` — and each was being consed by hand with its own
+/// `push_root` pair around it.
+pub fn pair(heap: &mut Heap, car: Value, cdr: Value) -> Result<Value, Error> {
+    let mut s = RootScope::new(heap);
+    s.push_root(car);
+    s.push_root(cdr);
+    s.cons(car, cdr)
 }
 
 /// Build the node `(tag field...)`. See [`list`] for the rooting contract.

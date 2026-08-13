@@ -136,8 +136,8 @@ const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 /// [`DEFAULT_AOT_HEAP_CAPACITY`]. The allocated `Heap` is deliberately
 /// never freed — it must outlive every other compiled function in the
 /// process, i.e. live until the OS reclaims everything at process exit, the
-/// same trade-off `ClosureBox`/`RtValue::HashTable` already accept for
-/// values that outlive their last explicit owner.
+/// same trade-off [`rt_push_permanent_sexpr_root`] already accepts for values
+/// that outlive their last explicit owner.
 ///
 /// # Safety
 ///
@@ -1303,7 +1303,7 @@ pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
 /// `(rt-sexpr-instance-test v type-name variant)` for compiled code's
 /// Sexpr-downcast pattern guard (`(point x y)`/`(color::red)`/`(the T p)`
 /// against a `Sexpr` scrutinee — `compiler.rs`'s `compile-sexpr-instance-
-/// test`, `ast_bridge::pattern_to_sexpr`'s `downcast`/`pat-typetest`
+/// test`, `core_bridge::translate_pattern`'s `downcast`/`pat-typetest`
 /// encoding). Tests whether tagged `Sexpr` value `args[0]` is a boxed
 /// struct or enum whose own `type_name` matches the `Str` `args[1]`, and —
 /// for an enum — whose variant also matches the *raw* `args[2]` (`-1` skips
@@ -2224,7 +2224,7 @@ pub unsafe extern "C" fn rt_match_fail(_args: *const i64, _argc: u32) -> i64 {
     fatal("match: no pattern arm matched (the checker should have guaranteed exhaustiveness)")
 }
 
-/// `(panic msg)` for compiled code (`ast_bridge::translate_panic`/
+/// `(panic msg)` for compiled code (`core_bridge`'s `panic` arm /
 /// `compiler.rs`'s `compile-panic`): prints `"panic: {msg}"` — the same
 /// wording `EvalError::Panic`'s `Display` impl uses for an *interpreted*
 /// `(panic ...)` — and aborts the process. Unlike the interpreted path
@@ -2267,7 +2267,7 @@ pub unsafe extern "C" fn rt_panic(args: *const i64, argc: u32) -> i64 {
 ///
 /// `compiler.rs`'s `compile-str` is the only caller: a string literal's
 /// content is entirely known at compile time, so each character becomes an
-/// ordinary `const-i64` operand (`ast_bridge` translates `Expr::Str` into a
+/// ordinary `const-i64` operand (`core_bridge::str_form` builds a
 /// `(str (int c0) (int c1) ...)` node, reusing `compile-value`'s existing
 /// `int` handling for every character rather than needing a new
 /// literal-embedding mechanism) — unlike every other allocating `rt_*`
@@ -2299,7 +2299,7 @@ pub unsafe extern "C" fn rt_str_new(args: *const i64, argc: u32) -> i64 {
 
 /// Interns `args[0]` (a tagged `Value::Str`) as a symbol, returning it as a
 /// tagged `Value::Symbol` — the compiled-code half of a quoted symbol
-/// literal (`ast_bridge::translate_quote`'s `Sym` arm builds the name as an
+/// literal (`core_bridge::quoted_form`'s `Sym` arm builds the name as an
 /// ordinary `(str (int c0) ...)` node, exactly like any other string
 /// literal, then wraps the compiled result in a call here rather than
 /// needing its own character-embedding mechanism the way `rt_str_new`
@@ -2545,7 +2545,7 @@ pub unsafe extern "C" fn rt_f64_atanh(args: *const i64, argc: u32) -> i64 {
 }
 
 /// Interns `args[0..argc]` (each a tagged `Value::Symbol`, one per `::`
-/// segment, in order — `ast_bridge::translate_quote`'s `Path` arm builds
+/// segment, in order — `core_bridge::quoted_form`'s `Path` arm builds
 /// each segment as its own `(str ...)` literal, so the compiled IR calls
 /// [`rt_intern_symbol`] once per segment before collecting the results
 /// here) as a single `::`-path, returning it as a tagged `Value::Path`.

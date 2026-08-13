@@ -58,10 +58,10 @@ use super::{EnumDef, FnDef, Interp};
 
 /// A core form's operator, resolved from its tag symbol.
 ///
-/// Only the tags that have a lowering *and* an evaluation live here. A tag
-/// from the vocabulary that is not yet implemented is deliberately absent, so
-/// reaching it is an internal error naming the tag rather than a silent
-/// mis-evaluation — the same convention as `core::unlowered`.
+/// Every vocabulary tag lives here — `tests/core_vocabulary_test.rs` holds the
+/// vocabulary closed, and `a_tag_with_no_evaluation_names_itself` holds the
+/// other side: anything *off* it is deliberately absent, so reaching one is an
+/// internal error naming the tag rather than a silent mis-evaluation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Op {
     Int,
@@ -508,9 +508,9 @@ impl Interp {
         if super::is_sexpr_type(&path) {
             construct_sexpr_core(&mut s, variant, &argv)
         } else if mutable {
-            // The old evaluator mapped each field through
-            // `rtvalue_to_struct_field` first; that function is the identity
-            // now, so the values go in as they are.
+            // The values go in as they are: the old evaluator mapped each field
+            // across the two value worlds first, and with one world there is
+            // nothing to map.
             Ok(crate::type_key::alloc_typed_struct(&mut s, &path, argv))
         } else {
             Ok(super::build_enum_value(&mut s, path, variant, argv))
@@ -1206,33 +1206,26 @@ impl Interp {
     fn reify(&self, heap: &mut Heap, f: &Rc<FnDef>) -> Result<Value, EvalError> {
         let mut s = RootScope::new(heap);
         let reprs = f.sig.as_ref().map(|(ps, _)| ps.as_slice()).unwrap_or(&[]);
-        let mut params = Value::Empty;
-        for (i, name) in f.params.iter().enumerate().rev() {
-            let sym = s.intern_symbol(name);
-            s.push_root(sym);
+
+        let mut ps = core::Items::new(&mut s);
+        for (i, name) in f.params.iter().enumerate() {
+            let sym = ps.heap().intern_symbol(name);
             let repr = match reprs.get(i) {
-                Some(r) => r.write(&mut s).map_err(heap_err)?,
+                Some(r) => r.write(ps.heap()).map_err(heap_err)?,
                 None => Value::Empty,
             };
-            s.push_root(repr);
-            s.push_root(params);
-            let one = s.cons(repr, Value::Empty).map_err(heap_err)?;
-            s.push_root(one);
-            let one = s.cons(sym, one).map_err(heap_err)?;
-            s.push_root(one);
-            params = s.cons(one, params).map_err(heap_err)?;
+            let one = core::list(ps.heap(), &[sym, repr]).map_err(heap_err)?;
+            ps.push(one);
         }
+        let params = ps.finish_list().map_err(heap_err)?;
         s.push_root(params);
+
         let ret = match f.sig.as_ref() {
             Some((_, r)) => r.write(&mut s).map_err(heap_err)?,
             None => Value::Empty,
         };
         s.push_root(ret);
-        let mut body = Value::Empty;
-        for form in f.body.iter().rev() {
-            s.push_root(body);
-            body = s.cons(*form, body).map_err(heap_err)?;
-        }
+        let body = core::list(&mut s, &f.body).map_err(heap_err)?;
         s.push_root(body);
         Ok(s.alloc_closure(params, ret, body, Value::Empty))
     }
@@ -1295,11 +1288,17 @@ pub(crate) fn extend_env(heap: &mut Heap, binds: &[(SymId, Value)], env: Value) 
         // iteration, and is `Empty` — which needs no root — on the first.
         let cell = s.alloc_cell_unregistered(*v);
         s.push_root(cell);
-        let pair = s.cons(Value::Symbol(*sym), cell).map_err(heap_err)?;
+        let pair = core::pair(&mut s, Value::Symbol(*sym), cell).map_err(heap_err)?;
         s.push_root(pair);
+        // core-build-ok: an environment frame, not a core form — `core::list`
+        // wants its elements up front, and these are produced one cell at a
+        // time. Each intermediate is rooted before the next allocation, as the
+        // comment above sets out.
         frame = s.cons(pair, frame).map_err(heap_err)?;
         s.push_root(frame);
     }
+    // core-build-ok: pushing the finished frame onto the environment chain;
+    // both halves are rooted above.
     s.cons(frame, env).map_err(heap_err)
 }
 
@@ -1491,6 +1490,9 @@ fn match_sexpr_core(
             let mut acc = Value::Empty;
             for seg in segs.into_iter().rev() {
                 heap.push_root(acc);
+                // core-build-ok: rebuilds a quoted `::`-path as user data, not
+                // a core form. The growing tail is rooted just above, and the
+                // result stays rooted deliberately — see the note below.
                 acc = heap.cons(Value::Symbol(seg), acc).map_err(heap_err)?;
             }
             // Rooted, and deliberately never popped here. This list *is* the
@@ -1546,8 +1548,9 @@ fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Value]) -> Resu
             let r = super::rt_ratio(heap, &arg(0)?)?;
             Ok(heap.alloc_ratio(r))
         }
-        // The arguments are rooted by the caller, which is what makes this
-        // allocation safe.
+        // core-build-ok: this *is* `cons` — the user-facing primitive, over
+        // user data. The arguments are rooted by the caller, which is what
+        // makes the allocation safe.
         SEXPR_CONS => heap.cons(arg(0)?, arg(1)?).map_err(heap_err),
         SEXPR_PATH => {
             let ids = super::sexpr_list_to_symbols(heap, arg(0)?)?;
@@ -2518,16 +2521,22 @@ mod tests {
     ///
     /// This used to have two halves: one naming whichever vocabulary tag was
     /// not implemented yet (it named `loop`, then `assoc`, each example moving
-    /// as a stage landed), and `unlowered`. **Every vocabulary tag now
-    /// evaluates**, so the moving half has nothing left to name and is gone —
-    /// which is the measure arriving, not breaking. `unlowered` is the fixed
-    /// half: it is scaffolding, so it never gets an evaluation at all.
+    /// as a stage landed), and `unlowered`, Phase 2's scaffolding marker.
+    /// **Every vocabulary tag now evaluates**, so the moving half had nothing
+    /// left to name; `unlowered` outlived its purpose the same way and was
+    /// deleted with the rest of the scaffolding.
+    ///
+    /// What is worth keeping is the property itself, which is about anything
+    /// off the vocabulary rather than about those two: a form the evaluator
+    /// does not know must say so and name the tag. A tag nobody declared
+    /// exercises it exactly as well as a scaffolding one did, and needs no
+    /// scaffolding to exist.
     #[test]
     fn a_tag_with_no_evaluation_names_itself() {
         let mut h = stress_heap();
-        let e = eval_src(&mut h, r#"(unlowered "CheckWhile")"#).unwrap_err();
+        let e = eval_src(&mut h, "(no-such-tag 1)").unwrap_err();
         assert!(
-            matches!(e.kind(), EvalError::Internal(m) if m.contains("`unlowered`")),
+            matches!(e.kind(), EvalError::Internal(m) if m.contains("`no-such-tag`")),
             "{:?}",
             e
         );

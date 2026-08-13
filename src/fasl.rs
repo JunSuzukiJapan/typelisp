@@ -189,6 +189,10 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
                 for cell in cells.iter().rev() {
                     let car_v = owned_to_value(heap, &cell.form)?;
                     heap.push_root(car_v);
+                    // core-build-ok: rebuilding a flattened spine read back
+                    // from disk, where the elements arrive one at a time. Both
+                    // halves are rooted above, and the explicit `roots_base`
+                    // unwind below covers the error paths a `RootScope` would.
                     let consed = heap.cons(car_v, acc)?;
                     heap.push_root(consed);
                     // The spans go back into the rebuilt cell, not into a table

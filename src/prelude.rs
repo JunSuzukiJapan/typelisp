@@ -640,14 +640,14 @@ pub const SOURCE: &str = r##"
 ;; `Self` mutates in place across calls (no immutable "next state" returned
 ;; alongside the element — see the trait machinery's design notes): a
 ;; `next` implementation is expected to update its own fields via `setf`,
-;; the same mutation `RtValue::Struct`'s `Rc<RefCell<..>>` representation
-;; already gives every `defstruct` instance.
+;; the same mutation a boxed struct's shared representation already gives
+;; every `defstruct` instance.
 (deftrait Iter ()
   (type Item)
   (next ((self Self)) Option<Item>))
 
 ;; `vector-iter<T>` is `Vector<T>`'s own iterator: a shared reference to the
-;; vector being walked (`vec`, sharing the same underlying `RtValue::Struct`
+;; vector being walked (`vec`, sharing the same underlying box
 ;; — pushing to the original after creating an iterator is visible through
 ;; it, matching Rust's own growable-vec iterators) plus a cursor position
 ;; (`pos`). `Vector<T>` is deliberately *not* `Iter` itself (its `next` would

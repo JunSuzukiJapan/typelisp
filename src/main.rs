@@ -519,7 +519,7 @@ fn is_incomplete(e: &Error) -> bool {
     )
 }
 
-/// Format an `RtValue` for REPL output, in the reader's own syntax where
+/// Format a value for REPL output, in the reader's own syntax where
 /// possible (so the printed form can be pasted back in).
 fn format_value(heap: &Heap, reg: &Registry, v: &Value) -> String {
     match v {
@@ -531,8 +531,7 @@ fn format_value(heap: &Heap, reg: &Registry, v: &Value) -> String {
     }
 }
 
-/// Format a Sexpr-side `mem::Value` (the `RtValue::Sexpr` payload),
-/// recursively, in the reader's own syntax. `reg` recovers an enum box's
+/// Format a `mem::Value` recursively, in the reader's own syntax. `reg` recovers an enum box's
 /// variant *name* (the runtime stores only the index) so `(some 1)` prints
 /// the way it always has.
 fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
@@ -572,9 +571,8 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
             }
         }
         Value::Boxed(id) if heap.is_hashtable(id) => format!("#<hashtable count={}>", heap.hashtable_count(id)),
-        // A `Scope<V>` with heap-repr `V` is boxed too since Stage 8 —
-        // printed the same way `format_value`'s `RtValue::Scope` arm prints
-        // a native-`V` scope.
+        // A `Scope<V>` with heap-repr `V` is boxed too since Stage 8, and
+        // prints the same way a native-`V` scope always did.
         Value::Boxed(id) if heap.is_scope(id) => format!("#<scope depth={}>", heap.scope_frame_count(id)),
         // A closure is a boxed value, printed opaquely — and identically
         // whether it was compiled or is being tree-walked

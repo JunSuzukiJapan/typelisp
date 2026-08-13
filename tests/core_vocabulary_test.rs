@@ -372,16 +372,6 @@ fn top_level() {
     ]);
 }
 
-// ---- the scaffolding marker ---------------------------------------------
-
-/// Present only while the checker is being converted, and counted as the
-/// progress measure. Included here so it is part of the vocabulary rather than
-/// something the evaluator meets unannounced.
-#[test]
-fn the_unlowered_marker() {
-    round_trips(r#"(unlowered "CheckIf")"#);
-}
-
 // ---- the properties with teeth ------------------------------------------
 
 /// Every core tag, in one place.
@@ -421,9 +411,6 @@ const EXPR_ONLY: &[&str] = &[
 const TOP_LEVEL: &[&str] =
     &["defun", "defmethod", "defmacro", "defvar", "defstruct", "defenum", "module", "use", "load", "expr"];
 
-/// Scaffolding, gone by the end of the conversion.
-const SCAFFOLDING: &[&str] = &["unlowered"];
-
 /// The examples above use exactly the declared vocabulary — no more, no less.
 ///
 /// Catches a typo or a quietly-invented tag (an example using a tag nobody
@@ -436,7 +423,6 @@ fn zz_the_vocabulary_is_closed() {
         .iter()
         .chain(EXPR_ONLY)
         .chain(TOP_LEVEL)
-        .chain(SCAFFOLDING)
         .map(|s| s.to_string())
         .collect();
 
@@ -451,7 +437,6 @@ fn zz_the_vocabulary_is_closed() {
     functions();
     trait_objects();
     top_level();
-    record_tags(r#"(unlowered "CheckIf")"#);
 
     let seen = SEEN_TAGS.lock().unwrap().clone();
     let undeclared: Vec<&String> = seen.difference(&declared).collect();

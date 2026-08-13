@@ -301,13 +301,16 @@ const MATCH_KIND_SEXPR: i64 = 0;
 const MATCH_KIND_BOX: i64 = 1;
 const MATCH_KIND_STRUCT: i64 = 2;
 
-/// A tag this stage has no translation for yet.
+/// A tag the bridge has no translation for.
 ///
-/// Not a fallback: reaching one is a bug in whoever routed here, and it says
-/// which tag rather than emitting something the island would misread. Every
-/// one of these is gone by the end of the phase, and their count is the
-/// progress measure — the same convention `core::unlowered` uses on the
-/// checker's side.
+/// Not a fallback: every vocabulary tag translates, so reaching this means a
+/// caller routed a form here that is not one — a bug in the router, or a tag
+/// added to the vocabulary without a translation. It says which tag rather
+/// than emitting something the island would misread.
+///
+/// This counted translated-vs-not as the conversion's progress measure while
+/// Phase 2 was running. That measure is spent; what the function is for now is
+/// the invariant.
 fn untranslated(tag: &str) -> Error {
     Error::TypeError(format!("compile: the bridge has no translation for `{}` yet", tag))
 }
@@ -543,11 +546,11 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             let Value::Symbol(_) = name else { return Err(malformed(&s, *b)) };
             let Some(repr) = Repr::read(&s, repr) else { return Err(malformed(&s, *b)) };
             let Value::Symbol(name_sym) = name else { return Err(malformed(&s, *b)) };
-            let name_pair = s.cons(name, Value::Int(cx.binding_kind(name_sym, &repr)))?;
+            let kind = Value::Int(cx.binding_kind(name_sym, &repr));
+            let name_pair = core::pair(&mut s, name, kind)?;
             s.push_root(name_pair);
             let init = to_island(&mut s, init, cx)?;
-            s.push_root(init);
-            let pair = s.cons(name_pair, init)?;
+            let pair = core::pair(&mut s, name_pair, init)?;
             s.push_root(pair);
             pairs.push(pair);
         }
@@ -602,8 +605,7 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
 
     let mut f = Items::new(heap);
     f.push(name_v);
-    let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
-    f.extend(pairs);
+    arg_pairs(&mut f, &reprs, &args, cx)?;
     f.finish("call")
 }
 
@@ -643,8 +645,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         let opid = Value::Int(llvm_op_id(key, &method));
         let mut f = Items::new(heap);
         f.push(opid);
-        let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
-        f.extend(pairs);
+        arg_pairs(&mut f, &reprs, &args, cx)?;
         return f.finish("llvm-op");
     }
 
@@ -658,8 +659,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     let method_v = f.heap().alloc_string(method);
     f.push(method_v);
     f.push(Value::Bool(instance));
-    let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
-    f.extend(pairs);
+    arg_pairs(&mut f, &reprs, &args, cx)?;
     f.finish("assoc")
 }
 
@@ -1283,7 +1283,7 @@ fn dyn_operand(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let mut s = RootScope::new(heap);
     let v = to_island(&mut s, form, cx)?;
     s.push_root(v);
-    s.cons(Value::Int(Repr::Dyn.binding_kind()), v)
+    core::pair(&mut s, Value::Int(Repr::Dyn.binding_kind()), v)
 }
 
 /// `(dyn-new STR PATH ((PATH SYM)...) ((...)...) R E)` -> `(dyn-new vtable-id
@@ -1309,8 +1309,7 @@ fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Err
     })?;
     let mut f = Items::new(heap);
     f.push(Value::Int(id as i64));
-    let pairs = arg_pairs(f.heap(), std::slice::from_ref(&repr), &[parts[5]], cx)?;
-    f.extend(pairs);
+    arg_pairs(&mut f, std::slice::from_ref(&repr), &[parts[5]], cx)?;
     f.finish("dyn-new")
 }
 
@@ -1352,22 +1351,20 @@ fn translate_dyn_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Er
     let args = parts[5..].to_vec();
     let mut f = Items::new(heap);
     f.push(Value::Int(slot));
-    let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
-    f.extend(pairs);
+    arg_pairs(&mut f, &reprs, &args, cx)?;
     f.finish("dyn-call")
 }
 
 /// A `((SYM . kind) ...)` list — a lambda's parameters, or a captured
 /// environment's slots, in the shape `bind-params`/`bind-captures` read.
 fn name_kind_list(heap: &mut Heap, names: &[(SymId, Repr)], cx: Ctx) -> Result<Value, Error> {
-    let mut s = RootScope::new(heap);
-    let mut pairs = Vec::with_capacity(names.len());
+    let mut f = Items::new(heap);
     for (name, repr) in names {
-        let pair = s.cons(Value::Symbol(*name), Value::Int(cx.binding_kind(*name, repr)))?;
-        s.push_root(pair);
-        pairs.push(pair);
+        let kind = Value::Int(cx.binding_kind(*name, repr));
+        let p = core::pair(f.heap(), Value::Symbol(*name), kind)?;
+        f.push(p);
     }
-    core::list(&mut s, &pairs)
+    f.finish_list()
 }
 
 /// A `(SYM R)` parameter list, as names with their representations.
@@ -1608,8 +1605,7 @@ fn translate_apply(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             let name_v = heap.alloc_string(heap.symbol_name(name).to_string());
             let mut f = Items::new(heap);
             f.push(name_v);
-            let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
-            f.extend(pairs);
+            arg_pairs(&mut f, &reprs, &args, cx)?;
             f.finish("apply")
         }
         (Some("lambda"), _) => translate_immediate_lambda_call(heap, callee, parts[2], &args, cx),
@@ -1617,8 +1613,7 @@ fn translate_apply(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             let mut f = Items::new(heap);
             let callee_v = to_island(f.heap(), callee, cx)?;
             f.push(callee_v);
-            let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
-            f.extend(pairs);
+            arg_pairs(&mut f, &reprs, &args, cx)?;
             f.finish("apply-indirect")
         }
     }
@@ -1767,7 +1762,7 @@ fn forwarding_lambda(
             s.push_root(name_v);
             let var = core::tagged(&mut s, "var", &[name_v, Value::Bool(false)])?;
             s.push_root(var);
-            let pair = s.cons(Value::Int(repr.binding_kind()), var)?;
+            let pair = core::pair(&mut s, Value::Int(repr.binding_kind()), var)?;
             s.push_root(pair);
             pairs.push(pair);
         }
@@ -1841,8 +1836,7 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     // A struct field and an enum field cross the same tagged boundary, so both
     // take `field_kind` — not `binding_kind`, which only says whether a root
     // is wanted. Here the exact tagged shape to build is what matters.
-    let pairs = arg_pairs_with(f.heap(), &field_reprs, &args, Repr::field_kind, cx)?;
-    f.extend(pairs);
+    arg_pairs_with(&mut f, &field_reprs, &args, Repr::field_kind, cx)?;
     f.finish("construct")
 }
 
@@ -1924,7 +1918,7 @@ fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
                 }
             };
             s.push_root(body);
-            let pair = s.cons(pat, body)?;
+            let pair = core::pair(&mut s, pat, body)?;
             s.push_root(pair);
             pairs.push(pair);
         }
@@ -2072,8 +2066,8 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
 /// around the evaluated argument: a later argument's evaluation can allocate
 /// and collect an earlier one, which is unrooted for exactly as long as it
 /// sits in the argument array.
-fn arg_pairs(heap: &mut Heap, reprs: &[Repr], args: &[Value], cx: Ctx) -> Result<Vec<Value>, Error> {
-    arg_pairs_with(heap, reprs, args, Repr::binding_kind, cx)
+fn arg_pairs(f: &mut Items, reprs: &[Repr], args: &[Value], cx: Ctx) -> Result<(), Error> {
+    arg_pairs_with(f, reprs, args, Repr::binding_kind, cx)
 }
 
 /// [`arg_pairs`] over either projection.
@@ -2081,13 +2075,22 @@ fn arg_pairs(heap: &mut Heap, reprs: &[Repr], args: &[Value], cx: Ctx) -> Result
 /// A call's arguments take `binding_kind` — the island only wants to know
 /// whether to root one. A `construct`'s fields take `field_kind`: they are
 /// being written into a box, so the exact tagged shape is what matters.
+///
+/// Appends into the caller's [`Items`] rather than returning a `Vec`. It used
+/// to return one, built under a [`RootScope`] that dropped — releasing every
+/// root — at the `return`, so the pairs reached the caller unrooted and stayed
+/// that way until its `extend`. Nothing allocated in that window, which is why
+/// it never broke; nothing said so either, and a `Vec<Value>` is invisible to
+/// the collector (`Checker::list_from_vec_locs`'s history is the same story).
+/// Pushing straight into the caller's node removes the window instead of
+/// documenting it.
 fn arg_pairs_with(
-    heap: &mut Heap,
+    f: &mut Items,
     reprs: &[Repr],
     args: &[Value],
     kind_of: impl Fn(&Repr) -> i64,
     cx: Ctx,
-) -> Result<Vec<Value>, Error> {
+) -> Result<(), Error> {
     if reprs.len() != args.len() {
         return Err(Error::TypeError(format!(
             "compile: {} argument representations for {} arguments (internal error)",
@@ -2095,16 +2098,12 @@ fn arg_pairs_with(
             args.len()
         )));
     }
-    let mut s = RootScope::new(heap);
-    let mut pairs = Vec::with_capacity(args.len());
     for (r, a) in reprs.iter().zip(args) {
-        let form = to_island(&mut s, *a, cx)?;
-        s.push_root(form);
-        let pair = s.cons(Value::Int(kind_of(r)), form)?;
-        s.push_root(pair);
-        pairs.push(pair);
+        let form = to_island(f.heap(), *a, cx)?;
+        let pair = core::pair(f.heap(), Value::Int(kind_of(r)), form)?;
+        f.push(pair);
     }
-    Ok(pairs)
+    Ok(())
 }
 
 /// A `(R...)` field, as representations.

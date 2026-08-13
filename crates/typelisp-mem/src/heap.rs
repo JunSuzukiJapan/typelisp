@@ -1844,8 +1844,9 @@ impl Heap {
 ///
 /// Hand-balanced `push_root`/`pop_root` pairs are the standard way to keep an
 /// intermediate alive across an allocation that might collect, but they are
-/// fragile at scale — one builder in `compile::ast_bridge` balances *sixteen*
-/// pops by hand, and every `?` early return is a chance to skip them. This
+/// fragile at scale — one builder in the translator this replaced balanced
+/// *sixteen* pops by hand, and every `?` early return is a chance to skip
+/// them. This
 /// guard makes the unwind automatic, so an error path cannot leave the stack
 /// unbalanced and a later "pop back to my own mark" caller cannot pop
 /// somebody else's roots.

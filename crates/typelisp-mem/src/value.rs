@@ -351,8 +351,8 @@ pub(crate) enum BoxedObj {
     ///
     /// It was an `Rc<Cell<u64>>` on the interpreter's side of the fence, which
     /// the collector could not see and no `Value` could carry — the last
-    /// `RtValue` variant with no heap form, and so the last thing keeping
-    /// `rtvalue_to_struct_field` partial.
+    /// runtime value with no heap form, and so the last thing standing between
+    /// the two value worlds and their unification.
     RandomState(u64),
     /// A trait object (`:dyn Trait`, TODO T4): a vtable identifier alongside
     /// the concrete value it dispatches for.

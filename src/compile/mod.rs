@@ -78,8 +78,9 @@ static LLVM_CONTEXT: OnceLock<ContextCell> = OnceLock::new();
 
 /// The single process-wide LLVM `Context`. Modules/builders/values created
 /// from it borrow it for the life of the process (no per-compile teardown),
-/// which is what lets [`crate::eval::value::RtValue`]'s LLVM variants hold
-/// `'static` inkwell types instead of threading a lifetime through `RtValue`.
+/// which is what lets the interpreter's LLVM handle registry hold `'static`
+/// inkwell types instead of threading a lifetime through every value that
+/// could carry one.
 pub fn llvm_context() -> &'static Context {
     &LLVM_CONTEXT.get_or_init(|| ContextCell(Context::create())).0
 }

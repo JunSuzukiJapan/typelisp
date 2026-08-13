@@ -681,10 +681,10 @@ impl Interp {
     /// plain `i64` at the compiled ABI level — true for an `i64`/`i32`
     /// itself, and for a general-ADT pointer (`Option`/`defstruct`, Stage 6)
     /// that *already* crossed this same boundary once (so it's sitting in
-    /// `argv` as `RtValue::Int`, not decoded into a boxed struct/`Data`/etc.
+    /// `argv` as a `Value::Int`, not decoded into a boxed struct/enum/etc.
     /// — general-ADT bridging at this boundary isn't implemented, a
     /// pre-existing, separate gap). Calling a compiled method on a receiver
-    /// built by *pure* interpretation (a real boxed-struct `RtValue::Sexpr`,
+    /// built by *pure* interpretation (a real boxed struct,
     /// never touched by compiled code) hits the same wall an analogous top-level
     /// `call` already would for a general-ADT parameter — a clear
     /// internal error here, not a silent misread of unrelated bits.
@@ -711,7 +711,7 @@ impl Interp {
     /// [`Self::call_compiled`]'s argument-marshaling half, factored out so
     /// [`Self::eval`]'s `apply` arm can reuse it when the callee is a
     /// `BoxedObj::CompiledClosure` rather than a top-level `(compile ...)`d
-    /// function — both cross the exact same interp-`RtValue` -> compiled-ABI
+    /// function — both cross the exact same interpreter -> compiled-ABI
     /// `i64` boundary. Returns the encoded `int_args` plus how many roots it
     /// pushed (over `argv`'s heap-backed elements only); the caller must pop
     /// exactly that many once the call this feeds into has returned. See
@@ -1172,20 +1172,17 @@ impl Interp {
     /// either way. See [`Self::compiled_globals`]'s doc comment for why
     /// promotion — not moving every global's storage — is the shape this
     /// takes: reads the global's *current* value (whatever the interpreter
-    /// last set it to) via the existing `Slot`, converts it with
-    /// `rtvalue_to_struct_field` (the same `RtValue` -> `mem::Value`
-    /// boundary crossing a boxed-struct field write already uses — a
-    /// global's storage is exactly that shape, a single always-live cell),
-    /// and hands the result to `typelisp_rt::global_new`, which roots it
-    /// permanently and returns its id. An enum global
-    /// (`Option`/`Result`/a user `defenum`) crosses through
-    /// `rtvalue_to_struct_field`'s ordinary `RtValue::Sexpr` arm like any
-    /// other boxed value now — the enum-representation unification's
-    /// compiler flip retired the raw-box/shift-tagged special case this
-    /// used to need (a `defvar`'s declared type is always one ordinary user
-    /// source can write, and every such enum instantiation is heap-repr by
-    /// construction — see `Repr::field_kind`'s doc comment —
-    /// so the native `RtValue::Data` fallback never actually reaches here).
+    /// last set it to) via the existing `Slot` and hands it to
+    /// `typelisp_rt::global_new`, which roots it permanently and returns its
+    /// id.
+    ///
+    /// Nothing is converted on the way. There used to be a crossing here — a
+    /// global's storage has the shape of a single always-live boxed-struct
+    /// field, so it went through the same `RtValue` -> `mem::Value` mapping a
+    /// field write did, with a raw-box/shift-tagged special case for an enum
+    /// global on top. The value worlds were unified and that mapping became the
+    /// identity, then went; the enum special case had already been retired by
+    /// the enum-representation unification's compiler flip.
     ///
     /// `pub(crate)`: `compile::aot::compile_file` calls this directly too,
     /// once per `defvar`, *before* compiling any `defun` — eagerly, in file
@@ -1215,8 +1212,7 @@ impl Interp {
             .get_global(path)
             .ok_or_else(|| EvalError::Internal(format!("compile: global \"{}\" is not defined", path)))?;
         let v = slot.get(heap);
-        let value = rtvalue_to_struct_field(&v);
-        let id = crate::compile::runtime::global_new(heap, value);
+        let id = crate::compile::runtime::global_new(heap, v);
         self.compiled_globals.borrow_mut().insert(path.clone(), id);
         Ok(id)
     }
@@ -1875,14 +1871,14 @@ impl Interp {
     }
 
     /// Build the argument vector for a macro call: the first `fixed` raw
-    /// forms map 1:1 to `RtValue::Sexpr`; if `f.rest`, every remaining raw
+    /// forms map 1:1 to parameters; if `f.rest`, every remaining raw
     /// form is collected into a single heap-allocated `Sexpr` list (built
     /// back-to-front, like `Self::alloc_quoted`'s `Cons` case) bound to the
     /// last parameter. Each element is already rooted by the caller (it's in
     /// `raw_args`, individually pushed in `Self::expand_macro`); only the
     /// growing `list` accumulator needs protecting around each `cons` call.
     /// Bind a macro call's raw (unevaluated) argument forms to its parameters,
-    /// producing one `RtValue::Sexpr` per parameter in `f.params` order —
+    /// producing one value per parameter in `f.params` order —
     /// required, then `&optional`, then `&rest`, then `&key` — ready for
     /// [`Self::apply`]. Omitted `&optional`/`&key` arguments evaluate their
     /// default-value body (in an environment holding the params already bound,
@@ -2033,6 +2029,9 @@ impl Interp {
         let mut list = Value::Empty;
         for v in items.iter().rev() {
             heap.push_root(list);
+            // core-build-ok: a `Sexpr` list of user data for a macro's `&rest`,
+            // not a core form. The growing tail is rooted on the line above and
+            // popped on the line below.
             let consed = heap.cons(*v, list);
             heap.pop_root();
             list = consed.map_err(|e| EvalError::Panic(e.to_string()))?;
@@ -2333,7 +2332,7 @@ impl Interp {
             }
             // `symbol->string`/`string->symbol`: the `Symbol`<->`Str` bridges.
             // A `Symbol` value shares the `Value::Symbol(id)` carrier of a
-            // `Sexpr::Sym` (`RtValue::Sexpr(Value::Symbol(id))`), so
+            // `Sexpr::Sym` (a `Value::Symbol(id)`), so
             // `symbol->string` reads its interned name and `string->symbol`
             // interns a fresh one — the same intern table `gensym`/`read` use.
             "symbol->string" => Some(match args[0] {
@@ -2362,6 +2361,8 @@ impl Interp {
             // Phase 5's `match`-to-enum fence.
             "sexpr-cons" => match (args.first(), args.get(1)) {
                 (Some(a), Some(b)) => {
+                    // core-build-ok: this *is* `cons`, over user data; both
+                    // arguments are already rooted as evaluated call arguments.
                     Some(heap.cons(*a, *b).map_err(|e| EvalError::Panic(e.to_string())))
                 }
                 _ => Some(Err(EvalError::Internal("sexpr-cons: expected two Sexpr arguments".into()))),
@@ -2797,7 +2798,7 @@ impl Interp {
         let result: Value = match def_name {
             Some(n) => heap.intern_symbol(&n),
             None => match out {
-                Some(rt) => rtvalue_to_sexpr(&rt),
+                Some(rt) => rt,
                 // `use`/`module`, or an empty body — nothing to hand back but `()`.
                 None => Value::Empty,
             },
@@ -2841,7 +2842,7 @@ fn crossing_mismatch(what: &str, got: Value) -> EvalError {
 impl MacroExpander for Interp {
     /// Expand one macro call: look `path` up in `fns` (a `defmacro` is stored
     /// there exactly like a `defun` — see [`Interp::exec`]'s `Defmacro` arm),
-    /// wrap each raw (unevaluated) argument form as `RtValue::Sexpr` with no
+    /// wrap each raw (unevaluated) argument form as a datum with no
     /// conversion (this *is* the implicit quoting that makes macro arguments
     /// unevaluated data), and run it like any other call.
     ///
@@ -2891,8 +2892,7 @@ impl Default for Interp {
 }
 
 /// Whether `type_name` is the built-in `Sexpr` type, whose values are
-/// represented by [`RtValue::Sexpr`] (heap-backed) rather than
-/// [`RtValue::Data`].
+/// represented as a heap box rather than a Rust-side value.
 fn is_sexpr_type(type_name: &Path) -> bool {
     *type_name == Path::root("sexpr")
 }
@@ -2983,7 +2983,7 @@ const SEXPR_RATIO: usize = 9;
 const SEXPR_PATH: usize = 10;
 
 /// Evaluate a built-in `i32`/`i64` arithmetic/comparison instance method
-/// (`registry::int_assoc`) — shared by both widths since `RtValue::Int`
+/// (`registry::int_assoc`) — shared by both widths since `Value::Int`
 /// represents every integer type uniformly as `i64`.
 fn eval_int_builtin(name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
     let (a, b) = match (args.first(), args.get(1)) {
@@ -3056,7 +3056,7 @@ fn expect_float(heap: &Heap, v: &Value) -> Result<f64, EvalError> {
 }
 
 /// `int->float` (`registry::int_assoc`): widen an `i32`/`i64` to `f64`. Both
-/// widths share `RtValue::Int(i64)` at runtime (see `eval_int_builtin`'s doc
+/// widths share `Value::Int(i64)` at runtime (see `eval_int_builtin`'s doc
 /// comment), so one implementation covers both.
 fn int_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     match args.first() {
@@ -3684,7 +3684,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[
             "append" => Some(string_append(heap, args)),
             "lt" => Some(string_lt(heap, args)),
             "<" | "<=" | ">" | ">=" => Some(string_compare(heap, method, args)),
-            // `eq`/`eql`: true identity (`Rc::ptr_eq` — see `RtValue::Str`'s
+            // `eq`/`eql`: true identity (`Rc::ptr_eq` — see the string table's
             // doc comment). `equal`/`equalp`: content comparison, the
             // (case-sensitive/-insensitive) CL predicates a naive "string
             // equality" actually means — see `registry::string_assoc`'s doc
@@ -5171,8 +5171,7 @@ fn llvm_builder_build_ptr_to_int(args: &[Value]) -> Result<Value, EvalError> {
 /// alone (`enum_fields_representable`) and the two could — and did — disagree
 /// without anything observable breaking, which is a bad place to be.
 fn build_enum_value(heap: &mut Heap, type_name: Path, variant: usize, fields: Vec<Value>) -> Value {
-    let mem_fields = fields.iter().map(|f| rtvalue_to_struct_field(f)).collect();
-    alloc_typed_enum(heap, &type_name, variant, mem_fields)
+    alloc_typed_enum(heap, &type_name, variant, fields)
 }
 
 impl Interp {
@@ -5343,16 +5342,15 @@ fn expect_hashable_key(v: &Value) -> Result<(), EvalError> {
 fn hashtable_get(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
-    let key = rtvalue_to_struct_field(&args[1]);
-    let found = heap.hashtable_get(id, key);
+    let found = heap.hashtable_get(id, args[1]);
     Ok(option_value(heap, found))
 }
 
 fn hashtable_set(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
-    let key = rtvalue_to_struct_field(&args[1]);
-    let val = rtvalue_to_struct_field(&args[2]);
+    let key = args[1];
+    let val = args[2];
     heap.hashtable_set(id, key, val);
     Ok(Value::Empty)
 }
@@ -5360,8 +5358,7 @@ fn hashtable_set(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
 fn hashtable_remove(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
-    let key = rtvalue_to_struct_field(&args[1]);
-    let removed = heap.hashtable_remove(id, key);
+    let removed = heap.hashtable_remove(id, args[1]);
     Ok(option_value(heap, removed))
 }
 
@@ -5380,7 +5377,7 @@ fn hashtable_clear(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> 
 /// `"vector"` representation, see `vector_def`'s doc comment) directly out of
 /// already-encoded `mem::Value` fields — the shared tail of `hashtable_keys`/
 /// `hashtable_values`/`hashtable_entries`, whose fields come straight from
-/// `Heap::hashtable_pairs` and so need no `RtValue` round-trip.
+/// `Heap::hashtable_pairs` and so need no conversion on the way out.
 fn vector_of_raw(heap: &mut Heap, fields: Vec<Value>) -> Value {
     // type-identity-ok: the built-in `Vector`, a root name spelled in full
     heap.alloc_struct("vector".to_string(), fields)
@@ -5417,8 +5414,8 @@ fn hashtable_entries(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError
 }
 
 /// The `BoxId` behind a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance —
-/// see [`RtValue::Sexpr`]'s doc comment for why these no longer get their
-/// own `RtValue` variant. Doesn't itself check `Heap::is_struct` (a
+/// they are ordinary boxed structs rather than a representation of their own.
+/// Doesn't itself check `Heap::is_struct` (a
 /// mismatched-kind `BoxId` — e.g. a boxed float reaching here — is caught by
 /// the panic in whichever `Heap` struct accessor the caller goes on to call,
 /// the same internal-invariant-trap convention `Heap::struct_field` etc.
@@ -5430,66 +5427,6 @@ fn expect_struct_box(v: &Value) -> Result<BoxId, EvalError> {
     }
 }
 
-/// Converts an already-evaluated `RtValue` into the `mem::Value` a
-/// `BoxedObj::Struct` field stores — the encode half of the struct-field
-/// boundary crossing (`decode_field_typed` is the other direction).
-/// Unambiguous regardless of the field's static type: every supported
-/// `RtValue` variant maps to exactly one `Value` shape. `RtValue::Sexpr`
-/// covers `HashTable<K,V>` too, since the `Sexpr`/`RtValue` unification's
-/// Stage 5 — a boxed `HashTable` is a `mem::Value::Boxed` like any other
-/// boxed struct. The variants a `defstruct`/`Vector<T>`/`HashTable<K,V>`
-/// field still can't hold — `Data` (`Option`/`Result`/a user sum type) and
-/// `RtValue::Scope` (a `Scope<V>` of a *native-repr* `V`, LLVM handles
-/// above all) — aren't representable in `crate::mem::Value` (that crate
-/// can't depend on `RtValue`), so they're a clear internal error here
-/// rather than a silent corruption. Closures stopped being on that list at
-/// Stage 6b (a function value is a `Value::Boxed` closure box riding in
-/// `RtValue::Sexpr`, storable like any other boxed value), and heap-repr-`V`
-/// scopes at Stage 8, the same way.
-///
-/// `Unit` left that list when `()` gained a field representation: it stores
-/// as `Value::Empty`. The slot carries no information (a unit type has one
-/// value, already known statically from the declared type), so what it holds
-/// only has to be a word the GC can `decode` safely — and an immediate nil
-/// references nothing at all. This is the *one* encoding where the stored
-/// shape alone doesn't identify the type, so [`decode_field_typed`] reads
-/// `Unit` back off the declared type rather than from the value; see its
-/// doc comment. Making this representable is what keeps `Result<(), E>` a
-/// heap-repr enum instead of sending [`build_enum_value`] down its
-/// native-`RtValue::Data` fallback — which is what let a `()` payload cross
-/// into compiled code at all.
-pub(super) fn rtvalue_to_struct_field(v: &Value) -> Value {
-    match v {
-        Value::Empty => Value::Empty,
-        Value::Int(n) => Value::Int(*n),
-        Value::Bool(b) => Value::Bool(*b),
-        Value::Char(c) => Value::Char(*c),
-        v => *v,
-    }
-}
-
-/// Convert an evaluated [`RtValue`] back into a `Sexpr`-side [`Value`], or
-/// `None` if it has no `Sexpr` representation — the shape `eval` needs to
-/// return its result (`Self::eval_form`). Exactly
-/// [`rtvalue_to_struct_field`]'s conversion: scalars box through the heap,
-/// an `RtValue::Sexpr` passes through, and `Unit` becomes `Value::Empty` —
-/// so a form that produces no value (a `defvar` initializer's side effect,
-/// an empty `progn`) reads back as `()`/nil. `Unit` used to need its own arm
-/// here because a struct field couldn't hold one; now that it can, the two
-/// agree by construction rather than by two copies of the same rule.
-///
-/// The non-representable set has shrunk to exactly one variant,
-/// [`RtValue::Data`]. Everything that used to be in it has since been given a
-/// heap form: the LLVM handles and native `Scope<V>` (Phase 1a), built-in
-/// function values (`BoxedObj::Builtin`), and `random-state`
-/// (`BoxedObj::RandomState`). And `Data` is only ever *built* by
-/// `build_enum_value`'s fallback, which fires only when a field fails this
-/// very conversion — so with nothing else able to fail it, no `Data` can be
-/// constructed and this returns `None` for nothing at all.
-pub(super) fn rtvalue_to_sexpr(v: &Value) -> Value {
-    rtvalue_to_struct_field(v)
-}
-
 fn expect_int_index(v: &Value) -> Result<usize, EvalError> {
     match v {
         Value::Int(n) if *n >= 0 => Ok(*n as usize),
@@ -5499,8 +5436,7 @@ fn expect_int_index(v: &Value) -> Result<usize, EvalError> {
 
 fn vector_push(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
-    let v = rtvalue_to_struct_field(&args[1]);
-    heap.struct_push_field(id, v);
+    heap.struct_push_field(id, args[1]);
     Ok(Value::Empty)
 }
 
@@ -5523,8 +5459,7 @@ fn vector_set(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     if i >= heap.struct_field_count(id) {
         return Err(EvalError::Panic(format!("Vector: index {} out of bounds", i)));
     }
-    let v = rtvalue_to_struct_field(&args[2]);
-    heap.struct_set_field(id, i, v);
+    heap.struct_set_field(id, i, args[2]);
     Ok(Value::Empty)
 }
 
@@ -5548,21 +5483,21 @@ fn vector_pop(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
 // ---- LLVM handle registry + `rt_llvm_call` (interp-closure removal ------
 // ---- Stage 1) -----------------------------------------------------------
 //
-// Compiled code represents every Rust-native LLVM value (`RtValue::
+// Compiled code represents every Rust-native LLVM value (an `llvm-*
 // LlvmModule`/`LlvmBuilder`/`LlvmFunction`/`LlvmBasicBlock`/`LlvmValue`)
-// and the native `RtValue::Scope` as an *LLVM handle*: an index into this
+// object, and a native-repr `Scope<V>`) as an *LLVM handle*: an index into this
 // thread-local registry, carried as a plain untraced `i64`
 // (`Repr::Handle` — kind `1`, the integer kind). That is
 // what makes the self-hosted compiler island's own `defun`s compilable:
 // their `llvm-*` method calls lower to a single generic shim,
-// [`rt_llvm_call`], which decodes handles back to `RtValue`s, dispatches
+// [`rt_llvm_call`], which decodes handles back to those objects, dispatches
 // into the very same [`eval_llvm_builtin_method`]/native-scope builtins the
 // interpreter uses, and encodes the result.
 //
 // Registry entries are only ever *appended* during a compile session; the
 // mark/release pair below lets the outermost compiled-island entry point
 // drop everything it accumulated once the session ends (the `Rc`s inside
-// the registered `RtValue`s keep shared structures like a module or a
+// the registered objects keep shared structures like a module or a
 // scope's frames alive exactly as long as some other owner still needs
 // them). Thread-local for the same reason `set_active_heap` is: `cargo
 // test` workers each drive their own independent `Heap`/LLVM session.
@@ -5596,6 +5531,11 @@ pub(crate) enum NativeHandle {
     Value(BasicValueEnum<'static>),
 }
 
+// A handle is an index into this vector, which is what lets one cross to
+// compiled code as a plain integer with no ownership attached. It grows for
+// the life of the thread except where `llvm_handles_mark`/`_release` bracket a
+// compile (`Interp::run_compile_function`), which is the one place a bounded
+// batch of handles is known to be finished with.
 thread_local! {
     static LLVM_HANDLES: RefCell<Vec<NativeHandle>> = const { RefCell::new(Vec::new()) };
 }
@@ -5691,6 +5631,22 @@ fn value_of_handle(raw: i64) -> Option<Value> {
     llvm_handle_get(raw).map(|_| Value::Int(raw))
 }
 
+/// The current registry length — pass to [`llvm_handles_release`] to drop
+/// every handle issued after this point.
+///
+/// [`Interp::run_compile_function`] brackets each compile with a pair, so the
+/// transient handles the native compiler registers while emitting one
+/// function's IR do not accumulate across many compiles. Everything else
+/// issued outside such a bracket lives as long as the thread.
+pub(crate) fn llvm_handles_mark() -> usize {
+    LLVM_HANDLES.with(|t| t.borrow().len())
+}
+
+/// Drops every handle issued since the matching [`llvm_handles_mark`].
+pub(crate) fn llvm_handles_release(mark: usize) {
+    LLVM_HANDLES.with(|t| t.borrow_mut().truncate(mark));
+}
+
 /// The handle integer `v` carries, for the `expect_llvm_*` accessors.
 fn expect_handle(v: &Value, want: &str) -> Result<NativeHandle, EvalError> {
     let h = match v {
@@ -5698,22 +5654,6 @@ fn expect_handle(v: &Value, want: &str) -> Result<NativeHandle, EvalError> {
         other => return Err(EvalError::Internal(format!("expected an {}, got {:?}", want, other))),
     };
     llvm_handle_get(h).ok_or_else(|| EvalError::Internal(format!("expected an {}, got dangling handle {}", want, h)))
-}
-
-/// The current registry length — pass to [`llvm_handles_release`] to drop
-/// every handle issued after this point. Wired to the compiled-island
-/// session boundaries in a later stage of the interp-closure removal plan
-/// (nothing calls a compiled function with LLVM-handle-typed values yet
-/// outside tests, whose registries die with their test process).
-#[allow(dead_code)]
-pub(crate) fn llvm_handles_mark() -> usize {
-    LLVM_HANDLES.with(|t| t.borrow().len())
-}
-
-/// Drops every handle issued since the matching [`llvm_handles_mark`].
-#[allow(dead_code)]
-pub(crate) fn llvm_handles_release(mark: usize) {
-    LLVM_HANDLES.with(|t| t.borrow_mut().truncate(mark));
 }
 
 /// How `rt_llvm_call` decodes one raw argument word, per the op table.
@@ -5728,7 +5668,7 @@ enum LlvmArgK {
     /// is settled entirely here, and the committed island bitcode is
     /// indifferent to the change from registry handle to tagged box.
     Scope,
-    /// A tagged heap `Value::Str` — decode to `RtValue::Str`.
+    /// A tagged heap `Value::Str`.
     Str,
     /// A raw untagged integer.
     Int,
@@ -5736,7 +5676,7 @@ enum LlvmArgK {
     Bool,
 }
 
-/// How `rt_llvm_call` encodes the builtin's `RtValue` result.
+/// How `rt_llvm_call` encodes the builtin's result.
 #[derive(Clone, Copy, Debug)]
 enum LlvmRetK {
     /// Register the value, return its handle.
@@ -5891,7 +5831,7 @@ unsafe extern "C" fn rt_apply_interpreted(closure: i64, args: *const i64, argc: 
 /// [`eval_llvm_builtin_method`]/native-scope builtins the interpreter
 /// itself uses — one implementation, two callers, no drift.
 ///
-/// Argument values are fully materialized into Rust-side `RtValue`s
+/// Argument values are fully materialized into Rust-side objects
 /// *before* anything here can allocate on the GC heap, so callers only
 /// need their usual kind-driven rooting (a tagged `Str` argument crossing
 /// in stays valid until then because nothing between the caller's own
@@ -5940,7 +5880,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         });
     }
     // The scope `get` returns `Option<V>` — encoded specially, so it's
-    // handled before the generic single-`RtValue` result path.
+    // handled before the generic single-value result path.
     //
     // The stored element word goes into the `Some` payload verbatim: for the
     // island's `Scope<llvm-value>`/`Scope<llvm-function>` that is the same
@@ -5966,10 +5906,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
             "push-frame" => scope_push_frame_heap(heap, &vals),
             "pop-frame" => scope_pop_frame_heap(heap, &vals),
             // The element type is irrelevant here: the value arrives already
-            // in its stored form, so `set` stores the word as given. (The
-            // interpreter's own `set` still encodes through
-            // `rtvalue_to_struct_field`, since there the value is an
-            // `RtValue` that has not crossed a boundary.)
+            // in its stored form, so `set` stores the word as given.
             "set" => scope_set_raw(heap, &vals),
             other => rt_llvm_fatal(&format!("rt_llvm_call: unknown native-scope method {}", other)),
         }
@@ -6015,7 +5952,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
 // Which family a call lands in is decided statically, from the receiver's
 // checked `Scope<V>` type ([`Interp::scope_is_heap`]) — never from the
 // receiver value's shape. `V` being heap-repr means every stored/returned
-// element is `RtValue::Sexpr` by construction, so — unlike `hashtable_get`,
+// element is a heap value by construction, so — unlike `hashtable_get`,
 // whose `V` can be anything — no typed decode is needed on the way out and
 // a non-`Sexpr` element on the way in is an internal-invariant trap.
 
@@ -6050,13 +5987,12 @@ fn scope_get_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// precedent of keeping a user-reachable condition a catchable evaluation
 /// error rather than a Rust panic.
 fn scope_set_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let v = rtvalue_to_struct_field(&args[2]);
-    scope_store(heap, args, v)
+    scope_store(heap, args, args[2])
 }
 
 /// `set` for a value that is already in its stored form — the `rt_llvm_call`
 /// path, where the element arrives as the very word compiled code holds and
-/// there is no `RtValue` to encode.
+/// there is no value to encode.
 fn scope_set_raw(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     scope_store(heap, args, args[2])
 }
@@ -6111,7 +6047,7 @@ fn expect_char(v: &Value) -> Result<char, EvalError> {
 }
 
 /// `char->int` (`registry::char_assoc`): a `char`'s Unicode scalar value as
-/// `i32` (uniformly `RtValue::Int(i64)` at runtime — see
+/// `i32` (uniformly `Value::Int(i64)` at runtime — see
 /// `eval_int_builtin`'s doc comment). Always succeeds — every `char` is
 /// already a valid scalar value, unlike `int->char`'s reverse direction.
 fn char_to_int(args: &[Value]) -> Result<Value, EvalError> {
@@ -6169,7 +6105,7 @@ fn string_identity_eq(args: &[Value]) -> Result<Value, EvalError> {
 }
 
 /// Content equality (case-sensitive) — CL's `equal`/`string=`, *not* `eq`
-/// (identity — see `RtValue::Str`'s doc comment and `docs/cl-equivalence-catalog.md`'s
+/// (identity — see the string table's doc comment and `docs/cl-equivalence-catalog.md`'s
 /// eq/eql/equal/equalp section). Named for what it computes, not for which
 /// builtin method currently calls it.
 fn string_content_eq(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
