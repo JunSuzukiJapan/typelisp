@@ -19,8 +19,8 @@ use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader
 /// Read, pre-declare, then check+exec every form — the shape every real
 /// driver has. `with_island` additionally loads the prelude and the compiler
 /// island, which anything building a closure or calling `(compile ...)` needs
-/// (since interp-closure removal Stage 8c every closure value is a compiled
-/// one, and compiling needs the island).
+/// (a closure value JIT-compiles when it can, and compiling needs the
+/// island).
 fn run_inner(src: &str, with_island: bool) -> Result<Value, Error> {
     let mut h = Heap::with_capacity(1 << 18);
     let r = Reader::new();

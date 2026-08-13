@@ -21,8 +21,7 @@ fn run(src: &str) -> Result<Value, Error> {
     let mut interp = Interp::new();
     // Load the prelude then the native compiler island *before* reading the
     // program: a generic function used as a value reifies to an `FnRef`
-    // closure, which JIT-compiles through the island (interp-closure removal
-    // Stage 8c — no interpreted-closure fallback). Loading first also keeps
+    // closure, which JIT-compiles through the island. Loading first also keeps
     // the read program's GC roots off the stack while the island loads.
     load_prelude(&mut h, &mut chk, &mut interp);
     load_compiler(&mut h, &mut chk, &mut interp);

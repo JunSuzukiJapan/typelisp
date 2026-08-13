@@ -5,10 +5,10 @@ use typelisp::{load_prelude, load_compiler, Checker, EvalError, Heap, Interp, Re
 
 /// Read, type-check, and evaluate a program; return the last expression's value.
 ///
-/// Loads the prelude and the native compiler island first: since interp-closure
-/// removal Stage 8c every `lambda`/`labels`/`FnRef` value is JIT-compiled
-/// through the island (no interpreted-closure fallback), so the many closure
-/// tests here that evaluate through `eval_ok` need it loaded. Loading before
+/// Loads the prelude and the native compiler island first: a
+/// `lambda`/`labels`/`FnRef` value JIT-compiles through the island when the
+/// island is there, which is the configuration the many closure tests here
+/// are meant to exercise, so `eval_ok` loads it. Loading before
 /// the read also keeps the program's GC roots off the stack while the island
 /// loads; the heap is sized for prelude + island accordingly.
 fn run(src: &str) -> Result<Value, EvalError> {
@@ -944,9 +944,9 @@ fn setf_through_a_shared_capture_is_visible_to_the_sibling_closure() {
 // in interp-closure removal Stage 8c.) It proved `Interp`'s interpreted-
 // closure side table (`closure_bodies`, drained via
 // `Heap::take_dead_closure_tokens`) shrank in step with the GC. Both the side
-// table and that drain mechanism are gone now that every closure is a compiled
-// `BoxedObj::CompiledClosure` carrying its own env inline — there is no
-// interpreter-side per-closure state left to leak.
+// table and that drain mechanism are gone: a compiled closure carries its env
+// inline, and an interpreted one carries its own code as heap data, so
+// neither leaves interpreter-side per-closure state to leak.
 
 /// A runtime error (here a `panic`) carries the source location of the form it
 /// came from, so messages read `file:line:col: ...` — down to the innermost

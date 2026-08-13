@@ -269,16 +269,15 @@ pub(crate) enum BoxedObj {
     /// `ClosureBox`, whose reference-counting header, retain/release calls,
     /// and capture mask globals it replaces wholesale; lifetime is the
     /// GC's business now, which also reclaims `labels` sibling cycles the
-    /// refcount scheme deliberately leaked). This is the *only* closure box
-    /// since interp-closure removal Stage 8c — its interpreted twin
-    /// (`Closure { body_token, env }`, whose body was a checked AST in the
-    /// interpreter's side table) is gone now that every closure is JIT/AOT
-    /// compiled at definition time; there is nothing to key a side table with
-    /// and nothing for the sweep to report.
+    /// refcount scheme deliberately leaked). One of the two closure boxes,
+    /// the other being its interpreted twin [`Closure`](BoxedObj::Closure) —
+    /// which values of the same `Type::Fn` can equally be, so anything that
+    /// applies a function value has to admit both. In compiled code that
+    /// dispatch is `typelisp_rt::rt_apply_any`'s.
     ///
     /// `fn_ptr` is the native entry point (the `compiled_fn_type_with_env`
     /// ABI: `(args_ptr, argc, env_ptr, env_len) -> i64`), opaque at this
-    /// layer exactly like `Closure`'s `body_token`. `env` holds one `Value`
+    /// layer. `env` holds one `Value`
     /// per captured slot, but only slots whose bit is set in `sexpr_mask`
     /// (bit `i` = slot `i`, so at most 64 captures — the same limit the
     /// replaced `ClosureBox` fn-mask had) are *real* tagged values the mark
@@ -299,8 +298,8 @@ pub(crate) enum BoxedObj {
     /// the body was a checked Rust AST, invisible to the collector, so the
     /// box held a `body_token` into an interpreter-side table instead. With
     /// the program itself made of cons cells there is no side table and no
-    /// token — `params`, `body` and `env` are ordinary `Value`s the mark
-    /// phase traces like any other, which is what lets a closure be
+    /// token — `params`, `ret`, `body` and `env` are ordinary `Value`s the
+    /// mark phase traces like any other, which is what lets a closure be
     /// collected (and a `labels` cycle reclaimed) by the same rules
     /// everything else follows.
     ///
@@ -308,7 +307,16 @@ pub(crate) enum BoxedObj {
     /// optimisation: a `lambda` whose parameters have no compiled
     /// representation used to be a hard error at definition time, and can
     /// now simply be interpreted.
-    Closure { params: Value, body: Value, env: Value },
+    ///
+    /// `params` is the core `((SYM REPR)...)` list and `ret` the return
+    /// representation, so the box carries its own whole signature. The
+    /// interpreter needs neither — it binds and returns `Value`s — but
+    /// `typelisp_rt::rt_apply_any` does: when compiled code applies one of
+    /// these, the argument words arriving from the compiled side and the
+    /// word going back have to be decoded and encoded by *declared*
+    /// representation, and the apply site does not carry one at runtime. A
+    /// closure is the only thing that knows its own.
+    Closure { params: Value, ret: Value, body: Value, env: Value },
     /// A *built-in* function used as a function value: `gensym` passed to a
     /// higher-order function, `+` reified as `i32::+`. The second function
     /// case alongside [`CompiledClosure`](BoxedObj::CompiledClosure), and the

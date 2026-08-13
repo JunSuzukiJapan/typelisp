@@ -1887,7 +1887,10 @@ impl Renderer {
             Value::Boxed(id) if heap.is_scope(id) => {
                 out.push_str(&format!("#<scope depth={}>", heap.scope_frame_count(id)))
             }
-            Value::Boxed(id) if heap.is_compiled_closure(id) => out.push_str("#<closure>"),
+            // Opaque, and identical whether the JIT took this `lambda`
+            // (`BoxedObj::CompiledClosure`) or it is being tree-walked
+            // (`BoxedObj::Closure`) — that is not a property of the value.
+            Value::Boxed(id) if heap.is_compiled_closure(id) || heap.is_closure(id) => out.push_str("#<closure>"),
             // Unreadable, like CL's own — the seed is an implementation
             // detail, not part of the value.
             Value::Boxed(id) if heap.is_random_state(id) => out.push_str("#<random-state>"),

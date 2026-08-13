@@ -14,7 +14,7 @@ use crate::{parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScop
 use crate::name_lexer::{NameLexer, NameTok};
 use super::semantic::{TypeKind, TypeUse};
 
-use super::ast::{CompileTarget, Pattern, Ref};
+use super::resolved::{CompileTarget, Pattern, Ref};
 use super::core::{self, Checked, Items};
 use super::repr::Repr;
 use super::registry::{AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, VarInfo, Variant};

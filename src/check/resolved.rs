@@ -6,6 +6,11 @@
 //! consumers because they cannot re-derive them — a name resolved to a target
 //! ([`Ref`], [`CompileTarget`]) and a pattern's shape ([`Pattern`], which the
 //! core `pat-*` forms are built from).
+//!
+//! This was `src/check/ast.rs`, holding `Typed`/`Expr`/`Arm`. The plan for the
+//! cons-cell interpreter had the file deleted outright; what actually happened
+//! is that the tree went and these three did not, so Stage D renamed it rather
+//! than leave a file called `ast` in a checker that builds no AST.
 
 use crate::{Path, Type};
 /// A reference to a free function or global variable — everything both

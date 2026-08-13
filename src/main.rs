@@ -576,10 +576,12 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
         // printed the same way `format_value`'s `RtValue::Scope` arm prints
         // a native-`V` scope.
         Value::Boxed(id) if heap.is_scope(id) => format!("#<scope depth={}>", heap.scope_frame_count(id)),
-        // A closure is a boxed value, printed opaquely. Always a compiled
-        // closure since interp-closure removal Stage 8c (`BoxedObj::Closure`
-        // is gone); `BoxedObj::CompiledClosure` is the only closure box left.
-        Value::Boxed(id) if heap.is_compiled_closure(id) => "#<closure>".to_string(),
+        // A closure is a boxed value, printed opaquely — and identically
+        // whether it was compiled or is being tree-walked
+        // (`BoxedObj::CompiledClosure` / `BoxedObj::Closure`). Which one a
+        // given `lambda` became is a matter of whether the JIT took it, not
+        // anything about the value, so printing must not tell them apart.
+        Value::Boxed(id) if heap.is_compiled_closure(id) || heap.is_closure(id) => "#<closure>".to_string(),
         // The other kind of function value: a built-in reified as a value,
         // which prints as its name rather than opaquely — there is nothing
         // else to show, and the name is exactly what identifies it.

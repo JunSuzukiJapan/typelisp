@@ -46,7 +46,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use typelisp_mem::{Heap, RootScope, SymId, Value};
+use typelisp_mem::{BoxId, Heap, RootScope, SymId, Value};
 
 use crate::check::core;
 use crate::check::repr::Repr;
@@ -399,11 +399,15 @@ impl Interp {
             Op::Lambda => {
                 let params = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (lambda ..) has no parameter list".to_string()))?;
-                // Field 1 is the return repr, for the bridge.
+                // The return repr, for the bridge — and, once this closure
+                // is stored in its box, for a compiled caller applying it
+                // (`Interp::apply_interpreted`).
+                let ret = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (lambda ..) has no return representation".to_string()))?;
                 let body = tail_after(heap, form, 2)?;
                 // `alloc_closure` cannot collect (only `cons` does), so the
-                // three values need no rooting across it.
-                Ok(Step::Done(heap.alloc_closure(params, body, env)))
+                // four values need no rooting across it.
+                Ok(Step::Done(heap.alloc_closure(params, ret, body, env)))
             }
             Op::Labels => self.labels_core(heap, form, env),
             Op::Apply => self.apply_core(heap, form, env),
@@ -663,8 +667,9 @@ impl Interp {
             };
             let rest = s.cdr(*d).map_err(heap_err)?;
             let params = s.car(rest).map_err(heap_err)?;
+            let ret = s.cdr(rest).and_then(|d| s.car(d)).map_err(heap_err)?;
             let body = tail_after_value(&s, rest, 2)?;
-            let f = s.alloc_closure(params, body, env);
+            let f = s.alloc_closure(params, ret, body, env);
             let cell = env_lookup(&s, env, sym)
                 .ok_or_else(|| EvalError::Internal(format!("eval: (labels ..) lost the slot for `{}`", s.symbol_name(sym))))?;
             match cell {
@@ -727,7 +732,7 @@ impl Interp {
                 let ret = Repr::read(&s, ret_repr_field)
                     .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no return representation".to_string()))?;
                 let (int_args, crossing_roots) = self.encode_crossing_args(&mut s, &argv, &arg_reprs, false)?;
-                crate::compile::runtime::set_active_heap(&mut *s as *mut Heap);
+                self.enter_compiled(&mut s);
                 let raw = Interp::call_closure_box(&s, id, &int_args);
                 for _ in 0..crossing_roots {
                     s.pop_root();
@@ -757,8 +762,26 @@ impl Interp {
             other => return Err(EvalError::Internal(format!("eval: (apply ..) callee is not a function: {:?}", other))),
         };
 
-        let (params, body, closure_env) = s.closure_parts(id);
-        let names = param_names(&s, params)?;
+        let (call_env, body) = self.closure_frame(&mut s, id, argv)?;
+        let Some((last, rest)) = body.split_last() else {
+            return Ok(Step::Done(Value::Empty));
+        };
+        for e in rest {
+            self.eval_core(&mut s, *e, call_env)?;
+        }
+        Ok(Step::Tail(*last, call_env))
+    }
+
+    /// Bind `argv` to interpreted closure `id`'s parameters, returning the
+    /// environment its body runs in and that body's forms.
+    ///
+    /// The call environment extends the environment the closure *captured*,
+    /// not the caller's: that is what makes this lexical scope rather than
+    /// dynamic. `call_env` is rooted on `heap` — the caller is inside a
+    /// [`RootScope`] that will release it.
+    fn closure_frame(&self, heap: &mut Heap, id: BoxId, argv: Vec<Value>) -> Result<(Value, Vec<Value>), EvalError> {
+        let (params, body, closure_env) = heap.closure_parts(id);
+        let names = param_names(heap, params)?;
         if names.len() != argv.len() {
             return Err(EvalError::Internal(format!(
                 "eval: arity mismatch: the closure takes {} argument(s), given {}",
@@ -767,21 +790,30 @@ impl Interp {
             )));
         }
         let binds: Vec<(SymId, Value)> = names.into_iter().zip(argv).collect();
-        // Over the *captured* environment, not the caller's: that is what
-        // makes this lexical scope rather than dynamic.
-        let call_env = extend_env(&mut s, &binds, closure_env)?;
-        s.push_root(call_env);
-
-        let body = s
+        let call_env = extend_env(heap, &binds, closure_env)?;
+        heap.push_root(call_env);
+        let body = heap
             .list_to_vec(body)
             .map_err(|e| EvalError::Internal(format!("eval: closure body: {}", e)))?;
-        let Some((last, rest)) = body.split_last() else {
-            return Ok(Step::Done(Value::Empty));
-        };
-        for e in rest {
-            self.eval_core(&mut s, *e, call_env)?;
+        Ok((call_env, body))
+    }
+
+    /// Applies interpreted closure `id` to values, all the way to a result.
+    ///
+    /// [`Self::apply_core`]'s counterpart for a caller that is *not* the
+    /// evaluator's own loop — `Interp::apply_interpreted`, re-entered from
+    /// compiled code. There is a native frame waiting on this call, so the
+    /// body's last form is evaluated here rather than handed back as a
+    /// [`Step::Tail`] jump: the tail call optimisation applies within an
+    /// interpreted call chain, and this is a boundary crossing.
+    pub(super) fn call_interpreted_closure(&self, heap: &mut Heap, id: BoxId, argv: Vec<Value>) -> Result<Value, EvalError> {
+        let mut s = RootScope::new(heap);
+        let (call_env, body) = self.closure_frame(&mut s, id, argv)?;
+        let mut last = Value::Empty;
+        for e in &body {
+            last = self.eval_core(&mut s, *e, call_env)?;
         }
-        Ok(Step::Tail(*last, call_env))
+        Ok(last)
     }
 
     /// `(match E R (P E...) ...)` — the first arm whose pattern matches wins.
@@ -1167,8 +1199,10 @@ impl Interp {
     /// (`param_names` takes each entry's `car`). `FnDef` keeps names and
     /// representations apart, so they are zipped back together here; a function
     /// registered without a signature (a `defmacro` lambda) has no
-    /// representations to zip, and unit stands in — nothing reads them on this
-    /// path, since an interpreted apply is uniform over `Value`.
+    /// representations to zip, and unit stands in — an interpreted apply is
+    /// uniform over `Value` and reads none of them. A *compiled* caller does
+    /// read them (`Interp::apply_interpreted`), and a `defmacro` lambda never
+    /// reaches one: it has no compiled representation to be passed by.
     fn reify(&self, heap: &mut Heap, f: &Rc<FnDef>) -> Result<Value, EvalError> {
         let mut s = RootScope::new(heap);
         let reprs = f.sig.as_ref().map(|(ps, _)| ps.as_slice()).unwrap_or(&[]);
@@ -1189,13 +1223,18 @@ impl Interp {
             params = s.cons(one, params).map_err(heap_err)?;
         }
         s.push_root(params);
+        let ret = match f.sig.as_ref() {
+            Some((_, r)) => r.write(&mut s).map_err(heap_err)?,
+            None => Value::Empty,
+        };
+        s.push_root(ret);
         let mut body = Value::Empty;
         for form in f.body.iter().rev() {
             s.push_root(body);
             body = s.cons(*form, body).map_err(heap_err)?;
         }
         s.push_root(body);
-        Ok(s.alloc_closure(params, body, Value::Empty))
+        Ok(s.alloc_closure(params, ret, body, Value::Empty))
     }
 
     /// [`Interp::resolve_fn_ref`] from a core form's own three name fields.
@@ -1610,6 +1649,25 @@ fn param_names(heap: &Heap, params: Value) -> Result<Vec<SymId>, EvalError> {
         .map(|p| match heap.car(*p) {
             Ok(Value::Symbol(sym)) => Ok(sym),
             other => Err(EvalError::Internal(format!("eval: parameter is not (SYM R): {:?}", other))),
+        })
+        .collect()
+}
+
+/// [`param_names`]'s other half: the declared representation of each entry in
+/// a parameter list `((SYM R)...)`, in order.
+///
+/// The interpreter itself never needs these — it binds a parameter to the
+/// `Value` it already is — but `Interp::apply_interpreted` does, to decode
+/// the raw words a *compiled* caller passes into an interpreted closure.
+pub(super) fn param_reprs(heap: &Heap, params: Value) -> Result<Vec<Repr>, EvalError> {
+    let ps = heap
+        .list_to_vec(params)
+        .map_err(|e| EvalError::Internal(format!("eval: parameter list: {}", e)))?;
+    ps.iter()
+        .map(|p| {
+            let r = heap.cdr(*p).and_then(|d| heap.car(d)).map_err(heap_err)?;
+            Repr::read(heap, r)
+                .ok_or_else(|| EvalError::Internal(format!("eval: parameter has no representation: {}", core::print(heap, *p))))
         })
         .collect()
 }

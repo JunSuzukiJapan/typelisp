@@ -525,8 +525,9 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
 /// raw-builtin tests preceded their self-hosted-compiler-body counterparts.
 /// This module is built entirely by hand (`llvm-module::create`, no
 /// `Interp::compile_function`/`add_compiled_function`), so it has to
-/// explicitly declare the `rt_closure_*` shims `build-make-closure`/
-/// `build-closure-apply` call into (bodyless `add-function` declarations,
+/// explicitly declare the `rt_closure_new`/`rt_apply_any` shims
+/// `build-make-closure`/`build-closure-apply` call into (bodyless
+/// `add-function` declarations,
 /// resolved via LLVM's default process-symbol lookup since every `rt_*`
 /// function is a `#[no_mangle]` symbol already linked into this test
 /// binary) — the same idiom `rt_root_count`/`rt_truncate_sexpr_roots` need
@@ -539,9 +540,7 @@ fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
         (defun build-and-run-closure-module () llvm-module
           (let ((m (llvm-module::create "mod")))
             (let ((ignored-new-decl (add-function m "rt_closure_new"))) ())
-            (let ((ignored-fnptr-decl (add-function m "rt_closure_fnptr"))) ())
-            (let ((ignored-envlen-decl (add-function m "rt_closure_env_len"))) ())
-            (let ((ignored-envget-decl (add-function m "rt_closure_env_get"))) ())
+            (let ((ignored-apply-decl (add-function m "rt_apply_any"))) ())
             (let ((add-offset-fn (add-function-with-env m "add_offset")))
               (let ((caller-fn (add-function m "caller")))
                 (let ((b1 (append-block add-offset-fn "entry")))
@@ -1053,21 +1052,109 @@ fn compile_dispatches_an_escaping_capturing_lambda_called_through_another_compil
     }
 }
 
+/// The other direction of the same slice, and what the plan called the
+/// "compiled -> interpreted hole": `adder` is *not* compiled, so `(adder 5)`
+/// is an ordinary tree-walked `lambda` and yields a `BoxedObj::Closure`. It
+/// then crosses into `apply-fn`, which *is* compiled, and gets applied there.
+///
+/// Before `rt_apply_any` this aborted the process: `build-closure-apply`
+/// emitted a `rt_closure_fnptr` call, which `fatal`s on anything that is not
+/// a `BoxedObj::CompiledClosure`, and `fatal` cannot be caught. Compiled code
+/// now calls a closure value through `rt_apply_any`, which dispatches on what
+/// the box actually holds and re-enters the interpreter for this case.
+#[test]
+fn compile_applies_an_interpreted_closure_handed_to_a_compiled_function() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
+        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
+        (compile apply-fn)
+        (apply-fn (adder 5) 10)
+        "#,
+    );
+    match v {
+        Value::Int(n) => assert_eq!(n, 15),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The same crossing with representations that are *not* raw machine words:
+/// a `Sexpr` argument arrives tagged and has to be decoded, the interpreted
+/// body conses (so it allocates with a compiled frame on the stack), and the
+/// result goes back tagged.
+///
+/// The word itself says nothing about which of the two it is — that is the
+/// whole reason `BoxedObj::Closure` carries its own `params`/`ret`. Deciding
+/// by the value's shape instead is the mistake `(which (Float 1.5))` caught
+/// when `f64` unified into one value world.
+#[test]
+fn an_interpreted_closure_called_from_compiled_code_crosses_tagged_values() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun consr ((tail Sexpr)) (fn (Sexpr) Sexpr) (lambda ((x Sexpr)) Sexpr (sexpr-cons x tail)))
+        (defun apply-fn ((f (fn (Sexpr) Sexpr)) (v Sexpr)) Sexpr (f v))
+        (compile apply-fn)
+        (sexpr-int (sexpr-car (apply-fn (consr (Int 2)) (Int 1))))
+        "#,
+    );
+    assert_eq!(v, Value::Int(1));
+}
+
+/// And with `f64`, the representation that crosses as a raw `to_bits` pattern
+/// and whose *decode* allocates a box — so a later argument's decode can
+/// collect an earlier one if it was not rooted on the way in.
+#[test]
+fn an_interpreted_closure_called_from_compiled_code_crosses_floats() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun scaler ((k f64)) (fn (f64 f64) f64) (lambda ((x f64) (y f64)) f64 (* k (+ x y))))
+        (defun apply-fn ((f (fn (f64 f64) f64)) (x f64) (y f64)) bool (= (f x y) 9.0))
+        (compile apply-fn)
+        (apply-fn (scaler 3.0) 1.0 2.0)
+        "#,
+    );
+    assert_eq!(v, Value::Bool(true));
+}
+
+/// The interpreted callee under real collections: the compiled caller conses
+/// in a loop before applying `f`, on a heap small enough that those conses
+/// force repeated `gc()` runs — the counterpart of
+/// `repeated_calls_through_a_captured_closure_survive_gc_pressure` for a
+/// callee the collector has to keep alive across a frame it cannot see.
+#[test]
+fn an_interpreted_closure_held_by_compiled_code_survives_gc_pressure() {
+    let v = run_with_compiler_and_capacity(
+        r#"
+        (defun adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
+        (defun outer ((f (fn (i64) i64)) (x i64)) i64
+          (let ((ignored (loop
+                           (if (eq x 0) (break) ())
+                           (sexpr-cons (Int 0) (Int 0))
+                           (setf x (- x 1)))))
+            (f 5)))
+        (compile outer)
+        (outer (adder 10) 5000)
+        "#,
+        20000,
+    )
+    .expect("eval failed");
+    assert_eq!(v, Value::Int(15));
+}
+
 /// The end-to-end Stage 4 slice (`Expr::FnRef` as a closure value): `square`
 /// is used bare (no call syntax) where a `(fn (i64) i64)` is expected — the
-/// checker reifies that into `Expr::FnRef`, which `ast_bridge::translate_fnref`
-/// turns into a non-capturing forwarding `lambda` (`(lambda ... (call
-/// "square" (var arg0)))`), reaching the exact same `ClosureBox`/
+/// checker reifies that into a non-capturing forwarding `lambda` (`(lambda
+/// ... (call "square" (var arg0)))`), reaching the exact same closure-box/
 /// `build-closure-apply` machinery the closure-value test above does.
 ///
 /// `run-it`'s body (not the top-level call site) is where `square` appears
 /// bare, so the whole chain — `run-it` -> `apply-fn` -> the `square` `FnRef`
-/// — stays compiled. (Historically this routing mattered because the
-/// tree-walking interpreter's `Expr::FnRef` produced an *interpreted* closure
-/// that was rejected at the compiled boundary; since interp-closure removal
-/// Stage 8c `Expr::FnRef` JIT-compiles to a `BoxedObj::CompiledClosure` that
-/// crosses fine, so a bare top-level `(apply-fn square 5)` would work too —
-/// this test keeps the `run-it` form as the original end-to-end slice.)
+/// — stays compiled. (This routing used to be load-bearing: a bare top-level
+/// `(apply-fn square 5)` produced an *interpreted* closure that the compiled
+/// boundary rejected outright. It no longer is — an interpreted closure
+/// crosses and is applied through `rt_apply_any`, see
+/// `compile_applies_an_interpreted_closure_handed_to_a_compiled_function` —
+/// but this test keeps the `run-it` form as the original end-to-end slice.)
 #[test]
 fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
     let v = eval_ok_with_compiler(
@@ -1188,9 +1275,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_closure_new"))) ())
-             (let ((ignored-fnptr (add-function m "rt_closure_fnptr"))) ())
-             (let ((ignored-envlen (add-function m "rt_closure_env_len"))) ())
-             (let ((ignored-envget (add-function m "rt_closure_env_get"))) ())
+             (let ((ignored-apply (add-function m "rt_apply_any"))) ())
              (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -1226,9 +1311,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_closure_new"))) ())
-             (let ((ignored-fnptr (add-function m "rt_closure_fnptr"))) ())
-             (let ((ignored-envlen (add-function m "rt_closure_env_len"))) ())
-             (let ((ignored-envget (add-function m "rt_closure_env_get"))) ())
+             (let ((ignored-apply (add-function m "rt_apply_any"))) ())
              (let ((ignored-push (add-function m "rt_push_sexpr_root"))) ())
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "go" true) (0 int 5)))))"#,
     ));

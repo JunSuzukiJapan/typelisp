@@ -150,8 +150,7 @@ fn source_loaded() -> (Heap, Checker, Interp) {
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     // Some comparison programs build closures, which JIT through the compiler
-    // island (interp-closure removal Stage 8c: no interpreted-closure
-    // fallback), so both environments must have it loaded.
+    // island, so both environments must have it loaded.
     load_compiler(&mut h, &mut chk, &mut interp);
     (h, chk, interp)
 }
@@ -196,8 +195,8 @@ fn fasl_loaded(fasl: &Fasl) -> (Heap, Checker, Interp) {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     fasl.load_into(&mut h, &mut chk, &mut interp).expect("load_into");
-    // Match `source_loaded`: the island is needed to JIT any closure a
-    // comparison program builds (interp-closure removal Stage 8c).
+    // Match `source_loaded`: the island is what JITs any closure a comparison
+    // program builds.
     load_compiler(&mut h, &mut chk, &mut interp);
     (h, chk, interp)
 }

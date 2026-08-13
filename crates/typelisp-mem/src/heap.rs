@@ -973,19 +973,19 @@ impl Heap {
         self.alloc_boxed(BoxedObj::CompiledClosure { fn_ptr, env, sexpr_mask })
     }
 
-    /// True if `id` holds a `BoxedObj::CompiledClosure` — the only *compiled*
-    /// closure box there is since interp-closure removal Stage 8c. A built-in
-    /// used as a function value is [`is_builtin_fn`](Self::is_builtin_fn)
-    /// instead; the two together are every `Type::Fn` value.
+    /// True if `id` holds a `BoxedObj::CompiledClosure`. A function value can
+    /// equally be an *interpreted* closure ([`is_closure`](Self::is_closure))
+    /// or a built-in ([`is_builtin_fn`](Self::is_builtin_fn)); the three
+    /// together are every `Type::Fn` value.
     pub fn is_compiled_closure(&self, id: BoxId) -> bool {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::CompiledClosure { .. }))
     }
 
-    /// Store an *interpreted* closure — parameter list, body, and captured
-    /// environment, all core forms and all `Value` — returning its
-    /// `Value::Boxed`. See [`BoxedObj::Closure`].
-    pub fn alloc_closure(&mut self, params: Value, body: Value, env: Value) -> Value {
-        self.alloc_boxed(BoxedObj::Closure { params, body, env })
+    /// Store an *interpreted* closure — parameter list, return
+    /// representation, body, and captured environment, all core forms and all
+    /// `Value` — returning its `Value::Boxed`. See [`BoxedObj::Closure`].
+    pub fn alloc_closure(&mut self, params: Value, ret: Value, body: Value, env: Value) -> Value {
+        self.alloc_boxed(BoxedObj::Closure { params, ret, body, env })
     }
 
     /// True if `id` holds a [`BoxedObj::Closure`].
@@ -998,7 +998,18 @@ impl Heap {
     /// [`float_value`](Self::float_value).
     pub fn closure_parts(&self, id: BoxId) -> (Value, Value, Value) {
         match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Closure { params, body, env }) => (*params, *body, *env),
+            Some(BoxedObj::Closure { params, body, env, .. }) => (*params, *body, *env),
+            _ => panic!("BoxId does not hold a Closure"),
+        }
+    }
+
+    /// An interpreted closure's declared return representation — the core
+    /// form, not a decoded `Repr` (this crate has no notion of one). Only a
+    /// boundary crossing needs it; see [`BoxedObj::Closure`]. Panics like
+    /// [`closure_parts`](Self::closure_parts).
+    pub fn closure_ret(&self, id: BoxId) -> Value {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Closure { ret, .. }) => *ret,
             _ => panic!("BoxId does not hold a Closure"),
         }
     }
@@ -1620,8 +1631,9 @@ impl Heap {
             // captures: `params`/`body` are cons cells like any other, and
             // nothing else necessarily refers to a `lambda`'s body once the
             // form that built it is gone.
-            BoxedObj::Closure { params, body, env } => {
+            BoxedObj::Closure { params, ret, body, env } => {
                 stack.push(*params);
+                stack.push(*ret);
                 stack.push(*body);
                 stack.push(*env);
             }

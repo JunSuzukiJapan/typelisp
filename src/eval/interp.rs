@@ -623,17 +623,23 @@ impl Interp {
             .collect();
         let internal_names: Vec<String> =
             names.iter().map(|n| crate::compile::symbols::user_symbol_name(n)).collect();
-        // Wire only the `rt_*` shims the module actually forward-declares. A
-        // `check_hash` load has a fresh `.bc` that declares exactly the current
-        // set, but the bootstrap snapshot chain installs the *committed* (older)
-        // `.bc`: if this generation added a new shim (e.g. `rt_gensym`, made to
-        // compile `gensym` in macro-expansion lambdas), that older module never
-        // declared it — and never called it either, so skipping its mapping is
-        // correct, whereas passing it to `new_multi` would fail its "no forward
-        // declaration" guard.
+        // Wire only the `rt_*` shims the module actually forward-declares.
+        // Skipping the rest is not a leniency: a module can only *call* what
+        // it declares, so a shim with no declaration here has no call site to
+        // resolve, whereas passing it to `new_multi` would fail that
+        // function's "no forward declaration" guard.
+        //
+        // Both loads need this, not just the bootstrap one. The `check_hash`
+        // load verifies the `.bc` against `compiler.rs`'s `SOURCE` — and the
+        // shim list is *Rust*, so adding one (`rt_gensym`, made to compile
+        // `gensym` in macro-expansion lambdas; `rt_apply_any`, Stage D)
+        // leaves the hash matching while the committed bitcode still declares
+        // the older set. Gating on `check_hash` made every such addition fail
+        // the install until the island was regenerated, for a mapping the
+        // island had no use for.
         let externals: Vec<(String, usize)> = rt_extern_functions()
             .iter()
-            .filter(|(n, _)| check_hash || module.get_function(n).is_some())
+            .filter(|(n, _)| module.get_function(n).is_some())
             .map(|(n, addr)| (n.to_string(), *addr))
             .collect();
         let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals)
@@ -694,14 +700,7 @@ impl Interp {
         // `&rest` one that reached compilation would land in the "no declared
         // representation" error above rather than be guessed at.
         let (int_args, crossing_roots) = self.encode_crossing_args(heap, argv, param_reprs, false)?;
-        // Registers `heap` as this thread's active `Heap` (see
-        // `compile::runtime::set_active_heap`'s doc comment) so any
-        // `rt-cons`/`rt-car`/... call the compiled code makes — directly or
-        // transitively through another compiled function — resolves against
-        // the right heap. Done on every call rather than once, since it's
-        // one pointer store and there's no cheaper place to detect "this
-        // callee might transitively touch the heap" ahead of time.
-        crate::compile::runtime::set_active_heap(heap as *mut Heap);
+        self.enter_compiled(heap);
         let raw = compiled.call(&int_args);
         for _ in 0..crossing_roots {
             heap.pop_root();
@@ -778,97 +777,12 @@ impl Interp {
                 None if rest => Some(&Repr::Sexpr),
                 None => None,
             };
-            let encoded = match v {
-                // A closure crossing into compiled code is always a
-                // `BoxedObj::CompiledClosure` now (interp-closure removal
-                // Stage 8c deleted `BoxedObj::Closure`), a tagged `Sexpr` like
-                // any other boxed value — so it just falls through to the
-                // ordinary `RtValue::Sexpr` arm; compiled code on both sides
-                // already agrees on its shape. Already rooted by the pre-pass
-                // above, so this only encodes.
-                // A built-in used as a function value is a box, and compiled
-                // code would hand it to `rt_closure_fnptr` and *abort*
-                // (`is_compiled_closure` fails there, and `fatal` cannot be
-                // caught). Rejected here instead, where it is still an
-                // ordinary catchable error. Lifted once `rt_apply_any` exists
-                // (plan Phase 3).
-                Value::Boxed(id) if heap.is_builtin_fn(*id) => {
-                    let name = heap.builtin_fn_name(*id).to_string();
-                    Err(EvalError::Internal(format!(
-                        "compiled call: the built-in \"{}\" cannot be passed as a function value to compiled code",
-                        name
-                    )))
-                }
-                // Everything else is decided by the parameter's *declared*
-                // type, never by the value's shape.
-                //
-                // This used to read the value: an `i32` argument was
-                // `RtValue::Int` and crossed as a raw machine word, while a
-                // `Sexpr` argument holding an integer was
-                // `RtValue::Sexpr(Value::Int)` and crossed as a tagged word,
-                // and the two variants told them apart. With one value
-                // universe both are `Value::Int(n)` and the value says
-                // nothing — exactly the ambiguity that made `(which (Float
-                // 1.5))` miss its `(float _)` arm when `f64` unified
-                // (`compile_match_distinguishes_float_bignum_and_ratio_boxes`).
-                // So the whole dispatch is type-driven, and a parameter with
-                // no declared type to consult is an error rather than a
-                // guess: either encoding would corrupt the call silently.
-                _ => match param_repr {
-                    // Raw machine words, by the encodings compiled code uses
-                    // internally.
-                    Some(Repr::Int) => match v {
-                        Value::Int(n) => Ok(*n),
-                        other => Err(EvalError::Internal(format!("compiled call: expected an integer argument, got {:?}", other))),
-                    },
-                    Some(Repr::Bool) => match v {
-                        Value::Bool(b) => Ok(i64::from(*b)),
-                        other => Err(EvalError::Internal(format!("compiled call: expected a bool argument, got {:?}", other))),
-                    },
-                    Some(Repr::Char) => match v {
-                        Value::Char(c) => Ok(*c as i64),
-                        other => Err(EvalError::Internal(format!("compiled call: expected a char argument, got {:?}", other))),
-                    },
-                    // `()` crosses as the plain `0` `compile-unit` compiles a
-                    // `Unit`-typed body tail to. A unit value carries no
-                    // information, so the word is a placeholder the callee
-                    // never reads; it just has to be the one both sides agree
-                    // on.
-                    Some(Repr::Unit) => Ok(0),
-                    // An `f64` is its raw `f64::to_bits` pattern in an `i64`
-                    // (`compile-float`/`llvm_builder_build_float_op`), the
-                    // inverse of the `Repr::Float` return decode below.
-                    Some(Repr::Float) => match v {
-                        Value::Boxed(id) if heap.is_float(*id) => Ok(heap.float_value(*id).to_bits() as i64),
-                        other => Err(EvalError::Internal(format!("compiled call: expected an f64 argument, got {:?}", other))),
-                    },
-                    // An LLVM handle crosses as the *raw* registry index —
-                    // never tagged. Without its own arm it would fall into the
-                    // tagged catch-all below and the callee would read
-                    // `handle << 3` as a handle: passing the island its own
-                    // module as handle 1 made it look up handle 8 and abort
-                    // with "dangling llvm handle 8". Must stay ahead of the
-                    // catch-all, exactly as the matching check in
-                    // `decode_compiled_return` does.
-                    Some(Repr::Handle) => match v {
-                        Value::Int(h) => Ok(*h),
-                        other => Err(EvalError::Internal(format!(
-                            "compiled call: expected an llvm handle argument, got {:?}",
-                            other
-                        ))),
-                    },
-                    // Every remaining representation — `Sexpr`, `string`,
-                    // `bignum`/`ratio`, structs, enums, closures, trait
-                    // objects, and a `Scope<V>` (one heap object since Phase
-                    // 1a) — is already a heap `Value`, and crosses as the
-                    // tagged `i64` the `rt_*` shims read. Rooted by the
-                    // pre-pass above.
-                    Some(_) => Ok(crate::compile::runtime::encode(*v)),
-                    None => Err(EvalError::Internal(format!(
-                        "compiled call: no declared representation for argument {} — cannot tell a raw scalar from a tagged heap word",
-                        i
-                    ))),
-                },
+            let encoded = match param_repr {
+                Some(r) => self.encode_crossing_value(heap, v, r),
+                None => Err(EvalError::Internal(format!(
+                    "compiled call: no declared representation for argument {} — cannot tell a raw scalar from a tagged heap word",
+                    i
+                ))),
             };
             match encoded {
                 Ok(n) => int_args.push(n),
@@ -881,6 +795,88 @@ impl Interp {
             }
         }
         Ok((int_args, crossing_roots))
+    }
+
+    /// One value's worth of [`Self::encode_crossing_args`] — the exact
+    /// inverse of [`Self::decode_compiled_return`], and shared with it by
+    /// [`Self::apply_interpreted`], which crosses the same boundary in the
+    /// other direction (compiled code's argument words in, the interpreted
+    /// result's word out).
+    ///
+    /// The dispatch is on the *declared* representation, never on the value's
+    /// shape. It used to read the value: an `i32` argument was `RtValue::Int`
+    /// and crossed as a raw machine word, while a `Sexpr` argument holding an
+    /// integer was `RtValue::Sexpr(Value::Int)` and crossed as a tagged word,
+    /// and the two variants told them apart. With one value universe both are
+    /// `Value::Int(n)` and the value says nothing — exactly the ambiguity
+    /// that made `(which (Float 1.5))` miss its `(float _)` arm when `f64`
+    /// unified (`compile_match_distinguishes_float_bignum_and_ratio_boxes`).
+    /// A caller with no declared representation to consult must raise an
+    /// error rather than guess: either encoding would corrupt the call
+    /// silently.
+    ///
+    /// Encoding allocates nothing, so no rooting happens (or is needed) here.
+    fn encode_crossing_value(&self, heap: &Heap, v: &Value, repr: &Repr) -> Result<i64, EvalError> {
+        // A built-in used as a function value is a box like any other, so it
+        // would encode as an ordinary tagged word — and then `rt_apply_any`
+        // would find a callee whose arguments it has no way to decode: a
+        // built-in carries only its name, and the apply site does not carry
+        // the representations at runtime (an interpreted closure does, which
+        // is why *it* crosses fine). Rejected here, where it is still an
+        // ordinary catchable error rather than an abort from inside a
+        // compiled frame.
+        if let Value::Boxed(id) = v {
+            if heap.is_builtin_fn(*id) {
+                return Err(EvalError::Internal(format!(
+                    "compiled call: the built-in \"{}\" cannot be passed as a function value to compiled code",
+                    heap.builtin_fn_name(*id)
+                )));
+            }
+        }
+        match repr {
+            // Raw machine words, by the encodings compiled code uses
+            // internally.
+            Repr::Int => match v {
+                Value::Int(n) => Ok(*n),
+                other => Err(EvalError::Internal(format!("compiled call: expected an integer argument, got {:?}", other))),
+            },
+            Repr::Bool => match v {
+                Value::Bool(b) => Ok(i64::from(*b)),
+                other => Err(EvalError::Internal(format!("compiled call: expected a bool argument, got {:?}", other))),
+            },
+            Repr::Char => match v {
+                Value::Char(c) => Ok(*c as i64),
+                other => Err(EvalError::Internal(format!("compiled call: expected a char argument, got {:?}", other))),
+            },
+            // `()` crosses as the plain `0` `compile-unit` compiles a
+            // `Unit`-typed body tail to. A unit value carries no information,
+            // so the word is a placeholder the callee never reads; it just has
+            // to be the one both sides agree on.
+            Repr::Unit => Ok(0),
+            // An `f64` is its raw `f64::to_bits` pattern in an `i64`
+            // (`compile-float`/`llvm_builder_build_float_op`), the inverse of
+            // `decode_compiled_return`'s `Repr::Float` arm.
+            Repr::Float => match v {
+                Value::Boxed(id) if heap.is_float(*id) => Ok(heap.float_value(*id).to_bits() as i64),
+                other => Err(EvalError::Internal(format!("compiled call: expected an f64 argument, got {:?}", other))),
+            },
+            // An LLVM handle crosses as the *raw* registry index — never
+            // tagged. Without its own arm it would fall into the tagged
+            // catch-all below and the callee would read `handle << 3` as a
+            // handle: passing the island its own module as handle 1 made it
+            // look up handle 8 and abort with "dangling llvm handle 8". Must
+            // stay ahead of the catch-all, exactly as the matching check in
+            // `decode_compiled_return` does.
+            Repr::Handle => match v {
+                Value::Int(h) => Ok(*h),
+                other => Err(EvalError::Internal(format!("compiled call: expected an llvm handle argument, got {:?}", other))),
+            },
+            // Every remaining representation — `Sexpr`, `string`,
+            // `bignum`/`ratio`, structs, enums, closures, trait objects, and a
+            // `Scope<V>` (one heap object since Phase 1a) — is already a heap
+            // `Value`, and crosses as the tagged `i64` the `rt_*` shims read.
+            _ => Ok(crate::compile::runtime::encode(*v)),
+        }
     }
 
     /// [`Self::call_compiled`]'s return-value half, factored out for the same
@@ -1013,6 +1009,82 @@ impl Interp {
         // always points at a function with this signature.
         let f: unsafe extern "C" fn(*const i64, u32, *const i64, u32) -> i64 = unsafe { std::mem::transmute(fn_ptr) };
         unsafe { f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32) }
+    }
+
+    /// Registers this thread's `Heap` and `Interp` for the compiled code
+    /// about to run, and wires the interpreter re-entry hook
+    /// `typelisp_rt::rt_apply_any` calls when it finds an interpreted callee.
+    ///
+    /// Called immediately before *every* crossing into compiled code rather
+    /// than once per session: it is three pointer stores, and there is no
+    /// cheaper place to decide ahead of time whether a given callee might
+    /// transitively touch the heap or apply a function value. The heap
+    /// registration is what makes `rt-cons`/`rt-car`/... resolve against the
+    /// right heap — see `compile::runtime::set_active_heap`'s doc comment.
+    ///
+    /// AOT has no counterpart: an AOT-compiled executable is its own process
+    /// with no interpreter in it, so `rt_heap_init` registers the heap alone
+    /// and an interpreted callee there is an invariant break (see
+    /// `rt_apply_any`).
+    fn enter_compiled(&self, heap: &mut Heap) {
+        crate::compile::runtime::set_active_heap(heap as *mut Heap);
+        ACTIVE_INTERP.with(|cell| cell.set(self as *const Interp));
+        crate::compile::runtime::set_apply_interpreted(Some(rt_apply_interpreted));
+    }
+
+    /// Applies an *interpreted* closure that compiled code is calling —
+    /// [`rt_apply_interpreted`]'s body, and the compiled -> interpreted
+    /// direction of the boundary [`Self::call_compiled`] crosses the other
+    /// way. `closure` and `argv` are raw compiled-side words.
+    ///
+    /// The representations to decode and encode by come from the closure box
+    /// itself ([`typelisp_mem::BoxedObj::Closure`]'s `params`/`ret`), because
+    /// nothing else at this point has them: the apply site knows the callee's
+    /// `Fn` type statically but carries none of it into the emitted call, and
+    /// the words are exactly as ambiguous here as they are anywhere else on
+    /// this boundary (a raw `f64` bit pattern and a tagged box pointer are
+    /// both just `i64`s). A built-in used as a function value has no
+    /// signature to read, which is why it is rejected before it can ever
+    /// cross — see [`Self::encode_crossing_value`].
+    fn apply_interpreted(&self, heap: &mut Heap, closure: i64, argv: &[i64]) -> Result<i64, EvalError> {
+        let f = crate::compile::runtime::decode(closure);
+        let id = match f {
+            Value::Boxed(id) if heap.is_closure(id) => id,
+            Value::Boxed(id) if heap.is_builtin_fn(id) => {
+                return Err(EvalError::Internal(format!(
+                    "the built-in \"{}\" cannot be applied from compiled code: its argument representations are not carried at the apply site",
+                    heap.builtin_fn_name(id)
+                )))
+            }
+            other => return Err(EvalError::Internal(format!("the callee is not an interpreted closure: {:?}", other))),
+        };
+        let (params, _, _) = heap.closure_parts(id);
+        let param_reprs = core_eval::param_reprs(heap, params)?;
+        let ret = Repr::read(heap, heap.closure_ret(id))
+            .ok_or_else(|| EvalError::Internal("the closure has no declared return representation".to_string()))?;
+        if argv.len() != param_reprs.len() {
+            return Err(EvalError::Internal(format!(
+                "arity mismatch: the closure takes {} argument(s), given {}",
+                param_reprs.len(),
+                argv.len()
+            )));
+        }
+
+        let mut s = RootScope::new(heap);
+        // The closure box is reachable from the caller's compiled frame,
+        // which the collector cannot see; the arguments the caller passed are
+        // rooted on its side, but their *decoded* forms (a `Repr::Float`
+        // argument allocates a box) are new objects reachable from nothing.
+        s.push_root(f);
+        let mut args = Vec::with_capacity(argv.len());
+        for (raw, r) in argv.iter().zip(&param_reprs) {
+            let v = self.decode_compiled_return(&mut s, *raw, r)?;
+            s.push_root(v);
+            args.push(v);
+        }
+        let v = self.call_interpreted_closure(&mut s, id, args)?;
+        s.push_root(v);
+        self.encode_crossing_value(&s, &v, &ret)
     }
 
     /// Finds the registered `(Path, String)` key for a `"type-path::method"`
@@ -4144,12 +4216,12 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 118] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 119] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
-        rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len, rt_closure_fnptr,
-        rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum,
+        rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len,
+        rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum,
         rt_float_to_ratio, rt_float_value, rt_gensym, rt_global_get, rt_global_new, rt_global_set, rt_i64_div, rt_i64_mod,
         rt_i64_ash, rt_i64_logbitp, rt_i64_logcount, rt_i64_integer_length,
         rt_f64_tan, rt_f64_asin, rt_f64_acos, rt_f64_atan, rt_f64_sinh, rt_f64_cosh, rt_f64_tanh, rt_f64_asinh, rt_f64_acosh,
@@ -4232,6 +4304,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 118] {
         ("rt_closure_fnptr", rt_closure_fnptr as usize),
         ("rt_closure_env_len", rt_closure_env_len as usize),
         ("rt_closure_env_get", rt_closure_env_get as usize),
+        ("rt_apply_any", rt_apply_any as usize),
         ("rt_cell_new", rt_cell_new as usize),
         ("rt_cell_get", rt_cell_get as usize),
         ("rt_cell_set", rt_cell_set as usize),
@@ -4937,27 +5010,31 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
 }
 
 /// `build-call-with-env`'s indirect counterpart: the callee isn't a
-/// statically-known `llvm-function` here, only a tagged `Sexpr` closure
-/// reference, so this reads `fn_ptr`/`env_len` back out via `rt_closure_fnptr`/
-/// `rt_closure_env_len`, copies each captured slot into a fixed 64-slot
-/// scratch buffer via a genuine runtime loop over `rt_closure_env_get`
-/// (`env_len` is only known once the closure value actually exists, not at
-/// IR-build time; 64 is `rt_closure_new`'s own capture-count ceiling — see
-/// `BoxedObj::CompiledClosure`'s doc comment — so a fixed-capacity buffer
-/// avoids a dynamic-sized `alloca`), then calls through
-/// `Builder::build_indirect_call` against the one fixed
-/// `compiled_fn_type_with_env` signature every closure-boxed function shares
-/// (see that function's doc comment for why no ABI branch is needed here).
-/// Never exposes `env`'s backing `Vec<Value>` as a raw pointer across an `rt_*`
-/// call boundary (Stage 1's "don't hold an env pointer across an rt call"
-/// convention — a GC triggered inside `rt_closure_env_get` could move/resize
-/// that `Vec`), which is exactly why each slot is copied out one at a time
-/// through the accessor rather than read directly.
+/// statically-known `llvm-function` here, only a tagged `Sexpr` function
+/// value, so the call goes out through
+/// [`typelisp_rt::rt_apply_any`](crate::compile::runtime::rt_apply_any) —
+/// one `rt_*` call taking the closure word, the address of the argument
+/// array the caller already built, and its length.
+///
+/// This used to emit the dispatch inline: `rt_closure_fnptr` +
+/// `rt_closure_env_len`, an `rt_closure_env_get` copy loop into a fixed
+/// 64-slot scratch buffer, then a `build_indirect_call` through
+/// `compiled_fn_type_with_env`. That works for a `BoxedObj::CompiledClosure`
+/// and *only* for one — `rt_closure_fnptr` `fatal`s on anything else, and a
+/// `Type::Fn` value can equally be an interpreted `BoxedObj::Closure` since
+/// the JIT stopped being mandatory. Emitting a call to a shim that dispatches
+/// on the box instead moves the whole decision to where the value is, at the
+/// cost of one call for the compiled case (the loop it replaces was already
+/// three `rt_*` calls plus a per-slot one).
+///
+/// `compiler.rs` is untouched by this — it asks for `build-closure-apply`
+/// and gets whatever this emits — which is what let the change happen with
+/// the committed island bitcode frozen.
 fn llvm_builder_build_closure_apply(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
     let closure = expect_llvm_value(&args[2])?;
-    let args_ptr = expect_llvm_value(&args[3])?;
+    let args_ptr = expect_llvm_value(&args[3])?.into_pointer_value();
     let argc = match &args[4] {
         Value::Int(n) => *n as u64,
         other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
@@ -4967,106 +5044,35 @@ fn llvm_builder_build_closure_apply(args: &[Value]) -> Result<Value, EvalError> 
     let module = module.borrow();
     let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("build-closure-apply: {}", e));
 
-    let function = b
-        .get_insert_block()
-        .and_then(|blk| blk.get_parent())
-        .ok_or_else(|| EvalError::Internal("build-closure-apply: builder has no current function".into()))?;
-    let rt_closure_fnptr = module
-        .get_function("rt_closure_fnptr")
-        .ok_or_else(|| EvalError::Internal("build-closure-apply: rt_closure_fnptr not declared in this module".into()))?;
-    let rt_closure_env_len = module
-        .get_function("rt_closure_env_len")
-        .ok_or_else(|| EvalError::Internal("build-closure-apply: rt_closure_env_len not declared in this module".into()))?;
-    let rt_closure_env_get = module
-        .get_function("rt_closure_env_get")
-        .ok_or_else(|| EvalError::Internal("build-closure-apply: rt_closure_env_get not declared in this module".into()))?;
+    let rt_apply_any = module
+        .get_function("rt_apply_any")
+        .ok_or_else(|| EvalError::Internal("build-closure-apply: rt_apply_any not declared in this module".into()))?;
 
-    let i64_ty = ctx.i64_type();
-    let closure_int = closure.into_int_value();
-
-    // Every `rt_*` shim shares the one uniform `(args_ptr, argc) -> i64` ABI
-    // (`compiled_fn_type`) — including these three — never raw scalar
-    // parameters, so each call below builds its own small `alloca`'d
-    // argument array first, exactly the way `compiler.rs`'s own
+    // `rt_apply_any` shares the one uniform `(args_ptr, argc) -> i64` `rt_*`
+    // ABI (`compiled_fn_type`), so its own three arguments go into an
+    // `alloca`'d array first — exactly what `compiler.rs`'s
     // `alloca-args`/`store-arg`/`build-call` triple does for every other
-    // `rt_*` call.
-    let call_rt1 = |target: FunctionValue<'static>, a0: BasicValueEnum<'static>, name: &str| -> Result<inkwell::values::IntValue<'static>, EvalError> {
-        let ap = b.build_alloca(i64_ty.array_type(1), "rt1_args").map_err(err)?;
-        let p0 = unsafe { b.build_gep(i64_ty, ap, &[i64_ty.const_int(0, false)], "rt1_arg0_ptr").map_err(err)? };
-        b.build_store(p0, a0).map_err(err)?;
-        let argc = ctx.i32_type().const_int(1, false);
-        let call = b.build_call(target, &[ap.into(), argc.into()], name).map_err(err)?;
-        match call.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => Ok(v.into_int_value()),
-            inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal(format!("build-closure-apply: {} produced no value", name))),
-        }
+    // `rt_*` call. The *callee's* argument array is passed by address, as an
+    // `i64`; it is a live `alloca` in this frame, so no copy is needed (and
+    // unlike a `Vec`'s buffer it cannot be moved by anything the shim does).
+    let i64_ty = ctx.i64_type();
+    let shim_args = b.build_alloca(i64_ty.array_type(3), "apply_any_args").map_err(err)?;
+    let store = |i: u64, v: BasicValueEnum<'static>, name: &str| -> Result<(), EvalError> {
+        let p = unsafe { b.build_gep(i64_ty, shim_args, &[i64_ty.const_int(i, false)], name).map_err(err)? };
+        b.build_store(p, v).map_err(err)?;
+        Ok(())
     };
-    let call_rt2 = |target: FunctionValue<'static>,
-                     a0: BasicValueEnum<'static>,
-                     a1: BasicValueEnum<'static>,
-                     name: &str|
-     -> Result<BasicValueEnum<'static>, EvalError> {
-        let ap = b.build_alloca(i64_ty.array_type(2), "rt2_args").map_err(err)?;
-        let p0 = unsafe { b.build_gep(i64_ty, ap, &[i64_ty.const_int(0, false)], "rt2_arg0_ptr").map_err(err)? };
-        b.build_store(p0, a0).map_err(err)?;
-        let p1 = unsafe { b.build_gep(i64_ty, ap, &[i64_ty.const_int(1, false)], "rt2_arg1_ptr").map_err(err)? };
-        b.build_store(p1, a1).map_err(err)?;
-        let argc = ctx.i32_type().const_int(2, false);
-        let call = b.build_call(target, &[ap.into(), argc.into()], name).map_err(err)?;
-        match call.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => Ok(v),
-            inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal(format!("build-closure-apply: {} produced no value", name))),
-        }
-    };
+    let args_ptr_int = b.build_ptr_to_int(args_ptr, i64_ty, "apply_any_callee_args_int").map_err(err)?;
+    store(0, closure, "apply_any_closure_ptr")?;
+    store(1, args_ptr_int.into(), "apply_any_args_ptr")?;
+    store(2, i64_ty.const_int(argc, false).into(), "apply_any_argc_ptr")?;
 
-    let fn_ptr_int = call_rt1(rt_closure_fnptr, closure_int.into(), "closure_fnptr_raw")?;
-    let env_len_i64 = call_rt1(rt_closure_env_len, closure_int.into(), "closure_env_len_raw")?;
-
-    // Fixed-capacity (64) scratch buffer — the same cap `rt_closure_new`
-    // enforces — filled by a genuine runtime loop since `env_len_i64` is
-    // only known once this closure value actually exists.
-    let scratch_ptr = b
-        .build_alloca(i64_ty.array_type(64), "closure_apply_env_scratch")
-        .map_err(err)?;
-    let idx_alloca = b.build_alloca(i64_ty, "closure_apply_env_idx").map_err(err)?;
-    b.build_store(idx_alloca, i64_ty.const_int(0, false)).map_err(err)?;
-
-    let loop_header = ctx.append_basic_block(function, "closure_apply_env_loop_header");
-    let loop_body = ctx.append_basic_block(function, "closure_apply_env_loop_body");
-    let loop_exit = ctx.append_basic_block(function, "closure_apply_env_loop_exit");
-    b.build_unconditional_branch(loop_header).map_err(err)?;
-
-    b.position_at_end(loop_header);
-    let i_val = b.build_load(i64_ty, idx_alloca, "closure_apply_env_i").map_err(err)?.into_int_value();
-    let in_range = b.build_int_compare(inkwell::IntPredicate::ULT, i_val, env_len_i64, "closure_apply_env_in_range").map_err(err)?;
-    b.build_conditional_branch(in_range, loop_body, loop_exit).map_err(err)?;
-
-    b.position_at_end(loop_body);
-    let elem_v = call_rt2(rt_closure_env_get, closure_int.into(), i_val.into(), "closure_env_elem")?;
-    let dst_ptr = unsafe {
-        b.build_gep(i64_ty, scratch_ptr, &[i_val], "closure_apply_env_dst").map_err(err)?
-    };
-    b.build_store(dst_ptr, elem_v).map_err(err)?;
-    let i_next = b.build_int_add(i_val, i64_ty.const_int(1, false), "closure_apply_env_i_next").map_err(err)?;
-    b.build_store(idx_alloca, i_next).map_err(err)?;
-    b.build_unconditional_branch(loop_header).map_err(err)?;
-
-    b.position_at_end(loop_exit);
-    let env_len_i32 = b.build_int_truncate(env_len_i64, ctx.i32_type(), "closure_env_len_i32").map_err(err)?;
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_ptr = b.build_int_to_ptr(fn_ptr_int, ptr_ty, "closure_fn_ptr_val").map_err(err)?;
-    let argc_val = ctx.i32_type().const_int(argc, false);
     let call = b
-        .build_indirect_call(
-            compiled_fn_type_with_env(),
-            fn_ptr,
-            &[args_ptr.into(), argc_val.into(), scratch_ptr.into(), env_len_i32.into()],
-            "closure_apply_result",
-        )
+        .build_call(rt_apply_any, &[shim_args.into(), ctx.i32_type().const_int(3, false).into()], "closure_apply_result")
         .map_err(err)?;
     match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
-        inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-closure-apply: callee produced no value".into())),
+        inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-closure-apply: rt_apply_any produced no value".into())),
     }
 }
 
@@ -5834,10 +5840,46 @@ fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
 }
 
 /// The `rt_*` family's abort-on-invariant-break convention
-/// (`typelisp-rt`'s `fatal`), local to the one main-crate shim.
+/// (`typelisp-rt`'s `fatal`), for the main-crate shims.
 fn rt_llvm_fatal(msg: &str) -> ! {
     eprintln!("typelisp runtime error: {}", msg);
     std::process::abort();
+}
+
+thread_local! {
+    /// The interpreter [`rt_apply_interpreted`] re-enters — registered by
+    /// [`Interp::enter_compiled`] alongside the active heap, and thread-local
+    /// for the identical reason (`cargo test` drives one `Interp` per
+    /// thread, many per process).
+    static ACTIVE_INTERP: std::cell::Cell<*const Interp> = const { std::cell::Cell::new(std::ptr::null()) };
+}
+
+/// `typelisp_rt::rt_apply_any`'s interpreter half: compiled code has reached
+/// an apply site whose callee is *not* a compiled closure, so the call has to
+/// finish in the tree-walking evaluator.
+///
+/// Errors abort rather than return: there is a compiled frame between here
+/// and any Rust caller that could handle a `Result`, and it has no way to
+/// carry one. That matches every other `rt_*` shim (`rt_panic`,
+/// `rt_match_fail`, `rt_llvm_call`).
+///
+/// # Safety
+///
+/// `args` must point to `argc` valid `i64`s, and both a `Heap`
+/// ([`typelisp_rt::set_active_heap`]) and an `Interp`
+/// ([`Interp::enter_compiled`]) must be registered on this thread.
+unsafe extern "C" fn rt_apply_interpreted(closure: i64, args: *const i64, argc: u32) -> i64 {
+    let interp = ACTIVE_INTERP.with(|cell| cell.get());
+    if interp.is_null() {
+        rt_llvm_fatal("rt_apply_any: no interpreter is registered on this thread");
+    }
+    let interp = &*interp;
+    let heap = crate::compile::runtime::shim_active_heap();
+    let argv = std::slice::from_raw_parts(args, argc as usize);
+    match interp.apply_interpreted(heap, closure, argv) {
+        Ok(w) => w,
+        Err(e) => rt_llvm_fatal(&format!("rt_apply_any: {:?}", e)),
+    }
 }
 
 /// `(rt-llvm-call opid arg...)` for compiled code — the generic dispatch
@@ -6416,7 +6458,7 @@ mod scc_tests {
         }
 
         interp
-            .compile_function(&mut heap, &CompileTarget::Fn(crate::check::ast::Ref::synthetic(Path::root("a"))))
+            .compile_function(&mut heap, &CompileTarget::Fn(crate::check::resolved::Ref::synthetic(Path::root("a"))))
             .expect("mutual recursion across separate top-level functions should now compile");
         assert!(interp.root.borrow().fn_compiled(&Path::root("a")), "\"a\" should have ended up compiled");
         assert!(interp.root.borrow().fn_compiled(&Path::root("b")), "\"b\", pulled in transitively as part of the same SCC, should have ended up compiled too");

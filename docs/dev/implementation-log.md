@@ -40,7 +40,7 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
 - `src/mem/heap.rs` — `Heap`（割当・car/cdr・set・GC・シンボル・文字列・パス intern・`list_to_vec`・ルート）
 - `src/read/reader.rs` — `Reader::read` / `read_all`（`::` を top-level で分割し `Value::Path` 生成）
 - `src/types.rs` — `Type`（`Never` 追加）/ `parse_type`（Path/`!` 対応）
-- `src/check/ast.rs` — `Typed` / `Expr`（`Call`/`Assoc`/`Panic` 等）/ `Pattern` / `Arm`
+- `src/check/resolved.rs` — `Ref` / `CompileTarget` / `Pattern`（当時は `src/check/ast.rs` で `Typed` / `Expr` / `Arm` を持っていた。cons セル化 Phase 2 で AST 自体が無くなり、消費者が再導出できない解決結果だけが残ったので Stage D で改名）
 - `src/check/registry.rs` — `AdtDef`(assoc 付)/`Variant`/`FnSig`/`AssocFn`/`Registry`（組み込み Option/Result/Error/Sexpr、modules/aliases）
 - `src/check/checker.rs` — `Checker`（`check_form` 入口、`ns` 状態、名前解決 現NS→root、defun/defstruct/module/defmethod/use、双方向検査・単段具体化・網羅性・Never 適合）
 - `src/eval/value.rs` — `RtValue`（実行時値、構成子インスタンス、`Sexpr` は cons ヒープ参照）/ `EvalError`（`Panic`・`Break`/`Return` 内部シグナル等）
@@ -4272,7 +4272,7 @@ CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`pri
   （`(defmacro dup (x &optional (y x)) ...)` が動く）。デフォルトを書かなければ `()`=`Sexpr::Nil`。
   `&key` は呼び出し側 `:name 値`（順不同）。キーワードはシンボル名が `:` で始まる素のシンボル
   （typelisp に専用キーワード型は無く、リーダは `:b` を名前 `:b` のシンボルとして読む）。
-- **表現**: 共有型 [`MacroLambda`](../../src/check/ast.rs)（`required`/`optionals: Vec<Vec<Typed>>`/
+- **表現**: 共有型 [`MacroLambda`](../../src/check/checker.rs)（`required`/`optionals: Vec<Vec<Typed>>`/
   `keys: Vec<(String, Vec<Typed>)>`）を新設し `TopLevel::Defmacro` と `FnDef` に持たせた。`params`
   は従来通り全束縛名を順に並べたフラット列（`apply` 用）で、`MacroLambda` は必須以降の各領域の
   埋め方（デフォルト式・キーワード名）だけを足す。`FnDef.rest: bool` は据え置き（`&rest` 有無）。
@@ -5913,3 +5913,104 @@ span の数」= ソース規模のオーダー。圧縮は sweep が全セルを
 「**再利用されたセルが古い位置を持たない**」の検査）、span の intern を固定する 1 件、
 `Cell` のサイズを固定する 1 件、`OwnedForm` の位置往復 1 件を追加。core_builder_test の
 「全消しを生き延びる」は「収集を生き延びる」に。
+
+## compiled → interpreted の穴を塞ぐ（`rt_apply_any`、2026-08-12）
+
+cons セル化改修 Phase 2 の Stage D（後始末）。プランが Stage D に挙げていた項目のうち
+`locate.rs`/`lsp.rs` のサイドチャネル化・`fasl` の `OwnedForm` 化・AST を直接叩く
+テスト群の書き換えは Stage C の中で済んでおり、残っていたのは `rt_apply_any` だけだった。
+
+### 何が空いていたか
+
+Stage A4 で `BoxedObj::Closure`（インタプリタ実行されるクロージャ）が復活した。JIT は
+「表現の要件」から「最適化」に降格したので、同じ `Type::Fn` の値が
+`BoxedObj::CompiledClosure` のことも `BoxedObj::Closure` のこともある。ところが
+コンパイル済み側の apply 地点（島の `compile-apply-indirect` → Rust ビルトイン
+`build-closure-apply`）が発行していたのは `rt_closure_fnptr` + `rt_closure_env_get` の
+コピーループ + 間接呼び出しで、これは前者しか扱えない。`rt_closure_fnptr` は
+コンパイル済みクロージャでなければ `fatal` する——**捕捉できないプロセス abort** である。
+
+```
+(defun adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
+(defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
+(compile apply-fn)          ; adder は compile しない
+(apply-fn (adder 5) 10)     ; → SIGABRT
+```
+
+先にこの落ちるテストを書いて SIGABRT を確認してから実装した。
+
+### 分岐は値のある場所に置く
+
+`build-closure-apply` の発行先を新シム `rt_apply_any(closure, args-ptr, argc)` 1 本に
+変えた。箱の種類で分岐し、コンパイル済みなら旧来の系列（エントリポイント取得 → env の
+再符号化 → `compiled_fn_type_with_env` 経由の呼び出し）を Rust で行い、インタプリタ
+クロージャならフックを通してツリーウォーカへ再入する。**`src/compiler.rs` は不変**——島は
+`build-closure-apply` を頼むだけで、何が出るかは Rust 側の裁量にある。これが島の bitcode を
+凍結したまま入れられた理由。
+
+### crate の向きとフック
+
+`rt_apply_any` は `typelisp-rt` に置いた。AOT 実行ファイルは `typelisp-rt` の staticlib
+だけをリンクするので、`rt_llvm_call` のように本体 crate に置くとクロージャを使う AOT
+プログラムがリンクエラーになる。しかし `typelisp-rt` は `typelisp-mem` にしか依存しない
+（インタプリタは逆向きの依存の先にある）ので、再入は関数ポインタでしか書けない:
+`set_apply_interpreted` を `Interp::enter_compiled` が毎回登録する（`set_active_heap` と
+同じ場所・同じ thread-local の理由）。AOT にはインタプリタが無いのでフックは未設定のままで、
+その状態でインタプリタクロージャが来たら不変条件違反として `fatal` する。
+
+### クロージャが自分の署名を持つ
+
+境界を渡る語は宣言表現でしか復号できない（[[typelisp-crossing-must-be-type-driven]] と
+同じ話——生の `f64` ビット列とタグ付き箱ポインタはどちらもただの `i64`)。apply 地点は
+呼び先の `Fn` 型を静的には知っているが、実行時には何も運んでいない。そこで
+`BoxedObj::Closure` に `ret` を足し、`params`（`((SYM REPR)...)`）と合わせて**箱が自分の
+署名を持つ**ようにした。インタプリタ自身はどちらも読まない（`Value` を束縛して `Value` を
+返すだけ）ので、唯一の読み手は `rt_apply_any` である。読み手が 1 つしか無いスロットは
+mark フェーズが黙って辿らなくなる類なので、`tests/mem_test.rs` に `live_count` で気づく
+テストを置き、`stack.push(*ret)` を外すと落ちることを確認した。
+
+**組み込み関数だけは今も渡せない。** 箱が名前しか持たず署名が無いので、引数語を復号する
+すべが無い。`encode_crossing_value` で捕捉可能なエラーとして弾いている（推測はしない）。
+
+### 副作用: 島 bitcode の shim 表チェック
+
+`rt_extern_functions` は 118 → 119 になった。`install_island_bitcode` は `check_hash` が
+真のとき「新しい `.bc` は現行の集合をちょうど宣言している」と仮定して全件を
+`add_global_mapping` に渡していたが、この仮定は誤りである——ハッシュが見ているのは
+`compiler.rs` の `SOURCE` で、shim 表は Rust だからである。モジュールが宣言していない
+shim を飛ばすフィルタを両方の読み込みに適用した（宣言が無ければ呼び出し地点も無い）。
+
+### 印字の取りこぼし
+
+`format_sexpr`（`main.rs`）と `format.rs` のクロージャの腕が `is_compiled_closure` しか
+見ておらず、インタプリタクロージャが `#<unprintable>` になっていた。JIT が取ったかどうかは
+値の性質ではないので、どちらも `#<closure>` と印字する。
+
+### Miri の numeric_test は「走らないコマンド」だった（2026-08-13）
+
+Stage D の検証で `MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test --test
+numeric_test` を回したところ **21 時間で終わらなかった**。テスト本体ではなく
+`load_prelude` の中で、Miri の進捗バックトレース
+（`-Zmiri-report-progress=50000000`）が指すのは
+`Heap::intern_loc` ← `Heap::set_elem_loc` ← `reader::read_list` ← `Reader::read_all`。
+
+履歴を調べると、このコマンド行は `numeric_test` 新設時（`8c8b812`、2026-06-18）に
+「miri green 20/20」と一緒に書かれたもので、**当時の `numeric_test` は prelude を
+読んでいなかった**（`src/prelude.rs` はその日に生まれたところで、テストは `Heap` を
+直接組み立てていた）。数値ヘルパを prelude の typelisp メソッドへ移した `faee845`
+（2026-07-22）で `load_prelude` を呼ぶようになったが、それ以降 Miri で走らせた記録は
+無い。`dd17823`（2026-07-29）で TODO.md から development.md へ移ったのは文書の再編で、
+実行ではない。**2 ヶ月間、テストの性質が変わったあとも同じコマンド行が運ばれていた。**
+
+**cons セル化の退行ではない。** Phase 1c（`895aec5`）で同じ 1 テストを回しても 50 分で
+同じく `load_prelude` の中にいる。prelude が 2,383 行に育って以降ずっとこうだった。
+
+アルゴリズムの問題でもない（`intern_loc` は `HashMap` 引きで O(1)）。生ポインタの cons
+アリーナへの書き込み 1 回ごとに Miri が Stacked Borrows の provenance 検査をするコストが、
+prelude ぶんの回数だけ掛かる。ネイティブでは同じ 1 テストが 0.20 秒、`numeric_test`
+バイナリ全体 33 件でも 0.05 秒。
+
+`docs/dev/development.md` から該当行を落とし、「Miri で回せるのは prelude を読まない
+テストだけ」を理由つきで書いた。**走らないコマンドを手順書に置いておくのは、番人の
+ふりをした嘘である。** 同じファイルの「compile 機能の実装方針（未対応ノードの扱い）」も
+`ast_bridge.rs` 前提のまま無効になっていたので、あわせて訂正した。

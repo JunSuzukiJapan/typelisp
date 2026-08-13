@@ -5,7 +5,7 @@
 //! registered at the tree node for its own defining module, under its own
 //! unqualified name — so no single table spans the whole program. Resolving
 //! a reference re-walks this tree from the reference's own lexical module
-//! (`check::ast::Ref::home`), independently reproducing
+//! (`check::resolved::Ref::home`), independently reproducing
 //! `Checker::resolve_fn`/`resolve_fn_path`/`resolve_global`/`resolve_global_path`
 //! (`check/checker.rs`) rather than trusting the checker's already-resolved
 //! `Path` as a lookup key — the point of this module existing at all.

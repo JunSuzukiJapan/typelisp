@@ -420,12 +420,21 @@ fn build_main_wrapper(
 ///
 /// Computed from `CARGO_MANIFEST_DIR` + the build profile this very test/
 /// binary was compiled under (`debug_assertions` tracks `dev`/`test` vs
-/// `release` closely enough: the staticlib is always built in the same
-/// profile as whatever is currently calling this function, since both come
-/// from the same `cargo` invocation) rather than hardcoded — see the
-/// project's policy on machine-specific absolute paths. The workspace
-/// shares one `target/` dir at the repo root, so `CARGO_MANIFEST_DIR` (this
-/// crate's own root) is the right base for every member's artifacts.
+/// `release`) rather than hardcoded — see the project's policy on
+/// machine-specific absolute paths. The workspace shares one `target/` dir at
+/// the repo root, so `CARGO_MANIFEST_DIR` (this crate's own root) is the
+/// right base for every member's artifacts.
+///
+/// **This artifact is not built by the `cargo` invocation that runs an AOT
+/// test.** `cargo test` builds `typelisp-rt`'s *rlib* (the dependency this
+/// crate links) and never its `staticlib` target, so what is on disk here is
+/// whatever the last `cargo build -p typelisp-rt` / `cargo build --workspace`
+/// left. Adding an `rt_*` shim therefore links against a runtime that
+/// predates it and fails with an undefined symbol — observed adding
+/// `rt_apply_any`, where the JIT tests all passed and only AOT broke.
+/// `scripts/test-serial.sh` builds the staticlib first for exactly this
+/// reason; a bare `cargo test --test compile_file_test` needs it built by
+/// hand.
 fn staticlib_path() -> String {
     let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
     format!("{}/target/{}/libtypelisp_rt.a", env!("CARGO_MANIFEST_DIR"), profile)

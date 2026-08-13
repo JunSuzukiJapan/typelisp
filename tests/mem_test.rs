@@ -1467,12 +1467,47 @@ fn gc_traces_through_cell_then_struct_then_cons() {
     assert_eq!(h.live_count(), 1);
 }
 
-// (The `BoxedObj::Closure` heap tests — a rooted closure keeping its
-// captured cells alive, a swept closure reporting its side-table token, and a
-// cell↔closure `labels` cycle collected as a unit — were removed in
-// interp-closure removal Stage 8c along with `BoxedObj::Closure` itself.
-// `BoxedObj::CompiledClosure` is the only closure box now; its own env-tracing
-// and sweep behavior are covered in `crates/typelisp-rt`'s closure tests.)
+// (The `BoxedObj::Closure` heap tests that once sat here — a swept closure
+// reporting its side-table token, and a cell↔closure `labels` cycle collected
+// as a unit — went with the side table itself: an interpreted closure now
+// carries its own code as ordinary heap data, so there is no token to report
+// and the cycle is collected by the same rules as any other. What the box
+// keeps alive is the test just below; `BoxedObj::CompiledClosure`'s own env
+// tracing is covered in `crates/typelisp-rt`'s closure tests.)
+
+/// An interpreted closure keeps its own *code* alive, not just its captures:
+/// `params`, `ret`, `body` and `env` are all ordinary heap values, and
+/// nothing else necessarily still refers to a `lambda`'s body once the form
+/// that built it is gone.
+///
+/// `ret` is the one worth naming. The interpreter never reads it — it returns
+/// the `Value` it produced — so the only reader is the compiled -> interpreted
+/// boundary (`typelisp_rt::rt_apply_any`, which has to encode the result by
+/// its declared representation). A slot with one distant reader is exactly
+/// the kind the mark phase can quietly stop tracing, and `live_count` is what
+/// notices.
+#[test]
+fn gc_traces_an_interpreted_closures_params_ret_body_and_env() {
+    let mut h = Heap::with_capacity(8);
+    let params = h.cons(Value::Int(1), Value::Empty).unwrap();
+    let ret = h.cons(Value::Int(2), Value::Empty).unwrap();
+    let body = h.cons(Value::Int(3), Value::Empty).unwrap();
+    let env = h.cons(Value::Int(4), Value::Empty).unwrap();
+    let clo = h.alloc_closure(params, ret, body, env);
+    h.push_root(clo);
+    h.gc();
+    let id = match clo {
+        Value::Boxed(id) => id,
+        other => panic!("expected a boxed closure, got {:?}", other),
+    };
+    let (p, b, e) = h.closure_parts(id);
+    assert_eq!(h.car(p).unwrap(), Value::Int(1));
+    assert_eq!(h.car(h.closure_ret(id)).unwrap(), Value::Int(2));
+    assert_eq!(h.car(b).unwrap(), Value::Int(3));
+    assert_eq!(h.car(e).unwrap(), Value::Int(4));
+    assert_eq!(h.live_count(), 4, "all four of the closure's own slots stay live");
+    assert_accounting(&h);
+}
 
 // ---- boxed scopes (`StructPayload::Frames`, Sexpr/RtValue unification Stage 7) ----
 //

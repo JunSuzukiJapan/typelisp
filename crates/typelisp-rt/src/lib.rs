@@ -1482,6 +1482,112 @@ pub unsafe extern "C" fn rt_closure_env_get(args: *const i64, argc: u32) -> i64 
     }
 }
 
+/// How [`rt_apply_any`] re-enters the tree-walking interpreter: the closure
+/// as a tagged word, then the very same `(args_ptr, argc)` the compiled
+/// callee would have received.
+///
+/// A function pointer rather than a direct call because this crate depends
+/// on `typelisp-mem` alone — the interpreter lives in the `typelisp` crate,
+/// which depends on *this* one, so the edge can only run at runtime.
+/// `typelisp::eval::Interp` installs it ([`set_apply_interpreted`]) at the
+/// same moment it registers the active heap; an AOT-compiled executable has
+/// no interpreter to install and leaves it unset.
+pub type ApplyInterpretedFn = unsafe extern "C" fn(closure: i64, args: *const i64, argc: u32) -> i64;
+
+thread_local! {
+    static APPLY_INTERPRETED: Cell<Option<ApplyInterpretedFn>> = const { Cell::new(None) };
+}
+
+/// Installs (or, with `None`, clears) this thread's interpreter re-entry
+/// hook — see [`ApplyInterpretedFn`]. Thread-local for exactly the reason
+/// [`set_active_heap`] is: one `Interp` per thread, many per process under
+/// `cargo test`.
+pub fn set_apply_interpreted(f: Option<ApplyInterpretedFn>) {
+    APPLY_INTERPRETED.with(|cell| cell.set(f));
+}
+
+/// `(rt-apply-any closure args-ptr argc)` — compiled code's one way to call
+/// a function *value*, whatever kind of function it turns out to hold.
+/// `args[0]` is the callee as a tagged word, `args[1]` the address of the
+/// caller's own argument array, and `args[2]` how many arguments it holds;
+/// the result is the callee's return word. `compiler.rs`'s
+/// `compile-apply-indirect` reaches this through the `build-closure-apply`
+/// builtin, which emits the single call.
+///
+/// Compiled code cannot know which kind it has: a `Type::Fn` value is a
+/// `BoxedObj::CompiledClosure` when its `lambda` was JIT/AOT compiled and a
+/// `BoxedObj::Closure` when it was not, and since the JIT became an
+/// optimisation rather than a requirement (the cons-cell interpreter's
+/// Phase 2) both reach the same apply site. What `build-closure-apply` used
+/// to emit — `rt_closure_fnptr` + an `rt_closure_env_get` copy loop + an
+/// indirect call — handled only the first and `fatal`'d on the second,
+/// aborting the process from a place no `Result` could catch. The dispatch
+/// belongs where the value is, so it is here.
+///
+/// The compiled case is the old emitted sequence, done in Rust: read the
+/// entry point, re-encode the captured environment (the exact per-slot rule
+/// [`rt_closure_env_get`] applies), and call through the one fixed
+/// `compiled_fn_type_with_env` ABI every closure-boxed function shares. The
+/// interpreted case hands off to [`set_apply_interpreted`]'s hook, which
+/// decodes the argument words by the closure's own declared parameter
+/// representations, evaluates the body, and encodes the result back.
+///
+/// # Safety
+///
+/// `args` must point to 3 valid `i64`s, `args[1]` to `args[2]` valid `i64`s
+/// that stay valid for the call, and a `Heap` must be registered on this
+/// thread. Every heap-backed word in the callee's argument array must
+/// already be rooted by the caller (`compile-call-args`' `push-sexpr-root`
+/// for a `kind = 2` argument does this): an interpreted body allocates, and
+/// an unrooted argument would be collected under it.
+#[no_mangle]
+pub unsafe extern "C" fn rt_apply_any(args: *const i64, argc: u32) -> i64 {
+    if argc != 3 {
+        fatal("rt_apply_any: expected 3 arguments (closure, argument array, argument count)");
+    }
+    let closure = *args;
+    let callee_args = *args.add(1) as usize as *const i64;
+    let callee_argc = *args.add(2) as u32;
+    let id = match decode(closure) {
+        Value::Boxed(id) => id,
+        other => fatal(&format!("rt_apply_any: callee is not a function value: {:?}", other)),
+    };
+    let heap = active_heap();
+    if !heap.is_compiled_closure(id) {
+        return match APPLY_INTERPRETED.with(|cell| cell.get()) {
+            Some(hook) => hook(closure, callee_args, callee_argc),
+            // AOT: there is no interpreter in the process at all. Nothing
+            // *should* produce an interpreted closure there either — an
+            // AOT-compiled program is compiled through — so this is an
+            // internal-invariant break rather than a limitation to work
+            // around.
+            None => fatal("rt_apply_any: the callee is not a compiled closure and no interpreter is registered on this thread"),
+        };
+    }
+    let env_len = heap.compiled_closure_env_len(id);
+    let mask = heap.compiled_closure_mask(id);
+    let env: Vec<i64> = (0..env_len)
+        .map(|i| {
+            let v = heap.compiled_closure_env_get(id, i);
+            if mask & (1 << i) != 0 {
+                encode(v)
+            } else {
+                match v {
+                    Value::Int(raw) => raw,
+                    other => fatal(&format!("rt_apply_any: unmasked closure slot {} holds a non-raw value {:?}", i, other)),
+                }
+            }
+        })
+        .collect();
+    let fn_ptr = heap.compiled_closure_fnptr(id);
+    // SAFETY: `rt_closure_new` is the only producer of a
+    // `BoxedObj::CompiledClosure`, and `build-make-closure` only ever hands
+    // it an LLVM function compiled under `compiled_fn_type_with_env`'s exact
+    // signature.
+    let f: unsafe extern "C" fn(*const i64, u32, *const i64, u32) -> i64 = std::mem::transmute(fn_ptr);
+    f(callee_args, callee_argc, env.as_ptr(), env.len() as u32)
+}
+
 /// `(rt-cell-new v)` for compiled code — allocates a shared binding cell
 /// (`BoxedObj::Cell`) holding tagged `Sexpr` `args[0]`, returning the
 /// cell's own tagged reference. Unlike the interpreter's `Heap::alloc_cell`
@@ -3681,8 +3787,9 @@ mod tests {
 
     /// A rooted compiled closure keeps its captured cell — and through it
     /// the cell's contents — alive across a collection: the mark-phase
-    /// fan-out `push_boxed_nested`'s `CompiledClosure` arm (the only closure
-    /// arm since interp-closure removal Stage 8c).
+    /// fan-out `push_boxed_nested`'s `CompiledClosure` arm. (Its interpreted
+    /// twin `BoxedObj::Closure` has an arm of its own, tracing `params`/
+    /// `ret`/`body`/`env`; `tests/mem_test.rs` covers that one.)
     #[test]
     fn a_rooted_compiled_closure_keeps_its_captured_cell_alive_across_gc() {
         let mut heap = Heap::with_capacity(8);
@@ -3725,11 +3832,11 @@ mod tests {
         assert_eq!(unsafe { rt_cell_get([cell].as_ptr(), 1) }, encode(Value::Int(3)));
     }
 
-    /// An unreachable compiled closure is swept like any other box. (It has
-    /// no interpreter side table to release — the `BoxedObj::CompiledClosure`
-    /// carries its own env inline; the interpreted `BoxedObj::Closure` that
-    /// once needed a swept-token report was removed in interp-closure removal
-    /// Stage 8c, and with it the whole dead-token mechanism.)
+    /// An unreachable compiled closure is swept like any other box. (Neither
+    /// closure box needs a swept-token report to an interpreter side table
+    /// any more: `CompiledClosure` carries its env inline, and the
+    /// interpreted `BoxedObj::Closure` carries its own code as heap data. The
+    /// whole dead-token mechanism went with the side table.)
     #[test]
     fn an_unreachable_compiled_closure_is_swept() {
         let mut heap = Heap::with_capacity(8);
