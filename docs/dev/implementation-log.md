@@ -6112,7 +6112,8 @@ panic: compile-sexpr-field: field type is not representable in compiled code yet
 
 そのため次の 2 つが宿題として残る:
 
-1. **`ast_bridge` への参照 51 箇所**（Stage C で `src/compile/ast_bridge.rs` は削除済み）。
+1. **`ast_bridge` への参照 52 行**（Stage C で `src/compile/ast_bridge.rs` は削除済み。
+   `grep -c ast_bridge src/compiler.rs` が 0 になったら片付いたということ）。
    SOURCE 外の 6 箇所は今回 `core_bridge`/`core_freevars` に直した。
 2. **`compile-construct-boxed-struct` の doc（`:3557-3570`）が新しい分類と矛盾する。**
    「`binding_kind` は `mutable` struct を意図的に `KIND_SEXPR` にしない」と書いてあるが、
