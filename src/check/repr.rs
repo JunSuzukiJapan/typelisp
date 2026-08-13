@@ -15,9 +15,12 @@
 //!   [`Repr`] and nothing else; turning one into the integer
 //!   `src/compiler.rs`'s `bind-params`/`compile-sexpr-field`/... read is the
 //!   bridge's job, in [`Repr::binding_kind`]/[`Repr::field_kind`] below.
-//! * **The two projections sit side by side.** They disagree, and that
-//!   disagreement was invisible while each classifier was a separate function
-//!   several hundred lines apart — see [`Repr::binding_kind`].
+//! * **The two projections are derived, not written.** Both come from one
+//!   [`Repr::class`], so they cannot disagree. They used to be independent
+//!   hand-written tables and did disagree — in four places, invisibly, because
+//!   the two were separate functions several hundred lines apart. One of those
+//!   disagreements made a `HashTable<K,V>` field of a `defstruct` fail to
+//!   compile while claiming the type had no representation at all.
 
 use std::collections::HashSet;
 
@@ -317,52 +320,100 @@ impl Repr {
         }
     }
 
+    /// What compiled code has to do with a value of this representation at a
+    /// boundary — **the one decision per `Repr`**, from which both numbers the
+    /// island reads are derived ([`Repr::field_kind`], [`Repr::binding_kind`]).
+    ///
+    /// This used to be two independent hand-written tables, and they disagreed.
+    /// `Struct`, `Vector<T>` and `Dyn` were the passthrough kind `6` at a field
+    /// boundary — a tagged heap pointer — while getting no GC root at a binding
+    /// boundary, and `HashTable<K,V>` was classified as having no compiled
+    /// representation at all (see [`Repr::field_kind`] for what that cost).
+    /// Neither disagreement was a decision anyone took: the classifier this
+    /// replaced was not given the struct set, so it could not recognize a
+    /// `defstruct`-typed binding, and the numbers were carried over unexamined.
+    ///
+    /// Collapsing the two tables into this one is what makes that class of bug
+    /// unwritable — a new `Repr` variant now forces exactly one judgement, and
+    /// the two numbers cannot drift apart because neither is written down.
+    fn class(&self) -> Class {
+        match self {
+            // A handle joins the integer class: its representation *is* a plain
+            // untraced `i64`, so the int tag/detag bit ops are exactly right
+            // and no GC root is ever wanted.
+            Repr::Int | Repr::Handle => Class::Int,
+            Repr::Float => Class::Float,
+            Repr::Char => Class::Char,
+            Repr::Bool => Class::Bool,
+            // A unit type has exactly one value, already known from the
+            // declared type, so the word carries no information.
+            Repr::Unit => Class::Unit,
+            // Already-tagged words, and the collector can reclaim what each
+            // one points at.
+            //
+            // `HashTable<K,V>` belongs here for the same reason a `defstruct`
+            // does, and always did: `Heap::alloc_hashtable` builds a
+            // `BoxedObj::Struct { payload: StructPayload::Map }`. The old
+            // classifier's "in neither the struct set nor the enum set" was a
+            // statement about the sets it happened to be handed, not about the
+            // value.
+            Repr::Str
+            | Repr::Bignum
+            | Repr::Ratio
+            | Repr::Sexpr
+            | Repr::Struct
+            | Repr::Vector(_)
+            | Repr::HashTable(..)
+            | Repr::Enum
+            | Repr::Dyn
+            | Repr::Scope(_)
+            | Repr::Fn => Class::Tagged { collectable: true },
+            // A tagged word the collector never reclaims. The mark phase
+            // (`Heap::gc`) walks `Cons`/`Str`/`Boxed` and lets every other
+            // `Value` fall through, so an interned `Value::Symbol` is immortal
+            // — it needs the passthrough tagging like any other tagged word,
+            // and needs no root at all. This is the only representation for
+            // which the two answers genuinely differ, which is why the class
+            // carries the distinction instead of a second table making it.
+            Repr::Sym => Class::Tagged { collectable: false },
+            Repr::None => Class::NotRepresentable,
+        }
+    }
+
     /// Whether a binding of this representation needs a GC root pushed around
     /// it — `compiler.rs`'s `bind-params`/`bind-let-values`/`retain-bindings`/
     /// `release-bindings` read the number this returns.
     ///
-    /// **This does not agree with [`Repr::field_kind`], and the disagreement is
-    /// deliberate for now.** `Struct`, `Dyn`, and `Sym` are tagged heap
-    /// pointers — `field_kind` calls all three the passthrough kind `6` — yet
-    /// they get no root here. The classifier this replaces could not have done
-    /// otherwise: it was not even given the struct set, so it had no way to
-    /// recognize a `defstruct`-typed binding.
+    /// Derived from [`Repr::class`]: a value the collector can reclaim needs a
+    /// root, and nothing else does.
     ///
-    /// Whether that is exploitable is unsettled. `tests/compiled_binding_gc_test.rs`
-    /// is the attempt to exploit it and does not manage to; see its module
-    /// comment for what that does and does not establish. It is left alone
-    /// because these numbers are an *interface*: the committed island bitcode
-    /// (`src/compiler_island.bc`) pairs a push in `bind-let-values` with a pop
-    /// in `release-bindings` off the same number, and that artifact is frozen
-    /// until the compiler is rebuilt. Settle it then, with both halves rebuilt
-    /// together.
+    /// Reclassifying a `Repr` here does **not** require regenerating
+    /// `src/compiler_island.bc`, despite what this comment used to claim. The
+    /// island branches on the *number* (`retain-bindings`' `(eq kind 2)` push
+    /// paired with `release-bindings`' matching pop); which type carries which
+    /// number is decided entirely on this side, in `compile::core_bridge`.
+    /// Changing what `2` *means* would need the island rebuilt; changing which
+    /// reprs get a `2` does not. Verified by reclassifying `Struct` against the
+    /// committed bitcode: island trio, `compile_test`, and
+    /// `compiled_binding_gc_test` all stayed green.
+    ///
+    /// `Struct`/`Vector`/`Dyn` reaching this as `KIND_PLAIN` was not an
+    /// oversight: `compile-construct-boxed-struct`'s doc comment
+    /// (`src/compiler.rs`) argues the classifier "deliberately doesn't classify
+    /// a `mutable` struct type as `KIND_SEXPR`", because
+    /// `push-permanent-sexpr-root` already keeps every box compiled code builds
+    /// alive from birth, making a per-binding push/pop redundant. That is true
+    /// — and it is correctness resting on a leak, since a permanent root is
+    /// never popped by design (`rt_push_permanent_sexpr_root`'s own doc). The
+    /// derivation here pays that redundancy back to be independent of it.
     pub fn binding_kind(&self) -> i64 {
         /// No bookkeeping at a binding boundary.
         const KIND_PLAIN: i64 = 0;
         /// Push/pop a GC root: the value may point into the managed heap.
         const KIND_SEXPR: i64 = 2;
-        match self {
-            Repr::Sexpr
-            | Repr::Str
-            | Repr::Bignum
-            | Repr::Ratio
-            | Repr::Fn
-            | Repr::Scope(_)
-            | Repr::Enum => KIND_SEXPR,
-            Repr::Int
-            | Repr::Float
-            | Repr::Char
-            | Repr::Bool
-            | Repr::Unit
-            | Repr::Handle
-            | Repr::Sym
-            | Repr::Struct
-            // A `Vector<T>` is in the struct set and a `HashTable<K,V>` is in
-            // neither, so both already produced this number.
-            | Repr::Vector(_)
-            | Repr::HashTable(..)
-            | Repr::Dyn
-            | Repr::None => KIND_PLAIN,
+        match self.class() {
+            Class::Tagged { collectable: true } => KIND_SEXPR,
+            _ => KIND_PLAIN,
         }
     }
 
@@ -370,50 +421,62 @@ impl Repr {
     /// crosses a `BoxedObj::Struct` field boundary — `compiler.rs`'s
     /// `compile-tag-struct-field` (encode) and `compile-sexpr-field` (decode).
     ///
-    /// The numbers are `Sexpr`'s own variant numbering (`registry::sexpr_def`:
-    /// `1`=int `2`=float `3`=char `4`=bool `6`=str) rather than a parallel
-    /// scheme, so those two functions reuse the same per-variant bit
-    /// manipulation instead of duplicating it. `11` is the first number past
-    /// that numbering, for `Unit`, which is not a `Sexpr` variant and so has
-    /// none to borrow — `0` being taken by the "not representable" case.
+    /// Derived from [`Repr::class`]. The numbers are `Sexpr`'s own variant
+    /// numbering (`registry::sexpr_def`: `1`=int `2`=float `3`=char `4`=bool
+    /// `6`=str) rather than a parallel scheme, so those two island functions
+    /// reuse the same per-variant bit manipulation instead of duplicating it.
+    /// `11` is the first number past that numbering, for `Unit`, which is not a
+    /// `Sexpr` variant and so has none to borrow — `0` being taken by the "not
+    /// representable" case.
+    ///
+    /// **This numbering space has a second producer.** `compile-sexpr-field`
+    /// also decodes `5` (sym), `7` (cons), `8` (bignum), `9` (ratio) and `10`
+    /// (path), which come from `Sexpr` *construction*
+    /// (`compile-construct-sexpr` / `match_sexpr_ctor`'s `SEXPR_*`), not from
+    /// here — this function folds sym/bignum/ratio into the `6` passthrough.
+    /// Anything renumbering these must account for both producers.
     pub fn field_kind(&self) -> i64 {
-        match self {
-            // A handle joins the integer kind: its representation *is* a plain
-            // untraced `i64`, so the int tag/detag bit ops are exactly right
-            // and no GC root is ever wanted.
-            Repr::Int | Repr::Handle => 1,
-            Repr::Float => 2,
-            Repr::Char => 3,
-            Repr::Bool => 4,
-            // Everything already boxed or already tagged passes through
-            // untouched — both directions leave a kind-`6` value alone.
-            Repr::Str
-            | Repr::Sym
-            | Repr::Bignum
-            | Repr::Ratio
-            | Repr::Sexpr
-            | Repr::Struct
-            // Represented exactly like a `defstruct`, which is what it was
-            // classified as before it had a variant of its own.
-            | Repr::Vector(_)
-            | Repr::Enum
-            | Repr::Dyn
-            | Repr::Scope(_)
-            | Repr::Fn => 6,
+        match self.class() {
+            Class::Int => 1,
+            Class::Float => 2,
+            Class::Char => 3,
+            Class::Bool => 4,
+            // Both directions leave the word alone.
+            Class::Tagged { .. } => 6,
             // Both directions ignore the word they are handed and emit a
-            // constant: a unit type has exactly one value, already known from
-            // the declared type, so the slot carries no information and only
-            // has to hold something the GC can decode safely.
-            Repr::Unit => 11,
-            // A `HashTable<K,V>` is in neither the struct set nor the enum
-            // set, so this is the number it already produced. That it shares
-            // the number with the genuine representation gap is an
-            // inconsistency inherited from the classifier this replaced, not a
-            // new one — and, like the `binding_kind` asymmetry above, it is
-            // frozen until the island is rebuilt.
-            Repr::HashTable(..) | Repr::None => 0,
+            // constant; the slot only has to hold something the GC can decode
+            // safely.
+            Class::Unit => 11,
+            // The one type that genuinely reaches this is a still-generic type
+            // variable ([`Repr::None`]). The island's `compile-sexpr-field`
+            // panics on it with "field type is not representable in compiled
+            // code yet", which is now true of everything that produces it.
+            Class::NotRepresentable => 0,
         }
     }
+}
+
+/// What compiled code does with a value at a boundary — see [`Repr::class`],
+/// which is the only thing that builds one.
+///
+/// Deliberately not `pub`: it exists to keep [`Repr::field_kind`] and
+/// [`Repr::binding_kind`] from being written independently, and callers want
+/// the island-facing numbers, not this.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Class {
+    /// A raw machine word.
+    Int,
+    Float,
+    Char,
+    Bool,
+    /// One value, so the word carries no information.
+    Unit,
+    /// Already a tagged word; passes through both directions untouched.
+    /// `collectable` is whether the collector can reclaim what it points at —
+    /// see [`Repr::class`]'s `Sym` arm for the one case where it cannot.
+    Tagged { collectable: bool },
+    /// No compiled representation.
+    NotRepresentable,
 }
 
 #[cfg(test)]
@@ -524,53 +587,61 @@ mod tests {
         assert_eq!(of(Type::Named(Path::root("T"), vec![])), Repr::None);
     }
 
-    /// The `Struct`/`Dyn`/`Sym` rows are the asymmetry `binding_kind`'s doc
-    /// comment describes. Pinned as a test so that changing either projection
-    /// has to acknowledge the other.
+    /// Every heap-backed representation is the passthrough kind at a field
+    /// boundary *and* gets a GC root at a binding boundary. These two used to
+    /// be independent hand-written tables and disagreed on four rows; this is
+    /// the invariant that replaced the pinned-inconsistency test that sat here.
+    ///
+    /// `Sym` is the one documented exception and is asserted separately below,
+    /// so adding a representation to this list is a claim that the collector
+    /// can reclaim it.
     #[test]
-    fn the_two_projections_disagree_only_where_documented() {
-        let heap_ish = [
+    fn every_reclaimable_representation_is_both_passthrough_and_rooted() {
+        let reclaimable = [
             Repr::Str,
-            Repr::Sym,
             Repr::Bignum,
             Repr::Ratio,
             Repr::Sexpr,
             Repr::Struct,
             Repr::Vector(Box::new(Repr::Int)),
+            Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr)),
             Repr::Enum,
             Repr::Dyn,
             Repr::Scope(Box::new(Repr::Handle)),
             Repr::Fn,
         ];
-        // Every one of them is the passthrough kind at a field boundary...
-        for r in &heap_ish {
+        for r in &reclaimable {
             assert_eq!(r.field_kind(), 6, "{:?} should be the passthrough field kind", r);
+            assert_eq!(r.binding_kind(), 2, "{:?} should be rooted at a binding boundary", r);
         }
-        // ...but only some of them get a GC root at a binding boundary.
-        let rooted: Vec<Repr> = heap_ish.iter().filter(|r| r.binding_kind() == 2).cloned().collect();
-        assert_eq!(
-            rooted,
-            vec![
-                Repr::Str,
-                Repr::Bignum,
-                Repr::Ratio,
-                Repr::Sexpr,
-                Repr::Enum,
-                Repr::Scope(Box::new(Repr::Handle)),
-                Repr::Fn
-            ],
-            "the unrooted heap representations should be exactly Struct/Vector/Sym/Dyn"
-        );
     }
 
-    /// A `HashTable<K,V>` is the one representation that is heap-allocated and
-    /// yet gets neither a root nor a passthrough field kind. Pinned so that
-    /// the inconsistency `field_kind` documents cannot be quietly changed on
-    /// one side while the island's own numbering is frozen.
+    /// A `Symbol` is the one tagged word the collector never reclaims: `Heap`'s
+    /// mark phase walks `Cons`/`Str`/`Boxed` and lets every other `Value` fall
+    /// through, and symbols are interned. So it takes the passthrough tagging
+    /// and no root — the single place the two projections legitimately differ,
+    /// which is why `Repr::class` carries `collectable` rather than a second
+    /// table deciding it again.
     #[test]
-    fn a_hash_table_keeps_the_numbers_it_had_before_it_had_a_variant() {
-        let ht = Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr));
-        assert_eq!(ht.binding_kind(), 0);
-        assert_eq!(ht.field_kind(), 0);
+    fn a_symbol_is_passthrough_but_needs_no_root() {
+        assert_eq!(Repr::Sym.field_kind(), 6);
+        assert_eq!(Repr::Sym.binding_kind(), 0);
+    }
+
+    /// A scalar needs no root, and `Repr::None` — a still-generic type
+    /// variable, the only genuine representation gap left — is the sole
+    /// producer of the field kind `0` the island panics on. A `HashTable<K,V>`
+    /// used to share that number, which made a `HashTable`-typed `defstruct`
+    /// field fail to compile while claiming the type had no representation
+    /// (`tests/compile_test.rs`'s
+    /// `compile_reads_a_hashtable_field_out_of_a_struct`).
+    #[test]
+    fn only_a_generic_type_variable_is_not_representable() {
+        for r in [Repr::Int, Repr::Handle, Repr::Float, Repr::Char, Repr::Bool, Repr::Unit] {
+            assert_eq!(r.binding_kind(), 0, "{:?} is a scalar and needs no root", r);
+            assert_ne!(r.field_kind(), 0, "{:?} is representable in a field", r);
+        }
+        assert_eq!(Repr::None.field_kind(), 0);
+        assert_eq!(Repr::None.binding_kind(), 0);
     }
 }

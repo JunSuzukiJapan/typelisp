@@ -6014,3 +6014,110 @@ prelude ぶんの回数だけ掛かる。ネイティブでは同じ 1 テスト
 テストだけ」を理由つきで書いた。**走らないコマンドを手順書に置いておくのは、番人の
 ふりをした嘘である。** 同じファイルの「compile 機能の実装方針（未対応ノードの扱い）」も
 `ast_bridge.rs` 前提のまま無効になっていたので、あわせて訂正した。
+
+## 2 つの kind 分類を 1 つに統一する（2026-08-13）
+
+cons セル化 Phase 2 で `src/check/repr.rs` に手書きの分類表が 2 つ新設された
+（`Repr::binding_kind` / `Repr::field_kind`）。旧 `ast_bridge` の 2 つの分類器を
+置き換えたもので、その際**旧分類器の不整合を 2 件そのまま引き継ぎ**、「島の bitcode が
+凍結中なので今は直さない、島を作り直すときに両半分そろえて決着させる」と明記して
+据え置いていた。島はその後一度も再生成されていない。
+
+個別に直すのではなく、**表を 1 つにして食い違いが起こりえない形にした。** 2 つの
+手書き表が同じ型について別々の答えを出せること自体が温床で、2 件はその温床が生んだ実例
+である。
+
+### 全 variant を突き合わせると、片方は他方の関数だった
+
+| Repr | field | binding | |
+|---|---|---|---|
+| Sexpr / Str / Bignum / Ratio / Fn / Scope / Enum | 6 | 2 | 一致 |
+| Struct / Vector / Dyn | 6 | **0** | 食い違い |
+| HashTable | **0** | **0** | 両方誤り |
+| Sym | 6 | 0 | **例外（正しい）** |
+| Int / Handle / Float / Char / Bool / Unit / None | 1/2/3/4/11/0 | 0 | 一致 |
+
+例外は `Sym` ただ 1 つ。GC の mark ループが辿るのは `Cons`/`Str`/`Boxed` だけで
+`Value::Symbol` は素通しなので、**intern 済みシンボルは回収されない**——タグ付きだが
+不死、という第 3 の状態である。それ以外はすべて「タグ付き ⇔ ルートが要る」で決まる。
+
+そこで判断を 1 つの `Class` に集約し、2 つの番号をその射影にした。
+`Tagged { collectable: bool }` の `collectable` が `Sym` の例外を明示的に持つ。
+**新しい `Repr` variant を足す人は判断を 1 回しかしない。**
+
+### 「島を作り直すまで直せない」は過大だった
+
+doc とメモリは「kind 番号はインターフェースで、push と pop が同じ番号で対になって
+いるから片側だけ動かせない」と言っていた。島のコードを読むと、これは**番号の意味を
+変える（renumbering）**には当てはまるが、**どの型にどの番号を割り当てるか
+（reclassification）**には当てはまらない。島は番号だけを見ており、型→番号の射影は
+Rust 側（`core_bridge` / `Repr`）に閉じている。
+
+実測で確認した: `Struct` を 2 に再分類した状態で、`compiler_island.bc` **無変更**のまま
+島トリオ・`compile_test`・`compiled_binding_gc_test` すべて緑。
+
+### 凍結 1 の危険性が「未確定」から確定へ
+
+`tests/compiled_binding_gc_test.rs` は `Struct`/`Vector` の穴を突こうとして書かれ、
+突けていなかった。**理由が判明した**: `compile-construct-boxed-struct` ほか 12 箇所が、
+compiled コードの作る箱を**構築時に `push-permanent-sexpr-root` している**。permanent
+root は pop されないので、compiled な struct ローカルは束縛 kind が何であろうと不死で、
+どう割り当てを並べても回収されない。
+
+**これは修正ではなくマスクである。** permanent root は意図的なリーク
+（`compile-construct` に `build-free` の対がない）なので、いつか箱に本当の寿命を与える
+人が、unrooted な束縛と収集の間に立っていた唯一のものを外すことになる。分類が正しく
+なった今、その日は何事も起きない。
+
+なお既存テストが落ちなかった直接の理由は別にもう 1 つあって、`p` を作ったあと
+`sexpr-cons` しかしないと、回収されても `Heap::alloc_boxed` の `box_free.pop()` が
+呼ばれず**箱のスロットが再利用されない**。間に箱の割り当てを挟むテストを足したが、
+permanent root があるのでこれも落ちない。
+
+### 凍結 2 は本物の穴だった
+
+`HashTable<K,V>` の `field_kind` 0 は「構造体フィールドに置けない」を意味する番号で、
+`Repr::None`（単型化前のジェネリック型変数）と共有していた。しかし
+`Heap::alloc_hashtable` は `BoxedObj::Struct { payload: StructPayload::Map }` を作る——
+**実行時表現はそのものずばり boxed struct** である。「struct の集合にも enum の集合にも
+属さない」という 0 の理由は、旧分類器に渡していた集合の話で実体の話ではなかった。
+
+帰結: `HashTable<K,V>` 型フィールドを持つ `defstruct` を compile すると
+
+```
+panic: compile-sexpr-field: field type is not representable in compiled code yet
+```
+
+で **SIGABRT していた**。表現できるのに「表現できない」と嘘をつく。テストは 1 件も
+無かった。セル化された捕捉（`10 + field_kind`）の経路も同じ穴を踏む。番人を 2 本足し、
+どちらも旧分類で SIGABRT することを確認してから直した。
+
+### テスト
+
+`src/check/repr.rs` の単体テスト 2 本は**旧来の誤りを固定していた**ので書き換えた
+（「2 つの射影は文書化された場所でだけ食い違う」→「回収されうる表現はすべて素通し
+かつルート付き」、「HashTable は variant を持つ前の番号を保つ」→「表現の穴は
+ジェネリック型変数だけ」）。`core_bridge` のゴールデン 5 箇所も `Struct`/`Dyn`
+レシーバが 0 から 2 になった。`the_boxed_values_kind_follows_its_representation` は
+対比の軸が struct-vs-enum（＝バグそのもの）だったので scalar-vs-heap に変えた。
+
+`src/compiler.rs` と `src/compiler_island.bc` は無変更。
+
+### 島側のコメントは古いまま残る（次の島再生成時の宿題）
+
+`src/compiler.rs` のうち **SOURCE 文字列の中（277〜4171 行）にある `;;` コメントは
+触れない**。`island_artifacts_are_fresh`（`tests/island_artifacts_test.rs`）が
+`source_hash(SOURCE)` と bitcode に埋め込まれたハッシュを比較しており、**コメント 1 文字の
+変更でも島の再生成が要る**からである。SOURCE の外にある Rust の `//!` は自由に直せる。
+
+そのため次の 2 つが宿題として残る:
+
+1. **`ast_bridge` への参照 51 箇所**（Stage C で `src/compile/ast_bridge.rs` は削除済み）。
+   SOURCE 外の 6 箇所は今回 `core_bridge`/`core_freevars` に直した。
+2. **`compile-construct-boxed-struct` の doc（`:3557-3570`）が新しい分類と矛盾する。**
+   「`binding_kind` は `mutable` struct を意図的に `KIND_SEXPR` にしない」と書いてあるが、
+   今は `KIND_SEXPR` になる。この主張自体は当時正しく、根拠も正しかった
+   （permanent root が誕生時から生かしている）。変わったのは、その依存を
+   受け入れるかどうかの判断のほう。
+
+**`compiler_island.bc` を再生成する人は、まずこの 2 つを消すこと。**

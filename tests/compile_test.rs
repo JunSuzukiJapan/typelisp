@@ -5920,3 +5920,52 @@ fn the_island_runs_a_whole_bridged_defun() {
         assert_eq!(unsafe { clamp.call(argv.as_ptr(), argv.len() as u32) }, want, "x={}", x);
     }
 }
+
+/// A `defstruct` whose field is a `HashTable<K,V>`, compiled.
+///
+/// `Repr::field_kind` classified a `HashTable` as `0` — the number that means
+/// "not representable in a struct field", shared with `Repr::None` (a
+/// still-generic type variable). The island's `compile-sexpr-field` reaches
+/// its final `else` on `0` and panics with exactly that claim. But a
+/// `HashTable` *is* representable: `Heap::alloc_hashtable` builds a
+/// `BoxedObj::Struct { payload: StructPayload::Map }` — a tagged heap box like
+/// any `defstruct`, which is the passthrough kind `6`.
+#[test]
+fn compile_reads_a_hashtable_field_out_of_a_struct() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defstruct cache (table HashTable<i64,i64>))
+        (defun probe () i64
+          (let ((c (cache::new (the HashTable<i64,i64> (HashTable::new)))))
+            (let ((t c::table))
+              (set t 1 41)
+              (match (get t 1) ((Some n) (+ n 1)) (None 0)))))
+        (compile probe)
+        (probe)
+        "#,
+    );
+    assert_eq!(v, Value::Int(42));
+}
+
+/// The same gap on the *cell-boxed* path: a name a nested `lambda` captures is
+/// promoted to a shared `BoxedObj::Cell`, and its binding kind becomes the
+/// island's `10 + field_kind` marker (`core_bridge`'s `binding_kind`). With
+/// `HashTable` classified `0` that marker was a bare `10`, so
+/// `bind-let-values`' `(- kind 10)` handed `compile-tag-struct-field` the
+/// not-representable `0` — the same wrong answer as the field path above,
+/// reached through a different door.
+#[test]
+fn compile_captures_a_hashtable_in_a_closure() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun probe () i64
+          (let ((t (the HashTable<i64,i64> (HashTable::new))))
+            (set t 1 41)
+            (let ((f (lambda () i64 (match (get t 1) ((Some n) (+ n 1)) (None 0)))))
+              (f))))
+        (compile probe)
+        (probe)
+        "#,
+    );
+    assert_eq!(v, Value::Int(42));
+}

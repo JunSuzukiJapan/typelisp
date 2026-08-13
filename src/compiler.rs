@@ -1,5 +1,5 @@
-//! The (typelisp-hosted) compiler body: AST (bridged to `Sexpr` by
-//! [`crate::compile::ast_bridge`]) -> LLVM IR, built by calling the
+//! The (typelisp-hosted) compiler body: core IR (converted to the shape this
+//! file reads by [`crate::compile::core_bridge`]) -> LLVM IR, built by calling the
 //! `llvm-*` builtins (`crate::eval::interp`'s `eval_llvm_builtin_method`)
 //! directly — the same "Rust provides the bindings, typelisp drives them"
 //! split [docs/implementation-log.md](../docs/dev/implementation-log.md) calls for. Loaded the same way
@@ -7,7 +7,7 @@
 //! top-level form once, against the same `Heap`/`Checker`/`Interp` the rest
 //! of the program uses.
 //!
-//! Compiles the node shapes `ast_bridge::ast_to_sexpr` actually produces a
+//! Compiles the node shapes `core_bridge::to_island` actually produces a
 //! real translation for today — integer literals (`(int n)`), `i64`
 //! arithmetic (`(var name is-fn)`/`(assoc type method instance arg...)`, for
 //! `+`/`-`/`*` only), `labels`-sibling/self direct calls
@@ -34,8 +34,8 @@
 //! `return`'s value-less case) round out every native control-flow primitive
 //! the checker has (`if`/`let`/`match`/`labels`/`loop`/`break`/`return` —
 //! `match` alone remains uncompiled). `compile-value` grows a new tag-/
-//! method-matching arm as later phases teach `ast_bridge` to translate more
-//! `Expr` variants for real.
+//! method-matching arm as later phases teach `core_bridge` to translate more
+//! core IR forms for real.
 //!
 //! **`loop`/`break`/`return`/`setf` also changed how every local variable is
 //! represented** (`bind-params`/`bind-captures`/`bind-let-values`): `env`
@@ -51,7 +51,7 @@
 //! places that write to an existing slot a second time (or, for a cell-kind
 //! name, to the cell itself — see just below). A `setf` on a *captured*
 //! name now genuinely shares — closure-representation unification, Stage 4:
-//! any name `ast_bridge::names_captured_by_nested` finds referenced inside a
+//! any name `core_freevars::names_captured_by_nested` finds referenced inside a
 //! nested `lambda`/`labels` is promoted, at `bind-params`/`bind-let-values`
 //! time, to a shared `BoxedObj::Cell` (`rt_cell_new`) instead of an ordinary
 //! stack slot — a captured name is *always* one of these (every entry a
@@ -67,7 +67,7 @@
 //! binding through the same `BoxedObj::Cell` heap cells. The one
 //! exception: a `labels` sibling captured *as a value* (not called) is
 //! never cell-boxed even though it appears in the very same captured-list —
-//! see `Ctx::visible_siblings`'s doc comment (`ast_bridge.rs`) for why a
+//! see `Ctx::visible_siblings`'s doc comment (`core_bridge.rs`) for why a
 //! sibling reference has no sharable mutable state to begin with.
 //!
 //! **`break`/`return` always exit the *nearest enclosing loop*, never a
@@ -111,9 +111,11 @@
 //! only by `llvm-module::verify`, not by anything in this file.
 //!
 //! Every captured/parameter name and call argument carries a `kind` `Int`
-//! tag alongside it (`ast_bridge`'s `tagged_sym_list`/`tagged_ast_list_to_sexpr`,
-//! `binding_kind`'s doc comment) — `2` (`Sexpr`) for a `Sexpr`-, `Str`-, or
-//! `Fn`-typed name/argument, `0` (plain) otherwise. This is what
+//! tag alongside it (`core_bridge`'s `name_kind_list`/`arg_pairs`, and
+//! [`crate::check::repr::Repr::binding_kind`]'s doc comment) — `2` (`Sexpr`)
+//! for every representation the collector can *reclaim* (that is every tagged
+//! one except an interned symbol, which is tagged but immortal), `0` (plain)
+//! for a raw scalar. This is what
 //! `retain-bindings`/`release-bindings`/`compile-call-args` key their
 //! GC-root push/pop on (see those functions' doc comments for the exact
 //! insertion points): a `kind = 2` name gets a root pushed at its binding

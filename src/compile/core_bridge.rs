@@ -2371,7 +2371,7 @@ mod tests {
         );
         assert_eq!(
             bridged("(assoc m::point area true () int (struct) (var p))"),
-            r#"(assoc "m::point" "area" true (0 var "p" false))"#
+            r#"(assoc "m::point" "area" true (2 var "p" false))"#
         );
     }
 
@@ -2747,7 +2747,7 @@ mod tests {
     fn a_method_reference_forwards_onto_the_method() {
         let printed = bridged("(methodref point area () (struct))");
         assert!(
-            printed.ends_with(r#" () ((arg0 . 0)) (assoc "point" "area" true (0 var "arg0" false)))"#),
+            printed.ends_with(r#" () ((arg0 . 2)) (assoc "point" "area" true (2 var "arg0" false)))"#),
             "{}",
             printed
         );
@@ -2795,25 +2795,32 @@ mod tests {
     #[test]
     fn a_trait_object_carries_the_ids_interned_for_it() {
         let printed = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () struct (var p))"#);
-        assert_eq!(printed, r#"(dyn-new 11 (0 var "p" false))"#);
-        assert_eq!(bridged_with_dyn("(dyn-upcast drawable (var d))"), r#"(dyn-upcast 22 (0 var "d" false))"#);
+        assert_eq!(printed, r#"(dyn-new 11 (2 var "p" false))"#);
+        assert_eq!(bridged_with_dyn("(dyn-upcast drawable (var d))"), r#"(dyn-upcast 22 (2 var "d" false))"#);
         assert_eq!(
             bridged_with_dyn("(dyn-call shape area 0 ((point area)) (dyn) (var d))"),
-            r#"(dyn-call 0 (0 var "d" false))"#
+            r#"(dyn-call 0 (2 var "d" false))"#
         );
-        assert_eq!(bridged_with_dyn("(dyn-value (var d))"), r#"(dyn-value (0 var "d" false))"#);
+        assert_eq!(bridged_with_dyn("(dyn-value (var d))"), r#"(dyn-value (2 var "d" false))"#);
     }
 
-    /// An enum boxed as a trait object needs a GC root across the boxing call
-    /// where a struct does not — which is the whole reason the node states the
-    /// boxed value's representation rather than deriving it from the concrete
-    /// type's name.
+    /// The node states the boxed value's *representation* rather than deriving
+    /// it from the concrete type's name, because whether the boxing call needs
+    /// a GC root across it is a property of the representation.
+    ///
+    /// The contrast used to be struct-vs-enum: a struct boxed here got `0` and
+    /// an enum got `2`. That was the `binding_kind`/`field_kind` disagreement,
+    /// not a real distinction — both are tagged heap boxes the collector can
+    /// reclaim — so the axis is now scalar-vs-heap, which is the distinction
+    /// that was always meant.
     #[test]
     fn the_boxed_values_kind_follows_its_representation() {
         let as_struct = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () struct (var p))"#);
         let as_enum = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () enum (var p))"#);
-        assert!(as_struct.contains("(0 var"), "{}", as_struct);
+        let as_int = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () int (var p))"#);
+        assert!(as_struct.contains("(2 var"), "{}", as_struct);
         assert!(as_enum.contains("(2 var"), "{}", as_enum);
+        assert!(as_int.contains("(0 var"), "{}", as_int);
     }
 
     /// Reflection cannot be compiled: it acts on the running interpreter's own
@@ -2864,7 +2871,7 @@ mod tests {
             top_level(&[], "(defmethod m::point area false ((self struct)) int true (field-get (var self) 0 int))")
                 .expect("a defmethod is compiled");
         assert_eq!(name, "tl_m::point::area");
-        assert_eq!(params, "((self . 0))");
+        assert_eq!(params, "((self . 2))");
         assert_eq!(body, r#"(field-get () 1 (var "self" false))"#);
     }
 
