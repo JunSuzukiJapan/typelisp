@@ -186,14 +186,6 @@ impl MacroShape {
 /// goto-definition back to the binding site.
 type PatternBindings = Vec<(String, Type, Option<Loc>)>;
 
-/// The generic templates [`Checker::export_templates`] hands to the fasl
-/// serializer: free functions and (type-name-qualified) methods, each paired
-/// with its heap-independent [`crate::fasl`] representation.
-type ExportedTemplates = (
-    Vec<(Path, crate::fasl::FnTemplateRepr)>,
-    Vec<(Path, String, crate::fasl::MethodTemplateRepr)>,
-);
-
 /// A lexical environment mapping variable names to their types.
 #[derive(Clone)]
 struct Env {
@@ -1873,85 +1865,6 @@ impl Checker {
         &self.reg
     }
 
-    /// Mutable registry access for the fasl loader (`crate::fasl`) — the one
-    /// caller that legitimately writes registry entries without going
-    /// through `check_form` (it replays entries a previous check already
-    /// produced and serialized).
-    pub(crate) fn registry_mut(&mut self) -> &mut Registry {
-        &mut self.reg
-    }
-
-    /// Exports the retained generic templates in the heap-independent
-    /// [`crate::fasl`] representation — the serialize-side half of the fasl
-    /// round trip (templates are the only checker state whose data lives on
-    /// the GC heap; see [`FnTemplate`]/[`MethodTemplate`]).
-    pub fn export_templates(&self, heap: &Heap) -> Result<ExportedTemplates, Error> {
-        let mut fns = Vec::new();
-        for (path, t) in &self.generic_fn_templates {
-            let parts = t.parts.iter().map(|v| crate::fasl::value_to_owned(heap, *v)).collect::<Result<_, _>>()?;
-            fns.push((
-                path.clone(),
-                crate::fasl::FnTemplateRepr { parts, ns: t.ns.clone(), type_params: t.type_params.clone() },
-            ));
-        }
-        let mut methods = Vec::new();
-        for ((owner, name), t) in &self.generic_method_templates {
-            let repr = match t {
-                MethodTemplate::Form { parts, ns, written_vars } => crate::fasl::MethodTemplateRepr::Form {
-                    parts: parts.iter().map(|v| crate::fasl::value_to_owned(heap, *v)).collect::<Result<_, _>>()?,
-                    ns: ns.clone(),
-                    written_vars: written_vars.clone(),
-                },
-                MethodTemplate::Getter { index } => crate::fasl::MethodTemplateRepr::Getter { index: *index },
-                MethodTemplate::Setter { index } => crate::fasl::MethodTemplateRepr::Setter { index: *index },
-            };
-            methods.push((owner.clone(), name.clone(), repr));
-        }
-        Ok((fns, methods))
-    }
-
-    /// Installs fasl-carried generic templates, rebuilding each raw form in
-    /// `heap` through its allocation APIs ([`crate::fasl::owned_to_value`])
-    /// and permanently rooting it — exactly the protection a source-checked
-    /// template's parts get (see the `push_permanent_root` calls in
-    /// [`Self::check_defun`]/[`Self::check_defmethod`]).
-    pub fn install_templates(
-        &mut self,
-        heap: &mut Heap,
-        fns: &[(Path, crate::fasl::FnTemplateRepr)],
-        methods: &[(Path, String, crate::fasl::MethodTemplateRepr)],
-    ) -> Result<(), Error> {
-        for (path, repr) in fns {
-            let mut parts = Vec::with_capacity(repr.parts.len());
-            for f in &repr.parts {
-                let v = crate::fasl::owned_to_value(heap, f)?;
-                heap.push_permanent_root(v);
-                parts.push(v);
-            }
-            self.generic_fn_templates.insert(
-                path.clone(),
-                FnTemplate { parts, ns: repr.ns.clone(), type_params: repr.type_params.clone() },
-            );
-        }
-        for (owner, name, repr) in methods {
-            let t = match repr {
-                crate::fasl::MethodTemplateRepr::Form { parts, ns, written_vars } => {
-                    let mut vs = Vec::with_capacity(parts.len());
-                    for f in parts {
-                        let v = crate::fasl::owned_to_value(heap, f)?;
-                        heap.push_permanent_root(v);
-                        vs.push(v);
-                    }
-                    MethodTemplate::Form { parts: vs, ns: ns.clone(), written_vars: written_vars.clone() }
-                }
-                crate::fasl::MethodTemplateRepr::Getter { index } => MethodTemplate::Getter { index: *index },
-                crate::fasl::MethodTemplateRepr::Setter { index } => MethodTemplate::Setter { index: *index },
-            };
-            self.generic_method_templates.insert((owner.clone(), name.clone()), t);
-        }
-        Ok(())
-    }
-
     /// `(pub defun ...)` / `(pub defmethod ...)` etc. — mark the next definition public.
     fn check_pub(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>], def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
         if parts.is_empty() {
@@ -3211,7 +3124,7 @@ impl Checker {
         _pname: &str,
         decl_ty: &Type,
         default_raw: Option<Value>,
-    ) -> Result<Option<crate::fasl::OwnedForm>, Error> {
+    ) -> Result<Option<crate::owned_form::OwnedForm>, Error> {
         match default_raw {
             None => Ok(None),
             Some(form) => {
@@ -3219,7 +3132,7 @@ impl Checker {
                 let checked = self.check(heap, interp, &env, form, Some(decl_ty))?;
                 // Detached from the heap right here — see `OptKeyParam::
                 // default` for why the signature cannot hold a `Value`.
-                Ok(Some(crate::fasl::value_to_owned(heap, checked.form)?))
+                Ok(Some(crate::owned_form::value_to_owned(heap, checked.form)?))
             }
         }
     }
@@ -4531,7 +4444,7 @@ impl Checker {
                 // it round-trips through `list_from_vec`/`list_to_vec`.
                 let item = elems
                     .iter()
-                    .map(|v| crate::fasl::value_to_owned(heap, *v))
+                    .map(|v| crate::owned_form::value_to_owned(heap, *v))
                     .collect::<Result<Vec<_>, _>>()?;
                 defaults.insert(head.clone(), TraitDefault { item, ns: self.ns.clone() });
                 default_written
@@ -4702,7 +4615,7 @@ impl Checker {
                 _ => Err(Error::TypeError("impl: method name must be a symbol".into())),
             })
             .collect::<Result<_, Error>>()?;
-        let defaulted: Vec<(String, Vec<crate::fasl::OwnedForm>, Vec<String>)> = self
+        let defaulted: Vec<(String, Vec<crate::owned_form::OwnedForm>, Vec<String>)> = self
             .reg
             .trait_def(&trait_fq)
             .map(|t| {
@@ -4854,10 +4767,10 @@ impl Checker {
     /// spine is rooted across its own `cons` — the discipline the reader
     /// follows for exactly the same reason. Roots are popped LIFO on both the
     /// success and the error path.
-    fn owned_item_to_form(heap: &mut Heap, item: &[crate::fasl::OwnedForm]) -> Result<Value, Error> {
+    fn owned_item_to_form(heap: &mut Heap, item: &[crate::owned_form::OwnedForm]) -> Result<Value, Error> {
         let mut vals: Vec<Value> = Vec::with_capacity(item.len());
         for f in item {
-            match crate::fasl::owned_to_value(heap, f) {
+            match crate::owned_form::owned_to_value(heap, f) {
                 Ok(v) => {
                     heap.push_root(v);
                     vals.push(v);
@@ -5141,11 +5054,11 @@ impl Checker {
     ) -> Result<Vec<TopLevelForm>, Error> {
         let Some(b) = self.reg.blanket_impl(trait_path) else { return Ok(Vec::new()) };
         let (target_var, ns) = (b.target_var.clone(), b.ns.clone());
-        let mut items: Vec<Vec<crate::fasl::OwnedForm>> = Vec::new();
+        let mut items: Vec<Vec<crate::owned_form::OwnedForm>> = Vec::new();
         for (aname, ty) in &b.assoc {
             items.push(vec![
-                crate::fasl::OwnedForm::Sym("type".into()),
-                crate::fasl::OwnedForm::Sym(aname.clone()),
+                crate::owned_form::OwnedForm::Sym("type".into()),
+                crate::owned_form::OwnedForm::Sym(aname.clone()),
                 ty.clone(),
             ]);
         }
@@ -5162,12 +5075,12 @@ impl Checker {
         // segment, and `check_impl` would look for a trait of that literal
         // name.
         let segs: Vec<String> = trait_path.segments().to_vec();
-        let trait_v = crate::fasl::owned_to_value(
+        let trait_v = crate::owned_form::owned_to_value(
             heap,
             &if segs.len() > 1 {
-                crate::fasl::OwnedForm::Path(segs)
+                crate::owned_form::OwnedForm::Path(segs)
             } else {
-                crate::fasl::OwnedForm::Sym(trait_path.last_segment().to_string())
+                crate::owned_form::OwnedForm::Sym(trait_path.last_segment().to_string())
             },
         )?;
         heap.push_permanent_root(trait_v);
@@ -5399,7 +5312,7 @@ impl Checker {
             };
             let owned = elems
                 .iter()
-                .map(|v| crate::fasl::value_to_owned(heap, *v))
+                .map(|v| crate::owned_form::value_to_owned(heap, *v))
                 .collect::<Result<Vec<_>, Error>>()?;
             if head == "type" {
                 if elems.len() != 3 {

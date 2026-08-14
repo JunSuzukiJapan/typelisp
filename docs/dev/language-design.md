@@ -61,17 +61,17 @@
   リンクする）。旧実装は 2026-06-23 に `Vector<T>`/`defstruct` の全面リバートに伴って一度
   削除されたが、2026-06-25 以降 Vector/defstruct 再設計後の前提の上で再実装されている
   （対応構文の範囲は都度拡張中——詳細は `src/compile/`、[implementation-log.md](implementation-log.md) 参照）。
-- **ファイル拡張子**: ソースファイルは `.typl`。コンパイル済みモジュール（CL の `.fasl` 相当の
-  「チェック済み定義のシリアライズ」——§2.4、`typl compile-module` が生成）は **`.fastl`**。
-  これは LLVM の `compile-file`（`cc` でリンクした**ネイティブ実行ファイル**を直接出力、中間
-  ファイルではない）とは別物。`.typlc` という拡張子は実装上使用されていない。
+- **ファイル拡張子**: ソースファイルは `.typl` のみ。コンパイル済みモジュール形式は無い
+  （`.fastl` は 2026-08-14 に削除——§2.4）。LLVM の `compile-file` は `cc` でリンクした
+  **ネイティブ実行ファイル**を直接出力するもので、中間ファイルは残さない。`.typlc` という
+  拡張子は実装上使用されていない。
 - **命名規則 `!`/`?`**: 関数名の末尾に `!`（破壊的操作）や `?`（述語）を接尾辞として使わない（詳細・理由は §7.3）。
 
 ---
 
 ## 1. メモリモデル / GC
 
-- cons セルは**固定アリーナ**（起動時に確保、再確保しない＝生ポインタが安定）。既定は 65536（`1 << 16`）セルで、`typl --heap-cells N` で起動時に容量を指定できる（`run`/REPL/`compile-module` 共通のグローバルフラグ、`--heap-cells=N` 形も可。`main.rs` の `parse_heap_cells`）。
+- cons セルは**固定アリーナ**（起動時に確保、再確保しない＝生ポインタが安定）。既定は 65536（`1 << 16`）セルで、`typl --heap-cells N` で起動時に容量を指定できる（ファイル実行/REPL 共通のグローバルフラグ、`--heap-cells=N` 形も可。`main.rs` の `parse_heap_cells`）。
 - 割当はフリーリストから。空なら GC、それでも空なら **`Error::HeapExhausted`（成長しない）**。
 - **mark-sweep GC**（反復マーク＝深い構造でもスタック溢れなし、循環回収）。ルート集合 `push_root`/`pop_root`。
 - **生ポインタは `ConsRef` に隠蔽、公開 API は安全**。
@@ -166,23 +166,17 @@
 - **実行**: `typl <file.typl>`（引数なしはREPL）。REPL の `use` も同じLoaderで解決。
   LSP（`typl-lsp`）も同じLoaderでクロスファイル診断を行う。
 
-### 2.4 `(load)` とコンパイル済みモジュール（fasl、2026-07-14 実装）
+### 2.4 `(load)`
 
 - **`(load "path")`**: CL流のフラットロード（対象ファイルのフォームをカレント名前空間に読み込む、
-  `use` のモジュール包みとは別）。トップレベル専用。`path.fastl` があり `source_hash` が `.typl` と
-  一致すれば fasl を直接ロード（read・マクロ展開・型チェックを全スキップ）、無ければソース。
-  **自動コンパイルはしない**。
-- **fasl の実体**: ネイティブコードではなく「**チェック済み状態のシリアライズ**」（`src/fasl.rs`、
-  LLVM `(compile ...)` とは無関係）。中身は Registry の名前差分 + generic テンプレート（唯一 heap を
-  参照する Checker 状態を `OwnedForm` 化）+ チェック済み `TopLevel` 列（ロード時 `interp.exec` で
-  再登録）。**生ポインタ処理系なのでヒープの clone/コピーは不可**——ロード時に確保 API
-  （`heap.cons`/`alloc_string`/`intern_symbol`）で値を作り直す（`owned_to_value`）。
-- **生成**: `typl compile-module <file.typl> [-o out.fastl]`。モジュールは定義のみ（トップレベル式は
-  エラー）。
-- **prelude 起動最適化**: prelude 自身もこの機構で起動時ロード（`prelude::load_cached`、
-  専用ディレクトリ `$TYPL_CACHE_DIR`|`~/.typl/cache/` にキャッシュ）。LSP は prelude fasl を起動時に1つ構築し
-  各診断パスで `Fasl::load_into` 再利用——キー入力毎の prelude 再チェックが消える（実測 5.2倍速）。
-  `prelude::load`（純ソース）はテストの hermeticity のため据え置き。
+  `use` のモジュール包みとは別）。トップレベル専用。`path` は読み込み元ファイルのディレクトリ
+  からの相対で、拡張子が無ければ `.typl` を補う。読み込んだファイル自身の `(load)`/`(use)` も
+  再帰的に処理される。
+- **コンパイル済みモジュール形式は無い**。2026-07-14 に fasl（チェック済み状態のシリアライズ、
+  `.fastl`、`typl compile-module` が生成）を入れたが、2026-08-14 に削除した——ネイティブコードでは
+  なく read+型チェックを飛ばすだけの機構で、実行を1ミリ秒も速くしないため。経緯と実測値は
+  [implementation-log.md](implementation-log.md)。
+- **prelude** も毎回ソースから読んで型チェックする（`prelude::load`）。LSP の各診断パスも同じ。
 
 ### 2.4 名前解決規則
 - **裸名（修飾なし）**: 現在の module → root（組み込み）の順。**中間の親 module は歩かない**。
@@ -366,7 +360,7 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   `TraitDef::assoc_types` に継承分を足すことになって既存トレイトの `:dyn` ピン個数が変わる。
   - **義務**: `impl Ord X` は `impl Eq X` が**先に**書かれていることを要求する（`check_supertrait_impls`）。
     直接のスーパトレイトだけ見れば十分（親の impl が祖父を強制済み）。厳密な記述順の規則で
-    Rust より制限が強いが、REPL・逐次 `load`・fasl 復元のどれでも決定的に判定できる唯一の形。
+    Rust より制限が強いが、REPL でも逐次 `load` でも決定的に判定できる唯一の形。
     その帰結として `AdtDef::impls` はスーパトレイトについて閉じるので、
     `validate_where_bounds` の平坦な一覧走査は変更不要のまま済む。
   - **同名衝突**: サブが親のメソッドを再宣言すること、2つの親から同名メソッドを継承することは

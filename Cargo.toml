@@ -18,19 +18,18 @@ default-members = [".", "crates/typelisp-mem", "crates/typelisp-rt"]
 
 [dependencies]
 once_cell = "1.8.0"
-# `serde` feature: fasl (compiled-module) serialization — see `src/fasl.rs`.
-num-bigint = { version = "0.4", features = ["serde"] }
-num-rational = { version = "0.4", features = ["serde"] }
+num-bigint = "0.4"
+num-rational = "0.4"
 num-traits = "0.2"
 num-integer = "0.1"
 rustyline = "18"
 inkwell = { version = "0.9", features = ["llvm17-0"] }
-typelisp-mem = { path = "crates/typelisp-mem", features = ["serde"] }
+typelisp-mem = { path = "crates/typelisp-mem" }
 typelisp-rt = { path = "crates/typelisp-rt" }
 lsp-server = "0.8"
 lsp-types = "0.97"
-# `rc`: `Loc.file` is an `Rc<str>` (see `typelisp-mem`'s `errors.rs`).
-serde = { version = "1", features = ["derive", "rc"] }
+# `lsp-types` requires `serde`; the LSP transport speaks JSON.
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [[bin]]

@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-08-05 / ブランチ: `main`
+最終更新: 2026-08-14 / ブランチ: `refactor/remove-fasl`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -6317,3 +6317,74 @@ Phase 2 完了後、不要になったもの・重複・単純に書けるよう
 `reg` だけを触る 29 メソッドのうち自己完結は 9 個（うち 3 個は残すべきアクセサ）で、
 残り 20 個は兄弟を呼ぶ。**`checker.rs` が大きいのは checker が大きいからで、
 引ける境界は 1 本しか無かった。** 同じ調査を繰り返さないために測定結果ごと記録する。
+
+---
+
+## fasl（コンパイル済みモジュール機構）を削除（2026-08-14、ブランチ `refactor/remove-fasl`）
+
+TODO.md にあった「fasl の速度に本物の番人を置く」を検討するうちに、番人の手前の問いが出た:
+**この fasl はロード時間を縮めるだけで、コンパイル済みコードではない。それに意味はあるのか。**
+
+結論として機構ごと削除した。以下、判断の材料と、失ったものの実測値。
+
+### fasl が何だったか
+
+`Fasl` が持っていたのはレジストリ差分・ジェネリックのテンプレート・型チェック済みトップレベル
+フォームの3つで、`load_into` はそれを積み直して `interp.exec` を回していた。つまり省いていたのは
+**前半（read + 型チェック）だけ**で、後半の実行はインタプリタでまったく同じに走る——
+**実行は1ミリ秒も速くならない**。CL の `.fasl` が指すのはコンパイル済みコードを収めたファイルで
+あり、この機構はそれではなかった。ネイティブコードを持つ機構は別にある（`src/compiler_island.bc`
+＋ `load_compiler_aot`、`compile` 機能）。
+
+### 実測（削除前、release ビルド、N=5 の min）
+
+| 測定 | source 経路 | fasl 経路 | 比 |
+|---|---|---|---|
+| A: prelude のみ（LSP per-pass の環境） | 55.8 ms | 7.3 ms | 7.6x |
+| B: 診断パス全体（prelude + 小さな文書） | 57.6 ms | 7.6 ms | 7.6x |
+| C: ディスクから起動（JSON パース込み） | 55.8 ms | 24.6 ms | 2.3x |
+
+**機構は実際に効いていた**。削除の代償は LSP のキー入力ごとに +48 ms、CLI 起動に +31 ms。
+それを承知の上で、「実行を速くしない機構をこの規模で抱える価値は無い」という判断で削除した。
+
+C が A/B に比べて振るわないのは形式のせい: ディスク上の実物は 2,383 行のソースに対して
+**2,499,193 バイトの JSON**（`serde_json`）で、その JSON パースが 24.6 ms のうち約 17 ms を
+食っていた。ディスク経路は形式をバイナリ化すれば救えたが、それは「効いていない部分を直す」で
+あって「実行が速くならない」という本体の問題には触らない。
+
+TODO.md には「測る対象が違う（prelude ではなく LSP 診断パスを測れ）」と書いてあったが、これは
+**誤りだった**。fasl が省くのは read+check だけで `exec` は両辺共通なのだから、正しい測定単位は
+「同じモジュールを source から積む vs fasl から積む」であり、診断パスを測ると fasl と無関係な
+文書側のチェックコストが両辺に乗って比を薄めるだけである（上の表の A と B が実際そうなっている）。
+2026-08-07 に削除した旧 bench `bench_fasl_load_beats_source_load` は**測る対象自体は正しかった**
+——欠陥は `#[ignore]` と `fasl_time < source`（1.01 倍でも通る）という assertion のほうにあった。
+
+### 削除の範囲と、残ったもの
+
+消したのは `src/fasl.rs` / `tests/fasl_test.rs` の全体、`typl compile-module` サブコマンド、
+`.fastl` 拡張子、`prelude::load_cached`/`prelude_fasl` と `~/.typl/cache`、`(load)` の fasl 優先
+分岐、LSP の `Rc<Fasl>`、`project::ModuleCache`（依存モジュールのパス間キャッシュ）、
+`Checker::export_templates`/`install_templates`/`registry_mut`。付随して `registry.rs`/
+`resolved.rs`/`types.rs` の serde 派生と `Path` の手書き `Serialize`/`Deserialize`、
+`typelisp-mem` の `serde` feature、`num-bigint`/`num-rational` の `serde` feature も落ちた
+（`serde`/`serde_json` 本体は `lsp-types` が要求するので残る）。
+
+**`(load "path")` は言語機能として残る**——`load_file_flat` はもともとソースも読むので、
+fasl 優先の分岐が消えただけ。
+
+**予期していなかった発見**: `OwnedForm`（ヒープ非依存の読み形ミラー）は fasl のシリアライズ
+担当として書かれたものだが、checker が独立にそれを必要としていた——`&optional`/`&key` の
+デフォルト式（`OptKeyParam::default`）、`impl` より先に検査する `deftrait` のデフォルト本体、
+per-instantiation の再検査のために retain するジェネリックテンプレート。どれも「チェック済みの
+`Value` はあるヒープへの添字なので、そのヒープより長生きする状態は `Value` を持てない」という
+同じ理由による。そこで `OwnedForm`/`OwnedCell`/`value_to_owned`/`owned_to_value` だけを
+`src/owned_form.rs` へ移し（serde 派生は落として）、fasl 本体は消した。
+**シリアライズ形式として書かれたものが、シリアライズをやめても生き残る**という形。
+
+### 検証
+
+`cargo check --all-targets` は警告 0（削除の途中で出た「消し残しの `pub` が dead code を隠す」
+に当たらないよう、`load_source_flat` は `pub` を落として private にし、`registry_mut` は
+呼び出し元が消えた時点で削除した）。`ModuleCache` を見ていた `module_file_test.rs` の4本は、
+キャッシュ以外のことも見ていた3本をキャッシュ無しの形（別セッションで再ロードして編集が
+見えること）に書き換え、純粋にキャッシュ命中数だけを見ていた1本を削除した。

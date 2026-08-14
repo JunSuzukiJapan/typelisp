@@ -1,8 +1,8 @@
 //! Tests for top-level forward references — `Checker::predeclare_program`.
 //!
 //! Every driver that checks a whole program (the prelude loader, the file
-//! loaders in `project.rs`, `compile-module`, AOT `compile-file`, the compiler
-//! island's own bootstrap) runs a pre-pass that registers each top-level
+//! loaders in `project.rs`, AOT `compile-file`, the compiler island's own
+//! bootstrap) runs a pre-pass that registers each top-level
 //! `defun`'s *signature* before any body is checked. `check_defun` has always
 //! registered a function's own signature before its body, so self-recursion
 //! worked; what did not was recursion *between* forms, because the drivers

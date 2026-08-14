@@ -133,7 +133,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | `function` (`#'`) | ⚠️ | 関数名をそのまま値として書けるので `#'` 構文は無い |
 | `funcall` | ⚠️ | 関数値は `(f args...)` で直接呼べる（Lisp-1）。関数名の名前空間が分かれていないため不要 |
 | `apply` | ✅ | 特殊形。`&rest` を持つ可変長関数にのみ適用できる |
-| `compile` / `compile-file` | ⚠️ | 実体は LLVM JIT / AOT ネイティブ実行ファイル生成。CL の「fasl を作る」意味とは違う（fasl 相当は `load` と `typl compile-module`） |
+| `compile` / `compile-file` | ⚠️ | 実体は LLVM JIT / AOT ネイティブ実行ファイル生成。CL の「fasl を作る」意味とは違い、中間ファイルは残さない。コンパイル済みモジュール形式は無い |
 | `constantly` | ❌ | `const` はあるが 2引数版（`(const x y)`）で、クロージャを返す `constantly` とは別物 |
 | `complement` | ❌ | 述語の否定を返す高階関数 |
 | `identity` | ✅ | |
@@ -465,7 +465,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `load` | ⚠️ | fasl（チェック済みモジュール）優先ロード。CL の「ソースを読んで順に評価」とは意味が違う |
+| `load` | ✅ | ソースを読んで順に評価するフラットロード。トップレベル専用 |
 | `require` / `provide` / `*modules*` | ⚠️ | `module`/`use`＋ファイル↔モジュール対応が相当 |
 | `*features*` / `#+` / `#-` | ⚠️ | 2026-07-30実装。`#+`/`#-`（`and`/`or`/`not`合成式込み）をリーダに追加。`*features*`はCLと違い**読み込み中に書き換え不可の固定集合**（全フォームを読んでからチェック/評価する既存アーキテクチャのため）。デフォルトはホストOS/アーキテクチャ＋`:typelisp`、`typl`の`--feature NAME`で追加可能 |
 | `compile-file-pathname` / `*compile-file-pathname*` / `*load-pathname*` 等 | ❌ | |

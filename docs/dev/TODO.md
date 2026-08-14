@@ -1,37 +1,16 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-08-07 / ブランチ: `feature/cons-cell-interpreter`
+最終更新: 2026-08-14 / ブランチ: `refactor/remove-fasl`
 
 このドキュメントは**現在残っている作業のみ**を記録する。
 
 ## 残っている作業
 
-### fasl の速度に本物の番人を置く
+無し。
 
-fasl は**速度のためだけに**存在する。正しさは round-trip テスト
-（`tests/fasl_test.rs` の S1〜S4）が見ているので、fasl が遅くなっても
-他のテストは全部通る。つまり今、この機能の存在理由を守っているものが無い。
-
-以前は `bench_fasl_load_beats_source_load` があったが 2026-08-07 に削除した。
-番人として成立していなかったため:
-
-- `#[ignore]` なので自動では走らない。手で `--ignored` を打った時だけ
-- アサーションが `fasl_time < source`、つまり「少しでも速い」。1.01 倍まで
-  劣化しても通るので、意味のある形では落ちない
-- prelude をループで読む時間を測っていたが、実際に効く場所は LSP の診断パス
-  （そこは 5.2 倍と実測済み）。測る対象が違う
-
-作るなら:
-
-- 対象は **LSP 診断パス**（`typl-lisp` の per-pass、fasl 導入の動機そのもの）
-- 閾値は**実比に対して余裕のある倍率**（実測 5.2 倍なら 3 倍など）。
-  タイミング assertion は負荷のかかったマシンで揺れるので、
-  「速いこと」ではなく「桁が違うこと」を主張する形にする
-- **スイートで回す**（`#[ignore]` にしない）。走らない番人は番人ではない
-
-なお Phase 2 で fasl は cons 直列化に作り替わり `FASL_FORMAT_VERSION` が
-18→19 に上がる（`~/.claude/plans/lisp-lisp-ast-cons-vivid-galaxy.md`）ので、
-着手はその後が素直。
+直前まで「fasl の速度に本物の番人を置く」が載っていたが、番人を書く前に
+fasl 機構そのものを削除したので消えた（2026-08-14、経緯は
+[implementation-log.md](implementation-log.md)）。
 
 作業を始めるときはここに項目を足し、終わったら（経緯・設計判断を
 [implementation-log.md](implementation-log.md) へ書いたうえで）ここから消す。

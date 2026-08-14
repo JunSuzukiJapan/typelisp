@@ -9,12 +9,9 @@
 //! and drives the real `Loader` + `Interp::exec` pipeline, asserting on the
 //! last executed top-level expression's value.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::rc::Rc;
 
-use typelisp::project::{find_src_root, Loader, ModuleCache};
+use typelisp::project::{find_src_root, Loader};
 use typelisp::*;
 
 /// Create a fresh project dir containing `files` (`(relative path, source)`,
@@ -56,16 +53,11 @@ fn run_project(name: &str, files: &[(&str, &str)], entry: &str) -> Result<Option
     Ok(last)
 }
 
-/// Like [`run_project`], but drives its own fresh `Heap`/`Checker`/`Interp`
-/// (as every separate LSP `diagnostics_for` pass would) while sharing the
-/// caller-supplied `cache` across the call — so a test can call this twice
-/// with the same `cache` and observe the second pass's `Loader::cache_stats`.
-/// Returns `(result, cache hits, cache misses)`.
-fn run_project_with_cache(
-    dir: &std::path::Path,
-    entry: &str,
-    cache: &ModuleCache,
-) -> (Result<Option<Value>, String>, usize, usize) {
+/// Like [`run_project`], but over a project directory the caller already
+/// wrote — so a test can load the *same* directory twice, in two independent
+/// sessions (fresh `Heap`/`Checker`/`Interp` each, as every separate LSP
+/// `diagnostics_for` pass is), with an edit in between.
+fn run_project_in_dir(dir: &std::path::Path, entry: &str) -> Result<Option<Value>, String> {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
@@ -76,22 +68,21 @@ fn run_project_with_cache(
     let entry_dir = entry_path.parent().unwrap().to_path_buf();
     let src_root = find_src_root(&entry_dir).unwrap_or(entry_dir);
     let mut loader = Loader::new(src_root);
-    loader.set_module_cache(cache.clone());
 
-    let load_result = loader.load_entry(&mut heap, &reader, &mut checker, &mut interp, &entry_path).map_err(|e| e.to_string());
-    let (hits, misses) = loader.cache_stats();
-    let result = load_result.and_then(|()| {
-        let mut last = None;
-        for tl in loader.take_pending() {
-            match interp.exec(&mut heap, tl) {
-                Ok(Some(v)) => last = Some(v),
-                Ok(None) => {}
-                Err(e) => return Err(e.to_string()),
+    loader
+        .load_entry(&mut heap, &reader, &mut checker, &mut interp, &entry_path)
+        .map_err(|e| e.to_string())
+        .and_then(|()| {
+            let mut last = None;
+            for tl in loader.take_pending() {
+                match interp.exec(&mut heap, tl) {
+                    Ok(Some(v)) => last = Some(v),
+                    Ok(None) => {}
+                    Err(e) => return Err(e.to_string()),
+                }
             }
-        }
-        Ok(last)
-    });
-    (result, hits, misses)
+            Ok(last)
+        })
 }
 
 /// Write `files` (`(relative path, source)`) under a fresh
@@ -107,107 +98,72 @@ fn write_project(name: &str, files: &[(&str, &str)]) -> PathBuf {
     dir
 }
 
-/// A second, independent load session (fresh heap/checker/interp, same
-/// project directory) sharing one `ModuleCache` with the first hits the
-/// cache for its dependency and skips re-checking it — while still
-/// producing the exact same evaluated result.
+/// A second, independent load session over the same project directory sees a
+/// dependency edited in between — nothing from the first session survives to
+/// serve a stale definition.
 #[test]
-fn a_second_load_session_hits_the_module_cache() {
+fn a_second_load_session_sees_an_edited_dependency() {
     let dir = write_project(
-        "cache-hit",
+        "reload-edited-dep",
         &[
             ("geo/point.typl", "(pub defun origin-x () i32 42)"),
             ("main.typl", "(use geo::point)\n(point::origin-x)"),
         ],
     );
-    let cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
 
-    let (r1, hits1, misses1) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r1, Ok(Some(Value::Int(42))));
-    assert_eq!((hits1, misses1), (0, 1), "first pass: miss then populate the cache");
-
-    let (r2, hits2, misses2) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r2, Ok(Some(Value::Int(42))));
-    assert_eq!((hits2, misses2), (1, 0), "second pass: cache hit, no re-check");
-}
-
-/// Editing the cached dependency invalidates the cache entry (by content
-/// hash, not mtime) — the next load re-checks it from source and sees the
-/// new definition, not a stale cached one.
-#[test]
-fn editing_a_cached_dependency_invalidates_its_cache_entry() {
-    let dir = write_project(
-        "cache-invalidate",
-        &[
-            ("geo/point.typl", "(pub defun origin-x () i32 42)"),
-            ("main.typl", "(use geo::point)\n(point::origin-x)"),
-        ],
-    );
-    let cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
-
-    let (r1, ..) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r1, Ok(Some(Value::Int(42))));
+    assert_eq!(run_project_in_dir(&dir, "main.typl"), Ok(Some(Value::Int(42))));
 
     std::fs::write(dir.join("geo/point.typl"), "(pub defun origin-x () i32 99)").unwrap();
 
-    let (r2, hits2, misses2) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r2, Ok(Some(Value::Int(99))), "edited dependency's new definition must be seen");
-    assert_eq!((hits2, misses2), (0, 1), "stale entry must miss, not silently serve old code");
+    assert_eq!(
+        run_project_in_dir(&dir, "main.typl"),
+        Ok(Some(Value::Int(99))),
+        "edited dependency's new definition must be seen"
+    );
 }
 
-/// A dependency that itself has a `(load ...)` form opts out of caching (see
-/// `LoadOutcome::cacheable`'s doc comment) — every pass is a miss, but
-/// correctness (not caching) is what actually matters here.
+/// A dependency reached through `use` may itself contain a `(load ...)` form:
+/// the loaded file's definitions land in the dependency's own environment and
+/// its functions are callable from the entry file, in a fresh session as well
+/// as the first.
 #[test]
-fn a_dependency_with_a_nested_load_is_never_cached() {
+fn a_dependency_with_a_nested_load_works_in_every_session() {
     let dir = write_project(
-        "cache-load-form",
+        "nested-load-dep",
         &[
             ("loaded.typl", "(pub defun helper () i32 7)"),
             ("geo/point.typl", "(load \"../loaded\")\n(pub defun origin-x () i32 (helper))"),
             ("main.typl", "(use geo::point)\n(point::origin-x)"),
         ],
     );
-    let cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
 
-    let (r1, ..) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r1, Ok(Some(Value::Int(7))));
-
-    let (r2, hits2, misses2) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r2, Ok(Some(Value::Int(7))));
-    assert_eq!((hits2, misses2), (0, 1), "a nested (load) dependency must never be cached");
+    assert_eq!(run_project_in_dir(&dir, "main.typl"), Ok(Some(Value::Int(7))));
+    assert_eq!(run_project_in_dir(&dir, "main.typl"), Ok(Some(Value::Int(7))));
 }
 
-/// A transitive dependency's own change invalidates the *cache entry that
-/// pulled it in*, even though that entry's own file is untouched — proving
-/// `ModuleCacheEntry::deps` tracks the whole transitive closure, not just
-/// the cached file's own hash. `main` only ever `use`s `mid` directly; `leaf`
-/// is reached solely through `mid`'s own `use`.
+/// A *transitive* dependency's change is seen by a later session even though
+/// the file the entry `use`s directly is untouched: `main` only ever `use`s
+/// `mid`, and `leaf` is reached solely through `mid`'s own `use`.
 #[test]
-fn changing_a_transitive_dependency_invalidates_the_cache_entry_that_pulled_it_in() {
+fn a_later_session_sees_a_changed_transitive_dependency() {
     let dir = write_project(
-        "cache-transitive",
+        "reload-transitive-dep",
         &[
             ("leaf.typl", "(pub defun leaf-value () i32 1)"),
             ("mid.typl", "(use leaf)\n(pub defun call-it () i32 (leaf::leaf-value))"),
             ("main.typl", "(use mid)\n(mid::call-it)"),
         ],
     );
-    let cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
 
-    let (r1, hits1, misses1) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r1, Ok(Some(Value::Int(1))));
-    assert_eq!((hits1, misses1), (0, 2), "first pass: miss for both mid and leaf");
-
-    let (r2, hits2, misses2) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r2, Ok(Some(Value::Int(1))));
-    assert_eq!((hits2, misses2), (1, 0), "second pass: one hit for `mid` covers `leaf` transitively");
+    assert_eq!(run_project_in_dir(&dir, "main.typl"), Ok(Some(Value::Int(1))));
 
     std::fs::write(dir.join("leaf.typl"), "(pub defun leaf-value () i32 2)").unwrap();
 
-    let (r3, hits3, misses3) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r3, Ok(Some(Value::Int(2))), "leaf's new definition must be seen through mid");
-    assert_eq!((hits3, misses3), (0, 2), "leaf's change must invalidate mid's cache entry too");
+    assert_eq!(
+        run_project_in_dir(&dir, "main.typl"),
+        Ok(Some(Value::Int(2))),
+        "leaf's new definition must be seen through mid"
+    );
 }
 
 #[test]

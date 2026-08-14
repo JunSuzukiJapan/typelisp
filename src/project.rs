@@ -56,58 +56,12 @@
 //! is `defmacro` registration, which must precede later macro *uses* in the
 //! same load and is safe mid-load because it never touches the root stack.
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path as FsPath, PathBuf};
-use std::rc::Rc;
 
-use crate::fasl::{registry_mark, source_hash, Fasl, RegistryMark};
 use crate::check::core;
 use crate::{Checker, Error, Heap, Interp, Path, Reader, TopLevelForm, Value, MONO_BUNDLE_MODULE};
-
-/// A cached fasl for one dependency file, keyed by its path in
-/// [`ModuleCache`]. Shared (via `Rc`) across `Loader` instances so a caller
-/// with a long-lived session (the LSP) can keep reusing it across many
-/// separate `diagnostics_for` passes, each of which builds a fresh `Loader`.
-///
-/// Staleness isn't just this file's own [`source_hash`]: `fasl` was captured
-/// with this file's dependencies already baked into its registry delta (see
-/// [`Loader::try_load_module`]'s doc comment), so every file the load
-/// transitively touched must still hash the same, or the cache entry is
-/// treated as stale (falls back to a real load, which re-populates the
-/// cache). `deps` always includes this file itself as its first entry.
-#[derive(Clone)]
-pub struct ModuleCacheEntry {
-    /// `(file path, its module path segments, its content hash at capture
-    /// time)` for this file and every dependency its load transitively
-    /// touched — the segments let a cache *hit* replay
-    /// `Loader::loaded`/`Loader::loaded_files` bookkeeping without re-reading
-    /// each file's directory structure.
-    pub deps: Vec<(PathBuf, Vec<String>, u64)>,
-    pub fasl: Rc<Fasl>,
-}
-
-/// A [`Loader`]-external cache of already-checked dependency modules, shared
-/// across many separate load sessions (see [`Loader::set_module_cache`]).
-pub type ModuleCache = Rc<RefCell<HashMap<PathBuf, ModuleCacheEntry>>>;
-
-/// [`Loader::load_source_inner`]'s result: everything [`Loader::try_load_module`]
-/// needs to decide whether (and how) to populate the module cache.
-struct LoadOutcome {
-    /// Whether this load is safe to capture into the module cache: `false`
-    /// when it contained a nested `(load ...)` — `load_file_flat` applies it
-    /// inline (its definitions land in the registry `checker` already
-    /// mutated, but never get their own `TopLevel::Module` entry pushed to
-    /// `Loader::pending`), so replaying only `Loader::pending`'s growth on a
-    /// cache hit (see `Loader::try_load_module`'s cache-store branch) would
-    /// silently miss the loaded file's function bodies at `exec` time — a
-    /// checker-registry-only load without a matching interpreter-side replay.
-    /// Rare in practice; a `false` here just means this file's
-    /// `try_load_module` call falls back to an ordinary (uncached) load every
-    /// time, same as before this cache existed.
-    cacheable: bool,
-}
 
 /// The manifest file that marks a project root.
 pub const MANIFEST_NAME: &str = "typelisp.toml";
@@ -195,18 +149,6 @@ pub struct Loader {
     /// Empty (the default from [`Loader::new`]) for drivers with no editor
     /// buffers (`typl`'s file/REPL modes), which always read disk.
     overlay: HashMap<PathBuf, String>,
-    /// An external cache of already-checked *dependency* files (never the
-    /// entry file — see [`Loader::try_load_module`]'s doc comment), consulted
-    /// by every `use` resolution. `None` (the default from [`Loader::new`])
-    /// for drivers with no reason to skip re-checking (`typl`'s file/REPL/
-    /// `compile-module` modes, each a one-shot process) — only the LSP, whose
-    /// `Loader` is rebuilt fresh for every `diagnostics_for` pass, opts in via
-    /// [`Loader::set_module_cache`].
-    module_cache: Option<ModuleCache>,
-    /// `(cache hits, cache misses)` this `Loader` served — see
-    /// [`Loader::cache_stats`]. Both stay `0` with no `module_cache` set.
-    cache_hits: usize,
-    cache_misses: usize,
 }
 
 impl Loader {
@@ -218,27 +160,7 @@ impl Loader {
             loaded_files: HashSet::new(),
             pending: Vec::new(),
             overlay: HashMap::new(),
-            module_cache: None,
-            cache_hits: 0,
-            cache_misses: 0,
         }
-    }
-
-    /// `(cache hits, cache misses)` served by this `Loader`'s `use`
-    /// resolutions so far — a miss counts a dependency that either found no
-    /// cache entry or found a stale one; both are `0` with no
-    /// [`Loader::set_module_cache`] call. For a caller (the LSP) to log
-    /// effectiveness, or a test to observe that a second load actually
-    /// skipped re-checking rather than merely producing the same result.
-    pub fn cache_stats(&self) -> (usize, usize) {
-        (self.cache_hits, self.cache_misses)
-    }
-
-    /// Supply a cache of already-checked dependency modules, consulted (and
-    /// populated) by every `use` resolution this `Loader` performs — see
-    /// [`ModuleCacheEntry`]'s doc comment for what makes an entry stale.
-    pub fn set_module_cache(&mut self, cache: ModuleCache) {
-        self.module_cache = Some(cache);
     }
 
     /// Supply in-editor buffer contents to consult before disk. See the
@@ -289,10 +211,7 @@ impl Loader {
         src: &str,
     ) -> Result<(), Error> {
         let segs = module_segs_for(file, &self.src_root)?;
-        // The entry file is never itself a cache candidate (only its
-        // dependencies, loaded through `try_load_module`, are) — discard the
-        // `LoadOutcome`.
-        self.load_source(heap, reader, checker, interp, file, src, segs).map(|_| ())
+        self.load_source(heap, reader, checker, interp, file, src, segs)
     }
 
     /// Scan `forms` (a batch read from stdin — the REPL's case, where no
@@ -331,7 +250,7 @@ impl Loader {
         file: &FsPath,
         src: &str,
         segs: Vec<String>,
-    ) -> Result<LoadOutcome, Error> {
+    ) -> Result<(), Error> {
         self.loading.push(segs.join("::"));
         let result = self.load_source_inner(heap, reader, checker, interp, file, src, &segs);
         self.loading.pop();
@@ -352,7 +271,7 @@ impl Loader {
         file: &FsPath,
         src: &str,
         segs: &[String],
-    ) -> Result<LoadOutcome, Error> {
+    ) -> Result<(), Error> {
         let file_name = file.to_string_lossy();
         let mark = heap.root_count();
         let forms = match reader.read_all_in_spanned(heap, &file_name, src) {
@@ -374,13 +293,6 @@ impl Loader {
                 return Err(e);
             }
         }
-        // Any dependency load from here on (a `(load ...)` form, or a `use`
-        // surfaced by macro expansion mid-check) is the harder-to-reproduce
-        // case a fasl capture below deliberately opts out of — see
-        // `LoadOutcome::cacheable`'s doc comment.
-        let loaded_files_before_body = self.loaded_files.len();
-        let mut cacheable = true;
-
         let file_dir = file.parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
         let path = checker.enter_file_module(segs);
         checker.predeclare_program(heap, &forms.iter().map(|(v, _)| *v).collect::<Vec<_>>());
@@ -410,11 +322,9 @@ impl Loader {
                 break;
             }
             match checker.check_form_at(heap, &*interp, v, Some(loc)) {
-                // `(load ...)` loads inline (so subsequent forms see the
-                // definitions), preferring a compiled fasl — see
-                // `load_file_flat`.
+                // `(load ...)` loads inline, so subsequent forms see the
+                // definitions — see `load_file_flat`.
                 Ok(tl) if core::op(heap, tl) == Some("load") => {
-                    cacheable = false;
                     let load_path = match load_path_of(heap, tl) {
                         Some(p) => p,
                         None => {
@@ -442,9 +352,6 @@ impl Loader {
         if let Some(e) = check_err {
             return Err(e);
         }
-        if self.loaded_files.len() != loaded_files_before_body {
-            cacheable = false;
-        }
         // `(module PATH BODY...)` — the file's own definitions as one unit.
         // Built here rather than by the checker because the *driver* is what
         // knows a file's forms belong together.
@@ -454,7 +361,7 @@ impl Loader {
         };
         heap.push_permanent_root(wrapper);
         self.pending.push(wrapper);
-        Ok(LoadOutcome { cacheable })
+        Ok(())
     }
 
     /// If `v` is a `(use path)` form, load the file its path maps to (no-op
@@ -573,18 +480,6 @@ impl Loader {
     /// file — whether it was freshly loaded here or already loaded/loading
     /// before — so the caller stops trying shorter/sibling candidates;
     /// `false` if no such file exists, so the caller should keep trying.
-    ///
-    /// When [`Loader::module_cache`] is set, a fresh cache entry for `file`
-    /// (see [`ModuleCacheEntry`]) is applied via [`Fasl::load_into`] instead
-    /// of reading/checking — skipping parse and type-check entirely, the
-    /// same win `prelude::load_cached` gets from its own fasl (see
-    /// [[typelisp-fasl-compiled-modules]]). A capture on a cache *miss*
-    /// covers this file and every dependency its own load transitively
-    /// touched (a fasl's registry delta is a name-diff against a mark taken
-    /// before any of them loaded, and `diff_namespace` walks the whole
-    /// namespace tree — see `fasl.rs`'s module doc comment) — so the cached
-    /// entry's own staleness check must re-verify all of them, not just
-    /// `file` itself, tracked via `ModuleCacheEntry::deps`.
     fn try_load_module(
         &mut self,
         heap: &mut Heap,
@@ -617,37 +512,8 @@ impl Loader {
             )));
         }
 
-        let cache = self.module_cache.clone();
-        if let Some(cache) = &cache {
-            let hit = cache.borrow().get(&file).cloned();
-            if let Some(entry) = hit {
-                if self.cache_entry_is_fresh(&entry.deps) {
-                    entry.fasl.load_into(heap, checker, interp).map_err(|e| {
-                        Error::TypeError(format!("module cache: `{}`: {}", file.display(), e))
-                    })?;
-                    for (p, segs, _) in &entry.deps {
-                        self.loaded.insert(segs.clone());
-                        self.loaded_files.insert(p.clone());
-                    }
-                    self.cache_hits += 1;
-                    return Ok(true);
-                }
-                cache.borrow_mut().remove(&file);
-            }
-            self.cache_misses += 1;
-        }
-
         let src = self.read_source(&file)?;
-        let files_before = self.loaded_files.clone();
         self.loaded_files.insert(file.clone());
-        // The exact `TopLevel::Module` entries this call (and every nested
-        // dependency it recursively loads) pushes to `self.pending` —
-        // captured as-is into the fasl below, so a later cache *hit* replays
-        // precisely what a live load would have queued for the driver to
-        // `exec`, dependency-first order included (see
-        // `Loader::capture_into_cache`'s doc comment on why this — not just
-        // this file's own top-levels — is what must be captured).
-        let pending_before = self.pending.len();
         // A dependency file's own module must never nest under whichever
         // module the checker is currently inside: during the normal
         // pre-check scan the context is already clean (making the suspend a
@@ -655,75 +521,10 @@ impl Loader {
         // expansion, see `load_source_inner`'s check loop — runs inside the
         // requesting file's module context.
         let saved = checker.suspend_ns_context();
-        let mark = cache.as_ref().map(|_| registry_mark(checker));
         let result = self.load_source(heap, reader, checker, interp, &file, &src, module_segs.to_vec());
         checker.resume_ns_context(saved);
-        let outcome = result?;
-
-        if let (Some(cache), Some(mark)) = (&cache, &mark) {
-            if outcome.cacheable {
-                let top_levels = self.pending[pending_before..].to_vec();
-                if let Err(e) = self.capture_into_cache(heap, checker, mark, &file, top_levels, &files_before, cache) {
-                    // A capture failure just means this file won't be cached
-                    // this round (it already loaded fine live) — not worth
-                    // failing the whole load over.
-                    let _ = e;
-                }
-            }
-        }
+        result?;
         Ok(true)
-    }
-
-    /// Builds a [`ModuleCacheEntry`] for the file just loaded at `file` and
-    /// inserts it into `cache` — the store half of [`Loader::try_load_module`]'s
-    /// cache-miss path, split out so its early-return error handling doesn't
-    /// clutter the caller.
-    ///
-    /// `top_levels` — the newly-grown tail of `self.pending` — is exactly
-    /// what a live load queued for the driver, **not** just this file's own
-    /// `TopLevel::Module`: a `use`d dependency reached during this call gets
-    /// its *own* `TopLevel::Module` entry pushed by its own (nested)
-    /// `try_load_module` call, entirely separate from this file's. Capturing
-    /// only this file's own forms would produce a fasl whose registry delta
-    /// (via `Fasl::capture`'s `diff_namespace`, which walks the whole
-    /// namespace tree) still *type-checks* calls into that dependency —
-    /// `checker`'s state has it registered — but whose replayed `exec` never
-    /// re-registers the dependency's function bodies with the interpreter,
-    /// surfacing as a `NoSuchFunction` at call time instead: a strictly
-    /// worse failure mode (works until someone actually calls it) that a
-    /// dedicated regression test guards against.
-    #[allow(clippy::too_many_arguments)]
-    fn capture_into_cache(
-        &self,
-        heap: &Heap,
-        checker: &Checker,
-        mark: &RegistryMark,
-        file: &FsPath,
-        top_levels: Vec<TopLevelForm>,
-        files_before: &HashSet<PathBuf>,
-        cache: &ModuleCache,
-    ) -> Result<(), Error> {
-        let mut deps = Vec::new();
-        for p in self.loaded_files.difference(files_before) {
-            let segs = module_segs_for(p, &self.src_root)?;
-            let hash = source_hash(&self.read_source(p)?);
-            deps.push((p.clone(), segs, hash));
-        }
-        let this_hash = deps
-            .iter()
-            .find(|(p, ..)| p == file)
-            .map(|(_, _, h)| *h)
-            .unwrap_or_else(|| source_hash(""));
-        let fasl = Fasl::capture(heap, checker, mark, top_levels, this_hash)?;
-        cache.borrow_mut().insert(file.to_path_buf(), ModuleCacheEntry { deps, fasl: Rc::new(fasl) });
-        Ok(())
-    }
-
-    /// Whether every file in a [`ModuleCacheEntry::deps`] list still hashes
-    /// the same as when it was captured — re-reads each (respecting the
-    /// overlay, same as a live load) but never re-parses/re-checks.
-    fn cache_entry_is_fresh(&self, deps: &[(PathBuf, Vec<String>, u64)]) -> bool {
-        deps.iter().all(|(p, _, h)| self.read_source(p).map(|s| source_hash(&s) == *h).unwrap_or(false))
     }
 
     /// `file`'s content: the overlay's copy if one exists (an open, possibly
@@ -742,30 +543,20 @@ fn pop_roots_to(heap: &mut Heap, mark: usize) {
     }
 }
 
-/// The extension a compiled (fasl) module file carries on disk — see
-/// [`load_file_flat`].
-pub const FASL_EXTENSION: &str = "fastl";
-
 /// The CL-style `(load "path")` mechanism (`TopLevel::Load`): loads `path`'s
 /// definitions into the *current* environment (root namespace, no module
-/// wrap), preferring a compiled `.fasl` over source.
+/// wrap).
 ///
 /// Resolution:
 /// - `path` is taken relative to `dir` (the loading file's directory, or the
 ///   process cwd for a REPL `(load)`), with `.typl` appended if it has no
 ///   extension.
-/// - If a sibling `<stem>.fasl` exists and its `source_hash` matches the
-///   `.typl`'s current bytes (or the `.typl` is absent), the fasl is loaded
-///   via [`Fasl::load_into`] — no read/typecheck.
-/// - Otherwise the `.typl` source is read, checked form-by-form into the same
+/// - The `.typl` source is read, checked form-by-form into the same
 ///   `checker`/`interp`, and each form `exec`d (so later forms — here or in
-///   the caller — see the definitions). **Never auto-compiles** a missing
-///   fasl (per the design: compilation is an explicit `compile-module` step).
+///   the caller — see the definitions).
 ///
 /// A `load`ed file's own `(load ...)`/`(use ...)` are honored recursively
-/// (the recursive `load_file_flat` / this `Loader`'s scan). Unlike a source
-/// load, the fasl path skips reading entirely, so a fasl's transitive
-/// `(load)`s are already baked into its `top_levels`/delta.
+/// (the recursive `load_file_flat` / this `Loader`'s scan).
 pub fn load_file_flat(
     heap: &mut Heap,
     reader: &Reader,
@@ -777,24 +568,6 @@ pub fn load_file_flat(
     let raw = FsPath::new(path);
     let base = if raw.is_absolute() { raw.to_path_buf() } else { dir.join(raw) };
     let typl = if base.extension().is_some() { base.clone() } else { base.with_extension("typl") };
-    let fasl = typl.with_extension(FASL_EXTENSION);
-
-    // Prefer a fresh-enough fasl.
-    if fasl.is_file() {
-        if let Ok(bytes) = fs::read(&fasl) {
-            if let Ok(f) = crate::fasl::Fasl::from_bytes(&bytes) {
-                let source_ok = match fs::read_to_string(&typl) {
-                    Ok(src) => crate::fasl::source_hash(&src) == f.source_hash,
-                    // No source alongside the fasl — trust the fasl.
-                    Err(_) => true,
-                };
-                if source_ok {
-                    return f.load_into(heap, checker, interp);
-                }
-            }
-        }
-        // A stale/unreadable fasl falls through to the source below.
-    }
 
     let src = fs::read_to_string(&typl)
         .map_err(|e| Error::TypeError(format!("load: cannot read `{}`: {}", typl.display(), e)))?;
@@ -802,10 +575,10 @@ pub fn load_file_flat(
 }
 
 /// Reads, checks, and execs `src`'s forms into the current environment (root
-/// namespace) — the source half of [`load_file_flat`], factored out so
-/// `prelude::load`'s fallback and a `compile-module` capture can share it.
-/// A nested `(load ...)` resolves relative to `file`'s own directory.
-pub fn load_source_flat(
+/// namespace) — the body of [`load_file_flat`], split out so its path
+/// resolution stays readable. A nested `(load ...)` resolves relative to
+/// `file`'s own directory.
+fn load_source_flat(
     heap: &mut Heap,
     reader: &Reader,
     checker: &mut Checker,

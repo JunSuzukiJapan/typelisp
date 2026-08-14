@@ -45,9 +45,8 @@ struct Hit {
     text: String,
 }
 
-/// Every `.rs` file that builds or restores core IR: the checker that emits it,
-/// the evaluator and bridge that consume and rebuild it, and the fasl that
-/// reads it back from disk.
+/// Every `.rs` file that builds or restores core IR: the checker that emits
+/// it, and the evaluator and bridge that consume and rebuild it.
 ///
 /// `src/check/core.rs` is excluded — it is the one place whose whole job is to
 /// cons correctly. So is `src/read/`: the reader is where cells come from, and
@@ -71,7 +70,6 @@ fn scanned_files() -> Vec<PathBuf> {
             }
         }
     }
-    out.push(root.join("fasl.rs"));
     out.sort();
     assert!(out.len() >= 12, "the scan found only {} files — is the walk broken?", out.len());
     out

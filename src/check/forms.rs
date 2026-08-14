@@ -309,10 +309,10 @@ pub(super) fn hole(heap: &mut Heap, loc: Option<Loc>) -> Result<Checked, Error> 
 /// default exists).
 pub(super) fn splice_default(
     heap: &mut Heap,
-    default: &crate::fasl::OwnedForm,
+    default: &crate::owned_form::OwnedForm,
     decl_ty: &Type,
 ) -> Result<Checked, Error> {
-    let form = crate::fasl::owned_to_value(heap, default)?;
+    let form = crate::owned_form::owned_to_value(heap, default)?;
     Ok(Checked::new(rooted(heap, form), decl_ty.clone()))
 }
 

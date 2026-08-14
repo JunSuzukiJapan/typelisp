@@ -11,10 +11,6 @@
 //! error — [`load`] panics rather than threading a `Result` callers would
 //! have no real recovery from.
 
-use std::path::PathBuf;
-
-use crate::fasl::{registry_mark, source_hash, Fasl, FASL_FORMAT_VERSION};
-use crate::project::FASL_EXTENSION;
 use crate::{Checker, Heap, Interp, Reader};
 
 /// `consp`/`null`/`atom` only need `match` on `Sexpr`'s `Cons`/`Nil`
@@ -2275,9 +2271,6 @@ pub const SOURCE: &str = r##"
 /// first. Must be called before any user source that references a prelude
 /// name.
 ///
-/// This is the pure source path — no fasl cache, so it stays hermetic (tests
-/// and any embedding depend only on `SOURCE`, never on `~/.cache` state). The
-/// binaries opt into the on-disk cache via [`load_cached`]/[`prelude_fasl`].
 pub fn load(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     let r = Reader::new();
     let forms = r.read_all(heap, SOURCE).expect("prelude: read failed");
@@ -2288,96 +2281,5 @@ pub fn load(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
             eprintln!("{}", w);
         }
         interp.exec(heap, tl).expect("prelude: eval failed");
-    }
-}
-
-/// Like [`load`], but backed by the fasl (compiled-module) cache: a fresh
-/// `prelude-<hash>-v<version>.fasl` under the user cache directory is loaded
-/// directly ([`Fasl::load_into`] — no reading/typechecking). On a miss the
-/// source is checked as usual and the result cached (best-effort) for next
-/// time. The resulting `heap`/`chk`/`interp` are identical to [`load`]'s (see
-/// `tests/fasl_test.rs`'s equivalence tests) — the cache only removes work,
-/// never changes the outcome. For the CLI/REPL, whose startup pays this cost
-/// every run.
-pub fn load_cached(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
-    if let Some(fasl) = cached_fasl() {
-        fasl.load_into(heap, chk, interp).expect("prelude: fasl load failed");
-        return;
-    }
-    let fasl = source_load_capturing(heap, chk, interp);
-    write_cache(&fasl);
-}
-
-/// The prelude as a [`Fasl`], for a caller (the LSP) that reconstructs a
-/// fresh prelude-loaded environment many times and wants to pay the
-/// read/typecheck cost only once. Cache-hit returns the stored fasl; a miss
-/// builds one in a throwaway environment, caches it, and returns it.
-pub fn prelude_fasl() -> Fasl {
-    if let Some(fasl) = cached_fasl() {
-        return fasl;
-    }
-    let mut heap = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    let fasl = source_load_capturing(&mut heap, &mut chk, &mut interp);
-    write_cache(&fasl);
-    fasl
-}
-
-/// Source-loads the prelude into the given (empty) environment and returns a
-/// [`Fasl`] capturing exactly what it added — the shared cache-miss path of
-/// [`load`]/[`prelude_fasl`].
-fn source_load_capturing(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) -> Fasl {
-    let mark = registry_mark(chk);
-    let r = Reader::new();
-    let forms = r.read_all(heap, SOURCE).expect("prelude: read failed");
-    chk.predeclare_program(heap, &forms);
-    let mut top_levels = Vec::new();
-    for v in forms {
-        let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");
-        for w in chk.take_warnings() {
-            eprintln!("{}", w);
-        }
-        interp.exec(heap, tl.clone()).expect("prelude: eval failed");
-        top_levels.push(tl);
-    }
-    Fasl::capture(heap, chk, &mark, top_levels, source_hash(SOURCE)).expect("prelude: fasl capture failed")
-}
-
-/// The prelude fasl's cache path:
-/// `<cache-dir>/prelude-<hash>-v<ver>.fasl`, where `<cache-dir>` is
-/// `$TYPL_CACHE_DIR` if set, else `$HOME/.typl/cache`. A *dedicated* typelisp
-/// directory — deliberately **not** the shared XDG `~/.cache`, so clearing
-/// another app's caches (or a blanket `rm -rf ~/.cache/*`) can't take
-/// typelisp's with it. Resolved at runtime, never hardcoded
-/// ([[feedback-no-hardcoded-absolute-paths]]). `None` if neither is set (no
-/// cache used — the source path still works).
-fn cache_path() -> Option<PathBuf> {
-    let base = std::env::var_os("TYPL_CACHE_DIR")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".typl").join("cache")))?;
-    Some(base.join(format!("prelude-{:016x}-v{}.{}", source_hash(SOURCE), FASL_FORMAT_VERSION, FASL_EXTENSION)))
-}
-
-/// Loads the cached prelude fasl if present and valid (its `source_hash`
-/// matches this build's [`SOURCE`]). Any failure — missing file, unreadable,
-/// parse error, version/hash mismatch — is a silent miss.
-fn cached_fasl() -> Option<Fasl> {
-    let path = cache_path()?;
-    let bytes = std::fs::read(&path).ok()?;
-    let fasl = Fasl::from_bytes(&bytes).ok()?;
-    (fasl.source_hash == source_hash(SOURCE)).then_some(fasl)
-}
-
-/// Writes `fasl` to the cache path (best-effort: a read-only or unwritable
-/// cache directory just means the next load re-checks the source).
-fn write_cache(fasl: &Fasl) {
-    if let Some(path) = cache_path() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(bytes) = fasl.to_bytes() {
-            let _ = std::fs::write(&path, bytes);
-        }
     }
 }

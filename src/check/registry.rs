@@ -9,7 +9,7 @@ use crate::{Loc, Path, Type};
 
 /// One constructor of a data type: a name and its field types. Field types may
 /// reference the enclosing type's parameters as `Type::Named(param, [])`.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Variant {
     pub name: String,
     pub fields: Vec<Type>,
@@ -20,7 +20,7 @@ pub struct Variant {
 /// `(Iter T (Item i32))` pins `T`'s `Item` to `i32`. `assoc` is empty for a
 /// bound with no pins (`(Iter T)`), which behaves exactly as before pins
 /// existed — see `Checker::parse_where_clause`.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct TraitBound {
     pub trait_path: Path,
     /// Associated-type name (lowercase) -> the concrete `Type` this bound
@@ -31,7 +31,7 @@ pub struct TraitBound {
 }
 
 /// A function's parameter and return types.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct FnSig {
     /// Type parameter names declared by `(defun (name T1 T2...) ...)`. Empty
     /// for an ordinary (non-generic) function — callers resolve these against
@@ -81,7 +81,7 @@ pub struct FnSig {
 
 /// One `&optional`/`&key` parameter of a `defun`, resolved at check time —
 /// see `Checker::check_defun_opt_key`.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct OptKeyParam {
     pub name: String,
     /// The declared type as written — always the plain (non-`Option`-
@@ -102,15 +102,15 @@ pub struct OptKeyParam {
     /// still writes a plain `decl_ty`-typed value, auto-wrapped into `Some`
     /// (never a literal `Option::some` call) by the same call-site logic.
     ///
-    /// Held as an [`OwnedForm`](crate::fasl::OwnedForm), not as the lowered
+    /// Held as an [`OwnedForm`](crate::owned_form::OwnedForm), not as the lowered
     /// core form itself: a `Value` is an index into *a* heap, and this
     /// signature outlives the checker's per-form root truncation and is
     /// serialized into a fasl. Rebuilding it per call site with
-    /// `fasl::owned_to_value` is also the right splice semantics — each site
+    /// `owned_form::owned_to_value` is also the right splice semantics — each site
     /// needs its own cells, not a shared subtree. `TraitDefault` makes the
     /// same call for the same reason. The source position survives the round
     /// trip because `OwnedForm::Cons` carries both of a cell's location slots.
-    pub default: Option<crate::fasl::OwnedForm>,
+    pub default: Option<crate::owned_form::OwnedForm>,
 }
 
 impl OptKeyParam {
@@ -129,7 +129,7 @@ impl OptKeyParam {
 
 /// A type-associated function or method (Rust-style; types are *not*
 /// namespaces). `instance` is true when the first parameter is the receiver.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct AssocFn {
     pub sig: FnSig,
     pub instance: bool,
@@ -140,7 +140,7 @@ pub struct AssocFn {
 /// A `defmacro`'s signature: an arity and whether it's variadic (every
 /// parameter and the implicit return are always `Sexpr`, so there is no
 /// per-parameter type to record — see `Checker::check_defmacro`).
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct MacroDef {
     /// The number of leading required parameters — the call's minimum argument
     /// count. (`&optional`/`&rest`/`&key` params past this prefix are all
@@ -168,7 +168,7 @@ pub struct MacroDef {
 }
 
 /// A global variable/constant: its type and whether it is assignable.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct VarInfo {
     pub ty: Type,
     pub mutable: bool,
@@ -186,7 +186,7 @@ pub struct VarInfo {
 /// constructs a *mutable* boxed struct (`BoxedObj::Struct`) rather than an
 /// immutable enum box (`Checker::check_construct` decides which by this field) — see [`AdtDef::field_names`] for the other `Struct`-only
 /// piece of metadata.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdtKind {
     Sum,
     Struct,
@@ -195,7 +195,7 @@ pub enum AdtKind {
 /// A built-in data-type definition (a sum type, e.g. `Option`/`Result`/
 /// `Sexpr`/`HashTable`). `name` is the fully-qualified (module-prefixed) type
 /// [`Path`] used as the type's identity.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct AdtDef {
     pub name: Path,
     /// Type-parameter names (lowercase), e.g. `["t"]` for `Option<T>`.
@@ -247,7 +247,7 @@ pub struct AdtDef {
 /// called on a still-generic type-variable receiver (no concrete `AdtDef` to
 /// look the method up on yet) — `Checker::check_instance_method`'s
 /// type-variable branch.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct TraitDef {
     pub name: Path,
     /// Associated type names (lowercase), e.g. `["item"]` for `Iter`.
@@ -300,15 +300,15 @@ pub struct TraitDef {
 
 /// A `deftrait` method that was written with a body — Rust's default method
 /// implementation.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct TraitDefault {
     /// The *whole* method item as written, `(name (params) ret [where] [doc]
     /// body...)`, so `Checker::check_impl` can push it through the very same
     /// rebuild-and-check loop a written `impl` item takes: a default is
     /// exactly "an `impl` item the user didn't type". Stored as
-    /// [`crate::fasl::OwnedForm`]s because a `Value` is a heap index, which
+    /// [`crate::owned_form::OwnedForm`]s because a `Value` is a heap index, which
     /// means nothing once the heap it indexed is gone.
-    pub item: Vec<crate::fasl::OwnedForm>,
+    pub item: Vec<crate::owned_form::OwnedForm>,
     /// The namespace the `deftrait` was checked in. The body must resolve
     /// names *there* — a default written against the trait's module-private
     /// helpers has to keep working at an `impl` in some other module.
@@ -326,7 +326,7 @@ pub struct TraitDefault {
 /// `SpecRequest` queue monomorphization already uses). An `impl` written over
 /// a *constructor* (`impl Iter vector-iter<T>`) is not a blanket impl — it
 /// has a single owning `AdtDef` and takes the ordinary path.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct BlanketImpl {
     pub trait_path: Path,
     /// The type-variable name the impl abstracts over, as written (`t`).
@@ -336,9 +336,9 @@ pub struct BlanketImpl {
     pub bounds: HashMap<String, Vec<TraitBound>>,
     /// `(type AssocName Type)` items, as written; the type may mention
     /// `target_var`, so it can only be parsed once the target is known.
-    pub assoc: Vec<(String, crate::fasl::OwnedForm)>,
+    pub assoc: Vec<(String, crate::owned_form::OwnedForm)>,
     /// Method items, as written — replayed per materialization.
-    pub methods: Vec<Vec<crate::fasl::OwnedForm>>,
+    pub methods: Vec<Vec<crate::owned_form::OwnedForm>>,
     /// The namespace the `impl` was written in, which its method bodies and
     /// type annotations must be re-checked under.
     pub ns: Vec<String>,

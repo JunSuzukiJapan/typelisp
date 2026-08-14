@@ -232,7 +232,6 @@ dependencies = [
  "autocfg",
  "num-integer",
  "num-traits",
- "serde",
 ]
 
 [[package]]
@@ -254,7 +253,6 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "serde",
 ]
 
 [[package]]
@@ -455,7 +453,6 @@ version = "0.0.2"
 dependencies = [
  "num-bigint",
  "num-rational",
- "serde",
 ]
 
 [[package]]

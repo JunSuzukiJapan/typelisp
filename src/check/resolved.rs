@@ -34,7 +34,7 @@ use crate::{Path, Type};
 ///   themselves: `compile::core_bridge` (deliberately `Registry`-free),
 ///   `compile::aot`, and `check::locate`'s LSP goto-definition. `Interp`
 ///   itself never reads this field.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Ref {
     pub written: Vec<String>,
     pub home: Vec<String>,
@@ -67,14 +67,14 @@ impl Ref {
 /// `type_name` is already a fully resolved type identity (never searched,
 /// same reasoning as `assoc`/`MethodRef`), so only `home` is needed
 /// for the `pub`-or-`in_scope` check.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CompileTarget {
     Fn(Ref),
     Method { type_name: Path, method: String, home: Vec<String> },
 }
 
 /// A match pattern.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Pattern {
     /// `_` — matches anything, binds nothing.
     Wildcard,

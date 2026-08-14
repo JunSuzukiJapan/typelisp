@@ -12,8 +12,6 @@ use std::rc::Rc;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
-use typelisp::check::core;
-use typelisp::fasl::{registry_mark, source_hash, Fasl};
 use typelisp::project::{find_src_root, load_file_flat, needs_immediate_exec, Loader};
 use typelisp::*;
 
@@ -38,13 +36,7 @@ fn main() -> rustyline::Result<()> {
     // defaults (see `Features::host`) — typelisp's equivalent of pushing onto
     // CL's `*features*` before loading.
     let (features, args) = parse_features(args);
-    // `typl compile-module <file.typl> [-o out.fasl]` — precompile a source
-    // file to a fasl (see `crate::fasl` / `compile_module`), for
-    // fasl-preferred `(load)`.
-    if args.first().map(String::as_str) == Some("compile-module") {
-        std::process::exit(compile_module(&args[1..], heap_cells, features));
-    }
-    // Otherwise the first non-flag argument names a source file to run;
+    // The first non-flag argument names a source file to run;
     // with none, start the REPL.
     if let Some(file) = args.iter().find(|a| !a.starts_with("--")) {
         std::process::exit(run_file(file, heap_cells, features));
@@ -119,124 +111,6 @@ fn parse_heap_cells_value(v: &str) -> usize {
     }
 }
 
-/// `compile-module <file.typl> [-o <out.fasl>]`: checks `file` against a
-/// prelude-loaded environment and writes a fasl of the definitions it added.
-/// Does *not* run the file's top-level expressions (only registrations are
-/// captured — a top-level `(expr ...)` in the source is a compile error, since a
-/// fasl is a module of definitions, not a script). Returns an exit code.
-fn compile_module(args: &[String], heap_cells: usize, features: Vec<String>) -> i32 {
-    let mut input: Option<&str> = None;
-    let mut output: Option<String> = None;
-    let mut it = args.iter();
-    while let Some(a) = it.next() {
-        match a.as_str() {
-            "-o" => match it.next() {
-                Some(o) => output = Some(o.clone()),
-                None => {
-                    eprintln!("compile-module: -o needs an output path");
-                    return 1;
-                }
-            },
-            _ if input.is_none() => input = Some(a),
-            _ => {
-                eprintln!("compile-module: unexpected argument `{}`", a);
-                return 1;
-            }
-        }
-    }
-    let input = match input {
-        Some(f) => f,
-        None => {
-            eprintln!("compile-module: usage: typl compile-module <file.typl> [-o <out.fastl>]");
-            return 1;
-        }
-    };
-    let out_path = output
-        .unwrap_or_else(|| PathBuf::from(input).with_extension(typelisp::project::FASL_EXTENSION).to_string_lossy().into_owned());
-
-    let src = match std::fs::read_to_string(input) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("compile-module: cannot read `{}`: {}", input, e);
-            return 1;
-        }
-    };
-
-    let mut heap = Heap::with_capacity(heap_cells);
-    let reader = Reader::with_features(features);
-    let mut checker = Checker::new();
-    checker.set_redef_policy(parse_redef_policy());
-    let mut interp = Interp::new();
-    load_prelude(&mut heap, &mut checker, &mut interp);
-    // Load the compiler island natively (interp-closure removal Stage 5) so a
-    // module whose top-level initializer builds a closure JIT-compiles it at
-    // definition time instead of falling back to an interpreted closure.
-    typelisp::load_compiler_aot(&mut heap, &mut checker, &mut interp);
-
-    let mark = registry_mark(&checker);
-    let forms = match reader.read_all_in_spanned(&mut heap, input, &src) {
-        Ok(fs) => fs,
-        Err(e) => {
-            eprintln!("compile-module: {}", e);
-            return 1;
-        }
-    };
-    let mut top_levels = Vec::new();
-    checker.predeclare_program(&mut heap, &forms.iter().map(|(v, _)| *v).collect::<Vec<_>>());
-    for (v, loc) in forms {
-        let tl = match checker.check_form_at(&mut heap, &interp, v, Some(loc)) {
-            Ok(tl) => tl,
-            Err(e) => {
-                eprintln!("compile-module: {}", e);
-                return 1;
-            }
-        };
-        if core::op(&heap, tl) == Some("expr") {
-            eprintln!("compile-module: `{}` contains a top-level expression; a module is definitions only", input);
-            return 1;
-        }
-        if let Some(path) = typelisp::project::load_path_of(&heap, tl) {
-            // A `(load)` inside a compiled module is applied at compile time
-            // (its definitions become part of this module's own environment),
-            // the same as a source load.
-            let dir = PathBuf::from(input).parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
-            if let Err(e) = load_file_flat(&mut heap, &reader, &mut checker, &mut interp, &dir, &path) {
-                eprintln!("compile-module: {}", e);
-                return 1;
-            }
-            continue;
-        }
-        if let Err(e) = interp.exec(&mut heap, tl) {
-            eprintln!("compile-module: exec: {}", e);
-            return 1;
-        }
-        top_levels.push(tl);
-    }
-    for w in checker.take_warnings() {
-        eprintln!("{}", w);
-    }
-
-    let fasl = match Fasl::capture(&heap, &checker, &mark, top_levels, source_hash(&src)) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("compile-module: capture: {}", e);
-            return 1;
-        }
-    };
-    let bytes = match fasl.to_bytes() {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("compile-module: serialize: {}", e);
-            return 1;
-        }
-    };
-    if let Err(e) = std::fs::write(&out_path, bytes) {
-        eprintln!("compile-module: cannot write `{}`: {}", out_path, e);
-        return 1;
-    }
-    0
-}
-
 /// Load and execute `file` (and, transitively, whatever its `use`s pull in).
 /// Returns the process exit code. Top-level expression results are not
 /// printed — printing is the REPL's affordance; a script prints via `print`.
@@ -246,7 +120,7 @@ fn run_file(file: &str, heap_cells: usize, features: Vec<String>) -> i32 {
     let mut checker = Checker::new();
     checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
-    typelisp::prelude::load_cached(&mut heap, &mut checker, &mut interp);
+    load_prelude(&mut heap, &mut checker, &mut interp);
     // The compiler island is always loaded (interp-closure removal Stage 5),
     // as native AOT code, so any closure this file defines is JIT-compiled at
     // definition time rather than falling back to an interpreted closure.
@@ -307,7 +181,7 @@ fn repl(heap_cells: usize, features: Vec<String>) -> rustyline::Result<()> {
     let checker = Rc::new(RefCell::new(Checker::new()));
     checker.borrow_mut().set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
-    typelisp::prelude::load_cached(&mut heap, &mut checker.borrow_mut(), &mut interp);
+    load_prelude(&mut heap, &mut checker.borrow_mut(), &mut interp);
     // The compiler island is always loaded (interp-closure removal Stage 5),
     // as native AOT code, so a closure typed at the REPL is JIT-compiled at
     // definition time rather than falling back to an interpreted closure.

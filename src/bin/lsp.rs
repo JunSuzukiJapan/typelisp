@@ -22,10 +22,9 @@
 //! references resolve. A dependency that is itself open in the editor is
 //! read from its in-memory buffer (`Loader::set_overlay`, fed from this
 //! file's `docs` map) rather than disk, so an unsaved edit to it is visible
-//! immediately; a dependency that isn't open is read from disk, through the
-//! shared `ModuleCache` (content-hash-validated across passes, see
-//! `typelisp::project::ModuleCache`) so re-checking it from scratch on every
-//! keystroke is the exception rather than the rule.
+//! immediately; a dependency that isn't open is read from disk. Every pass
+//! re-reads and re-checks the prelude and each dependency from scratch —
+//! nothing is cached between passes.
 //!
 //! Editing a dependency also refreshes whoever depends on it: `publish`
 //! records each document's `Loader::loaded_files` in `deps` and, after
@@ -62,9 +61,7 @@
 // upstream type and there is no more-natural document key to switch to.
 #![allow(clippy::mutable_key_type)]
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::rc::Rc;
 
 use std::path::{Path as FsPath, PathBuf};
 
@@ -85,8 +82,7 @@ use lsp_types::{
 
 use typelisp::check::core;
 use typelisp::check::semantic::{encode, file_type_tokens, TypeKind, TypeToken};
-use typelisp::fasl::Fasl;
-use typelisp::project::{find_src_root, module_segs_for, Loader, ModuleCache};
+use typelisp::project::{find_src_root, module_segs_for, Loader};
 use typelisp::*;
 
 fn main() {
@@ -150,20 +146,6 @@ fn run(connection: Connection) {
     let _params: InitializeParams =
         serde_json::from_value(init_params).unwrap_or_else(|_| InitializeParams::default());
 
-    // The prelude, checked *once* and kept as a fasl (`prelude::prelude_fasl`,
-    // cache-backed across restarts). Every diagnostics/completion pass
-    // reconstructs a fresh prelude-loaded environment from this via
-    // `Fasl::load_into` — allocation-API rebuild + registry insert, no
-    // re-reading or re-typechecking the ~800-line source per keystroke.
-    let prelude: Rc<Fasl> = Rc::new(typelisp::prelude::prelude_fasl());
-    // A cache of already-checked *dependency* modules (never an open
-    // document's own entry — see `Loader::try_load_module`'s doc comment),
-    // shared across every diagnostics/completion pass for the life of this
-    // server: a `use`d file that hasn't changed skips parse and type-check
-    // entirely on the next pass, the same win the prelude fasl above gets,
-    // now extended to project files.
-    let module_cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
-
     let mut docs: HashMap<Uri, String> = HashMap::new();
     // The filesystem paths each open document's last diagnostics pass
     // actually depended on (`Loader::loaded_files`) — lets `publish` find
@@ -187,7 +169,7 @@ fn run(connection: Connection) {
                 } else if req.method == GotoDefinition::METHOD {
                     handle_goto_definition(req.id, req.params, &analyses)
                 } else if req.method == Completion::METHOD {
-                    handle_completion(req.id, req.params, &prelude, &module_cache, &docs)
+                    handle_completion(req.id, req.params, &docs)
                 } else if req.method == SemanticTokensFullRequest::METHOD {
                     handle_semantic_tokens(req.id, req.params, &analyses)
                 } else {
@@ -213,7 +195,7 @@ fn run(connection: Connection) {
                     if let Ok(p) = serde_json::from_value::<lsp_types::DidOpenTextDocumentParams>(not.params) {
                         let uri = p.text_document.uri;
                         docs.insert(uri.clone(), p.text_document.text);
-                        publish(&connection, &prelude, &module_cache, &uri, &docs, &mut deps, &mut analyses);
+                        publish(&connection, &uri, &docs, &mut deps, &mut analyses);
                     }
                 }
                 m if m == DidChangeTextDocument::METHOD => {
@@ -224,7 +206,7 @@ fn run(connection: Connection) {
                         if let Some(change) = p.content_changes.pop() {
                             let uri = p.text_document.uri;
                             docs.insert(uri.clone(), change.text);
-                            publish(&connection, &prelude, &module_cache, &uri, &docs, &mut deps, &mut analyses);
+                            publish(&connection, &uri, &docs, &mut deps, &mut analyses);
                         }
                     }
                 }
@@ -232,7 +214,7 @@ fn run(connection: Connection) {
                     if let Ok(p) = serde_json::from_value::<lsp_types::DidSaveTextDocumentParams>(not.params) {
                         let uri = p.text_document.uri;
                         if docs.contains_key(&uri) {
-                            publish(&connection, &prelude, &module_cache, &uri, &docs, &mut deps, &mut analyses);
+                            publish(&connection, &uri, &docs, &mut deps, &mut analyses);
                         }
                     }
                 }
@@ -265,8 +247,6 @@ fn run(connection: Connection) {
 /// is corrected within the same pass that discovers it's stale.
 fn publish(
     connection: &Connection,
-    prelude: &Rc<Fasl>,
-    module_cache: &ModuleCache,
     uri: &Uri,
     docs: &HashMap<Uri, String>,
     deps: &mut HashMap<Uri, HashSet<PathBuf>>,
@@ -277,7 +257,7 @@ fn publish(
     visited.insert(uri.clone());
     queue.push_back(uri.clone());
     while let Some(cur) = queue.pop_front() {
-        publish_one(connection, prelude, module_cache, &cur, docs, deps, analyses);
+        publish_one(connection, &cur, docs, deps, analyses);
         let cur_path = PathBuf::from(cur.path().as_str());
         for other in docs.keys() {
             if visited.contains(other) {
@@ -310,8 +290,6 @@ fn build_overlay(docs: &HashMap<Uri, String>, exclude: &Uri) -> HashMap<PathBuf,
 /// last-good hover/goto-definition data instead of losing it.
 fn publish_one(
     connection: &Connection,
-    prelude: &Rc<Fasl>,
-    module_cache: &ModuleCache,
     uri: &Uri,
     docs: &HashMap<Uri, String>,
     deps: &mut HashMap<Uri, HashSet<PathBuf>>,
@@ -322,7 +300,7 @@ fn publish_one(
     // The URI's path component as a filesystem path (`file:///tmp/a.typl` ->
     // `/tmp/a.typl`). Percent-encoded characters are not decoded — good
     // enough for the ordinary-ASCII paths this MVP targets.
-    let (diagnostics, loaded, analysis) = diagnostics_for(prelude, module_cache, uri.path().as_str(), text, overlay);
+    let (diagnostics, loaded, analysis) = diagnostics_for(uri.path().as_str(), text, overlay);
     deps.insert(uri.clone(), loaded);
     if let Some(a) = analysis {
         analyses.insert(uri.clone(), a);
@@ -361,8 +339,6 @@ fn publish_one(
 /// the first. `result` is `Err` only on a reader error, which stops the whole
 /// document (an s-expression reader can't resync past an unmatched paren).
 fn diagnostics_for(
-    prelude: &Rc<Fasl>,
-    module_cache: &ModuleCache,
     file: &str,
     text: &str,
     overlay: HashMap<PathBuf, String>,
@@ -371,7 +347,7 @@ fn diagnostics_for(
     let reader = Reader::new();
     let mut checker = Checker::new();
     let mut interp = Interp::new();
-    prelude.load_into(&mut heap, &mut checker, &mut interp).expect("prelude fasl load");
+    load_prelude(&mut heap, &mut checker, &mut interp);
     checker.set_recover(true);
 
     let fs_file = FsPath::new(file);
@@ -379,7 +355,6 @@ fn diagnostics_for(
     let src_root = find_src_root(&dir).unwrap_or(dir);
     let mut loader = Loader::new(src_root);
     loader.set_overlay(overlay);
-    loader.set_module_cache(module_cache.clone());
 
     let mut diagnostics = Vec::new();
     let result = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, text);
@@ -559,8 +534,6 @@ fn handle_goto_definition(id: RequestId, params: serde_json::Value, analyses: &H
 fn handle_completion(
     id: RequestId,
     params: serde_json::Value,
-    prelude: &Rc<Fasl>,
-    module_cache: &ModuleCache,
     docs: &HashMap<Uri, String>,
 ) -> Response {
     let result = (|| {
@@ -596,7 +569,7 @@ fn handle_completion(
         }
         let patched = heuristically_close(&truncated);
         let overlay = build_overlay(docs, &uri);
-        let candidates = candidates_for(prelude, module_cache, uri.path().as_str(), &patched, overlay, line, col);
+        let candidates = candidates_for(uri.path().as_str(), &patched, overlay, line, col);
         let items: Vec<CompletionItem> = candidates
             .into_iter()
             .filter(|c| prefix.is_empty() || c.name.starts_with(&prefix))
@@ -630,8 +603,6 @@ fn handle_completion(
 /// dependency's module, and `completion_locals` filters by `file` and returns
 /// empty — so no gate is needed.
 fn candidates_for(
-    prelude: &Rc<Fasl>,
-    module_cache: &ModuleCache,
     file: &str,
     patched_text: &str,
     overlay: HashMap<PathBuf, String>,
@@ -642,7 +613,7 @@ fn candidates_for(
     let reader = Reader::new();
     let mut checker = Checker::new();
     let mut interp = Interp::new();
-    prelude.load_into(&mut heap, &mut checker, &mut interp).expect("prelude fasl load");
+    load_prelude(&mut heap, &mut checker, &mut interp);
     checker.set_recover(true);
 
     let fs_file = FsPath::new(file);
@@ -650,7 +621,6 @@ fn candidates_for(
     let src_root = find_src_root(&dir).unwrap_or_else(|| dir.clone());
     let mut loader = Loader::new(src_root.clone());
     loader.set_overlay(overlay);
-    loader.set_module_cache(module_cache.clone());
     let _ = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, patched_text);
 
     let module_path = module_segs_for(fs_file, &src_root).unwrap_or_default();
@@ -1026,10 +996,8 @@ mod completion_helper_tests {
         // so the file need not exist on disk).
         let file = "/tmp/typelisp-lsp-recover-test/f.typl";
         let patched = "(defun f ((o Option<i32>)) i32 (match o ((Some x) (panic \"\"))))";
-        let prelude = Rc::new(typelisp::prelude::prelude_fasl());
-        let module_cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
         // The placeholder sits at 1-based column 51 (the `(` of `(panic "")`).
-        let candidates = candidates_for(&prelude, &module_cache, file, patched, HashMap::new(), 1, 51);
+        let candidates = candidates_for(file, patched, HashMap::new(), 1, 51);
         let locals: Vec<&str> = candidates
             .iter()
             .filter(|c| c.kind == CompletionKind::Variable)

@@ -20,7 +20,7 @@
 //! the reader produced rather than the source bytes, so editing a comment does
 //! not invalidate the artifact — see its doc comment for why the distinction
 //! is worth a reader pass, and why `prelude`'s fasl cache still uses the
-//! byte-based [`crate::fasl::source_hash`] instead.
+//! byte-based [`crate::owned_form::source_hash`] instead.
 //!
 //! **That hash covers one of the artifact's two inputs.** The bitcode is a
 //! compilation of `SOURCE` *by the Rust-side LLVM builders*
