@@ -98,6 +98,14 @@ pub enum Repr {
     Sym,
     Bignum,
     Ratio,
+    /// `random-state` — a boxed seed cell, tagged like [`Repr::Bignum`] and
+    /// [`Repr::Ratio`] and collectable like both. It has no `Type::Named`
+    /// spelling, which is why it needs a variant of its own rather than
+    /// falling into the struct arm; without one it landed on [`Repr::None`]
+    /// and `(match state ((some s) ...))` over an `Option<random-state>` —
+    /// the prelude's `random` — aborted the island with "field type is not
+    /// representable in compiled code yet".
+    RandomState,
     /// The built-in `sexpr` type.
     Sexpr,
     /// A `defstruct`, or a built-in that reuses that representation
@@ -171,6 +179,7 @@ impl Repr {
             Type::Symbol => Repr::Sym,
             Type::Bignum => Repr::Bignum,
             Type::Ratio => Repr::Ratio,
+            Type::RandomState => Repr::RandomState,
             Type::Named(p, _) if *p == Path::root("sexpr") => Repr::Sexpr,
             // The three parametric builtins, ahead of the struct/enum arms
             // that would otherwise swallow them. Each classifies to the same
@@ -215,6 +224,7 @@ impl Repr {
             Repr::Sym => "sym",
             Repr::Bignum => "bignum",
             Repr::Ratio => "ratio",
+            Repr::RandomState => "random-state",
             Repr::Sexpr => "sexpr",
             Repr::Struct => "struct",
             Repr::Enum => "enum",
@@ -229,7 +239,7 @@ impl Repr {
 
     /// Every simple representation, for [`Repr::read`] and for a test that
     /// wants to enumerate the vocabulary.
-    pub const SIMPLE: [Repr; 16] = [
+    pub const SIMPLE: [Repr; 17] = [
         Repr::Int,
         Repr::Float,
         Repr::Char,
@@ -240,6 +250,7 @@ impl Repr {
         Repr::Sym,
         Repr::Bignum,
         Repr::Ratio,
+        Repr::RandomState,
         Repr::Sexpr,
         Repr::Struct,
         Repr::Enum,
@@ -343,6 +354,7 @@ impl Repr {
             Repr::Str
             | Repr::Bignum
             | Repr::Ratio
+            | Repr::RandomState
             | Repr::Sexpr
             | Repr::Struct
             | Repr::Vector(_)

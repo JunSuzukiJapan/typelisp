@@ -53,6 +53,9 @@ use std::collections::HashMap;
 
 use typelisp_mem::Heap;
 
+pub mod stream;
+pub mod stream_builtin;
+
 // The `Heap` every other `rt_*` function in this crate (from Stage 3
 // onward) implicitly operates on — see the module doc comment's framing of
 // this as CL/Scheme-style "the heap is one implicit, process-wide thing",
@@ -819,6 +822,65 @@ pub unsafe extern "C" fn rt_bignum_mod(args: *const i64, argc: u32) -> i64 {
         fatal("rt_bignum_mod: division by zero");
     }
     encode(active_heap().alloc_bignum(a.mod_floor(&b)))
+}
+
+/// `bignum::logand` for compiled code — CL §12.10's "infinite two's
+/// complement" bitwise `and`, which `BigInt`'s own operator already
+/// implements (the interpreter's `eval_bignum_builtin` uses the very same
+/// one). Unlike `i64::logand`, this cannot be a bare LLVM instruction: the
+/// operands are boxed arbitrary-precision values, so the result is a fresh
+/// allocation like every other `rt_bignum_*` binop's.
+///
+/// # Safety
+///
+/// Same as [`bignum_pair`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_bignum_logand(args: *const i64, argc: u32) -> i64 {
+    let (a, b) = bignum_pair(args, argc, "rt_bignum_logand");
+    encode(active_heap().alloc_bignum(a & b))
+}
+
+/// `bignum::logior` for compiled code — the `or` counterpart of
+/// [`rt_bignum_logand`].
+///
+/// # Safety
+///
+/// Same as [`bignum_pair`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_bignum_logior(args: *const i64, argc: u32) -> i64 {
+    let (a, b) = bignum_pair(args, argc, "rt_bignum_logior");
+    encode(active_heap().alloc_bignum(a | b))
+}
+
+/// `bignum::logxor` for compiled code — the `xor` counterpart of
+/// [`rt_bignum_logand`]. Needed by `bignum::logeqv` (`lognot` of it), which
+/// is what made this the last bitwise hole left once `lognot` had one.
+///
+/// # Safety
+///
+/// Same as [`bignum_pair`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_bignum_logxor(args: *const i64, argc: u32) -> i64 {
+    let (a, b) = bignum_pair(args, argc, "rt_bignum_logxor");
+    encode(active_heap().alloc_bignum(a ^ b))
+}
+
+/// `bignum::lognot` for compiled code — `-(n+1)`, the two's-complement
+/// negation `BigInt`'s `Not` gives, matching the interpreter's `bignum_unary`.
+/// Unary, so it takes the `bignum`-argument preamble directly rather than
+/// [`bignum_pair`].
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args[0]` must decode to a boxed bignum; a
+/// `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_bignum_lognot(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_bignum_lognot: expected 1 argument");
+    }
+    let a = bignum_arg(args, 0, "rt_bignum_lognot");
+    encode(active_heap().alloc_bignum(!a))
 }
 
 /// Three-way comparison (`-1`/`0`/`1`) for compiled code — the single
@@ -2843,6 +2905,152 @@ pub unsafe extern "C" fn rt_str_append(args: *const i64, argc: u32) -> i64 {
     encode(heap.alloc_string(s))
 }
 
+/// `str::substring` for compiled code — the `[start, end)` character range of
+/// `args[0]`'s content as a freshly allocated string, matching the
+/// interpreter's own `string_substring`. `args[1]`/`args[2]` are bare
+/// (untagged) `i64` indices, the same convention [`rt_str_ref`] uses, and
+/// they count *characters*, not bytes.
+///
+/// Fatal on an invalid range, where the interpreter raises a catchable
+/// `Panic` — the same trade [`rt_str_ref`] documents for its own bounds
+/// check (there is no error channel across the compiled-code ABI).
+///
+/// # Safety
+///
+/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s,
+/// the first encoding a `Value::Str`; a `Heap` must already be registered on
+/// this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_str_substring(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_str_substring: expected 3 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_substring: first argument is not a Str"),
+    };
+    let start = *args.add(1);
+    let end = *args.add(2);
+    let heap = active_heap();
+    let chars: Vec<char> = heap.string(id).chars().collect();
+    let len = chars.len() as i64;
+    if start < 0 || end > len || start > end {
+        fatal(&format!("rt_str_substring: invalid range {start}..{end} (length {len})"));
+    }
+    let s: String = chars[start as usize..end as usize].iter().collect();
+    encode(heap.alloc_string(s))
+}
+
+// ---- random-state -------------------------------------------------------
+//
+// A `random-state` is an ordinary boxed heap object holding one `u64` seed,
+// so nothing about it lives outside the heap and all three of its builtins
+// lower to shims here.
+
+/// One step of a 64-bit xorshift generator (period `2^64 - 1` over the
+/// nonzero states — these exact shift/xor constants are a full-cycle
+/// permutation of them, so a nonzero seed can never reach `0`).
+///
+/// Public, and the interpreter's `random-state-next` calls it rather than
+/// keeping its own copy: a compiled draw and an interpreted draw from the
+/// same seed must produce the same number, which two implementations of the
+/// same three lines cannot promise.
+pub fn xorshift64_step(x: u64) -> u64 {
+    let mut x = x;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    x
+}
+
+/// A fresh entropy seed for `make-random-state-fresh` — `| 1` guarantees
+/// non-zero (the one fixed point [`xorshift64_step`] can't escape).
+///
+/// Public for the same reason [`xorshift64_step`] is: the interpreter's
+/// `eval_make_random_state_fresh` calls it rather than keeping a second copy.
+pub fn fresh_random_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(1)
+        | 1
+}
+
+/// `make-random-state-fresh` for compiled code — a brand new, independently
+/// seeded stream (`eval_make_random_state_fresh`). Nullary; the result is a
+/// fresh allocation, as unrooted as [`rt_str_new`]'s until a caller protects
+/// it.
+///
+/// # Safety
+///
+/// A `Heap` must already be registered on this thread. Takes no arguments,
+/// so `args`/`argc` are unread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_make_random_state_fresh(_args: *const i64, _argc: u32) -> i64 {
+    encode(active_heap().alloc_random_state(fresh_random_seed()))
+}
+
+/// Decodes `args[idx]` as a boxed random-state.
+///
+/// # Safety
+///
+/// `args` must point to at least `idx + 1` valid `i64`s, `args[idx]`
+/// decoding to a `Value::Boxed` random-state; a `Heap` must already be
+/// registered on this thread.
+unsafe fn random_state_arg(args: *const i64, idx: isize, who: &str) -> BoxId {
+    match decode(*args.offset(idx)) {
+        Value::Boxed(id) if active_heap().is_random_state(id) => id,
+        _ => fatal(&format!("{who}: argument is not a random-state")),
+    }
+}
+
+/// `random-state-next` for compiled code — advances `args[0]`'s seed one
+/// xorshift step and returns the draw reduced into `[0, args[1])`, matching
+/// the interpreter's own `eval_random_state_next` (`args[1]` is a bare
+/// `i64` bound, and the result is a bare `i64` too). Fatal on a non-positive
+/// bound, where the interpreter raises a catchable `Panic` — the same trade
+/// [`rt_str_ref`] documents.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args[0]` must decode to a boxed random-state;
+/// a `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_random_state_next(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_random_state_next: expected 2 arguments");
+    }
+    let id = random_state_arg(args, 0, "rt_random_state_next");
+    let bound = *args.add(1);
+    if bound <= 0 {
+        fatal(&format!("rt_random_state_next: bound must be positive, got {bound}"));
+    }
+    let heap = active_heap();
+    let next = xorshift64_step(heap.random_state_seed(id));
+    heap.set_random_state_seed(id, next);
+    (next % bound as u64) as i64
+}
+
+/// `random-state-copy` for compiled code — a new state starting where
+/// `args[0]` is now, so later draws against either never affect the other
+/// (`eval_random_state_copy`). The result is a fresh allocation, tagged and
+/// as unrooted as [`rt_str_new`]'s until a caller protects it.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args[0]` must decode to a boxed random-state;
+/// a `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_random_state_copy(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_random_state_copy: expected 1 argument");
+    }
+    let id = random_state_arg(args, 0, "rt_random_state_copy");
+    let heap = active_heap();
+    let seed = heap.random_state_seed(id);
+    encode(heap.alloc_random_state(seed))
+}
+
 // ---- Global variables (compile `Global`/`SetGlobal` support) ------------
 //
 // A `defvar`/`defconstant` a compiled function references needs storage
@@ -2990,9 +3198,9 @@ pub unsafe extern "C" fn rt_global_set(args: *const i64, argc: u32) -> i64 {
 // value. The vtable itself lives *outside* the heap, here — one table per
 // (concrete type, trait) pair, holding raw native function pointers in the
 // trait's declared method order (`TraitDef::method_order`). A call site knows
-// its slot statically, so dispatch is `rt_dyn_vtable` -> `rt_vtable_slot` ->
-// an indirect call through the ordinary `compiled_fn_type` ABI, with no
-// lookup by name or type at run time. Ids are assigned by the interpreter
+// its slot statically, so dispatch is `rt_dyn_vtable` -> `rt_dyn_call`, with
+// no lookup by name or type at run time — and `rt_dyn_call` is also where a
+// slot whose implementation is *interpreted* is handled. Ids are assigned by the interpreter
 // (`Interp::vtable_id_for`), which keeps its own parallel table of
 // `(type, method)` identities for tree-walking calls.
 
@@ -3034,7 +3242,7 @@ pub fn upcast_define(from: u32, trait_id: u32, to: u32) {
 /// Installs (or replaces) vtable `id`'s slots. Called from the interpreter
 /// once a compilation unit's function addresses are final
 /// (`Interp::compile_scc`) and from AOT startup; a slot holding 0 means "not
-/// compiled", which [`rt_vtable_slot`] refuses to call.
+/// compiled", which [`rt_dyn_call`] answers by asking the interpreter.
 pub fn vtable_define(id: u32, slots: Vec<usize>) {
     VTABLES.with(|t| {
         let mut t = t.borrow_mut();
@@ -3095,27 +3303,80 @@ pub unsafe extern "C" fn rt_dyn_value(args: *const i64, argc: u32) -> i64 {
     }
 }
 
-/// Slot `args[1]` of vtable `args[0]`: the raw native entry point a `:dyn`
-/// call site then calls indirectly. An unfilled slot aborts rather than
-/// jumping to null — reaching one means a method that a boxing site pulled
-/// into the call graph was not compiled, which is a compiler bug, not
-/// anything user code can provoke.
+fn vtable_slot_addr(id: usize, slot: usize) -> usize {
+    VTABLES.with(|t| t.borrow().get(id).and_then(|s| s.get(slot).copied()).unwrap_or(0))
+}
+
+/// How [`rt_dyn_call`] asks the interpreter for the closure standing behind
+/// an unfilled vtable slot — `(vtable id, slot) -> a tagged interpreted
+/// closure value`.
+pub type DynSlotClosureFn = unsafe extern "C" fn(u32, u32) -> i64;
+
+thread_local! {
+    static DYN_SLOT_CLOSURE: Cell<Option<DynSlotClosureFn>> = const { Cell::new(None) };
+}
+
+/// Registers this thread's interpreter re-entry for `:dyn` dispatch —
+/// `typelisp::eval::Interp` installs it alongside
+/// [`set_apply_interpreted`], for the same reason and at the same moment.
+pub fn set_dyn_slot_closure(f: Option<DynSlotClosureFn>) {
+    DYN_SLOT_CLOSURE.with(|cell| cell.set(f));
+}
+
+/// A `:dyn` method call: slot `args[1]` of vtable `args[0]`, applied to the
+/// `args[3]` arguments at `args[2]` (a pointer, as an integer — the same way
+/// [`rt_apply_any`] takes its callee's argument array).
+///
+/// **Why the dispatch is here and not at the call site.** A compiled `:dyn`
+/// call used to be "read the slot, call it indirectly", which assumes every
+/// implementation behind a trait object is compiled. It need not be: the
+/// prelude's stream methods are compiled (as of the precompiled prelude), and
+/// a program can hand one of them a `:dyn CharInput` whose concrete type is
+/// the *user's* own struct, whose `read-char` is an ordinary interpreted
+/// method. The slot for it is 0, and the call site — which has already
+/// evaluated its arguments into a raw array — has nowhere to go.
+///
+/// So the branch lives where the answer is, which is the same shape
+/// [`rt_apply_any`] settled on for closures: compiled slot, call it;
+/// otherwise ask the interpreter for the closure that slot stands for and
+/// hand it to the same interpreted-apply hook. The two paths agree on the
+/// argument array because an interpreted closure carries its own parameter
+/// representations, which is exactly what that hook decodes by.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+/// `argc` must be 4; `args[2]` must be a valid pointer to at least `args[3]`
+/// `i64`s in the callee's own argument representations; a `Heap` must
+/// already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_vtable_slot(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_vtable_slot: expected 2 arguments (the vtable id and the slot)");
+pub unsafe extern "C" fn rt_dyn_call(args: *const i64, argc: u32) -> i64 {
+    if argc != 4 {
+        fatal("rt_dyn_call: expected 4 arguments (vtable id, slot, argument array, argument count)");
     }
     let id = *args as usize;
     let slot = *args.add(1) as usize;
-    let ptr = VTABLES.with(|t| t.borrow().get(id).and_then(|s| s.get(slot).copied()).unwrap_or(0));
-    if ptr == 0 {
-        fatal("rt_vtable_slot: vtable slot is empty — a dyn dispatch target was not compiled");
+    let callee_args = *args.add(2) as usize as *const i64;
+    let callee_argc = *args.add(3) as u32;
+
+    let ptr = vtable_slot_addr(id, slot);
+    if ptr != 0 {
+        // SAFETY: every address in a vtable comes from `CompiledFn::address`
+        // for a method compiled under the plain `compiled_fn_type` signature.
+        let f: unsafe extern "C" fn(*const i64, u32) -> i64 = std::mem::transmute(ptr);
+        return f(callee_args, callee_argc);
     }
-    ptr as i64
+
+    // Not compiled. In an AOT executable that cannot happen — everything the
+    // program can reach is compiled and no interpreter exists to ask — so a
+    // missing hook is an invariant break, exactly as in `rt_apply_any`.
+    let closure = match DYN_SLOT_CLOSURE.with(|cell| cell.get()) {
+        Some(hook) => hook(id as u32, slot as u32),
+        None => fatal("rt_dyn_call: vtable slot is empty and no interpreter is registered on this thread"),
+    };
+    match APPLY_INTERPRETED.with(|cell| cell.get()) {
+        Some(hook) => hook(closure, callee_args, callee_argc),
+        None => fatal("rt_dyn_call: the slot's method is interpreted and no interpreter is registered on this thread"),
+    }
 }
 
 /// Upcasts the trait object `args[1]` to the supertrait interned as trait id
@@ -3209,6 +3470,107 @@ pub unsafe extern "C" fn rt_vtable_set(args: *const i64, argc: u32) -> i64 {
     });
     0
 }
+
+// ---- stream/file builtins ----------------------------------------------
+//
+// One shim per builtin (`crate::stream_builtin::stream_builtin` is the
+// implementation both these and the interpreter call). What each shim adds is
+// the *representation* conversion the compiled ABI needs and the interpreter
+// does not: an `i64` handle, an `i32` mode, a `bool` and a `char` are bare
+// machine words in compiled code, while a `string` and every `Result` are
+// tagged heap values. Which is which comes from the builtin's own signature
+// (`registry::register_stream_builtins`), so it is spelled out per shim
+// rather than guessed from the value.
+
+/// Decodes one tagged argument.
+///
+/// # Safety
+///
+/// `args` must point to at least `i + 1` valid `i64`s.
+unsafe fn tagged_arg(args: *const i64, i: usize) -> Value {
+    decode(*args.add(i))
+}
+
+/// Generates one `rt_stream_*`/`rt_file_*` shim.
+///
+/// `$arg` names how each parameter arrives (`int`/`str`/`char`), `$ret` how
+/// the result leaves (`tagged` for a heap value, `raw` for a bare `i64`,
+/// `bool` for a bare `0`/`1`).
+macro_rules! stream_shim {
+    ($shim:ident, $name:literal, [$($arg:ident),*], $ret:ident) => {
+        /// A `stream-*`/`file-*` builtin for compiled code — see
+        /// [`crate::stream_builtin::stream_builtin`], which is also what the
+        /// interpreter calls.
+        ///
+        /// # Safety
+        ///
+        /// `args` must point to at least as many valid `i64`s as this
+        /// builtin has parameters, each in the representation its signature
+        /// gives it; a `Heap` must already be registered on this thread.
+        #[no_mangle]
+        pub unsafe extern "C" fn $shim(args: *const i64, argc: u32) -> i64 {
+            // A nullary builtin reads neither, and `decoded` stays empty.
+            let _ = (args, argc);
+            #[allow(unused_mut)]
+            let mut decoded: Vec<Value> = Vec::new();
+            $(
+                let i = decoded.len();
+                if argc as usize <= i {
+                    fatal(concat!(stringify!($shim), ": too few arguments"));
+                }
+                decoded.push(stream_shim!(@arg $arg, args, i));
+            )*
+            match crate::stream_builtin::stream_builtin(active_heap(), $name, &decoded) {
+                Some(Ok(v)) => stream_shim!(@ret $ret, v),
+                Some(Err(e)) => fatal(&e),
+                None => fatal(concat!(stringify!($shim), ": ", $name, " is not a stream builtin")),
+            }
+        }
+    };
+    // A stream handle and an `open` mode are both bare `i64`s.
+    (@arg int, $args:expr, $i:expr) => { Value::Int(*$args.add($i)) };
+    (@arg str, $args:expr, $i:expr) => { tagged_arg($args, $i) };
+    (@arg char, $args:expr, $i:expr) => {
+        match char::from_u32(*$args.add($i) as u32) {
+            Some(c) => Value::Char(c),
+            None => fatal("stream shim: argument is not a valid char scalar value"),
+        }
+    };
+    (@ret tagged, $v:expr) => { encode($v) };
+    (@ret raw, $v:expr) => {
+        match $v {
+            Value::Int(n) => n,
+            other => fatal(&format!("stream shim: expected an i64 result, got {:?}", other)),
+        }
+    };
+    (@ret bool, $v:expr) => {
+        match $v {
+            Value::Bool(b) => i64::from(b),
+            other => fatal(&format!("stream shim: expected a bool result, got {:?}", other)),
+        }
+    };
+}
+
+stream_shim!(rt_stream_stdin, "stream-stdin", [], raw);
+stream_shim!(rt_stream_stdout, "stream-stdout", [], raw);
+stream_shim!(rt_stream_stderr, "stream-stderr", [], raw);
+stream_shim!(rt_stream_string_input, "stream-string-input", [str], raw);
+stream_shim!(rt_stream_string_output, "stream-string-output", [], raw);
+stream_shim!(rt_stream_open_file, "stream-open-file", [str, int], tagged);
+stream_shim!(rt_stream_close, "stream-close", [int], tagged);
+stream_shim!(rt_stream_open_p, "stream-open-p", [int], bool);
+stream_shim!(rt_stream_input_p, "stream-input-p", [int], tagged);
+stream_shim!(rt_stream_output_p, "stream-output-p", [int], tagged);
+stream_shim!(rt_stream_read_char, "stream-read-char", [int], tagged);
+stream_shim!(rt_stream_unread_char, "stream-unread-char", [int, char], tagged);
+stream_shim!(rt_stream_listen, "stream-listen", [int], tagged);
+stream_shim!(rt_stream_write_string, "stream-write-string", [int, str], tagged);
+stream_shim!(rt_stream_at_line_start, "stream-at-line-start", [int], tagged);
+stream_shim!(rt_stream_finish_output, "stream-finish-output", [int], tagged);
+stream_shim!(rt_stream_take_output_string, "stream-take-output-string", [int], tagged);
+stream_shim!(rt_file_exists_p, "file-exists-p", [str], bool);
+stream_shim!(rt_file_delete, "file-delete", [str], tagged);
+stream_shim!(rt_file_rename, "file-rename", [str, str], tagged);
 
 #[cfg(test)]
 mod tests {

@@ -8265,16 +8265,19 @@ impl Checker {
     /// the same `written`+`home` independent re-resolution every other
     /// reference (`Call`/`Global`/`FnRef`) gets, not a special case.
     ///
-    /// A name this can't resolve (never registered, or genuinely private
-    /// from here — `resolve_fn`/`resolve_fn_path` already fold "exists but
-    /// not visible" into "doesn't resolve", same as every other reference)
-    /// is deliberately *not* a check-time error: a `CompileTarget::Fn` is
-    /// still built, with a best-effort placeholder `resolved` `Path` (never
-    /// looked at unless resolution also fails again at runtime, in which
-    /// case it's only used to name the failure) — preserving the existing
-    /// `EvalError::NoSuchFunction` this has always surfaced through
-    /// `Interp::resolve_fn_ref` at the actual `(compile ...)` call, not a
-    /// check-time rejection.
+    /// A name this can't resolve is a check-time error, like every other
+    /// unresolvable reference in the language. There is nothing left to look
+    /// up at runtime — the resolution above is the answer — so deferring the
+    /// failure to `Interp::resolve_fn_ref` would only move a diagnosis the
+    /// checker already made past the point where it can name a source
+    /// position. "Genuinely private from here" fails the same way: both
+    /// `resolve_fn` and `resolve_fn_path` fold "exists but not visible" into
+    /// "doesn't resolve", so `(compile other-modules-private)` is rejected
+    /// with the rest, exactly as an ordinary call to it would be.
+    ///
+    /// Three distinguishable failures, three messages: an unresolvable bare
+    /// name, a `Type::method` whose type resolved but has no such member, and
+    /// a `a::b` that names neither a type's member nor a free function.
     fn check_compile(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("compile: (compile name) — expected exactly 1 argument".into()));
@@ -8303,26 +8306,32 @@ impl Checker {
         // Shared by both places that build a `CompileTarget::Fn`: a bare name
         // (`resolve_fn`) and a module-qualified one that turned out not to
         // name a `type::method` (`resolve_fn_path`) — same generic check,
-        // same "no resolution -> best-effort placeholder `Path`, deferring
-        // to a runtime `NoSuchFunction`" fallback (see this function's own
-        // doc comment for why that's deliberate).
+        // same "no resolution -> check-time error".
         let fn_target = |written: Vec<String>, resolved: Option<Path>| -> Result<CompileTarget, Error> {
-            if resolved.as_ref().is_some_and(|fq| self.generic_fn_templates.contains_key(fq)) {
+            let resolved = resolved.ok_or_else(|| {
+                Error::TypeError(format!("compile: no function `{}` is visible from here", name))
+            })?;
+            if self.generic_fn_templates.contains_key(&resolved) {
                 return Err(generic_err());
             }
-            let resolved = resolved.unwrap_or_else(|| Path::from_segments(written.clone()));
             Ok(CompileTarget::Fn(self.mk_ref(written, resolved)))
         };
         let target = match name.rsplit_once("::") {
             None => fn_target(vec![name.clone()], self.resolve_fn(&name))?,
             Some((type_part, method)) => {
                 let type_segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
-                let type_fq = if type_segs.len() == 1 {
+                // Kept separate from `type_fq` below: whether the *type* half
+                // resolved is what tells "this type has no such method" apart
+                // from "this names nothing at all", and both are reachable
+                // only after `resolve_fn_path` has also come up empty.
+                let type_path = if type_segs.len() == 1 {
                     self.resolve_bare_type(&type_segs[0])
                 } else {
                     self.resolve_type_path(&type_segs)
-                }
-                .filter(|tp| self.reg.type_def(tp).is_some_and(|def| def.assoc.contains_key(method)));
+                };
+                let type_fq = type_path
+                    .clone()
+                    .filter(|tp| self.reg.type_def(tp).is_some_and(|def| def.assoc.contains_key(method)));
                 match type_fq {
                     // A genuine `type::method` — the type exists and has
                     // this associated function/method.
@@ -8334,11 +8343,24 @@ impl Checker {
                     }
                     // Not a type::method — a module-qualified free function
                     // instead (e.g. `(compile m::inc)`), or genuinely nothing
-                    // at all (`(compile bogus::x)`).
+                    // at all (`(compile bogus::x)`, `(compile point::bogus)`).
                     None => {
                         let full_segs: Vec<String> = name.split("::").map(|s| s.to_string()).collect();
-                        let resolved = self.resolve_fn_path(&full_segs);
-                        fn_target(full_segs, resolved)?
+                        match self.resolve_fn_path(&full_segs) {
+                            Some(resolved) => fn_target(full_segs, Some(resolved))?,
+                            None => {
+                                return Err(Error::TypeError(match &type_path {
+                                    Some(tp) => format!(
+                                        "compile: type `{}` has no associated function or method `{}`",
+                                        tp, method
+                                    ),
+                                    None => format!(
+                                        "compile: `{}` names neither a type's method nor a function visible from here",
+                                        name
+                                    ),
+                                }))
+                            }
+                        }
                     }
                 }
             }

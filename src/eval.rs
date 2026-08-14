@@ -11,7 +11,6 @@ pub(crate) mod format;
 pub(crate) mod interp;
 pub(crate) mod pprint;
 pub(crate) mod scope;
-pub(crate) mod stream;
 
 pub use value::EvalError;
 pub use interp::{llvm_module_of, llvm_value_of, Interp};

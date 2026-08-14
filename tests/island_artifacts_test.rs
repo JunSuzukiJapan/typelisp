@@ -29,7 +29,7 @@ fn island_artifacts_are_fresh() {
     let buffer = MemoryBuffer::create_from_memory_range_copy(&bc, "island");
     let module = Module::parse_bitcode_from_buffer(&buffer, llvm_context())
         .expect("src/compiler_island.bc failed to parse — run scripts/regen-compiler-island.sh");
-    let embedded = read_embedded_source_hash(&module)
+    let embedded = read_embedded_source_hash(&module, typelisp::compile::bootstrap::SOURCE_HASH_GLOBAL)
         .expect("src/compiler_island.bc has no embedded source hash — run scripts/regen-compiler-island.sh");
     assert_eq!(
         embedded,

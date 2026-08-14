@@ -1324,7 +1324,7 @@ pub const SOURCE: &str = r##"
 ;; ---------------------------------------------------------------------------
 ;; `random-state` (CLHS 12.1.6): a mutable PRNG stream. The actual
 ;; bit-twiddling (a fixed-width xorshift step) lives in Rust — see
-;; `eval::interp::xorshift64_step` — since typelisp has no bitwise operators
+;; `typelisp_rt::xorshift64_step` — since typelisp has no bitwise operators
 ;; to write it in directly; `make-random-state-fresh`/`random-state-copy`/
 ;; `random-state-next` (registered in `check::registry::Registry::
 ;; with_builtins`) are the three native primitives everything below builds on.
@@ -1586,7 +1586,7 @@ pub const SOURCE: &str = r##"
 ;;   * User types are streams. Implement `CharOutput` for your own type and
 ;;     every function below works on it.
 ;;
-;; The native layer (`eval::stream`) knows only about leaf backends -- files,
+;; The native layer (`typelisp_rt::stream`) knows only about leaf backends -- files,
 ;; strings, the three standard streams -- addressed by an opaque `i64` handle.
 ;; A concrete stream type is a struct holding one, and the field is not `pub`,
 ;; so handles cannot be forged.
@@ -2266,20 +2266,80 @@ pub const SOURCE: &str = r##"
 
 "##;
 
+/// The committed, precompiled prelude bodies (see
+/// [`crate::compile::prelude_bootstrap`]), embedded so [`load`] needs no
+/// filesystem access at runtime. Kept in sync with [`SOURCE`] by
+/// `scripts/regen-prelude-bitcode.sh` and the tests in
+/// `tests/prelude_artifacts_test.rs`.
+pub const PRELUDE_BITCODE: &[u8] = include_bytes!("prelude_compiled.bc");
+
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,
 /// registering its definitions exactly as if the caller had typed them
-/// first. Must be called before any user source that references a prelude
-/// name.
+/// first — then install the precompiled native bodies over them, so a later
+/// call to a prelude function runs compiled instead of being tree-walked.
 ///
+/// Must be called before any user source that references a prelude name.
+///
+/// [`SOURCE`] being fixed and the bitcode a committed, freshness-checked
+/// artifact, any failure here is a build/bug condition rather than a user
+/// error — hence the panics.
 pub fn load(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
+    let plan = load_interpreted(heap, chk, interp);
+    // Before the bitcode, and in this order: the compiled-slot ids baked into
+    // it were assigned by this same walk at generation time. See
+    // `prelude_bootstrap::promote_globals`.
+    crate::compile::prelude_bootstrap::promote_globals(heap, interp, &plan)
+        .expect("prelude: promoting globals failed");
+    // Every collected definition, not a filtered subset: the artifact carries
+    // bodies for the ones the compiler could handle, and
+    // `install_compiled_library` installs exactly those. Re-deriving the
+    // subset here would mean running the compile path's own precheck over the
+    // whole prelude at every startup, to reach an answer the module already
+    // holds.
+    interp
+        .install_compiled_library(crate::compile::CompiledLibrary {
+            label: "prelude",
+            regen_script: "scripts/regen-prelude-bitcode.sh",
+            bitcode: PRELUDE_BITCODE,
+            items: &plan.items,
+            expected_hash: Some((
+                crate::compile::prelude_bootstrap::PRELUDE_SOURCE_HASH_GLOBAL,
+                plan.source_hash,
+            )),
+        })
+        .expect("prelude: bitcode install failed");
+}
+
+/// [`load`] without the precompiled bodies: read, check, and `exec` [`SOURCE`]
+/// only, returning what a compiled artifact has to know about it.
+///
+/// Two callers need exactly this and not the install: the prelude generator
+/// ([`crate::compile::prelude_bootstrap::build_prelude_bitcode`]), which is
+/// about to *produce* the artifact, and the island generator
+/// ([`crate::compile::bootstrap::build_island_bitcode`]), which needs prelude
+/// definitions in scope but must not depend on the prelude artifact — that
+/// dependency in both directions is a chicken-and-egg neither script could
+/// break.
+pub fn load_interpreted(
+    heap: &mut Heap,
+    chk: &mut Checker,
+    interp: &mut Interp,
+) -> crate::compile::prelude_bootstrap::PreludePlan {
     let r = Reader::new();
     let forms = r.read_all(heap, SOURCE).expect("prelude: read failed");
     chk.predeclare_program(heap, &forms);
+    let mut plan = crate::compile::prelude_bootstrap::PreludePlan {
+        source_hash: crate::compile::bootstrap::hash_read_forms(heap, &forms)
+            .expect("prelude: hashing the read forms failed"),
+        ..Default::default()
+    };
     for v in forms {
         let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");
         for w in chk.take_warnings() {
             eprintln!("{}", w);
         }
+        crate::compile::prelude_bootstrap::collect_item(heap, tl, &mut plan).expect("prelude: collect failed");
         interp.exec(heap, tl).expect("prelude: eval failed");
     }
+    plan
 }

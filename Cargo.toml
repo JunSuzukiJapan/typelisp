@@ -40,10 +40,25 @@ path = "src/main.rs"
 name = "typl-lsp"
 path = "src/bin/lsp.rs"
 
-# Regenerates the committed compiler-island AOT artifacts
-# (src/compiler_island.bc/.fasl). Run via scripts/regen-compiler-island.sh
+# Regenerates the committed compiler-island AOT artifact
+# (src/compiler_island.bc). Run via scripts/regen-compiler-island.sh
 # whenever compiler.rs's SOURCE changes; the island_artifacts_are_fresh test
 # fails until it is re-run. Interp-closure removal Stage 3.
 [[bin]]
 name = "typl-bootstrap-island"
 path = "src/bin/bootstrap_island.rs"
+
+# Regenerates the committed precompiled-prelude artifact
+# (src/prelude_compiled.bc). Run via scripts/regen-prelude-bitcode.sh whenever
+# prelude.rs's SOURCE changes — or the island does, since the island compiles
+# it; the prelude_artifacts_* tests fail until it is re-run.
+[[bin]]
+name = "typl-bootstrap-prelude"
+path = "src/bin/bootstrap_prelude.rs"
+
+# Measures what the precompiled prelude is worth: the same workloads against a
+# compiled and an interpreted prelude, in one process. Run via
+# scripts/bench-prelude.sh.
+[[bin]]
+name = "typl-bench-prelude"
+path = "src/bin/bench_prelude.rs"

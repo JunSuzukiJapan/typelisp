@@ -336,14 +336,40 @@ fn random_varies_across_calls() {
     assert!(seen.len() > 1, "random never changed across 20 calls");
 }
 
+/// A one-off *interpreted* prelude, for the two tests below.
+///
+/// `random`'s bound check is a `panic` inside a prelude body, and since the
+/// precompiled prelude that body is native — where a panic aborts the process
+/// by design (`typelisp_rt::rt_panic`: there are no landing pads to unwind
+/// through across the JIT boundary) rather than surfacing as a catchable
+/// `EvalError::Panic`. So these two assert what the check *is*, against the
+/// tier that can still answer: the divergence itself is recorded in
+/// `docs/dev/TODO.md`.
+fn run_interpreted(src: &str) -> Result<Value, EvalError> {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::prelude::load_interpreted(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = Value::Empty;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
+            last = val;
+        }
+    }
+    Ok(last)
+}
+
 #[test]
 fn random_with_zero_bound_panics() {
     let src = "(defun f () i32 (random 0)) (f)";
-    assert!(matches!(run(src), Err(EvalError::Panic(_))));
+    assert!(matches!(run_interpreted(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn random_with_negative_bound_panics() {
     let src = "(defun f () i32 (random -5)) (f)";
-    assert!(matches!(run(src), Err(EvalError::Panic(_))));
+    assert!(matches!(run_interpreted(src), Err(EvalError::Panic(_))));
 }

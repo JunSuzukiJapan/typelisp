@@ -241,6 +241,21 @@ pub fn field(heap: &Heap, form: Value, i: usize) -> Option<Value> {
     heap.car(cur).ok()
 }
 
+/// A node's `i`th field read as a [`crate::Path`].
+///
+/// A single-segment path reads back as a bare symbol — the reader only builds a
+/// `Value::Path` when it sees `::` — so both spellings have to be accepted, and
+/// forgetting the symbol case fails only for definitions at the root, which is
+/// most of them. Shared by everything that walks *checked* top-level forms
+/// looking for what they define (`compile::aot`, `compile::prelude_bootstrap`).
+pub fn path_field(heap: &Heap, form: Value, i: usize) -> Option<crate::Path> {
+    match field(heap, form, i)? {
+        Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
+        Value::Symbol(id) => Some(crate::Path::root(heap.symbol_name(id))),
+        _ => None,
+    }
+}
+
 // ---- printing ------------------------------------------------------------
 
 /// Render a core form as an s-expression.

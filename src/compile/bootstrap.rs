@@ -19,8 +19,7 @@
 //! to `SOURCE`, with no separate sidecar file. That hash covers the *forms*
 //! the reader produced rather than the source bytes, so editing a comment does
 //! not invalidate the artifact — see its doc comment for why the distinction
-//! is worth a reader pass, and why `prelude`'s fasl cache still uses the
-//! byte-based [`crate::owned_form::source_hash`] instead.
+//! is worth a reader pass.
 //!
 //! **That hash covers one of the artifact's two inputs.** The bitcode is a
 //! compilation of `SOURCE` *by the Rust-side LLVM builders*
@@ -54,7 +53,8 @@ use inkwell::module::Module;
 use inkwell::AddressSpace;
 
 use crate::check::core;
-use crate::{Checker, Heap, Interp, Reader, Value};
+use crate::compile::symbols::CompiledItem;
+use crate::{Checker, Heap, Interp, Path, Reader, Value};
 
 /// The name of the i64 global the island bitcode carries its source hash in.
 /// Read back by [`read_embedded_source_hash`].
@@ -75,7 +75,10 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
 
-    crate::load_prelude(&mut heap, &mut chk, &mut interp);
+    // Interpreted: the island needs the prelude's *definitions* in scope, not
+    // its compiled bodies — and depending on `prelude_compiled.bc` here would
+    // close a cycle, since that artifact is built by the island.
+    crate::prelude::load_interpreted(&mut heap, &mut chk, &mut interp);
 
     let reader = Reader::new();
     let forms = reader
@@ -106,8 +109,15 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
     // own `labels`/`lambda`s. (The very first `.bc`, before this chain existed,
     // was built by the interpreted island; every one since is built by its
     // predecessor.)
+    let items: Vec<CompiledItem> = fn_names.iter().map(|n| CompiledItem::Fn(Path::root(n))).collect();
     interp
-        .install_island_bitcode(crate::compiler::ISLAND_BITCODE, &fn_names, false)
+        .install_compiled_library(crate::compile::CompiledLibrary {
+            label: "compiler island",
+            regen_script: "scripts/regen-compiler-island.sh",
+            bitcode: crate::compiler::ISLAND_BITCODE,
+            items: &items,
+            expected_hash: None,
+        })
         .map_err(|e| format!("island bootstrap install of the committed .bc failed: {}", e))?;
 
     let ctx = crate::compile::llvm_context();
@@ -119,13 +129,7 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
         for (name, _) in crate::eval::interp::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
         }
-        // Embed the source hash as an i64 global with a constant initializer
-        // (internal linkage — it's read by value from the parsed module, never
-        // linked against).
-        let i64_ty = ctx.i64_type();
-        let hash_global = module.add_global(i64_ty, None, SOURCE_HASH_GLOBAL);
-        hash_global.set_initializer(&i64_ty.const_int(island_source_hash(crate::compiler::SOURCE)?, false));
-        hash_global.set_constant(true);
+        embed_source_hash(ctx, &module, SOURCE_HASH_GLOBAL, island_source_hash(crate::compiler::SOURCE)?);
         // Forward-declare *every* island function before compiling any body.
         // The island's own `compile-call` resolves a call target with
         // `(get-function m "tl_<callee>")`, which fails outright if the callee
@@ -188,23 +192,35 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
 /// `core_bridge` emits none and `src/compiler.rs` embeds none, so two `SOURCE`
 /// texts that read alike compile to identical bitcode.
 ///
-/// Distinct from [`source_hash`], which stays byte-based for fasl caches — a
-/// fasl stores checked state *including* positions (`OwnedForm` carries both
-/// of a cell's location slots since v19), so for those a moved line genuinely
-/// is a change.
+/// Shared by both artifacts (the compiler island and the prelude): the
+/// property wanted — a comment must not invalidate a megabyte of bitcode — is
+/// the same for each, and so is the reason positions can be skipped.
 pub fn island_source_hash(source: &str) -> Result<u64, String> {
-    use std::hash::{Hash, Hasher};
-
     let mut heap = Heap::with_capacity(1 << 18);
     let reader = Reader::new();
     let forms = reader
         .read_all(&mut heap, source)
         .map_err(|e| format!("island source hash: read failed: {}", e))?;
+    hash_read_forms(&heap, &forms)
+}
+
+/// [`island_source_hash`] over forms already read, for a loader that just read
+/// them.
+///
+/// `prelude::load` needs the hash of the same source it is in the middle of
+/// loading. Going through [`island_source_hash`] there would read the prelude a
+/// second time into a second 256K-cell `Heap`, at every startup, to reproduce a
+/// parse that just happened — measurable next to a load this whole artifact
+/// exists to make faster. The value is identical either way: the hash covers
+/// names rather than intern ids and skips positions, so which heap the forms
+/// were read into cannot affect it.
+pub fn hash_read_forms(heap: &Heap, forms: &[Value]) -> Result<u64, String> {
+    use std::hash::{Hash, Hasher};
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     forms.len().hash(&mut hasher);
     for form in forms {
-        hash_form(&heap, form, &mut hasher)?;
+        hash_form(heap, *form, &mut hasher)?;
     }
     Ok(hasher.finish())
 }
@@ -294,14 +310,42 @@ fn hash_form(
     Ok(())
 }
 
-/// Reads the [`SOURCE_HASH_GLOBAL`] i64 constant back out of an
-/// already-parsed island `module` — the staleness key `load_aot` and the
-/// freshness test compare against [`island_source_hash`]`(SOURCE)`. `None` if
-/// the global is absent or not a constant integer (a `.bc` from before this
-/// global existed, or a corrupt one).
-pub fn read_embedded_source_hash(module: &Module<'static>) -> Option<u64> {
-    let global = module.get_global(SOURCE_HASH_GLOBAL)?;
+/// Reads a `hash_global`-named i64 constant back out of an already-parsed
+/// `module` — the staleness key a loader and the freshness tests compare
+/// against [`island_source_hash`] of the live source. `None` if the global is
+/// absent or not a constant integer (a `.bc` from before this global existed,
+/// or a corrupt one).
+///
+/// `hash_global` is a parameter because there are two artifacts with two
+/// globals ([`SOURCE_HASH_GLOBAL`] and
+/// [`crate::compile::prelude_bootstrap::PRELUDE_SOURCE_HASH_GLOBAL`]); reading
+/// one artifact's hash out of the other would compare two unrelated numbers
+/// and call every load stale.
+pub fn read_embedded_source_hash(module: &Module<'static>, hash_global: &str) -> Option<u64> {
+    let global = module.get_global(hash_global)?;
     global.get_initializer()?.into_int_value().get_zero_extended_constant()
+}
+
+/// Adds `hash_global` to `module` as an i64 constant holding `hash` — the write
+/// side of [`read_embedded_source_hash`], shared by both generators so the two
+/// can't disagree about linkage or width.
+///
+/// Takes the hash rather than the source: the prelude's generator already has
+/// one from the forms it read (see [`hash_read_forms`]), and re-deriving it
+/// here would read that source a second time.
+///
+/// Internal linkage: it is read by value out of the parsed module, never
+/// linked against.
+pub(crate) fn embed_source_hash(
+    ctx: &'static inkwell::context::Context,
+    module: &Module<'static>,
+    hash_global: &str,
+    hash: u64,
+) {
+    let i64_ty = ctx.i64_type();
+    let global = module.add_global(i64_ty, None, hash_global);
+    global.set_initializer(&i64_ty.const_int(hash, false));
+    global.set_constant(true);
 }
 
 /// The last segment of a `(defun PATH ...)` form's name, or `None` for anything

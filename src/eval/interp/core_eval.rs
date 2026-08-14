@@ -582,8 +582,8 @@ impl Interp {
         // Every table, not just this box's own: an upcast of it hands compiled
         // code one of the supertrait tables, and compiled code reads entry
         // points from the compiled tier's copy and nowhere else. (Publishing
-        // only `ids[0]` left those empty and aborted with `rt_vtable_slot:
-        // vtable slot is empty`.)
+        // only `ids[0]` left those empty, which aborted every AOT dispatch
+        // through a supertrait table.)
         for id in &ids {
             self.publish_vtable(*id);
         }
@@ -1203,7 +1203,7 @@ impl Interp {
     /// uniform over `Value` and reads none of them. A *compiled* caller does
     /// read them (`Interp::apply_interpreted`), and a `defmacro` lambda never
     /// reaches one: it has no compiled representation to be passed by.
-    fn reify(&self, heap: &mut Heap, f: &Rc<FnDef>) -> Result<Value, EvalError> {
+    pub(crate) fn reify(&self, heap: &mut Heap, f: &Rc<FnDef>) -> Result<Value, EvalError> {
         let mut s = RootScope::new(heap);
         let reprs = f.sig.as_ref().map(|(ps, _)| ps.as_slice()).unwrap_or(&[]);
 

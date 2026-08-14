@@ -34,6 +34,28 @@ fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
+/// Check every form in `src` and return the first check-time error, for the
+/// tests about what `(compile ...)` rejects before anything runs.
+///
+/// [`run`] can't serve these: it `expect`s the check to succeed, so a
+/// check-time rejection panics there instead of coming back as a value. This
+/// stops after the first error rather than running the program, which is also
+/// what a real driver does.
+fn check_error(src: &str) -> Error {
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    let result = vs
+        .into_iter()
+        .try_for_each(|v| chk.check_form(&mut h, &interp, v).map_err(Error::into_kind).map(|_| ()));
+    match result {
+        Err(e) => e,
+        Ok(()) => panic!("expected a check-time error for {:?}, but every form checked", src),
+    }
+}
+
 /// The text of a `string` result.
 ///
 /// A `string` is a heap `Value::Str` since the scalar unification, so reading
@@ -2520,43 +2542,66 @@ fn compile_of_a_function_calling_an_unsupported_i64_method_is_a_clean_error() {
         "#,
     )
     .expect_err("expected compiling a caller of the non-native i64 `int->char` to fail");
+    // A variant rather than a `Panic` carrying the same words: `target` is what
+    // `compile::prelude_bootstrap` reconciles against its record of the
+    // compiler's gaps, so it has to survive as data. The rendered message is
+    // unchanged.
     match err {
-        EvalError::Panic(msg) => {
-            assert!(msg.contains("i64::int->char"), "message was: {}", msg);
-            assert!(msg.contains("no compiled implementation"), "message was: {}", msg);
+        EvalError::Uncompilable { caller, target } => {
+            assert_eq!(caller, "root");
+            assert_eq!(target, "i64::int->char");
+            let rendered = EvalError::Uncompilable { caller, target }.to_string();
+            assert!(rendered.contains("no compiled implementation"), "message was: {}", rendered);
         }
-        other => panic!("expected a Panic, got {:?}", other),
+        other => panic!("expected an Uncompilable, got {:?}", other),
     }
 }
 
-/// `(compile point::bogus)`/`(compile bogus::x)`: `Interp::method_key`
-/// finds no match either way (a real method name on the wrong type, or any
-/// method name on a type that was never `defstruct`/`defmethod`-registered)
-/// — `resolve_fn_def` reports the same `NoSuchFunction` a plain unknown
-/// `defun` name would, not an internal panic.
+/// A name `(compile ...)` can't resolve is rejected at *check* time, with a
+/// message that says which of the three ways it failed.
+///
+/// Nothing is left to look up at runtime — the checker's resolution is the
+/// answer — so there is no reason to carry the failure to the `(compile ...)`
+/// call the way this used to (an `EvalError::NoSuchFunction` out of
+/// `Interp::resolve_fn_ref`). See `Checker::check_compile`'s doc comment.
 #[test]
-fn compile_of_an_unknown_method_name_is_a_clean_error() {
-    let err = run_with_compiler_and_prelude(
-        r#"
-        (defstruct point (x i64) (y i64))
-        (compile point::bogus)
-        "#,
-    )
-    .expect_err("expected compiling an unknown method to fail");
-    match err {
-        EvalError::NoSuchFunction(name) => assert_eq!(name, "point::bogus"),
-        other => panic!("expected a NoSuchFunction, got {:?}", other),
+fn compile_of_an_unresolvable_name_is_a_check_time_error() {
+    // A bare name that names nothing.
+    match check_error("(compile no-such-function)") {
+        Error::TypeError(m) => {
+            assert!(m.contains("no function `no-such-function` is visible"), "message was: {}", m)
+        }
+        other => panic!("expected a TypeError, got {:?}", other),
     }
 
-    let err2 = run_with_compiler_and_prelude(
-        r#"
-        (compile bogus::x)
-        "#,
-    )
-    .expect_err("expected compiling a method on an unknown type to fail");
-    match err2 {
-        EvalError::NoSuchFunction(name) => assert_eq!(name, "bogus::x"),
-        other => panic!("expected a NoSuchFunction, got {:?}", other),
+    // The type resolves; it just has no such member.
+    match check_error("(defstruct point (x i64) (y i64)) (compile point::bogus)") {
+        Error::TypeError(m) => {
+            assert!(m.contains("has no associated function or method `bogus`"), "message was: {}", m)
+        }
+        other => panic!("expected a TypeError, got {:?}", other),
+    }
+
+    // Neither half resolves.
+    match check_error("(compile bogus::x)") {
+        Error::TypeError(m) => assert!(
+            m.contains("`bogus::x` names neither a type's method nor a function"),
+            "message was: {}",
+            m
+        ),
+        other => panic!("expected a TypeError, got {:?}", other),
+    }
+}
+
+/// A definition that exists but is private from the call site fails exactly
+/// like one that doesn't exist at all — `resolve_fn`/`resolve_fn_path` fold
+/// "exists but not visible" into "doesn't resolve" for every reference, and
+/// `(compile ...)` is no exception now that it reports the failure itself.
+#[test]
+fn compile_of_a_private_name_from_outside_its_module_is_a_check_time_error() {
+    match check_error("(module m (defun hidden () i64 1)) (compile m::hidden)") {
+        Error::TypeError(m) => assert!(m.contains("m::hidden"), "message was: {}", m),
+        other => panic!("expected a TypeError, got {:?}", other),
     }
 }
 
@@ -2651,16 +2696,8 @@ fn compile_of_a_string_literal_is_a_type_error() {
         r#"(defun add2 ((a i64) (b i64)) i64 (+ a b)) (compile "add2")"#,
         r#"(defstruct point (x i64) (y i64)) (compile "point::x")"#,
     ] {
-        let mut h = Heap::with_capacity(1 << 16);
-        let r = Reader::new();
-        let vs = r.read_all(&mut h, src).expect("read failed");
-        let mut chk = Checker::new();
-        let interp = Interp::new();
-        let result = vs
-            .into_iter()
-            .try_for_each(|v| chk.check_form(&mut h, &interp, v).map_err(Error::into_kind).map(|_| ()));
-        match result {
-            Err(Error::TypeError(_)) => {}
+        match check_error(src) {
+            Error::TypeError(_) => {}
             other => panic!("expected a TypeError for {:?}, got {:?}", src, other),
         }
     }

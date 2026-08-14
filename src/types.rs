@@ -161,8 +161,8 @@ pub const LLVM_METHOD_RECEIVER_TYPES: [&str; 4] =
 /// LLVM instructions or `rt_*` calls rather than function calls
 /// (`Interp::is_native_lowered_primitive_method` says *which* methods; this
 /// says which receivers can have them).
-pub const NATIVE_LOWERED_PRIMITIVES: [&str; 8] =
-    ["i64", "i32", "char", "string", "f64", "bignum", "ratio", "sexpr"];
+pub const NATIVE_LOWERED_PRIMITIVES: [&str; 10] =
+    ["i64", "i32", "char", "string", "f64", "bignum", "ratio", "sexpr", "bool", "symbol"];
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Type {

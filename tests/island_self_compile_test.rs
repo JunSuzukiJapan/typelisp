@@ -67,6 +67,8 @@ const ISLAND_DEFUNS: &[&str] = &[
     "int-native-method?",
     "string-native-method?",
     "char-native-method?",
+    "bool-native-method?",
+    "symbol-native-method?",
     "float-native-method?",
     "str-lt-call",
     "bignum-native-method?",

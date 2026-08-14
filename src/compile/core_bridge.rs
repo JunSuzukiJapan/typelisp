@@ -64,7 +64,7 @@ use crate::type_key::type_key_of;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES};
 
 use super::symbols::{
-    fresh_lambda_name, llvm_op_id, user_method_symbol_name, user_symbol_name, DynTables,
+    callee_symbol_name, fresh_lambda_name, llvm_op_id, user_method_symbol_name, DynTables,
     HASHTABLE_BUILTIN_METHODS, VECTOR_BUILTIN_METHODS,
 };
 use super::core_freevars::{free_vars, names_captured_by_nested};
@@ -580,12 +580,13 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 
 /// `(call WRITTEN HOME PATH (R...) E...)` -> `(call "name" (kind . form)...)`.
 ///
-/// The island looks the callee up by the same mangled name
-/// `Interp::compile_scc`/`compile::aot` declare it under, so the mangling
-/// lives in one place ([`user_symbol_name`]) shared with the old bridge. The
-/// three `sexpr-car`/`sexpr-cdr`/`sexpr-cons` builtins are the exception:
-/// `compile-call` matches those literal names and emits `rt_car`/`rt_cdr`/
-/// `rt_cons` directly, so prefixing them would break the match.
+/// The island looks the callee up by the name written here and nothing else:
+/// the mangled name `Interp::compile_scc`/`compile::aot` declare an ordinary
+/// function under ([`user_symbol_name`]), or — for a free builtin with no
+/// typelisp body — the `crate::compile::runtime` shim that *is* its
+/// implementation ([`crate::eval::interp::rt_builtin_symbol`]). Both
+/// decisions live on this side; see that function on why the island no
+/// longer re-derives the second one.
 fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
     if parts.len() < 4 {
@@ -595,12 +596,7 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
     let reprs = repr_list(heap, parts[3])?;
     let args = parts[4..].to_vec();
 
-    let raw = path.last_segment();
-    let name = if crate::eval::interp::is_rt_builtin_name(raw) {
-        raw.to_string()
-    } else {
-        user_symbol_name(&path.segments().join("::"))
-    };
+    let name = callee_symbol_name(&path);
     let name_v = heap.alloc_string(name);
 
     let mut f = Items::new(heap);
@@ -1012,8 +1008,9 @@ fn vtable_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, String)>, 
 /// no tag, and [`core::field`] counts past a tag — so an index into one is off
 /// by one. Taking the list directly removes the arithmetic instead of getting it
 /// right twice. (Getting it wrong here emitted an empty supertrait vtable, and
-/// the only symptom was an AOT executable aborting with `rt_vtable_slot: vtable
-/// slot is empty`.)
+/// the only symptom was an AOT executable aborting on the empty slot — the
+/// abort `rt_vtable_slot` used to raise, now `rt_dyn_call`'s no-interpreter
+/// case.)
 fn vtable_of(heap: &Heap, list: Value) -> Result<Vec<(Path, String)>, Error> {
     let mut out = Vec::new();
     for entry in heap.list_to_vec(list)? {
@@ -1065,13 +1062,7 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
                 return Err(malformed(heap, form));
             }
             let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
-            let raw = path.last_segment();
-            let name = if crate::eval::interp::is_rt_builtin_name(raw) {
-                raw.to_string()
-            } else {
-                user_symbol_name(&path.segments().join("::"))
-            };
-            (name, params_of(heap, parts[1])?, parts[4..].to_vec())
+            (callee_symbol_name(&path), params_of(heap, parts[1])?, parts[4..].to_vec())
         }
         // `(defmethod PATH SYM INSTANCE ((SYM R)...) RET-R PUBLIC E...)`
         "defmethod" => {
@@ -1683,12 +1674,7 @@ fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         .and_then(|v| as_path(heap, v))
         .ok_or_else(|| malformed(heap, form))?;
     let reprs = repr_list(heap, core::field(heap, form, 3).ok_or_else(|| malformed(heap, form))?)?;
-    let raw = path.last_segment();
-    let target = if crate::eval::interp::is_rt_builtin_name(raw) {
-        raw.to_string()
-    } else {
-        user_symbol_name(&path.segments().join("::"))
-    };
+    let target = callee_symbol_name(&path);
     forwarding_lambda(heap, "fnref", &reprs, cx, |heap, forwarded| {
         let name_v = heap.alloc_string(target);
         let mut f = Items::new(heap);
@@ -2354,11 +2340,19 @@ mod tests {
         // A module-qualified callee mangles by its full path, so `m::inc` and
         // a root `inc` cannot collide on one symbol.
         assert_eq!(bridged("(call (inc) (m) m::inc ())"), r#"(call "tl_m::inc")"#);
-        // The three cons primitives are matched by literal name and must stay
-        // unprefixed.
+        // A free builtin with no typelisp body is named for the runtime shim
+        // that *is* its implementation, not mangled — and the naming happens
+        // here, so the island has nothing to re-derive
+        // (`interp::rt_builtin_symbol`).
         assert_eq!(
             bridged("(call (sexpr-car) () sexpr-car (sexpr) (var xs))"),
-            r#"(call "sexpr-car" (2 var "xs" false))"#
+            r#"(call "rt_car" (2 var "xs" false))"#
+        );
+        // (`sym`'s kind is `0`: an interned symbol is a tagged word the
+        // collector never reclaims, so it needs no root — `Repr::class`.)
+        assert_eq!(
+            bridged("(call (symbol->string) () symbol->string (sym) (var s))"),
+            r#"(call "rt_sym_name" (0 var "s" false))"#
         );
     }
 

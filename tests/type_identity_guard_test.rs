@@ -170,6 +170,35 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
     );
 }
 
+/// Rule 3: the type keys `typelisp-rt` spells for itself must be the ones
+/// `type_key_of` produces.
+///
+/// The `src/` scan cannot reach them — `crates/typelisp-rt` is a separate
+/// crate with no `Path` type to derive a key from, which is why
+/// `rt_data_new` has always received its key as a string from compiled code
+/// instead. `stream_builtin` is the one place that cannot: it builds
+/// `Result`/`Option`/`FileError` values *itself*, on both sides of the
+/// compile boundary, so it names them from constants. This is those
+/// constants' end of the agreement, checked rather than assumed — a value
+/// built under a key nobody else spells is unmatchable, prints as
+/// `<unknown-variant>`, and compares unequal to its own twin, silently.
+#[test]
+fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
+    use typelisp::types::Path;
+    for (constant, path) in [
+        (typelisp::compile::runtime::stream_builtin::OPTION_TYPE_KEY, "option"),
+        (typelisp::compile::runtime::stream_builtin::RESULT_TYPE_KEY, "result"),
+        (typelisp::compile::runtime::stream_builtin::FILE_ERROR_TYPE_KEY, typelisp::check::registry::FILE_ERROR),
+    ] {
+        assert_eq!(
+            constant,
+            typelisp::type_key::type_key_of(&Path::root(path)),
+            "typelisp-rt spells `{}`'s type key differently from `type_key_of`",
+            path
+        );
+    }
+}
+
 /// The scan is only worth anything if it actually looks at the files the two
 /// bugs were in — a walk that silently found nothing would pass both rules.
 #[test]

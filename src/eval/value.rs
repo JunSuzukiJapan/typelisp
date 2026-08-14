@@ -65,6 +65,18 @@ pub enum EvalError {
     Unbound(String),
     /// Call to a function/method with no definition.
     NoSuchFunction(String),
+    /// `caller`'s body can't be compiled because it calls `target`, a builtin
+    /// method the compile path has no lowering for and that has no `defmethod`
+    /// body to compile either.
+    ///
+    /// A variant rather than a [`EvalError::Panic`] with the same text because
+    /// `target` is the answer to "what is missing from the compiler", and
+    /// something has to read it: `compile::prelude_bootstrap` decides which
+    /// prelude definitions the precompiled artifact can carry, and reconciles
+    /// the root causes against a committed list. Recovering that name by
+    /// parsing a message would make the list's accuracy depend on the wording
+    /// of an error.
+    Uncompilable { caller: String, target: String },
     /// An internal invariant was violated (a checker/interpreter bug).
     Internal(String),
     /// `break`: unwinding to the nearest enclosing loop, no value.
@@ -124,6 +136,9 @@ impl fmt::Display for EvalError {
             EvalError::Panic(m) => write!(f, "panic: {}", m),
             EvalError::Unbound(n) => write!(f, "unbound variable: {}", n),
             EvalError::NoSuchFunction(n) => write!(f, "no such function: {}", n),
+            EvalError::Uncompilable { caller, target } => {
+                write!(f, "compile: \"{}\" calls \"{}\", a builtin method with no compiled implementation", caller, target)
+            }
             EvalError::Internal(m) => write!(f, "internal error: {}", m),
             EvalError::Break => write!(f, "internal error: break escaped its loop"),
             EvalError::Return(_) => write!(f, "internal error: return escaped its loop"),

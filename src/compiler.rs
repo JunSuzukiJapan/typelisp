@@ -274,7 +274,7 @@
 //! `Scope`'s methods, `Option`'s `some`/`none`/pattern-matching), so
 //! loading order relative to the prelude doesn't matter.
 
-use crate::{Checker, Heap, Interp, Reader};
+use crate::{Checker, Heap, Interp, Path, Reader};
 
 pub const SOURCE: &str = r#"
 ;; EXPERIMENT: island-local `cond`. Not the prelude's — the island must not
@@ -911,6 +911,9 @@ pub const SOURCE: &str = r#"
          ((equal method "<=")     true)
          ((equal method ">")      true)
          ((equal method ">=")     true)
+         ;; `substring` is the one three-operand string method
+         ;; (`rt_str_substring`); every other one here is unary or binary.
+         ((equal method "substring") true)
          (else (equal method "append"))))
 
 ;; `char`'s natively-compilable methods: a compiled `char` is a raw `i64`
@@ -920,6 +923,10 @@ pub const SOURCE: &str = r#"
 ;; compiled level (a `char`'s value *is* its code point, and `i32`/`i64`
 ;; share width) — needed so the island's own `compile-char` (which calls
 ;; `(char->int (sexpr-char ...))`) is itself compilable.
+;; `char->string` is a one-character `rt_str_new` call, since that shim's
+;; arguments are exactly raw code points — the single most expensive gap the
+;; precompiled prelude found (31 definitions, the string scanners and the
+;; reader among them, reach it).
 (defun char-native-method? ((method string)) bool
   (icond
          ((equal method "eq") true)
@@ -932,7 +939,29 @@ pub const SOURCE: &str = r#"
          ((equal method ">") true)
          ((equal method ">=") true)
          ((equal method "char->int") true)
+         ((equal method "char->string") true)
          (else false)))
+
+;; `bool`'s natively-compilable methods. `registry::bool_assoc` registers
+;; `eq`/`eql`/`equal`/`equalp` as four names for one operation (two immediate
+;; values, no case folding and no structure to recurse into), and a compiled
+;; `bool` is a raw `0`/`1`, so all four are the same `icmp eq` — the same
+;; shape the `char` comparisons take.
+(defun bool-native-method? ((method string)) bool
+  (icond
+         ((equal method "eq") true)
+         ((equal method "eql") true)
+         ((equal method "equal") true)
+         (else (equal method "equalp"))))
+
+;; `symbol`'s natively-compilable methods: `eq`/`eql`, the only two
+;; `registry::symbol_assoc` registers. A compiled `symbol` is its interned
+;; handle, so identity is handle equality — the `sexpr` arm's `eq` again,
+;; with a receiver the checker spells `symbol` rather than `sexpr`.
+(defun symbol-native-method? ((method string)) bool
+  (icond
+         ((equal method "eq") true)
+         (else (equal method "eql"))))
 
 ;; `f64`'s natively-compilable methods: arithmetic (`+`/`-`/`*`/`/`) lowers to
 ;; LLVM float instructions (`build-fadd`/... — each `bitcast`s the
@@ -1041,6 +1070,18 @@ pub const SOURCE: &str = r#"
          ;; `max`/`min`: `rt_bignum_cmp` (already used by every comparison below)
          ;; plus `build-select`, branch-free — no new runtime helper needed.
          ((equal method "max") true)
+         ;; `logand`/`logior`/`logxor`/`lognot`: `rt_bignum_*` calls, not the
+         ;; bare LLVM instructions `i64` gets — the operands are boxed
+         ;; arbitrary-precision values. These four are what the prelude's
+         ;; derived bitwise operators (`logeqv`/`lognand`/`lognor`/`logandc1`/
+         ;; `logandc2`/`logorc1`/`logorc2`) are written in terms of; the rest
+         ;; of `bignum_assoc`'s bitwise catalog (`ash`/`logbitp`/`logtest`/
+         ;; `logcount`/`integer-length`) has no prelude caller and stays
+         ;; interpreted.
+         ((equal method "logand") true)
+         ((equal method "logior") true)
+         ((equal method "logxor") true)
+         ((equal method "lognot") true)
          (else (equal method "min"))))
 
 ;; `ratio` (`registry::ratio_assoc`)'s natively-compilable methods — the
@@ -1870,6 +1911,19 @@ pub const SOURCE: &str = r#"
                           (store-arg builder args-ptr 0 a)
                           (store-arg builder args-ptr 1 b)
                           (build-call builder (get-function m "rt_str_append") args-ptr 2)))
+                       ;; `substring`: the one three-operand string method —
+                       ;; `b` is the start index and the third operand the
+                       ;; end, both raw `i32`s (`rt_str_ref`'s own index
+                       ;; convention). Compiled here rather than beside `b`
+                       ;; above so no other method pays for reading an
+                       ;; argument form it doesn't have.
+                       ((equal method "substring")
+                        (let ((c (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr (sexpr-cdr rest)))))))
+                          (let ((args-ptr (alloca-args builder 3)))
+                            (store-arg builder args-ptr 0 a)
+                            (store-arg builder args-ptr 1 b)
+                            (store-arg builder args-ptr 2 c)
+                            (build-call builder (get-function m "rt_str_substring") args-ptr 3))))
                        (else (panic (append "compile-assoc: unsupported str method " method))))))))
             ((if (if (equal type-name "i64") true (equal type-name "i32")) (int-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
@@ -1951,9 +2005,16 @@ pub const SOURCE: &str = r#"
                ;; identity at the compiled level — return the
                ;; receiver's raw code point unchanged, before
                ;; the binary branch below tries to read a
-               ;; (non-existent) second operand.
+               ;; (non-existent) second operand. `char->string`
+               ;; is unary for the same reason: a one-character
+               ;; `rt_str_new`, whose arguments are raw code
+               ;; points, which is exactly what `a` already is.
                (if (equal method "char->int")
                    a
+               (if (equal method "char->string")
+                   (let ((args-ptr (alloca-args builder 1)))
+                     (store-arg builder args-ptr 0 a)
+                     (build-call builder (get-function m "rt_str_new") args-ptr 1))
                (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
                  (icond
                    ((equal method "equalp")
@@ -1969,7 +2030,20 @@ pub const SOURCE: &str = r#"
                     (build-icmp-gt builder a b2))
                    ((equal method ">=")
                     (build-icmp-ge builder a b2))
-                   (else (build-icmp-eq builder a b2)))))))
+                   (else (build-icmp-eq builder a b2))))))))
+            ;; `bool`/`symbol`: one `icmp eq` each, over a raw `0`/`1` and
+            ;; over an interned handle respectively. Both receivers reach
+            ;; `compile-assoc` with the type name the checker spells
+            ;; (`prim_type_path`), so neither can be folded into the `sexpr`
+            ;; arm above even though `symbol`'s lowering is identical to it.
+            ((if (equal type-name "bool") (bool-native-method? method) false)
+             (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+               (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                 (build-icmp-eq builder a b2))))
+            ((if (equal type-name "symbol") (symbol-native-method? method) false)
+             (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+               (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                 (build-icmp-eq builder a b2))))
             ((if (equal type-name "f64") (float-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
                (icond
@@ -2059,6 +2133,10 @@ pub const SOURCE: &str = r#"
                   (bignum-unary-call builder m "rt_bignum_to_float" a))
                  ((equal method "bignum->ratio")
                   (bignum-unary-call builder m "rt_bignum_to_ratio" a))
+                 ;; `lognot` is unary, so — like the conversions above — it is
+                 ;; checked before `b2` is read.
+                 ((equal method "lognot")
+                  (bignum-unary-call builder m "rt_bignum_lognot" a))
                  ((equal method "try-bignum->int")
                   ;; `Option<i32>` result: real control flow (found/overflow), the
                   ;; same `compile-if`-shaped "alloca a merge slot, branch, store
@@ -2112,6 +2190,12 @@ pub const SOURCE: &str = r#"
                              (bignum-binop-call builder m "rt_bignum_div" a b2))
                             ((equal method "mod")
                              (bignum-binop-call builder m "rt_bignum_mod" a b2))
+                            ((equal method "logand")
+                             (bignum-binop-call builder m "rt_bignum_logand" a b2))
+                            ((equal method "logior")
+                             (bignum-binop-call builder m "rt_bignum_logior" a b2))
+                            ((equal method "logxor")
+                             (bignum-binop-call builder m "rt_bignum_logxor" a b2))
                             ((equal method "<")
                              (build-icmp-lt builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)))
                             ((equal method "<=")
@@ -2263,10 +2347,20 @@ pub const SOURCE: &str = r#"
 ;; — the dynamic dispatch itself (`Expr::DynCall`).
 ;; The slot is a translate-time constant, so this is
 ;; three steps and no search: read the receiver's
-;; vtable id (`rt_dyn_vtable`), index that slot for a
-;; native entry point (`rt_vtable_slot`), and call it
-;; indirectly (`build-dyn-call`, the env-less sibling
-;; of `build-closure-apply`).
+;; vtable id (`rt_dyn_vtable`), unwrap the concrete
+;; receiver (`rt_dyn_value`), and hand both the slot
+;; and the argument array to `rt_dyn_call`.
+;;
+;; `rt_dyn_call` rather than the `rt_vtable_slot` +
+;; `build-dyn-call` pair this used to emit (both since
+;; deleted): the implementation behind a slot
+;; is not necessarily compiled (a compiled prelude
+;; stream method dispatching on a `:dyn CharInput`
+;; whose concrete type is the user's own struct), and
+;; only the runtime can see which case it is — see
+;; that shim's doc comment. The argument array is
+;; passed as a pointer-sized integer, the same way
+;; `build-closure-apply` hands `rt_apply_any` its own.
 ;;
 ;; The callee is an ordinary compiled method and
 ;; expects the *concrete* receiver, so slot 0 of the
@@ -2289,13 +2383,14 @@ pub const SOURCE: &str = r#"
                   (let ((vtable-id (build-call builder (get-function m "rt_dyn_vtable") vt-ptr 1)))
                     (let ((inner (build-call builder (get-function m "rt_dyn_value") vt-ptr 1)))
                       (store-arg builder args-ptr 0 inner)
-                      (let ((slot-ptr (alloca-args builder 2)))
-                        (store-arg builder slot-ptr 0 vtable-id)
-                        (store-arg builder slot-ptr 1 (const-i64 builder slot))
-                        (let ((fn-ptr (build-call builder (get-function m "rt_vtable_slot") slot-ptr 2)))
-                          (let ((result (build-dyn-call builder fn-ptr args-ptr argc)))
-                            (pop-sexpr-roots builder m sexpr-roots)
-                            result)))))))))))))
+                      (let ((call-ptr (alloca-args builder 4)))
+                        (store-arg builder call-ptr 0 vtable-id)
+                        (store-arg builder call-ptr 1 (const-i64 builder slot))
+                        (store-arg builder call-ptr 2 (build-ptr-to-int builder args-ptr))
+                        (store-arg builder call-ptr 3 (const-i64 builder (as i64 argc)))
+                        (let ((result (build-call builder (get-function m "rt_dyn_call") call-ptr 4)))
+                          (pop-sexpr-roots builder m sexpr-roots)
+                          result))))))))))))
 
 ;; Fills a previously-`alloca-args`'d array, one
 ;; compiled argument per slot, exactly as before —
@@ -2397,40 +2492,22 @@ pub const SOURCE: &str = r#"
 ;; `compile-function`'s own first step (`add-function`,
 ;; above) before this body was ever reached.
 (defun compile-call ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr))llvm-value
-    (let ((raw-nm (sexpr-str (sexpr-car (sexpr-cdr e)))))
-      ;; The `sexpr-*` island layer maps to its
-      ;; `crate::compile::runtime` cons-heap shims (Symbol/
-      ;; Sexpr redesign Phase 4b — the free `car`/`cdr`/
-      ;; `cons` names are the `cons<T,U>` pair now, compiled
-      ;; as ordinary methods/`defun`s, not `rt_*` shims).
-      (let ((nm (if (equal raw-nm "sexpr-car") "rt_car"
-                    (if (equal raw-nm "sexpr-cdr") "rt_cdr"
-                        (if (equal raw-nm "sexpr-cons") "rt_cons"
-                            (if (equal raw-nm "sexpr-consp") "rt_consp"
-                                (if (equal raw-nm "sexpr-null") "rt_null"
-                                    (if (equal raw-nm "sexpr-atom") "rt_atom"
-                                        (if (equal raw-nm "sexpr-symp") "rt_symp"
-                                            (if (equal raw-nm "sexpr-int") "rt_sexpr_int"
-                                                (if (equal raw-nm "sexpr-bool") "rt_sexpr_bool"
-                                                    (if (equal raw-nm "sexpr-char") "rt_sexpr_char"
-                                                        (if (equal raw-nm "sexpr-float") "rt_float_value"
-                                                            (if (equal raw-nm "sexpr-str") "rt_sexpr_str"
-                                                                (if (equal raw-nm "sexpr-sym-name") "rt_sym_name"
-                                                                    ;; `gensym`: the one non-`sexpr-*` free
-                                                                    ;; builtin rewritten here — a nullary
-                                                                    ;; call to the `rt_gensym` shim (mints a
-                                                                    ;; fresh interned symbol), the same
-                                                                    ;; wiring the accessors above get. See
-                                                                    ;; `interp::is_rt_builtin_name`.
-                                                                    (if (equal raw-nm "gensym") "rt_gensym"
-                                                                        raw-nm))))))))))))))))
-        (let ((arg-forms (sexpr-cdr (sexpr-cdr e))))
-          (let ((argc (sexpr-list-length arg-forms)))
-            (let ((args-ptr (alloca-args builder argc)))
-              (let ((sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr arg-forms 0)))
-                (let ((result (build-call builder (get-function m nm) args-ptr argc)))
-                  (pop-sexpr-roots builder m sexpr-roots)
-                  result))))))))
+    ;; The name is used exactly as the node carries it. A free builtin with no
+    ;; typelisp body (`sexpr-car`, `gensym`, `symbol->string`, ...) already
+    ;; arrives as its `crate::compile::runtime` shim name — `symbols::
+    ;; callee_symbol_name` decides that, on the same side of the boundary that
+    ;; decides whether to mangle. This used to re-derive it from a nested `if`
+    ;; chain over the raw names, which meant two lists that had to agree about
+    ;; every builtin; `get-function` aborting the process on a name it cannot
+    ;; find is what disagreement cost.
+    (let ((nm (sexpr-str (sexpr-car (sexpr-cdr e)))))
+      (let ((arg-forms (sexpr-cdr (sexpr-cdr e))))
+        (let ((argc (sexpr-list-length arg-forms)))
+          (let ((args-ptr (alloca-args builder argc)))
+            (let ((sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr arg-forms 0)))
+              (let ((result (build-call builder (get-function m nm) args-ptr argc)))
+                (pop-sexpr-roots builder m sexpr-roots)
+                result)))))))
 
 ;; `(apply-indirect callee-form (is-fn . arg-form)...)`
 ;; — `Expr::Apply`, labels/closures Stage 4, the
@@ -4237,7 +4314,18 @@ pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
         }
         interp.exec(heap, tl).expect("compiler: eval failed");
     }
+    let items: Vec<crate::compile::symbols::CompiledItem> =
+        island_defuns.iter().map(|n| crate::compile::symbols::CompiledItem::Fn(Path::root(n))).collect();
     interp
-        .install_island_bitcode(ISLAND_BITCODE, &island_defuns, true)
+        .install_compiled_library(crate::compile::CompiledLibrary {
+            label: "compiler island",
+            regen_script: "scripts/regen-compiler-island.sh",
+            bitcode: ISLAND_BITCODE,
+            items: &items,
+            expected_hash: Some((
+                crate::compile::bootstrap::SOURCE_HASH_GLOBAL,
+                crate::compile::bootstrap::island_source_hash(SOURCE).expect("compiler: hashing SOURCE failed"),
+            )),
+        })
         .expect("compiler: island bitcode install failed");
 }

@@ -200,7 +200,7 @@ IO系（`print`/`println`/`princ`/`format`/`read`/`read-line`）・型変換・i
 | `expt` / `sqrt` / `floor` / `ceiling` / `round` / `truncate` | **Rust** | 浮動小数演算はネイティブ命令が必要 |
 | `gcd` / `lcm` | **TypeLisp** | `mod` を使ったユークリッドの互除法で実装可能 |
 | `signum` | **TypeLisp** | 比較演算の組合せで実装可能 |
-| `random` | **Rust**（実装済み、`random-state` 含む） | ビット演算を要する xorshift ステップ自体は Rust（`interp::xorshift64_step`）、`random`/`make-random-state`/`random-state-p` は `&optional` を使った prelude の `defun`。`*random-state*` は動的束縛ではなく通常の再代入可能グローバル |
+| `random` | **Rust**（実装済み、`random-state` 含む） | ビット演算を要する xorshift ステップ自体は Rust（`typelisp_rt::xorshift64_step`）、`random`/`make-random-state`/`random-state-p` は `&optional` を使った prelude の `defun`。`*random-state*` は動的束縛ではなく通常の再代入可能グローバル |
 
 #### g. `apply` / `&rest` — 2026-07-15 実装完了
 

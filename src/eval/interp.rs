@@ -231,10 +231,6 @@ pub struct Interp {
     /// is the sole source of). Neither table holds heap values, so a vtable
     /// needs no GC root — `BoxedObj::Dyn`'s own `value` is all the collector
     /// ever has to trace.
-    /// Open streams, addressed by the opaque `i64` handle a stream
-    /// `defstruct` holds. See `eval::stream` for why the OS resource lives
-    /// here rather than inside the value.
-    streams: RefCell<crate::eval::stream::StreamTable>,
     vtables: RefCell<Vec<Vec<(Path, String)>>>,
     /// `(concrete type key, trait path)` -> `vtable_id`, so the same pair
     /// interns to one id however many times it is boxed. The key's first
@@ -281,6 +277,22 @@ pub struct Interp {
 enum CallEdge {
     Fn(Path),
     Method(Path, String),
+}
+
+/// Why [`Interp::precheck_compilable`] says no.
+///
+/// The split is between a cause worth *recording* and one worth *fixing*: a
+/// missing target names a specific gap in what the compile path lowers, stays
+/// stable while that gap does, and is the same for every definition that
+/// reaches it; anything else is a one-off and gets no such treatment.
+#[derive(Debug)]
+pub(crate) enum Uncompilable {
+    /// A call target with no compilable body — a Rust builtin free function or
+    /// builtin method the compile path has no lowering for. Carries that
+    /// target's name, not the caller's.
+    MissingTarget(String),
+    /// Anything else the compile path rejected.
+    Other(EvalError),
 }
 
 impl CallEdge {
@@ -372,7 +384,6 @@ impl Interp {
             root: RefCell::new(root),
             checker: None,
             compiled_globals: RefCell::new(HashMap::new()),
-            streams: RefCell::new(Default::default()),
             vtables: RefCell::new(Vec::new()),
             vtable_ids: RefCell::new(HashMap::new()),
             dyn_upcasts: RefCell::new(HashMap::new()),
@@ -431,10 +442,10 @@ impl Interp {
     /// is compiled *later* than the function that boxes for it.
     ///
     /// A slot whose method has no compiled form yet is published as 0, which
-    /// `rt_vtable_slot` refuses to call. Compiled code can only reach a slot
-    /// through a boxing site, and `core_bridge::collect_targets` puts every one
-    /// of a boxing site's slots into the call graph — so a live 0 would mean
-    /// that contract was broken, not that user code did something unusual.
+    /// `rt_dyn_call` reads as "this one is interpreted — ask the interpreter
+    /// for its closure". That is not an error: a trait object's concrete type
+    /// can be a user `defstruct` whose methods nobody ever compiled, while the
+    /// code dispatching on it (a prelude stream method, say) is native.
     fn publish_vtables(&self) {
         for id in 0..self.vtables.borrow().len() {
             self.publish_vtable(id as u32);
@@ -480,10 +491,20 @@ impl Interp {
         if let Some(&id) = self.vtable_ids.borrow().get(&key) {
             return id;
         }
-        let mut tables = self.vtables.borrow_mut();
-        let id = tables.len() as u32;
-        tables.push(slots.to_vec());
+        let id = {
+            let mut tables = self.vtables.borrow_mut();
+            let id = tables.len() as u32;
+            tables.push(slots.to_vec());
+            id
+        };
         self.vtable_ids.borrow_mut().insert(key, id);
+        // Publish immediately, not only after the next `compile_scc`: with a
+        // precompiled prelude the targets may already have native bodies
+        // while nothing in this session ever compiles anything, and then the
+        // compiled tier would never learn the table exists. A slot whose
+        // method is *not* compiled publishes as 0, which `rt_dyn_call` reads
+        // as "ask the interpreter".
+        self.publish_vtable(id);
         id
     }
 
@@ -565,89 +586,104 @@ impl Interp {
         self.root.borrow().all_fn_names()
     }
 
-    /// Installs the precompiled compiler island (interp-closure removal
-    /// Stage 4): parses the committed bitcode ([`crate::compile::bootstrap`])
-    /// and registers every island top-level `defun` named in `island_defuns`
-    /// into [`Self::compiled`], so a later call to `compile-function` (and
-    /// the whole island it drives) runs as native code instead of being
-    /// tree-walked. [`crate::compiler::load_aot`] calls this after re-checking
-    /// and `exec`ing the island `SOURCE` (which registers the interpreted
-    /// `FnDef`s + checker state the compiled bodies still need for
-    /// signatures/fallback), passing the `defun` names it collected there.
+    /// Installs a precompiled library — a committed bitcode artifact holding
+    /// the native bodies of definitions this `Interp` has already registered
+    /// interpreted — into [`FnDef::compiled`], so calls to them dispatch to
+    /// native code instead of being tree-walked.
     ///
-    /// The island bitcode references no external symbols other than the
-    /// `rt_*` runtime shims (verified: it is one self-contained module whose
-    /// functions call each other directly and lower every builtin to an
-    /// `rt_*`/`rt_llvm_call`), so `externals` is exactly
-    /// [`rt_extern_functions`] — the same set `compile_scc` supplies for a
-    /// JIT'd SCC.
+    /// Two callers, both after re-checking and `exec`ing the corresponding
+    /// source (which registers the `FnDef`s + checker state the compiled
+    /// bodies still need for signatures): the compiler island
+    /// ([`crate::compiler::load_aot`], interp-closure removal Stage 4) and the
+    /// prelude ([`crate::prelude::load`]).
     ///
-    /// `check_hash` selects the two callers' differing staleness needs. The
-    /// runtime loader ([`crate::compiler::load_aot`], `check_hash = true`)
-    /// compares the bitcode's embedded source hash against the live `SOURCE`
-    /// and hard-errors on a mismatch: a stale committed `.bc` (someone edited
-    /// `compiler.rs` without running `scripts/regen-compiler-island.sh`) must
-    /// never be silently loaded as wrong-version native bodies. The bootstrap
-    /// regenerator ([`crate::compile::bootstrap::build_island_bitcode`],
-    /// `check_hash = false`) *deliberately* loads the committed — necessarily
-    /// older — `.bc` to compile a possibly-changed `SOURCE` with it (the
-    /// snapshot chain that lets interpreted closures be removed: the *previous*
-    /// native island recompiles the next one), so a mismatch is expected, not
-    /// an error. In that mode a `defun` present in `island_defuns` but absent
-    /// from the older `.bc` (a newly added island function) is skipped here and
-    /// gets freshly compiled by the just-installed native `compile-function`
-    /// like any other new body, rather than failing the whole install.
-    pub(crate) fn install_island_bitcode(&self, bitcode: &[u8], island_defuns: &[String], check_hash: bool) -> Result<(), String> {
+    /// Neither artifact references any external symbol other than the `rt_*`
+    /// runtime shims (each is one self-contained module whose functions call
+    /// each other directly and lower every builtin to an `rt_*`/
+    /// `rt_llvm_call`), so `externals` is exactly [`rt_extern_functions`] —
+    /// the same set `compile_scc` supplies for a JIT'd SCC.
+    ///
+    /// [`CompiledLibrary::expected_hash`] selects between the two staleness
+    /// needs. A runtime loader passes `Some`, and a mismatch hard-errors: a
+    /// stale committed `.bc` (someone edited the source without regenerating)
+    /// must never be silently loaded as wrong-version native bodies. A
+    /// bootstrap regenerator passes `None` because it *deliberately* loads the
+    /// committed — necessarily older — `.bc` to compile a possibly-changed
+    /// source with it (the island's snapshot chain), so a mismatch is
+    /// expected, not an error.
+    ///
+    /// `items` is what the caller *would like* installed; what actually gets
+    /// installed is whatever of that the artifact has a body for. See the
+    /// filter below for why that is the artifact's call and not the caller's.
+    pub(crate) fn install_compiled_library(&self, lib: crate::compile::CompiledLibrary) -> Result<(), String> {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let buffer = MemoryBuffer::create_from_memory_range_copy(bitcode, "compiler_island");
+        let buffer = MemoryBuffer::create_from_memory_range_copy(lib.bitcode, lib.label);
         let module = Module::parse_bitcode_from_buffer(&buffer, crate::compile::llvm_context())
-            .map_err(|e| format!("compiler island bitcode failed to parse: {}", e))?;
+            .map_err(|e| format!("{} bitcode failed to parse: {}", lib.label, e))?;
 
-        if check_hash {
-            let embedded = crate::compile::bootstrap::read_embedded_source_hash(&module)
-                .ok_or_else(|| "compiler island bitcode has no embedded source hash".to_string())?;
-            if embedded != crate::compile::bootstrap::island_source_hash(crate::compiler::SOURCE)? {
-                return Err(
-                    "compiler island bitcode is stale relative to compiler.rs's SOURCE — run scripts/regen-compiler-island.sh"
-                        .to_string(),
-                );
+        if let Some((hash_global, expected)) = lib.expected_hash {
+            let embedded = crate::compile::bootstrap::read_embedded_source_hash(&module, hash_global)
+                .ok_or_else(|| format!("{} bitcode has no embedded source hash", lib.label))?;
+            if embedded != expected {
+                return Err(format!(
+                    "{} bitcode is stale relative to its SOURCE — run {}",
+                    lib.label, lib.regen_script
+                ));
             }
         }
 
-        // In bootstrap mode, keep only names the (older) module actually
-        // defines; a `check_hash` load has a fresh `.bc` so all are present.
-        let names: Vec<String> = island_defuns
+        // The artifact decides what it carries. An item with no *body* here
+        // either was never compilable (the prelude's stream methods, whose
+        // builtins have no lowering) or postdates this `.bc` (a definition
+        // added since, during a bootstrap load of the previous generation) —
+        // either way there is nothing to install, and asking `new_multi` for
+        // it would resolve a body-less declaration to an address pointing at
+        // nothing.
+        //
+        // Checking for a body rather than a declaration matters: `rt_*` shims
+        // and any not-yet-filled forward declaration answer `get_function`
+        // too.
+        let items: Vec<&crate::compile::symbols::CompiledItem> = lib
+            .items
             .iter()
-            .filter(|n| check_hash || module.get_function(&crate::compile::symbols::user_symbol_name(n)).is_some())
-            .cloned()
+            .filter(|item| {
+                module.get_function(&item.symbol_name()).is_some_and(|f| f.count_basic_blocks() > 0)
+            })
             .collect();
-        let internal_names: Vec<String> =
-            names.iter().map(|n| crate::compile::symbols::user_symbol_name(n)).collect();
+        let internal_names: Vec<String> = items.iter().map(|item| item.symbol_name()).collect();
         // Wire only the `rt_*` shims the module actually forward-declares.
         // Skipping the rest is not a leniency: a module can only *call* what
         // it declares, so a shim with no declaration here has no call site to
         // resolve, whereas passing it to `new_multi` would fail that
         // function's "no forward declaration" guard.
         //
-        // Both loads need this, not just the bootstrap one. The `check_hash`
-        // load verifies the `.bc` against `compiler.rs`'s `SOURCE` — and the
-        // shim list is *Rust*, so adding one (`rt_gensym`, made to compile
-        // `gensym` in macro-expansion lambdas; `rt_apply_any`, Stage D)
-        // leaves the hash matching while the committed bitcode still declares
-        // the older set. Gating on `check_hash` made every such addition fail
-        // the install until the island was regenerated, for a mapping the
-        // island had no use for.
+        // Both loads need this, not just the bootstrap one. A hash-checked
+        // load verifies the `.bc` against its own SOURCE — and the shim list is
+        // *Rust*, so adding one (`rt_gensym`, made to compile `gensym` in
+        // macro-expansion lambdas; `rt_apply_any`, Stage D) leaves the hash
+        // matching while the committed bitcode still declares the older set.
+        // Gating this on the hash check made every such addition fail the
+        // install until the artifact was regenerated, for a mapping the
+        // artifact had no use for.
         let externals: Vec<(String, usize)> = rt_extern_functions()
             .iter()
             .filter(|(n, _)| module.get_function(n).is_some())
             .map(|(n, addr)| (n.to_string(), *addr))
             .collect();
         let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals)
-            .map_err(|e| format!("compiler island JIT install failed: {}", e))?;
+            .map_err(|e| format!("{} JIT install failed: {}", lib.label, e))?;
 
-        for (name, cf) in names.iter().zip(compiled_fns) {
-            let f = self.root.borrow().get_fn(&Path::root(name)).expect("island defun already registered by exec'ing SOURCE");
-            *f.compiled.borrow_mut() = Some(Rc::new(cf));
+        for (item, cf) in items.iter().zip(compiled_fns) {
+            let def = match item {
+                crate::compile::symbols::CompiledItem::Fn(path) => self.root.borrow().get_fn(path),
+                crate::compile::symbols::CompiledItem::Method(type_path, method) => {
+                    self.root.borrow().get_method(type_path, method)
+                }
+            }
+            .ok_or_else(|| {
+                format!("{}: `{}` is not registered — exec its SOURCE first", lib.label, item.node_name())
+            })?;
+            *def.compiled.borrow_mut() = Some(Rc::new(cf));
         }
         Ok(())
     }
@@ -948,6 +984,10 @@ impl Interp {
                 v @ Value::Boxed(id) if heap.is_bignum(id) || heap.is_ratio(id) => v,
                 other => return Err(crossing_mismatch("a bignum/ratio", other)),
             },
+            Repr::RandomState => match crate::compile::runtime::decode(raw) {
+                v @ Value::Boxed(id) if heap.is_random_state(id) => v,
+                other => return Err(crossing_mismatch("a random-state", other)),
+            },
             // Every remaining representation is a heap value crossing as the
             // tagged `i64` the `rt_*` shims read.
             Repr::Sexpr
@@ -1030,6 +1070,33 @@ impl Interp {
         crate::compile::runtime::set_active_heap(heap as *mut Heap);
         ACTIVE_INTERP.with(|cell| cell.set(self as *const Interp));
         crate::compile::runtime::set_apply_interpreted(Some(rt_apply_interpreted));
+        crate::compile::runtime::set_dyn_slot_closure(Some(rt_dyn_slot_closure));
+    }
+
+    /// The closure an unfilled vtable slot's method reifies to —
+    /// [`rt_dyn_slot_closure`]'s body, and the `:dyn` counterpart of
+    /// [`Self::apply_interpreted`]'s closure argument.
+    ///
+    /// The slot names a `(type path, method)` pair (`Self::vtables`, filled
+    /// by the boxing site from the checker's own `TraitDef::method_order`),
+    /// and reifying it produces exactly the closure an interpreted
+    /// `(method-ref ...)` would — carrying the parameter and return
+    /// representations the caller decodes by.
+    fn dyn_slot_closure(&self, heap: &mut Heap, vtable: u32, slot: u32) -> Result<i64, EvalError> {
+        let target = self
+            .vtables
+            .borrow()
+            .get(vtable as usize)
+            .and_then(|slots| slots.get(slot as usize).cloned())
+            .ok_or_else(|| EvalError::Internal(format!("vtable {} has no slot {}", vtable, slot)))?;
+        let (type_path, method) = target;
+        let f = self
+            .root
+            .borrow()
+            .get_method(&type_path, &method)
+            .ok_or_else(|| EvalError::Internal(format!("vtable slot names `{}::{}`, which is not registered", type_path, method)))?;
+        let v = self.reify(heap, &f)?;
+        Ok(crate::compile::runtime::encode(v))
     }
 
     /// Applies an *interpreted* closure that compiled code is calling —
@@ -1137,6 +1204,20 @@ impl Interp {
         self.root.borrow().get_fn(&Path::root(name)).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))
     }
 
+    /// Whether `name` — a `defun` name, or `type-path::method` — currently has
+    /// a compiled body installed, so calls to it run native rather than being
+    /// tree-walked.
+    ///
+    /// Public because "did the precompiled prelude actually take effect?" is
+    /// otherwise unanswerable from outside the crate: every observable of a
+    /// compiled call is identical to the interpreted one *except* how fast it
+    /// is, which is exactly the wrong thing to assert on. `false` for a name
+    /// that resolves to nothing, since an absent definition has no compiled
+    /// body either.
+    pub fn is_compiled(&self, name: &str) -> bool {
+        self.resolve_fn_def(name).is_ok_and(|f| f.compiled.borrow().is_some())
+    }
+
     /// Looks up `name`'s registered `defun`/`defmethod` body (see
     /// [`Self::resolve_fn_def`]), enforcing the one constraint every entry
     /// point into the compiler shares: a real type signature (so an LLVM
@@ -1202,6 +1283,28 @@ impl Interp {
     /// has no such concern — compiling and running happen in the same
     /// `Heap` there, so lazy, reference-driven promotion (its own call
     /// here) is simpler and just as correct.
+    /// A global's current value, wherever it actually lives.
+    ///
+    /// A *promoted* global (one compiled code can reach) is stored in a
+    /// permanent GC root, and `set-global` writes only there — its
+    /// interpreter-side cell keeps whatever it was initialized with. So Rust
+    /// code that reads a prelude global by name must ask here rather than
+    /// through `root.get_global(..).get(heap)`, which is the cell.
+    ///
+    /// The `eval_core` reader (`global_core`) has always made this
+    /// distinction; the printer-settings readers did not, and once the
+    /// precompiled prelude started promoting *every* prelude `defvar` eagerly,
+    /// `(setf *print-pretty* true)` stopped reaching [`Self::pretty_opts`] —
+    /// pretty printing silently never happened.
+    pub(crate) fn global_value(&self, heap: &Heap, path: &Path) -> Option<Value> {
+        if let Some(&id) = self.compiled_globals.borrow().get(path) {
+            // See `global_core`: the id is not the permanent-root position,
+            // so it is resolved the same way `rt_global_get` resolves it.
+            return crate::compile::runtime::global_perm_idx(id).map(|i| heap.permanent_root(i));
+        }
+        self.root.borrow().get_global(path).map(|slot| slot.get(heap))
+    }
+
     pub(crate) fn promote_global(&self, heap: &mut Heap, path: &Path) -> Result<usize, EvalError> {
         if let Some(&id) = self.compiled_globals.borrow().get(path) {
             return Ok(id);
@@ -1550,14 +1653,21 @@ impl Interp {
     fn compile_function(&self, heap: &mut Heap, target: &CompileTarget) -> Result<Value, EvalError> {
         let (name, already_compiled) = match target {
             CompileTarget::Fn(r) => {
-                self.resolve_fn_ref(r).ok_or_else(|| EvalError::NoSuchFunction(r.written.join("::")))?;
+                self.resolve_fn_ref(r).ok_or_else(|| {
+                    EvalError::Internal(format!(
+                        "compile: `{}` resolved at check time but not here",
+                        r.written.join("::")
+                    ))
+                })?;
                 (r.resolved.to_string(), self.root.borrow().fn_compiled(&r.resolved))
             }
             CompileTarget::Method { type_name, method, home } => {
-                self.root
-                    .borrow()
-                    .resolve_method(home, type_name, method)
-                    .ok_or_else(|| EvalError::NoSuchFunction(method_link_name(type_name, method)))?;
+                self.root.borrow().resolve_method(home, type_name, method).ok_or_else(|| {
+                    EvalError::Internal(format!(
+                        "compile: `{}` resolved at check time but not here",
+                        method_link_name(type_name, method)
+                    ))
+                })?;
                 (method_link_name(type_name, method), self.root.borrow().method_compiled(type_name, method))
             }
         };
@@ -1568,6 +1678,39 @@ impl Interp {
             self.compile_scc(heap, &scc)?;
         }
         Ok(Value::Bool(true))
+    }
+
+    /// Answers "would compiling `name` reach something with no compilable
+    /// body?" without emitting anything.
+    ///
+    /// The check has to happen *before* translation, not around it: when the
+    /// island's `compile-call` can't find a callee's declaration it calls
+    /// `get-function`, which **aborts the process** rather than returning an
+    /// error (see [`crate::compile::runtime_function_names`]'s doc comment).
+    /// So a builder of a shared library module — `compile::prelude_bootstrap`,
+    /// which must decide per definition whether to include it — cannot simply
+    /// try and recover. [`Self::compute_sccs`] already walks exactly the
+    /// transitive closure that matters and reports a missing body cleanly
+    /// (through [`Self::compiled_fn_body`]), so asking it is both the cheapest
+    /// and the most faithful available oracle: same graph, same filters, same
+    /// notion of "is a real call target" the compile path itself uses.
+    ///
+    /// Transitivity is the useful part. A definition that merely *calls*
+    /// something uncompilable is itself uncompilable — its emitted body would
+    /// reference a symbol nothing defines — and this reports that without the
+    /// caller having to close the set by hand. It also means the answer is
+    /// about the *root* cause: dozens of prelude stream methods are
+    /// uncompilable for the single reason that `stream-read-char` has no
+    /// lowering, and [`Uncompilable::MissingTarget`] says so for each.
+    pub(crate) fn precheck_compilable(&self, heap: &Heap, name: &str) -> Result<(), Uncompilable> {
+        match self.compute_sccs(heap, name) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(match e.into_kind() {
+                EvalError::NoSuchFunction(target) => Uncompilable::MissingTarget(target),
+                EvalError::Uncompilable { target, .. } => Uncompilable::MissingTarget(target),
+                other => Uncompilable::Other(other),
+            }),
+        }
     }
 
     /// `name`'s own outgoing edges in the top-level compile call graph —
@@ -1646,7 +1789,7 @@ impl Interp {
                 // instructions / `rt_str_*`/`rt_bignum_*`/`rt_ratio_*` calls
                 // in `compile-assoc`, not function calls. A builtin on these
                 // receivers that `compile-assoc` does *not* lower natively
-                // (`i64::int->char`, `char::equalp`, ...) is kept as a target
+                // (`i64::int->char`, `string::upcase`, ...) is kept as a target
                 // so the `!self.methods.contains_key` check below rejects it
                 // with a clean up-front error — otherwise it reaches the
                 // island's `get-function` guard, an unrecoverable
@@ -1660,11 +1803,10 @@ impl Interp {
             .collect();
         for (type_name, method) in &method_targets {
             if !self.root.borrow().has_method(type_name, method) {
-                return Err(EvalError::Panic(format!(
-                    "compile: \"{}\" calls \"{}\", a builtin method with no compiled implementation",
-                    name,
-                    method_link_name(type_name, method)
-                )));
+                return Err(EvalError::Uncompilable {
+                    caller: name.to_string(),
+                    target: method_link_name(type_name, method),
+                });
             }
         }
         edges.extend(method_targets.into_iter().map(|(p, m)| CallEdge::Method(p, m)));
@@ -2543,16 +2685,15 @@ impl Interp {
     /// build a bare `Interp`) means every limit is off, which is also CL's
     /// initial state for all three.
     pub(crate) fn print_limits(&self, heap: &Heap) -> crate::eval::format::Limits {
-        let root = self.root.borrow();
         let read_limit = |name: &str| -> Option<usize> {
-            match root.get_global(&crate::Path::root(name)).map(|s| s.get(heap)) {
+            match self.global_value(heap, &crate::Path::root(name)) {
                 Some(Value::Int(n)) if n > 0 => Some(n as usize),
                 _ => None,
             }
         };
         crate::eval::format::Limits {
             circle: matches!(
-                root.get_global(&crate::Path::root("*print-circle*")).map(|s| s.get(heap)),
+                self.global_value(heap, &crate::Path::root("*print-circle*")),
                 Some(Value::Bool(true))
             ),
             level: read_limit("*print-level*"),
@@ -2706,9 +2847,8 @@ impl Interp {
     /// A missing global (the prelude was not loaded — some unit tests build a
     /// bare `Interp`) falls back to the defaults, i.e. pretty printing off.
     pub(crate) fn pretty_opts(&self, heap: &Heap) -> crate::eval::pprint::Opts {
-        let root = self.root.borrow();
         let read_int = |name: &str, default: i64| -> i64 {
-            match root.get_global(&crate::Path::root(name)).map(|s| s.get(heap)) {
+            match self.global_value(heap, &crate::Path::root(name)) {
                 Some(Value::Int(n)) => n,
                 _ => default,
             }
@@ -2718,7 +2858,7 @@ impl Interp {
         // global — the same thing CL's stream-type dispatch achieves.
         let pretty = self.pretty.borrow().is_some()
             || matches!(
-                root.get_global(&crate::Path::root("*print-pretty*")).map(|s| s.get(heap)),
+                self.global_value(heap, &crate::Path::root("*print-pretty*")),
                 Some(Value::Bool(true))
             );
         let margin = read_int("*print-right-margin*", crate::eval::pprint::DEFAULT_MARGIN as i64);
@@ -3436,30 +3576,21 @@ fn ratio_denominator(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError
     Ok(bignum_rt(heap, expect_ratio(heap, &args[0])?.denom().clone()))
 }
 
-/// One step of a 64-bit xorshift generator (period `2^64 - 1` over the
-/// nonzero states — these exact shift/xor constants are a full-cycle
-/// permutation of them, so a nonzero seed can never reach `0`) — the
-/// bit-twiddling behind every `random-state` draw. Not cryptographically
-/// secure and not expressible in typelisp itself (no bitwise operators),
-/// matching `gensym`'s "collision-resistant, not unforgeable" precedent for
-/// what a builtin without a real entropy/hygiene API can promise.
-fn xorshift64_step(x: u64) -> u64 {
-    let mut x = x;
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    x
-}
+/// One step of a 64-bit xorshift generator — the bit-twiddling behind every
+/// `random-state` draw. Not cryptographically secure and not expressible in
+/// typelisp itself (no bitwise operators), matching `gensym`'s
+/// "collision-resistant, not unforgeable" precedent for what a builtin
+/// without a real entropy/hygiene API can promise.
+///
+/// Lives in `typelisp-rt` (with the compiled lowering,
+/// `rt_random_state_next`) rather than here, and is used from both sides: a
+/// draw must not depend on whether the caller happened to be compiled.
+use crate::compile::runtime::xorshift64_step;
 
-/// A fresh entropy seed for `make-random-state-fresh` — `| 1` guarantees
-/// non-zero (the one fixed point `xorshift64_step` can't escape).
-fn fresh_random_seed() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(1)
-        | 1
-}
+/// A fresh entropy seed for `make-random-state-fresh`. Lives beside the
+/// compiled lowering (`rt_make_random_state_fresh`), like
+/// [`xorshift64_step`].
+use crate::compile::runtime::fresh_random_seed;
 
 /// The box behind a `random-state` value. A *positive* `is_random_state` test,
 /// so a differently-shaped box (a float, a struct) is reported rather than
@@ -3916,7 +4047,6 @@ fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, arg
             "build-call-with-env" => Some(llvm_builder_build_call_with_env(args)),
             "build-make-closure" => Some(llvm_builder_build_make_closure(args)),
             "build-closure-apply" => Some(llvm_builder_build_closure_apply(args)),
-            "build-dyn-call" => Some(llvm_builder_build_dyn_call(args)),
             "load-raw" => Some(llvm_builder_load_raw(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
@@ -4056,42 +4186,93 @@ fn method_link_name(type_name: &Path, method: &str) -> String {
     format!("{}::{}", type_name, method)
 }
 
-/// True for the handful of builtins `compiler.rs`'s `compile-call` rewrites to
-/// a `crate::compile::runtime` shim by name (`sexpr-car` -> `rt_car`, etc. —
-/// see that function's `raw-nm`/`nm` rename) rather than requiring `(compile
-/// ...)` first: these can never be `compile`d themselves (no typelisp AST body
-/// — direct cons-heap access, Rust-only), so [`Interp::compile_function`]
+/// The `crate::compile::runtime` shim a *free* builtin call lowers to, or
+/// `None` for an ordinary function whose name gets mangled instead.
+///
+/// These builtins can never be `compile`d themselves (no typelisp body —
+/// direct cons-heap or OS access, Rust-only), so [`Interp::compile_function`]
 /// excludes them from its normal "every call target must already be compiled"
-/// check and instead always wires them via [`rt_extern_functions`]. These are
-/// the `sexpr-*` island layer (Symbol/Sexpr redesign Phase 4b) — the whole
-/// family since closure unification Stage 8 (tag predicates and typed
-/// payload extractors included, not just `car`/`cdr`/`cons`). The free
-/// `car`/`cdr`/`cons` names are the `cons<T,U>` pair (an ordinary
-/// `defstruct` method / `defun`, compiled the normal way), not `rt_*` shims.
+/// check ([`is_rt_builtin_name`]) and instead always wires them via
+/// [`rt_extern_functions`]. The `sexpr-*` family is the island layer
+/// (Symbol/Sexpr redesign Phase 4b — the whole family since closure
+/// unification Stage 8, tag predicates and typed payload extractors included,
+/// not just `car`/`cdr`/`cons`). The free `car`/`cdr`/`cons` names are the
+/// `cons<T,U>` pair (an ordinary `defstruct` method / `defun`, compiled the
+/// normal way), not `rt_*` shims.
+///
+/// **One table, on purpose.** The renaming used to happen twice: `core_bridge`
+/// decided whether to mangle a name, and `compile-call` in the island's SOURCE
+/// re-derived the shim it stood for, from a 15-deep nested `if`. Two lists
+/// that had to agree — and the failure mode of a disagreement is the worst one
+/// this compiler has: the island's `get-function` **aborts the process** on a
+/// name it cannot find. Naming the shim here, where the "is it a builtin?"
+/// decision already lives, leaves the island nothing to re-derive; it calls
+/// whatever the bridge named.
+pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "sexpr-car" => "rt_car",
+        "sexpr-cdr" => "rt_cdr",
+        "sexpr-cons" => "rt_cons",
+        "sexpr-consp" => "rt_consp",
+        "sexpr-null" => "rt_null",
+        "sexpr-atom" => "rt_atom",
+        "sexpr-symp" => "rt_symp",
+        "sexpr-int" => "rt_sexpr_int",
+        "sexpr-bool" => "rt_sexpr_bool",
+        "sexpr-char" => "rt_sexpr_char",
+        "sexpr-float" => "rt_float_value",
+        "sexpr-str" => "rt_sexpr_str",
+        "sexpr-sym-name" => "rt_sym_name",
+        // `gensym`: a free builtin (not a `sexpr-*` accessor) with no typelisp
+        // body. It must be here so a macro-expansion lambda that calls it
+        // (e.g. `do`'s per-binding temporaries) doesn't send
+        // `call_graph_edges` looking for a (nonexistent) `gensym` function to
+        // transitively compile.
+        "gensym" => "rt_gensym",
+        // `symbol->string` is `sexpr-sym-name` under the checker's `symbol`
+        // type rather than `sexpr`'s — the same shim, since both spellings
+        // carry the same interned `Value::Symbol`.
+        "symbol->string" => "rt_sym_name",
+        // The `random-state` builtins. Nothing about a random-state lives
+        // outside the heap, so all three lower.
+        "random-state-next" => "rt_random_state_next",
+        "random-state-copy" => "rt_random_state_copy",
+        "make-random-state-fresh" => "rt_make_random_state_fresh",
+        // The stream/file builtins. Every one is a thin conversion around
+        // `typelisp_rt::stream_builtin::stream_builtin`, which the
+        // interpreter calls too — see `Interp::eval_stream_builtin`. They can
+        // lower at all only because the stream *table* lives in
+        // `typelisp-rt` (see `typelisp_rt::stream`'s module docs): an
+        // AOT-linked executable has no interpreter to keep it on.
+        "stream-stdin" => "rt_stream_stdin",
+        "stream-stdout" => "rt_stream_stdout",
+        "stream-stderr" => "rt_stream_stderr",
+        "stream-string-input" => "rt_stream_string_input",
+        "stream-string-output" => "rt_stream_string_output",
+        "stream-open-file" => "rt_stream_open_file",
+        "stream-close" => "rt_stream_close",
+        "stream-open-p" => "rt_stream_open_p",
+        "stream-input-p" => "rt_stream_input_p",
+        "stream-output-p" => "rt_stream_output_p",
+        "stream-read-char" => "rt_stream_read_char",
+        "stream-unread-char" => "rt_stream_unread_char",
+        "stream-listen" => "rt_stream_listen",
+        "stream-write-string" => "rt_stream_write_string",
+        "stream-at-line-start" => "rt_stream_at_line_start",
+        "stream-finish-output" => "rt_stream_finish_output",
+        "stream-take-output-string" => "rt_stream_take_output_string",
+        "file-exists-p" => "rt_file_exists_p",
+        "file-delete" => "rt_file_delete",
+        "file-rename" => "rt_file_rename",
+        _ => return None,
+    })
+}
+
+/// Whether [`rt_builtin_symbol`] names a shim for `name` — the "this is not a
+/// call target to compile" question, asked where the shim's own name is not
+/// needed.
 pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
-    matches!(
-        name,
-        "sexpr-car"
-            | "sexpr-cdr"
-            | "sexpr-cons"
-            | "sexpr-consp"
-            | "sexpr-null"
-            | "sexpr-atom"
-            | "sexpr-symp"
-            | "sexpr-int"
-            | "sexpr-bool"
-            | "sexpr-char"
-            | "sexpr-float"
-            | "sexpr-str"
-            | "sexpr-sym-name"
-            // `gensym`: a free builtin (not a `sexpr-*` accessor) with no
-            // typelisp body — `compile-call` rewrites it to the `rt_gensym`
-            // shim, the same wiring as the accessors above. It must be here so
-            // a macro-expansion lambda that calls it (e.g. `do`'s per-binding
-            // temporaries) doesn't send `call_graph_edges` looking for a
-            // (nonexistent) `gensym` function to transitively compile.
-            | "gensym"
-    )
+    rt_builtin_symbol(name).is_some()
 }
 
 /// Whether a builtin method on a primitive receiver (`i64`/`i32`/`char`/
@@ -4114,48 +4295,78 @@ pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
 /// here keeps `(compile bad-fn)` a clean `EvalError` — the behavior the
 /// interpreted island used to give from `get-function` directly.
 pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str) -> bool {
+    native_lowered_primitive_methods(type_local).contains(&method)
+}
+
+/// The methods [`is_native_lowered_primitive_method`] answers `true` for, as
+/// data.
+///
+/// A table rather than a `matches!` so the set can be *read*, not only
+/// queried: `native_method_list_tests` compares it against the island's own
+/// predicates in both directions, and the direction that matters — a method
+/// Rust claims and the island does not lower — is unaskable of a predicate,
+/// because there is nothing to enumerate. That gap is not hypothetical; it is
+/// how `char->string` survived here.
+pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'static str] {
     match type_local {
-        "i64" | "i32" => matches!(
-            method,
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "eq" | "/=" | "int->bignum" | "int->ratio"
-                | "max" | "min" | "logand" | "logior" | "logxor" | "logtest" | "lognot" | "logcount" | "integer-length"
-                | "ash" | "logbitp"
-        ),
-        "string" => matches!(
-            method,
-            "length" | "ref" | "eq" | "equal" | "equalp" | "lt" | "<" | "<=" | ">" | ">=" | "append"
-        ),
-        "char" => matches!(
-            method,
-            "eq" | "eql" | "equal" | "equalp" | "lt" | "<" | "<=" | ">" | ">=" | "char->int"
-                | "char->string"
-        ),
-        "f64" => matches!(
-            method,
-            "+" | "-" | "*" | "/" | "expt" | "sqrt" | "floor" | "ceiling" | "round" | "truncate"
-                | "float->int" | "float->bignum" | "float->ratio"
-                | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
-                | "max" | "min" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh"
-                | "asinh" | "acosh" | "atanh" | "exp" | "log"
-        ),
-        "bignum" => matches!(
-            method,
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
-                | "bignum->int" | "try-bignum->int" | "bignum->float" | "bignum->ratio" | "max" | "min"
-        ),
-        "ratio" => matches!(
-            method,
-            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
-                | "ratio->bignum" | "ratio->float" | "numerator" | "denominator" | "max" | "min"
-        ),
+        "i64" | "i32" => &[
+            "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "/=", "int->bignum", "int->ratio",
+            "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
+            "ash", "logbitp",
+        ],
+        "string" => &["length", "ref", "eq", "equal", "equalp", "lt", "<", "<=", ">", ">=", "append", "substring"],
+        // `char->string` is here *and* in `char-native-method?` now. It was
+        // here alone once, and that is worth remembering: this list is what
+        // decides whether a call is a real graph edge, so claiming a method is
+        // lowered natively when the island has no case for it means the edge
+        // is dropped, no declaration is emitted, and `compile-call`'s
+        // `get-function` **aborts the process** at compile time. The
+        // disagreement is what `the_rust_and_island_native_method_lists_agree`
+        // exists to catch.
+        "char" => &["eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "char->int", "char->string"],
+        "f64" => &[
+            "+", "-", "*", "/", "expt", "sqrt", "floor", "ceiling", "round", "truncate",
+            "float->int", "float->bignum", "float->ratio",
+            "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
+            "max", "min", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh",
+            "asinh", "acosh", "atanh", "exp", "log",
+        ],
+        "bignum" => &[
+            "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
+            "bignum->int", "try-bignum->int", "bignum->float", "bignum->ratio", "max", "min",
+            // The three bitwise primitives the prelude's derived bignum
+            // operators (`logeqv`/`lognand`/`lognor`/`logandc1`/`logandc2`/
+            // `logorc1`/`logorc2`) are written in terms of. The rest of
+            // `bignum_assoc`'s bitwise catalog (`logxor`/`ash`/`logbitp`/
+            // `logtest`/`logcount`/`integer-length`) stays interpreted: no
+            // prelude definition reaches it, so lowering it would be code
+            // nothing exercises. `logxor` is here because `logeqv` is
+            // `lognot` of it — a blocker that only became visible once
+            // `lognot` had a lowering, which is the reconcile check in
+            // `prelude_bootstrap` doing its job.
+            "logand", "logior", "logxor", "lognot",
+        ],
+        "ratio" => &[
+            "+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
+            "ratio->bignum", "ratio->float", "numerator", "denominator", "max", "min",
+        ],
         // `Sexpr` values are raw tagged `i64` handles in compiled code, and
         // interned symbols/`nil`/small atoms are handle-identical, so `eq`
         // (CL identity) lowers to a plain `icmp eq` on the two handles —
         // `compile-assoc`'s `sexpr` arm, mirroring the `char` branch. Only
         // `eq` is native; structural `equal` stays an ordinary prelude
         // `defun` compiled the normal way.
-        "sexpr" => matches!(method, "eq"),
-        _ => false,
+        "sexpr" => &["eq"],
+        // `bool`'s four comparison names are one operation
+        // (`registry::bool_assoc`: two immediate values, nothing to fold or
+        // recurse into), and a compiled `bool` is a raw `0`/`1`, so all four
+        // are the same `icmp eq`.
+        "bool" => &["eq", "eql", "equal", "equalp"],
+        // A compiled `symbol` is the interned `Value::Symbol` handle, so
+        // identity *is* handle equality — the same `icmp eq` as `sexpr`'s
+        // `eq`. `registry::symbol_assoc` registers only these two.
+        "symbol" => &["eq", "eql"],
+        _ => &[],
     }
 }
 
@@ -4172,8 +4383,8 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 ///
 /// `rt_push_sexpr_root`/`rt_pop_sexpr_root` (Stage 6 of the
 /// Sexpr-representation plan, `docs/implementation-log.md` — the "Sexprルート挿入パス"):
-/// unlike `rt_car`/.../`rt_match_fail`, nothing here rewrites a *user-visible*
-/// call name to reach these (`is_rt_builtin_name`'s list is unchanged) —
+/// unlike `rt_car`/.../`rt_match_fail`, no *user-visible* call name maps to
+/// these (they are not in [`rt_builtin_symbol`]'s table) —
 /// `compiler.rs`'s `retain-bindings`/`release-bindings`/`bind-let-values`
 /// call them directly via `get-function`/`build-call`, the same way
 /// `build-make-closure`/`build-closure-apply` call `rt_closure_*` directly
@@ -4216,9 +4427,16 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 119] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 147] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
+        rt_bignum_logand, rt_bignum_logior, rt_bignum_lognot, rt_bignum_logxor,
+        rt_make_random_state_fresh, rt_random_state_copy, rt_random_state_next,
+        rt_file_delete, rt_file_exists_p, rt_file_rename, rt_stream_at_line_start, rt_stream_close,
+        rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p,
+        rt_stream_output_p, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
+        rt_stream_string_input, rt_stream_string_output, rt_stream_take_output_string, rt_stream_unread_char,
+        rt_stream_write_string,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
         rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len,
         rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum,
@@ -4232,9 +4450,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 119] {
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
         rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_int, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
-        rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
+        rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
-        rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set, rt_vtable_slot,
+        rt_dyn_call, rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
     };
     [
         // The one main-crate entry: the generic `llvm-*`/native-scope
@@ -4246,10 +4464,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 119] {
         // declaration emits no symbol for the linker to miss).
         ("rt_llvm_call", rt_llvm_call as usize),
         // Trait objects and vtables (TODO T4): `rt_dyn_new` boxes,
-        // `rt_dyn_vtable`/`rt_dyn_value` decode, and `rt_vtable_slot` reads
-        // the native entry point a `:dyn` call site then calls indirectly
-        // (`compiler.rs`'s `compile-dyn-*`). `rt_dyn_upcast` swaps a box's
-        // table for a supertrait's when the two layouts share no prefix.
+        // `rt_dyn_vtable`/`rt_dyn_value` decode, and `rt_dyn_call` performs
+        // the dispatch itself (`compiler.rs`'s `compile-dyn-*`) — including
+        // the case where the slot's implementation is interpreted.
+        // `rt_dyn_upcast` swaps a box's table for a supertrait's when the two
+        // layouts share no prefix.
         // `rt_vtable_set`/`rt_upcast_set` fill the two tables from AOT
         // startup; the JIT fills them Rust-side instead
         // (`Interp::publish_vtables`/`register_dyn_box`), so nothing emits a
@@ -4258,7 +4477,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 119] {
         ("rt_dyn_vtable", rt_dyn_vtable as usize),
         ("rt_dyn_value", rt_dyn_value as usize),
         ("rt_dyn_upcast", rt_dyn_upcast as usize),
-        ("rt_vtable_slot", rt_vtable_slot as usize),
+        ("rt_dyn_call", rt_dyn_call as usize),
         ("rt_vtable_set", rt_vtable_set as usize),
         ("rt_upcast_set", rt_upcast_set as usize),
         ("rt_car", rt_car as usize),
@@ -4291,6 +4510,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 119] {
         ("rt_char_equalp", rt_char_equalp as usize),
         ("rt_str_lt", rt_str_lt as usize),
         ("rt_str_append", rt_str_append as usize),
+        ("rt_str_substring", rt_str_substring as usize),
         ("rt_float_new", rt_float_new as usize),
         ("rt_float_value", rt_float_value as usize),
         ("rt_box_kind", rt_box_kind as usize),
@@ -4332,6 +4552,33 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 119] {
         ("rt_bignum_mul", rt_bignum_mul as usize),
         ("rt_bignum_div", rt_bignum_div as usize),
         ("rt_bignum_mod", rt_bignum_mod as usize),
+        ("rt_bignum_logand", rt_bignum_logand as usize),
+        ("rt_bignum_logior", rt_bignum_logior as usize),
+        ("rt_bignum_logxor", rt_bignum_logxor as usize),
+        ("rt_bignum_lognot", rt_bignum_lognot as usize),
+        ("rt_random_state_next", rt_random_state_next as usize),
+        ("rt_random_state_copy", rt_random_state_copy as usize),
+        ("rt_make_random_state_fresh", rt_make_random_state_fresh as usize),
+        ("rt_stream_stdin", rt_stream_stdin as usize),
+        ("rt_stream_stdout", rt_stream_stdout as usize),
+        ("rt_stream_stderr", rt_stream_stderr as usize),
+        ("rt_stream_string_input", rt_stream_string_input as usize),
+        ("rt_stream_string_output", rt_stream_string_output as usize),
+        ("rt_stream_open_file", rt_stream_open_file as usize),
+        ("rt_stream_close", rt_stream_close as usize),
+        ("rt_stream_open_p", rt_stream_open_p as usize),
+        ("rt_stream_input_p", rt_stream_input_p as usize),
+        ("rt_stream_output_p", rt_stream_output_p as usize),
+        ("rt_stream_read_char", rt_stream_read_char as usize),
+        ("rt_stream_unread_char", rt_stream_unread_char as usize),
+        ("rt_stream_listen", rt_stream_listen as usize),
+        ("rt_stream_write_string", rt_stream_write_string as usize),
+        ("rt_stream_at_line_start", rt_stream_at_line_start as usize),
+        ("rt_stream_finish_output", rt_stream_finish_output as usize),
+        ("rt_stream_take_output_string", rt_stream_take_output_string as usize),
+        ("rt_file_exists_p", rt_file_exists_p as usize),
+        ("rt_file_delete", rt_file_delete as usize),
+        ("rt_file_rename", rt_file_rename as usize),
         ("rt_bignum_cmp", rt_bignum_cmp as usize),
         ("rt_bignum_to_int", rt_bignum_to_int as usize),
         ("rt_bignum_fits_i32", rt_bignum_fits_i32 as usize),
@@ -4861,42 +5108,6 @@ fn llvm_builder_build_call(args: &[Value]) -> Result<Value, EvalError> {
     }
 }
 
-/// Dynamic dispatch through a trait object's vtable (TODO T4): calls the
-/// raw function pointer `args[1]` — which the island has just read out with
-/// `rt_vtable_slot` — under the ordinary `compiled_fn_type` ABI, passing the
-/// argument array exactly as [`llvm_builder_build_call`] does.
-///
-/// The stripped-down sibling of [`llvm_builder_build_closure_apply`]: both
-/// call a callee that is only a runtime value, but a vtable slot carries no
-/// captured environment, so none of that function's env-copying loop or
-/// fixed 64-slot scratch buffer is needed — just an `inttoptr` and an
-/// indirect call.
-fn llvm_builder_build_dyn_call(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let fn_ptr_int = expect_llvm_value(&args[1])?.into_int_value();
-    let args_ptr = expect_llvm_value(&args[2])?;
-    let argc = match &args[3] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
-    let ctx = crate::compile::llvm_context();
-    let b = builder.borrow();
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_ptr = b
-        .build_int_to_ptr(fn_ptr_int, ptr_ty, "dyn_fn_ptr")
-        .map_err(|e| EvalError::Internal(format!("build-dyn-call: {}", e)))?;
-    let argc_val = ctx.i32_type().const_int(argc, false);
-    let call = b
-        .build_indirect_call(compiled_fn_type(), fn_ptr, &[args_ptr.into(), argc_val.into()], "dyn_call_result")
-        .map_err(|e| EvalError::Internal(format!("build-dyn-call: {}", e)))?;
-    match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
-        inkwell::values::ValueKind::Instruction(_) => {
-            Err(EvalError::Internal("build-dyn-call: callee produced no value".into()))
-        }
-    }
-}
-
 /// The captures counterpart of [`llvm_builder_build_call`]: calls `target`
 /// (declared via `add-function-with-env`) passing both the args array
 /// (`args_ptr`/`argc`, exactly as `build-call` does) and an env array
@@ -5175,122 +5386,31 @@ fn build_enum_value(heap: &mut Heap, type_name: Path, variant: usize, fields: Ve
 }
 
 impl Interp {
-    /// The `stream-*` / `file-*` built-ins: thin wrappers over
-    /// [`crate::eval::stream::StreamTable`], which owns the OS resources.
+    /// The `stream-*` / `file-*` built-ins: a thin adapter over
+    /// [`crate::compile::runtime::stream_builtin::stream_builtin`], which is
+    /// the implementation — and is also what the compiled `rt_stream_*` shims
+    /// call, so an interpreted and a compiled call to `read-char` are the same
+    /// code reading the same stream table.
     ///
-    /// Every one of these is deliberately dumb. The CL-shaped surface —
+    /// Every one of those is deliberately dumb. The CL-shaped surface —
     /// `open`'s `&key` arguments, the `with-...` macros, `read-line`'s
     /// end-of-input convention, and every composite stream — is written in
     /// typelisp on top of the `Stream`/`InputStream`/`OutputStream` traits,
     /// where a default method body can express it once for all
-    /// implementations. Nothing here knows those traits exist.
+    /// implementations. Nothing down there knows those traits exist.
     ///
-    /// Fallible operations return `Result<_, FileError>` rather than
-    /// panicking: a missing file or a closed stream is a condition programs
-    /// routinely handle, not a bug.
+    /// Fallible operations return `Result<_, FileError>` values; the `Err`
+    /// arm here is something else entirely — an argument of the wrong shape,
+    /// which the checker rules out, so it can only mean an internal bug.
     fn eval_stream_builtin(
         &self,
         heap: &mut Heap,
         name: &str,
         args: &[Value],
     ) -> Option<Result<Value, EvalError>> {
-        use crate::check::registry::FILE_ERROR;
-        // Most arms yield a `StreamResult`; this keeps each to one line.
-        macro_rules! wrap {
-            ($e:expr, $ok:expr) => {
-                match $e {
-                    Ok(v) => Ok(result_ok(heap, $ok(v))),
-                    Err(m) => Ok(result_err(heap, FILE_ERROR, m)),
-                }
-            };
-        }
-        let mut t = self.streams.borrow_mut();
-        let h = |i: usize| -> Result<i64, EvalError> { rt_i64(&args[i]) };
-        Some(match name {
-            "stream-stdin" => Ok(Value::Int(t.stdin())),
-            "stream-stdout" => Ok(Value::Int(t.stdout())),
-            "stream-stderr" => Ok(Value::Int(t.stderr())),
-            "stream-string-input" => match expect_str(heap, &args[0]) {
-                Ok(s) => Ok(Value::Int(t.string_input(&s))),
-                Err(e) => Err(e),
-            },
-            "stream-string-output" => Ok(Value::Int(t.string_output())),
-            "stream-open-file" => match (expect_str(heap, &args[0]), h(1)) {
-                (Ok(p), Ok(mode)) => wrap!(t.open_file(&p, mode), |v: i64| Value::Int(v)),
-                (Err(e), _) | (_, Err(e)) => Err(e),
-            },
-            "stream-close" => match h(0) {
-                Ok(x) => wrap!(t.close(x), |_v: ()| Value::Empty),
-                Err(e) => Err(e),
-            },
-            "stream-open-p" => h(0).map(|x| Value::Bool(t.is_open(x))),
-            "stream-input-p" => match h(0) {
-                Ok(x) => wrap!(t.is_input(x), |v: bool| Value::Bool(v)),
-                Err(e) => Err(e),
-            },
-            "stream-output-p" => match h(0) {
-                Ok(x) => wrap!(t.is_output(x), |v: bool| Value::Bool(v)),
-                Err(e) => Err(e),
-            },
-            "stream-read-char" => match h(0) {
-                Ok(x) => match t.read_char(x) {
-                    Ok(c) => {
-                        let inner = option_value(heap, c.map(Value::Char));
-                        Ok(result_ok(heap, inner))
-                    }
-                    Err(m) => Ok(result_err(heap, FILE_ERROR, m)),
-                },
-                Err(e) => Err(e),
-            },
-            "stream-unread-char" => match (h(0), expect_char(&args[1])) {
-                (Ok(x), Ok(c)) => wrap!(t.unread_char(x, c), |_v: ()| Value::Empty),
-                (Err(e), _) | (_, Err(e)) => Err(e),
-            },
-            "stream-listen" => match h(0) {
-                Ok(x) => wrap!(t.listen(x), |v: bool| Value::Bool(v)),
-                Err(e) => Err(e),
-            },
-            "stream-write-string" => match (h(0), expect_str(heap, &args[1])) {
-                (Ok(x), Ok(s)) => wrap!(t.write_str(x, &s), |_v: ()| Value::Empty),
-                (Err(e), _) | (_, Err(e)) => Err(e),
-            },
-            "stream-at-line-start" => match h(0) {
-                Ok(x) => wrap!(t.at_line_start(x), |v: bool| Value::Bool(v)),
-                Err(e) => Err(e),
-            },
-            "stream-finish-output" => match h(0) {
-                Ok(x) => wrap!(t.finish_output(x), |_v: ()| Value::Empty),
-                Err(e) => Err(e),
-            },
-            "stream-take-output-string" => match h(0) {
-                Ok(x) => match t.take_output_string(x) {
-                    Ok(s) => {
-                        let sv = str_rt(heap, s);
-                        Ok(result_ok(heap, sv))
-                    }
-                    Err(m) => Ok(result_err(heap, FILE_ERROR, m)),
-                },
-                Err(e) => Err(e),
-            },
-            "file-exists-p" => match expect_str(heap, &args[0]) {
-                Ok(p) => Ok(Value::Bool(std::path::Path::new(&*p).exists())),
-                Err(e) => Err(e),
-            },
-            "file-delete" => match expect_str(heap, &args[0]) {
-                Ok(p) => match std::fs::remove_file(&*p) {
-                    Ok(()) => Ok(result_ok(heap, Value::Empty)),
-                    Err(e) => Ok(result_err(heap, FILE_ERROR, format!("delete-file: {}: {}", p, e))),
-                },
-                Err(e) => Err(e),
-            },
-            "file-rename" => match (expect_str(heap, &args[0]), expect_str(heap, &args[1])) {
-                (Ok(a), Ok(b)) => match std::fs::rename(&*a, &*b) {
-                    Ok(()) => Ok(result_ok(heap, Value::Empty)),
-                    Err(e) => Ok(result_err(heap, FILE_ERROR, format!("rename-file: {}: {}", a, e))),
-                },
-                (Err(e), _) | (_, Err(e)) => Err(e),
-            },
-            _ => return None,
+        Some(match crate::compile::runtime::stream_builtin::stream_builtin(heap, name, args)? {
+            Ok(v) => Ok(v),
+            Err(e) => Err(EvalError::Internal(e)),
         })
     }
 }
@@ -5521,7 +5641,7 @@ fn vector_pop(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// safety is unaffected — `LLVM_HANDLE_TYPES` keeps these distinct from `i32`
 /// statically, which is where it was always enforced.
 ///
-/// `src/eval/stream.rs` represents OS streams the same way.
+/// `typelisp_rt::stream` represents OS streams the same way.
 #[derive(Clone)]
 pub(crate) enum NativeHandle {
     Module(Rc<RefCell<Module<'static>>>),
@@ -5819,6 +5939,32 @@ unsafe extern "C" fn rt_apply_interpreted(closure: i64, args: *const i64, argc: 
     match interp.apply_interpreted(heap, closure, argv) {
         Ok(w) => w,
         Err(e) => rt_llvm_fatal(&format!("rt_apply_any: {:?}", e)),
+    }
+}
+
+/// `typelisp_rt::rt_dyn_call`'s interpreter half: a `:dyn` call site found
+/// its vtable slot empty, so the implementation behind it is an ordinary
+/// interpreted method. Hands back the closure that method reifies to, which
+/// the caller then applies through [`rt_apply_interpreted`] — the same path
+/// any other interpreted callee takes out of compiled code.
+///
+/// A slot with no `(type, method)` behind it, or a method that no longer
+/// resolves, is a compiler bug rather than anything a program can provoke,
+/// and aborts for the same reason [`rt_apply_interpreted`]'s errors do.
+///
+/// # Safety
+///
+/// Both a `Heap` and an `Interp` must be registered on this thread.
+unsafe extern "C" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
+    let interp = ACTIVE_INTERP.with(|cell| cell.get());
+    if interp.is_null() {
+        rt_llvm_fatal("rt_dyn_call: no interpreter is registered on this thread");
+    }
+    let interp = &*interp;
+    let heap = crate::compile::runtime::shim_active_heap();
+    match interp.dyn_slot_closure(heap, vtable, slot) {
+        Ok(w) => w,
+        Err(e) => rt_llvm_fatal(&format!("rt_dyn_call: {:?}", e)),
     }
 }
 
@@ -6398,5 +6544,85 @@ mod scc_tests {
             .expect("mutual recursion across separate top-level functions should now compile");
         assert!(interp.root.borrow().fn_compiled(&Path::root("a")), "\"a\" should have ended up compiled");
         assert!(interp.root.borrow().fn_compiled(&Path::root("b")), "\"b\", pulled in transitively as part of the same SCC, should have ended up compiled too");
+    }
+}
+
+#[cfg(test)]
+mod native_method_list_tests {
+    use super::native_lowered_primitive_methods;
+
+    /// Every primitive receiver whose builtin methods either side lowers, with
+    /// the island predicate that decides for it.
+    const PRIMITIVES: &[(&str, &[&str])] = &[
+        ("int", &["i64", "i32"]),
+        ("string", &["string"]),
+        ("char", &["char"]),
+        ("float", &["f64"]),
+        ("bignum", &["bignum"]),
+        ("ratio", &["ratio"]),
+        ("bool", &["bool"]),
+        ("symbol", &["symbol"]),
+    ];
+
+    /// Every `(equal method "X")` inside the island's `<name>-native-method?`
+    /// definition.
+    fn island_methods(name: &str) -> Vec<String> {
+        let src = crate::compiler::SOURCE;
+        let head = format!("(defun {}-native-method? ", name);
+        let start = src.find(&head).unwrap_or_else(|| panic!("`{}` not found in the island SOURCE", head));
+        let rest = &src[start + head.len()..];
+        let body = match rest.find("\n(defun ") {
+            Some(end) => &rest[..end],
+            None => rest,
+        };
+        let mut out = Vec::new();
+        let needle = "(equal method \"";
+        let mut at = 0;
+        while let Some(i) = body[at..].find(needle) {
+            let from = at + i + needle.len();
+            let len = body[from..].find('"').expect("unterminated method-name string in the island SOURCE");
+            out.push(body[from..from + len].to_string());
+            at = from + len;
+        }
+        out.sort();
+        out
+    }
+
+    /// `native_lowered_primitive_methods` and the island's
+    /// `*-native-method?` predicates must agree, method for method.
+    ///
+    /// They are one decision written twice, and disagreement is not a missed
+    /// optimization: this list decides whether a call is a real edge of the
+    /// compile call graph, so a method it claims and the island does not lower
+    /// gets no declaration emitted — and `compile-call`'s `get-function`
+    /// **aborts the process** rather than reporting an error. The Rust side
+    /// claimed `char->string` for exactly this reason, and nothing noticed
+    /// until the precompiled prelude became the first thing to compile every
+    /// prelude body instead of the few a test happens to name.
+    ///
+    /// Reading the island's own source is the point: a second hand-written
+    /// list here would be a third copy to keep in sync.
+    #[test]
+    fn the_rust_and_island_native_method_lists_agree() {
+        for (island_name, type_locals) in PRIMITIVES {
+            let island = island_methods(island_name);
+            assert!(!island.is_empty(), "`{}-native-method?` parsed as empty — the scan is broken", island_name);
+            for type_local in *type_locals {
+                let mut rust: Vec<String> =
+                    native_lowered_primitive_methods(type_local).iter().map(|m| m.to_string()).collect();
+                rust.sort();
+                let island_only: Vec<&String> = island.iter().filter(|m| !rust.contains(m)).collect();
+                let rust_only: Vec<&String> = rust.iter().filter(|m| !island.contains(m)).collect();
+                assert!(
+                    island_only.is_empty() && rust_only.is_empty(),
+                    "`{}` disagrees between the two native-method lists:\n  island-only (a missed \
+                     optimization): {:?}\n  Rust-only (a call to one aborts the process at compile \
+                     time): {:?}",
+                    type_local,
+                    island_only,
+                    rust_only
+                );
+            }
+        }
     }
 }

@@ -1,6 +1,6 @@
 # typelisp 開発手順（ビルド・テスト）
 
-最終更新: 2026-08-13 / ブランチ: `main`
+最終更新: 2026-08-14 / ブランチ: `feature/compile-strict-names-and-prelude-bitcode`
 
 ビルドとテストの実行方法。2026-07-29 に [TODO.md](TODO.md) から分離した（TODO.md は残作業のみを
 記録するドキュメントで、残作業が無くなったため）。
@@ -42,6 +42,29 @@ cargo run                                    # REPL（typl、prelude 読み込�
   の方が実用的。
 
 なお Miri はコミット前の必須手順ではない（通常の `cargo test` で十分、という既存合意）。
+
+## コミット済みビットコード成果物の再生成
+
+`src/compiler_island.bc`（自己ホストコンパイラ島）と `src/prelude_compiled.bc`（事前コンパイル
+された prelude）はどちらもコミットされたバイナリ成果物で、対応する `SOURCE` を編集したら
+再生成が要る。番人テストが一致するまで落ち続ける。
+
+```sh
+scripts/regen-compiler-island.sh    # compiler.rs の SOURCE を変えたら
+scripts/regen-prelude-bitcode.sh    # prelude.rs の SOURCE を変えたら
+```
+
+**両方要るときは島が先。** prelude は島によってコンパイルされるので、島を再生成すると
+prelude の成果物も変わる（逆向きの依存は無い——島の生成器は prelude を interpreted で読む）。
+
+`llvm-*` ビルダ（`eval_llvm_builtin_method`）やコンパイル・ブリッジを変えた場合も再生成が要る:
+出力 IR が変わるのに `SOURCE` は変わらないので、埋め込みハッシュを見る
+`*_artifacts_are_fresh` は気付かない。バイト比較する
+`the_committed_*_matches_a_fresh_build` の方が落ちる。
+
+```sh
+scripts/bench-prelude.sh            # 事前コンパイル済み prelude の効果を測る（release）
+```
 
 ## compile 機能のビルド
 

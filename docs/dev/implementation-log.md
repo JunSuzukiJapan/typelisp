@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-08-14 / ブランチ: `refactor/remove-fasl`
+最終更新: 2026-08-15 / ブランチ: `feature/compile-strict-names-and-prelude-bitcode`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -6394,3 +6394,271 @@ per-instantiation の再検査のために retain するジェネリックテン
 呼び出し元が消えた時点で削除した）。`ModuleCache` を見ていた `module_file_test.rs` の4本は、
 キャッシュ以外のことも見ていた3本をキャッシュ無しの形（別セッションで再ロードして編集が
 見えること）に書き換え、純粋にキャッシュ命中数だけを見ていた1本を削除した。
+
+## `(compile)` の未解決名をチェック時エラーに（2026-08-14、ブランチ `feature/compile-strict-names-and-prelude-bitcode`）
+
+`Checker::check_compile` は解決できない名前をわざとエラーにせず、プレースホルダの `Path` を入れて
+実行時の `EvalError::NoSuchFunction` に委ねていた。doc コメントに理由が「既存挙動の保存」と
+明記されていたが、その保存はもう要らないという判断。
+
+チェッカーは常にどこへ解決するか知っている（`documentation` 特殊形が同じ前提で完全にチェック時
+解決している）ので、名前解決の失敗だけ実行時まで持ち越す理由がない。3 系統を区別して報告する:
+
+- 裸の名前が解決しない → `no function \`foo\` is visible from here`
+- `T::m` で型は解決したがそのメンバが無い → `type \`T\` has no associated function or method \`m\``
+- `a::b` が型のメソッドでも自由関数でもない → `names neither a type's method nor a function`
+
+2 番目は以前 `type_fq` の `.filter(...)` で潰れて 3 番目の枝に落ちていたので、型の解決結果を
+別に保持して分岐させた。可視性は変わらない——`resolve_fn`/`resolve_fn_path` はもともと
+「在るが見えない」を「解決しない」に畳むので、`(compile 他モジュールの非 pub)` も同じ経路で落ちる。
+
+`Interp::compile_function` 側の再解決失敗は、チェッカーが解決を保証した後では内部不変条件違反な
+ので `EvalError::NoSuchFunction` から `Internal` へ変えた（`compute_sccs` の finish-order を
+`.expect()` で守っているのと同じ扱い）。
+
+## prelude をビットコードへ事前コンパイル（2026-08-14、同ブランチ）
+
+prelude は毎起動 read→check→exec され、本体はすべてツリーウォークで実行されていた。コンパイラ島
+（`src/compiler_island.bc`）が既に「コミット済みビットコードを起動時に JIT インストールする」形で
+同じ問題を解いているので、その機構を prelude にも広げた。**削除した fasl とは目的が違う**——fasl は
+チェック済み状態をシリアライズしてロード時間だけを縮める機構で、`exec` は両辺共通だから実行は
+1 バイトも速くならなかった。こちらがシリアライズするのは機械語である。
+
+新しいもの: `src/compile/prelude_bootstrap.rs`（収集器＋生成器）、`src/prelude_compiled.bc`
+（244 KB）、`src/bin/bootstrap_prelude.rs`、`scripts/regen-prelude-bitcode.sh`、
+`tests/prelude_artifacts_test.rs`、`tests/prelude_compiled_test.rs`。
+`Interp::install_island_bitcode` は `install_compiled_library` に一般化した（島は root の `defun`
+決め打ちだったが、prelude は 105 個の `defmethod` を持つ）。
+
+### 事前コンパイルできる範囲は判断ではなく構造で決まる
+
+prelude の `defun` 86 個のうち **61 個がジェネリック**で、単型化は使用箇所ごとに走るから事前に
+固められる本体が存在しない。ただしジェネリック判定を書く必要はない——チェッカーはジェネリック
+テンプレートを**空の `(module PATH)`** として吐くので、収集器を素通りして自然に消える
+（`deftrait` も同じ形）。「収集を生き延びたものをコンパイルする」がそのまま規則になる。
+
+### 決定的採番
+
+compiled コードはグローバル変数 id を定数として IR に焼き込み、id は `Interp` 生存期間ごとに 0 から
+順に振られる。したがって生成時とロード時で採番順が一致しないと壊れる。`compile-file` が
+`$global_init$N` をファイル宣言順に並べているのと同じ問題で、同じ解——**同じ 1 回の走査が生成側と
+ロード側の両方で使われる**（`PreludePlan`）。手で並べた 2 つのリストを同期させる形にはしていない。
+
+vtable/trait id（`dyn-new`/`dyn-upcast` が焼き込む）は今の prelude では発生しない
+（`as-dyn-error` はジェネリック、ストリーム合成は既にボックス済みの `:dyn` を受け取るだけ、
+`dyn-call` はスロット番号しか焼かない）。**仮定せず検査する**——生成器は最後に
+`vtable_descriptors()`/`upcast_descriptors()` が空であることを確認し、空でなければ停止する。
+焼き込んだ id がロード時に別の意味になる故障は静かなので、気付ける形にしてある。
+
+### コンパイルできないものは「根本原因」で記録する
+
+生成器は 111 個の prelude 定義をコンパイルできない。だがその原因は 9 種類しかないので、
+`PRELUDE_COMPILE_UNSUPPORTED` は**定義でなくコンパイル経路の穴（呼び先の名前）**を記録する。
+定義を並べると帰結の一覧になり、prelude を 1 行いじるたびに churn し、しかも「何を作れば短く
+なるか」を何も言わない。
+
+| 穴 | 巻き添えになる定義数 |
+|---|---|
+| `char::char->string` | 31 |
+| `stream-read-char` ほか stream/file 系 10 種 | 計 65 |
+| `bignum::lognot`/`logand`/`logior`、`bool::equal`、`symbol::eq`、`string::substring` | 計 13 |
+| `symbol->string`、`random-state-next`、`random-state-copy` | 計 3 |
+
+生成のたびに再計算して、このリストと完全一致しなければ停止する（見つけた集合を貼り付け可能な
+形で印字する）。穴を塞げば「listed, but blocks nothing now」で落ちるので、リストが嘘になれない。
+**次に最も効くのは `char->string` の lowering**（1 つで 31 定義）。
+
+判定は emit 前に済ませる必要がある: 島の `compile-call` は宣言の無い呼び先に対して
+`get-function` で**プロセスを abort する**ので「やってみて失敗したら除外」ができない。
+`Interp::precheck_compilable` が `compute_sccs`（コンパイル経路自身のグラフ・フィルタ・
+「本当に呼び先か」の定義をそのまま使う）に聞く。推移的なので、コンパイル不能なものを呼ぶ定義も
+自動的にコンパイル不能と報告され、集合が呼び出し元について閉じる。
+
+ロード側はこの走査を繰り返さない。**成果物自身に聞く**——モジュールが本体を持つシンボルが、
+まさに emit されたものだから。起動時予算に対して安いだけでなく、同じ述語を 2 回走らせる形と違って
+「食い違いようがない」。
+
+### 副産物: Rust と島の native-method リストが食い違っていた
+
+`is_native_lowered_primitive_method`（Rust）は `char->string` を「ネイティブに lowering される」と
+主張していたが、島の `char-native-method?` には最初から無かった。このリストは**呼び出しが
+コールグラフの本当の辺かどうかを決める**ので、食い違いは最適化の取りこぼしではない——辺が落ち、
+宣言が emit されず、`get-function` がプロセスを abort する。`(char->string c)` を含む関数は
+`(compile ...)` できなかったはずで、prelude 全体をコンパイルするまで誰も踏まなかった。
+
+番人として `native_method_list_tests` を追加した。島の `SOURCE` から `*-native-method?` の
+`(equal method "X")` を読み取って双方向に比較する。そのために Rust 側を `matches!` から
+テーブル（`native_lowered_primitive_methods`）へ変えた——危険な向き（Rust だけが主張する）は
+述語には問えない、列挙するものが無いから。`char->string` を戻すと実際に落ちることを確認済み。
+
+### 実測（release、同一プロセス内 A/B、`scripts/bench-prelude.sh`）
+
+N=3 の範囲で示す（同じ機械でも 1 割は動くので、1 回の数字を 3 桁で書いても意味がない）。
+
+| ワークロード | compiled | interpreted | 倍率 |
+|---|---|---|---|
+| i64 `gcd` | 225〜261 ms | 1219〜1321 ms | **5.1〜5.4x** |
+| i64 `abs`/`signum`/`rem` | 907〜969 ms | 1952〜1999 ms | **2.1〜2.2x** |
+| bignum `abs`/`+` | 291〜305 ms | 416〜428 ms | **1.4〜1.5x** |
+| f64 `abs`/`signum` | 1221〜1252 ms | 1774〜1863 ms | **1.4〜1.5x** |
+
+倍率の差は「その本体でネイティブ化が何を消せるか」に対応している。`gcd` は再帰＋整数演算だけ
+なのでツリーウォークの分がまるごと消えて 5 倍。bignum/f64 は本体の外——ボックス確保と
+`rt_*` 呼び出し——が支配的なので 1.4 倍で頭打ちになる。
+
+A/B を同一プロセス内で取るのは、両辺がビルド・マシン・ヒープサイズを共有するようにするため
+（`typl` を 2 回叩く形だとそこが揃わない）。閾値 assert は置いていない——タイミングの assertion は
+混んだマシンで落ちて、無視することを学習させるだけなので。
+
+**起動時のコスト: +105〜109 ms**（prelude ロードが 58 ms → 165 ms）。空ファイルに対する `typl`
+全体の起動は release で 0.84 s（N=5）なので、その約 13% にあたる。244 KB のビットコード全体を
+MCJIT が起動時に解決する分。ユーザー選択により常時有効（切替フラグは設けていない）。
+
+その一部は削れた: ステイルネス検査のハッシュを `island_source_hash(prelude::SOURCE)` で取ると
+**ちょうど今読んだ prelude をもう一度 256K セルの `Heap` へ読み直す**ことになる。読んだ形に対して
+ハッシュを取る `hash_read_forms` を切り出し、`PreludePlan` がキーを運ぶようにした（約 4 ms、
+`load` あたりのパースが 2 回から 1 回へ）。残りの約 100 ms は MCJIT の解決そのもの。
+
+---
+
+## コンパイル経路の穴を塞ぐ（2026-08-14、同ブランチ）
+
+前項の生成器が数え上げた穴——`PRELUDE_COMPILE_UNSUPPORTED` の 20 エントリ、巻き添え 111 定義——を
+全部塞いだ。リストは空になり、**収集を生き延びた prelude 定義（＝ジェネリックでないもの）は
+すべて事前コンパイルされる**。`src/prelude_compiled.bc` は 244 KB → 416 KB。
+
+塞ぎ方は穴の性質ごとに 4 通りだった。
+
+### 1. プリミティブ受け手の組み込みメソッド（`char->string` ほか）
+
+`char->string`（単独で 31 定義）、`string::substring`、`bignum::logand`/`logior`/`logxor`/
+`lognot`、`bool` の `eq`/`eql`/`equal`/`equalp`、`symbol::eq`/`eql`。
+
+`char->string` は**新しい runtime shim すら要らなかった**。コンパイル後の `char` は生のコード
+ポイントで、`rt_str_new` の引数はまさに生のコードポイント列だから、`rt_str_new(a, 1)` がそのまま
+`char->string` である。31 定義を止めていたものの実体は 4 行の `icond` 節だった。
+
+`bool`/`symbol` は `compile-assoc` にとって**新しい受け手型**なので、`NATIVE_LOWERED_PRIMITIVES`
+を 8 → 10 に増やし、島に `bool-native-method?`/`symbol-native-method?` を足し、前項で入れた番人
+（`native_method_list_tests`）の `PRIMITIVES` 表にも両方を登録した。番人の守備範囲を新しい型に
+広げないまま片方だけ書くのは、まさに `char->string` が生き延びた形である。
+
+`bignum::logxor` は最初は「prelude に呼び出し元が無い」と判断して外した。regen が
+`blocks compilation, but not listed: bignum::logxor` で落ちた——`logeqv` は `lognot` の
+`logxor` なので、**`lognot` を塞ぐまで `logxor` は見えなかった**。穴は互いに隠し合う。生成のたびに
+再計算する仕掛けだから気付けた話で、手で書いた一覧なら見落としていた。
+
+### 2. 自由な組み込み関数と、名前対応表の一本化
+
+`symbol->string`（`rt_sym_name` の再利用——`sexpr-sym-name` と同じ内部表現に、チェッカー側の別
+綴りが付いているだけ）、`random-state-next`/`random-state-copy`/`make-random-state-fresh`
+（`random-state` はヒープ上の箱でしかないので shim は素直に書ける）。
+
+ここで**対応表を 1 つに畳んだ**。従来は「組み込みかどうか」を `core_bridge` が
+`is_rt_builtin_name` で判定し、「ではどの shim か」を島の `compile-call` が 15 段のネスト `if` で
+再導出していた。一致しなければならない 2 つのリストで、しかも不一致の帰結はこのコンパイラで最悪の
+もの——島の `get-function` は見つからない名前に対して**プロセスを abort する**。
+`rt_builtin_symbol`（Rust）が shim 名まで答えるようにし、`symbols::callee_symbol_name` が
+「マングルするか shim 名にするか」の唯一の判断点になり、島側のネスト `if` は削除した。島は渡された
+名前をそのまま呼ぶ。
+
+### 3. ストリーム（65 定義）: テーブルを `typelisp-rt` へ移す
+
+最大の塊。そして「lowering を書いていない」のではなく、**書けない構造だった**——ストリーム表は
+`Interp` のフィールドで、AOT でリンクした実行ファイルにはインタプリタが存在しない。`Interp` の中に
+ある限り、compiled 側から触る shim は原理的に置けない。
+
+`src/eval/stream.rs` → `crates/typelisp-rt/src/stream.rs`（std だけに依存していたのでそのまま
+動く）へ移し、thread_local 1 つの後ろに置いた（`Heap` と同じ理由——2 つはいつも一緒に使われ、
+テストはスレッド並列で走る）。compiled `open` が返したハンドルを interpreted `close` が閉じられる
+のは、両者が同じ表を引くからで、2 つの表を同期させているからではない。
+
+値づくり（`Result<_, FileError>`、`Ok(none)` での EOF、エラーメッセージの文面）も **1 実装**に
+した: `stream_builtin::stream_builtin` を `Interp::eval_stream_builtin` と 20 個の `rt_stream_*`
+shim の両方が呼ぶ。20 個それぞれに失敗様態と包み方があるので、境界の両側に書けば 20 回食い違える。
+shim が足すのは表現の変換だけ——ハンドルと `bool` と `char` は compiled 側では生のマシン語、
+文字列と `Result` はタグ付きヒープ値——で、それは呼び出し規約の話であって操作の話ではないから
+shim 側にある。
+
+型キー（`option`/`result`/`fileerror`）は rt 側の定数になった。`rt_data_new` が「compiled code から
+文字列で受け取る」形で回避してきた一方、ここは**自分で作る**側なので受け取れない。
+`type_key_of` と一致することを `tests/type_identity_guard_test.rs` に番人として追加した
+（`src/` を走査する既存の 2 規則は別クレートに届かない）。破れ方が静かな不変条件は、仮定ではなく
+検査にする。
+
+### 4. 副産物: `Repr::RandomState`
+
+穴を全部塞いだあと、生成器は `random` のコンパイルで島ごと abort した——
+`compile-sexpr-field: field type is not representable in compiled code yet`。
+`random` は `Option<random-state>` を `match` するが、`Type::RandomState` に `Repr` が無く
+`Repr::None`（フィールド kind `0`）に落ちていた。`random-state` は `bignum`/`ratio` と同じ
+「タグ付きの、回収可能なヒープ値」なので、`Repr::RandomState` を足して `Class::Tagged` 群へ入れる
+だけで済む（島は番号で分岐するので再生成は不要）。
+
+**precheck はこれを見られない**: `Interp::precheck_compilable` はコールグラフを辿って
+「lowering の無い呼び先」を探す仕掛けで、*形*の穴は守備範囲の外にある。前項で
+`build_prelude_bitcode` のエラーメッセージに書いておいた「precheck が通ったのにここで失敗したら、
+それはコールグラフ走査に見えない穴」がそのまま起きた。
+
+### 5. `:dyn` ディスパッチの穴（compiled → interpreted）
+
+穴を塞いだ結果 prelude のストリームメソッドが compiled になり、`stream_test` の
+「ユーザ定義の入力ストリーム」が
+`rt_vtable_slot: vtable slot is empty — a dyn dispatch target was not compiled` で
+プロセスごと落ちた。
+
+compiled な `:dyn` 呼び出しは「スロットを読んで間接呼び出し」——**トレイトオブジェクトの中身が
+必ず compiled である**という前提だった。そんな保証は無い: compiled な prelude の `read-line` に
+渡される `:dyn CharInput` の具体型が**ユーザの defstruct** で、その `read-char` は普通の
+interpreted メソッドでありうる。スロットは 0 で、引数を配列に積み終わった呼び出し側には行き先が
+無い。
+
+`rt_apply_any`（クロージャに対する同じ穴、2026-08-12）と同じ形で塞いだ——**分岐を値のある場所に
+置く**。`rt_vtable_slot` + `build-dyn-call` の 2 段を `rt_dyn_call` 1 つにして、スロットが埋まって
+いれば間接呼び出し、空ならインタプリタに「そのスロットのメソッドを reify したクロージャ」を訊いて、
+`rt_apply_any` が使うのと同じ interpreted-apply フックへ渡す。引数配列の解釈が両者で一致するのは、
+interpreted クロージャが自分のパラメータ表現を持ち歩いているからで、これも Stage D と同じ理屈。
+
+あわせて `vtable_id_for` が**インターン時に publish** するようにした。従来は `compile_scc` の
+あとだけで、事前コンパイル済み prelude しか無いセッション（＝何もコンパイルしない）ではコンパイル
+済みターゲットの表が compiled 側に一度も届かなかった。
+
+### 6. 副産物: promote された defvar を Rust 側の読み手が見ていなかった
+
+`pprint_test`/`print_limits_test` の 14 件が「改行が一切入らない」形で落ちていた。原因は今回の
+作業ではなく前項（prelude 事前コンパイル）にある: `promote_globals` が prelude の `defvar` を
+**全部** promote するので `(setf *print-pretty* true)` は permanent root に書かれるのに、
+`Interp::pretty_opts`/`print_limits` はインタプリタ側のセルを読んでいた。`eval_core` の
+`global_core` は最初から両者を区別していたが、Rust から名前で読む 2 箇所だけが取り残されていた。
+
+`Interp::global_value` を 1 つ作って両方をそこへ通した。破れ方が静かなバグ——設定が効かないだけで
+エラーは出ない——なので、読み手を増やすときはこの入口を使うこと。
+
+### 効果
+
+`PRELUDE_COMPILE_UNSUPPORTED` は空になったが、**リストと突き合わせ検査は残す**。役割が
+「今ある穴の記録」から「新しい穴が空いた瞬間に落ちる番人」に変わっただけで、prelude に定義を 1 つ
+足して lowering の無い組み込みに触れば、その呼び先の名前を出して生成が止まる。
+
+### 実測
+
+`scripts/bench-prelude.sh`（release、同一プロセス内 A/B）。実行速度側は前項から動いていない
+（同じ本体が同じように compiled になっているだけ）——動いたのは**起動時コスト**で、成果物が
+244 KB → 417 KB になった分ほぼ比例して増えた:
+
+| | 成果物 | インストール（N=3） | 空ファイルに対する `typl` 全体（N=5） |
+|---|---|---|---|
+| 穴を塞ぐ前 | 244 KB | +105〜109 ms | 0.84 s |
+| 現在 | 417 KB | +198〜258 ms | 0.98 s |
+
+穴を塞ぐとは「事前コンパイルされる本体が増える」ことなので、この増加は成果そのものの裏面である。
+トレードオフの検討は [TODO.md](TODO.md) 側に残した。
+
+### 代償: compiled な prelude 本体の `panic` はプロセスを abort する
+
+`rt_panic` は「JIT/AOT のネイティブフレームを巻き戻す landing pad が無いので abort する」という
+既存の意図的な設計だが、prelude が既定で compiled になったことで、**prelude 本体の `panic` が
+catchable な `EvalError::Panic` ではなくプロセス終了になる**。`(random -5)`（今回 compiled に
+なった）と `(expt 2n -1n)`/`(expt 2/3 1/2)`（前項で既になっていた）が該当し、テストは interpreted
+prelude に対して検査する形へ変えた。REPL では 1 回のタイプミスがセッションを落とすので、残作業
+として [TODO.md](TODO.md) に記録した。

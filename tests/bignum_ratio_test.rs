@@ -207,10 +207,33 @@ fn bignum_expt_produces_a_large_exact_result() {
     assert_bignum(eval_ok(e), "1267650600228229401496703205376");
 }
 
+/// A one-off *interpreted* prelude: `bignum::expt`'s guard is a `panic`
+/// inside a prelude body, and since the precompiled prelude that body is
+/// native — where a panic aborts the process by design
+/// (`typelisp_rt::rt_panic`) rather than surfacing as a catchable
+/// `EvalError::Panic`. The check itself is still worth asserting, against the
+/// tier that can answer; the divergence is recorded in `docs/dev/TODO.md`.
+fn run_interpreted(src: &str) -> Result<Value, EvalError> {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::prelude::load_interpreted(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = Value::Empty;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
+            last = val;
+        }
+    }
+    Ok(last)
+}
+
 #[test]
 fn bignum_expt_with_a_negative_exponent_panics() {
     let e = "(defun f ((a bignum) (b bignum)) bignum (expt a b)) (f (int->bignum 2) (int->bignum -1))";
-    assert!(matches!(run(e), Err(EvalError::Panic(_))));
+    assert!(matches!(run_interpreted(e), Err(EvalError::Panic(_))));
 }
 
 // ---- ratio arithmetic/comparison --------------------------------------------
@@ -266,8 +289,9 @@ fn ratio_expt_with_integer_exponent() {
 
 #[test]
 fn ratio_expt_with_a_non_integer_exponent_panics() {
+    // Interpreted for the same reason `bignum_expt_with_a_negative_exponent_panics` is.
     let src = "(defun f ((a ratio) (b ratio)) ratio (expt a b)) (f 2/3 1/2)";
-    assert!(matches!(run(src), Err(EvalError::Panic(_))));
+    assert!(matches!(run_interpreted(src), Err(EvalError::Panic(_))));
 }
 
 // ---- conversions --------------------------------------------------------------

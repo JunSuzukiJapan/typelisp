@@ -1586,18 +1586,6 @@ pub(crate) fn llvm_builder_def() -> AdtDef {
         "build-closure-apply".to_string(),
         assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
     );
-    // `build-dyn-call`: dynamic dispatch through a trait object's vtable
-    // (TODO T4). The stripped-down sibling of `build-closure-apply` — the
-    // callee is likewise only a runtime value (here a raw function pointer
-    // the island already read out with `rt_vtable_slot`), but there is no
-    // captured environment, so it calls straight through the ordinary
-    // `compiled_fn_type` ABI with the argument array as built: none of
-    // `build-closure-apply`'s env-copying loop or 64-slot scratch buffer
-    // applies. Parameters are `(builder, fn-ptr, args-ptr, argc)`.
-    assoc.insert(
-        "build-dyn-call".to_string(),
-        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
-    );
     // The generic-pointer read counterpart of `store-arg` — see
     // `interp::llvm_builder_load_raw`'s doc comment.
     assoc.insert(

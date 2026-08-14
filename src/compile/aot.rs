@@ -89,14 +89,14 @@ fn collect_aot_item(
     }
     let defvar_meta = match tag.as_str() {
         "defun" => {
-            let path = path_at(heap, tl, 0).ok_or_else(|| "compile-file: defun without a name".to_string())?;
+            let path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defun without a name".to_string())?;
             let node = path.last_segment().to_string();
             let symbol = crate::compile::symbols::user_symbol_name(&node);
             node_names.push((node, symbol));
             None
         }
         "defmethod" => {
-            let type_name = path_at(heap, tl, 0).ok_or_else(|| "compile-file: defmethod without a type".to_string())?;
+            let type_name = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
                 Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
                 _ => return Err("compile-file: defmethod without a name".to_string()),
@@ -109,7 +109,7 @@ fn collect_aot_item(
         // The whole form travels, not just the initializer: the global's
         // storage tagging is on the form (see `Interp::add_compiled_global_init`).
         "defvar" => {
-            let name = path_at(heap, tl, 0).ok_or_else(|| "compile-file: defvar without a name".to_string())?;
+            let name = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defvar without a name".to_string())?;
             Some((name, tl))
         }
         // No codegen of their own. `exec` still runs: it records an enum's
@@ -132,16 +132,6 @@ fn collect_aot_item(
         defvar_inits.push((name, form));
     }
     Ok(())
-}
-
-/// Field `i` of `form` as a path. A single-segment path reads back as a bare
-/// symbol (the reader only builds `Value::Path` when it sees `::`).
-fn path_at(heap: &Heap, form: Value, i: usize) -> Option<Path> {
-    match core::field(heap, form, i)? {
-        Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
-        Value::Symbol(id) => Some(Path::root(heap.symbol_name(id))),
-        _ => None,
-    }
 }
 
 /// Reads `source_path`, compiles every `defun` in it, and links a native
@@ -195,13 +185,12 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let module = {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let module = ctx.create_module("compiled_file");
-        // Forward-declares `rt_car`/`rt_cdr`/`rt_cons`/`rt_set_car`/
-        // `rt_set_cdr` (no body) so `compile-call`'s `get-function` finds
-        // them the same way it finds any other already-defined function in
-        // this shared module — `compiler.rs`'s `compile-call` rewrites a
-        // call to `car`/`cdr`/`cons`/`set-car`/`set-cdr` to one of these
-        // names before ever reaching `get-function` (see that function's
-        // `raw-nm`/`nm` rename). Unlike the JIT path
+        // Forward-declares every `rt_*` shim (no body) so `compile-call`'s
+        // `get-function` finds one the same way it finds any other
+        // already-defined function in this shared module — a call to a free
+        // builtin (`sexpr-car`, `gensym`, `stream-read-char`, ...) arrives
+        // already named for its shim, `symbols::callee_symbol_name` having
+        // made that choice bridge-side. Unlike the JIT path
         // (`Interp::compile_function`), no `add_global_mapping` is needed
         // here: these resolve as ordinary linker symbols against
         // `typelisp-rt`'s `staticlib` once `write_executable` links it in.

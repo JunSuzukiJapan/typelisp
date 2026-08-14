@@ -18,19 +18,56 @@
 //!
 //! An integer handle sidesteps both: the stream *value* is a `defstruct`
 //! holding an `i64`, heap-representable like any other struct, while the OS
-//! resource lives in [`StreamTable`] on the interpreter. The struct's field
-//! is not `pub`, so a handle cannot be forged from typelisp code, and every
-//! entry point here validates it regardless.
+//! resource lives in [`StreamTable`]. The struct's field is not `pub`, so a
+//! handle cannot be forged from typelisp code, and every entry point here
+//! validates it regardless.
 //!
 //! The cost is that dropping the last reference to a stream does **not**
 //! close it. That was already true of a value-typed design: the collector
 //! only runs when the cons arena is exhausted, so a finalizer would fire at
 //! an unpredictable time or never at all. Closing stays explicit (`close`, or
 //! the `with-open-file` macro that wraps it).
+//!
+//! # Why the table lives here and not on the interpreter
+//!
+//! It used to be a field of `Interp` (`src/eval/stream.rs`), which made these
+//! builtins reachable only from interpreted code: an AOT-linked executable
+//! links `typelisp-rt` and no interpreter at all, so a shim standing on the
+//! other side of that field could not exist, and every stream method in the
+//! prelude — 65 definitions, by far the largest gap in what the precompiled
+//! prelude could cover — had to stay tree-walked.
+//!
+//! Moving the table into the runtime crate, behind one thread-local
+//! ([`with_streams`]), is what lets both sides address the same open streams:
+//! a handle a compiled `open` returns is the same handle interpreted code
+//! closes. Thread-local rather than global because a `Heap` is
+//! ([`crate::active_heap`]) — the two are always used together, and the tests
+//! that run interpreters in parallel threads would otherwise share stdin.
+//!
+//! Slots are never reused (see [`StreamTable`]), so the table's one
+//! interpreter-visible behaviour change — it outlives any single `Interp`
+//! rather than being dropped with it — cannot make a stale handle name a
+//! different stream; it names a closed one forever.
 
+use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
+
+thread_local! {
+    /// This thread's open streams. See the module docs for why it is here.
+    static STREAMS: RefCell<StreamTable> = RefCell::new(StreamTable::default());
+}
+
+/// Runs `f` against this thread's [`StreamTable`].
+///
+/// The only way to reach it: both the interpreter's `stream-*` builtins and
+/// the compiled `rt_stream_*` shims go through here, which is what makes
+/// "the same handle means the same stream in both" true by construction
+/// rather than by two tables staying in step.
+pub fn with_streams<T>(f: impl FnOnce(&mut StreamTable) -> T) -> T {
+    STREAMS.with(|t| f(&mut t.borrow_mut()))
+}
 
 /// What a stream is attached to. Only *leaf* backends live here; a composite
 /// stream is a typelisp struct holding other streams (see the module docs).
