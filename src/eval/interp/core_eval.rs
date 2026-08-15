@@ -740,7 +740,7 @@ impl Interp {
                 // repair every other error path out of `apply_core` gets.
                 let raw = match crate::compile::catch_compiled_panic(|| Interp::call_closure_box(&s, id, &int_args)) {
                     Ok(raw) => raw,
-                    Err(message) => return Err(EvalError::Panic(message)),
+                    Err(e) => return Err(e),
                 };
                 for _ in 0..crossing_roots {
                     s.pop_root();

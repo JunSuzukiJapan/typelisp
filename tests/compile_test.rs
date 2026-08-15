@@ -6006,3 +6006,40 @@ fn compile_captures_a_hashtable_in_a_closure() {
     );
     assert_eq!(v, Value::Int(42));
 }
+
+/// A `(panic ...)` in an *interpreted* callee that compiled code called into
+/// comes back as a recoverable `EvalError::Panic`, not a dead process.
+///
+/// This is the boundary crossed in the other direction from a compiled
+/// `panic`: `apply-it` is native, its `f` parameter is an ordinary
+/// interpreted function, so the call goes out through `rt_apply_any` into the
+/// interpreter and the failure has to travel back through a compiled frame.
+/// `rt_apply_interpreted` used to have nowhere to report to and aborted —
+/// with the `EvalError`'s `Debug` formatting leaking into the message, at
+/// that.
+#[test]
+fn a_panic_in_an_interpreted_callee_of_compiled_code_is_recoverable() {
+    let src = r#"
+        (defun boom ((n i32)) i32 (panic "interpreted boom"))
+        (defun apply-it ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (compile apply-it)
+        (apply-it boom 1)
+    "#;
+    match run_with_compiler(src) {
+        Err(EvalError::Panic(m)) => assert_eq!(m, "interpreted boom"),
+        other => panic!("expected a catchable panic, got {:?}", other),
+    }
+}
+
+/// The same call with a callee that does not fail still returns normally —
+/// the catch is not swallowing ordinary results.
+#[test]
+fn an_interpreted_callee_of_compiled_code_still_returns_normally() {
+    let src = r#"
+        (defun triple ((n i32)) i32 (* n 3))
+        (defun apply-it ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (compile apply-it)
+        (apply-it triple 7)
+    "#;
+    assert_eq!(eval_ok_with_compiler(src), Value::Int(21));
+}

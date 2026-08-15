@@ -744,9 +744,9 @@ impl Interp {
         self.enter_compiled(heap);
         let raw = match crate::compile::catch_compiled_panic(|| compiled.call(&int_args)) {
             Ok(raw) => raw,
-            Err(message) => {
+            Err(e) => {
                 heap.truncate_roots(roots_on_entry);
-                return Err(EvalError::Panic(message));
+                return Err(e);
             }
         };
         for _ in 0..crossing_roots {
@@ -5932,17 +5932,24 @@ thread_local! {
 /// an apply site whose callee is *not* a compiled closure, so the call has to
 /// finish in the tree-walking evaluator.
 ///
-/// Errors abort rather than return: there is a compiled frame between here
-/// and any Rust caller that could handle a `Result`, and it has no way to
-/// carry one. That matches every other `rt_*` shim (`rt_panic`,
-/// `rt_match_fail`, `rt_llvm_call`).
+/// An error from the callee *unwinds* rather than returning: there is a
+/// compiled frame between here and any Rust caller that could handle a
+/// `Result`, and it has no way to carry one. Unwinding is how the error gets
+/// past that frame to [`crate::compile::catch_compiled_panic`], which puts it
+/// back together — so a `(panic ...)` in an interpreted callback reached from
+/// compiled code is as recoverable as one anywhere else.
+///
+/// A *missing interpreter* still aborts: that is a registration bug in
+/// [`Interp::enter_compiled`], not something a program can provoke.
 ///
 /// # Safety
 ///
 /// `args` must point to `argc` valid `i64`s, and both a `Heap`
 /// ([`typelisp_rt::set_active_heap`]) and an `Interp`
-/// ([`Interp::enter_compiled`]) must be registered on this thread.
-unsafe extern "C" fn rt_apply_interpreted(closure: i64, args: *const i64, argc: u32) -> i64 {
+/// ([`Interp::enter_compiled`]) must be registered on this thread. Every
+/// frame between here and the catching boundary must tolerate being unwound
+/// through, which is why this and `rt_apply_any` are `extern "C-unwind"`.
+unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64, argc: u32) -> i64 {
     let interp = ACTIVE_INTERP.with(|cell| cell.get());
     if interp.is_null() {
         rt_llvm_fatal("rt_apply_any: no interpreter is registered on this thread");
@@ -5952,7 +5959,10 @@ unsafe extern "C" fn rt_apply_interpreted(closure: i64, args: *const i64, argc: 
     let argv = std::slice::from_raw_parts(args, argc as usize);
     match interp.apply_interpreted(heap, closure, argv) {
         Ok(w) => w,
-        Err(e) => rt_llvm_fatal(&format!("rt_apply_any: {:?}", e)),
+        Err(e) => {
+            crate::compile::park_interpreted_error(e);
+            typelisp_rt::unwind_interpreted_error()
+        }
     }
 }
 
@@ -5962,14 +5972,18 @@ unsafe extern "C" fn rt_apply_interpreted(closure: i64, args: *const i64, argc: 
 /// the caller then applies through [`rt_apply_interpreted`] — the same path
 /// any other interpreted callee takes out of compiled code.
 ///
-/// A slot with no `(type, method)` behind it, or a method that no longer
-/// resolves, is a compiler bug rather than anything a program can provoke,
-/// and aborts for the same reason [`rt_apply_interpreted`]'s errors do.
+/// Most failures here really are compiler bugs — a slot with no
+/// `(type, method)` behind it, or a method that no longer resolves — but
+/// reifying the closure allocates, so heap exhaustion reaches this arm too,
+/// and that a program can provoke. So errors unwind rather than abort, the
+/// same way [`rt_apply_interpreted`]'s do; an internal one still surfaces
+/// intact as `EvalError::Internal` rather than being flattened.
 ///
 /// # Safety
 ///
-/// Both a `Heap` and an `Interp` must be registered on this thread.
-unsafe extern "C" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
+/// Both a `Heap` and an `Interp` must be registered on this thread, and every
+/// frame out to the catching boundary must tolerate being unwound through.
+unsafe extern "C-unwind" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
     let interp = ACTIVE_INTERP.with(|cell| cell.get());
     if interp.is_null() {
         rt_llvm_fatal("rt_dyn_call: no interpreter is registered on this thread");
@@ -5978,7 +5992,10 @@ unsafe extern "C" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
     let heap = crate::compile::runtime::shim_active_heap();
     match interp.dyn_slot_closure(heap, vtable, slot) {
         Ok(w) => w,
-        Err(e) => rt_llvm_fatal(&format!("rt_dyn_call: {:?}", e)),
+        Err(e) => {
+            crate::compile::park_interpreted_error(e);
+            typelisp_rt::unwind_interpreted_error()
+        }
     }
 }
 

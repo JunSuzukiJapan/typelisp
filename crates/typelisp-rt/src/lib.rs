@@ -235,24 +235,60 @@ pub struct CompiledPanic {
     pub message: String,
 }
 
-/// Makes the default panic hook stay quiet for [`CompiledPanic`], installed
-/// once on the first compiled `(panic ...)` of the process.
+/// The payload marking an unwind that carries an *interpreted* callee's
+/// error, raised when compiled code called into the interpreter and got an
+/// error back ([`rt_apply_any`]/[`rt_dyn_call`] reaching their interpreter
+/// hooks).
 ///
-/// Without this, unwinding a compiled `panic` prints Rust's own
+/// **Carries nothing.** The error is a `typelisp::EvalError`, which is
+/// neither nameable from this crate (it depends on `typelisp-mem` alone) nor
+/// `Send`, as a panic payload must be — it holds `Rc<str>` and raw heap
+/// pointers. So the `typelisp` crate parks the error in a thread-local and
+/// this type only says *which* thread-local to look in. That is not a
+/// workaround so much as the honest shape: the error never leaves the thread
+/// that raised it, and a payload asserting otherwise would be a lie held up
+/// by an `unsafe impl Send` over raw pointers.
+#[derive(Debug)]
+pub struct InterpretedUnwind;
+
+/// Makes the default panic hook stay quiet for the two payloads this crate
+/// raises deliberately ([`CompiledPanic`] and [`InterpretedUnwind`]),
+/// installed once on the first such unwind of the process.
+///
+/// Without this, unwinding one of them prints Rust's own
 /// `thread '...' panicked at ...: Box<dyn Any>` line before the interpreter
 /// ever gets to report the error properly. Any other payload — a real bug in
 /// the runtime — still reaches the previous hook untouched, so this hides
-/// nothing that was not deliberately raised as a typelisp-level panic.
-fn install_quiet_panic_hook() {
+/// nothing that was not raised on purpose as a typelisp-level failure.
+pub(crate) fn install_quiet_panic_hook() {
     static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     INSTALLED.get_or_init(|| {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            if info.payload().downcast_ref::<CompiledPanic>().is_none() {
+            let ours = info.payload().downcast_ref::<CompiledPanic>().is_some()
+                || info.payload().downcast_ref::<InterpretedUnwind>().is_some();
+            if !ours {
                 previous(info);
             }
         }));
     });
+}
+
+/// Unwinds out of compiled code because an interpreted callee failed.
+///
+/// The counterpart of [`rt_panic`] for the other direction of the boundary:
+/// compiled code called into the interpreter, and the interpreter failed.
+/// Before this existed, [`rt_apply_any`]'s and [`rt_dyn_call`]'s interpreter
+/// hooks had nowhere to report to and aborted the process — including for
+/// ordinary, recoverable failures like a `(panic ...)` in an interpreted
+/// callback.
+///
+/// The caller must have parked the error where its catcher will look for it
+/// *before* calling this; see [`InterpretedUnwind`] for why it does not
+/// travel in the payload.
+pub fn unwind_interpreted_error() -> ! {
+    install_quiet_panic_hook();
+    std::panic::panic_any(InterpretedUnwind)
 }
 
 /// Encodes a `Value` into the tagged `i64` representation compiled code
@@ -1594,7 +1630,7 @@ pub unsafe extern "C" fn rt_closure_env_get(args: *const i64, argc: u32) -> i64 
 /// `typelisp::eval::Interp` installs it ([`set_apply_interpreted`]) at the
 /// same moment it registers the active heap; an AOT-compiled executable has
 /// no interpreter to install and leaves it unset.
-pub type ApplyInterpretedFn = unsafe extern "C" fn(closure: i64, args: *const i64, argc: u32) -> i64;
+pub type ApplyInterpretedFn = unsafe extern "C-unwind" fn(closure: i64, args: *const i64, argc: u32) -> i64;
 
 thread_local! {
     static APPLY_INTERPRETED: Cell<Option<ApplyInterpretedFn>> = const { Cell::new(None) };
@@ -1643,7 +1679,7 @@ pub fn set_apply_interpreted(f: Option<ApplyInterpretedFn>) {
 /// for a `kind = 2` argument does this): an interpreted body allocates, and
 /// an unrooted argument would be collected under it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_apply_any(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_apply_any(args: *const i64, argc: u32) -> i64 {
     if argc != 3 {
         fatal("rt_apply_any: expected 3 arguments (closure, argument array, argument count)");
     }
@@ -3410,7 +3446,7 @@ fn vtable_slot_addr(id: usize, slot: usize) -> usize {
 /// How [`rt_dyn_call`] asks the interpreter for the closure standing behind
 /// an unfilled vtable slot — `(vtable id, slot) -> a tagged interpreted
 /// closure value`.
-pub type DynSlotClosureFn = unsafe extern "C" fn(u32, u32) -> i64;
+pub type DynSlotClosureFn = unsafe extern "C-unwind" fn(u32, u32) -> i64;
 
 thread_local! {
     static DYN_SLOT_CLOSURE: Cell<Option<DynSlotClosureFn>> = const { Cell::new(None) };
@@ -3449,7 +3485,7 @@ pub fn set_dyn_slot_closure(f: Option<DynSlotClosureFn>) {
 /// `i64`s in the callee's own argument representations; a `Heap` must
 /// already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_dyn_call(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_dyn_call(args: *const i64, argc: u32) -> i64 {
     if argc != 4 {
         fatal("rt_dyn_call: expected 4 arguments (vtable id, slot, argument array, argument count)");
     }
