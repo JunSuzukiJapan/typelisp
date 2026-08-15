@@ -732,12 +732,23 @@ impl Interp {
         param_reprs: &[Repr],
         ret: &Repr,
     ) -> Result<Value, EvalError> {
+        // Recorded before anything is pushed, so the unwind path below can
+        // discard the crossing roots and whatever compiled code pushed on top
+        // of them in one shot — an unwinding `(panic ...)` runs none of the
+        // pops that normally balance either.
+        let roots_on_entry = heap.root_count();
         // A `defun`/`defmethod`'s `sig` lists only its fixed parameters; a
         // `&rest` one that reached compilation would land in the "no declared
         // representation" error above rather than be guessed at.
         let (int_args, crossing_roots) = self.encode_crossing_args(heap, argv, param_reprs, false)?;
         self.enter_compiled(heap);
-        let raw = compiled.call(&int_args);
+        let raw = match crate::compile::catch_compiled_panic(|| compiled.call(&int_args)) {
+            Ok(raw) => raw,
+            Err(message) => {
+                heap.truncate_roots(roots_on_entry);
+                return Err(EvalError::Panic(message));
+            }
+        };
         for _ in 0..crossing_roots {
             heap.pop_root();
         }
@@ -1047,7 +1058,10 @@ impl Interp {
         // in `compiler.rs`'s `compile-lambda`/`resolve-value` is its only
         // producer) — there is no other way to construct one, so `fn_ptr`
         // always points at a function with this signature.
-        let f: unsafe extern "C" fn(*const i64, u32, *const i64, u32) -> i64 = unsafe { std::mem::transmute(fn_ptr) };
+        // `extern "C-unwind"`, for the same reason `compile::CompiledSignature`
+        // is: a `(panic ...)` in this closure's body unwinds out through here,
+        // and an `extern "C"` pointer would promise Rust that it cannot.
+        let f: unsafe extern "C-unwind" fn(*const i64, u32, *const i64, u32) -> i64 = unsafe { std::mem::transmute(fn_ptr) };
         unsafe { f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32) }
     }
 

@@ -378,8 +378,14 @@ fn build_main_wrapper(
             .build_call(f, &[null_args.into(), argc_zero.into()], "global_init_result")
             .map_err(|e| format!("failed to build global-init call: {}", e))?;
     }
+    // Through `rt_run_entry` rather than calling `tl_main` directly, so a
+    // `(panic ...)` that unwinds out of the program has a Rust frame to be
+    // caught in — see that function's doc comment. `main` is the C entry
+    // point, and letting an unwind run off the end of it is undefined.
+    let rt_run_entry = module.add_function("rt_run_entry", ctx.i64_type().fn_type(&[ctx.i64_type().into()], false), None);
+    let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(ctx.i64_type());
     let call: CallSiteValue = builder
-        .build_call(tl_main, &[null_args.into(), argc_zero.into()], "tl_main_result")
+        .build_call(rt_run_entry, &[entry_addr.into()], "tl_main_result")
         .map_err(|e| format!("failed to build entry-point call: {}", e))?;
     let result = match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => v.into_int_value(),

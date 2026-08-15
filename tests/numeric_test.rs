@@ -338,13 +338,16 @@ fn random_varies_across_calls() {
 
 /// A one-off *interpreted* prelude, for the two tests below.
 ///
-/// `random`'s bound check is a `panic` inside a prelude body, and since the
-/// precompiled prelude that body is native — where a panic aborts the process
-/// by design (`typelisp_rt::rt_panic`: there are no landing pads to unwind
-/// through across the JIT boundary) rather than surfacing as a catchable
-/// `EvalError::Panic`. So these two assert what the check *is*, against the
-/// tier that can still answer: the divergence itself is recorded in
-/// `docs/dev/TODO.md`.
+/// `random`'s bound check is not its own `panic` at all — it is
+/// `typelisp_rt`'s `rt_random_state_next` reaching `fatal()`, which still
+/// aborts the process. `rt_panic` learned to unwind (so a `(panic ...)`
+/// *written in* a prelude body is now catchable against the ordinary prelude
+/// — see `bignum_ratio_test.rs`), but the `fatal()` callers that ordinary
+/// programs can reach have not moved to that mechanism yet.
+///
+/// So these two still assert what the check *is* against the tier that can
+/// answer. Delete this helper once `fatal()`'s user-reachable callers unwind
+/// too; the remaining divergence is recorded in `docs/dev/TODO.md`.
 fn run_interpreted(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();

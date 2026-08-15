@@ -733,7 +733,15 @@ impl Interp {
                     .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no return representation".to_string()))?;
                 let (int_args, crossing_roots) = self.encode_crossing_args(&mut s, &argv, &arg_reprs, false)?;
                 self.enter_compiled(&mut s);
-                let raw = Interp::call_closure_box(&s, id, &int_args);
+                // An unwinding `(panic ...)` inside the closure runs none of
+                // the pops below, and leaves whatever roots the compiled body
+                // had pushed. Returning here drops `s`, whose `RootScope`
+                // truncates the stack back to this call's own base — the same
+                // repair every other error path out of `apply_core` gets.
+                let raw = match crate::compile::catch_compiled_panic(|| Interp::call_closure_box(&s, id, &int_args)) {
+                    Ok(raw) => raw,
+                    Err(message) => return Err(EvalError::Panic(message)),
+                };
                 for _ in 0..crossing_roots {
                     s.pop_root();
                 }

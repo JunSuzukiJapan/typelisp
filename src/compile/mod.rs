@@ -80,7 +80,7 @@ pub const USER_SYMBOL_PREFIX: &str = "tl_";
 use std::sync::{Mutex, OnceLock};
 
 use inkwell::context::Context;
-use inkwell::execution_engine::JitFunction;
+use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
 use inkwell::OptimizationLevel;
 
@@ -115,14 +115,34 @@ pub fn llvm_context() -> &'static Context {
 /// `i64` out — see `registry::llvm_module_def`'s doc comment for why
 /// `compiler.rs`'s `compile-function` always builds LLVM functions under
 /// this exact signature.
-pub type CompiledSignature = unsafe extern "C" fn(*const i64, u32) -> i64;
+///
+/// `extern "C-unwind"`, not `extern "C"`: `typelisp_rt::rt_panic` unwinds, and
+/// an `extern "C"` pointer would promise Rust that the callee cannot — a
+/// promise broken the moment a `(panic ...)` fires.
+pub type CompiledSignature = unsafe extern "C-unwind" fn(*const i64, u32) -> i64;
 
-/// A JIT-compiled function. Holding the `JitFunction` is enough to keep the
-/// code (and its owning `ExecutionEngine`) alive — see
-/// [`inkwell::execution_engine::JitFunction`]'s doc comment, it carries its
-/// engine along internally.
+/// A JIT-compiled function: its entry address, and a share of the engine
+/// that owns the code at that address.
+///
+/// Reached by address rather than through
+/// [`inkwell::execution_engine::JitFunction`], because inkwell's
+/// `UnsafeFunctionPointer` is implemented for `unsafe extern "C" fn` only —
+/// `ExecutionEngine::get_function` cannot name [`CompiledSignature`]'s
+/// `-unwind` ABI at all, so the address comes from `get_function_address` and
+/// the engine has to be held directly.
+///
+/// What the engine keeps alive matters twice over: the code itself, and the
+/// `.eh_frame` registration the system unwinder walks when a compiled
+/// `(panic ...)` unwinds. Dropping an engine while a panic is still
+/// propagating through frames it owns leaves the unwinder unable to complete
+/// the *next* unwind — it hangs rather than fails, which
+/// `tests/compiled_unwind_test.rs` demonstrates. `ExecutionEngine` is
+/// reference-counted, so cloning one share per function is what keeps a whole
+/// SCC's engine alive as long as any member of it.
 pub struct CompiledFn {
-    f: JitFunction<'static, CompiledSignature>,
+    /// Held for its lifetime, never called through — see this struct's doc
+    /// comment.
+    _engine: ExecutionEngine<'static>,
     /// This function's own JIT-resolved address — see [`Self::address`].
     addr: usize,
 }
@@ -150,9 +170,8 @@ impl CompiledFn {
                 .ok_or_else(|| format!("internal error: no forward declaration for \"{}\" in this module", name))?;
             engine.add_global_mapping(&decl, *addr);
         }
-        let f = unsafe { engine.get_function::<CompiledSignature>(fn_name).map_err(|e| e.to_string())? };
         let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
-        Ok(CompiledFn { f, addr })
+        Ok(CompiledFn { _engine: engine, addr })
     }
 
     /// Like [`Self::new`], but resolves every name in `fn_names` out of one
@@ -185,15 +204,22 @@ impl CompiledFn {
         fn_names
             .iter()
             .map(|fn_name| {
-                let f = unsafe { engine.get_function::<CompiledSignature>(fn_name).map_err(|e| e.to_string())? };
                 let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
-                Ok(CompiledFn { f, addr })
+                Ok(CompiledFn { _engine: engine.clone(), addr })
             })
             .collect()
     }
 
+    /// Runs this function. A compiled `(panic ...)` unwinds out of here
+    /// rather than returning, so callers that need to recover must wrap the
+    /// call in [`catch_compiled_panic`].
+    ///
     pub fn call(&self, args: &[i64]) -> i64 {
-        unsafe { self.f.call(args.as_ptr(), args.len() as u32) }
+        // SAFETY: `addr` came from `get_function_address` on a name the module
+        // defines, so it points at a function built under `compiled_fn_type` —
+        // exactly what `CompiledSignature` describes.
+        let f: CompiledSignature = unsafe { std::mem::transmute::<usize, CompiledSignature>(self.addr) };
+        unsafe { f(args.as_ptr(), args.len() as u32) }
     }
 
     /// This function's own JIT-resolved address — used to wire
@@ -202,6 +228,39 @@ impl CompiledFn {
     /// parameter).
     pub fn address(&self) -> usize {
         self.addr
+    }
+}
+
+/// Runs `call` — a call into compiled code — and converts a compiled
+/// `(panic ...)` into `Err(message)` instead of letting it unwind further.
+///
+/// This is the boundary that makes a compiled `panic` recoverable: it is the
+/// counterpart of `typelisp_rt::rt_panic`'s unwind, and the reason the
+/// process no longer aborts. Every place the interpreter enters compiled code
+/// has to go through it, or the panic keeps unwinding into interpreter frames
+/// that never expected it.
+///
+/// **Only a [`typelisp_rt::CompiledPanic`] is caught.** Any other payload is
+/// a genuine bug in the runtime or in LLVM-generated code, and is re-raised
+/// unchanged — swallowing one would turn a crash into a plausible-looking
+/// `EvalError` and hide it. `AssertUnwindSafe` is sound here for the same
+/// reason the call is: the `Heap` compiled code mutates is reached through
+/// `runtime::active_heap`'s raw pointer, not through anything captured by
+/// this closure, and the caller repairs the root stack afterwards.
+///
+/// The caller is responsible for the GC root stack. Compiled code pushes
+/// roots as it runs and pops them on the way out; an unwind skips every one
+/// of those pops, so a caller that catches here must truncate the root stack
+/// back to the depth it recorded before the call
+/// (`Heap::root_count`/`Heap::truncate_roots` — the same pair a compiled
+/// `break`/`return` already unwinds through).
+pub fn catch_compiled_panic<R>(call: impl FnOnce() -> R) -> Result<R, String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
+        Ok(v) => Ok(v),
+        Err(payload) => match payload.downcast::<typelisp_rt::CompiledPanic>() {
+            Ok(p) => Err(p.message),
+            Err(other) => std::panic::resume_unwind(other),
+        },
     }
 }
 

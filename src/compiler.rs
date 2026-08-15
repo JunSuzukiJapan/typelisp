@@ -3896,12 +3896,18 @@ pub const SOURCE: &str = r#"
 ;; `rt_struct_pop_field` (shrink by one, returning the
 ;; removed element — the mem layer panics if the
 ;; vector is already empty). An out-of-range `get`/
-;; `set` index aborts inside `rt_struct_field_get`/
-;; `_set` (the mem-layer bounds panic across the
-;; `extern "C"` boundary), matching compiled code's
-;; "abort, don't unwind" convention (`rt_panic`) — the
-;; one intentional semantic gap from the interpreter,
-;; which recovers the same overrun as an `EvalError`.
+;; `set` index still aborts inside
+;; `rt_struct_field_get`/`_set`: the mem-layer bounds
+;; panic crosses those functions' `extern "C"`
+;; boundary, which is defined to abort. `rt_panic` no
+;; longer works that way — it is `extern "C-unwind"`
+;; and a `(panic ...)` comes back as a catchable
+;; `EvalError::Panic` — so these two are simply among
+;; the `fatal()`-and-`extern "C"` sites not moved to
+;; that mechanism yet, not a deliberate convention.
+;; Until they are, this stays a semantic gap from the
+;; interpreter, which recovers the same overrun as an
+;; `EvalError`.
 ;; No extra GC-rooting beyond what `compile-field-set`
 ;; already relies on: the receiver flows in as an
 ;; ordinary (env-rooted) value, and `rt_struct_push_
@@ -4225,15 +4231,22 @@ pub const SOURCE: &str = r#"
 ;; `Match`/`FieldGet` need — `msg-form` compiles down to
 ;; the exact tagged `Sexpr::Str` representation
 ;; `compile-str` already produces, handed straight to
-;; `rt_panic`, which prints it (`"panic: {msg}"`,
-;; matching `EvalError::Panic`'s own interpreted-path
-;; wording) and aborts the process — the only safe way
-;; to fail out of compiled code (no landing pads to
-;; unwind through across the JIT/AOT native-code
-;; boundary; the same rule `rt_match_fail` already
-;; follows). `Expr::Panic`'s own checked type is
-;; `Never`, so nothing downstream ever reads this call's
-;; return value for real.
+;; `rt_panic` — which *unwinds* with the message rather
+;; than returning, so the boundary that entered
+;; compiled code turns it back into the same catchable
+;; `EvalError::Panic` an interpreted `(panic ...)`
+;; produces. Nothing changes on this side for that: the
+;; unwinding is all in `rt_panic`'s own
+;; `extern "C-unwind"` declaration, and a plain `call`
+;; to a function that unwinds needs no landing pad in
+;; this frame — only a frame the unwinder can walk,
+;; which MCJIT and the AOT linker both give us (see
+;; `tests/compiled_unwind_test.rs`). `rt_match_fail`
+;; still aborts, but that is a checker-guaranteed
+;; unreachable, not a user-visible failure.
+;; `Expr::Panic`'s own checked type is `Never`, so
+;; nothing downstream ever reads this call's return
+;; value for real.
 (defun compile-panic ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr))llvm-value
     (let ((msg-form (sexpr-car (sexpr-cdr e))))
       (let ((msg-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base msg-form)))

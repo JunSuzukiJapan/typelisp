@@ -24,6 +24,13 @@ fn tmp_dir() -> PathBuf {
 /// `<scratch>/<name>`, and returns the exit code of running that
 /// executable with no arguments.
 fn compile_and_run(name: &str, source: &str) -> i32 {
+    let (code, _) = compile_and_capture(name, source);
+    code
+}
+
+/// [`compile_and_run`] plus the executable's stderr — for the cases where
+/// *what it said* on the way out is the point, not just the code.
+fn compile_and_capture(name: &str, source: &str) -> (i32, String) {
     let dir = tmp_dir();
     let src_path = dir.join(format!("{}.typl", name));
     let out_path = dir.join(name);
@@ -32,8 +39,9 @@ fn compile_and_run(name: &str, source: &str) -> i32 {
     typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
         .expect("compile_file failed");
 
-    let status = Command::new(&out_path).status().expect("failed to run the compiled executable");
-    status.code().expect("process did not exit normally")
+    let out = Command::new(&out_path).output().expect("failed to run the compiled executable");
+    let code = out.status.code().expect("process did not exit normally");
+    (code, String::from_utf8_lossy(&out.stderr).into_owned())
 }
 
 #[test]
@@ -716,4 +724,39 @@ fn compiles_and_runs_a_multi_slot_vtable() {
         ),
         73
     );
+}
+
+/// A `(panic ...)` that reaches the entry point ends the program cleanly —
+/// message on stderr, exit code 1 — instead of aborting it.
+///
+/// `typelisp_rt::rt_panic` unwinds now, and an AOT executable's `main` is
+/// generated LLVM code with no Rust frame to catch in; `rt_run_entry` is the
+/// frame added for exactly this, and `compile::aot`'s entry-point builder
+/// calls `tl_main` through it. Without that, the unwind would run off the end
+/// of the C `main`, which is undefined.
+///
+/// Exit code 1 rather than the old 134 (`SIGABRT`) is the point: it matches
+/// what `typl <file>` exits with when an interpreted run ends in an error, so
+/// a script cannot tell the two front ends apart.
+#[test]
+fn a_panic_reaching_the_entry_point_exits_rather_than_aborting() {
+    let (code, stderr) = compile_and_capture("panics", r#"(defun main () i64 (panic "from aot"))"#);
+    assert_eq!(code, 1, "stderr was: {}", stderr);
+    assert!(stderr.contains("panic: from aot"), "stderr was: {}", stderr);
+}
+
+/// The panic still has to be reachable *through* a call, not just at the top
+/// of `main` — that is the frame the unwinder actually has to walk.
+#[test]
+fn a_panic_unwinds_through_a_compiled_call_in_an_aot_executable() {
+    let (code, stderr) = compile_and_capture(
+        "panics_nested",
+        r#"
+        (defun inner ((n i32)) i32 (if (< n 0) (panic "negative") n))
+        (defun outer ((n i32)) i32 (inner n))
+        (defun main () i64 (as i64 (outer -1)))
+        "#,
+    );
+    assert_eq!(code, 1, "stderr was: {}", stderr);
+    assert!(stderr.contains("panic: negative"), "stderr was: {}", stderr);
 }

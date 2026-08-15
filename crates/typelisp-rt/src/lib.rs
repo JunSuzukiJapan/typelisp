@@ -201,18 +201,58 @@ const IMMEDIATE_NIL: i64 = 0;
 const IMMEDIATE_FALSE: i64 = 1;
 const IMMEDIATE_TRUE: i64 = 2;
 
-/// Prints `msg` to stderr and aborts the process — the only safe way to
-/// fail out of an `rt_*` function. A bare Rust `panic!` would try to unwind
-/// back through whatever JIT-compiled or AOT-linked native code called in
-/// (no Rust landing pads there), which is undefined behavior across an
-/// `extern "C"` boundary; aborting is the documented-safe alternative.
-/// Every error case below is a contract violation by `compiler.rs` itself
-/// (an internal compiler bug), never a normal/recoverable runtime
-/// condition — there is no `Result`-like channel back to compiled code to
-/// report it through instead.
+/// Prints `msg` to stderr and aborts the process — how an `rt_*` function
+/// fails when it has no way to report back.
+///
+/// Every error case that reaches here is a contract violation by
+/// `compiler.rs` itself (an internal compiler bug), never a normal or
+/// recoverable runtime condition, and there is no `Result`-like channel back
+/// to compiled code to report it through instead.
+///
+/// A user-level `(panic ...)` no longer comes through here — see
+/// [`rt_panic`], which unwinds. The remaining callers are being reviewed
+/// one at a time: several of them (integer division by zero, a non-positive
+/// `random` bound, an out-of-range `substring`) *are* reachable from ordinary
+/// programs despite this comment's claim, and each one that is should move to
+/// [`rt_panic`]'s mechanism rather than keep aborting.
 fn fatal(msg: &str) -> ! {
     eprintln!("typelisp runtime error: {}", msg);
     std::process::abort();
+}
+
+/// The payload a compiled `(panic ...)` unwinds with, so the interpreter can
+/// tell *its* panic apart from a genuine Rust bug that happens to cross the
+/// same boundary.
+///
+/// A plain `String` payload would be ambiguous — any `panic!("...")` inside
+/// the runtime produces one — and swallowing a real bug as if it were a
+/// typelisp-level `panic` would turn a crash into a silently wrong
+/// `EvalError`. Catchers downcast to this type and re-raise anything else.
+#[derive(Debug)]
+pub struct CompiledPanic {
+    /// The message the `(panic ...)` form was given, without the `"panic: "`
+    /// prefix `EvalError::Panic`'s `Display` adds.
+    pub message: String,
+}
+
+/// Makes the default panic hook stay quiet for [`CompiledPanic`], installed
+/// once on the first compiled `(panic ...)` of the process.
+///
+/// Without this, unwinding a compiled `panic` prints Rust's own
+/// `thread '...' panicked at ...: Box<dyn Any>` line before the interpreter
+/// ever gets to report the error properly. Any other payload — a real bug in
+/// the runtime — still reaches the previous hook untouched, so this hides
+/// nothing that was not deliberately raised as a typelisp-level panic.
+fn install_quiet_panic_hook() {
+    static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    INSTALLED.get_or_init(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if info.payload().downcast_ref::<CompiledPanic>().is_none() {
+                previous(info);
+            }
+        }));
+    });
 }
 
 /// Encodes a `Value` into the tagged `i64` representation compiled code
@@ -2287,31 +2327,91 @@ pub unsafe extern "C" fn rt_match_fail(_args: *const i64, _argc: u32) -> i64 {
 }
 
 /// `(panic msg)` for compiled code (`core_bridge`'s `panic` arm /
-/// `compiler.rs`'s `compile-panic`): prints `"panic: {msg}"` — the same
-/// wording `EvalError::Panic`'s `Display` impl uses for an *interpreted*
-/// `(panic ...)` — and aborts the process. Unlike the interpreted path
-/// (where a user `panic` unwinds as an ordinary, recoverable `Result::Err`
-/// the caller can propagate), compiled code has no landing pads to unwind
-/// through across the JIT/AOT native-code boundary, so aborting is the only
-/// safe option here — the same rule every other unrecoverable compiled-code
-/// failure path (e.g. [`rt_match_fail`]) already follows. A deliberate
-/// behavioral divergence from the interpreter, not an oversight.
+/// `compiler.rs`'s `compile-panic`): unwinds with a [`CompiledPanic`]
+/// carrying `msg`, so the boundary that entered compiled code can turn it
+/// back into the same recoverable `EvalError::Panic` the interpreted path
+/// produces.
+///
+/// **`extern "C-unwind"`, not `extern "C"`, is what makes this legal.** A
+/// panic reaching a plain `extern "C"` boundary is defined to abort the
+/// process (the Rustonomicon's "FFI and unwinding"), which is exactly what
+/// this function used to do on purpose. Rust 1.71 stabilized the `-unwind`
+/// ABI strings for this case; `tests/compiled_unwind_test.rs` is the probe
+/// that established the rest of the pipeline cooperates — MCJIT's frames are
+/// walkable by the system unwinder, and no `uwtable` attribute is needed on
+/// the generated functions.
+///
+/// One non-obvious constraint comes with it: **the `ExecutionEngine` owning
+/// the frames being unwound through must outlive the unwind.** Dropping it
+/// mid-unwind leaves the unwinder's registry in a state where the *next*
+/// unwind hangs forever. `CompiledFn` already holds its engine for the life
+/// of the process, so nothing has to change — but nothing may start dropping
+/// engines on this path either.
 ///
 /// # Safety
 ///
 /// `argc` must be `>= 1`, `args[0]` must decode to a `Value::Str`; a `Heap`
-/// must already be registered on this thread.
+/// must already be registered on this thread. Every frame between this call
+/// and the catching boundary must tolerate being unwound through — for
+/// compiled frames that is what the probe above establishes, and for the
+/// `rt_*` frames in between it is why they are `extern "C-unwind"` too.
 #[no_mangle]
-pub unsafe extern "C" fn rt_panic(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_panic(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_panic: expected 1 argument");
     }
-    let msg = match decode(*args) {
+    let message = match decode(*args) {
         Value::Str(id) => active_heap().string(id).to_string(),
         _ => fatal("rt_panic: argument is not a Str"),
     };
-    eprintln!("panic: {}", msg);
-    std::process::abort();
+    install_quiet_panic_hook();
+    std::panic::panic_any(CompiledPanic { message })
+}
+
+/// The exit code an AOT executable ends with when a `(panic ...)` reaches its
+/// entry point uncaught — the same code `typl <file>` exits with when an
+/// interpreted run ends in an error, so the two front ends agree.
+const EXIT_CODE_PANIC: i64 = 1;
+
+/// Runs an AOT executable's compiled entry point (`tl_main`) with a catch
+/// around it, returning its exit code — or, if a `(panic ...)` unwound out of
+/// it, printing the message and returning [`EXIT_CODE_PANIC`].
+///
+/// This exists because an AOT executable has nowhere else to put the catch.
+/// In the JIT path the interpreter is a Rust frame that can wrap the call
+/// (`typelisp::compile::catch_compiled_panic`); AOT's `main` is *generated
+/// LLVM code* that calls `rt_heap_init` and then `tl_main` directly
+/// (`compile::aot`'s entry-point builder), with no Rust frame in between. So
+/// the catch moves into the runtime, and the generated `main` calls this
+/// instead of calling `tl_main` itself.
+///
+/// Letting the panic unwind out of `main` instead is not an option: `main` is
+/// the C entry point, and unwinding past it is undefined.
+///
+/// # Safety
+///
+/// `entry` must be the address of a function compiled under the standard
+/// compiled-function ABI (`typelisp::compile::CompiledSignature`) that
+/// tolerates being called with no arguments — which `tl_main` is, since the
+/// generated `main` already called it that way. A `Heap` must already be
+/// registered on this thread (`rt_heap_init` runs first).
+#[no_mangle]
+pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
+    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = std::mem::transmute(entry as usize);
+    let call = std::panic::AssertUnwindSafe(|| f(std::ptr::null(), 0));
+    match std::panic::catch_unwind(call) {
+        Ok(code) => code,
+        // Only a typelisp-level `panic` is turned into an exit code; anything
+        // else is a real bug in the runtime and keeps unwinding, exactly as
+        // `catch_compiled_panic` does on the JIT side.
+        Err(payload) => match payload.downcast::<CompiledPanic>() {
+            Ok(p) => {
+                eprintln!("panic: {}", p.message);
+                EXIT_CODE_PANIC
+            }
+            Err(other) => std::panic::resume_unwind(other),
+        },
+    }
 }
 
 // ---- Stage 7: Str --------------------------------------------------------

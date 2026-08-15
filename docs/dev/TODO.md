@@ -6,23 +6,30 @@
 
 ## 残っている作業
 
-### compiled な prelude 本体の `panic` がプロセスを abort する
+### `fatal()` の到達可能な呼び出し元がまだ abort する
 
-`typelisp_rt::rt_panic` は JIT/AOT のネイティブフレームを巻き戻せない（landing pad が無い）ので
-abort する——これ自体は意図的な設計だが、prelude が既定で事前コンパイルされるようになった結果、
-**prelude 本体の `panic` が catchable な `EvalError::Panic` ではなくプロセス終了になる**。
+`rt_panic` は `extern "C-unwind"` になり、compiled な `(panic ...)` は catchable な
+`EvalError::Panic` として返るようになった（JIT は `compile::catch_compiled_panic`、
+AOT は `typelisp_rt::rt_run_entry` が受ける）。REPL も compiled な panic で落ちなくなった。
 
-既知の該当箇所（テストは interpreted prelude に対して検査する形にしてある）:
+残っているのは **`typelisp_rt::fatal()` を経由する経路**。`fatal()` の doc は「ここに来るのは
+`compiler.rs` の契約違反だけ」と書いているが、実際にはユーザ入力で到達する:
 
-| 式 | 本来 |
-|---|---|
-| `(random 0)` / `(random -5)` | `panic: random: bound must be positive` |
-| `(expt 2n -1n)` | `panic: expt: negative exponent ...` |
-| `(expt 2/3 1/2)` | `panic: expt: ratio exponent must be integer-valued` |
+| 式 | 現状 | 本来 |
+|---|---|---|
+| `(random 0)` / `(random -5)` | abort | `panic: random: bound must be positive` |
+| `(rem 5 0)`（i32/i64/bignum/ratio） | abort | `panic: divide by zero` |
+| `(mod 1/2 0)` | abort | 同上 |
+| `(floor-div 5 0)`/`(truncate-div 5 0)`/`(ceiling-div 5 0)`/`(round-div 5 0)` | abort | 同上 |
+| compiled なユーザコードの `(/ a b)` / `(mod a b)` / 範囲外 `substring` | abort | 同上 |
+| 範囲外の `vector-ref`（`rt_struct_field_get`/`_set`） | abort | 同上 |
 
-REPL ではタイプミス 1 回でセッションが落ちるので、ユーザから見える度合いは小さくない。
-本気で直すなら「compiled フレームを巻き戻す」話になるので、まず REPL だけ別プロセスで実行する等の
-軽い緩和で足りるかを決めること。
+`fatal()` の呼び出し元 100 箇所超のうち大半は本当に内部不変条件（arity 違反、タグ違い）なので、
+一括で `rt_panic` の機構に載せ替えるか、到達可能なものだけ選ぶかを決めること。
+載せ替える関数は `extern "C-unwind"` にする必要がある。
+
+検査を interpreted prelude に逃がしているテストが `tests/numeric_test.rs` の
+`run_interpreted` に 1 つ残っている（`random`）。この項目が終わったら消せる。
 
 ### prelude ビットコードの起動時コスト（+198〜258 ms）
 
