@@ -1,38 +1,44 @@
-//! Phase A feasibility probe for making a compiled `panic` catchable instead
-//! of aborting the process (`docs/dev/TODO.md`).
+//! What the unwinder will and will not do for LLVM-generated frames — the
+//! ground the compiled-`panic` work and any future `unwind-protect` stand on.
 //!
-//! Today `typelisp_rt::rt_panic` calls `std::process::abort()` because a Rust
+//! `typelisp_rt::rt_panic` used to call `std::process::abort()`, because a Rust
 //! `panic!` crossing back through JIT/AOT frames over an `extern "C"` boundary
 //! is undefined behavior. Rust 1.71 stabilized `extern "C-unwind"` for exactly
-//! this case: a panic may cross that boundary, provided every frame in between
-//! is unwindable.
+//! that case: a panic may cross, provided every frame in between is unwindable.
+//! Whether *these* frames are was not something the codebase could answer — it
+//! had no `personality`, `uwtable`, `invoke` or `landingpad` anywhere — so
+//! these probes build the smallest modules that settle it, at two levels.
 //!
-//! The frames in between are LLVM-generated, so the open question is whether
-//! *this* pipeline produces unwindable frames — MCJIT has to register the
-//! module's `.eh_frame` with the system unwinder. Nothing in the codebase
-//! exercises that today (no `personality`, `uwtable`, `invoke` or `landingpad`
-//! anywhere), so this builds the smallest module that answers it: one function
-//! under the real `CompiledSignature` ABI whose body calls an
-//! `extern "C-unwind"` Rust function that panics.
+//! **Level 1 — unwinding *through* a compiled frame**, which is all a catchable
+//! `panic` needs:
 //!
-//! Three things this pins down, each of which changes the real fix:
-//!
-//! 1. **A panic does cross a JIT frame** — Phase A's level 1 ("unwind *through*
-//!    a compiled frame"), the precondition for `rt_panic` to stop aborting.
-//! 2. **No `uwtable` attribute is needed** on the generated function, so
-//!    `compiler.rs`'s `compile-function` and the island artifact are untouched.
+//! 1. A panic does cross a JIT frame and reach `catch_unwind`.
+//! 2. **No `uwtable` attribute is needed**, so `compiler.rs`'s
+//!    `compile-function` and the island artifact are untouched.
 //! 3. **The execution engine must outlive the unwind.** Dropping it while the
 //!    panic is still propagating through its own code *deadlocks the next
-//!    unwind* — see [`a_second_panic_still_unwinds`]. The real
-//!    [`typelisp::compile::CompiledFn`] already keeps its engine alive for the
-//!    life of the process, so this is a constraint to preserve rather than one
-//!    to fix, but it is invisible until a second panic happens.
+//!    unwind* — see [`a_second_panic_still_unwinds`].
+//!    [`typelisp::compile::CompiledFn`] keeps its engine alive for the life of
+//!    the process, so this is a constraint to preserve rather than one to fix,
+//!    but it is invisible until a second panic happens.
+//!
+//! **Level 2 — running cleanup *inside* a compiled frame**, which is what an
+//! `unwind-protect` needs and level 1 does not provide:
+//!
+//! 4. An `invoke` with a cleanup-only `landingpad` runs its cleanup while the
+//!    panic is in flight, `resume`s, and the panic still reaches the catcher —
+//!    both halves, since cleanup that swallowed the unwind would be a `catch`
+//!    instead.
+//! 5. **The personality routine has to be `rust_eh_personality`.**
+//!    `__gxx_personality_v0` works under JIT but does not link into an AOT
+//!    executable; see [`protected_probe`].
 //!
 //! Deliberately built with raw inkwell rather than through the typelisp front
 //! end: the point is to isolate the LLVM/JIT/unwinder interaction from every
 //! other moving part, so a failure names the mechanism rather than the language.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use inkwell::module::Linkage;
@@ -196,4 +202,153 @@ fn a_second_panic_still_unwinds() {
     assert_eq!(caught_message(0), PANIC_MESSAGE);
     // ...and the frame is still usable for ordinary calls afterwards.
     assert_eq!(call_probe(50), 100);
+}
+
+// ---- Phase A level 2: running cleanup *inside* a compiled frame ------------
+//
+// Level 1 above only needs the unwinder to *walk past* a compiled frame. An
+// `unwind-protect` needs more: the frame has to catch the in-flight unwind,
+// run its cleanup forms, and resume — which in LLVM means the call becomes an
+// `invoke` with a `landingpad` on its unwind edge, and the function needs a
+// personality routine. None of that exists in `compiler.rs` today, so these
+// tests establish whether it can before any of it is designed.
+
+/// Set by [`typelisp_test_cleanup_ran`], so a test can tell whether the
+/// landing pad actually executed rather than being merely emitted.
+static CLEANUP_RUNS: AtomicUsize = AtomicUsize::new(0);
+
+/// Stands in for an `unwind-protect`'s cleanup form: something observable
+/// that the landing pad calls while the panic is in flight.
+///
+/// # Safety
+///
+/// Called from a landing pad with no arguments; touches nothing but its own
+/// counter.
+#[no_mangle]
+pub extern "C-unwind" fn typelisp_test_cleanup_ran() {
+    CLEANUP_RUNS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// The level-2 probe's address, built once and kept — same reasoning as
+/// [`PROBE`].
+static PROTECTED_PROBE: OnceLock<usize> = OnceLock::new();
+
+/// Builds `protected(args, argc) -> i64`: the same call as [`probe`], but
+/// through an `invoke` whose unwind edge lands in a cleanup-only
+/// `landingpad` that calls [`typelisp_test_cleanup_ran`] and then `resume`s.
+///
+/// That shape *is* `unwind-protect` in miniature: run a form, and whether it
+/// completes or unwinds, run the cleanup — with the unwind continuing
+/// afterwards rather than being swallowed.
+///
+/// The personality routine is **`rust_eh_personality`**, and which one it is
+/// turned out to matter. `__gxx_personality_v0` (the Itanium C++ one) also
+/// works under JIT — a Rust panic is a foreign exception to it, and a
+/// cleanup-only clause runs for those — but it is *not linkable into an AOT
+/// executable*: plain `cc` on macOS leaves it undefined, since it lives in
+/// libc++abi and only the JIT process gets that for free by way of LLVM.
+/// `rust_eh_personality` is defined in `libtypelisp_rt.a`, which every AOT
+/// executable already links, so it is the one personality available on both
+/// paths.
+fn protected_probe() -> UnwindingProbe {
+    let addr = *PROTECTED_PROBE.get_or_init(|| {
+        let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ctx = llvm_context();
+        let module = ctx.create_module("unwind_protect_probe");
+        let i64_t = ctx.i64_type();
+        let i32_t = ctx.i32_type();
+        let ptr_t = ctx.ptr_type(AddressSpace::default());
+
+        let callee = module.add_function("typelisp_test_maybe_panic", i64_t.fn_type(&[i64_t.into()], false), Some(Linkage::External));
+        let cleanup_fn =
+            module.add_function("typelisp_test_cleanup_ran", ctx.void_type().fn_type(&[], false), Some(Linkage::External));
+        // `i32 (...)` — the personality's signature is never actually called
+        // by generated code, only recorded on the function.
+        let personality = module.add_function("rust_eh_personality", i32_t.fn_type(&[], true), Some(Linkage::External));
+
+        let protected = module.add_function("protected", i64_t.fn_type(&[ptr_t.into(), i32_t.into()], false), None);
+        protected.set_personality_function(personality);
+
+        let entry = ctx.append_basic_block(protected, "entry");
+        let normal = ctx.append_basic_block(protected, "normal");
+        let cleanup = ctx.append_basic_block(protected, "cleanup");
+
+        let builder = ctx.create_builder();
+        builder.position_at_end(entry);
+        let args_ptr = protected.get_nth_param(0).unwrap().into_pointer_value();
+        let first = builder.build_load(i64_t, args_ptr, "arg0").unwrap().into_int_value();
+        let invoked = builder.build_invoke(callee, &[first.into()], normal, cleanup, "invoke").unwrap();
+
+        builder.position_at_end(normal);
+        let result = match invoked.try_as_basic_value() {
+            ValueKind::Basic(v) => v.into_int_value(),
+            ValueKind::Instruction(_) => panic!("the callee declaration produced no value"),
+        };
+        builder.build_return(Some(&result)).unwrap();
+
+        // Cleanup-only: no catch clauses, so the personality reports "cleanup"
+        // and the `resume` hands the exception back to the unwinder.
+        builder.position_at_end(cleanup);
+        let exception_type = ctx.struct_type(&[ptr_t.into(), i32_t.into()], false);
+        let pad = builder.build_landing_pad(exception_type, personality, &[], true, "pad").unwrap();
+        builder.build_call(cleanup_fn, &[], "cleanup_call").unwrap();
+        builder.build_resume(pad).unwrap();
+
+        module.verify().expect("protected module failed verification");
+
+        let engine = module.create_jit_execution_engine(OptimizationLevel::None).expect("failed to create the JIT engine");
+        engine.add_global_mapping(&callee, typelisp_test_maybe_panic as usize);
+        engine.add_global_mapping(&cleanup_fn, typelisp_test_cleanup_ran as usize);
+        let addr = engine.get_function_address("protected").expect("protected did not resolve");
+        std::mem::forget(engine);
+        addr as usize
+    });
+    unsafe { std::mem::transmute::<usize, UnwindingProbe>(addr) }
+}
+
+fn call_protected(arg: i64) -> i64 {
+    let f = protected_probe();
+    let argv = [arg];
+    unsafe { f(argv.as_ptr(), 1) }
+}
+
+/// The normal path through an `invoke`: no unwind, so the landing pad does
+/// not run and the value comes back as usual.
+#[test]
+fn a_protected_frame_returns_normally_and_skips_its_cleanup() {
+    let before = CLEANUP_RUNS.load(Ordering::SeqCst);
+    assert_eq!(call_protected(21), 42);
+    assert_eq!(CLEANUP_RUNS.load(Ordering::SeqCst), before, "cleanup ran on the normal path");
+}
+
+/// Phase A, level 2: a compiled frame runs its cleanup while a panic unwinds
+/// through it, and the panic still reaches the catcher afterwards.
+///
+/// Both halves matter. Cleanup that runs but swallows the unwind would turn
+/// `(unwind-protect body cleanup)` into a `catch`; an unwind that reaches the
+/// catcher without running cleanup would leak whatever the cleanup was there
+/// to release.
+#[test]
+fn a_protected_frame_runs_its_cleanup_while_a_panic_unwinds_through() {
+    let before = CLEANUP_RUNS.load(Ordering::SeqCst);
+    let payload = without_panic_output(|| catch_unwind(AssertUnwindSafe(|| call_protected(0))))
+        .expect_err("the panic did not propagate past the landing pad");
+    assert_eq!(CLEANUP_RUNS.load(Ordering::SeqCst), before + 1, "the landing pad did not run the cleanup");
+    let message = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .expect("panic payload was not the String this probe panics with");
+    assert_eq!(message, PANIC_MESSAGE);
+}
+
+/// Repeatable, for the same reason level 1 had to be: a session runs
+/// `unwind-protect` over and over.
+#[test]
+fn a_protected_frame_is_reusable_after_an_unwind() {
+    let before = CLEANUP_RUNS.load(Ordering::SeqCst);
+    for _ in 0..3 {
+        let _ = without_panic_output(|| catch_unwind(AssertUnwindSafe(|| call_protected(0)))).expect_err("expected a panic");
+    }
+    assert_eq!(CLEANUP_RUNS.load(Ordering::SeqCst), before + 3);
+    assert_eq!(call_protected(50), 100);
 }
