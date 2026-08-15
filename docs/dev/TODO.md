@@ -1,10 +1,51 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-08-15 / ブランチ: `feature/compile-strict-names-and-prelude-bitcode`
+最終更新: 2026-08-15 / ブランチ: `feature/compiled-unwind`
 
 このドキュメントは**現在残っている作業のみ**を記録する。
 
 ## 残っている作業
+
+### `catch`/`throw`/`unwind-protect` の compiled 側（作業中）
+
+interpreted 層は入っている（checker・core form・`EvalError::Throw`・評価）。
+関数を跨ぐ throw、`unwind-protect` の cleanup、捕まらない throw のエラー、
+シンボルごとの型検査まで動く。
+
+**残りは compiled 側。** 今 `compile` すると
+`compile: the free-variable walk does not know the tag \`catch\`` で止まる
+（明確なエラーであって壊れてはいない）。方式は LLVM EH 一択——`catch`/`throw` は
+関数を跨ぐので `break`/`return` の関数内戻り値方式では書けない。実現可能性は
+`tests/compiled_unwind_test.rs` で実証済み（`invoke` + cleanup 専用 `landingpad` +
+`resume` が JIT で動き、cleanup が走ったうえで panic は先の catch まで届く）。
+
+着手順:
+
+1. `src/check/registry.rs` + `Interp` の `rt_llvm_call` に
+   `build-invoke`/`build-landing-pad`/`build-resume`/`set-personality-function`
+   を新設。島は registry が公開した `llvm-builder` メソッドしか呼べず、
+   現状 `build-*` は 27 個で EH 命令が無い。
+   **op-id は名前の FNV ハッシュ（`compile::symbols::llvm_op_id`）で連番ではないので、
+   追加しても既存 op の id は動かず島の成果物は無効化されない** — ここは島と独立に
+   入れて単体検証できる
+2. `src/compile/core_freevars.rs`（今の停止点）と `src/compile/core_bridge.rs`。
+   **タグの `Repr` をノードに焼き込む**こと: 投げた値は境界を跨ぐので、`apply` が
+   arg/ret repr を運ぶのと同じ理由が要る
+3. `crates/typelisp-rt` に実行中 throw のスロットと
+   `rt_throw`/`rt_throw_matches`/`rt_throw_take_value`
+4. 島 `src/compiler.rs` の `compile-catch`/`compile-throw`/`compile-unwind-protect`。
+   **personality は `rust_eh_personality`**。`__gxx_personality_v0` は JIT では
+   動くが AOT の実リンク行（`cc obj libtypelisp_rt.a`）で undefined になる（実測）
+5. GC ルート: unwind は compiled フレームの root pop を全部飛ばすので、
+   catch の landing pad で `rt_truncate_sexpr_roots` により catch 入口の深さへ
+   巻き戻す（`loop` の `loop-root-base` と同じ手）
+6. interpreted の `EvalError::Throw` と rt 側の実行中 throw の相互変換
+7. `scripts/regen-compiler-island.sh` / `scripts/regen-prelude-bitcode.sh` で
+   成果物を再生成し、`compile_test`/`compile_file_test` を含めてフルスイート
+
+設計判断（`Result` とコンディションの二重化を避け、コンディションは入れず
+`catch`/`throw`/`unwind-protect` に一本化する）は
+[language-design.md](language-design.md) §7 の改定として書くこと——まだ未着手。
 
 ### `fatal()` の到達可能な呼び出し元がまだ abort する
 
