@@ -81,6 +81,12 @@ pub enum EvalError {
     Internal(String),
     /// `break`: unwinding to the nearest enclosing loop, no value.
     Break,
+    /// `(throw 'tag value)`: leave for the nearest dynamically enclosing
+    /// `(catch 'tag ...)`. Like [`EvalError::Break`]/[`EvalError::Return`]
+    /// this is control flow rather than a failure, but unlike them it crosses
+    /// function boundaries — which is the whole point of `catch`/`throw`, and
+    /// why the tag has to travel with it.
+    Throw(String, Box<Value>),
     /// `return value`: unwinding to the nearest enclosing loop with `value`.
     Return(Box<Value>),
     /// A runtime error carrying the source location where it occurred. Wraps
@@ -92,13 +98,13 @@ pub enum EvalError {
 }
 
 impl EvalError {
-    /// Attach a source location to this error. The `Break`/`Return` non-local-
-    /// exit signals are returned unchanged — they are control flow, not errors,
-    /// and the loop that catches them matches on the bare variant. An
+    /// Attach a source location to this error. The `Break`/`Return`/`Throw`
+    /// non-local-exit signals are returned unchanged — they are control flow,
+    /// not errors, and whatever catches them matches on the bare variant. An
     /// already-located error also keeps its original (innermost) location.
     pub fn at(self, loc: Loc) -> EvalError {
         match self {
-            EvalError::Break | EvalError::Return(_) | EvalError::At(..) => self,
+            EvalError::Break | EvalError::Return(_) | EvalError::Throw(..) | EvalError::At(..) => self,
             other => EvalError::At(loc, Box::new(other)),
         }
     }
@@ -142,6 +148,7 @@ impl fmt::Display for EvalError {
             EvalError::Internal(m) => write!(f, "internal error: {}", m),
             EvalError::Break => write!(f, "internal error: break escaped its loop"),
             EvalError::Return(_) => write!(f, "internal error: return escaped its loop"),
+            EvalError::Throw(tag, _) => write!(f, "throw: no enclosing (catch '{}) for this throw", tag),
             EvalError::At(loc, inner) => write!(f, "{}: {}", loc, inner),
         }
     }

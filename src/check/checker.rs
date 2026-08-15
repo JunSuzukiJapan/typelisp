@@ -486,9 +486,33 @@ pub struct Checker {
     /// frame; `while`/`dotimes`/`dolist` seed it with `Unit` (their fixed
     /// result type), `loop` seeds it with `Never` (refined by any exit found).
     /// `lambda` bodies see an empty stack — `break`/`return` cannot cross a
-    /// function boundary (there is no labelled non-local exit in this
-    /// language, only "nearest enclosing loop").
+    /// function boundary; they mean "nearest enclosing loop" and nothing
+    /// else. Crossing one is what `catch`/`throw` are for, and they carry
+    /// their type on the symbol rather than on this stack for exactly that
+    /// reason ([`Self::throw_tags`]).
     loop_stack: RefCell<Vec<Type>>,
+    /// The type each `catch`/`throw` symbol carries, learned from the first
+    /// use of that symbol and enforced on every later one.
+    ///
+    /// `catch`/`throw` are *dynamic* — CL's, not a lexical `block`/
+    /// `return-from` — so a `(throw 'found v)` can sit in a function called
+    /// from inside `(catch 'found ...)`, with no lexical nesting between
+    /// them. That rules out the mechanism [`Self::loop_stack`] uses, where
+    /// `break`/`return` unify into the enclosing frame they can see: the
+    /// throw site cannot see its catch site at all.
+    ///
+    /// What both sites *can* see is the symbol, so that is where the type
+    /// lives. `(catch 'found body)` has `body`'s type, and registers it under
+    /// `found`; `(throw 'found v)` checks `v` against whatever `found` is
+    /// already known to carry (or establishes it, when the throw is checked
+    /// first). Using one symbol for two types is a type error, which is the
+    /// price of dynamic tags in a statically typed language — and what lets
+    /// `(throw 'found 42)` be rejected where `found` carries strings.
+    ///
+    /// Keyed by the symbol's printed name rather than its `SymId`: the id is
+    /// interned per `Heap`, and the message for a mismatch has to name the
+    /// symbol anyway.
+    throw_tags: RefCell<std::collections::BTreeMap<String, Type>>,
     /// What to do when a `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`
     /// reuses a non-builtin name — see [`RedefPolicy`]. Defaults to `Warn`;
     /// override with [`Self::set_redef_policy`] (e.g. from a CLI flag).
@@ -611,6 +635,7 @@ impl Checker {
             ns: Vec::new(),
             file_ns: Vec::new(),
             loop_stack: RefCell::new(Vec::new()),
+            throw_tags: RefCell::new(std::collections::BTreeMap::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
             recover: false,
@@ -2112,7 +2137,7 @@ impl Checker {
             name,
             // expression special forms (`check_list`)
             "if" | "let" | "let*" | "progn" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
-                | "loop" | "break" | "return" | "list"
+                | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "match" | "panic" | "the" | "as" | "try-as" | "compile"
                 | "quote" | "quasiquote" | "format" | "print" | "println"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
@@ -7347,6 +7372,9 @@ impl Checker {
             "rotatef" => return self.check_rotatef_shiftf(heap, interp, env, args, false),
             "shiftf" => return self.check_rotatef_shiftf(heap, interp, env, args, true),
             "loop" => return self.check_loop(heap, interp, env, args, arg_locs),
+            "catch" => return self.check_catch(heap, interp, env, args, arg_locs, expected),
+            "throw" => return self.check_throw(heap, interp, env, args, arg_locs),
+            "unwind-protect" => return self.check_unwind_protect(heap, interp, env, args, arg_locs, expected),
             "break" => return self.check_break(heap, args),
             "return" => return self.check_return(heap, interp, env, args, arg_locs),
             "list" => return self.check_list_lit(heap, interp, env, args, arg_locs),
@@ -9371,6 +9399,136 @@ impl Checker {
         let ty = self.loop_stack.borrow_mut().pop().expect("pushed above");
         let (body, _) = result?;
         Ok((body, ty))
+    }
+
+    /// The symbol named by a `catch`/`throw`'s first argument, which must be
+    /// a literal `'sym` — never a computed form.
+    ///
+    /// CL evaluates the tag, and compares tags with `eq` at run time. Here it
+    /// has to be literal, because the symbol is what carries the thrown
+    /// value's *type* ([`Self::throw_tags`]): a computed tag would leave the
+    /// checker with nothing to check `throw`'s value against. That is the one
+    /// place this departs from CL's `catch`/`throw`, and it costs little —
+    /// computed tags are vanishingly rare, and every use of one would have
+    /// been unstatable in a typed language anyway.
+    fn throw_tag(&self, heap: &Heap, form: Value, who: &str) -> Result<(String, Value), Error> {
+        let quoted = heap
+            .list_to_vec(form)
+            .ok()
+            .filter(|elems| elems.len() == 2)
+            .filter(|elems| matches!(elems[0], Value::Symbol(id) if heap.symbol_name(id) == "quote"))
+            .map(|elems| elems[1]);
+        match quoted {
+            Some(sym @ Value::Symbol(id)) => Ok((heap.symbol_name(id).to_string(), sym)),
+            _ => Err(Error::TypeError(format!("{}: the tag must be a literal symbol, as in ({} 'done ...)", who, who))),
+        }
+    }
+
+    /// Records that `tag` carries `ty`, or checks it against what an earlier
+    /// `catch`/`throw` on the same symbol already established.
+    fn unify_throw_tag(&self, tag: &str, ty: &Type, who: &str) -> Result<(), Error> {
+        let mut tags = self.throw_tags.borrow_mut();
+        match tags.get(tag) {
+            // `Never` never pins a tag down: it is what a `body` consisting
+            // only of a `throw` has, and adopting it would make the tag's type
+            // depend on which use the checker happened to reach first.
+            Some(_) if matches!(ty, Type::Never) => Ok(()),
+            Some(known) if known == ty => Ok(()),
+            Some(known) => Err(Error::TypeError(format!(
+                "{}: `{}` carries {:?}, but this use carries {:?}",
+                who, tag, known, ty
+            ))),
+            None => {
+                if !matches!(ty, Type::Never) {
+                    tags.insert(tag.to_string(), ty.clone());
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// `(catch 'tag body)`: run `body`, and produce the value of a
+    /// `(throw 'tag v)` fired anywhere it reaches instead, if one fires.
+    ///
+    /// The form's type is `body`'s — which is also the type `tag` is recorded
+    /// as carrying, since a thrown value takes the place of `body`'s result.
+    fn check_catch(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        if args.len() != 2 {
+            return Err(Error::TypeError("catch: (catch 'tag body)".into()));
+        }
+        let (tag, sym) = self.throw_tag(heap, args[0], "catch")?;
+        let body = self.check_at(heap, interp, env, args[1], expected, nth_loc(arg_locs, 1))?;
+        self.unify_throw_tag(&tag, &body.ty, "catch")?;
+        // Joined with the tag's own type, not simply `body`'s: a body that
+        // only throws has type `Never`, yet the form still produces whatever
+        // the throw delivered. `join_types` leaves the ordinary case alone,
+        // since `Never` joins away and an agreeing tag joins to the same type.
+        let ty = match self.throw_tags.borrow().get(&tag) {
+            Some(carried) => join_types(&body.ty, carried)?,
+            None => body.ty.clone(),
+        };
+        let tag_form = forms::quote_form(heap, sym)?;
+        let form = forms::catch_form(heap, tag_form, body.form)?;
+        Ok(Checked::new(form, ty))
+    }
+
+    /// `(throw 'tag value)`: leave for the nearest dynamically enclosing
+    /// `(catch 'tag ...)`, delivering `value` as its result. Type `Never`
+    /// (diverges; satisfies any expectation), since a `throw` never produces
+    /// a value where it stands.
+    fn check_throw(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Checked, Error> {
+        if args.len() != 2 {
+            return Err(Error::TypeError("throw: (throw 'tag value)".into()));
+        }
+        let (tag, sym) = self.throw_tag(heap, args[0], "throw")?;
+        // Checked against the tag's known type when there is one, so the
+        // mismatch is reported at the value rather than after the fact.
+        let expected = self.throw_tags.borrow().get(&tag).cloned();
+        let value = self.check_at(heap, interp, env, args[1], expected.as_ref(), nth_loc(arg_locs, 1))?;
+        self.unify_throw_tag(&tag, &value.ty, "throw")?;
+        let tag_form = forms::quote_form(heap, sym)?;
+        let form = forms::throw_form(heap, tag_form, value.form)?;
+        Ok(Checked::new(form, Type::Never))
+    }
+
+    /// `(unwind-protect protected cleanup)`: run `protected`, then `cleanup`
+    /// — whether `protected` finished normally or left by a non-local exit
+    /// (`throw`, `break`, `return`, or a `panic`).
+    ///
+    /// The form's type is `protected`'s; `cleanup` runs for its effect and its
+    /// value is discarded, exactly as in CL.
+    fn check_unwind_protect(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        if args.len() != 2 {
+            return Err(Error::TypeError("unwind-protect: (unwind-protect protected cleanup)".into()));
+        }
+        let protected = self.check_at(heap, interp, env, args[0], expected, nth_loc(arg_locs, 0))?;
+        let cleanup = self.check_at(heap, interp, env, args[1], None, nth_loc(arg_locs, 1))?;
+        let ty = protected.ty.clone();
+        let form = forms::unwind_protect_form(heap, protected.form, cleanup.form)?;
+        Ok(Checked::new(form, ty))
     }
 
     /// `(break)`: exit the nearest enclosing loop with no value (`Unit`). Type

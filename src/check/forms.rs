@@ -153,6 +153,28 @@ pub(super) fn return_form(heap: &mut Heap, value: Option<Value>) -> Result<Value
     }
 }
 
+/// `(catch SYMBOL BODY)` — run `BODY`, and if a `(throw SYMBOL v)` fires
+/// anywhere it reaches (through any number of calls), produce `v` instead.
+///
+/// The symbol is carried as a plain `Sexpr` symbol datum rather than a string
+/// so the evaluator can compare it with `eq` the way CL specifies, without
+/// interning a second time.
+pub(super) fn catch_form(heap: &mut Heap, tag: Value, body: Value) -> Result<Value, Error> {
+    core::tagged(heap, "catch", &[tag, body])
+}
+
+/// `(throw SYMBOL FORM)` — leave for the nearest dynamically enclosing
+/// `catch` on `SYMBOL`, delivering `FORM`'s value as its result.
+pub(super) fn throw_form(heap: &mut Heap, tag: Value, value: Value) -> Result<Value, Error> {
+    core::tagged(heap, "throw", &[tag, value])
+}
+
+/// `(unwind-protect PROTECTED CLEANUP)` — run `PROTECTED`, then `CLEANUP`,
+/// whether `PROTECTED` finished normally or left by any non-local exit.
+pub(super) fn unwind_protect_form(heap: &mut Heap, protected: Value, cleanup: Value) -> Result<Value, Error> {
+    core::tagged(heap, "unwind-protect", &[protected, cleanup])
+}
+
 /// `(dyn-upcast TRAIT FORM)`.
 pub(super) fn dyn_upcast_form(heap: &mut Heap, to_trait: &Path, value: Value) -> Result<Value, Error> {
     let mut f = Items::new(heap);

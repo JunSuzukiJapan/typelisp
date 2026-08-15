@@ -86,6 +86,9 @@ enum Op {
     Loop,
     Break,
     Return,
+    Catch,
+    Throw,
+    UnwindProtect,
     Lambda,
     Labels,
     Apply,
@@ -135,6 +138,9 @@ impl Op {
             "loop" => Op::Loop,
             "break" => Op::Break,
             "return" => Op::Return,
+            "catch" => Op::Catch,
+            "throw" => Op::Throw,
+            "unwind-protect" => Op::UnwindProtect,
             "lambda" => Op::Lambda,
             "labels" => Op::Labels,
             "apply" => Op::Apply,
@@ -386,6 +392,42 @@ impl Interp {
                 }
                 None => Err(EvalError::Return(Box::new(Value::Empty))),
             },
+            // `(catch 'tag body)`: run `body`, and if a `throw` on this very
+            // tag comes back through, produce its value instead. A throw on
+            // some *other* tag keeps travelling — it belongs to an outer
+            // catch, and swallowing it here is exactly the bug CL's `eq` tag
+            // comparison exists to prevent.
+            Op::Catch => {
+                let tag = self.throw_tag_of(heap, form, "catch")?;
+                let body = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (catch ..) has no body".to_string()))?;
+                match self.eval_core(heap, body, env) {
+                    Err(EvalError::Throw(thrown, v)) if thrown == tag => Ok(Step::Done(*v)),
+                    other => other.map(Step::Done),
+                }
+            }
+            Op::Throw => {
+                let tag = self.throw_tag_of(heap, form, "throw")?;
+                let value = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (throw ..) has no value".to_string()))?;
+                let v = self.eval_core(heap, value, env)?;
+                Err(EvalError::Throw(tag, Box::new(v)))
+            }
+            // `(unwind-protect protected cleanup)`: `cleanup` runs on every
+            // way out of `protected` — normal return, `throw`, `break`,
+            // `return`, or an error. A non-local exit *from the cleanup
+            // itself* wins over whatever was in flight, matching CLHS ("the
+            // cleanup-forms of unwind-protect are not protected by that
+            // unwind-protect").
+            Op::UnwindProtect => {
+                let protected = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no protected form".to_string()))?;
+                let cleanup = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no cleanup form".to_string()))?;
+                let outcome = self.eval_core(heap, protected, env);
+                self.eval_core(heap, cleanup, env)?;
+                outcome.map(Step::Done)
+            }
             // ---- closures ------------------------------------------------
             //
             // No JIT attempt. The old evaluator compiled every `lambda` and
@@ -474,6 +516,22 @@ impl Interp {
                     }
                 }
             }
+        }
+    }
+
+    /// The symbol a `catch`/`throw` node's first field names.
+    ///
+    /// Stored as a quoted `Sexpr` symbol datum (`forms::catch_form`), so this
+    /// is the same shape `Op::Quote` produces — read back by name because
+    /// that is what `EvalError::Throw` carries between the throw site and its
+    /// catch, which may be in a different function entirely.
+    fn throw_tag_of(&self, heap: &Heap, form: Value, who: &str) -> Result<String, EvalError> {
+        let quoted = core::field(heap, form, 0)
+            .and_then(|q| core::field(heap, q, 0))
+            .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) has no tag", who)))?;
+        match quoted {
+            Value::Symbol(id) => Ok(heap.symbol_name(id).to_string()),
+            other => Err(EvalError::Internal(format!("eval: ({} ..) tag is not a symbol: {:?}", who, other))),
         }
     }
 
