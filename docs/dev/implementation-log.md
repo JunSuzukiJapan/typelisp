@@ -6781,3 +6781,33 @@ stress を入れる**ヘルパを使っている。
 島に `defun` を足したときは `tests/island_self_compile_test.rs` の `ISLAND_DEFUNS`。後者は
 **同居する `every_island_defun_compiles` の仕事リストでもある**ので、更新を忘れると新しい関数を
 一度もコンパイルしないまま緑になる。
+
+#### 島の再生成は 1 回では足りないことがある（自己ホストの不動点）
+
+`the_committed_island_matches_a_fresh_build` が、再生成した直後に落ちた。同サイズで
+4568 バイト違う。順序（prelude を先に作ったせいでは）を疑ったが**外れ**——
+`build_island_bitcode` は `prelude::load_interpreted` を使い、「`prelude_compiled.bc` に
+依存すると循環する」と明記して避けている。実験でも prelude 再生成で島は変わらない。
+
+真因は自己ホストのブートストラップだった。`build_island_bitcode` は**コミット済みの `.bc` を
+install して、その `compile-function` に新しい SOURCE をコンパイルさせる**。`bootstrap.rs` の
+doc は「何が出力されるかは SOURCE と Rust 側ビルダで決まり、どの世代が駆動しているかには
+依らないので、結果からビルドし直せば再現する」と書いていたが、**その前提は「島の codegen を
+変えていない」ときだけ成り立つ**。
+
+今回は `compile-break` の `store` と `rt_truncate_sexpr_roots` の順序を入れ替えた——
+つまり島が `break` に対して吐く IR そのものを変えた。だから:
+
+* 1 回目 = 新 SOURCE を**旧**島がコンパイル → `break` 箇所は旧順序
+* そこからの fresh build = 新 SOURCE を**新**島がコンパイル → 新順序 ⇒ 不一致
+* 2 回目で不動点、3 回目・4 回目も同一
+
+差分が `break` の 2 箇所だけだったのは、島自身のコードに `break` が 2 つあるから。
+番人は正しく働いた（バイト比較でしか見えない差を止めた）ので、直したのは案内のほう
+（`scripts/regen-compiler-island.sh` と `bootstrap.rs` の doc）。
+
+**調査の道具について:** 成果物は `llvm-dis`/`llvm-bcanalyzer` がそのままでは読めない
+（`Bitcode stream should be a multiple of 4 bytes in length`——ファイルは 4n+1 バイト）。
+末尾 1 バイトを落とすと読め、そこで初めて「差は 2 箇所の命令順序だけ」と分かった。
+バイト差 4568 だけを見て IR の差の大きさを推し量ると誤る。この余分な 1 バイトの出所は
+未調査（プロジェクト自身のローダは問題なく読むので実害は出ていない）。

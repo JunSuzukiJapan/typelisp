@@ -38,6 +38,17 @@
 //! gets emitted is decided by `SOURCE` and the Rust builders rather than by
 //! which generation is driving, so building from the result reproduces it.
 //!
+//! **The fixpoint is reached in one pass only when the change does not alter
+//! the island's own code generation.** When it does, the first pass emits the
+//! new `SOURCE` through the *previous* generation's `compile-function`, so the
+//! result carries the old shape and a build from it differs — run the script
+//! again. 2026-08-16's static-exit cleanups are the worked example: reordering
+//! `compile-break`'s `store` and its `rt_truncate_sexpr_roots` call changed the
+//! IR emitted at every `break`, and the island has two of its own, so one pass
+//! left exactly those two sites in the old order and
+//! `the_committed_island_matches_a_fresh_build` failed on a 4568-byte
+//! difference. A second pass converged, and a third confirmed it.
+//!
 //! Building this installs the *committed* (previous) `.bc` first and drives
 //! its **native** `compile-function` to emit each defun's IR — the snapshot
 //! chain (interp-closure removal Stage 8b), so regeneration no longer depends
