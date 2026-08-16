@@ -325,5 +325,7 @@ pub fn build_prelude_bitcode() -> Result<Vec<u8>, String> {
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = module.borrow();
     module.verify().map_err(|e| format!("prelude module failed verification: {}", e))?;
+    // Carries a trailing NUL by design — see the identical call in
+    // `bootstrap.rs` for why it must not be trimmed.
     Ok(module.write_bitcode_to_memory().as_slice().to_vec())
 }

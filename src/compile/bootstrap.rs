@@ -176,6 +176,18 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = module.borrow();
     module.verify().map_err(|e| format!("island module failed verification: {}", e))?;
+    // `as_slice` deliberately includes LLVM's guaranteed trailing NUL
+    // (inkwell's `MemoryBuffer::get_size` is `LLVMGetBufferSize() + 1`), so the
+    // committed artifact is one byte longer than the bitstream. **Do not trim
+    // it**: the loader is `MemoryBuffer::create_from_memory_range_copy`
+    // (`Interp::install_compiled_library`), which asserts that last byte is NUL
+    // and passes `len - 1` as the real size. Trimming would not even fail the
+    // assert here — the bitstream's own last byte is padding zero — it would
+    // hand LLVM a buffer one byte short instead.
+    //
+    // The visible cost is that `llvm-dis`/`llvm-bcanalyzer` reject the file as
+    // written ("Bitcode stream should be a multiple of 4 bytes in length"; the
+    // artifact is 4n+1). To inspect one, drop the last byte into a scratch copy.
     Ok(module.write_bitcode_to_memory().as_slice().to_vec())
 }
 

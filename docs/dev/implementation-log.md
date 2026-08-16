@@ -6809,5 +6809,12 @@ doc は「何が出力されるかは SOURCE と Rust 側ビルダで決まり�
 **調査の道具について:** 成果物は `llvm-dis`/`llvm-bcanalyzer` がそのままでは読めない
 （`Bitcode stream should be a multiple of 4 bytes in length`——ファイルは 4n+1 バイト）。
 末尾 1 バイトを落とすと読め、そこで初めて「差は 2 箇所の命令順序だけ」と分かった。
-バイト差 4568 だけを見て IR の差の大きさを推し量ると誤る。この余分な 1 バイトの出所は
-未調査（プロジェクト自身のローダは問題なく読むので実害は出ていない）。
+バイト差 4568 だけを見て IR の差の大きさを推し量ると誤る。
+
+余分な 1 バイトは inkwell 0.9 の**意図的な仕様**で、バグではない。`MemoryBuffer::as_slice`
+は LLVM が保証する終端 NUL を含めて返す（`get_size` が `LLVMGetBufferSize() + 1`）。
+対になる読み込み側 `MemoryBuffer::create_from_memory_range_copy`（`install_compiled_library`）が
+**末尾 NUL を assert で要求し、実サイズとして `len - 1` を渡す**ので、成果物はローダが
+要求する形で保存されている。**削ってはいけない**——しかも削っても assert は落ちない
+（ビットストリーム自身の末尾はパディングのゼロなので）。1 バイト短い buffer が LLVM に
+渡るだけで、失敗は分かりにくい形で出る。書き出し 2 箇所にその旨を書いた。
