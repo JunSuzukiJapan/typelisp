@@ -816,3 +816,21 @@ fn an_uncaught_throw_reaching_the_entry_point_exits_rather_than_aborting() {
     assert_eq!(code, 1, "stderr was: {}", stderr);
     assert!(stderr.contains("no enclosing (catch 'nobody)"), "stderr was: {}", stderr);
 }
+
+/// A `break` leaving a protected form runs the cleanup in a standalone
+/// executable too — the static exit is a plain branch, so nothing about it
+/// depends on the JIT's own unwinding setup.
+#[test]
+fn a_break_runs_an_unwind_protect_cleanup_in_an_aot_executable() {
+    assert_eq!(
+        compile_and_run(
+            "aot_break_cleanup",
+            r#"
+            (defvar (ran i32) 0)
+            (defun body () i32 (progn (loop (unwind-protect (break) (setf ran 40))) ran))
+            (defun main () i64 (as i64 (+ (body) 2)))
+            "#
+        ),
+        42
+    );
+}

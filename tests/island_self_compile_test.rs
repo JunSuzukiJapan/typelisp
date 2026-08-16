@@ -113,6 +113,7 @@ const ISLAND_DEFUNS: &[&str] = &[
     "compile-dyn-call",
     "check-unwind",
     "emit-unwind-onward",
+    "emit-static-exit-onward",
     "emit-direct-call",
     "emit-direct-call-with-env",
     "emit-closure-apply",

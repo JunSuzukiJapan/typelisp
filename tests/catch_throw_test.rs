@@ -465,3 +465,205 @@ fn a_thrown_value_survives_a_cleanup_that_allocates() {
     }
     assert_eq!(typelisp::check::core::print(&h, last), "\"inflight\"");
 }
+
+// ------------------------------------------ static exits through a cleanup
+
+/// Compiles `setup` with the collector quiet, then runs `expr` with
+/// `gc-stress` on, so every allocation the *compiled* code makes collects.
+///
+/// Compiling under stress is not an option: the island is a large typelisp
+/// program, and checking it trips the prelude's own quasiquote root leak
+/// (`check_qq_template` → `construct_form`) long before reaching anything
+/// these tests are about.
+fn read_compiled_under_stress(setup: &str, expr: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    for v in r.read_all(&mut h, setup).expect("read failed") {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        interp.exec(&mut h, tl).expect("eval failed");
+    }
+    h.set_gc_stress(true);
+    let mut last = Value::Empty;
+    for v in r.read_all(&mut h, expr).expect("read failed") {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    typelisp::check::core::print(&h, last)
+}
+
+/// [`read_compiled`]'s interpreted twin, for results that are heap values.
+fn read_interpreted(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let mut last = Value::Empty;
+    for v in r.read_all(&mut h, src).expect("read failed") {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    typelisp::check::core::print(&h, last)
+}
+
+const RETURN_THROUGH_CLEANUP: &str = r#"
+    (defvar (ran i32) 0)
+    (defun body () i32 (loop (unwind-protect (return 40) (setf ran 2))))
+    (defun f () i32 (+ (body) ran))
+    "#;
+
+/// A `return` leaving a protected form runs the cleanup on its way out.
+#[test]
+fn a_return_runs_an_enclosing_cleanup() {
+    assert_eq!(int(&format!("{RETURN_THROUGH_CLEANUP} (f)")), 42);
+}
+
+#[test]
+fn a_return_runs_an_enclosing_compiled_cleanup() {
+    assert_eq!(int_compiled(&format!("{RETURN_THROUGH_CLEANUP} (compile f) (f)")), 42);
+}
+
+const BREAK_THROUGH_CLEANUP: &str = r#"
+    (defvar (ran i32) 0)
+    (defun body () i32 (progn (loop (unwind-protect (break) (setf ran 2))) ran))
+    (defun f () i32 (body))
+    "#;
+
+/// Likewise for `break`, whose own value is `Unit` — the cleanup still runs.
+#[test]
+fn a_break_runs_an_enclosing_cleanup() {
+    assert_eq!(int(&format!("{BREAK_THROUGH_CLEANUP} (f)")), 2);
+}
+
+#[test]
+fn a_break_runs_an_enclosing_compiled_cleanup() {
+    assert_eq!(int_compiled(&format!("{BREAK_THROUGH_CLEANUP} (compile f) (f)")), 2);
+}
+
+const NESTED_CLEANUPS_ON_RETURN: &str = r#"
+    (defvar (log string) "")
+    (defun body () i32
+      (loop (unwind-protect
+              (unwind-protect (return 7) (setf log (append log "in")))
+              (setf log (append log "out")))))
+    (defun f () string (progn (body) log))
+    "#;
+
+/// Nested cleanups all run, innermost first — the same order the interpreted
+/// side produces, and the reason the exit walks a chain rather than jumping to
+/// one block.
+#[test]
+fn nested_cleanups_all_run_on_a_return() {
+    assert_eq!(read_interpreted(&format!("{NESTED_CLEANUPS_ON_RETURN} (f)")), "\"inout\"");
+}
+
+#[test]
+fn nested_compiled_cleanups_all_run_on_a_return() {
+    assert_eq!(
+        read_compiled(&format!("{NESTED_CLEANUPS_ON_RETURN} (compile f) (f)")),
+        "\"inout\""
+    );
+}
+
+/// The returned value is a heap value that sits in the loop's result slot —
+/// a plain `alloca`, not a GC root — while the cleanup runs, and the cleanup
+/// allocates. Under `gc-stress` an unrooted value there is reclaimed.
+#[test]
+fn a_returned_value_survives_a_compiled_cleanup_that_allocates() {
+    assert_eq!(
+        read_compiled_under_stress(
+            r#"
+            (defun body () string
+              (loop (unwind-protect (return (append "sur" "vives")) (cons 3 (cons 4 ())))))
+            (defun f () string (body))
+            (compile f)
+            "#,
+            "(f)"
+        ),
+        "\"survives\""
+    );
+}
+
+/// The same question for the path that already worked: the protected form's
+/// own value also waits in a slot while the cleanup allocates.
+#[test]
+fn a_protected_form_s_value_survives_a_compiled_cleanup_that_allocates() {
+    assert_eq!(
+        read_compiled_under_stress(
+            r#"
+            (defun body () string (unwind-protect (append "nor" "mal") (cons 3 (cons 4 ()))))
+            (defun f () string (body))
+            (compile f)
+            "#,
+            "(f)"
+        ),
+        "\"normal\""
+    );
+}
+
+const INNER_LOOP_BREAK: &str = r#"
+    (defvar (log string) "")
+    (defun body () i32
+      (loop
+        (unwind-protect
+          (progn (loop (break)) (setf log (append log "after")))
+          (setf log (append log "|c")))
+        (return 5)))
+    (defun f () i32 (body))
+    "#;
+
+/// A `break` bound to a loop *inside* the protected form is none of the
+/// enclosing `unwind-protect`'s business: it leaves that inner loop and the
+/// protected form carries on. Only an exit that actually leaves the protected
+/// form runs the cleanup.
+///
+/// This is what the reset at each `loop` boundary buys. Without it the inner
+/// `break` would branch to the cleanup block and then out of the *outer* loop,
+/// skipping the rest of the protected form entirely — the function would
+/// answer 0 and the log would never see "after".
+#[test]
+fn an_inner_loops_break_does_not_run_an_enclosing_cleanup() {
+    assert_eq!(int(&format!("{INNER_LOOP_BREAK} (f)")), 5);
+    assert_eq!(read_interpreted(&format!("{INNER_LOOP_BREAK} (f) log")), "\"after|c\"");
+}
+
+#[test]
+fn an_inner_loops_break_does_not_run_an_enclosing_compiled_cleanup() {
+    assert_eq!(int_compiled(&format!("{INNER_LOOP_BREAK} (compile f) (f)")), 5);
+    assert_eq!(
+        read_compiled(&format!("{INNER_LOOP_BREAK} (compile f) (f) log")),
+        "\"after|c\""
+    );
+}
+
+const BREAK_THROUGH_CATCH_AND_CLEANUP: &str = r#"
+    (defvar (ran i32) 0)
+    (defun body () i32
+      (progn (loop (catch 'tag (unwind-protect (break) (setf ran 2)))) ran))
+    (defun f () i32 (body))
+    "#;
+
+/// A `catch` sitting between the `break` and its loop contributes nothing —
+/// it has no cleanup to run — while the `unwind-protect` inside it still does.
+/// The two chains are walked independently, which is the whole point of
+/// keeping them apart.
+#[test]
+fn a_break_passes_through_a_catch_but_runs_a_cleanup() {
+    assert_eq!(int(&format!("{BREAK_THROUGH_CATCH_AND_CLEANUP} (f)")), 2);
+}
+
+#[test]
+fn a_compiled_break_passes_through_a_catch_but_runs_a_cleanup() {
+    assert_eq!(
+        int_compiled(&format!("{BREAK_THROUGH_CATCH_AND_CLEANUP} (compile f) (f)")),
+        2
+    );
+}
