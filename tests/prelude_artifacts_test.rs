@@ -69,3 +69,28 @@ fn the_committed_prelude_matches_a_fresh_build() {
     );
     assert!(committed == fresh, "src/prelude_compiled.bc differs from a fresh build — {}", REGEN);
 }
+
+/// The prelude artifact carries the same load-bearing trailing NUL, for the
+/// same reason — see `the_committed_island_keeps_its_trailing_nul` in
+/// `island_artifacts_test.rs` for the writer/reader pairing and why the length
+/// check is the one that actually catches a trim.
+#[test]
+fn the_committed_prelude_keeps_its_trailing_nul() {
+    let bc = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/src/prelude_compiled.bc"))
+        .unwrap_or_else(|_| panic!("src/prelude_compiled.bc missing — {}", REGEN));
+
+    assert_eq!(&bc[..4], b"BC\xc0\xde", "src/prelude_compiled.bc is not LLVM bitcode at all");
+    assert_eq!(
+        bc.last().copied(),
+        Some(0),
+        "src/prelude_compiled.bc lost its trailing NUL — Interp::install_compiled_library asserts on it"
+    );
+    assert_eq!(
+        (bc.len() - 1) % 4,
+        0,
+        "src/prelude_compiled.bc is {} bytes; the bitstream proper must be a multiple of 4 \
+         with exactly one NUL after it — {}",
+        bc.len(),
+        REGEN
+    );
+}

@@ -63,6 +63,16 @@ fn island_artifacts_are_fresh() {
 /// the Rust builders, not by which generation is driving — verified by
 /// regenerating twice from different generations and getting identical bytes.
 ///
+/// **But it can take two passes to get there.** When a change alters what the
+/// island *emits*, the first regeneration compiles the new `SOURCE` with the
+/// previous generation, so the result still carries the old shape and this test
+/// fails on it; a second pass, now driven by the new island, converges. So if
+/// this fails immediately after a regeneration, run the script again before
+/// hunting for the difference. 2026-08-16: reordering `compile-break`'s `store`
+/// and its `rt_truncate_sexpr_roots` call left exactly the island's own two
+/// `break` sites in the old order — 4568 bytes of difference for 24 lines of
+/// IR.
+///
 /// A caveat for anyone seeing this fail with no local change: bitcode encoding
 /// is LLVM-version-specific, so a different LLVM 17 patch release can produce
 /// different bytes. That is not a false alarm — it means the committed
@@ -89,8 +99,9 @@ fn the_committed_island_matches_a_fresh_build() {
         panic!(
             "src/compiler_island.bc is not what building it now produces — run \
              scripts/regen-compiler-island.sh (committed {} bytes, fresh {} bytes, \
-             first difference at {}). If SOURCE is unchanged, an `llvm-*` builder \
-             changed the emitted IR.",
+             first difference at {}). If you just ran it, run it again — a change to \
+             what the island emits needs a second pass to reach the fixpoint. If \
+             SOURCE is unchanged, an `llvm-*` builder changed the emitted IR.",
             committed.len(),
             fresh.len(),
             match at {
@@ -99,4 +110,48 @@ fn the_committed_island_matches_a_fresh_build() {
             }
         );
     }
+}
+
+/// The committed artifact is bitcode **plus one trailing NUL byte**, and that
+/// byte is load-bearing.
+///
+/// inkwell's `MemoryBuffer::as_slice` deliberately includes the terminator LLVM
+/// guarantees past the end of the buffer (`get_size` is `LLVMGetBufferSize()
+/// + 1`), so that the slice can be handed straight back to
+/// `MemoryBuffer::create_from_memory_range_copy` — which is exactly what
+/// `Interp::install_compiled_library` does. That loader *asserts* the last byte
+/// is NUL and then passes `len - 1` as the real size. Writer and reader are a
+/// pair; the file on disk is in the form the reader demands.
+///
+/// The trap this guards is "4n+1 is odd, let me trim it": `llvm-dis` and
+/// `llvm-bcanalyzer` both reject the file as written (the latter says why —
+/// "Bitcode stream should be a multiple of 4 bytes in length"), which invites
+/// exactly that cleanup. Trimming would not even trip the loader's own assert,
+/// because the bitstream's last byte is padding zero too — LLVM would just get
+/// a buffer one byte short, and fail somewhere less obvious.
+///
+/// Hence the length check rather than only the NUL check: after a trim the file
+/// still *ends* with a zero, but `len - 1` stops being a multiple of 4. The
+/// same assertion fires if an inkwell upgrade stops appending the terminator,
+/// in which case the loader's pairing has to be revisited, not the artifact.
+#[test]
+fn the_committed_island_keeps_its_trailing_nul() {
+    let bc = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/src/compiler_island.bc"))
+        .expect("src/compiler_island.bc missing — run scripts/regen-compiler-island.sh");
+
+    assert_eq!(&bc[..4], b"BC\xc0\xde", "src/compiler_island.bc is not LLVM bitcode at all");
+    assert_eq!(
+        bc.last().copied(),
+        Some(0),
+        "src/compiler_island.bc lost its trailing NUL — Interp::install_compiled_library \
+         asserts on it (see src/compile/bootstrap.rs's write site)"
+    );
+    assert_eq!(
+        (bc.len() - 1) % 4,
+        0,
+        "src/compiler_island.bc is {} bytes; the bitstream proper must be a multiple of 4 \
+         with exactly one NUL after it. If someone trimmed the terminator to please \
+         llvm-dis, put it back — see src/compile/bootstrap.rs's write site.",
+        bc.len()
+    );
 }
