@@ -702,8 +702,9 @@ supers は「接頭辞にならない相手だけ」ではなく**閉包すべ�
   計算されたタグは検査対象が無くなる。
 - **`throw` の型は `!`**（§7.2）。`(catch 'sym expr)` の型は expr の型とタグの型の join——
   body が throw だけだと `Never` になるが、その form は throw が届けた値を produce するため。
-- **`unwind-protect` の cleanup は正常終了・throw・panic のどの経路でも走る**。cleanup 自身の
-  非局所脱出が、飛行中の脱出に勝つ（CLHS どおり）。
+- **`unwind-protect` の cleanup は `protected` をどう抜けても走る**——正常終了・throw・panic に
+  加えて、静的な脱出（`break`/`return`）でも走る。cleanup 自身の非局所脱出が、飛行中の脱出に
+  勝つ（CLHS どおり）。
 
 #### 静的な脱出と動的な脱出は混ぜない
 
@@ -718,6 +719,13 @@ supers は「接頭辞にならない相手だけ」ではなく**閉包すべ�
 なると `(loop ... (catch 'a (break)) ...)` の `break` が「同じ関数内の分岐」でなくなり、静的な
 脱出が動的な機構に巻き込まれる。`catch`/`unwind-protect` の本体は同じ LLVM 関数に残し、
 `catch_unwind` は保護領域内の**呼び出し**に置いている（`typelisp-rt` の catch/throw 節）。
+
+`unwind-protect` の cleanup を静的な脱出でも走らせる必要があるが、これも動的な機構には
+触れずに済む。行き先が静的に分かる以上、走らせるべき cleanup の並びも静的に分かるので、
+compiled 側では `break`/`return` を「最内の cleanup ブロックへの `br`」にし、各 cleanup が
+自分の外側の cleanup へ、最後の 1 つがループの出口へ `br` する——**分岐の鎖**であって、
+タグを見る dispatch ではない。鎖はループ境界と関数境界でリセットされる（`protected` の
+内側のループを抜ける `break` は `protected` から出ていない）。
 
 ### 7.6 部分関数の失敗方針（Rust 流の混在）
 | 操作 | 方針 |

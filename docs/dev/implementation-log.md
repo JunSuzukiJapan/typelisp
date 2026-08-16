@@ -6737,3 +6737,47 @@ alloca である。catch の本体を別関数に切り出すと、`(loop ... (c
 * **`gc-stress` を最初から有効にすると prelude のロードで落ちる。** checker の quasiquote 経路
   （`check_qq_template` → `construct_form`）に既存のルート漏れがあり、この作業とは無関係に
   再現する。テストは prelude をロードし終えてから stress を入れる形にした。
+
+### 静的な脱出でも cleanup を走らせる（同日、後続作業）
+
+上の時点では `break`/`return` で保護領域を抜けたときに cleanup が走らず、interpreted 側
+（`Op::UnwindProtect` は `EvalError::Break`/`Return` も「protected が抜けた」経路として扱う）と
+挙動が食い違っていた。これを塞いだ。
+
+**動的な機構には触れていない。** 行き先が静的に分かるなら、走らせるべき cleanup の並びも静的に
+分かる。`unwind-protect` は cleanup ブロックを 3 つ目（正常路・dispatch に続く）として持ち、
+`compile-break`/`compile-return` はそこへ `br` する。各 cleanup ブロックは自分の外側の cleanup へ、
+最後の 1 つがループの出口へ `br` する——**分岐の鎖**であって、タグを見る dispatch ではない。
+歩く関数も分けてある（`emit-static-exit-onward` と `emit-unwind-onward`）: 次の行き先が
+静的に分かるか実行時にしか分からないかが違うので、共有すると混ざる。
+
+引き回すのは `exit-cleanup Option<llvm-basic-block>` 1 つ（`protect` の隣、50 関数）。
+`compile-break` はこれを受け取る——`protect` は受け取らないままで、**追う鎖が違う**ことが
+シグネチャに残っている。
+
+**鎖は 2 箇所でリセットが要る:**
+
+* **ループ境界**（`compile-loop` は本体に `Option::none` を渡す）。`protected` の内側のループを
+  抜ける `break` は `protected` から出ていないので、その cleanup は走ってはいけない。
+  リセットを忘れると、内側の `break` が cleanup を走らせたうえ**外側の**ループまで抜ける。
+  番人は `an_inner_loops_break_does_not_run_an_enclosing_cleanup`。
+* **関数境界**（lambda 本体・labels の兄弟・`compile-function` の 3 箇所）。ブロックは関数に
+  属するので、跨いで `br` すれば不正 IR になる。ここは元から loop 三点セットを `Option::none` に
+  していた 3 箇所と同一。
+
+`catch` は鎖に何も足さずに素通しする（cleanup を持たないので当然）。`break` が catch を跨いで
+その内側の `unwind-protect` の cleanup だけを走らせることの番人が
+`a_break_passes_through_a_catch_but_runs_a_cleanup`。
+
+**GC:** `return` の値は loop の結果スロット（ただの `alloca`、GC ルートではない）に置かれたまま
+cleanup が走り、cleanup は allocate する。`a_returned_value_survives_a_compiled_cleanup_that_allocates`
+がこれを `gc-stress` 下で見ている。正常路の値（`unwind-protect` 自身のスロット）についても同じ
+問いがあるので番人を置いたが、そちらは元から通っていた。なお島を `gc-stress` 下でコンパイルする
+ことはできない（前項の prelude quasiquote ルート漏れに先に当たる）ので、**コンパイルを済ませてから
+stress を入れる**ヘルパを使っている。
+
+**島の台帳を 2 つ更新すること。** 特殊形を足したときは `editor/emacs/typelisp-mode.el` と
+`editor/vscode/syntaxes/typelisp.tmLanguage.json` の両方（VS Code の alternation は長い順に並べる）、
+島に `defun` を足したときは `tests/island_self_compile_test.rs` の `ISLAND_DEFUNS`。後者は
+**同居する `every_island_defun_compiles` の仕事リストでもある**ので、更新を忘れると新しい関数を
+一度もコンパイルしないまま緑になる。

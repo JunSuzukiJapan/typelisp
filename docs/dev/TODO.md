@@ -6,27 +6,6 @@
 
 ## 残っている作業
 
-### `unwind-protect` の cleanup が `break`/`return` の経路で走らない
-
-compiled 側の `catch`/`throw`/`unwind-protect` は入った（経緯は
-[implementation-log.md](implementation-log.md)）。残っているのはこの 1 点:
-
-```lisp
-(loop (unwind-protect (if done (break) (step)) (cleanup)))
-```
-
-保護領域から**静的な脱出**（`break`/`return`）で抜けると、`compile-break` は
-loop の出口ブロックへ直接 `br` するので、`compile-unwind-protect` が置いた
-cleanup の 2 つのコピー（正常路と dispatch ブロック）をどちらも飛び越す。
-interpreted 側は走る（`Op::UnwindProtect` は `EvalError::Break`/`Return` も
-「protected が抜けた」経路として扱う）ので、**両経路で挙動が違う**。
-
-行き先は静的に分かるので、解くのに実行時機構は要らない: 各 `unwind-protect` の
-cleanup ブロックに継続コード（0=resume / 1=正常 / 2=loop-exit）のスロットを持たせ、
-`compile-break`/`compile-return` から内側の cleanup ブロックへ `br` させればよい。
-**これも分岐だけで済む**（動的な脱出の機構には触れない）が、今は `protect` を
-見ない設計になっている `compile-break`/`compile-return` に手を入れることになる。
-
 ### `fatal()` の到達可能な呼び出し元がまだ abort する
 
 `rt_panic` は `extern "C-unwind"` になり、compiled な `(panic ...)` は catchable な

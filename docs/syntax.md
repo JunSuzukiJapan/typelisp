@@ -556,11 +556,10 @@ docstring を返す（`(documentation Type::method)` はメソッド専用）。
   `throw`/`catch` は全部それに突き合わされる。別の型で使うと型エラー。
 - `throw` の型は `!`（発散）。`(catch 'tag expr)` の型は `expr` の型とタグの型の合流型。
 - `unwind-protect` の値は `protected` の値。`cleanup` の値は捨てられる。
-  `cleanup` は正常終了・`throw`・`panic` のどの経路でも走る。`cleanup` 自身の非局所脱出は、
-  飛行中の脱出に勝つ。
-- **既知の制限**: コンパイルされた関数では、`unwind-protect` の `protected` から
-  `break`/`return` で抜けた場合に `cleanup` が走らない（インタプリタでは走る）。
-  [TODO.md](dev/TODO.md) 参照。
+  `cleanup` は `protected` をどう抜けても走る——正常終了・`throw`・`panic` に加えて、
+  `break`/`return` で抜けた場合も走る。`cleanup` 自身の非局所脱出は、飛行中の脱出に勝つ。
+- 入れ子の `unwind-protect` は内側から順に走る。`protected` の**内側**のループを抜ける
+  `break` は `protected` から出ていないので、その `cleanup` は走らない。
 
 CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`）は採用していない
 （[language-design.md](dev/language-design.md) §9）。
