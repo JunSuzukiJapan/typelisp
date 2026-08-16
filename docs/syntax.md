@@ -531,14 +531,48 @@ docstring を返す（`(documentation Type::method)` はメソッド専用）。
 時に定数として畳み込まれる——実行時のルックアップは発生しない（checker は常にどこへ解決するか知って
 いるため）。モジュール修飾された自由名（`mod::name`、`Type::method` を除く）は現状非対応。
 
-## 8. エラー処理の方針
+## 8. 非局所脱出（catch / throw / unwind-protect）
+
+```lisp
+(catch 'tag body)                   ; body を走らせる。body が届く範囲のどこかで
+                                    ; (throw 'tag v) が起きたら、その v を値にする
+(throw 'tag value)                  ; 直近の動的に囲む (catch 'tag ...) へ脱出する
+(unwind-protect protected cleanup)  ; protected をどう抜けても cleanup を走らせる
+```
+
+`break`/`return`（§5）と違い、これは**動的**な脱出——`throw` は自分を囲む `catch` を字句的に
+見ておらず、関数を何段跨いでも同じタグの `catch` に届く。
+
+```lisp
+(defun find-first ((xs Sexpr)) i32
+  (catch 'found
+    (dolist (x xs)
+      (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+    -1))                            ; 見つからなければ通常どおり末尾の値
+```
+
+- **タグはリテラルシンボルのみ**（`'done`）。CL と違い評価されない。
+- **タグが型を運ぶ。** `'tag` が最初に使われたときに型が決まり、以降の同じシンボルの
+  `throw`/`catch` は全部それに突き合わされる。別の型で使うと型エラー。
+- `throw` の型は `!`（発散）。`(catch 'tag expr)` の型は `expr` の型とタグの型の合流型。
+- `unwind-protect` の値は `protected` の値。`cleanup` の値は捨てられる。
+  `cleanup` は正常終了・`throw`・`panic` のどの経路でも走る。`cleanup` 自身の非局所脱出は、
+  飛行中の脱出に勝つ。
+- **既知の制限**: コンパイルされた関数では、`unwind-protect` の `protected` から
+  `break`/`return` で抜けた場合に `cleanup` が走らない（インタプリタでは走る）。
+  [TODO.md](dev/TODO.md) 参照。
+
+CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`）は採用していない
+（[language-design.md](dev/language-design.md) §9）。
+
+## 9. エラー処理の方針
 
 - 回復可能な失敗は `Result<T,E>` + `match`。回復不能な失敗（バグ・不変条件違反）は `panic`。
 - `?`/try に相当する構文はない。分岐は `match` で明示する。
 - 関数・特殊形の名前に `!`（破壊的操作）や `?`（述語）を接尾辞として使わない。述語は
   `-p`/`p` 接尾辞（`zerop` `consp` など）または `is-` 前置（`is-some` `is-ok` など）で命名する。
 
-## 9. コンパイル（実験的機能）
+## 10. コンパイル（実験的機能）
 
 ```lisp
 (compile name)                      ; 定義済みの defun/メソッドをネイティブコードへ JIT コンパイル

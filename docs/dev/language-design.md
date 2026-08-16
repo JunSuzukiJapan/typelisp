@@ -684,7 +684,42 @@ supers は「接頭辞にならない相手だけ」ではなく**閉包すべ�
   `:dyn Error` へ箱詰めできる。vtable は `E` が具象化する単型化時に確定するので、
   定義時の本体検査には消去済みプレースホルダ（`Expr::TraitCall`）が残るだけになる。
 
-### 7.5 部分関数の失敗方針（Rust 流の混在）
+### 7.5 非局所脱出（`catch`/`throw`/`unwind-protect`、2026-08-16 実装）
+
+**失敗の表現と制御の移動を分ける。** 前者は値（`Result`/`Option`/`Error` トレイト、§7.1〜7.4）、
+後者は CL 流の非局所脱出。この2つは競合しない——`catch`/`throw`/`unwind-protect` は CL でも
+条件システムの一部ではなく、非局所脱出のプリミティブである。
+
+**コンディション（`define-condition`/`handler-bind`/`invoke-restart`）は採用しない**（§9）。
+条件システムは「この関数が何を signal しうるか」が型に出ず、静的型付けと対立する。CL が
+持てるのは動的型付けだからで、静的に例外をやった唯一の主流例である Java の checked exception は
+広く失敗と評価されている。失うのは restart だけ。
+
+- **型はタグ（シンボル）が運ぶ**。`throw` と `catch` は動的に対応するので（別関数の奥から飛ぶ）、
+  両者が共有するのはシンボルしかない。checker がシンボル→型の表を持ち（`Checker::throw_tags`）、
+  最初の使用で型が決まり以降の同じシンボルは全部それに突き合わせる。`deftag` の類は要らない。
+- **タグはリテラルシンボル限定**。CL はタグを評価するが、型が乗る先がシンボルである以上、
+  計算されたタグは検査対象が無くなる。
+- **`throw` の型は `!`**（§7.2）。`(catch 'sym expr)` の型は expr の型とタグの型の join——
+  body が throw だけだと `Never` になるが、その form は throw が届けた値を produce するため。
+- **`unwind-protect` の cleanup は正常終了・throw・panic のどの経路でも走る**。cleanup 自身の
+  非局所脱出が、飛行中の脱出に勝つ（CLHS どおり）。
+
+#### 静的な脱出と動的な脱出は混ぜない
+
+| | 静的な脱出 | 動的な脱出 |
+|---|---|---|
+| 構文 | `break` / `return` | `throw` / `panic` |
+| 行き先 | checker が決定済み（最内 `loop`、関数境界を越えない） | 実行時にタグで決まる、関数を跨ぐ |
+| compiled | `br` 命令 | unwind（Rust panic） |
+
+この区別は実装方針でもある。compiled 側で `catch` の本体を別関数に切り出す案（unwind を止める
+`catch_unwind` を Rust フレームに置くための素直な手）は、この理由で**却下した**——本体が別関数に
+なると `(loop ... (catch 'a (break)) ...)` の `break` が「同じ関数内の分岐」でなくなり、静的な
+脱出が動的な機構に巻き込まれる。`catch`/`unwind-protect` の本体は同じ LLVM 関数に残し、
+`catch_unwind` は保護領域内の**呼び出し**に置いている（`typelisp-rt` の catch/throw 節）。
+
+### 7.6 部分関数の失敗方針（Rust 流の混在）
 | 操作 | 方針 |
 |---|---|
 | `vector-ref`（範囲外） | panic |
@@ -756,6 +791,12 @@ supers は「接頭辞にならない相手だけ」ではなく**閉包すべ�
   `sexpr-cdr` で直接歩いて各要素を束縛する（要素は動的に `Sexpr`。使う側が `match` で具体型に
   分解する）ので、上記の「ジェネリックな `Iter<Item>` を被せない」方針と両立している。
 - **`?`/`try` 構文**、および `!`/`?` の命名接尾辞: CL に倣い非採用（§7.3）。
+- **コンディション（`define-condition` / `handler-bind` / `handler-case` / `invoke-restart`）**:
+  2026-08-16 に非採用と確定（§7.5）。「この関数が何を signal しうるか」が型に出ない機構であり、
+  静的型付けと対立する。CL が持てるのは動的型付けだからで、静的に例外をやった唯一の主流例
+  である Java の checked exception は広く失敗と評価されている。失敗の**表現**は値
+  （`Result`/`Option`/`Error` トレイト）に、制御の**移動**は `catch`/`throw`/`unwind-protect` に
+  一本化する。失うのは restart（`handler-bind` + `invoke-restart`）だけ。
 - **`set-pprint-dispatch` / `*print-pprint-dispatch*`**: CL の「型指定子をキーにした実行時の
   整形関数登録表」。文字列キーもプリンタのシグネチャも無検査で、「登録時点で分かっていた型を
   捨ててから `match` で復元する」形になり、静的型付け言語には合わない——CL のもう一方の機構

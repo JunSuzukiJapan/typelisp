@@ -6662,3 +6662,78 @@ catchable な `EvalError::Panic` ではなくプロセス終了になる**。`(r
 なった）と `(expt 2n -1n)`/`(expt 2/3 1/2)`（前項で既になっていた）が該当し、テストは interpreted
 prelude に対して検査する形へ変えた。REPL では 1 回のタイプミスがセッションを落とすので、残作業
 として [TODO.md](TODO.md) に記録した。
+
+---
+
+## `catch`/`throw`/`unwind-protect`（2026-08-16、branch `feature/compiled-unwind`）
+
+CL 流の非局所脱出。interpreted 層は先に入っていた（checker・core form・`EvalError::Throw`・
+評価）。ここに記録するのは **compiled 側**と、そこで方式が変わった経緯。
+
+言語としての確定事項（コンディション非採用、タグが型を運ぶ、静的な脱出と動的な脱出を混ぜない）は
+[language-design.md](language-design.md) §7.5 / §9。
+
+### 方式が変わった: LLVM EH ではなく「保護呼び出し」
+
+[TODO.md](TODO.md) には「方式は LLVM EH 一択」と書いてあり、`tests/compiled_unwind_test.rs` が
+`invoke` + cleanup 専用 `landingpad` + `resume` の実現可能性まで実証していた。着手して分かったのは、
+**それで `unwind-protect` は書けるが `catch` は書けない**ということ:
+
+* catch は unwind を*止める*。Rust の panic を止めるとは例外オブジェクトを解放することで、
+  それができるのは `std::panic::catch_unwind` だけである——例外オブジェクト自身の
+  `exception_cleanup` は `__rust_drop_panic()` で abort し（"Rust panics must be rethrown"）、
+  `panic_count::decrease` も `catch_unwind` からしか呼ばれない（`library/std/src/panicking.rs`）。
+  landing pad で飲むと確保が漏れ、`std::thread::panicking()` がプロセスの残りの寿命ずっと true になる。
+* 自前の foreign exception を投げれば上は回避できるが、**interpreted フレームを跨ぐ throw が死ぬ**。
+  compiled → `rt_apply_any` → interpreted → compiled → throw の間には Rust フレームがあり、
+  Rust の `catch_unwind` は foreign exception を掴むと `__rust_foreign_exception()` で abort する。
+  throw の輸送体は Rust panic でなければならない。
+
+⇒ **unwind を止める Rust フレームが要る。** 一度は「catch の本体を 0 引数クロージャに切り出して
+Rust から呼ぶ」案を検討したが、ユーザー判断で却下。理由は本質的で、記録しておく価値がある:
+
+> 例外処理（`catch`/`throw`）と制御構文（`break`/`return`）をごっちゃにしている。
+> break の処理が例外処理とかちあわない設計にするべき。
+
+`break` は**静的**な脱出で、行き先は checker が決めている（最内 `loop`、関数境界を越えない）。
+compiled 側ではそれが `br` 命令であり、`loop-exit`/`loop-slot` はその LLVM 関数のブロックと
+alloca である。catch の本体を別関数に切り出すと、`(loop ... (catch 'a (break)) ...)` の `break` が
+「別関数のブロックへ飛ぶ」になり、表現できない。動的な脱出の実装都合で静的な脱出を壊すことになる。
+
+**採った形**: 本体は同じ LLVM 関数に残し、`catch_unwind` は**保護領域内の呼び出し**に置く。
+領域の中では call が `rt_protected_*` トランポリン（Rust 関数）を経由し、戻ったら
+`rt_unwind_pending` を見て領域の dispatch ブロックへ `build-cond-br` するだけ——compiled 側から
+見れば unwind もただの制御フローになる。LLVM EH（`invoke`/`landingpad`/`resume`/personality）は
+一切使っていないので、AOT で `__gxx_personality_v0` が undefined になる問題も起きない。
+
+### 構成
+
+| 層 | 変更 |
+|---|---|
+| `typelisp-mem` | `Heap` に 4 つ目のルート `in_flight_throw`（飛行中の throw の値。3 つのスタックはいずれも「unwind が切り捨てる／解放しない／throw で括られていない」ので使えない） |
+| `typelisp-rt` | `CompiledThrow` payload、park/take、`rt_throw`・`rt_throw_matches`・`rt_throw_take_value`・`rt_unwind_pending`・`rt_resume_unwind`、`rt_protected_{call,call_env,apply_any,dyn_call,panic,throw}` |
+| checker/forms | `(catch TAG BODY REPR)` / `(throw TAG VALUE REPR)` — 投げた値は境界を跨ぐので `apply` と同じ理由で repr が要る |
+| bridge/freevars | 3 タグの翻訳と walk。タグは `(sym ...)` と同じノードになるので、島は `rt_intern_symbol` 済みの tagged `Sexpr` を渡す |
+| 島 | `protect Option<llvm-basic-block>`（今いる領域の dispatch ブロック）を `loop-exit` の隣に引き回し、`compile-catch`/`compile-throw`/`compile-unwind-protect` と `emit-direct-call`/`emit-closure-apply`/`emit-rt-call` を新設 |
+| 境界 | `catch_compiled_panic` に `CompiledThrow` の腕、`unwind_interpreted_failure` が `EvalError::Throw` だけ throw チャネルへ回す、`rt_run_entry`（AOT）で捕まらない throw を報告 |
+
+**入れ子はブロックの連鎖で解く**（領域のリストを引き回さない）。各領域の dispatch ブロックは、
+自分のタグでない unwind を外側の dispatch ブロックへ `br` し、最外は `rt_resume_unwind` へ落ちる。
+`compile-break`/`compile-return` は `protect` を**受け取らない**——静的な脱出が領域を参照しないことが
+シグネチャに出ている。
+
+### 実装中に見つかったこと
+
+* **飛行中の throw の値は GC ルートが要る。** `EvalError::Throw` が運ぶ `Box<Value>` はコレクタから
+  見えず、その値を root していたスコープは unwind が全部捨てる。`break`/`return` は「巻き戻しは
+  何も allocate しない」で済んでいたが、throw は違う——`unwind-protect` の cleanup が走り、
+  それは allocate する。`Heap::in_flight_throw` がその 1 スロット。interpreted 側の
+  `Op::Throw`/`Op::Catch` も同じスロットを使う（park する側と解放する側が両経路で対になる）。
+* **飛行中でないタグを残してはいけない。** トランポリンが throw 以外（panic・interpreted の失敗）を
+  捕まえたときにタグを消さないと、上位の `catch` が panic を自分の throw として claim してしまう。
+* **`kind = 0` は「そのタグを投げるものが無い」を意味する。** `(catch 'unused ...)` や body が
+  `break` だけの catch はタグの型が決まらず `Repr::NotRepresentable` になる。dispatch ブロックは
+  到達不能なので decode しない（`compile-sexpr-field` はここで panic する）。
+* **`gc-stress` を最初から有効にすると prelude のロードで落ちる。** checker の quasiquote 経路
+  （`check_qq_template` → `construct_form`）に既存のルート漏れがあり、この作業とは無関係に
+  再現する。テストは prelude をロードし終えてから stress を入れる形にした。
