@@ -444,6 +444,58 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             f.finish("loop")
         }
         "break" => core::tagged(heap, "break", &[]),
+
+        // ---- non-local exits ---------------------------------------------
+        // `(catch TAG BODY REPR)` -> `(catch TAG-NODE KIND BODY)` and
+        // `(throw TAG VALUE REPR)` -> `(throw TAG-NODE KIND VALUE)`.
+        //
+        // The tag becomes the very node a `(sym ...)` would: the island builds
+        // it with `rt_intern_symbol`, so what reaches `rt_throw`/
+        // `rt_throw_matches` is an ordinary tagged `Sexpr` symbol — the same
+        // thing an interpreted `EvalError::Throw` names its tag by, which is
+        // what lets a throw be caught on either side of the boundary.
+        //
+        // `KIND` is what the island converts the carried value through
+        // (`compile-tag-struct-field` on the way in, `compile-sexpr-field` on
+        // the way out): the runtime sees one machine word and only the
+        // representation says whether it is already tagged.
+        "catch" => {
+            let name = throw_tag_name(heap, form)?;
+            let kind = repr_kind(heap, form, 2)?;
+            let body = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+            let mut f = Items::new(heap);
+            let tag = sexpr_leaf(f.heap(), SEXPR_SYM, |h| str_form(h, &name))?;
+            f.push(tag);
+            f.push(Value::Int(kind));
+            let b = to_island(f.heap(), body, cx)?;
+            f.push(b);
+            f.finish("catch")
+        }
+        "throw" => {
+            let name = throw_tag_name(heap, form)?;
+            let kind = repr_kind(heap, form, 2)?;
+            let value = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+            let mut f = Items::new(heap);
+            let tag = sexpr_leaf(f.heap(), SEXPR_SYM, |h| str_form(h, &name))?;
+            f.push(tag);
+            f.push(Value::Int(kind));
+            let v = to_island(f.heap(), value, cx)?;
+            f.push(v);
+            f.finish("throw")
+        }
+        // Structurally unchanged: both halves are ordinary forms, and the
+        // cleanup's value is discarded on every path, so no representation is
+        // needed for either.
+        "unwind-protect" => {
+            let protected = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
+            let cleanup = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+            let mut f = Items::new(heap);
+            let p = to_island(f.heap(), protected, cx)?;
+            f.push(p);
+            let c = to_island(f.heap(), cleanup, cx)?;
+            f.push(c);
+            f.finish("unwind-protect")
+        }
         "return" => {
             let value = core::field(heap, form, 0);
             let mut f = Items::new(heap);
@@ -2116,6 +2168,24 @@ fn symbol_field(heap: &Heap, form: Value, i: usize, ) -> Result<String, Error> {
         Some(Value::Symbol(id)) => Ok(heap.symbol_name(id).to_string()),
         _ => Err(malformed(heap, form)),
     }
+}
+
+/// The symbol a `catch`/`throw` node's first field names.
+///
+/// Stored as a quoted datum (`forms::catch_form`), so this unwraps one `quote`
+/// before reading the symbol — the same shape `Interp::throw_tag_of` reads on
+/// the interpreted side.
+fn throw_tag_name(heap: &Heap, form: Value) -> Result<String, Error> {
+    match core::field(heap, form, 0).and_then(|q| core::field(heap, q, 0)) {
+        Some(Value::Symbol(id)) => Ok(heap.symbol_name(id).to_string()),
+        _ => Err(malformed(heap, form)),
+    }
+}
+
+/// Field `i`'s representation, as the island's kind number.
+fn repr_kind(heap: &Heap, form: Value, i: usize) -> Result<i64, Error> {
+    let repr = core::field(heap, form, i).and_then(|r| Repr::read(heap, r)).ok_or_else(|| malformed(heap, form))?;
+    Ok(repr.field_kind())
 }
 
 /// `(str (int c0) (int c1) ...)` for a compile-time-known string.

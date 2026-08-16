@@ -266,6 +266,16 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: &str) -> Result<Vec<Value>, Er
         // "the free-variable walk does not know the tag `vector`".
         "field-get" => parts.first().copied().into_iter().collect(),
         "dyn-upcast" => from(1),
+        // `(catch TAG BODY REPR)` / `(throw TAG VALUE REPR)` — the middle
+        // field only. The tag is a quoted datum and the representation is not
+        // a form at all; a parametric one (`(vector int)`) is a list headed by
+        // a symbol, so walking it would look exactly like walking a node and
+        // fail with "the free-variable walk does not know the tag `vector`" —
+        // the same trap `field-get` documents.
+        "catch" | "throw" => parts.get(1).copied().into_iter().collect(),
+        // Both halves are ordinary forms: a cleanup refers to names from the
+        // scope it is written in, exactly as the protected form does.
+        "unwind-protect" => from(0),
         "field-set" => {
             let mut v = vec![parts.first().copied().unwrap_or(Value::Empty)];
             v.extend(from(3));

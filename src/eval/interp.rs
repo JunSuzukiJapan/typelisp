@@ -4075,6 +4075,7 @@ fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, arg
             "build-free" => Some(llvm_builder_build_free(args)),
             "build-int-to-ptr" => Some(llvm_builder_build_int_to_ptr(args)),
             "build-ptr-to-int" => Some(llvm_builder_build_ptr_to_int(args)),
+            "build-fn-address" => Some(llvm_builder_build_fn_address(args)),
             _ => None,
         };
     }
@@ -4441,7 +4442,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 147] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 158] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_logand, rt_bignum_logior, rt_bignum_lognot, rt_bignum_logxor,
@@ -4467,6 +4468,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 147] {
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
         rt_dyn_call, rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
+        rt_throw, rt_throw_matches, rt_throw_take_value, rt_unwind_pending, rt_resume_unwind,
+        rt_protected_apply_any, rt_protected_call, rt_protected_call_env, rt_protected_dyn_call, rt_protected_panic,
+        rt_protected_throw,
     };
     [
         // The one main-crate entry: the generic `llvm-*`/native-scope
@@ -4510,6 +4514,24 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 147] {
         ("rt_set_cdr", rt_set_cdr as usize),
         ("rt_match_fail", rt_match_fail as usize),
         ("rt_panic", rt_panic as usize),
+        // `catch`/`throw`/`unwind-protect` (`compiler.rs`'s `compile-catch`/
+        // `compile-throw`/`compile-unwind-protect`). `rt_throw` raises the
+        // unwind; the three queries below are what a region's dispatch block
+        // asks about the one in flight; the `rt_protected_*` family is the
+        // Rust frame that catches it, one per kind of call a protected region
+        // can make — see that section of `typelisp-rt` for why the catch
+        // cannot be a landing pad instead.
+        ("rt_throw", rt_throw as usize),
+        ("rt_throw_matches", rt_throw_matches as usize),
+        ("rt_throw_take_value", rt_throw_take_value as usize),
+        ("rt_unwind_pending", rt_unwind_pending as usize),
+        ("rt_resume_unwind", rt_resume_unwind as usize),
+        ("rt_protected_call", rt_protected_call as usize),
+        ("rt_protected_call_env", rt_protected_call_env as usize),
+        ("rt_protected_apply_any", rt_protected_apply_any as usize),
+        ("rt_protected_dyn_call", rt_protected_dyn_call as usize),
+        ("rt_protected_panic", rt_protected_panic as usize),
+        ("rt_protected_throw", rt_protected_throw as usize),
         ("rt_push_sexpr_root", rt_push_sexpr_root as usize),
         ("rt_pop_sexpr_root", rt_pop_sexpr_root as usize),
         ("rt_push_permanent_sexpr_root", rt_push_permanent_sexpr_root as usize),
@@ -5378,6 +5400,26 @@ fn llvm_builder_build_ptr_to_int(args: &[Value]) -> Result<Value, EvalError> {
     Ok(llvm_value_value(v.into()))
 }
 
+/// `build-fn-address`: a declared function's own address as the plain `i64`
+/// every other compiled value already is — `build-ptr-to-int` applied to the
+/// function itself rather than to a `build-malloc`'d block.
+///
+/// `compile-call`'s protected form is the only caller: inside a `catch`/
+/// `unwind-protect` region a direct call goes through `rt_protected_call`,
+/// which needs the target as a value it can be *handed* rather than as the
+/// callee of a `call` instruction. LLVM already treats a `FunctionValue` as a
+/// pointer constant, so this is a `ptrtoint` on it and nothing else.
+fn llvm_builder_build_fn_address(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let f = expect_llvm_function(&args[1])?;
+    let ctx = crate::compile::llvm_context();
+    let v = builder
+        .borrow()
+        .build_ptr_to_int(f.as_global_value().as_pointer_value(), ctx.i64_type(), "fn_address")
+        .map_err(|e| EvalError::Internal(format!("build-fn-address: {}", e)))?;
+    Ok(llvm_value_value(v.into()))
+}
+
 /// Builds an enum value (`Option`/`Result`/user `defenum`) for `type_name`'s
 /// `variant`, from already-evaluated `fields` — the encode-direction
 /// counterpart of `match_pattern`'s boxed-enum decode.
@@ -5959,10 +6001,7 @@ unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64,
     let argv = std::slice::from_raw_parts(args, argc as usize);
     match interp.apply_interpreted(heap, closure, argv) {
         Ok(w) => w,
-        Err(e) => {
-            crate::compile::park_interpreted_error(e);
-            typelisp_rt::unwind_interpreted_error()
-        }
+        Err(e) => crate::compile::unwind_interpreted_failure(e),
     }
 }
 
@@ -5992,10 +6031,7 @@ unsafe extern "C-unwind" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
     let heap = crate::compile::runtime::shim_active_heap();
     match interp.dyn_slot_closure(heap, vtable, slot) {
         Ok(w) => w,
-        Err(e) => {
-            crate::compile::park_interpreted_error(e);
-            typelisp_rt::unwind_interpreted_error()
-        }
+        Err(e) => crate::compile::unwind_interpreted_failure(e),
     }
 }
 

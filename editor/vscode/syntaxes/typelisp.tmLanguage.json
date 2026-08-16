@@ -182,7 +182,7 @@
       "name": "storage.modifier.lambda-list.typelisp"
     },
     "special-form": {
-      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:pprint\\-logical\\-block|unquote\\-splicing|pprint\\-tabular|documentation|pprint\\-linear|pprint\\-fill|unreachable|quasiquote|while\\-let|rotatef|compile|dotimes|println|unquote|doiter|dolist|format|if\\-let|labels|lambda|pprint|return|shiftf|try\\-as|unless|apply|break|match|panic|print|progn|quote|until|while|case|cond|decf|incf|let\\*|list|loop|setf|todo|when|and|let|the|as|do|if|or)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:pprint\\-logical\\-block|unquote\\-splicing|pprint\\-tabular|unwind\\-protect|documentation|pprint\\-linear|pprint\\-fill|unreachable|quasiquote|while\\-let|rotatef|compile|dotimes|println|unquote|doiter|dolist|format|if\\-let|labels|lambda|pprint|return|shiftf|try\\-as|unless|apply|break|catch|match|panic|print|progn|quote|throw|until|while|case|cond|decf|incf|let\\*|list|loop|setf|todo|when|and|let|the|as|do|if|or)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
       "name": "keyword.control.typelisp"
     },
     "clause": {

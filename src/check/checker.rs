@@ -9475,8 +9475,13 @@ impl Checker {
             Some(carried) => join_types(&body.ty, carried)?,
             None => body.ty.clone(),
         };
+        // The *tag's* type, not the form's: those differ exactly when the body
+        // falls off its end normally, and what crosses the boundary is what the
+        // throw carried.
+        let carried = self.throw_tags.borrow().get(&tag).cloned().unwrap_or_else(|| ty.clone());
         let tag_form = forms::quote_form(heap, sym)?;
-        let form = forms::catch_form(heap, tag_form, body.form)?;
+        let repr = self.repr_form(heap, &carried)?;
+        let form = forms::catch_form(heap, tag_form, body.form, repr)?;
         Ok(Checked::new(form, ty))
     }
 
@@ -9502,7 +9507,8 @@ impl Checker {
         let value = self.check_at(heap, interp, env, args[1], expected.as_ref(), nth_loc(arg_locs, 1))?;
         self.unify_throw_tag(&tag, &value.ty, "throw")?;
         let tag_form = forms::quote_form(heap, sym)?;
-        let form = forms::throw_form(heap, tag_form, value.form)?;
+        let repr = self.repr_form(heap, &value.ty)?;
+        let form = forms::throw_form(heap, tag_form, value.form, repr)?;
         Ok(Checked::new(form, Type::Never))
     }
 

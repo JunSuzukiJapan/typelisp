@@ -25,13 +25,14 @@
 //! * **Mark-sweep.** `gc()` marks everything reachable from the root set
 //!   (iteratively — no native recursion), then rebuilds the cons free list and
 //!   sweeps strings. Cycles are reclaimed (unlike reference counting).
-//! * **Three root sets.** `roots` is a strict LIFO stack (push on scope entry,
+//! * **Four root sets.** `roots` is a strict LIFO stack (push on scope entry,
 //!   pop on scope exit). `permanent_roots` holds values whose owner outlives
 //!   any single activation (e.g. a field inside a heap-external, never-freed
 //!   box) — appended to, never popped. `session_roots` holds values that must
 //!   survive a bracketed span of work but not outlive it, released in bulk at
-//!   the bracket's end (see [`Heap::push_session_root`]). `gc()` marks from all
-//!   three.
+//!   the bracket's end (see [`Heap::push_session_root`]). `in_flight_throw` is
+//!   the one value a `throw` is carrying while the stack that held it is being
+//!   discarded (see [`Heap::set_in_flight_throw`]). `gc()` marks from all four.
 //!
 //! All `unsafe` is confined here; the public API is safe.
 
@@ -74,6 +75,9 @@ pub struct Heap {
     permanent_roots: Vec<Value>,
     // Roots for the duration of a bracketed session — see `push_session_root`.
     session_roots: Vec<Value>,
+    // The value of a `throw` currently travelling up the stack — see
+    // `set_in_flight_throw`.
+    in_flight_throw: Option<Value>,
 
     // interned symbols (permanent)
     sym_names: Vec<String>,
@@ -191,6 +195,7 @@ impl Heap {
             roots: Vec::new(),
             permanent_roots: Vec::new(),
             session_roots: Vec::new(),
+            in_flight_throw: None,
             sym_names: Vec::new(),
             sym_ids: HashMap::new(),
             gensym_counter: 0,
@@ -479,6 +484,35 @@ impl Heap {
     /// a nested compile leaves the outer one's values rooted.
     pub fn truncate_session_roots(&mut self, len: usize) {
         self.session_roots.truncate(len);
+    }
+
+    // ---- the in-flight throw ----------------------------------------------
+
+    /// The value a `(throw ...)` currently travelling up the stack carries, or
+    /// `None` when no throw is in flight.
+    ///
+    /// A single slot rather than a stack, and none of the other three root
+    /// sets, because the lifetime it has to express is neither an activation's
+    /// nor a session's: the value is live from the `throw` that raised it
+    /// until the `catch` that consumes it, while the stack in between is being
+    /// *discarded*. `roots` is exactly what a non-local exit cuts back
+    /// (`truncate_roots`, from both the compiled and the interpreted side), so
+    /// a value parked there would be released by the very unwind that is
+    /// carrying it; `permanent_roots` never releases; `session_roots` is not
+    /// bracketed by a throw.
+    ///
+    /// One slot suffices because at most one throw is ever in flight: an exit
+    /// raised from an `unwind-protect` cleanup while another is travelling
+    /// *replaces* it (CLHS — the cleanup's own exit wins), which is what
+    /// overwriting this slot does.
+    pub fn in_flight_throw(&self) -> Option<Value> {
+        self.in_flight_throw
+    }
+
+    /// Park (or, with `None`, release) the in-flight throw's value — see
+    /// [`in_flight_throw`](Self::in_flight_throw).
+    pub fn set_in_flight_throw(&mut self, v: Option<Value>) {
+        self.in_flight_throw = v;
     }
 
     // ---- symbols ----------------------------------------------------------
@@ -1710,6 +1744,9 @@ impl Heap {
         for (i, &v) in self.session_roots.iter().enumerate() {
             check("session_roots", i, v);
         }
+        if let Some(v) = self.in_flight_throw {
+            check("in_flight_throw", 0, v);
+        }
         for w in &self.cell_registry {
             if let Some(id) = w.upgrade() {
                 if let Some(BoxedObj::Cell(v)) = &self.box_slots[id.0 as usize] {
@@ -1747,6 +1784,12 @@ impl Heap {
         }
         for i in 0..self.session_roots.len() {
             stack.push(self.session_roots[i]);
+        }
+        // The value a throw is carrying past the frames being discarded — see
+        // `set_in_flight_throw` for why it cannot live in any of the three
+        // stacks above.
+        if let Some(v) = self.in_flight_throw {
+            stack.push(v);
         }
         // Every binding cell still referenced by a live `Rc<BoxId>` handle
         // is a root of its own — see `alloc_cell`. Dead entries (the last

@@ -402,7 +402,13 @@ impl Interp {
                 let body = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (catch ..) has no body".to_string()))?;
                 match self.eval_core(heap, body, env) {
-                    Err(EvalError::Throw(thrown, v)) if thrown == tag => Ok(Step::Done(*v)),
+                    Err(EvalError::Throw(thrown, v)) if thrown == tag => {
+                        // The flight is over: release the root `Op::Throw`
+                        // registered, now that an ordinary rooted value is
+                        // taking over again.
+                        heap.set_in_flight_throw(None);
+                        Ok(Step::Done(*v))
+                    }
                     other => other.map(Step::Done),
                 }
             }
@@ -411,6 +417,14 @@ impl Interp {
                 let value = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (throw ..) has no value".to_string()))?;
                 let v = self.eval_core(heap, value, env)?;
+                // The value travels in a `Box` from here, where the collector
+                // cannot see it, while every scope that *did* root it is
+                // discarded — and unlike `break`/`return`, whose exits reach
+                // their `loop` without running anything, this flight can run
+                // `unwind-protect` cleanups, which allocate. `in_flight_throw`
+                // is the root that spans the flight; the catch that claims the
+                // value releases it.
+                heap.set_in_flight_throw(Some(v));
                 Err(EvalError::Throw(tag, Box::new(v)))
             }
             // `(unwind-protect protected cleanup)`: `cleanup` runs on every
@@ -425,7 +439,22 @@ impl Interp {
                 let cleanup = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no cleanup form".to_string()))?;
                 let outcome = self.eval_core(heap, protected, env);
-                self.eval_core(heap, cleanup, env)?;
+                // Whatever the protected form produced is sitting in a Rust
+                // local, where the collector cannot see it — and this is the
+                // one unwind in the evaluator that runs code before
+                // continuing: a cleanup allocates, so a collection here would
+                // reclaim the very value being carried past it. That is what
+                // the `loop` arm's "unwinding allocates nothing" reasoning
+                // cannot cover. (A thrown value is already rooted for its
+                // whole flight — see `Op::Throw` — so only these two need it.)
+                let mut s = RootScope::new(heap);
+                match &outcome {
+                    Ok(v) => s.push_root(*v),
+                    Err(EvalError::Return(v)) => s.push_root(**v),
+                    Err(_) => {}
+                }
+                self.eval_core(&mut s, cleanup, env)?;
+                drop(s);
                 outcome.map(Step::Done)
             }
             // ---- closures ------------------------------------------------

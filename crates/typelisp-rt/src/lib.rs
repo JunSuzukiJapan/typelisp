@@ -251,6 +251,18 @@ pub struct CompiledPanic {
 #[derive(Debug)]
 pub struct InterpretedUnwind;
 
+/// The payload marking an unwind raised by a compiled `(throw 'tag value)`.
+///
+/// Carries nothing, for the same reason [`InterpretedUnwind`] does not: the
+/// tag and the thrown value wait in [`take_throw`]'s slot on this thread while
+/// the unwind travels. Unlike an interpreted error, though, the reason is not
+/// that they are unnameable here — a `String` and a `Value` both are — but
+/// that the *value* needs a GC root for the whole flight
+/// (`Heap::set_in_flight_throw`), and a panic payload is invisible to the
+/// collector. Keeping both halves in one place keeps them from disagreeing.
+#[derive(Debug)]
+pub struct CompiledThrow;
+
 /// Makes the default panic hook stay quiet for the two payloads this crate
 /// raises deliberately ([`CompiledPanic`] and [`InterpretedUnwind`]),
 /// installed once on the first such unwind of the process.
@@ -266,7 +278,8 @@ pub(crate) fn install_quiet_panic_hook() {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             let ours = info.payload().downcast_ref::<CompiledPanic>().is_some()
-                || info.payload().downcast_ref::<InterpretedUnwind>().is_some();
+                || info.payload().downcast_ref::<InterpretedUnwind>().is_some()
+                || info.payload().downcast_ref::<CompiledThrow>().is_some();
             if !ours {
                 previous(info);
             }
@@ -2440,14 +2453,355 @@ pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
         // Only a typelisp-level `panic` is turned into an exit code; anything
         // else is a real bug in the runtime and keeps unwinding, exactly as
         // `catch_compiled_panic` does on the JIT side.
-        Err(payload) => match payload.downcast::<CompiledPanic>() {
-            Ok(p) => {
-                eprintln!("panic: {}", p.message);
-                EXIT_CODE_PANIC
+        Err(payload) => {
+            let payload = match payload.downcast::<CompiledPanic>() {
+                Ok(p) => {
+                    eprintln!("panic: {}", p.message);
+                    return EXIT_CODE_PANIC;
+                }
+                Err(other) => other,
+            };
+            // A `throw` that found no enclosing `catch` anywhere. Reported
+            // with the same wording `EvalError::Throw`'s `Display` uses, so
+            // the two front ends say the same thing about the same program.
+            match payload.downcast::<CompiledThrow>() {
+                Ok(_) => {
+                    let tag = take_throw().map(|(t, _)| t).unwrap_or_default();
+                    eprintln!("throw: no enclosing (catch '{}) for this throw", tag);
+                    EXIT_CODE_PANIC
+                }
+                Err(other) => std::panic::resume_unwind(other),
             }
-            Err(other) => std::panic::resume_unwind(other),
-        },
+        }
     }
+}
+
+// ---- catch / throw / unwind-protect --------------------------------------
+//
+// A `throw` travels as a Rust panic, because that is the only unwind every
+// frame between the throw and its catch can survive: compiled frames are
+// walkable (`tests/compiled_unwind_test.rs`), and the interpreted frames that
+// may sit in between (compiled -> `rt_apply_any` -> interpreted -> compiled)
+// are Rust ones, which can only catch Rust panics — a foreign exception
+// reaching `catch_unwind` aborts with "Rust cannot catch foreign exceptions".
+//
+// **Which is also why a `catch` cannot be an LLVM landing pad.** Stopping an
+// unwind means consuming the exception object, and for a Rust panic only
+// `std::panic::catch_unwind` can: the object's own `exception_cleanup` aborts
+// ("Rust panics must be rethrown") and `panic_count` is decremented nowhere
+// else, so a landing pad that swallowed one would leak the allocation and
+// leave `thread::panicking()` true for the rest of the process.
+//
+// So the Rust frame that does the catching is put where a Rust frame can
+// legitimately go: around each *call* made inside a protected region. The
+// trampolines below are that frame. Compiled code calls one instead of
+// calling its target directly, then asks [`rt_unwind_pending`] whether an
+// unwind was caught and branches to the region's dispatch block if so — an
+// ordinary conditional branch. Nothing in `compile-break`/`compile-return`
+// changes: a static exit stays a `br`, and only dynamic exits come through
+// here.
+
+thread_local! {
+    /// The tag of the throw currently in flight. Its *value* lives in
+    /// `Heap::set_in_flight_throw` instead, where the collector can see it —
+    /// see [`CompiledThrow`].
+    static IN_FLIGHT_TAG: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The panic payload a trampoline caught and has not yet handed on:
+    /// either to a `catch` that claims it ([`rt_throw_take_value`], which
+    /// drops it) or back to the unwinder ([`rt_resume_unwind`]).
+    static CAUGHT_UNWIND: RefCell<Option<Box<dyn std::any::Any + Send>>> = const { RefCell::new(None) };
+    /// Whether the most recent trampoline call ended in a caught unwind.
+    /// Read (and cleared) by [`rt_unwind_pending`] immediately after that
+    /// call, which is the only reader.
+    static UNWIND_PENDING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Parks a throw's tag and value for the unwind about to be raised for it,
+/// rooting the value for the flight.
+///
+/// `pub` because the `typelisp` crate needs it too: an interpreted callee
+/// that throws produces an `EvalError::Throw`, and the boundary hook turns it
+/// into this same parked pair so a *compiled* `catch` further up sees one kind
+/// of in-flight throw, not two.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread, and it must be the heap `value`
+/// belongs to.
+pub unsafe fn park_throw(tag: String, value: Value) {
+    IN_FLIGHT_TAG.with(|cell| *cell.borrow_mut() = Some(tag));
+    active_heap().set_in_flight_throw(Some(value));
+}
+
+/// Takes back what [`park_throw`] left. `None` when no throw is in flight.
+///
+/// Clears the tag but **leaves the value's GC root standing**: taking the pair
+/// here does not necessarily end the flight. The boundary that turns a
+/// compiled throw back into an `EvalError::Throw` takes it and the throw keeps
+/// travelling, now through interpreted frames, which can still run
+/// `unwind-protect` cleanups that allocate. The root is released where the
+/// value actually stops — the `catch` that claims it, on either side
+/// ([`rt_throw_take_value`], or `Op::Catch` in the interpreter).
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread.
+pub unsafe fn take_throw() -> Option<(String, Value)> {
+    let tag = IN_FLIGHT_TAG.with(|cell| cell.borrow_mut().take())?;
+    Some((tag, active_heap().in_flight_throw().unwrap_or(Value::Empty)))
+}
+
+/// Ends the flight: no throw is travelling any more, so the value it carried
+/// no longer needs a root of its own.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread.
+pub unsafe fn clear_throw() {
+    IN_FLIGHT_TAG.with(|cell| *cell.borrow_mut() = None);
+    active_heap().set_in_flight_throw(None);
+}
+
+/// Raises the unwind for a throw already parked by [`park_throw`].
+///
+/// The counterpart of [`unwind_interpreted_error`] for the throw channel; the
+/// `typelisp` crate calls it after parking an interpreted `EvalError::Throw`.
+pub fn unwind_throw() -> ! {
+    install_quiet_panic_hook();
+    std::panic::panic_any(CompiledThrow)
+}
+
+/// `(throw 'tag value)` for compiled code (`compiler.rs`'s `compile-throw`):
+/// parks the tag and value and unwinds, so the nearest dynamically enclosing
+/// `catch` on that tag — compiled or interpreted, in this function or twenty
+/// frames up — produces the value in its own place.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2`; `args[0]` must decode to a `Value::Symbol` and
+/// `args[1]` to the thrown value already in its tagged form (the island
+/// converts by the node's baked-in representation kind before calling). A
+/// `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_throw(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_throw: expected 2 arguments (tag, value)");
+    }
+    let tag = match decode(*args) {
+        Value::Symbol(id) => active_heap().symbol_name(id).to_string(),
+        _ => fatal("rt_throw: tag is not a symbol"),
+    };
+    let value = decode(*args.add(1));
+    park_throw(tag, value);
+    unwind_throw()
+}
+
+/// Whether the throw currently in flight carries tag `args[0]` — a `catch`'s
+/// dispatch block asking "is this one mine?". Returns the compiled `bool`
+/// encoding (`1`/`0`), like every `rt_*` predicate.
+///
+/// False when nothing is in flight at all, which is the case for a caught
+/// `CompiledPanic`/`InterpretedUnwind`: those belong to no tag, so every
+/// `catch` declines them and only `unwind-protect` cleanups see them pass.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args[0]` must decode to a `Value::Symbol`; a
+/// `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_throw_matches(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_throw_matches: expected 1 argument");
+    }
+    let tag = match decode(*args) {
+        Value::Symbol(id) => active_heap().symbol_name(id).to_string(),
+        _ => fatal("rt_throw_matches: tag is not a symbol"),
+    };
+    IN_FLIGHT_TAG.with(|cell| i64::from(cell.borrow().as_deref() == Some(tag.as_str())))
+}
+
+/// Consumes the in-flight throw, returning its value in tagged form — the
+/// other half of a `catch` claiming one, called only after
+/// [`rt_throw_matches`] said yes.
+///
+/// Dropping the parked panic payload here is what makes the claim final: a
+/// later [`rt_resume_unwind`] has nothing to re-raise, which is exactly right,
+/// since control has rejoined the catching function's ordinary flow.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_throw_take_value(_args: *const i64, _argc: u32) -> i64 {
+    CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = None);
+    match take_throw() {
+        Some((_, value)) => {
+            clear_throw();
+            encode(value)
+        }
+        None => fatal("rt_throw_take_value: no throw is in flight"),
+    }
+}
+
+/// Whether the trampoline call just made ended in a caught unwind (`1`) or
+/// returned normally (`0`), clearing the flag as it reads it.
+///
+/// Compiled code emits exactly one of these immediately after each protected
+/// call, so the flag never has to survive past the branch it feeds.
+#[no_mangle]
+pub unsafe extern "C" fn rt_unwind_pending(_args: *const i64, _argc: u32) -> i64 {
+    UNWIND_PENDING.with(|cell| i64::from(cell.replace(false)))
+}
+
+/// Hands a caught unwind back to the unwinder — what a `catch` whose tag did
+/// not match, or an `unwind-protect` that has finished its cleanup, does when
+/// there is no enclosing region left in this function to pass it to.
+///
+/// # Safety
+///
+/// A trampoline must have caught an unwind that no `catch` has since claimed.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_resume_unwind(_args: *const i64, _argc: u32) -> i64 {
+    match CAUGHT_UNWIND.with(|cell| cell.borrow_mut().take()) {
+        Some(payload) => std::panic::resume_unwind(payload),
+        None => fatal("rt_resume_unwind: no unwind is being carried"),
+    }
+}
+
+/// The shared body of every `rt_protected_*` trampoline: run `call` with a
+/// catch around it, and report the outcome the way compiled code reads it.
+///
+/// On a caught unwind the GC root stack is cut back to the depth it had when
+/// the call started — the callee pushed roots as it ran and the unwind skipped
+/// every matching pop, the same repair `catch_compiled_panic` documents for
+/// its own callers. The region's own dispatch block cuts back further still,
+/// to the depth at the region's entry; this only undoes the callee.
+///
+/// Anything that is not one of the runtime's three deliberate payloads keeps
+/// unwinding: a genuine bug in the runtime or in generated code must not come
+/// back as a plausible-looking typelisp condition.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread, and `call` must be safe to run
+/// under it.
+unsafe fn protected(call: impl FnOnce() -> i64) -> i64 {
+    let base = active_heap().root_count();
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
+        Ok(v) => {
+            UNWIND_PENDING.with(|cell| cell.set(false));
+            v
+        }
+        Err(payload) => {
+            let ours = payload.is::<CompiledThrow>() || payload.is::<CompiledPanic>() || payload.is::<InterpretedUnwind>();
+            if !ours {
+                std::panic::resume_unwind(payload);
+            }
+            // Anything but a throw *replaces* whatever was in flight — a
+            // cleanup that panics while a throw travels wins, and CLHS says so.
+            // Leaving the old tag parked would let a `catch` further up claim
+            // this panic as if it were its own throw.
+            if !payload.is::<CompiledThrow>() {
+                clear_throw();
+            }
+            active_heap().truncate_roots(base);
+            CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = Some(payload));
+            UNWIND_PENDING.with(|cell| cell.set(true));
+            0
+        }
+    }
+}
+
+/// A protected direct call: `args[0]` is the target's address (the island's
+/// `build-fn-address`), `args[1]`/`args[2]` the argument array and count it
+/// would have been called with.
+///
+/// # Safety
+///
+/// `argc` must be `>= 3`, `args[0]` must be the address of a function built
+/// under the standard compiled-function ABI (`CompiledSignature`), and
+/// `args[1]`/`args[2]` must describe a valid argument array for it.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_protected_call(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_protected_call: expected 3 arguments (target, argument array, argument count)");
+    }
+    let target: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = std::mem::transmute(*args as usize);
+    let callee_args = *args.add(1) as usize as *const i64;
+    let callee_argc = *args.add(2) as u32;
+    protected(|| target(callee_args, callee_argc))
+}
+
+/// [`rt_protected_call`] for the extended, captures-carrying ABI a `labels`
+/// sibling with outer-scope captures is declared under
+/// (`add-function-with-env`): `args[3]`/`args[4]` are the environment array
+/// and its length.
+///
+/// # Safety
+///
+/// `argc` must be `>= 5` and `args[0]` must be the address of a function built
+/// under `compiled_fn_type_with_env`; the two arrays must be valid for it.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_protected_call_env(args: *const i64, argc: u32) -> i64 {
+    if argc < 5 {
+        fatal("rt_protected_call_env: expected 5 arguments (target, argument array, argument count, env, env length)");
+    }
+    let target: unsafe extern "C-unwind" fn(*const i64, u32, *const i64, u32) -> i64 = std::mem::transmute(*args as usize);
+    let callee_args = *args.add(1) as usize as *const i64;
+    let callee_argc = *args.add(2) as u32;
+    let env = *args.add(3) as usize as *const i64;
+    let env_len = *args.add(4) as u32;
+    protected(|| target(callee_args, callee_argc, env, env_len))
+}
+
+/// The protected form of [`rt_apply_any`] — same arguments, same result, with
+/// the catch around it. Calling a function *value* is where a throw raised by
+/// an interpreted callee re-enters compiled code, so a `catch` region that
+/// contains an `apply` needs this one specifically.
+///
+/// # Safety
+///
+/// [`rt_apply_any`]'s, unchanged.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_protected_apply_any(args: *const i64, argc: u32) -> i64 {
+    protected(|| rt_apply_any(args, argc))
+}
+
+/// The protected form of [`rt_dyn_call`] — a trait-object dispatch inside a
+/// protected region, whose implementation may equally be compiled or
+/// interpreted.
+///
+/// # Safety
+///
+/// [`rt_dyn_call`]'s, unchanged.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_protected_dyn_call(args: *const i64, argc: u32) -> i64 {
+    protected(|| rt_dyn_call(args, argc))
+}
+
+/// The protected form of [`rt_panic`]. A `(panic ...)` inside an
+/// `unwind-protect` has to let the cleanup run before it continues outward,
+/// so the region catches it here and its dispatch block resumes afterwards.
+/// No `catch` ever claims it — [`rt_throw_matches`] is false for a panic.
+///
+/// # Safety
+///
+/// [`rt_panic`]'s, unchanged.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_protected_panic(args: *const i64, argc: u32) -> i64 {
+    protected(|| rt_panic(args, argc))
+}
+
+/// The protected form of [`rt_throw`], for a `throw` written *inside* the
+/// region that catches it — the one case where the unwind never leaves this
+/// function at all.
+///
+/// # Safety
+///
+/// [`rt_throw`]'s, unchanged.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_protected_throw(args: *const i64, argc: u32) -> i64 {
+    protected(|| rt_throw(args, argc))
 }
 
 // ---- Stage 7: Str --------------------------------------------------------

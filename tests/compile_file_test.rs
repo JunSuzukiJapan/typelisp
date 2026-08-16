@@ -760,3 +760,59 @@ fn a_panic_unwinds_through_a_compiled_call_in_an_aot_executable() {
     assert_eq!(code, 1, "stderr was: {}", stderr);
     assert!(stderr.contains("panic: negative"), "stderr was: {}", stderr);
 }
+
+/// `catch`/`throw` in an AOT executable — the whole round trip with no
+/// interpreter in the process at all.
+///
+/// The unwind is raised two compiled frames down, caught by the trampoline at
+/// the protected call, recognised by tag in the region's dispatch block, and
+/// its value produced in the catching function. Nothing here has a landing pad
+/// or a personality routine, which is why the `__gxx_personality_v0` link
+/// failure that ruled out the LLVM-EH approach cannot recur.
+#[test]
+fn catch_and_throw_work_in_an_aot_executable() {
+    assert_eq!(
+        compile_and_run(
+            "aot_catch",
+            r#"
+            (defun deep ((n i32)) i32 (throw 'done (* n 2)))
+            (defun middle ((n i32)) i32 (+ 1 (deep n)))
+            (defun main () i64 (as i64 (catch 'done (middle 21))))
+            "#
+        ),
+        42
+    );
+}
+
+/// An `unwind-protect` cleanup runs while the throw passes through it, in a
+/// standalone executable.
+#[test]
+fn an_unwind_protect_cleanup_runs_in_an_aot_executable() {
+    assert_eq!(
+        compile_and_run(
+            "aot_unwind_protect",
+            r#"
+            (defvar (ran i32) 0)
+            (defun body () i32 (unwind-protect (throw 'done 40) (setf ran 2)))
+            (defun main () i64 (as i64 (+ (catch 'done (body)) ran)))
+            "#
+        ),
+        42
+    );
+}
+
+/// A `throw` with no enclosing `catch` anywhere ends the program the way an
+/// uncaught `panic` does — message on stderr, exit code 1 — rather than
+/// running off the end of the C `main`, which is undefined.
+#[test]
+fn an_uncaught_throw_reaching_the_entry_point_exits_rather_than_aborting() {
+    let (code, stderr) = compile_and_capture(
+        "aot_uncaught_throw",
+        r#"
+        (defun thrower () i32 (throw 'nobody 1))
+        (defun main () i64 (as i64 (thrower)))
+        "#,
+    );
+    assert_eq!(code, 1, "stderr was: {}", stderr);
+    assert!(stderr.contains("no enclosing (catch 'nobody)"), "stderr was: {}", stderr);
+}

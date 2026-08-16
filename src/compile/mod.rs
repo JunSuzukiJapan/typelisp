@@ -239,12 +239,16 @@ impl CompiledFn {
 /// This is the boundary that makes compiled failures recoverable, and the
 /// reason the process no longer aborts on them. Every place the interpreter
 /// enters compiled code has to go through it, or the unwind continues into
-/// interpreter frames that never expected it. Two payloads arrive here, from
+/// interpreter frames that never expected it. Three payloads arrive here, from
 /// the two directions the boundary is crossed:
 ///
 /// - [`typelisp_rt::CompiledPanic`] — a `(panic ...)` in compiled code.
 ///   Rebuilt as `EvalError::Panic`, matching what the interpreted path
 ///   produces for the same form.
+/// - [`typelisp_rt::CompiledThrow`] — a `(throw 'tag v)` in compiled code that
+///   no compiled `catch` claimed. Rebuilt as `EvalError::Throw`, so an
+///   *interpreted* `(catch 'tag ...)` further up catches it exactly as it
+///   would an interpreted throw.
 /// - [`typelisp_rt::InterpretedUnwind`] — compiled code called *back* into the
 ///   interpreter (`rt_apply_any`/`rt_dyn_call`) and the interpreter failed.
 ///   The original `EvalError` travels whole, so a `Break`, an `Internal` and a
@@ -272,6 +276,18 @@ pub fn catch_compiled_panic<R>(call: impl FnOnce() -> R) -> Result<R, EvalError>
     };
     let payload = match payload.downcast::<typelisp_rt::CompiledPanic>() {
         Ok(p) => return Err(EvalError::Panic(p.message)),
+        Err(other) => other,
+    };
+    let payload = match payload.downcast::<typelisp_rt::CompiledThrow>() {
+        // SAFETY: the heap the throw's value belongs to is the one registered
+        // for the call that just unwound, and it is still registered here —
+        // this runs before the caller repairs anything.
+        Ok(_) => match unsafe { typelisp_rt::take_throw() } {
+            Some((tag, value)) => return Err(EvalError::Throw(tag, Box::new(value))),
+            None => {
+                return Err(EvalError::Internal("a compiled throw arrived with nothing parked for it".to_string()))
+            }
+        },
         Err(other) => other,
     };
     match payload.downcast::<typelisp_rt::InterpretedUnwind>() {
@@ -308,6 +324,37 @@ pub fn park_interpreted_error(error: EvalError) {
 /// Takes back what [`park_interpreted_error`] left, clearing the slot.
 fn take_interpreted_error() -> Option<EvalError> {
     INTERPRETED_ERROR.with(|cell| cell.borrow_mut().take())
+}
+
+/// Announces an interpreted callee's failure to the compiled frames that
+/// called it, by unwinding — the one way back out, since a compiled caller has
+/// no `Result` channel to return an `EvalError` through.
+///
+/// A `throw` takes the *throw* channel rather than this one. It has to: a
+/// compiled `catch` further up asks `rt_throw_matches` whether the unwind in
+/// flight carries its tag, and an interpreted throw announced as a generic
+/// interpreted error would answer no and travel straight past a `catch` that
+/// should have claimed it. Parking it as a throw is what makes "the throw
+/// crossed an interpreted frame on its way" invisible to the catcher, which is
+/// the whole point of a dynamic exit.
+///
+/// Only `Interp`'s `rt_apply_any`/`rt_dyn_call` hooks call this.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread — the one `error`'s values
+/// belong to.
+pub unsafe fn unwind_interpreted_failure(error: EvalError) -> ! {
+    match error {
+        EvalError::Throw(tag, value) => {
+            typelisp_rt::park_throw(tag, *value);
+            typelisp_rt::unwind_throw()
+        }
+        other => {
+            park_interpreted_error(other);
+            typelisp_rt::unwind_interpreted_error()
+        }
+    }
 }
 
 #[cfg(test)]

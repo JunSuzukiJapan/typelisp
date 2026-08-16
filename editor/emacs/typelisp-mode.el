@@ -75,6 +75,9 @@ take the same name.")
     ;; iteration (§5)
     "loop" "while" "until" "dotimes" "dolist" "do" "doiter"
     "break" "return"
+    ;; non-local exit (§8) — `break'/`return' above are the *static* exits,
+    ;; these are the dynamic ones
+    "catch" "throw" "unwind-protect"
     ;; function values & application (§6)
     "lambda" "labels" "apply"
     ;; other special forms (§7)
@@ -749,6 +752,10 @@ has already claimed it for `font-lock-string-face'."
     ("dolist"      . 1)
     ("doiter"      . 1)
     ("do"          . 2)
+    ;; Non-local exit: the tag / the protected form is the distinguished head,
+    ;; the rest is the body.
+    ("catch"          . 1)
+    ("unwind-protect" . 1)
     ;; Pretty printer.
     ("pprint-logical-block" . 1))
   "Indent specs for typelisp forms, keyed by the form's head as written.

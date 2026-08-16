@@ -153,20 +153,29 @@ pub(super) fn return_form(heap: &mut Heap, value: Option<Value>) -> Result<Value
     }
 }
 
-/// `(catch SYMBOL BODY)` — run `BODY`, and if a `(throw SYMBOL v)` fires
+/// `(catch SYMBOL BODY REPR)` — run `BODY`, and if a `(throw SYMBOL v)` fires
 /// anywhere it reaches (through any number of calls), produce `v` instead.
 ///
 /// The symbol is carried as a plain `Sexpr` symbol datum rather than a string
 /// so the evaluator can compare it with `eq` the way CL specifies, without
 /// interning a second time.
-pub(super) fn catch_form(heap: &mut Heap, tag: Value, body: Value) -> Result<Value, Error> {
-    core::tagged(heap, "catch", &[tag, body])
+///
+/// `REPR` is how the thrown value is represented — the same reason `apply`
+/// carries its argument and return reprs. The value crosses a boundary the
+/// compiled side cannot read a type from: it is handed to `rt_throw` as one
+/// machine word and comes back out of `rt_throw_take_value` as another, and
+/// only the repr says whether that word is a tagged `Sexpr` or a raw one.
+/// The interpreter ignores the field.
+pub(super) fn catch_form(heap: &mut Heap, tag: Value, body: Value, repr: Value) -> Result<Value, Error> {
+    core::tagged(heap, "catch", &[tag, body, repr])
 }
 
-/// `(throw SYMBOL FORM)` — leave for the nearest dynamically enclosing
-/// `catch` on `SYMBOL`, delivering `FORM`'s value as its result.
-pub(super) fn throw_form(heap: &mut Heap, tag: Value, value: Value) -> Result<Value, Error> {
-    core::tagged(heap, "throw", &[tag, value])
+/// `(throw SYMBOL FORM REPR)` — leave for the nearest dynamically enclosing
+/// `catch` on `SYMBOL`, delivering `FORM`'s value as its result. `REPR` is the
+/// thrown value's representation, for the reason [`catch_form`]'s doc comment
+/// gives.
+pub(super) fn throw_form(heap: &mut Heap, tag: Value, value: Value, repr: Value) -> Result<Value, Error> {
+    core::tagged(heap, "throw", &[tag, value, repr])
 }
 
 /// `(unwind-protect PROTECTED CLEANUP)` — run `PROTECTED`, then `CLEANUP`,
