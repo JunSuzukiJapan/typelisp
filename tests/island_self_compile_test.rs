@@ -79,6 +79,7 @@ const ISLAND_DEFUNS: &[&str] = &[
     "bignum-unary-call",
     "ratio-binop-call",
     "ratio-unary-call",
+    "raising-binop-call",
     "sexpr-list-length",
     "sexpr-list-length-i64",
     "bind-let-values",

@@ -1158,6 +1158,20 @@ pub const SOURCE: &str = r#"
     (store-arg builder args-ptr 0 x)
     (build-call builder (get-function m fname) args-ptr 1)))
 
+;; [`bignum-binop-call`]'s shape for the shims that can *raise*: a zero
+;; divisor (`rt_i64_div`/`rt_i64_mod`/`rt_bignum_div`/`rt_bignum_mod`/
+;; `rt_ratio_div`), an index past the end of a string (`rt_str_ref`). Those
+;; unwind now (`typelisp_rt::raise`) instead of aborting the process, and an
+;; unwind is only caught by the frame that *made* the call — so this goes
+;; through `emit-direct-call`, which inside a `catch`/`unwind-protect` region
+;; hands the target to `rt_protected_call` rather than calling it here. A
+;; plain `build-call` would fly past the enclosing region's own cleanups.
+(defun raising-binop-call ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (protect Option<llvm-basic-block>) (fname string) (x llvm-value) (y llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 2)))
+    (store-arg builder args-ptr 0 x)
+    (store-arg builder args-ptr 1 y)
+    (emit-direct-call builder m cur-fn (get-function m fname) args-ptr 2 protect)))
+
 ;; Counts a plain `Sexpr` list's elements — used to size the `i64*` args
 ;; array a direct call needs (`compile-apply`'s `alloca-args`/`build-call`),
 ;; and (labels/closures Stage 2) the `i64*` env array a captured call needs.
@@ -1876,11 +1890,11 @@ pub const SOURCE: &str = r#"
                      (build-call builder (get-function m "rt_str_length") args-ptr 1))
                    (let ((b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
                      (icond
+                       ;; `ref` can raise (an out-of-range index), so it goes
+                       ;; through `raising-binop-call` rather than a bare
+                       ;; `build-call` — see that function.
                        ((equal method "ref")
-                        (let ((args-ptr (alloca-args builder 2)))
-                          (store-arg builder args-ptr 0 a)
-                          (store-arg builder args-ptr 1 b)
-                          (build-call builder (get-function m "rt_str_ref") args-ptr 2)))
+                        (raising-binop-call builder m cur-fn protect "rt_str_ref" a b))
                        ((if (equal method "eq") true (equal method "equal"))
                         ;; `eq` and `equal` share `rt_str_eq` (content
                         ;; comparison) — the compiled story predates the
@@ -1919,14 +1933,17 @@ pub const SOURCE: &str = r#"
                        ;; end, both raw `i32`s (`rt_str_ref`'s own index
                        ;; convention). Compiled here rather than beside `b`
                        ;; above so no other method pays for reading an
-                       ;; argument form it doesn't have.
+                       ;; argument form it doesn't have. Like `ref` it can
+                       ;; raise (an invalid range), so the call is protected;
+                       ;; `raising-binop-call` is two-operand only, hence the
+                       ;; `emit-direct-call` spelled out here.
                        ((equal method "substring")
                         (let ((c (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr (sexpr-cdr rest)))))))
                           (let ((args-ptr (alloca-args builder 3)))
                             (store-arg builder args-ptr 0 a)
                             (store-arg builder args-ptr 1 b)
                             (store-arg builder args-ptr 2 c)
-                            (build-call builder (get-function m "rt_str_substring") args-ptr 3))))
+                            (emit-direct-call builder m cur-fn (get-function m "rt_str_substring") args-ptr 3 protect))))
                        (else (panic (append "compile-assoc: unsupported str method " method))))))))
             ((if (if (equal type-name "i64") true (equal type-name "i32")) (int-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
@@ -1961,18 +1978,14 @@ pub const SOURCE: &str = r#"
                             ;; division can't be a bare LLVM instruction —
                             ;; `sdiv`/`srem` by zero is UB — so both route
                             ;; through `rt_i64_div`/`rt_i64_mod`, which
-                            ;; check the divisor (and `MIN/-1`) and abort
-                            ;; cleanly, matching the interpreter's panic.
+                            ;; check the divisor (and `MIN/-1`) and raise
+                            ;; the interpreter's own `divide by zero`/`mod
+                            ;; by zero`. Raising means unwinding, so the
+                            ;; call is made through `raising-binop-call`.
                             ((equal method "/")
-                             (let ((args-ptr (alloca-args builder 2)))
-                               (store-arg builder args-ptr 0 a)
-                               (store-arg builder args-ptr 1 b2)
-                               (build-call builder (get-function m "rt_i64_div") args-ptr 2)))
+                             (raising-binop-call builder m cur-fn protect "rt_i64_div" a b2))
                             ((equal method "mod")
-                             (let ((args-ptr (alloca-args builder 2)))
-                               (store-arg builder args-ptr 0 a)
-                               (store-arg builder args-ptr 1 b2)
-                               (build-call builder (get-function m "rt_i64_mod") args-ptr 2)))
+                             (raising-binop-call builder m cur-fn protect "rt_i64_mod" a b2))
                             ((equal method "<")
                              (build-icmp-lt builder a b2))
                             ((equal method "<=")
@@ -2189,10 +2202,12 @@ pub const SOURCE: &str = r#"
                              (bignum-binop-call builder m "rt_bignum_sub" a b2))
                             ((equal method "*")
                              (bignum-binop-call builder m "rt_bignum_mul" a b2))
+                            ;; The two that can raise on a zero divisor —
+                            ;; `raising-binop-call`, not `bignum-binop-call`.
                             ((equal method "/")
-                             (bignum-binop-call builder m "rt_bignum_div" a b2))
+                             (raising-binop-call builder m cur-fn protect "rt_bignum_div" a b2))
                             ((equal method "mod")
-                             (bignum-binop-call builder m "rt_bignum_mod" a b2))
+                             (raising-binop-call builder m cur-fn protect "rt_bignum_mod" a b2))
                             ((equal method "logand")
                              (bignum-binop-call builder m "rt_bignum_logand" a b2))
                             ((equal method "logior")
@@ -2233,8 +2248,10 @@ pub const SOURCE: &str = r#"
                              (ratio-binop-call builder m "rt_ratio_sub" a b2))
                             ((equal method "*")
                              (ratio-binop-call builder m "rt_ratio_mul" a b2))
+                            ;; Zero divisor: raises, so protected
+                            ;; (`raising-binop-call`), like `bignum`'s `/`.
                             ((equal method "/")
-                             (ratio-binop-call builder m "rt_ratio_div" a b2))
+                             (raising-binop-call builder m cur-fn protect "rt_ratio_div" a b2))
                             ((equal method "<")
                              (build-icmp-lt builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))
                             ((equal method "<=")
@@ -3985,6 +4002,13 @@ pub const SOURCE: &str = r#"
 ;; header offset here, unlike the general-ADT box
 ;; layout's own variant-tag slot: a `BoxedObj::Struct`'s
 ;; own field vector has no variant-tag slot of its own.
+;; The call stays a bare `build-call` even though
+;; `rt_struct_field_get` can now raise: that index is a
+;; compile-time constant the checker derived from the
+;; `defstruct`'s own field list, so it is in range by
+;; construction and the bound never fires. Only
+;; `compile-vector-op`, whose index is a run-time
+;; value, needs the protected form.
 (defun compile-field-get ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
     (let ((idx (sexpr-list-length-i64 (sexpr-car (sexpr-cdr e)))))
       (let ((kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
@@ -4040,20 +4064,17 @@ pub const SOURCE: &str = r#"
 ;; `rt_struct_field_count` (raw element count),
 ;; `rt_struct_push_field` (grow by one), and
 ;; `rt_struct_pop_field` (shrink by one, returning the
-;; removed element — the mem layer panics if the
-;; vector is already empty). An out-of-range `get`/
-;; `set` index still aborts inside
-;; `rt_struct_field_get`/`_set`: the mem-layer bounds
-;; panic crosses those functions' `extern "C"`
-;; boundary, which is defined to abort. `rt_panic` no
-;; longer works that way — it is `extern "C-unwind"`
-;; and a `(panic ...)` comes back as a catchable
-;; `EvalError::Panic` — so these two are simply among
-;; the `fatal()`-and-`extern "C"` sites not moved to
-;; that mechanism yet, not a deliberate convention.
-;; Until they are, this stays a semantic gap from the
-;; interpreter, which recovers the same overrun as an
-;; `EvalError`.
+;; removed element — the caller checks the count
+;; first, so the empty case never reaches it). An
+;; out-of-range `get`/`set` index raises the
+;; interpreter's own `Vector: index N out of bounds`
+;; (`typelisp_rt::checked_field_index`), so those two
+;; calls go through `emit-direct-call`: raising means
+;; unwinding, and an unwind is caught only by the
+;; frame that made the call, so a bare `build-call`
+;; inside a `catch`/`unwind-protect` region would skip
+;; that region's cleanups. `pop`/`len`/`push` cannot
+;; raise and stay bare calls.
 ;; No extra GC-rooting beyond what `compile-field-set`
 ;; already relies on: the receiver flows in as an
 ;; ordinary (env-rooted) value, and `rt_struct_push_
@@ -4152,7 +4173,7 @@ pub const SOURCE: &str = r#"
                              (let ((args-ptr (alloca-args builder 2)))
                                (store-arg builder args-ptr 0 v)
                                (store-arg builder args-ptr 1 idx)
-                               (let ((raw (build-call builder (get-function m "rt_struct_field_get") args-ptr 2)))
+                               (let ((raw (emit-direct-call builder m cur-fn (get-function m "rt_struct_field_get") args-ptr 2 protect)))
                                  (compile-sexpr-field builder m raw kind 0)))
                              (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
                                (let ((x (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup x-form)))
@@ -4161,7 +4182,7 @@ pub const SOURCE: &str = r#"
                                      (store-arg builder args-ptr 0 v)
                                      (store-arg builder args-ptr 1 idx)
                                      (store-arg builder args-ptr 2 tagged-x)
-                                     (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
+                                     (let ((ignored (emit-direct-call builder m cur-fn (get-function m "rt_struct_field_set") args-ptr 3 protect)))
                                        (const-i64 builder 0)))))))))))))))))
 
 ;; `(hashtable-op method key-kind val-kind ht-form
