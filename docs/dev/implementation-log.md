@@ -6818,3 +6818,112 @@ doc は「何が出力されるかは SOURCE と Rust 側ビルダで決まり�
 要求する形で保存されている。**削ってはいけない**——しかも削っても assert は落ちない
 （ビットストリーム自身の末尾はパディングのゼロなので）。1 バイト短い buffer が LLVM に
 渡るだけで、失敗は分かりにくい形で出る。書き出し 2 箇所にその旨を書いた。
+
+---
+
+## 実行時エラーを abort でなく catchable な panic に（2026-08-17、branch `feature/compiled-unwind`）
+
+`(panic ...)` は unwind するようになっていたが、**言語が定義するエラーのほう**——ゼロ除算・
+範囲外アクセス・非正の `random` 境界——は compiled 経路で `typelisp_rt::fatal()` に落ち、
+プロセスを abort していた。同じ式が経路によって違う結末になる:
+
+```
+interp   (get v 9)  → panic: Vector: index 9 out of bounds   exit 1
+compiled (get v 9)  → non-unwinding panic. aborting.         exit 134
+interp   (rem 5 0)  → abort（prelude が compiled なので）     exit 134
+```
+
+`unwind-protect` の cleanup も走らず、REPL は 1 回のゼロ除算で落ちる。
+
+### 線引きは SBCL に合わせた
+
+SBCL 2.6.7 で実測して決めた。compiled でも interpreted でも `DIVISION-BY-ZERO` /
+`INVALID-ARRAY-INDEX-ERROR` を signal し、`unwind-protect` は走り、プロセスは生き残る
+（`safety 0` を明示したときだけ検査が消える）。つまり**経路による食い違いは方針ではなく不具合**。
+
+基準は「ユーザが踏めるか」ではなく、**壊れたのが*プログラム*か*ランタイム*か**:
+
+| SBCL | 用途 | typelisp |
+|---|---|---|
+| condition | 言語レベルのエラー全部 | catchable な panic（コンディションは非採用なので unwind） |
+| `lose()` | ランタイムの破壊のみ | `fatal()` |
+
+`fatal()` の doc を「ランタイム破壊専用」に書き直した。残る ~190 箇所（arity 違反・タグ違い・
+ルートスタック破壊）はコンパイラ契約違反なので abort が正しい。**safety レベルは導入しない**——
+検査は常時。
+
+### `raise` と `extern "C-unwind"`
+
+`rt_panic` の末尾（`install_quiet_panic_hook` + `panic_any(CompiledPanic)`）を
+`typelisp_rt::raise(String) -> !` として括り出し、以下を `fatal` から差し替えた。unwind する
+関数は**すべて `extern "C-unwind"`**（plain `extern "C"` を越える unwind は abort と定義されている）:
+
+| 関数 | メッセージ（interpreted 側に一致させた） |
+|---|---|
+| `rt_i64_div` / `rt_i64_mod` | `divide by zero` / `mod by zero` |
+| `rt_bignum_div` / `rt_bignum_mod` / `rt_ratio_div` | 同上 |
+| `rt_str_ref` | `ref: index {i} out of range (length {n})` |
+| `rt_str_substring` | `substring: invalid range {a}..{b} (length {n})` |
+| `rt_random_state_next` | `random: bound must be positive, got {n}` |
+| `rt_struct_field_get` / `_set` | `Vector: index {i} out of bounds` |
+
+`rt_struct_field_*` には **rt 側で上限検査を足した**（`checked_field_index`）。mem 層の
+`panic!` を捕まえるのではなく、落ちる前に検査する——捕まえる先が無いから。
+
+**`fatal` のまま残したもの**（どちらも呼び出し側の契約を確認したうえで）:
+
+* `rt_struct_pop_field` の空 vector — 唯一の呼び出し元（`compile-vector-op` の `pop`）が
+  `rt_struct_field_count` を先に見て `None` を自分で作る。ここに来る＝契約違反
+* `rt_ratio_from_bignums` の分母 0 — 作れるのはリテラルだけで、リーダーが `1/0` を
+  読む時点で弾く（CL のリーダーと同じ）
+
+`i64::MIN / -1` は除数の問題ではないので `arithmetic overflow: {a} / {b}` と名乗る
+（interpreted 側は Rust のオーバーフロー panic になる。既存の食い違いで、この作業の対象外）。
+
+interpreted 側も 1 箇所だけ直した: 負の添字が `Vector: invalid index Int(-1)` と Rust の
+`Debug` を漏らしていた。compiled 側は生の `i64` しか持っていないので同じ形は作れないし、
+そもそも範囲外アクセスの一種なので `Vector: index -1 out of bounds` に揃えた。
+
+### 島: 「上げうる呼び出し」は保護経由でなければならない
+
+保護呼び出し方式では、**unwind を捕まえるのは呼び出しを行ったフレーム**である。だから
+`catch`/`unwind-protect` 領域の中で素の `build-call` を出すと、そこから上がった unwind は
+その領域の cleanup を素通りする。上げうるようになった shim は `emit-direct-call`
+（`protect` が `Some` なら `rt_protected_call` 経由）に移した:
+
+* `compile-assoc` — `rt_i64_div`・`rt_i64_mod`・`rt_str_ref`・`rt_str_substring`、
+  および **`rt_bignum_div`・`rt_bignum_mod`・`rt_ratio_div`**
+* `compile-vector-op` — `rt_struct_field_get`・`rt_struct_field_set`
+
+2 引数のものは新しい島の defun `raising-binop-call` にまとめた（`bignum-binop-call` の
+保護版）。**プランは bignum/ratio を「`rt_builtin_symbol` 経由で `compile-call` に乗るので
+対応済み」と書いていたが、これは誤りだった**——`bignum->ratio` のような*自由*ビルトインは
+確かにそちらを通るが、`/`・`mod` は型のメソッドなので `compile-assoc` の
+`bignum-binop-call`（素の `build-call`）に出ていた。`random-state-next` だけは本当に
+自由ビルトインで、既に保護対応だった。
+
+触っていないもの: `compile-field-get`/`_set`・`compile-struct-field`・`compile-box-field`
+——添字が checker 由来の定数で、範囲外になりようがない。GC ルート操作などの残り ~97 の
+素の `build-call` も unwind しない。
+
+### テスト
+
+**主眼は差分テスト** `tests/runtime_error_parity_test.rs`: 同じ式を interpreted と compiled の
+両方で走らせ、**同じ `EvalError::Panic` メッセージ**になることを 15 ケースの表で確認する。
+今回の穴はどれも「両パスが食い違う」形で現れたので、番人もその形にした。加えて cleanup が
+走ること・`catch` は panic を claim しないこと・セッションが生き残ること。
+
+AOT は `tests/compile_file_test.rs` に 2 本（exit 134 → exit 1 + `panic: divide by zero`、
+および unwind-protect 経由）。`tests/numeric_test.rs` の `run_interpreted`（`random` 用の
+逃げ道）は削除した。
+
+### 途中で見つかった既存バグ（未修正）
+
+差分テストが並列実行で SIGSEGV した。調べると **`ExecutionEngine` の drop だけが
+`COMPILE_LOCK` の外にある**——`llvm::Module` のデストラクタは共有 `LLVMContext` の値名
+テーブルを書き換えるので、インタプリタを捨てるスレッドが compile 中のスレッドと競る。
+**この作業とは無関係**で、変更を stash した状態の `tests/numeric_test.rs` が 3/3 で落ちる
+（クラッシュレポートは片方が `MCJIT::~MCJIT`、もう片方が `install_compiled_library` の
+ビットコード parse）。詳細と直し方の注意（`COMPILE_LOCK` 保持中に `CompiledFn` を置き換える
+3 箇所がデッドロックの罠）は [TODO.md](TODO.md) に書いた。差分テストはファイル内の
+セッション生成を直列化して避けている。

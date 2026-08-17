@@ -1,35 +1,33 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-08-16 / ブランチ: `feature/compiled-unwind`
+最終更新: 2026-08-17 / ブランチ: `feature/compiled-unwind`
 
 このドキュメントは**現在残っている作業のみ**を記録する。
 
 ## 残っている作業
 
-### `fatal()` の到達可能な呼び出し元がまだ abort する
+### MCJIT エンジンの破棄が `COMPILE_LOCK` の外で起きている（既存のバグ）
 
-`rt_panic` は `extern "C-unwind"` になり、compiled な `(panic ...)` は catchable な
-`EvalError::Panic` として返るようになった（JIT は `compile::catch_compiled_panic`、
-AOT は `typelisp_rt::rt_run_entry` が受ける）。REPL も compiled な panic で落ちなくなった。
+`ExecutionEngine` を drop すると `llvm::Module` のデストラクタが走り、**プロセス共有の
+`LLVMContext`**（値名テーブル）を書き換える。コードベース中で `COMPILE_LOCK` を取らない
+唯一の LLVM 操作がこれで、インタプリタを捨てるスレッドが、コンパイル中／ビットコードを
+install 中の別スレッドと競る。落ちるのは `llvm::Value::destroyValueName` の中。
 
-残っているのは **`typelisp_rt::fatal()` を経由する経路**。`fatal()` の doc は「ここに来るのは
-`compiler.rs` の契約違反だけ」と書いているが、実際にはユーザ入力で到達する:
+**この作業とは無関係の既存バグ**で、`tests/numeric_test.rs` は本ブランチのまま（今回の変更を
+stash した状態）でも 3 回中 3 回 SIGSEGV する。クラッシュレポートでは片方のスレッドが
+`MCJIT::~MCJIT`、もう片方が `install_compiled_library` のビットコード parse だった。
+単一スレッドのプロセス（`typl`・AOT 実行ファイル）では起きない——エンジンを drop するのは
+実質 `cargo test` だけ。`scripts/test-serial.sh` は `--test-threads=1` を渡すので緑のままで、
+素の `cargo test --test numeric_test` でだけ出る。
 
-| 式 | 現状 | 本来 |
-|---|---|---|
-| `(random 0)` / `(random -5)` | abort | `panic: random: bound must be positive` |
-| `(rem 5 0)`（i32/i64/bignum/ratio） | abort | `panic: divide by zero` |
-| `(mod 1/2 0)` | abort | 同上 |
-| `(floor-div 5 0)`/`(truncate-div 5 0)`/`(ceiling-div 5 0)`/`(round-div 5 0)` | abort | 同上 |
-| compiled なユーザコードの `(/ a b)` / `(mod a b)` / 範囲外 `substring` | abort | 同上 |
-| 範囲外の `vector-ref`（`rt_struct_field_get`/`_set`） | abort | 同上 |
+素直な直し方（drop 時に `COMPILE_LOCK` を取る）には**デッドロックの罠**がある。`COMPILE_LOCK`
+を保持したまま `CompiledFn` を置き換える箇所が 3 つあり（`install_compiled_library` と
+`compile_scc` の 2 箇所）、古い `Rc<CompiledFn>` の drop がそこで起きる。ロックを取る前に
+古い値を取り出しておくか、破棄をロック保持者に肩代わりさせる（引退リストを
+`CompiledFn::new`/`new_multi` の先頭で空にする）かのどちらかが要る。
 
-`fatal()` の呼び出し元 100 箇所超のうち大半は本当に内部不変条件（arity 違反、タグ違い）なので、
-一括で `rt_panic` の機構に載せ替えるか、到達可能なものだけ選ぶかを決めること。
-載せ替える関数は `extern "C-unwind"` にする必要がある。
-
-検査を interpreted prelude に逃がしているテストが `tests/numeric_test.rs` の
-`run_interpreted` に 1 つ残っている（`random`）。この項目が終わったら消せる。
+`tests/runtime_error_parity_test.rs` はファイル内のセッション生成を直列化して避けている
+（`ONE_SESSION_AT_A_TIME`）。直したらその番人は外せる。
 
 ### prelude ビットコードの起動時コスト（+198〜258 ms）
 
