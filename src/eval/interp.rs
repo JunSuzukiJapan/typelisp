@@ -5736,13 +5736,41 @@ pub(crate) enum NativeHandle {
     Value(BasicValueEnum<'static>),
 }
 
+/// The registry itself, wrapped only so its teardown can be given the same
+/// treatment its explicit releases get.
+///
+/// A `Module`/`Builder` share sitting here is often the *last* one — the
+/// module a compile was driven with is registered before
+/// `run_compile_function`'s own mark, so it outlives the release bracket and
+/// stays until the thread ends. Destroying it runs `~Module`, which rewrites
+/// the shared LLVM Context's value-name tables, so it has to happen under
+/// `COMPILE_LOCK` like every other Context-touching operation (see that
+/// static's doc comment) — including at thread exit, which is where this
+/// `Drop` comes in. The exiting thread holds no lock of its own, so taking
+/// one here cannot deadlock.
+///
+/// The shares are not handed to `compile::retire_llvm` the way an engine is:
+/// these are `Rc`s, and every share of a given module lives on this thread
+/// (the registry is thread-local, and so is the compile that made it), so
+/// moving one to a list another thread drains would put a non-atomic refcount
+/// under two threads. Locking in place keeps the counting single-threaded and
+/// still puts the destructor inside the lock.
+struct LlvmHandles(Vec<NativeHandle>);
+
+impl Drop for LlvmHandles {
+    fn drop(&mut self) {
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        self.0.clear();
+    }
+}
+
 // A handle is an index into this vector, which is what lets one cross to
 // compiled code as a plain integer with no ownership attached. It grows for
 // the life of the thread except where `llvm_handles_mark`/`_release` bracket a
 // compile (`Interp::run_compile_function`), which is the one place a bounded
 // batch of handles is known to be finished with.
 thread_local! {
-    static LLVM_HANDLES: RefCell<Vec<NativeHandle>> = const { RefCell::new(Vec::new()) };
+    static LLVM_HANDLES: RefCell<LlvmHandles> = const { RefCell::new(LlvmHandles(Vec::new())) };
 }
 
 /// Registers `h` and returns its handle — the `i64` both the interpreter and
@@ -5750,8 +5778,8 @@ thread_local! {
 pub(crate) fn llvm_handle_register(h: NativeHandle) -> i64 {
     LLVM_HANDLES.with(|t| {
         let mut t = t.borrow_mut();
-        t.push(h);
-        (t.len() - 1) as i64
+        t.0.push(h);
+        (t.0.len() - 1) as i64
     })
 }
 
@@ -5761,7 +5789,7 @@ pub(crate) fn llvm_handle_get(h: i64) -> Option<NativeHandle> {
     if h < 0 {
         return None;
     }
-    LLVM_HANDLES.with(|t| t.borrow().get(h as usize).cloned())
+    LLVM_HANDLES.with(|t| t.borrow().0.get(h as usize).cloned())
 }
 
 /// Register `h` as the interpreter-level value standing for it.
@@ -5844,12 +5872,23 @@ fn value_of_handle(raw: i64) -> Option<Value> {
 /// function's IR do not accumulate across many compiles. Everything else
 /// issued outside such a bracket lives as long as the thread.
 pub(crate) fn llvm_handles_mark() -> usize {
-    LLVM_HANDLES.with(|t| t.borrow().len())
+    LLVM_HANDLES.with(|t| t.borrow().0.len())
 }
 
 /// Drops every handle issued since the matching [`llvm_handles_mark`].
+///
+/// The handles come out of the registry first and are destroyed afterwards,
+/// under `COMPILE_LOCK`: a released `Builder`/`Module` share is often the last
+/// one, and its destructor touches the shared LLVM Context — see
+/// [`LlvmHandles`]. Taking the lock here is safe because the only caller
+/// (`Interp::run_compile_function`) runs outside it, as `add_compiled_function`
+/// requires; the registry's own `RefCell` borrow ends before the lock is taken,
+/// so a destructor that reached back into the registry could not deadlock on
+/// that either.
 pub(crate) fn llvm_handles_release(mark: usize) {
-    LLVM_HANDLES.with(|t| t.borrow_mut().truncate(mark));
+    let released: Vec<NativeHandle> = LLVM_HANDLES.with(|t| t.borrow_mut().0.split_off(mark));
+    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    drop(released);
 }
 
 /// The handle integer `v` carries, for the `expect_llvm_*` accessors.
