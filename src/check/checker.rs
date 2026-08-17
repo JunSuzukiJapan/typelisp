@@ -8593,7 +8593,15 @@ impl Checker {
                             })?;
                             let r = self.mk_ref(vec!["sexpr-append".to_string()], append_fq);
                             let form = self.call_form(heap, &r, &[spliced, rest])?;
-                            return Ok(Checked::new(form, sexpr_ty));
+                            // Rooted like every other node handed back from
+                            // here (see `forms::rooted`). Without this, a
+                            // `,@` splice sitting in the middle of a template
+                            // was collectible the moment the *enclosing*
+                            // template node allocated — which is the very
+                            // next thing that happens, since this returns
+                            // into a `check_qq_template` that goes on to
+                            // check its own `cdr` and build a `construct`.
+                            return Ok(Checked::new(forms::rooted(heap, form), sexpr_ty));
                         }
                     }
                     return Err(Error::TypeError("unquote-splicing: (unquote-splicing datum)".into()));

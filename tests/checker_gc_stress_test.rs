@@ -93,6 +93,62 @@ fn quasiquote_expansion_survives_collection() {
     );
 }
 
+/// The `,@` cases need `sexpr-append`, which is the prelude's — so they get
+/// their own pair of runs with it loaded first.
+///
+/// The prelude itself is checked *unstressed*: it takes minutes per load
+/// otherwise (a collection per `cons`, over ~120k cells of definitions), and
+/// what is under test is the checking of `src`, not of the prelude. Stress
+/// goes on immediately afterwards, which is enough — a node the checker leaks
+/// while lowering `src` is collected by `src`'s own next allocation.
+fn check_all_with_prelude(src: &str, stress: bool) -> Result<Vec<String>, Error> {
+    let mut h = Heap::with_capacity(1 << 18);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::load_prelude(&mut h, &mut chk, &mut interp);
+    h.set_gc_stress(stress);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut out = Vec::new();
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v)?;
+        out.push(core::print(&h, tl));
+        interp.exec(&mut h, tl).map_err(|e| Error::TypeError(format!("exec: {}", e)))?;
+    }
+    Ok(out)
+}
+
+fn assert_stress_agrees_with_prelude(src: &str) {
+    let plain =
+        check_all_with_prelude(src, false).unwrap_or_else(|e| panic!("plain check failed: {}\nsrc: {}", e, src));
+    let stressed =
+        check_all_with_prelude(src, true).unwrap_or_else(|e| panic!("stressed check failed: {}\nsrc: {}", e, src));
+    assert_eq!(stressed, plain, "GC changed the checked result\nsrc: {}", src);
+}
+
+/// `,@` lowers to a `(call sexpr-append ...)` node, and *that* node was the
+/// one place in the quasiquote walk handing back an unrooted form.
+///
+/// The splice has to sit somewhere with template left after it: the leak is
+/// only observable if something allocates before the node reaches its parent,
+/// and what allocates is the enclosing template node checking its own `cdr`
+/// and building its `construct`. A `,@` in the final position returns straight
+/// into a caller that does nothing more, which is why the prelude — full of
+/// `` `(progn ,@body) `` — still tripped over it only in some macros.
+#[test]
+fn splicing_in_the_middle_of_a_template_survives_collection() {
+    assert_stress_agrees_with_prelude(
+        "(defmacro m (&rest body) `(progn ,@body 7))
+         (defun f () i32 (m 1 2))",
+    );
+    // Two splices, so the first one's node also has to survive the second's
+    // whole subtree being checked.
+    assert_stress_agrees_with_prelude(
+        "(defmacro m2 (&rest body) `(progn ,@body ,@body 7))
+         (defun g () i32 (m2 1 2))",
+    );
+}
+
 /// A whole small program, to catch anything the targeted cases miss.
 #[test]
 fn a_mixed_program_survives_collection() {
