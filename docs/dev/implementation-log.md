@@ -6992,3 +6992,51 @@ AOT は `tests/compile_file_test.rs` に 2 本（exit 134 → exit 1 + `panic: d
 `-9223372036854775808` を bignum として返す）ので `(- (- z 9223372036854775807) 1)` で
 作る。第 1 引数を `i64` 型の変数にするのは、`-` の受け手型が「`expected: None` で
 検査した第 1 引数」から決まるため——`0` と書くと `i32` に落ちる。
+
+---
+
+## checker の quasiquote に残っていた GC ルート漏れ（2026-08-17、branch `fix/checker-gc-root-leaks`）
+
+`gc-stress` を最初から有効にすると prelude のロードで落ちる件。2026-08-16 の
+`catch`/`throw` 作業のときに見つけて「この作業とは無関係」として置いてあったもの。
+
+落ち方は `gc-root-audit: push_root given freed cell`——ルート漏れ用に常設してある O(1) の
+検出装置（[[typelisp-gc-negative-reclaim-bug]] で入れたもの）が、`construct_form` の
+`Items::extend` で既に解放されたセルを掴んだ。
+
+**原因は 1 行**。`check_qq_template` の `,@`（unquote-splicing）の腕だけが、作った
+`(call sexpr-append ...)` ノードを `forms::rooted` に通さずに返していた。`check_at` の
+契約は「返すノードは必ず root 済み、解放は `check_form_at` の `truncate_roots` が一括で」
+なので、ここだけが穴だった。
+
+**なぜ prelude の一部の `,@` でしか出ないか**: 漏れが観測できるのは、ノードが親に届くまでの
+間に誰かが allocate したときだけ。`,@` がテンプレートの**末尾**にあると、返った先の
+`check_qq_template` はもう何もしないので助かる。途中にあると、親は自分の `cdr` を検査し
+`construct` を組む——その最初の `cons` で回収される。
+
+番人は `tests/checker_gc_stress_test.rs` に追加した。`,@` は prelude の `sexpr-append` を
+要求するので、prelude を**素で**ロードしてから stress を入れる専用ヘルパを足してある
+（prelude 自体を stress 下で検査すると 1 ロード 6 分半かかるうえ、見たいのはそこではない）。
+修正を戻すと同じ audit で落ち、入れると通る。3 秒。
+
+## LLVM ハンドルレジストリの解放もロックの内側へ（同日、同ブランチ）
+
+前日に `ExecutionEngine` の破棄を引退リストでロック下に入れたが、TODO に「素の
+`Module`/`Builder` が残る」と書いた分。島のハンドルレジストリ（スレッドローカルの
+`NativeHandle` 表）が `Rc` share を持ち、その解放は 2 箇所ともロック外だった:
+
+* `llvm_handles_release`（`run_compile_function` が 1 コンパイルごとに呼ぶ）
+* **スレッド終了時**のレジストリ自身の破棄——`run_compile_function` は `argv` を組んだ
+  *あと*に mark を取るので、コンパイルを駆動したモジュールの share は release の括りから
+  外れ、スレッドの寿命まで残る
+
+前者は「先に取り出してからロック下で drop」、後者は `LlvmHandles` newtype の `Drop` で
+ロックを取る形にした。**引退リストには入れない**——`Rc` の share は全部同じスレッド
+（レジストリはスレッドローカル）にあるので、その場でロックを取れば計数は単一スレッドのまま
+デストラクタだけをロック下に置ける。別スレッドが drain するリストに移すと、そこが崩れる。
+
+**正直に書いておく**: こちらは**クラッシュとして再現できていない**。
+`tests/llvm_teardown_race_test.rs` に「3 スレッドがコンパイルして終了する」テストを足したが、
+修正を戻しても 3/3 green（ラウンドを倍にしても同じ）。エンジンの破棄と違って観測された
+不具合ではなく、「破棄は Context に触る操作だからロックの内側」という規則に揃えただけ。
+テストの doc にもそう書いた——通ったことを「危うい経路を守れている」と読まないために。
