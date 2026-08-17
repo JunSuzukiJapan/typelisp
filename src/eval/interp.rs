@@ -5603,10 +5603,20 @@ fn expect_struct_box(v: &Value) -> Result<BoxId, EvalError> {
     }
 }
 
+/// A `Vector<T>` index, rejected the same way an index past the end is.
+///
+/// A negative index used to report itself in a shape of its own (`Vector:
+/// invalid index Int(-1)`, a Rust `Debug` rendering leaking into a user-facing
+/// message). It is an out-of-bounds access like any other, and compiled code —
+/// where the index arrives as a bare `i64` with no `Value` around it — has no
+/// way to say it differently anyway; `typelisp_rt::checked_field_index` is the
+/// other half, and `tests/runtime_error_parity_test.rs` holds the two together.
+/// A non-`Int` here is a checker failure rather than a program error.
 fn expect_int_index(v: &Value) -> Result<usize, EvalError> {
     match v {
         Value::Int(n) if *n >= 0 => Ok(*n as usize),
-        other => Err(EvalError::Panic(format!("Vector: invalid index {:?}", other))),
+        Value::Int(n) => Err(EvalError::Panic(format!("Vector: index {} out of bounds", n))),
+        other => Err(EvalError::Internal(format!("Vector: index is not an integer: {:?}", other))),
     }
 }
 

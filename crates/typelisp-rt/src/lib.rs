@@ -202,19 +202,23 @@ const IMMEDIATE_FALSE: i64 = 1;
 const IMMEDIATE_TRUE: i64 = 2;
 
 /// Prints `msg` to stderr and aborts the process — how an `rt_*` function
-/// fails when it has no way to report back.
+/// fails when the *runtime itself* has been violated.
 ///
-/// Every error case that reaches here is a contract violation by
-/// `compiler.rs` itself (an internal compiler bug), never a normal or
-/// recoverable runtime condition, and there is no `Result`-like channel back
-/// to compiled code to report it through instead.
+/// **Runtime corruption only.** Everything that reaches here is a contract
+/// violation by `compiler.rs` or by whoever built the call: a wrong argument
+/// count, an argument carrying the wrong tag, a root-stack invariant broken.
+/// None of it is expressible as a typelisp-level error, because a program
+/// that reaches one is no longer the program the checker approved — the same
+/// division of labor SBCL draws between `lose()` (the runtime is broken) and
+/// signalling a condition (the *program* did something the language defines
+/// an error for).
 ///
-/// A user-level `(panic ...)` no longer comes through here — see
-/// [`rt_panic`], which unwinds. The remaining callers are being reviewed
-/// one at a time: several of them (integer division by zero, a non-positive
-/// `random` bound, an out-of-range `substring`) *are* reachable from ordinary
-/// programs despite this comment's claim, and each one that is should move to
-/// [`rt_panic`]'s mechanism rather than keep aborting.
+/// A language-level failure — a zero divisor, an index past the end of a
+/// vector or string, a non-positive `random` bound, an explicit
+/// `(panic ...)` — is the other kind, and goes to [`raise`] instead, which
+/// unwinds and is catchable. Those callers moved off this function on
+/// 2026-08-17; what is left here is the ~190 sites that genuinely mean the
+/// runtime is broken.
 fn fatal(msg: &str) -> ! {
     eprintln!("typelisp runtime error: {}", msg);
     std::process::abort();
@@ -285,6 +289,24 @@ pub(crate) fn install_quiet_panic_hook() {
             }
         }));
     });
+}
+
+/// Unwinds out of compiled code with `msg` as a recoverable typelisp-level
+/// failure — the counterpart of [`fatal`] for everything the *language*
+/// defines an error for rather than the runtime.
+///
+/// Caught by [`crate::rt_run_entry`] in an AOT executable and by
+/// `typelisp::compile::catch_compiled_panic` on the JIT side, both of which
+/// turn it back into the `EvalError::Panic` the interpreted path produces for
+/// the same form — so a `catch`/`unwind-protect` region in between sees it,
+/// cleanups run, and the process survives.
+///
+/// **Every function that can reach this must be `extern "C-unwind"`.** A
+/// panic crossing a plain `extern "C"` boundary is defined to abort; see
+/// [`rt_panic`], where that constraint is spelled out in full.
+pub(crate) fn raise(msg: String) -> ! {
+    install_quiet_panic_hook();
+    std::panic::panic_any(CompiledPanic { message: msg })
 }
 
 /// Unwinds out of compiled code because an interpreted callee failed.
@@ -834,6 +856,12 @@ pub unsafe extern "C" fn rt_bignum_new(args: *const i64, argc: u32) -> i64 {
 /// a ratio literal (`compiler.rs`'s `compile-ratio-literal`, over two nested
 /// `compile-bignum-literal` calls) and `bignum->ratio`.
 ///
+/// The zero-denominator `fatal` below stays a `fatal` — checked, and it is
+/// unreachable from source. The only way to build one is a literal, and the
+/// reader rejects `1/0` outright ("ratio literal with zero denominator", as
+/// CL's reader does); a value that got here with a zero denominator was
+/// mis-built by the compiler, not written by a user.
+///
 /// # Safety
 ///
 /// `argc` must be `>= 2`, both decoding to boxed bignums; a `Heap` must
@@ -881,34 +909,35 @@ pub unsafe extern "C" fn rt_bignum_mul(args: *const i64, argc: u32) -> i64 {
 }
 
 /// `bignum::/` for compiled code — truncates toward zero (CL `truncate`),
-/// like `int_assoc`'s own `/`. Fatal on a zero divisor (see this section's
-/// module doc comment for why a bare Rust panic isn't safe here).
+/// like `int_assoc`'s own `/`. A zero divisor [`raise`]s the same
+/// `"divide by zero"` `eval_bignum_builtin` gives the interpreted path,
+/// exactly as [`rt_i64_div`] does for fixnums.
 ///
 /// # Safety
 ///
 /// Same as [`bignum_pair`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_bignum_div(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_bignum_div(args: *const i64, argc: u32) -> i64 {
     let (a, b) = bignum_pair(args, argc, "rt_bignum_div");
     if b.sign() == Sign::NoSign {
-        fatal("rt_bignum_div: division by zero");
+        raise("divide by zero".to_string());
     }
     encode(active_heap().alloc_bignum(a / b))
 }
 
 /// `bignum::mod` for compiled code — floored remainder (CL `mod`; result
 /// takes the sign of the divisor), matching the interpreter's
-/// `eval_bignum_builtin` and `int_assoc`'s own floored `mod`. Fatal on a zero
-/// divisor.
+/// `eval_bignum_builtin` and `int_assoc`'s own floored `mod`. A zero divisor
+/// [`raise`]s `"mod by zero"`, that same interpreted path's wording.
 ///
 /// # Safety
 ///
 /// Same as [`bignum_pair`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_bignum_mod(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_bignum_mod(args: *const i64, argc: u32) -> i64 {
     let (a, b) = bignum_pair(args, argc, "rt_bignum_mod");
     if b.sign() == Sign::NoSign {
-        fatal("rt_bignum_mod: division by zero");
+        raise("mod by zero".to_string());
     }
     encode(active_heap().alloc_bignum(a.mod_floor(&b)))
 }
@@ -1191,18 +1220,19 @@ pub unsafe extern "C" fn rt_ratio_mul(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_ratio(a * b))
 }
 
-/// `ratio::/` for compiled code. Fatal on a zero divisor (checked via the
-/// divisor's numerator sign — a reduced ratio is zero iff its numerator is,
-/// its denominator always being a positive nonzero invariant).
+/// `ratio::/` for compiled code. A zero divisor (checked via the divisor's
+/// numerator sign — a reduced ratio is zero iff its numerator is, its
+/// denominator always being a positive nonzero invariant) [`raise`]s
+/// `"divide by zero"`, `eval_ratio_builtin`'s own wording.
 ///
 /// # Safety
 ///
 /// Same as [`ratio_pair`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_div(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_ratio_div(args: *const i64, argc: u32) -> i64 {
     let (a, b) = ratio_pair(args, argc, "rt_ratio_div");
     if b.numer().sign() == Sign::NoSign {
-        fatal("rt_ratio_div: division by zero");
+        raise("divide by zero".to_string());
     }
     encode(active_heap().alloc_ratio(a / b))
 }
@@ -1326,14 +1356,38 @@ pub unsafe extern "C" fn rt_struct_new(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_struct(type_name, fields))
 }
 
+/// The index bound both `rt_struct_field_*` functions check before touching
+/// the heap, [`raise`]ing `vector_get`/`vector_set`'s own message when `idx`
+/// is outside it.
+///
+/// The check is here rather than left to the mem layer on purpose: the mem
+/// layer's own overrun is a Rust `panic!`, which would cross these
+/// functions' FFI boundary as an abort. Catching that panic afterwards is
+/// not an option either — the point is to *not* fail, so the bound is tested
+/// before the access.
+///
+/// Both call sites that can actually reach the bound are `Vector<T>`'s
+/// `get`/`set` (`compile-vector-op`), whose index is a run-time value; a
+/// `defstruct` field access (`compile-field-get`/`compile-field-set`) has a
+/// checker-fixed index and never fails here.
+///
+/// # Safety
+///
+/// A `Heap` must already be registered on this thread and `id` must name a
+/// live boxed struct in it.
+unsafe fn checked_field_index(id: BoxId, idx: i64) -> usize {
+    if idx < 0 || idx as usize >= active_heap().struct_field_count(id) {
+        raise(format!("Vector: index {} out of bounds", idx));
+    }
+    idx as usize
+}
+
 /// `(rt-struct-field-get s idx)` for compiled code — the `idx`-th field of
 /// boxed struct `args[0]` (a tagged `Sexpr`), where `args[1]` is a *raw*
 /// (untagged) `i64` index, matching [`rt_str_ref`]'s convention for its own
-/// raw index argument. Fatal if `args[0]` isn't a boxed struct or `idx` is
-/// out of range — the checker (a `defstruct` field access) or the builtin
-/// method itself (`Vector<T>`'s own bounds check) is responsible for
-/// guaranteeing that never happens once this is wired up, the same
-/// convention every other `rt_*` bounds violation here follows.
+/// raw index argument. Fatal if `args[0]` isn't a boxed struct (a compiler
+/// contract violation); an out-of-range `idx` is an ordinary recoverable
+/// failure instead — see [`checked_field_index`].
 ///
 /// # Safety
 ///
@@ -1341,7 +1395,7 @@ pub unsafe extern "C" fn rt_struct_new(args: *const i64, argc: u32) -> i64 {
 /// the first decoding to a `Value::Boxed` struct; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_struct_field_get(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_struct_field_get(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {
         fatal("rt_struct_field_get: expected 2 arguments");
     }
@@ -1349,11 +1403,8 @@ pub unsafe extern "C" fn rt_struct_field_get(args: *const i64, argc: u32) -> i64
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_field_get: first argument is not a boxed Sexpr"),
     };
-    let idx = *args.add(1);
-    if idx < 0 {
-        fatal("rt_struct_field_get: negative field index");
-    }
-    encode(active_heap().struct_field(id, idx as usize))
+    let idx = checked_field_index(id, *args.add(1));
+    encode(active_heap().struct_field(id, idx))
 }
 
 // ---- enum values (Option/Result/defenum) — the heap-unified shape ------
@@ -1814,7 +1865,8 @@ pub unsafe extern "C" fn rt_cell_set(args: *const i64, argc: u32) -> i64 {
 
 /// `(rt-struct-field-set! s idx val)` for compiled code — overwrites the
 /// `idx`-th field of boxed struct `args[0]` in place with `args[2]` (a
-/// tagged `Sexpr`); `args[1]` is a raw index, like [`rt_struct_field_get`].
+/// tagged `Sexpr`); `args[1]` is a raw index, like [`rt_struct_field_get`],
+/// and out-of-range the same recoverable way ([`checked_field_index`]).
 /// Returns the compiled representation of `Unit` (`0`), the same convention
 /// [`rt_set_car`]/[`rt_set_cdr`] use for their own in-place mutation.
 ///
@@ -1824,7 +1876,7 @@ pub unsafe extern "C" fn rt_cell_set(args: *const i64, argc: u32) -> i64 {
 /// the first decoding to a `Value::Boxed` struct; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_struct_field_set(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_struct_field_set(args: *const i64, argc: u32) -> i64 {
     if argc < 3 {
         fatal("rt_struct_field_set: expected 3 arguments");
     }
@@ -1832,12 +1884,9 @@ pub unsafe extern "C" fn rt_struct_field_set(args: *const i64, argc: u32) -> i64
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_field_set: first argument is not a boxed Sexpr"),
     };
-    let idx = *args.add(1);
-    if idx < 0 {
-        fatal("rt_struct_field_set: negative field index");
-    }
+    let idx = checked_field_index(id, *args.add(1));
     let val = decode(*args.add(2));
-    active_heap().struct_set_field(id, idx as usize, val);
+    active_heap().struct_set_field(id, idx, val);
     0
 }
 
@@ -1906,6 +1955,14 @@ pub unsafe extern "C" fn rt_struct_push_field(args: *const i64, argc: u32) -> i6
 /// a boxed struct, or if it turns out empty anyway (an internal-invariant
 /// trap, the same convention [`rt_hashtable_get_raw`]'s "key not present"
 /// fatal follows).
+///
+/// **Deliberately still `extern "C"` and `fatal`**, unlike its
+/// [`rt_struct_field_get`]/[`rt_struct_field_set`] neighbours: `pop` on an
+/// empty vector is not a user-reachable failure at all. The one caller
+/// branches on `rt_struct_field_count` first and builds `None` itself, so
+/// reaching the `fatal` below means the compiled caller stopped honouring
+/// that contract — runtime corruption, which is exactly what [`fatal`] is
+/// for.
 ///
 /// # Safety
 ///
@@ -2413,8 +2470,7 @@ pub unsafe extern "C-unwind" fn rt_panic(args: *const i64, argc: u32) -> i64 {
         Value::Str(id) => active_heap().string(id).to_string(),
         _ => fatal("rt_panic: argument is not a Str"),
     };
-    install_quiet_panic_hook();
-    std::panic::panic_any(CompiledPanic { message })
+    raise(message)
 }
 
 /// The exit code an AOT executable ends with when a `(panic ...)` reaches its
@@ -2899,45 +2955,56 @@ pub unsafe extern "C" fn rt_gensym(_args: *const i64, _argc: u32) -> i64 {
 
 /// Signed integer division `a / b` — the compiled-code half of `i64`/`i32`
 /// `/`, which (unlike `+`/`-`/`*`) can't be a bare LLVM instruction because
-/// LLVM `sdiv` by zero is undefined behavior. Matches the interpreter's
-/// `int_binop`, which panics on a zero divisor; `checked_div` also catches the
-/// one other trap case, `i64::MIN / -1` (arithmetic overflow). Operands are
-/// raw untagged `i64`s (the int branch of `compile-assoc` computes them the
-/// same way `build-add` does), so there is no decode/encode here.
+/// LLVM `sdiv` by zero is undefined behavior. Operands are raw untagged
+/// `i64`s (the int branch of `compile-assoc` computes them the same way
+/// `build-add` does), so there is no decode/encode here.
+///
+/// A zero divisor [`raise`]s `"divide by zero"` — the very message
+/// `eval_int_builtin` gives the interpreted path, since the two paths running
+/// the same form must fail the same way (`tests/runtime_error_parity_test.rs`
+/// is the guard). `checked_div`'s other `None` case, `i64::MIN / -1`, is an
+/// overflow rather than a divisor problem and says so; the interpreter's own
+/// `a / b` traps there as a Rust overflow panic instead, a divergence that
+/// predates this and is not a `fatal()` case either way.
 ///
 /// # Safety
 ///
 /// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_i64_div(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_i64_div(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {
         fatal("rt_i64_div: expected 2 arguments");
     }
-    match (*args).checked_div(*args.add(1)) {
+    let (a, b) = (*args, *args.add(1));
+    if b == 0 {
+        raise("divide by zero".to_string());
+    }
+    match a.checked_div(b) {
         Some(q) => q,
-        None => fatal("divide by zero"),
+        None => raise(format!("arithmetic overflow: {} / {}", a, b)),
     }
 }
 
 /// Floored remainder `a mod b` (CL `mod`) — the compiled-code half of
 /// `i64`/`i32` `mod`, matching the interpreter's `eval_int_builtin`. The
 /// result takes the sign of the divisor `b` (unlike `srem`/`rem`, which take
-/// the sign of the dividend), so `-7 mod 3 = 2`. Same zero-trap handling as
-/// [`rt_i64_div`]; `i64::MIN % -1` is mathematically `0` (`checked_rem`
-/// returns `None` on that overflow case, treated as the exact `0` here).
+/// the sign of the dividend), so `-7 mod 3 = 2`. Same zero-divisor handling
+/// as [`rt_i64_div`] — a catchable `"mod by zero"`, `eval_int_builtin`'s own
+/// wording; `i64::MIN % -1` is mathematically `0` (`checked_rem` returns
+/// `None` on that overflow case, treated as the exact `0` here).
 /// Raw-`i64` operand convention.
 ///
 /// # Safety
 ///
 /// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_i64_mod(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_i64_mod(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {
         fatal("rt_i64_mod: expected 2 arguments");
     }
     let (a, b) = (*args, *args.add(1));
     if b == 0 {
-        fatal("mod by zero");
+        raise("mod by zero".to_string());
     }
     let r = a.checked_rem(b).unwrap_or(0);
     if r != 0 && (r < 0) != (b < 0) {
@@ -3232,11 +3299,10 @@ pub unsafe extern "C" fn rt_str_length(args: *const i64, argc: u32) -> i64 {
 /// `args[0]`'s content (`args[1]`, a bare `i64` index), matching the
 /// interpreter's own `string_ref`. Returns a bare (untagged) scalar, the
 /// same `Type::Char` representation `compile-sexpr-field`'s own `char`
-/// extraction produces. Fatal on an out-of-range index — the type system
-/// can't express the bound, the same `car`/`cdr`-on-non-`Cons` precedent
-/// every other `rt_*` bounds violation here follows (the interpreter's own
-/// `string_ref` instead raises a catchable `Panic`, but there is no such
-/// channel across the compiled-code ABI boundary — see [`fatal`]).
+/// extraction produces. An out-of-range index (negative included) [`raise`]s
+/// the message the interpreter's `string_ref` raises for it, character for
+/// character — the type system cannot express the bound, so both paths check
+/// at run time and must agree on what they say when the check fails.
 ///
 /// # Safety
 ///
@@ -3244,7 +3310,7 @@ pub unsafe extern "C" fn rt_str_length(args: *const i64, argc: u32) -> i64 {
 /// the first encoding a `Value::Str`; a `Heap` must already be registered on
 /// this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_ref(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_str_ref(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {
         fatal("rt_str_ref: expected 2 arguments");
     }
@@ -3256,7 +3322,12 @@ pub unsafe extern "C" fn rt_str_ref(args: *const i64, argc: u32) -> i64 {
     let found = if idx >= 0 { active_heap().string(id).chars().nth(idx as usize) } else { None };
     match found {
         Some(c) => c as i64,
-        None => fatal("rt_str_ref: index out of range"),
+        // The length is only walked on the failing path, so an in-range
+        // `ref` still costs one `chars().nth`.
+        None => {
+            let len = active_heap().string(id).chars().count();
+            raise(format!("ref: index {} out of range (length {})", idx, len))
+        }
     }
 }
 
@@ -3401,9 +3472,8 @@ pub unsafe extern "C" fn rt_str_append(args: *const i64, argc: u32) -> i64 {
 /// (untagged) `i64` indices, the same convention [`rt_str_ref`] uses, and
 /// they count *characters*, not bytes.
 ///
-/// Fatal on an invalid range, where the interpreter raises a catchable
-/// `Panic` — the same trade [`rt_str_ref`] documents for its own bounds
-/// check (there is no error channel across the compiled-code ABI).
+/// An invalid range [`raise`]s the message `string_substring` raises for it,
+/// the same parity [`rt_str_ref`] keeps for its own bounds check.
 ///
 /// # Safety
 ///
@@ -3411,7 +3481,7 @@ pub unsafe extern "C" fn rt_str_append(args: *const i64, argc: u32) -> i64 {
 /// the first encoding a `Value::Str`; a `Heap` must already be registered on
 /// this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_substring(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_str_substring(args: *const i64, argc: u32) -> i64 {
     if argc < 3 {
         fatal("rt_str_substring: expected 3 arguments");
     }
@@ -3425,7 +3495,7 @@ pub unsafe extern "C" fn rt_str_substring(args: *const i64, argc: u32) -> i64 {
     let chars: Vec<char> = heap.string(id).chars().collect();
     let len = chars.len() as i64;
     if start < 0 || end > len || start > end {
-        fatal(&format!("rt_str_substring: invalid range {start}..{end} (length {len})"));
+        raise(format!("substring: invalid range {}..{} (length {})", start, end, len));
     }
     let s: String = chars[start as usize..end as usize].iter().collect();
     encode(heap.alloc_string(s))
@@ -3497,23 +3567,23 @@ unsafe fn random_state_arg(args: *const i64, idx: isize, who: &str) -> BoxId {
 /// `random-state-next` for compiled code — advances `args[0]`'s seed one
 /// xorshift step and returns the draw reduced into `[0, args[1])`, matching
 /// the interpreter's own `eval_random_state_next` (`args[1]` is a bare
-/// `i64` bound, and the result is a bare `i64` too). Fatal on a non-positive
-/// bound, where the interpreter raises a catchable `Panic` — the same trade
-/// [`rt_str_ref`] documents.
+/// `i64` bound, and the result is a bare `i64` too). A non-positive bound
+/// [`raise`]s that same function's message, so `(random 0)` fails
+/// identically whichever tier the prelude's `random` is running on.
 ///
 /// # Safety
 ///
 /// `argc` must be `>= 2` and `args[0]` must decode to a boxed random-state;
 /// a `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_random_state_next(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_random_state_next(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {
         fatal("rt_random_state_next: expected 2 arguments");
     }
     let id = random_state_arg(args, 0, "rt_random_state_next");
     let bound = *args.add(1);
     if bound <= 0 {
-        fatal(&format!("rt_random_state_next: bound must be positive, got {bound}"));
+        raise(format!("random: bound must be positive, got {}", bound));
     }
     let heap = active_heap();
     let next = xorshift64_step(heap.random_state_seed(id));
