@@ -3159,7 +3159,19 @@ fn eval_int_builtin(name: &str, args: &[Value]) -> Option<Result<Value, EvalErro
             if b == 0 {
                 return Some(Err(EvalError::Panic("divide by zero".into())));
             }
-            Value::Int(a / b)
+            match a.checked_div(b) {
+                Some(q) => Value::Int(q),
+                // `i64::MIN / -1`, whose quotient is one past `i64::MAX`. CL
+                // would widen to a bignum here, but the *declared* type of
+                // this expression is `i64` and a checked program cannot be
+                // handed a wider result than it asked for — so it fails, with
+                // `rt_i64_div`'s wording. Plain `a / b` would have trapped as
+                // a Rust overflow panic instead, killing the process where
+                // compiled code reported an ordinary error.
+                None => {
+                    return Some(Err(EvalError::Panic(format!("arithmetic overflow: {} / {}", a, b))))
+                }
+            }
         }
         "mod" => {
             if b == 0 {

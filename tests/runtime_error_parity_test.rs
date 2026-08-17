@@ -120,6 +120,19 @@ const CASES: &[Case] = &[
         message: "mod by zero",
     },
     Case {
+        // The other case integer division has no answer for: `i64::MIN / -1`
+        // is one past `i64::MAX`, and the expression's declared type is
+        // `i64`. Not writable as a literal — the reader hands
+        // `-9223372036854775808` back as a bignum — so `mk-min` builds it,
+        // with an `i64`-typed first operand so `-` dispatches on `i64`
+        // rather than defaulting to `i32`.
+        what: "i64 division overflowing",
+        defs: "(defun mk-min ((z i64)) i64 (- (- z 9223372036854775807) 1))
+               (defun f ((a i64) (b i64)) i64 (/ a b))",
+        call: "(f (mk-min 0) -1)",
+        message: "arithmetic overflow: -9223372036854775808 / -1",
+    },
+    Case {
         // `rem` is a prelude method built out of `/`, so this is the
         // divide-by-zero above reached through a compiled prelude body.
         what: "i32 rem by zero",

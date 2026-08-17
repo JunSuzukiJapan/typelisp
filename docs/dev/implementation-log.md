@@ -6977,3 +6977,18 @@ AOT は `tests/compile_file_test.rs` に 2 本（exit 134 → exit 1 + `panic: d
 副産物として `tests/runtime_error_parity_test.rs` の直列化（`ONE_SESSION_AT_A_TIME`）を
 外せた。並列でも落ちなくなり、実行時間も 53 秒 → 33 秒。`tests/numeric_test.rs` も
 素の `cargo test` で 4/4 green（修正前は 3/3 で SIGSEGV）。
+
+## `i64::MIN / -1` を両経路で同じ失敗に（2026-08-17、同ブランチ）
+
+差分テストの表に載せられずに残っていた最後の食い違い。compiled は
+`arithmetic overflow: ... / ...` を raise していたが、interpreted は素の `a / b` で
+**Rust のオーバーフロー panic**——つまりプロセスが落ちる側だった。
+
+`eval_int_builtin` を `checked_div` にして、compiled と同じ文言の `EvalError::Panic` に
+した。CL ならここで bignum に広がるが、式の宣言型は `i64` であり、チェックの通った
+プログラムに要求より広い型の値を返すことはできないので、失敗が正しい。
+
+テストは表に 1 行足した。`i64::MIN` は**リテラルとして書けない**（リーダーは
+`-9223372036854775808` を bignum として返す）ので `(- (- z 9223372036854775807) 1)` で
+作る。第 1 引数を `i64` 型の変数にするのは、`-` の受け手型が「`expected: None` で
+検査した第 1 引数」から決まるため——`0` と書くと `i32` に落ちる。

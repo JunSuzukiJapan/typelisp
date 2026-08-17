@@ -2963,9 +2963,9 @@ pub unsafe extern "C" fn rt_gensym(_args: *const i64, _argc: u32) -> i64 {
 /// `eval_int_builtin` gives the interpreted path, since the two paths running
 /// the same form must fail the same way (`tests/runtime_error_parity_test.rs`
 /// is the guard). `checked_div`'s other `None` case, `i64::MIN / -1`, is an
-/// overflow rather than a divisor problem and says so; the interpreter's own
-/// `a / b` traps there as a Rust overflow panic instead, a divergence that
-/// predates this and is not a `fatal()` case either way.
+/// overflow rather than a divisor problem and says so; `eval_int_builtin`
+/// uses `checked_div` and this same wording for it too, so that case is a
+/// recoverable failure on both paths rather than a Rust overflow trap on one.
 ///
 /// # Safety
 ///
