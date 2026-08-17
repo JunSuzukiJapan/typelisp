@@ -817,6 +817,52 @@ fn an_uncaught_throw_reaching_the_entry_point_exits_rather_than_aborting() {
     assert!(stderr.contains("no enclosing (catch 'nobody)"), "stderr was: {}", stderr);
 }
 
+/// A runtime failure the *runtime* raises — here a zero divisor inside
+/// `rt_i64_div` — ends an AOT executable the same way an explicit
+/// `(panic ...)` does: message on stderr, exit code 1.
+///
+/// It used to abort with 134 instead, because `rt_i64_div` reached
+/// `typelisp_rt::fatal()`. That it now unwinds all the way to `rt_run_entry`
+/// is what makes an AOT program's arithmetic failures reportable rather than
+/// fatal; `tests/runtime_error_parity_test.rs` covers the same failures on the
+/// interpreted and JIT paths.
+///
+/// The divisor comes from a call so nothing can fold it away before the
+/// division is emitted.
+#[test]
+fn a_zero_divisor_exits_rather_than_aborting_in_an_aot_executable() {
+    let (code, stderr) = compile_and_capture(
+        "aot_divide_by_zero",
+        r#"
+        (defun zero () i32 0)
+        (defun main () i64 (as i64 (/ 5 (zero))))
+        "#,
+    );
+    assert_eq!(code, 1, "stderr was: {}", stderr);
+    assert!(stderr.contains("panic: divide by zero"), "stderr was: {}", stderr);
+}
+
+/// ...and an `unwind-protect` around it runs its cleanup on the way out, in a
+/// process with no interpreter in it at all.
+///
+/// The cleanup's effect is observable in the exit code: `main` catches nothing
+/// (a panic is not a throw), so the program still dies — but `ran` was written
+/// while it was dying, and the exit code carries the failure, not the value.
+#[test]
+fn a_cleanup_runs_when_a_zero_divisor_unwinds_in_an_aot_executable() {
+    let (code, stderr) = compile_and_capture(
+        "aot_divide_by_zero_cleanup",
+        r#"
+        (defvar (ran i32) 0)
+        (defun zero () i32 0)
+        (defun body () i32 (unwind-protect (/ 5 (zero)) (setf ran 1)))
+        (defun main () i64 (as i64 (+ (body) ran)))
+        "#,
+    );
+    assert_eq!(code, 1, "stderr was: {}", stderr);
+    assert!(stderr.contains("panic: divide by zero"), "stderr was: {}", stderr);
+}
+
 /// A `break` leaving a protected form runs the cleanup in a standalone
 /// executable too — the static exit is a plain branch, so nothing about it
 /// depends on the JIT's own unwinding setup.
