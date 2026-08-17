@@ -22,42 +22,7 @@
 
 extern crate typelisp;
 
-use std::sync::{Mutex, MutexGuard};
-
 use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
-
-/// Held for the whole of every test here, so only one [`Session`] exists in
-/// this process at a time.
-///
-/// Not about the tests interfering with each other — each owns its own heap
-/// and interpreter. It works around a **pre-existing** hazard underneath them:
-/// dropping an MCJIT `ExecutionEngine` destroys its `llvm::Module`, which
-/// mutates the process-wide `LLVMContext`'s value-name tables — and that drop
-/// is the one LLVM operation in the codebase not made under `COMPILE_LOCK`.
-/// A thread whose interpreter is going away therefore races any thread
-/// compiling or installing bitcode, and the crash lands inside
-/// `llvm::Value::destroyValueName` (a crash report from this file showed
-/// exactly that pairing: one thread in `MCJIT::~MCJIT`, another holding the
-/// lock inside `install_compiled_library`'s bitcode parse).
-///
-/// Not caused by anything here: `tests/numeric_test.rs` segfaults the same way
-/// on this branch *without* any of this work applied — the two threads only
-/// have to overlap. `scripts/test-serial.sh`, the suite's green signal, passes
-/// `--test-threads=1` and so never meets it; a bare
-/// `cargo test --test runtime_error_parity_test` does, every run, because
-/// these tests build and drop sessions faster than any other target. This lock
-/// is what makes running this file on its own reliable — local containment,
-/// not a fix. The fix (destroy engines under `COMPILE_LOCK`, without
-/// deadlocking the three places that replace a `CompiledFn` while holding it)
-/// is recorded in `docs/dev/TODO.md`.
-static ONE_SESSION_AT_A_TIME: Mutex<()> = Mutex::new(());
-
-/// Takes [`ONE_SESSION_AT_A_TIME`], recovering from a previous test's panic —
-/// a poisoned lock here means an assertion failed, not that any state this
-/// guard protects went bad.
-fn exclusive() -> MutexGuard<'static, ()> {
-    ONE_SESSION_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
-}
 
 /// One heap/checker/interpreter, kept alive across several evaluations — a
 /// session, in the sense a REPL is one.
@@ -247,7 +212,6 @@ const CASES: &[Case] = &[
 /// it — which is why those two are in this table at all).
 #[test]
 fn every_runtime_failure_reports_the_same_message_interpreted() {
-    let _guard = exclusive();
     for case in CASES {
         let src = format!("{}\n{}", case.defs, case.call);
         assert_eq!(panic_message(&src), case.message, "interpreted: {}", case.what);
@@ -259,7 +223,6 @@ fn every_runtime_failure_reports_the_same_message_interpreted() {
 /// of these aborted the process.
 #[test]
 fn every_runtime_failure_reports_the_same_message_compiled() {
-    let _guard = exclusive();
     for case in CASES {
         let src = format!("{}\n(compile f)\n{}", case.defs, case.call);
         assert_eq!(panic_message(&src), case.message, "compiled: {}", case.what);
@@ -281,7 +244,6 @@ fn every_runtime_failure_reports_the_same_message_compiled() {
 /// can ask because the process is still there to ask it.
 #[test]
 fn a_compiled_cleanup_runs_when_a_zero_divisor_unwinds_through_it() {
-    let _guard = exclusive();
     let mut s = Session::new();
     s.ok(r#"
         (defvar (ran i32) 0)
@@ -299,7 +261,6 @@ fn a_compiled_cleanup_runs_when_a_zero_divisor_unwinds_through_it() {
 /// so `12` means both ran and in that order.
 #[test]
 fn compiled_cleanups_run_in_order_when_a_bad_index_unwinds_through_them() {
-    let _guard = exclusive();
     let mut s = Session::new();
     s.ok(r#"
         (defvar (trace i32) 0)
@@ -319,7 +280,6 @@ fn compiled_cleanups_run_in_order_when_a_bad_index_unwinds_through_them() {
 /// failure keeps travelling.
 #[test]
 fn a_compiled_catch_does_not_swallow_a_runtime_failure() {
-    let _guard = exclusive();
     let mut s = Session::new();
     s.ok(r#"
         (defvar (ran i32) 0)
@@ -335,7 +295,6 @@ fn a_compiled_catch_does_not_swallow_a_runtime_failure() {
 /// through a compiled caller — the frames in between are LLVM's, not Rust's.
 #[test]
 fn a_runtime_failure_unwinds_through_intermediate_compiled_frames() {
-    let _guard = exclusive();
     let src = r#"
         (defun deep ((b i32)) i32 (/ 5 b))
         (defun middle ((b i32)) i32 (+ 1 (deep b)))
@@ -353,7 +312,6 @@ fn a_runtime_failure_unwinds_through_intermediate_compiled_frames() {
 /// engine-lifetime probe).
 #[test]
 fn a_session_survives_a_compiled_runtime_failure_and_keeps_evaluating() {
-    let _guard = exclusive();
     let mut s = Session::new();
     s.ok("(defun f ((a i64) (b i64)) i64 (/ a b)) (compile f)");
     assert_eq!(s.panics("(f 5 0)"), "divide by zero");

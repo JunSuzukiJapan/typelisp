@@ -6,29 +6,6 @@
 
 ## 残っている作業
 
-### MCJIT エンジンの破棄が `COMPILE_LOCK` の外で起きている（既存のバグ）
-
-`ExecutionEngine` を drop すると `llvm::Module` のデストラクタが走り、**プロセス共有の
-`LLVMContext`**（値名テーブル）を書き換える。コードベース中で `COMPILE_LOCK` を取らない
-唯一の LLVM 操作がこれで、インタプリタを捨てるスレッドが、コンパイル中／ビットコードを
-install 中の別スレッドと競る。落ちるのは `llvm::Value::destroyValueName` の中。
-
-**この作業とは無関係の既存バグ**で、`tests/numeric_test.rs` は本ブランチのまま（今回の変更を
-stash した状態）でも 3 回中 3 回 SIGSEGV する。クラッシュレポートでは片方のスレッドが
-`MCJIT::~MCJIT`、もう片方が `install_compiled_library` のビットコード parse だった。
-単一スレッドのプロセス（`typl`・AOT 実行ファイル）では起きない——エンジンを drop するのは
-実質 `cargo test` だけ。`scripts/test-serial.sh` は `--test-threads=1` を渡すので緑のままで、
-素の `cargo test --test numeric_test` でだけ出る。
-
-素直な直し方（drop 時に `COMPILE_LOCK` を取る）には**デッドロックの罠**がある。`COMPILE_LOCK`
-を保持したまま `CompiledFn` を置き換える箇所が 3 つあり（`install_compiled_library` と
-`compile_scc` の 2 箇所）、古い `Rc<CompiledFn>` の drop がそこで起きる。ロックを取る前に
-古い値を取り出しておくか、破棄をロック保持者に肩代わりさせる（引退リストを
-`CompiledFn::new`/`new_multi` の先頭で空にする）かのどちらかが要る。
-
-`tests/runtime_error_parity_test.rs` はファイル内のセッション生成を直列化して避けている
-（`ONE_SESSION_AT_A_TIME`）。直したらその番人は外せる。
-
 ### prelude ビットコードの起動時コスト（+198〜258 ms）
 
 417 KB のビットコード全体を MCJIT が起動時に解決する分（冗長パースの除去で削れる分は既に

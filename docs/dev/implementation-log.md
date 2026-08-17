@@ -6917,13 +6917,63 @@ AOT は `tests/compile_file_test.rs` に 2 本（exit 134 → exit 1 + `panic: d
 および unwind-protect 経由）。`tests/numeric_test.rs` の `run_interpreted`（`random` 用の
 逃げ道）は削除した。
 
-### 途中で見つかった既存バグ（未修正）
+### 途中で見つかった既存バグ
 
 差分テストが並列実行で SIGSEGV した。調べると **`ExecutionEngine` の drop だけが
 `COMPILE_LOCK` の外にある**——`llvm::Module` のデストラクタは共有 `LLVMContext` の値名
 テーブルを書き換えるので、インタプリタを捨てるスレッドが compile 中のスレッドと競る。
-**この作業とは無関係**で、変更を stash した状態の `tests/numeric_test.rs` が 3/3 で落ちる
+**この作業とは無関係**で、変更を stash した状態の `tests/numeric_test.rs` が 3/3 で落ちた
 （クラッシュレポートは片方が `MCJIT::~MCJIT`、もう片方が `install_compiled_library` の
-ビットコード parse）。詳細と直し方の注意（`COMPILE_LOCK` 保持中に `CompiledFn` を置き換える
-3 箇所がデッドロックの罠）は [TODO.md](TODO.md) に書いた。差分テストはファイル内の
-セッション生成を直列化して避けている。
+ビットコード parse）。次の項で直した。
+
+## LLVM オブジェクトの破棄を COMPILE_LOCK の内側へ（2026-08-17、同ブランチ）
+
+上で見つけた既存バグの修正。`COMPILE_LOCK` の doc は「LLVM Context に触る操作を直列化する」と
+書いていたが、**破棄がその規則から漏れていた**。何かを*呼ぶ*わけではないので、呼び出しに
+ついて書かれた規則をすり抜ける。
+
+### 直し方: ロックを取れる場所まで破棄を遅らせる（`retire_llvm`）
+
+素直な案——`Drop` で `COMPILE_LOCK` を取る——は**デッドロックになる**。`COMPILE_LOCK` を
+保持したまま LLVM オブジェクトがスコープを抜ける場所が正当に沢山ある（ガードの下でモジュールを
+組み立てる `compile_test.rs` のケース群、`CompiledFn` を置き換える `install_compiled_library`/
+`compile_scc`）。`Mutex` は再入不可なので、稀なクラッシュを確実なハングに取り替えるだけになる。
+`std::sync::ReentrantLock` はまだ unstable（1.90 で確認）。
+
+採ったのは**引退リスト**。`CompiledFn::drop` はエンジンの share を
+`compile::retire_llvm` に渡すだけで、実際の破棄は次に誰かが `COMPILE_LOCK` を取って
+コンパイルするとき（`CompiledFn::new`/`new_multi` の先頭）に行う。drop する側は文脈を
+問わないので、どこで死んでも安全になる。
+
+`unsafe impl Send` が 1 つ要る。根拠は**移動しかしないこと**: 引退も回収も move であって
+中身に触らない。実際に走る操作は生成とデストラクタだけで、どちらもロックの下にある。
+非アトミックな `Rc` の増減も同様——増えるのは `new_multi` の `clone`（ロック下）、減るのは
+回収時の drop（ロック下）だけで、`ExecutionEngine` の share は `CompiledFn` の外に出ない。
+
+代償は「次のコンパイルまで引退したオブジェクトが残る」こと。二度とコンパイルしない
+プロセスはもう終了するところなので実害はない。
+
+### 素の `Module` は別扱い（引退させられない）
+
+エンジンに渡していない `Rc<RefCell<Module>>` を持つ 4 箇所（`compile_scc`・`aot::compile_file`・
+島と prelude の bootstrap）は、ガードより**前**に宣言されているせいで drop 順が逆——ガードが
+先に落ちてから Module が壊れる。ここは引退リストに入れずに、ガードを保持したまま明示的に
+`drop(module)` する形にした（`?` の早期 return もその経路を通るよう、末尾を `result`
+束縛に書き換えた）。
+
+**引退リストに入れなかったのは意図的**: Rc の share を*クローンして*リストに預けると、
+所有者スレッドと回収スレッドが同じ非アトミックカウンタを触りうる。最後の share を move
+できると保証できない以上（島のハンドルレジストリが一時的に share を持つ）、`Rc` は
+そのまま扱うほうが安全。
+
+### 番人
+
+`tests/llvm_teardown_race_test.rs`。**自前でスレッドを 3 本立てる**ので、
+`--test-threads=1` の `scripts/test-serial.sh` でも素の `cargo test` でも同じ意味になる。
+各スレッドが「prelude を install した Interp を作って走らせて捨てる」を 12 回繰り返す。
+修正を戻すと 3/3 で SIGSEGV、入れると 3/3 green（8 秒）。レースなので証明ではなく探針だが、
+壊れたときに必ず数秒で出る。
+
+副産物として `tests/runtime_error_parity_test.rs` の直列化（`ONE_SESSION_AT_A_TIME`）を
+外せた。並列でも落ちなくなり、実行時間も 53 秒 → 33 秒。`tests/numeric_test.rs` も
+素の `cargo test` で 4/4 green（修正前は 3/3 で SIGSEGV）。

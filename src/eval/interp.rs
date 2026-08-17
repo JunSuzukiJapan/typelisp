@@ -2023,6 +2023,13 @@ impl Interp {
         // that lands in some vtable's slot may well be a member of *this*
         // SCC, so its entry point only exists as of the loop just above.
         self.publish_vtables();
+        // Explicitly, while `_guard` is still held: `module` was declared
+        // before the guard, so letting it fall out of scope would destroy it
+        // *after* the guard released — and `~Module` unregisters every value
+        // name from the shared LLVM Context (see `compile::COMPILE_LOCK`).
+        // Nothing here can leave a share behind for someone else to drop:
+        // `add_compiled_function`'s clones are released before it returns.
+        drop(module);
         Ok(())
     }
 

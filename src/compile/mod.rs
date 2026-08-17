@@ -91,7 +91,78 @@ use crate::EvalError;
 /// (its type-uniquing tables aren't synchronized), so this is held for the
 /// duration of any compile even though nothing here spawns compiler threads
 /// today — cheap insurance against a known class of non-deterministic crash.
+///
+/// **Destruction counts as a Context-touching operation**, and it is the one
+/// that used to escape: `~Module` walks its functions and unregisters every
+/// value name from the Context's own tables. Nothing *calls* it, so it slipped
+/// past a rule written for calls — an interpreter going out of scope on one
+/// thread would tear a module down while another thread was building or
+/// parsing IR, and the crash landed in `llvm::Value::destroyValueName` with no
+/// hint that a drop was involved. Objects this crate owns now go through
+/// [`retire_llvm`] instead of being dropped where they happen to fall.
 pub static COMPILE_LOCK: Mutex<()> = Mutex::new(());
+
+/// LLVM objects waiting to be destroyed with [`COMPILE_LOCK`] held.
+///
+/// # Safety
+///
+/// `Send` is asserted because the value crosses threads *without being
+/// touched*: retiring moves it into [`RETIRED_LLVM`] and draining moves it
+/// back out, and nothing in between reads it. The only operations that ever
+/// run on the inner object are its creation and its destructor, and both
+/// happen under `COMPILE_LOCK` — creation because every construction site
+/// already holds it, destruction because [`destroy_retired_llvm`] is only
+/// called from a context that does.
+///
+/// That covers the reference counts inside, too, which is the subtler half:
+/// an `ExecutionEngine` is an `Rc` share, and a non-atomic refcount is
+/// exactly the thing a cross-thread move usually breaks. Here every
+/// increment is an `ExecutionEngine::clone` in [`CompiledFn::new_multi`]
+/// (lock held) and every decrement is a drop inside `destroy_retired_llvm`
+/// (lock held); moving a share into or out of the list changes no count.
+struct RetiredLlvm {
+    objects: Vec<Box<dyn std::any::Any>>,
+}
+
+// SAFETY: see the doc comment above.
+unsafe impl Send for RetiredLlvm {}
+
+/// Objects retired from any thread, destroyed by whichever thread next takes
+/// [`COMPILE_LOCK`] to compile something.
+///
+/// A plain `Mutex` of its own, never held together with anything but itself:
+/// retiring takes only this one, and draining takes it *inside*
+/// `COMPILE_LOCK`, so the two can't be acquired in opposite orders.
+static RETIRED_LLVM: Mutex<RetiredLlvm> = Mutex::new(RetiredLlvm { objects: Vec::new() });
+
+/// Hands `obj` over to be destroyed later, under [`COMPILE_LOCK`].
+///
+/// For LLVM objects whose owner goes out of scope somewhere that cannot take
+/// the lock — a `CompiledFn` dropped with the interpreter that held it, a
+/// module whose builder returned through `?`. Dropping such an object in
+/// place is the race this exists to remove, and locking in its `Drop` is not
+/// an option: plenty of call sites legitimately *hold* `COMPILE_LOCK` while
+/// an LLVM object of theirs goes out of scope (every `compile_test.rs` case
+/// that builds a module under the guard, for one), and `Mutex` is not
+/// reentrant, so that would trade a rare crash for a reliable hang.
+///
+/// The cost is that a retired object lives until someone compiles again —
+/// bounded, since the list is drained at the head of every JIT construction,
+/// and nil in the shape that matters: a process that never compiles again is
+/// about to exit anyway.
+pub(crate) fn retire_llvm<T: 'static>(obj: T) {
+    RETIRED_LLVM.lock().unwrap_or_else(|e| e.into_inner()).objects.push(Box::new(obj));
+}
+
+/// Destroys everything [`retire_llvm`] has collected.
+///
+/// The caller must hold [`COMPILE_LOCK`] — that is the entire point of the
+/// detour. The list is emptied first and dropped afterwards, so the inner
+/// `Mutex` is not held while destructors run.
+fn destroy_retired_llvm() {
+    let objects = std::mem::take(&mut RETIRED_LLVM.lock().unwrap_or_else(|e| e.into_inner()).objects);
+    drop(objects);
+}
 
 /// `Context` holds a raw `LLVMContextRef`, so it isn't `Sync` and can't sit
 /// in a `static` directly. Wrapping it asserts that's fine: every access goes
@@ -141,12 +212,28 @@ pub type CompiledSignature = unsafe extern "C-unwind" fn(*const i64, u32) -> i64
 /// `tests/compiled_unwind_test.rs` demonstrates. `ExecutionEngine` is
 /// reference-counted, so cloning one share per function is what keeps a whole
 /// SCC's engine alive as long as any member of it.
+///
+/// The share is given up through [`retire_llvm`] rather than dropped in
+/// place: the last one to go takes the whole engine — and the modules of IR
+/// inside it — down with it, and that teardown has to happen with
+/// [`COMPILE_LOCK`] held. Where a `CompiledFn` dies is not something it can
+/// choose; it goes wherever the `FnDef` holding it does, which is usually an
+/// interpreter being dropped by a thread doing nothing LLVM-related at all.
 pub struct CompiledFn {
     /// Held for its lifetime, never called through — see this struct's doc
-    /// comment.
-    _engine: ExecutionEngine<'static>,
+    /// comment. `Option` only so [`Drop`] can move it out; it is `Some` for
+    /// the whole life of a `CompiledFn`.
+    engine: Option<ExecutionEngine<'static>>,
     /// This function's own JIT-resolved address — see [`Self::address`].
     addr: usize,
+}
+
+impl Drop for CompiledFn {
+    fn drop(&mut self) {
+        if let Some(engine) = self.engine.take() {
+            retire_llvm(engine);
+        }
+    }
 }
 
 impl CompiledFn {
@@ -163,8 +250,10 @@ impl CompiledFn {
     /// real, already-running JIT code instead of an unresolved symbol. Empty
     /// for self-recursion only or no calls at all — the common case, and
     /// every call before Stage 3. Must be called with [`COMPILE_LOCK`]
-    /// held.
+    /// held — which is also what makes this the place to destroy whatever
+    /// [`retire_llvm`] has been handed since the last compile.
     pub fn new(module: &Module<'static>, fn_name: &str, externals: &[(String, usize)]) -> Result<CompiledFn, String> {
+        destroy_retired_llvm();
         let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
         for (name, addr) in externals {
             let decl = module
@@ -173,7 +262,7 @@ impl CompiledFn {
             engine.add_global_mapping(&decl, *addr);
         }
         let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
-        Ok(CompiledFn { _engine: engine, addr })
+        Ok(CompiledFn { engine: Some(engine), addr })
     }
 
     /// Like [`Self::new`], but resolves every name in `fn_names` out of one
@@ -194,8 +283,10 @@ impl CompiledFn {
     /// clone their own reference to the shared engine internally (see that
     /// method's doc comment), so every returned [`CompiledFn`] independently
     /// keeps it alive — dropping some of them early is safe. Must be called
-    /// with [`COMPILE_LOCK`] held.
+    /// with [`COMPILE_LOCK`] held, and drains the retirement list for the
+    /// same reason [`Self::new`] does.
     pub fn new_multi(module: &Module<'static>, fn_names: &[String], externals: &[(String, usize)]) -> Result<Vec<CompiledFn>, String> {
+        destroy_retired_llvm();
         let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
         for (name, addr) in externals {
             let decl = module
@@ -207,7 +298,7 @@ impl CompiledFn {
             .iter()
             .map(|fn_name| {
                 let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
-                Ok(CompiledFn { _engine: engine.clone(), addr })
+                Ok(CompiledFn { engine: Some(engine.clone()), addr })
             })
             .collect()
     }

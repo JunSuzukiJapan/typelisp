@@ -234,10 +234,19 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     }
 
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-    let module = module.borrow();
-    build_main_wrapper(ctx, &module, &global_init_names, &interp.vtable_descriptors(), &interp.upcast_descriptors())?;
-    module.verify().map_err(|e| format!("module failed verification: {}", e))?;
-    write_executable(&module, output_path)
+    let result = {
+        let m = module.borrow();
+        build_main_wrapper(ctx, &m, &global_init_names, &interp.vtable_descriptors(), &interp.upcast_descriptors())
+            .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
+            .and_then(|()| write_executable(&m, output_path))
+    };
+    // Destroyed here rather than left to fall out of scope: `module` was
+    // declared before the guard, so its own drop would run *after* the guard
+    // released, and `~Module` unregisters every value name from the shared
+    // LLVM Context (see `compile::COMPILE_LOCK`). Written as a `result`
+    // binding rather than `?`s so the failing paths take this route too.
+    drop(module);
+    result
 }
 
 /// Adds a real, C-ABI `main` to `module` that calls the compiled entry
