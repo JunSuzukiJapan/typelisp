@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-08-15 / ブランチ: `feature/compile-strict-names-and-prelude-bitcode`
+最終更新: 2026-08-18 / ブランチ: `main`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -7040,3 +7040,89 @@ AOT は `tests/compile_file_test.rs` に 2 本（exit 134 → exit 1 + `panic: d
 修正を戻しても 3/3 green（ラウンドを倍にしても同じ）。エンジンの破棄と違って観測された
 不具合ではなく、「破棄は Context に触る操作だからロックの内側」という規則に揃えただけ。
 テストの doc にもそう書いた——通ったことを「危うい経路を守れている」と読まないために。
+
+## 「呼ぶとコンパイルできなくなるもの」を潰す（2026-08-18）
+
+`docs/syntax.md` §10 に、呼ぶと `(compile f)` が通らなくなる組み込みの表があった。6項目
+（システム組み込み・等価述語・印字一式・`read`・`eval`）。この作業でそれを1項目（`eval`）まで
+減らした。手口は2つで、**ネイティブ shim を書く**か、**インタプリタ側にしか無い実装を
+切り出してランタイム側へ下ろす**か。
+
+### システム組み込みと等価述語（shim を書いた側）
+
+`parse-int`/`parse-float`/`get-universal-time`/`get-internal-real-time`/`exit`/`string->symbol`
+を `typelisp-rt` の `sys_builtin` に、`eql`/`equal`/`equalp` を `equality` に切り出した。
+どちらもストリーム層と同じ「実装は1つ、両側に薄い edge」で、インタプリタも同じ関数を呼ぶ。
+`eq`/`eql`/`equal`/`equalp` が `i32`/`i64`/`string`/`Sexpr` の全てで lowering できるように
+なったので、**`case` が全型でコンパイルできる**ようになった。
+
+その過程で既存バグを1件見つけた: compiled 側の文字列 `eq`/`eql` が*内容*比較、interpreted 側が
+*同一性*比較で、同じプログラムが tier によって違う答えを出していた。コメントに「eq/eql/equal
+再設計より前の名残」と書いてあったもの。identity に揃え、24 通りの比較を両 tier で走らせて
+一致を確認した。
+
+### 印字とリーダ（切り出した側）
+
+`format`（1,977行）と pretty printer（979行）を `typelisp-print` クレートへ、リーダ（950行）と
+`name_lexer` を `typelisp-read` クレートへ移した。どちらも `#[no_mangle]` の `rt_*` シムを
+**自分のクレートの中に**持つ。
+
+#### なぜモジュール分割では足りないか（実測）
+
+`compile-file` がリンクするアーカイブは `typelisp-rt` の `staticlib` ただ1つで、リンカは
+アーカイブを**メンバ単位**で引く。だから印字エンジンを `typelisp-rt` の 1 モジュールとして
+置くと、rustc が小さい CGU をマージして `rt_cons` と同じオブジェクトに同居させ、そのオブジェクトは
+必ず引かれるので、印字しないプログラムにも書式エンジンが入る。`(defun main () i32 42)` の
+AOT 出力で 3,474,808 → 4,089,872 バイト。
+
+クレートを分ければメンバは分かれる。ただし**依存の書き方に2つの罠**がある。
+
+1. 参照が1つも無い依存クレートは、rustc が staticlib に同梱しない（実測: `ar t` で
+   `typelisp_print` のメンバ 0 個）。`typelisp-rt` に `pub use typelisp_print;` を1行置くと
+   117 個入る。この行はコード生成を伴わず呼び出し元も無いので、dead として消すと
+   compiled な `println` が全部リンクエラーになる。消させないための注記をコードに書いた。
+2. rustc は opt-level 0 と 1 で**ジェネリックの単型化をクレート間で共有**する。共有された
+   単型化は参照なので、`typelisp-rt` のオブジェクトが `Vec::len` を求めて `typelisp_print` の
+   メンバを引き、その巻き添えで印字エンジンが入る（debug で 4,083,736 バイト・印字シンボル
+   237 個）。`[profile.dev.package.typelisp-print] opt-level = 2` で共有が止まり 3,510,608 バイト・
+   0 個になる。release は元から共有しないので、この設定は release の挙動を debug に戻すだけ。
+
+最終的な実測: 印字もリーダも使わない AOT 実行ファイル 3,530,224 バイト（印字 0 個・リーダ 0 個）、`println` を
+1つ足すと 3,877,648 バイト（印字 124 個）、`read` を1つ足すと 3,647,960 バイト（リーダ 24 個、
+印字は 0 個のまま——片方を使っても他方は入らない）。
+
+#### `typelisp-abi`
+
+印字クレートのシムは `encode`/`active_heap`/`fatal` を要るが、それらは `typelisp-rt` にあり、
+`typelisp-rt` は `typelisp-print` に依存しているので循環する。両者の下に `typelisp-abi`
+（タグ付きワード表現・暗黙のアクティブ `Heap`・シムの死に方）を切り出した。`ACTIVE_HEAP` が
+**1つの thread-local である**ことが要点で、2つに割れるとシムがインタプリタの登録した
+ヒープを見失う。
+
+#### ヒープから読めない2つの事実
+
+印字はヒープを見ても分からないものが2つある——enum の変種*名*（箱は index しか持たない）と、
+型が `print-object` を持つかどうか。`PrintEnv` トレイト越しに渡す。インタプリタは自分の
+スコープ木から答え（`ModuleScope::enum_variant_name` を新設。従来の
+`collect_struct_and_enum_types` はプログラム中の全型のマップを毎回作っていた）、AOT 実行
+ファイルは `build_main_wrapper` が生成した起動時登録のテーブルから答える。
+
+起動時登録は、**モジュールが実際に印字シムを call しているときだけ**出す。出すこと自体が
+印字エンジンへの参照だからで、無条件に出すと上の分離が無意味になる。判定は IR を歩いて
+call 命令の callee 名を見る（`module_calls_any`）。
+
+AOT の制御変数（`*print-pretty*` 等）は登録しない。`compile-file` はコンパイラ島だけを読み
+prelude を読まないので、AOT プログラムにそれらのグローバルは存在せず、CL の初期値が唯一の
+正解になる。`BARE_HOOKS` がそれをそのまま与える。
+
+なお AOT で `print-object` を書けるのは `(defmethod print-object ...)` の形だけ。
+`(impl print-object ...)` はトレイト本体が prelude にあるため——これは以前からの制限。
+
+### 副産物: `src/project.rs` の GC ルート漏れ
+
+ローダが1ファイル分の検査済みフォームを**ルートされていない `Vec<Value>`** に溜めていた。
+コレクタから見えないので、次のフォームの検査が起こした GC で回収されうる。この作業で
+アロケーションが増えて既定ヒープサイズで顕在化し、`not a top-level core form: (())` になった。
+`check_impl` で過去に直ったのと同じ形のバグ。落ちるところで root し、`pop_roots_to` を
+`push_permanent_root` の後ろへ動かした。回帰テストは `tests/loader_gc_test.rs`（修正を戻すと
+実際に落ちることを確認済み）。

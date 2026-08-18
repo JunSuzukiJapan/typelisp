@@ -92,6 +92,32 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   リストとして束縛される。呼び出し側の各実引数は `Type2` として個別に型検査される）。
   `defmacro` にも独自の `&rest` があるが、常に無型の `Sexpr` である点が異なる（`defun`/`lambda`
   は要素型を明示する）。`fn` 型でも `(fn (T1... &rest Te) Ret)` の形で可変長関数の型を書ける。
+- **`&optional` / `&key`**（`defun` のみ。`lambda`/`defmethod` は未対応で、`defmacro` は
+  後述の別実装）。順序は CL 流に `必須 &optional &rest &key`。各パラメータは
+  `(name Type)` か `(name Type デフォルト式)` と書く:
+
+  ```lisp
+  (defun greet ((name string) &optional (suffix string)) string      ; デフォルト無し
+    (match suffix ((some s) (append name s)) ((none) name)))         ; 本体では Option<string>
+
+  (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; デフォルト有り
+  (pow 3)      ; n = 2
+  (pow 3 5)    ; n = 5
+
+  (defun mk (&key (a i32 0) (b string "z")) string ...)
+  (mk :b "q")  ; 呼び出し側は `:name 値`、順不同。省略した分はデフォルト
+  ```
+
+  - **デフォルト式を書かなかったパラメータの型は `Option<Type>` になる**。省略すれば `none`、
+    渡せば呼び出し側が書いた裸の値が自動で `some` に包まれる。CL の「省略されたかどうかを
+    supplied-p 変数で知る」に当たるものが、静的型の側に出る形。
+  - デフォルト式を書いた場合は宣言どおりの `Type` のまま。省略時はその**検査済みの式**が
+    呼び出し側へそのまま埋め込まれる（呼び出しごとに評価される）。
+  - **`&key` は `&optional`/`&rest` と同じ引数リストに混ぜられない**。CL 自身が抱える曖昧さ
+    （末尾の実引数を、位置で埋まる `&optional` が取るのかラベルで照合する `&key` が取るのかが
+    *値*に依存する）を、組み合わせを禁じることで回避している。`&optional` と `&rest` の併用は可。
+  - ジェネリック関数でも使えるが、**省略された引数にしか現れない型パラメータは推論できず
+    エラー**になる（そこには突き合わせる値が無いため）。
 - **前方参照可**: トップレベルの `defun` は、ファイル内で自分より後に定義された `defun` を
   呼べる（相互再帰も可）。各ローダがファイル全体を読んだ直後に全 `defun` のシグネチャだけを
   先行登録するため（`Checker::predeclare_program`）。ただし例外が3つある:
@@ -257,10 +283,14 @@ REPL でも逐次 `load` でも決定的に判定できる唯一の形で、Rust
 docstring を持てる（`(deftrait Name () "doc" (type ...) (method ...)...)`）。本体を持たないシグネチャに
 docstring は書けない——末尾の文字列はそれ自体がデフォルト実装の戻り値になるので、両者を区別できない。
 
-`prelude.rs` は標準トレイト **`Iter`**（`next`／関連型 `Item`。`doiter`／シーケンス関数の基盤）・
-**`Eq`**（`equals`。`not-equals` はデフォルト実装）・**`Ord`**（`Eq` を継承。`less` のみ実装必須で
-`less-equal`／`greater`／`greater-equal` はデフォルト実装）を
-提供し、主要なスカラ型と `cons-cell<A,B>` に実装済み（詳細は [functions.md](functions.md) §12・§12.1）。
+`prelude.rs` が提供する標準トレイト: **`Iter`**（`next`／関連型 `Item`。`doiter`／シーケンス関数の
+基盤）・**`Eq`**（`equals`。`not-equals` はデフォルト実装）・**`Ord`**（`Eq` を継承。`less` のみ
+実装必須で `less-equal`／`greater`／`greater-equal` はデフォルト実装）・**`Error`**（`message`／
+`source`。エラー型を一様に扱うための `:dyn Error`）・**`print-object`**（型ごとの印字表現）・
+**`Pathish`**（パス名指定子＝文字列 or `pathname`）・ストリーム階層 **`Stream`** →
+**`InputStream`**／**`OutputStream`** → **`CharInput`**／**`CharOutput`** → **`PeekInput`**。
+`Iter`/`Eq`/`Ord` は主要なスカラ型と `cons-cell<A,B>` に実装済み
+（詳細は [functions.md](functions.md) §12・§12.1・§7.1・§15.2・§18・§19）。
 自前のコレクション型に `Iter` を `impl` すれば `doiter`（§5）や `map`／`filter`／`sort` 等がそのまま使える。
 
 トレイトの呼び出しは既定で**静的**（レシーバの静的型で解決）。実行時に具象型が決まる値を扱いたい
@@ -317,9 +347,12 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 - **循環参照はエラー**: `circular module dependency: a -> b -> a` の形で連鎖が報告される。
 - **実行**: `typl <file.typl>` でファイルを実行できる（引数なしなら REPL）。REPL の `use` も
   同じ規約でファイルを解決する。
-- **cons アリーナ容量**: `typl --heap-cells N` で cons セルの固定アリーナ容量を指定できる（既定
-  65536。`--heap-cells=N` 形も可、ファイル実行/REPL 共通）。アリーナは起動時確保・
-  再成長しないため、大量のリスト処理で `heap exhausted` になる場合はここで増やす。
+- **cons アリーナ容量**: `typl --heap-cells N` で cons セルのアリーナ**初期容量**を指定できる
+  （既定 65536。`--heap-cells=N` 形も可、ファイル実行/REPL 共通）。チェッカーがコード自体を
+  cons セルへ落とすようになって以降、必要量はプログラムを読むまで分からないので、アリーナは
+  足りなくなればチャンクを**追加して伸びる**（既存セルは動かないのでポインタは有効なまま）。
+  伸びる上限は初期容量の 256 倍で、そこを超えた確保が `heap exhausted` になる——つまり初期容量は
+  「最初にこれだけ確保する」、上限は「ここを越えたらリークとみなす」という意味。
 
 ### load — フラットロード
 
@@ -571,7 +604,7 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 - 関数・特殊形の名前に `!`（破壊的操作）や `?`（述語）を接尾辞として使わない。述語は
   `-p`/`p` 接尾辞（`zerop` `consp` など）または `is-` 前置（`is-some` `is-ok` など）で命名する。
 
-## 10. コンパイル（実験的機能）
+## 10. コンパイル
 
 ```lisp
 (compile name)                      ; 定義済みの defun/メソッドをネイティブコードへ JIT コンパイル
@@ -584,5 +617,34 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 （型は在るがそのメソッドが無い場合／型も関数も無い場合／裸の未定義名、で別々のメッセージになる）。
 ここでの可視性は他の参照と同じ扱いで、「在るがここからは見えない」は「解決しない」と同じく
 チェック時に落ちる。
+
+呼び先も推移的にコンパイルされるので、**コンパイルできない組み込みを（間接的にでも）呼ぶ関数は
+コンパイルできない**（`no such function: <組み込み名>` で落ちる）。2026-08-14 に prelude 側の穴を、
+2026-08-18 にシステム組み込み・等価述語・印字・リーダの穴を塞いだ結果、残っているのは次の1つだけ:
+
+| 呼ぶとコンパイルできなくなるもの | 理由 |
+|---|---|
+| `eval` | チェッカーとインタプリタそのものを要する。単体の実行ファイルにはそのどちらも無い |
+
+`compile`/`compile-file` は定義上インタプリタ専用の操作なので、この表には入らない（コンパイル
+できない、のではなく、コンパイルする側）。
+
+コンパイル**できる**もの: ストリーム・ファイル I/O、`random`、`gensym`、
+`symbol->string`/`string->symbol`、`parse-int`/`parse-float`、`get-universal-time`/
+`get-internal-real-time`、`exit`、超越関数、ビット演算、`catch`/`throw`/`unwind-protect`、
+`eq`/`eql`/`equal`/`equalp` の4つ全部（`case` もこれで全型でコンパイルできる）、
+`print`/`println`/`format`/`pprint` と `pprint-logical-block` を含む印字一式、そして `read`。
+prelude は事前コンパイル済みで出荷される。
+
+印字とリーダは、必要な実行ファイルだけが払うように**独立したクレート**に分けてある
+（`typelisp-print` / `typelisp-read`）。リンカはアーカイブのメンバ単位で引くので、
+印字しないプログラムに書式エンジンは入らない——`(defun main () i32 42)` の AOT 出力で実測
+3,530,224 バイト（印字シンボル 0 個・リーダシンボル 0 個）、同じ出力に `println` を1つ足すと
+3,877,648 バイト（印字 124 個）、`read` を1つ足すと 3,647,960 バイト（リーダ 24 個・印字は 0 個の
+まま）。
+
+AOT 実行ファイルの `print-object` は `(defmethod print-object ...)` の形でのみ書ける。
+`(impl print-object ...)` はトレイト本体が prelude にあり、`compile-file` は prelude を
+読まない（コンパイラ島だけを読む）ため——これは以前からの制限で、印字対応で変わっていない。
 
 内部実装（LLVM バックエンド）の詳細は開発用ドキュメント（[docs/dev/](dev/)）を参照。

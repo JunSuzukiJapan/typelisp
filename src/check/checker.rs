@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::{parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScope, Type, TypeNameSpan, Value};
-use crate::name_lexer::{NameLexer, NameTok};
+use typelisp_read::name_lexer::{NameLexer, NameTok};
 use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern, Ref};

@@ -870,6 +870,14 @@ pub const SOURCE: &str = r#"
          ((equal method ">=") true)
          ((equal method "=") true)
          ((equal method "eq") true)
+         ;; `eql`/`equal`/`equalp` are three more names for `=` on an integer
+         ;; (same-type operands, no case to fold and no structure to recurse
+         ;; into), so all three are the same `icmp eq`. `case` expands to
+         ;; `equal` comparisons, so leaving these out made every `case` over
+         ;; an integer uncompilable.
+         ((equal method "eql") true)
+         ((equal method "equal") true)
+         ((equal method "equalp") true)
          ((equal method "/=") true)
          ;; `int->bignum`/`int->ratio`: always-exact widening into the two
          ;; arbitrary-precision types (`rt_int_to_bignum`/`rt_int_to_ratio`) — unary,
@@ -900,10 +908,31 @@ pub const SOURCE: &str = r#"
          ((equal method "lognot") true)
          (else (equal method "integer-length"))))
 
+;; The four integer method names that are all one `icmp eq`: CL's `=` plus
+;; the three equality aliases `registry::int_assoc` registers beside it.
+;; Split out of the lowering `icond` so the chain stays one line per shape
+;; rather than four `if`s deep.
+(defun int-equality-method? ((method string)) bool
+  (icond ((equal method "=") true)
+         ((equal method "eq") true)
+         ((equal method "eql") true)
+         ((equal method "equal") true)
+         (else (equal method "equalp"))))
+
+;; `sexpr`'s natively-compilable methods (`registry::sexpr_assoc` registers
+;; exactly these two). `eq` is an `icmp eq` on the tagged handle; `eql` is the
+;; `rt_sexpr_eql` shim, since it has to see inside `Float`/`bignum`/`ratio`
+;; boxes. The structural `equal`/`equalp` are free *functions*, not methods,
+;; so they reach their own shims through `rt_builtin_symbol` instead of here.
+(defun sexpr-native-method? ((method string)) bool
+  (icond ((equal method "eq") true)
+         (else (equal method "eql"))))
+
 (defun string-native-method? ((method string)) bool
   (icond ((equal method "length") true)
          ((equal method "ref")    true)
          ((equal method "eq")     true)
+         ((equal method "eql")    true)
          ((equal method "equal")  true)
          ((equal method "equalp") true)
          ((equal method "lt")     true)
@@ -1878,10 +1907,20 @@ pub const SOURCE: &str = r#"
       (let ((method (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
         (let ((rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
           (icond
-            ((if (equal type-name "sexpr") (equal method "eq") false)
+            ((if (equal type-name "sexpr") (sexpr-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
                (let ((b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                 (build-icmp-eq builder a b))))
+                 ;; `eq` is handle identity — one `icmp eq`. `eql` is not:
+                 ;; two separately boxed but equal `Float`/`bignum`/`ratio`
+                 ;; values are `eql` and not `eq`, so it goes through the
+                 ;; shim over the same `typelisp_rt::equality` the
+                 ;; interpreter calls.
+                 (if (equal method "eq")
+                     (build-icmp-eq builder a b)
+                     (let ((args-ptr (alloca-args builder 2)))
+                       (store-arg builder args-ptr 0 a)
+                       (store-arg builder args-ptr 1 b)
+                       (build-call builder (get-function m "rt_sexpr_eql") args-ptr 2))))))
             ((if (equal type-name "string") (string-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
                (if (equal method "length")
@@ -1895,12 +1934,19 @@ pub const SOURCE: &str = r#"
                        ;; `build-call` — see that function.
                        ((equal method "ref")
                         (raising-binop-call builder m cur-fn protect "rt_str_ref" a b))
-                       ((if (equal method "eq") true (equal method "equal"))
-                        ;; `eq` and `equal` share `rt_str_eq` (content
-                        ;; comparison) — the compiled story predates the
-                        ;; eq/eql/equal redesign's Rc-identity `eq`, and
-                        ;; `equal` (the prelude's `impl Eq string` body)
-                        ;; is the content comparison it implements.
+                       ((if (equal method "eq") true (equal method "eql"))
+                        ;; `eq`/`eql` on a string are *identity*
+                        ;; (`string_identity_eq`), and a compiled string is
+                        ;; the tagged `Value::Str` word, so identity is an
+                        ;; `icmp eq` on that word. These two shared
+                        ;; `rt_str_eq` (content) with `equal` until
+                        ;; 2026-08-18, which made compiled `(eq a b)`
+                        ;; answer true where the interpreter said false.
+                        (build-icmp-eq builder a b))
+                       ((equal method "equal")
+                        ;; `equal`: case-sensitive *content* comparison
+                        ;; (`rt_str_eq`) — the prelude's `impl Eq string`
+                        ;; body.
                         (let ((args-ptr (alloca-args builder 2)))
                           (store-arg builder args-ptr 0 a)
                           (store-arg builder args-ptr 1 b)
@@ -1994,7 +2040,7 @@ pub const SOURCE: &str = r#"
                              (build-icmp-gt builder a b2))
                             ((equal method ">=")
                              (build-icmp-ge builder a b2))
-                            ((if (equal method "=") true (equal method "eq"))
+                            ((int-equality-method? method)
                              (build-icmp-eq builder a b2))
                             ((equal method "/=")
                              (build-icmp-ne builder a b2))

@@ -1,6 +1,8 @@
 # Common Lisp との差分 — 未実装のクラス（型）とメソッド（関数）の全リスト
 
-作成: 2026-07-29 / 最終更新: 2026-08-05（§1.5・§2.17〜§2.20 をストリーム・パス名の実装後に更新）
+作成: 2026-07-29 / 最終更新: 2026-08-18（`catch`/`throw`/`unwind-protect`、`defun` の
+`&optional`/`&key`、`sort` の比較関数と項目ベースの `find`/`position`/`count`、`time`/`random-state`
+の実装を反映。§0 の (D3)、§1.5、§2.3、§2.7、§2.10、§2.15、§2.21、§3 を更新）
 
 このドキュメントは **ANSI Common Lisp（CLHS）に存在して typelisp に無いもの** を、クラス（型）と
 メソッド（関数・マクロ・特殊形）に分けて網羅列挙する。「CL 同等の表現力のために何を足すか」を
@@ -30,7 +32,12 @@
 - **(D2) `nil` が無い**: 偽は `false`、空リストは `Sexpr::Nil`、「値が無い」は `Option<T>`。
   CL の「nil を偽・空リスト・失敗の三役で使う」慣用が全滅する（[[typelisp-language-spec]]）。
 - **(D3) コンディションシステムを採らない**: 回復可能な失敗は `Result<T,E>`、回復不能は `panic`
-  （§7.1）。非局所脱出は `break`/`return`（直近ループのみ）だけ。
+  （language-design.md §7.1）。2026-08-16 に非採用が確定（同 §9）。ただし**非採用なのは
+  コンディション**（`define-condition`/`handler-bind`/`handler-case`/`invoke-restart`）であって
+  非局所脱出そのものではない——CL でもこの2つは別の機構で、静的な脱出 `break`/`return`
+  （直近ループのみ）に加え、動的な脱出 `catch`/`throw`/`unwind-protect` を同日に実装した
+  （language-design.md §7.5、[[typelisp-catch-throw-design]]）。落ちているのは
+  「ハンドラを積んでスタックを巻き戻さずに走らせる」層と restart だけ。
 - **(D4) 破壊的操作を原則採らない**: `nreverse`/`nconc`/`rplaca` 等は撤去済み
   （[[typelisp-vector-defstruct-revert]]）。書き換えは `setf` で場所を明示する。
 - **(D5) 動的束縛（special 変数）が無い**: `let` は常に字句束縛。CL の `*print-\*`/`*read-\*` 等の
@@ -108,7 +115,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | `logical-pathname` | ⛔ | 論理パス名は採用しない |
 | `stream` および全サブクラス（`file-stream`/`string-stream`/`broadcast-stream`/`concatenated-stream`/`echo-stream`/`two-way-stream`/`string-input-stream`/`string-output-stream`) | ✅ | 2026-08-02。ただしクラス階層ではなく**トレイト階層**（§2.18）。`synonym-stream` のみ無し |
 | `readtable` | ❌ | リーダマクロを登録する表が無い（リーダの構文は固定） |
-| `random-state` | ❌ | 乱数状態が値として無い（`random` は暗黙のグローバル状態を使う） |
+| `random-state` | ✅ | 2026-07-31。`random-state` 型（ネイティブの xorshift 状態）＋ `make-random-state` / `random-state-p` / `*random-state*`。`(random n &optional state)` で状態を明示できる |
 | `restart` | ⛔ | (D3) |
 | `condition` および全サブクラス（`serious-condition`/`error`/`warning`/`simple-condition`/`arithmetic-error`/`division-by-zero`/`floating-point-*`/`cell-error`/`unbound-variable`/`unbound-slot`/`undefined-function`/`control-error`/`file-error`/`package-error`/`parse-error`/`print-not-readable`/`program-error`/`reader-error`/`storage-condition`/`stream-error`/`end-of-file`/`type-error`/`style-warning` …） | ⛔ | (D3)。代替は `Error` トレイト＋操作ごとの具象エラー型（`ParseIntError`/`ParseFloatError`/`ReadError`/`EvalError`）＋ユーザ定義エラー型（functions.md §7.1）。**CL の標準コンディション型に一対一で対応する型は無い** |
 
@@ -158,10 +165,10 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | `shiftf` / `rotatef` | ✅ | 2026-07-30 実装（`Checker::check_rotatef_shiftf`）。上記どの place 種でも使えるが、読み取り型と書き込み型が非対称な place（`HashTable<K,V>` の `get`→`Option<V>`／`set`→`V`）をまたぐ回転は型エラーになる（CL の untyped `gethash` と違い静的型があるため） |
 | `incf` / `decf` | ✅ | 2026-07-30 実装（`Checker::check_incf_decf`）。`delta` 省略時は `1` |
 | `push` / `pop` | ⚠️ | `Vector<T>` のメソッドとして存在（`(push vec item)`、受け手が先）。2026-07-30、`(push item vec)` という CL の引数順も同名のまま両立するようにした（`Checker::try_instance_method_swapped` — 通常の受け手優先解決が失敗した場合だけ引数を入れ替えて再試行する2引数汎用フォールバック）。`Vector<T>` は参照型（ヒープ上で直接変異）なので CL のような setf 展開は不要。`pushnew` / `remf` は未実装 |
-| `block` / `return-from` | ⚠️ | `return` はあるが **直近のループからしか脱出できない**。名前付きブロックも関数からの早期リターンも無い |
+| `block` / `return-from` | ⚠️ | `return` はあるが **直近のループからしか脱出できない**。名前付きブロックも関数からの早期リターンも無い。字句的な入れ子を跨ぐ脱出が要る場合は `catch`/`throw`（動的）で代用する |
 | `tagbody` / `go` | ⛔ | goto |
-| `catch` / `throw` | ⛔ | (D3) |
-| `unwind-protect` | ⛔ | (D3)。後始末を保証する構文が無いのは、ファイル等のリソースを持つようになったときに効いてくる |
+| `catch` / `throw` | ✅ | 2026-08-16 実装（syntax.md §8 / language-design.md §7.5）。**動的**な脱出で、関数を何段跨いでも同じタグの `catch` に届く。CL との差は**タグがリテラルシンボル限定**（評価されない）で、そのシンボルが飛ぶ値の型を運ぶこと（`Checker::throw_tags`。計算したタグでは突き合わせる型が無くなる）。`throw` の型は `!`、`(catch 'tag e)` の型は `e` の型とタグの型の合流 |
+| `unwind-protect` | ✅ | 2026-08-16 実装。`cleanup` は `protected` をどう抜けても走る——正常終了・`throw`・`panic` に加えて `break`/`return` でも。interpreted / compiled 両経路（compiled 側は「上げうる呼び出しを保護経由にする」方式、[[typelisp-compiled-catch-throw]]） |
 | `destructuring-bind` | ❌ | `defmacro` のラムダリストでは分配束縛ができる（`&optional`/`&key` 含む）が、式としての `destructuring-bind` は無い |
 | `prog` / `prog*` / `prog1` / `prog2` | ❌ | `progn` ✅。`prog1`（最初の値を返す）は素直に書けるので優先度は低い |
 | `typecase` / `etypecase` / `ctypecase` | ⛔ | (D1)。`match` が相当 |
@@ -206,13 +213,16 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 
 ### 2.7 コンディション（CLHS 9）
 
-全体が ⛔ (D3)。`Result<T,E>` + `match` + `panic` で書き換える方針。
+全体が ⛔ (D3)。`Result<T,E>` + `match` + `panic` で書き換える方針で、2026-08-16 に非採用が確定した
+（language-design.md §9）。ただし**非局所脱出は別機構として実装済み**（`catch`/`throw`/
+`unwind-protect`、§2.3）——CL でもこの2つは別の機構なので、ここで落ちているのは
+「ハンドラを積んで、スタックを巻き戻さずにハンドラを走らせる」層と restart だけ。
 
 | CL | 状態 |
 |---|---|
 | `define-condition` / `make-condition` | ⛔（`defstruct`/`defenum` + `impl Error` が代替） |
 | `signal` / `error` / `cerror` / `warn` / `break` | ⛔（`panic` のみ。**警告を出して続行する仕組みが無い**） |
-| `handler-case` / `handler-bind` / `ignore-errors` | ⛔（`match` で `Result` を分岐） |
+| `handler-case` / `handler-bind` / `ignore-errors` | ⛔（`match` で `Result` を分岐）。`panic` は 2026-08-16 以降 abort でなく unwind するので `unwind-protect` の cleanup は走るが、**捕まえて継続する手段は無い**（`catch` が受けるのは `throw` だけ） |
 | `restart-case` / `restart-bind` / `with-simple-restart` / `invoke-restart` / `find-restart` / `compute-restarts` / `abort` / `continue` / `muffle-warning` / `store-value` / `use-value` | ⛔ |
 | `assert` | ❌（コンディション抜きの「条件が偽なら panic」なら追加可能） |
 | `invoke-debugger` / `*debugger-hook*` | ⛔ |
@@ -270,7 +280,7 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 | `numerator` / `denominator` | ✅ | |
 | `complex` `realpart` `imagpart` `conjugate` `phase` `cis` | ❌ | 複素数が無いため |
 | `float-sign` `float-digits` `float-precision` `decode-float` `integer-decode-float` `scale-float` `float-radix` | ❌ | 浮動小数点の内部表現へのアクセス |
-| `random` | ⚠️ | `(random n)` の `i32` 版のみ。`random-state` も `make-random-state` も `*random-state*` も無く、**シードを固定した再現可能な乱数が作れない** |
+| `random` | ⚠️ | **2026-07-31 に `random-state` 一式を追加**。`(random n &optional state)`（`i32` のみ）／`make-random-state`（引数なし＝新しい状態、状態を渡す＝その複製）／`random-state-p`／`*random-state*`（(D5) のため動的束縛でなく代入可能なグローバル）。状態は xorshift64、interpreted と compiled で同じ列を返す。残る差は**シード値を外から与えられない**こと——`make-random-state-fresh` は壁時計から採るので、同一プロセス内で `make-random-state` による複製を使えば列を再生できるが、実行を跨いで再現はできない（CL の `(make-random-state nil)`/`t` の区別も無い） |
 
 **ビット演算** — 2026-07-31実装:
 
@@ -372,9 +382,9 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `length` `elt` `subseq` `reverse` `sort` `find` `position` `count` `remove-if` `every` `some` `reduce` `map` | ✅ | ただし `find`/`position`/`count` は**述語版だけ**（CL の `-if` 系に相当）で、値で探す `(find item seq)` は無い。`some` は `any`、`reduce` は `foldl`/`foldr` |
-| `:key` `:test` `:test-not` `:start` `:end` `:from-end` `:count` | ❌ | **キーワード引数が関数に無い**（`&optional`/`&key` は `defmacro` のみ実装、`defun`/`lambda` は `&rest` のみ）。この1点で CL のシーケンス API の柔軟性がまるごと落ちる |
-| `sort` / `stable-sort` の述語引数 | ❌ | typelisp の `sort` は `Ord A` 境界で**昇順固定**。比較関数を渡せないので降順にもキー指定にもできない（実装は挿入ソートで安定） |
+| `length` `elt` `subseq` `reverse` `sort` `find` `position` `count` `remove-if` `every` `some` `reduce` `map` | ✅ | 2026-07-31 に**項目ベース版 `find`/`position`/`count`**（`(find x it)`、`Eq A` 境界。CL のデフォルト `:test` = `eql` に相当）を追加し、述語版は `find-if`/`position-if`/`count-if` の名で並立。`some` は `any`、`reduce` は `foldl`/`foldr` |
+| `:key` `:test` `:test-not` `:start` `:end` `:from-end` `:count` | ❌ | キーワード引数**機構**は 2026-07-29 に入った（`defun` が `&optional`/`&key` を取れる。`defmacro` は 2026-07-24 から。`lambda` と `defmethod` は今も `&rest` のみ）が、**シーケンス API 側がまだ受けていない**。等価性は `Eq` トレイト固定なので `:test`/`:key` はトレイト境界とも噛み合わせが要る |
+| `sort` / `stable-sort` の述語引数 | ✅ | 2026-07-31 に CL 本来の `(sort sequence predicate)` へ変更。`(sort it cmp)`、`cmp` は「第1引数が第2引数より真に前」で `true`。非破壊（新しい `Vector<A>` を返す）かつ安定な挿入ソートなので `stable-sort` は同じものになる |
 | `merge` | ❌ | |
 | `copy-seq` / `fill` / `replace` / `map-into` | ❌ | |
 | `concatenate` | ❌ | `append` は 2引数のみ |
@@ -469,8 +479,8 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `require` / `provide` / `*modules*` | ⚠️ | `module`/`use`＋ファイル↔モジュール対応が相当 |
 | `*features*` / `#+` / `#-` | ⚠️ | 2026-07-30実装。`#+`/`#-`（`and`/`or`/`not`合成式込み）をリーダに追加。`*features*`はCLと違い**読み込み中に書き換え不可の固定集合**（全フォームを読んでからチェック/評価する既存アーキテクチャのため）。デフォルトはホストOS/アーキテクチャ＋`:typelisp`、`typl`の`--feature NAME`で追加可能 |
 | `compile-file-pathname` / `*compile-file-pathname*` / `*load-pathname*` 等 | ❌ | |
-| `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ❌ | **時間の計測手段が無い**（ベンチマークが書けない） |
-| `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ❌ | **日時が扱えない** |
+| `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ⚠️ | 2026-07-31 実装。`get-internal-real-time`（`i64`、マイクロ秒＝`internal-time-units-per-second` は 1_000_000）と、それを使う `time` マクロ（経過実時間を1行印字して `form` の値をそのまま返す）。**`get-internal-run-time`（CPU 時間）は無い**——OS 固有の呼び出しが要るうえ、CL も `time` の報告書式を規定していないので実時間1本にした |
+| `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ⚠️ | `get-universal-time` のみ 2026-07-31 実装（`i64`、CL の紀元 1900-01-01 UTC からの秒）。**分解・合成（`decode-`/`encode-`/`get-decoded-time`）は無い**ので、日時として読める形にはできない |
 | `sleep` | ❌ | |
 | `room` / `ed` / `dribble` / `apropos` / `apropos-list` / `inspect` / `describe` | ❌ | 対話環境向け。REPL があるので `apropos`/`describe` は相性が良い |
 | `documentation` / docstring | ✅ | 2026-07-30実装。`defun`/`defmethod`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftrait` が docstring を持てる（位置は各フォームの CL 規則通り）。`documentation` は名前を評価せず解決する特殊形（`quote`/`compile` と同様）で check 時に定数へ畳み込まれる。LSP hover にも統合済み。`(setf documentation)` は対象外（functions.md §17） |
@@ -484,13 +494,19 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 ## 3. 横断的な欠落（個別の関数より効いてくるもの）
 
 上の表は関数単位だが、実際には**1つの機構が無いために関数が束で落ちている**箇所がある。
-足すなら効果が大きい順に:
+作成時（2026-07-29）に「足すなら効果が大きい順」で並べた 1〜7 と 9 はその順序のまま残し、
+解消したものに取り消し線を引いて、いつ何で解消したかを書き足してある（8 は 2026-08-18 の
+見直しで追加した項目）。**いま生きているのは 2（の後半）・4・7（の残差）・8 の4つ**で、
+丸ごと残っているのは 4 と 8 だけ。
 
-1. **ストリームとファイル I/O**（§2.17/§2.18）— CLHS 3章ぶんが丸ごと落ちている。現状 typelisp が
-   触れる外界は「標準入力から1行」と「標準出力へ書く」だけで、ファイルを読むプログラムが書けない。
-2. **関数の `&optional` / `&key`** — `defmacro` には実装済み（2026-07-24）だが `defun`/`lambda` は
-   `&rest` のみ。このため CL のシーケンス API の `:key`/`:test`/`:start`/`:end`、
-   `make-hash-table :test`、BOA コンストラクタなどが**構造的に書けない**。
+1. ~~**ストリームとファイル I/O**（§2.17/§2.18）~~ — 2026-08-02（ストリーム）と 2026-08-05
+   （パス名・`read-sexpr`・`format` の出力先）で解消。CLHS 21章はトレイト階層として、
+   19/20章はパス名層として入っている。残差は §2.18 のバイナリ I/O・`listen` 系だけ。
+2. ⚠️ **関数の `&optional` / `&key`** — 機構としては 2026-07-29 に解消（`defun` が両方取れる。
+   `defmacro` は 2026-07-24 から）。ただし **`lambda` と `defmethod` はいまも `&rest` のみ**で、
+   既存のシーケンス API も `:key`/`:test`/`:start`/`:end` を受けていない（§2.15）。
+   `make-hash-table :test` と BOA コンストラクタも同様に未着手（§2.16/§2.6）——
+   「書けない」から「書いていない」に変わった段階。
 3. ~~**汎用 place（`setf` 展開子）**~~ — 2026-07-30 解消。place は変数・`変数::field` に加え
    `(accessor recv key...)` 形の呼び出し形（`recv` の静的型が `set-{accessor}` を持てば任意の
    アクセサ名で成立、ユーザ定義型も対象）に対応、`incf`/`decf`/`rotatef`/`shiftf`/
@@ -500,12 +516,21 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
    CL の API 設計は多値を前提にしている箇所が多い。typelisp は `Option`/`cons-cell` で個別に
    回避しているが、CL コードの移植では毎回書き換えが要る（`gethash` 相当は `get`→`Option<V>` で
    解決済み、`floor` 相当は2026-07-29に `floor-div` 等→`cons-cell` で解決済み。§2.10 参照）。
-5. **数値ライブラリの基礎**（§2.10）— `max`/`min`/`zerop`/`evenp`/超越関数/ビット演算が無い。
-   一つ一つは小さいが、数を数える程度のコードでも欠落に当たる。単純に prelude へ足せるものが多い。
-6. **述語や比較関数を引数に取れないコレクション API** — `sort` に比較関数を渡せず、
-   `find`/`position`/`count` は述語版しかなく値版が無い。2 と合わせて解消すべき。
-7. **時間・乱数の再現性**（§2.21/§2.10）— `time` も `get-universal-time` も `random-state` も無い。
-8. ~~**`*print-circle*` / `*print-level*` / `*print-length*`**~~ — **2026-07-29 実装済み**
+5. ~~**数値ライブラリの基礎**（§2.10）~~ — 2026-07-31 に解消。可変長 `+ - * / < <= > >=`（0/1引数版
+   込み）・`max`/`min`・`zerop`/`plusp`/`minusp`/`evenp`/`oddp`・超越関数一式・`pi`・ビット演算
+   （`logand` 系／`byte`/`ldb`/`dpb`/`boole`）を、JIT/AOT 対応込みで実装。残差は複素数と
+   浮動小数点の内部表現アクセス、および `most-positive-fixnum` 等の定数。
+6. ~~**述語や比較関数を引数に取れないコレクション API**~~ — 2026-07-31 に解消。`sort` は CL 本来の
+   `(sort sequence predicate)` になり、項目ベースの `find`/`position`/`count` が述語版
+   （`-if` 系）と並立した。残るのは 2 の後半、つまり `:key`/`:test` 等のキーワード引数。
+7. ⚠️ **時間・乱数の再現性**（§2.21/§2.10）— 2026-07-31 に `time`/`get-internal-real-time`/
+   `get-universal-time` と `random-state` 一式が入った。残差は CPU 時間（`get-internal-run-time`）、
+   日時の分解・合成（`decode-universal-time` 等）、そして**乱数のシードを外から与える手段**——
+   同一プロセス内なら `make-random-state` の複製で列を再生できるが、実行を跨いだ再現はできない。
+8. **多次元配列・集合演算・文字列ユーティリティ**（§2.13/§2.12/§2.14）— いずれも単独の機構では
+   なく「同じ層の関数が束で無い」箇所。`make-array`/`aref` 一式、`union`/`intersection`/`adjoin`、
+   `string-trim`/`search`/`concatenate`/`split` 相当。CL コードの移植で真っ先に当たるのはここ。
+9. ~~**`*print-circle*` / `*print-level*` / `*print-length*`**~~ — **2026-07-29 実装済み**
    （functions.md §15.3、[implementation-log.md](implementation-log.md) の該当節）。着手前は
    「循環構造を印字するとプロセスが落ちる」状態だった——`defstruct` のフィールドを `setf` で
    自分自身へ向けた値を `println` するとスタックオーバーフローで abort することを確認しており、
@@ -515,7 +540,14 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 
 ここに並べた ❌ は**すべてが TODO ではない**。[TODO.md](TODO.md) の「残っている作業」は現時点で
 空であり、この一覧は「CL と比べたときの残差はどこか」を測るための地図として作った。着手する
-場合は §3 の順序が費用対効果の目安になる（優先度は筆者の見立てで、確定した方針ではない）。
+場合は §3 の（取り消し線の付いていない）項目が費用対効果の目安になる（優先度は筆者の見立てで、
+確定した方針ではない）。
+
+この地図は放っておくと実装より古くなる。実際、2026-08-18 の見直しでは、作成時に挙げた §3 の
+8項目のうち5項目がすでに解消済みで、そのうち3項目（1・5・6）は解消から今回まで表に反映されて
+いなかった——`defun` の `&optional`/`&key` に至っては、この表を書いた**その日の夜**に入っている。
+**表を根拠に「無い」と判断する前に、必ず `src/check/registry.rs` / `src/prelude.rs` /
+`src/check/checker.rs` を grep して確かめること。**
 
 ⛔ の項目については、[language-design.md](language-design.md) §7・§8・§9（採用しないと決めた
 機能）が一次情報。CL に同名の機能があることを理由にこれらを再検討する場合は、

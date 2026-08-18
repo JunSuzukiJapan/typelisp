@@ -1,0 +1,13 @@
+[package]
+name = "typelisp-abi"
+version = "0.0.2"
+edition = "2021"
+
+# The compiled-code calling convention, below every crate that defines `rt_*`
+# shims (`typelisp-rt`, `typelisp-print`). See the crate doc comment for why
+# it is not simply part of `typelisp-rt`.
+[lib]
+name = "typelisp_abi"
+
+[dependencies]
+typelisp-mem = { path = "../typelisp-mem" }

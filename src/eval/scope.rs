@@ -137,6 +137,26 @@ impl ModuleScope {
         self.get_or_create(name.parent()).types.insert(name.last_segment().to_string(), TypeEntry::Enum(def));
     }
 
+    /// The name of `variant` of the enum registered at `name`, or `None` when
+    /// no enum is registered there.
+    ///
+    /// The printer's question ([`typelisp_print::PrintEnv::enum_variant_name`]):
+    /// an enum box stores its type key and variant *index*, never the name.
+    /// A direct walk down the module chain rather than
+    /// [`Self::collect_struct_and_enum_types`], because this is asked once per
+    /// enum *value* rendered and that one builds a map of every type in the
+    /// program.
+    pub(crate) fn enum_variant_name(&self, name: &Path, variant: usize) -> Option<String> {
+        let mut ns = self;
+        for seg in name.parent() {
+            ns = ns.children.get(seg)?;
+        }
+        match ns.types.get(name.last_segment())? {
+            TypeEntry::Enum(def) => def.variants.get(variant).map(|(n, _)| n.clone()),
+            TypeEntry::Struct(_) => None,
+        }
+    }
+
     /// Resolve a `Call`/`FnRef` reference's `written` name segments from its
     /// lexical `home` module — the runtime re-derivation of
     /// `Checker::resolve_fn`/`resolve_fn_path` (checker.rs:1061-1093).

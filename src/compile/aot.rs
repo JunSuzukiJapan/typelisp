@@ -48,7 +48,7 @@ use std::rc::Rc;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine};
-use inkwell::values::CallSiteValue;
+use inkwell::values::{CallSiteValue, InstructionOpcode, Operand};
 use inkwell::AddressSpace;
 use inkwell::OptimizationLevel;
 
@@ -233,10 +233,32 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         global_init_names.push(internal_name);
     }
 
+    // Which types have a compiled `print-object`, for the printer's AOT
+    // startup registration. Read off `node_names` rather than off the method
+    // tables because the address has to name a function *this file* compiled:
+    // `compile-file` compiles every top-level body in the file, so an `impl
+    // print-object` in it is here whether or not anything calls it.
+    let print_objects: Vec<(String, String)> = node_names
+        .iter()
+        .filter_map(|(node, symbol)| {
+            let type_name = node.strip_suffix("::print-object")?;
+            let path = Path::from_segments(type_name.split("::").map(str::to_string).collect());
+            Some((crate::type_key::type_key_of(&path), symbol.clone()))
+        })
+        .collect();
+
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let result = {
         let m = module.borrow();
-        build_main_wrapper(ctx, &m, &global_init_names, &interp.vtable_descriptors(), &interp.upcast_descriptors())
+        build_main_wrapper(
+            ctx,
+            &m,
+            &global_init_names,
+            &interp.vtable_descriptors(),
+            &interp.upcast_descriptors(),
+            &interp.enum_variant_descriptors(),
+            &print_objects,
+        )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
             .and_then(|()| write_executable(&m, output_path))
     };
@@ -282,6 +304,8 @@ fn build_main_wrapper(
     global_init_names: &[String],
     vtables: &[(u32, Vec<(Path, String)>)],
     upcasts: &[(u32, u32, u32)],
+    enum_variants: &[(String, usize, String)],
+    print_objects: &[(String, String)],
 ) -> Result<(), String> {
     let tl_main = module
         .get_function(ENTRY_POINT_INTERNAL_NAME)
@@ -369,6 +393,69 @@ fn build_main_wrapper(
                 .map_err(|e| format!("failed to build rt_upcast_set call: {}", e))?;
         }
     }
+    // The printer's two program facts (`typelisp_print::aot`): an enum's
+    // variant *names* and each type's `print-object`, neither of which a
+    // standalone executable can look up the way the interpreter does.
+    //
+    // Emitted only when this module actually calls a printing shim. That is
+    // not an optimisation: a reference to the printer is what makes the
+    // linker pull the whole directive engine into the executable, so a
+    // program that never prints must not make one. Measured, on a
+    // `(defun main () i32 42)`: 3,530,224 bytes with no printer symbol in it
+    // at all when this guard does not trip, 3,877,648 and 124 of them when it
+    // does.
+    if module_calls_any(module, &PRINT_SHIMS) {
+        let i64_ty = ctx.i64_type();
+        // A `(pointer, length)` pair per string, from a module-level constant
+        // — no heap involved, so this can run before `rt_heap_init` like the
+        // two tables above.
+        let literal = |builder: &inkwell::builder::Builder<'static>, text: &str| -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), String> {
+            let g = builder
+                .build_global_string_ptr(text, "print_reg_str")
+                .map_err(|e| format!("failed to build a printer-registration string: {}", e))?;
+            Ok((
+                g.as_pointer_value().const_to_int(i64_ty),
+                i64_ty.const_int(text.len() as u64, false),
+            ))
+        };
+        let call = |builder: &inkwell::builder::Builder<'static>, name: &str, words: &[inkwell::values::IntValue<'static>]| -> Result<(), String> {
+            let f = module
+                .get_function(name)
+                .ok_or_else(|| format!("internal error: {} not declared in module", name))?;
+            let args_ptr = builder
+                .build_alloca(i64_ty.array_type(words.len() as u32), "print_reg_args")
+                .map_err(|e| format!("failed to alloca printer-registration args: {}", e))?;
+            for (i, w) in words.iter().enumerate() {
+                let p = unsafe {
+                    builder
+                        .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "print_reg_arg_ptr")
+                        .map_err(|e| format!("failed to build printer-registration gep: {}", e))?
+                };
+                builder.build_store(p, *w).map_err(|e| format!("failed to store printer-registration arg: {}", e))?;
+            }
+            builder
+                .build_call(f, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u32 as u64, false).into()], "print_reg_result")
+                .map_err(|e| format!("failed to build {} call: {}", name, e))?;
+            Ok(())
+        };
+        for (key, variant, name) in enum_variants {
+            let (key_ptr, key_len) = literal(&builder, key)?;
+            let (name_ptr, name_len) = literal(&builder, name)?;
+            call(
+                &builder,
+                "rt_print_enum_variant",
+                &[key_ptr, key_len, i64_ty.const_int(*variant as u64, false), name_ptr, name_len],
+            )?;
+        }
+        for (key, symbol) in print_objects {
+            let target = module.get_function(symbol).ok_or_else(|| {
+                format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
+            })?;
+            let (key_ptr, key_len) = literal(&builder, key)?;
+            let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(i64_ty);
+            call(&builder, "rt_print_object_method", &[key_ptr, key_len, fn_ptr])?;
+        }
+    }
     // AOT's counterpart to the JIT path's `Interp::eval` calling
     // `runtime::set_active_heap` before every compiled call — see
     // `runtime::rt_heap_init`'s doc comment for why a standalone executable
@@ -407,6 +494,59 @@ fn build_main_wrapper(
         .map_err(|e| format!("failed to truncate exit code: {}", e))?;
     builder.build_return(Some(&exit_code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
     Ok(())
+}
+
+/// The names of the printing shims (`typelisp_print::shim`), which is what
+/// "this program prints" means at the IR level.
+const PRINT_SHIMS: [&str; 11] = [
+    "rt_format",
+    "rt_print",
+    "rt_println",
+    "rt_pprint",
+    "rt_pprint_block_start",
+    "rt_pprint_block_end",
+    "rt_pprint_newline",
+    "rt_pprint_indent",
+    "rt_pprint_tab",
+    "rt_pprint_pop",
+    "rt_pprint_list_exhausted",
+];
+
+/// Whether any compiled body in `module` calls one of `names`.
+///
+/// Asked of [`PRINT_SHIMS`] to decide whether to emit the printer's startup
+/// registration at all. It has to be a question about the *emitted calls*
+/// rather than about the source: every `rt_*` shim is forward-declared in
+/// every module (see `compile_file`), so the declaration's presence says
+/// nothing, and a program that never prints must not reference the printer —
+/// referencing it is exactly what makes the linker pull the directive engine
+/// in (see `typelisp_print`'s crate doc comment).
+fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
+    let mut f = module.get_first_function();
+    while let Some(func) = f {
+        for block in func.get_basic_blocks() {
+            let mut instr = block.get_first_instruction();
+            while let Some(i) = instr {
+                if i.get_opcode() == InstructionOpcode::Call {
+                    // A direct call's callee is its *last* operand; under
+                    // opaque pointers it is the callee global itself, whose
+                    // name is the symbol the linker will look for.
+                    let n = i.get_num_operands();
+                    if let Some(Operand::Value(v)) = n.checked_sub(1).and_then(|last| i.get_operand(last)) {
+                        if v.is_pointer_value() {
+                            let name = v.into_pointer_value().get_name().to_string_lossy().into_owned();
+                            if names.contains(&name.as_str()) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                instr = i.get_next_instruction();
+            }
+        }
+        f = func.get_next_function();
+    }
+    false
 }
 
 /// The path to the `typelisp-rt` crate's `staticlib` artifact, which
@@ -538,7 +678,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[]).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[]).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -577,7 +717,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[]).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[]).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

@@ -1,0 +1,23 @@
+[package]
+name = "typelisp-print"
+version = "0.0.2"
+edition = "2021"
+
+# The CL printer — `format`'s directive engine (CLHS 22.3) and the pretty
+# printer (22.2) — as its own crate rather than a module of `typelisp-rt`.
+#
+# The split is about what a linked executable pays for. `compile-file` links
+# `typelisp-rt`'s `staticlib`, and the linker pulls archive *members*, so a
+# subsystem in its own crate is either wholly pulled in (some `rt_format`-alike
+# is called) or wholly absent. Left as a module of a 5,000-line `lib.rs` it
+# would share codegen units with `rt_cons`, and every program would carry the
+# directive parser.
+[lib]
+name = "typelisp_print"
+
+[dependencies]
+# `~r`/`~d`'s radix printing and `~f`/`~e`/`~$`'s float formatting reach for
+# `ToPrimitive`; nothing else here needs the numeric stack.
+num-traits = "0.2"
+typelisp-abi = { path = "../typelisp-abi" }
+typelisp-mem = { path = "../typelisp-mem" }

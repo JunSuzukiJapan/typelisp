@@ -1,0 +1,20 @@
+[package]
+name = "typelisp-read"
+version = "0.0.2"
+edition = "2021"
+
+# The CL reader, as its own crate rather than a module of `typelisp`, for the
+# same reason `typelisp-print` is one: a compiled function that calls `read`
+# has to name a shim, and the shim cannot reach up into a crate that depends
+# on the runtime. Below the checker and the interpreter, which is where the
+# reader has always sat conceptually — it turns text into `Value`s and knows
+# nothing about types.
+[lib]
+name = "typelisp_read"
+
+[dependencies]
+# `#xFF`/`1/3` and the bignum overflow path.
+num-bigint = "0.4"
+num-rational = "0.4"
+typelisp-abi = { path = "../typelisp-abi" }
+typelisp-mem = { path = "../typelisp-mem" }

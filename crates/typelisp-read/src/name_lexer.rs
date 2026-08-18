@@ -14,7 +14,7 @@
 /// sequence that simply contains no `ColonColon`/`Comma`, and callers that
 /// only look for those leave such tokens alone).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NameTok<'a> {
+pub enum NameTok<'a> {
     Ident(&'a str),
     ColonColon,
     Lt,
@@ -38,20 +38,20 @@ pub(crate) enum NameTok<'a> {
 }
 
 /// Tokenizes a name string left to right.
-pub(crate) struct NameLexer<'a> {
+pub struct NameLexer<'a> {
     src: &'a str,
     pos: usize,
 }
 
 impl<'a> NameLexer<'a> {
-    pub(crate) fn new(src: &'a str) -> Self {
+    pub fn new(src: &'a str) -> Self {
         NameLexer { src, pos: 0 }
     }
 
     /// Byte offset just past the most recently returned token (i.e. where
     /// the next token, if any, begins). Lets a caller slice `src` between
     /// token boundaries without re-deriving them.
-    pub(crate) fn pos(&self) -> usize {
+    pub fn pos(&self) -> usize {
         self.pos
     }
 }

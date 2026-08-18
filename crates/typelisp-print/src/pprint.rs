@@ -45,13 +45,13 @@
 
 use std::collections::HashMap;
 
-use crate::mem::{Heap, Value};
+use typelisp_mem::{Heap, Value};
 
-use super::format::{Pre, RenderCtx, Renderer};
+use crate::format::{Pre, RenderCtx, Renderer};
 
 /// The kinds of conditional newline `pprint-newline` (and `~_`) can emit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum NewlineKind {
+pub enum NewlineKind {
     Linear,
     Fill,
     Miser,
@@ -61,14 +61,14 @@ pub(crate) enum NewlineKind {
 /// `pprint-indent`'s two origins: the column the block started at (`:block`)
 /// or the column output has reached (`:current`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum IndentKind {
+pub enum IndentKind {
     Block,
     Current,
 }
 
 /// `pprint-tab`'s four flavors (`~t` / `~:t` / `~@t` / `~:@t` inside a block).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TabKind {
+pub enum TabKind {
     Line,
     Section,
     LineRelative,
@@ -77,7 +77,7 @@ pub(crate) enum TabKind {
 
 /// One pretty-printer instruction anchored in an [`Out`].
 #[derive(Clone, Debug)]
-pub(crate) enum Op {
+pub enum Op {
     /// Opens a logical block. `prefix`/`suffix` are emitted by [`layout`]
     /// (not held in the text) so that a block whose prefix lands at a
     /// different column than it was built at still measures correctly. When
@@ -95,11 +95,11 @@ pub(crate) enum Op {
 /// (`Interp::pretty_opts`). typelisp has no dynamic binding, so these are
 /// ordinary assignable globals rather than CL's special variables.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Opts {
-    pub(crate) pretty: bool,
-    pub(crate) margin: usize,
+pub struct Opts {
+    pub pretty: bool,
+    pub margin: usize,
     /// `None` when `*print-miser-width*` is 0 or negative ("off", CL's `nil`).
-    pub(crate) miser: Option<usize>,
+    pub miser: Option<usize>,
 }
 
 impl Default for Opts {
@@ -111,7 +111,7 @@ impl Default for Opts {
 /// The `*print-right-margin*` default, matching the conventional 80-column
 /// line every CL implementation falls back to when the stream can't report a
 /// width.
-pub(crate) const DEFAULT_MARGIN: usize = 80;
+pub const DEFAULT_MARGIN: usize = 80;
 
 /// A text buffer plus the pretty-printer ops anchored inside it.
 ///
@@ -121,13 +121,13 @@ pub(crate) const DEFAULT_MARGIN: usize = 80;
 /// (`~(…~)`'s case conversion, `~<…~>`'s justification segments) are spliced
 /// back with [`Out::append`], which re-anchors their ops.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Out {
-    pub(crate) text: String,
+pub struct Out {
+    pub text: String,
     ops: Vec<(usize, Op)>,
 }
 
 impl Out {
-    pub(crate) fn new() -> Out {
+    pub fn new() -> Out {
         Out::default()
     }
 
@@ -135,17 +135,17 @@ impl Out {
         self.text.push_str(s);
     }
 
-    pub(crate) fn push(&mut self, c: char) {
+    pub fn push(&mut self, c: char) {
         self.text.push(c);
     }
 
-    pub(crate) fn op(&mut self, op: Op) {
+    pub fn op(&mut self, op: Op) {
         self.ops.push((self.text.len(), op));
     }
 
     /// Whether any pretty-printer op was recorded — when false the text is
     /// already the final output and [`layout`] is skipped.
-    pub(crate) fn is_plain(&self) -> bool {
+    pub fn is_plain(&self) -> bool {
         self.ops.is_empty()
     }
 
@@ -158,7 +158,7 @@ impl Out {
     }
 
     /// Appends `other`, shifting its op anchors by the current text length.
-    pub(crate) fn append(&mut self, other: Out) {
+    pub fn append(&mut self, other: Out) {
         let base = self.text.len();
         self.text.push_str(&other.text);
         self.ops.extend(other.ops.into_iter().map(|(at, op)| (at + base, op)));
@@ -229,7 +229,7 @@ struct Block {
 }
 
 /// Lays `doc` out, starting at column `start_col`, under `opts`.
-pub(crate) fn layout(doc: &Out, start_col: usize, opts: &Opts) -> String {
+pub fn layout(doc: &Out, start_col: usize, opts: &Opts) -> String {
     let items = flatten(doc);
     let margin = if opts.margin == 0 { usize::MAX } else { opts.margin };
     let metrics = Metrics::new(&items);
@@ -613,7 +613,7 @@ fn section_ends(items: &[Item<'_>], ends: &HashMap<usize, usize>) -> HashMap<usi
 
 /// How a list is laid out by [`render`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Style {
+pub enum Style {
     /// The default `*print-pprint-dispatch*` behavior: word-wrap ordinary
     /// lists (`Fill`), but lay code-shaped forms out with their head and
     /// distinguished arguments on the first line (see [`code_style`]).
@@ -630,7 +630,7 @@ pub(crate) enum Style {
 /// Atoms are rendered exactly as `~a`/`~s` render them (`standard` selects the
 /// `prin1` reader syntax), so the only difference pretty printing makes is
 /// where the line breaks fall.
-pub(crate) fn render(
+pub fn render(
     heap: &mut Heap,
     ctx: RenderCtx<'_>,
     v: Value,

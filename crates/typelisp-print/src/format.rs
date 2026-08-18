@@ -1,5 +1,5 @@
 //! The Common Lisp `format` directive engine (CLHS §22.3), shared by the
-//! `format`/`print`/`println` special forms (`crate::check::checker`) via
+//! `format`/`print`/`println` special forms (`typelisp::check::checker`) via
 //! `Interp::run_format`. A control string is parsed once into a [`Node`] tree
 //! (so block directives — `~[…~]`, `~{…~}`, `~<…~>`, `~(…~)` — and their
 //! clause separators nest properly) and then interpreted against the argument
@@ -21,7 +21,7 @@
 //!
 //! The pretty-printer directives (and the `*print-pretty*` path of
 //! `~A`/`~S`/`~W`) record [`Op`]s on the output buffer rather than emitting
-//! text directly; [`crate::eval::pprint`] turns the finished buffer into laid
+//! text directly; [`crate::pprint`] turns the finished buffer into laid
 //! out text. With `*print-pretty*` false nothing records an op and the buffer
 //! is returned exactly as before.
 //!
@@ -32,18 +32,17 @@
 
 use std::collections::HashMap;
 
-use crate::mem::{Heap, Value};
-use crate::Path;
+use typelisp_mem::{Heap, Value};
 
-use super::interp::EnumDef;
-use super::pprint::{self, IndentKind, NewlineKind, Op, Opts, Out, Style, TabKind};
+use crate::pprint::{self, IndentKind, NewlineKind, Op, Opts, Out, Style, TabKind};
+use crate::PrintEnv;
 
 /// Entry point: interpret `control` against the `Sexpr` argument list `args`,
 /// returning the buffer it produced (text plus any pretty-printer ops — see
 /// [`finish`], which turns one into text). Errors (bad directive, too few
 /// arguments, …) are `String`s the caller turns into a recoverable
 /// `EvalError::Panic`.
-pub(crate) fn build(
+pub fn build(
     heap: &mut Heap,
     ctx: RenderCtx<'_>,
     control: &str,
@@ -71,13 +70,14 @@ pub(crate) fn build(
 /// `limits` is the `*print-circle*`/`*print-level*`/`*print-length*` snapshot
 /// this printing operation runs under (see [`Limits`]).
 ///
-/// Copyable (two references and three scalars) so it can be threaded alongside
+/// Copyable (one reference and three scalars) so it can be threaded alongside
 /// the `&mut Heap` the dispatch needs without fighting the borrow checker.
 #[derive(Clone, Copy)]
-pub(crate) struct RenderCtx<'a> {
-    pub(crate) enums: &'a HashMap<Path, EnumDef>,
-    pub(crate) interp: Option<&'a super::interp::Interp>,
-    pub(crate) limits: Limits,
+pub struct RenderCtx<'a> {
+    /// What the printer needs to know about the program — enum variant names
+    /// and `print-object` methods. See [`PrintEnv`].
+    pub env: &'a dyn PrintEnv,
+    pub limits: Limits,
 }
 
 /// The three CLHS 22.1.1 printer control variables that bound *what* a value
@@ -91,21 +91,21 @@ pub(crate) struct RenderCtx<'a> {
 /// `*print-level*`/`*print-length*` and what a bare `Interp` (no prelude
 /// loaded, as in some unit tests) must fall back to.
 #[derive(Clone, Copy, Default)]
-pub(crate) struct Limits {
+pub struct Limits {
     /// `*print-circle*`: label shared and circular substructure with `#n=` /
     /// `#n#` instead of following it forever.
-    pub(crate) circle: bool,
+    pub circle: bool,
     /// `*print-level*`: nested objects at this depth or deeper print as `#`.
     /// The object handed to the printer is at depth 0.
-    pub(crate) level: Option<usize>,
+    pub level: Option<usize>,
     /// `*print-length*`: at most this many elements/fields per list, struct or
     /// enum; the rest collapse to `...`.
-    pub(crate) length: Option<usize>,
+    pub length: Option<usize>,
 }
 
 /// Turns a finished buffer into text: a buffer with no pretty-printer op in it
 /// is already the answer, so the layout pass only runs when one was recorded.
-pub(crate) fn finish(out: Out, opts: &Opts) -> String {
+pub fn finish(out: Out, opts: &Opts) -> String {
     if out.is_plain() {
         out.text
     } else {
@@ -1669,7 +1669,7 @@ fn scan_shared(heap: &Heap, root: Value, seen: &mut HashMap<NodeKey, ShareState>
 }
 
 /// What [`Renderer::pre`] decided about a node, before any of it is printed.
-pub(crate) enum Pre {
+pub enum Pre {
     /// Print this text and nothing else for the node: a `#n#` back-reference
     /// or the `#` of a `*print-level*` cut-off.
     Stop(String),
@@ -1682,10 +1682,10 @@ pub(crate) enum Pre {
 /// therefore free) when `*print-circle*` is off.
 ///
 /// Shared by both walkers over a value: this module's [`Renderer::render`] and
-/// [`crate::eval::pprint::render`], which lays lists out itself and calls back
+/// [`crate::pprint::render`], which lays lists out itself and calls back
 /// here for everything else. One [`Renderer`] must span the whole operation,
 /// or the two would hand out conflicting `#n=` numbers for the same node.
-pub(crate) struct Renderer {
+pub struct Renderer {
     shared: HashMap<NodeKey, ShareState>,
     next_label: u32,
 }
@@ -1783,11 +1783,9 @@ impl Renderer {
         if self.prologue(heap, ctx, v, depth, out) {
             return Ok(());
         }
-        if let Some(interp) = ctx.interp {
-            if let Some(text) = interp.print_object(heap, v, standard)? {
-                out.push_str(&text);
-                return Ok(());
-            }
+        if let Some(text) = ctx.env.print_object(heap, v, standard)? {
+            out.push_str(&text);
+            return Ok(());
         }
         self.render_builtin(heap, ctx, v, standard, depth, out)
     }
@@ -1801,7 +1799,6 @@ impl Renderer {
         depth: usize,
         out: &mut String,
     ) -> Result<(), String> {
-        let enums = ctx.enums;
         match v {
             Value::Empty => out.push_str("()"),
             Value::Int(n) => out.push_str(&n.to_string()),
@@ -1830,7 +1827,9 @@ impl Renderer {
                 out.push_str(&format!("{}/{}", r.numer(), r.denom()));
             }
             Value::Boxed(id) if heap.is_struct(id) => {
-                let key = crate::type_key::heap_type_path(heap, id).expect("a struct box has a type name");
+                let key = crate::stored_type_key(heap, id)
+                    .expect("a struct box has a type name")
+                    .to_string();
                 out.push_str(&format!("#<{}", key));
                 for i in 0..heap.struct_field_count(id) {
                     if Self::length_reached(ctx, i) {
@@ -1847,8 +1846,9 @@ impl Renderer {
                 out.push('>');
             }
             Value::Boxed(id) if heap.is_enum(id) => {
-                let type_path =
-                    crate::type_key::heap_type_path(heap, id).expect("an enum box has a type name");
+                let type_key = crate::stored_type_key(heap, id)
+                    .expect("an enum box has a type name")
+                    .to_string();
                 let variant = heap.enum_variant(id);
                 // `enums` holds every `TypeEntry::Enum` in the interpreter's
                 // scope tree — a user `defenum`'s own exec, *and* the built-in
@@ -1859,10 +1859,9 @@ impl Renderer {
                 // up empty here means the lookup itself is broken (a stale
                 // `Path`, an enum this table was never told about), not that
                 // the name lives somewhere else.
-                let name = enums
-                    .get(&type_path)
-                    .and_then(|d| d.variants.get(variant))
-                    .map(|(n, _)| n.clone())
+                let name = ctx
+                    .env
+                    .enum_variant_name(&type_key, variant)
                     .unwrap_or_else(|| "<unknown-variant>".to_string());
                 if heap.enum_field_count(id) == 0 {
                     out.push_str(&name);
@@ -1899,11 +1898,15 @@ impl Renderer {
             Value::Boxed(id) if heap.is_builtin_fn(id) => {
                 let text = match heap.builtin_fn_recv(id) {
                     None => format!("#<builtin {}>", heap.builtin_fn_name(id)),
-                    Some(pid) => format!(
-                        "#<builtin {}::{}>",
-                        crate::types::path_from_id(heap, pid),
-                        heap.builtin_fn_name(id)
-                    ),
+                    Some(pid) => {
+                        // The receiver type's path, spelled straight from the
+                        // heap's interned segments — `typelisp::types::Path`'s
+                        // `Display` is the same `::` join, and this crate has
+                        // no `Path` to borrow it from.
+                        let segs: Vec<&str> =
+                            heap.path_segments(pid).iter().map(|s| heap.symbol_name(*s)).collect();
+                        format!("#<builtin {}::{}>", segs.join("::"), heap.builtin_fn_name(id))
+                    }
                 };
                 out.push_str(&text);
             }

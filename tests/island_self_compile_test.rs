@@ -65,6 +65,8 @@ const ISLAND_DEFUNS: &[&str] = &[
     "int-binop-shim-call",
     "int-unary-shim-call",
     "int-native-method?",
+    "int-equality-method?",
+    "sexpr-native-method?",
     "string-native-method?",
     "char-native-method?",
     "bool-native-method?",

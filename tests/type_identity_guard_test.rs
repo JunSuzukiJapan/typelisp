@@ -178,10 +178,12 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
 /// `rt_data_new` has always received its key as a string from compiled code
 /// instead. `stream_builtin` is the one place that cannot: it builds
 /// `Result`/`Option`/`FileError` values *itself*, on both sides of the
-/// compile boundary, so it names them from constants. This is those
-/// constants' end of the agreement, checked rather than assumed — a value
-/// built under a key nobody else spells is unmatchable, prints as
-/// `<unknown-variant>`, and compares unequal to its own twin, silently.
+/// compile boundary, so it names them from constants. `sys_builtin` is the
+/// second such place, for the same reason (`Result<_, ParseIntError>` and
+/// friends), and `typelisp_read::shim` the third (`Result<Sexpr, ReadError>`). This is those constants' end of the agreement, checked rather
+/// than assumed — a value built under a key nobody else spells is
+/// unmatchable, prints as `<unknown-variant>`, and compares unequal to its
+/// own twin, silently.
 #[test]
 fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
     use typelisp::types::Path;
@@ -189,6 +191,17 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
         (typelisp::compile::runtime::stream_builtin::OPTION_TYPE_KEY, "option"),
         (typelisp::compile::runtime::stream_builtin::RESULT_TYPE_KEY, "result"),
         (typelisp::compile::runtime::stream_builtin::FILE_ERROR_TYPE_KEY, typelisp::check::registry::FILE_ERROR),
+        (typelisp::compile::runtime::sys_builtin::RESULT_TYPE_KEY, "result"),
+        (
+            typelisp::compile::runtime::sys_builtin::PARSE_INT_ERROR_TYPE_KEY,
+            typelisp::check::registry::PARSE_INT_ERROR,
+        ),
+        (
+            typelisp::compile::runtime::sys_builtin::PARSE_FLOAT_ERROR_TYPE_KEY,
+            typelisp::check::registry::PARSE_FLOAT_ERROR,
+        ),
+        (typelisp_read::shim::RESULT_TYPE_KEY, "result"),
+        (typelisp_read::shim::READ_ERROR_TYPE_KEY, typelisp::check::registry::READ_ERROR),
     ] {
         assert_eq!(
             constant,

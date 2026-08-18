@@ -11,7 +11,7 @@
 use std::fmt;
 use std::rc::Rc;
 
-use crate::name_lexer::{NameLexer, NameTok};
+use typelisp_read::name_lexer::{NameLexer, NameTok};
 use crate::{Error, Heap, Loc, PathId, SymId, Value};
 
 /// A structured, fully-qualified path identifying a type, free function, or

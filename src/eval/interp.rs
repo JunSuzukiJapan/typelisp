@@ -31,7 +31,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::check::registry::{EVAL_ERROR, PARSE_FLOAT_ERROR, PARSE_INT_ERROR, READ_ERROR};
+use crate::check::registry::EVAL_ERROR;
 use crate::type_key::{alloc_typed_enum, heap_type_path};
 use crate::types::{
     path_is_builtin, path_is_builtin_any, LLVM_METHOD_RECEIVER_TYPES, NATIVE_LOWERED_PRIMITIVES,
@@ -42,7 +42,6 @@ use crate::check::core;
 use crate::check::repr::Repr;
 use crate::{BoxId, CompileTarget, Heap, MacroExpander, MacroLambda, Path, Ref, SymId, Type, Value};
 
-use super::pprint;
 use super::scope;
 use super::value::{EvalError, Slot};
 
@@ -146,36 +145,6 @@ pub(crate) struct EnumDef {
     pub(crate) variants: Vec<(String, Vec<Repr>)>,
 }
 
-/// An in-progress pretty-printing session: what CL would call "the output
-/// stream is a pretty stream right now".
-///
-/// typelisp has no first-class streams, so instead of handing the user a
-/// pretty-stream *value* to thread through every call (a whole new mutable
-/// value type the language does not otherwise have — see `docs/dev/TODO.md`'s
-/// T5 notes on why that was the blocker), the session is implicit interpreter
-/// state, in exactly the way the GC heap already is. It is opened by the
-/// outermost `pprint-logical-block` and flushed to stdout when that block
-/// closes. While it is open, *every* printing operation — `print`, `println`,
-/// `(format true …)`, `pprint` — appends into it instead of going straight to
-/// stdout, so ordinary printing calls supply the block's content and the
-/// `pprint-newline`/`pprint-indent`/`pprint-tab` builtins supply its layout,
-/// which is exactly how the same code reads in CL.
-struct PrettySession {
-    /// The text and pretty-printer ops accumulated so far.
-    out: crate::eval::pprint::Out,
-    /// One entry per open logical block: a heap cell holding the still
-    /// unconsumed tail of the list that block was given, which `pprint-pop`
-    /// walks. A *cell* rather than a bare `Value` because a cell is a GC root
-    /// for as long as its `Rc` is alive (`Heap::alloc_cell`'s registry), so the
-    /// list survives whatever the block's body allocates — and is released
-    /// automatically when the block closes, unlike a permanent root.
-    lists: Vec<Rc<crate::mem::BoxId>>,
-    /// The layout parameters this session was opened with, read once so a
-    /// `setf` of `*print-right-margin*` inside a block cannot change the
-    /// margin halfway through laying one document out.
-    opts: crate::eval::pprint::Opts,
-}
-
 /// The interpreter state: a runtime mirror of the checker's module tree
 /// ([`scope::ModuleScope`], rooted here), holding every free function/
 /// macro/method/global/struct/enum by its own defining module and
@@ -214,8 +183,6 @@ pub struct Interp {
     /// ordinary [`Slot`] in [`Self::globals`] untouched — see that
     /// method's doc comment for why only a promoted global's storage moves.
     compiled_globals: RefCell<HashMap<Path, usize>>,
-    /// The open pretty-printing session, if any — see [`PrettySession`].
-    pretty: RefCell<Option<PrettySession>>,
     /// The values currently being rendered by their own `print-object`
     /// method, innermost last — [`Self::print_object`]'s re-entry guard.
     printing: RefCell<Vec<Value>>,
@@ -389,7 +356,6 @@ impl Interp {
             dyn_upcasts: RefCell::new(HashMap::new()),
             trait_ids: RefCell::new(HashMap::new()),
             dyn_dispatch_compiled: RefCell::new(HashSet::new()),
-            pretty: RefCell::new(None),
             printing: RefCell::new(Vec::new()),
         }
     }
@@ -474,6 +440,30 @@ impl Interp {
     /// Every vtable interned so far, as `(id, slots)` — for a code generator
     /// that has to emit the table itself rather than patch it in from JIT
     /// addresses (`compile::aot::build_main_wrapper`).
+    /// Every enum in the program as `(type key, variant index, variant
+    /// name)` — what an AOT executable's startup registers so its printer can
+    /// name a variant (`typelisp_print::aot`), since the box carries only the
+    /// index.
+    ///
+    /// Keyed by `type_key::type_key_of`, not by the `Path`'s `Display`: the
+    /// key is what the box actually stores, and the two are only the same for
+    /// a root-module type (see `src/type_key.rs`'s module doc comment).
+    pub(crate) fn enum_variant_descriptors(&self) -> Vec<(String, usize, String)> {
+        let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
+        let mut out = Vec::new();
+        for (path, def) in &enums {
+            let key = crate::type_key::type_key_of(path);
+            for (i, (name, _)) in def.variants.iter().enumerate() {
+                out.push((key.clone(), i, name.clone()));
+            }
+        }
+        // `collect_struct_and_enum_types` returns a `HashMap`, so sort for a
+        // deterministic startup sequence — two runs of `compile-file` on the
+        // same source must produce the same executable.
+        out.sort();
+        out
+    }
+
     pub(crate) fn vtable_descriptors(&self) -> Vec<(u32, Vec<(Path, String)>)> {
         self.vtables.borrow().iter().cloned().enumerate().map(|(i, s)| (i as u32, s)).collect()
     }
@@ -1082,9 +1072,23 @@ impl Interp {
     /// `rt_apply_any`).
     fn enter_compiled(&self, heap: &mut Heap) {
         crate::compile::runtime::set_active_heap(heap as *mut Heap);
-        ACTIVE_INTERP.with(|cell| cell.set(self as *const Interp));
+        self.install_print_hooks();
         crate::compile::runtime::set_apply_interpreted(Some(rt_apply_interpreted));
         crate::compile::runtime::set_dyn_slot_closure(Some(rt_dyn_slot_closure));
+    }
+
+    /// Registers this `Interp` as the environment the printer asks its two
+    /// program questions of, and its control variables of — see
+    /// [`INTERP_PRINT_HOOKS`].
+    ///
+    /// Called at the point of use rather than once per session, for the same
+    /// reason [`Self::enter_compiled`] re-registers the heap on every
+    /// crossing: it is two stores, and a nested `Interp` (`compile-file`
+    /// builds one) would otherwise leave the slot naming an `Interp` that has
+    /// since returned.
+    fn install_print_hooks(&self) {
+        ACTIVE_INTERP.with(|cell| cell.set(self as *const Interp));
+        typelisp_print::runtime::set_print_hooks(Some(INTERP_PRINT_HOOKS));
     }
 
     /// The closure an unfilled vtable slot's method reifies to —
@@ -2248,6 +2252,28 @@ impl Interp {
     /// stay free functions too — `random`/`make-random-state`/
     /// `random-state-p` are ordinary prelude `defun`s built on top of them.)
     fn eval_builtin(&self, heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+        // The printing builtins, ahead of the match so there is one list of
+        // their names rather than two. Most are what a special form lowered
+        // to — `format`/`print`/`println`/`pprint` and `pprint-logical-block`
+        // are checked forms, and what survives checking is a call to one of
+        // the `*-rt` names; the four `pprint-*` operators are ordinary
+        // builtins. All of them run the same
+        // `typelisp_print::runtime::print_builtin` that compiled code reaches
+        // through `rt_format`/`rt_print`/..., so a `println` inside a
+        // `pprint-logical-block` lands in the same buffer whichever side of
+        // the compile boundary each half was on.
+        self.install_print_hooks();
+        if let Some(r) = typelisp_print::runtime::print_builtin(heap, name, args) {
+            use typelisp_print::runtime::PrintError;
+            return Some(r.map_err(|e| match e {
+                // A `~` directive the engine doesn't know, or a
+                // `print-object` method that failed: catchable, like the
+                // `(panic ...)` it would be if a program wrote it.
+                PrintError::Raise(msg) => EvalError::Panic(msg),
+                // An argument the checker cannot have produced.
+                PrintError::Shape(msg) => EvalError::Internal(msg),
+            }));
+        }
         match name {
             // `(compile-file "source.typl" "output")`: AOT-compiles an
             // independent source file straight to a native executable —
@@ -2281,196 +2307,6 @@ impl Interp {
             "parse-float" => Some(eval_parse_float(heap, args)),
             "read" => Some(eval_read(heap, args)),
             "eval" => Some(self.eval_form(heap, &args[0])),
-            // The runtime side of the `format`/`print`/`println` special forms
-            // (`Checker::check_format`/`check_print_like`): each lowers to a
-            // synthetic call to one of these three names, with `args[0]`
-            // (for `format-rt` a `bool` destination, otherwise the control
-            // string) and a trailing `Sexpr` list of the already-`Sexpr`-wrapped
-            // directive arguments. The CL-style directive engine itself is
-            // `Self::run_format`. `format-rt` returns the built string (having
-            // also written it to stdout when the destination is `true`, CL's
-            // `t`); `print-rt`/`println-rt` return `unit` after writing (the
-            // latter with a trailing newline).
-            "format-rt" => {
-                let dest = match expect_bool(&args[0]) {
-                    Ok(b) => b,
-                    Err(e) => return Some(Err(e)),
-                };
-                let control = match expect_str(heap, &args[1]) {
-                    Ok(s) => s.to_string(),
-                    Err(e) => return Some(Err(e)),
-                };
-                let list = args[2];
-                Some((|| {
-                    let out = self.build_format(heap, &control, list)?;
-                    // The string `format` returns is always the laid-out text.
-                    // Writing it to stdout, though, goes through `emit`, which
-                    // merges it into an open `pprint-logical-block` instead of
-                    // jumping the queue past that block's buffered output.
-                    let text = crate::eval::format::finish(out.clone(), &self.pretty_opts(heap));
-                    if dest {
-                        self.emit(heap, out, false)?;
-                    }
-                    Ok(str_rt(heap, text))
-                })())
-            }
-            "print-rt" | "println-rt" => {
-                let control = match expect_str(heap, &args[0]) {
-                    Ok(s) => s.to_string(),
-                    Err(e) => return Some(Err(e)),
-                };
-                let list = args[1];
-                let newline = name == "println-rt";
-                Some((|| {
-                    let out = self.build_format(heap, &control, list)?;
-                    self.emit(heap, out, newline)
-                })())
-            }
-            // The runtime side of the `pprint`/`pprint-fill`/`pprint-linear`/
-            // `pprint-tabular` special forms (`Checker::check_pprint`), which
-            // pass the form's own name so one builtin serves all four:
-            // `args[0]` names the layout, `args[1]` is the `Sexpr`-wrapped
-            // object and `args[2]` is `pprint-tabular`'s column width.
-            //
-            // These pretty-print unconditionally (CL defines `pprint` as
-            // printing "as if `*print-pretty*` were true"), but still honor
-            // `*print-right-margin*`/`*print-miser-width*`. Following CLHS,
-            // `pprint` emits a newline *before* the object and none after,
-            // while the three layout-specific ones emit no newline at all.
-            "pprint-rt" => {
-                let form = match expect_str(heap, &args[0]) {
-                    Ok(s) => s.to_string(),
-                    Err(e) => return Some(Err(e)),
-                };
-                let value = args[1];
-                let colinc = match rt_i64(&args[2]) {
-                    Ok(n) => n,
-                    Err(e) => return Some(Err(e)),
-                };
-                use crate::eval::pprint::Style;
-                let style = match form.as_str() {
-                    "pprint-fill" => Style::Fill,
-                    "pprint-linear" => Style::Linear,
-                    // CL's `pprint-tabular` defaults its column width to 16;
-                    // `check_pprint` passes 0 when the caller omitted it.
-                    "pprint-tabular" => Style::Tabular(if colinc <= 0 { 16 } else { colinc }),
-                    _ => Style::Default,
-                };
-                Some((|| {
-                    let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
-                    let ctx = self.render_ctx(heap, &enums);
-                    let mut out = crate::eval::pprint::Out::new();
-                    if form == "pprint" {
-                        out.push('\n');
-                    }
-                    // Unconditionally pretty: `render` always records the
-                    // layout ops, and `emit`'s layout pass runs whenever any
-                    // op is present — `*print-pretty*` only gates
-                    // `~a`/`~s`/`~w`.
-                    crate::eval::pprint::render(heap, ctx, value, true, style, &mut out)
-                        .map_err(EvalError::Panic)?;
-                    self.emit(heap, out, false)
-                })())
-            }
-            // The user-callable pretty-printer API (CLHS 22.2.1's `pprint-*`
-            // operators). `pprint-block-start-rt`/`pprint-block-end-rt` are
-            // what the `pprint-logical-block` special form lowers to; the rest
-            // are ordinary builtins taking CL's keyword arguments as the
-            // self-evaluating symbols typelisp already has. Each is a no-op
-            // outside a logical block, as CL's are on a non-pretty stream.
-            "pprint-block-start-rt" => {
-                let obj = args[0];
-                let prefix = match expect_str(heap, &args[1]) {
-                    Ok(s) => s.to_string(),
-                    Err(e) => return Some(Err(e)),
-                };
-                let per_line = match expect_bool(&args[2]) {
-                    Ok(b) => b,
-                    Err(e) => return Some(Err(e)),
-                };
-                let suffix = match expect_str(heap, &args[3]) {
-                    Ok(s) => s.to_string(),
-                    Err(e) => return Some(Err(e)),
-                };
-                self.pprint_block_start(heap, obj, &prefix, per_line, &suffix);
-                Some(Ok(Value::Empty))
-            }
-            "pprint-block-end-rt" => Some(self.pprint_block_end()),
-            "pprint-newline" => {
-                let kind = match pprint_keyword(heap, &args[0]) {
-                    Ok(k) => k,
-                    Err(e) => return Some(Err(e)),
-                };
-                use crate::eval::pprint::NewlineKind;
-                let kind = match kind {
-                    ":linear" => NewlineKind::Linear,
-                    ":fill" => NewlineKind::Fill,
-                    ":miser" => NewlineKind::Miser,
-                    ":mandatory" => NewlineKind::Mandatory,
-                    other => {
-                        return Some(Err(EvalError::Panic(format!(
-                            "pprint-newline: expected :linear, :fill, :miser or :mandatory, got {}",
-                            other
-                        ))))
-                    }
-                };
-                self.pprint_op(crate::eval::pprint::Op::Newline(kind));
-                Some(Ok(Value::Empty))
-            }
-            "pprint-indent" => {
-                let kind = match pprint_keyword(heap, &args[0]) {
-                    Ok(k) => k,
-                    Err(e) => return Some(Err(e)),
-                };
-                let n = match rt_i64(&args[1]) {
-                    Ok(n) => n,
-                    Err(e) => return Some(Err(e)),
-                };
-                use crate::eval::pprint::IndentKind;
-                let kind = match kind {
-                    ":block" => IndentKind::Block,
-                    ":current" => IndentKind::Current,
-                    other => {
-                        return Some(Err(EvalError::Panic(format!(
-                            "pprint-indent: expected :block or :current, got {}",
-                            other
-                        ))))
-                    }
-                };
-                self.pprint_op(crate::eval::pprint::Op::Indent(kind, n));
-                Some(Ok(Value::Empty))
-            }
-            "pprint-tab" => {
-                let kind = match pprint_keyword(heap, &args[0]) {
-                    Ok(k) => k,
-                    Err(e) => return Some(Err(e)),
-                };
-                let colnum = match rt_i64(&args[1]) {
-                    Ok(n) => n,
-                    Err(e) => return Some(Err(e)),
-                };
-                let colinc = match rt_i64(&args[2]) {
-                    Ok(n) => n,
-                    Err(e) => return Some(Err(e)),
-                };
-                use crate::eval::pprint::TabKind;
-                let kind = match kind {
-                    ":line" => TabKind::Line,
-                    ":section" => TabKind::Section,
-                    ":line-relative" => TabKind::LineRelative,
-                    ":section-relative" => TabKind::SectionRelative,
-                    other => {
-                        return Some(Err(EvalError::Panic(format!(
-                            "pprint-tab: expected :line, :section, :line-relative or :section-relative, got {}",
-                            other
-                        ))))
-                    }
-                };
-                self.pprint_op(crate::eval::pprint::Op::Tab { kind, colnum, colinc });
-                Some(Ok(Value::Empty))
-            }
-            "pprint-pop" => Some(Ok(self.pprint_pop(heap))),
-            "pprint-list-exhausted" => Some(Ok(Value::Bool(self.pprint_list_exhausted(heap)))),
             // `equal`/`equalp` on `Sexpr`: structural equality builtins (the
             // free-function `Sexpr` overloads; the per-scalar-type `equal`
             // *methods* — `string`/`char`/`int`/... — are dispatched separately
@@ -2682,19 +2518,6 @@ impl Interp {
         }
     }
 
-    /// The [`RenderCtx`](crate::eval::format::RenderCtx) a printing operation
-    /// runs under: the enum-variant name table plus this interpreter, so a
-    /// value's own `print-object` method can be dispatched to, plus the
-    /// `*print-circle*`/`*print-level*`/`*print-length*` snapshot
-    /// ([`Self::print_limits`]).
-    fn render_ctx<'a>(
-        &'a self,
-        heap: &Heap,
-        enums: &'a HashMap<Path, EnumDef>,
-    ) -> crate::eval::format::RenderCtx<'a> {
-        crate::eval::format::RenderCtx { enums, interp: Some(self), limits: self.print_limits(heap) }
-    }
-
     /// Reads the three "what to print" globals — `*print-circle*`,
     /// `*print-level*`, `*print-length*` (CLHS 22.1.1) — the same way
     /// [`Self::pretty_opts`] reads the three "how to lay it out" ones: fresh
@@ -2705,6 +2528,22 @@ impl Interp {
     /// `*print-miser-width*`. A missing global (no prelude — some unit tests
     /// build a bare `Interp`) means every limit is off, which is also CL's
     /// initial state for all three.
+    /// The name of `variant` of the enum whose type key is `type_key` — the
+    /// printer's question, answered from the scope tree.
+    ///
+    /// The tree holds every `TypeEntry::Enum`: a user `defenum`'s own exec,
+    /// *and* the built-in sum types (`Option`/`Result`/the error types),
+    /// which `Interp::new` seeds from `registry::builtin_sum_defs` up front
+    /// precisely so this lookup never needs a second table to fall back to.
+    /// Coming up empty means the lookup itself is broken (a stale key, an
+    /// enum the tree was never told about), not that the name lives
+    /// somewhere else — which is why it prints as the loud
+    /// `<unknown-variant>` rather than anything plausible.
+    fn enum_variant_name(&self, type_key: &str, variant: usize) -> Option<String> {
+        let path = Path::from_segments(type_key.split("::").map(str::to_string).collect());
+        self.root.borrow().enum_variant_name(&path, variant)
+    }
+
     pub(crate) fn print_limits(&self, heap: &Heap) -> crate::eval::format::Limits {
         let read_limit = |name: &str| -> Option<usize> {
             match self.global_value(heap, &crate::Path::root(name)) {
@@ -2722,135 +2561,11 @@ impl Interp {
         }
     }
 
-    /// Builds `control`'s output without committing it: the shared half of
-    /// `format-rt`/`print-rt`/`println-rt`. Kept separate from [`Self::emit`]
-    /// because a buffer that still carries pretty-printer ops must be merged
-    /// into an open [`PrettySession`] *un*-laid-out — laying it out early
-    /// would freeze line breaks chosen against the wrong starting column and
-    /// without the enclosing block's indentation.
-    fn build_format(&self, heap: &mut Heap, control: &str, args: Value) -> Result<pprint::Out, EvalError> {
-        let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
-        let opts = self.pretty_opts(heap);
-        let ctx = self.render_ctx(heap, &enums);
-        crate::eval::format::build(heap, ctx, control, args, &opts).map_err(EvalError::Panic)
-    }
-
-    /// Commits printed output: into the open [`PrettySession`] if there is
-    /// one, otherwise laid out and written straight to stdout.
-    fn emit(&self, heap: &Heap, mut out: pprint::Out, newline: bool) -> Result<Value, EvalError> {
-        if newline {
-            out.push('\n');
-        }
-        // `pretty_opts` itself reads `self.pretty`, so it must not run while
-        // this borrow is held.
-        let buffered = match self.pretty.borrow_mut().as_mut() {
-            Some(s) => {
-                s.out.append(out);
-                None
-            }
-            None => Some(out),
-        };
-        match buffered {
-            Some(out) => {
-                let opts = self.pretty_opts(heap);
-                write_stdout(&crate::eval::format::finish(out, &opts), false)
-            }
-            None => Ok(Value::Empty),
-        }
-    }
-
-    /// Opens a logical block, starting a [`PrettySession`] if this is the
-    /// outermost one. `obj` is the list `pprint-pop` walks (`()` when the
-    /// block iterates nothing).
-    pub(crate) fn pprint_block_start(
-        &self,
-        heap: &mut Heap,
-        obj: Value,
-        prefix: &str,
-        per_line: bool,
-        suffix: &str,
-    ) {
-        let opts = pprint::Opts { pretty: true, ..self.pretty_opts(heap) };
-        let cell = heap.alloc_cell(obj);
-        let mut session = self.pretty.borrow_mut();
-        let s = session.get_or_insert_with(|| PrettySession { out: pprint::Out::new(), lists: Vec::new(), opts });
-        s.out.op(pprint::Op::BlockStart {
-            prefix: prefix.to_string(),
-            per_line,
-            suffix: suffix.to_string(),
-        });
-        s.lists.push(cell);
-    }
-
-    /// Closes a logical block; closing the outermost one lays the whole
-    /// session out and writes it to stdout.
-    pub(crate) fn pprint_block_end(&self) -> Result<Value, EvalError> {
-        let finished = {
-            let mut session = self.pretty.borrow_mut();
-            let Some(s) = session.as_mut() else {
-                return Ok(Value::Empty);
-            };
-            s.out.op(pprint::Op::BlockEnd);
-            s.lists.pop();
-            if s.lists.is_empty() {
-                session.take()
-            } else {
-                None
-            }
-        };
-        match finished {
-            // `s.opts` was snapshotted with `pretty` forced on at block start:
-            // an explicit `pprint-logical-block` is a request to pretty-print,
-            // exactly as `pprint` is.
-            Some(s) => write_stdout(&crate::eval::format::finish(s.out, &s.opts), false),
-            None => Ok(Value::Empty),
-        }
-    }
-
     /// Closes and writes out a pretty-printing session left open by a
     /// non-local exit (see [`Self::exec`]). A no-op in the normal case, where
     /// the matching `pprint-block-end-rt` already flushed it.
     fn flush_pretty(&self) -> Result<(), EvalError> {
-        let Some(s) = self.pretty.borrow_mut().take() else {
-            return Ok(());
-        };
-        let opts = pprint::Opts { pretty: true, ..s.opts };
-        // `layout` closes whatever blocks are still open, emitting their
-        // suffixes, so the partial output is still well-formed.
-        write_stdout(&crate::eval::format::finish(s.out, &opts), false).map(|_| ())
-    }
-
-    /// Records a pretty-printer op on the open session. A no-op with no
-    /// session open, matching CL, where `pprint-newline` and friends do
-    /// nothing unless the stream really is a pretty stream.
-    fn pprint_op(&self, op: pprint::Op) {
-        if let Some(s) = self.pretty.borrow_mut().as_mut() {
-            s.out.op(op);
-        }
-    }
-
-    /// `pprint-pop`: the next element of the innermost open block's list, or
-    /// `()` when it is exhausted (`pprint-list-exhausted` is the predicate to
-    /// check first). Advances the stored tail in place.
-    fn pprint_pop(&self, heap: &mut Heap) -> Value {
-        let cell = match self.pretty.borrow().as_ref().and_then(|s| s.lists.last().cloned()) {
-            Some(c) => c,
-            None => return Value::Empty,
-        };
-        let rest = heap.cell_get(*cell);
-        let Ok(head) = heap.car(rest) else { return Value::Empty };
-        let tail = heap.cdr(rest).unwrap_or(Value::Empty);
-        heap.cell_set(*cell, tail);
-        head
-    }
-
-    /// `pprint-list-exhausted`: whether the innermost open block's list has
-    /// nothing left (also true when there is no open block at all).
-    fn pprint_list_exhausted(&self, heap: &Heap) -> bool {
-        match self.pretty.borrow().as_ref().and_then(|s| s.lists.last().cloned()) {
-            Some(cell) => !heap.cell_get(*cell).is_cons(),
-            None => true,
-        }
+        typelisp_print::runtime::flush().map_err(EvalError::Panic)
     }
 
     /// Reads the three pretty-printing globals the prelude defines —
@@ -2877,7 +2592,7 @@ impl Interp {
         // Inside a `pprint-logical-block` the "stream" *is* a pretty stream,
         // so everything printed into it pretty-prints regardless of the
         // global — the same thing CL's stream-type dispatch achieves.
-        let pretty = self.pretty.borrow().is_some()
+        let pretty = typelisp_print::runtime::session_open()
             || matches!(
                 self.global_value(heap, &crate::Path::root("*print-pretty*")),
                 Some(Value::Bool(true))
@@ -3671,12 +3386,7 @@ fn eval_random_state_next(heap: &mut Heap, args: &[Value]) -> Result<Value, Eval
 /// (CL's epoch) — the Unix epoch offset by the well-known 2208988800s
 /// between the two.
 fn eval_get_universal_time(_args: &[Value]) -> Result<Value, EvalError> {
-    const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
-    let unix_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    Ok(Value::Int(unix_secs + UNIX_TO_CL_EPOCH_SECS))
+    Ok(Value::Int(crate::compile::runtime::sys_builtin::get_universal_time()))
 }
 
 /// `get-internal-real-time` (CLHS 25.1): elapsed `internal-time-units-per-
@@ -3685,9 +3395,7 @@ fn eval_get_universal_time(_args: &[Value]) -> Result<Value, EvalError> {
 /// `std::time::Instant`, not wall-clock time, so `time`'s elapsed-time
 /// measurement can't go backwards under a clock adjustment.
 fn eval_get_internal_real_time(_args: &[Value]) -> Result<Value, EvalError> {
-    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    let start = START.get_or_init(std::time::Instant::now);
-    Ok(Value::Int(start.elapsed().as_micros() as i64))
+    Ok(Value::Int(crate::compile::runtime::sys_builtin::get_internal_real_time()))
 }
 
 /// Shared tail of every scalar `print`/`println` method (`registry.rs`'s
@@ -3708,15 +3416,6 @@ fn format_float_for_print(f: f64) -> String {
     }
 }
 
-/// Reads a `pprint-*` builtin's keyword argument (`:linear`, `:block`, …).
-/// Keywords are ordinary interned symbols whose name keeps the leading colon
-/// (`sym`), so this is just "the symbol's name".
-fn pprint_keyword<'a>(heap: &'a Heap, v: &Value) -> Result<&'a str, EvalError> {
-    match v {
-        Value::Symbol(id) => Ok(heap.symbol_name(*id)),
-        _ => Err(EvalError::Panic("expected a keyword argument such as :linear".into())),
-    }
-}
 
 fn write_stdout(text: &str, newline: bool) -> Result<Value, EvalError> {
     let mut out = std::io::stdout();
@@ -3729,25 +3428,16 @@ fn write_stdout(text: &str, newline: bool) -> Result<Value, EvalError> {
 /// `str::parse`), `Err` on anything else rather than a panic (unlike the
 /// reader's own integer literals, this reads *untrusted* runtime text).
 fn eval_parse_int(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let s = expect_str(heap, &args[0])?;
-    match s.parse::<i32>() {
-        Ok(n) => Ok(result_ok(heap, Value::Int(n as i64))),
-        Err(_) => Ok(result_err(heap, PARSE_INT_ERROR, format!("parse-int: invalid integer literal: {:?}", s))),
-    }
+    let s = expect_str(heap, &args[0])?.to_string();
+    Ok(crate::compile::runtime::sys_builtin::parse_int(heap, &s))
 }
 
 /// `parse-float` (`registry.rs`'s free-function entry): an `f64` literal via
 /// `str::parse` (accepts everything Rust's own `FromStr for f64` does,
 /// including `inf`/`nan`), `Err` on anything else.
 fn eval_parse_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let s = expect_str(heap, &args[0])?;
-    match s.parse::<f64>() {
-        Ok(f) => {
-            let v = float_rt(heap, f);
-            Ok(result_ok(heap, v))
-        }
-        Err(_) => Ok(result_err(heap, PARSE_FLOAT_ERROR, format!("parse-float: invalid float literal: {:?}", s))),
-    }
+    let s = expect_str(heap, &args[0])?.to_string();
+    Ok(crate::compile::runtime::sys_builtin::parse_float(heap, &s))
 }
 
 /// `read` (`registry.rs`'s free-function entry): parses exactly one `Sexpr`
@@ -3758,11 +3448,10 @@ fn eval_parse_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError>
 /// data the running program doesn't control.
 fn eval_read(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let s = expect_str(heap, &args[0])?.to_string();
-    let reader = crate::read::Reader::new();
-    match reader.read(heap, &s) {
-        Ok(v) => Ok(result_ok(heap, v)),
-        Err(e) => Ok(result_err(heap, READ_ERROR, format!("read: {}", e))),
-    }
+    // `typelisp_read::shim`, the same implementation `rt_read` calls: one
+    // reader, one `Result` shape, whichever side of the compile boundary the
+    // caller is on.
+    Ok(typelisp_read::shim::read_builtin(heap, &s))
 }
 
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
@@ -4267,6 +3956,48 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // type rather than `sexpr`'s — the same shim, since both spellings
         // carry the same interned `Value::Symbol`.
         "symbol->string" => "rt_sym_name",
+        // `string->symbol` is the other direction, and is likewise a shim
+        // that already existed: `rt_intern_symbol` is what a compiled quoted
+        // symbol literal already goes through, and interning a `Str` is the
+        // whole of this builtin.
+        "string->symbol" => "rt_intern_symbol",
+        // The small system builtins (`sys_builtin`): parsing, the clock, and
+        // process exit. Each is a thin edge over one shared implementation
+        // the interpreter calls too.
+        // `equal`/`equalp` on `Sexpr` are free *functions*
+        // (`registry`'s root `fns`), not methods, so they map here rather
+        // than through `native_lowered_primitive_methods`. Both are the same
+        // `typelisp_rt::equality` the interpreter calls.
+        "equal" => "rt_sexpr_equal",
+        "equalp" => "rt_sexpr_equalp",
+        "parse-int" => "rt_parse_int",
+        "parse-float" => "rt_parse_float",
+        "get-universal-time" => "rt_get_universal_time",
+        "get-internal-real-time" => "rt_get_internal_real_time",
+        "exit" => "rt_exit",
+        // `read` (`typelisp_read::shim`), which could not lower while the
+        // reader was a module of this crate: a shim naming it would have had
+        // to reach up into `typelisp`, which depends on the runtime rather
+        // than the other way round.
+        "read" => "rt_read",
+        // The printing family. `format`/`print`/`println`/`pprint` and
+        // `pprint-logical-block` are special forms; the names here are what
+        // the checker lowered them to (`Checker::check_format`/
+        // `check_print_like`/`check_pprint`/`check_pprint_logical_block`).
+        // The last four are ordinary builtins (`registry`'s root `fns`).
+        // All eleven run `typelisp_print::runtime::print_builtin`, the same
+        // implementation `Interp::eval_builtin` runs.
+        "format-rt" => "rt_format",
+        "print-rt" => "rt_print",
+        "println-rt" => "rt_println",
+        "pprint-rt" => "rt_pprint",
+        "pprint-block-start-rt" => "rt_pprint_block_start",
+        "pprint-block-end-rt" => "rt_pprint_block_end",
+        "pprint-newline" => "rt_pprint_newline",
+        "pprint-indent" => "rt_pprint_indent",
+        "pprint-tab" => "rt_pprint_tab",
+        "pprint-pop" => "rt_pprint_pop",
+        "pprint-list-exhausted" => "rt_pprint_list_exhausted",
         // The `random-state` builtins. Nothing about a random-state lives
         // outside the heap, so all three lower.
         "random-state-next" => "rt_random_state_next",
@@ -4343,12 +4074,23 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// how `char->string` survived here.
 pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'static str] {
     match type_local {
+        // `eq`/`eql`/`equal`/`equalp` are four names for `=` on an integer
+        // (`registry::int_assoc`'s doc comment: same-type operands, nothing to
+        // fold or recurse into), so all four are the same `icmp eq`. Only
+        // `eq` used to be here, which is what made `case` — whose expansion
+        // compares with `equal` — uncompilable for every integer scrutinee.
         "i64" | "i32" => &[
-            "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "/=", "int->bignum", "int->ratio",
+            "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
+            "int->bignum", "int->ratio",
             "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
             "ash", "logbitp",
         ],
-        "string" => &["length", "ref", "eq", "equal", "equalp", "lt", "<", "<=", ">", ">=", "append", "substring"],
+        // `eq`/`eql` are `StrId` identity (`string_identity_eq`) and lower to
+        // an `icmp eq` on the two tagged words; `equal`/`equalp` are content
+        // comparisons and go through `rt_str_eq`/`rt_str_equalp`.
+        "string" => &[
+            "length", "ref", "eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "append", "substring",
+        ],
         // `char->string` is here *and* in `char-native-method?` now. It was
         // here alone once, and that is worth remembering: this list is what
         // decides whether a call is a real graph edge, so claiming a method is
@@ -4387,10 +4129,14 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // `Sexpr` values are raw tagged `i64` handles in compiled code, and
         // interned symbols/`nil`/small atoms are handle-identical, so `eq`
         // (CL identity) lowers to a plain `icmp eq` on the two handles —
-        // `compile-assoc`'s `sexpr` arm, mirroring the `char` branch. Only
-        // `eq` is native; structural `equal` stays an ordinary prelude
-        // `defun` compiled the normal way.
-        "sexpr" => &["eq"],
+        // `compile-assoc`'s `sexpr` arm, mirroring the `char` branch. `eql`
+        // cannot be that instruction (two separately boxed but equal
+        // `Float`/`bignum`/`ratio` values are `eql` and not `eq`), so it
+        // lowers to the `rt_sexpr_eql` shim over the same
+        // `typelisp_rt::equality` the interpreter uses. The free-function
+        // `equal`/`equalp` reach their shims through `rt_builtin_symbol`
+        // instead, being calls rather than methods.
+        "sexpr" => &["eq", "eql"],
         // `bool`'s four comparison names are one operation
         // (`registry::bool_assoc`: two immediate values, nothing to fold or
         // recurse into), and a compiled `bool` is a raw `0`/`1`, so all four
@@ -4461,11 +4207,25 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 158] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 180] {
+    use crate::compile::runtime::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
+    // The printing family. These are the one group of shims defined outside
+    // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
+    // the linker requires that.
+    use typelisp_print::shim::{
+        rt_format, rt_pprint, rt_pprint_block_end, rt_pprint_block_start, rt_pprint_indent,
+        rt_pprint_list_exhausted, rt_pprint_newline, rt_pprint_pop, rt_pprint_tab, rt_print, rt_println,
+    };
+    use typelisp_print::aot::{rt_print_enum_variant, rt_print_object_method};
+    use typelisp_read::shim::rt_read;
+    use crate::compile::runtime::sys_builtin::{
+        rt_exit, rt_get_internal_real_time, rt_get_universal_time, rt_parse_float, rt_parse_int,
+    };
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_logand, rt_bignum_logior, rt_bignum_lognot, rt_bignum_logxor,
         rt_make_random_state_fresh, rt_random_state_copy, rt_random_state_next,
+
         rt_file_delete, rt_file_exists_p, rt_file_rename, rt_stream_at_line_start, rt_stream_close,
         rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p,
         rt_stream_output_p, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
@@ -4517,6 +4277,45 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 158] {
         ("rt_dyn_call", rt_dyn_call as usize),
         ("rt_vtable_set", rt_vtable_set as usize),
         ("rt_upcast_set", rt_upcast_set as usize),
+        // The small system builtins (`typelisp_rt::sys_builtin`): parsing,
+        // the clock, and process exit. Each was a gap that made every
+        // function calling it uncompilable, and each closed the same way the
+        // stream family did — one implementation, two edges.
+        // The three structural equality predicates
+        // (`typelisp_rt::equality`). `eq` needs no shim — it is the `icmp eq`
+        // the island emits in place.
+        ("rt_sexpr_eql", rt_sexpr_eql as usize),
+        ("rt_sexpr_equal", rt_sexpr_equal as usize),
+        ("rt_sexpr_equalp", rt_sexpr_equalp as usize),
+        ("rt_parse_int", rt_parse_int as usize),
+        ("rt_parse_float", rt_parse_float as usize),
+        ("rt_get_universal_time", rt_get_universal_time as usize),
+        ("rt_get_internal_real_time", rt_get_internal_real_time as usize),
+        ("rt_exit", rt_exit as usize),
+        ("rt_read", rt_read as usize),
+        // The printing family (`typelisp_print::shim`). `format`/`print`/
+        // `println`/`pprint` and `pprint-logical-block` are special forms, so
+        // what reaches here are the `*-rt` names the checker lowered them to;
+        // the four `pprint-*` operators are ordinary builtins.
+        ("rt_format", rt_format as usize),
+        ("rt_print", rt_print as usize),
+        ("rt_println", rt_println as usize),
+        ("rt_pprint", rt_pprint as usize),
+        ("rt_pprint_block_start", rt_pprint_block_start as usize),
+        ("rt_pprint_block_end", rt_pprint_block_end as usize),
+        ("rt_pprint_newline", rt_pprint_newline as usize),
+        ("rt_pprint_indent", rt_pprint_indent as usize),
+        ("rt_pprint_tab", rt_pprint_tab as usize),
+        ("rt_pprint_pop", rt_pprint_pop as usize),
+        ("rt_pprint_list_exhausted", rt_pprint_list_exhausted as usize),
+        // The printer's AOT startup registration (`typelisp_print::aot`):
+        // an enum's variant names and each type's `print-object`, which a
+        // standalone executable cannot look up the way the interpreter does.
+        // AOT-only, like `rt_vtable_set`/`rt_upcast_set` above — the JIT
+        // installs `INTERP_PRINT_HOOKS` instead, so nothing emits a call to
+        // either there.
+        ("rt_print_enum_variant", rt_print_enum_variant as usize),
+        ("rt_print_object_method", rt_print_object_method as usize),
         ("rt_car", rt_car as usize),
         ("rt_cdr", rt_cdr as usize),
         ("rt_cons", rt_cons as usize),
@@ -6023,6 +5822,45 @@ fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
     })
 }
 
+/// The printer's [`typelisp_print::runtime::PrintHooks`] pointing at the
+/// interpreter — the two program facts and the two sets of control
+/// variables that `typelisp-print` cannot read off the heap.
+///
+/// Plain `fn` pointers, so each one reaches the running `Interp` through
+/// [`ACTIVE_INTERP`] rather than by capture. That is the same thread-local
+/// [`rt_apply_interpreted`] already uses, refreshed at the point of use for
+/// the same reason: a nested `Interp` (`compile-file` builds its own) leaves
+/// the slot pointing at a finished one otherwise.
+const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::runtime::PrintHooks {
+    enum_variant_name: |type_key, variant| with_active_interp(|i| i.enum_variant_name(type_key, variant))?,
+    print_object: |heap, v, escape| match with_active_interp(|i| i.print_object(heap, v, escape)) {
+        Some(r) => r,
+        // No interpreter registered: the printer is running under a bare
+        // program (a unit test), where no type can have a `print-object`
+        // method because no program defined one.
+        None => Ok(None),
+    },
+    opts: |heap| with_active_interp(|i| i.pretty_opts(heap)).unwrap_or_default(),
+    limits: |heap| with_active_interp(|i| i.print_limits(heap)).unwrap_or_default(),
+};
+
+/// Runs `f` against this thread's registered `Interp`, or `None` when there
+/// is none.
+///
+/// # Safety of the raw pointer
+///
+/// The slot is written immediately before every use (see
+/// [`Interp::install_print_hooks`] and [`Interp::enter_compiled`]) by an
+/// `&self` method, so the `Interp` it names is on the stack below this call
+/// for the whole of `f`.
+fn with_active_interp<T>(f: impl FnOnce(&Interp) -> T) -> Option<T> {
+    let ptr = ACTIVE_INTERP.with(|cell| cell.get());
+    if ptr.is_null() {
+        return None;
+    }
+    Some(f(unsafe { &*ptr }))
+}
+
 /// The `rt_*` family's abort-on-invariant-break convention
 /// (`typelisp-rt`'s `fatal`), for the main-crate shims.
 fn rt_llvm_fatal(msg: &str) -> ! {
@@ -6065,7 +5903,7 @@ unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64,
         rt_llvm_fatal("rt_apply_any: no interpreter is registered on this thread");
     }
     let interp = &*interp;
-    let heap = crate::compile::runtime::shim_active_heap();
+    let heap = crate::compile::runtime::active_heap();
     let argv = std::slice::from_raw_parts(args, argc as usize);
     match interp.apply_interpreted(heap, closure, argv) {
         Ok(w) => w,
@@ -6096,7 +5934,7 @@ unsafe extern "C-unwind" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
         rt_llvm_fatal("rt_dyn_call: no interpreter is registered on this thread");
     }
     let interp = &*interp;
-    let heap = crate::compile::runtime::shim_active_heap();
+    let heap = crate::compile::runtime::active_heap();
     match interp.dyn_slot_closure(heap, vtable, slot) {
         Ok(w) => w,
         Err(e) => crate::compile::unwind_interpreted_failure(e),
@@ -6140,7 +5978,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
             raw_args.len()
         ));
     }
-    let heap = crate::compile::runtime::shim_active_heap();
+    let heap = crate::compile::runtime::active_heap();
     let mut vals: Vec<Value> = Vec::with_capacity(raw_args.len());
     for (raw, k) in raw_args.iter().zip(&op.args) {
         vals.push(match k {
@@ -6456,13 +6294,12 @@ fn bool_eq(args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Bool(expect_bool(&args[0])? == expect_bool(&args[1])?))
 }
 
+
 /// `eq` on `Sexpr`: compares the underlying `mem::Value` directly (see
 /// `registry::sexpr_assoc`'s doc comment for why this matches CL's `eq`
 /// semantics — cons identity, scalar/symbol value equality).
 fn sexpr_eq(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let a = strip_dyn(heap, args[0]);
-    let b = strip_dyn(heap, args[1]);
-    Ok(Value::Bool(a == b))
+    Ok(Value::Bool(crate::compile::runtime::equality::eq_val(heap, args[0], args[1])))
 }
 
 /// `eql` on `Sexpr`: CL's `eql` is `eq` plus "two numbers of the same type
@@ -6482,139 +6319,22 @@ fn sexpr_eq(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// other boxed kind is an aggregate/identity object for which CL's `eql` is
 /// `eq` anyway, so they fall through to the identity comparison below.
 fn sexpr_eql(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let a = args[0];
-    let b = args[1];
-    Ok(Value::Bool(eql_val(heap, a, b)))
-}
-
-/// The concrete value inside a trait object, or `v` unchanged. Comparison
-/// (like printing) sees straight through a `BoxedObj::Dyn`: the box is a
-/// dispatch mechanism, and — since it is usually created by an *implicit*
-/// coercion at a `:dyn` parameter — letting it change the answer of `eq`/
-/// `equal` would make an invisible conversion observable. Applied at the
-/// entry of `eql_val`/`sexpr_equal_val`/`sexpr_equalp_val`, so it covers
-/// nested positions through their recursion too.
-fn strip_dyn(heap: &Heap, v: Value) -> Value {
-    match v {
-        Value::Boxed(id) if heap.is_dyn(id) => heap.dyn_value(id),
-        other => other,
-    }
-}
-
-/// The scalar core of `eql` on two `Sexpr` payloads: `==` (plain `Value`
-/// identity/value equality) except two separately-boxed but equal `Float`s,
-/// which are `eql` by value — see [`sexpr_eql`]. Shared by [`sexpr_equal`]/
-/// [`sexpr_equalp`] as their atom-comparison base case.
-fn eql_val(heap: &Heap, a: Value, b: Value) -> bool {
-    let (a, b) = (strip_dyn(heap, a), strip_dyn(heap, b));
-    if let (Value::Boxed(ia), Value::Boxed(ib)) = (a, b) {
-        if heap.is_float(ia) && heap.is_float(ib) {
-            return heap.float_value(ia) == heap.float_value(ib);
-        }
-        // Same rationale as `Float` above: two separately-allocated but
-        // equal-valued `bignum`/`ratio` boxes must still be `eql`.
-        if heap.is_bignum(ia) && heap.is_bignum(ib) {
-            return heap.bignum_value(ia) == heap.bignum_value(ib);
-        }
-        if heap.is_ratio(ia) && heap.is_ratio(ib) {
-            return heap.ratio_value(ia) == heap.ratio_value(ib);
-        }
-    }
-    a == b
+    Ok(Value::Bool(crate::compile::runtime::equality::eql_val(heap, args[0], args[1])))
 }
 
 /// CL's `equal` on `Sexpr`: `eql` on every atom but `Cons` (structural
-/// recursion) and `Str` (case-sensitive content). Was a prelude `defun` until
-/// the Symbol/Sexpr redesign fenced `match` off `Sexpr` (Phase 5,
-/// `docs/dev/symbol-sexpr-redesign.md`); reimplemented here as a Rust builtin
-/// (a peer of [`sexpr_eq`]/[`sexpr_eql`]) rather than a `sexpr-*`-navigated
-/// `defun`, so it needs neither `match` nor the user-facing `car`/`cdr` (which
-/// Phase 4b repurposes to a generic `cons<T,U>` pair). The self-hosting
-/// compiler (`compiler.rs`) still calls it from interpreted code.
-fn sexpr_equal_val(heap: &Heap, a: Value, b: Value) -> bool {
-    let (a, b) = (strip_dyn(heap, a), strip_dyn(heap, b));
-    match (a, b) {
-        (Value::Cons(_), Value::Cons(_)) => {
-            let (Ok(ca), Ok(cb)) = (heap.car(a), heap.car(b)) else { return false };
-            let (Ok(da), Ok(db)) = (heap.cdr(a), heap.cdr(b)) else { return false };
-            sexpr_equal_val(heap, ca, cb) && sexpr_equal_val(heap, da, db)
-        }
-        (Value::Str(i), Value::Str(j)) => heap.string(i) == heap.string(j),
-        (a, b) => eql_val(heap, a, b),
-    }
-}
-
+/// recursion) and `Str` (case-sensitive content). The comparison itself is
+/// [`typelisp_rt::equality::equal_val`], which the compiled `rt_sexpr_equal`
+/// shim also calls — one implementation, so `(equal x y)` cannot answer
+/// differently depending on whether the caller happened to be compiled.
 fn sexpr_equal(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let a = args[0];
-    let b = args[1];
-    Ok(Value::Bool(sexpr_equal_val(heap, a, b)))
+    Ok(Value::Bool(crate::compile::runtime::equality::equal_val(heap, args[0], args[1])))
 }
 
-/// Converts any of the four numeric `Sexpr` shapes (`Int`, boxed `Float`,
-/// boxed `bignum`, boxed `ratio`) into an exact `BigRational`, or `None` for
-/// a non-numeric value *or* a non-finite `Float` (`NaN`/`inf` have no exact
-/// rational value) — the common representation [`sexpr_equalp_val`]'s
-/// cross-type numeric comparison needs, since every finite `f64` is itself
-/// an exact dyadic rational (`BigRational::from_float`, same conversion
-/// `float_assoc`'s `float->ratio` uses).
-fn numeric_as_ratio(heap: &Heap, v: Value) -> Option<BigRational> {
-    match v {
-        Value::Int(n) => Some(BigRational::from_integer(BigInt::from(n))),
-        Value::Boxed(id) if heap.is_float(id) => BigRational::from_float(heap.float_value(id)),
-        Value::Boxed(id) if heap.is_bignum(id) => Some(BigRational::from_integer(heap.bignum_value(id).clone())),
-        Value::Boxed(id) if heap.is_ratio(id) => Some(heap.ratio_value(id).clone()),
-        _ => None,
-    }
-}
-
-/// CL's `equalp` on `Sexpr`: like [`sexpr_equal`] but `Str`/`Char` compare
-/// case-insensitively and numbers compare across type (`Int`/`Float`/
-/// `bignum`/`ratio`) via [`numeric_as_ratio`] — CL's `equalp` defines two
-/// numbers as equal by `=`, regardless of type, unlike `eql`/`equal`'s
-/// same-type requirement. Same Phase 5 migration from a prelude
-/// `match`-based `defun` to a Rust builtin.
-fn sexpr_equalp_val(heap: &Heap, a: Value, b: Value) -> bool {
-    let (a, b) = (strip_dyn(heap, a), strip_dyn(heap, b));
-    if let (Some(x), Some(y)) = (numeric_as_ratio(heap, a), numeric_as_ratio(heap, b)) {
-        return x == y;
-    }
-    match (a, b) {
-        (Value::Cons(_), Value::Cons(_)) => {
-            let (Ok(ca), Ok(cb)) = (heap.car(a), heap.car(b)) else { return false };
-            let (Ok(da), Ok(db)) = (heap.cdr(a), heap.cdr(b)) else { return false };
-            sexpr_equalp_val(heap, ca, cb) && sexpr_equalp_val(heap, da, db)
-        }
-        (Value::Str(i), Value::Str(j)) => heap.string(i).eq_ignore_ascii_case(heap.string(j)),
-        (Value::Char(c), Value::Char(d)) => c.eq_ignore_ascii_case(&d),
-        // CL's `equalp` on a structure: same type, and every slot `equalp`
-        // (unlike `equal`, which is `eq` on structures — `eql_val`'s
-        // fallback `a == b`, a pointer-identity `BoxId` compare, is exactly
-        // that, so this recursive arm must come *before* it or it would
-        // never run). Design plan §3.
-        (Value::Boxed(ia), Value::Boxed(ib)) if heap.is_struct(ia) && heap.is_struct(ib) => {
-            // type-identity-ok: two stored keys compared to each other — no
-            // `Path` to spell, and `equalp`'s "same type" is exactly key equality
-            heap.struct_type_name(ia) == heap.struct_type_name(ib)
-                && heap.struct_field_count(ia) == heap.struct_field_count(ib)
-                && (0..heap.struct_field_count(ia))
-                    .all(|i| sexpr_equalp_val(heap, heap.struct_field(ia, i), heap.struct_field(ib, i)))
-        }
-        (Value::Boxed(ia), Value::Boxed(ib)) if heap.is_enum(ia) && heap.is_enum(ib) => {
-            // type-identity-ok: two stored keys compared to each other (see the struct arm)
-            heap.enum_type_name(ia) == heap.enum_type_name(ib)
-                && heap.enum_variant(ia) == heap.enum_variant(ib)
-                && heap.enum_field_count(ia) == heap.enum_field_count(ib)
-                && (0..heap.enum_field_count(ia))
-                    .all(|i| sexpr_equalp_val(heap, heap.enum_field(ia, i), heap.enum_field(ib, i)))
-        }
-        (a, b) => eql_val(heap, a, b),
-    }
-}
-
+/// CL's `equalp` on `Sexpr` — [`sexpr_equal`]'s case-folding, cross-type-
+/// numeric, struct/enum-recursive sibling. Same shared implementation.
 fn sexpr_equalp(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let a = args[0];
-    let b = args[1];
-    Ok(Value::Bool(sexpr_equalp_val(heap, a, b)))
+    Ok(Value::Bool(crate::compile::runtime::equality::equalp_val(heap, args[0], args[1])))
 }
 
 #[cfg(test)]
@@ -6697,6 +6417,7 @@ mod native_method_list_tests {
         ("ratio", &["ratio"]),
         ("bool", &["bool"]),
         ("symbol", &["symbol"]),
+        ("sexpr", &["sexpr"]),
     ];
 
     /// Every `(equal method "X")` inside the island's `<name>-native-method?`

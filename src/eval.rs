@@ -7,10 +7,17 @@
 //! and the binding handle.
 
 mod value;
-pub(crate) mod format;
 pub(crate) mod interp;
-pub(crate) mod pprint;
 pub(crate) mod scope;
+
+/// The CL printer moved to its own crate ([`typelisp_print`]) so a compiled
+/// function that calls `format`/`print`/`println`/`pprint` can reach it
+/// through an `rt_*` shim — the interpreter cannot be a call target of
+/// compiled code, but a crate below it can. Re-exported under the old paths
+/// so every `crate::eval::format::…` / `crate::eval::pprint::…` reference
+/// keeps working.
+pub(crate) use typelisp_print::format;
+pub(crate) use typelisp_print::pprint;
 
 pub use value::EvalError;
 pub use interp::{llvm_module_of, llvm_value_of, Interp};

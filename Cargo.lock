@@ -443,8 +443,18 @@ dependencies = [
  "rustyline",
  "serde",
  "serde_json",
+ "typelisp-abi",
  "typelisp-mem",
+ "typelisp-print",
+ "typelisp-read",
  "typelisp-rt",
+]
+
+[[package]]
+name = "typelisp-abi"
+version = "0.0.2"
+dependencies = [
+ "typelisp-mem",
 ]
 
 [[package]]
@@ -456,6 +466,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "typelisp-print"
+version = "0.0.2"
+dependencies = [
+ "num-traits",
+ "typelisp-abi",
+ "typelisp-mem",
+]
+
+[[package]]
+name = "typelisp-read"
+version = "0.0.2"
+dependencies = [
+ "num-bigint",
+ "num-rational",
+ "typelisp-abi",
+ "typelisp-mem",
+]
+
+[[package]]
 name = "typelisp-rt"
 version = "0.0.2"
 dependencies = [
@@ -463,7 +492,10 @@ dependencies = [
  "num-integer",
  "num-rational",
  "num-traits",
+ "typelisp-abi",
  "typelisp-mem",
+ "typelisp-print",
+ "typelisp-read",
 ]
 
 [[package]]

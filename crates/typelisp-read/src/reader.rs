@@ -25,7 +25,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 
 use crate::name_lexer::{NameLexer, NameTok};
-use crate::{Error, Heap, Loc, SymId, Value};
+use typelisp_mem::{Error, Heap, Loc, SymId, Value};
 
 /// The feature set consulted by `#+`/`#-` reader conditionals (CLHS 24.1.2 —
 /// the closest an s-expression reader has to a preprocessor). A feature is

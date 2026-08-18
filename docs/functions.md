@@ -17,11 +17,13 @@
 | `+` `-` `*` `/` | `(op a b)` | `(T,T)→T` | 四則演算。`/` はゼロ方向切り捨て・ゼロ除算で panic |
 | `mod` | `(mod a b)` | `(T,T)→T` | 剰余（CL の `mod`、**床除算**＝符号は除数側。`(mod -7 3)`→`2`）。ゼロ除算で panic |
 | `rem` | `(rem a b)` | `(T,T)→T` | 剰余（CL の `rem`、**切り捨て除算**＝符号は被除数側。`(rem -7 3)`→`-1`）。ゼロ除算で panic |
-| `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(T,T)→cons-cell<T,T>` | CL の2引数 `floor`/`ceiling`/`round`/`truncate`（`(floor 7 2)`→商3・剰余1）に相当。多値の代わりに商・剰余を`cons-cell`（`car`=商、`cdr`=剰余）で返す（§5、§3.4）。`round-div` は同点をCL準拠で偶数側に丸める |
+| `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(T,T)→cons-cell<T,T>` | CL の2引数 `floor`/`ceiling`/`round`/`truncate`（`(floor 7 2)`→商3・剰余1）に相当。多値の代わりに商・剰余を`cons-cell`（`car`=商、`cdr`=剰余）で返す（§5。多値そのものは非採用——[dev/cl-missing-classes-and-methods.md](dev/cl-missing-classes-and-methods.md) §3 の 4）。`round-div` は同点をCL準拠で偶数側に丸める |
 | `abs` | `(abs x)` | `T→T` | 絶対値（`prelude.rs` のメソッド） |
 | `signum` | `(signum x)` | `T→T` | 符号（`1`/`-1`/`0`） |
 | `gcd` | `(gcd a b)` | `(T,T)→T` | 最大公約数 |
 | `lcm` | `(lcm a b)` | `(T,T)→T` | 最小公倍数（どちらかが0なら0） |
+| `max` `min` | `(op a b)` | `(T,T)→T` | 大きい方／小さい方（3引数以上は §4 の可変長糖衣で展開） |
+| `1+` `1-` | `(op x)` | `T→T` | `x±1`（`prelude.rs` のメソッド） |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(T,T)→bool` | 比較 |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(T,T)→bool` | いずれも `=` と同じ（同型の数値に差はない） |
 | `int->float` | `(int->float x)` | `T→f64` | `f64` への拡大変換 |
@@ -31,6 +33,8 @@
 | `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` の失敗を `None` で返す版 |
 
 これらの変換は `(as Type x)`/`(try-as Type x)` 特殊形（[syntax.md](syntax.md) 参照）の実体でもある。
+ビット演算（`logand`/`ash`/`ldb` 等）と述語（`zerop`/`evenp` 等）は型をまたいで同じ形なので §4 に
+まとめてある。
 
 `i8` `i16` `isize` `u8` `u16` `u32` `u64` `usize` `f32` は `defmethod` の受け手として型登録は
 されているが、現時点では算術・比較を含め一切のメソッドを持たない。
@@ -47,7 +51,11 @@
 | `expt` | `(expt a b)` | `(f64,f64)→f64` | 冪乗 |
 | `abs` | `(abs x)` | `f64→f64` | 絶対値 |
 | `signum` | `(signum x)` | `f64→f64` | 符号（`1.0`/`-1.0`、`±0.0`/`NaN` はそのまま。CL 準拠で Rust の `signum` とは異なる） |
+| `max` `min` | `(op a b)` | `(f64,f64)→f64` | 大きい方／小さい方（3引数以上は §4 の可変長糖衣で展開） |
+| `1+` `1-` | `(op x)` | `f64→f64` | `x±1.0` |
 | `sqrt` `floor` `ceiling` `round` `truncate` | `(op x)` | `f64→f64` | 単項演算 |
+| `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `f64→f64` | 超越関数。`log` は自然対数 |
+| `log`（2引数） | `(log x base)` | `(f64,f64)→f64` | 底を指定した対数。チェッカーが `(/ (log x) (log base))` へ展開する糖衣（§4） |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL の2引数版（`(floor 7.0 2.0)`→商2・剰余1）に相当。§1 の同名メソッドと同じ設計（`car`=商、`cdr`=剰余） |
 | `float->int` | `(float->int x)` | `f64→i32` | ゼロ方向への切り捨てで `i32` へ変換 |
 | `float->bignum` | `(float->bignum x)` | `f64→bignum` | ゼロ方向への切り捨てで `bignum` へ変換 |
@@ -71,6 +79,11 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 | `gcd` | `(gcd a b)` | `(bignum,bignum)→bignum` | 最大公約数 |
 | `lcm` | `(lcm a b)` | `(bignum,bignum)→bignum` | 最小公倍数（どちらかが0なら0） |
 | `expt` | `(expt a b)` | `(bignum,bignum)→bignum` | 冪乗。指数が負なら panic（結果が `ratio` になり `bignum` で表せないため） |
+| `max` `min` | `(op a b)` | `(bignum,bignum)→bignum` | 大きい方／小さい方 |
+| `1+` `1-` | `(op x)` | `bignum→bignum` | `x±1` |
+| `logand` `logior` `logxor` `ash` | `(op a b)` | `(bignum,bignum)→bignum` | ビット演算（無限精度2の補数、§4） |
+| `lognot` `logcount` `integer-length` | `(op x)` | `bignum→bignum` | 同上（単項） |
+| `logbitp` `logtest` | `(op a b)` | `(bignum,bignum)→bool` | 同上（述語） |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(bignum,bignum)→bool` | 比較 |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(bignum,bignum)→bool` | いずれも `=` と同じ |
 | `bignum->int` | `(bignum->int x)` | `bignum→i32` | 縮小変換。`i64` に収まらなければ panic |
@@ -89,6 +102,8 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 | `abs` | `(abs x)` | `ratio→ratio` | 絶対値 |
 | `signum` | `(signum x)` | `ratio→ratio` | 符号（`1`/`-1`/`0` を `ratio` で返す） |
 | `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | 冪乗。指数は整数値の `ratio` のみ（非整数なら panic）。負指数は逆数 |
+| `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | 大きい方／小さい方 |
+| `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`。`ratio` にビット演算は無い（CL も整数専用） |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | 比較 |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(ratio,ratio)→bool` | いずれも `=` と同じ |
 | `numerator` | `(numerator x)` | `ratio→bignum` | 既約分子（CL と同名） |
@@ -126,11 +141,107 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 （`ratio-expt-int` も `prelude.rs` に `defun` として存在するが、これは `ratio` の `expt` が整数乗を
 計算するための内部ヘルパーであり、通常は `(expt r n)` を使う。）
 
-`random` のみレシーバを持たない自由関数として残る。
+以下は 2026-07-31 に CL 準拠で追加した残りの数値カタログ。可変長・0/1引数の呼び出し形（§4.1）、
+述語（§4.2）、定数（§4.3）、ビット演算とバイト指定子（§4.4）、乱数（§4.5）、時間（§4.6）。
+すべて JIT/AOT コンパイルできる
+（コンパイルできないものの一覧は [syntax.md](syntax.md) §10）。
+
+### 4.1 可変長・0/1引数（チェッカーの糖衣）
+
+CL の算術・比較は可変長だが、`defmethod` はレシーバ型でしか解決せずアリティでは解決しない。
+そこで**チェッカーが構文糖衣として展開**する（`Checker::check_variadic_arith` /
+`check_variadic_cmp` / `check_nullary_or_unary_numeric_op` / `check_log_with_base`）。展開後は
+常に2引数のメソッド呼び出しなので、インタプリタも JIT/AOT も無改修で動く。
+
+| 書ける形 | 展開 | 対象 |
+|---|---|---|
+| `(op a b c ...)` | `(op (op a b) c)` の左畳み込み | `+` `-` `*` `/` `max` `min` `logand` `logior` `logxor` |
+| `(cmp a b c ...)` | 各項を一時変数に束縛した `(and (cmp a b) (cmp b c) ...)` | `<` `<=` `>` `>=` `=` `/=` |
+| `(op)` | `(+)`=0 / `(*)`=1 / `(logior)`=`(logxor)`=0 / `(logand)`=-1 | 上記のうち単位元を持つもの |
+| `(op x)` | `+ * max min logand logior logxor` は `x` そのもの。`(- x)` は符号反転、`(/ x)` は逆数 | 同上 |
+| `(cmp x)` | `x` を評価して `true` | `<` `<=` `>` `>=` `=` `/=` |
+| `(log x base)` | `(/ (log x) (log base))` | `f64` |
+
+各項は左から1回だけ評価される（比較の可変長版が一時変数を挟むのはこのため）。
+
+### 4.2 述語
+
+| 名前 | 形式 | 型 | 対応する型 |
+|---|---|---|---|
+| `zerop` `plusp` `minusp` | `(op x)` | `T→bool` | `i32` `i64` `f64` `bignum` `ratio` |
+| `evenp` `oddp` | `(op x)` | `T→bool` | `i32` `i64` `bignum`（CL 同様、整数型のみ） |
+
+CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型付けなので実行時に型を問う場面が
+無い（[language-design.md](dev/language-design.md) §0）。
+
+### 4.3 定数
+
+| 名前 | 型 | 値 |
+|---|---|---|
+| `pi` | `f64` | `3.141592653589793` |
+| `boole-clr` `boole-set` `boole-1` `boole-2` `boole-c1` `boole-c2` `boole-and` `boole-ior` `boole-xor` `boole-eqv` `boole-nand` `boole-nor` `boole-andc1` `boole-andc2` `boole-orc1` `boole-orc2` | `i32` | `boole` に渡す演算コード（CL のキーワードの代わり） |
+
+`most-positive-fixnum` 等の数値限界定数は無い。
+
+### 4.4 ビット演算
+
+無限精度の2の補数として定義される（CL §12.10）。`i32`/`i64`/`bignum` に実装があり、`ratio` には
+無い（CL 自体もビット演算は整数専用）。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `random` | `(random n)` | `i32→i32` | `0` 以上 `n` 未満の乱数（自由関数、レシーバなし） |
+| `logand` `logior` `logxor` | `(op a b)` | `(T,T)→T` | 論理積・論理和・排他的論理和（可変長・0引数版は §4.1） |
+| `lognot` | `(lognot x)` | `T→T` | ビット反転 |
+| `ash` | `(ash x count)` | `(T,T)→T` | 算術シフト。`count` が正なら左 |
+| `logbitp` | `(logbitp index x)` | `(T,T)→bool` | `index` ビット目が立っているか |
+| `logtest` | `(logtest a b)` | `(T,T)→bool` | `(/= (logand a b) 0)` |
+| `logcount` | `(logcount x)` | `T→T` | 立っているビット数（負数なら 0 ビットの数） |
+| `integer-length` | `(integer-length x)` | `T→T` | 符号を除いて表現に要するビット数 |
+| `logeqv` `lognand` `lognor` `logandc1` `logandc2` `logorc1` `logorc2` | `(op a b)` | `(T,T)→T` | 上記から合成した残り7種（`prelude.rs`） |
+
+**バイト指定子**（`i32` のみ）。CL の `byte` が返す不透明なオブジェクトの代わりに、既存の
+`cons-cell<i32,i32>`（`car`=サイズ、`cdr`=位置）を流用する。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `byte` | `(byte size position)` | `(i32,i32)→cons-cell<i32,i32>` | バイト指定子を作る |
+| `byte-size` / `byte-position` | `(byte-size b)` | `cons-cell<i32,i32>→i32` | 成分を取り出す |
+| `ldb` | `(ldb b x)` | `(cons-cell<i32,i32>,i32)→i32` | `x` から指定バイトを取り出して右詰め |
+| `ldb-test` | `(ldb-test b x)` | `(cons-cell<i32,i32>,i32)→bool` | 指定バイトに立っているビットがあるか |
+| `mask-field` | `(mask-field b x)` | `(cons-cell<i32,i32>,i32)→i32` | 指定バイト以外を 0 にする（位置は保つ） |
+| `dpb` | `(dpb newbyte b x)` | `(i32,cons-cell<i32,i32>,i32)→i32` | 右詰めの `newbyte` を `x` の指定バイトへ埋める |
+| `deposit-field` | `(deposit-field newbyte b x)` | `(i32,cons-cell<i32,i32>,i32)→i32` | `dpb` の「位置を保ったまま」版 |
+| `boole` | `(boole op a b)` | `(i32,i32,i32)→i32` | `op`（§4.3 の `boole-*` 定数）で選んだ 16 種の2項論理演算 |
+
+### 4.5 乱数
+
+`random` と `random-state` 一式はレシーバを持たない自由関数（`prelude.rs`）。状態は
+xorshift64 で、インタプリタと compiled コードは同じ列を返す。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `random` | `(random n [state])` | `i32 &optional random-state → i32` | `0` 以上 `n` 未満の乱数。状態を省略すると `*random-state*` から引いて進める |
+| `make-random-state` | `(make-random-state [state])` | `&optional random-state → random-state` | 引数なしなら新しい状態、渡せばその複製（複製は同じ列を再生する） |
+| `random-state-p` | `(random-state-p x)` | `random-state→bool` | 常に `true`（静的型が既に他の型を排除しているため。CL との対応のためだけに在る） |
+| `*random-state*` | — | `random-state` | `random` の既定の状態。動的束縛が無いので**代入可能なグローバル**（`setf` で差し替える） |
+
+新しい状態のシードは壁時計から採る。**シード値を外から与える手段は無い**ので、実行を跨いで
+同じ列を再現することはできない（同一プロセス内なら `make-random-state` の複製で再生できる）。
+
+上の4つは `make-random-state-fresh` / `random-state-copy` / `random-state-next` という Rust
+プリミティブ（ビットをいじる部分だけ）の上に載った prelude の `defun`。プリミティブ側も呼べるが、
+`&optional` を持てるのは `defun` の側なので、通常は上の名前を使う。
+
+### 4.6 時間
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `get-universal-time` | `(get-universal-time)` | `()→i64` | CL の紀元（1900-01-01 UTC）からの秒 |
+| `get-internal-real-time` | `(get-internal-real-time)` | `()→i64` | プロセス基準の経過時間。単位は次の定数 |
+| `internal-time-units-per-second` | — | `i64` | `1000000`（マイクロ秒）。CL 同様、値は処理系の選択 |
+| `time` | `(time form)` | マクロ | `form` を実行し、かかった実時間を1行印字して `form` の値をそのまま返す |
+
+CPU 時間（`get-internal-run-time`）と、日時への分解・合成（`decode-universal-time` 等）は無い。
 
 ## 5. `cons`/`car`/`cdr`（ジェネリックなペア）と `Sexpr`
 
@@ -334,7 +445,7 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `append` | `(append s1 s2)` | `(string,string)→string` | 連結 |
 | `<` `<=` `>` `>=` | `(op s1 s2)` | `(string,string)→bool` | 辞書順比較（`i32` 等と同じくレシーバ型で多重定義） |
 | `lt` | `(lt s1 s2)` | `(string,string)→bool` | 辞書順の狭義小なり（`<` の旧 CL カタログ名） |
-| `eq` `eql` | `(op s1 s2)` | `(string,string)→bool` | 同一性比較（内容ではなく参照） |
+| `eq` `eql` | `(op s1 s2)` | `(string,string)→bool` | 同一性比較（内容ではなく参照）。2026-08-18 まで compiled 側だけ内容比較になっていたのを揃えた |
 | `equal` | `(equal s1 s2)` | `(string,string)→bool` | 内容比較（大文字小文字を区別） |
 | `equalp` | `(equalp s1 s2)` | `(string,string)→bool` | 内容比較（大文字小文字を無視、ASCII のみ） |
 
@@ -350,11 +461,12 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `digitp` | `(digitp c)` | `char→bool` | ASCII 数字か |
 | `eq` `eql` `equal` | `(op c1 c2)` | `(char,char)→bool` | 値の比較 |
 | `equalp` | `(equalp c1 c2)` | `(char,char)→bool` | 大文字小文字を無視した値の比較 |
-| `char->int` | `(char->int c)` | `char→i32` | Unicode スカラ値 |
+| `char->int` | `(char->int c)` | `char→i32` | Unicode スカラ値（逆方向は §1 の `int->char`/`try-int->char`） |
+| `char->string` | `(char->string c)` | `char→string` | 1文字だけの文字列。CL は `string` 関数が指定子を取って兼ねるが、この言語には指定子が無いので向きを名前に出している |
 
 ## 10. `Vector<T>`
 
-可変長配列。`RtValue::Struct` を流用した組み込み型。
+可変長配列。ユーザ定義 `defstruct` と同じヒープ表現を流用した組み込み型。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
@@ -369,13 +481,12 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 `map`/`filter` は§6（`Iter` トレイト上のジェネリック関数）で実装済み——`(map (iter v) f)` のように
 `Vector<T>` を `iter` でカーソル化して渡す。
 
-**`Vector<T>` ↔ `Sexpr` リストの相互変換は言語仕様上できない（意図的に対象外）**: `cons` は
-`cons<T,U>` という異種ペア型であり、`(cons 1 "hello")` の型は `cons<i32, cons<str, null>>` になる
-——1つめの要素の型は `i32`、2つめの要素の型は `cons<str, null>` で異なる。`Sexpr` のリストは
-この異種の入れ子 `cons` 連鎖（各要素ごとに型が変わりうる）であり、`Vector<T>` のような単一の要素型
-`T` だけからなるコレクションとは表現が根本的に異なるため、両者を汎用的に変換する
-`to-list`/`from-list` のような関数は書けない（型パラメータ`T`だけでは`Sexpr`側の入れ子構造を
-静的に表現できない）。
+**`Vector<T>` ↔ `Sexpr` リストの相互変換は言語仕様上できない（意図的に対象外）**: `cons-cell<A,B>`
+は異種のペア型で、要素を並べた連鎖の型は要素ごとに変わる（`(cons 1 (cons "s" x))` の
+`cdr` の型は `cons-cell<string, ...>`）。`Sexpr` のリストはこの異種の入れ子 `Cons` 連鎖であり、
+`Vector<T>` のような単一の要素型 `T` だけからなるコレクションとは表現が根本的に異なるため、両者を
+汎用的に変換する `to-list`/`from-list` のような関数は書けない（型パラメータ `T` だけでは `Sexpr` 側の
+入れ子構造を静的に表現できない）。
 
 ## 11. `HashTable<K,V>`
 
@@ -560,11 +671,15 @@ CL の `format` ディレクティブをほぼ網羅する。各ディレクテ�
 ```
 
 `print`/`println`/`format` は呼び出しのたびに即座に `flush` する（パイプ経由でも標準入力を読む前に
-プロンプトが確実に見えるようにするため）。書式エンジンは [format.rs](../src/eval/format.rs)（制御文字列を
-[`Node`] 木にパース→引数リストに対して解釈。`~a`/`~s` の値描画は GCヒープ走査＋enum 変種名解決が要る
-Rust 専用処理）、`Interp::run_format` が enum 変種名表を渡して呼ぶ。可変長引数を `Sexpr` リストへまとめる
-特殊形は [checker.rs](../src/check/checker.rs) の `check_format`/`check_print_like`。コンパイル
-（`compile`）対象ではない（旧 `print`/`println` も未対応だった）。
+プロンプトが確実に見えるようにするため）。書式エンジンは
+[typelisp-print](../crates/typelisp-print/src/format.rs)（制御文字列を [`Node`] 木にパース→引数リストに
+対して解釈。`~a`/`~s` の値描画は GC ヒープ走査が要る Rust 専用処理）。可変長引数を `Sexpr` リストへ
+まとめる特殊形は [checker.rs](../src/check/checker.rs) の `check_format`/`check_print_like`。
+
+**JIT/AOT コンパイルできる**（2026-08-18）。ヒープから読めない2つの事実——enum の変種*名*と型の
+`print-object` メソッド——は `PrintEnv` 越しに渡す。インタプリタは自分のスコープ木から答え、AOT 実行
+ファイルは起動時に登録したテーブルから答える。整形セッション（`pprint-logical-block`）も一箇所
+なので、インタプリタのブロックの中で compiled な `println` を呼んでも同じバッファに入る。
 
 ### 15.1 pretty printer（CLHS 22.2）
 
@@ -809,9 +924,13 @@ CLHS の `eval` に準拠する: **現在の大域環境**（グローバルの�
   REPL は1行ずつ検査・実行するので、`eval` で定義した名前を次の行から直接呼べる。
 - **エラーの扱い**: チェッカーが静的に弾ける型エラー・構文エラーは `Err` を返す（パニックしない）。
   評価したコード内の**実行時パニック**（ゼロ除算等）は、直接書いたコードと同様にそのまま伝播する
-  （CL の condition system は typelisp に無いため、これが最も近い挙動）。
+  （CL の condition system は採らないので、panic を捕まえて継続する手段は無い。ただし panic は
+  unwind するので、途中の `unwind-protect` の cleanup は走る——[syntax.md](syntax.md) §8）。
 - **名前空間**: `typl file.typl` 実行時、`eval` はそのスクリプトのファイル由来モジュール名前空間で
   評価される（スクリプト自身のグローバルが見える）。REPL はルート名前空間で評価する。
+- **コンパイル**: `read` は JIT/AOT コンパイルできる（2026-08-18、リーダを `typelisp-read`
+  クレートへ切り出した）。`eval` はまだできない——チェッカーとインタプリタそのものを要するため。
+  残作業の分析は [dev/TODO.md](dev/TODO.md)。
 
 ## 17. docstring / `documentation`（Common Lisp 準拠）
 
@@ -1010,8 +1129,10 @@ CL 同様、`close` 後でも取り出せる。
   強いないため。
 - **閉じるのは明示的**。GC はクローズしない（コレクタは cons アリーナ枯渇時にしか走らないので、
   ファイナライザは予測できない時点で動くか一度も動かない）。`with-open-file` を使うのが安全。
-- ストリーム操作は `format`/`random` と同じく**インタプリタ専用**で、これらを呼ぶ関数は
-  JIT/AOT コンパイルされない。
+- **ストリーム操作は JIT/AOT コンパイルできる**（2026-08-14 の「コンパイル経路の穴」で解消。
+  ストリーム表を `typelisp-rt` へ移したため、インタプリタの無い AOT 実行ファイルからも同じ表を
+  引ける）。prelude のストリーム定義は事前コンパイル済みで出荷される。コンパイルできないものは
+  [syntax.md](syntax.md) §10 に一覧がある（2026-08-18 時点で `eval` のみ）。
 
 ## 19. パス名 (`pathname`)
 
