@@ -340,7 +340,19 @@ impl Loader {
                 Ok(tl) if needs_immediate_exec(heap, tl) => {
                     let _ = interp.exec(heap, tl);
                 }
-                Ok(tl) => body.push(tl),
+                // Rooted as it lands. `body` is a `Vec<Value>`, which the
+                // collector cannot see, and checking the *next* form of this
+                // file allocates heavily — so an earlier member left unrooted
+                // is collected and its cell recycled, and the module bundle
+                // built below ends up holding a fragment of it. That shows up
+                // at exec as `not a top-level core form: (())`, the same
+                // signature (and the same fix) as `Checker::check_impl`'s own
+                // `body` vector. Released by the `pop_roots_to(mark)` below,
+                // once the bundle holding them is permanently rooted.
+                Ok(tl) => {
+                    heap.push_root(tl);
+                    body.push(tl);
+                }
                 Err(e) => {
                     check_err = Some(e);
                     break;
@@ -348,18 +360,33 @@ impl Loader {
             }
         }
         checker.exit_file_module(segs.len());
-        pop_roots_to(heap, mark);
         if let Some(e) = check_err {
+            pop_roots_to(heap, mark);
             return Err(e);
         }
         // `(module PATH BODY...)` — the file's own definitions as one unit.
         // Built here rather than by the checker because the *driver* is what
         // knows a file's forms belong together.
+        //
+        // Still under the per-form roots pushed above. `tagged_module` conses
+        // the bundle *around* `body`'s members, so in principle they have to
+        // survive a collection triggered by that consing too — a narrower
+        // window than the one above, and one `tests/loader_gc_test.rs` does
+        // not currently provoke (the bundle is N+1 cells against a whole
+        // file's checking). Closing it costs one moved line, so it is closed
+        // rather than argued about.
         let wrapper = match crate::check::core::tagged_module(heap, &path, &body) {
             Ok(v) => v,
-            Err(e) => return Err(Error::TypeError(format!("load: {}", e))),
+            Err(e) => {
+                pop_roots_to(heap, mark);
+                return Err(Error::TypeError(format!("load: {}", e)));
+            }
         };
         heap.push_permanent_root(wrapper);
+        // Only now: the bundle keeps every member reachable, so this file's
+        // read roots and per-form roots can all go — restoring the LIFO
+        // discipline this function's callers rely on (see the module doc).
+        pop_roots_to(heap, mark);
         self.pending.push(wrapper);
         Ok(())
     }
