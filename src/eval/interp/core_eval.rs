@@ -1278,7 +1278,7 @@ impl Interp {
         let compiled = f.compiled.borrow().clone();
         if let Some(compiled) = compiled {
             let sig = f.sig.as_ref().expect("a compiled function always has a type signature");
-            return self.call_compiled(heap, &compiled, &argv, &sig.0, &sig.1);
+            return self.call_compiled(heap, compiled.as_ref(), &argv, &sig.0, &sig.1);
         }
         self.apply(heap, f, argv)
     }

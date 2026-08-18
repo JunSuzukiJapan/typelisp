@@ -20,6 +20,24 @@ pub mod aot;
 pub mod bootstrap;
 pub mod core_bridge;
 pub mod core_freevars;
+pub mod llvm_builtins;
+
+/// Registers this crate's `llvm-*` builtin implementations with the
+/// interpreter, for the current thread.
+///
+/// The interpreter reaches them through a hook rather than by naming them
+/// (see [`llvm_builtins`]'s doc comment for why the dependency points this
+/// way), so *something* has to connect the two. Ordinarily that is
+/// [`crate::compiler::load_aot`], since loading the island is what makes the
+/// `llvm-*` builtins reachable in the first place — every driver, both
+/// bootstrappers and `compile-file` come through it.
+///
+/// Called directly only by code that drives the builders without an island:
+/// the tests that build a module by hand. An `Interp` with neither is not
+/// broken, it simply has no backend, and says so.
+pub fn install_llvm_backend() {
+    crate::eval::interp::set_llvm_builtin_hook(llvm_builtins::eval_llvm_builtin_method);
+}
 pub mod prelude_bootstrap;
 pub mod symbols;
 
@@ -308,11 +326,7 @@ impl CompiledFn {
     /// call in [`catch_compiled_panic`].
     ///
     pub fn call(&self, args: &[i64]) -> i64 {
-        // SAFETY: `addr` came from `get_function_address` on a name the module
-        // defines, so it points at a function built under `compiled_fn_type` —
-        // exactly what `CompiledSignature` describes.
-        let f: CompiledSignature = unsafe { std::mem::transmute::<usize, CompiledSignature>(self.addr) };
-        unsafe { f(args.as_ptr(), args.len() as u32) }
+        <Self as crate::eval::interp::CompiledBody>::call(self, args)
     }
 
     /// This function's own JIT-resolved address — used to wire
@@ -320,6 +334,18 @@ impl CompiledFn {
     /// this one (labels/closures Stage 3, see [`Self::new`]'s `externals`
     /// parameter).
     pub fn address(&self) -> usize {
+        self.addr
+    }
+}
+
+/// The evaluator's view of this: an address it can call through, and an
+/// owner whose `Drop` retires the engine behind it.
+///
+/// The trait lives in the front end (`eval::interp`) and names only the
+/// address, so nothing there has to mention `ExecutionEngine` — see its doc
+/// comment.
+impl crate::eval::interp::CompiledBody for CompiledFn {
+    fn address(&self) -> usize {
         self.addr
     }
 }

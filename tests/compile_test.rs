@@ -19,6 +19,7 @@ fn run(src: &str) -> Result<Value, EvalError> {
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    typelisp::compile::install_llvm_backend();
     let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {
@@ -46,6 +47,7 @@ fn check_error(src: &str) -> Error {
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    typelisp::compile::install_llvm_backend();
     let interp = Interp::new();
     let result = vs
         .into_iter()
@@ -74,6 +76,7 @@ fn eval_string(src: &str) -> String {
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    typelisp::compile::install_llvm_backend();
     let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {
@@ -110,6 +113,7 @@ fn run_with_compiler(src: &str) -> Result<Value, EvalError> {
 fn run_with_compiler_and_capacity(src: &str, capacity: usize) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(capacity);
     let mut chk = Checker::new();
+    typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
@@ -133,6 +137,7 @@ fn eval_ok_with_compiler(src: &str) -> Value {
 fn eval_string_with_compiler_and_capacity(src: &str, capacity: usize) -> String {
     let mut h = Heap::with_capacity(capacity);
     let mut chk = Checker::new();
+    typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
@@ -182,6 +187,7 @@ fn run_with_compiler_and_prelude_and_capacity(src: &str, capacity: usize) -> Res
 fn run_and_read<R>(src: &str, capacity: usize, f: impl FnOnce(&Heap, Value) -> R) -> Result<R, EvalError> {
     let mut h = Heap::with_capacity(capacity);
     let mut chk = Checker::new();
+    typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     load_compiler(&mut h, &mut chk, &mut interp);
@@ -2995,6 +3001,7 @@ fn compile_let_does_not_emit_instructions_after_an_early_return_from_its_body() 
 fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_first() {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();

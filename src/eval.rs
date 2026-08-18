@@ -20,4 +20,4 @@ pub(crate) use typelisp_print::format;
 pub(crate) use typelisp_print::pprint;
 
 pub use value::EvalError;
-pub use interp::{llvm_module_of, llvm_value_of, Interp};
+pub use interp::Interp;

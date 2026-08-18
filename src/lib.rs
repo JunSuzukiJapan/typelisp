@@ -17,6 +17,10 @@ pub use mem::*;
 pub use types::*;
 pub use check::*;
 pub use eval::*;
+// The two LLVM-handle accessors moved to the backend with the rest of the
+// island's IR builders; re-exported here under the names they have always had
+// from outside this crate (tests inspect generated IR through them).
+pub use compile::llvm_builtins::{llvm_module_of, llvm_value_of};
 pub use prelude::load as load_prelude;
 // interp-closure removal: every island load goes through the native AOT
 // loader (`load_aot`), so nothing tree-walks the island's own bodies — the

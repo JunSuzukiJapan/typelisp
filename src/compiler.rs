@@ -4665,6 +4665,14 @@ pub const ISLAND_BITCODE: &[u8] = include_bytes!("compiler_island.bc");
 /// artifact, any failure here is a build/bug condition, not a user error —
 /// hence the panics, matching [`load`].
 pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
+    // The island's whole purpose is emitting IR, so this is where the backend
+    // that does the emitting becomes available: every path that can reach an
+    // `llvm-*` builtin — the JIT driver, `compile-file`, the two
+    // bootstrappers, a test evaluating one directly — comes through here
+    // first. An `Interp` built *without* loading the island has no business
+    // reaching those builtins, and gets a clear invariant error rather than a
+    // silently missing backend (see `eval::interp::set_llvm_builtin_hook`).
+    crate::compile::install_llvm_backend();
     let r = Reader::new();
     let forms = r.read_all(heap, SOURCE).expect("compiler: read failed");
     // The island is written as mutually recursive top-level `defun`s (Phase 3
