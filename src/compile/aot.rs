@@ -217,7 +217,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // `ENTRY_POINT_INTERNAL_NAME` ("tl_main"). A `defmethod`'s symbol is
         // `user_method_symbol_name`'s `tl_type::method`, exactly what a
         // compiled call site emits.
-        interp.add_compiled_function(&mut heap, module.clone(), name, internal_name).map_err(|e| e.to_string())?;
+        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), name, internal_name).map_err(|e| e.to_string())?;
     }
 
     // One `add_compiled_global_init` per `defvar`, in the same file-
@@ -229,7 +229,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let mut global_init_names: Vec<String> = Vec::with_capacity(defvar_inits.len());
     for (i, (_, form)) in defvar_inits.iter().enumerate() {
         let internal_name = format!("$global_init${}", i);
-        interp.add_compiled_global_init(&mut heap, module.clone(), &internal_name, *form).map_err(|e| e.to_string())?;
+        crate::compile::driver::add_compiled_global_init(&interp, &mut heap, module.clone(), &internal_name, *form).map_err(|e| e.to_string())?;
         global_init_names.push(internal_name);
     }
 

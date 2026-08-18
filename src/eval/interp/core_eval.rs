@@ -657,7 +657,7 @@ impl Interp {
                         method: method.clone(),
                         home: type_name.parent().to_vec(),
                     };
-                    self.compile_function(&mut s, &target)?;
+                    crate::compile::driver::compile_function(&self, &mut s, &target)?;
                 }
             }
         }
@@ -1239,7 +1239,7 @@ impl Interp {
                 )))
             }
         };
-        self.compile_function(heap, &target)
+        crate::compile::driver::compile_function(&self, heap, &target)
     }
 
     /// Evaluate a node's trailing argument forms, rooting each for the whole

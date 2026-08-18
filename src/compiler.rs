@@ -4700,8 +4700,7 @@ pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     }
     let items: Vec<crate::compile::symbols::CompiledItem> =
         island_defuns.iter().map(|n| crate::compile::symbols::CompiledItem::Fn(Path::root(n))).collect();
-    interp
-        .install_compiled_library(crate::compile::CompiledLibrary {
+    crate::compile::driver::install_compiled_library(&interp, crate::compile::CompiledLibrary {
             label: "compiler island",
             regen_script: "scripts/regen-compiler-island.sh",
             bitcode: ISLAND_BITCODE,

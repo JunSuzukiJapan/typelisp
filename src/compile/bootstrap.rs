@@ -121,8 +121,7 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
     // was built by the interpreted island; every one since is built by its
     // predecessor.)
     let items: Vec<CompiledItem> = fn_names.iter().map(|n| CompiledItem::Fn(Path::root(n))).collect();
-    interp
-        .install_compiled_library(crate::compile::CompiledLibrary {
+    crate::compile::driver::install_compiled_library(&interp, crate::compile::CompiledLibrary {
             label: "compiler island",
             regen_script: "scripts/regen-compiler-island.sh",
             bitcode: crate::compiler::ISLAND_BITCODE,
@@ -168,8 +167,7 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
     // documents at its own loop.
     for name in &fn_names {
         let internal_name = crate::compile::symbols::user_symbol_name(name);
-        interp
-            .add_compiled_function(&mut heap, module.clone(), name, &internal_name)
+        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), name, &internal_name)
             .map_err(|e| format!("island compile of `{}` failed: {}", name, e))?;
     }
 

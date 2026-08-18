@@ -116,7 +116,7 @@ impl PreludePlan {
     pub fn compilable(&self, heap: &Heap, interp: &Interp) -> Vec<CompiledItem> {
         self.items
             .iter()
-            .filter(|item| interp.precheck_compilable(heap, &item.node_name()).is_ok())
+            .filter(|item| crate::compile::driver::precheck_compilable(&interp, heap, &item.node_name()).is_ok())
             .cloned()
             .collect()
     }
@@ -199,7 +199,7 @@ fn reconcile_unsupported(heap: &Heap, interp: &Interp, plan: &PreludePlan) -> Re
     let mut broken: Vec<(String, EvalError)> = Vec::new();
     for item in &plan.items {
         let node = item.node_name();
-        match interp.precheck_compilable(heap, &node) {
+        match crate::compile::driver::precheck_compilable(&interp, heap, &node) {
             Ok(()) => {}
             Err(Uncompilable::MissingTarget(target)) => blockers.entry(target).or_default().push(node),
             Err(Uncompilable::Other(e)) => broken.push((node, e)),
@@ -288,7 +288,7 @@ pub fn build_prelude_bitcode() -> Result<Vec<u8>, String> {
     // island generator both document at their own loops.
     for item in &items {
         let node = item.node_name();
-        interp.add_compiled_function(&mut heap, module.clone(), &node, &item.symbol_name()).map_err(|e| {
+        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), &node, &item.symbol_name()).map_err(|e| {
             format!(
                 "prelude: compiling `{}` failed: {} — the precheck said it was fine, so this is a \
                  gap the call-graph walk cannot see rather than a missing lowering to record in \

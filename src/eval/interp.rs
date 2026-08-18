@@ -21,22 +21,17 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::rc::Rc;
 
-use inkwell::memory_buffer::MemoryBuffer;
-use inkwell::module::Module;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
 use crate::check::registry::EVAL_ERROR;
 use crate::type_key::{alloc_typed_enum, heap_type_path};
-use crate::types::{
-    path_is_builtin, path_is_builtin_any, LLVM_METHOD_RECEIVER_TYPES, NATIVE_LOWERED_PRIMITIVES,
-};
 use typelisp_mem::RootScope;
 
 use crate::check::core;
 use crate::check::repr::Repr;
-use crate::{BoxId, CompileTarget, Heap, MacroExpander, MacroLambda, Path, Ref, SymId, Value};
+use crate::{BoxId, Heap, MacroExpander, MacroLambda, Path, Ref, SymId, Value};
 
 use super::scope;
 pub(crate) use super::value::EvalError;
@@ -192,7 +187,7 @@ pub struct Interp {
     /// a `&mut self` the deep `&self` eval chain cannot produce. Every read
     /// (`resolve_fn`/`get_fn`/`find_type`/...) borrows shared; the handful of
     /// registration sites in [`Self::exec`] borrow mutably.
-    root: RefCell<scope::ModuleScope>,
+    pub(crate) root: RefCell<scope::ModuleScope>,
     /// A shared handle to the live `Checker`, set by [`Self::set_checker`] on
     /// the drivers that support runtime `eval` (the CLI's `run_file`/`repl`/
     /// `compile_module` and the LSP). `None` in throwaway/AOT/bootstrap/test
@@ -201,7 +196,7 @@ pub struct Interp {
     /// top-level forms through; the borrow discipline (never hold a checker
     /// borrow across an `exec` that could `eval`) keeps the two from
     /// double-borrowing — see `Self::eval_form` and the drivers' own comments.
-    checker: Option<Rc<RefCell<crate::check::Checker>>>,
+    pub(crate) checker: Option<Rc<RefCell<crate::check::Checker>>>,
     /// Every `defvar`/`defconstant` global some compiled function has
     /// referenced, promoted to a compiled-global slot (a permanent GC root
     /// — `typelisp_rt::global_new`) and mapped to the id that slot got.
@@ -213,10 +208,10 @@ pub struct Interp {
     /// referenced from compiled code has no entry here and keeps using its
     /// ordinary [`Slot`] in [`Self::globals`] untouched — see that
     /// method's doc comment for why only a promoted global's storage moves.
-    compiled_globals: RefCell<HashMap<Path, usize>>,
+    pub(crate) compiled_globals: RefCell<HashMap<Path, usize>>,
     /// The values currently being rendered by their own `print-object`
     /// method, innermost last — [`Self::print_object`]'s re-entry guard.
-    printing: RefCell<Vec<Value>>,
+    pub(crate) printing: RefCell<Vec<Value>>,
     /// Trait-object vtables, interpreter tier: `vtable_id` -> the call
     /// targets for the trait's methods, in slot order (`dyn-new`'s
     /// `slots`, which the checker laid out from `TraitDef::method_order`).
@@ -229,12 +224,12 @@ pub struct Interp {
     /// is the sole source of). Neither table holds heap values, so a vtable
     /// needs no GC root — `BoxedObj::Dyn`'s own `value` is all the collector
     /// ever has to trace.
-    vtables: RefCell<Vec<Vec<(Path, String)>>>,
+    pub(crate) vtables: RefCell<Vec<Vec<(Path, String)>>>,
     /// `(concrete type key, trait path)` -> `vtable_id`, so the same pair
     /// interns to one id however many times it is boxed. The key's first
     /// half is `mangle_type`'s rendering (the `dyn-new` node's own concrete
     /// key), since `Type` has no `Hash`.
-    vtable_ids: RefCell<HashMap<(String, Path), u32>>,
+    pub(crate) vtable_ids: RefCell<HashMap<(String, Path), u32>>,
     /// `(vtable id, trait id)` -> the vtable id the *same concrete type* uses
     /// for that trait: the supertrait upcast table `dyn-upcast` reads.
     ///
@@ -244,12 +239,12 @@ pub struct Interp {
     /// ([`Self::register_dyn_box`]), which is where both halves are still in
     /// hand. The compiled tier keeps the same map under the same ids in
     /// `typelisp_rt` (`upcast_define`).
-    dyn_upcasts: RefCell<HashMap<(u32, u32), u32>>,
+    pub(crate) dyn_upcasts: RefCell<HashMap<(u32, u32), u32>>,
     /// Trait path -> a small integer, so an upcast site in *compiled* code
     /// can name its target trait with a baked-in constant the way a boxing
     /// site names its vtable ([`Self::vtable_id_for`]). Interpreted upcasts
     /// go through the same ids, so both tiers agree by construction.
-    trait_ids: RefCell<HashMap<Path, u32>>,
+    pub(crate) trait_ids: RefCell<HashMap<Path, u32>>,
     /// Traits some *compiled* body dispatches on (an `dyn-call` in a
     /// function that has been through `translate_and_compile`).
     ///
@@ -262,7 +257,7 @@ pub struct Interp {
     /// be compiled before the box escapes. Empty for any program that never
     /// compiles a dynamic dispatch — which is why boxing does not simply
     /// compile its slots unconditionally.
-    dyn_dispatch_compiled: RefCell<HashSet<Path>>,
+    pub(crate) dyn_dispatch_compiled: RefCell<HashSet<Path>>,
 }
 
 /// One outgoing edge of the top-level compile call graph
@@ -272,7 +267,7 @@ pub struct Interp {
 /// Carries the full typed key (not just its string name) so
 /// [`Interp::compile_scc`] can reuse it directly to declare/wire the target
 /// without re-deriving it from the name.
-enum CallEdge {
+pub(crate) enum CallEdge {
     Fn(Path),
     Method(Path, String),
 }
@@ -300,7 +295,7 @@ impl CallEdge {
     /// [`Interp::method_key`]'s doc comment for why) for a `defmethod`,
     /// exactly the string shape [`Interp::compiled_fn_body`]/
     /// [`Interp::method_key`] already resolve back.
-    fn node_name(&self) -> String {
+    pub(crate) fn node_name(&self) -> String {
         match self {
             CallEdge::Fn(p) => p.to_string(),
             CallEdge::Method(p, m) => method_link_name(p, m),
@@ -312,7 +307,7 @@ impl CallEdge {
 /// `Path[m, inc]`, `"inc"` -> `Path::root("inc")`. Only ever applied to a name
 /// [`Interp::method_key`] has already ruled out as a `type::method`, so a
 /// `"::"` here is unambiguously a module separator.
-fn fn_path_from_node_name(name: &str) -> Path {
+pub(crate) fn fn_path_from_node_name(name: &str) -> Path {
     if name.contains("::") {
         Path::from_segments(name.split("::").map(|s| s.to_string()).collect())
     } else {
@@ -443,7 +438,7 @@ impl Interp {
     /// for its closure". That is not an error: a trait object's concrete type
     /// can be a user `defstruct` whose methods nobody ever compiled, while the
     /// code dispatching on it (a prelude stream method, say) is native.
-    fn publish_vtables(&self) {
+    pub(crate) fn publish_vtables(&self) {
         for id in 0..self.vtables.borrow().len() {
             self.publish_vtable(id as u32);
         }
@@ -553,7 +548,7 @@ impl Interp {
     /// in, and a chain of upcasts can arrive at any of these tables before
     /// asking for the next. Admissibility is the checker's business — an
     /// entry nothing is allowed to ask for is simply never read.
-    fn register_dyn_box(
+    pub(crate) fn register_dyn_box(
         &self,
         concrete_key: &str,
         trait_path: &Path,
@@ -607,107 +602,6 @@ impl Interp {
         self.root.borrow().all_fn_names()
     }
 
-    /// Installs a precompiled library — a committed bitcode artifact holding
-    /// the native bodies of definitions this `Interp` has already registered
-    /// interpreted — into [`FnDef::compiled`], so calls to them dispatch to
-    /// native code instead of being tree-walked.
-    ///
-    /// Two callers, both after re-checking and `exec`ing the corresponding
-    /// source (which registers the `FnDef`s + checker state the compiled
-    /// bodies still need for signatures): the compiler island
-    /// ([`crate::compiler::load_aot`], interp-closure removal Stage 4) and the
-    /// prelude ([`crate::prelude::load`]).
-    ///
-    /// Neither artifact references any external symbol other than the `rt_*`
-    /// runtime shims (each is one self-contained module whose functions call
-    /// each other directly and lower every builtin to an `rt_*`/
-    /// `rt_llvm_call`), so `externals` is exactly [`rt_extern_functions`] —
-    /// the same set `compile_scc` supplies for a JIT'd SCC.
-    ///
-    /// [`CompiledLibrary::expected_hash`] selects between the two staleness
-    /// needs. A runtime loader passes `Some`, and a mismatch hard-errors: a
-    /// stale committed `.bc` (someone edited the source without regenerating)
-    /// must never be silently loaded as wrong-version native bodies. A
-    /// bootstrap regenerator passes `None` because it *deliberately* loads the
-    /// committed — necessarily older — `.bc` to compile a possibly-changed
-    /// source with it (the island's snapshot chain), so a mismatch is
-    /// expected, not an error.
-    ///
-    /// `items` is what the caller *would like* installed; what actually gets
-    /// installed is whatever of that the artifact has a body for. See the
-    /// filter below for why that is the artifact's call and not the caller's.
-    pub(crate) fn install_compiled_library(&self, lib: crate::compile::CompiledLibrary) -> Result<(), String> {
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let buffer = MemoryBuffer::create_from_memory_range_copy(lib.bitcode, lib.label);
-        let module = Module::parse_bitcode_from_buffer(&buffer, crate::compile::llvm_context())
-            .map_err(|e| format!("{} bitcode failed to parse: {}", lib.label, e))?;
-
-        if let Some((hash_global, expected)) = lib.expected_hash {
-            let embedded = crate::compile::bootstrap::read_embedded_source_hash(&module, hash_global)
-                .ok_or_else(|| format!("{} bitcode has no embedded source hash", lib.label))?;
-            if embedded != expected {
-                return Err(format!(
-                    "{} bitcode is stale relative to its SOURCE — run {}",
-                    lib.label, lib.regen_script
-                ));
-            }
-        }
-
-        // The artifact decides what it carries. An item with no *body* here
-        // either was never compilable (the prelude's stream methods, whose
-        // builtins have no lowering) or postdates this `.bc` (a definition
-        // added since, during a bootstrap load of the previous generation) —
-        // either way there is nothing to install, and asking `new_multi` for
-        // it would resolve a body-less declaration to an address pointing at
-        // nothing.
-        //
-        // Checking for a body rather than a declaration matters: `rt_*` shims
-        // and any not-yet-filled forward declaration answer `get_function`
-        // too.
-        let items: Vec<&crate::compile::symbols::CompiledItem> = lib
-            .items
-            .iter()
-            .filter(|item| {
-                module.get_function(&item.symbol_name()).is_some_and(|f| f.count_basic_blocks() > 0)
-            })
-            .collect();
-        let internal_names: Vec<String> = items.iter().map(|item| item.symbol_name()).collect();
-        // Wire only the `rt_*` shims the module actually forward-declares.
-        // Skipping the rest is not a leniency: a module can only *call* what
-        // it declares, so a shim with no declaration here has no call site to
-        // resolve, whereas passing it to `new_multi` would fail that
-        // function's "no forward declaration" guard.
-        //
-        // Both loads need this, not just the bootstrap one. A hash-checked
-        // load verifies the `.bc` against its own SOURCE — and the shim list is
-        // *Rust*, so adding one (`rt_gensym`, made to compile `gensym` in
-        // macro-expansion lambdas; `rt_apply_any`, Stage D) leaves the hash
-        // matching while the committed bitcode still declares the older set.
-        // Gating this on the hash check made every such addition fail the
-        // install until the artifact was regenerated, for a mapping the
-        // artifact had no use for.
-        let externals: Vec<(String, usize)> = rt_extern_functions()
-            .iter()
-            .filter(|(n, _)| module.get_function(n).is_some())
-            .map(|(n, addr)| (n.to_string(), *addr))
-            .collect();
-        let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals)
-            .map_err(|e| format!("{} JIT install failed: {}", lib.label, e))?;
-
-        for (item, cf) in items.iter().zip(compiled_fns) {
-            let def = match item {
-                crate::compile::symbols::CompiledItem::Fn(path) => self.root.borrow().get_fn(path),
-                crate::compile::symbols::CompiledItem::Method(type_path, method) => {
-                    self.root.borrow().get_method(type_path, method)
-                }
-            }
-            .ok_or_else(|| {
-                format!("{}: `{}` is not registered — exec its SOURCE first", lib.label, item.node_name())
-            })?;
-            *def.compiled.borrow_mut() = Some(Rc::new(cf));
-        }
-        Ok(())
-    }
 
 
 
@@ -725,7 +619,7 @@ impl Interp {
     /// answer — is still a direct tree descent, not a flat-table trust
     /// fallback: only the *search strategy* differs from the ordinary case,
     /// not the mechanism.
-    fn resolve_fn_ref(&self, r: &Ref) -> Option<Rc<FnDef>> {
+    pub(crate) fn resolve_fn_ref(&self, r: &Ref) -> Option<Rc<FnDef>> {
         self.root.borrow().resolve_fn(&r.home, &r.written).or_else(|| self.root.borrow().get_fn(&r.resolved))
     }
 
@@ -745,7 +639,7 @@ impl Interp {
     /// never touched by compiled code) hits the same wall an analogous top-level
     /// `call` already would for a general-ADT parameter — a clear
     /// internal error here, not a silent misread of unrelated bits.
-    fn call_compiled(
+    pub(crate) fn call_compiled(
         &self,
         heap: &mut Heap,
         compiled: &dyn CompiledBody,
@@ -1219,7 +1113,7 @@ impl Interp {
     /// [`Self::resolve_fn_def`] (the lookup) and [`Self::compile_function`]
     /// (which `(compile name)` for a method) — both need the exact same
     /// `(Path, String)` key.
-    fn method_key(&self, name: &str) -> Option<(Path, String)> {
+    pub(crate) fn method_key(&self, name: &str) -> Option<(Path, String)> {
         let (type_part, method) = name.rsplit_once("::")?;
         let type_path = Path::from_segments(type_part.split("::").map(|s| s.to_string()).collect());
         self.root.borrow().get_method(&type_path, method)?;
@@ -1233,7 +1127,7 @@ impl Interp {
     /// `FieldSet` `compile-field-get`/`compile-field-set` exist to compile in
     /// the first place). See [`Self::method_key`] for how `name` decides
     /// which of the two this is.
-    fn resolve_fn_def(&self, name: &str) -> Result<Rc<FnDef>, EvalError> {
+    pub(crate) fn resolve_fn_def(&self, name: &str) -> Result<Rc<FnDef>, EvalError> {
         // A `"::"` name is a `type::method` (a `defmethod`) *or* a
         // module-qualified `defun` (`m::inc`) — both share the separator.
         // `method_key` matches only a genuinely registered method, so try it
@@ -1283,7 +1177,7 @@ impl Interp {
     /// [`Self::compile_function`]/[`Self::call_graph_edges`] (which need the
     /// body slightly earlier — to collect `call` targets — before
     /// `add_compiled_function` ever runs).
-    fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Repr)>, Vec<Value>), EvalError> {
+    pub(crate) fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Repr)>, Vec<Value>), EvalError> {
         let f = self.resolve_fn_def(name)?;
         let sig = f
             .sig
@@ -1369,712 +1263,6 @@ impl Interp {
         Ok(id)
     }
 
-    /// Compiles the `defun` named `name` (looked up in the scope tree) into one
-    /// LLVM function — named `internal_name` — added to `module`. Shared by
-    /// [`Self::compile_function`] (JIT, Phase 1) — which always passes a
-    /// throwaway, single-use module and the same name twice — and
-    /// `compile::aot::compile_file` (AOT, Phase 2) — which passes the same
-    /// shared, file-wide module across every `defun` in the source file,
-    /// asking for a different `internal_name` only for `main` (so it
-    /// doesn't collide with the real C `main` the AOT path synthesizes
-    /// separately — see that module's doc comment).
-    ///
-    /// Takes `module` instead of creating/returning one, on purpose: see
-    /// `compiler.rs`'s doc comment for why `compile-function` (the
-    /// typelisp-hosted half of this) can never hand back sole ownership of
-    /// an `llvm-module` value once `labels`' mutual-recursion closures have
-    /// captured it.
-    ///
-    /// Phase 1/2 scope: a non-generic `defun` whose single-expression body
-    /// only uses node shapes `compile::core_bridge::to_island` has a real
-    /// translation for (`i64` literals/vars/`+`/`-`/`*`) — anything else
-    /// surfaces as a `Panic` from the compiler body's own `"unsupported"`
-    /// handling (`compiler.rs`'s `compile-value`), not a separate check
-    /// here; there's exactly one place that needs to know the supported
-    /// shape.
-    pub(crate) fn add_compiled_function(
-        &self,
-        heap: &mut Heap,
-        module: Rc<RefCell<Module<'static>>>,
-        name: &str,
-        internal_name: &str,
-    ) -> Result<(), EvalError> {
-        let (params, body) = self.compiled_fn_body(name)?;
-        self.translate_and_compile(heap, module, &params, &body, internal_name, &HashSet::new())
-    }
-
-    /// The AST-bridge-and-emit half of [`Self::add_compiled_function`],
-    /// factored out (no behavior change for that caller) so closure
-    /// unification Stage 7's [`Self::jit_define_closure`] can drive the same
-    /// translate-then-`compile-function` pipeline for a *synthetic*
-    /// top-level function — a "closure constructor" whose own `params` are
-    /// **not** a real `defun`'s declared parameters but a captured-cell
-    /// reference per free variable — rather than one looked up by name via
-    /// [`Self::compiled_fn_body`].
-    ///
-    /// `extra_exclude_from_cell_names` is empty for every ordinary caller
-    /// (`add_compiled_function`'s own behavior, unchanged); Stage 7's ctor
-    /// passes its own synthetic parameter names there, because
-    /// `names_captured_by_nested`'s free-variable walk of `body` (which
-    /// literally *is* `(lambda ...)`, wrapping the real closure being
-    /// JIT'd) would otherwise "discover" that the ctor's own params are
-    /// captured by the nested `lambda` it wraps and — wrongly — cell-box
-    /// them a second time (`tagged_sym_list`'s `kind + 10`): the ctor's own
-    /// params are declared `Sexpr` specifically so `bind-params` passes
-    /// each cell reference through unchanged (kind `6`, the same tagged-
-    /// pointer passthrough any other boxed value gets), for the *inner*
-    /// `lambda`'s own (correctly, separately, computed) `lcaptured` list to
-    /// pick up as-is.
-    fn translate_and_compile(
-        &self,
-        heap: &mut Heap,
-        module: Rc<RefCell<Module<'static>>>,
-        params: &[(String, Repr)],
-        body: &[Value],
-        internal_name: &str,
-        extra_exclude_from_cell_names: &HashSet<String>,
-    ) -> Result<(), EvalError> {
-        // Every global this body reads/assigns must have a compiled-global
-        // slot before translation starts — `ast_to_sexpr` looks each one up
-        // by id, not by name (see `Ctx::globals`'s doc comment), so there is
-        // nothing to resolve lazily mid-translation the way `compile-call`'s
-        // `get-function` can for an ordinary function name.
-        let targets = match crate::compile::core_bridge::collect_targets(heap, body) {
-            Ok(t) => t,
-            Err(e) => return Err(EvalError::Panic(e.to_string())),
-        };
-        for target in &targets.globals {
-            self.promote_global(heap, target)?;
-        }
-        // Every trait object this body boxes needs its vtable id before
-        // translation starts, for the same reason a global needs its slot:
-        // `ast_to_sexpr` bakes the id into the emitted IR as a constant.
-        for site in &targets.dyn_boxes {
-            self.register_dyn_box(&site.concrete_key, &site.trait_path, &site.slots, &site.supers);
-        }
-        for to_trait in &targets.dyn_upcasts {
-            self.trait_id_for(to_trait);
-        }
-        for trait_path in &targets.dyn_traits {
-            self.dyn_dispatch_compiled.borrow_mut().insert(trait_path.clone());
-        }
-        // `core_bridge` is deliberately `Registry`-free, so hand it the type
-        // definitions as a plain flattened snapshot of the scope tree —
-        // exactly what `exec` recorded there from each `defstruct`/`defenum`
-        // form. Collected fresh per compilation; compiling is rare enough that
-        // keeping a second always-current copy isn't worth it.
-        let defs = self.compile_definitions();
-        let compiled_globals = self.compiled_globals.borrow();
-        let vtable_ids = self.vtable_ids.borrow();
-        let trait_ids = self.trait_ids.borrow();
-        let dyn_tables = crate::compile::symbols::DynTables { vtables: &vtable_ids, trait_ids: &trait_ids };
-        let cx = crate::compile::core_bridge::Ctx::with_dyn_tables(&defs, &compiled_globals, dyn_tables);
-        let excluded = intern_names(heap, extra_exclude_from_cell_names);
-        let params = intern_params(heap, params);
-        let (param_list, body_sexpr) =
-            match crate::compile::core_bridge::function_parts(heap, &params, body, cx, &excluded) {
-                Ok(v) => v,
-                Err(e) => return Err(EvalError::Panic(e.to_string())),
-            };
-        drop(compiled_globals);
-        drop(vtable_ids);
-        drop(trait_ids);
-
-        self.run_compile_function(heap, module, internal_name, param_list, body_sexpr)
-    }
-
-    /// The scope tree's type definitions, in the shape the compile bridge
-    /// takes. See [`Self::translate_and_compile`] for why it is a snapshot.
-    fn compile_definitions(&self) -> crate::compile::core_bridge::Definitions {
-        let (structs, enums) = self.root.borrow().collect_struct_and_enum_types();
-        let mut defs = crate::compile::core_bridge::Definitions::new();
-        for (path, _fields) in structs {
-            defs.record_struct(path);
-        }
-        for (path, _def) in enums {
-            defs.record_enum(path);
-        }
-        defs
-    }
-
-    /// Drives the island's `compile-function` over one already-translated
-    /// function `(param_list, body_sexpr)` into `module` — the shared tail of
-    /// [`Self::translate_and_compile`] and [`Self::add_compiled_global_init`].
-    ///
-    /// Dispatches to the *compiled* island `compile-function` whenever it is
-    /// installed in [`Self::compiled`] (interp-closure removal Stage 4: after
-    /// [`crate::compiler::load_aot`], so the island runs natively and its own
-    /// `labels`/`lambda` bodies are never built as interpreted closures),
-    /// falling back to the interpreted `FnDef` otherwise — a plain
-    /// `load_compiler` environment, or the bootstrap
-    /// ([`crate::compile::bootstrap`]) that produces the island bitcode in
-    /// the first place, where the compiled island doesn't exist yet.
-    ///
-    /// The compiled `compile-function` returns the very `llvm-module` it was
-    /// handed (mutated in place); both callers care only about that side
-    /// effect and ignore the return, but it is still decoded so
-    /// [`Self::call_compiled`]'s LLVM-handle bookkeeping stays balanced. A
-    /// [`llvm_handles_mark`]/[`llvm_handles_release`] pair brackets the call
-    /// so the transient handles the native compiler registers while walking
-    /// the AST don't accumulate across many compiles.
-    fn run_compile_function(
-        &self,
-        heap: &mut Heap,
-        module: Rc<RefCell<Module<'static>>>,
-        internal_name: &str,
-        param_list: Value,
-        body_sexpr: Value,
-    ) -> Result<(), EvalError> {
-        // The island is about to run, and its `llvm-*` builtins are the
-        // backend's. Installed here rather than once at startup for the reason
-        // [`Self::enter_compiled`] re-registers the heap on every crossing: it
-        // is one store, and there is no ordering rule left to remember. (This
-        // line is one of the last front-end references to `crate::compile`; it
-        // goes away with this method, which belongs to the backend — see
-        // `docs/dev/TODO.md`.)
-        crate::compile::install_llvm_backend();
-        let compiler_path = Path::root("compile-function");
-        let argv = vec![
-            crate::compile::llvm_builtins::llvm_module_value_rc(module),
-            str_rt(heap, internal_name),
-            param_list,
-            body_sexpr,
-        ];
-        let compiler_def = self.root.borrow().get_fn(&compiler_path).ok_or_else(|| {
-            EvalError::Internal("compile: compiler body not loaded — call load_compiler first".into())
-        })?;
-        let compiled = compiler_def.compiled.borrow().clone();
-        if let Some(cf) = compiled {
-            // The island's own entry point hands back an LLVM module, which
-            // crosses as a raw registry index.
-            let ret = Repr::Handle;
-            let mark = crate::compile::llvm_builtins::llvm_handles_mark();
-            let scope_mark = heap.session_root_count();
-            let param_reprs =
-                &compiler_def.sig.as_ref().expect("the compiler body always has a signature").0;
-            let r = self.call_compiled(heap, cf.as_ref(), &argv, param_reprs, &ret);
-            crate::compile::llvm_builtins::llvm_handles_release(mark);
-            // Scope boxes the island created during this compile are session
-            // roots (see `LlvmRetK::Scope`); release them with the handles.
-            heap.truncate_session_roots(scope_mark);
-            r?;
-            return Ok(());
-        }
-        self.apply(heap, &compiler_def, argv)?;
-        Ok(())
-    }
-
-    /// AOT-only counterpart of [`Self::add_compiled_function`]: compiles a
-    /// `defvar`'s initializer expression `value` into a zero-argument LLVM
-    /// function `internal_name` in `module` that, when called, evaluates it
-    /// and calls `rt_global_new` to establish that global's *runtime*
-    /// storage — one entry in the startup sequence `compile::aot::
-    /// compile_file` generates and wires into `main` (via
-    /// `compile::aot::build_main_wrapper`) so a standalone executable
-    /// allocates each of its own promoted globals before `tl_main` (the
-    /// file's own `main` defun) ever runs. See [`Self::promote_global`]'s
-    /// doc comment for why `compile::aot::compile_file` must call these, in
-    /// the same order it called `Self::promote_global` for each `defvar`.
-    ///
-    /// Mirrors `add_compiled_function`'s own translate-then-`compile-
-    /// function` shape almost exactly, just with no parameters and a body
-    /// wrapped as `(global-init kind value-form)`
-    /// ([`crate::compile::symbols::ast_to_sexpr_for_global_init`],
-    /// `compiler.rs`'s `compile-global-init`) instead of an ordinary
-    /// translated function body — `value` may itself reference other
-    /// globals (an earlier `defvar`'s value), so the same promotion pass
-    /// applies here too.
-    pub(crate) fn add_compiled_global_init(
-        &self,
-        heap: &mut Heap,
-        module: Rc<RefCell<Module<'static>>>,
-        internal_name: &str,
-        form: Value,
-    ) -> Result<(), EvalError> {
-        // The whole `(defvar ...)` form, not just its initializer:
-        // `core_bridge::global_init` reads the declared representation off the
-        // form to know how the global's storage is tagged, which the
-        // initializer alone does not say.
-        let body = std::slice::from_ref(&form);
-        let targets = match crate::compile::core_bridge::collect_targets(heap, body) {
-            Ok(t) => t,
-            Err(e) => return Err(EvalError::Panic(e.to_string())),
-        };
-        // The initializer may reference *other* globals (an earlier `defvar`'s
-        // value), so the same promotion pass an ordinary body gets applies.
-        for target in &targets.globals {
-            self.promote_global(heap, target)?;
-        }
-        for site in &targets.dyn_boxes {
-            self.register_dyn_box(&site.concrete_key, &site.trait_path, &site.slots, &site.supers);
-        }
-        for to_trait in &targets.dyn_upcasts {
-            self.trait_id_for(to_trait);
-        }
-        let defs = self.compile_definitions();
-        let compiled_globals = self.compiled_globals.borrow();
-        let vtable_ids = self.vtable_ids.borrow();
-        let trait_ids = self.trait_ids.borrow();
-        let dyn_tables = crate::compile::symbols::DynTables { vtables: &vtable_ids, trait_ids: &trait_ids };
-        let cx = crate::compile::core_bridge::Ctx::with_dyn_tables(&defs, &compiled_globals, dyn_tables);
-        let body_sexpr = match crate::compile::core_bridge::global_init(heap, form, cx) {
-            Ok(Some(v)) => v,
-            Ok(None) => {
-                return Err(EvalError::Internal(
-                    "compile: a global initializer was built from something that is not a `defvar`".into(),
-                ))
-            }
-            Err(e) => return Err(EvalError::Panic(e.to_string())),
-        };
-        drop(compiled_globals);
-        drop(vtable_ids);
-        drop(trait_ids);
-        let mut s = RootScope::new(heap);
-        s.push_root(body_sexpr);
-        // A global initializer takes no parameters.
-        let param_list = Value::Empty;
-        self.run_compile_function(&mut s, module, internal_name, param_list, body_sexpr)
-    }
-
-    /// `(compile fn-name)` (or `(compile type::method)`): JIT-compiles a
-    /// previously-defined `defun`/`defmethod` and marks the target `FnDef`
-    /// node compiled (see `FnDef::compiled`) so `call`/`assoc`
-    /// dispatches to native code instead of tree-walking it from then on.
-    /// `target` is already fully resolved by `Checker::check_compile` (a
-    /// `Ref` re-verified here via `Self::resolve_fn_ref`, or a `type_name`+
-    /// `method` re-verified via `ModuleScope::resolve_method` — the same
-    /// independent re-resolution every other reference gets, not a bare
-    /// name to search the whole tree for by local name alone). The
-    /// qualified string this derives from that resolved identity only feeds
-    /// [`Self::compute_sccs`]'s *internal* graph bookkeeping — unchanged
-    /// from before, and still keyed by local type name for a method
-    /// ([`Self::method_key`]), since transitively-discovered call targets
-    /// already reach that machinery the same way. See
-    /// [`Self::add_compiled_function`] for the supported-shape scope.
-    ///
-    /// labels/closures Stage 3 (single-function shape) / Stage 5 (SCC
-    /// generalization): unlike `compile::aot::compile_file` (one shared
-    /// module built up over every `defun` in file order, so a callee is
-    /// always already fully defined in that same module by the time its
-    /// caller is compiled — see that module's doc comment), `name`'s own
-    /// strongly connected component of the top-level call graph —
-    /// [`Self::compute_sccs`], usually just `{name}` itself, but a genuine
-    /// group for mutual recursion across *separate* top-level functions —
-    /// gets one throwaway module/engine per SCC ([`Self::compile_scc`]),
-    /// processed leaf-SCC-first. Every target *outside* the current SCC
-    /// (`crate::compile::symbols::collect_call_targets`/
-    /// `collect_assoc_targets`, gathered via [`Self::call_graph_edges`]) is
-    /// handled by hand, in three steps: (1) it must already be `compile`d by
-    /// the time its SCC is processed — [`Self::compute_sccs`]'s finish-order
-    /// contract guarantees this, so a violation is an internal-invariant
-    /// `.expect()`, not a user-facing error; (2) forward-declared — no body
-    /// — in this SCC's module *before* the compiler body runs for any of its
-    /// members (`compile-call`'s `get-function` needs to find *something* by
-    /// that name); (3) wired to the real, already-running JIT code's address
-    /// via `add_global_mapping` *after* (`crate::compile::CompiledFn::
-    /// new_multi`'s `externals` parameter) — can't happen any earlier, since
-    /// the engine that will actually run this SCC's code doesn't exist until
-    /// then. Self-recursion, and recursion among an SCC's own members, needs
-    /// none of this: every member of the SCC is forward-declared under its
-    /// own name in the *same* module before any of their bodies are
-    /// translated, so `compile-function`'s own `(add-function m name)`
-    /// (reusing that declaration — see [`llvm_module_add_function`]'s doc
-    /// comment) already gives every sibling something to call before any
-    /// body exists.
-    ///
-    /// A user-defined method this body calls (`assoc`,
-    /// `crate::compile::symbols::collect_assoc_targets`) goes through the
-    /// exact same three steps, *keyed and named differently*: looked up in
-    /// [`Self::methods`]/[`Self::compiled_methods`] instead of
-    /// [`Self::fns`]/[`Self::compiled`], and forward-declared/wired under the
-    /// mangled name [`method_link_name`] builds — the same literal string
-    /// this very method itself uses as `internal_name` when `name` is a
-    /// method (see [`Self::add_compiled_function`]'s call below), which is
-    /// also exactly what `compiler.rs`'s `compile-assoc` mangles a callee's
-    /// `(type-name, method)` back into before its own `get-function` lookup
-    /// — so the three names (this method's own `internal_name`, this
-    /// method's entry in `externals`, and a *caller's* `compile-assoc`
-    /// lookup) can never drift apart. A primitive-receiver target *not*
-    /// registered in the scope tree's `methods` (`i64`/`i32`'s own built-in
-    /// arithmetic; `string`'s, since Stage 7 of the Sexpr-representation plan —
-    /// `docs/implementation-log.md`) needs none of this: those compile
-    /// natively with no external call (`compile-assoc`'s own dispatch, which
-    /// panics clearly on its own for any one of *their* methods it doesn't
-    /// actually implement, e.g. `string::upcase`). But a *user-defined*
-    /// method on a primitive receiver (e.g. the prelude's `impl Eq i32` →
-    /// `i32::equals`) is registered like any other `defstruct` method and
-    /// takes the normal three steps — `compile-assoc`'s dispatch falls
-    /// through to the same mangled-name call for it. Anything else
-    /// (`f64`/`char` builtins — still out of scope) panics clearly right
-    /// here rather than deep inside `compile-assoc`'s own `get-function`.
-    fn compile_function(&self, heap: &mut Heap, target: &CompileTarget) -> Result<Value, EvalError> {
-        let (name, already_compiled) = match target {
-            CompileTarget::Fn(r) => {
-                self.resolve_fn_ref(r).ok_or_else(|| {
-                    EvalError::Internal(format!(
-                        "compile: `{}` resolved at check time but not here",
-                        r.written.join("::")
-                    ))
-                })?;
-                (r.resolved.to_string(), self.root.borrow().fn_compiled(&r.resolved))
-            }
-            CompileTarget::Method { type_name, method, home } => {
-                self.root.borrow().resolve_method(home, type_name, method).ok_or_else(|| {
-                    EvalError::Internal(format!(
-                        "compile: `{}` resolved at check time but not here",
-                        method_link_name(type_name, method)
-                    ))
-                })?;
-                (method_link_name(type_name, method), self.root.borrow().method_compiled(type_name, method))
-            }
-        };
-        if already_compiled {
-            return Ok(Value::Bool(true));
-        }
-        for scc in self.compute_sccs(heap, &name)? {
-            self.compile_scc(heap, &scc)?;
-        }
-        Ok(Value::Bool(true))
-    }
-
-    /// Answers "would compiling `name` reach something with no compilable
-    /// body?" without emitting anything.
-    ///
-    /// The check has to happen *before* translation, not around it: when the
-    /// island's `compile-call` can't find a callee's declaration it calls
-    /// `get-function`, which **aborts the process** rather than returning an
-    /// error (see [`crate::compile::runtime_function_names`]'s doc comment).
-    /// So a builder of a shared library module — `compile::prelude_bootstrap`,
-    /// which must decide per definition whether to include it — cannot simply
-    /// try and recover. [`Self::compute_sccs`] already walks exactly the
-    /// transitive closure that matters and reports a missing body cleanly
-    /// (through [`Self::compiled_fn_body`]), so asking it is both the cheapest
-    /// and the most faithful available oracle: same graph, same filters, same
-    /// notion of "is a real call target" the compile path itself uses.
-    ///
-    /// Transitivity is the useful part. A definition that merely *calls*
-    /// something uncompilable is itself uncompilable — its emitted body would
-    /// reference a symbol nothing defines — and this reports that without the
-    /// caller having to close the set by hand. It also means the answer is
-    /// about the *root* cause: dozens of prelude stream methods are
-    /// uncompilable for the single reason that `stream-read-char` has no
-    /// lowering, and [`Uncompilable::MissingTarget`] says so for each.
-    pub(crate) fn precheck_compilable(&self, heap: &Heap, name: &str) -> Result<(), Uncompilable> {
-        match self.compute_sccs(heap, name) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(match e.into_kind() {
-                EvalError::NoSuchFunction(target) => Uncompilable::MissingTarget(target),
-                EvalError::Uncompilable { target, .. } => Uncompilable::MissingTarget(target),
-                other => Uncompilable::Other(other),
-            }),
-        }
-    }
-
-    /// `name`'s own outgoing edges in the top-level compile call graph —
-    /// every concrete function/method *instantiation* `name`'s body calls,
-    /// filtered exactly the way `compile_function_rec` always has: self-
-    /// recursion and `rt_*`/native builtins excluded from
-    /// [`CallEdge::Fn`]; `Vector`/`HashTable`'s op-node-lowered builtin
-    /// methods and natively-lowered primitive-receiver builtins excluded
-    /// from [`CallEdge::Method`]. A method target with no registered
-    /// implementation at all (a builtin `compile-assoc` doesn't lower
-    /// natively, e.g. `f64::sqrt`) is a compile-time error here, same as
-    /// before Stage 5 — this is the one path that produces a real user-
-    /// facing error out of graph construction, everything else just shapes
-    /// the graph [`Self::compute_sccs`] walks. Shared by that graph walk and
-    /// [`Self::compile_scc`] (which needs the same edges again, in typed
-    /// form, to know what to forward-declare/wire as `externals`).
-    fn call_graph_edges(&self, heap: &Heap, name: &str) -> Result<Vec<CallEdge>, EvalError> {
-        let path = fn_path_from_node_name(name);
-        let method_key = self.method_key(name);
-        let (_, body) = self.compiled_fn_body(name)?;
-        let targets = match crate::compile::core_bridge::collect_targets(heap, &body) {
-            Ok(t) => t,
-            Err(e) => return Err(EvalError::Panic(e.to_string())),
-        };
-        let mut edges = Vec::new();
-
-        edges.extend(
-            targets
-                .calls
-                .into_iter()
-                .filter(|p| *p != path && !is_rt_builtin_name(p.last_segment()))
-                .map(CallEdge::Fn),
-        );
-
-        let method_targets: Vec<(Path, String)> = targets
-            .methods
-            .into_iter()
-            .filter(|key| method_key.as_ref() != Some(key))
-            .filter(|key| {
-                // `Vector<T>`'s field-backed builtin methods (`new`/`get`/
-                // `set`/`len`/`push`/`pop`) are lowered to a `vector-op` node
-                // (`core_bridge::translate_vector_method` -> `rt_struct_*`),
-                // not a method call, so — like the native primitive methods
-                // below — they are never a real call target. `vector::iter`
-                // is deliberately excluded from this list: it is a genuine
-                // prelude `defmethod` (`vector-iter::new`) and must be
-                // `compile`d like any other method.
-                if path_is_builtin(&key.0, "vector") && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
-                    return false;
-                }
-                // `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op`
-                // node (`core_bridge::translate_hashtable_method`) are likewise
-                // never a real call target. `iter` (a real `defmethod`) is
-                // deliberately absent so it's validated/transitively compiled
-                // normally.
-                if path_is_builtin(&key.0, "hashtable")
-                    && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
-                {
-                    return false;
-                }
-                // `llvm-*`/`scope` builtin methods are natively lowered to
-                // the `rt_llvm_call` dispatch shim (an `llvm-op` node,
-                // interp-closure removal Stage 1) — like `vector-op`/
-                // `hashtable-op` above, never a real call target. A
-                // heap-repr `Scope<V>` method has no compiled lowering and
-                // panics inside `compile-assoc-user`'s `get-function`
-                // instead, per the convention in the next comment.
-                if path_is_builtin_any(&key.0, &LLVM_METHOD_RECEIVER_TYPES) {
-                    return false;
-                }
-                // A user-registered method is a real call target even on a
-                // primitive receiver (`i32::equals`); only the natively
-                // lowered `i64`/`i32`/`char`/`string`/`f64`/`bignum`/`ratio`
-                // builtins (`+`, `<`, `=`, `lt`, `length`, `sqrt`, `fadd`,
-                // `rt_bignum_add`, ...) are excluded — those become LLVM
-                // instructions / `rt_str_*`/`rt_bignum_*`/`rt_ratio_*` calls
-                // in `compile-assoc`, not function calls. A builtin on these
-                // receivers that `compile-assoc` does *not* lower natively
-                // (`i64::int->char`, `string::upcase`, ...) is kept as a target
-                // so the `!self.methods.contains_key` check below rejects it
-                // with a clean up-front error — otherwise it reaches the
-                // island's `get-function` guard, an unrecoverable
-                // `rt_llvm_call` abort under the AOT-native island
-                // (interp-closure removal Stage 8a). `is_native_lowered_primitive_method`
-                // is the Rust twin of the island's `*-native-method?` list.
-                self.root.borrow().has_method(&key.0, &key.1)
-                    || !path_is_builtin_any(&key.0, &NATIVE_LOWERED_PRIMITIVES)
-                    || !is_native_lowered_primitive_method(key.0.last_segment(), &key.1)
-            })
-            .collect();
-        for (type_name, method) in &method_targets {
-            if !self.root.borrow().has_method(type_name, method) {
-                return Err(EvalError::Uncompilable {
-                    caller: name.to_string(),
-                    target: method_link_name(type_name, method),
-                });
-            }
-        }
-        edges.extend(method_targets.into_iter().map(|(p, m)| CallEdge::Method(p, m)));
-        Ok(edges)
-    }
-
-    /// Tarjan's algorithm over the top-level compile call graph, rooted at
-    /// `name`, restricted to the induced subgraph of not-yet-`compile`d
-    /// nodes (labels/closures Stage 5) — an edge into an already-compiled
-    /// target is a leaf for this traversal's purposes, since its address is
-    /// already known and needs no further graph treatment. Returns every
-    /// strongly connected component this traversal reaches, **in the order
-    /// Tarjan completes them**: a classic property of the algorithm is that
-    /// this finish order is a reverse topological order of the SCC
-    /// condensation — if `A` calls something in a different SCC `B`, `B`
-    /// finishes (and is pushed onto the result) before `A` does. That is
-    /// exactly the order [`Self::compile_function`] needs to hand to
-    /// [`Self::compile_scc`]: every SCC's external dependencies are already
-    /// compiled by the time it's processed. A single-member SCC with no
-    /// self-loop is the common case (an ordinary, non-recursive-with-others
-    /// function); a multi-member SCC is genuine mutual recursion across
-    /// separate top-level functions, unsupported before this stage.
-    fn compute_sccs(&self, heap: &Heap, name: &str) -> Result<Vec<Vec<String>>, EvalError> {
-        let mut counter = 0usize;
-        let mut indices: HashMap<String, usize> = HashMap::new();
-        let mut lowlink: HashMap<String, usize> = HashMap::new();
-        let mut on_stack: HashSet<String> = HashSet::new();
-        let mut stack: Vec<String> = Vec::new();
-        let mut sccs: Vec<Vec<String>> = Vec::new();
-        self.scc_strongconnect(heap, name, &mut counter, &mut indices, &mut lowlink, &mut on_stack, &mut stack, &mut sccs)?;
-        Ok(sccs)
-    }
-
-    /// One node's worth of Tarjan's `strongconnect` — see
-    /// [`Self::compute_sccs`]'s doc comment for the algorithm-level
-    /// contract. Recursive over [`Self::call_graph_edges`]; an edge whose
-    /// target is already compiled is skipped outright (never entered into
-    /// `indices` at all), so it never contributes a spurious singleton SCC.
-    #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
-    fn scc_strongconnect(
-        &self,
-        heap: &Heap,
-        node: &str,
-        counter: &mut usize,
-        indices: &mut HashMap<String, usize>,
-        lowlink: &mut HashMap<String, usize>,
-        on_stack: &mut HashSet<String>,
-        stack: &mut Vec<String>,
-        sccs: &mut Vec<Vec<String>>,
-    ) -> Result<(), EvalError> {
-        indices.insert(node.to_string(), *counter);
-        lowlink.insert(node.to_string(), *counter);
-        *counter += 1;
-        stack.push(node.to_string());
-        on_stack.insert(node.to_string());
-
-        for edge in self.call_graph_edges(heap, node)? {
-            let already_compiled = match &edge {
-                CallEdge::Fn(p) => self.root.borrow().fn_compiled(p),
-                CallEdge::Method(p, m) => self.root.borrow().method_compiled(p, m),
-            };
-            if already_compiled {
-                continue;
-            }
-            let target = edge.node_name();
-            if !indices.contains_key(&target) {
-                self.scc_strongconnect(heap, &target, counter, indices, lowlink, on_stack, stack, sccs)?;
-                let merged = lowlink[node].min(lowlink[&target]);
-                lowlink.insert(node.to_string(), merged);
-            } else if on_stack.contains(&target) {
-                let merged = lowlink[node].min(indices[&target]);
-                lowlink.insert(node.to_string(), merged);
-            }
-        }
-
-        if lowlink[node] == indices[node] {
-            let mut component = Vec::new();
-            loop {
-                let w = stack.pop().expect("node's own strongconnect frame pushed it onto the stack");
-                on_stack.remove(&w);
-                let is_root = w == node;
-                component.push(w);
-                if is_root {
-                    break;
-                }
-            }
-            sccs.push(component);
-        }
-        Ok(())
-    }
-
-    /// Compiles one strongly connected component of the top-level call graph
-    /// (labels/closures Stage 5) — a single function/method, or a set of
-    /// separate top-level `defun`/`defmethod`s mutually recursive with each
-    /// other — into one shared, throwaway LLVM module, replacing the single-
-    /// function-per-module shape every `compile_function_rec` call used
-    /// before this stage. Every `members` name is forward-declared under its
-    /// real internal name (`core_bridge::user_symbol_name`) *before* any of
-    /// their bodies are translated, exactly like an external call target
-    /// always was — so a call from one member to a sibling still without a
-    /// body yet resolves to that same declaration by name
-    /// (`compile-call`'s `get-function`), and [`Self::add_compiled_function`]
-    /// (via `compiler.rs`'s `compile-function`, whose own `(add-function m
-    /// name)` now reuses an existing declaration instead of minting a second,
-    /// disjoint one — see [`llvm_module_add_function`]'s doc comment) attaches
-    /// that member's real body to it in place. Targets *outside* `members`
-    /// are handled exactly like [`Self::call_graph_edges`]'s callers always
-    /// have: forward-declared, then wired post-hoc via `add_global_mapping`
-    /// (`externals`) to their already-compiled address — guaranteed to exist
-    /// by [`Self::compute_sccs`]'s finish-order contract. The whole module is
-    /// JIT'd exactly once via [`crate::compile::CompiledFn::new_multi`], so
-    /// every member shares one execution engine (mutual calls within the SCC
-    /// need no `add_global_mapping` entry at all — LLVM resolves them
-    /// directly against the sibling's own definition in this same module).
-    fn compile_scc(&self, heap: &mut Heap, members: &[String]) -> Result<(), EvalError> {
-        let member_set: HashSet<&str> = members.iter().map(|s| s.as_str()).collect();
-
-        let mut call_targets: Vec<Path> = Vec::new();
-        let mut method_targets: Vec<(Path, String)> = Vec::new();
-        let mut seen: HashSet<String> = HashSet::new();
-        for member in members {
-            for edge in self.call_graph_edges(heap, member)? {
-                let target_name = edge.node_name();
-                // A sibling within this same SCC resolves through the SCC's
-                // own internal forward declarations below, not `externals`.
-                if member_set.contains(target_name.as_str()) || !seen.insert(target_name) {
-                    continue;
-                }
-                match edge {
-                    CallEdge::Fn(p) => call_targets.push(p),
-                    CallEdge::Method(p, m) => method_targets.push((p, m)),
-                }
-            }
-        }
-
-        let module = {
-            let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-            let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")));
-            for member in members {
-                crate::compile::llvm_builtins::declare_external_function(&module, &crate::compile::symbols::user_symbol_name(member));
-            }
-            for target in &call_targets {
-                crate::compile::llvm_builtins::declare_external_function(&module, &crate::compile::symbols::user_symbol_name(&target.to_string()));
-            }
-            for (type_name, method) in &method_targets {
-                crate::compile::llvm_builtins::declare_external_function(&module, &crate::compile::symbols::user_method_symbol_name(type_name, method));
-            }
-            for (rt_name, _) in rt_extern_functions() {
-                crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
-            }
-            module
-        };
-
-        for member in members {
-            self.add_compiled_function(heap, module.clone(), member, &crate::compile::symbols::user_symbol_name(member))?;
-        }
-
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let mut externals: Vec<(String, usize)> = call_targets
-            .iter()
-            .map(|p| {
-                let f = self.root.borrow().get_fn(p).expect("Self::compute_sccs's finish order guarantees this is already compiled");
-                let addr = f.compiled.borrow().as_ref().expect("Self::compute_sccs's finish order guarantees this is already compiled").address();
-                (crate::compile::symbols::user_symbol_name(&p.to_string()), addr)
-            })
-            .collect();
-        externals.extend(method_targets.iter().map(|(type_name, method)| {
-            let f = self.root.borrow().get_method(type_name, method).expect("Self::compute_sccs's finish order guarantees this is already compiled");
-            let addr = f.compiled.borrow().as_ref().expect("Self::compute_sccs's finish order guarantees this is already compiled").address();
-            (crate::compile::symbols::user_method_symbol_name(type_name, method), addr)
-        }));
-        externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
-        // Mirrors `compile::aot::compile_file`'s own `verify()` call in the
-        // same position, before handing the module to LLVM for real: a
-        // typelisp-hosted `compiler.rs` bug that emits
-        // instructions after a block's terminator (the `compile-let`
-        // GC-root-leak fix's own doc comment names this exact risk) would
-        // otherwise reach `CompiledFn::new_multi`'s `create_jit_execution_engine`
-        // as malformed IR — undefined behavior in LLVM itself, not a
-        // catchable Rust error. Verifying first turns that into a clean
-        // `Panic` instead.
-        module.borrow().verify().map_err(|e| EvalError::Panic(format!("compile: module failed verification: {}", e)))?;
-        let internal_names: Vec<String> = members.iter().map(|m| crate::compile::symbols::user_symbol_name(m)).collect();
-        let compiled_fns = crate::compile::CompiledFn::new_multi(&module.borrow(), &internal_names, &externals)
-            .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
-        for (member, compiled) in members.iter().zip(compiled_fns) {
-            match self.method_key(member) {
-                Some((type_path, method)) => {
-                    let f = self.root.borrow().get_method(&type_path, &method).expect("member is a registered method");
-                    *f.compiled.borrow_mut() = Some(Rc::new(compiled));
-                }
-                None => {
-                    let f = self.root.borrow().get_fn(&fn_path_from_node_name(member)).expect("member is a registered function");
-                    *f.compiled.borrow_mut() = Some(Rc::new(compiled));
-                }
-            }
-        }
-        // After the addresses above are in place, never before: a method
-        // that lands in some vtable's slot may well be a member of *this*
-        // SCC, so its entry point only exists as of the loop just above.
-        self.publish_vtables();
-        // Explicitly, while `_guard` is still held: `module` was declared
-        // before the guard, so letting it fall out of scope would destroy it
-        // *after* the guard released — and `~Module` unregisters every value
-        // name from the shared LLVM Context (see `compile::COMPILE_LOCK`).
-        // Nothing here can leave a share behind for someone else to drop:
-        // `add_compiled_function`'s clones are released before it returns.
-        drop(module);
-        Ok(())
-    }
 
     /// Build the argument vector for a macro call: the first `fixed` raw
     /// forms map 1:1 to parameters; if `f.rest`, every remaining raw
@@ -2723,7 +1911,7 @@ impl Interp {
 }
 
 /// Intern a name set into the `SymId`s the core bridge compares by.
-fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<SymId> {
+pub(crate) fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<SymId> {
     names
         .iter()
         .map(|n| match heap.intern_symbol(n) {
@@ -2734,7 +1922,7 @@ fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<SymId> {
 }
 
 /// The same for a parameter list, keeping each name's representation.
-fn intern_params(heap: &mut Heap, params: &[(String, Repr)]) -> Vec<(SymId, Repr)> {
+pub(crate) fn intern_params(heap: &mut Heap, params: &[(String, Repr)]) -> Vec<(SymId, Repr)> {
     params
         .iter()
         .map(|(n, r)| {
@@ -3789,7 +2977,7 @@ fn eval_llvm_builtin_method(
 /// function is declared/looked-up under — exactly the literal string a
 /// standalone `(compile "type-path::method")` call uses as its
 /// `internal_name` ([`Interp::compile_function`]'s own
-/// `self.add_compiled_function(heap, module.clone(), name, name)` call,
+/// `crate::compile::driver::add_compiled_function(&self, heap, module.clone(), name, name)` call,
 /// where `name` is that literal user-typed string) — but also every other
 /// place this crate needs the same "which method" identity as plain text: a
 /// `NoSuchFunction` error, [`CallEdge::Method`]'s own SCC graph node name.
@@ -3797,7 +2985,7 @@ fn eval_llvm_builtin_method(
 /// re-deriving the same format independently. Also relied on by
 /// `compiler.rs`'s `compile-assoc` (looking the same name back up via
 /// `get-function` — see that function's doc comment).
-fn method_link_name(type_name: &Path, method: &str) -> String {
+pub(crate) fn method_link_name(type_name: &Path, method: &str) -> String {
     format!("{}::{}", type_name, method)
 }
 
@@ -5059,8 +4247,7 @@ mod scc_tests {
             );
         }
 
-        interp
-            .compile_function(&mut heap, &CompileTarget::Fn(crate::check::resolved::Ref::synthetic(Path::root("a"))))
+        crate::compile::driver::compile_function(&interp, &mut heap, &crate::CompileTarget::Fn(crate::check::resolved::Ref::synthetic(Path::root("a"))))
             .expect("mutual recursion across separate top-level functions should now compile");
         assert!(interp.root.borrow().fn_compiled(&Path::root("a")), "\"a\" should have ended up compiled");
         assert!(interp.root.borrow().fn_compiled(&Path::root("b")), "\"b\", pulled in transitively as part of the same SCC, should have ended up compiled too");

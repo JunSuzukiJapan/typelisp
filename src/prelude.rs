@@ -2296,8 +2296,7 @@ pub fn load(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     // subset here would mean running the compile path's own precheck over the
     // whole prelude at every startup, to reach an answer the module already
     // holds.
-    interp
-        .install_compiled_library(crate::compile::CompiledLibrary {
+    crate::compile::driver::install_compiled_library(&interp, crate::compile::CompiledLibrary {
             label: "prelude",
             regen_script: "scripts/regen-prelude-bitcode.sh",
             bitcode: PRELUDE_BITCODE,
