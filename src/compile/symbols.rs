@@ -65,7 +65,7 @@ pub fn user_symbol_name(logical_name: &str) -> String {
 
 /// The LLVM symbol a call to `path` must name: the `typelisp-rt` shim, when
 /// `path` is a free builtin with no typelisp body
-/// ([`crate::eval::interp::rt_builtin_symbol`]), and otherwise the mangled
+/// ([`crate::compile::externs::rt_builtin_symbol`]), and otherwise the mangled
 /// name of the compiled function.
 ///
 /// The one place that choice is made. `core_bridge` writes the answer into
@@ -73,7 +73,7 @@ pub fn user_symbol_name(logical_name: &str) -> String {
 /// there is no second derivation on the island side to disagree with this
 /// one.
 pub fn callee_symbol_name(path: &crate::Path) -> String {
-    match crate::eval::interp::rt_builtin_symbol(path.last_segment()) {
+    match crate::compile::externs::rt_builtin_symbol(path.last_segment()) {
         Some(shim) => shim.to_string(),
         None => user_symbol_name(&path.segments().join("::")),
     }

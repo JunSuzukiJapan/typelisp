@@ -196,7 +196,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // `typelisp-rt`'s `staticlib` once `write_executable` links it in.
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
         let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        for (name, _) in crate::eval::interp::rt_extern_functions() {
+        for (name, _) in crate::compile::externs::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
         }
         Rc::new(RefCell::new(module))

@@ -30,9 +30,11 @@ use typelisp_mem::{Heap, RootScope, Value};
 
 use crate::check::repr::Repr;
 use crate::eval::interp::{
-    fn_path_from_node_name, intern_names, intern_params, is_native_lowered_primitive_method,
-    is_rt_builtin_name, method_link_name,
-    rt_extern_functions, str_rt, CallEdge, EvalError, Interp, Uncompilable,
+    fn_path_from_node_name, intern_names, intern_params, method_link_name, str_rt, CallEdge, EvalError,
+    Interp, Uncompilable,
+};
+use crate::compile::externs::{
+    is_native_lowered_primitive_method, is_rt_builtin_name, rt_extern_functions,
 };
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES, NATIVE_LOWERED_PRIMITIVES};
 use crate::CompileTarget;

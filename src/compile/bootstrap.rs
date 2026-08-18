@@ -136,7 +136,7 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
         let module = ctx.create_module("compiler_island");
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
         let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        for (name, _) in crate::eval::interp::rt_extern_functions() {
+        for (name, _) in crate::compile::externs::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
         }
         embed_source_hash(ctx, &module, SOURCE_HASH_GLOBAL, island_source_hash(crate::compiler::SOURCE)?);

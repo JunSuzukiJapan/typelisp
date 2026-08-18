@@ -657,7 +657,7 @@ impl Interp {
                         method: method.clone(),
                         home: type_name.parent().to_vec(),
                     };
-                    crate::compile::driver::compile_function(&self, &mut s, &target)?;
+                    (crate::eval::interp::backend_compile_function()?)(self, &mut s, &target)?;
                 }
             }
         }
@@ -825,7 +825,7 @@ impl Interp {
                 // had pushed. Returning here drops `s`, whose `RootScope`
                 // truncates the stack back to this call's own base — the same
                 // repair every other error path out of `apply_core` gets.
-                let raw = match crate::compile::catch_compiled_panic(|| Interp::call_closure_box(&s, id, &int_args)) {
+                let raw = match crate::eval::crossing::catch_compiled_panic(|| Interp::call_closure_box(&s, id, &int_args)) {
                     Ok(raw) => raw,
                     Err(e) => return Err(e),
                 };
@@ -1137,7 +1137,7 @@ impl Interp {
             // global's own heap-referencing field pushes its own extra
             // permanent root during encoding, desyncing the two) — so
             // `global_perm_idx` resolves it the same way `rt_global_get` does.
-            let perm_idx = crate::compile::runtime::global_perm_idx(id)
+            let perm_idx = typelisp_rt::global_perm_idx(id)
                 .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id)))?;
             // No decode: with one value world left, a stored word *is* the
             // value (see `eval_builtin_method`'s doc comment).
@@ -1163,7 +1163,7 @@ impl Interp {
         // See `global_core` for why a promoted global is written through the
         // permanent root rather than its cell.
         if let Some(&id) = self.compiled_globals.borrow().get(&path) {
-            let perm_idx = crate::compile::runtime::global_perm_idx(id)
+            let perm_idx = typelisp_rt::global_perm_idx(id)
                 .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id)))?;
             s.set_permanent_root(perm_idx, v);
             return Ok(Value::Empty);
@@ -1239,7 +1239,7 @@ impl Interp {
                 )))
             }
         };
-        crate::compile::driver::compile_function(&self, heap, &target)
+        (crate::eval::interp::backend_compile_function()?)(self, heap, &target)
     }
 
     /// Evaluate a node's trailing argument forms, rooting each for the whole

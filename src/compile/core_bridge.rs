@@ -636,7 +636,7 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// the mangled name `Interp::compile_scc`/`compile::aot` declare an ordinary
 /// function under ([`user_symbol_name`]), or — for a free builtin with no
 /// typelisp body — the `crate::compile::runtime` shim that *is* its
-/// implementation ([`crate::eval::interp::rt_builtin_symbol`]). Both
+/// implementation ([`crate::compile::externs::rt_builtin_symbol`]). Both
 /// decisions live on this side; see that function on why the island no
 /// longer re-derives the second one.
 fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {

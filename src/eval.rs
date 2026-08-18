@@ -7,6 +7,7 @@
 //! and the binding handle.
 
 mod value;
+pub(crate) mod crossing;
 pub(crate) mod interp;
 pub(crate) mod scope;
 
@@ -21,3 +22,4 @@ pub(crate) use typelisp_print::pprint;
 
 pub use value::EvalError;
 pub use interp::Interp;
+

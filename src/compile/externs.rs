@@ -1,0 +1,740 @@
+//! Which Rust function a builtin call lowers to, and how the two tiers find
+//! it.
+//!
+//! Three tables, all of them backend concerns even though they name no LLVM
+//! type:
+//!
+//! - [`rt_builtin_symbol`]: the `rt_*` shim a *free* builtin lowers to. Read
+//!   by `compile::symbols::callee_symbol_name` when it decides whether to
+//!   mangle a name, and by the driver when it decides whether a call target
+//!   needs compiling first.
+//! - [`native_lowered_primitive_methods`]: which builtin *methods* on a
+//!   primitive receiver the island lowers in place rather than calling.
+//! - [`rt_extern_functions`]: every shim, with its address — the JIT's
+//!   `add_global_mapping` list and the AOT module's forward-declaration list,
+//!   which have to be the same list.
+//!
+//! They live here rather than in `eval::interp` because nothing in the
+//! evaluator asks any of these questions: they are asked while *compiling*,
+//! by `symbols`, `core_bridge`, `driver`, `aot` and the two bootstrappers.
+
+/// The `typelisp_rt` shim a *free* builtin call lowers to, or
+/// `None` for an ordinary function whose name gets mangled instead.
+///
+/// These builtins can never be `compile`d themselves (no typelisp body —
+/// direct cons-heap or OS access, Rust-only), so [`Interp::compile_function`]
+/// excludes them from its normal "every call target must already be compiled"
+/// check ([`is_rt_builtin_name`]) and instead always wires them via
+/// [`rt_extern_functions`]. The `sexpr-*` family is the island layer
+/// (Symbol/Sexpr redesign Phase 4b — the whole family since closure
+/// unification Stage 8, tag predicates and typed payload extractors included,
+/// not just `car`/`cdr`/`cons`). The free `car`/`cdr`/`cons` names are the
+/// `cons<T,U>` pair (an ordinary `defstruct` method / `defun`, compiled the
+/// normal way), not `rt_*` shims.
+///
+/// **One table, on purpose.** The renaming used to happen twice: `core_bridge`
+/// decided whether to mangle a name, and `compile-call` in the island's SOURCE
+/// re-derived the shim it stood for, from a 15-deep nested `if`. Two lists
+/// that had to agree — and the failure mode of a disagreement is the worst one
+/// this compiler has: the island's `get-function` **aborts the process** on a
+/// name it cannot find. Naming the shim here, where the "is it a builtin?"
+/// decision already lives, leaves the island nothing to re-derive; it calls
+/// whatever the bridge named.
+pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "sexpr-car" => "rt_car",
+        "sexpr-cdr" => "rt_cdr",
+        "sexpr-cons" => "rt_cons",
+        "sexpr-consp" => "rt_consp",
+        "sexpr-null" => "rt_null",
+        "sexpr-atom" => "rt_atom",
+        "sexpr-symp" => "rt_symp",
+        "sexpr-int" => "rt_sexpr_int",
+        "sexpr-bool" => "rt_sexpr_bool",
+        "sexpr-char" => "rt_sexpr_char",
+        "sexpr-float" => "rt_float_value",
+        "sexpr-str" => "rt_sexpr_str",
+        "sexpr-sym-name" => "rt_sym_name",
+        // `gensym`: a free builtin (not a `sexpr-*` accessor) with no typelisp
+        // body. It must be here so a macro-expansion lambda that calls it
+        // (e.g. `do`'s per-binding temporaries) doesn't send
+        // `call_graph_edges` looking for a (nonexistent) `gensym` function to
+        // transitively compile.
+        "gensym" => "rt_gensym",
+        // `symbol->string` is `sexpr-sym-name` under the checker's `symbol`
+        // type rather than `sexpr`'s — the same shim, since both spellings
+        // carry the same interned `Value::Symbol`.
+        "symbol->string" => "rt_sym_name",
+        // `string->symbol` is the other direction, and is likewise a shim
+        // that already existed: `rt_intern_symbol` is what a compiled quoted
+        // symbol literal already goes through, and interning a `Str` is the
+        // whole of this builtin.
+        "string->symbol" => "rt_intern_symbol",
+        // The small system builtins (`sys_builtin`): parsing, the clock, and
+        // process exit. Each is a thin edge over one shared implementation
+        // the interpreter calls too.
+        // `equal`/`equalp` on `Sexpr` are free *functions*
+        // (`registry`'s root `fns`), not methods, so they map here rather
+        // than through `native_lowered_primitive_methods`. Both are the same
+        // `typelisp_rt::equality` the interpreter calls.
+        "equal" => "rt_sexpr_equal",
+        "equalp" => "rt_sexpr_equalp",
+        "parse-int" => "rt_parse_int",
+        "parse-float" => "rt_parse_float",
+        "get-universal-time" => "rt_get_universal_time",
+        "get-internal-real-time" => "rt_get_internal_real_time",
+        "exit" => "rt_exit",
+        // `read` (`typelisp_read::shim`), which could not lower while the
+        // reader was a module of this crate: a shim naming it would have had
+        // to reach up into `typelisp`, which depends on the runtime rather
+        // than the other way round.
+        "read" => "rt_read",
+        // The printing family. `format`/`print`/`println`/`pprint` and
+        // `pprint-logical-block` are special forms; the names here are what
+        // the checker lowered them to (`Checker::check_format`/
+        // `check_print_like`/`check_pprint`/`check_pprint_logical_block`).
+        // The last four are ordinary builtins (`registry`'s root `fns`).
+        // All eleven run `typelisp_print::runtime::print_builtin`, the same
+        // implementation `Interp::eval_builtin` runs.
+        "format-rt" => "rt_format",
+        "print-rt" => "rt_print",
+        "println-rt" => "rt_println",
+        "pprint-rt" => "rt_pprint",
+        "pprint-block-start-rt" => "rt_pprint_block_start",
+        "pprint-block-end-rt" => "rt_pprint_block_end",
+        "pprint-newline" => "rt_pprint_newline",
+        "pprint-indent" => "rt_pprint_indent",
+        "pprint-tab" => "rt_pprint_tab",
+        "pprint-pop" => "rt_pprint_pop",
+        "pprint-list-exhausted" => "rt_pprint_list_exhausted",
+        // The `random-state` builtins. Nothing about a random-state lives
+        // outside the heap, so all three lower.
+        "random-state-next" => "rt_random_state_next",
+        "random-state-copy" => "rt_random_state_copy",
+        "make-random-state-fresh" => "rt_make_random_state_fresh",
+        // The stream/file builtins. Every one is a thin conversion around
+        // `typelisp_rt::stream_builtin::stream_builtin`, which the
+        // interpreter calls too — see `Interp::eval_stream_builtin`. They can
+        // lower at all only because the stream *table* lives in
+        // `typelisp-rt` (see `typelisp_rt::stream`'s module docs): an
+        // AOT-linked executable has no interpreter to keep it on.
+        "stream-stdin" => "rt_stream_stdin",
+        "stream-stdout" => "rt_stream_stdout",
+        "stream-stderr" => "rt_stream_stderr",
+        "stream-string-input" => "rt_stream_string_input",
+        "stream-string-output" => "rt_stream_string_output",
+        "stream-open-file" => "rt_stream_open_file",
+        "stream-close" => "rt_stream_close",
+        "stream-open-p" => "rt_stream_open_p",
+        "stream-input-p" => "rt_stream_input_p",
+        "stream-output-p" => "rt_stream_output_p",
+        "stream-read-char" => "rt_stream_read_char",
+        "stream-unread-char" => "rt_stream_unread_char",
+        "stream-listen" => "rt_stream_listen",
+        "stream-write-string" => "rt_stream_write_string",
+        "stream-at-line-start" => "rt_stream_at_line_start",
+        "stream-finish-output" => "rt_stream_finish_output",
+        "stream-take-output-string" => "rt_stream_take_output_string",
+        "file-exists-p" => "rt_file_exists_p",
+        "file-delete" => "rt_file_delete",
+        "file-rename" => "rt_file_rename",
+        _ => return None,
+    })
+}
+
+/// Whether [`rt_builtin_symbol`] names a shim for `name` — the "this is not a
+/// call target to compile" question, asked where the shim's own name is not
+/// needed.
+pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
+    rt_builtin_symbol(name).is_some()
+}
+
+/// Whether a builtin method on a primitive receiver (`i64`/`i32`/`char`/
+/// `string`/`f64`/`bignum`/`ratio`) is one `compiler.rs`'s `compile-assoc`
+/// lowers *natively* — to an inline LLVM instruction or an `rt_*` call —
+/// rather than to an ordinary function call that would need the method
+/// `compile`d as its own function first. The Rust-side twin of the island's
+/// own `int-native-method?`/`string-native-method?`/`char-native-method?`/
+/// `float-native-method?`/`bignum-native-method?`/`ratio-native-method?`
+/// predicates (`compiler.rs`'s `SOURCE`); the lists must stay in lockstep,
+/// the same way [`Interp::heap_repr_kind`] mirrors the checker's
+/// `is_heap_repr`.
+///
+/// [`Interp::call_graph_edges`] needs this so it can reject — cleanly, up
+/// front — a compile whose body calls a *non*-native primitive builtin
+/// (`i64::int->char`, `char::equalp`, ...): those have no compiled lowering
+/// *and* no function to link, so left to reach the island they hit its
+/// `get-function` guard, which under the AOT-native island is a hard
+/// `rt_llvm_call` process abort rather than a catchable error. Catching them
+/// here keeps `(compile bad-fn)` a clean `EvalError` — the behavior the
+/// interpreted island used to give from `get-function` directly.
+pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str) -> bool {
+    native_lowered_primitive_methods(type_local).contains(&method)
+}
+
+/// The methods [`is_native_lowered_primitive_method`] answers `true` for, as
+/// data.
+///
+/// A table rather than a `matches!` so the set can be *read*, not only
+/// queried: `native_method_list_tests` compares it against the island's own
+/// predicates in both directions, and the direction that matters — a method
+/// Rust claims and the island does not lower — is unaskable of a predicate,
+/// because there is nothing to enumerate. That gap is not hypothetical; it is
+/// how `char->string` survived here.
+pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'static str] {
+    match type_local {
+        // `eq`/`eql`/`equal`/`equalp` are four names for `=` on an integer
+        // (`registry::int_assoc`'s doc comment: same-type operands, nothing to
+        // fold or recurse into), so all four are the same `icmp eq`. Only
+        // `eq` used to be here, which is what made `case` — whose expansion
+        // compares with `equal` — uncompilable for every integer scrutinee.
+        "i64" | "i32" => &[
+            "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
+            "int->bignum", "int->ratio",
+            "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
+            "ash", "logbitp",
+        ],
+        // `eq`/`eql` are `StrId` identity (`string_identity_eq`) and lower to
+        // an `icmp eq` on the two tagged words; `equal`/`equalp` are content
+        // comparisons and go through `rt_str_eq`/`rt_str_equalp`.
+        "string" => &[
+            "length", "ref", "eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "append", "substring",
+        ],
+        // `char->string` is here *and* in `char-native-method?` now. It was
+        // here alone once, and that is worth remembering: this list is what
+        // decides whether a call is a real graph edge, so claiming a method is
+        // lowered natively when the island has no case for it means the edge
+        // is dropped, no declaration is emitted, and `compile-call`'s
+        // `get-function` **aborts the process** at compile time. The
+        // disagreement is what `the_rust_and_island_native_method_lists_agree`
+        // exists to catch.
+        "char" => &["eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "char->int", "char->string"],
+        "f64" => &[
+            "+", "-", "*", "/", "expt", "sqrt", "floor", "ceiling", "round", "truncate",
+            "float->int", "float->bignum", "float->ratio",
+            "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
+            "max", "min", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh",
+            "asinh", "acosh", "atanh", "exp", "log",
+        ],
+        "bignum" => &[
+            "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
+            "bignum->int", "try-bignum->int", "bignum->float", "bignum->ratio", "max", "min",
+            // The three bitwise primitives the prelude's derived bignum
+            // operators (`logeqv`/`lognand`/`lognor`/`logandc1`/`logandc2`/
+            // `logorc1`/`logorc2`) are written in terms of. The rest of
+            // `bignum_assoc`'s bitwise catalog (`logxor`/`ash`/`logbitp`/
+            // `logtest`/`logcount`/`integer-length`) stays interpreted: no
+            // prelude definition reaches it, so lowering it would be code
+            // nothing exercises. `logxor` is here because `logeqv` is
+            // `lognot` of it — a blocker that only became visible once
+            // `lognot` had a lowering, which is the reconcile check in
+            // `prelude_bootstrap` doing its job.
+            "logand", "logior", "logxor", "lognot",
+        ],
+        "ratio" => &[
+            "+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
+            "ratio->bignum", "ratio->float", "numerator", "denominator", "max", "min",
+        ],
+        // `Sexpr` values are raw tagged `i64` handles in compiled code, and
+        // interned symbols/`nil`/small atoms are handle-identical, so `eq`
+        // (CL identity) lowers to a plain `icmp eq` on the two handles —
+        // `compile-assoc`'s `sexpr` arm, mirroring the `char` branch. `eql`
+        // cannot be that instruction (two separately boxed but equal
+        // `Float`/`bignum`/`ratio` values are `eql` and not `eq`), so it
+        // lowers to the `rt_sexpr_eql` shim over the same
+        // `typelisp_rt::equality` the interpreter uses. The free-function
+        // `equal`/`equalp` reach their shims through `rt_builtin_symbol`
+        // instead, being calls rather than methods.
+        "sexpr" => &["eq", "eql"],
+        // `bool`'s four comparison names are one operation
+        // (`registry::bool_assoc`: two immediate values, nothing to fold or
+        // recurse into), and a compiled `bool` is a raw `0`/`1`, so all four
+        // are the same `icmp eq`.
+        "bool" => &["eq", "eql", "equal", "equalp"],
+        // A compiled `symbol` is the interned `Value::Symbol` handle, so
+        // identity *is* handle equality — the same `icmp eq` as `sexpr`'s
+        // `eq`. `registry::symbol_assoc` registers only these two.
+        "symbol" => &["eq", "eql"],
+        _ => &[],
+    }
+}
+
+/// The fixed set of `typelisp_rt` shims every compiled function
+/// gets forward-declared and (JIT only — AOT resolves them as ordinary
+/// linker symbols against `typelisp-rt`'s `staticlib`, see
+/// `compile::aot::compile_file`) `add_global_mapping`-wired to, regardless
+/// of whether its own body actually calls any of them. Cheap enough (9
+/// extra declarations/mappings) to always include rather than checking
+/// which ones a given body's call targets actually need. `pub(crate)`:
+/// `compile::aot::compile_file` declares the same names (no JIT mapping
+/// needed there — ordinary linker symbol resolution against `typelisp-rt`'s
+/// `staticlib` instead) from this one source of truth.
+///
+/// `rt_push_sexpr_root`/`rt_pop_sexpr_root` (Stage 6 of the
+/// Sexpr-representation plan, `docs/implementation-log.md` — the "Sexprルート挿入パス"):
+/// unlike `rt_car`/.../`rt_match_fail`, no *user-visible* call name maps to
+/// these (they are not in [`rt_builtin_symbol`]'s table) —
+/// `compiler.rs`'s `retain-bindings`/`release-bindings`/`bind-let-values`
+/// call them directly via `get-function`/`build-call`, the same way
+/// `build-make-closure`/`build-closure-apply` call `rt_closure_*` directly
+/// rather than through the `(call name args)` tag. They still need
+/// the same forward-declaration/global-mapping treatment as every other
+/// `rt_*` shim, so they belong in this one shared list regardless.
+///
+/// `rt_push_permanent_sexpr_root` (general-ADT box field GC root
+/// protection): `compiler.rs`'s `compile-construct-box-fields` calls this
+/// directly for the same reason, one level down from a box's own
+/// never-`build-free`'d field storage rather than a call-stack scope — see
+/// `typelisp_rt::rt_push_permanent_sexpr_root`'s doc comment for why it has
+/// no `rt_pop_permanent_sexpr_root` counterpart.
+///
+/// `rt_root_count`/`rt_set_sexpr_root` (the `setf`-reassignment GC-root fix):
+/// `compiler.rs`'s `retain-bindings`/`bind-let-values` call `rt_root_count`
+/// right before their own `rt_push_sexpr_root` call for a `kind = 2` binding,
+/// to record the exact root-stack index that push lands at; `compile-set`
+/// later hands that same index to `rt_set_sexpr_root` so a `setf` updates the
+/// binding's *existing* root in place instead of leaving a freshly assigned
+/// value with no root at all — see `typelisp_rt::rt_set_sexpr_root`'s doc
+/// comment for the corruption this closes.
+///
+/// `rt_float_new`/`rt_float_value` (Sexpr/RtValue unification, Stage 0):
+/// `compiler.rs`'s `compile-construct-sexpr`/`compile-sexpr-field` variant-2
+/// arms call these to box/unbox a `Sexpr::Float` (`Value::Boxed`, see
+/// `BoxedObj`) — the first `rt_*` pair for the new boxed-object store, same
+/// declare-into-every-module mechanism every other `rt_*` function here
+/// already uses.
+///
+/// `rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`
+/// (Sexpr/RtValue unification, Stage 3): `compiler.rs`'s
+/// `compile-construct-boxed-struct`/`compile-field-get`/`compile-field-set`
+/// call these to build/read/write a `BoxedObj::Struct` — the same
+/// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
+/// isolation, wired to the compiler for the first time here.
+///
+/// `rt_closure_*`/`rt_cell_*` (closure unification, Stage 1): the GC-heap
+/// `BoxedObj::CompiledClosure` that replaces the raw `malloc`'d
+/// reference-counted `ClosureBox`, plus the shared binding cells
+/// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
+/// `setf` mutate the very same object.
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 180] {
+    use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
+    // The printing family. These are the one group of shims defined outside
+    // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
+    // the linker requires that.
+    use typelisp_print::shim::{
+        rt_format, rt_pprint, rt_pprint_block_end, rt_pprint_block_start, rt_pprint_indent,
+        rt_pprint_list_exhausted, rt_pprint_newline, rt_pprint_pop, rt_pprint_tab, rt_print, rt_println,
+    };
+    use typelisp_print::aot::{rt_print_enum_variant, rt_print_object_method};
+    use typelisp_read::shim::rt_read;
+    use typelisp_rt::sys_builtin::{
+        rt_exit, rt_get_internal_real_time, rt_get_universal_time, rt_parse_float, rt_parse_int,
+    };
+    use typelisp_rt::{
+        rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
+        rt_bignum_logand, rt_bignum_logior, rt_bignum_lognot, rt_bignum_logxor,
+        rt_make_random_state_fresh, rt_random_state_copy, rt_random_state_next,
+
+        rt_file_delete, rt_file_exists_p, rt_file_rename, rt_stream_at_line_start, rt_stream_close,
+        rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p,
+        rt_stream_output_p, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
+        rt_stream_string_input, rt_stream_string_output, rt_stream_take_output_string, rt_stream_unread_char,
+        rt_stream_write_string,
+        rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
+        rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len,
+        rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum,
+        rt_float_to_ratio, rt_float_value, rt_gensym, rt_global_get, rt_global_new, rt_global_set, rt_i64_div, rt_i64_mod,
+        rt_i64_ash, rt_i64_logbitp, rt_i64_logcount, rt_i64_integer_length,
+        rt_f64_tan, rt_f64_asin, rt_f64_acos, rt_f64_atan, rt_f64_sinh, rt_f64_cosh, rt_f64_tanh, rt_f64_asinh, rt_f64_acosh,
+        rt_f64_atanh,
+        rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys,
+        rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
+        rt_intern_path, rt_intern_symbol, rt_list_to_path, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
+        rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
+        rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
+        rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_int, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
+        rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
+        rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
+        rt_dyn_call, rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
+        rt_throw, rt_throw_matches, rt_throw_take_value, rt_unwind_pending, rt_resume_unwind,
+        rt_protected_apply_any, rt_protected_call, rt_protected_call_env, rt_protected_dyn_call, rt_protected_panic,
+        rt_protected_throw,
+    };
+    [
+        // The one main-crate entry: the generic `llvm-*`/native-scope
+        // builtin dispatch shim (interp-closure removal Stage 1) — it can't
+        // live in `typelisp-rt` because it calls into the `inkwell`-backed
+        // [`eval_llvm_builtin_method`]. Never referenced by AOT-linked user
+        // executables (LLVM handle types are unreachable from user code, so
+        // `compile-file` output never emits a call to it — an unreferenced
+        // declaration emits no symbol for the linker to miss).
+        ("rt_llvm_call", crate::compile::llvm_builtins::rt_llvm_call as usize),
+        // Trait objects and vtables (TODO T4): `rt_dyn_new` boxes,
+        // `rt_dyn_vtable`/`rt_dyn_value` decode, and `rt_dyn_call` performs
+        // the dispatch itself (`compiler.rs`'s `compile-dyn-*`) — including
+        // the case where the slot's implementation is interpreted.
+        // `rt_dyn_upcast` swaps a box's table for a supertrait's when the two
+        // layouts share no prefix.
+        // `rt_vtable_set`/`rt_upcast_set` fill the two tables from AOT
+        // startup; the JIT fills them Rust-side instead
+        // (`Interp::publish_vtables`/`register_dyn_box`), so nothing emits a
+        // call to either there.
+        ("rt_dyn_new", rt_dyn_new as usize),
+        ("rt_dyn_vtable", rt_dyn_vtable as usize),
+        ("rt_dyn_value", rt_dyn_value as usize),
+        ("rt_dyn_upcast", rt_dyn_upcast as usize),
+        ("rt_dyn_call", rt_dyn_call as usize),
+        ("rt_vtable_set", rt_vtable_set as usize),
+        ("rt_upcast_set", rt_upcast_set as usize),
+        // The small system builtins (`typelisp_rt::sys_builtin`): parsing,
+        // the clock, and process exit. Each was a gap that made every
+        // function calling it uncompilable, and each closed the same way the
+        // stream family did — one implementation, two edges.
+        // The three structural equality predicates
+        // (`typelisp_rt::equality`). `eq` needs no shim — it is the `icmp eq`
+        // the island emits in place.
+        ("rt_sexpr_eql", rt_sexpr_eql as usize),
+        ("rt_sexpr_equal", rt_sexpr_equal as usize),
+        ("rt_sexpr_equalp", rt_sexpr_equalp as usize),
+        ("rt_parse_int", rt_parse_int as usize),
+        ("rt_parse_float", rt_parse_float as usize),
+        ("rt_get_universal_time", rt_get_universal_time as usize),
+        ("rt_get_internal_real_time", rt_get_internal_real_time as usize),
+        ("rt_exit", rt_exit as usize),
+        ("rt_read", rt_read as usize),
+        // The printing family (`typelisp_print::shim`). `format`/`print`/
+        // `println`/`pprint` and `pprint-logical-block` are special forms, so
+        // what reaches here are the `*-rt` names the checker lowered them to;
+        // the four `pprint-*` operators are ordinary builtins.
+        ("rt_format", rt_format as usize),
+        ("rt_print", rt_print as usize),
+        ("rt_println", rt_println as usize),
+        ("rt_pprint", rt_pprint as usize),
+        ("rt_pprint_block_start", rt_pprint_block_start as usize),
+        ("rt_pprint_block_end", rt_pprint_block_end as usize),
+        ("rt_pprint_newline", rt_pprint_newline as usize),
+        ("rt_pprint_indent", rt_pprint_indent as usize),
+        ("rt_pprint_tab", rt_pprint_tab as usize),
+        ("rt_pprint_pop", rt_pprint_pop as usize),
+        ("rt_pprint_list_exhausted", rt_pprint_list_exhausted as usize),
+        // The printer's AOT startup registration (`typelisp_print::aot`):
+        // an enum's variant names and each type's `print-object`, which a
+        // standalone executable cannot look up the way the interpreter does.
+        // AOT-only, like `rt_vtable_set`/`rt_upcast_set` above — the JIT
+        // installs `INTERP_PRINT_HOOKS` instead, so nothing emits a call to
+        // either there.
+        ("rt_print_enum_variant", rt_print_enum_variant as usize),
+        ("rt_print_object_method", rt_print_object_method as usize),
+        ("rt_car", rt_car as usize),
+        ("rt_cdr", rt_cdr as usize),
+        ("rt_cons", rt_cons as usize),
+        ("rt_consp", rt_consp as usize),
+        ("rt_null", rt_null as usize),
+        ("rt_atom", rt_atom as usize),
+        ("rt_symp", rt_symp as usize),
+        ("rt_sexpr_int", rt_sexpr_int as usize),
+        ("rt_sexpr_bool", rt_sexpr_bool as usize),
+        ("rt_sexpr_char", rt_sexpr_char as usize),
+        ("rt_sexpr_str", rt_sexpr_str as usize),
+        ("rt_sym_name", rt_sym_name as usize),
+        ("rt_set_car", rt_set_car as usize),
+        ("rt_set_cdr", rt_set_cdr as usize),
+        ("rt_match_fail", rt_match_fail as usize),
+        ("rt_panic", rt_panic as usize),
+        // `catch`/`throw`/`unwind-protect` (`compiler.rs`'s `compile-catch`/
+        // `compile-throw`/`compile-unwind-protect`). `rt_throw` raises the
+        // unwind; the three queries below are what a region's dispatch block
+        // asks about the one in flight; the `rt_protected_*` family is the
+        // Rust frame that catches it, one per kind of call a protected region
+        // can make — see that section of `typelisp-rt` for why the catch
+        // cannot be a landing pad instead.
+        ("rt_throw", rt_throw as usize),
+        ("rt_throw_matches", rt_throw_matches as usize),
+        ("rt_throw_take_value", rt_throw_take_value as usize),
+        ("rt_unwind_pending", rt_unwind_pending as usize),
+        ("rt_resume_unwind", rt_resume_unwind as usize),
+        ("rt_protected_call", rt_protected_call as usize),
+        ("rt_protected_call_env", rt_protected_call_env as usize),
+        ("rt_protected_apply_any", rt_protected_apply_any as usize),
+        ("rt_protected_dyn_call", rt_protected_dyn_call as usize),
+        ("rt_protected_panic", rt_protected_panic as usize),
+        ("rt_protected_throw", rt_protected_throw as usize),
+        ("rt_push_sexpr_root", rt_push_sexpr_root as usize),
+        ("rt_pop_sexpr_root", rt_pop_sexpr_root as usize),
+        ("rt_push_permanent_sexpr_root", rt_push_permanent_sexpr_root as usize),
+        ("rt_root_count", rt_root_count as usize),
+        ("rt_set_sexpr_root", rt_set_sexpr_root as usize),
+        ("rt_truncate_sexpr_roots", rt_truncate_sexpr_roots as usize),
+        ("rt_str_new", rt_str_new as usize),
+        ("rt_str_length", rt_str_length as usize),
+        ("rt_str_ref", rt_str_ref as usize),
+        ("rt_str_eq", rt_str_eq as usize),
+        ("rt_str_equalp", rt_str_equalp as usize),
+        ("rt_char_equalp", rt_char_equalp as usize),
+        ("rt_str_lt", rt_str_lt as usize),
+        ("rt_str_append", rt_str_append as usize),
+        ("rt_str_substring", rt_str_substring as usize),
+        ("rt_float_new", rt_float_new as usize),
+        ("rt_float_value", rt_float_value as usize),
+        ("rt_box_kind", rt_box_kind as usize),
+        ("rt_struct_new", rt_struct_new as usize),
+        ("rt_struct_field_get", rt_struct_field_get as usize),
+        ("rt_struct_field_set", rt_struct_field_set as usize),
+        ("rt_struct_field_count", rt_struct_field_count as usize),
+        ("rt_struct_push_field", rt_struct_push_field as usize),
+        ("rt_struct_pop_field", rt_struct_pop_field as usize),
+        ("rt_closure_new", rt_closure_new as usize),
+        ("rt_closure_fnptr", rt_closure_fnptr as usize),
+        ("rt_closure_env_len", rt_closure_env_len as usize),
+        ("rt_closure_env_get", rt_closure_env_get as usize),
+        ("rt_apply_any", rt_apply_any as usize),
+        ("rt_cell_new", rt_cell_new as usize),
+        ("rt_cell_get", rt_cell_get as usize),
+        ("rt_cell_set", rt_cell_set as usize),
+        ("rt_data_new", rt_data_new as usize),
+        ("rt_data_variant", rt_data_variant as usize),
+        ("rt_data_field", rt_data_field as usize),
+        ("rt_sexpr_instance_test", rt_sexpr_instance_test as usize),
+        ("rt_hashtable_new", rt_hashtable_new as usize),
+        ("rt_hashtable_set", rt_hashtable_set as usize),
+        ("rt_hashtable_count", rt_hashtable_count as usize),
+        ("rt_hashtable_clear", rt_hashtable_clear as usize),
+        ("rt_hashtable_keys", rt_hashtable_keys as usize),
+        ("rt_hashtable_values", rt_hashtable_values as usize),
+        ("rt_hashtable_entries", rt_hashtable_entries as usize),
+        ("rt_hashtable_contains", rt_hashtable_contains as usize),
+        ("rt_hashtable_get_raw", rt_hashtable_get_raw as usize),
+        ("rt_hashtable_remove_raw", rt_hashtable_remove_raw as usize),
+        ("rt_global_new", rt_global_new as usize),
+        ("rt_global_get", rt_global_get as usize),
+        ("rt_global_set", rt_global_set as usize),
+        ("rt_bignum_new", rt_bignum_new as usize),
+        ("rt_ratio_from_bignums", rt_ratio_from_bignums as usize),
+        ("rt_bignum_add", rt_bignum_add as usize),
+        ("rt_bignum_sub", rt_bignum_sub as usize),
+        ("rt_bignum_mul", rt_bignum_mul as usize),
+        ("rt_bignum_div", rt_bignum_div as usize),
+        ("rt_bignum_mod", rt_bignum_mod as usize),
+        ("rt_bignum_logand", rt_bignum_logand as usize),
+        ("rt_bignum_logior", rt_bignum_logior as usize),
+        ("rt_bignum_logxor", rt_bignum_logxor as usize),
+        ("rt_bignum_lognot", rt_bignum_lognot as usize),
+        ("rt_random_state_next", rt_random_state_next as usize),
+        ("rt_random_state_copy", rt_random_state_copy as usize),
+        ("rt_make_random_state_fresh", rt_make_random_state_fresh as usize),
+        ("rt_stream_stdin", rt_stream_stdin as usize),
+        ("rt_stream_stdout", rt_stream_stdout as usize),
+        ("rt_stream_stderr", rt_stream_stderr as usize),
+        ("rt_stream_string_input", rt_stream_string_input as usize),
+        ("rt_stream_string_output", rt_stream_string_output as usize),
+        ("rt_stream_open_file", rt_stream_open_file as usize),
+        ("rt_stream_close", rt_stream_close as usize),
+        ("rt_stream_open_p", rt_stream_open_p as usize),
+        ("rt_stream_input_p", rt_stream_input_p as usize),
+        ("rt_stream_output_p", rt_stream_output_p as usize),
+        ("rt_stream_read_char", rt_stream_read_char as usize),
+        ("rt_stream_unread_char", rt_stream_unread_char as usize),
+        ("rt_stream_listen", rt_stream_listen as usize),
+        ("rt_stream_write_string", rt_stream_write_string as usize),
+        ("rt_stream_at_line_start", rt_stream_at_line_start as usize),
+        ("rt_stream_finish_output", rt_stream_finish_output as usize),
+        ("rt_stream_take_output_string", rt_stream_take_output_string as usize),
+        ("rt_file_exists_p", rt_file_exists_p as usize),
+        ("rt_file_delete", rt_file_delete as usize),
+        ("rt_file_rename", rt_file_rename as usize),
+        ("rt_bignum_cmp", rt_bignum_cmp as usize),
+        ("rt_bignum_to_int", rt_bignum_to_int as usize),
+        ("rt_bignum_fits_i32", rt_bignum_fits_i32 as usize),
+        ("rt_bignum_to_int_raw", rt_bignum_to_int_raw as usize),
+        ("rt_bignum_to_float", rt_bignum_to_float as usize),
+        ("rt_bignum_to_ratio", rt_bignum_to_ratio as usize),
+        ("rt_int_to_bignum", rt_int_to_bignum as usize),
+        ("rt_int_to_ratio", rt_int_to_ratio as usize),
+        ("rt_float_to_bignum", rt_float_to_bignum as usize),
+        ("rt_float_to_ratio", rt_float_to_ratio as usize),
+        ("rt_ratio_add", rt_ratio_add as usize),
+        ("rt_ratio_sub", rt_ratio_sub as usize),
+        ("rt_ratio_mul", rt_ratio_mul as usize),
+        ("rt_ratio_div", rt_ratio_div as usize),
+        ("rt_ratio_cmp", rt_ratio_cmp as usize),
+        ("rt_ratio_to_bignum", rt_ratio_to_bignum as usize),
+        ("rt_ratio_to_float", rt_ratio_to_float as usize),
+        ("rt_ratio_numerator", rt_ratio_numerator as usize),
+        ("rt_ratio_denominator", rt_ratio_denominator as usize),
+        ("rt_intern_symbol", rt_intern_symbol as usize),
+        ("rt_intern_path", rt_intern_path as usize),
+        ("rt_path_to_list", rt_path_to_list as usize),
+        ("rt_list_to_path", rt_list_to_path as usize),
+        ("rt_gensym", rt_gensym as usize),
+        ("rt_i64_div", rt_i64_div as usize),
+        ("rt_i64_mod", rt_i64_mod as usize),
+        ("rt_i64_ash", rt_i64_ash as usize),
+        ("rt_i64_logbitp", rt_i64_logbitp as usize),
+        ("rt_i64_logcount", rt_i64_logcount as usize),
+        ("rt_i64_integer_length", rt_i64_integer_length as usize),
+        ("rt_f64_tan", rt_f64_tan as usize),
+        ("rt_f64_asin", rt_f64_asin as usize),
+        ("rt_f64_acos", rt_f64_acos as usize),
+        ("rt_f64_atan", rt_f64_atan as usize),
+        ("rt_f64_sinh", rt_f64_sinh as usize),
+        ("rt_f64_cosh", rt_f64_cosh as usize),
+        ("rt_f64_tanh", rt_f64_tanh as usize),
+        ("rt_f64_asinh", rt_f64_asinh as usize),
+        ("rt_f64_acosh", rt_f64_acosh as usize),
+        ("rt_f64_atanh", rt_f64_atanh as usize),
+    ]
+}
+
+#[cfg(test)]
+mod scc_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use typelisp_mem::{Heap, Value};
+
+    use crate::check::core;
+    use crate::check::repr::Repr;
+    use crate::eval::interp::{FnDef, Interp};
+    use crate::types::Path;
+
+    /// Surface `defun`/`defmethod` syntax can never actually exercise the
+    /// mutual-recursion branch of [`Interp::compute_sccs`]/
+    /// [`Interp::compile_scc`]: `Checker::check_form_at` checks one top-level
+    /// form at a time, in file order, so a `defun` can only ever call a name
+    /// already registered *earlier* — `docs/syntax.md`'s own description of
+    /// `labels` ("相互再帰可能なローカル関数定義") confirms mutual recursion
+    /// is deliberately a `labels`-only, local-scope feature, not something a
+    /// pair of top-level `defun`s can express. So this bypasses the checker
+    /// entirely — inserting two hand-built [`FnDef`]s that call each other
+    /// straight into [`Interp::fns`], the same "same-module direct access"
+    /// trick this file's own [`Interp`] fields allow — to prove the SCC
+    /// machinery itself (labels/closures Stage 5) handles a genuine cycle
+    /// between two *separately* JIT'd top-level functions: forward-declares
+    /// both in one shared module before either body is translated, JITs the
+    /// module once via `CompiledFn::new_multi`, and both end up in
+    /// `Interp::compiled` with no "mutual recursion ... is not supported"
+    /// `Panic` (the pre-Stage-5 behavior this replaces).
+    #[test]
+    fn compile_function_compiles_a_genuine_two_node_cycle_bypassing_the_checker() {
+        let mut heap = Heap::with_capacity(1 << 16);
+        let mut checker = crate::Checker::new();
+        let mut interp = Interp::new();
+        crate::load_compiler(&mut heap, &mut checker, &mut interp);
+
+        // `(defun a () i64 (b))` / `(defun b () i64 (a))` — never checked,
+        // built directly as core forms, so the checker's forward-reference
+        // restriction never comes into play. Each body is a single
+        // `(call () () NAME ())`: no written/home segments (the callee is
+        // already fully resolved) and no arguments, hence no argument reprs.
+        for (name, callee) in [("a", "b"), ("b", "a")] {
+            let path = heap.intern_symbol(callee);
+            heap.push_root(path);
+            let call = core::tagged(&mut heap, "call", &[Value::Empty, Value::Empty, path, Value::Empty])
+                .expect("building a 4-field node cannot exhaust a 1<<16 heap");
+            // Registered `FnDef` bodies are reachable only through
+            // `Interp::fns`, which the collector does not scan — the same
+            // permanent root `Interp::exec` takes for a checked definition.
+            heap.push_permanent_root(call);
+            heap.pop_root();
+            interp.root.borrow_mut().fns.insert(
+                name.to_string(),
+                Rc::new(FnDef {
+                    params: vec![],
+                    body: vec![call],
+                    rest: false,
+                    lambda: None,
+                    sig: Some((vec![], Repr::Int)),
+                    public: true,
+                    compiled: RefCell::new(None),
+                }),
+            );
+        }
+
+        crate::compile::driver::compile_function(&interp, &mut heap, &crate::CompileTarget::Fn(crate::check::resolved::Ref::synthetic(Path::root("a"))))
+            .expect("mutual recursion across separate top-level functions should now compile");
+        assert!(interp.root.borrow().fn_compiled(&Path::root("a")), "\"a\" should have ended up compiled");
+        assert!(interp.root.borrow().fn_compiled(&Path::root("b")), "\"b\", pulled in transitively as part of the same SCC, should have ended up compiled too");
+    }
+}
+
+#[cfg(test)]
+mod native_method_list_tests {
+    use super::native_lowered_primitive_methods;
+
+    /// Every primitive receiver whose builtin methods either side lowers, with
+    /// the island predicate that decides for it.
+    const PRIMITIVES: &[(&str, &[&str])] = &[
+        ("int", &["i64", "i32"]),
+        ("string", &["string"]),
+        ("char", &["char"]),
+        ("float", &["f64"]),
+        ("bignum", &["bignum"]),
+        ("ratio", &["ratio"]),
+        ("bool", &["bool"]),
+        ("symbol", &["symbol"]),
+        ("sexpr", &["sexpr"]),
+    ];
+
+    /// Every `(equal method "X")` inside the island's `<name>-native-method?`
+    /// definition.
+    fn island_methods(name: &str) -> Vec<String> {
+        let src = crate::compiler::SOURCE;
+        let head = format!("(defun {}-native-method? ", name);
+        let start = src.find(&head).unwrap_or_else(|| panic!("`{}` not found in the island SOURCE", head));
+        let rest = &src[start + head.len()..];
+        let body = match rest.find("\n(defun ") {
+            Some(end) => &rest[..end],
+            None => rest,
+        };
+        let mut out = Vec::new();
+        let needle = "(equal method \"";
+        let mut at = 0;
+        while let Some(i) = body[at..].find(needle) {
+            let from = at + i + needle.len();
+            let len = body[from..].find('"').expect("unterminated method-name string in the island SOURCE");
+            out.push(body[from..from + len].to_string());
+            at = from + len;
+        }
+        out.sort();
+        out
+    }
+
+    /// `native_lowered_primitive_methods` and the island's
+    /// `*-native-method?` predicates must agree, method for method.
+    ///
+    /// They are one decision written twice, and disagreement is not a missed
+    /// optimization: this list decides whether a call is a real edge of the
+    /// compile call graph, so a method it claims and the island does not lower
+    /// gets no declaration emitted — and `compile-call`'s `get-function`
+    /// **aborts the process** rather than reporting an error. The Rust side
+    /// claimed `char->string` for exactly this reason, and nothing noticed
+    /// until the precompiled prelude became the first thing to compile every
+    /// prelude body instead of the few a test happens to name.
+    ///
+    /// Reading the island's own source is the point: a second hand-written
+    /// list here would be a third copy to keep in sync.
+    #[test]
+    fn the_rust_and_island_native_method_lists_agree() {
+        for (island_name, type_locals) in PRIMITIVES {
+            let island = island_methods(island_name);
+            assert!(!island.is_empty(), "`{}-native-method?` parsed as empty — the scan is broken", island_name);
+            for type_local in *type_locals {
+                let mut rust: Vec<String> =
+                    native_lowered_primitive_methods(type_local).iter().map(|m| m.to_string()).collect();
+                rust.sort();
+                let island_only: Vec<&String> = island.iter().filter(|m| !rust.contains(m)).collect();
+                let rust_only: Vec<&String> = rust.iter().filter(|m| !island.contains(m)).collect();
+                assert!(
+                    island_only.is_empty() && rust_only.is_empty(),
+                    "`{}` disagrees between the two native-method lists:\n  island-only (a missed \
+                     optimization): {:?}\n  Rust-only (a call to one aborts the process at compile \
+                     time): {:?}",
+                    type_local,
+                    island_only,
+                    rust_only
+                );
+            }
+        }
+    }
+}
+
