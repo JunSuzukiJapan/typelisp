@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-08-18 / ブランチ: `main`
+最終更新: 2026-08-19 / ブランチ: `feature/close-compile-gaps`
 
 このドキュメントは**現在残っている作業のみ**を記録する。
 
@@ -13,30 +13,37 @@
 
 `eval` はチェッカーとインタプリタそのものを要する（`Interp::eval_form` は `Checker::check_form_at`
 → `Interp::exec`）。手口は前の5つと同じ「実装を下ろして shim を書く」だが、下ろす対象が
-フロントエンド全体（`check/` + `eval/` + prelude + 島、約 25,000 行）になる。**調べた結果、
-これは2つの別々の作業に分かれる**:
+フロントエンド全体になる。作業は2つに分かれ、**(A) は 2026-08-19 に完了した**。
 
-**(A) `typelisp-front` クレートへの分離**。shim がインタプリタを名指しできるようにする前提条件。
-`check/` は inkwell を1箇所も参照していないので、そのまま下りる。障害は `eval/interp.rs` の
-3箇所:
+**(A) `typelisp-front` クレートへの分離**（完了）。`check/` + `eval/` + `types.rs` +
+`type_key.rs` + `project.rs` + prelude の SOURCE、約 20,000 行が `crates/typelisp-front` に
+移った。`typelisp` は `pub use typelisp_front::{...}` で従来のモジュールパスを再輸出するので、
+外から見た `typelisp::Heap` などは変わっていない。
 
-- `llvm-*` ビルダ組み込み（約1,550行、`eval_llvm_builtin_method` 以下）。既存の `rt_llvm_call`
-  と同じフック方式で `typelisp` 側へ上げられる。
-- `Interp` の JIT ドライバ（`install_compiled_library`/`compile_function`/`add_compiled_function`/
-  `compile_scc`/`call_compiled` 等）。`Module`/`MemoryBuffer`/`COMPILE_LOCK` を直接触る。
-- **`FnDef.compiled: RefCell<Option<Rc<CompiledFn>>>`**。フロントエンドの型がバックエンドの型を
-  持っている。ここが一番深い結合で、不透明ハンドルか型引数に変える必要がある。
+- `llvm-*` ビルダ（`src/compile/llvm_builtins.rs`）と JIT ドライバ（`src/compile/driver.rs`）を
+  backend へ移し、インタプリタは関数ポインタの `Backend` 構造体越しにだけ backend を呼ぶ。
+- `FnDef.compiled` は `Rc<dyn CompiledBody>`（アドレスを返すだけのトレイト）になった。
+  事前に「一番深い結合」と見立てたが、`CompiledFn` は `{engine, addr}` の2フィールドで、
+  フロント側の利用は全部 `.address()` だったので実際には浅かった。
+- prelude はソースがフロント・ビットコード導入が backend に割れた
+  （`typelisp::load_prelude` は `compile::prelude_bootstrap::load` を指す）。
+- AOT がリンクするアーカイブは `libtypelisp_rt.a` → `libtypelisp_front.a`。front は rt の上に
+  あるので、1つのアーカイブに両方入るのは外側だけ。**`eval` を呼ばないプログラムのサイズは
+  +784 バイト、front のシンボルは 0 個**（`(defun main () i32 42)` で実測）。
 
-**(B) 単体実行ファイルの中で `eval` を動かす**。(A) を済ませても AOT ではまだ動かない。
+**(B) 単体実行ファイルの中で `eval` を動かす**（残り）。(A) を済ませても AOT ではまだ動かない。
 `eval` は「プログラムの現在のグローバル環境」に対して型検査するので、実行ファイルが起動時に
-prelude と**自分自身の定義**を検査済みの形で登録していなければならない。既存の FASL 機構
-（`prelude::load_cached`）が検査済み状態のシリアライズをすでに持っているので土台はあるが、
-実行ファイルへの埋め込みと起動時復元は新規。サイズは数 MB 増える見込み——ただしそれを払うのは
-`eval` を呼ぶプログラムだけ、という 2026-08-18 の分割方針はそのまま適用できる。
+prelude と**自分自身の定義**を検査済みの形で登録していなければならない。設計の当たりは付いていて、
+`build_main_wrapper` が印字向けにすでに持っている「モジュールがそのシムを call しているときだけ
+起動時登録を出す」仕掛けをもう一段使う:
 
-(A) だけを先に landing させると、`compile`（JIT）では `eval` が通り `compile-file`（AOT）では
-通らない、という中途半端な状態になる。その場合は AOT 側でチェック時に落とすこと——実行時に
-abort する shim を置くのは、コンパイル時の拒否より悪い。
+1. `rt_eval_source(ptr, len)` — プログラム自身のソースを埋め込んで渡す。
+2. `rt_eval_compiled_fn(name, addr)` — コンパイル済み本体のアドレス。eval したフォームからの
+   呼び出しが tree-walk に落ちないように、replay 後に `FnDef.compiled` へ入れる。
+3. `rt_eval_global(name, id)` — コンパイル済みグローバルのスロット id。インタプリタは
+   `compiled_globals` を先に見る（`global_core`）ので、これを入れれば記憶域が共有される。
+   **`defvar` の初期化子を二度走らせないこと**が設計上の要点で、replay とコンパイル済み
+   グローバル初期化のどちらが値を書くのかを1つに決める必要がある。
 
 作業を始めるときはここに項目を足し、終わったら（経緯・設計判断を
 [implementation-log.md](implementation-log.md) へ書いたうえで）ここから消す。

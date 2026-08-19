@@ -247,7 +247,7 @@ static PROTECTED_PROBE: OnceLock<usize> = OnceLock::new();
 /// cleanup-only clause runs for those — but it is *not linkable into an AOT
 /// executable*: plain `cc` on macOS leaves it undefined, since it lives in
 /// libc++abi and only the JIT process gets that for free by way of LLVM.
-/// `rust_eh_personality` is defined in `libtypelisp_rt.a`, which every AOT
+/// `rust_eh_personality` is defined in `libtypelisp_front.a`, which every AOT
 /// executable already links, so it is the one personality available on both
 /// paths.
 fn protected_probe() -> UnwindingProbe {

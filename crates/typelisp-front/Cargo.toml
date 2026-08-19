@@ -1,0 +1,29 @@
+[package]
+name = "typelisp-front"
+version = "0.0.2"
+edition = "2021"
+
+# The front end of the language: reader glue, type checker, interpreter,
+# module loader, and the prelude source. Everything here is about *typelisp
+# programs*; nothing here knows what LLVM is.
+#
+# It is a crate and not a module of `typelisp` for the same reason
+# `typelisp-print` and `typelisp-read` are: the linker pulls a static archive
+# by member, and only a crate boundary guarantees that a program which never
+# calls `eval` does not pay for the checker. `staticlib` is here rather than on
+# `typelisp-rt` because this crate sits *above* it — one archive has to hold
+# both, and it has to be the outer one.
+[lib]
+name = "typelisp_front"
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+typelisp-abi = { path = "../typelisp-abi" }
+typelisp-mem = { path = "../typelisp-mem" }
+typelisp-print = { path = "../typelisp-print" }
+typelisp-read = { path = "../typelisp-read" }
+typelisp-rt = { path = "../typelisp-rt" }
+num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
+num-integer = "0.1"

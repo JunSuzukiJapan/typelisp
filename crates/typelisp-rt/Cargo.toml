@@ -3,13 +3,14 @@ name = "typelisp-rt"
 version = "0.0.2"
 edition = "2021"
 
-# `staticlib` lets `compile-file`'s AOT output (linked via the system `cc`,
-# see `typelisp::compile::aot::write_executable`) resolve these `#[no_mangle]`
-# functions as ordinary linker symbols. `rlib` stays too, since the main
-# `typelisp` crate links against this the normal Rust way for its JIT path.
+# `rlib` only. These `#[no_mangle]` shims still have to reach an AOT
+# executable as ordinary linker symbols, but `cc` takes one archive and this
+# crate is not the top of the stack any more: `typelisp-front` sits above it
+# and its `staticlib` carries these objects along. Two staticlibs would just
+# be a second copy nobody links.
 [lib]
 name = "typelisp_rt"
-crate-type = ["rlib", "staticlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 typelisp-abi = { path = "../typelisp-abi" }

@@ -556,11 +556,22 @@ fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
 /// executable below so calls to those shims resolve the same way a call to
 /// another `defun` in the file does — see `runtime`'s module doc comment.
 ///
-/// Deliberately the small, dependency-free `typelisp-rt` crate's own
-/// artifact, not this (`typelisp`) crate's — `typelisp` embeds all of LLVM
-/// via `inkwell`, and linking *that* into a tiny AOT executable drags in
-/// LLVM's entire system-library footprint (`libc++`, zlib, libffi,
-/// terminfo, ...) for no benefit; `typelisp-rt` has none of that.
+/// Deliberately `typelisp-front`'s artifact, not this (`typelisp`) crate's —
+/// `typelisp` embeds all of LLVM via `inkwell`, and linking *that* into a
+/// tiny AOT executable drags in LLVM's entire system-library footprint
+/// (`libc++`, zlib, libffi, terminfo, ...) for no benefit; nothing at or
+/// below `typelisp-front` names LLVM at all.
+///
+/// It is `typelisp-front`'s and not `typelisp-rt`'s only because `cc` takes
+/// *one* archive and `typelisp-front` sits above `typelisp-rt`, so its
+/// artifact is the one that holds both. Front's own objects — the checker,
+/// the interpreter, the prelude source — are what `rt_eval` needs and
+/// nothing else does, and the linker leaves every one of them out of a
+/// program that does not call it: measured at +784 bytes and zero
+/// `typelisp_front` symbols for `(defun main () i32 42)` against linking
+/// `typelisp-rt` alone. That is the whole reason the front end is a crate;
+/// see its doc comment, and `Cargo.toml`'s `profile.dev.package` entries for
+/// the one thing that quietly breaks it.
 ///
 /// Computed from `CARGO_MANIFEST_DIR` + the build profile this very test/
 /// binary was compiled under (`debug_assertions` tracks `dev`/`test` vs
@@ -570,18 +581,18 @@ fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
 /// right base for every member's artifacts.
 ///
 /// **This artifact is not built by the `cargo` invocation that runs an AOT
-/// test.** `cargo test` builds `typelisp-rt`'s *rlib* (the dependency this
+/// test.** `cargo test` builds `typelisp-front`'s *rlib* (the dependency this
 /// crate links) and never its `staticlib` target, so what is on disk here is
-/// whatever the last `cargo build -p typelisp-rt` / `cargo build --workspace`
-/// left. Adding an `rt_*` shim therefore links against a runtime that
-/// predates it and fails with an undefined symbol — observed adding
+/// whatever the last `cargo build -p typelisp-front` / `cargo build
+/// --workspace` left. Adding an `rt_*` shim therefore links against a runtime
+/// that predates it and fails with an undefined symbol — observed adding
 /// `rt_apply_any`, where the JIT tests all passed and only AOT broke.
 /// `scripts/test-serial.sh` builds the staticlib first for exactly this
 /// reason; a bare `cargo test --test compile_file_test` needs it built by
 /// hand.
 fn staticlib_path() -> String {
     let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
-    format!("{}/target/{}/libtypelisp_rt.a", env!("CARGO_MANIFEST_DIR"), profile)
+    format!("{}/target/{}/libtypelisp_front.a", env!("CARGO_MANIFEST_DIR"), profile)
 }
 
 /// Emits `module` to an object file and links it into a native executable

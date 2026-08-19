@@ -11,10 +11,10 @@
 
 実装状況は docs（古い可能性がある）ではなく、以下を直接読んで確認した:
 
-- `src/check/registry.rs` — Rust 組み込み型・組み込みメソッドの登録表
-- `src/check/checker.rs` — 特殊形の一覧（`check` の文字列 match）
-- `src/prelude.rs` — typelisp で書かれた標準ライブラリ（`defun`/`defmethod`/`defmacro`/`impl`）
-- `src/eval/interp.rs` — 組み込みメソッドの実体
+- `crates/typelisp-front/src/check/registry.rs` — Rust 組み込み型・組み込みメソッドの登録表
+- `crates/typelisp-front/src/check/checker.rs` — 特殊形の一覧（`check` の文字列 match）
+- `crates/typelisp-front/src/prelude.rs` — typelisp で書かれた標準ライブラリ（`defun`/`defmethod`/`defmacro`/`impl`）
+- `crates/typelisp-front/src/eval/interp.rs` — 組み込みメソッドの実体
 
 ## 0. 記号の意味
 
@@ -546,8 +546,9 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 この地図は放っておくと実装より古くなる。実際、2026-08-18 の見直しでは、作成時に挙げた §3 の
 8項目のうち5項目がすでに解消済みで、そのうち3項目（1・5・6）は解消から今回まで表に反映されて
 いなかった——`defun` の `&optional`/`&key` に至っては、この表を書いた**その日の夜**に入っている。
-**表を根拠に「無い」と判断する前に、必ず `src/check/registry.rs` / `src/prelude.rs` /
-`src/check/checker.rs` を grep して確かめること。**
+**表を根拠に「無い」と判断する前に、必ず `crates/typelisp-front/src/check/registry.rs` /
+`crates/typelisp-front/src/prelude.rs` / `crates/typelisp-front/src/check/checker.rs` を
+grep して確かめること。**
 
 ⛔ の項目については、[language-design.md](language-design.md) §7・§8・§9（採用しないと決めた
 機能）が一次情報。CL に同名の機能があることを理由にこれらを再検討する場合は、

@@ -265,7 +265,7 @@ fn alternation_words(regex: &str) -> Vec<String> {
 /// Panics when the sentinels are missing, so a refactor that moves the dispatch
 /// makes this test fail loudly rather than silently checking nothing.
 fn special_forms_from_checker() -> BTreeSet<String> {
-    let path = repo_root().join("src/check/checker.rs");
+    let path = repo_root().join("crates/typelisp-front/src/check/checker.rs");
     let src = std::fs::read_to_string(&path).expect("checker is readable");
     let begin = src
         .find("// SPECIAL-FORM DISPATCH BEGIN")

@@ -2046,7 +2046,7 @@ impl Interp {
     /// The environment is a heap chain (`extend_env`), the same one a `lambda`'s
     /// captured environment is, so a nested closure in the body captures the
     /// parameters by the ordinary mechanism rather than a second one.
-    pub(crate) fn apply(&self, heap: &mut Heap, def: &FnDef, args: Vec<Value>) -> Result<Value, EvalError> {
+    pub fn apply(&self, heap: &mut Heap, def: &FnDef, args: Vec<Value>) -> Result<Value, EvalError> {
         if def.params.len() != args.len() {
             return Err(EvalError::Internal(format!(
                 "apply: the body takes {} argument(s), given {}",

@@ -72,7 +72,7 @@ pub(crate) struct GlobalDef {
 
 /// One node of the runtime module tree, rooted at `Interp`'s own `root`.
 #[derive(Default)]
-pub(crate) struct ModuleScope {
+pub struct ModuleScope {
     /// `defun`/`defmacro`, by unqualified name — defined directly in this
     /// module (not a descendant).
     pub(crate) fns: HashMap<String, Rc<FnDef>>,
@@ -223,7 +223,7 @@ impl ModuleScope {
     /// a `(type_name.last_segment(), method)` lookup and a `pub`-or-`in_scope`
     /// check against `home` — the runtime twin of `Checker::assoc_visible`
     /// (checker.rs:989-991).
-    pub(crate) fn resolve_method(&self, home: &[String], type_name: &Path, method: &str) -> Option<Rc<FnDef>> {
+    pub fn resolve_method(&self, home: &[String], type_name: &Path, method: &str) -> Option<Rc<FnDef>> {
         let ns = self.find(type_name.parent())?;
         let f = ns.methods.get(&(type_name.last_segment().to_string(), method.to_string()))?;
         if !f.public && !in_scope(home, type_name.parent()) {
@@ -239,7 +239,7 @@ impl ModuleScope {
     /// already has a resolved target in hand rather than a bare name to
     /// search for: `MacroExpander::expand_macro`'s checker-driven lookup,
     /// and the JIT/SCC machinery's "is this already compiled" checks.
-    pub(crate) fn get_fn(&self, path: &Path) -> Option<Rc<FnDef>> {
+    pub fn get_fn(&self, path: &Path) -> Option<Rc<FnDef>> {
         self.find(path.parent())?.fns.get(path.last_segment()).cloned()
     }
 
@@ -253,7 +253,7 @@ impl ModuleScope {
     }
 
     /// [`Self::get_fn`]'s twin for a `(type, method)` pair.
-    pub(crate) fn get_method(&self, type_name: &Path, method: &str) -> Option<Rc<FnDef>> {
+    pub fn get_method(&self, type_name: &Path, method: &str) -> Option<Rc<FnDef>> {
         self.find(type_name.parent())?.methods.get(&(type_name.last_segment().to_string(), method.to_string())).cloned()
     }
 
@@ -261,18 +261,29 @@ impl ModuleScope {
     /// direct replacement for the old `Interp::compiled: HashMap<Path, _>`'s
     /// `contains_key` check (see [`super::interp::FnDef::compiled`]'s doc
     /// comment for why this now lives on the node itself).
-    pub(crate) fn fn_compiled(&self, path: &Path) -> bool {
+    pub fn fn_compiled(&self, path: &Path) -> bool {
         self.get_fn(path).is_some_and(|f| f.compiled.borrow().is_some())
     }
 
     /// [`Self::fn_compiled`]'s twin for a `(type, method)` pair.
-    pub(crate) fn method_compiled(&self, type_name: &Path, method: &str) -> bool {
+    pub fn method_compiled(&self, type_name: &Path, method: &str) -> bool {
         self.get_method(type_name, method).is_some_and(|f| f.compiled.borrow().is_some())
+    }
+
+    /// Register `def` under `name` in this module, replacing whatever was
+    /// there. The raw door: the interpreter's own `defun`/`defmethod`
+    /// execution goes through `Interp::register_fn`, which builds the `FnDef`
+    /// out of a checked core form. This is for a caller that already holds
+    /// one — the backend's SCC tests build two mutually recursive `FnDef`s
+    /// directly, because the checker's forward-reference rules will not let
+    /// that call graph be written as source.
+    pub fn define_fn(&mut self, name: String, def: Rc<FnDef>) {
+        self.fns.insert(name, def);
     }
 
     /// Whether a `(type, method)` pair is registered at all — the direct
     /// replacement for the old `Interp::methods.contains_key` check.
-    pub(crate) fn has_method(&self, type_name: &Path, method: &str) -> bool {
+    pub fn has_method(&self, type_name: &Path, method: &str) -> bool {
         self.get_method(type_name, method).is_some()
     }
 
@@ -301,7 +312,7 @@ impl ModuleScope {
     /// boundary" treatment `compiled_globals` already gets when cloned into
     /// `core_bridge::Ctx::globals`. Called once per JIT/AOT compile, not on
     /// any interpreted hot path.
-    pub(crate) fn collect_struct_and_enum_types(
+    pub fn collect_struct_and_enum_types(
         &self,
     ) -> (HashMap<Path, Vec<crate::check::repr::Repr>>, HashMap<Path, EnumDef>) {
         let mut structs = HashMap::new();

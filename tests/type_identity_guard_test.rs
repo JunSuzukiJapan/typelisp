@@ -41,12 +41,22 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Every `.rs` file under `src/`, recursively.
+/// Every `.rs` file the invariant can be broken in, recursively: the backend
+/// (`src/`) and the front end (`crates/typelisp-front/src/`).
+///
+/// Those two and no more, because a type key is derived from a `Path` and
+/// those are the only crates that have one. The runtime crates below them
+/// (`typelisp-rt`, `typelisp-print`, `typelisp-read`) spell a handful of keys
+/// as string constants precisely *because* they cannot derive them — that end
+/// of the agreement is checked by
+/// [`the_runtimes_type_keys_are_the_ones_type_key_of_produces`], which
+/// compares the constants themselves rather than scanning for them.
 fn src_files() -> Vec<PathBuf> {
     let mut out = Vec::new();
     collect(&repo_root().join("src"), &mut out);
+    collect(&repo_root().join("crates/typelisp-front/src"), &mut out);
     out.sort();
-    assert!(out.len() > 10, "src/ scan found only {} files — is the walk broken?", out.len());
+    assert!(out.len() > 10, "the scan found only {} files — is the walk broken?", out.len());
     out
 }
 
@@ -131,7 +141,7 @@ fn report(hits: &[Hit], rule: &str, fix: &str) {
 fn a_builtin_type_is_never_recognized_by_its_last_segment_alone() {
     let hits = scan(
         // `path_is_builtin`'s own body is the one place the comparison lives.
-        &|rel| rel == "src/types.rs",
+        &|rel| rel == "crates/typelisp-front/src/types.rs",
         &|line| {
             line.contains("last_segment()")
                 && (line.contains("last_segment() == \"")
@@ -144,7 +154,7 @@ fn a_builtin_type_is_never_recognized_by_its_last_segment_alone() {
         "`m::vector` and the built-in `vector` share a last segment but are different types \
          (fixed in 7aebfd2). Use `types::path_is_builtin(p, \"vector\")` or \
          `types::path_is_builtin_any(p, &NATIVE_LOWERED_PRIMITIVES)` — and put the name list \
-         in `src/types.rs` next to the others rather than spelling it inline.",
+         in `crates/typelisp-front/src/types.rs` next to the others rather than spelling it inline.",
     );
 }
 
@@ -153,7 +163,7 @@ fn a_builtin_type_is_never_recognized_by_its_last_segment_alone() {
 #[test]
 fn a_heap_values_type_identity_is_only_touched_through_type_key() {
     let hits = scan(
-        &|rel| rel == "src/type_key.rs",
+        &|rel| rel == "crates/typelisp-front/src/type_key.rs",
         &|line| {
             ["alloc_struct(", "alloc_enum(", "struct_type_name(", "enum_type_name("]
                 .iter()
@@ -162,7 +172,7 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
     );
     report(
         &hits,
-        "A heap value's type identity must go through `src/type_key.rs`.",
+        "A heap value's type identity must go through `crates/typelisp-front/src/type_key.rs`.",
         "The stored string is the value's identity, and compiled code, the interpreter, the \
          printer and `equalp` all have to agree on how it is spelled — they did not, twice \
          (2dd5171). Write it with `type_key::type_key_of`, compare it with \
@@ -173,7 +183,7 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
 /// Rule 3: the type keys `typelisp-rt` spells for itself must be the ones
 /// `type_key_of` produces.
 ///
-/// The `src/` scan cannot reach them — `crates/typelisp-rt` is a separate
+/// The source scan cannot reach them — `crates/typelisp-rt` is a separate
 /// crate with no `Path` type to derive a key from, which is why
 /// `rt_data_new` has always received its key as a string from compiled code
 /// instead. `stream_builtin` is the one place that cannot: it builds
@@ -223,9 +233,12 @@ fn the_scan_covers_the_files_the_invariant_lives_in() {
     // `src/compile/core_bridge.rs` stands where `ast_bridge.rs` did: it is the
     // successor of the file one of the two original bugs was in, and the one that
     // spells a runtime type name on the compiled side today.
-    for expected in
-        ["src/types.rs", "src/type_key.rs", "src/eval/interp.rs", "src/compile/core_bridge.rs"]
-    {
+    for expected in [
+        "crates/typelisp-front/src/types.rs",
+        "crates/typelisp-front/src/type_key.rs",
+        "crates/typelisp-front/src/eval/interp.rs",
+        "src/compile/core_bridge.rs",
+    ] {
         assert!(files.contains(&expected.to_string()), "scan missed {}", expected);
     }
 }

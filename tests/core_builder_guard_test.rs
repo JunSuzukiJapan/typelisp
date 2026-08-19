@@ -48,18 +48,22 @@ struct Hit {
 /// Every `.rs` file that builds or restores core IR: the checker that emits
 /// it, and the evaluator and bridge that consume and rebuild it.
 ///
-/// `src/check/core.rs` is excluded — it is the one place whose whole job is to
-/// cons correctly. So is `src/read/`: the reader is where cells come from, and
-/// its subject is syntax rather than core forms.
+/// `check/core.rs` is excluded — it is the one place whose whole job is to
+/// cons correctly. So is the `typelisp-read` crate: the reader is where cells
+/// come from, and its subject is syntax rather than core forms.
 ///
-/// The scan started at `src/check/` alone, which was narrower than the hazard.
+/// The scan started at `check/` alone, which was narrower than the hazard.
 /// `Heap::cons` does not care which module calls it, and the two biggest
 /// consumers of the IR — `compile::core_bridge` and `eval::interp::core_eval`
 /// — were building the same nodes by hand, outside it.
+///
+/// The roots are spelled out rather than derived, and a missing one panics:
+/// when the checker and the interpreter moved into `typelisp-front`, that
+/// panic is what said so.
 fn scanned_files() -> Vec<PathBuf> {
-    let root = repo_root().join("src");
+    let front = repo_root().join("crates/typelisp-front/src");
     let mut out = Vec::new();
-    let mut stack = vec![root.join("check"), root.join("compile"), root.join("eval")];
+    let mut stack = vec![front.join("check"), repo_root().join("src/compile"), front.join("eval")];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{} is readable: {}", dir.display(), e)) {
             let p = entry.expect("readable dir entry").path();

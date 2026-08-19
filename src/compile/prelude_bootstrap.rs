@@ -47,6 +47,79 @@ use crate::{EvalError, Heap, Interp, Path, Value};
 /// so neither artifact can be checked against the other's hash.
 pub const PRELUDE_SOURCE_HASH_GLOBAL: &str = "__typelisp_prelude_source_hash";
 
+/// The committed, precompiled prelude bodies, embedded so [`load`] needs no
+/// filesystem access at runtime. Kept in sync with [`crate::prelude::SOURCE`]
+/// by `scripts/regen-prelude-bitcode.sh` and the tests in
+/// `tests/prelude_artifacts_test.rs`.
+pub const PRELUDE_BITCODE: &[u8] = include_bytes!("../prelude_compiled.bc");
+
+/// [`crate::prelude::load_interpreted`] followed by installing the
+/// precompiled native bodies over the definitions it registered, so a later
+/// call to a prelude function runs compiled instead of being tree-walked.
+///
+/// This is what `typelisp::load_prelude` names, and it lives on the backend
+/// side because everything it adds to the interpreted load is backend: the
+/// bitcode, the compiled-slot promotion, the module install.
+///
+/// The source being fixed and the bitcode a committed, freshness-checked
+/// artifact, any failure here is a build/bug condition rather than a user
+/// error — hence the panics.
+pub fn load(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Interp) {
+    let plan = load_interpreted_plan(heap, chk, interp);
+    // Before the bitcode, and in this order: the compiled-slot ids baked into
+    // it were assigned by this same walk at generation time. See
+    // `promote_globals`.
+    promote_globals(heap, interp, &plan).expect("prelude: promoting globals failed");
+    // Every collected definition, not a filtered subset: the artifact carries
+    // bodies for the ones the compiler could handle, and
+    // `install_compiled_library` installs exactly those. Re-deriving the
+    // subset here would mean running the compile path's own precheck over the
+    // whole prelude at every startup, to reach an answer the module already
+    // holds.
+    crate::compile::driver::install_compiled_library(
+        interp,
+        crate::compile::CompiledLibrary {
+            label: "prelude",
+            regen_script: "scripts/regen-prelude-bitcode.sh",
+            bitcode: PRELUDE_BITCODE,
+            items: &plan.items,
+            expected_hash: Some((PRELUDE_SOURCE_HASH_GLOBAL, plan.source_hash)),
+        },
+    )
+    .expect("prelude: bitcode install failed");
+}
+
+/// [`crate::prelude::load_interpreted`], collecting along the way everything a
+/// compiled artifact has to know about the prelude.
+///
+/// Two callers need exactly this and not the install: this module's
+/// [`build_prelude_bitcode`], which is about to *produce* the artifact, and
+/// the island generator ([`crate::compile::bootstrap::build_island_bitcode`]),
+/// which needs prelude definitions in scope but must not depend on the
+/// prelude artifact — that dependency in both directions is a chicken-and-egg
+/// neither script could break.
+pub fn load_interpreted_plan(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Interp) -> PreludePlan {
+    let mut plan = PreludePlan::default();
+    // Two separate locals, not two closures over `plan`: the callbacks are
+    // live at the same time, so each has to capture something the other does
+    // not touch.
+    let mut source_hash: u64 = 0;
+    crate::prelude::load_interpreted_with(
+        heap,
+        chk,
+        interp,
+        &mut |heap, forms| {
+            source_hash = crate::compile::bootstrap::hash_read_forms(heap, forms)
+                .expect("prelude: hashing the read forms failed");
+        },
+        &mut |heap, tl| {
+            collect_item(heap, tl, &mut plan).expect("prelude: collect failed");
+        },
+    );
+    plan.source_hash = source_hash;
+    plan
+}
+
 /// The gaps in what the compile path can lower, each with what it costs —
 /// `(target name, what stays interpreted because of it)`.
 ///
@@ -250,7 +323,7 @@ pub fn build_prelude_bitcode() -> Result<Vec<u8>, String> {
 
     // Interpreted, deliberately: see this module's doc comment on why there is
     // no snapshot chain.
-    let plan = crate::prelude::load_interpreted(&mut heap, &mut chk, &mut interp);
+    let plan = load_interpreted_plan(&mut heap, &mut chk, &mut interp);
     promote_globals(&mut heap, &interp, &plan)?;
     // The island is what actually translates the bodies below, so it has to be
     // native before the first `add_compiled_function` call.

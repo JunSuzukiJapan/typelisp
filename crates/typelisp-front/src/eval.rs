@@ -7,9 +7,9 @@
 //! and the binding handle.
 
 mod value;
-pub(crate) mod crossing;
-pub(crate) mod interp;
-pub(crate) mod scope;
+pub mod crossing;
+pub mod interp;
+pub mod scope;
 
 /// The CL printer moved to its own crate ([`typelisp_print`]) so a compiled
 /// function that calls `format`/`print`/`println`/`pprint` can reach it

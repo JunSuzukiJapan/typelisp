@@ -73,14 +73,14 @@ if [ "${#targets[@]}" -eq 0 ]; then
     done
 fi
 
-# The AOT tests (`compile_file_test`) link `target/<profile>/libtypelisp_rt.a`
+# The AOT tests (`compile_file_test`) link `target/<profile>/libtypelisp_front.a`
 # into every executable they build (`compile::aot::staticlib_path`), and
-# `cargo test` does *not* produce it: it builds `typelisp-rt`'s rlib, which is
+# `cargo test` does *not* produce it: it builds `typelisp-front`'s rlib, which is
 # a different target from its staticlib. Without this the AOT tests silently
 # link whatever `.a` was last left on disk, so a newly added `rt_*` shim fails
 # with an undefined symbol while every JIT test passes.
-echo "=== cargo build -p typelisp-rt (staticlib for the AOT tests) ==="
-cargo build -p typelisp-rt || { echo "FAILED: building typelisp-rt's staticlib"; exit 1; }
+echo "=== cargo build -p typelisp-front (staticlib for the AOT tests) ==="
+cargo build -p typelisp-front || { echo "FAILED: building typelisp-front's staticlib"; exit 1; }
 
 failed=()
 for t in "${targets[@]}"; do

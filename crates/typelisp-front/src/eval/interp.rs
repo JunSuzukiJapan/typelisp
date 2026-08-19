@@ -34,7 +34,7 @@ use crate::check::repr::Repr;
 use crate::{BoxId, Heap, MacroExpander, MacroLambda, Path, Ref, SymId, Value};
 
 use super::scope;
-pub(crate) use super::value::EvalError;
+pub use super::value::EvalError;
 use super::value::Slot;
 
 /// The evaluator over core forms — the cons-cell program representation that
@@ -49,7 +49,7 @@ mod core_eval;
 /// rather than in a flat program-wide table; see that module's doc comment.
 pub struct FnDef {
     /// Parameter names, including the receiver name first for instance methods.
-    pub(crate) params: Vec<String>,
+    pub params: Vec<String>,
     /// The body's core forms, in order.
     ///
     /// These are heap cells, which the old `Vec<Typed>` was not — so the
@@ -58,18 +58,18 @@ pub struct FnDef {
     /// covering the body, the parameter list and every representation
     /// reachable from it); see `Heap::push_permanent_root`, which is
     /// LIFO-independent for exactly this.
-    pub(crate) body: Vec<Value>,
+    pub body: Vec<Value>,
     /// Only ever set for a `defmacro` with a trailing `&rest` parameter (see
     /// [`Interp::expand_macro`]); always `false` for `defun`/`defmethod`,
     /// which `apply` calls 1:1 regardless.
-    pub(crate) rest: bool,
+    pub rest: bool,
     /// The `&optional`/`&key` structure of a `defmacro`'s lambda list —
     /// `Some` only for a macro (its default-value bodies and keyword names,
     /// consumed by [`Interp::bind_macro_args`]), `None` for `defun`/
     /// `defmethod`, which bind their arguments 1:1 with no defaults. `params`
     /// still lists every binding name in order; this only adds how the
     /// non-required regions are filled.
-    pub(crate) lambda: Option<MacroLambda>,
+    pub lambda: Option<MacroLambda>,
     /// `(parameter representations, return representation)`, parallel to
     /// `params` — `None` for a `defmacro` (every parameter and the implicit
     /// return are always `Sexpr`, see `check::registry::MacroDef`'s doc
@@ -82,7 +82,7 @@ pub struct FnDef {
     /// shape rather than the runtime value's — see
     /// `docs/dev/` and the crossing rule: whether a word is raw or tagged is
     /// in the declaration only.
-    pub(crate) sig: Option<(Vec<Repr>, Repr)>,
+    pub sig: Option<(Vec<Repr>, Repr)>,
     /// Whether this definition is `pub` — the runtime twin of
     /// `FnSig`/`VarInfo`/`AssocFn.sig`'s own `public` bit
     /// (`check::registry`), baked onto the `TopLevel` node by the checker
@@ -90,7 +90,7 @@ pub struct FnDef {
     /// path resolution can enforce `Checker::resolve_fn_path`'s
     /// `public || in_scope` gate without needing the checker's `Registry` at
     /// runtime.
-    pub(crate) public: bool,
+    pub public: bool,
     /// This definition's JIT/AOT-compiled form, if `(compile name)` (or an
     /// AOT pass) has ever produced one — the direct replacement for the old
     /// standalone `Interp::compiled`/`compiled_methods` side tables (`Path`-
@@ -113,7 +113,7 @@ pub struct FnDef {
     /// `apply`'s already-live borrow. Scoping the `RefCell` down to just this
     /// field keeps that borrow-and-mutate pair independent, exactly like the
     /// old design's two separate top-level fields (`fns`/`compiled`) did.
-    pub(crate) compiled: RefCell<Option<Rc<dyn CompiledBody>>>,
+    pub compiled: RefCell<Option<Rc<dyn CompiledBody>>>,
 }
 
 /// What the interpreter needs from a compiled function body: where it is.
@@ -162,7 +162,7 @@ pub trait CompiledBody {
 /// question moot — every enum value is a heap box — and the parameters went
 /// unread with it.
 #[derive(Clone)]
-pub(crate) struct EnumDef {
+pub struct EnumDef {
     /// Each variant's name and its fields' representations, in declaration
     /// order — everything the two consumers need: the printer wants the name
     /// (`eval::format`), and the compiled-global boundary wants each field's
@@ -187,7 +187,7 @@ pub struct Interp {
     /// a `&mut self` the deep `&self` eval chain cannot produce. Every read
     /// (`resolve_fn`/`get_fn`/`find_type`/...) borrows shared; the handful of
     /// registration sites in [`Self::exec`] borrow mutably.
-    pub(crate) root: RefCell<scope::ModuleScope>,
+    pub root: RefCell<scope::ModuleScope>,
     /// A shared handle to the live `Checker`, set by [`Self::set_checker`] on
     /// the drivers that support runtime `eval` (the CLI's `run_file`/`repl`/
     /// `compile_module` and the LSP). `None` in throwaway/AOT/bootstrap/test
@@ -208,7 +208,7 @@ pub struct Interp {
     /// referenced from compiled code has no entry here and keeps using its
     /// ordinary [`Slot`] in [`Self::globals`] untouched — see that
     /// method's doc comment for why only a promoted global's storage moves.
-    pub(crate) compiled_globals: RefCell<HashMap<Path, usize>>,
+    pub compiled_globals: RefCell<HashMap<Path, usize>>,
     /// The values currently being rendered by their own `print-object`
     /// method, innermost last — [`Self::print_object`]'s re-entry guard.
     pub(crate) printing: RefCell<Vec<Value>>,
@@ -229,7 +229,7 @@ pub struct Interp {
     /// interns to one id however many times it is boxed. The key's first
     /// half is `mangle_type`'s rendering (the `dyn-new` node's own concrete
     /// key), since `Type` has no `Hash`.
-    pub(crate) vtable_ids: RefCell<HashMap<(String, Path), u32>>,
+    pub vtable_ids: RefCell<HashMap<(String, Path), u32>>,
     /// `(vtable id, trait id)` -> the vtable id the *same concrete type* uses
     /// for that trait: the supertrait upcast table `dyn-upcast` reads.
     ///
@@ -244,7 +244,7 @@ pub struct Interp {
     /// can name its target trait with a baked-in constant the way a boxing
     /// site names its vtable ([`Self::vtable_id_for`]). Interpreted upcasts
     /// go through the same ids, so both tiers agree by construction.
-    pub(crate) trait_ids: RefCell<HashMap<Path, u32>>,
+    pub trait_ids: RefCell<HashMap<Path, u32>>,
     /// Traits some *compiled* body dispatches on (an `dyn-call` in a
     /// function that has been through `translate_and_compile`).
     ///
@@ -257,7 +257,7 @@ pub struct Interp {
     /// be compiled before the box escapes. Empty for any program that never
     /// compiles a dynamic dispatch — which is why boxing does not simply
     /// compile its slots unconditionally.
-    pub(crate) dyn_dispatch_compiled: RefCell<HashSet<Path>>,
+    pub dyn_dispatch_compiled: RefCell<HashSet<Path>>,
 }
 
 /// One outgoing edge of the top-level compile call graph
@@ -267,7 +267,7 @@ pub struct Interp {
 /// Carries the full typed key (not just its string name) so
 /// [`Interp::compile_scc`] can reuse it directly to declare/wire the target
 /// without re-deriving it from the name.
-pub(crate) enum CallEdge {
+pub enum CallEdge {
     Fn(Path),
     Method(Path, String),
 }
@@ -279,7 +279,7 @@ pub(crate) enum CallEdge {
 /// stable while that gap does, and is the same for every definition that
 /// reaches it; anything else is a one-off and gets no such treatment.
 #[derive(Debug)]
-pub(crate) enum Uncompilable {
+pub enum Uncompilable {
     /// A call target with no compilable body — a Rust builtin free function or
     /// builtin method the compile path has no lowering for. Carries that
     /// target's name, not the caller's.
@@ -295,7 +295,7 @@ impl CallEdge {
     /// [`Interp::method_key`]'s doc comment for why) for a `defmethod`,
     /// exactly the string shape [`Interp::compiled_fn_body`]/
     /// [`Interp::method_key`] already resolve back.
-    pub(crate) fn node_name(&self) -> String {
+    pub fn node_name(&self) -> String {
         match self {
             CallEdge::Fn(p) => p.to_string(),
             CallEdge::Method(p, m) => method_link_name(p, m),
@@ -307,7 +307,7 @@ impl CallEdge {
 /// `Path[m, inc]`, `"inc"` -> `Path::root("inc")`. Only ever applied to a name
 /// [`Interp::method_key`] has already ruled out as a `type::method`, so a
 /// `"::"` here is unambiguously a module separator.
-pub(crate) fn fn_path_from_node_name(name: &str) -> Path {
+pub fn fn_path_from_node_name(name: &str) -> Path {
     if name.contains("::") {
         Path::from_segments(name.split("::").map(|s| s.to_string()).collect())
     } else {
@@ -438,7 +438,7 @@ impl Interp {
     /// for its closure". That is not an error: a trait object's concrete type
     /// can be a user `defstruct` whose methods nobody ever compiled, while the
     /// code dispatching on it (a prelude stream method, say) is native.
-    pub(crate) fn publish_vtables(&self) {
+    pub fn publish_vtables(&self) {
         for id in 0..self.vtables.borrow().len() {
             self.publish_vtable(id as u32);
         }
@@ -474,7 +474,7 @@ impl Interp {
     /// Keyed by `type_key::type_key_of`, not by the `Path`'s `Display`: the
     /// key is what the box actually stores, and the two are only the same for
     /// a root-module type (see `src/type_key.rs`'s module doc comment).
-    pub(crate) fn enum_variant_descriptors(&self) -> Vec<(String, usize, String)> {
+    pub fn enum_variant_descriptors(&self) -> Vec<(String, usize, String)> {
         let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
         let mut out = Vec::new();
         for (path, def) in &enums {
@@ -490,7 +490,7 @@ impl Interp {
         out
     }
 
-    pub(crate) fn vtable_descriptors(&self) -> Vec<(u32, Vec<(Path, String)>)> {
+    pub fn vtable_descriptors(&self) -> Vec<(u32, Vec<(Path, String)>)> {
         self.vtables.borrow().iter().cloned().enumerate().map(|(i, s)| (i as u32, s)).collect()
     }
 
@@ -528,7 +528,7 @@ impl Interp {
     /// [`Self::dyn_upcasts`]'s key, and the constant a compiled
     /// `dyn-upcast` bakes in. Ids are dense and per-`Interp`, like
     /// vtable ids; nothing outside this pair of tables reads them.
-    pub(crate) fn trait_id_for(&self, trait_path: &Path) -> u32 {
+    pub fn trait_id_for(&self, trait_path: &Path) -> u32 {
         if let Some(&id) = self.trait_ids.borrow().get(trait_path) {
             return id;
         }
@@ -548,7 +548,7 @@ impl Interp {
     /// in, and a chain of upcasts can arrive at any of these tables before
     /// asking for the next. Admissibility is the checker's business — an
     /// entry nothing is allowed to ask for is simply never read.
-    pub(crate) fn register_dyn_box(
+    pub fn register_dyn_box(
         &self,
         concrete_key: &str,
         trait_path: &Path,
@@ -577,7 +577,7 @@ impl Interp {
     /// generator that has to emit the table itself instead of filling it in
     /// from a running interpreter (`compile::aot::build_main_wrapper`).
     /// Sorted so a rebuild of the same program emits the same startup code.
-    pub(crate) fn upcast_descriptors(&self) -> Vec<(u32, u32, u32)> {
+    pub fn upcast_descriptors(&self) -> Vec<(u32, u32, u32)> {
         let mut out: Vec<(u32, u32, u32)> =
             self.dyn_upcasts.borrow().iter().map(|(&(from, t), &to)| (from, t, to)).collect();
         out.sort_unstable();
@@ -619,7 +619,7 @@ impl Interp {
     /// answer — is still a direct tree descent, not a flat-table trust
     /// fallback: only the *search strategy* differs from the ordinary case,
     /// not the mechanism.
-    pub(crate) fn resolve_fn_ref(&self, r: &Ref) -> Option<Rc<FnDef>> {
+    pub fn resolve_fn_ref(&self, r: &Ref) -> Option<Rc<FnDef>> {
         self.root.borrow().resolve_fn(&r.home, &r.written).or_else(|| self.root.borrow().get_fn(&r.resolved))
     }
 
@@ -639,7 +639,7 @@ impl Interp {
     /// never touched by compiled code) hits the same wall an analogous top-level
     /// `call` already would for a general-ADT parameter — a clear
     /// internal error here, not a silent misread of unrelated bits.
-    pub(crate) fn call_compiled(
+    pub fn call_compiled(
         &self,
         heap: &mut Heap,
         compiled: &dyn CompiledBody,
@@ -1113,7 +1113,7 @@ impl Interp {
     /// [`Self::resolve_fn_def`] (the lookup) and [`Self::compile_function`]
     /// (which `(compile name)` for a method) — both need the exact same
     /// `(Path, String)` key.
-    pub(crate) fn method_key(&self, name: &str) -> Option<(Path, String)> {
+    pub fn method_key(&self, name: &str) -> Option<(Path, String)> {
         let (type_part, method) = name.rsplit_once("::")?;
         let type_path = Path::from_segments(type_part.split("::").map(|s| s.to_string()).collect());
         self.root.borrow().get_method(&type_path, method)?;
@@ -1177,7 +1177,7 @@ impl Interp {
     /// [`Self::compile_function`]/[`Self::call_graph_edges`] (which need the
     /// body slightly earlier — to collect `call` targets — before
     /// `add_compiled_function` ever runs).
-    pub(crate) fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Repr)>, Vec<Value>), EvalError> {
+    pub fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Repr)>, Vec<Value>), EvalError> {
         let f = self.resolve_fn_def(name)?;
         let sig = f
             .sig
@@ -1248,7 +1248,7 @@ impl Interp {
         self.root.borrow().get_global(path).map(|slot| slot.get(heap))
     }
 
-    pub(crate) fn promote_global(&self, heap: &mut Heap, path: &Path) -> Result<usize, EvalError> {
+    pub fn promote_global(&self, heap: &mut Heap, path: &Path) -> Result<usize, EvalError> {
         if let Some(&id) = self.compiled_globals.borrow().get(path) {
             return Ok(id);
         }
@@ -1915,7 +1915,7 @@ impl Interp {
 }
 
 /// Intern a name set into the `SymId`s the core bridge compares by.
-pub(crate) fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<SymId> {
+pub fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<SymId> {
     names
         .iter()
         .map(|n| match heap.intern_symbol(n) {
@@ -1926,7 +1926,7 @@ pub(crate) fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<
 }
 
 /// The same for a parameter list, keeping each name's representation.
-pub(crate) fn intern_params(heap: &mut Heap, params: &[(String, Repr)]) -> Vec<(SymId, Repr)> {
+pub fn intern_params(heap: &mut Heap, params: &[(String, Repr)]) -> Vec<(SymId, Repr)> {
     params
         .iter()
         .map(|(n, r)| {
@@ -2307,7 +2307,7 @@ fn ratio_rt(heap: &mut Heap, r: BigRational) -> Value {
 /// evaluated literals with equal content get distinct `StrId`s — which is
 /// what keeps `eq` a genuine identity test rather than collapsing to content
 /// comparison. See [`string_identity_eq`].
-pub(crate) fn str_rt(heap: &mut Heap, s: impl Into<String>) -> Value {
+pub fn str_rt(heap: &mut Heap, s: impl Into<String>) -> Value {
     heap.alloc_string(s.into())
 }
 
@@ -3019,7 +3019,7 @@ fn eval_llvm_builtin_method(
 /// re-deriving the same format independently. Also relied on by
 /// `compiler.rs`'s `compile-assoc` (looking the same name back up via
 /// `get-function` — see that function's doc comment).
-pub(crate) fn method_link_name(type_name: &Path, method: &str) -> String {
+pub fn method_link_name(type_name: &Path, method: &str) -> String {
     format!("{}::{}", type_name, method)
 }
 
@@ -3201,7 +3201,7 @@ fn hashtable_entries(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError
 /// the panic in whichever `Heap` struct accessor the caller goes on to call,
 /// the same internal-invariant-trap convention `Heap::struct_field` etc.
 /// already use).
-pub(crate) fn expect_struct_box(v: &Value) -> Result<BoxId, EvalError> {
+pub fn expect_struct_box(v: &Value) -> Result<BoxId, EvalError> {
     match v {
         Value::Boxed(id) => Ok(*id),
         other => Err(EvalError::Internal(format!("expected a boxed struct, got {:?}", other))),
@@ -3396,18 +3396,18 @@ unsafe extern "C-unwind" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
 // whose `V` can be anything — no typed decode is needed on the way out and
 // a non-`Sexpr` element on the way in is an internal-invariant trap.
 
-pub(crate) fn scope_clone_frames_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+pub fn scope_clone_frames_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     Ok(heap.scope_clone_frames(id))
 }
 
-pub(crate) fn scope_push_frame_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+pub fn scope_push_frame_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     heap.scope_push_frame(id);
     Ok(Value::Empty)
 }
 
-pub(crate) fn scope_pop_frame_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+pub fn scope_pop_frame_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     heap.scope_pop_frame(id);
     Ok(Value::Empty)
@@ -3433,7 +3433,7 @@ pub(crate) fn scope_set_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, E
 /// `set` for a value that is already in its stored form — the `rt_llvm_call`
 /// path, where the element arrives as the very word compiled code holds and
 /// there is no value to encode.
-pub(crate) fn scope_set_raw(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+pub fn scope_set_raw(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     scope_store(heap, args, args[2])
 }
 
@@ -3472,7 +3472,7 @@ fn checked_index(i: i64, len: usize) -> Option<usize> {
 /// only read it; the ones that go on to build a new string end the borrow
 /// with an explicit `.to_string()` first, so the copy is visible at the site
 /// that needs it rather than paid by every caller.
-pub(crate) fn expect_str<'h>(heap: &'h Heap, v: &Value) -> Result<&'h str, EvalError> {
+pub fn expect_str<'h>(heap: &'h Heap, v: &Value) -> Result<&'h str, EvalError> {
     match v {
         Value::Str(id) => Ok(heap.string(*id)),
         other => Err(EvalError::Internal(format!("expected a Str, got {:?}", other))),

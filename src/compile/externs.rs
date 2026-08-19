@@ -636,7 +636,7 @@ mod scc_tests {
             // permanent root `Interp::exec` takes for a checked definition.
             heap.push_permanent_root(call);
             heap.pop_root();
-            interp.root.borrow_mut().fns.insert(
+            interp.root.borrow_mut().define_fn(
                 name.to_string(),
                 Rc::new(FnDef {
                     params: vec![],

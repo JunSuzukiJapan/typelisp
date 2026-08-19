@@ -444,6 +444,7 @@ dependencies = [
  "serde",
  "serde_json",
  "typelisp-abi",
+ "typelisp-front",
  "typelisp-mem",
  "typelisp-print",
  "typelisp-read",
@@ -455,6 +456,21 @@ name = "typelisp-abi"
 version = "0.0.2"
 dependencies = [
  "typelisp-mem",
+]
+
+[[package]]
+name = "typelisp-front"
+version = "0.0.2"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-rational",
+ "num-traits",
+ "typelisp-abi",
+ "typelisp-mem",
+ "typelisp-print",
+ "typelisp-read",
+ "typelisp-rt",
 ]
 
 [[package]]
