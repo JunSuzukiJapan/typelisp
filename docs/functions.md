@@ -928,9 +928,11 @@ CLHS の `eval` に準拠する: **現在の大域環境**（グローバルの�
   unwind するので、途中の `unwind-protect` の cleanup は走る——[syntax.md](syntax.md) §8）。
 - **名前空間**: `typl file.typl` 実行時、`eval` はそのスクリプトのファイル由来モジュール名前空間で
   評価される（スクリプト自身のグローバルが見える）。REPL はルート名前空間で評価する。
-- **コンパイル**: `read` は JIT/AOT コンパイルできる（2026-08-18、リーダを `typelisp-read`
-  クレートへ切り出した）。`eval` はまだできない——チェッカーとインタプリタそのものを要するため。
-  残作業の分析は [dev/TODO.md](dev/TODO.md)。
+- **コンパイル**: `read` も `eval` も JIT/AOT コンパイルできる（`read` は 2026-08-18、`eval` は
+  2026-08-19）。JIT では走っているインタプリタがそのまま環境になる。AOT では `compile-file` が
+  プログラム自身のソースを実行ファイルに埋め込み、起動時に prelude とその定義を読み直して環境を
+  組み立てる——`eval` を呼ぶプログラムだけが、そのぶんの起動時間とサイズを払う。詳細と
+  帰結（起動が重くなる／eval したフォームは解釈実行される）は [syntax.md](syntax.md) §10。
 
 ## 17. docstring / `documentation`（Common Lisp 準拠）
 

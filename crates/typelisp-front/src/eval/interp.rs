@@ -1011,7 +1011,15 @@ impl Interp {
     /// crossing: it is two stores, and a nested `Interp` (`compile-file`
     /// builds one) would otherwise leave the slot naming an `Interp` that has
     /// since returned.
-    fn install_print_hooks(&self) {
+    ///
+    /// `pub` for the one caller that is *not* at a point of use:
+    /// `crate::shim::rt_eval_init` calls it on the immortal `Interp` it has
+    /// just leaked. Building that environment runs this from inside, against
+    /// an `Interp` still on `rt_eval_init`'s stack, and moving it into the
+    /// leak leaves the slot dangling — which the rest of the process then
+    /// follows, since an AOT program has no later crossing to refresh it.
+    /// Re-registering the moved address is what closes that.
+    pub fn install_print_hooks(&self) {
         ACTIVE_INTERP.with(|cell| cell.set(self as *const Interp));
         typelisp_print::runtime::set_print_hooks(Some(INTERP_PRINT_HOOKS));
     }
@@ -1246,6 +1254,34 @@ impl Interp {
             return typelisp_rt::global_perm_idx(id).map(|i| heap.permanent_root(i));
         }
         self.root.borrow().get_global(path).map(|slot| slot.get(heap))
+    }
+
+    /// Record that `path`'s storage is the compiled-global slot `id`, without
+    /// creating one — [`Self::promote_global`]'s half for an environment that
+    /// is *joining* a running compiled program rather than preparing one.
+    ///
+    /// The AOT `eval` environment is the only caller: a standalone executable
+    /// created its globals at startup with ids `compile-file` baked into its
+    /// machine code, and the interpreter the executable builds for `eval` has
+    /// to address those same slots rather than allocate a second set nobody
+    /// else can see. `global_core`/`set_global_core` consult this map before
+    /// the module tree, so binding it is the whole of sharing the storage.
+    pub fn bind_compiled_global(&self, path: Path, id: usize) {
+        self.compiled_globals.borrow_mut().insert(path, id);
+    }
+
+    /// Whether `path` already has a compiled-global slot — "is this variable
+    /// already initialized by somebody else?", asked by the AOT `eval`
+    /// environment before it replays a `defvar` (see
+    /// [`Self::bind_compiled_global`]).
+    pub fn has_compiled_global(&self, path: &Path) -> bool {
+        self.compiled_globals.borrow().contains_key(path)
+    }
+
+    /// The compiled-global slot id [`Self::promote_global`] assigned `path`,
+    /// if it has one.
+    pub fn compiled_global_id(&self, path: &Path) -> Option<usize> {
+        self.compiled_globals.borrow().get(path).copied()
     }
 
     pub fn promote_global(&self, heap: &mut Heap, path: &Path) -> Result<usize, EvalError> {
@@ -1862,7 +1898,7 @@ impl Interp {
     /// to the entry mark before `exec`. The result-building afterward
     /// only allocates through the growable box store (`alloc_enum`/
     /// `intern_symbol`/scalar boxing), never `cons`, so it needs no rooting.
-    fn eval_form(&self, heap: &mut Heap, arg: &Value) -> Result<Value, EvalError> {
+    pub fn eval_form(&self, heap: &mut Heap, arg: &Value) -> Result<Value, EvalError> {
         let checker = match &self.checker {
             Some(c) => Rc::clone(c),
             None => return Ok(result_err(heap, EVAL_ERROR, "eval: unavailable in this context (no checker handle)".to_string())),
@@ -3303,7 +3339,7 @@ const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
 /// [`Interp::install_print_hooks`] and [`Interp::enter_compiled`]) by an
 /// `&self` method, so the `Interp` it names is on the stack below this call
 /// for the whole of `f`.
-fn with_active_interp<T>(f: impl FnOnce(&Interp) -> T) -> Option<T> {
+pub fn with_active_interp<T>(f: impl FnOnce(&Interp) -> T) -> Option<T> {
     let ptr = ACTIVE_INTERP.with(|cell| cell.get());
     if ptr.is_null() {
         return None;

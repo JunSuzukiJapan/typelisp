@@ -247,9 +247,31 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         })
         .collect();
 
+    // Each global's path with the slot id `collect_aot_item` promoted it to,
+    // for the `eval` environment's startup binding. Read back rather than
+    // assumed to be the loop index: the ids are whatever
+    // `typelisp_rt::global_new` handed out, and the executable reproducing
+    // them is a property of the `$global_init$` call order, not of this list.
+    let eval_globals: Vec<(String, usize)> = defvar_inits
+        .iter()
+        .map(|(path, _)| {
+            let id = interp
+                .compiled_global_id(path)
+                .ok_or_else(|| format!("internal error: global `{}` was collected but never promoted", path))?;
+            Ok((path.to_string(), id))
+        })
+        .collect::<Result<_, String>>()?;
+
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let result = {
         let m = module.borrow();
+        // Only when the program actually calls `eval`: naming the shim is what
+        // makes the linker pull the checker and the interpreter in, the same
+        // rule the printer's registration block follows.
+        let eval_env = module_calls_any(&m, &EVAL_SHIMS).then(|| EvalEnv {
+            source: source.as_str(),
+            globals: &eval_globals,
+        });
         build_main_wrapper(
             ctx,
             &m,
@@ -258,6 +280,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &interp.upcast_descriptors(),
             &interp.enum_variant_descriptors(),
             &print_objects,
+            eval_env.as_ref(),
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
             .and_then(|()| write_executable(&m, output_path))
@@ -306,6 +329,7 @@ fn build_main_wrapper(
     upcasts: &[(u32, u32, u32)],
     enum_variants: &[(String, usize, String)],
     print_objects: &[(String, String)],
+    eval_env: Option<&EvalEnv<'_>>,
 ) -> Result<(), String> {
     let tl_main = module
         .get_function(ENTRY_POINT_INTERNAL_NAME)
@@ -456,16 +480,63 @@ fn build_main_wrapper(
             call(&builder, "rt_print_object_method", &[key_ptr, key_len, fn_ptr])?;
         }
     }
+    // What `eval` needs to have an environment at all: the program's own
+    // source, and where its globals live. Registration only — both shims just
+    // remember their arguments — so this belongs with the other pre-heap
+    // stores. Emitted, like the printer's block above, only when the module
+    // actually calls `rt_eval`: naming the shim is what pulls the checker and
+    // the interpreter into the executable.
+    if let Some(env) = eval_env {
+        let literal = |builder: &inkwell::builder::Builder<'static>, text: &str| -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), String> {
+            let g = builder
+                .build_global_string_ptr(text, "eval_reg_str")
+                .map_err(|e| format!("failed to build an eval-registration string: {}", e))?;
+            Ok((
+                g.as_pointer_value().const_to_int(ctx.i64_type()),
+                ctx.i64_type().const_int(text.len() as u64, false),
+            ))
+        };
+        let (src_ptr, src_len) = literal(&builder, env.source)?;
+        call_shim(ctx, module, &builder, "rt_eval_source", &[src_ptr, src_len])?;
+        for (path, id) in env.globals {
+            let (name_ptr, name_len) = literal(&builder, path)?;
+            call_shim(
+                ctx,
+                module,
+                &builder,
+                "rt_eval_global",
+                &[name_ptr, name_len, ctx.i64_type().const_int(*id as u64, false)],
+            )?;
+        }
+    }
     // AOT's counterpart to the JIT path's `Interp::eval` calling
     // `runtime::set_active_heap` before every compiled call — see
     // `runtime::rt_heap_init`'s doc comment for why a standalone executable
     // has to create and register its own `Heap` here instead. Must run
-    // before `tl_main` (or anything it calls) touches the heap at all; no
-    // logical arguments, so `rt_heap_init` falls back to its default
-    // capacity.
-    builder
-        .build_call(rt_heap_init, &[null_args.into(), argc_zero.into()], "heap_init_result")
-        .map_err(|e| format!("failed to build rt_heap_init call: {}", e))?;
+    // before `tl_main` (or anything it calls) touches the heap at all.
+    //
+    // With `eval` in the program the capacity is given explicitly: the
+    // environment built two lines down reads, checks and runs the prelude and
+    // the program's own definitions into this same heap, which does not fit in
+    // `rt_heap_init`'s default. The figure is the one the prelude's own
+    // generator sizes its heap at (`prelude_bootstrap::build_prelude_bitcode`).
+    match eval_env {
+        None => {
+            builder
+                .build_call(rt_heap_init, &[null_args.into(), argc_zero.into()], "heap_init_result")
+                .map_err(|e| format!("failed to build rt_heap_init call: {}", e))?;
+        }
+        Some(_) => {
+            call_shim(ctx, module, &builder, "rt_heap_init", &[ctx.i64_type().const_int(EVAL_HEAP_CAPACITY as u64, false)])?;
+        }
+    }
+    // Between the heap and the global inits, and that position is forced:
+    // `rt_eval_init` builds an `Interp`, and `Interp::new` resets the runtime
+    // global table — after the inits it would wipe the slots the machine code
+    // addresses. See `typelisp_front::shim`'s module doc comment.
+    if eval_env.is_some() {
+        call_shim(ctx, module, &builder, "rt_eval_init", &[])?;
+    }
     for name in global_init_names {
         let f = module
             .get_function(name)
@@ -493,6 +564,59 @@ fn build_main_wrapper(
         .build_int_truncate(result, i32_type, "exit_code")
         .map_err(|e| format!("failed to truncate exit code: {}", e))?;
     builder.build_return(Some(&exit_code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
+    Ok(())
+}
+
+/// What `compile-file` hands `build_main_wrapper` for a program that calls
+/// `eval`: the source text to rebuild an environment from, and each global's
+/// path paired with the compiled-slot id the machine code addresses it by.
+pub(crate) struct EvalEnv<'a> {
+    pub source: &'a str,
+    pub globals: &'a [(String, usize)],
+}
+
+/// The cons-cell arena an `eval`-carrying executable asks `rt_heap_init` for.
+/// Its startup reads, checks and runs the whole prelude plus the program's own
+/// definitions into this heap before `main` proper begins, which the runtime's
+/// own default (`1 << 16`) does not hold.
+const EVAL_HEAP_CAPACITY: usize = 1 << 18;
+
+/// The name of the `eval` shim (`typelisp_front::shim`), which is what "this
+/// program evaluates at runtime" means at the IR level.
+const EVAL_SHIMS: [&str; 1] = ["rt_eval"];
+
+/// Emits one call to the `rt_*` shim `name` with `words` as its argument
+/// array — the startup-registration calling pattern, spelled once.
+fn call_shim(
+    ctx: &'static Context,
+    module: &Module<'static>,
+    builder: &inkwell::builder::Builder<'static>,
+    name: &str,
+    words: &[inkwell::values::IntValue<'static>],
+) -> Result<(), String> {
+    let i64_ty = ctx.i64_type();
+    let f = module
+        .get_function(name)
+        .ok_or_else(|| format!("internal error: {} not declared in module", name))?;
+    let args_ptr = if words.is_empty() {
+        ctx.ptr_type(AddressSpace::default()).const_null()
+    } else {
+        let p = builder
+            .build_alloca(i64_ty.array_type(words.len() as u32), "shim_args")
+            .map_err(|e| format!("failed to alloca {} args: {}", name, e))?;
+        for (i, w) in words.iter().enumerate() {
+            let slot = unsafe {
+                builder
+                    .build_gep(i64_ty, p, &[i64_ty.const_int(i as u64, false)], "shim_arg_ptr")
+                    .map_err(|e| format!("failed to build {} gep: {}", name, e))?
+            };
+            builder.build_store(slot, *w).map_err(|e| format!("failed to store {} arg: {}", name, e))?;
+        }
+        p
+    };
+    builder
+        .build_call(f, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u64, false).into()], "shim_result")
+        .map_err(|e| format!("failed to build {} call: {}", name, e))?;
     Ok(())
 }
 
@@ -689,7 +813,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[]).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], None).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -728,7 +852,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[]).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], None).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

@@ -880,3 +880,160 @@ fn a_break_runs_an_unwind_protect_cleanup_in_an_aot_executable() {
         42
     );
 }
+
+// ---- `eval` in a standalone executable ---------------------------------
+//
+// The last builtin that used to make a caller uncompilable. Unlike the other
+// ten shims defined outside `typelisp-rt`, `eval` needs a whole checker and
+// interpreter, which `typelisp_front::shim::rt_eval_init` builds at startup
+// out of the source text `compile-file` embeds. What these tests are really
+// about is that the environment it builds is *the running program's* — same
+// heap, same global storage, same definitions — and not a second one beside
+// it.
+
+/// The base case: an eval'd expression that mentions nothing of the program.
+#[test]
+fn an_aot_executable_evaluates_a_form_at_runtime() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_expression",
+            r#"
+            (defun main () i32
+              (match (eval (quote (+ 40 2)))
+                ((ok v) (as i32 (sexpr-int v)))
+                ((err _) -1)))
+            "#
+        ),
+        42
+    );
+}
+
+/// The eval'd form calls one of the program's own functions — so the startup
+/// replay has to have registered it, which is the whole reason the source is
+/// embedded rather than just the prelude being loaded.
+#[test]
+fn an_aot_executable_evaluates_a_call_to_its_own_function() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_own_function",
+            r#"
+            (defun double ((n i64)) i64 (* n 2))
+            (defun main () i32
+              (match (eval (quote (double 21)))
+                ((ok v) (as i32 (sexpr-int v)))
+                ((err _) -1)))
+            "#
+        ),
+        42
+    );
+}
+
+/// The eval'd form reads a global the *compiled* code wrote. Storage is
+/// shared through `Interp::bind_compiled_global`, not copied: without it the
+/// replay's own `defvar` cell would answer, and the answer would be the
+/// initializer rather than what `main` has since stored — silently.
+#[test]
+fn an_aot_executable_evaluates_a_read_of_a_global_the_program_wrote() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_global_read",
+            r#"
+            (defvar (counter i64) 1)
+            (defun main () i32
+              (progn
+                (setf counter 42)
+                (match (eval (quote counter))
+                  ((ok v) (as i32 (sexpr-int v)))
+                  ((err _) -1))))
+            "#
+        ),
+        42
+    );
+}
+
+/// And the other direction: an eval'd write lands where the compiled code
+/// reads. Same slot or the test cannot pass.
+#[test]
+fn an_aot_executable_sees_a_global_an_evaluated_form_wrote() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_global_write",
+            r#"
+            (defvar (counter i64) 1)
+            (defun main () i32
+              (progn
+                (eval (quote (setf counter 42)))
+                (as i32 counter)))
+            "#
+        ),
+        42
+    );
+}
+
+/// A `defvar` initializer must run exactly once. The program's compiled
+/// global-init sequence is what runs it; the startup replay skips any
+/// `defvar` whose global already has a compiled slot. Counted rather than
+/// asserted about directly: the initializer bumps a second global, so a
+/// second run shows up as 2.
+#[test]
+fn an_aot_executable_runs_each_defvar_initializer_once() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_single_init",
+            r#"
+            (defvar (times i64) 0)
+            (defun bump () i64 (progn (setf times (+ times 1)) 7))
+            (defvar (v i64) (bump))
+            (defun main () i32
+              (match (eval (quote times))
+                ((ok r) (as i32 (sexpr-int r)))
+                ((err _) -1)))
+            "#
+        ),
+        1
+    );
+}
+
+/// The eval'd form defines something, and a later eval uses it — the
+/// environment is durable across calls, not rebuilt per call.
+#[test]
+fn an_aot_executable_keeps_definitions_made_by_an_evaluated_form() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_definition",
+            r#"
+            (defun main () i32
+              (progn
+                (eval (quote (defun tripled ((n i64)) i64 (* n 3))))
+                (match (eval (quote (tripled 14)))
+                  ((ok v) (as i32 (sexpr-int v)))
+                  ((err _) -1))))
+            "#
+        ),
+        42
+    );
+}
+
+/// A program that never calls `eval` must not pay for it. The checker and the
+/// interpreter reach an executable only by being referenced, so the guard is
+/// the absence of any `typelisp_front` symbol — the same measurement the
+/// printer's registration block is guarded by.
+#[test]
+fn an_executable_that_never_evaluates_carries_no_interpreter() {
+    let dir = tmp_dir();
+    let src_path = dir.join("no_eval.typl");
+    let out_path = dir.join("no_eval");
+    std::fs::write(&src_path, "(defun main () i32 42)").expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect("compile_file failed");
+
+    let nm = Command::new("nm").arg(&out_path).output().expect("failed to run nm");
+    let symbols = String::from_utf8_lossy(&nm.stdout);
+    let front: Vec<&str> = symbols.lines().filter(|l| l.contains("typelisp_front")).collect();
+    assert!(
+        front.is_empty(),
+        "an executable with no `eval` in it linked {} front-end symbol(s): {:?}",
+        front.len(),
+        &front[..front.len().min(10)]
+    );
+}

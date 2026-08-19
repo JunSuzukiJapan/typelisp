@@ -7126,3 +7126,97 @@ prelude を読まないので、AOT プログラムにそれらのグローバ�
 `check_impl` で過去に直ったのと同じ形のバグ。落ちるところで root し、`pop_roots_to` を
 `push_permanent_root` の後ろへ動かした。回帰テストは `tests/loader_gc_test.rs`（修正を戻すと
 実際に落ちることを確認済み）。
+
+## `eval` をコンパイルできるようにする（2026-08-19）
+
+上の表に残っていた最後の1つ。**表は空になった**——組み込みを理由にコンパイルできない関数は
+もう無い。作業は2段で、(A) フロントエンドのクレート分離、(B) 実行ファイルの中の環境。
+
+### (A) `typelisp-front` クレート
+
+`check/` + `eval/` + `types.rs` + `type_key.rs` + `project.rs` + prelude の SOURCE、約 20,000 行が
+`crates/typelisp-front` へ移った。`typelisp` は `pub use typelisp_front::{...}` で従来の
+モジュールパスを再輸出するので、外から見た `typelisp::Heap` や `typelisp::check::core` は同じ。
+
+依存の向きを逆にするのが前提だった。移す前は `eval/interp.rs` が `llvm-*` ビルダ（約1,550行）と
+JIT ドライバを直に抱えていた。それぞれ `src/compile/llvm_builtins.rs` と `src/compile/driver.rs`
+へ出し、インタプリタは関数ポインタの `Backend` 構造体越しにだけ backend を呼ぶ。ドライバは
+`impl Interp` のメソッドから自由関数になった——分割後は他クレートの型に `impl` を書けないので。
+
+事前に「一番深い結合」と見立てた `FnDef.compiled` は、実際には浅かった。`CompiledFn` は
+`{engine, addr}` の2フィールドで、engine は機械語を生かしておくためだけ、フロント側の利用は
+全部 `.address()`。読む側の半分だけを名指しする `CompiledBody` トレイトで済んだ。逆に重かったのは
+ドライバのほうで、`Module` を作る/受け取るメソッドが `impl Interp` の中に散在していた。
+
+`crossing.rs`（`catch_compiled_panic` 等）は backend からフロントへ**下ろした**。LLVM の型を
+1つも名指しておらず `EvalError` だけで書かれている、評価器の側の境界だったので。
+
+**なぜモジュールでなくクレートか**は印字・リーダと同じ理由（リンカはアーカイブをメンバ単位で
+引く）。AOT がリンクするアーカイブは `libtypelisp_rt.a` → `libtypelisp_front.a` へ移した——
+`cc` が取るアーカイブは1つで、front は rt の上にあるから両方入るのは外側だけ。`eval` を
+呼ばないプログラムのサイズは **+784 バイト・front のシンボル 0 個**（`(defun main () i32 42)`）。
+
+`opt-level = 2` は front には要らなかった。共有ジェネリクスは**下流へ流れる**ので、引かれうるのは
+「リンク済みのものが上に乗っているクレート」だけ。print/read は rt の下だから要る、front は rt の
+上だから要らない。0 シンボルで一致し、ビルドは 4分27秒 → 26秒。前回「新しくクレートを切ったら
+同じ設定を足すこと」と書いたのは広すぎた。
+
+番人3本がパスのずれを検出した。うち `type_identity_guard_test` は規則2本が「スキャンがファイルを
+見失ったから」通っており、捕まえたのは `the_scan_covers_the_files_the_invariant_lives_in` のほう。
+守備範囲と危険の範囲を一致させ直した。
+
+### (B) 実行ファイルの中の環境
+
+`eval` は「現在の大域環境」に対して型検査する。単体の実行ファイルにはそれが無いので、
+`compile-file` は `eval` を呼ぶプログラムに限って起動列を生成する（判定は印字と同じ
+`module_calls_any`）:
+
+1. `rt_eval_source(ptr, len)` — プログラム自身のソースを埋め込んで渡す。
+2. `rt_eval_global(name, id)` — 各グローバルのコンパイル済みスロット id。
+3. `rt_heap_init(1 << 18)` — 既定の `1 << 16` では prelude が入らない。
+4. `rt_eval_init()` — prelude を解釈実行で読み、プログラムのソースを読み直して定義を登録する。
+5. コンパイル済みグローバル初期化列 → `tl_main`。
+
+**4 が 5 より前にある位置は選択でなく強制**。`Interp::new` は `typelisp_rt::reset_global_table`
+を呼ぶので、初期化列の後に `Interp` を作るとコンパイル済みコードが番号で触るスロットを消す。
+その代わり `eval` は遅延ではなく起動時に組み立てられる。
+
+グローバルの記憶域は共有する。`Interp::bind_compiled_global` で `compiled_globals` に
+`path → id` を入れておけば、`global_core`/`set_global_core` がモジュール木より先にそれを見るので
+読みも書きもコンパイル済みスロットへ行く。**`defvar` の初期化子を二度走らせない**のが設計上の
+要点で、読み直しのほうは「すでにコンパイル済みスロットを持つ `defvar`」を `exec` しない
+（typelisp の `defvar` は CL と違って毎回代入するので、素通しすると初期化子の副作用が2回走り、
+プログラムがそれまでに書いた値も消える）。
+
+eval したフォームは解釈実行される。プログラム自身の関数を呼んでも、走るのは読み直しが登録した
+解釈実行用の本体のほう。結果は同じで速度だけが違うので、コンパイル済みアドレスの登録は入れて
+いない。
+
+#### 見つけたバグ: 宙に浮いた `ACTIVE_INTERP`
+
+最初の実装は AOT で 100% CPU のまま止まらなかった。サンプルを取ると `rt_eval` →
+`with_active_interp` → `HashMap::get` で回っていた。`rt_eval_init` の中で prelude を読む過程が
+`install_print_hooks` を走らせ、**そのときスタックにあった `Interp` のアドレス**を
+thread-local に書く。その直後に `Box::leak` で移動させたので、以降そのスロットは宙に浮く。
+AOT には「次の crossing で書き直される」機会が無い（JIT の `enter_compiled` に当たるものが
+無い）ので、そのまま印字とこのシムの両方が deref する。移動先で登録し直して解消。
+
+`rt_eval` の分岐も「アクティブな `Interp` が居るか」ではなく `AOT_ENV` が非 null かで見るように
+した。前者はスロットの鮮度が保証される文脈でしか意味を持たない問いで、どちらの deployment かを
+判別する問いではない。
+
+#### もう1件: `Value::Path` だけを見ていた
+
+「この `defvar` はもう初期化済みか」の判定で `core::field(...)` の結果を `Value::Path` として
+だけ受けていた。ルート直下の名前は裸の `Value::Symbol` で入っているので、**修飾されていない
+グローバルを全部取りこぼす**。`core::path_field` が両方を吸収してくれるので、そちらを通す。
+症状は「初期化子が2回走る」ではなく「読み直しの最中に、まだ存在しないコンパイル済みスロットを
+触ってエラーになる」だった。
+
+### テスト
+
+AOT 7本（`compile_file_test`）: 式の評価、自分の関数の呼び出し、プログラムが書いたグローバルの
+読み、eval が書いたグローバルをプログラムが読む、初期化子が1回だけ走ること、eval した定義が
+次の eval から見えること、そして **`eval` を呼ばない実行ファイルに front のシンボルが 0 個**。
+JIT 3本（`eval_builtin_test`）: コンパイル済み本体からの `eval`、そこからグローバルが見えること、
+そこで作った定義が残ること。

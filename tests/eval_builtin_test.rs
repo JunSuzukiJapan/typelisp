@@ -97,3 +97,47 @@ fn a_global_shadowed_by_a_local_is_still_seen_by_its_global_value() {
     );
     assert!(out.contains("(ok 7)"), "stdout was:\n{}", out);
 }
+
+// ---- `eval` from inside compiled code ----------------------------------
+//
+// Until 2026-08-19 a `defun` that called `eval` could not be compiled at all
+// (`docs/syntax.md` §10's table, the last entry in it). It lowers to
+// `rt_eval` now — `typelisp_front::shim` — which under JIT finds the running
+// interpreter through the same thread-local the printer's hooks use, so the
+// compiled body evaluates against the *program's* environment rather than one
+// of its own.
+
+/// The compile itself is what used to be refused; `(compile ev)` returning
+/// the name is half the point, and the compiled body agreeing with the
+/// interpreted one is the other half.
+#[test]
+fn a_compiled_function_can_call_eval() {
+    let out = repl_stdout(
+        "(defun ev () i64 (match (eval (quote (+ 40 2))) ((ok v) (sexpr-int v)) ((err _) -1)))\n\
+         (ev)\n(compile ev)\n(ev)\n:quit\n",
+    );
+    assert_eq!(out.matches("42").count(), 2, "stdout was:\n{}", out);
+}
+
+/// And the environment it evaluates against is the live one: a global the
+/// interpreter defined is visible from inside the compiled body.
+#[test]
+fn a_compiled_function_evaluating_a_form_sees_the_programs_globals() {
+    let out = repl_stdout(
+        "(defvar (g i64) 7)\n\
+         (defun ev () i64 (match (eval (quote g)) ((ok v) (sexpr-int v)) ((err _) -1)))\n\
+         (compile ev)\n(ev)\n:quit\n",
+    );
+    assert!(out.contains('7'), "stdout was:\n{}", out);
+}
+
+/// A definition made by an eval'd form inside a compiled body is registered
+/// in that same environment, so the next line can call it.
+#[test]
+fn a_definition_made_by_a_compiled_functions_eval_survives_the_call() {
+    let out = repl_stdout(
+        "(defun define-it () Sexpr (match (eval (quote (defun sq ((n i64)) i64 (* n n)))) ((ok v) v) ((err _) (Nil))))\n\
+         (compile define-it)\n(define-it)\n(sq 7)\n:quit\n",
+    );
+    assert!(out.contains("49"), "stdout was:\n{}", out);
+}

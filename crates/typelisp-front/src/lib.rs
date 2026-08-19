@@ -26,6 +26,7 @@ pub mod check;
 pub mod eval;
 pub mod prelude;
 pub mod project;
+pub mod shim;
 
 pub use errors::*;
 pub use read::*;
