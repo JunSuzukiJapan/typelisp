@@ -35,7 +35,7 @@ use crate::{Error, Heap, Loc, Value};
 /// is the guard). The rebuild re-records them, which is possible precisely
 /// because the location travels *with* the cell rather than in a table keyed by
 /// an address that no longer exists.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum OwnedForm {
     /// `Value::Empty` — the empty list `()`.
     Empty,
@@ -49,7 +49,9 @@ pub enum OwnedForm {
     /// A `::`-path, by segment names (re-interned on load).
     Path(Vec<String>),
     Float(f64),
+    #[serde(with = "num_str")]
     Bignum(BigInt),
+    #[serde(with = "num_str")]
     Ratio(BigRational),
     /// A cons chain, spine flattened: one entry per cell, then whatever the
     /// last cell's `cdr` holds (`Empty` for a proper list, an atom for a dotted
@@ -74,11 +76,85 @@ pub enum OwnedForm {
 /// cell's `car`, plus the two spans the cell carries — its `car`'s own extent
 /// and the extent of the form this cell heads. `None` for a cell with none (a
 /// synthesized or macro-expanded list).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OwnedCell {
     pub form: OwnedForm,
+    #[serde(with = "loc_serde::opt")]
     pub car_loc: Option<Loc>,
+    #[serde(with = "loc_serde::opt")]
     pub self_loc: Option<Loc>,
+}
+
+/// Serialization for [`Loc`], which lives in `typelisp-mem` and must keep
+/// living there without a `serde` dependency: every AOT executable links that
+/// crate, and only the ones that call `eval` should carry a serializer.
+///
+/// `serde(remote)` is exactly this case — the shape is written down here, once,
+/// against a type this crate does not own. `Rc<str>` round-trips through
+/// `serde`'s `rc` feature; the sharing is not preserved, which costs nothing:
+/// a restored form's cells all name the same file, and re-interning one string
+/// per cell is what the reader would have done anyway.
+/// `bignum`/`ratio` as their decimal spellings.
+///
+/// Rather than turning on `num-bigint`/`num-rational`'s own `serde` features:
+/// a Cargo feature is additive across the whole graph, so enabling it here
+/// would give every crate that touches those types a serializer, including the
+/// ones every AOT executable links. The spelling is canonical either way — a
+/// `BigRational` is stored already reduced — so a round-trip through text is
+/// exact, which is the same reasoning `compile_test`'s `Readback` uses to
+/// compare numbers between two runs.
+mod num_str {
+    use std::fmt::Display;
+    use std::str::FromStr;
+
+    pub fn serialize<T: Display, S: serde::Serializer>(v: &T, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&v.to_string())
+    }
+
+    pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
+    where
+        T: FromStr,
+        T::Err: Display,
+        D: serde::Deserializer<'de>,
+    {
+        let s = <String as serde::Deserialize>::deserialize(d)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+mod loc_serde {
+    use std::rc::Rc;
+
+    use super::Loc;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[serde(remote = "Loc")]
+    struct LocDef {
+        file: Rc<str>,
+        line: u32,
+        col: u32,
+        end_line: u32,
+        end_col: u32,
+    }
+
+    pub mod opt {
+        use super::{Loc, LocDef};
+
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Wrap(#[serde(with = "LocDef")] Loc);
+
+        pub fn serialize<S: serde::Serializer>(v: &Option<Loc>, s: S) -> Result<S::Ok, S::Error> {
+            // `Wrap` is a newtype, so this costs one clone of an `Rc` and five
+            // `u32`s — not the string.
+            let w = v.clone().map(Wrap);
+            serde::Serialize::serialize(&w, s)
+        }
+
+        pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Loc>, D::Error> {
+            let w: Option<Wrap> = serde::Deserialize::deserialize(d)?;
+            Ok(w.map(|Wrap(l)| l))
+        }
+    }
 }
 
 /// Converts a heap `Value` into its owned mirror. Read-only on `heap`.

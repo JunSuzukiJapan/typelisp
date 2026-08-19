@@ -1037,3 +1037,48 @@ fn an_executable_that_never_evaluates_carries_no_interpreter() {
         &front[..front.len().min(10)]
     );
 }
+
+/// A *generic* prelude function, instantiated for the first time by an eval'd
+/// form. Nothing in the program calls `pathname-name`, so the executable
+/// carries no instantiation of it — only the retained template, restored from
+/// the snapshot (`Checker::from_state`), can answer this.
+///
+/// The sharpest test of the snapshot there is: 61 of the prelude's 86 `defun`s
+/// are generic, the live templates hold raw heap `Value`s, and getting them
+/// back means rebuilding every one through the heap's own allocation APIs.
+#[test]
+fn an_aot_executable_instantiates_a_generic_from_a_restored_template() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_generic_template",
+            r#"
+            (defun main () i32
+              (match (eval (quote (if (is-some (pathname-name "/a/b.txt")) 42 0)))
+                ((ok v) (as i32 (sexpr-int v)))
+                ((err _) -1)))
+            "#
+        ),
+        42
+    );
+}
+
+/// A prelude *macro* expanded by an eval'd form. A macro is two halves — the
+/// `MacroDef` the checker dispatches on and the body the interpreter expands
+/// with — and they are restored by two different halves of the snapshot (the
+/// registry, and re-executing the checked `defmacro` form). Either one missing
+/// and this fails.
+#[test]
+fn an_aot_executable_expands_a_prelude_macro_from_a_snapshot() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_prelude_macro",
+            r#"
+            (defun main () i32
+              (match (eval (quote (length (with-output-to-string (s) (write-string "hello" s)))))
+                ((ok v) (as i32 (sexpr-int v)))
+                ((err _) -1)))
+            "#
+        ),
+        5
+    );
+}

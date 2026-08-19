@@ -20,7 +20,7 @@ use crate::{Error, Heap, Loc, PathId, SymId, Value};
 /// never re-parsed; the only place `::` strings are split is the reader/parser
 /// (surface syntax). A single-segment path is also how type *variables* and
 /// root-level names are represented.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Path(Vec<String>);
 
 impl Path {
@@ -164,7 +164,7 @@ pub const LLVM_METHOD_RECEIVER_TYPES: [&str; 4] =
 pub const NATIVE_LOWERED_PRIMITIVES: [&str; 10] =
     ["i64", "i32", "char", "string", "f64", "bignum", "ratio", "sexpr", "bool", "symbol"];
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Type {
     I8,
     I16,

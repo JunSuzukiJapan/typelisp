@@ -27,3 +27,14 @@ num-bigint = "0.4"
 num-rational = "0.4"
 num-traits = "0.2"
 num-integer = "0.1"
+# The AOT `eval` environment's checked-state snapshot (`snapshot.rs`): what
+# `compile-file` writes into the executable so its startup does not have to
+# re-read and re-check the prelude and the program's own source.
+#
+# `bincode` and not `serde_json`: the deleted fasl format was JSON and measured
+# 2,499,193 bytes for 2,383 lines of source, of which ~17ms of a 24.6ms load was
+# the JSON parse alone. A snapshot is machine-to-machine and never read by a
+# person, so there is nothing the text form buys back. It also lets a map be
+# keyed by something other than a string, which `DefLocs`/`Docs` need.
+serde = { version = "1", features = ["derive", "rc"] }
+bincode = "1.3"

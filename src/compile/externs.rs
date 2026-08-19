@@ -322,7 +322,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 184] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 183] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -332,7 +332,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 184] {
         rt_pprint_list_exhausted, rt_pprint_newline, rt_pprint_pop, rt_pprint_tab, rt_print, rt_println,
     };
     use typelisp_print::aot::{rt_print_enum_variant, rt_print_object_method};
-    use typelisp_front::shim::{rt_eval, rt_eval_global, rt_eval_init, rt_eval_source};
+    use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state};
     use typelisp_read::shim::rt_read;
     use typelisp_rt::sys_builtin::{
         rt_exit, rt_get_internal_real_time, rt_get_universal_time, rt_parse_float, rt_parse_int,
@@ -409,15 +409,14 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 184] {
         ("rt_get_internal_real_time", rt_get_internal_real_time as usize),
         ("rt_exit", rt_exit as usize),
         ("rt_read", rt_read as usize),
-        // `eval` and the three startup calls an AOT executable makes to give
-        // it an environment (`aot::build_main_wrapper`). The three are useless
-        // under JIT — there is already an interpreter — but they are declared
-        // in every module all the same, because this table is both the
+        // `eval` and the two startup calls an AOT executable makes to give it
+        // an environment (`aot::build_main_wrapper`). The two are useless under
+        // JIT — there is already an interpreter — but they are declared in
+        // every module all the same, because this table is both the
         // forward-declaration list and the JIT address map, and the wrapper
         // looks them up by name.
         ("rt_eval", rt_eval as usize),
-        ("rt_eval_source", rt_eval_source as usize),
-        ("rt_eval_global", rt_eval_global as usize),
+        ("rt_eval_state", rt_eval_state as usize),
         ("rt_eval_init", rt_eval_init as usize),
         // The printing family (`typelisp_print::shim`). `format`/`print`/
         // `println`/`pprint` and `pprint-logical-block` are special forms, so

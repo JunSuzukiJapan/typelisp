@@ -262,16 +262,36 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         })
         .collect::<Result<_, String>>()?;
 
+    // Only when the program actually calls `eval`: naming the shim is what
+    // makes the linker pull the checker and the interpreter in, the same rule
+    // the printer's registration block follows. Asked under its own short lock
+    // so the environment below — which runs the checker and the interpreter,
+    // and touches no LLVM at all — is built without holding it.
+    let calls_eval = {
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let m = module.borrow();
+        module_calls_any(&m, &EVAL_SHIMS)
+    };
+    // The `eval` environment, built here rather than at the executable's
+    // startup: this is the same prelude load and the same check of the same
+    // source that a startup rebuild would do, and doing it once at compile time
+    // is the whole point (`typelisp_front::snapshot`).
+    //
+    // Its own throwaway `Heap`, and after `eval_globals` is read: `capture`
+    // creates an `Interp`, and `Interp::new` resets the runtime global table.
+    // Nothing below consults it — `build_main_wrapper` emits ids as constants
+    // and `write_executable` links — and `compile_file` already reset it once
+    // at the top for its own `interp`.
+    let eval_snapshot: Option<Vec<u8>> = if calls_eval {
+        let mut snap_heap = Heap::with_capacity(EVAL_HEAP_CAPACITY);
+        Some(typelisp_front::snapshot::capture(&mut snap_heap, &source, &eval_globals)?)
+    } else {
+        None
+    };
+
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let result = {
         let m = module.borrow();
-        // Only when the program actually calls `eval`: naming the shim is what
-        // makes the linker pull the checker and the interpreter in, the same
-        // rule the printer's registration block follows.
-        let eval_env = module_calls_any(&m, &EVAL_SHIMS).then(|| EvalEnv {
-            source: source.as_str(),
-            globals: &eval_globals,
-        });
         build_main_wrapper(
             ctx,
             &m,
@@ -280,7 +300,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &interp.upcast_descriptors(),
             &interp.enum_variant_descriptors(),
             &print_objects,
-            eval_env.as_ref(),
+            eval_snapshot.as_deref(),
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
             .and_then(|()| write_executable(&m, output_path))
@@ -329,7 +349,7 @@ fn build_main_wrapper(
     upcasts: &[(u32, u32, u32)],
     enum_variants: &[(String, usize, String)],
     print_objects: &[(String, String)],
-    eval_env: Option<&EvalEnv<'_>>,
+    eval_env: Option<&[u8]>,
 ) -> Result<(), String> {
     let tl_main = module
         .get_function(ENTRY_POINT_INTERNAL_NAME)
@@ -480,34 +500,23 @@ fn build_main_wrapper(
             call(&builder, "rt_print_object_method", &[key_ptr, key_len, fn_ptr])?;
         }
     }
-    // What `eval` needs to have an environment at all: the program's own
-    // source, and where its globals live. Registration only — both shims just
-    // remember their arguments — so this belongs with the other pre-heap
-    // stores. Emitted, like the printer's block above, only when the module
-    // actually calls `rt_eval`: naming the shim is what pulls the checker and
-    // the interpreter into the executable.
-    if let Some(env) = eval_env {
-        let literal = |builder: &inkwell::builder::Builder<'static>, text: &str| -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), String> {
-            let g = builder
-                .build_global_string_ptr(text, "eval_reg_str")
-                .map_err(|e| format!("failed to build an eval-registration string: {}", e))?;
-            Ok((
-                g.as_pointer_value().const_to_int(ctx.i64_type()),
-                ctx.i64_type().const_int(text.len() as u64, false),
-            ))
-        };
-        let (src_ptr, src_len) = literal(&builder, env.source)?;
-        call_shim(ctx, module, &builder, "rt_eval_source", &[src_ptr, src_len])?;
-        for (path, id) in env.globals {
-            let (name_ptr, name_len) = literal(&builder, path)?;
-            call_shim(
-                ctx,
-                module,
-                &builder,
-                "rt_eval_global",
-                &[name_ptr, name_len, ctx.i64_type().const_int(*id as u64, false)],
-            )?;
-        }
+    // The environment `eval` needs, as one immutable blob. Registration only —
+    // the shim just remembers the pointer — so this belongs with the other
+    // pre-heap stores. Emitted, like the printer's block above, only when the
+    // module actually calls `rt_eval`: naming the shim is what pulls the
+    // checker and the interpreter into the executable.
+    if let Some(bytes) = eval_env {
+        let i64_ty = ctx.i64_type();
+        let blob = module.add_global(ctx.i8_type().array_type(bytes.len() as u32), None, "typelisp_eval_snapshot");
+        blob.set_initializer(&ctx.const_string(bytes, false));
+        blob.set_constant(true);
+        call_shim(
+            ctx,
+            module,
+            &builder,
+            "rt_eval_state",
+            &[blob.as_pointer_value().const_to_int(i64_ty), i64_ty.const_int(bytes.len() as u64, false)],
+        )?;
     }
     // AOT's counterpart to the JIT path's `Interp::eval` calling
     // `runtime::set_active_heap` before every compiled call — see
@@ -568,12 +577,8 @@ fn build_main_wrapper(
 }
 
 /// What `compile-file` hands `build_main_wrapper` for a program that calls
-/// `eval`: the source text to rebuild an environment from, and each global's
-/// path paired with the compiled-slot id the machine code addresses it by.
-pub(crate) struct EvalEnv<'a> {
-    pub source: &'a str,
-    pub globals: &'a [(String, usize)],
-}
+/// `eval`: the environment, already built and serialized
+/// (`typelisp_front::snapshot`).
 
 /// The cons-cell arena an `eval`-carrying executable asks `rt_heap_init` for.
 /// Its startup reads, checks and runs the whole prelude plus the program's own
