@@ -11,11 +11,6 @@
 2026-08-20 に「ダンプ」（ビットコードと型情報を 1 ファイルに対で持つ）を入れ、起動は
 1.50s → 1.07s になった。経緯は [implementation-log.md](implementation-log.md) の該当節。
 
-**その作業で測ってわかった次の相手**: 起動 1.50s の内訳は read+check が 597ms、
-**ビットコードの install（LLVM のパース + JIT）が 781ms**。ダンプが消したのは前者だけなので、
-これ以上起動を詰めるなら install の側（遅延マテリアライズ、あるいは prelude/島を typl 本体へ
-AOT リンクする）になる。いまは着手が決まっていない。
-
 2026-08-19 に「呼ぶとコンパイルできなくなるもの」（[syntax.md](../syntax.md) §10）の最後の1つ
 `eval` を閉じ、あの表は空になった。経緯・設計判断は
 [implementation-log.md](implementation-log.md) の該当節。
