@@ -274,7 +274,7 @@
 //! `Scope`'s methods, `Option`'s `some`/`none`/pattern-matching), so
 //! loading order relative to the prelude doesn't matter.
 
-use crate::{Checker, Heap, Interp, Path, Reader};
+use crate::{Checker, Heap, Interp};
 
 pub const SOURCE: &str = r#"
 ;; EXPERIMENT: island-local `cond`. Not the prelude's — the island must not
@@ -4645,25 +4645,34 @@ pub const SOURCE: &str = r#"
 /// embedded so [`load_aot`] needs no filesystem access at runtime. Kept in
 /// sync with `SOURCE` by `scripts/regen-compiler-island.sh` and the
 /// `island_artifacts_are_fresh` test.
-pub const ISLAND_BITCODE: &[u8] = include_bytes!("compiler_island.bc");
+/// The committed island dump: the checked state the island's 121 `defun`s and
+/// one `defmacro` produce, paired with the bitcode holding their native
+/// bodies. Written by `scripts/regen-compiler-island.sh`, applied by
+/// [`load_aot`].
+pub const ISLAND_DUMP: &[u8] = include_bytes!("compiler_island.typld");
+
+/// What to run when the committed dump no longer matches [`SOURCE`].
+pub const REGEN_SCRIPT: &str = "scripts/regen-compiler-island.sh";
 
 /// Loads the compiler island as **native code** (interp-closure removal
-/// Stage 4): the same read/check/`exec` of `SOURCE` [`load`] does — which
-/// registers each island `defun`'s interpreted `FnDef` and checker state but
-/// allocates no closures (a `defun` only *builds* a closure when its body is
-/// *called* interpreted, which never happens after this) — followed by
-/// installing the committed AOT bitcode's native function bodies into
-/// [`Interp`]'s compiled-function table
-/// ([`Interp::install_island_bitcode`]).
+/// Stage 4): the committed dump's checked state and definitions — which
+/// registers each island `defun`'s `FnDef` and checker entry but allocates no
+/// closures (a `defun` only *builds* a closure when its body is *called*
+/// interpreted, which never happens after this) — followed by installing the
+/// same dump's native function bodies into [`Interp`]'s compiled-function
+/// table.
+///
+/// Reading and type-checking `SOURCE` here is what the dump replaced: 57ms of
+/// read, 307ms of check and a further 70ms of re-reading it to hash, out of a
+/// 1.50s `typl` startup (`typl-bench-prelude`).
 ///
 /// After this, calling `compile-function` (directly via `(compile ...)`, or
 /// transitively when a user closure is JIT-compiled at definition time)
 /// dispatches to the native island rather than tree-walking it — so the
 /// island's own `labels`/`lambda` bodies never become interpreted closures,
 /// which is what lets interpreted closures be removed entirely (Stage 8).
-/// `SOURCE` being fixed and the bitcode a committed, freshness-checked
-/// artifact, any failure here is a build/bug condition, not a user error —
-/// hence the panics, matching [`load`].
+/// `SOURCE` being fixed and the dump a committed, digest-checked artifact, any
+/// failure here is a build/bug condition, not a user error — hence the panics.
 pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     // The island's whole purpose is emitting IR, so this is where the backend
     // that does the emitting becomes available: every path that can reach an
@@ -4673,42 +4682,13 @@ pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     // reaching those builtins, and gets a clear invariant error rather than a
     // silently missing backend (see `eval::interp::set_llvm_builtin_hook`).
     crate::compile::install_llvm_backend();
-    let r = Reader::new();
-    let forms = r.read_all(heap, SOURCE).expect("compiler: read failed");
-    // The island is written as mutually recursive top-level `defun`s (Phase 3
-    // of docs/dev/two-pass-toplevel-plan.md), so it needs the same signature
-    // pre-pass every other loader runs — `compile-value` calls helpers
-    // declared below it.
-    chk.predeclare_program(heap, &forms);
-    let mut island_defuns: Vec<String> = Vec::new();
-    for v in forms {
-        let tl = chk.check_form(heap, &*interp, v).expect("compiler: check failed");
-        for w in chk.take_warnings() {
-            eprintln!("{}", w);
-        }
-        if crate::check::core::op(heap, tl) == Some("defun") {
-            let name = match crate::check::core::field(heap, tl, 0) {
-                Some(typelisp_mem::Value::Path(id)) => Some(crate::types::path_from_id(heap, id).last_segment().to_string()),
-                Some(typelisp_mem::Value::Symbol(id)) => Some(heap.symbol_name(id).to_string()),
-                _ => None,
-            };
-            if let Some(name) = name {
-                island_defuns.push(name);
-            }
-        }
-        interp.exec(heap, tl).expect("compiler: eval failed");
-    }
-    let items: Vec<crate::compile::symbols::CompiledItem> =
-        island_defuns.iter().map(|n| crate::compile::symbols::CompiledItem::Fn(Path::root(n))).collect();
-    crate::compile::driver::install_compiled_library(&interp, crate::compile::CompiledLibrary {
-            label: "compiler island",
-            regen_script: "scripts/regen-compiler-island.sh",
-            bitcode: ISLAND_BITCODE,
-            items: &items,
-            expected_hash: Some((
-                crate::compile::bootstrap::SOURCE_HASH_GLOBAL,
-                crate::compile::bootstrap::island_source_hash(SOURCE).expect("compiler: hashing SOURCE failed"),
-            )),
-        })
-        .expect("compiler: island bitcode install failed");
+
+    let units = crate::compile::dump::parse(ISLAND_DUMP, "compiler island")
+        .unwrap_or_else(|e| panic!("compiler: {}", e));
+    let unit = units.first().unwrap_or_else(|| panic!("compiler: the committed dump holds no units"));
+    let state = crate::compile::dump::read_types(unit, "compiler island")
+        .unwrap_or_else(|e| panic!("compiler: {}", e));
+    typelisp_front::dump::verify_digest(&state, SOURCE, REGEN_SCRIPT).unwrap_or_else(|e| panic!("{}", e));
+    crate::compile::dump::load_unit(heap, chk, interp, state, unit.bitcode, REGEN_SCRIPT)
+        .unwrap_or_else(|e| panic!("compiler: {}", e));
 }

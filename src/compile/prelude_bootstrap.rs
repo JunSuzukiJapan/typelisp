@@ -1,17 +1,18 @@
-//! The precompiled *prelude* artifact: `src/prelude_compiled.bc`, holding the
-//! native bodies of every prelude definition that can have one, so prelude
-//! calls in user code run compiled instead of being tree-walked.
+//! The committed *prelude dump*: `crates/typelisp-front/src/prelude.typld`,
+//! holding both halves of compiling the prelude — the checked state its
+//! definitions produced, and the native bodies for every one that can have a
+//! body.
 //!
 //! The same shape as [`crate::compile::bootstrap`]'s compiler island —
-//! [`build_prelude_bitcode`] compiles into one shared module and serializes
-//! it, `src/bin/bootstrap_prelude.rs` commits the bytes, [`crate::prelude::load`]
-//! installs them — with three differences worth naming.
+//! [`build_prelude_artifact`] compiles into one shared module and writes the
+//! pair, `src/bin/bootstrap_prelude.rs` commits the file, [`load`] applies it —
+//! with three differences worth naming.
 //!
-//! **This is about execution speed, not load time.** The deleted fasl cache
-//! serialized *checked state* to skip parsing and type-checking; this
-//! serializes *machine code*. The read/check/`exec` pass still runs at load
-//! (the checker state and the `FnDef`s are needed either way); what changes is
-//! what a later call to `gcd` or `abs` actually executes.
+//! **This is about both execution speed and load time.** The bitcode half is
+//! what makes a later call to `gcd` or `abs` run compiled instead of
+//! tree-walked. The checked-state half is what removes the read and the type
+//! check from every startup: 27ms + 136ms of a 1.50s `typl` startup, measured
+//! by `typl-bench-prelude`.
 //!
 //! **Not everything can be precompiled, and the boundary is not a judgement
 //! call.** A generic definition has no single body to compile — the checker
@@ -42,52 +43,34 @@ use crate::compile::symbols::CompiledItem;
 use crate::eval::interp::Uncompilable;
 use crate::{EvalError, Heap, Interp, Path, Value};
 
-/// The name of the i64 global the prelude bitcode carries its source hash in.
-/// Distinct from the island's [`crate::compile::bootstrap::SOURCE_HASH_GLOBAL`]
-/// so neither artifact can be checked against the other's hash.
-pub const PRELUDE_SOURCE_HASH_GLOBAL: &str = "__typelisp_prelude_source_hash";
-
-/// The committed, precompiled prelude bodies, embedded so [`load`] needs no
-/// filesystem access at runtime. Kept in sync with [`crate::prelude::SOURCE`]
-/// by `scripts/regen-prelude-bitcode.sh` and the tests in
-/// `tests/prelude_artifacts_test.rs`.
-pub const PRELUDE_BITCODE: &[u8] = include_bytes!("../prelude_compiled.bc");
-
-/// [`crate::prelude::load_interpreted`] followed by installing the
-/// precompiled native bodies over the definitions it registered, so a later
-/// call to a prelude function runs compiled instead of being tree-walked.
+/// Applies the committed prelude dump: its checked state, its definitions, and
+/// the native bodies over them.
 ///
-/// This is what `typelisp::load_prelude` names, and it lives on the backend
-/// side because everything it adds to the interpreted load is backend: the
-/// bitcode, the compiled-slot promotion, the module install.
+/// This is what `typelisp::load_prelude` names. `interp` must be freshly
+/// [`Interp::new`]'d — the unit's globals are created here, in the order they
+/// were compiled against, and an `Interp` that has already promoted something
+/// would number them differently.
 ///
-/// The source being fixed and the bitcode a committed, freshness-checked
-/// artifact, any failure here is a build/bug condition rather than a user
-/// error — hence the panics.
+/// The source being fixed and the dump a committed, digest-checked artifact,
+/// any failure here is a build/bug condition rather than a user error — hence
+/// the panics.
 pub fn load(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Interp) {
-    let plan = load_interpreted_plan(heap, chk, interp);
-    // Before the bitcode, and in this order: the compiled-slot ids baked into
-    // it were assigned by this same walk at generation time. See
-    // `promote_globals`.
-    promote_globals(heap, interp, &plan).expect("prelude: promoting globals failed");
-    // Every collected definition, not a filtered subset: the artifact carries
-    // bodies for the ones the compiler could handle, and
-    // `install_compiled_library` installs exactly those. Re-deriving the
-    // subset here would mean running the compile path's own precheck over the
-    // whole prelude at every startup, to reach an answer the module already
-    // holds.
-    crate::compile::driver::install_compiled_library(
-        interp,
-        crate::compile::CompiledLibrary {
-            label: "prelude",
-            regen_script: "scripts/regen-prelude-bitcode.sh",
-            bitcode: PRELUDE_BITCODE,
-            items: &plan.items,
-            expected_hash: Some((PRELUDE_SOURCE_HASH_GLOBAL, plan.source_hash)),
-        },
-    )
-    .expect("prelude: bitcode install failed");
+    let units = crate::compile::dump::parse(crate::prelude::DUMP, "prelude")
+        .unwrap_or_else(|e| panic!("prelude: {}", e));
+    let unit = units.first().unwrap_or_else(|| panic!("prelude: the committed dump holds no units"));
+    let state =
+        crate::compile::dump::read_types(unit, "prelude").unwrap_or_else(|e| panic!("prelude: {}", e));
+    // Before anything is applied: a dump built from a different `SOURCE` than
+    // the one compiled into this binary would install definitions the source
+    // no longer has, and leave an edit looking like it did nothing.
+    typelisp_front::dump::verify_digest(&state, crate::prelude::SOURCE, REGEN_SCRIPT)
+        .unwrap_or_else(|e| panic!("{}", e));
+    crate::compile::dump::load_unit(heap, chk, interp, state, unit.bitcode, REGEN_SCRIPT)
+        .unwrap_or_else(|e| panic!("prelude: {}", e));
 }
+
+/// What to run when the committed dump no longer matches `SOURCE`.
+pub const REGEN_SCRIPT: &str = "scripts/regen-prelude-bitcode.sh";
 
 /// [`crate::prelude::load_interpreted`], collecting along the way everything a
 /// compiled artifact has to know about the prelude.
@@ -113,6 +96,11 @@ pub fn load_interpreted_plan(heap: &mut Heap, chk: &mut crate::Checker, interp: 
                 .expect("prelude: hashing the read forms failed");
         },
         &mut |heap, tl| {
+            // Rooted and never popped: the generator writes these into the
+            // dump long after the load, with a whole island load in between.
+            // Both callers are one-shot generators against a throwaway heap.
+            heap.push_root(tl);
+            plan.forms.push(tl);
             collect_item(heap, tl, &mut plan).expect("prelude: collect failed");
         },
     );
@@ -164,6 +152,9 @@ pub struct PreludePlan {
     pub items: Vec<CompiledItem>,
     /// Every `defvar`/`defconstant`, in declaration order.
     pub globals: Vec<Path>,
+    /// Every checked top-level form, in declaration order, rooted for the
+    /// lifetime of the heap it was loaded into — the dump's checked-state half.
+    pub forms: Vec<Value>,
     /// The staleness key for the forms this plan came from
     /// ([`crate::compile::bootstrap::hash_read_forms`]): what the generator
     /// embeds in the artifact and the loader checks it against.
@@ -244,7 +235,8 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
     Ok(())
 }
 
-/// Assigns every prelude global its compiled-slot id, in declaration order.
+/// Assigns every prelude global its compiled-slot id, in declaration order,
+/// and returns the assignment for the dump to record.
 ///
 /// Must run at the same point on both sides — right after the prelude's forms
 /// are `exec`'d, before anything touches bitcode — because the ids are baked
@@ -254,11 +246,18 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
 /// promotes its `defvar`s eagerly: a numbering that depends on *which bodies
 /// happened to be compiled first* is not a numbering a second process can
 /// reproduce.
-pub fn promote_globals(heap: &mut Heap, interp: &Interp, plan: &PreludePlan) -> Result<(), String> {
+pub fn promote_globals(
+    heap: &mut Heap,
+    interp: &Interp,
+    plan: &PreludePlan,
+) -> Result<Vec<(String, usize)>, String> {
+    let mut out = Vec::with_capacity(plan.globals.len());
     for path in &plan.globals {
-        interp.promote_global(heap, path).map_err(|e| format!("prelude: promoting `{}`: {}", path, e))?;
+        let id =
+            interp.promote_global(heap, path).map_err(|e| format!("prelude: promoting `{}`: {}", path, e))?;
+        out.push((path.to_string(), id));
     }
-    Ok(())
+    Ok(out)
 }
 
 /// Fails unless [`PRELUDE_COMPILE_UNSUPPORTED`] names exactly the targets that
@@ -306,7 +305,13 @@ fn reconcile_unsupported(heap: &Heap, interp: &Interp, plan: &PreludePlan) -> Re
     Err(msg)
 }
 
-/// Builds the prelude's AOT bitcode in a throwaway environment.
+/// Builds the committed prelude dump in a throwaway environment: the checked
+/// state the prelude's definitions produce, and the bitcode holding their
+/// bodies, written as one file.
+///
+/// The checker delta is captured **before the island is loaded**, which is the
+/// one ordering constraint here that is not obvious: both load into the same
+/// `Checker`, and afterwards nothing can say which of them added what.
 ///
 /// Mirrors [`crate::compile::bootstrap::build_island_bitcode`]: one shared
 /// module, `rt_*` forward declarations, every body forward-declared before any
@@ -316,17 +321,20 @@ fn reconcile_unsupported(heap: &Heap, interp: &Interp, plan: &PreludePlan) -> Re
 /// `add_global_mapping`: this is a library of compiled functions, and the
 /// `rt_*` addresses are supplied at install time by
 /// `Interp::install_compiled_library`.
-pub fn build_prelude_bitcode() -> Result<Vec<u8>, String> {
+pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
     let mut heap = Heap::with_capacity(1 << 18);
     let mut chk = crate::Checker::new();
     let mut interp = Interp::new();
 
     // Interpreted, deliberately: see this module's doc comment on why there is
     // no snapshot chain.
+    let before = chk.signature(&heap)?;
     let plan = load_interpreted_plan(&mut heap, &mut chk, &mut interp);
-    promote_globals(&mut heap, &interp, &plan)?;
+    let globals = promote_globals(&mut heap, &interp, &plan)?;
+    let delta = chk.capture_delta(&heap, &before)?;
     // The island is what actually translates the bodies below, so it has to be
-    // native before the first `add_compiled_function` call.
+    // native before the first `add_compiled_function` call — and after the
+    // delta above, whose subject is the prelude alone.
     crate::load_compiler(&mut heap, &mut chk, &mut interp);
 
     // Decide what is in before emitting anything: the island's `compile-call`
@@ -345,7 +353,6 @@ pub fn build_prelude_bitcode() -> Result<Vec<u8>, String> {
         for (name, _) in crate::compile::externs::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
         }
-        crate::compile::bootstrap::embed_source_hash(ctx, &module, PRELUDE_SOURCE_HASH_GLOBAL, plan.source_hash);
         for item in &items {
             let sym = item.symbol_name();
             if module.get_function(&sym).is_none() {
@@ -395,17 +402,46 @@ pub fn build_prelude_bitcode() -> Result<Vec<u8>, String> {
         );
     }
 
-    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let bitcode = {
-        let m = module.borrow();
-        m.verify().map_err(|e| format!("prelude module failed verification: {}", e)).map(|()| {
-            // Carries a trailing NUL by design — see the identical call in
-            // `bootstrap.rs` for why it must not be trimmed.
-            m.write_bitcode_to_memory().as_slice().to_vec()
-        })
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let bitcode = {
+            let m = module.borrow();
+            m.verify().map_err(|e| format!("prelude module failed verification: {}", e)).map(|()| {
+                // Carries a trailing NUL by design — see the identical call in
+                // `bootstrap.rs` for why it must not be trimmed.
+                m.write_bitcode_to_memory().as_slice().to_vec()
+            })
+        };
+        // Destroyed with the guard still held — see the same `drop` in
+        // `bootstrap::build_island_bitcode`.
+        drop(module);
+        bitcode?
     };
-    // Destroyed with the guard still held — see the same `drop` in
-    // `bootstrap::build_island_bitcode`.
-    drop(module);
-    bitcode
+
+    let state = typelisp_front::dump::capture_types(
+        &heap,
+        delta,
+        "prelude",
+        Some(typelisp_front::dump::source_digest(crate::prelude::SOURCE)),
+        Some(plan.source_hash),
+        &plan.forms,
+        items.iter().map(unit_item).collect(),
+        globals,
+    )?;
+    let types = typelisp_front::dump::write_state(&state)?;
+    Ok(crate::compile::dump::write(&[(types, bitcode)]))
+}
+
+/// One compiled definition in the form a dump records it.
+///
+/// The backend's [`CompiledItem`] and the front end's `UnitItem` are the same
+/// two cases; they are separate types because the front end must not depend on
+/// the backend (see `typelisp_front::dump::UnitItem`).
+pub(crate) fn unit_item(item: &CompiledItem) -> typelisp_front::dump::UnitItem {
+    match item {
+        CompiledItem::Fn(path) => typelisp_front::dump::UnitItem::Fn(path.clone()),
+        CompiledItem::Method(path, name) => {
+            typelisp_front::dump::UnitItem::Method(path.clone(), name.clone())
+        }
+    }
 }

@@ -65,6 +65,17 @@ use crate::{Checker, Heap, Interp, Reader, Value};
 /// comment for the key-quoting design decision this forces. `do` (step 8d)
 /// completes the roadmap's step-8 macro set, parallel-stepping multiple
 /// bindings via `gensym`-fresh temporaries (see its own comment).
+/// The committed prelude dump: the checked state these definitions produce,
+/// paired with the bitcode holding their native bodies. Written by
+/// `scripts/regen-prelude-bitcode.sh`, applied by
+/// `typelisp::compile::prelude_bootstrap::load`.
+///
+/// It lives in *this* crate, not the backend's, because an AOT executable
+/// links only `typelisp-front`: the checked-state half is what its `eval` needs
+/// to have the prelude in scope, and it cannot reach a file the backend owns.
+/// The bitcode half is opaque here — nothing in this crate parses it.
+pub const DUMP: &[u8] = include_bytes!("prelude.typld");
+
 pub const SOURCE: &str = r##"
 ;; `not`: moved here from a Rust builtin (it has no dependency on the GC
 ;; heap or anything else Rust-only — a plain `if`/`bool` round trip) so it

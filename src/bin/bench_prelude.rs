@@ -100,7 +100,96 @@ fn run(heap: &mut Heap, chk: &mut Checker, interp: &Interp, src: &str) -> Durati
     t0.elapsed()
 }
 
+/// Where the startup second actually goes.
+///
+/// `load_prelude`/`load_compiler_aot` each do read -> predeclare -> check ->
+/// exec and then install a committed `.bc` over the result, and the whole of
+/// that is paid at every `typl` startup. This replicates the two loaders step
+/// by step against fresh environments so each step can be timed on its own;
+/// the totals of the real loaders are reported alongside, since the manual
+/// replication cannot reach the crate-private collect/promote steps between
+/// exec and install.
+fn startup_breakdown() {
+    use typelisp::compile::bootstrap::island_source_hash;
+    use typelisp::Value;
+
+    println!("startup breakdown (one process, fresh 1<<18-cell heap per measurement):");
+
+    for (label, source) in [("prelude", typelisp::prelude::SOURCE), ("island", typelisp::compiler::SOURCE)] {
+        let mut heap = Heap::with_capacity(1 << 18);
+        let mut chk = Checker::new();
+        let mut interp = Interp::new();
+        // The island's SOURCE references prelude names, so it needs the
+        // prelude in scope before it can be checked at all. Interpreted, and
+        // not timed: this is the other row of this same table.
+        if label == "island" {
+            typelisp::prelude::load_interpreted(&mut heap, &mut chk, &mut interp);
+            typelisp::compile::install_llvm_backend();
+        }
+
+        let r = Reader::new();
+        let t0 = Instant::now();
+        let forms = r.read_all(&mut heap, source).expect("read failed");
+        let read = t0.elapsed();
+
+        let t0 = Instant::now();
+        chk.predeclare_program(&mut heap, &forms);
+        let predeclare = t0.elapsed();
+
+        let mut checked: Vec<Value> = Vec::with_capacity(forms.len());
+        let mut check = Duration::ZERO;
+        let mut exec = Duration::ZERO;
+        for v in forms {
+            let t0 = Instant::now();
+            let tl = chk.check_form(&mut heap, &interp, v).expect("check failed");
+            check += t0.elapsed();
+            let _ = chk.take_warnings();
+            heap.push_root(tl);
+            checked.push(tl);
+            let t0 = Instant::now();
+            interp.exec(&mut heap, tl).expect("exec failed");
+            exec += t0.elapsed();
+        }
+
+        // The island hashes its SOURCE a second time at every load, into a
+        // second 1<<18-cell heap, to check the committed `.bc` for staleness
+        // (`compiler::load_aot`). The prelude does not: it hashes the forms it
+        // just read.
+        let rehash = if label == "island" {
+            let t0 = Instant::now();
+            island_source_hash(source).expect("hash failed");
+            t0.elapsed()
+        } else {
+            Duration::ZERO
+        };
+
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        println!(
+            "  {:<8} read {:>7.1} ms | predeclare {:>6.1} ms | check {:>7.1} ms | exec {:>7.1} ms | re-hash {:>6.1} ms",
+            label, ms(read), ms(predeclare), ms(check), ms(exec), ms(rehash)
+        );
+    }
+
+    let mut heap = Heap::with_capacity(1 << 18);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    let t0 = Instant::now();
+    typelisp::load_prelude(&mut heap, &mut chk, &mut interp);
+    let prelude_total = t0.elapsed();
+    let t0 = Instant::now();
+    typelisp::load_compiler_aot(&mut heap, &mut chk, &mut interp);
+    let island_total = t0.elapsed();
+    println!(
+        "  real loaders: load_prelude {:.1} ms, load_compiler_aot {:.1} ms (the excess over the rows \
+         above is collect + promote + the bitcode install)",
+        prelude_total.as_secs_f64() * 1000.0,
+        island_total.as_secs_f64() * 1000.0
+    );
+    println!();
+}
+
 fn main() {
+    startup_breakdown();
     let (_h1, _c1, _i1, compiled_load) = load(true);
     let (_h2, _c2, _i2, interpreted_load) = load(false);
     println!("prelude load (read+check+exec, plus the bitcode install for compiled):");

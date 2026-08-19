@@ -81,7 +81,7 @@ pub const SOURCE_HASH_GLOBAL: &str = "__typelisp_island_source_hash";
 /// here: the rt_* addresses are supplied at load time by `load_aot`'s
 /// `CompiledFn::new_multi`, and the bitcode only needs to carry the
 /// declarations (which it does).
-pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
+pub fn build_island_artifact() -> Result<Vec<u8>, String> {
     let mut heap = Heap::with_capacity(1 << 18);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -91,12 +91,19 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
     // close a cycle, since that artifact is built by the island.
     crate::prelude::load_interpreted(&mut heap, &mut chk, &mut interp);
 
+    // After the prelude, before the island: what the island unit records is
+    // what the *island* added, and the checker they share cannot say
+    // afterwards which of them contributed what.
+    let before = chk.signature(&heap)?;
+
     let reader = Reader::new();
     let forms = reader
         .read_all(&mut heap, crate::compiler::SOURCE)
         .map_err(|e| format!("island read failed: {}", e))?;
     chk.predeclare_program(&mut heap, &forms);
+    let forms_digest = hash_read_forms(&heap, &forms)?;
     let mut fn_names: Vec<String> = Vec::new();
+    let mut checked: Vec<Value> = Vec::new();
     for v in forms {
         let tl = chk.check_form(&mut heap, &interp, v).map_err(|e| format!("island check failed: {}", e))?;
         for w in chk.take_warnings() {
@@ -105,14 +112,23 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
         if let Some(name) = defun_name(&heap, tl) {
             fn_names.push(name);
         }
+        // Rooted and never popped: these go into the dump at the end of this
+        // function, with the whole compile loop in between. The heap is a
+        // throwaway the generator drops on the way out.
+        heap.push_root(tl);
+        checked.push(tl);
         interp.exec(&mut heap, tl).map_err(|e| format!("island exec failed: {}", e))?;
     }
+    let delta = chk.capture_delta(&heap, &before)?;
 
     // Install the *committed* island bitcode so the compile loop below drives
     // the previous build's **native** `compile-function`, not an interpreted
-    // one (the snapshot chain — interp-closure removal Stage 8b). `check_hash`
-    // is `false`: the committed `.bc` is by construction one generation behind
-    // the `SOURCE` we're recompiling, so a hash mismatch is expected. Any
+    // one (the snapshot chain — interp-closure removal Stage 8b). Only the
+    // bitcode half of the committed dump is taken, and its checked state is
+    // ignored: the definitions are already in scope from the read/check/exec
+    // above, which is what this generation is *about*. No digest check either
+    // — the committed dump is by construction one generation behind the
+    // `SOURCE` being recompiled, so a mismatch is expected. Any
     // island `defun` added since that `.bc` is simply absent from it and gets
     // compiled fresh by the just-installed native `compile-function`. This is
     // what lets interpreted closures be deleted (Stage 8c): regenerating the
@@ -124,7 +140,10 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
     crate::compile::driver::install_compiled_library(&interp, crate::compile::CompiledLibrary {
             label: "compiler island",
             regen_script: "scripts/regen-compiler-island.sh",
-            bitcode: crate::compiler::ISLAND_BITCODE,
+            bitcode: crate::compile::dump::parse(crate::compiler::ISLAND_DUMP, "compiler island")?
+                .first()
+                .ok_or_else(|| "island: the committed dump holds no units".to_string())?
+                .bitcode,
             items: &items,
             expected_hash: None,
         })
@@ -171,34 +190,51 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
             .map_err(|e| format!("island compile of `{}` failed: {}", name, e))?;
     }
 
-    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let bitcode = {
-        let m = module.borrow();
-        m.verify().map_err(|e| format!("island module failed verification: {}", e)).map(|()| {
-            // `as_slice` deliberately includes LLVM's guaranteed trailing
-            // NUL (inkwell's `MemoryBuffer::get_size` is
-            // `LLVMGetBufferSize() + 1`), so the committed artifact is one
-            // byte longer than the bitstream. **Do not trim it**: the loader
-            // is `MemoryBuffer::create_from_memory_range_copy`
-            // (`Interp::install_compiled_library`), which asserts that last
-            // byte is NUL and passes `len - 1` as the real size. Trimming
-            // would not even fail the assert here — the bitstream's own last
-            // byte is padding zero — it would hand LLVM a buffer one byte
-            // short instead.
-            //
-            // The visible cost is that `llvm-dis`/`llvm-bcanalyzer` reject
-            // the file as written ("Bitcode stream should be a multiple of 4
-            // bytes in length"; the artifact is 4n+1). To inspect one, drop
-            // the last byte into a scratch copy.
-            m.write_bitcode_to_memory().as_slice().to_vec()
-        })
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let bitcode = {
+            let m = module.borrow();
+            m.verify().map_err(|e| format!("island module failed verification: {}", e)).map(|()| {
+                // `as_slice` deliberately includes LLVM's guaranteed trailing
+                // NUL (inkwell's `MemoryBuffer::get_size` is
+                // `LLVMGetBufferSize() + 1`), so the committed artifact is one
+                // byte longer than the bitstream. **Do not trim it**: the loader
+                // is `MemoryBuffer::create_from_memory_range_copy`
+                // (`Interp::install_compiled_library`), which asserts that last
+                // byte is NUL and passes `len - 1` as the real size. Trimming
+                // would not even fail the assert here — the bitstream's own last
+                // byte is padding zero — it would hand LLVM a buffer one byte
+                // short instead.
+                //
+                // The visible cost is that `llvm-dis`/`llvm-bcanalyzer` reject
+                // the file as written ("Bitcode stream should be a multiple of 4
+                // bytes in length"; the artifact is 4n+1). To inspect one, drop
+                // the last byte into a scratch copy.
+                m.write_bitcode_to_memory().as_slice().to_vec()
+            })
+        };
+        // Destroyed with the guard still held: `module` was declared before it,
+        // so its own drop would run after the guard released, and `~Module`
+        // unregisters every value name from the shared LLVM Context (see
+        // `compile::COMPILE_LOCK`).
+        drop(module);
+        bitcode?
     };
-    // Destroyed with the guard still held: `module` was declared before it, so
-    // its own drop would run after the guard released, and `~Module`
-    // unregisters every value name from the shared LLVM Context (see
-    // `compile::COMPILE_LOCK`).
-    drop(module);
-    bitcode
+
+    let state = typelisp_front::dump::capture_types(
+        &heap,
+        delta,
+        "compiler island",
+        Some(typelisp_front::dump::source_digest(crate::compiler::SOURCE)),
+        Some(forms_digest),
+        &checked,
+        items.iter().map(crate::compile::prelude_bootstrap::unit_item).collect(),
+        // The island defines 121 `defun`s and one `defmacro`, and no globals at
+        // all — nothing here to give compiled-slot storage to.
+        Vec::new(),
+    )?;
+    let types = typelisp_front::dump::write_state(&state)?;
+    Ok(crate::compile::dump::write(&[(types, bitcode)]))
 }
 
 /// The island's staleness key: a hash of what the reader *read*, not of the

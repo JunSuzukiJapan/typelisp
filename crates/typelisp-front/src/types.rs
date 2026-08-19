@@ -20,7 +20,12 @@ use crate::{Error, Heap, Loc, PathId, SymId, Value};
 /// never re-parsed; the only place `::` strings are split is the reader/parser
 /// (surface syntax). A single-segment path is also how type *variables* and
 /// root-level names are represented.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
+/// `Ord` so a `Path`-keyed table can be a `BTreeMap`: several of the
+/// registry's are, because a dump hashes what a table *would serialize to* to
+/// decide what changed, and a `HashMap` serializes in an order that differs
+/// run to run (`std`'s `RandomState`) — which would make every entry look
+/// modified.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Path(Vec<String>);
 
 impl Path {

@@ -6,7 +6,7 @@
 //! else synthesizes its own type and is reconciled against the expectation.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use std::rc::Rc;
 
@@ -18,6 +18,7 @@ use super::resolved::{CompileTarget, Pattern, Ref};
 use super::core::{self, Checked, Items};
 use super::forms;
 use super::repr::Repr;
+use crate::dump::{CheckerDelta, RegistrySignature};
 use super::registry::{AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
@@ -211,12 +212,12 @@ struct Env {
     /// call-site validation — this copy exists only because body-checking
     /// needs it readily available in `Env`, not threaded through `Registry`
     /// lookups on every method call.
-    bounds: std::rc::Rc<HashMap<String, Vec<TraitBound>>>,
+    bounds: std::rc::Rc<BTreeMap<String, Vec<TraitBound>>>,
 }
 
 impl Env {
     fn new() -> Env {
-        Env { vars: Vec::new(), bounds: std::rc::Rc::new(HashMap::new()) }
+        Env { vars: Vec::new(), bounds: std::rc::Rc::new(BTreeMap::new()) }
     }
 
     fn get(&self, name: &str) -> Option<&Type> {
@@ -252,7 +253,7 @@ impl Env {
 
     /// A child environment that additionally declares `bounds` (a function's
     /// own `where`-clause trait bounds) — see the field's doc comment.
-    fn with_bounds(&self, bounds: HashMap<String, Vec<TraitBound>>) -> Env {
+    fn with_bounds(&self, bounds: BTreeMap<String, Vec<TraitBound>>) -> Env {
         Env { vars: self.vars.clone(), bounds: std::rc::Rc::new(bounds) }
     }
 }
@@ -424,7 +425,7 @@ struct MethodSig {
     /// Lets an `impl` method on a generic owner require trait bounds on the
     /// owner's own type variables (e.g. `cons-cell<A,B>`'s `equals` needing
     /// `(where (Eq A) (Eq B))` for its recursive field comparisons).
-    bounds: HashMap<String, Vec<TraitBound>>,
+    bounds: BTreeMap<String, Vec<TraitBound>>,
     /// Index of the first body form in the `defmethod` parts: 4 when a
     /// `where` clause is present, 3 otherwise (plus 1 more if a leading
     /// docstring was also consumed — see `doc`).
@@ -584,7 +585,7 @@ pub struct Checker {
     /// type parser: `Option<T>`'s `T` arrives here already split out as a
     /// structured `Type::Named` argument. Non-empty only while
     /// [`Self::specialize_defun`] runs.
-    type_var_bindings: HashMap<String, Type>,
+    type_var_bindings: BTreeMap<String, Type>,
     /// Every occurrence of a user-defined type/trait name resolved so far,
     /// with its exact source span — recorded wherever the checker's grammar
     /// put a type name (annotations, definition headers, `Type::member`
@@ -647,7 +648,7 @@ impl Checker {
             generic_method_templates: HashMap::new(),
             spec_memo: RefCell::new(HashSet::new()),
             spec_pending: RefCell::new(Vec::new()),
-            type_var_bindings: HashMap::new(),
+            type_var_bindings: BTreeMap::new(),
             type_uses: RefCell::new(Vec::new()),
             place_tmp_counter: Cell::new(0),
             predeclared: HashSet::new(),
@@ -759,6 +760,165 @@ impl Checker {
             chk.generic_method_templates.insert(key, restored);
         }
         Ok(chk)
+    }
+
+    /// Every registry entry's content hash, as of now.
+    ///
+    /// The "before" half of [`Self::capture_delta`]: take one, load a unit,
+    /// then ask what changed. Hashes rather than a copy of the state, because
+    /// this is taken at startup on the path a dump exists to make fast — and
+    /// hashes of what a table *would serialize to* is exactly the question the
+    /// delta asks.
+    pub fn signature(&self, heap: &Heap) -> Result<RegistrySignature, String> {
+        let mut sig = crate::dump::signature(
+            &self.reg.root,
+            &self.reg.docs,
+            &self.throw_tags.borrow(),
+            &self.sorted_predeclared(),
+        )
+?;
+        self.visit_templates(heap, &mut |cat, key, _wire_bytes, hash| {
+            sig.record(cat, key, hash);
+            Ok(())
+        })?;
+        Ok(sig)
+    }
+
+    /// Every checker entry that is new or different since `before`.
+    ///
+    /// See [`crate::dump`] for why a unit carries its own additions rather
+    /// than the whole world.
+    pub fn capture_delta(&self, heap: &Heap, before: &RegistrySignature) -> Result<CheckerDelta, String> {
+        let entries = crate::dump::delta(
+            &self.reg.root,
+            &self.reg.docs,
+            &self.throw_tags.borrow(),
+            &self.sorted_predeclared(),
+            before,
+        )?;
+
+        let mut fn_templates = Vec::new();
+        let mut method_templates = Vec::new();
+        self.visit_templates(heap, &mut |cat, key, bytes, hash| {
+            if before.unchanged(cat, &key, hash) {
+                return Ok(());
+            }
+            if cat == crate::dump::cat::FN_TEMPLATE {
+                fn_templates.push((crate::dump::parse_path(&key), bincode_read(&bytes)?));
+            } else {
+                let (path, name) = key
+                    .split_once('|')
+                    .ok_or_else(|| format!("dump: `{}` is not a method key", key))?;
+                method_templates
+                    .push(((crate::dump::parse_path(path), name.to_string()), bincode_read(&bytes)?));
+            }
+            Ok(())
+        })?;
+        Ok(CheckerDelta { entries, fn_templates, method_templates })
+    }
+
+    /// Reinstates a unit's checker additions in `self`.
+    ///
+    /// Each rebuilt template form is pushed as a **permanent** root, matching
+    /// what the definition-checking path does for a template it retains: a
+    /// template must outlive any number of collections between here and its
+    /// last instantiation, and nothing else refers to it.
+    pub fn apply_delta(&mut self, delta: CheckerDelta, heap: &mut Heap) -> Result<(), String> {
+        let mut predeclared = std::mem::take(&mut self.predeclared);
+        crate::dump::apply_entries(
+            &mut self.reg.root,
+            &mut self.reg.docs,
+            &mut self.throw_tags.borrow_mut(),
+            &mut |name| {
+                predeclared.insert(name);
+            },
+            delta.entries,
+        )?;
+        self.predeclared = predeclared;
+
+        let rebuild = |parts: &[crate::owned_form::OwnedForm], heap: &mut Heap| -> Result<Vec<Value>, String> {
+            let mut out = Vec::with_capacity(parts.len());
+            for p in parts {
+                let v = crate::owned_form::owned_to_value(heap, p).map_err(|e| e.to_string())?;
+                heap.push_permanent_root(v);
+                out.push(v);
+            }
+            Ok(out)
+        };
+        for (path, t) in delta.fn_templates {
+            let parts = rebuild(&t.parts, heap)?;
+            self.generic_fn_templates
+                .insert(path, FnTemplate { parts, ns: t.ns, type_params: t.type_params });
+        }
+        for (key, t) in delta.method_templates {
+            let restored = match t {
+                crate::dump::WireMethodTemplate::Form { parts, ns, written_vars } => {
+                    MethodTemplate::Form { parts: rebuild(&parts, heap)?, ns, written_vars }
+                }
+                crate::dump::WireMethodTemplate::Getter { index } => MethodTemplate::Getter { index },
+                crate::dump::WireMethodTemplate::Setter { index } => MethodTemplate::Setter { index },
+            };
+            self.generic_method_templates.insert(key, restored);
+        }
+        Ok(())
+    }
+
+    /// The pre-declared names in a fixed order, so two runs of the same load
+    /// produce the same bytes.
+    fn sorted_predeclared(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.predeclared.iter().cloned().collect();
+        v.sort();
+        v
+    }
+
+    /// Feeds every retained generic template to `visit` as `(category, key,
+    /// serialized wire form, hash)`.
+    ///
+    /// The templates live on the `Checker` rather than in the `Registry`, so
+    /// `dump::walk` cannot see them; this is their half of the same walk, and
+    /// both [`Self::signature`] and [`Self::capture_delta`] go through it for
+    /// the same reason `dump::walk` is written once.
+    fn visit_templates(
+        &self,
+        heap: &Heap,
+        visit: &mut dyn FnMut(u8, String, Vec<u8>, u64) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let owned = |parts: &[Value]| -> Result<Vec<crate::owned_form::OwnedForm>, String> {
+            parts
+                .iter()
+                .map(|v| crate::owned_form::value_to_owned(heap, *v).map_err(|e| e.to_string()))
+                .collect()
+        };
+
+        let mut fns: Vec<(&Path, &FnTemplate)> = self.generic_fn_templates.iter().collect();
+        fns.sort_by_key(|(p, _)| p.to_string());
+        for (path, t) in fns {
+            let w = crate::dump::WireFnTemplate {
+                parts: owned(&t.parts)?,
+                ns: t.ns.clone(),
+                type_params: t.type_params.clone(),
+            };
+            let (bytes, hash) = crate::dump::wire(&w)?;
+            visit(crate::dump::cat::FN_TEMPLATE, path.to_string(), bytes, hash)?;
+        }
+
+        let mut methods: Vec<(&(Path, String), &MethodTemplate)> =
+            self.generic_method_templates.iter().collect();
+        methods.sort_by_key(|(k, _)| (k.0.to_string(), k.1.clone()));
+        for (key, t) in methods {
+            let w = match t {
+                MethodTemplate::Form { parts, ns, written_vars } => crate::dump::WireMethodTemplate::Form {
+                    parts: owned(parts)?,
+                    ns: ns.clone(),
+                    written_vars: written_vars.clone(),
+                },
+                MethodTemplate::Getter { index } => crate::dump::WireMethodTemplate::Getter { index: *index },
+                MethodTemplate::Setter { index } => crate::dump::WireMethodTemplate::Setter { index: *index },
+            };
+            let (bytes, hash) = crate::dump::wire(&w)?;
+            visit(crate::dump::cat::METHOD_TEMPLATE, format!("{}|{}", key.0, key.1), bytes, hash)?;
+        }
+        Ok(())
     }
 
     /// Overrides the default [`RedefPolicy`] (`Warn`) for non-builtin
@@ -1034,7 +1194,7 @@ impl Checker {
     fn variant_field_tys(&self, adt: &Path, variant: usize, args: &[Type]) -> Vec<Type> {
         let Some(def) = self.reg.type_def(adt) else { return Vec::new() };
         let Some(v) = def.variants.get(variant) else { return Vec::new() };
-        let subst: HashMap<String, Type> =
+        let subst: BTreeMap<String, Type> =
             def.params.iter().cloned().zip(args.iter().cloned()).collect();
         v.fields.iter().map(|t| subst_apply(t, &subst)).collect()
     }
@@ -2586,7 +2746,7 @@ impl Checker {
         }
         if let Some(exp) = expected {
             let params: HashSet<String> = sig.type_params.iter().cloned().collect();
-            let mut subst: HashMap<String, Type> = HashMap::new();
+            let mut subst: BTreeMap<String, Type> = BTreeMap::new();
             if unify(&params, &tmpl_ty, exp, &mut subst).is_ok()
                 && sig.type_params.iter().all(|p| subst.contains_key(p))
             {
@@ -2668,7 +2828,7 @@ impl Checker {
         let ty = Type::Fn(af.sig.params.clone(), af.sig.rest.clone().map(Box::new), Box::new(af.sig.ret.clone()));
         if !def.params.is_empty() {
             let tparams: HashSet<String> = def.params.iter().cloned().collect();
-            let mut subst: HashMap<String, Type> = HashMap::new();
+            let mut subst: BTreeMap<String, Type> = BTreeMap::new();
             if unify(&tparams, &ty, expected.unwrap(), &mut subst).is_ok()
                 && def.params.iter().all(|p| subst.contains_key(p))
             {
@@ -3137,7 +3297,7 @@ impl Checker {
         let (required, required_locs, optionals_raw, rest, keys_raw) = self.parse_defun_params_full(heap, parts[1])?;
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
         let mut body_start = 3;
-        let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
+        let mut bounds: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
         if let Some(form) = parts.get(3) {
             if is_where_clause(heap, *form)? {
                 bounds = self.parse_where_clause(heap, *form)?;
@@ -3286,7 +3446,7 @@ impl Checker {
         parts: &[Value],
         parts_locs: &[Option<Loc>],
     ) -> Result<
-        (Vec<(String, Type)>, Vec<Option<Loc>>, Option<RestParam>, Type, HashMap<String, Vec<TraitBound>>, usize, Option<String>),
+        (Vec<(String, Type)>, Vec<Option<Loc>>, Option<RestParam>, Type, BTreeMap<String, Vec<TraitBound>>, usize, Option<String>),
         Error,
     > {
         if parts.len() < 3 {
@@ -3295,7 +3455,7 @@ impl Checker {
         let (params, param_locs, rest) = self.parse_params_rest(heap, parts[1])?;
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
         let mut body_start = 3;
-        let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
+        let mut bounds: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
         if let Some(form) = parts.get(3) {
             if is_where_clause(heap, *form)? {
                 bounds = self.parse_where_clause(heap, *form)?;
@@ -3430,7 +3590,7 @@ impl Checker {
         // A specialization's own `public` mirrors the unspecialized
         // template's — see `Self::specialize_method`'s identical treatment.
         let public = self.reg.fn_sig(base).map(|s| s.public).unwrap_or(true);
-        let bindings: HashMap<String, Type> =
+        let bindings: BTreeMap<String, Type> =
             tmpl.type_params.iter().cloned().zip(args.iter().cloned()).collect();
         let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(tmpl.ns.clone(), bindings);
         let result = self.specialize_defun_body(heap, interp, &tmpl, mangled, public);
@@ -3447,8 +3607,8 @@ impl Checker {
     fn enter_specialization(
         &mut self,
         ns: Vec<String>,
-        bindings: HashMap<String, Type>,
-    ) -> (Vec<String>, Vec<Type>, HashMap<String, Type>) {
+        bindings: BTreeMap<String, Type>,
+    ) -> (Vec<String>, Vec<Type>, BTreeMap<String, Type>) {
         let saved_ns = std::mem::replace(&mut self.ns, ns);
         let saved_loops = std::mem::take(&mut *self.loop_stack.borrow_mut());
         let saved_bindings = std::mem::replace(&mut self.type_var_bindings, bindings);
@@ -3459,7 +3619,7 @@ impl Checker {
         &mut self,
         saved_ns: Vec<String>,
         saved_loops: Vec<Type>,
-        saved_bindings: HashMap<String, Type>,
+        saved_bindings: BTreeMap<String, Type>,
     ) {
         self.type_var_bindings = saved_bindings;
         *self.loop_stack.borrow_mut() = saved_loops;
@@ -3500,7 +3660,7 @@ impl Checker {
             .clone();
         match tmpl {
             MethodTemplate::Form { parts, ns, written_vars } => {
-                let bindings: HashMap<String, Type> =
+                let bindings: BTreeMap<String, Type> =
                     written_vars.into_iter().zip(args.iter().cloned()).collect();
                 let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(ns, bindings);
                 let result = self.specialize_method_form(heap, interp, &parts, mangled, public);
@@ -3553,7 +3713,7 @@ impl Checker {
         public: bool,
     ) -> Result<TopLevelForm, Error> {
         let def = self.reg.type_def(type_fq).expect("an accessor template implies the type exists");
-        let subst: HashMap<String, Type> =
+        let subst: BTreeMap<String, Type> =
             def.params.iter().cloned().zip(args.iter().cloned()).collect();
         let field_ty = subst_apply(&def.variants[0].fields[index], &subst);
         let recv_ty = Type::Named(type_fq.clone(), args.to_vec());
@@ -3759,9 +3919,9 @@ impl Checker {
     /// `Checker::check_instance_method`'s existing assumption that every
     /// trait lives at the root module — a pre-existing limitation, not new
     /// here.
-    fn parse_where_clause(&self, heap: &Heap, v: Value) -> Result<HashMap<String, Vec<TraitBound>>, Error> {
+    fn parse_where_clause(&self, heap: &Heap, v: Value) -> Result<BTreeMap<String, Vec<TraitBound>>, Error> {
         let elems = heap.list_to_vec(v)?;
-        let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
+        let mut bounds: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
         for clause in &elems[1..] {
             let parts_locs = heap.list_to_vec_locs(*clause)?;
             let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
@@ -3801,8 +3961,8 @@ impl Checker {
         heap: &Heap,
         pins: &[Value],
         what: &str,
-    ) -> Result<HashMap<String, Type>, Error> {
-        let mut assoc: HashMap<String, Type> = HashMap::new();
+    ) -> Result<BTreeMap<String, Type>, Error> {
+        let mut assoc: BTreeMap<String, Type> = BTreeMap::new();
         for pin in pins {
             let pin_locs = heap.list_to_vec_locs(*pin)?;
             let pin_parts: Vec<Value> = pin_locs.iter().map(|(v, _)| *v).collect();
@@ -3927,7 +4087,7 @@ impl Checker {
         out: &mut Vec<TraitBound>,
         name: &str,
         trait_path: Path,
-        assoc: HashMap<String, Type>,
+        assoc: BTreeMap<String, Type>,
     ) -> Result<(), Error> {
         if out.iter().any(|b| b.trait_path == trait_path) {
             return Err(Error::TypeError(format!(
@@ -4489,21 +4649,21 @@ impl Checker {
             TraitDef {
                 name: fq_name.clone(),
                 assoc_types: Vec::new(),
-                methods: HashMap::new(),
+                methods: BTreeMap::new(),
                 method_order: Vec::new(),
                 public,
                 builtin: false,
                 supertraits: Vec::new(),
                 vtable_order: Vec::new(),
                 vtable_owner: Vec::new(),
-                defaults: HashMap::new(),
+                defaults: BTreeMap::new(),
             },
         );
         let mut assoc_types = Vec::new();
-        let mut methods = HashMap::new();
+        let mut methods = BTreeMap::new();
         // Source order, kept alongside `methods` for vtable slot numbering.
         let mut method_order: Vec<String> = Vec::new();
-        let mut defaults: HashMap<String, TraitDefault> = HashMap::new();
+        let mut defaults: BTreeMap<String, TraitDefault> = BTreeMap::new();
         // The same items as live `Value`s, for the declaration-time body check
         // below — which needs the written forms, not the `OwnedForm`s the
         // registry keeps for `impl` to replay.
@@ -4537,7 +4697,7 @@ impl Checker {
             // `ret` is optional; with no body forms left this is an ordinary
             // bodyless signature, exactly as before defaults existed.
             let mut at = 3;
-            let mut bounds = HashMap::new();
+            let mut bounds = BTreeMap::new();
             if let Some(f) = elems.get(at) {
                 if is_where_clause(heap, *f)? {
                     bounds = self.parse_where_clause(heap, *f)?;
@@ -4693,7 +4853,7 @@ impl Checker {
         // `Checker::check_call`/`resolve_trait_assoc_type` later recover
         // what this `impl` concretely binds each associated type to, without
         // re-parsing `subst`'s raw `Value`s.
-        let mut assoc_concrete: HashMap<String, Type> = HashMap::new();
+        let mut assoc_concrete: BTreeMap<String, Type> = BTreeMap::new();
 
         // An optional impl-level `(where ...)`, right after the target type:
         // bounds that hold for *every* method of this `impl`, so the owner's
@@ -4992,7 +5152,7 @@ impl Checker {
         target_fq: &Path,
         target_ty: &Type,
         written: &[String],
-        assoc_concrete: &HashMap<String, Type>,
+        assoc_concrete: &BTreeMap<String, Type>,
     ) -> Result<(), Error> {
         let Some(tdef) = self.reg.trait_def(trait_fq) else { return Ok(()) };
         for (i, m) in written.iter().enumerate() {
@@ -5024,7 +5184,7 @@ impl Checker {
         }
         // `Self` and the associated types, as this `impl` binds them, so a
         // template can be compared against what was actually registered.
-        let mut subst: HashMap<String, Type> = assoc_concrete.clone();
+        let mut subst: BTreeMap<String, Type> = assoc_concrete.clone();
         let Some(def) = self.reg.type_def(target_fq) else { return Ok(()) };
         // The *parsed* target type, not one rebuilt from `target_fq`: a
         // primitive target is `Type::I32`, never `Named("i32")`, and the two
@@ -5107,7 +5267,7 @@ impl Checker {
             if !tdef.vtable_order.iter().any(|m| m == method) {
                 continue;
             }
-            let tb = TraitBound { trait_path: tp.clone(), assoc: HashMap::new() };
+            let tb = TraitBound { trait_path: tp.clone(), assoc: BTreeMap::new() };
             if self.type_implements(ty, &tb, 0) {
                 found = Some(tp);
                 break;
@@ -5143,7 +5303,7 @@ impl Checker {
         let (_, sig) = self.reg.trait_method(tdef, method).ok_or_else(|| {
             Error::TypeError(format!("`{}` is not a method of `{}`", method, trait_path))
         })?;
-        let mut subst: HashMap<String, Type> = HashMap::new();
+        let mut subst: BTreeMap<String, Type> = BTreeMap::new();
         subst.insert("self".to_string(), receiver.ty.clone());
         let want = sig.params.len() - 1;
         if args.len() != want {
@@ -5408,7 +5568,7 @@ impl Checker {
             )));
         }
         let mut at = 2;
-        let mut bounds = HashMap::new();
+        let mut bounds = BTreeMap::new();
         let mut impl_where = None;
         if let Some(f) = parts.get(2) {
             if is_where_clause(heap, *f)? {
@@ -5525,7 +5685,7 @@ impl Checker {
         // variable) — the abstract counterpart of `check_impl`'s `subst`.
         let mut subst: HashMap<String, Value> = HashMap::new();
         subst.insert("self".to_string(), heap.intern_symbol(target_var));
-        let mut pins: HashMap<String, Type> = HashMap::new();
+        let mut pins: BTreeMap<String, Type> = BTreeMap::new();
         for (aname, written) in assoc {
             subst.insert(aname.clone(), *written);
             pins.insert(aname.clone(), self.parse_type_here_at(heap, *written, None)?);
@@ -5643,7 +5803,7 @@ impl Checker {
         &self,
         trait_fq: &Path,
         target_fq: &Path,
-        assoc_concrete: &HashMap<String, Type>,
+        assoc_concrete: &BTreeMap<String, Type>,
     ) -> Result<(), Error> {
         let Some(tdef) = self.reg.trait_def(trait_fq) else { return Ok(()) };
         if tdef.supertraits.is_empty() {
@@ -6104,7 +6264,7 @@ impl Checker {
     /// associated types, and return the name->type map that resolves them in
     /// a method signature. Positional, in `TraitDef::assoc_types` declaration
     /// order — `:dyn Iter<i32>` is `Iter` with `Item = i32`.
-    fn dyn_assoc_subst(&self, trait_path: &Path, pins: &[Type]) -> Result<HashMap<String, Type>, Error> {
+    fn dyn_assoc_subst(&self, trait_path: &Path, pins: &[Type]) -> Result<BTreeMap<String, Type>, Error> {
         let tdef = self.check_object_safe(trait_path)?;
         if pins.len() != tdef.assoc_types.len() {
             return Err(Error::TypeError(format!(
@@ -6138,15 +6298,15 @@ impl Checker {
     fn trait_assoc_subst_for(
         &self,
         tdef: &TraitDef,
-        own: &HashMap<String, Type>,
+        own: &BTreeMap<String, Type>,
         target: &Path,
-    ) -> Option<HashMap<String, Type>> {
+    ) -> Option<BTreeMap<String, Type>> {
         if tdef.name == *target {
             return Some(own.clone());
         }
         for sup in &tdef.supertraits {
             let sdef = self.reg.trait_def(&sup.trait_path)?;
-            let next: HashMap<String, Type> =
+            let next: BTreeMap<String, Type> =
                 sup.assoc.iter().map(|(k, v)| (k.clone(), subst_apply(v, own))).collect();
             if let Some(found) = self.trait_assoc_subst_for(sdef, &next, target) {
                 return Some(found);
@@ -6203,7 +6363,7 @@ impl Checker {
         if !def.impls.contains(trait_path)
             && !self.type_implements(
                 concrete,
-                &TraitBound { trait_path: trait_path.clone(), assoc: HashMap::new() },
+                &TraitBound { trait_path: trait_path.clone(), assoc: BTreeMap::new() },
                 0,
             )
         {
@@ -6248,7 +6408,7 @@ impl Checker {
                 }
             }
         }
-        let subst: HashMap<String, Type> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
+        let subst: BTreeMap<String, Type> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
         // Over the linearized order, so an inherited method gets its slot
         // too. The supertrait obligation (`Checker::check_supertrait_impls`)
         // guarantees `def` also has an `impl` of every supertrait, hence has
@@ -6641,7 +6801,7 @@ impl Checker {
         // Optional `(where ...)` clause after the return type — identical
         // peek to `parse_defun_sig`'s.
         let mut body_start = 3;
-        let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
+        let mut bounds: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
         if let Some(form) = parts.get(3) {
             if is_where_clause(heap, *form)? {
                 bounds = self.parse_where_clause(heap, *form)?;
@@ -6712,13 +6872,13 @@ impl Checker {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: Vec::new(),
-            assoc: HashMap::new(),
+            assoc: BTreeMap::new(),
             public,
             builtin: false,
             kind: AdtKind::Struct,
             field_names: Vec::new(),
             impls: Vec::new(),
-            trait_assoc: HashMap::new(),
+            trait_assoc: BTreeMap::new(),
         });
 
         let fields = self.parse_struct_fields(heap, &parts[field_start..])?;
@@ -6736,7 +6896,7 @@ impl Checker {
         let recv_targs: Vec<Type> = type_params.iter().map(|p| Type::Named(Path::root(p), Vec::new())).collect();
         let recv_ty = Type::Named(type_fq.clone(), recv_targs);
 
-        let mut assoc = HashMap::new();
+        let mut assoc = BTreeMap::new();
         // The bundle's members, each rooted from the moment it is built. The
         // loop below allocates once per accessor, so an accessor finished two
         // fields ago is exactly as collectible as the one being built now —
@@ -6755,7 +6915,7 @@ impl Checker {
                 public: field_public,
                 rest: None,
                 builtin: false,
-                bounds: HashMap::new(),
+                bounds: BTreeMap::new(),
                 optionals: Vec::new(),
                 keys: Vec::new(),
             };
@@ -6793,7 +6953,7 @@ impl Checker {
                 public: field_public,
                 rest: None,
                 builtin: false,
-                bounds: HashMap::new(),
+                bounds: BTreeMap::new(),
                 optionals: Vec::new(),
                 keys: Vec::new(),
             };
@@ -6846,7 +7006,7 @@ impl Checker {
             kind: AdtKind::Struct,
             field_names,
             impls: Vec::new(),
-            trait_assoc: HashMap::new(),
+            trait_assoc: BTreeMap::new(),
         };
         self.reg.root.module_mut(&self.ns).add_type(def);
         if let Some(loc) = def_loc {
@@ -6913,13 +7073,13 @@ impl Checker {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: Vec::new(),
-            assoc: HashMap::new(),
+            assoc: BTreeMap::new(),
             public,
             builtin: false,
             kind: AdtKind::Sum,
             field_names: Vec::new(),
             impls: Vec::new(),
-            trait_assoc: HashMap::new(),
+            trait_assoc: BTreeMap::new(),
         });
 
         let mut variants = Vec::new();
@@ -6961,13 +7121,13 @@ impl Checker {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: variants.clone(),
-            assoc: HashMap::new(),
+            assoc: BTreeMap::new(),
             public,
             builtin: false,
             kind: AdtKind::Sum,
             field_names: Vec::new(),
             impls: Vec::new(),
-            trait_assoc: HashMap::new(),
+            trait_assoc: BTreeMap::new(),
         };
         self.reg.root.module_mut(&self.ns).add_type(def);
         if let Some(loc) = def_loc {
@@ -8146,7 +8306,7 @@ impl Checker {
         let def = self.reg.type_def(type_fq).expect("assoc type exists").clone();
         let af = def.assoc[method].clone();
 
-        let mut subst: HashMap<String, Type> = HashMap::new();
+        let mut subst: BTreeMap<String, Type> = BTreeMap::new();
         let concrete_args: Option<&[Type]> = match (&receiver, expected) {
             (Some(r), _) => match &r.ty {
                 Type::Named(n, args) if n == type_fq => Some(args.as_slice()),
@@ -9841,7 +10001,7 @@ impl Checker {
         if concrete
             // Lowercase: symbol names are interned case-folded, so that is how
             // the prelude's `CharOutput` is spelled in the registry.
-            && !self.type_implements(dest_ty, &TraitBound { trait_path: Path::root("charoutput"), assoc: HashMap::new() }, 0)
+            && !self.type_implements(dest_ty, &TraitBound { trait_path: Path::root("charoutput"), assoc: BTreeMap::new() }, 0)
         {
             return Err(Error::TypeError(format!(
                 "format: the destination must be `true` (stdout), `false` (build the string only), \
@@ -10081,7 +10241,7 @@ impl Checker {
         // actual argument types with the same `unify`/`subst_apply` accumulation
         // `check_construct` uses for an ADT's `params`.
         let params: HashSet<String> = sig.type_params.iter().cloned().collect();
-        let mut subst: HashMap<String, Type> = HashMap::new();
+        let mut subst: BTreeMap<String, Type> = BTreeMap::new();
         let mut typed = Vec::new();
         for (i, (arg, pty)) in args[..fixed].iter().zip(sig.params.iter()).enumerate() {
             let st = subst_apply(pty, &subst);
@@ -10286,7 +10446,7 @@ impl Checker {
             )));
         }
         let params: HashSet<String> = sig.type_params.iter().cloned().collect();
-        let mut subst: HashMap<String, Type> = HashMap::new();
+        let mut subst: BTreeMap<String, Type> = BTreeMap::new();
 
         let mut typed = Vec::with_capacity(required_n + sig.optionals.len().max(sig.keys.len()));
         for (i, (arg, pty)) in args[..required_n].iter().zip(sig.params.iter()).enumerate() {
@@ -10501,9 +10661,9 @@ impl Checker {
     fn validate_where_bounds(
         &self,
         name: &str,
-        bounds: &HashMap<String, Vec<TraitBound>>,
-        subst: &HashMap<String, Type>,
-        caller_bounds: &HashMap<String, Vec<TraitBound>>,
+        bounds: &BTreeMap<String, Vec<TraitBound>>,
+        subst: &BTreeMap<String, Type>,
+        caller_bounds: &BTreeMap<String, Vec<TraitBound>>,
     ) -> Result<(), Error> {
         for (tparam, trait_bounds) in bounds {
             let Some(concrete) = subst.get(tparam) else { continue };
@@ -10628,7 +10788,7 @@ impl Checker {
             )));
         }
         let params: HashSet<String> = def.params.iter().cloned().collect();
-        let mut subst: HashMap<String, Type> = HashMap::new();
+        let mut subst: BTreeMap<String, Type> = BTreeMap::new();
 
         // Seed the substitution from an expected `Named(adt, args)` type, so a
         // field-less constructor such as `None` can learn its type argument.
@@ -11162,7 +11322,7 @@ impl Checker {
         downcast: bool,
     ) -> Result<(Pattern, PatternBindings), Error> {
         let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
-        let subst: HashMap<String, Type> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
+        let subst: BTreeMap<String, Type> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
 
         let fields = &def.variants[variant].fields;
         if parts.len() - 1 != fields.len() {
@@ -11579,7 +11739,7 @@ fn mangled_method_name(base: &str, args: &[Type]) -> String {
 /// `pub(crate)`: `crate::eval::interp`'s `data_variant_field_types` reuses it
 /// to instantiate a generic enum's variant field types when decoding a
 /// compiled global (`Interp::enum_defs`).
-pub(crate) fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
+pub(crate) fn subst_apply(t: &Type, subst: &BTreeMap<String, Type>) -> Type {
     match t {
         Type::Named(n, args) if args.is_empty() && n.is_simple() => match subst.get(n.last_segment()) {
             Some(bound) => bound.clone(),
@@ -11637,7 +11797,7 @@ fn mentions_self(t: &Type) -> bool {
 fn resolve_trait_assoc_type(def: &AdtDef, trait_path: &Path, assoc_name: &str, concrete_args: &[Type]) -> Option<Type> {
     let raw = def.trait_assoc.get(trait_path)?.get(assoc_name)?;
     if concrete_args.len() == def.params.len() {
-        let subst: HashMap<String, Type> = def.params.iter().cloned().zip(concrete_args.iter().cloned()).collect();
+        let subst: BTreeMap<String, Type> = def.params.iter().cloned().zip(concrete_args.iter().cloned()).collect();
         Some(subst_apply(raw, &subst))
     } else {
         Some(raw.clone())
@@ -11650,7 +11810,7 @@ fn unify(
     params: &HashSet<String>,
     tmpl: &Type,
     actual: &Type,
-    subst: &mut HashMap<String, Type>,
+    subst: &mut BTreeMap<String, Type>,
 ) -> Result<(), Error> {
     // A diverging value (`Never`) unifies with any template without binding.
     if *actual == Type::Never {
@@ -11863,4 +12023,12 @@ fn params_declare_opt_key(heap: &Heap, v: Value) -> Result<bool, Error> {
     Ok(elems.iter().any(|p| {
         matches!(p, Value::Symbol(id) if matches!(heap.symbol_name(*id), "&optional" | "&key"))
     }))
+}
+
+/// One serialized entry back into the type it was written from.
+///
+/// Free rather than a method so [`Checker::capture_delta`]'s two template
+/// arms, which deserialize different types, can share the error wording.
+fn bincode_read<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, String> {
+    bincode::deserialize(bytes).map_err(|e| format!("dump: reading a template: {}", e))
 }

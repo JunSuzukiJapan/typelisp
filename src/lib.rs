@@ -11,7 +11,7 @@
 pub mod compile;
 pub mod compiler;
 
-pub use typelisp_front::{check, errors, eval, mem, owned_form, prelude, project, read, type_key, types};
+pub use typelisp_front::{check, dump, errors, eval, mem, owned_form, prelude, project, read, type_key, types};
 
 pub use typelisp_front::errors::*;
 pub use typelisp_front::read::*;

@@ -1,5 +1,6 @@
-//! Regenerates the committed precompiled-prelude artifact
-//! (`src/prelude_compiled.bc`). Run through `scripts/regen-prelude-bitcode.sh`
+//! Regenerates the committed prelude dump
+//! (`crates/typelisp-front/src/prelude.typld`, checked state + bitcode). Run
+//! through `scripts/regen-prelude-bitcode.sh`
 //! (which supplies the LLVM environment) whenever `prelude.rs`'s `SOURCE`
 //! changes; the `prelude_artifacts_are_fresh` test fails until this is re-run.
 //!
@@ -22,20 +23,20 @@ fn main() {
     // deeply recursive compile pipeline, which needs far more than the default
     // main-thread stack. `RUST_MIN_STACK` sizes only *spawned* threads, so the
     // work runs on one with an explicit 64MB stack.
-    let bitcode = std::thread::Builder::new()
+    let dump = std::thread::Builder::new()
         .stack_size(64 * 1024 * 1024)
         .spawn(|| {
-            typelisp::compile::prelude_bootstrap::build_prelude_bitcode()
-                .unwrap_or_else(|e| panic!("failed to build prelude bitcode: {}", e))
+            typelisp::compile::prelude_bootstrap::build_prelude_artifact()
+                .unwrap_or_else(|e| panic!("failed to build the prelude dump: {}", e))
         })
         .expect("failed to spawn bootstrap thread")
         .join()
         .expect("bootstrap thread panicked");
 
     let root = env!("CARGO_MANIFEST_DIR");
-    let bc_path = Path::new(root).join("src").join("prelude_compiled.bc");
+    let path = Path::new(root).join("crates").join("typelisp-front").join("src").join("prelude.typld");
 
-    std::fs::write(&bc_path, &bitcode).unwrap_or_else(|e| panic!("failed to write {}: {}", bc_path.display(), e));
+    std::fs::write(&path, &dump).unwrap_or_else(|e| panic!("failed to write {}: {}", path.display(), e));
 
-    println!("wrote {} ({} bytes)", bc_path.display(), bitcode.len());
+    println!("wrote {} ({} bytes)", path.display(), dump.len());
 }

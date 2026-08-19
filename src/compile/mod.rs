@@ -21,6 +21,7 @@ pub mod bootstrap;
 pub mod core_bridge;
 pub mod core_freevars;
 pub mod driver;
+pub mod dump;
 pub mod externs;
 pub mod llvm_builtins;
 
