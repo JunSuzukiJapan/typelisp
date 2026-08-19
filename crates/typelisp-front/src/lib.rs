@@ -28,7 +28,6 @@ pub mod prelude;
 pub mod project;
 pub mod shim;
 pub mod dump;
-pub mod snapshot;
 
 pub use errors::*;
 pub use read::*;

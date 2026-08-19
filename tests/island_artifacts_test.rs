@@ -14,10 +14,9 @@
 //!   is downstream of everything the output depends on.
 
 use typelisp::compile::bootstrap::build_island_artifact;
-use typelisp::compile::dump::parse;
 use typelisp::compile::llvm_context;
 use typelisp::compiler;
-use typelisp::dump::{read_state, source_digest};
+use typelisp::dump::{parse, read_state, source_digest};
 
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::Module;

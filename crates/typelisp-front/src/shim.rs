@@ -16,7 +16,7 @@
 //!
 //! **AOT.** A standalone executable, with no interpreter in the process at
 //! all. `compile-file` builds one at *compile* time and writes it into the
-//! executable ([`crate::snapshot`]); [`rt_eval_init`] rebuilds it from those
+//! executable ([`crate::dump`]); [`rt_eval_init`] rebuilds it from those
 //! bytes at startup. Nothing is re-read and nothing is re-checked.
 //!
 //! [`rt_eval_init`] runs at startup rather than on the first `eval` call, and
@@ -27,7 +27,7 @@
 //! and the global inits.
 //!
 //! What an eval'd form gets is a tree-walking evaluation, including of the
-//! program's own functions: the snapshot carries their checked bodies as
+//! program's own functions: the dump carries their checked bodies as
 //! ordinary interpreted definitions. Their compiled bodies are in the
 //! executable and are what the *program* runs; teaching the restore to reuse
 //! them would make an eval'd call faster, not different.
@@ -39,9 +39,9 @@ use typelisp_abi::{active_heap, encode, fatal, tagged_arg};
 use crate::eval::interp::{with_active_interp, Interp};
 
 thread_local! {
-    /// The environment snapshot, from [`rt_eval_state`]. A `&'static [u8]`
+    /// The embedded environment dump, from [`rt_eval_state`]. A `&'static [u8]`
     /// because it points into the executable's read-only data.
-    static SNAPSHOT: Cell<Option<&'static [u8]>> = const { Cell::new(None) };
+    static EVAL_DUMP: Cell<Option<&'static [u8]>> = const { Cell::new(None) };
 
     /// The environment [`rt_eval_init`] rebuilt, or null under JIT where the
     /// running `Interp` is used instead.
@@ -54,7 +54,7 @@ thread_local! {
     static AOT_ENV: Cell<*const Interp> = const { Cell::new(std::ptr::null()) };
 }
 
-/// Registers the environment snapshot: `args` is `[ptr, len]`.
+/// Registers the embedded environment dump: `args` is `[ptr, len]`.
 ///
 /// # Safety
 ///
@@ -66,16 +66,16 @@ pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
     }
     let ptr = *args as usize as *const u8;
     let len = *args.add(1) as usize;
-    SNAPSHOT.with(|c| c.set(Some(std::slice::from_raw_parts(ptr, len))));
+    EVAL_DUMP.with(|c| c.set(Some(std::slice::from_raw_parts(ptr, len))));
     0
 }
 
-/// Rebuilds the AOT `eval` environment from the registered snapshot. Called
+/// Rebuilds the AOT `eval` environment from the registered dump. Called
 /// once from the generated `main`, after `rt_heap_init` and before the
 /// program's global-init sequence — see this module's doc comment for why that
 /// position is forced.
 ///
-/// The snapshot was produced by the same `compile-file` run that produced this
+/// The dump was produced by the same `compile-file` run that produced this
 /// executable, so a failure is a bug in the build rather than anything a user
 /// could have caused: it aborts with a message instead of returning an error
 /// nobody could act on.
@@ -85,17 +85,17 @@ pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_eval_init(_args: *const i64, _argc: u32) -> i64 {
-    let bytes = match SNAPSHOT.with(|c| c.get()) {
+    let bytes = match EVAL_DUMP.with(|c| c.get()) {
         Some(b) => b,
-        None => fatal("rt_eval_init: the environment snapshot was never registered"),
+        None => fatal("rt_eval_init: the environment dump was never registered"),
     };
-    let interp = match crate::snapshot::restore(active_heap(), bytes) {
+    let interp = match crate::dump::restore_dump(active_heap(), bytes) {
         Ok(i) => i,
         Err(e) => fatal(&format!("rt_eval_init: {}", e)),
     };
     let interp: &'static Interp = Box::leak(Box::new(interp));
     // The restore above ran `Interp::install_print_hooks` from inside, against
-    // an `Interp` that was still a local of `snapshot::restore`; the leak has
+    // an `Interp` that was still a local of `dump::restore_dump`; the leak has
     // just moved it. Nothing in an AOT process would ever refresh that slot
     // again — there is no compiled-call crossing to do it at — so it has to be
     // re-registered here, at the address it will keep for the rest of the

@@ -4683,7 +4683,7 @@ pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     // silently missing backend (see `eval::interp::set_llvm_builtin_hook`).
     crate::compile::install_llvm_backend();
 
-    let units = crate::compile::dump::parse(ISLAND_DUMP, "compiler island")
+    let units = typelisp_front::dump::parse(ISLAND_DUMP, "compiler island")
         .unwrap_or_else(|e| panic!("compiler: {}", e));
     let unit = units.first().unwrap_or_else(|| panic!("compiler: the committed dump holds no units"));
     let state = crate::compile::dump::read_types(unit, "compiler island")

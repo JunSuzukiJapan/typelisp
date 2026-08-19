@@ -1,109 +1,24 @@
-//! The dump *file*: one unit's checked state and one unit's bitcode, in one
-//! artifact, for as many units as the dump holds.
+//! Loading a dump: applying a unit's checked state and then installing the
+//! native bodies its bitcode section holds.
 //!
-//! The front end owns what a unit means ([`typelisp_front::dump`]); this owns
-//! how it is written down and how the native half gets installed.
-//!
-//! **Why a header rather than appending to the `.bc`.** Adding bytes after a
-//! bitstream and handing the whole file to LLVM is not something the format
-//! promises to tolerate — `llvm-dis` already rejects our artifacts over a
-//! single trailing NUL ("Bitcode stream should be a multiple of 4 bytes in
-//! length"). With a directory of offsets the loader slices out exactly the
-//! bytes `Module::parse_bitcode_from_buffer` was always given, and the file
-//! stays one file.
-
-use std::convert::TryInto;
+//! The container itself — the header, the directory, the byte layout — lives in
+//! the front end too ([`typelisp_front::dump::write`]/`parse`), because an AOT
+//! executable has to read one and links only that crate. What is left here is
+//! the half that needs LLVM: turning a unit's bitcode section into installed
+//! native bodies.
 
 use typelisp_front::dump::{apply_types, UnitItem, UnitState};
 
+
 use crate::compile::symbols::CompiledItem;
 use crate::{Checker, Heap, Interp};
-
-/// Identifies the file and, with [`FORMAT_VERSION`], what is in it.
-pub const MAGIC: &[u8; 6] = b"TYPLD\0";
-
-/// The container's own version, distinct from
-/// [`typelisp_front::dump::FORMAT_VERSION`] (the unit payload's): a change to
-/// the directory layout and a change to what a unit records are different
-/// events, and either one alone should be able to reject an old file.
-pub const FORMAT_VERSION: u32 = 1;
-
-const HEADER: usize = 6 + 4 + 4;
-const DIRECTORY_ENTRY: usize = 8 * 4;
-
-/// One unit as it sits in a dump: the bytes of its checked state, and the
-/// bitcode holding the bodies that state describes.
-///
-/// Borrowed, not owned: the prelude's and island's dumps are `include_bytes!`
-/// statics, and the bitcode is handed straight to LLVM, which copies it into
-/// its own `MemoryBuffer` anyway.
-pub struct UnitRef<'a> {
-    pub types: &'a [u8],
-    pub bitcode: &'a [u8],
-}
-
-/// Lays out `units` as a dump.
-pub fn write(units: &[(Vec<u8>, Vec<u8>)]) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.extend_from_slice(MAGIC);
-    out.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
-    out.extend_from_slice(&(units.len() as u32).to_le_bytes());
-
-    let mut offset = (HEADER + DIRECTORY_ENTRY * units.len()) as u64;
-    for (types, bitcode) in units {
-        for section in [types, bitcode] {
-            out.extend_from_slice(&offset.to_le_bytes());
-            out.extend_from_slice(&(section.len() as u64).to_le_bytes());
-            offset += section.len() as u64;
-        }
-    }
-    for (types, bitcode) in units {
-        out.extend_from_slice(types);
-        out.extend_from_slice(bitcode);
-    }
-    out
-}
-
-/// Reads a dump's directory, without touching the payloads.
-pub fn parse<'a>(bytes: &'a [u8], label: &str) -> Result<Vec<UnitRef<'a>>, String> {
-    if bytes.len() < HEADER || &bytes[..6] != MAGIC {
-        return Err(format!("{}: not a typelisp dump", label));
-    }
-    let version = u32::from_le_bytes(bytes[6..10].try_into().expect("4 bytes"));
-    if version != FORMAT_VERSION {
-        return Err(format!(
-            "{}: dump container version {}, expected {} — the file and this build are from \
-             different sources",
-            label, version, FORMAT_VERSION
-        ));
-    }
-    let count = u32::from_le_bytes(bytes[10..14].try_into().expect("4 bytes")) as usize;
-    let directory_end = HEADER + DIRECTORY_ENTRY * count;
-    if bytes.len() < directory_end {
-        return Err(format!("{}: dump claims {} units but ends inside its directory", label, count));
-    }
-
-    let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().expect("8 bytes")) as usize;
-    let mut units = Vec::with_capacity(count);
-    for i in 0..count {
-        let base = HEADER + DIRECTORY_ENTRY * i;
-        let section = |half: usize| -> Result<&[u8], String> {
-            let (off, len) = (word(base + half * 16), word(base + half * 16 + 8));
-            bytes
-                .get(off..off + len)
-                .ok_or_else(|| format!("{}: dump unit {} points past the end of the file", label, i))
-        };
-        units.push(UnitRef { types: section(0)?, bitcode: section(1)? });
-    }
-    Ok(units)
-}
 
 /// Reads one unit's checked state, without applying it.
 ///
 /// Split out from [`load_unit`] because a caller with a source to check
 /// against (`prelude_bootstrap::load` and the island's) has to see
 /// `source_digest` *before* anything is applied.
-pub fn read_types(unit: &UnitRef, label: &str) -> Result<UnitState, String> {
+pub fn read_types(unit: &typelisp_front::dump::UnitRef, label: &str) -> Result<UnitState, String> {
     typelisp_front::dump::read_state(unit.types, label)
 }
 
@@ -174,4 +89,78 @@ pub fn load_unit(
             expected_hash: None,
         },
     )
+}
+
+/// Builds the dump an AOT executable embeds to answer `eval`: the prelude's
+/// unit, copied verbatim from the committed artifact, followed by the program's
+/// own.
+///
+/// Only the checked-state halves; both bitcode sections are empty. An eval'd
+/// form runs interpreted — the program's compiled bodies are in the executable's
+/// own object code, reachable by name, and the prelude's are not needed at all.
+///
+/// Run by `compile-file` against a throwaway `Heap`. `globals` is each
+/// `defvar`'s path with the compiled-slot id the machine code addresses it by;
+/// binding them *before* the replay is what makes the program's own `defvar`s
+/// recognizable as somebody else's storage.
+///
+/// # Panics on nothing, fails on everything
+///
+/// Every error here is a build bug — the same source just type-checked — but it
+/// is returned rather than aborted, because the caller is `compile-file` and a
+/// user watching a compile deserves the message with the rest of its
+/// diagnostics.
+pub fn capture_program_dump(
+    heap: &mut Heap,
+    source: &str,
+    globals: &[(String, usize)],
+) -> Result<Vec<u8>, String> {
+    let prelude = typelisp_front::dump::parse(typelisp_front::prelude::DUMP, "prelude")?;
+    let prelude_unit = prelude.first().ok_or_else(|| "prelude: the committed dump holds no units".to_string())?;
+    let prelude_state = typelisp_front::dump::read_state(prelude_unit.types, "prelude")?;
+    typelisp_front::dump::verify_digest(&prelude_state, typelisp_front::prelude::SOURCE, typelisp_front::prelude::REGEN_SCRIPT)?;
+
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    // The prelude's *checked state*, not a fresh interpreted load of its
+    // source: this is the same environment, reached without reading and
+    // type-checking 114KB of Lisp at every `compile-file`. Its `globals` are
+    // deliberately left unbound — this executable never compiled the prelude,
+    // so nothing made compiled storage for them, and the `defvar`s applied
+    // above put their values where an interpreted `eval` reads them.
+    apply_types(heap, &mut chk, &mut interp, prelude_state)?;
+
+    let before = chk.signature(heap)?;
+    typelisp_front::dump::bind_globals(&interp, globals);
+
+    // Collected as they are checked, and each one rooted for the whole of this
+    // function: `exec` permanently roots a definition's *body*, not the
+    // top-level node this list holds, and a later form's checking allocates.
+    let mark = heap.root_count();
+    let mut forms: Vec<crate::Value> = Vec::new();
+    let reader = crate::Reader::new();
+    let program = reader.read_all_in(heap, typelisp_front::dump::PROGRAM_LABEL, source).map_err(|e| e.to_string())?;
+    chk.predeclare_program(heap, &program);
+    for v in program {
+        let tl = chk.check_form(heap, &interp, v).map_err(|e| e.to_string())?;
+        // The warnings were already reported by the caller's own check of this
+        // same source; repeating them would double every one.
+        let _ = chk.take_warnings();
+        heap.push_root(tl);
+        forms.push(tl);
+        if typelisp_front::dump::already_initialized_global(heap, &interp, tl) {
+            continue;
+        }
+        interp.exec(heap, tl).map_err(|e| e.to_string())?;
+    }
+
+    let delta = chk.capture_delta(heap, &before)?;
+    let state = typelisp_front::dump::capture_types(heap, delta, typelisp_front::dump::PROGRAM_LABEL, None, None, &forms, Vec::new(), globals.to_vec())?;
+    while heap.root_count() > mark {
+        heap.pop_root();
+    }
+    Ok(typelisp_front::dump::write(&[
+        (prelude_unit.types.to_vec(), Vec::new()),
+        (typelisp_front::dump::write_state(&state)?, Vec::new()),
+    ]))
 }

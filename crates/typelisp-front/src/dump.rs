@@ -31,6 +31,7 @@
 //! which only `typl-lsp` reads.
 
 use std::collections::hash_map::DefaultHasher;
+use std::convert::TryInto;
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
@@ -163,6 +164,85 @@ impl RegistrySignature {
         }
         out
     }
+}
+
+/// Identifies the file and, with [`FORMAT_VERSION`], what is in it.
+pub const MAGIC: &[u8; 6] = b"TYPLD\0";
+
+/// The container's own version, distinct from [`FORMAT_VERSION`] (the unit
+/// payload's): a change to the directory layout and a change to what a unit
+/// records are different events, and either one alone should be able to reject
+/// an old file.
+pub const CONTAINER_VERSION: u32 = 1;
+
+const HEADER: usize = 6 + 4 + 4;
+const DIRECTORY_ENTRY: usize = 8 * 4;
+
+/// One unit as it sits in a dump: the bytes of its checked state, and the
+/// bitcode holding the bodies that state describes.
+///
+/// Borrowed, not owned: the prelude's and island's dumps are `include_bytes!`
+/// statics, and the bitcode is handed straight to LLVM, which copies it into
+/// its own `MemoryBuffer` anyway.
+pub struct UnitRef<'a> {
+    pub types: &'a [u8],
+    pub bitcode: &'a [u8],
+}
+
+/// Lays out `units` as a dump.
+pub fn write(units: &[(Vec<u8>, Vec<u8>)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(MAGIC);
+    out.extend_from_slice(&CONTAINER_VERSION.to_le_bytes());
+    out.extend_from_slice(&(units.len() as u32).to_le_bytes());
+
+    let mut offset = (HEADER + DIRECTORY_ENTRY * units.len()) as u64;
+    for (types, bitcode) in units {
+        for section in [types, bitcode] {
+            out.extend_from_slice(&offset.to_le_bytes());
+            out.extend_from_slice(&(section.len() as u64).to_le_bytes());
+            offset += section.len() as u64;
+        }
+    }
+    for (types, bitcode) in units {
+        out.extend_from_slice(types);
+        out.extend_from_slice(bitcode);
+    }
+    out
+}
+
+/// Reads a dump's directory, without touching the payloads.
+pub fn parse<'a>(bytes: &'a [u8], label: &str) -> Result<Vec<UnitRef<'a>>, String> {
+    if bytes.len() < HEADER || &bytes[..6] != MAGIC {
+        return Err(format!("{}: not a typelisp dump", label));
+    }
+    let version = u32::from_le_bytes(bytes[6..10].try_into().expect("4 bytes"));
+    if version != CONTAINER_VERSION {
+        return Err(format!(
+            "{}: dump container version {}, expected {} — the file and this build are from \
+             different sources",
+            label, version, CONTAINER_VERSION
+        ));
+    }
+    let count = u32::from_le_bytes(bytes[10..14].try_into().expect("4 bytes")) as usize;
+    let directory_end = HEADER + DIRECTORY_ENTRY * count;
+    if bytes.len() < directory_end {
+        return Err(format!("{}: dump claims {} units but ends inside its directory", label, count));
+    }
+
+    let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().expect("8 bytes")) as usize;
+    let mut units = Vec::with_capacity(count);
+    for i in 0..count {
+        let base = HEADER + DIRECTORY_ENTRY * i;
+        let section = |half: usize| -> Result<&[u8], String> {
+            let (off, len) = (word(base + half * 16), word(base + half * 16 + 8));
+            bytes
+                .get(off..off + len)
+                .ok_or_else(|| format!("{}: dump unit {} points past the end of the file", label, i))
+        };
+        units.push(UnitRef { types: section(0)?, bitcode: section(1)? });
+    }
+    Ok(units)
 }
 
 /// A generic `defun`'s retained source form, heap-independent.
@@ -626,7 +706,7 @@ pub fn bind_globals(interp: &crate::Interp, globals: &[(String, usize)]) {
 /// Through `core::path_field`, not by matching `Value::Path`: a root-level name
 /// is stored as a bare `Value::Symbol`, so reading the field by hand silently
 /// misses every unqualified global — which is most of them.
-fn already_initialized_global(heap: &crate::Heap, interp: &crate::Interp, tl: crate::Value) -> bool {
+pub fn already_initialized_global(heap: &crate::Heap, interp: &crate::Interp, tl: crate::Value) -> bool {
     if crate::check::core::op(heap, tl) != Some("defvar") {
         return false;
     }
@@ -694,4 +774,41 @@ pub fn verify_digest(state: &UnitState, source: &str, regen_script: &str) -> Res
             state.label, regen_script
         )),
     }
+}
+
+/// The label a program's own unit carries in an AOT executable's embedded dump.
+///
+/// Meaningful, not cosmetic: it is how [`restore_dump`] tells the unit whose
+/// globals the compiled program made storage for from the prelude unit ahead of
+/// it, whose `defvar`s the executable never compiled and which therefore have
+/// to run here.
+pub const PROGRAM_LABEL: &str = "<program>";
+
+/// Rebuilds an embedded environment dump in `heap` — the inverse of
+/// `compile::dump::capture_program_dump`, which is what wrote it.
+///
+/// Applies each unit in order. No bitcode is installed — a dump embedded in an
+/// executable carries none, and this crate has no installer anyway.
+pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8]) -> Result<crate::Interp, String> {
+    let mut chk = crate::Checker::new();
+    // Before anything runs: `Interp::new` resets the runtime global table
+    // (`typelisp_rt::reset_global_table`), which is why an AOT program's startup
+    // calls this ahead of its own global-init sequence.
+    let mut interp = crate::Interp::new();
+
+    for unit in parse(bytes, "eval environment")? {
+        let state = read_state(unit.types, "eval environment")?;
+        // Only the program's own globals are somebody else's storage. Every
+        // earlier unit describes globals this executable never compiled, and
+        // binding those would make their `defvar`s look already-initialized and
+        // skip the assignment that gives them a value at all.
+        if state.label == PROGRAM_LABEL {
+            bind_globals(&interp, &state.globals);
+        }
+        apply_types(heap, &mut chk, &mut interp, state)?;
+    }
+
+    chk.take_warnings();
+    interp.set_checker(std::rc::Rc::new(std::cell::RefCell::new(chk)));
+    Ok(interp)
 }

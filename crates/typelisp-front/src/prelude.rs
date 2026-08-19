@@ -76,6 +76,11 @@ use crate::{Checker, Heap, Interp, Reader, Value};
 /// The bitcode half is opaque here — nothing in this crate parses it.
 pub const DUMP: &[u8] = include_bytes!("prelude.typld");
 
+/// What to run when [`DUMP`] no longer matches [`SOURCE`]. Lives here, next to
+/// both, so the backend's loader and the front end's `eval`-environment builder
+/// name the same script.
+pub const REGEN_SCRIPT: &str = "scripts/regen-prelude-bitcode.sh";
+
 pub const SOURCE: &str = r##"
 ;; `not`: moved here from a Rust builtin (it has no dependency on the GC
 ;; heap or anything else Rust-only — a plain `if`/`bool` round trip) so it

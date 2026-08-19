@@ -9,10 +9,9 @@
 //! compiler island, so this artifact goes stale when the island changes, and
 //! the digest below covers only `prelude.rs`.
 
-use typelisp::compile::dump::parse;
 use typelisp::compile::llvm_context;
 use typelisp::compile::prelude_bootstrap::build_prelude_artifact;
-use typelisp::dump::{read_state, source_digest};
+use typelisp::dump::{parse, read_state, source_digest};
 
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::Module;

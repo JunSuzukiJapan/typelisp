@@ -140,7 +140,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
     crate::compile::driver::install_compiled_library(&interp, crate::compile::CompiledLibrary {
             label: "compiler island",
             regen_script: "scripts/regen-compiler-island.sh",
-            bitcode: crate::compile::dump::parse(crate::compiler::ISLAND_DUMP, "compiler island")?
+            bitcode: typelisp_front::dump::parse(crate::compiler::ISLAND_DUMP, "compiler island")?
                 .first()
                 .ok_or_else(|| "island: the committed dump holds no units".to_string())?
                 .bitcode,
@@ -234,7 +234,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         Vec::new(),
     )?;
     let types = typelisp_front::dump::write_state(&state)?;
-    Ok(crate::compile::dump::write(&[(types, bitcode)]))
+    Ok(typelisp_front::dump::write(&[(types, bitcode)]))
 }
 
 /// The island's staleness key: a hash of what the reader *read*, not of the

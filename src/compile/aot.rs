@@ -273,18 +273,18 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         module_calls_any(&m, &EVAL_SHIMS)
     };
     // The `eval` environment, built here rather than at the executable's
-    // startup: this is the same prelude load and the same check of the same
-    // source that a startup rebuild would do, and doing it once at compile time
-    // is the whole point (`typelisp_front::snapshot`).
+    // startup: the prelude's checked state comes straight out of the committed
+    // prelude dump, and this source's own is checked once, at compile time
+    // (`typelisp_front::dump::capture_program_dump`).
     //
-    // Its own throwaway `Heap`, and after `eval_globals` is read: `capture`
+    // Its own throwaway `Heap`, and after `eval_globals` is read: the capture
     // creates an `Interp`, and `Interp::new` resets the runtime global table.
     // Nothing below consults it — `build_main_wrapper` emits ids as constants
     // and `write_executable` links — and `compile_file` already reset it once
     // at the top for its own `interp`.
-    let eval_snapshot: Option<Vec<u8>> = if calls_eval {
-        let mut snap_heap = Heap::with_capacity(EVAL_HEAP_CAPACITY);
-        Some(typelisp_front::snapshot::capture(&mut snap_heap, &source, &eval_globals)?)
+    let eval_env: Option<Vec<u8>> = if calls_eval {
+        let mut env_heap = Heap::with_capacity(EVAL_HEAP_CAPACITY);
+        Some(crate::compile::dump::capture_program_dump(&mut env_heap, &source, &eval_globals)?)
     } else {
         None
     };
@@ -300,7 +300,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &interp.upcast_descriptors(),
             &interp.enum_variant_descriptors(),
             &print_objects,
-            eval_snapshot.as_deref(),
+            eval_env.as_deref(),
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
             .and_then(|()| write_executable(&m, output_path))
@@ -507,7 +507,7 @@ fn build_main_wrapper(
     // checker and the interpreter into the executable.
     if let Some(bytes) = eval_env {
         let i64_ty = ctx.i64_type();
-        let blob = module.add_global(ctx.i8_type().array_type(bytes.len() as u32), None, "typelisp_eval_snapshot");
+        let blob = module.add_global(ctx.i8_type().array_type(bytes.len() as u32), None, "typelisp_eval_env");
         blob.set_initializer(&ctx.const_string(bytes, false));
         blob.set_constant(true);
         call_shim(
@@ -578,7 +578,7 @@ fn build_main_wrapper(
 
 /// What `compile-file` hands `build_main_wrapper` for a program that calls
 /// `eval`: the environment, already built and serialized
-/// (`typelisp_front::snapshot`).
+/// (`typelisp_front::dump`).
 
 /// The cons-cell arena an `eval`-carrying executable asks `rt_heap_init` for.
 /// Its startup reads, checks and runs the whole prelude plus the program's own

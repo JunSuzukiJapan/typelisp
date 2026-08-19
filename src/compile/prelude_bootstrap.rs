@@ -55,7 +55,7 @@ use crate::{EvalError, Heap, Interp, Path, Value};
 /// any failure here is a build/bug condition rather than a user error — hence
 /// the panics.
 pub fn load(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Interp) {
-    let units = crate::compile::dump::parse(crate::prelude::DUMP, "prelude")
+    let units = typelisp_front::dump::parse(crate::prelude::DUMP, "prelude")
         .unwrap_or_else(|e| panic!("prelude: {}", e));
     let unit = units.first().unwrap_or_else(|| panic!("prelude: the committed dump holds no units"));
     let state =
@@ -70,7 +70,7 @@ pub fn load(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Interp) {
 }
 
 /// What to run when the committed dump no longer matches `SOURCE`.
-pub const REGEN_SCRIPT: &str = "scripts/regen-prelude-bitcode.sh";
+pub use crate::prelude::REGEN_SCRIPT;
 
 /// [`crate::prelude::load_interpreted`], collecting along the way everything a
 /// compiled artifact has to know about the prelude.
@@ -429,7 +429,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         globals,
     )?;
     let types = typelisp_front::dump::write_state(&state)?;
-    Ok(crate::compile::dump::write(&[(types, bitcode)]))
+    Ok(typelisp_front::dump::write(&[(types, bitcode)]))
 }
 
 /// One compiled definition in the form a dump records it.
