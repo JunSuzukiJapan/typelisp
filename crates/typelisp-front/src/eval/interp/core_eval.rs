@@ -1849,6 +1849,21 @@ impl Interp {
     /// specializations), so the two "must never run" special cases the old
     /// `exec` carried have nothing left to skip.
     pub fn exec(&self, heap: &mut Heap, tl: Value) -> Result<Option<Value>, EvalError> {
+        let result = self.exec_form(heap, tl);
+        // After the form has run, not before: a session's recording
+        // (`(dump ...)`) is a list of definitions that worked. At *every*
+        // depth, because a `(module ...)`'s items come back through here and
+        // each one records itself — the container records nothing, which is
+        // what keeps a file-derived module from dragging its top-level
+        // expressions (including the `(dump ...)` call itself) into the dump.
+        if result.is_ok() {
+            self.note_definitions(heap, tl);
+        }
+        result
+    }
+
+    /// [`Self::exec`]'s body, one top-level form.
+    fn exec_form(&self, heap: &mut Heap, tl: Value) -> Result<Option<Value>, EvalError> {
         let tag = match heap.car(tl) {
             Ok(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
             _ => {

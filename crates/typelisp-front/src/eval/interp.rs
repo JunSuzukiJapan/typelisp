@@ -212,6 +212,21 @@ pub struct Interp {
     /// The values currently being rendered by their own `print-object`
     /// method, innermost last — [`Self::print_object`]'s re-entry guard.
     pub(crate) printing: RefCell<Vec<Value>>,
+    /// The dumps whose units this environment was built from, in the order
+    /// they were applied — the bytes `(dump ...)` re-emits ahead of the
+    /// session's own unit, so that what it writes is self-contained.
+    ///
+    /// `Cow` rather than `Vec<u8>`: the prelude's and island's are
+    /// `include_bytes!` statics (4MB between them, borrowed for free), while a
+    /// `typl --image` load owns what it read.
+    dump_sources: RefCell<Vec<std::borrow::Cow<'static, [u8]>>>,
+    /// What this session has defined since [`Self::start_recording`], and the
+    /// checker signature it started from — the two halves `(dump ...)` needs
+    /// to write the session's own unit.
+    ///
+    /// `None` until a driver turns it on, which is what keeps the definitions
+    /// arriving from the loaded units themselves out of it.
+    recording: RefCell<Option<Recording>>,
     /// Trait-object vtables, interpreter tier: `vtable_id` -> the call
     /// targets for the trait's methods, in slot order (`dyn-new`'s
     /// `slots`, which the checker laid out from `TraitDef::method_order`).
@@ -383,6 +398,69 @@ impl Interp {
             trait_ids: RefCell::new(HashMap::new()),
             dyn_dispatch_compiled: RefCell::new(HashSet::new()),
             printing: RefCell::new(Vec::new()),
+            dump_sources: RefCell::new(Vec::new()),
+            recording: RefCell::new(None),
+        }
+    }
+
+    /// A shared handle to the live `Checker`, for the paths that need to check
+    /// or capture against this environment (`(dump ...)`). `None` where no
+    /// driver wired one — see the `checker` field.
+    pub fn checker_handle(&self) -> Option<Rc<RefCell<crate::check::Checker>>> {
+        self.checker.clone()
+    }
+
+    /// Records that this environment came from `bytes` — a dump whose units
+    /// have just been applied.
+    pub fn push_dump_source(&self, bytes: std::borrow::Cow<'static, [u8]>) {
+        self.dump_sources.borrow_mut().push(bytes);
+    }
+
+    /// Runs `f` over the dumps this environment was built from.
+    pub fn with_dump_sources<R>(&self, f: impl FnOnce(&[std::borrow::Cow<'static, [u8]>]) -> R) -> R {
+        f(&self.dump_sources.borrow())
+    }
+
+    /// Starts recording what this session defines, from a checker signature
+    /// taken now.
+    ///
+    /// Called by a driver once its environment is fully loaded and before it
+    /// runs a line of user code: everything after this point is the session's,
+    /// and everything before it belongs to a unit that is already written down.
+    pub fn start_recording(&self, baseline: crate::dump::RegistrySignature) {
+        *self.recording.borrow_mut() =
+            Some(Recording { baseline, forms: Vec::new(), globals_before: self.compiled_globals.borrow().len() });
+    }
+
+    /// Whether [`Self::start_recording`] has been called.
+    pub fn is_recording(&self) -> bool {
+        self.recording.borrow().is_some()
+    }
+
+    /// Runs `f` over this session's recording, or fails if there is none.
+    pub fn with_recording<R>(
+        &self,
+        f: impl FnOnce(&crate::dump::RegistrySignature, &[Value], usize) -> R,
+    ) -> Option<R> {
+        let r = self.recording.borrow();
+        let r = r.as_ref()?;
+        Some(f(&r.baseline, &r.forms, r.globals_before))
+    }
+
+    /// Adds `tl`'s definitions to the recording, if there is one.
+    ///
+    /// Called by [`Self::exec`] after a successful top-level form. Each
+    /// recorded node is rooted for the rest of the session: `exec` permanently
+    /// roots a definition's *body*, not the top-level node, and `(dump ...)`
+    /// reads these nodes long afterwards.
+    pub(crate) fn note_definitions(&self, heap: &mut Heap, tl: Value) {
+        let mut recording = self.recording.borrow_mut();
+        let Some(recording) = recording.as_mut() else { return };
+        let mut found = Vec::new();
+        crate::dump::record_definitions(heap, tl, &mut found);
+        for v in found {
+            heap.push_root(v);
+            recording.forms.push(v);
         }
     }
 
@@ -1560,6 +1638,23 @@ impl Interp {
                     .compile_file)(&source_path, &output_path)
                         .map(|()| Value::Bool(true))
                         .map_err(|e| EvalError::Panic(format!("compile-file: {}", e))),
+                )
+            }
+            // `(dump "path")`: this session's environment, written where
+            // `typl --image` can pick it up — see `compile::dump::dump_image`.
+            "dump" => {
+                let path = match expect_str(heap, &args[0]) {
+                    Ok(s) => s.to_string(),
+                    Err(e) => return Some(Err(e)),
+                };
+                let backend = match backend("dump") {
+                    Ok(b) => b,
+                    Err(e) => return Some(Err(e)),
+                };
+                Some(
+                    (backend.dump_image)(self, heap, &path)
+                        .map(|()| Value::Bool(true))
+                        .map_err(EvalError::Panic),
                 )
             }
             name if name.starts_with("stream-") || name.starts_with("file-") => {
@@ -2963,6 +3058,18 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[
 }
 
 
+/// What a session has defined since it started recording.
+struct Recording {
+    /// The checker signature as of the moment recording started — the "before"
+    /// side of the delta `(dump ...)` writes.
+    baseline: crate::dump::RegistrySignature,
+    /// The definitions, in the order they were executed, each rooted.
+    forms: Vec<Value>,
+    /// How many globals had compiled slots before the session began; the ones
+    /// past this are the session's own.
+    globals_before: usize,
+}
+
 /// Everything the interpreter needs from the LLVM backend, as plain `fn`
 /// pointers.
 ///
@@ -2989,6 +3096,8 @@ pub struct Backend {
     pub compile_function: fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>,
     /// `(compile-file source output)`.
     pub compile_file: fn(&str, &str) -> Result<(), String>,
+    /// `(dump path)`.
+    pub dump_image: fn(&Interp, &mut Heap, &str) -> Result<(), String>,
 }
 
 thread_local! {

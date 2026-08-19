@@ -4689,6 +4689,7 @@ pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     let state = crate::compile::dump::read_types(unit, "compiler island")
         .unwrap_or_else(|e| panic!("compiler: {}", e));
     typelisp_front::dump::verify_digest(&state, SOURCE, REGEN_SCRIPT).unwrap_or_else(|e| panic!("{}", e));
-    crate::compile::dump::load_unit(heap, chk, interp, state, unit.bitcode, REGEN_SCRIPT)
+    crate::compile::dump::load_unit(heap, chk, interp, state, unit.bitcode)
         .unwrap_or_else(|e| panic!("compiler: {}", e));
+    interp.push_dump_source(std::borrow::Cow::Borrowed(ISLAND_DUMP));
 }

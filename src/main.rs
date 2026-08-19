@@ -36,12 +36,43 @@ fn main() -> rustyline::Result<()> {
     // defaults (see `Features::host`) — typelisp's equivalent of pushing onto
     // CL's `*features*` before loading.
     let (features, args) = parse_features(args);
+    // A global `--image FILE` (or `--image=FILE`) starts from a dump written by
+    // `(dump ...)` instead of the prelude and island compiled into this binary.
+    let (image, args) = parse_image(args);
     // The first non-flag argument names a source file to run;
     // with none, start the REPL.
     if let Some(file) = args.iter().find(|a| !a.starts_with("--")) {
-        std::process::exit(run_file(file, heap_cells, features));
+        std::process::exit(run_file(file, heap_cells, features, image));
     }
-    repl(heap_cells, features)
+    repl(heap_cells, features, image)
+}
+
+/// Parses a global `--image FILE` / `--image=FILE` flag out of `args`,
+/// returning the path and the remaining arguments with the flag removed.
+///
+/// Exits with a diagnostic on a missing value, for the same reason
+/// [`parse_heap_cells`] does: a typo here silently starts a different
+/// environment than the one asked for. A later occurrence wins.
+fn parse_image(args: Vec<String>) -> (Option<PathBuf>, Vec<String>) {
+    let mut image = None;
+    let mut rest = Vec::with_capacity(args.len());
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--image" {
+            match it.next() {
+                Some(v) => image = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--image: needs a path to a dump");
+                    std::process::exit(1);
+                }
+            }
+        } else if let Some(v) = a.strip_prefix("--image=") {
+            image = Some(PathBuf::from(v));
+        } else {
+            rest.push(a);
+        }
+    }
+    (image, rest)
 }
 
 /// Parses zero or more `--feature NAME` / `--feature=NAME` flags out of
@@ -111,20 +142,58 @@ fn parse_heap_cells_value(v: &str) -> usize {
     }
 }
 
+/// Brings up the environment a session runs in, and starts recording what that
+/// session defines.
+///
+/// Either the prelude and compiler island compiled into this binary (the
+/// island always: interp-closure removal Stage 5 means a closure defined at
+/// runtime is JIT-compiled at definition time rather than falling back to an
+/// interpreted one), or, with `--image`, a dump written by `(dump ...)`.
+///
+/// The recording baseline is taken here, once the environment is complete and
+/// before a line of user code runs — everything after this point is the
+/// session's, and everything before it belongs to a unit already written down.
+/// It costs ~14ms over ~630 entries (`typl-bench-prelude`), which is what
+/// `(dump ...)` costs a session that never calls it.
+fn load_environment(
+    heap: &mut Heap,
+    checker: &mut Checker,
+    interp: &mut Interp,
+    image: Option<PathBuf>,
+) -> Result<(), String> {
+    match image {
+        Some(path) => {
+            let bytes = std::fs::read(&path).map_err(|e| format!("--image {}: {}", path.display(), e))?;
+            typelisp::compile::dump::load_image(
+                heap,
+                checker,
+                interp,
+                std::borrow::Cow::Owned(bytes),
+                &path.display().to_string(),
+            )?;
+        }
+        None => {
+            load_prelude(heap, checker, interp);
+            typelisp::load_compiler_aot(heap, checker, interp);
+        }
+    }
+    interp.start_recording(checker.signature(heap)?);
+    Ok(())
+}
+
 /// Load and execute `file` (and, transitively, whatever its `use`s pull in).
 /// Returns the process exit code. Top-level expression results are not
 /// printed — printing is the REPL's affordance; a script prints via `print`.
-fn run_file(file: &str, heap_cells: usize, features: Vec<String>) -> i32 {
+fn run_file(file: &str, heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> i32 {
     let mut heap = Heap::with_capacity(heap_cells);
     let reader = Reader::with_features(features);
     let mut checker = Checker::new();
     checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
-    load_prelude(&mut heap, &mut checker, &mut interp);
-    // The compiler island is always loaded (interp-closure removal Stage 5),
-    // as native AOT code, so any closure this file defines is JIT-compiled at
-    // definition time rather than falling back to an interpreted closure.
-    typelisp::load_compiler_aot(&mut heap, &mut checker, &mut interp);
+    if let Err(e) = load_environment(&mut heap, &mut checker, &mut interp, image) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
 
     let file = PathBuf::from(file);
     let dir = file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
@@ -170,7 +239,7 @@ fn run_file(file: &str, heap_cells: usize, features: Vec<String>) -> i32 {
     0
 }
 
-fn repl(heap_cells: usize, features: Vec<String>) -> rustyline::Result<()> {
+fn repl(heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> rustyline::Result<()> {
     let mut heap = Heap::with_capacity(heap_cells);
     let reader = Reader::with_features(features);
     // The checker lives behind a shared `RefCell` so the interpreter can reach
@@ -181,11 +250,10 @@ fn repl(heap_cells: usize, features: Vec<String>) -> rustyline::Result<()> {
     let checker = Rc::new(RefCell::new(Checker::new()));
     checker.borrow_mut().set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
-    load_prelude(&mut heap, &mut checker.borrow_mut(), &mut interp);
-    // The compiler island is always loaded (interp-closure removal Stage 5),
-    // as native AOT code, so a closure typed at the REPL is JIT-compiled at
-    // definition time rather than falling back to an interpreted closure.
-    typelisp::load_compiler_aot(&mut heap, &mut checker.borrow_mut(), &mut interp);
+    if let Err(e) = load_environment(&mut heap, &mut checker.borrow_mut(), &mut interp, image) {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    }
     // Wire the interpreter to the checker now that loading is done, so
     // `(eval ...)` at the REPL type-checks against the live environment.
     interp.set_checker(Rc::clone(&checker));

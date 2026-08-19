@@ -65,8 +65,11 @@ pub fn load(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Interp) {
     // no longer has, and leave an edit looking like it did nothing.
     typelisp_front::dump::verify_digest(&state, crate::prelude::SOURCE, REGEN_SCRIPT)
         .unwrap_or_else(|e| panic!("{}", e));
-    crate::compile::dump::load_unit(heap, chk, interp, state, unit.bitcode, REGEN_SCRIPT)
+    crate::compile::dump::load_unit(heap, chk, interp, state, unit.bitcode)
         .unwrap_or_else(|e| panic!("prelude: {}", e));
+    // Remembered so `(dump ...)` can re-emit this unit ahead of the session's
+    // own; borrowed, since it is a static in this binary.
+    interp.push_dump_source(std::borrow::Cow::Borrowed(crate::prelude::DUMP));
 }
 
 /// What to run when the committed dump no longer matches `SOURCE`.

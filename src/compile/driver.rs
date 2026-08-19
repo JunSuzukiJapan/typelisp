@@ -56,14 +56,10 @@ use crate::CompileTarget;
 /// `rt_llvm_call`), so `externals` is exactly [`rt_extern_functions`] —
 /// the same set `compile_scc` supplies for a JIT'd SCC.
 ///
-/// [`CompiledLibrary::expected_hash`] selects between the two staleness
-/// needs. A runtime loader passes `Some`, and a mismatch hard-errors: a
-/// stale committed `.bc` (someone edited the source without regenerating)
-/// must never be silently loaded as wrong-version native bodies. A
-/// bootstrap regenerator passes `None` because it *deliberately* loads the
-/// committed — necessarily older — `.bc` to compile a possibly-changed
-/// source with it (the island's snapshot chain), so a mismatch is
-/// expected, not an error.
+/// Staleness is not this function's question: a dump's bitcode and its checked
+/// state are written by one pass into one file, and the source both came from
+/// is checked against the dump's own digest before a loader gets here
+/// (`compile::dump::load_unit`'s callers).
 ///
 /// `items` is what the caller *would like* installed; what actually gets
 /// installed is whatever of that the artifact has a body for. See the
@@ -73,17 +69,6 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
     let buffer = MemoryBuffer::create_from_memory_range_copy(lib.bitcode, lib.label);
     let module = Module::parse_bitcode_from_buffer(&buffer, crate::compile::llvm_context())
         .map_err(|e| format!("{} bitcode failed to parse: {}", lib.label, e))?;
-
-    if let Some((hash_global, expected)) = lib.expected_hash {
-        let embedded = crate::compile::bootstrap::read_embedded_source_hash(&module, hash_global)
-            .ok_or_else(|| format!("{} bitcode has no embedded source hash", lib.label))?;
-        if embedded != expected {
-            return Err(format!(
-                "{} bitcode is stale relative to its SOURCE — run {}",
-                lib.label, lib.regen_script
-            ));
-        }
-    }
 
     // The artifact decides what it carries. An item with no *body* here
     // either was never compilable (the prelude's stream methods, whose

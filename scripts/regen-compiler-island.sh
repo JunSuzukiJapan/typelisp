@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Regenerates the committed compiler-island AOT artifact
-# (src/compiler_island.bc) from compiler.rs's SOURCE. Run this whenever you
+# Regenerates the committed compiler-island dump
+# (src/compiler_island.typld: checked state + bitcode) from compiler.rs's SOURCE. Run this whenever you
 # edit that SOURCE; the `island_artifacts_are_fresh` test fails until the
 # artifact matches. Interp-closure removal Stage 3.
 #

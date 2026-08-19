@@ -44,6 +44,7 @@ pub fn install_llvm_backend() {
         handle_is_live: |h| llvm_builtins::llvm_handle_get(h).is_some(),
         compile_function: driver::compile_function,
         compile_file: aot::compile_file,
+        dump_image: dump::dump_image,
     });
 }
 pub mod prelude_bootstrap;
@@ -52,25 +53,15 @@ pub mod symbols;
 /// One precompiled bitcode artifact, ready to install into an `Interp` —
 /// everything `Interp::install_compiled_library` needs to know about it.
 ///
-/// A struct rather than five positional parameters because the two artifacts
-/// (the compiler island and the prelude) differ in every field, and the two
-/// *modes* each is installed in — a hash-checked runtime load, and a
-/// bootstrap load of the previous generation — differ only in
-/// [`Self::expected_hash`]. Naming that difference is what keeps a
-/// regenerator from accidentally hard-failing on the staleness it creates on
-/// purpose.
+/// A struct rather than four positional parameters because the artifacts that
+/// go through it (the compiler island, the prelude, a session's own compiled
+/// definitions) differ in every field.
 pub struct CompiledLibrary<'a> {
     /// Human-readable name for error messages ("compiler island", "prelude").
     pub label: &'a str,
-    /// What to tell the user to run when the artifact turns out stale.
-    pub regen_script: &'a str,
     pub bitcode: &'a [u8],
     /// Every definition whose native body this artifact carries.
     pub items: &'a [symbols::CompiledItem],
-    /// `(embedded-hash global name, the hash the live source produces)`, or
-    /// `None` to skip the staleness check — see
-    /// `Interp::install_compiled_library` for when each is right.
-    pub expected_hash: Option<(&'a str, u64)>,
 }
 
 /// The shared Rust-only runtime library (`typelisp-rt`, a separate crate —

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Regenerates the committed precompiled-prelude artifact
-# (src/prelude_compiled.bc) from prelude.rs's SOURCE. Run this whenever you
-# edit that SOURCE; the `prelude_artifacts_are_fresh` test fails until the
+# Regenerates the committed prelude dump
+# (crates/typelisp-front/src/prelude.typld: checked state + bitcode) from
+# prelude.rs's SOURCE. Run this whenever you edit that SOURCE; the `prelude_artifacts_are_fresh` test fails until the
 # artifact matches.
 #
 # ORDER MATTERS: the prelude is compiled *by* the compiler island, so a

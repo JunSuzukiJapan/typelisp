@@ -34,7 +34,6 @@ pub fn load_unit(
     interp: &mut Interp,
     state: UnitState,
     bitcode: &[u8],
-    regen_script: &str,
 ) -> Result<(), String> {
     let label = state.label.clone();
     let globals = state.globals.clone();
@@ -79,14 +78,8 @@ pub fn load_unit(
         interp,
         crate::compile::CompiledLibrary {
             label: &label,
-            regen_script,
             bitcode,
             items: &items,
-            // The unit and its bitcode were written by one pass into one file,
-            // so there is no second artifact to have drifted from. What *can*
-            // drift is the source both were built from, and that is checked
-            // against `UnitState::source_digest` before this is reached.
-            expected_hash: None,
         },
     )
 }
@@ -163,4 +156,187 @@ pub fn capture_program_dump(
         (prelude_unit.types.to_vec(), Vec::new()),
         (typelisp_front::dump::write_state(&state)?, Vec::new()),
     ]))
+}
+
+/// `(dump path)`: writes this session's whole environment to one file.
+///
+/// The dumps this environment was loaded from are re-emitted first, unit for
+/// unit and byte for byte, followed by one unit for what the session itself
+/// defined. What comes out is therefore self-contained: `typl --image` on it
+/// rebuilds the same environment from nothing.
+///
+/// **Definitions, not history.** The session's `(println ...)` calls are not in
+/// it, and a global comes back at whatever its `defvar` initializer produces
+/// rather than the value the session last stored — see [`typelisp_front::dump`]
+/// for why that trade (the one place this differs from SBCL's
+/// `save-lisp-and-die`) is what makes stream handles and closures non-problems.
+///
+/// Unlike `save-lisp-and-die`, this does not end the process: nothing here
+/// destroys the image it is writing.
+pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), String> {
+    let checker = interp
+        .checker_handle()
+        .ok_or_else(|| "dump: this environment has no checker — only the CLI and the REPL can dump".to_string())?;
+
+    // The delta and the form list, taken while the recording is borrowed and
+    // nothing else touches the heap.
+    let (delta, forms, globals_before) = interp
+        .with_recording(|baseline, forms, globals_before| {
+            let chk = checker.borrow();
+            Ok::<_, String>((chk.capture_delta(heap, baseline)?, forms.to_vec(), globals_before))
+        })
+        .ok_or_else(|| "dump: this session was not recording what it defines".to_string())??;
+
+    // Every definition the session compiled, re-emitted as bitcode: a JIT'd
+    // body lives in LLVM's memory as an address, and an address is not
+    // something a file can carry (see this module's SBCL comparison). The
+    // island is what translates them, so it has to be loaded — in `typl` it
+    // always is.
+    let mut plan = crate::compile::prelude_bootstrap::PreludePlan::default();
+    for tl in &forms {
+        crate::compile::prelude_bootstrap::collect_item(heap, *tl, &mut plan)?;
+    }
+    let compiled: Vec<CompiledItem> = plan
+        .items
+        .iter()
+        .filter(|item| is_compiled(interp, item))
+        .cloned()
+        .collect();
+    let bitcode = if compiled.is_empty() { Vec::new() } else { emit_bitcode(interp, heap, &compiled)? };
+
+    // The globals this session promoted: ids are handed out sequentially, so
+    // "past where the session started" is exactly its own.
+    let mut globals: Vec<(String, usize)> = interp
+        .compiled_globals
+        .borrow()
+        .iter()
+        .filter(|(_, id)| **id >= globals_before)
+        .map(|(p, id)| (p.to_string(), *id))
+        .collect();
+    globals.sort_by_key(|(_, id)| *id);
+
+    let state = typelisp_front::dump::capture_types(
+        heap,
+        delta,
+        "session",
+        None,
+        None,
+        &forms,
+        compiled.iter().map(crate::compile::prelude_bootstrap::unit_item).collect(),
+        globals,
+    )?;
+
+    let mut units: Vec<(Vec<u8>, Vec<u8>)> = interp.with_dump_sources(|sources| {
+        let mut out = Vec::new();
+        for bytes in sources {
+            for unit in typelisp_front::dump::parse(bytes, "dump")? {
+                out.push((unit.types.to_vec(), unit.bitcode.to_vec()));
+            }
+        }
+        Ok::<_, String>(out)
+    })?;
+    units.push((typelisp_front::dump::write_state(&state)?, bitcode));
+
+    std::fs::write(path, typelisp_front::dump::write(&units))
+        .map_err(|e| format!("dump: writing \"{}\": {}", path, e))
+}
+
+/// Whether the interpreter has a native body for `item`.
+fn is_compiled(interp: &Interp, item: &CompiledItem) -> bool {
+    let def = match item {
+        CompiledItem::Fn(path) => interp.root.borrow().get_fn(path),
+        CompiledItem::Method(type_path, method) => interp.root.borrow().get_method(type_path, method),
+    };
+    def.is_some_and(|d| d.compiled.borrow().is_some())
+}
+
+/// Compiles `items` into one module and serializes it — the same shape the
+/// prelude and island generators build, minus their forward-declaration pass
+/// (a session's definitions were compiled once already, so their call graph is
+/// known to work).
+fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompiledItem]) -> Result<Vec<u8>, String> {
+    use inkwell::AddressSpace;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let ctx = crate::compile::llvm_context();
+    let module = {
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let module = ctx.create_module("session");
+        let ptr_ty = ctx.ptr_type(AddressSpace::default());
+        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        for (name, _) in crate::compile::externs::rt_extern_functions() {
+            module.add_function(name, fn_ty, None);
+        }
+        for item in items {
+            let sym = item.symbol_name();
+            if module.get_function(&sym).is_none() {
+                module.add_function(&sym, fn_ty, None);
+            }
+        }
+        Rc::new(RefCell::new(module))
+    };
+
+    // Without the lock held: `add_compiled_function` takes it per LLVM builtin
+    // call and `Mutex` is not reentrant — the same constraint every other
+    // compile loop in this crate documents.
+    for item in items {
+        let node = item.node_name();
+        crate::compile::driver::add_compiled_function(interp, heap, module.clone(), &node, &item.symbol_name())
+            .map_err(|e| format!("dump: re-compiling `{}` failed: {}", node, e))?;
+    }
+
+    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    let bitcode = {
+        let m = module.borrow();
+        m.verify().map_err(|e| format!("dump: the session module failed verification: {}", e)).map(|()| {
+            // Trailing NUL included by design — see `bootstrap.rs`'s write site.
+            m.write_bitcode_to_memory().as_slice().to_vec()
+        })
+    };
+    // Destroyed with the guard still held, like every other module here.
+    drop(module);
+    bitcode
+}
+
+/// Applies every unit in a dump file, in order — `typl --image`.
+///
+/// `chk`/`interp` must be fresh: a dump is a whole environment, not something
+/// to layer on top of one. The prelude's and island's units are digest-checked
+/// against the sources compiled into *this* binary, so an image written by a
+/// different build is refused rather than half-applied.
+pub fn load_image(
+    heap: &mut Heap,
+    chk: &mut Checker,
+    interp: &mut Interp,
+    bytes: std::borrow::Cow<'static, [u8]>,
+    label: &str,
+) -> Result<(), String> {
+    // The backend has to be available before any unit's bitcode is installed,
+    // and `compiler::load_aot` — which normally does this — is exactly what an
+    // image load replaces.
+    crate::compile::install_llvm_backend();
+
+    for unit in typelisp_front::dump::parse(&bytes, label)? {
+        let state = typelisp_front::dump::read_state(unit.types, label)?;
+        // A unit built from source this binary also carries has to match it.
+        // Which source is decided by the unit's own label, the only thing that
+        // says what it was built from.
+        match state.label.as_str() {
+            "prelude" => typelisp_front::dump::verify_digest(
+                &state,
+                typelisp_front::prelude::SOURCE,
+                typelisp_front::prelude::REGEN_SCRIPT,
+            )?,
+            "compiler island" => typelisp_front::dump::verify_digest(
+                &state,
+                crate::compiler::SOURCE,
+                crate::compiler::REGEN_SCRIPT,
+            )?,
+            _ => {}
+        }
+        load_unit(heap, chk, interp, state, unit.bitcode)?;
+    }
+    interp.push_dump_source(bytes);
+    Ok(())
 }

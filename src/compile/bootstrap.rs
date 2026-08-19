@@ -8,27 +8,21 @@
 //! `src/compiler_island.bc`, which is committed and `include_bytes!`'d by
 //! `load_aot`.
 //!
-//! Only the *native bodies* are committed — no checker/interpreter state.
-//! `load_aot` rebuilds that by re-checking `SOURCE` (registering each
-//! `defun`'s `FnDef`, which allocates no closures — an island body is never
-//! *called* interpreted, only compiled); the bitcode supplies the compiled
-//! function bodies that make those calls native.
-//! A [`SOURCE_HASH_GLOBAL`] i64 global carrying [`island_source_hash`] of
-//! `SOURCE` is embedded in the module so `load_aot` and the
-//! `island_artifacts_are_fresh` test can detect a `.bc` gone stale relative
-//! to `SOURCE`, with no separate sidecar file. That hash covers the *forms*
-//! the reader produced rather than the source bytes, so editing a comment does
-//! not invalidate the artifact — see its doc comment for why the distinction
-//! is worth a reader pass.
+//! Both halves are committed: the checked state the island's definitions
+//! produce, and the bitcode holding their bodies. `load_aot` applies the first
+//! (registering each `defun`'s `FnDef`, which allocates no closures — an island
+//! body is never *called* interpreted, only compiled) and installs the second
+//! over it. The dump records a digest of `SOURCE`, which is what `load_aot` and
+//! `island_artifacts_are_fresh` check for staleness.
 //!
-//! **That hash covers one of the artifact's two inputs.** The bitcode is a
+//! **That digest covers one of the artifact's two inputs.** The bitcode is a
 //! compilation of `SOURCE` *by the Rust-side LLVM builders*
 //! (`eval_llvm_builtin_method`), so changing a builder changes the artifact
 //! just as changing `SOURCE` does. Regenerating after Stage D made this
 //! visible: with `SOURCE` untouched, the emitted indirect apply went from a
 //! `rt_closure_fnptr` + env-loop + indirect-call sequence to a single
-//! `rt_apply_any` call, and the committed `.bc` had been carrying the old one
-//! with nothing complaining.
+//! `rt_apply_any` call, and the committed artifact had been carrying the old
+//! one with nothing complaining.
 //!
 //! The other input is covered by comparing the *output* instead of guessing at
 //! inputs: `the_committed_island_matches_a_fresh_build`
@@ -60,16 +54,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use inkwell::module::Module;
 use inkwell::AddressSpace;
 
 use crate::check::core;
 use crate::compile::symbols::CompiledItem;
 use crate::{Checker, Heap, Interp, Path, Reader, Value};
-
-/// The name of the i64 global the island bitcode carries its source hash in.
-/// Read back by [`read_embedded_source_hash`].
-pub const SOURCE_HASH_GLOBAL: &str = "__typelisp_island_source_hash";
 
 /// Builds the compiler island's AOT bitcode in a throwaway environment.
 ///
@@ -139,13 +128,11 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
     let items: Vec<CompiledItem> = fn_names.iter().map(|n| CompiledItem::Fn(Path::root(n))).collect();
     crate::compile::driver::install_compiled_library(&interp, crate::compile::CompiledLibrary {
             label: "compiler island",
-            regen_script: "scripts/regen-compiler-island.sh",
             bitcode: typelisp_front::dump::parse(crate::compiler::ISLAND_DUMP, "compiler island")?
                 .first()
                 .ok_or_else(|| "island: the committed dump holds no units".to_string())?
                 .bitcode,
             items: &items,
-            expected_hash: None,
         })
         .map_err(|e| format!("island bootstrap install of the committed .bc failed: {}", e))?;
 
@@ -158,7 +145,6 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         for (name, _) in crate::compile::externs::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
         }
-        embed_source_hash(ctx, &module, SOURCE_HASH_GLOBAL, island_source_hash(crate::compiler::SOURCE)?);
         // Forward-declare *every* island function before compiling any body.
         // The island's own `compile-call` resolves a call target with
         // `(get-function m "tl_<callee>")`, which fails outright if the callee
@@ -377,44 +363,6 @@ fn hash_form(
         }
     }
     Ok(())
-}
-
-/// Reads a `hash_global`-named i64 constant back out of an already-parsed
-/// `module` — the staleness key a loader and the freshness tests compare
-/// against [`island_source_hash`] of the live source. `None` if the global is
-/// absent or not a constant integer (a `.bc` from before this global existed,
-/// or a corrupt one).
-///
-/// `hash_global` is a parameter because there are two artifacts with two
-/// globals ([`SOURCE_HASH_GLOBAL`] and
-/// [`crate::compile::prelude_bootstrap::PRELUDE_SOURCE_HASH_GLOBAL`]); reading
-/// one artifact's hash out of the other would compare two unrelated numbers
-/// and call every load stale.
-pub fn read_embedded_source_hash(module: &Module<'static>, hash_global: &str) -> Option<u64> {
-    let global = module.get_global(hash_global)?;
-    global.get_initializer()?.into_int_value().get_zero_extended_constant()
-}
-
-/// Adds `hash_global` to `module` as an i64 constant holding `hash` — the write
-/// side of [`read_embedded_source_hash`], shared by both generators so the two
-/// can't disagree about linkage or width.
-///
-/// Takes the hash rather than the source: the prelude's generator already has
-/// one from the forms it read (see [`hash_read_forms`]), and re-deriving it
-/// here would read that source a second time.
-///
-/// Internal linkage: it is read by value out of the parsed module, never
-/// linked against.
-pub(crate) fn embed_source_hash(
-    ctx: &'static inkwell::context::Context,
-    module: &Module<'static>,
-    hash_global: &str,
-    hash: u64,
-) {
-    let i64_ty = ctx.i64_type();
-    let global = module.add_global(i64_ty, None, hash_global);
-    global.set_initializer(&i64_ty.const_int(hash, false));
-    global.set_constant(true);
 }
 
 /// The last segment of a `(defun PATH ...)` form's name, or `None` for anything

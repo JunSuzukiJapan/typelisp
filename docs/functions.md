@@ -572,8 +572,11 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 |---|---|---|---|
 | `gensym` | `(gensym)` | `()→Symbol` | 衝突耐性のある新しいシンボルを返す（マクロ用） |
 | `exit` | `(exit code)` | `i32→!` | プロセスを終了する |
+| `dump` | `(dump path)` | `string→bool` | いまの環境（型情報 + コンパイル済み本体）を1ファイルへ書き出す。`typl --image <path>` で立ち上げ直せる。`compile`/`compile-file` と同じくインタプリタ専用（コンパイル済み関数からは呼べない） |
 
-`compile`/`compile-file` は [syntax.md](syntax.md) の「コンパイル」節を参照。
+`compile`/`compile-file`/`dump` は [syntax.md](syntax.md) の「コンパイル」節を参照。
+`dump` が保存するのは**定義であって値ではない**——グローバルは初期化式を走らせ直した値で戻り、
+セッションのトップレベル式は再実行されない。SBCL の `save-lisp-and-die` と違ってプロセスも死なない。
 
 ## 15. 標準入出力 (I/O)
 
@@ -931,8 +934,9 @@ CLHS の `eval` に準拠する: **現在の大域環境**（グローバルの�
 - **コンパイル**: `read` も `eval` も JIT/AOT コンパイルできる（`read` は 2026-08-18、`eval` は
   2026-08-19）。JIT では走っているインタプリタがそのまま環境になる。AOT では `compile-file` が
   環境（検査済みの大域状態）をコンパイル時に組み立てて実行ファイルに書き込み、起動時は復元
-  するだけ——`eval` を呼ぶプログラムだけが、そのぶんの起動時間とサイズを払う。詳細と
-  帰結（起動 0.05 秒／eval したフォームは解釈実行される）は [syntax.md](syntax.md) §10。
+  するだけ——`eval` を呼ぶプログラムだけが、そのぶんの起動時間とサイズを払う。埋め込まれるのは
+  `(dump ...)` と同じ形式（prelude の単位 + プログラムの単位）。詳細と帰結（eval したフォームは
+  解釈実行される）は [syntax.md](syntax.md) §10。
 
 ## 17. docstring / `documentation`（Common Lisp 準拠）
 

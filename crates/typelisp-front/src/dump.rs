@@ -812,3 +812,24 @@ pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8]) -> Result<crate::Inter
     interp.set_checker(std::rc::Rc::new(std::cell::RefCell::new(chk)));
     Ok(interp)
 }
+
+/// Collects the definitions in one checked top-level form, for a session that
+/// is recording what it defines.
+///
+/// A dump records definitions, not history: re-running a session's `(println
+/// ...)` on load is nobody's idea of a dump, and a file-derived `(module ...)`
+/// wrapping the whole script would drag every one of them in — including the
+/// `(dump ...)` call itself. So a container contributes *nothing* here: its
+/// items come back through `Interp::exec` on their own and each records itself,
+/// which also puts them in the order they ran. That covers a written `module`,
+/// an `impl` block's grouping, a `deftrait`'s empty one, and the checker's
+/// monomorphization bundle (whose specializations are real `defun`s compiled
+/// code may call by their mangled names) with one rule instead of four.
+pub fn record_definitions(heap: &crate::Heap, tl: crate::Value, out: &mut Vec<crate::Value>) {
+    if matches!(
+        crate::check::core::op(heap, tl),
+        Some("defun" | "defmethod" | "defvar" | "defstruct" | "defenum" | "defmacro" | "use")
+    ) {
+        out.push(tl);
+    }
+}

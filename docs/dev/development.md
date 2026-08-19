@@ -43,11 +43,13 @@ cargo run                                    # REPL（typl、prelude 読み込�
 
 なお Miri はコミット前の必須手順ではない（通常の `cargo test` で十分、という既存合意）。
 
-## コミット済みビットコード成果物の再生成
+## コミット済みダンプ成果物の再生成
 
-`src/compiler_island.bc`（自己ホストコンパイラ島）と `src/prelude_compiled.bc`（事前コンパイル
-された prelude）はどちらもコミットされたバイナリ成果物で、対応する `SOURCE` を編集したら
-再生成が要る。番人テストが一致するまで落ち続ける。
+`src/compiler_island.typld`（自己ホストコンパイラ島）と
+`crates/typelisp-front/src/prelude.typld`（事前コンパイルされた prelude）はどちらもコミット
+されたバイナリ成果物で、対応する `SOURCE` を編集したら再生成が要る。番人テストが一致するまで
+落ち続ける。1 ファイルに**検査済み状態とビットコードの両方**が入っている（[syntax.md](../syntax.md)
+§10「ダンプ」）。
 
 ```sh
 scripts/regen-compiler-island.sh    # compiler.rs の SOURCE を変えたら
@@ -58,7 +60,7 @@ scripts/regen-prelude-bitcode.sh    # prelude.rs の SOURCE を変えたら
 prelude の成果物も変わる（逆向きの依存は無い——島の生成器は prelude を interpreted で読む）。
 
 `llvm-*` ビルダ（`eval_llvm_builtin_method`）やコンパイル・ブリッジを変えた場合も再生成が要る:
-出力 IR が変わるのに `SOURCE` は変わらないので、埋め込みハッシュを見る
+出力 IR が変わるのに `SOURCE` は変わらないので、ダイジェストを見る
 `*_artifacts_are_fresh` は気付かない。バイト比較する
 `the_committed_*_matches_a_fresh_build` の方が落ちる。
 

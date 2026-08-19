@@ -737,6 +737,14 @@ impl Registry {
             "compile-file".to_string(),
             FnSig { type_params: vec![], rest: None, params: vec![Type::Str, Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
         );
+        // `dump`: writes this session's whole environment — the units it was
+        // loaded from, plus one for what it has defined since — to a file
+        // `typl --image` can start from. Same free-function shape as
+        // `compile-file`, one path argument (see `compile::dump::dump_image`).
+        root.fns.insert(
+            "dump".to_string(),
+            FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+        );
         Registry { root, def_locs: DefLocs::default(), docs: Docs::default() }
     }
 
