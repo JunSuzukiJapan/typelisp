@@ -8153,13 +8153,27 @@ impl Checker {
                         // ...and composed down the supertrait chain when the
                         // method is an inherited one, since its template is
                         // written in the declaring trait's associated types.
-                        let Some(assoc) = self.trait_assoc_subst_for(tdef, &tb.assoc, &decl_path)
+                        let Some(mut assoc) = self.trait_assoc_subst_for(tdef, &tb.assoc, &decl_path)
                         else {
                             return Err(Error::TypeError(format!(
                                 "{}: `{}` declares `{}`, but is not in `{}`'s supertrait chain",
                                 method, decl_path, method, tb.trait_path
                             )));
                         };
+                        // `Self` in the template *is* this bounded type
+                        // variable. Without this binding a trait method
+                        // declared to return `Self` — `(add ((self Self)
+                        // (other Self)) Self)` — hands the literal `self`
+                        // type variable back to a call justified by `(where
+                        // (Add T))`, and the enclosing generic's `T` return
+                        // position rejects it ("expected t, found self").
+                        // Same `"self"` key that `subst_method_sig` and
+                        // `check_trait_call` bind for a concrete receiver;
+                        // no prelude trait method returned `Self` (they all
+                        // return `bool` or an associated type), which is why
+                        // the gap survived until the `Number` trait layer
+                        // needed it.
+                        assoc.insert("self".to_string(), recv.ty.clone());
                         let ret_ty = subst_apply(&sig.ret, &assoc);
                         let form = forms::erased_generic_form(heap, method)?;
                         return Ok(Checked::new(form, ret_ty));

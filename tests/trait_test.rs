@@ -750,3 +750,45 @@ fn an_impl_omitting_an_associated_type_is_rejected() {
     );
     assert!(m.contains("associated type"), "{}", m);
 }
+
+/// A trait method declared to return `Self`, called on a `where`-bounded type
+/// variable, must come back as *that variable* — not the literal `Self` type
+/// variable the trait's template is written in.
+///
+/// The bounds branch of `Checker::check_instance_method` used to substitute
+/// only the trait's associated types into the method's return type, so
+/// `(add a b)` under `(where (Add T))` yielded `self` and the enclosing
+/// generic's `T` return position rejected it. Nothing in the prelude caught
+/// it because no prelude trait method returns `Self` — `Eq`/`Ord` return
+/// `bool`, `Iter` returns an associated type — and it only surfaced when the
+/// CL-parity plan's `Number` trait layer (Phase 1a) needed arithmetic to be
+/// requestable from generic code.
+#[test]
+fn a_self_returning_trait_method_resolves_to_the_bounded_type_variable() {
+    assert_eq!(
+        eval_ok(
+            "(deftrait Add () (add ((self Self) (other Self)) Self))
+             (impl Add i32 (add ((self Self) (other Self)) Self (+ self other)))
+             (defun sum3<T> ((a T) (b T) (c T)) T (where (Add T)) (add (add a b) c))
+             (sum3 1 2 3)"
+        ),
+        Value::Int(6)
+    );
+}
+
+/// The same substitution, one supertrait up: an *inherited* `Self`-returning
+/// method reached through a subtrait bound.
+#[test]
+fn an_inherited_self_returning_trait_method_resolves_to_the_bounded_type_variable() {
+    assert_eq!(
+        eval_ok(
+            "(deftrait Add () (add ((self Self) (other Self)) Self))
+             (deftrait Double (Add) (twice ((self Self)) Self (add self self)))
+             (impl Add i32 (add ((self Self) (other Self)) Self (+ self other)))
+             (impl Double i32)
+             (defun quad<T> ((a T)) T (where (Double T)) (twice (twice a)))
+             (quad 3)"
+        ),
+        Value::Int(12)
+    );
+}
