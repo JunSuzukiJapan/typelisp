@@ -60,6 +60,20 @@
 | `float->int` | `(float->int x)` | `f64→i32` | ゼロ方向への切り捨てで `i32` へ変換 |
 | `float->bignum` | `(float->bignum x)` | `f64→bignum` | ゼロ方向への切り捨てで `bignum` へ変換 |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 正確な二進有理数として `ratio` へ変換（CL の `rational`） |
+| `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | CL の同名関数。上の `floor`/`ceiling`/`round`/`truncate` の別名——CL では無印の方が整数を返すので、`f` 付きの方がこの言語の挙動に一致する |
+| `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→i32` | それぞれ 2 / 53 / 53（`0.0` の precision だけ 0）。`f64` は常に IEEE-754 binary64 なので定数 |
+| `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` か `-1.0` |
+| `scale-float` | `(scale-float x n)` | `(f64,i32)→f64` | `x * 2^n` |
+| `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,i32>` | 仮数（`[1/2,1)`、符号なし）と指数。CL は3値返しだが多値は非採用なので、符号は `float-sign` が担う |
+| `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<bignum,i32>` | 同じ分解を厳密な 53 ビット整数の仮数で。`仮数 * 2^指数` がちょうど元の値 |
+| `rationalize` | `(rationalize x)` | `f64→ratio` | **その float に読み戻る最も簡単な**有理数（`(rationalize 0.1)` は `1/10`）。厳密な二進値が要るなら `float->ratio` |
+
+> **CL との差: `round` の丸め方**。`round`（したがって `fround`/`round-div`）は
+> **0 から遠い方へ**丸める（`(round 2.5)` = `3.0`）。CL は**偶数側へ**丸めるので `2` になる。
+> Rust の `f64::round` をそのまま使っている既存の挙動で、Phase 1c は `fround` を
+> `round` と一致させることを優先して**この差をそのまま引き継いだ**（別々に丸める 2 つの名前が
+> 並ぶ方が悪い）。直すなら `round` 本体を CL 準拠にするのが筋で、`round` は島が lowering
+> している組み込みなので島側も同時に変わる。
 
 ## 2.5 多倍長数値（`bignum` / `ratio`）
 
@@ -155,14 +169,21 @@ CL の算術・比較は可変長だが、`defmethod` はレシーバ型でし�
 
 | 書ける形 | 展開 | 対象 |
 |---|---|---|
-| `(op a b c ...)` | `(op (op a b) c)` の左畳み込み | `+` `-` `*` `/` `max` `min` `logand` `logior` `logxor` |
+| `(op a b c ...)` | `(op (op a b) c)` の左畳み込み | `+` `-` `*` `/` `max` `min` `logand` `logior` `logxor` `gcd` `lcm` |
 | `(cmp a b c ...)` | 各項を一時変数に束縛した `(and (cmp a b) (cmp b c) ...)` | `<` `<=` `>` `>=` `=` `/=` |
-| `(op)` | `(+)`=0 / `(*)`=1 / `(logior)`=`(logxor)`=0 / `(logand)`=-1 | 上記のうち単位元を持つもの |
-| `(op x)` | `+ * max min logand logior logxor` は `x` そのもの。`(- x)` は符号反転、`(/ x)` は逆数 | 同上 |
+| `(op)` | `(+)`=0 / `(*)`=1 / `(logior)`=`(logxor)`=0 / `(logand)`=-1 / `(gcd)`=0 / `(lcm)`=1 | 上記のうち単位元を持つもの |
+| `(op x)` | `+ * max min logand logior logxor` は `x` そのもの。`(- x)` は符号反転、`(/ x)` は逆数、`(gcd x)`/`(lcm x)` は `(abs x)`（CL 準拠） | 同上 |
 | `(cmp x)` | `x` を評価して `true` | `<` `<=` `>` `>=` `=` `/=` |
 | `(log x base)` | `(/ (log x) (log base))` | `f64` |
 
 各項は左から1回だけ評価される（比較の可変長版が一時変数を挟むのはこのため）。
+
+`isqrt` / 整数の `expt`（`i32`/`i64`）:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `isqrt` | `(isqrt n)` | `T→T` | 平方根を超えない最大の整数。負なら panic |
+| `expt` | `(expt n e)` | `(T,T)→T` | 冪乗（二乗法）。CL は負の指数に有理数を返すが、整数型では表せないので panic——`ratio` に変換してから使う |
 
 ### 4.2 述語
 
@@ -181,7 +202,15 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 | `pi` | `f64` | `3.141592653589793` |
 | `boole-clr` `boole-set` `boole-1` `boole-2` `boole-c1` `boole-c2` `boole-and` `boole-ior` `boole-xor` `boole-eqv` `boole-nand` `boole-nor` `boole-andc1` `boole-andc2` `boole-orc1` `boole-orc2` | `i32` | `boole` に渡す演算コード（CL のキーワードの代わり） |
 
-`most-positive-fixnum` 等の数値限界定数は無い。
+数値限界定数（CLHS 12.1.4.2 / 12.1.3）:
+
+| 名前 | 型 | 説明 |
+|---|---|---|
+| `most-positive-fixnum` / `most-negative-fixnum` | `i64` | ここでの fixnum は実行時が運ぶ即値整数＝`i64`（静的型が `i32` でも実行時表現は `i64`） |
+| `most-positive-double-float` / `most-negative-double-float` | `f64` | 有限で最大／最小 |
+| `least-positive-double-float` / `least-negative-double-float` | `f64` | 非正規化数を含む、0 でない最小の絶対値 |
+| `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | 正規化数に限った同じもの |
+| `double-float-epsilon` / `double-float-negative-epsilon` | `f64` | CL の定義（`(/= (+ 1 e) 1)` を満たす最小の正の `e`）に従うので、2^-53 **より 1 ULP 大きい**——2^-53 自身は最近接偶数丸めで `1.0` に戻ってしまう |
 
 ### 4.4 ビット演算
 

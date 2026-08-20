@@ -7693,11 +7693,11 @@ impl Checker {
         } else if args.len() <= 1
             && matches!(
                 head.as_str(),
-                "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor" | "<" | "<=" | ">" | ">=" | "=" | "/="
+                "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor" | "gcd" | "lcm" | "<" | "<=" | ">" | ">=" | "=" | "/="
             )
         {
             self.check_nullary_or_unary_numeric_op(heap, interp, env, &head, args, expected)
-        } else if args.len() > 2 && matches!(head.as_str(), "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor") {
+        } else if args.len() > 2 && matches!(head.as_str(), "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor" | "gcd" | "lcm") {
             self.check_variadic_arith(heap, interp, env, &head, args, expected)
         } else if args.len() > 2 && matches!(head.as_str(), "<" | "<=" | ">" | ">=" | "=" | "/=") {
             self.check_variadic_cmp(heap, interp, env, &head, args)
@@ -9460,8 +9460,10 @@ impl Checker {
     ) -> Result<Checked, Error> {
         let Some(&x) = args.first() else {
             let value = match op {
-                "+" | "logior" | "logxor" => 0,
-                "*" => 1,
+                // CL's identities: `(gcd)` is 0 (every integer divides 0) and
+                // `(lcm)` is 1, the same way `(+)` is 0 and `(*)` is 1.
+                "+" | "logior" | "logxor" | "gcd" => 0,
+                "*" | "lcm" => 1,
                 "logand" => -1,
                 _ => return Err(Error::TypeError(format!("{}: requires at least 1 argument", op))),
             };
@@ -9471,6 +9473,18 @@ impl Checker {
         match op {
             "+" | "*" | "max" | "min" | "logand" | "logior" | "logxor" => self.check(heap, interp, env, x, expected),
             "-" | "/" => self.check_unary_negate_or_invert(heap, interp, env, op, x, expected),
+            // CL: one-argument `gcd`/`lcm` are the absolute value, not the
+            // argument itself — `(gcd -4)` is 4. `abs` is a prelude method on
+            // every type that has a binary `gcd`, so this expands rather than
+            // passing through the way `+`/`max` do.
+            "gcd" | "lcm" => {
+                let abs_sym = heap.intern_symbol("abs");
+                let expansion = forms::list_from_vec_locs(heap, &[(abs_sym, None), (x, None)])?;
+                heap.push_root(expansion);
+                let result = self.check(heap, interp, env, expansion, expected);
+                heap.pop_root();
+                result
+            }
             "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 let progn_sym = heap.intern_symbol("progn");
                 let expansion = forms::list_from_vec_locs(heap, &[(progn_sym, None), (x, None), (Value::Bool(true), None)])?;

@@ -227,6 +227,38 @@ prelude.rs:95-104 が既に選んでいた道（"redesigned on top of `Vector<T>
 
 ### Stage 1c — CL 残差
 
+**状態: 完了（2026-08-20）**、ただし 2 項目は保留（下記）。実装は `prelude.rs` の `SOURCE`
+（`gcd`/`lcm` のアリティだけ checker 糖衣）で、`PRELUDE_COMPILE_UNSUPPORTED` に穴を開けずに
+通っている。テストは `tests/numeric_catalog_test.rs`（8 本）、ドキュメントは
+[functions.md](../functions.md) §1／§2／§4.1／§4.3。
+
+入ったもの: `ffloor`/`fceiling`/`fround`/`ftruncate`（既存の `f64` `floor` 等の別名——
+CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言語の挙動に一致する）、
+`isqrt`（`i32`/`i64`）、整数の `expt`（`i32`/`i64`、負の指数は panic）、
+0/1/n 引数の `gcd`/`lcm`（`(gcd)`=0・`(lcm)`=1・1 引数は `abs`。既存の可変長糖衣に 2 語足しただけ）、
+`rationalize`、浮動小数点の内部表現アクセス 7 つ、数値限界定数 10 個。
+
+**計画から変えた点・保留**:
+
+1. **`scale-float` と `rationalize` は `int->float` を呼ばない書き方にした。**
+   Phase 2 と同じ理由（島に lowering が無い）。`scale-float` は 2 倍/半分のループ、
+   `rationalize` は連分数の収束項を整数でなく `f64`（整数値を保持）で持ち、
+   最後に `float->ratio` で組み立てる。最初の草稿はここで穴を 1 つ開けて止まった。
+2. **保留: 乱数のシードを外から与える手段。** `random-state` を i64 から作る Rust
+   プリミティブが要る（§2-4 の触点フルセット）。既存の `make-random-state-fresh` は
+   引数を取らず、`random-state` に書き込む口も無いので prelude だけでは閉じない。
+3. **保留: `byte`/`ldb`/`dpb`/`boole` の `i64`・`bignum` 拡張。**
+   `defmethod` は受け手でしか解決せず、CL の `(ldb bytespec integer)` は指定子が先なので、
+   *整数側の幅*で実装を選べない。引数順を変えて `try_instance_method_swapped` に頼るか、
+   バイト指定子自体に幅を持たせるかの設計判断が要る——どちらも計画のリスク表が
+   名指しする「解決順が変わって無関係な既存コードが壊れる」側なので、片手間では入れない。
+4. **見つけた CL との差（直していない）**: `round` は**0 から遠い方へ**丸める
+   （`(round 2.5)`=`3.0`）が、CL は**偶数側へ**丸めるので `2`。Rust の `f64::round` を
+   そのまま使っている既存の挙動。`fround` を `round` と一致させる方を優先してこの差は
+   引き継いだ（別々に丸める 2 つの名前が並ぶ方が悪い）。直すなら `round` 本体で、
+   `round` は島が lowering しているので島側も同時に変わる。functions.md §2 に注記した。
+
+
 `ffloor`/`fceiling`/`fround`/`ftruncate`、`isqrt`、整数の `expt`、可変長 `gcd`/`lcm`、
 `rationalize`、浮動小数点の内部表現アクセス（`float-sign`/`float-digits`/`float-precision`/
 `decode-float`/`integer-decode-float`/`scale-float`/`float-radix`）、
@@ -419,6 +451,35 @@ prelude.rs:95-104 が既に選んでいた道（"redesigned on top of `Vector<T>
 ## Phase 4 — 制御構造とマクロ層
 
 ### Stage 4a — 脱出と代入
+
+**状態: 部分完了（2026-08-20）。** マクロで書ける半分は入った。テストは
+`tests/control_forms_test.rs`（6 本）、ドキュメントは [syntax.md](../syntax.md) §4／§5／§7。
+
+入ったもの: `prog1`/`prog2`、`do*`、`ecase`/`ccase`、`setq`/`psetq`/`psetf`、`pushnew`。
+いずれも prelude の `defmacro`（`pushnew` だけ `Vector<T>` の `defmethod`）。
+`defmacro` は保護された組み込み形を*呼べない*が*生成する*のは構わない——展開はチェッカーへ
+返って検査されるので、既存の `do` が変数をステップするのと同じ手が使える。
+
+**残っているもの（それぞれ理由つき）**:
+
+- **`block` / `return-from`** — 本 Stage の主役で、いちばん重い。checker 側は
+  `loop_stack` と同型の名前付きブロックスタックで足りるが、実行時は
+  (1) インタプリタに `EvalError::ReturnFrom(name, value)` と、それを捕まえる `Block` op、
+  (2) **島に名前付き脱出先を通す仕組み**が要る。島の `compile-value` は `loop-exit`/
+  `loop-slot` を全呼び出し地点に引数として引き回しており、名前付きブロックの*スタック*を
+  足すとその引数列がもう一段増える——4000 行の自己ホストコンパイラ全体に触る変更。
+  「compiled 側は既存の `break`/`return` の分岐鎖にそのまま乗る」という計画本文の見立ては
+  制御フローの形については正しいが、**引数の引き回しの量を見積もっていない**。
+- **`prog` / `prog*`** — CL では `block nil` ＋ `tagbody` の糖衣。`block` に依存し、
+  `tagbody` は goto なので対象外。`block` が入ったら「`tagbody` 抜きの `prog`」の
+  是非を判断する。
+- **`destructuring-bind`** — `defmacro` のラムダリストは分配束縛できるが、あれは全て
+  無型の `Sexpr`。式としての `destructuring-bind` は束縛される各変数に静的型を与える
+  必要があり、`Sexpr` の異種の入れ子から型を取り出す手段が無い（`match` の downcast
+  パターンが相当する既存機構）。**設計判断が要る項目**で、片手間には入らない。
+- **`remf`** — プロパティリストごと対象外（Phase 3c の判断）。
+- **`sleep`** — Rust 組み込みが要る（§2-4 の触点フルセット）。
+
 
 - **`block` / `return-from`**（本 Phase の主役）。現在 `return` は**直近のループからしか脱出できず**、
   名前付きブロックも関数からの早期リターンも無い。`defun` が関数名の暗黙ブロックを作る CL 規則も

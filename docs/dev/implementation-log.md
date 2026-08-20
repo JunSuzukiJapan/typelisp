@@ -7388,3 +7388,109 @@ prelude のビットコード 418KB ごと 1.3MB 増える（14.4MB → 13.0MB�
 `tests/dump_image_test.rs` が `typl` バイナリを 2 回起動して、
 定義・マクロ・コンパイル済み本体が渡ることと、トップレベル式が再実行されないこと、
 グローバルが初期値で戻ること、他ビルドのイメージが拒否されることを確かめている。
+
+---
+
+## CL 残差を埋める（2026-08-20、Phase 0 / 1c / 2 / 3 / 4a 前半）
+
+計画は [cl-parity-plan.md](cl-parity-plan.md)、進捗表は [TODO.md](TODO.md)。ここには
+「なぜそうしたか」と、途中で見つけたものを書く。
+
+### 何が入ったか
+
+prelude に約 200 の名前。**全て `PRELUDE_COMPILE_UNSUPPORTED` に穴を開けずに通っている**ので、
+JIT/AOT 対応込み。文字・文字列カタログ（Phase 2）、リスト/シーケンス/集合演算と破壊的操作
+（Phase 3）、数値の残り（Phase 1c）、マクロで書ける制御形（Phase 4a 前半）。
+テストは `char_string_catalog_test` 18 / `seq_catalog_test` 18 / `numeric_catalog_test` 8 /
+`control_forms_test` 6 の計 50 本。
+
+### 名前の付け方は既存の慣習に従った
+
+計画 §1.1 は「受け手優先・Rust 風、CL 名は薄い別名」としていた。実際には**既にこのファイルが
+選んでいた慣習に合わせる**方が一貫した——`alpha-char-p`→`alphap`、`zerop`/`evenp` の
+`p` 接尾辞、`char->int`/`char->string` の変換名。なので `char-lessp`→`lessp`、
+`upper-case-p`→`upper-casep`、`char-name`→`char->name`、`digit-char`→`digit->char`、
+`make-string`→`string::filled`。別名は増やしていない（CL 対応は functions.md の表が持つ）。
+
+Phase 3 では計画から**外れた**。§1.2 は「同じ CL 名を受け手型ごとに `defmethod` で定義する」と
+していたが、既存の `Iter` ライブラリ（`map`/`filter`/`length`/`nth`/…）がジェネリック `defun` で
+書かれているところへ `defmethod` を混ぜると、同じ名前が受け手の形で 2 通りに解決されうる——
+計画自身のリスク表が `member` を名指しで警告していたのと同じ形。`Iter` に統一し、`member`/
+`member-if`/`member-if-not` は 3 つとも `bool`（CL は残りのリスト）で揃えた。破壊的操作
+（Phase 3d）だけは受け手を書き換えるので `Vector<T>` の `defmethod`。
+
+### 島に lowering の無い組み込みを踏まない、という制約
+
+Phase 2a の最初の草稿は `(upcase c)`/`(alphap c)` を素直に呼んだ。prelude の再生成が
+`PRELUDE_COMPILE_UNSUPPORTED` の照合で止まり、`char::upcase`/`char::downcase`/`char::alphap`/
+`char::digitp` と `i32::int->char` に lowering が無いこと、そしてそれを踏むと**その節の全定義が
+インタプリタ専用に落ちる**ことを教えてきた。計画 §2-2 が「穴が開けば毎ビルドで落ちて教えて
+くれる」と書いたとおりに機能した番人。
+
+以後、Phase 2 も Phase 1c も全て `char->int` のコードポイント上と lowering 済みの演算だけで
+書いてある。文字を*作る*ところは `(ref "0123456789ABC..." w)` のように `string::ref` で引く。
+`scale-float` が `(* self (expt 2.0 (int->float n)))` でなく 2 倍/半分のループなのも、
+`rationalize` が連分数の収束項を整数でなく `f64` で持つのも同じ理由。
+**この 5 つの lowering を足す作業は残タスク**として計画に立ててある（Phase 1a と同じく
+島の分岐を増やす作業なので、まとめると安い）。
+
+### 見つけた checker のバグ 4 件——全部同じ形だった
+
+**「型変数の名前がたまたま一致したときだけ動いていた」**。4 件が独立に見つかって、
+4 件とも同じ診断になった。
+
+1. **境界越しの `Self` 戻り型**（Phase 0.2 で発覚）。`check_instance_method` の bounds 分岐が
+   トレイトメソッドの戻り型に**関連型しか**代入しておらず、`Self` を返すメソッドを
+   `(where (Add T))` の下で呼ぶと `expected t, found self` になった。prelude のトレイト
+   メソッドは 1 つも `Self` を返さない（`Eq`/`Ord` は `bool`、`Iter` は関連型）ので、
+   これまで一度も踏まれていない。`Number` トレイト層（Phase 1a）の前提条件なので先に潰した。
+2. **境界付きジェネリック同士の委譲**（Phase 3a で発覚）。`validate_where_bounds` が
+   呼ばれ側の宣言ピン（呼ばれ側の型パラメータで書かれている）と呼び出し側のピンを
+   **素のまま**比較していた。`elt`→`nth` が通っていたのは両方 `A` と綴っていたからで、
+   `B` と綴れば落ち、構造化されたピン（`(Item cons-cell<K,V>)`）は一度も一致しなかった。
+
+   ここは**自分の Phase 0 の結論も間違っていた**。当初「制約は既に解消済み」と書いたのは、
+   検証に使った例がたまたま `A` を使っていたからで、*なぜ*動いたかを確かめていなかった。
+   計画にも両方の訂正を残してある。
+3. **ジェネリック `defmethod` の受け手の型パラメータ名**（Phase 3d で発覚）。
+   `check_assoc_call` は `def.params` を受け手の具体引数と zip して特殊化するのに、
+   登録される署名は `defmethod` が書かれたままの名前を保っていた。`Vector<A>` は
+   `a` を置換しないまま具体引数を拒否し、`Vector<T>`（`Vector` 自身の宣言と同じ名前）は通る。
+   登録時に所有型の名前へ書き換えるようにした——本体は書かれたままの名前で検査する
+   （本文がそう書いてあるので）。
+4. **compiled 経路の `format` が `f64` パラメータを生ワードで渡していた**（Phase 2b で発覚）。
+   `wrap_rest_elem` が `is_heap_repr` の真を根拠に `Sexpr` 構成子を飛ばしていたが、
+   `is_heap_repr` が答えているのは**インタプリタの**表現。compiled な `f64` は箱でもタグ付きでも
+   ない生の `f64::to_bits` パターンで、下位 3 ビットがたまたま `Int` タグに読めるため
+   `to_bits(x) >> 3` が印字されていた。`f64` だけ近道から外した
+   （`string`/`bignum`/`ratio` は両世界で同じタグ付きの語なのでそのまま）。
+   [[typelisp-crossing-must-be-type-driven]] と同じ形の誤りで 4 回目。
+
+4 件とも回帰テスト付き（`trait_test` 2 本、`generic_defun_test` 4 本、`compile_test` 1 本）。
+
+### 直さずに記録した CL との差
+
+- **`round` の丸め方**。`round`（したがって Phase 1c で足した `fround`、既存の `round-div`）は
+  Rust の `f64::round` をそのまま使うので **0 から遠い方へ**丸める。CL は偶数側なので
+  `(round 2.5)` は CL で `2`、ここで `3.0`。`fround` を `round` と一致させる方を優先して
+  差を引き継いだ（別々に丸める 2 つの名前が並ぶ方が悪い）。直すなら `round` 本体で、
+  島が lowering しているので島側も同時に変わる。
+- **n 引数の `/=`** は隣接ペア比較（`(/= a b a)` が真）。CL は全ペア相異を問う。
+  可変長比較の糖衣が全ての比較演算子に対して選んでいる既存の意味で、`char`/`string` に
+  `/=` を足したことで見えるようになっただけ。
+
+### 対象外にしたもの（理由つき）
+
+`list*`（「末尾を差し替えた不完全リスト」という概念が無い）、`copy-tree`/`copy-alist`/
+`sublis`/`subst`/`subst-if`（任意深さの異種の木を走査する型が書けない）、
+プロパティリスト一式 `getf`/`get-properties`/`symbol-plist`/`remprop`（キーと値が交互に並ぶ
+無型のリストという表現が無く、同じ役割は `assoc` か `HashTable`）、可変文字列
+（`Vector<char>` + `to-string` で足り、`string` の `eq` が `Rc::ptr_eq` である前提を崩す
+代償に見合わない）、`Sexpr` 版の `rplaca`/`nconc`（cons セルが `car` のソース位置を
+セル内に持つので、書き換えると以後の診断が静かにずれる）。
+
+保留（設計判断が要る）: 乱数のシード指定（Rust プリミティブが要る）、`ldb`/`dpb` の
+`i64`/`bignum` 拡張（`defmethod` は受け手でしか解決せず、CL の `(ldb bytespec integer)` は
+指定子が先なので整数側の幅で実装を選べない）、`block`/`return-from`（島の
+`compile-value` が `loop-exit`/`loop-slot` を全呼び出し地点に引き回しているので、
+名前付き脱出先の*スタック*を足すと自己ホストコンパイラ全体に触る）、`destructuring-bind`。

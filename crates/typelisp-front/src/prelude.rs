@@ -1856,6 +1856,244 @@ pub const SOURCE: &str = r##"
   (progn (set-cdr self x) self))
 
 ;; ---------------------------------------------------------------------------
+;; The rest of CL's numeric catalog — cl-parity-plan.md Phase 1c.
+;;
+;; Everything here is built from the primitives above, so it compiles through
+;; the ordinary prelude path.
+
+;; CL's `ffloor`/`fceiling`/`fround`/`ftruncate`: round, but stay a float.
+;; This language's `f64` `floor`/`ceiling`/`round`/`truncate` *already* return
+;; `f64` (functions.md §2) — CL's undecorated names return an integer, so it is
+;; the `f`-prefixed CL names that these match. Thin aliases, kept so ported CL
+;; reads unchanged.
+(defmethod ffloor ((self f64)) f64 (floor self))
+(defmethod fceiling ((self f64)) f64 (ceiling self))
+(defmethod fround ((self f64)) f64 (round self))
+(defmethod ftruncate ((self f64)) f64 (truncate self))
+
+;; CL's `isqrt`: the greatest integer whose square does not exceed `self`.
+;; Integer Newton, keeping the *previous* estimate and stopping when the next
+;; one stops decreasing — testing "unchanged" instead loops forever on the
+;; inputs where the iteration oscillates between two neighbouring values.
+(defmethod isqrt ((self i32)) i32
+  (if (< self 0)
+      (panic "isqrt: negative argument")
+      (if (< self 2)
+          self
+          (let ((g self) (k (/ (+ self 1) 2)))
+            (progn
+              (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
+              g)))))
+(defmethod isqrt ((self i64)) i64
+  (if (< self 0)
+      (panic "isqrt: negative argument")
+      (if (< self 2)
+          self
+          (let ((g self) (k (/ (+ self 1) 2)))
+            (progn
+              (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
+              g)))))
+
+;; CL's integer `expt`, by squaring. CL answers a *ratio* for a negative
+;; exponent; an `i32`/`i64` result cannot hold one, so that case is a panic
+;; rather than a silent truncation — convert to `ratio` first if you want it
+;; (`bignum`/`ratio` already have their own `expt` above).
+(defmethod expt ((self i32) (e i32)) i32
+  (if (< e 0)
+      (panic "expt: a negative exponent on an integer is not an integer")
+      (if (= e 0)
+          1
+          (let ((half (expt self (/ e 2))))
+            (if (evenp e) (* half half) (* self (* half half)))))))
+(defmethod expt ((self i64) (e i64)) i64
+  (if (< e 0)
+      (panic "expt: a negative exponent on an integer is not an integer")
+      (if (= e 0)
+          1
+          (let ((half (expt self (/ e 2))))
+            (if (evenp e) (* half half) (* self (* half half)))))))
+
+;; CL's float-representation accessors (CLHS 12.1.4.1). `f64` is IEEE-754
+;; binary64 here and always will be, so `float-radix`/`float-digits`/
+;; `float-precision` are the constants 2/53/53 rather than queries — CL allows
+;; an implementation to fix them, and a denormal is the only case where
+;; `float-precision` would differ, which this does not track.
+(defmethod float-radix ((self f64)) i32 2)
+(defmethod float-digits ((self f64)) i32 53)
+(defmethod float-precision ((self f64)) i32 (if (= self 0.0) 0 53))
+(defmethod float-sign ((self f64)) f64 (if (< self 0.0) -1.0 1.0))
+;; `(scale-float x n)` = `x * 2^n`. Halving/doubling in a loop rather than
+;; `(* self (expt 2.0 (int->float n)))`: `int->float` is one of the builtins
+;; the island has no lowering for, and reaching it would make this whole
+;; section interpreted-only (the same constraint the character section above
+;; works under). Every step here is exact in binary floating point.
+(defmethod scale-float ((self f64) (n i32)) f64
+  (let ((r self) (k (abs n)))
+    (progn
+      (if (>= n 0)
+          (while (> k 0) (progn (setf r (* r 2.0)) (setf k (- k 1)) ()))
+          (while (> k 0) (progn (setf r (/ r 2.0)) (setf k (- k 1)) ())))
+      r)))
+;; `decode-float`: the significand scaled into `[1/2,1)` and the exponent that
+;; puts it back, as a pair. CL returns three values (significand, exponent,
+;; sign); multiple values are not taken (language-design.md §0), so the sign
+;; is `float-sign` and this pair carries the other two. The significand is
+;; unsigned, as CL specifies.
+(defmethod decode-float ((self f64)) cons-cell<f64,i32>
+  (if (= self 0.0)
+      (cons 0.0 0)
+      (let ((m (abs self)) (e 0))
+        (progn
+          (while (>= m 1.0) (progn (setf m (/ m 2.0)) (setf e (+ e 1)) ()))
+          (while (< m 0.5) (progn (setf m (* m 2.0)) (setf e (- e 1)) ()))
+          (cons m e)))))
+;; `integer-decode-float`: the same split with the significand as an exact
+;; integer of `float-digits` bits, so `significand * 2^exponent` is the value
+;; exactly. A `bignum`, since 53 bits do not fit an `i32`.
+(defmethod integer-decode-float ((self f64)) cons-cell<bignum,i32>
+  (let ((d (decode-float self)))
+    (cons (float->bignum (scale-float (car d) 53)) (- (cdr d) 53))))
+
+;; CL's `rationalize`: the *simplest* rational that reads back as exactly this
+;; float — as against `float->ratio` (CL's `rational`), which is the exact
+;; binary value. `(rationalize 0.1)` is `1/10`; `(float->ratio 0.1)` is
+;; `3602879701896397/36028797018963968`.
+;;
+;; Continued fractions: successive convergents `h/k`, stopping at the first
+;; one that reads back as `self`. The iteration count is capped because a
+;; float that no convergent reproduces exactly (an infinity or a NaN) would
+;; otherwise spin.
+;;
+;; The convergents are carried as `f64` holding integral values rather than as
+;; integers, for the same reason `scale-float` loops: `int->float` has no
+;; island lowering. Every convergent that matters is well under 2^53, so the
+;; integers are exact, and `float->ratio` on an integral float is that integer
+;; over 1 — which is how the answer is assembled at the end.
+(defmethod rationalize ((self f64)) ratio
+  (let ((h1 1.0) (h0 0.0) (k1 0.0) (k0 1.0) (b self)
+        (out (int->ratio 0)) (go true) (guard 0))
+    (progn
+      (while go
+        (let ((a (floor b)))
+          (let ((h2 (+ (* a h1) h0)) (k2 (+ (* a k1) k0)))
+            (progn
+              (setf h0 h1) (setf h1 h2)
+              (setf k0 k1) (setf k1 k2)
+              (setf guard (+ guard 1))
+              (if (or (= (/ h2 k2) self) (> guard 40))
+                  (progn (setf out (/ (float->ratio h2) (float->ratio k2))) (setf go false) ())
+                  (progn (setf b (/ 1.0 (- b a))) ()))))))
+      out)))
+
+;; CL's numeric limit constants (CLHS 12.1.4.2 / 12.1.3). "fixnum" here is the
+;; immediate integer the runtime carries, which is an `i64` regardless of
+;; whether a value's static type is `i32` or `i64` — so these are `i64`'s
+;; bounds. `(- (* most-positive-fixnum -1) 1)` rather than the literal:
+;; `-9223372036854775808` reads as the *bignum* 9223372036854775808 negated,
+;; since the magnitude alone overflows `i64`.
+(pub defconstant (most-positive-fixnum i64) 9223372036854775807)
+(pub defconstant (most-negative-fixnum i64) (- (* most-positive-fixnum -1) 1))
+(pub defconstant (most-positive-double-float f64) 1.7976931348623157e308)
+(pub defconstant (most-negative-double-float f64) -1.7976931348623157e308)
+(pub defconstant (least-positive-double-float f64) 5.0e-324)
+(pub defconstant (least-negative-double-float f64) -5.0e-324)
+(pub defconstant (least-positive-normalized-double-float f64) 2.2250738585072014e-308)
+(pub defconstant (least-negative-normalized-double-float f64) -2.2250738585072014e-308)
+;; CL defines `double-float-epsilon` as the smallest positive `e` with
+;; `(/= (+ 1 e) 1)`, which is one ULP *above* 2^-53 rather than 2^-53 itself:
+;; 2^-53 rounds back to 1.0 under round-to-nearest-even.
+(pub defconstant (double-float-epsilon f64) 1.1102230246251568e-16)
+(pub defconstant (double-float-negative-epsilon f64) 5.551115123125784e-17)
+
+;; ---------------------------------------------------------------------------
+;; The control forms of CL's chapter 5 that need no new machinery —
+;; cl-parity-plan.md Phase 4a's macro-expressible half. (`block`/`return-from`,
+;; `prog`/`prog*`, `destructuring-bind`, `remf` and `sleep` are the half that
+;; does; see the plan for what each needs.)
+;;
+;; These expand to `setf`, which a `defmacro` may *produce* even though it may
+;; not *call* one of the protected builtin forms (checker.rs's note by
+;; `check_setf`): the expansion is handed back to the checker and checked
+;; there, which is how `do` above already steps its variables.
+
+;; `prog1`/`prog2`: evaluate everything, answer with the first (or second)
+;; form's value. The `gensym` keeps that value from being re-evaluated.
+(pub defmacro prog1 (first &rest rest)
+  "`(prog1 form more...)` -- every form runs; the value is `form`'s."
+  (let ((tmp (gensym))) `(let ((,tmp ,first)) ,@rest ,tmp)))
+(pub defmacro prog2 (first second &rest rest)
+  "`(prog2 a b more...)` -- every form runs; the value is `b`'s."
+  (let ((tmp (gensym))) `(progn ,first (let ((,tmp ,second)) ,@rest ,tmp))))
+
+;; `do*`: `do` with *sequential* binding and stepping. `do` above evaluates
+;; every step against the old values before assigning any; `do*` assigns each
+;; as it goes, so a later step sees the earlier ones already updated — which
+;; is why this needs no temporaries at all and `do` needs one per binding.
+(pub defmacro do* (bindings test-result &rest body)
+  "`(do* ((var init step)...) (test result...) body...)` -- `do` with `let*`
+   binding and in-order stepping."
+  (let ((test (sexpr-car test-result))
+        (result (sexpr-cdr test-result)))
+    `(let* ,(sexpr-map (lambda ((b Sexpr)) Sexpr (list (sexpr-car b) (sexpr-car (sexpr-cdr b)))) bindings)
+       (while (not ,test)
+         ,@body
+         ,@(sexpr-map (lambda ((b Sexpr)) Sexpr
+                        (list (quote setf) (sexpr-car b) (sexpr-car (sexpr-cdr (sexpr-cdr b)))))
+                      bindings))
+       ,@result)))
+
+;; `ecase`: `case` that requires a clause to match. CL signals a (correctable)
+;; error; with no condition system the answer is a `panic`, which is what
+;; `ecase` is *for* — saying "this really is exhaustive".
+;;
+;; `ccase` is `ecase` plus a restart letting the user supply a new value.
+;; Restarts are not taken (language-design.md §9), and with no restart the two
+;; are the same form — so `ccase` is defined as the same expansion rather than
+;; left out, and `docs/functions.md` records that they coincide here.
+(pub defmacro ecase (expr &rest clauses)
+  "`case` with no fallthrough: a value matching no clause panics."
+  `(case ,expr ,@clauses (else (panic "ecase: no clause matched"))))
+(pub defmacro ccase (expr &rest clauses)
+  "CL's `ccase`. With no restarts to offer, identical to `ecase`."
+  `(case ,expr ,@clauses (else (panic "ccase: no clause matched"))))
+
+;; `setq`: CL's variable-only assignment, and its multi-pair form. `setf` is
+;; the general one here, so this is a spelling rather than a mechanism —
+;; kept because ported CL is full of it.
+(pub defmacro setq (&rest pairs)
+  "`(setq var val ...)` -- CL's assignment. `setf` is the general form."
+  (let ((out (quote ())) (rest pairs))
+    (progn
+      (while (not (sexpr-null rest))
+        (progn
+          (setf out (sexpr-append out (list (list (quote setf) (sexpr-car rest) (sexpr-car (sexpr-cdr rest))))))
+          (setf rest (sexpr-cdr (sexpr-cdr rest)))))
+      `(progn ,@out ()))))
+;; `psetf`/`psetq`: the *parallel* versions — every value is computed before
+;; any assignment happens, so `(psetq a b b a)` swaps. One expansion serves
+;; both names, since `setf` already generalizes to places.
+(pub defmacro psetf (&rest pairs)
+  "`(psetf place val ...)` -- all values computed first, then assigned."
+  (let ((tmps (quote ())) (sets (quote ())) (rest pairs))
+    (progn
+      (while (not (sexpr-null rest))
+        (let ((g (gensym)))
+          (progn
+            (setf tmps (sexpr-append tmps (list (list g (sexpr-car (sexpr-cdr rest))))))
+            (setf sets (sexpr-append sets (list (list (quote setf) (sexpr-car rest) g))))
+            (setf rest (sexpr-cdr (sexpr-cdr rest))))))
+      `(let ,tmps ,@sets ()))))
+(pub defmacro psetq (&rest pairs)
+  "CL's `psetq`. `psetf` with places restricted to variables; same expansion."
+  `(psetf ,@pairs))
+
+;; `pushnew`: push unless already present. A `defmethod` rather than a macro —
+;; CL needs a macro because its `place` must be re-written, and a `Vector<T>`
+;; mutates in place instead.
+(defmethod pushnew ((self Vector<T>) (x T)) () (where (Eq T))
+  (if (member x (iter self)) () (push self x)))
+
+;; ---------------------------------------------------------------------------
 ;; Pretty-printer controls (CLHS 22.1.1 / 22.2 — the `*print-*` variables the
 ;; pretty printer consults).
 ;;

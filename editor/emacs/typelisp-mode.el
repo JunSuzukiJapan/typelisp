@@ -72,8 +72,10 @@ take the same name.")
   '(;; binding & conditionals (docs/syntax.md §4)
     "let" "let*" "if" "when" "unless" "cond" "case" "and" "or" "progn"
     "the" "match" "if-let" "while-let"
+    ;; CL's chapter-5 control forms (cl-parity-plan.md Phase 4a, §4/§7)
+    "ecase" "ccase" "prog1" "prog2" "setq" "psetq" "psetf"
     ;; iteration (§5)
-    "loop" "while" "until" "dotimes" "dolist" "do" "doiter"
+    "loop" "while" "until" "dotimes" "dolist" "do" "do*" "doiter"
     "break" "return"
     ;; non-local exit (§8) — `break'/`return' above are the *static* exits,
     ;; these are the dynamic ones
@@ -180,6 +182,10 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "next"
     ;; string / char methods
     "upcase" "downcase" "ref" "substring" "alphap" "digitp" "lt"
+    ;; the rest of CL's numeric catalog (Phase 1c, §2/§4.3)
+    "ffloor" "fceiling" "fround" "ftruncate" "isqrt" "rationalize"
+    "float-radix" "float-digits" "float-precision" "float-sign"
+    "scale-float" "decode-float" "integer-decode-float"
     ;; the CL character/string catalog (cl-parity-plan.md Phase 2a/2b, §8/§9):
     ;; case-insensitive order, case and class predicates, the CL-conformant
     ;; digit weight, character names, and the string utilities.
@@ -212,6 +218,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "caddr" "cadr" "cdaaar" "cdaadr" "cdaar" "cdadar"
     "cdaddr" "cdadr" "cdar" "cddaar" "cddadr" "cddar"
     "cdddar" "cddddr" "cdddr" "cddr"
+    ;; `pushnew' -- a `defmethod' on `Vector<T>', not one of the macros above
+    "pushnew"
     ;; the destructive `Vector<T>' operations (Phase 3d, §6.2)
     "nreverse" "nconc" "nreconc" "nbutlast" "nsubstitute" "nsubstitute-if"
     "delete" "delete-if" "delete-if-not" "delete-duplicates" "fill" "replace"
@@ -272,7 +280,13 @@ stream (CLHS 12.1.6).")
     ;; has no keyword-symbol type for CL's `boole-and` etc to be)
     "boole-clr" "boole-set" "boole-1" "boole-2" "boole-c1" "boole-c2"
     "boole-and" "boole-ior" "boole-xor" "boole-eqv" "boole-nand" "boole-nor"
-    "boole-andc1" "boole-andc2" "boole-orc1" "boole-orc2")
+    "boole-andc1" "boole-andc2" "boole-orc1" "boole-orc2"
+    ;; CL's numeric limit constants (cl-parity-plan.md Phase 1c, §4.3)
+    "most-positive-fixnum" "most-negative-fixnum"
+    "most-positive-double-float" "most-negative-double-float"
+    "least-positive-double-float" "least-negative-double-float"
+    "least-positive-normalized-double-float" "least-negative-normalized-double-float"
+    "double-float-epsilon" "double-float-negative-epsilon")
   "Literal constants.")
 
 ;;; Font lock ---------------------------------------------------------------

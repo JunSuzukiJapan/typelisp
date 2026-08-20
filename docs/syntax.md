@@ -413,9 +413,13 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   (key2 body...)
   (else body...))                   ; expr は一度だけ評価。key は equal で比較。
                                      ; シンボルを key にするときは 'sym と quote する。defmacro
+(ecase expr (key body...) ...)      ; 網羅を要求する case。どれにも当たらなければ panic。defmacro
+(ccase expr (key body...) ...)      ; CL の ccase。差し出せる restart が無いので ecase と同一。defmacro
 (and expr...)                       ; 短絡評価。0引数なら true。defmacro
 (or expr...)                        ; 短絡評価。0引数なら false。defmacro
 (progn body...)                     ; 順次実行、最後の値を返す
+(prog1 form more...)                ; 全部評価し、値は form のもの。defmacro
+(prog2 a b more...)                 ; 全部評価し、値は b のもの。defmacro
 (the Type expr)                     ; 型注釈（実行時の効果なし）
 ```
 
@@ -487,6 +491,9 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 (do ((var init step) ...)
     (test result...)
   body...)                          ; CL 流の並行ステップ反復。defmacro
+(do* ((var init step) ...)
+     (test result...)
+  body...)                          ; do の逐次版（let* 束縛・順に代入）。defmacro
 (doiter (var coll-expr) body...)    ; Iter トレイトを実装する値を反復。defmacro
 
 (break)                             ; 直近のループのみを抜ける。値は常に Unit
@@ -511,6 +518,9 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 ## 7. その他の特殊形
 
 ```lisp
+(setq var value ...)                ; CL の変数代入。(setf var value) を順に並べるだけ。defmacro
+(psetq var value ...)               ; 並行代入。全ての値を先に評価してから代入する。defmacro
+(psetf place value ...)             ; psetq を place へ一般化したもの（同じ展開）。defmacro
 (setf place value)                  ; place への代入。place は 変数名 / var::field /
                                      ; (accessor recv key...) 形の呼び出し形。recv の静的な
                                      ; 型が set-{accessor} というインスタンスメソッドを

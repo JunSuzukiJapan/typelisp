@@ -164,18 +164,19 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 |---|---|---|
 | `values` / `values-list` / `multiple-value-bind` / `multiple-value-call` / `multiple-value-list` / `multiple-value-prog1` / `multiple-value-setq` / `nth-value` | ⛔ | **多値が無い**。`(values ...)` という名前は `HashTable` のメソッドとして別用途で使われている。複数の結果は `cons-cell` か `defstruct` で返す |
 | `setf` | ⚠️ | 実装済み。place は「変数」「変数::フィールド」に加え、**`(accessor recv key...)` 形の呼び出し形 place** も 2026-07-30 対応（`Checker::check_setf_call_place`）。CL の `defsetf`/`define-setf-expander`（実行時のグローバルな名前→名前の登録テーブル）に相当する仕組みは無いが不要——`recv` の静的な型はチェック時にすでに分かっているので、`変数::field`＝`field`/`set-field` と同じ規約をそのまま流用し、`recv` の型が `set-{accessor}` という名のインスタンスメソッドを持っていればそれを setter として使う。ユーザ定義型は `defmethod set-foo ...` を書くだけで任意のアクセサ名 `foo` を setf 可能にでき、しかも型ごとに独立（CL のグローバル1本の名前テーブルと違い、別の型が同じアクセサ名を別の setter に割り当てても衝突しない）。`Vector<T>`/`HashTable<K,V>` の `get`→`set`（`set-get` ではない）は既存 API 互換のための特例。CL の `(setf (gethash k h) v)`/`(setf (aref a i) v)` に相当するものはこれで書ける（例: `(setf (get h k) v)`）。`(setf (car x) v)` 相当は無い（`Sexpr` の cons セルは `p::car` フィールド place で書く） |
-| `psetf` / `psetq` / `setq` | ❌ | 上の place 機構はあるが、この3つ自体は未実装 |
+| `psetf` / `psetq` / `setq` | ✅ | 3つとも `defmacro`（`setf` へ展開）（2026-08-20、Phase 4a）。`psetf`/`psetq` は全ての値を先に評価してから代入するので `(psetq a b b a)` が交換になる |
 | `shiftf` / `rotatef` | ✅ | 2026-07-30 実装（`Checker::check_rotatef_shiftf`）。上記どの place 種でも使えるが、読み取り型と書き込み型が非対称な place（`HashTable<K,V>` の `get`→`Option<V>`／`set`→`V`）をまたぐ回転は型エラーになる（CL の untyped `gethash` と違い静的型があるため） |
 | `incf` / `decf` | ✅ | 2026-07-30 実装（`Checker::check_incf_decf`）。`delta` 省略時は `1` |
-| `push` / `pop` | ⚠️ | `Vector<T>` のメソッドとして存在（`(push vec item)`、受け手が先）。2026-07-30、`(push item vec)` という CL の引数順も同名のまま両立するようにした（`Checker::try_instance_method_swapped` — 通常の受け手優先解決が失敗した場合だけ引数を入れ替えて再試行する2引数汎用フォールバック）。`Vector<T>` は参照型（ヒープ上で直接変異）なので CL のような setf 展開は不要。`pushnew` / `remf` は未実装 |
+| `push` / `pop` | ⚠️ | `Vector<T>` のメソッドとして存在（`(push vec item)`、受け手が先）。2026-07-30、`(push item vec)` という CL の引数順も同名のまま両立するようにした（`Checker::try_instance_method_swapped` — 通常の受け手優先解決が失敗した場合だけ引数を入れ替えて再試行する2引数汎用フォールバック）。`Vector<T>` は参照型（ヒープ上で直接変異）なので CL のような setf 展開は不要。`pushnew` は 2026-08-20（Phase 4a）に `defmethod` として追加——CL がマクロなのは place を書き換えるためで、ここは受け手がその場で変異するので不要。`remf` はプロパティリストごと対象外（§2.12） |
 | `block` / `return-from` | ⚠️ | `return` はあるが **直近のループからしか脱出できない**。名前付きブロックも関数からの早期リターンも無い。字句的な入れ子を跨ぐ脱出が要る場合は `catch`/`throw`（動的）で代用する |
 | `tagbody` / `go` | ⛔ | goto |
 | `catch` / `throw` | ✅ | 2026-08-16 実装（syntax.md §8 / language-design.md §7.5）。**動的**な脱出で、関数を何段跨いでも同じタグの `catch` に届く。CL との差は**タグがリテラルシンボル限定**（評価されない）で、そのシンボルが飛ぶ値の型を運ぶこと（`Checker::throw_tags`。計算したタグでは突き合わせる型が無くなる）。`throw` の型は `!`、`(catch 'tag e)` の型は `e` の型とタグの型の合流 |
 | `unwind-protect` | ✅ | 2026-08-16 実装。`cleanup` は `protected` をどう抜けても走る——正常終了・`throw`・`panic` に加えて `break`/`return` でも。interpreted / compiled 両経路（compiled 側は「上げうる呼び出しを保護経由にする」方式、[[typelisp-compiled-catch-throw]]） |
 | `destructuring-bind` | ❌ | `defmacro` のラムダリストでは分配束縛ができる（`&optional`/`&key` 含む）が、式としての `destructuring-bind` は無い |
-| `prog` / `prog*` / `prog1` / `prog2` | ❌ | `progn` ✅。`prog1`（最初の値を返す）は素直に書けるので優先度は低い |
+| `prog1` / `prog2` | ✅ | `defmacro`（2026-08-20、Phase 4a） |
+| `prog` / `prog*` | ❌ | `block nil` + `tagbody` の糖衣なので、`block`（Phase 4a の残り）と `tagbody`（⛔ goto）に依存する |
 | `typecase` / `etypecase` / `ctypecase` | ⛔ | (D1)。`match` が相当 |
-| `ecase` / `ccase` | ❌ | `case` ✅（`equal` 比較・`else` 節）。網羅性を要求する `ecase` は無い |
+| `ecase` / `ccase` | ✅ | `defmacro`（2026-08-20、Phase 4a）。どれにも当たらなければ panic。`ccase` は差し出せる restart が無いので `ecase` と同一の展開 |
 | `sleep` | ❌ | |
 
 ### 2.4 反復（CLHS 6）
@@ -183,7 +184,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | CL | 状態 | 備考 |
 |---|---|---|
 | 拡張 `loop`（`for`/`in`/`across`/`collect`/`sum`/`when`/`finally` …） | ❌ | typelisp の `loop` は**無限ループのみ**で、CL の LOOP DSL とは名前が同じだけの別物。`collect`/`sum` 等の集約は `map`/`foldl` を使う |
-| `do` / `do*` | ⚠️ | `do` ✅（`defmacro`）。逐次版 `do*` は無い |
+| `do` / `do*` | ✅ | 両方 `defmacro`。`do` は並行ステップ、`do*` は `let*` 束縛と順次代入（2026-08-20、Phase 4a） |
 | `dolist` / `dotimes` | ✅ | `dolist` は `Sexpr` の cons リストを歩く（要素は `Sexpr`）。`doiter` が `Iter` 版 |
 | `mapc` / `mapcar` / `mapcan` / `mapl` / `maplist` / `mapcon` | ⚠️ | `map`（`Iter` 用）と `sexpr-map`（`Sexpr` リスト用）のみ。**複数シーケンスを同時に走査する版が無い**（CL の `(mapcar #'f a b)`）ので zip 相当が書けない |
 
@@ -273,16 +274,16 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 | `+` `-` `*` `/` `=` `/=` `<` `<=` `>` `>=` | ✅ | **2026-07-31 可変長化+0/1引数対応**。`Checker::check_variadic_arith`/`check_variadic_cmp`（`checker.rs`）が `(+ a b c)` を `(+ (+ a b) c)` に、`(< a b c)` を一時変数束縛＋`(and (< a b) (< b c))` に構文糖衣展開。`Checker::check_nullary_or_unary_numeric_op` が CL の0/1引数版も実装: `(+)=0`、`(*)=1`、`(- x)`/`(/ x)`（単項否定・逆数、`(let ((%t x)) (- (- %t %t) %t))` 型のトリックでリテラル型変換問題を回避）、`(< x)=true` 等 |
 | `max` / `min` | ✅ | 型ごとの2引数ビルトイン(`icmp`+`select`、`bignum`/`ratio`は`rt_*_cmp`+`select`) + 可変長糖衣展開で3引数以上にも対応 |
 | `1+` / `1-` | ✅ | 型ごとの `defmethod`（`prelude.rs`） |
-| `abs` `signum` `gcd` `lcm` `mod` `rem` `expt` | ✅ | 型ごとのメソッド。ただし `gcd`/`lcm` は 2引数固定、整数の `expt` は無い（`bignum` 経由） |
+| `abs` `signum` `gcd` `lcm` `mod` `rem` `expt` | ✅ | 型ごとのメソッド。`gcd`/`lcm` は 0/1/n 引数すべて（チェッカー糖衣、`(gcd)`=0・`(lcm)`=1・1引数は `abs`）、整数の `expt` も `i32`/`i64` に（2026-08-20、Phase 1c） |
 | `floor` `ceiling` `round` `truncate` | ⚠️ | 1引数版（`f64→f64`）はCL相当。~~除数を取る2引数版も商・剰余の多値も無い~~ → **2026-07-29 `floor-div`/`ceiling-div`/`round-div`/`truncate-div` として実装済み**（`i32`/`i64`/`f64`、商・剰余を`cons-cell`で返す。多値そのものは非採用、§3.4参照）。CL と同名の2引数オーバーロードにしなかったのは `defmethod` が受け手の型でのみ解決しアリティでは解決しないため |
-| `ffloor` `fceiling` `fround` `ftruncate` | ❌ | |
-| `sqrt` | ⚠️ | `f64` のみ。`isqrt` は無い |
+| `ffloor` `fceiling` `fround` `ftruncate` | ✅ | 既存の `f64` `floor` 等の別名（CL では無印が整数を返すので `f` 付きの方が一致する）（2026-08-20、Phase 1c）。**丸め方だけ CL と違う**——0 から遠い方へ丸める |
+| `sqrt` | ✅ | `f64` の `sqrt` と、整数の `isqrt`（`i32`/`i64`）（2026-08-20、Phase 1c） |
 | `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | ✅ | **2026-07-31実装**（`f64`、`registry.rs`/`interp.rs`）。`log` は自然対数のみ（1引数）に加え、`(log number base)` の2引数版は `Checker::check_log_with_base` が `(/ (log number) (log base))` へアリティ展開して対応 |
 | `pi` | ✅ | **2026-07-31実装**。`f64` 定数（`prelude.rs` の `defconstant`） |
-| `float` `rational` `rationalize` | ⚠️ | `int->float`/`float->ratio` 等の個別変換はある。`rationalize`（近似有理数化）は無い |
+| `float` `rational` `rationalize` | ✅ | `int->float`/`float->ratio`（CL の `rational`）に加え `rationalize`（読み戻せる最も簡単な有理数。`(rationalize 0.1)`=`1/10`）（2026-08-20、Phase 1c） |
 | `numerator` / `denominator` | ✅ | |
 | `complex` `realpart` `imagpart` `conjugate` `phase` `cis` | ❌ | 複素数が無いため |
-| `float-sign` `float-digits` `float-precision` `decode-float` `integer-decode-float` `scale-float` `float-radix` | ❌ | 浮動小数点の内部表現へのアクセス |
+| `float-sign` `float-digits` `float-precision` `decode-float` `integer-decode-float` `scale-float` `float-radix` | ✅ | 7つとも（2026-08-20、Phase 1c）。`decode-float` は CL の3値返しのうち仮数と指数を `cons-cell` で返し、符号は `float-sign` が担う |
 | `random` | ⚠️ | **2026-07-31 に `random-state` 一式を追加**。`(random n &optional state)`（`i32` のみ）／`make-random-state`（引数なし＝新しい状態、状態を渡す＝その複製）／`random-state-p`／`*random-state*`（(D5) のため動的束縛でなく代入可能なグローバル）。状態は xorshift64、interpreted と compiled で同じ列を返す。残る差は**シード値を外から与えられない**こと——`make-random-state-fresh` は壁時計から採るので、同一プロセス内で `make-random-state` による複製を使えば列を再生できるが、実行を跨いで再現はできない（CL の `(make-random-state nil)`/`t` の区別も無い） |
 
 **ビット演算** — 2026-07-31実装:
@@ -291,13 +292,16 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 |---|---|---|
 | `logand` `logior` `logxor` `lognot` `ash` `logbitp` `logcount` `logtest` `integer-length` | ✅ | `i32`/`i64`（`registry.rs`/`interp.rs`）+ `bignum`（`num-bigint`のネイティブビット演算+独自popcount/bit-length実装）。無限精度2の補数として実装。`ratio` には未対応（CL自体もビット演算は整数専用でratioには定義が無い） |
 | `logeqv` `lognand` `lognor` `logandc1` `logandc2` `logorc1` `logorc2` | ✅ | `i32`/`i64`/`bignum` の `defmethod`（`prelude.rs`、上記プリミティブから合成） |
-| `byte` `byte-size` `byte-position` `ldb` `ldb-test` `dpb` `mask-field` `deposit-field` | ✅ | `i32` のみ（`prelude.rs`）。バイト指定子は新規struct型を作らず既存の`cons-cell<i32,i32>`を流用 |
+| `byte` `byte-size` `byte-position` `ldb` `ldb-test` `dpb` `mask-field` `deposit-field` | ⚠️ | `i32` のみ（`prelude.rs`）。バイト指定子は新規struct型を作らず既存の`cons-cell<i32,i32>`を流用。**`i64`/`bignum` への拡張は保留**——`defmethod` は受け手でしか解決せず、CL の `(ldb bytespec integer)` は指定子が先なので、整数側の幅で実装を選べない（引数順を変えるか指定子に幅を持たせるかの設計判断が要る） |
 | `boole` | ✅ | `i32` のみ。16個の `boole-*` 定数(`i32`コード、CLのキーワードの代わり)+ `defmethod`（`prelude.rs`） |
 
-**定数** — `pi` 以外は全滅（❌）:
+**定数** — ✅（2026-08-20、Phase 1c）:
 
-`most-positive-fixnum` `most-negative-fixnum` `most-positive-double-float` `least-positive-*`
-`double-float-epsilon` など
+`most-positive-fixnum` `most-negative-fixnum` `most-positive-double-float`
+`most-negative-double-float` `least-positive-double-float` `least-negative-double-float`
+`least-positive-normalized-double-float` `least-negative-normalized-double-float`
+`double-float-epsilon` `double-float-negative-epsilon`（`pi` は以前から）。
+`single-float`/`long-float` 系の同名定数は `f32`/`long-float` を持たないので無い。
 
 **コンパイル(JIT/AOT)対応**: 2026-07-31、上記の新規実装すべてに `compile`/`compile-file` 対応を追加。
 `i32`/`i64` のビット演算・`max`/`min` はLLVM命令直結(`build-and`/`build-or`/`build-xor`/`build-select`)
