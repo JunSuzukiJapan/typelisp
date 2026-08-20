@@ -259,15 +259,6 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
    `round` は島が lowering しているので島側も同時に変わる。functions.md §2 に注記した。
 
 
-`ffloor`/`fceiling`/`fround`/`ftruncate`、`isqrt`、整数の `expt`、可変長 `gcd`/`lcm`、
-`rationalize`、浮動小数点の内部表現アクセス（`float-sign`/`float-digits`/`float-precision`/
-`decode-float`/`integer-decode-float`/`scale-float`/`float-radix`）、
-`most-positive-fixnum`/`most-negative-fixnum`/`most-positive-double-float`/`least-positive-*`/
-`double-float-epsilon` 等の定数一式、**乱数のシードを外から与える手段**（現状
-`make-random-state-fresh` は壁時計から採るので実行を跨いだ再現ができない）、
-`byte`/`byte-size`/`byte-position`/`ldb`/`ldb-test`/`dpb`/`mask-field`/`deposit-field`/`boole` の
-`i64`・`bignum` への拡張（現在 `i32` のみ）。
-
 ### Stage 1d — 複素数
 
 `complex` 型を `bignum`/`ratio` と同じ heap-boxed 方式（`TAG_BOXED` ポインタ）で新設。前例を
