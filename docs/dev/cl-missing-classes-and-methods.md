@@ -9,6 +9,9 @@
 提案した [cl-equivalence-catalog.md](cl-equivalence-catalog.md)（2026-06-18、提案項目はほぼ実装済み）
 とは目的が異なり、**こちらは残差の棚卸し**である。
 
+**この残差を埋める実行計画は [cl-parity-plan.md](cl-parity-plan.md)（2026-08-20 策定）にある。**
+下の表の ❌/⚠️/⛔ がそれぞれどの Phase に落ちたか（落ちていないなら理由）は同計画の付録 A。
+
 実装状況は docs（古い可能性がある）ではなく、以下を直接読んで確認した:
 
 - `crates/typelisp-front/src/check/registry.rs` — Rust 組み込み型・組み込みメソッドの登録表
@@ -313,13 +316,14 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 | CL | 状態 | 備考 |
 |---|---|---|
 | `char=` `char<` `char<=` `char>` `char>=` | ⚠️ | 順序比較は `<`/`<=`/`>`/`>=` が `char` に多重定義されて ✅。等価は `equal`（`eq`/`eql` も同義）で、**数値と違い `=`/`/=` は `char` に定義されていない** |
-| `char/=` | ❌ | `(not (equal a b))` と書く |
-| `char-equal` / `char-lessp` 等（大文字小文字無視版） | ⚠️ | `equalp` のみ ✅。順序比較の大文字小文字無視版は無い |
+| `char/=` | ✅ | `/=`（2026-08-20、Phase 2a）。**可変長形は隣接ペア比較**で、全ペア相異を問う CL とは異なる |
+| `char-equal` / `char-lessp` 等（大文字小文字無視版） | ✅ | `equalp` に加え `lessp`/`greaterp`/`not-lessp`/`not-greaterp`（2026-08-20、Phase 2a） |
 | `char-code` / `code-char` | ✅ | `char->int` / `int->char`（+ `try-int->char`） |
 | `char-upcase` / `char-downcase` | ✅ | `upcase` / `downcase`（ASCII のみ） |
-| `alpha-char-p` / `digit-char-p` | ⚠️ | `alphap` ✅ / `digitp` は **bool を返す**（CL は数字の重みか nil）。基数引数も無い |
-| `alphanumericp` `graphic-char-p` `standard-char-p` `upper-case-p` `lower-case-p` `both-case-p` `characterp` | ❌ | |
-| `char-name` / `name-char` / `char-int` / `digit-char` | ❌ | |
+| `alpha-char-p` / `digit-char-p` | ✅ | `alphap` ✅ / CL 本来の重みは `digit-weight`（基数引数つき、`Option<i32>`）として別名で追加。`digitp` は bool のまま据え置き（prelude 自身のリーダが述語として呼ぶため）——2026-08-20、Phase 2a |
+| `alphanumericp` `graphic-char-p` `standard-char-p` `upper-case-p` `lower-case-p` `both-case-p` | ✅ | `alphanumericp`/`graphicp`/`standardp`/`upper-casep`/`lower-casep`/`both-casep`（2026-08-20、Phase 2a） |
+| `characterp` | ⛔ | 静的型付け（D1） |
+| `char-name` / `name-char` / `char-int` / `digit-char` | ✅ | `char->name`/`name->char`（リーダの文字名表の 7 つ）／`char-int` は既存の `char->int` と同じ／`digit->char`（基数引数つき）——2026-08-20、Phase 2a |
 | `char-code-limit` | ❌ | |
 
 ### 2.12 コンス（CLHS 14）
@@ -328,23 +332,24 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `caar` … `cddddr`（28個） | ❌ | 合成アクセサ。`(car (cdr x))` と書けば済むが CL コードの移植では頻出 |
-| `first` … `tenth` / `rest` | ❌ | |
-| `list` / `list*` | ⚠️ | `list` ✅（特殊形、`Sexpr` を作る）。`list*` は無い |
-| `make-list` / `copy-list` / `copy-tree` / `copy-alist` | ❌ | `copy-list` は Phase 5 で削除済み |
+| `caar` … `cddddr`（28個） | ✅ | 28 個すべて。ジェネリック `defun`（`defmethod` の受け手はネスト位置の型変数を束縛できない）。**リストでなくネストしたペア**の走査（2026-08-20、Phase 3） |
+| `first` … `tenth` / `rest` | ✅ | `Iter` 上（2026-08-20、Phase 3）。`first`〜`tenth` は `Option<A>`、`rest` は新しい `Vector<A>` |
+| `list` / `list*` | ⚠️ | `list` ✅（特殊形、`Sexpr` を作る）。`list*` は**対象外**——「末尾を差し替えた不完全リスト」という概念が無い |
+| `make-list` / `copy-list` | ✅ | `Vector::filled` / `copy-seq`（2026-08-20、Phase 3） |
+| `copy-tree` / `copy-alist` | ⛔ | 任意深さの異種の木を走査する型が書けない（`Sexpr` の木としてなら `equal` が `tree-equal` に当たる） |
 | `nth` / `nthcdr` | ⚠️ | `nth` は `Iter` 用で ✅、**`Sexpr` リストには使えない**。`nthcdr` は削除済み |
-| `last` / `butlast` | ⚠️ | 両方 `Iter` 用で ✅。`last` は CL と違い**最後のセルでなく最後の要素**を返す。`nbutlast` は (D4) |
+| `last` / `butlast` | ⚠️ | 両方 `Iter` 用で ✅。`last` は CL と違い**最後のセルでなく最後の要素**を返す。`nbutlast` は ✅（2026-08-20、Phase 3） |
 | `list-length` / `endp` / `null` / `consp` / `atom` / `listp` | ⚠️ | `Sexpr` 版の `sexpr-null`/`sexpr-consp`/`sexpr-atom` は ✅。汎用の `null`/`consp`/`atom` は削除済み |
-| `rplaca` / `rplacd` | ⛔ | (D4)。`(setf x::car v)` を使う |
-| `nconc` / `nreverse` / `nbutlast` / `nsubst` 等の n 系 | ⛔ | (D4) |
-| `revappend` / `nreconc` | ❌ | |
+| `rplaca` / `rplacd` | ✅ | `cons-cell` 上（2026-08-20、Phase 3）。(D4) は撤回（cl-parity-plan.md 付録 B）。**`Sexpr` 版は無い**——cons セルが `car` のソース位置を持つので書き換えると診断がずれる |
+| `nconc` / `nreverse` / `nbutlast` / `nsubst` 等の n 系 | ✅ | `Vector<T>` 上（2026-08-20、Phase 3）。(D4) は撤回。`nconc` は CL と違い**共有構造の書き換えではない** |
+| `revappend` / `nreconc` | ✅ | （2026-08-20、Phase 3） |
 | `append` | ⚠️ | `Iter` 版（2引数）と `string` 版と `sexpr-append` がある。CL の可変長・任意個は無い |
-| `member` / `member-if` / `member-if-not` | ⚠️ | `member` は **`bool` を返す**（CL は残りのリスト）。`-if` 版は無い |
-| `assoc` / `assoc-if` / `rassoc` / `rassoc-if` / `acons` / `pairlis` | ⚠️ | `assoc` ✅（`Eq K` 境界、`:test`/`:key` 無し）。ほかは無い |
-| `sublis` / `subst` / `subst-if` / `tree-equal` | ❌ | 木の書き換え。マクロ処理で効く |
-| `union` / `intersection` / `set-difference` / `set-exclusive-or` / `subsetp` / `adjoin` | ❌ | **集合演算が全滅** |
-| `ldiff` / `tailp` | ❌ | |
-| `getf` / `get-properties` | ❌ | プロパティリスト |
+| `member` / `member-if` / `member-if-not` | ⚠️ | 3つとも ✅ だが**すべて `bool` を返す**（CL は残りのリスト）。イテレータに返すべき tail cons が無いため——残りが要るなら `position` + `subseq`（2026-08-20、Phase 3） |
+| `assoc` / `assoc-if` / `rassoc` / `rassoc-if` / `acons` / `pairlis` | ✅ | 6つとも（2026-08-20、Phase 3）（`:test`/`:key` は Phase 3e） |
+| `sublis` / `subst` / `subst-if` / `tree-equal` | ⛔ | `copy-tree` と同じ理由で対象外 |
+| `union` / `intersection` / `set-difference` / `set-exclusive-or` / `subsetp` / `adjoin` | ✅ | 6つとも `Iter` 上・`Eq` 境界（2026-08-20、Phase 3）。CL が規定しない結果の順序は**初出順**で安定させた |
+| `ldiff` / `tailp` | ✅ | （2026-08-20、Phase 3）。CL は**構造の共有**を問うが、共有すべき構造が無いので**値として**の接尾辞を問う |
+| `getf` / `get-properties` | ⛔ | キーと値が交互に並ぶ無型のリストという表現が無い。同じ役割は `assoc`（連想リスト）か `HashTable` |
 
 ### 2.13 配列（CLHS 15）
 
@@ -363,17 +368,19 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 | CL | 状態 | 備考 |
 |---|---|---|
 | `string=` `string<` `string<=` `string>` `string>=` | ✅ | `equal`（内容比較）と `<`/`<=`/`>`/`>=`（`string` に多重定義）。`char` と同じく `=`/`/=` は無い |
-| `string/=` | ❌ | `(not (equal a b))` と書く。CL のように**不一致位置を返す**用途は代替が無い |
-| `string-equal` / `string-lessp` 等（大文字小文字無視版） | ⚠️ | `equalp` のみ。順序比較版は無い |
+| `string/=` | ✅ | `/=`（bool）と、不一致位置を返す `mismatch` の両方（2026-08-20、Phase 2b） |
+| `string-equal` / `string-lessp` 等（大文字小文字無視版） | ✅ | `equalp` に加え `lessp`/`greaterp`/`not-lessp`/`not-greaterp`（2026-08-20、Phase 2b） |
 | `char` / `schar` | ✅ | `ref`（範囲外は panic） |
 | `subseq`（文字列に対して） | ✅ | `substring` |
 | `string-upcase` / `string-downcase` | ✅ | `upcase` / `downcase`（ASCII のみ、`:start`/`:end` 無し） |
-| `string-capitalize` / `nstring-*` | ❌ | 各語頭を大文字化 |
-| `string-trim` / `string-left-trim` / `string-right-trim` | ❌ | **トリムが無い**。行入力を扱うと即欲しくなる |
+| `string-capitalize` | ✅ | `capitalize`（2026-08-20、Phase 2b） |
+| `nstring-*` | ❌ | 破壊版。`string` が不変なので Phase 3d の可変文字列判断待ち |
+| `string-trim` / `string-left-trim` / `string-right-trim` | ✅ | `trim`/`left-trim`/`right-trim`。`bag` 省略時は空白類（2026-08-20、Phase 2b） |
 | `concatenate` | ⚠️ | `append`（2引数）のみ |
-| `make-string` / `string` / `stringp` / `simple-string-p` | ❌ | 「文字を n 個並べた文字列」も「値を文字列化する汎用 `string`」も無い（後者は `(format false "~a" x)` で代替） |
-| `search` / `mismatch`（文字列検索） | ❌ | **部分文字列検索が無い** |
-| `split-sequence` 相当 | ❌ | CL 標準にも無いが、実用上ほぼ必ず要る |
+| `make-string` / `string`（文字列化） | ✅ | `string::filled` と `to-string`（2026-08-20、Phase 2b）。`to-string` はスカラ 6 型に実装 |
+| `stringp` / `simple-string-p` | ⛔ | 静的型付け（D1） |
+| `search` / `mismatch`（文字列検索） | ✅ | 受け手優先の `(search s sub)`（CL は引数順が逆）と `(mismatch a b)`（2026-08-20、Phase 2b） |
+| `split-sequence` 相当 | ✅ | `(split s sep)`、`sep` は文字列（2026-08-20、Phase 2b） |
 | `parse-integer` | ✅ | `parse-int`（`Result` を返す）。`:radix`/`:junk-allowed` は無い |
 
 ### 2.15 シーケンス（CLHS 17）
@@ -383,15 +390,15 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 | CL | 状態 | 備考 |
 |---|---|---|
 | `length` `elt` `subseq` `reverse` `sort` `find` `position` `count` `remove-if` `every` `some` `reduce` `map` | ✅ | 2026-07-31 に**項目ベース版 `find`/`position`/`count`**（`(find x it)`、`Eq A` 境界。CL のデフォルト `:test` = `eql` に相当）を追加し、述語版は `find-if`/`position-if`/`count-if` の名で並立。`some` は `any`、`reduce` は `foldl`/`foldr` |
-| `:key` `:test` `:test-not` `:start` `:end` `:from-end` `:count` | ❌ | キーワード引数**機構**は 2026-07-29 に入った（`defun` が `&optional`/`&key` を取れる。`defmacro` は 2026-07-24 から。`lambda` と `defmethod` は今も `&rest` のみ）が、**シーケンス API 側がまだ受けていない**。等価性は `Eq` トレイト固定なので `:test`/`:key` はトレイト境界とも噛み合わせが要る |
+| `:key` `:test` `:test-not` `:start` `:end` `:from-end` `:count` | ❌ | キーワード引数**機構**は 2026-07-29 に入った（`defun` が `&optional`/`&key` を取れる。`defmacro` は 2026-07-24 から。`lambda` は `&rest` のみ、`defmethod` は `&rest` すら取れない）が、**シーケンス API 側がまだ受けていない**。等価性は `Eq` トレイト固定なので `:test`/`:key` はトレイト境界とも噛み合わせが要る |
 | `sort` / `stable-sort` の述語引数 | ✅ | 2026-07-31 に CL 本来の `(sort sequence predicate)` へ変更。`(sort it cmp)`、`cmp` は「第1引数が第2引数より真に前」で `true`。非破壊（新しい `Vector<A>` を返す）かつ安定な挿入ソートなので `stable-sort` は同じものになる |
-| `merge` | ❌ | |
-| `copy-seq` / `fill` / `replace` / `map-into` | ❌ | |
-| `concatenate` | ❌ | `append` は 2引数のみ |
-| `substitute` / `substitute-if` / `nsubstitute` | ❌ | |
-| `remove` / `remove-duplicates` / `delete` / `delete-if` / `delete-duplicates` | ⚠️ | `remove-if` ✅ のみ。値で消す `remove` と重複除去が無い（`delete` 系は (D4)） |
-| `notany` / `notevery` / `count-if-not` / `find-if-not` / `remove-if-not` | ❌ | 否定版が一律に無い（`not` を挟めば書けるが CL コードの移植では頻出） |
-| `search` / `mismatch` | ❌ | 部分列検索 |
+| `merge` | ✅ | （2026-08-20、Phase 3）。CL は整列済みを要求するが、これは連結を整列する |
+| `copy-seq` / `fill` / `replace` / `map-into` | ✅ | `copy-seq` は `Iter` 上、残り3つは `Vector<T>` のその場書き込み（2026-08-20、Phase 3） |
+| `concatenate` | ⚠️ | `append`（2引数）が相当。可変長版は無い |
+| `substitute` / `substitute-if` / `nsubstitute` | ✅ | `nsubstitute-if` も（2026-08-20、Phase 3） |
+| `remove` / `remove-duplicates` / `delete` / `delete-if` / `delete-duplicates` | ✅ | 全部（2026-08-20、Phase 3）。`delete-if-not` も。(D4) は撤回 |
+| `notany` / `notevery` / `count-if-not` / `find-if-not` / `remove-if-not` | ✅ | 5つとも（2026-08-20、Phase 3） |
+| `search` / `mismatch` | ⚠️ | `string` 上は ✅（Phase 2b）。任意のシーケンス上の部分列検索は無い |
 | `make-sequence` / `coerce`（シーケンス変換） | ❌ | `Vector<T>` ↔ `Sexpr` リストの相互変換は**言語仕様上不可**と結論済み（functions.md §10） |
 | `nreverse` | ⛔ | (D4) |
 
@@ -503,7 +510,8 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
    （パス名・`read-sexpr`・`format` の出力先）で解消。CLHS 21章はトレイト階層として、
    19/20章はパス名層として入っている。残差は §2.18 のバイナリ I/O・`listen` 系だけ。
 2. ⚠️ **関数の `&optional` / `&key`** — 機構としては 2026-07-29 に解消（`defun` が両方取れる。
-   `defmacro` は 2026-07-24 から）。ただし **`lambda` と `defmethod` はいまも `&rest` のみ**で、
+   `defmacro` は 2026-07-24 から）。ただし **`lambda` は `&rest` のみ、`defmethod` は
+   `&rest` すら受け付けない**（`parse_defmethod_sig_inner` は `parse_param_pairs` を呼ぶだけ）。
    既存のシーケンス API も `:key`/`:test`/`:start`/`:end` を受けていない（§2.15）。
    `make-hash-table :test` と BOA コンストラクタも同様に未着手（§2.16/§2.6）——
    「書けない」から「書いていない」に変わった段階。

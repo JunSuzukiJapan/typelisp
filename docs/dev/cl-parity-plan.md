@@ -180,14 +180,27 @@ prelude.rs:95-104 が既に選んでいた道（"redesigned on top of `Vector<T>
 
 ### Phase 0 が計画本体に強いた訂正
 
-- **§2-3 の「境界付きジェネリックは別の境界付きジェネリックを呼べない」は現時点で誤り。**
-  `(defun mylen2<I,A> ((it I)) i32 (where (Iter I (Item A))) (mylen it))` は通る。
-  根拠として引いた `prelude.rs` 1145-1148 行のコメントは自分自身が反証になっている——
-  そのすぐ下の `elt` は `(nth n it)` と**実際に委譲している**（コメントは「`elt` が `nth` の
-  ループを複製している」と書いているが、コードは複製していない）。`check_call` の bounds 検証は
-  10192-10208 行で呼び出し側の `where` 節の関連型ピンを伝播するようになっており、
-  この制約は既に解消済み。**「Iter 系を 1 つ足すたびにループを書き下ろす」前提で積んだ工数は不要**
-  ——これは計画中で最大の見積り誤差。コメントの修正は付録 C に足した。
+- **§2-3 の「境界付きジェネリックは別の境界付きジェネリックを呼べない」は誤りだが、
+  最初に書いた訂正も誤りだった（Phase 3 で発覚、両方ここに残す）。**
+
+  当初の検証では `(defun mylen2<I,A> ((it I)) i32 (where (Iter I (Item A))) (mylen it))` が
+  通ったので「制約は既に解消済み」と結論した。Phase 3a で `assoc-if` が `find-if` へ委譲
+  しようとして落ち、**通っていたのは委譲が実装されていたからではなく、呼び出し側と呼ばれ側が
+  たまたま同じ文字（`A`）で項目型変数を綴っていたから**だと分かった。
+  `validate_where_bounds` は呼ばれ側の宣言されたピン（呼ばれ側の型パラメータで書かれている）と
+  呼び出し側のピン（呼び出し側の型パラメータで書かれている）を**素のまま**比較していた。
+  `prelude.rs` の `elt` が `nth` に委譲できていたのも同じ偶然（両方 `A`）で、`B` と綴れば落ち、
+  ピンが構造化された型（`(Item cons-cell<K,V>)`）なら一度も一致しなかった。
+
+  **修正済み**: 呼ばれ側のピンをその呼び出しの `subst` で解決してから比較する。
+  回帰テストは `generic_defun_test` の
+  `a_bounded_generic_can_delegate_when_the_item_variable_is_named_differently` と
+  `..._with_a_structured_associated_type_pin`。これで Phase 3 の全定義が委譲で書けている
+  （`first` → `nth`、`remove` → `remove-if`、`assoc-if` → `find-if`、…）ので、
+  「Iter 系を 1 つ足すたびにループを書き下ろす」前提で積んだ工数はやはり不要。
+  `prelude.rs` 1145-1148 行のコメントは付録 C で直す。
+
+  **教訓**: 「動いた」を根拠に制約の不在を結論しない。動いた例が*なぜ*動いたかを確かめる。
 
 ---
 
@@ -237,6 +250,49 @@ prelude.rs:95-104 が既に選んでいた道（"redesigned on top of `Vector<T>
 
 ## Phase 2 — 文字・文字列層
 
+**状態: 2a / 2b とも完了（2026-08-20）。** 実装は全て `prelude.rs` の `SOURCE` に入り、
+`PRELUDE_COMPILE_UNSUPPORTED` に穴を開けずに（＝JIT/AOT 対応込みで）通っている。
+テストは `tests/char_string_catalog_test.rs`（18 本）、ドキュメントは
+[functions.md](../functions.md) §8/§9。
+
+**計画から変えた点 4 つ**:
+
+1. **`upcase`/`downcase`/`alphap`/`digitp`/`int->char` を一切呼ばない書き方に統一した。**
+   この 5 つは島に lowering が無い組み込みで（`externs::native_lowered_primitive_methods` の
+   `"char"`/`"i32"` 行）、触れた瞬間この節の全定義がインタプリタ専用に落ちる。最初の草稿が
+   実際にそうなり、`PRELUDE_COMPILE_UNSUPPORTED` の照合が 3 件の穴を報告して止めた——
+   §2-2 が「穴が開けば毎ビルドで落ちて教えてくれる」と書いたとおりに機能した。
+   代わりに全て `char->int` のコードポイント上で書き、文字を*作る*ところは
+   `(ref "0123456789ABC..." w)` のように lowering 済みの `string::ref` で引く。
+   **この 5 つの lowering を足す作業は本計画の残タスクとして別に立てる**（下記）。
+2. **`digitp` は破壊的変更にしなかった。** CL 本来の重み返しは `digit-weight` という別名で
+   足し、`digitp`（bool）は据え置き。prelude 自身のリーダ（`reader-scan-atom`）と島が
+   述語として呼んでいるため。
+3. **`trim`/`left-trim`/`right-trim`/`digit-weight`/`digit->char` は `defmethod` でなく
+   `defun`。** CL がこの 5 つに省略可能引数（`bag`/`radix`）を与えており、`defmethod` は
+   `&optional` も `&key` も受け付けない（§2-8）。Phase 5b が入れば `defmethod` に移せる。
+4. **`(setf (char s i) c)` 相当（可変文字列）は入れなかった。** Stage 2b の冒頭で決めると
+   書いた判断: **入れない**。`Vector<char>` ＋ `to-string` で足り、`string` の `eq`/`eql` が
+   `Rc::ptr_eq` である前提を崩す代償に見合わない。地図の `nstring-*` 行は Phase 3d へ送った。
+
+**副産物で見つけた既存バグ 1 件（修正済み）**: コンパイル済みコードで
+`(format false "~a" x)` の `x` が `f64` **パラメータ**だと、数値でなく
+`to_bits(x) >> 3` が印字されていた。`Checker::wrap_rest_elem` が
+`is_heap_repr` の真を根拠に構成子を飛ばしていたが、`is_heap_repr` が答えているのは
+*インタプリタの*表現で、compiled な `f64` は箱でもタグ付きでもない生のビット列。
+`f64` だけこの近道から外した（`string`/`bignum`/`ratio` は両世界で同じタグ付きの語なので
+そのまま）。回帰テストは `compile_test::compiled_format_renders_a_float_parameter_as_a_number`。
+[[typelisp-crossing-must-be-type-driven]] と同じ形の誤りで、これで 4 回目。
+
+### 残タスク: char / int の native lowering 5 つ
+
+`char::upcase` / `char::downcase` / `char::alphap` / `char::digitp` / `i32`・`i64` の
+`int->char` はコンパイルできない。ユーザコードが `(upcase c)` を呼ぶ関数を `compile` すると
+（プロセス abort ではなく）クリーンなエラーで断られる、という既知の穴。§2-4 の触点
+フルセット（rt シム 5 本 → externs 3 表 → 島の `char-native-method?` と lowering →
+島再生成 ×2 → prelude 再生成）が要る。Phase 2 の本文からは独立しているので、
+着手は Phase 1a（同じく島の分岐を増やす作業）とまとめるのが安い。
+
 ### Stage 2a — 文字
 
 `char/=`、大文字小文字を無視する順序比較（`char-equal`/`char-lessp`/`char-greaterp`/
@@ -263,6 +319,46 @@ prelude.rs:95-104 が既に選んでいた道（"redesigned on top of `Vector<T>
 ---
 
 ## Phase 3 — リスト・シーケンス層（本計画の最大ブロック）
+
+**状態: 3a / 3b / 3c / 3d すべて完了（2026-08-20）。** 全て `prelude.rs` の `SOURCE` に入り、
+`PRELUDE_COMPILE_UNSUPPORTED` に穴を開けずに通っている。テストは
+`tests/seq_catalog_test.rs`（18 本）、ドキュメントは [functions.md](../functions.md) §6.1／§6.2。
+
+**計画から変えた点 5 つ**:
+
+1. **受け手は `Iter` 実装型に統一した**（`Vector<T>` 受け手の `defmethod` を並べる案は不採用）。
+   §1.2 は「同じ CL 名を受け手型ごとに `defmethod` で定義する」としていたが、既存の
+   `Iter` ライブラリ（`map`/`filter`/`length`/`nth`/…）が既にジェネリック `defun` で書かれており、
+   そこへ `defmethod` を混ぜると同じ名前が 2 通りに解決されうる——計画のリスク表が
+   `member` を名指しで警告していたのと同じ形。`Vector<T>` は `(iter v)` で渡す既存の作法のまま。
+   例外は Phase 3d（破壊的操作）で、こちらは受け手を書き換えるので `Vector<T>` の `defmethod`。
+2. **`member` を「残りのリストを返す形」にしなかった。** §3a の指示に反する。理由は上の 1 と同じで、
+   受け手の形で `member` の戻り型が変わるのは解決順の事故を招く。`member`/`member-if`/
+   `member-if-not` は 3 つとも `bool`——既存ライブラリが既に選んでいた departure を揃えた。
+   CL の「残り」が要る場面は `position` + `subseq` で書ける。
+3. **`caar`〜`cddddr` は `defun`**（Phase 0.1b の結果どおり）。28 個は機械生成した。
+4. **対象外にしたもの**: `list*`（「末尾を差し替えた不完全リスト」という概念が無い）、
+   `copy-tree`/`copy-alist`/`sublis`/`subst`/`subst-if`（任意深さの異種の木を走査する型が書けない。
+   `Sexpr` の木としてなら `equal` が `tree-equal` に当たる）、
+   プロパティリスト一式 `getf`/`get-properties`/`symbol-plist`/`remprop`（キーと値が交互に並ぶ
+   無型のリストという表現が無く、同じ役割は `assoc` か `HashTable` が担う。`symbol-plist`/`remprop`
+   はさらに可変なグローバルのシンボル属性表を要求するので (D5) 側でもある）。
+5. **Phase 0.4 の判断どおり `nconc` は入れたが、CL の `nconc` とは別物。** `Vector<T>` に
+   `other` の要素を足すだけで、共有構造の書き換えは起きない（`other` は影響を受けない）。
+   `Sexpr` 版は入れていない。
+
+**副産物で見つけた既存バグ 2 件（どちらも修正済み、回帰テストは `generic_defun_test`）**——
+どちらも Phase 0.2 で直した `Self` 置換漏れと**同じ形**（型変数の名前がたまたま一致したときだけ
+動く）で、これで 3 件目・4 件目:
+
+- 境界付きジェネリック同士の委譲（上の Phase 0 訂正を参照）。
+- **ジェネリック `defmethod` は受け手の型パラメータを所有型の宣言と同じ名前で綴らないと
+  置換されなかった。** `check_assoc_call` は `def.params` を受け手の具体引数と zip して
+  特殊化するのに、登録される署名は `defmethod` が書かれたままの名前を保っていた——
+  `(defmethod keepif ((self Vector<A>) (pred (fn (A) bool))) ...)` は `a` を置換しないまま
+  具体引数を拒否し、`Vector<T>` と綴った同じメソッドは通る。登録時に所有型の名前へ
+  書き換えるようにした（本体は書かれたままの名前で検査する——本文がそう書いてあるので）。
+
 
 §1.2 の方針に従い、**受け手は `Vector<T>` と `cons-cell` ネストと `Iter` 実装型**。`Sexpr` には足さない。
 §2-3 の制約（境界付きジェネリック同士は委譲できない）により、Iter 系は毎回ループを書き下ろす。
@@ -797,12 +893,14 @@ CL コードの移植と実用スクリプトで真っ先に当たる。
 
 ## 付録 C — 策定時に見つけた、計画本体とは別の小さな不整合
 
-いずれも実施のついでに直す。
+**4 件とも解消済み（2026-08-20、Phase 3 と同じコミット）。**
 
-1. **`docs/functions.md` §7.1 のエラー型表が 4 つしかない**（`FileError` が漏れている。
-   実装は `registry.rs` の `builtin_error_defs` に 5 つある）。
-2. **地図 §3-2 の「`lambda` と `defmethod` はいまも `&rest` のみ」が不正確**——
-   `defmethod` は `&rest` すら受け付けない（`parse_defmethod_sig_inner` checker.rs:6641）。
-3. **`.gitattributes` が `src/compiler_island.bc binary` を指している**が、実ファイルは
-   2026-08-20 のダンプ化で `src/compiler_island.typld` に改名済み。バイナリ属性が効いていないので
-   git が line-diff / text-merge を試みうる。
+1. ~~**`docs/functions.md` §7.1 のエラー型表が 4 つしかない**~~（`FileError` を追加）。
+2. ~~**地図 §3-2 の「`lambda` と `defmethod` はいまも `&rest` のみ」が不正確**~~
+   （`lambda` は `&rest` のみ、`defmethod` は `&rest` すら受け付けない、に修正。2 箇所）。
+3. ~~**`.gitattributes` が `src/compiler_island.bc binary` を指している**~~
+   （`src/compiler_island.typld` へ改名し、同じくバイナリの
+   `crates/typelisp-front/src/prelude.typld` も追加）。
+4. **`prelude.rs` 1145-1148 行の「兄弟の境界付きジェネリックへ委譲できない」コメント**
+   （策定後に発見）。すぐ下の `elt` 自身が反証だったうえ、*なぜ*そう見えたかも
+   実際とは違っていた——Phase 3 の節を参照。何が本当に真だったかを書き直した。

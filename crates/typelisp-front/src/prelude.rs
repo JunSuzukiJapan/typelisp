@@ -519,6 +519,273 @@ pub const SOURCE: &str = r##"
 (defmethod logorc1 ((self bignum) (b bignum)) bignum (logior (lognot self) b))
 (defmethod logorc2 ((self bignum) (b bignum)) bignum (logior self (lognot b)))
 
+;; CL's character catalog beyond the primitives in `registry::char_assoc`
+;; (`upcase`/`downcase`/`<`/`alphap`/`digitp`/`char->int`/`equalp`).
+;; cl-parity-plan.md Phase 2a.
+;;
+;; Naming follows this file's existing character/predicate convention rather
+;; than CL's spelling: the receiver's static type already says "char", so
+;; `char-lessp`/`upper-case-p`/`char-name`/`digit-char` become `lessp`/
+;; `upper-casep`/`char->name`/`digit->char` — the same collapse
+;; `alpha-char-p`->`alphap` and `zerop`/`evenp` already made, and the same
+;; `char->int`/`char->string` conversion spelling this type already carries.
+;; `docs/functions.md` §9 lists the CL correspondence for each.
+;;
+;; EVERY body below works on `char->int` code points and never calls
+;; `upcase`/`downcase`/`alphap`/`digitp`/`int->char`. That is not style: those
+;; five are builtins the island has no lowering for (`externs::
+;; native_lowered_primitive_methods`'s `"char"` and `"i32"` rows), so reaching
+;; one would make this whole section interpreted-only and open a
+;; `PRELUDE_COMPILE_UNSUPPORTED` hole — which is exactly what the first draft
+;; of this section did, and what that list exists to catch. `char->int`, the
+;; comparison operators and `string`'s `ref` *are* lowered, so everything here
+;; compiles through the ordinary prelude path. (Closing the lowering gap for
+;; those five is separate work; until then this constraint stands.)
+;;
+;; ASCII-only, like `char_assoc`'s own `upcase`/`alphap`: classifying a
+;; non-ASCII code point needs Unicode tables the runtime does not carry.
+(defun ascii-alpha-code ((n i32)) bool
+  (or (and (>= n 65) (<= n 90)) (and (>= n 97) (<= n 122))))
+(defun ascii-digit-code ((n i32)) bool (and (>= n 48) (<= n 57)))
+;; Case-folds an upper-case ASCII letter down, leaving everything else alone —
+;; the code-point-level half of `char`'s `equalp`, reused by the four
+;; case-insensitive order comparisons below.
+(defun ascii-downcase-code ((n i32)) i32
+  (if (and (>= n 65) (<= n 90)) (+ n 32) n))
+
+;; `char/=`: CL's inequality. `char` had `equal` but no `/=`, so the checker's
+;; variadic `/=` sugar (`check_variadic_cmp`, functions.md §4.1) had no binary
+;; method to expand onto for characters.
+(defmethod /= ((self char) (b char)) bool (not (equal self b)))
+;; The case-insensitive order comparisons (`char-lessp` and friends). CL
+;; defines them by case-folding both operands, which is what `equalp` on
+;; `char` already does for equality — these are its ordering siblings.
+(defmethod lessp ((self char) (b char)) bool
+  (< (ascii-downcase-code (char->int self)) (ascii-downcase-code (char->int b))))
+(defmethod greaterp ((self char) (b char)) bool
+  (> (ascii-downcase-code (char->int self)) (ascii-downcase-code (char->int b))))
+(defmethod not-lessp ((self char) (b char)) bool
+  (>= (ascii-downcase-code (char->int self)) (ascii-downcase-code (char->int b))))
+(defmethod not-greaterp ((self char) (b char)) bool
+  (<= (ascii-downcase-code (char->int self)) (ascii-downcase-code (char->int b))))
+;; Case classification. `both-casep` is CL's `both-case-p`: whether this
+;; character has *both* cases, i.e. whether case conversion means anything for
+;; it — true for ASCII letters, false for digits and punctuation.
+(defmethod upper-casep ((self char)) bool
+  (let ((n (char->int self))) (and (>= n 65) (<= n 90))))
+(defmethod lower-casep ((self char)) bool
+  (let ((n (char->int self))) (and (>= n 97) (<= n 122))))
+(defmethod both-casep ((self char)) bool (ascii-alpha-code (char->int self)))
+(defmethod alphanumericp ((self char)) bool
+  (let ((n (char->int self))) (or (ascii-alpha-code n) (ascii-digit-code n))))
+;; `graphic-char-p`: printable, space included, everything else excluded.
+(defmethod graphicp ((self char)) bool
+  (let ((n (char->int self))) (and (>= n 32) (< n 127))))
+;; `standard-char-p`: CL's 96-character standard set — the graphic characters
+;; plus newline, and nothing else.
+(defmethod standardp ((self char)) bool
+  (let ((n (char->int self))) (or (and (>= n 32) (< n 127)) (= n 10))))
+
+;; CL's `digit-char-p`: the character's *weight* in `radix`, or `none` when it
+;; is not a digit in that radix. This is the CL-conformant reading of that
+;; name; the existing `digitp` (ASCII decimal, `bool`) is deliberately left
+;; alone rather than redefined, because this file's own reader
+;; (`reader-scan-atom`) and the self-hosting island both call it as a
+;; predicate.
+;;
+;; A free `defun` rather than a `defmethod`, and likewise `digit->char`: CL
+;; gives both an optional radix, and `defmethod` accepts neither `&optional`
+;; nor `&key` (`parse_defmethod_sig_inner` only calls `parse_param_pairs`)
+;; until cl-parity-plan.md Phase 5b lifts that.
+(defun digit-weight ((c char) &optional (radix i32 10)) Option<i32>
+  (let* ((n (char->int c))
+         ;; `-1` means "not a digit character at all", which the range test
+         ;; below rejects along with a weight too large for `radix`.
+         (w (cond ((ascii-digit-code n) (- n 48))
+                  ((and (>= n 97) (<= n 122)) (+ (- n 97) 10))
+                  ((and (>= n 65) (<= n 90)) (+ (- n 65) 10))
+                  (else -1))))
+    (if (and (>= w 0) (< w radix)) (option::some w) (option::none))))
+;; CL's `digit-char`: the inverse — the character standing for `weight` in
+;; `radix`, or `none` when the weight is out of range. Digits use `0`-`9` and
+;; the rest upper-case letters, as CL specifies (so `radix` tops out at 36).
+;; Indexing a literal with `string`'s `ref` rather than computing a code point
+;; keeps this off `int->char`, per this section's header.
+(defun digit->char ((weight i32) &optional (radix i32 10)) Option<char>
+  (if (or (< weight 0) (>= weight radix))
+      (option::none)
+      (option::some (ref "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" weight))))
+;; CL's `char-name`/`name-char`, over exactly the characters this language's
+;; reader spells by name (`read::reader`'s named-character table). Anything
+;; else gets `none`, which is what CL says for every graphic character.
+;; `name->char` accepts the reader's aliases (`linefeed`, `null`) too, and is
+;; case-insensitive because the reader's own lookup is.
+(defmethod char->name ((self char)) Option<string>
+  (cond ((equal self #\newline)   (option::some "newline"))
+        ((equal self #\space)     (option::some "space"))
+        ((equal self #\tab)       (option::some "tab"))
+        ((equal self #\return)    (option::some "return"))
+        ((equal self #\page)      (option::some "page"))
+        ((equal self #\nul)       (option::some "nul"))
+        ((equal self #\backspace) (option::some "backspace"))
+        (else (option::none))))
+(defun name->char ((name string)) Option<char>
+  (cond ((equalp name "space")     (option::some #\space))
+        ((equalp name "newline")   (option::some #\newline))
+        ((equalp name "linefeed")  (option::some #\newline))
+        ((equalp name "tab")       (option::some #\tab))
+        ((equalp name "return")    (option::some #\return))
+        ((equalp name "page")      (option::some #\page))
+        ((equalp name "nul")       (option::some #\nul))
+        ((equalp name "null")      (option::some #\nul))
+        ((equalp name "backspace") (option::some #\backspace))
+        (else (option::none))))
+
+;; CL's string catalog beyond the primitives in `registry::string_assoc`
+;; (`upcase`/`downcase`/`length`/`ref`/`substring`/`append`/`equal`/`<`).
+;; cl-parity-plan.md Phase 2b.
+;;
+;; Same naming rule as the character section above — the receiver's static
+;; type already says "string", so `string-trim`/`string-capitalize`/
+;; `string-lessp`/`make-string` become `trim`/`capitalize`/`lessp`/
+;; `string::filled`. And the same compilability rule: nothing here reaches
+;; `upcase`/`downcase` (unlowered on both `string` and `char`), so case
+;; conversion goes through the two code-point helpers below, which index a
+;; literal alphabet with `string`'s `ref` — lowered, unlike `int->char`.
+(defun ascii-upcase-char ((c char)) char
+  (let ((n (char->int c)))
+    (if (and (>= n 97) (<= n 122)) (ref "ABCDEFGHIJKLMNOPQRSTUVWXYZ" (- n 97)) c)))
+(defun ascii-downcase-char ((c char)) char
+  (let ((n (char->int c)))
+    (if (and (>= n 65) (<= n 90)) (ref "abcdefghijklmnopqrstuvwxyz" (- n 65)) c)))
+
+;; `string/=`: CL's inequality, the counterpart of `char`'s `/=` above.
+(defmethod /= ((self string) (b string)) bool (not (equal self b)))
+;; `string-lessp` and friends: CL's case-insensitive order comparisons.
+;; Lexicographic on case-folded code points, with the shorter string first on
+;; a common prefix — the same order `<` gives, folded.
+(defun string-fold-compare ((a string) (b string)) i32
+  "-1/0/1 for a < b / a = b / a > b, comparing case-folded code points."
+  (let ((i 0) (n (min (length a) (length b))) (r 0))
+    (progn
+      (while (and (< i n) (= r 0))
+        (let ((x (ascii-downcase-code (char->int (ref a i))))
+              (y (ascii-downcase-code (char->int (ref b i)))))
+          (progn (if (< x y) (setf r -1) (if (> x y) (setf r 1) 0)) (setf i (+ i 1)))))
+      (if (/= r 0) r
+          (if (< (length a) (length b)) -1 (if (> (length a) (length b)) 1 0))))))
+(defmethod lessp ((self string) (b string)) bool (< (string-fold-compare self b) 0))
+(defmethod greaterp ((self string) (b string)) bool (> (string-fold-compare self b) 0))
+(defmethod not-lessp ((self string) (b string)) bool (>= (string-fold-compare self b) 0))
+(defmethod not-greaterp ((self string) (b string)) bool (<= (string-fold-compare self b) 0))
+
+;; `make-string`: `n` copies of `c`. A static method, so it reads like every
+;; other constructor in this language (`Vector::new`, `HashTable::new`) rather
+;; than as a `make-*` free function — cl-parity-plan.md §1.1.
+(defmethod filled (string (n i32) (c char)) string
+  (let ((out "") (i 0))
+    (progn
+      (while (< i n) (progn (setf out (append out (char->string c))) (setf i (+ i 1))))
+      out)))
+
+;; `search`: the index where `sub` first occurs in `self`, or `none`.
+;; CL spells the arguments the other way round (`(search pattern sequence)`);
+;; this takes the receiver first like every other method here, and
+;; `docs/functions.md` §8 records the difference.
+;; The empty string occurs at index 0, as CL says.
+(defmethod search ((self string) (sub string)) Option<i32>
+  (let ((n (length self)) (m (length sub)) (i 0) (found (the Option<i32> (option::none))))
+    (progn
+      (while (and (<= i (- n m)) (is-none found))
+        (progn
+          (if (equal (substring self i (+ i m)) sub) (progn (setf found (option::some i)) ()) ())
+          (setf i (+ i 1))))
+      found)))
+;; `mismatch`: the index of the first position where the two differ, or `none`
+;; when one is a prefix of the other *and* they are the same length — i.e.
+;; `none` exactly when they are `equal`. A length difference mismatches at the
+;; shorter one's end, which is CL's answer too.
+(defmethod mismatch ((self string) (b string)) Option<i32>
+  (let ((n (min (length self) (length b))) (i 0) (found (the Option<i32> (option::none))))
+    (progn
+      (while (and (< i n) (is-none found))
+        (progn
+          (if (equal (ref self i) (ref b i)) () (progn (setf found (option::some i)) ()))
+          (setf i (+ i 1))))
+      (match found
+        ((some k) (option::some k))
+        ((none) (if (= (length self) (length b)) (option::none) (option::some n)))))))
+
+;; The `string-trim` family. `bag` is the set of characters to strip, spelled
+;; as a string (CL takes any character sequence; a string *is* the character
+;; sequence this language has). A free `defun` with an `&optional` default of
+;; the usual whitespace, because `defmethod` takes neither `&optional` nor
+;; `&key` until cl-parity-plan.md Phase 5b.
+(defun char-in-bag ((c char) (bag string)) bool
+  (let ((i 0) (n (length bag)) (hit false))
+    (progn
+      (while (and (< i n) (not hit))
+        (progn (if (equal (ref bag i) c) (progn (setf hit true) ()) ()) (setf i (+ i 1))))
+      hit)))
+(defun left-trim ((s string) &optional (bag string " \t\n\r")) string
+  (let ((i 0) (n (length s)))
+    (progn
+      (while (and (< i n) (char-in-bag (ref s i) bag)) (setf i (+ i 1)))
+      (substring s i n))))
+(defun right-trim ((s string) &optional (bag string " \t\n\r")) string
+  (let ((j (length s)))
+    (progn
+      (while (and (> j 0) (char-in-bag (ref s (- j 1)) bag)) (setf j (- j 1)))
+      (substring s 0 j))))
+(defun trim ((s string) &optional (bag string " \t\n\r")) string
+  (right-trim (left-trim s bag) bag))
+
+;; `string-capitalize`: each word's first character up, the rest down, where a
+;; word is a maximal run of alphanumerics — CL's own definition.
+(defmethod capitalize ((self string)) string
+  (let ((out "") (i 0) (n (length self)) (in-word false))
+    (progn
+      (while (< i n)
+        (let ((c (ref self i)))
+          (progn
+            (if (alphanumericp c)
+                (progn
+                  (setf out (append out (char->string (if in-word (ascii-downcase-char c) (ascii-upcase-char c)))))
+                  (setf in-word true))
+                (progn (setf out (append out (char->string c))) (setf in-word false)))
+            (setf i (+ i 1)))))
+      out)))
+
+;; `split`: the pieces of `self` between occurrences of `sep`. Not CL (which
+;; has no splitter at all), but the operation every program that reads lines
+;; ends up writing. Adjacent separators produce empty pieces, and an empty
+;; separator is rejected rather than looping forever.
+(defmethod split ((self string) (sep string)) Vector<string>
+  (let ((out (the Vector<string> (Vector::new))) (rest self) (go true))
+    (progn
+      (if (= (length sep) 0) (panic "split: the separator must not be empty") ())
+      (while go
+        (match (search rest sep)
+          ((some k)
+           (progn
+             (push out (substring rest 0 k))
+             (setf rest (substring rest (+ k (length sep)) (length rest)))
+             ()))
+          ((none) (progn (push out rest) (setf go false) ()))))
+      out)))
+
+;; `to-string`: a value's `~a` rendering as a string. CL reaches this through
+;; `princ-to-string`/`write-to-string` (Phase 8a); this is the receiver-first
+;; form, per scalar type rather than as one generic `defun` because `format`'s
+;; `&rest` demands a concretely Sexpr-encodable element type and rejects a
+;; type variable outright.
+(defmethod to-string ((self i32)) string (format false "~a" self))
+(defmethod to-string ((self i64)) string (format false "~a" self))
+(defmethod to-string ((self f64)) string (format false "~a" self))
+(defmethod to-string ((self bool)) string (format false "~a" self))
+(defmethod to-string ((self char)) string (char->string self))
+(defmethod to-string ((self string)) string self)
+
 ;; `sort`/`insert-sorted`/`member`/`assoc`/`every`/`any` (user-facing `Sexpr`
 ;; list operations) were removed with the rest of the `Sexpr` list surface
 ;; (Symbol/Sexpr redesign Phase 5). The self-hosting compiler (`compiler.rs`)
@@ -1142,10 +1409,18 @@ pub const SOURCE: &str = r##"
 ;;   (`(nth n it)` vs `(elt it n)`);
 ;; - `subseq` clamps `end` past the input's length instead of erroring.
 ;;
-;; Every body is self-contained (no delegating to a sibling bounded generic:
-;; where-bound propagation from one generic's body into another's bounds is
-;; unimplemented — `check_call`'s bound validation would fail with "cannot
-;; infer" — which is why `elt` duplicates `nth`'s loop).
+;; Delegating to a sibling bounded generic *is* allowed — `elt` below is
+;; `(nth n it)`, not a second copy of `nth`'s loop, and the Phase 3 catalog
+;; further down leans on it throughout. This comment used to claim the
+;; opposite, and the code right below it was already the counterexample.
+;;
+;; What was true until 2026-08-20: `validate_where_bounds` compared the
+;; callee's declared associated-type pin against the caller's *raw*, each
+;; written in its own type parameters, so the check only passed when the two
+;; happened to spell the item variable with the same letter. `elt`/`nth` both
+;; say `A` and worked; the same shape spelled `B` did not, and a structured
+;; pin (`(Item cons-cell<K,V>)`) never matched at all. The callee's side is
+;; now resolved through the call's own substitution first.
 (defun length<I,A> ((it I)) i32 (where (Iter I (Item A)))
   (let ((n 0))
     (doiter (x it) (setf n (+ n 1)))
@@ -1258,6 +1533,327 @@ pub const SOURCE: &str = r##"
     (doiter (p it)
       (if (equals (car p) k) (progn (setf result (Option::some p)) (break)) ()))
     result))
+
+;; ---------------------------------------------------------------------------
+;; The rest of CL's list/sequence catalog — cl-parity-plan.md Phase 3a/3b/3c.
+;;
+;; Same shape as the `Iter` library above and for the same reason: these are
+;; generic `defun`s over `(where (Iter I (Item A)))`, not `defmethod`s, because
+;; a `defmethod` resolves by the receiver's *exact* type and would have to be
+;; written once per collection. `Vector<T>` reaches them through `(iter v)`,
+;; exactly as `map`/`filter` are already reached.
+;;
+;; The departures from CL that the `Iter` shape forces (documented above and in
+;; functions.md §6) carry over unchanged: a search reports `bool`/`Option`
+;; rather than the tail cons, and everything that CL returns as a fresh list
+;; comes back as a `Vector<A>`.
+
+;; --- Phase 3a: positional accessors and copying ---
+;; CL's `first`..`tenth`. `nth` already does the work; these are the named
+;; arities, and they delegate rather than duplicating the loop (which
+;; `validate_where_bounds` now permits for any pin, not only one that happens
+;; to spell its item variable `A` — see the plan's Phase 3 notes).
+(defun first<I,A>   ((it I)) Option<A> (where (Iter I (Item A))) (nth 0 it))
+(defun second<I,A>  ((it I)) Option<A> (where (Iter I (Item A))) (nth 1 it))
+(defun third<I,A>   ((it I)) Option<A> (where (Iter I (Item A))) (nth 2 it))
+(defun fourth<I,A>  ((it I)) Option<A> (where (Iter I (Item A))) (nth 3 it))
+(defun fifth<I,A>   ((it I)) Option<A> (where (Iter I (Item A))) (nth 4 it))
+(defun sixth<I,A>   ((it I)) Option<A> (where (Iter I (Item A))) (nth 5 it))
+(defun seventh<I,A> ((it I)) Option<A> (where (Iter I (Item A))) (nth 6 it))
+(defun eighth<I,A>  ((it I)) Option<A> (where (Iter I (Item A))) (nth 7 it))
+(defun ninth<I,A>   ((it I)) Option<A> (where (Iter I (Item A))) (nth 8 it))
+(defun tenth<I,A>   ((it I)) Option<A> (where (Iter I (Item A))) (nth 9 it))
+;; CL's `rest`: everything but the first element. A fresh `Vector`, not a tail
+;; cons — an iterator has no tail to share.
+(defun rest<I,A> ((it I)) Vector<A> (where (Iter I (Item A)))
+  (let ((out (the Vector<A> (Vector::new))) (skipped false))
+    (progn
+      (doiter (x it) (if skipped (push out x) (progn (setf skipped true) ())))
+      out)))
+;; CL's `copy-seq`/`copy-list`: materialize an iterator into a fresh `Vector`.
+;; Used throughout this section wherever a sequence has to be walked twice —
+;; an `Iter` is a one-shot cursor.
+(defun copy-seq<I,A> ((it I)) Vector<A> (where (Iter I (Item A)))
+  (let ((out (the Vector<A> (Vector::new))))
+    (progn (doiter (x it) (push out x)) out)))
+;; CL's `revappend`: `a` reversed, then `b`.
+(defun revappend<I,J,A> ((a I) (b J)) Vector<A>
+  (where (Iter I (Item A)) (Iter J (Item A)))
+  (append (iter (reverse a)) b))
+;; CL's `make-list`/`make-sequence`: `n` copies of `x`. A static method, so it
+;; reads like `Vector::new` — and, like `Vector::new`, its type argument comes
+;; from the surrounding expected type, so a bare `let` binding needs `the`.
+(defmethod filled (Vector<T> (n i32) (x T)) Vector<T>
+  (let ((out (the Vector<T> (Vector::new))) (i 0))
+    (progn (while (< i n) (progn (push out x) (setf i (+ i 1)))) out)))
+
+;; CL's `caar`..`cddddr`, over *nested pairs* rather than lists: `cadr` wants a
+;; `cons-cell<A,cons-cell<B,C>>`, which is what `(cons 1 (cons 2 3))` builds.
+;; Free `defun`s rather than `defmethod`s on `cons-cell` — the receiver of a
+;; `defmethod` only binds type variables that sit at the *top level* of its
+;; type arguments (`check_defmethod`'s `written_vars`), so `((self
+;; cons-cell<A,cons-cell<B,C>>))` leaves `B`/`C` unbound and `car` stops
+;; resolving on it. Generated mechanically; the type of `cXr` is read
+;; right-to-left, one `cons-cell` nesting per letter.
+(defun caar<A,B,C> ((x cons-cell<cons-cell<A,B>,C>)) A (car (car x)))
+(defun cadr<A,B,C> ((x cons-cell<A,cons-cell<B,C>>)) B (car (cdr x)))
+(defun cdar<A,B,C> ((x cons-cell<cons-cell<A,B>,C>)) B (cdr (car x)))
+(defun cddr<A,B,C> ((x cons-cell<A,cons-cell<B,C>>)) C (cdr (cdr x)))
+(defun caaar<A,B,C,D> ((x cons-cell<cons-cell<cons-cell<A,B>,C>,D>)) A (car (car (car x))))
+(defun caadr<A,B,C,D> ((x cons-cell<A,cons-cell<cons-cell<B,C>,D>>)) B (car (car (cdr x))))
+(defun cadar<A,B,C,D> ((x cons-cell<cons-cell<A,cons-cell<B,C>>,D>)) B (car (cdr (car x))))
+(defun caddr<A,B,C,D> ((x cons-cell<A,cons-cell<B,cons-cell<C,D>>>)) C (car (cdr (cdr x))))
+(defun cdaar<A,B,C,D> ((x cons-cell<cons-cell<cons-cell<A,B>,C>,D>)) B (cdr (car (car x))))
+(defun cdadr<A,B,C,D> ((x cons-cell<A,cons-cell<cons-cell<B,C>,D>>)) C (cdr (car (cdr x))))
+(defun cddar<A,B,C,D> ((x cons-cell<cons-cell<A,cons-cell<B,C>>,D>)) C (cdr (cdr (car x))))
+(defun cdddr<A,B,C,D> ((x cons-cell<A,cons-cell<B,cons-cell<C,D>>>)) D (cdr (cdr (cdr x))))
+(defun caaaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<cons-cell<A,B>,C>,D>,E>)) A (car (car (car (car x)))))
+(defun caaadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<cons-cell<B,C>,D>,E>>)) B (car (car (car (cdr x)))))
+(defun caadar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<cons-cell<B,C>,D>>,E>)) B (car (car (cdr (car x)))))
+(defun caaddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<cons-cell<C,D>,E>>>)) C (car (car (cdr (cdr x)))))
+(defun cadaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<A,cons-cell<B,C>>,D>,E>)) B (car (cdr (car (car x)))))
+(defun cadadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<B,cons-cell<C,D>>,E>>)) C (car (cdr (car (cdr x)))))
+(defun caddar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<B,cons-cell<C,D>>>,E>)) C (car (cdr (cdr (car x)))))
+(defun cadddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<C,cons-cell<D,E>>>>)) D (car (cdr (cdr (cdr x)))))
+(defun cdaaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<cons-cell<A,B>,C>,D>,E>)) B (cdr (car (car (car x)))))
+(defun cdaadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<cons-cell<B,C>,D>,E>>)) C (cdr (car (car (cdr x)))))
+(defun cdadar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<cons-cell<B,C>,D>>,E>)) C (cdr (car (cdr (car x)))))
+(defun cdaddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<cons-cell<C,D>,E>>>)) D (cdr (car (cdr (cdr x)))))
+(defun cddaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<A,cons-cell<B,C>>,D>,E>)) C (cdr (cdr (car (car x)))))
+(defun cddadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<B,cons-cell<C,D>>,E>>)) D (cdr (cdr (car (cdr x)))))
+(defun cdddar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<B,cons-cell<C,D>>>,E>)) D (cdr (cdr (cdr (car x)))))
+(defun cddddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<C,cons-cell<D,E>>>>)) E (cdr (cdr (cdr (cdr x)))))
+
+;; --- Phase 3b: predicate, negated and mapping variants ---
+;; The `-if`/`-if-not` pairs CL has for every search. `member-if` reports
+;; `bool` like `member` does, the same deliberate departure (an iterator has no
+;; tail cons to return).
+(defun member-if<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
+  (any it pred))
+(defun member-if-not<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
+  (any it (lambda ((x A)) bool (not (pred x)))))
+(defun notany<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
+  (not (any it pred)))
+(defun notevery<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
+  (not (every it pred)))
+(defun find-if-not<I,A> ((it I) (pred (fn (A) bool))) Option<A> (where (Iter I (Item A)))
+  (find-if it (lambda ((x A)) bool (not (pred x)))))
+(defun count-if-not<I,A> ((it I) (pred (fn (A) bool))) i32 (where (Iter I (Item A)))
+  (count-if it (lambda ((x A)) bool (not (pred x)))))
+(defun remove-if-not<I,A> ((it I) (pred (fn (A) bool))) Vector<A> (where (Iter I (Item A)))
+  (filter it pred))
+;; CL's item-based `remove`, and `remove-duplicates` (which keeps the *first*
+;; of each run of equals, CL's `:from-end t` behaviour — the one that reads as
+;; "order-preserving dedup").
+(defun remove<I,A> ((x A) (it I)) Vector<A> (where (Iter I (Item A)) (Eq A))
+  (remove-if it (lambda ((y A)) bool (equals y x))))
+(defun remove-duplicates<I,A> ((it I)) Vector<A> (where (Iter I (Item A)) (Eq A))
+  (let ((out (the Vector<A> (Vector::new))))
+    (progn (doiter (x it) (if (member x (iter out)) () (push out x))) out)))
+(defun substitute<I,A> ((new A) (old A) (it I)) Vector<A> (where (Iter I (Item A)) (Eq A))
+  (map it (lambda ((x A)) A (if (equals x old) new x))))
+(defun substitute-if<I,A> ((new A) (pred (fn (A) bool)) (it I)) Vector<A>
+  (where (Iter I (Item A)))
+  (map it (lambda ((x A)) A (if (pred x) new x))))
+;; The association-list catalog around the existing `assoc`.
+(defun assoc-if<I,K,V> ((it I) (pred (fn (K) bool))) Option<cons-cell<K,V>>
+  (where (Iter I (Item cons-cell<K,V>)))
+  (find-if it (lambda ((p cons-cell<K,V>)) bool (pred (car p)))))
+(defun rassoc<I,K,V> ((v V) (it I)) Option<cons-cell<K,V>>
+  (where (Iter I (Item cons-cell<K,V>)) (Eq V))
+  (find-if it (lambda ((p cons-cell<K,V>)) bool (equals (cdr p) v))))
+(defun rassoc-if<I,K,V> ((it I) (pred (fn (V) bool))) Option<cons-cell<K,V>>
+  (where (Iter I (Item cons-cell<K,V>)))
+  (find-if it (lambda ((p cons-cell<K,V>)) bool (pred (cdr p)))))
+(defun acons<I,K,V> ((k K) (v V) (it I)) Vector<cons-cell<K,V>>
+  (where (Iter I (Item cons-cell<K,V>)))
+  (let ((out (the Vector<cons-cell<K,V>> (Vector::new))))
+    (progn (push out (cons k v)) (doiter (p it) (push out p)) out)))
+(defun pairlis<I,J,K,V> ((ks I) (vs J)) Vector<cons-cell<K,V>>
+  (where (Iter I (Item K)) (Iter J (Item V)))
+  (let ((kv (copy-seq ks)) (vv (copy-seq vs)))
+    (let ((out (the Vector<cons-cell<K,V>> (Vector::new))) (i 0) (n (min (len kv) (len vv))))
+      (progn
+        (while (< i n) (progn (push out (cons (get kv i) (get vv i))) (setf i (+ i 1))))
+        out))))
+;; CL's multi-sequence `mapcar`, at the arity that covers nearly every use:
+;; two sequences walked in step, stopping at the shorter. (`map` above is the
+;; one-sequence form.)
+(defun map2<I,J,A,B,U> ((a I) (b J) (f (fn (A B) U))) Vector<U>
+  (where (Iter I (Item A)) (Iter J (Item B)))
+  (let ((av (copy-seq a)) (bv (copy-seq b)))
+    (let ((out (the Vector<U> (Vector::new))) (i 0) (n (min (len av) (len bv))))
+      (progn
+        (while (< i n) (progn (push out (f (get av i) (get bv i))) (setf i (+ i 1))))
+        out))))
+;; CL's `mapc` (map for effect), `mapcan` (map then concatenate) and `maplist`
+;; (map over successive *tails*).
+(defun mapc<I,A> ((it I) (f (fn (A) ()))) () (where (Iter I (Item A)))
+  (doiter (x it) (f x)))
+(defun mapcan<I,A,U> ((it I) (f (fn (A) Vector<U>))) Vector<U> (where (Iter I (Item A)))
+  (let ((out (the Vector<U> (Vector::new))))
+    (progn (doiter (x it) (doiter (y (iter (f x))) (push out y))) out)))
+(defun maplist<I,A,U> ((it I) (f (fn (Vector<A>) U))) Vector<U> (where (Iter I (Item A)))
+  (let ((v (copy-seq it)))
+    (let ((out (the Vector<U> (Vector::new))) (i 0) (n (len v)))
+      (progn
+        (while (< i n) (progn (push out (f (subseq (iter v) i n))) (setf i (+ i 1))))
+        out))))
+;; CL's `merge`. CL requires both inputs already sorted and merges in linear
+;; time; this sorts the concatenation, which agrees on every input CL defines
+;; an answer for and is also correct on the ones it does not.
+(defun merge<I,J,A> ((a I) (b J) (less (fn (A A) bool))) Vector<A>
+  (where (Iter I (Item A)) (Iter J (Item A)))
+  (sort (iter (append a b)) less))
+
+;; --- Phase 3c: set operations, and the list-tail relations ---
+;; All `Eq`-bounded and quadratic, like CL's own list-based versions. `union`
+;; and friends return elements in first-appearance order rather than CL's
+;; unspecified one — a stable answer is worth more than the freedom.
+(defun seq-equals<A> ((a Vector<A>) (b Vector<A>)) bool (where (Eq A))
+  "Element-wise equality of two vectors. `Vector<T>` has no `Eq` impl of its
+   own (that would need a bound on `T` an `impl` cannot express here), so the
+   tail relations below compare through this instead."
+  (if (/= (len a) (len b))
+      false
+      (let ((i 0) (ok true))
+        (progn
+          (while (and (< i (len a)) ok)
+            (progn
+              (if (equals (get a i) (get b i)) () (progn (setf ok false) ()))
+              (setf i (+ i 1))))
+          ok))))
+;; CL's `adjoin`: `x` prepended unless it is already there. CL conses onto the
+;; front, so the new element leads.
+(defun adjoin<I,A> ((x A) (it I)) Vector<A> (where (Iter I (Item A)) (Eq A))
+  (let ((v (copy-seq it)))
+    (if (member x (iter v))
+        v
+        (let ((out (the Vector<A> (Vector::new))))
+          (progn (push out x) (doiter (y (iter v)) (push out y)) out)))))
+(defun union<I,J,A> ((a I) (b J)) Vector<A>
+  (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (let ((out (remove-duplicates a)))
+    (progn (doiter (y b) (if (member y (iter out)) () (push out y))) out)))
+(defun intersection<I,J,A> ((a I) (b J)) Vector<A>
+  (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (let ((bv (copy-seq b)))
+    (remove-duplicates (iter (filter a (lambda ((x A)) bool (member x (iter bv))))))))
+(defun set-difference<I,J,A> ((a I) (b J)) Vector<A>
+  (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (let ((bv (copy-seq b)))
+    (remove-duplicates (iter (filter a (lambda ((x A)) bool (not (member x (iter bv)))))))))
+(defun set-exclusive-or<I,J,A> ((a I) (b J)) Vector<A>
+  (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (let ((av (copy-seq a)) (bv (copy-seq b)))
+    (append (iter (set-difference (iter av) (iter bv)))
+            (iter (set-difference (iter bv) (iter av))))))
+(defun subsetp<I,J,A> ((a I) (b J)) bool
+  (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (let ((bv (copy-seq b)))
+    (every a (lambda ((x A)) bool (member x (iter bv))))))
+;; CL's `tailp`/`ldiff`. CL asks about shared *structure* (`tail` must be one
+;; of `whole`'s own conses); with no shared structure to ask about, this asks
+;; the observable question instead — is `tail` a suffix of `whole` by value.
+(defun tailp<I,J,A> ((tail I) (whole J)) bool
+  (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (let ((tv (copy-seq tail)) (wv (copy-seq whole)))
+    (let ((k (- (len wv) (len tv))))
+      (if (< k 0) false (seq-equals (subseq (iter wv) k (len wv)) tv)))))
+(defun ldiff<I,J,A> ((whole I) (tail J)) Vector<A>
+  (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (let ((wv (copy-seq whole)) (tv (copy-seq tail)))
+    (if (tailp (iter tv) (iter wv))
+        (subseq (iter wv) 0 (- (len wv) (len tv)))
+        (copy-seq (iter wv)))))
+
+;; --- Phase 3d: the destructive operations ---
+;; language-design.md §0's (D4) said destructive operations would not be
+;; taken. cl-parity-plan.md revisits that: `Vector<T>` is a *reference* type
+;; whose elements live on the heap, so `nreverse` and friends are ordinary
+;; in-place mutation with no shared-structure hazard — the thing (D4) was
+;; actually protecting against. The one CL operation that really does rewrite
+;; shared structure, `nconc` over conses, is not what `nconc` means here (see
+;; below).
+;;
+;; Every one of these mutates the receiver *and* returns it, so `(nreverse v)`
+;; reads like the functional `reverse` while `v` itself is also reversed. The
+;; naming follows language-design.md §7.3 — no `!` suffix — which is why they
+;; keep CL's own `n`/`delete` spellings rather than inventing a marker.
+;;
+;; `vector-push-extend` and `vector-pop` are the existing `push`/`pop`: a
+;; `Vector<T>` has always grown on demand, so CL's distinction between a
+;; fill-pointer vector and a simple one has nothing to attach to.
+;;
+;; The receivers spell `Vector`'s type parameter `T` because that is the name
+;; `Vector<T>` itself was declared with — a generic `defmethod`'s registered
+;; signature is rewritten into the owner's parameter names, so any name works,
+;; but matching keeps the two readable side by side.
+(defmethod set-contents ((self Vector<T>) (src Vector<T>)) Vector<T>
+  "Replaces every element of `self` with `src`'s, in place, changing its
+   length. The shared bottom half of the `delete`/`n...` family: each of them
+   computes the new contents with the corresponding non-destructive function
+   above and then installs the answer here, rather than repeating a
+   compaction loop per operation."
+  (progn
+    (while (> (len self) 0) (progn (pop self) ()))
+    (doiter (x (iter src)) (push self x))
+    self))
+(defmethod nreverse ((self Vector<T>)) Vector<T>
+  (let ((i 0) (j (- (len self) 1)))
+    (progn
+      (while (< i j)
+        (let ((tmp (get self i)))
+          (progn
+            (set self i (get self j))
+            (set self j tmp)
+            (setf i (+ i 1))
+            (setf j (- j 1))
+            ())))
+      self)))
+(defmethod delete ((self Vector<T>) (x T)) Vector<T> (where (Eq T))
+  (set-contents self (remove x (iter self))))
+(defmethod delete-if ((self Vector<T>) (pred (fn (T) bool))) Vector<T>
+  (set-contents self (remove-if (iter self) pred)))
+(defmethod delete-if-not ((self Vector<T>) (pred (fn (T) bool))) Vector<T>
+  (set-contents self (filter (iter self) pred)))
+(defmethod delete-duplicates ((self Vector<T>)) Vector<T> (where (Eq T))
+  (set-contents self (remove-duplicates (iter self))))
+(defmethod nsubstitute ((self Vector<T>) (new T) (old T)) Vector<T> (where (Eq T))
+  (set-contents self (substitute new old (iter self))))
+(defmethod nsubstitute-if ((self Vector<T>) (new T) (pred (fn (T) bool))) Vector<T>
+  (set-contents self (substitute-if new pred (iter self))))
+(defmethod nbutlast ((self Vector<T>)) Vector<T>
+  (progn (if (> (len self) 0) (progn (pop self) ()) ()) self))
+;; CL's `fill`/`replace`/`map-into` all write into an existing sequence and
+;; leave its length alone, copying `(min (len self) (len src))` elements.
+(defmethod fill ((self Vector<T>) (x T)) Vector<T>
+  (let ((i 0))
+    (progn (while (< i (len self)) (progn (set self i x) (setf i (+ i 1)))) self)))
+(defmethod replace ((self Vector<T>) (src Vector<T>)) Vector<T>
+  (let ((i 0) (n (min (len self) (len src))))
+    (progn (while (< i n) (progn (set self i (get src i)) (setf i (+ i 1)))) self)))
+(defmethod map-into ((self Vector<T>) (src Vector<T>) (f (fn (T) T))) Vector<T>
+  (let ((i 0) (n (min (len self) (len src))))
+    (progn (while (< i n) (progn (set self i (f (get src i))) (setf i (+ i 1)))) self)))
+;; CL's `nconc` splices by rewriting the last cons of the first list, which is
+;; why it is the one destructive operation (D4) genuinely warned about. Here
+;; there is no last cons and nothing is shared: `other`'s elements are simply
+;; appended into `self`, which `other` neither observes nor is affected by.
+(defmethod nconc ((self Vector<T>) (other Vector<T>)) Vector<T>
+  (progn (doiter (x (iter other)) (push self x)) self))
+(defmethod nreconc ((self Vector<T>) (other Vector<T>)) Vector<T>
+  (nconc (nreverse self) other))
+;; CL's `rplaca`/`rplacd`: `cons-cell`'s own field setters, returning the cell
+;; rather than `()` so they compose the way CL's do. Deliberately *not*
+;; offered for `Sexpr` — beyond §1.2's "no `Sexpr` list methods", a `Sexpr`
+;; cons carries its `car`'s source span inline (`value::Cell::car_loc`), and
+;; overwriting the `car` would leave the old element's position attached to
+;; the new one, quietly misplacing every later diagnostic.
+(defmethod rplaca ((self cons-cell<A,B>) (x A)) cons-cell<A,B>
+  (progn (set-car self x) self))
+(defmethod rplacd ((self cons-cell<A,B>) (x B)) cons-cell<A,B>
+  (progn (set-cdr self x) self))
 
 ;; ---------------------------------------------------------------------------
 ;; Pretty-printer controls (CLHS 22.1.1 / 22.2 — the `*print-*` variables the

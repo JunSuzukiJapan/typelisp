@@ -6050,3 +6050,40 @@ fn an_interpreted_callee_of_compiled_code_still_returns_normally() {
     "#;
     assert_eq!(eval_ok_with_compiler(src), Value::Int(21));
 }
+
+/// `(format false "~a" x)` on an `f64` *parameter*, compiled.
+///
+/// `format`'s variadic tail is lowered by wrapping each argument as a `Sexpr`
+/// (`Checker::wrap_rest_elem`), and that wrap used to skip the constructor
+/// entirely for any type `is_heap_repr` calls heap-resident — which `f64` is,
+/// *in the interpreter*, where an `f64` is a `BoxedObj::Float` and therefore
+/// already a `Sexpr::Float`. A compiled `f64` is neither boxed nor tagged: it
+/// is the raw `f64::to_bits` pattern, whose low three bits read as the `Int`
+/// tag, so the printer rendered `to_bits(x) >> 3` — a large integer — instead
+/// of the number. The interpreted run got it right, which is what made the
+/// divergence worth pinning here rather than in `format_test`.
+///
+/// `i32` alongside it: the same lowering for a type that never took the
+/// shortcut, so a regression that broke the constructor path generally would
+/// not hide behind the float case.
+#[test]
+fn compiled_format_renders_a_float_parameter_as_a_number() {
+    assert_eq!(
+        run_and_read(
+            r#"
+            (defun show ((x f64)) string (format false "~a" x))
+            (defun showi ((n i32)) string (format false "~a" n))
+            (compile show)
+            (compile showi)
+            (append (append (show 2.25) "|") (showi 7))
+            "#,
+            1 << 16,
+            |h, v| match v {
+                Value::Str(id) => h.string(id).to_string(),
+                other => panic!("expected a string, got {:?}", other),
+            },
+        )
+        .expect("eval failed"),
+        "2.25|7"
+    );
+}

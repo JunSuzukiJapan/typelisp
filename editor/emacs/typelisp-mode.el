@@ -180,8 +180,42 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "next"
     ;; string / char methods
     "upcase" "downcase" "ref" "substring" "alphap" "digitp" "lt"
+    ;; the CL character/string catalog (cl-parity-plan.md Phase 2a/2b, §8/§9):
+    ;; case-insensitive order, case and class predicates, the CL-conformant
+    ;; digit weight, character names, and the string utilities.
+    "lessp" "greaterp" "not-lessp" "not-greaterp"
+    "upper-casep" "lower-casep" "both-casep" "alphanumericp"
+    "graphicp" "standardp" "digit-weight" "digit->char"
+    "char->name" "name->char"
+    "filled" "search" "mismatch" "trim" "left-trim" "right-trim"
+    "capitalize" "split"
+    ;; their code-point helpers -- ordinary public prelude functions, so the
+    ;; registry offers them and this list has to know them
+    "ascii-alpha-code" "ascii-digit-code" "ascii-downcase-code"
+    "ascii-upcase-char" "ascii-downcase-char"
+    "char-in-bag" "string-fold-compare"
     ;; higher-order combinators
     "identity" "const" "compose" "flip"
+    ;; the CL list/sequence catalog (cl-parity-plan.md Phase 3a/3b/3c, §6.1) --
+    ;; generic `defun's over the `Iter' trait
+    "first" "second" "third" "fourth" "fifth" "sixth"
+    "seventh" "eighth" "ninth" "tenth"
+    "acons" "adjoin" "assoc-if" "copy-seq" "count-if-not" "find-if-not"
+    "intersection" "ldiff" "map2" "mapc" "mapcan" "maplist"
+    "member-if" "member-if-not" "merge" "notany" "notevery" "pairlis"
+    "rassoc" "rassoc-if" "remove-duplicates" "remove-if-not" "rest" "revappend"
+    "seq-equals" "set-difference" "set-exclusive-or" "subsetp" "substitute" "substitute-if"
+    "tailp" "union"
+    ;; the 28 `c*r' pair accessors (§6.1)
+    "caaaar" "caaadr" "caaar" "caadar" "caaddr" "caadr"
+    "caar" "cadaar" "cadadr" "cadar" "caddar" "cadddr"
+    "caddr" "cadr" "cdaaar" "cdaadr" "cdaar" "cdadar"
+    "cdaddr" "cdadr" "cdar" "cddaar" "cddadr" "cddar"
+    "cdddar" "cddddr" "cdddr" "cddr"
+    ;; the destructive `Vector<T>' operations (Phase 3d, §6.2)
+    "nreverse" "nconc" "nreconc" "nbutlast" "nsubstitute" "nsubstitute-if"
+    "delete" "delete-if" "delete-if-not" "delete-duplicates" "fill" "replace"
+    "map-into" "set-contents" "rplaca" "rplacd"
     ;; Eq / Ord trait methods
     "equals" "not-equals" "less" "less-equal" "greater" "greater-equal"
     ;; pretty-printer helpers callable inside `pprint-logical-block' (§15.1)

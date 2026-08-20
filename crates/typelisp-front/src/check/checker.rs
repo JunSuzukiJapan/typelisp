@@ -2459,7 +2459,21 @@ impl Checker {
         // `check_inner`'s expected-type fallback, see its doc comment for why
         // this is runtime-cost-free. This is what lets `(println "~a" my-
         // struct)`/`(list p ...&rest)` accept a user ADT argument.
-        if self.is_heap_repr(elem_ty) {
+        // `f64` is the one heap-repr type this shortcut must *not* take.
+        // `is_heap_repr` answers about the **interpreter's** representation,
+        // where an `f64` is a `BoxedObj::Float` and therefore already a
+        // `Sexpr::Float`. A *compiled* `f64` is neither boxed nor tagged: it
+        // is the raw `f64::to_bits` pattern in an i64 slot, so retyping it
+        // hands the printer a word whose low bits happen to read as the `Int`
+        // tag — `(format false "~a" x)` in a compiled function printed
+        // `to_bits(x) >> 3` instead of the number. Going through the `Float`
+        // constructor instead is free in the interpreter
+        // (`construct_sexpr_core`'s `SEXPR_FLOAT` arm validates and passes the
+        // value straight back) and is exactly the `rt_float_new` box the
+        // island emits for that variant. `string`/`bignum`/`ratio` genuinely
+        // do share their tagged word between both worlds and stay on the
+        // shortcut.
+        if self.is_heap_repr(elem_ty) && *elem_ty != Type::F64 {
             // A retype, not a node: the form is unchanged and only the
             // checker's own view of its type widens.
             return Ok(Checked::new(e.form, sexpr_ty()));
@@ -6558,19 +6572,70 @@ impl Checker {
         }
 
         // Register the signature before checking the body (self-recursion).
+        //
+        // A generic method's registered signature is rewritten into the
+        // *owner type's* parameter names first. `Checker::check_assoc_call`
+        // specializes a call by zipping `def.params` against the receiver's
+        // concrete arguments, so a signature written in any other names is
+        // simply not substituted — `(defmethod keepif ((self Vector<A>) (pred
+        // (fn (A) bool))) ...)` kept its `a` and rejected an `(fn (i32)
+        // bool)` argument, while the identical method spelled `Vector<T>`
+        // (the name `Vector` itself was declared with) worked. Renaming here
+        // rather than teaching `check_assoc_call` a second vocabulary keeps
+        // one name in play past this point; the *body* is deliberately left
+        // in the written names below, since that is what its text says, and
+        // `MethodTemplate::Form` keeps `written_vars` for the same reason.
+        let owner_rename: BTreeMap<String, Type> = if is_generic_template {
+            self.reg
+                .type_def(&type_fq)
+                .map(|d| {
+                    written_vars
+                        .iter()
+                        .cloned()
+                        .zip(d.params.iter().map(|p| Type::Named(Path::root(p), Vec::new())))
+                        .filter(|(w, t)| !matches!(t, Type::Named(p, _) if p.last_segment() == w))
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            BTreeMap::new()
+        };
+        let rename = |t: &Type| {
+            if owner_rename.is_empty() { t.clone() } else { subst_apply(t, &owner_rename) }
+        };
         let mut sig_params: Vec<Type> = Vec::new();
         if instance {
-            sig_params.push(recv_ty.clone());
+            sig_params.push(rename(&recv_ty));
         }
-        sig_params.extend(params.iter().map(|(_, t)| t.clone()));
+        sig_params.extend(params.iter().map(|(_, t)| rename(t)));
+        // The bounds are keyed by type-variable *name*, so they move too —
+        // `validate_where_bounds` looks its keys up in the same `subst`
+        // `check_assoc_call` builds from `def.params`.
+        let sig_bounds: BTreeMap<String, Vec<TraitBound>> = bounds
+            .iter()
+            .map(|(k, bs)| {
+                let k = match owner_rename.get(k) {
+                    Some(Type::Named(p, _)) => p.last_segment().to_string(),
+                    _ => k.clone(),
+                };
+                let bs = bs
+                    .iter()
+                    .map(|b| TraitBound {
+                        trait_path: b.trait_path.clone(),
+                        assoc: b.assoc.iter().map(|(n, t)| (n.clone(), rename(t))).collect(),
+                    })
+                    .collect();
+                (k, bs)
+            })
+            .collect();
         let sig = FnSig {
             type_params: vec![],
             params: sig_params,
-            ret: ret.clone(),
+            ret: rename(&ret),
             public,
             rest: None,
             builtin: false,
-            bounds: bounds.clone(),
+            bounds: sig_bounds,
             optionals: Vec::new(),
             keys: Vec::new(),
         };
@@ -10602,7 +10667,26 @@ impl Checker {
                                 ) else {
                                     return false;
                                 };
-                                tb.assoc.iter().all(|(k, v)| at.get(k) == Some(v))
+                                // `tb` is the *callee's declared* bound, so
+                                // its pins are written in the callee's own
+                                // type parameters (`find-if`'s `(Item A)`).
+                                // `at` holds the caller's, in the caller's.
+                                // Comparing them raw only agreed when the two
+                                // functions happened to spell the variable
+                                // with the same letter — which is why the
+                                // prelude's `elt` could delegate to `nth`
+                                // (both say `A`) while the identical shape
+                                // spelled `B` could not, and why no pin that
+                                // is a *structured* type (`(Item
+                                // cons-cell<K,V>)`) ever matched. Resolving
+                                // the callee's side through the call's own
+                                // `subst` first puts both in the caller's
+                                // vocabulary. A parameter `subst` never bound
+                                // is left as-is by `subst_apply`, which is
+                                // exactly the previous behavior.
+                                tb.assoc
+                                    .iter()
+                                    .all(|(k, v)| at.get(k) == Some(&subst_apply(v, subst)))
                             })
                         });
                         if !satisfied {

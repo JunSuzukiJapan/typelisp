@@ -359,7 +359,78 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 > `nconc` `nreverse`（破壊的操作）、`remove-if-not`。`find-if`/`count-if`/`position-if`
 > は一時 `find`/`count`/`position` に統合されていたが、CL 本来の項目ベース版
 > `find`/`count`/`position`（上表）を別途追加したのに伴い述語版の名前として復活した。
-> `remove`（要素削除）は現在 `HashTable<K,V>` のメソッドとしてのみ存在（§11）。
+> `remove`（要素削除）はその後 Phase 3b で `Iter` 上に復活した（下表）。
+> `nconc`/`nreverse`/`remove-if-not`/`copy-list` も Phase 3b/3d で戻っている。
+
+### 6.1 CL カタログの残り（cl-parity-plan.md Phase 3a/3b/3c）
+
+すべて上と同じ `where (Iter I (Item A))` のジェネリック `defun`。`Vector<T>` からは
+`(iter v)` で渡す。結果のコレクションはやはり新しい `Vector` として返る。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `first`…`tenth` | `(first it)` | `Iter<A>→Option<A>` | CL の名前付き添字。`(nth k it)` に委譲 |
+| `rest` | `(rest it)` | `Iter<A>→Vector<A>` | 先頭を除いた残り（共有される tail cons ではなく新しい `Vector`） |
+| `copy-seq` | `(copy-seq it)` | `Iter<A>→Vector<A>` | イテレータを `Vector` に実体化（CL `copy-seq`/`copy-list`） |
+| `revappend` | `(revappend a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | `a` を反転して `b` を続ける |
+| `Vector::filled` | `(Vector::filled n x)` | `(i32,T)→Vector<T>` | `x` を `n` 個（CL `make-list`/`make-sequence`）。`Vector::new` と同じく型引数は期待型から来るので、裸の `let` には `the` が要る |
+| `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `member` と同じく **`bool`**（イテレータに返すべき tail cons が無い） |
+| `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `any`/`every` の否定 |
+| `find-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | 各正版と同型 | 述語を否定した版 |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | 値で削除 |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | 重複除去。**最初の出現を残す**（CL の `:from-end t` 側） |
+| `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | 値／述語で置換 |
+| `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | `Iter<cons-cell<K,V>>` 上 | `assoc` の述語版・値側版 |
+| `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | 先頭にペアを足す |
+| `pairlis` | `(pairlis ks vs)` | `(Iter<K>,Iter<V>)→Vector<cons-cell<K,V>>` | 2列を組にする。短い方で止まる |
+| `map2` | `(map2 a b f)` | `(Iter<A>,Iter<B>,(fn (A B) U))→Vector<U>` | CL の複数シーケンス `mapcar`。短い方で止まる |
+| `mapc` | `(mapc it f)` | `(Iter<A>,(fn (A) ()))→()` | 副作用のための写像 |
+| `mapcan` | `(mapcan it f)` | `(Iter<A>,(fn (A) Vector<U>))→Vector<U>` | 写像して連結 |
+| `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | 連続する**末尾**への写像 |
+| `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | 併合。CL は整列済みを要求するが、これは連結を整列する |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | 無ければ**先頭に**足す |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | 集合演算。CL は順序を規定しないが、ここは**初出順**で安定 |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | 包含 |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | 接尾辞か／接尾辞を除いた前半。CL は**構造の共有**を問うが、共有すべき構造が無いので**値として**の接尾辞を問う |
+| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | 要素ごとの等価。`Vector<T>` 自身に `Eq` の実装は無いので、`tailp` はこれを経由する |
+| `caar`…`cddddr` | `(cadr p)` | ネストしたペア上 | CL の 28 個。**リストではなくペア**の走査で、`cadr` は `cons-cell<A,cons-cell<B,C>>` を取る |
+
+`caar`〜`cddddr` が `defmethod` でなく `defun` なのは、`defmethod` の受け手が型変数を束縛するのは
+型引数の**最上位**だけで（`check_defmethod` の `written_vars`）、`cons-cell<A,cons-cell<B,C>>` の
+`B`/`C` が未束縛になるため。
+
+CL にあってここに無いもの: `list*`（末尾を差し替えた不完全リストという概念が無い）、
+`copy-tree`/`copy-alist`/`sublis`/`subst`/`subst-if`（任意深さの異種の木を走査する型が書けない。
+`Sexpr` の木としてなら `equal` が `tree-equal` に当たる）、
+プロパティリスト一式 `getf`/`get-properties`/`symbol-plist`/`remprop`（キーと値が交互に並ぶ
+無型のリストという表現が無い。同じ役割は `assoc`（連想リスト）か `HashTable` が担う）。
+
+### 6.2 破壊的操作（cl-parity-plan.md Phase 3d）
+
+`Vector<T>` の `defmethod`。**受け手を書き換えたうえで受け手自身を返す**ので、`(nreverse v)` は
+`reverse` と同じ形で書けて `v` 自身も反転する。`!` 接尾辞は使わない規約
+（[language-design.md](dev/language-design.md) §7.3）に従い CL の名前をそのまま使う。
+
+| 名前 | 形式 | 説明 |
+|---|---|---|
+| `nreverse` | `(nreverse v)` | その場で反転 |
+| `delete` `delete-if` `delete-if-not` `delete-duplicates` | `(delete v x)` | `remove`／`remove-if`／`filter`／`remove-duplicates` のその場版 |
+| `nsubstitute` `nsubstitute-if` | `(nsubstitute v new old)` | `substitute` 系のその場版 |
+| `nbutlast` | `(nbutlast v)` | 末尾を1つ落とす |
+| `fill` | `(fill v x)` | 全要素を `x` に。長さは変えない |
+| `replace` | `(replace v src)` | `src` の要素を先頭から上書き。`(min (len v) (len src))` 個 |
+| `map-into` | `(map-into v src f)` | `v[i] = (f src[i])`。同上 |
+| `nconc` | `(nconc v w)` | `w` の要素を `v` に追加。CL と違い**共有構造の書き換えではない**（`w` は影響を受けない） |
+| `nreconc` | `(nreconc v w)` | `(nconc (nreverse v) w)` |
+| `set-contents` | `(set-contents v src)` | `v` の中身を `src` で置き換える（長さも変わる）。上の `delete`/`n...` 系の共通土台 |
+| `rplaca` `rplacd` | `(rplaca p x)` | `cons-cell` の `set-car`/`set-cdr` に、セル自身を返す形を被せたもの |
+
+`vector-push-extend`/`vector-pop` は既存の `push`/`pop` そのもの——`Vector<T>` は常に伸びるので、
+CL の「fill pointer を持つベクタ」と「simple なベクタ」の区別に対応するものが無い。
+
+**`Sexpr` 版の `rplaca`/`nconc` は無い**（意図的）。`Sexpr` の cons セルは自分の `car` の
+ソース位置をセル内に持つ（`value::Cell::car_loc`）ので、`car` を書き換えると古い要素の位置が
+新しい要素に付いたまま残り、以後の診断が静かにずれる。
 
 ## 7. `Option<T>` / `Result<T,E>`
 
@@ -390,6 +461,7 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `ParseFloatError` | `parse-float` |
 | `ReadError` | `read` |
 | `EvalError` | `eval` |
+| `FileError` | ファイル/ストリーム操作（§18） |
 
 いずれも「メッセージ文字列を1つ持つ単一変種の直和型」で、型名と変種名が同じ
 （`(match e ((ParseIntError m) m))`、構成は `(ParseIntError::ParseIntError "...")`）。
@@ -448,6 +520,18 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `eq` `eql` | `(op s1 s2)` | `(string,string)→bool` | 同一性比較（内容ではなく参照）。2026-08-18 まで compiled 側だけ内容比較になっていたのを揃えた |
 | `equal` | `(equal s1 s2)` | `(string,string)→bool` | 内容比較（大文字小文字を区別） |
 | `equalp` | `(equalp s1 s2)` | `(string,string)→bool` | 内容比較（大文字小文字を無視、ASCII のみ） |
+| `/=` | `(/= s1 s2)` | `(string,string)→bool` | 内容が異なるか（CL `string/=`。可変長形は隣接ペア比較——§4.1） |
+| `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | 大文字小文字を無視した順序比較（CL `string-lessp` 等）。共通接頭辞なら短い方が小 |
+| `string::filled` | `(string::filled n c)` | `(i32,char)→string` | `c` を `n` 個並べた文字列（CL `make-string`） |
+| `search` | `(search s sub)` | `(string,string)→Option<i32>` | `sub` が最初に現れる位置。**CL の `search` は引数順が逆**（`(search pattern sequence)`）。空文字列は 0 |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<i32>` | 最初に食い違う位置。`equal` なときだけ `none`。片方が接頭辞なら短い方の末尾 |
+| `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string,string?)→string` | 両端/左/右から `bag` に含まれる文字を除く（CL `string-trim` 等）。`bag` 省略時は空白類 `" \t\n\r"` |
+| `capitalize` | `(capitalize s)` | `string→string` | 各語の先頭を大文字・残りを小文字（CL `string-capitalize`）。語＝英数字の極大連続 |
+| `split` | `(split s sep)` | `(string,string)→Vector<string>` | `sep` で分割。CL に対応物は無い。連続する区切りは空要素を生む。`sep` が空なら panic |
+| `to-string` | `(to-string x)` | `T→string` | `~a` 相当の文字列化。`i32`/`i64`/`f64`/`bool`/`char`/`string` に実装（CL `princ-to-string`） |
+
+`trim` 系と `digit-weight`/`digit->char`（§9）だけ `defmethod` でなく `defun` なのは、
+`defmethod` が `&optional`/`&key` を受け付けないため（`parse_defmethod_sig_inner`）。
 
 ## 9. 文字 (`char`)
 
@@ -463,6 +547,25 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `equalp` | `(equalp c1 c2)` | `(char,char)→bool` | 大文字小文字を無視した値の比較 |
 | `char->int` | `(char->int c)` | `char→i32` | Unicode スカラ値（逆方向は §1 の `int->char`/`try-int->char`） |
 | `char->string` | `(char->string c)` | `char→string` | 1文字だけの文字列。CL は `string` 関数が指定子を取って兼ねるが、この言語には指定子が無いので向きを名前に出している |
+| `/=` | `(/= c1 c2)` | `(char,char)→bool` | 値が異なるか（CL `char/=`。**可変長形は隣接ペア比較**で、全ペア相異を問う CL とは異なる——§4.1） |
+| `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op c1 c2)` | `(char,char)→bool` | 大文字小文字を無視した順序比較（CL `char-lessp` 等）。等値版は既存の `equalp`（CL `char-equal`） |
+| `upper-casep` `lower-casep` `both-casep` | `(op c)` | `char→bool` | 大文字か/小文字か/そもそも大小の別を持つか（CL `upper-case-p` 等） |
+| `alphanumericp` | `(alphanumericp c)` | `char→bool` | 英字または数字か（CL 同名） |
+| `graphicp` | `(graphicp c)` | `char→bool` | 印字可能か。空白は含み、改行・タブは含まない（CL `graphic-char-p`） |
+| `standardp` | `(standardp c)` | `char→bool` | CL の標準文字 96 個か＝`graphicp` に改行を足したもの（CL `standard-char-p`） |
+| `digit-weight` | `(digit-weight c)` / `(digit-weight c radix)` | `(char,i32?)→Option<i32>` | その基数での数字の**重み**（CL `digit-char-p` 本来の意味）。既存の `digitp` は `bool` のまま据え置き |
+| `digit->char` | `(digit->char w)` / `(digit->char w radix)` | `(i32,i32?)→Option<char>` | 重み `w` を表す文字。10 以上は大文字（CL `digit-char`。基数は最大 36） |
+| `char->name` | `(char->name c)` | `char→Option<string>` | 文字名。名前を持つのはリーダの表にある 7 つだけ（CL `char-name`） |
+| `name->char` | `(name->char s)` | `string→Option<char>` | 文字名から文字。大文字小文字を無視し、リーダの別名（`linefeed`/`null`）も受ける（CL `name-char`） |
+
+この節の実装は全て `char->int` のコードポイント上で書かれていて、`upcase`/`downcase`/`alphap`/
+`digitp`/`int->char` を**呼ばない**。この 5 つは島に lowering が無い組み込み
+（`externs::native_lowered_primitive_methods`）なので、触れると prelude 全体が
+インタプリタ専用に落ちて `PRELUDE_COMPILE_UNSUPPORTED` に穴が開く。ASCII 限定なのも
+既存の `upcase`/`alphap` と同じ理由（Unicode の表を実行時に持っていない）。
+
+`char-code-limit` に当たる定数は無い（`char` は Unicode スカラ値で、上限は言語の性質ではなく
+Unicode の性質）。`char-int` は `char->int` と同じ。
 
 ## 10. `Vector<T>`
 
