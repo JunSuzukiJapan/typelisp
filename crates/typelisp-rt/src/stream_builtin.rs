@@ -41,6 +41,11 @@ use crate::stream::with_streams;
 pub const OPTION_TYPE_KEY: &str = "option";
 pub const RESULT_TYPE_KEY: &str = "result";
 pub const FILE_ERROR_TYPE_KEY: &str = "fileerror";
+/// `Vector<T>`'s box is a `Struct` under this name, not an `Enum` — the
+/// "just a box + a name" representation `value.rs`'s `BoxedObj` doc comment
+/// describes, whose *fields are its elements*. `file-list-directory` builds
+/// one directly, so it needs the key the same way the three above do.
+pub const VECTOR_TYPE_KEY: &str = "vector";
 
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
 fn result_ok(heap: &mut Heap, v: Value) -> Value {
@@ -201,6 +206,84 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
             match std::fs::remove_file(&p) {
                 Ok(()) => Ok(result_ok(heap, Value::Empty)),
                 Err(e) => Ok(result_err(heap, format!("delete-file: {}: {}", p, e))),
+            }
+        }
+        // The queries that only look at the filesystem, no stream involved
+        // (CLHS 20.1). Each is the primitive under a `Pathish` prelude
+        // wrapper that carries the CL name: `truename`, `file-write-date`,
+        // `directory-p`, `directory`, `ensure-directories-exist`.
+        //
+        // They live here rather than in `sys_builtin` because the `file-`
+        // prefix is a *routing rule*, not a naming convention:
+        // `Interp::eval_builtin` sends every name starting `stream-`/`file-`
+        // straight to this dispatch, so a `file-*` builtin implemented
+        // anywhere else would never be reached interpreted.
+        "file-truename" => {
+            let p = arg!(text(heap, args, 0, name));
+            match std::fs::canonicalize(&p) {
+                Ok(c) => {
+                    let sv = heap.alloc_string(c.to_string_lossy().into_owned());
+                    Ok(result_ok(heap, sv))
+                }
+                Err(e) => Ok(result_err(heap, format!("truename: {}: {}", p, e))),
+            }
+        }
+        // The result is a *universal* time — seconds since 1900-01-01 UTC,
+        // the scale `get-universal-time` counts on — so a file's timestamp
+        // and the clock are directly comparable and either can be handed to
+        // the prelude's `decode-universal-time`.
+        "file-modified-date" => {
+            let p = arg!(text(heap, args, 0, name));
+            const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
+            match std::fs::metadata(&p).and_then(|m| m.modified()) {
+                Ok(t) => match t.duration_since(std::time::UNIX_EPOCH) {
+                    Ok(d) => Ok(result_ok(heap, Value::Int(d.as_secs() as i64 + UNIX_TO_CL_EPOCH_SECS))),
+                    Err(e) => Ok(result_err(heap, format!("file-write-date: {}: timestamp precedes the Unix epoch: {}", p, e))),
+                },
+                Err(e) => Ok(result_err(heap, format!("file-write-date: {}: {}", p, e))),
+            }
+        }
+        // `false` for a plain file *and* for something that isn't there —
+        // the same "a question, not a fallible operation" shape
+        // `file-exists-p` has. A caller that must tell the two apart asks
+        // `file-exists-p` as well.
+        "file-directory-p" => {
+            let p = arg!(text(heap, args, 0, name));
+            Ok(Value::Bool(std::path::Path::new(&p).is_dir()))
+        }
+        // Entries as full paths, in whatever order the OS reports them:
+        // `readdir` order carries no meaning, so sorting belongs to the
+        // caller that wants a stable listing, not here. `.` and `..` are not
+        // entries — `read_dir` does not yield them.
+        //
+        // Allocating every element before the vector box is safe as written:
+        // `alloc_string` and `alloc_struct` never collect (only `Heap::cons`
+        // does), so nothing can invalidate the `Vec<Value>` in between. A
+        // version of this that consed would need each element rooted.
+        "file-list-directory" => {
+            let p = arg!(text(heap, args, 0, name));
+            let entries = match std::fs::read_dir(&p) {
+                Ok(rd) => rd,
+                Err(e) => return Some(Ok(result_err(heap, format!("directory: {}: {}", p, e)))),
+            };
+            let mut names: Vec<String> = Vec::new();
+            for entry in entries {
+                match entry {
+                    Ok(e) => names.push(e.path().to_string_lossy().into_owned()),
+                    Err(e) => return Some(Ok(result_err(heap, format!("directory: {}: {}", p, e)))),
+                }
+            }
+            let elems: Vec<Value> = names.into_iter().map(|n| heap.alloc_string(n)).collect();
+            let vec_val = heap.alloc_struct(VECTOR_TYPE_KEY.to_string(), elems);
+            Ok(result_ok(heap, vec_val))
+        }
+        // Succeeds when the directory already exists: `create_dir_all` is
+        // idempotent, which is exactly what "ensure" means in CL's name.
+        "file-create-directories" => {
+            let p = arg!(text(heap, args, 0, name));
+            match std::fs::create_dir_all(&p) {
+                Ok(()) => Ok(result_ok(heap, Value::Empty)),
+                Err(e) => Ok(result_err(heap, format!("ensure-directories-exist: {}: {}", p, e))),
             }
         }
         "file-rename" => {

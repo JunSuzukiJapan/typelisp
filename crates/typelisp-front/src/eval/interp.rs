@@ -1665,6 +1665,23 @@ impl Interp {
             "random-state-next" => Some(eval_random_state_next(heap, args)),
             "get-universal-time" => Some(eval_get_universal_time(args)),
             "get-internal-real-time" => Some(eval_get_internal_real_time(args)),
+            // The environment and the running implementation. Each is one
+            // call into `typelisp_rt::sys_builtin`, the same implementation
+            // the compiled shims wrap — the `file-*` half of Phase 9c needs
+            // no arm here at all, since the `starts_with("file-")` guard
+            // above already routes it to `eval_stream_builtin`.
+            "command-line-args" => Some(Ok(typelisp_rt::sys_builtin::command_line_args(heap))),
+            "getenv" => Some(match &args[0] {
+                Value::Str(id) => {
+                    let name = heap.string(*id).to_string();
+                    Ok(typelisp_rt::sys_builtin::getenv(heap, &name))
+                }
+                other => Err(EvalError::Panic(format!("getenv: argument is not a string, got {:?}", other))),
+            }),
+            "home-directory" => Some(Ok(typelisp_rt::sys_builtin::home_directory(heap))),
+            "lisp-implementation-version" => Some(Ok(typelisp_rt::sys_builtin::lisp_implementation_version(heap))),
+            "machine-type" => Some(Ok(typelisp_rt::sys_builtin::machine_type(heap))),
+            "software-type" => Some(Ok(typelisp_rt::sys_builtin::software_type(heap))),
             "parse-int" => Some(eval_parse_int(heap, args)),
             "parse-float" => Some(eval_parse_float(heap, args)),
             "read" => Some(eval_read(heap, args)),

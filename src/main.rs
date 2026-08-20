@@ -41,9 +41,22 @@ fn main() -> rustyline::Result<()> {
     let (image, args) = parse_image(args);
     // The first non-flag argument names a source file to run;
     // with none, start the REPL.
-    if let Some(file) = args.iter().find(|a| !a.starts_with("--")) {
-        std::process::exit(run_file(file, heap_cells, features, image));
+    //
+    // Everything from the file name onward is the *script's* command line,
+    // and `(command-line-args)` must answer with it rather than with `typl`'s
+    // own `std::env::args()` — otherwise the same source would see a
+    // different vector run by `typl` than run as an AOT executable, where
+    // element 0 is the program and element 1 the first argument. Installing
+    // it here, before any user code, is what makes the two agree; see
+    // `typelisp_rt::sys_builtin::COMMAND_LINE_ARGS`.
+    if let Some(pos) = args.iter().position(|a| !a.starts_with("--")) {
+        typelisp_rt::sys_builtin::set_command_line_args(args[pos..].to_vec());
+        std::process::exit(run_file(&args[pos], heap_cells, features, image));
     }
+    // The REPL has no script, so its command line is just `typl` itself —
+    // set explicitly rather than left to the process argv, which would leak
+    // `--heap-cells` and friends into a program's view of its arguments.
+    typelisp_rt::sys_builtin::set_command_line_args(vec!["typl".to_string()]);
     repl(heap_cells, features, image)
 }
 

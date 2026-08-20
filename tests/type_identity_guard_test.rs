@@ -201,6 +201,10 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
         (typelisp::compile::runtime::stream_builtin::OPTION_TYPE_KEY, "option"),
         (typelisp::compile::runtime::stream_builtin::RESULT_TYPE_KEY, "result"),
         (typelisp::compile::runtime::stream_builtin::FILE_ERROR_TYPE_KEY, typelisp::check::registry::FILE_ERROR),
+        // `file-list-directory` builds a `Vector<string>` box directly, so it
+        // needs the key too — and unlike the others, its spelling is what
+        // `rt_struct_new`'s callers have always passed as a bare literal.
+        (typelisp::compile::runtime::stream_builtin::VECTOR_TYPE_KEY, "vector"),
         (typelisp::compile::runtime::sys_builtin::RESULT_TYPE_KEY, "result"),
         (
             typelisp::compile::runtime::sys_builtin::PARSE_INT_ERROR_TYPE_KEY,

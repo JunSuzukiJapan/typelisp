@@ -624,6 +624,7 @@ impl Registry {
         // reader `typl`/the REPL use for source text
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
         register_stream_builtins(&mut root);
+        register_system_builtins(&mut root);
         root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(sexpr(), error_ty(READ_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `eval`: type-checks and runs a runtime `Sexpr` against the current
         // global environment, CL-style (`Interp::eval_form`). Sees all globals
@@ -975,10 +976,73 @@ fn register_stream_builtins(root: &mut Namespace) {
     native("stream-finish-output", vec![h.clone()], unit_or_err.clone());
     native("stream-take-output-string", vec![h.clone()], result_of(Type::Str, file_err.clone()));
 
-    // Filesystem operations that need no open stream.
+    // Filesystem operations that need no open stream. Every one of these is
+    // a *primitive* under a `Pathish` prelude wrapper that carries the CL
+    // name (`probe-file`, `delete-file`, `rename-file`, `truename`,
+    // `file-write-date`, `directory-p`, `directory`,
+    // `ensure-directories-exist`) — which is also why the primitive's name
+    // never equals the CL one: both would live in this same root namespace.
+    //
+    // The `file-` prefix is load-bearing, not decorative: `Interp::
+    // eval_builtin` routes every `stream-`/`file-` name to
+    // `stream_builtin::stream_builtin`, so a filesystem builtin spelled
+    // otherwise would be unreachable interpreted.
     native("file-exists-p", vec![Type::Str], Type::Bool);
     native("file-delete", vec![Type::Str], unit_or_err.clone());
-    native("file-rename", vec![Type::Str, Type::Str], unit_or_err);
+    native("file-rename", vec![Type::Str, Type::Str], unit_or_err.clone());
+    native("file-truename", vec![Type::Str], result_of(Type::Str, file_err.clone()));
+    // A universal time, on `get-universal-time`'s 1900-epoch scale, so the
+    // two are comparable and either decodes with the same prelude function.
+    native("file-modified-date", vec![Type::Str], result_of(Type::I64, file_err.clone()));
+    native("file-directory-p", vec![Type::Str], Type::Bool);
+    native(
+        "file-list-directory",
+        vec![Type::Str],
+        result_of(Type::Named(Path::root("vector"), vec![Type::Str]), file_err.clone()),
+    );
+    native("file-create-directories", vec![Type::Str], unit_or_err);
+}
+
+/// The environment the program is running in (CLHS 25.1) — plus the two
+/// things CL has no equivalent of at all and a script cannot do without,
+/// `command-line-args` and `getenv`.
+///
+/// All free functions: none has a receiver to dispatch on, the same reason
+/// `gensym` and the `random-state` primitives above are free functions.
+/// `lisp-implementation-type` is deliberately *not* here — it is a constant
+/// string, so the prelude defines it in typelisp rather than spending a
+/// builtin on it.
+fn register_system_builtins(root: &mut Namespace) {
+    let mut native = |name: &str, params: Vec<Type>, ret: Type| {
+        root.fns.insert(
+            name.to_string(),
+            FnSig {
+                type_params: vec![],
+                params,
+                ret,
+                public: true,
+                rest: None,
+                builtin: true,
+                bounds: BTreeMap::new(),
+                optionals: Vec::new(),
+                keys: Vec::new(),
+            },
+        );
+    };
+    // Element 0 names the program in both worlds — the script path under
+    // `typl`, the executable under AOT — so one source file can be run either
+    // way and index its arguments identically. See
+    // `sys_builtin::COMMAND_LINE_ARGS` for how the two are made to agree.
+    native("command-line-args", vec![], Type::Named(Path::root("vector"), vec![Type::Str]));
+    // `none` covers both "unset" and "not valid Unicode": a `string` here is
+    // Rust's, so bytes that aren't UTF-8 have no value to hand back.
+    native("getenv", vec![Type::Str], option_of(Type::Str));
+    // `$HOME`, or `none` — the primitive under `user-homedir-pathname`, which
+    // CL explicitly allows to answer `NIL`.
+    native("home-directory", vec![], option_of(Type::Str));
+    native("lisp-implementation-version", vec![], Type::Str);
+    native("machine-type", vec![], Type::Str);
+    native("software-type", vec![], Type::Str);
 }
 
 /// Whether `p` names one of [`BUILTIN_ERROR_TYPES`].

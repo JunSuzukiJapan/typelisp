@@ -99,6 +99,110 @@ pub fn get_internal_real_time() -> i64 {
     start.elapsed().as_micros() as i64
 }
 
+/// The process's own command line, or the override `typl` installs.
+///
+/// The two ways a typelisp program runs disagree about what `std::env::args`
+/// means, which is the whole reason this slot exists:
+///
+/// | how it runs | `std::env::args()` | what the program should see |
+/// |---|---|---|
+/// | `./prog a b` (AOT) | `["./prog", "a", "b"]` | the same |
+/// | `typl s.typl a b` | `["typl", "s.typl", "a", "b"]` | `["s.typl", "a", "b"]` |
+///
+/// So `typl` calls [`set_command_line_args`] with the script's own view
+/// before running anything, and an AOT executable — whose `main` is the LLVM
+/// wrapper in `compile::aot::build_main_wrapper`, which takes no `argc`/
+/// `argv` — leaves the slot alone and reads its real argv here. Rust's `std`
+/// captures argv at process start independently of `main`'s signature
+/// (`_NSGetArgv` on macOS, an `.init_array` entry on Linux), so the wrapper's
+/// empty parameter list costs nothing.
+///
+/// Element 0 names the program in both worlds: the script path interpreted,
+/// the executable compiled. That is `sb-ext:*posix-argv*`'s convention and
+/// Rust's, and it is the only choice that lets one source file be run either
+/// way and index its arguments the same.
+static COMMAND_LINE_ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Install the command line a typelisp program should see. Called once, by
+/// `typl`'s `main`, before any user code runs; ignored if called twice (the
+/// first caller wins, and there is only ever one).
+pub fn set_command_line_args(args: Vec<String>) {
+    let _ = COMMAND_LINE_ARGS.set(args);
+}
+
+/// `(command-line-args)`: the command line as a `Vector<string>`.
+///
+/// Allocating every element before the vector box is deliberate and safe:
+/// `alloc_string` and `alloc_struct` never collect — only [`Heap::cons`]
+/// does — so the `Vec<Value>` of elements cannot be invalidated between the
+/// first string and the box that finally roots them all. A version of this
+/// that consed would need each element rooted, which is the shape of the
+/// leaks recorded in `checker.rs`'s history.
+pub fn command_line_args(heap: &mut Heap) -> Value {
+    let args: Vec<String> = match COMMAND_LINE_ARGS.get() {
+        Some(installed) => installed.clone(),
+        None => std::env::args().collect(),
+    };
+    let elems: Vec<Value> = args.into_iter().map(|a| heap.alloc_string(a)).collect();
+    heap.alloc_struct(crate::stream_builtin::VECTOR_TYPE_KEY.to_string(), elems)
+}
+
+/// `(getenv name)`: the environment variable's value, or `none` when it is
+/// unset *or* not valid Unicode. CL has no equivalent at all, so the name is
+/// the one every CL implementation's extension uses (`sb-posix:getenv`,
+/// `ccl:getenv`).
+///
+/// The two failure modes collapse into one `none` on purpose: a `string` in
+/// this language is Rust's, so a variable holding bytes that are not UTF-8
+/// has no value that could be handed back, and "unset" is the only honest
+/// answer a `Option<string>` can give.
+pub fn getenv(heap: &mut Heap, name: &str) -> Value {
+    let v = std::env::var(name).ok().map(|s| heap.alloc_string(s));
+    option_value(heap, v)
+}
+
+/// `(home-directory)`: `$HOME`, or `none` when it is unset — the primitive
+/// the prelude's `user-homedir-pathname` (CLHS 25.1) is built on.
+///
+/// `none` rather than a guess: CL says `user-homedir-pathname` may return
+/// `NIL` when the home directory cannot be determined, and inventing `"/"` or
+/// the current directory would make an unset `$HOME` indistinguishable from a
+/// real one.
+pub fn home_directory(heap: &mut Heap) -> Value {
+    let v = std::env::var("HOME").ok().map(|s| heap.alloc_string(s));
+    option_value(heap, v)
+}
+
+/// `Some(v)`/`None` under `option_def`'s variant order (`some` = 0,
+/// `none` = 1) — the same shape [`crate::stream_builtin`] builds, spelled
+/// again here rather than shared so neither module has to be linked for the
+/// other's sake (see this module's note on archive-member granularity).
+fn option_value(heap: &mut Heap, v: Option<Value>) -> Value {
+    let (variant, fields) = match v {
+        Some(x) => (0, vec![x]),
+        None => (1, vec![]),
+    };
+    heap.alloc_enum(crate::stream_builtin::OPTION_TYPE_KEY.to_string(), variant, fields)
+}
+
+/// `(lisp-implementation-version)` (CLHS 25.1): this build's version, taken
+/// from Cargo at compile time so it cannot drift from the package's.
+pub fn lisp_implementation_version(heap: &mut Heap) -> Value {
+    heap.alloc_string(env!("CARGO_PKG_VERSION").to_string())
+}
+
+/// `(machine-type)` (CLHS 25.1): the CPU architecture (`aarch64`, `x86_64`,
+/// …) — `std::env::consts::ARCH`, resolved at compile time.
+pub fn machine_type(heap: &mut Heap) -> Value {
+    heap.alloc_string(std::env::consts::ARCH.to_string())
+}
+
+/// `(software-type)` (CLHS 25.1): the operating system (`macos`, `linux`,
+/// …) — `std::env::consts::OS`, resolved at compile time.
+pub fn software_type(heap: &mut Heap) -> Value {
+    heap.alloc_string(std::env::consts::OS.to_string())
+}
+
 // ---- The compiled-code edge -------------------------------------------
 //
 // The `#[no_mangle]` shims live *beside* their implementation rather than in
@@ -180,6 +284,91 @@ pub unsafe extern "C" fn rt_get_universal_time(_args: *const i64, _argc: u32) ->
 #[no_mangle]
 pub unsafe extern "C" fn rt_get_internal_real_time(_args: *const i64, _argc: u32) -> i64 {
     get_internal_real_time()
+}
+
+/// The one-string argument every filesystem query below takes, decoded at the
+/// calling convention's edge: a compiled `string` arrives as a tagged
+/// `Value::Str`.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to a valid `i64` encoding a
+/// `Value::Str`; a `Heap` must be registered on this thread.
+unsafe fn str_arg(args: *const i64, argc: u32, who: &str) -> String {
+    if argc < 1 {
+        fatal(&format!("{}: expected 1 argument", who));
+    }
+    match decode(*args) {
+        Value::Str(id) => active_heap().string(id).to_string(),
+        other => fatal(&format!("{}: argument is not a string, got {:?}", who, other)),
+    }
+}
+
+/// `(command-line-args)` for compiled code — a freshly allocated
+/// `Vector<string>`, as unrooted as every other allocating shim's result.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_command_line_args(_args: *const i64, _argc: u32) -> i64 {
+    encode(command_line_args(active_heap()))
+}
+
+/// `(getenv name)` for compiled code.
+///
+/// # Safety
+///
+/// Same as [`str_arg`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_getenv(args: *const i64, argc: u32) -> i64 {
+    let name = str_arg(args, argc, "rt_getenv");
+    encode(getenv(active_heap(), &name))
+}
+
+/// `(home-directory)` for compiled code.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_home_directory(_args: *const i64, _argc: u32) -> i64 {
+    encode(home_directory(active_heap()))
+}
+
+/// `(lisp-implementation-version)` for compiled code.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_lisp_implementation_version(_args: *const i64, _argc: u32) -> i64 {
+    encode(lisp_implementation_version(active_heap()))
+}
+
+/// `(machine-type)` for compiled code.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_machine_type(_args: *const i64, _argc: u32) -> i64 {
+    encode(machine_type(active_heap()))
+}
+
+/// `(software-type)` for compiled code.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_software_type(_args: *const i64, _argc: u32) -> i64 {
+    encode(software_type(active_heap()))
 }
 
 /// `(exit code)` for compiled code: terminates the process through the OS

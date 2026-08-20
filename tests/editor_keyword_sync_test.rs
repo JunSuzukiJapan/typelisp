@@ -135,13 +135,16 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 6] = [
+    const PRELUDE_PRIVATE: [&str; 7] = [
         "unwrap-io",
         "io-ok",
         "split-on-slash",
         "name-type-dot",
         "pathname-file-part",
         "pathname-directory-part",
+        // The civil-calendar formula under `encode-universal-time` /
+        // `decode-universal-time` (Phase 9c). A user writes those two.
+        "days-from-civil",
     ];
     // `read-sexpr`'s datum scanner, which finds where one datum ends so the
     // text can go to `read`. Prelude-private, and a step finer-grained than

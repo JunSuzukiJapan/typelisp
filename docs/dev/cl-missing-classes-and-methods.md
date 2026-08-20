@@ -428,7 +428,8 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 | パス名指定子（文字列 or パス名） | ✅ | `Pathish` トレイト。ファイルを名指しする関数は全てこれをジェネリックに取る |
 | `directory-namestring` | ✅ | |
 | `probe-file` / `delete-file` / `rename-file` | ✅ | |
-| `truename` / `file-write-date` / `file-author` / `directory` / `ensure-directories-exist` | ❌ | ファイルシステムへの問い合わせ層。`probe-file` 以外は無い |
+| `truename` / `file-write-date` / `directory` / `ensure-directories-exist` | ✅ | 2026-08-20 実装（Phase 9c）。`file-*` プリミティブの上に `Pathish` の薄い層。`directory` はワイルドカード照合ではなく「そのディレクトリを並べる」（この言語のパス名にワイルドカードが無いため）。おまけで `directory-p` も |
+| `file-author` | ⛔ | uid→ユーザ名の引き当てに `libc` が要る。ワークスペースは `libc` に依存していない |
 | `wild-pathname-p` / `translate-logical-pathname` / `logical-pathname` | ⛔ | ワイルドカードも論理パス名も採用しない（この処理系が走らないファイルシステム向けの機能） |
 | ホスト・デバイス・バージョン成分 | ⛔ | 同上。区切りは `/` 固定 |
 
@@ -451,7 +452,7 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 | `open-stream-p` | ✅ | `Stream` トレイトのメソッド |
 | `*standard-output*` / `*standard-input*` / `*error-output*` | ✅ | ただし代入可能なグローバル（(D5) のため動的束縛ではない） |
 | `*trace-output*` / `*query-io*` / `*terminal-io*` / `*debug-io*` | ⛔ | (D5) |
-| `y-or-n-p` / `yes-or-no-p` | ❌ | |
+| `y-or-n-p` / `yes-or-no-p` | ✅ | 2026-08-20 実装（Phase 9c）。`*standard-input*` から読み、受け付けるまで訊き直す。入力の終端だけが止め、そのとき `false` |
 
 ### 2.19 プリンタ（CLHS 22）
 
@@ -490,13 +491,14 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `require` / `provide` / `*modules*` | ⚠️ | `module`/`use`＋ファイル↔モジュール対応が相当 |
 | `*features*` / `#+` / `#-` | ⚠️ | 2026-07-30実装。`#+`/`#-`（`and`/`or`/`not`合成式込み）をリーダに追加。`*features*`はCLと違い**読み込み中に書き換え不可の固定集合**（全フォームを読んでからチェック/評価する既存アーキテクチャのため）。デフォルトはホストOS/アーキテクチャ＋`:typelisp`、`typl`の`--feature NAME`で追加可能 |
 | `compile-file-pathname` / `*compile-file-pathname*` / `*load-pathname*` 等 | ❌ | |
-| `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ⚠️ | 2026-07-31 実装。`get-internal-real-time`（`i64`、マイクロ秒＝`internal-time-units-per-second` は 1_000_000）と、それを使う `time` マクロ（経過実時間を1行印字して `form` の値をそのまま返す）。**`get-internal-run-time`（CPU 時間）は無い**——OS 固有の呼び出しが要るうえ、CL も `time` の報告書式を規定していないので実時間1本にした |
-| `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ⚠️ | `get-universal-time` のみ 2026-07-31 実装（`i64`、CL の紀元 1900-01-01 UTC からの秒）。**分解・合成（`decode-`/`encode-`/`get-decoded-time`）は無い**ので、日時として読める形にはできない |
+| `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ⚠️ | 2026-07-31 実装。`get-internal-real-time`（`i64`、マイクロ秒＝`internal-time-units-per-second` は 1_000_000）と、それを使う `time` マクロ（経過実時間を1行印字して `form` の値をそのまま返す）。**`get-internal-run-time`（CPU 時間）は無い**——`getrusage` に `libc` が要り、ワークスペースは `libc` に依存していない。実時間で代用すると嘘になる |
+| `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ✅ | 分解・合成を 2026-08-20 実装（Phase 9c）。多値が無いので `decoded-time` という `defstruct` 7 フィールドで返す。**CL は zone 省略時に地方時へ分解するが、ここは UTC**（タイムゾーンデータベースが無い）。CL にもある明示 zone 引数が代わり |
 | `sleep` | ❌ | |
 | `room` / `ed` / `dribble` / `apropos` / `apropos-list` / `inspect` / `describe` | ❌ | 対話環境向け。REPL があるので `apropos`/`describe` は相性が良い |
 | `documentation` / docstring | ✅ | 2026-07-30実装。`defun`/`defmethod`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftrait` が docstring を持てる（位置は各フォームの CL 規則通り）。`documentation` は名前を評価せず解決する特殊形（`quote`/`compile` と同様）で check 時に定数へ畳み込まれる。LSP hover にも統合済み。`(setf documentation)` は対象外（functions.md §17） |
-| `lisp-implementation-type` / `lisp-implementation-version` / `machine-type` / `machine-version` / `machine-instance` / `software-type` / `software-version` / `short-site-name` / `long-site-name` | ❌ | |
-| `user-homedir-pathname` | ❌ | 環境変数を読む手段が無い（パス名型そのものは §2.17 で実装済み） |
+| `lisp-implementation-type` / `lisp-implementation-version` / `machine-type` / `software-type` | ✅ | 2026-08-20 実装（Phase 9c）。版数は Cargo から、機種と OS は `std::env::consts` から、いずれもコンパイル時に決まる |
+| `machine-version` / `machine-instance` / `software-version` / `short-site-name` / `long-site-name` | ⛔ | ホスト名の取得に `libc` が要る。残りは CL でも `NIL` を返してよい——中身の無い定数を並べるより置かない方を選んだ |
+| `user-homedir-pathname` | ✅ | 2026-08-20 実装（Phase 9c）。`$HOME` が無ければ `none`（CL も `NIL` を許す）。環境変数を読む `getenv` と、CL に無い `command-line-args` も同時に入った |
 | `trace` / `untrace` / `step` / `disassemble` | ❌ | |
 | コマンドライン引数の取得 | ❌ | CL 標準にも無いが、`typl file.typl` でスクリプトを書く以上ほぼ必須 |
 
@@ -535,9 +537,10 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 6. ~~**述語や比較関数を引数に取れないコレクション API**~~ — 2026-07-31 に解消。`sort` は CL 本来の
    `(sort sequence predicate)` になり、項目ベースの `find`/`position`/`count` が述語版
    （`-if` 系）と並立した。残るのは 2 の後半、つまり `:key`/`:test` 等のキーワード引数。
-7. ⚠️ **時間・乱数の再現性**（§2.21/§2.10）— 2026-07-31 に `time`/`get-internal-real-time`/
-   `get-universal-time` と `random-state` 一式が入った。残差は CPU 時間（`get-internal-run-time`）、
-   日時の分解・合成（`decode-universal-time` 等）、そして**乱数のシードを外から与える手段**——
+7. ⚠️ **乱数の再現性**（§2.10）— 2026-07-31 に `time`/`get-internal-real-time`/
+   `get-universal-time` と `random-state` 一式、2026-08-20 に日時の分解・合成
+   （`decode-universal-time` 等、Phase 9c）が入った。残差は CPU 時間
+   （`get-internal-run-time`、`libc` 依存）と、**乱数のシードを外から与える手段**——
    同一プロセス内なら `make-random-state` の複製で列を再生できるが、実行を跨いだ再現はできない。
 8. **多次元配列・集合演算・文字列ユーティリティ**（§2.13/§2.12/§2.14）— いずれも単独の機構では
    なく「同じ層の関数が束で無い」箇所。`make-array`/`aref` 一式、`union`/`intersection`/`adjoin`、

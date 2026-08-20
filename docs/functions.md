@@ -270,7 +270,55 @@ xorshift64 で、インタプリタと compiled コードは同じ列を返す�
 | `internal-time-units-per-second` | — | `i64` | `1000000`（マイクロ秒）。CL 同様、値は処理系の選択 |
 | `time` | `(time form)` | マクロ | `form` を実行し、かかった実時間を1行印字して `form` の値をそのまま返す |
 
-CPU 時間（`get-internal-run-time`）と、日時への分解・合成（`decode-universal-time` 等）は無い。
+#### 日時への分解・合成
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `decoded-time` | — | `defstruct` | `second` / `minute` / `hour` / `date` / `month` / `year` / `day-of-week` の7フィールド。CL の9個の返り値の代わり（多値が無いため） |
+| `decode-universal-time` | `(decode-universal-time ut &optional zone)` | `(i64,i32)→decoded-time` | 万国時を暦の成分へ。`zone` はグリニッジ以西の時間数（CL と同じ向き）、既定 `0`＝UTC |
+| `encode-universal-time` | `(encode-universal-time sec min hour date month year &optional zone)` | `(i32×6,i32)→i64` | 逆向き |
+| `get-decoded-time` | `(get-decoded-time)` | `()→decoded-time` | いまを分解したもの |
+
+`day-of-week` は CL と同じく **0 が月曜、6 が日曜**。万国時 0（1900-01-01）が月曜なので、
+単なる剰余で出る。暦の計算は Howard Hinnant の `civil_from_days` / `days_from_civil` を
+CL の紀元へずらしたもので、表も閏年の場合分けも持たない厳密な整数演算。
+
+**CL との違い**: CL の `decode-universal-time` は zone 引数を省くと**地方時**へ分解するが、
+ここでは **UTC** へ分解する。この処理系のランタイムはタイムゾーンのデータベースを持たないので、
+CL の9個の返り値のうち `daylight-p` と「既定の分解が使った zone」の2つは、
+偽の値を返すのではなく**用意していない**。明示的な zone を渡す形（CL にもある）が代わり。
+
+CPU 時間（`get-internal-run-time`）は無い。`libc` の `getrusage` が要るが、
+このワークスペースは `libc` に依存していない——実時間で代用すると嘘になるので置いていない。
+
+### 4.7 実行環境
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `command-line-args` | `(command-line-args)` | `()→Vector<string>` | コマンドライン。**要素0はプログラム名** |
+| `getenv` | `(getenv name)` | `string→Option<string>` | 環境変数。未設定でも非UTF-8でも `none` |
+| `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`。`user-homedir-pathname`（§19.2）の土台 |
+| `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
+| `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | Cargo のパッケージ版数 |
+| `machine-type` | `(machine-type)` | `()→string` | CPU アーキテクチャ（`x86_64` / `aarch64` …） |
+| `software-type` | `(software-type)` | `()→string` | OS（`macos` / `linux` …） |
+
+`command-line-args` の要素0は、`typl script.typl a b` ならスクリプトのパス、AOT 実行ファイル
+`./prog a b` なら実行ファイル自身。**どちらの走らせ方でも同じ添字で同じ引数が読める**ようにこう
+決めてある（`typl` は自分の名前と `--heap-cells` 等の大域フラグを取り除いてから渡す）。
+
+`machine-instance`（ホスト名）・`software-version`・`short-site-name` / `long-site-name` は
+無い。ホスト名の取得には `libc` が要り、残りは CL でも `NIL` を返してよいことになっている——
+中身の無い定数を並べるより、無い方を選んだ。
+
+### 4.8 ユーザへの問いかけ
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `y-or-n-p` | `(y-or-n-p question)` | `string→bool` | `y` / `n` を1文字で受ける。受け付けるまで訊き直す |
+| `yes-or-no-p` | `(yes-or-no-p question)` | `string→bool` | `yes` / `no` を綴らせる。間違えると高くつく問い用 |
+
+どちらも `*standard-input*` から読む。入力の終端だけが問い直しを止め、そのときは `false`。
 
 ## 5. `cons`/`car`/`cdr`（ジェネリックなペア）と `Sexpr`
 
@@ -1233,6 +1281,11 @@ CL 同様、`close` 後でも取り出せる。
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | 書き出す |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | 存在するか |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | 削除・改名（引数は `Pathish`） |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | シンボリックリンクと `.`/`..` を解いた絶対パス。存在しなければ `Err` |
+| `file-write-date` | `(file-write-date name)` | `(P)→Result<i64,FileError>` where `Pathish P` | 最終更新時刻。**万国時**なので `decode-universal-time`（§4.6）が読める |
+| `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | ディレクトリか。**無い場合も `false`** ——両者を分けるのは `probe-file` |
+| `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 中身を絶対パスで並べる。`.`/`..` は入らない。順序は OS のまま |
+| `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | 親ごと作る。既にあれば成功（「ensure」の意味） |
 
 ファイルを名指しする引数は全て**文字列でも `pathname` でもよい**——CL のパス名指定子と同じ扱いで、
 実行時の型テストではなく `Pathish` トレイトで解決している（§19）。
@@ -1311,6 +1364,7 @@ CL がパス名指定子（文字列 or パス名）を受ける場所で、こ�
 | `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | 型を除いた名前。ディレクトリなら `none` |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | 最後のドット以降。先頭のドットは対象外（`.gitignore` は全部が名前） |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | ルート始まりか |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | ホームディレクトリ。`$HOME` が無ければ `none`（CL も `NIL` を許す） |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | 最後の `/` までの部分 |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | `name.type` の部分だけ |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | `p` に無い成分を `default` から補う。相対の `p` は `default` のディレクトリの下に置かれ、絶対の `p` は自分のディレクトリを保つ |
@@ -1324,5 +1378,5 @@ CL がパス名指定子（文字列 or パス名）を受ける場所で、こ�
   論理パス名（`logical-pathname`）も無い。CLHS 19 のそれらの部分は、この処理系が走らない
   ファイルシステムのためにある。区切りは `/` 固定。
 - **`pathname` 関数は `to-pathname`**。型とトレイト・関数が同じ名前空間を共有するため。
-- **`truename` / `file-write-date` / `directory` は無い**（ファイルシステムへの問い合わせ層は
-  `probe-file` だけ）。
+- **ワイルドカードによる照合は無い**ので、`directory` は「そのディレクトリの中身を並べる」だけの
+  関数になっている（§18.4）。CL の `directory` はパス名のパターンと照合する。

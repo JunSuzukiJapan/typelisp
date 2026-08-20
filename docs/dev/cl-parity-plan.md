@@ -707,17 +707,53 @@ cleanup は正常終了・`throw`・`panic`・`break`/`return` のどれで抜�
 
 ### Stage 9c — 環境・時間・ファイルシステム
 
-- ファイルシステムへの問い合わせ層: `truename` / `file-write-date` / `file-author` / `directory` /
-  `ensure-directories-exist`（現在は `probe-file` だけ）
-- `user-homedir-pathname`、**環境変数を読む手段**（現在まったく無い）
-- **コマンドライン引数の取得** — CL 標準にも無いが、`typl file.typl` でスクリプトを書く以上ほぼ必須
-- `get-internal-run-time`（CPU 時間。実時間は 2026-07-31 に実装済み）
-- `decode-universal-time` / `encode-universal-time` / `get-decoded-time`
-  （**現在は分解・合成が無いので日時として読める形にできない**）
-- `lisp-implementation-type` / `-version` / `machine-type` / `machine-version` /
-  `machine-instance` / `software-type` / `software-version` / `short-site-name` / `long-site-name`
-- 対話環境向け: `y-or-n-p` / `yes-or-no-p`、`trace` / `untrace` / `step` / `disassemble`、
-  `room` / `ed` / `dribble`（REPL があるので相性は良い。`apropos`/`describe` は (D1) で対象外）
+**状態: 完了（2026-08-20）**、ただし 4 群は保留（下記）。テストは
+`tests/environment_catalog_test.rs`（12 本）、ドキュメントは
+[functions.md](../functions.md) §4.6／§4.7／§4.8／§18.5／§19.2。
+
+入ったもの:
+
+- **Rust プリミティブ 11 個**。`file-*` 5 つ（`file-truename` / `file-modified-date` /
+  `file-directory-p` / `file-list-directory` / `file-create-directories`）は
+  `stream_builtin.rs` へ、環境まわり 6 つ（`command-line-args` / `getenv` /
+  `home-directory` / `lisp-implementation-version` / `machine-type` / `software-type`）は
+  `sys_builtin.rs` へ。
+- prelude 側の `Pathish` 層: `truename` / `file-write-date` / `directory-p` / `directory` /
+  `ensure-directories-exist` / `user-homedir-pathname` / `lisp-implementation-type`。
+- 日時の分解・合成: `decoded-time`（`defstruct` 7 フィールド）と
+  `decode-universal-time` / `encode-universal-time` / `get-decoded-time`。純粋な typelisp。
+- 対話: `y-or-n-p` / `yes-or-no-p`。
+
+**計画から変えた点・保留**:
+
+1. **`file-` 接頭辞は命名規約ではなく*経路規則*だった。** `Interp::eval_builtin` は
+   `stream-`/`file-` で始まる名前を全部 `stream_builtin::stream_builtin` へ丸投げするので
+   （interp.rs の `name if name.starts_with(...)` アーム）、`file-*` を `sys_builtin.rs` に
+   置くとインタプリタからは永久に届かない。最初の草稿はそこに置いていた。
+2. **§2-4 の「触点 8 箇所」は*メソッド*の話で、自由関数はもっと安い。**
+   `externs.rs` の `rt_builtin_symbol` の doc コメントが明言しているとおり、島は
+   「bridge が名付けたものを呼ぶ」だけなので、**組み込み*関数*を足すのに島の変更も再生成も要らない**
+   （`file-exists-p` が `src/compiler.rs` に一度も現れないのが証拠）。今回の触点は
+   registry / interp / rt / externs の 3 表だけで、島は一切触っていない。
+3. **`command-line-args` の要素 0 はプログラム名**、という一点を守るために `typl` 側に
+   スロットを置いた。`typl script.typl a b` の `std::env::args()` は
+   `["typl","script.typl","a","b"]`、AOT の `./prog a b` は `["./prog","a","b"]` で食い違うので、
+   `typl` の `main` が「ファイル名以降」を `set_command_line_args` で渡す。
+   AOT 側は `build_main_wrapper` の `main` が `argc`/`argv` を取らないが、Rust の `std` は
+   プロセス開始時に argv を捕まえている（macOS は `_NSGetArgv`、Linux は `.init_array`）ので
+   そのまま読める。**両方の走らせ方で実際に確かめた**——同じソースが同じ添字で同じ引数を読む。
+4. **保留: `get-internal-run-time`（CPU 時間）と `file-author`。** どちらも `libc`
+   （`getrusage` / uid→名前）が要り、ワークスペースは `libc` に依存していない。
+   実時間で CPU 時間を代用すると嘘になる。
+5. **保留: `machine-version` / `machine-instance` / `software-version` /
+   `short-site-name` / `long-site-name`。** ホスト名に `libc` が要り、残りは CL でも `NIL`
+   を返してよい。中身の無い定数を並べるより置かない方を選んだ。
+6. **保留: `trace` / `untrace` / `step` / `disassemble` / `room` / `ed` / `dribble`。**
+   REPL のツール層で、このカタログとは別の作業。
+7. **見つけた CL との差（直していない）**: `decode-universal-time` は zone 省略時に
+   **UTC** へ分解する（CL は地方時）。タイムゾーンデータベースが無いため。
+   CL の 9 個の返り値のうち `daylight-p` と「既定の分解が使った zone」は、
+   偽の値を返すのではなく用意していない。CL にもある明示 zone 引数が代わり。
 
 ### Stage 9d — ストリーム残差
 
@@ -793,9 +829,27 @@ CL コードの移植と実用スクリプトで真っ先に当たる。
 | 境界付きジェネリック同士の委譲不可を忘れて設計する | `cannot infer` | Iter 系は毎回ループを書き下ろす前提で工数を積む（§2-3） |
 | 新しい名前がエディタ定義から漏れる | `editor_keyword_sync_test` が落ちる | 完了判定 4 |
 | GC ルート漏れ（`Vec<Value>` はコレクタから見えない） | `gc_stress` でのみ再現し、通常のテストは通る | 新しい構文再構築を書いたら `checker_gc_stress_test` を回す |
-| 表面積の増加でダンプ生成・単型化が重くなる | 起動時間の退行（現在 1.07s） | `scripts/bench-prelude.sh` を Phase 境界で測る |
+| 表面積の増加でダンプ生成・単型化が重くなる | 起動時間の退行 | **2026-08-20 実測（下記）。+9.2% で収まっている** |
 | CL 名が既存メソッド名と衝突する（`get`/`values`/`count`/`member`/`some`） | 解決順が変わって無関係な既存コードが壊れる | 名前を足す前に `registry.rs` と `prelude.rs` を grep。`some` は `Some` 構成子と衝突するので使えない（language-design.md §7.3） |
 | Phase 5a の `:include` が単型化・`repr`・パターンマッチへ波及する | 一見無関係なテストが落ちる | `:include` は Phase 5a の最後に、単独の commit で入れる |
+
+### 起動時間の実測（2026-08-20、Phase 1c/2/3/4a/9c 完了時点）
+
+計画着手直前の `bad8b82` と、この計画で入れたもの全部込みを、それぞれ release でビルドして
+`(defun main () i32 0)` だけのスクリプトを走らせた時間。交互に各 15 回、同一負荷下。
+
+| | min | 中央 | max | `prelude.typld` |
+|---|---|---|---|---|
+| `bad8b82`（着手前） | 0.922s | 0.926s | 0.933s | 1,305,970 B |
+| 1c/2/3/4a/9c 込み | 1.002s | **1.011s** | 1.025s | 1,867,175 B |
+
+**prelude 成果物 +43.0% に対して起動 +0.085s（+9.2%）。** 表面積に対して線形よりずっと
+緩いので、この計画の残りの Phase を入れても起動が破綻する兆候は無い。
+
+測定中に一度だけ 27.4 秒という外れ値が出た。付録 D-2 の GC スラッシュを疑って
+再現を試みたが**再現しなかった**——15 回とも 1.00〜1.03 秒に収まり、`--heap-cells 262144`
+（既定の 4 倍）でも変わらない。並行して走っていた別のテストが CPU を奪っただけだった。
+D-2 は実在するが、`typl` の通常の起動には出ていない。
 
 ---
 
@@ -965,3 +1019,55 @@ CL コードの移植と実用スクリプトで真っ先に当たる。
 4. **`prelude.rs` 1145-1148 行の「兄弟の境界付きジェネリックへ委譲できない」コメント**
    （策定後に発見）。すぐ下の `elt` 自身が反証だったうえ、*なぜ*そう見えたかも
    実際とは違っていた——Phase 3 の節を参照。何が本当に真だったかを書き直した。
+
+---
+
+## 付録 D — 実装中に見つかった、この計画の範囲外の問題
+
+どちらも **main で再現する既存の問題**で、Phase 9c の作業中に偶然踏んだもの。
+直していない——計画の範囲外で、どちらも設計判断が要る。
+
+### D-1. AOT 実行ファイルから prelude の関数が一切呼べない
+
+`compile::aot::compile_file` は `load_compiler`（＝島の `load_aot`）しか呼ばず、
+**`load_prelude` を呼ばない**（`src/compile/aot.rs:146`）。結果として
+`(compile-file "src" "out")` で作った実行ファイルは、組み込みと自分の定義しか使えない。
+
+main で確認した範囲（`typl` 経由）:
+
+| 呼ぶもの | 結果 |
+|---|---|
+| `Vector::new` / `push` / `len`（組み込みメソッド） | 通る |
+| `machine-type` / `getenv` / `file-directory-p`（組み込み関数） | 通る |
+| `abs` / `gcd` / `zerop` / `identity` / `to-string` | `no such function` |
+| `random-state-p` / `parse-namestring`（既存の prelude `defun`） | `no such function` |
+
+**JIT（`(compile name)`）は無関係**——そちらは prelude が載ったプロセスの中で動くので、
+既存の `abs` も Phase 9c の `directory-p` も通る（実際に確かめた）。
+問題は `compile-file` が作る**独立した実行ファイル**だけ。
+
+**この計画にとっての意味は大きい**: Phase 1c/2/3/4a/9c で足したものはほぼ全て prelude に
+あるので、インタプリタと JIT では使えるが AOT 実行ファイルからは使えない。
+§2-2 の「prelude だけに足したなら compile 対応は自動」は *prelude 自身の本体が
+コンパイルされること*については正しく、*利用者の AOT プログラムから呼べること*は別の話だった。
+
+`tests/compile_file_test.rs` はこの穴を踏んでいない——どのテストも prelude 関数を
+コンパイル対象のコードから呼んでいないため（唯一 prelude 関数が出てくる 1056 行は
+`(eval (quote ...))` の中、つまり実行時のインタプリタ経由）。
+
+### D-2. 小さいヒープを渡すと GC がスラッシュする
+
+`Heap::cons` は「free リストが空になったら `gc()`、それでも空なら `grow()`」という順序なので
+（`heap.rs:1508-1522`）、**`gc()` が 1 セルでも回収すると `grow()` は呼ばれない**。
+生存量が容量にわずかに届かない状態に入ると、以後ほぼ毎回の割り当てが全体マークを引き起こす。
+
+実測: `tests/editor_keyword_sync_test.rs` は `Heap::with_capacity(1 << 16)` で prelude を
+読み込み、**6 テストで 649.74 秒**（1 回あたり約 108 秒）かかる。同じ `load_prelude` を
+`1 << 18` で呼ぶ `prelude_test` は 1 回 1.2 秒。約 90 倍。
+
+`1 << 16` は `src/main.rs` の `DEFAULT_HEAP_CELLS` でもあり、
+`tests/` の多くも同じ値を使っている。prelude が育つほど悪化する種類の問題なので、
+リスク表の「表面積の増加で起動時間が退行する」と同じ根から出ている。
+
+直すなら `grow()` の発火条件（回収後の空き率が閾値を下回ったら伸ばす）だが、
+固定アリーナという設計上の約束（`Error::HeapExhausted` を出すこと）と相談が要る。

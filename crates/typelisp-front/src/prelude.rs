@@ -3120,6 +3120,189 @@ pub const SOURCE: &str = r##"
     ((ok _) (result::ok ()))
     ((err e) (result::err e))))
 
+;; The rest of CLHS 20.1: questions about a file that need no open stream.
+;; Each is one call to the `file-*` primitive, with `Pathish` in front so a
+;; string and a `pathname` are equally ordinary arguments -- the same shape
+;; `probe-file`/`delete-file`/`rename-file` above already have.
+
+(pub defun truename<P> ((name P)) Result<string, FileError> (where (Pathish P))
+  "`name` with symlinks resolved and `.`/`..` removed, as an absolute path.
+   `Err` if it does not exist -- resolving a path means looking at it."
+  (file-truename (namestring name)))
+
+(pub defun file-write-date<P> ((name P)) Result<i64, FileError> (where (Pathish P))
+  "When `name` was last modified, as a universal time -- the same scale
+   `get-universal-time` counts on, so `decode-universal-time` reads it."
+  (file-modified-date (namestring name)))
+
+(pub defun directory-p<P> ((name P)) bool (where (Pathish P))
+  "Whether `name` is a directory. `false` for a plain file and for something
+   that is not there at all; `probe-file` is what separates those two."
+  (file-directory-p (namestring name)))
+
+(pub defun directory<P> ((name P)) Result<Vector<string>, FileError> (where (Pathish P))
+  "The entries of directory `name`, as full paths.
+
+   Narrower than CL's `directory`, which matches a wildcard pathname: there
+   are no wildcards in this language's pathnames, so there is nothing to
+   match and the argument simply names the directory to list. `.` and `..`
+   are not entries. The order is the operating system's -- sort it if you
+   need a stable one."
+  (file-list-directory (namestring name)))
+
+(pub defun ensure-directories-exist<P> ((name P)) Result<(), FileError> (where (Pathish P))
+  "Create directory `name` and any missing parent. `Ok(())` if it already
+   exists -- that is what `ensure` means."
+  (match (file-create-directories (namestring name))
+    ((ok _) (result::ok ()))
+    ((err e) (result::err e))))
+
+;; ---------------------------------------------------------------------------
+;; The environment the program is running in (CLHS 25.1), plus the two things
+;; CL has no equivalent of and a script cannot do without.
+
+(pub defun lisp-implementation-type () string
+  "The name of this implementation. A constant, so it is written here rather
+   than spent on a builtin."
+  "typelisp")
+
+(pub defun user-homedir-pathname () Option<pathname>
+  "The user's home directory, or `none` when `$HOME` is unset. CL allows
+   `NIL` here for exactly this case, so the `Option` is not an extra."
+  (match (home-directory)
+    ((none) (option::none))
+    ((some h) (option::some (to-pathname h)))))
+
+;; ---------------------------------------------------------------------------
+;; Universal time, decomposed (CLHS 25.1).
+;;
+;; CL returns nine values from `decode-universal-time`; there are no multiple
+;; values here, so the components come back as one struct. Two of CL's nine
+;; are missing rather than faked: `daylight-p` and the `zone` a *default*
+;; decode would have used both need a timezone database, and this language's
+;; runtime has none. What is offered instead is the explicit-zone form CL also
+;; has -- `zone` is an offset in hours west of Greenwich, and 0 (the default
+;; here) is UTC.
+;;
+;; **This is the divergence to know about**: CL's `decode-universal-time` with
+;; no zone argument decodes into *local* time. Here it decodes into UTC.
+
+(pub defstruct decoded-time
+  (pub second i32) (pub minute i32) (pub hour i32)
+  (pub date i32) (pub month i32) (pub year i32) (pub day-of-week i32))
+
+;; The civil-calendar conversions are Howard Hinnant's `civil_from_days` /
+;; `days_from_civil`, shifted from the Unix epoch to CL's. They are exact
+;; integer arithmetic over the proleptic Gregorian calendar -- no tables, no
+;; leap-year special cases beyond the ones the formulas already encode.
+;;
+;; `days-from-civil` counts days from 1900-01-01, which is why the constant
+;; 25567 (the days between the CL and Unix epochs) appears in both.
+
+(defun days-from-civil ((year i32) (month i32) (day i32)) i32
+  "Days from 1900-01-01 to this proleptic-Gregorian date. Years before 0 are
+   out of range -- a universal time cannot name one."
+  (let ((y (if (<= month 2) (- year 1) year))
+        (era 0) (yoe 0) (doy 0) (doe 0))
+    (progn
+      (setf era (/ y 400))
+      (setf yoe (- y (* era 400)))
+      (setf doy (+ (/ (+ (* 153 (+ month (if (> month 2) -3 9))) 2) 5) (- day 1)))
+      (setf doe (- (+ (* yoe 365) (/ yoe 4) doy) (/ yoe 100)))
+      ;; `- 719468` lands on the Unix epoch; `+ 25567` moves from there to
+      ;; CL's, which is 25567 days earlier.
+      (+ (- (+ (* era 146097) doe) 719468) 25567))))
+
+(pub defun encode-universal-time ((second i32) (minute i32) (hour i32)
+                                  (date i32) (month i32) (year i32)
+                                  &optional (zone i32 0)) i64
+  "The universal time for this date and time. `zone` is an offset in hours
+   west of Greenwich, as CL's is; 0 (the default) means the arguments are
+   UTC."
+  (+ (* (as i64 (days-from-civil year month date)) 86400)
+     (as i64 (+ (* (+ hour zone) 3600) (* minute 60) second))))
+
+(pub defun decode-universal-time ((ut i64) &optional (zone i32 0)) decoded-time
+  "`ut` broken into its calendar components. `zone` is an offset in hours west
+   of Greenwich, as CL's is; 0 (the default) decodes into UTC.
+
+   `day-of-week` is CL's: 0 is Monday, 6 is Sunday. 1900-01-01 -- universal
+   time 0 -- was a Monday, which is what makes it a plain remainder."
+  (if (< ut 0)
+      (panic "decode-universal-time: universal time is never negative")
+      (let ((local (- ut (as i64 (* zone 3600))))
+            (days 0) (secs 0) (z 0)
+            (era 0) (doe 0) (yoe 0) (y 0) (doy 0) (mp 0) (d 0) (m 0))
+        (progn
+          ;; `mod` floors and `/` truncates, so they disagree on a negative
+          ;; `local` (reachable for a small `ut` with a positive `zone`).
+          ;; Taking the remainder first and dividing the difference makes the
+          ;; division exact, so the two can never disagree.
+          (setf secs (as i32 (mod local 86400)))
+          (setf days (as i32 (/ (- local (as i64 secs)) 86400)))
+          ;; `z` is days since 1970-01-01 shifted by 719468, which restarts
+          ;; the era arithmetic below from a March-based year 0000-03-01.
+          (setf z (+ (- days 25567) 719468))
+          (setf era (/ z 146097))
+          (setf doe (- z (* era 146097)))
+          (setf yoe (/ (- (+ (- doe (/ doe 1460)) (/ doe 36524)) (/ doe 146096)) 365))
+          (setf y (+ yoe (* era 400)))
+          (setf doy (- doe (- (+ (* 365 yoe) (/ yoe 4)) (/ yoe 100))))
+          (setf mp (/ (+ (* 5 doy) 2) 153))
+          (setf d (+ (- doy (/ (+ (* 153 mp) 2) 5)) 1))
+          (setf m (+ mp (if (< mp 10) 3 -9)))
+          (if (<= m 2) (progn (setf y (+ y 1)) ()) ())
+          (decoded-time::new (mod secs 60) (mod (/ secs 60) 60) (/ secs 3600)
+                             d m y (mod days 7))))))
+
+(pub defun get-decoded-time () decoded-time
+  "Now, in UTC, broken into its calendar components."
+  (decode-universal-time (get-universal-time)))
+
+;; ---------------------------------------------------------------------------
+;; Asking the user a question (CLHS 25.2). Both read from
+;; `*standard-input*` and re-ask until the answer is one they accept, which
+;; is what CL specifies; end of input is the one thing that can stop them,
+;; and it answers `false`.
+
+(pub defun y-or-n-p ((question string)) bool
+  "Ask `question` and accept a single `y` or `n` (in either case)."
+  (let ((answer false) (settled false))
+    (progn
+      (while (not settled)
+        (progn
+          (print "~a (y/n) " question)
+          (match (read-line *standard-input*)
+            ((none) (progn (setf settled true) ()))
+            ((some line)
+             (let ((a (trim line)))
+               (if (equalp a "y")
+                   (progn (setf answer true) (setf settled true) ())
+                   (if (equalp a "n")
+                       (progn (setf settled true) ())
+                       ())))))))
+      answer)))
+
+(pub defun yes-or-no-p ((question string)) bool
+  "Ask `question` and accept a full `yes` or `no` (in either case). The
+   deliberate extra typing is CL's: this is the one for questions whose
+   wrong answer is expensive."
+  (let ((answer false) (settled false))
+    (progn
+      (while (not settled)
+        (progn
+          (print "~a (yes/no) " question)
+          (match (read-line *standard-input*)
+            ((none) (progn (setf settled true) ()))
+            ((some line)
+             (let ((a (trim line)))
+               (if (equalp a "yes")
+                   (progn (setf answer true) (setf settled true) ())
+                   (if (equalp a "no")
+                       (progn (setf settled true) ())
+                       ())))))))
+      answer)))
+
 
 "##;
 

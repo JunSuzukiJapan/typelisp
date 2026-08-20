@@ -7494,3 +7494,127 @@ Phase 2a の最初の草稿は `(upcase c)`/`(alphap c)` を素直に呼んだ�
 指定子が先なので整数側の幅で実装を選べない）、`block`/`return-from`（島の
 `compile-value` が `loop-exit`/`loop-slot` を全呼び出し地点に引き回しているので、
 名前付き脱出先の*スタック*を足すと自己ホストコンパイラ全体に触る）、`destructuring-bind`。
+
+---
+
+## CL 同等カタログ Phase 9c — 実行環境（2026-08-20）
+
+[cl-parity-plan.md](cl-parity-plan.md) の Stage 9c。コマンドライン引数・環境変数・
+ファイルシステムへの問い合わせ・日時の分解合成・`y-or-n-p` が入った。
+計画が「費用対効果で先に着手するなら」と名指ししていた 4 つのうち、最後の 1 つ。
+
+### 組み込み*関数*は組み込み*メソッド*よりずっと安い
+
+計画の §2-4 は「Rust builtin を足すときの触点は 8 箇所」とし、島の
+`*-native-method?` と lowering、そして島の再生成を数えていた。**それはメソッドの話だった。**
+
+`externs.rs` の `rt_builtin_symbol` の doc コメントが書いているとおり、島は
+「bridge が名付けたシンボルを呼ぶ」だけで、自分では何も導出しない。だから自由関数を
+足すのに島は一切関係しない——証拠として、`file-exists-p` は `src/compiler.rs` に
+一度も現れないのに JIT でも AOT でも通る。
+
+今回の触点は registry（署名）→ interp（解釈側）→ rt（実装と `#[no_mangle]` シム）→
+`externs.rs` の 3 表（シンボル表・`use` 一覧・アドレス表と**その配列長**）の 4 段だけで、
+島の再生成も 2 回パスの心配も無かった。prelude の再生成だけで済んでいる。
+
+### `file-` は命名規約ではなく経路規則
+
+最初の草稿は `file-truename` 以下 5 つを `sys_builtin.rs` に置いた。動かない。
+`Interp::eval_builtin` に
+
+```rust
+name if name.starts_with("stream-") || name.starts_with("file-") =>
+    self.eval_stream_builtin(heap, name, args),
+```
+
+というアームがあり、**この接頭辞を持つ名前は解釈経路では必ず `stream_builtin.rs` へ行く**。
+そこに実装が無ければ、他のどこに書いても届かない。5 つとも `stream_builtin.rs` の
+`dispatch` へ移し、シムは既存の `stream_shim!` マクロに 1 行ずつ足すだけになった
+（手書きしていた 5 個ぶんの `unsafe extern "C"` が消えた）。
+
+命名にも影響した: プリミティブは `file-modified-date`、prelude 側の CL 名は
+`file-write-date`。同じ根名前空間に両方は置けないので、`file-exists-p`/`probe-file`、
+`file-delete`/`delete-file` と同じ「プリミティブと CL 名を別綴りにする」既存の規約に従った。
+
+### `command-line-args` の要素 0 を両世界で一致させる
+
+`typl script.typl a b` と AOT の `./prog a b` では `std::env::args()` が食い違う
+（前者は先頭が `typl`、`--heap-cells` 等の大域フラグも混ざる）。同じソースが
+どちらの走らせ方でも同じ添字で同じ引数を読めないと、この関数を足す意味がほぼ無い。
+
+`sys_builtin` に `OnceLock<Vec<String>>` を置き、`typl` の `main` が
+「最初の非フラグ引数（＝ファイル名）以降」を渡す。AOT 側は何も設定せず、自分の argv を
+そのまま読む。`build_main_wrapper` が生成する `main` は `argc`/`argv` を取らない
+（`i32 ()` として作られる）が、Rust の `std` はプロセス開始時に argv を捕まえている
+（macOS は `_NSGetArgv`、Linux は `.init_array`）ので問題にならない。
+
+両方で実際に確かめた:
+
+```
+$ typl /tmp/argv_probe.typl alpha beta     $ /tmp/argv_aot alpha beta
+count=3                                     count=3
+prog=/tmp/argv_probe.typl                   prog=/tmp/argv_aot
+rest=alpha                                  rest=alpha
+```
+
+### 暦は Hinnant の公式をそのまま
+
+`decode-universal-time`/`encode-universal-time` は Howard Hinnant の
+`civil_from_days`/`days_from_civil` を CL の紀元（1900-01-01）へずらしたもの。
+表も閏年の場合分けも要らない厳密な整数演算で、prelude に typelisp で書いてある。
+
+書く前に Python で同じ式を——`/` は 0 方向切り捨て、`mod` は床、という
+この言語の意味論を再現して——20,005 件（`datetime` との突き合わせと往復）検証した。
+実装後の初回テストが 12 本中 11 本通り、落ちた 1 本も暦とは無関係だったのはそのため。
+
+1 箇所だけ意味論に気をつけた: `local` が負になりうる（小さい `ut` に正の `zone`）ので、
+`mod`（床）と `/`（切り捨て）が食い違う。先に剰余を取り、差を割ることで除算を厳密にした。
+
+### `y-or-n-p` はテストに書けないので、パイプで確かめた
+
+この 2 つは `*standard-input*` を読む。Rust のテストからだと*プロセスの* stdin を
+渡すことになり、手で `cargo test` を叩いた人の端末が繋がっていれば永久に止まる。
+代わりにパイプで確認した:
+
+```text
+$ printf 'maybe\nY\nno\n' | typl yn.typl
+delete everything? (y/n) delete everything? (y/n) true
+really? (yes/no) false
+```
+
+効くべき 3 つ——受け付けない答えは訊き直す、大小文字を問わない、`no` は偽——が全部出ている。
+経緯はテストファイルの冒頭コメントにも残した。
+
+### 保留したもの（理由つき）
+
+`get-internal-run-time`（CPU 時間）と `file-author` は `getrusage` / uid→名前の引き当てに
+`libc` が要り、ワークスペースは `libc` に依存していない。実時間で CPU 時間を代用するのは嘘。
+`machine-instance` 等のホスト名系も同じ理由、`software-version`/`short-site-name`/
+`long-site-name` は CL でも `NIL` を返してよいので、中身の無い定数を並べるより置かない方を選んだ。
+`trace`/`untrace`/`step`/`disassemble`/`room`/`ed`/`dribble` は REPL のツール層で別作業。
+
+### 直さずに記録した CL との差
+
+**`decode-universal-time` は zone 省略時に UTC へ分解する**（CL は地方時）。
+ランタイムがタイムゾーンデータベースを持たないため。CL の 9 個の返り値のうち
+`daylight-p` と「既定の分解が使った zone」は、偽の値を返すのではなく用意していない。
+CL にもある明示 zone 引数（グリニッジ以西の時間数）が代わり。
+
+### 副産物: この計画の範囲外の既存問題 2 件
+
+どちらも main で再現し、どちらも設計判断が要るので直していない。詳細は
+[cl-parity-plan.md](cl-parity-plan.md) の付録 D。
+
+1. **AOT 実行ファイルから prelude の関数が一切呼べない**。`aot::compile_file` は
+   `load_compiler`（島）しか呼ばず `load_prelude` を呼ばないので、`abs`/`gcd`/`identity`/
+   `parse-namestring` すら `no such function` になる。組み込みと自分の定義だけが使える。
+   この計画で足したものはほぼ全て prelude にあるので影響は小さくない。
+   `compile_file_test` がこれを踏んでいないのは、どのテストもコンパイル対象のコードから
+   prelude 関数を呼んでいないため。**JIT（`(compile name)`）は無関係**——prelude が載った
+   プロセスの中で動くので通る（既存の `abs` と Phase 9c の `directory-p` で確認）。
+2. **小さいヒープで GC がスラッシュする**。`Heap::cons` は「空なら `gc()`、それでも空なら
+   `grow()`」の順なので、**`gc()` が 1 セルでも回収すると `grow()` は呼ばれない**。
+   生存量が容量にわずかに届かない状態で毎回全体マークが走る。
+   `editor_keyword_sync_test`（`Heap::with_capacity(1 << 16)`）は 6 テストで 649.74 秒、
+   同じ `load_prelude` を `1 << 18` で呼ぶ `prelude_test` は 1 回 1.2 秒——約 90 倍。
+   `1 << 16` は `src/main.rs` の `DEFAULT_HEAP_CELLS` でもある。

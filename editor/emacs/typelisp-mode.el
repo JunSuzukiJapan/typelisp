@@ -242,7 +242,22 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "random-state-copy" "random-state-next"
     ;; time (CLHS 25.1)
     "time" "get-universal-time" "get-internal-real-time"
-    "internal-time-units-per-second")
+    "internal-time-units-per-second"
+    ;; universal time, decomposed (CLHS 25.1).  UTC only -- see functions.md
+    ;; §20 for the divergence from CL's local-time default.
+    "decode-universal-time" "encode-universal-time" "get-decoded-time"
+    ;; filesystem queries that need no open stream (CLHS 20.1).  The `file-'
+    ;; primitives these call are deliberately absent, like `file-exists-p'
+    ;; before them: a user writes the `Pathish' wrapper, never the primitive.
+    "truename" "file-write-date" "directory" "directory-p"
+    "ensure-directories-exist"
+    ;; the environment and the running implementation (CLHS 25.1), plus the
+    ;; two things CL has no equivalent of at all
+    "command-line-args" "getenv" "home-directory" "user-homedir-pathname"
+    "lisp-implementation-type" "lisp-implementation-version"
+    "machine-type" "software-type"
+    ;; asking the user a question (CLHS 25.2)
+    "y-or-n-p" "yes-or-no-p")
   "Builtin functions and methods from the standard catalog (docs/functions.md).")
 
 (defconst typelisp-primitive-types
@@ -270,6 +285,9 @@ stream (CLHS 12.1.6).")
     "ParseIntError" "ParseFloatError" "ReadError" "EvalError"
     ;; builtin generic pair & iterator types (lowercase)
     "cons-cell" "vector-iter" "hashtable-iter"
+    ;; the struct `decode-universal-time' answers with, standing in for CL's
+    ;; nine return values
+    "decoded-time"
     ;; builtin traits
     "Iter" "Eq" "Ord" "Error")
   "Builtin generic/abstract type names and traits.")

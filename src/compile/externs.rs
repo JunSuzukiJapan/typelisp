@@ -83,6 +83,14 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "parse-float" => "rt_parse_float",
         "get-universal-time" => "rt_get_universal_time",
         "get-internal-real-time" => "rt_get_internal_real_time",
+        // The environment and the running implementation (CLHS 25.1, plus
+        // `command-line-args`/`getenv`, which CL has no equivalent of).
+        "command-line-args" => "rt_command_line_args",
+        "getenv" => "rt_getenv",
+        "home-directory" => "rt_home_directory",
+        "lisp-implementation-version" => "rt_lisp_implementation_version",
+        "machine-type" => "rt_machine_type",
+        "software-type" => "rt_software_type",
         "exit" => "rt_exit",
         // `read` (`typelisp_read::shim`), which could not lower while the
         // reader was a module of this crate: a shim naming it would have had
@@ -143,6 +151,11 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "stream-take-output-string" => "rt_stream_take_output_string",
         "file-exists-p" => "rt_file_exists_p",
         "file-delete" => "rt_file_delete",
+        "file-truename" => "rt_file_truename",
+        "file-modified-date" => "rt_file_modified_date",
+        "file-directory-p" => "rt_file_directory_p",
+        "file-list-directory" => "rt_file_list_directory",
+        "file-create-directories" => "rt_file_create_directories",
         "file-rename" => "rt_file_rename",
         _ => return None,
     })
@@ -322,7 +335,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 183] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 194] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -335,14 +348,18 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 183] {
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state};
     use typelisp_read::shim::rt_read;
     use typelisp_rt::sys_builtin::{
-        rt_exit, rt_get_internal_real_time, rt_get_universal_time, rt_parse_float, rt_parse_int,
+        rt_command_line_args, rt_exit, rt_get_internal_real_time, rt_get_universal_time, rt_getenv,
+        rt_home_directory, rt_lisp_implementation_version, rt_machine_type, rt_parse_float,
+        rt_parse_int, rt_software_type,
     };
     use typelisp_rt::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_logand, rt_bignum_logior, rt_bignum_lognot, rt_bignum_logxor,
         rt_make_random_state_fresh, rt_random_state_copy, rt_random_state_next,
 
-        rt_file_delete, rt_file_exists_p, rt_file_rename, rt_stream_at_line_start, rt_stream_close,
+        rt_file_create_directories, rt_file_delete, rt_file_directory_p, rt_file_exists_p,
+        rt_file_list_directory, rt_file_modified_date, rt_file_rename, rt_file_truename,
+        rt_stream_at_line_start, rt_stream_close,
         rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p,
         rt_stream_output_p, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
         rt_stream_string_input, rt_stream_string_output, rt_stream_take_output_string, rt_stream_unread_char,
@@ -558,6 +575,17 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 183] {
         ("rt_file_exists_p", rt_file_exists_p as usize),
         ("rt_file_delete", rt_file_delete as usize),
         ("rt_file_rename", rt_file_rename as usize),
+        ("rt_file_truename", rt_file_truename as usize),
+        ("rt_file_modified_date", rt_file_modified_date as usize),
+        ("rt_file_directory_p", rt_file_directory_p as usize),
+        ("rt_file_list_directory", rt_file_list_directory as usize),
+        ("rt_file_create_directories", rt_file_create_directories as usize),
+        ("rt_command_line_args", rt_command_line_args as usize),
+        ("rt_getenv", rt_getenv as usize),
+        ("rt_home_directory", rt_home_directory as usize),
+        ("rt_lisp_implementation_version", rt_lisp_implementation_version as usize),
+        ("rt_machine_type", rt_machine_type as usize),
+        ("rt_software_type", rt_software_type as usize),
         ("rt_bignum_cmp", rt_bignum_cmp as usize),
         ("rt_bignum_to_int", rt_bignum_to_int as usize),
         ("rt_bignum_fits_i32", rt_bignum_fits_i32 as usize),

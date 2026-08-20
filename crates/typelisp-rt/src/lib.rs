@@ -3878,6 +3878,11 @@ stream_shim!(rt_stream_take_output_string, "stream-take-output-string", [int], t
 stream_shim!(rt_file_exists_p, "file-exists-p", [str], bool);
 stream_shim!(rt_file_delete, "file-delete", [str], tagged);
 stream_shim!(rt_file_rename, "file-rename", [str, str], tagged);
+stream_shim!(rt_file_truename, "file-truename", [str], tagged);
+stream_shim!(rt_file_modified_date, "file-modified-date", [str], tagged);
+stream_shim!(rt_file_directory_p, "file-directory-p", [str], bool);
+stream_shim!(rt_file_list_directory, "file-list-directory", [str], tagged);
+stream_shim!(rt_file_create_directories, "file-create-directories", [str], tagged);
 
 
 #[cfg(test)]
