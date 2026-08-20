@@ -721,11 +721,23 @@ cleanup は正常終了・`throw`・`panic`・`break`/`return` のどれで抜�
    `stream-`/`file-` で始まる名前を全部 `stream_builtin::stream_builtin` へ丸投げするので
    （interp.rs の `name if name.starts_with(...)` アーム）、`file-*` を `sys_builtin.rs` に
    置くとインタプリタからは永久に届かない。最初の草稿はそこに置いていた。
-2. **§2-4 の「触点 8 箇所」は*メソッド*の話で、自由関数はもっと安い。**
+2. **§2-4 の「触点 8 箇所」は*メソッド*の話で、自由関数は安い——ただし島の*再生成*は要る。**
    `externs.rs` の `rt_builtin_symbol` の doc コメントが明言しているとおり、島は
-   「bridge が名付けたものを呼ぶ」だけなので、**組み込み*関数*を足すのに島の変更も再生成も要らない**
-   （`file-exists-p` が `src/compiler.rs` に一度も現れないのが証拠）。今回の触点は
-   registry / interp / rt / externs の 3 表だけで、島は一切触っていない。
+   「bridge が名付けたものを呼ぶ」だけなので、**組み込み*関数*を足すのに
+   `src/compiler.rs` の SOURCE を書き換える必要は無い**（`file-exists-p` が
+   そこに一度も現れないのが証拠）。触点は registry / interp / rt / externs の 3 表だけ。
+
+   **しかし成果物のバイト列は変わる。** `rt_extern_functions()` に足した 11 個は島の
+   ビットコードに extern 宣言として現れるので、`the_committed_island_matches_a_fresh_build`
+   が 452 バイト差で落ちた。最初この節に「島の再生成も要らない」と書いたのは誤りで、
+   **「SOURCE を書き換えなくてよい」と「成果物が変わらない」を混同していた**。
+   `src/compiler.rs` に名前が出てこないことが示すのは前者だけ。
+
+   区別は Phase 1c/2/3/4a との対比で明確に出た——あちらは prelude を大幅に育てたが
+   島テストは通り、9c は prelude に加えて registry へ組み込みを足したので落ちた。
+   つまり**島の成果物を動かすのは prelude の中身ではなく、extern の表**。
+   再生成は 1 回で不動点（島が*吐くもの*は変えていないため）、prelude 成果物は
+   バイト単位で不変だった。
 3. **`command-line-args` の要素 0 はプログラム名**、という一点を守るために `typl` 側に
    スロットを置いた。`typl script.typl a b` の `std::env::args()` は
    `["typl","script.typl","a","b"]`、AOT の `./prog a b` は `["./prog","a","b"]` で食い違うので、
