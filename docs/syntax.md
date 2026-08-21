@@ -87,13 +87,13 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - 引数の型・戻り値の型は必須。
 - ジェネリック関数は名前に山括弧で型パラメータを書く: `(defun name<T1,T2...> (params) Ret body...)`
   （型位置の `Vector<T>` と同じ山括弧構文。旧来の `(name T1 T2...)` リスト形式は廃止）。
-- `defun`/`lambda` は末尾に `&rest (name Type)` を書くと可変長引数を受け取れる:
+- `defun`/`lambda`/`defmethod` は末尾に `&rest (name Type)` を書くと可変長引数を受け取れる:
   `(defun name ((a Type1) &rest (xs Type2)) Ret body...)`（本体内では `xs` は常に `Sexpr` の
   リストとして束縛される。呼び出し側の各実引数は `Type2` として個別に型検査される）。
   `defmacro` にも独自の `&rest` があるが、常に無型の `Sexpr` である点が異なる（`defun`/`lambda`
   は要素型を明示する）。`fn` 型でも `(fn (T1... &rest Te) Ret)` の形で可変長関数の型を書ける。
-- **`&optional` / `&key`**（`defun` のみ。`lambda`/`defmethod` は未対応で、`defmacro` は
-  後述の別実装）。順序は CL 流に `必須 &optional &rest &key`。各パラメータは
+- **`&optional` / `&key`**（`defun` と `defmethod`。`lambda`/`labels` は後述の理由で対象外、
+  `defmacro` は後述の別実装）。順序は CL 流に `必須 &optional &rest &key`。各パラメータは
   `(name Type)` か `(name Type デフォルト式)` と書く:
 
   ```lisp
@@ -118,6 +118,29 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
     *値*に依存する）を、組み合わせを禁じることで回避している。`&optional` と `&rest` の併用は可。
   - ジェネリック関数でも使えるが、**省略された引数にしか現れない型パラメータは推論できず
     エラー**になる（そこには突き合わせる値が無いため）。
+  - **`defmethod` でも同じ 3 区画が書ける**（インスタンスメソッド・静的関数の両方）。受け手の
+    次から `&optional`/`&rest`/`&key` を並べる:
+
+    ```lisp
+    (defstruct box (w i32) (h i32))
+    (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32 ...)
+    (grow (box::new 1 2) :dh 10)
+
+    (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))   ; 静的関数
+    (point::origin :y 7)
+    ```
+
+    ジェネリック型のメソッドでも使えるが、**デフォルト式を書いたパラメータの型に所有者の型
+    パラメータを書くことはできない**（`defun` が自分の型パラメータについて負うのと同じ制限。
+    省略時に埋め込まれるのは*検査済み*の式なので、その型が抽象変数のままでは困る）。
+  - **トレイトのメソッドでは使えない**。`deftrait` 側に構文が無く、`impl` 側だけが区画を宣言
+    できてしまうと、`:dyn` 受け手の呼び出し（トレイトの宣言から引数を埋める）と具象受け手の
+    呼び出し（`impl` の宣言から埋める）が別物になる。vtable スロットのアリティは固定。
+  - **`lambda` / `labels` では使えない**（`&rest` は使える）。省略された引数を埋めるには
+    呼び出し側が**呼ばれる側の検査済みデフォルト式**を読む必要があり、それは名前で解決した
+    シグネチャからしか手に入らない。`lambda` は値として渡され、その値を説明するのは `Type::Fn`
+    だけ——そこに式を置く場所は無いし、置けば「同じシグネチャでデフォルトだけ違う 2 つの
+    ラムダ」が別の型になってしまう。`&rest` は型の話に閉じているので `Type::Fn` に枠がある。
 - **前方参照可**: トップレベルの `defun` は、ファイル内で自分より後に定義された `defun` を
   呼べる（相互再帰も可）。各ローダがファイル全体を読んだ直後に全 `defun` のシグネチャだけを
   先行登録するため（`Checker::predeclare_program`）。ただし例外が3つある:

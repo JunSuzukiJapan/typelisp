@@ -287,3 +287,192 @@ fn generic_optional_self_recursive() {
     let src = "(defun rep<T> ((x T) &optional (n i32 3)) T (if (= n 0) x (rep x (- n 1)))) (rep 5)";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
+
+// ---- defmethod ------------------------------------------------------------
+//
+// The same two mechanisms, on the method side: `Checker::check_defmethod_in`
+// registers the sections on the `AssocFn`'s own `FnSig`, and
+// `Checker::push_assoc_opt_key_args` (`check_assoc_call`'s branch) fills a
+// call site in. Method signatures have no type parameters of their own, so
+// there is no inference pass there — the only substitution is the one the
+// receiver's type arguments already fixed.
+
+#[test]
+fn method_optional_default_is_used_when_the_argument_is_omitted() {
+    let src = "
+        (defstruct counter (n i32))
+        (defmethod bump ((self counter) &optional (by i32 1)) i32 (+ self::n by))
+        (bump (counter::new 10))
+    ";
+    assert_eq!(eval_ok(src), Value::Int(11));
+}
+
+#[test]
+fn method_optional_supplied_value_overrides_the_default() {
+    let src = "
+        (defstruct counter (n i32))
+        (defmethod bump ((self counter) &optional (by i32 1)) i32 (+ self::n by))
+        (bump (counter::new 10) 5)
+    ";
+    assert_eq!(eval_ok(src), Value::Int(15));
+}
+
+#[test]
+fn method_defaultless_optional_arrives_as_an_option() {
+    let src = "
+        (defstruct counter (n i32))
+        (defmethod bump ((self counter) &optional (by i32)) i32
+          (match by ((some k) (+ self::n k)) ((none) self::n)))
+        (+ (bump (counter::new 10)) (bump (counter::new 10) 5))
+    ";
+    assert_eq!(eval_ok(src), Value::Int(25));
+}
+
+#[test]
+fn method_keyword_arguments_match_by_label() {
+    let src = "
+        (defstruct box (w i32) (h i32))
+        (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32
+          (+ (+ self::w dw) (+ self::h dh)))
+        (grow (box::new 1 2) :dh 10)
+    ";
+    assert_eq!(eval_ok(src), Value::Int(13));
+}
+
+#[test]
+fn method_rest_collects_the_trailing_arguments() {
+    let src = "
+        (defun len ((s Sexpr)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
+        (defstruct acc (base i32))
+        (defmethod total ((self acc) &rest (xs i32)) i32 (+ self::base (len xs)))
+        (total (acc::new 100) 1 2 3)
+    ";
+    assert_eq!(eval_ok(src), Value::Int(103));
+}
+
+#[test]
+fn static_method_takes_keyword_arguments() {
+    let src = "
+        (defstruct point (x i32) (y i32))
+        (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))
+        (x (point::origin :y 7))
+    ";
+    assert_eq!(eval_ok(src), Value::Int(0));
+}
+
+#[test]
+fn method_on_a_generic_owner_takes_an_optional() {
+    // The owner's type argument is resolved from the receiver, exactly as
+    // for a fixed-arity method; the `&optional`'s own type is concrete, so
+    // the definition-side restriction below does not bite.
+    let src = "
+        (defstruct cell<T> (v T))
+        (defmethod shown ((self cell<i32>) &optional (extra i32 100)) i32 (+ self::v extra))
+        (shown (cell::new 1))
+    ";
+    assert_eq!(eval_ok(src), Value::Int(101));
+}
+
+#[test]
+fn method_keyword_and_optional_agree_between_interp_and_compile() {
+    let src = "
+        (defstruct box (w i32) (h i32))
+        (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32
+          (+ (+ self::w dw) (+ self::h dh)))
+        (defun run () i32 (+ (grow (box::new 1 2)) (grow (box::new 1 2) :dw 10)))
+        %COMPILE%
+        (run)
+    ";
+    assert_eq!(eval_ok_compiled(src, "run"), Value::Int(16));
+}
+
+#[test]
+fn method_unknown_keyword_is_rejected() {
+    let src = "
+        (defstruct box (w i32))
+        (defmethod grow ((self box) &key (dw i32 0)) i32 (+ self::w dw))
+        (grow (box::new 1) :nope 2)
+    ";
+    assert!(check_err(src).contains("unknown keyword argument :nope"), "{}", check_err(src));
+}
+
+#[test]
+fn method_too_many_positional_arguments_are_rejected() {
+    let src = "
+        (defstruct box (w i32))
+        (defmethod grow ((self box) &optional (dw i32 0)) i32 (+ self::w dw))
+        (grow (box::new 1) 2 3)
+    ";
+    assert!(check_err(src).contains("expected at most"), "{}", check_err(src));
+}
+
+#[test]
+fn a_defaulted_method_parameter_may_not_mention_the_owners_type_parameter() {
+    // The mirror of `defun`'s own restriction: an omitted argument splices
+    // the *already checked* default node into the call, so its type must
+    // not still name an abstract variable.
+    let src = "
+        (defstruct cell<T> (v T))
+        (defmethod pick ((self cell<T>) &optional (alt T self::v)) T alt)
+    ";
+    assert!(check_err(src).contains("may not default"), "{}", check_err(src));
+}
+
+// ---- what has no named callee -------------------------------------------
+//
+// See `checker::OPT_KEY_NEEDS_A_NAME`: filling an omitted argument in needs
+// the callee's *checked default expression*, which lives on its signature
+// and is reachable only by resolving the callee by name. A `lambda`/`labels`
+// function is reached through its value, described by `Type::Fn` alone.
+
+#[test]
+fn lambda_rejects_optional_with_the_reason() {
+    let msg = check_err("(lambda ((a i32) &optional (b i32 1)) i32 (+ a b))");
+    assert!(msg.contains("need a named callee"), "unexpected message: {}", msg);
+}
+
+#[test]
+fn labels_rejects_key_with_the_reason() {
+    let msg = check_err("(labels ((f ((a i32) &key (b i32 1)) i32 (+ a b))) (f 1))");
+    assert!(msg.contains("need a named callee"), "unexpected message: {}", msg);
+}
+
+#[test]
+fn lambda_still_takes_a_rest_parameter() {
+    // `&rest` is purely a matter of types, and `Type::Fn` has a slot for it.
+    let src = "
+        (defun len ((s Sexpr)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
+        ((lambda ((a i32) &rest (xs i32)) i32 (+ a (len xs))) 1 2 3)
+    ";
+    assert_eq!(eval_ok(src), Value::Int(3));
+}
+
+#[test]
+fn a_trait_impl_method_may_not_declare_lambda_list_sections() {
+    // A trait method's arity is fixed by its vtable slot — a `:dyn` call
+    // site fills its arguments from the trait's declaration, a concrete one
+    // from the impl's, and the two have to be the same call.
+    let src = "
+        (deftrait greet () (hello ((self Self)) i32))
+        (defstruct thing (n i32))
+        (impl greet thing
+          (hello ((self Self) &key (extra i32 0)) i32 (+ self::n extra)))
+    ";
+    let msg = check_err(src);
+    assert!(msg.contains("arity is fixed by its vtable slot"), "unexpected message: {}", msg);
+}
+
+#[test]
+fn an_inherent_method_with_sections_cannot_be_adopted_as_a_trait_method() {
+    // The other way into `check_impl_conformance`: the method is written
+    // outside the `impl` block, so `subst_method_item` never sees it and the
+    // conformance check is what refuses it.
+    let src = "
+        (deftrait greet () (hello ((self Self)) i32))
+        (defstruct thing (n i32))
+        (defmethod hello ((self thing) &key (extra i32 0)) i32 (+ self::n extra))
+        (impl greet thing)
+    ";
+    let msg = check_err(src);
+    assert!(msg.contains("may not declare &optional/&key/&rest"), "unexpected message: {}", msg);
+}

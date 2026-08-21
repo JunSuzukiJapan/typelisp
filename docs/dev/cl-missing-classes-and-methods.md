@@ -394,7 +394,7 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 | CL | 状態 | 備考 |
 |---|---|---|
 | `length` `elt` `subseq` `reverse` `sort` `find` `position` `count` `remove-if` `every` `some` `reduce` `map` | ✅ | 2026-07-31 に**項目ベース版 `find`/`position`/`count`**（`(find x it)`、`Eq A` 境界。CL のデフォルト `:test` = `eql` に相当）を追加し、述語版は `find-if`/`position-if`/`count-if` の名で並立。`some` は `any`、`reduce` は `foldl`/`foldr` |
-| `:key` `:test` `:test-not` `:start` `:end` `:from-end` `:count` | ❌ | キーワード引数**機構**は 2026-07-29 に入った（`defun` が `&optional`/`&key` を取れる。`defmacro` は 2026-07-24 から。`lambda` は `&rest` のみ、`defmethod` は `&rest` すら取れない）が、**シーケンス API 側がまだ受けていない**。等価性は `Eq` トレイト固定なので `:test`/`:key` はトレイト境界とも噛み合わせが要る |
+| `:key` `:test` `:test-not` `:start` `:end` `:from-end` `:count` | ✅ | 2026-08-21（Stage 3e）にシーケンス API 30 本が受けるようになった。キーワード引数**機構**自体は 2026-07-29（`defun`）・2026-07-24（`defmacro`）・2026-08-21（`defmethod`）|
 | `sort` / `stable-sort` の述語引数 | ✅ | 2026-07-31 に CL 本来の `(sort sequence predicate)` へ変更。`(sort it cmp)`、`cmp` は「第1引数が第2引数より真に前」で `true`。非破壊（新しい `Vector<A>` を返す）かつ安定な挿入ソートなので `stable-sort` は同じものになる |
 | `merge` | ✅ | （2026-08-20、Phase 3）。CL は整列済みを要求するが、これは連結を整列する |
 | `copy-seq` / `fill` / `replace` / `map-into` | ✅ | `copy-seq` は `Iter` 上、残り3つは `Vector<T>` のその場書き込み（2026-08-20、Phase 3） |
@@ -516,11 +516,11 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
    （パス名・`read-sexpr`・`format` の出力先）で解消。CLHS 21章はトレイト階層として、
    19/20章はパス名層として入っている。残差は §2.18 のバイナリ I/O・`listen` 系だけ。
 2. ⚠️ **関数の `&optional` / `&key`** — 機構としては 2026-07-29 に解消（`defun` が両方取れる。
-   `defmacro` は 2026-07-24 から）。ただし **`lambda` は `&rest` のみ、`defmethod` は
-   `&rest` すら受け付けない**（`parse_defmethod_sig_inner` は `parse_param_pairs` を呼ぶだけ）。
-   既存のシーケンス API も `:key`/`:test`/`:start`/`:end` を受けていない（§2.15）。
-   `make-hash-table :test` と BOA コンストラクタも同様に未着手（§2.16/§2.6）——
-   「書けない」から「書いていない」に変わった段階。
+   `defmacro` は 2026-07-24 から）。**2026-08-21（Stage 5b）に `defmethod` も 3 区画すべてを
+   取れるようになった**。残る非対応は `lambda`/`labels`（`&rest` のみ）とトレイトのメソッド
+   （vtable スロットのアリティが固定）で、どちらも「入れない」理由つきで確定している。
+   シーケンス API の `:key`/`:test`/`:start`/`:end` は 2026-08-21（Stage 3e）に解消。
+   `make-hash-table :test` と BOA コンストラクタは未着手（§2.16/§2.6）。
 3. ~~**汎用 place（`setf` 展開子）**~~ — 2026-07-30 解消。place は変数・`変数::field` に加え
    `(accessor recv key...)` 形の呼び出し形（`recv` の静的型が `set-{accessor}` を持てば任意の
    アクセサ名で成立、ユーザ定義型も対象）に対応、`incf`/`decf`/`rotatef`/`shiftf`/

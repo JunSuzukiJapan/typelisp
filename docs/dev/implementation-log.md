@@ -8123,3 +8123,72 @@ uninterned シンボルではない**: ここのシンボルは常に intern さ
 `tests/macro_tools_test.rs`（7 本）。`macroexpand` はチェッカーハンドルを要するので、
 テストハンドラも `main.rs` と同じに `interp.set_checker` する（借用を `exec` を跨いで
 持たない——再入した `macroexpand` が自分の借用を取る場所がそこ）。
+
+## CL 残差 Phase 5b — `defmethod` の `&optional` / `&key` / `&rest`（2026-08-21、branch `feature/cl-parity`）
+
+`defun` は 2026-07-29 から 3 区画を取れたが、`defmethod` は `&rest` すら取れなかった
+（`parse_defmethod_sig_inner` が `parse_param_pairs` を呼ぶだけだった）。ここで揃えた。
+
+### 実行時パラメータをヘッダの出口で確定させる
+
+`parse_defun_params_full` を `defun` から切り離して `parse_params_full(elems, what)` にし、
+`defmethod` は受け手の次のスライスをそれに渡す。要点は返り値の形で、`MethodSig::params` は
+最初から**実行時パラメータ**を並べる: 必須 → `&optional` の実効型 → `&rest` の名前
+（`Sexpr`）→ `&key` の実効型。区画を書かなければ従来どおり必須だけが並ぶので、
+`parse_param_pairs` を呼んでいた頃と同じ列になる。
+
+この形にしたので、本体の `Env`、生成する `TopLevel::Defmethod`、単型化のテンプレート
+再解析、コンパイル経路のどれも区画の存在を知らない。知っているのは 2 箇所だけ:
+
+- 登録される `AssocFn` の `FnSig`（`params` は**必須引数のみ**、区画は `optionals`/`keys`/
+  `rest` に入る。`defun` の `FnSig` と同じ約束）
+- 呼び出し側 `check_assoc_call` の分岐 `push_assoc_opt_key_args`
+
+自由関数版（`check_call_opt_key`）より単純な点が 1 つある。メソッドのシグネチャは自前の型
+パラメータを持たない（`AssocFn` の `FnSig::type_params` は常に空）ので、推論パスが要らない。
+効いている代入は受け手または期待型の型引数から呼び出し側が既に決めた `subst` だけ。
+
+制限は `defun` と同じ 1 つ: **デフォルト式を書いたパラメータの型に所有者の型パラメータを
+書けない**。省略時に埋め込むのは検査済みのノードで、その `.ty` が抽象変数のままだと下流の
+表現判定（`core_bridge` の `binding_kind`）が読む型が嘘になる。デフォルトの無い
+パラメータは `Option<T>` として呼び出し側で新しく作るので無制限。
+
+ついでに `defun` 側と揃えて、この制限の検査を**デフォルト式を検査する前**に移した。
+順序が逆だと、空 `Env` で検査されるデフォルト式自身のエラー（`self::v` は当然 unbound）が
+先に出て、本当の理由が見えない。
+
+### トレイトのメソッドでは使えない
+
+vtable スロットのアリティは固定である。`:dyn` 受け手の呼び出しはトレイトの宣言から引数を
+埋め、具象受け手の呼び出しは `impl` の宣言から埋めるので、両者が食い違うと同じ呼び出しが
+2 通りになる。`deftrait` 側に区画の構文が無い以上、食い違いを作れるのは `impl` 側だけ。
+そこで 2 箇所塞いだ:
+
+- `subst_method_item` — `impl` ブロックの中に書いた場合。放っておくと `&key` という裸の
+  シンボルを `(name type)` として読もうとして `ImproperList` になり、理由が伝わらない
+- `check_impl_conformance` — `impl` の外に書いたメソッドを後から `impl` が拾う場合。
+  `FnSig::params` は必須引数しか持たないので、区画を見ずに比較すると
+  「トレイトは 1 引数、実体は実行時 2 引数」が素通りしてしまう
+
+前者だけでは足りないことに、テストを書いていて気づいた。後者はテストで実際に到達する。
+
+### `lambda` / `labels` は入れない
+
+省略された引数を埋めるには、呼び出し側が**呼ばれる側の検査済みデフォルト式**を読む必要が
+ある。それはシグネチャに載っていて、名前で解決したからこそ手に入る。`lambda` は値として
+渡され、その値を説明するのは `Type::Fn` だけ——パラメータ型・`&rest` の要素型・戻り型しか
+無い。式を置く場所が無いうえ、置けば「同じシグネチャでデフォルトだけ違う 2 つのラムダ」が
+別の型になってしまう。`labels` の関数も `Type::Fn` 型のローカル変数で、値として渡せるので
+同じ。`&rest` が両方で使えるのは、それが型の話に閉じていて `Type::Fn` に枠があるから。
+
+理由は `checker::OPT_KEY_NEEDS_A_NAME` に書き、エラーメッセージがそれを言う。`labels` には
+そもそも検査が無く「parameter must be (name type)」になっていたので、`lambda` と同じ
+明示的な拒否を足した。
+
+### テスト
+
+`tests/optional_key_test.rs` に 16 本追加（合計 38 本）。`defmethod` の
+`&optional`/デフォルト無し/`&key`/`&rest`/静的関数/ジェネリック所有者、interp と compile の
+一致、キーワード名の誤り・引数過多・所有者型パラメータへの依存の 3 つのエラー、
+`lambda`/`labels` の拒否とその理由、`lambda` の `&rest` が残っていること、トレイト
+メソッドの拒否 2 経路。

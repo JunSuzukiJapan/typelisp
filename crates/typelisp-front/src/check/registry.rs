@@ -119,11 +119,19 @@ impl OptKeyParam {
     /// against instead) is ultimately packaged as — see [`Self::default`]'s
     /// doc comment.
     pub fn effective_ty(&self) -> Type {
-        if self.default.is_some() {
-            self.decl_ty.clone()
-        } else {
-            Type::Named(Path::root("option"), vec![self.decl_ty.clone()])
-        }
+        opt_key_effective_ty(&self.decl_ty, self.default.is_some())
+    }
+}
+
+/// [`OptKeyParam::effective_ty`] before the default has been checked into an
+/// [`OwnedForm`](crate::owned_form::OwnedForm) — all it ever depended on was
+/// *whether* there is one. `Checker::parse_defmethod_sig_inner` needs the
+/// effective types while still holding the defaults as raw source forms.
+pub fn opt_key_effective_ty(decl_ty: &Type, has_default: bool) -> Type {
+    if has_default {
+        decl_ty.clone()
+    } else {
+        Type::Named(Path::root("option"), vec![decl_ty.clone()])
     }
 }
 
