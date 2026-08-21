@@ -211,6 +211,32 @@ pub const SOURCE: &str = r##"
 ;; `Unit` directly).
 (defmacro while (test &rest body) `(loop (if (not ,test) (break) ()) ,@body))
 
+
+;; ---------------------------------------------------------------------------
+;; `gensym` (cl-parity-plan.md Phase 4c).
+;;
+;; A prelude function, not a Rust builtin, so that CL's `*gensym-counter*` can
+;; be a real variable a program can read and set — a builtin's counter lived on
+;; the `Heap` and nothing could name it. The interpreted and compiled paths
+;; still share one sequence, because they now share this one definition and its
+;; one global.
+;;
+;; The name starts with a space, which no source can write, so a generated
+;; binding cannot collide with a written one. That is the whole guarantee:
+;; symbols here are always interned, so two `gensym`s are distinct because
+;; their *names* differ, not because they are separate uninterned objects as in
+;; CL. Uninterned symbols would buy nothing — every place a symbol acts as a
+;; binder is keyed by name (`Env::vars`), so two same-named uninterned symbols
+;; would collide exactly where it matters most.
+(pub defvar (*gensym-counter* i32) 0)
+
+(pub defun gensym (&optional (prefix string "g")) Symbol
+  "A fresh symbol, named from `prefix` and `*gensym-counter*`. CL's `gensym`."
+  (let ((n *gensym-counter*))
+    (progn
+      (setf *gensym-counter* (+ n 1))
+      (string->symbol (format false " ~a~a" prefix n)))))
+
 ;; `dotimes`: `gensym` replaces the old `check_dotimes`'s "leading-space,
 ;; unwritable-in-source" hidden binding trick with the macro system's own
 ;; (already-proven, see `case`'s `tmp`) hygiene mechanism.
@@ -331,6 +357,17 @@ pub const SOURCE: &str = r##"
 ;; outer defun's parameters (`f`/`g`) the same way any nested lambda would.
 (defun identity<T> ((x T)) T x)
 (defun const<A,B> ((x A) (y B)) A x)
+
+;; CL's `complement`: the predicate that answers the opposite. `const` above
+;; is CL's `constantly` applied to its argument — CL's `constantly` itself
+;; (the *function* that ignores its arguments) is not here, because the type
+;; of the argument it ignores appears only in the return type, and this
+;; checker resolves a type parameter from the *arguments* (there is no
+;; explicit type application either). `(lambda ((x T)) A v)` says it inline in
+;; the same space.
+(pub defun complement<A> ((pred (fn (A) bool))) (fn (A) bool)
+  "The predicate that answers what `pred` does not."
+  (lambda ((x A)) bool (not (pred x))))
 (defun compose<A,B,C> ((f (fn (B) C)) (g (fn (A) B))) (fn (A) C)
   (lambda ((x A)) C (f (g x))))
 (defun flip<A,B,C> ((f (fn (A B) C))) (fn (B A) C)

@@ -147,3 +147,60 @@ pub unsafe extern "C-unwind" fn rt_eval(args: *const i64, argc: u32) -> i64 {
         Err(e) => fatal(&format!("eval: {}", e)),
     }
 }
+
+/// `macroexpand-1` for compiled code: `args[0]` is the form, tagged; the
+/// result is the tagged `Result<Option<Sexpr>, EvalError>`.
+///
+/// # Safety
+///
+/// Same as [`rt_eval`]'s.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_macroexpand_1(args: *const i64, argc: u32) -> i64 {
+    expand_shim(args, argc, "rt_macroexpand_1", Interp::macroexpand_1_form)
+}
+
+/// `macroexpand` for compiled code: `args[0]` is the form, tagged; the result
+/// is the tagged `Result<Sexpr, EvalError>`.
+///
+/// # Safety
+///
+/// Same as [`rt_eval`]'s.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_macroexpand(args: *const i64, argc: u32) -> i64 {
+    expand_shim(args, argc, "rt_macroexpand", Interp::macroexpand_form)
+}
+
+/// The half [`rt_macroexpand_1`] and [`rt_macroexpand`] share: find the
+/// environment the way [`rt_eval`] does, run `f` in it, and tag the result.
+///
+/// # Safety
+///
+/// Same as [`rt_eval`]'s.
+unsafe fn expand_shim(
+    args: *const i64,
+    argc: u32,
+    who: &str,
+    f: impl Fn(&Interp, &mut typelisp_mem::Heap, typelisp_mem::Value) -> Result<typelisp_mem::Value, crate::eval::interp::EvalError>,
+) -> i64 {
+    if argc < 1 {
+        fatal(&format!("{}: expected 1 argument", who));
+    }
+    let form = tagged_arg(args, 0);
+    let heap = active_heap();
+    let env = AOT_ENV.with(|c| c.get());
+    let result = if env.is_null() {
+        match with_active_interp(|i| f(i, heap, form)) {
+            Some(r) => r,
+            None => fatal(&format!(
+                "{}: no environment — neither an active interpreter nor a completed rt_eval_init",
+                who
+            )),
+        }
+    } else {
+        f(&*env, heap, form)
+    };
+    match result {
+        Ok(v) => encode(v),
+        Err(e) => fatal(&format!("{}: {}", who, e)),
+    }
+}

@@ -588,11 +588,51 @@ acc)` へ展開すれば要素型が推論で決まる」——決まらない:
 
 ### Stage 4c — 評価とマクロ
 
-`macroexpand` / `macroexpand-1`（**マクロ展開結果をプログラムから覗く手段が無い**——デバッグに効く）、
-`macrolet` / `symbol-macrolet`、`eval-when`、`define-compiler-macro` / `compiler-macro-function`、
-`load-time-value`、`constantly`（現在の `const` は 2 引数版で別物）、`complement`、
-`gensym` のプレフィクス引数と `*gensym-counter*`、
-uninterned シンボル生成 `(Symbol::new name)`（CL の `make-symbol`）/ `copy-symbol` / `gentemp`。
+**状態: 部分完了（2026-08-21）。** 入ったのは `macroexpand`/`macroexpand-1`、`complement`、
+`gensym` のプレフィクス引数と `*gensym-counter*`。テストは `tests/macro_tools_test.rs`、
+ドキュメントは [functions.md](../functions.md) §14。
+
+**`macroexpand-1` は `Option<Sexpr>` を返す。** CL は「展開したか」を第 2 返り値で伝えるが
+多値が無いので、`none` が「マクロ呼び出しではない」を表す。CL の真偽値より情報が多い——
+自分自身の呼び出しへ展開するマクロと非マクロを取り違えようがない。`macroexpand` は
+`none` になるまで繰り返して最終形を返す（CL と同じ）。展開そのものは
+`Checker::try_expand_toplevel_macro`、つまり**検査が使うのと同じ 1 段**なので、
+プログラムが見るものと検査が見たものがずれない。コンパイル済みコードからは `eval` と
+同じ 2 経路（JIT の `with_active_interp` / AOT の `AOT_ENV`）で環境に届く。
+
+**`gensym` は prelude 関数になった**（Rust 組み込みを廃止）。CL の `*gensym-counter*` を
+「プログラムが読み書きできる変数」にするには、カウンタが typelisp 側の大域変数である
+必要があったから——組み込みのカウンタは `Heap` にあり、誰も名指しできなかった。
+解釈と compiled が 1 つの列を共有するという不変条件は、**同じ 1 つの定義と 1 つの大域**を
+共有することで保たれる。名前は先頭が空白なので、ソースに書けるどの名前とも衝突しない。
+
+**入れなかったもの（それぞれ理由つき）**:
+
+- **`constantly`** — CL のそれは*引数を無視する関数*を返す。無視される引数の型は
+  **戻り型にしか現れない**が、このチェッカーは型パラメータを*引数から*決める
+  （明示的な型適用も無い）ので `(the (fn (i32) string) (constantly "hi"))` でも決まらない。
+  0 引数のサンクに縮めれば書けるが、CL の用途（`:key` 等）に届かない。
+  `(lambda ((x T)) A v)` が同じ字数で同じことを言う。`const`（2 引数版）は既にある。
+- **`macrolet` / `symbol-macrolet`** — 障害は 1 つで、はっきりしている。**式の位置の検査は
+  `&self`** で、マクロを定義するには (1) レジストリへの登録（`check_defmacro` は
+  `&mut self`）と (2) **インタプリタ側でのラムダの登録**（`exec` 相当）の両方が要る。
+  やるなら: `check_defmacro` を「本体を検査して部品を返す `&self` 部分」と「登録する
+  `&mut self` 部分」に割り、`Checker` にスコープ付きのローカルマクロ表（`RefCell`）を足して
+  `resolve_macro` がレジストリより先に引き、`MacroExpander` に「この defmacro コア形を
+  定義せよ」という 1 メソッドを足す。**設計は決まっているが片手間には入らない**ので別立て。
+- **`eval-when`** — **選ぶべき区別が無い**。`typl` は各トップレベル形を検査→実行と 1 本で
+  進み、`compile-file` は**定義形を全部 `exec` する**うえに裸のトップレベル式を受け付けない
+  （`aot.rs`)。つまり CL の `:compile-toplevel`/`:load-toplevel`/`:execute` の 3 つは
+  ここでは常に一致していて、`eval-when` は恒真のラッパーにしかならない。
+- **`define-compiler-macro` / `compiler-macro-function`** — コンパイラマクロ層が無い。
+  ここの `compile` は明示的な操作で、島は名前で呼び出しを書き換えたりしない。
+- **`load-time-value`** — 実行と別のロード相が無い（上と同じ理由）。
+- **`(Symbol::new name)` / `copy-symbol` / `gentemp`** — uninterned シンボル。シンボルは
+  名前で intern されるので「同名で別物」を作ること自体は `Heap` に 1 メソッド足せば可能
+  だが、**買えるものが無い**: シンボルが束縛子として働く場所は全部*名前*で引かれる
+  （`Env::vars` は `String` 鍵）ので、同名の uninterned シンボル 2 つは肝心なところで
+  衝突する。データとしてなら intern 済みと区別が付くだけで、その区別に用途が無い。
+  `gentemp` は intern された新しい名前を作るもので、それは `gensym` そのもの。
 
 `*macroexpand-hook*` は (D5) 側の判断（Phase 7b）に合流させる。
 

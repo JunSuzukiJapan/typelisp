@@ -166,21 +166,25 @@ fn literal_types() {
 #[test]
 fn gensym_is_typed_symbol() {
     // The original motivation: `gensym` returns a `Symbol`, not the
-    // heterogeneous `Sexpr`.
-    assert_eq!(ty("(gensym)"), Type::Symbol);
+    // heterogeneous `Sexpr`. It is a prelude `defun` (over the prelude global
+    // `*gensym-counter*`), hence `ty_with_prelude`.
+    assert_eq!(ty_with_prelude("(gensym)"), Type::Symbol);
 }
 
 #[test]
 fn symbol_string_bridges_are_typed() {
     assert_eq!(ty("(string->symbol \"x\")"), Type::Symbol);
-    assert_eq!(ty("(symbol->string (gensym))"), Type::Str);
+    assert_eq!(ty_with_prelude("(symbol->string (gensym))"), Type::Str);
 }
 
 #[test]
 fn symbol_is_accepted_where_sexpr_expected() {
     // A `Symbol` is a valid `Sexpr` datum, so it flows into a `list`/`sexpr-cons`
     // code position (the checker wraps it into `Sexpr::Sym`).
-    assert_eq!(ty("(sexpr-cons (gensym) (Nil))"), Type::Named(Path::root("sexpr"), vec![]));
+    assert_eq!(
+        ty_with_prelude("(sexpr-cons (gensym) (Nil))"),
+        Type::Named(Path::root("sexpr"), vec![])
+    );
 }
 
 // ---- if ---------------------------------------------------------------------

@@ -97,9 +97,9 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
     //
     // Both loads need this, not just the bootstrap one. A hash-checked
     // load verifies the `.bc` against its own SOURCE — and the shim list is
-    // *Rust*, so adding one (`rt_gensym`, made to compile `gensym` in
-    // macro-expansion lambdas; `rt_apply_any`, Stage D) leaves the hash
-    // matching while the committed bitcode still declares the older set.
+    // *Rust*, so adding one (`rt_apply_any`, Stage D; `rt_macroexpand_1`,
+    // Phase 4c) leaves the hash matching while the committed bitcode still
+    // declares the older set.
     // Gating this on the hash check made every such addition fail the
     // install until the artifact was regenerated, for a mapping the
     // artifact had no use for.

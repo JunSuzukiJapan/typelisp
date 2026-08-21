@@ -91,16 +91,6 @@ pub struct Heap {
     sym_names: Vec<String>,
     sym_ids: HashMap<String, u32>,
 
-    // Monotonic counter backing `gensym`. Lives on the `Heap` — not the
-    // `Interp` — so both the interpreter's `gensym` builtin and the compiled
-    // `rt_gensym` shim (which only ever sees this shared, thread-registered
-    // heap) draw from *one* sequence: a macro expansion mixing interpreted
-    // `gensym` calls (a macro body's own, e.g. `case`'s `tmp`) with compiled
-    // ones (a JIT'd expansion-lambda's, e.g. `do`'s per-binding temporaries)
-    // must never mint the same " gensym-N" symbol twice, or two "fresh"
-    // symbols would be `eq`-identical (symbols are interned/permanent) and
-    // hygiene would break.
-    gensym_counter: u64,
 
     // interned `::` paths (permanent; reference only permanent symbols)
     paths: Vec<Vec<SymId>>,
@@ -207,7 +197,6 @@ impl Heap {
             in_flight_throw: None,
             sym_names: Vec::new(),
             sym_ids: HashMap::new(),
-            gensym_counter: 0,
             paths: Vec::new(),
             path_ids: HashMap::new(),
             str_slots: Vec::new(),
@@ -556,18 +545,6 @@ impl Heap {
         &self.sym_names[id.0 as usize]
     }
 
-    /// Mint a fresh, unforgeable symbol for `gensym`, returning its
-    /// `Value::Symbol`. The name uses a leading space (` gensym-N`) the
-    /// reader's tokenizer can never produce mid-token, so it can never collide
-    /// with a symbol a user actually types; `N` is a per-heap monotonic
-    /// counter, so it never collides with an earlier `gensym` either. Both the
-    /// interpreter's `gensym` builtin and the compiled `rt_gensym` shim funnel
-    /// through here (see [`Heap::gensym_counter`]) so the two never overlap.
-    pub fn gensym(&mut self) -> Value {
-        let n = self.gensym_counter;
-        self.gensym_counter += 1;
-        self.intern_symbol(&format!(" gensym-{}", n))
-    }
 
     // ---- paths ------------------------------------------------------------
 
@@ -1073,7 +1050,7 @@ impl Heap {
 
     /// Store a built-in used as a function value, returning its
     /// `Value::Boxed` — `recv_type` is the receiver type for a built-in
-    /// *method* (`i32::+`) and `None` for a free built-in (`gensym`). See
+    /// *method* (`i32::+`) and `None` for a free built-in (`eval`). See
     /// [`BoxedObj::Builtin`].
     ///
     /// `name` is interned, so the box is two permanent indices wide and

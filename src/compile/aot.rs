@@ -201,7 +201,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // Forward-declares every `rt_*` shim (no body) so `compile-call`'s
         // `get-function` finds one the same way it finds any other
         // already-defined function in this shared module — a call to a free
-        // builtin (`sexpr-car`, `gensym`, `stream-read-char`, ...) arrives
+        // builtin (`sexpr-car`, `eval`, `stream-read-char`, ...) arrives
         // already named for its shim, `symbols::callee_symbol_name` having
         // made that choice bridge-side. Unlike the JIT path
         // (`Interp::compile_function`), no `add_global_mapping` is needed

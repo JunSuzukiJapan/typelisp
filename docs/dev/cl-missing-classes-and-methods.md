@@ -133,19 +133,19 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | CL | 状態 | 備考 |
 |---|---|---|
 | `eval` | ✅ | 戻り型は `Result<Sexpr,EvalError>` 固定（functions.md §16） |
-| `macroexpand` / `macroexpand-1` / `*macroexpand-hook*` | ❌ | マクロ展開結果をプログラムから覗く手段が無い（デバッグ時に効く） |
-| `eval-when` | ❌ | コンパイル時／ロード時／実行時の区別が無い |
-| `macrolet` / `symbol-macrolet` | ❌ | ローカルマクロ |
-| `define-compiler-macro` / `compiler-macro-function` | ❌ | |
-| `load-time-value` | ❌ | |
+| `macroexpand` / `macroexpand-1` / `*macroexpand-hook*` | ⚠️ | 4c で `macroexpand` / `macroexpand-1` ✅（チェッカーと同じ 1 段展開器を共有）。`macroexpand-1` は CL の第 2 返り値の代わりに `Option<Sexpr>` を返す。`*macroexpand-hook*` は無い |
+| `eval-when` | ❌ | 入れない。`compile-file` は定義形を全部実行し裸のトップレベル式を拒否するので、CL の 3 situation が常に一致する（4c で確定） |
+| `macrolet` / `symbol-macrolet` | ❌ | 未実装。式位置の検査が `&self` なのに対しマクロ定義は登録（`&mut self`）を要する。やり方は `docs/dev/cl-parity-plan.md` の 4c に書いた |
+| `define-compiler-macro` / `compiler-macro-function` | ❌ | 入れない。コンパイラ用の別展開経路を持つと `macroexpand` の答えと実際のコンパイル結果がずれる（4c で確定） |
+| `load-time-value` | ❌ | 入れない。`eval-when` と同じ理由でロード時と実行時が分かれていない（4c で確定） |
 | `declare` / `declaim` / `proclaim` / `locally` | ⛔ | 型宣言は不要 (D1)、`optimize`/`inline`/`special` も現状概念が無い |
 | `the` | ✅ | 型注釈として実装済み（実行時効果なし） |
 | `function` (`#'`) | ⚠️ | 関数名をそのまま値として書けるので `#'` 構文は無い |
 | `funcall` | ⚠️ | 関数値は `(f args...)` で直接呼べる（Lisp-1）。関数名の名前空間が分かれていないため不要 |
 | `apply` | ✅ | 特殊形。`&rest` を持つ可変長関数にのみ適用できる |
 | `compile` / `compile-file` | ⚠️ | 実体は LLVM JIT / AOT ネイティブ実行ファイル生成。CL の「fasl を作る」意味とは違い、中間ファイルは残さない。コンパイル済みモジュール形式は無い |
-| `constantly` | ❌ | `const` はあるが 2引数版（`(const x y)`）で、クロージャを返す `constantly` とは別物 |
-| `complement` | ❌ | 述語の否定を返す高階関数 |
+| `constantly` | ❌ | 入れない。捨てる引数の型が**戻り型にしか現れず**、型引数は引数からしか決まらない（明示的な型適用も無い）。`const` は 2 引数版として別にある（4c で確定） |
+| `complement` | ✅ | 4c |
 | `identity` | ✅ | |
 
 ### 2.2 型とクラス（CLHS 4）
@@ -237,8 +237,8 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 |---|---|---|
 | `symbol-name` / `intern` | ✅ | `symbol->string` / `string->symbol`。ただし**パッケージ引数が無い** |
 | `keywordp` | ✅ | |
-| `make-symbol` / `copy-symbol` / `gentemp` | ❌ | uninterned シンボルを作る手段が `gensym` だけ |
-| `gensym` / `*gensym-counter*` | ⚠️ | `gensym` ✅（引数なし版のみ、プレフィクス指定不可）。カウンタ変数は無い |
+| `make-symbol` / `copy-symbol` / `gentemp` | ❌ | 入れない。束縛子は `Env::vars` で**名前**で引かれるので、uninterned シンボルにできることが増えない（4c で確定） |
+| `gensym` / `*gensym-counter*` | ✅ | 4c で prelude の `defun` + 大域変数へ。`(gensym)` / `(gensym prefix)`、`*gensym-counter*` は読み書きできる |
 | `symbol-value` / `set` / `boundp` / `makunbound` | ⛔ | (D1)(D5) |
 | `symbol-function` / `fboundp` / `fmakunbound` / `fdefinition` | ⛔ | 関数を名前で実行時に引く操作 (D1)。`eval` で部分的に代替 |
 | `symbol-plist` / `get` / `remprop` / `getf` / `get-properties` | ❌ | プロパティリストが無い（`get` は `Vector`/`HashTable` のメソッド名として別用途） |

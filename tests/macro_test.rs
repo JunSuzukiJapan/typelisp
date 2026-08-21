@@ -218,10 +218,13 @@ fn quasiquote_dotted_unquote_tail() {
 }
 
 // ---- Phase C: gensym ----------------------------------------------------------
+//
+// `gensym` is a prelude `defun` over the prelude global `*gensym-counter*`
+// (CL has the same variable), so these need `eval_ok_with_prelude`.
 
 #[test]
 fn gensym_returns_a_symbol() {
-    let (v, h) = eval_ok("(gensym)");
+    let (v, h) = eval_ok_with_prelude("(gensym)");
     match v {
         Value::Symbol(_) => {}
         other => panic!("expected a Symbol, got {:?}", other),
@@ -231,7 +234,7 @@ fn gensym_returns_a_symbol() {
 
 #[test]
 fn gensym_is_fresh_each_call() {
-    let (v, h) = eval_ok("(let ((a (gensym)) (b (gensym))) (list a b))");
+    let (v, h) = eval_ok_with_prelude("(let ((a (gensym)) (b (gensym))) (list a b))");
     match v {
         sv => {
             let a = h.car(sv).unwrap();
@@ -319,7 +322,7 @@ fn macro_is_unhygienic_and_capture_is_observable() {
 
 #[test]
 fn gensym_fixes_macro_hygiene() {
-    let (v, _h) = eval_ok(
+    let (v, _h) = eval_ok_with_prelude(
         "(defmacro my-swap-fixed (a b)
            (let ((g (gensym)))
              `(let ((,g ,a))

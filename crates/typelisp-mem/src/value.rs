@@ -317,8 +317,8 @@ pub(crate) enum BoxedObj {
     /// representation, and the apply site does not carry one at runtime. A
     /// closure is the only thing that knows its own.
     Closure { params: Value, ret: Value, body: Value, env: Value },
-    /// A *built-in* function used as a function value: `gensym` passed to a
-    /// higher-order function, `+` reified as `i32::+`. The second function
+    /// A *built-in* function used as a function value: `symbol->string`
+    /// passed to a higher-order function, `+` reified as `i32::+`. The second function
     /// case alongside [`CompiledClosure`](BoxedObj::CompiledClosure), and the
     /// reason it exists is that a built-in has no compiled entry point to
     /// point at — it is a name the interpreter's own `eval_builtin`/
@@ -329,7 +329,7 @@ pub(crate) enum BoxedObj {
     /// function values in Rust-side `RtValue::Builtin(String)`/
     /// `BuiltinMethod(Path, String)` variants with no `Value` form at all,
     /// and that gap is what made `Type::Fn` unstorable in a heap
-    /// `Enum`/`Struct` field — `(Option::some gensym)` had to fall back to
+    /// `Enum`/`Struct` field — `(Option::some symbol->string)` had to fall back to
     /// the heap-invisible `RtValue::Data`. Giving them a box closes it.
     ///
     /// `name` is a [`super::heap::Heap::intern_string`] id and `recv_type` an

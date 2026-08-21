@@ -246,7 +246,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; parsing & evaluation (§16)
     "parse-int" "parse-float" "read" "eval"
     ;; macro / system
-    "gensym" "keywordp" "exit" "compile-file" "dump"
+    "gensym" "macroexpand" "macroexpand-1" "complement"
+    "keywordp" "exit" "compile-file" "dump"
     ;; random-state (CLHS 12.1.6).  `make-random-state-fresh'/
     ;; `random-state-copy'/`random-state-next' are the native primitives
     ;; `random'/`make-random-state'/`random-state-p' are built on.

@@ -55,12 +55,6 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "sexpr-float" => "rt_float_value",
         "sexpr-str" => "rt_sexpr_str",
         "sexpr-sym-name" => "rt_sym_name",
-        // `gensym`: a free builtin (not a `sexpr-*` accessor) with no typelisp
-        // body. It must be here so a macro-expansion lambda that calls it
-        // (e.g. `do`'s per-binding temporaries) doesn't send
-        // `call_graph_edges` looking for a (nonexistent) `gensym` function to
-        // transitively compile.
-        "gensym" => "rt_gensym",
         // `symbol->string` is `sexpr-sym-name` under the checker's `symbol`
         // type rather than `sexpr`'s — the same shim, since both spellings
         // carry the same interned `Value::Symbol`.
@@ -103,6 +97,11 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // this one — see that module's doc comment for how the shim finds an
         // environment on each of the two paths.
         "eval" => "rt_eval",
+        // `macroexpand-1`/`macroexpand` reach the same two environments
+        // `eval` does, and for the same reason: expanding a macro means
+        // running its body, which is the interpreter.
+        "macroexpand-1" => "rt_macroexpand_1",
+        "macroexpand" => "rt_macroexpand",
         // The printing family. `format`/`print`/`println`/`pprint` and
         // `pprint-logical-block` are special forms; the names here are what
         // the checker lowered them to (`Checker::check_format`/
@@ -335,7 +334,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 194] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 195] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -345,7 +344,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 194] {
         rt_pprint_list_exhausted, rt_pprint_newline, rt_pprint_pop, rt_pprint_tab, rt_print, rt_println,
     };
     use typelisp_print::aot::{rt_print_enum_variant, rt_print_object_method};
-    use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state};
+    use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::rt_read;
     use typelisp_rt::sys_builtin::{
         rt_command_line_args, rt_exit, rt_get_internal_real_time, rt_get_universal_time, rt_getenv,
@@ -367,7 +366,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 194] {
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
         rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len,
         rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum,
-        rt_float_to_ratio, rt_float_value, rt_gensym, rt_global_get, rt_global_new, rt_global_set, rt_i64_div, rt_i64_mod,
+        rt_float_to_ratio, rt_float_value, rt_global_get, rt_global_new, rt_global_set, rt_i64_div, rt_i64_mod,
         rt_i64_ash, rt_i64_logbitp, rt_i64_logcount, rt_i64_integer_length,
         rt_f64_tan, rt_f64_asin, rt_f64_acos, rt_f64_atan, rt_f64_sinh, rt_f64_cosh, rt_f64_tanh, rt_f64_asinh, rt_f64_acosh,
         rt_f64_atanh,
@@ -433,6 +432,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 194] {
         // forward-declaration list and the JIT address map, and the wrapper
         // looks them up by name.
         ("rt_eval", rt_eval as usize),
+        ("rt_macroexpand_1", rt_macroexpand_1 as usize),
+        ("rt_macroexpand", rt_macroexpand as usize),
         ("rt_eval_state", rt_eval_state as usize),
         ("rt_eval_init", rt_eval_init as usize),
         // The printing family (`typelisp_print::shim`). `format`/`print`/
@@ -609,7 +610,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 194] {
         ("rt_intern_path", rt_intern_path as usize),
         ("rt_path_to_list", rt_path_to_list as usize),
         ("rt_list_to_path", rt_list_to_path as usize),
-        ("rt_gensym", rt_gensym as usize),
         ("rt_i64_div", rt_i64_div as usize),
         ("rt_i64_mod", rt_i64_mod as usize),
         ("rt_i64_ash", rt_i64_ash as usize),

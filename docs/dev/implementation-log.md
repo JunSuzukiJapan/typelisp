@@ -8042,3 +8042,84 @@ acc)` へ展開すれば要素型が推論で決まる」と書いていた。**
 
 `tests/loop_dsl_test.rs`（20 本）。展開結果は普通のソースなので JIT/AOT もそのまま通る
 （`(compile …)` で確認）。
+
+---
+
+## CL 残差 Phase 4c — 評価とマクロ（2026-08-21、branch `feature/cl-parity`）
+
+[cl-parity-plan.md](cl-parity-plan.md) の Stage 4c。**部分完了**——入ったものと、
+入れなかったものの理由を両方書く（後者のほうが多い節なので）。
+
+### `macroexpand-1` / `macroexpand`
+
+**展開の 1 段はチェッカーが使うのと同じ**（`Checker::try_expand_toplevel_macro`）。
+第 2 の展開器を書くと必ずずれるので、そこは共有した。インタプリタ側は
+`Interp::expand_step` がチェッカーハンドル越しにそれを呼ぶだけ。
+
+**`macroexpand-1` は `Option<Sexpr>` を返す。** CL は「展開したか」を第 2 返り値で伝えるが
+多値が無い。`none` を「マクロ呼び出しではない」にすると、**CL の真偽値より情報が多い**
+——自分自身の呼び出しへ展開するマクロと非マクロを、CL の真偽値では区別できないが
+これなら区別できる。`macroexpand` は `none` になるまで繰り返して最終形を返す。
+
+コンパイル済みコードからは `eval` と同じ 2 経路で環境へ届く（JIT は
+`with_active_interp`、AOT は `rt_eval_init` が建てた `AOT_ENV`）。`rt_macroexpand_1` /
+`rt_macroexpand` は `rt_eval` と同じ形の shim で、環境の探し方を `expand_shim` に括った。
+
+### `gensym` を prelude へ動かした
+
+CL の `*gensym-counter*` を**プログラムが読み書きできる変数**にするには、カウンタが
+typelisp 側の大域変数である必要がある。組み込みのカウンタは `Heap` にあって誰も名指し
+できなかったので、`gensym` ごと prelude の `defun` にした:
+
+```lisp
+(pub defvar (*gensym-counter* i32) 0)
+(pub defun gensym (&optional (prefix string "g")) Symbol
+  (let ((n *gensym-counter*))
+    (progn (setf *gensym-counter* (+ n 1))
+           (string->symbol (format false " ~a~a" prefix n)))))
+```
+
+**「解釈と compiled が 1 つの列を共有する」という不変条件は保たれる**——理由が変わった
+だけで、以前は「1 つの `Heap` カウンタを共有していたから」、いまは「**1 つの定義と
+1 つの大域**を共有しているから」。組み込みを消したので `Heap::gensym`/`gensym_counter`/
+`rt_gensym`/registry の `FnSig`/interp の分岐/externs の 3 箇所も消えた。
+`Heap::gensym` は `pub` なので消し忘れても警告は出ない——[[typelisp-pub-hides-dead-code]]
+のとおり、手で確かめて消した。
+
+名前の先頭が空白なのは以前と同じで、それがこの機構の保証の全部である。**CL のような
+uninterned シンボルではない**: ここのシンボルは常に intern されるので、2 つの `gensym` が
+別物なのは*名前*が違うからで、別オブジェクトだからではない。
+
+### 入れなかったもの
+
+- **`constantly`** — CL のそれは*引数を無視する関数*を返す。無視される引数の型は
+  **戻り型にしか現れない**。このチェッカーは型パラメータを引数から決めるので
+  `(the (fn (i32) string) (constantly "hi"))` でも `cannot infer type parameter` になる
+  （明示的な型適用も無い——`(mk<string,i32> …)` は `no such function`）。実際に両方試した。
+  `(lambda ((x T)) A v)` が同じ字数で同じことを言う。
+- **`macrolet` / `symbol-macrolet`** — 障害は 1 つではっきりしている。式の位置の検査は
+  `&self` だが、マクロの定義には (1) レジストリへの登録（`check_defmacro` は `&mut self`）と
+  (2) インタプリタ側でのラムダの登録（`exec` 相当）の両方が要る。**やり方は決まっている**
+  ——`check_defmacro` を `&self` の本体検査部と `&mut self` の登録部に割り、`Checker` に
+  スコープ付きローカルマクロ表（`RefCell`）を足して `resolve_macro` がレジストリより先に
+  引き、`MacroExpander` に「この defmacro コア形を定義せよ」を 1 メソッド足す——が、
+  片手間には入らないので別立てにした。
+- **`eval-when`** — **選ぶべき区別が無い**。`typl` は各トップレベル形を検査→実行と 1 本で
+  進む。`compile-file` は定義形を全部 `exec` するうえに裸のトップレベル式を受け付けない
+  （`aot.rs` の `other =>` 分岐がその場で拒否する）。CL の 3 つの situation はここでは常に
+  一致していて、`eval-when` は恒真のラッパーにしかならない。
+- **`define-compiler-macro` / `compiler-macro-function` / `load-time-value`** — 前二者は
+  コンパイラマクロ層が無い（`compile` は明示的な操作で、島は名前で呼び出しを書き換えない）。
+  後者は実行と別のロード相が無い。
+- **`(Symbol::new name)` / `copy-symbol` / `gentemp`** — uninterned シンボル自体は
+  `Heap` に 1 メソッド足せば作れる（`sym_names` に押して `sym_ids` に入れない）が、
+  **買えるものが無い**。シンボルが束縛子として働く場所は全部*名前*で引かれる
+  （`Env::vars` の鍵は `String`）ので、同名の uninterned シンボル 2 つは肝心なところで
+  衝突する。データとしてなら intern 済みと `eq` で区別が付くだけで、その区別の用途が無い。
+  `gentemp` は intern された新しい名前を作るもので、それは `gensym` そのもの。
+
+### 検証
+
+`tests/macro_tools_test.rs`（7 本）。`macroexpand` はチェッカーハンドルを要するので、
+テストハンドラも `main.rs` と同じに `interp.set_checker` する（借用を `exec` を跨いで
+持たない——再入した `macroexpand` が自分の借用を取る場所がそこ）。

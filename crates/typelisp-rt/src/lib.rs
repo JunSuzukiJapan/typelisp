@@ -2688,25 +2688,6 @@ pub unsafe extern "C" fn rt_intern_symbol(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().intern_symbol(&name))
 }
 
-/// Mints a fresh `gensym` symbol, returning it as a tagged `Value::Symbol` —
-/// the compiled-code half of `gensym` (`compiler.rs`'s `compile-call` rewrites
-/// the free call `(gensym)` to this shim by name, the same way it rewrites
-/// `sexpr-car` -> `rt_car`). Takes no arguments. Delegates to [`Heap::gensym`]
-/// so it draws from the *same* per-heap counter the interpreter's `gensym`
-/// builtin uses — a program whose macro expansion mixes interpreted and
-/// compiled `gensym` calls (a `case` body's own vs. a JIT'd `do` expansion-
-/// lambda's) must never mint the same name twice. The result is a permanent
-/// interned symbol, so — like [`rt_intern_symbol`] — it needs no GC-root
-/// protection.
-///
-/// # Safety
-///
-/// A `Heap` must already be registered on this thread. `args`/`argc` are
-/// unused (`gensym` is nullary).
-#[no_mangle]
-pub unsafe extern "C" fn rt_gensym(_args: *const i64, _argc: u32) -> i64 {
-    encode(active_heap().gensym())
-}
 
 /// Signed integer division `a / b` — the compiled-code half of `i64`/`i32`
 /// `/`, which (unlike `+`/`-`/`*`) can't be a bare LLVM instruction because

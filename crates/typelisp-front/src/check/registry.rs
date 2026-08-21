@@ -598,8 +598,7 @@ impl Registry {
         // actual bit-twiddling done in Rust (`interp::eval_random_state_next`
         // — the fixed-width xorshift step isn't expressible in typelisp,
         // which has no bitwise operators). None of these three has a natural
-        // receiver to dispatch on (like `gensym`/`random` before it), so all
-        // stay free functions. `random`/`make-random-state`/`random-state-p`
+        // receiver to dispatch on, so all stay free functions. `random`/`make-random-state`/`random-state-p`
         // are ordinary `defun`s in the prelude built on top of these — a
         // `random-state` has nowhere else to hang an `&optional` parameter
         // off of, since `check_call_opt_key` only resolves `&optional`/`&key`
@@ -640,6 +639,18 @@ impl Registry {
         // immediately. Result is a `Sexpr` (the value, or a definition's name
         // symbol); malformed/ill-typed input is `Err`, not a panic.
         root.fns.insert("eval".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: result_of(sexpr(), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // `macroexpand-1`/`macroexpand`: what the checker does to a macro
+        // call, made available to a program (CL's own, and the only way to
+        // see a `defmacro`'s output without reading the checker's mind).
+        //
+        // CL returns a second value saying whether anything expanded; there
+        // are no multiple values here, so `macroexpand-1` answers
+        // `Option<Sexpr>` — `none` *is* "not a macro call", and it carries
+        // strictly more than CL's boolean, since the caller cannot mistake a
+        // macro that expands to itself for a non-macro. `macroexpand` repeats
+        // until `none` and answers the final form, as CL's does.
+        root.fns.insert("macroexpand-1".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("macroexpand".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: result_of(sexpr(), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // The pretty printer's user-callable layout operators (CLHS 22.2.1),
         // minus the stream argument typelisp has no streams for. They act on
         // the logical block the `pprint-logical-block` special form opened
@@ -710,12 +721,10 @@ impl Registry {
         // fallback for actual `Sexpr` data (`case` expands to `(equal ..)`).
         root.fns.insert("equal".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("equalp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        // `gensym`: a fresh `Sexpr::Sym` on every call, for macro hygiene
-        // workarounds (see `Interp`'s `gensym_counter` for the caveat that
-        // these are collision-*resistant*, not truly unforgeable — typelisp
-        // symbols are always interned/permanent, there is no uninterned-symbol
-        // concept to give a CL-style absolute guarantee).
-        root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::Symbol, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // `gensym` is *not* here: it moved into the prelude in Phase 4c, so
+        // that CL's `*gensym-counter*` could be a real variable a program can
+        // read and set. A builtin's counter lived on the `Heap` and nothing
+        // could name it.
         // `symbol->string`/`string->symbol`: the only bridges between the
         // interned `Symbol` handle and its textual name. They are Rust builtins
         // (`Interp::eval_builtin`) rather than typelisp because they touch the
@@ -1016,7 +1025,7 @@ fn register_stream_builtins(root: &mut Namespace) {
 /// `command-line-args` and `getenv`.
 ///
 /// All free functions: none has a receiver to dispatch on, the same reason
-/// `gensym` and the `random-state` primitives above are free functions.
+/// the `random-state` primitives above are free functions.
 /// `lisp-implementation-type` is deliberately *not* here — it is a constant
 /// string, so the prelude defines it in typelisp rather than spending a
 /// builtin on it.

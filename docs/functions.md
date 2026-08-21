@@ -882,9 +882,32 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `gensym` | `(gensym)` | `()→Symbol` | 衝突耐性のある新しいシンボルを返す（マクロ用） |
+| `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→Symbol` | 新しいシンボル。名前は `" <prefix><n>"` で `n` は `*gensym-counter*`。先頭の空白はソースに書けないので、生成した束縛が書かれた名前と衝突しない |
+| `*gensym-counter*` | 変数 | `i32` | `gensym` が次に使う番号。CL 同様、読んでも設定してもよい |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Sexpr→Result<Option<Sexpr>,EvalError>` | マクロ呼び出しを 1 段展開。`none` は「マクロ呼び出しではない」 |
+| `macroexpand` | `(macroexpand form)` | `Sexpr→Result<Sexpr,EvalError>` | マクロでなくなるまで繰り返す |
+| `complement` | `(complement pred)` | `(fn (A) bool)→(fn (A) bool)` | 述語の否定 |
 | `exit` | `(exit code)` | `i32→!` | プロセスを終了する |
 | `dump` | `(dump path)` | `string→bool` | いまの環境（型情報 + コンパイル済み本体）を1ファイルへ書き出す。`typl --image <path>` で立ち上げ直せる。`compile`/`compile-file` と同じくインタプリタ専用（コンパイル済み関数からは呼べない） |
+
+`macroexpand-1` が返すのは `Option`——CL は「展開したか」を第 2 返り値で伝えるが、多値が
+無いので `none` がそれに当たる。CL の真偽値より情報が多く、**自分自身の呼び出しへ展開する
+マクロと非マクロを取り違えようがない**。展開の 1 段はチェッカーが使うのと同じもの
+（`Checker::try_expand_toplevel_macro`）なので、プログラムが見るものと検査が見たものは
+ずれない。
+
+```lisp
+(defmacro twice (x) `(+ ,x ,x))
+(macroexpand-1 '(twice 5))   ; => (ok (some (+ 5 5)))
+(macroexpand-1 '(+ 1 2))     ; => (ok none)
+(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+```
+
+CL にあってここに無いもの（cl-parity-plan.md Phase 4c に理由を記録）:
+`constantly`（無視する引数の型が戻り型にしか現れず決まらない。`(lambda ((x T)) A v)` を書く）、
+`macrolet`/`symbol-macrolet`、`eval-when`（`:compile-toplevel`/`:load-toplevel`/`:execute` が
+常に一致するので選ぶ区別が無い）、`define-compiler-macro`、`load-time-value`、
+`make-symbol`/`copy-symbol`/`gentemp`（uninterned シンボル。束縛子は名前で引かれるので買えるものが無い）。
 
 `compile`/`compile-file`/`dump` は [syntax.md](syntax.md) の「コンパイル」節を参照。
 `dump` が保存するのは**定義であって値ではない**——グローバルは初期化式を走らせ直した値で戻り、

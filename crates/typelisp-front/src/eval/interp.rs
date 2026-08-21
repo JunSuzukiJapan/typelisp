@@ -1686,6 +1686,8 @@ impl Interp {
             "parse-float" => Some(eval_parse_float(heap, args)),
             "read" => Some(eval_read(heap, args)),
             "eval" => Some(self.eval_form(heap, &args[0])),
+            "macroexpand-1" => Some(self.macroexpand_1_form(heap, args[0])),
+            "macroexpand" => Some(self.macroexpand_form(heap, args[0])),
             // `equal`/`equalp` on `Sexpr`: structural equality builtins (the
             // free-function `Sexpr` overloads; the per-scalar-type `equal`
             // *methods* — `string`/`char`/`int`/... — are dispatched separately
@@ -1700,14 +1702,6 @@ impl Interp {
                 Ok(code) => std::process::exit(code as i32),
                 Err(e) => Some(Err(e)),
             },
-            "gensym" => {
-                // Both the fresh-name scheme (leading-space, unforgeable) and
-                // the monotonic counter live on the `Heap` now
-                // (`Heap::gensym`), so this interpreted path and the compiled
-                // `rt_gensym` shim share one sequence — see that method's doc
-                // comment for why they must.
-                Some(Ok(heap.gensym()))
-            }
             // `symbol->string`/`string->symbol`: the `Symbol`<->`Str` bridges.
             // A `Symbol` value shares the `Value::Symbol(id)` carrier of a
             // `Sexpr::Sym` (a `Value::Symbol(id)`), so
@@ -2010,6 +2004,81 @@ impl Interp {
     /// to the entry mark before `exec`. The result-building afterward
     /// only allocates through the growable box store (`alloc_enum`/
     /// `intern_symbol`/scalar boxing), never `cons`, so it needs no rooting.
+    /// CL's `macroexpand-1`: one expansion step on a runtime `Sexpr`.
+    ///
+    /// The step is the checker's own (`Checker::try_expand_toplevel_macro`),
+    /// so what a program sees here is exactly what checking would have seen —
+    /// there is no second expander to drift from it.
+    ///
+    /// `Ok(none)` means "not a macro call", which is what CL's second return
+    /// value says. Carrying it in the `Option` rather than beside the form is
+    /// both what this language has (no multiple values) and strictly more
+    /// informative: a macro whose expansion is its own call form is
+    /// distinguishable from a non-macro, which CL's boolean cannot do.
+    pub fn macroexpand_1_form(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
+        match self.expand_step(heap, form) {
+            Ok(Some(v)) => {
+                heap.push_root(v);
+                let some = option_value(heap, Some(v));
+                heap.pop_root();
+                heap.push_root(some);
+                let out = result_ok(heap, some);
+                heap.pop_root();
+                Ok(out)
+            }
+            Ok(None) => {
+                let none = option_value(heap, None);
+                heap.push_root(none);
+                let out = result_ok(heap, none);
+                heap.pop_root();
+                Ok(out)
+            }
+            Err(msg) => Ok(result_err(heap, EVAL_ERROR, msg)),
+        }
+    }
+
+    /// CL's `macroexpand`: [`Self::macroexpand_1_form`] until the form is no
+    /// longer a macro call. A macro that expands to a call of itself would
+    /// spin here exactly as it does in CL's expander, and in the checker.
+    pub fn macroexpand_form(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
+        let mut cur = form;
+        let mark = heap.root_count();
+        heap.push_root(cur);
+        loop {
+            match self.expand_step(heap, cur) {
+                Ok(Some(next)) => {
+                    cur = next;
+                    heap.push_root(cur);
+                }
+                Ok(None) => break,
+                Err(msg) => {
+                    heap.truncate_roots(mark);
+                    return Ok(result_err(heap, EVAL_ERROR, msg));
+                }
+            }
+        }
+        heap.truncate_roots(mark);
+        heap.push_root(cur);
+        let out = result_ok(heap, cur);
+        heap.pop_root();
+        Ok(out)
+    }
+
+    /// One expansion step, or `None` when `form` is not a macro call.
+    fn expand_step(&self, heap: &mut Heap, form: Value) -> Result<Option<Value>, String> {
+        let checker = match &self.checker {
+            Some(c) => Rc::clone(c),
+            None => {
+                return Err("macroexpand: unavailable in this context (no checker handle)".to_string())
+            }
+        };
+        let mark = heap.root_count();
+        heap.push_root(form);
+        let out = checker.borrow().try_expand_toplevel_macro(heap, self, form);
+        heap.truncate_roots(mark);
+        out.map_err(|e| e.to_string())
+    }
+
     pub fn eval_form(&self, heap: &mut Heap, arg: &Value) -> Result<Value, EvalError> {
         let checker = match &self.checker {
             Some(c) => Rc::clone(c),
