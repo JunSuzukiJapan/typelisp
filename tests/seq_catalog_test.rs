@@ -112,8 +112,11 @@ fn the_negated_search_variants_mirror_their_positives() {
 }
 
 #[test]
-fn remove_and_remove_duplicates_keep_first_appearance_order() {
+fn remove_takes_out_every_match_and_dedup_keeps_appearance_order() {
     assert_eq!(with_fixtures("(remove 2 (iter a))"), "#<vector 1 3>");
+    // Which occurrence of a duplicate group survives is Phase 3e's
+    // `:from-end` question (`seq_keywords_test`); `a`'s duplicates are
+    // adjacent, so the order is the same either way.
     assert_eq!(with_fixtures("(remove-duplicates (iter a))"), "#<vector 1 2 3>");
 }
 

@@ -209,9 +209,13 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "acons" "adjoin" "assoc-if" "copy-seq" "count-if-not" "find-if-not"
     "intersection" "ldiff" "map2" "mapc" "mapcan" "maplist"
     "member-if" "member-if-not" "merge" "notany" "notevery" "pairlis"
-    "rassoc" "rassoc-if" "remove-duplicates" "remove-if-not" "rest" "revappend"
+    "position-if-not" "rassoc" "rassoc-if" "remove-duplicates" "remove-if-not"
+    "rest" "revappend"
     "seq-equals" "set-difference" "set-exclusive-or" "subsetp" "substitute" "substitute-if"
     "tailp" "union"
+    ;; the Phase 3e keyword layer's shared loop cores (§6.3)
+    "seq-any-core" "seq-count-core" "seq-edit-core" "seq-find-core" "seq-flag"
+    "seq-in-bounds" "seq-limit" "seq-position-core" "seq-sort-core"
     ;; the 28 `c*r' pair accessors (§6.1)
     "caaaar" "caaadr" "caaar" "caadar" "caaddr" "caadr"
     "caar" "cadaar" "cadadr" "cadar" "caddar" "cadddr"

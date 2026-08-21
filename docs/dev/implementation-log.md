@@ -7849,3 +7849,94 @@ CL の 2 引数 `atan` は prelude の `atan2` に落とす。`defmethod` はア
 四則、`(sqrt -1)` が `i` になること、オイラーの等式 `e^(i*pi) + 1 = 0`（丸め許容）、
 `phase`/`abs` の極形式の対、実数側アクセサ、`(atan y x)`。
 prelude 成果物は 2,105,392 → 2,193,844 バイト。
+
+---
+
+## CL 残差 Phase 3e — シーケンス API のキーワード引数（2026-08-21、branch `feature/cl-parity`）
+
+[cl-parity-plan.md](cl-parity-plan.md) の Stage 3e。`:key`/`:test`/`:test-not`/
+`:start`/`:end`/`:from-end`/`:count` を、`Iter` 上のジェネリック `defun` 30 本に持たせた。
+
+### 前提が要らなかった
+
+計画は「前提: `lambda` と `defmethod` の `&optional`/`&key` 対応（Phase 5b）」と書いていたが、
+**Phase 5b は要らなかった**。Stage 3a が受け手を `Iter` 実装型に統一した結果、対象は全部
+`defmethod` ではなく**ジェネリック `defun`** で、`defun` の `&optional`/`&key` は既に通って
+いたからである。まだ届かないのは逆側——`Vector<T>` の破壊的操作と `string` の
+`search`/`mismatch` は `defmethod` なので、そちらが Phase 5b 待ち。
+
+### `Option<(fn ...)>` は書けない。だから開封は宣言した関数の中に残る
+
+キーワードはすべて**デフォルト無し**で宣言する。デフォルトを書いた `&optional`/`&key`
+パラメータの宣言型は自分の型パラメータに触れられず（`check_defun_opt_key`)、
+`:key`/`:test` は要素型の関数型なので、それに当たる。デフォルト無しなら制限は無く、
+本体には `Option<...>` として届くので、既定値は本体で与える。
+
+ここで詰まったのは共有ヘルパーのほう。`Option<(fn (A) A)>` は**型として綴れない**——
+リーダはジェネリックトークンを最初の括弧で打ち切る（`extend_angle_token`。`(a<b c)` を
+呼び出しとして読み続けるための意図的な設計で、「括弧を含まない、1 行に収まる、釣り合った
+トークンだけが生き残る」とコメントが明言している）。`&key` パラメータはその型を*誰も
+綴らずに*得るので成立するが、キーワードを受け渡すヘルパーは書けない。
+
+そこで**キーワードの開封は宣言した関数の中に残し、コアへ渡すのは
+`(fn (i32 A) bool)` のクロージャ**にした。コアは 7 本:
+
+| コア | 役目 |
+|---|---|
+| `seq-in-bounds` / `seq-flag` / `seq-limit` | `Option<i32>`/`Option<bool>` の読み出し |
+| `seq-find-core` / `seq-position-core` / `seq-count-core` | 前向き 1 パスの探索 |
+| `seq-edit-core` | `remove`/`substitute` 系（2 パス） |
+| `seq-any-core` / `seq-sort-core` | 集合演算の所属判定 / `:key` 付き挿入ソート |
+
+`:from-end` を探索側は**逆走査でなく「break をやめる」**で実装した。一方向の使い捨て
+カーソルにとって「終端から」とはそういうことで、off のときの費用がゼロで済む。
+`:count` と `:from-end` が同時に来る `remove`/`substitute` だけは、どの一致に効かせるかを
+決める前に総数が要るので 2 パスになる（結果はどのみち新しい `Vector` なので、実体化は
+余分な費用ではない）。
+
+### `:key` は要素型の中に閉じる
+
+`(fn (A) A)`。`(fn (A) B)` と宣言すると `:key` 省略時に `B` を決めるものが無く、本体の
+恒等フォールバック `((none) y)` が `A` と `B` の不一致で落ちる——実際に試して確かめた。
+異なる型への射影（CL の `(find 3 alist :key #'car)`）は `-if` 系にラムダを渡すほうで書ける。
+これは CL の `:key` が「`#'` とラムダが冗長だから」存在する機能で、こちらにはラムダがある。
+
+項目ベースの探索では `:key` は**要素にだけ**掛かる（探している項目には掛からない）——
+CL の規則。集合演算では両辺とも要素なので両方に掛かる。
+
+### `:test` は境界と競合しなかった
+
+計画は「`Eq` 境界版と `:test` 版のどちらを既定にするか設計判断が要る」としていたが、
+CL 自身が `:test` の既定を `eql` としているのと同じ形——**既定は `Eq` 境界の `equals`、
+`:test` を渡すとその場で差し替える**——で足り、名前を分ける必要は無かった。
+
+### 見つけたもの 3 件
+
+1. **`check_call_opt_key` に関連型ピンの推論が無かった（修正済み）。** `where` の
+   `(Iter I (Item A))` だけで決まる型変数を `check_call` は推論するのに `&key` 版はして
+   おらず、`(remove-duplicates (iter v))` が "cannot infer type parameter `a`" で落ちた。
+   `check_call` の該当ブロックを `Checker::infer_pinned_assoc_types` に括り出して両方から
+   呼ぶようにした。
+2. **`lambda` が `match` のアーム束縛を捕獲すると compile できない（未修正）。**
+   最小再現と原因は [TODO.md](TODO.md) に残した。この節の prelude はその形を避けて
+   書いてある——`:test-not` の否定をラムダにして返さず、比較地点で `match` を展開する。
+3. **`where` 付き `defun` は前方参照できない。** `predeclare_program` は SOURCE の実行前に
+   走るので `deftrait Iter` がまだ登録されておらず、`where` 節が解決できずヘッダごと
+   黙って捨てられる（この pass は「名前を足すことしかできない、決して拒否しない」設計なので
+   エラーも出ない）。`prelude.rs` の冒頭コメントが「ヘルパーを先に置くのは今や必要でなく
+   慣習」と書いているのは、**`where` の無い `defun` についてのみ**正しい。
+   `seq-edit-core` が `copy-seq` を呼ばず実体化を書き下ろしているのはこれが理由。
+
+### 挙動を変えたもの
+
+**`remove-duplicates` の既定**。以前は無条件に最初の出現を残していたが、CL の既定は
+最後を残す。以前の挙動は `:from-end true` で得られる。`docs/functions.md` §6.1/§6.3 と
+`seq_catalog_test` の該当テストを直した。
+
+**副産物**: `position-if-not` を足した。この節の見出しコメントが「CL が持つ `-if`/`-if-not`
+の対を全部」と書いているのに 1 つだけ欠けていた。
+
+### 検証
+
+`tests/seq_keywords_test.rs`（14 本）。`seq_catalog_test`/`prelude_artifacts_test`/
+`prelude_compiled_test`/`editor_keyword_sync_test` も green。

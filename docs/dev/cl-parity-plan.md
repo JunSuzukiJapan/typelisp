@@ -451,13 +451,52 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 
 ### Stage 3e — シーケンス API のキーワード引数
 
-`:key` / `:test` / `:test-not` / `:start` / `:end` / `:from-end` / `:count`。
-**前提**: `lambda` と `defmethod` の `&optional`/`&key` 対応（Phase 5b）。
+**状態: 完了（2026-08-21）。** 実装は `prelude.rs` の `SOURCE`、テストは
+`tests/seq_keywords_test.rs`、カタログは [functions.md](../functions.md) §6.3。
 
-- `:test` は現在トレイト境界（`Eq`）に固定されている等価性を関数引数で差し替える話なので、
-  **境界と噛み合わせる設計判断が要る**——`Eq` 境界版と `:test` 版のどちらを既定にするか、
-  両立させるなら名前をどう分けるか。
-- `:key` は戻り型の型変数が省略時に決まらない懸念がある（Phase 0.3）。
+**前提の訂正**: 本文は「`lambda` と `defmethod` の `&optional`/`&key` 対応（Phase 5b）」を
+前提に挙げていたが、**Phase 5b は要らなかった**。Stage 3a が受け手を `Iter` 実装型に
+統一した結果、対象は全部 `defmethod` ではなく**ジェネリック `defun`** で、`defun` の
+`&optional`/`&key` は既に通っていた。逆にまだ届かないのは `defmethod` の側——
+破壊的操作（§3d、`Vector<T>` の `defmethod`）と `search`/`mismatch`（`string` の
+`defmethod`）はキーワードを取れないままで、これは Phase 5b 待ち。
+
+**`:test` と `Eq` 境界の噛み合わせ**: 既定は `Eq` 境界の `equals`、`:test` を渡すとその場で
+差し替える——CL が `:test` の既定を `eql` としているのと同じ形なので、名前を分ける必要は
+無かった。`:test-not` はその否定。
+
+**`:key` は `(fn (A) A)`**（要素型の中に閉じた射影）。Phase 0.3 の結論どおり `-by` 系の
+別名関数は要らなかったが、**別の型へ射影することはできない**——`(fn (A) B)` と宣言すると
+`:key` 省略時に `B` が決まらず、本体の恒等フォールバックが `A` と `B` の不一致で落ちる
+（実際に確かめた）。異なる型への射影は `-if` 系にラムダを渡すほうで書ける。
+
+**副産物・発見 4 件**:
+
+1. **`Option<(fn ...)>` は型として書けない。** リーダはジェネリックトークンを最初の括弧で
+   打ち切る（`read::reader::extend_angle_token`、`(a<b c)` を呼び出しとして読み続けるための
+   意図的な設計）。`&key` パラメータはその型を*誰も綴らずに*得るので成立するが、
+   キーワードの受け渡しを担うヘルパー関数は書けない。だから共有コアは
+   `(fn (i32 A) bool)` のクロージャを受け取り、キーワードの開封は宣言した関数の中に残る。
+2. **`check_call_opt_key` に関連型ピンの推論が無かった（修正済み）。** `where` の
+   `(Iter I (Item A))` だけで決まる型変数を `check_call` は推論するのに、`&key` 版は
+   していなかったので `(remove-duplicates (iter v))` が "cannot infer type parameter `a`"
+   で落ちた。`check_call` の該当ブロックを `Checker::infer_pinned_assoc_types` として
+   括り出し、両方から呼ぶようにした。
+3. **`lambda` が `match` の束縛を捕獲すると compile できない（未修正）。**
+   `(match o ((some g) (lambda ... (g ...))))` が
+   "compile: `g` is referenced but no binder in scope states its representation" で落ちる。
+   `core_bridge::translate_match` はアームの本体を `cx` を広げずに変換するので、
+   パターン束縛の `Repr` がスコープに入らない。**Phase 3e の範囲外**（島側でセル化も
+   要るので一行では済まない）。prelude はこの形を避けて書いてある。[TODO.md](TODO.md) 参照。
+4. **`where` 付き `defun` は前方参照できない。** `predeclare_program` は SOURCE の実行前に
+   走るので `deftrait Iter` がまだ登録されておらず、`where` 節が解決できずヘッダごと
+   黙って捨てられる。この節の定義順が今までどおり必須である理由。
+
+**`remove-duplicates` の既定を変えた**（挙動の変更）。以前は無条件に最初の出現を残していたが、
+CL の既定は最後を残す。以前の挙動は `:from-end true`。
+
+**副産物**: `position-if-not` を足した。この節の見出しコメントが「CL が持つ `-if`/`-if-not`
+の対を全部」と書いているのに 1 つだけ欠けていた。
 
 ---
 

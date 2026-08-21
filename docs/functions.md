@@ -469,6 +469,9 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | CL 本来の `(sort sequence predicate)`。安定な非破壊挿入ソート。`cmp` は「第1引数が第2引数より真に前」で `true` |
 | `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | `car` が `k` と等しい最初のペア。値は `(cdr p)` で取り出す |
 
+上の 3 つの表と §6.1 の関数の多くは、CL のキーワード引数 `:key` / `:test` / `:test-not` /
+`:start` / `:end` / `:from-end` / `:count` も取る。どれがどれを取るかは **§6.3**。
+
 `(list e1 e2 ... en)` は特殊形（`(cons e1 (cons e2 (... (Nil))))` へ展開、[syntax.md](syntax.md) 参照）。
 `map` / `filter` 等が返す `Vector<T>` を再び回すには `(iter result)` を渡す。
 
@@ -494,9 +497,9 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 | `Vector::filled` | `(Vector::filled n x)` | `(i32,T)→Vector<T>` | `x` を `n` 個（CL `make-list`/`make-sequence`）。`Vector::new` と同じく型引数は期待型から来るので、裸の `let` には `the` が要る |
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `member` と同じく **`bool`**（イテレータに返すべき tail cons が無い） |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `any`/`every` の否定 |
-| `find-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | 各正版と同型 | 述語を否定した版 |
+| `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | 各正版と同型 | 述語を否定した版 |
 | `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | 値で削除 |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | 重複除去。**最初の出現を残す**（CL の `:from-end t` 側） |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | 重複除去。CL どおり**最後の出現を残す**（最初の出現を残すには `:from-end true`。§6.3） |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | 値／述語で置換 |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | `Iter<cons-cell<K,V>>` 上 | `assoc` の述語版・値側版 |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | 先頭にペアを足す |
@@ -522,6 +525,60 @@ CL にあってここに無いもの: `list*`（末尾を差し替えた不完�
 `Sexpr` の木としてなら `equal` が `tree-equal` に当たる）、
 プロパティリスト一式 `getf`/`get-properties`/`symbol-plist`/`remprop`（キーと値が交互に並ぶ
 無型のリストという表現が無い。同じ役割は `assoc`（連想リスト）か `HashTable` が担う）。
+
+### 6.3 キーワード引数（cl-parity-plan.md Phase 3e）
+
+CL のシーケンス関数が取るキーワード `:key` / `:test` / `:test-not` / `:start` / `:end` /
+`:from-end` / `:count` を、上の §6／§6.1 のジェネリック `defun` に持たせた。すべて
+**省略可能**で、省略時の意味は今までの挙動と同じ（`remove-duplicates` だけ例外——下記）。
+
+| キーワード | 型 | 意味 |
+|---|---|---|
+| `:key` | `(fn (A) A)` | 比較・述語にかける前に要素へ適用する射影 |
+| `:test` | `(fn (A A) bool)` | `Eq` 境界の `equals` の代わりに使う等価判定。第1引数が**探している項目**、第2引数が（`:key` 適用後の）要素——CL と同じ順 |
+| `:test-not` | `(fn (A A) bool)` | `:test` の否定 |
+| `:start` `:end` | `i32` | 走査する窓 `[start, end)`。添字は列全体に対するもの |
+| `:from-end` | `bool` | 探索は**最後の**一致を答える。`:count` と併せると影響を受けるのは末尾側から |
+| `:count` | `i32` | `remove`／`substitute` 系が影響を与える最大個数 |
+
+どの関数がどれを取るかは CL に従う:
+
+| 関数 | 取るキーワード |
+|---|---|
+| `find` `position` | `:key` `:test` `:test-not` `:start` `:end` `:from-end` |
+| `count` | `:key` `:test` `:test-not` `:start` `:end` |
+| `member` `adjoin` | `:key` `:test` `:test-not` |
+| `remove` `substitute` | 上の全部（`:count` を含む） |
+| `remove-duplicates` | `:key` `:test` `:test-not` `:start` `:end` `:from-end` |
+| `find-if` `find-if-not` `position-if` `position-if-not` | `:key` `:start` `:end` `:from-end` |
+| `count-if` `count-if-not` | `:key` `:start` `:end` |
+| `member-if` `member-if-not` | `:key` |
+| `remove-if` `remove-if-not` `substitute-if` | `:key` `:start` `:end` `:from-end` `:count` |
+| `assoc` `rassoc` | `:key` `:test` `:test-not`（`assoc` の `:key` は `car`、`rassoc` は `cdr` に掛かる） |
+| `assoc-if` `rassoc-if` | `:key` |
+| `sort` `merge` | `:key` |
+| `union` `intersection` `set-difference` `set-exclusive-or` `subsetp` | `:key` `:test` `:test-not` |
+
+```lisp
+(find 2 (iter v) :key (lambda ((x i32)) i32 (abs x)))   ; → (some -2)
+(remove 2 (iter v) :count 1 :from-end true)             ; 末尾側の 1 個だけ消す
+(position 3 (iter v) :start 1)                          ; 添字は列全体に対するもの
+```
+
+**CL と違うところ 3 点**:
+
+1. **`:key` の射影は要素型の中に閉じる**（`(fn (A) A)`）。CL のように別の型へ射影する
+   ことはできない——型変数を増やすと省略時に決まらなくなるため。異なる型への射影が要る
+   場面は `-if` 系にラムダを渡すほうで書ける（`(find-if it (lambda ((p ...)) bool (= (car p) 3)))`）。
+2. **項目ベースの探索では `:key` は要素にだけ掛かる**（探している項目には掛からない）。
+   CL の `find`/`position`/`count`/`member`/`remove`/`substitute` と同じ規則。集合演算では
+   両辺とも要素なので両方に掛かる。
+3. **`remove-duplicates` の既定が変わった**。Phase 3e 以前は無条件に最初の出現を残していたが、
+   CL の既定は**最後**を残す。以前の挙動は `:from-end true`。
+
+破壊的な版（§6.2、`Vector<T>` の `defmethod`）と `search`/`mismatch`（`string` の
+`defmethod`）はまだキーワードを取らない。`defmethod` は `&optional`/`&key` を受け付けない
+（cl-parity-plan.md Phase 5b）。
 
 ### 6.2 破壊的操作（cl-parity-plan.md Phase 3d）
 

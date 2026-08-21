@@ -1008,35 +1008,188 @@ pub const SOURCE: &str = r##"
         (push out (get buf i))
         (setf i (- i 1)))
       out)))
-(defun find-if<I,A> ((it I) (pred (fn (A) bool))) Option<A> (where (Iter I (Item A)))
-  (let ((result (the Option<A> (Option::none))))
+;; ---------------------------------------------------------------------------
+;; cl-parity-plan.md Phase 3e: the sequence keywords.
+;;
+;; CL's `:key`/`:test`/`:test-not`/`:start`/`:end`/`:from-end`/`:count`, on the
+;; generic `defun`s of this library. Three small readers and four loop cores,
+;; so each public function below spells only what is its own.
+;;
+;; **Every keyword is declared without a default.** That is forced, not
+;; stylistic: a defaulted `&optional`/`&key` parameter's declared type may not
+;; mention the function's own type parameters (`Checker::check_defun_opt_key`),
+;; and `:key`/`:test` are function types over the element type. A defaultless
+;; parameter arrives as `Option<...>`, so the default lives in the body.
+;;
+;; **Why the cores take a `hit` closure rather than the keywords themselves.**
+;; `Option<(fn (A) A)>` is not writable as a declared type — the reader ends a
+;; generic token at the first paren (`read::reader::extend_angle_token`), by
+;; design, so that `(a<b c)` keeps reading as a call. A `&key` parameter gets
+;; that type without anyone spelling it. So the keyword unpacking has to stay
+;; in the function that declared the keywords, and what crosses into a core is
+;; an ordinary `(fn (i32 A) bool)` closed over them.
+(defun seq-in-bounds ((i i32) (start Option<i32>) (end Option<i32>)) bool
+  "Whether index `i` lies in the `:start`/`:end` window `[start, end)`."
+  (if (match start ((some s) (< i s)) ((none) false))
+      false
+      (match end ((some e) (< i e)) ((none) true))))
+
+(defun seq-flag ((b Option<bool>)) bool
+  "A boolean keyword (`:from-end`); false when the caller omitted it."
+  (match b ((some v) v) ((none) false)))
+
+(defun seq-limit ((n Option<i32>)) i32
+  "`:count` as a plain limit; -1 (no limit) when the caller omitted it."
+  (match n ((some v) v) ((none) -1)))
+
+;; The forward scan the searches share. `last` is `:from-end`: instead of a
+;; second pass it simply stops breaking, so the final match wins — which is
+;; what "from the end" means for a one-shot forward cursor, and costs nothing
+;; when it is off.
+(defun seq-find-core<I,A> ((it I) (hit (fn (i32 A) bool)) (last bool)) Option<A>
+  (where (Iter I (Item A)))
+  (let ((result (the Option<A> (Option::none))) (i 0) (found false))
     (doiter (x it)
-      (if (pred x) (progn (setf result (Option::some x)) (break)) ()))
+      (progn
+        (when (hit i x) (progn (setf result (Option::some x)) (setf found true) ()))
+        (setf i (+ i 1))
+        (if (if found (not last) false) (break) ())))
     result))
-(defun position-if<I,A> ((it I) (pred (fn (A) bool))) Option<i32> (where (Iter I (Item A)))
-  ;; `i` counts only the mismatches seen before the match, so it equals the
-  ;; index of the first match. Both `if` branches are `Unit` (`(break)` is
-  ;; `Never`; the mismatch branch ends in a trailing `()`) so the loop body
-  ;; type-checks.
-  (let ((i 0) (result (the Option<i32> (Option::none))))
+
+(defun seq-position-core<I,A> ((it I) (hit (fn (i32 A) bool)) (last bool)) Option<i32>
+  (where (Iter I (Item A)))
+  "[`seq-find-core`] reporting the index instead of the element. The index is
+   into the whole sequence, not into the `:start`/`:end` window — CL's rule."
+  (let ((result (the Option<i32> (Option::none))) (i 0) (found false))
     (doiter (x it)
-      (if (pred x)
-          (progn (setf result (Option::some i)) (break))
-          (progn (setf i (+ i 1)) ())))
+      (progn
+        (when (hit i x) (progn (setf result (Option::some i)) (setf found true) ()))
+        (setf i (+ i 1))
+        (if (if found (not last) false) (break) ())))
     result))
-(defun count-if<I,A> ((it I) (pred (fn (A) bool))) i32 (where (Iter I (Item A)))
-  ;; `when`, not a bare `(if (pred x) (setf n ...) ())`: `setf` evaluates to
-  ;; the value it assigned (here `i32`), so an `if` whose other branch is `()`
-  ;; would fail to unify (`i32` vs `Unit`); `when` wraps the `setf` in a
-  ;; `progn` with a trailing `()`, making the whole loop body `Unit`.
-  (let ((n 0))
-    (doiter (x it) (when (pred x) (setf n (+ n 1))))
+
+(defun seq-count-core<I,A> ((it I) (hit (fn (i32 A) bool))) i32
+  (where (Iter I (Item A)))
+  (let ((n 0) (i 0))
+    (doiter (x it)
+      (progn (when (hit i x) (setf n (+ n 1))) (setf i (+ i 1)) ()))
     n))
-(defun remove-if<I,A> ((it I) (pred (fn (A) bool))) Vector<A> (where (Iter I (Item A)))
+
+;; `remove`/`substitute` and their `-if` variants. `act` decides what an
+;; *affected* match contributes: `none` drops it, `(some v)` puts `v` in its
+;; place. An element that does not match, or that `:count` has used up, passes
+;; through unchanged — CL's rule, and the reason this cannot be written as a
+;; filter over the window alone.
+;;
+;; A materialized copy, because `:count` together with `:from-end` cannot know
+;; which matches to affect until it knows how many there are — that pairing is
+;; the only case that walks twice, and the counting pass is skipped otherwise
+;; (which also keeps a caller's `:key`/`:test` from being called twice per
+;; element for nothing). The copy itself costs nothing extra in principle: the
+;; result is a fresh `Vector` either way. It is spelled out rather than
+;; delegated to `copy-seq`
+;; because a `where`-bounded `defun` is never pre-declared (the pre-pass runs
+;; before `deftrait Iter` is registered, so its header does not parse and is
+;; silently skipped — `Checker::predeclare_program`), and `copy-seq` is
+;; defined further down this file.
+(defun seq-edit-core<I,A> ((it I) (hit (fn (i32 A) bool)) (act (fn (A) Option<A>))
+                           (limit i32) (last bool)) Vector<A>
+  (where (Iter I (Item A)))
+  (let ((buf (the Vector<A> (Vector::new))) (out (the Vector<A> (Vector::new)))
+        (total 0) (seen 0) (i 0))
+    (progn
+      (doiter (x it) (push buf x))
+      (when (if (< limit 0) false last)
+        (while (< i (len buf))
+          (progn (when (hit i (get buf i)) (setf total (+ total 1))) (setf i (+ i 1)) ())))
+      (let ((skip (if (< limit 0) 0 (if last (if (> total limit) (- total limit) 0) 0))))
+        (progn
+          (setf i 0)
+          (while (< i (len buf))
+            (let ((x (get buf i)))
+              (progn
+                (if (hit i x)
+                    (progn
+                      (setf seen (+ seen 1))
+                      (if (if (< limit 0) true (if last (> seen skip) (<= seen limit)))
+                          (match (act x) ((some v) (push out v)) ((none) ()))
+                          (push out x))
+                      ())
+                    (progn (push out x) ()))
+                (setf i (+ i 1))
+                ())))
+          out)))))
+
+;; Whether any element of `hay` satisfies `hit` — the membership test the set
+;; operations share, with their `:key`/`:test` already folded into `hit`.
+(defun seq-any-core<A> ((hay Vector<A>) (hit (fn (A) bool))) bool
+  (let ((found false) (i 0))
+    (progn
+      (while (if found false (< i (len hay)))
+        (progn (when (hit (get hay i)) (setf found true)) (setf i (+ i 1)) ()))
+      found)))
+
+;; Non-destructive insertion sort, stable: the inner shift uses strict `cmp`,
+;; so elements equal under `cmp` keep their input order. `proj` is `:key`,
+;; already defaulted to the identity by the caller — CL compares the
+;; projections, not the elements.
+(defun seq-sort-core<I,A> ((it I) (cmp (fn (A A) bool)) (proj (fn (A) A))) Vector<A>
+  (where (Iter I (Item A)))
   (let ((out (the Vector<A> (Vector::new))))
-    (doiter (x it) (if (pred x) () (push out x)))
+    (doiter (x it)
+      (let ((j (len out)))
+        (push out x)
+        (while (if (> j 0) (cmp (proj x) (proj (get out (- j 1)))) false)
+          (set out j (get out (- j 1)))
+          (setf j (- j 1)))
+        (set out j x)))
     out))
 
+(defun find-if<I,A> ((it I) (pred (fn (A) bool))
+                     &key (key (fn (A) A)) (start i32) (end i32) (from-end bool))
+    Option<A>
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-find-core it
+      (lambda ((i i32) (y A)) bool
+        (if (seq-in-bounds i start end) (pred (proj y)) false))
+      (seq-flag from-end))))
+(defun position-if<I,A> ((it I) (pred (fn (A) bool))
+                         &key (key (fn (A) A)) (start i32) (end i32) (from-end bool))
+    Option<i32>
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-position-core it
+      (lambda ((i i32) (y A)) bool
+        (if (seq-in-bounds i start end) (pred (proj y)) false))
+      (seq-flag from-end))))
+(defun position-if-not<I,A> ((it I) (pred (fn (A) bool))
+                             &key (key (fn (A) A)) (start i32) (end i32) (from-end bool))
+    Option<i32>
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-position-core it
+      (lambda ((i i32) (y A)) bool
+        (if (seq-in-bounds i start end) (not (pred (proj y))) false))
+      (seq-flag from-end))))
+(defun count-if<I,A> ((it I) (pred (fn (A) bool))
+                      &key (key (fn (A) A)) (start i32) (end i32))
+    i32
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-count-core it
+      (lambda ((i i32) (y A)) bool
+        (if (seq-in-bounds i start end) (pred (proj y)) false)))))
+(defun remove-if<I,A> ((it I) (pred (fn (A) bool))
+                       &key (key (fn (A) A)) (start i32) (end i32) (from-end bool) (count i32))
+    Vector<A>
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-edit-core it
+      (lambda ((i i32) (y A)) bool
+        (if (seq-in-bounds i start end) (pred (proj y)) false))
+      (lambda ((y A)) Option<A> (Option::none))
+      (seq-limit count) (seq-flag from-end))))
 ;; `cons-cell<A,B>`: a generic 2-field product, needed below purely because
 ;; typelisp has no built-in tuple syntax. Named and shaped after Lisp's own
 ;; convention for storing two values — a cons cell, `car`/`cdr` — rather
@@ -1702,35 +1855,73 @@ pub const SOURCE: &str = r##"
         (setf i (+ i 1)))
       out)))
 ;; `member`/`assoc` require `Eq` (defined below with the scalar impls)
-;; instead of taking a predicate — the trait-bounded half of the library.
-;; Predicate variants of the same searches exist above (`find-if`/
-;; `position-if`/`count-if`), and item-based `find`/`position`/`count` (CL's
-;; own, `Eq`-bounded like `member`) exist right below `sort`.
-(defun member<I,A> ((x A) (it I)) bool (where (Iter I (Item A)) (Eq A))
-  (let ((found false))
-    (doiter (y it)
-      (if (equals y x) (progn (setf found true) (break)) ()))
-    found))
-;; CL's own item-based `find`/`position`/`count` (its default `:test` is
-;; `eql`; this language's one generic equality trait is `Eq`, so these bound
-;; on it like `member` does) — the counterparts of `find-if`/`position-if`/
-;; `count-if` above, which take a predicate instead.
-(defun find<I,A> ((x A) (it I)) Option<A> (where (Iter I (Item A)) (Eq A))
-  (let ((result (the Option<A> (Option::none))))
-    (doiter (y it)
-      (if (equals y x) (progn (setf result (Option::some y)) (break)) ()))
-    result))
-(defun position<I,A> ((x A) (it I)) Option<i32> (where (Iter I (Item A)) (Eq A))
-  (let ((i 0) (result (the Option<i32> (Option::none))))
-    (doiter (y it)
-      (if (equals y x)
-          (progn (setf result (Option::some i)) (break))
-          (progn (setf i (+ i 1)) ())))
-    result))
-(defun count<I,A> ((x A) (it I)) i32 (where (Iter I (Item A)) (Eq A))
-  (let ((n 0))
-    (doiter (y it) (when (equals y x) (setf n (+ n 1))))
-    n))
+;; The item-based searches. `:test`/`:test-not` replace the `Eq` bound's
+;; `equals` when given (CL's default test is `eql`; the one generic equality
+;; here is `Eq`), and `:key` projects the *element* before the comparison —
+;; never the item being searched for, which is CL's rule for this family.
+;;
+;; `same` is built as a local closure rather than a shared helper because a
+;; helper would have to declare `Option<(fn (A A) bool)>`, which is not
+;; writable (see the Phase 3e note above the cores).
+(defun member<I,A> ((x A) (it I)
+                    &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
+    bool
+  (where (Iter I (Item A)) (Eq A))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f p (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g p (proj q))))
+                              ((none) (equals p (proj q)))))))))
+      (is-some (seq-find-core it (lambda ((i i32) (y A)) bool (same x y)) false)))))
+(defun find<I,A> ((x A) (it I)
+                  &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
+                       (start i32) (end i32) (from-end bool))
+    Option<A>
+  (where (Iter I (Item A)) (Eq A))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f p (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g p (proj q))))
+                              ((none) (equals p (proj q)))))))))
+      (seq-find-core it
+        (lambda ((i i32) (y A)) bool
+          (if (seq-in-bounds i start end) (same x y) false))
+        (seq-flag from-end)))))
+(defun position<I,A> ((x A) (it I)
+                      &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
+                           (start i32) (end i32) (from-end bool))
+    Option<i32>
+  (where (Iter I (Item A)) (Eq A))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f p (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g p (proj q))))
+                              ((none) (equals p (proj q)))))))))
+      (seq-position-core it
+        (lambda ((i i32) (y A)) bool
+          (if (seq-in-bounds i start end) (same x y) false))
+        (seq-flag from-end)))))
+(defun count<I,A> ((x A) (it I)
+                   &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
+                        (start i32) (end i32))
+    i32
+  (where (Iter I (Item A)) (Eq A))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f p (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g p (proj q))))
+                              ((none) (equals p (proj q)))))))))
+      (seq-count-core it
+        (lambda ((i i32) (y A)) bool
+          (if (seq-in-bounds i start end) (same x y) false))))))
 (defun every<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (let ((result true))
     (doiter (x it)
@@ -1741,35 +1932,26 @@ pub const SOURCE: &str = r##"
     (doiter (x it)
       (if (pred x) (progn (setf result true) (break)) ()))
     result))
-;; Non-destructive insertion sort, stable: the inner shift uses strict `cmp`,
-;; so equal elements (per `cmp`) keep their input order. CL's own `sort`
-;; signature — `predicate` is a required argument, not an `Ord` bound, so any
-;; strict-weak-order function works (`(lambda ((a i32) (b i32)) bool (< a
-;; b))` for ascending, `(flip ...)`-wrapped or reversed for descending, a
-;; key-projecting comparator, etc.) — matching CL's `(sort sequence
-;; predicate)` exactly (`predicate` returns true when its first argument
-;; belongs strictly before its second).
-(defun sort<I,A> ((it I) (cmp (fn (A A) bool))) Vector<A> (where (Iter I (Item A)))
-  (let ((out (the Vector<A> (Vector::new))))
-    (doiter (x it)
-      (let ((j (len out)))
-        (push out x)
-        (while (if (> j 0) (cmp x (get out (- j 1))) false)
-          (set out j (get out (- j 1)))
-          (setf j (- j 1)))
-        (set out j x)))
-    out))
+(defun sort<I,A> ((it I) (cmp (fn (A A) bool)) &key (key (fn (A) A))) Vector<A>
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-sort-core it cmp proj)))
 ;; `assoc` works over any iterator whose `Item` is a `cons-cell<K,V>` pair —
 ;; an alist (`Vector<cons-cell<K,V>>`) and a `HashTable<K,V>` (whose `iter`'s
 ;; `Item` is exactly `cons-cell<K,V>`) both qualify. Returns the whole
 ;; matching pair, CL-style; project the value with `(cdr p)`.
-(defun assoc<I,K,V> ((k K) (it I)) Option<cons-cell<K,V>>
+(defun assoc<I,K,V> ((k K) (it I)
+                     &key (key (fn (K) K)) (test (fn (K K) bool)) (test-not (fn (K K) bool)))
+    Option<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)) (Eq K))
-  (let ((result (the Option<cons-cell<K,V>> (Option::none))))
-    (doiter (p it)
-      (if (equals (car p) k) (progn (setf result (Option::some p)) (break)) ()))
-    result))
-
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y K)) K y)))))
+    (let ((same (lambda ((p K) (q K)) bool
+                  (match test
+                    ((some f) (f p (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g p (proj q))))
+                              ((none) (equals p (proj q)))))))))
+      (seq-find-core it (lambda ((i i32) (p cons-cell<K,V>)) bool (same k (car p))) false))))
 ;; ---------------------------------------------------------------------------
 ;; The rest of CL's list/sequence catalog — cl-parity-plan.md Phase 3a/3b/3c.
 ;;
@@ -1864,43 +2046,151 @@ pub const SOURCE: &str = r##"
 ;; The `-if`/`-if-not` pairs CL has for every search. `member-if` reports
 ;; `bool` like `member` does, the same deliberate departure (an iterator has no
 ;; tail cons to return).
-(defun member-if<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
-  (any it pred))
-(defun member-if-not<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
-  (any it (lambda ((x A)) bool (not (pred x)))))
+(defun member-if<I,A> ((it I) (pred (fn (A) bool)) &key (key (fn (A) A))) bool
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (is-some (seq-find-core it (lambda ((i i32) (y A)) bool (pred (proj y))) false))))
+(defun member-if-not<I,A> ((it I) (pred (fn (A) bool)) &key (key (fn (A) A))) bool
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (is-some (seq-find-core it (lambda ((i i32) (y A)) bool (not (pred (proj y)))) false))))
 (defun notany<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (not (any it pred)))
 (defun notevery<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (not (every it pred)))
-(defun find-if-not<I,A> ((it I) (pred (fn (A) bool))) Option<A> (where (Iter I (Item A)))
-  (find-if it (lambda ((x A)) bool (not (pred x)))))
-(defun count-if-not<I,A> ((it I) (pred (fn (A) bool))) i32 (where (Iter I (Item A)))
-  (count-if it (lambda ((x A)) bool (not (pred x)))))
-(defun remove-if-not<I,A> ((it I) (pred (fn (A) bool))) Vector<A> (where (Iter I (Item A)))
-  (filter it pred))
-;; CL's item-based `remove`, and `remove-duplicates` (which keeps the *first*
-;; of each run of equals, CL's `:from-end t` behaviour — the one that reads as
-;; "order-preserving dedup").
-(defun remove<I,A> ((x A) (it I)) Vector<A> (where (Iter I (Item A)) (Eq A))
-  (remove-if it (lambda ((y A)) bool (equals y x))))
-(defun remove-duplicates<I,A> ((it I)) Vector<A> (where (Iter I (Item A)) (Eq A))
-  (let ((out (the Vector<A> (Vector::new))))
-    (progn (doiter (x it) (if (member x (iter out)) () (push out x))) out)))
-(defun substitute<I,A> ((new A) (old A) (it I)) Vector<A> (where (Iter I (Item A)) (Eq A))
-  (map it (lambda ((x A)) A (if (equals x old) new x))))
-(defun substitute-if<I,A> ((new A) (pred (fn (A) bool)) (it I)) Vector<A>
+(defun find-if-not<I,A> ((it I) (pred (fn (A) bool))
+                         &key (key (fn (A) A)) (start i32) (end i32) (from-end bool))
+    Option<A>
   (where (Iter I (Item A)))
-  (map it (lambda ((x A)) A (if (pred x) new x))))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-find-core it
+      (lambda ((i i32) (y A)) bool
+        (if (seq-in-bounds i start end) (not (pred (proj y))) false))
+      (seq-flag from-end))))
+(defun count-if-not<I,A> ((it I) (pred (fn (A) bool))
+                          &key (key (fn (A) A)) (start i32) (end i32))
+    i32
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-count-core it
+      (lambda ((i i32) (y A)) bool
+        (if (seq-in-bounds i start end) (not (pred (proj y))) false)))))
+(defun remove-if-not<I,A> ((it I) (pred (fn (A) bool))
+                           &key (key (fn (A) A)) (start i32) (end i32) (from-end bool) (count i32))
+    Vector<A>
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-edit-core it
+      (lambda ((i i32) (y A)) bool
+        (if (seq-in-bounds i start end) (not (pred (proj y))) false))
+      (lambda ((y A)) Option<A> (Option::none))
+      (seq-limit count) (seq-flag from-end))))
+(defun remove<I,A> ((x A) (it I)
+                    &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
+                         (start i32) (end i32) (from-end bool) (count i32))
+    Vector<A>
+  (where (Iter I (Item A)) (Eq A))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f p (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g p (proj q))))
+                              ((none) (equals p (proj q)))))))))
+      (seq-edit-core it
+        (lambda ((i i32) (y A)) bool
+          (if (seq-in-bounds i start end) (same x y) false))
+        (lambda ((y A)) Option<A> (Option::none))
+        (seq-limit count) (seq-flag from-end)))))
+;; `remove-duplicates`: **CL's rule, which is not what this used to do.**
+;; The default keeps the *last* of each group of equals; `:from-end t` keeps
+;; the first (the order-preserving dedup this function used to be
+;; unconditionally). Elements outside `:start`/`:end` are neither removed nor
+;; compared against.
+(defun remove-duplicates<I,A> ((it I)
+                               &key (key (fn (A) A)) (test (fn (A A) bool))
+                                    (test-not (fn (A A) bool))
+                                    (start i32) (end i32) (from-end bool))
+    Vector<A>
+  (where (Iter I (Item A)) (Eq A))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equals (proj p) (proj q))))))))
+          (buf (copy-seq it)) (out (the Vector<A> (Vector::new)))
+          (last (seq-flag from-end)) (i 0))
+      (progn
+        (while (< i (len buf))
+          (let ((x (get buf i)))
+            (progn
+              (if (seq-in-bounds i start end)
+                  (let ((dup false) (j (if last 0 (+ i 1))) (stop (if last i (len buf))))
+                    (progn
+                      (while (< j stop)
+                        (progn
+                          (when (if (seq-in-bounds j start end) (same x (get buf j)) false)
+                            (setf dup true))
+                          (setf j (+ j 1))
+                          ()))
+                      (if dup () (push out x))
+                      ()))
+                  (progn (push out x) ()))
+              (setf i (+ i 1))
+              ())))
+        out))))
+(defun substitute<I,A> ((new A) (old A) (it I)
+                        &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
+                             (start i32) (end i32) (from-end bool) (count i32))
+    Vector<A>
+  (where (Iter I (Item A)) (Eq A))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f p (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g p (proj q))))
+                              ((none) (equals p (proj q)))))))))
+      (seq-edit-core it
+        (lambda ((i i32) (y A)) bool
+          (if (seq-in-bounds i start end) (same old y) false))
+        (lambda ((y A)) Option<A> (Option::some new))
+        (seq-limit count) (seq-flag from-end)))))
+(defun substitute-if<I,A> ((new A) (pred (fn (A) bool)) (it I)
+                           &key (key (fn (A) A)) (start i32) (end i32) (from-end bool) (count i32))
+    Vector<A>
+  (where (Iter I (Item A)))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-edit-core it
+      (lambda ((i i32) (y A)) bool
+        (if (seq-in-bounds i start end) (pred (proj y)) false))
+      (lambda ((y A)) Option<A> (Option::some new))
+      (seq-limit count) (seq-flag from-end))))
 ;; The association-list catalog around the existing `assoc`.
-(defun assoc-if<I,K,V> ((it I) (pred (fn (K) bool))) Option<cons-cell<K,V>>
+(defun assoc-if<I,K,V> ((it I) (pred (fn (K) bool)) &key (key (fn (K) K)))
+    Option<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)))
-  (find-if it (lambda ((p cons-cell<K,V>)) bool (pred (car p)))))
-(defun rassoc<I,K,V> ((v V) (it I)) Option<cons-cell<K,V>>
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y K)) K y)))))
+    (seq-find-core it (lambda ((i i32) (p cons-cell<K,V>)) bool (pred (proj (car p)))) false)))
+(defun rassoc<I,K,V> ((v V) (it I)
+                      &key (key (fn (V) V)) (test (fn (V V) bool)) (test-not (fn (V V) bool)))
+    Option<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)) (Eq V))
-  (find-if it (lambda ((p cons-cell<K,V>)) bool (equals (cdr p) v))))
-(defun rassoc-if<I,K,V> ((it I) (pred (fn (V) bool))) Option<cons-cell<K,V>>
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y V)) V y)))))
+    (let ((same (lambda ((p V) (q V)) bool
+                  (match test
+                    ((some f) (f p (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g p (proj q))))
+                              ((none) (equals p (proj q)))))))))
+      (seq-find-core it (lambda ((i i32) (p cons-cell<K,V>)) bool (same v (cdr p))) false))))
+(defun rassoc-if<I,K,V> ((it I) (pred (fn (V) bool)) &key (key (fn (V) V)))
+    Option<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)))
-  (find-if it (lambda ((p cons-cell<K,V>)) bool (pred (cdr p)))))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y V)) V y)))))
+    (seq-find-core it (lambda ((i i32) (p cons-cell<K,V>)) bool (pred (proj (cdr p)))) false)))
 (defun acons<I,K,V> ((k K) (v V) (it I)) Vector<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)))
   (let ((out (the Vector<cons-cell<K,V>> (Vector::new))))
@@ -1938,14 +2228,18 @@ pub const SOURCE: &str = r##"
 ;; CL's `merge`. CL requires both inputs already sorted and merges in linear
 ;; time; this sorts the concatenation, which agrees on every input CL defines
 ;; an answer for and is also correct on the ones it does not.
-(defun merge<I,J,A> ((a I) (b J) (less (fn (A A) bool))) Vector<A>
+(defun merge<I,J,A> ((a I) (b J) (less (fn (A A) bool)) &key (key (fn (A) A))) Vector<A>
   (where (Iter I (Item A)) (Iter J (Item A)))
-  (sort (iter (append a b)) less))
-
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (seq-sort-core (iter (append a b)) less proj)))
 ;; --- Phase 3c: set operations, and the list-tail relations ---
 ;; All `Eq`-bounded and quadratic, like CL's own list-based versions. `union`
 ;; and friends return elements in first-appearance order rather than CL's
 ;; unspecified one — a stable answer is worth more than the freedom.
+;;
+;; Phase 3e gave them `:key`/`:test`/`:test-not`. Unlike the item searches
+;; above, `:key` here projects *both* sides of every comparison: both are
+;; sequence elements.
 (defun seq-equals<A> ((a Vector<A>) (b Vector<A>)) bool (where (Eq A))
   "Element-wise equality of two vectors. `Vector<T>` has no `Eq` impl of its
    own (that would need a bound on `T` an `impl` cannot express here), so the
@@ -1961,33 +2255,116 @@ pub const SOURCE: &str = r##"
           ok))))
 ;; CL's `adjoin`: `x` prepended unless it is already there. CL conses onto the
 ;; front, so the new element leads.
-(defun adjoin<I,A> ((x A) (it I)) Vector<A> (where (Iter I (Item A)) (Eq A))
-  (let ((v (copy-seq it)))
-    (if (member x (iter v))
-        v
-        (let ((out (the Vector<A> (Vector::new))))
-          (progn (push out x) (doiter (y (iter v)) (push out y)) out)))))
-(defun union<I,J,A> ((a I) (b J)) Vector<A>
+(defun adjoin<I,A> ((x A) (it I)
+                    &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
+    Vector<A>
+  (where (Iter I (Item A)) (Eq A))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equals (proj p) (proj q))))))))
+          (v (copy-seq it)))
+      (if (seq-any-core v (lambda ((z A)) bool (same x z)))
+          v
+          (let ((out (the Vector<A> (Vector::new))))
+            (progn (push out x) (doiter (y (iter v)) (push out y)) out))))))
+(defun union<I,J,A> ((a I) (b J)
+                     &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
+    Vector<A>
   (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
-  (let ((out (remove-duplicates a)))
-    (progn (doiter (y b) (if (member y (iter out)) () (push out y))) out)))
-(defun intersection<I,J,A> ((a I) (b J)) Vector<A>
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equals (proj p) (proj q))))))))
+          (out (the Vector<A> (Vector::new))))
+      (progn
+        (doiter (x a)
+          (when (not (seq-any-core out (lambda ((z A)) bool (same x z)))) (push out x)))
+        (doiter (y b)
+          (when (not (seq-any-core out (lambda ((z A)) bool (same y z)))) (push out y)))
+        out))))
+(defun intersection<I,J,A> ((a I) (b J)
+                            &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
+    Vector<A>
   (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
-  (let ((bv (copy-seq b)))
-    (remove-duplicates (iter (filter a (lambda ((x A)) bool (member x (iter bv))))))))
-(defun set-difference<I,J,A> ((a I) (b J)) Vector<A>
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equals (proj p) (proj q))))))))
+          (bv (copy-seq b)) (out (the Vector<A> (Vector::new))))
+      (progn
+        (doiter (x a)
+          (when (if (seq-any-core bv (lambda ((z A)) bool (same x z)))
+                    (not (seq-any-core out (lambda ((z A)) bool (same x z))))
+                    false)
+            (push out x)))
+        out))))
+(defun set-difference<I,J,A> ((a I) (b J)
+                              &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
+    Vector<A>
   (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
-  (let ((bv (copy-seq b)))
-    (remove-duplicates (iter (filter a (lambda ((x A)) bool (not (member x (iter bv)))))))))
-(defun set-exclusive-or<I,J,A> ((a I) (b J)) Vector<A>
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equals (proj p) (proj q))))))))
+          (bv (copy-seq b)) (out (the Vector<A> (Vector::new))))
+      (progn
+        (doiter (x a)
+          (when (if (seq-any-core bv (lambda ((z A)) bool (same x z)))
+                    false
+                    (not (seq-any-core out (lambda ((z A)) bool (same x z)))))
+            (push out x)))
+        out))))
+(defun set-exclusive-or<I,J,A> ((a I) (b J)
+                                &key (key (fn (A) A)) (test (fn (A A) bool))
+                                     (test-not (fn (A A) bool)))
+    Vector<A>
   (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
-  (let ((av (copy-seq a)) (bv (copy-seq b)))
-    (append (iter (set-difference (iter av) (iter bv)))
-            (iter (set-difference (iter bv) (iter av))))))
-(defun subsetp<I,J,A> ((a I) (b J)) bool
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equals (proj p) (proj q))))))))
+          (av (copy-seq a)) (bv (copy-seq b)) (out (the Vector<A> (Vector::new))))
+      (progn
+        (doiter (x (iter av))
+          (when (if (seq-any-core bv (lambda ((z A)) bool (same x z)))
+                    false
+                    (not (seq-any-core out (lambda ((z A)) bool (same x z)))))
+            (push out x)))
+        (doiter (y (iter bv))
+          (when (if (seq-any-core av (lambda ((z A)) bool (same y z)))
+                    false
+                    (not (seq-any-core out (lambda ((z A)) bool (same y z)))))
+            (push out y)))
+        out))))
+(defun subsetp<I,J,A> ((a I) (b J)
+                       &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
+    bool
   (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
-  (let ((bv (copy-seq b)))
-    (every a (lambda ((x A)) bool (member x (iter bv))))))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equals (proj p) (proj q))))))))
+          (bv (copy-seq b)))
+      (every a (lambda ((x A)) bool (seq-any-core bv (lambda ((z A)) bool (same x z))))))))
 ;; CL's `tailp`/`ldiff`. CL asks about shared *structure* (`tail` must be one
 ;; of `whole`'s own conses); with no shared structure to ask about, this asks
 ;; the observable question instead — is `tail` a suffix of `whole` by value.

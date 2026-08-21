@@ -10240,6 +10240,81 @@ impl Checker {
 
     // Same invariant checking context as `check_path_call` — see its comment.
     #[allow(clippy::too_many_arguments)]
+    /// Associated-type pins participate in *inference*, not just
+    /// verification, for every call path that has a `where` clause —
+    /// [`Self::check_call`] and [`Self::check_call_opt_key`] both run this
+    /// before their "cannot infer type parameter" check, so a parameter that
+    /// appears in no argument but is pinned by a bound counts as resolved.
+    ///
+    /// Failures are deliberately silent: `Self::validate_where_bounds` runs
+    /// afterwards and reports a pin mismatch with a precise message, so a
+    /// `unify` that cannot make two pins agree here should leave the
+    /// diagnosis to it rather than raising a vaguer error first.
+    fn infer_pinned_assoc_types(
+        &self,
+        env: &Env,
+        sig: &FnSig,
+        params: &HashSet<String>,
+        subst: &mut BTreeMap<String, Type>,
+    ) {
+        for (tparam, trait_bounds) in &sig.bounds {
+            let Some(concrete) = subst.get(tparam).cloned() else { continue };
+            // `concrete` may itself be a **bare** unresolved type variable —
+            // the enclosing generic function's own type parameter, forwarded
+            // straight through (this call is nested inside another
+            // `where`-bounded generic's own diagnostic body-check, mirroring
+            // `Self::validate_where_bounds`'s own bare-variable case).
+            // There is no registered type to look an associated-type impl up
+            // on yet, but the *enclosing* function's own `where` clause may
+            // already pin the same associated type on the same trait —
+            // propagate that pin into `subst` instead of leaving the callee's
+            // parameter uninferred (e.g. `elt` calling `nth n it` with `it:
+            // I` forwards `elt`'s own `(Iter I (Item A))` pin so `nth`'s own
+            // `A` resolves to `elt`'s own, still-open `A`; both become
+            // concrete together once the enclosing function is specialized).
+            if let Type::Named(n, args) = &concrete {
+                if args.is_empty() && n.is_simple() && self.reg.type_def(n).is_none() {
+                    let var_name = n.last_segment();
+                    if let Some(caller_tbs) = env.bounds.get(var_name) {
+                        for tb in trait_bounds {
+                            let Some(caller_tb) =
+                                caller_tbs.iter().find(|c| c.trait_path == tb.trait_path)
+                            else {
+                                continue;
+                            };
+                            for (assoc_name, declared_ty) in &tb.assoc {
+                                if let Some(caller_ty) = caller_tb.assoc.get(assoc_name) {
+                                    let _ = unify(&params, declared_ty, caller_ty, subst);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+            let type_fq = match &concrete {
+                Type::Named(n, _) if n.is_simple() && self.reg.type_def(n).is_none() => None,
+                Type::Named(n, _) => Some(n.clone()),
+                other => prim_type_path(other),
+            };
+            let Some(type_fq) = type_fq else { continue };
+            let Some(def) = self.reg.type_def(&type_fq) else { continue };
+            let concrete_args: &[Type] = match &concrete {
+                Type::Named(_, args) => args.as_slice(),
+                _ => &[],
+            };
+            for tb in trait_bounds {
+                for (assoc_name, declared_ty) in &tb.assoc {
+                    if let Some(actual) =
+                        resolve_trait_assoc_type(def, &tb.trait_path, assoc_name, concrete_args)
+                    {
+                        let _ = unify(&params, declared_ty, &actual, subst);
+                    }
+                }
+            }
+        }
+    }
+
     fn check_call(
         &self,
         heap: &mut Heap,
@@ -10307,73 +10382,7 @@ impl Checker {
             let resolved = subst_apply(elem_ty, &subst);
             typed.push(self.cons_rest_list(heap, &resolved, rest_typed)?);
         }
-        // Associated-type pins participate in *inference*, not just
-        // verification: when a `where` bound pins an associated type to one of
-        // `name`'s own type parameters (e.g. `reverse`'s `(where (Iter I (Item
-        // A)))`, where `A` appears in no ordinary argument and so is otherwise
-        // uninferrable), resolve the concrete type's real binding for that
-        // associated type and unify it into `subst`. Runs before the
-        // "cannot infer" check below so the pinned variable counts as
-        // resolved; the strict validation loop further down then re-checks the
-        // (now-inferred) pin for consistency. A `unify` failure here is
-        // ignored — the validation loop reports pin mismatches with a precise
-        // message.
-        for (tparam, trait_bounds) in &sig.bounds {
-            let Some(concrete) = subst.get(tparam).cloned() else { continue };
-            // `concrete` may itself be a **bare** unresolved type variable —
-            // the enclosing generic function's own type parameter, forwarded
-            // straight through (this call is nested inside another
-            // `where`-bounded generic's own diagnostic body-check, mirroring
-            // `Self::validate_where_bounds`'s bare-variable case below).
-            // There is no registered type to look an associated-type impl up
-            // on yet, but the *enclosing* function's own `where` clause may
-            // already pin the same associated type on the same trait —
-            // propagate that pin into `subst` instead of leaving `name`'s
-            // parameter uninferred (e.g. `elt` calling `nth n it` with `it:
-            // I` forwards `elt`'s own `(Iter I (Item A))` pin so `nth`'s own
-            // `A` resolves to `elt`'s own, still-open `A`; both become
-            // concrete together once the enclosing function is specialized).
-            if let Type::Named(n, args) = &concrete {
-                if args.is_empty() && n.is_simple() && self.reg.type_def(n).is_none() {
-                    let var_name = n.last_segment();
-                    if let Some(caller_tbs) = env.bounds.get(var_name) {
-                        for tb in trait_bounds {
-                            let Some(caller_tb) =
-                                caller_tbs.iter().find(|c| c.trait_path == tb.trait_path)
-                            else {
-                                continue;
-                            };
-                            for (assoc_name, declared_ty) in &tb.assoc {
-                                if let Some(caller_ty) = caller_tb.assoc.get(assoc_name) {
-                                    let _ = unify(&params, declared_ty, caller_ty, &mut subst);
-                                }
-                            }
-                        }
-                    }
-                    continue;
-                }
-            }
-            let type_fq = match &concrete {
-                Type::Named(n, _) if n.is_simple() && self.reg.type_def(n).is_none() => None,
-                Type::Named(n, _) => Some(n.clone()),
-                other => prim_type_path(other),
-            };
-            let Some(type_fq) = type_fq else { continue };
-            let Some(def) = self.reg.type_def(&type_fq) else { continue };
-            let concrete_args: &[Type] = match &concrete {
-                Type::Named(_, args) => args.as_slice(),
-                _ => &[],
-            };
-            for tb in trait_bounds {
-                for (assoc_name, declared_ty) in &tb.assoc {
-                    if let Some(actual) =
-                        resolve_trait_assoc_type(def, &tb.trait_path, assoc_name, concrete_args)
-                    {
-                        let _ = unify(&params, declared_ty, &actual, &mut subst);
-                    }
-                }
-            }
-        }
+        self.infer_pinned_assoc_types(env, &sig, &params, &mut subst);
         for p in &sig.type_params {
             if !subst.contains_key(p) {
                 return Err(Error::TypeError(format!(
@@ -10586,6 +10595,7 @@ impl Checker {
             }
         }
 
+        self.infer_pinned_assoc_types(env, sig, &params, &mut subst);
         for p in &sig.type_params {
             if !subst.contains_key(p) {
                 return Err(Error::TypeError(format!(

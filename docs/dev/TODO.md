@@ -17,12 +17,30 @@ Common Lisp にあって typelisp に無いものを Phase 0〜9 に落とした
 | 0（実装前に確かめる 6 件） | **完了** 2026-08-20。結果と、それが計画本体に強いた訂正は同計画の該当節 |
 | 1（数値層 1a〜1d） | **全完了**（1a/1b/1d は 2026-08-21）。1c の保留 2 項目（乱数のシード指定・`ldb` 系の幅拡張）はそのまま。1d の complex は prelude の `defstruct`（成分は `f64` 固定、`(sqrt -1.0)` は実数 NaN のまま——[implementation-log.md](implementation-log.md) 該当節）。Phase 2 が残した「char/int の native lowering 5 つ」は未着手——1a と同じ島の分岐を触る作業 |
 | 2（文字・文字列 2a/2b） | **完了** 2026-08-20 |
-| 3（リスト・シーケンス 3a〜3d） | **3a/3b/3c/3d 完了** 2026-08-20。残るは 3e（`:key`/`:test` 等のキーワード引数、Phase 5b 依存） |
+| 3（リスト・シーケンス 3a〜3e） | **全完了**（3e は 2026-08-21）。3e は Phase 5b に依存しなかった——対象は全部ジェネリック `defun` で、`defun` の `&key` は既に通っていた。まだキーワードを取れないのは `defmethod` の側（破壊的操作と `search`/`mismatch`）で、そちらが Phase 5b 待ち |
 | 4（制御構造・マクロ） | **4a 部分完了** 2026-08-20（`prog1`/`prog2`/`do*`/`ecase`/`ccase`/`setq`/`psetq`/`psetf`/`pushnew`）。残るは `block`/`return-from`（島の引数引き回しに全面的に触る）・`prog`/`prog*`・`destructuring-bind`・`sleep`。4b/4c 未着手 |
 | 5〜8 | 未着手 |
 | 9（シンボル・パッケージ・環境） | **9c 完了** 2026-08-20（コマンドライン引数・環境変数・ファイルシステム問い合わせ・日時の分解合成・`y-or-n-p`）。保留は `libc` が要る 4 群と REPL ツール層。9a/9b/9d 未着手 |
 | 付録 C（小さな不整合 4 件） | **完了** 2026-08-20 |
 | 付録 D（範囲外の既存問題 2 件） | **完了** 2026-08-21。D-2 は `Heap::cons` の成長条件（回収後の空きが 1/4 未満なら伸ばす）、D-1 は AOT 実行ファイルが prelude を持ち歩くように |
+
+Phase 3e の作業中に見つけた**コンパイラの穴 1 件（未修正）**: `lambda` が `match` の
+アーム束縛を捕獲すると compile できない。
+
+```lisp
+(defun mk ((o Option<i32>)) (fn (i32) bool)
+  (match o
+    ((some g) (lambda ((a i32)) bool (< a g)))   ; ← `g` を捕獲
+    ((none) (lambda ((a i32)) bool false))))
+(compile ...)  ; => compile: `g` is referenced but no binder in scope states
+               ;    its representation (internal error)
+```
+
+インタプリタでは動く。原因は `core_bridge::translate_match` がアームの本体を `cx` を
+広げずに変換することで、パターン束縛の `Repr` がスコープに入らない
+（`captured_with_reprs` が引ける表に無い）。`let` 束縛の捕獲は通る。
+直すには `Repr` をスコープに入れるだけでなく**島側でその束縛をセル化**する必要があるので、
+一行では済まない。Phase 3e の prelude はこの形を避けて書いてある。
 
 Phase 2/3 の副産物として checker のバグを 4 件見つけて直した。4 件とも
 **「型変数の名前がたまたま一致したときだけ動いていた」同じ形**（詳細は同計画の Phase 0 / Phase 3 の節）:
