@@ -1754,3 +1754,51 @@ fn a_dyn_box_reachable_only_through_a_cons_car_survives_gc() {
     assert_eq!(h.dyn_vtable_id(id), 2);
     assert_accounting(&h);
 }
+
+// ---- headroom ------------------------------------------------------------
+
+/// A live set that nearly fills the arena must make the arena grow, not make
+/// every allocation collect.
+///
+/// The old rule was "collect when the free list empties, grow only if the
+/// collection freed nothing", so a single reclaimed cell was enough to keep the
+/// arena at its size — and the next `cons` emptied the free list again. Every
+/// allocation then paid for a full mark of the whole live set: loading the
+/// prelude into a `1 << 16` heap took ~108 seconds where a `1 << 18` one took
+/// 1.2. Collection count, not wall time, is what this asserts.
+#[test]
+fn a_live_set_near_capacity_grows_the_arena_instead_of_collecting_every_time() {
+    let mut h = Heap::with_capacity(1000);
+    // Root 900 of the 1000 cells, so a collection can only ever reclaim the
+    // other 100 — the shape that used to thrash.
+    for i in 0..900 {
+        let c = h.cons(Value::Int(i), Value::Empty).unwrap();
+        h.push_root(c);
+    }
+    let before = h.gc_count();
+    for i in 0..20_000 {
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap(); // garbage
+    }
+    let collections = h.gc_count() - before;
+    assert!(h.capacity() > 1000, "the arena must have grown, got {}", h.capacity());
+    // 20k allocations against ~100 reclaimable cells is 200 collections under
+    // the old rule. The bound is generous: what it rules out is thrashing.
+    assert!(collections < 25, "expected a handful of collections, got {}", collections);
+    assert_accounting(&h);
+}
+
+/// Growth is bounded by headroom, not unbounded: a workload whose garbage is
+/// most of the arena keeps the arena the size it is.
+#[test]
+fn plentiful_garbage_does_not_grow_the_arena() {
+    let mut h = Heap::with_capacity(1000);
+    for i in 0..100 {
+        let c = h.cons(Value::Int(i), Value::Empty).unwrap();
+        h.push_root(c);
+    }
+    for i in 0..20_000 {
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap(); // garbage
+    }
+    assert_eq!(h.capacity(), 1000, "900 free cells after each collection is headroom enough");
+    assert_accounting(&h);
+}

@@ -48,6 +48,11 @@ use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, MemHashKey, PathId, St
 /// of being OOM-killed.
 pub const GROWTH_FACTOR: usize = 256;
 
+/// How much of the arena must be free after a collection for the arena to be
+/// left at the size it is: below `1/HEADROOM_DIVISOR` free, the next `cons`
+/// grows instead of collecting again — see [`Heap::cons`].
+const HEADROOM_DIVISOR: usize = 4;
+
 /// One owned run of cons cells. Chunks are only ever appended (see
 /// [`Heap::set_growth_limit`]) and never moved or freed individually, which is
 /// what lets a raw `*mut Cell` stay valid for the heap's whole lifetime.
@@ -71,6 +76,9 @@ pub struct Heap {
     free_count: usize,
     // When set, every `cons` collects first — see `set_gc_stress`.
     gc_stress: bool,
+    // How many collections have run, for tests that assert an allocation
+    // pattern does not thrash — see `gc_count`.
+    gc_count: u64,
     roots: Vec<Value>,
     permanent_roots: Vec<Value>,
     // Roots for the duration of a bracketed session — see `push_session_root`.
@@ -192,6 +200,7 @@ impl Heap {
             free,
             free_count: capacity,
             gc_stress: false,
+            gc_count: 0,
             roots: Vec::new(),
             permanent_roots: Vec::new(),
             session_roots: Vec::new(),
@@ -304,6 +313,14 @@ impl Heap {
     /// Cons cells currently in use (`capacity - free_count`).
     pub fn live_count(&self) -> usize {
         self.cap - self.free_count
+    }
+
+    /// How many collections have run over this heap's lifetime. A ratio, not
+    /// an absolute: what it is for is asserting that a workload whose live set
+    /// sits close to capacity collects a handful of times rather than once per
+    /// allocation (see [`Heap::cons`]).
+    pub fn gc_count(&self) -> u64 {
+        self.gc_count
     }
 
     /// Distinct interned symbols.
@@ -1517,6 +1534,21 @@ impl Heap {
         }
         if self.free.is_null() {
             self.gc();
+            // A collection that hands back one cell is not a collection that
+            // helped: with a live set just under capacity the *next* cons
+            // empties the free list again, so nearly every allocation pays for
+            // a full mark of the whole live set. (Measured before this check:
+            // loading the prelude into a `1 << 16` heap took ~108s against 1.2s
+            // in a `1 << 18` one — the same work, ~90x the time.) So grow
+            // whenever the collection failed to restore a working margin, not
+            // only when it freed nothing at all.
+            //
+            // A fixed arena is unaffected: `grow` refuses immediately when no
+            // ceiling was set, so `Error::HeapExhausted` still means exactly
+            // "a collection freed nothing and growth is not permitted".
+            if self.free_count.saturating_mul(HEADROOM_DIVISOR) < self.cap {
+                self.grow();
+            }
             if self.free.is_null() && !self.grow() {
                 return Err(Error::HeapExhausted);
             }
@@ -1757,6 +1789,7 @@ impl Heap {
     }
 
     pub fn gc(&mut self) -> usize {
+        self.gc_count += 1;
         if false {
             self.audit_roots_against_free_list();
         }
