@@ -7,16 +7,25 @@ use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Va
 
 /// Read, type-check, and evaluate a program; return the last expression's
 /// value alongside the heap (so `Sexpr` results can be inspected).
+///
+/// Loads the prelude, which the key methods now require: `get`/`set`/`remove`
+/// carry a `(where (Hash K))` bound (`registry::hashtable_def`), and `Hash` is
+/// a prelude trait. That bound is what turned "unsupported key type" from a
+/// runtime panic into a type error, so depending on the prelude for it is the
+/// trade — and every real program loads the prelude anyway. The one thing that
+/// deliberately does not is the compiler island, which never holds a
+/// `HashTable` value of its own (it only *emits* the `rt_hashtable_*` calls).
 fn run(src: &str) -> Result<(Value, Heap), EvalError> {
     run_with_capacity(src, 1 << 16)
 }
 
 fn run_with_capacity(src: &str, capacity: usize) -> Result<(Value, Heap), EvalError> {
     let mut h = Heap::with_capacity(capacity);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut chk = Checker::new();
-    let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");

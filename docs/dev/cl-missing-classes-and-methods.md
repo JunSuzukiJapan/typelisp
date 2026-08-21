@@ -410,12 +410,12 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `make-hash-table` | ⚠️ | `HashTable::new` ✅。**`:test` を選べない**（キー等価性は組み込み固定）、`:size`/`:rehash-size`/`:rehash-threshold` も無し |
+| `make-hash-table` | ⚠️ | `HashTable::new` ✅。`:test` は「入れない」で確定——表が持たない意味論の選択で（`equal` 一択）、関数値を受け取っても比較できない。`:rehash-size`/`:rehash-threshold` も同じく、`HashMap` にユーザから見える再ハッシュ方針が無い |
 | `gethash` / `(setf gethash)` / `remhash` / `clrhash` / `hash-table-count` | ✅ | `get`（`Option<V>` を返す。CL の第2値の代わり）/ `set` / `remove` / `clear` / `count` |
-| `maphash` | ⚠️ | `doiter` と `entries`/`keys`/`values` で代替できるが `maphash` そのものは無い |
+| `maphash` | ✅ | 2026-08-22（Stage 6a）。`(maphash h f)`、受け手優先 |
 | `with-hash-table-iterator` | ❌ | |
-| `hash-table-p` / `hash-table-test` / `hash-table-size` / `hash-table-rehash-*` | ❌ | |
-| `sxhash` | ❌ | ハッシュ値を取り出せない（ユーザ定義型をキーにする自前の `Hash` トレイトも無い） |
+| `hash-table-p` / `hash-table-test` / `hash-table-size` / `hash-table-rehash-*` | ⚠️ | `size` ✅（2026-08-22。`count` と同値——この表は Rust の `HashMap` で、占有数と別の容量をユーザに見せていない）。`hash-table-p` は (D1)（受け手の静的型が既に答えている）、他は上の `make-hash-table` と同じ理由で対象外 |
+| `sxhash` | ✅ | 2026-08-22（Stage 6a）。`Eq` をスーパトレイトに持つ `Hash` トレイトのメソッド——CL の「`equal` ならば `sxhash` が等しい」を言語の言葉にしたもの。非負・30bit（CL の fixnum）。ユーザ型も `impl Hash` で書ける。ただし**ユーザ型を `HashTable` の鍵にする**のはまだで、mem 層にバケットが要る |
 
 ### 2.17 パス名（CLHS 19）・ファイル（CLHS 20）
 

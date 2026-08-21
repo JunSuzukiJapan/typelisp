@@ -1433,6 +1433,24 @@ pub const SOURCE: &str = r##"
         (Option::none))))
 (defmethod iter ((self HashTable<K,V>)) hashtable-iter<K,V> (hashtable-iter::new (entries self) 0))
 
+;; CL's `maphash` and `hash-table-size`, receiver-first and without the type
+;; name in the method name (§1.1 of cl-parity-plan.md) — `(maphash h f)` and
+;; `(size h)`, next to the `count` the table already had.
+;;
+;; `size` is `count`: this table is a Rust `HashMap`, which has no
+;; user-visible capacity distinct from its occupancy, and reporting a made-up
+;; number would be worse than reporting the real one. CL only promises that
+;; `hash-table-size` is a non-negative integer.
+(pub defmethod maphash ((self HashTable<K,V>) (f (fn (K V) ()))) ()
+  "Call `f` on every key/value pair, in no particular order. CL's `maphash`."
+  (doiter (e (iter self)) (f (car e) (cdr e))))
+
+(pub defmethod size ((self HashTable<K,V>)) i32
+  "How many entries the table holds. CL's `hash-table-size`, which this
+language reports as the occupancy — a Rust `HashMap` has no separate
+user-visible capacity."
+  (count self))
+
 ;; `Eq`/`Ord` (redesign Phase 6.5): user-visible equality/ordering *traits*, so
 ;; `member`/`assoc`/`find`/`position`/`count` below can require `(where (Eq A))`
 ;; instead of taking a predicate — CL's own item-based searches, alongside
@@ -1525,6 +1543,68 @@ pub const SOURCE: &str = r##"
 (impl Ord u64   (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord usize (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord f32   (less ((self Self) (other Self)) bool (< self other)))
+
+;; ---------------------------------------------------------------------
+;; `Hash` — CL's `sxhash`, as a trait.
+;;
+;; CL states the contract as an implication: `(equal x y)` implies
+;; `(= (sxhash x) (sxhash y))`. Making it a trait with `Eq` as its supertrait
+;; says the same thing in this language's own terms — a type that can be
+;; hashed is a type whose values can be compared, and `sxhash` must agree
+;; with that comparison. The reverse does not hold: two different values may
+;; share a hash, and any user impl has to be written on that understanding.
+;;
+;; Results are non-negative and fit in 30 bits — CL calls the result a
+;; *fixnum*, and staying well inside one keeps a hash usable as an index
+;; without a sign check and cheap to combine.
+;; `sxhash` is declared without a docstring on purpose: a lone trailing
+;; string in a trait method is the *default body's* return value, not a
+;; docstring (`take_leading_docstring`'s rule), and this method has no
+;; default body. Its contract is the paragraph above.
+(deftrait Hash (Eq)
+  (sxhash ((self Self)) i64))
+
+;; The mask that keeps a hash non-negative and fixnum-sized: 2^30-1.
+(pub defconstant (*sxhash-mask* i64) 1073741823)
+
+;; FNV-1a over a string's code points, written in typelisp rather than Rust:
+;; it is pure arithmetic on values the language already has, which is the
+;; side of the Rust-builtin policy line it falls on.
+;;
+;; The **32-bit** variant, deliberately. `i64` arithmetic here is ordinary
+;; checked arithmetic, so the 64-bit variant's `h * 1099511628211` would
+;; overflow on the second character; masking to 32 bits after each step keeps
+;; the product below 2^56 and can never overflow. The 32-bit intermediate is
+;; then narrowed to `*sxhash-mask*`, so every `sxhash` in this file lands in
+;; the same 30-bit range.
+(pub defconstant (*fnv-offset-basis* i64) 2166136261)
+(pub defconstant (*fnv-prime* i64) 16777619)
+(pub defconstant (*fnv-mask* i64) 4294967295)
+
+(pub defun sxhash-string ((s string)) i64
+  "FNV-1a over `s`'s code points — the hash `string`'s `Hash` impl uses."
+  (let ((h *fnv-offset-basis*) (i 0) (n (length s)))
+    (progn
+      (while (< i n)
+        (progn
+          (setf h (logand (* (logxor h (as i64 (char->int (ref s i)))) *fnv-prime*) *fnv-mask*))
+          (setf i (+ i 1))))
+      (logand h *sxhash-mask*))))
+
+(impl Hash i32    (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
+(impl Hash i64    (sxhash ((self Self)) i64 (logand self *sxhash-mask*)))
+(impl Hash i8     (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
+(impl Hash i16    (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
+(impl Hash isize  (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
+(impl Hash u8     (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
+(impl Hash u16    (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
+(impl Hash u32    (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
+(impl Hash u64    (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
+(impl Hash usize  (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
+(impl Hash bool   (sxhash ((self Self)) i64 (if self 1231 1237)))
+(impl Hash char   (sxhash ((self Self)) i64 (as i64 (char->int self))))
+(impl Hash string (sxhash ((self Self)) i64 (sxhash-string self)))
+(impl Hash symbol (sxhash ((self Self)) i64 (sxhash-string (symbol->string self))))
 
 ;; ---------------------------------------------------------------------
 ;; The arithmetic traits.

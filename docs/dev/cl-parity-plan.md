@@ -780,12 +780,48 @@ Stage 5c の `Namespace::type_aliases` も Stage 5a の `Registry::struct_defaul
 
 ### Stage 6a — ハッシュ表
 
-- **`Hash` トレイト ＋ `sxhash`**。現在ハッシュ値を取り出せず、ユーザ定義型をキーにする手段も無い
-- 生成は既存の `(HashTable::new)` を維持し、CL の `make-hash-table` の
-  `:test` / `:size` / `:rehash-size` / `:rehash-threshold` を `HashTable::new` の `&key` として足す
-- 反復は既存の `iter`/`doiter` と `entries`/`keys`/`values` が一次 API。`maphash` は
-  受け手優先の `defmethod`（`(maphash h f)`）として並べる。`with-hash-table-iterator`
-- `hash-table-count` / `hash-table-size` は型名を埋めず `count`（既存）/ `size` にする
+状態: 部分完了（2026-08-22）。**ユーザ定義型をキーにする**分だけ残した（理由は下）。
+
+**`Hash` トレイト ＋ `sxhash`** が入った。CL は契約を含意で述べる——`(equal x y)` ならば
+`(= (sxhash x) (sxhash y))`。`Eq` をスーパトレイトに持つトレイトにすると、同じことが
+この言語の言葉で言える: ハッシュできる型とは値を比較できる型で、`sxhash` はその比較と
+一致していなければならない。逆は成り立たない（衝突はありうる）。結果は非負で 30bit に
+収まる（CL は fixnum と言う）。スカラ 14 型に impl があり、ユーザ型も `impl Hash` で
+書ける。文字列は typelisp で書いた 32bit FNV-1a。
+
+**キーのハッシュ可能性が静的になった。** `HashTable` の `get`/`set`/`remove` が
+`(where (Hash K))` を持つので、表が保持できないキー型は**型エラー**になる。以前は
+`Heap::lookup_hash_key` の実行時 panic で、そのコメントは「チェッカーはハッシュ可能性の
+境界を表現できない（この言語にトレイトが無いので）」と言っていた。トレイトは
+2026-06-30 に入っており、これがそのコメントへの回答。代償として組み込みの `HashTable` が
+prelude のトレイトに依存する（島は `HashTable` の値を持たず `rt_hashtable_*` の呼び出しを
+*出す*だけなので影響しない）。
+
+`maphash` と `size` を受け手優先の `defmethod` で足した。`size` は `count` と同じ値を返す
+——この表は Rust の `HashMap` で、占有数と別の「容量」をユーザに見せておらず、
+作った数を返すほうが嘘が少ない。CL も `hash-table-size` には非負整数としか約束していない。
+
+**`HashTable::new` の `&key` は入れていない。** `:test` は表が持たない意味論の選択で
+（この表は `equal` 一択）、関数値を受け取っても比較できない。`:rehash-size` /
+`:rehash-threshold` は `HashMap` にユーザから見える再ハッシュ方針が無い。受け取って無視
+するのは、受け取らないより悪い。
+
+**ユーザ定義型をキーにするのは別作業。** mem 層の表は `MemHashKey`（`Int`/`Bool`/`Char`/
+`Str` の閉じた集合）で引いており、ユーザ型を入れるには `get`/`set`/`remove`/`keys`/
+`values`/`entries` の下にバケット層——ハッシュ衝突を構造的等価で解決する層——を敷く必要が
+ある。それを prelude 側に置こうとすると型が合わない（表の宣言型 `V` と、格納したい
+「`(K,V)` のバケット」が別物で、組み込みメソッドのシグネチャに後者を書けない）ので、
+バケットは Rust 側（typelisp-mem と interp、および `rt_hashtable_*`）に置くことになる。
+`sxhash` と `(where (Hash K))` はその作業の入口として先に入れてある。
+
+**副産物: コンパイル済みコードの整数切り詰めを 2 件見つけた**（[TODO.md](TODO.md) に記録）。
+1 件は直した——整数リテラルは島へ `Sexpr` として渡るので 3bit タグを引いた 61bit しか
+残らず、`4611686018427387903` が `-1` にコンパイルされていた。`float` が最初から採っている
+32bit 2 分割にして LLVM 側で組み直す。自己ホストなので移行にはブートストラップの順序が
+要った（島の読み手を新形式にして*古い*エミッタで 1 世代作り、そのあとエミッタを切り替える。
+二重読みのコードは書いていない）。残る 1 件は幅の広い `i64` **グローバル**が同じ 61bit で
+壊れるもので、渡し方ではなくコンパイル済みコードから見たグローバルの表現の問題なので
+未修正。
 
 ### Stage 6b — 多次元配列 `Array<T>`
 

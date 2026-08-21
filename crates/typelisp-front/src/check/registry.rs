@@ -1286,6 +1286,20 @@ fn result_of(t: Type, e: Type) -> Type {
 /// `crate::eval::interp`.
 fn hashtable_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
+    // The key methods require `K: Hash`. `Hash` is a *prelude* trait
+    // (`deftrait Hash (Eq)`), declared after this registry is built, which is
+    // fine: a bound is validated at the call site (`validate_where_bounds`),
+    // by which time the prelude has loaded.
+    //
+    // This is what turned "unsupported key type" from a runtime panic into a
+    // type error. The old comment on `Heap::lookup_hash_key` said the checker
+    // "can't express a hashable bound (no traits in this language)"; traits
+    // arrived in 2026-06-30, and this is that comment's answer.
+    let hashable = || {
+        let mut b: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
+        b.insert("k".to_string(), vec![TraitBound { trait_path: Path::root("hash"), assoc: BTreeMap::new() }]);
+        b
+    };
     assoc.insert(
         "new".to_string(),
         AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: hashtable_ty(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: false, builtin: true },
@@ -1293,7 +1307,7 @@ fn hashtable_def() -> AdtDef {
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true, bounds: hashable(), optionals: Vec::new(), keys: Vec::new() },
             instance: true,
             builtin: true,
         },
@@ -1301,7 +1315,7 @@ fn hashtable_def() -> AdtDef {
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k"), tvar("v")], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k"), tvar("v")], ret: Type::Unit, public: true, builtin: true, bounds: hashable(), optionals: Vec::new(), keys: Vec::new() },
             instance: true,
             builtin: true,
         },
@@ -1309,7 +1323,7 @@ fn hashtable_def() -> AdtDef {
     assoc.insert(
         "remove".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true, bounds: hashable(), optionals: Vec::new(), keys: Vec::new() },
             instance: true,
             builtin: true,
         },

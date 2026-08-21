@@ -1551,8 +1551,19 @@ pub const SOURCE: &str = r#"
 (defun compile-unit ((m llvm-module) (fn-name string) (builder llvm-builder))llvm-value
     (const-i64 builder 0))
 
+;; `(int HI LO)` -- two 32-bit halves, not one word, for
+;; the same reason `compile-float` takes two: this island
+;; reads a `Sexpr` int back through its 3-bit tag, so only
+;; 61 bits survive the crossing and a wider literal arrived
+;; sign-extended from bit 60. Reassembled here in LLVM,
+;; where a full 64-bit word is ordinary -- doing it in the
+;; island's own arithmetic would overflow the same way.
 (defun compile-int ((m llvm-module) (fn-name string) (builder llvm-builder) (e Sexpr))llvm-value
-    (const-i64 builder (sexpr-int (sexpr-car (sexpr-cdr e)))))
+    (let ((hi (sexpr-int (sexpr-car (sexpr-cdr e))))
+          (lo (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+      (build-or builder
+                (build-shl builder (const-i64 builder hi) (const-i64 builder 32))
+                (const-i64 builder lo))))
 
 ;; `(char c)` -- a bare `char` literal. Compiled the same
 ;; way `compile-int` is (a plain, untagged `i64` scalar --
@@ -3500,7 +3511,17 @@ pub const SOURCE: &str = r#"
                    (store-arg builder bslot 0 v)
                    (set env nm bslot)))
                (if (equal s "pat-lit")
-                   (compile-pattern-guard builder cur-fn (build-icmp-eq builder v (const-i64 builder (sexpr-int (sexpr-car (sexpr-cdr pat))))) fail-block)
+                   ;; `(pat-lit HI LO)` -- two 32-bit halves, like `(int HI LO)`
+                   ;; and `(float HI LO)`. A pattern's integer is matched
+                   ;; against an `Sexpr`, so it already fits in the 61 bits a
+                   ;; tagged int carries; the shape is uniform so that "an
+                   ;; integer crosses as two halves" has no exceptions.
+                   (compile-pattern-guard builder cur-fn
+                     (build-icmp-eq builder v
+                       (build-or builder
+                                 (build-shl builder (const-i64 builder (sexpr-int (sexpr-car (sexpr-cdr pat)))) (const-i64 builder 32))
+                                 (const-i64 builder (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))))
+                     fail-block)
                    (if (equal s "pat-ctor")
                        (let ((variant (sexpr-int (sexpr-car (sexpr-cdr pat)))))
                          (let ((subpats (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))

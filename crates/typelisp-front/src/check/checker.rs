@@ -4804,6 +4804,18 @@ impl Checker {
     fn parse_struct_options(&self, heap: &Heap, opts: &[Value], opt_locs: &[Option<Loc>]) -> Result<StructOptions, Error> {
         let mut out = StructOptions::default();
         for (i, opt) in opts.iter().enumerate() {
+            // A bare symbol here is almost always the *old* generic header,
+            // `(defstruct (Pair A B) ...)`, which the option list now occupies
+            // the syntax of. Say that, rather than "an option must be a list".
+            if let Value::Symbol(id) = opt {
+                let name = heap.symbol_name(*id);
+                if !name.starts_with(':') {
+                    return Err(Error::TypeError(format!(
+                        "defstruct: `{}` is not an option — a definition name's type parameters go on the name itself (`Name<{}>`); the list after `defstruct` is the option list (`:constructor`, `:copier`, `:include`)",
+                        name, name
+                    )));
+                }
+            }
             let items = heap.list_to_vec(*opt).map_err(|_| {
                 Error::TypeError("defstruct: each option must be a list, e.g. (:constructor make-point)".into())
             })?;

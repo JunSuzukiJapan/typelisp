@@ -213,7 +213,10 @@ fn a_constructor_arity_mismatch_is_rejected() {
 
 #[test]
 fn the_old_list_form_defstruct_header_is_rejected() {
-    assert_check_err("(defstruct (Pair A B) (a A) (b B))", "definition name");
+    // The list after `defstruct` is the *option list* now (Phase 5a), so the
+    // old header form lands there — and the error says so rather than
+    // complaining that `A` is not a list.
+    assert_check_err("(defstruct (Pair A B) (a A) (b B))", "is not an option");
 }
 
 #[test]

@@ -308,14 +308,14 @@ fn a_freshly_built_module_verifies_successfully() {
 
 /// The self-hosted compiler body (`src/compiler.rs`'s `compile-value`/
 /// `compile-function`) compiling the exact shape `ast_bridge::ast_to_sexpr`
-/// produces for `Expr::Int` — `'(int 42)` here stands in for what the bridge
+/// produces for `Expr::Int` — `'(int 0 42)` here stands in for what the bridge
 /// would build from the real typed AST (the Rust-side `ast_bridge` unit
 /// tests already cover that translation in isolation; this covers the
 /// compiler body consuming it). No parameters, hence the empty `'()`.
 #[test]
 fn the_compiler_body_compiles_an_int_literal_node() {
     let ir = eval_string_with_compiler(
-        r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int 42)))"#,
+        r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int 0 42)))"#,
     );
     assert!(ir.contains("define i64 @answer"), "IR was:\n{}", ir);
     assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
@@ -371,7 +371,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
 #[test]
 fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
     let module = expect_llvm_module(eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int 0 5))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
@@ -1287,7 +1287,7 @@ fn compile_dispatches_a_defstruct_field_of_fn_type_to_native_code() {
 /// not found in the ordinary `env`, found instead in `fn-env`, so it gets
 /// boxed into a fresh `ClosureBox` on the spot (`build-make-closure`, the
 /// same builtin `compile-lambda` already uses). `(apply-indirect (var "f")
-/// (int 5))` then calls through that box, proving the boxing produced a
+/// (int 0 5))` then calls through that box, proving the boxing produced a
 /// genuinely callable closure, not just a value that type-checks.
 #[test]
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
@@ -1304,7 +1304,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_closure_new"))) ())
              (let ((ignored-apply (add-function m "rt_apply_any"))) ())
-             (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int 5)))))"#,
+             (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
@@ -1341,7 +1341,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
              (let ((ignored-new (add-function m "rt_closure_new"))) ())
              (let ((ignored-apply (add-function m "rt_apply_any"))) ())
              (let ((ignored-push (add-function m "rt_push_sexpr_root"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "go" true) (0 int 5)))))"#,
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "go" true) (0 int 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
@@ -1704,7 +1704,7 @@ fn let_shadowing_is_correctly_restored_after_the_let_ends() {
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . 0))
               '(assoc "i64" "+" true
-                 (0 let (((x . 0) . (int 99))) (var "x" false))
+                 (0 let (((x . 0) . (int 0 99))) (var "x" false))
                  (0 var "x" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -5976,7 +5976,7 @@ fn the_island_runs_a_whole_bridged_defun() {
 /// any `defstruct`, which is the passthrough kind `6`.
 #[test]
 fn compile_reads_a_hashtable_field_out_of_a_struct() {
-    let v = eval_ok_with_compiler(
+    let v = run_with_compiler_and_prelude(
         r#"
         (defstruct cache (table HashTable<i64,i64>))
         (defun probe () i64
@@ -5987,7 +5987,8 @@ fn compile_reads_a_hashtable_field_out_of_a_struct() {
         (compile probe)
         (probe)
         "#,
-    );
+    )
+    .expect("eval failed");
     assert_eq!(v, Value::Int(42));
 }
 
@@ -6000,7 +6001,7 @@ fn compile_reads_a_hashtable_field_out_of_a_struct() {
 /// reached through a different door.
 #[test]
 fn compile_captures_a_hashtable_in_a_closure() {
-    let v = eval_ok_with_compiler(
+    let v = run_with_compiler_and_prelude(
         r#"
         (defun probe () i64
           (let ((t (the HashTable<i64,i64> (HashTable::new))))
@@ -6010,7 +6011,8 @@ fn compile_captures_a_hashtable_in_a_closure() {
         (compile probe)
         (probe)
         "#,
-    );
+    )
+    .expect("eval failed");
     assert_eq!(v, Value::Int(42));
 }
 
@@ -6086,4 +6088,37 @@ fn compiled_format_renders_a_float_parameter_as_a_number() {
         .expect("eval failed"),
         "2.25|7"
     );
+}
+
+// ---- wide integer literals ---------------------------------------------------
+//
+// An integer crosses into the compiler island as a `Sexpr`, whose 3-bit tag
+// leaves 61 bits of payload — so a literal needing more than that arrived
+// sign-extended from bit 60, and `4611686018427387903` compiled to `-1` while
+// the interpreter returned it whole. `core_bridge::int_node` now splits every
+// integer into two 32-bit halves and `compile-int` reassembles them in LLVM,
+// the shape `float` has always used and for exactly the same reason.
+
+/// The value of `src`'s last expression, with the prelude *and* the compiler
+/// island loaded — `(compile f)` needs the island.
+fn run_compiled(src: &str) -> Value {
+    run_and_read(src, 1 << 16, |_h, v| v).expect("eval failed")
+}
+
+#[test]
+fn a_literal_wider_than_the_sexpr_tag_allows_survives_compilation() {
+    let src = "
+        (defun big () i64 4611686018427387903)
+        (compile big)
+        (big)
+    ";
+    assert_eq!(run_compiled(src), Value::Int(4611686018427387903));
+}
+
+#[test]
+fn the_extreme_i64_literals_survive_compilation() {
+    let hi = "(defun hi () i64 9223372036854775807) (compile hi) (hi)";
+    assert_eq!(run_compiled(hi), Value::Int(i64::MAX));
+    let lo = "(defun lo () i64 -9223372036854775807) (compile lo) (lo)";
+    assert_eq!(run_compiled(lo), Value::Int(-9223372036854775807));
 }

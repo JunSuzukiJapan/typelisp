@@ -334,8 +334,21 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
     match tag.as_str() {
         // ---- literals ----------------------------------------------------
         // Identical on both sides: the payload is a plain machine word the
-        // island reads with `sexpr-int`/`sexpr-bool`/`sexpr-char`.
-        "int" | "char" | "bool" => Ok(form),
+        // island reads with `sexpr-bool`/`sexpr-char`. A `char` fits in 21
+        // bits and a `bool` in one, so both cross whole.
+        "char" | "bool" => Ok(form),
+        // An `int` does *not*: the island reads a `Sexpr` int back through
+        // its 3-bit tag, so only 61 bits survive, and a literal needing more
+        // came out sign-extended from bit 60 — `4611686018427387903` compiled
+        // to `-1` while the interpreter returned it whole. Split into two
+        // 32-bit halves for exactly the reason `float` below already does,
+        // and let `compile-int` reassemble them in LLVM (where a full 64-bit
+        // word is ordinary) rather than in the island's own tagged
+        // arithmetic, where the shift would overflow again.
+        "int" => match core::field(heap, form, 0) {
+            Some(Value::Int(n)) => int_node(heap, n),
+            _ => Err(malformed(heap, form)),
+        },
         "unit" => core::tagged(heap, "unit", &[]),
         "float" => {
             let bits = match core::field(heap, form, 0) {
@@ -1249,7 +1262,7 @@ fn sexpr_leaf(
 fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
     match datum {
         Value::Empty => sexpr_construct(heap, SEXPR_NIL, &[]),
-        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| core::tagged(h, "int", &[Value::Int(n)])),
+        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| int_node(h, n)),
         Value::Bool(b) => sexpr_leaf(heap, SEXPR_BOOL, |h| core::tagged(h, "bool", &[Value::Bool(b)])),
         Value::Char(c) => sexpr_leaf(heap, SEXPR_CHAR, |h| core::tagged(h, "char", &[Value::Char(c)])),
         Value::Str(id) => {
@@ -2014,7 +2027,16 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
                 (Some("char"), Some(Value::Char(c))) => c as i64,
                 _ => return Err(malformed(heap, pat)),
             };
-            core::tagged(heap, "pat-lit", &[Value::Int(n)])
+            // Two 32-bit halves, like every other integer crossing into the
+            // island. Not because this one can overflow — a pattern's integer
+            // is matched against an `Sexpr`, so it is already inside the 61
+            // bits a tagged int holds — but so that "an integer crosses as two
+            // halves" has no exceptions to remember.
+            core::tagged(
+                heap,
+                "pat-lit",
+                &[Value::Int(((n as u64) >> 32) as i64), Value::Int((n as u64 & 0xFFFF_FFFF) as i64)],
+            )
         }
         "pat-ctor" => translate_ctor_pattern(heap, pat, cx),
         "pat-typetest" => {
@@ -2188,6 +2210,23 @@ fn repr_kind(heap: &Heap, form: Value, i: usize) -> Result<i64, Error> {
     Ok(repr.field_kind())
 }
 
+/// `(int HI LO)` — an integer literal as two 32-bit halves.
+///
+/// One helper rather than three call sites writing `(int N)`, because the
+/// split is not an optimization: this island reads a `Sexpr` int back through
+/// its 3-bit tag, so a one-word payload silently loses everything above bit
+/// 60 (`4611686018427387903` compiled to `-1` while the interpreter returned
+/// it whole). `compile-int` reassembles the halves in LLVM, where a full
+/// 64-bit word is ordinary. `float_form` has taken the same two-half shape
+/// since it was written, for the same reason.
+fn int_node(heap: &mut Heap, n: i64) -> Result<Value, Error> {
+    core::tagged(
+        heap,
+        "int",
+        &[Value::Int(((n as u64) >> 32) as i64), Value::Int((n as u64 & 0xFFFF_FFFF) as i64)],
+    )
+}
+
 /// `(str (int c0) (int c1) ...)` for a compile-time-known string.
 ///
 /// Not a `Value::Str`: the content is known now, but the `StrId` an allocation
@@ -2197,7 +2236,7 @@ fn repr_kind(heap: &Heap, form: Value, i: usize) -> Result<i64, Error> {
 fn str_form(heap: &mut Heap, s: &str) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     for c in s.chars() {
-        let node = core::tagged(f.heap(), "int", &[Value::Int(c as i64)])?;
+        let node = int_node(f.heap(), c as i64)?;
         f.push(node);
     }
     f.finish("str")
@@ -2214,10 +2253,10 @@ fn bignum_form(heap: &mut Heap, n: &num_bigint::BigInt) -> Result<Value, Error> 
         num_bigint::Sign::Plus => 1,
     };
     let mut f = Items::new(heap);
-    let s = core::tagged(f.heap(), "int", &[Value::Int(sign_val)])?;
+    let s = int_node(f.heap(), sign_val)?;
     f.push(s);
     for d in digits {
-        let node = core::tagged(f.heap(), "int", &[Value::Int(d as i64)])?;
+        let node = int_node(f.heap(), d as i64)?;
         f.push(node);
     }
     f.finish("bignum")

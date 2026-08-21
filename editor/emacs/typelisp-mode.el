@@ -231,6 +231,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "map-into" "set-contents" "rplaca" "rplacd"
     ;; Eq / Ord trait methods
     "equals" "not-equals" "less" "less-equal" "greater" "greater-equal"
+    ;; the `Hash' trait and the hash-table methods that came with it (Phase 6a)
+    "sxhash" "sxhash-string" "maphash" "size"
     ;; complex numbers (Phase 1d).  `complex' is both the type and CL's
     ;; constructor function, so it appears in both lists.
     "complex" "realpart" "imagpart" "conjugate" "phase" "cis" "atan2"
@@ -305,7 +307,7 @@ stream (CLHS 12.1.6).")
     ;; nine return values
     "decoded-time"
     ;; builtin traits
-    "Iter" "Eq" "Ord" "Error"
+    "Iter" "Eq" "Ord" "Error" "Hash"
     ;; the arithmetic traits (Phase 1a)
     "Add" "Sub" "Mul" "Div" "Rem" "Bits" "Number")
   "Builtin generic/abstract type names and traits.")
