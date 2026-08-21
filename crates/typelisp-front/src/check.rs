@@ -10,6 +10,7 @@ pub mod forms;
 pub mod repr;
 pub mod registry;
 pub mod checker;
+pub mod loop_dsl;
 pub mod locate;
 pub mod semantic;
 

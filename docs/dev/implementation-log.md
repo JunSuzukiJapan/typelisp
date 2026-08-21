@@ -7940,3 +7940,105 @@ CL 自身が `:test` の既定を `eql` としているのと同じ形——**�
 
 `tests/seq_keywords_test.rs`（14 本）。`seq_catalog_test`/`prelude_artifacts_test`/
 `prelude_compiled_test`/`editor_keyword_sync_test` も green。
+
+---
+
+## CL 残差 Phase 4b — 拡張 `loop` DSL（2026-08-21、branch `feature/cl-parity`）
+
+[cl-parity-plan.md](cl-parity-plan.md) の Stage 4b。CL の LOOP を、`:named` を除いて入れた。
+
+### 分岐は第 1 要素、CL 自身の規則
+
+Phase 0.6 の結論どおり `loop` の第 1 要素がキーワードなら DSL、そうでなければ今までの
+無限ループ。CL 自身が simple loop 形を持つので規則としても CL 準拠で、**既に書かれている
+`loop` は 1 つも意味が変わらない**（prelude の `while`/`dotimes`/`dolist` はどれも
+第 1 要素がコンスなので無関係）。
+
+CL は節の語を裸のシンボルで書くが、ここでは全部キーワードにした。裸の `for` はただの
+変数参照になるし、キーワードであることが単純ループとの分かれ目でもある。例外は変数と値を
+区切る `=` で、位置が一意なので裸でも `:=` でも読む。
+
+### 計画の前提が誤っていた
+
+計画は「静的型が問題にならない: `collect` は `(let ((acc (Vector::new))) … (push acc e) …
+acc)` へ展開すれば要素型が推論で決まる」と書いていた。**決まらない**:
+
+```text
+(let ((acc (Vector::new))) (progn (push acc 5) (len acc)))
+=> type error: cannot infer type argument `t` for `vector::new`
+```
+
+`Vector::new` の型引数は**期待型から前向きに**来る。後続の `push` から後ろ向きには届かない
+——双方向検査であって単一化ベースの推論ではない。
+
+そこで `check_loop_dsl` は 2 パスになった:
+
+1. `:with`/`:for` の節ごとに**代表式**を 1 つ検査して、その変数の型を学び `Env` を伸ばす
+   （`:for x :in s` の代表式は `(get (copy-seq s) 0)`。検査するだけで評価はしない）。
+2. その環境で集約式を検査して要素型を求め、`(the Vector<T> (Vector::new))` の `T` を
+   書き込む。
+
+これは「チェッカーは常に型を知っている。知った型は自分が組む木へ焼き込む」の一例
+（[[typelisp-static-types-are-always-known]]）。本体を 2 回検査するのはここが初めてではない
+——ジェネリック `defun` の本体は診断で 1 回、特殊化ごとにもう 1 回検査される。
+
+**書き出す型は往復で検証する。** `mangle_type` は表層型構文をそのまま出すが、**すべての型に
+表層構文があるわけではない**——関数型の括弧はリーダのジェネリックトークンの中を通れない
+（`extend_angle_token`）。`the_form` は書いた文字列を `parse_type_here_at` で読み直して
+同じ型に戻ることを確かめ、戻らなければその場でエラーにする（黙って別の形を出さない）。
+
+### 構造
+
+`loop_dsl.rs` は 2 つの仕事しかしない: `parse` が節列を `Plan` に読む（名前も型も解決しない）、
+`build` が `Plan` を普通のソース（`let*`/`loop`/`if`/`setf`/`push`）に戻す。型を要する
+部分だけ `Resolved` として外から渡る。`checker.rs` に置かなかったのは
+[[typelisp-checker-only-one-boundary]] の線引きどおり——状態を持たない構築は別ファイルへ。
+
+展開の形:
+
+```lisp
+(let* (<状態> <蓄積> ("loop first" true))
+  (progn <initially...>
+    (loop
+      (if "loop first" (progn (setf "loop first" false) ()) (progn <steppers> ()))
+      (if <尽きた> (progn <finally...> (return <結果>)) ())
+      (let* (<毎回の束縛>) (progn <本体節...> ())))))
+```
+
+**ステップを本体の頭に置き、初回だけ飛ばす**のが要。CL の順序は「初期化 → 判定 → 本体 →
+ステップ → 判定 → …」で、これはその同じ列を、脱出を 1 箇所にまとめた形。`:for v = e :then f`
+の `f` が 2 回目以降の**先頭**で評価されるという CL の規則も、これで自然に出る（末尾で
+ステップすると最後の本体の後にもう 1 回 `f` を評価してしまう）。
+
+生成する名前はすべて空白を含む（`"loop first"`、`"loop buf 0"`…）ので、ソースには書けず
+ユーザ変数と衝突しない——`mangled_method_name` と同じ手。入れ子のループは同じ名前を使うが、
+内側の `let*` が外側を隠し、外側のステップは内側の `let*` の外にあるので正しく働く
+（テストあり）。
+
+### 途中で踏んだ 3 つ
+
+1. **`(Vector::new)` は `Value::Path` であって symbol ではない。** リーダが読み時に `::` で
+   割るので、`intern_symbol("Vector::new")` で作った頭は「no such function」になる。
+   `forms::path_form` を使う。
+2. **`(progn … ())` は文の並びには要るが、値を返す位置では邪魔。** `:initially` を
+   ループの前に置くラッパーで `statements`（末尾に `()` を足す）を使ってしまい、構築全体が
+   Unit になった。値を返す `progn` と文の `progn` を別のヘルパーに分けた。
+3. **`:finally (return e)` と合成の `(return <結果>)` が二重になる。** ループが 2 つの違う型で
+   脱出することになる。`:finally` の最後が `(return …)` なら合成側を出さない——CL の
+   `finally (return …)` の慣用そのもので、集約しないループが自分の答えを名乗る唯一の方法。
+
+### CL から外したもの
+
+- 節の語はキーワード（上記）。
+- `:maximize`/`:minimize` は `Option<T>`（CL が空列に nil を返すのと同じで、任意の `Ord` 型に
+  最小元は無い）。`:thereis` は `Option<T>` を取り `Option<T>` を返す——CL の「最初の非 nil 値」に
+  当たるのがこれで、`bool` を試すのは `:always`/`:never`。
+- **`:return` だけ書いて集約も `:finally` も無いのはエラー**。CL は尽きたとき nil を返すが、
+  ここにはそれが無いのでループが「尽きたときの値」を言う必要がある。読める文言で先に弾く。
+- `:named`（Phase 4a の `block`/`return-from` 依存）、`:and`、`:being`、`:it`、`:nconc` は無い。
+- 変数節は本体節より前（CL の規則）。後ろに書くと「そこから先だけ回る」と読めるのでエラー。
+
+### 検証
+
+`tests/loop_dsl_test.rs`（20 本）。展開結果は普通のソースなので JIT/AOT もそのまま通る
+（`(compile …)` で確認）。

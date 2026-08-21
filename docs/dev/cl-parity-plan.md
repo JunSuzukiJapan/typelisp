@@ -548,16 +548,43 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
 
 ### Stage 4b — 拡張 `loop` DSL
 
-typelisp の `loop` は**無限ループのみ**で、CL の LOOP DSL とは名前が同じだけの別物。
+**状態: 完了（2026-08-21）、`:named` を除く。** 実装は
+`crates/typelisp-front/src/check/loop_dsl.rs`（節の読み取りと再構成）と
+`Checker::check_loop_dsl`（型を決める側）、テストは `tests/loop_dsl_test.rs`（20 本）、
+ドキュメントは [syntax.md](../syntax.md) §5.1。
 
-- 既存の無限ループ `loop` は **CL の simple loop 形**として残し、
-  **第 1 要素がキーワードなら DSL に分岐**する（CL 自身の規則と同じ。Phase 0.6 で確認）。
-- 節: `for` / `in` / `on` / `across` / `=` / `then` / `from` / `to` / `below` / `by` / `repeat` /
-  `with` / `while` / `until` / `collect` / `append` / `sum` / `count` / `maximize` / `minimize` /
-  `when` / `unless` / `if` / `do` / `initially` / `finally` / `return` / `named` / `thereis` / `always`。
-- **静的型が問題にならない**: `collect` は `(let ((acc (Vector::new))) … (push acc e) … acc)` へ
-  展開すれば要素型が推論で決まる。`sum`/`maximize` も同様に初期値の型から決まる。
-- `named` は Phase 4a の `block`/`return-from` に依存する。
+分岐は Phase 0.6 の結論どおり **第 1 要素がキーワードかどうか**。CL 自身の simple loop
+規則と同じなので、既に書かれている `loop` は 1 つも意味が変わらない。
+
+入った節: `:with`/`:for`（`:in`/`:across`/`:on`/`:from`/`:downfrom`/`:upfrom`/`:to`/`:below`/
+`:downto`/`:above`/`:by`/`=`/`:then`）/`:repeat`/`:do`/`:collect`/`:append`/`:sum`/`:count`/
+`:maximize`/`:minimize`/`:always`/`:never`/`:thereis`/`:while`/`:until`/`:when`/`:unless`/`:if`/
+`:else`/`:return`/`:initially`/`:finally`/`:into`。
+
+**計画の前提が 1 つ誤っていた。** 「`collect` は `(let ((acc (Vector::new))) … (push acc e) …
+acc)` へ展開すれば要素型が推論で決まる」——決まらない:
+
+```text
+(let ((acc (Vector::new))) (progn (push acc 5) (len acc)))
+=> type error: cannot infer type argument `t` for `vector::new`
+```
+
+`Vector::new` の型引数は**期待型から前向きに**来るので、後続の `push` からは決まらない。
+したがって DSL は「ソースへ展開して再検査するだけ」では済まない。`check_loop_dsl` は
+2 パスになった: 変数節ごとに代表式を検査して型を学び、その環境で集約式を検査して要素型を
+求め、`(the Vector<T> (Vector::new))` の `T` を自分で書き込む。書けない型（関数型など）は
+往復検証で弾いてその旨のエラーにする。`:maximize`/`:minimize`/`:thereis` の `Option<T>` も同じ。
+
+**CL から外した点**:
+
+- **節の語はキーワード**（`:for`/`:collect`…）。裸の `for` はただの変数参照になるし、
+  キーワードであることが単純ループとの分かれ目でもある。`=` だけは位置が一意なので裸でも可。
+- `:maximize`/`:minimize` は `Option<T>`、`:thereis` は `Option<T>` を取り `Option<T>` を返す
+  （nil が無いため。`bool` を試すのは `:always`/`:never`）。
+- **`:return` だけで集約も `:finally` も無いのはエラー**。CL は尽きたとき nil を返すが、
+  ここにはそれが無いのでループが「尽きたときの値」を言う必要がある。
+- `:named`（Phase 4a の `block`/`return-from` 依存なので同項の残件へ）、`:and`、`:being`、
+  `:it`、`:nconc` は入っていない。
 
 ### Stage 4c — 評価とマクロ
 

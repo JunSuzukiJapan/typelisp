@@ -505,6 +505,71 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 `lambda` の境界は越えられない）。`loop` の型は内部で見つかった `break`/`return` の値型の合流型
 （一度も脱出しなければ `!`）。
 
+### 5.1 拡張 `loop`（CL の LOOP DSL、cl-parity-plan.md Phase 4b）
+
+`loop` の**第 1 要素がキーワードなら**節の並びとして読む。そうでなければ上の単純ループの
+ままで、既に書かれている `loop` の意味は変わらない（CL 自身の simple loop 規則と同じ）。
+
+CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 collect i)`）、ここでは
+**すべてキーワード**にする——裸の `for` はただの変数参照になってしまうし、キーワードで
+あることが単純ループとの分かれ目でもある。例外は変数と値を区切る `=` で、位置が
+一意なので裸でもキーワード（`:=`）でも読む。
+
+```lisp
+(loop :for i :from 1 :to 3 :collect i)              ; #<vector 1 2 3>
+(loop :for x :in (iter v) :when (evenp x) :sum x)
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector 1 2 4 8>
+(loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
+```
+
+**変数節**（本体節より前に書く。CL の規則で、後ろに書くと「そこから先だけ回る」と
+読めてしまうためエラーにする）:
+
+| 節 | 意味 |
+|---|---|
+| `:with v = e` | 一度だけ束縛する。前の節の変数を読んでよい |
+| `:for v :in s` / `:for v :across s` | `Iter` の要素を順に。CL のリスト/ベクタの区別はここには無いので同じ節の別綴り |
+| `:for v :on s` | 以降の**接尾辞**を順に。CL は共有される tail cons を渡すが、`Iter` に共有すべき tail は無いので新しい `Vector` |
+| `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | 数え上げ。`:downfrom`/`:upfrom` も可 |
+| `:for v = e [:then f]` | `e` で始め、2 回目以降は `f`（`:then` 無しなら毎回 `e`） |
+| `:repeat n` | 回数だけ回す |
+
+`:for` を複数書くと**並行に**進み、どれか 1 つが尽きた時点で終わる。
+
+**本体節**（書いた順に毎回実行）:
+
+| 節 | 意味 |
+|---|---|
+| `:do form...` | 副作用のため |
+| `:collect e [:into v]` | `Vector<T>` に集める |
+| `:append e [:into v]` | `Iter` の中身を継ぎ足す |
+| `:sum e` / `:count e` | 合計 / 真だった回数 |
+| `:maximize e` / `:minimize e` | 最大 / 最小。**`Option<T>`**（CL が空列に nil を返すのと同じ。任意の `Ord` 型に最小元は無い） |
+| `:always e` / `:never e` | 全部満たせば `true`、破れたら即 `false` |
+| `:thereis e` | `e` は **`Option<T>`**。最初の `some` を返し、無ければ `none`（CL の「最初の非 nil 値」に当たるのがこれ。`bool` を試すなら `:always`/`:never`） |
+| `:while e` / `:until e` | ここで**正常終了**する（`:finally` は走り、集めたものが答え） |
+| `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | 節 1 つを条件付きにする |
+| `:return e` | 即座にその値で脱出（`:finally` は走らない。CL と同じ） |
+| `:initially form...` / `:finally form...` | ループの前 / 正常終了時 |
+
+**ループの値**は、集約節があればその蓄積（複数あれば最初のもの）、`:always`/`:never` なら
+`true`、`:thereis` なら `none`、どれも無ければ `()`。`:finally` の最後が `(return e)` なら
+それが値になる——CL の `finally (return …)` の慣用で、集約しないループが自分の答えを
+名乗る唯一の方法。
+
+**CL との違い / 入っていないもの**:
+
+- **節の語はキーワード**（上記）。
+- `:maximize`/`:minimize`/`:thereis` は `Option<T>` を返す（nil が無いため）。
+- **`:return` だけ書いて集約も `:finally` も無いのはエラー**。CL は尽きたとき nil を返すが、
+  ここにはそれが無いので「尽きたときの値」をループが言う必要がある。
+- `:named`（`block`/`return-from` 依存。Phase 4a の残件）、`:and` による並行節の連結、
+  `:being`/ハッシュ表の専用反復、`:it`、`:nconc` は入っていない。
+- `:collect` の要素型はチェッカーが集約式を先に検査して決め、`(the Vector<T> …)` として
+  書き込む。`Vector::new` の型引数は期待型から前向きに来るので、後ろの `push` からは
+  決まらない（計画のこの前提は誤りだった）。関数型のように**書き表せない型**を集めようと
+  するとその旨のエラーになる。
+
 ## 6. 関数値・呼び出し
 
 ```lisp

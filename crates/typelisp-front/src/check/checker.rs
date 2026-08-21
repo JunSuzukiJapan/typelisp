@@ -11,6 +11,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::{parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScope, Type, TypeNameSpan, Value};
+
+use super::loop_dsl;
 use typelisp_read::name_lexer::{NameLexer, NameTok};
 use super::semantic::{TypeKind, TypeUse};
 
@@ -7599,7 +7601,7 @@ impl Checker {
             "decf" => return self.check_incf_decf(heap, interp, env, args, "-"),
             "rotatef" => return self.check_rotatef_shiftf(heap, interp, env, args, false),
             "shiftf" => return self.check_rotatef_shiftf(heap, interp, env, args, true),
-            "loop" => return self.check_loop(heap, interp, env, args, arg_locs),
+            "loop" => return self.check_loop(heap, interp, env, args, arg_locs, expected),
             "catch" => return self.check_catch(heap, interp, env, args, arg_locs, expected),
             "throw" => return self.check_throw(heap, interp, env, args, arg_locs),
             "unwind-protect" => return self.check_unwind_protect(heap, interp, env, args, arg_locs, expected),
@@ -9687,10 +9689,143 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
     ) -> Result<Checked, Error> {
+        // CL's own rule: a `loop` whose first form is a keyword is the
+        // extended DSL, anything else is the simple loop this always was.
+        if loop_dsl::is_dsl(heap, args) {
+            return self.check_loop_dsl(heap, interp, env, args, arg_locs, expected);
+        }
         let (body, ty) = self.check_loop_body(heap, interp, env, args, arg_locs, Type::Never)?;
         let form = forms::loop_form(heap, &body)?;
         Ok(Checked::new(form, ty))
+    }
+
+    /// CL's extended `loop` (cl-parity-plan.md Stage 4b). Two passes, and
+    /// the reason is the plan's one wrong assumption: it expected
+    /// `(let ((acc (Vector::new))) … (push acc e) … acc)` to infer its own
+    /// element type, and it does not — `Vector::new`'s type argument comes
+    /// from the *expected* type, forwards, so a later `push` cannot reach
+    /// back for it. So the accumulators' types are worked out here, before
+    /// any source is written, and written into the tree
+    /// ([`super::loop_dsl`]'s module comment).
+    ///
+    /// Pass 1 checks one representative expression per `:with`/`:for` clause
+    /// to learn what that variable is, extending an `Env` as it goes, then
+    /// checks each accumulated expression in it. Those checks are thrown
+    /// away — only the types are kept. Checking a body twice is not new
+    /// here: a generic `defun`'s body is checked once for diagnostics and
+    /// again per specialization.
+    fn check_loop_dsl(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        let plan = loop_dsl::parse(heap, args, arg_locs)?;
+
+        // Pass 1a: the loop variables, each learned in the environment its
+        // predecessors built (`:with j = (* i 2)` after `:for i …` is legal
+        // in CL, and `let*` gives it the same meaning here).
+        let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
+        for var in &plan.vars {
+            let probe = loop_dsl::var_probe(heap, var)?;
+            let probe = forms::rooted(heap, probe);
+            let scoped = env.extended_with_locs(binds.clone());
+            let ty = self.check_at(heap, interp, &scoped, probe, None, var.loc.clone())?.ty;
+            binds.push((var.name.clone(), ty, var.loc.clone()));
+        }
+        let scoped = env.extended_with_locs(binds);
+
+        // Pass 1b: each accumulator's own type, and the `Option` a
+        // `:thereis` leaves behind when nothing matched.
+        let mut acc_inits: Vec<(String, Value)> = Vec::new();
+        for acc in &plan.accs {
+            let init = self.loop_acc_init(heap, interp, &scoped, acc)?;
+            acc_inits.push((acc.name.clone(), init));
+        }
+        let thereis_none = match loop_dsl::thereis_expr(&plan) {
+            Some(expr) => {
+                let ty = self.check_at(heap, interp, &scoped, expr, None, None)?.ty;
+                let Type::Named(p, targs) = &ty else {
+                    return Err(loop_thereis_error(&ty));
+                };
+                if p.last_segment() != "option" || targs.len() != 1 {
+                    return Err(loop_thereis_error(&ty));
+                }
+                let elem = targs[0].clone();
+                Some(self.the_form(heap, "Option", &elem, "Option::none")?)
+            }
+            None => None,
+        };
+
+        let resolved = loop_dsl::Resolved { acc_inits, thereis_none };
+        let built = loop_dsl::build(heap, &plan, &resolved)?;
+        let built = forms::rooted(heap, built);
+        self.check_at(heap, interp, env, built, expected, arg_locs.first().cloned().flatten())
+    }
+
+    /// The initializer for one accumulator, at the type its accumulated
+    /// expression turned out to have.
+    fn loop_acc_init(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        acc: &loop_dsl::AccVar,
+    ) -> Result<Value, Error> {
+        use loop_dsl::Acc;
+        // `:count` counts passes, not elements, so its accumulator's type
+        // does not depend on what was written.
+        if acc.acc == Acc::Count {
+            return Ok(Value::Int(0));
+        }
+        let probe = loop_dsl::acc_probe(heap, acc)?;
+        let probe = forms::rooted(heap, probe);
+        let ty = self.check_at(heap, interp, env, probe, None, None)?.ty;
+        match acc.acc {
+            Acc::Collect | Acc::Append => self.the_form(heap, "Vector", &ty, "Vector::new"),
+            Acc::Sum => Ok(forms::numeric_identity_literal(heap, Some(&ty), 0)),
+            Acc::Maximize | Acc::Minimize => self.the_form(heap, "Option", &ty, "Option::none"),
+            Acc::Count => unreachable!("handled above"),
+        }
+    }
+
+    /// `(the OUTER<ELEM> (CTOR))` with the type written out — the checker
+    /// putting a type it worked out into the tree it is building, since
+    /// nothing downstream can rederive it.
+    ///
+    /// The written form is [`mangle_type`]'s, which is the surface syntax,
+    /// and the round trip through [`Self::parse_type_here_at`] is *checked*
+    /// rather than assumed: not every type has surface syntax — a function
+    /// type's parentheses cannot survive inside `<>`
+    /// (`read::reader::extend_angle_token`) — and refusing to write one says
+    /// so here instead of emitting a form that fails somewhere less legible.
+    fn the_form(&self, heap: &mut Heap, outer: &str, elem: &Type, ctor: &str) -> Result<Value, Error> {
+        let text = format!("{}<{}>", outer, mangle_type(elem));
+        let ty_form = heap.intern_symbol(&text);
+        let ok = match self.parse_type_here_at(heap, ty_form, None) {
+            Ok(Type::Named(_, args)) => args.len() == 1 && args[0] == *elem,
+            _ => false,
+        };
+        if !ok {
+            return Err(Error::TypeError(format!(
+                "loop: `{}` has no written form, so this accumulator's type cannot be stated",
+                text
+            )));
+        }
+        let the = heap.intern_symbol("the");
+        // A `::` name is a `Value::Path`, not a symbol — the reader splits it
+        // at read time, so a symbol spelled `Vector::new` would resolve to
+        // nothing.
+        let ctor_path = Path::from_segments(ctor.split("::").map(str::to_string).collect());
+        let ctor_sym = forms::path_form(heap, &ctor_path);
+        let call = forms::list_from_vec_locs(heap, &[(ctor_sym, None)])?;
+        let call = forms::rooted(heap, call);
+        forms::list_from_vec_locs(heap, &[(the, None), (ty_form, None), (call, None)])
     }
 
     /// Check a loop body sequence with a fresh loop-stack frame seeded at
@@ -12160,4 +12295,17 @@ fn params_declare_opt_key(heap: &Heap, v: Value) -> Result<bool, Error> {
 /// arms, which deserialize different types, can share the error wording.
 fn bincode_read<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, String> {
     bincode::deserialize(bytes).map_err(|e| format!("dump: reading a template: {}", e))
+}
+
+/// `loop :thereis` was handed something that is not an `Option`.
+///
+/// CL's `thereis` answers the first non-nil value the clause produced; the
+/// type that says "a value or nothing" here is `Option<T>`, so that is what
+/// the clause takes. A `bool` test wants `:always`/`:never` instead.
+fn loop_thereis_error(ty: &Type) -> Error {
+    Error::TypeError(format!(
+        "loop :thereis: expected an `Option<T>`, got `{}` — CL's `thereis` answers the first \
+         non-nil value, and `Option` is what that is here (a `bool` test is `:always`/`:never`)",
+        mangle_type(ty)
+    ))
 }
