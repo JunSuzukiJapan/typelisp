@@ -208,12 +208,12 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 | CL | 状態 | 備考 |
 |---|---|---|
 | `defstruct` 本体 | ✅ | |
-| `:include`（構造体の継承） | ❌ | 型の継承は無い（トレイトの継承・デフォルト実装で共通の振る舞いは括れる） |
-| `:constructor`（BOA コンストラクタ・複数コンストラクタ） | ❌ | 自動生成の `new`（全フィールドを位置引数で受ける）のみ。キーワード引数コンストラクタが無い |
-| `:conc-name` / `:predicate` / `:copier` | ❌ | アクセサ名の変更、`point-p` 述語、`copy-point` が生成されない |
+| `:include`（構造体の継承） | ⚠️ | 2026-08-21（Stage 5a）にスロット列の連結として入った（デフォルトも引き継ぐ）。**型の関係は作らない**——部分型は無く、共通の振る舞いはトレイトが受け持つ |
+| `:constructor`（BOA コンストラクタ・複数コンストラクタ） | ✅ | 2026-08-21（Stage 5a）。`(:constructor name)` は全スロットを `&key`、`(:constructor name (slot...))` は BOA（`&optional` 可）。複数宣言可。生成されるのは型の静的関数で、本体は必ず `(Name::new ...)` |
+| `:conc-name` / `:predicate` / `:copier` | ⚠️ | `:copier` ✅（2026-08-21）。`:conc-name` と `:predicate` は「入れない」で確定——前者は衝突しない名前空間のための機能で `instance::field` を壊す、後者は実行時の witness が無いので常に `true` しか返せない |
 | `:print-function` / `:print-object` | ✅ | `impl print-object` が相当 |
 | `:type` / `:initial-offset` / `:named` | ⛔ | 表現を list/vector に変える指定は (D1) と衝突 |
-| スロットの初期値 | ❌ | フィールドのデフォルト値が書けない |
+| スロットの初期値 | ✅ | 2026-08-21（Stage 5a）。`(x i32 0)`。読むのは生成されたコンストラクタだけなので、`:constructor` が無いのにデフォルトを書くとエラー |
 
 ### 2.7 コンディション（CLHS 9）
 

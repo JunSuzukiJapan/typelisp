@@ -37,7 +37,7 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::check::registry::{AdtDef, BlanketImpl, Docs, FnSig, MacroDef, Namespace, TraitDef, VarInfo};
+use crate::check::registry::{AdtDef, BlanketImpl, Docs, FnSig, MacroDef, Namespace, TraitDef, TypeAlias, VarInfo};
 use crate::owned_form::OwnedForm;
 use crate::types::Path;
 use crate::Type;
@@ -47,7 +47,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -74,6 +74,8 @@ pub mod cat {
     pub const PREDECLARED: u8 = 19;
     pub const FN_TEMPLATE: u8 = 20;
     pub const METHOD_TEMPLATE: u8 = 21;
+    pub const TYPE_ALIAS: u8 = 22;
+    pub const STRUCT_DEFAULT: u8 = 23;
 }
 
 /// One registry entry, with its value already serialized.
@@ -147,6 +149,8 @@ impl RegistrySignature {
             cat::PREDECLARED => "predeclared",
             cat::FN_TEMPLATE => "fn-template",
             cat::METHOD_TEMPLATE => "method-template",
+            cat::TYPE_ALIAS => "type-alias",
+            cat::STRUCT_DEFAULT => "struct-defaults",
             _ => "doc",
         };
         let mut out = Vec::new();
@@ -311,11 +315,19 @@ fn key_of(ns: &[String], name: &str) -> String {
 fn walk(
     root: &Namespace,
     docs: &Docs,
+    struct_defaults: &BTreeMap<Path, Vec<Option<OwnedForm>>>,
     throw_tags: &BTreeMap<String, Type>,
     predeclared: &[String],
     visit: &mut dyn FnMut(u8, &[String], &str, Vec<u8>, u64) -> Result<(), String>,
 ) -> Result<(), String> {
     walk_ns(root, &mut Vec::new(), visit)?;
+
+    // Keyed absolutely, like the doc tables — this one hangs off the
+    // `Registry`, not off any namespace.
+    for (path, defaults) in struct_defaults {
+        let (bytes, hash) = wire(defaults)?;
+        visit(cat::STRUCT_DEFAULT, &[], &path.to_string(), bytes, hash)?;
+    }
 
     macro_rules! doc_table {
         ($cat:expr, $map:expr, $key:expr) => {
@@ -374,6 +386,7 @@ fn walk_ns(
     table!(cat::ALIAS, ns.aliases);
     table!(cat::MOD_ALIAS, ns.mod_aliases);
     table!(cat::STATIC_USE, ns.static_uses);
+    table!(cat::TYPE_ALIAS, ns.type_aliases);
     // Positional, not keyed: at most one blanket `impl` may cover any trait,
     // so the index is a stable identity for as long as the list only grows.
     for (i, imp) in ns.blanket_impls.iter().enumerate() {
@@ -400,11 +413,12 @@ fn walk_ns(
 pub fn signature(
     root: &Namespace,
     docs: &Docs,
+    struct_defaults: &BTreeMap<Path, Vec<Option<OwnedForm>>>,
     throw_tags: &BTreeMap<String, Type>,
     predeclared: &[String],
 ) -> Result<RegistrySignature, String> {
     let mut sig = RegistrySignature::default();
-    walk(root, docs, throw_tags, predeclared, &mut |cat, ns, name, _bytes, hash| {
+    walk(root, docs, struct_defaults, throw_tags, predeclared, &mut |cat, ns, name, _bytes, hash| {
         sig.record(cat, key_of(ns, name), hash);
         Ok(())
     })?;
@@ -415,12 +429,13 @@ pub fn signature(
 pub fn delta(
     root: &Namespace,
     docs: &Docs,
+    struct_defaults: &BTreeMap<Path, Vec<Option<OwnedForm>>>,
     throw_tags: &BTreeMap<String, Type>,
     predeclared: &[String],
     before: &RegistrySignature,
 ) -> Result<Vec<Entry>, String> {
     let mut entries = Vec::new();
-    walk(root, docs, throw_tags, predeclared, &mut |cat, ns, name, bytes, hash| {
+    walk(root, docs, struct_defaults, throw_tags, predeclared, &mut |cat, ns, name, bytes, hash| {
         if !before.unchanged(cat, &key_of(ns, name), hash) {
             entries.push(Entry { cat, ns: ns.to_vec(), name: name.to_string(), payload: bytes });
         }
@@ -436,9 +451,11 @@ pub fn delta(
 /// including the constructor index those helpers maintain, so replaying their
 /// side effects on top would be doing the same work twice from worse
 /// information.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_entries(
     root: &mut Namespace,
     docs: &mut Docs,
+    struct_defaults: &mut BTreeMap<Path, Vec<Option<OwnedForm>>>,
     throw_tags: &mut BTreeMap<String, Type>,
     predeclared: &mut dyn FnMut(String),
     entries: Vec<Entry>,
@@ -485,6 +502,15 @@ pub fn apply_entries(
             cat::STATIC_USE => {
                 let v: (Path, String) = bincode::deserialize(&e.payload).map_err(|err| read_failed("static use", err))?;
                 root.module_mut(&e.ns).static_uses.insert(e.name, v);
+            }
+            cat::TYPE_ALIAS => {
+                let v: TypeAlias = bincode::deserialize(&e.payload).map_err(|err| read_failed("type alias", err))?;
+                root.module_mut(&e.ns).type_aliases.insert(e.name, v);
+            }
+            cat::STRUCT_DEFAULT => {
+                let v: Vec<Option<OwnedForm>> =
+                    bincode::deserialize(&e.payload).map_err(|err| read_failed("struct slot defaults", err))?;
+                struct_defaults.insert(parse_path(&e.name), v);
             }
             cat::BLANKET => {
                 let v: BlanketImpl = bincode::deserialize(&e.payload).map_err(|err| read_failed("blanket impl", err))?;

@@ -184,3 +184,40 @@ fn an_image_built_from_a_different_prelude_is_refused() {
         stderr
     );
 }
+
+#[test]
+fn a_type_alias_survives_the_image() {
+    // `deftype` registers into `Namespace::type_aliases`, a table the dump's
+    // walk has to know about by name — a table only one side knew would drop
+    // the alias silently, and the annotation using it would then fail to
+    // resolve in the second process.
+    let dir = scratch("alias");
+    write(
+        &dir,
+        "mk.typl",
+        "(pub deftype meters i32)\n(pub defun mk () meters 12)\n(dump \"session.typld\")\n",
+    );
+    write(&dir, "use.typl", "(defun show ((m mk::meters)) i32 m)\n(println \"~a\" (show (mk::mk)))\n");
+    run(&dir, &["mk.typl"]);
+    assert_eq!(run(&dir, &["--image", "session.typld", "use.typl"]).trim(), "12");
+}
+
+#[test]
+fn a_structs_slot_defaults_survive_the_image() {
+    // `Registry::struct_defaults` is what a child `defstruct` reads to inherit
+    // an `:include`d parent's defaults, so it has to cross the dump too.
+    let dir = scratch("slot-defaults");
+    write(
+        &dir,
+        "mk.typl",
+        "(pub defstruct (base (:constructor mk-base)) (pub id i32 7))\n(dump \"session.typld\")\n",
+    );
+    write(
+        &dir,
+        "use.typl",
+        "(defstruct (derived (:include mk::base) (:constructor mk (extra))) (extra i32))\n\
+         (println \"~a\" (id (derived::mk 1)))\n",
+    );
+    run(&dir, &["mk.typl"]);
+    assert_eq!(run(&dir, &["--image", "session.typld", "use.typl"]).trim(), "7");
+}

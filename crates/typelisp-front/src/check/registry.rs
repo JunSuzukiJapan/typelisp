@@ -541,6 +541,21 @@ pub struct Registry {
     pub root: Namespace,
     pub def_locs: DefLocs,
     pub docs: Docs,
+    /// Per-`defstruct` slot default forms, keyed by the type's path and
+    /// parallel to [`AdtDef::field_names`] — `None` where a slot declared no
+    /// default. Sparse: only a `defstruct` that actually wrote one appears.
+    ///
+    /// A side table rather than an [`AdtDef`] field, for the same reason
+    /// [`Docs`] is one: every built-in type constructs an `AdtDef` literally
+    /// (thirty sites) and none of them has a slot default to record. What
+    /// needs it is `Checker::check_defstruct`'s generated constructors, and —
+    /// across a module or a dump boundary — a child `defstruct` that
+    /// `:include`s this one.
+    ///
+    /// Held as [`OwnedForm`](crate::owned_form::OwnedForm)s, and *unchecked*:
+    /// these are the default expressions as written, spliced into a
+    /// generated constructor's source before that constructor is checked.
+    pub struct_defaults: BTreeMap<Path, Vec<Option<crate::owned_form::OwnedForm>>>,
 }
 
 impl Registry {
@@ -797,7 +812,7 @@ impl Registry {
             "dump".to_string(),
             FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
         );
-        Registry { root, def_locs: DefLocs::default(), docs: Docs::default() }
+        Registry { root, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
     }
 
     /// Look up a type by its fully-qualified [`Path`] (e.g. `geo::point`).

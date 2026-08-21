@@ -475,6 +475,59 @@ struct MethodSig {
     doc: Option<String>,
 }
 
+/// One `defstruct` field as written: `(name Type)`, `(pub name Type)`, or
+/// either with a trailing default form.
+struct StructField {
+    name: String,
+    ty: Type,
+    public: bool,
+    /// The default value, unchecked — spliced into a generated constructor's
+    /// source (see [`Checker::check_defstruct`]) and recorded in
+    /// [`Registry::struct_defaults`] so an `:include`ing child can reuse it.
+    default: Option<SlotDefault>,
+}
+
+/// Where a [`StructField`]'s default form comes from.
+enum SlotDefault {
+    /// Written in this `defstruct`'s own source, so it is part of the form
+    /// the caller already holds rooted for the length of the check.
+    Written(Value),
+    /// Inherited through `(:include Parent)`, read back out of
+    /// [`Registry::struct_defaults`]. Kept detached and rebuilt at each
+    /// splice site rather than materialized up front: a `Vec<Value>` is
+    /// invisible to the collector, and everything between here and the
+    /// generated constructor allocates.
+    Inherited(crate::owned_form::OwnedForm),
+}
+
+/// A `(:constructor name)` / `(:constructor name (slot...))` option.
+struct CtorSpec {
+    name: String,
+    /// `None` — a keyword constructor: every slot is a `&key` at its own
+    /// default, so every slot must have one. `Some(params)` — a BOA
+    /// constructor taking exactly these slots positionally; every slot it
+    /// does not name is filled from that slot's default.
+    boa: Option<Vec<BoaParam>>,
+}
+
+/// One parameter of a BOA constructor's lambda list: a slot name, optionally
+/// after an `&optional` marker (in which case that slot's own default becomes
+/// the parameter's).
+struct BoaParam {
+    name: String,
+    optional: bool,
+}
+
+/// A `(defstruct (Name option...) ...)` option list, parsed.
+#[derive(Default)]
+struct StructOptions {
+    constructors: Vec<CtorSpec>,
+    copier: Option<String>,
+    /// `(:include Parent)` — the parent type as written, for
+    /// `parse_type_here_at`.
+    include: Option<(Value, Option<Loc>)>,
+}
+
 /// The synthetic `TopLevel::Module` path under which `check_form` bundles
 /// monomorphized specializations together with the form that requested them.
 /// Contains a space, which [`crate::read::Reader`] treats as a delimiter — so
@@ -708,6 +761,7 @@ impl Checker {
         let mut sig = crate::dump::signature(
             &self.reg.root,
             &self.reg.docs,
+            &self.reg.struct_defaults,
             &self.throw_tags.borrow(),
             &self.sorted_predeclared(),
         )
@@ -727,6 +781,7 @@ impl Checker {
         let entries = crate::dump::delta(
             &self.reg.root,
             &self.reg.docs,
+            &self.reg.struct_defaults,
             &self.throw_tags.borrow(),
             &self.sorted_predeclared(),
             before,
@@ -763,6 +818,7 @@ impl Checker {
         crate::dump::apply_entries(
             &mut self.reg.root,
             &mut self.reg.docs,
+            &mut self.reg.struct_defaults,
             &mut self.throw_tags.borrow_mut(),
             &mut |name| {
                 predeclared.insert(name);
@@ -2046,7 +2102,7 @@ impl Checker {
                     "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     "module" => return self.check_module(heap, interp, &elems[1..]),
                     "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], parts_locs, false, def_loc),
-                    "defstruct" => return self.check_defstruct(heap, &elems[1..], parts_locs, false, def_loc),
+                    "defstruct" => return self.check_defstruct(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     "defenum" => return self.check_defenum(heap, &elems[1..], parts_locs, false, def_loc),
                     "deftrait" => return self.check_deftrait(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     "deftype" => return self.check_deftype(heap, &elems[1..], parts_locs, false, def_loc),
@@ -2114,7 +2170,7 @@ impl Checker {
                 "defconstant" => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc),
                 "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], inner_locs, true, def_loc),
-                "defstruct" => return self.check_defstruct(heap, &parts[1..], inner_locs, true, def_loc),
+                "defstruct" => return self.check_defstruct(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 "defenum" => return self.check_defenum(heap, &parts[1..], inner_locs, true, def_loc),
                 "deftype" => return self.check_deftype(heap, &parts[1..], inner_locs, true, def_loc),
                 _ => {}
@@ -4627,7 +4683,9 @@ impl Checker {
         Ok((required, required_locs, optionals, rest, keys))
     }
 
-    /// Parse `defstruct` field bindings: `(name type)` or `(pub name type)`.
+    /// Parse `defstruct` field bindings: `(name type)` or `(pub name type)`,
+    /// each optionally with a trailing default form (`(name type default)`).
+    ///
     /// Field visibility is independent of the struct's own `pub` — like every
     /// other `pub` in this language it's opt-in per item, never inherited
     /// from a container — so a field defaults to private (its getter/setter
@@ -4636,7 +4694,12 @@ impl Checker {
     /// field is reachable cross-module on any value of that type the current
     /// module's own `pub` API happens to hand out, even though outside code
     /// can't name or construct the type itself).
-    fn parse_struct_fields(&self, heap: &Heap, pairs: &[Value]) -> Result<Vec<(String, Type, bool)>, Error> {
+    ///
+    /// The default is *not* checked here (this is a `&Heap`-only parse
+    /// helper, like [`Self::parse_opt_key_spec`]): it is spliced into a
+    /// generated constructor's source and checked there, against that
+    /// constructor's own parameter type.
+    fn parse_struct_fields(&self, heap: &Heap, pairs: &[Value]) -> Result<Vec<StructField>, Error> {
         let mut out = Vec::new();
         for binding in pairs {
             let elem_locs = heap.list_to_vec_locs(*binding)?;
@@ -4645,16 +4708,203 @@ impl Checker {
                 Some(Value::Symbol(id)) if heap.symbol_name(*id) == "pub" => (true, &elems[1..], &elem_locs[1..]),
                 _ => (false, &elems[..], &elem_locs[..]),
             };
-            if rest.len() != 2 {
-                return Err(Error::TypeError("defstruct: field must be (name type) or (pub name type)".into()));
+            if rest.len() < 2 || rest.len() > 3 {
+                return Err(Error::TypeError(
+                    "defstruct: field must be (name type), (pub name type), or either with a default".into(),
+                ));
             }
             let name = match rest[0] {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("defstruct: field name must be a symbol".into())),
             };
-            out.push((name, self.parse_type_here_at(heap, rest[1], rest_locs[1].1.as_ref())?, public));
+            out.push(StructField {
+                name,
+                ty: self.parse_type_here_at(heap, rest[1], rest_locs[1].1.as_ref())?,
+                public,
+                default: rest.get(2).copied().map(SlotDefault::Written),
+            });
         }
         Ok(out)
+    }
+
+    /// The slots a `(:include Parent)` contributes, in the parent's own
+    /// order: name, type (with the parent's type parameters substituted at
+    /// the arguments written here), visibility, and default.
+    ///
+    /// The defaults come from [`Registry::struct_defaults`] rather than from
+    /// the parent's `AdtDef`, so this works across a module boundary and
+    /// across a dump reload — a `:include`d parent may have been defined in
+    /// another file entirely.
+    fn included_fields(&self, heap: &mut Heap, parent_form: Value, loc: Option<&Loc>) -> Result<Vec<StructField>, Error> {
+        let parent_ty = self.parse_type_here_at(heap, parent_form, loc)?;
+        let Type::Named(parent_path, args) = &parent_ty else {
+            return Err(Error::TypeError(format!(
+                "defstruct: (:include {:?}) — a struct is what can be included",
+                parent_ty
+            )));
+        };
+        let Some(def) = self.reg.type_def(parent_path) else {
+            return Err(Error::TypeError(format!("defstruct: (:include {}) — unknown type", parent_path)));
+        };
+        if def.kind != AdtKind::Struct || def.variants.len() != 1 {
+            return Err(Error::TypeError(format!(
+                "defstruct: (:include {}) — only a `defstruct` has slots to include",
+                parent_path
+            )));
+        }
+        if args.len() != def.params.len() {
+            return Err(Error::TypeError(format!(
+                "defstruct: (:include {}) takes {} type argument(s), got {}",
+                parent_path,
+                def.params.len(),
+                args.len()
+            )));
+        }
+        let subst: BTreeMap<String, Type> = def.params.iter().cloned().zip(args.iter().cloned()).collect();
+        let defaults = self.reg.struct_defaults.get(parent_path);
+        let mut out = Vec::with_capacity(def.field_names.len());
+        for (i, fname) in def.field_names.iter().enumerate() {
+            // A slot's visibility lives on its accessor, which is where
+            // `check_defstruct` put it.
+            let public = def.assoc.get(fname).map(|af| af.sig.public).unwrap_or(false);
+            let default = defaults
+                .and_then(|d| d.get(i))
+                .and_then(|d| d.as_ref())
+                .map(|owned| SlotDefault::Inherited(owned.clone()));
+            out.push(StructField {
+                name: fname.clone(),
+                ty: subst_apply(&def.variants[0].fields[i], &subst),
+                public,
+                default,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Parse a `(defstruct (Name option...) ...)` option list — everything
+    /// after the name inside that leading list.
+    ///
+    /// Three CL options are refused outright rather than approximated,
+    /// because what they are *for* does not exist here:
+    ///
+    /// - **`:conc-name`** prefixes CL's accessors so that two structs' slots
+    ///   do not collide in one flat function namespace. Accessors here are
+    ///   methods dispatched on the receiver's type, so there is nothing to
+    ///   collide; worse, a prefix would break `instance::field`, which is the
+    ///   language's own way to reach a slot and knows only the slot's name.
+    /// - **`:predicate`** answers "is this value a `point`?" at runtime. A
+    ///   type here is a compile-time classification with no runtime witness,
+    ///   and there is no position where a value of unknown-but-possibly-point
+    ///   type exists (`match` on `Sexpr` is fenced off, a `:dyn` cannot be
+    ///   downcast) — so the generated predicate could only ever return
+    ///   `true`.
+    /// - **`:type` / `:initial-offset` / `:named`** re-lay the value out as a
+    ///   list or vector. The representation is the compiler's (D1); nothing
+    ///   in the language observes it.
+    fn parse_struct_options(&self, heap: &Heap, opts: &[Value], opt_locs: &[Option<Loc>]) -> Result<StructOptions, Error> {
+        let mut out = StructOptions::default();
+        for (i, opt) in opts.iter().enumerate() {
+            let items = heap.list_to_vec(*opt).map_err(|_| {
+                Error::TypeError("defstruct: each option must be a list, e.g. (:constructor make-point)".into())
+            })?;
+            let key = match items.first() {
+                Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                _ => return Err(Error::TypeError("defstruct: an option starts with a keyword, e.g. (:copier copy-point)".into())),
+            };
+            match key.as_str() {
+                ":constructor" => out.constructors.push(self.parse_ctor_option(heap, &items[1..])?),
+                ":copier" => {
+                    let name = single_name_option(heap, &items[1..], ":copier")?;
+                    if out.copier.is_some() {
+                        return Err(Error::TypeError("defstruct: :copier may appear only once".into()));
+                    }
+                    out.copier = Some(name);
+                }
+                ":include" => {
+                    if items.len() != 2 {
+                        return Err(Error::TypeError("defstruct: (:include Parent) takes exactly one type".into()));
+                    }
+                    if out.include.is_some() {
+                        return Err(Error::TypeError("defstruct: :include may appear only once".into()));
+                    }
+                    out.include = Some((items[1], opt_locs.get(i).and_then(|l| l.clone())));
+                }
+                ":conc-name" => {
+                    return Err(Error::TypeError(
+                        "defstruct: :conc-name has nothing to do here — accessors are methods dispatched on the receiver's type, so slot names never collide, and a prefix would break `instance::field`"
+                            .into(),
+                    ))
+                }
+                ":predicate" => {
+                    return Err(Error::TypeError(
+                        "defstruct: :predicate has nothing to answer — a type is a compile-time classification with no runtime witness, so the generated predicate could only ever return true"
+                            .into(),
+                    ))
+                }
+                ":type" | ":initial-offset" | ":named" => {
+                    return Err(Error::TypeError(format!(
+                        "defstruct: `{}` re-lays the value out as a list or vector; the representation belongs to the compiler here and nothing in the language observes it",
+                        key
+                    )))
+                }
+                other => {
+                    return Err(Error::TypeError(format!(
+                        "defstruct: unknown option `{}` (known: :constructor, :copier, :include)",
+                        other
+                    )))
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// `(:constructor name)` or `(:constructor name (slot... [&optional slot...]))`.
+    fn parse_ctor_option(&self, heap: &Heap, rest: &[Value]) -> Result<CtorSpec, Error> {
+        let name = match rest.first() {
+            Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+            _ => {
+                return Err(Error::TypeError(
+                    "defstruct: (:constructor name) needs a name — `new` is the structural constructor and is always present, so there is nothing to suppress".into(),
+                ))
+            }
+        };
+        let boa = match rest.len() {
+            1 => None,
+            2 => {
+                let items = heap.list_to_vec(rest[1])?;
+                let mut params = Vec::new();
+                let mut optional = false;
+                for it in &items {
+                    let Value::Symbol(id) = it else {
+                        return Err(Error::TypeError(
+                            "defstruct: a BOA constructor's lambda list holds slot names, not types — each slot's type is its declaration's".into(),
+                        ));
+                    };
+                    let n = heap.symbol_name(*id);
+                    if n == "&optional" {
+                        if optional {
+                            return Err(Error::TypeError("defstruct: &optional may appear only once".into()));
+                        }
+                        optional = true;
+                        continue;
+                    }
+                    if n.starts_with('&') {
+                        return Err(Error::TypeError(format!(
+                            "defstruct: a BOA constructor's lambda list takes slot names and `&optional`, not `{}`",
+                            n
+                        )));
+                    }
+                    params.push(BoaParam { name: n.to_string(), optional });
+                }
+                Some(params)
+            }
+            _ => {
+                return Err(Error::TypeError(
+                    "defstruct: (:constructor name) or (:constructor name (slot...))".into(),
+                ))
+            }
+        };
+        Ok(CtorSpec { name, boa })
     }
 
     // ---- deftrait / impl ---------------------------------------------------
@@ -7109,16 +7359,40 @@ impl Checker {
     /// one `TopLevel::Module` — purely as a grouping device: `Interp::exec`'s
     /// `Module` arm just runs `body` in order and never reads `path`, so this
     /// carries none of an actual `(module ...)`'s namespace-nesting semantics.
-    fn check_defstruct(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
+    #[allow(clippy::too_many_arguments)]
+    fn check_defstruct(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+        def_loc: Option<Loc>,
+    ) -> Result<TopLevelForm, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("defstruct: (defstruct name (field type)...)".into()));
         }
-        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+        // CL's `(defstruct (name option...) ...)`: a *list* in the name
+        // position carries options. A bare symbol is the common case and
+        // means no options.
+        let (name_form, options) = match parts[0] {
+            Value::Cons(_) => {
+                let items_locs = heap.list_to_vec_locs(parts[0])?;
+                let items: Vec<Value> = items_locs.iter().map(|(v, _)| *v).collect();
+                let locs: Vec<Option<Loc>> = items_locs.iter().map(|(_, l)| l.clone()).collect();
+                let Some(&head) = items.first() else {
+                    return Err(Error::TypeError("defstruct: (defstruct (Name option...) ...) needs a name".into()));
+                };
+                (head, self.parse_struct_options(heap, &items[1..], &locs[1..])?)
+            }
+            _ => (parts[0], StructOptions::default()),
+        };
+        let (name, type_params) = self.parse_defun_name(heap, name_form)?;
         // A leading docstring, right after the name and before the field
         // list — CL's `(defstruct (name options) documentation slot...)`
         // position. Unlike `defun`'s, unambiguous: a field is always a
-        // `(name Type)` pair, never a bare string, so no "followed by more
-        // forms" guard is needed.
+        // `(name Type ...)` list, never a bare string, so no "followed by
+        // more forms" guard is needed.
         let (doc, field_start) = match parts.get(1) {
             Some(Value::Str(id)) => (Some(heap.string(*id).to_string()), 2),
             _ => (None, 1),
@@ -7148,15 +7422,39 @@ impl Checker {
             trait_assoc: BTreeMap::new(),
         });
 
-        let fields = self.parse_struct_fields(heap, &parts[field_start..])?;
+        let mut fields = self.parse_struct_fields(heap, &parts[field_start..])?;
+        // `(:include Parent)`: the parent's slots come first, exactly as in
+        // CL. What this does *not* do is establish a type relation — a child
+        // is not a subtype of its parent, the parent's methods do not apply
+        // to it, and no `typep`-style test relates them. There is no
+        // subtyping in this language (see the doc comment above); a shared
+        // interface is what `deftrait` is for. Inheriting the slot *list* is
+        // the part that carries over.
+        if let Some((parent_form, parent_loc)) = options.include {
+            let inherited = self.included_fields(heap, parent_form, parent_loc.as_ref())?;
+            let mut all = inherited;
+            all.extend(fields);
+            fields = all;
+        }
         if fields.is_empty() {
             return Err(Error::TypeError("defstruct: needs at least one field".into()));
         }
-        let field_names: Vec<String> = fields.iter().map(|(n, _, _)| n.clone()).collect();
-        let field_types: Vec<Type> = fields.iter().map(|(_, t, _)| t.clone()).collect();
+        let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+        let field_types: Vec<Type> = fields.iter().map(|f| f.ty.clone()).collect();
         for (i, n) in field_names.iter().enumerate() {
             if field_names[..i].contains(n) {
                 return Err(Error::TypeError(format!("defstruct: duplicate field `{}`", n)));
+            }
+        }
+        // A slot default is only ever read by a generated constructor. With
+        // none declared it would be dead configuration, so say so here rather
+        // than let it sit unused.
+        if options.constructors.is_empty() {
+            if let Some(f) = fields.iter().find(|f| f.default.is_some()) {
+                return Err(Error::TypeError(format!(
+                    "defstruct {}: slot `{}` has a default, but nothing would use it — a default is read by the constructors this `defstruct` generates, so declare one with `(:constructor name)` (or drop the default; `new` always takes every slot)",
+                    name, f.name
+                )));
             }
         }
 
@@ -7173,8 +7471,9 @@ impl Checker {
         let mut members = Items::new(heap);
         let def_node = self.defstruct_form(members.heap(), &type_fq, &field_types)?;
         members.push(def_node);
-        for (i, (field_name, field_ty, field_public)) in fields.iter().enumerate() {
-            let field_public = *field_public;
+        for (i, field) in fields.iter().enumerate() {
+            let (field_name, field_ty) = (&field.name, &field.ty);
+            let field_public = field.public;
             let getter_sig = FnSig {
                 type_params: vec![],
                 params: vec![recv_ty.clone()],
@@ -7265,7 +7564,7 @@ impl Checker {
 
         let def = AdtDef {
             name: type_fq.clone(),
-            params: type_params,
+            params: type_params.clone(),
             variants: vec![Variant { name: "new".to_string(), fields: field_types }],
             assoc,
             public,
@@ -7276,7 +7575,7 @@ impl Checker {
             trait_assoc: BTreeMap::new(),
         };
         self.reg.root.module_mut(&self.ns).add_type(def);
-        if let Some(loc) = def_loc {
+        if let Some(loc) = def_loc.clone() {
             self.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
         if let Some(doc) = doc {
@@ -7288,12 +7587,328 @@ impl Checker {
             parts_locs.first().and_then(|l| l.as_ref()),
             name.chars().count(),
         );
+        // Record the slot defaults for a later `(:include ...)` — including
+        // one in another file, or after a dump reload. Only when there is
+        // something to record, so the table stays sparse.
+        if fields.iter().any(|f| f.default.is_some()) {
+            let mut owned = Vec::with_capacity(fields.len());
+            for f in &fields {
+                owned.push(match &f.default {
+                    Some(SlotDefault::Written(v)) => Some(crate::owned_form::value_to_owned(members.heap(), *v)?),
+                    Some(SlotDefault::Inherited(o)) => Some(o.clone()),
+                    None => None,
+                });
+            }
+            self.reg.struct_defaults.insert(type_fq.clone(), owned);
+        }
+
+        // Generated constructors and the copier, *after* the type is
+        // registered: unlike the accessors (whose ASTs are synthesized
+        // directly), these are synthesized as **source** and run through
+        // `check_defmethod_in`. That is what buys them the whole method
+        // pipeline for free — `&key`/`&optional` filling (Phase 5b),
+        // visibility, and, for a generic owner, the `MethodTemplate::Form`
+        // retention that makes them specializable. It needs the type and its
+        // `new` to already exist, hence the position.
+        for spec in &options.constructors {
+            let form = self.constructor_source(members.heap(), &name, &type_params, &fields, spec)?;
+            let checked = self.check_synthetic_defmethod(members.heap(), interp, form, public, def_loc.clone())?;
+            members.push(checked);
+        }
+        if let Some(copier) = &options.copier {
+            let form = self.copier_source(members.heap(), &name, &type_params, &fields, copier)?;
+            let checked = self.check_synthetic_defmethod(members.heap(), interp, form, public, def_loc.clone())?;
+            members.push(checked);
+        }
 
         // `(module Name (defstruct ...) (defmethod ...)...)`: the definition
         // and its accessors travel as one unit, so a caller that records this
         // form records all of it.
         let body: Vec<Value> = members.as_slice().to_vec();
         forms::module_form(members.heap(), &type_fq, &body)
+    }
+
+    /// Check a `defmethod` this checker synthesized itself: `parts` is the
+    /// form *without* the leading `defmethod` symbol, already rooted by the
+    /// caller.
+    ///
+    /// Split out because the synthesized source has no source positions of
+    /// its own — every `parts_locs` entry is `None`, and the definition's own
+    /// `def_loc` is the `defstruct`'s, which is where a reader looking for
+    /// the generated method should in fact land.
+    fn check_synthetic_defmethod(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        form: Value,
+        public: bool,
+        def_loc: Option<Loc>,
+    ) -> Result<Value, Error> {
+        // `form` is one list, so rooting it keeps every part alive across the
+        // allocation that checking it does — a `Vec<Value>` would not.
+        heap.push_root(form);
+        let result = (|| {
+            let parts = heap.list_to_vec(form)?;
+            let locs: Vec<Option<Loc>> = vec![None; parts.len()];
+            self.check_defmethod_in(heap, interp, &parts, &locs, public, def_loc, None)
+        })();
+        heap.pop_root();
+        result
+    }
+
+    /// A [`Type`] rendered back into the surface syntax a type annotation is
+    /// written in, so a synthesized definition can carry it.
+    ///
+    /// [`mangle_type`] alone is not enough: it is a *serialization* (commas
+    /// inside `(fn ...)`, a bare `dyn` head), tuned for making two distinct
+    /// canonical types render differently, not for being read back. It is
+    /// exactly right for the atomic cases, which is why they go through it.
+    fn type_source(&self, heap: &mut Heap, t: &Type) -> Result<Value, Error> {
+        match t {
+            Type::Fn(ps, rest, r) => {
+                let mut out = Items::new(heap);
+                let head = out.heap().intern_symbol("fn");
+                out.push(head);
+                let param_list = {
+                    let mut params = Items::new(out.heap());
+                    for p in ps {
+                        let f = self.type_source(params.heap(), p)?;
+                        params.push(f);
+                    }
+                    if let Some(elem) = rest {
+                        let marker = params.heap().intern_symbol("&rest");
+                        params.push(marker);
+                        let f = self.type_source(params.heap(), elem)?;
+                        params.push(f);
+                    }
+                    params.finish_list()?
+                };
+                out.push(param_list);
+                let ret = self.type_source(out.heap(), r)?;
+                out.push(ret);
+                out.finish_list()
+            }
+            // The reader joins the two-word `:dyn Trait` spelling into this
+            // list, so this is what an annotation site actually sees.
+            Type::Dyn(path, pins) => {
+                let mut f = Items::new(heap);
+                let head = f.heap().intern_symbol(":dyn");
+                f.push(head);
+                let inner = mangle_type(&Type::Named(path.clone(), pins.clone()));
+                let name = f.heap().intern_symbol(&inner);
+                f.push(name);
+                f.finish_list()
+            }
+            other => Ok(heap.intern_symbol(&mangle_type(other))),
+        }
+    }
+
+    /// The receiver/return annotation for a generated static constructor:
+    /// the struct's own written name, with its type parameters spelled back
+    /// on (`point<T>`), which is what makes `check_defmethod_in` retain a
+    /// specializable template for a generic owner.
+    fn owner_type_source(&self, heap: &mut Heap, name: &str, type_params: &[String]) -> Value {
+        let text = if type_params.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}<{}>", name, type_params.join(","))
+        };
+        heap.intern_symbol(&text)
+    }
+
+    /// One slot's default value form, materialized into `heap`.
+    fn slot_default_source(&self, heap: &mut Heap, d: &SlotDefault) -> Result<Value, Error> {
+        match d {
+            SlotDefault::Written(v) => Ok(*v),
+            SlotDefault::Inherited(o) => crate::owned_form::owned_to_value(heap, o),
+        }
+    }
+
+    /// Synthesize a `(:constructor ...)` option's `defmethod` **source** —
+    /// everything after the `defmethod` keyword, as one list.
+    ///
+    /// Source rather than a lowered AST (which is how the accessors are
+    /// built) because a constructor needs the whole method pipeline:
+    /// `&key`/`&optional` filling, visibility, and — for a generic owner —
+    /// the `MethodTemplate::Form` retention that makes it specializable.
+    /// Synthesizing source and handing it to `check_defmethod_in` gets all of
+    /// that with no second implementation.
+    ///
+    /// The body is always `(Name::new slot...)`: `new` stays the one
+    /// structural constructor, and everything generated here is a *way of
+    /// calling it*.
+    fn constructor_source(
+        &self,
+        heap: &mut Heap,
+        name: &str,
+        type_params: &[String],
+        fields: &[StructField],
+        spec: &CtorSpec,
+    ) -> Result<Value, Error> {
+        // One outer builder holds every finished piece rooted; each
+        // sub-list is built in a nested scope that reborrows its heap.
+        let mut out = Items::new(heap);
+        let mname = out.heap().intern_symbol(&spec.name);
+        out.push(mname);
+
+        // `bound` marks the slots a parameter supplies; the rest come from
+        // their own defaults.
+        let mut bound: Vec<bool> = vec![false; fields.len()];
+        let mut sig = Items::new(out.heap());
+        let recv = self.owner_type_source(sig.heap(), name, type_params);
+        sig.push(recv);
+        match &spec.boa {
+            None => {
+                // Keyword constructor: every slot is a `&key` at its own
+                // default. A slot without one cannot be filled — there is no
+                // "unbound slot" here the way CL has.
+                let marker = sig.heap().intern_symbol("&key");
+                sig.push(marker);
+                for (i, f) in fields.iter().enumerate() {
+                    let Some(d) = &f.default else {
+                        return Err(Error::TypeError(format!(
+                            "defstruct {}: (:constructor {}) takes every slot by keyword, so slot `{}` needs a default — give it one, or declare a BOA constructor `(:constructor {} ({} ...))` that takes it positionally",
+                            name, spec.name, f.name, spec.name, f.name
+                        )));
+                    };
+                    let item = self.param_source(sig.heap(), &f.name, &f.ty, Some(d))?;
+                    sig.push(item);
+                    bound[i] = true;
+                }
+            }
+            Some(params) => {
+                let mut seen_optional = false;
+                for p in params {
+                    let Some(i) = fields.iter().position(|f| f.name == p.name) else {
+                        return Err(Error::TypeError(format!(
+                            "defstruct {}: (:constructor {}) names `{}`, which is not a slot",
+                            name, spec.name, p.name
+                        )));
+                    };
+                    if bound[i] {
+                        return Err(Error::TypeError(format!(
+                            "defstruct {}: (:constructor {}) names slot `{}` twice",
+                            name, spec.name, p.name
+                        )));
+                    }
+                    let default = if p.optional {
+                        if !seen_optional {
+                            let marker = sig.heap().intern_symbol("&optional");
+                            sig.push(marker);
+                            seen_optional = true;
+                        }
+                        match &fields[i].default {
+                            Some(d) => Some(d),
+                            None => {
+                                return Err(Error::TypeError(format!(
+                                    "defstruct {}: (:constructor {}) makes slot `{}` optional, so that slot needs a default to fall back on",
+                                    name, spec.name, p.name
+                                )))
+                            }
+                        }
+                    } else {
+                        None
+                    };
+                    let item = self.param_source(sig.heap(), &fields[i].name, &fields[i].ty, default)?;
+                    sig.push(item);
+                    bound[i] = true;
+                }
+            }
+        }
+        let sig_list = sig.finish_list()?;
+        out.push(sig_list);
+        let ret = self.owner_type_source(out.heap(), name, type_params);
+        out.push(ret);
+
+        // `(Name::new v...)`: a bound slot contributes its parameter's name,
+        // an unbound one its own default.
+        let mut call = Items::new(out.heap());
+        let ctor_path = Path::from_segments(vec![name.to_string(), "new".to_string()]);
+        let head = forms::path_form(call.heap(), &ctor_path);
+        call.push(head);
+        for (i, field) in fields.iter().enumerate() {
+            let arg = if bound[i] {
+                call.heap().intern_symbol(&field.name)
+            } else {
+                match &field.default {
+                    Some(d) => self.slot_default_source(call.heap(), d)?,
+                    None => {
+                        return Err(Error::TypeError(format!(
+                            "defstruct {}: (:constructor {}) does not take slot `{}` and that slot has no default, so the constructor could not fill it",
+                            name, spec.name, field.name
+                        )))
+                    }
+                }
+            };
+            call.push(arg);
+        }
+        let body = call.finish_list()?;
+        out.push(body);
+        out.finish_list()
+    }
+
+    /// One `(name Type)` / `(name Type default)` parameter item.
+    fn param_source(&self, heap: &mut Heap, name: &str, ty: &Type, default: Option<&SlotDefault>) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let n = f.heap().intern_symbol(name);
+        f.push(n);
+        let t = self.type_source(f.heap(), ty)?;
+        f.push(t);
+        if let Some(d) = default {
+            let v = self.slot_default_source(f.heap(), d)?;
+            f.push(v);
+        }
+        f.finish_list()
+    }
+
+    /// Synthesize a `(:copier name)` option's `defmethod` source: an
+    /// *instance* method returning a fresh value with the same slot values —
+    /// CL's copier is likewise shallow.
+    fn copier_source(
+        &self,
+        heap: &mut Heap,
+        name: &str,
+        type_params: &[String],
+        fields: &[StructField],
+        copier: &str,
+    ) -> Result<Value, Error> {
+        let mut out = Items::new(heap);
+        let mname = out.heap().intern_symbol(copier);
+        out.push(mname);
+
+        let sig_list = {
+            let mut sig = Items::new(out.heap());
+            let recv = {
+                let mut recv_pair = Items::new(sig.heap());
+                let sname = recv_pair.heap().intern_symbol("self");
+                recv_pair.push(sname);
+                let owner = self.owner_type_source(recv_pair.heap(), name, type_params);
+                recv_pair.push(owner);
+                recv_pair.finish_list()?
+            };
+            sig.push(recv);
+            sig.finish_list()?
+        };
+        out.push(sig_list);
+        let ret = self.owner_type_source(out.heap(), name, type_params);
+        out.push(ret);
+
+        let body = {
+            let mut call = Items::new(out.heap());
+            let ctor_path = Path::from_segments(vec![name.to_string(), "new".to_string()]);
+            let head = forms::path_form(call.heap(), &ctor_path);
+            call.push(head);
+            for field in fields {
+                // `self::slot` — the accessor sugar, so the copier reads
+                // exactly what the getter does.
+                let acc = Path::from_segments(vec!["self".to_string(), field.name.clone()]);
+                let read = forms::path_form(call.heap(), &acc);
+                call.push(read);
+            }
+            call.finish_list()?
+        };
+        out.push(body);
+        out.finish_list()
     }
 
     /// `(deftype Name Type)` — or, generically, `(deftype Name<T,U> Type)`,
@@ -8748,24 +9363,38 @@ impl Checker {
         if let Some(r) = receiver {
             typed.push(r);
         }
+        let owner_params: HashSet<String> = def.params.iter().cloned().collect();
         if af.sig.optionals.is_empty() && af.sig.keys.is_empty() && af.sig.rest.is_none() {
-            let expected_params: Vec<Type> =
-                af.sig.params[offset..].iter().map(|t| subst_apply(t, &subst)).collect();
-            if args.len() != expected_params.len() {
+            let declared = &af.sig.params[offset..];
+            if args.len() != declared.len() {
                 return Err(Error::TypeError(format!(
                     "{}::{}: expected {} argument(s), got {}",
                     type_fq,
                     method,
-                    expected_params.len(),
+                    declared.len(),
                     args.len()
                 )));
             }
-            for (i, (arg, pty)) in args.iter().zip(expected_params.iter()).enumerate() {
-                typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i))?);
+            // The arguments refine `subst` too, exactly as in
+            // `Self::check_call`. For an instance method the receiver already
+            // fixed every owner parameter and this only confirms it; what
+            // needs it is a **static** function on a generic owner
+            // (`cell::of`), where there is no receiver and the expected type
+            // may say nothing — the argument is the only evidence. Without
+            // this such a call could only be written where its result type
+            // was already known.
+            for (i, (arg, pty)) in args.iter().zip(declared.iter()).enumerate() {
+                let st = subst_apply(pty, &subst);
+                let exp = if type_has_param(&st, &owner_params) { None } else { Some(st) };
+                let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
+                unify(&owner_params, pty, &ta.ty, &mut subst)?;
+                typed.push(ta);
             }
         } else {
             let who = format!("{}::{}", type_fq, method);
-            self.push_assoc_opt_key_args(heap, interp, env, &who, &af.sig, offset, &subst, args, arg_locs, &mut typed)?;
+            self.push_assoc_opt_key_args(
+                heap, interp, env, &who, &af.sig, offset, &owner_params, &mut subst, args, arg_locs, &mut typed,
+            )?;
         }
         for p in &def.params {
             if !subst.contains_key(p) {
@@ -8831,7 +9460,8 @@ impl Checker {
         who: &str,
         sig: &FnSig,
         offset: usize,
-        subst: &BTreeMap<String, Type>,
+        owner_params: &HashSet<String>,
+        subst: &mut BTreeMap<String, Type>,
         args: &[Value],
         arg_locs: &[Option<Loc>],
         typed: &mut Vec<Checked>,
@@ -8846,8 +9476,11 @@ impl Checker {
             )));
         }
         for (i, (arg, pty)) in args[..required.len()].iter().zip(required.iter()).enumerate() {
-            let exp = subst_apply(pty, subst);
-            typed.push(self.check_at(heap, interp, env, *arg, Some(&exp), nth_loc(arg_locs, i))?);
+            let st = subst_apply(pty, subst);
+            let exp = if type_has_param(&st, owner_params) { None } else { Some(st) };
+            let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
+            unify(owner_params, pty, &ta.ty, subst)?;
+            typed.push(ta);
         }
         let tail = &args[required.len()..];
         let tail_locs = arg_locs.get(required.len()..).unwrap_or(&[]);
@@ -8878,8 +9511,10 @@ impl Checker {
                 if supplied.contains_key(&kw) {
                     return Err(Error::TypeError(format!("{}: duplicate keyword argument :{}", who, kw)));
                 }
-                let exp = subst_apply(&key.decl_ty, subst);
-                let checked = self.check_at(heap, interp, env, tail[i + 1], Some(&exp), nth_loc(tail_locs, i + 1))?;
+                let st = subst_apply(&key.decl_ty, subst);
+                let exp = if type_has_param(&st, owner_params) { None } else { Some(st) };
+                let checked = self.check_at(heap, interp, env, tail[i + 1], exp.as_ref(), nth_loc(tail_locs, i + 1))?;
+                unify(owner_params, &key.decl_ty, &checked.ty, subst)?;
                 supplied.insert(kw, checked);
                 i += 2;
             }
@@ -8907,17 +9542,23 @@ impl Checker {
         let supplied_n = tail.len().min(sig.optionals.len());
         let mut supplied: Vec<Checked> = Vec::with_capacity(supplied_n);
         for (i, opt) in sig.optionals.iter().enumerate().take(supplied_n) {
-            let exp = subst_apply(&opt.decl_ty, subst);
-            supplied.push(self.check_at(heap, interp, env, tail[i], Some(&exp), nth_loc(tail_locs, i))?);
+            let st = subst_apply(&opt.decl_ty, subst);
+            let exp = if type_has_param(&st, owner_params) { None } else { Some(st) };
+            let checked = self.check_at(heap, interp, env, tail[i], exp.as_ref(), nth_loc(tail_locs, i))?;
+            unify(owner_params, &opt.decl_ty, &checked.ty, subst)?;
+            supplied.push(checked);
         }
         let after = &tail[supplied_n..];
         let after_locs = tail_locs.get(supplied_n..).unwrap_or(&[]);
         let mut rest_typed: Vec<Checked> = Vec::new();
         match &sig.rest {
             Some(elem_ty) => {
-                let exp = subst_apply(elem_ty, subst);
                 for (i, arg) in after.iter().enumerate() {
-                    rest_typed.push(self.check_at(heap, interp, env, *arg, Some(&exp), nth_loc(after_locs, i))?);
+                    let st = subst_apply(elem_ty, subst);
+                    let exp = if type_has_param(&st, owner_params) { None } else { Some(st) };
+                    let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(after_locs, i))?;
+                    unify(owner_params, elem_ty, &ta.ty, subst)?;
+                    rest_typed.push(ta);
                 }
             }
             None if !after.is_empty() => {
@@ -12867,6 +13508,14 @@ fn parse_macro_lambda_list(
 const OPT_KEY_NEEDS_A_NAME: &str = "{}: &optional/&key need a named callee (defun/defmethod) — a \
      function value is described by its `Type::Fn` alone, which has no place to carry a default \
      expression for a call site to fill in. `&rest` does work here.";
+
+/// A `defstruct` option that takes exactly one name (`(:copier copy-point)`).
+fn single_name_option(heap: &Heap, rest: &[Value], what: &str) -> Result<String, Error> {
+    match rest {
+        [Value::Symbol(id)] => Ok(heap.symbol_name(*id).to_string()),
+        _ => Err(Error::TypeError(format!("defstruct: ({} name) takes exactly one name", what))),
+    }
+}
 
 fn params_declare_opt_key(heap: &Heap, v: Value) -> Result<bool, Error> {
     let elems = heap.list_to_vec(v)?;
