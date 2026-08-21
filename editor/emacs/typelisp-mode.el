@@ -226,6 +226,11 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "map-into" "set-contents" "rplaca" "rplacd"
     ;; Eq / Ord trait methods
     "equals" "not-equals" "less" "less-equal" "greater" "greater-equal"
+    ;; the arithmetic traits' methods (Phase 1a).  The operators themselves
+    ;; are builtins; these are what a `where'-bounded type variable spells
+    ;; them as.
+    "add" "sub" "mul" "div" "remainder"
+    "bit-and" "bit-or" "bit-xor" "bit-not"
     ;; pretty-printer helpers callable inside `pprint-logical-block' (§15.1)
     "pprint-newline" "pprint-indent" "pprint-tab" "pprint-pop"
     "pprint-exit-if-list-exhausted" "pprint-list-exhausted"
@@ -289,7 +294,9 @@ stream (CLHS 12.1.6).")
     ;; nine return values
     "decoded-time"
     ;; builtin traits
-    "Iter" "Eq" "Ord" "Error")
+    "Iter" "Eq" "Ord" "Error"
+    ;; the arithmetic traits (Phase 1a)
+    "Add" "Sub" "Mul" "Div" "Rem" "Bits" "Number")
   "Builtin generic/abstract type names and traits.")
 
 (defconst typelisp-constants

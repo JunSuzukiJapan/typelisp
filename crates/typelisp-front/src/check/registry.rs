@@ -566,13 +566,21 @@ impl Registry {
             let assoc = match ty {
                 Type::Str => string_assoc(),
                 Type::Char => char_assoc(),
-                Type::I32 => int_assoc(Type::I32),
-                Type::I64 => int_assoc(Type::I64),
-                Type::F64 => float_assoc(),
                 Type::Bignum => bignum_assoc(),
                 Type::Ratio => ratio_assoc(),
                 Type::Bool => bool_assoc(),
                 Type::Symbol => symbol_assoc(),
+                // Every integer width and both float widths get the same
+                // catalog as `i32`/`f64` did alone. Width is a *static*
+                // distinction here and nothing else: a `Value::Int` is an
+                // `i64` and a `Value::Float` an `f64` whichever type labels
+                // it, so `u8` arithmetic neither wraps at 8 bits nor rounds —
+                // exactly the treatment `i32` has always had (`i32` overflow
+                // does not wrap at 32 bits either). What this removes is the
+                // state these types were in before: registered, nameable, and
+                // with no `+` at all.
+                ref t if t.is_integer() => int_assoc(t.clone()),
+                ref t if t.is_float() => float_assoc(t.clone()),
                 _ => BTreeMap::new(),
             };
             root.add_type(AdtDef {
@@ -1913,10 +1921,10 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
 /// `abs`/`signum` are defined in `prelude.rs` as typelisp methods (built from
 /// these primitives — `mod`/`rem` via `a - b*floor|truncate(a/b)`), so they
 /// compile via the normal path.
-fn float_assoc() -> BTreeMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
-    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
+    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = BTreeMap::new();
     for op in ["+", "-", "*", "/", "max", "min"] {
         m.insert(op.to_string(), binop());
@@ -1946,16 +1954,16 @@ fn float_assoc() -> BTreeMap<String, AssocFn> {
     // integer type, `Checker::int_lit_ty`'s fallback) even though the
     // runtime value is a uniform `Value::Int(i64)` either way (see
     // `eval_int_builtin`'s doc comment).
-    m.insert("float->int".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("float->int".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `float->bignum`: narrowing, truncating toward zero (`f64 as i64`'s
     // multi-precision analogue — see `crate::eval::interp::float_to_bignum`).
     // `float->ratio`: widening and *exact* — every finite `f64` is itself an
     // exact dyadic rational (CL's `rational`, not the lossy-round-trip
     // `rationalize`), via `num_rational::BigRational::from_float`.
-    m.insert("float->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("float->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("float->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("float->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m
 }
 

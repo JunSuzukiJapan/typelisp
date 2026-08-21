@@ -2833,6 +2833,19 @@ fn eval_read(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     Ok(typelisp_read::shim::read_builtin(heap, &s))
 }
 
+/// Whether `type_name` is one of the integer types — every one of which shares
+/// the same catalog and the same runtime representation (`Value::Int`, an
+/// `i64`, whatever width the static type claims; see `registry::int_assoc`).
+fn is_int_receiver(type_name: &Path) -> bool {
+    crate::types::INT_TYPE_NAMES.iter().any(|n| *type_name == Path::root(n))
+}
+
+/// [`is_int_receiver`]'s float counterpart: `f32` and `f64` are one
+/// `Value::Float` (an `f64`) apart from which type labels them.
+fn is_float_receiver(type_name: &Path) -> bool {
+    crate::types::FLOAT_TYPE_NAMES.iter().any(|n| *type_name == Path::root(n))
+}
+
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
 /// have no `defmethod` body to run — currently `HashTable<K,V>`
 /// (`crate::check::registry`'s `hashtable_def`).
@@ -2950,7 +2963,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[
             _ => None,
         };
     }
-    if *type_name == Path::root("i32") || *type_name == Path::root("i64") {
+    if is_int_receiver(type_name) {
         return match method {
             "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
             | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_int_builtin(method, args),
@@ -2974,7 +2987,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[
             _ => None,
         };
     }
-    if *type_name == Path::root("f64") {
+    if is_float_receiver(type_name) {
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_float_builtin(heap, method, args)

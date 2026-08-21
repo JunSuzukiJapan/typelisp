@@ -166,8 +166,10 @@ pub const LLVM_METHOD_RECEIVER_TYPES: [&str; 4] =
 /// LLVM instructions or `rt_*` calls rather than function calls
 /// (`Interp::is_native_lowered_primitive_method` says *which* methods; this
 /// says which receivers can have them).
-pub const NATIVE_LOWERED_PRIMITIVES: [&str; 10] =
-    ["i64", "i32", "char", "string", "f64", "bignum", "ratio", "sexpr", "bool", "symbol"];
+pub const NATIVE_LOWERED_PRIMITIVES: [&str; 19] = [
+    "i64", "i32", "i8", "i16", "isize", "u8", "u16", "u32", "u64", "usize",
+    "char", "string", "f64", "f32", "bignum", "ratio", "sexpr", "bool", "symbol",
+];
 
 #[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Type {
@@ -259,6 +261,17 @@ impl Type {
         matches!(self, Type::F32 | Type::F64)
     }
 }
+
+/// Every integer type's registry name, in the one order the whole codebase
+/// spells them. The list exists because "which types share the integer
+/// catalog" is asked in four places that must not drift apart: the registry
+/// (which methods a receiver has), the interpreter (which arm runs them), the
+/// compile bridge's native-method table, and the island's own dispatch
+/// predicate.
+pub const INT_TYPE_NAMES: [&str; 10] = ["i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize"];
+
+/// [`INT_TYPE_NAMES`]'s float counterpart.
+pub const FLOAT_TYPE_NAMES: [&str; 2] = ["f32", "f64"];
 
 /// All primitive value types that can be a `defmethod` receiver (every
 /// variant [`prim_type_path`] maps to a `Path`). Used to pre-register each

@@ -1285,10 +1285,9 @@ pub const SOURCE: &str = r##"
 ;; would make `(member "x" ...)` fail on separately built equal-content
 ;; strings); `symbol` to `eq` (interned, identity *is* content equality).
 ;; `not-equals` comes from `Eq`'s default body, so each impl supplies only the
-;; core `equals`. Only the seven scalar types with a usable comparison builtin
-;; get an impl — `f32`/`i8`/`i16`/`u*` have empty assoc tables (no `=`/`<` to
-;; delegate to), so they stay outside `Eq`/`Ord` until they grow real
-;; arithmetic.
+;; core `equals`. The narrow integer widths and `f32` are further down, with
+;; the arithmetic traits: they had no `=`/`<` to delegate to until Phase 1a
+;; gave every width the same built-in catalog `i32` had.
 (impl Eq i32    (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq i64    (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq f64    (equals ((self Self) (other Self)) bool (= self other)))
@@ -1312,6 +1311,243 @@ pub const SOURCE: &str = r##"
 (impl Ord ratio  (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord char   (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord string (less ((self Self) (other Self)) bool (< self other)))
+
+;; The widths that had no methods at all until Phase 1a — every integer
+;; other than `i32`/`i64`, plus `f32` — joining `Eq`/`Ord`. The comment
+;; above used to end "...so they stay outside `Eq`/`Ord` until they grow
+;; real arithmetic": they have, so they do.
+(impl Eq i8    (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq i16   (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq isize (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq u8    (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq u16   (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq u32   (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq u64   (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq usize (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq f32   (equals ((self Self) (other Self)) bool (= self other)))
+
+(impl Ord i8    (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord i16   (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord isize (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord u8    (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord u16   (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord u32   (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord u64   (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord usize (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord f32   (less ((self Self) (other Self)) bool (< self other)))
+
+;; ---------------------------------------------------------------------
+;; The arithmetic traits.
+;;
+;; These exist for *generic* code. A call whose receiver type is known
+;; goes on using the built-in operators, which lower to single LLVM
+;; instructions and are not touched here. What was missing is the other
+;; case: a `defun` whose parameter is a type variable had no way to ask
+;; that the variable be a type you can add, so no generic function could
+;; add two of its own arguments.
+;;
+;; The method names are `add`/`sub`/... rather than `+`/`-`/...: an `impl`
+;; naming a method `+` is refused ("cannot redefine built-in method"), and
+;; the refusal is right — the operator names belong to the primitive
+;; types' own tables. The checker closes the gap from the other side: on a
+;; receiver whose type is a `where`-bounded type variable, `(+ a b)`
+;; resolves to the `Add` bound's `add` (`Checker::trait_operator_method`),
+;; so generic code is still written with operators and only these
+;; declarations spell the names out.
+;;
+;; There is no `Neg`: `(- x)` desugars to `(- (- x x) x)`
+;; (`check_unary_negate_or_invert`), so negation on a type variable needs
+;; `Sub` and nothing more.
+(deftrait Add ()
+  (add ((self Self) (other Self)) Self))
+(deftrait Sub ()
+  (sub ((self Self) (other Self)) Self))
+(deftrait Mul ()
+  (mul ((self Self) (other Self)) Self))
+(deftrait Div ()
+  (div ((self Self) (other Self)) Self))
+;; `remainder`, not `rem`: `rem` is already a method on every numeric type
+;; (above), and a trait may not declare a name its implementors already
+;; define. The impls delegate to it, and `(rem a b)` on a bounded type
+;; variable resolves here through the same operator spelling as `+`, so
+;; the short name is still what generic code writes.
+(deftrait Rem ()
+  (remainder ((self Self) (other Self)) Self))
+;; The bitwise catalog, spelled apart from the `logand`/`logior`/`logxor`/
+;; `lognot` builtins for the same reason `add` is spelled apart from `+`.
+(deftrait Bits ()
+  (bit-and ((self Self) (other Self)) Self)
+  (bit-or ((self Self) (other Self)) Self)
+  (bit-xor ((self Self) (other Self)) Self)
+  (bit-not ((self Self)) Self))
+;; What "a number" means as a bound: arithmetic and an ordering, with no
+;; methods of its own — a name for the conjunction, so `(where (Number T))`
+;; says in one bound what six would.
+(deftrait Number (Add Sub Mul Div Rem Ord))
+
+;; `mod`/`rem` for the widths that did not have them. Same bodies the
+;; `i32`/`i64` (integer) and `f64` (float) methods above carry — floored for
+;; `mod`, truncated for `rem`. The integer widths get `mod` from the built-in
+;; table, so only `f32` needs one here.
+(defmethod mod ((self f32) (b f32)) f32 (- self (* b (floor (/ self b)))))
+(defmethod rem ((self f32) (b f32)) f32 (- self (* b (truncate (/ self b)))))
+(defmethod rem ((self i8   ) (b i8   )) i8    (- self (* b (/ self b))))
+(defmethod rem ((self i16  ) (b i16  )) i16   (- self (* b (/ self b))))
+(defmethod rem ((self isize) (b isize)) isize (- self (* b (/ self b))))
+(defmethod rem ((self u8   ) (b u8   )) u8    (- self (* b (/ self b))))
+(defmethod rem ((self u16  ) (b u16  )) u16   (- self (* b (/ self b))))
+(defmethod rem ((self u32  ) (b u32  )) u32   (- self (* b (/ self b))))
+(defmethod rem ((self u64  ) (b u64  )) u64   (- self (* b (/ self b))))
+(defmethod rem ((self usize) (b usize)) usize (- self (* b (/ self b))))
+
+;; The impls. Each is the built-in operator under the trait's name.
+(impl Add i32    (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add i64    (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add i8     (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add i16    (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add isize  (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add u8     (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add u16    (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add u32    (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add u64    (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add usize  (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add f64    (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add f32    (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add bignum (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add ratio  (add ((self Self) (other Self)) Self (+ self other)))
+
+(impl Sub i32    (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub i64    (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub i8     (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub i16    (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub isize  (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub u8     (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub u16    (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub u32    (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub u64    (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub usize  (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub f64    (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub f32    (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub bignum (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub ratio  (sub ((self Self) (other Self)) Self (- self other)))
+
+(impl Mul i32    (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul i64    (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul i8     (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul i16    (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul isize  (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul u8     (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul u16    (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul u32    (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul u64    (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul usize  (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul f64    (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul f32    (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul bignum (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul ratio  (mul ((self Self) (other Self)) Self (* self other)))
+
+(impl Div i32    (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div i64    (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div i8     (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div i16    (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div isize  (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div u8     (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div u16    (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div u32    (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div u64    (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div usize  (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div f64    (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div f32    (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div bignum (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div ratio  (div ((self Self) (other Self)) Self (/ self other)))
+
+(impl Rem i32    (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem i64    (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem i8     (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem i16    (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem isize  (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem u8     (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem u16    (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem u32    (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem u64    (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem usize  (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem f64    (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem f32    (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem bignum (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem ratio  (remainder ((self Self) (other Self)) Self (rem self other)))
+
+(impl Bits i32
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+(impl Bits i64
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+(impl Bits i8
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+(impl Bits i16
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+(impl Bits isize
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+(impl Bits u8
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+(impl Bits u16
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+(impl Bits u32
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+(impl Bits u64
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+(impl Bits usize
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+(impl Bits bignum
+  (bit-and ((self Self) (other Self)) Self (logand self other))
+  (bit-or ((self Self) (other Self)) Self (logior self other))
+  (bit-xor ((self Self) (other Self)) Self (logxor self other))
+  (bit-not ((self Self)) Self (lognot self)))
+
+;; `Number` has no methods, so its impls are the bare conjunction: this
+;; type has all six.
+(impl Number i32)
+(impl Number i64)
+(impl Number i8)
+(impl Number i16)
+(impl Number isize)
+(impl Number u8)
+(impl Number u16)
+(impl Number u32)
+(impl Number u64)
+(impl Number usize)
+(impl Number f64)
+(impl Number f32)
+(impl Number bignum)
+(impl Number ratio)
 
 ;; `cons-cell<A,B>`'s Eq/Ord: recursive (structural) comparison. The field
 ;; comparisons go through the methods' own `where` bounds — checked as

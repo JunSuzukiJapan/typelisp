@@ -36,8 +36,16 @@
 ビット演算（`logand`/`ash`/`ldb` 等）と述語（`zerop`/`evenp` 等）は型をまたいで同じ形なので §4 に
 まとめてある。
 
-`i8` `i16` `isize` `u8` `u16` `u32` `u64` `usize` `f32` は `defmethod` の受け手として型登録は
-されているが、現時点では算術・比較を含め一切のメソッドを持たない。
+`i8` `i16` `isize` `u8` `u16` `u32` `u64` `usize` はこの節の表をそのまま持ち、`f32` は §2 の
+`f64` の表をそのまま持つ。**幅は静的な区別だけで、実行時表現は共通**——整数はどの型でも
+`i64`、浮動小数点はどちらも `f64` なので、`u8` の算術は 8 ビットで巻き戻らず、`f32` の算術は
+f32 精度に丸めない。これは `i32` が最初からそうだった扱い（`i32` の加算も 32 ビットで
+巻き戻らない）をそのまま広げたもの。
+
+CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と §4 の述語）は
+`i32`/`i64`/`f64`/`bignum`/`ratio` のまま。CL 側に対応物が無い幅なので、同じ名前を 8 型ぶん
+並べても CL 準拠には近づかない——狭い幅が要るのはデータを*名指す*ためで、計算する型としてでは
+ない。必要なら `(as i32 x)` で移る（§1b の変換は全ペアにある）。
 
 ## 2. 算術・比較（`f64`）
 
@@ -730,12 +738,46 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` 実装済み: `i32` `i64` `f64` `bignum` `ratio` `bool` `char` `string` `symbol` および
-`cons-cell<A,B>`（要素が `Eq` なら再帰的に）。`Ord` 実装済み: `i32` `i64` `f64` `bignum` `ratio`
-`char` `string` および `cons-cell<A,B>`（辞書順、要素が `Ord` なら）。メソッド名が組み込み演算子
+`Eq` 実装済み: 全数値型（`i8`〜`usize` / `f32` / `f64` / `bignum` / `ratio`）と `bool` `char`
+`string` `symbol`、および `cons-cell<A,B>`（要素が `Eq` なら再帰的に）。`Ord` 実装済み:
+全数値型と `char` `string`、および `cons-cell<A,B>`（辞書順、要素が `Ord` なら）。メソッド名が組み込み演算子
 （`= /= < <= > >=`）・`eq`/`lt` と重複
 しないのは、組み込みは再定義できず各実装がそれらへ委譲するため。スカラの比較演算子そのものは
 レシーバ型で多重定義された組み込みメソッド（§1・§2・§8・§9）。
+
+## 12.2 算術トレイト（`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`）
+
+ジェネリックコードが「足せる型」を要求するための層。**具体型の演算は今までどおり組み込み
+演算子**（§1・§2）で、この層は通らない。
+
+```lisp
+(deftrait Add () (add ((self Self) (other Self)) Self))
+(deftrait Sub () (sub ((self Self) (other Self)) Self))
+(deftrait Mul () (mul ((self Self) (other Self)) Self))
+(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Rem () (remainder ((self Self) (other Self)) Self))
+(deftrait Bits ()
+  (bit-and ((self Self) (other Self)) Self)
+  (bit-or  ((self Self) (other Self)) Self)
+  (bit-xor ((self Self) (other Self)) Self)
+  (bit-not ((self Self)) Self))
+(deftrait Number (Add Sub Mul Div Rem Ord))               ; メソッド無し・6つの合成
+```
+
+**境界内では演算子で書ける。** `where` で束縛された型変数が受け手のとき、チェッカーが
+演算子をトレイトメソッドへ綴り直す（`+`→`add`、`-`→`sub`、`*`→`mul`、`/`→`div`、
+`rem`→`remainder`、`logand`→`bit-and`、`=`→`equals`、`<`→`less` …）:
+
+```lisp
+(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+  (+ a b c))                                              ; = (add (add a b) c)
+```
+
+トレイト側のメソッド名が `+` でないのは、`+` が組み込みメソッド名で `impl` が再定義を
+拒むため（`cannot redefine built-in method`）。`Neg` は無い——`(- x)` は
+`(- (- x x) x)` へ脱糖されるので `Sub` だけで足りる。
+
+実装済み: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` は全数値型、`Bits` は全整数型と `bignum`。
 
 ## 13. 高階関数
 

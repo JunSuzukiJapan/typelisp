@@ -207,7 +207,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // fold or recurse into), so all four are the same `icmp eq`. Only
         // `eq` used to be here, which is what made `case` — whose expansion
         // compares with `equal` — uncompilable for every integer scrutinee.
-        "i64" | "i32" => &[
+        "i64" | "i32" | "i8" | "i16" | "isize" | "u8" | "u16" | "u32" | "u64" | "usize" => &[
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
             "int->bignum", "int->ratio",
             "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
@@ -228,7 +228,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // disagreement is what `the_rust_and_island_native_method_lists_agree`
         // exists to catch.
         "char" => &["eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "char->int", "char->string"],
-        "f64" => &[
+        "f64" | "f32" => &[
             "+", "-", "*", "/", "expt", "sqrt", "floor", "ceiling", "round", "truncate",
             "float->int", "float->bignum", "float->ratio",
             "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
@@ -708,10 +708,10 @@ mod native_method_list_tests {
     /// Every primitive receiver whose builtin methods either side lowers, with
     /// the island predicate that decides for it.
     const PRIMITIVES: &[(&str, &[&str])] = &[
-        ("int", &["i64", "i32"]),
+        ("int", &["i64", "i32", "i8", "i16", "isize", "u8", "u16", "u32", "u64", "usize"]),
         ("string", &["string"]),
         ("char", &["char"]),
-        ("float", &["f64"]),
+        ("float", &["f64", "f32"]),
         ("bignum", &["bignum"]),
         ("ratio", &["ratio"]),
         ("bool", &["bool"]),

@@ -854,6 +854,32 @@ pub const SOURCE: &str = r#"
 ;; receiver, e.g. the prelude's `impl Eq i32` → `equals` — falls through to
 ;; `compile-assoc-user`'s ordinary mangled-name call. (Chained `if`s: the
 ;; prelude's `or` macro isn't loaded under `run_with_compiler`.)
+;; Which receiver type names go to `int-native-method?`/`float-native-method?`
+;; above. Every integer width is one catalog and one representation (a tagged
+;; `i64`), and both float widths are one boxed `f64` — the static width is a
+;; type-checking distinction that reaches no instruction, so the lowering that
+;; serves `i32` serves `u8` unchanged. Kept as their own predicates rather than
+;; inlined at the dispatch so the two lists read next to each other.
+(defun int-receiver-type? ((name string)) bool
+  (icond
+         ((equal name "i8") true)
+         ((equal name "i16") true)
+         ((equal name "i32") true)
+         ((equal name "i64") true)
+         ((equal name "isize") true)
+         ((equal name "u8") true)
+         ((equal name "u16") true)
+         ((equal name "u32") true)
+         ((equal name "u64") true)
+         ((equal name "usize") true)
+         (else false)))
+
+(defun float-receiver-type? ((name string)) bool
+  (icond
+         ((equal name "f32") true)
+         ((equal name "f64") true)
+         (else false)))
+
 (defun int-native-method? ((method string)) bool
   (icond
          ((equal method "+") true)
@@ -1991,7 +2017,7 @@ pub const SOURCE: &str = r#"
                             (store-arg builder args-ptr 2 c)
                             (emit-direct-call builder m cur-fn (get-function m "rt_str_substring") args-ptr 3 protect))))
                        (else (panic (append "compile-assoc: unsupported str method " method))))))))
-            ((if (if (equal type-name "i64") true (equal type-name "i32")) (int-native-method? method) false)
+            ((if (int-receiver-type? type-name) (int-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
                ;; `int->bignum`/`int->ratio`: unary, checked before `b2`
                ;; is read — same reason `float-native-method?`'s own
@@ -2106,7 +2132,7 @@ pub const SOURCE: &str = r#"
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
                (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
                  (build-icmp-eq builder a b2))))
-            ((if (equal type-name "f64") (float-native-method? method) false)
+            ((if (float-receiver-type? type-name) (float-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
                (icond
                  ((equal method "sqrt")

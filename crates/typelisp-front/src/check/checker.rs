@@ -2459,7 +2459,8 @@ impl Checker {
         // `check_inner`'s expected-type fallback, see its doc comment for why
         // this is runtime-cost-free. This is what lets `(println "~a" my-
         // struct)`/`(list p ...&rest)` accept a user ADT argument.
-        // `f64` is the one heap-repr type this shortcut must *not* take.
+        // The float types are the heap-repr types this shortcut must *not*
+        // take.
         // `is_heap_repr` answers about the **interpreter's** representation,
         // where an `f64` is a `BoxedObj::Float` and therefore already a
         // `Sexpr::Float`. A *compiled* `f64` is neither boxed nor tagged: it
@@ -2472,15 +2473,17 @@ impl Checker {
         // value straight back) and is exactly the `rt_float_new` box the
         // island emits for that variant. `string`/`bignum`/`ratio` genuinely
         // do share their tagged word between both worlds and stay on the
-        // shortcut.
-        if self.is_heap_repr(elem_ty) && *elem_ty != Type::F64 {
+        // shortcut. `f32` is `f64`'s case exactly — one runtime
+        // representation, two static widths — so the exclusion is by family,
+        // not by naming `f64`.
+        if self.is_heap_repr(elem_ty) && !elem_ty.is_float() {
             // A retype, not a node: the form is unchanged and only the
             // checker's own view of its type widens.
             return Ok(Checked::new(e.form, sexpr_ty()));
         }
         let ctor = sexpr_ctor_for(elem_ty).ok_or_else(|| {
             Error::TypeError(format!(
-                "&rest: element type {:?} has no Sexpr encoding (use one of i32/i64/f64/bool/char/string/Sexpr)",
+                "&rest: element type {:?} has no Sexpr encoding (use a number, bool/char/string/Sexpr)",
                 elem_ty
             ))
         })?;
@@ -8186,6 +8189,27 @@ impl Checker {
                 // for why the implementing type is resolved at runtime
                 // instead of here.
                 if let Some(bound_traits) = env.bounds.get(type_fq.last_segment()) {
+                    // An operator on a bounded type variable means its trait's
+                    // method: `(+ a b)` under `(where (Add T))` is `(add a b)`.
+                    // The trait cannot declare the operator itself — an `impl`
+                    // naming a method `+` is refused, because `+` belongs to
+                    // the primitive types' built-in tables — so the two
+                    // spellings meet here, in the one place a receiver is known
+                    // to be a type variable rather than a type. A bound that
+                    // declares the written name itself always wins: this is a
+                    // fallback for a name no bound has, never a rename.
+                    let method = match trait_operator_method(method) {
+                        Some(alias)
+                            if !bound_traits.iter().any(|tb| {
+                                self.reg
+                                    .trait_def(&tb.trait_path)
+                                    .is_some_and(|t| self.reg.trait_method(t, method).is_some())
+                            }) =>
+                        {
+                            alias
+                        }
+                        _ => method,
+                    };
                     for tb in bound_traits {
                         let Some(tdef) = self.reg.trait_def(&tb.trait_path) else { continue };
                         // Inherited methods included: bounding `T` by `Ord`
@@ -8453,13 +8477,16 @@ impl Checker {
         if src.ty == target {
             return if try_variant { wrap_some(heap, self, src, target) } else { Ok(src) };
         }
-        // `i32`<->`i64`: a pure relabel, no runtime effect. `Value::Int` is
-        // uniformly `i64` regardless of which static width labels it (see
-        // `registry::int_assoc`'s `int->float` doc comment) — there is no
-        // real 32-bit-truncating representation anywhere in this codebase
-        // for `as`/`try-as` to imitate, so crossing widths is total in both
-        // directions.
-        if matches!((&src.ty, &target), (Type::I32, Type::I64) | (Type::I64, Type::I32)) {
+        // Between two integer widths, or between the two float widths: a pure
+        // relabel, no runtime effect. `Value::Int` is uniformly `i64` and
+        // `Value::Float` uniformly `f64` regardless of which static width
+        // labels them (see `registry::int_assoc`'s `int->float` doc comment) —
+        // there is no truncating representation anywhere in this codebase for
+        // `as`/`try-as` to imitate, so crossing widths is total in both
+        // directions. `try-as` between them is therefore always `some`, which
+        // is worth knowing when reading code that asks: it says the *static*
+        // type changed and nothing else did.
+        if (src.ty.is_integer() && target.is_integer()) || (src.ty.is_float() && target.is_float()) {
             let relabeled = Checked::new(src.form, target.clone());
             return if try_variant { wrap_some(heap, self, relabeled, target) } else { Ok(relabeled) };
         }
@@ -8496,22 +8523,23 @@ impl Checker {
         )?;
 
         // `float->int`/`bignum->int`/`char->int` are always registered with
-        // an `I32` return even when the caller asked for `i64` — see
-        // `as_conversion`'s doc comment. Whenever this branch is reached
-        // with `target == I64`, `called`'s (unwrapped, for a try_method
-        // result) type is always exactly `I32` by construction of
-        // `as_conversion`'s table.
+        // an `I32` return, and `int->float` with an `F64` one, whichever width
+        // the caller asked for — see `as_conversion`'s doc comment. The result
+        // is relabeled to the target here, which is all a width is: by
+        // construction of `as_conversion`'s table, `called`'s (unwrapped, for
+        // a `try_method` result) type is the catalog width of the target's own
+        // family.
+        let relabel = target != called_width(&target);
         if try_variant {
             match try_method {
-                Some(_) => Ok(if target == Type::I64 { retype_option(called, target) } else { called }),
+                Some(_) => Ok(if relabel { retype_option(called, target) } else { called }),
                 None => {
-                    let called =
-                        if target == Type::I64 { Checked::new(called.form, Type::I64) } else { called };
+                    let called = if relabel { Checked::new(called.form, target.clone()) } else { called };
                     wrap_some(heap, self, called, target)
                 }
             }
-        } else if target == Type::I64 {
-            Ok(Checked::new(called.form, Type::I64))
+        } else if relabel {
+            Ok(Checked::new(called.form, target))
         } else {
             Ok(called)
         }
@@ -11457,15 +11485,26 @@ fn is_symbol(heap: &Heap, v: Value, name: &str) -> bool {
 /// before the lookup.
 fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'static str>)> {
     use Type::*;
-    let to_key = if *to == I64 { I32 } else { to.clone() };
+    // Widths do not appear in a conversion method's name: every integer type
+    // has the same `int->float`/`int->bignum`/... catalog (they share one
+    // runtime representation), and both float types the same `float->int`.
+    // So the table is written between *families*, and `check_as` relabels the
+    // result to the width that was actually asked for.
+    let to_key = called_width(to);
     match (from, &to_key) {
-        (I32, F64) | (I64, F64) => Some(("int->float", None)),
-        (I32, Bignum) | (I64, Bignum) => Some(("int->bignum", None)),
-        (I32, Ratio) | (I64, Ratio) => Some(("int->ratio", None)),
-        (I32, Char) | (I64, Char) => Some(("int->char", Some("try-int->char"))),
-        (F64, I32) => Some(("float->int", None)),
-        (F64, Bignum) => Some(("float->bignum", None)),
-        (F64, Ratio) => Some(("float->ratio", None)),
+        _ if from.is_integer() => match &to_key {
+            F64 => Some(("int->float", None)),
+            Bignum => Some(("int->bignum", None)),
+            Ratio => Some(("int->ratio", None)),
+            Char => Some(("int->char", Some("try-int->char"))),
+            _ => None,
+        },
+        _ if from.is_float() => match &to_key {
+            I32 => Some(("float->int", None)),
+            Bignum => Some(("float->bignum", None)),
+            Ratio => Some(("float->ratio", None)),
+            _ => None,
+        },
         (Char, I32) => Some(("char->int", None)),
         (Bignum, Ratio) => Some(("bignum->ratio", None)),
         (Bignum, F64) => Some(("bignum->float", None)),
@@ -11473,6 +11512,19 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
         (Ratio, F64) => Some(("ratio->float", None)),
         (Ratio, Bignum) => Some(("ratio->bignum", None)),
         _ => None,
+    }
+}
+
+/// The width a conversion *into* `ty`'s family is actually registered at:
+/// `i32` for every integer, `f64` for both floats, and `ty` itself for
+/// everything else. See [`as_conversion`].
+fn called_width(ty: &Type) -> Type {
+    if ty.is_integer() {
+        Type::I32
+    } else if ty.is_float() {
+        Type::F64
+    } else {
+        ty.clone()
     }
 }
 
@@ -11623,8 +11675,13 @@ fn sexpr_ty() -> Type {
 /// nothing else has a lossless `Sexpr` encoding to collect into a list with.
 fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
     match elem_ty {
-        Type::I64 | Type::I32 => Some("int"),
-        Type::F64 => Some("float"),
+        // Every integer width is one `Sexpr::Int` and both float widths one
+        // `Sexpr::Float`: the widths differ statically and share a runtime
+        // value, so there is nothing else they could encode as. Written as
+        // guards rather than a variant list so a width added later is
+        // encodable the day it is added.
+        _ if elem_ty.is_integer() => Some("int"),
+        _ if elem_ty.is_float() => Some("float"),
         Type::Bignum => Some("bignum"),
         Type::Ratio => Some("ratio"),
         Type::Char => Some("char"),
@@ -11636,6 +11693,37 @@ fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
 }
 
 /// The type of an integer literal: the expected integer type if any, else `i32`.
+/// The trait method an operator spells when its receiver is a `where`-bounded
+/// type variable — `+` is `Add`'s `add`, `<` is `Ord`'s `less`.
+///
+/// One table, not a rule: the prelude's numeric traits pick these names
+/// (`prelude.rs`'s "arithmetic traits" section says why they cannot be the
+/// operators), and this is the other half of that choice. A name absent from
+/// the table is passed through unchanged, and so is one a bound declares
+/// itself.
+fn trait_operator_method(op: &str) -> Option<&'static str> {
+    Some(match op {
+        "+" => "add",
+        "-" => "sub",
+        "*" => "mul",
+        "/" => "div",
+        "rem" => "remainder",
+        "logand" => "bit-and",
+        "logior" => "bit-or",
+        "logxor" => "bit-xor",
+        "lognot" => "bit-not",
+        // `Eq`/`Ord` predate the arithmetic traits and already had these four
+        // under spelled-out names; the operators reach them the same way.
+        "=" => "equals",
+        "/=" => "not-equals",
+        "<" => "less",
+        "<=" => "less-equal",
+        ">" => "greater",
+        ">=" => "greater-equal",
+        _ => return None,
+    })
+}
+
 fn int_lit_ty(expected: Option<&Type>) -> Type {
     match expected {
         Some(t) if t.is_integer() => t.clone(),

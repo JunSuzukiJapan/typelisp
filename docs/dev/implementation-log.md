@@ -7727,3 +7727,63 @@ prelude が入るまでこれが問題にならなかったのは、ジェネリ
 「global initializer が `defvar` でない」という遠くの症状になった。
 `push_permanent_root`（LIFO 非依存の第 2 のルート集合）が正しい道具だった。
 [[typelisp-permanent-gc-root]] が置かれた理由そのもの。
+
+## CL 残差 Phase 1a/1b — 全ての幅を「数」にする（2026-08-21、branch `feature/cl-parity`）
+
+[cl-parity-plan.md](cl-parity-plan.md) の Stage 1a（演算トレイト化と全型カタログ）と
+Stage 1b（全数値型間の変換）。着手前の状態は計画の §1.3 が書いているとおりで、
+`i8`/`i16`/`u8`/`u16`/`u32`/`u64`/`isize`/`usize`/`f32` は **`defmethod` の受け手として
+型登録だけされていて、メソッドが 1 つも無かった**（`+` すら）。
+
+### 幅は静的な区別であって、それ以上ではない
+
+これを決めてから作業した。実行時の値は `Value::Int(i64)` と `Value::Float(f64)` の 2 つで、
+どの型が貼られていても同じ——つまり `u8` の算術は 8 ビットで巻き戻らないし、`f32` の算術は
+f32 精度に丸めない。
+
+**これは新しい妥協ではなく、`i32` が最初からそうだった扱いの拡張**である
+（`i32` の加算も 32 ビットでは巻き戻らない。`eval_int_builtin` の doc コメントが
+「静的な型が `i32` か `i64` かに関わらず一様な `i64`」と明言している）。
+本当に幅どおりに巻き戻す/丸めるなら、インタプリタと島の両方に幅を運んで両方でマスク・
+`fptrunc` する必要があり、片方だけ直せば**解釈と compiled が食い違う**——いちばん悪い結末。
+そこまでやる価値があるかは別の判断なので、`docs/functions.md` §1 に明記して据え置いた。
+
+この決定のおかげで **Stage 1b は変換表ではなく張り替えになった**。整数どうし・浮動小数点
+どうしの `as` は実行時に何もしない（`try-as` は常に `some`）。変換メソッドの名前に幅が
+出てこないのも同じ理由で、`as_conversion` は型の*族*の間だけを表にし、
+`check_as` が結果を要求された幅へ張り替える。
+
+### 触点
+
+計画の §2-4 が数えた「Rust builtin の触点 8 箇所」のうち、*メソッド*側の 4 段を全部通った:
+
+| 段 | やったこと |
+|---|---|
+| registry | `int_assoc(ty)` を全整数型に、`float_assoc(ty)`（引数化した）を両浮動小数点型に |
+| interp | `*type_name == Path::root("i32") \|\| ...` の分岐を `is_int_receiver`/`is_float_receiver` に |
+| externs | `native_lowered_primitive_methods` の 2 アームに型名を追加、番人テストの `PRIMITIVES` 表も |
+| 島 | `int-receiver-type?`/`float-receiver-type?` を新設し、`compile-assoc` の 2 箇所の型名比較を置換 |
+
+型名のリストは `types.rs` の `INT_TYPE_NAMES`/`FLOAT_TYPE_NAMES` に 1 つ置いて Rust 側 3 箇所が
+参照する（島は自分の SOURCE に持つ——番人は `the_rust_and_island_native_method_lists_agree`）。
+
+### 演算子はトレイトメソッドになれない。だから綴りを対応させた
+
+Phase 0.2 が見つけていたとおり、`(deftrait Add () (+ ((self Self) (other Self)) Self))` は
+`impl` の時点で `cannot redefine built-in method `+`` に当たる。トレイト側は
+`add`/`sub`/`mul`/`div`/`remainder`/`bit-and`… という綴りにして、**チェッカーが逆側から
+埋めた**: 受け手の型が `where` で束縛された型変数のとき、演算子をその束縛のメソッド名へ
+綴り直す（`Checker::trait_operator_method`）。だからジェネリックコードは今までどおり
+演算子で書ける:
+
+```lisp
+(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T)) (+ a b c))
+```
+
+**綴り直しは「どの束縛も名乗っていない名前」に対してだけ**行う。束縛が自分でその名前を
+宣言していれば必ずそちらが勝つので、ユーザのトレイトが `+` という*関数*を持っていても
+奪われない。
+
+`Neg` は入れなかった。`(- x)` は `check_unary_negate_or_invert` が `(- (- x x) x)` に
+脱糖するので、単項マイナスに要るのは `Sub` だけ——トレイトを 1 つ足すより、脱糖が既に
+そうなっている事実を記録するほうが正しい。
