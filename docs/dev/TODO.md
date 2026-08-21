@@ -15,7 +15,7 @@ Common Lisp にあって typelisp に無いものを Phase 0〜9 に落とした
 | Phase | 状態 |
 |---|---|
 | 0（実装前に確かめる 6 件） | **完了** 2026-08-20。結果と、それが計画本体に強いた訂正は同計画の該当節 |
-| 1（数値層 1a〜1d） | **1a/1b/1c 完了**（1a/1b は 2026-08-21）。1c の保留 2 項目（乱数のシード指定・`ldb` 系の幅拡張）はそのまま。**1d（複素数）未着手**。Phase 2 が残した「char/int の native lowering 5 つ」も未着手——1a と同じ島の分岐を触る作業 |
+| 1（数値層 1a〜1d） | **全完了**（1a/1b/1d は 2026-08-21）。1c の保留 2 項目（乱数のシード指定・`ldb` 系の幅拡張）はそのまま。1d の complex は prelude の `defstruct`（成分は `f64` 固定、`(sqrt -1.0)` は実数 NaN のまま——[implementation-log.md](implementation-log.md) 該当節）。Phase 2 が残した「char/int の native lowering 5 つ」は未着手——1a と同じ島の分岐を触る作業 |
 | 2（文字・文字列 2a/2b） | **完了** 2026-08-20 |
 | 3（リスト・シーケンス 3a〜3d） | **3a/3b/3c/3d 完了** 2026-08-20。残るは 3e（`:key`/`:test` 等のキーワード引数、Phase 5b 依存） |
 | 4（制御構造・マクロ） | **4a 部分完了** 2026-08-20（`prog1`/`prog2`/`do*`/`ecase`/`ccase`/`setq`/`psetq`/`psetf`/`pushnew`）。残るは `block`/`return-from`（島の引数引き回しに全面的に触る）・`prog`/`prog*`・`destructuring-bind`・`sleep`。4b/4c 未着手 |

@@ -174,3 +174,55 @@ fn an_operator_without_the_bound_is_still_an_error() {
     );
     assert!(msg.contains("+") || msg.contains("add"), "unexpected message: {}", msg);
 }
+
+// ---- complex numbers (Phase 1d) ------------------------------------------
+
+/// The components are `f64` and the arithmetic is the ordinary complex
+/// arithmetic — `(1+2i)(3+4i) = -5+10i`.
+#[test]
+fn complex_arithmetic_works() {
+    assert_eq!(show(r#"(format false "~a" (+ (complex 1.0 2.0) (complex 3.0 4.0)))"#), "#C(4.0 6.0)");
+    assert_eq!(show(r#"(format false "~a" (- (complex 1.0 2.0) (complex 3.0 4.0)))"#), "#C(-2.0 -2.0)");
+    assert_eq!(show(r#"(format false "~a" (* (complex 1.0 2.0) (complex 3.0 4.0)))"#), "#C(-5.0 10.0)");
+    assert_eq!(show(r#"(format false "~a" (/ (complex -5.0 10.0) (complex 3.0 4.0)))"#), "#C(1.0 2.0)");
+}
+
+#[test]
+fn the_complex_accessors_answer_for_reals_too() {
+    assert_eq!(show(r#"(format false "~a ~a" (realpart (complex 1.0 2.0)) (imagpart (complex 1.0 2.0)))"#), "1.0 2.0");
+    // CL: every real is a complex whose imaginary part is zero.
+    assert_eq!(show(r#"(format false "~a ~a" (realpart 3.0) (imagpart 3.0))"#), "3.0 0.0");
+    assert_eq!(show(r#"(format false "~a" (conjugate (complex 1.0 2.0)))"#), "#C(1.0 -2.0)");
+}
+
+/// `i^2 = -1`, reached through the principal square root.
+#[test]
+fn the_principal_square_root_of_minus_one_is_i() {
+    let src = r#"
+        (defvar (i complex) (sqrt (complex -1.0 0.0)))
+        (format false "~a ~a" (round (imagpart i)) (round (realpart (* i i))))
+    "#;
+    assert_eq!(show(src), "1.0 -1.0");
+}
+
+/// Euler: `e^(i*pi) = -1`.
+#[test]
+fn eulers_identity_holds_to_rounding() {
+    let src = r#"(format false "~a ~a" (round (realpart (exp (complex 0.0 pi)))) (round (imagpart (exp (complex 0.0 pi)))))"#;
+    assert_eq!(show(src), "-1.0 0.0");
+}
+
+#[test]
+fn phase_and_abs_are_the_polar_pair() {
+    assert_eq!(show(r#"(format false "~a" (abs (complex 3.0 4.0)))"#), "5.0");
+    assert_eq!(show(r#"(format false "~a" (round (* 4.0 (phase (complex 0.0 1.0)))))"#), "6.0");
+    // `(cis theta)` is the unit complex at `theta`.
+    assert_eq!(show(r#"(format false "~a" (round (realpart (cis 0.0))))"#), "1.0");
+}
+
+/// CL's two-argument `(atan y x)`, which `phase` is built on.
+#[test]
+fn atan_takes_two_arguments_as_in_cl() {
+    assert_eq!(show(r#"(format false "~a" (round (* 4.0 (atan 1.0 1.0))))"#), "3.0");
+    assert_eq!(show(r#"(format false "~a" (round (* 4.0 (atan 1.0))))"#), "3.0");
+}

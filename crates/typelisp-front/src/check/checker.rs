@@ -7706,6 +7706,12 @@ impl Checker {
             self.check_variadic_cmp(heap, interp, env, &head, args)
         } else if head == "log" && args.len() == 2 {
             self.check_log_with_base(heap, interp, env, args, expected)
+        } else if head == "atan" && args.len() == 2 {
+            // CL's two-argument `(atan y x)`: the prelude's `atan2`. Sugar
+            // here for the same reason two-argument `log` is — `defmethod`
+            // overloads on receiver type, never on arity, and one-argument
+            // `atan` is already `f64`'s built-in method.
+            self.check_renamed_call(heap, interp, env, "atan2", args, arg_locs)
         } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args, arg_locs) {
             result
         } else if let Some(result) = self.try_instance_method_swapped(heap, interp, env, &head, args, arg_locs) {
@@ -9523,6 +9529,24 @@ impl Checker {
             }
             _ => unreachable!(),
         }
+    }
+
+    /// Check `(written args...)` as a call to the prelude function `name` —
+    /// for a CL spelling whose implementation is an ordinary `defun` under a
+    /// different name (`(atan y x)` -> `atan2`).
+    fn check_renamed_call(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        name: &str,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Checked, Error> {
+        let fq = self
+            .resolve_fn(name)
+            .ok_or_else(|| Error::TypeError(format!("{}: the prelude's `{}` is not loaded", name, name)))?;
+        self.check_call(heap, interp, env, &[name.to_string()], &fq, args, arg_locs)
     }
 
     /// CL's 2-argument `(log number base)`: the change-of-base identity

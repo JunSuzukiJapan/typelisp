@@ -261,13 +261,35 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 
 ### Stage 1d — 複素数
 
-`complex` 型を `bignum`/`ratio` と同じ heap-boxed 方式（`TAG_BOXED` ポインタ）で新設。前例を
-そのまま踏襲できる（[[typelisp-bignum-ratio]]／`rt_bignum_*` 26 関数の構成）。
+**状態: 完了（2026-08-21）。ただし方式を変えた。** 詳細は
+[implementation-log.md](implementation-log.md) の該当節、カタログは
+[functions.md](../functions.md) §2.6、テストは `tests/numeric_widths_test.rs`（6 本）。
 
-- 生成 `(complex::new re im)`（CL の `complex` 関数は薄い別名）
-- 成分は受け手優先: `(realpart z)` / `(imagpart z)` / `(conjugate z)` / `(phase z)` / `(cis theta)`
-- `sqrt`/`log`/`expt`/`asin`/`acos` が CL では複素数を返す場面（現在は panic か NaN）の再定義
-- `Eq`・`print-object`・`as`/`try-as`・JIT/AOT 対応まで
+着手前の計画は「`bignum`/`ratio` と同じ heap-boxed 方式（`TAG_BOXED` ポインタ）で新設。
+前例をそのまま踏襲できる」だったが、**その前例が成り立つ理由がここには無い**——
+`bignum`/`ratio` が Rust にあるのは `BigInt`/`BigRational` の算術がこの言語で書けない
+からで、`f64` 2 つの複素数は `f64` の算術そのもの。prelude の
+`(pub defstruct complex (pub re f64) (pub im f64))` にしたので、新しい `Repr` も `rt_*`
+シムも島の lowering も成果物の手術も要らず、通常経路で compile される。
+
+入ったもの: `complex`/`complex::new`、`realpart`/`imagpart`/`conjugate`/`phase`（実数側にも）、
+`cis`、`atan2`（CL の 2 引数 `(atan y x)` はチェッカーがここへ綴り替える）、
+`+`/`-`/`*`/`/`/`=`/`/=`/`Eq`、`abs`（戻りは実数）/`zerop`/`exp`/`log`/`sqrt`/`expt`、
+`print-object`（`#C(re im)`）。
+
+**CL から外れた 2 点、どちらも静的型が強いる**:
+
+1. **成分は `f64` 固定**。CL の complex は有理数も持て `(complex 1 2)` と
+   `(complex 1.0 2.0)` は別の型だが、静的型は 1 つ選ぶしかない。
+2. **`(sqrt -1.0)` は実数の NaN のまま**。CL が実関数から complex を返せるのは戻りが
+   合併型だから。ここでは `f64` の `sqrt` は `f64` を返すしかなく、複素数は複素数の
+   引数から出る（`(sqrt (complex::new -1.0 0.0))` = `i`）。これにより計画の
+   「`sqrt`/`log`/`expt`/`asin`/`acos` が CL では複素数を返す場面の再定義」は
+   **実数側は据え置き**、複素数側にのみ定義した。
+
+`Ord` は入れていない（複素数体は順序体でない。CL の `<` も複素数を撥ねる）。
+`as`/`try-as` も入れていない——`f64`↔`complex` は張り替えでなく実際の構築/破棄で、
+どちら向きも `complex`/`realpart` という名前のある操作で足りる。
 
 ---
 

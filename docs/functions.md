@@ -143,6 +143,39 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 > でも通常の関数として**コンパイル可能**で、インタプリタと結果が一致する（専用の `rt_*` シムや
 > compiler.rs 分岐は不要）。整数 `mod` と各型の四則・比較・変換はネイティブ命令へ直接ローワリングされる。
 
+## 2.6 複素数（`complex`）
+
+**組み込み型ではなく prelude の `defstruct`。** `bignum`/`ratio` が Rust 実装なのは
+`BigInt`/`BigRational` の演算がこの言語で書けないからで、`f64` 2 つの複素数はそれに当たらない
+（新しい `Repr` も `rt_*` シムも島の lowering も要らず、書いた日から JIT/AOT で動く）。
+
+**CL との違い 2 つ**（どちらも静的型付けの帰結）:
+
+1. **成分は `f64` 固定。** CL の complex は有理数も持て、`(complex 1 2)` と
+   `(complex 1.0 2.0)` は別の型。静的な型はどちらかを選ぶ必要があり、超越関数が返すのは
+   浮動小数点のほう。
+2. **`(sqrt -1.0)` は今までどおり実数の `sqrt`（NaN）。** CL は `sqrt` が和型を返せるので
+   実数から複素数を返せるが、`f64` の `sqrt` は `f64` を返さねばならない。複素数の結果は
+   複素数の引数から出る——`(sqrt (complex -1.0 0.0))` が `i`。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | 生成。`z::re`/`z::im` で成分を直接読める |
+| `realpart` `imagpart` | `(op z)` | `complex→f64` | 実部・虚部。**実数にも効く**（`(realpart 3.0)`→`3.0`、`(imagpart 3.0)`→`0.0`）。CL と同じ |
+| `conjugate` | `(conjugate z)` | `complex→complex` | 共役（実数にも効く） |
+| `phase` | `(phase z)` | `complex→f64` | 偏角 (-pi,pi]（実数にも効く） |
+| `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
+| `abs` | `(abs z)` | `complex→f64` | 絶対値。**唯一、受け手の型を返さない `abs`**（CL 同様、複素数の絶対値は実数） |
+| `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | 複素数の四則 |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | 成分ごとの一致。`Eq` も実装済み（`Ord` は無い——複素数に順序は無く、CL の `<` も拒む） |
+| `zerop` | `(zerop z)` | `complex→bool` | 両成分が 0 か |
+| `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` は主値 |
+| `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`。`(expt 0 0)`=1 |
+| `atan2` | `(atan2 y x)` | `(f64,f64)→f64` | ベクトル `(x,y)` の角度。**CL の 2 引数 `(atan y x)` はこれへの糖衣**（`log` の 2 引数版と同じくアリティで分岐） |
+
+`print-object` を実装しているので `~a`/`~s` は CL と同じ `#C(re im)` で印字する
+（読み戻す `#C` 構文はこの言語のリーダに無い）。
+
 ## 3. 論理・真偽値
 
 | 名前 | 形式 | 型 | 説明 |

@@ -226,6 +226,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "map-into" "set-contents" "rplaca" "rplacd"
     ;; Eq / Ord trait methods
     "equals" "not-equals" "less" "less-equal" "greater" "greater-equal"
+    ;; complex numbers (Phase 1d).  `complex' is both the type and CL's
+    ;; constructor function, so it appears in both lists.
+    "complex" "realpart" "imagpart" "conjugate" "phase" "cis" "atan2"
     ;; the arithmetic traits' methods (Phase 1a).  The operators themselves
     ;; are builtins; these are what a `where'-bounded type variable spells
     ;; them as.
@@ -290,6 +293,8 @@ stream (CLHS 12.1.6).")
     "ParseIntError" "ParseFloatError" "ReadError" "EvalError"
     ;; builtin generic pair & iterator types (lowercase)
     "cons-cell" "vector-iter" "hashtable-iter"
+    ;; complex numbers (Phase 1d) -- a prelude `defstruct', not a builtin
+    "complex"
     ;; the struct `decode-universal-time' answers with, standing in for CL's
     ;; nine return values
     "decoded-time"

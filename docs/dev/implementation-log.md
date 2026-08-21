@@ -7787,3 +7787,65 @@ Phase 0.2 が見つけていたとおり、`(deftrait Add () (+ ((self Self) (ot
 `Neg` は入れなかった。`(- x)` は `check_unary_negate_or_invert` が `(- (- x x) x)` に
 脱糖するので、単項マイナスに要るのは `Sub` だけ——トレイトを 1 つ足すより、脱糖が既に
 そうなっている事実を記録するほうが正しい。
+
+---
+
+## CL 残差 Phase 1d — 複素数（2026-08-21、branch `feature/cl-parity`）
+
+[cl-parity-plan.md](cl-parity-plan.md) の Stage 1d。
+
+### 計画が指した先例は、ここまで届かない
+
+計画は「`bignum`/`ratio` の先例に倣って」`TAG_BOXED` のヒープ箱 + Rust 側の算術、と
+書いていた。**その先例が成り立つ理由がここには無い**——`bignum`/`ratio` が Rust に
+あるのは `BigInt`/`BigRational` の算術がこの言語で書けないからで、`f64` 2 つの複素数は
+`f64` の算術そのものである。
+
+そこで prelude の `defstruct` にした。新しい `Repr` も `rt_*` シムも島の lowering も
+成果物の手術も要らず、**書いたその日に通常経路で compile される**（`bignum` 対応が
+どれだけの触点を要したかは同ログの該当節のとおり）。
+
+```lisp
+(pub defstruct complex (pub re f64) (pub im f64))
+```
+
+フィールドが `pub` なので `z::re` は他のどの構造体とも同じに読める。`realpart`/`imagpart`
+は同じ読み出しの CL 綴り。
+
+### CL から外れた 2 点（どちらも静的型が強いる）
+
+1. **成分は `f64` 固定**。CL の complex は有理数も持てて `(complex 1 2)` と
+   `(complex 1.0 2.0)` は*別の型*だが、静的型は 1 つ選ぶしかない。超越関数が揃って
+   返すほうを取った。
+2. **`(sqrt -1.0)` は今までどおり実数の NaN**。CL が実関数から complex を返せるのは
+   `sqrt` の戻りが合併型だからで、ここでは `f64` の `sqrt` は `f64` を返すしかない。
+   複素数は複素数の引数から出る:`(sqrt (complex::new -1.0 0.0))` が `i`。
+
+どちらも `docs/functions.md` §2.6 に書いた。
+
+### 演算子はここでは名乗れる
+
+Stage 1a では `impl Add i32` のメソッドを `+` と綴れず `add` にした。**その制約は
+primitive が組み込みメソッド表を持っていることから来る**ので、`complex` には掛からない
+——`(pub defmethod + ((self complex) (other complex)) complex ...)` がそのまま通る。
+`=`/`/=` も同様で、`Eq` は `(impl Eq complex ...)` がその `=` へ委譲する。
+
+`Ord` は入れていない。複素数体は順序体ではなく、CL の `<` が複素数を撥ねるのと同じ理由。
+
+### 実数側にも生やしたもの
+
+`realpart`/`imagpart`/`conjugate`/`phase` は `f64` にも定義した。CL でも実数は虚部 0 の
+複素数として扱えるので、呼ぶ側がどちらを持っているか知らずに実部を取れる。
+
+### `(atan y x)`
+
+CL の 2 引数 `atan` は prelude の `atan2` に落とす。`defmethod` はアリティで
+オーバーロードできず 1 引数 `atan` は `f64` の組み込みメソッドなので、チェッカー側で
+綴り替える——2 引数 `log` と同じ形（新設した `Checker::check_renamed_call`）。
+
+### 検証
+
+`tests/numeric_widths_test.rs` に 6 本追加（1a/1b の 9 本と合わせて 15/15 green）:
+四則、`(sqrt -1)` が `i` になること、オイラーの等式 `e^(i*pi) + 1 = 0`（丸め許容）、
+`phase`/`abs` の極形式の対、実数側アクセサ、`(atan y x)`。
+prelude 成果物は 2,105,392 → 2,193,844 バイト。

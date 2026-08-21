@@ -2498,6 +2498,128 @@ pub const SOURCE: &str = r##"
 ;; no wild pathnames or `directory` matching, and no logical pathnames. Those
 ;; answer to filesystems this does not run on. The separator is `/`.
 
+;; ---------------------------------------------------------------------------
+;; Complex numbers (CL parity Phase 1d).
+;;
+;; **A prelude type, not a built-in one.** The plan called for the
+;; `bignum`/`ratio` treatment — a heap-boxed `TAG_BOXED` pointer with Rust
+;; arithmetic behind it — "following the precedent". The precedent does not
+;; reach here: `bignum` and `ratio` are in Rust because `BigInt`/`BigRational`
+;; arithmetic is not expressible in this language, and a complex over two
+;; `f64`s is nothing but `f64` arithmetic. Written as a `defstruct` it needs no
+;; new `Repr`, no `rt_*` shim, no island lowering and no artifact surgery, and
+;; it compiles through the ordinary path the day it is written.
+;;
+;; **Two departures from CL, both forced by static typing:**
+;;
+;; 1. The components are `f64`. CL's complex can hold rationals, and
+;;    `(complex 1 2)` is a *different type* from `(complex 1.0 2.0)`; a static
+;;    type has to pick one, and the one the transcendental functions all
+;;    produce is the float one.
+;; 2. `(sqrt -1.0)` is still a real `sqrt` of a negative — NaN, as before. CL
+;;    can return a complex from a real function because its `sqrt` answers a
+;;    union type; here `sqrt` on `f64` has to return `f64`. Complex results
+;;    come from complex arguments: `(sqrt (complex::new -1.0 0.0))` is `i`.
+;;
+;; The struct's fields are `pub` so `z::re` reads like `z::x` on any other
+;; struct; `realpart`/`imagpart` are the CL spellings of the same reads.
+(pub defstruct complex (pub re f64) (pub im f64))
+
+;; CL's two-argument `atan`, which `phase` is built on. `(atan y x)` is sugar
+;; for this (`Checker::check_list`, the same arity dispatch two-argument `log`
+;; uses) — `defmethod` cannot overload on arity, and `atan` is a built-in `f64`
+;; method already.
+(pub defun atan2 ((y f64) (x f64)) f64
+  "The angle of the vector `(x,y)`, in (-pi,pi]. CL's `(atan y x)`."
+  (if (> x 0.0)
+      (atan (/ y x))
+      (if (< x 0.0)
+          (if (>= y 0.0) (+ (atan (/ y x)) pi) (- (atan (/ y x)) pi))
+          (if (> y 0.0)
+              (/ pi 2.0)
+              (if (< y 0.0) (* (/ pi 2.0) -1.0) 0.0)))))
+
+;; CL's `complex` constructor. `complex::new` is the same thing spelled the way
+;; every other struct is built.
+(pub defun complex ((re f64) (im f64)) complex (complex::new re im))
+
+;; `realpart`/`imagpart` answer for reals too, exactly as in CL: every real is
+;; a complex whose imaginary part is zero. That is what lets a caller take the
+;; real part of something without knowing which it has.
+(pub defmethod realpart ((self complex)) f64 self::re)
+(pub defmethod imagpart ((self complex)) f64 self::im)
+(pub defmethod realpart ((self f64)) f64 self)
+(pub defmethod imagpart ((self f64)) f64 0.0)
+
+(pub defmethod conjugate ((self complex)) complex (complex::new self::re (* self::im -1.0)))
+(pub defmethod conjugate ((self f64)) f64 self)
+
+(pub defmethod phase ((self complex)) f64
+  "The angle of `self` in the complex plane, in (-pi,pi]."
+  (atan2 self::im self::re))
+(pub defmethod phase ((self f64)) f64 (if (< self 0.0) pi 0.0))
+
+(pub defun cis ((theta f64)) complex
+  "`e^(i*theta)` — the unit complex at angle `theta`."
+  (complex::new (cos theta) (sin theta)))
+
+;; Arithmetic. These are `defmethod`s named for the operators, which is allowed
+;; because `complex` is not a primitive with a built-in table of its own —
+;; the reason `impl Add i32` cannot name its method `+` (see the arithmetic
+;; traits above) does not apply here.
+(pub defmethod + ((self complex) (other complex)) complex
+  (complex::new (+ self::re other::re) (+ self::im other::im)))
+(pub defmethod - ((self complex) (other complex)) complex
+  (complex::new (- self::re other::re) (- self::im other::im)))
+(pub defmethod * ((self complex) (other complex)) complex
+  (complex::new (- (* self::re other::re) (* self::im other::im))
+                (+ (* self::re other::im) (* self::im other::re))))
+(pub defmethod / ((self complex) (other complex)) complex
+  (let ((d (+ (* other::re other::re) (* other::im other::im))))
+    (complex::new (/ (+ (* self::re other::re) (* self::im other::im)) d)
+                  (/ (- (* self::im other::re) (* self::re other::im)) d))))
+
+(pub defmethod = ((self complex) (other complex)) bool
+  (if (= self::re other::re) (= self::im other::im) false))
+(pub defmethod /= ((self complex) (other complex)) bool (not (= self other)))
+(impl Eq complex (equals ((self Self) (other Self)) bool (= self other)))
+;; No `Ord`: the complex numbers are not ordered, and CL's `<` rejects them
+;; for the same reason.
+
+(pub defmethod abs ((self complex)) f64
+  "The modulus. A *real*, as in CL — the one `abs` whose result is not the
+   receiver's own type."
+  (sqrt (+ (* self::re self::re) (* self::im self::im))))
+
+(pub defmethod zerop ((self complex)) bool
+  (if (= self::re 0.0) (= self::im 0.0) false))
+
+(pub defmethod exp ((self complex)) complex
+  (let ((m (exp self::re)))
+    (complex::new (* m (cos self::im)) (* m (sin self::im)))))
+
+(pub defmethod log ((self complex)) complex
+  "The principal branch: `log|z| + i*phase(z)`."
+  (complex::new (log (abs self)) (phase self)))
+
+(pub defmethod sqrt ((self complex)) complex
+  "The principal square root, from the half-angle form."
+  (let ((m (sqrt (abs self))) (h (/ (phase self) 2.0)))
+    (complex::new (* m (cos h)) (* m (sin h)))))
+
+(pub defmethod expt ((self complex) (power complex)) complex
+  "`z^w` as `exp(w * log z)`. `(expt 0 0)` is 1, as in CL."
+  (if (zerop self)
+      (if (zerop power) (complex::new 1.0 0.0) (complex::new 0.0 0.0))
+      (exp (* power (log self)))))
+
+;; CL prints a complex as `#C(re im)`, and reads it back the same way — the
+;; reader half is not here (this language has no `#C` syntax), so `escape`
+;; changes nothing.
+(impl print-object complex
+  (print-object ((self Self) (escape bool)) string
+    (format false "#C(~a ~a)" self::re self::im)))
+
 (pub defstruct pathname
   (directory Vector<string>)
   (name Option<string>)
