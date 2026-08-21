@@ -58,11 +58,12 @@
   "Definition forms whose defined name is a function name.")
 
 (defconst typelisp-type-definition-forms
-  '("defstruct" "defenum" "deftrait")
-  "Definition forms whose defined name is a type or trait name.
+  '("defstruct" "defenum" "deftrait" "deftype")
+  "Definition forms whose defined name is a type, trait or type-alias name.
 Types and traits share one namespace (as in Rust), which is why they share a
 rule here: within a module a `defstruct'/`defenum' and a `deftrait' cannot
-take the same name.")
+take the same name.  A `deftype' alias occupies that same namespace -- it is
+a spelling for a type, expanded where it is written.")
 
 (defconst typelisp-variable-definition-forms
   '("defvar" "defconstant")
@@ -797,6 +798,7 @@ has already claimed it for `font-lock-string-face'."
     ("defstruct"   . defun)
     ("defenum"     . defun)
     ("deftrait"    . defun)
+    ("deftype"     . defun)
     ("defvar"      . defun)
     ("defconstant" . defun)
     ("module"      . defun)

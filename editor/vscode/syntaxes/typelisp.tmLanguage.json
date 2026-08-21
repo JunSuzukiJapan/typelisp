@@ -132,7 +132,7 @@
       }
     },
     "type-definition": {
-      "match": "\\(\\s*(?:(pub)\\s+)?(defstruct|deftrait|defenum)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])\\s*\\(?\\s*([-A-Za-z0-9_?!*/+.%&^~:<>=]+)?",
+      "match": "\\(\\s*(?:(pub)\\s+)?(defstruct|deftrait|defenum|deftype)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])\\s*\\(?\\s*([-A-Za-z0-9_?!*/+.%&^~:<>=]+)?",
       "captures": {
         "1": {
           "name": "storage.modifier.typelisp"

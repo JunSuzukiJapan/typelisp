@@ -826,7 +826,7 @@ fn code_style(heap: &Heap, (elems, tail): &Items) -> Option<usize> {
     Some(match heap.symbol_name(id) {
         "progn" | "cond" | "loop" | "and" | "or" | "list" | "block" => 0,
         "if" | "when" | "unless" | "while" | "let" | "let*" | "match" | "case" | "setf" | "module"
-        | "defstruct" | "defenum" | "deftrait" | "the" | "as" | "dolist" | "dotimes" | "doiter" | "until" => 1,
+        | "defstruct" | "defenum" | "deftrait" | "deftype" | "the" | "as" | "dolist" | "dotimes" | "doiter" | "until" => 1,
         "lambda" | "defmacro" | "impl" | "labels" | "do" => 2,
         "defvar" | "defconstant" => 2,
         "defun" => 3,

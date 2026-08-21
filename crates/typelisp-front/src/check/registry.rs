@@ -356,6 +356,26 @@ pub struct BlanketImpl {
 /// child modules, and `use` aliases. `Foo::Bar` is resolved by descending into
 /// the child module `Foo` and looking up `Bar` there. (Types are *not*
 /// namespaces — they own associated items in [`AdtDef::assoc`].)
+/// A `deftype` alias: `(deftype name<T...> Body)`. `body` is stored already
+/// canonicalized and already alias-expanded, which is what makes expansion at
+/// a use site a single non-recursive substitution and makes an alias cycle
+/// unconstructible: by the time `B`'s body is stored, any `A` in it has
+/// already become `A`'s own body. The cost is the usual textual-precedence
+/// rule this language applies everywhere (see `check_supertrait_impls`) —
+/// redefining `A` afterwards does not reach back into `B`.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct TypeAlias {
+    /// The alias's fully-qualified name, its identity for diagnostics.
+    pub name: Path,
+    /// The type parameters written in the header (`(deftype pair<T> ...)`),
+    /// in order. A use site must supply exactly this many arguments.
+    pub params: Vec<String>,
+    /// What the alias stands for, with `params` left as bare type variables.
+    pub body: Type,
+    /// See [`FnSig::public`].
+    pub public: bool,
+}
+
 #[derive(Default, serde::Serialize, serde::Deserialize, Clone)]
 pub struct Namespace {
     /// Child modules, keyed by their (unqualified) name.
@@ -384,6 +404,12 @@ pub struct Namespace {
     pub aliases: HashMap<String, Vec<String>>,
     /// `use` aliases for modules: short name -> absolute module path.
     pub mod_aliases: HashMap<String, Vec<String>>,
+    /// `deftype` aliases defined directly here, keyed by unqualified name.
+    /// Kept apart from `types`: an alias is not a type, it is a *spelling*
+    /// that `Checker::canon` rewrites away, so nothing past the type parser
+    /// ever sees one (`mangle_type`, the fasl, the compile pipeline, an error
+    /// message — all show the expansion).
+    pub type_aliases: HashMap<String, TypeAlias>,
     /// Bare names snapshotted from a `(use Type)` of a type's *static*
     /// associated functions (`instance: false`, e.g. `HashTable::new`) —
     /// unqualified name -> (owning type path, method name). Mirrors `ctors`

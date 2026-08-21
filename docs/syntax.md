@@ -243,6 +243,36 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - **docstring**: `defstruct` と同じ位置・同じ規則——名前の直後、バリアント列の前
   （`(defenum Name "doc" (Variant ...)...)`）。`(documentation Name)` で取り出す。
 
+### deftype — 型別名
+
+```lisp
+(deftype meters i32)
+(deftype fallible<T> Result<T,string>)
+(deftype pred (fn (i32) bool))
+
+(defun double ((m meters)) meters (* m 2))
+(defun parse ((s string)) fallible<i32> ...)
+```
+
+CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞ったもの——**型の綴りであって、
+型ではない**。
+
+- 名前の位置は `defun` と同じで、ジェネリック引数は `Name<T,U>` と書く。使用位置では
+  宣言した個数どおりの型引数が要る（過不足はその場でエラー）。
+- 展開は**型パーサの中**で起きる。したがって下流は誰も別名の存在を知らない——単型化の
+  キーもダンプもコンパイル経路も、そして**エラーメッセージ**も、すべて展開後を見せる。
+  `(f "x")` が `meters` を要求する関数で失敗すれば、メッセージには `i32` と出る。
+- **新しい型ではない**。`(deftype meters i32)` は `meters` と `i32` を同じ型にするので、
+  取り違えは何も捕まえない。区別したいなら `defstruct`。
+- **述語にはならない**。CL の `(deftype small () '(integer 0 9))` は*値の集合*を表し
+  `typep` が実行時に判定するが、ここでは型は実行時の witness を持たないコンパイル時の
+  分類なので、値を制限する別名には制限する相手がいない。
+- **自分自身を含められない**。別名は書かれた場所で展開されるので、再帰する先が無い。
+  再帰的なデータ型は `defstruct`/`defenum` で書く。
+- 名前空間は型・トレイトと共有する（同じモジュール内で `defstruct`/`defenum`/`deftrait`
+  と同名にはできない）。`(pub deftype ...)` で公開、`(use m::meters)` で取り込める。
+- **docstring**: 名前の直後、型の前（`(deftype Name "doc" Type)`）。
+
 ### deftrait / impl — トレイト機構
 
 ```lisp

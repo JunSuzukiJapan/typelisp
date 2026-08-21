@@ -154,7 +154,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 |---|---|---|
 | `typep` / `type-of` / `subtypep` | ⛔ | 実行時の型問い合わせ (D1)。`Sexpr` に限れば `match` と `sexpr-consp`/`sexpr-symp` 等が相当 |
 | `coerce` | ⚠️ | 数値・文字間の変換は `as`/`try-as` 特殊形。シーケンス間の変換（`(coerce x 'list)` 等）は無い |
-| `deftype` | ❌ | 型別名（type alias）が書けない。`defstruct`/`defenum` で新しい型を作るしかない |
+| `deftype` | ✅ | 2026-08-21（Stage 5c）。型の**綴り**であって型ではない——型パーサの中で展開されるので、エラーメッセージも含め下流は展開後しか見ない。値を制限する CL の使い方（`'(integer 0 9)`）は対象外: 型は実行時の witness を持たない |
 | `check-type` | ⛔ | (D1)(D3) |
 | `type-error` 系 | ⛔ | (D3) |
 

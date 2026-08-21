@@ -21,7 +21,7 @@ use super::core::{self, Checked, Items};
 use super::forms;
 use super::repr::Repr;
 use crate::dump::{CheckerDelta, RegistrySignature};
-use super::registry::{opt_key_effective_ty, AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, VarInfo, Variant};
+use super::registry::{opt_key_effective_ty, AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, TypeAlias, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
 /// `raw_args` are the call's unevaluated argument forms (exactly as written —
@@ -314,6 +314,13 @@ impl Definable for FnSig {
 impl Definable for MacroDef {
     fn builtin(&self) -> bool {
         self.builtin
+    }
+}
+impl Definable for TypeAlias {
+    /// No alias is ever built in — `deftype` is the only thing that makes
+    /// one, so redefining always goes through the ordinary `RedefPolicy`.
+    fn builtin(&self) -> bool {
+        false
     }
 }
 impl Definable for VarInfo {
@@ -1719,6 +1726,16 @@ impl Checker {
                 kind, name, other
             )));
         }
+        // A `deftype` alias occupies the same name space as both: it is a
+        // spelling *for* a type, so a later `defstruct`/`defenum`/`deftrait`
+        // of that name would make the same written name mean two things
+        // depending on which registration a lookup consulted first.
+        if kind != "type alias" && self.cur_ns().type_aliases.contains_key(name) {
+            return Err(Error::TypeError(format!(
+                "cannot define {} `{}`: a `deftype` alias of that name already exists here",
+                kind, name
+            )));
+        }
         Ok(())
     }
 
@@ -2032,6 +2049,7 @@ impl Checker {
                     "defstruct" => return self.check_defstruct(heap, &elems[1..], parts_locs, false, def_loc),
                     "defenum" => return self.check_defenum(heap, &elems[1..], parts_locs, false, def_loc),
                     "deftrait" => return self.check_deftrait(heap, interp, &elems[1..], parts_locs, false, def_loc),
+                    "deftype" => return self.check_deftype(heap, &elems[1..], parts_locs, false, def_loc),
                     "impl" => return self.check_impl(heap, interp, &elems[1..], parts_locs),
                     "use" => return self.check_use(heap, &elems[1..], parts_locs),
                     "load" => return self.check_load(heap, &elems[1..]),
@@ -2098,10 +2116,11 @@ impl Checker {
                 "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 "defstruct" => return self.check_defstruct(heap, &parts[1..], inner_locs, true, def_loc),
                 "defenum" => return self.check_defenum(heap, &parts[1..], inner_locs, true, def_loc),
+                "deftype" => return self.check_deftype(heap, &parts[1..], inner_locs, true, def_loc),
                 _ => {}
             }
         }
-        Err(Error::TypeError("pub: expected defun/defmacro/defmethod/defstruct/defenum/defvar/defconstant".into()))
+        Err(Error::TypeError("pub: expected defun/defmacro/defmethod/defstruct/defenum/deftype/defvar/defconstant".into()))
     }
 
     // ---- namespace navigation & resolution --------------------------------
@@ -2337,7 +2356,7 @@ impl Checker {
                 | "pprint-logical-block"
                 // top-level forms (`check_form_dispatch`)
                 | "pub" | "defun" | "defvar" | "defconstant" | "defmacro" | "module"
-                | "defmethod" | "defstruct" | "defenum" | "deftrait" | "impl" | "use" | "load"
+                | "defmethod" | "defstruct" | "defenum" | "deftrait" | "deftype" | "impl" | "use" | "load"
         )
     }
 
@@ -2588,6 +2607,94 @@ impl Checker {
             return Some(def.name.clone());
         }
         None
+    }
+
+    /// Resolve a written type name to a `deftype` alias, if it names one.
+    ///
+    /// Searched exactly like a type ([`Self::resolve_bare_type`] /
+    /// [`Self::resolve_type_path`]), including `use` aliases and the
+    /// `pub`-visibility rule for a qualified name — an alias is a spelling
+    /// for a type and is reached the same ways one is.
+    fn resolve_type_alias(&self, path: &Path) -> Option<TypeAlias> {
+        if path.is_simple() {
+            let name = path.last_segment();
+            if let Some(target) = self.lookup_alias(name) {
+                if let Some(a) = self.resolve_type_alias_path(&target) {
+                    return Some(a);
+                }
+            }
+            for prefix in self.ns_ancestors() {
+                if let Some(m) = self.reg.root.module(prefix) {
+                    if let Some(a) = m.type_aliases.get(name) {
+                        return Some(a.clone());
+                    }
+                }
+            }
+            return None;
+        }
+        self.resolve_type_alias_path(path.segments())
+    }
+
+    /// [`Self::resolve_type_alias`] for a `module::...::Name` segment path.
+    fn resolve_type_alias_path(&self, segs: &[String]) -> Option<TypeAlias> {
+        if segs.is_empty() {
+            return None;
+        }
+        let (mods, local) = segs.split_at(segs.len() - 1);
+        if mods.is_empty() {
+            for prefix in self.ns_ancestors() {
+                if let Some(m) = self.reg.root.module(prefix) {
+                    if let Some(a) = m.type_aliases.get(&local[0]) {
+                        return Some(a.clone());
+                    }
+                }
+            }
+            return None;
+        }
+        let (abs, m) = self.find_module(mods)?;
+        let a = m.type_aliases.get(&local[0])?;
+        if !a.public && !self.in_scope(&abs) {
+            return None;
+        }
+        Some(a.clone())
+    }
+
+    /// Reject a `deftype` alias written with the wrong number of type
+    /// arguments, before [`Self::canon`] silently declines to expand it.
+    ///
+    /// `canon` cannot fail — it is called from places with no `Result` to
+    /// return — so an arity mismatch there would just leave the name
+    /// unexpanded and surface much later as "unknown type". This walks the
+    /// *written* type (pre-`canon`, so the paths are still as spelled) and
+    /// says what is actually wrong.
+    fn check_type_alias_arity(&self, t: &Type) -> Result<(), Error> {
+        match t {
+            Type::Named(n, args) => {
+                if let Some(a) = self.resolve_type_alias(n) {
+                    if a.params.len() != args.len() {
+                        return Err(Error::TypeError(format!(
+                            "type alias `{}` takes {} type argument(s), got {}",
+                            a.name,
+                            a.params.len(),
+                            args.len()
+                        )));
+                    }
+                }
+                for x in args {
+                    self.check_type_alias_arity(x)?;
+                }
+                Ok(())
+            }
+            Type::Dyn(_, pins) => pins.iter().try_for_each(|p| self.check_type_alias_arity(p)),
+            Type::Fn(ps, rest, r) => {
+                ps.iter().try_for_each(|p| self.check_type_alias_arity(p))?;
+                if let Some(t) = rest {
+                    self.check_type_alias_arity(t)?;
+                }
+                self.check_type_alias_arity(r)
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Resolve a nominal type [`Path`] to its canonical (located) form if a
@@ -2881,6 +2988,24 @@ impl Checker {
                         return bound.clone();
                     }
                 }
+                // A `deftype` alias is a spelling, not a type: rewrite it away
+                // here and nothing downstream ever learns it existed. The
+                // stored body is already canonical and already
+                // alias-expanded, so this is one substitution, not a loop.
+                // A wrong argument count declines to expand (this cannot
+                // fail) — `Self::check_type_alias_arity` reports it at the
+                // annotation instead.
+                if let Some(alias) = self.resolve_type_alias(n) {
+                    if alias.params.len() == args.len() {
+                        let subst: BTreeMap<String, Type> = alias
+                            .params
+                            .iter()
+                            .cloned()
+                            .zip(args.iter().map(|a| self.canon(a)))
+                            .collect();
+                        return subst_apply(&alias.body, &subst);
+                    }
+                }
                 Type::Named(
                     self.resolve_type_name(n),
                     args.iter().map(|a| self.canon(a)).collect(),
@@ -2928,7 +3053,9 @@ impl Checker {
     /// where no span is available.
     fn parse_type_here_at(&self, heap: &Heap, v: Value, loc: Option<&Loc>) -> Result<Type, Error> {
         let mut spans = Vec::new();
-        let ty = self.canon(&parse_type_spanned(heap, v, loc, &mut spans)?);
+        let written = parse_type_spanned(heap, v, loc, &mut spans)?;
+        self.check_type_alias_arity(&written)?;
+        let ty = self.canon(&written);
         for span in &spans {
             self.record_type_span(span);
         }
@@ -7169,6 +7296,108 @@ impl Checker {
         forms::module_form(members.heap(), &type_fq, &body)
     }
 
+    /// `(deftype Name Type)` — or, generically, `(deftype Name<T,U> Type)`,
+    /// the name position parsed exactly like a `defun`'s
+    /// ([`Self::parse_defun_name`]) — CL's `deftype`, narrowed to what a
+    /// statically typed language can mean by it: a **spelling** for a type,
+    /// not a type of its own.
+    ///
+    /// The body is stored already canonical and already alias-expanded (see
+    /// [`TypeAlias`]), so a use site's expansion in [`Self::canon`] is one
+    /// substitution rather than a fixpoint, and an alias cycle is
+    /// unconstructible rather than merely detected. Because the rewrite
+    /// happens inside the type parser, nothing downstream ever learns an
+    /// alias existed: `mangle_type`, the monomorphization keys, the dump, the
+    /// compile pipeline and every error message all show the expansion. That
+    /// is the deliberate trade — CL's `deftype` is likewise a
+    /// *type-specifier* abbreviation, not a distinct type, and `typep` on one
+    /// asks about the expansion.
+    ///
+    /// Two things it is therefore *not*:
+    ///
+    /// - **not a new type.** `(deftype meters i32)` makes `meters` and `i32`
+    ///   the same type; nothing catches passing one where the other is
+    ///   meant. A distinct type is what `defstruct` is for.
+    /// - **not a predicate.** CL's `(deftype small () '(integer 0 9))`
+    ///   describes a *set of values*, checked at runtime by `typep`. Here a
+    ///   type is a compile-time classification with no runtime witness, so a
+    ///   value-restricting alias has nothing to restrict.
+    ///
+    /// Registers into [`Namespace::type_aliases`], which shares the
+    /// type/trait name space ([`Self::check_type_trait_clash`]). Emits an
+    /// empty `module` form: like `deftrait`, there is nothing to run.
+    fn check_deftype(
+        &mut self,
+        heap: &mut Heap,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+        def_loc: Option<Loc>,
+    ) -> Result<TopLevelForm, Error> {
+        if parts.is_empty() {
+            return Err(Error::TypeError("deftype: (deftype Name Type)".into()));
+        }
+        let (name, params) = self.parse_defun_name(heap, parts[0])?;
+        // A leading docstring, in the same position `defstruct`/`defenum`
+        // take one. Unambiguous for the same reason: a type is never written
+        // as a string literal.
+        let (doc, body_at) = match parts.get(1) {
+            Some(Value::Str(id)) => (Some(heap.string(*id).to_string()), 2),
+            _ => (None, 1),
+        };
+        if parts.len() != body_at + 1 {
+            return Err(Error::TypeError("deftype: (deftype Name Type) — exactly one type follows the name".into()));
+        }
+        for (i, p) in params.iter().enumerate() {
+            if params[..i].contains(p) {
+                return Err(Error::TypeError(format!("deftype: duplicate type parameter `{}`", p)));
+            }
+        }
+
+        // A type of this name is not a redefinition of this alias — the two
+        // live in different tables, so `RedefPolicy` allowing a redefinition
+        // would leave *both* registered, with the alias silently winning at
+        // every use site. Refuse outright, the way a trait of that name is
+        // refused.
+        if self.cur_ns().types.contains_key(&name) {
+            return Err(Error::TypeError(format!(
+                "cannot define type alias `{}`: a type of that name already exists here",
+                name
+            )));
+        }
+        self.check_redef("type alias", &name, self.cur_ns().type_aliases.get(&name))?;
+        self.check_type_trait_clash("type alias", &name)?;
+
+        let body = self.parse_type_here_at(heap, parts[body_at], parts_locs.get(body_at).and_then(|l| l.as_ref()))?;
+        // The alias is not registered yet, so a self-reference parsed above
+        // as an unresolved bare name — indistinguishable from a type
+        // variable, and it would expand a use site into a type nothing can
+        // inhabit. Say so here instead. (Mutual cycles cannot arise: storing
+        // expanded bodies means `B`'s body already contains `A`'s body, not
+        // `A`.)
+        let self_name: HashSet<String> = std::iter::once(name.clone()).collect();
+        if type_has_param(&body, &self_name) {
+            return Err(Error::TypeError(format!(
+                "deftype {}: an alias may not mention itself — it is a spelling, expanded where it is written, so there is nothing to recurse into",
+                name
+            )));
+        }
+
+        let fq = self.fq(&name);
+        self.reg
+            .root
+            .module_mut(&self.ns)
+            .type_aliases
+            .insert(name.clone(), TypeAlias { name: fq.clone(), params, body, public });
+        if let Some(loc) = def_loc {
+            self.reg.def_locs.types.insert(fq.clone(), loc);
+        }
+        if let Some(doc) = doc {
+            self.reg.docs.types.insert(fq.clone(), doc);
+        }
+        forms::module_form(heap, &fq, &[])
+    }
+
     /// `(defenum Name (Variant Type...)...)` — or generically
     /// `(defenum Name<T1,T2...> ...)` — a user-defined sum type: a
     /// multi-variant `AdtKind::Sum` `AdtDef`, structurally identical to the
@@ -7368,6 +7597,15 @@ impl Checker {
             }
             let alias = self.fq(&bare);
             return forms::use_form(heap, &alias, &target);
+        }
+        // Try: `deftype` alias. Only the name is imported — an alias has no
+        // constructors or static methods of its own (whatever its *body*
+        // names keeps its own name). The `aliases` entry is what
+        // `resolve_type_alias`'s bare-name branch follows.
+        if let Some(a) = self.resolve_type_alias_path(&segs) {
+            self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
+            let alias = self.fq(&bare);
+            return forms::use_form(heap, &alias, &a.name);
         }
         // Try: module alias — `(use std::math)` makes `math` a short name for `std::math`.
         if let Some((abs, _)) = self.find_module(&segs) {
