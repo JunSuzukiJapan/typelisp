@@ -72,6 +72,88 @@ pub fn load(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Interp) {
     interp.push_dump_source(std::borrow::Cow::Borrowed(crate::prelude::DUMP));
 }
 
+/// What an AOT executable needs from the prelude on top of the definitions
+/// [`load`] installs — see [`load_for_aot`].
+pub struct AotPrelude {
+    /// The committed prelude bitcode, to be linked into the executable's own
+    /// module so a call to `abs` resolves to a body rather than to nothing.
+    pub bitcode: &'static [u8],
+    /// Each prelude `defvar`, in the order its compiled slot id was assigned.
+    /// The executable re-runs these at its own startup: the compiled bodies
+    /// address their globals by baked-in slot id, so the storage has to exist,
+    /// with the same numbering, before any of them runs.
+    pub global_inits: Vec<(Path, Value)>,
+}
+
+/// [`load`], plus what an AOT executable needs to *carry* the prelude rather
+/// than borrow this process's copy of it.
+///
+/// The difference between the two loaders is the difference between a JIT and
+/// an executable. `load` installs the bitcode's bodies as addresses in this
+/// process ([`crate::compile::driver::install_compiled_library`]); an
+/// executable has no process to install into, so it gets the bitcode itself,
+/// linked into its module, and a startup sequence for the state those bodies
+/// assume. Today that state is the globals; the forms are read out here rather
+/// than reconstructed later because the dump is parsed exactly once.
+///
+/// The returned forms are permanently rooted — every caller is a one-shot
+/// compile against a throwaway heap, and they have to outlive a load that
+/// pushes and pops the ordinary root stack throughout.
+pub fn load_for_aot(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Interp) -> Result<AotPrelude, String> {
+    let units = typelisp_front::dump::parse(crate::prelude::DUMP, "prelude")?;
+    let unit = units.first().ok_or_else(|| "prelude: the committed dump holds no units".to_string())?;
+    let state = crate::compile::dump::read_types(unit, "prelude")?;
+    typelisp_front::dump::verify_digest(&state, crate::prelude::SOURCE, REGEN_SCRIPT)?;
+
+    // Taken off the state before `load_unit` consumes it, and matched against
+    // the recorded `globals` afterwards: this list decides the order the
+    // executable initializes them in, and the ids in the bitcode are only
+    // correct if that order is the one they were compiled against.
+    let mut global_inits: Vec<(Path, Value)> = Vec::new();
+    for f in &state.forms {
+        let tl = crate::owned_form::owned_to_value(heap, f).map_err(|e| e.to_string())?;
+        if core::op(heap, tl) != Some("defvar") {
+            continue;
+        }
+        // A *permanent* root, not `push_root`: these have to survive the whole
+        // of `load_unit` and a compiler-island load after it, and the ordinary
+        // root stack is a strict LIFO that every one of those callers pushes
+        // and pops on. Rooted the LIFO way, they were collected out from under
+        // the caller and turned up later as "a global initializer was built
+        // from something that is not a `defvar`" — the cell had been recycled.
+        heap.push_permanent_root(tl);
+        let path =
+            core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defvar without a name".to_string())?;
+        global_inits.push((path, tl));
+    }
+
+    let globals = state.globals.clone();
+    // Types and definitions only: the bodies go into the *executable* (the
+    // caller links `bitcode` into its module), so JIT-installing them here
+    // would compile every prelude body a second time, per `compile-file`, for
+    // addresses this process never calls.
+    crate::compile::dump::load_unit_types_only(heap, chk, interp, state)?;
+
+    // `load_unit` already refuses a numbering it cannot reproduce; what this
+    // adds is that *this* list is that numbering. A `defvar` the walk above
+    // missed would otherwise show up as an executable whose prelude globals
+    // are one slot off — compiled code reading somebody else's storage, with
+    // no error anywhere.
+    if globals.len() != global_inits.len()
+        || globals.iter().zip(&global_inits).any(|((name, _), (path, _))| name != &path.to_string())
+    {
+        return Err(format!(
+            "prelude: the dump records {} global(s) but its forms hold {} `defvar`(s), or they are \
+             in a different order — an AOT executable cannot reproduce the slot numbering the \
+             bitcode was compiled against",
+            globals.len(),
+            global_inits.len()
+        ));
+    }
+
+    Ok(AotPrelude { bitcode: unit.bitcode, global_inits })
+}
+
 /// What to run when the committed dump no longer matches `SOURCE`.
 pub use crate::prelude::REGEN_SCRIPT;
 

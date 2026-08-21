@@ -143,6 +143,19 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let mut heap = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
+    // The prelude first, and before `load_compiler` — the same order `typl`'s
+    // own startup uses, and for the same reason on both sides: the prelude's
+    // globals are numbered from zero as they load, so nothing may promote a
+    // global ahead of it.
+    //
+    // An AOT executable used to get only the island, which meant an AOT
+    // program could call the builtins and its own definitions and nothing
+    // else: `abs`, `gcd`, `identity`, every stream and pathname helper — the
+    // whole prelude — answered "no such function" at compile time. Its bodies
+    // now come along in the executable (`prelude.bitcode`, linked into the
+    // module below) and its globals get their storage at the executable's own
+    // startup (`prelude.global_inits`).
+    let prelude = crate::compile::prelude_bootstrap::load_for_aot(&mut heap, &mut chk, &mut interp)?;
     crate::load_compiler(&mut heap, &mut chk, &mut interp);
 
     let reader = Reader::new();
@@ -199,8 +212,47 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         for (name, _) in crate::compile::externs::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
         }
+        // The prelude's compiled bodies, merged in here — *before* the first
+        // `add_compiled_function` below, not after. The island's
+        // `compile-call` resolves a callee with `get-function` against this
+        // very module and aborts the process when it finds nothing, so a call
+        // to `abs` needs `tl_abs` present by the time any body is translated,
+        // not merely by the time the module is written out.
+        let buffer =
+            inkwell::memory_buffer::MemoryBuffer::create_from_memory_range_copy(prelude.bitcode, "prelude");
+        let prelude_module = Module::parse_bitcode_from_buffer(&buffer, ctx)
+            .map_err(|e| format!("the committed prelude bitcode failed to parse: {}", e))?;
+        module
+            .link_in_module(prelude_module)
+            .map_err(|e| format!("linking the prelude into the compiled file failed: {}", e))?;
         Rc::new(RefCell::new(module))
     };
+
+    {
+        // Every body this file will emit, declared before any of them is
+        // translated — the same thing the prelude artifact's generator does
+        // with its own item list.
+        //
+        // Declaration order is not call order. A file's own `defun`s used to
+        // be enough (a callee must be defined earlier in the file), but a
+        // monomorphization bundle is emitted in the order the checker
+        // *created* its instantiations, which is not a topological one:
+        // `length <vector-iter<i32>,i32>` precedes the `vector-iter::next
+        // <i32>` it calls. The island resolves a callee by looking it up in
+        // this module and **aborts the process** when it finds nothing, so the
+        // declaration has to be there first. Nothing exercised this until the
+        // prelude arrived: a file that could not name a generic could not
+        // instantiate one either.
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let m = module.borrow();
+        let ptr_ty = ctx.ptr_type(AddressSpace::default());
+        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        for (_, symbol) in &node_names {
+            if m.get_function(symbol).is_none() {
+                m.add_function(symbol, fn_ty, None);
+            }
+        }
+    }
 
     // One shared module, one `add_compiled_function` call per `defun` —
     // *not* per-function modules merged afterward, see this module's doc
@@ -220,14 +272,21 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), name, internal_name).map_err(|e| e.to_string())?;
     }
 
-    // One `add_compiled_global_init` per `defvar`, in the same file-
-    // declaration order `promote_global` assigned their compile-time ids
-    // in above — `build_main_wrapper` below emits a call to each, in this
-    // same order, from the generated `main`, so the standalone executable
-    // reproduces that exact numbering at its own runtime (see
-    // `Interp::promote_global`'s doc comment).
-    let mut global_init_names: Vec<String> = Vec::with_capacity(defvar_inits.len());
-    for (i, (_, form)) in defvar_inits.iter().enumerate() {
+    // One `add_compiled_global_init` per `defvar`, in the order
+    // `promote_global` assigned their compile-time ids in — the prelude's
+    // first, since `load_for_aot` ran before a line of this file was checked,
+    // then the file's own in declaration order. `build_main_wrapper` below
+    // emits a call to each, in this same order, from the generated `main`, so
+    // the standalone executable reproduces that exact numbering at its own
+    // runtime (see `Interp::promote_global`'s doc comment).
+    //
+    // The prelude's are not optional even for a program that never mentions
+    // one: its compiled bodies address their globals by baked-in slot id, so
+    // `*print-pretty*` has to have storage before anything that prints runs.
+    let all_inits: Vec<(Path, Value)> =
+        prelude.global_inits.iter().chain(defvar_inits.iter()).cloned().collect();
+    let mut global_init_names: Vec<String> = Vec::with_capacity(all_inits.len());
+    for (i, (_, form)) in all_inits.iter().enumerate() {
         let internal_name = format!("$global_init${}", i);
         crate::compile::driver::add_compiled_global_init(&interp, &mut heap, module.clone(), &internal_name, *form).map_err(|e| e.to_string())?;
         global_init_names.push(internal_name);
@@ -252,7 +311,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // assumed to be the loop index: the ids are whatever
     // `typelisp_rt::global_new` handed out, and the executable reproducing
     // them is a property of the `$global_init$` call order, not of this list.
-    let eval_globals: Vec<(String, usize)> = defvar_inits
+    let eval_globals: Vec<(String, usize)> = all_inits
         .iter()
         .map(|(path, _)| {
             let id = interp

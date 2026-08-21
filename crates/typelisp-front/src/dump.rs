@@ -777,11 +777,6 @@ pub fn verify_digest(state: &UnitState, source: &str, regen_script: &str) -> Res
 }
 
 /// The label a program's own unit carries in an AOT executable's embedded dump.
-///
-/// Meaningful, not cosmetic: it is how [`restore_dump`] tells the unit whose
-/// globals the compiled program made storage for from the prelude unit ahead of
-/// it, whose `defvar`s the executable never compiled and which therefore have
-/// to run here.
 pub const PROGRAM_LABEL: &str = "<program>";
 
 /// Rebuilds an embedded environment dump in `heap` — the inverse of
@@ -798,13 +793,15 @@ pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8]) -> Result<crate::Inter
 
     for unit in parse(bytes, "eval environment")? {
         let state = read_state(unit.types, "eval environment")?;
-        // Only the program's own globals are somebody else's storage. Every
-        // earlier unit describes globals this executable never compiled, and
-        // binding those would make their `defvar`s look already-initialized and
-        // skip the assignment that gives them a value at all.
-        if state.label == PROGRAM_LABEL {
-            bind_globals(&interp, &state.globals);
-        }
+        // Every unit's globals are somebody else's storage: an AOT executable
+        // carries the prelude's compiled bodies as well as its own, and those
+        // bodies address their globals by baked-in slot id, so the executable's
+        // startup created the storage for the prelude's `defvar`s before this
+        // ran (`compile::aot::compile_file`'s global-init sequence). Binding
+        // them here is what makes an eval'd `*print-pretty*` read that same
+        // storage instead of a second, interpreted copy of it — and it is why
+        // the `defvar`s below are skipped rather than re-assigned.
+        bind_globals(&interp, &state.globals);
         apply_types(heap, &mut chk, &mut interp, state)?;
     }
 

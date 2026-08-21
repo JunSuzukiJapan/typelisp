@@ -35,6 +35,33 @@ pub fn load_unit(
     state: UnitState,
     bitcode: &[u8],
 ) -> Result<(), String> {
+    load_unit_with(heap, chk, interp, state, Some(bitcode))
+}
+
+/// [`load_unit`] without installing the bodies: the checked state, the
+/// definitions, and the globals, and no JIT at all.
+///
+/// For a loader that will never *call* the unit's functions in this process.
+/// `compile::aot::compile_file` is the one: it links the same bitcode into the
+/// executable it is building instead, so JIT-installing it would be a second
+/// compilation of every prelude body per `compile-file` — measured, the
+/// dominant cost of an AOT compile — for addresses nothing would ever call.
+pub fn load_unit_types_only(
+    heap: &mut Heap,
+    chk: &mut Checker,
+    interp: &mut Interp,
+    state: UnitState,
+) -> Result<(), String> {
+    load_unit_with(heap, chk, interp, state, None)
+}
+
+fn load_unit_with(
+    heap: &mut Heap,
+    chk: &mut Checker,
+    interp: &mut Interp,
+    state: UnitState,
+    bitcode: Option<&[u8]>,
+) -> Result<(), String> {
     let label = state.label.clone();
     let globals = state.globals.clone();
     let items: Vec<CompiledItem> = state
@@ -70,10 +97,11 @@ pub fn load_unit(
 
     // A unit with nothing compiled — a session that never called `(compile)` —
     // has no bitcode section at all, and asking LLVM to parse zero bytes is a
-    // parse error rather than an empty module.
-    if bitcode.is_empty() {
+    // parse error rather than an empty module. `None` is the caller saying it
+    // does not want the bodies installed at all (`load_unit_types_only`).
+    let Some(bitcode) = bitcode.filter(|b| !b.is_empty()) else {
         return Ok(());
-    }
+    };
     crate::compile::driver::install_compiled_library(
         interp,
         crate::compile::CompiledLibrary {
@@ -117,10 +145,11 @@ pub fn capture_program_dump(
     let mut interp = Interp::new();
     // The prelude's *checked state*, not a fresh interpreted load of its
     // source: this is the same environment, reached without reading and
-    // type-checking 114KB of Lisp at every `compile-file`. Its `globals` are
-    // deliberately left unbound — this executable never compiled the prelude,
-    // so nothing made compiled storage for them, and the `defvar`s applied
-    // above put their values where an interpreted `eval` reads them.
+    // type-checking 114KB of Lisp at every `compile-file`. This is a
+    // compile-time environment for checking the program's source — the
+    // executable rebuilds its own from the units written below
+    // (`typelisp_front::dump::restore_dump`), and *that* is where the globals
+    // get bound to the storage the startup sequence made for them.
     apply_types(heap, &mut chk, &mut interp, prelude_state)?;
 
     let before = chk.signature(heap)?;

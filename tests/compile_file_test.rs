@@ -1082,3 +1082,51 @@ fn an_aot_executable_expands_a_prelude_macro_from_a_snapshot() {
         5
     );
 }
+
+// ---- the prelude in an AOT executable ------------------------------------
+
+/// A compiled executable can call the prelude, not just the builtins and its
+/// own definitions.
+///
+/// `compile-file` used to load the island and nothing else, so `abs`, `gcd`,
+/// `identity`, `to-string` and every other prelude definition answered "no
+/// such function" at compile time — while the *JIT* (`(compile name)`) had
+/// them all, because that runs inside a process where the prelude is loaded.
+/// The executable now carries the prelude's compiled bodies itself.
+#[test]
+fn an_aot_executable_calls_prelude_functions() {
+    let src = r#"
+        (defun main () i32
+          (+ (abs -30) (gcd 8 12) (if (zerop 0) 8 0)))
+    "#;
+    assert_eq!(compile_and_run("aot_prelude_call", src), 42);
+}
+
+/// A prelude *generic* has no compiled body to carry — the checker
+/// monomorphizes it per use site — so this goes the other route: the
+/// instantiation is checked into this file and compiled with the file's own
+/// definitions.
+#[test]
+fn an_aot_executable_calls_a_generic_prelude_function() {
+    let src = r#"
+        (defun main () i32
+          (let ((v (the Vector<i32> (Vector::new))))
+            (push v 20)
+            (push v 22)
+            (+ (length (iter v)) 40)))
+    "#;
+    assert_eq!(compile_and_run("aot_prelude_generic", src), 42);
+}
+
+/// The prelude's globals get their storage at the executable's own startup,
+/// in the order their compiled slot ids were assigned — a prelude body reading
+/// `*print-right-margin*` reads the value the prelude's own `defvar` gave it,
+/// not slot 0 of somebody else's numbering.
+#[test]
+fn an_aot_executable_initializes_the_preludes_globals() {
+    let src = r#"
+        (defun main () i32
+          (+ (as i32 *print-right-margin*) (if *print-pretty* 1 -38)))
+    "#;
+    assert_eq!(compile_and_run("aot_prelude_globals", src), 42);
+}
