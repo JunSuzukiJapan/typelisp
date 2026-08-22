@@ -251,6 +251,11 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "bit" "sbit" "set-bit" "set-sbit"
     "bit-ior" "bit-eqv" "bit-nand" "bit-nor"
     "bit-andc1" "bit-andc2" "bit-orc1" "bit-orc2"
+    ;; errors and dynamic rebinding (Phase 7).  `assert'/`warn'/`dlet'/
+    ;; `with-standard-io-syntax' are macros, not functions, but they read as
+    ;; ordinary calls.
+    "simple-error" "wrap-error" "describe-error"
+    "assert" "warn" "dlet" "with-standard-io-syntax"
     ;; pretty-printer helpers callable inside `pprint-logical-block' (§15.1)
     "pprint-newline" "pprint-indent" "pprint-tab" "pprint-pop"
     "pprint-exit-if-list-exhausted" "pprint-list-exhausted"
@@ -316,6 +321,8 @@ stream (CLHS 12.1.6).")
     ;; the multi-dimensional array and the bit vector (Phase 6b/6c) -- prelude
     ;; `defstruct's over `Vector', not builtins
     "Array" "BitVector"
+    ;; the general-purpose error types (Phase 7a)
+    "SimpleError" "WrappedError"
     ;; the struct `decode-universal-time' answers with, standing in for CL's
     ;; nine return values
     "decoded-time"

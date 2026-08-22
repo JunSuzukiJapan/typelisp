@@ -11,13 +11,13 @@
 //!
 //! # What is deliberately *not* registered
 //!
-//! The six printer control variables (`*print-pretty*`, `*print-circle*`,
-//! …). `compile-file` compiles one self-contained source file against the
-//! compiler island alone — it never loads the prelude, which is where those
-//! globals are defined — so an AOT program has none of them, and CL's
-//! initial values are the right and only answer. That is what
+//! The eleven printer control variables (`*print-pretty*`, `*print-circle*`,
+//! `*print-base*`, …). `compile-file` compiles one self-contained source
+//! file against the compiler island alone — it never loads the prelude,
+//! which is where those globals are defined — so an AOT program has none of
+//! them, and CL's initial values are the right and only answer. That is what
 //! [`crate::runtime::BARE_HOOKS`] already gives, and what the hooks here
-//! keep: `opts`/`limits` are its two verbatim.
+//! keep: `opts`/`print_vars` are its two verbatim.
 //!
 //! # Why the registration shims live here rather than in `typelisp-rt`
 //!
@@ -58,7 +58,7 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
     enum_variant_name: |key, variant| ENUM_NAMES.with(|t| t.borrow().get(&(key.to_string(), variant)).cloned()),
     print_object: aot_print_object,
     opts: BARE_HOOKS.opts,
-    limits: BARE_HOOKS.limits,
+    print_vars: BARE_HOOKS.print_vars,
 };
 
 fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {

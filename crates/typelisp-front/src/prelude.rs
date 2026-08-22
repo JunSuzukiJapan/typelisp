@@ -2881,7 +2881,7 @@ user-visible capacity."
 (pub defvar (*print-right-margin* i64) 80)
 (pub defvar (*print-miser-width* i64) 0)
 
-;; The "what to print" controls (CLHS 22.1.1), read by `Interp::print_limits`
+;; The "what to print" controls (CLHS 22.1.1), read by `Interp::print_vars`
 ;; on every printing operation just like the three above.
 ;;
 ;; `*print-level*`/`*print-length*` bound how much of a nested structure is
@@ -2907,6 +2907,39 @@ user-visible capacity."
 (pub defvar (*print-circle* bool) false)
 (pub defvar (*print-level* i64) 0)
 (pub defvar (*print-length* i64) 0)
+
+;; The rest of CLHS 22.1.1's "what to print" controls (cl-parity-plan.md
+;; Phase 7b). Rebind them for one printing operation with `dlet`, which is
+;; what CL's `let` on a special variable does.
+;;
+;; `*print-base*` is the radix integers (`i64` and `bignum`) print in, 2..36;
+;; anything else is a printing error, as CL says it is. `*print-radix*` adds
+;; the marker that makes the result read back as the same number whatever
+;; `*read-base*` is: `#b`/`#o`/`#x` or `#NNr` before the sign, and a trailing
+;; `.` in base 10.
+(pub defvar (*print-base* i64) 10)
+(pub defvar (*print-radix* bool) false)
+
+;; `*print-case*` takes CL's own spelling: the keywords `:upcase`,
+;; `:downcase` and `:capitalize`, which are self-evaluating `symbol`s here
+;; (`Checker::check_symbol`). CL defaults to `:upcase` because its reader
+;; stores symbol names upcased; this reader stores them downcased, so the
+;; default that means the same thing ("print them as stored") is `:downcase`.
+(pub defvar (*print-case* symbol) :downcase)
+
+;; `*print-readably*` prints so the result reads back as an equal object:
+;; escapes on whatever the caller asked for, and the `*print-level*`/
+;; `*print-length*` cuts off. **CL's other half is missing on purpose**: CL
+;; signals `print-not-readable` for a value with no readable form, and this
+;; language has no condition to signal and no way to decide the question for
+;; a type whose `print-object` may print anything at all.
+(pub defvar (*print-readably* bool) false)
+
+;; `*print-lines*` caps how many lines one pretty-printed value may take,
+;; marking the cut with CL's `..`. A layout control like
+;; `*print-right-margin*`, so it only bites while `*print-pretty*` is on; 0 or
+;; less is CL's `nil` (no limit).
+(pub defvar (*print-lines* i64) 0)
 
 ;; ---------------------------------------------------------------------------
 ;; `random-state` (CLHS 12.1.6): a mutable PRNG stream. The actual
@@ -2967,9 +3000,9 @@ user-visible capacity."
     `(let ((,t0 (get-internal-real-time)))
        (let ((,result ,form))
          (progn
-           (println "Real time: ~,3f seconds"
-                     (/ (int->float (- (get-internal-real-time) ,t0))
-                        (int->float internal-time-units-per-second)))
+           (format *trace-output* "Real time: ~,3f seconds~%"
+                   (/ (int->float (- (get-internal-real-time) ,t0))
+                      (int->float internal-time-units-per-second)))
            ,result)))))
 
 
@@ -3494,12 +3527,38 @@ user-visible capacity."
   (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h)))
   (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
 
-;; CL's standard streams. Ordinary assignable globals, not dynamically bound
-;; specials (typelisp has no dynamic binding) -- `(setf *standard-output* s)`
-;; does globally what CL's `(let ((*standard-output* s)) ...)` does locally.
+;; CL's standard streams. Ordinary assignable globals rather than dynamically
+;; bound specials — `(setf *standard-output* s)` does globally what CL's
+;; `(let ((*standard-output* s)) ...)` does locally, and `dlet` (Phase 7b) does
+;; the scoped version.
+;;
+;; **Concretely typed, so a rebinding can only be another `standard-stream`.**
+;; Typing them `:dyn CharOutput` — which is what would let a program redirect
+;; output into a string stream for the extent of one form, the thing CL
+;; programs use dynamic binding for — does not work *yet*, and the obstacle is
+;; not in the type system: a prelude global's initializer is a compiled body,
+;; and a compiled body in the shipped artifact may not *create* a trait object.
+;; `dyn-new` bakes a vtable id and `dyn-upcast` a trait id, both assigned per
+;; site during translation, and the artifact has no startup sequence to replay
+;; that numbering or publish the vtable addresses (see the check at the end of
+;; `compile::prelude_bootstrap::build_dump`). Dispatching on an already-boxed
+;; `:dyn` is fine, which is why the composed streams below work.
 (pub defvar (*standard-input*  standard-stream) (standard-stream::new (stream-stdin)))
 (pub defvar (*standard-output* standard-stream) (standard-stream::new (stream-stdout)))
 (pub defvar (*error-output*    standard-stream) (standard-stream::new (stream-stderr)))
+
+;; CL's `*trace-output*`: where a program's own progress reporting goes, as
+;; opposed to its output (`*standard-output*`) or its errors (`*error-output*`).
+;; `time` writes its report here, which is what CL specifies.
+;;
+;; CL's other three stream variables — `*terminal-io*`, `*query-io*` and
+;; `*debug-io*` — are *two-way* streams, and a `two-way-stream` is built by
+;; upcasting its two halves to `:dyn CharInput`/`:dyn CharOutput`. That is
+;; exactly the trait-object creation a prelude body may not do (see the note
+;; above), so those three are not here. A program can build its own
+;; `(make-two-way-stream ...)` and pass it around; only the *prelude* is
+;; barred from holding one in a global.
+(pub defvar (*trace-output* standard-stream) (standard-stream::new (stream-stdout)))
 
 ;; ---------------------------------------------------------------------------
 ;; Composite streams. These are the whole argument for the trait design: each
@@ -4512,6 +4571,154 @@ user-visible capacity."
           (setf i (+ i 1))))
       (bitvector-trim out)
       out)))
+
+;; ---------------------------------------------------------------------------
+;; Errors: the general-purpose type, wrapping, and the two things CL had that
+;; this language did not — cl-parity-plan.md Phase 7a.
+;;
+;; The condition *system* is not adopted (the plan's §0, and
+;; language-design.md §9: there is no way to catch a `panic` and continue).
+;; What is here is the mapping of CL's condition *types* onto the `Error`
+;; trait, plus the two holes that mapping left open:
+;;
+;; - `SimpleError` — CL's `simple-error`, the type a program reaches for when
+;;   it just wants to say what went wrong. Every other concrete error type
+;;   here belongs to some particular fallible operation.
+;; - `warn` — CL's warning path. Everything else that goes wrong in this
+;;   language either returns a `Result` or panics; there was no way to say
+;;   something and *continue*.
+;;
+;; CL's `type-error`, `unbound-variable`, `unbound-slot`,
+;; `undefined-function`, `control-error` and `program-error` have no
+;; counterpart on purpose: type checking, all-slots-required construction,
+;; name resolution and the static escape analysis turn every one of them into
+;; a compile-time error, so there is nothing left to signal at run time.
+
+(pub defstruct SimpleError
+  "An error that carries nothing but its message — CL's `simple-error`."
+  (text string))
+(impl Error SimpleError
+  (message ((self Self)) string self::text))
+
+;; CL's `simple-error` is what `(error "...")` signals; the same
+;; convenience here is a constructor that formats, since a `Result` is
+;; returned rather than signalled.
+(pub defun simple-error ((msg string)) SimpleError (SimpleError::new msg))
+
+;; An error that wraps another, so a low-level cause can travel with the
+;; context that makes it readable. This is the one error type whose `source`
+;; is not `none`, and the reason the `Error` trait has `source` at all.
+(pub defstruct WrappedError
+  "An error carrying both its own message and the error that caused it."
+  (text string)
+  (cause :dyn Error))
+(impl Error WrappedError
+  (message ((self Self)) string self::text)
+  (source ((self Self)) Option<:dyn Error> (Option::some self::cause)))
+
+;; `(wrap-error "reading the config" e)` — the same widening `as-dyn-error`
+;; does, with a sentence attached. Generic over the cause's concrete type for
+;; the same reason `as-dyn-error` is: the boxing happens where the call site
+;; specializes this body.
+(pub defun wrap-error<E> ((msg string) (cause E)) WrappedError (where (Error E))
+  (WrappedError::new msg (as :dyn Error cause)))
+
+;; The whole chain, one cause per line. CL has no counterpart (its condition
+;; report is a single line); this is Rust's "caused by" chain, and it is the
+;; only thing that makes `source` observable.
+(pub defun describe-error<E> ((e E)) string (where (Error E))
+  (let ((out (message e)) (cur (source e)) (go true))
+    (progn
+      (while go
+        (match cur
+          ((none) (progn (setf go false) ()))
+          ((some c)
+           (progn
+             (setf out (append out (append "\n  caused by: " (message c))))
+             (setf cur (source c))
+             ()))))
+      out)))
+
+;; CL's `assert`. Without a condition system there are no restarts to offer,
+;; so a false test is a `panic` — which is what CL's `assert` does too when
+;; every restart is declined. A macro rather than a function so the failure
+;; message can name the test *as written*; with a second argument, that is
+;; the message instead.
+(defmacro assert (c &rest msg)
+  (if (sexpr-null msg)
+      `(if ,c () (panic (format false "assertion failed: ~s" (quote ,c))))
+      `(if ,c () (panic ,(sexpr-car msg)))))
+
+;; CL's `warn`: say something on `*error-output*` and carry on. The only
+;; thing in this language that reports without either returning a `Result` or
+;; ending the program. Takes a control string like `print`/`println`, and
+;; prefixes the line the way CL's warning report does.
+(defmacro warn (control &rest args)
+  `(progn
+     (format *error-output* "WARNING: ")
+     (format *error-output* ,control ,@args)
+     (format *error-output* "~%")))
+
+;; ---------------------------------------------------------------------------
+;; Scoped rebinding of a global — cl-parity-plan.md Phase 7b.
+;;
+;; CL writes this as `let`, because a CL `let` on a special variable *is* a
+;; dynamic binding. This language's `let` is always lexical and always will
+;; be (language-design.md), so `(let ((*print-base* 16)) ...)` would quietly
+;; bind a fresh local named `*print-base*` that nothing reads. The dynamic one
+;; therefore needs a name of its own: `dlet`, after Emacs Lisp's macro of the
+;; same name and the same job.
+;;
+;; It is not a binding at all, underneath — it saves the global, assigns, and
+;; restores in an `unwind-protect` cleanup. That is enough to be indistinguishable
+;; from a dynamic binding for single-threaded code, because the cleanup runs
+;; however the body is left: normally, by `throw`, by `panic`, or by
+;; `break`/`return` (syntax.md §8).
+;;
+;; What it is *not*: per-thread. A real special variable has one binding per
+;; thread; this has one global that a body borrows and gives back.
+
+(defmacro dlet1 (place value &rest body)
+  (let ((saved (gensym)))
+    `(let ((,saved ,place))
+       (progn
+         (setf ,place ,value)
+         (unwind-protect (progn ,@body) (setf ,place ,saved))))))
+
+(pub defmacro dlet (bindings &rest body)
+  "Assign each global for the extent of `body`, restoring it on the way out
+   however `body` is left. CL spells this `let`; this language's `let` is
+   lexical, so the dynamic one has its own name."
+  (if (sexpr-null bindings)
+      (sexpr-cons (quote progn) body)
+      (let ((b (sexpr-car bindings)))
+        `(dlet1 ,(sexpr-car b) ,(sexpr-car (sexpr-cdr b))
+                (dlet ,(sexpr-cdr bindings) ,@body)))))
+
+
+;; CL's `with-standard-io-syntax`: run `body` with every printer control
+;; variable at its standard value, so what is printed does not depend on what
+;; the surrounding program happened to `setf`. Nothing but a `dlet` over the
+;; whole set.
+;;
+;; Two departures from CL's list. `*print-case*` is `:downcase` rather than
+;; `:upcase` — CL's standard value means "as stored", and this reader stores
+;; symbol names downcased (see `*print-case*`'s own note). And the reader
+;; variables CL also binds (`*read-base*`, `*read-default-float-format*`,
+;; `*read-eval*`, `*read-suppress*`) are not in this language, so there is
+;; nothing to bind; `*package*` and `*readtable*` likewise.
+(pub defmacro with-standard-io-syntax (&rest body)
+  `(dlet ((*print-base* 10)
+          (*print-radix* false)
+          (*print-case* :downcase)
+          (*print-circle* false)
+          (*print-level* 0)
+          (*print-length* 0)
+          (*print-pretty* false)
+          (*print-readably* true)
+          (*print-right-margin* 0)
+          (*print-miser-width* 0))
+     ,@body))
 
 
 "##;

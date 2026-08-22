@@ -45,6 +45,9 @@
   （[[typelisp-vector-defstruct-revert]]）。書き換えは `setf` で場所を明示する。
 - **(D5) 動的束縛（special 変数）が無い**: `let` は常に字句束縛。CL の `*print-\*`/`*read-\*` 等の
   制御変数は「代入可能なグローバル」に読み替えている（functions.md §15.1）。
+  2026-08-22（Phase 7b）に**スコープ付きの差し替え `dlet`** を入れた——保存 → 代入 →
+  `unwind-protect` で復元。単スレッドでは CL の動的束縛と区別が付かない（cleanup は
+  `throw`/`panic`/`break`/`return` でも走る）。**スレッドごとの束縛ではない**点だけが違う。
 
 ---
 
@@ -217,19 +220,28 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 
 ### 2.7 コンディション（CLHS 9）
 
-全体が ⛔ (D3)。`Result<T,E>` + `match` + `panic` で書き換える方針で、2026-08-16 に非採用が確定した
-（language-design.md §9）。ただし**非局所脱出は別機構として実装済み**（`catch`/`throw`/
-`unwind-protect`、§2.3）——CL でもこの2つは別の機構なので、ここで落ちているのは
-「ハンドラを積んで、スタックを巻き戻さずにハンドラを走らせる」層と restart だけ。
+コンディション**システム**は ⛔ (D3)。`Result<T,E>` + `match` + `panic` で書き換える方針で、
+2026-08-16 に非採用が確定した（language-design.md §9）。ただし**非局所脱出は別機構として
+実装済み**（`catch`/`throw`/`unwind-protect`、§2.3）——CL でもこの2つは別の機構なので、
+落ちているのは「ハンドラを積んで、スタックを巻き戻さずにハンドラを走らせる」層と restart だけ。
+
+2026-08-22（Phase 7a）に、コンディション型を `Error` トレイトへ写像しても残っていた 2 つの穴を
+埋めた: `assert` と `warn`。
 
 | CL | 状態 |
 |---|---|
 | `define-condition` / `make-condition` | ⛔（`defstruct`/`defenum` + `impl Error` が代替） |
-| `signal` / `error` / `cerror` / `warn` / `break` | ⛔（`panic` のみ。**警告を出して続行する仕組みが無い**） |
+| `simple-error` | ✅ | `SimpleError`（`(simple-error msg)`）。functions.md §7.1 |
+| `warn` | ✅ | `*error-output*` へ `WARNING: ` 付きで書いて**続行**する。この言語で「`Result` を返しもせずプログラムを終わらせもせずに報告する」唯一の手段 |
+| `assert` | ⚠️ | 偽なら panic。メッセージ省略時はテストを*書かれたまま*名指す。CL の restart は無い（提供する物が無い）ので、CL の「全部断られたとき」の動作に落ちる |
+| `signal` / `error` / `cerror` / `break` | ⛔（`panic` と `Result`）。`error` に当たるのは「`Result` に `SimpleError` を載せる」か `panic` |
 | `handler-case` / `handler-bind` / `ignore-errors` | ⛔（`match` で `Result` を分岐）。`panic` は 2026-08-16 以降 abort でなく unwind するので `unwind-protect` の cleanup は走るが、**捕まえて継続する手段は無い**（`catch` が受けるのは `throw` だけ） |
 | `restart-case` / `restart-bind` / `with-simple-restart` / `invoke-restart` / `find-restart` / `compute-restarts` / `abort` / `continue` / `muffle-warning` / `store-value` / `use-value` | ⛔ |
-| `assert` | ❌（コンディション抜きの「条件が偽なら panic」なら追加可能） |
 | `invoke-debugger` / `*debugger-hook*` | ⛔ |
+
+**起こりえないコンディション型**: `type-error` / `unbound-variable` / `unbound-slot` /
+`undefined-function` / `control-error` / `program-error` は、型検査・全スロット必須の構築・
+名前解決・静的な脱出検査によって全部コンパイル時に潰れる。実行時に上げる物が残っていない。
 
 ### 2.8 シンボル（CLHS 10）
 
@@ -462,7 +474,8 @@ prelude の `defstruct`（`Array<T>` は `Vector<T>` 2 本、`BitVector` は詰�
 | `streamp` / `input-stream-p` / `output-stream-p` / `stream-element-type` | ⛔ | 方向も要素型も型が持つ（実行時に尋ねる問いではない） |
 | `open-stream-p` | ✅ | `Stream` トレイトのメソッド |
 | `*standard-output*` / `*standard-input*` / `*error-output*` | ✅ | ただし代入可能なグローバル（(D5) のため動的束縛ではない） |
-| `*trace-output*` / `*query-io*` / `*terminal-io*` / `*debug-io*` | ⛔ | (D5) |
+| `*trace-output*` | ✅ | 2026-08-22（Phase 7b）。`time` の報告先 |
+| `*query-io*` / `*terminal-io*` / `*debug-io*` | ⛔ | どれも two-way ストリームで、`two-way-stream` は両半分を `:dyn` へアップキャストして作る。それは prelude の本体がやってはいけない唯一のこと（`dyn-new`/`dyn-upcast` は地点ごとに vtable id/trait id を焼き込み、成果物にその番号を再生する起動列が無い）。ユーザコードは `(make-two-way-stream ...)` を自由に作れる |
 | `y-or-n-p` / `yes-or-no-p` | ✅ | 2026-08-20 実装（Phase 9c）。`*standard-input*` から読み、受け付けるまで訊き直す。入力の終端だけが止め、そのとき `false` |
 
 ### 2.19 プリンタ（CLHS 22）
@@ -476,9 +489,15 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | pretty printer 一式 | ✅ | `pprint`/`pprint-fill`/`pprint-linear`/`pprint-tabular`/`pprint-logical-block`/`pprint-newline`/`pprint-indent`/`pprint-tab`/`pprint-pop`/`pprint-exit-if-list-exhausted` |
 | `print-object` | ✅ | トレイト |
 | `*print-pretty*` / `*print-right-margin*` / `*print-miser-width*` | ✅ | 通常のグローバル変数（(D5) のため動的束縛でなく `setf`） |
-| `*print-escape*` | ⚠️ | `print-object` の `escape` 引数としてのみ存在。変数としては無い |
+| `*print-escape*` | ⚠️ | `print-object` の `escape` 引数としてのみ存在。変数としては無い（`princ`/`prin1` を入れる Phase 8a で決める）。`*print-readably*` がエスケープを強制する分だけは効く |
 | `*print-circle*` / `*print-level*` / `*print-length*` | ✅ | 2026-07-29 実装（functions.md §15.3）。`*print-circle*` は共有・循環構造を `#n=`/`#n#` でラベル付けし、後の2つは `#`/`...` で打ち切る。CL の `nil`（無制限）は 0 以下で表す |
-| `*print-base*` / `*print-radix*` / `*print-case*` / `*print-lines*` / `*print-gensym*` / `*print-array*` / `*print-readably*` | ❌ | 基数・大文字小文字・行数などの制御 |
+| `*print-base*` / `*print-radix*` | ✅ | 2026-08-22（Phase 7b）。2〜36 の外は印字エラー。印は符号の前（`#x-ff`）で、リーダの radix マクロが読み戻せる |
+| `*print-case*` | ✅ | 同上。CL と同じ `:upcase`/`:downcase`/`:capitalize`。既定は `:downcase`——CL の `:upcase` と同じ「格納されているまま」の意味（このリーダは小文字で格納する） |
+| `*print-lines*` | ✅ | 同上。pretty printer の行数上限、打ち切りは CL と同じ `..` |
+| `*print-readably*` | ⚠️ | 同上。エスケープを強制し `*print-level*`/`*print-length*` を無効化する分は入っている。**読めない値にエラーを上げる半分は無い**（上げるコンディションが無く、`print-object` が何でも印字しうる型について可否を決められない） |
+| `*print-gensym*` | ⛔ | 未 intern シンボルが無い |
+| `*print-array*` | ❌ | `Array<T>` の `print-object` と一緒に Phase 8a で決める |
+| `with-standard-io-syntax` | ✅ | 2026-08-22（Phase 7b）。上を全部標準値に `dlet` する |
 | `set-pprint-dispatch` / `*print-pprint-dispatch*` / `copy-pprint-dispatch` | ⛔ | 採用しないと確定済み（language-design.md §9、`print-object` トレイトで置き換え） |
 | `write-byte` / `read-byte` | ❌ | バイナリ I/O |
 
@@ -489,9 +508,12 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `read` | ✅ | ストリームからは `read-sexpr`（`PeekInput` を取り `Result<Option<Sexpr>,ReadError>` を返す。入力末尾は `Ok(none)`）。2026-08-05 |
 | `read-from-string` | ⚠️ | これが `(read s)`。ただし読んだ位置（第2値）が返らない |
 | `read-preserving-whitespace` / `read-delimited-list` | ❌ | |
-| `readtable` 関連（`copy-readtable` / `set-macro-character` / `get-macro-character` / `set-dispatch-macro-character` / `make-dispatch-macro-character` / `readtable-case` / `*readtable*`） | ❌ | **リーダマクロが定義できない**。`#.`/`#+`/`#-` 等の読み込み時制御も無い |
-| `*read-base*` / `*read-default-float-format*` / `*read-suppress*` / `*read-eval*` | ⛔ | (D5) |
-| `with-standard-io-syntax` | ⛔ | (D5) |
+| `readtable` 関連（`copy-readtable` / `set-macro-character` / `get-macro-character` / `set-dispatch-macro-character` / `make-dispatch-macro-character` / `readtable-case` / `*readtable*`） | ❌ | **リーダマクロが定義できない**。`#.` も無い（`#+`/`#-` はある） |
+| radix マクロ `#b` / `#o` / `#x` / `#NNr` | ✅ | 2026-08-22（Phase 7b の副産物）。`*print-radix*` が付ける印を読み戻すために入れた。符号は印の後ろ、`i64` を超えれば `bignum` |
+| `*read-base*` | ⛔ | 見送り（Phase 7b で判断）。`read` はコンパイル済みコードからも `rt_read` 経由で呼ばれ、そちら側に typelisp のグローバルへの経路が無い（`PrintHooks` に相当するリーダ側の表が要る）。CL 自身の落とし穴（基数 16 では `abc` が数になる）もあり、「別の基数で読む」需要は radix マクロが明示的に満たす |
+| `*read-default-float-format*` | ⛔ | 浮動小数点型が `f64` 1 つしか無い |
+| `*read-suppress*` / `*read-eval*` | ⛔ | `#.` が無く、`#+`/`#-` はリーダ内部で読み飛ばしを完結させている |
+| `with-standard-io-syntax` | ✅ | 2026-08-22（Phase 7b）。印字側の変数を全部標準値に `dlet` する。CL がここで束縛するリーダ変数はこの言語に無い |
 | `parse-integer` | ✅ | `parse-int` |
 
 ### 2.21 システム構築（CLHS 24）・環境（CLHS 25）

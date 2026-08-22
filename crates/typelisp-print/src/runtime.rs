@@ -23,7 +23,7 @@ use std::cell::RefCell;
 use std::io::Write;
 
 use typelisp_mem::{BoxId, Heap, Value};
-use crate::format::{self, Limits, RenderCtx};
+use crate::format::{self, PrintVars, RenderCtx};
 use crate::pprint::{self, IndentKind, NewlineKind, Op, Opts, Out, Style, TabKind};
 use crate::PrintEnv;
 
@@ -47,7 +47,7 @@ pub struct PrintHooks {
     pub opts: fn(&Heap) -> Opts,
     /// The three "what to print" control variables (`*print-circle*`,
     /// `*print-level*`, `*print-length*`), read the same way.
-    pub limits: fn(&Heap) -> Limits,
+    pub print_vars: fn(&Heap) -> PrintVars,
 }
 
 /// The hooks a program with no environment installed gets: every enum prints
@@ -62,7 +62,7 @@ pub const BARE_HOOKS: PrintHooks = PrintHooks {
     enum_variant_name: |_, _| None,
     print_object: |_, _, _| Ok(None),
     opts: |_| Opts::default(),
-    limits: |_| Limits::default(),
+    print_vars: |_| PrintVars::default(),
 };
 
 thread_local! {
@@ -122,8 +122,8 @@ pub fn current_opts(heap: &Heap) -> Opts {
 }
 
 /// The three "what to print" control variables, as of right now.
-pub fn current_limits(heap: &Heap) -> Limits {
-    (hooks().limits)(heap)
+pub fn current_print_vars(heap: &Heap) -> PrintVars {
+    (hooks().print_vars)(heap)
 }
 
 /// Builds `control`'s output without committing it — the shared half of
@@ -136,7 +136,7 @@ pub fn current_limits(heap: &Heap) -> Limits {
 pub fn build_format(heap: &mut Heap, control: &str, args: Value) -> Result<Out, String> {
     let env = RtPrintEnv { hooks: hooks() };
     let opts = current_opts(heap);
-    let ctx = RenderCtx { env: &env, limits: current_limits(heap) };
+    let ctx = RenderCtx { env: &env, print_vars: current_print_vars(heap) };
     format::build(heap, ctx, control, args, &opts)
 }
 
@@ -156,7 +156,7 @@ pub fn build_pprint(heap: &mut Heap, which: &str, value: Value, colinc: i64) -> 
         _ => Style::Default,
     };
     let env = RtPrintEnv { hooks: hooks() };
-    let ctx = RenderCtx { env: &env, limits: current_limits(heap) };
+    let ctx = RenderCtx { env: &env, print_vars: current_print_vars(heap) };
     let mut out = Out::new();
     if which == "pprint" {
         // CLHS: `pprint` outputs a newline *before* the object.

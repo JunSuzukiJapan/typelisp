@@ -100,12 +100,39 @@ pub struct Opts {
     pub margin: usize,
     /// `None` when `*print-miser-width*` is 0 or negative ("off", CL's `nil`).
     pub miser: Option<usize>,
+    /// `*print-lines*`: stop after this many lines and mark the cut with
+    /// `..`, CL's own marker. `None` is no limit (CL's `nil`), which is both
+    /// the default and what 0 or a negative global means.
+    pub lines: Option<usize>,
 }
 
 impl Default for Opts {
     fn default() -> Self {
-        Opts { pretty: false, margin: DEFAULT_MARGIN, miser: None }
+        Opts { pretty: false, margin: DEFAULT_MARGIN, miser: None, lines: None }
     }
+}
+
+/// Cuts `text` to `opts.lines` lines, marking the cut with CL's `..`.
+///
+/// CLHS 22.1.1 puts the marker at the point the output was abandoned; here it
+/// goes at the end of the last line kept, which is the same place for every
+/// layout this printer produces (a line break is where the cut can fall).
+/// Nothing to do when the limit is off or the text already fits.
+fn cut_lines(text: String, opts: &Opts) -> String {
+    let Some(limit) = opts.lines else { return text };
+    if limit == 0 {
+        return text;
+    }
+    let mut kept: Vec<&str> = Vec::new();
+    for (i, line) in text.split('\n').enumerate() {
+        if i == limit {
+            let mut out = kept.join("\n");
+            out.push_str(" ..");
+            return out;
+        }
+        kept.push(line);
+    }
+    text
 }
 
 /// The `*print-right-margin*` default, matching the conventional 80-column
@@ -230,6 +257,11 @@ struct Block {
 
 /// Lays `doc` out, starting at column `start_col`, under `opts`.
 pub fn layout(doc: &Out, start_col: usize, opts: &Opts) -> String {
+    cut_lines(layout_uncut(doc, start_col, opts), opts)
+}
+
+/// [`layout`] before `*print-lines*` is applied.
+fn layout_uncut(doc: &Out, start_col: usize, opts: &Opts) -> String {
     let items = flatten(doc);
     let margin = if opts.margin == 0 { usize::MAX } else { opts.margin };
     let metrics = Metrics::new(&items);
@@ -659,7 +691,7 @@ fn render_at(
     // Anything that is not a list has no layout of its own — including a
     // struct/enum with a `print-object` method, whose own text is whatever
     // that method returns (`Renderer::render` performs the dispatch, and
-    // applies the limits to whatever it walks into).
+    // applies the print_vars to whatever it walks into).
     if !matches!(v, Value::Cons(_)) {
         let mut s = String::new();
         st.render(heap, ctx, v, standard, depth, &mut s)?;
@@ -683,7 +715,7 @@ fn render_at(
     // (A cut list has no dotted tail left to print, as in CL.)
     let (mut elems, mut tail) = list_items(heap, v);
     let mut cut = false;
-    if let Some(limit) = ctx.limits.length {
+    if let Some(limit) = ctx.print_vars.cuts().1 {
         // Only the *elements* count against the limit — a dotted tail that is
         // still within it prints as usual (`(1 2 . 3)` under a limit of 2),
         // matching what `Renderer::render`'s flat cons loop does. A tail past
@@ -873,7 +905,7 @@ mod tests {
     fn lay(build: impl FnOnce(&mut Out), margin: usize) -> String {
         let mut out = Out::new();
         build(&mut out);
-        layout(&out, 0, &Opts { pretty: true, margin, miser: None })
+        layout(&out, 0, &Opts { pretty: true, margin, miser: None, lines: None })
     }
 
     fn block(out: &mut Out, kind: NewlineKind, elems: &[&str]) {
@@ -915,9 +947,9 @@ mod tests {
         let mut out = Out::new();
         block(&mut out, NewlineKind::Miser, &["11", "2", "3"]);
         // Miser off: the newlines are ignored even though the block overflows.
-        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 6, miser: None }), "(11 2 3)");
+        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 6, miser: None, lines: None }), "(11 2 3)");
         // Miser on (the block starts within 6 columns of the margin): breaks.
-        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 6, miser: Some(6) }), "(11\n 2\n 3)");
+        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 6, miser: Some(6), lines: None }), "(11\n 2\n 3)");
     }
 
     #[test]
@@ -932,7 +964,7 @@ mod tests {
             o.op(Op::BlockEnd);
             o
         };
-        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 80, miser: None }), "(aa\n    bb)");
+        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 80, miser: None, lines: None }), "(aa\n    bb)");
     }
 
     #[test]
@@ -946,7 +978,7 @@ mod tests {
             o.op(Op::BlockEnd);
             o
         };
-        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 80, miser: None }), ";; one\n;; two");
+        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 80, miser: None, lines: None }), ";; one\n;; two");
     }
 
     #[test]
@@ -961,9 +993,9 @@ mod tests {
             o
         };
         // Wide: everything on one line.
-        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 80, miser: None }), "(outer (a b))");
+        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 80, miser: None, lines: None }), "(outer (a b))");
         // Narrow: the outer block breaks, the inner one still fits.
-        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 12, miser: None }), "(outer\n (a b))");
+        assert_eq!(layout(&out, 0, &Opts { pretty: true, margin: 12, miser: None, lines: None }), "(outer\n (a b))");
     }
 
     #[test]

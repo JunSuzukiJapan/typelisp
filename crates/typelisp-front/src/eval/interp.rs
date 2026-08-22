@@ -1917,20 +1917,42 @@ impl Interp {
         self.root.borrow().enum_variant_name(&path, variant)
     }
 
-    pub(crate) fn print_limits(&self, heap: &Heap) -> crate::eval::format::Limits {
+    pub(crate) fn print_vars(&self, heap: &Heap) -> crate::eval::format::PrintVars {
         let read_limit = |name: &str| -> Option<usize> {
             match self.global_value(heap, &crate::Path::root(name)) {
                 Some(Value::Int(n)) if n > 0 => Some(n as usize),
                 _ => None,
             }
         };
-        crate::eval::format::Limits {
-            circle: matches!(
-                self.global_value(heap, &crate::Path::root("*print-circle*")),
-                Some(Value::Bool(true))
-            ),
+        let read_flag = |name: &str| -> bool {
+            matches!(self.global_value(heap, &crate::Path::root(name)), Some(Value::Bool(true)))
+        };
+        let defaults = crate::eval::format::PrintVars::default();
+        crate::eval::format::PrintVars {
+            circle: read_flag("*print-circle*"),
             level: read_limit("*print-level*"),
             length: read_limit("*print-length*"),
+            // Left at the default when the global is missing (a bare `Interp`
+            // with no prelude) or holds something other than an integer —
+            // an out-of-range *value* is a printing error, but there being no
+            // variable at all is just "the prelude was never loaded".
+            base: match self.global_value(heap, &crate::Path::root("*print-base*")) {
+                Some(Value::Int(n)) => n,
+                _ => defaults.base,
+            },
+            radix: read_flag("*print-radix*"),
+            case: match self.global_value(heap, &crate::Path::root("*print-case*")) {
+                // The interned name keeps the leading colon — a keyword is an
+                // ordinary symbol whose name starts with one, not a separate
+                // type (`Checker::check_symbol`).
+                Some(Value::Symbol(id)) => match heap.symbol_name(id) {
+                    ":upcase" => crate::eval::format::PrintCase::Upcase,
+                    ":capitalize" => crate::eval::format::PrintCase::Capitalize,
+                    _ => crate::eval::format::PrintCase::Downcase,
+                },
+                _ => defaults.case,
+            },
+            readably: read_flag("*print-readably*"),
         }
     }
 
@@ -1972,10 +1994,12 @@ impl Interp {
             );
         let margin = read_int("*print-right-margin*", crate::eval::pprint::DEFAULT_MARGIN as i64);
         let miser = read_int("*print-miser-width*", 0);
+        let lines = read_int("*print-lines*", 0);
         crate::eval::pprint::Opts {
             pretty,
             margin: margin.max(0) as usize,
             miser: (miser > 0).then_some(miser as usize),
+            lines: (lines > 0).then_some(lines as usize),
         }
     }
 
@@ -3535,7 +3559,7 @@ const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
         None => Ok(None),
     },
     opts: |heap| with_active_interp(|i| i.pretty_opts(heap)).unwrap_or_default(),
-    limits: |heap| with_active_interp(|i| i.print_limits(heap)).unwrap_or_default(),
+    print_vars: |heap| with_active_interp(|i| i.print_vars(heap)).unwrap_or_default(),
 };
 
 /// Runs `f` against this thread's registered `Interp`, or `None` when there

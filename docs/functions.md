@@ -637,8 +637,10 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `ReadError` | `read` |
 | `EvalError` | `eval` |
 | `FileError` | ファイル/ストリーム操作（§18） |
+| `SimpleError` | `(SimpleError::new msg)` / `(simple-error msg)`。CL の `simple-error`——「何が起きたか言いたいだけ」のときの既定の選択肢 |
+| `WrappedError` | `(wrap-error msg cause)`。自分のメッセージと原因の両方を運ぶ唯一の型で、`Error` トレイトに `source` がある理由 |
 
-いずれも「メッセージ文字列を1つ持つ単一変種の直和型」で、型名と変種名が同じ
+最初の 5 つはいずれも「メッセージ文字列を1つ持つ単一変種の直和型」で、型名と変種名が同じ
 （`(match e ((ParseIntError m) m))`、構成は `(ParseIntError::ParseIntError "...")`）。
 特別扱いは一切なく、自前のエラー型を `(defstruct my-err (...))` / `(defenum my-err ...)`
 で書いたときとまったく同じ扱いになる。
@@ -648,6 +650,7 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `message` | `(message e)` | `Self→string` | エラーメッセージ（`Error` トレイトのメソッド） |
 | `source` | `(source e)` | `Self→Option<:dyn Error>` | このエラーが包んでいる原因、無ければ `None`（Rust の `Error::source`） |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>`（`E` は `Error` 実装） | 具象エラー型を trait オブジェクトへ広げる |
+| `describe-error` | `(describe-error e)` | `E→string`（`E` は `Error` 実装） | メッセージと、`source` を辿った原因の連鎖を 1 行 1 原因で。CL に対応物は無い（Rust の "caused by"） |
 
 自前のエラー型に `Error` を実装すれば、組み込みエラーと**同じ形で**扱える:
 
@@ -935,6 +938,10 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | `macroexpand-1` | `(macroexpand-1 form)` | `Sexpr→Result<Option<Sexpr>,EvalError>` | マクロ呼び出しを 1 段展開。`none` は「マクロ呼び出しではない」 |
 | `macroexpand` | `(macroexpand form)` | `Sexpr→Result<Sexpr,EvalError>` | マクロでなくなるまで繰り返す |
 | `complement` | `(complement pred)` | `(fn (A) bool)→(fn (A) bool)` | 述語の否定 |
+| `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | 偽なら panic。メッセージ省略時は `assertion failed: <テストを書かれたまま>`（マクロなので式そのものを名指せる）。CL の restart はこの言語に無い |
+| `warn` | `(warn control args...)` | `(string,...)→()` | `*error-output*` へ `WARNING: ` 付きで 1 行書いて**続行**する。`Result` を返しもせずプログラムを終わらせもせずに報告する唯一の手段 |
+| `dlet` | `(dlet ((*var* val)...) body...)` | — | グローバルを `body` の間だけ差し替え、抜けるときに戻す。CL はこれを `let` と書くが、この言語の `let` は常に字句束縛なので別名（Emacs Lisp の同名マクロと同じ役目）。復元は `unwind-protect` の cleanup なので、正常終了・`throw`・`panic`・`break`/`return` のどれで抜けても走る。**スレッドごとの束縛ではない** |
+| `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 印字制御変数を全部標準値に `dlet` する（§15.3） |
 | `exit` | `(exit code)` | `i32→!` | プロセスを終了する |
 | `dump` | `(dump path)` | `string→bool` | いまの環境（型情報 + コンパイル済み本体）を1ファイルへ書き出す。`typl --image <path>` で立ち上げ直せる。`compile`/`compile-file` と同じくインタプリタ専用（コンパイル済み関数からは呼べない） |
 
@@ -1273,6 +1280,45 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 共有が1つも無い値では**ラベルは一切現れない**ので、この変数を真にしたまま普段のコードを動かしても
 出力は変わらない。
 
+#### 基数・大小・読み戻し（cl-parity-plan.md Phase 7b）
+
+| 変数 | 型 | 既定 | 意味 |
+|---|---|---|---|
+| `*print-base*` | `i64` | `10` | 整数（`i64` と `bignum`）を印字する基数。2〜36 の外は**印字エラー**（CL も範囲を規定している） |
+| `*print-radix*` | `bool` | `false` | 真なら基数の印を付ける。`#b`/`#o`/`#x`、それ以外は `#NNr`、基数 10 は末尾の `.`。印は符号の**前**（`#x-ff`） |
+| `*print-case*` | `symbol` | `:downcase` | シンボル名の大小。`:upcase` / `:downcase` / `:capitalize`（CL と同じ綴り。この言語のキーワードは自己評価する `symbol`） |
+| `*print-readably*` | `bool` | `false` | 真なら読み戻せる形で印字する。エスケープを強制し、`*print-level*`/`*print-length*` の打ち切りを無効化する |
+| `*print-lines*` | `i64` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 以下は無制限 |
+
+```lisp
+(dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
+(dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
+(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
+```
+
+`*print-radix*` が付ける印はリーダが読み戻せる（§16 の radix マクロ）。
+
+**`*print-case*` の既定が CL と違う理由**: CL の既定は `:upcase` だが、それは CL のリーダが
+シンボル名を大文字で格納するから——つまり「格納されているまま」の意味。このリーダは小文字で
+格納するので、同じ意味になる既定は `:downcase`。
+
+**`*print-readably*` に無い半分**: CL は読み戻せない値に `print-not-readable` を上げるが、
+この言語には上げるコンディションが無く、`print-object` が何でも印字しうるユーザ型について
+可否を決める手段も無い。エスケープと打ち切りの上書きだけが入っている。
+
+**CL にあって無いもの**: `*print-gensym*`（未 intern シンボルが無い）。
+`*print-array*` と `*print-escape*` は Phase 8a 待ち。
+
+#### 一時的な差し替え
+
+CL はこれらを `let` で束縛するが、この言語の `let` は字句束縛なので `dlet`（§14）を使う:
+
+```lisp
+(dlet ((*print-level* 2) (*print-length* 4))
+  (println "~a" x))                 ; この 1 回だけ制限が効く
+(with-standard-io-syntax (println "~a" x))   ; 全部を標準値に戻して印字
+```
+
 ## 16. 解析・評価 (`parse-int` / `parse-float` / `read` / `eval`)
 
 いずれも実行時の（プログラム自身は制御できない）テキスト・データを扱うため、失敗時は panic では
@@ -1284,6 +1330,11 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
 | `read` | `(read s)` | `string→Result<Sexpr,ReadError>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err`。CL の `read-from-string` に当たる——ストリームから読むのは `read-sexpr`（§18.5） |
 | `eval` | `(eval form)` | `Sexpr→Result<Sexpr,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
+
+リーダが読む数値表記は10進のほか、`0x`（16進）と CL の **radix マクロ** `#b`（2進）・`#o`（8進）・
+`#x`（16進）・`#NNr`（基数 NN、2〜36）。符号は印の**後ろ**（`#x-ff`）で、`i64` に収まらなければ
+`bignum` になる。`*print-radix*`（§15.3）が印字するのはこの表記なので、印字したものはそのまま
+読み戻せる。CL の `*read-base*` は無い——理由は cl-parity-plan.md Stage 7b の表に記録した。
 
 ### `eval` の意味論（Common Lisp 準拠）
 

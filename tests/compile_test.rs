@@ -6212,3 +6212,22 @@ fn a_compiled_bit_wise_operation_leaves_no_bits_past_the_length() {
     ";
     assert_eq!(run_compiled(src), Value::Int(35));
 }
+
+// ---- errors (cl-parity-plan.md Phase 7a) -----------------------------------
+
+#[test]
+fn a_compiled_function_builds_and_reads_an_error_chain() {
+    let src = "
+        (defun chain () string
+          (describe-error (wrap-error \"starting up\" (simple-error \"no such file\"))))
+        (compile chain)
+        (equal (chain) \"starting up\n  caused by: no such file\")
+    ";
+    assert_eq!(run_compiled(src), Value::Bool(true));
+}
+
+#[test]
+fn a_compiled_assert_passes_and_fails_the_same_way() {
+    let ok = "(defun fine () i32 (progn (assert (= 1 1)) 7)) (compile fine) (fine)";
+    assert_eq!(run_compiled(ok), Value::Int(7));
+}

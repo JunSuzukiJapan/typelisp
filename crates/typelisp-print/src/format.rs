@@ -67,8 +67,8 @@ pub fn build(
 /// With `interp: None` no dispatch is attempted and every value renders the
 /// built-in way.
 ///
-/// `limits` is the `*print-circle*`/`*print-level*`/`*print-length*` snapshot
-/// this printing operation runs under (see [`Limits`]).
+/// `print_vars` is the snapshot of the CLHS 22.1.1 printer control variables
+/// this printing operation runs under (see [`PrintVars`]).
 ///
 /// Copyable (one reference and three scalars) so it can be threaded alongside
 /// the `&mut Heap` the dispatch needs without fighting the borrow checker.
@@ -77,21 +77,20 @@ pub struct RenderCtx<'a> {
     /// What the printer needs to know about the program — enum variant names
     /// and `print-object` methods. See [`PrintEnv`].
     pub env: &'a dyn PrintEnv,
-    pub limits: Limits,
+    pub print_vars: PrintVars,
 }
 
-/// The three CLHS 22.1.1 printer control variables that bound *what* a value
-/// renders as, as opposed to how it is laid out (that is [`Opts`]):
-/// `*print-circle*`, `*print-level*`, `*print-length*`.
+/// The CLHS 22.1.1 printer control variables that decide *what* a value
+/// renders as, as opposed to how it is laid out (that is [`Opts`]).
 ///
 /// CL spells "no limit" as `nil`; typelisp has no `nil`, so the prelude's
 /// globals are `i64`s where 0 or less means unlimited — the same convention
 /// `*print-right-margin*`/`*print-miser-width*` already use. [`Default`] is
-/// therefore "every limit off", which is both CL's initial state for
-/// `*print-level*`/`*print-length*` and what a bare `Interp` (no prelude
-/// loaded, as in some unit tests) must fall back to.
-#[derive(Clone, Copy, Default)]
-pub struct Limits {
+/// every limit off, base 10, and symbols as stored: CL's initial state, and
+/// what a bare `Interp` (no prelude loaded, as in some unit tests) falls back
+/// to.
+#[derive(Clone, Copy)]
+pub struct PrintVars {
     /// `*print-circle*`: label shared and circular substructure with `#n=` /
     /// `#n#` instead of following it forever.
     pub circle: bool,
@@ -101,6 +100,105 @@ pub struct Limits {
     /// `*print-length*`: at most this many elements/fields per list, struct or
     /// enum; the rest collapse to `...`.
     pub length: Option<usize>,
+    /// `*print-base*`: the radix integers print in. Kept as the raw `i64` the
+    /// global holds rather than a validated `u32`, because CL requires 2..=36
+    /// and this snapshot is taken where there is no way to report the
+    /// violation — [`PrintVars::radix_of`] validates at the point of use,
+    /// where the renderer can return an error.
+    pub base: i64,
+    /// `*print-radix*`: prefix the digits with the radix marker (`#b`/`#o`/
+    /// `#x`/`#NNr`, or a trailing `.` in base 10), so the printed form reads
+    /// back as the same number whatever `*read-base*` is.
+    pub radix: bool,
+    /// `*print-case*`: how a symbol's name is rendered. CL stores symbol names
+    /// upcased and defaults to `:upcase`; this language's reader stores them
+    /// downcased, so the default is [`PrintCase::Downcase`] — both mean "as
+    /// stored".
+    pub case: PrintCase,
+    /// `*print-readably*`: print so the result reads back as an equal object.
+    /// Here that means escapes on and the `*print-level*`/`*print-length*`
+    /// cuts off, which is what CL says it overrides. CL additionally signals
+    /// `print-not-readable` for values with no readable form; this language
+    /// has nothing to signal (no conditions) and no way to decide the question
+    /// for a user type whose `print-object` may print anything, so that half
+    /// is deliberately absent — see `docs/functions.md` §15.3.
+    pub readably: bool,
+}
+
+impl Default for PrintVars {
+    fn default() -> Self {
+        PrintVars {
+            circle: false,
+            level: None,
+            length: None,
+            base: 10,
+            radix: false,
+            case: PrintCase::Downcase,
+            readably: false,
+        }
+    }
+}
+
+/// `*print-case*`'s three values, written in typelisp as CL's own keywords
+/// `:upcase` / `:downcase` / `:capitalize` — self-evaluating `symbol`s whose
+/// interned name keeps the colon, not a type of their own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PrintCase {
+    Upcase,
+    Downcase,
+    Capitalize,
+}
+
+impl PrintVars {
+    /// The validated `*print-base*`, or the message CL's "must be between 2
+    /// and 36" restriction deserves. Checked here rather than where the
+    /// snapshot is taken, because only the renderer has an error to return.
+    pub fn radix_of(&self) -> Result<u32, String> {
+        match self.base {
+            b if (2..=36).contains(&b) => Ok(b as u32),
+            b => Err(format!("*print-base* must be between 2 and 36, got {}", b)),
+        }
+    }
+
+    /// `*print-level*`/`*print-length*` as this printing operation should
+    /// apply them: both off under `*print-readably*`, which CL says overrides
+    /// them so the output can be read back whole.
+    pub fn cuts(&self) -> (Option<usize>, Option<usize>) {
+        if self.readably {
+            (None, None)
+        } else {
+            (self.level, self.length)
+        }
+    }
+
+    /// A symbol name rendered under `*print-case*`. Never applied under
+    /// `*print-readably*`: changing the case would change which symbol reads
+    /// back (this language's reader folds to lower case, so an upcased name
+    /// still reads back equal — but `:capitalize` on a name containing a
+    /// digit does not round-trip in CL either, and printing readably is not
+    /// the place to find out).
+    pub fn render_symbol(&self, name: &str) -> String {
+        if self.readably {
+            return name.to_string();
+        }
+        match self.case {
+            PrintCase::Downcase => name.to_string(),
+            PrintCase::Upcase => name.to_ascii_uppercase(),
+            PrintCase::Capitalize => name
+                .split_inclusive(|c: char| !c.is_ascii_alphanumeric())
+                .map(|word| {
+                    let mut cs = word.chars();
+                    match cs.next() {
+                        Some(first) => {
+                            first.to_ascii_uppercase().to_string()
+                                + &cs.as_str().to_ascii_lowercase()
+                        }
+                        None => String::new(),
+                    }
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Turns a finished buffer into text: a buffer with no pretty-printer op in it
@@ -1574,7 +1672,7 @@ fn roman(n: i64, old: bool) -> Result<String, String> {
 /// `Err` is the user printer's own failure (a `panic` in its body, say),
 /// surfaced rather than swallowed; every built-in path is infallible.
 ///
-/// `ctx.limits` bounds the walk: `*print-level*` cuts nesting off with `#`,
+/// `ctx.print_vars` bounds the walk: `*print-level*` cuts nesting off with `#`,
 /// `*print-length*` cuts element counts off with `...`, and `*print-circle*`
 /// labels shared/circular substructure (`#n=` / `#n#`) so a cycle terminates.
 /// The label numbering is per call — CL numbers per printed object, and each
@@ -1695,7 +1793,7 @@ impl Renderer {
     /// and returns the renderer that will label it.
     pub(crate) fn new(heap: &Heap, ctx: RenderCtx<'_>, root: Value) -> Renderer {
         let mut shared = HashMap::new();
-        if ctx.limits.circle {
+        if ctx.print_vars.circle {
             // Pass 1: find the nodes reached more than once. Only those get a
             // label, so an acyclic value with no sharing prints exactly as it
             // does with `*print-circle*` off.
@@ -1709,7 +1807,7 @@ impl Renderer {
     /// level cut-off, or an ordinary rendering (possibly label-prefixed).
     pub(crate) fn pre(&mut self, heap: &Heap, ctx: RenderCtx<'_>, v: Value, depth: usize) -> Pre {
         let mut prefix = String::new();
-        if ctx.limits.circle {
+        if ctx.print_vars.circle {
             if let Some(key) = container_key(heap, v) {
                 match self.shared.get(&key).copied() {
                     Some(ShareState::Labeled(n)) => return Pre::Stop(format!("#{}#", n)),
@@ -1733,7 +1831,7 @@ impl Renderer {
         // container for this purpose either.
         let composite = matches!(v, Value::Cons(_))
             || matches!(v, Value::Boxed(id) if heap.is_struct(id) || heap.is_enum(id));
-        match ctx.limits.level {
+        match ctx.print_vars.cuts().0 {
             // The label is dropped along with the object it would have named:
             // `#` says "something was here", and nothing can refer back to a
             // node that never printed.
@@ -1767,7 +1865,7 @@ impl Renderer {
     /// `*print-length*`: whether the element/field at index `printed` is past
     /// the limit (the caller writes the `...`, since its separator differs).
     pub(crate) fn length_reached(ctx: RenderCtx<'_>, printed: usize) -> bool {
-        matches!(ctx.limits.length, Some(limit) if printed >= limit)
+        matches!(ctx.print_vars.cuts().1, Some(limit) if printed >= limit)
     }
 
     /// Renders `v` at nesting `depth` the flat (non-pretty) way.
@@ -1790,6 +1888,38 @@ impl Renderer {
         self.render_builtin(heap, ctx, v, standard, depth, out)
     }
 
+    /// One integer under `*print-base*`/`*print-radix*`. `decimal` and
+    /// `digits` are two ways of writing the same number — the caller supplies
+    /// both because `i64` and `BigInt` spell them differently, and base 10
+    /// wants the plain `Display` rather than a digit loop.
+    ///
+    /// CL's radix markers go *before* the sign (`#x-1f`), and base 10 marks
+    /// itself with a trailing decimal point instead of a prefix. Both
+    /// spellings read back as the same integer whatever `*read-base*` is,
+    /// which is the whole point of `*print-radix*`.
+    fn integer_text(
+        ctx: RenderCtx<'_>,
+        decimal: impl FnOnce() -> String,
+        digits: impl FnOnce(u32) -> String,
+    ) -> Result<String, String> {
+        let radix = ctx.print_vars.radix_of()?;
+        let body = if radix == 10 {
+            decimal()
+        } else {
+            digits(radix)
+        };
+        if !ctx.print_vars.radix {
+            return Ok(body);
+        }
+        Ok(match radix {
+            2 => format!("#b{}", body),
+            8 => format!("#o{}", body),
+            16 => format!("#x{}", body),
+            10 => format!("{}.", body),
+            r => format!("#{}r{}", r, body),
+        })
+    }
+
     fn render_builtin(
         &mut self,
         heap: &mut Heap,
@@ -1799,9 +1929,16 @@ impl Renderer {
         depth: usize,
         out: &mut String,
     ) -> Result<(), String> {
+        // `*print-readably*` says the output must read back as an equal
+        // object, so it turns escaping on whatever the caller asked for —
+        // `~a` on a string under it still prints the quotes.
+        let standard = standard || ctx.print_vars.readably;
         match v {
             Value::Empty => out.push_str("()"),
-            Value::Int(n) => out.push_str(&n.to_string()),
+            Value::Int(n) => {
+                let text = Self::integer_text(ctx, || n.to_string(), |r| int_to_radix(n, r))?;
+                out.push_str(&text);
+            }
             Value::Bool(b) => out.push_str(&b.to_string()),
             Value::Char(c) => {
                 if standard {
@@ -1816,12 +1953,23 @@ impl Renderer {
                     out.push_str(heap.string(id));
                 }
             }
-            Value::Symbol(id) => out.push_str(heap.symbol_name(id)),
+            Value::Symbol(id) => {
+                let text = ctx.print_vars.render_symbol(heap.symbol_name(id));
+                out.push_str(&text);
+            }
             Value::Path(id) => {
-                let segs: Vec<&str> = heap.path_segments(id).iter().map(|s| heap.symbol_name(*s)).collect();
+                let segs: Vec<String> = heap
+                    .path_segments(id)
+                    .iter()
+                    .map(|s| ctx.print_vars.render_symbol(heap.symbol_name(*s)))
+                    .collect();
                 out.push_str(&segs.join("::"));
             }
-            Value::Boxed(id) if heap.is_bignum(id) => out.push_str(&heap.bignum_value(id).to_string()),
+            Value::Boxed(id) if heap.is_bignum(id) => {
+                let n = heap.bignum_value(id).clone();
+                let text = Self::integer_text(ctx, || n.to_string(), |r| n.to_str_radix(r))?;
+                out.push_str(&text);
+            }
             Value::Boxed(id) if heap.is_ratio(id) => {
                 let r = heap.ratio_value(id);
                 out.push_str(&format!("{}/{}", r.numer(), r.denom()));
@@ -1941,7 +2089,7 @@ impl Renderer {
                             // points back at a cell already printed. The first
                             // cell is skipped: `prologue` labelled it, and
                             // re-entering here would loop.
-                            if printed > 0 && ctx.limits.circle && self.is_shared(heap, cur) {
+                            if printed > 0 && ctx.print_vars.circle && self.is_shared(heap, cur) {
                                 out.push_str(" . ");
                                 self.render(heap, ctx, cur, standard, depth, out)?;
                                 break;

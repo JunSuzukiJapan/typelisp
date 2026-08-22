@@ -8555,3 +8555,82 @@ Phase 6b/6c の回帰を `scripts/test-serial.sh`（97 個のテストバイナ�
 
 **教訓**: 「関係しそうなテストを選んで回す」では足りない。`--lib` は 6a のときに回して
 いれば 28 本が即座に赤で出ていた。フェーズの締めは直列の全実行にする。
+
+---
+
+## CL 残差 Phase 7 — エラーと動的束縛（2026-08-22、branch `feature/cl-parity`）
+
+計画は [cl-parity-plan.md](cl-parity-plan.md) の Stage 7a / 7b。
+
+### 7a — コンディション型を `Error` トレイトへ写像して、残った穴を埋める
+
+コンディション**システム**は非採用のまま（language-design.md §9）。入れたのは
+`SimpleError` / `WrappedError` / `wrap-error` / `describe-error` / `assert` / `warn` の 6 つで、
+全部 prelude。Rust 側の追加はゼロ。
+
+**`assert` はマクロにした**。失敗時に `assertion failed: (= 1 2)` と*書かれたまま*テストを
+名指せるのは、展開時にフォームを `(quote ...)` で埋め込めるマクロだけだから。関数だと
+「何が偽だったか」を言えない。CL の restart は提供する物が無いので、偽なら `panic` ——
+CL も restart が全部断られれば同じところへ行く。
+
+**`warn` は `*error-output*` へ書いて続行する**。この言語で「`Result` を返しもせず
+プログラムを終わらせもせずに報告する」唯一の手段で、地図 §2.7 が「警告を出して続行する
+仕組みが無い」と書いていた穴がこれで埋まった。
+
+**テストで観測できない半分を正直に書いた**。`warn` の文面は `*error-output*` へ出るが、
+`*error-output*` は `standard-stream` 型で、文字列ストリームは別の型なのでプロセス内に
+差し替え先が無い。テストは「引数を評価する」「続行する」だけを見ていて、そのことを
+テストファイルに書いてある。
+
+### 7b — `dlet`、そして「入れなかった変数」の理由
+
+**`dlet`** は保存 → 代入 → `unwind-protect` で復元。CL はこれを `let` と書くが、この言語の
+`let` は常に字句束縛なので `(let ((*print-base* 16)) ...)` は「何も読まないローカル」を
+静かに作ってしまう。名前は Emacs Lisp の同名・同義のマクロから。
+
+cleanup が正常終了・`throw`・`panic`・`break`/`return` のどれでも走るので、単スレッドでは
+CL の動的束縛と区別が付かない。テスト 16 本のうち 4 本がその「どう抜けたか」だけを見ている。
+**スレッドごとの束縛ではない**点は違うので、そう書いた。
+
+**印字制御変数**は `Limits` を `PrintVars` に改名して（3 つの限界だけを運ぶ名前ではなくなった）
+`*print-base*` / `*print-radix*` / `*print-case*` / `*print-readably*` を足し、`Opts` に
+`*print-lines*` を足した。`*print-case*` は CL と同じ綴りの `:upcase`/`:downcase`/
+`:capitalize` を取る——**この言語のキーワードは自己評価する `symbol`** で、型ではないが値としては
+CL と同じ書き方ができる（`Checker::check_symbol` の `:` 分岐）。「キーワード型が無い」という
+`boole-*` 定数の注記に引きずられて最初は文字列にしようとしていた。
+
+**副産物として radix リーダマクロ `#b`/`#o`/`#x`/`#NNr` を入れた**（本来 Stage 8b）。
+`*print-radix*` の存在理由は「`*read-base*` が何であれ同じ数に読み戻せる印を付ける」ことなので、
+リーダが `#x` を知らないままではドキュメントの記述が嘘になる。自分で書いた説明が実装と
+食い違ったので、実装のほうを合わせた。
+
+### 途中で壁に当たった 1 件: 標準ストリームを `:dyn` にできない
+
+`*standard-output*` を `:dyn CharOutput` にすれば、CL がいちばんよく動的束縛を使う用途——
+1 つのフォームの間だけ出力を文字列ストリームへ向ける——が書けるようになる。やってみたら
+prelude の成果物ビルドが落ちた:
+
+> prelude: a compiled body boxes or upcasts a trait object, whose vtable/trait ids are baked
+> in per site — the artifact needs an ordered replay of those tables at load time
+
+グローバルの初期化式はコンパイル済み本体で、`dyn-new`/`dyn-upcast` は箱詰め/アップキャスト
+**地点ごと**に vtable id・trait id を焼き込む。JIT で載せるライブラリにはその番号を再生して
+vtable アドレスを公開する起動列が無い、という既存の検査に正面から当たった（`prelude_bootstrap`
+の末尾。「今日どの prelude 本体もここに届かない」と書いてあったが、届かせようとしたわけだ）。
+
+同じ理由で CL の `*terminal-io*` / `*query-io*` / `*debug-io*` も作れない——どれも two-way
+ストリームで、`two-way-stream` は両半分を `:dyn` へアップキャストして作る。ユーザコードは
+`(make-two-way-stream ...)` を自由に作れるので、**prelude だけが持てない**。
+型は元に戻し、理由を prelude のコメントと対応表の両方に書いた。
+
+### 入れなかった変数（全部、理由つきで）
+
+`*print-gensym*`（未 intern シンボルが無い）、`*read-default-float-format*`（浮動小数点型が
+1 つ）、`*read-suppress*`/`*read-eval*`（`#.` が無く `#+`/`#-` はリーダ内部で完結）、
+`*macroexpand-hook*`（展開はチェッカーの中で起きる。目的は Phase 4c の `macroexpand` が満たす）、
+`*read-base*`（`read` はコンパイル済みコードからも `rt_read` 経由で呼ばれ、そちらに typelisp の
+グローバルへの経路が無い。`PrintHooks` に相当するリーダ側の表が要る）。
+`*print-array*`/`*print-escape*` は Phase 8a へ送った。
+
+テストは `tests/error_catalog_test.rs`（16 本）、`tests/dynamic_binding_test.rs`（33 本）、
+`tests/compile_test.rs` に 2 本。

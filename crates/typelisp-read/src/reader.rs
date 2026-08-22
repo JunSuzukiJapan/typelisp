@@ -666,15 +666,91 @@ fn read_string(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
     Ok(heap.alloc_string(s))
 }
 
-fn read_hash(cur: &mut Cursor, _heap: &mut Heap) -> Result<Value, Error> {
+fn read_hash(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
     cur.next(); // '#'
     match cur.peek() {
         Some('\\') => {
             cur.next(); // '\\'
             read_char(cur)
         }
+        // CL's radix macros. The counterpart of `*print-radix*`, which prints
+        // exactly these: without them the marker it adds so a number "reads
+        // back whatever `*read-base*` is" would be unreadable here.
+        Some('b') | Some('B') => {
+            cur.next();
+            read_radix(cur, heap, 2)
+        }
+        Some('o') | Some('O') => {
+            cur.next();
+            read_radix(cur, heap, 8)
+        }
+        Some('x') | Some('X') => {
+            cur.next();
+            read_radix(cur, heap, 16)
+        }
+        Some(c) if c.is_ascii_digit() => {
+            let mut digits = String::new();
+            while let Some(d) = cur.peek() {
+                if d.is_ascii_digit() {
+                    digits.push(d);
+                    cur.next();
+                } else {
+                    break;
+                }
+            }
+            match cur.peek() {
+                Some('r') | Some('R') => cur.next(),
+                other => {
+                    return Err(Error::ReadError(format!(
+                        "#{} must be followed by `r` (the radix macro `#NNrDIGITS`), not {:?}",
+                        digits, other
+                    )))
+                }
+            };
+            let radix: u32 = digits
+                .parse()
+                .map_err(|_| Error::ReadError(format!("#{}r: radix does not fit", digits)))?;
+            if !(2..=36).contains(&radix) {
+                return Err(Error::ReadError(format!(
+                    "#{}r: radix must be between 2 and 36",
+                    digits
+                )));
+            }
+            read_radix(cur, heap, radix)
+        }
         other => Err(Error::ReadError(format!("unsupported # syntax: #{:?}", other))),
     }
+}
+
+/// The integer after a radix macro (`#x-1f`, `#b101`, `#36rZZ`). The sign
+/// comes *after* the marker, which is where CL's printer puts it.
+///
+/// Past `i64`'s range it reads as a `bignum`, the same fixnum-or-bignum split
+/// [`parse_number`] makes for decimal and `0x` tokens.
+fn read_radix(cur: &mut Cursor, heap: &mut Heap, radix: u32) -> Result<Value, Error> {
+    let mut tok = String::new();
+    while let Some(c) = cur.peek() {
+        if is_delimiter(c) {
+            break;
+        }
+        tok.push(c);
+        cur.next();
+    }
+    let (neg, body) = match tok.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, tok.strip_prefix('+').unwrap_or(&tok)),
+    };
+    if body.is_empty() || !body.chars().all(|c| c.is_digit(radix)) {
+        return Err(Error::ReadError(format!(
+            "`{}` is not a base-{} integer",
+            tok, radix
+        )));
+    }
+    if let Ok(n) = i64::from_str_radix(body, radix) {
+        return Ok(Value::Int(if neg { -n } else { n }));
+    }
+    let n = BigInt::parse_bytes(body.as_bytes(), radix).expect("digits of this radix parse as BigInt");
+    Ok(heap.alloc_bignum(if neg { -n } else { n }))
 }
 
 fn read_char(cur: &mut Cursor) -> Result<Value, Error> {

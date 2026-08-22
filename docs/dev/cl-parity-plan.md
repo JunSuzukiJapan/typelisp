@@ -894,66 +894,64 @@ Phase 6a で見つけた整数切り詰めの 3 件目として [TODO.md](TODO.m
 
 ## Phase 7 — エラーと動的束縛
 
-### Stage 7a — コンディションの `Error` トレイトへの統合
+### Stage 7a — コンディションの `Error` トレイトへの統合（完了 2026-08-22）
 
-コンディション**システム**は採らない（§0）。ここでやるのは「CL がコンディション型で表していたものを
-typelisp の `Error` トレイト＋具象エラー型へ写像し、写像しても残る穴だけを埋める」こと。
+コンディション**システム**は予定どおり非採用。CL のコンディション**型**を `Error` トレイトへ
+写像し、写像しても残る穴を埋めた。全部 prelude で、Rust 側の追加はゼロ。
 
-**(1) 具象エラー型の整備** — 既存 5 型（`ParseIntError` / `ParseFloatError` / `ReadError` /
-`EvalError` / `FileError`）に足りない分を、CL の標準コンディション型のうち
-**typelisp で実際に起こりうるもの**に限って足す:
-
-| CL のコンディション型 | typelisp での扱い |
+| 入れたもの | CL |
 |---|---|
-| `simple-error` / `simple-condition` | **`SimpleError` を新設**（任意メッセージの汎用具象型）。ユーザが `Result` に載せる既定の選択肢になる |
-| `end-of-file` | `read-sexpr` は入力末尾を `Ok(none)` で表しており既に十分。ストリーム層に足すかは実施時判断 |
-| `file-error` | `FileError` として実装済み |
-| `parse-error` / `reader-error` | `ParseIntError` / `ParseFloatError` / `ReadError` として実装済み |
-| `arithmetic-error` / `division-by-zero` / `floating-point-*` | 現在はゼロ除算が panic（language-design.md §7.6 が Rust の整数除算に忠実であることを選んでいる）。`Result` を返す `checked-` 版を出すかを実施時に判断 |
-| `type-error` / `unbound-variable` / `unbound-slot` / `undefined-function` / `control-error` / `program-error` | **起こりえない**。型検査・スロット全必須・名前解決・静的な脱出の検査で全部コンパイル時に潰れる。対応表にその旨を明記する |
-| `storage-condition` | cons アリーナ枯渇は現在 panic。据え置き |
-| `warning` / `style-warning` | **(2) の `warn` が担う** |
-| `cell-error` / `package-error` / `print-not-readable` / `stream-error` | 対応する操作が無いか、上記のいずれかに吸収される |
+| `SimpleError`（`(SimpleError::new msg)` / `(simple-error msg)`） | `simple-error` |
+| `WrappedError` と `(wrap-error msg cause)` | 原因を包む型（CL では `:cause` 引数の慣習） |
+| `(describe-error e)` | 原因の連鎖を 1 行 1 原因で印字（CL に対応物は無い。Rust の "caused by"） |
+| `(assert test)` / `(assert test msg)` | `assert` |
+| `(warn control args...)` | `warn` |
 
-**(2) 落ちている 2 つの穴を埋める**:
+- **`assert` はマクロ**。`(assert (= 1 2))` が失敗すると
+  `assertion failed: (= 1 2)`——テストを*書かれたまま*名指すため。第 2 引数を渡せば
+  そちらがメッセージになる。CL の restart は無い（コンディションが無いので提供する物が無い）
+  ので、偽なら `panic`。CL も restart が全部断られれば同じところへ行く。
+- **`warn` は `*error-output*` へ書いて続行する**。この言語で「`Result` を返しもせず
+  プログラムを終わらせもせずに報告する」唯一の手段。
+- **起こりえない型**（`type-error` / `unbound-variable` / `unbound-slot` /
+  `undefined-function` / `control-error` / `program-error`）は対応表にその旨を書いた。
+- `handler-case` / `ignore-errors` は予定どおり**非採用**（language-design.md §9）。
+- 「§7.1 の 4 型表を 5 型へ」は既に直っていた（`FileError` は入っている）。
 
-- **`assert`** — 条件が偽なら panic。コンディション抜きなら素直に足せる（地図 §2.7 も
-  「コンディション抜きの『条件が偽なら panic』なら追加可能」と書いている）
-- **`warn`** — `*error-output*` へ書いて**続行**する。地図 §2.7 の
-  「**警告を出して続行する仕組みが無い**」を埋める唯一の項目。`print`/`println` と同じく
-  制御文字列を取る特殊形にする
+テストは `tests/error_catalog_test.rs`（16 本）と `tests/compile_test.rs` の 2 本。
 
-**(3) `Error` トレイト周辺の整備**:
+### Stage 7b — 動的束縛の代替と制御変数（完了 2026-08-22）
 
-- `source` チェーンを辿って原因の連鎖を印字するヘルパ
-- 原因を包む `wrap-error`
-- `docs/functions.md` §7.1 の 4 型表を 5 型（`FileError` 追加）へ修正（§2-11）
+**`dlet`** — 保存 → 代入 → `unwind-protect` で復元、をマクロにしたもの。CL はこれを `let` と
+書くが、この言語の `let` は常に字句束縛なので `(let ((*print-base* 16)) ...)` は
+「何も読まないローカル」を作ってしまう。名前は Emacs Lisp の同名・同義のマクロから。
+cleanup は body をどう抜けても走る（正常終了・`throw`・`panic`・`break`/`return`）ので、
+単スレッドでは動的束縛と区別が付かない。**スレッドごとの束縛ではない**点だけが違う。
 
-**(4) 判断が要る 1 件（この計画は非採用を推奨する）**:
-`handler-case` / `ignore-errors` 相当（panic を捕まえて継続する手段）は、
-`crossing.rs` の `catch_compiled_panic`（コンパイル済みコードの Rust unwind を
-`EvalError::Panic` / `EvalError::Throw` に再構築する既存機構）を使えば**技術的には作れる**。
-しかし language-design.md §9 が「捕まえて継続する手段は無い」を確定事項としており、
-`panic` は「回復不能なバグ・不変条件違反」の側に置くという §7.1 の住み分けとも噛み合っている。
-**覆すなら §9 の改訂が先**。この計画では実装しない。
+入れた制御変数と、入れなかったものの理由:
 
-### Stage 7b — 動的束縛の代替と制御変数の完成
+| 変数 | 状態 |
+|---|---|
+| `*print-base*` / `*print-radix*` | ✅ 整数（`i64`/`bignum`）の基数と、読み戻せるようにする印。2..36 の外は印字エラー（CL と同じ） |
+| `*print-case*` | ✅ CL と同じ綴り（`:upcase`/`:downcase`/`:capitalize`。この言語のキーワードは自己評価する `symbol`）。既定は `:downcase`——CL の `:upcase` と同じく「格納されているまま」の意味 |
+| `*print-readably*` | ⚠️ エスケープを強制し、`*print-level*`/`*print-length*` の打ち切りを無効化する（CL が「上書きする」と言っている分）。**読めない値にエラーを上げる半分は入れていない**——上げるコンディションが無く、`print-object` が何でも印字しうる型について可否を決められない |
+| `*print-lines*` | ✅ pretty printer の行数上限。打ち切りは CL と同じ `..` |
+| `*trace-output*` | ✅ `time` の報告先（CL 準拠） |
+| `*print-gensym*` | ⛔ この言語に未 intern シンボルが無い |
+| `*print-array*` / `*print-escape*` | ⏳ Phase 8a へ。前者は `Array<T>` の `print-object`、後者は `princ`/`prin1` と一緒に決める話 |
+| `*terminal-io*` / `*query-io*` / `*debug-io*` | ⛔ **作れない**。CL ではどれも two-way ストリームで、`two-way-stream` は両半分を `:dyn` へアップキャストして作る。それは prelude の本体がやってはいけない唯一のこと（`dyn-new`/`dyn-upcast` は箱詰め/アップキャスト地点ごとに vtable id・trait id を焼き込み、成果物にはその番号を再生して vtable アドレスを公開する起動列が無い——`prelude_bootstrap::build_dump` 末尾の検査）。ユーザコードは `(make-two-way-stream ...)` を自由に作れる |
+| `*read-base*` | ⛔ 見送り。`read` はコンパイル済みコードからも `rt_read` 経由で呼ばれ、そちら側に typelisp のグローバルへの経路が無い（`PrintHooks` に相当するリーダ側の表が要る）。CL 自身の落とし穴（基数 16 では `abc` が数になる）もあり、「別の基数で読む」需要は下の radix マクロが明示的に満たす |
+| `*read-default-float-format*` | ⛔ 浮動小数点型が 1 つしか無い |
+| `*read-suppress*` / `*read-eval*` | ⛔ `#.` が無く、`#+`/`#-` はリーダ内部で読み飛ばしを完結させている |
+| `*macroexpand-hook*` | ⛔ 展開はチェッカーの中で `MacroExpander` 越しに起きる。ユーザ関数を挟むにはチェッカーが展開ごとにインタプリタを呼び返す必要があり、目的（追跡）は Phase 4c の `macroexpand` が満たす |
+| `with-standard-io-syntax` | ✅ 上の全部を標準値に `dlet` するマクロ。`*print-case*` だけ CL の字面（`:upcase`）でなく `:downcase`——CL の標準値の*意味*は「格納されているまま」で、このリーダは小文字で格納する |
 
-`let` は常に字句束縛のまま変えない。代わりに「保存 → 代入 → `unwind-protect` で復元」する
-**スコープ付き再束縛**を入れる（`unwind-protect` は 2026-08-16 実装済みなので新機構は不要。
-cleanup は正常終了・`throw`・`panic`・`break`/`return` のどれで抜けても走る）。
-これで CL の「一時的に `*print-base*` を 16 にする」用法が書ける。
+**副産物: radix リーダマクロ `#b` / `#o` / `#x` / `#NNr`**（本来 Stage 8b）。
+`*print-radix*` が付ける印は、読み戻せて初めて意味がある——リーダが `#x` を知らないままでは
+「`*read-base*` が何であれ同じ数に読める」という `*print-radix*` の存在理由が嘘になるので、
+ここで入れた。符号は印の**後ろ**（`#x-ff`）、`i64` を超えれば `bignum`。
 
-その上で、CL の制御変数のうち typelisp に対応物があるものを全部揃える:
-
-- プリンタ: `*print-base*` / `*print-radix*` / `*print-case*` / `*print-lines*` /
-  `*print-gensym*` / `*print-array*` / `*print-readably*` / `*print-escape*`
-  （最後の1つは今 `print-object` の `escape` 引数としてしか存在しない）
-- リーダ: `*read-base*` / `*read-default-float-format*` / `*read-suppress*` / `*read-eval*`
-- ストリーム: `*trace-output*` / `*query-io*` / `*terminal-io*` / `*debug-io*`
-- `with-standard-io-syntax`、`*macroexpand-hook*`
-
-`*package*` / `*readtable*` はそれぞれ Phase 9a / 8c に依存するのでそちらで扱う。
+テストは `tests/dynamic_binding_test.rs`（33 本）。
 
 ---
 
