@@ -53,11 +53,11 @@ fn eval_ok(src: &str) -> Value {
 /// matches it back out and applies it. Both the built-in *method* case
 /// (`recv_type: Some`) and the free-built-in case (`recv_type: None`) have a
 /// variant here.
-const OP_ENUM: &str = "(defenum op (binary (fn (i32 i32) i32)) (nullary (fn () Symbol)) (none)) \
+const OP_ENUM: &str = "(defenum op (binary (fn (i32 i32) i32)) (naming (fn (string) Symbol)) (none)) \
                        (defun run-binary ((o op) (a i32) (b i32)) i32 \
-                         (match o ((binary f) (f a b)) ((nullary _) 0) ((none) -1))) \
-                       (defun run-nullary ((o op)) Symbol \
-                         (match o ((nullary g) (g)) ((binary _) (gensym)) ((none) (gensym))))";
+                         (match o ((binary f) (f a b)) ((naming _) 0) ((none) -1))) \
+                       (defun run-naming ((o op) (s string)) Symbol \
+                         (match o ((naming g) (g s)) ((binary _) (string->symbol s)) ((none) (string->symbol s))))";
 
 // ---- still a function value ------------------------------------------------
 
@@ -80,16 +80,21 @@ fn two_reifications_of_one_builtin_both_apply() {
 
 #[test]
 fn a_free_builtin_passed_as_an_argument_is_applied() {
-    let src = "(defun call0 ((f (fn () Symbol))) Symbol (f)) (call0 gensym)";
+    // `string->symbol` rather than `gensym`: `gensym` moved out of the
+    // built-in table into the prelude when it gained a prefix argument
+    // (cl-parity-plan.md Phase 4c), so it stopped exercising the free-*built-in*
+    // path this test is about — a prelude `defun` reaches compiled code as an
+    // ordinary closure.
+    let src = "(defun call1 ((f (fn (string) Symbol)) (s string)) Symbol (f s)) (call1 string->symbol \"x\")";
     assert_sym(eval_ok(src));
 }
 
-/// `gensym` mints a fresh symbol per call, so the only thing to assert is the
-/// shape — that the built-in really ran rather than the box being handed back.
+/// The built-in returns a symbol, so the only thing to assert is the shape —
+/// that it really ran rather than the box being handed back.
 fn assert_sym(v: Value) {
     match v {
         typelisp::Value::Symbol(_) => {}
-        other => panic!("expected a gensym'd symbol, got {:?}", other),
+        other => panic!("expected a symbol, got {:?}", other),
     }
 }
 
@@ -107,7 +112,7 @@ fn a_builtin_method_stored_in_an_enum_field_is_recovered_and_applied() {
 /// The free-built-in half — `recv_type: None` rather than a receiver path.
 #[test]
 fn a_free_builtin_stored_in_an_enum_field_is_recovered_and_applied() {
-    let src = format!("{} (run-nullary (op::nullary gensym))", OP_ENUM);
+    let src = format!("{} (run-naming (op::naming string->symbol) \"x\")", OP_ENUM);
     assert_sym(eval_ok(&src));
 }
 

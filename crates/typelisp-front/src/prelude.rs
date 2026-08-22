@@ -4155,6 +4155,364 @@ user-visible capacity."
                        ())))))))
       answer)))
 
+;; ---------------------------------------------------------------------------
+;; Multi-dimensional arrays (CLHS 15) — cl-parity-plan.md Phase 6b.
+;;
+;; **A prelude type, not a built-in one**, for the reason `complex` above is
+;; one: an array is a dimension list plus a flat element sequence, and both of
+;; those are `Vector`s this language already has. Written as a `defstruct` it
+;; needs no new `Repr`, no `rt_*` shim, no island lowering and no artifact
+;; surgery — it compiles through the ordinary prelude path the day it is
+;; written.
+;;
+;; Departures from CL, all of them either forced by static typing or already
+;; answered by it:
+;;
+;; 1. The element type is the type parameter `T`. So `array-element-type`,
+;;    `simple-vector-p`, `adjustable-array-p` and `array-has-fill-pointer-p`
+;;    are questions the static type has already answered and none of them
+;;    exists here (see `docs/dev/cl-missing-classes-and-methods.md`).
+;; 2. Subscripts are a `Vector<i32>` rather than a `&rest` of integers: a
+;;    `defmethod` resolves by arity, never by a trailing run of same-typed
+;;    arguments. The CL-shaped `(aref a i j)` is checker sugar over exactly
+;;    these methods — see `Checker::check_aref`.
+;; 3. Creation is `Array::make`, not `Array::new`. `new` is the field-order
+;;    constructor every `defstruct` generates, and this one's fields are the
+;;    *representation* (dimensions, flat storage, fill pointer) rather than
+;;    what a caller wants to hand over.
+;; 4. CL's `make-array` keywords: `:initial-element` is the required `init`
+;;    argument, since there are no unbound array cells here; `:fill-pointer`
+;;    is a `&key`; and `:adjustable` has no counterpart, because `adjust`
+;;    works on every array.
+;;
+;; Row-major order throughout, as in CL: the last subscript varies fastest.
+
+(pub defstruct Array<T>
+  "A multi-dimensional array of `T`, stored in row-major order."
+  (dims Vector<i32>)
+  (data Vector<T>)
+  (pub fill-pointer Option<i32>))
+
+;; CL's `make-array`. `dims` is copied, so a later `push` to the caller's own
+;; vector cannot change the array's shape behind its back.
+(pub defmethod make (Array<T> (dims Vector<i32>) (init T) &key (fill-pointer i32)) Array<T>
+  (let ((d (the Vector<i32> (Vector::new))) (n 1))
+    (progn
+      (doiter (x (iter dims))
+        (progn
+          (if (< x 0)
+              (panic (format false "Array::make: dimension ~a is negative" x))
+              ())
+          (push d x)
+          (setf n (* n x))))
+      (match fill-pointer
+        ((none) ())
+        ((some f)
+         (progn
+           (if (/= (len d) 1)
+               (panic "Array::make: :fill-pointer needs a one-dimensional array")
+               ())
+           (if (or (< f 0) (> f n))
+               (panic (format false "Array::make: :fill-pointer ~a is not in 0..~a" f n))
+               ()))))
+      (Array::new d (Vector::filled n init) fill-pointer))))
+
+;; CL's `array-rank` / `array-dimension` / `array-dimensions` /
+;; `array-total-size`. The type name is not repeated in the method name:
+;; the receiver already says which type is being asked.
+(pub defmethod rank ((self Array<T>)) i32 (len self::dims))
+(pub defmethod dimension ((self Array<T>) (n i32)) i32 (get self::dims n))
+(pub defmethod total-size ((self Array<T>)) i32 (len self::data))
+;; A fresh vector, like CL's `array-dimensions` returns a fresh list — the
+;; array's own is its representation and handing it out would let a caller
+;; reshape the array by mutating what it got back.
+(pub defmethod dimensions ((self Array<T>)) Vector<i32>
+  (let ((out (the Vector<i32> (Vector::new))))
+    (progn (doiter (x (iter self::dims)) (push out x)) out)))
+
+;; CL's `array-in-bounds-p`: false for the wrong number of subscripts too,
+;; which is what CL says (it is not an error to ask).
+(pub defmethod in-bounds ((self Array<T>) (idx Vector<i32>)) bool
+  (if (/= (len idx) (len self::dims))
+      false
+      (let ((i 0) (ok true) (n (len idx)))
+        (progn
+          (while (< i n)
+            (progn
+              (let ((s (get idx i)))
+                (setf ok (and ok (>= s 0) (< s (get self::dims i)))))
+              (setf i (+ i 1))))
+          ok))))
+
+;; CL's `array-row-major-index`: the flat offset `idx` names, by the Horner
+;; fold that row-major order *is*. Out-of-range subscripts are an error here
+;; rather than a wrong-but-in-range offset — without the check `(aref a 0 5)`
+;; on a 3x3 would quietly read row 1 rather than say anything.
+(pub defmethod row-major-index ((self Array<T>) (idx Vector<i32>)) i32
+  (if (in-bounds self idx)
+      (let ((acc 0) (i 0) (r (len self::dims)))
+        (progn
+          (while (< i r)
+            (progn
+              (setf acc (+ (* acc (get self::dims i)) (get idx i)))
+              (setf i (+ i 1))))
+          acc))
+      (panic "aref: subscripts are out of range for this array")))
+
+;; `aref` / `(setf (aref ...))`, spelled the way every other indexed container
+;; in this language spells them. `(aref a i j)` is checker sugar for these.
+(pub defmethod get ((self Array<T>) (idx Vector<i32>)) T
+  (get self::data (row-major-index self idx)))
+(pub defmethod set ((self Array<T>) (idx Vector<i32>) (x T)) ()
+  (set self::data (row-major-index self idx) x))
+
+;; CL's `row-major-aref` and its `setf`: the flat offset directly.
+(pub defmethod row-major-get ((self Array<T>) (i i32)) T (get self::data i))
+(pub defmethod row-major-set ((self Array<T>) (i i32) (x T)) () (set self::data i x))
+
+;; CL's `length` on an array: the fill pointer when there is one, and the
+;; whole array when there is not.
+(pub defmethod len ((self Array<T>)) i32
+  (match self::fill-pointer ((some n) n) ((none) (len self::data))))
+
+;; `array-iter<T>` is to `Array<T>` what `vector-iter<T>` is to `Vector<T>`:
+;; a separate cursor per `(iter a)` call, walking row-major order and stopping
+;; at the fill pointer if there is one.
+(defstruct array-iter<T> (arr Array<T>) (pos i32))
+(impl Iter array-iter<T>
+  (type Item T)
+  (next ((self Self)) Option<T>
+    (if (< self::pos (len self::arr))
+        (let ((v (row-major-get self::arr self::pos)))
+          (setf self::pos (+ self::pos 1))
+          (Option::some v))
+        (Option::none))))
+(pub defmethod iter ((self Array<T>)) array-iter<T> (array-iter::new self 0))
+
+;; CL's `vector-push-extend`: write at the fill pointer, growing the storage
+;; when the pointer has reached the end. A fill-pointer array is
+;; one-dimensional by construction (`Array::make` refuses any other rank), so
+;; growing it means growing its single dimension.
+(pub defmethod push-extend ((self Array<T>) (x T)) ()
+  (match self::fill-pointer
+    ((none) (panic "push-extend: this array has no fill pointer"))
+    ((some n)
+     (progn
+       (if (< n (len self::data)) (set self::data n x) (push self::data x))
+       (set self::dims 0 (len self::data))
+       (setf self::fill-pointer (Option::some (+ n 1)))))))
+
+;; CL's `vector-pop`. `Option<T>` on an empty array rather than an error, the
+;; same answer `Vector<T>`'s own `pop` gives.
+(pub defmethod pop ((self Array<T>)) Option<T>
+  (match self::fill-pointer
+    ((none) (panic "pop: this array has no fill pointer"))
+    ((some n)
+     (if (<= n 0)
+         (Option::none)
+         (let ((v (get self::data (- n 1))))
+           (setf self::fill-pointer (Option::some (- n 1)))
+           (Option::some v))))))
+
+;; Decode a row-major offset back into subscripts, into `out` (which must
+;; already have one slot per dimension). The inverse of `row-major-index`'s
+;; fold, so it runs the dimensions backwards: the last one varies fastest.
+(defun array-decode ((dims Vector<i32>) (flat i32) (out Vector<i32>)) ()
+  (let ((k (- (len dims) 1)) (rest flat))
+    (while (>= k 0)
+      (progn
+        (let ((d (get dims k)))
+          (progn
+            (set out k (mod rest d))
+            (setf rest (/ rest d))))
+        (setf k (- k 1))))))
+
+(defun array-subs-in-bounds ((sub Vector<i32>) (dims Vector<i32>)) bool
+  (let ((i 0) (ok true) (n (len sub)))
+    (progn
+      (while (< i n)
+        (progn
+          (setf ok (and ok (< (get sub i) (get dims i))))
+          (setf i (+ i 1))))
+      ok)))
+
+;; CL's `adjust-array`: reshape in place, keeping every element whose
+;; subscripts still name a cell. CL requires the new rank to match the old
+;; one, and so does this. New cells get `init` — CL's `:initial-element`,
+;; required here for the same reason `Array::make` requires it.
+;;
+;; Mutates and returns `()`, where CL returns the array; CL has to, because a
+;; non-adjustable CL array may come back as a *different* array. Every array
+;; here is adjustable, so there is never a second one to return.
+(pub defmethod adjust ((self Array<T>) (newdims Vector<i32>) (init T)) ()
+  (let ((nd (the Vector<i32> (Vector::new))) (n 1))
+    (progn
+      (if (/= (len newdims) (len self::dims))
+          (panic (format false "adjust: expected ~a dimension(s), got ~a"
+                         (len self::dims) (len newdims)))
+          ())
+      (doiter (x (iter newdims))
+        (progn
+          (if (< x 0)
+              (panic (format false "adjust: dimension ~a is negative" x))
+              ())
+          (push nd x)
+          (setf n (* n x))))
+      (let ((moved (Vector::filled n init))
+            (sub (Vector::filled (len nd) 0))
+            (i 0))
+        (progn
+          (while (< i n)
+            (progn
+              (array-decode nd i sub)
+              (if (array-subs-in-bounds sub self::dims)
+                  (set moved i (get self::data (row-major-index self sub)))
+                  ())
+              (setf i (+ i 1))))
+          (setf self::dims nd)
+          (setf self::data moved)
+          (match self::fill-pointer
+            ((none) ())
+            ((some f) (setf self::fill-pointer (Option::some (min f n))))))))))
+
+;; ---------------------------------------------------------------------------
+;; Bit vectors (CLHS 15.2) — cl-parity-plan.md Phase 6c.
+;;
+;; A prelude type for the same reason `Array<T>` above is one: a bit vector is
+;; a packed word sequence and a length, and `Vector<i64>` plus the integer
+;; bit operations (§4.4 of `docs/functions.md`) are all that takes.
+;;
+;; **32 bits to a word, not 64.** A compiled function stores a container
+;; element through the tagged representation compiled code passes values in
+;; (`typelisp-abi`'s `encode`: three tag bits in the low end, the integer in
+;; the rest), so an `i64` wider than that payload does not survive the round
+;; trip — `(set v 0 (ash 1 60))` on a `Vector<i64>` reads back as a different
+;; number *when the function holding it is compiled*, which every prelude
+;; method is. That is a bug in its own right and is recorded as one in
+;; `docs/dev/TODO.md`; packing 32 bits a word keeps this type well inside
+;; what the payload carries instead of at its edge, and `(/ i 32)` /
+;; `(mod i 32)` say plainly which word a bit is in.
+;;
+;; The bits past the length in the final word are kept clear
+;; (`bitvector-trim`), so the representation of a given bit vector is unique
+;; and `lognot` cannot leave phantom set bits behind it.
+;;
+;; As with `Array<T>`, creation is `BitVector::make` rather than
+;; `BitVector::new`: `new` is the field-order constructor `defstruct`
+;; generates, and this type's fields are its packed representation.
+;; `bit-vector-p` does not exist — the static type has already answered it.
+
+(pub defstruct BitVector
+  "A fixed-length sequence of bits, packed 32 to an `i64` word."
+  (words Vector<i64>)
+  (nbits i32))
+
+;; CL's `(make-array n :element-type 'bit)`. Every bit starts at 0, which is
+;; what CL's `:initial-element` defaults to for a bit array.
+(pub defmethod make (BitVector (n i32)) BitVector
+  (if (< n 0)
+      (panic (format false "BitVector::make: length ~a is negative" n))
+      (BitVector::new (Vector::filled (/ (+ n 31) 32) (the i64 0)) n)))
+
+(pub defmethod len ((self BitVector)) i32 self::nbits)
+
+;; CL's `bit` / `sbit` and their `setf`s are `get`/`set` here, the way every
+;; other indexed container in this language spells them; the CL names are
+;; kept as aliases below.
+(pub defmethod get ((self BitVector) (i i32)) bool
+  (if (or (< i 0) (>= i self::nbits))
+      (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
+      (logbitp (as i64 (mod i 32)) (get self::words (/ i 32)))))
+
+(pub defmethod set ((self BitVector) (i i32) (b bool)) ()
+  (if (or (< i 0) (>= i self::nbits))
+      (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
+      (let ((w (/ i 32)) (mask (ash (the i64 1) (as i64 (mod i 32)))))
+        (set self::words w
+             (if b
+                 (logior (get self::words w) mask)
+                 (logand (get self::words w) (lognot mask)))))))
+
+(pub defmethod bit ((self BitVector) (i i32)) bool (get self i))
+(pub defmethod set-bit ((self BitVector) (i i32) (b bool)) () (set self i b))
+;; CL's `sbit` differs from `bit` only in requiring a *simple* bit vector,
+;; a distinction this language's single bit-vector type does not have.
+(pub defmethod sbit ((self BitVector) (i i32)) bool (get self i))
+(pub defmethod set-sbit ((self BitVector) (i i32) (b bool)) () (set self i b))
+
+;; Put the words back in canonical form. Two things can put them out of it,
+;; and both have to be undone or two bit vectors holding the same bits stop
+;; being the same value (`equalp` compares the words):
+;;
+;; 1. `lognot` sets all 64 bits of a word, not just the 32 this packing uses.
+;; 2. The last word reaches past the length.
+;;
+;; Every operation that can do either ends here.
+(defconstant (*bitvector-word-mask* i64) 4294967295)
+(defun bitvector-trim ((v BitVector)) ()
+  (let ((n (len v::words)) (i 0))
+    (progn
+      (while (< i n)
+        (progn
+          (set v::words i (logand (get v::words i) *bitvector-word-mask*))
+          (setf i (+ i 1))))
+      (let ((used (mod v::nbits 32)))
+        (if (= used 0)
+            ()
+            (set v::words (- n 1)
+                 (logand (get v::words (- n 1))
+                         (- (ash (the i64 1) (as i64 used)) (the i64 1)))))))))
+
+;; The shared body of CL's `bit-and` family: same length in, a fresh bit
+;; vector out, one word at a time. `who` is only for the length-mismatch
+;; message. CL's optional third argument (write into an existing vector, or
+;; into the first one when it is `t`) is not offered — the caller writes
+;; `(setf a (bit-and a b))`, and the aliasing question never comes up.
+(defun bitvector-zip ((a BitVector) (b BitVector) (who string) (f (fn (i64 i64) i64))) BitVector
+  (if (/= a::nbits b::nbits)
+      (panic (format false "~a: bit vectors differ in length (~a and ~a)" who a::nbits b::nbits))
+      (let ((out (BitVector::make a::nbits)) (i 0) (n (len a::words)))
+        (progn
+          (while (< i n)
+            (progn
+              (set out::words i (f (get a::words i) (get b::words i)))
+              (setf i (+ i 1))))
+          (bitvector-trim out)
+          out))))
+
+(pub defmethod bit-and ((self BitVector) (other BitVector)) BitVector
+  (bitvector-zip self other "bit-and" (lambda ((x i64) (y i64)) i64 (logand x y))))
+(pub defmethod bit-ior ((self BitVector) (other BitVector)) BitVector
+  (bitvector-zip self other "bit-ior" (lambda ((x i64) (y i64)) i64 (logior x y))))
+(pub defmethod bit-xor ((self BitVector) (other BitVector)) BitVector
+  (bitvector-zip self other "bit-xor" (lambda ((x i64) (y i64)) i64 (logxor x y))))
+;; The rest of CL's family. Nothing new is needed for any of them: each is
+;; the same word-wise walk over the integer operation of the same name.
+(pub defmethod bit-eqv ((self BitVector) (other BitVector)) BitVector
+  (bitvector-zip self other "bit-eqv" (lambda ((x i64) (y i64)) i64 (logeqv x y))))
+(pub defmethod bit-nand ((self BitVector) (other BitVector)) BitVector
+  (bitvector-zip self other "bit-nand" (lambda ((x i64) (y i64)) i64 (lognand x y))))
+(pub defmethod bit-nor ((self BitVector) (other BitVector)) BitVector
+  (bitvector-zip self other "bit-nor" (lambda ((x i64) (y i64)) i64 (lognor x y))))
+(pub defmethod bit-andc1 ((self BitVector) (other BitVector)) BitVector
+  (bitvector-zip self other "bit-andc1" (lambda ((x i64) (y i64)) i64 (logandc1 x y))))
+(pub defmethod bit-andc2 ((self BitVector) (other BitVector)) BitVector
+  (bitvector-zip self other "bit-andc2" (lambda ((x i64) (y i64)) i64 (logandc2 x y))))
+(pub defmethod bit-orc1 ((self BitVector) (other BitVector)) BitVector
+  (bitvector-zip self other "bit-orc1" (lambda ((x i64) (y i64)) i64 (logorc1 x y))))
+(pub defmethod bit-orc2 ((self BitVector) (other BitVector)) BitVector
+  (bitvector-zip self other "bit-orc2" (lambda ((x i64) (y i64)) i64 (logorc2 x y))))
+
+(pub defmethod bit-not ((self BitVector)) BitVector
+  (let ((out (BitVector::make self::nbits)) (i 0) (n (len self::words)))
+    (progn
+      (while (< i n)
+        (progn
+          (set out::words i (lognot (get self::words i)))
+          (setf i (+ i 1))))
+      (bitvector-trim out)
+      out)))
+
 
 "##;
 

@@ -8404,3 +8404,154 @@ quote された Sexpr、そして値としての整数リテラル）。
   検証しているもの）は 1 フィールドのままで、変わったのは島に渡る側だけ
 
 `tests/hash_trait_test.rs` 14 本、`compile_test` に 2 本。
+
+---
+
+## CL 残差 Phase 6b/6c — 多次元配列とビットベクタ（2026-08-22、branch `feature/cl-parity`）
+
+計画は [cl-parity-plan.md](cl-parity-plan.md) の Stage 6b / 6c。CLHS 15 の 2 つの型を入れた。
+
+### どちらも prelude の `defstruct`（Rust 側の追加はゼロ）
+
+`Array<T>` は `Vector<i32>`（次元列）と `Vector<T>`（row-major の平坦な格納）と
+`Option<i32>`（fill pointer）を持つ `defstruct`。`BitVector` は `Vector<i64>`（詰めた語）と
+`i32`（長さ）。
+
+Phase 1d の `complex` と同じ判断で、これは節約ではなく**この言語で書ける物を Rust で書かない**
+という方針そのもの（[typelisp-rust-builtin-policy]）。結果として:
+
+- 新しい `Repr` も `rt_*` シムも島の lowering も要らない。
+- 書いた日に JIT/AOT を通る。`PRELUDE_COMPILE_UNSUPPORTED` が空であることを守る番人が
+  すでにあるので、「prelude に書いた物はコンパイルできる」は自動で検査される。
+- `defstruct` にできることが全部できる（`setf` の place、`Iter`、ジェネリック）。
+
+`Vector<T>` を `RtValue::Struct` の流用で入れたときの原則
+（[typelisp-vector-defstruct-revert]）の素直な延長でもある。
+
+### `Array::new` ではなく `Array::make`
+
+`defstruct` は必ずフィールド順のコンストラクタ `Name::new` を生成する。`Array<T>` の
+フィールドは**表現**（次元列・平坦な格納・fill pointer）であって、呼び手が渡したいもの
+（形と初期値）ではない。`new` を「本来のコンストラクタ」の位置に置いたまま、作る側の
+入口を `Array::make` にした。`BitVector::make` も同じ。
+
+計画表には `Array::new` と書いてあったが、これは `defstruct` が `new` を予約していることを
+見落としていた。`:constructor` オプション（Phase 5a）でも `new` は消せない——あれが作るのは
+`new` の*呼び方*であって、`new` そのものは構造上の唯一のコンストラクタのまま。
+
+### `(aref a i j)` — チェッカーの糖衣
+
+`defmethod` は**アリティ**で解決するので、「末尾に同じ型の引数が何個か続く」形は宣言できない。
+そこで `Array<T>` の `get`/`set` は添字を `Vector<i32>` 1 本で取り（`row-major-index` /
+`in-bounds` が欲しい形でもある）、CL の綴りはチェッカーが書き換える:
+
+```lisp
+(aref a i j)
+;; =>
+(let* ((%a a) (%idx (the Vector<i32> (Vector::new))))
+  (progn (push %idx i) (push %idx j) (get %a %idx)))
+```
+
+**展開先を `row-major-get` ではなく `get` にしたのが要点**。計画は
+`(row-major-get a (row-major-index a <添字の Vector>))` と書いていたが、それだと
+`(setf (aref a i j) v)` が既存の呼び出し形 place 機構に乗らない——あの機構は
+`(accessor recv key...)` の `accessor` に対して `set-{accessor}`（と `get` の特例の `set`）を
+探すので、読み書きが同じ `get`/`set` の対になっている必要がある。`get` に展開すると
+書き込み側は同じ展開の末尾を `set` に差し替えるだけで済み、両方が `Array<T>` 自身の
+`get`/`set`——すなわち添字の範囲検査——を通る。
+
+配列を先に `let*` で束縛するのは**評価順**のため。展開後の形では配列は最後（`get` の位置）に
+読まれるので、束縛しないと `(aref (f) (g))` が `g` → `f` の順に評価されてしまう。添字は
+1 回ずつしか現れないので、そちらに一時変数は要らない。
+
+糖衣は名前に対して無条件（2 引数 `atan` と同じ）。ただし失敗したときだけ受け手をもう一度
+検査して、`(aref v 0)`（`Vector<T>`）に「`vector<i32>` は `Array<T>` ではない」と言わせている。
+書き換えた形の型エラーはユーザが書いていない型を名指すので、**同じ失敗についてまともな文を
+出すためだけの再検査**——`aref` に第 2 の意味を与えているわけではない。
+
+### 添字の範囲検査は省けない
+
+`row-major-index` は畳み込む前に `in-bounds` を通す。省くと 2x3 の配列で `(aref a 0 5)` が
+オフセット 5、つまり**別の行の実在するセル**を静かに読む。「間違った答えを返す」のと
+「エラーになる」のは同じコストではない。
+
+### `BitVector` の 1 語が 32bit である理由（既存バグの 3 件目）
+
+最初 1 語 64bit で書いたところ、ビット 62 以上が立たなかった。切り分けの結果:
+
+| 試したこと | 結果 |
+|---|---|
+| `(ash 1 62)` をインタプリタで | 正しい |
+| `(ash 1 62)` をコンパイル済み関数で | 正しい |
+| 幅の広い `i64` をコンパイル済み関数の引数に / 戻り値に | 正しい |
+| **コンパイル済み関数で `Vector<i64>` に入れて読み戻す** | **壊れる** |
+
+コンパイル済みコードはコンテナの要素をタグ付きの語（`typelisp-abi` の `encode`、下位 3bit が
+タグ）で往復させるので、payload に入らない `i64` は往復で上位ビットを失う。prelude の
+メソッドは全部コンパイル済みで走るから、`BitVector` はこれを正面から踏んだ。
+
+**Phase 6a で見つけた整数切り詰めの 3 件目**で、しかも一番範囲が広い——グローバルだけでなく
+`Vector`/`HashTable`/`defstruct` のフィールドでも、±2^60 の外にある `i64` は黙って壊れる。
+再現手順は [TODO.md](TODO.md) に書いた。本筋の直し方（payload に入らない整数を `TAG_BOXED` の
+箱へ逃がす）は島の lowering・`rt_*` シム・GC ルート・等価述語と印字・ダンプの版まで動く
+1 フェーズ分の作業なので、Phase 6c の片手間には入れない。
+
+1 語 32bit は「端に近寄らない」選択。60bit なら payload をぎりぎりまで使えるが、
+タグが 1bit 増えたら黙って壊れる。密度は半分になるが、この型の正しさが表現の内部事情に
+依存しなくなる。
+
+### 長さの先のビットは常に 0
+
+`lognot` は語の 64bit 全部を立てるので、長さの先にビットが残ると同じ長さの 2 本が食い違う。
+`bitvector-trim` を、そこを立てうる操作（`bit-not` と全ての `bit-*` の対）の末尾に置いた。
+テストは「補集合の往復が恒等」「補集合どうしの `bit-and` が全部 1」「語境界を跨いでも
+1 ビットずつ独立に立つ」の 3 本で見ている。
+
+### この 2 つで見つけた小さいこと
+
+- `(if cond (setf x v) ())` は型エラーになる。`setf` は代入した**値**を返すので、腕の型が
+  `bool`/`i32` と `Unit` で食い違う。`(setf ok (and ok cond))` と書くか `progn` で包む。
+- `defmethod` は前方参照できない（`predeclare_program` の対象外）。`Array::make` が
+  `Vector::filled` を呼ぶので、この節は prelude のそれより後に置く必要がある。
+
+テストは `tests/array_test.rs`（37 本）、`tests/bit_vector_test.rs`（18 本）、
+`tests/compile_test.rs` に 5 本。
+
+### 全テストを直列で回して見つかった、前フェーズの取りこぼし 3 件
+
+Phase 6b/6c の回帰を `scripts/test-serial.sh`（97 個のテストバイナリ全部）で回したところ、
+6b/6c とは無関係な赤が 3 件出た。3 件とも**前のフェーズで入れた変更が、そのとき回さなかった
+テストを壊していた**もので、`cargo check` は全部通っていた。
+
+1. **`--lib` の `core_bridge::tests` 28 本** — Phase 6a が `int` ノードを 32bit 2 分割
+   （`(int HI LO)`）にしたのに、ゴールデン文字列が `(int N)` のままだった。6a では
+   `compile_test` 内の手書き島 IR は直したが、`--lib` を回していなかった。
+   `(pat-lit N)` も同じ 2 分割になっているのを見落としていた。
+
+2. **`place_test::setf_get_writes_through_a_hashtable_entry`** — prelude を読まないランナで
+   `HashTable<string,i32>` を使っていた。6a で鍵に `(where (Hash K))` が付き、
+   `Hash` の実装は全部 prelude の `impl` なので、素の `Checker` では型が付かない。
+   prelude を読むランナに移した（Phase 4c で `macro_test`/`check_test` を移したのと同じ形）。
+
+3. **`builtin_fn_value_test` 2 本 — これだけは本物のバグ**。
+   `gensym` は Phase 4c でプレフィクス引数を得て Rust の組み込みから prelude の `defun` に
+   移った。そのため (a) このテストが「自由な*組み込み*を関数値にする」経路をもう通って
+   いなかった、(b) `(call0 gensym)` が**型検査を通ってから実行時にアリティ不一致で落ちた**。
+
+   (b) が言語のバグ。`FnSig::params` は必須引数だけを持ち、`&optional`/`&key` は別のフィールドに
+   ある——名前で呼ぶ呼び出し側は宣言からそれを埋められるからで、`Checker::fn_ref_node` は
+   その `params` だけで `Type::Fn` を作っていた。しかし実行時の関数は**宣言した名前の数だけ
+   引数を取る**。関数値には名前が無く、値を説明するのは `Type::Fn` だけなので、
+   そこに全アリティが出ていないと辻褄が合わない。
+
+   `fn_value_params`（必須 → `&optional` → `&key`、デフォルトの無いものは本体と同じ
+   `Option<T>`）を新設して `fn_ref_node` をそれに合わせた。デフォルトは間接呼び出しでは
+   埋まらない——埋める場所が `Type::Fn` に無いのは `OPT_KEY_NEEDS_A_NAME` が
+   `lambda` について書いているのと同じ理由——ので、呼び手が自分で全部渡す。
+   テストは `tests/optional_key_test.rs` に 4 本。
+
+   テスト側は `gensym` を `string->symbol`（本物の自由な組み込み）に替えて、
+   テストが名乗っている経路を実際に通るようにした。
+
+**教訓**: 「関係しそうなテストを選んで回す」では足りない。`--lib` は 6a のときに回して
+いれば 28 本が即座に赤で出ていた。フェーズの締めは直列の全実行にする。

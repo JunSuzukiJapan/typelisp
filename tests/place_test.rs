@@ -6,7 +6,7 @@
 //! covered elsewhere (`check_test.rs`'s `setf_*` tests, `struct_test.rs`).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Type, Value};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Type, Value};
 
 /// Check every form and return the LAST one's expression type — `None` if that
 /// form was a definition. The type is no longer part of the checked form (see
@@ -41,6 +41,28 @@ fn run(src: &str) -> Result<Value, EvalError> {
 
 fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
+}
+
+/// [`run`], but with the prelude loaded first — for the tests whose place
+/// needs something the prelude defines. A `HashTable<K,V>`'s key methods
+/// carry `(where (Hash K))` since Phase 6a, and every `Hash` implementation
+/// (including `string`'s) is a prelude `impl`, so a bare `Checker` cannot
+/// type-check `(get h "a")` at all.
+fn eval_ok_with_prelude(src: &str) -> Value {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = Value::Empty;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    last
 }
 
 // ---- incf / decf --------------------------------------------------------
@@ -155,7 +177,7 @@ fn setf_get_writes_through_a_hashtable_entry() {
                  (set h \"a\" 1)
                  (setf (get h \"a\") 41)
                  (match (get h \"a\") ((Some x) x) ((None) -1)))";
-    assert_eq!(eval_ok(src), Value::Int(41));
+    assert_eq!(eval_ok_with_prelude(src), Value::Int(41));
 }
 
 #[test]

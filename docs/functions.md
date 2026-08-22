@@ -781,6 +781,54 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
 | `entries` | `(entries h)` | `HashTable<K,V>→Vector<cons-cell<K,V>>` | `(k . v)` ペアのスナップショット |
 | `iter` | `(iter h)` | `HashTable<K,V>→hashtable-iter<K,V>` | `Iter` を実装するカーソル（ライブラリ定義） |
 
+## 11.1 `Array<T>`（多次元配列）
+
+`Vector<T>` 2 本（次元列と row-major の平坦な要素列）の上に書かれた prelude の
+`defstruct`。組み込み型ではないので、`defstruct` にできることは全部できる。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<i32>,T)→Array<T>` | CL `make-array`。`dims` は複製される。`init` が全セルの初期値（CL の `:initial-element`。この言語に「未束縛のセル」は無いので必須）。`:fill-pointer` は 1 次元のときだけ |
+| `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<i32>)→T` | CL `aref` / `(setf (aref …))`。添字が範囲外なら panic |
+| `aref` | `(aref a i j …)` | — | 裸の添字で書く CL の綴り。**チェッカーの糖衣**で上の `get`/`set` に展開される（§4.1 の可変長演算子と同じ手口）。`(setf (aref a i j) v)` も同じ |
+| `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,i32)→T` | CL `row-major-aref`。平坦な添字 |
+| `rank` | `(rank a)` | `Array<T>→i32` | CL `array-rank` |
+| `dimension` | `(dimension a n)` | `(Array<T>,i32)→i32` | CL `array-dimension` |
+| `dimensions` | `(dimensions a)` | `Array<T>→Vector<i32>` | CL `array-dimensions`。CL が新しいリストを返すのと同じく**複製**を返す |
+| `total-size` | `(total-size a)` | `Array<T>→i32` | CL `array-total-size`（fill pointer とは無関係の確保済みセル数） |
+| `len` | `(len a)` | `Array<T>→i32` | CL の配列に対する `length`。fill pointer があればその値、無ければ `total-size` |
+| `in-bounds` | `(in-bounds a idx)` | `(Array<T>,Vector<i32>)→bool` | CL `array-in-bounds-p`。添字の**個数**が違っても偽（エラーではない） |
+| `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<i32>)→i32` | CL `array-row-major-index` |
+| `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<i32>,T)→Unit` | CL `adjust-array`。ランクは変えられない。範囲に残る要素は添字ごと保存、増えたセルは `init`。CL と違い配列を返さない（この言語の配列は全部 adjustable なので、返す第 2 の配列が無い） |
+| `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL `vector-push-extend`。fill pointer が無ければ panic |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL `vector-pop`。空なら `none`（`Vector<T>` の `pop` と同じ） |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<i32>` | fill pointer（無ければ `none`）。`(setf a::fill-pointer …)` で書ける |
+| `iter` | `(iter a)` | `Array<T>→array-iter<T>` | row-major 順のカーソル。fill pointer があればそこで止まる |
+
+- **添字は `Vector<i32>`**。`defmethod` はアリティで解決するので「末尾に同じ型の引数が
+  何個か続く」形を宣言できない。`aref` の糖衣がその差を埋めている。
+- `array-element-type` / `simple-vector-p` / `adjustable-array-p` /
+  `array-has-fill-pointer-p` は**無い**。受け手の静的型が既に答えている問い。
+- `Array::new` は `defstruct` が生成するフィールド順のコンストラクタ（次元列・平坦な格納・
+  fill pointer）で、作るときに使うものではない。`Array::make` を使う。
+
+## 11.2 `BitVector`（ビットベクタ）
+
+固定長のビット列。`Vector<i64>` に **1 語 32bit** で詰めた prelude の `defstruct`
+（64bit にしない理由は [dev/TODO.md](dev/TODO.md) の整数切り詰めの節）。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `make` | `(BitVector::make n)` | `i32→BitVector` | 長さ `n`、全ビット 0 |
+| `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,i32)→bool` | 範囲外は panic |
+| `bit` / `sbit` | `(bit v i)` | `(BitVector,i32)→bool` | CL の綴り。`(setf (bit v i) b)` も書ける。CL の `sbit` は simple なビットベクタを要求する点だけが `bit` と違うが、この言語のビットベクタは 1 種類しかない |
+| `len` | `(len v)` | `BitVector→i32` | ビット数 |
+| `bit-and` `bit-ior` `bit-xor` `bit-eqv` `bit-nand` `bit-nor` `bit-andc1` `bit-andc2` `bit-orc1` `bit-orc2` | `(op a b)` | `(BitVector,BitVector)→BitVector` | 新しいビットベクタを返す。長さが違えば panic。CL の第 3 引数（結果の書き込み先）は無い |
+| `bit-not` | `(bit-not v)` | `BitVector→BitVector` | 補集合 |
+
+`bit-vector-p` は無い（静的型が答えている）。長さの先にあるビットは常に 0 に保たれるので、
+同じ長さの 2 本は必ず同じ表現を持つ。
+
 ## 12. `Iter` トレイトと反復
 
 ```lisp

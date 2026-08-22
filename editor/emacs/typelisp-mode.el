@@ -241,6 +241,16 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; them as.
     "add" "sub" "mul" "div" "remainder"
     "bit-and" "bit-or" "bit-xor" "bit-not"
+    ;; `Array<T>' (Phase 6b).  `aref' is checker sugar rather than a
+    ;; registered name, so it is here for highlighting only.
+    "make" "aref" "rank" "dimension" "dimensions" "total-size"
+    "in-bounds" "row-major-index" "row-major-get" "row-major-set"
+    "adjust" "push-extend" "fill-pointer"
+    ;; `BitVector' (Phase 6c).  `bit-and'/`bit-xor'/`bit-not' are already
+    ;; above as the `Bits' trait's methods.
+    "bit" "sbit" "set-bit" "set-sbit"
+    "bit-ior" "bit-eqv" "bit-nand" "bit-nor"
+    "bit-andc1" "bit-andc2" "bit-orc1" "bit-orc2"
     ;; pretty-printer helpers callable inside `pprint-logical-block' (§15.1)
     "pprint-newline" "pprint-indent" "pprint-tab" "pprint-pop"
     "pprint-exit-if-list-exhausted" "pprint-list-exhausted"
@@ -300,9 +310,12 @@ stream (CLHS 12.1.6).")
     ;; as `:dyn Error'.
     "ParseIntError" "ParseFloatError" "ReadError" "EvalError"
     ;; builtin generic pair & iterator types (lowercase)
-    "cons-cell" "vector-iter" "hashtable-iter"
+    "cons-cell" "vector-iter" "hashtable-iter" "array-iter"
     ;; complex numbers (Phase 1d) -- a prelude `defstruct', not a builtin
     "complex"
+    ;; the multi-dimensional array and the bit vector (Phase 6b/6c) -- prelude
+    ;; `defstruct's over `Vector', not builtins
+    "Array" "BitVector"
     ;; the struct `decode-universal-time' answers with, standing in for CL's
     ;; nine return values
     "decoded-time"

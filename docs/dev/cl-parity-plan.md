@@ -730,6 +730,16 @@ Stage 5c の `Namespace::type_aliases` も Stage 5a の `Registry::struct_defaul
 
 地図 §3-2 の「`lambda` と `defmethod` は `&rest` のみ」という記述もここで直した。
 
+**関数値としての参照（2026-08-22 追記）。** 名前で呼ばない側——`(call2 greet)` のように
+`defun` を値として渡す形——に穴があった。`FnSig::params` は必須引数しか持たないので
+`Checker::fn_ref_node` の作る `Type::Fn` が必須アリティになり、**型検査を通ってから実行時に
+アリティ不一致で落ちていた**（実行時の関数は宣言した名前の数だけ引数を取る）。
+`fn_value_params`（必須 → `&optional` → `&key`、デフォルトの無いものは本体と同じ
+`Option<T>`）を新設して直した。デフォルトは間接呼び出しでは埋まらない——埋める場所が
+`Type::Fn` に無いのは上と同じ理由——ので、関数値の呼び手は全引数を自分で渡す。
+Phase 4c で `gensym` が `&optional` を得たときに踏んでいたが、その 2 本のテストを
+回していなかったので Phase 6c の直列全実行まで見つからなかった。
+
 ### Stage 5c — `deftype`
 
 状態: 完了（2026-08-21）。読み通り、checker の型解決にエイリアス表を足すだけで済んだ。
@@ -823,34 +833,62 @@ prelude のトレイトに依存する（島は `HashTable` の値を持たず `
 壊れるもので、渡し方ではなくコンパイル済みコードから見たグローバルの表現の問題なので
 未修正。
 
-### Stage 6b — 多次元配列 `Array<T>`
+### Stage 6b — 多次元配列 `Array<T>`（完了 2026-08-22）
 
-`Vector<T>` と同じく `RtValue::Struct` を流用（専用の `RtValue` バリアントは作らない
-——[[typelisp-vector-defstruct-revert]] の原則）。次元列と平坦な要素列を持つ。
+`Vector<T>` 2 本（次元列と平坦な要素列）の上の **prelude の `defstruct`** として入れた。
+Rust 側の追加はゼロ——新しい `Repr` も `rt_*` シムも島の lowering も要らず、書いた日に
+JIT/AOT を通る。1d の `complex` と同じ判断（[[typelisp-vector-defstruct-revert]] の原則）。
 
-| 一次 API（Rust 風） | CL 名 | 備考 |
-|---|---|---|
-| `(Array::new dims init)` | `make-array` | `dims` は `Vector<i32>`。`Vector::new` と同じ静的メソッド形 |
-| `(get a idx)` / `(set a idx x)` | `aref` / `(setf (aref …))` | `idx` は `Vector<i32>`。`Vector<T>` の `get`/`set` と同名・同形 |
-| `(row-major-get a i)` / `(row-major-set a i x)` | `row-major-aref` | 平坦添字 |
-| `(rank a)` `(dimension a n)` `(dimensions a)` `(total-size a)` | `array-rank` / `array-dimension` / `array-dimensions` / `array-total-size` | 型名を関数名に埋めない |
-| `(in-bounds a idx)` `(row-major-index a idx)` | `array-in-bounds-p` / `array-row-major-index` | |
-| `(adjust a dims)` `(push-extend a x)` `(pop a)` `(fill-pointer a)` | `adjust-array` / `vector-push-extend` / `vector-pop` / `fill-pointer` | |
-| `(iter a)` | — | `Iter` を実装すれば `map`/`filter`/`doiter` がそのまま効く |
+| 実装した API | CL 名 |
+|---|---|
+| `(Array::make dims init &key fill-pointer)` | `make-array` |
+| `(get a idx)` / `(set a idx x)`（`idx` は `Vector<i32>`） | `aref` / `(setf (aref …))` |
+| `(aref a i j …)` / `(setf (aref a i j) v)` | 同上（checker の糖衣） |
+| `(row-major-get a i)` / `(row-major-set a i x)` | `row-major-aref` |
+| `(rank a)` `(dimension a n)` `(dimensions a)` `(total-size a)` | `array-rank` / `array-dimension` / `array-dimensions` / `array-total-size` |
+| `(in-bounds a idx)` `(row-major-index a idx)` | `array-in-bounds-p` / `array-row-major-index` |
+| `(adjust a dims init)` `(push-extend a x)` `(pop a)` `fill-pointer` | `adjust-array` / `vector-push-extend` / `vector-pop` / `fill-pointer` |
+| `(iter a)` | — |
 
-`(aref a i j k)` のような**可変個の裸添字**は `defmethod` がアリティで解決しないので、
-**checker の糖衣**で `(row-major-get a (row-major-index a <添字の Vector>))` へ展開する
-（`check_variadic_arith` checker.rs:9260 と同じ手法）。`(setf (aref a i j) v)` は既存の
-呼び出し形 place 機構（`check_setf_call_place` checker.rs:9031。`get`→`set` の特例）に乗る。
+計画から変わった点:
 
-`array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p` は
-受け手の静的型が既に答えている問い（(D1)）なので対象外——対応表にその旨を書く。
-`svref` / `array-displacement` は実装可否を実施時に判断する。
+- **生成は `Array::new` ではなく `Array::make`**。`new` は `defstruct` が必ず生成する
+  フィールド順のコンストラクタで、この型のフィールドは*表現*（次元列・平坦な格納・
+  fill pointer）であって呼び手が渡したいものではない。`BitVector` も同じ理由で `make`。
+- **`(aref a i j)` の展開先は `row-major-get` ではなく `get`**。`(setf (aref a i j) v)` を
+  既存の呼び出し形 place 機構（`get`→`set` の特例）にそのまま乗せるため、両方が
+  `Array<T>` 自身の `get`/`set` を通る。展開は
+  `(let* ((%a a) (%idx (the Vector<i32> (Vector::new)))) (progn (push %idx i) (push %idx j) (get %a %idx)))`
+  で、配列を先に束縛するのは*書いた順*（配列→添字）に評価させるため。
+- **添字が範囲外なら実行時エラー**。検査を省くと 2x3 の `(aref a 0 5)` が「別の行の実在する
+  セル」を静かに読む。`row-major-index` が `in-bounds` を通してから畳む。
+- `array-element-type` / `simple-vector-p` / `adjustable-array-p` /
+  `array-has-fill-pointer-p` は予定どおり対象外（(D1)。静的型が既に答えている）。
+  `svref` / `array-displacement` も入れていない——前者は `Vector<T>` の `get` がその物、
+  後者は「別の配列の記憶域を共有する」という、この言語に持ち込む理由の無い概念。
+- `adjust` は CL と違って**配列を返さず `()`**。CL が返すのは、非 adjustable な配列だと
+  *別の配列*が返りうるからで、ここでは全部 adjustable なので返す第 2 の配列が無い。
 
-### Stage 6c — ビットベクタ `BitVector`
+テストは `tests/array_test.rs`（37 本）と `tests/compile_test.rs` の 3 本。
 
-生成は `(BitVector::new n)`、操作は `get` / `set` / `len` / `bit-and` / `bit-ior` / `bit-xor` /
-`bit-not` を受け手優先の `defmethod` で。CL の `bit` / `sbit` は薄い別名、`bit-vector-p` は (D1)。
+### Stage 6c — ビットベクタ `BitVector`（完了 2026-08-22）
+
+`Vector<i64>` に詰めた語＋長さの prelude `defstruct`。`BitVector::make` / `get` / `set` /
+`len` / `bit` / `sbit`（と `setf` 版）/ `bit-and` / `bit-ior` / `bit-xor` / `bit-not`、
+および CL の残り 7 種（`bit-eqv` / `bit-nand` / `bit-nor` / `bit-andc1` / `bit-andc2` /
+`bit-orc1` / `bit-orc2`）。`bit-vector-p` は予定どおり (D1)。
+
+**1 語は 64bit ではなく 32bit**。コンパイル済みコードはコンテナの要素をタグ付きの語
+（`typelisp-abi` の `encode`、下位 3bit がタグ）で往復させるので、payload に入らない
+`i64` は往復で壊れる——prelude のメソッドは全部コンパイル済みで走るから、64bit で詰めると
+上位 3 ビットが黙って消える。これは `BitVector` の問題ではなく既存のバグで、
+Phase 6a で見つけた整数切り詰めの 3 件目として [TODO.md](TODO.md) に再現手順つきで
+記録した。直し方（payload に入らない整数を `TAG_BOXED` の箱へ逃がす）は 1 フェーズ分の
+作業なので、ここでは端に近寄らない語幅を選んである。
+
+長さの先にあるビットは常に 0 に保つ（`bitvector-trim`）。そうしないと `lognot` が
+幽霊ビットを残し、同じ長さの 2 本が食い違う。テストは `tests/bit_vector_test.rs`（18 本）と
+`tests/compile_test.rs` の 2 本。
 
 ---
 

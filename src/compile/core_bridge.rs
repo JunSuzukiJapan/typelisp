@@ -2365,8 +2365,8 @@ mod tests {
 
     #[test]
     fn the_word_sized_literals_pass_through_unchanged() {
-        assert_eq!(bridged("(int 42)"), "(int 42)");
-        assert_eq!(bridged("(int -7)"), "(int -7)");
+        assert_eq!(bridged("(int 42)"), "(int 0 42)");
+        assert_eq!(bridged("(int -7)"), "(int 4294967295 4294967289)");
         assert_eq!(bridged("(bool true)"), "(bool true)");
         assert_eq!(bridged(r"(char #\a)"), r"(char #\a)");
         assert_eq!(bridged("(unit)"), "(unit)");
@@ -2388,7 +2388,7 @@ mod tests {
 
     #[test]
     fn a_string_becomes_one_node_per_character() {
-        assert_eq!(bridged(r#"(str "hi")"#), "(str (int 104) (int 105))");
+        assert_eq!(bridged(r#"(str "hi")"#), "(str (int 0 104) (int 0 105))");
         assert_eq!(bridged(r#"(str "")"#), "(str)");
     }
 
@@ -2400,9 +2400,9 @@ mod tests {
     /// Its digits are `0, 0, 1`, which also shows the ordering.
     #[test]
     fn a_bignum_becomes_its_sign_and_digits() {
-        assert_eq!(bridged("(bignum 18446744073709551616)"), "(bignum (int 1) (int 0) (int 0) (int 1))");
-        assert_eq!(bridged("(bignum -18446744073709551616)"), "(bignum (int -1) (int 0) (int 0) (int 1))");
-        assert_eq!(bridged("(ratio 1/3)"), "(ratio (bignum (int 1) (int 1)) (bignum (int 1) (int 3)))");
+        assert_eq!(bridged("(bignum 18446744073709551616)"), "(bignum (int 0 1) (int 0 0) (int 0 0) (int 0 1))");
+        assert_eq!(bridged("(bignum -18446744073709551616)"), "(bignum (int 4294967295 4294967295) (int 0 0) (int 0 0) (int 0 1))");
+        assert_eq!(bridged("(ratio 1/3)"), "(ratio (bignum (int 0 1) (int 0 1)) (bignum (int 0 1) (int 0 3)))");
     }
 
     #[test]
@@ -2416,24 +2416,24 @@ mod tests {
     fn a_let_carries_each_bindings_kind() {
         assert_eq!(
             bridged("(let ((x int (int 1))) (var x))"),
-            r#"(let (((x . 0) int 1)) (var "x" false))"#
+            r#"(let (((x . 0) int 0 1)) (var "x" false))"#
         );
         // A `sexpr` binding is the one that needs a GC root, hence kind 2.
         assert_eq!(
             bridged(r#"(let ((s sexpr (str "a"))) (var s))"#),
-            r#"(let (((s . 2) str (int 97))) (var "s" false))"#
+            r#"(let (((s . 2) str (int 0 97))) (var "s" false))"#
         );
         // `progn` is a `let` with no bindings, on both sides.
-        assert_eq!(bridged("(let () (int 1) (int 2))"), "(let () (int 1) (int 2))");
+        assert_eq!(bridged("(let () (int 1) (int 2))"), "(let () (int 0 1) (int 0 2))");
     }
 
     #[test]
     fn if_and_panic_keep_their_shape() {
         assert_eq!(
             bridged("(if (bool true) (int 1) (int 2))"),
-            "(if false (bool true) (int 1) (int 2))"
+            "(if false (bool true) (int 0 1) (int 0 2))"
         );
-        assert_eq!(bridged(r#"(panic (str "boom"))"#), "(panic (str (int 98) (int 111) (int 111) (int 109)))");
+        assert_eq!(bridged(r#"(panic (str "boom"))"#), "(panic (str (int 0 98) (int 0 111) (int 0 111) (int 0 109)))");
     }
 
     /// Each argument becomes `(kind . form)`, and the kind is the argument's
@@ -2443,7 +2443,7 @@ mod tests {
     fn a_call_tags_every_argument_with_its_kind() {
         assert_eq!(
             bridged("(call (f) () f (int sexpr) (int 1) (int 2))"),
-            r#"(call "tl_f" (0 int 1) (2 int 2))"#
+            r#"(call "tl_f" (0 int 0 1) (2 int 0 2))"#
         );
         assert_eq!(bridged("(call (f) () f ())"), r#"(call "tl_f")"#);
         // A module-qualified callee mangles by its full path, so `m::inc` and
@@ -2483,7 +2483,7 @@ mod tests {
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
             bridged("(assoc vector get true () int ((vector int) int) (var v) (int 0))"),
-            r#"(vector-op "get" 1 (var "v" false) (int 0))"#
+            r#"(vector-op "get" 1 (var "v" false) (int 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
         assert_eq!(
@@ -2494,7 +2494,7 @@ mod tests {
         // says it is a vector at all.
         assert_eq!(
             bridged("(assoc vector new false () (vector int) ())"),
-            r#"(vector-op "new" 0 (str (int 118) (int 101) (int 99) (int 116) (int 111) (int 114)))"#
+            r#"(vector-op "new" 0 (str (int 0 118) (int 0 101) (int 0 99) (int 0 116) (int 0 111) (int 0 114)))"#
         );
     }
 
@@ -2508,7 +2508,7 @@ mod tests {
         // the type-name literal for.
         assert_eq!(
             bridged("(assoc hashtable get true () enum ((hashtable str int) str) (var h) (var k))"),
-            r#"(hashtable-op "get" 6 1 (str (int 111) (int 112) (int 116) (int 105) (int 111) (int 110)) (var "h" false) (var "k" false))"#
+            r#"(hashtable-op "get" 6 1 (str (int 0 111) (int 0 112) (int 0 116) (int 0 105) (int 0 111) (int 0 110)) (var "h" false) (var "k" false))"#
         );
     }
 
@@ -2521,7 +2521,7 @@ mod tests {
         assert_eq!(
             printed,
             format!(
-                r#"(llvm-op {} (0 var "b" false) (0 int 42))"#,
+                r#"(llvm-op {} (0 var "b" false) (0 int 0 42))"#,
                 llvm_op_id("llvm-builder", "const-i64")
             )
         );
@@ -2550,17 +2550,17 @@ mod tests {
     fn a_construct_tags_its_fields_from_its_own_representations() {
         assert_eq!(
             bridged_with(&DEFS, "(construct point 0 true (int int) (int 1) (int 2))"),
-            r#"(construct false true (str (int 112) (int 111) (int 105) (int 110) (int 116)) 0 (1 int 1) (1 int 2))"#
+            r#"(construct false true (str (int 0 112) (int 0 111) (int 0 105) (int 0 110) (int 0 116)) 0 (1 int 0 1) (1 int 0 2))"#
         );
         // An enum field of `sexpr` is already tagged, hence the passthrough
         // kind 6.
         assert_eq!(
             bridged_with(&DEFS, "(construct option 1 false (sexpr) (var x))"),
-            r#"(construct false false (str (int 111) (int 112) (int 116) (int 105) (int 111) (int 110)) 1 (6 var "x" false))"#
+            r#"(construct false false (str (int 0 111) (int 0 112) (int 0 116) (int 0 105) (int 0 111) (int 0 110)) 1 (6 var "x" false))"#
         );
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
-        assert_eq!(bridged_with(&DEFS, "(construct sexpr 7 false (sexpr sexpr) (int 1) (int 2))"), "(construct true false () 7 (int 1) (int 2))");
+        assert_eq!(bridged_with(&DEFS, "(construct sexpr 7 false (sexpr sexpr) (int 1) (int 2))"), "(construct true false () 7 (int 0 1) (int 0 2))");
     }
 
     /// A construct needs no definition on hand at all: the `MUTABLE` flag says
@@ -2569,7 +2569,7 @@ mod tests {
     fn a_construct_needs_no_definition_recorded() {
         assert_eq!(
             bridged_with(&[], "(construct point 0 true (int int) (int 1) (int 2))"),
-            r#"(construct false true (str (int 112) (int 111) (int 105) (int 110) (int 116)) 0 (1 int 1) (1 int 2))"#
+            r#"(construct false true (str (int 0 112) (int 0 111) (int 0 105) (int 0 110) (int 0 116)) 0 (1 int 0 1) (1 int 0 2))"#
         );
     }
 
@@ -2602,7 +2602,7 @@ mod tests {
         assert_eq!(bridged("(field-get (var p) 2 sexpr)"), r#"(field-get (false false) 6 (var "p" false))"#);
         assert_eq!(
             bridged("(field-set (var p) 1 int (int 5))"),
-            r#"(field-set (false) 1 (var "p" false) (int 5))"#
+            r#"(field-set (false) 1 (var "p" false) (int 0 5))"#
         );
     }
 
@@ -2615,7 +2615,7 @@ mod tests {
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
             bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option 0 false ()) (int 0)) ((pat-ctor option 1 false (sexpr) (pat-bind x)) (var x)))"),
-            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int 0) ((pat-ctor 1 ((pat-bind "x")) 1 (6) false ()) var "x" false)) 1)"#
+            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int 0 0) ((pat-ctor 1 ((pat-bind "x")) 1 (6) false ()) var "x" false)) 1)"#
         );
         // A struct scrutinee: kind 2, and the field kinds come from the
         // `defstruct`.
@@ -2632,7 +2632,7 @@ mod tests {
     fn a_multi_form_arm_body_becomes_a_progn() {
         assert_eq!(
             bridged_with(&DEFS, "(match (var v) sexpr ((pat-wild) (int 1) (int 2)))"),
-            r#"(match false (var "v" false) (((pat-wild) let () (int 1) (int 2))) 0)"#
+            r#"(match false (var "v" false) (((pat-wild) let () (int 0 1) (int 0 2))) 0)"#
         );
     }
 
@@ -2645,9 +2645,9 @@ mod tests {
             &DEFS,
             r"(match (var v) sexpr ((pat-lit (int 7)) (int 1)) ((pat-lit (bool true)) (int 2)) ((pat-lit (char #\A)) (int 3)))",
         );
-        assert!(printed.contains("(pat-lit 7)"), "{}", printed);
-        assert!(printed.contains("(pat-lit 1)"), "{}", printed);
-        assert!(printed.contains("(pat-lit 65)"), "{}", printed);
+        assert!(printed.contains("(pat-lit 0 7)"), "{}", printed);
+        assert!(printed.contains("(pat-lit 0 1)"), "{}", printed);
+        assert!(printed.contains("(pat-lit 0 65)"), "{}", printed);
     }
 
     /// A downcast pattern carries the type name it has to test at run time;
@@ -2658,10 +2658,10 @@ mod tests {
         let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point 0 false (int int) (pat-wild) (pat-wild)) (int 1)))");
         assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (1 1) false ())"), "{}", plain);
         let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point 0 true (int int) (pat-wild) (pat-wild)) (int 1)))");
-        assert!(down.contains("true (str (int 112)"), "{}", down);
+        assert!(down.contains("true (str (int 0 112)"), "{}", down);
         // A whole-value type test always tests, so it always carries one.
         let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest point (pat-bind p)) (var p)))");
-        assert!(tt.contains(r#"(pat-typetest (str (int 112) (int 111) (int 105) (int 110) (int 116)) (pat-bind "p"))"#), "{}", tt);
+        assert!(tt.contains(r#"(pat-typetest (str (int 0 112) (int 0 111) (int 0 105) (int 0 110) (int 0 116)) (pat-bind "p"))"#), "{}", tt);
     }
 
     /// A scalar scrutinee is refused, exactly as the old bridge refused it:
@@ -2682,12 +2682,12 @@ mod tests {
     fn set_takes_its_kind_from_the_binding_it_targets() {
         assert_eq!(
             bridged("(let ((x int (int 1))) (set x (int 2)))"),
-            r#"(let (((x . 0) int 1)) (set "x" 0 (int 2)))"#
+            r#"(let (((x . 0) int 0 1)) (set "x" 0 (int 0 2)))"#
         );
         // A `sexpr` binding is the one with a GC root to keep in step.
         assert_eq!(
             bridged(r#"(let ((s sexpr (str "a"))) (set s (str "b")))"#),
-            r#"(let (((s . 2) str (int 97))) (set "s" 2 (str (int 98))))"#
+            r#"(let (((s . 2) str (int 0 97))) (set "s" 2 (str (int 0 98))))"#
         );
         // An inner binding shadows an outer one of a different kind.
         let shadowed = bridged(r#"(let ((x sexpr (str "a"))) (let ((x int (int 1))) (set x (int 2))))"#);
@@ -2706,7 +2706,7 @@ mod tests {
     fn a_loop_keeps_its_body_untagged() {
         assert_eq!(
             bridged("(loop (int 1) (break))"),
-            "(loop (int 1) (break))"
+            "(loop (int 0 1) (break))"
         );
         assert_eq!(bridged("(break)"), "(break)");
     }
@@ -2715,7 +2715,7 @@ mod tests {
     /// shape to compile rather than two.
     #[test]
     fn return_always_carries_a_value() {
-        assert_eq!(bridged("(return (int 3))"), "(return false (int 3))");
+        assert_eq!(bridged("(return (int 3))"), "(return false (int 0 3))");
         assert_eq!(bridged("(return)"), "(return false (unit))");
     }
 
@@ -2727,7 +2727,7 @@ mod tests {
         assert_eq!(bridged("(global (total) (m) m::total sexpr)"), "(global 7 6)");
         assert_eq!(
             bridged("(set-global (counter) () counter int (int 5))"),
-            "(set-global 3 1 (int 5))"
+            "(set-global 3 1 (int 0 5))"
         );
     }
 
@@ -2764,7 +2764,7 @@ mod tests {
         let printed = bridged("(let ((n int (int 1))) (lambda () int (var n)))");
         // The binding itself gains the island's `10 +` cell marker over the
         // int field classification.
-        assert!(printed.starts_with("(let (((n . 11) int 1))"), "the binder should create the cell: {}", printed);
+        assert!(printed.starts_with("(let (((n . 11) int 0 1))"), "the binder should create the cell: {}", printed);
         // The capture is a cell in the closure that receives it...
         assert!(printed.contains("((n . 11))"), "{}", printed);
         // ...and the reference reads through it.
@@ -2776,7 +2776,7 @@ mod tests {
     #[test]
     fn an_uncaptured_binding_stays_a_plain_slot() {
         let printed = bridged("(let ((n int (int 1))) (lambda ((m int)) int (var m)))");
-        assert!(printed.starts_with("(let (((n . 0)) int 1))") || printed.contains("(n . 0)"), "{}", printed);
+        assert!(printed.starts_with("(let (((n . 0)) int 0 1))") || printed.contains("(n . 0)"), "{}", printed);
         assert!(!printed.contains("cellvar"), "nothing is captured here: {}", printed);
     }
 
@@ -2785,7 +2785,7 @@ mod tests {
     #[test]
     fn assigning_a_captured_binding_writes_through_the_cell() {
         let printed = bridged("(let ((n int (int 1))) (lambda () unit (set n (int 2))))");
-        assert!(printed.contains(r#"(cellset "n" 1 (int 2))"#), "{}", printed);
+        assert!(printed.contains(r#"(cellset "n" 1 (int 0 2))"#), "{}", printed);
     }
 
     /// `labels` siblings are callable directly, through the function
@@ -2795,7 +2795,7 @@ mod tests {
     fn labels_siblings_are_called_directly() {
         let printed =
             bridged("(labels ((go ((i int)) int (var i))) (apply (var go) int (int) (int 1)))");
-        assert_eq!(printed, r#"(labels () (("go" ((i . 0)) (var "i" false))) (apply "go" (0 int 1)))"#);
+        assert_eq!(printed, r#"(labels () (("go" ((i . 0)) (var "i" false))) (apply "go" (0 int 0 1)))"#);
     }
 
     /// A `labels` block captures what its defs refer to from outside, and
@@ -2814,7 +2814,7 @@ mod tests {
     fn an_unknown_callee_is_dispatched_indirectly() {
         assert_eq!(
             bridged("(let ((f fn (var g))) (apply (var f) int (int) (int 1)))"),
-            r#"(let (((f . 2) var "g" false)) (apply-indirect (var "f" false) (0 int 1)))"#
+            r#"(let (((f . 2) var "g" false)) (apply-indirect (var "f" false) (0 int 0 1)))"#
         );
     }
 
@@ -2825,7 +2825,7 @@ mod tests {
     fn an_immediately_invoked_lambda_becomes_a_labels_block() {
         let printed = bridged("(apply (lambda ((x int)) int (var x)) int (int) (int 2))");
         assert!(printed.starts_with("(labels () ((\"__lambda$"), "{}", printed);
-        assert!(printed.ends_with(r#"((x . 0)) (var "x" false))) (apply "__lambda$0" (0 int 2)))"#)
+        assert!(printed.ends_with(r#"((x . 0)) (var "x" false))) (apply "__lambda$0" (0 int 0 2)))"#)
             || printed.contains(r#"((x . 0)) (var "x" false)))"#), "{}", printed);
         assert!(!printed.contains("apply-indirect"), "it does not escape: {}", printed);
     }
@@ -2863,21 +2863,21 @@ mod tests {
     #[test]
     fn a_quoted_datum_becomes_the_nodes_that_rebuild_it() {
         assert_eq!(bridged("(quote ())"), "(construct true false () 0)");
-        assert_eq!(bridged("(quote 7)"), "(construct true false () 1 (int 7))");
+        assert_eq!(bridged("(quote 7)"), "(construct true false () 1 (int 0 7))");
         assert_eq!(bridged("(quote true)"), "(construct true false () 4 (bool true))");
         assert_eq!(bridged(r"(quote #\a)"), r"(construct true false () 3 (char #\a))");
         assert_eq!(
             bridged(r#"(quote "hi")"#),
-            "(construct true false () 6 (str (int 104) (int 105)))"
+            "(construct true false () 6 (str (int 0 104) (int 0 105)))"
         );
         // A symbol is interned at run time rather than stored, hence a marker
         // past the variant numbering.
-        assert_eq!(bridged("(quote foo)"), "(construct true false () 100 (str (int 102) (int 111) (int 111)))");
+        assert_eq!(bridged("(quote foo)"), "(construct true false () 100 (str (int 0 102) (int 0 111) (int 0 111)))");
         assert_eq!(bridged("(sym foo)"), bridged("(quote foo)"));
         // A path's segments each become a string, interned back at run time.
         assert_eq!(
             bridged("(quote m::x)"),
-            "(construct true false () 101 (str (int 109)) (str (int 120)))"
+            "(construct true false () 101 (str (int 0 109)) (str (int 0 120)))"
         );
     }
 
@@ -2887,8 +2887,8 @@ mod tests {
     fn a_quoted_list_is_built_cons_by_cons() {
         assert_eq!(
             bridged("(quote (1 2))"),
-            "(construct true false () 7 (construct true false () 1 (int 1)) \
-(construct true false () 7 (construct true false () 1 (int 2)) (construct true false () 0)))"
+            "(construct true false () 7 (construct true false () 1 (int 0 1)) \
+(construct true false () 7 (construct true false () 1 (int 0 2)) (construct true false () 0)))"
         );
     }
 
@@ -2981,7 +2981,7 @@ mod tests {
     #[test]
     fn a_multi_form_body_collapses() {
         let (_, _, body) = top_level(&[], "(defun f () unit false (int 1) (unit))").expect("compiled");
-        assert_eq!(body, "(let () (int 1) (unit))");
+        assert_eq!(body, "(let () (int 0 1) (unit))");
     }
 
     /// The cell set is derived from the body rather than asked for, since
@@ -3007,8 +3007,8 @@ mod tests {
             "(defmacro m::when (c body) true (1 () ()) false (quote ()))",
             "(use m::helper other::helper)",
             r#"(load "lib.typl")"#,
-            "(expr (int 42))",
-            "(module m (expr (int 1)))",
+            "(expr (int 0 42))",
+            "(module m (expr (int 0 1)))",
         ] {
             assert!(top_level(&[], src).is_none(), "{} should not be compiled as a function", src);
         }
@@ -3042,7 +3042,7 @@ mod tests {
                 &["(module m (defstruct m::point (int sexpr)))"],
                 "(construct m::point 0 true (int sexpr) (int 1) (quote ()))"
             )
-            .contains("(1 int 1)"),
+            .contains("(1 int 0 1)"),
             true
         );
     }

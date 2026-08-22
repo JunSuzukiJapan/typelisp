@@ -2835,15 +2835,21 @@ impl Checker {
     /// `FnRef` that could never be applied anyway).
     fn fn_ref_node(&self, heap: &mut Heap, written: Vec<String>, fq: Path, expected: Option<&Type>) -> Result<Checked, Error> {
         let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
-        let tmpl_ty = Type::Fn(sig.params.clone(), sig.rest.clone().map(Box::new), Box::new(sig.ret.clone()));
+        let tmpl_ty = fn_value_type(&sig);
         let home = self.ns.clone();
         // The referenced function's own parameter types, which the bridge
-        // needs to build a closure with no call site to read them from. A
-        // `&rest` parameter is the last entry, as a `sexpr`.
+        // needs to build a closure with no call site to read them from —
+        // every one the runtime function really takes, in declared order.
+        // A `&rest` parameter is a `sexpr` entry in the list (it has no slot
+        // of its own there the way `Type::Fn` gives it one).
         let ref_params = |sig: &FnSig| {
-            let mut ps = sig.params.clone();
+            let mut ps = fn_value_params(sig);
             if sig.rest.is_some() {
-                ps.push(sexpr_ty());
+                // Between the `&optional`s and the `&key`s, which is where
+                // `Self::check_defun` puts it. The two cannot both appear
+                // (the language refuses `&key` beside `&optional`/`&rest`),
+                // so this only ever lands at the end of one of them.
+                ps.insert(sig.params.len() + sig.optionals.len(), sexpr_ty());
             }
             ps
         };
@@ -8746,6 +8752,8 @@ impl Checker {
             self.check_variadic_arith(heap, interp, env, &head, args, expected)
         } else if args.len() > 2 && matches!(head.as_str(), "<" | "<=" | ">" | ">=" | "=" | "/=") {
             self.check_variadic_cmp(heap, interp, env, &head, args)
+        } else if head == "aref" && !args.is_empty() {
+            self.check_aref(heap, interp, env, args[0], &args[1..], None, expected)
         } else if head == "log" && args.len() == 2 {
             self.check_log_with_base(heap, interp, env, args, expected)
         } else if head == "atan" && args.len() == 2 {
@@ -10380,6 +10388,16 @@ impl Checker {
             return Err(Error::TypeError("setf: place's head must be a function name".into()));
         };
         let accessor = heap.symbol_name(head_id).to_string();
+        // `(setf (aref a i j) v)`: variadic bare subscripts, which no
+        // `set-...` method can take. Rewritten into `Array<T>`'s own
+        // `Vector<i32>`-subscript `set` by the same expansion the reading
+        // form uses — see `Self::check_aref`.
+        if accessor == "aref" {
+            let Some((recv_form, subs)) = rest.split_first() else {
+                return Err(Error::TypeError("setf: `(aref ...)` place needs an array".into()));
+            };
+            return self.check_aref(heap, interp, env, *recv_form, subs, Some(value), None);
+        }
         let Some((recv_form, key_args)) = rest.split_first() else {
             return Err(Error::TypeError(format!("setf: `({} ...)` place needs a receiver argument", accessor)));
         };
@@ -10582,6 +10600,107 @@ impl Checker {
         let result = self.check(heap, interp, env, expansion, None);
         heap.pop_root();
         result
+    }
+
+    /// CL's `(aref a i j k ...)`: bare subscripts, however many the array's
+    /// rank calls for. A `defmethod` cannot express that — it resolves by
+    /// arity, never by a trailing run of same-typed arguments — so
+    /// `Array<T>`'s own indexing takes the subscripts as one `Vector<i32>`
+    /// (the shape `row-major-index`/`in-bounds` want anyway) and `aref` is
+    /// rewritten into it here:
+    ///
+    /// ```text
+    /// (aref a i j)  =>  (let* ((%a a) (%idx (the Vector<i32> (Vector::new))))
+    ///                     (progn (push %idx i) (push %idx j) (get %a %idx)))
+    /// ```
+    ///
+    /// The array is bound first so it is evaluated before the subscripts,
+    /// the order it is written in — in the rewritten form it is otherwise
+    /// read last, at the `get`. The subscripts appear once each and stay in
+    /// place, so nothing else needs a temporary.
+    ///
+    /// `(setf (aref a i j) v)` is the same rewrite ending in `set` rather
+    /// than `get` — see `Self::check_setf_call_place`, which reaches this
+    /// through `Self::aref_expansion`'s `value` argument. Both spellings
+    /// therefore go through `Array<T>`'s ordinary `get`/`set`, which is
+    /// where the subscripts are range-checked.
+    ///
+    /// Unconditional sugar on the *name*, like two-argument `atan` above: a
+    /// user-written `aref` of their own is shadowed by it. It has exactly
+    /// one meaning — `Array<T>` indexing — and never inspects the receiver
+    /// to choose a second one; a `Vector<T>`, `string` or `HashTable<K,V>`
+    /// is indexed with `get`/`set` directly, and asking `aref` for one is an
+    /// error. The receiver's type *is* read on the failure path, but only to
+    /// write a better sentence about that error (see below).
+    fn check_aref(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        recv: Value,
+        subs: &[Value],
+        value: Option<Value>,
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        let expansion = self.aref_expansion(heap, recv, subs, value)?;
+        heap.push_root(expansion);
+        let result = self.check(heap, interp, env, expansion, expected);
+        heap.pop_root();
+        let Err(err) = result else { return result };
+        // The rewritten form is not what the user wrote, so a type error
+        // inside it names types they never mentioned — `expected I32, found
+        // vector<I32>` for `(aref v 0)` on a `Vector<T>`, pointing at a
+        // `get` call that is not in their source. Re-check the receiver
+        // alone (only here, on the way out with an error already in hand)
+        // to say which type they actually indexed. Not a second meaning for
+        // `aref`, just a better sentence about the same failure.
+        let Ok(recv_ty) = self.check_at(heap, interp, env, recv, None, None).map(|c| c.ty) else {
+            return Err(err);
+        };
+        if matches!(&recv_ty, Type::Named(p, _) if crate::types::path_is_builtin(p, "array")) {
+            return Err(err);
+        }
+        Err(Error::TypeError(format!(
+            "aref: `{}` is not an `Array<T>`. `aref` collects its subscripts into the \
+             `Vector<i32>` an array is indexed by; a `Vector<T>`, `string` or `HashTable<K,V>` \
+             takes its key directly, as `(get x k)` / `(setf (get x k) v)`.",
+            mangle_type(&recv_ty)
+        )))
+    }
+
+    /// The rewrite [`Self::check_aref`] documents. `value` is `None` for a
+    /// read (`get`) and `Some(form)` for a write (`set`), which is the only
+    /// difference between the two.
+    fn aref_expansion(
+        &self,
+        heap: &mut Heap,
+        recv: Value,
+        subs: &[Value],
+        value: Option<Value>,
+    ) -> Result<Value, Error> {
+        let a = heap.intern_symbol(&self.gensym_place());
+        let idx = heap.intern_symbol(&self.gensym_place());
+        let empty = self.the_form(heap, "Vector", &Type::I32, "Vector::new")?;
+        let empty = forms::rooted(heap, empty);
+        let push = heap.intern_symbol("push");
+        let progn = heap.intern_symbol("progn");
+        let getter = heap.intern_symbol("get");
+        let setter = heap.intern_symbol("set");
+        // Rooted as each lands: these are freshly built syntax lists held
+        // only in a `Vec<Value>`, and every later iteration allocates more.
+        let mut body: Vec<(Value, Option<Loc>)> = vec![(progn, None)];
+        for s in subs {
+            let one = forms::list_from_vec_locs(heap, &[(push, None), (idx, None), (*s, None)])?;
+            body.push((forms::rooted(heap, one), None));
+        }
+        let tail = match value {
+            None => forms::list_from_vec_locs(heap, &[(getter, None), (a, None), (idx, None)])?,
+            Some(v) => forms::list_from_vec_locs(heap, &[(setter, None), (a, None), (idx, None), (v, None)])?,
+        };
+        body.push((forms::rooted(heap, tail), None));
+        let body = forms::list_from_vec_locs(heap, &body)?;
+        let body = forms::rooted(heap, body);
+        forms::wrap_let_star(heap, vec![(a, recv), (idx, empty)], body)
     }
 
     /// CL's variadic arithmetic operators (`+ - * / max min`): `(op a b c
@@ -13155,6 +13274,34 @@ fn type_has_param(t: &Type, params: &HashSet<String>) -> bool {
 /// serialization, so two distinct canonical types can never render equal
 /// (which is what lets `mangled_fn_path` double as the instantiation's
 /// identity). Nested generics render Rust-style: `vector<cons-cell<string,i32>>`.
+/// The parameter types a *function value* of this signature really takes:
+/// the required ones, then `&optional`, then `&key`. `FnSig::params` holds
+/// the required list alone because a call site that resolved the callee *by
+/// name* fills the rest in from the declaration
+/// (`Checker::push_opt_key_args`) — a function value has no name to look
+/// that up by, so the value's own type has to state the whole arity and its
+/// caller supplies every argument itself. A parameter with no default is
+/// `Option<T>` here, the same effective type it has inside the body.
+///
+/// Without this a reference to such a function type-checked as its required
+/// arity and then failed at run time ("the closure takes 1 argument(s),
+/// given 0") — the runtime function has one parameter per declared name,
+/// whatever region it was declared in.
+fn fn_value_params(sig: &FnSig) -> Vec<Type> {
+    let mut ps = sig.params.clone();
+    let effective =
+        |p: &OptKeyParam| opt_key_effective_ty(&p.decl_ty, p.default.is_some());
+    ps.extend(sig.optionals.iter().map(effective));
+    ps.extend(sig.keys.iter().map(effective));
+    ps
+}
+
+/// [`fn_value_params`] as a `Type::Fn`, with `&rest` in the slot that type
+/// keeps for it.
+fn fn_value_type(sig: &FnSig) -> Type {
+    Type::Fn(fn_value_params(sig), sig.rest.clone().map(Box::new), Box::new(sig.ret.clone()))
+}
+
 fn mangle_type(t: &Type) -> String {
     match t {
         Type::I8 => "i8".into(),

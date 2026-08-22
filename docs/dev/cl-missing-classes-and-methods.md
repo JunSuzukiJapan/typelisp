@@ -88,10 +88,10 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | `cons` | ⚠️ | 2つある。汎用ペア `cons-cell<A,B>`（`defstruct`）と `Sexpr` の `Cons` 構成子。前者は静的な要素型を持ち、CL の「異種の入れ子」は `Sexpr` 側だけが担う |
 | `list` | ⛔ | 型としての `list` が無い。`Sexpr` のリストは「`Cons` 連鎖である `Sexpr` 値」であり、静的には長さも要素型も区別されない |
 | `sequence` | ⚠️ | 抽象型としては無い。代替は `Iter` トレイト（`Vector<T>`/`HashTable<K,V>` が実装）。**`Sexpr` のリストは意図的に `Iter` を実装しない**（language-design.md §9） |
-| `array` | ❌ | 多次元配列が無い。`Vector<T>` は1次元のみ |
-| `vector` | ⚠️ | `Vector<T>`（可変長・要素型が一様）。CL の `fill-pointer`/`adjustable` の概念は無い |
+| `array` | ⚠️ | `Array<T>`（2026-08-22、Phase 6b）。要素型は型パラメータで一様——CL の「要素型を実行時に問う」側面（`array-element-type` 等）は静的型が答えている |
+| `vector` | ⚠️ | `Vector<T>`（可変長・要素型が一様）。CL の `fill-pointer`/`adjustable` は `Array<T>` の側にある |
 | `simple-vector` / `simple-array` | ⛔ | simple 系のサブタイプ区分が無い |
-| `bit-vector` / `simple-bit-vector` | ❌ | ビットベクタが無い（`bit`/`sbit`/`bit-and` 系も同様に無い） |
+| `bit-vector` / `simple-bit-vector` | ⚠️ | `BitVector`（2026-08-22、Phase 6c）。simple かどうかの区分は無い（1 種類しかない） |
 | `string` | ⚠️ | `string` は**不変**。CL の「文字の配列」ではないので `(setf (char s i) c)` に相当する操作が無い |
 | `base-string` / `simple-string` | ⛔ | サブタイプ区分が無い |
 | `hash-table` | ✅ | `HashTable<K,V>` |
@@ -357,15 +357,26 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 
 ### 2.13 配列（CLHS 15）
 
-多次元配列そのものが無いため全滅（❌）:
+2026-08-22（Phase 6b/6c）に `Array<T>` と `BitVector` を入れた。どちらも組み込み型ではなく
+prelude の `defstruct`（`Array<T>` は `Vector<T>` 2 本、`BitVector` は詰めた語＋長さ）。
 
-`make-array` `aref` `row-major-aref` `array-dimension` `array-dimensions` `array-rank`
-`array-total-size` `array-element-type` `array-in-bounds-p` `array-row-major-index`
-`array-displacement` `adjustable-array-p` `adjust-array` `fill-pointer` `array-has-fill-pointer-p`
-`vector-push` `vector-push-extend` `vector-pop` `svref` `arrayp` `vectorp` `simple-vector-p`
-`bit` `sbit` `bit-and` `bit-ior` `bit-xor` `bit-not` `bit-vector-p` `upgraded-array-element-type`
-
-`Vector<T>` の `push`/`pop`/`get`/`set`/`len` が1次元の範囲を最小限カバーしているだけ。
+| CL | 状態 | 備考 |
+|---|---|---|
+| `make-array` | ✅ | `(Array::make dims init &key fill-pointer)`。`dims` は `Vector<i32>`。`init`（CL の `:initial-element`）は必須——この言語に「未束縛のセル」が無いため。`:element-type` は型パラメータ、`:adjustable` は常に真 |
+| `aref` / `(setf (aref …))` | ✅ | 裸の可変個添字。**チェッカーの糖衣**で `Array<T>` 自身の `get`/`set`（添字は `Vector<i32>`）に展開される。`defmethod` はアリティで解決するので、糖衣を通さずに書くこともできる |
+| `row-major-aref` | ✅ | `row-major-get` / `row-major-set` |
+| `array-rank` `array-dimension` `array-dimensions` `array-total-size` | ✅ | `rank` / `dimension` / `dimensions` / `total-size`。型名を関数名に埋めない |
+| `array-in-bounds-p` `array-row-major-index` | ✅ | `in-bounds` / `row-major-index` |
+| `adjust-array` | ⚠️ | `(adjust a dims init)`。ランクは変えられない。CL と違い配列を**返さない**（CL が返すのは非 adjustable な配列だと別の配列が返りうるからで、ここでは全部 adjustable） |
+| `fill-pointer` | ⚠️ | `Option<i32>` を返す。CL は fill pointer を持たない配列に対してエラーだが、静的型で分けられない（同じ `Array<T>`）ので値で答える |
+| `vector-push-extend` `vector-pop` | ✅ | `push-extend` / `pop`。`pop` は空なら `none`（`Vector<T>` の `pop` と同じ） |
+| `vector-push` | ⛔ | 「伸ばさずに失敗する」版。`push-extend` があれば要らない |
+| `array-element-type` `adjustable-array-p` `array-has-fill-pointer-p` `simple-vector-p` `arrayp` `vectorp` `upgraded-array-element-type` | ⛔ | (D1)。受け手の静的型が既に答えている問い |
+| `svref` | ⛔ | 「simple vector の添字アクセス」で、`Vector<T>` の `get` がその物 |
+| `array-displacement` | ⛔ | 別の配列の記憶域を共有する（displaced array）という概念が無い |
+| `bit` / `sbit` / `(setf (bit …))` | ✅ | `BitVector` の `get`/`set` の CL 名の別名。`sbit` と `bit` の違い（simple 要求）は 1 種類しか無いので消える |
+| `bit-and` `bit-ior` `bit-xor` `bit-not` `bit-eqv` `bit-nand` `bit-nor` `bit-andc1` `bit-andc2` `bit-orc1` `bit-orc2` | ⚠️ | 11 種すべて。CL の第 3 引数（結果の書き込み先。`t` なら第 1 引数へ）は無く、常に新しいビットベクタを返す |
+| `bit-vector-p` | ⛔ | (D1) |
 
 ### 2.14 文字列（CLHS 16）
 
@@ -542,9 +553,10 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
    （`decode-universal-time` 等、Phase 9c）が入った。残差は CPU 時間
    （`get-internal-run-time`、`libc` 依存）と、**乱数のシードを外から与える手段**——
    同一プロセス内なら `make-random-state` の複製で列を再生できるが、実行を跨いだ再現はできない。
-8. **多次元配列・集合演算・文字列ユーティリティ**（§2.13/§2.12/§2.14）— いずれも単独の機構では
-   なく「同じ層の関数が束で無い」箇所。`make-array`/`aref` 一式、`union`/`intersection`/`adjoin`、
-   `string-trim`/`search`/`concatenate`/`split` 相当。CL コードの移植で真っ先に当たるのはここ。
+8. ~~**多次元配列・集合演算・文字列ユーティリティ**（§2.13/§2.12/§2.14）~~ — 3 つとも解消。
+   文字列ユーティリティは 2026-08-20（Phase 2）、集合演算は同（Phase 3）、多次元配列と
+   ビットベクタは 2026-08-22（Phase 6b/6c）。いずれも単独の機構ではなく「同じ層の関数が束で
+   無い」箇所だったので、束ごと入れてある。
 9. ~~**`*print-circle*` / `*print-level*` / `*print-length*`**~~ — **2026-07-29 実装済み**
    （functions.md §15.3、[implementation-log.md](implementation-log.md) の該当節）。着手前は
    「循環構造を印字するとプロセスが落ちる」状態だった——`defstruct` のフィールドを `setf` で

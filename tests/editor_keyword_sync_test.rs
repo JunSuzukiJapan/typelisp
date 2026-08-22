@@ -135,7 +135,7 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 7] = [
+    const PRELUDE_PRIVATE: [&str; 11] = [
         "unwrap-io",
         "io-ok",
         "split-on-slash",
@@ -145,6 +145,17 @@ fn is_excluded(name: &str) -> bool {
         // The civil-calendar formula under `encode-universal-time` /
         // `decode-universal-time` (Phase 9c). A user writes those two.
         "days-from-civil",
+        // `Array<T>`'s subscript arithmetic (Phase 6b): `array-decode` is
+        // `row-major-index`'s inverse and `array-subs-in-bounds` its
+        // range test, both used only by `adjust` walking the new index
+        // space. A user writes `row-major-index`/`in-bounds`.
+        "array-decode",
+        "array-subs-in-bounds",
+        // `BitVector`'s word-level internals (Phase 6c): the shared body of
+        // the `bit-and` family, and the "clear the bits past the length"
+        // step every operation that can set them ends with.
+        "bitvector-zip",
+        "bitvector-trim",
     ];
     // `read-sexpr`'s datum scanner, which finds where one datum ends so the
     // text can go to `read`. Prelude-private, and a step finer-grained than

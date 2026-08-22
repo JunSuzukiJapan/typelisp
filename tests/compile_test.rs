@@ -6122,3 +6122,93 @@ fn the_extreme_i64_literals_survive_compilation() {
     let lo = "(defun lo () i64 -9223372036854775807) (compile lo) (lo)";
     assert_eq!(run_compiled(lo), Value::Int(-9223372036854775807));
 }
+
+// ---- `Array<T>` (cl-parity-plan.md Phase 6b) --------------------------------
+//
+// `Array<T>` is a prelude `defstruct` over two `Vector`s, so it reaches
+// compiled code through the paths `defstruct` and `Vector<T>` already had —
+// there is no array node in the IR. What is worth pinning down is that
+// `(aref a i j)`, which the checker rewrites before the compiler ever sees
+// it, arrives as an ordinary `let*`/`push`/`get` and behaves the same
+// compiled as interpreted.
+
+#[test]
+fn a_compiled_function_reads_and_writes_an_array_through_aref() {
+    let src = "
+        (defun cell () i32
+          (let ((d (the Vector<i32> (Vector::new))))
+            (progn
+              (push d 2) (push d 3)
+              (let ((a (Array::make d 0)))
+                (progn (setf (aref a 1 2) 9) (aref a 1 2))))))
+        (compile cell)
+        (cell)
+    ";
+    assert_eq!(run_compiled(src), Value::Int(9));
+}
+
+#[test]
+fn a_compiled_function_walks_an_array_in_row_major_order() {
+    let src = "
+        (defun digits () i32
+          (let ((d (the Vector<i32> (Vector::new))))
+            (progn
+              (push d 2) (push d 2)
+              (let ((a (Array::make d 0)) (acc 0))
+                (progn
+                  (setf (aref a 0 0) 1) (setf (aref a 0 1) 2)
+                  (setf (aref a 1 0) 3) (setf (aref a 1 1) 4)
+                  (doiter (x (iter a)) (setf acc (+ (* acc 10) x)))
+                  acc)))))
+        (compile digits)
+        (digits)
+    ";
+    assert_eq!(run_compiled(src), Value::Int(1234));
+}
+
+#[test]
+fn a_compiled_functions_fill_pointer_grows_the_same_way() {
+    let src = "
+        (defun grown () i32
+          (let ((d (the Vector<i32> (Vector::new))))
+            (progn
+              (push d 1)
+              (let ((a (Array::make d 0 :fill-pointer 0)))
+                (progn (push-extend a 7) (push-extend a 8)
+                       (+ (* 100 (total-size a)) (* 10 (len a)) (unwrap (pop a))))))))
+        (compile grown)
+        (grown)
+    ";
+    assert_eq!(run_compiled(src), Value::Int(228));
+}
+
+// ---- `BitVector` (cl-parity-plan.md Phase 6c) -------------------------------
+
+#[test]
+fn a_compiled_function_sets_and_reads_bits_across_word_boundaries() {
+    let src = "
+        (defun edges () i32
+          (let ((v (BitVector::make 70)))
+            (progn
+              (set v 31 true) (set v 32 true) (set v 69 true)
+              (+ (if (get v 31) 1 0) (* 2 (if (get v 32) 1 0))
+                 (* 4 (if (get v 69) 1 0)) (* 8 (if (get v 30) 1 0))))))
+        (compile edges)
+        (edges)
+    ";
+    assert_eq!(run_compiled(src), Value::Int(7));
+}
+
+#[test]
+fn a_compiled_bit_wise_operation_leaves_no_bits_past_the_length() {
+    let src = "
+        (defun ones () i32
+          (let ((v (bit-not (BitVector::make 35))) (n 0) (i 0))
+            (progn
+              (while (< i 35) (progn (setf n (+ n (if (get v i) 1 0))) (setf i (+ i 1))))
+              n)))
+        (compile ones)
+        (ones)
+    ";
+    assert_eq!(run_compiled(src), Value::Int(35));
+}

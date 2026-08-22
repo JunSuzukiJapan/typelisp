@@ -476,3 +476,52 @@ fn an_inherent_method_with_sections_cannot_be_adopted_as_a_trait_method() {
     let msg = check_err(src);
     assert!(msg.contains("may not declare &optional/&key/&rest"), "unexpected message: {}", msg);
 }
+
+// ---- as a function value ----------------------------------------------------
+//
+// A call site that resolved its callee *by name* fills the omitted arguments
+// in from the declaration. A function *value* has no name to look that up by,
+// so its `Type::Fn` states the whole arity — required, `&optional`, `&key` —
+// and its caller passes every argument itself (`fn_value_params` in
+// `checker.rs`). Until this was fixed such a reference type-checked at the
+// *required* arity and then failed at run time with an arity mismatch, since
+// the runtime function has one parameter per declared name whatever region it
+// was declared in.
+
+#[test]
+fn a_function_value_states_its_optional_parameters_too() {
+    let src = "(defun greet ((name string) &optional (suffix string \"!\")) string (append name suffix))
+               (defun call2 ((f (fn (string string) string))) string (f \"hi\" \"?\"))
+               (equal (call2 greet) \"hi?\")";
+    assert_eq!(eval_ok(src), Value::Bool(true));
+}
+
+#[test]
+fn a_function_value_at_the_required_arity_alone_is_a_type_error() {
+    let src = "(defun greet ((name string) &optional (suffix string \"!\")) string (append name suffix))
+               (defun call1 ((f (fn (string) string))) string (f \"hi\"))
+               (call1 greet)";
+    let msg = check_err(src);
+    assert!(msg.contains("Fn") || msg.contains("fn"), "{}", msg);
+}
+
+#[test]
+fn a_defaultless_optional_is_an_option_in_the_function_value_too() {
+    // Inside the body such a parameter is `Option<T>`; a function value's
+    // caller sees the same type, since it is the same parameter.
+    let src = "(defun tag ((n i32) &optional (extra i32)) i32
+                 (match extra ((some e) (+ n e)) ((none) n)))
+               (defun call2 ((f (fn (i32 Option<i32>) i32))) i32 (f 10 (Option::some 5)))
+               (call2 tag)";
+    assert_eq!(eval_ok(src), Value::Int(15));
+}
+
+#[test]
+fn a_key_parameter_shows_up_in_the_function_value_positionally() {
+    // Labels are a *call-site* notation; a function value has no call site to
+    // read them at, so the parameter takes its place in declared order.
+    let src = "(defun mk (&key (a i32 1) (b i32 2)) i32 (+ (* 10 a) b))
+               (defun call2 ((f (fn (i32 i32) i32))) i32 (f 7 8))
+               (call2 mk)";
+    assert_eq!(eval_ok(src), Value::Int(78));
+}
