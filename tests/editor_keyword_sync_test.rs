@@ -135,7 +135,7 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 12] = [
+    const PRELUDE_PRIVATE: [&str; 13] = [
         "unwrap-io",
         "io-ok",
         "split-on-slash",
@@ -159,6 +159,10 @@ fn is_excluded(name: &str) -> bool {
         // The one-binding worker `dlet` expands into, once per pair (Phase
         // 7b). A user writes `dlet`, which takes a binding list.
         "dlet1",
+        // `read-delimited-list`'s accumulator turned back into a list (Phase
+        // 8b). Collecting into a `Vector` and reversing once is how that
+        // function builds its result; nothing else needs the step.
+        "sexpr-list-from",
     ];
     // `read-sexpr`'s datum scanner, which finds where one datum ends so the
     // text can go to `read`. Prelude-private, and a step finer-grained than

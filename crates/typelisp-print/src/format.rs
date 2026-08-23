@@ -266,6 +266,9 @@ enum Node {
     /// written `~@;` — which marks the preceding prefix segment as a
     /// *per-line* prefix.
     Block { head: Head, segments: Vec<Vec<Node>>, sep_at: Vec<bool> },
+    /// `~/name/` — CL's function-call directive. `name` is resolved against
+    /// the argument's own type at render time; see [`crate::PrintEnv::format_call`].
+    Call { head: Head, name: String },
     /// `~^` — escape upward out of the nearest `~{`/`~<` (or the whole op).
     Escape { head: Head },
 }
@@ -330,6 +333,29 @@ fn parse_seq(chars: &[char], pos: &mut usize, stops: &[char]) -> Result<(Vec<Nod
                 }
             }
             '<' => nodes.push(parse_just(chars, pos, head)?),
+            '/' => {
+                // The name runs to the closing `/`. Case-folded because that
+                // is how the reader interns every name the lookup will match
+                // against.
+                let mut name = String::new();
+                loop {
+                    match chars.get(*pos) {
+                        None => return Err("format: unterminated ~/ — the name needs a closing `/`".to_string()),
+                        Some('/') => {
+                            *pos += 1;
+                            break;
+                        }
+                        Some(c) => {
+                            name.push(*c);
+                            *pos += 1;
+                        }
+                    }
+                }
+                if name.is_empty() {
+                    return Err("format: ~// names no method".to_string());
+                }
+                nodes.push(Node::Call { head, name: name.to_ascii_lowercase() });
+            }
             '^' => nodes.push(Node::Escape { head }),
             '\n' => {
                 // `~<newline>`: by default ignore the newline and the following
@@ -604,6 +630,11 @@ impl State<'_> {
                 }
                 Node::Dir { head, ch } => {
                     self.interp_dir(head, *ch, out)?;
+                }
+                Node::Call { head, name } => {
+                    let v = self.next_arg()?;
+                    let text = self.ctx.env.format_call(self.heap, name, v, head.colon, head.at)?;
+                    out.push_str(&text);
                 }
             }
         }
@@ -1026,9 +1057,6 @@ impl State<'_> {
                 if self.opts.pretty {
                     out.op(Op::Indent(if head.colon { IndentKind::Current } else { IndentKind::Block }, n));
                 }
-            }
-            '/' => {
-                return Err("format: ~/name/ function-call directives are not supported".to_string());
             }
             other => {
                 return Err(format!("format: unknown directive ~{}", other));

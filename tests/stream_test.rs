@@ -601,13 +601,40 @@ fn read_sexpr_reads_one_datum_at_a_time() {
 }
 
 #[test]
-fn read_sexpr_consumes_the_datum_and_no_more() {
+fn read_sexpr_consumes_the_datum_and_the_whitespace_that_ended_it() {
+    // CL's `read` consumes the delimiting character when it is whitespace —
+    // which is what makes a form typed at a terminal take its newline with
+    // it. This used to keep the space (it was `read-preserving-whitespace`'s
+    // behaviour under `read`'s name); cl-parity-plan.md Phase 8b split the
+    // two, and the preserving one is tested just below.
     let v = eval_string(
         r#"(let ((s (make-string-input-stream "(a b) rest")))
              (read-sexpr s)
              (read-all s))"#,
     );
+    assert_eq!(v, "rest");
+}
+
+#[test]
+fn read_sexpr_preserving_whitespace_leaves_what_ended_the_datum() {
+    let v = eval_string(
+        r#"(let ((s (make-string-input-stream "(a b) rest")))
+             (read-sexpr-preserving-whitespace s)
+             (read-all s))"#,
+    );
     assert_eq!(v, " rest");
+}
+
+#[test]
+fn read_sexpr_leaves_a_non_whitespace_terminator_alone() {
+    // Only whitespace is consumed: a `)` that ended the datum belongs to
+    // whatever comes next.
+    let v = eval_string(
+        r#"(let ((s (make-string-input-stream "a)b")))
+             (read-sexpr s)
+             (read-all s))"#,
+    );
+    assert_eq!(v, ")b");
 }
 
 #[test]

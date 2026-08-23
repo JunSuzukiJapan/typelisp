@@ -682,6 +682,30 @@ impl Registry {
         register_stream_builtins(&mut root);
         register_system_builtins(&mut root);
         root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(sexpr(), error_ty(READ_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // `read-datum-at`: one datum from a string starting at a character
+        // index, paired with where reading stopped — CL's `read-from-string`
+        // and its second return value, which this language has no multiple
+        // values to carry. The prelude's `read-from-string` /
+        // `read-from-string-preserving-whitespace` are this with the two
+        // `preserve` settings and a default `start`; the primitive keeps a
+        // name of its own because the CL one is the prelude's.
+        root.fns.insert(
+            "read-datum-at".to_string(),
+            FnSig {
+                type_params: vec![],
+                rest: None,
+                params: vec![Type::Str, Type::I64, Type::Bool],
+                ret: result_of(
+                    Type::Named(Path::root("cons-cell"), vec![sexpr(), Type::I64]),
+                    error_ty(READ_ERROR),
+                ),
+                public: true,
+                builtin: true,
+                bounds: BTreeMap::new(),
+                optionals: Vec::new(),
+                keys: Vec::new(),
+            },
+        );
         // `eval`: type-checks and runs a runtime `Sexpr` against the current
         // global environment, CL-style (`Interp::eval_form`). Sees all globals
         // but not the caller's lexical locals; a definition form registers
@@ -1033,6 +1057,13 @@ fn register_stream_builtins(root: &mut Namespace) {
         result_of(option_of(Type::Char), file_err.clone()),
     );
     native("stream-unread-char", vec![h.clone(), Type::Char], unit_or_err.clone());
+    // Byte I/O, the same shape one level down: `Ok(none)` at end of file.
+    // Only a file stream (and stdin/stdout/stderr) answers these — a string
+    // stream is a sequence of characters, and CL calls `read-byte` on a
+    // character stream an error rather than handing back a UTF-8 encoding
+    // nobody wrote.
+    native("stream-read-byte", vec![h.clone()], result_of(option_of(Type::I64), file_err.clone()));
+    native("stream-write-byte", vec![h.clone(), Type::I64], unit_or_err.clone());
     native("stream-listen", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
 
     // Output. Only whole strings cross this boundary — a per-character

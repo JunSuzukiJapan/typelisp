@@ -93,6 +93,31 @@ GC ルート、等価述語と印字、ダンプの版まで動く——1 フェ
 片手間には入らない。`BitVector` は 1 語 64bit ではなく **32bit** で詰めることで
 この端に近寄らないようにしてある（型の側にも同じ注記がある）。
 
+`print-object` は**ジェネリック型に対して一度も発火しない**（Phase 8a で判明）。
+これは登録漏れではなく、実行時ディスパッチの前提が無いという話:
+
+```lisp
+(defstruct gen<T> (v T))
+(impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
+(println "~a" (gen::new 1))          ; => #<gen 1>   （"GEN" ではない）
+(println "~a" (print-object (gen::new 1) true))  ; => GEN  （名前で呼べば動く）
+```
+
+プリンタは値が持つ型キーでメソッドを引くが、単型化が型引数を消しているのでキーは
+`gen` であって `gen<i64>` ではない。値の側に「どの実体化なのか」が書かれていない以上、
+`gen<i64>` の版と `gen<string>` の版を選び分ける材料が無い。全 T で 1 本の本体を
+共有する手もあるが、`gen<T>` を印字するとは `T` を印字することなので成立しない。
+**型検査は通り、名前で呼べば動き、プリンタからだけ見えない**ので、書いた人が気づかない。
+`tests/printer_test.rs::print_object_does_not_reach_a_generic_type` が現状を固定しており、
+直ったらそのテストが落ちる。これに依存して見送ったのが `*print-array*` と
+`Array<T>` の `print-object`（cl-parity-plan.md Phase 8a）。
+
+`~/name/` は **AOT 実行ファイルでは使えない**（Phase 8a）。ディレクティブは
+メソッドを実行時の `string` で名指すので、どのメソッドに到達しうるかをコンパイル時に
+言えない。対応するには全型の全メソッドを起動時に登録することになる——`print-object` は
+1 トレイトの impl だけを登録すれば済む。黙って別の動作をするのではなく、その旨を
+述べるエラーにしてある。
+
 Phase 2/3 の副産物として checker のバグを 4 件見つけて直した。4 件とも
 **「型変数の名前がたまたま一致したときだけ動いていた」同じ形**（詳細は同計画の Phase 0 / Phase 3 の節）:
 境界越しの `Self` 戻り型、境界付きジェネリック同士の委譲、ジェネリック `defmethod` の受け手の

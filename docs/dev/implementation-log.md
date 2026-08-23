@@ -8634,3 +8634,134 @@ vtable アドレスを公開する起動列が無い、という既存の検査�
 
 テストは `tests/error_catalog_test.rs`（16 本）、`tests/dynamic_binding_test.rs`（33 本）、
 `tests/compile_test.rs` に 2 本。
+
+---
+
+## CL 残差 Phase 8a/8b — プリンタとリーダ（2026-08-23、branch `feature/cl-parity`）
+
+計画は [cl-parity-plan.md](cl-parity-plan.md) の Phase 8。8c（リードテーブル）は
+先行条件が別作業なので分けた。
+
+### 1 引数プリンタは全部マクロ
+
+`prin1`（`~s`）/ `princ`（`~a`）/ `write`（`*print-escape*` で選ぶ）と `-to-string` 三種。
+Rust 側の追加はゼロ。
+
+関数にできない理由がはっきりしている: **`format` の `&rest` は型変数を受け付けない**。
+
+```lisp
+(defun show<T> ((x T)) string (format false "~a" x))
+;; => type error: &rest: element type Named("t") has no Sexpr encoding
+```
+
+prelude の `to-string` が「1 つのジェネリック `defun` ではなくスカラ型ごとの `defmethod`」
+なのと同じ壁で、コメントにもそう書いてあった。マクロなら呼び出し地点で型が具体化しているので
+通る。[[feedback-prefer-macro-over-checker-special-form]] の 3 例目。
+
+CL の 1 引数 `print`（改行 → `prin1` → 空白）には**この言語での綴りが無い**。`print`/`println` は
+制御文字列を取る `format` の短縮形として既に埋まっており、計画どおり併存させ改名しないため。
+
+### `*print-escape*` を読むのは `write` だけ
+
+CLHS どおり `~s`/`prin1`/`pprint` はこれを真に、`~a`/`princ` は偽に、それぞれ自分の呼び出しの
+間だけ束縛する。つまり**誰も束縛していない状態で読まれるのは `write`/`write-to-string` だけ**で、
+そこを実行時の `if` にすればプリンタ側は 1 行も変えなくてよい。`print-object` の実装は大域変数
+ではなく自分の `escape` 引数を読む——そちらが directive の選んだ値を運ぶ。
+
+### `~/name/`: CL の読みは静的型付けと両立しない
+
+format 最後の未対応ディレクティブ。CL はグローバル関数を名指すが、**そう実装すると健全でない**:
+
+- 制御文字列は実行時の `string` なので、どのディレクティブがどの引数に当たるかは検査時に決まらない
+  （`~[`/`~{`/`~*` があるので静的な対応付けは一般に決定不能）。
+- 実行時に名前で引ける定義が持っているのは `Repr` だけ（`FnDef` のコメント:
+  「型は登録の時点で IR から消えている」）。`Repr::Struct` は全 `defstruct` を 1 つに潰すので、
+  `point` 用のヘルパを `pathname` に対して呼べてしまう。
+
+健全な道は 1 本しかなく、**値の型でディスパッチする**こと——`print-object` が既に使っている
+仕組みで、そのメソッドはまさにその型に対して型検査済みなので構成上正しい。よって
+`~/name/` は「引数自身の型のメソッド」を引く。形は `((self Self) (colon bool) (at bool)) → string`。
+
+即値（`string`/`bool`/`char`/`symbol`/リスト）は型パスを持たないので明示的に対応付けた。
+対応はどれも厳密（あらゆる `Value::Str` は `string`）。唯一厳密でないのが整数で、`i32`/`i64` は
+生の語を共有し値から区別できない——**推測せず両方を候補にし、両方が同名メソッドを定義している
+ときだけエラー**にした。片方だけなら曖昧さは無い。
+
+`print-object` と違い、メソッドが無いのは**エラー**。`~a` には組み込みの表示という戻り先が
+あるが、`~/name/` は名指しで特定のものを要求している。
+
+**AOT では使えない**。メソッドを実行時の名前で引く以上、どのメソッドに到達しうるかを
+コンパイル時に言えず、対応するには全型の全メソッドを起動時に登録することになる
+（`print-object` は 1 トレイトの impl だけ）。黙って別の動作をするのではなく、その旨を
+述べるエラーにした。
+
+### バイト I/O はストリーム層が最初から空けてあった穴
+
+`InputStream`/`OutputStream` の `Item` が開いたままなのは「バイトストリームが並行するトレイト
+階層なしに `Item` を後で固定できるように」——2026-08-02 の設計コメントにそう書いてある。
+そのとおり `ByteInput`/`ByteOutput` が `i64` に固定し、`binary-file-stream` が実装する。
+
+CL は `:element-type '(unsigned-byte 8)` で要素型を**呼び出し**の性質にするが、ここでは
+ストリームの**型**の性質なので、違うのは開く関数の側になる（`open-binary` 系）。
+文字ストリームへの `read-byte` は型エラーで、native 層でも拒否する——次の文字の UTF-8
+エンコーディングを返すのは「そこに無いファイルを発明する」こと。`unread-char` が保留中の
+ときも拒否する（文字の押し戻しとバイト位置は、ストリーム位置が何を意味するかについて食い違う）。
+
+### 見送り: `print-object` はジェネリック型に効かない
+
+`*print-array*` と `Array<T>` の `print-object` を入れようとして、**既存の穴**に当たった:
+
+```lisp
+(defstruct gen<T> (v T))
+(impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
+(println "~a" (gen::new 1))                     ; => #<gen 1>
+(println "~a" (print-object (gen::new 1) true)) ; => GEN
+```
+
+型検査を通り、名前で呼べば動き、**プリンタからだけ見えない**。登録漏れではない: プリンタは
+値が持つ型キーで引くが、単型化が型引数を消しているのでキーは `gen` であって `gen<i64>` では
+なく、値の側に実体化の情報が無い。全 T で 1 本の本体を共有する手も、`gen<T>` を印字するとは
+`T` を印字することなので成立しない。`Array` だけ組み込みプリンタに型名で特別扱いさせるのは
+[[typelisp-type-identity-invariant]] が避けている形なので採らなかった。
+`tests/printer_test.rs::print_object_does_not_reach_a_generic_type` が現状を固定しており、
+直ったらそのテストが落ちる。
+
+### 8b: 読み終わり位置と、終端文字がトークンを終わらせていなかったバグ
+
+`read-from-string` は CL では 2 値（datum と位置）を返す。多値が無いので `cons-cell<Sexpr, i64>`
+1 つで返す——`Cursor.pos` は元から**文字**単位で、CL が返す位置そのものだった。位置があると
+文字列を 1 データずつ読むのが再スキャンでなくループになる。
+
+`read-preserving-whitespace` との差は**空白 1 文字**だけ。既存の `read-sexpr` は元々
+「datum とその前の空白だけ消費し、後ろに手を付けない」＝ CL の用語では
+`read-preserving-whitespace` の契約だった。区別を実装せず名前だけ増やすと CL 準拠は名目に
+なるので、`read-sexpr` を CL の `read` に合わせ（終端の空白 1 文字を消費）、従来の挙動を
+`read-sexpr-preserving-whitespace` として出した。**既存の挙動変更**なので
+`stream_test` の 1 本を 3 本に分けた（CL 挙動 / preserving / 空白以外の終端は触らない）。
+
+**本物のバグを 1 件修正**: 終端文字がトークンを終わらせていなかった。
+`(read-delimited-list #\] s)` を `1]x` に対して使うと `1]x` が 1 つのアトムになる。CL は
+終端文字をリードテーブルの *terminating macro character* にすることでこれを解決するが、
+リードテーブルが無いのでスキャナに直接教える必要がある。`reader-scan-atom` /
+`reader-scan-hash` / `reader-scan-datum` に呼び出し側の追加区切りを通し、**深さ 0 でだけ**
+効くようにした（`(1 2]` の `]` はリスト自身のテキストの一部で、壊れたリストとして `read` が
+報告するのが正しい）。
+
+### 締めで出た 2 件
+
+- **extern を足すと島の成果物が変わる**。`stream-read-byte`/`stream-write-byte`/`read-datum-at`
+  を足したので `island_artifacts_test` が落ちた。成果物の入力は SOURCE・Rust 側ビルダ・extern の
+  表の 3 つあるのにハッシュは SOURCE しか見ていない、という既知の穴
+  （[[typelisp-island-hash-reads-forms]]）。`regen-compiler-island.sh` で解決。
+- `rt_extern_functions` の戻り値は配列長を型に書いているので、extern を足すたびにそこも直す。
+
+### テスト書きで確かめた言語の挙動
+
+- **`equal` は構造に降りない**（`equalp` が降りる）。`(equal (option::some 2) (option::some 2))`
+  は偽。CL 準拠（CL の `equal` が降りるのは cons・文字列・ビットベクタ・パス名だけ）。
+- 組み込みエラー型は 1 変種の sum 型なので構築は **`(ReadError::ReadError "msg")`**。
+  prelude はこれまで `match` で分解するだけで、構築の綴りがどこにも書かれていなかった。
+- `(option::none)` は文脈から型引数を推論できないことがある（`(the Option<X> (option::none))`）。
+
+テストは `tests/printer_test.rs`（31 本）、`tests/byte_io_test.rs`（13 本）、
+`tests/reader_extras_test.rs`（22 本）。

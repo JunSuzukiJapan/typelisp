@@ -216,6 +216,11 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
         ),
         (typelisp_read::shim::RESULT_TYPE_KEY, "result"),
         (typelisp_read::shim::READ_ERROR_TYPE_KEY, typelisp::check::registry::READ_ERROR),
+        // `read-datum-at` pairs its datum with its end index in a
+        // `cons-cell<Sexpr, i64>` box, built on the reader's side of the
+        // boundary — CL's second return value, which this language has no
+        // multiple values to carry.
+        (typelisp_read::shim::CONS_CELL_TYPE_KEY, "cons-cell"),
     ] {
         assert_eq!(
             constant,

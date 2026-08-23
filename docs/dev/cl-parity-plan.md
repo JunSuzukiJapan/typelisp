@@ -957,19 +957,91 @@ cleanup は body をどう抜けても走る（正常終了・`throw`・`panic`�
 
 ## Phase 8 — 印字とリーダ
 
-### Stage 8a — プリンタ
+### Stage 8a — プリンタ（完了 2026-08-23）
 
-- `prin1` / `princ` / `write` / `write-to-string` / `prin1-to-string` / `princ-to-string` / `pprint`
-  を **CL 本来の意味で**足す。現在の `print`/`println` は制御文字列を取る format 系であり
-  CL の `print`（1 引数、`~s` 相当）とは別物なので、**併存させる**（改名しない）
-- format の `~/name/` ディレクティブ（唯一の未対応ディレクティブ）
-- バイナリ I/O: `write-byte` / `read-byte`
+**1 引数プリンタ**。`prin1`（`~s`）/ `princ`（`~a`）/ `write`（`*print-escape*` で選ぶ）と
+`prin1-to-string` / `princ-to-string` / `write-to-string`。前 3 者は CL と同じく
+オブジェクトを返す。`pprint` は既にあった。
 
-### Stage 8b — リーダ
+`print`/`println` は**これらではない**。制御文字列を取る `format` の短縮形であり、
+CL の `print`（改行 → `prin1` → 空白）とは別の仕事なので、計画どおり併存させ改名しない。
+その結果 **CL の 1 引数 `print` にはこの言語での綴りが無い**——`prin1` を書く。
 
-`read-preserving-whitespace`、`read-delimited-list`、
-`read-from-string`（＝現在の `(read s)`）の**読み終わり位置**を返す形（多値は使わないので
-`cons-cell` で返す）。
+**関数でなくマクロ**。`format` の `&rest` は型変数を受け付けないので
+（`(defun show<T> ((x T)) string (format false "~a" x))` は弾かれる。prelude の
+`to-string` がスカラ型ごとの `defmethod` なのと同じ理由）、呼び出し地点で型が
+具体化しているマクロにした。ストリームは CL と同じく省略可能。
+
+**`*print-escape*`**（Phase 7 からの繰り越し）。CLHS どおり `~s`/`prin1` は真を、
+`~a`/`princ` は偽を自分の呼び出しの間だけ束縛するので、この大域変数が実際に*読まれる*のは
+`write`/`write-to-string` だけ。`print-object` メソッドは大域でなく自分の `escape` 引数を
+読むべきで、そちらが directive の選んだ値を運ぶ。
+
+**`~/name/`**（最後の未対応ディレクティブ）。**CL と 1 点違う: 名前は
+グローバル関数ではなく引数自身の型のメソッドとして引く。** CL の読みは到達不能で、
+理由は静的型付けそのもの——制御文字列は実行時の `string` なので「どのディレクティブが
+どの引数に当たるか」は検査時に決まらず、その時点で登録済みの定義が持つのは `Repr` だけ。
+`Repr::Struct` は全 `defstruct` を 1 つに潰すので、名前だけの検索では `point` 用の
+ヘルパを `pathname` に対して呼べてしまう。値の型でディスパッチすれば、そのメソッドは
+まさにその型に対して型検査済み——`print-object` と同じ仕組み、同じ理由で健全。
+即値（`string`/`bool`/`char`/`symbol`/リスト）は型パスを持たないので明示的に対応付けた。
+唯一厳密でないのが整数で、`i32`/`i64` は生の語を共有し値から区別できないため、
+**推測せず両方を候補にし、両方が同名メソッドを定義しているときだけエラー**にする。
+`print-object` と違いメソッドが無いのは**エラー**——`~a` には組み込みの表示という
+戻り先があるが、`~/name/` は名指しで特定のものを要求している。
+**AOT 実行ファイルでは使えない**（実行時の名前で引く以上どのメソッドに到達しうるかを
+コンパイル時に言えず、対応するには全型の全メソッドを起動時に登録することになる）。
+
+**バイト I/O**。`ByteInput`/`ByteOutput` が `InputStream`/`OutputStream` の開いた `Item` を
+`i64` に固定する——ストリーム層が最初からそのために `Item` を開けてあった。CL は
+`:element-type '(unsigned-byte 8)` で要素型を*呼び出し*の性質にするが、ここでは
+ストリームの**型**の性質なので、違うのは開く関数の側（`open-binary` /
+`open-binary-input` / `open-binary-output` → `binary-file-stream`）。
+文字ストリームへの `read-byte` は型エラーになり、native 層でも拒否する
+（次の文字の UTF-8 エンコーディングを返すのは「そこに無いファイルを発明する」こと）。
+`unread-char` が保留中のときも拒否する。
+
+**入れなかったもの**: `*print-array*` と `Array<T>` の `print-object`。
+**`print-object` はジェネリック型に対して一度も発火しない**ことが分かった
+（`(impl print-object gen<T> ...)` は型検査を通り直接呼べば動くのに、プリンタからは
+見えない）。プリンタは値の持つ型キーで引くが、単型化が型引数を消すのでキーは `gen` で
+あって `gen<i64>` ではなく、値に実体化の情報が無い。全 T で 1 本の本体を共有する手も、
+`Array<T>` の印字は要素を印字するので成立しない。登録漏れを直せば済む話ではないので
+独立した作業とし、`Array` だけ組み込みプリンタに型名で特別扱いさせるのは
+（このコードベースが避けている「型名で分岐する」やり方なので）しない。
+テストで固定してある（`tests/printer_test.rs::print_object_does_not_reach_a_generic_type`）。
+
+テストは `tests/printer_test.rs`（31 本）と `tests/byte_io_test.rs`（13 本）。
+
+### Stage 8b — リーダ（完了 2026-08-23）
+
+**`read-from-string` の読み終わり位置**。CL は `read-from-string` から 2 値を返すが
+この言語に多値は無いので、計画どおり `cons-cell<Sexpr, i64>` 1 つで返す——`(car r)` が
+datum、`(cdr r)` が次に読む**文字**位置。位置があると、文字列を 1 データずつ読むのが
+再スキャンでなくループになる。`Cursor.pos` は元から文字単位で、CL が返す位置そのもの
+だった。組み込みは `read-datum-at`（CL 名は prelude の側が使うので別名）。
+
+**`read-preserving-whitespace`**。CL の `read` と違うのは「datum を終わらせた空白 1 文字を
+消費するか」だけ。既存の `read-sexpr` は元々**消費しない**側だったので、`read-sexpr` を
+CL の `read` に合わせ（1 文字消費する。端末で打った form が改行ごと消えるのはこれ）、
+今までの挙動を `read-sexpr-preserving-whitespace` として出した。
+
+**`read-delimited-list`**。終端文字まで読み、終端は消費する。入力が尽きたら短いリストでは
+なく `Err`（CL も上げる。読めた分を返すと間違いが隠れる）。CL の第 3 引数 `recursive-p` には
+対応物が無い——あれは「この呼び出しはリーダマクロの中だ」と CL のリーダに伝えるためのもので、
+リーダマクロが無い以上、伝える相手がいない。
+
+**副産物として本物のバグを 1 件修正**: 終端文字がトークンを終わらせていなかった。
+`(read-delimited-list #\] s)` を `1]x` に対して使うと `1]x` が 1 つのアトムになる。CL は
+終端文字をリードテーブルの *terminating macro character* にすることでこれを解決するが、
+リードテーブルが無いのでスキャナに直接教える必要がある。`reader-scan-atom` /
+`reader-scan-hash` / `reader-scan-datum` に呼び出し側の追加区切りを通し、**深さ 0 でだけ**
+効くようにした（`(1 2]` の `]` はリスト自身のテキストの一部で、壊れたリストとして `read` が
+報告するのが正しい）。
+
+`#b`/`#o`/`#x`/`#NNr` は Phase 7b で前倒し済み。
+
+テストは `tests/reader_extras_test.rs`（22 本）。
 
 ### Stage 8c — `readtable` とリーダマクロ
 

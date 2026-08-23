@@ -52,7 +52,7 @@
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 
 thread_local! {
     /// This thread's open streams. See the module docs for why it is here.
@@ -261,6 +261,51 @@ impl StreamTable {
                 read_one_char(&mut lock)
             }
             _ => Err("the stream is not an input stream".to_string()),
+        }
+    }
+
+    /// The next byte, or `None` at end of file.
+    ///
+    /// Only a *file* stream (and stdin) answers this. A string stream is a
+    /// sequence of characters, not of bytes — CL says `read-byte` on a
+    /// character stream is an error, and answering with the UTF-8 encoding of
+    /// whatever character came next would be inventing a file that is not
+    /// there.
+    ///
+    /// Character pushback is refused rather than silently skipped: an
+    /// `unread-char` and a byte read disagree about what the stream position
+    /// even means.
+    pub fn read_byte(&mut self, h: Handle) -> StreamResult<Option<u8>> {
+        let s = self.readable(h)?;
+        if !s.pushback.is_empty() {
+            return Err("read-byte: the stream has an unread character pending".to_string());
+        }
+        let mut buf = [0u8; 1];
+        let n = match &mut s.backend {
+            Backend::FileIn(r) => r.read(&mut buf).map_err(|e| format!("read-byte: {}", e))?,
+            Backend::Stdin => {
+                let stdin = std::io::stdin();
+                let mut lock = stdin.lock();
+                lock.read(&mut buf).map_err(|e| format!("read-byte: {}", e))?
+            }
+            _ => return Err("read-byte: the stream is not a byte input stream".to_string()),
+        };
+        Ok(if n == 0 { None } else { Some(buf[0]) })
+    }
+
+    /// Write one byte. The mirror of [`Self::read_byte`], and refused on a
+    /// string stream for the same reason.
+    pub fn write_byte(&mut self, h: Handle, b: u8) -> StreamResult<()> {
+        let s = self.writable(h)?;
+        // `fresh-line` asks what was written last. A byte is not a character,
+        // but a newline is byte 10 whichever way it was written, and that is
+        // the only distinction `at_line_start` draws.
+        s.last_written = Some(char::from(b));
+        match &mut s.backend {
+            Backend::FileOut(w) => w.write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
+            Backend::Stdout => std::io::stdout().write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
+            Backend::Stderr => std::io::stderr().write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
+            _ => Err("write-byte: the stream is not a byte output stream".to_string()),
         }
     }
 

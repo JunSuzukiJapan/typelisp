@@ -65,6 +65,25 @@ pub trait PrintEnv {
     /// value that isn't a string), which the printer propagates rather than
     /// swallowing.
     fn print_object(&self, heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String>;
+
+    /// `~/name/`'s rendering of `v` — CL's function-call directive, with
+    /// `colon` and `at` carrying the directive's own `:` and `@` flags.
+    ///
+    /// **`name` is looked up as a method on `v`'s own type**, not as a global
+    /// function the way CL's is. That is not a shortcut: a control string is
+    /// an ordinary runtime `string`, so which directive runs on which argument
+    /// is not known until it runs, and by then a registered definition carries
+    /// only its [`Repr`]s — `Repr::Struct` is every `defstruct` at once, so a
+    /// global-function lookup could not tell `point`'s helper from `pathname`'s
+    /// and would call one with the other's value. Dispatching on the value
+    /// instead is the same mechanism [`Self::print_object`] uses, and it is
+    /// sound for the same reason: the method was type-checked against exactly
+    /// the type that is now being handed to it.
+    ///
+    /// The method must be `((self Self) (colon bool) (at bool)) -> string`.
+    /// A value with no heap type of its own (`i64`/`bool`/`char`) has no
+    /// method table to look in, and says so.
+    fn format_call(&self, heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String>;
 }
 
 /// A [`PrintEnv`] that knows nothing: every enum prints `<unknown-variant>`
@@ -82,6 +101,10 @@ impl PrintEnv for BarePrintEnv {
 
     fn print_object(&self, _heap: &mut Heap, _v: Value, _escape: bool) -> Result<Option<String>, String> {
         Ok(None)
+    }
+
+    fn format_call(&self, _heap: &mut Heap, name: &str, _v: Value, _colon: bool, _at: bool) -> Result<String, String> {
+        Err(format!("format: ~/{}/ needs a program to look the method up in", name))
     }
 }
 

@@ -2862,6 +2862,14 @@ user-visible capacity."
 ;; No built-in type implements this: every existing program's output stays
 ;; byte-for-byte what it was, and a custom representation is something a type
 ;; opts into.
+;;
+;; **A generic type cannot use this yet.** `(impl print-object box<T> ...)`
+;; type-checks and can be called by name, but the printer never finds it, so
+;; the value still prints the built-in way. The printer looks a method up by
+;; the type key the *value* carries, and monomorphization has erased the type
+;; argument by then -- the key is `box`, not `box<i64>`, so there is nothing
+;; in the value to choose `box<i64>`'s method by. Nor would one shared body
+;; do: printing a `box<T>` means printing its `T`. See docs/dev/TODO.md.
 (deftrait print-object ()
   (print-object ((self Self) (escape bool)) string))
 
@@ -2940,6 +2948,17 @@ user-visible capacity."
 ;; `*print-right-margin*`, so it only bites while `*print-pretty*` is on; 0 or
 ;; less is CL's `nil` (no limit).
 (pub defvar (*print-lines* i64) 0)
+
+;; `*print-escape*` is the default `prin1`-vs-`princ` choice, and the one
+;; thing `write`/`write-to-string` consult that the other printers do not.
+;; CL says the same: `~s`/`prin1`/`pprint` bind it to true and `~a`/`princ` to
+;; false for the extent of their own call, so it is only *read* where nobody
+;; bound it — which is exactly `write`.
+;;
+;; A `print-object` method should read its own `escape` parameter rather than
+;; this global: the parameter carries the per-call value the directive picked,
+;; and this one only says what `write` starts from.
+(pub defvar (*print-escape* bool) true)
 
 ;; ---------------------------------------------------------------------------
 ;; `random-state` (CLHS 12.1.6): a mutable PRNG stream. The actual
@@ -3443,11 +3462,35 @@ user-visible capacity."
     "Push buffered output to its destination. A no-op unless overridden."
     ()))
 
+;; The byte layers, the other half of what `InputStream`/`OutputStream` left
+;; `Item` open for. CL reaches these by opening a file with
+;; `:element-type '(unsigned-byte 8)`; here the element type is the stream's
+;; type, so a byte file is its own type and the question is settled where the
+;; value is bound.
+;;
+;; `Item` is `i64` rather than a byte type this language does not have. The
+;; value is always 0..255 -- `write-byte` refuses anything else, as CL's does.
+(deftrait ByteInput ((InputStream (Item i64)))
+  "A byte input stream. Every method has a default body."
+  (read-byte ((self Self)) Option<i64>
+    "The next byte, or `none` at end of input."
+    (read-item self)))
+
+(deftrait ByteOutput ((OutputStream (Item i64)))
+  "A byte output stream. Every method has a default body."
+  (write-byte ((self Self) (b i64)) ()
+    "Write one byte. `b` outside 0..255 is an error."
+    (write-item self b))
+  (finish-output ((self Self)) ()
+    "Push buffered output to its destination. A no-op unless overridden."
+    ()))
+
 ;; ---------------------------------------------------------------------------
 ;; The native-backed stream types. Each is a struct around one handle; the
 ;; field is deliberately not `pub`.
 
 (pub defstruct file-stream (h i64))
+(pub defstruct binary-file-stream (h i64))
 (pub defstruct string-input-stream (h i64))
 (pub defstruct string-output-stream (h i64))
 (pub defstruct standard-stream (h i64))
@@ -3484,6 +3527,19 @@ user-visible capacity."
   (write-string ((self Self) (s string)) ()
     (unwrap-io (stream-write-string self::h s)))
   (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h)))
+  (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
+
+(impl Stream binary-file-stream
+  (open-stream-p ((self Self)) bool (stream-open-p self::h))
+  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+(impl InputStream binary-file-stream
+  (type Item i64)
+  (read-item ((self Self)) Option<i64> (unwrap-io (stream-read-byte self::h))))
+(impl OutputStream binary-file-stream
+  (type Item i64)
+  (write-item ((self Self) (b i64)) () (unwrap-io (stream-write-byte self::h b))))
+(impl ByteInput binary-file-stream)
+(impl ByteOutput binary-file-stream
   (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
 
 (impl Stream string-input-stream
@@ -3714,6 +3770,22 @@ user-visible capacity."
 (pub defun open-input<P> ((name P)) Result<file-stream, FileError> (where (Pathish P))
   (open-file name direction-input))
 
+;; The byte-stream openers. CL writes these as `open` with
+;; `:element-type '(unsigned-byte 8)`; the difference here is the *type* of
+;; what comes back, so it is the opener that differs.
+(pub defun open-binary<P> ((name P) (direction i64)) Result<binary-file-stream, FileError> (where (Pathish P))
+  "Open `name` for byte I/O in one of `direction-input` / `direction-output` /
+   `direction-append`."
+  (match (stream-open-file (namestring name) direction)
+    ((ok h) (result::ok (binary-file-stream::new h)))
+    ((err e) (result::err e))))
+
+(pub defun open-binary-input<P> ((name P)) Result<binary-file-stream, FileError> (where (Pathish P))
+  (open-binary name direction-input))
+
+(pub defun open-binary-output<P> ((name P)) Result<binary-file-stream, FileError> (where (Pathish P))
+  (open-binary name direction-output))
+
 (pub defun open-output<P> ((name P)) Result<file-stream, FileError> (where (Pathish P))
   (open-file name direction-output))
 
@@ -3754,6 +3826,77 @@ user-visible capacity."
     out))
 
 ;; ---------------------------------------------------------------------------
+;; The one-object printers (CLHS 22.1.3) -- cl-parity-plan.md Phase 8a.
+;;
+;; `prin1` writes reader syntax (`~s`), `princ` writes it for a person (`~a`),
+;; and `write` picks between the two by `*print-escape*`. The `-to-string`
+;; three are the same choices with the string kept instead of written. Each of
+;; the first three returns its object, as CL's do, so a call can sit inside a
+;; larger expression.
+;;
+;; **`print`/`println` are not these.** They take a control string and are this
+;; language's `format` shorthand -- a different job from CL's `print` (fresh
+;; line, `prin1`, space). Both stay under the names they already have, so CL's
+;; one-argument `print` has no spelling here; write `prin1`, which is what it
+;; prints with.
+;;
+;; Macros rather than functions because the object's type has to be concrete
+;; where the formatting happens: `format`'s `&rest` rejects a type variable
+;; outright (the same reason `to-string` above is a method per scalar type
+;; rather than one generic `defun`), and a macro is checked at the call site,
+;; where the type is known. The stream is optional, as in CL, and defaults to
+;; `*standard-output*`.
+
+(pub defmacro prin1 (x &rest stream)
+  "Write `x` in reader syntax to `stream` (default `*standard-output*`) and
+   return it. CL's `prin1`; `~s` is the same rendering."
+  (let ((v (gensym)))
+    (if (sexpr-null stream)
+        `(let ((,v ,x)) (progn (format *standard-output* "~s" ,v) ,v))
+        `(let ((,v ,x)) (progn (format ,(sexpr-car stream) "~s" ,v) ,v)))))
+
+(pub defmacro princ (x &rest stream)
+  "Write `x` for a person to `stream` (default `*standard-output*`) and return
+   it. CL's `princ`; `~a` is the same rendering."
+  (let ((v (gensym)))
+    (if (sexpr-null stream)
+        `(let ((,v ,x)) (progn (format *standard-output* "~a" ,v) ,v))
+        `(let ((,v ,x)) (progn (format ,(sexpr-car stream) "~a" ,v) ,v)))))
+
+(pub defmacro write (x &rest stream)
+  "Write `x` to `stream` (default `*standard-output*`) the way
+   `*print-escape*` says, and return it. CL's `write`, minus its keyword
+   arguments -- rebind the control variables with `dlet` instead, which is
+   what those keywords are shorthand for."
+  (let ((v (gensym)))
+    (if (sexpr-null stream)
+        `(let ((,v ,x))
+           (progn (if *print-escape*
+                      (format *standard-output* "~s" ,v)
+                      (format *standard-output* "~a" ,v))
+                  ,v))
+        `(let ((,v ,x))
+           (progn (if *print-escape*
+                      (format ,(sexpr-car stream) "~s" ,v)
+                      (format ,(sexpr-car stream) "~a" ,v))
+                  ,v)))))
+
+(pub defmacro prin1-to-string (x)
+  "`x` in reader syntax, as a string. CL's `prin1-to-string`."
+  `(format false "~s" ,x))
+
+(pub defmacro princ-to-string (x)
+  "`x` rendered for a person, as a string. CL's `princ-to-string`. The
+   receiver-first spelling of the same thing is `to-string`."
+  `(format false "~a" ,x))
+
+(pub defmacro write-to-string (x)
+  "`x` as a string, the way `*print-escape*` says. CL's `write-to-string`."
+  (let ((v (gensym)))
+    `(let ((,v ,x))
+       (if *print-escape* (format false "~s" ,v) (format false "~a" ,v)))))
+
+;; ---------------------------------------------------------------------------
 ;; `read` over a stream (CL's `read`; typelisp's own `read` takes a string,
 ;; which is CL's `read-from-string`).
 ;;
@@ -3785,7 +3928,17 @@ user-visible capacity."
    peeked at, so there is nothing to report."
   (match (read-char s) (_ ())))
 
-(defun reader-scan-atom<S> ((s S)) string (where (PeekInput S))
+(defun reader-stopp ((stop Option<char>) (c char)) bool
+  "Whether `c` is the caller-supplied extra delimiter. `read-delimited-list`
+   is the only caller that has one: CL gets the same effect by making the
+   terminator a *terminating macro character* in the readtable, and without
+   readtables (Phase 8c) the scanner has to be told directly. Without it,
+   `(read-delimited-list #\\] s)` over `1]x` scans `1]x` as one atom."
+  (match stop
+    ((none) false)
+    ((some x) (equal c x))))
+
+(defun reader-scan-atom-until<S> ((s S) (stop Option<char>)) string (where (PeekInput S))
   "An atom's characters, up to (not including) whatever ends it. The
    terminator is put back -- that, and only that, is why `read-sexpr` needs
    `PeekInput` rather than plain `CharInput`."
@@ -3794,10 +3947,14 @@ user-visible capacity."
       (match (peek-char s)
         ((none) (break))
         ((some c)
-         (if (reader-delimiterp c)
+         (if (or (reader-delimiterp c) (reader-stopp stop c))
              (break)
              (progn (reader-skip-one s) (setf out (append out (char->string c))) ())))))
     out))
+
+(defun reader-scan-atom<S> ((s S)) string (where (PeekInput S))
+  "An atom's characters, with only the reader's own delimiters ending it."
+  (reader-scan-atom-until s (the Option<char> (option::none))))
 
 (defun reader-scan-name<S> ((s S)) string (where (PeekInput S))
   "The rest of a `#\\newline`-style character name: alphanumerics and `-`."
@@ -3876,7 +4033,7 @@ user-visible capacity."
            (else (break))))))
     out))
 
-(defun reader-scan-hash<S> ((s S)) string (where (PeekInput S))
+(defun reader-scan-hash<S> ((s S) (stop Option<char>)) string (where (PeekInput S))
   "A `#`-token, from a peeked `#`. Returns \"\" for `#| ... |#`, which is a
    comment rather than a datum -- the caller keeps scanning."
   (progn
@@ -3898,9 +4055,9 @@ user-visible capacity."
                  (if (alphap first) (append out (reader-scan-name s)) out))))))
          ;; Any other `#` syntax is not one the reader has; scan it as a token
          ;; and let `read` say so.
-         (else (append "#" (reader-scan-atom s))))))))
+         (else (append "#" (reader-scan-atom-until s stop))))))))
 
-(defun reader-scan-datum<S> ((s S)) string (where (PeekInput S))
+(defun reader-scan-datum-until<S> ((s S) (stop Option<char>)) string (where (PeekInput S))
   "The exact text of the next datum on `s`, or \"\" at end of input.
    Consumes the datum and the whitespace/comments before it, and nothing
    after it but the one character that ends an atom, which is put back."
@@ -3919,6 +4076,12 @@ user-visible capacity."
           ((none) (progn (setf going false) ()))
           ((some c)
            (cond
+             ;; The caller's extra delimiter ends the scan without being
+             ;; consumed -- but only where a datum could start, so a `]`
+             ;; inside `(1 2]` still belongs to the list's own text and is
+             ;; reported by `read` as the malformed list it is.
+             ((and (reader-stopp stop c) (= depth 0))
+              (progn (setf going false) ()))
              ((equal c #\()
               (progn (reader-skip-one s) (setf out (append out "(")) (setf depth (+ depth 1)) (setf wanted false) ()))
              ((equal c #\))
@@ -3938,24 +4101,126 @@ user-visible capacity."
                 (setf wanted true)
                 ()))
              ((equal c #\#)
-              (let ((text (reader-scan-hash s)))
+              (let ((text (reader-scan-hash s stop)))
                 (if (equal text "")
                     ()                                  ; a block comment: no datum yet
                     (progn (setf out (append out text)) (setf wanted false) ()))))
-             (else (progn (setf out (append out (reader-scan-atom s))) (setf wanted false) ())))))
+             (else (progn (setf out (append out (reader-scan-atom-until s stop))) (setf wanted false) ())))))
         (if (and (= depth 0) (not wanted)) (progn (setf going false) ()) ())))
     out))
 
-(pub defun read-sexpr<S> ((s S)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
-  "Read one datum from `s` -- CL's `read`. `Ok(none)` at end of input (so a
-   read loop ends on a value rather than an error), `Err` if what is there is
-   not a datum. Reads exactly one, so the next call gets the next one."
+(defun reader-scan-datum<S> ((s S)) string (where (PeekInput S))
+  "The next datum's text, with only the reader's own delimiters ending it."
+  (reader-scan-datum-until s (the Option<char> (option::none))))
+
+(pub defun read-sexpr-preserving-whitespace<S> ((s S)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
+  "Read one datum from `s`, leaving everything after it untouched -- CL's
+   `read-preserving-whitespace`. `Ok(none)` at end of input (so a read loop
+   ends on a value rather than an error), `Err` if what is there is not a
+   datum."
   (let ((text (reader-scan-datum s)))
     (if (equal text "")
         (result::ok (option::none))
         (match (read text)
           ((ok v) (result::ok (option::some v)))
           ((err e) (result::err e))))))
+
+(defun reader-read-one-until<S> ((s S) (stop Option<char>)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
+  "`read-sexpr-preserving-whitespace` with an extra delimiter -- what
+   `read-delimited-list` reads each element with."
+  (let ((text (reader-scan-datum-until s stop)))
+    (if (equal text "")
+        (result::ok (option::none))
+        (match (read text)
+          ((ok v) (result::ok (option::some v)))
+          ((err e) (result::err e))))))
+
+(pub defun read-sexpr<S> ((s S)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
+  "Read one datum from `s` -- CL's `read`. `Ok(none)` at end of input (so a
+   read loop ends on a value rather than an error), `Err` if what is there is
+   not a datum. Reads exactly one, so the next call gets the next one.
+
+   Consumes the one whitespace character that ended the datum, as CL's `read`
+   does -- which is what makes a form typed at a terminal take its newline
+   with it. `read-sexpr-preserving-whitespace` is the same read without that
+   step."
+  (let ((v (read-sexpr-preserving-whitespace s)))
+    (progn
+      ;; Only whitespace, and only one: a `)` or a `"` that ended the datum
+      ;; belongs to whatever comes next.
+      (match (peek-char s)
+        ((none) ())
+        ((some c) (if (reader-whitespacep c) (reader-skip-one s) ())))
+      v)))
+
+;; CL's `read-from-string`, whose *second* return value is where reading
+;; stopped. This language has no multiple values, so the two come back as one
+;; `cons-cell` -- `(car r)` is the datum, `(cdr r)` the character index to read
+;; from next, which is what makes reading a string datum by datum a loop
+;; rather than a re-scan.
+;;
+;; `read` (the builtin) is the same read without the index: CL's
+;; `read-from-string` used for its first value only, which is the common case.
+(pub defun read-from-string ((s string) &optional (start i64 0)) Result<cons-cell<Sexpr, i64>, ReadError>
+  "One datum from `s` beginning at character index `start`, paired with the
+   index reading stopped at. Consumes the whitespace character that ended the
+   datum, as CL's `read-from-string` does."
+  (read-datum-at s start false))
+
+(pub defun read-from-string-preserving-whitespace ((s string) &optional (start i64 0))
+    Result<cons-cell<Sexpr, i64>, ReadError>
+  "`read-from-string` without consuming the whitespace that ended the datum --
+   CL's `read-from-string` with `:preserve-whitespace t`. The difference shows
+   in the returned index, and so in what the next read sees."
+  (read-datum-at s start true))
+
+;; CL's `read-delimited-list`: every datum up to `terminator`, which is
+;; consumed. Unterminated input is an error rather than a short list --
+;; a missing `)` is a mistake, and CL signals it too.
+;;
+;; CL's third argument (`recursive-p`) has nothing to correspond to here: it
+;; exists to tell CL's reader that the call is inside a reader macro, and
+;; there are no reader macros (cl-parity-plan.md Phase 8c).
+(pub defun read-delimited-list<S> ((terminator char) (s S)) Result<Sexpr, ReadError> (where (PeekInput S))
+  "Every datum on `s` up to `terminator`, as a list. The terminator is
+   consumed; reaching end of input first is an `Err`."
+  (let ((acc (the Vector<Sexpr> (Vector::new))) (failed (the Option<ReadError> (option::none))) (going true))
+    (progn
+      (while going
+        (progn
+          (reader-scan-atmosphere s)
+          (match (peek-char s)
+            ((none)
+             (progn
+               (setf failed (option::some (ReadError::ReadError
+                 (format false "read-delimited-list: end of input before the closing ~a" terminator))))
+               (setf going false)
+               ()))
+            ((some c)
+             (if (equal c terminator)
+                 (progn (reader-skip-one s) (setf going false) ())
+                 (match (reader-read-one-until s (option::some terminator))
+                   ((err e) (progn (setf failed (option::some e)) (setf going false) ()))
+                   ((ok found)
+                    (match found
+                      ((none)
+                       (progn
+                         (setf failed (option::some (ReadError::ReadError
+                           (format false "read-delimited-list: end of input before the closing ~a" terminator))))
+                         (setf going false)
+                         ()))
+                      ((some v) (progn (push acc v) ()))))))))))
+      (match failed
+        ((some e) (result::err e))
+        ((none) (result::ok (sexpr-list-from acc)))))))
+
+(defun sexpr-list-from ((v Vector<Sexpr>)) Sexpr
+  "The elements of `v` as a list, front to back."
+  (let ((out (quote ())) (i (- (len v) 1)))
+    (progn
+      (while (>= i 0)
+        (progn (setf out (sexpr-cons (get v i) out)) (setf i (- i 1)) ()))
+      out)))
 
 ;; ---------------------------------------------------------------------------
 ;; The `with-...` macros, which are the reason `close` rarely appears in user

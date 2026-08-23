@@ -167,6 +167,23 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
                 Err(m) => Ok(result_err(heap, m)),
             }
         }
+        "stream-read-byte" => {
+            let h = arg!(int(args, 0, name));
+            match with_streams(|t| t.read_byte(h)) {
+                Ok(b) => {
+                    let inner = option_value(heap, b.map(|b| Value::Int(b as i64)));
+                    Ok(result_ok(heap, inner))
+                }
+                Err(m) => Ok(result_err(heap, m)),
+            }
+        }
+        "stream-write-byte" => {
+            let (h, b) = (arg!(int(args, 0, name)), arg!(int(args, 1, name)));
+            match u8::try_from(b) {
+                Ok(b) => wrap!(with_streams(|t| t.write_byte(h, b)), |_v: ()| Value::Empty),
+                Err(_) => Ok(result_err(heap, format!("write-byte: {} is not a byte (0..255)", b))),
+            }
+        }
         "stream-unread-char" => {
             let (h, c) = (arg!(int(args, 0, name)), arg!(character(args, 1, name)));
             wrap!(with_streams(|t| t.unread_char(h, c)), |_v: ()| Value::Empty)

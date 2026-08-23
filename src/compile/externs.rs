@@ -91,6 +91,7 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // to reach up into `typelisp`, which depends on the runtime rather
         // than the other way round.
         "read" => "rt_read",
+        "read-datum-at" => "rt_read_datum_at",
         // `eval` (`typelisp_front::shim`), the last of the six builtins that
         // used to make a caller uncompilable. Its implementation is the
         // checker and the interpreter, which is why they are a crate below
@@ -142,6 +143,8 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "stream-input-p" => "rt_stream_input_p",
         "stream-output-p" => "rt_stream_output_p",
         "stream-read-char" => "rt_stream_read_char",
+        "stream-read-byte" => "rt_stream_read_byte",
+        "stream-write-byte" => "rt_stream_write_byte",
         "stream-unread-char" => "rt_stream_unread_char",
         "stream-listen" => "rt_stream_listen",
         "stream-write-string" => "rt_stream_write_string",
@@ -334,7 +337,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 195] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 198] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -345,7 +348,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 195] {
     };
     use typelisp_print::aot::{rt_print_enum_variant, rt_print_object_method};
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
-    use typelisp_read::shim::rt_read;
+    use typelisp_read::shim::{rt_read, rt_read_datum_at};
     use typelisp_rt::sys_builtin::{
         rt_command_line_args, rt_exit, rt_get_internal_real_time, rt_get_universal_time, rt_getenv,
         rt_home_directory, rt_lisp_implementation_version, rt_machine_type, rt_parse_float,
@@ -360,9 +363,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 195] {
         rt_file_list_directory, rt_file_modified_date, rt_file_rename, rt_file_truename,
         rt_stream_at_line_start, rt_stream_close,
         rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p,
-        rt_stream_output_p, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
+        rt_stream_output_p, rt_stream_read_byte, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
         rt_stream_string_input, rt_stream_string_output, rt_stream_take_output_string, rt_stream_unread_char,
-        rt_stream_write_string,
+        rt_stream_write_byte, rt_stream_write_string,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
         rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len,
         rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum,
@@ -425,6 +428,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 195] {
         ("rt_get_internal_real_time", rt_get_internal_real_time as usize),
         ("rt_exit", rt_exit as usize),
         ("rt_read", rt_read as usize),
+        ("rt_read_datum_at", rt_read_datum_at as usize),
         // `eval` and the two startup calls an AOT executable makes to give it
         // an environment (`aot::build_main_wrapper`). The two are useless under
         // JIT — there is already an interpreter — but they are declared in
@@ -567,6 +571,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 195] {
         ("rt_stream_input_p", rt_stream_input_p as usize),
         ("rt_stream_output_p", rt_stream_output_p as usize),
         ("rt_stream_read_char", rt_stream_read_char as usize),
+        ("rt_stream_read_byte", rt_stream_read_byte as usize),
+        ("rt_stream_write_byte", rt_stream_write_byte as usize),
         ("rt_stream_unread_char", rt_stream_unread_char as usize),
         ("rt_stream_listen", rt_stream_listen as usize),
         ("rt_stream_write_string", rt_stream_write_string as usize),

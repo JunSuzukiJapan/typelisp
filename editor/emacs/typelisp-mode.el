@@ -116,7 +116,11 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "fresh-line" "get-output-stream-string" "make-broadcast-stream" "make-concatenated-stream"
     "make-echo-stream" "make-peek-stream" "make-string-input-stream" "make-string-output-stream"
     "make-two-way-stream"
+    "open-binary" "open-binary-input" "open-binary-output"
+    "read-datum-at" "read-delimited-list" "read-from-string"
+    "read-from-string-preserving-whitespace" "read-sexpr-preserving-whitespace"
     "open-file" "open-input" "open-output" "open-stream-p" "peek-char"
+    "read-byte" "write-byte"
     "probe-file" "read-all" "read-char" "read-file-lines"
     "read-file-string" "read-item" "read-line" "read-lines" "read-sexpr" "rename-file"
     "terpri" "unread-char" "with-input-from-string" "with-open-file" "with-output-to-string"
@@ -256,6 +260,10 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; ordinary calls.
     "simple-error" "wrap-error" "describe-error"
     "assert" "warn" "dlet" "with-standard-io-syntax"
+    ;; the one-object printers (Phase 8a).  Macros over `format', so they
+    ;; read as ordinary calls too.
+    "prin1" "princ" "write"
+    "prin1-to-string" "princ-to-string" "write-to-string"
     ;; pretty-printer helpers callable inside `pprint-logical-block' (§15.1)
     "pprint-newline" "pprint-indent" "pprint-tab" "pprint-pop"
     "pprint-exit-if-list-exhausted" "pprint-list-exhausted"
@@ -303,6 +311,7 @@ stream (CLHS 12.1.6).")
 (defconst typelisp-builtin-types
   '(;; stream traits and concrete stream types (§18)
     "broadcast-stream" "charinput" "charoutput" "concatenated-stream"
+    "binary-file-stream" "byteinput" "byteoutput"
     "echo-stream" "fileerror" "inputstream" "outputstream" "peekinput"
     "peek-stream" "standard-stream" "stream" "string-input-stream"
     "string-output-stream" "two-way-stream"

@@ -3850,6 +3850,8 @@ stream_shim!(rt_stream_open_p, "stream-open-p", [int], bool);
 stream_shim!(rt_stream_input_p, "stream-input-p", [int], tagged);
 stream_shim!(rt_stream_output_p, "stream-output-p", [int], tagged);
 stream_shim!(rt_stream_read_char, "stream-read-char", [int], tagged);
+stream_shim!(rt_stream_read_byte, "stream-read-byte", [int], tagged);
+stream_shim!(rt_stream_write_byte, "stream-write-byte", [int, int], tagged);
 stream_shim!(rt_stream_unread_char, "stream-unread-char", [int, char], tagged);
 stream_shim!(rt_stream_listen, "stream-listen", [int], tagged);
 stream_shim!(rt_stream_write_string, "stream-write-string", [int, str], tagged);

@@ -993,6 +993,25 @@ CL にあってここに無いもの（cl-parity-plan.md Phase 4c に理由を�
 `bool` でもストリームでもない `dest` は「destination は `true`/`false` か `CharOutput` を実装した
 ストリーム」という型エラーになる。
 
+**1 引数プリンタ**（CLHS 22.1.3）は書式展開ではなく、値ひとつをそのまま印字する。
+すべて prelude のマクロで、ストリームは省略可能（既定 `*standard-output*`）。
+
+| 名前 | 形式 | 説明 |
+|---|---|---|
+| `prin1` | `(prin1 x [stream])` | 読み戻せる表現（`~s` と同じ）で書き、`x` を返す |
+| `princ` | `(princ x [stream])` | 人向けの表現（`~a` と同じ）で書き、`x` を返す |
+| `write` | `(write x [stream])` | `*print-escape*` が真なら `prin1`、偽なら `princ`。`x` を返す |
+| `prin1-to-string` | `(prin1-to-string x)` | 書かずに文字列で返す（`~s`） |
+| `princ-to-string` | `(princ-to-string x)` | 同上（`~a`）。受け手先頭の綴りは `to-string` |
+| `write-to-string` | `(write-to-string x)` | 同上、`*print-escape*` に従う |
+
+`print`/`println` は**これらではない**。制御文字列を取る `format` の短縮形であり、
+CL の `print`（改行 → `prin1` → 空白）とは別の仕事なので、両方をそれぞれの名前で残してある。
+その結果 **CL の 1 引数 `print` にはこの言語での綴りが無い**——`prin1` を書く。
+
+関数でなくマクロなのは、`format` の可変長引数が型変数を受け付けないため（上記のとおり
+`Sexpr` 表現を持つ具体型でなければならない）。マクロなら呼び出し地点で型が具体化している。
+
 **標準入力を読む**のは専用関数ではなく、標準ストリーム `*standard-input*` に対する
 `CharInput` のメソッド（§18.1）——`(read-line *standard-input*)` / `(read-char *standard-input*)` /
 `(read-all *standard-input*)`。標準出力・標準エラーも同様に `*standard-output*` /
@@ -1045,9 +1064,29 @@ CL の `format` ディレクティブをほぼ網羅する。各ディレクテ�
 | `~<...~;...~:>` | **論理ブロック**（閉じが `~:>`。上の桁揃えとは別物）。先頭セグメント=prefix、末尾=suffix（いずれもリテラル文字列のみ）。`~@;` 区切りなら prefix は**行頭 prefix**。`~:<` は prefix/suffix を `(`/`)` に既定。引数はリスト1つ（`~@<` は残り引数をその場で使う） |
 | `~?` | 間接（次の引数=制御文字列、その次=引数リスト。`~@?`=以降の引数を流用） |
 | `~*` | 引数スキップ（`~n*`=n個進む, `~:*`=戻る, `~@*`=絶対位置へ） |
+| `~/name/` | メソッド呼び出し（下記。`:`/`@` フラグがメソッドへ渡る） |
 
-**未対応**（実行時エラー）: `~/name/`（関数呼び出しディレクティブ。実行時の関数名解決機構が
-`format` の呼出規約に合わない）。CL の `~:a`/`~@[` の nil 特有挙動は typelisp の `false` に読み替える
+**`~/name/` は CL と 1 点違う: 名前をグローバル関数ではなく引数自身の型のメソッドとして引く。**
+メソッドの形は `((self Self) (colon bool) (at bool)) → string` で、ディレクティブの `:`/`@` が
+そのまま渡る。CL の読み（グローバル関数）はこの言語では健全に実装できない——制御文字列は
+実行時の `string` なので「どのディレクティブがどの引数に当たるか」は検査時に決まらず、
+その時点で登録済みの定義が持っているのは表現（`Repr`）だけで、`Repr::Struct` は全 `defstruct` を
+1 つに潰す。名前だけで引くと `point` 用のヘルパを `pathname` に対して呼べてしまう。値の型で
+ディスパッチすれば、そのメソッドはまさにその型に対して型検査済みなので健全（`print-object` と
+同じ仕組み）。`string`/`bool`/`char`/`symbol`/リストのような即値も引ける。整数だけは
+`i32`/`i64` を値から区別できないため、**両方が同名メソッドを定義しているときだけ**エラーになる。
+メソッドが無いのはエラー（`~a` と違い戻り先が無い）。**AOT 実行ファイルでは使えない**——
+到達しうるメソッドをコンパイル時に決められないため。
+
+```lisp
+(defstruct point (x i64) (y i64))
+(defmethod brief ((self point) (colon bool) (at bool)) string
+  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
+(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+```
+
+CL の `~:a`/`~@[` の nil 特有挙動は typelisp の `false` に読み替える
 （nil は無い）。pretty-printer 系ディレクティブ（`~_` `~i` `~:t` `~<...~:>`、および `~a`/`~s`/`~w` の
 整形経路）は `*print-pretty*` が偽のとき CL 同様すべて no-op——既定は偽なので、既存の出力は一切変わらない。
 詳細は下の §15.1。
@@ -1205,6 +1244,11 @@ pretty printer とも合成される（§15.1）。`*print-pretty*` が真なら
 
 - **登録は静的**。`impl` はふつうのメソッド定義として型検査されるので、型名の打ち間違いも
   シグネチャ違いもコンパイルエラーになる。別建ての登録表は無い。
+- **ジェネリック型には効かない（既知の穴）**。`(impl print-object box<T> ...)` は型検査を通り、
+  `(print-object x true)` と名前で呼べば動くのに、プリンタからは見えず組み込み表現のまま出る。
+  プリンタは値が持つ型キーでメソッドを引くが、単型化が型引数を消しているのでキーは `box` で
+  あって `box<i64>` ではなく、値の側に「どの実体化なのか」が書かれていない。`Array<T>` の
+  `print-object` と `*print-array*` がまだ無いのはこれが理由（docs/dev/TODO.md）。
 - **選択は印字時**。どのディレクティブがどの引数を消費するかは制御文字列の実行時の中身で
   決まるため、`~a` と `~s` の区別（＝`escape`）は印字の瞬間にしか分からない。CLOS が
   `print-object` メソッドを「クラスごとに定義し、印字時に選択する」のと同じ。
@@ -1289,6 +1333,7 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 | `*print-case*` | `symbol` | `:downcase` | シンボル名の大小。`:upcase` / `:downcase` / `:capitalize`（CL と同じ綴り。この言語のキーワードは自己評価する `symbol`） |
 | `*print-readably*` | `bool` | `false` | 真なら読み戻せる形で印字する。エスケープを強制し、`*print-level*`/`*print-length*` の打ち切りを無効化する |
 | `*print-lines*` | `i64` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 以下は無制限 |
+| `*print-escape*` | `bool` | `true` | `write`/`write-to-string` が `prin1` と `princ` のどちらをするか。**これを読むのはその 2 つだけ** |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
@@ -1306,8 +1351,14 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 この言語には上げるコンディションが無く、`print-object` が何でも印字しうるユーザ型について
 可否を決める手段も無い。エスケープと打ち切りの上書きだけが入っている。
 
+**`*print-escape*` を読むのが `write` だけな理由**: CLHS どおり `~s`/`prin1`/`pprint` は
+これを真に、`~a`/`princ` は偽に、それぞれ自分の呼び出しの間だけ束縛する。つまり誰も
+束縛していない状態で読まれるのは `write`/`write-to-string` だけ。`print-object` の実装は
+この大域変数ではなく自分の `escape` 引数を読むこと——そちらが directive の選んだ値を運ぶ。
+
 **CL にあって無いもの**: `*print-gensym*`（未 intern シンボルが無い）。
-`*print-array*` と `*print-escape*` は Phase 8a 待ち。
+`*print-array*` は入っていない——`Array<T>` 自身の印字が要り、それには
+`print-object` がジェネリック型に効く必要がある（§15.2 の「既知の穴」）。
 
 #### 一時的な差し替え
 
@@ -1329,7 +1380,26 @@ CL はこれらを `let` で束縛するが、この言語の `let` は字句束
 | `parse-int` | `(parse-int s)` | `string→Result<i32,ParseIntError>` | 10進整数（`+`/`-`前置可）。Rust の `str::parse::<i32>` と同じ受理範囲 |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
 | `read` | `(read s)` | `string→Result<Sexpr,ReadError>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err`。CL の `read-from-string` に当たる——ストリームから読むのは `read-sexpr`（§18.5） |
+| `read-from-string` | `(read-from-string s [start])` | `(string,i64)→Result<cons-cell<Sexpr,i64>,ReadError>` | `read` に**読み終わり位置**を添えたもの。`(car r)` が値、`(cdr r)` が次に読む文字位置。`start` 省略時は 0 |
+| `read-from-string-preserving-whitespace` | 同上 | 同上 | 同上だが datum を終わらせた空白を消費しない。違いは返る位置に出る |
 | `eval` | `(eval form)` | `Sexpr→Result<Sexpr,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
+
+CL は `read-from-string` から**2 値**（値と位置）を返すが、この言語に多値は無いので
+`cons-cell` 1 つで返す。位置があると、文字列を 1 データずつ読むのが再スキャンではなく
+ループになる:
+
+```lisp
+(let ((s "1 2 3") (i (the i64 0)) (going true))
+  (while going
+    (match (read-from-string s i)
+      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+                     (if (>= i (as i64 (length s))) (progn (setf going false) ()) ()) ()))
+      ((err e) (progn (setf going false) ())))))
+```
+
+`preserving-whitespace` の違いは**空白 1 文字**だけ——CL の `read` は datum を終わらせた空白を
+消費し、`read-preserving-whitespace` は残す。`(read-from-string "12 34")` は位置 3 を返し、
+preserving 版は 2 を返す。
 
 リーダが読む数値表記は10進のほか、`0x`（16進）と CL の **radix マクロ** `#b`（2進）・`#o`（8進）・
 `#x`（16進）・`#NNr`（基数 NN、2〜36）。符号は印の**後ろ**（`#x-ff`）で、`i64` に収まらなければ
@@ -1494,6 +1564,7 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 | `string-input-stream` | `(make-string-input-stream s)` | `CharInput` `PeekInput` |
 | `string-output-stream` | `(make-string-output-stream)` | `CharOutput` |
 | `standard-stream` | `*standard-input*` `*standard-output*` `*error-output*` | `CharInput` `PeekInput` `CharOutput` |
+| `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` は `direction-input` / `direction-output` / `direction-append` の3定数。
 `open-file` は開けなければ `Err(FileError)` を返す（存在しないファイルは普通の結果であって
@@ -1501,6 +1572,20 @@ panic ではない）。ファイル名は文字列でも `pathname` でもよ�
 
 `(get-output-stream-string s)` は `string-output-stream` に書かれた内容を返して空にする。
 CL 同様、`close` 後でも取り出せる。
+
+**バイト I/O** は `ByteInput`/`ByteOutput`。`InputStream`/`OutputStream` の `Item` を
+`i64` に固定したもので、`CharInput`/`CharOutput` が `char` に固定しているのと同じ形。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `read-byte` | `(read-byte s)` | `(S)→Option<i64>` where `ByteInput S` | 次の1バイト。ファイル終端で `none` |
+| `write-byte` | `(write-byte s b)` | `(S,i64)→()` where `ByteOutput S` | 1バイト書く。0..255 の外はエラー |
+
+CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出し**で決めるが、
+ここでは要素型はストリームの**型**なので、違うのは開く関数の側になる。文字ストリームから
+バイトを読むことは型エラーであり（`string-input-stream` は `ByteInput` を実装しない）、
+native 層でも拒否する——次の文字の UTF-8 エンコーディングを返すのは、そこに無いファイルを
+発明することだから。`unread-char` が保留中のストリームからのバイト読みも同じ理由で拒否する。
 
 ### 18.3 合成ストリーム
 
@@ -1528,7 +1613,9 @@ CL 同様、`close` 後でも取り出せる。
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | 全部転送 |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | 残り全行 |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `Sexpr` を1つ読む（CL の `read`）。入力末尾は `Ok(none)`、データでなければ `Err`。ちょうど1個だけ消費する |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `Sexpr` を1つ読む（CL の `read`）。入力末尾は `Ok(none)`、データでなければ `Err`。datum を終わらせた**空白1文字を消費する**（CL と同じ） |
+| `read-sexpr-preserving-whitespace` | 同上 | 同上 | 同上だが空白を残す（CL の `read-preserving-whitespace`） |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Sexpr,ReadError>` where `PeekInput S` | `ch` まで読んでリストにする。`ch` は消費。入力が尽きたら `Err` |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 1行ずつ書く |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | 全内容 |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 全行 |
@@ -1563,6 +1650,12 @@ CL 同様、`close` 後でも取り出せる。
 
 入力側も同じで、書くのは `read-item` だけ。押し戻しを自前で持たない型でも、
 `(read-sexpr (make-peek-stream my-stream))` と包めば `read` できる。
+
+`read-delimited-list` の終端文字は**トークンも終わらせる**。CL は終端文字をリードテーブルの
+terminating macro character にすることでこれを実現するが、リードテーブルが無い（Phase 8c）ので
+スキャナに直接渡している。効くのは深さ 0 だけで、`(1 2]` の `]` はリスト自身のテキストの一部
+として `read` に渡り、壊れたリストとして報告される。CL の第3引数 `recursive-p` に対応物は無い
+（リーダマクロが無いので伝える相手がいない）。
 
 ### 18.7 CL との違い
 

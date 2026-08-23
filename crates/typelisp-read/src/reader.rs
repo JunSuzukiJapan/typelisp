@@ -128,6 +128,41 @@ impl Reader {
         read_datum(&mut cur, heap, &self.features).map_err(|e| e.at(cur.loc()))
     }
 
+    /// Read one datum starting at character index `start`, and say where
+    /// reading stopped — CL's `read-from-string`, whose second return value
+    /// this is. The index counts *characters*, as CL's does.
+    ///
+    /// `preserve_whitespace` is CL's distinction between `read-from-string`
+    /// and `read-from-string-preserving-whitespace`: the datum itself always
+    /// ends where it ends, but `read` consumes the one whitespace character
+    /// that terminated it and the preserving form does not. It matters to a
+    /// caller that reads again from the returned index and wants to know
+    /// whether a space is still there.
+    ///
+    /// `start` past the end of `src` reads nothing and reports the error the
+    /// reader reports for empty input; a `start` inside a datum reads
+    /// whatever begins there, which is the caller's business, not this
+    /// function's.
+    pub fn read_from(
+        &self,
+        heap: &mut Heap,
+        src: &str,
+        start: usize,
+        preserve_whitespace: bool,
+    ) -> Result<(Value, usize), Error> {
+        let mut cur = Cursor::new("<input>", src);
+        cur.seek(start);
+        let v = read_datum(&mut cur, heap, &self.features).map_err(|e| e.at(cur.loc()))?;
+        if !preserve_whitespace {
+            if let Some(c) = cur.peek() {
+                if c.is_whitespace() {
+                    cur.next();
+                }
+            }
+        }
+        Ok((v, cur.pos()))
+    }
+
     /// Read every top-level datum from `src`.
     ///
     /// Each returned value is registered as a GC root (so later reads cannot
@@ -218,6 +253,18 @@ impl Cursor {
             }
         }
         c
+    }
+    /// Jump to character index `n`, keeping `line`/`col` truthful by
+    /// counting the characters skipped over — an error reported after a
+    /// `seek` must still name the right place in the source.
+    fn seek(&mut self, n: usize) {
+        let n = n.min(self.chars.len());
+        while self.pos < n {
+            self.next();
+        }
+    }
+    fn pos(&self) -> usize {
+        self.pos
     }
     fn at_end(&self) -> bool {
         self.pos >= self.chars.len()

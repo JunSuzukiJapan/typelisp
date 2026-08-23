@@ -40,6 +40,9 @@ pub struct PrintHooks {
     pub enum_variant_name: fn(&str, usize) -> Option<String>,
     /// `(heap, value, escape) -> rendering`. See [`PrintEnv::print_object`].
     pub print_object: fn(&mut Heap, Value, bool) -> Result<Option<String>, String>,
+    /// `(heap, name, value, colon, at) -> rendering`, for `~/name/`. See
+    /// [`PrintEnv::format_call`].
+    pub format_call: fn(&mut Heap, &str, Value, bool, bool) -> Result<String, String>,
     /// The three layout control variables (`*print-pretty*`,
     /// `*print-right-margin*`, `*print-miser-width*`), read fresh per
     /// printing operation — typelisp has no dynamic binding, so they are
@@ -61,6 +64,7 @@ pub struct PrintHooks {
 pub const BARE_HOOKS: PrintHooks = PrintHooks {
     enum_variant_name: |_, _| None,
     print_object: |_, _, _| Ok(None),
+    format_call: |_, name, _, _, _| Err(format!("format: ~/{}/ needs a program to look the method up in", name)),
     opts: |_| Opts::default(),
     print_vars: |_| PrintVars::default(),
 };
@@ -93,6 +97,10 @@ impl PrintEnv for RtPrintEnv {
 
     fn print_object(&self, heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {
         (self.hooks.print_object)(heap, v, escape)
+    }
+
+    fn format_call(&self, heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
+        (self.hooks.format_call)(heap, name, v, colon, at)
     }
 }
 

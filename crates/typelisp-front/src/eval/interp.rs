@@ -1685,6 +1685,7 @@ impl Interp {
             "parse-int" => Some(eval_parse_int(heap, args)),
             "parse-float" => Some(eval_parse_float(heap, args)),
             "read" => Some(eval_read(heap, args)),
+            "read-datum-at" => Some(eval_read_datum_at(heap, args)),
             "eval" => Some(self.eval_form(heap, &args[0])),
             "macroexpand-1" => Some(self.macroexpand_1_form(heap, args[0])),
             "macroexpand" => Some(self.macroexpand_form(heap, args[0])),
@@ -1888,6 +1889,94 @@ impl Interp {
         match result.map_err(|e| e.to_string())? {
             Value::Str(id) => Ok(Some(heap.string(id).to_string())),
             other => Err(format!("print-object on `{}` returned {:?}, not a string", type_path, other)),
+        }
+    }
+
+    /// `~/name/`'s rendering of `v` — CL's function-call directive.
+    ///
+    /// `name` is a method on `v`'s **own** type, resolved here exactly the way
+    /// [`Self::print_object`] resolves `print-object`. It cannot be a global
+    /// function the way CL's is: a control string is an ordinary runtime
+    /// `string`, so nothing is known at check time about which directive meets
+    /// which argument, and a registered `FnDef` keeps only `Repr`s by then —
+    /// `Repr::Struct` is every `defstruct` at once, so a name-only lookup
+    /// would happily call `point`'s helper with a `pathname`. Dispatching on
+    /// the value keeps the call type-correct by construction.
+    ///
+    /// Unlike `print-object`, a missing method is an **error** rather than a
+    /// silent fallback: `~a` has a built-in rendering to fall back to and
+    /// `~/name/` does not — the control string asked for something specific by
+    /// name, so failing to find it is a mistake worth naming.
+    pub(crate) fn format_call(
+        &self,
+        heap: &mut Heap,
+        name: &str,
+        v: Value,
+        colon: bool,
+        at: bool,
+    ) -> Result<String, String> {
+        // The type(s) `v` could be a value of, as method-table keys. Boxed
+        // values carry their own; the immediate ones do not, so they are
+        // mapped here — soundly, because each mapping is exact: every
+        // `Value::Str` *is* a `string`, so a method registered on `string`
+        // receives what it declared.
+        //
+        // `Value::Int` is the one that is not exact: `i32` and `i64` share the
+        // raw word, and nothing in the value says which was written. Rather
+        // than guess, both are candidates and it is only an error when *both*
+        // define the name — one definition is unambiguous whichever width the
+        // author meant.
+        let candidates: Vec<String> = match v {
+            Value::Boxed(id) => match heap_type_path(heap, id).map(|p| p.to_string()) {
+                Some(key) => vec![key],
+                None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
+            },
+            Value::Str(_) => vec!["string".to_string()],
+            Value::Bool(_) => vec!["bool".to_string()],
+            Value::Char(_) => vec!["char".to_string()],
+            Value::Symbol(_) => vec!["symbol".to_string()],
+            Value::Empty | Value::Cons(_) | Value::Path(_) => vec!["sexpr".to_string()],
+            Value::Int(_) => vec!["i64".to_string(), "i32".to_string()],
+        };
+        let mut found: Vec<(Path, std::rc::Rc<FnDef>)> = Vec::new();
+        for key in &candidates {
+            let type_path = Path::from_segments(key.split("::").map(|s| s.to_string()).collect());
+            if let Some(f) = self.root.borrow().get_method(&type_path, name) {
+                found.push((type_path, f));
+            }
+        }
+        let (type_path, f) = match found.len() {
+            1 => found.pop().expect("just checked there is one"),
+            0 => {
+                return Err(format!(
+                    "format: ~/{}/ — {} has no method `{}`",
+                    name,
+                    candidates.iter().map(|c| format!("`{}`", c)).collect::<Vec<_>>().join(" or "),
+                    name
+                ))
+            }
+            _ => {
+                return Err(format!(
+                    "format: ~/{}/ — an integer argument could be either width and both \
+                     `i64` and `i32` define `{}`; there is nothing in the value to choose by",
+                    name, name
+                ))
+            }
+        };
+        match f.sig.as_ref() {
+            Some((params, ret))
+                if params.len() == 3 && params[1] == Repr::Bool && params[2] == Repr::Bool && *ret == Repr::Str => {}
+            _ => {
+                return Err(format!(
+                    "format: ~/{}/ — `{}`'s `{}` must be \
+                     `((self Self) (colon bool) (at bool)) -> string`",
+                    name, type_path, name
+                ))
+            }
+        }
+        match self.apply(heap, &f, vec![v, Value::Bool(colon), Value::Bool(at)]).map_err(|e| e.to_string())? {
+            Value::Str(id) => Ok(heap.string(id).to_string()),
+            other => Err(format!("format: ~/{}/ on `{}` returned {:?}, not a string", name, type_path, other)),
         }
     }
 
@@ -2926,6 +3015,16 @@ fn eval_read(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     Ok(typelisp_read::shim::read_builtin(heap, &s))
 }
 
+fn eval_read_datum_at(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+    let s = expect_str(heap, &args[0])?.to_string();
+    let start = match args[1] {
+        Value::Int(n) => n,
+        ref other => return Err(EvalError::Internal(format!("read-datum-at: start is not an integer: {:?}", other))),
+    };
+    let preserve = matches!(args[2], Value::Bool(true));
+    Ok(typelisp_read::shim::read_datum_at_builtin(heap, &s, start, preserve))
+}
+
 /// Whether `type_name` is one of the integer types — every one of which shares
 /// the same catalog and the same runtime representation (`Value::Int`, an
 /// `i64`, whatever width the static type claims; see `registry::int_assoc`).
@@ -3557,6 +3656,10 @@ const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
         // program (a unit test), where no type can have a `print-object`
         // method because no program defined one.
         None => Ok(None),
+    },
+    format_call: |heap, name, v, colon, at| match with_active_interp(|i| i.format_call(heap, name, v, colon, at)) {
+        Some(r) => r,
+        None => Err(format!("format: ~/{}/ needs a program to look the method up in", name)),
     },
     opts: |heap| with_active_interp(|i| i.pretty_opts(heap)).unwrap_or_default(),
     print_vars: |heap| with_active_interp(|i| i.print_vars(heap)).unwrap_or_default(),

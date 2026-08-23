@@ -57,6 +57,20 @@ thread_local! {
 const AOT_HOOKS: PrintHooks = PrintHooks {
     enum_variant_name: |key, variant| ENUM_NAMES.with(|t| t.borrow().get(&(key.to_string(), variant)).cloned()),
     print_object: aot_print_object,
+    // `~/name/` is not available to an AOT executable. The directive names its
+    // method in a *runtime* string, so nothing at compile time can say which
+    // methods a program might reach that way — supporting it would mean
+    // registering every method of every type at startup, where `print-object`
+    // registers exactly the impls of one trait. An error rather than silence:
+    // the control string asked for something by name.
+    format_call: |_, name, _, _, _| {
+        Err(format!(
+            "format: ~/{}/ is not available in a compiled executable — the method is \
+             looked up by a name that only exists at run time, and an AOT program \
+             registers only its `print-object` methods",
+            name
+        ))
+    },
     opts: BARE_HOOKS.opts,
     print_vars: BARE_HOOKS.print_vars,
 };
