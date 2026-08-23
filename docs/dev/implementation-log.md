@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-08-18 / ブランチ: `main`
+最終更新: 2026-08-24 / ブランチ: `feature/cl-parity`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -8765,3 +8765,94 @@ CL は `:element-type '(unsigned-byte 8)` で要素型を**呼び出し**の性�
 
 テストは `tests/printer_test.rs`（31 本）、`tests/byte_io_test.rs`（13 本）、
 `tests/reader_extras_test.rs`（22 本）。
+
+---
+
+## トップレベル前方参照の廃止 → `defsignature`（2026-08-24、branch `feature/cl-parity`、`af27bae`）
+
+Phase 8c（リードテーブルとリーダマクロ）に着手しようとして、先行条件が塞がっていると分かった。
+
+`Checker::predeclare_program`（2026-08-01、[two-pass-toplevel-plan.md](two-pass-toplevel-plan.md)
+Phase 1）は「最初のフォームを**検査する**前に**全フォームを読む**」ことを要求する。
+リーダマクロは「フォーム *k* を**実行してから** *k+1* を読む」ことを要求する。両者は正面から
+衝突する。方針は**トップレベル `defun` の前方参照を廃止**と決まり、置き換えとして明示の
+前方宣言を入れた。
+
+```lisp
+(defsignature <名前> (<引数型>...) <戻り型>)
+(pub defsignature <名前> (<引数型>...) <戻り型>)
+```
+
+引数名は書かない——本体が無いので名付ける対象が無い。CL の対応物は
+`(declaim (ftype (function (i64) bool) even2?))` だが、あちらは宣言システム一式を伴い、かつ
+**助言**でしかない。こちらは静的型付けなので宣言は検査される。別物として独自の名前を持たせた。
+
+### 決めた規則
+
+- **宣言と定義は一致しなければならない。** 食い違いは定義地点でエラー（引数の個数・各引数の型・
+  戻り型・`&rest`・型パラメータ・`&optional`/`&key`・`pub` をすべて比べる）。
+  `predeclare_program` は黙って上書きしていた。宣言を信用できるものにするのがこの検査の目的。
+- **宣言したまま定義しないのはエラー。** ユニットのロード完了時に `Checker::finish_unit` が
+  未消化の宣言を全部挙げて報告する。REPL は 1 入力ごとには報告しない（宣言と定義を別の行に
+  打てるべき）。
+- **定義より後ろに置いた宣言もエラー。** 当初は再定義として扱うつもりだったが、`RedefPolicy` の
+  既定が警告なので通ってしまい、その宣言が未消化のまま残って `finish_unit` が
+  「定義がありません」という**明らかに嘘の**メッセージを出した。「何もできない宣言だ」と
+  直接言うほうが正確。
+- **ジェネリック関数は宣言できない。** 実体化は**保持したソースフォーム**から行う
+  （`request_fn_specialization` がテンプレート表を先に引く）。本体の無い宣言では実体化しようが
+  ない。今まで動いていたのは `predeclare_defun` が `defun` フォーム丸ごとをテンプレートとして
+  保持していたから。宣言地点で理由を述べて拒否する。`&optional`/`&key` も同じ理由で拒否
+  （既定値は検査済みの式で、署名だけ登録すると呼び出し側が不完全なものを見る）。
+- 対象は `defun` のみ。`defmethod`／型／`defmacro` は今も前方参照不可で、変わらない。
+
+### 実測: 前方参照に実際に依存していたもの
+
+呼び出しグラフを作って（コメント・文字列を除去）調べた。
+
+| 層 | トップレベル `defun` | 前方参照される名前 |
+|---|---|---|
+| 島 `src/compiler.rs` の `SOURCE` | 123 | **65** |
+| prelude | 218 | 1 |
+| `examples/` `projects/` `tests/**/*.typl`（22 ファイル） | — | **0** |
+
+島の 65 は、コンパイラ中核の相互再帰リング（`compile-value` / `compile-assoc` / `compile-if` …）と、
+そのリングから後ろ向きに呼ばれる `compile-int` / `compile-var` / `emit-rt-call` などの合計。
+**この 65 は全部単型で、`where` も `&optional`/`&key` も無い**——上の唯一の制限に 1 つも当たらない。
+prelude の 1 件（`read-delimited-list` → `sexpr-list-from`）は定義順の入れ替えで消した。
+
+**測り間違いを 1 件やった。** 最初の強連結成分の分析で「循環の中から外へ」出る辺を数え落とし、
+54 と報告した。島の再生成が `no such function: compile-int` で落ちて発覚。方針・設計・作業量は
+変わらないが、数字は 65 が正しい。
+
+### 消したもの
+
+`predeclare_program` / `predeclare_form` / `predeclare_defun` と、その呼び出し 8 箇所
+（`project.rs` の 2 ローダ、`compile/aot.rs`、`compile/dump.rs`、`compile/bootstrap.rs`、
+`bin/bench_prelude.rs` ×2、`prelude.rs`）。`predeclared: HashSet<String>` と
+`claim_predeclared`、dump へのシリアライズはそのまま `defsignature` が引き継いだ。
+
+実行時は `"defsignature" => Ok(None)`——`"use"` と同じ no-op トップレベル。全部の効果は
+チェッカーで済んでいる。
+
+### 塞がった穴が 1 つ
+
+「`where` 付き `defun` は前方参照できない」（`predeclare_program` が `deftrait` 登録前に走るため
+ヘッダごと黙って捨てられていた）は、宣言を `deftrait` の後ろに置けるので消えた。
+
+### 締めで出た 1 件
+
+**prelude のダンプは SOURCE 文字列のハッシュ**なので、コメント 1 文字の修正で無効になる。
+島のハッシュは「読んだ形」に対して取る（[[typelisp-island-hash-reads-forms]]）ので
+コメントでは無効化されない——この非対称を取り違えて、prelude を再生成した**あとで**
+`SOURCE` 内のコメントを直し、全直列回帰の 80 ターゲット・1,371 件の panic が全部
+`prelude: the dump is stale` になった。再生成のやり直しだけで解決。
+
+### この後
+
+これで検査はソース順の 1 パスになり、Phase 8c の先行条件が外れた。残る 8c 本体は
+「1 フォームずつ**読む**」へのドライバ改修と、リーダ側フック表（`PrintHooks` 相当）の新設。
+後者は Phase 7b で `*read-base*` を見送った理由そのもので、作れば `*read-base*` /
+`readtable-case` / `#.` も併せて入る。
+
+テストは `tests/defsignature_test.rs`（26 本、`tests/forward_reference_test.rs` を書き換え）。
