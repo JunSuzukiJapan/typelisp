@@ -2028,6 +2028,9 @@ impl Interp {
                 Ok(last)
             }
             "use" => Ok(None),
+            // A forward declaration produced no code — its whole effect
+            // happened in the checker (`Checker::check_defsignature`).
+            "defsignature" => Ok(None),
             // `(expr FORM)`
             "expr" => {
                 let form = core::field(heap, tl, 0)

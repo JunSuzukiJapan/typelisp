@@ -181,7 +181,6 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // `Interp::compile_scc` uses for the JIT's call graph.
     let mut node_names: Vec<(String, String)> = Vec::new(); // (node name, LLVM symbol)
     let mut defvar_inits: Vec<(Path, Value)> = Vec::new();
-    chk.predeclare_program(&mut heap, &forms.iter().map(|(v, _)| *v).collect::<Vec<_>>());
     for (v, loc) in forms {
         let tl = chk.check_form_at(&mut heap, &interp, v, Some(loc)).map_err(|e| e.to_string())?;
         collect_aot_item(&mut heap, &mut interp, tl, &mut node_names, &mut defvar_inits)?;

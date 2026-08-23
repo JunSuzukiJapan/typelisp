@@ -686,16 +686,14 @@ pub struct Checker {
     /// LSP's semantic tokens. A `RefCell` for the same reason as
     /// `loop_stack`/`warnings`: annotation parsing runs under `&self`.
     type_uses: RefCell<Vec<TypeUse>>,
-    /// Fully-qualified names registered by [`Self::predeclare_form`] but not
-    /// yet checked for real. Entries are removed by the matching
-    /// `check_defun`/`check_defmethod` when it comes to register the name
-    /// properly, which is how that check knows the existing registry entry is
-    /// its own pre-declaration rather than a genuine redefinition (see
-    /// [`Self::claim_predeclared`]). A name left here after a whole program
-    /// has been checked simply never had its body checked — that is not an
-    /// error condition (a driver may legitimately pre-declare a form it then
-    /// discards), so nothing verifies emptiness.
-    ///
+    /// Fully-qualified names a `defsignature` has announced and no `defun`
+    /// has yet defined ([`Self::check_defsignature`]). The matching
+    /// `check_defun` removes its own entry, which is how it knows the
+    /// registry entry already under that name is the declaration it is
+    /// fulfilling rather than a genuine redefinition (see
+    /// [`Self::claim_predeclared`]). A name still here when the unit is
+    /// finished is a declaration nothing defined, which
+    /// [`Self::finish_unit`] reports: a declaration promises a definition.
     predeclared: HashSet<String>,
     /// Monotonic counter for the synthetic temporary names `Self::place_dedup`
     /// mints (e.g. `%place-tmp-3`) when desugaring `incf`/`decf`/`rotatef`/
@@ -1918,152 +1916,163 @@ impl Checker {
         result
     }
 
-    /// Pre-registers the *signatures* of every definition in `forms` (a whole
-    /// file/program's top-level forms, in order) so that a later form's body
-    /// may call an earlier-in-the-registry-but-later-in-the-file name.
+    /// `(defsignature name (T...) Ret)` — a forward declaration.
     ///
-    /// This is what makes top-level mutual recursion work. `check_defun`
-    /// already registers a function's own signature before checking its body,
-    /// so *self*-recursion has always worked; what did not was recursion
-    /// *between* forms, because every driver checks and executes one form at a
-    /// time, so `(defun even? ...)` calling a `(defun odd? ...)` written below
-    /// it failed with "no such function". Running this over the form list
-    /// first closes that gap without changing the one-form-at-a-time
-    /// check/exec loop the drivers (and, through `Interp::exec`, macro
-    /// availability) depend on.
+    /// Top-level `defun`s are checked and executed one form at a time, in
+    /// source order, so a body can only call a name the checker has already
+    /// seen. Mutual recursion therefore needs the signature said ahead of the
+    /// definition, and this is where it is said. It replaces the implicit
+    /// pre-pass this checker used to run over a whole file before checking
+    /// any of it (`predeclare_program`, 2026-08-01): that pass required
+    /// reading every form before checking the first, which is exactly what a
+    /// reader macro cannot allow — the reader has to be able to run a form
+    /// before reading the next one.
     ///
-    /// Deliberately narrow — everything it does *not* cover keeps exactly the
-    /// old define-before-use behaviour, so nothing that used to work stops
-    /// working:
+    /// The declaration is *checked*, not merely recorded: the definition that
+    /// follows must agree with it (see `check_defun_fixed`), and a
+    /// declaration with no definition is reported when the unit finishes
+    /// (see [`Self::finish_unit`]). That is the difference from the old
+    /// implicit pass, which could only ever add a name and never reject one.
     ///
-    /// - Only `defun` (plus `(pub defun ...)`, and both inside a nested
-    ///   `(module ...)`).
-    /// - `defmacro` is *not* pre-declared. Expanding a macro needs its body to
-    ///   have been `exec`'d, not merely registered, and this pass runs before
-    ///   any form executes — a pre-declared macro would resolve at check time
-    ///   and then fail at expansion time, which is strictly worse than the
-    ///   current "no such function".
-    /// - Types (`defstruct`/`defenum`/`deftrait`) are not pre-declared, and
-    ///   consequently neither are `defmethod`s (a method registers into its
-    ///   owner's `TypeDef`, which must therefore already exist). A type is a
-    ///   genuinely harder case than a function: a signature is self-contained,
-    ///   whereas a type's registration is what the code registering it needs.
-    ///   So a `defun` whose *signature* mentions a type defined further down
-    ///   also stays un-pre-declared — its body simply keeps the old rule.
-    /// - `&optional`/`&key` `defun`s are skipped; see
-    ///   [`Self::predeclare_defun`].
+    /// Parameters are types alone — there is no body here for a name to mean
+    /// anything to.
     ///
-    /// Nothing is *checked* here, and every error is swallowed rather than
-    /// reported: a malformed or not-yet-resolvable header is left for the real
-    /// `check_form` to diagnose with its full context and source location.
-    /// That is what keeps this pass incapable of introducing a diagnostic of
-    /// its own — it can only ever add a name, never reject one.
-    pub fn predeclare_program(&mut self, heap: &mut Heap, forms: &[Value]) {
-        for v in forms {
-            self.predeclare_form(heap, *v);
+    /// # What cannot be declared
+    ///
+    /// - **Type parameters.** A generic `defun` is instantiated from its
+    ///   retained source form (`request_fn_specialization` consults the
+    ///   template map first), and a declaration has no body to retain. A
+    ///   forward call would resolve and then fail to instantiate, so the
+    ///   declaration is rejected here instead.
+    /// - **`&optional`/`&key`.** Their `FnSig` carries each defaulted
+    ///   parameter's *checked* default expression, which a call site that
+    ///   omits the argument splices in verbatim; a declaration has nowhere to
+    ///   put one, and registering the signature without them would let a
+    ///   forward call see an incomplete one.
+    /// - **Anything but `defun`.** `defmacro` needs its body `exec`'d, not
+    ///   merely registered, before it can expand. A type's registration *is*
+    ///   what the code registering it needs, so a type is a genuinely harder
+    ///   case than a function; `defmethod` follows from that, since a method
+    ///   registers into its owner's `TypeDef`.
+    fn check_defsignature(
+        &mut self,
+        heap: &mut Heap,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+    ) -> Result<TopLevelForm, Error> {
+        if parts.len() != 3 {
+            return Err(Error::TypeError("defsignature: (defsignature name (param-type...) return-type)".into()));
         }
-    }
+        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+        if !type_params.is_empty() {
+            return Err(Error::TypeError(format!(
+                "defsignature: `{}` takes type parameters, and a generic function cannot be forward-declared — \
+                 instantiating one needs its body, which a declaration does not have. Define it before its callers.",
+                name
+            )));
+        }
+        let (params, rest) = self.parse_signature_params(heap, parts[1])?;
+        let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
 
-    /// [`Self::predeclare_program`] for a single form. Recurses into `pub` and
-    /// `(module ...)`; ignores everything else.
-    fn predeclare_form(&mut self, heap: &mut Heap, v: Value) {
-        let Value::Cons(_) = v else { return };
-        let Ok(elems) = heap.list_to_vec(v) else { return };
-        let Some(Value::Symbol(id)) = elems.first() else { return };
-        match heap.symbol_name(*id).to_string().as_str() {
-            "defun" => {
-                let _ = self.predeclare_defun(heap, &elems[1..], false);
-            }
-            "pub" => {
-                if let Some(Value::Symbol(inner)) = elems.get(1) {
-                    match heap.symbol_name(*inner).to_string().as_str() {
-                        "defun" => {
-                            let _ = self.predeclare_defun(heap, &elems[2..], true);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            "module" => {
-                if elems.len() < 2 {
-                    return;
-                }
-                let Ok(segs) = path_to_segs(heap, elems[1]) else { return };
-                self.enter_module(&segs);
-                for form in &elems[2..] {
-                    self.predeclare_form(heap, *form);
-                }
-                self.exit_module(segs.len());
-            }
-            _ => {}
-        }
-    }
-
-    /// Registers one `defun`'s [`FnSig`] (and, when generic, its
-    /// [`FnTemplate`]) without checking its body — the shared body of
-    /// [`Self::predeclare_form`]'s two `defun` arms.
-    ///
-    /// Mirrors the registration half of [`Self::check_defun_fixed`]/
-    /// [`Self::check_defun_opt_key`] exactly, so the real check later
-    /// overwrites its own identical entry. `def_locs`/`docs` are deliberately
-    /// left to the real check: this pass has no location to record and
-    /// nothing consults docs before then.
-    fn predeclare_defun(&mut self, heap: &mut Heap, parts: &[Value], public: bool) -> Result<(), Error> {
-        let (name, type_params) = self.parse_defun_name(heap, *parts.first().ok_or_else(|| Error::TypeError("defun: missing name".into()))?)?;
-        let params_form = *parts.get(1).ok_or_else(|| Error::TypeError("defun: missing params".into()))?;
-        // `&optional`/`&key` are deliberately not pre-declared. Their `FnSig`
-        // carries each defaulted parameter's *checked* default expression
-        // (`OptKeyParam::default`), which a call site that omits the argument
-        // splices in verbatim — so registering the signature without them
-        // would let a forward call see an incomplete one, which is worse than
-        // not resolving at all. Such a `defun` keeps the old
-        // define-before-use requirement.
-        if params_declare_opt_key(heap, params_form)? {
-            return Ok(());
-        }
         let fq_name = self.fq(&name);
-        // A name this pass already claimed is a genuine duplicate; leave it to
-        // the real check, whose `RedefPolicy` handling and location reporting
-        // are the ones that should fire.
-        if !self.predeclared.insert(fq_name.to_string()) {
-            return Ok(());
+        if self.predeclared.contains(&fq_name.to_string()) {
+            return Err(Error::TypeError(format!("defsignature: `{}` is already declared", name)));
         }
-        let locs = vec![None; parts.len()];
-        let (params, _, rest, ret, bounds, _, _) = self.parse_defun_sig(heap, parts, &locs)?;
+        // A declaration *after* the definition is not a redefinition to warn
+        // about — it is a declaration that can never do anything, and saying
+        // so plainly beats the "no definition in this file" the end-of-unit
+        // check would otherwise report about a name that is plainly defined.
+        // The redefinition path still runs for the built-in case, which has
+        // its own message.
+        if let Some(existing) = self.cur_ns().fns.get(&name) {
+            if existing.builtin {
+                self.check_redef("function", &name, Some(existing))?;
+            }
+            return Err(Error::TypeError(format!(
+                "defsignature: `{}` is already defined — a declaration has to come before the definition it announces",
+                name
+            )));
+        }
+
         let sig = FnSig {
-            type_params: type_params.clone(),
-            params: params.iter().map(|(_, t)| t.clone()).collect(),
+            type_params: Vec::new(),
+            params,
             ret,
             public,
-            rest: rest.as_ref().map(|(_, t, _)| t.clone()),
+            rest,
             builtin: false,
-            bounds,
+            bounds: BTreeMap::new(),
             optionals: Vec::new(),
             keys: Vec::new(),
         };
-        // A generic `defun` is instantiated from its retained source form, so
-        // a *forward* generic call needs the template present too, not just
-        // the signature (`request_fn_specialization` consults the template
-        // map first). Rooted permanently for the same reason the real check
-        // roots it — the parts stay reachable for later re-checking.
-        if !type_params.is_empty() && !self.generic_fn_templates.contains_key(&fq_name) {
-            for &p in parts {
-                heap.push_permanent_root(p);
-            }
-            self.generic_fn_templates.insert(
-                fq_name.clone(),
-                FnTemplate { parts: parts.to_vec(), ns: self.ns.clone(), type_params },
-            );
-        }
         self.reg.root.module_mut(&self.ns).fns.insert(name, sig);
-        Ok(())
+        self.predeclared.insert(fq_name.to_string());
+        forms::defsignature_form(heap)
     }
 
-    /// True when `fq` was registered by [`Self::predeclare_form`] and has not
-    /// yet been claimed — consumed by the real `check_defun`/`check_defmethod`
-    /// so it treats the existing registry entry as its own pre-declaration
-    /// rather than a redefinition to report. Claiming removes the entry, so a
-    /// genuine second definition of the same name still trips `check_redef`.
+    /// A `defsignature`'s parameter list: bare types, with an optional
+    /// trailing `&rest T`. The `(name type)` pairs `defun` writes have no
+    /// counterpart here — see [`Self::check_defsignature`].
+    fn parse_signature_params(&self, heap: &Heap, v: Value) -> Result<(Vec<Type>, Option<Type>), Error> {
+        let elems_locs = heap.list_to_vec_locs(v)?;
+        let is_rest_marker =
+            |p: &Value| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest");
+        if elems_locs.iter().any(|(p, _)| {
+            matches!(p, Value::Symbol(id) if matches!(heap.symbol_name(*id), "&optional" | "&key"))
+        }) {
+            return Err(Error::TypeError(
+                "defsignature: `&optional`/`&key` cannot be forward-declared — a declaration has nowhere to put \
+                 their default expressions, which call sites splice in verbatim. Define such a function before its callers."
+                    .into(),
+            ));
+        }
+        let rest_at = elems_locs.iter().position(|(p, _)| is_rest_marker(p));
+        let (fixed, rest_ty) = match rest_at {
+            Some(i) => {
+                if i + 2 != elems_locs.len() {
+                    return Err(Error::TypeError(
+                        "&rest must be followed by exactly one type, as the last item in the parameter list".into(),
+                    ));
+                }
+                let (v, loc) = &elems_locs[i + 1];
+                (&elems_locs[..i], Some(self.parse_type_here_at(heap, *v, loc.as_ref())?))
+            }
+            None => (&elems_locs[..], None),
+        };
+        let mut params = Vec::with_capacity(fixed.len());
+        for (v, loc) in fixed {
+            params.push(self.parse_type_here_at(heap, *v, loc.as_ref())?);
+        }
+        Ok((params, rest_ty))
+    }
+
+    /// Reports every `defsignature` in this unit that never got a definition.
+    ///
+    /// Called by a file/module loader once the unit's forms are all checked.
+    /// The REPL deliberately does *not* call it: a declaration typed on one
+    /// line and its definition on the next are two batches, and both are one
+    /// session.
+    pub fn finish_unit(&mut self) -> Result<(), Error> {
+        if self.predeclared.is_empty() {
+            return Ok(());
+        }
+        let mut names = self.sorted_predeclared();
+        self.predeclared.clear();
+        let list = names.join("`, `");
+        let (subject, verb) = if names.len() == 1 { ("declaration", "has") } else { ("declarations", "have") };
+        names.clear();
+        Err(Error::TypeError(format!(
+            "defsignature: `{}` {} no definition in this file — a {} promises one",
+            list, verb, subject
+        )))
+    }
+
+    /// True when `fq` was declared by a `defsignature` and no `defun` has
+    /// claimed it yet — consumed by `check_defun` so it treats the existing
+    /// registry entry as the declaration it fulfils rather than a
+    /// redefinition to report. Claiming removes the entry, so a genuine
+    /// second definition of the same name still trips `check_redef`.
     fn claim_predeclared(&mut self, fq: &str) -> bool {
         self.predeclared.remove(fq)
     }
@@ -2097,6 +2106,7 @@ impl Checker {
                 match heap.symbol_name(*id) {
                     "pub" => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
                     "defun" => return self.check_defun(heap, interp, &elems[1..], parts_locs, false, def_loc),
+                    "defsignature" => return self.check_defsignature(heap, &elems[1..], parts_locs, false),
                     "defvar" => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc),
                     "defconstant" => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc),
                     "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], parts_locs, false, def_loc),
@@ -2166,6 +2176,7 @@ impl Checker {
         if let Value::Symbol(id) = parts[0] {
             match heap.symbol_name(id) {
                 "defun" => return self.check_defun(heap, interp, &parts[1..], inner_locs, true, def_loc),
+                "defsignature" => return self.check_defsignature(heap, &parts[1..], inner_locs, true),
                 "defvar" => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc),
                 "defconstant" => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc),
                 "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], inner_locs, true, def_loc),
@@ -2176,7 +2187,9 @@ impl Checker {
                 _ => {}
             }
         }
-        Err(Error::TypeError("pub: expected defun/defmacro/defmethod/defstruct/defenum/deftype/defvar/defconstant".into()))
+        Err(Error::TypeError(
+            "pub: expected defun/defsignature/defmacro/defmethod/defstruct/defenum/deftype/defvar/defconstant".into(),
+        ))
     }
 
     // ---- namespace navigation & resolution --------------------------------
@@ -2411,7 +2424,7 @@ impl Checker {
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block"
                 // top-level forms (`check_form_dispatch`)
-                | "pub" | "defun" | "defvar" | "defconstant" | "defmacro" | "module"
+                | "pub" | "defun" | "defsignature" | "defvar" | "defconstant" | "defmacro" | "module"
                 | "defmethod" | "defstruct" | "defenum" | "deftrait" | "deftype" | "impl" | "use" | "load"
         )
     }
@@ -3310,14 +3323,18 @@ impl Checker {
         let fq_name = self.fq(&name);
 
         // Register the signature in the current namespace before checking the
-        // body so self-recursion works. A signature this file's
-        // pre-declaration pass (`Checker::predeclare_program`) already put
-        // there is *this same definition*, not a redefinition — claiming it
-        // consumes the entry, so a genuine second `defun` of the name still
-        // reports through `check_redef` as before.
-        if !self.claim_predeclared(&fq_name.to_string()) {
+        // body so self-recursion works. A signature a `defsignature` already
+        // put there is *this same definition*, not a redefinition — claiming
+        // it consumes the entry, so a genuine second `defun` of the name still
+        // reports through `check_redef` as before. The declared signature is
+        // kept to compare against below: a declaration nobody checks is a
+        // declaration nobody can trust.
+        let declared = if self.claim_predeclared(&fq_name.to_string()) {
+            self.cur_ns().fns.get(&name).cloned()
+        } else {
             self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
-        }
+            None
+        };
 
         // A generic defun additionally retains its raw source form for
         // per-instantiation re-checking — see `FnTemplate`. Retained *before*
@@ -3346,6 +3363,9 @@ impl Checker {
             optionals: Vec::new(),
             keys: Vec::new(),
         };
+        if let Some(decl) = &declared {
+            signature_agrees(&name, decl, &sig)?;
+        }
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
             self.reg.def_locs.fns.insert(fq_name.clone(), loc);
@@ -13565,6 +13585,58 @@ fn path_to_segs(heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
 
 /// Whether `v` is a `(where ...)` clause (vs. an ordinary body form) —
 /// `Checker::check_defun` peeks at this to decide whether to consume it.
+/// Rejects a `defun` that disagrees with the `defsignature` that promised it.
+///
+/// A declaration is only worth writing if it is binding: a call checked
+/// against the declaration and then dispatched to a definition of another
+/// shape is exactly the kind of quiet mismatch static types exist to stop.
+/// The old implicit pre-pass could not do this — it *derived* the signature
+/// from the definition, so the two agreed by construction.
+///
+/// Docstrings, parameter *names* and the body play no part: a signature is
+/// the types, `pub`, and the `&rest` tail.
+fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) -> Result<(), Error> {
+    let mismatch = |what: &str, decl: String, def: String| {
+        Err(Error::TypeError(format!(
+            "`{}` does not match its `defsignature`: {} declared as {}, defined as {}",
+            name, what, decl, def
+        )))
+    };
+    if declared.params.len() != defined.params.len() {
+        return mismatch(
+            "parameter count",
+            declared.params.len().to_string(),
+            defined.params.len().to_string(),
+        );
+    }
+    for (i, (d, f)) in declared.params.iter().zip(&defined.params).enumerate() {
+        if d != f {
+            return mismatch(&format!("parameter {}", i + 1), format!("{:?}", d), format!("{:?}", f));
+        }
+    }
+    if declared.ret != defined.ret {
+        return mismatch("return type", format!("{:?}", declared.ret), format!("{:?}", defined.ret));
+    }
+    if declared.rest != defined.rest {
+        return mismatch("`&rest`", format!("{:?}", declared.rest), format!("{:?}", defined.rest));
+    }
+    if !defined.type_params.is_empty() {
+        return mismatch("type parameters", "none".to_string(), format!("{:?}", defined.type_params));
+    }
+    if !defined.optionals.is_empty() || !defined.keys.is_empty() {
+        return mismatch(
+            "parameter kinds",
+            "required only".to_string(),
+            "`&optional`/`&key`".to_string(),
+        );
+    }
+    if declared.public != defined.public {
+        let vis = |p: bool| if p { "`pub`".to_string() } else { "private".to_string() };
+        return mismatch("visibility", vis(declared.public), vis(defined.public));
+    }
+    Ok(())
+}
+
 fn is_where_clause(heap: &Heap, v: Value) -> Result<bool, Error> {
     Ok(matches!(v, Value::Cons(_))
         && matches!(heap.list_to_vec(v)?.first(), Some(Value::Symbol(id)) if heap.symbol_name(*id) == "where"))

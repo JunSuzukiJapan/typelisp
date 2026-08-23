@@ -295,7 +295,6 @@ impl Loader {
         }
         let file_dir = file.parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
         let path = checker.enter_file_module(segs);
-        checker.predeclare_program(heap, &forms.iter().map(|(v, _)| *v).collect::<Vec<_>>());
         let mut body = Vec::new();
         let mut check_err = None;
         for (v, loc) in forms {
@@ -361,6 +360,13 @@ impl Loader {
         }
         checker.exit_file_module(segs.len());
         if let Some(e) = check_err {
+            pop_roots_to(heap, mark);
+            return Err(e);
+        }
+        // Every `defsignature` in this file promised a definition; this is
+        // where the promise comes due. Checked before the bundle is built so
+        // a file with an unmet declaration never becomes a loadable module.
+        if let Err(e) = checker.finish_unit() {
             pop_roots_to(heap, mark);
             return Err(e);
         }
@@ -624,7 +630,6 @@ fn load_source_flat(
     };
     let dir = file.parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
     let mut result = Ok(());
-    checker.predeclare_program(heap, &forms.iter().map(|(v, _)| *v).collect::<Vec<_>>());
     for (v, loc) in forms {
         match checker.check_form_at(heap, &*interp, v, Some(loc)) {
             Ok(tl) if core::op(heap, tl) == Some("load") => {
@@ -650,7 +655,7 @@ fn load_source_flat(
         }
     }
     pop_roots_to(heap, mark);
-    result
+    result.and_then(|()| checker.finish_unit())
 }
 
 /// The segments of a `use` argument: a bare symbol is one segment, a

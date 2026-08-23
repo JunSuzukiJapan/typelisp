@@ -156,9 +156,8 @@
 //! defined below it: `compile-assoc` calling back into `compile-value` was a
 //! forward reference, and CL's non-recursive `flet` does not help when the
 //! calls genuinely are mutual recursion, so `labels` was the only tool that
-//! worked. That restriction is gone — every loader now pre-registers each
-//! top-level `defun`'s signature before checking any body
-//! (`Checker::predeclare_program`) — and the ring was flattened out
+//! worked. That restriction is gone — the ring is announced by the
+//! `defsignature` block at the top of `SOURCE` — and it was flattened out
 //! (docs/dev/two-pass-toplevel-plan.md, Phase 3).
 //!
 //! Flattening cost two explicit parameters. The `labels` block closed over
@@ -315,6 +314,302 @@ pub const SOURCE: &str = r#"
 ;; overflows an ordinary `cargo test` thread even though
 ;; `scripts/test-serial.sh`'s `RUST_MIN_STACK=32MB` hides it. Iterating keeps
 ;; the expander's stack flat regardless of arm count.
+;; ---------------------------------------------------------------------------
+;; Forward declarations.
+;;
+;; This file is a recursive-descent compiler: `compile-value` and the ~50
+;; helpers below it call each other in a ring, and a ring cannot be written
+;; in definition order. Top-level `defun`s are checked one form at a time in
+;; source order, so the way to say a name early is to say it here.
+;;
+;; Generated from the `defun` headers themselves; each must keep agreeing
+;; with its definition, which the checker enforces at the definition.
+(defsignature compile-apply
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-apply-indirect
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-assoc
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-assoc-user
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> string string Sexpr)
+  llvm-value)
+(defsignature compile-bignum-literal
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-call
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-call-args
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> llvm-value Sexpr i32)
+  i32)
+(defsignature compile-catch
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-cellset
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-construct
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-construct-box
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr i64 Sexpr)
+  llvm-value)
+(defsignature compile-construct-boxed-struct
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr Sexpr)
+  llvm-value)
+(defsignature compile-construct-boxed-struct-fields
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> llvm-value Sexpr i32)
+  ())
+(defsignature compile-construct-path
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-construct-path-segs
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> llvm-value Sexpr i32)
+  ())
+(defsignature compile-construct-sexpr
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> i64 Sexpr)
+  llvm-value)
+(defsignature compile-construct-sym
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-ctor-subpatterns
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> llvm-value i64 i64 Sexpr Sexpr i32 llvm-basic-block)
+  ())
+(defsignature compile-dyn-call
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-dyn-new
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-dyn-upcast
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-dyn-value
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-escaping-env-args
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-value Sexpr i32)
+  ())
+(defsignature compile-field-get
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-field-set
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-global-init
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-hashtable-op
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-if
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-if-branch
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> bool Sexpr)
+  llvm-value)
+(defsignature compile-labels
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-labels-bodies (llvm-module string Scope<llvm-function> Sexpr Sexpr) ())
+(defsignature compile-lambda
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr Sexpr)
+  llvm-value)
+(defsignature compile-let
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-let-body
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-let-values
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr Scope<llvm-value>)
+  ())
+(defsignature compile-llvm-op
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-loop
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-loop-body
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  ())
+(defsignature compile-match
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-match-arms
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> bool llvm-value llvm-value llvm-basic-block Sexpr)
+  ())
+(defsignature compile-panic
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-pattern-test
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> llvm-value Sexpr llvm-basic-block)
+  ())
+(defsignature compile-ratio-literal
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-return
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-set
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-set-global
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-sexpr-instance-test
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> llvm-value Sexpr i64)
+  llvm-value)
+(defsignature compile-str
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-throw
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-unwind-protect
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-value
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature compile-vector-op
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Sexpr)
+  llvm-value)
+(defsignature resolve-value
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr string)
+  llvm-value)
+(defsignature store-str-chars
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> llvm-value Sexpr i32)
+  ())
+;;
+;; Called from inside the ring but written after it.
+(defsignature compile-bool (llvm-module string llvm-builder Sexpr) llvm-value)
+(defsignature compile-break
+  (llvm-module string llvm-builder Option<llvm-basic-block> Option<llvm-value> Option<llvm-value>
+   Option<llvm-basic-block>)
+  llvm-value)
+(defsignature compile-cellvar
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr Sexpr)
+  llvm-value)
+(defsignature compile-char (llvm-module string llvm-builder Sexpr) llvm-value)
+(defsignature compile-float (llvm-module string llvm-builder Sexpr) llvm-value)
+(defsignature compile-global (llvm-module string llvm-builder Sexpr) llvm-value)
+(defsignature compile-int (llvm-module string llvm-builder Sexpr) llvm-value)
+(defsignature compile-unit (llvm-module string llvm-builder) llvm-value)
+(defsignature compile-var
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr Sexpr)
+  llvm-value)
+(defsignature emit-rt-call
+  (llvm-builder llvm-module llvm-function string string llvm-value i32 Option<llvm-basic-block>)
+  llvm-value)
+;;
+;; Not part of the ring — just written after its caller.
+(defsignature emit-direct-call
+  (llvm-builder llvm-module llvm-function llvm-function llvm-value i32 Option<llvm-basic-block>)
+  llvm-value)
+
 (defun icond-build ((clauses Sexpr)) Sexpr
   (let ((rev (the Sexpr ())) (cur clauses))
     (loop

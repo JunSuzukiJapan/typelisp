@@ -10,6 +10,14 @@
 - 問題 (1) トップレベル前方参照 → 完了(Phase 1、`Checker::predeclare_program`)
 - 問題 (3) compile-function の分割 → 完了(Phase 3、61ヘルパをトップレベル defun 化)
 
+> **2026-08-23 追記: Phase 1 の暗黙の先読みは撤去された。**
+> `predeclare_program` は「最初のフォームを検査する前に**全フォームを読む**」ことを要求し、
+> それはリーダマクロ(読み込み中にユーザコードを走らせる、cl-parity-plan.md Phase 8c)と
+> 正面から衝突する。前方参照は明示的な宣言 **`defsignature`** に置き換えた
+> (docs/syntax.md の該当節)。問題 (3) の成果 — 島がトップレベル defun の集まりであること —
+> はそのまま残っており、リングは SOURCE 冒頭の `defsignature` ブロック 65 件で宣言している。
+> 以下の Phase 1 の記述は、その時点の設計として残す。
+
 最終的な指標(SOURCE):
 
 | | 着手前 | icond 後 | Phase 3 後 |

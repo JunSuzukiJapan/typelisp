@@ -37,11 +37,10 @@ use crate::{Checker, Heap, Interp, Reader, Value};
 /// cells, never a separate homogeneous array type. Item-based predicates (`member`/
 /// `remove`/`count`/`position`) compare with `eq` (matching CL's default
 /// `eql` test); their `-if` counterparts take a `(fn (Sexpr) bool)` instead.
-/// Helper functions a later definition depends on are still placed earlier in
-/// this string, but that is now convention rather than necessity: top-level
-/// `defun`s may reference each other in any order (`Checker::
-/// predeclare_program`, which every loader including this one runs first).
-/// `defmacro` is the exception and remains strictly define-before-use.
+/// A helper a later definition depends on is placed earlier in this string,
+/// and that is a necessity, not a convention: a top-level `defun` may only
+/// call a name already seen. This file needs no `defsignature` anywhere — it
+/// has no mutual recursion at top level, which is worth keeping true.
 ///
 /// `nconc`/`nreverse` are destructive (mutate existing cons cells via
 /// `set-car`/`set-cdr` instead of allocating new ones — see those functions'
@@ -1125,10 +1124,8 @@ pub const SOURCE: &str = r##"
 ;; element for nothing). The copy itself costs nothing extra in principle: the
 ;; result is a fresh `Vector` either way. It is spelled out rather than
 ;; delegated to `copy-seq`
-;; because a `where`-bounded `defun` is never pre-declared (the pre-pass runs
-;; before `deftrait Iter` is registered, so its header does not parse and is
-;; silently skipped — `Checker::predeclare_program`), and `copy-seq` is
-;; defined further down this file.
+;; because `copy-seq` is defined further down this file, and a top-level
+;; `defun` may only call a name already seen.
 (defun seq-edit-core<I,A> ((it I) (hit (fn (i32 A) bool)) (act (fn (A) Option<A>))
                            (limit i32) (last bool)) Vector<A>
   (where (Iter I (Item A)))
@@ -4174,6 +4171,14 @@ user-visible capacity."
    in the returned index, and so in what the next read sees."
   (read-datum-at s start true))
 
+(defun sexpr-list-from ((v Vector<Sexpr>)) Sexpr
+  "The elements of `v` as a list, front to back."
+  (let ((out (quote ())) (i (- (len v) 1)))
+    (progn
+      (while (>= i 0)
+        (progn (setf out (sexpr-cons (get v i) out)) (setf i (- i 1)) ()))
+      out)))
+
 ;; CL's `read-delimited-list`: every datum up to `terminator`, which is
 ;; consumed. Unterminated input is an error rather than a short list --
 ;; a missing `)` is a mistake, and CL signals it too.
@@ -4213,14 +4218,6 @@ user-visible capacity."
       (match failed
         ((some e) (result::err e))
         ((none) (result::ok (sexpr-list-from acc)))))))
-
-(defun sexpr-list-from ((v Vector<Sexpr>)) Sexpr
-  "The elements of `v` as a list, front to back."
-  (let ((out (quote ())) (i (- (len v) 1)))
-    (progn
-      (while (>= i 0)
-        (progn (setf out (sexpr-cons (get v i) out)) (setf i (- i 1)) ()))
-      out)))
 
 ;; ---------------------------------------------------------------------------
 ;; The `with-...` macros, which are the reason `close` rarely appears in user
@@ -5026,7 +5023,6 @@ pub fn load_interpreted_with(
     let r = Reader::new();
     let forms = r.read_all(heap, SOURCE).expect("prelude: read failed");
     on_read(heap, &forms);
-    chk.predeclare_program(heap, &forms);
     for v in forms {
         let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");
         for w in chk.take_warnings() {

@@ -89,7 +89,6 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
     let forms = reader
         .read_all(&mut heap, crate::compiler::SOURCE)
         .map_err(|e| format!("island read failed: {}", e))?;
-    chk.predeclare_program(&mut heap, &forms);
     let forms_digest = hash_read_forms(&heap, &forms)?;
     let mut fn_names: Vec<String> = Vec::new();
     let mut checked: Vec<Value> = Vec::new();
@@ -150,9 +149,9 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         // `(get-function m "tl_<callee>")`, which fails outright if the callee
         // has no declaration yet — so compiling one at a time only works while
         // the island's call graph happens to be a DAG in declaration order.
-        // It is not: since top-level `defun`s may reference each other freely
-        // (`Checker::predeclare_program`) the island is written as ~60 mutually
-        // recursive top-level functions rather than one `labels` block, and
+        // It is not: the island announces its ring with `defsignature` and is
+        // written as ~60 mutually recursive top-level functions rather than
+        // one `labels` block, and
         // `compile-value` calls helpers declared below it. `add-function`
         // reuses an existing declaration rather than adding a second one
         // (`llvm_module_add_function`), so a body compiled later simply fills

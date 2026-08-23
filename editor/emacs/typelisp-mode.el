@@ -54,8 +54,10 @@
 ;;; Keyword tables ----------------------------------------------------------
 
 (defconst typelisp-definition-forms
-  '("defun" "defmethod" "defmacro")
-  "Definition forms whose defined name is a function name.")
+  '("defun" "defsignature" "defmethod" "defmacro")
+  "Definition forms whose defined name is a function name.
+`defsignature' declares one ahead of its definition -- the only way to write
+mutual recursion at top level, since forms are checked in source order.")
 
 (defconst typelisp-type-definition-forms
   '("defstruct" "defenum" "deftrait" "deftype")

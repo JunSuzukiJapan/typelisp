@@ -162,7 +162,6 @@ pub fn capture_program_dump(
     let mut forms: Vec<crate::Value> = Vec::new();
     let reader = crate::Reader::new();
     let program = reader.read_all_in(heap, typelisp_front::dump::PROGRAM_LABEL, source).map_err(|e| e.to_string())?;
-    chk.predeclare_program(heap, &program);
     for v in program {
         let tl = chk.check_form(heap, &interp, v).map_err(|e| e.to_string())?;
         // The warnings were already reported by the caller's own check of this

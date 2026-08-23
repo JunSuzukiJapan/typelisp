@@ -90,7 +90,6 @@ fn load(compiled: bool) -> (Heap, Checker, Interp, Duration) {
 fn run(heap: &mut Heap, chk: &mut Checker, interp: &Interp, src: &str) -> Duration {
     let r = Reader::new();
     let forms = r.read_all(heap, src).expect("read failed");
-    chk.predeclare_program(heap, &forms);
     let checked: Vec<_> =
         forms.into_iter().map(|v| chk.check_form(heap, interp, v).expect("check failed")).collect();
     let t0 = Instant::now();
@@ -133,7 +132,6 @@ fn startup_breakdown() {
         let read = t0.elapsed();
 
         let t0 = Instant::now();
-        chk.predeclare_program(&mut heap, &forms);
         let predeclare = t0.elapsed();
 
         let mut checked: Vec<Value> = Vec::with_capacity(forms.len());

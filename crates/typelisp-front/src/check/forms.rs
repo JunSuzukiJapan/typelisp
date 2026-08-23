@@ -273,6 +273,14 @@ pub(super) fn use_form(heap: &mut Heap, alias: &Path, target: &Path) -> Result<V
     f.finish("use")
 }
 
+/// `(defsignature)` — a forward declaration, which produces no code. The
+/// whole of its effect happened while checking (the signature is in the
+/// registry), so what reaches `Interp::exec` is an empty marker, the way
+/// `(use ...)` is one.
+pub(super) fn defsignature_form(heap: &mut Heap) -> Result<Value, Error> {
+    core::tagged(heap, "defsignature", &[])
+}
+
 /// `(load "PATH")` — recorded, not performed: the checker cannot do file
 /// I/O, so the driver reads this and loads the file before checking on.
 pub(super) fn load_form(heap: &mut Heap, path: &str) -> Result<Value, Error> {

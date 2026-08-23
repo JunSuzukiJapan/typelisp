@@ -27,7 +27,6 @@ fn env(compiled: bool) -> (Heap, Checker, Interp) {
 fn eval(heap: &mut Heap, chk: &mut Checker, interp: &Interp, src: &str) -> Value {
     let r = Reader::new();
     let forms = r.read_all(heap, src).expect("read failed");
-    chk.predeclare_program(heap, &forms);
     let mut last = Value::Empty;
     for v in forms {
         let tl = chk.check_form(heap, interp, v).expect("check failed");
