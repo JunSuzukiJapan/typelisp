@@ -932,7 +932,7 @@ impl Interp {
             let Some((pat, body)) = parts.split_first() else {
                 return Err(EvalError::Internal("eval: (match ..) arm is empty".to_string()));
             };
-            let Some(binds) = match_core_pattern(&mut s, *pat, v)? else {
+            let Some(binds) = match_core_pattern(self, &mut s, env, *pat, v)? else {
                 continue;
             };
             let env = extend_env(&mut s, &binds, env)?;
@@ -1404,7 +1404,13 @@ pub(crate) fn extend_env(heap: &mut Heap, binds: &[(SymId, Value)], env: Value) 
 /// caller's scope closes. That is not belt-and-braces: the `Path` pattern
 /// builds its binding *fresh* rather than pointing into the scrutinee, so a
 /// later sub-pattern's allocation would collect it.
-fn match_core_pattern(heap: &mut Heap, pat: Value, v: Value) -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
+fn match_core_pattern(
+    it: &Interp,
+    heap: &mut Heap,
+    env: Value,
+    pat: Value,
+    v: Value,
+) -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
     let tag = match heap.car(pat) {
         Ok(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
         _ => return Err(EvalError::Internal(format!("eval: not a pattern: {}", core::print(heap, pat)))),
@@ -1439,6 +1445,35 @@ fn match_core_pattern(heap: &mut Heap, pat: Value, v: Value) -> Result<Option<Ve
             };
             Ok(if want == v { Some(Vec::new()) } else { None })
         }
+        // `(pat-guard SYM TEST)` — matches iff `TEST` (a checked `bool`
+        // expression that reads the value under test through `SYM`) is true.
+        // This is what a `string`/`f64`/`symbol`/`bignum`/`ratio` literal and
+        // an explicit `(= expr)` both lower to; see `Pattern::Guard`.
+        //
+        // The binding is made here and thrown away here: the frame it needs
+        // exists only for the duration of the test, and `SYM` is the
+        // checker's own name, never something the arm body can refer to.
+        "pat-guard" => {
+            let sym = match core::field(heap, pat, 0) {
+                Some(Value::Symbol(id)) => id,
+                other => {
+                    return Err(EvalError::Internal(format!("eval: (pat-guard ..) names {:?}", other)))
+                }
+            };
+            let test = core::field(heap, pat, 1)
+                .ok_or_else(|| EvalError::Internal("eval: (pat-guard ..) has no test".to_string()))?;
+            let mut s = RootScope::new(heap);
+            let guard_env = extend_env(&mut s, &[(sym, v)], env)?;
+            s.push_root(guard_env);
+            match it.eval_core(&mut s, test, guard_env)? {
+                Value::Bool(true) => Ok(Some(Vec::new())),
+                Value::Bool(false) => Ok(None),
+                other => Err(EvalError::Internal(format!(
+                    "eval: (pat-guard ..) test produced {:?}, not a bool",
+                    other
+                ))),
+            }
+        }
         "pat-ctor" => {
             let path = path_field(heap, pat, 0, "pat-ctor")?;
             let variant = int_field(heap, pat, 1, "pat-ctor")? as usize;
@@ -1452,7 +1487,7 @@ fn match_core_pattern(heap: &mut Heap, pat: Value, v: Value) -> Result<Option<Ve
                 return Err(EvalError::Internal(format!("eval: malformed pattern: {}", core::print(heap, pat))));
             }
             let subs = subs[4..].to_vec();
-            match_ctor(heap, &path, variant, &subs, v)
+            match_ctor(it, heap, env, &path, variant, &subs, v)
         }
         "pat-typetest" => {
             let path = path_field(heap, pat, 0, "pat-typetest")?;
@@ -1460,10 +1495,10 @@ fn match_core_pattern(heap: &mut Heap, pat: Value, v: Value) -> Result<Option<Ve
                 .ok_or_else(|| EvalError::Internal("eval: (pat-typetest ..) has no sub-pattern".to_string()))?;
             // `(the sexpr p)` tests nothing: every value is a `Sexpr`.
             if crate::types::path_is_builtin(&path, "sexpr") {
-                return match_core_pattern(heap, inner, v);
+                return match_core_pattern(it, heap, env, inner, v);
             }
             match v {
-                Value::Boxed(id) if crate::type_key::heap_type_is(heap, id, &path) => match_core_pattern(heap, inner, v),
+                Value::Boxed(id) if crate::type_key::heap_type_is(heap, id, &path) => match_core_pattern(it, heap, env, inner, v),
                 _ => Ok(None),
             }
         }
@@ -1480,7 +1515,9 @@ fn match_core_pattern(heap: &mut Heap, pat: Value, v: Value) -> Result<Option<Ve
 /// arm indexes by *bare* variant number, where a struct's sole variant 0 would
 /// spuriously match `Sexpr::Nil`.
 fn match_ctor(
+    it: &Interp,
     heap: &mut Heap,
+    env: Value,
     path: &crate::Path,
     variant: usize,
     subs: &[Value],
@@ -1500,7 +1537,7 @@ fn match_ctor(
                 // `field_types` entry purely to drive one, and both reduced
                 // to the identity once the value worlds merged.
                 let f = heap.enum_field(id, i);
-                match match_core_pattern(heap, *p, f)? {
+                match match_core_pattern(it, heap, env, *p, f)? {
                     Some(b) => binds.extend(b),
                     None => return Ok(None),
                 }
@@ -1518,21 +1555,23 @@ fn match_ctor(
             let mut binds = Vec::new();
             for (i, p) in subs.iter().enumerate() {
                 let f = heap.struct_field(id, i);
-                match match_core_pattern(heap, *p, f)? {
+                match match_core_pattern(it, heap, env, *p, f)? {
                     Some(b) => binds.extend(b),
                     None => return Ok(None),
                 }
             }
             Ok(Some(binds))
         }
-        sv if *path == crate::Path::root("sexpr") => match_sexpr_core(heap, variant, subs, sv),
+        sv if *path == crate::Path::root("sexpr") => match_sexpr_core(it, heap, env, variant, subs, sv),
         _ => Ok(None),
     }
 }
 
 /// A `Sexpr` constructor pattern, destructured through the heap.
 fn match_sexpr_core(
+    it: &Interp,
     heap: &mut Heap,
+    env: Value,
     variant: usize,
     subs: &[Value],
     v: Value,
@@ -1544,7 +1583,7 @@ fn match_sexpr_core(
     // unwrap and re-wrap.
     let one = |heap: &mut Heap, bound: Value| -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
         match subs.first() {
-            Some(p) => match_core_pattern(heap, *p, bound),
+            Some(p) => match_core_pattern(it, heap, env, *p, bound),
             None => Err(EvalError::Internal("eval: sexpr pattern has no sub-pattern".to_string())),
         }
     };
@@ -1565,10 +1604,10 @@ fn match_sexpr_core(
             let (Some(pa), Some(pd)) = (subs.first(), subs.get(1)) else {
                 return Err(EvalError::Internal("eval: cons pattern needs two sub-patterns".to_string()));
             };
-            let Some(mut binds) = match_core_pattern(heap, *pa, car)? else {
+            let Some(mut binds) = match_core_pattern(it, heap, env, *pa, car)? else {
                 return Ok(None);
             };
-            match match_core_pattern(heap, *pd, cdr)? {
+            match match_core_pattern(it, heap, env, *pd, cdr)? {
                 Some(b) => {
                     binds.extend(b);
                     Ok(Some(binds))

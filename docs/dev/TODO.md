@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-08-22 / ブランチ: `feature/cl-parity`
+最終更新: 2026-08-25 / ブランチ: `feature/cl-parity`
 
 このドキュメントは**現在残っている作業のみ**を記録する。
 
@@ -143,6 +143,13 @@ Phase 9c の作業中に見つけた**計画の範囲外の既存問題 2 件**�
 2026-08-19 に「呼ぶとコンパイルできなくなるもの」（[syntax.md](../syntax.md) §10）の最後の1つ
 `eval` を閉じ、あの表は空になった。経緯・設計判断は
 [implementation-log.md](implementation-log.md) の該当節。
+
+`match` の値パターン（2026-08-25、[implementation-log.md](implementation-log.md) の該当節）で
+**意識して残した 1 件**:
+
+- **`bool` スクルーティニーは `(true ...) (false ...)` の 2 腕で網羅にならない**。
+  「変種を持たない型は一律 catchall 必須」という単純な規則を優先した。直すなら
+  `check_match` が bool リテラルの被覆を数えることになる。
 
 作業を始めるときはここに項目を足し、終わったら（経緯・設計判断を
 [implementation-log.md](implementation-log.md) へ書いたうえで）ここから消す。

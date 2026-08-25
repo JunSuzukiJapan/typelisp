@@ -543,6 +543,13 @@ pub const MONO_BUNDLE_MODULE: &str = "<monomorph specializations>";
 /// generics per form; hitting this is a `TypeError`, not a hang.
 const SPECIALIZATION_BUDGET: usize = 512;
 
+/// The variable a [`Pattern::Guard`]'s test form reads the scrutinee
+/// through — see that variant's doc comment for why one fixed name is
+/// enough for every guard in a program. Spelled with a leading `$` so it
+/// cannot collide with a name a user wrote: the reader has no way to
+/// produce it, and the checker interns it directly.
+const MATCH_SCRUT: &str = "$match-scrut";
+
 /// How deep a blanket impl's own bounds may be chased before the search is
 /// declared non-terminating (`impl<T> A T (where (B T))` together with
 /// `impl<T> B T (where (A T))` would recur forever). Small on purpose:
@@ -1285,6 +1292,7 @@ impl Checker {
     }
 
     /// `(pat-wild)` / `(pat-bind SYM)` / `(pat-lit LITERAL)` /
+    /// `(pat-guard SYM TEST)` /
     /// `(pat-ctor PATH VARIANT DOWNCAST SUB...)` /
     /// `(pat-typetest PATH SUB)`.
     ///
@@ -1320,6 +1328,17 @@ impl Checker {
                 let mut s = RootScope::new(heap);
                 s.push_root(lit);
                 core::tagged(&mut s, "pat-lit", &[lit])?
+            }
+            Pattern::Guard { name, form } => {
+                // The test form is already lowered — it came out of
+                // `check_at` — so this only wraps it. It is rooted where it
+                // was built (`check_at` pushes every node it produces onto
+                // the heap's root stack, and `check_form_at` is what
+                // truncates that stack), which is what lets it sit in a
+                // `Pattern` on the Rust side across the allocations its
+                // siblings make.
+                let sym = heap.intern_symbol(name);
+                core::tagged(heap, "pat-guard", &[sym, *form])?
             }
             Pattern::Ctor { type_name, variant, args, field_types, downcast, .. } => {
                 let mut f = Items::new(heap);
@@ -12434,7 +12453,15 @@ impl Checker {
             let form = forms::dyn_value_form(heap, scrut.form)?;
             scrut = Checked::new(forms::rooted(heap, form), sexpr_ty());
         }
-        let (adt_name, _) = self.expect_adt(&scrut.ty)?;
+        // A scrutinee that is *not* a data type is matched by value alone:
+        // its arms can only be literals, `(= expr)` guards, and a catch-all,
+        // so there is no variant coverage to compute and the catch-all is
+        // mandatory (checked below, where an ADT's own exhaustiveness is).
+        // Before, `expect_adt`'s error stopped this dead — which meant a
+        // `string`/`symbol`/`i32` scrutinee could not be matched at all, and
+        // a string literal had no pattern position it was legal in.
+        let adt = self.expect_adt(&scrut.ty).ok();
+        let adt_name = adt.as_ref().map(|(n, _)| n.clone());
         // `match` covers every sum type, `Sexpr` included. Symbol/Sexpr
         // redesign Phase 5 fenced `Sexpr` off here (its structure was to be
         // navigated only through the `sexpr-*` accessor island), but that
@@ -12453,7 +12480,8 @@ impl Checker {
         // field`/`compile-construct-sexpr` variants `5`/`10` in
         // `compiler.rs`, plus the new `rt_path_to_list`/`rt_list_to_path`
         // runtime shims for `path`'s list building).
-        let total_variants = self.reg.type_def(&adt_name).expect("adt exists").variants.len();
+        let total_variants =
+            adt_name.as_ref().map_or(0, |n| self.reg.type_def(n).expect("adt exists").variants.len());
 
         /// An arm held back by the probe (B4) for the second pass below: its
         /// slot in `arms`, everything checking its body again needs, and the
@@ -12510,8 +12538,14 @@ impl Checker {
             if parts.is_empty() {
                 recover_arm!(Err(Error::TypeError("match: arm must be (pattern body...)".into())));
             }
-            let (pat, binds) =
-                recover_arm!(self.check_pattern(heap, &scrut.ty, parts[0], parts_locs[0].1.clone()));
+            let (pat, binds) = recover_arm!(self.check_pattern(
+                heap,
+                interp,
+                env,
+                &scrut.ty,
+                parts[0],
+                parts_locs[0].1.clone()
+            ));
             match &pat {
                 // A Sexpr-downcast `Ctor` pattern's `type_name` names the
                 // *downcast target* (a user struct/enum), not the
@@ -12520,7 +12554,7 @@ impl Checker {
                 // plan's "網羅性" rule). Restricting to a same-ADT `type_name`
                 // covers both the ordinary case (always same-ADT) and this
                 // one in a single guard.
-                Pattern::Ctor { type_name, variant, .. } if *type_name == adt_name => {
+                Pattern::Ctor { type_name, variant, .. } if Some(type_name) == adt_name.as_ref() => {
                     covered.insert(*variant);
                 }
                 Pattern::Wildcard | Pattern::Bind(..) => catchall = true,
@@ -12639,13 +12673,25 @@ impl Checker {
         // inside a non-catchall arm, where truncating the source deletes the
         // arms that would have made the match exhaustive. Suppressed when an
         // arm was skipped (B2), since coverage is then unknown.
-        if !catchall && !arm_recovered && covered.len() != total_variants {
-            let e = Error::TypeError(format!(
-                "non-exhaustive match on `{}`: {}/{} variants covered",
-                adt_name,
-                covered.len(),
-                total_variants
-            ));
+        // A type with no variants is never covered by its arms: there is
+        // nothing to enumerate, so only a catch-all closes the match.
+        let covers_every_variant = adt_name.is_some() && covered.len() == total_variants;
+        if !catchall && !arm_recovered && !covers_every_variant {
+            let e = Error::TypeError(match &adt_name {
+                Some(adt_name) => format!(
+                    "non-exhaustive match on `{}`: {}/{} variants covered",
+                    adt_name,
+                    covered.len(),
+                    total_variants
+                ),
+                // No variants to count: every arm was a value test, and a
+                // value test can only ever be a partial answer.
+                None => format!(
+                    "non-exhaustive match on {:?}: a type with no variants can only be matched \
+                     by value, so a `_` arm is required",
+                    scrut.ty
+                ),
+            });
             if self.recover {
                 self.push_recovered(e, nth_loc(arg_locs, 0));
             } else {
@@ -12681,43 +12727,221 @@ impl Checker {
     /// `DefLocs::local_refs`).
     fn check_pattern(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
         expected: &Type,
         v: Value,
         loc: Option<Loc>,
     ) -> Result<(Pattern, PatternBindings), Error> {
         match v {
             Value::Symbol(id) => {
-                let name = heap.symbol_name(id);
+                let name = heap.symbol_name(id).to_string();
                 if name == "_" {
-                    Ok((Pattern::Wildcard, Vec::new()))
-                } else {
-                    Ok((
-                        Pattern::Bind(name.to_string()),
-                        vec![(name.to_string(), expected.clone(), loc)],
-                    ))
+                    return Ok((Pattern::Wildcard, Vec::new()));
                 }
+                // A bare name that *is* a constructor of the scrutinee's own
+                // type is that constructor, not a new variable — `(match c
+                // (red 1) (blue 2))`. Without this the arm silently binds
+                // `c` to a variable called `red`, matches everything, and
+                // counts as a catch-all for the exhaustiveness check, so
+                // `blue`'s arm becomes unreachable and nothing says so.
+                // A variant that *has* fields still has to be written with
+                // its fields: `check_ctor_pattern_fields`' arity check is
+                // what reports that, and it reads better than anything this
+                // site could say ("expected 1 field(s), got 0").
+                if let Some(pat) = self.check_bare_ctor_pattern(heap, interp, env, expected, v, loc.as_ref())? {
+                    return Ok(pat);
+                }
+                Ok((Pattern::Bind(name.clone()), vec![(name, expected.clone(), loc)]))
             }
             Value::Int(n) => {
                 if expected.is_integer() {
                     Ok((Pattern::Int(n), Vec::new()))
                 } else {
-                    Err(Error::TypeError(format!(
-                        "integer pattern does not match type {:?}",
-                        expected
-                    )))
+                    // Not an integer type. Handed to `value_pattern`
+                    // anyway, not refused here, so that the message comes
+                    // from where every other mismatched literal's does: the
+                    // `(equals $match-scrut 1)` it builds reports "expected
+                    // F64, found I32" against an `f64` scrutinee, naming
+                    // both types, where this site could only say "integer
+                    // pattern does not match type F64". Nothing is widened
+                    // by the detour — an integer literal is no more an
+                    // `f64`/`bignum` in a pattern than it is anywhere else.
+                    self.value_pattern(heap, interp, env, expected, v, loc)
                 }
             }
-            Value::Bool(b) if *expected == Type::Bool => Ok((Pattern::Bool(b), Vec::new())),
-            Value::Char(c) if *expected == Type::Char => Ok((Pattern::Char(c), Vec::new())),
-            Value::Cons(_) => self.check_ctor_pattern(heap, expected, v),
+            // Same shape as the integer arm above: the immediate pattern
+            // when the scrutinee is exactly this type, the general value
+            // test otherwise — which is what lets `#\a`/`true` be matched
+            // against a `Sexpr` scrutinee, where the literal is implicitly
+            // an `Sexpr` and `Eq`'s `eq` compares the two immediates.
+            Value::Bool(b) => {
+                if *expected == Type::Bool {
+                    Ok((Pattern::Bool(b), Vec::new()))
+                } else {
+                    self.value_pattern(heap, interp, env, expected, v, loc)
+                }
+            }
+            Value::Char(c) => {
+                if *expected == Type::Char {
+                    Ok((Pattern::Char(c), Vec::new()))
+                } else {
+                    self.value_pattern(heap, interp, env, expected, v, loc)
+                }
+            }
+            // The literals with no immediate word: a `string` is a pointer,
+            // an `f64`/`bignum`/`ratio` is a box id. Comparing those words
+            // is identity, not equality, so each is matched by a *test* —
+            // see `Pattern::Guard`.
+            //
+            // Against a `Sexpr` scrutinee that test would be `Eq`'s `eq`
+            // (`prelude.rs`'s `impl Eq sexpr`, deliberately identity), and
+            // identity on one of *these* is the identity of a `Str`/box —
+            // an arm that type-checks and never matches. Refused with the
+            // variant pattern named instead, which destructures to the
+            // scalar's own type and so compares it by value. The immediate
+            // literals (`'foo`, an integer, a `char`, a `bool`) have no
+            // such gap and are left alone; so is an explicit `(= expr)`,
+            // where the author asked for `equals` in as many words.
+            Value::Str(_) | Value::Boxed(_) if *expected == sexpr_ty() => {
+                Err(Error::TypeError(format!(
+                    "pattern: `{}` against a `Sexpr` scrutinee would compare by identity — \
+                     `Eq` on `sexpr` is `eq`, so this arm could never match a separately built \
+                     value. Write `({} {})` to destructure it and compare by value instead",
+                    core::print(heap, v),
+                    sexpr_variant_for_literal(heap, v),
+                    core::print(heap, v)
+                )))
+            }
+            Value::Str(_) | Value::Boxed(_) => self.value_pattern(heap, interp, env, expected, v, loc),
+            Value::Cons(_) => self.check_ctor_pattern(heap, interp, env, expected, v),
             other => Err(Error::TypeError(format!("pattern does not match {:?}: {:?}", expected, other))),
         }
     }
 
+    /// A bare symbol pattern that names a constructor of `expected`, or
+    /// `None` when it names no constructor and is therefore an ordinary
+    /// binding.
+    ///
+    /// Two resolutions, the same two `check_ctor_pattern` performs for a
+    /// parenthesized head: the scrutinee type's own variants, and — for a
+    /// `Sexpr` scrutinee — a downcast to a visible user ADT. Neither can
+    /// reach a *generic* ADT's field-destructuring form, so neither can be
+    /// silently wrong about type arguments.
+    fn check_bare_ctor_pattern(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        expected: &Type,
+        v: Value,
+        loc: Option<&Loc>,
+    ) -> Result<Option<(Pattern, PatternBindings)>, Error> {
+        let Value::Symbol(id) = v else { return Ok(None) };
+        let name = heap.symbol_name(id).to_string();
+        // A one-element `(name)` pattern is exactly what the parenthesized
+        // spelling of a no-field variant already is, so both resolutions
+        // below are handed the same shape they always see.
+        let parts = [v];
+        let parts_locs = [(v, loc.cloned())];
+        if *expected == sexpr_ty() {
+            if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, v, loc)? {
+                return self
+                    .check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, true)
+                    .map(Some);
+            }
+            return Ok(None);
+        }
+        let Ok((adt_name, targs)) = self.expect_adt(expected) else { return Ok(None) };
+        let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
+        let Some(variant) = def.variants.iter().position(|vr| vr.name == name) else { return Ok(None) };
+        self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, false).map(Some)
+    }
+
+    /// Lower a value pattern — a non-immediate literal, or `(= expr)`'s
+    /// expression — into the [`Pattern::Guard`] that tests it.
+    ///
+    /// The test is built as *source* (`(equals $match-scrut EXPR)`) and run
+    /// through `check_at`, deliberately: that is the one path on which
+    /// instance-method resolution, trait bounds and monomorphization all
+    /// happen, so a user type's own `Eq` impl is what compares it, a type
+    /// with no `Eq` is a type error rather than a silently-never-matching
+    /// arm, and the compile pipeline sees an ordinary `assoc` call it
+    /// already knows how to translate and to follow as a dependency.
+    fn value_pattern(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        expected: &Type,
+        expr: Value,
+        loc: Option<Loc>,
+    ) -> Result<(Pattern, PatternBindings), Error> {
+        // Asked before the call is built, because "no method `equals`" is
+        // not what went wrong: the type is one nothing can compare.
+        if !self.implements_eq(env, expected) {
+            return Err(Error::TypeError(format!(
+                "pattern: `{}` cannot be compared by value — its type {:?} does not implement `Eq`",
+                core::print(heap, expr),
+                expected
+            )));
+        }
+        let form = {
+            let mut s = RootScope::new(heap);
+            let equals = s.intern_symbol("equals");
+            let scrut = s.intern_symbol(MATCH_SCRUT);
+            core::list(&mut s, &[equals, scrut, expr])?
+        };
+        let guard_env =
+            env.extended_with_locs(vec![(MATCH_SCRUT.to_string(), expected.clone(), None)]);
+        let checked = self.check_at(heap, interp, &guard_env, form, Some(&Type::Bool), loc)?;
+        if checked.ty != Type::Bool && checked.ty != Type::Never {
+            return Err(Error::TypeError(format!(
+                "pattern: comparing with `equals` produced {:?}, not a bool",
+                checked.ty
+            )));
+        }
+        Ok((Pattern::Guard { name: MATCH_SCRUT.to_string(), form: checked.form }, Vec::new()))
+    }
+
+    /// Whether `ty` can be compared with `equals` — the same two lookups
+    /// [`Self::try_instance_method`] and its bounded-type-variable fallback
+    /// would do for the call [`Self::value_pattern`] is about to build,
+    /// asked first so that "this type cannot be compared" is the error
+    /// rather than "no such method `equals`", which names the mechanism
+    /// instead of the problem.
+    ///
+    /// The second lookup is why a generic body can use a value pattern at
+    /// all: `(defun same<A> ((x A) (y A)) i32 (where (Eq A)) (match x ((= y)
+    /// 1) (_ 0)))` is checked once with `A` still a type variable, and there
+    /// is no `AdtDef` to ask — the `where` clause is the promise, and the
+    /// call it lowers to becomes a real one when monomorphization re-checks
+    /// the body with `A` known. `trait_method` searches inherited methods
+    /// too, so `(where (Ord A))` is equally enough.
+    fn implements_eq(&self, env: &Env, ty: &Type) -> bool {
+        let type_fq = match ty {
+            Type::Named(n, _) => Some(n.clone()),
+            other => prim_type_path(other),
+        };
+        let Some(type_fq) = type_fq else { return false };
+        if let Some(def) = self.reg.type_def(&type_fq) {
+            if matches!(def.assoc.get("equals"), Some(af) if af.instance) {
+                return true;
+            }
+        }
+        env.bounds.get(type_fq.last_segment()).is_some_and(|bounds| {
+            bounds.iter().any(|tb| {
+                self.reg.trait_def(&tb.trait_path).is_some_and(|t| self.reg.trait_method(t, "equals").is_some())
+            })
+        })
+    }
+
     fn check_ctor_pattern(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
         expected: &Type,
         v: Value,
     ) -> Result<(Pattern, PatternBindings), Error> {
@@ -12729,6 +12953,39 @@ impl Checker {
         if parts.is_empty() {
             return Err(Error::TypeError("pattern: empty list".into()));
         }
+        let loc = parts_locs[0].1.clone();
+
+        // `(= expr)` — the escape into ordinary evaluation, and the only way
+        // to compare against a value with no literal syntax (a `defstruct`
+        // instance, a global, a computed one). Ahead of every resolution
+        // below because `=` names no constructor and never could.
+        if is_symbol(heap, parts[0], "=") {
+            if parts.len() != 2 {
+                return Err(Error::TypeError("pattern: (= expr)".into()));
+            }
+            return self.value_pattern(heap, interp, env, expected, parts[1], loc);
+        }
+        // `'foo` — a symbol literal. It reaches here as `(quote foo)`, and
+        // it is *not* checked as an expression the way `(= expr)`'s argument
+        // is: a quoted datum's type is `Sexpr`, so `(equals sym 'foo)`
+        // would be a type error. The comparison wanted is between two
+        // `symbol`s, so the test is built over the symbol's *name* —
+        // `string->symbol` is the bridge, and interning is exactly what
+        // makes the resulting comparison identity-as-equality on both
+        // sides of the compile boundary.
+        if is_symbol(heap, parts[0], "quote") && parts.len() == 2 {
+            if let Value::Symbol(id) = parts[1] {
+                let name = heap.symbol_name(id).to_string();
+                let expr = {
+                    let mut s = RootScope::new(heap);
+                    let f = s.intern_symbol("string->symbol");
+                    let lit = s.alloc_string(name);
+                    s.push_root(lit);
+                    core::list(&mut s, &[f, lit])?
+                };
+                return self.value_pattern(heap, interp, env, expected, expr, loc);
+            }
+        }
 
         // Sexpr downcast patterns (design plan's "出す" section — the CL-
         // conformant counterpart of Stage 1's "入れる" retype/wrap). Only
@@ -12739,7 +12996,7 @@ impl Checker {
         if *expected == sexpr_ty() {
             if let Value::Symbol(id) = parts[0] {
                 if heap.symbol_name(id) == "the" {
-                    return self.check_type_test_pattern(heap, &parts, &parts_locs);
+                    return self.check_type_test_pattern(heap, interp, env, &parts, &parts_locs);
                 }
             }
             const BUILTIN_SEXPR_CTORS: &[&str] =
@@ -12748,7 +13005,7 @@ impl Checker {
                 matches!(parts[0], Value::Symbol(id) if BUILTIN_SEXPR_CTORS.contains(&heap.symbol_name(id)));
             if !is_builtin_head {
                 if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, parts[0], parts_locs[0].1.as_ref())? {
-                    return self.check_ctor_pattern_fields(heap, adt_name, targs, variant, &parts, &parts_locs, true);
+                    return self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, true);
                 }
             }
         }
@@ -12764,7 +13021,7 @@ impl Checker {
         let variant = def.variants.iter().position(|vr| vr.name == ctor).ok_or_else(|| {
             Error::TypeError(format!("`{}` is not a constructor of `{}`", ctor, adt_name))
         })?;
-        self.check_ctor_pattern_fields(heap, adt_name, targs, variant, &parts, &parts_locs, false)
+        self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, false)
     }
 
     /// Resolve a Sexpr-downcast pattern's head to `(adt path, type args,
@@ -12851,7 +13108,9 @@ impl Checker {
     /// `Sexpr` (see [`Pattern::TypeTest`]'s doc comment).
     fn check_type_test_pattern(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
         parts: &[Value],
         parts_locs: &[(Value, Option<Loc>)],
     ) -> Result<(Pattern, PatternBindings), Error> {
@@ -12865,7 +13124,7 @@ impl Checker {
                 ty
             )));
         }
-        let (pat, binds) = self.check_pattern(heap, &ty, parts[2], parts_locs[2].1.clone())?;
+        let (pat, binds) = self.check_pattern(heap, interp, env, &ty, parts[2], parts_locs[2].1.clone())?;
         Ok((Pattern::TypeTest(ty, Box::new(pat)), binds))
     }
 
@@ -12875,7 +13134,9 @@ impl Checker {
     /// field count and type-checks each field sub-pattern.
     fn check_ctor_pattern_fields(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
         adt_name: Path,
         targs: Vec<Type>,
         variant: usize,
@@ -12904,7 +13165,7 @@ impl Checker {
             // known — see `Pattern::Ctor::field_types`'s doc comment.
             let field_ty = subst_apply(field, &subst);
             field_types.push(field_ty.clone());
-            let (p, b) = self.check_pattern(heap, &field_ty, *sub, sub_loc.clone())?;
+            let (p, b) = self.check_pattern(heap, interp, env, &field_ty, *sub, sub_loc.clone())?;
             sub_pats.push(p);
             binds.extend(b);
         }
@@ -12987,6 +13248,22 @@ impl Default for Checker {
 /// bare atom argument's own source location into [`Checker::check_at`].
 fn nth_loc(locs: &[Option<Loc>], i: usize) -> Option<Loc> {
     locs.get(i).cloned().flatten()
+}
+
+/// The `Sexpr` variant that destructures a literal of `v`'s kind —
+/// `check_pattern`'s suggestion when a by-identity literal is written
+/// against a `Sexpr` scrutinee. Only the four kinds that reach it (a
+/// `Str` literal, and the three boxed numbers) are named; anything else
+/// falls back to the variant that binds without destructuring, which is
+/// always true and always available.
+fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
+    match v {
+        Value::Str(_) => "str",
+        Value::Boxed(id) if heap.is_float(id) => "float",
+        Value::Boxed(id) if heap.is_bignum(id) => "bignum",
+        Value::Boxed(id) if heap.is_ratio(id) => "ratio",
+        _ => "the sexpr",
+    }
 }
 
 /// Whether `v` is the symbol named `name`.

@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-08-24 / ブランチ: `feature/cl-parity`
+最終更新: 2026-08-25 / ブランチ: `feature/cl-parity`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -8856,3 +8856,118 @@ prelude の 1 件（`read-delimited-list` → `sexpr-list-from`）は定義順�
 `readtable-case` / `#.` も併せて入る。
 
 テストは `tests/defsignature_test.rs`（26 本、`tests/forward_reference_test.rs` を書き換え）。
+
+---
+
+## `match` で比較できるものを増やす — 値パターンと裸 variant 名（2026-08-25、branch `feature/cl-parity`）
+
+### 出発点にあった誤り
+
+「シンボルには compiled 表現が無い」——これは**間違い**だった。`typelisp-abi` の
+タグ表に `TAG_SYMBOL = 0b010` があり、compiled なシンボルは `(SymId << 3) | 2`、
+すなわちシンボルテーブルへの索引を持つ即値である。リテラルは
+`compile-construct-sym`（`src/compiler.rs`）が名前文字列を `rt_intern_symbol` に渡して
+**実行時に intern** して作る——SymId を焼き込まないので AOT でも正しい。intern 済みなので
+同一性比較がそのまま内容比較になり、パターンの比較は `icmp eq` 1 命令で済む。
+
+実際に欠けていたのは 2 つ:
+
+1. `check_pattern` が `Value::Symbol` を無条件に束縛パターンにし、`Value::Str` /
+   `Value::Boxed`（f64 / bignum / ratio）/ `(quote sym)` をどれも受けなかった。
+2. `match` のスクルーティニーが `expect_adt` で ADT に限定されていた。`string` を
+   `match` できないので、そもそも文字列リテラルを**書ける場所が無かった**。
+
+### 入れたもの
+
+| パターン | 下がる先 | 比較 |
+|---|---|---|
+| 整数 / `true`/`false` / 文字 | `pat-lit`（従来どおり） | 語の比較 |
+| 文字列 / f64 / `'sym` / bignum / ratio | **`pat-guard`（新設）** | その型の `Eq::equals` |
+| `(= expr)`（新設） | 同上 | 同上 |
+| 裸の variant 名 | `pat-ctor`（引数 0 個） | 変種タグ |
+
+`(pat-guard SYM TEST)` は「`SYM` に検査対象を束縛し、`TEST`（`bool` 式）が真ならマッチ」
+という 1 つのノード。`TEST` はチェッカーが**ソースとして**組み立てた
+`(equals $match-scrut EXPR)` を通常の `check_at` に通したもので、これが要点:
+
+- インスタンスメソッド解決・トレイト境界・単型化が**全部ただで付いてくる**。比較規則は
+  その型自身の `Eq` 実装になり、ユーザ定義型は作者が書いたとおりに比べられる。
+- `Eq` を持たない型は「マッチしない腕が黙って残る」ではなく**型エラー**になる。
+- compile 側から見ると中身はただの `assoc` 呼び出しなので、`collect_targets` が依存として
+  拾い、島は `compile-value` でそのまま翻訳できる。島に足したのは
+  「値をスロットに入れて名前を束縛し、テストをコンパイルして分岐する」20 行だけ。
+
+`$match-scrut` は全ガードで**共有の 1 名**。各ガードは自分の `TEST` を走らせる直前に
+束縛する（インタプリタは都度 env を伸ばし、compiled 側は新しい alloca に入れて名前を張り替える）
+ので、1 つのパターンに 2 つのガードがあっても互いの値を読まない。テストで固定してある。
+
+### 裸の variant 名は既存の穴だった
+
+```lisp
+(defenum color (red) (blue))
+(defun f ((c color)) i32 (match c (red 1) (blue 2)))   ; 修正前は常に 1
+```
+
+裸名は束縛パターン＝catchall なので、第 1 腕が常に勝ち、**しかも網羅性検査を満たしてしまう**
+ので「第 2 腕に到達しない」と言う者が誰もいなかった。スクルーティニー自身の型が同名の変種を
+持つときだけ変種として解決するようにした（`check_bare_ctor_pattern`）。持たない名前は
+従来どおり束縛なので、`(match v (x ...))` は全部そのままの意味。フィールドを持つ変種を裸名で
+書いたらアリティエラー（"expected 1 field(s), got 0"）で、これはこの場所で言えるどの文言より
+読みやすい。
+
+### スカラのスクルーティニーが暴いた 1 件
+
+`compile-match` はスクルーティニーを**無条件に** `push-sexpr-root` していた。
+`rt_push_sexpr_root` は渡された語を `decode` するので、生の `i64` の `7` は
+`TAG_BOXED` の箱 id として解釈される——ADT しかスクルーティニーになれない間は
+「冗長」で済んでいたものが、`(match n (1 ...) (_ ...))` を許した瞬間にバグになる。
+`match` ノードの末尾フィールド（島が読んでいなかった分類番号）を
+`Repr::binding_kind` に置き換え、`2` のときだけ root するようにした。
+
+### 触った場所
+
+- `check/resolved.rs` — `Pattern::Guard { name, form }`
+- `check/checker.rs` — `check_pattern` に `interp`/`env` を通す（`&Heap` → `&mut Heap`）、
+  `value_pattern` / `check_bare_ctor_pattern` / `eq_method_of` を新設、
+  `check_match` の `expect_adt` を `Option` 化＋変種を持たない型は catchall 必須
+- `eval/interp/core_eval.rs` — `match_core_pattern` に `&Interp`/`env` を通し `pat-guard` を追加
+- `compile/core_bridge.rs` — `pat-guard` の翻訳、`match_kind_of` を廃して `binding_kind` へ
+- `compile/core_freevars.rs` — ガードの `TEST` を自由変数の走査対象に（`(= limit)` のような
+  外側参照を取りこぼすとクロージャの捕獲スロットが 1 つ足りなくなる）
+- `check/locate.rs` — `pat-guard` は LSP から見て opaque（合成ノードで span が全部同じ、
+  受け手の名前は誰も書いていない）
+- `src/compiler.rs`（島）— `compile-pattern-test` の `pat-guard` 分岐、`compile-match` の
+  条件付き root。**島の再生成は 2 回**（emit が変わったので不動点に達するまで）
+- `docs/syntax.md` §4 match、`tests/match_value_test.rs`（16 本、全部 interp と compiled の両方）、
+  `tests/core_vocabulary_test.rs`（`pat-guard` を語彙に追加）、`tests/check_test.rs`
+  （「スカラは match できない」テストを「catchall が要る」テストへ）
+
+### 続き: `impl Eq sexpr`（同日、`eq` 相当で採用）
+
+上の「残した限界」の 1 件目——`Sexpr` に `Eq` が無い——はその場で入れた。**`eq` 相当**、つまり
+CL の同一性。`equal` の再帰比較にしなかったのは、`sexpr` が万物の直和なので「2 つを比べる」に
+唯一の正解が無く、`eq`/`eql`/`equal`/`equalp` が既に 4 つとも `sexpr` に生えている以上、
+`equals` を `equal` の 3 つ目の名前にしても意味が増えないから。比較のコストが定数で済むのも大きい。
+
+帰結が非対称なので、**checker で片側だけ塞いだ**:
+
+| `Sexpr` スクルーティニーに対するリテラル | `eq` だと | 扱い |
+|---|---|---|
+| `'foo` / 整数 / 文字 / `true`/`false` | 内容どおり一致（intern 済み・即値） | **そのまま書ける** |
+| 文字列 / f64 / bignum / ratio | `Str`・箱の同一性 | **型エラー**にして `(str "hi")` を名指す |
+
+塞いだ理由はこの機能自身の原則（「マッチしない腕が黙って残るより、比較できないと言う」）で、
+実際に `(match s ("hi" 1) (_ 0))` は `impl` を入れた直後に「型は通るが 0 を返す」状態だった。
+`(= expr)` には掛けていない——`equals` を明示的に求めて書いた式だから。
+
+副産物として `check_pattern` の `char`/`bool` の腕を整数と同じ形にした（型が一致すれば即値
+パターン、そうでなければ値テスト）。これが無いと `Sexpr` に対する `#\a` / `true` が
+「pattern does not match」で落ちる。
+
+prelude の `SOURCE` を触ったのでダンプの再生成が要る（`scripts/regen-prelude-bitcode.sh`）。
+
+### 残した限界
+
+- **`bool` スクルーティニーは `(true ...) (false ...)` で網羅にならない**。変種を持たない型は
+  一律 catchall 必須という規則を優先した。
+- `(= expr)` の中は LSP の hover/goto が効かない（上記 opaque の帰結）。

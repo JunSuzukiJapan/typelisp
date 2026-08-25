@@ -1503,6 +1503,25 @@ user-visible capacity."
 (impl Eq string (equals ((self Self) (other Self)) bool (equal self other)))
 (impl Eq symbol (equals ((self Self) (other Self)) bool (eq self other)))
 
+;; `sexpr` is `eq`, deliberately — CL's identity, not `equal`'s recursive
+;; descent. The type is a *union* of everything, so "compare two of these"
+;; has no single right answer: `equal` would walk two cons trees and fold a
+;; `Str`'s content, `eq` asks whether they are the same object. Picking `eq`
+;; keeps `equals` on `sexpr` from being a third name for `equal` (`eq`/`eql`/
+;; `equal`/`equalp` are already all four callable on it) and keeps the cost
+;; of a comparison a constant.
+;;
+;; What this buys, since `match`'s value patterns compare through `Eq`
+;; (`Pattern::Guard`): a literal pattern against a `Sexpr` scrutinee now
+;; type-checks, and *matches* for every immediate — `'foo` (interned, so
+;; identity is content equality), an integer, a `char`, a `bool`. What it
+;; does not buy: `"a"`, a float, a bignum/ratio or a quoted list, whose
+;; `eq` is the identity of a `Str`/box/cons cell. `(str "a")` — the
+;; variant pattern, which destructures to a `string` and compares *that* by
+;; content — is the spelling for those, and `docs/syntax.md`'s `match`
+;; section says so.
+(impl Eq sexpr  (equals ((self Self) (other Self)) bool (eq self other)))
+
 ;; Scalar `Ord` impls — only the core `less`; the other three come from `Ord`'s
 ;; default bodies. Every scalar here has the overloaded `<` builtin (numbers
 ;; always had it; `char`/`string` gained one alongside these expanded traits —

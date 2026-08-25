@@ -288,6 +288,10 @@ fn patterns() {
         "(match (var v) sexpr ((pat-wild) (int 0)))",
         "(match (var v) int ((pat-bind x) (var x)))",
         "(match (var v) sexpr ((pat-lit (int 1)) (int 10)) ((pat-wild) (int 0)))",
+        // A value pattern: the test is an ordinary expression — here the
+        // `equals` call a `"a"` literal pattern lowers to — and the symbol is
+        // the name that expression reads the value under test through.
+        r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true () bool (str str) (var $match-scrut) (str "a"))) (int 1)) ((pat-wild) (int 0)))"#,
         "(match (var v) enum ((pat-ctor option 0 false ()) (int 0)) ((pat-ctor option 1 false (int) (pat-bind x)) (var x)))",
         // A downcast arm, for matching a trait object against a concrete type.
         "(match (var d) sexpr ((pat-ctor point 0 true (int int) (pat-bind p)) (var p)))",
@@ -299,6 +303,7 @@ fn patterns() {
         "(pat-wild)",
         "(pat-bind x)",
         "(pat-lit (int 1))",
+        "(pat-guard $match-scrut (bool true))",
         "(pat-ctor option 1 false (int) (pat-bind x))",
         "(pat-typetest point (pat-bind p))",
     ]);
@@ -402,6 +407,7 @@ const EXPR_ONLY: &[&str] = &[
     "pat-wild",
     "pat-bind",
     "pat-lit",
+    "pat-guard",
     "pat-ctor",
     "pat-typetest",
 ];

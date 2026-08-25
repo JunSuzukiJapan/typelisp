@@ -1922,11 +1922,20 @@ fn translate_field(heap: &mut Heap, form: Value, tag: &str, cx: Ctx) -> Result<V
     f.finish(tag)
 }
 
-/// `(match E R (P E...) ...)` -> `(match is-fn scrut ((pat . body)...) kind)`.
+/// `(match E R (P E...) ...)` -> `(match is-fn scrut ((pat . body)...) root-kind)`.
 ///
 /// An arm's body is collapsed to one form — a `let` with no bindings, which is
 /// what `progn` already is on both sides — because the island's
 /// `compile-match-arms` compiles exactly one form per arm.
+///
+/// `root-kind` is [`Repr::binding_kind`]'s answer for the scrutinee: `2` when
+/// the value is a heap pointer the collector can reclaim (so the island roots
+/// it across the arms), `0` when it is a raw machine word. It used to be a
+/// *classification* (`sexpr`/box/struct) that the island did not read at all,
+/// and every scrutinee it could describe happened to be a heap pointer — so
+/// `compile-match` rooted unconditionally. A scalar scrutinee makes that
+/// wrong rather than merely redundant: `rt_push_sexpr_root` decodes the word
+/// it is given, and the raw `i64` `7` decodes as a boxed-object id.
 fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
     if parts.len() < 2 {
@@ -1934,12 +1943,13 @@ fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     }
     let scrut = parts[0];
     let scrut_repr = Repr::read(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
-    let kind = match_kind_of(&scrut_repr).ok_or_else(|| {
-        Error::TypeError(format!(
+    if scrut_repr == Repr::None {
+        return Err(Error::TypeError(format!(
             "compile: a match on a `{}` scrutinee has no lowering",
             scrut_repr.tag()
-        ))
-    })?;
+        )));
+    }
+    let kind = scrut_repr.binding_kind();
     let arms = parts[2..].to_vec();
 
     let mut f = Items::new(heap);
@@ -1982,22 +1992,6 @@ fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     f.finish("match")
 }
 
-/// A scrutinee representation's island classification, or `None` for one that
-/// is never a `match` scrutinee in compiled code.
-///
-/// A scalar is the `None` case, and deliberately so: the old bridge refused
-/// exactly the same set (its classification only accepted a named type), so a
-/// `match` on an `int` was never something the island compiled. Refusing here
-/// keeps that, rather than inventing a lowering nothing has tested.
-fn match_kind_of(repr: &Repr) -> Option<i64> {
-    match repr {
-        Repr::Sexpr => Some(MATCH_KIND_SEXPR),
-        Repr::Struct | Repr::Vector(_) => Some(MATCH_KIND_STRUCT),
-        Repr::Enum => Some(MATCH_KIND_BOX),
-        _ => None,
-    }
-}
-
 /// One pattern.
 ///
 /// A constructor pattern carries its *own* type's classification rather than
@@ -2037,6 +2031,20 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
                 "pat-lit",
                 &[Value::Int(((n as u64) >> 32) as i64), Value::Int((n as u64 & 0xFFFF_FFFF) as i64)],
             )
+        }
+        // `(pat-guard SYM TEST)` -> `(pat-guard "SYM" TEST)`. The name
+        // crosses as a string for the same reason `pat-bind`'s does — the
+        // island's `env` is keyed by `string` — and the test is an ordinary
+        // expression, translated like any other.
+        "pat-guard" => {
+            let name = symbol_field(heap, pat, 0)?;
+            let test = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
+            let name_v = heap.alloc_string(name);
+            let mut f = Items::new(heap);
+            f.push(name_v);
+            let test = to_island(f.heap(), test, cx)?;
+            f.push(test);
+            f.finish("pat-guard")
         }
         "pat-ctor" => translate_ctor_pattern(heap, pat, cx),
         "pat-typetest" => {
@@ -2611,14 +2619,18 @@ mod tests {
     /// Each arm becomes a `(pattern . body)` pair, and a constructor pattern
     /// carries its own type's classification rather than the match's — a
     /// nested sub-pattern's can differ from its parent's.
+    ///
+    /// The node's own trailing number is neither of those classifications: it
+    /// is the scrutinee's *root kind* (`Repr::binding_kind`), `2` for every
+    /// heap value and `0` for a raw word.
     #[test]
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
             bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option 0 false ()) (int 0)) ((pat-ctor option 1 false (sexpr) (pat-bind x)) (var x)))"),
-            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int 0 0) ((pat-ctor 1 ((pat-bind "x")) 1 (6) false ()) var "x" false)) 1)"#
+            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int 0 0) ((pat-ctor 1 ((pat-bind "x")) 1 (6) false ()) var "x" false)) 2)"#
         );
-        // A struct scrutinee: kind 2, and the field kinds come from the
-        // `defstruct`.
+        // A struct scrutinee: pattern kind 2, and the field kinds come from
+        // the `defstruct`.
         assert_eq!(
             bridged_with(&DEFS, "(match (var p) struct ((pat-ctor point 0 false (int int) (pat-bind a) (pat-wild)) (var a)))"),
             r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a") (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
@@ -2632,7 +2644,7 @@ mod tests {
     fn a_multi_form_arm_body_becomes_a_progn() {
         assert_eq!(
             bridged_with(&DEFS, "(match (var v) sexpr ((pat-wild) (int 1) (int 2)))"),
-            r#"(match false (var "v" false) (((pat-wild) let () (int 0 1) (int 0 2))) 0)"#
+            r#"(match false (var "v" false) (((pat-wild) let () (int 0 1) (int 0 2))) 2)"#
         );
     }
 
@@ -2664,13 +2676,33 @@ mod tests {
         assert!(tt.contains(r#"(pat-typetest (str (int 0 112) (int 0 111) (int 0 105) (int 0 110) (int 0 116)) (pat-bind "p"))"#), "{}", tt);
     }
 
-    /// A scalar scrutinee is refused, exactly as the old bridge refused it:
-    /// its classification only accepted a named type, so the island never
-    /// compiled such a match. Keeping that rather than inventing a lowering.
+    /// A scalar scrutinee translates, and asks for no GC root.
+    ///
+    /// It used to be refused — the classification the trailing field carried
+    /// only accepted a named type — which is why `match` could not eliminate
+    /// a `string`/`i32` at all. The `0` here is the load-bearing part: the
+    /// island roots the scrutinee only when this says `2`, and rooting a raw
+    /// `i64` means handing `rt_push_sexpr_root` a word it will decode as
+    /// whatever its low three bits say.
     #[test]
-    fn a_match_on_a_scalar_is_refused() {
-        let e = refused_with(&DEFS, "(match (var n) int ((pat-lit (int 1)) (int 10)))");
-        assert!(e.contains("a match on a `int` scrutinee has no lowering"), "{}", e);
+    fn a_match_on_a_scalar_translates_and_asks_for_no_root() {
+        assert_eq!(
+            bridged_with(&DEFS, "(match (var n) int ((pat-lit (int 1)) (int 10)))"),
+            r#"(match false (var "n" false) (((pat-lit 0 1) int 0 10)) 0)"#
+        );
+    }
+
+    /// A value pattern crosses as its name plus an ordinary expression — the
+    /// island binds the one and compiles the other.
+    #[test]
+    fn a_value_pattern_crosses_as_a_name_and_a_test() {
+        let printed = bridged_with(
+            &DEFS,
+            r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true () bool (str str) (var $match-scrut) (str "a"))) (int 1)) ((pat-wild) (int 0)))"#,
+        );
+        assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc "string" "equals" true"#), "{}", printed);
+        // A `str` scrutinee is a heap pointer, so this one *is* rooted.
+        assert!(printed.ends_with(" 2)"), "{}", printed);
     }
 
     // ---- assignment, loops and globals -----------------------------------

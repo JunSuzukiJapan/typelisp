@@ -12,6 +12,8 @@
 //! is that the tree went and these three did not, so Stage D renamed it rather
 //! than leave a file called `ast` in a checker that builds no AST.
 
+use typelisp_mem::Value;
+
 use crate::{Path, Type};
 /// A reference to a free function or global variable — everything both
 /// `Interp` and the compile pipeline need to resolve one, kept as two
@@ -84,6 +86,33 @@ pub enum Pattern {
     Int(i64),
     Bool(bool),
     Char(char),
+    /// A *value* pattern: matches when the scrutinee compares equal to
+    /// something the checker could not reduce to an immediate word.
+    ///
+    /// This is what a `string`/`f64`/`symbol`/`bignum`/`ratio` literal
+    /// pattern and the `(= expr)` escape both lower to. All five literal
+    /// kinds are heap values whose machine word is a pointer or a box id, so
+    /// `Pattern::Int`'s "compare the word" is not equality for any of them;
+    /// and `(= expr)` is an arbitrary expression, which has no word until it
+    /// is evaluated. Both therefore become the same thing: *run a test*.
+    ///
+    /// `form` is an already-checked `bool`-typed expression — `(equals NAME
+    /// expr)`, resolved through the ordinary instance-method path, so a user
+    /// type's own `Eq` impl is what compares it — and `name` is the variable
+    /// that expression reads the scrutinee through. The matcher binds `name`
+    /// to the value under test, evaluates `form`, and matches iff it is
+    /// `true`; `name` is the checker's own (`$match-scrut`), never visible to
+    /// the arm body.
+    ///
+    /// One fixed name for every guard, not a fresh one per site: each guard's
+    /// binding is established immediately before its own `form` runs (the
+    /// interpreter extends the environment per guard; the compiled side
+    /// stores into a fresh slot and rebinds the name before compiling that
+    /// form), so two guards in one pattern never read each other's value.
+    Guard {
+        name: String,
+        form: Value,
+    },
     /// A constructor pattern, e.g. `(Some v)` / `(Cons a d)`.
     Ctor {
         type_name: Path,

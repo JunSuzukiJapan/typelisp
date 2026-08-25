@@ -1118,6 +1118,26 @@ fn an_aot_executable_calls_a_generic_prelude_function() {
     assert_eq!(compile_and_run("aot_prelude_generic", src), 42);
 }
 
+/// A value pattern — a `string` literal in a `match` — inside an AOT
+/// executable.
+///
+/// It is the pattern whose test is a *call*: `(equals $match-scrut "add")`,
+/// resolved to the prelude's `impl Eq string`. So this is the case where a
+/// pattern drags a prelude method into the executable, and it says the
+/// dependency is followed from inside a pattern the same way it is from a
+/// body (`core_bridge::collect_targets` walks a pattern's fields like any
+/// other node's).
+#[test]
+fn an_aot_executable_matches_on_a_string_literal() {
+    let src = r#"
+        (defun op ((s string)) i32
+          (match s ("add" 40) ("sub" 1) (_ 0)))
+        (defun main () i32
+          (+ (op "add") (+ (op "sub") (op "nope"))))
+    "#;
+    assert_eq!(compile_and_run("aot_match_string", src), 41);
+}
+
 /// The prelude's globals get their storage at the executable's own startup,
 /// in the order their compiled slot ids were assigned — a prelude body reading
 /// `*print-right-margin*` reads the value the prelude's own `defvar` gave it,

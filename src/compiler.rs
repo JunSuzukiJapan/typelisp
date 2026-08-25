@@ -3817,6 +3817,31 @@ pub const SOURCE: &str = r#"
                                  (build-shl builder (const-i64 builder (sexpr-int (sexpr-car (sexpr-cdr pat)))) (const-i64 builder 32))
                                  (const-i64 builder (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))))
                      fail-block)
+                   (if (equal s "pat-guard")
+                       ;; `(pat-guard NAME TEST)` -- the value
+                       ;; pattern: bind the value under test to
+                       ;; NAME (exactly as `pat-bind` binds, and
+                       ;; into this arm's own frame, so it is
+                       ;; discarded with it), compile TEST, and
+                       ;; branch on the `bool` it produces. This
+                       ;; is what a `string`/`f64`/`symbol`/
+                       ;; `bignum`/`ratio` literal pattern and an
+                       ;; explicit `(= expr)` both lower to: their
+                       ;; equality is a call, not a word
+                       ;; comparison, so there is nothing for
+                       ;; `pat-lit` to compare. The test is an
+                       ;; ordinary expression -- `(equals NAME
+                       ;; ...)`, already resolved to a concrete
+                       ;; method by the checker -- so
+                       ;; `compile-value` handles the whole of it,
+                       ;; including rooting whatever it allocates.
+                       (let ((nm (sexpr-str (sexpr-car (sexpr-cdr pat)))))
+                         (let ((test (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))
+                           (let ((bslot (alloca-args builder 1)))
+                             (store-arg builder bslot 0 v)
+                             (set env nm bslot)
+                             (let ((r (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup test)))
+                               (compile-pattern-guard builder cur-fn r fail-block)))))
                    (if (equal s "pat-ctor")
                        (let ((variant (sexpr-int (sexpr-car (sexpr-cdr pat)))))
                          (let ((subpats (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))
@@ -3871,7 +3896,7 @@ pub const SOURCE: &str = r#"
                              (let ((inner (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))
                                (compile-pattern-guard builder cur-fn (compile-sexpr-instance-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v type-name-form -1) fail-block)
                                (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v inner fail-block)))
-                           (panic (append "compile-pattern-test: unsupported pattern tag " s))))))))
+                           (panic (append "compile-pattern-test: unsupported pattern tag " s)))))))))
                            )
 
 ;; Compiles `type-name-form` (a compile-time-known
@@ -3980,27 +4005,39 @@ pub const SOURCE: &str = r#"
 ;; GC-managed `BoxedObj::Enum` now, no different from
 ;; a `Sexpr`/boxed-struct scrutinee — so the old
 ;; `scrut-kind = 1` exclusion below is gone; all three
-;; kinds root/unroot identically.
+;; kinds root/unroot identically. What is *not* a heap
+;; value roots not at all: a scrutinee can now be a
+;; scalar (`(match n (1 ...) (_ ...))`), and the
+;; node's trailing root-kind field says which — see
+;; the comment at the read itself.
 (defun compile-match ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
     (let ((is-fn (sexpr-bool (sexpr-car (sexpr-cdr e)))))
       (let ((scrut-form (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
         (let ((arms (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
-          ;; The node's trailing `scrut-kind` field
-          ;; (`core_bridge::translate_match`) isn't read
-          ;; here — every scrutinee kind now roots
-          ;; identically (see this function's own doc
-          ;; comment) — only `compile-pattern-test`'s
-          ;; *per-pattern* `scrut-kind` (embedded in each
-          ;; `pat-ctor`, a separate field) still matters.
-          (let ((scrut-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup scrut-form)))
-            (let ((ignored (push-sexpr-root builder m scrut-v)))
-              (let ((merge-block (append-block cur-fn "match-merge")))
-                (let ((slot (alloca-args builder 1)))
-                  (compile-match-arms m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup is-fn scrut-v slot merge-block arms)
-                  (position-at-end builder merge-block)
-                  (let ((result (load-raw builder slot 0)))
-                    (let ((ignored2 (pop-sexpr-root builder m)))
-                      result))))))))))
+          ;; The node's trailing field is the scrutinee's
+          ;; *root kind* (`core_bridge::translate_match`,
+          ;; `Repr::binding_kind`): `2` for a heap pointer
+          ;; the collector can reclaim, `0` for a raw
+          ;; machine word. Rooting was unconditional while
+          ;; a scrutinee was always a heap value; a scalar
+          ;; scrutinee (`(match n (1 ...) (_ ...))`) makes
+          ;; that a live bug rather than a redundancy,
+          ;; because `rt_push_sexpr_root` *decodes* the
+          ;; word it is handed and a raw `i64` decodes as
+          ;; whatever its low three bits happen to say.
+          ;; The per-pattern `scrut-kind` embedded in each
+          ;; `pat-ctor` is a different field and still
+          ;; drives the tag test.
+          (let ((root-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
+            (let ((scrut-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup scrut-form)))
+              (let ((ignored (if (eq root-kind 2) (push-sexpr-root builder m scrut-v) ())))
+                (let ((merge-block (append-block cur-fn "match-merge")))
+                  (let ((slot (alloca-args builder 1)))
+                    (compile-match-arms m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup is-fn scrut-v slot merge-block arms)
+                    (position-at-end builder merge-block)
+                    (let ((result (load-raw builder slot 0)))
+                      (let ((ignored2 (if (eq root-kind 2) (pop-sexpr-root builder m) ())))
+                        result)))))))))))
 
 ;; Tries each `(pattern-form . body-form)` arm in
 ;; order: `push-frame env` a fresh frame for any name

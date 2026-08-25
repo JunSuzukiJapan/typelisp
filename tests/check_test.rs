@@ -330,9 +330,16 @@ fn match_binds_constructor_fields() {
     assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
+/// A scrutinee that is *not* a data type is matched by value: literal
+/// patterns and `(= expr)` guards, with no variants to count. That makes a
+/// catch-all mandatory — the only way such a `match` is ever exhaustive.
+///
+/// This used to be refused outright ("expected a data type, found I32"),
+/// which is also why a string literal had no legal pattern position.
 #[test]
-fn match_scrutinee_must_be_a_data_type() {
-    assert_type_error("(match 1 (_ 0))");
+fn match_on_a_type_with_no_variants_needs_a_catch_all() {
+    assert_eq!(ty("(match 1 (_ 0))"), Type::I32);
+    assert_type_error("(match 1 (1 10))");
 }
 
 // ---- match arms fill each other's inference holes ---------------------------

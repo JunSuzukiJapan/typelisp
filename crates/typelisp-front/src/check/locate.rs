@@ -41,8 +41,16 @@ use crate::{DefLocs, Docs, Loc, Path, Registry, TopLevelForm};
 /// node that does not exist. The pattern tags are the other case: a
 /// `(pat-lit (int 1))`'s literal is part of the pattern, not an expression
 /// evaluated at that position, and a pattern binds rather than refers.
+///
+/// `pat-guard` is opaque for the same reason even though its field *is* an
+/// expression: it is one the checker synthesized (`(equals $match-scrut
+/// EXPR)`), every node of it carries the whole pattern's span rather than
+/// its own, and its receiver names a variable no user wrote. Descending
+/// would offer hovers positioned at the pattern for nodes half of which are
+/// not in the source — so `(= expr)`'s `expr` has no hover, which is the
+/// same deal `(pat-lit (int 1))`'s literal already gets.
 fn is_opaque(tag: &str) -> bool {
-    matches!(tag, "quote" | "pat-wild" | "pat-bind" | "pat-lit" | "pat-ctor" | "pat-typetest")
+    matches!(tag, "quote" | "pat-wild" | "pat-bind" | "pat-lit" | "pat-guard" | "pat-ctor" | "pat-typetest")
 }
 
 /// The innermost candidates seen so far during [`locate_node`]'s walk: one
@@ -369,6 +377,12 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
 /// Every name a pattern binds, appended in source order. `pat-wild` and
 /// `pat-lit` bind nothing; a `pat-ctor`'s field sub-patterns can each bind
 /// (nested constructors included).
+///
+/// `pat-guard` binds one name too — but the checker's own, live only while
+/// its test runs and unnameable from the arm body, so it is deliberately not
+/// added here: this list is what completion offers, and offering
+/// `$match-scrut` would be offering a name that means nothing where the
+/// cursor is.
 fn pattern_bind_names(heap: &Heap, pat: Value, scope: &mut Vec<String>) {
     match core::op(heap, pat) {
         Some("pat-bind") => {

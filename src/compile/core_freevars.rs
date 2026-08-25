@@ -222,6 +222,14 @@ fn walk(
                 let Some((pat, arm_body)) = items.split_first() else { continue };
                 let mut inner = bound.clone();
                 pattern_bindings(heap, *pat, &mut inner)?;
+                // A `pat-guard`'s test is an ordinary expression sitting
+                // inside the pattern, and it can name anything the arm body
+                // could — `(= limit)` reads the enclosing `limit`. Missing
+                // these would make a closure over such a `match` capture one
+                // slot too few. `inner` already holds the guard's own
+                // scrutinee name (`pattern_bindings` inserts it), so the
+                // one name the test is guaranteed to use is not counted.
+                pattern_guard_tests(heap, *pat, &mut |g| walk(heap, g, &inner, siblings, seen, order))?;
                 for f in arm_body {
                     walk(heap, *f, &inner, siblings, seen, order)?;
                 }
@@ -314,6 +322,40 @@ fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymId>) -> Result
                 pattern_bindings(heap, inner, out)?;
             }
         }
+        // The name the test form reads the scrutinee through. Not a
+        // user-visible binding — the arm body cannot name it — but it *is*
+        // bound while the test runs, which is what this set is asked about.
+        "pat-guard" => {
+            out.insert(sym(heap, pat, 0)?);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Calls `f` on every `pat-guard` test form in `pat`, however deeply nested.
+fn pattern_guard_tests(
+    heap: &Heap,
+    pat: Value,
+    f: &mut dyn FnMut(Value) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let Some(tag) = core::op(heap, pat) else { return Ok(()) };
+    match tag {
+        "pat-guard" => {
+            if let Some(test) = core::field(heap, pat, 1) {
+                f(test)?;
+            }
+        }
+        "pat-ctor" => {
+            for p in core::fields(heap, pat)?.iter().skip(4) {
+                pattern_guard_tests(heap, *p, f)?;
+            }
+        }
+        "pat-typetest" => {
+            if let Some(inner) = core::field(heap, pat, 1) {
+                pattern_guard_tests(heap, inner, f)?;
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -389,7 +431,11 @@ fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymId>) -> Result<(),
             }
             walk_nested(heap, parts[0], out)?;
             for arm in &parts[2..] {
-                for f in heap.list_to_vec(*arm)?.iter().skip(1) {
+                let items = heap.list_to_vec(*arm)?;
+                if let Some(pat) = items.first() {
+                    pattern_guard_tests(heap, *pat, &mut |g| walk_nested(heap, g, out))?;
+                }
+                for f in items.iter().skip(1) {
                     walk_nested(heap, *f, out)?;
                 }
             }
