@@ -725,8 +725,19 @@ mod native_method_list_tests {
         ("sexpr", &["sexpr"]),
     ];
 
-    /// Every `(equal method "X")` inside the island's `<name>-native-method?`
+    /// Every method-name key inside the island's `<name>-native-method?`
     /// definition.
+    ///
+    /// The predicates are `icase` key lists now (`(("+" "-" "*") true)`), not
+    /// the `(equal method "X")` chains this used to scan for, so a key is a
+    /// bare string literal in key position. Every string literal in the body
+    /// *is* a key — the clause bodies are all `true`/`false` and the only other
+    /// tokens are symbols — which makes "collect the literals" the whole parse.
+    /// The one thing that needs real lexing is `;`: skipping comments by line
+    /// is wrong in general (a `;` inside a string is not a comment), and here a
+    /// mis-skip would drop keys silently, so the scan tracks string state the
+    /// way the reader does. `!island.is_empty()` at the call site is the
+    /// backstop for the whole scan going stale again.
     fn island_methods(name: &str) -> Vec<String> {
         let src = crate::compiler::SOURCE;
         let head = format!("(defun {}-native-method? ", name);
@@ -737,13 +748,30 @@ mod native_method_list_tests {
             None => rest,
         };
         let mut out = Vec::new();
-        let needle = "(equal method \"";
-        let mut at = 0;
-        while let Some(i) = body[at..].find(needle) {
-            let from = at + i + needle.len();
-            let len = body[from..].find('"').expect("unterminated method-name string in the island SOURCE");
-            out.push(body[from..from + len].to_string());
-            at = from + len;
+        let mut chars = body.char_indices();
+        while let Some((i, c)) = chars.next() {
+            match c {
+                ';' => {
+                    for (_, c) in chars.by_ref() {
+                        if c == '\n' {
+                            break;
+                        }
+                    }
+                }
+                '"' => {
+                    let from = i + 1;
+                    let mut end = None;
+                    for (j, c) in chars.by_ref() {
+                        if c == '"' {
+                            end = Some(j);
+                            break;
+                        }
+                    }
+                    let to = end.expect("unterminated method-name string in the island SOURCE");
+                    out.push(body[from..to].to_string());
+                }
+                _ => {}
+            }
         }
         out.sort();
         out

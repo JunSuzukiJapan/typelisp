@@ -8971,3 +8971,59 @@ prelude の `SOURCE` を触ったのでダンプの再生成が要る（`scripts
 - **`bool` スクルーティニーは `(true ...) (false ...)` で網羅にならない**。変種を持たない型は
   一律 catchall 必須という規則を優先した。
 - `(= expr)` の中は LSP の hover/goto が効かない（上記 opaque の帰結）。
+
+## 2026-08-26 — 島に `icase` を入れ、コンパイラのディスパッチを書き直す
+
+`cond`/`case` は prelude に既にある（`case` は CL の `eql` ではなく `equal` を使う——
+`docs/cl-equivalence-catalog.md` の eq/eql/equal/equalp 節に記録済みの意図的な逸脱）。
+足りなかったのは**島の側**で、島は prelude に依存しない（[[typelisp-island-no-prelude-dependency]]
+の原則: `src/compiler.rs` の `SOURCE` に prelude 名を書くと 40 件超のテストが落ちる）。
+`icond` と同じ理由で `icase` を島自前のマクロとして書いた。
+
+```lisp
+(defun icase-key-test ((key Sexpr)) Sexpr ...)   ; 単一キー or キー列 → bool 式
+(defun icase-build ((key-form Sexpr) (clauses Sexpr)) Sexpr ...)
+(defmacro icase (key &rest clauses) (icase-build key clauses))
+```
+
+展開形は `(let ((icase-key KEY)) <if の木>)`。キーは 1 つでも `(k1 k2 k3)` のリストでもよく、
+リストは `(if (equal icase-key k1) true (if (equal icase-key k2) ...))` の or 連鎖になる。
+`else` 節が最後の枝。**キーを 1 度だけ評価する**のが `icond` との差で、
+`compile-value` の 41 分岐や `compile-assoc` の 131 メソッド節のように
+同じ `(sexpr-sym-name (sexpr-car e))` を毎回引き直していた箇所がそのまま短くなる。
+
+島のマクロ展開器の 3 制約は `icond` と同じ（[[typelisp-island-icond]]）:
+クロージャ禁止・`,@` 禁止（prelude の `sexpr-append` が要る）・**自己再帰禁止**。
+`icond` は 1 節ずつ剥がす再帰形だと展開器がスタックを溢れさせるので、`icase-build` も
+`icond-build` と同様に**節を逆順に畳んで `if` の木を一気に作る**反復ループで書いた。
+`ISLAND_MACROS`（`tests/island_self_compile_test.rs`）にも `"icase"` を足すこと。
+
+### 書き直した箇所
+
+| 箇所 | 前 | 後 |
+|---|---|---|
+| `compile-value` | 41 段の `if (equal tag ...)` 連鎖 | `icase` 1 つ |
+| `compile-assoc` | 131 メソッド節 | 受け手型ごとの `icase`（外側は `icond` のまま） |
+| `*-native-method?` / `*-receiver-type?` 12 個 | `icond` の述語列 | キー列 1 本ずつ |
+| `compile-sexpr-field` | タグごとの連鎖 | `((5 6 8 9) v)` のような複数キー節 |
+| `compile-sexpr-tag-test` | 1 関数に混在 | `compile-tag-bits-test` / `compile-box-kind-test` に分割 |
+| `compile-pattern-test` | 連鎖 | `compile-ctor-pattern` を切り出し + `icase scrut-kind` |
+| `compile-construct` / `compile-ctor-subpatterns` | `(eq variant 100)` 等の連鎖 | `icase` |
+
+`int-equality-method?` は唯一の呼び出し側がキー列に化けたので削除した。
+
+**残した `icond` は 2 つだけ**: `icond` マクロ定義自身と、`compile-assoc` の外側の受け手型
+ディスパッチ。後者は節が `(if (equal type-name "sexpr") (sexpr-native-method? method) false)`
+という**混合述語**（型名の一致 *かつ* メソッド名の所属判定）なので、単一キーの `icase` には
+落ちない。2 way / 3 way の `(if (equal method "new") ...)` のような早期分岐も、
+後続の束縛を使わずに抜けるものはそのまま残した（`icase` にすると読みにくくなるだけ）。
+
+### 落とし穴
+
+- **島は定義順に検査する**。`compile-sexpr-tag-test` から呼ぶ新ヘルパを後ろに置いたら
+  `no such function: compile-box-kind-test`。前に移すか `defsignature` を書く
+  （`compile-ctor-pattern` は後者）。
+- **`setf` は代入値を返す**。`(if first (setf acc one) (setf acc (list ...)))` は
+  両腕の型が食い違って `progn` の型エラーになる。`(setf acc (if first one ...))` に直す。
+- SOURCE を触ったので**島の再生成が要る**。emit が変わった回は 2 回
+  （[[typelisp-island-regen-fixpoint]]）、コメントだけなら 1 回。

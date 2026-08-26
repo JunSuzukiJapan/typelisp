@@ -458,9 +458,16 @@ fn zz_the_vocabulary_is_closed() {
 /// Every tag declared as shared is one `compile-value` actually dispatches on.
 ///
 /// This is the property tied to a real consumer. The island is the thing that
-/// has to accept the bridge's output, and its dispatch is a flat `icond` over
-/// `(equal s "TAG")` clauses in `compiler::SOURCE` — so the accepted set can be
-/// read straight out of the source it is compiled from, with no guessing.
+/// has to accept the bridge's output, and its dispatch is a flat `icase` over
+/// the tag in `compiler::SOURCE` — so the accepted set can be read straight out
+/// of the source it is compiled from, with no guessing.
+///
+/// The keys are string literals in clause-head position (`("int" ...)`), which
+/// is what the scan looks for, restricted to `compile-value`'s own body so a
+/// literal elsewhere in the island cannot widen the accepted set. It used to
+/// look for `(equal s "TAG")` across the whole SOURCE; that form is gone, and
+/// the `accepted.len() > 30` assertion below is what caught the change rather
+/// than letting the test quietly pass on an empty set.
 ///
 /// Checked now rather than after the checker switches, because that is the
 /// whole point of building the consumers first: finding out the island will not
@@ -468,13 +475,49 @@ fn zz_the_vocabulary_is_closed() {
 #[test]
 fn every_shared_tag_is_one_the_island_dispatches_on() {
     let source = typelisp::compiler::SOURCE;
-    let accepted: BTreeSet<&str> = source
-        .match_indices("(equal s \"")
-        .filter_map(|(i, m)| {
-            let rest = &source[i + m.len()..];
-            rest.find('"').map(|end| &rest[..end])
-        })
-        .collect();
+    let head = "(defun compile-value ";
+    let start = source.find(head).expect("`compile-value` not found in the island SOURCE") + head.len();
+    let rest = &source[start..];
+    let body = match rest.find("\n(defun ") {
+        Some(end) => &rest[..end],
+        None => rest,
+    };
+    // A clause key is a string literal right after `(`. Comments are skipped
+    // by a scan that tracks string state, since a `;` inside a string does not
+    // start one.
+    let mut accepted: BTreeSet<&str> = BTreeSet::new();
+    let mut chars = body.char_indices();
+    let mut prev_open = false;
+    while let Some((i, c)) = chars.next() {
+        match c {
+            ';' => {
+                prev_open = false;
+                for (_, c) in chars.by_ref() {
+                    if c == '\n' {
+                        break;
+                    }
+                }
+            }
+            '"' => {
+                let from = i + 1;
+                let mut end = None;
+                for (j, c) in chars.by_ref() {
+                    if c == '"' {
+                        end = Some(j);
+                        break;
+                    }
+                }
+                let to = end.expect("unterminated string in the island SOURCE");
+                if prev_open {
+                    accepted.insert(&body[from..to]);
+                }
+                prev_open = false;
+            }
+            '(' => prev_open = true,
+            c if c.is_whitespace() => {}
+            _ => prev_open = false,
+        }
+    }
 
     assert!(
         accepted.len() > 30,
