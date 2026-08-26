@@ -9885,8 +9885,17 @@ impl Checker {
             }
             Ok(CompileTarget::Fn(self.mk_ref(written, resolved)))
         };
+        // A macro resolves too. Its body is an ordinary `Sexpr -> Sexpr`
+        // function — the *interpreter* keeps it in the same `fns` table a
+        // `defun` goes in, so a `CompileTarget::Fn` reaches it — but the
+        // *checker* keeps functions and macros in separate maps, so
+        // `resolve_fn` alone comes up empty and `(compile <macro>)` used to be
+        // rejected as "no function ... is visible from here". Functions first:
+        // that is the existing resolution, and this only widens what a name
+        // that resolved to nothing can still mean.
+        let fn_or_macro = |name: &str| self.resolve_fn(name).or_else(|| self.resolve_macro(name).map(|(p, _)| p));
         let target = match name.rsplit_once("::") {
-            None => fn_target(vec![name.clone()], self.resolve_fn(&name))?,
+            None => fn_target(vec![name.clone()], fn_or_macro(&name))?,
             Some((type_part, method)) => {
                 let type_segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
                 // Kept separate from `type_fq` below: whether the *type* half

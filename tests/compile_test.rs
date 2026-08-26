@@ -5193,6 +5193,52 @@ fn compile_and_interpret_agree_on_a_trait_object_match() {
     assert_eq!(compiled, interpreted);
 }
 
+/// `(compile <macro>)`: a macro body is an ordinary `Sexpr -> Sexpr` function
+/// — expanding it *is* calling it — so it compiles like any other definition,
+/// and expansions after the compile run through the native body.
+///
+/// Two claims, because either alone would be worthless: the expander really is
+/// compiled (`is_compiled`, since a compiled call is observationally identical
+/// to an interpreted one except in speed), and the expansion is still correct.
+/// The checker had to learn this name too: it keeps functions and macros in
+/// separate maps, so `(compile twice)` was rejected as "no function `twice` is
+/// visible from here" even though the interpreter has the body right there in
+/// its `fns` table.
+#[test]
+fn a_macro_expander_can_be_compiled() {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    typelisp::compile::install_llvm_backend();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+
+    let run = |h: &mut Heap, chk: &mut Checker, interp: &Interp, src: &str| -> Value {
+        let r = Reader::new();
+        let vs = r.read_all(h, src).expect("read failed");
+        let mut last = Value::Empty;
+        for v in vs {
+            let tl = chk.check_form(h, interp, v).expect("check failed");
+            if let Some(val) = interp.exec(h, tl).expect("eval failed") {
+                last = val;
+            }
+        }
+        last
+    };
+
+    run(&mut h, &mut chk, &interp, "(defmacro twice (x) `(+ ,x ,x))");
+    assert!(!interp.is_compiled("twice"), "a freshly defined macro has no compiled body yet");
+    assert_eq!(run(&mut h, &mut chk, &interp, "(twice 21)"), Value::Int(42));
+
+    run(&mut h, &mut chk, &interp, "(compile twice)");
+    assert!(interp.is_compiled("twice"), "`(compile twice)` should have installed a native expander");
+    assert_eq!(
+        run(&mut h, &mut chk, &interp, "(twice 21)"),
+        Value::Int(42),
+        "expanding through the native body must produce the same expansion"
+    );
+}
+
 /// Compiling *only* the dispatching function — the boxing happens in
 /// interpreted code at the call site — must still work. Nothing in
 /// `render`'s own body names `circle::draw`, so the vtable's targets have to

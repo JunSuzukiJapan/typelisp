@@ -304,10 +304,22 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
             let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defvar without a name".to_string())?;
             plan.globals.push(path);
         }
+        // A macro body is an ordinary `Sexpr -> Sexpr` function — expanding it
+        // *is* calling it, and `exec` registers it in the same `fns` table a
+        // `defun` goes in — so it compiles like one and belongs in the
+        // artifact. Without this the expander stayed interpreted forever,
+        // which is the half of "macros can be compiled" the implementation was
+        // missing (the other half, "expand before compiling the expansion",
+        // was already true and then some: expansion finishes at check time,
+        // before any codegen runs).
+        "defmacro" => {
+            let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defmacro without a name".to_string())?;
+            plan.items.push(CompiledItem::Fn(path));
+        }
         // No codegen of their own. `exec` still registers what they define:
         // an enum's variants and a struct's field representations, which the
         // compile bridge reads back through `Interp::compile_definitions`.
-        "defstruct" | "defenum" | "defmacro" | "use" => {}
+        "defstruct" | "defenum" | "use" => {}
         other => {
             return Err(format!(
                 "prelude: top-level `{}` has no place in the compiled artifact — \

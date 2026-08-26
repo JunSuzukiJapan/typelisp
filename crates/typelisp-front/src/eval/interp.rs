@@ -2308,8 +2308,17 @@ impl MacroExpander for Interp {
         // (defaulting omitted `&optional`/`&key` args); the call-site checker
         // has already range-checked the raw count (`Checker::check_macro_arity`),
         // so any error here is a keyword/plist detail it deliberately deferred.
+        //
+        // `enter`, not `apply`: a macro body is an ordinary `Sexpr -> Sexpr`
+        // function and is compiled like one when something has compiled it
+        // (`(compile <macro>)`, or the prelude's dump generator, which now
+        // collects `defmacro` alongside `defun`). `apply` always tree-walks;
+        // `enter` takes the compiled body when there is one. Argument
+        // *binding* stays interpreted either way — `bind_macro_args` is what
+        // evaluates omitted `&optional`/`&key` defaults, and it runs before
+        // this — so only the body crosses.
         let result = match self.bind_macro_args(heap, &f, &raw_args) {
-            Ok(argv) => self.apply(heap, &f, argv),
+            Ok(argv) => self.enter(heap, &f, argv),
             Err(e) => Err(e),
         };
         for _ in &raw_args {

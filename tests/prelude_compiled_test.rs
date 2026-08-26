@@ -75,6 +75,26 @@ fn the_families_that_used_to_be_blocked_are_compiled_now() {
     }
 }
 
+/// Macro *expanders* too: a macro body is an ordinary `Sexpr -> Sexpr`
+/// function — expanding it is calling it — so it compiles like any other
+/// definition and the artifact carries it.
+///
+/// This is the half of "macros can be compiled" the implementation was missing
+/// until 2026-08-26: the checker already checked every macro body under
+/// all-`Sexpr` types, but `exec` registered it with no signature, and
+/// `compiled_fn_body` refuses a `FnDef` without one — so `(compile <macro>)`
+/// answered "has no signature (is it a defmacro?)" and every expander
+/// tree-walked forever. Named across the layers that have macros: the core
+/// macro layer, the prelude's loop/branch set, and one that builds its
+/// expansion dynamically.
+#[test]
+fn macro_expanders_have_native_bodies_too() {
+    let (_heap, _chk, interp) = env(true);
+    for name in ["cond", "case", "when", "and", "while", "dotimes", "do", "setq"] {
+        assert!(interp.is_compiled(name), "`{}`'s expander should have a compiled body after load_prelude", name);
+    }
+}
+
 /// A generic definition still isn't — it has no single body to compile (the
 /// checker monomorphizes per use site, so it reaches the collector as an
 /// empty `(module PATH)`).

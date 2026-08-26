@@ -1274,7 +1274,7 @@ impl Interp {
     /// precedence. `compile_function` never populates `compiled` without going
     /// through `compiled_fn_body`, which requires `sig` — so the `expect` is an
     /// internal invariant, not a user-reachable error.
-    fn enter(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<Value, EvalError> {
+    pub(crate) fn enter(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<Value, EvalError> {
         let compiled = f.compiled.borrow().clone();
         if let Some(compiled) = compiled {
             let sig = f.sig.as_ref().expect("a compiled function always has a type signature");
@@ -1293,11 +1293,12 @@ impl Interp {
     /// because that is what a closure box holds and what `apply_core` reads back
     /// (`param_names` takes each entry's `car`). `FnDef` keeps names and
     /// representations apart, so they are zipped back together here; a function
-    /// registered without a signature (a `defmacro` lambda) has no
-    /// representations to zip, and unit stands in — an interpreted apply is
-    /// uniform over `Value` and reads none of them. A *compiled* caller does
-    /// read them (`Interp::apply_interpreted`), and a `defmacro` lambda never
-    /// reaches one: it has no compiled representation to be passed by.
+    /// registered without a signature has no representations to zip, and unit
+    /// stands in — an interpreted apply is uniform over `Value` and reads none
+    /// of them, while a *compiled* caller does read them
+    /// (`Interp::apply_interpreted`). A `defmacro` used to be the case with no
+    /// signature; it has one now (all-`Sexpr`, which is what the checker
+    /// checked its body under), so its parameters zip like any other.
     pub(crate) fn reify(&self, heap: &mut Heap, f: &Rc<FnDef>) -> Result<Value, EvalError> {
         let mut s = RootScope::new(heap);
         let reprs = f.sig.as_ref().map(|(ps, _)| ps.as_slice()).unwrap_or(&[]);
@@ -1966,12 +1967,26 @@ impl Interp {
                 let public = bool_field(heap, tl, 4, "defmacro")?;
                 let body = body_forms(heap, tl, 5, "defmacro")?;
                 heap.push_permanent_root(tl);
+                // Every parameter — and the result — is `Sexpr`. The checker
+                // already checks a macro body under exactly those types
+                // (`Checker::check_defmacro`), so this records a signature it
+                // established rather than inventing one, and recording it is
+                // what makes a macro body compilable: `compiled_fn_body`
+                // refuses a `FnDef` without one, which is why `(compile
+                // <macro>)` used to answer "has no signature (is it a
+                // defmacro?)".
+                //
+                // One entry per *binding*, `&rest` included — the same shape a
+                // `&rest` `defun`'s signature has, and the shape
+                // `bind_macro_args` produces, since it collects the rest
+                // arguments into one `Sexpr` before the call.
+                let sig = (vec![Repr::Sexpr; params.len()], Repr::Sexpr);
                 let def = FnDef {
                     params,
                     body,
                     rest,
                     lambda: Some(lambda),
-                    sig: None,
+                    sig: Some(sig),
                     public,
                     compiled: RefCell::new(None),
                 };
