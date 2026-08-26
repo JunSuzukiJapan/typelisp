@@ -11,7 +11,7 @@
 
 use typelisp::compile::llvm_context;
 use typelisp::compile::prelude_bootstrap::build_prelude_artifact;
-use typelisp::dump::{parse, read_state, source_digest};
+use typelisp::dump::{parse, read_state, sources_digest};
 
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::Module;
@@ -31,7 +31,7 @@ fn prelude_artifacts_are_fresh() {
     let state = read_state(unit.types, "prelude").unwrap_or_else(|e| panic!("{} — {}", e, REGEN));
     assert_eq!(
         state.source_digest,
-        Some(source_digest(typelisp::prelude::SOURCE)),
+        Some(sources_digest(typelisp::prelude::DUMPED_SOURCES)),
         "the prelude dump is stale relative to prelude.rs's SOURCE — {}",
         REGEN
     );

@@ -539,9 +539,11 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
 (case expr
   (key1 body...)
-  (key2 body...)
+  ((key2 key3) body...)             ; キー列: どれかに当たれば
   (else body...))                   ; expr は一度だけ評価。key は equal で比較。
-                                     ; シンボルを key にするときは 'sym と quote する。defmacro
+                                     ; key は「リテラル」で、評価されない（CL と同じ）。
+                                     ; 裸のシンボル a はシンボル 'a を意味する。
+                                     ; 'a と書くとエラー（裸の a を使う）。defmacro
 (ecase expr (key body...) ...)      ; 網羅を要求する case。どれにも当たらなければ panic。defmacro
 (ccase expr (key body...) ...)      ; CL の ccase。差し出せる restart が無いので ecase と同一。defmacro
 (and expr...)                       ; 短絡評価。0引数なら true。defmacro

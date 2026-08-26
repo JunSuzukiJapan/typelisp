@@ -80,6 +80,16 @@ pub const DUMP: &[u8] = include_bytes!("prelude.typld");
 /// name the same script.
 pub const REGEN_SCRIPT: &str = "scripts/regen-prelude-bitcode.sh";
 
+/// Every source [`DUMP`] was built from, in load order.
+///
+/// Two, not one: the dump carries the core macro layer's definitions
+/// ([`crate::core_macros::SOURCE`]) as well as this module's, because that
+/// layer loads as part of the prelude load and a from-dump start would
+/// otherwise come up with no `cond`/`case`. Staleness is judged against both
+/// ([`crate::dump::verify_sources_digest`]) — hashing only `SOURCE` would let
+/// an edit to the core layer ship against a dump that no longer matches it.
+pub const DUMPED_SOURCES: &[&str] = &[crate::core_macros::SOURCE, SOURCE];
+
 pub const SOURCE: &str = r##"
 ;; `not`: moved here from a Rust builtin (it has no dependency on the GC
 ;; heap or anything else Rust-only — a plain `if`/`bool` round trip) so it
@@ -160,18 +170,6 @@ pub const SOURCE: &str = r##"
 ;; `cons<T,U>` pair) — Symbol/Sexpr redesign Phase 2. The quasiquote/`list`
 ;; templates still emit ordinary `car`/`cdr`/`if` symbols into the *expansion*
 ;; (user code), untouched.
-(defmacro and (&rest args)
-  (if (sexpr-null args)
-      (quote true)
-      (if (sexpr-null (sexpr-cdr args))
-          (sexpr-car args)
-          (list (quote if) (sexpr-car args) (sexpr-cons (quote and) (sexpr-cdr args)) (quote false)))))
-(defmacro or (&rest args)
-  (if (sexpr-null args)
-      (quote false)
-      (if (sexpr-null (sexpr-cdr args))
-          (sexpr-car args)
-          (list (quote if) (sexpr-car args) (quote true) (sexpr-cons (quote or) (sexpr-cdr args))))))
 
 ;; `equal`/`equalp` (CL structural equality) are now Rust builtins
 ;; (`registry.rs`, `Interp::eval_builtin`'s `sexpr_equal`/`sexpr_equalp`), not
@@ -189,10 +187,6 @@ pub const SOURCE: &str = r##"
 ;; `sexpr-*` layer (no `match`, no user-facing `car`/`cdr`). Placed here, before
 ;; the macros below, since every one of them uses `,@` in its expansion, and
 ;; that desugaring needs `sexpr-append` already registered.
-(defun sexpr-append ((a Sexpr) (b Sexpr)) Sexpr
-  (if (sexpr-consp a)
-      (sexpr-cons (sexpr-car a) (sexpr-append (sexpr-cdr a) b))
-      b))
 
 ;; The rest of the loop/branch primitive reduction set (see the comment by
 ;; `and`/`or` above) — placed here, right after `sexpr-append`, since every one
@@ -289,19 +283,10 @@ pub const SOURCE: &str = r##"
 ;; `docs/language-design.md`) — without the taken side's trailing `()`,
 ;; `if`'s `then`/`els` types would only agree by coincidence (e.g. `(when c
 ;; 5)` would try to unify `i32` against `els`'s `Unit` and fail to check).
-(defmacro when (test &rest body) `(if ,test (progn ,@body ()) ()))
-(defmacro unless (test &rest body) `(if ,test () (progn ,@body ())))
 
 ;; `cond`: nested `if`s, one clause peeled off per recursive expansion (same
 ;; self-recursion shape as `and`/`or` above). `else`-detection mirrors
 ;; `case`'s own `(eq (car c) (quote else))`.
-(defmacro cond (&rest clauses)
-  (if (sexpr-null clauses)
-      ()
-      (let ((clause (sexpr-car clauses)))
-        (if (eq (sexpr-car clause) (quote else))
-            `(progn ,@(sexpr-cdr clause))
-            `(if ,(sexpr-car clause) (progn ,@(sexpr-cdr clause)) (cond ,@(sexpr-cdr clauses)))))))
 
 ;; `if-let`: exactly the two-armed `match` `Checker::check_if_let` used to
 ;; build directly (a constructor-pattern arm plus a wildcard `else` arm) —
@@ -914,14 +899,6 @@ pub const SOURCE: &str = r##"
 ;; design goal that originally motivated giving every scalar type its own
 ;; `eq` method (now corrected to real identity; `equal` is the one that
 ;; keeps `case` working uniformly across types, `string` included).
-(defmacro case (expr &rest clauses)
-  (let ((tmp (gensym)))
-    `(let ((,tmp ,expr))
-       (cond ,@(sexpr-map (lambda ((c Sexpr)) Sexpr
-                       (if (eq (sexpr-car c) (quote else))
-                           c
-                           (sexpr-cons (list (quote equal) tmp (sexpr-car c)) (sexpr-cdr c))))
-                     clauses)))))
 
 ;; `do` (roadmap step 8d, catalog §1.1): `(do ((var1 init1 step1)
 ;; (var2 init2 step2) ...) (test result...) body...)`. Each binding's `step`
@@ -2796,12 +2773,6 @@ user-visible capacity."
 ;; Restarts are not taken (language-design.md §9), and with no restart the two
 ;; are the same form — so `ccase` is defined as the same expansion rather than
 ;; left out, and `docs/functions.md` records that they coincide here.
-(pub defmacro ecase (expr &rest clauses)
-  "`case` with no fallthrough: a value matching no clause panics."
-  `(case ,expr ,@clauses (else (panic "ecase: no clause matched"))))
-(pub defmacro ccase (expr &rest clauses)
-  "CL's `ccase`. With no restarts to offer, identical to `ecase`."
-  `(case ,expr ,@clauses (else (panic "ccase: no clause matched"))))
 
 ;; `setq`: CL's variable-only assignment, and its multi-pair form. `setf` is
 ;; the general one here, so this is a spelling rather than a mechanism —
@@ -5039,6 +5010,13 @@ pub fn load_interpreted_with(
     on_read: &mut dyn FnMut(&mut Heap, &[Value]),
     on_checked: &mut dyn FnMut(&mut Heap, Value),
 ) {
+    // The core macro layer first: `SOURCE` below is written in `when`/`cond`/
+    // `and`/`or`, and `,@` desugars to the `sexpr-append` that layer defines.
+    // It is a separate layer rather than the top of this file because the
+    // compiler island needs the same macros without taking the prelude with
+    // them — see `crate::core_macros`'s module comment.
+    crate::core_macros::load_with(heap, chk, interp, on_checked);
+
     let r = Reader::new();
     let forms = r.read_all(heap, SOURCE).expect("prelude: read failed");
     on_read(heap, &forms);

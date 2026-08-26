@@ -24,6 +24,7 @@ pub mod types;
 pub mod type_key;
 pub mod check;
 pub mod eval;
+pub mod core_macros;
 pub mod prelude;
 pub mod project;
 pub mod shim;

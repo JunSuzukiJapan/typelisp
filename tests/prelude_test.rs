@@ -38,6 +38,29 @@ fn with_ctx<R>(f: impl FnOnce(&mut Heap, &mut Checker, &mut Interp) -> R) -> R {
     })
 }
 
+/// The checker's rendered error for `src`, for the cases that fail during the
+/// check rather than the run — a macro that refuses its input, among them.
+/// [`run`] cannot be used for those: it `expect`s the check.
+fn check_err(src: &str) -> String {
+    with_ctx(|h, chk, interp| {
+        let r = Reader::new();
+        let vs = r.read_all(h, src).expect("read failed");
+        let mut err = None;
+        for v in vs {
+            match chk.check_form(h, &*interp, v) {
+                Ok(tl) => {
+                    interp.exec(h, tl).expect("eval failed");
+                }
+                Err(e) => {
+                    err = Some(e.to_string());
+                    break;
+                }
+            }
+        }
+        err.expect("expected the check to fail")
+    })
+}
+
 fn run(src: &str) -> Result<Value, EvalError> {
     with_ctx(|h, chk, interp| {
         let r = Reader::new();
@@ -660,8 +683,27 @@ fn case_falls_through_to_else_when_nothing_matches() {
 }
 
 #[test]
-fn case_matches_explicitly_quoted_symbol_keys() {
-    assert_eq!(eval_ok("(case (quote b) ('a 1) ('b 2) (else 0))"), Value::Int(2));
+fn case_matches_bare_symbol_keys() {
+    assert_eq!(eval_ok("(case (quote b) (a 1) (b 2) (else 0))"), Value::Int(2));
+}
+
+/// A key list, CL's `((k1 k2) form)` — the thing keys-as-expressions could not
+/// express: the list read as a call, and this failed to check.
+#[test]
+fn case_matches_any_key_in_a_key_list() {
+    assert_eq!(eval_ok("(case 2 ((1 2 3) 100) ((8 9) 200) (else 0))"), Value::Int(100));
+    assert_eq!(eval_ok("(case 9 ((1 2 3) 100) ((8 9) 200) (else 0))"), Value::Int(200));
+    assert_eq!(eval_ok("(case 5 ((1 2 3) 100) ((8 9) 200) (else 0))"), Value::Int(0));
+}
+
+/// `'sym` in key position is refused, not read CL's way (the two-key list
+/// `{quote, sym}`, which would type-check and never match). Refusing names the
+/// fix, which matters here more than in CL: `'sym` was this language's
+/// *documented* spelling for a symbol key until keys became literals.
+#[test]
+fn case_refuses_a_quoted_key() {
+    let msg = check_err("(case (quote b) ('a 1) (else 0))");
+    assert!(msg.contains("quoted key"), "unexpected error: {}", msg);
 }
 
 #[test]

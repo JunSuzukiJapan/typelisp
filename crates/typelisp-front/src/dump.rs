@@ -776,8 +776,21 @@ pub fn read_state(bytes: &[u8], label: &str) -> Result<UnitState, String> {
 /// therefore need a regeneration now — cheap, since the regeneration script
 /// keeps the bitcode section it already has whenever the *forms* are unchanged.
 pub fn source_digest(source: &str) -> u64 {
+    sources_digest(&[source])
+}
+
+/// [`source_digest`] over more than one source, for a dump built from several.
+///
+/// The prelude's is: its unit holds the core macro layer's definitions
+/// (`typelisp_front::core_macros::SOURCE`) as well as its own, so hashing only
+/// one of the two would let an edit to the other ship against a stale dump —
+/// the "several inputs, one hash" failure the island artifact already had once.
+/// Order matters and is the load order.
+pub fn sources_digest(sources: &[&str]) -> u64 {
     let mut h = DefaultHasher::new();
-    source.hash(&mut h);
+    for s in sources {
+        s.hash(&mut h);
+    }
     h.finish()
 }
 
@@ -788,8 +801,14 @@ pub fn source_digest(source: &str) -> u64 {
 /// quietly falling back to reading the source would hide exactly the case this
 /// exists to catch — an edit that appears to do nothing.
 pub fn verify_digest(state: &UnitState, source: &str, regen_script: &str) -> Result<(), String> {
+    verify_sources_digest(state, &[source], regen_script)
+}
+
+/// [`verify_digest`] for a dump built from several sources — see
+/// [`sources_digest`].
+pub fn verify_sources_digest(state: &UnitState, sources: &[&str], regen_script: &str) -> Result<(), String> {
     match state.source_digest {
-        Some(d) if d == source_digest(source) => Ok(()),
+        Some(d) if d == sources_digest(sources) => Ok(()),
         Some(_) => Err(format!(
             "{}: the dump is stale relative to its source — run {}",
             state.label, regen_script

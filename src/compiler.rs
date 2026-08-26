@@ -267,53 +267,27 @@
 //! an arithmetic operand, can be `Fn`- or `Sexpr`-typed and need the same
 //! retain/GC-root treatment `compile-call-args` already gives those.
 //!
-//! Doesn't depend on `prelude.rs` (no `cond`/`when`/...) — only the
+//! **What this SOURCE may name.** Builtins (`eq`/`append`/`car`/`cdr`/
+//! `Scope`'s methods, `Option`'s `some`/`none`/pattern-matching), the
 //! checker's native special forms (`if`/`let`/`match`/`labels`/`loop`/
-//! `break`/`return`/`setf`) and builtins (`eq`/`append`/`car`/`cdr`/
-//! `Scope`'s methods, `Option`'s `some`/`none`/pattern-matching), so
-//! loading order relative to the prelude doesn't matter.
+//! `break`/`return`/`setf`), and the *core macro layer*
+//! (`typelisp_front::core_macros` — `cond`/`case`/`when`/`unless`/`and`/`or`),
+//! which is loaded before both this and the prelude for exactly that reason.
+//!
+//! Not prelude *functions*: a call to one is still there in the code this
+//! island emits, and the island must not drag the prelude into it. A macro is
+//! not a call — it is gone by the time anything is emitted — which is why the
+//! core layer is fine here and why the island-local `icond`/`icase` copies it
+//! used to carry are deleted. (This was once written as "no prelude names at
+//! all"; the stricter reading cost the island `cond`/`case` for no benefit. An
+//! island probe using the prelude's own `cond`/`case` bootstrapped cleanly,
+//! since this SOURCE is checked with the prelude already in scope — the island
+//! generator loads it for the *types* the signatures below use,
+//! `Option<llvm-basic-block>` among them.)
 
 use crate::{Checker, Heap, Interp};
 
 pub const SOURCE: &str = r#"
-;; EXPERIMENT: island-local `cond`. Not the prelude's — the island must not
-;; reference prelude names (see this module's doc comment). Named `icond` to
-;; avoid colliding with the prelude's own `cond` when both are loaded.
-;;
-;; Deliberately written without quasiquote: `,@` expands to a call to
-;; `sexpr-append`, which is a *prelude* `defun` (prelude.rs), so a spliced
-;; expander would reintroduce exactly the prelude dependency this exists to
-;; avoid ("unquote-splicing (,@) requires the prelude's `sexpr-append` to be
-;; loaded"). `sexpr-cons`/`sexpr-car`/`sexpr-cdr`/`sexpr-null`/`list` are all
-;; builtins (`check::registry`), so this expander stays inside the builtin
-;; layer. It also creates no closure, which the bootstrap requires: expanding
-;; a macro whose expander builds one would need the island's own JIT, and the
-;; island is not installed until after this SOURCE is checked.
-;;
-;; Narrower than the prelude's `cond` in one way: every clause body is exactly
-;; *one* form (`(test expr)` / `(else expr)`), because a multi-form body is
-;; what would need the splice. Every dispatch arm here is a single call, so
-;; nothing needs more.
-;;
-;; The tree is built by an ordinary `defun` rather than by the macro
-;; re-expanding itself into `(icond <rest>)`. That distinction is load-bearing,
-;; not stylistic: a self-re-expanding `icond` leaves a *macro call* in each
-;; `if`'s else position, and `Checker::check_if`/`Interp::eval` can only
-;; loopify an else chain whose links are already `if` nodes — every link would
-;; instead cost a full expand-then-check recursion, and `compile-value`'s
-;; 37-arm dispatch overflowed the stack of an unrelated test that way (the
-;; same failure mode `compile-construct`'s doc comment records). Expanding
-;; once, into the whole nested `if` tree, keeps the checker on its existing
-;; iterative path; the recursion moves into `icond-build`, where it is plain
-;; interpreter recursion 37 frames deep and costs nothing.
-;; Written with `loop`/`setf` instead of the obvious recursion on `clauses`.
-;; The expander runs *interpreted* (it is called during the check of this very
-;; file, before the island exists), and an unoptimized `Interp::eval` frame is
-;; fat: recursing once per clause put `compile-value`'s 37-arm dispatch at
-;; ~8MB of stack where the hand-written `if` chain needed ~2MB, which
-;; overflows an ordinary `cargo test` thread even though
-;; `scripts/test-serial.sh`'s `RUST_MIN_STACK=32MB` hides it. Iterating keeps
-;; the expander's stack flat regardless of arm count.
 ;; ---------------------------------------------------------------------------
 ;; Forward declarations.
 ;;
@@ -615,97 +589,6 @@ pub const SOURCE: &str = r#"
   (llvm-builder llvm-module llvm-function llvm-function llvm-value i32 Option<llvm-basic-block>)
   llvm-value)
 
-(defun icond-build ((clauses Sexpr)) Sexpr
-  (let ((rev (the Sexpr ())) (cur clauses))
-    (loop
-      (if (sexpr-null cur) (break) ())
-      (setf rev (sexpr-cons (sexpr-car cur) rev))
-      (setf cur (sexpr-cdr cur)))
-    ;; `rev` is innermost-clause-first, so folding it left builds the nested
-    ;; `if` from the inside out. An `else` clause contributes its body as the
-    ;; starting accumulator; without one the chain bottoms out at `()`.
-    (let ((acc (the Sexpr ())) (c rev))
-      (loop
-        (if (sexpr-null c) (break) ())
-        (let ((clause (sexpr-car c)))
-          (if (eq (sexpr-car clause) (quote else))
-              (setf acc (sexpr-car (sexpr-cdr clause)))
-              (setf acc (list (quote if)
-                              (sexpr-car clause)
-                              (sexpr-car (sexpr-cdr clause))
-                              acc))))
-        (setf c (sexpr-cdr c)))
-      acc)))
-
-(defmacro icond (&rest clauses) (icond-build clauses))
-
-;; The test one `icase` clause's key contributes, over the fixed binding
-;; `icase-key`: `(equal icase-key K)` for a single key, and an `or`-chain
-;; spelled as nested `if`s for a key *list* — CL's `case` shape, which is
-;; what lets the four passthrough `Sexpr` variants share one clause
-;; (`compile-sexpr-field`'s `((5 6 8 9) v)`) instead of repeating a body.
-;;
-;; Spelled as `(if t1 true <rest>)` rather than `(or ...)` because that is
-;; what `or` desugars to anyway, and building it here keeps the expander
-;; inside the same "no prelude, no splice, no closure" fence `icond`'s
-;; comment sets out.
-(defun icase-key-test ((key Sexpr)) Sexpr
-  (if (sexpr-consp key)
-      (let ((rev (the Sexpr ())) (cur key))
-        (loop
-          (if (sexpr-null cur) (break) ())
-          (setf rev (sexpr-cons (sexpr-car cur) rev))
-          (setf cur (sexpr-cdr cur)))
-        ;; `rev` is last-key-first, so the first one folded is the chain's
-        ;; bottom and no `false` literal is needed to terminate it.
-        (let ((acc (the Sexpr ())) (c rev) (first true))
-          (loop
-            (if (sexpr-null c) (break) ())
-            (let ((one (list (quote equal) (quote icase-key) (sexpr-car c))))
-              (setf acc (if first one (list (quote if) one (quote true) acc))))
-            (setf first false)
-            (setf c (sexpr-cdr c)))
-          acc))
-      (list (quote equal) (quote icase-key) key)))
-
-;; Island-local `case`. Same three constraints as `icond` (no prelude name,
-;; no `,@`, no closure in the expander, and expand *once* into the whole
-;; tree so the checker keeps its iterative `if`-chain path) — see that
-;; macro's comment, which is the long version of all of them.
-;;
-;; `(icase KEY (K1 E1) ((K2 K3) E2) ... (else E))` binds the key once and
-;; then tests it, so the key form is evaluated exactly one time however many
-;; clauses there are. The binding's name is fixed rather than gensym'd: it is
-;; established immediately around the chain that reads it, so a nested
-;; `icase` shadows it correctly, and no island code names it.
-;;
-;; `equal`, not `eq`: the island dispatches on both an AST tag (`string`)
-;; and a variant number (`i64`), and only `equal` is value equality for
-;; both. It costs nothing — `equal` is in `string-native-method?` and in
-;; `int-native-method?`, so each test lowers to the same single
-;; instruction the hand-written `(equal s "...")` / `(eq n 5)` chains did.
-(defun icase-build ((key-form Sexpr) (clauses Sexpr)) Sexpr
-  (let ((rev (the Sexpr ())) (cur clauses))
-    (loop
-      (if (sexpr-null cur) (break) ())
-      (setf rev (sexpr-cons (sexpr-car cur) rev))
-      (setf cur (sexpr-cdr cur)))
-    (let ((acc (the Sexpr ())) (c rev))
-      (loop
-        (if (sexpr-null c) (break) ())
-        (let ((clause (sexpr-car c)))
-          (if (eq (sexpr-car clause) (quote else))
-              (setf acc (sexpr-car (sexpr-cdr clause)))
-              (setf acc (list (quote if)
-                              (icase-key-test (sexpr-car clause))
-                              (sexpr-car (sexpr-cdr clause))
-                              acc))))
-        (setf c (sexpr-cdr c)))
-      (list (quote let)
-            (list (list (quote icase-key) key-form))
-            acc))))
-
-(defmacro icase (key &rest clauses) (icase-build key clauses))
 
 ;; `sexpr-str`/`sexpr-bool`/`sexpr-sym-name`/`sexpr-int` — the island's typed
 ;; `Sexpr` field extractors — are now Rust builtins (`Interp::eval_builtin`,
@@ -756,7 +639,7 @@ pub const SOURCE: &str = r#"
 ;; only ever call *out* of the ring" paragraph for the general shape of this
 ;; constraint). Purely a textual move; neither function's own body changed.
 (defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i64) (idx i32)) llvm-value
-  (icase variant
+  (case variant
     ;; `int`(1): the signed value sits above the 3 tag bits.
     (1 (build-ashr builder v (const-i64 builder 3)))
     ;; `float`(2): the payload is inside the box.
@@ -814,7 +697,7 @@ pub const SOURCE: &str = r#"
 ;; see that function's own doc comment for why each shift/tag constant is
 ;; what it is.
 (defun compile-tag-struct-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind i64)) llvm-value
-  (icase kind
+  (case kind
     ;; `int`(1): the value moves above the 3 tag bits.
     (1 (build-shl builder v (const-i64 builder 3)))
     ;; `float`(2): the only kind that allocates.
@@ -1205,17 +1088,17 @@ pub const SOURCE: &str = r#"
 ;; serves `i32` serves `u8` unchanged. Kept as their own predicates rather than
 ;; inlined at the dispatch so the two lists read next to each other.
 (defun int-receiver-type? ((name string)) bool
-  (icase name
+  (case name
     (("i8" "i16" "i32" "i64" "isize" "u8" "u16" "u32" "u64" "usize") true)
     (else false)))
 
 (defun float-receiver-type? ((name string)) bool
-  (icase name
+  (case name
     (("f32" "f64") true)
     (else false)))
 
 (defun int-native-method? ((method string)) bool
-  (icase method
+  (case method
     (("+" "-" "*") true)
     ;; `/`/`mod` lower to the `rt_i64_div`/`rt_i64_mod` shims (integer division
     ;; can't be a bare LLVM instruction — `sdiv`/`srem` by zero is UB), not a
@@ -1258,12 +1141,12 @@ pub const SOURCE: &str = r#"
 ;; boxes. The structural `equal`/`equalp` are free *functions*, not methods,
 ;; so they reach their own shims through `rt_builtin_symbol` instead of here.
 (defun sexpr-native-method? ((method string)) bool
-  (icase method
+  (case method
     (("eq" "eql") true)
     (else false)))
 
 (defun string-native-method? ((method string)) bool
-  (icase method
+  (case method
     (("length" "ref" "eq" "eql" "equal" "equalp" "lt" "<" "<=" ">" ">="
       "append") true)
     ;; `substring` is the one three-operand string method
@@ -1283,7 +1166,7 @@ pub const SOURCE: &str = r#"
 ;; precompiled prelude found (31 definitions, the string scanners and the
 ;; reader among them, reach it).
 (defun char-native-method? ((method string)) bool
-  (icase method
+  (case method
     (("eq" "eql" "equal" "equalp" "lt" "<" "<=" ">" ">=") true)
     ;; `char->int` is the identity at the compiled level and `char->string`
     ;; is a one-character `rt_str_new`; both are unary, which is why
@@ -1297,7 +1180,7 @@ pub const SOURCE: &str = r#"
 ;; `bool` is a raw `0`/`1`, so all four are the same `icmp eq` — the same
 ;; shape the `char` comparisons take.
 (defun bool-native-method? ((method string)) bool
-  (icase method
+  (case method
     (("eq" "eql" "equal" "equalp") true)
     (else false)))
 
@@ -1306,7 +1189,7 @@ pub const SOURCE: &str = r#"
 ;; handle, so identity is handle equality — the `sexpr` arm's `eq` again,
 ;; with a receiver the checker spells `symbol` rather than `sexpr`.
 (defun symbol-native-method? ((method string)) bool
-  (icase method
+  (case method
          ("eq" true)
          (else (equal method "eql"))))
 
@@ -1326,7 +1209,7 @@ pub const SOURCE: &str = r#"
 ;; compiled the normal way. (The `build-frem` arm in the dispatch below is now
 ;; unreachable for `mod` and left only as a no-op.)
 (defun float-native-method? ((method string)) bool
-  (icase method
+  (case method
     (("+" "-" "*" "/" "expt" "sqrt" "floor" "ceiling" "round" "truncate"
       "float->int" "float->bignum" "float->ratio" "<" "<=" ">" ">=" "=" "/="
       "eq" "eql" "equal" "equalp") true)
@@ -1361,7 +1244,7 @@ pub const SOURCE: &str = r#"
 ;; here). `bignum->int`/`try-bignum->int`/`bignum->float`/`bignum->ratio`
 ;; round out the conversions.
 (defun bignum-native-method? ((method string)) bool
-  (icase method
+  (case method
     (("+" "-" "*" "/" "mod" "<" "<=" ">" ">=" "=" "/=" "eq" "eql" "equal"
       "equalp" "bignum->int" "try-bignum->int" "bignum->float" "bignum->ratio") true)
     ;; `max`/`min`: `rt_bignum_cmp` (already used by every comparison above)
@@ -1383,7 +1266,7 @@ pub const SOURCE: &str = r#"
 ;; define a rational remainder), plus `ratio->bignum`/`ratio->float`/
 ;; `numerator`/`denominator`.
 (defun ratio-native-method? ((method string)) bool
-  (icase method
+  (case method
     (("+" "-" "*" "/" "<" "<=" ">" ">=" "=" "/=" "eq" "eql" "equal" "equalp"
       "ratio->bignum" "ratio->float" "numerator" "denominator") true)
     ;; `max`/`min`: `rt_ratio_cmp` + `build-select`, same shape as `bignum`'s.
@@ -1611,7 +1494,7 @@ pub const SOURCE: &str = r#"
                    (const-i64 builder kind))))
 
 (defun compile-sexpr-tag-test ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i64)) llvm-value
-  (icase variant
+  (case variant
     ;; `float`(2)/`bignum`(8)/`ratio`(9) are heap boxes that share one tag,
     ;; so what tells them apart is the box's own kind, not the tag bits.
     (2 (compile-box-kind-test builder m v 1))
@@ -1627,7 +1510,7 @@ pub const SOURCE: &str = r#"
                   (build-icmp-ne builder (build-lshr builder v (const-i64 builder 3)) (const-i64 builder 0))))
     ;; Everything else is one comparison against `typelisp-abi`'s tag table.
     (else (compile-tag-bits-test builder v
-                                 (icase variant
+                                 (case variant
                                    (1 0) (3 4) (5 2) (6 3) (7 1) (10 5)
                                    (else (panic "compile-sexpr-tag-test: unknown Sexpr variant")))))))
 
@@ -1701,20 +1584,23 @@ pub const SOURCE: &str = r#"
     (build-call builder (get-function m "rt_str_new") args-ptr 6)))
 
 (defun compile-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
-    ;; The AST-tag dispatch. `icond` (this file's own
-    ;; macro, defined at the top of SOURCE) rather than
-    ;; the hand-nested `if` chain this used to be: the
+    ;; The AST-tag dispatch. `case` (the core macro layer's
+    ;; — `typelisp_front::core_macros`) rather than the
+    ;; hand-nested `if` chain this used to be: the
     ;; expansion is literally the same `if` chain, so
     ;; nothing the checker, the interpreter or the
     ;; emitted IR sees changes — it trades 37 levels of
-    ;; indentation for one flat clause list.
+    ;; indentation for one flat clause list, and the key
+    ;; is read once instead of per clause.
     ;;
-    ;; Not the prelude's `cond`/`case`: this SOURCE may
-    ;; reference only builtins and special forms (see the
-    ;; module doc comment), and reaching for the prelude
-    ;; here breaks every test that loads the island on
-    ;; its own. See `icond`'s own comment for the two
-    ;; constraints its definition works around.
+    ;; This used to be an island-local `icond`/`icase`
+    ;; copy, on the reading that this SOURCE may name only
+    ;; builtins and special forms. That fence is about the
+    ;; code the island *emits*: a prelude function call
+    ;; would still be there afterwards, but a macro is
+    ;; gone by then, and the island's SOURCE is checked
+    ;; with the layer defining these already loaded. The
+    ;; duplicates are deleted.
     ;;
     ;; A hash table keyed by tag was considered and
     ;; rejected: the arms are *code*, not values, so a
@@ -1728,7 +1614,7 @@ pub const SOURCE: &str = r#"
     ;; `fn-env` are `Scope<V>`, `String`-keyed `HashMap`
     ;; frames.)
     (let ((s (sexpr-sym-name (sexpr-car e))))
-      (icase s
+      (case s
         ("int" (compile-int m fn-name builder e))
         ("char" (compile-char m fn-name builder e))
         ("bool" (compile-bool m fn-name builder e))
@@ -2176,7 +2062,7 @@ pub const SOURCE: &str = r#"
     (let ((type-name (sexpr-str (sexpr-car (sexpr-cdr e)))))
       (let ((method (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
         (let ((rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
-          (icond
+          (cond
             ((if (equal type-name "sexpr") (sexpr-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
                (let ((b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
@@ -2198,7 +2084,7 @@ pub const SOURCE: &str = r#"
                      (store-arg builder args-ptr 0 a)
                      (build-call builder (get-function m "rt_str_length") args-ptr 1))
                    (let ((b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                     (icase method
+                     (case method
                        ;; `ref` can raise (an out-of-range index), so it goes
                        ;; through `raising-binop-call` rather than a bare
                        ;; `build-call` — see that function.
@@ -2267,7 +2153,7 @@ pub const SOURCE: &str = r#"
                ;; is read — same reason `float-native-method?`'s own
                ;; unary conversions are checked first (there is no
                ;; second argument form to compile for these).
-               (icase method
+               (case method
                  ("int->bignum"
                   (let ((args-ptr (alloca-args builder 1)))
                     (store-arg builder args-ptr 0 a)
@@ -2283,7 +2169,7 @@ pub const SOURCE: &str = r#"
                  ("lognot"
                   (build-xor builder a (const-i64 builder -1)))
                  (else (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                          (icase method
+                          (case method
                             ("+"
                              (build-add builder a b2))
                             ("-"
@@ -2351,7 +2237,7 @@ pub const SOURCE: &str = r#"
                      (store-arg builder args-ptr 0 a)
                      (build-call builder (get-function m "rt_str_new") args-ptr 1))
                (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                 (icase method
+                 (case method
                    ("equalp"
                     (let ((args-ptr (alloca-args builder 2)))
                       (store-arg builder args-ptr 0 a)
@@ -2381,7 +2267,7 @@ pub const SOURCE: &str = r#"
                  (build-icmp-eq builder a b2))))
             ((if (float-receiver-type? type-name) (float-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
-               (icase method
+               (case method
                  ("sqrt"
                   (build-fsqrt builder m a))
                  ("floor"
@@ -2431,7 +2317,7 @@ pub const SOURCE: &str = r#"
                  ("atanh"
                   (int-unary-shim-call builder m "rt_f64_atanh" a))
                  (else (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                          (icase method
+                          (case method
                             ("+"
                              (build-fadd builder a b2))
                             ("-"
@@ -2461,7 +2347,7 @@ pub const SOURCE: &str = r#"
                             (else (build-fcmp-eq builder a b2))))))))
             ((if (equal type-name "bignum") (bignum-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
-               (icase method
+               (case method
                  ("bignum->int"
                   (bignum-unary-call builder m "rt_bignum_to_int" a))
                  ("bignum->float"
@@ -2514,7 +2400,7 @@ pub const SOURCE: &str = r#"
                               (position-at-end builder merge-block)
                               (load-raw builder slot 0))))))))
                  (else (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                          (icase method
+                          (case method
                             ("+"
                              (bignum-binop-call builder m "rt_bignum_add" a b2))
                             ("-"
@@ -2550,7 +2436,7 @@ pub const SOURCE: &str = r#"
                             (else (build-icmp-eq builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)))))))))
             ((if (equal type-name "ratio") (ratio-native-method? method) false)
              (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
-               (icase method
+               (case method
                  ("ratio->bignum"
                   (ratio-unary-call builder m "rt_ratio_to_bignum" a))
                  ("ratio->float"
@@ -2560,7 +2446,7 @@ pub const SOURCE: &str = r#"
                  ("denominator"
                   (ratio-unary-call builder m "rt_ratio_denominator" a))
                  (else (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                          (icase method
+                          (case method
                             ("+"
                              (ratio-binop-call builder m "rt_ratio_add" a b2))
                             ("-"
@@ -3738,7 +3624,7 @@ pub const SOURCE: &str = r#"
 ;; comment already explains for `compile-value`
 ;; & co.).
 (defun compile-pattern-test ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (pat Sexpr) (fail-block llvm-basic-block))()
-    (icase (sexpr-sym-name (sexpr-car pat))
+    (case (sexpr-sym-name (sexpr-car pat))
       ;; Matches anything and binds nothing, so there is no guard to emit.
       ("pat-wild" ())
       ;; Binds into a fresh slot in this arm's own frame.
@@ -3812,7 +3698,7 @@ pub const SOURCE: &str = r#"
         (let ((field-kinds (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))
           (let ((downcast (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))))
             (let ((type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))))
-              (icase scrut-kind
+              (case scrut-kind
                 ;; A boxed struct has one variant, so only a downcast tests
                 ;; anything at all.
                 (2 (if downcast
@@ -3862,7 +3748,7 @@ pub const SOURCE: &str = r#"
          (let ((rest-kinds (if (eq scrut-kind 0) field-kinds (sexpr-cdr field-kinds))))
           (if (equal (sexpr-sym-name (sexpr-car p)) "pat-wild")
            (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)
-           (let ((field-v (icase scrut-kind
+           (let ((field-v (case scrut-kind
                             ;; A boxed struct and a sum-ADT box both carry a
                             ;; per-field kind; a tagged `Sexpr` (`0`) reads its
                             ;; field shape off the variant instead.
@@ -4073,7 +3959,7 @@ pub const SOURCE: &str = r#"
               ;; already-tagged `Sexpr` value into
               ;; `compile-construct-sym`/`-path`'s literal-name reader,
               ;; which chokes trying to `rt_intern_symbol` it.
-              (icase variant
+              (case variant
                 (100 (compile-construct-sym m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup arg-forms))
                 (101 (compile-construct-path m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup arg-forms))
                 ;; Every other variant index is a real one, and which of the
@@ -4283,7 +4169,7 @@ pub const SOURCE: &str = r#"
     ;; compiles its own argument rather than one being hoisted out: `nil`(0)
     ;; has no argument at all, and a hoisted `compile-value` would emit that
     ;; argument's IR even for the variants that never use it.
-    (icase variant
+    (case variant
       (0 (const-i64 builder 6))
       (1 (build-shl builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car arg-forms)) (const-i64 builder 3)))
       (2 (let ((args-ptr (alloca-args builder 1)))
@@ -4436,7 +4322,7 @@ pub const SOURCE: &str = r#"
             (compile-construct-boxed-struct m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))) (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
         (let ((v-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
           (let ((v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v-form)))
-            (icase method
+            (case method
               ("len"
                (let ((args-ptr (alloca-args builder 1)))
                  (store-arg builder args-ptr 0 v)
@@ -4562,7 +4448,7 @@ pub const SOURCE: &str = r#"
               (let ((option-type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
               (let ((ht-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
                 (let ((ht (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup ht-form)))
-                  (icase method
+                  (case method
                     ("set"
                      (let ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
                        (let ((val-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))

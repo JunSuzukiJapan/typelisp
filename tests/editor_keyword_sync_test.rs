@@ -168,12 +168,19 @@ fn is_excluded(name: &str) -> bool {
     // text can go to `read`. Prelude-private, and a step finer-grained than
     // anything a user writes.
     let datum_scanner = name.starts_with("reader-");
+    // The core macro layer's expansion helpers
+    // (`typelisp_front::core_macros`): `case` turns each clause's key
+    // designator into a test with these, one for a key list and one for a
+    // single key. They register like any other `defun` because the layer
+    // loads with the prelude, but a user writes `case`.
+    let case_expander = name == "case-key-test" || name == "case-key-atom-test";
 
     operator
         || type_param
         || earmuffed
         || native_stream
         || datum_scanner
+        || case_expander
         || PRELUDE_PRIVATE.contains(&name)
         || name.ends_with("-rt")
         || ISLAND_PREFIXES.iter().any(|p| name.starts_with(p))

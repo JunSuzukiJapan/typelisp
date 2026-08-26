@@ -44,9 +44,6 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
 /// desync this test. Island `defmacro`s go in [`ISLAND_MACROS`] instead —
 /// see its doc comment for why the two must not be merged.
 const ISLAND_DEFUNS: &[&str] = &[
-    "icond-build",
-    "icase-key-test",
-    "icase-build",
     "compile-tag-bits-test",
     "compile-box-kind-test",
     "compile-ctor-pattern",
@@ -186,7 +183,7 @@ const ISLAND_DEFUNS: &[&str] = &[
 /// lost by not compiling one — a macro body only ever runs interpreted, at
 /// expansion time, which for the island is during the check of `SOURCE`
 /// itself, before any island bitcode exists to run it compiled.
-const ISLAND_MACROS: &[&str] = &["icond", "icase"];
+const ISLAND_MACROS: &[&str] = &[];
 
 #[test]
 fn every_island_defun_compiles() {

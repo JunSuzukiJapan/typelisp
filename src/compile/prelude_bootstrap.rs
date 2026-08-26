@@ -63,7 +63,7 @@ pub fn load(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Interp) {
     // Before anything is applied: a dump built from a different `SOURCE` than
     // the one compiled into this binary would install definitions the source
     // no longer has, and leave an edit looking like it did nothing.
-    typelisp_front::dump::verify_digest(&state, crate::prelude::SOURCE, REGEN_SCRIPT)
+    typelisp_front::dump::verify_sources_digest(&state, crate::prelude::DUMPED_SOURCES, REGEN_SCRIPT)
         .unwrap_or_else(|e| panic!("{}", e));
     crate::compile::dump::load_unit(heap, chk, interp, state, unit.bitcode)
         .unwrap_or_else(|e| panic!("prelude: {}", e));
@@ -103,7 +103,7 @@ pub fn load_for_aot(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Inte
     let units = typelisp_front::dump::parse(crate::prelude::DUMP, "prelude")?;
     let unit = units.first().ok_or_else(|| "prelude: the committed dump holds no units".to_string())?;
     let state = crate::compile::dump::read_types(unit, "prelude")?;
-    typelisp_front::dump::verify_digest(&state, crate::prelude::SOURCE, REGEN_SCRIPT)?;
+    typelisp_front::dump::verify_sources_digest(&state, crate::prelude::DUMPED_SOURCES, REGEN_SCRIPT)?;
 
     // Taken off the state before `load_unit` consumes it, and matched against
     // the recorded `globals` afterwards: this list decides the order the
@@ -507,7 +507,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         &heap,
         delta,
         "prelude",
-        Some(typelisp_front::dump::source_digest(crate::prelude::SOURCE)),
+        Some(typelisp_front::dump::sources_digest(crate::prelude::DUMPED_SOURCES)),
         Some(plan.source_hash),
         &plan.forms,
         items.iter().map(unit_item).collect(),

@@ -9027,3 +9027,65 @@ prelude の `SOURCE` を触ったのでダンプの再生成が要る（`scripts
   両腕の型が食い違って `progn` の型エラーになる。`(setf acc (if first one ...))` に直す。
 - SOURCE を触ったので**島の再生成が要る**。emit が変わった回は 2 回
   （[[typelisp-island-regen-fixpoint]]）、コメントだけなら 1 回。
+
+## 2026-08-26（続き） — コアマクロ層の新設と `case` のキーのリテラル化
+
+上の `icase` の節に書いた「島は prelude に依存しないので自前のマクロが要る」は、
+**確かめたら成り立っていなかった**。島の SOURCE に prelude の `cond`/`case` を使う
+`defun` を 2 本足してブートストラップを回したら、そのまま通った。
+
+理由は `src/compile/bootstrap.rs:81` で、**島の SOURCE を読む前に prelude を
+interpreted でロードしている**。島は既に `Option<llvm-basic-block>` など prelude 由来の
+型に依存していて、「prelude に依存しない」の実体は「**emit するコードに prelude 関数を
+残さない**」だった。マクロは展開時に消えるので、この柵の内側ではない。`icond` のコメントが
+挙げていた 3 制約のうち、`,@` 禁止（`sexpr-append` が prelude の `defun`）と
+クロージャ禁止（「島が未インストールで JIT が無い」）は現状には当てはまらない。
+
+### コアマクロ層（`crates/typelisp-front/src/core_macros.rs`）
+
+とはいえ「島が prelude を引く」のは筋が悪いので、**制御マクロを prelude から切り出して
+独立した層にした**。定義は 1 つ、利用者は prelude と島の 2 つ。
+
+入れたもの: `sexpr-append`（`,@` の展開先）、`and`/`or`/`when`/`unless`/`cond`/
+`case`/`ecase`/`ccase`。層の規律は「**builtin と特殊形しか名指さない**」の 1 つだけ
+（この層は prelude より前にロードされるので）。
+
+ロード順は `prelude::load_interpreted_with` の先頭。**ダンプにも入る**——
+`core_macros::load_with` が prelude のダンプ生成コールバックを受け取る。入れないと
+ダンプ起動で `cond`/`case` が消える（実際に一度そうなった）。
+
+**入力が 2 つになったのでハッシュも 2 つ見る**: `dump::sources_digest` /
+`verify_sources_digest` を新設し、prelude ダンプの新鮮さは
+`prelude::DUMPED_SOURCES`（コア層 + prelude）で判定する。片方しか見ないと、
+コア層を編集しても古いダンプが「新鮮」と呼ばれる——島の成果物で一度やった
+「入力は複数、ハッシュは 1 つ」の失敗と同じ形。
+
+島側は `icond`/`icase` とその補助 3 defun を削除して `cond`/`case` に統一
+（`icond-build`/`icase-key-test`/`icase-build`)。**削除範囲の罠**: `icond` の
+コメントブロックと `icond-build` の間に 66 本の `defsignature`（前方宣言）が挟まっていて、
+コメント先頭から `defmacro icase` までを一括削除したらそれごと消え、
+`no such function: emit-direct-call` になった。HEAD と現在で
+`^\((defsignature|defun|defmacro|defvar) NAME` を突き合わせ、消えたのが 5 件ちょうどで
+順序も保たれていることを確認してから再生成した。
+
+### `case` のキーはリテラルになった
+
+CL と同じく**キーを評価しない**。これで CL のキー列 `((1 2 3) "low")` が入る。
+
+| キーの書き方 | 意味 |
+|---|---|
+| `1` / `"one"` / `#\a` / `true` / `1.5` | そのままのリテラル |
+| 裸のシンボル `a` | シンボル `a`（生成する比較は `(equal tmp (quote a))` で**従来と同一**） |
+| `(k1 k2 ...)` | キー列。どれかに当たればマッチ |
+| `'a`（＝`(quote a)`） | **エラー**。裸の `a` を書くよう名指す |
+
+`'a` は CL では黙って 2 要素のキー列 `{quote, a}` になる有名な罠で、この言語では
+`'a` が**変更前の正規の書き方**だったぶん踏みやすい。`match` の値パターンと同じ理由
+（型は通るが決してマッチしない腕を黙って残さない）でエラーにした。移行が要ったのは
+`tests/prelude_test.rs` の 1 箇所だけ。
+
+`gensym` は使えない（prelude の `defun` で、`*gensym-counter*` と `format` を要求する）ので、
+スクルーティニーの一時変数は**先頭が空白の固定名 `" case-key"`**。空白始まりはソースに
+書けないので衝突しない——`gensym` 自身が使っているのと同じ保証で、カウンタが要らない。
+固定名で足りるのは、束縛が唯一の読み手である `cond` を直接囲むからで、
+`case` の腕に入れ子になった `case` は正しく shadow する。
