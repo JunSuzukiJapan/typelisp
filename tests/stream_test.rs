@@ -593,7 +593,7 @@ fn read_sexpr_reads_one_datum_at_a_time() {
                  (out ""))
              (loop
                (match (read-sexpr s)
-                 ((ok o) (match o ((none) (break)) ((some d) (setf out (append out (format false "~s|" d))))))
+                 ((ok o) (match o ((eof) (break)) ((datum d) (setf out (append out (format false "~s|" d))))))
                  ((err e) (progn (setf out (append out (message e))) (break)))))
              out)"#,
     );
@@ -643,7 +643,7 @@ fn read_sexpr_handles_quotes_comments_strings_and_character_literals() {
         r##"(defun one ((text string)) string
              (let ((s (make-string-input-stream text)))
                (match (read-sexpr s)
-                 ((ok o) (match o ((none) "<eof>") ((some d) (format false "~s" d))))
+                 ((ok o) (match o ((eof) "<eof>") ((datum d) (format false "~s" d))))
                  ((err e) (message e)))))
            (format false "~a ~a ~a ~a ~a"
              (one "'(a b)")
@@ -668,7 +668,7 @@ fn an_atom_ends_at_a_paren_without_losing_it() {
                  (out ""))
              (loop
                (match (read-sexpr s)
-                 ((ok o) (match o ((none) (break)) ((some d) (setf out (append out (format false "~s|" d))))))
+                 ((ok o) (match o ((eof) (break)) ((datum d) (setf out (append out (format false "~s|" d))))))
                  ((err e) (break))))
              out)"#,
     );
@@ -691,10 +691,10 @@ fn end_of_input_is_a_value_not_an_error() {
     let v = eval_string(
         r#"(let ((s (make-string-input-stream "   ")))
              (match (read-sexpr s)
-               ((ok o) (match o ((none) "none") ((some _) "some")))
+               ((ok o) (match o ((eof) "eof") ((datum _) "datum")))
                ((err e) (message e))))"#,
     );
-    assert_eq!(v, "none");
+    assert_eq!(v, "eof");
 }
 
 #[test]
@@ -708,7 +708,7 @@ fn read_sexpr_reads_a_file_form_by_form() {
               (let ((out ""))
                 (loop
                   (match (read-sexpr f)
-                    ((ok o) (match o ((none) (break)) ((some d) (setf out (append out (format false "~s" d))))))
+                    ((ok o) (match o ((eof) (break)) ((datum d) (setf out (append out (format false "~s" d))))))
                     ((err e) (break))))
                 (close f)
                 out))
@@ -740,7 +740,7 @@ fn a_stream_without_pushback_gets_it_by_wrapping() {
                    (out ""))
                (loop
                  (match (read-sexpr p)
-                   ((ok o) (match o ((none) (break)) ((some d) (setf out (append out (format false "~s|" d))))))
+                   ((ok o) (match o ((eof) (break)) ((datum d) (setf out (append out (format false "~s|" d))))))
                    ((err e) (break))))
                out))"#,
     );
@@ -765,7 +765,7 @@ fn a_user_defined_input_stream_can_be_read_from() {
            (impl CharInput fixed)
            (let ((p (make-peek-stream (fixed::new "(from a user stream)" 0))))
              (match (read-sexpr p)
-               ((ok o) (match o ((none) "<eof>") ((some d) (format false "~s" d))))
+               ((ok o) (match o ((eof) "<eof>") ((datum d) (format false "~s" d))))
                ((err e) (message e))))"#,
     );
     assert_eq!(v, "(from a user stream)");

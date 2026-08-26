@@ -4100,30 +4100,40 @@ user-visible capacity."
   "The next datum's text, with only the reader's own delimiters ending it."
   (reader-scan-datum-until s (the Option<char> (option::none))))
 
-(pub defun read-sexpr-preserving-whitespace<S> ((s S)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
+;; `read-sexpr` とその仲間は「データが無かった」を `Ok(none)` ではなく専用の
+;; バリアントで報告する。S 式リーダはデータ `()` を返せなければならず、空リストが
+;; `Option` の `none` になった時点(docs/dev/null-elimination-plan.md)で `Ok(none)` は
+;; 「入力終端」と「空リストを読んだ」の両方を同じ場所で意味してしまう。今のうちに
+;; 二つを分けておけば、その変更が呼び出し側全部に波及せずに済む。
+(pub defenum ReadOutcome
+  "What one `read-sexpr` produced: a datum, or nothing because the input ended."
+  (eof)
+  (datum Sexpr))
+
+(pub defun read-sexpr-preserving-whitespace<S> ((s S)) Result<ReadOutcome, ReadError> (where (PeekInput S))
   "Read one datum from `s`, leaving everything after it untouched -- CL's
-   `read-preserving-whitespace`. `Ok(none)` at end of input (so a read loop
+   `read-preserving-whitespace`. `Ok(eof)` at end of input (so a read loop
    ends on a value rather than an error), `Err` if what is there is not a
    datum."
   (let ((text (reader-scan-datum s)))
     (if (equal text "")
-        (result::ok (option::none))
+        (result::ok (ReadOutcome::eof))
         (match (read text)
-          ((ok v) (result::ok (option::some v)))
+          ((ok v) (result::ok (ReadOutcome::datum v)))
           ((err e) (result::err e))))))
 
-(defun reader-read-one-until<S> ((s S) (stop Option<char>)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
+(defun reader-read-one-until<S> ((s S) (stop Option<char>)) Result<ReadOutcome, ReadError> (where (PeekInput S))
   "`read-sexpr-preserving-whitespace` with an extra delimiter -- what
    `read-delimited-list` reads each element with."
   (let ((text (reader-scan-datum-until s stop)))
     (if (equal text "")
-        (result::ok (option::none))
+        (result::ok (ReadOutcome::eof))
         (match (read text)
-          ((ok v) (result::ok (option::some v)))
+          ((ok v) (result::ok (ReadOutcome::datum v)))
           ((err e) (result::err e))))))
 
-(pub defun read-sexpr<S> ((s S)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
-  "Read one datum from `s` -- CL's `read`. `Ok(none)` at end of input (so a
+(pub defun read-sexpr<S> ((s S)) Result<ReadOutcome, ReadError> (where (PeekInput S))
+  "Read one datum from `s` -- CL's `read`. `Ok(eof)` at end of input (so a
    read loop ends on a value rather than an error), `Err` if what is there is
    not a datum. Reads exactly one, so the next call gets the next one.
 
@@ -4198,13 +4208,13 @@ user-visible capacity."
                    ((err e) (progn (setf failed (option::some e)) (setf going false) ()))
                    ((ok found)
                     (match found
-                      ((none)
+                      ((eof)
                        (progn
                          (setf failed (option::some (ReadError::ReadError
                            (format false "read-delimited-list: end of input before the closing ~a" terminator))))
                          (setf going false)
                          ()))
-                      ((some v) (progn (push acc v) ()))))))))))
+                      ((datum v) (progn (push acc v) ()))))))))))
       (match failed
         ((some e) (result::err e))
         ((none) (result::ok (sexpr-list-from acc)))))))

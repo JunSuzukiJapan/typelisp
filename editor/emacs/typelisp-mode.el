@@ -324,7 +324,7 @@ stream (CLHS 12.1.6).")
     ;; builtin concrete error types, one per fallible builtin (§7.1).  `Error'
     ;; itself is *not* a type -- it is the prelude trait these implement, used
     ;; as `:dyn Error'.
-    "ParseIntError" "ParseFloatError" "ReadError" "EvalError"
+    "ParseIntError" "ParseFloatError" "ReadError" "ReadOutcome" "EvalError"
     ;; builtin generic pair & iterator types (lowercase)
     "cons-cell" "vector-iter" "hashtable-iter" "array-iter"
     ;; complex numbers (Phase 1d) -- a prelude `defstruct', not a builtin

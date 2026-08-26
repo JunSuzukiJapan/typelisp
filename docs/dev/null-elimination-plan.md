@@ -17,9 +17,10 @@
    型エラーになる」ことであって、値が 1 つ減ることではない。
 2. cdr だけでなく **car も `Option<Sexpr>`** にせざるを得ない。結果として
    「S 式データの型」は `Sexpr` ではなく `Option<Sexpr>` になる。
-3. `Option<Sexpr>` の niche 表現は**必須**だが、**`nil` 削除より先には入れられない**
-   （§3.2）。この 2 つは同じ段階で入れるか、間に「箱のままの遅い中間状態」を
-   1 段挟むかのどちらかになる。
+3. `Option<Sexpr>` の niche 表現は**必須**で、**`nil` 削除と同じ段階で入れる**（§3.2）。
+   niche なら実行時のビット表現が今日と同一なので、リーダ・印字・等価・GC には触らずに済む。
+   その代わり、`(none)` が `Option<Sexpr>` か `Option<i64>` かを IR ノードが区別できるよう、
+   `pat-ctor` / `construct` に被検査値の repr を足す作業が先に要る（§3.2.1）。
 
 ---
 
@@ -126,18 +127,36 @@ dotted pair は保たれる（cdr が `some` の非 cons）。
 
 **`Sexpr` に `nil` が残っている間は niche が不健全になる。**
 `(Option::some ())` と `(Option::none)` がどちらも `Value::Empty` になり、
-区別が付かないからである。したがって「段階 0 として niche だけ先に入れて green にする」
-ことはできない。取れる形は 2 つ:
+区別が付かないからである。したがって「niche だけ先に入れて green にする」ことはできない。
 
-- **(a) 同時に入れる。** `nil` 削除と niche を 1 段階で。中間状態が無い代わりに、
-  その 1 段階が大きい。
-- **(b) 間に遅い中間状態を挟む。** 先に「`Sexpr` から `nil` を削除し、
-  `Option<Sexpr>` は箱のまま」を green にし、そのあと niche を**純粋な最適化として**
-  被せる。空リストごとに box＋`String` を確保する重い状態を一時的に通るが、
-  規模は 10 万オーダの確保なのでビルドもテストも通るはずで、
-  正しさと表現を分離できる。
+> **2026-08-27 訂正（段階 1 実装中の調査による）。**
+> 当初ここには「先に `Option<Sexpr>` を**箱のまま**にした遅い中間状態を通し、
+> あとから niche を最適化として被せる」案を書き、そちらを推していた。**これは逆である。**
+> 箱のままの中間状態のほうが**大きく、かつ捨てる作業になる**:
+>
+> - `Option<Sexpr>` が箱だと、cons セルの cdr が `Value::Boxed` になる。すると
+>   リーダ（`typelisp-read/src/reader.rs`）・印字（`typelisp-print`）・`equal`/`equalp`・
+>   cons を歩く全経路（`Value::Empty` 162 箇所）が、箱を被せる/剥がす形に**全部**書き換わる。
+> - そして niche を被せる段階で、その書き換えを**全部元に戻す**ことになる。
+> - niche なら実行時のビット表現が今日と同一なので、**リーダ・印字・等価・GC には一切触らない**。
+>   変わるのは静的型の層と、`Option` の構築/`match` の lowering だけである。
+>
+> よって **niche と `nil` 削除は同じ段階で入れる**。§6 の段階表はこれに合わせて改めた。
 
-**(b) を推す。** 島の 522 箇所の書き換えと、表現の切り替えを、別々にデバッグできる。
+### 3.2.1 niche には IR ノードの形の変更が要る（段階 2 の主な作業）
+
+`match` は値駆動だが、**パターンのノードは静的な情報を運んでいる**ので、そこに
+「この `Option` は `Sexpr` を包んでいる」を書き込めばよい——ただし今の形では足りない。
+
+`pat-ctor` の形は `(PATH VARIANT DOWNCAST (REPR...) P...)`
+（組み立ては `checker.rs:1343`、解釈は `core_eval.rs:1478`）で、`(REPR...)` は
+**フィールドごと**の表現である。`(some x)` なら `x` の repr から `Sexpr` と分かるが、
+**`(none)` はフィールドを持たないので `Option<Sexpr>` と `Option<i64>` が同じノードになる。**
+
+したがって `pat-ctor` と `construct` に**被検査値自身の repr**を持たせる必要がある。
+チェッカーは走査対象の型を知っているので、書き込めないという問題ではない
+（「型が分からない」は言い訳にならない、の通り）。ノードのスロットが増えるので、
+位置で読む島の `compile-match` / `compile-construct` の更新と再生成が要る。
 
 ### 3.3 印字は値駆動である（仕様変更を伴う）
 
@@ -188,18 +207,18 @@ niche を入れると `Option<Sexpr>` の値は「`(some ...)`」でなく**中�
 | 段階 | 内容 | 単独 green | 島再生成 |
 |---|---|---|---|
 | 1 | `read-sexpr` の EOF と `()` を分離（§5） | ○ | 不要 |
-| 2 | `Sexpr` から `nil` 削除（番号は 0 を空きに）、cons variant を `cons-cell<Option<Sexpr>, Option<Sexpr>>` 化、`sexpr-cdr` の戻りを `Option<Sexpr>` に。**`Option<Sexpr>` は箱のまま** | ○（遅い） | 要 |
-| 3 | prelude・`core_macros` の `sexpr-*` 利用を `match`/`if-let` へ | ○ | 不要 |
-| 4 | 島 `src/compiler.rs` の 522 箇所を移行 → 再生成 | ○ | 要 ×2 |
-| 5 | `Option<Sexpr>` の niche 表現を最適化として被せる（§3.1） | ○ | 要 |
+| 2 | `pat-ctor` / `construct` に被検査値の repr を足す（§3.2.1）。島も追随 | ○ | 要 |
+| 3 | `Option<Sexpr>` の niche 表現（§3.1）と `Sexpr` からの `nil` 削除を**同時に**。変種番号は 0 を空きに（§4）。cons variant を `cons-cell<Option<Sexpr>, Option<Sexpr>>` 化、`sexpr-car`/`sexpr-cdr` の戻りを `Option<Sexpr>` に | ○ | 要 |
+| 4 | prelude・`core_macros` の `sexpr-*` 利用を `match`/`if-let` へ | ○ | 不要 |
+| 5 | 島 `src/compiler.rs` の 522 箇所を移行 → 再生成 | ○ | 要 ×2 |
 | 6 | examples / tests / docs、印字仕様の明記（§3.3） | ○ | 不要 |
 
-段階 4 が支配的リスク。`symbol-sexpr-redesign.md` の Phase 2（島の全面移行）が
+段階 5 が支配的リスク。`symbol-sexpr-redesign.md` の Phase 2（島の全面移行）が
 「週単位」と見積もられたのと同じ規模で、あれと違い今回は**型が変わる**ので
 コンパイラが移行漏れを全部教えてくれる分だけ有利。
 
 島の再生成は**不動点なので 2 回**回す（成果物は 4n+1 バイト）。
-段階 2 と 5 は `Repr` の内容が変わるので再生成が要る。
+段階 2 と 3 は IR ノードの形と `Repr` の内容が変わるので再生成が要る。
 
 ---
 
@@ -217,11 +236,33 @@ niche を入れると `Option<Sexpr>` の値は「`(some ...)`」でなく**中�
 
 ## 8. 着手前に決まっていないこと
 
-- 段階 2 の中間状態（`Option<Sexpr>` が箱）で、prelude＋島のロードが
-  実用的な時間に収まるか。**未計測**。段階 2 に入る前に、
-  `Option<i64>` を 10 万個作る程度のマイクロベンチで当たりを付ける価値がある。
-  収まらないなら §3.2 (a)（同時投入）に切り替える。
+- 段階 3 は `nil` 削除と niche が同時に落ちるので、途中の状態でテストが緑にならない
+  区間がある。段階 2（IR ノードに repr を足す）を先に単独で緑にしておくことで、
+  その区間を「型の層だけ」に絞れる見込みだが、**まだ実際にやっていない**。
 - `sexpr-car` の新しい型。`Sexpr -> Option<Sexpr>`（非 cons でも `none` を返す）か、
   `cons-cell<...> -> Option<Sexpr>`（cons であることを型で要求）か。
   後者のほうが強いが、`sexpr-consp` で分岐してから cons セルを取り出す手段
   （`match` で cons variant を剥がす）が要る。段階 2 の設計時に決める。
+
+---
+
+## 9. 実装ログ
+
+### 段階 1 — `read-sexpr` の EOF と `()` を分離【完了、2026-08-27】
+
+`ReadOutcome`（`(eof)` / `(datum Sexpr)`）を prelude に新設し、
+`read-sexpr` / `read-sexpr-preserving-whitespace` / `reader-read-one-until` の戻りを
+`Result<Option<Sexpr>, ReadError>` から `Result<ReadOutcome, ReadError>` へ変えた。
+内部の呼び出し元は `read-delimited-list` の 1 箇所だけ。
+
+`datum` のフィールドは今は `Sexpr`。段階 3 で `Option<Sexpr>` になるが、
+そのとき**このシグネチャは変わらない**——EOF が別バリアントに出ているので、
+`datum` の中身が `Option` になっても衝突しない。それがこの段階の目的である。
+
+分かったこと: prelude にはこれまで `defenum` が 1 つも無かった（`Option`/`Result` は
+組み込み、`registry.rs` 側の定義）。prelude 内の `defenum` が型検査もダンプ生成も
+通ることは、この段階で初めて確認された。
+
+副作用: `ReadOutcome` は公開型なので `editor/emacs/typelisp-mode.el` と
+`editor/vscode/syntaxes/typelisp.tmLanguage.json` の型リストにも追加した
+（`editor_keyword_sync_test` が番人）。

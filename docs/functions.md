@@ -1613,7 +1613,7 @@ native 層でも拒否する——次の文字の UTF-8 エンコーディング
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | 全部転送 |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | 残り全行 |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `Sexpr` を1つ読む（CL の `read`）。入力末尾は `Ok(none)`、データでなければ `Err`。datum を終わらせた**空白1文字を消費する**（CL と同じ） |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | `Sexpr` を1つ読む（CL の `read`）。入力末尾は `Ok(eof)`、読めたときは `Ok(datum d)`、データでなければ `Err`。datum を終わらせた**空白1文字を消費する**（CL と同じ）。`ReadOutcome` が `Option<Sexpr>` でないのは、空リスト `()` を読んだことと入力末尾とを同じ値で表さないため |
 | `read-sexpr-preserving-whitespace` | 同上 | 同上 | 同上だが空白を残す（CL の `read-preserving-whitespace`） |
 | `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Sexpr,ReadError>` where `PeekInput S` | `ch` まで読んでリストにする。`ch` は消費。入力が尽きたら `Err` |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 1行ずつ書く |
