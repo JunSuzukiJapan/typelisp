@@ -19,8 +19,7 @@
    「S 式データの型」は `Sexpr` ではなく `Option<Sexpr>` になる。
 3. `Option<Sexpr>` の niche 表現は**必須**で、**`nil` 削除と同じ段階で入れる**（§3.2）。
    niche なら実行時のビット表現が今日と同一なので、リーダ・印字・等価・GC には触らずに済む。
-   その代わり、`(none)` が `Option<Sexpr>` か `Option<i64>` かを IR ノードが区別できるよう、
-   `pat-ctor` / `construct` に被検査値の repr を足す作業が先に要る（§3.2.1）。
+   IR に要る追加はパターンノード 1 種類だけで、`Repr` にも構築側にも新しいものは要らない（§3.2.1）。
 
 ---
 
@@ -143,20 +142,49 @@ dotted pair は保たれる（cdr が `some` の非 cons）。
 >
 > よって **niche と `nil` 削除は同じ段階で入れる**。§6 の段階表はこれに合わせて改めた。
 
-### 3.2.1 niche には IR ノードの形の変更が要る（段階 2 の主な作業）
+### 3.2.1 niche に要る IR の変更は、パターンノード 1 種類だけ
 
-`match` は値駆動だが、**パターンのノードは静的な情報を運んでいる**ので、そこに
-「この `Option` は `Sexpr` を包んでいる」を書き込めばよい——ただし今の形では足りない。
+> **2026-08-27 再訂正（段階 1 完了後の調査による）。**
+> ここには当初「`pat-ctor` / `construct` に被検査値の repr を足す必要がある」と書いた。
+> 実際にコードを読んだところ、**もっと小さく済む**ことが分かった。以下が調査の結果である。
 
-`pat-ctor` の形は `(PATH VARIANT DOWNCAST (REPR...) P...)`
-（組み立ては `checker.rs:1343`、解釈は `core_eval.rs:1478`）で、`(REPR...)` は
-**フィールドごと**の表現である。`(some x)` なら `x` の repr から `Sexpr` と分かるが、
-**`(none)` はフィールドを持たないので `Option<Sexpr>` と `Option<i64>` が同じノードになる。**
+**(1) `Repr` に新しい variant は要らない。`Repr::of(Option<Sexpr>)` を `Repr::Sexpr` にする。**
 
-したがって `pat-ctor` と `construct` に**被検査値自身の repr**を持たせる必要がある。
-チェッカーは走査対象の型を知っているので、書き込めないという問題ではない
-（「型が分からない」は言い訳にならない、の通り）。ノードのスロットが増えるので、
-位置で読む島の `compile-match` / `compile-construct` の更新と再生成が要る。
+niche は「`Option<Sexpr>` と `Sexpr` の実行時表現が同一」という主張そのものなので、
+`Repr`（＝表現の分類）でも同じものにするのが正しい。そうすると:
+
+- `field_kind` は 6、`binding_kind` は 2。**どちらも `Repr::Sexpr` と同じ数**なので、
+  島の `compile-sexpr-field` / `compile-tag-struct-field` / 束縛境界は**一切変わらない**。
+- 境界の decode（`interp.rs:997`）は `Repr::Sexpr` と `Repr::Enum` を**同じ腕**で扱っている
+  ので、ここも変わらない。
+- 置く場所だけ注意: `Repr::of_by` の `is_enum_ty_by` の腕より**前**に置く（`repr.rs:206` は
+  `Option` を enum と判定するので、後ろに置くと届かない）。
+
+**(2) 構築側は新しいノードが要らない。**
+
+- `(Option::some x)` は、`x` を lower したものそのもの。ノードを作らない。
+- `(Option::none)` は空リスト定数、すなわち `(construct sexpr 0 false ())`。
+  §4 の通り `nil` の index 0 を IR に残す限り、島の `compile-construct-sexpr` の
+  variant-0 の腕が**そのまま使える**。「ソース面から `nil` を消すが IR の 0 番は残す」
+  という §4 の判断が、ここで効いてくる。
+
+**(3) パターン側だけ、新しいノードが 1 種類要る。**
+
+既存のパターンノードでは表せない:
+
+- `pat-lit`（`core_eval.rs:1428`）は `int`/`bool`/`char` しか受け付けない。空リストは通らない。
+- `pat-guard`（`core_eval.rs:1457`）は**束縛を捨てる**（`Ok(Some(Vec::new()))`）ので、
+  `(some p)` の `p` を束縛できない。
+
+したがって次の 1 種類を足す（タグ 2 つでも、極性フラグ付き 1 つでもよい）:
+
+| ノード | 意味 | 対応する書き方 |
+|---|---|---|
+| `(pat-empty)` | 値が空リストなら成立 | `((none) ...)` |
+| `(pat-nonempty P)` | 値が空リストでなければ、`P` を同じ値に当てる | `((some P) ...)` |
+
+島側は `compile-value` の `icase` ディスパッチ（`compiler.rs:1642` 付近）と同型の
+パターンコンパイラに腕を足すだけで、既存ノードのフィールド位置は動かない。
 
 ### 3.3 印字は値駆動である（仕様変更を伴う）
 
@@ -207,7 +235,7 @@ niche を入れると `Option<Sexpr>` の値は「`(some ...)`」でなく**中�
 | 段階 | 内容 | 単独 green | 島再生成 |
 |---|---|---|---|
 | 1 | `read-sexpr` の EOF と `()` を分離（§5） | ○ | 不要 |
-| 2 | `pat-ctor` / `construct` に被検査値の repr を足す（§3.2.1）。島も追随 | ○ | 要 |
+| 2 | パターンノード `pat-empty` / `pat-nonempty` を新設（§3.2.1(3)）。インタプリタと島の両方 | ○ | 要 |
 | 3 | `Option<Sexpr>` の niche 表現（§3.1）と `Sexpr` からの `nil` 削除を**同時に**。変種番号は 0 を空きに（§4）。cons variant を `cons-cell<Option<Sexpr>, Option<Sexpr>>` 化、`sexpr-car`/`sexpr-cdr` の戻りを `Option<Sexpr>` に | ○ | 要 |
 | 4 | prelude・`core_macros` の `sexpr-*` 利用を `match`/`if-let` へ | ○ | 不要 |
 | 5 | 島 `src/compiler.rs` の 522 箇所を移行 → 再生成 | ○ | 要 ×2 |
