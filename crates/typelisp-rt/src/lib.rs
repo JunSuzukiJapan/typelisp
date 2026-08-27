@@ -176,7 +176,15 @@ pub unsafe extern "C" fn rt_car(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_car: expected 1 argument");
     }
-    match active_heap().car(decode(*args)) {
+    // The empty list's `car` is the empty list, as in CL. Both sides are
+    // `Option<Sexpr>` now, so this is `none` in and `none` out — and it has
+    // to agree with the interpreter's `sexpr-car`, or the same walk would
+    // end differently depending on whether its caller was compiled.
+    let arg = decode(*args);
+    if arg.is_empty() {
+        return encode(arg);
+    }
+    match active_heap().car(arg) {
         Ok(v) => encode(v),
         Err(_) => fatal("rt_car: argument is not a cons"),
     }
@@ -192,7 +200,15 @@ pub unsafe extern "C" fn rt_cdr(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_cdr: expected 1 argument");
     }
-    match active_heap().cdr(decode(*args)) {
+    // The empty list's `cdr` is the empty list, as in CL. Both sides are
+    // `Option<Sexpr>` now, so this is `none` in and `none` out — and it has
+    // to agree with the interpreter's `sexpr-cdr`, or the same walk would
+    // end differently depending on whether its caller was compiled.
+    let arg = decode(*args);
+    if arg.is_empty() {
+        return encode(arg);
+    }
+    match active_heap().cdr(arg) {
         Ok(v) => encode(v),
         Err(_) => fatal("rt_cdr: argument is not a cons"),
     }

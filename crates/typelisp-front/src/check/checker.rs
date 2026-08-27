@@ -556,6 +556,33 @@ const MATCH_SCRUT: &str = "$match-scrut";
 const OPTION_SOME: usize = 0;
 const OPTION_NONE: usize = 1;
 
+/// `Sexpr`'s variant 0 — the old `nil`.
+///
+/// The variant is still *in* `sexpr_def`, and deliberately so: three places
+/// have its numbering baked in (`eval::interp`'s `SEXPR_*`,
+/// `compile::core_bridge`'s copy, and `Repr::field_kind`, which borrows the
+/// same numbers), and `bignum`/`ratio` were appended rather than inserted
+/// precisely so those constants would stay valid. Removing the entry would
+/// renumber all ten.
+///
+/// What is gone is its *surface*: `(nil)` can no longer be written as a
+/// constructor or a pattern, because a writable empty-list `Sexpr` would
+/// make `Option<Sexpr>`'s niche unsound — `(Option::some (nil))` and
+/// `(Option::none)` would be the same word. The empty list is reached as
+/// `Option<Sexpr>`'s `none`, and the core IR still spells it `(construct
+/// sexpr 0 ..)`, which the checker emits itself.
+const SEXPR_RESERVED_VARIANT: usize = 0;
+
+/// Message for a `(nil)` that survived in source somewhere.
+const NIL_IS_GONE: &str = "`nil` is no longer a `Sexpr` constructor: the empty list is \
+     `Option<Sexpr>`'s `none`. Write `()` where an `Option<Sexpr>` is expected, or \
+     `(Option::none)`; match it with `((none) ...)`.";
+
+/// Is `(adt, variant)` the retired `Sexpr::nil`?
+fn is_retired_nil(adt: &Path, variant: usize) -> bool {
+    variant == SEXPR_RESERVED_VARIANT && crate::types::path_is_builtin(adt, "sexpr")
+}
+
 /// How deep a blanket impl's own bounds may be chased before the search is
 /// declared non-terminating (`impl<T> A T (where (B T))` together with
 /// `impl<T> B T (where (A T))` would recur forever). Small on purpose:
@@ -2622,7 +2649,7 @@ impl Checker {
     /// declared type may only resolve to something concrete at a given call
     /// site (see `Self::check_call`'s `subst_apply`).
     fn wrap_rest_elem(&self, heap: &mut Heap, elem_ty: &Type, e: Checked) -> Result<Checked, Error> {
-        if *elem_ty == sexpr_ty() {
+        if is_sexpr_expectation(elem_ty) {
             return Ok(e);
         }
         // A heap-repr ADT (`defstruct`/`defenum`/`Vector<T>`/`HashTable<K,V>`)
@@ -2677,14 +2704,14 @@ impl Checker {
         let cons_path = Path::root("sexpr-cons");
         let r = Ref::synthetic(cons_path);
         let nil = forms::quote_nil(heap)?;
-        let mut acc = Checked::new(nil, sexpr_ty());
+        let mut acc = Checked::new(nil, option_of_sexpr());
         for item in items.into_iter().rev() {
             let mut s = RootScope::new(heap);
             s.push_root(acc.form);
             let item = self.wrap_rest_elem(&mut s, elem_ty, item)?;
             s.push_root(item.form);
             let form = self.call_form(&mut s, &r, &[item, acc])?;
-            acc = Checked::new(form, sexpr_ty());
+            acc = Checked::new(form, option_of_sexpr());
         }
         Ok(Checked::new(forms::rooted(heap, acc.form), acc.ty))
     }
@@ -2912,7 +2939,7 @@ impl Checker {
                 // `Self::check_defun` puts it. The two cannot both appear
                 // (the language refuses `&key` beside `&optional`/`&rest`),
                 // so this only ever lands at the end of one of them.
-                ps.insert(sig.params.len() + sig.optionals.len(), sexpr_ty());
+                ps.insert(sig.params.len() + sig.optionals.len(), option_of_sexpr());
             }
             ps
         };
@@ -2947,7 +2974,7 @@ impl Checker {
                             Type::Fn(ps, rest, _) => {
                                 let mut ps = ps.clone();
                                 if rest.is_some() {
-                                    ps.push(sexpr_ty());
+                                    ps.push(option_of_sexpr());
                                 }
                                 ps
                             }
@@ -3435,7 +3462,7 @@ impl Checker {
         let mut params = params;
         let mut param_locs = param_locs;
         if let Some((rname, _, rloc)) = &rest {
-            params.push((rname.clone(), sexpr_ty()));
+            params.push((rname.clone(), option_of_sexpr()));
             param_locs.push(rloc.clone());
         }
         let binds: Vec<(String, Type, Option<Loc>)> = params
@@ -3593,7 +3620,7 @@ impl Checker {
             param_locs.push(loc.clone());
         }
         if let Some((rname, _, rloc)) = &rest {
-            params.push((rname.clone(), sexpr_ty()));
+            params.push((rname.clone(), option_of_sexpr()));
             param_locs.push(rloc.clone());
         }
         for (k, (_, _, loc, _)) in keys.iter().zip(keys_raw.iter()) {
@@ -3972,7 +3999,7 @@ impl Checker {
         let (params, _param_locs, rest, ret, _bounds, body_start, _doc) = self.parse_defun_sig(heap, &tmpl.parts, &[])?;
         let mut params = params;
         if let Some((rname, _, _)) = &rest {
-            params.push((rname.clone(), sexpr_ty()));
+            params.push((rname.clone(), option_of_sexpr()));
         }
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
@@ -4036,7 +4063,7 @@ impl Checker {
             params.push((o.name.clone(), o.effective_ty()));
         }
         if let Some((rname, _, _)) = &rest {
-            params.push((rname.clone(), sexpr_ty()));
+            params.push((rname.clone(), option_of_sexpr()));
         }
         for k in &keys {
             params.push((k.name.clone(), k.effective_ty()));
@@ -4454,12 +4481,14 @@ impl Checker {
             self.reg.docs.macros.insert(fq_name.clone(), doc);
         }
 
-        // Every parameter — and the macro's implicit result — is `Sexpr`. A
-        // default-value form is checked against `Sexpr` in an environment
+        // Every parameter — and the macro's implicit result — is an
+        // S-expression, which is `Option<Sexpr>`: a macro is handed the forms
+        // as written, and `()` is one of them. A
+        // default-value form is checked against it in an environment
         // holding exactly the params bound *before* it (CL: an optional/key
         // default may reference earlier params, never later ones), which is
         // also the order `bind_macro_args` evaluates them in.
-        let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
+        let sexpr_ty = option_of_sexpr();
         let mut bindings: Vec<(String, Type)> =
             required_names.iter().map(|n| (n.clone(), sexpr_ty.clone())).collect();
 
@@ -7379,7 +7408,7 @@ impl Checker {
             param_locs.push(loc.clone());
         }
         if let Some((rname, _, rloc)) = &rest {
-            params.push((rname.clone(), sexpr_ty()));
+            params.push((rname.clone(), option_of_sexpr()));
             param_locs.push(rloc.clone());
         }
         for (name, ty, loc, default) in &keys {
@@ -8484,14 +8513,13 @@ impl Checker {
                         // builtin path/variant index.
                         return self.check_construct(heap, interp, env, (&Path::root("option"), OPTION_NONE), &[], &[], expected);
                     }
-                    // `nil` stays a bare-resolvable name (`Sexpr` is exempt
-                    // from the use-gated constructor visibility rule), so
-                    // this one keeps going through `resolve_ctor` unchanged.
-                    if let Some((adt, idx)) = self.resolve_ctor("nil") {
-                        if *n == adt {
-                            return self.check_construct(heap, interp, env, (&adt, idx), &[], &[], expected);
-                        }
-                    }
+                    // The `Sexpr::nil` branch that used to sit here is gone:
+                    // the empty list is `Option<Sexpr>`'s `none` now, which
+                    // the `option` arm just above already produces. A `()`
+                    // written where a bare `Sexpr` is expected is no longer
+                    // an empty list at all — `Sexpr` means "a non-empty
+                    // S-expression" — so it falls through to `Unit` like any
+                    // other non-option, non-sexpr context.
                 }
                 Checked::new(core::tagged(heap, "unit", &[])?, Type::Unit)
             }
@@ -8572,8 +8600,24 @@ impl Checker {
                 // Feeding it an already-built `Symbol` value (a `gensym`'d temp
                 // captured by a now-compiled macro-expansion lambda) aborts in
                 // `rt_intern_symbol`. A bare retype is correct for both tiers.
-                if *e == sexpr_ty() && typed.ty == Type::Symbol {
-                    return Ok(Checked::new(typed.form, sexpr_ty()));
+                // A `Sexpr` reaching an `Option<Sexpr>` expectation widens
+                // for free. This is the one direction the empty list's niche
+                // makes safe: `Option<Sexpr>` is represented *exactly* like a
+                // `Sexpr` (`check/repr.rs`), with `none` taking the
+                // empty-list word — so a `Sexpr`, which is by construction
+                // never that word, is already a well-formed non-empty
+                // `Option<Sexpr>`. No runtime work, hence a bare retype.
+                //
+                // The opposite direction stays a type error, and that is
+                // where this migration's static checking lives: narrowing an
+                // `Option<Sexpr>` to a `Sexpr` is the claim "this is not the
+                // empty list", which only a `match` (or `unwrap`) can
+                // discharge.
+                if is_option_of_sexpr(e) && typed.ty == sexpr_ty() {
+                    return Ok(Checked::new(typed.form, e.clone()));
+                }
+                if is_sexpr_expectation(e) && typed.ty == Type::Symbol {
+                    return Ok(Checked::new(typed.form, e.clone()));
                 }
                 // A user ADT instance (`defstruct`/`defenum`, `Vector<T>`,
                 // `HashTable<K,V>`, `cons-cell<K,V>`) is a valid `Sexpr` datum
@@ -8599,12 +8643,12 @@ impl Checker {
                 // data that every runtime type test would then have to know
                 // about. Checked before the general `is_heap_repr` retype
                 // below, which would otherwise claim it.
-                if *e == sexpr_ty() && matches!(typed.ty, Type::Dyn(..)) {
+                if is_sexpr_expectation(e) && matches!(typed.ty, Type::Dyn(..)) {
                     let form = forms::dyn_value_form(heap, typed.form)?;
-                    return Ok(Checked::new(form, sexpr_ty()));
+                    return Ok(Checked::new(form, e.clone()));
                 }
-                if *e == sexpr_ty() && self.is_heap_repr(&typed.ty) {
-                    return Ok(Checked::new(typed.form, sexpr_ty()));
+                if is_sexpr_expectation(e) && self.is_heap_repr(&typed.ty) {
+                    return Ok(Checked::new(typed.form, e.clone()));
                 }
                 // A scalar (`i32`/`f64`/`bignum`/`ratio`/`char`/`bool`/`Str`)
                 // has no shared runtime shape with `Sexpr`, so — unlike the
@@ -8627,14 +8671,14 @@ impl Checker {
                 if let Type::Dyn(trait_path, pins) = e {
                     return self.coerce_to_dyn(heap, env, typed, trait_path, pins);
                 }
-                if *e == sexpr_ty() {
+                if is_sexpr_expectation(e) {
                     if let Some(ctor) = sexpr_ctor_for(&typed.ty) {
                         let (type_name, variant) =
                             self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
                         let field_tys = self.variant_field_tys(&type_name, variant, &[]);
                         let form =
                             self.construct_form(heap, &type_name, variant, false, &field_tys, &[typed.form])?;
-                        return Ok(Checked::new(form, sexpr_ty()));
+                        return Ok(Checked::new(form, e.clone()));
                     }
                 }
                 return Err(Error::TypeError(format!(
@@ -9237,6 +9281,17 @@ impl Checker {
     /// to defer to — propagates a real error from checking the first
     /// argument instead of swallowing it, and reports `NoSuchFunction` if no
     /// matching method exists either.
+    /// Does `Sexpr`'s own assoc table carry `method`?
+    ///
+    /// The test that lets an `Option<Sexpr>` receiver reach that table
+    /// without shadowing `Option`'s own methods — see the receiver match in
+    /// [`Self::check_instance_method`].
+    fn sexpr_has_method(&self, method: &str) -> bool {
+        self.reg
+            .type_def(&Path::root("sexpr"))
+            .is_some_and(|d| d.assoc.get(method).is_some_and(|af| af.instance))
+    }
+
     fn check_instance_method(
         &self,
         heap: &mut Heap,
@@ -9275,6 +9330,20 @@ impl Checker {
                 recv = Checked::new(form, sexpr_ty());
             }
             let type_fq = match &recv.ty {
+                // `Option<Sexpr>` *is* the type an S-expression has, so
+                // `Sexpr`'s own catalog (`eq`/`eql`/...) has to reach it —
+                // the same "an option over `Sexpr` behaves as an
+                // S-expression" rule the `match` sugar follows. Its
+                // signatures already take `Option<Sexpr>`, so nothing else
+                // has to change; without this the whole catalog silently
+                // disappears the moment a value is typed `Option<Sexpr>`.
+                //
+                // `Option`'s own methods (`unwrap`/`is-some`/...) still
+                // resolve: they live on `option`, which this only bypasses
+                // for a receiver whose payload is exactly `sexpr`, and the
+                // arm below falls back to the ordinary lookup when `Sexpr`
+                // has no such method.
+                t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::root("sexpr")),
                 Type::Named(n, _) => Some(n.clone()),
                 other => prim_type_path(other),
             };
@@ -10085,7 +10154,13 @@ impl Checker {
             return Err(Error::TypeError("quote: (quote datum)".into()));
         }
         let form = forms::quote_form(heap, args[0])?;
-        Ok(Checked::new(form, Type::Named(Path::root("sexpr"), vec![])))
+        // `Option<Sexpr>`, not `Sexpr`: `'()` is a datum a quote may produce,
+        // and the empty list is `none` now. Every quoted datum therefore has
+        // the type S-expressions have — `Sexpr` alone would exclude exactly
+        // one writable literal, and there is no implicit coercion to widen it
+        // back (the checker has no subtyping — see `coerce_to_dyn`, the only
+        // conversion it does).
+        Ok(Checked::new(form, option_of_sexpr()))
     }
 
     /// `(quasiquote template)`: like `quote`, but `(unquote x)` sub-forms are
@@ -10141,7 +10216,7 @@ impl Checker {
         env: &Env,
         v: Value,
     ) -> Result<Checked, Error> {
-        let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
+        let sexpr_ty = option_of_sexpr();
         if let Value::Cons(_) = v {
             let car = heap.car(v)?;
             let cdr = heap.cdr(v)?;
@@ -11466,12 +11541,17 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
-        let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
+        // A list of S-expressions is an S-expression, so both the elements
+        // and the result are `Option<Sexpr>` — the empty list this starts
+        // from is exactly `none`.
+        let sexpr_ty = option_of_sexpr();
         let (adt, cons_idx) = self.sexpr_cons_ctor();
-        let (_, nil_idx) = self.resolve_ctor("nil").expect("sexpr::nil is built in");
-        let nil_tys = self.variant_field_tys(&adt, nil_idx, &[]);
         let cons_tys = self.variant_field_tys(&adt, cons_idx, &[]);
-        let mut acc = self.construct_form(heap, &adt, nil_idx, false, &nil_tys, &[])?;
+        // The empty list, built straight from `Sexpr`'s reserved variant 0:
+        // `resolve_ctor("nil")` cannot answer any more (`nil` is gone from
+        // the surface — see `SEXPR_RESERVED_VARIANT`), and the checker is
+        // exactly the caller that is still allowed to name it.
+        let mut acc = self.construct_form(heap, &adt, SEXPR_RESERVED_VARIANT, false, &[], &[])?;
         for (i, &elem) in args.iter().enumerate().rev() {
             // The accumulator is a finished node that the next element's own
             // checking can collect, so it stays rooted across that step.
@@ -11494,7 +11574,7 @@ impl Checker {
     fn cons_hetero_sexpr(&self, heap: &mut Heap, items: Vec<Checked>) -> Result<Checked, Error> {
         let r = Ref::synthetic(Path::root("sexpr-cons"));
         let nil = forms::quote_nil(heap)?;
-        let mut acc = Checked::new(nil, sexpr_ty());
+        let mut acc = Checked::new(nil, option_of_sexpr());
         for item in items.into_iter().rev() {
             let mut s = RootScope::new(heap);
             s.push_root(acc.form);
@@ -11502,7 +11582,7 @@ impl Checker {
             let item = self.wrap_rest_elem(&mut s, &elem_ty, item)?;
             s.push_root(item.form);
             let form = self.call_form(&mut s, &r, &[item, acc])?;
-            acc = Checked::new(form, sexpr_ty());
+            acc = Checked::new(form, option_of_sexpr());
         }
         Ok(Checked::new(forms::rooted(heap, acc.form), acc.ty))
     }
@@ -12398,6 +12478,9 @@ impl Checker {
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
         let (adt_name, variant) = ctor;
+        if is_retired_nil(adt_name, variant) {
+            return Err(Error::TypeError(NIL_IS_GONE.to_string()));
+        }
         let def = self.reg.type_def(adt_name).expect("indexed adt exists").clone();
         let fields = &def.variants[variant].fields;
         if args.len() != fields.len() {
@@ -12542,8 +12625,29 @@ impl Checker {
         // field`/`compile-construct-sexpr` variants `5`/`10` in
         // `compiler.rs`, plus the new `rt_path_to_list`/`rt_list_to_path`
         // runtime shims for `path`'s list building).
-        let total_variants =
-            adt_name.as_ref().map_or(0, |n| self.reg.type_def(n).expect("adt exists").variants.len());
+        // `Sexpr`'s reserved variant 0 is not writable, so it cannot be
+        // covered and must not be demanded — see `SEXPR_RESERVED_VARIANT`.
+        // A `match` whose scrutinee is `Option<Sexpr>` writes the `Sexpr`
+        // shapes and `none` in one flat arm list (the niche's match sugar,
+        // `check_ctor_pattern`), so its coverage universe is neither
+        // `option`'s two variants nor `sexpr`'s ten but their union.
+        //
+        // The two index without colliding because `Sexpr`'s variant 0 is the
+        // slot the empty list vacated (`SEXPR_RESERVED_VARIANT`) and `none`
+        // is precisely what moved out of it: `none` takes 0, the ten writable
+        // shapes keep 1..=10, and the count is `sexpr`'s own `variants.len()`
+        // with nothing subtracted.
+        let sexpr_sugar = is_option_of_sexpr(&scrut.ty);
+        let sexpr_variants =
+            || self.reg.type_def(&Path::root("sexpr")).expect("sexpr is always registered").variants.len();
+        let total_variants = if sexpr_sugar {
+            sexpr_variants()
+        } else {
+            adt_name.as_ref().map_or(0, |n| {
+                let all = self.reg.type_def(n).expect("adt exists").variants.len();
+                if crate::types::path_is_builtin(n, "sexpr") { all - 1 } else { all }
+            })
+        };
 
         /// An arm held back by the probe (B4) for the second pass below: its
         /// slot in `arms`, everything checking its body again needs, and the
@@ -12609,6 +12713,25 @@ impl Checker {
                 parts_locs[0].1.clone()
             ));
             match &pat {
+                // ---- the `Option<Sexpr>` sugar's flat coverage (see
+                // `sexpr_sugar` above). Placed ahead of the general arms
+                // because under the sugar both of them would answer, and
+                // answer with the wrong index space.
+                Pattern::Ctor { type_name, variant, .. }
+                    if sexpr_sugar && crate::types::path_is_builtin(type_name, "sexpr") =>
+                {
+                    covered.insert(*variant);
+                }
+                Pattern::Empty if sexpr_sugar => {
+                    covered.insert(SEXPR_RESERVED_VARIANT);
+                }
+                // `(some x)` under the sugar means "any non-empty shape",
+                // which is all ten of them at once.
+                Pattern::NonEmpty(sub)
+                    if sexpr_sugar && matches!(**sub, Pattern::Wildcard | Pattern::Bind(..)) =>
+                {
+                    covered.extend(1..sexpr_variants());
+                }
                 // A Sexpr-downcast `Ctor` pattern's `type_name` names the
                 // *downcast target* (a user struct/enum), not the
                 // scrutinee's own ADT — it must not count toward this
@@ -12883,7 +13006,7 @@ impl Checker {
             // literals (`'foo`, an integer, a `char`, a `bool`) have no
             // such gap and are left alone; so is an explicit `(= expr)`,
             // where the author asked for `equals` in as many words.
-            Value::Str(_) | Value::Boxed(_) if *expected == sexpr_ty() => {
+            Value::Str(_) | Value::Boxed(_) if is_sexpr_expectation(expected) => {
                 Err(Error::TypeError(format!(
                     "pattern: `{}` against a `Sexpr` scrutinee would compare by identity — \
                      `Eq` on `sexpr` is `eq`, so this arm could never match a separately built \
@@ -12924,7 +13047,7 @@ impl Checker {
         // below are handed the same shape they always see.
         let parts = [v];
         let parts_locs = [(v, loc.cloned())];
-        if *expected == sexpr_ty() {
+        if is_sexpr_expectation(expected) {
             if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, v, loc)? {
                 return self
                     .check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, true)
@@ -13072,7 +13195,7 @@ impl Checker {
         // isn't one of `Sexpr`'s own eleven built-in variant names, so
         // `(int n)`/`(cons a d)`/... keep meaning exactly what they always
         // have.
-        if *expected == sexpr_ty() {
+        if is_sexpr_expectation(expected) {
             if let Value::Symbol(id) = parts[0] {
                 if heap.symbol_name(id) == "the" {
                     return self.check_type_test_pattern(heap, interp, env, &parts, &parts_locs);
@@ -13247,6 +13370,9 @@ impl Checker {
         parts_locs: &[(Value, Option<Loc>)],
         downcast: bool,
     ) -> Result<(Pattern, PatternBindings), Error> {
+        if is_retired_nil(&adt_name, variant) {
+            return Err(Error::TypeError(NIL_IS_GONE.to_string()));
+        }
         let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
         let subst: BTreeMap<String, Type> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
 
@@ -13592,6 +13718,24 @@ fn has_open_hole(t: &Type) -> bool {
 /// declared element type before it's wrapped into the list.
 fn sexpr_ty() -> Type {
     Type::Named(Path::root("sexpr"), vec![])
+}
+
+/// `Option<Sexpr>` — the type an S-expression datum has once the empty list
+/// is `none` (see [`is_option_of_sexpr`]).
+fn option_of_sexpr() -> Type {
+    Type::Named(Path::root("option"), vec![sexpr_ty()])
+}
+
+/// Does an expected type ask for an S-expression?
+///
+/// Both spellings answer yes. `Option<Sexpr>` is what a datum has, and it is
+/// what the implicit widenings should fire on — a `Symbol`, a heap value or a
+/// `:dyn` reaching "an S-expression is wanted here" is the same rule
+/// whichever of the two the site declared. Bare `Sexpr` still means
+/// *non-empty*, and a widening into it is just as sound: nothing these rules
+/// produce is the empty list.
+fn is_sexpr_expectation(ty: &Type) -> bool {
+    *ty == sexpr_ty() || is_option_of_sexpr(ty)
 }
 
 /// Is `ty` exactly `Option<Sexpr>` — the type the empty list's niche belongs

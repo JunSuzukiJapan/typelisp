@@ -681,7 +681,7 @@ impl Registry {
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
         register_stream_builtins(&mut root);
         register_system_builtins(&mut root);
-        root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(sexpr(), error_ty(READ_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(option_of(sexpr()), error_ty(READ_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `read-datum-at`: one datum from a string starting at a character
         // index, paired with where reading stopped — CL's `read-from-string`
         // and its second return value, which this language has no multiple
@@ -696,7 +696,7 @@ impl Registry {
                 rest: None,
                 params: vec![Type::Str, Type::I64, Type::Bool],
                 ret: result_of(
-                    Type::Named(Path::root("cons-cell"), vec![sexpr(), Type::I64]),
+                    Type::Named(Path::root("cons-cell"), vec![option_of(sexpr()), Type::I64]),
                     error_ty(READ_ERROR),
                 ),
                 public: true,
@@ -711,7 +711,7 @@ impl Registry {
         // but not the caller's lexical locals; a definition form registers
         // immediately. Result is a `Sexpr` (the value, or a definition's name
         // symbol); malformed/ill-typed input is `Err`, not a panic.
-        root.fns.insert("eval".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: result_of(sexpr(), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("eval".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `macroexpand-1`/`macroexpand`: what the checker does to a macro
         // call, made available to a program (CL's own, and the only way to
         // see a `defmacro`'s output without reading the checker's mind).
@@ -722,8 +722,8 @@ impl Registry {
         // strictly more than CL's boolean, since the caller cannot mistake a
         // macro that expands to itself for a non-macro. `macroexpand` repeats
         // until `none` and answers the final form, as CL's does.
-        root.fns.insert("macroexpand-1".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("macroexpand".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: result_of(sexpr(), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("macroexpand-1".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("macroexpand".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // The pretty printer's user-callable layout operators (CLHS 22.2.1),
         // minus the stream argument typelisp has no streams for. They act on
         // the logical block the `pprint-logical-block` special form opened
@@ -738,7 +738,7 @@ impl Registry {
         root.fns.insert("pprint-newline".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("pprint-indent".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I64], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("pprint-tab".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I64, Type::I64], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("pprint-pop".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("pprint-pop".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("pprint-list-exhausted".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
         // the Symbol/Sexpr redesign (Phase 4b) repurposes `cons`/`car`/`cdr` to
@@ -762,12 +762,12 @@ impl Registry {
         // `is_empty`) rather than pattern-matching, so they survive that
         // fence. Same heap operations as `cons`/`car`/`cdr` (see
         // `Interp::eval_builtin`), so no new runtime machinery is needed.
-        root.fns.insert("sexpr-cons".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: sexpr(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-consp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-null".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-atom".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-cons".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr()), option_of(sexpr())], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-consp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-null".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-atom".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // Internal `Sexpr` payload extractors (Symbol/Sexpr redesign Phase 2):
         // typed field readers that used to be `match`-based typelisp defuns in
         // `compiler.rs` (`(match s ((Int n) n) (_ (panic ...)))`), moved to Rust
@@ -777,13 +777,13 @@ impl Registry {
         // predicate its non-panic-fallback caller (`form-is-borrowed?`) needs
         // to branch on a `Sym` node — a peer of
         // `sexpr-consp`/`sexpr-null`/`sexpr-atom`.
-        root.fns.insert("sexpr-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::I64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-bool".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-char".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Char, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-str".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-sym-name".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-symp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::I64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-bool".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-char".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Char, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-str".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-sym-name".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-symp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `equal`/`equalp` on `Sexpr`: structural equality (CL `equal`/`equalp`),
         // Rust builtins (`Interp::eval_builtin`'s `sexpr_equal`/`sexpr_equalp`)
         // since the Symbol/Sexpr redesign fenced `match` off `Sexpr` (Phase 5).
@@ -792,8 +792,8 @@ impl Registry {
         // separate (`registry::string_assoc` etc.) and resolved first when the
         // receiver is one of those types — these free `Sexpr` overloads are the
         // fallback for actual `Sexpr` data (`case` expands to `(equal ..)`).
-        root.fns.insert("equal".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("equalp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("equal".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr()), option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("equalp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr()), option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `gensym` is *not* here: it moved into the prelude in Phase 4c, so
         // that CL's `*gensym-counter*` could be a real variable a program can
         // read and set. A builtin's counter lived on the `Heap` and nothing
@@ -1202,7 +1202,7 @@ fn sexpr_def() -> AdtDef {
             Variant { name: "bool".to_string(), fields: vec![Type::Bool] },
             Variant { name: "sym".to_string(), fields: vec![Type::Symbol] },
             Variant { name: "str".to_string(), fields: vec![Type::Str] },
-            Variant { name: "cons".to_string(), fields: vec![sexpr(), sexpr()] },
+            Variant { name: "cons".to_string(), fields: vec![option_of(sexpr()), option_of(sexpr())] },
             // Appended after `cons` (not inserted alongside `int`/`float`)
             // so the existing `SEXPR_*` variant-index constants
             // (`crate::eval::interp`) stay valid.
@@ -1223,7 +1223,7 @@ fn sexpr_def() -> AdtDef {
             // `match_sexpr_ctor` arms need to (they only ever read
             // already-heap-resident data) — see that function's own doc
             // comment for the GC-rooting this requires.
-            Variant { name: "path".to_string(), fields: vec![sexpr()] },
+            Variant { name: "path".to_string(), fields: vec![option_of(sexpr())] },
         ],
         assoc: sexpr_assoc(),
         public: true,
@@ -1251,7 +1251,7 @@ fn sexpr_def() -> AdtDef {
 /// structural comparisons) special-case `Str` to compare content instead.
 fn sexpr_assoc() -> BTreeMap<String, AssocFn> {
     let mut m = BTreeMap::new();
-    let eq_fn = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let eq_fn = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr()), option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     m.insert("eq".to_string(), eq_fn());
     m.insert("eql".to_string(), eq_fn());
     m

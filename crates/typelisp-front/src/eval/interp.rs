@@ -1740,13 +1740,21 @@ impl Interp {
                 }
                 _ => Some(Err(EvalError::Internal("sexpr-cons: expected two Sexpr arguments".into()))),
             },
+            // `car`/`cdr` of the empty list is the empty list, as in CL —
+            // `(car nil)` is `nil` there, and here both the argument and the
+            // result are `Option<Sexpr>`, so "the empty list" is `none` on
+            // each side. Only a non-empty non-cons (an int, a string, ...)
+            // is still an error: that is a genuine type confusion, where the
+            // empty list is an ordinary end of a list walk.
             "sexpr-car" => match args.first() {
+                Some(v) if v.is_empty() => Some(Ok(Value::Empty)),
                 Some(v) => {
                     Some(heap.car(*v).map_err(|_| EvalError::Panic("sexpr-car: not a cons".into())))
                 }
                 None => Some(Err(EvalError::Internal("sexpr-car: expected one argument".into()))),
             },
             "sexpr-cdr" => match args.first() {
+                Some(v) if v.is_empty() => Some(Ok(Value::Empty)),
                 Some(v) => {
                     Some(heap.cdr(*v).map_err(|_| EvalError::Panic("sexpr-cdr: not a cons".into())))
                 }

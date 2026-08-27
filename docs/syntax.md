@@ -29,7 +29,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   先頭が `::` のものはキーワードではなく絶対パス（下記）。
   なお `:dyn` は型位置専用の予約キーワードで、それ以外の場所に書くとエラーになる（§2 参照）。
 - **リスト**: `(a b c)`。ドット対 `(a . b)` も読み取り可能。
-- **空リスト `()`**: 文脈によって `Unit` 型の値、または `Sexpr` 型の `Nil` になる。
+- **空リスト `()`**: 文脈によって `Unit` 型の値、または `Option<Sexpr>` の `none` になる。
+  **`Sexpr` に空リストの変種は無い**——`Sexpr` は「空でない S 式」を表し、S 式データの型は
+  `Option<Sexpr>` である（§match の「`Option<Sexpr>` のパターン」参照）。
 - **quote/quasiquote/unquote**:
   - `'x` → `(quote x)`
   - `` `x `` → `(quasiquote x)`
@@ -604,7 +606,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
     (_     0)))          ; 変種の無い型なので `_` が要る
 ```
 
-`Sexpr` スクルーティニーに対しては、上記の組み込み11変種パターンに加えて **downcast パターン**
+`Sexpr` スクルーティニーに対しては、上記の組み込み10変種パターンに加えて **downcast パターン**
 （ユーザ定義 ADT インスタンスの取り出し）が書ける — `(list p 42)` のように `Sexpr` へ暗黙変換された
 `defstruct`（§3）/`defenum`（§3）インスタンスを `match` で取り戻す構文:
 
@@ -618,6 +620,27 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   `pattern` へ渡す。可変な struct の同一性を保ったまま取り出せる唯一の書き方であり、`Vector<T>`/
   `HashTable<K,V>` を `Sexpr` から取り出す唯一の手段でもある（両者はフィールド分解形を持たない）。
   例: `(the point p)` の後で `(setf p::x 9)` すればリスト内の元インスタンスにも反映される。
+
+**`Option<Sexpr>` のパターン**: S 式データの型は `Sexpr` ではなく `Option<Sexpr>` で、空リストは
+`Sexpr` の変種ではなく `Option` の `none` である。そのため `Option<Sexpr>` を `match` するときは、
+`Sexpr` の 10 変種と `none` を**同じ腕の並びに平らに**書ける（`Option` を剥がす外側の `match` は
+要らない）:
+
+```lisp
+(defun tag ((s Option<Sexpr>)) i32
+  (match s
+    ((int _)    1)
+    ((cons _ _) 2)
+    ((str _)    3)
+    ((none)     0)          ; 空リスト
+    (_          9)))
+```
+
+網羅性も同じ平らな宇宙——`Sexpr` の 10 変種 ＋ `none` の 11 個——で検査する。`(none)` を
+書き忘れれば `_` が無いかぎりエラーになる。`(some x)` も従来どおり書けて「空でない何か」を束縛する。
+
+この糖衣は `Option<Sexpr>` **ちょうど**にしか掛からない。`Option<Option<Sexpr>>` では
+`(int n)` がどちらの層を剥がしたのか決まらないので、通常どおり 2 段の `match` を書く。
 
 **trait オブジェクト（`:dyn Trait`、§2）のスクルーティニー**にも同じ downcast パターンがそのまま
 使える——`match` は箱を外してから上の `Sexpr` パターン機構に渡すので、追加の構文はない。実装型の
@@ -638,7 +661,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 その腕自身のエラー（`cannot infer type argument ...`）になる。`match` の外では従来どおり、
 決まらない型引数はその場でエラー。
 
-downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本来の11変種のカバレッジには数えない
+downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本来の変種のカバレッジには数えない
 （downcast パターンだけを並べた `match` は `_` で閉じる必要がある）。ジェネリックな ADT
 （`defstruct point<T> ...` など）は downcast パターンの型引数を推論できないため、フィールド分解形
 （`(point ...)`)/裸変種形は使えず、`(the point<i32> p)` のように `the` で明示する。
@@ -764,7 +787,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
                                      ; 新placeN=旧place1）。各 place の部分式は1回だけ評価
 (shiftf place1 ... placeN newvalue) ; place2..N の値を左へシフトし、newvalue を placeN へ。
                                      ; 戻り値は旧 place1 の値
-(list e1 e2 ... en)                 ; (cons e1 (cons e2 (... (Nil)))) への展開。0引数なら Nil
+(list e1 e2 ... en)                 ; (cons e1 (cons e2 (... ()))) への展開。0引数なら ()
                                      ; 各要素は Sexpr へ暗黙変換される（CL のcons同様、任意の値を
                                      ; 保持できる）: スカラ(i32/f64/bignum/ratio/char/bool/string/
                                      ; symbol)は対応する Sexpr コンストラクタでラップ、defstruct/

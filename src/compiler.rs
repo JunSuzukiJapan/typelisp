@@ -299,286 +299,286 @@ pub const SOURCE: &str = r#"
 ;; Generated from the `defun` headers themselves; each must keep agreeing
 ;; with its definition, which the checker enforces at the definition.
 (defsignature compile-apply
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-apply-indirect
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-assoc
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-assoc-user
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> string string Sexpr)
+   Option<llvm-basic-block> string string Option<Sexpr>)
   llvm-value)
 (defsignature compile-bignum-literal
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-call
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-call-args
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> llvm-value Sexpr i32)
+   Option<llvm-basic-block> llvm-value Option<Sexpr> i32)
   i32)
 (defsignature compile-catch
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-cellset
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-construct
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-construct-box
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr i64 Sexpr)
+   Option<llvm-basic-block> Option<Sexpr> i64 Option<Sexpr>)
   llvm-value)
 (defsignature compile-construct-boxed-struct
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr Sexpr)
+   Option<llvm-basic-block> Option<Sexpr> Option<Sexpr>)
   llvm-value)
 (defsignature compile-construct-boxed-struct-fields
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> llvm-value Sexpr i32)
+   Option<llvm-basic-block> llvm-value Option<Sexpr> i32)
   ())
 (defsignature compile-construct-path
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-construct-path-segs
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> llvm-value Sexpr i32)
+   Option<llvm-basic-block> llvm-value Option<Sexpr> i32)
   ())
 (defsignature compile-construct-sexpr
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> i64 Sexpr)
+   Option<llvm-basic-block> i64 Option<Sexpr>)
   llvm-value)
 (defsignature compile-construct-sym
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-ctor-subpatterns
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> llvm-value i64 i64 Sexpr Sexpr i32 llvm-basic-block)
+   Option<llvm-basic-block> llvm-value i64 i64 Option<Sexpr> Option<Sexpr> i32 llvm-basic-block)
   ())
 (defsignature compile-dyn-call
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-dyn-new
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-dyn-upcast
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-dyn-value
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-escaping-env-args
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-value Sexpr i32)
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-value Option<Sexpr> i32)
   ())
 (defsignature compile-field-get
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-field-set
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-global-init
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-hashtable-op
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-if
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-if-branch
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> bool Sexpr)
+   Option<llvm-basic-block> bool Option<Sexpr>)
   llvm-value)
 (defsignature compile-labels
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
-(defsignature compile-labels-bodies (llvm-module string Scope<llvm-function> Sexpr Sexpr) ())
+(defsignature compile-labels-bodies (llvm-module string Scope<llvm-function> Option<Sexpr> Option<Sexpr>) ())
 (defsignature compile-lambda
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr Sexpr)
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> Option<Sexpr>)
   llvm-value)
 (defsignature compile-let
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-let-body
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-let-values
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr Scope<llvm-value>)
+   Option<llvm-basic-block> Option<Sexpr> Scope<llvm-value>)
   ())
 (defsignature compile-llvm-op
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-loop
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
-   Option<llvm-basic-block> Option<llvm-basic-block> Sexpr)
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
+   Option<llvm-basic-block> Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-loop-body
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   ())
 (defsignature compile-match
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-match-arms
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> bool llvm-value llvm-value llvm-basic-block Sexpr)
+   Option<llvm-basic-block> bool llvm-value llvm-value llvm-basic-block Option<Sexpr>)
   ())
 (defsignature compile-panic
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-pattern-test
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> llvm-value Sexpr llvm-basic-block)
+   Option<llvm-basic-block> llvm-value Option<Sexpr> llvm-basic-block)
   ())
 (defsignature compile-ctor-pattern
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> llvm-value Sexpr llvm-basic-block)
+   Option<llvm-basic-block> llvm-value Option<Sexpr> llvm-basic-block)
   ())
 (defsignature compile-ratio-literal
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-return
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-set
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-set-global
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-sexpr-instance-test
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> llvm-value Sexpr i64)
+   Option<llvm-basic-block> llvm-value Option<Sexpr> i64)
   llvm-value)
 (defsignature compile-str
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-throw
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-unwind-protect
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-value
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-vector-op
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> Sexpr)
+   Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature resolve-value
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr string)
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> string)
   llvm-value)
 (defsignature store-str-chars
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr llvm-function
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> llvm-value Sexpr i32)
+   Option<llvm-basic-block> llvm-value Option<Sexpr> i32)
   ())
 ;;
 ;; Called from inside the ring but written after it.
-(defsignature compile-bool (llvm-module string llvm-builder Sexpr) llvm-value)
+(defsignature compile-bool (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
 (defsignature compile-break
   (llvm-module string llvm-builder Option<llvm-basic-block> Option<llvm-value> Option<llvm-value>
    Option<llvm-basic-block>)
   llvm-value)
 (defsignature compile-cellvar
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr Sexpr)
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> Option<Sexpr>)
   llvm-value)
-(defsignature compile-char (llvm-module string llvm-builder Sexpr) llvm-value)
-(defsignature compile-float (llvm-module string llvm-builder Sexpr) llvm-value)
-(defsignature compile-global (llvm-module string llvm-builder Sexpr) llvm-value)
-(defsignature compile-int (llvm-module string llvm-builder Sexpr) llvm-value)
+(defsignature compile-char (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
+(defsignature compile-float (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
+(defsignature compile-global (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
+(defsignature compile-int (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
 (defsignature compile-unit (llvm-module string llvm-builder) llvm-value)
 (defsignature compile-var
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Sexpr Sexpr)
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> Option<Sexpr>)
   llvm-value)
 (defsignature emit-rt-call
   (llvm-builder llvm-module llvm-function string string llvm-value i32 Option<llvm-basic-block>)
@@ -770,7 +770,7 @@ pub const SOURCE: &str = r#"
 ;; `release-bindings` pops it at function exit, alongside every `kind = 2`
 ;; root `retain-bindings` pushed — see that function's own doc comment for
 ;; why popping order among a same-activation batch never matters.
-(defun bind-params ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Sexpr) (idx i32)) ()
+(defun bind-params ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Option<Sexpr>) (idx i32)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
         (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-int (sexpr-cdr name-pair))))
@@ -816,7 +816,7 @@ pub const SOURCE: &str = r#"
 ;; allocate" reason (a captured name is never rooted purely by inheriting the
 ;; closure box's own rooting, since the copy lives in a plain stack slot, not
 ;; scanned by the GC).
-(defun bind-captures ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Sexpr) (idx i32)) ()
+(defun bind-captures ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Option<Sexpr>) (idx i32)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
         (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-int (sexpr-cdr name-pair))))
@@ -851,7 +851,7 @@ pub const SOURCE: &str = r#"
 ;; `KIND_SEXPR` — see `binding_kind`'s doc comment), so this mask is what
 ;; tells `rt_closure_new` which captured slots are tagged `Sexpr` values the
 ;; GC mark phase must trace, versus a `0` (plain) slot's raw native bits.
-(defun compute-sexpr-mask ((names Sexpr) (idx i32)) i64
+(defun compute-sexpr-mask ((names Option<Sexpr>) (idx i32)) i64
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
         (let ((kind (sexpr-int (sexpr-cdr name-pair))))
@@ -885,7 +885,7 @@ pub const SOURCE: &str = r#"
 ;; argument forms can be arbitrary expressions, not just bare names — every
 ;; other tag's result is fresh by construction, see this module's doc
 ;; comment).
-(defun form-is-borrowed? ((env Scope<llvm-value>) (form Sexpr)) bool
+(defun form-is-borrowed? ((env Scope<llvm-value>) (form Option<Sexpr>)) bool
   (if (sexpr-symp (sexpr-car form))
       (if (equal (sexpr-sym-name (sexpr-car form)) "var")
           (name-is-borrowed? env (sexpr-str (sexpr-car (sexpr-cdr form))))
@@ -919,7 +919,7 @@ pub const SOURCE: &str = r#"
 ;; forever, leaving every reassigned value unrooted (`typelisp-rt`'s
 ;; `a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
 ;; demonstrates the resulting corruption directly).
-(defun retain-bindings ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (names Sexpr)) ()
+(defun retain-bindings ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (names Option<Sexpr>)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
        (let* ((nm (sexpr-sym-name (sexpr-car name-pair)))
@@ -964,7 +964,7 @@ pub const SOURCE: &str = r#"
 ;; push has to happen immediately at bind time, not deferred here the way
 ;; `kind = 2`'s is) — `release-bindings` is where every binding's root, no
 ;; matter which function pushed it, is popped in one place at function exit.
-(defun release-bindings ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (names Sexpr)) ()
+(defun release-bindings ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (names Option<Sexpr>)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
        (let ((kind (sexpr-int (sexpr-cdr name-pair))))
@@ -1338,7 +1338,7 @@ pub const SOURCE: &str = r#"
 ;; Counts a plain `Sexpr` list's elements — used to size the `i64*` args
 ;; array a direct call needs (`compile-apply`'s `alloca-args`/`build-call`),
 ;; and (labels/closures Stage 2) the `i64*` env array a captured call needs.
-(defun sexpr-list-length ((s Sexpr)) i32
+(defun sexpr-list-length ((s Option<Sexpr>)) i32
   (if (sexpr-consp s)
       (+ 1 (sexpr-list-length (sexpr-cdr s)))
       0))
@@ -1352,7 +1352,7 @@ pub const SOURCE: &str = r#"
 ;; `docs/implementation-log.md`) use this to recover `idx-unary-list`'s
 ;; length as the raw field-index argument `rt_struct_field_get`/
 ;; `rt_struct_field_set` expect.
-(defun sexpr-list-length-i64 ((s Sexpr)) i64
+(defun sexpr-list-length-i64 ((s Option<Sexpr>)) i64
   (if (sexpr-consp s)
       (+ (sexpr-list-length-i64 (sexpr-cdr s)) 1)
       0))
@@ -1400,7 +1400,7 @@ pub const SOURCE: &str = r#"
 ;; `kind = 2` binding, a cell-kind slot's own word 0 never changes after this
 ;; — `compile-cellset` mutates the cell in place, never the slot — so there
 ;; is no root-index for a later `setf` to update).
-(defun bind-let-values ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (bindings Sexpr) (acc Scope<llvm-value>)) ()
+(defun bind-let-values ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (bindings Option<Sexpr>) (acc Scope<llvm-value>)) ()
   (if (sexpr-consp bindings)
       (let ((pair (sexpr-car bindings)) (rest (sexpr-cdr bindings)))
        (let* ((name-pair (sexpr-car pair))
@@ -1459,7 +1459,7 @@ pub const SOURCE: &str = r#"
 ;; broadened condition — `bind-let-values`'s cell branch pushes its cell
 ;; reference's root permanently at bind time, so it needs the same unwind
 ;; here as a `kind = 2` binding's does.
-(defun unroot-let-sexpr-values ((builder llvm-builder) (m llvm-module) (bindings Sexpr)) ()
+(defun unroot-let-sexpr-values ((builder llvm-builder) (m llvm-module) (bindings Option<Sexpr>)) ()
   (if (sexpr-consp bindings)
       (let ((pair (sexpr-car bindings)) (rest (sexpr-cdr bindings)))
        (let ((kind (sexpr-int (sexpr-cdr (sexpr-car pair)))))
@@ -1586,7 +1586,7 @@ pub const SOURCE: &str = r#"
     (store-arg builder args-ptr 5 (const-i64 builder 110))
     (build-call builder (get-function m "rt_str_new") args-ptr 6)))
 
-(defun compile-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     ;; The AST-tag dispatch. `case` (the core macro layer's
     ;; — `typelisp_front::core_macros`) rather than the
     ;; hand-nested `if` chain this used to be: the
@@ -1680,7 +1680,7 @@ pub const SOURCE: &str = r#"
 ;; sign-extended from bit 60. Reassembled here in LLVM,
 ;; where a full 64-bit word is ordinary -- doing it in the
 ;; island's own arithmetic would overflow the same way.
-(defun compile-int ((m llvm-module) (fn-name string) (builder llvm-builder) (e Sexpr))llvm-value
+(defun compile-int ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
     (let ((hi (sexpr-int (sexpr-car (sexpr-cdr e))))
           (lo (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
       (build-or builder
@@ -1700,7 +1700,7 @@ pub const SOURCE: &str = r#"
 ;; `char` literal previously had no dispatch tag at all
 ;; (an oversight discovered while implementing
 ;; `Expr::Quote`, whose `Char` leaf needs exactly this).
-(defun compile-char ((m llvm-module) (fn-name string) (builder llvm-builder) (e Sexpr))llvm-value
+(defun compile-char ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
     (const-i64 builder (as i64 (char->int (sexpr-char (sexpr-car (sexpr-cdr e)))))))
 
 ;; `(bool b)` (if/let/comparisons, labels/closures
@@ -1709,7 +1709,7 @@ pub const SOURCE: &str = r#"
 ;; a `bool` literal is just `0`/`1`, the same
 ;; representation `build-icmp-*` already produces and
 ;; `compile-if`'s `build-cond-br` already expects.
-(defun compile-bool ((m llvm-module) (fn-name string) (builder llvm-builder) (e Sexpr))llvm-value
+(defun compile-bool ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
     (if (sexpr-bool (sexpr-car (sexpr-cdr e))) (const-i64 builder 1) (const-i64 builder 0)))
 
 ;; `(float bits)` (Sexpr/RtValue unification, Stage 0)
@@ -1735,7 +1735,7 @@ pub const SOURCE: &str = r#"
 ;; `2.0` to `0.0`. Each half is < 2^32 so both survive
 ;; the tag; reassemble with `(hi << 32) | lo` — LLVM
 ;; constant-folds it back to the exact 64-bit pattern.
-(defun compile-float ((m llvm-module) (fn-name string) (builder llvm-builder) (e Sexpr))llvm-value
+(defun compile-float ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
     (let ((hi (sexpr-int (sexpr-car (sexpr-cdr e))))
           (lo (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
       (build-or builder
@@ -1763,7 +1763,7 @@ pub const SOURCE: &str = r#"
 ;; obligation every other allocating call here already
 ;; has (e.g. `compile-construct-sexpr`'s `Cons` field
 ;; handling, or a `kind = 2` `let`/parameter binding).
-(defun compile-str ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-str ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((chars (sexpr-cdr e))
            (n (sexpr-list-length chars))
            (args-ptr (alloca-args builder n)))
@@ -1773,7 +1773,7 @@ pub const SOURCE: &str = r#"
 ;; Fills a `compile-str`-allocated array, one compiled
 ;; `(int c)` character per slot — the `str`-literal
 ;; analogue of `compile-construct-box-fields`.
-(defun store-str-chars ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Sexpr) (idx i32))()
+(defun store-str-chars ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Option<Sexpr>) (idx i32))()
     (if (sexpr-consp forms)
         (let ((form (sexpr-car forms)) (rest (sexpr-cdr forms)))
           (store-arg builder args-ptr idx (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup form))
@@ -1790,7 +1790,7 @@ pub const SOURCE: &str = r#"
 ;; — no further bit manipulation needed at the
 ;; `compile-construct-sexpr`/`compile-sexpr-field`
 ;; boundary (both treat variant `8` as passthrough).
-(defun compile-bignum-literal ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-bignum-literal ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((parts (sexpr-cdr e))
            (n (sexpr-list-length parts))
            (args-ptr (alloca-args builder n)))
@@ -1809,7 +1809,7 @@ pub const SOURCE: &str = r#"
 ;; case: each already-boxed sub-value is rooted before
 ;; the next is built, in case building it triggers a
 ;; collection.
-(defun compile-ratio-literal ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-ratio-literal ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let ((numer-form (sexpr-car (sexpr-cdr e))) (denom-form (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
       (let* ((args-ptr (alloca-args builder 2))
              (numer-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup numer-form)))
@@ -1840,7 +1840,7 @@ pub const SOURCE: &str = r#"
 ;; anything) needs retaining/releasing around it. See
 ;; `resolve-value`'s doc comment for how the
 ;; sibling-as-value case resolves.
-(defun compile-var ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (e Sexpr))llvm-value
+(defun compile-var ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (e Option<Sexpr>))llvm-value
     (resolve-value m fn-name builder env fn-env captured (sexpr-str (sexpr-car (sexpr-cdr e)))))
 
 ;; `(cellvar name kind)` — a reference to a cell-boxed
@@ -1860,7 +1860,7 @@ pub const SOURCE: &str = r#"
 ;; `env` here is a genuine internal-invariant break
 ;; (`core_bridge` only ever emits this tag for a name it
 ;; already knows is a cell-boxed local/param/capture).
-(defun compile-cellvar ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (e Sexpr))llvm-value
+(defun compile-cellvar ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (e Option<Sexpr>))llvm-value
     (let* ((name (sexpr-str (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
       (match (get env name)
@@ -1931,7 +1931,7 @@ pub const SOURCE: &str = r#"
 ;; outer sibling's own captures are, at the same
 ;; leading indices `bind-captures`/`load-env` read
 ;; them back out at on the other side.
-(defun resolve-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (name string))llvm-value
+(defun resolve-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (name string))llvm-value
     (match (get env name)
       ((Some slot) (load-raw builder slot 0))
       (None (match (get fn-env name)
@@ -1963,7 +1963,7 @@ pub const SOURCE: &str = r#"
 ;; value. At every existing call site, `names` and
 ;; `captured` happen to be the *same* list (building a
 ;; block's own shared env array).
-(defun compile-env-args ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (env-ptr llvm-value) (names Sexpr) (idx i32))()
+(defun compile-env-args ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (env-ptr llvm-value) (names Option<Sexpr>) (idx i32))()
     (if (sexpr-consp names)
         (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
          (let* ((nm (sexpr-sym-name (sexpr-car name-pair)))
@@ -1982,7 +1982,7 @@ pub const SOURCE: &str = r#"
 ;; wherever the box itself is reachable — a captured
 ;; value just moves into its env slot with no
 ;; ownership bookkeeping of its own.
-(defun compile-escaping-env-args ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (env-ptr llvm-value) (names Sexpr) (idx i32))()
+(defun compile-escaping-env-args ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (env-ptr llvm-value) (names Option<Sexpr>) (idx i32))()
     (if (sexpr-consp names)
         (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
          (let* ((nm (sexpr-sym-name (sexpr-car name-pair)))
@@ -2061,7 +2061,7 @@ pub const SOURCE: &str = r#"
 ;; `compile-assoc-user` like any other user method,
 ;; and `get-function` panics clearly there if it was
 ;; never compiled.
-(defun compile-assoc ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-assoc ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((type-name (sexpr-str (sexpr-car (sexpr-cdr e))))
            (method (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
@@ -2479,7 +2479,7 @@ pub const SOURCE: &str = r#"
 ;; an ordinary call's. A `labels` sibling (not a
 ;; toplevel `defun`) because it closes over `m` and
 ;; mutually recurses with `compile-call-args`.
-(defun compile-assoc-user ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name string) (method string) (rest Sexpr))llvm-value
+(defun compile-assoc-user ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name string) (method string) (rest Option<Sexpr>))llvm-value
     (let* ((mangled (append "tl_" (append type-name (append "::" method))))
            (argc (sexpr-list-length rest))
            (args-ptr (alloca-args builder argc))
@@ -2503,7 +2503,7 @@ pub const SOURCE: &str = r#"
 ;; encoding (handle / unit / bool / tagged str /
 ;; boxed `Option`) is dictated by the node's checked
 ;; type, the same as every other compiled value.
-(defun compile-llvm-op ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-llvm-op ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((opid (sexpr-int (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (+ (sexpr-list-length arg-forms) 1))
@@ -2523,7 +2523,7 @@ pub const SOURCE: &str = r#"
 ;; constant, `compile-call-args` fills the rest and
 ;; roots the tagged-`Sexpr` ones across the
 ;; allocation `rt_dyn_new` itself performs.
-(defun compile-dyn-new ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-dyn-new ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((vtable-id (sexpr-int (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (args-ptr (alloca-args builder 2)))
@@ -2546,7 +2546,7 @@ pub const SOURCE: &str = r#"
 ;; `compile-call-args` roots it across the allocation
 ;; `rt_dyn_upcast` performs — which is also what keeps
 ;; the concrete value inside it alive.
-(defun compile-dyn-upcast ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-dyn-upcast ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((trait-id (sexpr-int (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (args-ptr (alloca-args builder 2)))
@@ -2558,7 +2558,7 @@ pub const SOURCE: &str = r#"
 
 ;; `(dyn-value (kind . form))` — unwrap a trait object
 ;; to the concrete value inside (`Expr::DynValue`).
-(defun compile-dyn-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-dyn-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((arg-forms (sexpr-cdr e))
            (args-ptr (alloca-args builder 1))
            (sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup args-ptr arg-forms 0))
@@ -2594,7 +2594,7 @@ pub const SOURCE: &str = r#"
 ;; (`compile-call-args` pushed it as a `kind = 2`
 ;; argument), which is what keeps the unwrapped
 ;; concrete value alive too.
-(defun compile-dyn-call ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-dyn-call ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((slot (sexpr-int (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
@@ -2775,7 +2775,7 @@ pub const SOURCE: &str = r#"
 ;; `compile-apply-indirect`) knows how many
 ;; `pop-sexpr-root` calls to make once the call these
 ;; roots were protecting is done.
-(defun compile-call-args ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Sexpr) (idx i32))i32
+(defun compile-call-args ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Option<Sexpr>) (idx i32))i32
     (if (sexpr-consp forms)
         (let ((arg-pair (sexpr-car forms)) (rest (sexpr-cdr forms)))
          (let* ((kind (sexpr-int (sexpr-car arg-pair)))
@@ -2801,7 +2801,7 @@ pub const SOURCE: &str = r#"
 ;; env array built and passed via
 ;; `build-call-with-env`, regardless of which sibling
 ;; `nm` actually names.
-(defun compile-apply ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-apply ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
@@ -2851,7 +2851,7 @@ pub const SOURCE: &str = r#"
 ;; `nm` is `name` itself, already declared by
 ;; `compile-function`'s own first step (`add-function`,
 ;; above) before this body was ever reached.
-(defun compile-call ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-call ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     ;; The name is used exactly as the node carries it. A free builtin with no
     ;; typelisp body (`sexpr-car`, `gensym`, `symbol->string`, ...) already
     ;; arrives as its `crate::compile::runtime` shim name — `symbols::
@@ -2892,7 +2892,7 @@ pub const SOURCE: &str = r#"
 ;; boxed on the spot by `resolve-value` — an
 ;; unreferenced one is simply left for the GC now,
 ;; same as any other unreferenced heap value).
-(defun compile-apply-indirect ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-apply-indirect ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((callee-form (sexpr-car (sexpr-cdr e)))
            (closure (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup callee-form))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
@@ -2916,7 +2916,7 @@ pub const SOURCE: &str = r#"
 ;; now, kept only so `compile-if`/`compile-return`/
 ;; `compile-set`/`compile-match-arms` don't need their
 ;; own separate call shape.
-(defun compile-if-branch ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (is-fn bool) (form Sexpr))llvm-value
+(defun compile-if-branch ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (is-fn bool) (form Option<Sexpr>))llvm-value
     (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup form))
 
 ;; `(if is-fn cond-form then-form else-form)`
@@ -2955,7 +2955,7 @@ pub const SOURCE: &str = r#"
 ;; terminator comes from whatever code the caller
 ;; emits next, exactly as before this addition (see
 ;; this module's doc comment).
-(defun compile-if ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-if ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((is-fn (sexpr-bool (sexpr-car (sexpr-cdr e))))
            (cond-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (then-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -2992,7 +2992,7 @@ pub const SOURCE: &str = r#"
 ;; into that later computation. Lives in this `labels`
 ;; ring (unlike `bind-let-values`/`restore-let-values`)
 ;; purely because it calls `compile-value`.
-(defun compile-let-values ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (bindings Sexpr) (acc Scope<llvm-value>))()
+(defun compile-let-values ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (bindings Option<Sexpr>) (acc Scope<llvm-value>))()
     (if (sexpr-consp bindings)
         (let ((pair (sexpr-car bindings)) (rest (sexpr-cdr bindings)))
          (let* ((nm (sexpr-sym-name (sexpr-car (sexpr-car pair))))
@@ -3022,7 +3022,7 @@ pub const SOURCE: &str = r#"
 ;; CL `let`'s own `Unit`-typed case) compiles to
 ;; `compile-unit`, the same `Unit` encoding every other
 ;; empty-body shape in this module already uses.
-(defun compile-let-body ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (forms Sexpr))llvm-value
+(defun compile-let-body ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (forms Option<Sexpr>))llvm-value
     (if (sexpr-consp forms)
         (let ((form (sexpr-car forms)) (rest (sexpr-cdr forms)))
          (let ((v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup form)))
@@ -3066,7 +3066,7 @@ pub const SOURCE: &str = r#"
 ;; tradeoff as an unreferenced boxed `labels` sibling
 ;; or a captured reference cycle (see this module's
 ;; doc comment).
-(defun compile-let ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-let ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((bindings (sexpr-car (sexpr-cdr e)))
            (body-forms (sexpr-cdr (sexpr-cdr e)))
            (acc (new-acc-table)))
@@ -3109,7 +3109,7 @@ pub const SOURCE: &str = r#"
 ;; bitmask so the GC mark phase knows which of its own
 ;; captured slots are tagged values to trace) — the
 ;; value this whole node evaluates to.
-(defun compile-lambda ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (e Sexpr))llvm-value
+(defun compile-lambda ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (e Option<Sexpr>))llvm-value
     (let* ((lname (sexpr-str (sexpr-car (sexpr-cdr e))))
            (lcaptured (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (lparams (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -3177,7 +3177,7 @@ pub const SOURCE: &str = r#"
 ;; ABI, so the choice between `add-function` (no
 ;; captures) and `add-function-with-env` (captures) is
 ;; made once from `captured`'s length, not per-def.
-(defun declare-labels-siblings ((m llvm-module) (fn-name string) (inner-fn-env Scope<llvm-function>) (captured Sexpr) (defs Sexpr))()
+(defun declare-labels-siblings ((m llvm-module) (fn-name string) (inner-fn-env Scope<llvm-function>) (captured Option<Sexpr>) (defs Option<Sexpr>))()
     (if (sexpr-consp defs)
         (let ((def (sexpr-car defs)) (rest (sexpr-cdr defs)))
          (let* ((nm (sexpr-str (sexpr-car def)))
@@ -3213,7 +3213,7 @@ pub const SOURCE: &str = r#"
 ;; that same env array right back, then R2-releasing
 ;; both (minus whichever is bare-returned) before
 ;; returning.
-(defun compile-labels-bodies ((m llvm-module) (fn-name string) (inner-fn-env Scope<llvm-function>) (captured Sexpr) (defs Sexpr))()
+(defun compile-labels-bodies ((m llvm-module) (fn-name string) (inner-fn-env Scope<llvm-function>) (captured Option<Sexpr>) (defs Option<Sexpr>))()
     (if (sexpr-consp defs)
         (let ((def (sexpr-car defs)) (rest (sexpr-cdr defs)))
          (let* ((nm (sexpr-str (sexpr-car def)))
@@ -3299,7 +3299,7 @@ pub const SOURCE: &str = r#"
 ;; result ultimately flows back up into — this
 ;; function introduces no function activation of its
 ;; own, so no R1/R2 here.
-(defun compile-labels ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-labels ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((inner-captured (sexpr-car (sexpr-cdr e)))
            (defs (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (trailing (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
@@ -3357,7 +3357,7 @@ pub const SOURCE: &str = r#"
 ;; value, rather than each scope's own ordinary pop,
 ;; is what makes that unwind correct regardless of
 ;; nesting depth.
-(defun compile-loop ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-loop ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((body-forms (sexpr-cdr e))
            (loop-block (append-block cur-fn "loop-body"))
            (exit-block (append-block cur-fn "loop-exit"))
@@ -3387,7 +3387,7 @@ pub const SOURCE: &str = r#"
 ;; threaded as `Option` only because `compile-value`'s
 ;; shared signature must also serve every *other* call
 ;; site, where there may be no enclosing loop at all.
-(defun compile-loop-body ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (forms Sexpr))()
+(defun compile-loop-body ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (forms Option<Sexpr>))()
     (if (sexpr-consp forms)
         (let ((form (sexpr-car forms)) (rest (sexpr-cdr forms)))
          (let ((ignored (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup form)))
@@ -3469,7 +3469,7 @@ pub const SOURCE: &str = r#"
 ;; sexpr_roots` never allocates, so there's no GC
 ;; between computing `v` and storing it this couldn't
 ;; already have happened without this call.
-(defun compile-return ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-return ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((is-fn (sexpr-bool (sexpr-car (sexpr-cdr e))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (v (compile-if-branch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup is-fn value-form)))
@@ -3530,7 +3530,7 @@ pub const SOURCE: &str = r#"
 ;; binding's scope — `typelisp-rt`'s
 ;; `a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
 ;; test demonstrates the resulting corruption directly.
-(defun compile-set ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-set ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (is-fn (eq kind 1))
@@ -3577,7 +3577,7 @@ pub const SOURCE: &str = r#"
 ;; next instruction. Returns `v` (the new, untagged
 ;; value), matching `compile-set`'s own "a `setf`
 ;; evaluates to the value that was set" convention.
-(defun compile-cellset ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-cellset ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -3609,7 +3609,7 @@ pub const SOURCE: &str = r#"
 ;; each other" constraint this module's doc
 ;; comment already explains for `compile-value`
 ;; & co.).
-(defun compile-pattern-test ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (pat Sexpr) (fail-block llvm-basic-block))()
+(defun compile-pattern-test ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (pat Option<Sexpr>) (fail-block llvm-basic-block))()
     (case (sexpr-sym-name (sexpr-car pat))
       ;; Matches anything and binds nothing, so there is no guard to emit.
       ("pat-wild" ())
@@ -3696,7 +3696,7 @@ pub const SOURCE: &str = r#"
 ;; heterogeneous `Sexpr`, not from the scrutinee's own static type -- needs an
 ;; instance test the ordinary case never did. `downcast` false is a total
 ;; no-op, exactly the pre-existing scrut-kind 1/2 behavior unchanged.
-(defun compile-ctor-pattern ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (pat Sexpr) (fail-block llvm-basic-block))()
+(defun compile-ctor-pattern ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (pat Option<Sexpr>) (fail-block llvm-basic-block))()
   (let* ((variant (sexpr-int (sexpr-car (sexpr-cdr pat))))
          (subpats (sexpr-car (sexpr-cdr (sexpr-cdr pat))))
          (scrut-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr pat))))))
@@ -3729,7 +3729,7 @@ pub const SOURCE: &str = r#"
 ;; check, for a struct downcast or a `(the T p)`
 ;; whole-enum bind). The shared guard both a
 ;; downcast `pat-ctor` and a `pat-typetest` use.
-(defun compile-sexpr-instance-test ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (type-name-form Sexpr) (variant i64))llvm-value
+(defun compile-sexpr-instance-test ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (type-name-form Option<Sexpr>) (variant i64))llvm-value
     (let* ((name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup type-name-form))
            (args-ptr (alloca-args builder 3)))
       (store-arg builder args-ptr 0 v)
@@ -3747,7 +3747,7 @@ pub const SOURCE: &str = r#"
 ;; reason to call `compile-sexpr-field`/
 ;; `compile-struct-field` -- and for `cons`, no
 ;; reason to emit an `rt_car`/`rt_cdr` call either).
-(defun compile-ctor-subpatterns ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (scrut-kind i64) (variant i64) (field-kinds Sexpr) (subpats Sexpr) (idx i32) (fail-block llvm-basic-block))()
+(defun compile-ctor-subpatterns ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (scrut-kind i64) (variant i64) (field-kinds Option<Sexpr>) (subpats Option<Sexpr>) (idx i32) (fail-block llvm-basic-block))()
     (if (sexpr-consp subpats)
         (let ((p (sexpr-car subpats)) (rest (sexpr-cdr subpats)))
          (let ((rest-kinds (if (eq scrut-kind 0) field-kinds (sexpr-cdr field-kinds))))
@@ -3832,7 +3832,7 @@ pub const SOURCE: &str = r#"
 ;; scalar (`(match n (1 ...) (_ ...))`), and the
 ;; node's trailing root-kind field says which — see
 ;; the comment at the read itself.
-(defun compile-match ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-match ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((is-fn (sexpr-bool (sexpr-car (sexpr-cdr e))))
            (scrut-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (arms (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -3883,7 +3883,7 @@ pub const SOURCE: &str = r#"
 ;; was somehow wrong, the same role
 ;; `resolve-value`'s "unbound variable" panic plays
 ;; elsewhere in this file.
-(defun compile-match-arms ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (is-fn bool) (scrut-v llvm-value) (slot llvm-value) (merge-block llvm-basic-block) (arms Sexpr))()
+(defun compile-match-arms ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (is-fn bool) (scrut-v llvm-value) (slot llvm-value) (merge-block llvm-basic-block) (arms Option<Sexpr>))()
     (if (sexpr-consp arms)
         (let ((arm (sexpr-car arms)) (rest (sexpr-cdr arms)))
          (let* ((pat (sexpr-car arm))
@@ -3931,7 +3931,7 @@ pub const SOURCE: &str = r#"
 ;; the incident), since `Checker::check_if`/
 ;; `Interp::eval` never loopified `if`-chain recursion
 ;; the way `compile-value`'s own dispatch did.
-(defun compile-construct ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-construct ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((is-sexpr (sexpr-bool (sexpr-car (sexpr-cdr e))))
            (mutable (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -3958,7 +3958,7 @@ pub const SOURCE: &str = r#"
 ;; handed straight to `rt_intern_symbol` (no GC-root
 ;; protection needed — an interned symbol is permanent,
 ;; unlike the `Str` that briefly holds its name).
-(defun compile-construct-sym ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (arg-forms Sexpr))llvm-value
+(defun compile-construct-sym ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (arg-forms Option<Sexpr>))llvm-value
     (let* ((name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car arg-forms)))
            (args-ptr (alloca-args builder 1)))
       (store-arg builder args-ptr 0 name-v)
@@ -3972,7 +3972,7 @@ pub const SOURCE: &str = r#"
 ;; `compile-construct-sym`) into a fresh `args-ptr`
 ;; array, then `rt_intern_path` combines them into the
 ;; final tagged `Sexpr::Path`.
-(defun compile-construct-path ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (arg-forms Sexpr))llvm-value
+(defun compile-construct-path ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (arg-forms Option<Sexpr>))llvm-value
     (let* ((n (sexpr-list-length arg-forms))
            (args-ptr (alloca-args builder n)))
       (compile-construct-path-segs m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup args-ptr arg-forms 0)
@@ -3981,7 +3981,7 @@ pub const SOURCE: &str = r#"
 ;; Fills a `compile-construct-path`-allocated array,
 ;; one interned segment `Sexpr::Symbol` per slot —
 ;; the path-literal analogue of `store-str-chars`.
-(defun compile-construct-path-segs ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Sexpr) (idx i32))()
+(defun compile-construct-path-segs ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Option<Sexpr>) (idx i32))()
     (if (sexpr-consp forms)
         (let ((form (sexpr-car forms)) (rest (sexpr-cdr forms)))
           (let* ((name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup form))
@@ -4041,7 +4041,7 @@ pub const SOURCE: &str = r#"
 ;; binding is `kind = 2` like any other reclaimable
 ;; value and this root is redundant rather than load-
 ;; bearing.
-(defun compile-construct-boxed-struct ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name-form Sexpr) (arg-forms Sexpr))llvm-value
+(defun compile-construct-boxed-struct ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name-form Option<Sexpr>) (arg-forms Option<Sexpr>))llvm-value
     (let* ((argc (sexpr-list-length arg-forms))
            (args-ptr (alloca-args builder (+ argc 1)))
            (name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup type-name-form)))
@@ -4064,7 +4064,7 @@ pub const SOURCE: &str = r#"
 ;; turns the field's own compiled (untagged, for a
 ;; scalar kind) value into the tagged `Sexpr`
 ;; `rt_struct_new` requires.
-(defun compile-construct-boxed-struct-fields ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Sexpr) (idx i32))()
+(defun compile-construct-boxed-struct-fields ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Option<Sexpr>) (idx i32))()
     (if (sexpr-consp forms)
         (let ((field-pair (sexpr-car forms)) (rest (sexpr-cdr forms)))
          (let* ((kind (sexpr-int (sexpr-car field-pair)))
@@ -4102,7 +4102,7 @@ pub const SOURCE: &str = r#"
 ;; treatment `compile-construct-boxed-struct` already
 ;; gives its own result (not a leak: a real GC-managed
 ;; value now, just never released early).
-(defun compile-construct-box ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name-form Sexpr) (variant i64) (arg-forms Sexpr))llvm-value
+(defun compile-construct-box ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name-form Option<Sexpr>) (variant i64) (arg-forms Option<Sexpr>))llvm-value
     (let* ((argc (sexpr-list-length arg-forms))
            (args-ptr (alloca-args builder (+ argc 2)))
            (name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup type-name-form)))
@@ -4142,7 +4142,7 @@ pub const SOURCE: &str = r#"
 ;; payload is a `SymId`, a separate gap from `str`'s
 ;; own — see `compile-sexpr-field`'s doc comment), so
 ;; constructing one still panics clearly.
-(defun compile-construct-sexpr ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (variant i64) (arg-forms Sexpr))llvm-value
+(defun compile-construct-sexpr ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (variant i64) (arg-forms Option<Sexpr>))llvm-value
     ;; The inverse of `compile-sexpr-field`, variant for variant. Each clause
     ;; compiles its own argument rather than one being hoisted out: `nil`(0)
     ;; has no argument at all, and a hoisted `compile-value` would emit that
@@ -4220,7 +4220,7 @@ pub const SOURCE: &str = r#"
 ;; construction and the bound never fires. Only
 ;; `compile-vector-op`, whose index is a run-time
 ;; value, needs the protected form.
-(defun compile-field-get ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-field-get ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((idx (sexpr-list-length-i64 (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (obj-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -4240,7 +4240,7 @@ pub const SOURCE: &str = r#"
 ;; `rt_struct_field_set` stores it. Evaluates to `Unit`
 ;; (`0`, `compile-unit`'s own convention), matching
 ;; `Expr::FieldSet`'s own checked type.
-(defun compile-field-set ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-field-set ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((idx (sexpr-list-length-i64 (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (obj-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -4290,7 +4290,7 @@ pub const SOURCE: &str = r#"
 ;; already relies on: the receiver flows in as an
 ;; ordinary (env-rooted) value, and `rt_struct_push_
 ;; field`/`rt_struct_pop_field` allocate nothing.
-(defun compile-vector-op ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-vector-op ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((method (sexpr-str (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
       (if (equal method "new")
@@ -4411,7 +4411,7 @@ pub const SOURCE: &str = r#"
 ;; box, a separate problem from iteration (see
 ;; `docs/dev/iter-compile-plan.md`), so they fall
 ;; through to `compile-assoc` and panic clearly.
-(defun compile-hashtable-op ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-hashtable-op ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let ((method (sexpr-str (sexpr-car (sexpr-cdr e)))))
       (if (equal method "new")
           (let* ((args-ptr (alloca-args builder 1))
@@ -4533,7 +4533,7 @@ pub const SOURCE: &str = r#"
 ;; shift-tagged `kind = 10` special case) is just
 ;; another passthrough value here, no different from
 ;; a boxed struct or `Str` global.
-(defun compile-global ((m llvm-module) (fn-name string) (builder llvm-builder) (e Sexpr))llvm-value
+(defun compile-global ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
     (let* ((id (sexpr-int (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (args-ptr (alloca-args builder 1)))
@@ -4557,7 +4557,7 @@ pub const SOURCE: &str = r#"
 ;; itself (the newly stored value in its own,
 ;; already-untagged compiled representation),
 ;; matching `Expr::SetGlobal`'s own checked type.
-(defun compile-set-global ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-set-global ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((id (sexpr-int (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -4583,7 +4583,7 @@ pub const SOURCE: &str = r#"
 ;; compile-time ids in. The allocated id itself is
 ;; discarded here (nothing at this call site needs it);
 ;; this tag exists purely for its side effect.
-(defun compile-global-init ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-global-init ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((kind (sexpr-int (sexpr-car (sexpr-cdr e))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup value-form))
@@ -4610,7 +4610,7 @@ pub const SOURCE: &str = r#"
 ;; decoded back to this catch's own representation (`compile-sexpr-field`,
 ;; the same decoder a struct field read uses) — `kind` is what
 ;; `core_bridge` baked in for exactly this.
-(defun compile-catch ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-catch ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((tag-form (sexpr-car (sexpr-cdr e)))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (body (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -4664,7 +4664,7 @@ pub const SOURCE: &str = r#"
 ;; The call goes through `emit-rt-call` like any other: a `throw` written
 ;; inside the very region that catches it is the one case where the unwind
 ;; never leaves this function, and it has to be caught all the same.
-(defun compile-throw ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-throw ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((tag-form (sexpr-car (sexpr-cdr e)))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -4696,7 +4696,7 @@ pub const SOURCE: &str = r#"
 ;; left here, recorded in `docs/dev/TODO.md`; closing it means giving the
 ;; cleanup a third copy at the `break` site, which is a change to
 ;; `compile-break` rather than to anything on the unwinding path.
-(defun compile-unwind-protect ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-unwind-protect ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((protected-form (sexpr-car (sexpr-cdr e)))
            (cleanup-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (slot (alloca-args builder 1))
@@ -4758,14 +4758,14 @@ pub const SOURCE: &str = r#"
 ;; `Expr::Panic`'s own checked type is `Never`, so
 ;; nothing downstream ever reads this call's return
 ;; value for real.
-(defun compile-panic ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Sexpr))llvm-value
+(defun compile-panic ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((msg-form (sexpr-car (sexpr-cdr e)))
            (msg-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup msg-form))
            (args-ptr (alloca-args builder 1)))
       (store-arg builder args-ptr 0 msg-v)
       (emit-rt-call builder m cur-fn "rt_panic" "rt_protected_panic" args-ptr 1 protect)))
 
-(defun compile-function ((m llvm-module) (name string) (param-names Sexpr) (body Sexpr)) llvm-module
+(defun compile-function ((m llvm-module) (name string) (param-names Option<Sexpr>) (body Option<Sexpr>)) llvm-module
     (let* ((f (add-function m name))
            (b (append-block f "entry"))
            (builder (llvm-builder::create)))

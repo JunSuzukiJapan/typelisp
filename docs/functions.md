@@ -376,27 +376,38 @@ Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用�
 | `car` | `(car p)` | `cons-cell<A,B>→A` | 先頭（`defstruct` フィールドアクセサ、インスタンスメソッドとして呼べる） |
 | `cdr` | `(cdr p)` | `cons-cell<A,B>→B` | 残り（同上） |
 
-`read` が返すデータ型 `Sexpr`（`Nil | Int | Float | Char | Bool | Sym | Str | Cons(Sexpr,Sexpr)`）
+`read` が返すデータ型 `Sexpr`（`Int | Float | Char | Bool | Sym | Str | Cons | Bignum | Ratio | Path`）
 自体のセル操作は、上記の汎用 `cons`/`car`/`cdr` とは別の内部 island 層 `sexpr-*` が担う
 （`read`/`eval`/`print`/`defmacro`/自己ホストコンパイラ `compiler.rs` の内部でのみ使われ、
 ユーザー向けライブラリ関数からは `sexpr-*` を直接呼ぶ場面はほぼ無い）。
 
+**S 式データの型は `Option<Sexpr>` である。** 空リストは `Sexpr` の変種ではなく
+`Option` の `none` であり、`Sexpr` そのものは「空でない S 式」を意味する。
+したがって `sexpr-*` は引数も戻り値も `Option<Sexpr>` を取る。
+
+- `()` は `Option<Sexpr>` が期待される位置で空リストになる（`(Option::none)` とも書ける）
+- `Sexpr` は `Option<Sexpr>` が期待される位置へ暗黙に広がる（実行時の変換は無い）。
+  逆向き——`Option<Sexpr>` を `Sexpr` として使う——は「空リストではない」の主張なので、
+  `match` か `unwrap` で明示的に示す必要がある
+- `match` では `Sexpr` の 10 変種と `none` を**同じ腕の並びに平らに**書ける
+  （[syntax.md](syntax.md) の `match` 参照）
+
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `sexpr-cons` | `(sexpr-cons a b)` | `(Sexpr,Sexpr)→Sexpr` | `Sexpr` セルを作る |
-| `sexpr-car` | `(sexpr-car s)` | `Sexpr→Sexpr` | 先頭。`Cons` でなければ panic |
-| `sexpr-cdr` | `(sexpr-cdr s)` | `Sexpr→Sexpr` | 残り。`Cons` でなければ panic |
-| `sexpr-consp` | `(sexpr-consp s)` | `Sexpr→bool` | `Cons` かどうか |
-| `sexpr-null` | `(sexpr-null s)` | `Sexpr→bool` | `Nil` かどうか |
-| `sexpr-atom` | `(sexpr-atom s)` | `Sexpr→bool` | `Cons` でないか |
-| `sexpr-symp` | `(sexpr-symp s)` | `Sexpr→bool` | `Sym`（シンボル）かどうか |
-| `sexpr-int` | `(sexpr-int s)` | `Sexpr→i64` | `Int` の中身を取り出す。`Int` でなければ panic |
-| `sexpr-float` | `(sexpr-float s)` | `Sexpr→f64` | `Float` の中身。型違いは panic |
-| `sexpr-char` | `(sexpr-char s)` | `Sexpr→char` | `Char` の中身。型違いは panic |
-| `sexpr-bool` | `(sexpr-bool s)` | `Sexpr→bool` | `Bool` の中身。型違いは panic |
-| `sexpr-str` | `(sexpr-str s)` | `Sexpr→string` | `Str` の中身。型違いは panic |
-| `sexpr-sym-name` | `(sexpr-sym-name s)` | `Sexpr→string` | `Sym` の名前。型違いは panic |
-| `eq` `eql` | `(op a b)` | `(Sexpr,Sexpr)→bool` | 同一性比較（`Cons`/`Str` はポインタ、それ以外は値） |
+| `sexpr-cons` | `(sexpr-cons a b)` | `(Option<Sexpr>,Option<Sexpr>)→Option<Sexpr>` | `Sexpr` セルを作る |
+| `sexpr-car` | `(sexpr-car s)` | `Option<Sexpr>→Option<Sexpr>` | 先頭。**空リストなら空リスト**（CL 準拠）。`Cons` でない原子は panic |
+| `sexpr-cdr` | `(sexpr-cdr s)` | `Option<Sexpr>→Option<Sexpr>` | 残り。**空リストなら空リスト**（CL 準拠）。`Cons` でない原子は panic |
+| `sexpr-consp` | `(sexpr-consp s)` | `Option<Sexpr>→bool` | `Cons` かどうか |
+| `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | 空リストかどうか |
+| `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | `Cons` でないか |
+| `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | `Sym`（シンボル）かどうか |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→i64` | `Int` の中身を取り出す。`Int` でなければ panic |
+| `sexpr-float` | `(sexpr-float s)` | `Option<Sexpr>→f64` | `Float` の中身。型違いは panic |
+| `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | `Char` の中身。型違いは panic |
+| `sexpr-bool` | `(sexpr-bool s)` | `Option<Sexpr>→bool` | `Bool` の中身。型違いは panic |
+| `sexpr-str` | `(sexpr-str s)` | `Option<Sexpr>→string` | `Str` の中身。型違いは panic |
+| `sexpr-sym-name` | `(sexpr-sym-name s)` | `Option<Sexpr>→string` | `Sym` の名前。型違いは panic |
+| `eq` `eql` | `(op a b)` | `(Option<Sexpr>,Option<Sexpr>)→bool` | 同一性比較（`Cons`/`Str` はポインタ、それ以外は値） |
 
 上の `sexpr-*` アクセサは Rust 組み込み。これらの上に、`Sexpr` リスト全体を扱う次の2つが
 `prelude.rs` に typelisp の `defun` として定義されている（`defmacro` の本体で引数の `Sexpr`
@@ -472,7 +483,7 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 上の 3 つの表と §6.1 の関数の多くは、CL のキーワード引数 `:key` / `:test` / `:test-not` /
 `:start` / `:end` / `:from-end` / `:count` も取る。どれがどれを取るかは **§6.3**。
 
-`(list e1 e2 ... en)` は特殊形（`(cons e1 (cons e2 (... (Nil))))` へ展開、[syntax.md](syntax.md) 参照）。
+`(list e1 e2 ... en)` は特殊形（`(cons e1 (cons e2 (... ())))` へ展開、[syntax.md](syntax.md) 参照）。
 `map` / `filter` 等が返す `Vector<T>` を再び回すには `(iter result)` を渡す。
 
 > **旧 API から削除された関数**（`docs/dev/symbol-sexpr-redesign.md` Phase 5 / 6.5）:
@@ -992,6 +1003,17 @@ CL にあってここに無いもの（cl-parity-plan.md Phase 4c に理由を�
 `:dyn CharOutput`・`(where (CharOutput S))` の型変数のいずれでも同じように書ける。
 `bool` でもストリームでもない `dest` は「destination は `true`/`false` か `CharOutput` を実装した
 ストリーム」という型エラーになる。
+
+**`Option<Sexpr>` は透過的に印字される。** S 式データの型が `Option<Sexpr>` になったため、
+`(some x)` の包みは印字に現れず、中身がそのまま出る。空リストは `()` と出る。
+これは `Option<Sexpr>` の実行時表現が `Sexpr` そのもの（空リストが `none`）だからで、
+他の `Option<T>` は従来どおり `(some ...)` / `(none)` と印字する。
+
+```lisp
+(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> ()))                  ; => ()
+(println "~a" (the Option<i64>   (Option::some 42)))   ; => (some 42)
+```
 
 **1 引数プリンタ**（CLHS 22.1.3）は書式展開ではなく、値ひとつをそのまま印字する。
 すべて prelude のマクロで、ストリームは省略可能（既定 `*standard-output*`）。

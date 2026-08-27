@@ -142,8 +142,8 @@ fn match_refines_char_and_bool_payloads() {
 }
 
 #[test]
-fn match_selects_the_nil_arm_for_the_empty_list() {
-    assert_eq!(eval_ok("(match (Nil) ((nil) 10) (_ 20))"), Value::Int(10));
+fn match_selects_the_none_arm_for_the_empty_list() {
+    assert_eq!(eval_ok("(match (the Option<Sexpr> ()) ((none) 10) (_ 20))"), Value::Int(10));
 }
 
 #[test]
@@ -158,15 +158,17 @@ fn match_dispatches_bignum_and_ratio_arms() {
 #[test]
 fn match_dispatches_a_runtime_chosen_variant() {
     let src = r#"
-        (defun tag ((s Sexpr)) i32
+        (defun tag ((s Option<Sexpr>)) i32
           (match s
-            ((nil) 0) ((int _) 1) ((float _) 2) ((char _) 3) ((bool _) 4)
+            ((none) 0) ((int _) 1) ((float _) 2) ((char _) 3) ((bool _) 4)
             ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((bignum _) 8) ((ratio _) 9)
             ((path _) 10)))
-        (+ (+ (tag (Int 1)) (* 10 (tag (Str "s")))) (* 100 (tag (sexpr-cons (Nil) (Nil)))))
+        (+ (+ (tag (Int 1)) (* 10 (tag (Str "s")))) (* 100 (tag (sexpr-cons () ()))))
     "#;
     // 1 + 60 + 700: int=1, str=6, cons=7 — and the eleven-armed match above
-    // is exhaustive without a wildcard, exercising full variant coverage.
+    // is exhaustive without a wildcard, exercising full variant coverage:
+    // the ten `Sexpr` variants plus `none`, written in one flat arm list
+    // (the `Option<Sexpr>` match sugar) rather than nested two deep.
     assert_eq!(eval_ok(src), Value::Int(761));
 }
 
@@ -214,7 +216,7 @@ fn match_nested_pattern_mismatch_falls_through_to_the_next_arm() {
     // nested (int a) fails and the second arm catches the same cons.
     assert_eq!(
         eval_ok(
-            "(match (sexpr-cons (Str \"car\") (Nil))
+            "(match (sexpr-cons (Str \"car\") ())
                ((cons (int a) _) a)
                ((cons (str _) _) -1)
                (_ 0))"
@@ -261,10 +263,10 @@ fn if_let_binds_a_sexpr_pattern() {
 #[test]
 fn while_let_loops_over_a_sexpr_condition() {
     let src = r#"
-        (let ((x (Int 3)) (acc (the i64 0)))
+        (let ((x (the Option<Sexpr> (Int 3))) (acc (the i64 0)))
           (while-let ((int n) x)
             (setf acc (+ acc n))
-            (setf x (if (> n 1) (Int (- n 1)) (Nil))))
+            (setf x (if (> n 1) (Int (- n 1)) (the Option<Sexpr> ()))))
           acc)
     "#;
     assert_eq!(eval_ok_with_prelude(src), Value::Int(6));
@@ -275,6 +277,54 @@ fn while_let_loops_over_a_sexpr_condition() {
 #[test]
 fn match_on_sexpr_without_full_coverage_is_a_type_error() {
     let err = check("(match (Int 1) ((int n) n))").expect_err("should be non-exhaustive");
+    let msg = format!("{:?}", err);
+    assert!(msg.contains("non-exhaustive"), "unexpected error: {}", msg);
+}
+
+// ---- the empty list as `Option<Sexpr>`'s `none` ------------------------------
+
+/// `car`/`cdr` of the empty list are the empty list, as in Common Lisp —
+/// they no longer panic.
+///
+/// This is a runtime property, not a typing one: `sexpr-car`/`sexpr-cdr`
+/// taking `Option<Sexpr>` only made the call *legal*. Both tiers had to
+/// learn the behavior separately (`Interp::call_builtin` and `rt_car`/
+/// `rt_cdr` in `typelisp-rt`), so a list walk cannot end differently
+/// depending on whether its caller was compiled.
+///
+/// Non-cons *atoms* stay an error — `(car 5)` is a type confusion, not the
+/// end of a list, and CL rejects it too.
+#[test]
+fn car_and_cdr_of_the_empty_list_are_the_empty_list() {
+    assert_eq!(
+        eval_ok("(sexpr-null (sexpr-car (the Option<Sexpr> ())))"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        eval_ok("(sexpr-null (sexpr-cdr (the Option<Sexpr> ())))"),
+        Value::Bool(true)
+    );
+    // And walking off the end of a real list lands there by the same rule.
+    assert_eq!(
+        eval_ok("(sexpr-null (sexpr-cdr (sexpr-cdr (quote (1)))))"),
+        Value::Bool(true)
+    );
+}
+
+/// The `Option<Sexpr>` match sugar writes `Sexpr` shapes and `none` as
+/// siblings in one arm list — and exhaustiveness is computed over that same
+/// flat universe, so omitting `none` is still an error. Without this, the
+/// sugar would silently turn a total `match` into a partial one.
+#[test]
+fn a_flat_match_on_an_option_sexpr_must_still_cover_none() {
+    let err = check(
+        "(defun tag ((s Option<Sexpr>)) i32
+           (match s
+             ((int _) 1) ((float _) 2) ((char _) 3) ((bool _) 4)
+             ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((bignum _) 8) ((ratio _) 9)
+             ((path _) 10)))",
+    )
+    .expect_err("should be non-exhaustive without a `none` arm");
     let msg = format!("{:?}", err);
     assert!(msg.contains("non-exhaustive"), "unexpected error: {}", msg);
 }

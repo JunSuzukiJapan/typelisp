@@ -27,7 +27,7 @@ pub const SOURCE: &str = r##"
 ;; `Checker::check_qq_template` desugars each splice to a `(sexpr-append
 ;; spliced rest)` call). First in this file because every macro below that
 ;; splices needs it already registered.
-(defun sexpr-append ((a Sexpr) (b Sexpr)) Sexpr
+(defun sexpr-append ((a Option<Sexpr>) (b Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-consp a)
       (sexpr-cons (sexpr-car a) (sexpr-append (sexpr-cdr a) b))
       b))
@@ -82,7 +82,7 @@ pub const SOURCE: &str = r##"
 ;; content, which is the departure `docs/dev/cl-equivalence-catalog.md` records
 ;; under eq/eql/equal/equalp. Defined before its caller because definitions are
 ;; checked in source order.
-(defun case-key-atom-test ((key-form Symbol) (key Sexpr)) Sexpr
+(defun case-key-atom-test ((key-form Symbol) (key Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-symp key)
       (list (quote equal) key-form (list (quote quote) key))
       (list (quote equal) key-form key)))
@@ -114,7 +114,7 @@ pub const SOURCE: &str = r##"
 ;;
 ;; Iterates with `loop`/`break`/`setf` rather than `while`: `while` and `not`
 ;; are prelude definitions, and this layer loads before the prelude.
-(defun case-key-test ((key-form Symbol) (key Sexpr)) Sexpr
+(defun case-key-test ((key-form Symbol) (key Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-consp key)
       (if (if (sexpr-symp (sexpr-car key)) (equal (sexpr-sym-name (sexpr-car key)) "quote") false)
           (panic "case: a quoted key is not a key list -- write the bare symbol, not 'sym")

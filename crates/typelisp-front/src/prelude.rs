@@ -256,17 +256,21 @@ pub const SOURCE: &str = r##"
 ;; `var`'s scope (CL binds `var` to nil there), which is cleaner here since a
 ;; result form references an accumulator, never the exhausted `var`. An
 ;; improper/dotted list stops at the first non-`cons` cdr (the `sexpr-consp`
-;; guard), never erroring. The absent-`result-form` default is spelled `(Nil)`
-;; (a `Sexpr`), not `()`: this macro body itself type-checks, and the `if`'s
-;; other branch (`sexpr-car`) is `Sexpr`, so a bare `()` there would be `Unit`
-;; and mismatch — the spliced `(Nil)` still surfaces as `()`/`Unit` in the
-;; final `let`'s tail position (the same two-faced `()` `when`/`unless` use).
+;; guard), never erroring. The absent-`result-form` default is a bare `()`,
+;; which is the empty list here: the `if`'s other branch (`sexpr-car`) is
+;; `Option<Sexpr>`, so `()` denotes that type's `none` rather than `Unit`.
+;; The `the` is what supplies that expectation: an `if` checks its branches
+;; in order, so the bare `()` would otherwise settle as `Unit` before the
+;; other branch is ever looked at.
+;; It used to have to be spelled `(Nil)` for exactly the reason that no
+;; longer holds — `Sexpr` carried the empty list, `()` did not, and the two
+;; branches would not agree.
 (defmacro dolist (spec &rest body)
   (let ((var (sexpr-car spec))
         (list-expr (sexpr-car (sexpr-cdr spec)))
         (rest-spec (sexpr-cdr (sexpr-cdr spec)))
         (cursor (gensym)))
-    (let ((result (if (sexpr-null rest-spec) (Nil) (sexpr-car rest-spec))))
+    (let ((result (if (sexpr-null rest-spec) (the Option<Sexpr> ()) (sexpr-car rest-spec))))
       `(let ((,cursor ,list-expr))
          (while (sexpr-consp ,cursor)
            (let ((,var (sexpr-car ,cursor))) ,@body)
@@ -867,7 +871,7 @@ pub const SOURCE: &str = r##"
 ;; `map` is now the generic `Iter` combinator further down (an iterator, not a
 ;; `Sexpr`, so it cannot walk a macro's argument list). Macro authors doing
 ;; the same should likewise reach for `sexpr-*` (see the redesign doc §7).
-(defun sexpr-map ((f (fn (Sexpr) Sexpr)) (lst Sexpr)) Sexpr
+(defun sexpr-map ((f (fn (Option<Sexpr>) Option<Sexpr>)) (lst Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-consp lst)
       (sexpr-cons (f (sexpr-car lst)) (sexpr-map f (sexpr-cdr lst)))
       ()))
@@ -925,13 +929,13 @@ pub const SOURCE: &str = r##"
 (defmacro do (bindings test-result &rest body)
   (let ((test (sexpr-car test-result))
         (result (sexpr-cdr test-result))
-        (temps (sexpr-map (lambda ((b Sexpr)) Sexpr (list (gensym) (sexpr-car b) (sexpr-car (sexpr-cdr (sexpr-cdr b)))))
+        (temps (sexpr-map (lambda ((b Option<Sexpr>)) Option<Sexpr> (list (gensym) (sexpr-car b) (sexpr-car (sexpr-cdr (sexpr-cdr b)))))
                      bindings)))
-    `(let ,(sexpr-map (lambda ((b Sexpr)) Sexpr (list (sexpr-car b) (sexpr-car (sexpr-cdr b)))) bindings)
+    `(let ,(sexpr-map (lambda ((b Option<Sexpr>)) Option<Sexpr> (list (sexpr-car b) (sexpr-car (sexpr-cdr b)))) bindings)
        (while (not ,test)
          ,@body
-         (let ,(sexpr-map (lambda ((tr Sexpr)) Sexpr (list (sexpr-car tr) (sexpr-car (sexpr-cdr (sexpr-cdr tr))))) temps)
-           ,@(sexpr-map (lambda ((tr Sexpr)) Sexpr (list (quote setf) (sexpr-car (sexpr-cdr tr)) (sexpr-car tr))) temps)))
+         (let ,(sexpr-map (lambda ((tr Option<Sexpr>)) Option<Sexpr> (list (sexpr-car tr) (sexpr-car (sexpr-cdr (sexpr-cdr tr))))) temps)
+           ,@(sexpr-map (lambda ((tr Option<Sexpr>)) Option<Sexpr> (list (quote setf) (sexpr-car (sexpr-cdr tr)) (sexpr-car tr))) temps)))
        ,@result)))
 
 ;; `Iter`: the trait `doiter` requires every iterable type to implement — a single
@@ -1497,7 +1501,10 @@ user-visible capacity."
 ;; variant pattern, which destructures to a `string` and compares *that* by
 ;; content — is the spelling for those, and `docs/syntax.md`'s `match`
 ;; section says so.
-(impl Eq sexpr  (equals ((self Self) (other Self)) bool (eq self other)))
+;; `Self` here is `Sexpr` — the *non-empty* S-expression — while `eq` takes
+;; `Option<Sexpr>`, the type an S-expression datum has. Wrapping is what
+;; bridges the two, and it is free: under the niche `(Option::some x)` is `x`.
+(impl Eq sexpr  (equals ((self Self) (other Self)) bool (eq (Option::some self) (Option::some other))))
 
 ;; Scalar `Ord` impls — only the core `less`; the other three come from `Ord`'s
 ;; default bodies. Every scalar here has the overloaded `<` builtin (numbers
@@ -2757,10 +2764,10 @@ user-visible capacity."
    binding and in-order stepping."
   (let ((test (sexpr-car test-result))
         (result (sexpr-cdr test-result)))
-    `(let* ,(sexpr-map (lambda ((b Sexpr)) Sexpr (list (sexpr-car b) (sexpr-car (sexpr-cdr b)))) bindings)
+    `(let* ,(sexpr-map (lambda ((b Option<Sexpr>)) Option<Sexpr> (list (sexpr-car b) (sexpr-car (sexpr-cdr b)))) bindings)
        (while (not ,test)
          ,@body
-         ,@(sexpr-map (lambda ((b Sexpr)) Sexpr
+         ,@(sexpr-map (lambda ((b Option<Sexpr>)) Option<Sexpr>
                         (list (quote setf) (sexpr-car b) (sexpr-car (sexpr-cdr (sexpr-cdr b)))))
                       bindings))
        ,@result)))
@@ -4108,7 +4115,7 @@ user-visible capacity."
 (pub defenum ReadOutcome
   "What one `read-sexpr` produced: a datum, or nothing because the input ended."
   (eof)
-  (datum Sexpr))
+  (datum Option<Sexpr>))
 
 (pub defun read-sexpr-preserving-whitespace<S> ((s S)) Result<ReadOutcome, ReadError> (where (PeekInput S))
   "Read one datum from `s`, leaving everything after it untouched -- CL's
@@ -4158,20 +4165,20 @@ user-visible capacity."
 ;;
 ;; `read` (the builtin) is the same read without the index: CL's
 ;; `read-from-string` used for its first value only, which is the common case.
-(pub defun read-from-string ((s string) &optional (start i64 0)) Result<cons-cell<Sexpr, i64>, ReadError>
+(pub defun read-from-string ((s string) &optional (start i64 0)) Result<cons-cell<Option<Sexpr>, i64>, ReadError>
   "One datum from `s` beginning at character index `start`, paired with the
    index reading stopped at. Consumes the whitespace character that ended the
    datum, as CL's `read-from-string` does."
   (read-datum-at s start false))
 
 (pub defun read-from-string-preserving-whitespace ((s string) &optional (start i64 0))
-    Result<cons-cell<Sexpr, i64>, ReadError>
+    Result<cons-cell<Option<Sexpr>, i64>, ReadError>
   "`read-from-string` without consuming the whitespace that ended the datum --
    CL's `read-from-string` with `:preserve-whitespace t`. The difference shows
    in the returned index, and so in what the next read sees."
   (read-datum-at s start true))
 
-(defun sexpr-list-from ((v Vector<Sexpr>)) Sexpr
+(defun sexpr-list-from ((v Vector<Option<Sexpr>>)) Option<Sexpr>
   "The elements of `v` as a list, front to back."
   (let ((out (quote ())) (i (- (len v) 1)))
     (progn
@@ -4186,10 +4193,10 @@ user-visible capacity."
 ;; CL's third argument (`recursive-p`) has nothing to correspond to here: it
 ;; exists to tell CL's reader that the call is inside a reader macro, and
 ;; there are no reader macros (cl-parity-plan.md Phase 8c).
-(pub defun read-delimited-list<S> ((terminator char) (s S)) Result<Sexpr, ReadError> (where (PeekInput S))
+(pub defun read-delimited-list<S> ((terminator char) (s S)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
   "Every datum on `s` up to `terminator`, as a list. The terminator is
    consumed; reaching end of input first is an `Err`."
-  (let ((acc (the Vector<Sexpr> (Vector::new))) (failed (the Option<ReadError> (option::none))) (going true))
+  (let ((acc (the Vector<Option<Sexpr>> (Vector::new))) (failed (the Option<ReadError> (option::none))) (going true))
     (progn
       (while going
         (progn
