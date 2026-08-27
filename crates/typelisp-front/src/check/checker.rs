@@ -8647,7 +8647,17 @@ impl Checker {
                     let form = forms::dyn_value_form(heap, typed.form)?;
                     return Ok(Checked::new(form, e.clone()));
                 }
-                if is_sexpr_expectation(e) && self.is_heap_repr(&typed.ty) {
+                // `Option<Sexpr>` is excluded: it *is* heap-repr by
+                // `is_heap_repr`'s reckoning (an `option` is a `Sum` with
+                // variants), so without this guard the retype above would
+                // fire on it and hand a bare `Sexpr` expectation a value
+                // that may be the empty list — a narrowing, wearing a
+                // widening's clothes. It type-checked and then fell over at
+                // runtime: an exhaustive ten-arm `match` on the resulting
+                // `Sexpr` found no arm to take, because the empty list is
+                // not one of `Sexpr`'s shapes. Narrowing is what `match`
+                // and `unwrap` are for.
+                if is_sexpr_expectation(e) && self.is_heap_repr(&typed.ty) && !is_option_of_sexpr(&typed.ty) {
                     return Ok(Checked::new(typed.form, e.clone()));
                 }
                 // A scalar (`i32`/`f64`/`bignum`/`ratio`/`char`/`bool`/`Str`)
@@ -8916,11 +8926,14 @@ impl Checker {
             Box::new(ret.clone()),
         );
         // The body additionally sees the `&rest` parameter (if any) bound to
-        // a plain `Sexpr` list — see `Self::check_defun`'s identical treatment.
+        // a plain S-expression list — see `Self::check_defun`'s identical
+        // treatment. `Option<Sexpr>`, like every other list here: the empty
+        // list is what a `&rest` binds when no variadic argument was passed,
+        // so a bare `Sexpr` could not even spell the common case.
         let mut params = params;
         let mut param_locs = param_locs;
         if let Some((rname, _, rloc)) = rest {
-            params.push((rname, sexpr_ty()));
+            params.push((rname, option_of_sexpr()));
             param_locs.push(rloc);
         }
         let binds: Vec<(String, Type, Option<Loc>)> =
@@ -9124,7 +9137,7 @@ impl Checker {
             typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i + 1))?);
         }
         let list_loc = nth_loc(arg_locs, args.len() - 1);
-        typed.push(self.check_at(heap, interp, env, list_arg[0], Some(&sexpr_ty()), list_loc)?);
+        typed.push(self.check_at(heap, interp, env, list_arg[0], Some(&option_of_sexpr()), list_loc)?);
         let form = self.apply_form(heap, callee.form, &ret, &typed)?;
         Ok(Checked::new(form, ret))
     }
@@ -11818,7 +11831,7 @@ impl Checker {
         // source, so nothing else roots them — this scope does, for as long as
         // the body checking that can collect them is still running.
         let mut s = RootScope::new(heap);
-        let obj = self.check_at(&mut s, interp, env, obj_form, Some(&sexpr_ty()), nth_loc(arg_locs, 0))?;
+        let obj = self.check_at(&mut s, interp, env, obj_form, Some(&option_of_sexpr()), nth_loc(arg_locs, 0))?;
         let empty = forms::str_lit_form(&mut s, "")?;
         s.push_root(empty);
         let mut prefix = Checked::new(empty, Type::Str);

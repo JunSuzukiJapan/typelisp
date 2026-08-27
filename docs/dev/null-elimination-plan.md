@@ -334,3 +334,54 @@ prelude も島も docs も同じコミットで緑にするしかない。以下
 
 **チェッカーを変えたらダンプを手で再生成する**。ダンプの番人はソースのハッシュしか
 見ていないので、チェッカーの変更ではハッシュが変わらないまま中身が古くなる。
+
+### 段階 3 補遺 — 静的検査が実は効いていなかった【2026-08-28】
+
+上の段階 3 の記録に**誤りがあった**ので訂正する。「逆向き（`Option<Sexpr>` →
+`Sexpr` の縮小）は型エラーのまま」と書いたが、**型エラーになっていなかった**。
+
+```lisp
+(defun takes-sexpr ((s Sexpr)) i64 1)
+(takes-sexpr (the Option<Sexpr> ()))   ; 通ってしまっていた
+```
+
+原因は既存の widening である。`Option<Sexpr>` は `AdtKind::Sum` なので
+`is_heap_repr` が真を返し、「ユーザ ADT を `Sexpr` データに入れる」ための retype が
+空リストにも適用されていた。widening の衣を着た narrowing である。
+
+**型安全性が破れていた。** 空リストが裸の `Sexpr` に届いた結果:
+
+```lisp
+(defun tag ((s Sexpr)) i64
+  (match s ((int _) 1) ... ((path _) 10)))   ; 10 変種、網羅的、catchall 無し
+(tag (the Option<Sexpr> ()))
+;; => internal error: eval: no matching match arm
+```
+
+**チェッカーが網羅的だと証明した `match` が実行時に腕を使い果たした。** null が
+「来ないはず」の場所に届くという、この移行が消すはずだったもの、そのものである。
+
+`is_heap_repr` の retype から `Option<Sexpr>` を除外して修正。番人は
+`tests/check_test.rs` の `an_option_sexpr_does_not_narrow_to_a_bare_sexpr`
+（拡大が通ること・縮小が落ちること・ユーザ ADT の拡大が壊れていないこと の 3 つ）。
+
+**教訓**: 段階 3 の移行が「機械変換 258・手直し 0」で済んだのは、方針の裏面である
+以上に**この穴のせい**でもあった。移行が楽すぎるときは、型が仕事をしていない可能性を
+先に疑うべきだった。「呼び出し側が 1 箇所も型エラーにならない」を設計の帰結として
+説明し、それ以上調べなかったのが誤り。
+
+**同時に見つかった移行漏れ 3 件**（縮小を塞いだ結果ではなく、裸の `Sexpr` を要求する
+表面を数え上げて見つけた）:
+
+| 箇所 | 症状 |
+|---|---|
+| `lambda` の `&rest` | 裸の `Sexpr` に束縛。`defun` の `&rest` は `Option<Sexpr>` で、コメントは「同一の扱い」と主張していた |
+| `apply` の末尾リスト引数 | 同上 |
+| `pprint-logical-block` の `obj` | **壊れていた**。docs が「何も反復しないブロックには `()`」と言う、その `()` が型エラー |
+
+数え上げの結果（裸の `Sexpr` が残る箇所）:
+
+- `registry.rs` の組み込みシグネチャ: **0**（`sexpr()` 36 箇所すべて `option_of` 包み）
+- prelude / `core_macros` / 島 `compiler.rs` の typelisp コード: **0**（すべてコメント内）
+- 唯一の例外は prelude の `(impl Eq sexpr ...)`——トレイト実装の対象型なので `Self` が
+  `Sexpr` になる。避けられない

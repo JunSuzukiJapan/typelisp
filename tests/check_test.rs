@@ -121,6 +121,14 @@ fn ret_of(src: &str, name: &str) -> Type {
 }
 
 /// The synthesized type of a single expression form.
+/// `Option<Sexpr>` — the type an S-expression datum has since the empty list
+/// became `Option`'s `none` rather than a `Sexpr` variant. Bare `Sexpr` still
+/// exists and means *non-empty*, so the two are not interchangeable in either
+/// direction here: these tests assert which one a form actually produces.
+fn opt_sexpr() -> Type {
+    Type::Named(Path::root("option"), vec![Type::Named(Path::root("sexpr"), vec![])])
+}
+
 fn ty(src: &str) -> Type {
     let c = form(src).expect("check failed");
     c.ty.unwrap_or_else(|| panic!("expected expression, got a `{}` form", c.tag))
@@ -181,10 +189,7 @@ fn symbol_string_bridges_are_typed() {
 fn symbol_is_accepted_where_sexpr_expected() {
     // A `Symbol` is a valid `Sexpr` datum, so it flows into a `list`/`sexpr-cons`
     // code position (the checker wraps it into `Sexpr::Sym`).
-    assert_eq!(
-        ty_with_prelude("(sexpr-cons (gensym) (Nil))"),
-        Type::Named(Path::root("sexpr"), vec![])
-    );
+    assert_eq!(ty_with_prelude("(sexpr-cons (gensym) ())"), opt_sexpr());
 }
 
 // ---- if ---------------------------------------------------------------------
@@ -261,25 +266,64 @@ fn construct_some_infers_type_argument() {
 }
 
 #[test]
-fn sexpr_cons_yields_sexpr() {
-    // `(sexpr-cons (Int 1) ())`: car and cdr are both Sexpr; `()` adopts `Nil`.
-    // (The free `cons`/`Cons` name is the generic `cons<T,U>` pair now — the
-    // Sexpr cons cell is built through the `sexpr-*` layer — Phase 4b.)
-    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
-    assert_eq!(ty("(sexpr-cons (Int 1) ())"), sexpr);
+fn sexpr_cons_yields_an_option_sexpr() {
+    // `(sexpr-cons (Int 1) ())`: both slots are `Option<Sexpr>`, and `()`
+    // adopts `none` there. (The free `cons`/`Cons` name is the generic
+    // `cons<T,U>` pair now — the Sexpr cons cell is built through the
+    // `sexpr-*` layer — Phase 4b.)
+    assert_eq!(ty("(sexpr-cons (Int 1) ())"), opt_sexpr());
 }
 
 #[test]
-fn nil_constructs_sexpr() {
-    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
-    assert_eq!(ty("(Nil)"), sexpr);
+fn nil_is_no_longer_a_sexpr_constructor() {
+    // The empty list moved out of `Sexpr` and into `Option<Sexpr>`'s `none`.
+    // `nil`'s variant slot is kept reserved rather than reused (so the IR's
+    // variant numbering is untouched), which means `(Nil)` would otherwise
+    // still *resolve* — hence an explicit gate with a migration message
+    // rather than an "unknown constructor" error.
+    let err = program("(Nil)").expect_err("`nil` should be retired");
+    let msg = format!("{:?}", err);
+    assert!(msg.contains("no longer a `Sexpr` constructor"), "unexpected error: {}", msg);
+}
+
+/// `Sexpr` widens into `Option<Sexpr>`; `Option<Sexpr>` does *not* narrow
+/// into `Sexpr`.
+///
+/// The widening is free — the niche gives the two types the same bits, and a
+/// `Sexpr` is by construction never the empty-list word. The narrowing is the
+/// claim "this is not the empty list", and only a `match` or `unwrap` can
+/// discharge it.
+///
+/// This asymmetry is the whole static-checking yield of moving the empty list
+/// out of `Sexpr`, and it was silently absent at first: `Option<Sexpr>` is
+/// `is_heap_repr` (an `option` is a `Sum` with variants), so the retype meant
+/// for "store a user ADT in a `Sexpr` slot" claimed it too. The empty list
+/// then reached a bare `Sexpr`, and a *ten-arm exhaustive* `match` on it fell
+/// off the end at runtime — the checker having proved it could not.
+#[test]
+fn an_option_sexpr_does_not_narrow_to_a_bare_sexpr() {
+    // Widening: fine, and free.
+    assert!(program("(defun f ((s Option<Sexpr>)) i64 1) (f (Int 1))").is_ok());
+    // Narrowing: rejected.
+    let err = program("(defun f ((s Sexpr)) i64 1) (f (the Option<Sexpr> ()))")
+        .expect_err("narrowing should be rejected");
+    let msg = format!("{:?}", err);
+    assert!(msg.contains("type mismatch"), "unexpected error: {}", msg);
+    // A user ADT still widens into an S-expression slot — the rule this
+    // exclusion is carved out of must stay intact.
+    assert!(program(
+        "(defstruct point (x i64)) (defun f ((s Option<Sexpr>)) i64 1) (f (point::new 1))"
+    )
+    .is_ok());
 }
 
 #[test]
-fn empty_list_as_sexpr_is_nil() {
-    // `()` adopts `Sexpr::Nil` when a Sexpr is expected, just like it adopts
-    // `Option::None` when an Option<T> is expected.
-    assert_eq!(ty("(sexpr-cons () ())"), ty("(sexpr-cons (Nil) (Nil))"));
+fn the_empty_list_is_an_option_sexpr_none() {
+    // `()` adopts `none` where an S-expression is expected — which is now the
+    // same rule as "`()` adopts `Option::None` when an `Option<T>` is
+    // expected", not a second special case beside it.
+    assert_eq!(ty("(sexpr-cons () ())"), opt_sexpr());
+    assert_eq!(ty("(the Option<Sexpr> ())"), opt_sexpr());
 }
 
 #[test]
@@ -538,13 +582,23 @@ fn lambda_rest_has_a_variadic_function_type() {
 }
 
 #[test]
-fn rest_param_is_seen_as_a_sexpr_inside_the_body() {
-    // `sexpr-car` only accepts a `Sexpr` argument — type-checking succeeds,
-    // proving `xs` is bound to plain `Sexpr` (an ordinary Lisp list) inside
-    // the body, not some homogeneous array type.
+fn rest_param_is_seen_as_a_sexpr_list_inside_the_body() {
+    // `sexpr-car` only accepts an S-expression argument — type-checking
+    // succeeds, proving `xs` is bound to an ordinary Lisp list inside the
+    // body, not some homogeneous array type. `Option<Sexpr>` specifically:
+    // a `&rest` that collected nothing *is* the empty list, which bare
+    // `Sexpr` cannot spell.
     assert_eq!(
-        form("(defun f ((a i32) &rest (xs i32)) Sexpr (sexpr-car xs))").expect("check failed").tag,
+        form("(defun f ((a i32) &rest (xs i32)) Option<Sexpr> (sexpr-car xs))")
+            .expect("check failed")
+            .tag,
         "defun"
+    );
+    // `lambda`'s `&rest` binds the same type as `defun`'s — they drifted
+    // apart once during the migration, which no test then caught.
+    assert_eq!(
+        ty("((lambda ((a i32) &rest (xs i32)) Option<Sexpr> (sexpr-car xs)) 1 2)"),
+        opt_sexpr()
     );
 }
 
@@ -630,10 +684,9 @@ fn apply_auto_wraps_a_scalar_rest_list_argument_into_sexpr() {
 // ---- cons / car / cdr / list / dolist ----------------------------------------
 
 #[test]
-fn sexpr_car_and_cdr_yield_sexpr() {
-    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
-    assert_eq!(ty("(sexpr-car (sexpr-cons (Int 1) (Nil)))"), sexpr.clone());
-    assert_eq!(ty("(sexpr-cdr (sexpr-cons (Int 1) (Nil)))"), sexpr);
+fn sexpr_car_and_cdr_yield_an_option_sexpr() {
+    assert_eq!(ty("(sexpr-car (sexpr-cons (Int 1) ()))"), opt_sexpr());
+    assert_eq!(ty("(sexpr-cdr (sexpr-cons (Int 1) ()))"), opt_sexpr());
 }
 
 #[test]
@@ -644,23 +697,23 @@ fn sexpr_car_auto_wraps_a_scalar_argument_into_sexpr() {
     // "must be a `Cons`" requirement is still enforced, just at *runtime*
     // now (a `Sexpr::Int` isn't a cons) — the same CL-conformant shift
     // `apply_auto_wraps_a_scalar_rest_list_argument_into_sexpr` documents.
-    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
-    assert_eq!(ty("(sexpr-car 1)"), sexpr);
+    assert_eq!(ty("(sexpr-car 1)"), opt_sexpr());
 }
 
 #[test]
 fn sexpr_cons_usable_as_function_value() {
-    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
-    let src = "(defun apply2 ((f (fn (Sexpr Sexpr) Sexpr)) (a Sexpr) (b Sexpr)) Sexpr (f a b)) \
-               (apply2 sexpr-cons (Int 1) (Nil))";
-    assert_eq!(ty_program(src), sexpr);
+    let src = "(defun apply2 ((f (fn (Option<Sexpr> Option<Sexpr>) Option<Sexpr>)) \
+                              (a Option<Sexpr>) (b Option<Sexpr>)) Option<Sexpr> (f a b)) \
+               (apply2 sexpr-cons (Int 1) ())";
+    assert_eq!(ty_program(src), opt_sexpr());
 }
 
 #[test]
 fn list_builds_sexpr_cons_chain() {
-    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
-    assert_eq!(ty("(list (Int 1) (Int 2))"), sexpr.clone());
-    assert_eq!(ty("(list)"), sexpr);
+    assert_eq!(ty("(list (Int 1) (Int 2))"), opt_sexpr());
+    // `(list)` is the empty list, so its type has to be the one that can
+    // hold it.
+    assert_eq!(ty("(list)"), opt_sexpr());
 }
 
 #[test]
@@ -672,8 +725,7 @@ fn list_elements_are_auto_wrapped_into_sexpr() {
     // `Sexpr` encoding (`i32`/`i64`/`f64`/.../`Str`) now auto-wraps through
     // its constructor there — `(list 1 2)` mirrors CL's `(list 1 2)`
     // instead of demanding the caller pre-wrap every element by hand.
-    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
-    assert_eq!(ty("(list 1 2)"), sexpr);
+    assert_eq!(ty("(list 1 2)"), opt_sexpr());
 }
 
 // `dolist` (iterating a `Sexpr` list) was removed — Symbol/Sexpr redesign
