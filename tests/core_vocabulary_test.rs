@@ -289,6 +289,9 @@ fn patterns() {
         // The empty list. Its own node rather than `Sexpr`'s variant 0:
         // the empty list outlives `nil` (docs/dev/null-elimination-plan.md).
         "(match (var v) sexpr ((pat-empty) (int 0)) ((pat-wild) (int 1)))",
+        // `Option<Sexpr>`'s `(some P)`: reject the empty list, then match
+        // `P` against the same word (the niche makes them one value).
+        "(match (var v) sexpr ((pat-nonempty (pat-bind x)) (var x)) ((pat-empty) (int 0)))",
         "(match (var v) int ((pat-bind x) (var x)))",
         "(match (var v) sexpr ((pat-lit (int 1)) (int 10)) ((pat-wild) (int 0)))",
         // A value pattern: the test is an ordinary expression — here the
@@ -305,6 +308,7 @@ fn patterns() {
     all_round_trip(&[
         "(pat-wild)",
         "(pat-empty)",
+        "(pat-nonempty (pat-bind x))",
         "(pat-bind x)",
         "(pat-lit (int 1))",
         "(pat-guard $match-scrut (bool true))",
@@ -410,6 +414,7 @@ const EXPR_ONLY: &[&str] = &[
     "method",
     "pat-wild",
     "pat-empty",
+    "pat-nonempty",
     "pat-bind",
     "pat-lit",
     "pat-guard",

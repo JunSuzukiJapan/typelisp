@@ -550,6 +550,12 @@ const SPECIALIZATION_BUDGET: usize = 512;
 /// produce it, and the checker interns it directly.
 const MATCH_SCRUT: &str = "$match-scrut";
 
+/// `Option`'s variant indices (`check::registry::option_def`). Written down
+/// once because three places already depend on the order — `()`'s inference
+/// rule, the niche pattern shapes, and `check_construct`'s `None` shortcut.
+const OPTION_SOME: usize = 0;
+const OPTION_NONE: usize = 1;
+
 /// How deep a blanket impl's own bounds may be chased before the search is
 /// declared non-terminating (`impl<T> A T (where (B T))` together with
 /// `impl<T> B T (where (A T))` would recur forever). Small on purpose:
@@ -1339,6 +1345,18 @@ impl Checker {
                 // siblings make.
                 let sym = heap.intern_symbol(name);
                 core::tagged(heap, "pat-guard", &[sym, *form])?
+            }
+            // `Option<Sexpr>`'s two shapes (`check_ctor_pattern_fields`).
+            // `some` needs no test of its own: under the niche the unwrapped
+            // value *is* the same word, and every `Sexpr` variant test
+            // already excludes the empty-list immediate — so a `(some (int
+            // n))` arm is the `int` test alone. `pat-nonempty` exists for the
+            // case where the sub-pattern tests nothing (`(some x)`), which
+            // must still reject the empty list.
+            Pattern::Empty => core::tagged(heap, "pat-empty", &[])?,
+            Pattern::NonEmpty(sub) => {
+                let inner = self.pattern_form(heap, sub)?;
+                core::tagged(heap, "pat-nonempty", &[inner])?
             }
             // The empty list is its own pattern node, not `Sexpr`'s variant 0.
             // Today the two are the same test; they stop being the same when
@@ -8464,7 +8482,7 @@ impl Checker {
                         // regardless of `use` status, so this bypasses
                         // `resolve_ctor` and goes straight to the known
                         // builtin path/variant index.
-                        return self.check_construct(heap, interp, env, (&Path::root("option"), 1), &[], &[], expected);
+                        return self.check_construct(heap, interp, env, (&Path::root("option"), OPTION_NONE), &[], &[], expected);
                     }
                     // `nil` stays a bare-resolvable name (`Sexpr` is exempt
                     // from the use-gated constructor visibility rule), so
@@ -12444,6 +12462,28 @@ impl Checker {
         // later field's `unify` can be what determines an earlier one's type
         // parameter, so only the finished `subst` is complete.
         let field_tys: Vec<Type> = fields.iter().map(|f| subst_apply(f, &subst)).collect();
+        // `Option<Sexpr>` is niche-represented (`check/repr.rs`), so neither
+        // of its constructors builds a box: `some v` *is* `v`, and `none` is
+        // the empty-list immediate. The pattern side reads the same encoding
+        // (`Pattern::Empty`/`Pattern::NonEmpty`), and the two must agree —
+        // a boxed `none` would sail past `pat-empty`'s word comparison and
+        // be taken for a `some`.
+        //
+        // Here is where the instantiation is known, the same reason
+        // `field_tys` is computed here rather than at the definition.
+        if crate::types::path_is_builtin(adt_name, "option")
+            && matches!(result_args.first(), Some(Type::Named(a, _)) if *a == Path::root("sexpr"))
+        {
+            let form = match variant {
+                // `(some v)` lowers to `v`'s own already-checked form.
+                OPTION_SOME => arg_forms[0],
+                // `(none)` is the empty list, which the core IR still spells
+                // as `sexpr`'s variant 0 — see the null-elimination plan's
+                // "変種番号は詰めない".
+                _ => self.construct_form(heap, &Path::root("sexpr"), 0, false, &[], &[])?,
+            };
+            return Ok(Checked::new(forms::rooted(heap, form), Type::Named(adt_name.clone(), result_args)));
+        }
         let form = self.construct_form(heap, adt_name, variant, mutable, &field_tys, &arg_forms)?;
         Ok(Checked::new(forms::rooted(heap, form), Type::Named(adt_name.clone(), result_args)))
     }
@@ -12578,6 +12618,23 @@ impl Checker {
                 // one in a single guard.
                 Pattern::Ctor { type_name, variant, .. } if Some(type_name) == adt_name.as_ref() => {
                     covered.insert(*variant);
+                }
+                // `Option<Sexpr>`'s two niche shapes, which
+                // `check_ctor_pattern_fields` produced in place of an
+                // `option` ctor pattern. They cover `option`'s own variants,
+                // so exhaustiveness counts them as such — otherwise a
+                // complete `((some x) ..) ((none) ..)` would be rejected.
+                Pattern::Empty if adt_name.as_ref().map(|p| crate::types::path_is_builtin(p, "option")) == Some(true) => {
+                    covered.insert(OPTION_NONE);
+                }
+                // `(some P)` covers `some` only when `P` itself matches
+                // anything; `(some (int n))` leaves other `Sexpr` shapes
+                // uncovered, exactly as a nested ctor pattern would.
+                Pattern::NonEmpty(sub)
+                    if matches!(**sub, Pattern::Wildcard | Pattern::Bind(..))
+                        && adt_name.as_ref().map(|p| crate::types::path_is_builtin(p, "option")) == Some(true) =>
+                {
+                    covered.insert(OPTION_SOME);
                 }
                 Pattern::Wildcard | Pattern::Bind(..) => catchall = true,
                 _ => {}
@@ -13036,6 +13093,30 @@ impl Checker {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("pattern: constructor must be a symbol".into())),
         };
+
+        // An `Option<Sexpr>` scrutinee accepts `Sexpr`'s own constructors
+        // directly, as if the `some` had already been peeled: `(int n)` and
+        // `(none)` sit in one arm list. Without this a caller would have to
+        // nest — `((some x) (match x ((int n) ..) ..)) ((none) ..)` — which
+        // is a plain regression against the single-level `match` that
+        // `Sexpr` (with its own `nil`) allows today.
+        //
+        // Exactly `Option<sexpr>`, matching the niche's own rule
+        // (`check/repr.rs`): in an `Option<Option<Sexpr>>` an `(int n)` arm
+        // could not say which level it peeled.
+        //
+        // The `some` needs no test of its own here. Under the niche the
+        // unwrapped value is the same word, and every `Sexpr` variant test
+        // already rejects the empty-list immediate, so re-checking the
+        // pattern against `Sexpr` produces the right code as it stands.
+        if is_option_of_sexpr(expected) {
+            const BUILTIN_SEXPR_CTORS: &[&str] =
+                &["nil", "int", "float", "char", "bool", "sym", "str", "cons", "bignum", "ratio", "path"];
+            if BUILTIN_SEXPR_CTORS.contains(&ctor.as_str()) {
+                return self.check_ctor_pattern(heap, interp, env, &sexpr_ty(), v);
+            }
+        }
+
         // The constructor is resolved against the scrutinee's type (its
         // variants), not the namespace — the type context disambiguates it.
         let (adt_name, targs) = self.expect_adt(expected)?;
@@ -13178,7 +13259,7 @@ impl Checker {
                 parts.len() - 1
             )));
         }
-        let mut sub_pats = Vec::new();
+        let mut sub_pats: Vec<Pattern> = Vec::new();
         let mut binds = Vec::new();
         let mut field_types = Vec::new();
         for ((sub, sub_loc), field) in parts_locs[1..].iter().zip(fields.iter()) {
@@ -13190,6 +13271,24 @@ impl Checker {
             let (p, b) = self.check_pattern(heap, interp, env, &field_ty, *sub, sub_loc.clone())?;
             sub_pats.push(p);
             binds.extend(b);
+        }
+        // `Option<Sexpr>` is niche-represented (`check/repr.rs`): `none` is
+        // the empty-list immediate and `some v` is `v` itself. Here — and
+        // only here — both the ADT and its type arguments are known, so this
+        // is where that instantiation becomes a pattern shape of its own
+        // rather than a ctor pattern nothing downstream could classify.
+        if !downcast && crate::types::path_is_builtin(&adt_name, "option") && targs.len() == 1 {
+            if let Type::Named(a, _) = &targs[0] {
+                if *a == Path::root("sexpr") {
+                    return Ok((
+                        match variant {
+                            OPTION_SOME => Pattern::NonEmpty(Box::new(sub_pats.remove(0))),
+                            _ => Pattern::Empty,
+                        },
+                        binds,
+                    ));
+                }
+            }
         }
         Ok((Pattern::Ctor { type_name: adt_name, variant, args: sub_pats, field_types, downcast }, binds))
     }
@@ -13493,6 +13592,22 @@ fn has_open_hole(t: &Type) -> bool {
 /// declared element type before it's wrapped into the list.
 fn sexpr_ty() -> Type {
     Type::Named(Path::root("sexpr"), vec![])
+}
+
+/// Is `ty` exactly `Option<Sexpr>` — the type the empty list's niche belongs
+/// to (`check/repr.rs`)?
+///
+/// One predicate because three decisions have to agree on the same boundary:
+/// how the value is represented, how its constructors lower, and which
+/// patterns a `match` on it accepts. Were any of them drawn wider — around
+/// "an `Option` whose payload *represents* like a `Sexpr`", which
+/// `Option<Option<Sexpr>>` does — the outer level would claim the same
+/// empty-list word as the inner one and the two `none`s would collide.
+fn is_option_of_sexpr(ty: &Type) -> bool {
+    matches!(ty, Type::Named(p, args)
+        if crate::types::path_is_builtin(p, "option")
+            && args.len() == 1
+            && matches!(&args[0], Type::Named(a, _) if *a == Path::root("sexpr")))
 }
 
 /// The `Sexpr` constructor name that exactly represents a value of `elem_ty`

@@ -2213,6 +2213,40 @@ fn compile_dispatches_a_function_taking_an_enum_typed_argument_to_native_code() 
     assert_eq!(v, Value::Int(99));
 }
 
+/// `Option<Option<Sexpr>>`'s three states stay distinct — the soundness
+/// requirement the `Option<Sexpr>` niche has to earn.
+///
+/// `Option<Sexpr>` is represented *exactly* like a `Sexpr` (`check/repr.rs`):
+/// `none` is the empty-list immediate, `some v` is `v`. That works only while
+/// the niche is claimed for `Option<sexpr>` and nothing else. Were the rule
+/// written as "the payload *represents* like a `Sexpr`" — which the inner
+/// `Option<Sexpr>` does — the outer level would niche too, and its `none`
+/// would be the same word as the inner one's: `outer-none` and `inner-none`
+/// would become indistinguishable. Requiring the type argument to be the
+/// `sexpr` type itself drops the outer `Option` through to a real box.
+///
+/// This is reachable, not hypothetical: `HashTable<K,Option<Sexpr>>::get`
+/// produces exactly this type.
+#[test]
+fn a_nested_option_over_sexpr_keeps_its_two_nones_apart() {
+    let v = run_and_read(
+        r#"
+        (defun name ((v Option<Option<Sexpr>>)) string
+          (match v
+            ((none) "outer-none")
+            ((some i) (match i ((none) "inner-none") ((some _) "inner-some")))))
+        (compile name)
+        (append (append (name (the Option<Option<Sexpr>> (Option::none)))
+                        (append " " (name (Option::some (the Option<Sexpr> (Option::none))))))
+                (append " " (name (Option::some (Option::some (quote 42))))))
+        "#,
+        1 << 16,
+        read_str,
+    )
+    .expect("eval failed");
+    assert_eq!(v, "outer-none inner-none inner-some");
+}
+
 /// A nested enum (`Option<Option<i64>>`): `struct_field_kind`'s recursive
 /// classification (an `Option<T>` field is kind `6` regardless of what `T`
 /// is) means the inner `Option<i64>` crosses the outer box's field boundary

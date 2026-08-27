@@ -1479,6 +1479,17 @@ fn match_core_pattern(
         // `(pat-ctor sexpr 0 ..)` because the empty list outlives `Sexpr`'s
         // `nil` variant; see `Checker::pattern_form`.
         "pat-empty" => Ok(if v.is_empty() { Some(Vec::new()) } else { None }),
+        // `(pat-nonempty P)` — `Option<Sexpr>`'s `(some P)`. Under the niche
+        // the unwrapped value is the same word, so this rejects the empty
+        // list and then matches `P` against the value itself.
+        "pat-nonempty" => {
+            if v.is_empty() {
+                return Ok(None);
+            }
+            let inner = core::field(heap, pat, 0)
+                .ok_or_else(|| EvalError::Internal("eval: (pat-nonempty ..) has no sub-pattern".to_string()))?;
+            match_core_pattern(it, heap, env, inner, v)
+        }
         "pat-ctor" => {
             let path = path_field(heap, pat, 0, "pat-ctor")?;
             let variant = int_field(heap, pat, 1, "pat-ctor")? as usize;

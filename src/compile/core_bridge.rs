@@ -2005,6 +2005,15 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
         "pat-wild" => core::tagged(heap, "pat-wild", &[]),
         // Nothing to carry: the node *is* the test.
         "pat-empty" => core::tagged(heap, "pat-empty", &[]),
+        // `(pat-nonempty P)` — the sub-pattern is translated like any other;
+        // the island applies it to the same value after the emptiness test.
+        "pat-nonempty" => {
+            let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
+            let mut f = Items::new(heap);
+            let sub = translate_pattern(f.heap(), sub, cx)?;
+            f.push(sub);
+            f.finish("pat-nonempty")
+        }
         "pat-bind" => {
             let name = symbol_field(heap, pat, 0)?;
             let name_v = heap.alloc_string(name);

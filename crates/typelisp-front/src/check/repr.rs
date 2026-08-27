@@ -181,6 +181,32 @@ impl Repr {
             Type::Ratio => Repr::Ratio,
             Type::RandomState => Repr::RandomState,
             Type::Named(p, _) if *p == Path::root("sexpr") => Repr::Sexpr,
+            // `Option<Sexpr>` is represented *exactly* like a `Sexpr`: `none`
+            // is the empty-list immediate (`Value::Empty`), `some v` is `v`
+            // itself. That is the niche the empty list vacates when `nil`
+            // leaves `Sexpr` (docs/dev/null-elimination-plan.md §3.1), and
+            // saying it here — rather than inventing a variant — is what
+            // keeps every consumer unchanged: `field_kind` 6 and
+            // `binding_kind` 2 are `Repr::Sexpr`'s own numbers, and the
+            // crossing decode already handles `Sexpr` and `Enum` in one arm.
+            //
+            // **Exactly `Option<sexpr>`, never a payload that merely
+            // *represents* like one.** Were this written as "the payload's
+            // repr is `Sexpr`", `Option<Option<Sexpr>>` would niche at the
+            // outer level too and its two `none`s would collide on the same
+            // `Value::Empty`. Requiring the argument to be the `sexpr` type
+            // itself drops the outer one through to `Repr::Enum` (a real
+            // box), which is the same rule Rust's niche optimization uses.
+            // `Option<Option<i64>>` is an existing, tested shape
+            // (`tests/compile_test.rs`) and `HashTable<K,Option<V>>::get`
+            // produces one, so this is reachable, not hypothetical.
+            Type::Named(p, args)
+                if path_is_builtin(p, "option")
+                    && args.len() == 1
+                    && matches!(&args[0], Type::Named(a, _) if *a == Path::root("sexpr")) =>
+            {
+                Repr::Sexpr
+            }
             // The three parametric builtins, ahead of the struct/enum arms
             // that would otherwise swallow them. Each classifies to the same
             // two kinds it did before it had a variant of its own — a

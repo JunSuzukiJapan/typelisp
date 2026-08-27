@@ -3618,6 +3618,20 @@ pub const SOURCE: &str = r#"
       ;; name a variant: the empty list outlives `Sexpr`'s `nil`.
       ("pat-empty"
        (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v 0) fail-block))
+      ;; `(pat-nonempty P)` -- `Option<Sexpr>`'s `(some P)`. The niche makes
+      ;; the unwrapped value the same word, so this rejects the empty list
+      ;; and then applies `P` to that same `v`.
+      ;;
+      ;; One comparison, not the negation of `compile-sexpr-tag-test`'s
+      ;; two-part nil test: the empty list is a single word. `Value::Empty`
+      ;; encodes as `(IMMEDIATE_NIL << TAG_BITS) | TAG_IMMEDIATE` =
+      ;; `(0 << 3) | 6` = 6 (`typelisp-abi`), so "tag is 6 and payload is 0"
+      ;; and "the word is 6" are the same test, and this is its opposite.
+      ("pat-nonempty"
+       (progn
+         (compile-pattern-guard builder cur-fn
+           (build-icmp-ne builder v (const-i64 builder 6)) fail-block)
+         (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v (sexpr-car (sexpr-cdr pat)) fail-block)))
       ;; Binds into a fresh slot in this arm's own frame.
       ("pat-bind"
        (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr pat))))

@@ -152,6 +152,20 @@ pub enum Pattern {
         /// `Sexpr`-declared field is itself downcast-matched).
         downcast: bool,
     },
+    /// The empty list, as `Option<Sexpr>`'s `none`.
+    ///
+    /// Its own variant rather than a `Ctor { type_name: option, variant: 1 }`
+    /// because a nullary ctor pattern carries no `field_types`, so nothing
+    /// downstream could tell `Option<Sexpr>`'s `none` — which is the
+    /// empty-list *immediate* under the niche (`check/repr.rs`) — from
+    /// `Option<i64>`'s, which is a real box. The scrutinee's type arguments
+    /// are known in `check_ctor_pattern_fields` and nowhere later, so the
+    /// decision is made there and recorded as a shape, the same reasoning
+    /// `Ctor::field_types` records for the fields it can carry.
+    Empty,
+    /// A non-empty S-expression: `Option<Sexpr>`'s `(some P)`, with `P`
+    /// matched against the unwrapped value (which *is* the same word).
+    NonEmpty(Box<Pattern>),
     /// `(the Type pattern)` against a `Sexpr` scrutinee — a whole-value
     /// downcast extraction (`Checker::check_ctor_pattern`'s Sexpr-downcast
     /// branch), the only way to pull a `Vector<T>`/`HashTable<K,V>` back out
