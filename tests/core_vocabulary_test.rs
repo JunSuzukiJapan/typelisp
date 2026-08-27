@@ -286,6 +286,9 @@ fn data() {
 fn patterns() {
     all_round_trip(&[
         "(match (var v) sexpr ((pat-wild) (int 0)))",
+        // The empty list. Its own node rather than `Sexpr`'s variant 0:
+        // the empty list outlives `nil` (docs/dev/null-elimination-plan.md).
+        "(match (var v) sexpr ((pat-empty) (int 0)) ((pat-wild) (int 1)))",
         "(match (var v) int ((pat-bind x) (var x)))",
         "(match (var v) sexpr ((pat-lit (int 1)) (int 10)) ((pat-wild) (int 0)))",
         // A value pattern: the test is an ordinary expression — here the
@@ -301,6 +304,7 @@ fn patterns() {
     // inside a `match` arm, and `record_tags` reads the outermost head only.
     all_round_trip(&[
         "(pat-wild)",
+        "(pat-empty)",
         "(pat-bind x)",
         "(pat-lit (int 1))",
         "(pat-guard $match-scrut (bool true))",
@@ -405,6 +409,7 @@ const EXPR_ONLY: &[&str] = &[
     "fn",
     "method",
     "pat-wild",
+    "pat-empty",
     "pat-bind",
     "pat-lit",
     "pat-guard",

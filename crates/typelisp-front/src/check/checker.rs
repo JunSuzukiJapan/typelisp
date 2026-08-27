@@ -1340,6 +1340,19 @@ impl Checker {
                 let sym = heap.intern_symbol(name);
                 core::tagged(heap, "pat-guard", &[sym, *form])?
             }
+            // The empty list is its own pattern node, not `Sexpr`'s variant 0.
+            // Today the two are the same test; they stop being the same when
+            // `nil` leaves `Sexpr` and the empty list becomes `Option<Sexpr>`'s
+            // `none` (docs/dev/null-elimination-plan.md §3.2.1) — at which
+            // point there is no variant 0 to name, but there is still an empty
+            // list to test for. Splitting the node now is what lets that
+            // change touch only the checker's choice of node, not the two
+            // consumers that compile one.
+            Pattern::Ctor { type_name, variant: 0, args, downcast: false, .. }
+                if args.is_empty() && crate::types::path_is_builtin(type_name, "sexpr") =>
+            {
+                core::tagged(heap, "pat-empty", &[])?
+            }
             Pattern::Ctor { type_name, variant, args, field_types, downcast, .. } => {
                 let mut f = Items::new(heap);
                 let tp = forms::path_form(f.heap(), type_name);

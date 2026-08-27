@@ -3627,6 +3627,11 @@ pub const SOURCE: &str = r#"
     (case (sexpr-sym-name (sexpr-car pat))
       ;; Matches anything and binds nothing, so there is no guard to emit.
       ("pat-wild" ())
+      ;; `(pat-empty)` -- the empty list. The same word comparison a
+      ;; `pat-ctor` on `Sexpr`'s variant 0 emits, under a node that does not
+      ;; name a variant: the empty list outlives `Sexpr`'s `nil`.
+      ("pat-empty"
+       (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v 0) fail-block))
       ;; Binds into a fresh slot in this arm's own frame.
       ("pat-bind"
        (let ((nm (sexpr-str (sexpr-car (sexpr-cdr pat)))))

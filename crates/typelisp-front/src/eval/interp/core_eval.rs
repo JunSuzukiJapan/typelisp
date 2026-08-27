@@ -1475,6 +1475,10 @@ fn match_core_pattern(
                 ))),
             }
         }
+        // `(pat-empty)` — the empty list. Its own node rather than
+        // `(pat-ctor sexpr 0 ..)` because the empty list outlives `Sexpr`'s
+        // `nil` variant; see `Checker::pattern_form`.
+        "pat-empty" => Ok(if v.is_empty() { Some(Vec::new()) } else { None }),
         "pat-ctor" => {
             let path = path_field(heap, pat, 0, "pat-ctor")?;
             let variant = int_field(heap, pat, 1, "pat-ctor")? as usize;

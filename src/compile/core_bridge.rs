@@ -2003,6 +2003,8 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
     };
     match tag.as_str() {
         "pat-wild" => core::tagged(heap, "pat-wild", &[]),
+        // Nothing to carry: the node *is* the test.
+        "pat-empty" => core::tagged(heap, "pat-empty", &[]),
         "pat-bind" => {
             let name = symbol_field(heap, pat, 0)?;
             let name_v = heap.alloc_string(name);
