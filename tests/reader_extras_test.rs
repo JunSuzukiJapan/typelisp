@@ -142,12 +142,20 @@ fn unreadable_text_is_an_err() {
 }
 
 // ---- the stream reader's whitespace rule -------------------------------------
+//
+// The "next character is X" assertions below unwrap `read-char`'s
+// `Option<char>` rather than comparing it against `(option::some X)`. The
+// comparison would be between two *different* things now: `equalp` takes
+// S-expression data (`Option<Sexpr>`), and a constructor call in that
+// argument position takes its type argument from the expectation — so
+// `(option::some #\x)` is the niche, a bare char datum, while `read-char`'s
+// own `Option<char>` crosses as a boxed enum. Unequal, and correctly so.
 
 #[test]
 fn read_sexpr_consumes_the_whitespace_that_ended_the_datum() {
     is_true(
         r#"(let ((s (make-string-input-stream "1 2")))
-             (progn (read-sexpr s) (equalp (read-char s) (option::some #\2))))"#,
+             (progn (read-sexpr s) (match (read-char s) ((some c) (equalp c #\2)) ((none) false))))"#,
     );
 }
 
@@ -156,7 +164,7 @@ fn read_sexpr_preserving_whitespace_leaves_it() {
     is_true(
         r#"(let ((s (make-string-input-stream "1 2")))
              (progn (read-sexpr-preserving-whitespace s)
-                    (equalp (read-char s) (option::some #\space))))"#,
+                    (match (read-char s) ((some c) (equalp c #\space)) ((none) false))))"#,
     );
 }
 
@@ -164,7 +172,7 @@ fn read_sexpr_preserving_whitespace_leaves_it() {
 fn only_one_whitespace_character_is_consumed() {
     is_true(
         r#"(let ((s (make-string-input-stream "1  2")))
-             (progn (read-sexpr s) (equalp (read-char s) (option::some #\space))))"#,
+             (progn (read-sexpr s) (match (read-char s) ((some c) (equalp c #\space)) ((none) false))))"#,
     );
 }
 
@@ -172,7 +180,7 @@ fn only_one_whitespace_character_is_consumed() {
 fn a_non_whitespace_terminator_is_left_alone() {
     is_true(
         r#"(let ((s (make-string-input-stream "1)2")))
-             (progn (read-sexpr s) (equalp (read-char s) (option::some #\)))))"#,
+             (progn (read-sexpr s) (match (read-char s) ((some c) (equalp c #\))) ((none) false))))"#,
     );
 }
 
@@ -205,7 +213,7 @@ fn a_delimited_list_stops_at_its_terminator() {
 fn the_terminator_is_consumed() {
     is_true(&format!(
         r#"(let ((s {}))
-             (progn (read-delimited-list #\] s) (equalp (read-char s) (option::some #\x))))"#,
+             (progn (read-delimited-list #\] s) (match (read-char s) ((some c) (equalp c #\x)) ((none) false))))"#,
         over("1]x")
     ));
 }
