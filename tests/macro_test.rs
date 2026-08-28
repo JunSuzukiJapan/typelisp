@@ -175,7 +175,7 @@ fn quote_survives_gc_pressure() {
     // the next iteration overwrites `last`, so the heap must actually reclaim
     // and reuse cells to keep up).
     let (v, h) = run_with_prelude_under_gc_stress(
-        "(defun build () Sexpr (quote (a (b c) (d (e f)) g)))
+        "(defun build () Option<Sexpr> (quote (a (b c) (d (e f)) g)))
          (let ((last (quote ())))
            (dotimes (i 500)
              (setf last (build)))
@@ -345,7 +345,7 @@ fn macro_expansion_survives_gc_pressure() {
     // for `Interp::expand_macro`'s push_root/pop_root discipline.
     let (v, h) = run_with_prelude_under_gc_stress(
         "(defmacro listify (a b c) `(list ,a ,b ,c))
-         (defun build () Sexpr (listify (quote x) (quote y) (quote z)))
+         (defun build () Option<Sexpr> (listify (quote x) (quote y) (quote z)))
          (let ((last (quote ())))
            (dotimes (i 500)
              (setf last (build)))
@@ -428,7 +428,7 @@ fn rest_arg_list_construction_survives_gc_pressure() {
     // a flat 5-cell spine, matching `listify`'s per-iteration cost above.
     let (v, h) = run_with_prelude_under_gc_stress(
         "(defmacro capture (a &rest rest) `(quote ,rest))
-         (defun build () Sexpr (capture 0 a b c d e))
+         (defun build () Option<Sexpr> (capture 0 a b c d e))
          (let ((last (quote ())))
            (dotimes (i 500)
              (setf last (build)))
@@ -674,7 +674,7 @@ fn optional_default_construction_survives_gc_pressure() {
     // `rest_arg_list_construction_survives_gc_pressure`.
     let (v, h) = run_with_prelude_under_gc_stress(
         "(defmacro deflt (&optional (xs (quote (a b c)))) `(quote ,xs))
-         (defun build () Sexpr (deflt))
+         (defun build () Option<Sexpr> (deflt))
          (let ((last (quote ())))
            (dotimes (i 500)
              (setf last (build)))

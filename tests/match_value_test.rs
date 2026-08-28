@@ -125,7 +125,7 @@ fn a_symbol_literal_pattern_compares_the_interned_symbol() {
 #[test]
 fn a_symbol_literal_pattern_works_inside_a_sexpr_pattern() {
     both(
-        r#"(defun f ((s Sexpr)) i32 (match s ((sym 'foo) 1) ((str "hi") 2) ((int 42) 3) (_ 0)))"#,
+        r#"(defun f ((s Option<Sexpr>)) i32 (match s ((sym 'foo) 1) ((str "hi") 2) ((int 42) 3) (_ 0)))"#,
         r#"(+ (* 100 (f 'foo)) (+ (* 10 (f "hi")) (f 'zz)))"#,
         digits(1, 2, 0),
     );
@@ -139,7 +139,7 @@ fn a_symbol_literal_pattern_works_inside_a_sexpr_pattern() {
 #[test]
 fn immediate_literals_match_a_sexpr_scrutinee_directly() {
     both(
-        r#"(defun f ((s Sexpr)) i32
+        r#"(defun f ((s Option<Sexpr>)) i32
              (match s ('foo 1) (42 2) (#\a 3) (true 4) (_ 0)))"#,
         r#"(+ (* 1000 (f 'foo)) (+ (* 100 (f 42)) (+ (* 10 (f #\a)) (f true))))"#,
         1234,

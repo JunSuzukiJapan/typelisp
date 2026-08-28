@@ -7,7 +7,7 @@
 //! dispatched statically on the element type `V` (`Interp::scope_is_heap`):
 //! the `Scope<i32>` tests below run the Rust-native `RtValue::Scope` path
 //! (the same one `compiler.rs`'s `Scope<llvm-value>`/`Scope<llvm-function>`
-//! use), the `Scope<Sexpr>`/`Scope<Vector<i32>>` tests the GC-heap
+//! use), the `Scope<Option<Sexpr>>`/`Scope<Vector<i32>>` tests the GC-heap
 //! `StructPayload::Frames` path. Both families assert the same observable
 //! semantics — that equivalence is the point.
 
@@ -214,7 +214,7 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
     assert_eq!(eval_ok(src), Value::Int(-1));
 }
 
-// ---- heap-repr `V` (`Scope<Sexpr>` etc. — `StructPayload::Frames`) ---------
+// ---- heap-repr `V` (`Scope<Option<Sexpr>>` etc. — `StructPayload::Frames`) ---------
 //
 // The same method surface as above, backed by the GC-heap representation
 // (unification Stage 8). Each test mirrors a native-path sibling; the
@@ -224,7 +224,7 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
 
 #[test]
 fn heap_scope_set_then_get_roundtrips() {
-    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () i64
                  (let ((s (make-s)))
                    (set s \"x\" (quote 42))
@@ -237,7 +237,7 @@ fn heap_scope_set_then_get_roundtrips() {
 
 #[test]
 fn heap_scope_get_missing_key_returns_none() {
-    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () i32
                  (let ((s (make-s)))
                    (match (get s \"missing\") ((Some v) 0) ((None) -1))))
@@ -247,8 +247,8 @@ fn heap_scope_get_missing_key_returns_none() {
 
 #[test]
 fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
-    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
-               (defun as-int ((o Option<Sexpr>)) i64
+    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+               (defun as-int ((o Option<Option<Sexpr>>)) i64
                  (match o
                    ((Some v) (sexpr-int v))
                    ((None) -1)))
@@ -267,7 +267,7 @@ fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
 
 #[test]
 fn heap_scope_pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
-    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () i32
                  (let ((s (make-s)))
                    (push-frame s)
@@ -280,7 +280,7 @@ fn heap_scope_pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
 
 #[test]
 fn heap_scope_clone_frames_shares_existing_frames() {
-    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () i64
                  (let ((s (make-s)))
                    (set s \"x\" (quote 7))
@@ -294,7 +294,7 @@ fn heap_scope_clone_frames_shares_existing_frames() {
 
 #[test]
 fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both() {
-    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () i64
                  (let ((s (make-s)))
                    (set s \"x\" (quote 1))
@@ -309,7 +309,7 @@ fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both(
 
 #[test]
 fn heap_scope_pushing_a_frame_on_the_clone_does_not_affect_the_original() {
-    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () i32
                  (let ((s (make-s)))
                    (let ((s2 (clone-frames s)))
@@ -326,7 +326,7 @@ fn heap_scope_pushing_a_frame_on_the_clone_does_not_affect_the_original() {
 /// `EvalError` instead, matching the native path's own behavior.
 #[test]
 fn heap_scope_set_with_every_frame_popped_is_a_catchable_error_not_a_panic() {
-    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () ()
                  (let ((s (make-s)))
                    (pop-frame s)
@@ -360,7 +360,7 @@ fn heap_scope_stores_a_boxed_struct_element_by_reference() {
 }
 
 /// The heap-scope GC contract end to end: values stored in a
-/// `Scope<Sexpr>`'s frames are cons-heap pointers that must survive
+/// `Scope<Option<Sexpr>>`'s frames are cons-heap pointers that must survive
 /// collections triggered by later allocation churn — rooted through the
 /// binding's `Slot::Heap` cell (`heap_repr_kind`'s `Scope<V>` recursion) ->
 /// the scope box -> `StructPayload::Frames` -> the frame's values, all
@@ -368,8 +368,8 @@ fn heap_scope_stores_a_boxed_struct_element_by_reference() {
 /// Mirrors `hashtable_test.rs`'s `sexpr_values_survive_gc_pressure`.
 #[test]
 fn heap_scope_sexpr_values_survive_gc_pressure() {
-    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
-               (defun f () Sexpr
+    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+               (defun f () Option<Sexpr>
                  (let ((s (make-s)))
                    (set s \"keep\" (quote (a b c d e)))
                    (dotimes (i 500)

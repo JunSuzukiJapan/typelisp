@@ -315,7 +315,18 @@ fn a_built_in_error_value_prints_its_type_name() {
 
 #[test]
 fn variant_names_resolve_inside_a_nested_structure() {
-    assert_eq!(fmt(r#"(format false "~a" (list (option::some 1) 2))"#), "((some 1) 2)");
+    // `Option<i32>` is an ordinary boxed enum inside the list, so it prints
+    // with its variant name. It has to be spelled out: a bare
+    // `(option::some 1)` in an element position would take the element's own
+    // `Option<Sexpr>` expectation instead, and *that* is the niche.
+    assert_eq!(
+        fmt(r#"(format false "~a" (list (the Option<i32> (option::some 1)) 2))"#),
+        "((some 1) 2)"
+    );
+    // The niche prints transparently: `Option<Sexpr>` *is* the S-expression,
+    // so there is no wrapper to name. This is the visible spec change from
+    // moving the empty list into `Option` (`docs/functions.md` §15).
+    assert_eq!(fmt(r#"(format false "~a" (list (option::some 1) 2))"#), "(1 2)");
 }
 
 #[test]

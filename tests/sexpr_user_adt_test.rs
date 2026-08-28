@@ -50,11 +50,16 @@ fn eval_ok(src: &str) -> Value {
 // ---- insertion: struct/enum retype into Sexpr -------------------------------
 
 #[test]
-fn list_of_a_struct_instance_and_an_int_type_checks_as_sexpr() {
+fn list_of_a_struct_instance_and_an_int_type_checks_as_an_option_sexpr() {
+    // `(list ...)` is S-expression data, and that type is `Option<Sexpr>`
+    // since the empty list moved there — `(list)` has to be spellable.
     let src = "(defstruct point (x i32) (y i32)) (list (point::new 1 2) 42)";
     assert_eq!(
         check(src).expect("check failed"),
-        Some(Type::Named(typelisp::Path::root("sexpr"), vec![]))
+        Some(Type::Named(
+            typelisp::Path::root("option"),
+            vec![Type::Named(typelisp::Path::root("sexpr"), vec![])]
+        ))
     );
 }
 
@@ -147,7 +152,7 @@ fn a_struct_instance_flows_through_a_compiled_function_still_shared() {
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
     let src = "(defstruct point (x i32) (y i32))
-         (defun wrap ((p point)) sexpr (list p 42))
+         (defun wrap ((p point)) Option<Sexpr> (list p 42))
          (compile wrap)
          (let ((p (point::new 1 2)))
            (let ((l (wrap p)))

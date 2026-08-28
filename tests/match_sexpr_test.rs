@@ -243,7 +243,7 @@ fn match_walks_a_quoted_list() {
     // `quote` and macro arguments are the pre-`read` producers of compound
     // Sexpr data; summing a quoted list exercises match-driven recursion.
     let src = r#"
-        (defun sum ((s Sexpr)) i64
+        (defun sum ((s Option<Sexpr>)) i64
           (match s
             ((cons (int n) rest) (+ n (sum rest)))
             (_ 0)))

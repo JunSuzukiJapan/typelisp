@@ -203,7 +203,7 @@ fn builtin_errors_implement_the_error_trait() {
     let src = r#"
         (defun int-msg ((r Result<i32,ParseIntError>)) string
           (match r ((ok _) "?") ((err e) (message e))))
-        (defun read-msg ((r Result<Sexpr,ReadError>)) string
+        (defun read-msg ((r Result<Option<Sexpr>,ReadError>)) string
           (match r ((ok _) "?") ((err e) (message e))))
         (list (int-msg (parse-int "zz")) (read-msg (read "(")))
         (int-msg (parse-int "zz"))

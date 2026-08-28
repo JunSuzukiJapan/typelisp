@@ -336,8 +336,13 @@ fn sexpr_values_survive_gc_pressure() {
     // GCs; if key 0's cells aren't rooted they can be swept and recycled into
     // one of those later allocations, corrupting (not just losing) the read
     // back at the end.
-    let src = "(defun make-h () HashTable<i32,Sexpr> (HashTable::new))
-               (defun f () Sexpr
+    // The value type is `Option<Sexpr>` (S-expression data), which makes
+    // `(get h 0)` an `Option<Option<Sexpr>>` — the very nesting the empty
+    // list's niche has to keep distinct, reached here for real rather than
+    // constructed for a test (`tests/compile_test.rs`'s
+    // `a_nested_option_over_sexpr_keeps_its_two_nones_apart`).
+    let src = "(defun make-h () HashTable<i32,Option<Sexpr>> (HashTable::new))
+               (defun f () Option<Sexpr>
                  (let ((h (make-h)))
                    (set h 0 (quote (a b c d e)))
                    (dotimes (i 500)

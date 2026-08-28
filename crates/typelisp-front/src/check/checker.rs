@@ -9269,10 +9269,7 @@ impl Checker {
             };
             recv = Checked::new(form, sexpr_ty());
         }
-        let type_fq = match &recv.ty {
-            Type::Named(n, _) => Some(n.clone()),
-            other => prim_type_path(other),
-        }?;
+        let type_fq = self.assoc_receiver_path(&recv.ty, method)?;
         let def = self.reg.type_def(&type_fq)?;
         match def.assoc.get(method) {
             Some(af) if af.instance && self.assoc_visible(&type_fq, af) => {}
@@ -9303,6 +9300,31 @@ impl Checker {
         self.reg
             .type_def(&Path::root("sexpr"))
             .is_some_and(|d| d.assoc.get(method).is_some_and(|af| af.instance))
+    }
+
+    /// Whose assoc table serves `method` called on a receiver of type `ty`.
+    ///
+    /// Normally the receiver's own type. The exception is `Option<Sexpr>`:
+    /// it *is* the type an S-expression has, so `Sexpr`'s catalog
+    /// (`eq`/`eql`/`equals`/`print`/...) has to reach it — the same "an
+    /// option over `Sexpr` behaves as an S-expression" rule the `match`
+    /// sugar follows. `Sexpr`'s signatures already take `Option<Sexpr>`, so
+    /// nothing else changes; without it the whole catalog disappears the
+    /// moment a value is typed `Option<Sexpr>`.
+    ///
+    /// `Option`'s own methods (`unwrap`/`is-some`/...) still resolve: the
+    /// redirection is conditional on `Sexpr` actually having the method, so
+    /// anything it does not have falls through to `option` as before.
+    ///
+    /// Every receiver-type lookup goes through here. Three separate copies
+    /// of this decision are what let a value pattern keep working on a
+    /// `Sexpr` scrutinee while quietly failing on an `Option<Sexpr>` one.
+    fn assoc_receiver_path(&self, ty: &Type, method: &str) -> Option<Path> {
+        match ty {
+            t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::root("sexpr")),
+            Type::Named(n, _) => Some(n.clone()),
+            other => prim_type_path(other),
+        }
     }
 
     fn check_instance_method(
@@ -9342,24 +9364,7 @@ impl Checker {
                 let form = forms::dyn_value_form(heap, recv.form)?;
                 recv = Checked::new(form, sexpr_ty());
             }
-            let type_fq = match &recv.ty {
-                // `Option<Sexpr>` *is* the type an S-expression has, so
-                // `Sexpr`'s own catalog (`eq`/`eql`/...) has to reach it —
-                // the same "an option over `Sexpr` behaves as an
-                // S-expression" rule the `match` sugar follows. Its
-                // signatures already take `Option<Sexpr>`, so nothing else
-                // has to change; without this the whole catalog silently
-                // disappears the moment a value is typed `Option<Sexpr>`.
-                //
-                // `Option`'s own methods (`unwrap`/`is-some`/...) still
-                // resolve: they live on `option`, which this only bypasses
-                // for a receiver whose payload is exactly `sexpr`, and the
-                // arm below falls back to the ordinary lookup when `Sexpr`
-                // has no such method.
-                t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::root("sexpr")),
-                Type::Named(n, _) => Some(n.clone()),
-                other => prim_type_path(other),
-            };
+            let type_fq = self.assoc_receiver_path(&recv.ty, method);
             if let Some(type_fq) = &type_fq {
                 if let Some(def) = self.reg.type_def(type_fq) {
                     let visible = def
@@ -13135,10 +13140,10 @@ impl Checker {
     /// the body with `A` known. `trait_method` searches inherited methods
     /// too, so `(where (Ord A))` is equally enough.
     fn implements_eq(&self, env: &Env, ty: &Type) -> bool {
-        let type_fq = match ty {
-            Type::Named(n, _) => Some(n.clone()),
-            other => prim_type_path(other),
-        };
+        // The same receiver resolution the `equals` call this is clearing
+        // the way for will perform — asked here so "this type cannot be
+        // compared" is the error rather than a mismatch from deeper in.
+        let type_fq = self.assoc_receiver_path(ty, "equals");
         let Some(type_fq) = type_fq else { return false };
         if let Some(def) = self.reg.type_def(&type_fq) {
             if matches!(def.assoc.get("equals"), Some(af) if af.instance) {

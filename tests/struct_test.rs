@@ -400,7 +400,7 @@ fn sexpr_typed_field_reads_back_as_a_sexpr_not_a_scalar() {
     // `match` on a `Sexpr` is fenced off (Symbol/Sexpr redesign Phase 5); the
     // stored node is read back with `sexpr-int`, which still panics (rather
     // than silently succeeding) if `content` decoded to a bare scalar.
-    let src = "(defstruct holder (content Sexpr)) \
+    let src = "(defstruct holder (content Option<Sexpr>)) \
                (let ((h (holder::new '42))) \
                  (sexpr-int (content h)))";
     assert_eq!(eval_ok(src), Value::Int(42));
@@ -411,7 +411,7 @@ fn sexpr_typed_field_holding_a_quoted_float_reads_back_as_a_sexpr() {
     // The float case is the one `decode_struct_field`'s old doc comment
     // called out as its known ambiguity (a boxed float is also what an
     // `f64` field stores).
-    let src = "(defstruct holder (content Sexpr)) \
+    let src = "(defstruct holder (content Option<Sexpr>)) \
                (let ((h (holder::new '2.5))) \
                  (sexpr-float (content h)))";
     // A float is a `BoxedObj::Float` since the scalar unification, so reading
@@ -425,7 +425,7 @@ fn sexpr_typed_field_holding_a_quoted_float_reads_back_as_a_sexpr() {
 
 #[test]
 fn setf_then_read_of_a_sexpr_typed_field_round_trips() {
-    let src = "(defstruct holder (content Sexpr)) \
+    let src = "(defstruct holder (content Option<Sexpr>)) \
                (let ((h (holder::new '1))) \
                  (setf h::content '99) \
                  (sexpr-int h::content))";
@@ -437,7 +437,7 @@ fn match_on_a_struct_binds_a_sexpr_typed_field_as_a_sexpr() {
     // The `match` destructuring path decodes fields itself
     // (`Pattern::Ctor::sexpr_fields`, baked at check time), independently
     // of the accessor path the tests above cover.
-    let src = "(defstruct holder (content Sexpr) (k i64)) \
+    let src = "(defstruct holder (content Option<Sexpr>) (k i64)) \
                (match (holder::new '7 3) \
                  ((new c n) (+ (sexpr-int c) n)))";
     assert_eq!(eval_ok(src), Value::Int(10));
@@ -446,8 +446,9 @@ fn match_on_a_struct_binds_a_sexpr_typed_field_as_a_sexpr() {
 // ---- `()`-typed fields --------------------------------------------------
 //
 // A unit-typed slot is the one field encoding whose *stored shape* doesn't
-// identify it: it holds a `Value::Empty`, exactly what a `Sexpr`-declared
-// slot holding the datum `()` would. Both read paths therefore decide from
+// identify it: it holds a `Value::Empty`, exactly what an
+// `Option<Sexpr>`-declared slot holding the empty list would — the two have
+// been the same word since the empty list became `none` under the niche. Both read paths therefore decide from
 // the declared type — the accessor via `decode_field_typed`, `match` via
 // `Pattern::Ctor::field_types` — and these tests pin that down by asserting
 // on `RtValue::Unit` itself, which a shape-driven decode would return as

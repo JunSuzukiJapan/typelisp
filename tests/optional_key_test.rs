@@ -342,7 +342,7 @@ fn method_keyword_arguments_match_by_label() {
 #[test]
 fn method_rest_collects_the_trailing_arguments() {
     let src = "
-        (defun len ((s Sexpr)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
+        (defun len ((s Option<Sexpr>)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
         (defstruct acc (base i32))
         (defmethod total ((self acc) &rest (xs i32)) i32 (+ self::base (len xs)))
         (total (acc::new 100) 1 2 3)
@@ -441,7 +441,7 @@ fn labels_rejects_key_with_the_reason() {
 fn lambda_still_takes_a_rest_parameter() {
     // `&rest` is purely a matter of types, and `Type::Fn` has a slot for it.
     let src = "
-        (defun len ((s Sexpr)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
+        (defun len ((s Option<Sexpr>)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
         ((lambda ((a i32) &rest (xs i32)) i32 (+ a (len xs))) 1 2 3)
     ";
     assert_eq!(eval_ok(src), Value::Int(3));

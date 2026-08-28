@@ -172,8 +172,8 @@ fn identity_is_the_wrapped_object_not_the_box() {
 fn a_trait_object_can_be_stored_in_a_sexpr_list() {
     let src = format!(
         "{SHAPES}
-         (defun box-it ((d :dyn Drawable)) Sexpr (list d))
-         (defun first-draw ((xs Sexpr)) string
+         (defun box-it ((d :dyn Drawable)) Option<Sexpr> (list d))
+         (defun first-draw ((xs Option<Sexpr>)) string
            (match (sexpr-car xs) ((circle r) \"circle\") (_ \"other\")))
          (first-draw (box-it (circle::new 3)))"
     );

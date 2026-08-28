@@ -178,7 +178,8 @@ fn a_unit_returning_closure_performs_its_effect_and_returns_unit() {
 /// closure sees a fixed 2-argument call.
 #[test]
 fn a_variadic_lambda_jits_and_collects_its_rest_list() {
-    let src = "(defun sexpr-len ((s Sexpr)) i64 (if (sexpr-consp s) (+ (the i64 1) (sexpr-len (sexpr-cdr s))) (the i64 0))) \
+    let src = "(defun sexpr-len ((s Option<Sexpr>)) i64 \
+                 (if (sexpr-consp s) (+ (the i64 1) (sexpr-len (sexpr-cdr s))) (the i64 0))) \
                ((lambda ((a i64) &rest (xs i64)) i64 (+ a (sexpr-len xs))) 1 2 3)";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
@@ -189,7 +190,8 @@ fn a_variadic_lambda_jits_and_collects_its_rest_list() {
 /// fix), now reached through definition-time JIT instead of `(compile ...)`.
 #[test]
 fn fnref_of_a_variadic_function_jits_and_forwards_the_rest_list() {
-    let src = "(defun sexpr-len ((s Sexpr)) i64 (if (sexpr-consp s) (+ (the i64 1) (sexpr-len (sexpr-cdr s))) (the i64 0))) \
+    let src = "(defun sexpr-len ((s Option<Sexpr>)) i64 \
+                 (if (sexpr-consp s) (+ (the i64 1) (sexpr-len (sexpr-cdr s))) (the i64 0))) \
                (defun count-extra ((base i64) &rest (xs i64)) i64 (+ base (sexpr-len xs))) \
                (defun use-it ((f (fn (i64 &rest i64) i64))) i64 (f 10 1 2 3)) \
                (use-it count-extra)";
@@ -226,7 +228,7 @@ fn a_macro_expansion_and_a_real_closure_coexist() {
 fn a_closure_built_inside_a_macro_body_jits_during_expansion() {
     let src = "(defmacro plus-list () \
                  (let ((op (quote +))) \
-                   (let ((mk (lambda ((s Sexpr)) Sexpr (sexpr-cons op s)))) \
+                   (let ((mk (lambda ((s Option<Sexpr>)) Option<Sexpr> (sexpr-cons op s)))) \
                      (mk (quote (1 2)))))) \
                (plus-list)";
     assert_eq!(eval_ok(src), Value::Int(3));

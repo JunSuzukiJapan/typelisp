@@ -1119,8 +1119,9 @@ fn compile_applies_an_interpreted_closure_handed_to_a_compiled_function() {
 fn an_interpreted_closure_called_from_compiled_code_crosses_tagged_values() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun consr ((tail Sexpr)) (fn (Sexpr) Sexpr) (lambda ((x Sexpr)) Sexpr (sexpr-cons x tail)))
-        (defun apply-fn ((f (fn (Sexpr) Sexpr)) (v Sexpr)) Sexpr (f v))
+        (defun consr ((tail Option<Sexpr>)) (fn (Option<Sexpr>) Option<Sexpr>)
+          (lambda ((x Option<Sexpr>)) Option<Sexpr> (sexpr-cons x tail)))
+        (defun apply-fn ((f (fn (Option<Sexpr>) Option<Sexpr>)) (v Option<Sexpr>)) Option<Sexpr> (f v))
         (compile apply-fn)
         (sexpr-int (sexpr-car (apply-fn (consr (Int 2)) (Int 1))))
         "#,
@@ -1950,7 +1951,7 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
 fn compile_dispatches_a_dolist_summing_a_sexpr_list() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun sum-list-ints ((lst Sexpr)) i64
+        (defun sum-list-ints ((lst Option<Sexpr>)) i64
           (let ((acc (the i64 0)))
             (dolist (x lst acc)
               (match x ((int n) (setf acc (+ acc n)) ()) (_ ())))))
@@ -2051,7 +2052,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
 
 // ---- Stage 6 of the Sexpr-representation plan: Construct/FieldGet/FieldSet --
 
-/// `Expr::Construct` over `Sexpr` itself: `(Int n)`/`(Bool b)`/`(Nil)` all
+/// `Expr::Construct` over `Sexpr` itself: `(Int n)`/`(Bool b)`/`()` all
 /// compile to `compile-construct-sexpr`'s pure bit-tagging path (no heap
 /// allocation at all), round-tripping through `Expr::Call`'s existing
 /// `Sexpr` decode step (Stage 5) with no further bridging needed. Every
@@ -2090,7 +2091,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
 
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun make-nil () Sexpr (Nil))
+        (defun make-nil () Option<Sexpr> ())
         (compile make-nil)
         (make-nil)
         "#,
@@ -2238,7 +2239,7 @@ fn a_nested_option_over_sexpr_keeps_its_two_nones_apart() {
         (compile name)
         (append (append (name (the Option<Option<Sexpr>> (Option::none)))
                         (append " " (name (Option::some (the Option<Sexpr> (Option::none))))))
-                (append " " (name (Option::some (Option::some (quote 42))))))
+                (append " " (name (Option::some (quote 42)))))
         "#,
         1 << 16,
         read_str,
@@ -3479,7 +3480,7 @@ fn compile_and_interpret_agree_on_a_defstruct_match() {
 fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun f ((s Sexpr)) i64
+        (defun f ((s Option<Sexpr>)) i64
           (match s
             ((int n) n)
             ((cons (int a) _) a)
@@ -3544,12 +3545,12 @@ fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
 fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun tag ((s Sexpr)) i64
+        (defun tag ((s Option<Sexpr>)) i64
           (match s
-            ((nil) 1) ((sym _) 2) ((str _) 3) ((bool _) 4)
+            ((none) 1) ((sym _) 2) ((str _) 3) ((bool _) 4)
             (_ 0)))
         (compile tag)
-        (+ (+ (tag (Nil)) (* (the i64 10) (tag (quote foo))))
+        (+ (+ (tag ()) (* (the i64 10) (tag (quote foo))))
            (+ (* (the i64 100) (tag (Str "s"))) (* (the i64 1000) (tag (Bool false)))))
         "#,
     );
@@ -3568,7 +3569,7 @@ fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
 fn compile_match_binds_and_returns_a_sym_payload() {
     let v = eval_string_with_compiler(
         r#"
-        (defun get-sym ((s Sexpr)) Symbol
+        (defun get-sym ((s Option<Sexpr>)) Symbol
           (match s ((sym x) x) (_ (panic "not a sym"))))
         (compile get-sym)
         (symbol->string (get-sym (quote hello)))
@@ -3587,7 +3588,7 @@ fn compile_match_binds_and_returns_a_sym_payload() {
 fn compile_match_dispatches_and_extracts_the_path_variant() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun path-segs ((s Sexpr)) Sexpr
+        (defun path-segs ((s Option<Sexpr>)) Option<Sexpr>
           (match s ((path segs) segs) (_ (panic "not a path"))))
         (compile path-segs)
         (equal (path-segs (quote dep::head)) (list (quote dep) (quote head)))
@@ -3607,7 +3608,7 @@ fn compile_match_dispatches_and_extracts_the_path_variant() {
 fn compile_construct_and_round_trips_the_path_variant() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun make-path ((segs Sexpr)) Sexpr
+        (defun make-path ((segs Option<Sexpr>)) Option<Sexpr>
           (Path segs))
         (compile make-path)
         (match (make-path (list (quote a) (quote b)))
@@ -3624,7 +3625,7 @@ fn compile_and_interpret_agree_on_a_sexpr_match() {
     let src = |call: &str| {
         format!(
             r#"
-            (defun sum ((s Sexpr)) i64
+            (defun sum ((s Option<Sexpr>)) i64
               (match s
                 ((cons (int n) rest) (+ n (sum rest)))
                 (_ 0)))
@@ -4025,8 +4026,8 @@ fn compile_dispatches_a_user_defined_method_reified_as_a_value_to_native_code() 
 fn compile_dispatches_a_function_that_constructs_a_quoted_list_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun make-quoted () Sexpr (quote (1 2 3)))
-        (defun sum ((s Sexpr)) i64 (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
+        (defun make-quoted () Option<Sexpr> (quote (1 2 3)))
+        (defun sum ((s Option<Sexpr>)) i64 (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
         (compile make-quoted)
         (compile sum)
         (sum (make-quoted))
@@ -4040,8 +4041,8 @@ fn compile_dispatches_a_function_that_constructs_a_quoted_list_to_native_code() 
 #[test]
 fn compile_and_interpret_agree_on_a_quoted_list() {
     let prog = r#"
-        (defun make-quoted () Sexpr (quote (1 2 3)))
-        (defun sum ((s Sexpr)) i64 (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
+        (defun make-quoted () Option<Sexpr> (quote (1 2 3)))
+        (defun sum ((s Option<Sexpr>)) i64 (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
     "#;
     let compiled = eval_ok_with_compiler(&format!("{}\n(compile make-quoted)\n(compile sum)\n(sum (make-quoted))", prog));
     let interpreted = eval_ok(&format!("{}\n(sum (make-quoted))", prog));
@@ -4059,7 +4060,7 @@ fn compile_and_interpret_agree_on_a_quoted_list() {
 fn compile_of_a_function_quoting_a_symbol_round_trips() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun q () Sexpr (quote foo))
+        (defun q () Option<Sexpr> (quote foo))
         (compile q)
         (eq (q) (quote foo))
         "#,
@@ -4074,7 +4075,7 @@ fn compile_of_a_function_quoting_a_symbol_round_trips() {
 fn compile_of_a_function_quoting_a_list_of_symbols_round_trips() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun q () Sexpr (quote (a b c)))
+        (defun q () Option<Sexpr> (quote (a b c)))
         (compile q)
         (equal (q) (quote (a b c)))
         "#,
@@ -4089,7 +4090,7 @@ fn compile_of_a_function_quoting_a_list_of_symbols_round_trips() {
 fn compile_of_a_function_quoting_a_path_round_trips() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun q () Sexpr (quote dep::head))
+        (defun q () Option<Sexpr> (quote dep::head))
         (compile q)
         (eq (q) (quote dep::head))
         "#,
@@ -5025,20 +5026,20 @@ fn compile_dispatches_sexpr_accessors_and_agrees_with_the_interpreter() {
     let cases = [
         // Recursive list walk: `sexpr-consp` steering, `sexpr-cdr` descent.
         (
-            "(defun f ((s Sexpr)) i64 (if (sexpr-consp s) (+ (the i64 1) (f (sexpr-cdr s))) (the i64 0)))",
+            "(defun f ((s Option<Sexpr>)) i64 (if (sexpr-consp s) (+ (the i64 1) (f (sexpr-cdr s))) (the i64 0)))",
             "(f '(10 20 30))",
         ),
         // `sexpr-null`/`sexpr-atom` predicates surface as bools.
-        ("(defun f ((s Sexpr)) bool (sexpr-null s))", "(f '())"),
-        ("(defun f ((s Sexpr)) bool (sexpr-atom s))", "(f '(1 2))"),
-        ("(defun f ((s Sexpr)) bool (sexpr-symp s))", "(f 'hello)"),
+        ("(defun f ((s Option<Sexpr>)) bool (sexpr-null s))", "(f '())"),
+        ("(defun f ((s Option<Sexpr>)) bool (sexpr-atom s))", "(f '(1 2))"),
+        ("(defun f ((s Option<Sexpr>)) bool (sexpr-symp s))", "(f 'hello)"),
         // Typed payload extractors.
-        ("(defun f ((s Sexpr)) i64 (sexpr-int (sexpr-car s)))", "(f '(42 43))"),
-        ("(defun f ((s Sexpr)) bool (sexpr-bool (sexpr-car s)))", "(f '(true))"),
-        ("(defun f ((s Sexpr)) char (sexpr-char (sexpr-car s)))", r#"(f '(#\A #\B))"#),
-        ("(defun f ((s Sexpr)) f64 (sexpr-float (sexpr-car s)))", "(f '(2.5))"),
-        ("(defun f ((s Sexpr)) string (sexpr-str (sexpr-car s)))", r#"(f '("hi"))"#),
-        ("(defun f ((s Sexpr)) string (sexpr-sym-name (sexpr-car s)))", "(f '(hello))"),
+        ("(defun f ((s Option<Sexpr>)) i64 (sexpr-int (sexpr-car s)))", "(f '(42 43))"),
+        ("(defun f ((s Option<Sexpr>)) bool (sexpr-bool (sexpr-car s)))", "(f '(true))"),
+        ("(defun f ((s Option<Sexpr>)) char (sexpr-char (sexpr-car s)))", r#"(f '(#\A #\B))"#),
+        ("(defun f ((s Option<Sexpr>)) f64 (sexpr-float (sexpr-car s)))", "(f '(2.5))"),
+        ("(defun f ((s Option<Sexpr>)) string (sexpr-str (sexpr-car s)))", r#"(f '("hi"))"#),
+        ("(defun f ((s Option<Sexpr>)) string (sexpr-sym-name (sexpr-car s)))", "(f '(hello))"),
     ];
     for (def, call) in cases {
         let interpreted = run_readback(&format!("{def}\n{call}")).expect("interpreted failed");

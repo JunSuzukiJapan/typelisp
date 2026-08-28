@@ -136,7 +136,8 @@ fn a_compiled_function_evaluating_a_form_sees_the_programs_globals() {
 #[test]
 fn a_definition_made_by_a_compiled_functions_eval_survives_the_call() {
     let out = repl_stdout(
-        "(defun define-it () Sexpr (match (eval (quote (defun sq ((n i64)) i64 (* n n)))) ((ok v) v) ((err _) (Nil))))\n\
+        "(defun define-it () Option<Sexpr> \
+           (match (eval (quote (defun sq ((n i64)) i64 (* n n)))) ((ok v) v) ((err _) ())))\n\
          (compile define-it)\n(define-it)\n(sq 7)\n:quit\n",
     );
     assert!(out.contains("49"), "stdout was:\n{}", out);

@@ -126,7 +126,7 @@ fn a_function_compiled_under_stress_agrees_with_the_interpreter() {
 #[test]
 fn interpreted_scopes_survive_constant_collection() {
     let (mut h, mut chk, mut interp) = stressed();
-    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () i64
                  (let ((s (make-s)))
                    (set s \"a\" (quote 42))

@@ -75,7 +75,7 @@ fn the_families_that_used_to_be_blocked_are_compiled_now() {
     }
 }
 
-/// Macro *expanders* too: a macro body is an ordinary `Sexpr -> Sexpr`
+/// Macro *expanders* too: a macro body is an ordinary S-expression function
 /// function — expanding it is calling it — so it compiles like any other
 /// definition and the artifact carries it.
 ///
@@ -128,7 +128,7 @@ fn a_compiled_prelude_computes_what_the_interpreted_one_does() {
         "(gcd (as bignum 462) (as bignum 1071))",
         "(abs -3.5)",
         "(not false)",
-        "(sexpr-map (lambda ((x Sexpr)) Sexpr (sexpr-cons x x)) (list 1 2 3))",
+        "(sexpr-map (lambda ((x Option<Sexpr>)) Option<Sexpr> (sexpr-cons x x)) (list 1 2 3))",
         "(sexpr-append (list 1 2) (list 3 4))",
         "(equal (list 1 (list 2 3)) (list 1 (list 2 3)))",
         // The families whose lowering landed on 2026-08-14. Streams matter

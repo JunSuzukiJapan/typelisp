@@ -314,14 +314,14 @@ fn one_generic_type_instantiated_at_two_types_gets_independent_methods() {
 fn a_sexpr_instantiated_generic_field_returns_the_datum_not_a_misdecoded_scalar() {
     // The exact misdecode the old shape heuristic documented as a known
     // erasure limitation (pre-monomorphization `interp.rs`'s
-    // `decode_struct_field` doc comment): a `box<Sexpr>` field holding the
+    // `decode_struct_field` doc comment): a `box<Option<Sexpr>>` field holding the
     // quoted datum `42` is stored as a bare `Value::Int`, and a shape-driven
     // decode handed it back as `RtValue::Int` — contradicting the field's
     // static type. With the accessor monomorphized (`v <sexpr>`, `FieldGet`
     // node type `Sexpr`) the decode is type-directed and exact.
     let src = r#"
         (defstruct box<T> (v T))
-        (defvar (b box<Sexpr>) (box::new '42))
+        (defvar (b box<Option<Sexpr>>) (box::new '42))
         b::v
     "#;
     match run(src).expect("eval failed") {
@@ -332,10 +332,12 @@ fn a_sexpr_instantiated_generic_field_returns_the_datum_not_a_misdecoded_scalar(
 
 #[test]
 fn a_vector_of_sexpr_element_returns_the_datum() {
-    // `Vector<Sexpr>`'s `get` return type is `Sexpr` at every (specialized)
-    // call site, so the element decode is type-directed the same way.
+    // `Vector<Option<Sexpr>>`'s `get` return type is `Option<Sexpr>` at every
+    // (specialized) call site, so the element decode is type-directed the same
+    // way — and that type is `Repr::Sexpr` through the empty list's niche, so
+    // it is the very same decode path the bare spelling exercised.
     let src = r#"
-        (defvar (v Vector<Sexpr>) (Vector::new))
+        (defvar (v Vector<Option<Sexpr>>) (Vector::new))
         (push v '7)
         (get v 0)
     "#;
