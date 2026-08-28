@@ -386,7 +386,7 @@ pub fn parse_type_spanned(
 
 /// Whether `v` is a `(:dyn ...)` list.
 pub fn is_dyn_form(heap: &Heap, v: Value) -> bool {
-    matches!(heap.car(v), Ok(Value::Symbol(id)) if heap.symbol_name(id) == ":dyn")
+    matches!(heap.car(v), Ok(Value::Symbol(id)) if id == SymId::DYN)
 }
 
 /// Parse the reader-joined `(:dyn Trait)` / `(:dyn Trait<Pin,...>)` form. The
@@ -424,7 +424,7 @@ fn parse_fn_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<T
         return Err(Error::TypeError("fn type must be (fn (params) ret)".to_string()));
     }
     match elems[0].0 {
-        Value::Symbol(id) if heap.symbol_name(id) == "fn" => {}
+        Value::Symbol(id) if id == SymId::FN => {}
         _ => return Err(Error::TypeError("expected fn type".to_string())),
     }
     let (params, rest) = match elems[1].0 {
@@ -446,7 +446,7 @@ fn parse_fn_params(
 ) -> Result<(Vec<Type>, Option<Box<Type>>), Error> {
     let rest_marker = ps
         .iter()
-        .position(|(p, _)| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest"));
+        .position(|(p, _)| matches!(p, Value::Symbol(id) if *id == SymId::REST));
     match rest_marker {
         Some(i) => {
             if i + 2 != ps.len() {

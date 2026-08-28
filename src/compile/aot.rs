@@ -301,7 +301,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         .filter_map(|(node, symbol)| {
             let type_name = node.strip_suffix("::print-object")?;
             let path = Path::from_segments(type_name.split("::").map(str::to_string).collect());
-            Some((crate::type_key::type_key_of(&path), symbol.clone()))
+            Some((crate::type_key::type_key_of(&path).into_owned(), symbol.clone()))
         })
         .collect();
 

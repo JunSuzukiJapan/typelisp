@@ -41,7 +41,7 @@ use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue};
 use inkwell::AddressSpace;
 
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{Heap, TypeKeyId, Value};
 
 use crate::eval::interp::{
     expect_str, expect_struct_box, scope_clone_frames_heap, scope_pop_frame_heap, scope_push_frame_heap,
@@ -1423,9 +1423,9 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         };
         let boxed = match found {
             // type-identity-ok: the built-in `Option`, a root name spelled in full
-            Some(v) => heap.alloc_enum("option".to_string(), 0, vec![v]),
+            Some(v) => heap.alloc_enum(TypeKeyId::OPTION, 0, vec![v]),
             // type-identity-ok: the built-in `Option`, a root name spelled in full
-            None => heap.alloc_enum("option".to_string(), 1, vec![]),
+            None => heap.alloc_enum(TypeKeyId::OPTION, 1, vec![]),
         };
         return crate::compile::runtime::encode(boxed);
     }

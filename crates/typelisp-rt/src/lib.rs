@@ -133,7 +133,7 @@ pub unsafe extern "C" fn rt_heap_live_count(_args: *const i64, _argc: u32) -> i6
 
 // ---- Stage 2/3: the tagged `Sexpr` representation ----------------------
 
-use typelisp_mem::{BoxId, Value};
+use typelisp_mem::{BoxId, TypeKeyId, Value};
 
 /// `(cons car cdr)` for compiled code.
 ///
@@ -1097,11 +1097,59 @@ pub unsafe extern "C" fn rt_ratio_denominator(args: *const i64, argc: u32) -> i6
 // unification plan, per `docs/TODO.md`): these three functions exist so the
 // representation itself can be exercised and tested in isolation first.
 
+/// The interned type identity named by a tagged `Sexpr` `Str` argument.
+///
+/// Compiled code has no `Path`, so it hands these shims the type's *name* —
+/// the literal `core_bridge` compiled from `type_key::type_key_of`. This is
+/// where that name crosses back into the heap's type-key table, and the one
+/// place in this crate where an identity is minted.
+///
+/// The lookup runs first so the steady state allocates nothing: a type is
+/// interned once (by the checker, or by the first value compiled code builds
+/// of it) and every later instance finds the id already there.
+///
+/// # Safety
+///
+/// `raw` must decode to a `Value::Str`; a `Heap` must be registered on this
+/// thread.
+unsafe fn type_key_arg(raw: i64, who: &str) -> TypeKeyId {
+    if let Some(key) = existing_type_key_arg(raw, who) {
+        return key;
+    }
+    let sid = match decode(raw) {
+        Value::Str(id) => id,
+        _ => unreachable!("existing_type_key_arg already rejected a non-Str"),
+    };
+    let heap = active_heap();
+    let name = heap.string(sid).to_string();
+    heap.intern_type_key(&name)
+}
+
+/// The interned identity named by a tagged `Sexpr` `Str` argument, or `None`
+/// if this heap has never seen that type — [`type_key_arg`] without the
+/// minting.
+///
+/// What an instance *test* wants: a type no value here has ever had answers
+/// the question by itself, and minting an id for it would only grow a
+/// permanent table with a name nothing will ever carry.
+///
+/// # Safety
+///
+/// Same as [`type_key_arg`].
+unsafe fn existing_type_key_arg(raw: i64, who: &str) -> Option<TypeKeyId> {
+    let sid = match decode(raw) {
+        Value::Str(id) => id,
+        _ => fatal(&format!("{}: type name argument is not a Str", who)),
+    };
+    let heap = active_heap();
+    heap.type_key_id(heap.string(sid))
+}
+
 /// `(rt-struct-new type-name field0 field1 ...)` for compiled code —
 /// allocates a boxed `Sexpr` struct. `args[0]` is a tagged `Sexpr` `Str`
-/// (the struct's type name, read once here rather than kept as a live
-/// `Sexpr` reference — `Heap::alloc_struct` copies it out into an owned
-/// `String`, like every other `BoxedObj` payload); `args[1..argc]` are the
+/// (the struct's type name, interned into a `TypeKeyId` here rather than
+/// kept as a live `Sexpr` reference — the box stores the id, not the name);
+/// `args[1..argc]` are the
 /// field values, already-tagged `Sexpr`s copied into the new struct's field
 /// vector unchanged (this function doesn't interpret them, same as
 /// [`rt_cons`] doesn't interpret its `car`/`cdr`).
@@ -1116,15 +1164,12 @@ pub unsafe extern "C" fn rt_struct_new(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_struct_new: expected at least 1 argument (the type name)");
     }
-    let type_name = match decode(*args) {
-        Value::Str(id) => active_heap().string(id).to_string(),
-        _ => fatal("rt_struct_new: first argument is not a Str"),
-    };
+    let type_key = type_key_arg(*args, "rt_struct_new");
     let mut fields = Vec::with_capacity(argc as usize - 1);
     for i in 1..argc as isize {
         fields.push(decode(*args.offset(i)));
     }
-    encode(active_heap().alloc_struct(type_name, fields))
+    encode(active_heap().alloc_struct(type_key, fields))
 }
 
 /// The index bound both `rt_struct_field_*` functions check before touching
@@ -1191,7 +1236,7 @@ pub unsafe extern "C-unwind" fn rt_struct_field_get(args: *const i64, argc: u32)
 
 /// `(rt-data-new type-name variant field0 field1 ...)` for compiled code —
 /// allocates a boxed enum value. `args[0]` is a tagged `Sexpr` `Str` (the
-/// enum's type name, copied out like [`rt_struct_new`]'s), `args[1]` is the
+/// enum's type name, interned like [`rt_struct_new`]'s), `args[1]` is the
 /// *raw* (untagged) variant index, `args[2..argc]` are the variant's field
 /// values, already-tagged `Sexpr`s stored unchanged.
 ///
@@ -1205,10 +1250,7 @@ pub unsafe extern "C" fn rt_data_new(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {
         fatal("rt_data_new: expected at least 2 arguments (type name, variant)");
     }
-    let type_name = match decode(*args) {
-        Value::Str(id) => active_heap().string(id).to_string(),
-        _ => fatal("rt_data_new: first argument is not a Str"),
-    };
+    let type_key = type_key_arg(*args, "rt_data_new");
     let variant = *args.add(1);
     if variant < 0 {
         fatal("rt_data_new: negative variant index");
@@ -1217,7 +1259,7 @@ pub unsafe extern "C" fn rt_data_new(args: *const i64, argc: u32) -> i64 {
     for i in 2..argc as isize {
         fields.push(decode(*args.offset(i)));
     }
-    encode(active_heap().alloc_enum(type_name, variant as usize, fields))
+    encode(active_heap().alloc_enum(type_key, variant as usize, fields))
 }
 
 /// `(rt-data-variant v)` for compiled code — the variant index of boxed
@@ -1303,20 +1345,19 @@ pub unsafe extern "C" fn rt_sexpr_instance_test(args: *const i64, argc: u32) -> 
         fatal("rt_sexpr_instance_test: expected 3 arguments");
     }
     let v = decode(*args);
-    let type_name = match decode(*args.add(1)) {
-        Value::Str(id) => active_heap().string(id).to_string(),
-        _ => fatal("rt_sexpr_instance_test: second argument is not a Str"),
+    let Some(type_key) = existing_type_key_arg(*args.add(1), "rt_sexpr_instance_test") else {
+        return 0;
     };
-    let variant = *args.add(2);
     let id = match v {
         Value::Boxed(id) => id,
         _ => return 0,
     };
+    let variant = *args.add(2);
     let heap = active_heap();
     let matches = if heap.is_struct(id) {
-        heap.struct_type_name(id) == type_name
+        heap.struct_type_key(id) == type_key
     } else if heap.is_enum(id) {
-        heap.enum_type_name(id) == type_name && (variant < 0 || heap.enum_variant(id) as i64 == variant)
+        heap.enum_type_key(id) == type_key && (variant < 0 || heap.enum_variant(id) as i64 == variant)
     } else {
         false
     };
@@ -1869,7 +1910,7 @@ unsafe fn hashtable_arg(args: *const i64, argc: u32, who: &str) -> BoxId {
 pub unsafe extern "C" fn rt_hashtable_keys(args: *const i64, argc: u32) -> i64 {
     let id = hashtable_arg(args, argc, "rt_hashtable_keys");
     let fields: Vec<Value> = active_heap().hashtable_pairs(id).into_iter().map(|(k, _)| k).collect();
-    encode(active_heap().alloc_struct("vector".to_string(), fields))
+    encode(active_heap().alloc_struct(TypeKeyId::VECTOR, fields))
 }
 
 /// `(rt-hashtable-values ht)` — a fresh `Vector<V>` of the map's values; see
@@ -1882,7 +1923,7 @@ pub unsafe extern "C" fn rt_hashtable_keys(args: *const i64, argc: u32) -> i64 {
 pub unsafe extern "C" fn rt_hashtable_values(args: *const i64, argc: u32) -> i64 {
     let id = hashtable_arg(args, argc, "rt_hashtable_values");
     let fields: Vec<Value> = active_heap().hashtable_pairs(id).into_iter().map(|(_, v)| v).collect();
-    encode(active_heap().alloc_struct("vector".to_string(), fields))
+    encode(active_heap().alloc_struct(TypeKeyId::VECTOR, fields))
 }
 
 /// `(rt-hashtable-entries ht)` — a fresh `Vector<cons-cell<K,V>>`, each entry
@@ -1903,12 +1944,12 @@ pub unsafe extern "C" fn rt_hashtable_entries(args: *const i64, argc: u32) -> i6
     let mut fields = Vec::with_capacity(pairs.len());
     let mut rooted = 0usize;
     for (k, v) in pairs {
-        let cell = active_heap().alloc_struct("cons-cell".to_string(), vec![k, v]);
+        let cell = active_heap().alloc_struct(TypeKeyId::CONS_CELL, vec![k, v]);
         active_heap().push_root(cell);
         rooted += 1;
         fields.push(cell);
     }
-    let vec = active_heap().alloc_struct("vector".to_string(), fields);
+    let vec = active_heap().alloc_struct(TypeKeyId::VECTOR, fields);
     for _ in 0..rooted {
         active_heap().pop_root();
     }

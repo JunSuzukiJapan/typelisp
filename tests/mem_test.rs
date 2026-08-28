@@ -19,6 +19,17 @@
 extern crate typelisp;
 use typelisp::{BoxId, Error, Heap, Value};
 
+/// `Heap::alloc_struct` with the type identity interned for you.
+///
+/// The heap stores an interned `TypeKeyId`, not a name, so a struct cannot be
+/// allocated without its identity already existing (that is the point — it is
+/// what makes "same type?" an integer comparison). These tests care about the
+/// *name* they wrote, so they mint it here.
+fn alloc_named_struct(h: &mut Heap, name: &str, fields: Vec<Value>) -> Value {
+    let key = h.intern_type_key(name);
+    h.alloc_struct(key, fields)
+}
+
 // ---- helpers ------------------------------------------------------------
 
 /// `free + live == capacity` must hold at all times.
@@ -209,14 +220,14 @@ fn shared_substructure_lives_until_all_owners_gone() {
 #[test]
 fn a_struct_reachable_only_through_a_cons_car_survives_gc() {
     let mut h = Heap::with_capacity(64);
-    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
     let list = h.cons(s, Value::Empty).unwrap();
     h.push_root(list);
     // unrelated garbage, both cons cells and boxes
     for i in 0..20 {
         let _ = h.cons(Value::Int(i), Value::Empty).unwrap();
     }
-    let _ = h.alloc_struct("garbage".to_string(), vec![Value::Int(0)]);
+    let _ = alloc_named_struct(&mut h, "garbage", vec![Value::Int(0)]);
     assert_eq!(h.box_count(), 2, "the rooted struct plus the unrooted garbage struct");
     h.gc();
     assert_eq!(h.box_count(), 1, "only the struct reachable through the rooted cons survives");
@@ -230,7 +241,7 @@ fn a_struct_reachable_only_through_a_cons_car_survives_gc() {
 #[test]
 fn a_struct_reachable_only_through_a_cons_car_is_reclaimed_once_unrooted() {
     let mut h = Heap::with_capacity(64);
-    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
     let list = h.cons(s, Value::Empty).unwrap();
     h.push_root(list);
     h.gc();
@@ -832,12 +843,15 @@ fn car_cdr_of_non_cons_errors() {
 #[test]
 fn symbols_intern_by_name() {
     let mut h = Heap::with_capacity(8);
+    // Counted as a delta: every heap starts with the syntax words
+    // `BUILTIN_SYMBOLS` pre-interns (see `SymId`'s constants).
+    let before = h.symbol_count();
     let a = h.intern_symbol("foo");
     let b = h.intern_symbol("foo");
     let c = h.intern_symbol("bar");
     assert_eq!(a, b, "equal names must intern to the same symbol");
     assert_ne!(a, c);
-    assert_eq!(h.symbol_count(), 2);
+    assert_eq!(h.symbol_count() - before, 2);
     if let Value::Symbol(id) = a {
         assert_eq!(h.symbol_name(id), "foo");
     } else {
@@ -848,12 +862,13 @@ fn symbols_intern_by_name() {
 #[test]
 fn symbols_are_case_insensitive() {
     let mut h = Heap::with_capacity(8);
+    let before = h.symbol_count();
     let lower = h.intern_symbol("foo");
     let upper = h.intern_symbol("FOO");
     let mixed = h.intern_symbol("Foo");
     assert_eq!(lower, upper);
     assert_eq!(lower, mixed);
-    assert_eq!(h.symbol_count(), 1);
+    assert_eq!(h.symbol_count() - before, 1);
     if let Value::Symbol(id) = mixed {
         assert_eq!(h.symbol_name(id), "foo"); // canonical lowercase
     } else {
@@ -929,7 +944,7 @@ fn string_slots_are_recycled() {
 #[test]
 fn structs_store_and_read_back_fields() {
     let mut h = Heap::with_capacity(8);
-    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
     match s {
         Value::Boxed(id) => {
             assert_eq!(h.struct_type_name(id), "point");
@@ -945,7 +960,7 @@ fn structs_store_and_read_back_fields() {
 #[test]
 fn struct_with_no_fields_has_zero_field_count() {
     let mut h = Heap::with_capacity(8);
-    let s = h.alloc_struct("unit-struct".to_string(), vec![]);
+    let s = alloc_named_struct(&mut h, "unit-struct", vec![]);
     match s {
         Value::Boxed(id) => assert_eq!(h.struct_field_count(id), 0),
         other => panic!("expected a boxed struct, got {:?}", other),
@@ -955,7 +970,7 @@ fn struct_with_no_fields_has_zero_field_count() {
 #[test]
 fn struct_set_field_mutates_in_place() {
     let mut h = Heap::with_capacity(8);
-    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
     let id = match s {
         Value::Boxed(id) => id,
         other => panic!("expected a boxed struct, got {:?}", other),
@@ -969,7 +984,7 @@ fn struct_set_field_mutates_in_place() {
 #[should_panic(expected = "out of range")]
 fn struct_field_out_of_range_panics() {
     let mut h = Heap::with_capacity(8);
-    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1)]);
+    let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1)]);
     let id = match s {
         Value::Boxed(id) => id,
         other => panic!("expected a boxed struct, got {:?}", other),
@@ -992,7 +1007,7 @@ fn struct_accessor_on_a_boxed_float_panics() {
 #[test]
 fn unreachable_structs_are_collected() {
     let mut h = Heap::with_capacity(8);
-    let _ = h.alloc_struct("garbage".to_string(), vec![Value::Int(1)]);
+    let _ = alloc_named_struct(&mut h, "garbage", vec![Value::Int(1)]);
     assert_eq!(h.box_count(), 1);
     h.gc(); // not rooted, not in any cell -> reclaimed
     assert_eq!(h.box_count(), 0);
@@ -1001,10 +1016,10 @@ fn unreachable_structs_are_collected() {
 #[test]
 fn struct_reachable_via_rooted_cons_survives() {
     let mut h = Heap::with_capacity(8);
-    let s = h.alloc_struct("keep".to_string(), vec![Value::Int(1)]);
+    let s = alloc_named_struct(&mut h, "keep", vec![Value::Int(1)]);
     let cell = h.cons(s, Value::Empty).unwrap();
     h.push_root(cell);
-    let _ = h.alloc_struct("drop".to_string(), vec![Value::Int(2)]); // unrooted garbage
+    let _ = alloc_named_struct(&mut h, "drop", vec![Value::Int(2)]); // unrooted garbage
     h.gc();
     assert_eq!(h.box_count(), 1); // only "keep" survives
     match h.car(cell).unwrap() {
@@ -1021,7 +1036,7 @@ fn struct_reachable_via_rooted_cons_survives() {
 fn gc_traces_into_a_rooted_structs_fields() {
     let mut h = Heap::with_capacity(64);
     let inner = list_of(&mut h, &[10, 20, 30]);
-    let s = h.alloc_struct("wrapper".to_string(), vec![inner]);
+    let s = alloc_named_struct(&mut h, "wrapper", vec![inner]);
     h.push_root(s);
     for i in 0..20 {
         let _ = h.cons(Value::Int(i), Value::Empty).unwrap(); // unrelated garbage
@@ -1046,7 +1061,7 @@ fn gc_traces_into_a_rooted_structs_fields() {
 #[test]
 fn struct_push_field_grows_field_count() {
     let mut h = Heap::with_capacity(8);
-    let s = h.alloc_struct("vector".to_string(), vec![]);
+    let s = alloc_named_struct(&mut h, "vector", vec![]);
     let id = match s {
         Value::Boxed(id) => id,
         other => panic!("expected a boxed struct, got {:?}", other),
@@ -1074,7 +1089,7 @@ fn struct_push_field_on_a_boxed_float_panics() {
 #[test]
 fn is_struct_distinguishes_struct_from_float() {
     let mut h = Heap::with_capacity(8);
-    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1)]);
+    let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1)]);
     let f = h.alloc_float(1.5);
     let (sid, fid) = match (s, f) {
         (Value::Boxed(sid), Value::Boxed(fid)) => (sid, fid),
@@ -1207,7 +1222,7 @@ fn hashtable_accessor_on_a_boxed_float_panics() {
 #[should_panic(expected = "does not hold a HashTable")]
 fn hashtable_accessor_on_a_boxed_struct_panics() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_struct("point".to_string(), vec![Value::Int(1)]));
+    let id = as_boxed(alloc_named_struct(&mut h, "point", vec![Value::Int(1)]));
     h.hashtable_count(id);
 }
 
@@ -1224,7 +1239,7 @@ fn unsupported_key_type_panics() {
 fn is_hashtable_distinguishes_hashtable_from_struct_and_float() {
     let mut h = Heap::with_capacity(8);
     let map = as_boxed(h.alloc_hashtable());
-    let s = as_boxed(h.alloc_struct("point".to_string(), vec![Value::Int(1)]));
+    let s = as_boxed(alloc_named_struct(&mut h, "point", vec![Value::Int(1)]));
     let f = as_boxed(h.alloc_float(1.5));
     assert!(h.is_hashtable(map));
     assert!(!h.is_hashtable(s));
@@ -1456,7 +1471,7 @@ fn cell_set_releases_the_old_value_and_protects_the_new() {
 fn gc_traces_through_cell_then_struct_then_cons() {
     let mut h = Heap::with_capacity(4);
     let leaf = h.cons(Value::Int(9), Value::Empty).unwrap();
-    let boxed = h.alloc_struct("wrapper".to_string(), vec![leaf]);
+    let boxed = alloc_named_struct(&mut h, "wrapper", vec![leaf]);
     let cell = h.alloc_cell(boxed);
     h.gc();
     let id = match h.cell_get(*cell) {
@@ -1642,7 +1657,7 @@ fn is_scope_distinguishes_scopes_from_other_boxes() {
     let mut h = Heap::with_capacity(8);
     let scope = as_boxed(h.alloc_scope());
     let table = as_boxed(h.alloc_hashtable());
-    let strukt = as_boxed(h.alloc_struct("point".to_string(), vec![Value::Int(1)]));
+    let strukt = as_boxed(alloc_named_struct(&mut h, "point", vec![Value::Int(1)]));
     let float = as_boxed(h.alloc_float(1.5));
     assert!(h.is_scope(scope));
     assert!(!h.is_scope(table));
@@ -1710,10 +1725,10 @@ fn a_shared_frame_survives_the_death_of_one_of_its_scopes() {
 #[test]
 fn a_dyn_box_keeps_the_value_it_wraps_alive() {
     let mut h = Heap::with_capacity(64);
-    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
     let d = h.alloc_dyn(7, s);
     h.push_root(d);
-    let _ = h.alloc_struct("garbage".to_string(), vec![Value::Int(0)]);
+    let _ = alloc_named_struct(&mut h, "garbage", vec![Value::Int(0)]);
     assert_eq!(h.box_count(), 3, "the struct, its dyn box, and the unrooted garbage");
     h.gc();
     assert_eq!(h.box_count(), 2, "the dyn box and the struct it wraps both survive");
@@ -1730,7 +1745,7 @@ fn a_dyn_box_keeps_the_value_it_wraps_alive() {
 #[test]
 fn a_dyn_box_and_its_value_are_reclaimed_together_once_unrooted() {
     let mut h = Heap::with_capacity(64);
-    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
     let d = h.alloc_dyn(0, s);
     h.push_root(d);
     h.gc();
@@ -1744,7 +1759,7 @@ fn a_dyn_box_and_its_value_are_reclaimed_together_once_unrooted() {
 #[test]
 fn a_dyn_box_reachable_only_through_a_cons_car_survives_gc() {
     let mut h = Heap::with_capacity(64);
-    let s = h.alloc_struct("point".to_string(), vec![Value::Int(3), Value::Int(4)]);
+    let s = alloc_named_struct(&mut h, "point", vec![Value::Int(3), Value::Int(4)]);
     let d = h.alloc_dyn(2, s);
     let list = h.cons(d, Value::Empty).unwrap();
     h.push_root(list);

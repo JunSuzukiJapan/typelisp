@@ -132,6 +132,54 @@ impl ConsRef {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SymId(pub(crate) u32);
 
+/// The symbols every heap has from birth, interned by `Heap::with_capacity` in this
+/// order so that their ids are compile-time constants (the [`SymId`]
+/// associated constants below).
+///
+/// These are the ones the language's *syntax* is made of — the head of a
+/// quasiquote hole, a lambda list marker, the `pub` in front of a definition.
+/// Recognizing one used to mean reading its name back out of the symbol table
+/// and comparing strings, which quietly depended on `intern_symbol`'s
+/// case-folding: a site that spelled the literal `"&REST"` would simply never
+/// match. Comparing ids cannot be spelled wrong.
+///
+/// Lowercase because that is the canonical form `intern_symbol` folds to; a
+/// name here that is not already canonical would intern under a different one
+/// and break the index/constant correspondence.
+pub const BUILTIN_SYMBOLS: &[&str] = &[
+    "quote",
+    "unquote",
+    "unquote-splicing",
+    "the",
+    "fn",
+    "pub",
+    "where",
+    "return",
+    "&rest",
+    "&optional",
+    "&key",
+    ":dyn",
+    "=",
+    ":=",
+];
+
+impl SymId {
+    pub const QUOTE: SymId = SymId(0);
+    pub const UNQUOTE: SymId = SymId(1);
+    pub const UNQUOTE_SPLICING: SymId = SymId(2);
+    pub const THE: SymId = SymId(3);
+    pub const FN: SymId = SymId(4);
+    pub const PUB: SymId = SymId(5);
+    pub const WHERE: SymId = SymId(6);
+    pub const RETURN: SymId = SymId(7);
+    pub const REST: SymId = SymId(8);
+    pub const OPTIONAL: SymId = SymId(9);
+    pub const KEY: SymId = SymId(10);
+    pub const DYN: SymId = SymId(11);
+    pub const EQUALS: SymId = SymId(12);
+    pub const COLON_EQUALS: SymId = SymId(13);
+}
+
 /// Reference to a string in the heap's string store.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct StrId(pub(crate) u32);
@@ -139,6 +187,62 @@ pub struct StrId(pub(crate) u32);
 /// Reference to an interned `::` path (a sequence of symbols) in the heap.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PathId(pub(crate) u32);
+
+/// A type's **runtime identity**, interned in the heap's type-key table.
+///
+/// Every [`BoxedObj::Struct`]/[`BoxedObj::Enum`] carries one of these, and
+/// asking "are these two values the same type?" or "is this value a `point`?"
+/// is an integer comparison on it. The identity used to be the type's name
+/// spelled out as a `String` on every instance, which meant every such test
+/// was a string comparison and every allocation copied the name again; the
+/// spelling now lives once, in the table, and only printing and diagnostics
+/// go back to it (see [`super::heap::Heap::type_key_name`]).
+///
+/// Interning is permanent — an id stays valid for the heap's lifetime and
+/// equal names always share one id, exactly like [`SymId`].
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct TypeKeyId(pub(crate) u32);
+
+/// The type keys every heap has from birth, interned by `Heap::with_capacity` in this
+/// order so that their ids are compile-time constants (the `TypeKeyId`
+/// associated constants below).
+///
+/// These are the types the *runtime* itself builds without a checker in the
+/// loop: what `typelisp-rt`'s shims wrap results in, what the reader returns,
+/// and what the heap's own `HashTable`/`Scope` machinery allocates. A user
+/// type is interned on first use like any other name; only these need to be
+/// nameable from Rust without a heap in hand.
+pub const BUILTIN_TYPE_KEYS: &[&str] = &[
+    "option",
+    "result",
+    "vector",
+    "cons-cell",
+    "hashtable",
+    "scope",
+    "scope-frame",
+    "readerror",
+    "fileerror",
+    "parseinterror",
+    "parsefloaterror",
+];
+
+impl TypeKeyId {
+    pub const OPTION: TypeKeyId = TypeKeyId(0);
+    pub const RESULT: TypeKeyId = TypeKeyId(1);
+    pub const VECTOR: TypeKeyId = TypeKeyId(2);
+    pub const CONS_CELL: TypeKeyId = TypeKeyId(3);
+    pub const HASHTABLE: TypeKeyId = TypeKeyId(4);
+    pub const SCOPE: TypeKeyId = TypeKeyId(5);
+    pub const SCOPE_FRAME: TypeKeyId = TypeKeyId(6);
+    pub const READ_ERROR: TypeKeyId = TypeKeyId(7);
+    pub const FILE_ERROR: TypeKeyId = TypeKeyId(8);
+    pub const PARSE_INT_ERROR: TypeKeyId = TypeKeyId(9);
+    pub const PARSE_FLOAT_ERROR: TypeKeyId = TypeKeyId(10);
+
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
 
 // `as_u32`/`from_u32`: for `typelisp-rt`'s tagged compiled-code
 // representation, which embeds these as plain integer payloads (see
@@ -208,7 +312,7 @@ impl BoxId {
 ///
 /// `Struct` is the second case: `defstruct` instances, `Vector<T>`, and
 /// `cons-cell<K,V>` all share this one variant rather than getting one each
-/// — `type_name` plus whichever builtin method dispatches on it is what
+/// — `type_key` plus whichever builtin method dispatches on it is what
 /// gives the fields their meaning (the same "no special-cased runtime
 /// shape, just a box + a name" treatment `Vector<T>` already got when it was
 /// reintroduced on top of `RtValue::Struct`), not three parallel encodings
@@ -230,7 +334,7 @@ pub(crate) enum BoxedObj {
     /// always kept in reduced form with a positive denominator (the crate
     /// normalizes on construction). Same heap-boxing rationale as `Bignum`.
     Ratio(BigRational),
-    Struct { type_name: String, payload: StructPayload },
+    Struct { type_key: TypeKeyId, payload: StructPayload },
     /// An enum (sum-ADT) value: `Option<T>`/`Result<T,E>`/a user `defenum`
     /// instance — one variant's index plus that variant's field values. The
     /// third case of the unification mechanism (after `Float` and `Struct`),
@@ -243,12 +347,12 @@ pub(crate) enum BoxedObj {
     /// `Heap::is_struct` must stay `false` for an enum (the interpreter's
     /// `match` dispatch, struct field accessors, and `rt_struct_*` all key
     /// on it), and `Some(x)` would otherwise be indistinguishable from a
-    /// one-field struct. `type_name` is kept for display/debugging (variant
+    /// one-field struct. `type_key` is kept for display/debugging (variant
     /// *names* live in the checker's registry; the runtime needs only the
     /// index), mirroring `Struct`'s own. Enum values are immutable — no
     /// setter exists at any layer — so sharing one box between bindings is
     /// unobservable.
-    Enum { type_name: String, variant: usize, fields: Vec<Value> },
+    Enum { type_key: TypeKeyId, variant: usize, fields: Vec<Value> },
     /// A shared mutable variable slot — the heap-resident replacement for
     /// the interpreter's `Rc<RefCell<RtValue>>` binding cells, for bindings
     /// whose static type's runtime representation is a `Value` (`Sexpr`,

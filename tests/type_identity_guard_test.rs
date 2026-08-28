@@ -1,12 +1,13 @@
 //! Keeps the "a type is identified by its whole path" invariant enforceable.
 //!
-//! A heap value's type identity is a *string* (`Heap::alloc_struct`/
-//! `alloc_enum`), and so is a built-in type's name. Both are `String`, so
-//! nothing in the type system stops a new call site from spelling either one
-//! as `Path::last_segment` — the last segment alone — which is exactly how
-//! two bugs got in on 2026-08-04:
+//! A heap value's type identity is an interned `TypeKeyId`, but the *name*
+//! it was interned under is a `String`, and so is a built-in type's name.
+//! Both are `String`, so nothing in the type system stops a new call site
+//! from spelling either one as `Path::last_segment` — the last segment alone
+//! — which is exactly how two bugs got in on 2026-08-04:
 //!
-//! - compiled code wrote a value's type name unqualified, so a value it built
+//! - compiled code wrote a value's type name unqualified, so it interned a
+//!   *different* identity, and a value it built
 //!   was unmatchable by interpreted code, printed `<unknown-variant>`, and
 //!   compared unequal to its own twin (`2dd5171`);
 //! - compiled code recognized the *built-in* `vector`/`hashtable` by last
@@ -165,69 +166,135 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
     let hits = scan(
         &|rel| rel == "crates/typelisp-front/src/type_key.rs",
         &|line| {
-            ["alloc_struct(", "alloc_enum(", "struct_type_name(", "enum_type_name("]
-                .iter()
-                .any(|needle| line.contains(needle))
+            [
+                "alloc_struct(",
+                "alloc_enum(",
+                "intern_type_key(",
+                "struct_type_key(",
+                "enum_type_key(",
+                "struct_type_name(",
+                "enum_type_name(",
+            ]
+            .iter()
+            .any(|needle| line.contains(needle))
         },
     );
     report(
         &hits,
         "A heap value's type identity must go through `crates/typelisp-front/src/type_key.rs`.",
-        "The stored string is the value's identity, and compiled code, the interpreter, the \
-         printer and `equalp` all have to agree on how it is spelled — they did not, twice \
-         (2dd5171). Write it with `type_key::type_key_of`, compare it with \
+        "The interned key is the value's identity, and compiled code, the interpreter, the \
+         printer and `equalp` all have to agree on the name it is interned under — they did \
+         not, twice (2dd5171). Mint it with `type_key::type_key_id`, write it with \
+         `type_key::alloc_typed_struct`/`alloc_typed_enum`, compare it with \
          `type_key::heap_type_is`, read it back with `type_key::heap_type_path`.",
     );
 }
 
-/// Rule 3: the type keys `typelisp-rt` spells for itself must be the ones
-/// `type_key_of` produces.
+/// Rule 3: the type identities the runtime crates mint for themselves must be
+/// interned under the names `type_key_of` produces.
 ///
 /// The source scan cannot reach them — `crates/typelisp-rt` is a separate
 /// crate with no `Path` type to derive a key from, which is why
 /// `rt_data_new` has always received its key as a string from compiled code
 /// instead. `stream_builtin` is the one place that cannot: it builds
 /// `Result`/`Option`/`FileError` values *itself*, on both sides of the
-/// compile boundary, so it names them from constants. `sys_builtin` is the
-/// second such place, for the same reason (`Result<_, ParseIntError>` and
-/// friends), and `typelisp_read::shim` the third (`Result<Sexpr, ReadError>`). This is those constants' end of the agreement, checked rather
-/// than assumed — a value built under a key nobody else spells is
-/// unmatchable, prints as `<unknown-variant>`, and compares unequal to its
-/// own twin, silently.
+/// compile boundary. `sys_builtin` is the second such place, for the same
+/// reason (`Result<_, ParseIntError>` and friends), and `typelisp_read::shim`
+/// the third (`Result<Sexpr, ReadError>`). They all name those types through
+/// `typelisp_mem`'s pre-interned table, whose entries every `Heap` mints at
+/// construction so that a `TypeKeyId` for them is a compile-time constant.
+///
+/// This is that table's end of the agreement, checked rather than assumed — a
+/// value built under a key nobody else spells is unmatchable, prints as
+/// `<unknown-variant>`, and compares unequal to its own twin, silently.
 #[test]
 fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
     use typelisp::types::Path;
-    for (constant, path) in [
-        (typelisp::compile::runtime::stream_builtin::OPTION_TYPE_KEY, "option"),
-        (typelisp::compile::runtime::stream_builtin::RESULT_TYPE_KEY, "result"),
-        (typelisp::compile::runtime::stream_builtin::FILE_ERROR_TYPE_KEY, typelisp::check::registry::FILE_ERROR),
-        // `file-list-directory` builds a `Vector<string>` box directly, so it
-        // needs the key too — and unlike the others, its spelling is what
-        // `rt_struct_new`'s callers have always passed as a bare literal.
-        (typelisp::compile::runtime::stream_builtin::VECTOR_TYPE_KEY, "vector"),
-        (typelisp::compile::runtime::sys_builtin::RESULT_TYPE_KEY, "result"),
-        (
-            typelisp::compile::runtime::sys_builtin::PARSE_INT_ERROR_TYPE_KEY,
-            typelisp::check::registry::PARSE_INT_ERROR,
-        ),
-        (
-            typelisp::compile::runtime::sys_builtin::PARSE_FLOAT_ERROR_TYPE_KEY,
-            typelisp::check::registry::PARSE_FLOAT_ERROR,
-        ),
-        (typelisp_read::shim::RESULT_TYPE_KEY, "result"),
-        (typelisp_read::shim::READ_ERROR_TYPE_KEY, typelisp::check::registry::READ_ERROR),
+    use typelisp::{TypeKeyId, BUILTIN_TYPE_KEYS};
+
+    for (key, path) in [
+        (TypeKeyId::OPTION, "option"),
+        (TypeKeyId::RESULT, "result"),
+        (TypeKeyId::FILE_ERROR, typelisp::check::registry::FILE_ERROR),
+        (TypeKeyId::READ_ERROR, typelisp::check::registry::READ_ERROR),
+        (TypeKeyId::PARSE_INT_ERROR, typelisp::check::registry::PARSE_INT_ERROR),
+        (TypeKeyId::PARSE_FLOAT_ERROR, typelisp::check::registry::PARSE_FLOAT_ERROR),
+        // `file-list-directory` builds a `Vector<string>` box directly, and
         // `read-datum-at` pairs its datum with its end index in a
-        // `cons-cell<Sexpr, i64>` box, built on the reader's side of the
-        // boundary — CL's second return value, which this language has no
-        // multiple values to carry.
-        (typelisp_read::shim::CONS_CELL_TYPE_KEY, "cons-cell"),
+        // `cons-cell<Sexpr, i64>` box (CL's second return value, which this
+        // language has no multiple values to carry) — both on the runtime's
+        // own side of the boundary, so both need the identity too.
+        (TypeKeyId::VECTOR, "vector"),
+        (TypeKeyId::CONS_CELL, "cons-cell"),
+        // The heap's own machinery: a `HashTable<K,V>` box, and the frames a
+        // `Scope<V>` is made of.
+        (TypeKeyId::HASHTABLE, "hashtable"),
+        (TypeKeyId::SCOPE, "scope"),
+        (TypeKeyId::SCOPE_FRAME, "scope-frame"),
     ] {
         assert_eq!(
-            constant,
+            BUILTIN_TYPE_KEYS[key.as_u32() as usize],
             typelisp::type_key::type_key_of(&Path::root(path)),
-            "typelisp-rt spells `{}`'s type key differently from `type_key_of`",
+            "the pre-interned key at index {} is not the one `type_key_of` produces for `{}`",
+            key.as_u32(),
             path
         );
+    }
+}
+
+/// The `TypeKeyId` constants must be the indices `Heap::with_capacity` interns
+/// [`BUILTIN_TYPE_KEYS`] at — the whole reason those constants can exist.
+///
+/// Rule 3 above compares *names*, so an off-by-one in the constants would
+/// still let it pass while every runtime-built value silently took on a
+/// neighbour's identity. This checks the ids against a real heap.
+#[test]
+fn the_builtin_type_key_constants_are_what_a_heap_interns() {
+    use typelisp::{Heap, BUILTIN_TYPE_KEYS};
+
+    let mut heap = Heap::with_capacity(64);
+    for (i, name) in BUILTIN_TYPE_KEYS.iter().enumerate() {
+        let id = heap.intern_type_key(name);
+        assert_eq!(
+            id.as_u32() as usize,
+            i,
+            "`{}` does not intern at its table index — `Heap::with_capacity` and \
+             `BUILTIN_TYPE_KEYS` have drifted apart",
+            name
+        );
+        assert_eq!(heap.type_key_name(id), *name);
+    }
+}
+
+/// The `SymId` constants must be the indices `Heap::with_capacity` interns
+/// [`BUILTIN_SYMBOLS`] at.
+///
+/// The same drift this file's other constant test guards, one table over: a
+/// syntax word recognized by the wrong id would silently stop being
+/// recognized (`&rest` read as an ordinary parameter, `pub` as a definition
+/// name), and nothing about the spelling would look wrong.
+///
+/// Each name must also already be canonical — `intern_symbol` folds to
+/// lowercase, so a name spelled otherwise would intern under a different one
+/// and land at a different index.
+#[test]
+fn the_builtin_symbol_constants_are_what_a_heap_interns() {
+    use typelisp::{Heap, Value, BUILTIN_SYMBOLS};
+
+    let mut heap = Heap::with_capacity(64);
+    for (i, name) in BUILTIN_SYMBOLS.iter().enumerate() {
+        assert_eq!(*name, name.to_lowercase(), "`{}` is not the canonical form it interns under", name);
+        let Value::Symbol(id) = heap.intern_symbol(name) else {
+            panic!("intern_symbol always returns a symbol");
+        };
+        assert_eq!(
+            id.as_u32() as usize,
+            i,
+            "`{}` does not intern at its table index — `Heap::with_capacity` and \
+             `BUILTIN_SYMBOLS` have drifted apart",
+            name
+        );
+        assert_eq!(heap.symbol_name(id), *name);
     }
 }
 

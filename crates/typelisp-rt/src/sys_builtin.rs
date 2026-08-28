@@ -18,28 +18,23 @@
 //! `std::time` machinery in with it — see this crate's own module docs on how
 //! archive-member granularity decides what an AOT binary pays for.
 
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{Heap, TypeKeyId, Value};
 
-/// The type keys these results are built with. Same standing exception (and
-/// same guard test) as [`crate::stream_builtin`]'s three: this crate has no
-/// `Path` to derive a key from, so the spellings are written out and
-/// `tests/type_identity_guard_test.rs` asserts each equals what
-/// `type_key::type_key_of` produces for that root name.
-pub const RESULT_TYPE_KEY: &str = "result";
-pub const PARSE_INT_ERROR_TYPE_KEY: &str = "parseinterror";
-pub const PARSE_FLOAT_ERROR_TYPE_KEY: &str = "parsefloaterror";
+// The types these results are built with come from `typelisp_mem`'s
+// pre-interned table — same standing exception (and same guard test) as
+// [`crate::stream_builtin`]: this crate has no `Path` to derive a name from.
 
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
 fn result_ok(heap: &mut Heap, v: Value) -> Value {
-    heap.alloc_enum(RESULT_TYPE_KEY.to_string(), 0, vec![v])
+    heap.alloc_enum(TypeKeyId::RESULT, 0, vec![v])
 }
 
 /// `Err(<ErrType>(msg))`: the concrete single-variant error type of the
 /// failing builtin, wrapped in `Result`'s `err`.
-fn result_err(heap: &mut Heap, err_type_key: &str, msg: String) -> Value {
+fn result_err(heap: &mut Heap, err_type_key: TypeKeyId, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
-    let err_val = heap.alloc_enum(err_type_key.to_string(), 0, vec![msg_val]);
-    heap.alloc_enum(RESULT_TYPE_KEY.to_string(), 1, vec![err_val])
+    let err_val = heap.alloc_enum(err_type_key, 0, vec![msg_val]);
+    heap.alloc_enum(TypeKeyId::RESULT, 1, vec![err_val])
 }
 
 /// `(parse-int s)`: a decimal `i32` via `str::parse`, `Err` on anything else.
@@ -51,7 +46,7 @@ pub fn parse_int(heap: &mut Heap, s: &str) -> Value {
         Ok(n) => result_ok(heap, Value::Int(n as i64)),
         Err(_) => result_err(
             heap,
-            PARSE_INT_ERROR_TYPE_KEY,
+            TypeKeyId::PARSE_INT_ERROR,
             format!("parse-int: invalid integer literal: {:?}", s),
         ),
     }
@@ -68,7 +63,7 @@ pub fn parse_float(heap: &mut Heap, s: &str) -> Value {
         }
         Err(_) => result_err(
             heap,
-            PARSE_FLOAT_ERROR_TYPE_KEY,
+            TypeKeyId::PARSE_FLOAT_ERROR,
             format!("parse-float: invalid float literal: {:?}", s),
         ),
     }
@@ -144,7 +139,7 @@ pub fn command_line_args(heap: &mut Heap) -> Value {
         None => std::env::args().collect(),
     };
     let elems: Vec<Value> = args.into_iter().map(|a| heap.alloc_string(a)).collect();
-    heap.alloc_struct(crate::stream_builtin::VECTOR_TYPE_KEY.to_string(), elems)
+    heap.alloc_struct(TypeKeyId::VECTOR, elems)
 }
 
 /// `(getenv name)`: the environment variable's value, or `none` when it is
@@ -182,7 +177,7 @@ fn option_value(heap: &mut Heap, v: Option<Value>) -> Value {
         Some(x) => (0, vec![x]),
         None => (1, vec![]),
     };
-    heap.alloc_enum(crate::stream_builtin::OPTION_TYPE_KEY.to_string(), variant, fields)
+    heap.alloc_enum(TypeKeyId::OPTION, variant, fields)
 }
 
 /// `(lisp-implementation-version)` (CLHS 25.1): this build's version, taken

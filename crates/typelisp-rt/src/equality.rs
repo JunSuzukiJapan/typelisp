@@ -127,13 +127,13 @@ pub fn equalp_val(heap: &Heap, a: Value, b: Value) -> bool {
         // `a == b`, a pointer-identity `BoxId` compare, is exactly that, so
         // this recursive arm must come *before* it or it would never run).
         (Value::Boxed(ia), Value::Boxed(ib)) if heap.is_struct(ia) && heap.is_struct(ib) => {
-            heap.struct_type_name(ia) == heap.struct_type_name(ib)
+            heap.struct_type_key(ia) == heap.struct_type_key(ib)
                 && heap.struct_field_count(ia) == heap.struct_field_count(ib)
                 && (0..heap.struct_field_count(ia))
                     .all(|i| equalp_val(heap, heap.struct_field(ia, i), heap.struct_field(ib, i)))
         }
         (Value::Boxed(ia), Value::Boxed(ib)) if heap.is_enum(ia) && heap.is_enum(ib) => {
-            heap.enum_type_name(ia) == heap.enum_type_name(ib)
+            heap.enum_type_key(ia) == heap.enum_type_key(ib)
                 && heap.enum_variant(ia) == heap.enum_variant(ib)
                 && heap.enum_field_count(ia) == heap.enum_field_count(ib)
                 && (0..heap.enum_field_count(ia))

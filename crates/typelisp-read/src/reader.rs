@@ -497,7 +497,7 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> Result<
             // resulting list. Inside a generic argument the same spelling is
             // handled a level down, by `extend_angle_token` + the type
             // parser, since there is no datum boundary there at all.
-            if matches!(v, Value::Symbol(id) if heap.symbol_name(id) == ":dyn") {
+            if matches!(v, Value::Symbol(id) if id == SymId::DYN) {
                 skip_ws_comments(cur, heap, features)?;
                 if matches!(cur.peek(), None | Some(')')) {
                     return Err(Error::ReadError("`:dyn` must be followed by a trait name".to_string()));

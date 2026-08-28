@@ -40,7 +40,7 @@ use std::collections::HashMap;
 use std::ptr;
 
 use crate::Error;
-use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, MemHashKey, PathId, StrId, StructPayload, SymId, Value};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, MemHashKey, PathId, StrId, StructPayload, SymId, TypeKeyId, Value};
 
 /// How far past its initial capacity a heap may grow by default — see
 /// [`Heap::with_capacity`]. Large enough that program text plus a working set
@@ -90,6 +90,12 @@ pub struct Heap {
     // interned symbols (permanent)
     sym_names: Vec<String>,
     sym_ids: HashMap<String, u32>,
+
+    // interned type identities (permanent) — see `TypeKeyId`. The first
+    // `BUILTIN_TYPE_KEYS.len()` entries are pre-interned by `Heap::with_capacity`, so their
+    // ids are the `TypeKeyId` associated constants.
+    type_keys: Vec<String>,
+    type_key_ids: HashMap<String, u32>,
 
 
     // interned `::` paths (permanent; reference only permanent symbols)
@@ -183,7 +189,7 @@ impl Heap {
     pub fn with_capacity(capacity: usize) -> Heap {
         let (chunk, free) = Self::alloc_chunk(capacity, ptr::null_mut());
 
-        Heap {
+        let mut heap = Heap {
             chunks: vec![chunk],
             cap: capacity,
             growth_limit: capacity.saturating_mul(GROWTH_FACTOR),
@@ -197,6 +203,8 @@ impl Heap {
             in_flight_throw: None,
             sym_names: Vec::new(),
             sym_ids: HashMap::new(),
+            type_keys: Vec::new(),
+            type_key_ids: HashMap::new(),
             paths: Vec::new(),
             path_ids: HashMap::new(),
             str_slots: Vec::new(),
@@ -209,7 +217,14 @@ impl Heap {
             cell_registry: Vec::new(),
             locs: Vec::new(),
             loc_ids: HashMap::new(),
+        };
+        for name in crate::value::BUILTIN_SYMBOLS {
+            heap.intern_symbol(name);
         }
+        for key in crate::value::BUILTIN_TYPE_KEYS {
+            heap.intern_type_key(key);
+        }
+        heap
     }
 
     // -- Source locations (see `Cell`'s doc comment) -------------------------
@@ -546,6 +561,43 @@ impl Heap {
     }
 
 
+    // ---- type identities ---------------------------------------------------
+
+    /// Intern a type identity by name, returning the [`TypeKeyId`] every
+    /// instance of that type carries. Permanent, like a symbol: equal names
+    /// always share one id, so "same type?" is `==` on the id.
+    ///
+    /// Names are taken verbatim — unlike symbols, a type key is not folded.
+    /// The spelling is the type's whole `::` path, and producing it is the
+    /// front end's job (`typelisp-front`'s `type_key` module); this layer only
+    /// stores what it is given.
+    pub fn intern_type_key(&mut self, name: &str) -> TypeKeyId {
+        if let Some(&id) = self.type_key_ids.get(name) {
+            return TypeKeyId(id);
+        }
+        let id = self.type_keys.len() as u32;
+        self.type_keys.push(name.to_string());
+        self.type_key_ids.insert(name.to_string(), id);
+        TypeKeyId(id)
+    }
+
+    /// The id `name` interns to, if it has ever been interned in this heap.
+    ///
+    /// The read-only half of [`intern_type_key`](Self::intern_type_key), for
+    /// asking "is this value of type `name`?" without minting an id for a type
+    /// no value has: `None` answers the question already (nothing can be an
+    /// instance of a type never named here).
+    pub fn type_key_id(&self, name: &str) -> Option<TypeKeyId> {
+        self.type_key_ids.get(name).map(|&id| TypeKeyId(id))
+    }
+
+    /// The name behind an interned type identity — for printing, `Debug`, and
+    /// error messages. Not for comparison: compare the ids.
+    pub fn type_key_name(&self, key: TypeKeyId) -> &str {
+        &self.type_keys[key.0 as usize]
+    }
+
+
     // ---- paths ------------------------------------------------------------
 
     /// Intern a `::` path from its symbol segments, returning a `Value::Path`.
@@ -708,21 +760,31 @@ impl Heap {
     /// Store a struct-shaped [`BoxedObj`] with fixed- or variable-length
     /// `fields`, returning its `Value::Boxed` — the runtime representation a
     /// `defstruct` instance, `Vector<T>`, and `cons-cell<K,V>` all share
-    /// (see `BoxedObj`'s doc comment). `type_name` is what a later builtin
+    /// (see `BoxedObj`'s doc comment). `type_key` is what a later builtin
     /// method dispatch (`eval_builtin_method`) uses to decide what the
     /// fields mean; this layer itself doesn't interpret it.
-    pub fn alloc_struct(&mut self, type_name: String, fields: Vec<Value>) -> Value {
-        self.alloc_boxed(BoxedObj::Struct { type_name, payload: StructPayload::Fields(fields) })
+    ///
+    /// Takes an interned [`TypeKeyId`] rather than a name, so a struct cannot
+    /// be built without its type identity already existing as a comparable id
+    /// — see [`intern_type_key`](Self::intern_type_key).
+    pub fn alloc_struct(&mut self, type_key: TypeKeyId, fields: Vec<Value>) -> Value {
+        self.alloc_boxed(BoxedObj::Struct { type_key, payload: StructPayload::Fields(fields) })
     }
 
-    /// The type name of a boxed struct. Panics if `id` doesn't hold a
-    /// `BoxedObj::Struct` — same internal-invariant-trap convention as
-    /// [`float_value`](Self::float_value).
-    pub fn struct_type_name(&self, id: BoxId) -> &str {
+    /// The type identity of a boxed struct — what a "is this a `point`?" test
+    /// compares. Panics if `id` doesn't hold a `BoxedObj::Struct` — same
+    /// internal-invariant-trap convention as [`float_value`](Self::float_value).
+    pub fn struct_type_key(&self, id: BoxId) -> TypeKeyId {
         match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Struct { type_name, .. }) => type_name,
+            Some(BoxedObj::Struct { type_key, .. }) => *type_key,
             _ => panic!("BoxId does not hold a Struct"),
         }
+    }
+
+    /// The *name* of a boxed struct's type, for printing and diagnostics.
+    /// Comparisons use [`struct_type_key`](Self::struct_type_key) instead.
+    pub fn struct_type_name(&self, id: BoxId) -> &str {
+        self.type_key_name(self.struct_type_key(id))
     }
 
     /// The number of fields a boxed struct holds — e.g. `Vector<T>::length`
@@ -819,16 +881,16 @@ impl Heap {
 
     // ---- enums ----------------------------------------------------------------
 
-    /// Store an enum (sum-ADT) value — variant index `variant` of `type_name`
+    /// Store an enum (sum-ADT) value — variant index `variant` of `type_key`
     /// with that variant's `fields` — returning its `Value::Boxed`; the
     /// runtime representation `Option<T>`/`Result<T,E>`/user `defenum`
     /// instances all share (see [`BoxedObj::Enum`]'s doc comment for why
     /// this is a variant of its own, not a `Struct`). The enum counterpart
-    /// of [`alloc_struct`](Self::alloc_struct); like `type_name` there,
+    /// of [`alloc_struct`](Self::alloc_struct); like `type_key` there,
     /// `variant` is stored uninterpreted — which variant means what is the
     /// checker's business, this layer only carries the index.
-    pub fn alloc_enum(&mut self, type_name: String, variant: usize, fields: Vec<Value>) -> Value {
-        self.alloc_boxed(BoxedObj::Enum { type_name, variant, fields })
+    pub fn alloc_enum(&mut self, type_key: TypeKeyId, variant: usize, fields: Vec<Value>) -> Value {
+        self.alloc_boxed(BoxedObj::Enum { type_key, variant, fields })
     }
 
     /// True if `id` holds a `BoxedObj::Enum` — the enum peer of
@@ -838,14 +900,20 @@ impl Heap {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Enum { .. }))
     }
 
-    /// The type name of a boxed enum value. Panics if `id` doesn't hold a
-    /// `BoxedObj::Enum` — same internal-invariant-trap convention as
-    /// [`struct_type_name`](Self::struct_type_name).
-    pub fn enum_type_name(&self, id: BoxId) -> &str {
+    /// The type identity of a boxed enum value — the enum peer of
+    /// [`struct_type_key`](Self::struct_type_key). Panics if `id` doesn't hold
+    /// a `BoxedObj::Enum`.
+    pub fn enum_type_key(&self, id: BoxId) -> TypeKeyId {
         match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Enum { type_name, .. }) => type_name,
+            Some(BoxedObj::Enum { type_key, .. }) => *type_key,
             _ => panic!("BoxId does not hold an Enum"),
         }
+    }
+
+    /// The *name* of a boxed enum value's type, for printing and diagnostics.
+    /// Comparisons use [`enum_type_key`](Self::enum_type_key) instead.
+    pub fn enum_type_name(&self, id: BoxId) -> &str {
+        self.type_key_name(self.enum_type_key(id))
     }
 
     /// The variant index of a boxed enum value — what a `match` arm's tag
@@ -1215,7 +1283,7 @@ impl Heap {
     /// `HashTable<K,V>`'s runtime representation (see `BoxedObj`/
     /// `StructPayload::Map`'s doc comments).
     pub fn alloc_hashtable(&mut self) -> Value {
-        self.alloc_boxed(BoxedObj::Struct { type_name: "hashtable".to_string(), payload: StructPayload::Map(HashMap::new()) })
+        self.alloc_boxed(BoxedObj::Struct { type_key: TypeKeyId::HASHTABLE, payload: StructPayload::Map(HashMap::new()) })
     }
 
     /// `(gethash key table)`'s primitive: the value `key` maps to, or `None`
@@ -1305,7 +1373,7 @@ impl Heap {
     /// (frame *sharing* across `scope_clone_frames`) rather than a `HashMap`
     /// stored inline in the scope's payload.
     fn alloc_scope_frame(&mut self) -> BoxId {
-        let obj = BoxedObj::Struct { type_name: "scope-frame".to_string(), payload: StructPayload::Frame(HashMap::new()) };
+        let obj = BoxedObj::Struct { type_key: TypeKeyId::SCOPE_FRAME, payload: StructPayload::Frame(HashMap::new()) };
         match self.alloc_boxed(obj) {
             Value::Boxed(id) => id,
             _ => unreachable!("alloc_boxed always returns Value::Boxed"),
@@ -1341,7 +1409,7 @@ impl Heap {
     /// allocation this never itself triggers a collection.
     pub fn alloc_scope(&mut self) -> Value {
         let frame = self.alloc_scope_frame();
-        self.alloc_boxed(BoxedObj::Struct { type_name: "scope".to_string(), payload: StructPayload::Frames(vec![frame]) })
+        self.alloc_boxed(BoxedObj::Struct { type_key: TypeKeyId::SCOPE, payload: StructPayload::Frames(vec![frame]) })
     }
 
     /// `Scope::clone-frames`'s primitive: a brand-new scope box whose stack
@@ -1354,7 +1422,7 @@ impl Heap {
     /// they're called on). Panics like [`scope_get`](Self::scope_get).
     pub fn scope_clone_frames(&mut self, id: BoxId) -> Value {
         let frames = self.scope_frames(id).clone();
-        self.alloc_boxed(BoxedObj::Struct { type_name: "scope".to_string(), payload: StructPayload::Frames(frames) })
+        self.alloc_boxed(BoxedObj::Struct { type_key: TypeKeyId::SCOPE, payload: StructPayload::Frames(frames) })
     }
 
     /// Pushes a fresh, empty frame onto a scope's stack. Panics like

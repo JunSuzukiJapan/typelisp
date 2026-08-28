@@ -36,7 +36,7 @@
 //! :collect i)`. A bare `for` would be an ordinary variable reference, and the
 //! keyword is also what tells `check_loop` a DSL body from a simple one.
 
-use crate::{Error, Heap, Loc, Value};
+use crate::{Error, Heap, Loc, SymId, Value};
 
 use super::forms;
 
@@ -236,9 +236,9 @@ impl<'a> Cursor<'a> {
     /// either bare (`:with k = 10`, CL's own spelling) or as the keyword
     /// `:=`. A bare `=` is unambiguous here — the position holds a clause
     /// word, and no clause word is a variable reference — so both read.
-    fn eat_eq(&mut self, heap: &Heap) -> bool {
+    fn eat_eq(&mut self) -> bool {
         match self.args.get(self.i).copied() {
-            Some(Value::Symbol(id)) if matches!(heap.symbol_name(id), "=" | ":=") => {
+            Some(Value::Symbol(id)) if id == SymId::EQUALS || id == SymId::COLON_EQUALS => {
                 self.i += 1;
                 true
             }
@@ -282,7 +282,7 @@ pub(super) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result
                     return Err(err(format!(":{} needs a variable name", word)));
                 };
                 let kind = if word == "with" {
-                    if !c.eat_eq(heap) {
+                    if !c.eat_eq() {
                         return Err(err(":with needs `= form` after the variable"));
                     }
                     VarKind::With(c.next_value(heap, ":with =")?.0)
@@ -357,7 +357,7 @@ fn has_return(step: &Step) -> bool {
 }
 
 fn parse_for_iter(heap: &Heap, c: &mut Cursor) -> Result<ForIter, Error> {
-    if c.eat_eq(heap) {
+    if c.eat_eq() {
         let init = c.next_value(heap, "=")?.0;
         let next = if c.eat(heap, "then") { Some(c.next_value(heap, ":then")?.0) } else { None };
         return Ok(ForIter::Assign { init, next });
@@ -792,7 +792,7 @@ fn leave_normally(b: &mut Build, plan: &Plan, resolved: &Resolved) -> Result<Val
 fn finally_returns(b: &Build, plan: &Plan) -> bool {
     let Some(last) = plan.finally.last() else { return false };
     let Ok(items) = b.s.list_to_vec(*last) else { return false };
-    matches!(items.first(), Some(Value::Symbol(id)) if b.s.symbol_name(*id) == "return")
+    matches!(items.first(), Some(Value::Symbol(id)) if *id == SymId::RETURN)
 }
 
 fn build_step(b: &mut Build, step: &Step, plan: &Plan, resolved: &Resolved) -> Result<Value, Error> {

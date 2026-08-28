@@ -47,8 +47,8 @@
   は対象外（`Sexpr` の表現を持たないため従来通り型エラー）。`match` 側は `Sexpr` スクルーティニーに
   対する **downcast パターン**（型名先頭のフィールド分解 `(point x y)`／裸または修飾の enum 変種名
   `(red)`/`(color::red)`／丸ごと束縛 `(the point p)`）で取り出す——構文の詳細は
-  [syntax.md](../syntax.md) の `match` 節。ランタイムテストは boxed オブジェクトの `type_name` 文字列
-  比較（+ enum は variant index）で、downcast パターンは `Sexpr` 本来の11変種の網羅性カバレッジには
+  [syntax.md](../syntax.md) の `match` 節。ランタイムテストは boxed オブジェクトが持つ
+  インターン済み型 identity（`TypeKeyId`）の比較（+ enum は variant index）で、downcast パターンは `Sexpr` 本来の11変種の網羅性カバレッジには
   数えない。`equal` は CL 同様 struct/enum に対し同一性（`eq`）のまま、`equalp` はスロットごとの
   再帰比較に拡張。
 - **大文字小文字は区別しない**（シンボルは小文字に正規化してインターン）。

@@ -77,13 +77,19 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
 
 fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {
     let Value::Boxed(id) = v else { return Ok(None) };
-    let Some(key) = stored_type_key(heap, id).map(str::to_string) else {
-        return Ok(None);
-    };
     if PRINTING.with(|p| p.borrow().contains(&v)) {
         return Ok(None);
     }
-    let Some(addr) = PRINT_OBJECT.with(|t| t.borrow().get(&key).copied()) else {
+    // Looked up by the value's type *name*, not its interned `TypeKeyId`:
+    // `rt_print_object_method` fills this table from the executable's static
+    // strings before `rt_heap_init` runs (see `build_main_wrapper`), so there
+    // is no heap to intern against at registration time. The borrow of the
+    // name is kept inside this block so `heap` is free again for the method
+    // call below.
+    let Some(addr) = ({
+        let Some(key) = stored_type_key(heap, id) else { return Ok(None) };
+        PRINT_OBJECT.with(|t| t.borrow().get(key).copied())
+    }) else {
         return Ok(None);
     };
     // SAFETY: `addr` came from `rt_print_object_method`, whose only caller is
@@ -100,7 +106,12 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     });
     match decode(result) {
         Value::Str(id) => Ok(Some(heap.string(id).to_string())),
-        other => Err(format!("print-object on `{}` returned {:?}, not a string", key, other)),
+        other => {
+            // Only the error path needs the name back, so it is read here
+            // rather than kept borrowed across the compiled call above.
+            let key = stored_type_key(heap, id).unwrap_or("<untyped box>");
+            Err(format!("print-object on `{}` returned {:?}, not a string", key, other))
+        }
     }
 }
 

@@ -9141,3 +9141,76 @@ prelude ダンプが 2,829,011 → 3,139,096 バイト（+310KB）になり、40
 **それでも入れた**（ユーザ判断）。方針「マクロはコンパイルされているもの」に実装を揃えるほうを
 取り、境界コストが下がれば自動的に利益に転じる。速度を根拠に入れたのではない、というのが
 ここに数字を残す理由。
+
+## 2026-08-29 — 型 identity とシンボルを文字列で比べるのをやめる
+
+ユーザ指摘：「型をテストするのに、文字列で比較するのはしてはいけない。型（型構造体あるいは
+列挙体）そのものを比較しないとダメ」。続けて「文字列を比較してるところをすべて洗い出して、
+それが本当に文字列でしか比較できないものか確認して、可能な限り文字列での比較をなくして」。
+
+洗い出した結果は 4 分類。A（型 identity）と B（シンボル）を本作業で潰した。
+
+### A. 型 identity を `String` からインターン済み ID へ
+
+`BoxedObj::Struct`/`Enum` は型名を `String` で**インスタンスごとに**持ち、「同じ型か」は
+その文字列比較だった（`equalp`、`rt_sexpr_instance_test`、`match` の struct/enum 腕）。
+
+- `typelisp-mem` に `TypeKeyId` とヒープ内インターン表（`type_keys` / `type_key_ids`、恒久）を
+  新設。`alloc_struct`/`alloc_enum` は **`TypeKeyId` しか受け取らない** ので、identity が
+  comparable な ID として存在しないまま値を作ることができない
+- 表示・診断用に `struct_type_name`/`enum_type_name` は残す（表を引くだけ）。比較は
+  `struct_type_key`/`enum_type_key`
+- `BUILTIN_TYPE_KEYS` を `Heap::with_capacity` が生成時にインターンするので、`option`/`result`/
+  `vector`/`cons-cell`/`hashtable`/`scope`/`scope-frame`/各エラー型の ID は**コンパイル時定数**
+  （`TypeKeyId::OPTION` 等）。これで 3 クレートに散っていた `RESULT_TYPE_KEY: &str = "result"`
+  等 11 個の重複定数が消えた
+- `type_key.rs` の入口は据え置き（`alloc_typed_struct`/`alloc_typed_enum`/`heap_type_is`/
+  `heap_type_path`）。`type_key_of` は `Cow<str>` を返すようにし、単一セグメント（＝ほとんど）で
+  join の確保をしない
+
+**ABI は変えていない。** 島は今も型名を文字列リテラルで渡す。受け取る側
+（`rt_struct_new`/`rt_data_new`/`rt_sexpr_instance_test`）が `type_key_arg` でインターンし、
+**先に lookup してから mint する**ので定常状態では確保が起きない。島の再生成は不要だった。
+
+**残した文字列**（理由つき）:
+
+- `typelisp-print` の AOT 側 `PRINT_OBJECT` / `ENUM_NAMES` は型名キーのまま。登録
+  （`rt_print_object_method`）が **`rt_heap_init` より前**に走る（`build_main_wrapper` が
+  「no heap involved, so this can run before `rt_heap_init`」と明記）ので、登録時にインターン
+  する相手がいない。印字 1 回ごとの `String` 確保だけは borrow を短くして消した
+- `type_key.rs::heap_type_is` は `Path` → 名前 → ID の lookup を 1 回する。呼び出し側が持って
+  いるのは名前（`Path`）なので、名前→ID の変換はこの境界に本質的に要る。比較そのものは整数
+
+### B. シンボルを名前文字列で比べていた 16 箇所
+
+`heap.symbol_name(id) == "&rest"` の形。`intern_symbol` が小文字畳み込みをするので**今も正しい**
+が、`"&REST"` と書いた新しい箇所は黙って一致しなくなる——綴りを間違えられる比較だった。
+
+`BUILTIN_SYMBOLS`（`quote`/`unquote`/`unquote-splicing`/`the`/`fn`/`pub`/`where`/`return`/
+`&rest`/`&optional`/`&key`/`:dyn`/`=`/`:=`）を型キーと同じく生成時にインターンし、`SymId::REST`
+等の定数で比較する。`is_symbol(heap, v, name)` は `is_symbol(v, sym)` になった。
+
+**残した 1 箇所**: `loop_dsl.rs` の `symbol_name(id).starts_with(':')`。「キーワードシンボルか」は
+開いた集合の問い（前方一致）であって、ID 比較にはならない。
+
+**インターン順を変えて安全な根拠**（確認済み）:
+
+- 成果物のハッシュは名前を辿る（`bootstrap.rs` の `hash_form` が「Interned ids are *not*
+  hashed」と明記、テスト `the_hash_follows_names_not_intern_ids` つき）
+- ダンプの直列化は `OwnedForm::Sym(String)` 経由で名前
+- コンパイル済みコードは `SymId` を焼き込まず、実行時に `rt_intern_symbol` を呼ぶ
+
+### 番人
+
+`tests/type_identity_guard_test.rs` に 2 本追加：`BUILTIN_TYPE_KEYS` / `BUILTIN_SYMBOLS` の
+各エントリが、実ヒープでその表の**添字どおりに**インターンされること。既存の「rt が綴る
+キーは `type_key_of` の綴りか」は、11 個の `&str` 定数を比べる形から、表の中身を比べる形に
+書き換えた。**名前だけ比べても添字がずれていれば全部隣の型になる**ので、ID 側の検査を
+別に立ててある。
+
+### 未着手（C/D）
+
+- **C**: 文字列そのものの比較（`heap.string(i) == heap.string(j)`、CLI 引数、REPL の `:quit`、
+  型構文レキサの `NameTok::Ident`）。文字列でしか比較できない
+- **D**: 名前ディスパッチ（IR の op 名、builtin メソッド名、`LlvmOp.type_key`）。IR がタグを
+  文字列で持つ設計に踏み込むので、実測なしには手を付けない

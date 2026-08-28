@@ -31,7 +31,7 @@ use typelisp_mem::RootScope;
 
 use crate::check::core;
 use crate::check::repr::Repr;
-use crate::{BoxId, Heap, MacroExpander, MacroLambda, Path, Ref, SymId, Value};
+use crate::{BoxId, Heap, MacroExpander, MacroLambda, Path, Ref, SymId, TypeKeyId, Value};
 
 use super::scope;
 pub use super::value::EvalError;
@@ -558,7 +558,7 @@ impl Interp {
         for (path, def) in &enums {
             let key = crate::type_key::type_key_of(path);
             for (i, (name, _)) in def.variants.iter().enumerate() {
-                out.push((key.clone(), i, name.clone()));
+                out.push((key.to_string(), i, name.clone()));
             }
         }
         // `collect_struct_and_enum_types` returns a `HashMap`, so sort for a
@@ -1871,7 +1871,7 @@ impl Interp {
     /// intermediate `Vec<Value>`s.
     pub(crate) fn print_object(&self, heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {
         let Value::Boxed(id) = v else { return Ok(None) };
-        let Some(name) = heap_type_path(heap, id).map(|p| p.to_string()) else {
+        let Some(type_path) = heap_type_path(heap, id) else {
             return Ok(None);
         };
         // A value already being printed by its own method is rendered the
@@ -1882,7 +1882,6 @@ impl Interp {
         if self.printing.borrow().contains(&v) {
             return Ok(None);
         }
-        let type_path = Path::from_segments(name.split("::").map(|s| s.to_string()).collect());
         let Some(f) = self.root.borrow().get_method(&type_path, "print-object") else {
             return Ok(None);
         };
@@ -1934,23 +1933,22 @@ impl Interp {
         // than guess, both are candidates and it is only an error when *both*
         // define the name — one definition is unambiguous whichever width the
         // author meant.
-        let candidates: Vec<String> = match v {
-            Value::Boxed(id) => match heap_type_path(heap, id).map(|p| p.to_string()) {
-                Some(key) => vec![key],
+        let candidates: Vec<Path> = match v {
+            Value::Boxed(id) => match heap_type_path(heap, id) {
+                Some(p) => vec![p],
                 None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
             },
-            Value::Str(_) => vec!["string".to_string()],
-            Value::Bool(_) => vec!["bool".to_string()],
-            Value::Char(_) => vec!["char".to_string()],
-            Value::Symbol(_) => vec!["symbol".to_string()],
-            Value::Empty | Value::Cons(_) | Value::Path(_) => vec!["sexpr".to_string()],
-            Value::Int(_) => vec!["i64".to_string(), "i32".to_string()],
+            Value::Str(_) => vec![Path::root("string")],
+            Value::Bool(_) => vec![Path::root("bool")],
+            Value::Char(_) => vec![Path::root("char")],
+            Value::Symbol(_) => vec![Path::root("symbol")],
+            Value::Empty | Value::Cons(_) | Value::Path(_) => vec![Path::root("sexpr")],
+            Value::Int(_) => vec![Path::root("i64"), Path::root("i32")],
         };
         let mut found: Vec<(Path, std::rc::Rc<FnDef>)> = Vec::new();
-        for key in &candidates {
-            let type_path = Path::from_segments(key.split("::").map(|s| s.to_string()).collect());
-            if let Some(f) = self.root.borrow().get_method(&type_path, name) {
-                found.push((type_path, f));
+        for type_path in &candidates {
+            if let Some(f) = self.root.borrow().get_method(type_path, name) {
+                found.push((type_path.clone(), f));
             }
         }
         let (type_path, f) = match found.len() {
@@ -3103,7 +3101,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[
     if *type_name == Path::root("vector") {
         return match method {
             // type-identity-ok: the built-in `Vector`, a root name spelled in full
-            "new" => Some(Ok(heap.alloc_struct("vector".to_string(), Vec::new()))),
+            "new" => Some(Ok(heap.alloc_struct(TypeKeyId::VECTOR, Vec::new()))),
             "push" => Some(vector_push(heap, args)),
             "get" => Some(vector_get(heap, args)),
             "set" => Some(vector_set(heap, args)),
@@ -3545,7 +3543,7 @@ fn hashtable_clear(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> 
 /// `Heap::hashtable_pairs` and so need no conversion on the way out.
 fn vector_of_raw(heap: &mut Heap, fields: Vec<Value>) -> Value {
     // type-identity-ok: the built-in `Vector`, a root name spelled in full
-    heap.alloc_struct("vector".to_string(), fields)
+    heap.alloc_struct(TypeKeyId::VECTOR, fields)
 }
 
 fn hashtable_keys(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
@@ -3573,7 +3571,7 @@ fn hashtable_entries(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError
         .hashtable_pairs(id)
         .into_iter()
         // type-identity-ok: the built-in `cons-cell`, a root name spelled in full
-        .map(|(k, v)| heap.alloc_struct("cons-cell".to_string(), vec![k, v]))
+        .map(|(k, v)| heap.alloc_struct(TypeKeyId::CONS_CELL, vec![k, v]))
         .collect();
     Ok(vector_of_raw(heap, fields))
 }

@@ -23,33 +23,27 @@
 //! register_stream_builtins`). That conversion is deliberately *not* here:
 //! it belongs to the calling convention, not to the operation.
 
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{Heap, TypeKeyId, Value};
 
 use crate::stream::with_streams;
 
-/// The type keys the results are built with — `type_key::type_key_of` of
-/// `option`/`result`/`fileerror`, which for a root path is just its name.
-///
-/// Written out here because this crate has no `Path` to derive them from (the
-/// same standing exception `rt_data_new` has, which receives its key as a
-/// string from compiled code). Their end of that agreement is held up by
-/// `tests/type_identity_guard_test.rs`, which asserts each of these three
-/// equals what `type_key_of` produces — the invariant is checked, not
-/// assumed, because the failure it guards is silent: a value built here under
-/// a key nobody else spells would be unmatchable and print as
-/// `<unknown-variant>`.
-pub const OPTION_TYPE_KEY: &str = "option";
-pub const RESULT_TYPE_KEY: &str = "result";
-pub const FILE_ERROR_TYPE_KEY: &str = "fileerror";
-/// `Vector<T>`'s box is a `Struct` under this name, not an `Enum` — the
-/// "just a box + a name" representation `value.rs`'s `BoxedObj` doc comment
-/// describes, whose *fields are its elements*. `file-list-directory` builds
-/// one directly, so it needs the key the same way the three above do.
-pub const VECTOR_TYPE_KEY: &str = "vector";
+// The types the results here are built with — `TypeKeyId::OPTION`, `RESULT`,
+// and `FILE_ERROR` — come from `typelisp_mem`'s pre-interned table rather
+// than being named here, because this crate has no `Path` to derive a name
+// from (the same standing exception `rt_data_new` has, which receives its key
+// as a string from compiled code). That their names are the ones
+// `type_key::type_key_of` produces is asserted by
+// `tests/type_identity_guard_test.rs` — checked, not assumed, because the
+// failure it guards is silent: a value built here under a key nobody else
+// spells would be unmatchable and print as `<unknown-variant>`.
+//
+// `Vector<T>`'s box is a `Struct`, not an `Enum` — the "just a box + a name"
+// representation `value.rs`'s `BoxedObj` doc comment describes, whose *fields
+// are its elements*. `file-list-directory` builds one directly.
 
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
 fn result_ok(heap: &mut Heap, v: Value) -> Value {
-    heap.alloc_enum(RESULT_TYPE_KEY.to_string(), 0, vec![v])
+    heap.alloc_enum(TypeKeyId::RESULT, 0, vec![v])
 }
 
 /// `Err(FileError(msg))` — the concrete error type every stream and file
@@ -57,8 +51,8 @@ fn result_ok(heap: &mut Heap, v: Value) -> Value {
 /// exactly one variant (index 0) carrying the message.
 fn result_err(heap: &mut Heap, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
-    let err_val = heap.alloc_enum(FILE_ERROR_TYPE_KEY.to_string(), 0, vec![msg_val]);
-    heap.alloc_enum(RESULT_TYPE_KEY.to_string(), 1, vec![err_val])
+    let err_val = heap.alloc_enum(TypeKeyId::FILE_ERROR, 0, vec![msg_val]);
+    heap.alloc_enum(TypeKeyId::RESULT, 1, vec![err_val])
 }
 
 /// `Some(v)`/`None`, matching `option_def`'s variant order (`some` = 0,
@@ -68,7 +62,7 @@ fn option_value(heap: &mut Heap, v: Option<Value>) -> Value {
         Some(x) => (0, vec![x]),
         None => (1, vec![]),
     };
-    heap.alloc_enum(OPTION_TYPE_KEY.to_string(), variant, fields)
+    heap.alloc_enum(TypeKeyId::OPTION, variant, fields)
 }
 
 /// An argument that isn't the shape its signature promises. Unreachable
@@ -291,7 +285,7 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
                 }
             }
             let elems: Vec<Value> = names.into_iter().map(|n| heap.alloc_string(n)).collect();
-            let vec_val = heap.alloc_struct(VECTOR_TYPE_KEY.to_string(), elems);
+            let vec_val = heap.alloc_struct(TypeKeyId::VECTOR, elems);
             Ok(result_ok(heap, vec_val))
         }
         // Succeeds when the directory already exists: `create_dir_all` is

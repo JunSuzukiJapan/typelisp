@@ -45,7 +45,7 @@
 
 use std::collections::HashMap;
 
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{Heap, SymId, Value};
 
 use crate::format::{Pre, RenderCtx, Renderer};
 
@@ -742,7 +742,7 @@ fn render_at(
 fn quote_form(heap: &Heap, v: Value) -> Option<Value> {
     let head = heap.car(v).ok()?;
     let Value::Symbol(id) = head else { return None };
-    if heap.symbol_name(id) != "quote" {
+    if id != SymId::QUOTE {
         return None;
     }
     let rest = heap.cdr(v).ok()?;

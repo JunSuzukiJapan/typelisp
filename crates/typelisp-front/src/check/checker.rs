@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use std::rc::Rc;
 
-use crate::{parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScope, Type, TypeNameSpan, Value};
+use crate::{parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScope, SymId, Type, TypeNameSpan, Value};
 
 use super::loop_dsl;
 use typelisp_read::name_lexer::{NameLexer, NameTok};
@@ -2094,9 +2094,9 @@ impl Checker {
     fn parse_signature_params(&self, heap: &Heap, v: Value) -> Result<(Vec<Type>, Option<Type>), Error> {
         let elems_locs = heap.list_to_vec_locs(v)?;
         let is_rest_marker =
-            |p: &Value| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest");
+            |p: &Value| matches!(p, Value::Symbol(id) if *id == SymId::REST);
         if elems_locs.iter().any(|(p, _)| {
-            matches!(p, Value::Symbol(id) if matches!(heap.symbol_name(*id), "&optional" | "&key"))
+            matches!(p, Value::Symbol(id) if *id == SymId::OPTIONAL || *id == SymId::KEY)
         }) {
             return Err(Error::TypeError(
                 "defsignature: `&optional`/`&key` cannot be forward-declared — a declaration has nowhere to put \
@@ -4610,7 +4610,7 @@ impl Checker {
         let elems = heap.list_to_vec(v)?;
         let rest_marker = elems
             .iter()
-            .position(|p| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest"));
+            .position(|p| matches!(p, Value::Symbol(id) if *id == SymId::REST));
         match rest_marker {
             Some(i) => {
                 if i + 2 != elems.len() {
@@ -4810,7 +4810,7 @@ impl Checker {
             let elem_locs = heap.list_to_vec_locs(*binding)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
             let (public, rest, rest_locs) = match elems.first() {
-                Some(Value::Symbol(id)) if heap.symbol_name(*id) == "pub" => (true, &elems[1..], &elem_locs[1..]),
+                Some(Value::Symbol(id)) if *id == SymId::PUB => (true, &elems[1..], &elem_locs[1..]),
                 _ => (false, &elems[..], &elem_locs[..]),
             };
             if rest.len() < 2 || rest.len() > 3 {
@@ -10262,7 +10262,7 @@ impl Checker {
         if let Value::Cons(_) = v {
             let car = heap.car(v)?;
             let cdr = heap.cdr(v)?;
-            if is_symbol(heap, car, "unquote") {
+            if is_symbol(car, SymId::UNQUOTE) {
                 if let Value::Cons(_) = cdr {
                     let x = heap.car(cdr)?;
                     if heap.cdr(cdr)?.is_empty() {
@@ -10276,7 +10276,7 @@ impl Checker {
             }
             if let Value::Cons(_) = car {
                 let car_car = heap.car(car)?;
-                if is_symbol(heap, car_car, "unquote-splicing") {
+                if is_symbol(car_car, SymId::UNQUOTE_SPLICING) {
                     let car_cdr = heap.cdr(car)?;
                     if let Value::Cons(_) = car_cdr {
                         let x = heap.car(car_cdr)?;
@@ -11398,7 +11398,7 @@ impl Checker {
             .list_to_vec(form)
             .ok()
             .filter(|elems| elems.len() == 2)
-            .filter(|elems| matches!(elems[0], Value::Symbol(id) if heap.symbol_name(id) == "quote"))
+            .filter(|elems| matches!(elems[0], Value::Symbol(id) if id == SymId::QUOTE))
             .map(|elems| elems[1]);
         match quoted {
             Some(sym @ Value::Symbol(id)) => Ok((heap.symbol_name(id).to_string(), sym)),
@@ -13203,7 +13203,7 @@ impl Checker {
         // to compare against a value with no literal syntax (a `defstruct`
         // instance, a global, a computed one). Ahead of every resolution
         // below because `=` names no constructor and never could.
-        if is_symbol(heap, parts[0], "=") {
+        if is_symbol(parts[0], SymId::EQUALS) {
             if parts.len() != 2 {
                 return Err(Error::TypeError("pattern: (= expr)".into()));
             }
@@ -13217,7 +13217,7 @@ impl Checker {
         // `string->symbol` is the bridge, and interning is exactly what
         // makes the resulting comparison identity-as-equality on both
         // sides of the compile boundary.
-        if is_symbol(heap, parts[0], "quote") && parts.len() == 2 {
+        if is_symbol(parts[0], SymId::QUOTE) && parts.len() == 2 {
             if let Value::Symbol(id) = parts[1] {
                 let name = heap.symbol_name(id).to_string();
                 let expr = {
@@ -13239,7 +13239,7 @@ impl Checker {
         // have.
         if is_sexpr_expectation(expected) {
             if let Value::Symbol(id) = parts[0] {
-                if heap.symbol_name(id) == "the" {
+                if id == SymId::THE {
                     return self.check_type_test_pattern(heap, interp, env, &parts, &parts_locs);
                 }
             }
@@ -13555,9 +13555,13 @@ fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
     }
 }
 
-/// Whether `v` is the symbol named `name`.
-fn is_symbol(heap: &Heap, v: Value, name: &str) -> bool {
-    matches!(v, Value::Symbol(id) if heap.symbol_name(id) == name)
+/// Whether `v` is the interned symbol `sym`.
+///
+/// Takes a [`SymId`] rather than a name: the syntax words this asks about are
+/// pre-interned (`BUILTIN_SYMBOLS`), so the test is an integer comparison and
+/// there is no spelling to get wrong.
+fn is_symbol(v: Value, sym: SymId) -> bool {
+    matches!(v, Value::Symbol(id) if id == sym)
 }
 
 /// `Checker::check_as`'s conversion table: `(from, to)` -> `(panic_method,
@@ -14239,7 +14243,7 @@ fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) -> Result<(),
 
 fn is_where_clause(heap: &Heap, v: Value) -> Result<bool, Error> {
     Ok(matches!(v, Value::Cons(_))
-        && matches!(heap.list_to_vec(v)?.first(), Some(Value::Symbol(id)) if heap.symbol_name(*id) == "where"))
+        && matches!(heap.list_to_vec(v)?.first(), Some(Value::Symbol(id)) if *id == SymId::WHERE))
 }
 
 /// Peeks `parts[at]` for a leading docstring — CL's rule for `defun`/
@@ -14351,7 +14355,7 @@ fn single_name_option(heap: &Heap, rest: &[Value], what: &str) -> Result<String,
 fn params_declare_opt_key(heap: &Heap, v: Value) -> Result<bool, Error> {
     let elems = heap.list_to_vec(v)?;
     Ok(elems.iter().any(|p| {
-        matches!(p, Value::Symbol(id) if matches!(heap.symbol_name(*id), "&optional" | "&key"))
+        matches!(p, Value::Symbol(id) if *id == SymId::OPTIONAL || *id == SymId::KEY)
     }))
 }
 
