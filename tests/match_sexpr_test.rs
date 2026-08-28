@@ -132,7 +132,11 @@ fn match_refines_a_str_payload_to_str() {
 
 #[test]
 fn match_refines_a_sym_payload_to_symbol() {
-    assert_eq!(eval_string("(match (quote foo) ((sym s) (symbol->string s)) (_ \"no\"))"), "foo");
+    // `(Sym 'foo)`, matching the `(Str ...)`/`(Char ...)` spelling of its
+    // siblings: `'foo` on its own is a `Symbol` now, and a `Symbol` has no
+    // variant to refine — the `sym` payload only exists once it is wrapped
+    // into S-expression data.
+    assert_eq!(eval_string("(match (Sym (quote foo)) ((sym s) (symbol->string s)) (_ \"no\"))"), "foo");
 }
 
 #[test]

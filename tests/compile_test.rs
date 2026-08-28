@@ -4102,11 +4102,16 @@ fn compile_of_a_function_quoting_a_path_round_trips() {
 /// correctly by tag (`compile-sexpr-tag-test`'s existing `variant 5` arm,
 /// exercised for the first time now that a quoted symbol can actually reach
 /// compiled code) — proves the tag test, not just `eq`, sees a real `Sym`.
+///
+/// The scrutinee is spelled `(the Option<Sexpr> ...)` because `'foo` on its
+/// own is a `Symbol`, and a `Symbol` has no tag left to test: its type
+/// already says what it is. Widening it back to S-expression data is what
+/// puts the runtime tag test back in play, which is what this test is about.
 #[test]
 fn compile_of_a_function_matching_a_quoted_symbol_dispatches_by_tag() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun q () i64 (match (quote foo) ((sym _) 1) (_ 0)))
+        (defun q () i64 (match (the Option<Sexpr> (quote foo)) ((sym _) 1) (_ 0)))
         (compile q)
         (q)
         "#,

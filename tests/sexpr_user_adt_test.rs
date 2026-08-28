@@ -276,14 +276,42 @@ fn equalp_recursively_compares_two_distinct_struct_instances() {
     assert_eq!(v, Value::Bool(true));
 }
 
+/// Comparing two *different* struct types is a type error, not `false`.
+///
+/// It used to be `false`: `equal`/`equalp` were free builtins typed over
+/// S-expression data, so both arguments widened into it independently and any
+/// two values of any two types compared. They are generic now — `equal<T>(T,
+/// T)` — which is the rule the language already applied everywhere a type
+/// carried its own `equal` method (`(equalp 1 "a")` has always been a type
+/// error).
 #[test]
-fn equalp_distinguishes_structs_by_type_name_even_with_matching_fields() {
-    let v = eval_ok(
+fn equalp_between_two_struct_types_is_a_type_error() {
+    let err = check(
         "(defstruct point (x i32) (y i32))
          (defstruct pair (a i32) (b i32))
          (equalp (point::new 1 2) (pair::new 1 2))",
+    )
+    .expect_err("comparing two struct types should not check");
+    assert!(format!("{:?}", err).contains("type mismatch"), "unexpected error: {:?}", err);
+}
+
+/// The runtime rule that used to be visible above — `equalp` tells two
+/// same-shaped structs apart by type name — still holds where two struct
+/// types can still legitimately meet: inside S-expression data, where both
+/// sides really do have one type.
+#[test]
+fn equalp_distinguishes_structs_by_type_name_inside_sexpr_data() {
+    let src = "(defstruct point (x i32) (y i32))
+               (defstruct pair (a i32) (b i32))";
+    assert_eq!(
+        eval_ok(&format!("{src}\n(equalp (list (point::new 1 2)) (list (pair::new 1 2)))")),
+        Value::Bool(false)
     );
-    assert_eq!(v, Value::Bool(false));
+    // Same type, same fields: equal.
+    assert_eq!(
+        eval_ok(&format!("{src}\n(equalp (list (point::new 1 2)) (list (point::new 1 2)))")),
+        Value::Bool(true)
+    );
 }
 
 #[test]
