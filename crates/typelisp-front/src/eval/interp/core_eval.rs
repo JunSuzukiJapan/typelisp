@@ -108,12 +108,25 @@ enum Op {
 impl Op {
     /// The single dispatch point from a tag's text to an operator.
     ///
-    /// A `match` on `&str` rather than a table indexed by [`SymId`]: a symbol
-    /// id is only meaningful relative to the heap that interned it, so a table
-    /// keyed by one would need a heap identity to stay honest across the
-    /// throwaway heaps the drivers build. Whether that is worth its cost is a
-    /// question for the wall-clock comparison at the end of the phase, and
-    /// this function is the whole seam it would be answered behind.
+    /// A `match` on `&str` rather than a table indexed by [`SymId`]. The old
+    /// objection was that an id is only meaningful relative to the heap that
+    /// interned it; `BUILTIN_SYMBOLS` (2026-08-29) removed that objection, so
+    /// the alternative was built and measured — and **it is not worth it**:
+    ///
+    /// - wall clock, back to back on one build, an interpreted `fib 25` +
+    ///   200k-iteration `dotimes`: 5.33 s best of 6 either way. `rustc`
+    ///   compiles this into a length-and-prefix decision tree; it is not
+    ///   where the time goes.
+    /// - the table has to be indexed by a *stable* id, which means every tag
+    ///   here would have to be listed in `typelisp-mem`'s `BUILTIN_SYMBOLS` —
+    ///   the memory crate would carry the front end's IR vocabulary, and a
+    ///   tag added here but forgotten there would evaluate as an unknown
+    ///   operator.
+    ///
+    /// Unlike the scattered `symbol_name(id) == "&rest"` comparisons that
+    /// became `SymId` tests the same day, this is one central table, not a
+    /// spelling repeated in a dozen places: there is no second place to get
+    /// it wrong. Left as it is deliberately.
     fn from_name(name: &str) -> Option<Op> {
         Some(match name {
             "int" => Op::Int,
