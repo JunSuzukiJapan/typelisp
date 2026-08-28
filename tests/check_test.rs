@@ -884,3 +884,88 @@ fn type_error_carries_source_location() {
     // Underlying kind is still a TypeError.
     assert!(matches!(err.kind(), Error::TypeError(_)));
 }
+
+// ---- equality is type-checked, with no free-function escape hatch ------------
+
+/// `equal`/`equalp` compare two values *of the same type*, and nothing else.
+///
+/// The language already enforced this for every type that carries its own
+/// `equal` method: `(equalp 1 "a")` is a type error because `i32`'s method
+/// demands two `i32`s. But those two were free builtins typed
+/// `(Sexpr, Sexpr) -> bool`, so for a type with *no* such method — `Option<T>`,
+/// `Result<T,E>`, a user `defstruct` — both arguments widened into
+/// S-expression data independently and any two values of any two types
+/// compared, answering `false` rather than failing to check.
+///
+/// The hole opened exactly where a mistake is hardest to see, and it made a
+/// second one possible: with `Option<Sexpr>` parameters, `(equalp opt
+/// (option::some x))` had its constructor call take the *parameter's* type
+/// argument and become the empty-list niche — a bare datum — while `opt`
+/// crossed as a boxed enum, so a comparison between two genuinely equal
+/// values answered `false`.
+///
+/// One type parameter used twice closes both.
+#[test]
+fn equality_requires_its_two_arguments_to_have_one_type() {
+    for src in [
+        // Two unrelated user structs — the case that used to answer `false`.
+        "(defstruct pa (x i64)) (defstruct pb (y string)) (equalp (pa::new 1) (pb::new \"z\"))",
+        // Two different instantiations of the same generic.
+        "(equalp (the Option<char> (option::none)) (the Option<i64> (option::none)))",
+        // And the case that was already an error, still is.
+        "(equalp 1 \"a\")",
+    ] {
+        let err = program(src).expect_err("mismatched equality should not check");
+        let msg = format!("{:?}", err);
+        assert!(msg.contains("type mismatch"), "unexpected error for {}:\n{}", src, msg);
+    }
+}
+
+/// The same-type cases all still check and still answer structurally — the
+/// point being that closing the hole cost none of the reach `equal`/`equalp`
+/// actually need.
+#[test]
+fn equality_still_compares_every_same_typed_pair() {
+    for src in [
+        "(equal (quote (1 2 3)) (quote (1 2 3)))",
+        "(equalp (option::some #\\x) (option::some #\\x))",
+        "(defstruct pt (x i64)) (equalp (pt::new 1) (pt::new 1))",
+    ] {
+        assert!(program(src).is_ok(), "should check: {}", src);
+    }
+}
+
+/// `'foo` is a `Symbol`, not S-expression data.
+///
+/// Every other atom has an unquoted spelling that already carries its precise
+/// type — `42`, `"s"`, `#\a`, `true`. The symbol is the one value whose *only*
+/// literal syntax is the quote, so typing it as data threw away what the
+/// program said, and did it invisibly: the symbol still worked everywhere
+/// S-expression data is wanted (it widens by a bare retype), so the loss only
+/// surfaced somewhere it was compared.
+#[test]
+fn a_quoted_symbol_is_a_symbol() {
+    assert_eq!(ty("(quote foo)"), Type::Symbol);
+    // A compound datum stays S-expression data — there is no other type for it.
+    assert_eq!(ty("(quote (a b))"), opt_sexpr());
+    assert_eq!(ty("(quote ())"), opt_sexpr());
+    // An integer literal is deliberately left alone: it has no one type to be
+    // given, it adopts the width its context asks for.
+    assert_eq!(ty("(quote 42)"), opt_sexpr());
+    // It still reaches a `Symbol` parameter, and still reaches an
+    // S-expression one.
+    assert!(program(r#"(defun f ((s Symbol)) string (symbol->string s)) (f (quote foo))"#).is_ok());
+    assert!(program(r#"(defun g ((s Option<Sexpr>)) bool (sexpr-symp s)) (g (quote foo))"#).is_ok());
+}
+
+/// Equality between a built symbol and a quoted one checks *in either order*.
+///
+/// It did not before: `T` binds from the first argument, so the order decided
+/// whether the other side had to widen (fine) or narrow (impossible). That
+/// asymmetry was a symptom of `'foo` having lost its type, not a property of
+/// generic inference — with both sides `Symbol` there is nothing to widen.
+#[test]
+fn equality_between_a_built_and_a_quoted_symbol_is_order_independent() {
+    assert!(program(r#"(equal (string->symbol "foo") (quote foo))"#).is_ok());
+    assert!(program(r#"(equal (quote foo) (string->symbol "foo"))"#).is_ok());
+}

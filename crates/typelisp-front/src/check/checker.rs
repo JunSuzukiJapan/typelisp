@@ -10172,10 +10172,34 @@ impl Checker {
             return Err(Error::TypeError("quote: (quote datum)".into()));
         }
         let form = forms::quote_form(heap, args[0])?;
-        // `Option<Sexpr>`, not `Sexpr`: `'()` is a datum a quote may produce,
-        // and the empty list is `none` now. Every quoted datum therefore has
-        // the type S-expressions have — `Sexpr` alone would exclude exactly
-        // one writable literal, and there is no implicit coercion to widen it
+        // A quoted *symbol* is a `Symbol`, not S-expression data.
+        //
+        // For every other atom there is an unquoted spelling that already
+        // carries the precise type — `42` is an integer, `"s"` a `string`,
+        // `#\a` a `char`, `true` a `bool`. The symbol is the one value whose
+        // *only* literal syntax is the quote, so typing `'foo` as data is
+        // the same mistake as typing `42` as data would be: it throws away
+        // what the program said. It also made equality order-dependent —
+        // `(equal (string->symbol "foo") 'foo)` failed to check while the
+        // reverse checked — because only one side had lost its type.
+        //
+        // Nothing is closed off by this: a `Symbol` widens into an
+        // S-expression position by a bare retype (`Checker::check_atom`'s
+        // `Type::Symbol` arm, which is a *retype* precisely because the
+        // runtime value is already the datum), so `'foo` still flows into
+        // `list`/`cons`/quasiquote code positions exactly as before.
+        //
+        // Integers are deliberately *not* given the same treatment: an
+        // integer literal has no single type to be given, it adopts the
+        // width its context asks for (`the_overrides_an_integer_literals_
+        // default_type`). A symbol has no such ambiguity.
+        if matches!(args[0], Value::Symbol(_)) {
+            return Ok(Checked::new(form, Type::Symbol));
+        }
+        // Everything else is S-expression data: `Option<Sexpr>`, not
+        // `Sexpr`, because `'()` is a datum a quote may produce and the
+        // empty list is `none` now. `Sexpr` alone would exclude exactly one
+        // writable literal, and there is no implicit coercion to widen it
         // back (the checker has no subtyping — see `coerce_to_dyn`, the only
         // conversion it does).
         Ok(Checked::new(form, option_of_sexpr()))

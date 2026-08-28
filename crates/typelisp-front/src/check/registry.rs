@@ -784,16 +784,44 @@ impl Registry {
         root.fns.insert("sexpr-str".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-sym-name".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-symp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        // `equal`/`equalp` on `Sexpr`: structural equality (CL `equal`/`equalp`),
-        // Rust builtins (`Interp::eval_builtin`'s `sexpr_equal`/`sexpr_equalp`)
+        // `equal`/`equalp`: structural equality (CL `equal`/`equalp`), Rust
+        // builtins (`Interp::eval_builtin`'s `sexpr_equal`/`sexpr_equalp`)
         // since the Symbol/Sexpr redesign fenced `match` off `Sexpr` (Phase 5).
         // They used to be prelude `defun`s (`(match a ((Cons ..) ..) ..)`); the
         // per-scalar `equal`/`equalp` *methods* (string/char/int/...) are
         // separate (`registry::string_assoc` etc.) and resolved first when the
-        // receiver is one of those types — these free `Sexpr` overloads are the
-        // fallback for actual `Sexpr` data (`case` expands to `(equal ..)`).
-        root.fns.insert("equal".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr()), option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("equalp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr()), option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // receiver is one of those types — these free ones are the fallback
+        // for everything else (`case` expands to `(equal ..)`).
+        //
+        // **Generic, not `Sexpr`-typed**, and that is the whole point. With
+        // concrete `Option<Sexpr>` parameters both arguments widened into
+        // S-expression data independently, so *any two values of any two
+        // types* compared — `(equalp (pa::new 1) (pb::new "z"))` type-checked
+        // and answered `false`. That silently contradicted the rule the
+        // language already enforces everywhere else: `(equalp 1 "a")` is a
+        // type error, because `i32` has its own `equal` method and that
+        // method demands both sides be `i32`. The escape hatch opened only
+        // for types with *no* such method — `Option<T>`, `Result<T,E>`, user
+        // ADTs — which is exactly where a mistake is hardest to see.
+        //
+        // One type parameter used twice forces the two arguments to agree.
+        // No template exists for a builtin, so `check_call` leaves the call
+        // runtime-dispatched (see its "builtin generic free functions"
+        // comment) — the runtime already compares `Value`s structurally
+        // whatever they hold, so nothing downstream changes.
+        let eq_generic = || FnSig {
+            type_params: vec!["t".to_string()],
+            rest: None,
+            params: vec![tvar("t"), tvar("t")],
+            ret: Type::Bool,
+            public: true,
+            builtin: true,
+            bounds: BTreeMap::new(),
+            optionals: Vec::new(),
+            keys: Vec::new(),
+        };
+        root.fns.insert("equal".to_string(), eq_generic());
+        root.fns.insert("equalp".to_string(), eq_generic());
         // `gensym` is *not* here: it moved into the prelude in Phase 4c, so
         // that CL's `*gensym-counter*` could be a real variable a program can
         // read and set. A builtin's counter lived on the `Heap` and nothing

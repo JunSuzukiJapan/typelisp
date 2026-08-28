@@ -432,7 +432,12 @@ fn symbol_to_string_rejects_a_non_symbol_at_check_time() {
 
 #[test]
 fn string_to_symbol_round_trips_symbol_to_string() {
+    // Stated at `string`, where the two sides are the same type outright.
+    assert_eq!(eval_string(r#"(symbol->string (string->symbol "foo"))"#), "foo");
+    // And against the quoted symbol, in either order: `'foo` is a `Symbol`
+    // too, so both sides of the generic `equal<T>(T, T)` already agree.
     assert_eq!(eval_ok(r#"(equal (string->symbol "foo") (quote foo))"#), Value::Bool(true));
+    assert_eq!(eval_ok(r#"(equal (quote foo) (string->symbol "foo"))"#), Value::Bool(true));
 }
 
 // `set-car`/`set-cdr` (destructive `Sexpr` cons mutation) were removed with the
