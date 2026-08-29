@@ -468,16 +468,17 @@ fn zz_the_vocabulary_is_closed() {
 /// Every tag declared as shared is one `compile-value` actually dispatches on.
 ///
 /// This is the property tied to a real consumer. The island is the thing that
-/// has to accept the bridge's output, and its dispatch is a flat `icase` over
+/// has to accept the bridge's output, and its dispatch is a flat `case` over
 /// the tag in `compiler::SOURCE` — so the accepted set can be read straight out
 /// of the source it is compiled from, with no guessing.
 ///
-/// The keys are string literals in clause-head position (`("int" ...)`), which
-/// is what the scan looks for, restricted to `compile-value`'s own body so a
-/// literal elsewhere in the island cannot widen the accepted set. It used to
-/// look for `(equal s "TAG")` across the whole SOURCE; that form is gone, and
-/// the `accepted.len() > 30` assertion below is what caught the change rather
-/// than letting the test quietly pass on an empty set.
+/// The keys are bare symbols in clause-head position (`(int ...)`) since the
+/// dispatch compares tag *symbols* rather than their names, so the scan walks
+/// the `case` form by paren depth and takes the first token of each clause.
+/// It has now been through two shapes before this one — `(equal s "TAG")`
+/// across the whole SOURCE, then `("int" ...)` string keys — and both times it
+/// was the `accepted.len() > 30` assertion below that caught the change rather
+/// than the test quietly passing on an empty set. Keep that assertion.
 ///
 /// Checked now rather than after the checker switches, because that is the
 /// whole point of building the consumers first: finding out the island will not
@@ -492,42 +493,63 @@ fn every_shared_tag_is_one_the_island_dispatches_on() {
         Some(end) => &rest[..end],
         None => rest,
     };
-    // A clause key is a string literal right after `(`. Comments are skipped
-    // by a scan that tracks string state, since a `;` inside a string does not
-    // start one.
+    let case_head = "(case (sexpr-car e)";
+    let case_at = body.find(case_head).expect("`compile-value`'s tag dispatch is not a `case` on (sexpr-car e)");
+    // Walk the `case` form. Depth 1 is the form itself; every group opening at
+    // depth 2 is a clause, and its first token is the key. The key expression
+    // `(sexpr-car e)` opens at depth 2 as well and is simply the first one, so
+    // it is skipped by position rather than by matching its text.
     let mut accepted: BTreeSet<&str> = BTreeSet::new();
-    let mut chars = body.char_indices();
-    let mut prev_open = false;
+    let mut depth = 0usize;
+    let mut groups_at_clause_depth = 0usize;
+    let mut chars = body[case_at..].char_indices().peekable();
     while let Some((i, c)) = chars.next() {
         match c {
             ';' => {
-                prev_open = false;
                 for (_, c) in chars.by_ref() {
                     if c == '\n' {
                         break;
                     }
                 }
             }
+            // A `;` inside a string does not start a comment, and a paren
+            // inside one is not structure.
             '"' => {
-                let from = i + 1;
-                let mut end = None;
-                for (j, c) in chars.by_ref() {
+                for (_, c) in chars.by_ref() {
                     if c == '"' {
-                        end = Some(j);
                         break;
                     }
                 }
-                let to = end.expect("unterminated string in the island SOURCE");
-                if prev_open {
-                    accepted.insert(&body[from..to]);
-                }
-                prev_open = false;
             }
-            '(' => prev_open = true,
-            c if c.is_whitespace() => {}
-            _ => prev_open = false,
+            '(' => {
+                depth += 1;
+                if depth == 2 {
+                    groups_at_clause_depth += 1;
+                    let from = i + 1;
+                    let mut to = from;
+                    while let Some((j, c)) = chars.peek() {
+                        if c.is_whitespace() || *c == '(' || *c == ')' {
+                            to = *j;
+                            break;
+                        }
+                        to = *j + c.len_utf8();
+                        chars.next();
+                    }
+                    if groups_at_clause_depth > 1 {
+                        accepted.insert(&body[case_at + from..case_at + to]);
+                    }
+                }
+            }
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
         }
     }
+    accepted.remove("else");
 
     assert!(
         accepted.len() > 30,

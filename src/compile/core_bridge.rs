@@ -473,11 +473,11 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         // the way out): the runtime sees one machine word and only the
         // representation says whether it is already tagged.
         "catch" => {
-            let name = throw_tag_name(heap, form)?;
+            let name = throw_tag_sym(heap, form)?;
             let kind = repr_kind(heap, form, 2)?;
             let body = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
-            let tag = sexpr_leaf(f.heap(), SEXPR_SYM, |h| str_form(h, &name))?;
+            let tag = sym_form(f.heap(), name)?;
             f.push(tag);
             f.push(Value::Int(kind));
             let b = to_island(f.heap(), body, cx)?;
@@ -485,11 +485,11 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             f.finish("catch")
         }
         "throw" => {
-            let name = throw_tag_name(heap, form)?;
+            let name = throw_tag_sym(heap, form)?;
             let kind = repr_kind(heap, form, 2)?;
             let value = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
-            let tag = sexpr_leaf(f.heap(), SEXPR_SYM, |h| str_form(h, &name))?;
+            let tag = sym_form(f.heap(), name)?;
             f.push(tag);
             f.push(Value::Int(kind));
             let v = to_island(f.heap(), value, cx)?;
@@ -546,8 +546,8 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             quoted_form(heap, datum)
         }
         "sym" => {
-            let name = symbol_field(heap, form, 0)?;
-            sexpr_leaf(heap, SEXPR_SYM, |h| str_form(h, &name))
+            let sym = symbol_field_sym(heap, form, 0)?;
+            sym_form(heap, sym)
         }
 
         // ---- trait objects -----------------------------------------------
@@ -1230,6 +1230,9 @@ const SEXPR_RATIO: i64 = 9;
 /// `compile-construct-sym`/`compile-construct-path` recognize them by a marker
 /// the ordinary variants can never collide with.
 const SEXPR_SYM: i64 = 100;
+/// A quoted symbol from the system module, named by its [`BUILTIN_SYMBOLS`]
+/// index rather than by its name — see [`sym_form`].
+const SEXPR_SYM_WK: i64 = 102;
 const SEXPR_PATH: i64 = 101;
 
 /// `(construct true false () variant field...)` — one `sexpr` value.
@@ -1252,6 +1255,40 @@ fn sexpr_leaf(
     sexpr_construct(f.heap(), variant, &fields)
 }
 
+/// A quoted symbol, as the node that rebuilds it at run time.
+///
+/// A symbol's identity is the address of its header, and an address cannot
+/// cross into a compiled program — an ahead-of-time one is another process
+/// entirely. So what crosses is whatever *names* the symbol on the other side,
+/// and there are two such things, told apart here, at compile time:
+///
+/// - A member of the fixed vocabulary is named by its index. Every process
+///   builds `BUILTIN_SYMBOLS` in the same order into the system module, so the
+///   index means the same thing everywhere ([`SEXPR_SYM_WK`], `rt_wk_symbol`).
+///   No name is spelled out and nothing is interned.
+/// - Any other symbol is named by its name **and the module that owns it**.
+///   Two modules that both write `foo` own two different symbols, so interning
+///   the bare name would land in whichever module the runtime happened to
+///   default to — which is exactly the bug this shape exists to prevent
+///   (`(module m ...)`'s `'foo` compiled, compared against the same `'foo`
+///   interpreted).
+fn sym_form(heap: &mut Heap, sym: SymRef) -> Result<Value, Error> {
+    if sym.well_known() != typelisp_mem::NOT_WELL_KNOWN {
+        return sexpr_construct(heap, SEXPR_SYM_WK, &[Value::Int(sym.well_known() as i64)]);
+    }
+    let name = sym.name();
+    let home = typelisp_mem::symbols::ns_path(sym.home());
+    let mut f = Items::new(heap);
+    let n = str_form(f.heap(), name)?;
+    f.push(n);
+    for seg in &home {
+        let v = str_form(f.heap(), seg)?;
+        f.push(v);
+    }
+    let fields = f.as_slice().to_vec();
+    sexpr_construct(f.heap(), SEXPR_SYM, &fields)
+}
+
 /// A quoted datum, as the nodes that rebuild it at run time.
 ///
 /// Quoted data cannot be *referred* to: the datum lives in the compiling
@@ -1269,10 +1306,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
             let text = heap.string(id).to_string();
             sexpr_leaf(heap, SEXPR_STR, |h| str_form(h, &text))
         }
-        Value::Symbol(id) => {
-            let name = heap.symbol_name(id).to_string();
-            sexpr_leaf(heap, SEXPR_SYM, |h| str_form(h, &name))
-        }
+        Value::Symbol(id) => sym_form(heap, id),
         // A path's segments become one string literal each, interned back into
         // a path at run time.
         Value::Path(id) => {
@@ -2211,14 +2245,23 @@ fn symbol_field(heap: &Heap, form: Value, i: usize, ) -> Result<String, Error> {
     }
 }
 
+/// Field `i` as the symbol itself, for the one caller that needs its identity
+/// (its home module and vocabulary index) rather than its spelling.
+fn symbol_field_sym(heap: &Heap, form: Value, i: usize) -> Result<SymRef, Error> {
+    match core::field(heap, form, i) {
+        Some(Value::Symbol(id)) => Ok(id),
+        _ => Err(malformed(heap, form)),
+    }
+}
+
 /// The symbol a `catch`/`throw` node's first field names.
 ///
 /// Stored as a quoted datum (`forms::catch_form`), so this unwraps one `quote`
 /// before reading the symbol — the same shape `Interp::throw_tag_of` reads on
 /// the interpreted side.
-fn throw_tag_name(heap: &Heap, form: Value) -> Result<String, Error> {
+fn throw_tag_sym(heap: &Heap, form: Value) -> Result<SymRef, Error> {
     match core::field(heap, form, 0).and_then(|q| core::field(heap, q, 0)) {
-        Some(Value::Symbol(id)) => Ok(heap.symbol_name(id).to_string()),
+        Some(Value::Symbol(id)) => Ok(id),
         _ => Err(malformed(heap, form)),
     }
 }

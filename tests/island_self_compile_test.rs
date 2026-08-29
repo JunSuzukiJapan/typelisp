@@ -150,6 +150,8 @@ const ISLAND_DEFUNS: &[&str] = &[
     "compile-match-arms",
     "compile-construct",
     "compile-construct-sym",
+    "compile-construct-sym-args",
+    "compile-construct-wk-sym",
     "compile-construct-path",
     "compile-construct-path-segs",
     "compile-construct-boxed-struct",

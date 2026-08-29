@@ -625,6 +625,48 @@ fn compile_dispatches_a_defun_call_to_native_code() {
     }
 }
 
+/// A quoted symbol keeps the module that owns it when it crosses into
+/// compiled code.
+///
+/// A symbol's identity is an address, which cannot be baked into a program
+/// that may run in another process, so compiled code rebuilds the symbol from
+/// what `core_bridge::sym_form` wrote down. Writing down only the *name* is
+/// what this guards against: two modules that both write `a-module-local-tag`
+/// own two different symbols, so a bare name would intern into whichever
+/// module the runtime defaulted to, and the compiled `tag` would stop being
+/// `equal` to the interpreted `same?`'s own literal. Only one side is
+/// compiled here on purpose — with both compiled they would agree on the
+/// wrong symbol and the test would pass while broken.
+#[test]
+fn a_compiled_quoted_symbol_keeps_its_home_module() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (module m
+          (pub defun tag () Sexpr (quote a-module-local-tag))
+          (pub defun same? ((s Sexpr)) bool (equal s (quote a-module-local-tag))))
+        (compile m::tag)
+        (m::same? (m::tag))
+        "#,
+    );
+    assert!(expect_bool(v), "the compiled symbol must be the module's own");
+}
+
+/// The same for a symbol from the fixed vocabulary, which crosses by its
+/// `BUILTIN_SYMBOLS` index instead of by name (`rt_wk_symbol`).
+#[test]
+fn a_compiled_quoted_system_symbol_is_the_same_symbol() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (module m
+          (pub defun tag () Sexpr (quote let))
+          (pub defun same? ((s Sexpr)) bool (equal s (quote let))))
+        (compile m::tag)
+        (m::same? (m::tag))
+        "#,
+    );
+    assert!(expect_bool(v), "one `let`, whichever side built it");
+}
+
 #[test]
 fn compile_returns_true_on_success() {
     let v = eval_ok_with_compiler(r#"(defun answer () i64 42) (compile answer)"#);

@@ -1,5 +1,4 @@
-//! The symbol table: process-global, permanent, and shaped like the module
-//! tree.
+//! The symbol table: process-global, permanent, and **one table per module**.
 //!
 //! A symbol's identity is the **address of its [`Symbol`] header** — the same
 //! thing CL means by comparing symbols with `eq`, and the same thing
@@ -7,21 +6,38 @@
 //! `&rest`?" is a pointer comparison; nothing reads the name back out to
 //! answer it.
 //!
-//! Three properties hold, and each one is load-bearing:
+//! Four properties hold, and each one is load-bearing:
 //!
-//! 1. **Global.** The table is not part of any `Heap`. `intern` returns the
-//!    same address for the same name for the life of the process, so a symbol
-//!    is meaningful across heaps — which matters because compiled code reaches
-//!    symbols through a raw tagged word, with no heap handle in sight.
+//! 1. **Global.** The table is not part of any `Heap`. It is one process-wide
+//!    structure, so a symbol is meaningful across heaps — which matters
+//!    because compiled code reaches symbols through a raw tagged word, with no
+//!    heap handle in sight.
 //! 2. **Permanent.** Nothing here is ever freed. Headers are `Box::leak`ed, so
 //!    the `'static` lifetime [`SymRef::name`] hands out is real rather than
 //!    asserted, and the address can never dangle. That is what makes the
 //!    `unsafe` below simple enough not to need Miri watching it: there is no
 //!    deallocation to get wrong.
-//! 3. **Shaped like the module tree.** Each module owns a table of the symbols
-//!    written inside it, so `m::foo` and `n::foo` are different symbols. See
-//!    [`intern_in`] for the lookup rule that keeps `(module m (defun ...))`
-//!    working anyway.
+//! 3. **One table per module.** A module owns the symbols written inside it.
+//!    Two modules that both write `foo` get **two different symbols** — the
+//!    module a name is written in is part of what the name means.
+//! 4. **Sharing is by pointer, never by name.** A module that must see another
+//!    module's symbol holds *that symbol* in its own table ([`import`]): one
+//!    header, two names pointing at it, so `==` on the addresses answers
+//!    "the same symbol" with nothing to fall back on. There is no search up
+//!    the module tree — a lookup reads exactly one table.
+//!
+//! ## The system module
+//!
+//! [`NsId::SYSTEM`] holds the fixed vocabulary ([`BUILTIN_SYMBOLS`]) and
+//! nothing else. It is created once; every module created afterwards
+//! *imports* those symbols by pointer, which is why `defun` written inside
+//! `(module m ...)` is the very same symbol as `defun` written at the top
+//! level — and why the checker can keep recognizing a definition by identity.
+//! Without that import a module's `defun` would be `m`'s own new symbol, and
+//! every definition inside a module would silently stop being a definition.
+//!
+//! [`NsId::ROOT`] is an ordinary module that happens to be first: the prelude,
+//! the core macro layer and the island are read into it.
 //!
 //! ## Why an address and not an index
 //!
@@ -272,6 +288,7 @@ well_known_symbols! {
     KW_INTO => ":into"
 }
 
+
 // ---- the symbol itself ---------------------------------------------------
 
 /// An interned symbol's header — what a [`SymRef`] points at.
@@ -286,7 +303,8 @@ well_known_symbols! {
 pub struct Symbol {
     /// The canonical (lowercase) name.
     name: Box<str>,
-    /// The module whose table this symbol lives in.
+    /// The module that owns this symbol — the one it was created in. A module
+    /// that merely [`import`]s it is not its home.
     home: NsId,
     /// Index into [`BUILTIN_SYMBOLS`], or [`NOT_WELL_KNOWN`].
     well_known: u32,
@@ -342,7 +360,8 @@ impl SymRef {
         &self.header().name
     }
 
-    /// The module this symbol lives in.
+    /// The module that owns this symbol. Not "a module it is visible from":
+    /// an imported symbol keeps the home it was created with.
     pub fn home(&self) -> NsId {
         self.header().home
     }
@@ -380,24 +399,34 @@ impl SymRef {
 
 // ---- the module tree -----------------------------------------------------
 
-/// A module's node in the symbol table — an index, since the nodes live in one
-/// `Vec` behind the lock. [`NsId::ROOT`] always exists.
+/// A module's table, as an index into the one `Vec` behind the lock.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct NsId(u32);
 
 impl NsId {
-    /// The root module: where the prelude, the core macro layer, the island
-    /// and every built-in name live, and the fallback every other module
-    /// inherits from (see [`intern_in`]).
-    pub const ROOT: NsId = NsId(0);
+    /// The system module: the fixed vocabulary ([`BUILTIN_SYMBOLS`]) and
+    /// nothing else. Every other module imports these by pointer when it is
+    /// created — see the module doc comment.
+    pub const SYSTEM: NsId = NsId(0);
+
+    /// The top-level module: the prelude, the core macro layer and the island
+    /// are read into it, as is a source file that declares no module of its
+    /// own. Ordinary in every respect but being created first.
+    pub const ROOT: NsId = NsId(1);
 }
 
+/// One module's table.
+///
+/// `syms` holds both the symbols this module created and the ones it imported
+/// from elsewhere; the two are not distinguished here because a lookup does
+/// not care. `SymRef::home` is what tells them apart.
 struct NsNode {
-    /// This module's own symbols, by canonical name.
     syms: HashMap<Box<str>, SymRef>,
     /// Child modules, by segment — the same shape as the checker's
-    /// `Namespace::modules`.
+    /// `Namespace::modules`. Structure only: a lookup never follows it.
     children: HashMap<Box<str>, NsId>,
+    /// The module this one is written inside, for [`SymTable::path`]. Never
+    /// consulted when resolving a name.
     parent: Option<NsId>,
     /// The segment this module was reached by, for diagnostics.
     segment: Box<str>,
@@ -405,38 +434,58 @@ struct NsNode {
 
 struct SymTable {
     nodes: Vec<NsNode>,
+    /// How many headers have been created. Summing `syms.len()` would count
+    /// an imported symbol once per module that can see it.
+    created: usize,
 }
 
 impl SymTable {
     fn new() -> SymTable {
-        let mut t = SymTable {
-            nodes: vec![NsNode {
-                syms: HashMap::new(),
-                children: HashMap::new(),
-                parent: None,
-                segment: "".into(),
-            }],
-        };
-        for (i, name) in BUILTIN_SYMBOLS.iter().enumerate() {
-            t.create(NsId::ROOT, name, i as u32);
-        }
+        let mut t = SymTable { nodes: Vec::new(), created: 0 };
+        // The system module owns the vocabulary...
+        t.push_node(None, "");
+        let vocabulary: Vec<SymRef> = BUILTIN_SYMBOLS
+            .iter()
+            .enumerate()
+            .map(|(i, name)| t.create(NsId::SYSTEM, name, i as u32))
+            .collect();
+        WELL_KNOWN
+            .set(vocabulary.into_boxed_slice())
+            .unwrap_or_else(|_| unreachable!("the table is built exactly once"));
+        // ...and the root module is the first to import it.
+        t.push_node(None, "");
+        debug_assert_eq!(t.nodes.len(), 2);
         t
     }
 
-    /// The symbol `name` names in `ns` or any module above it, if it exists.
-    fn lookup(&self, ns: NsId, name: &str) -> Option<SymRef> {
-        let mut cur = Some(ns);
-        while let Some(id) = cur {
-            let node = &self.nodes[id.0 as usize];
-            if let Some(s) = node.syms.get(name) {
-                return Some(*s);
-            }
-            cur = node.parent;
-        }
-        None
+    /// Appends a node, giving it the system vocabulary. `parent` is `None` for
+    /// the two modules that are not written inside another one.
+    fn push_node(&mut self, parent: Option<NsId>, segment: &str) -> NsId {
+        let id = NsId(self.nodes.len() as u32);
+        let syms = if id == NsId::SYSTEM {
+            HashMap::new()
+        } else {
+            // By pointer, not by name: this is property 4 in the module doc
+            // comment, and the reason `defun` means the same thing in every
+            // module.
+            self.nodes[NsId::SYSTEM.0 as usize].syms.clone()
+        };
+        self.nodes.push(NsNode {
+            syms,
+            children: HashMap::new(),
+            parent,
+            segment: segment.into(),
+        });
+        id
     }
 
-    /// Build a symbol in `ns` unconditionally. The caller has already looked.
+    /// The symbol `name` names in `ns` — in that module's own table, and
+    /// nowhere else. There is no walk up the tree.
+    fn lookup(&self, ns: NsId, name: &str) -> Option<SymRef> {
+        self.nodes[ns.0 as usize].syms.get(name).copied()
+    }
+
+    /// Build a symbol owned by `ns`. The caller has already looked.
     fn create(&mut self, ns: NsId, name: &str, well_known: u32) -> SymRef {
         // Leaked on purpose: symbols are permanent, so this is the allocation
         // that gives `SymRef::name` a genuine `'static` and makes the address
@@ -445,6 +494,7 @@ impl SymTable {
             Box::leak(Box::new(Symbol { name: name.into(), home: ns, well_known }));
         let sym = SymRef(header as *const Symbol);
         self.nodes[ns.0 as usize].syms.insert(name.into(), sym);
+        self.created += 1;
         sym
     }
 
@@ -452,13 +502,7 @@ impl SymTable {
         if let Some(id) = self.nodes[parent.0 as usize].children.get(segment) {
             return *id;
         }
-        let id = NsId(self.nodes.len() as u32);
-        self.nodes.push(NsNode {
-            syms: HashMap::new(),
-            children: HashMap::new(),
-            parent: Some(parent),
-            segment: segment.into(),
-        });
+        let id = self.push_node(Some(parent), segment);
         self.nodes[parent.0 as usize].children.insert(segment.into(), id);
         id
     }
@@ -476,13 +520,14 @@ impl SymTable {
         segs.reverse();
         segs
     }
-
-    fn count(&self) -> usize {
-        self.nodes.iter().map(|n| n.syms.len()).sum()
-    }
 }
 
 static SYMBOLS: OnceLock<Mutex<SymTable>> = OnceLock::new();
+
+/// The system module's symbols in [`BUILTIN_SYMBOLS`] order, for
+/// [`well_known_symbol`]. Written once, while the table is being built, and
+/// read without the lock afterwards.
+static WELL_KNOWN: OnceLock<Box<[SymRef]>> = OnceLock::new();
 
 fn table() -> MutexGuard<'static, SymTable> {
     SYMBOLS
@@ -491,21 +536,16 @@ fn table() -> MutexGuard<'static, SymTable> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Intern `name` as seen from module `ns`.
+/// Intern `name` in module `ns`.
 ///
 /// Names are **case-insensitive**: they fold to a canonical lowercase form, so
 /// `Foo`, `FOO` and `foo` all intern to one symbol.
 ///
-/// The lookup walks `ns` and then every module above it before creating
-/// anything, so a name the root already holds is *inherited* rather than
-/// shadowed. That rule is what keeps `(module m (defun ...))` working: `defun`
-/// is recognized by identity against the root's `defun`, and interning a
-/// second one in `m` would silently stop every definition inside a module from
-/// being a definition. It is also the rule the language already resolves names
-/// by — current namespace first, then root.
-///
-/// A name found nowhere up the chain is created **in `ns`**, which is what
-/// makes `m::foo` and `n::foo` different symbols.
+/// Only `ns`'s own table is consulted. A name it does not hold — neither
+/// created there nor imported into it — becomes a **new symbol owned by
+/// `ns`**, which is what makes `m::foo` and `n::foo` different symbols. The
+/// fixed vocabulary is the same symbol everywhere only because every module
+/// imports it from [`NsId::SYSTEM`] when it is created.
 pub fn intern_in(ns: NsId, name: &str) -> SymRef {
     let key = name.to_lowercase();
     let mut t = table();
@@ -521,6 +561,20 @@ pub fn intern_in(ns: NsId, name: &str) -> SymRef {
 /// symbols are made while the program runs rather than while it is read.
 pub fn intern(name: &str) -> SymRef {
     intern_in(NsId::ROOT, name)
+}
+
+/// Makes `sym` visible in `into` under its own name, by pointer.
+///
+/// The imported name is *the same symbol*, so `==` compares equal across the
+/// two modules — the only way one module is ever meant to see another's. Any
+/// symbol `into` already had under that name is replaced.
+pub fn import(into: NsId, sym: SymRef) {
+    table().nodes[into.0 as usize].syms.insert(sym.name().into(), sym);
+}
+
+/// The symbol `name` names in `ns`, without creating one.
+pub fn lookup_in(ns: NsId, name: &str) -> Option<SymRef> {
+    table().lookup(ns, &name.to_lowercase())
 }
 
 /// The module reached from `parent` by `segment`, creating it if new.
@@ -542,8 +596,39 @@ pub fn ns_path(ns: NsId) -> Vec<String> {
     table().path(ns)
 }
 
-/// How many symbols exist, across every module. Diagnostics only — the count
-/// is process-global and other threads may be interning.
+/// How many symbols exist — headers created, not names visible. Diagnostics
+/// only: the count is process-global and other threads may be interning.
 pub fn symbol_count() -> usize {
-    table().count()
+    table().created
+}
+
+/// The system module's symbol at index `i` of [`BUILTIN_SYMBOLS`] — the
+/// inverse of [`SymRef::well_known`].
+///
+/// This is how a member of the fixed vocabulary crosses into a compiled
+/// program: its *address* cannot (an ahead-of-time compiled program is another
+/// process), but its index can, because every process builds the vocabulary
+/// from the same list in the same order. No name is spelled out and no lookup
+/// happens — the alternative, rebuilding the name and interning it, is the
+/// thing this exists to avoid.
+///
+/// Panics on an index outside the vocabulary: the caller is a compiler that
+/// read the index off a symbol, so an out-of-range one is a bug here, not bad
+/// input.
+pub fn well_known_symbol(i: u32) -> SymRef {
+    if WELL_KNOWN.get().is_none() {
+        // Building the main table is what fills this in. Deliberately not
+        // `get_or_init`: the initializer would have to build that table, whose
+        // own construction `set`s this very cell — re-entering a `OnceLock`
+        // that is mid-initialization deadlocks.
+        drop(table());
+    }
+    WELL_KNOWN.get().expect("building the table fills WELL_KNOWN")[i as usize]
+}
+
+/// Intern `name` in the module `segments` names, relative to the root —
+/// [`ns_of`] and [`intern_in`] in one step, for callers holding a path rather
+/// than an [`NsId`] (compiled code rebuilding a quoted symbol).
+pub fn intern_in_path(segments: &[String], name: &str) -> SymRef {
+    intern_in(ns_of(segments), name)
 }

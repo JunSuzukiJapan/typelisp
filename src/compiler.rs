@@ -383,6 +383,14 @@ pub const SOURCE: &str = r#"
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
    Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
+(defsignature compile-construct-sym-args
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> llvm-value Option<Sexpr> i32)
+  ())
+(defsignature compile-construct-wk-sym
+  (llvm-module string llvm-builder Option<Sexpr>)
+  llvm-value)
 (defsignature compile-ctor-subpatterns
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value> Option<llvm-basic-block>
@@ -3953,6 +3961,7 @@ pub const SOURCE: &str = r#"
       (case variant
         (100 (compile-construct-sym m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup arg-forms))
         (101 (compile-construct-path m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup arg-forms))
+        (102 (compile-construct-wk-sym m fn-name builder arg-forms))
         ;; Every other variant index is a real one, and which of the
         ;; three constructors it names is decided by the node's two
         ;; flags rather than by the index.
@@ -3963,19 +3972,50 @@ pub const SOURCE: &str = r#"
                  (compile-construct-boxed-struct m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup type-name-form arg-forms)
                  (compile-construct-box m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup type-name-form variant arg-forms)))))))
 
-;; `(construct true false empty 100 name-form)` — a
-;; quoted symbol literal (`core_bridge::quoted_form`'s
-;; `Sym` arm, `QUOTE_SYM_MARKER`). `name-form` is an
-;; ordinary `(str ...)` node (`str_literal_form`);
-;; compiling it yields a fully tagged `Sexpr::Str`,
-;; handed straight to `rt_intern_symbol` (no GC-root
-;; protection needed — an interned symbol is permanent,
-;; unlike the `Str` that briefly holds its name).
+;; `(construct true false empty 100 name-form seg-form...)`
+;; — a quoted symbol literal (`core_bridge::sym_form`).
+;; Every form is an ordinary `(str ...)` node
+;; (`str_literal_form`); compiling one yields a fully
+;; tagged `Sexpr::Str`. The first is the symbol's name
+;; and the rest are the segments of the module that
+;; **owns** it, root being none at all: two modules that
+;; both write `foo` own two different symbols, so a bare
+;; name would intern into whichever module the runtime
+;; defaulted to. `rt_intern_symbol` takes them in that
+;; order. No GC-root protection is needed — an interned
+;; symbol is permanent, unlike the `Str`s that briefly
+;; hold the spelling.
 (defun compile-construct-sym ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (arg-forms Option<Sexpr>))llvm-value
-    (let* ((name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car arg-forms)))
-           (args-ptr (alloca-args builder 1)))
-      (store-arg builder args-ptr 0 name-v)
-      (build-call builder (get-function m "rt_intern_symbol") args-ptr 1)))
+    (let* ((n (sexpr-list-length arg-forms))
+           (args-ptr (alloca-args builder n)))
+      (compile-construct-sym-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup args-ptr arg-forms 0)
+      (build-call builder (get-function m "rt_intern_symbol") args-ptr n)))
+
+;; Fills a `compile-construct-sym`-allocated array, one
+;; compiled `(str ...)` per slot — the symbol analogue of
+;; `compile-construct-path-segs`, which differs only in
+;; interning each of its own slots on the way in.
+(defun compile-construct-sym-args ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Option<Sexpr>) (idx i32))()
+    (if (sexpr-consp forms)
+        (let ((form (sexpr-car forms)) (rest (sexpr-cdr forms)))
+          (store-arg builder args-ptr idx (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup form))
+          (compile-construct-sym-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup args-ptr rest (+ idx 1)))
+        ()))
+
+;; `(construct true false empty 102 INDEX)` — a quoted
+;; symbol from the system module, named by its
+;; `BUILTIN_SYMBOLS` index rather than by its spelling
+;; (`core_bridge::sym_form`). `INDEX` is a plain integer
+;; field read here at compile time, not a form to
+;; compile: every process builds the vocabulary from the
+;; same list in the same order, so the index means the
+;; same symbol everywhere. One `rt_wk_symbol` call, one
+;; array index — no string is built and nothing is
+;; interned.
+(defun compile-construct-wk-sym ((m llvm-module) (fn-name string) (builder llvm-builder) (arg-forms Option<Sexpr>))llvm-value
+    (let ((args-ptr (alloca-args builder 1)))
+      (store-arg builder args-ptr 0 (const-i64 builder (sexpr-int (sexpr-car arg-forms))))
+      (build-call builder (get-function m "rt_wk_symbol") args-ptr 1)))
 
 ;; `(construct true false empty 101 seg-form...)` — a
 ;; quoted `::`-path literal (`core_bridge::quoted_form`'s

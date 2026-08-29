@@ -2717,9 +2717,17 @@ pub unsafe extern "C" fn rt_str_new(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_string(s))
 }
 
-/// Interns `args[0]` (a tagged `Value::Str`) as a symbol, returning it as a
-/// tagged `Value::Symbol` — the compiled-code half of a quoted symbol
-/// literal (`core_bridge::quoted_form`'s `Sym` arm builds the name as an
+/// Interns `args[0]` (a tagged `Value::Str`) as a symbol **in the module the
+/// remaining arguments name** — zero of them being the root module — and
+/// returns it as a tagged `Value::Symbol`.
+///
+/// The home module is part of the answer, not decoration: two modules that
+/// both write `foo` own two different symbols, so interning a bare name would
+/// hand back whichever module the runtime defaulted to. A symbol from the
+/// fixed vocabulary never comes through here at all — it has an index, and
+/// [`rt_wk_symbol`] uses it.
+///
+/// This is the compiled-code half of a quoted symbol literal (`core_bridge::quoted_form`'s `Sym` arm builds the name as an
 /// ordinary `(str (int c0) ...)` node, exactly like any other string
 /// literal, then wraps the compiled result in a call here rather than
 /// needing its own character-embedding mechanism the way `rt_str_new`
@@ -2736,13 +2744,40 @@ pub unsafe extern "C" fn rt_str_new(args: *const i64, argc: u32) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn rt_intern_symbol(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
-        fatal("rt_intern_symbol: expected 1 argument");
+        fatal("rt_intern_symbol: expected at least 1 argument");
     }
-    let name = match decode(*args) {
-        Value::Str(id) => active_heap().string(id).to_string(),
-        _ => fatal("rt_intern_symbol: argument is not a Str"),
+    let str_arg = |i: u32| -> String {
+        match decode(*args.add(i as usize)) {
+            Value::Str(id) => active_heap().string(id).to_string(),
+            _ => fatal("rt_intern_symbol: argument is not a Str"),
+        }
     };
-    encode(active_heap().intern_symbol(&name))
+    let name = str_arg(0);
+    let home: Vec<String> = (1..argc).map(str_arg).collect();
+    encode(Value::Symbol(typelisp_mem::symbols::intern_in_path(&home, &name)))
+}
+
+/// The system module's symbol at index `args[0]` (a raw `i64`, not a tagged
+/// value) of `BUILTIN_SYMBOLS`, as a tagged `Value::Symbol`.
+///
+/// The compiled-code half of a quoted symbol from the fixed vocabulary
+/// (`core_bridge::sym_form`). Its address cannot be baked into a program that
+/// will run in another process, but its index can: every process builds the
+/// vocabulary from the same list in the same order. Nothing is spelled out,
+/// nothing is allocated, and no table is searched — one array index.
+///
+/// Permanent like every symbol, so no GC root is involved.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to a valid `i64` holding an
+/// index within `BUILTIN_SYMBOLS`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_wk_symbol(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_wk_symbol: expected 1 argument");
+    }
+    encode(Value::Symbol(typelisp_mem::symbols::well_known_symbol(*args as u32)))
 }
 
 

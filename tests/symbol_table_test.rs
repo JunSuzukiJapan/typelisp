@@ -10,8 +10,9 @@
 //! 2. **permanent** — nothing is ever freed, which is what makes the `unsafe`
 //!    in `typelisp_mem::symbols` simple enough not to need Miri watching it
 //!    (there is no deallocation to get wrong);
-//! 3. **per-module** — `m::foo` and `n::foo` are different symbols, while the
-//!    root's names are inherited by every module.
+//! 3. **per-module** — `m::foo` and `n::foo` are different symbols, and the
+//!    only way one module sees another's symbol is by holding that very
+//!    pointer (the system vocabulary, imported into every module).
 //!
 //! The tagged-word property (the low three bits are the tag's) is here too:
 //! it is an invariant of the *allocator*, so nothing in the type system
@@ -149,31 +150,63 @@ fn the_same_bare_name_in_two_modules_is_two_symbols() {
 }
 
 #[test]
-fn a_module_inherits_the_roots_names() {
-    let m = symbols::ns_of(&["inheriting-module".to_string()]);
-    let at_root = symbols::intern(&"already-at-root");
-    assert_eq!(
-        symbols::intern_in(m, "already-at-root"),
+fn a_module_does_not_see_the_roots_names() {
+    let m = symbols::ns_of(&["non-inheriting-module".to_string()]);
+    let at_root = symbols::intern("only-at-root");
+    assert_ne!(
+        symbols::intern_in(m, "only-at-root"),
         at_root,
-        "a name the root already holds is inherited, not shadowed"
+        "a lookup reads one table; the root's name is not the module's"
     );
 }
 
 #[test]
-fn a_nested_module_is_reached_through_its_parent() {
+fn a_nested_module_owns_its_own_name_too() {
     let outer = symbols::ns_of(&["outer-mod".to_string()]);
     let inner = symbols::ns_of(&["outer-mod".to_string(), "inner-mod".to_string()]);
     assert_ne!(outer, inner);
-    let at_outer = symbols::intern_in(outer, "shared-down-the-chain");
-    assert_eq!(
-        symbols::intern_in(inner, "shared-down-the-chain"),
+    let at_outer = symbols::intern_in(outer, "not-shared-down-the-chain");
+    assert_ne!(
+        symbols::intern_in(inner, "not-shared-down-the-chain"),
         at_outer,
-        "the walk goes up the whole chain, not just to the root"
+        "nesting is structure, not visibility"
     );
     assert_eq!(symbols::ns_path(inner), vec!["outer-mod".to_string(), "inner-mod".to_string()]);
 }
 
-// ---- what the inheritance rule is actually protecting ---------------------
+#[test]
+fn an_imported_symbol_is_the_same_symbol() {
+    let owner = symbols::ns_of(&["owning-mod".to_string()]);
+    let user = symbols::ns_of(&["borrowing-mod".to_string()]);
+    let original = symbols::intern_in(owner, "a-borrowed-name");
+    symbols::import(user, original);
+    assert_eq!(
+        symbols::intern_in(user, "a-borrowed-name"),
+        original,
+        "importing shares the pointer, so the two modules compare equal"
+    );
+    assert_eq!(original.home(), owner, "and the home stays with the module that created it");
+}
+
+#[test]
+fn every_module_gets_the_system_vocabulary() {
+    let m = symbols::ns_of(&["vocabulary-module".to_string()]);
+    let here = symbols::intern_in(m, "defun");
+    assert_eq!(here, symbols::intern("defun"), "one `defun`, imported everywhere");
+    assert_eq!(here.home(), NsId::SYSTEM, "owned by the system module");
+    assert!(here.is(typelisp::wk::DEFUN));
+}
+
+#[test]
+fn a_module_local_name_is_not_well_known() {
+    let m = symbols::ns_of(&["ordinary-names-module".to_string()]);
+    assert_eq!(
+        symbols::intern_in(m, "an-ordinary-name").well_known(),
+        typelisp::NOT_WELL_KNOWN
+    );
+}
+
+// ---- what the system import is actually protecting ------------------------
 
 fn check_all(src: &str) -> Result<(), Error> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -189,10 +222,11 @@ fn check_all(src: &str) -> Result<(), Error> {
 #[test]
 fn a_definition_inside_a_module_is_still_a_definition() {
     // The reader interns `defun` inside `m`, and the checker recognizes a
-    // definition form by comparing that symbol against the root's `defun`. If
-    // interning did not walk up to the root, this would read as a call to an
-    // unbound `m::defun` instead — silently, and for every definition in every
-    // module.
+    // definition form by comparing that symbol against the system module's
+    // `defun`. It is the same symbol only because `m`'s table was given the
+    // system vocabulary when it was created; without that import this would
+    // read as a call to an unbound `m::defun` instead — silently, and for
+    // every definition in every module.
     check_all("(module m (defun f ((x i32)) i32 x))").expect("a defun inside a module still checks");
 }
 
