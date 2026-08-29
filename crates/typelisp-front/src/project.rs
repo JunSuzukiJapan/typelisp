@@ -61,7 +61,7 @@ use std::fs;
 use std::path::{Path as FsPath, PathBuf};
 
 use crate::check::core;
-use crate::{Checker, Error, Heap, Interp, Path, Reader, TopLevelForm, Value, MONO_BUNDLE_MODULE};
+use crate::{Checker, Error, Heap, Interp, Path, Reader, SymId, TopLevelForm, Value, MONO_BUNDLE_MODULE};
 
 /// The manifest file that marks a project root.
 pub const MANIFEST_NAME: &str = "typelisp.toml";
@@ -323,7 +323,7 @@ impl Loader {
             match checker.check_form_at(heap, &*interp, v, Some(loc)) {
                 // `(load ...)` loads inline, so subsequent forms see the
                 // definitions — see `load_file_flat`.
-                Ok(tl) if core::op(heap, tl) == Some("load") => {
+                Ok(tl) if core::op_sym(heap, tl) == Some(SymId::LOAD) => {
                     let load_path = match load_path_of(heap, tl) {
                         Some(p) => p,
                         None => {
@@ -632,7 +632,7 @@ fn load_source_flat(
     let mut result = Ok(());
     for (v, loc) in forms {
         match checker.check_form_at(heap, &*interp, v, Some(loc)) {
-            Ok(tl) if core::op(heap, tl) == Some("load") => {
+            Ok(tl) if core::op_sym(heap, tl) == Some(SymId::LOAD) => {
                 let Some(path) = load_path_of(heap, tl) else {
                     result = Err(Error::TypeError("load: expected a path string".into()));
                     break;
@@ -680,12 +680,12 @@ fn value_path_segs(heap: &Heap, v: Value) -> Option<Vec<String>> {
 /// user-written `module` is deliberately *not* matched — executing one early
 /// would run arbitrary body expressions out of order.
 pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
-    match core::op(heap, tl) {
-        Some("defmacro") => true,
-        Some("module") => {
+    match core::op_sym(heap, tl) {
+        Some(SymId::DEFMACRO) => true,
+        Some(SymId::MODULE) => {
             let bundle = match core::field(heap, tl, 0) {
                 Some(Value::Path(id)) => crate::types::path_from_id(heap, id) == Path::root(MONO_BUNDLE_MODULE),
-                Some(Value::Symbol(id)) => heap.symbol_name(id) == MONO_BUNDLE_MODULE,
+                Some(Value::Symbol(id)) => id == SymId::MONO_BUNDLE,
                 _ => false,
             };
             bundle
@@ -703,7 +703,7 @@ pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
 /// (`main.rs`'s two, this module's two) has a top-level form in hand and wants
 /// to know "is this a load, and of what?" as one question.
 pub fn load_path_of(heap: &Heap, tl: TopLevelForm) -> Option<String> {
-    if core::op(heap, tl) != Some("load") {
+    if core::op_sym(heap, tl) != Some(SymId::LOAD) {
         return None;
     }
     match core::field(heap, tl, 0)? {

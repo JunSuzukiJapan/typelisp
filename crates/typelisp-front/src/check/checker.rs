@@ -2180,22 +2180,22 @@ impl Checker {
                 if head == "impl" && !head_params.is_empty() {
                     return self.check_impl_generic(heap, interp, &elems[1..], parts_locs, head_params);
                 }
-                match heap.symbol_name(*id) {
-                    "pub" => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
-                    "defun" => return self.check_defun(heap, interp, &elems[1..], parts_locs, false, def_loc),
-                    "defsignature" => return self.check_defsignature(heap, &elems[1..], parts_locs, false),
-                    "defvar" => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc),
-                    "defconstant" => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc),
-                    "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], parts_locs, false, def_loc),
-                    "module" => return self.check_module(heap, interp, &elems[1..]),
-                    "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], parts_locs, false, def_loc),
-                    "defstruct" => return self.check_defstruct(heap, interp, &elems[1..], parts_locs, false, def_loc),
-                    "defenum" => return self.check_defenum(heap, &elems[1..], parts_locs, false, def_loc),
-                    "deftrait" => return self.check_deftrait(heap, interp, &elems[1..], parts_locs, false, def_loc),
-                    "deftype" => return self.check_deftype(heap, &elems[1..], parts_locs, false, def_loc),
-                    "impl" => return self.check_impl(heap, interp, &elems[1..], parts_locs),
-                    "use" => return self.check_use(heap, &elems[1..], parts_locs),
-                    "load" => return self.check_load(heap, &elems[1..]),
+                match *id {
+                    SymId::PUB => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
+                    SymId::DEFUN => return self.check_defun(heap, interp, &elems[1..], parts_locs, false, def_loc),
+                    SymId::DEFSIGNATURE => return self.check_defsignature(heap, &elems[1..], parts_locs, false),
+                    SymId::DEFVAR => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc),
+                    SymId::DEFCONSTANT => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc),
+                    SymId::DEFMACRO => return self.check_defmacro(heap, interp, &elems[1..], parts_locs, false, def_loc),
+                    SymId::MODULE => return self.check_module(heap, interp, &elems[1..]),
+                    SymId::DEFMETHOD => return self.check_defmethod(heap, interp, &elems[1..], parts_locs, false, def_loc),
+                    SymId::DEFSTRUCT => return self.check_defstruct(heap, interp, &elems[1..], parts_locs, false, def_loc),
+                    SymId::DEFENUM => return self.check_defenum(heap, &elems[1..], parts_locs, false, def_loc),
+                    SymId::DEFTRAIT => return self.check_deftrait(heap, interp, &elems[1..], parts_locs, false, def_loc),
+                    SymId::DEFTYPE => return self.check_deftype(heap, &elems[1..], parts_locs, false, def_loc),
+                    SymId::IMPL => return self.check_impl(heap, interp, &elems[1..], parts_locs),
+                    SymId::USE => return self.check_use(heap, &elems[1..], parts_locs),
+                    SymId::LOAD => return self.check_load(heap, &elems[1..]),
                     _ => {}
                 }
             }
@@ -2251,16 +2251,16 @@ impl Checker {
         }
         let inner_locs: &[Option<Loc>] = if parts_locs.len() > 1 { &parts_locs[1..] } else { &[] };
         if let Value::Symbol(id) = parts[0] {
-            match heap.symbol_name(id) {
-                "defun" => return self.check_defun(heap, interp, &parts[1..], inner_locs, true, def_loc),
-                "defsignature" => return self.check_defsignature(heap, &parts[1..], inner_locs, true),
-                "defvar" => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc),
-                "defconstant" => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc),
-                "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], inner_locs, true, def_loc),
-                "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], inner_locs, true, def_loc),
-                "defstruct" => return self.check_defstruct(heap, interp, &parts[1..], inner_locs, true, def_loc),
-                "defenum" => return self.check_defenum(heap, &parts[1..], inner_locs, true, def_loc),
-                "deftype" => return self.check_deftype(heap, &parts[1..], inner_locs, true, def_loc),
+            match id {
+                SymId::DEFUN => return self.check_defun(heap, interp, &parts[1..], inner_locs, true, def_loc),
+                SymId::DEFSIGNATURE => return self.check_defsignature(heap, &parts[1..], inner_locs, true),
+                SymId::DEFVAR => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc),
+                SymId::DEFCONSTANT => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc),
+                SymId::DEFMACRO => return self.check_defmacro(heap, interp, &parts[1..], inner_locs, true, def_loc),
+                SymId::DEFMETHOD => return self.check_defmethod(heap, interp, &parts[1..], inner_locs, true, def_loc),
+                SymId::DEFSTRUCT => return self.check_defstruct(heap, interp, &parts[1..], inner_locs, true, def_loc),
+                SymId::DEFENUM => return self.check_defenum(heap, &parts[1..], inner_locs, true, def_loc),
+                SymId::DEFTYPE => return self.check_deftype(heap, &parts[1..], inner_locs, true, def_loc),
                 _ => {}
             }
         }
@@ -4720,22 +4720,22 @@ impl Checker {
         let mut keys_raw: Vec<Value> = Vec::new();
         for p in &elems {
             if let Value::Symbol(id) = p {
-                match heap.symbol_name(*id) {
-                    "&optional" => {
+                match *id {
+                    SymId::OPTIONAL => {
                         if rank >= 1 {
                             return Err(Error::TypeError(format!("{}: &optional must precede &rest and &key, and appear once", what)));
                         }
                         rank = 1;
                         continue;
                     }
-                    "&rest" => {
+                    SymId::REST => {
                         if rank >= 2 {
                             return Err(Error::TypeError(format!("{}: &rest must precede &key, and appear once", what)));
                         }
                         rank = 2;
                         continue;
                     }
-                    "&key" => {
+                    SymId::KEY => {
                         if rank >= 3 {
                             return Err(Error::TypeError(format!("{}: &key may appear only once", what)));
                         }
@@ -5873,8 +5873,8 @@ impl Checker {
         let checked = checked?;
         // `check_impl` wraps its methods in a `module` purely as a grouping
         // device; the caller wants the definitions themselves.
-        match core::op(heap, checked) {
-            Some("module") => Ok(core::fields(heap, checked)?.split_off(1)),
+        match core::op_sym(heap, checked) {
+            Some(SymId::MODULE) => Ok(core::fields(heap, checked)?.split_off(1)),
             _ => Ok(vec![checked]),
         }
     }
@@ -13243,10 +13243,20 @@ impl Checker {
                     return self.check_type_test_pattern(heap, interp, env, &parts, &parts_locs);
                 }
             }
-            const BUILTIN_SEXPR_CTORS: &[&str] =
-                &["nil", "int", "float", "char", "bool", "sym", "str", "cons", "bignum", "ratio", "path"];
-            let is_builtin_head =
-                matches!(parts[0], Value::Symbol(id) if BUILTIN_SEXPR_CTORS.contains(&heap.symbol_name(id)));
+            const BUILTIN_SEXPR_CTORS: &[SymId] = &[
+                SymId::NIL,
+                SymId::INT,
+                SymId::FLOAT,
+                SymId::CHAR,
+                SymId::BOOL,
+                SymId::SYM,
+                SymId::STR,
+                SymId::CONS,
+                SymId::BIGNUM,
+                SymId::RATIO,
+                SymId::PATH,
+            ];
+            let is_builtin_head = matches!(parts[0], Value::Symbol(id) if BUILTIN_SEXPR_CTORS.contains(&id));
             if !is_builtin_head {
                 if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, parts[0], parts_locs[0].1.as_ref())? {
                     return self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, true);
@@ -14276,22 +14286,22 @@ fn parse_macro_lambda_list(
 
     for p in param_vals {
         if let Value::Symbol(id) = p {
-            match heap.symbol_name(*id) {
-                "&optional" => {
+            match *id {
+                SymId::OPTIONAL => {
                     if rank >= 1 {
                         return Err(Error::TypeError("defmacro: &optional must precede &rest and &key, and appear once".into()));
                     }
                     rank = 1;
                     continue;
                 }
-                "&rest" => {
+                SymId::REST => {
                     if rank >= 2 {
                         return Err(Error::TypeError("defmacro: &rest must precede &key, and appear once".into()));
                     }
                     rank = 2;
                     continue;
                 }
-                "&key" => {
+                SymId::KEY => {
                     if rank >= 3 {
                         return Err(Error::TypeError("defmacro: &key may appear only once".into()));
                     }

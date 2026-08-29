@@ -368,7 +368,7 @@ fn hash_form(
 /// else — the island is all `defun`s, and this is what names each one for
 /// `install_island_bitcode`'s symbol list.
 fn defun_name(heap: &Heap, tl: Value) -> Option<String> {
-    if core::op(heap, tl) != Some("defun") {
+    if core::op_sym(heap, tl) != Some(typelisp_mem::SymId::DEFUN) {
         return None;
     }
     match core::field(heap, tl, 0)? {

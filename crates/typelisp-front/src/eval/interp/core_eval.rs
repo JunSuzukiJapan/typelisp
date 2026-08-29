@@ -106,68 +106,58 @@ enum Op {
 }
 
 impl Op {
-    /// The single dispatch point from a tag's text to an operator.
+    /// The single dispatch point from a tag to an operator.
     ///
-    /// A `match` on `&str` rather than a table indexed by [`SymId`]. The old
-    /// objection was that an id is only meaningful relative to the heap that
-    /// interned it; `BUILTIN_SYMBOLS` (2026-08-29) removed that objection, so
-    /// the alternative was built and measured — and **it is not worth it**:
+    /// A tag is a symbol, so recognizing one is an identity test on its
+    /// [`SymId`] — the same `eq` CL compares symbols with, never a comparison
+    /// of the names behind them. Every tag is in `BUILTIN_SYMBOLS`, so the
+    /// constants below mean the same thing in every heap.
     ///
-    /// - wall clock, back to back on one build, an interpreted `fib 25` +
-    ///   200k-iteration `dotimes`: 5.33 s best of 6 either way. `rustc`
-    ///   compiles this into a length-and-prefix decision tree; it is not
-    ///   where the time goes.
-    /// - the table has to be indexed by a *stable* id, which means every tag
-    ///   here would have to be listed in `typelisp-mem`'s `BUILTIN_SYMBOLS` —
-    ///   the memory crate would carry the front end's IR vocabulary, and a
-    ///   tag added here but forgotten there would evaluate as an unknown
-    ///   operator.
-    ///
-    /// Unlike the scattered `symbol_name(id) == "&rest"` comparisons that
-    /// became `SymId` tests the same day, this is one central table, not a
-    /// spelling repeated in a dozen places: there is no second place to get
-    /// it wrong. Left as it is deliberately.
-    fn from_name(name: &str) -> Option<Op> {
-        Some(match name {
-            "int" => Op::Int,
-            "float" => Op::Float,
-            "bignum" => Op::Bignum,
-            "ratio" => Op::Ratio,
-            "char" => Op::Char,
-            "bool" => Op::Bool,
-            "str" => Op::Str,
-            "sym" => Op::Sym,
-            "unit" => Op::Unit,
-            "var" => Op::Var,
-            "let" => Op::Let,
-            "if" => Op::If,
-            "call" => Op::Call,
-            "panic" => Op::Panic,
-            "construct" => Op::Construct,
-            "field-get" => Op::FieldGet,
-            "field-set" => Op::FieldSet,
-            "match" => Op::Match,
-            "set" => Op::Set,
-            "loop" => Op::Loop,
-            "break" => Op::Break,
-            "return" => Op::Return,
-            "catch" => Op::Catch,
-            "throw" => Op::Throw,
-            "unwind-protect" => Op::UnwindProtect,
-            "lambda" => Op::Lambda,
-            "labels" => Op::Labels,
-            "apply" => Op::Apply,
-            "quote" => Op::Quote,
-            "dyn-new" => Op::DynNew,
-            "dyn-upcast" => Op::DynUpcast,
-            "dyn-value" => Op::DynValue,
-            "global" => Op::Global,
-            "set-global" => Op::SetGlobal,
-            "assoc" => Op::Assoc,
-            "dyn-call" => Op::DynCall,
-            "fnref" => Op::FnRef,
-            "methodref" => Op::MethodRef,
-            "compile-fn" => Op::CompileFn,
+    /// A tag missing from that table would arrive with some id past the
+    /// built-in range and match nothing, which is the internal error the
+    /// caller reports; `tests/core_vocabulary_test.rs` holds the vocabulary
+    /// closed from the other side.
+    fn from_sym(tag: SymId) -> Option<Op> {
+        Some(match tag {
+            SymId::INT => Op::Int,
+            SymId::FLOAT => Op::Float,
+            SymId::BIGNUM => Op::Bignum,
+            SymId::RATIO => Op::Ratio,
+            SymId::CHAR => Op::Char,
+            SymId::BOOL => Op::Bool,
+            SymId::STR => Op::Str,
+            SymId::SYM => Op::Sym,
+            SymId::UNIT => Op::Unit,
+            SymId::VAR => Op::Var,
+            SymId::LET => Op::Let,
+            SymId::IF => Op::If,
+            SymId::CALL => Op::Call,
+            SymId::PANIC => Op::Panic,
+            SymId::CONSTRUCT => Op::Construct,
+            SymId::FIELD_GET => Op::FieldGet,
+            SymId::FIELD_SET => Op::FieldSet,
+            SymId::MATCH => Op::Match,
+            SymId::SET => Op::Set,
+            SymId::LOOP => Op::Loop,
+            SymId::BREAK => Op::Break,
+            SymId::RETURN => Op::Return,
+            SymId::CATCH => Op::Catch,
+            SymId::THROW => Op::Throw,
+            SymId::UNWIND_PROTECT => Op::UnwindProtect,
+            SymId::LAMBDA => Op::Lambda,
+            SymId::LABELS => Op::Labels,
+            SymId::APPLY => Op::Apply,
+            SymId::QUOTE => Op::Quote,
+            SymId::DYN_NEW => Op::DynNew,
+            SymId::DYN_UPCAST => Op::DynUpcast,
+            SymId::DYN_VALUE => Op::DynValue,
+            SymId::GLOBAL => Op::Global,
+            SymId::SET_GLOBAL => Op::SetGlobal,
+            SymId::ASSOC => Op::Assoc,
+            SymId::DYN_CALL => Op::DynCall,
+            SymId::FNREF => Op::FnRef,
+            SymId::METHODREF => Op::MethodRef,
+            SymId::COMPILE_FN => Op::CompileFn,
             _ => return None,
         })
     }
@@ -225,7 +215,7 @@ impl Interp {
             Ok(Value::Symbol(id)) => id,
             _ => return Err(EvalError::Internal(format!("eval: not a core form: {}", core::print(heap, form)))),
         };
-        let op = match Op::from_name(heap.symbol_name(tag)) {
+        let op = match Op::from_sym(tag) {
             Some(op) => op,
             None => {
                 let name = heap.symbol_name(tag).to_string();
@@ -1232,14 +1222,14 @@ impl Interp {
     fn compile_fn_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
         let payload = core::field(heap, form, 0)
             .ok_or_else(|| EvalError::Internal("eval: (compile-fn ..) has no target".to_string()))?;
-        let target = match core::op(heap, payload) {
-            Some("fn") => {
+        let target = match core::op_sym(heap, payload) {
+            Some(SymId::FN) => {
                 let written = self.name_list(heap, payload, 0, "compile-fn/fn")?;
                 let home = self.name_list(heap, payload, 1, "compile-fn/fn")?;
                 let resolved = path_field(heap, payload, 2, "compile-fn/fn")?;
                 crate::CompileTarget::Fn(crate::check::Ref { written, home, resolved })
             }
-            Some("method") => {
+            Some(SymId::METHOD) => {
                 let type_name = path_field(heap, payload, 0, "compile-fn/method")?;
                 let method = sym_field(heap, payload, 1, "compile-fn/method")?;
                 let home = self.name_list(heap, payload, 2, "compile-fn/method")?;
@@ -1447,8 +1437,8 @@ fn match_core_pattern(
             // pattern means. A string would compile to `Value::Str`, whose
             // equality is *identity*, so it would silently never match; that
             // is why anything else is refused here instead of compared.
-            let want = match core::op(heap, lit) {
-                Some("int") | Some("bool") | Some("char") => core::field(heap, lit, 0)
+            let want = match core::op_sym(heap, lit) {
+                Some(SymId::INT) | Some(SymId::BOOL) | Some(SymId::CHAR) => core::field(heap, lit, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (pat-lit ..) literal has no value".to_string()))?,
                 _ => {
                     return Err(EvalError::Internal(format!(

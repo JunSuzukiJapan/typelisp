@@ -190,7 +190,22 @@ impl<'h> Items<'h> {
 
 // ---- reading a node back -------------------------------------------------
 
-/// A node's tag, or `None` if `form` is not a tagged list.
+/// A node's tag as an interned symbol, or `None` if `form` is not a tagged
+/// list. **The way to ask which node this is.**
+///
+/// Every tag is in `BUILTIN_SYMBOLS`, so the answer is compared against a
+/// `SymId` constant — an integer test on the symbol's identity, CL's `eq`.
+/// [`op`] returns the tag's *text*, which is for printing it, not for
+/// recognizing it.
+pub fn op_sym(heap: &Heap, form: Value) -> Option<crate::SymId> {
+    match heap.car(form).ok()? {
+        Value::Symbol(id) => Some(id),
+        _ => None,
+    }
+}
+
+/// A node's tag *spelled out*, or `None` if `form` is not a tagged list — for
+/// error messages and diagnostics. To recognize a tag use [`op_sym`].
 pub fn op<'h>(heap: &'h Heap, form: Value) -> Option<&'h str> {
     match heap.car(form).ok()? {
         Value::Symbol(id) => Some(heap.symbol_name(id)),

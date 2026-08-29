@@ -31,7 +31,7 @@
 use typelisp_mem::{Heap, Value};
 
 use crate::check::core;
-use crate::{DefLocs, Docs, Loc, Path, Registry, TopLevelForm};
+use crate::{DefLocs, Docs, Loc, Path, Registry, SymId, TopLevelForm};
 
 /// Tags whose fields are *not* sub-expressions, so a walk must not descend
 /// into them.
@@ -49,8 +49,17 @@ use crate::{DefLocs, Docs, Loc, Path, Registry, TopLevelForm};
 /// would offer hovers positioned at the pattern for nodes half of which are
 /// not in the source — so `(= expr)`'s `expr` has no hover, which is the
 /// same deal `(pat-lit (int 1))`'s literal already gets.
-fn is_opaque(tag: &str) -> bool {
-    matches!(tag, "quote" | "pat-wild" | "pat-bind" | "pat-lit" | "pat-guard" | "pat-ctor" | "pat-typetest")
+fn is_opaque(tag: SymId) -> bool {
+    matches!(
+        tag,
+        SymId::QUOTE
+            | SymId::PAT_WILD
+            | SymId::PAT_BIND
+            | SymId::PAT_LIT
+            | SymId::PAT_GUARD
+            | SymId::PAT_CTOR
+            | SymId::PAT_TYPETEST
+    )
 }
 
 /// The innermost candidates seen so far during [`locate_node`]'s walk: one
@@ -106,7 +115,7 @@ fn visit(heap: &Heap, form: Value, file: &str, cursor: (u32, u32), depth: usize,
             }
         }
     }
-    match core::op(heap, form) {
+    match core::op_sym(heap, form) {
         Some(tag) if is_opaque(tag) => return,
         Some(_) => {
             let Ok(fields) = core::fields(heap, form) else { return };
@@ -139,24 +148,24 @@ fn visit(heap: &Heap, form: Value, file: &str, cursor: (u32, u32), depth: usize,
 /// not a fresh scope search. A `var` with no recorded position of its own falls
 /// through to `None`, same as any node this pass doesn't recognize.
 pub fn definition_target(heap: &Heap, node: Value, def_locs: &DefLocs) -> Option<Loc> {
-    match core::op(heap, node)? {
+    match core::op_sym(heap, node)? {
         // `(global (WRITTEN...) (HOME...) PATH REPR)` and `set-global`'s same
         // leading triple.
-        "global" | "set-global" => def_locs.vars.get(&path_at(heap, node, 2)?).cloned(),
+        SymId::GLOBAL | SymId::SET_GLOBAL => def_locs.vars.get(&path_at(heap, node, 2)?).cloned(),
         // `(call (WRITTEN...) (HOME...) PATH ...)`, `fnref`'s same triple.
-        "call" | "fnref" => def_locs.fns.get(&path_at(heap, node, 2)?).cloned(),
+        SymId::CALL | SymId::FNREF => def_locs.fns.get(&path_at(heap, node, 2)?).cloned(),
         // `(assoc PATH SYM ...)`, `(methodref PATH SYM ...)`.
-        "assoc" | "methodref" => {
+        SymId::ASSOC | SymId::METHODREF => {
             def_locs.methods.get(&(path_at(heap, node, 0)?, sym_at(heap, node, 1)?)).cloned()
         }
-        "construct" => def_locs.types.get(&path_at(heap, node, 0)?).cloned(),
+        SymId::CONSTRUCT => def_locs.types.get(&path_at(heap, node, 0)?).cloned(),
         // `(compile-fn ...)` names either a function or a method; which one is
         // told by whether a method name follows the path.
-        "compile-fn" => match sym_at(heap, node, 1) {
+        SymId::COMPILE_FN => match sym_at(heap, node, 1) {
             Some(m) => def_locs.methods.get(&(path_at(heap, node, 0)?, m)).cloned(),
             None => def_locs.fns.get(&path_at(heap, node, 0)?).cloned(),
         },
-        "var" => {
+        SymId::VAR => {
             let l = heap.cons_loc(node)?;
             def_locs.local_refs.get(&(l.line, l.col)).cloned()
         }
@@ -169,12 +178,12 @@ pub fn definition_target(heap: &Heap, node: Value, def_locs: &DefLocs) -> Option
 /// resolved-`Path`-carrying tags (a `var` local has no docstring of its own, so
 /// unlike `definition_target` there's no `local_refs` analog to fall back to).
 pub fn doc_for<'a>(heap: &Heap, node: Value, docs: &'a Docs) -> Option<&'a str> {
-    let found = match core::op(heap, node)? {
-        "global" | "set-global" => docs.vars.get(&path_at(heap, node, 2)?),
-        "call" | "fnref" => docs.fns.get(&path_at(heap, node, 2)?),
-        "assoc" | "methodref" => docs.methods.get(&(path_at(heap, node, 0)?, sym_at(heap, node, 1)?)),
-        "construct" => docs.types.get(&path_at(heap, node, 0)?),
-        "compile-fn" => match sym_at(heap, node, 1) {
+    let found = match core::op_sym(heap, node)? {
+        SymId::GLOBAL | SymId::SET_GLOBAL => docs.vars.get(&path_at(heap, node, 2)?),
+        SymId::CALL | SymId::FNREF => docs.fns.get(&path_at(heap, node, 2)?),
+        SymId::ASSOC | SymId::METHODREF => docs.methods.get(&(path_at(heap, node, 0)?, sym_at(heap, node, 1)?)),
+        SymId::CONSTRUCT => docs.types.get(&path_at(heap, node, 0)?),
+        SymId::COMPILE_FN => match sym_at(heap, node, 1) {
             Some(m) => docs.methods.get(&(path_at(heap, node, 0)?, m)),
             None => docs.fns.get(&path_at(heap, node, 0)?),
         },
@@ -244,24 +253,24 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
     if !matches!(form, Value::Cons(_)) {
         return false;
     }
-    let Some(tag) = core::op(heap, form).map(str::to_string) else {
+    let Some(tag) = core::op_sym(heap, form) else {
         // A list of nodes rather than a node: `match` arms, `let` bindings.
         let Ok(items) = heap.list_to_vec(form) else { return false };
         return items.into_iter().any(|item| scope_walk(heap, item, target, scope));
     };
-    if is_opaque(&tag) {
+    if is_opaque(tag) {
         return false;
     }
     let mark = scope.len();
-    let found = match tag.as_str() {
+    let found = match tag {
         // `(defun PATH ((SYM R)...) RET-R PUBLIC E...)` — the parameters are in
         // scope throughout the body. A `defmethod`'s receiver is simply its
         // first parameter, so it needs no case of its own.
-        "defun" => {
+        SymId::DEFUN => {
             scope.extend(param_names(heap, form, 1));
             fields_from(heap, form, 4).into_iter().any(|f| scope_walk(heap, f, target, scope))
         }
-        "defmethod" => {
+        SymId::DEFMETHOD => {
             scope.extend(param_names(heap, form, 3));
             fields_from(heap, form, 6).into_iter().any(|f| scope_walk(heap, f, target, scope))
         }
@@ -269,7 +278,7 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
         // are bare symbols (a macro's are all `sexpr`). The `&optional`/`&key`
         // default forms are checked expressions too, so a cursor can land in
         // one.
-        "defmacro" => {
+        SymId::DEFMACRO => {
             scope.extend(sym_list_at(heap, form, 1));
             let lambda = core::field(heap, form, 3);
             let in_defaults = lambda
@@ -279,7 +288,7 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
         }
         // `(let ((SYM R E)...) E...)`. Each binding's value is checked in the
         // *outer* scope, so this must not see the names being bound here.
-        "let" => {
+        SymId::LET => {
             let binds = core::field(heap, form, 0);
             let in_values = binds
                 .map(|b| {
@@ -309,14 +318,14 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
             fields_from(heap, form, 1).into_iter().any(|f| scope_walk(heap, f, target, scope))
         }
         // `(lambda ((SYM R)...) RET-R E...)`.
-        "lambda" => {
+        SymId::LAMBDA => {
             scope.extend(param_names(heap, form, 0));
             fields_from(heap, form, 2).into_iter().any(|f| scope_walk(heap, f, target, scope))
         }
         // `(labels ((SYM ((SYM R)...) RET-R E...)...) E...)`. Every function's
         // name is visible to every body (its own included) and to the trailing
         // body — see `Checker::check_labels`.
-        "labels" => {
+        SymId::LABELS => {
             let defs = core::field(heap, form, 0).and_then(|d| heap.list_to_vec(d).ok()).unwrap_or_default();
             for d in &defs {
                 if let Some(n) = list_head_sym(heap, *d) {
@@ -341,7 +350,7 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
         // `(match E R (P E...)...)`. The scrutinee is checked in the outer
         // scope; each arm's pattern-bound names are visible only in that arm's
         // own body.
-        "match" => {
+        SymId::MATCH => {
             if let Some(scrut) = core::field(heap, form, 0) {
                 if scope_walk(heap, scrut, target, scope) {
                     return true;
@@ -384,20 +393,20 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
 /// `$match-scrut` would be offering a name that means nothing where the
 /// cursor is.
 fn pattern_bind_names(heap: &Heap, pat: Value, scope: &mut Vec<String>) {
-    match core::op(heap, pat) {
-        Some("pat-bind") => {
+    match core::op_sym(heap, pat) {
+        Some(SymId::PAT_BIND) => {
             if let Some(n) = sym_at(heap, pat, 0) {
                 scope.push(n);
             }
         }
         // `(pat-ctor PATH VARIANT DOWNCAST (REPR...) SUB...)`.
-        Some("pat-ctor") => {
+        Some(SymId::PAT_CTOR) => {
             for sub in fields_from(heap, pat, 4) {
                 pattern_bind_names(heap, sub, scope);
             }
         }
         // `(pat-typetest PATH SUB)`.
-        Some("pat-typetest") => {
+        Some(SymId::PAT_TYPETEST) => {
             if let Some(sub) = core::field(heap, pat, 1) {
                 pattern_bind_names(heap, sub, scope);
             }

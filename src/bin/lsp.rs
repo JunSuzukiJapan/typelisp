@@ -645,7 +645,7 @@ fn candidates_for(
 fn module_body(heap: &Heap, last: Option<TopLevelForm>) -> Vec<TopLevelForm> {
     match last {
         // `(module PATH BODY...)` — drop the tag (`fields`) and the path.
-        Some(tl) if core::op(heap, tl) == Some("module") => {
+        Some(tl) if core::op_sym(heap, tl) == Some(typelisp::SymId::MODULE) => {
             core::fields(heap, tl).map(|f| f[1..].to_vec()).unwrap_or_default()
         }
         Some(other) => vec![other],

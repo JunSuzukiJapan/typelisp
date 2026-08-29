@@ -131,8 +131,8 @@ fn walk(
                 };
                 walk(heap, cond, bound, siblings, seen, order)?;
                 walk(heap, then, bound, siblings, seen, order)?;
-                match core::op(heap, els) {
-                    Some("if") => node = els,
+                match core::op_sym(heap, els) {
+                    Some(SymId::IF) => node = els,
                     _ => return walk(heap, els, bound, siblings, seen, order),
                 }
             }

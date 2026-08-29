@@ -733,7 +733,7 @@ pub fn bind_globals(interp: &crate::Interp, globals: &[(String, usize)]) {
 /// is stored as a bare `Value::Symbol`, so reading the field by hand silently
 /// misses every unqualified global — which is most of them.
 pub fn already_initialized_global(heap: &crate::Heap, interp: &crate::Interp, tl: crate::Value) -> bool {
-    if crate::check::core::op(heap, tl) != Some("defvar") {
+    if crate::check::core::op_sym(heap, tl) != Some(crate::SymId::DEFVAR) {
         return false;
     }
     match crate::check::core::path_field(heap, tl, 0) {

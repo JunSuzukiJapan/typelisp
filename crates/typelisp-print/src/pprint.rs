@@ -731,7 +731,7 @@ fn render_at(
         Style::Tabular(colinc) => render_tabular(heap, ctx, st, &items, standard, colinc, depth, cut, out),
         Style::Linear => render_seq(heap, ctx, st, &items, standard, style, NewlineKind::Linear, depth, cut, out),
         Style::Fill => render_seq(heap, ctx, st, &items, standard, style, NewlineKind::Fill, depth, cut, out),
-        Style::Default => match code_style(heap, &items) {
+        Style::Default => match code_style(&items) {
             Some(distinguished) => render_code(heap, ctx, st, &items, standard, distinguished, depth, cut, out),
             None => render_seq(heap, ctx, st, &items, standard, style, NewlineKind::Fill, depth, cut, out),
         },
@@ -850,19 +850,39 @@ fn render_tabular(
 /// line before the body is indented under it — the analogue of CL's default
 /// `*print-pprint-dispatch*` entries for `quote`/`let`/`defun`/… , spelled for
 /// typelisp's own special forms and definition forms.
-fn code_style(heap: &Heap, (elems, tail): &Items) -> Option<usize> {
+fn code_style((elems, tail): &Items) -> Option<usize> {
     if tail.is_some() || elems.is_empty() {
         return None;
     }
     let Value::Symbol(id) = elems[0] else { return None };
-    Some(match heap.symbol_name(id) {
-        "progn" | "cond" | "loop" | "and" | "or" | "list" | "block" => 0,
-        "if" | "when" | "unless" | "while" | "let" | "let*" | "match" | "case" | "setf" | "module"
-        | "defstruct" | "defenum" | "deftrait" | "deftype" | "the" | "as" | "dolist" | "dotimes" | "doiter" | "until" => 1,
-        "lambda" | "defmacro" | "impl" | "labels" | "do" => 2,
-        "defvar" | "defconstant" => 2,
-        "defun" => 3,
-        "defmethod" => 4,
+    // Identity on the head symbol, not its name: a form is recognized the way
+    // CL's own `*print-pprint-dispatch*` recognizes one, by `eq`.
+    Some(match id {
+        SymId::PROGN | SymId::COND | SymId::LOOP | SymId::AND | SymId::OR | SymId::LIST | SymId::BLOCK => 0,
+        SymId::IF
+        | SymId::WHEN
+        | SymId::UNLESS
+        | SymId::WHILE
+        | SymId::LET
+        | SymId::LET_STAR
+        | SymId::MATCH
+        | SymId::CASE
+        | SymId::SETF
+        | SymId::MODULE
+        | SymId::DEFSTRUCT
+        | SymId::DEFENUM
+        | SymId::DEFTRAIT
+        | SymId::DEFTYPE
+        | SymId::THE
+        | SymId::AS
+        | SymId::DOLIST
+        | SymId::DOTIMES
+        | SymId::DOITER
+        | SymId::UNTIL => 1,
+        SymId::LAMBDA | SymId::DEFMACRO | SymId::IMPL | SymId::LABELS | SymId::DO => 2,
+        SymId::DEFVAR | SymId::DEFCONSTANT => 2,
+        SymId::DEFUN => 3,
+        SymId::DEFMETHOD => 4,
         _ => return None,
     })
 }

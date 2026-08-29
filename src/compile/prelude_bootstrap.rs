@@ -112,7 +112,7 @@ pub fn load_for_aot(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Inte
     let mut global_inits: Vec<(Path, Value)> = Vec::new();
     for f in &state.forms {
         let tl = crate::owned_form::owned_to_value(heap, f).map_err(|e| e.to_string())?;
-        if core::op(heap, tl) != Some("defvar") {
+        if core::op_sym(heap, tl) != Some(typelisp_mem::SymId::DEFVAR) {
             continue;
         }
         // A *permanent* root, not `push_root`: these have to survive the whole

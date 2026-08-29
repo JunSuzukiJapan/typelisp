@@ -1193,7 +1193,7 @@ pub fn function_parts(
 ///
 /// `None` for anything that is not a `defvar`.
 pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value>, Error> {
-    if core::op(heap, form) != Some("defvar") {
+    if core::op_sym(heap, form) != Some(SymId::DEFVAR) {
         return Ok(None);
     }
     let parts = core::fields(heap, form)?;
