@@ -30,6 +30,7 @@
 //! output on load is nobody's idea of a dump), nor is `Registry::def_locs`,
 //! which only `typl-lsp` reads.
 
+use typelisp_mem::wk;
 use std::collections::hash_map::DefaultHasher;
 use std::convert::TryInto;
 use std::collections::BTreeMap;
@@ -733,7 +734,7 @@ pub fn bind_globals(interp: &crate::Interp, globals: &[(String, usize)]) {
 /// is stored as a bare `Value::Symbol`, so reading the field by hand silently
 /// misses every unqualified global — which is most of them.
 pub fn already_initialized_global(heap: &crate::Heap, interp: &crate::Interp, tl: crate::Value) -> bool {
-    if crate::check::core::op_sym(heap, tl) != Some(crate::SymId::DEFVAR) {
+    if !crate::check::core::op_is(heap, tl, wk::DEFVAR) {
         return false;
     }
     match crate::check::core::path_field(heap, tl, 0) {

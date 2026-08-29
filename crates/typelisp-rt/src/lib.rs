@@ -3927,7 +3927,7 @@ stream_shim!(rt_file_create_directories, "file-create-directories", [str], tagge
 
 #[cfg(test)]
 mod tests {
-    use typelisp_mem::{Heap, PathId, StrId, SymId, Value};
+    use typelisp_mem::{Heap, PathId, StrId, Value};
 
     use super::{
         active_heap, decode, encode, reset_global_table, rt_car, rt_cdr, rt_cons, rt_global_get, rt_global_new, rt_global_set,
@@ -4001,7 +4001,10 @@ mod tests {
         assert_eq!(decode(encode(Value::Bool(true))), Value::Bool(true));
         assert_eq!(decode(encode(Value::Bool(false))), Value::Bool(false));
         assert_eq!(decode(encode(Value::Empty)), Value::Empty);
-        assert_eq!(decode(encode(Value::Symbol(SymId::from_u32(7)))), Value::Symbol(SymId::from_u32(7)));
+        // A real interned symbol: the tagged payload is now its header's
+        // address, so there is no id to fabricate.
+        let sym = typelisp_mem::symbols::intern("round-trip");
+        assert_eq!(decode(encode(Value::Symbol(sym))), Value::Symbol(sym));
         assert_eq!(decode(encode(Value::Str(StrId::from_u32(9)))), Value::Str(StrId::from_u32(9)));
         assert_eq!(decode(encode(Value::Path(PathId::from_u32(3)))), Value::Path(PathId::from_u32(3)));
     }

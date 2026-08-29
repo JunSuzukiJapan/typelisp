@@ -194,14 +194,23 @@ impl<'h> Items<'h> {
 /// list. **The way to ask which node this is.**
 ///
 /// Every tag is in `BUILTIN_SYMBOLS`, so the answer is compared against a
-/// `SymId` constant — an integer test on the symbol's identity, CL's `eq`.
+/// `SymRef` constant — an integer test on the symbol's identity, CL's `eq`.
 /// [`op`] returns the tag's *text*, which is for printing it, not for
 /// recognizing it.
-pub fn op_sym(heap: &Heap, form: Value) -> Option<crate::SymId> {
+pub fn op_sym(heap: &Heap, form: Value) -> Option<crate::SymRef> {
     match heap.car(form).ok()? {
         Value::Symbol(id) => Some(id),
         _ => None,
     }
+}
+
+/// Whether `form` is a node tagged with the vocabulary member `konst` names.
+///
+/// The one-tag shorthand for [`op_sym`]: still an identity test on the tag
+/// symbol, just spelled as a question when there is only one answer worth
+/// asking about.
+pub fn op_is(heap: &Heap, form: Value, konst: u32) -> bool {
+    op_sym(heap, form).is_some_and(|s| s.is(konst))
 }
 
 /// A node's tag *spelled out*, or `None` if `form` is not a tagged list — for

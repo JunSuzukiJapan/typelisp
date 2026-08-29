@@ -9222,7 +9222,11 @@ IR の op 名ディスパッチ（`core_eval` の `Op::from_name`、40 タグ）
 
 同日 `SymId` 比較にした 16 箇所とは性質が違う。あちらは同じ綴りが十数箇所に散っていて
 「間違えて綴れる比較」だったが、こちらは中央の表 1 つで、間違える第 2 の場所が無い。
-**見送り**。判断とその根拠は `Op::from_name` の doc comment に書いた（また蒸し返さないため）。
+**見送り**——としたが、同日の後続作業（下記「シンボルテーブルを大域・恒久・生ポインタに」）で
+**撤回して入れた**。ユーザの方針「シンボルの比較はポインタ値の比較すればいいだけだし、それ以外
+の方法でしてはいけない」が壁時計の測定より上位にあるため。関数は `Op::from_sym(tag: SymRef)`
+になっている。反対理由に挙げた「メモリ層がフロントエンドの IR 語彙を持つ」も、`BUILTIN_SYMBOLS`
+を入れた時点で既に越えていた線で、見送りの根拠としては弱かった。
 
 他の名前ディスパッチ（builtin メソッド名、`LlvmOp.type_key`）は、そもそも整数 op-id で
 引いた後の静的テーブルのタグ比較なので、ヒープ上の値の identity を文字列で比べてはいない。
@@ -9231,3 +9235,129 @@ IR の op 名ディスパッチ（`core_eval` の `Op::from_name`、40 タグ）
 
 - 文字列そのものの比較（`heap.string(i) == heap.string(j)`、CLI 引数、REPL の `:quit`、
   型構文レキサの `NameTok::Ident`）。文字列でしか比較できない
+
+## 2026-08-29（続き） — シンボルテーブルを大域・恒久・生ポインタにし、モジュールの木に沿わせる
+
+ユーザ指摘：「シンボルの比較はポインタ値の比較すればいいだけだし、それ以外の方法でしてはいけない」
+「シンボルテーブルの設計がおかしそうだ」。挙がった 3 つの期待を照合した結果：
+
+| 期待 | 直前の実態 |
+|---|---|
+| 大域に確保される（`intern_symbol` の戻り値が常に同じ） | **違う。`Heap` のフィールド**。ヒープごとに空から始まる |
+| GC で解放されない | 合っていた（`gc()` が sweep するのは cons／`str_slots`／`box_slots` のみ） |
+| 名前空間ごとに作られる | **違う。**ヒープごとに平坦な表 1 つ |
+
+動機はコンパイラ側のメモリ管理。`SymId(u32)` は**ヒープへの索引**なので、compiled code は
+シンボルを触るたび `ACTIVE_HEAP` を経由していた（`rt_sym_name`／`rt_intern_symbol` とも
+`active_heap()` を呼ぶ）。生ポインタなら経由しない。ユーザから **unsafe 可・シンボルに miri は
+不要（単純な仕組みにする）・ただしテストで動作を保証すること**の許可。
+
+### 1. `Symbol` ヘッダと `SymRef`
+
+```rust
+#[repr(C, align(8))]                  // 下位 3 ビットをタグに空ける
+pub struct Symbol { name: Box<str>, home: NsId, well_known: u32 }
+
+#[derive(Clone, Copy)]
+pub struct SymRef(*const Symbol);     // 同一性 = アドレス。`==` が CL の `eq`
+```
+
+`Value::Cons` が既に生ポインタをタグ語に載せていた（`(c.addr() as i64) | TAG_CONS`）ので、
+`TAG_SYMBOL` も同じ形にしただけ。`ConsRef` が手本。
+
+ヘッダは `Box::leak` する。**恒久なので `'static` が主張ではなく本物になり、アドレスが
+ダングリングしようがない**——これが「miri で見張らなくていいくらい単純」の中身。
+`unsafe impl Send/Sync for SymRef` はここから正当化される（不変・不滅の共有参照）。
+
+**逆引き表 `sym_names: Vec<String>` は廃止した。** ポインタなら名前は 1 回の deref で返るので、
+`symbol_name` を O(1) にするための表という理由が消える（この指摘はユーザから。以前の
+「逆引きに要る」という説明は循環していた）。
+
+### 2. なぜ `well_known: u32` が要るか
+
+**ポインタは `const` にできず、`match` のパターンに書けない。** 同日午前に `SymId::PUB` 等で
+書き直した分岐（IR タグ 39 way、定義形 15 way、loop 43 way）が `if` の連鎖に退化してしまう。
+`Symbol` に固定語彙 151 個の添字を持たせ、`match sym.well_known() { wk::LET => ... }` と書く。
+密な小整数なのでジャンプテーブルのまま。
+
+**同一性の判定は常にポインタ。** `well_known` は固定語彙を引くためだけの副次情報で、語彙外の
+シンボルは全部 `NOT_WELL_KNOWN` を返す（＝identity テストには使えない）。`wk::X` は
+`const fn sym_index` が `BUILTIN_SYMBOLS` を探して作るので、**表に無い名前の定数はコンパイルが
+通らない**。
+
+### 3. 表はモジュールの木
+
+ユーザ指示「モジュールごとに、子要素のテーブルを持たせるのが直感的だと思う」。checker 側の
+`Namespace` と同型：
+
+```rust
+struct NsNode { syms: HashMap<Box<str>, SymRef>, children: HashMap<Box<str>, NsId>,
+                parent: Option<NsId>, segment: Box<str> }
+static SYMBOLS: OnceLock<Mutex<SymTable>>;   // ノードは Vec<NsNode>、NsId は添字
+```
+
+- **読みはロック不要**（ポインタを deref するだけ）。書き＝intern だけがロックを取る
+- `cargo test` は複数スレッドで走るが、シンボルは不変・恒久なのでプロセス共有で安全
+  （`ACTIVE_HEAP` が thread-local なのは*ヒープが可変でテストごとに別だから*で、シンボルには
+  当てはまらない）
+
+**intern の規則は current → 親 → … → root、無ければ current に作る。** これが無いと
+`(module m (defun ...))` が壊れる：`defun` を認識しているのは root の `defun` との同一性なので、
+モジュール内の `defun` が無条件に `m::defun` になると**モジュール内の全定義が定義でなくなる**。
+親を辿る形は、この言語が既に持つ名前解決（current namespace first then root）と同じ。
+
+順序依存（先に使ったモジュールがその名前を取る）に実害は無い：prelude・コアマクロ層・島は
+ユーザコードより先に root へ入る（`load_for_aot` → `load_compiler` → `read_all_in_spanned`）。
+
+### 4. リーダに基底名前空間を通す
+
+`(module path body...)` は**入れ子**なので、読みながら push すれば字句的に決まる——CL の
+`*package*` のような動的状態は要らない。`read_datum`／`read_list`／`read_atom` に `ns: NsId` を
+足し、`read_list` が 2 番目の要素（パス）を読んだ時点で本体用の `NsId` に切り替える
+（`module_body_ns`：頭が `wk::MODULE` かの identity テスト、相対降下、先頭が空セグメントなら
+ROOT からやり直し）。公開の入口は `read_all_in_spanned_within(heap, file, src, ns)`；
+既存の `read_all_in_spanned` は ROOT を渡す薄いラッパ。`project.rs::load_source_inner` は
+手元の `segs` から `ns_of(segs)` を作って渡す。
+
+**書かれたパス `m::foo` のセグメントは root の素の名前のまま**にした。`m::foo` はカレント
+名前空間からの相対でもありうる（`n` の中なら `n::m::foo` かもしれない）ので、**リーダには
+決められない**——解決はチェッカの仕事。裸のシンボルの住所は字句的に決まるが、修飾パスのそれは
+解決を要する、という非対称。
+
+`string->symbol` と `gensym` は実行時に作られて住所が字句的に決まらないので **root に入れる**。
+動的な「現在のパッケージ」がこの言語に無いため。
+
+### テスト（miri の代わり）
+
+`tests/symbol_table_test.rs`、13 本。大域（**別々の `Heap` をまたいで同じポインタ**／大文字小文字
+の畳み込み／複数スレッドから同名を同時に intern しても 1 つに収束——`Value` は `!Send` なので
+`.addr()` を送る）、恒久（ヒープを落としてもシンボルの名前が読める／GC が回収しない）、タグ語の
+不変条件（`addr() & 0b111 == 0`、`encode`/`decode` の往復）、名前空間（`m` と `n` で同名が別
+シンボル／`(module m (defun ...))` の `defun` が root のそれと同一＝§3 の親辿りの番人／入れ子の
+モジュールが鎖を全部辿る／`ns_path`）、端から端まで（モジュール本体が自分の表に裸の名前を読む）。
+
+`tests/mem_test.rs` の `symbol_count` を数える 2 本は、大域化＋並列テストで不安定になるので
+**同一性の主張に書き換えた**（元々測りたかったのはそちら）。実際、書き換える前に
+「left: 1, right: 2」で落ちた——同じバイナリ内の別テストが先に "foo" を intern していたため。
+
+### 島の成果物は再生成が要った（見立てが外れた）
+
+計画では「島は素通しなので再生成不要」と見ていた。**島が出す IR については当たっていた**
+（`compile-sexpr-field` はシンボルのペイロードを素通しする）。外れたのは別の理由で、
+`SymId` → `SymRef` の改名が島の `SOURCE` 文字列**内のコメント 2 行**に当たり、ダンプの
+`verify_digest` が**ソース文字列**に対して取られているために無効化された（読んだ形に対して
+取る `island_source_hash` とは別物——「島のハッシュは読んだ形に対して取る」の裏面で、
+ダンプ側は今もソース文字列を見ている）。
+
+表現が実際に変わった以上コメントは直すべきなので、アドレスを説明する文言に書き直してから
+再生成した。md5 `83ac1046…` → `b09f1282…`、不動点は 1 パスで到達（2 回目を回して確認）。
+prelude のダンプも追随させた。
+
+### 事故
+
+- **BSD の `sed` は `\b` を解さない。** `SymId` → `SymRef` の一括改名が静かに何もせず、301 箇所が
+  残っていた。`grep -rl` ＋ Python の `re.sub(r'\bSymId\b', ...)` でやり直した
+- **正規表現の巻き添え。** `match tag {` → `match tag.well_known() {` が `core_bridge.rs` と
+  `core_freevars.rs` の `tag: &str` にも当たった。`core_freevars` のほうは*本物の*シンボル比較
+  だったので正しく変換し（`core::op` → `core::op_sym`、腕を `wk::*` へ）、`core_bridge` の
+  `record` 以外は 1 行ずつ文字列の腕に戻した

@@ -842,16 +842,16 @@ fn car_cdr_of_non_cons_errors() {
 
 #[test]
 fn symbols_intern_by_name() {
+    // Identity, not a count: the table is process-global and permanent, so
+    // another test in this binary may have interned these names already. What
+    // is being asserted is what a count was ever standing in for — one symbol
+    // per name.
     let mut h = Heap::with_capacity(8);
-    // Counted as a delta: every heap starts with the syntax words
-    // `BUILTIN_SYMBOLS` pre-interns (see `SymId`'s constants).
-    let before = h.symbol_count();
     let a = h.intern_symbol("foo");
     let b = h.intern_symbol("foo");
     let c = h.intern_symbol("bar");
     assert_eq!(a, b, "equal names must intern to the same symbol");
     assert_ne!(a, c);
-    assert_eq!(h.symbol_count() - before, 2);
     if let Value::Symbol(id) = a {
         assert_eq!(h.symbol_name(id), "foo");
     } else {
@@ -862,13 +862,11 @@ fn symbols_intern_by_name() {
 #[test]
 fn symbols_are_case_insensitive() {
     let mut h = Heap::with_capacity(8);
-    let before = h.symbol_count();
     let lower = h.intern_symbol("foo");
     let upper = h.intern_symbol("FOO");
     let mixed = h.intern_symbol("Foo");
     assert_eq!(lower, upper);
     assert_eq!(lower, mixed);
-    assert_eq!(h.symbol_count() - before, 1);
     if let Value::Symbol(id) = mixed {
         assert_eq!(h.symbol_name(id), "foo"); // canonical lowercase
     } else {

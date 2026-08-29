@@ -56,7 +56,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use typelisp_mem::{Error, Heap, RootScope, SymId, Value};
+use typelisp_mem::{wk, Error, Heap, RootScope, SymRef, Value};
 
 use crate::check::core::{self, Items};
 use crate::check::repr::Repr;
@@ -114,15 +114,15 @@ impl Definitions {
     /// whole program's top level, and every other form there is simply not a
     /// type definition.
     pub fn record(&mut self, heap: &Heap, form: Value) -> Result<(), Error> {
-        let Some(tag) = core::op(heap, form) else { return Ok(()) };
-        match tag {
-            "defstruct" => {
+        let Some(tag) = core::op_sym(heap, form) else { return Ok(()) };
+        match tag.well_known() {
+            wk::DEFSTRUCT => {
                 let parts = core::fields(heap, form)?;
                 let [path, _fields] = parts[..] else { return Err(malformed(heap, form)) };
                 let path = as_path(heap, path).ok_or_else(|| malformed(heap, form))?;
                 self.structs.insert(path);
             }
-            "defenum" => {
+            wk::DEFENUM => {
                 let parts = core::fields(heap, form)?;
                 let [path, _variants, _fields] = parts[..] else { return Err(malformed(heap, form)) };
                 let path = as_path(heap, path).ok_or_else(|| malformed(heap, form))?;
@@ -131,7 +131,7 @@ impl Definitions {
             // A module's children are top-level forms too, and a type defined
             // inside one is just as reachable from a body being compiled as one
             // at the root.
-            "module" => {
+            wk::MODULE => {
                 for child in core::fields(heap, form)?.iter().skip(1) {
                     self.record(heap, *child)?;
                 }
@@ -186,23 +186,23 @@ pub struct Ctx<'a> {
     ///
     /// Innermost last, and searched backwards, so a shadowing binding wins the
     /// same way it does at run time.
-    reprs: &'a [(SymId, Repr)],
+    reprs: &'a [(SymRef, Repr)],
     /// Names that resolve to a *direct* call: the `labels` siblings in scope,
     /// this def included. Reset to empty inside a `lambda`, which never gets
     /// direct-call access to an enclosing block's siblings.
-    direct: &'a HashSet<SymId>,
+    direct: &'a HashSet<SymRef>,
     /// Names bound to a shared cell rather than an ordinary slot, so that an
     /// assignment inside a capturing closure is visible everywhere else that
     /// shares the binding. A reference to one becomes `cellvar` rather than
     /// `var`, and its binding kind gains the island's `10 +` cell marker.
-    cell_names: &'a HashSet<SymId>,
+    cell_names: &'a HashSet<SymRef>,
     /// Every `labels` sibling reachable from *any* enclosing scope. Unlike
     /// `direct` this is only ever grown, because a sibling captured as a value
     /// however many `lambda` boundaries away is still a sibling — the compiler
     /// boxes it at the capture site — and so must stay out of `cell_names`
     /// however deep it is found. A sibling can never be assigned to, so there
     /// is nothing for a cell to share.
-    visible_siblings: &'a HashSet<SymId>,
+    visible_siblings: &'a HashSet<SymRef>,
     /// The trait-object id tables, interned before translation starts: both
     /// are baked into the emitted code as constants, so there is nothing to
     /// resolve mid-translation.
@@ -214,7 +214,7 @@ pub struct Ctx<'a> {
     /// superset of the one enclosing it: calling an enclosing sibling needs
     /// that sibling's captures forwarded, and the only way a def here can have
     /// them to forward is to carry them itself.
-    outer_captured: &'a [SymId],
+    outer_captured: &'a [SymRef],
 }
 
 impl<'a> Ctx<'a> {
@@ -243,7 +243,7 @@ impl<'a> Ctx<'a> {
 
     /// This scope's bindings, plus `more` — for a caller to hold while it
     /// translates the body they are in scope for.
-    fn extended(&self, more: impl IntoIterator<Item = (SymId, Repr)>) -> Vec<(SymId, Repr)> {
+    fn extended(&self, more: impl IntoIterator<Item = (SymRef, Repr)>) -> Vec<(SymRef, Repr)> {
         let mut v = self.reprs.to_vec();
         v.extend(more);
         v
@@ -258,18 +258,18 @@ impl<'a> Ctx<'a> {
     /// would read through a cell the binder never created.
     ///
     /// [`core_freevars::names_captured_by_nested`]: super::core_freevars::names_captured_by_nested
-    pub fn with_cell_names(self, names: &'a HashSet<SymId>) -> Ctx<'a> {
+    pub fn with_cell_names(self, names: &'a HashSet<SymRef>) -> Ctx<'a> {
         Ctx { cell_names: names, ..self }
     }
 
-    fn repr_of(&self, name: SymId) -> Option<&Repr> {
+    fn repr_of(&self, name: SymRef) -> Option<&Repr> {
         self.reprs.iter().rev().find(|(n, _)| *n == name).map(|(_, r)| r)
     }
 
     /// The island's kind number for a binding of `name` at `repr`: the plain
     /// one, or the `10 +` cell marker and the field classification the cell's
     /// contents are tagged with.
-    fn binding_kind(&self, name: SymId, repr: &Repr) -> i64 {
+    fn binding_kind(&self, name: SymRef, repr: &Repr) -> i64 {
         if self.cell_names.contains(&name) {
             10 + repr.field_kind()
         } else {
@@ -279,8 +279,8 @@ impl<'a> Ctx<'a> {
 }
 
 /// One shared empty set, so `Ctx::new` can hand out borrows of it.
-fn empty_names() -> &'static HashSet<SymId> {
-    static EMPTY: std::sync::OnceLock<HashSet<SymId>> = std::sync::OnceLock::new();
+fn empty_names() -> &'static HashSet<SymRef> {
+    static EMPTY: std::sync::OnceLock<HashSet<SymRef>> = std::sync::OnceLock::new();
     EMPTY.get_or_init(HashSet::new)
 }
 
@@ -315,7 +315,7 @@ fn untranslated(tag: &str) -> Error {
     Error::TypeError(format!("compile: the bridge has no translation for `{}` yet", tag))
 }
 
-fn unbound(heap: &Heap, name: SymId) -> Error {
+fn unbound(heap: &Heap, name: SymRef) -> Error {
     Error::TypeError(format!(
         "compile: `{}` is referenced but no binder in scope states its representation (internal error)",
         heap.symbol_name(name)
@@ -1165,10 +1165,10 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
 /// inner `lambda`'s own separately-computed captured list to pick up as-is.
 pub fn function_parts(
     heap: &mut Heap,
-    params: &[(SymId, Repr)],
+    params: &[(SymRef, Repr)],
     body: &[Value],
     cx: Ctx,
-    extra_non_cell: &HashSet<SymId>,
+    extra_non_cell: &HashSet<SymRef>,
 ) -> Result<(Value, Value), Error> {
     let mut cells = names_captured_by_nested(heap, body)?;
     for n in extra_non_cell {
@@ -1193,7 +1193,7 @@ pub fn function_parts(
 ///
 /// `None` for anything that is not a `defvar`.
 pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value>, Error> {
-    if core::op_sym(heap, form) != Some(SymId::DEFVAR) {
+    if !core::op_is(heap, form, wk::DEFVAR) {
         return Ok(None);
     }
     let parts = core::fields(heap, form)?;
@@ -1413,7 +1413,7 @@ fn translate_dyn_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Er
 
 /// A `((SYM . kind) ...)` list — a lambda's parameters, or a captured
 /// environment's slots, in the shape `bind-params`/`bind-captures` read.
-fn name_kind_list(heap: &mut Heap, names: &[(SymId, Repr)], cx: Ctx) -> Result<Value, Error> {
+fn name_kind_list(heap: &mut Heap, names: &[(SymRef, Repr)], cx: Ctx) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     for (name, repr) in names {
         let kind = Value::Int(cx.binding_kind(*name, repr));
@@ -1424,7 +1424,7 @@ fn name_kind_list(heap: &mut Heap, names: &[(SymId, Repr)], cx: Ctx) -> Result<V
 }
 
 /// A `(SYM R)` parameter list, as names with their representations.
-fn params_of(heap: &Heap, list: Value) -> Result<Vec<(SymId, Repr)>, Error> {
+fn params_of(heap: &Heap, list: Value) -> Result<Vec<(SymRef, Repr)>, Error> {
     heap.list_to_vec(list)?
         .into_iter()
         .map(|p| {
@@ -1441,7 +1441,7 @@ fn params_of(heap: &Heap, list: Value) -> Result<Vec<(SymId, Repr)>, Error> {
 
 /// Pair each captured name with the representation the binder that introduced
 /// it stated — which is the whole reason the walk returns bare names.
-fn captured_with_reprs(heap: &Heap, names: &[SymId], cx: Ctx) -> Result<Vec<(SymId, Repr)>, Error> {
+fn captured_with_reprs(heap: &Heap, names: &[SymRef], cx: Ctx) -> Result<Vec<(SymRef, Repr)>, Error> {
     names
         .iter()
         .map(|n| cx.repr_of(*n).cloned().map(|r| (*n, r)).ok_or_else(|| unbound(heap, *n)))
@@ -1488,7 +1488,7 @@ fn translate_lambda(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     let params = params_of(heap, parts[0])?;
     let body: Vec<Value> = parts[2..].to_vec();
 
-    let bound: HashSet<SymId> = params.iter().map(|(n, _)| *n).collect();
+    let bound: HashSet<SymRef> = params.iter().map(|(n, _)| *n).collect();
     let captured_names = free_vars(heap, &body, &bound, &HashSet::new())?;
     let captured = captured_with_reprs(heap, &captured_names, cx)?;
 
@@ -1537,8 +1537,8 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     let raw_defs = heap.list_to_vec(*defs_list)?;
 
     struct Def {
-        name: SymId,
-        params: Vec<(SymId, Repr)>,
+        name: SymRef,
+        params: Vec<(SymRef, Repr)>,
         body: Vec<Value>,
     }
     let mut defs = Vec::with_capacity(raw_defs.len());
@@ -1557,10 +1557,10 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     // The enclosing block's captured list first, then whatever the defs
     // themselves refer to — see `Ctx::outer_captured` for why the prefix is
     // unconditional.
-    let mut captured_names: Vec<SymId> = cx.outer_captured.to_vec();
-    let mut seen: HashSet<SymId> = captured_names.iter().copied().collect();
+    let mut captured_names: Vec<SymRef> = cx.outer_captured.to_vec();
+    let mut seen: HashSet<SymRef> = captured_names.iter().copied().collect();
     for d in &defs {
-        let bound: HashSet<SymId> = d.params.iter().map(|(n, _)| *n).collect();
+        let bound: HashSet<SymRef> = d.params.iter().map(|(n, _)| *n).collect();
         for n in free_vars(heap, &d.body, &bound, &siblings)? {
             if seen.insert(n) {
                 captured_names.push(n);
@@ -1569,10 +1569,10 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     }
     let captured = captured_with_reprs(heap, &captured_names, cx)?;
     // Every name a block captures is a cell, unconditionally.
-    let captured_cells: HashSet<SymId> = captured_names.iter().copied().collect();
+    let captured_cells: HashSet<SymRef> = captured_names.iter().copied().collect();
     // Grown, never reset: a lambda nested arbitrarily deep still has to
     // recognize these names as sibling-derived.
-    let visible: HashSet<SymId> = cx.visible_siblings.union(&siblings).copied().collect();
+    let visible: HashSet<SymRef> = cx.visible_siblings.union(&siblings).copied().collect();
 
     // The siblings' own names enter the representation scope as function
     // values. A def's body never needs them (they are `direct`, called by name
@@ -1605,8 +1605,8 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
             // the parameters before adding this def's own nested captures back
             // is what keeps a reference to the parameter from reading the
             // captured cell instead.
-            let param_names: HashSet<SymId> = d.params.iter().map(|(n, _)| *n).collect();
-            let mut cells: HashSet<SymId> = captured_cells.difference(&param_names).copied().collect();
+            let param_names: HashSet<SymRef> = d.params.iter().map(|(n, _)| *n).collect();
+            let mut cells: HashSet<SymRef> = captured_cells.difference(&param_names).copied().collect();
             cells.extend(names_captured_by_nested(&s, &d.body)?);
             let inner_reprs = base.extended(d.params.iter().cloned());
             let inner = Ctx { reprs: &inner_reprs, cell_names: &cells, ..base };
@@ -1780,7 +1780,7 @@ fn forwarding_lambda(
     cx: Ctx,
     call_site: impl FnOnce(&mut Heap, &[Value]) -> Result<Value, Error>,
 ) -> Result<Value, Error> {
-    let params: Vec<(SymId, Repr)> = reprs
+    let params: Vec<(SymRef, Repr)> = reprs
         .iter()
         .enumerate()
         .map(|(i, r)| match heap.intern_symbol(&format!("arg{}", i)) {

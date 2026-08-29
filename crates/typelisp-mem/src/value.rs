@@ -15,7 +15,7 @@
 //! Cons cells live in a [`Heap`](super::heap::Heap) arena and are referenced
 //! through the opaque [`ConsRef`] (a raw pointer that is never dereferenced
 //! outside `mem`). Symbols and strings are stored in the heap and referenced by
-//! [`SymId`] / [`StrId`]. `Float` is heap-resident too, behind [`BoxId`] (see
+//! [`SymRef`] / [`StrId`]. `Float` is heap-resident too, behind [`BoxId`] (see
 //! [`BoxedObj`]) — an `f64` doesn't fit alongside a tag in one 64-bit word,
 //! the same reason `Str` isn't stored inline. The public surface is entirely
 //! safe.
@@ -23,6 +23,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use crate::symbols::SymRef;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
@@ -128,240 +129,6 @@ impl ConsRef {
     }
 }
 
-/// Reference to an interned symbol in the heap's symbol table.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct SymId(pub(crate) u32);
-
-/// Compile-time string equality, for [`sym_index`].
-const fn str_eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut i = 0;
-    while i < a.len() {
-        if a[i] != b[i] {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
-
-/// Where `name` sits in [`BUILTIN_SYMBOLS`] — the id `Heap::with_capacity`
-/// will intern it at. A name that is not in the table is a compile error.
-const fn sym_index(name: &str) -> u32 {
-    let mut i = 0;
-    while i < BUILTIN_SYMBOLS.len() {
-        if str_eq(BUILTIN_SYMBOLS[i], name) {
-            return i as u32;
-        }
-        i += 1;
-    }
-    panic!("a SymId constant names a symbol that is not in BUILTIN_SYMBOLS")
-}
-
-/// Declares the symbols every heap interns at birth, and one [`SymId`]
-/// constant per entry.
-///
-/// One list, two outputs: the constant's value is *computed from* the table by
-/// [`sym_index`] at compile time, so a constant and its name cannot drift
-/// apart — a name that moves takes its constant with it, and a constant whose
-/// name is not in the table fails to compile.
-macro_rules! well_known_symbols {
-    ($($section:literal $($konst:ident => $name:literal)+)+) => {
-        /// The symbols every heap has from birth, interned by `Heap::with_capacity`
-        /// in this order so that their ids are compile-time constants.
-        ///
-        /// These are the names the compiler *compares symbols against* — the head of
-        /// a definition form, a lambda-list marker, a core-IR operator tag, a `loop`
-        /// clause word. A symbol is an interned id, so asking "is this `&rest`?" is
-        /// meant to be the same integer comparison CL's `eq` is; before this table it
-        /// was a string comparison on the name read back out, which quietly depended
-        /// on `intern_symbol`'s case-folding and could be spelled wrong (`"&REST"`
-        /// would simply never match).
-        ///
-        /// This list lives here, in the memory crate, rather than with the front end
-        /// that gives each name meaning. It has to: the ids must be the same in every
-        /// heap for a constant to mean anything, and heap construction is the only
-        /// point every heap passes through. The crate does not interpret the names —
-        /// it interns them, the way it interns any other string.
-        ///
-        /// Names must already be lowercase: `intern_symbol` folds, so a name spelled
-        /// otherwise would intern under a different one and land at a different index.
-        pub const BUILTIN_SYMBOLS: &[&str] = &[$($($name,)+)+];
-
-        impl SymId {
-            $($(
-                #[doc = $section]
-                pub const $konst: SymId = SymId(sym_index($name));
-            )+)+
-        }
-    };
-}
-
-well_known_symbols! {
-    "Syntax the checker reads."
-    QUOTE => "quote"
-    UNQUOTE => "unquote"
-    UNQUOTE_SPLICING => "unquote-splicing"
-    THE => "the"
-    FN => "fn"
-    PUB => "pub"
-    WHERE => "where"
-    RETURN => "return"
-    REST => "&rest"
-    OPTIONAL => "&optional"
-    KEY => "&key"
-    DYN => ":dyn"
-    EQUALS => "="
-    COLON_EQUALS => ":="
-
-    "Core-IR operator tags shared with the island (`compile-value`'s dispatch)."
-    INT => "int"
-    FLOAT => "float"
-    BIGNUM => "bignum"
-    RATIO => "ratio"
-    CHAR => "char"
-    BOOL => "bool"
-    STR => "str"
-    UNIT => "unit"
-    VAR => "var"
-    SET => "set"
-    GLOBAL => "global"
-    SET_GLOBAL => "set-global"
-    LET => "let"
-    LAMBDA => "lambda"
-    LABELS => "labels"
-    CALL => "call"
-    ASSOC => "assoc"
-    APPLY => "apply"
-    IF => "if"
-    LOOP => "loop"
-    BREAK => "break"
-    PANIC => "panic"
-    MATCH => "match"
-    CONSTRUCT => "construct"
-    FIELD_GET => "field-get"
-    FIELD_SET => "field-set"
-    DYN_NEW => "dyn-new"
-    DYN_UPCAST => "dyn-upcast"
-    DYN_CALL => "dyn-call"
-    DYN_VALUE => "dyn-value"
-    CATCH => "catch"
-    THROW => "throw"
-    UNWIND_PROTECT => "unwind-protect"
-
-    "Core-IR tags with no island counterpart: the bridge turns each into something else."
-    SYM => "sym"
-    FNREF => "fnref"
-    METHODREF => "methodref"
-    COMPILE_FN => "compile-fn"
-    METHOD => "method"
-    PAT_WILD => "pat-wild"
-    PAT_EMPTY => "pat-empty"
-    PAT_NONEMPTY => "pat-nonempty"
-    PAT_BIND => "pat-bind"
-    PAT_LIT => "pat-lit"
-    PAT_GUARD => "pat-guard"
-    PAT_CTOR => "pat-ctor"
-    PAT_TYPETEST => "pat-typetest"
-
-    "Core-IR top-level tags, and the definition-form heads they are lowered from."
-    DEFUN => "defun"
-    DEFMETHOD => "defmethod"
-    DEFMACRO => "defmacro"
-    DEFVAR => "defvar"
-    DEFSTRUCT => "defstruct"
-    DEFENUM => "defenum"
-    MODULE => "module"
-    USE => "use"
-    LOAD => "load"
-    EXPR => "expr"
-    DEFSIGNATURE => "defsignature"
-    DEFCONSTANT => "defconstant"
-    DEFTRAIT => "deftrait"
-    DEFTYPE => "deftype"
-    IMPL => "impl"
-
-    "`Sexpr`'s own constructors, as a downcast pattern's head can spell them."
-    NIL => "nil"
-    CONS => "cons"
-    PATH => "path"
-
-    "Forms the pretty printer lays out code-shaped, beyond those already above."
-    PROGN => "progn"
-    COND => "cond"
-    AND => "and"
-    OR => "or"
-    LIST => "list"
-    BLOCK => "block"
-    WHEN => "when"
-    UNLESS => "unless"
-    WHILE => "while"
-    LET_STAR => "let*"
-    CASE => "case"
-    SETF => "setf"
-    AS => "as"
-    DOLIST => "dolist"
-    DOTIMES => "dotimes"
-    DOITER => "doiter"
-    UNTIL => "until"
-    DO => "do"
-
-    "Values a well-known global may hold, compared against as symbols."
-    UPCASE => ":upcase"
-    CAPITALIZE => ":capitalize"
-
-    "The synthetic module `check_program` collects monomorphized specializations into."
-    MONO_BUNDLE => "<monomorph specializations>"
-
-    "`loop`'s clause words. Keywords, so distinct from the bare symbols above."
-    KW_WITH => ":with"
-    KW_FOR => ":for"
-    KW_AS => ":as"
-    KW_REPEAT => ":repeat"
-    KW_INITIALLY => ":initially"
-    KW_FINALLY => ":finally"
-    KW_IN => ":in"
-    KW_ACROSS => ":across"
-    KW_ON => ":on"
-    KW_FROM => ":from"
-    KW_DOWNFROM => ":downfrom"
-    KW_UPFROM => ":upfrom"
-    KW_TO => ":to"
-    KW_BELOW => ":below"
-    KW_DOWNTO => ":downto"
-    KW_ABOVE => ":above"
-    KW_BY => ":by"
-    KW_THEN => ":then"
-    KW_DO => ":do"
-    KW_DOING => ":doing"
-    KW_COLLECT => ":collect"
-    KW_COLLECTING => ":collecting"
-    KW_APPEND => ":append"
-    KW_APPENDING => ":appending"
-    KW_SUM => ":sum"
-    KW_SUMMING => ":summing"
-    KW_COUNT => ":count"
-    KW_COUNTING => ":counting"
-    KW_MAXIMIZE => ":maximize"
-    KW_MAXIMIZING => ":maximizing"
-    KW_MINIMIZE => ":minimize"
-    KW_MINIMIZING => ":minimizing"
-    KW_ALWAYS => ":always"
-    KW_NEVER => ":never"
-    KW_THEREIS => ":thereis"
-    KW_WHILE => ":while"
-    KW_UNTIL => ":until"
-    KW_RETURN => ":return"
-    KW_WHEN => ":when"
-    KW_IF => ":if"
-    KW_UNLESS => ":unless"
-    KW_ELSE => ":else"
-    KW_INTO => ":into"
-}
-
 /// Reference to a string in the heap's string store.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct StrId(pub(crate) u32);
@@ -381,7 +148,7 @@ pub struct PathId(pub(crate) u32);
 /// go back to it (see [`super::heap::Heap::type_key_name`]).
 ///
 /// Interning is permanent — an id stays valid for the heap's lifetime and
-/// equal names always share one id, exactly like [`SymId`].
+/// equal names always share one id, exactly like an interned [`SymRef`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TypeKeyId(pub(crate) u32);
 
@@ -429,16 +196,6 @@ impl TypeKeyId {
 // `as_u32`/`from_u32`: for `typelisp-rt`'s tagged compiled-code
 // representation, which embeds these as plain integer payloads (see
 // `typelisp-rt`'s `encode`/`decode`).
-impl SymId {
-    pub fn as_u32(&self) -> u32 {
-        self.0
-    }
-
-    pub fn from_u32(v: u32) -> SymId {
-        SymId(v)
-    }
-}
-
 impl StrId {
     pub fn as_u32(&self) -> u32 {
         self.0
@@ -725,7 +482,7 @@ pub enum Value {
     Int(i64),
     Char(char),
     Bool(bool),
-    Symbol(SymId),
+    Symbol(SymRef),
     Str(StrId),
     Cons(ConsRef),
     /// A `::`-qualified path such as `std::process::exit`, produced by the

@@ -620,7 +620,8 @@ pub const SOURCE: &str = r#"
 ;; `rt_float_value` -- a real heap read, like `cons`, since a float is now
 ;; boxed rather than an immediate bit pattern (see `typelisp-rt`'s
 ;; `TAG_BOXED`). `sym`'s `Symbol` field still isn't representable in
-;; compiled code (a `Sym`'s tagged payload is a `SymId`; `Type::Symbol` has
+;; compiled code (a `Sym`'s tagged payload is the address of an interned
+;; symbol's header; `Type::Symbol` has
 ;; no compiled representation, and `Interp::call_compiled`'s return-value
 ;; decode would degrade one to a plain `Int` at the JIT boundary), and
 ;; neither are `bignum`/`ratio`'s payloads (`Type::Bignum`/`Type::Ratio`
@@ -4139,7 +4140,8 @@ pub const SOURCE: &str = r#"
 ;; (`f64::to_bits`), the convention `rt_float_new`
 ;; expects. `sym`'s `Str` field still isn't
 ;; representable in compiled code yet (a `Sym`'s tag
-;; payload is a `SymId`, a separate gap from `str`'s
+;; payload is an interned symbol's address, a separate
+;; gap from `str`'s
 ;; own — see `compile-sexpr-field`'s doc comment), so
 ;; constructing one still panics clearly.
 (defun compile-construct-sexpr ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (variant i64) (arg-forms Option<Sexpr>))llvm-value

@@ -22,7 +22,7 @@
 
 use std::collections::HashSet;
 
-use typelisp_mem::{Error, Heap, SymId, Value};
+use typelisp_mem::{wk, Error, Heap, SymRef, Value};
 
 use crate::check::core;
 
@@ -37,9 +37,9 @@ use crate::check::core;
 pub fn free_vars(
     heap: &Heap,
     body: &[Value],
-    bound: &HashSet<SymId>,
-    siblings: &HashSet<SymId>,
-) -> Result<Vec<SymId>, Error> {
+    bound: &HashSet<SymRef>,
+    siblings: &HashSet<SymRef>,
+) -> Result<Vec<SymRef>, Error> {
     let mut seen = HashSet::new();
     let mut order = Vec::new();
     for form in body {
@@ -60,7 +60,7 @@ pub fn free_vars(
 /// flagged from either occurrence. An unnecessary cell costs a little codegen
 /// and never correctness, and the caller's intersection against its own bound
 /// names discards the rest.
-pub fn names_captured_by_nested(heap: &Heap, body: &[Value]) -> Result<HashSet<SymId>, Error> {
+pub fn names_captured_by_nested(heap: &Heap, body: &[Value]) -> Result<HashSet<SymRef>, Error> {
     let mut out = HashSet::new();
     for form in body {
         walk_nested(heap, *form, &mut out)?;
@@ -68,7 +68,7 @@ pub fn names_captured_by_nested(heap: &Heap, body: &[Value]) -> Result<HashSet<S
     Ok(out)
 }
 
-fn note(name: SymId, bound: &HashSet<SymId>, siblings: &HashSet<SymId>, seen: &mut HashSet<SymId>, order: &mut Vec<SymId>) {
+fn note(name: SymRef, bound: &HashSet<SymRef>, siblings: &HashSet<SymRef>, seen: &mut HashSet<SymRef>, order: &mut Vec<SymRef>) {
     if bound.contains(&name) || siblings.contains(&name) {
         return;
     }
@@ -77,7 +77,7 @@ fn note(name: SymId, bound: &HashSet<SymId>, siblings: &HashSet<SymId>, seen: &m
     }
 }
 
-fn sym(heap: &Heap, form: Value, i: usize) -> Result<SymId, Error> {
+fn sym(heap: &Heap, form: Value, i: usize) -> Result<SymRef, Error> {
     match core::field(heap, form, i) {
         Some(Value::Symbol(id)) => Ok(id),
         _ => Err(Error::TypeError(format!("compile: expected a name in {}", core::print(heap, form)))),
@@ -87,42 +87,41 @@ fn sym(heap: &Heap, form: Value, i: usize) -> Result<SymId, Error> {
 fn walk(
     heap: &Heap,
     form: Value,
-    bound: &HashSet<SymId>,
-    siblings: &HashSet<SymId>,
-    seen: &mut HashSet<SymId>,
-    order: &mut Vec<SymId>,
+    bound: &HashSet<SymRef>,
+    siblings: &HashSet<SymRef>,
+    seen: &mut HashSet<SymRef>,
+    order: &mut Vec<SymRef>,
 ) -> Result<(), Error> {
-    let Some(tag) = core::op(heap, form) else { return Ok(()) };
-    let walk_all = |forms: &[Value], seen: &mut HashSet<SymId>, order: &mut Vec<SymId>| -> Result<(), Error> {
+    let Some(tag) = core::op_sym(heap, form) else { return Ok(()) };
+    let walk_all = |forms: &[Value], seen: &mut HashSet<SymRef>, order: &mut Vec<SymRef>| -> Result<(), Error> {
         for f in forms {
             walk(heap, *f, bound, siblings, seen, order)?;
         }
         Ok(())
     };
-    match tag {
+    match tag.well_known() {
         // No sub-forms at all. `quote`'s datum is the important one: it is
         // user data, and descending into it is exactly the mistake the module
         // comment describes.
-        "int" | "float" | "bignum" | "ratio" | "char" | "bool" | "str" | "sym" | "unit" | "quote"
-        | "global" | "fnref" | "methodref" | "compile-fn" | "break" => Ok(()),
+        wk::INT | wk::FLOAT | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::BREAK => Ok(()),
 
-        "var" => {
+        wk::VAR => {
             note(sym(heap, form, 0)?, bound, siblings, seen, order);
             Ok(())
         }
         // An assignment refers to its target as much as a read does, so the
         // name counts — a closure that only ever *writes* a captured binding
         // still captures it.
-        "set" => {
+        wk::SET => {
             note(sym(heap, form, 0)?, bound, siblings, seen, order);
             walk_all(&[core::field(heap, form, 1).unwrap_or(Value::Empty)], seen, order)
         }
-        "set-global" => walk_all(&[core::field(heap, form, 4).unwrap_or(Value::Empty)], seen, order),
+        wk::SET_GLOBAL => walk_all(&[core::field(heap, form, 4).unwrap_or(Value::Empty)], seen, order),
 
         // The `else` link is iterated rather than recursed: a dispatch chain
         // the size of the island's own is deep enough to overflow the stack,
         // and only that side chains. Both other children stay shallow.
-        "if" => {
+        wk::IF => {
             let mut node = form;
             loop {
                 let parts = core::fields(heap, node)?;
@@ -131,14 +130,14 @@ fn walk(
                 };
                 walk(heap, cond, bound, siblings, seen, order)?;
                 walk(heap, then, bound, siblings, seen, order)?;
-                match core::op_sym(heap, els) {
-                    Some(SymId::IF) => node = els,
+                match core::op_sym(heap, els).map(|s| s.well_known()) {
+                    Some(wk::IF) => node = els,
                     _ => return walk(heap, els, bound, siblings, seen, order),
                 }
             }
         }
 
-        "let" => {
+        wk::LET => {
             let parts = core::fields(heap, form)?;
             let Some((binds, body)) = parts.split_first() else { return Ok(()) };
             let binds = heap.list_to_vec(*binds)?;
@@ -163,7 +162,7 @@ fn walk(
         // block's siblings — only a `labels` def's own siblings do — so a
         // sibling name referred to here is an ordinary capture, and
         // `siblings` is cleared rather than passed down.
-        "lambda" => {
+        wk::LAMBDA => {
             let parts = core::fields(heap, form)?;
             if parts.len() < 2 {
                 return Ok(());
@@ -180,7 +179,7 @@ fn walk(
             Ok(())
         }
 
-        "labels" => {
+        wk::LABELS => {
             let parts = core::fields(heap, form)?;
             let Some((defs, body)) = parts.split_first() else { return Ok(()) };
             let defs = heap.list_to_vec(*defs)?;
@@ -211,7 +210,7 @@ fn walk(
             Ok(())
         }
 
-        "match" => {
+        wk::MATCH => {
             let parts = core::fields(heap, form)?;
             if parts.is_empty() {
                 return Ok(());
@@ -250,74 +249,74 @@ fn walk(
 /// Split out because both walks need the same answer, and because writing the
 /// offsets down once is what keeps them from drifting apart from the
 /// vocabulary.
-fn plain_sub_forms(heap: &Heap, form: Value, tag: &str) -> Result<Vec<Value>, Error> {
+fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, Error> {
     let parts = core::fields(heap, form)?;
     let from = |n: usize| -> Vec<Value> { parts.iter().skip(n).copied().collect() };
-    Ok(match tag {
+    Ok(match tag.well_known() {
         // written, home, path, representations, then the arguments.
-        "call" => from(4),
+        wk::CALL => from(4),
         // type, method, instance, home, result, representations, then the rest.
-        "assoc" => from(6),
+        wk::ASSOC => from(6),
         // The callee, then (past the return representation and the argument
         // representations) the arguments.
-        "apply" => {
+        wk::APPLY => {
             let mut v = vec![parts.first().copied().unwrap_or(Value::Empty)];
             v.extend(from(3));
             v
         }
-        "loop" => from(0),
-        "return" | "panic" | "dyn-value" => from(0),
+        wk::LOOP => from(0),
+        wk::RETURN | wk::PANIC | wk::DYN_VALUE => from(0),
         // `(field-get OBJ IDX REPR)` — the object only. The index is an
         // integer and the representation is not a form at all: a parametric one
         // (`(vector int)`, `(hashtable str int)`) is a *list* whose head is a
         // symbol, so walking it looks exactly like walking a node and fails with
         // "the free-variable walk does not know the tag `vector`".
-        "field-get" => parts.first().copied().into_iter().collect(),
-        "dyn-upcast" => from(1),
+        wk::FIELD_GET => parts.first().copied().into_iter().collect(),
+        wk::DYN_UPCAST => from(1),
         // `(catch TAG BODY REPR)` / `(throw TAG VALUE REPR)` — the middle
         // field only. The tag is a quoted datum and the representation is not
         // a form at all; a parametric one (`(vector int)`) is a list headed by
         // a symbol, so walking it would look exactly like walking a node and
         // fail with "the free-variable walk does not know the tag `vector`" —
         // the same trap `field-get` documents.
-        "catch" | "throw" => parts.get(1).copied().into_iter().collect(),
+        wk::CATCH | wk::THROW => parts.get(1).copied().into_iter().collect(),
         // Both halves are ordinary forms: a cleanup refers to names from the
         // scope it is written in, exactly as the protected form does.
-        "unwind-protect" => from(0),
-        "field-set" => {
+        wk::UNWIND_PROTECT => from(0),
+        wk::FIELD_SET => {
             let mut v = vec![parts.first().copied().unwrap_or(Value::Empty)];
             v.extend(from(3));
             v
         }
         // path, variant, mutable, field representations, then the fields.
-        "construct" => from(4),
+        wk::CONSTRUCT => from(4),
         // The boxed value, past the vtable tables and the value's own
         // representation.
-        "dyn-new" => from(5),
+        wk::DYN_NEW => from(5),
         // type, method, slot, table, representations, then the arguments.
-        "dyn-call" => from(5),
-        other => {
+        wk::DYN_CALL => from(5),
+        _ => {
             return Err(Error::TypeError(format!(
                 "compile: the free-variable walk does not know the tag `{}`",
-                other
+                tag.name()
             )))
         }
     })
 }
 
-fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymId>) -> Result<(), Error> {
-    let Some(tag) = core::op(heap, pat) else { return Ok(()) };
-    match tag {
-        "pat-bind" => {
+fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymRef>) -> Result<(), Error> {
+    let Some(tag) = core::op_sym(heap, pat) else { return Ok(()) };
+    match tag.well_known() {
+        wk::PAT_BIND => {
             out.insert(sym(heap, pat, 0)?);
         }
-        "pat-ctor" => {
+        wk::PAT_CTOR => {
             // path, variant, downcast, field representations, then sub-patterns.
             for p in core::fields(heap, pat)?.iter().skip(4) {
                 pattern_bindings(heap, *p, out)?;
             }
         }
-        "pat-typetest" => {
+        wk::PAT_TYPETEST => {
             if let Some(inner) = core::field(heap, pat, 1) {
                 pattern_bindings(heap, inner, out)?;
             }
@@ -325,7 +324,7 @@ fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymId>) -> Result
         // The name the test form reads the scrutinee through. Not a
         // user-visible binding — the arm body cannot name it — but it *is*
         // bound while the test runs, which is what this set is asked about.
-        "pat-guard" => {
+        wk::PAT_GUARD => {
             out.insert(sym(heap, pat, 0)?);
         }
         _ => {}
@@ -339,19 +338,19 @@ fn pattern_guard_tests(
     pat: Value,
     f: &mut dyn FnMut(Value) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    let Some(tag) = core::op(heap, pat) else { return Ok(()) };
-    match tag {
-        "pat-guard" => {
+    let Some(tag) = core::op_sym(heap, pat) else { return Ok(()) };
+    match tag.well_known() {
+        wk::PAT_GUARD => {
             if let Some(test) = core::field(heap, pat, 1) {
                 f(test)?;
             }
         }
-        "pat-ctor" => {
+        wk::PAT_CTOR => {
             for p in core::fields(heap, pat)?.iter().skip(4) {
                 pattern_guard_tests(heap, *p, f)?;
             }
         }
-        "pat-typetest" => {
+        wk::PAT_TYPETEST => {
             if let Some(inner) = core::field(heap, pat, 1) {
                 pattern_guard_tests(heap, inner, f)?;
             }
@@ -364,10 +363,10 @@ fn pattern_guard_tests(
 /// Finds nested closures and takes their free variables whole, without
 /// descending past one — the free-variable walk already resolves arbitrarily
 /// deep beneath it, so a name two closures down still surfaces.
-fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymId>) -> Result<(), Error> {
-    let Some(tag) = core::op(heap, form) else { return Ok(()) };
-    match tag {
-        "lambda" => {
+fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymRef>) -> Result<(), Error> {
+    let Some(tag) = core::op_sym(heap, form) else { return Ok(()) };
+    match tag.well_known() {
+        wk::LAMBDA => {
             let parts = core::fields(heap, form)?;
             if parts.len() < 2 {
                 return Ok(());
@@ -381,7 +380,7 @@ fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymId>) -> Result<(),
             out.extend(free_vars(heap, &parts[2..], &bound, &HashSet::new())?);
             Ok(())
         }
-        "labels" => {
+        wk::LABELS => {
             let parts = core::fields(heap, form)?;
             let Some((defs, body)) = parts.split_first() else { return Ok(()) };
             let defs = heap.list_to_vec(*defs)?;
@@ -411,7 +410,7 @@ fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymId>) -> Result<(),
             }
             Ok(())
         }
-        "let" => {
+        wk::LET => {
             let parts = core::fields(heap, form)?;
             let Some((binds, body)) = parts.split_first() else { return Ok(()) };
             for b in heap.list_to_vec(*binds)? {
@@ -424,7 +423,7 @@ fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymId>) -> Result<(),
             }
             Ok(())
         }
-        "match" => {
+        wk::MATCH => {
             let parts = core::fields(heap, form)?;
             if parts.is_empty() {
                 return Ok(());
@@ -441,28 +440,27 @@ fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymId>) -> Result<(),
             }
             Ok(())
         }
-        "if" => {
+        wk::IF => {
             for f in core::fields(heap, form)? {
                 walk_nested(heap, f, out)?;
             }
             Ok(())
         }
-        "set" => {
+        wk::SET => {
             if let Some(v) = core::field(heap, form, 1) {
                 walk_nested(heap, v, out)?;
             }
             Ok(())
         }
-        "set-global" => {
+        wk::SET_GLOBAL => {
             if let Some(v) = core::field(heap, form, 4) {
                 walk_nested(heap, v, out)?;
             }
             Ok(())
         }
-        "int" | "float" | "bignum" | "ratio" | "char" | "bool" | "str" | "sym" | "unit" | "quote"
-        | "var" | "global" | "fnref" | "methodref" | "compile-fn" | "break" => Ok(()),
-        other => {
-            for f in plain_sub_forms(heap, form, other)? {
+        wk::INT | wk::FLOAT | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::VAR | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::BREAK => Ok(()),
+        _ => {
+            for f in plain_sub_forms(heap, form, tag)? {
                 walk_nested(heap, f, out)?;
             }
             Ok(())

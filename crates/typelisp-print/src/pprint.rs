@@ -45,7 +45,7 @@
 
 use std::collections::HashMap;
 
-use typelisp_mem::{Heap, SymId, Value};
+use typelisp_mem::{wk, Heap, Value};
 
 use crate::format::{Pre, RenderCtx, Renderer};
 
@@ -742,7 +742,7 @@ fn render_at(
 fn quote_form(heap: &Heap, v: Value) -> Option<Value> {
     let head = heap.car(v).ok()?;
     let Value::Symbol(id) = head else { return None };
-    if id != SymId::QUOTE {
+    if !id.is(wk::QUOTE) {
         return None;
     }
     let rest = heap.cdr(v).ok()?;
@@ -857,32 +857,32 @@ fn code_style((elems, tail): &Items) -> Option<usize> {
     let Value::Symbol(id) = elems[0] else { return None };
     // Identity on the head symbol, not its name: a form is recognized the way
     // CL's own `*print-pprint-dispatch*` recognizes one, by `eq`.
-    Some(match id {
-        SymId::PROGN | SymId::COND | SymId::LOOP | SymId::AND | SymId::OR | SymId::LIST | SymId::BLOCK => 0,
-        SymId::IF
-        | SymId::WHEN
-        | SymId::UNLESS
-        | SymId::WHILE
-        | SymId::LET
-        | SymId::LET_STAR
-        | SymId::MATCH
-        | SymId::CASE
-        | SymId::SETF
-        | SymId::MODULE
-        | SymId::DEFSTRUCT
-        | SymId::DEFENUM
-        | SymId::DEFTRAIT
-        | SymId::DEFTYPE
-        | SymId::THE
-        | SymId::AS
-        | SymId::DOLIST
-        | SymId::DOTIMES
-        | SymId::DOITER
-        | SymId::UNTIL => 1,
-        SymId::LAMBDA | SymId::DEFMACRO | SymId::IMPL | SymId::LABELS | SymId::DO => 2,
-        SymId::DEFVAR | SymId::DEFCONSTANT => 2,
-        SymId::DEFUN => 3,
-        SymId::DEFMETHOD => 4,
+    Some(match id.well_known() {
+        wk::PROGN | wk::COND | wk::LOOP | wk::AND | wk::OR | wk::LIST | wk::BLOCK => 0,
+        wk::IF
+        | wk::WHEN
+        | wk::UNLESS
+        | wk::WHILE
+        | wk::LET
+        | wk::LET_STAR
+        | wk::MATCH
+        | wk::CASE
+        | wk::SETF
+        | wk::MODULE
+        | wk::DEFSTRUCT
+        | wk::DEFENUM
+        | wk::DEFTRAIT
+        | wk::DEFTYPE
+        | wk::THE
+        | wk::AS
+        | wk::DOLIST
+        | wk::DOTIMES
+        | wk::DOITER
+        | wk::UNTIL => 1,
+        wk::LAMBDA | wk::DEFMACRO | wk::IMPL | wk::LABELS | wk::DO => 2,
+        wk::DEFVAR | wk::DEFCONSTANT => 2,
+        wk::DEFUN => 3,
+        wk::DEFMETHOD => 4,
         _ => return None,
     })
 }

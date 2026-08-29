@@ -266,35 +266,33 @@ fn the_builtin_type_key_constants_are_what_a_heap_interns() {
     }
 }
 
-/// The `SymId` constants must be the indices `Heap::with_capacity` interns
-/// [`BUILTIN_SYMBOLS`] at.
+/// Every [`BUILTIN_SYMBOLS`] entry reports the `wk` constant that names it.
 ///
 /// The same drift this file's other constant test guards, one table over: a
-/// syntax word recognized by the wrong id would silently stop being
+/// syntax word reporting the wrong `wk` value would silently stop being
 /// recognized (`&rest` read as an ordinary parameter, `pub` as a definition
 /// name), and nothing about the spelling would look wrong.
 ///
-/// Each name must also already be canonical — `intern_symbol` folds to
-/// lowercase, so a name spelled otherwise would intern under a different one
-/// and land at a different index.
+/// Each name must also already be canonical — interning folds to lowercase, so
+/// a name spelled otherwise would intern under a different one.
 #[test]
-fn the_builtin_symbol_constants_are_what_a_heap_interns() {
-    use typelisp::{Heap, Value, BUILTIN_SYMBOLS};
+fn the_builtin_symbols_report_their_own_wk_constant() {
+    use typelisp::{Value, BUILTIN_SYMBOLS};
 
-    let mut heap = Heap::with_capacity(64);
+    let mut heap = typelisp::Heap::with_capacity(64);
     for (i, name) in BUILTIN_SYMBOLS.iter().enumerate() {
         assert_eq!(*name, name.to_lowercase(), "`{}` is not the canonical form it interns under", name);
-        let Value::Symbol(id) = heap.intern_symbol(name) else {
+        let Value::Symbol(sym) = heap.intern_symbol(name) else {
             panic!("intern_symbol always returns a symbol");
         };
         assert_eq!(
-            id.as_u32() as usize,
+            sym.well_known() as usize,
             i,
-            "`{}` does not intern at its table index — `Heap::with_capacity` and \
-             `BUILTIN_SYMBOLS` have drifted apart",
+            "`{}` reports a `wk` value that is not its own — the macro's table and the \
+             constants it generates have drifted apart",
             name
         );
-        assert_eq!(heap.symbol_name(id), *name);
+        assert_eq!(sym.name(), *name);
     }
 }
 

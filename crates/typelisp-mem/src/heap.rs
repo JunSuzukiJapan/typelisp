@@ -17,7 +17,7 @@
 //!   interpreter, once function bodies are themselves cons structure — calls
 //!   [`Heap::set_growth_limit`] to permit appending chunks up to a ceiling;
 //!   exhaustion is then reported at that ceiling instead.
-//! * **Symbols** are interned (name -> [`SymId`]) and never collected — they are
+//! * **Symbols** are interned (name -> [`SymRef`]) and never collected — they are
 //!   few and live for the heap's lifetime, like CL symbols in a package.
 //! * **Strings** live in a slot store and ARE collected: the mark phase marks
 //!   every reachable [`StrId`], the sweep frees unmarked slots (recycling
@@ -40,7 +40,8 @@ use std::collections::HashMap;
 use std::ptr;
 
 use crate::Error;
-use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, MemHashKey, PathId, StrId, StructPayload, SymId, TypeKeyId, Value};
+use super::symbols::{self, SymRef};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, MemHashKey, PathId, StrId, StructPayload, TypeKeyId, Value};
 
 /// How far past its initial capacity a heap may grow by default — see
 /// [`Heap::with_capacity`]. Large enough that program text plus a working set
@@ -87,9 +88,9 @@ pub struct Heap {
     // `set_in_flight_throw`.
     in_flight_throw: Option<Value>,
 
-    // interned symbols (permanent)
-    sym_names: Vec<String>,
-    sym_ids: HashMap<String, u32>,
+    // Symbols are *not* here: they live in one process-global, permanent
+    // table (`super::symbols`), so a symbol means the same thing in every
+    // heap and compiled code can reach one without an active `Heap` at all.
 
     // interned type identities (permanent) — see `TypeKeyId`. The first
     // `BUILTIN_TYPE_KEYS.len()` entries are pre-interned by `Heap::with_capacity`, so their
@@ -99,8 +100,8 @@ pub struct Heap {
 
 
     // interned `::` paths (permanent; reference only permanent symbols)
-    paths: Vec<Vec<SymId>>,
-    path_ids: HashMap<Vec<SymId>, u32>,
+    paths: Vec<Vec<SymRef>>,
+    path_ids: HashMap<Vec<SymRef>, u32>,
 
     // GC-managed string store
     str_slots: Vec<Option<String>>,
@@ -201,8 +202,6 @@ impl Heap {
             permanent_roots: Vec::new(),
             session_roots: Vec::new(),
             in_flight_throw: None,
-            sym_names: Vec::new(),
-            sym_ids: HashMap::new(),
             type_keys: Vec::new(),
             type_key_ids: HashMap::new(),
             paths: Vec::new(),
@@ -218,9 +217,6 @@ impl Heap {
             locs: Vec::new(),
             loc_ids: HashMap::new(),
         };
-        for name in crate::value::BUILTIN_SYMBOLS {
-            heap.intern_symbol(name);
-        }
         for key in crate::value::BUILTIN_TYPE_KEYS {
             heap.intern_type_key(key);
         }
@@ -329,7 +325,7 @@ impl Heap {
 
     /// Distinct interned symbols.
     pub fn symbol_count(&self) -> usize {
-        self.sym_names.len()
+        symbols::symbol_count()
     }
 
     /// Strings currently allocated (occupied slots).
@@ -542,22 +538,26 @@ impl Heap {
     ///
     /// typelisp symbols are **case-insensitive**, so names are folded to a
     /// canonical lowercase form: `Foo`, `FOO`, `foo` all intern to the same
-    /// [`SymId`], and [`symbol_name`](Self::symbol_name) returns the canonical
+    /// [`SymRef`], and [`symbol_name`](Self::symbol_name) returns the canonical
     /// (lowercase) spelling.
     pub fn intern_symbol(&mut self, name: &str) -> Value {
-        let key = name.to_lowercase();
-        if let Some(&id) = self.sym_ids.get(&key) {
-            return Value::Symbol(SymId(id));
-        }
-        let id = self.sym_names.len() as u32;
-        self.sym_names.push(key.clone());
-        self.sym_ids.insert(key, id);
-        Value::Symbol(SymId(id))
+        Value::Symbol(symbols::intern(name))
+    }
+
+    /// Intern a symbol as written inside module `ns` — the reader's entry
+    /// point, and the only one that can place a symbol anywhere but the root
+    /// (see [`symbols::intern_in`] for the inheritance rule).
+    pub fn intern_symbol_in(&mut self, ns: symbols::NsId, name: &str) -> Value {
+        Value::Symbol(symbols::intern_in(ns, name))
     }
 
     /// The name of an interned symbol.
-    pub fn symbol_name(&self, id: SymId) -> &str {
-        &self.sym_names[id.0 as usize]
+    ///
+    /// Takes `&self` only for call-site compatibility: a symbol carries its
+    /// own name, so this needs no heap at all — [`SymRef::name`] is the
+    /// heap-free way to ask.
+    pub fn symbol_name(&self, id: SymRef) -> &'static str {
+        id.name()
     }
 
 
@@ -603,7 +603,7 @@ impl Heap {
     /// Intern a `::` path from its symbol segments, returning a `Value::Path`.
     /// Paths are permanent (they reference only permanent symbols), and equal
     /// segment sequences share one [`PathId`].
-    pub fn intern_path(&mut self, segs: &[SymId]) -> Value {
+    pub fn intern_path(&mut self, segs: &[SymRef]) -> Value {
         if let Some(&id) = self.path_ids.get(segs) {
             return Value::Path(PathId(id));
         }
@@ -614,7 +614,7 @@ impl Heap {
     }
 
     /// The symbol segments of an interned path.
-    pub fn path_segments(&self, id: PathId) -> &[SymId] {
+    pub fn path_segments(&self, id: PathId) -> &[SymRef] {
         &self.paths[id.0 as usize]
     }
 

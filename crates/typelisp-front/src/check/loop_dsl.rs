@@ -36,7 +36,7 @@
 //! :collect i)`. A bare `for` would be an ordinary variable reference, and the
 //! keyword is also what tells `check_loop` a DSL body from a simple one.
 
-use crate::{Error, Heap, Loc, SymId, Value};
+use crate::{wk, Error, Heap, Loc, SymRef, Value};
 
 use super::forms;
 
@@ -164,11 +164,11 @@ const ANON_ACC: &str = "loop acc";
 /// `v` as a clause keyword, or `None` when `v` is not a keyword.
 ///
 /// Returns the symbol itself, not its text: which clause word this is gets
-/// decided by comparing that symbol against a [`SymId`] constant, the way one
+/// decided by comparing that symbol against a [`SymRef`] constant, the way one
 /// symbol is ever compared to another. The name is still *read* here, but only
 /// to answer "is this a keyword at all?" — an open set (any symbol whose name
 /// starts with one colon), which no fixed set of ids can express.
-fn keyword(heap: &Heap, v: Value) -> Option<SymId> {
+fn keyword(heap: &Heap, v: Value) -> Option<SymRef> {
     match v {
         Value::Symbol(id) => {
             let name = heap.symbol_name(id);
@@ -206,7 +206,7 @@ struct Cursor<'a> {
 }
 
 impl<'a> Cursor<'a> {
-    fn peek_keyword(&self, heap: &Heap) -> Option<SymId> {
+    fn peek_keyword(&self, heap: &Heap) -> Option<SymRef> {
         self.args.get(self.i).and_then(|v| keyword(heap, *v))
     }
 
@@ -244,7 +244,7 @@ impl<'a> Cursor<'a> {
     /// word, and no clause word is a variable reference — so both read.
     fn eat_eq(&mut self) -> bool {
         match self.args.get(self.i).copied() {
-            Some(Value::Symbol(id)) if id == SymId::EQUALS || id == SymId::COLON_EQUALS => {
+            Some(Value::Symbol(id)) if id.is(wk::EQUALS) || id.is(wk::COLON_EQUALS) => {
                 self.i += 1;
                 true
             }
@@ -253,8 +253,8 @@ impl<'a> Cursor<'a> {
     }
 
     /// Consume `word` if it is the next clause keyword.
-    fn eat(&mut self, heap: &Heap, word: SymId) -> bool {
-        if self.peek_keyword(heap) == Some(word) {
+    fn eat(&mut self, heap: &Heap, konst: u32) -> bool {
+        if self.peek_keyword(heap).is_some_and(|w| w.is(konst)) {
             self.i += 1;
             true
         } else {
@@ -280,14 +280,14 @@ pub(super) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result
     // Enforced rather than tolerated, because a `:for` written after a `:do`
     // would read as if it iterated only the rest of the body, and it does not.
     while let Some(word) = c.peek_keyword(heap) {
-        match word {
-            SymId::KW_WITH | SymId::KW_FOR | SymId::KW_AS => {
+        match word.well_known() {
+            wk::KW_WITH | wk::KW_FOR | wk::KW_AS => {
                 c.i += 1;
                 let (name_v, loc) = c.next_value(heap, heap.symbol_name(word))?;
                 let Some(name) = var_name(heap, name_v) else {
                     return Err(err(format!("{} needs a variable name", heap.symbol_name(word))));
                 };
-                let kind = if word == SymId::KW_WITH {
+                let kind = if word.is(wk::KW_WITH) {
                     if !c.eat_eq() {
                         return Err(err(":with needs `= form` after the variable"));
                     }
@@ -297,7 +297,7 @@ pub(super) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result
                 };
                 plan.vars.push(Var { name, loc, kind });
             }
-            SymId::KW_REPEAT => {
+            wk::KW_REPEAT => {
                 c.i += 1;
                 if plan.repeat.is_some() {
                     return Err(err(":repeat may appear only once"));
@@ -309,19 +309,19 @@ pub(super) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result
     }
 
     while let Some(word) = c.peek_keyword(heap) {
-        match word {
-            SymId::KW_WITH | SymId::KW_FOR | SymId::KW_AS => {
+        match word.well_known() {
+            wk::KW_WITH | wk::KW_FOR | wk::KW_AS => {
                 return Err(err(format!(
                     "{} must come before the body clauses, as in CL — it steps the whole loop, \
                      not the part written after it",
                     heap.symbol_name(word)
                 )))
             }
-            SymId::KW_INITIALLY => {
+            wk::KW_INITIALLY => {
                 c.i += 1;
                 plan.initially.extend(c.next_body(heap, ":initially")?);
             }
-            SymId::KW_FINALLY => {
+            wk::KW_FINALLY => {
                 c.i += 1;
                 plan.finally.extend(c.next_body(heap, ":finally")?);
             }
@@ -365,46 +365,46 @@ fn has_return(step: &Step) -> bool {
 fn parse_for_iter(heap: &Heap, c: &mut Cursor) -> Result<ForIter, Error> {
     if c.eat_eq() {
         let init = c.next_value(heap, "=")?.0;
-        let next = if c.eat(heap, SymId::KW_THEN) { Some(c.next_value(heap, ":then")?.0) } else { None };
+        let next = if c.eat(heap, wk::KW_THEN) { Some(c.next_value(heap, ":then")?.0) } else { None };
         return Ok(ForIter::Assign { init, next });
     }
     let Some(word) = c.peek_keyword(heap) else {
         return Err(err(":for needs `:in`, `:across`, `:on`, `:from` or `=` after the variable"));
     };
     c.i += 1;
-    match word {
-        SymId::KW_IN | SymId::KW_ACROSS => Ok(ForIter::Seq(c.next_value(heap, heap.symbol_name(word))?.0)),
-        SymId::KW_ON => Ok(ForIter::Suffixes(c.next_value(heap, ":on")?.0)),
-        SymId::KW_FROM | SymId::KW_DOWNFROM | SymId::KW_UPFROM => {
+    match word.well_known() {
+        wk::KW_IN | wk::KW_ACROSS => Ok(ForIter::Seq(c.next_value(heap, heap.symbol_name(word))?.0)),
+        wk::KW_ON => Ok(ForIter::Suffixes(c.next_value(heap, ":on")?.0)),
+        wk::KW_FROM | wk::KW_DOWNFROM | wk::KW_UPFROM => {
             let from = c.next_value(heap, heap.symbol_name(word))?.0;
-            let mut down = word == SymId::KW_DOWNFROM;
-            let end = match c.peek_keyword(heap) {
-                Some(SymId::KW_TO) => {
+            let mut down = word.is(wk::KW_DOWNFROM);
+            let end = match c.peek_keyword(heap).map(|w| w.well_known()) {
+                Some(wk::KW_TO) => {
                     c.i += 1;
                     RangeEnd::Inclusive(c.next_value(heap, ":to")?.0)
                 }
-                Some(SymId::KW_BELOW) => {
+                Some(wk::KW_BELOW) => {
                     c.i += 1;
                     RangeEnd::Exclusive(c.next_value(heap, ":below")?.0)
                 }
-                Some(SymId::KW_DOWNTO) => {
+                Some(wk::KW_DOWNTO) => {
                     c.i += 1;
                     down = true;
                     RangeEnd::Inclusive(c.next_value(heap, ":downto")?.0)
                 }
-                Some(SymId::KW_ABOVE) => {
+                Some(wk::KW_ABOVE) => {
                     c.i += 1;
                     down = true;
                     RangeEnd::Exclusive(c.next_value(heap, ":above")?.0)
                 }
                 _ => RangeEnd::Open,
             };
-            let by = if c.eat(heap, SymId::KW_BY) { Some(c.next_value(heap, ":by")?.0) } else { None };
+            let by = if c.eat(heap, wk::KW_BY) { Some(c.next_value(heap, ":by")?.0) } else { None };
             Ok(ForIter::Range { from, end, by, down })
         }
-        other => Err(err(format!(
+        _ => Err(err(format!(
             ":for {}: expected `:in`, `:across`, `:on`, `:from`/`:downfrom` or `=`",
-            heap.symbol_name(other)
+            heap.symbol_name(word)
         ))),
     }
 }
@@ -414,17 +414,17 @@ fn parse_step(heap: &Heap, c: &mut Cursor, plan: &mut Plan) -> Result<Step, Erro
         return Err(err("a clause word was expected here"));
     };
     c.i += 1;
-    match word {
-        SymId::KW_DO | SymId::KW_DOING => Ok(Step::Do(c.next_body(heap, ":do")?)),
-        SymId::KW_COLLECT | SymId::KW_COLLECTING => accumulate(heap, c, plan, Acc::Collect, word),
-        SymId::KW_APPEND | SymId::KW_APPENDING => accumulate(heap, c, plan, Acc::Append, word),
-        SymId::KW_SUM | SymId::KW_SUMMING => accumulate(heap, c, plan, Acc::Sum, word),
-        SymId::KW_COUNT | SymId::KW_COUNTING => accumulate(heap, c, plan, Acc::Count, word),
-        SymId::KW_MAXIMIZE | SymId::KW_MAXIMIZING => accumulate(heap, c, plan, Acc::Maximize, word),
-        SymId::KW_MINIMIZE | SymId::KW_MINIMIZING => accumulate(heap, c, plan, Acc::Minimize, word),
-        SymId::KW_ALWAYS => verdict_step(heap, c, plan, true),
-        SymId::KW_NEVER => verdict_step(heap, c, plan, false),
-        SymId::KW_THEREIS => {
+    match word.well_known() {
+        wk::KW_DO | wk::KW_DOING => Ok(Step::Do(c.next_body(heap, ":do")?)),
+        wk::KW_COLLECT | wk::KW_COLLECTING => accumulate(heap, c, plan, Acc::Collect, word),
+        wk::KW_APPEND | wk::KW_APPENDING => accumulate(heap, c, plan, Acc::Append, word),
+        wk::KW_SUM | wk::KW_SUMMING => accumulate(heap, c, plan, Acc::Sum, word),
+        wk::KW_COUNT | wk::KW_COUNTING => accumulate(heap, c, plan, Acc::Count, word),
+        wk::KW_MAXIMIZE | wk::KW_MAXIMIZING => accumulate(heap, c, plan, Acc::Maximize, word),
+        wk::KW_MINIMIZE | wk::KW_MINIMIZING => accumulate(heap, c, plan, Acc::Minimize, word),
+        wk::KW_ALWAYS => verdict_step(heap, c, plan, true),
+        wk::KW_NEVER => verdict_step(heap, c, plan, false),
+        wk::KW_THEREIS => {
             let expr = c.next_value(heap, ":thereis")?.0;
             if plan.verdict.is_some() {
                 return Err(err("only one of `:always`/`:never`/`:thereis` may appear"));
@@ -432,18 +432,18 @@ fn parse_step(heap: &Heap, c: &mut Cursor, plan: &mut Plan) -> Result<Step, Erro
             plan.verdict = Some(Verdict::Optional);
             Ok(Step::Thereis { expr })
         }
-        SymId::KW_WHILE => Ok(Step::Stop { expr: c.next_value(heap, ":while")?.0, when: false }),
-        SymId::KW_UNTIL => Ok(Step::Stop { expr: c.next_value(heap, ":until")?.0, when: true }),
-        SymId::KW_RETURN => Ok(Step::Return(c.next_value(heap, ":return")?.0)),
-        SymId::KW_WHEN | SymId::KW_IF | SymId::KW_UNLESS => {
-            let want = word != SymId::KW_UNLESS;
+        wk::KW_WHILE => Ok(Step::Stop { expr: c.next_value(heap, ":while")?.0, when: false }),
+        wk::KW_UNTIL => Ok(Step::Stop { expr: c.next_value(heap, ":until")?.0, when: true }),
+        wk::KW_RETURN => Ok(Step::Return(c.next_value(heap, ":return")?.0)),
+        wk::KW_WHEN | wk::KW_IF | wk::KW_UNLESS => {
+            let want = !word.is(wk::KW_UNLESS);
             let test = c.next_value(heap, heap.symbol_name(word))?.0;
             let then = Box::new(parse_step(heap, c, plan)?);
             let els =
-                if c.eat(heap, SymId::KW_ELSE) { Some(Box::new(parse_step(heap, c, plan)?)) } else { None };
+                if c.eat(heap, wk::KW_ELSE) { Some(Box::new(parse_step(heap, c, plan)?)) } else { None };
             Ok(Step::Cond { test, want, then, els })
         }
-        other => Err(err(format!("`{}` is not a clause this `loop` knows", heap.symbol_name(other)))),
+        _ => Err(err(format!("`{}` is not a clause this `loop` knows", heap.symbol_name(word)))),
     }
 }
 
@@ -461,10 +461,10 @@ fn accumulate(
     c: &mut Cursor,
     plan: &mut Plan,
     acc: Acc,
-    word: SymId,
+    word: SymRef,
 ) -> Result<Step, Error> {
     let expr = c.next_value(heap, heap.symbol_name(word))?.0;
-    let into = if c.eat(heap, SymId::KW_INTO) {
+    let into = if c.eat(heap, wk::KW_INTO) {
         let (v, _) = c.next_value(heap, ":into")?;
         var_name(heap, v).ok_or_else(|| err(":into needs a variable name"))?
     } else {
@@ -799,7 +799,7 @@ fn leave_normally(b: &mut Build, plan: &Plan, resolved: &Resolved) -> Result<Val
 fn finally_returns(b: &Build, plan: &Plan) -> bool {
     let Some(last) = plan.finally.last() else { return false };
     let Ok(items) = b.s.list_to_vec(*last) else { return false };
-    matches!(items.first(), Some(Value::Symbol(id)) if *id == SymId::RETURN)
+    matches!(items.first(), Some(Value::Symbol(id)) if id.is(wk::RETURN))
 }
 
 fn build_step(b: &mut Build, step: &Step, plan: &Plan, resolved: &Resolved) -> Result<Value, Error> {

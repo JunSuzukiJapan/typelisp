@@ -12,7 +12,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use typelisp_read::name_lexer::{NameLexer, NameTok};
-use crate::{Error, Heap, Loc, PathId, SymId, Value};
+use crate::{wk, Error, Heap, Loc, PathId, SymRef, Value};
 
 /// A structured, fully-qualified path identifying a type, free function, or
 /// module — a sequence of lowercase segments (e.g. `geo::point` is
@@ -102,7 +102,7 @@ impl fmt::Display for Path {
 /// `type_key.rs` string form: it addresses a name, not a heap value's type
 /// identity, so nothing here may be compared against a stored type key.
 pub fn intern_path_id(heap: &mut Heap, p: &Path) -> PathId {
-    let segs: Vec<SymId> = p
+    let segs: Vec<SymRef> = p
         .segments()
         .iter()
         .map(|s| match heap.intern_symbol(s) {
@@ -205,7 +205,7 @@ pub enum Type {
     /// The `String` type.
     Str,
     /// The `Symbol` type: an interned symbol handle, distinct from `Str`.
-    /// Its runtime value is a `Value::Symbol(SymId)` (the same carrier a
+    /// Its runtime value is a `Value::Symbol(SymRef)` (the same carrier a
     /// `Sexpr::Sym` holds), but statically it is its own primitive type so
     /// `gensym`/`string->symbol` can be typed precisely instead of as the
     /// heterogeneous `Sexpr`. `symbol->string`/`string->symbol` are the only
@@ -386,7 +386,7 @@ pub fn parse_type_spanned(
 
 /// Whether `v` is a `(:dyn ...)` list.
 pub fn is_dyn_form(heap: &Heap, v: Value) -> bool {
-    matches!(heap.car(v), Ok(Value::Symbol(id)) if id == SymId::DYN)
+    matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::DYN))
 }
 
 /// Parse the reader-joined `(:dyn Trait)` / `(:dyn Trait<Pin,...>)` form. The
@@ -424,7 +424,7 @@ fn parse_fn_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<T
         return Err(Error::TypeError("fn type must be (fn (params) ret)".to_string()));
     }
     match elems[0].0 {
-        Value::Symbol(id) if id == SymId::FN => {}
+        Value::Symbol(id) if id.is(wk::FN) => {}
         _ => return Err(Error::TypeError("expected fn type".to_string())),
     }
     let (params, rest) = match elems[1].0 {
@@ -446,7 +446,7 @@ fn parse_fn_params(
 ) -> Result<(Vec<Type>, Option<Box<Type>>), Error> {
     let rest_marker = ps
         .iter()
-        .position(|(p, _)| matches!(p, Value::Symbol(id) if *id == SymId::REST));
+        .position(|(p, _)| matches!(p, Value::Symbol(id) if id.is(wk::REST)));
     match rest_marker {
         Some(i) => {
             if i + 2 != ps.len() {

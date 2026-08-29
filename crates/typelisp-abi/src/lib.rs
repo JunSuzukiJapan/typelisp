@@ -22,7 +22,7 @@
 
 use std::cell::Cell;
 
-use typelisp_mem::{BoxId, ConsRef, Heap, PathId, StrId, SymId, Value};
+use typelisp_mem::{BoxId, ConsRef, Heap, PathId, StrId, SymRef, Value};
 
 
 // The `Heap` every other `rt_*` function in this crate (from Stage 3
@@ -251,7 +251,9 @@ pub fn encode(v: Value) -> i64 {
     match v {
         Value::Int(n) => (n << TAG_BITS) | TAG_FIXNUM,
         Value::Cons(c) => (c.addr() as i64) | TAG_CONS,
-        Value::Symbol(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_SYMBOL,
+        // The address itself, `Cons`-style: a `Symbol` header is 8-byte
+        // aligned, so the low 3 bits are the tag's to use.
+        Value::Symbol(s) => (s.addr() as i64) | TAG_SYMBOL,
         Value::Str(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_STR,
         Value::Char(c) => ((c as i64) << TAG_BITS) | TAG_CHAR,
         Value::Path(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_PATH,
@@ -268,7 +270,7 @@ pub fn decode(tagged: i64) -> Value {
     match tagged & TAG_MASK {
         TAG_FIXNUM => Value::Int(tagged >> TAG_BITS),
         TAG_CONS => Value::Cons(unsafe { ConsRef::from_addr((tagged & !TAG_MASK) as usize) }),
-        TAG_SYMBOL => Value::Symbol(SymId::from_u32((tagged >> TAG_BITS) as u32)),
+        TAG_SYMBOL => Value::Symbol(unsafe { SymRef::from_addr((tagged & !TAG_MASK) as usize) }),
         TAG_STR => Value::Str(StrId::from_u32((tagged >> TAG_BITS) as u32)),
         TAG_CHAR => {
             let scalar = (tagged >> TAG_BITS) as u32;

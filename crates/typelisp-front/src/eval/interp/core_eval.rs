@@ -38,7 +38,7 @@
 //! CELL  : Value::Boxed(BoxedObj::Cell)
 //! ```
 //!
-//! Lookup compares interned [`SymId`]s, so it is a `u32` comparison rather
+//! Lookup compares interned [`SymRef`]s, so it is a `u32` comparison rather
 //! than the `String` comparison `Env`'s `Vec<(String, Slot)>` needs. Within a
 //! frame the *most recently added* binding is found first, matching
 //! `env_get`'s `.rev()`.
@@ -46,7 +46,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use typelisp_mem::{BoxId, Heap, RootScope, SymId, Value};
+use typelisp_mem::{wk, BoxId, Heap, RootScope, SymRef, Value};
 
 use crate::check::core;
 use crate::check::repr::Repr;
@@ -109,7 +109,7 @@ impl Op {
     /// The single dispatch point from a tag to an operator.
     ///
     /// A tag is a symbol, so recognizing one is an identity test on its
-    /// [`SymId`] — the same `eq` CL compares symbols with, never a comparison
+    /// [`SymRef`] — the same `eq` CL compares symbols with, never a comparison
     /// of the names behind them. Every tag is in `BUILTIN_SYMBOLS`, so the
     /// constants below mean the same thing in every heap.
     ///
@@ -117,47 +117,47 @@ impl Op {
     /// built-in range and match nothing, which is the internal error the
     /// caller reports; `tests/core_vocabulary_test.rs` holds the vocabulary
     /// closed from the other side.
-    fn from_sym(tag: SymId) -> Option<Op> {
-        Some(match tag {
-            SymId::INT => Op::Int,
-            SymId::FLOAT => Op::Float,
-            SymId::BIGNUM => Op::Bignum,
-            SymId::RATIO => Op::Ratio,
-            SymId::CHAR => Op::Char,
-            SymId::BOOL => Op::Bool,
-            SymId::STR => Op::Str,
-            SymId::SYM => Op::Sym,
-            SymId::UNIT => Op::Unit,
-            SymId::VAR => Op::Var,
-            SymId::LET => Op::Let,
-            SymId::IF => Op::If,
-            SymId::CALL => Op::Call,
-            SymId::PANIC => Op::Panic,
-            SymId::CONSTRUCT => Op::Construct,
-            SymId::FIELD_GET => Op::FieldGet,
-            SymId::FIELD_SET => Op::FieldSet,
-            SymId::MATCH => Op::Match,
-            SymId::SET => Op::Set,
-            SymId::LOOP => Op::Loop,
-            SymId::BREAK => Op::Break,
-            SymId::RETURN => Op::Return,
-            SymId::CATCH => Op::Catch,
-            SymId::THROW => Op::Throw,
-            SymId::UNWIND_PROTECT => Op::UnwindProtect,
-            SymId::LAMBDA => Op::Lambda,
-            SymId::LABELS => Op::Labels,
-            SymId::APPLY => Op::Apply,
-            SymId::QUOTE => Op::Quote,
-            SymId::DYN_NEW => Op::DynNew,
-            SymId::DYN_UPCAST => Op::DynUpcast,
-            SymId::DYN_VALUE => Op::DynValue,
-            SymId::GLOBAL => Op::Global,
-            SymId::SET_GLOBAL => Op::SetGlobal,
-            SymId::ASSOC => Op::Assoc,
-            SymId::DYN_CALL => Op::DynCall,
-            SymId::FNREF => Op::FnRef,
-            SymId::METHODREF => Op::MethodRef,
-            SymId::COMPILE_FN => Op::CompileFn,
+    fn from_sym(tag: SymRef) -> Option<Op> {
+        Some(match tag.well_known() {
+            wk::INT => Op::Int,
+            wk::FLOAT => Op::Float,
+            wk::BIGNUM => Op::Bignum,
+            wk::RATIO => Op::Ratio,
+            wk::CHAR => Op::Char,
+            wk::BOOL => Op::Bool,
+            wk::STR => Op::Str,
+            wk::SYM => Op::Sym,
+            wk::UNIT => Op::Unit,
+            wk::VAR => Op::Var,
+            wk::LET => Op::Let,
+            wk::IF => Op::If,
+            wk::CALL => Op::Call,
+            wk::PANIC => Op::Panic,
+            wk::CONSTRUCT => Op::Construct,
+            wk::FIELD_GET => Op::FieldGet,
+            wk::FIELD_SET => Op::FieldSet,
+            wk::MATCH => Op::Match,
+            wk::SET => Op::Set,
+            wk::LOOP => Op::Loop,
+            wk::BREAK => Op::Break,
+            wk::RETURN => Op::Return,
+            wk::CATCH => Op::Catch,
+            wk::THROW => Op::Throw,
+            wk::UNWIND_PROTECT => Op::UnwindProtect,
+            wk::LAMBDA => Op::Lambda,
+            wk::LABELS => Op::Labels,
+            wk::APPLY => Op::Apply,
+            wk::QUOTE => Op::Quote,
+            wk::DYN_NEW => Op::DynNew,
+            wk::DYN_UPCAST => Op::DynUpcast,
+            wk::DYN_VALUE => Op::DynValue,
+            wk::GLOBAL => Op::Global,
+            wk::SET_GLOBAL => Op::SetGlobal,
+            wk::ASSOC => Op::Assoc,
+            wk::DYN_CALL => Op::DynCall,
+            wk::FNREF => Op::FnRef,
+            wk::METHODREF => Op::MethodRef,
+            wk::COMPILE_FN => Op::CompileFn,
             _ => return None,
         })
     }
@@ -738,7 +738,7 @@ impl Interp {
             .map_err(|e| EvalError::Internal(format!("eval: (labels ..) definitions: {}", e)))?;
 
         let mut s = RootScope::new(heap);
-        let placeholders: Vec<(SymId, Value)> = defs
+        let placeholders: Vec<(SymRef, Value)> = defs
             .iter()
             .map(|d| match s.car(*d) {
                 Ok(Value::Symbol(sym)) => Ok((sym, Value::Empty)),
@@ -887,7 +887,7 @@ impl Interp {
                 argv.len()
             )));
         }
-        let binds: Vec<(SymId, Value)> = names.into_iter().zip(argv).collect();
+        let binds: Vec<(SymRef, Value)> = names.into_iter().zip(argv).collect();
         let call_env = extend_env(heap, &binds, closure_env)?;
         heap.push_root(call_env);
         let body = heap
@@ -956,7 +956,7 @@ impl Interp {
     }
 
     /// Field `i` of `form`, which must be a symbol.
-    fn sym_field(&self, heap: &Heap, form: Value, i: usize, what: &str) -> Result<SymId, EvalError> {
+    fn sym_field(&self, heap: &Heap, form: Value, i: usize, what: &str) -> Result<SymRef, EvalError> {
         match core::field(heap, form, i) {
             Some(Value::Symbol(id)) => Ok(id),
             other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a symbol: {:?}", what, i, other))),
@@ -1222,14 +1222,14 @@ impl Interp {
     fn compile_fn_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
         let payload = core::field(heap, form, 0)
             .ok_or_else(|| EvalError::Internal("eval: (compile-fn ..) has no target".to_string()))?;
-        let target = match core::op_sym(heap, payload) {
-            Some(SymId::FN) => {
+        let target = match core::op_sym(heap, payload).map(|s| s.well_known()) {
+            Some(wk::FN) => {
                 let written = self.name_list(heap, payload, 0, "compile-fn/fn")?;
                 let home = self.name_list(heap, payload, 1, "compile-fn/fn")?;
                 let resolved = path_field(heap, payload, 2, "compile-fn/fn")?;
                 crate::CompileTarget::Fn(crate::check::Ref { written, home, resolved })
             }
-            Some(SymId::METHOD) => {
+            Some(wk::METHOD) => {
                 let type_name = path_field(heap, payload, 0, "compile-fn/method")?;
                 let method = sym_field(heap, payload, 1, "compile-fn/method")?;
                 let home = self.name_list(heap, payload, 2, "compile-fn/method")?;
@@ -1369,7 +1369,7 @@ impl Interp {
 /// allocates a cell and two conses per binding, and any of them can collect.
 /// The result is *not* rooted — the caller roots it, or hands it straight to
 /// something that does.
-pub(crate) fn extend_env(heap: &mut Heap, binds: &[(SymId, Value)], env: Value) -> Result<Value, EvalError> {
+pub(crate) fn extend_env(heap: &mut Heap, binds: &[(SymRef, Value)], env: Value) -> Result<Value, EvalError> {
     // No bindings, no frame. `progn` is `(let () ...)` and a `_` match arm
     // binds nothing, so this is the common case, not an edge one: consing an
     // empty frame for each would put an allocation (and so a possible
@@ -1414,7 +1414,7 @@ fn match_core_pattern(
     env: Value,
     pat: Value,
     v: Value,
-) -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
+) -> Result<Option<Vec<(SymRef, Value)>>, EvalError> {
     let tag = match heap.car(pat) {
         Ok(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
         _ => return Err(EvalError::Internal(format!("eval: not a pattern: {}", core::print(heap, pat)))),
@@ -1437,8 +1437,8 @@ fn match_core_pattern(
             // pattern means. A string would compile to `Value::Str`, whose
             // equality is *identity*, so it would silently never match; that
             // is why anything else is refused here instead of compared.
-            let want = match core::op_sym(heap, lit) {
-                Some(SymId::INT) | Some(SymId::BOOL) | Some(SymId::CHAR) => core::field(heap, lit, 0)
+            let want = match core::op_sym(heap, lit).map(|s| s.well_known()) {
+                Some(wk::INT) | Some(wk::BOOL) | Some(wk::CHAR) => core::field(heap, lit, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (pat-lit ..) literal has no value".to_string()))?,
                 _ => {
                     return Err(EvalError::Internal(format!(
@@ -1541,7 +1541,7 @@ fn match_ctor(
     variant: usize,
     subs: &[Value],
     v: Value,
-) -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
+) -> Result<Option<Vec<(SymRef, Value)>>, EvalError> {
     match v {
         Value::Boxed(id)
             if heap.is_enum(id)
@@ -1594,13 +1594,13 @@ fn match_sexpr_core(
     variant: usize,
     subs: &[Value],
     v: Value,
-) -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
+) -> Result<Option<Vec<(SymRef, Value)>>, EvalError> {
     use super::{SEXPR_BIGNUM, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_FLOAT, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_STR, SEXPR_SYM};
 
     // Each of these binds the scrutinee (or a piece of it) straight through:
     // a float/bignum/ratio/string box *is* its value, so there is nothing to
     // unwrap and re-wrap.
-    let one = |heap: &mut Heap, bound: Value| -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
+    let one = |heap: &mut Heap, bound: Value| -> Result<Option<Vec<(SymRef, Value)>>, EvalError> {
         match subs.first() {
             Some(p) => match_core_pattern(it, heap, env, *p, bound),
             None => Err(EvalError::Internal("eval: sexpr pattern has no sub-pattern".to_string())),
@@ -1797,7 +1797,7 @@ fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<(crate::Path, Ve
 }
 
 /// The names a parameter list `((SYM R)...)` binds, in order.
-fn param_names(heap: &Heap, params: Value) -> Result<Vec<SymId>, EvalError> {
+fn param_names(heap: &Heap, params: Value) -> Result<Vec<SymRef>, EvalError> {
     let ps = heap
         .list_to_vec(params)
         .map_err(|e| EvalError::Internal(format!("eval: parameter list: {}", e)))?;
@@ -1863,7 +1863,7 @@ fn bool_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<bool, Ev
 /// added binding wins — the order `env_get`'s `.rev()` gives, so a `let` that
 /// shadows an outer name (or, in a malformed one, itself) resolves the same
 /// way it always has.
-fn env_lookup(heap: &Heap, env: Value, name: SymId) -> Option<Value> {
+fn env_lookup(heap: &Heap, env: Value, name: SymRef) -> Option<Value> {
     let mut frames = env;
     while let Ok(frame) = heap.car(frames) {
         let mut cur = frame;
@@ -2150,7 +2150,7 @@ impl Interp {
         for a in &args {
             s.push_root(*a);
         }
-        let binds: Vec<(SymId, Value)> = def
+        let binds: Vec<(SymRef, Value)> = def
             .params
             .iter()
             .zip(args)

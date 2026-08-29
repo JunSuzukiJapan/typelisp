@@ -11,10 +11,10 @@
 
 pub mod errors;
 pub mod heap;
+pub mod symbols;
 pub mod value;
 
 pub use errors::{Error, Loc};
 pub use heap::{Heap, RootScope};
-pub use value::{
-    BoxId, ConsRef, PathId, StrId, SymId, TypeKeyId, Value, BUILTIN_SYMBOLS, BUILTIN_TYPE_KEYS,
-};
+pub use symbols::{wk, NsId, SymRef, Symbol, BUILTIN_SYMBOLS, NOT_WELL_KNOWN};
+pub use value::{BoxId, ConsRef, PathId, StrId, TypeKeyId, Value, BUILTIN_TYPE_KEYS};

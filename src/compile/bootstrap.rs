@@ -283,7 +283,7 @@ pub fn hash_read_forms(heap: &Heap, forms: &[Value]) -> Result<u64, String> {
 ///
 /// Every variant contributes a distinct tag byte before its payload, and only
 /// `Cons` has children, so the tag sequence determines the tree unambiguously.
-/// Interned ids (`SymId`/`StrId`/`PathId`) are *not* hashed — they are
+/// Interned ids (`SymRef`/`StrId`/`PathId`) are *not* hashed — they are
 /// positions in this throwaway heap's intern tables, so the same text read
 /// twice in a different order would hash differently. The name behind the id
 /// is what the source says.
@@ -368,7 +368,7 @@ fn hash_form(
 /// else — the island is all `defun`s, and this is what names each one for
 /// `install_island_bitcode`'s symbol list.
 fn defun_name(heap: &Heap, tl: Value) -> Option<String> {
-    if core::op_sym(heap, tl) != Some(typelisp_mem::SymId::DEFUN) {
+    if !core::op_is(heap, tl, typelisp_mem::wk::DEFUN) {
         return None;
     }
     match core::field(heap, tl, 0)? {
@@ -428,7 +428,7 @@ mod tests {
 
     /// Interned ids are heap-local, so the hash uses the names behind them.
     /// Reading the same symbols in a different order would otherwise assign
-    /// different `SymId`s and produce a different hash for the same program.
+    /// different `SymRef`s and produce a different hash for the same program.
     #[test]
     fn the_hash_follows_names_not_intern_ids() {
         assert_ne!(hash("(alpha beta)"), hash("(beta alpha)"));

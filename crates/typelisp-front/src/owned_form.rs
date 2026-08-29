@@ -227,7 +227,7 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
         OwnedForm::Str(s) => heap.alloc_string(s.clone()),
         OwnedForm::Path(segs) => {
             // Symbols are permanent (never collected), so the intermediate
-            // `SymId`s need no rooting while later segments intern.
+            // `SymRef`s need no rooting while later segments intern.
             let ids: Vec<_> = segs
                 .iter()
                 .map(|s| match heap.intern_symbol(s) {

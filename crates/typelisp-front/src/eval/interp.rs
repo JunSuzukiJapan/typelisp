@@ -31,7 +31,7 @@ use typelisp_mem::RootScope;
 
 use crate::check::core;
 use crate::check::repr::Repr;
-use crate::{BoxId, Heap, MacroExpander, MacroLambda, Path, Ref, SymId, TypeKeyId, Value};
+use crate::{wk, BoxId, Heap, MacroExpander, MacroLambda, Path, Ref, SymRef, TypeKeyId, Value};
 
 use super::scope;
 pub use super::value::EvalError;
@@ -2040,9 +2040,9 @@ impl Interp {
                 // The interned name keeps the leading colon — a keyword is an
                 // ordinary symbol whose name starts with one, not a separate
                 // type (`Checker::check_symbol`).
-                Some(Value::Symbol(id)) => match id {
-                    SymId::UPCASE => crate::eval::format::PrintCase::Upcase,
-                    SymId::CAPITALIZE => crate::eval::format::PrintCase::Capitalize,
+                Some(Value::Symbol(id)) => match id.well_known() {
+                    wk::UPCASE => crate::eval::format::PrintCase::Upcase,
+                    wk::CAPITALIZE => crate::eval::format::PrintCase::Capitalize,
                     _ => crate::eval::format::PrintCase::Downcase,
                 },
                 _ => defaults.case,
@@ -2219,11 +2219,11 @@ impl Interp {
         };
         // Decide the CL-style return before `exec` consumes `tl`: a definition
         // returns its own name symbol; an expression returns its value below.
-        let def_name: Option<String> = match core::op_sym(heap, tl) {
+        let def_name: Option<String> = match core::op_sym(heap, tl).map(|s| s.well_known()) {
             // Every definition form but `defmethod` names itself in field 0;
             // `defmethod` names its owner there and the method in field 1.
-            Some(SymId::DEFUN) | Some(SymId::DEFVAR) | Some(SymId::DEFMACRO) | Some(SymId::DEFSTRUCT)
-            | Some(SymId::DEFENUM) => {
+            Some(wk::DEFUN) | Some(wk::DEFVAR) | Some(wk::DEFMACRO) | Some(wk::DEFSTRUCT)
+            | Some(wk::DEFENUM) => {
                 match core::field(heap, tl, 0) {
                     Some(Value::Path(id)) => {
                         Some(crate::types::path_from_id(heap, id).last_segment().to_string())
@@ -2232,7 +2232,7 @@ impl Interp {
                     _ => None,
                 }
             }
-            Some(SymId::DEFMETHOD) => match core::field(heap, tl, 1) {
+            Some(wk::DEFMETHOD) => match core::field(heap, tl, 1) {
                 Some(Value::Symbol(id)) => Some(heap.symbol_name(id).to_string()),
                 _ => None,
             },
@@ -2251,8 +2251,8 @@ impl Interp {
     }
 }
 
-/// Intern a name set into the `SymId`s the core bridge compares by.
-pub fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<SymId> {
+/// Intern a name set into the `SymRef`s the core bridge compares by.
+pub fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<SymRef> {
     names
         .iter()
         .map(|n| match heap.intern_symbol(n) {
@@ -2263,7 +2263,7 @@ pub fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<SymId> 
 }
 
 /// The same for a parameter list, keeping each name's representation.
-pub fn intern_params(heap: &mut Heap, params: &[(String, Repr)]) -> Vec<(SymId, Repr)> {
+pub fn intern_params(heap: &mut Heap, params: &[(String, Repr)]) -> Vec<(SymRef, Repr)> {
     params
         .iter()
         .map(|(n, r)| {
@@ -2399,13 +2399,13 @@ fn rt_ratio(heap: &Heap, v: &Value) -> Result<BigRational, EvalError> {
     }
 }
 
-/// Walks a proper `Sexpr` list of `sym`s into a `Vec<SymId>` —
+/// Walks a proper `Sexpr` list of `sym`s into a `Vec<SymRef>` —
 /// `construct_sexpr`'s `SEXPR_PATH` arm's own reverse of
 /// `match_sexpr_ctor`'s path-segments-to-list direction. Read-only (no
 /// allocation): every `car` must already be a `Value::Symbol` and the `cdr`
 /// chain must terminate in `Value::Empty`, or the path being constructed
 /// isn't well-formed.
-fn sexpr_list_to_symbols(heap: &Heap, mut v: Value) -> Result<Vec<SymId>, EvalError> {
+fn sexpr_list_to_symbols(heap: &Heap, mut v: Value) -> Result<Vec<SymRef>, EvalError> {
     let mut ids = Vec::new();
     loop {
         match v {
