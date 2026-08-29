@@ -886,11 +886,14 @@ pub const SOURCE: &str = r#"
 ;; argument forms can be arbitrary expressions, not just bare names — every
 ;; other tag's result is fresh by construction, see this module's doc
 ;; comment).
+;;
+;; The `sexpr-symp` guard this used to open with is gone: comparing against
+;; the interned `var` symbol is already a type test — a cons or a literal is
+;; simply not that symbol — where reading a name out of the head first was
+;; not defined unless the head was one.
 (defun form-is-borrowed? ((env Scope<llvm-value>) (form Option<Sexpr>)) bool
-  (if (sexpr-symp (sexpr-car form))
-      (if (equal (sexpr-sym-name (sexpr-car form)) "var")
-          (name-is-borrowed? env (sexpr-str (sexpr-car (sexpr-cdr form))))
-          false)
+  (if (equal (sexpr-car form) (quote var))
+      (name-is-borrowed? env (sexpr-str (sexpr-car (sexpr-cdr form))))
       false))
 
 ;; R1 (function entry, design notes): pushes a GC root for every `kind = 2`
@@ -1606,6 +1609,16 @@ pub const SOURCE: &str = r#"
     ;; with the layer defining these already loaded. The
     ;; duplicates are deleted.
     ;;
+    ;; The key is the tag *symbol*, not its name: `case`
+    ;; literalizes a bare key, so each clause compares
+    ;; interned symbols — which is a pointer comparison
+    ;; (`typelisp-mem`'s `SymRef`), CL's `eq`. Reading the
+    ;; name back out with `sexpr-sym-name` (as this did)
+    ;; allocated a `string` on the GC heap once per
+    ;; dispatch and then compared it 37 times by content.
+    ;; The name is still read on the one path that needs
+    ;; to *print* it, the `else` panic.
+    ;;
     ;; A hash table keyed by tag was considered and
     ;; rejected: the arms are *code*, not values, so a
     ;; table would mean building 37 heap `ClosureBox`es
@@ -1617,50 +1630,49 @@ pub const SOURCE: &str = r#"
     ;; table *is* right for — already is one: `env`/
     ;; `fn-env` are `Scope<V>`, `String`-keyed `HashMap`
     ;; frames.)
-    (let ((s (sexpr-sym-name (sexpr-car e))))
-      (case s
-        ("int" (compile-int m fn-name builder e))
-        ("char" (compile-char m fn-name builder e))
-        ("bool" (compile-bool m fn-name builder e))
-        ("float" (compile-float m fn-name builder e))
-        ("str" (compile-str m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("bignum" (compile-bignum-literal m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("ratio" (compile-ratio-literal m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("unit" (compile-unit m fn-name builder))
-        ("var" (compile-var m fn-name builder env fn-env captured e))
-        ("cellvar" (compile-cellvar m fn-name builder env fn-env captured e))
-        ("llvm-op" (compile-llvm-op m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("assoc" (compile-assoc m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("apply" (compile-apply m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("labels" (compile-labels m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("call" (compile-call m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("lambda" (compile-lambda m fn-name builder env fn-env captured e))
-        ("apply-indirect" (compile-apply-indirect m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("if" (compile-if m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("let" (compile-let m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("loop" (compile-loop m fn-name builder env fn-env captured cur-fn protect exit-cleanup e))
-        ("break" (compile-break m fn-name builder loop-exit loop-slot loop-root-base exit-cleanup))
-        ("return" (compile-return m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("set" (compile-set m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("cellset" (compile-cellset m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("match" (compile-match m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("construct" (compile-construct m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("field-get" (compile-field-get m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("field-set" (compile-field-set m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("global" (compile-global m fn-name builder e))
-        ("set-global" (compile-set-global m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("global-init" (compile-global-init m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("panic" (compile-panic m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("catch" (compile-catch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("throw" (compile-throw m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("unwind-protect" (compile-unwind-protect m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("vector-op" (compile-vector-op m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("hashtable-op" (compile-hashtable-op m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("dyn-new" (compile-dyn-new m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("dyn-call" (compile-dyn-call m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("dyn-upcast" (compile-dyn-upcast m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        ("dyn-value" (compile-dyn-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
-        (else (panic (append "compile-value: unsupported tag " s)))))
+    (case (sexpr-car e)
+      (int (compile-int m fn-name builder e))
+      (char (compile-char m fn-name builder e))
+      (bool (compile-bool m fn-name builder e))
+      (float (compile-float m fn-name builder e))
+      (str (compile-str m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (bignum (compile-bignum-literal m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (ratio (compile-ratio-literal m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (unit (compile-unit m fn-name builder))
+      (var (compile-var m fn-name builder env fn-env captured e))
+      (cellvar (compile-cellvar m fn-name builder env fn-env captured e))
+      (llvm-op (compile-llvm-op m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (assoc (compile-assoc m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (apply (compile-apply m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (labels (compile-labels m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (call (compile-call m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (lambda (compile-lambda m fn-name builder env fn-env captured e))
+      (apply-indirect (compile-apply-indirect m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (if (compile-if m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (let (compile-let m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (loop (compile-loop m fn-name builder env fn-env captured cur-fn protect exit-cleanup e))
+      (break (compile-break m fn-name builder loop-exit loop-slot loop-root-base exit-cleanup))
+      (return (compile-return m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (set (compile-set m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (cellset (compile-cellset m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (match (compile-match m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (construct (compile-construct m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (field-get (compile-field-get m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (field-set (compile-field-set m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (global (compile-global m fn-name builder e))
+      (set-global (compile-set-global m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (global-init (compile-global-init m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (panic (compile-panic m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (catch (compile-catch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (throw (compile-throw m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (unwind-protect (compile-unwind-protect m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (vector-op (compile-vector-op m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (hashtable-op (compile-hashtable-op m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (dyn-new (compile-dyn-new m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (dyn-call (compile-dyn-call m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (dyn-upcast (compile-dyn-upcast m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (dyn-value (compile-dyn-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
+      (else (panic (append "compile-value: unsupported tag " (sexpr-sym-name (sexpr-car e))))))
                            )
 
 ;; `(unit)` — `Expr::Unit`, represented (like every
@@ -3611,13 +3623,13 @@ pub const SOURCE: &str = r#"
 ;; comment already explains for `compile-value`
 ;; & co.).
 (defun compile-pattern-test ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (pat Option<Sexpr>) (fail-block llvm-basic-block))()
-    (case (sexpr-sym-name (sexpr-car pat))
+    (case (sexpr-car pat)
       ;; Matches anything and binds nothing, so there is no guard to emit.
-      ("pat-wild" ())
+      (pat-wild ())
       ;; `(pat-empty)` -- the empty list. The same word comparison a
       ;; `pat-ctor` on `Sexpr`'s variant 0 emits, under a node that does not
       ;; name a variant: the empty list outlives `Sexpr`'s `nil`.
-      ("pat-empty"
+      (pat-empty
        (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v 0) fail-block))
       ;; `(pat-nonempty P)` -- `Option<Sexpr>`'s `(some P)`. The niche makes
       ;; the unwrapped value the same word, so this rejects the empty list
@@ -3628,13 +3640,13 @@ pub const SOURCE: &str = r#"
       ;; encodes as `(IMMEDIATE_NIL << TAG_BITS) | TAG_IMMEDIATE` =
       ;; `(0 << 3) | 6` = 6 (`typelisp-abi`), so "tag is 6 and payload is 0"
       ;; and "the word is 6" are the same test, and this is its opposite.
-      ("pat-nonempty"
+      (pat-nonempty
        (progn
          (compile-pattern-guard builder cur-fn
            (build-icmp-ne builder v (const-i64 builder 6)) fail-block)
          (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v (sexpr-car (sexpr-cdr pat)) fail-block)))
       ;; Binds into a fresh slot in this arm's own frame.
-      ("pat-bind"
+      (pat-bind
        (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr pat))))
               (bslot (alloca-args builder 1)))
          (store-arg builder bslot 0 v)
@@ -3643,7 +3655,7 @@ pub const SOURCE: &str = r#"
       ;; `(float HI LO)`. A pattern's integer is matched against an `Sexpr`,
       ;; so it already fits in the 61 bits a tagged int carries; the shape is
       ;; uniform so that "an integer crosses as two halves" has no exceptions.
-      ("pat-lit"
+      (pat-lit
        (compile-pattern-guard builder cur-fn
          (build-icmp-eq builder v
            (build-or builder
@@ -3660,7 +3672,7 @@ pub const SOURCE: &str = r#"
       ;; `(equals NAME ...)`, already resolved to a concrete method by the
       ;; checker -- so `compile-value` handles the whole of it, including
       ;; rooting whatever it allocates.
-      ("pat-guard"
+      (pat-guard
        (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr pat))))
               (test (sexpr-car (sexpr-cdr (sexpr-cdr pat))))
               (bslot (alloca-args builder 1)))
@@ -3671,13 +3683,13 @@ pub const SOURCE: &str = r#"
            fail-block)))
       ;; `(pat-ctor VARIANT (SUB...) SCRUT-KIND (FIELD-KIND...) DOWNCAST
       ;; TYPE-NAME)`.
-      ("pat-ctor" (compile-ctor-pattern m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v pat fail-block))
+      (pat-ctor (compile-ctor-pattern m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v pat fail-block))
       ;; `(pat-typetest TYPE-NAME SUB)` -- `(the Type pattern)`'s whole-value
       ;; `Sexpr` downcast (`core_bridge::translate_pattern`'s `the` arm). No
       ;; variant restriction (`-1`): it matches any variant of an enum
       ;; `Type`, the whole point of a type-only (not field-destructuring)
       ;; downcast.
-      ("pat-typetest"
+      (pat-typetest
        (let* ((type-name-form (sexpr-car (sexpr-cdr pat)))
               (inner (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))
          (compile-pattern-guard builder cur-fn (compile-sexpr-instance-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v type-name-form -1) fail-block)
@@ -3752,7 +3764,7 @@ pub const SOURCE: &str = r#"
     (if (sexpr-consp subpats)
         (let ((p (sexpr-car subpats)) (rest (sexpr-cdr subpats)))
          (let ((rest-kinds (if (eq scrut-kind 0) field-kinds (sexpr-cdr field-kinds))))
-          (if (equal (sexpr-sym-name (sexpr-car p)) "pat-wild")
+          (if (equal (sexpr-car p) (quote pat-wild))
            (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)
            (let ((field-v (case scrut-kind
                             ;; A boxed struct and a sum-ADT box both carry a
