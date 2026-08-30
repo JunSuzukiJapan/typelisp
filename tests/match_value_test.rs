@@ -323,6 +323,34 @@ fn a_scrutinee_with_no_variants_needs_a_catch_all() {
     assert!(e.contains("non-exhaustive"), "{}", e);
 }
 
+/// `bool` is the one primitive whose value universe is small enough to
+/// enumerate, so its two arms close a `match` with no `_` arm — unlike the
+/// `string` above. Checked compiled too: the island's arm chain ends with
+/// nothing falling through to a default.
+#[test]
+fn both_bool_arms_are_exhaustive_without_a_catch_all() {
+    both("(defun f ((x bool)) i32 (match x (true 1) (false 0)))", "(+ (* 10 (f true)) (f false))", 10);
+}
+
+/// One arm is still not exhaustive, and the message names the value that is
+/// missing rather than demanding a `_` arm that is not required.
+#[test]
+fn one_bool_arm_names_the_value_that_is_missing() {
+    let e = err("(defun f ((x bool)) i32 (match x (true 1)))");
+    assert!(e.contains("`false` is not covered"), "{}", e);
+    let e = err("(defun f ((x bool)) i32 (match x (false 0)))");
+    assert!(e.contains("`true` is not covered"), "{}", e);
+}
+
+/// A `Sexpr` scrutinee takes `true`/`false` literal patterns as well, but
+/// there they cover one of eleven *shapes*, not one of two values. Counting
+/// them the same way would close a match over `Sexpr` after two arms.
+#[test]
+fn bool_literals_against_a_sexpr_scrutinee_do_not_close_the_match() {
+    let e = err("(defun f ((s Sexpr)) i32 (match s (true 1) (false 0)))");
+    assert!(e.contains("non-exhaustive"), "{}", e);
+}
+
 /// An `i32` scrutinee: no heap value anywhere, which is what makes it the
 /// case the compiled side had to stop rooting unconditionally.
 #[test]

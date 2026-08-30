@@ -1122,6 +1122,109 @@ fn compile_dispatches_an_escaping_capturing_lambda_called_through_another_compil
     }
 }
 
+/// A closure that captures a **`match` arm binding** rather than a `let`
+/// binding or a parameter. Every capture reads a shared cell, and `pat-bind`
+/// binds an ordinary slot — so `core_bridge::translate_match` wraps an arm
+/// whose body captures one in a `let` that rebinds it, and the island's
+/// existing `kind >= 10` cell path does the rest.
+///
+/// This was a hard error until 2026-08-30 ("`g` is referenced but no binder
+/// in scope states its representation"): the arm body was translated without
+/// its own pattern's bindings in scope, so the `cellvar` a capture compiles
+/// to had no representation to state.
+#[test]
+fn compile_dispatches_a_lambda_that_captures_a_match_arm_binding() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun mk ((o Option<i32>)) (fn (i32) bool)
+          (match o
+            ((some g) (lambda ((a i32)) bool (< a g)))
+            ((none) (lambda ((a i32)) bool false))))
+        (defun try-it ((o Option<i32>) (a i32)) i32 (if ((mk o) a) 1 0))
+        (compile mk)
+        (compile try-it)
+        (+ (* 100 (try-it (option::some 5) 3))
+           (+ (* 10 (try-it (option::some 5) 7)) (try-it (option::none) 1)))
+        "#,
+    );
+    match v {
+        Value::Int(n) => assert_eq!(n, 100),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The same, from a `defstruct` pattern binding two fields at once: the
+/// representations come off the `pat-ctor` node's own per-field list, which
+/// is the only place a generic ADT's instantiated field types are known.
+#[test]
+fn compile_dispatches_a_lambda_that_captures_two_struct_pattern_bindings() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defstruct bx (v i32) (w i32))
+        (defun mk2 ((b bx)) (fn (i32) i32)
+          (match b ((new v w) (lambda ((a i32)) i32 (+ a (+ v w))))))
+        (defun use2 ((b bx) (a i32)) i32 ((mk2 b) a))
+        (compile mk2)
+        (compile use2)
+        (use2 (bx::new 3 4) 10)
+        "#,
+    );
+    match v {
+        Value::Int(n) => assert_eq!(n, 17),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The rebinding is a *cell*, not a copy: three calls to one closure see each
+/// other's writes. This is what says wrapping the body in a `let` gives the
+/// same sharing semantics cell-boxing the pattern binder itself would — and
+/// it is safe precisely because an arm's bindings are visible nowhere else,
+/// so the `let` shadows every read and every `set` in the body.
+#[test]
+fn a_captured_match_arm_binding_is_shared_not_copied() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun counter ((o Option<i32>)) (fn () i32)
+          (match o
+            ((some n) (lambda () i32 (progn (setf n (+ n 1)) n)))
+            ((none) (lambda () i32 0))))
+        (defun run-three ((o Option<i32>)) i32
+          (let ((f (counter o))) (+ (f) (+ (f) (f)))))
+        (compile counter)
+        (compile run-three)
+        (run-three (option::some 10))
+        "#,
+    );
+    match v {
+        Value::Int(n) => assert_eq!(n, 36),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The mirror image: the `match` sits *inside* the closure, over an
+/// `Option<Sexpr>` — the one type whose `(some P)` is niched into a
+/// `pat-nonempty` node instead of a `pat-ctor`. `core_freevars` did not count
+/// that node's bindings, so `g` looked free in the lambda's body and the
+/// closure captured a name bound inside itself. The `Option<i32>` spelling of
+/// the same program never showed it: only `Option<Sexpr>` is niched.
+#[test]
+fn a_niched_option_sexpr_pattern_binds_inside_an_enclosing_closure() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun pick ((o Option<Sexpr>)) (fn () Sexpr)
+          (lambda () Sexpr (match o ((some g) g) ((none) (quote nothing)))))
+        (defun hit ((o Option<Sexpr>)) i32 (if (equal ((pick o)) (quote hi)) 1 0))
+        (compile pick)
+        (compile hit)
+        (+ (* 10 (hit (option::some (quote hi)))) (hit (option::none)))
+        "#,
+    );
+    match v {
+        Value::Int(n) => assert_eq!(n, 10),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
 /// The other direction of the same slice, and what the plan called the
 /// "compiled -> interpreted hole": `adder` is *not* compiled, so `(adder 5)`
 /// is an ordinary tree-walked `lambda` and yields a `BoxedObj::Closure`. It

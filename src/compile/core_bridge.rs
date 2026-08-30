@@ -266,6 +266,12 @@ impl<'a> Ctx<'a> {
         self.reprs.iter().rev().find(|(n, _)| *n == name).map(|(_, r)| r)
     }
 
+    /// Whether `name` is one a nested closure captures, and so must be bound
+    /// to a shared cell rather than an ordinary slot.
+    fn is_cell(&self, name: SymRef) -> bool {
+        self.cell_names.contains(&name)
+    }
+
     /// The island's kind number for a binding of `name` at `repr`: the plain
     /// one, or the `10 +` cell marker and the field classification the cell's
     /// contents are tagged with.
@@ -1996,21 +2002,46 @@ fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         let mut pairs = Vec::with_capacity(arms.len());
         for arm in &arms {
             let items = s.list_to_vec(*arm)?;
-            let Some((pat, body)) = items.split_first() else { return Err(malformed(&s, *arm)) };
-            let pat = translate_pattern(&mut s, *pat, cx)?;
+            let Some((pat_form, body)) = items.split_first() else { return Err(malformed(&s, *arm)) };
+            let pat_form = *pat_form;
+            // What this arm's pattern binds, and at which representation.
+            // The body is translated with those in scope because a *use* does
+            // not repeat a representation — `Ctx::reprs`' doc comment — and a
+            // captured name's `cellvar` has to state one. The pattern is the
+            // only place it is known: a field's representation comes off the
+            // `pat-ctor` node, and a whole-value bind takes the scrutinee's.
+            let mut binds = Vec::new();
+            pattern_bindings(&s, pat_form, &scrut_repr, cx, &mut binds)?;
+            let arm_reprs = cx.extended(binds.iter().cloned());
+            let arm_cx = Ctx { reprs: &arm_reprs, ..cx };
+            let pat = translate_pattern(&mut s, pat_form, arm_cx)?;
             s.push_root(pat);
-            let body = match body {
-                [one] => to_island(&mut s, *one, cx)?,
-                many => {
-                    let mut b = Items::new(&mut s);
-                    let empty = core::list(b.heap(), &[])?;
-                    b.push(empty);
-                    for e in many {
-                        let v = to_island(b.heap(), *e, cx)?;
-                        b.push(v);
-                    }
-                    b.finish("let")?
+            // The bindings a closure nested in this body captures. `pat-bind`
+            // binds an ordinary slot, and a capture reads a shared cell, so
+            // the body is wrapped in a `let` that rebinds each under its own
+            // name: the island's existing cell path (`bind-let-values`'s
+            // `kind >= 10`, whose GC root that same `let` releases) then does
+            // all of it, and the pattern binder stays a plain slot.
+            //
+            // Rebinding rather than cell-boxing in place is sound because an
+            // arm's pattern bindings are visible nowhere but that arm's body:
+            // the `let` shadows each for the whole of the body, so every read
+            // and every `set` in it reaches the cell, and nothing outside can
+            // observe the slot the cell was copied from.
+            let cells: Vec<(SymRef, Repr)> =
+                binds.iter().filter(|(n, _)| cx.is_cell(*n)).cloned().collect();
+            let body = if cells.is_empty() && body.len() == 1 {
+                to_island(&mut s, body[0], arm_cx)?
+            } else {
+                let bindings = cell_bindings(&mut s, &cells, cx)?;
+                s.push_root(bindings);
+                let mut b = Items::new(&mut s);
+                b.push(bindings);
+                for e in body {
+                    let v = to_island(b.heap(), *e, arm_cx)?;
+                    b.push(v);
                 }
+                b.finish("let")?
             };
             s.push_root(body);
             let pair = core::pair(&mut s, pat, body)?;
@@ -2024,6 +2055,97 @@ fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // see the module comment on dead fields.
     f.push(Value::Int(kind));
     f.finish("match")
+}
+
+/// `(((SYM . KIND) . (var "SYM" false))...)` — the `let` bindings that give a
+/// match arm's captured pattern bindings the cells a closure reads them
+/// through. See the call site for why they exist at all.
+///
+/// `KIND` comes from the *enclosing* `cx`, where these names are already
+/// marked as cells, so it is the `10 +` marker `bind-let-values` acts on. The
+/// initializer is built here rather than translated: `to_island` would see a
+/// captured name and emit `cellvar`, and the cell is what this binding is
+/// about to create — the value to copy into it sits in the pattern's own
+/// slot, which is what a plain `var` reads.
+fn cell_bindings(heap: &mut Heap, cells: &[(SymRef, Repr)], cx: Ctx) -> Result<Value, Error> {
+    let mut s = RootScope::new(heap);
+    let mut pairs = Vec::with_capacity(cells.len());
+    for (name, repr) in cells {
+        let name_pair = core::pair(&mut s, Value::Symbol(*name), Value::Int(cx.binding_kind(*name, repr)))?;
+        s.push_root(name_pair);
+        let text = s.symbol_name(*name).to_string();
+        let name_v = s.alloc_string(text);
+        s.push_root(name_v);
+        // `is-fn`, which `compile-var` does not read — the same trailing
+        // field `translate_fnref`'s hand-built references carry.
+        let init = core::tagged(&mut s, "var", &[name_v, Value::Bool(false)])?;
+        s.push_root(init);
+        let pair = core::pair(&mut s, name_pair, init)?;
+        s.push_root(pair);
+        pairs.push(pair);
+    }
+    core::list(&mut s, &pairs)
+}
+
+/// Every name `pat` binds, with the representation it is bound at.
+///
+/// `value` is the representation of the value the pattern is applied to: a
+/// whole-value `(pat-bind x)` binds at the scrutinee's, and a `pat-ctor`'s
+/// sub-patterns bind at the per-field representations that node carries (one
+/// per sub-pattern — `check_ctor_pattern` builds both lists in one loop).
+///
+/// The name half of this walk is [`super::core_freevars`]'s own
+/// `pattern_bindings`; this one exists because the *representations* are what
+/// the body needs, and only the bridge has them.
+fn pattern_bindings(
+    heap: &Heap,
+    pat: Value,
+    value: &Repr,
+    cx: Ctx,
+    out: &mut Vec<(SymRef, Repr)>,
+) -> Result<(), Error> {
+    let Some(tag) = core::op(heap, pat).map(str::to_string) else { return Ok(()) };
+    match tag.as_str() {
+        "pat-bind" => out.push((symbol_field_sym(heap, pat, 0)?, value.clone())),
+        // The name the test reads the scrutinee through. Bound only while
+        // that test runs, and at the same representation as the value under
+        // test — the arm body cannot name it.
+        "pat-guard" => out.push((symbol_field_sym(heap, pat, 0)?, value.clone())),
+        // The niche: `(some P)` over an `Option<Sexpr>` applies `P` to the
+        // very same word, so `P` binds at the same representation.
+        "pat-nonempty" => {
+            let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
+            pattern_bindings(heap, sub, value, cx, out)?;
+        }
+        "pat-ctor" => {
+            let parts = core::fields(heap, pat)?;
+            if parts.len() < 4 {
+                return Err(malformed(heap, pat));
+            }
+            let field_reprs = repr_list(heap, parts[3])?;
+            for (sub, repr) in parts[4..].iter().zip(field_reprs.iter()) {
+                pattern_bindings(heap, *sub, repr, cx, out)?;
+            }
+        }
+        // The whole value, seen as the downcast target: the same word, whose
+        // representation follows from what that type is — the same three-way
+        // classification `translate_ctor_pattern` makes for its own kind.
+        "pat-typetest" => {
+            let path = as_path(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
+                .ok_or_else(|| malformed(heap, pat))?;
+            let sub = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
+            let repr = if path == Path::root("sexpr") {
+                Repr::Sexpr
+            } else if cx.defs.is_struct(heap, &path)? {
+                Repr::Struct
+            } else {
+                Repr::Enum
+            };
+            pattern_bindings(heap, sub, &repr, cx, out)?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// One pattern.
@@ -2245,7 +2367,7 @@ fn symbol_field(heap: &Heap, form: Value, i: usize, ) -> Result<String, Error> {
     }
 }
 
-/// Field `i` as the symbol itself, for the one caller that needs its identity
+/// Field `i` as the symbol itself, for the callers that need its identity
 /// (its home module and vocabulary index) rather than its spelling.
 fn symbol_field_sym(heap: &Heap, form: Value, i: usize) -> Result<SymRef, Error> {
     match core::field(heap, form, i) {

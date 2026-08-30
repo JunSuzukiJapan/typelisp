@@ -321,6 +321,17 @@ fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymRef>) -> Resul
                 pattern_bindings(heap, inner, out)?;
             }
         }
+        // `(some P)` over an `Option<Sexpr>`, which the niche turns into this
+        // node rather than a `pat-ctor` (`Checker::pattern_form`). Missing it
+        // made `P`'s names look *free* in the arm body, so a closure around
+        // the whole `match` captured a name bound inside it — and then had no
+        // binder to read a representation from. The `Option<i32>` spelling of
+        // the same pattern never showed it: only `Option<Sexpr>` is niched.
+        wk::PAT_NONEMPTY => {
+            if let Some(inner) = core::field(heap, pat, 0) {
+                pattern_bindings(heap, inner, out)?;
+            }
+        }
         // The name the test form reads the scrutinee through. Not a
         // user-visible binding — the arm body cannot name it — but it *is*
         // bound while the test runs, which is what this set is asked about.

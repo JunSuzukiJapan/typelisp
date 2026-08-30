@@ -12707,6 +12707,14 @@ impl Checker {
         // and arm order is match semantics — first match wins.
         let mut arms: Vec<Option<(Pattern, Vec<Value>)>> = Vec::new();
         let mut covered: HashSet<usize> = HashSet::new();
+        // A `bool` scrutinee has no *variants* (it is a primitive, so
+        // `adt_name` is `None` and `total_variants` is 0) but it does have a
+        // finite value universe of exactly two, and `Pattern::Bool` tests it
+        // by word. Counting those two is what lets `(true ..) (false ..)`
+        // close a match with no `_` arm. No other primitive gets this: `i64`
+        // and `char` have universes too large to enumerate, and `string`/
+        // `f64` do not compare by word at all (`Pattern::Guard`).
+        let mut bools_covered: HashSet<bool> = HashSet::new();
         let mut catchall = false;
         let mut result_ty: Option<Type> = expected.cloned();
         // What the arms *between them* know about the result type, holes and
@@ -12800,6 +12808,12 @@ impl Checker {
                         && adt_name.as_ref().map(|p| crate::types::path_is_builtin(p, "option")) == Some(true) =>
                 {
                     covered.insert(OPTION_SOME);
+                }
+                // Only when the scrutinee *is* `bool`: a `Sexpr` scrutinee
+                // also admits `true`/`false` literal patterns, and those cover
+                // one of eleven shapes rather than one of two values.
+                Pattern::Bool(b) if scrut.ty == Type::Bool => {
+                    bools_covered.insert(*b);
                 }
                 Pattern::Wildcard | Pattern::Bind(..) => catchall = true,
                 _ => {}
@@ -12920,13 +12934,21 @@ impl Checker {
         // A type with no variants is never covered by its arms: there is
         // nothing to enumerate, so only a catch-all closes the match.
         let covers_every_variant = adt_name.is_some() && covered.len() == total_variants;
-        if !catchall && !arm_recovered && !covers_every_variant {
+        let covers_both_bools = scrut.ty == Type::Bool && bools_covered.len() == 2;
+        if !catchall && !arm_recovered && !covers_every_variant && !covers_both_bools {
             let e = Error::TypeError(match &adt_name {
                 Some(adt_name) => format!(
                     "non-exhaustive match on `{}`: {}/{} variants covered",
                     adt_name,
                     covered.len(),
                     total_variants
+                ),
+                // `bool` is the one primitive whose value universe is small
+                // enough to enumerate, so say which of the two is missing
+                // rather than demanding a `_` arm that is not required.
+                None if scrut.ty == Type::Bool => format!(
+                    "non-exhaustive match on Bool: `{}` is not covered — write that arm or a `_` arm",
+                    if bools_covered.contains(&true) { "false" } else { "true" }
                 ),
                 // No variants to count: every arm was a value test, and a
                 // value test can only ever be a partial answer.
