@@ -4,8 +4,10 @@
 //! `setq`/`psetq`/`psetf`, and `pushnew`.
 //!
 //! The half that *does* need new machinery — `block`/`return-from`,
-//! `prog`/`prog*`, `destructuring-bind`, `remf`, `sleep` — is not here; see
-//! the plan for what each of those needs.
+//! `prog`/`prog*`, `destructuring-bind`, `sleep` — is not here; see the plan
+//! for what each of those needs. `remf` is in neither half: property lists are
+//! out of scope altogether (the plan's Phase 3c decision), so nothing is
+//! pending for it.
 
 extern crate typelisp;
 use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};

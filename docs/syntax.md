@@ -885,9 +885,22 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 チェック時に落ちる。
 
 呼び先も推移的にコンパイルされるので、**コンパイルできない組み込みを（間接的にでも）呼ぶ関数は
-コンパイルできない**（`no such function: <組み込み名>` で落ちる）。2026-08-14 に prelude 側の穴を、
-2026-08-18 にシステム組み込み・等価述語・印字・リーダの穴を、2026-08-19 に `eval` を塞いだ結果、
-**この表は空になった**。組み込みを理由にコンパイルできない関数はもう無い。
+コンパイルできない**。2026-08-14 に prelude 側の穴を、2026-08-18 にシステム組み込み・等価述語・
+印字・リーダの穴を、2026-08-19 に `eval` を塞いだ結果、**この表は 5 つまで減った**。残っているのは
+`char` の `upcase` / `downcase` / `alphap` / `digitp` と、`i32`・`i64` の `int->char`。この 5 つは
+島に lowering が無い（`externs::native_lowered_primitive_methods` の `char` 行と整数行）。
+プロセスが落ちるのではなく、その旨を述べるエラーで断られる:
+
+```lisp
+(defun f ((c char)) char (upcase c))
+(compile f)
+; => compile: "f" calls "char::upcase", a builtin method with no compiled implementation
+```
+
+`char->int`・比較演算子・`string` の `ref` には lowering があるので、コードポイントの上で書けば
+この 5 つを踏まずに済む——[functions.md](functions.md) §9 の文字関数はすべてそう書いてあり、
+prelude が事前コンパイル済みで出荷できるのはそのため。穴を塞ぐ作業は
+[dev/TODO.md](dev/TODO.md) の Phase 2 残タスク。
 
 `compile`/`compile-file`/`dump` はこの表に入らない——定義上インタプリタ専用の操作で、
 コンパイルできないのではなくコンパイルする側だから（`dump` が書き出すのはインタプリタの環境

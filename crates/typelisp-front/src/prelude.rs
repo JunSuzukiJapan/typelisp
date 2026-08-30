@@ -2738,8 +2738,9 @@ user-visible capacity."
 ;; ---------------------------------------------------------------------------
 ;; The control forms of CL's chapter 5 that need no new machinery —
 ;; cl-parity-plan.md Phase 4a's macro-expressible half. (`block`/`return-from`,
-;; `prog`/`prog*`, `destructuring-bind`, `remf` and `sleep` are the half that
-;; does; see the plan for what each needs.)
+;; `prog`/`prog*`, `destructuring-bind` and `sleep` are the half that does; see
+;; the plan for what each needs. `remf` is in neither half — property lists are
+;; out of scope altogether, decided in Phase 3c.)
 ;;
 ;; These expand to `setf`, which a `defmacro` may *produce* even though it may
 ;; not *call* one of the protected builtin forms (checker.rs's note by
