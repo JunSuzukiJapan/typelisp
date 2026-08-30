@@ -1212,17 +1212,29 @@ fn builtin_error_defs() -> Vec<AdtDef> {
 
 /// The built-in `Sexpr` sum type (the result type of `read`).
 ///
-/// `Sexpr = Nil | Int | Float | Char | Bool | Sym | Str | Cons(Sexpr, Sexpr) |
-/// Bignum | Ratio | Path`: the empty list `()` is the nullary `Nil`
-/// constructor (a `Sexpr` value in its own right, on par with `cons` cells),
-/// and `cons` holds two `Sexpr` fields — matching Lisp's `list = cons | nil`
-/// duality so `car`/`cdr` and list operations (`cons`/`car`/`cdr`/`list`/
-/// `dolist`) stay in `Sexpr` throughout.
+/// `Sexpr = Int | Float | Char | Bool | Sym | Str | Cons(Option<Sexpr>,
+/// Option<Sexpr>) | Bignum | Ratio | Path`: every S-expression **but** the
+/// empty list, which is `Option<Sexpr>`'s `none` since the null-elimination
+/// work (`docs/dev/null-elimination-plan.md`). So the type S-expression data
+/// is passed around as is `Option<Sexpr>`, not `Sexpr` — that is the point of
+/// the exercise, and `car`/`cdr` return it.
+///
+/// Both `cons` fields are `Option<Sexpr>`, the car as much as the cdr: an
+/// element position has to hold the empty list too, or `'(a () b)` could not
+/// be written (plan §2.1).
+///
+/// The `nil` variant below is a **placeholder, not a constructor**. Writing
+/// it is refused with a message pointing at `none`; the slot survives only so
+/// that the `SEXPR_*` variant indices (`crate::eval::interp`) — which are
+/// burned into the island's IR and into compiled code — keep their values.
+/// Renumbering them buys nothing and would invalidate every artifact.
 fn sexpr_def() -> AdtDef {
     AdtDef {
         name: Path::root("sexpr"),
         params: vec![],
         variants: vec![
+            // Index 0, and never constructible — see this function's doc
+            // comment. `Checker` rejects it by name.
             Variant { name: "nil".to_string(), fields: vec![] },
             Variant { name: "int".to_string(), fields: vec![Type::I64] },
             Variant { name: "float".to_string(), fields: vec![Type::F64] },

@@ -1,6 +1,8 @@
 # null 排除計画 — `Sexpr` の `nil` を `Option` へ
 
 作成: 2026-08-27。状態: **完了 2026-08-28**（§9 の実装ログ、とくに「段階 3 補遺」を先に読むこと）。
+2026-08-30 に再点検し、§9 末尾に「未対応」として残していた `equalp` の穴が
+`eq_generic` 化で解消済みであることを実測で確認した。**残作業は無い。**
 
 段階 1〜3 で全部入った。§6 の表は段階 3〜6 を分けていたが分けられず、
 prelude・島・docs は段階 3 と同じコミットになっている。
@@ -404,7 +406,19 @@ prelude も島も docs も同じコミットで緑にするしかない。以下
 
 **同じ「複製された判断のうち一部だけが更新されている」形が 2 回出た。**
 
-### 残っている落とし穴（未対応）
+### 残っている落とし穴【2026-08-30: 解消済み。以下は当時の記録】
+
+**再現しない。** `equal`/`equalp` がジェネリックになった（`registry.rs`、`eq_generic()`）
+ことで、型引数が両辺で統一され、niche と箱の食い違いごと消えた。実測:
+
+```
+(equalp (read-char s) (option::some #\a))    → true
+(equalp (read-char s) (option::some #\z))    → false
+(equalp (option::some 1) (option::some #\a)) → type error: expected I32, found Char
+```
+
+塞ぐ手として挙げていた「`Option<T>` に構造的等価を持たせる（仕様の追加）」は不要。
+以下は当時の症状の記録。
 
 `(equalp opt (option::some x))` が型エラーにならず `false` を返す。
 `equalp`/`equal`/`eq` の引数が `Option<Sexpr>`（S 式データ）になったため、
