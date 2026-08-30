@@ -58,7 +58,7 @@ use inkwell::AddressSpace;
 
 use crate::check::core;
 use crate::compile::symbols::CompiledItem;
-use crate::{Checker, Heap, Interp, Path, Reader, Value};
+use crate::{Checker, Heap, Interp, Reader, Value};
 
 /// Builds the compiler island's AOT bitcode in a throwaway environment.
 ///
@@ -90,16 +90,14 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         .read_all(&mut heap, crate::compiler::SOURCE)
         .map_err(|e| format!("island read failed: {}", e))?;
     let forms_digest = hash_read_forms(&heap, &forms)?;
-    let mut fn_names: Vec<String> = Vec::new();
+    let mut items: Vec<CompiledItem> = Vec::new();
     let mut checked: Vec<Value> = Vec::new();
     for v in forms {
         let tl = chk.check_form(&mut heap, &interp, v).map_err(|e| format!("island check failed: {}", e))?;
         for w in chk.take_warnings() {
             eprintln!("{}", w);
         }
-        if let Some(name) = defun_name(&heap, tl) {
-            fn_names.push(name);
-        }
+        collect_island_items(&heap, tl, &mut items)?;
         // Rooted and never popped: these go into the dump at the end of this
         // function, with the whole compile loop in between. The heap is a
         // throwaway the generator drops on the way out.
@@ -124,7 +122,6 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
     // own `labels`/`lambda`s. (The very first `.bc`, before this chain existed,
     // was built by the interpreted island; every one since is built by its
     // predecessor.)
-    let items: Vec<CompiledItem> = fn_names.iter().map(|n| CompiledItem::Fn(Path::root(n))).collect();
     crate::compile::driver::install_compiled_library(&interp, crate::compile::CompiledLibrary {
             label: "compiler island",
             bitcode: typelisp_front::dump::parse(crate::compiler::ISLAND_DUMP, "compiler island")?
@@ -157,8 +154,8 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         // (`llvm_module_add_function`), so a body compiled later simply fills
         // in the shell declared here. This is the same shape `Interp::
         // compile_scc` already uses for a JIT'd cycle.
-        for name in &fn_names {
-            let sym = crate::compile::symbols::user_symbol_name(name);
+        for item in &items {
+            let sym = item.symbol_name();
             if module.get_function(&sym).is_none() {
                 module.add_function(&sym, fn_ty, None);
             }
@@ -169,10 +166,10 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
     // (`eval_llvm_builtin_method`) and `Mutex` isn't reentrant, so it must
     // run without the lock held — same constraint `aot::compile_file`
     // documents at its own loop.
-    for name in &fn_names {
-        let internal_name = crate::compile::symbols::user_symbol_name(name);
-        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), name, &internal_name)
-            .map_err(|e| format!("island compile of `{}` failed: {}", name, e))?;
+    for item in &items {
+        let node_name = item.node_name();
+        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), &node_name, &item.symbol_name())
+            .map_err(|e| format!("island compile of `{}` failed: {}", node_name, e))?;
     }
 
     let bitcode = {
@@ -367,20 +364,105 @@ fn hash_form(
 /// The last segment of a `(defun PATH ...)` form's name, or `None` for anything
 /// else — the island is all `defun`s, and this is what names each one for
 /// `install_island_bitcode`'s symbol list.
-fn defun_name(heap: &Heap, tl: Value) -> Option<String> {
-    if !core::op_is(heap, tl, typelisp_mem::wk::DEFUN) {
-        return None;
+fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompiledItem>) -> Result<(), String> {
+    let tag = core::op(heap, tl).map(str::to_string).unwrap_or_default();
+    match tag.as_str() {
+        // The same three shapes `aot::collect_aot_item` flattens, and for the
+        // same reason: a `(module ...)` is a container, and the enclosing
+        // module is already baked into each item's own path. The one that
+        // reaches the island is the **monomorphization bundle** — a form that
+        // instantiates a generic comes back wrapped together with the
+        // specializations it needs (`Checker::check_form`'s doc comment says
+        // why they cannot be separated). Both the specialization and the form
+        // that wanted it are ordinary monomorphic definitions by then; without
+        // this recursion both were dropped on the floor, and the first island
+        // function to call any generic vanished from the module along with it
+        // — showing up as `get-function: no function named "tl_<caller>"` from
+        // some *other* function's call site.
+        "module" => {
+            for item in core::fields(heap, tl).map_err(|e| e.to_string())?.into_iter().skip(1) {
+                collect_island_items(heap, item, out)?;
+            }
+        }
+        "defun" => {
+            let path = core::path_field(heap, tl, 0)
+                .ok_or_else(|| "island: defun without a name".to_string())?;
+            out.push(CompiledItem::Fn(path));
+        }
+        "defmethod" => {
+            let type_path = core::path_field(heap, tl, 0)
+                .ok_or_else(|| "island: defmethod without a type".to_string())?;
+            let method = match core::field(heap, tl, 1) {
+                Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
+                _ => return Err("island: defmethod without a name".to_string()),
+            };
+            out.push(CompiledItem::Method(type_path, method));
+        }
+        // Declares a signature and emits no body of its own.
+        "defsignature" => {}
+        other => {
+            return Err(format!(
+                "island: the SOURCE grew a top-level `{}`, which this bootstrap does not know how to emit",
+                other
+            ))
+        }
     }
-    match core::field(heap, tl, 0)? {
-        Value::Path(id) => Some(crate::types::path_from_id(heap, id).last_segment().to_string()),
-        Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
-        _ => None,
-    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::island_source_hash;
+    use super::{collect_island_items, island_source_hash};
+    use crate::{Checker, Heap, Interp, Reader};
+
+    /// A form that instantiates a generic comes back wrapped in a
+    /// `<monomorph specializations>` module together with the specializations
+    /// it needs, so the enumeration has to look *inside* a `module` — see
+    /// [`collect_island_items`].
+    ///
+    /// Without the recursion this returns nothing at all: the caller is
+    /// dropped along with its specialization, and the failure surfaces far
+    /// away, as `get-function: no function named "tl_<caller>"` raised while
+    /// compiling some *other* function that calls it.
+    #[test]
+    fn a_generic_call_yields_both_the_caller_and_its_specialization() {
+        let mut heap = Heap::with_capacity(1 << 16);
+        let mut chk = Checker::new();
+        let mut interp = Interp::new();
+        crate::prelude::load_interpreted(&mut heap, &mut chk, &mut interp);
+        let reader = Reader::new();
+        let forms = reader
+            .read_all(&mut heap, "(defun island-probe ((e Option<Sexpr>)) Sexpr (unwrap (sexpr-car e)))")
+            .expect("read failed");
+        let mut items = Vec::new();
+        for v in forms {
+            let tl = chk.check_form(&mut heap, &interp, v).expect("check failed");
+            collect_island_items(&heap, tl, &mut items).expect("collection failed");
+        }
+        let names: Vec<String> = items.iter().map(|i| i.node_name()).collect();
+        assert!(names.iter().any(|n| n == "island-probe"), "the caller itself is missing: {:?}", names);
+        assert!(
+            names.len() > 1,
+            "the specialization `unwrap` was instantiated at must travel with its caller: {:?}",
+            names
+        );
+    }
+
+    /// The island's own top level is `defun`s and `defsignature`s; anything
+    /// else would emit nothing and go unnoticed, so it is refused by name.
+    #[test]
+    fn an_unknown_top_level_shape_is_refused_rather_than_skipped() {
+        let mut heap = Heap::with_capacity(1 << 16);
+        let mut chk = Checker::new();
+        let mut interp = Interp::new();
+        crate::prelude::load_interpreted(&mut heap, &mut chk, &mut interp);
+        let reader = Reader::new();
+        let forms = reader.read_all(&mut heap, "(defvar (island-probe-global i64) 1)").expect("read failed");
+        let tl = chk.check_form(&mut heap, &interp, forms[0]).expect("check failed");
+        let mut items = Vec::new();
+        let err = collect_island_items(&heap, tl, &mut items).expect_err("a defvar must be refused");
+        assert!(err.contains("defvar"), "the message should name the shape: {}", err);
+    }
 
     fn hash(src: &str) -> u64 {
         island_source_hash(src).expect("hashing failed")

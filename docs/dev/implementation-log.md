@@ -9445,3 +9445,61 @@ tag compiled, same? interp:  false      ← 同じ 'a-module-local-tag のはず
 文字列リテラルから裸のシンボルになり、文字列を探す走査が空集合を返していた。
 **`accepted.len() > 30` が捕まえた**——この番人は今回で 3 つ目の形を見ており、毎回この 1 行が
 効いている。走査を「`case` フォームを括弧の深さで歩き、各節の先頭トークンを取る」に書き直した。
+
+## 2026-08-30 — 島のブートストラップが単型化の束を見ていなかった
+
+`sexpr-*` の抽出子に非空 `Sexpr` を要求させる案（下記「A は不要」）を調べる過程で、
+島に `unwrap` を 1 箇所書いたら島全体がビルドできなくなった。
+
+```
+get-function: no function named "tl_compile-char" in this module
+```
+
+**呼び先が無かったのではなく、呼び先を出力し忘れていた。** ジェネリックを呼ぶ
+トップレベルは、チェッカが特殊化と一緒に `<monomorph specializations>` という
+`module` に包んで返す（`checker.rs:1880` の doc comment が「a form's specializations
+can never be separated from the form that needs them」と理由を書いている）。
+
+島のブートストラップの `defun_name` は裸の `defun` しか見ないので、束を見た瞬間に
+`None` を返し、**中の `defun` が呼び出し側もろとも全部落ちていた**。落ちた関数は
+前方宣言もされないので、失敗は**別の関数の呼び出し地点**に現れる。
+
+### 直し
+
+`aot::collect_aot_item` が同じ問題をとっくに解いていた——`module` に再帰し、
+`defun`/`defmethod` をリンク名つきで拾う。その形に揃えた（`collect_island_items`）。
+`fn_names: Vec<String>` は `Vec<CompiledItem>` になった。特殊化された**メソッド**は
+`user_method_symbol_name` でしか正しい記号名にならないので、これが要る。
+
+未知のトップレベル形は黙って捨てず `Err` にした。今回の不具合がまさに
+「黙って捨てて別の場所で落ちる」形だったため。
+
+**島の成果物は 1 バイトも変わらない**（md5 同一）。出す IR には影響しない変更で、
+それを不変性で確かめられるのが良い性質。
+
+### 数値
+
+これ以前、島はジェネリック関数を 1 つも呼んでいなかった。裏付け:
+`unwrap` を 1 箇所入れた状態で `defun 125 + defsignature 68 + module 1 = 194`、
+SOURCE の実形は `defun 126 + defsignature 68 = 194`。`module` 1 個がちょうど
+`compile-char` 1 個を飲み込んでいる。`Option<Sexpr>`/`Scope<llvm-value>` は
+ジェネリック**型**の具体化であって、呼び先は常に単型だった。
+
+番人は `bootstrap.rs` の unit test 2 本（束から両方拾えること、未知形が拒否されること）。
+
+### A は不要（調査の結論）
+
+`sexpr-int`/`sexpr-str` ほか 6 個の抽出子の引数を `Option<Sexpr>` から `Sexpr` に
+する案は**やらない**。理由は 3 つ。
+
+1. **`null-elimination-plan.md` §2.3 が既に決めている。** 機械的な `unwrap` 置換は
+   「実行時挙動は今日と同一で、書き換えコストだけ払って防げるバグは 0 件」。
+   `unwrap` に意味があるのは「明示的で grep 可能な主張」である場合に限る、と
+2. **77 箇所すべてが同じ機械的な形。** 引数は `sexpr-car` 57 / `sexpr-cdr` 7 …と、
+   直接渡すものしかない。判断の入る「主張」が 1 つも無い
+3. **診断が悪くなる。** 今日は空リストでも `sexpr-int: expected an Int Sexpr node` と
+   関数名と期待変種が出る（`Value::Empty` は `Some(_)` 腕）。実装ログ 8403 行に
+   このメッセージで実際にデバッグした記録がある。`unwrap` の汎用パニックはそれを消す
+
+失敗を本当に型で消すには、`sexpr-symp`/`sexpr-consp` によるフロー依存の絞り込みが要る。
+これは型検査器の新機能で、別作業。
