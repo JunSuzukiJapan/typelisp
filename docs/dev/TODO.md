@@ -43,24 +43,6 @@ Common Lisp にあって typelisp に無いものを Phase 0〜9 に落とした
 [implementation-log.md](implementation-log.md) の該当節。**フェーズの締めは「関係しそうな
 テストを選んで回す」ではなく直列の全実行にする。**
 
-Phase 3e の作業中に見つけた**コンパイラの穴 1 件（未修正）**: `lambda` が `match` の
-アーム束縛を捕獲すると compile できない。
-
-```lisp
-(defun mk ((o Option<i32>)) (fn (i32) bool)
-  (match o
-    ((some g) (lambda ((a i32)) bool (< a g)))   ; ← `g` を捕獲
-    ((none) (lambda ((a i32)) bool false))))
-(compile ...)  ; => compile: `g` is referenced but no binder in scope states
-               ;    its representation (internal error)
-```
-
-インタプリタでは動く。原因は `core_bridge::translate_match` がアームの本体を `cx` を
-広げずに変換することで、パターン束縛の `Repr` がスコープに入らない
-（`captured_with_reprs` が引ける表に無い）。`let` 束縛の捕獲は通る。
-直すには `Repr` をスコープに入れるだけでなく**島側でその束縛をセル化**する必要があるので、
-一行では済まない。Phase 3e の prelude はこの形を避けて書いてある。
-
 Phase 6a の作業中に**コンパイル済みコードの整数切り詰め**を 2 件見つけた。1 件は直した
 （整数リテラル: 島へは `Sexpr` として渡るので 3bit タグを引いた 61bit しか残らず、
 `4611686018427387903` が `-1` にコンパイルされていた。`float` と同じ 32bit 2 分割にして
@@ -97,11 +79,30 @@ Phase 6c で**同じ原因の 3 件目**が出た。グローバルだけの話�
 **コンテナの要素として往復させたとき**だけ。したがって「±2^60 の外にある `i64`」は
 グローバルに限らず `Vector`/`HashTable`/`defstruct` のフィールドでも黙って壊れる。
 
-本筋の直し方は `Float`/`bignum` と同じで、payload に入らない整数を `TAG_BOXED` の箱に
-逃がすこと。`encode` は今ヒープを持たない純関数なので、島の lowering と `rt_*` シム、
-GC ルート、等価述語と印字、ダンプの版まで動く——1 フェーズ分の作業で、Phase 6c の
-片手間には入らない。`BitVector` は 1 語 64bit ではなく **32bit** で詰めることで
-この端に近寄らないようにしてある（型の側にも同じ注記がある）。
+**直し方は決まっている（2026-08-31、ユーザ判断）: 64bit 幅の整数型を言語から消す。**
+箱に逃がす（`Float`/`bignum` と同じ手）道もあるが、採らない——多くの Lisp が整数を
+1 種類に絞ることでタグに bit を使えているのと同じ理屈で、**タグに干渉する幅の整数型を
+作らない**方が無難だから。`i32`/`u32` 以下は 61bit payload に収まるので、この種のバグは
+表現の側から消える。それより大きい数は `bignum` を使う。
+
+消すのは `i64` だけではない: **`u64`/`isize`/`usize` も同じ穴**（[types.rs](../../crates/typelisp-front/src/types.rs) の整数型 10 種）。
+
+規模（実測）: `tests/*.rs` 49 ファイル 819 箇所、`src/compiler.rs` 161、`prelude.rs` 134、
+`check/registry.rs` 41。加えて島と prelude の再生成、ダンプ／FASL の版、docs。
+
+決まっている方針:
+
+1. **`Sexpr` の Int の payload**（`registry.rs` の `sexpr_def`）も `i32` へ。読み取った
+   整数リテラルが `i32` を超えたら **bignum の `Sexpr` ノード**にする（CL の fixnum/bignum）。
+2. **`get-universal-time`/`get-internal-real-time`/`file-modified-date` は専用の構造体を返す**
+   ようにする。`i32` に収まらない量を裸の整数で返さない。
+3. **`u64`/`isize`/`usize` も同時に削除。**
+4. **島の `const-i64`** のように「`i32` を受け取るのに名前が `i64`」になるのは禁止。
+   引数の型に名前を合わせる。
+5. 移行措置は要らない（言語ユーザーはまだ居ない）。`i64` 等は**単純に削除**する。
+
+`BitVector` を 1 語 **32bit** で詰めてあるのは、この端に近寄らないためだった
+（型の側にも同じ注記がある）——64bit 幅が無くなれば、その注記の理由の方が消える。
 
 トップレベル `defun` の**前方参照は廃止**した（2026-08-23）。相互再帰は
 `(defsignature name (型...) 戻り型)` で明示的に宣言する。理由は Phase 8c
@@ -121,19 +122,33 @@ GC ルート、等価述語と印字、ダンプの版まで動く——1 フェ
 ```
 
 プリンタは値が持つ型キーでメソッドを引くが、単型化が型引数を消しているのでキーは
-`gen` であって `gen<i64>` ではない。値の側に「どの実体化なのか」が書かれていない以上、
-`gen<i64>` の版と `gen<string>` の版を選び分ける材料が無い。全 T で 1 本の本体を
-共有する手もあるが、`gen<T>` を印字するとは `T` を印字することなので成立しない。
-**型検査は通り、名前で呼べば動き、プリンタからだけ見えない**ので、書いた人が気づかない。
+`gen` であって `gen<i64>` ではない。**型検査は通り、名前で呼べば動き、プリンタからだけ
+見えない**ので、書いた人が気づかない。
 `tests/printer_test.rs::print_object_does_not_reach_a_generic_type` が現状を固定しており、
 直ったらそのテストが落ちる。これに依存して見送ったのが `*print-array*` と
 `Array<T>` の `print-object`（cl-parity-plan.md Phase 8a）。
 
-`~/name/` は **AOT 実行ファイルでは使えない**（Phase 8a）。ディレクティブは
-メソッドを実行時の `string` で名指すので、どのメソッドに到達しうるかをコンパイル時に
-言えない。対応するには全型の全メソッドを起動時に登録することになる——`print-object` は
-1 トレイトの impl だけを登録すれば済む。黙って別の動作をするのではなく、その旨を
-述べるエラーにしてある。
+**2026-08-31 の調査で、これは `print-object` 固有の話だと分かった。** ジェネリック型の
+メソッドは実行時に呼べている——`:dyn` 越しなら、実体化ごとに**正しい特殊化**へ飛ぶ:
+
+```lisp
+(impl Show gen<T> (where (Show T)) (show ((self Self)) string (append "gen-of-" (show (v self)))))
+(defun say ((s :dyn Show)) string (show s))
+(say (gen::new (wi::new 1)))   ; => "gen-of-INT"
+(say (gen::new (ws::new "x"))) ; => "gen-of-STR"
+```
+
+違いは 1 行。`:dyn` の箱を作る所（`checker.rs` の `check_as_dyn`）は
+`mangle_type(&value.ty)` を鍵にする——**型引数ごと**。struct/enum の箱を作る所
+（`type_key.rs` の `type_key_id`）は `type_key_of(&path)` で、`Path` は型引数を持たない。
+どちらも具象型が手元にあるチェッカーの地点なのに、片方だけ捨てている。
+
+**直し方（決定）: 構築地点でも実体化を鍵にする。**普通の箱にも `:dyn` の箱と同じものを
+持たせれば、プリンタは `gen<i32>` を受け取り、基底 `gen` と引数に割って
+`print-object <i32>`（単型化された特殊化の登録名、`mangled_method_name`）を引ける。
+波及先は型キーを見ている所すべて: downcast の型テスト（今は型引数を捨てて比較しているので
+`gen<string>` の値が `gen<i32>` として通る穴がある）・`equalp`・印字の `#<gen ...>` 表示・
+`enum_variant_name`・ダンプ／FASL の版・島（`construct` が渡す型名文字列が変わる＝再生成）。
 
 Phase 2/3 の副産物として checker のバグを 4 件見つけて直した。4 件とも
 **「型変数の名前がたまたま一致したときだけ動いていた」同じ形**（詳細は同計画の Phase 0 / Phase 3 の節）:
@@ -153,13 +168,6 @@ Phase 9c の作業中に見つけた**計画の範囲外の既存問題 2 件**�
 2026-08-19 に「呼ぶとコンパイルできなくなるもの」（[syntax.md](../syntax.md) §10）の最後の1つ
 `eval` を閉じ、あの表は空になった。経緯・設計判断は
 [implementation-log.md](implementation-log.md) の該当節。
-
-`match` の値パターン（2026-08-25、[implementation-log.md](implementation-log.md) の該当節）で
-**意識して残した 1 件**:
-
-- **`bool` スクルーティニーは `(true ...) (false ...)` の 2 腕で網羅にならない**。
-  「変種を持たない型は一律 catchall 必須」という単純な規則を優先した。直すなら
-  `check_match` が bool リテラルの被覆を数えることになる。
 
 作業を始めるときはここに項目を足し、終わったら（経緯・設計判断を
 [implementation-log.md](implementation-log.md) へ書いたうえで）ここから消す。

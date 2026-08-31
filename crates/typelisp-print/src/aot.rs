@@ -43,6 +43,12 @@ thread_local! {
     /// `type key -> the address of that type's compiled `print-object``,
     /// filled by [`rt_print_object_method`].
     static PRINT_OBJECT: RefCell<HashMap<String, usize>> = RefCell::new(HashMap::new());
+    /// `(type key, method name) -> the address of that method's compiled
+    /// body`, filled by [`rt_format_call_method`] — what `~/name/` dispatches
+    /// through. Registered per *directive site*, not per type: the checker
+    /// scans each literal control string and names only the methods a `~/ /`
+    /// in this program can actually reach.
+    static FORMAT_CALL: RefCell<HashMap<(String, String), usize>> = RefCell::new(HashMap::new());
     /// The values whose own `print-object` is running right now, innermost
     /// last — the re-entry guard, so `(impl print-object point (… (format
     /// false "~a" self)))` degrades to the built-in `#<point 1 2>` rather
@@ -57,20 +63,7 @@ thread_local! {
 const AOT_HOOKS: PrintHooks = PrintHooks {
     enum_variant_name: |key, variant| ENUM_NAMES.with(|t| t.borrow().get(&(key.to_string(), variant)).cloned()),
     print_object: aot_print_object,
-    // `~/name/` is not available to an AOT executable. The directive names its
-    // method in a *runtime* string, so nothing at compile time can say which
-    // methods a program might reach that way — supporting it would mean
-    // registering every method of every type at startup, where `print-object`
-    // registers exactly the impls of one trait. An error rather than silence:
-    // the control string asked for something by name.
-    format_call: |_, name, _, _, _| {
-        Err(format!(
-            "format: ~/{}/ is not available in a compiled executable — the method is \
-             looked up by a name that only exists at run time, and an AOT program \
-             registers only its `print-object` methods",
-            name
-        ))
-    },
+    format_call: aot_format_call,
     opts: BARE_HOOKS.opts,
     print_vars: BARE_HOOKS.print_vars,
 };
@@ -112,6 +105,67 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
             let key = stored_type_key(heap, id).unwrap_or("<untyped box>");
             Err(format!("print-object on `{}` returned {:?}, not a string", key, other))
         }
+    }
+}
+
+/// `~/name/` in an AOT executable, dispatched through [`FORMAT_CALL`].
+///
+/// The table is filled at startup with the methods the checker found by
+/// scanning this program's literal control strings, so a name that reaches
+/// here either has an entry or was never reachable at all — the error says
+/// which, rather than the blanket "not available in a compiled executable"
+/// this hook used to be.
+///
+/// The type key is read off the value the same way the interpreter reads it
+/// (`Interp::format_call`): a boxed value carries its own, and each immediate
+/// maps to exactly the type it *is*. `Value::Int` is the one that does not:
+/// `i32` and `i64` share the raw word, so both are tried and it is an error
+/// only when both were registered.
+fn aot_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
+    let keys: Vec<String> = match v {
+        Value::Boxed(id) => match stored_type_key(heap, id) {
+            Some(k) => vec![k.to_string()],
+            None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
+        },
+        Value::Str(_) => vec!["string".to_string()],
+        Value::Bool(_) => vec!["bool".to_string()],
+        Value::Char(_) => vec!["char".to_string()],
+        Value::Symbol(_) => vec!["symbol".to_string()],
+        Value::Empty | Value::Cons(_) | Value::Path(_) => vec!["sexpr".to_string()],
+        Value::Int(_) => vec!["i64".to_string(), "i32".to_string()],
+    };
+    let found: Vec<usize> = FORMAT_CALL
+        .with(|t| keys.iter().filter_map(|k| t.borrow().get(&(k.clone(), name.to_string())).copied()).collect());
+    let addr = match found.len() {
+        1 => found[0],
+        0 => {
+            return Err(format!(
+                "format: ~/{}/ — {} has no method `{}` registered in this executable",
+                name,
+                keys.iter().map(|k| format!("`{}`", k)).collect::<Vec<_>>().join(" or "),
+                name
+            ))
+        }
+        _ => {
+            return Err(format!(
+                "format: ~/{}/ — an integer argument could be either width and both \
+                 `i64` and `i32` define `{}`; there is nothing in the value to choose by",
+                name, name
+            ))
+        }
+    };
+    // SAFETY: the same contract `aot_print_object` relies on — `addr` came
+    // from `rt_format_call_method`, whose only caller is the startup sequence
+    // `build_main_wrapper` generates, and the address is a `ptrtoint` of a
+    // function this file compiled under the shared compiled-function ABI. The
+    // checker verified the signature (`(Self, bool, bool) -> string`) before
+    // naming it. `extern "C-unwind"` because a `(panic ...)` inside the
+    // method unwinds out through here.
+    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = unsafe { std::mem::transmute(addr) };
+    let args = [encode(v), i64::from(colon), i64::from(at)];
+    match decode(unsafe { f(args.as_ptr(), 3) }) {
+        Value::Str(id) => Ok(heap.string(id).to_string()),
+        other => Err(format!("format: ~/{}/ returned {:?}, not a string", name, other)),
     }
 }
 
@@ -169,6 +223,30 @@ pub unsafe extern "C" fn rt_print_object_method(args: *const i64, argc: u32) -> 
     let addr = *args.add(2) as usize;
     install();
     PRINT_OBJECT.with(|t| t.borrow_mut().insert(key.to_string(), addr));
+    0
+}
+
+/// Registers one method reachable through `~/name/`: `args` is `[key_ptr,
+/// key_len, name_ptr, name_len, fn_addr]`.
+///
+/// One call per `(type, method)` the checker found while scanning this
+/// program's literal control strings — see [`aot_format_call`].
+///
+/// # Safety
+///
+/// `args` must point to 5 valid `i64`s, the last being the address of a
+/// function compiled under the shared compiled-function ABI whose signature
+/// is `((self Self) (colon bool) (at bool)) -> string`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_format_call_method(args: *const i64, argc: u32) -> i64 {
+    if argc < 5 {
+        fatal("rt_format_call_method: expected 5 arguments");
+    }
+    let key = static_str(args, 0, "rt_format_call_method");
+    let name = static_str(args, 2, "rt_format_call_method");
+    let addr = *args.add(4) as usize;
+    install();
+    FORMAT_CALL.with(|t| t.borrow_mut().insert((key.to_string(), name.to_string()), addr));
     0
 }
 

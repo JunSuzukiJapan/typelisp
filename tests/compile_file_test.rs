@@ -44,6 +44,30 @@ fn compile_and_capture(name: &str, source: &str) -> (i32, String) {
     (code, String::from_utf8_lossy(&out.stderr).into_owned())
 }
 
+/// `~/name/` in a standalone executable.
+///
+/// The directive names its method in a string, and an AOT program has no
+/// interpreter to look a name up in — so it used to be refused outright.
+/// `format`/`print`/`println` now take a *literal* control string, the
+/// checker scans it (`Checker::format_call_methods`), and `compile_file`
+/// emits one `rt_format_call_method` registration per method it named,
+/// beside the `print-object` ones. Exit code 0 means the directive produced
+/// exactly what the interpreter produces for the same program.
+#[test]
+fn a_call_directive_dispatches_in_a_compiled_executable() {
+    assert_eq!(
+        compile_and_run(
+            "format_call",
+            r#"(defstruct money (yen i32))
+               (defmethod jp ((self money) (colon bool) (at bool)) string
+                 (format false "~a yen" (yen self)))
+               (defun main () i64
+                 (if (equal (format false "~/jp/" (money::new 300)) "300 yen") 0 1))"#,
+        ),
+        0
+    );
+}
+
 #[test]
 fn compiles_and_runs_a_constant_main() {
     assert_eq!(compile_and_run("answer", "(defun main () i64 42)"), 42);

@@ -6,7 +6,7 @@
 //! else synthesizes its own type and is reconciled against the expectation.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use std::rc::Rc;
 
@@ -752,6 +752,16 @@ pub struct Checker {
     /// a hole is re-checked with this clear, so a hole can only ever inform
     /// an expectation, never survive into a lowered node.
     infer_probe: Cell<bool>,
+    /// `(type, method)` for every `~/name/` directive found while scanning a
+    /// literal control string, with the argument types at that call site.
+    ///
+    /// The directive dispatches on the *runtime* value's type, so which body
+    /// runs is not decided here — this is the set of bodies that could be
+    /// reached, which is exactly what an AOT executable has to register at
+    /// startup (`compile::aot::compile_file` drains it, `typelisp_print::aot`
+    /// holds the table). The interpreter needs none of it: it has the whole
+    /// method table at hand and looks the name up when the directive runs.
+    format_calls: RefCell<BTreeSet<(Path, String)>>,
     /// Holes ([`Self::infer_probe`]) made and still standing in the tree
     /// checked so far. Snapshotted around each probe and restored when the
     /// probed subtree is thrown away, so it counts holes in *retained* output
@@ -785,7 +795,16 @@ impl Checker {
             predeclared: HashSet::new(),
             infer_probe: Cell::new(false),
             probe_holes: Cell::new(0),
+            format_calls: RefCell::new(BTreeSet::new()),
         }
+    }
+
+    /// The `(type, method)` pairs a `~/name/` directive can reach in what has
+    /// been checked so far — see [`Self::format_calls`]. Read by
+    /// `compile::aot::compile_file`, which turns each into a startup
+    /// registration so the directive works in a standalone executable.
+    pub fn format_call_methods(&self) -> Vec<(Path, String)> {
+        self.format_calls.borrow().iter().cloned().collect()
     }
 
     /// Every registry entry's content hash, as of now.
@@ -11629,6 +11648,90 @@ impl Checker {
         Ok(Checked::new(forms::rooted(heap, acc.form), acc.ty))
     }
 
+    /// The literal text of a control string argument.
+    ///
+    /// `format`/`print`/`println` take a **literal**, like Rust's `format!`
+    /// and for the same reason: the directives decide which methods a
+    /// `~/name/` can reach, and a string built at run time can be scanned by
+    /// nothing. Requiring the literal is what lets the scan below run at all
+    /// — and with it, a misspelled directive, an unterminated `~(`, or a
+    /// `~/name/` no argument answers to become errors here rather than in the
+    /// middle of printing.
+    ///
+    /// A macro that forwards a control string (`warn`'s `,control`) is
+    /// unaffected: expansion happens before this, so what arrives is whatever
+    /// literal the caller wrote.
+    fn control_string(&self, heap: &Heap, form: &str, v: Value) -> Result<String, Error> {
+        match v {
+            Value::Str(id) => Ok(heap.string(id).to_string()),
+            _ => Err(Error::TypeError(format!(
+                "{}: the control string must be a literal — the directives in it decide which \
+                 methods `~/name/` can reach and which arguments they take, and a string built \
+                 at run time cannot be read at compile time. Build the text with `format` and \
+                 print that instead.",
+                form
+            ))),
+        }
+    }
+
+    /// Records every `~/name/` in `control` against the types of the values
+    /// it could be handed — see [`Self::format_calls`].
+    ///
+    /// The directive picks its method by the *runtime* value's type, so this
+    /// cannot say which argument each `~/ /` will land on without modelling
+    /// the whole directive language (`~{`'s iteration, `~*`'s jumps). It does
+    /// not have to: registering every argument type at the site that answers
+    /// to the name is a superset of what can run, and that is what a startup
+    /// registration needs. Naming *no* type is the case worth reporting —
+    /// nothing this call could hand the directive has the method.
+    ///
+    /// A type nothing can be looked up on — a type variable in an unspecialized
+    /// generic body, a `:dyn`, a `Sexpr` holding who-knows-what — makes the
+    /// site unprovable rather than wrong, so it silences the error without
+    /// registering anything. The specialization re-checks the same site with
+    /// its type variables bound, which is where a generic body's real answer
+    /// comes from.
+    fn note_format_calls(&self, control: &str, form: &str, items: &[Checked]) -> Result<(), Error> {
+        // The engine's parse errors already name themselves (`format: ...`),
+        // so they pass through as they are rather than gaining a second
+        // prefix from the form that happened to hold the string.
+        let names = typelisp_print::format::call_directive_names(control).map_err(Error::TypeError)?;
+        for name in names {
+            let mut named = false;
+            let mut unprovable = false;
+            for item in items {
+                let Some(paths) = format_call_owners(&item.ty) else {
+                    unprovable = true;
+                    continue;
+                };
+                for path in paths {
+                    let Some(def) = self.reg.type_def(&path) else {
+                        // A type variable: no definition to ask until this
+                        // body is specialized.
+                        unprovable = true;
+                        continue;
+                    };
+                    if crate::types::path_is_builtin(&path, "sexpr") {
+                        unprovable = true;
+                    }
+                    let Some(af) = def.assoc.get(&name) else { continue };
+                    if directive_shaped(&af.sig) {
+                        self.format_calls.borrow_mut().insert((path, name.clone()));
+                        named = true;
+                    }
+                }
+            }
+            if !named && !unprovable {
+                return Err(Error::TypeError(format!(
+                    "{}: ~/{}/ — no argument here has a method `{}` of the shape \
+                     `((self Self) (colon bool) (at bool)) -> string`",
+                    form, name, name
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// The `(format dest control &rest args)` special form — CL's `format`
     /// adapted to typelisp's `bool` (`dest` is `true` for CL's `t`, writing to
     /// stdout, or `false` for CL's `nil`, only building the string). The
@@ -11665,11 +11768,13 @@ impl Checker {
         if dest.ty != Type::Bool {
             return self.check_format_to_stream(heap, interp, env, &dest.ty, args, arg_locs);
         }
+        let control_text = self.control_string(heap, "format", args[1])?;
         let control = self.check_at(heap, interp, env, args[1], Some(&Type::Str), nth_loc(arg_locs, 1))?;
         let mut items = Vec::new();
         for (i, &a) in args[2..].iter().enumerate() {
             items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, 2 + i))?);
         }
+        self.note_format_calls(&control_text, "format", &items)?;
         let list = self.cons_hetero_sexpr(heap, items)?;
         let r = Ref::synthetic(Path::root("format-rt"));
         let form = self.call_form(heap, &r, &[dest, control, list])?;
@@ -11766,11 +11871,14 @@ impl Checker {
                 if builtin == "println-rt" { "println" } else { "print" }
             )));
         }
+        let what = if builtin == "println-rt" { "println" } else { "print" };
+        let control_text = self.control_string(heap, what, args[0])?;
         let control = self.check_at(heap, interp, env, args[0], Some(&Type::Str), nth_loc(arg_locs, 0))?;
         let mut items = Vec::new();
         for (i, &a) in args[1..].iter().enumerate() {
             items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, 1 + i))?);
         }
+        self.note_format_calls(&control_text, what, &items)?;
         let list = self.cons_hetero_sexpr(heap, items)?;
         let r = Ref::synthetic(Path::root(builtin));
         let form = self.call_form(heap, &r, &[control, list])?;
@@ -14020,6 +14128,37 @@ fn mangled_fn_path(base: &Path, args: &[Type]) -> Path {
 /// space makes collisions with source-written names impossible.
 fn mangled_method_name(base: &str, args: &[Type]) -> String {
     format!("{} <{}>", base, args.iter().map(mangle_type).collect::<Vec<_>>().join(","))
+}
+
+/// The types whose method tables a `~/name/` directive would look `name` up
+/// in, or `None` when this type answers no such question — a trait object
+/// (the concrete type is gone), or anything with no name to key a table by.
+///
+/// The same mapping [`crate::eval::interp::Interp::format_call`] makes at run
+/// time, from the static side: each primitive maps to exactly the type it is.
+fn format_call_owners(ty: &Type) -> Option<Vec<Path>> {
+    match ty {
+        Type::Named(p, _) => Some(vec![p.clone()]),
+        Type::Dyn(..) => None,
+        // Every width at once, and exactly the two the runtime tries: an
+        // integer's machine word does not say which width was written, so
+        // `Interp::format_call` looks in `i64` and `i32` whatever the static
+        // type was. A static scan that used the written width instead would
+        // reject `(format false "~/twice/" 7)` — the literal is `i32`, the
+        // method is on `i64` — for a call that runs.
+        t if t.is_integer() => Some(vec![Path::root("i64"), Path::root("i32")]),
+        other => crate::types::prim_type_path(other).map(|p| vec![p]),
+    }
+}
+
+/// Whether `sig` is the shape `~/name/` calls: `((self Self) (colon bool)
+/// (at bool)) -> string`.
+///
+/// The runtime check `Interp::format_call` makes before calling, hoisted to
+/// where the name is first seen — the compiled side has no chance to make it,
+/// since by then the address has already been handed to a `transmute`.
+fn directive_shaped(sig: &crate::check::registry::FnSig) -> bool {
+    sig.params.len() == 3 && sig.params[1] == Type::Bool && sig.params[2] == Type::Bool && sig.ret == Type::Str
 }
 
 /// Replace type parameters in `t` with their bindings from `subst`.

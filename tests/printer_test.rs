@@ -40,6 +40,31 @@ fn eval_err(src: &str) -> String {
     }
 }
 
+/// The first *check*-time error `src` raises.
+///
+/// Since the control string became a literal (`Checker::control_string`), a
+/// `~/name/` that names nothing, names something of the wrong shape, or sits
+/// in a control string that does not parse is caught here rather than in the
+/// middle of printing — the whole point of scanning it at compile time. These
+/// used to be [`eval_err`] cases.
+fn check_err(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    for v in vs {
+        match chk.check_form(&mut h, &interp, v) {
+            Err(e) => return format!("{:?}", e),
+            Ok(tl) => {
+                interp.exec(&mut h, tl).expect("exec failed");
+            }
+        }
+    }
+    panic!("expected a check error, got none");
+}
+
 fn is_true(src: &str) {
     assert_eq!(eval_ok(src), Value::Bool(true), "{}", src);
 }
@@ -236,14 +261,15 @@ fn an_integer_argument_is_refused_when_both_widths_define_the_name() {
 #[test]
 fn a_missing_method_is_an_error_not_a_fallback() {
     // Unlike `print-object`, which has the built-in rendering to fall back
-    // to: the control string asked for something by name.
-    let e = eval_err(r#"(format false "~/nope/" "hi")"#);
-    assert!(e.contains("has no method"), "{}", e);
+    // to: the control string asked for something by name. Reported at check
+    // time now — the scan of the literal knows the argument's type.
+    let e = check_err(r#"(format false "~/nope/" "hi")"#);
+    assert!(e.contains("no argument here has a method `nope`"), "{}", e);
 }
 
 #[test]
 fn a_method_of_the_wrong_shape_is_reported_as_such() {
-    let e = eval_err(
+    let e = check_err(
         r#"(defmethod short ((self string)) string self)
            (format false "~/short/" "hi")"#,
     );
@@ -252,8 +278,18 @@ fn a_method_of_the_wrong_shape_is_reported_as_such() {
 
 #[test]
 fn an_unterminated_call_directive_is_a_syntax_error() {
-    let e = eval_err(r#"(format false "~/brief" "hi")"#);
+    let e = check_err(r#"(format false "~/brief" "hi")"#);
     assert!(e.contains("closing"), "{}", e);
+}
+
+/// The control string is a literal, like Rust's `format!` — a string built at
+/// run time cannot be scanned for the directives that decide which methods
+/// `~/name/` reaches, and scanning is what makes the directive work in an AOT
+/// executable at all.
+#[test]
+fn a_computed_control_string_is_refused() {
+    let e = check_err(r#"(defun go ((ctrl string)) string (format false ctrl))"#);
+    assert!(e.contains("must be a literal"), "{}", e);
 }
 
 #[test]

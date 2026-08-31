@@ -305,6 +305,29 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         })
         .collect();
 
+    // The methods a `~/name/` directive in this file can reach, from the
+    // checker's scan of each literal control string
+    // (`Checker::format_call_methods`). The interpreter needs no such list —
+    // it looks the name up in its own method table when the directive runs —
+    // but a standalone executable has no table, so each pair becomes a
+    // startup registration below, exactly as `print-object` does.
+    let format_calls: Vec<(String, String, String)> = chk
+        .format_call_methods()
+        .into_iter()
+        .map(|(path, method)| {
+            let node = format!("{}::{}", path, method);
+            let symbol = node_names
+                .iter()
+                .find(|(n, _)| *n == node)
+                .map(|(_, sym)| sym.clone())
+                .ok_or_else(|| format!(
+                    "compile-file: `~/{}/` names `{}`, which was not compiled into this file",
+                    method, node
+                ))?;
+            Ok((crate::type_key::type_key_of(&path).into_owned(), method, symbol))
+        })
+        .collect::<Result<_, String>>()?;
+
     // Each global's path with the slot id `collect_aot_item` promoted it to,
     // for the `eval` environment's startup binding. Read back rather than
     // assumed to be the loop index: the ids are whatever
@@ -358,6 +381,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &interp.upcast_descriptors(),
             &interp.enum_variant_descriptors(),
             &print_objects,
+            &format_calls,
             eval_env.as_deref(),
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
@@ -407,6 +431,7 @@ fn build_main_wrapper(
     upcasts: &[(u32, u32, u32)],
     enum_variants: &[(String, usize, String)],
     print_objects: &[(String, String)],
+    format_calls: &[(String, String, String)],
     eval_env: Option<&[u8]>,
 ) -> Result<(), String> {
     let tl_main = module
@@ -556,6 +581,15 @@ fn build_main_wrapper(
             let (key_ptr, key_len) = literal(&builder, key)?;
             let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(i64_ty);
             call(&builder, "rt_print_object_method", &[key_ptr, key_len, fn_ptr])?;
+        }
+        for (key, method, symbol) in format_calls {
+            let target = module.get_function(symbol).ok_or_else(|| {
+                format!("compile-file: `~/{}/` names `{}`, which was not compiled into this file", method, symbol)
+            })?;
+            let (key_ptr, key_len) = literal(&builder, key)?;
+            let (name_ptr, name_len) = literal(&builder, method)?;
+            let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(i64_ty);
+            call(&builder, "rt_format_call_method", &[key_ptr, key_len, name_ptr, name_len, fn_ptr])?;
         }
     }
     // The environment `eval` needs, as one immutable blob. Registration only —
@@ -876,7 +910,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], None).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], None).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -915,7 +949,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], None).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], None).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

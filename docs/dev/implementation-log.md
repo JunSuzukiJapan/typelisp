@@ -9533,3 +9533,84 @@ typed field reader を Rust 組み込みへ移した。
 
 今日の形が正しいと考える。抽出子のパニックはブリッジのバグ検出器として働いていて、
 `sexpr-int: expected an Int Sexpr node` と関数名・期待変種の両方を出す。
+
+## 2026-08-31 — TODO の「未修正のバグ 5 件」のうち 3 件
+
+`docs/dev/TODO.md` が挙げていた 5 件を上から潰した。残る 2 件（`i64` の切り詰め、
+`print-object` がジェネリック型に発火しない）は方針だけ決めて TODO へ書き戻してある。
+
+### 1. `bool` の `match` が 2 腕で網羅にならなかった
+
+`(match x (true 1) (false 0))` が「変種を持たない型は catchall 必須」で弾かれていた。
+`bool` は**値の宇宙が 2 つしかない唯一のプリミティブ**なので、その 2 つを数えるようにした
+(`check_match` の `bools_covered`)。`i64`/`char` は列挙できず、`string`/`f64` はそもそも
+語で比較しない (`Pattern::Guard`) ので、この扱いを受けるのは `bool` だけ。
+
+片方だけのときは `_` を要求するのではなく**欠けている値を名指す**エラーにした。
+`Sexpr` スクルーティニーの `true`/`false` は 11 変種のうちの 1 つを覆うだけなので、
+`scrut.ty == Type::Bool` のときしか数えない——これを間違えると `Sexpr` の match が
+2 腕で閉じてしまう（テストで固定した）。
+
+### 2. `lambda` が `match` アーム束縛を捕獲すると compile できなかった
+
+捕獲は共有セルを読み、`pat-bind` は素のスロットを束縛する、という食い違い。
+`core_bridge::translate_match` がアーム本体を**自分のパターンの束縛を持たない `cx`** で
+変換していたので、捕獲が compile される `cellvar` に述べるべき表現が無く、
+「`g` is referenced but no binder in scope states its representation」で落ちていた。
+
+直しは 2 つ。
+
+- `pattern_bindings`（bridge 側に新設）でアームが何をどの表現で束縛するかを集め、
+  それを入れた `cx` で本体を変換する。表現はパターンにしか無い——フィールドの分は
+  `pat-ctor` ノードが運び（`check_ctor_pattern` が `field_types` と引数を同じループで
+  作るので長さは必ず一致する）、全体束縛はスクルーティニーのものを取る。
+- 捕獲される束縛があるアームは、本体を**同じ名前で束縛し直す `let`** で包む。島の
+  `bind-let-values` の `kind >= 10` がセルを作り、その `let` が GC ルートも解放する。
+  **島は 1 行も変えていない**（成果物は md5 同一）。
+
+包み直しで済むのは、アームの束縛がそのアームの本体以外からは見えないため。`let` が
+本体全体を shadow するので読みも `set` もセルに届き、コピー元のスロットを観測できる者が
+いない。初期化子だけは手で組んだ `var` ノードにしてある——`cx` を通すと `cellvar` を
+吐くが、そのセルはまさにこれから作るものだから。
+
+同じ形の穴が `core_freevars` にもあった。`Option<Sexpr>` の `(some P)` だけは niche で
+`pat-nonempty` になるが、そこを束縛として数えていなかったので、`match` を囲む閉包が
+「自分の中で束縛される名前」を捕獲していた。**`Option<i32>` の綴りでは出ない**
+（niche は `Option<Sexpr>` だけ）ので、テストは両方の形で書いた。
+
+### 3. `~/name/` が AOT 実行ファイルで使えなかった
+
+TODO は「全型の全メソッドを起動時に登録することになる」と書いていたが、**そこまで要らない**。
+ユーザの方針（Rust の `format!` と同じく、決められた入口のリテラル文字列だけを
+コンパイル時に走査する）で実装した。
+
+- `format`/`print`/`println` は**リテラルの制御文字列しか受け取らない**
+  (`Checker::control_string`)。マクロが `,control` で転送する形（`warn`）は展開後に
+  リテラルが来るので影響を受けない。
+- チェッカーはそのリテラルを `typelisp_print::format::call_directive_names` で走査し、
+  `~/name/` を全部拾って、その呼び出し地点の引数の型のうち
+  `((self Self) (colon bool) (at bool)) -> string` を持つものを記録する
+  (`Checker::format_calls`)。
+- `compile::aot::compile_file` がその集合を読み、`rt_format_call_method` の登録を
+  `main` に吐く（`print-object` の登録の隣）。実行時は
+  `typelisp_print::aot` の `FORMAT_CALL` 表を引いて呼ぶ。
+
+副産物として**エラーが実行時からチェック時へ移った**: 綴りを間違えた `~/name/`、
+どの引数の型も答えられない `~/name/`、閉じていない `~(` が、印字の途中ではなく
+呼び出し地点で落ちる。`printer_test` の 3 本はそのぶん `eval_err` から `check_err` へ
+書き換えた。
+
+**どの引数に当たるかは静的に決まらない**（`~{` の反復、`~*` の跳躍）ので、記録するのは
+「その地点の引数の型のうち、その名前を持つもの全部」＝実際に走りうるものの上位集合。
+起動時登録に要るのはそれで足り、*どれも*持たないときだけエラーにする。型変数・`:dyn`・
+`Sexpr` は「証明できない」として黙らせる——ジェネリック本体は特殊化のときに同じ地点が
+再検査される。
+
+整数だけは静的な型を使ってはいけなかった。`(format false "~/twice/" 7)` のリテラルは
+`i32`、メソッドは `i64` の上、という組み合わせが実際に動く（実行時は語から幅を区別
+できないので `i64`/`i32` の両方を引く）。走査もその 2 つを引くようにして、
+`printer_test::an_integer_argument_dispatches_when_only_one_width_defines_the_name` が
+それを固定している。
+
+`rt_extern_functions()` に 1 つ足したので**島の成果物は変わる**（extern の表は成果物の
+3 つ目の入力）。再生成は 1 回で不動点だった——島が吐くものは変えていないため。

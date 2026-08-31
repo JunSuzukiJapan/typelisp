@@ -290,6 +290,43 @@ fn parse(control: &str) -> Result<Vec<Node>, String> {
     Ok(nodes)
 }
 
+/// Every `~/name/` directive `control` contains, in source order.
+///
+/// The compile-time half of [`Node::Call`]'s dispatch. `format`/`print`/
+/// `println` take a *literal* control string, so the checker can scan it with
+/// this and learn which methods the directive can reach before the program
+/// runs — which is what lets an AOT executable register exactly those
+/// (`crate::aot`), and what turns a misspelled name into a check error rather
+/// than a failure in the middle of printing.
+///
+/// `Err` is the control string not parsing at all, which the checker reports
+/// the same way: a literal that the engine could never render is worth
+/// hearing about at the call site rather than at the call.
+pub fn call_directive_names(control: &str) -> Result<Vec<String>, String> {
+    fn walk(nodes: &[Node], out: &mut Vec<String>) {
+        for n in nodes {
+            match n {
+                Node::Call { name, .. } => out.push(name.clone()),
+                Node::Case { body, .. } | Node::Iter { body, .. } => walk(body, out),
+                Node::Cond { clauses, .. } => {
+                    for c in clauses {
+                        walk(c, out);
+                    }
+                }
+                Node::Just { segments, .. } | Node::Block { segments, .. } => {
+                    for seg in segments {
+                        walk(seg, out);
+                    }
+                }
+                Node::Text(_) | Node::Dir { .. } | Node::Escape { .. } => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&parse(control)?, &mut out);
+    Ok(out)
+}
+
 /// Parses a run of nodes until end-of-string or a directive whose char is in
 /// `stops` (a block closer or `;`), which it returns as the [`Stop`].
 fn parse_seq(chars: &[char], pos: &mut usize, stops: &[char]) -> Result<(Vec<Node>, Option<Stop>), String> {
