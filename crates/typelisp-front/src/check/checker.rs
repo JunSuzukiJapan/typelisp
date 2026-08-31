@@ -1176,6 +1176,10 @@ impl Checker {
         let key = f.heap().alloc_string(key);
         f.push(key);
         f.extend(args.iter().map(|a| a.form));
+        // A built-in that hands back a generic box (`Vector::new`,
+        // `HashTable::keys`) is a construction site with no `construct` node,
+        // so the printer's specialization has to be asked for here too.
+        self.request_print_object(ret);
         f.finish("assoc")
     }
 
@@ -1228,6 +1232,9 @@ impl Checker {
         let key = crate::type_key::type_key_of_type(ret);
         let key = f.heap().alloc_string(key);
         f.push(key);
+        // Same reason as `Self::assoc_form`: called through a function value,
+        // this method still builds the box.
+        self.request_print_object(ret);
         f.finish("methodref")
     }
 
@@ -3795,6 +3802,26 @@ impl Checker {
     /// concrete type arguments `args`, returning the mangled method name for
     /// the `assoc` node to reference. Only ever called when a
     /// [`MethodTemplate`] is retained for the pair.
+    /// Asks for `ty`'s own `print-object` specialization, if `ty` is a generic
+    /// type that has one to specialize.
+    ///
+    /// Every other specialization is requested because some *call* names the
+    /// method. The printer never does: its dispatch happens at run time, off
+    /// the value's key, while specializations are generated on demand at check
+    /// time — so without this, `print-object <i32>` is registered by nobody and
+    /// a generic value prints the built-in way. The place to ask is wherever a
+    /// box of that type is built, which is the only place holding both halves:
+    /// this instantiation, and the fact that the type has an impl at all.
+    fn request_print_object(&self, ty: &Type) {
+        let Type::Named(path, args) = ty else { return };
+        if args.is_empty() {
+            return;
+        }
+        if self.generic_method_templates.contains_key(&(path.clone(), "print-object".to_string())) {
+            self.request_method_specialization(path, "print-object", args.clone());
+        }
+    }
+
     fn request_method_specialization(&self, type_fq: &Path, base: &str, args: Vec<Type>) -> String {
         let mangled = mangled_method_name(base, &args);
         let mut memo = self.spec_memo.borrow_mut();
@@ -9989,7 +10016,13 @@ impl Checker {
         let relabel = target != called_width(&target);
         if try_variant {
             match try_method {
-                Some(_) => Ok(if relabel { retype_option(called, target) } else { called }),
+                Some(_) => {
+                    if relabel {
+                        retype_option(heap, called, target)
+                    } else {
+                        Ok(called)
+                    }
+                }
                 None => {
                     let called = if relabel { Checked::new(called.form, target.clone()) } else { called };
                     wrap_some(heap, self, called, target)
@@ -12770,11 +12803,7 @@ impl Checker {
         // both halves are in hand — this instantiation, and the fact that the
         // type has an impl at all — the same reason `field_tys` and the
         // value's own key are spelled here.
-        if !result_args.is_empty()
-            && self.generic_method_templates.contains_key(&(adt_name.clone(), "print-object".to_string()))
-        {
-            self.request_method_specialization(adt_name, "print-object", result_args.clone());
-        }
+        self.request_print_object(&Type::Named(adt_name.clone(), result_args.clone()));
         let form = self.construct_form(heap, adt_name, &result_args, variant, mutable, &field_tys, &arg_forms)?;
         Ok(Checked::new(forms::rooted(heap, form), Type::Named(adt_name.clone(), result_args)))
     }
@@ -13870,8 +13899,30 @@ fn option_none(heap: &mut Heap, checker: &Checker, ty: Type) -> Result<Checked, 
 /// `i64`-target counterpart of the plain relabel it does for a total
 /// conversion; see [`as_conversion`]'s doc comment for why the underlying
 /// `Option`'s runtime payload doesn't actually change.
-fn retype_option(opt: Checked, inner_target: Type) -> Checked {
-    Checked::new(opt.form, Type::Named(Path::root("option"), vec![inner_target]))
+fn retype_option(heap: &mut Heap, opt: Checked, inner_target: Type) -> Result<Checked, Error> {
+    let ty = Type::Named(Path::root("option"), vec![inner_target]);
+    // The static relabel alone is not enough. An `assoc` node also carries the
+    // *runtime* identity of its result (`Checker::assoc_form`'s key slot), and
+    // the registry spelled this one at the catalog width — `option<i32>`. A
+    // box whose key says `option<i32>` matches no `option<i64>` pattern, so
+    // `(unwrap (try-as i64 n))` would find no arm at all. Of everything
+    // `Checker::check_as` relabels this is the only case that produces a box:
+    // the other relabels are scalars, which carry no identity to move.
+    let key = crate::type_key::type_key_of_type(&ty);
+    let key = heap.alloc_string(key);
+    let tag = match heap.car(opt.form)? {
+        Value::Symbol(s) => heap.symbol_name(s),
+        _ => "",
+    };
+    assert_eq!(tag, "assoc", "retype_option: `try-as`'s conversion call is an `assoc` node");
+    // `(assoc TYPE METHOD INSTANCE HOME RET-REPR (ARG-REPR...) KEY ARGS...)`
+    // — the key is the 7th field after the tag.
+    let mut cell = opt.form;
+    for _ in 0..7 {
+        cell = heap.cdr(cell)?;
+    }
+    heap.set_car(cell, key)?;
+    Ok(Checked::new(opt.form, ty))
 }
 
 /// `Some(t)` unless `t` is `Never` (which never constrains an expectation).

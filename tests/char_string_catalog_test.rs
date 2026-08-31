@@ -228,10 +228,10 @@ fn capitalize_upcases_each_words_first_alphanumeric() {
 
 #[test]
 fn split_keeps_empty_pieces_between_adjacent_separators() {
-    assert_eq!(eval_string("(format false \"~a\" (split \"a,b,,c\" \",\"))"), "#<vector a b  c>");
+    assert_eq!(eval_string("(format false \"~a\" (split \"a,b,,c\" \",\"))"), "#<vector<string> a b  c>");
     // A multi-character separator, and one that never occurs.
-    assert_eq!(eval_string("(format false \"~a\" (split \"a, b\" \", \"))"), "#<vector a b>");
-    assert_eq!(eval_string("(format false \"~a\" (split \"abc\" \",\"))"), "#<vector abc>");
+    assert_eq!(eval_string("(format false \"~a\" (split \"a, b\" \", \"))"), "#<vector<string> a b>");
+    assert_eq!(eval_string("(format false \"~a\" (split \"abc\" \",\"))"), "#<vector<string> abc>");
 }
 
 #[test]

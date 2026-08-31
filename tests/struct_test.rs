@@ -341,7 +341,11 @@ fn generic_defstruct_constructs_an_instance() {
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
         Value::Boxed(id) => {
-            assert_eq!(h.struct_type_name(id), "pair");
+            // The *instantiation*, not just the type: a value carries which one
+            // it is, which is what lets a generic type's `print-object` be
+            // found and what stops `(the pair<i32,i32> x)` from accepting this
+            // one (docs/dev/type-identity-instantiation-plan.md).
+            assert_eq!(h.struct_type_name(id), "pair<i32,bool>");
             assert_eq!(h.struct_field(id, 0), Value::Int(1));
             assert_eq!(h.struct_field(id, 1), Value::Bool(true));
         }

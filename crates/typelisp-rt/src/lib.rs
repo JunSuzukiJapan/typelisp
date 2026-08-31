@@ -4668,7 +4668,7 @@ mod tests {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
-        let ht = unsafe { rt_hashtable_new(std::ptr::null(), 0) };
+        let ht = unsafe { rt_hashtable_new([make_str("hashtable<i32,i32>")].as_ptr(), 1) };
         assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 0, "a fresh map is empty");
 
         // Two int->int entries (keys/values as raw tagged `Sexpr` ints).
@@ -4679,14 +4679,14 @@ mod tests {
         assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 2, "two distinct keys");
 
         // `keys` builds a `Vector` whose field count matches the entry count.
-        let keys = unsafe { rt_hashtable_keys([ht].as_ptr(), 1) };
+        let keys = unsafe { rt_hashtable_keys([ht, make_str("vector<i32>")].as_ptr(), 2) };
         match decode(keys) {
             Value::Boxed(id) => assert_eq!(unsafe { active_heap() }.struct_field_count(id), 2),
             other => panic!("expected a boxed vector, got {:?}", other),
         }
 
         // `entries` builds a `Vector` of `cons-cell`s, one per entry.
-        let entries = unsafe { rt_hashtable_entries([ht].as_ptr(), 1) };
+        let entries = unsafe { rt_hashtable_entries([ht, make_str("vector<cons-cell<i32,i32>>")].as_ptr(), 2) };
         match decode(entries) {
             Value::Boxed(id) => {
                 let h = unsafe { active_heap() };
@@ -4706,7 +4706,7 @@ mod tests {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
-        let ht = unsafe { rt_hashtable_new(std::ptr::null(), 0) };
+        let ht = unsafe { rt_hashtable_new([make_str("hashtable<i32,i32>")].as_ptr(), 1) };
         let key = encode(Value::Int(7));
         let val = encode(Value::Int(70));
 

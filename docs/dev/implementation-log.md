@@ -9667,3 +9667,34 @@ downcast が基底パスだけを比べていたので、`gen<string>` の値が
 
 実体化ごとに別の本体へ飛ぶ。`:dyn` にできて `print-object` にできなかったことが、
 同じ仕組みの上で揃った。
+
+### 締めの直列全実行で出た 3 件
+
+`scripts/test-serial.sh` で 3 種類出た。3 つとも**個別のスイートを回して green だった**
+ことが理由で見えていなかった。「`cargo check` が通っただけで完了と言わない」の一段上に、
+**個別スイートが全部通っても完了ではない**という形がある。
+
+1. **`cargo test --lib` がコンパイルできていなかった。** `core_eval.rs` の
+   `#[cfg(test)]` の中に、引数を 1 つ増やした `alloc_builtin_fn` の旧呼び出しが 1 行残って
+   いた。統合テストは全部通るので最後まで表に出ない。
+2. **手書きの core IR を持つ lib テスト 27 本**（`core_bridge` 14 / `core_eval` 13）。
+   統合テスト側の手書き IR は直したのに、同じものが lib の中にもあった。
+3. **`try-as i64` が壊れていた**（`as_conversion_test` 2 本）。`Checker::check_as` は
+   `bignum->int` を `i32` 幅で呼んで戻り型だけを `i64` に**付け替える**。付け替えて
+   いたのは静的型だけで、`assoc` ノードが運ぶ実行時の鍵は `option<i32>` のまま。
+   鍵が `option` だった頃は両方に当たっていたので、**実体化を鍵にしたことで初めて
+   表に出た元からの不整合**だった。`retype_option` が鍵も書き換えるようにして解消。
+   この付け替え自体、`i64` を消せば消える（[remove-i64-plan.md](remove-i64-plan.md)）。
+
+### 組み込みのジェネリック型も同じ穴だった
+
+`impl print-object Vector<T>` は型検査を通り `(print-object v true)` と名前で呼べるのに、
+プリンタからは選ばれない。鍵は `vector<point>` で正しい——`Vector::new` が `construct`
+ノードを作らず Rust 側で箱を建てるので、**特殊化を誰も要求しない**（上の 4 番と同じ形）。
+`assoc_form`/`methodref_form` にも要求を置いて解消（`Checker::request_print_object`）:
+
+```lisp
+(impl print-object Vector<T> (where (print-object T))
+  (print-object ((self Self) (escape bool)) string "V"))
+(println "~a" (the Vector<point> (Vector::new)))   ; => V   （以前: #<vector<point> ...>）
+```

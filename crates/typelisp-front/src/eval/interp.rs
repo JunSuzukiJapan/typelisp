@@ -2027,7 +2027,12 @@ impl Interp {
     /// somewhere else — which is why it prints as the loud
     /// `<unknown-variant>` rather than anything plausible.
     fn enum_variant_name(&self, type_key: &str, variant: usize) -> Option<String> {
-        let path = Path::from_segments(type_key.split("::").map(str::to_string).collect());
+        // The *base*: a key carries its instantiation now (`option<char>`), and
+        // the enum is registered under its bare path. Splitting is what
+        // `heap_type_path` does for every other lookup; missing it here is why
+        // `(some 1)` printed as `(<unknown-variant> 1)`.
+        let base = crate::type_key::split_key(type_key).0;
+        let path = Path::from_segments(base.split("::").map(str::to_string).collect());
         self.root.borrow().enum_variant_name(&path, variant)
     }
 
@@ -2171,7 +2176,7 @@ impl Interp {
                 heap.pop_root();
                 Ok(out)
             }
-            Err(msg) => Ok(result_err(heap, EVAL_ERROR, msg)),
+            Err(msg) => Ok(result_err(heap, MACROEXPAND_RESULT_KEY, EVAL_ERROR, msg)),
         }
     }
 
@@ -2191,7 +2196,7 @@ impl Interp {
                 Ok(None) => break,
                 Err(msg) => {
                     heap.truncate_roots(mark);
-                    return Ok(result_err(heap, EVAL_ERROR, msg));
+                    return Ok(result_err(heap, MACROEXPAND_RESULT_KEY, EVAL_ERROR, msg));
                 }
             }
         }
@@ -2220,7 +2225,7 @@ impl Interp {
     pub fn eval_form(&self, heap: &mut Heap, arg: &Value) -> Result<Value, EvalError> {
         let checker = match &self.checker {
             Some(c) => Rc::clone(c),
-            None => return Ok(result_err(heap, EVAL_ERROR, "eval: unavailable in this context (no checker handle)".to_string())),
+            None => return Ok(result_err(heap, EVAL_RESULT_KEY, EVAL_ERROR, "eval: unavailable in this context (no checker handle)".to_string())),
         };
         let form = *arg;
         // Root the form across type-checking (which allocates), then pop back
@@ -2234,7 +2239,7 @@ impl Interp {
         }
         let tl = match checked {
             Ok(tl) => tl,
-            Err(e) => return Ok(result_err(heap, EVAL_ERROR, e.to_string())),
+            Err(e) => return Ok(result_err(heap, EVAL_RESULT_KEY, EVAL_ERROR, e.to_string())),
         };
         // Decide the CL-style return before `exec` consumes `tl`: a definition
         // returns its own name symbol; an expression returns its value below.
@@ -3521,11 +3526,18 @@ fn result_ok(heap: &mut Heap, key: &str, v: Value) -> Value {
 /// `parsefloaterror`, `readerror`, `evalerror`), whose single variant carries
 /// exactly that string, before wrapping *that* in `Result`'s `err` variant.
 /// `err_type` must name one of those four — its variant index is 0, the only
-/// one each has.
-fn result_err(heap: &mut Heap, err_type: &str, msg: String) -> Value {
+/// one each has. `result_key` is the *whole* result type's key
+/// (`result<option<sexpr>,evalerror>`), which is what the caller's patterns
+/// test against.
+fn result_err(heap: &mut Heap, result_key: &str, err_type: &str, msg: String) -> Value {
     let msg_val = str_rt(heap, msg);
     let err_val = build_enum_value(heap, Path::root(err_type), 0, vec![msg_val]);
-    build_enum_value(heap, Path::root("result"), 1, vec![err_val])
+    // The `Result`'s own key, not the bare path: a value's identity carries
+    // its instantiation, and `result` matches no `result<option<sexpr>,
+    // evalerror>` pattern. `err_type` needs no such treatment — a concrete
+    // error type has no type arguments — but the wrapper does, which is why
+    // this takes two names rather than one.
+    crate::type_key::alloc_enum_keyed(heap, result_key, 1, vec![err_val])
 }
 
 /// Rejects a `HashTable<K,V>` key argument before it ever reaches

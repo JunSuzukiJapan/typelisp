@@ -61,7 +61,12 @@ thread_local! {
 /// The hooks an AOT executable prints under: the two tables above, and
 /// [`BARE_HOOKS`]' control variables (see the module doc comment).
 const AOT_HOOKS: PrintHooks = PrintHooks {
-    enum_variant_name: |key, variant| ENUM_NAMES.with(|t| t.borrow().get(&(key.to_string(), variant)).cloned()),
+    // The *base*: `rt_print_enum_variant` registers one entry per enum type,
+    // while the key a value carries names its instantiation (`option<char>`).
+    enum_variant_name: |key, variant| {
+        let base = typelisp_mem::base_type_key(key);
+        ENUM_NAMES.with(|t| t.borrow().get(&(base.to_string(), variant)).cloned())
+    },
     print_object: aot_print_object,
     format_call: aot_format_call,
     opts: BARE_HOOKS.opts,

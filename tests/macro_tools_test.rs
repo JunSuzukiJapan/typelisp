@@ -110,6 +110,6 @@ fn complement_answers_the_opposite_of_its_predicate() {
         show("(let ((v (the Vector<i32> (Vector::new))))
                 (progn (push v 1) (push v 2) (push v 3)
                   (filter (iter v) (complement (lambda ((n i32)) bool (> n 1))))))"),
-        "#<vector 1>"
+        "#<vector<i32> 1>"
     );
 }

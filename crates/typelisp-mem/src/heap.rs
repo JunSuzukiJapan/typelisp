@@ -2053,6 +2053,21 @@ impl Drop for Heap {
     }
 }
 
+/// A type key's base name, without its instantiation: `option<char>` ->
+/// `option`, `point` -> `point`.
+///
+/// Lives here, below both tiers, because both of them look a *type* up by a
+/// key a *value* carries. Registration is per type (an enum's variant names,
+/// its definition); a key names an instantiation. Splitting in only one tier
+/// is how `(some 1)` came out as `(<unknown-variant> 1)` in the interpreter
+/// while the AOT printer had the same gap the other way round.
+pub fn base_type_key(key: &str) -> &str {
+    match key.find('<') {
+        Some(i) if key.ends_with('>') => &key[..i],
+        _ => key,
+    }
+}
+
 /// The key one level inside `key`: `vector<cons-cell<i32,string>>` ->
 /// `cons-cell<i32,string>`, `option<char>` -> `char`.
 ///

@@ -113,6 +113,6 @@ fn pushnew_adds_only_what_is_not_already_there() {
             "(let ((v (the Vector<i32> (Vector::new))))
                (push v 1) (push v 2) (pushnew v 2) (pushnew v 3) v)"
         ),
-        "#<vector 1 2 3>"
+        "#<vector<i32> 1 2 3>"
     );
 }

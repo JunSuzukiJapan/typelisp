@@ -666,6 +666,12 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 （`defstruct point<T> ...` など）は downcast パターンの型引数を推論できないため、フィールド分解形
 （`(point ...)`)/裸変種形は使えず、`(the point<i32> p)` のように `the` で明示する。
 
+**downcast は実体化まで見る。** 明示した型引数は照合に使われる——`(the point<i32> p)` は
+`point<i32>` の値だけを通し、`point<string>` は素通りして次の腕へ行く。値が自分の実体化を
+型キーとして持っている（`print-object` のディスパッチと同じ仕組み、
+[functions.md](functions.md) §15.2）ためで、型引数を捨てて基底名だけで比べていたときは
+`point<string>` が `(the point<i32> ...)` に通り、フィールドを `i32` として読んでいた。
+
 ```lisp
 (if-let (pattern val) then els)     ; val が pattern にマッチすれば then（束縛あり）、失敗なら els。defmacro
 (while-let (pattern val) body...)   ; val（毎回再評価される）が pattern にマッチする間ループ。defmacro
@@ -706,9 +712,9 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 一意なので裸でもキーワード（`:=`）でも読む。
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #<vector<i32> 1 2 3>
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<i32> 1 2 4 8>
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 

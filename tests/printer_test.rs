@@ -354,3 +354,37 @@ fn each_instantiation_reaches_its_own_print_object() {
                 (equal (format false "~a" (gen::new (ws::new "x"))) "gen-of-STR"))"#,
     );
 }
+
+/// A built-in generic container reaches its own `print-object` too. `Vector`
+/// builds its box in Rust with no `construct` node, so the specialization the
+/// printer needs is requested from the `assoc` node instead — without that the
+/// impl type-checks, is callable by name, and is silently never selected.
+#[test]
+fn print_object_reaches_a_builtin_generic_type() {
+    is_true(
+        r#"(defstruct point (x i32) (y i32))
+           (impl print-object point (print-object ((self Self) (escape bool)) string "P"))
+           (impl print-object Vector<T> (where (print-object T))
+             (print-object ((self Self) (escape bool)) string "V"))
+           (equal (format false "~a" (the Vector<point> (Vector::new))) "V")"#,
+    );
+}
+
+/// An enum's variant *name* still resolves once the value's key carries an
+/// instantiation.
+///
+/// Variant names are registered per enum *type* (`option`), while the key a
+/// value carries names an instantiation (`option<i32>`). Looking one up
+/// without splitting the base off printed every `Option` as
+/// `(<unknown-variant> 1)` — 28 tests across nine suites, and none of them was
+/// about printing an `Option`, which is why the whole class only showed up in
+/// the serial full run.
+#[test]
+fn an_enum_variant_name_survives_an_instantiated_key() {
+    is_true(r#"(equal (format false "~a" (option::some 1)) "(some 1)")"#);
+    is_true(r#"(equal (format false "~a" (the Option<i32> (option::none))) "none")"#);
+    is_true(
+        r#"(defenum box<T> (full T) (empty))
+           (equal (format false "~a" (the box<string> (box::full "x"))) "(full x)")"#,
+    );
+}

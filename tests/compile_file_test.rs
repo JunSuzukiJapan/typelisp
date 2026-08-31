@@ -68,6 +68,25 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
     );
 }
 
+/// The same variant-name lookup, in a standalone executable.
+///
+/// The AOT tier has its own table (`rt_print_enum_variant` fills it at
+/// startup, one entry per enum *type*), and it was looked up by the *value's*
+/// key — which now names an instantiation. The interpreted half of this bug
+/// was caught by 28 existing tests; this half was caught by nothing, so it
+/// gets a test of its own.
+#[test]
+fn an_enum_variant_name_survives_an_instantiated_key_in_an_executable() {
+    assert_eq!(
+        compile_and_run(
+            "enum_variant_key",
+            r#"(defun main () i64
+                 (if (equal (format false "~a" (option::some 1)) "(some 1)") 0 1))"#,
+        ),
+        0
+    );
+}
+
 #[test]
 fn compiles_and_runs_a_constant_main() {
     assert_eq!(compile_and_run("answer", "(defun main () i64 42)"), 42);

@@ -91,14 +91,14 @@ fn the_float_accessors_report_the_binary64_representation() {
 /// pair carries the other two.
 #[test]
 fn decode_float_normalizes_into_a_half_open_significand() {
-    assert_eq!(show("(decode-float 8.0)"), "#<cons-cell 0.5 4>");
-    assert_eq!(show("(decode-float 0.75)"), "#<cons-cell 0.75 0>");
-    assert_eq!(show("(decode-float 0.0)"), "#<cons-cell 0.0 0>");
+    assert_eq!(show("(decode-float 8.0)"), "#<cons-cell<f64,i32> 0.5 4>");
+    assert_eq!(show("(decode-float 0.75)"), "#<cons-cell<f64,i32> 0.75 0>");
+    assert_eq!(show("(decode-float 0.0)"), "#<cons-cell<f64,i32> 0.0 0>");
     // The significand is unsigned, as CL specifies.
-    assert_eq!(show("(decode-float -8.0)"), "#<cons-cell 0.5 4>");
+    assert_eq!(show("(decode-float -8.0)"), "#<cons-cell<f64,i32> 0.5 4>");
     // `integer-decode-float` gives the same split with an exact 53-bit
     // significand: 2^52 * 2^-49 = 8.
-    assert_eq!(show("(integer-decode-float 8.0)"), "#<cons-cell 4503599627370496 -49>");
+    assert_eq!(show("(integer-decode-float 8.0)"), "#<cons-cell<bignum,i32> 4503599627370496 -49>");
 }
 
 /// CL's `rationalize` is the *simplest* rational reading back as the float;

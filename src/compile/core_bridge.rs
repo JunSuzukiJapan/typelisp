@@ -2681,11 +2681,11 @@ mod tests {
     #[test]
     fn an_ordinary_method_call_keeps_its_qualified_type_name() {
         assert_eq!(
-            bridged("(assoc i64 + true () int (int int) (var a) (var b))"),
+            bridged("(assoc i64 + true () int (int int) \"i64\" (var a) (var b))"),
             r#"(assoc "i64" "+" true (0 var "a" false) (0 var "b" false))"#
         );
         assert_eq!(
-            bridged("(assoc m::point area true () int (struct) (var p))"),
+            bridged("(assoc m::point area true () int (struct) \"i32\" (var p))"),
             r#"(assoc "m::point" "area" true (2 var "p" false))"#
         );
     }
@@ -2695,33 +2695,33 @@ mod tests {
     #[test]
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
-            bridged("(assoc vector get true () int ((vector int) int) (var v) (int 0))"),
+            bridged("(assoc vector get true () int ((vector int) int) \"i32\" (var v) (int 0))"),
             r#"(vector-op "get" 1 (var "v" false) (int 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
         assert_eq!(
-            bridged("(assoc vector push true () unit ((vector sexpr) sexpr) (var v) (var x))"),
+            bridged("(assoc vector push true () unit ((vector sexpr) sexpr) \"()\" (var v) (var x))"),
             r#"(vector-op "push" 6 (var "v" false) (var "x" false))"#
         );
         // `new` has no receiver and no element to tag; the result is what
         // says it is a vector at all.
         assert_eq!(
-            bridged("(assoc vector new false () (vector int) ())"),
-            r#"(vector-op "new" 0 (str (int 0 118) (int 0 101) (int 0 99) (int 0 116) (int 0 111) (int 0 114)))"#
+            bridged("(assoc vector new false () (vector int) () \"vector<i32>\")"),
+            r#"(vector-op "new" 0 (str (int 0 118) (int 0 101) (int 0 99) (int 0 116) (int 0 111) (int 0 114) (int 0 60) (int 0 105) (int 0 51) (int 0 50) (int 0 62)))"#
         );
     }
 
     #[test]
     fn a_hash_table_builtin_carries_both_key_and_value_kinds() {
         assert_eq!(
-            bridged("(assoc hashtable set true () unit ((hashtable str int) str int) (var h) (var k) (var x))"),
+            bridged("(assoc hashtable set true () unit ((hashtable str int) str int) \"()\" (var h) (var k) (var x))"),
             r#"(hashtable-op "set" 6 1 () (var "h" false) (var "k" false) (var "x" false))"#
         );
         // `get` returns an `Option`, which the island builds itself and needs
         // the type-name literal for.
         assert_eq!(
-            bridged("(assoc hashtable get true () enum ((hashtable str int) str) (var h) (var k))"),
-            r#"(hashtable-op "get" 6 1 (str (int 0 111) (int 0 112) (int 0 116) (int 0 105) (int 0 111) (int 0 110)) (var "h" false) (var "k" false))"#
+            bridged("(assoc hashtable get true () enum ((hashtable str int) str) \"option<i32>\" (var h) (var k))"),
+            r#"(hashtable-op "get" 6 1 (str (int 0 111) (int 0 112) (int 0 116) (int 0 105) (int 0 111) (int 0 110) (int 0 60) (int 0 105) (int 0 51) (int 0 50) (int 0 62)) (var "h" false) (var "k" false))"#
         );
     }
 
@@ -2730,7 +2730,7 @@ mod tests {
     /// name strings.
     #[test]
     fn an_llvm_method_becomes_an_operation_id() {
-        let printed = bridged("(assoc llvm-builder const-i64 true () handle (handle int) (var b) (int 42))");
+        let printed = bridged("(assoc llvm-builder const-i64 true () handle (handle int) \"llvm-value\" (var b) (int 42))");
         assert_eq!(
             printed,
             format!(
@@ -2746,10 +2746,10 @@ mod tests {
     /// `Repr::Scope` carries one.
     #[test]
     fn a_scope_routes_on_what_it_holds() {
-        let printed = bridged("(assoc scope get true () enum ((scope handle) str) (var e) (var n))");
+        let printed = bridged("(assoc scope get true () enum ((scope handle) str) \"option<llvm-value>\" (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc scope get true () enum ((scope int) str) (var e) (var n))"),
+            bridged("(assoc scope get true () enum ((scope int) str) \"option<i32>\" (var e) (var n))"),
             r#"(assoc "scope" "get" true (2 var "e" false) (2 var "n" false))"#
         );
     }
@@ -2762,18 +2762,18 @@ mod tests {
     #[test]
     fn a_construct_tags_its_fields_from_its_own_representations() {
         assert_eq!(
-            bridged_with(&DEFS, "(construct point 0 true (int int) (int 1) (int 2))"),
+            bridged_with(&DEFS, "(construct point \"point\" 0 true (int int) (int 1) (int 2))"),
             r#"(construct false true (str (int 0 112) (int 0 111) (int 0 105) (int 0 110) (int 0 116)) 0 (1 int 0 1) (1 int 0 2))"#
         );
         // An enum field of `sexpr` is already tagged, hence the passthrough
         // kind 6.
         assert_eq!(
-            bridged_with(&DEFS, "(construct option 1 false (sexpr) (var x))"),
-            r#"(construct false false (str (int 0 111) (int 0 112) (int 0 116) (int 0 105) (int 0 111) (int 0 110)) 1 (6 var "x" false))"#
+            bridged_with(&DEFS, "(construct option \"option<sexpr>\" 1 false (sexpr) (var x))"),
+            r#"(construct false false (str (int 0 111) (int 0 112) (int 0 116) (int 0 105) (int 0 111) (int 0 110) (int 0 60) (int 0 115) (int 0 101) (int 0 120) (int 0 112) (int 0 114) (int 0 62)) 1 (6 var "x" false))"#
         );
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
-        assert_eq!(bridged_with(&DEFS, "(construct sexpr 7 false (sexpr sexpr) (int 1) (int 2))"), "(construct true false () 7 (int 0 1) (int 0 2))");
+        assert_eq!(bridged_with(&DEFS, "(construct sexpr \"sexpr\" 7 false (sexpr sexpr) (int 1) (int 2))"), "(construct true false () 7 (int 0 1) (int 0 2))");
     }
 
     /// A construct needs no definition on hand at all: the `MUTABLE` flag says
@@ -2781,7 +2781,7 @@ mod tests {
     #[test]
     fn a_construct_needs_no_definition_recorded() {
         assert_eq!(
-            bridged_with(&[], "(construct point 0 true (int int) (int 1) (int 2))"),
+            bridged_with(&[], "(construct point \"point\" 0 true (int int) (int 1) (int 2))"),
             r#"(construct false true (str (int 0 112) (int 0 111) (int 0 105) (int 0 110) (int 0 116)) 0 (1 int 0 1) (1 int 0 2))"#
         );
     }
@@ -2791,7 +2791,7 @@ mod tests {
     /// kind.
     #[test]
     fn a_construct_whose_arity_disagrees_with_its_representations_is_refused() {
-        let e = refused_with(&DEFS, "(construct point 0 true (int int) (int 1))");
+        let e = refused_with(&DEFS, "(construct point \"point\" 0 true (int int) (int 1))");
         assert!(e.contains("has 2 fields, constructed with 1"), "{}", e);
     }
 
@@ -2802,7 +2802,7 @@ mod tests {
     /// wrong box shape.
     #[test]
     fn a_pattern_on_an_unrecorded_type_is_refused() {
-        let e = refused_with(&[], "(match (var v) struct ((pat-ctor point 0 false (int int) (pat-wild) (pat-wild)) (int 1)))");
+        let e = refused_with(&[], "(match (var v) struct ((pat-ctor point \"point\" 0 false (int int) (pat-wild) (pat-wild)) (int 1)))");
         assert!(e.contains("no definition recorded"), "{}", e);
     }
 
@@ -2831,13 +2831,13 @@ mod tests {
     #[test]
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option 0 false ()) (int 0)) ((pat-ctor option 1 false (sexpr) (pat-bind x)) (var x)))"),
+            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option \"option<sexpr>\" 0 false ()) (int 0)) ((pat-ctor option \"option<sexpr>\" 1 false (sexpr) (pat-bind x)) (var x)))"),
             r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int 0 0) ((pat-ctor 1 ((pat-bind "x")) 1 (6) false ()) var "x" false)) 2)"#
         );
         // A struct scrutinee: pattern kind 2, and the field kinds come from
         // the `defstruct`.
         assert_eq!(
-            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor point 0 false (int int) (pat-bind a) (pat-wild)) (var a)))"),
+            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor point \"point\" 0 false (int int) (pat-bind a) (pat-wild)) (var a)))"),
             r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a") (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
         );
     }
@@ -2872,12 +2872,12 @@ mod tests {
     /// placeholder.
     #[test]
     fn only_a_downcast_pattern_carries_a_type_name() {
-        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point 0 false (int int) (pat-wild) (pat-wild)) (int 1)))");
+        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point \"point\" 0 false (int int) (pat-wild) (pat-wild)) (int 1)))");
         assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (1 1) false ())"), "{}", plain);
-        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point 0 true (int int) (pat-wild) (pat-wild)) (int 1)))");
+        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point \"point\" 0 true (int int) (pat-wild) (pat-wild)) (int 1)))");
         assert!(down.contains("true (str (int 0 112)"), "{}", down);
         // A whole-value type test always tests, so it always carries one.
-        let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest point (pat-bind p)) (var p)))");
+        let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest point \"point\" (pat-bind p)) (var p)))");
         assert!(tt.contains(r#"(pat-typetest (str (int 0 112) (int 0 111) (int 0 105) (int 0 110) (int 0 116)) (pat-bind "p"))"#), "{}", tt);
     }
 
@@ -2903,7 +2903,7 @@ mod tests {
     fn a_value_pattern_crosses_as_a_name_and_a_test() {
         let printed = bridged_with(
             &DEFS,
-            r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true () bool (str str) (var $match-scrut) (str "a"))) (int 1)) ((pat-wild) (int 0)))"#,
+            r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true () bool (str str) "bool" (var $match-scrut) (str "a"))) (int 1)) ((pat-wild) (int 0)))"#,
         );
         assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc "string" "equals" true"#), "{}", printed);
         // A `str` scrutinee is a heap pointer, so this one *is* rooted.
@@ -3084,7 +3084,7 @@ mod tests {
 
     #[test]
     fn a_method_reference_forwards_onto_the_method() {
-        let printed = bridged("(methodref point area () (struct))");
+        let printed = bridged("(methodref point area () (struct) \"i32\")");
         assert!(
             printed.ends_with(r#" () ((arg0 . 2)) (assoc "point" "area" true (2 var "arg0" false)))"#),
             "{}",
@@ -3193,7 +3193,7 @@ mod tests {
     #[test]
     fn a_defun_becomes_the_boundary_triple() {
         let (name, params, body) =
-            top_level(&[], "(defun m::add ((a int) (b int)) int true (assoc i64 + true () int (int int) (var a) (var b)))")
+            top_level(&[], "(defun m::add ((a int) (b int)) int true (assoc i64 + true () int (int int) \"i64\" (var a) (var b)))")
                 .expect("a defun is compiled");
         assert_eq!(name, "tl_m::add");
         assert_eq!(params, "((a . 0) (b . 0))");
@@ -3277,7 +3277,7 @@ mod tests {
         assert_eq!(
             bridged_with(
                 &["(module m (defstruct m::point (int sexpr)))"],
-                "(construct m::point 0 true (int sexpr) (int 1) (quote ()))"
+                "(construct m::point \"m::point\" 0 true (int sexpr) (int 1) (quote ()))"
             )
             .contains("(1 int 0 1)"),
             true

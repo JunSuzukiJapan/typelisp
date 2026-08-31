@@ -39,7 +39,7 @@ fn fails(src: &str) -> String {
     run(src).expect_err("expected this loop to be rejected")
 }
 
-/// `expr` with `v` = `#<vector 0 1 2 3>` in scope.
+/// `expr` with `v` = `#<vector<i32> 0 1 2 3>` in scope.
 fn with_v(expr: &str) -> String {
     show(&format!(
         "(let ((v (the Vector<i32> (Vector::new))))
@@ -52,39 +52,39 @@ fn with_v(expr: &str) -> String {
 
 #[test]
 fn a_numeric_range_steps_up_down_and_by() {
-    assert_eq!(show("(loop :for i :from 1 :to 3 :collect i)"), "#<vector 1 2 3>");
-    assert_eq!(show("(loop :for i :from 0 :below 3 :collect i)"), "#<vector 0 1 2>");
-    assert_eq!(show("(loop :for i :from 0 :to 10 :by 3 :collect i)"), "#<vector 0 3 6 9>");
-    assert_eq!(show("(loop :for i :from 3 :downto 1 :collect i)"), "#<vector 3 2 1>");
-    assert_eq!(show("(loop :for i :from 3 :above 1 :collect i)"), "#<vector 3 2>");
+    assert_eq!(show("(loop :for i :from 1 :to 3 :collect i)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(show("(loop :for i :from 0 :below 3 :collect i)"), "#<vector<i32> 0 1 2>");
+    assert_eq!(show("(loop :for i :from 0 :to 10 :by 3 :collect i)"), "#<vector<i32> 0 3 6 9>");
+    assert_eq!(show("(loop :for i :from 3 :downto 1 :collect i)"), "#<vector<i32> 3 2 1>");
+    assert_eq!(show("(loop :for i :from 3 :above 1 :collect i)"), "#<vector<i32> 3 2>");
 }
 
 #[test]
 fn a_sequence_clause_walks_any_iter_and_on_gives_the_suffixes() {
-    assert_eq!(with_v("(loop :for x :in (iter v) :collect (* x x))"), "#<vector 0 1 4 9>");
+    assert_eq!(with_v("(loop :for x :in (iter v) :collect (* x x))"), "#<vector<i32> 0 1 4 9>");
     // `:across` is the same clause under CL's other spelling — this language
     // has one sequence protocol, not a list/vector split.
-    assert_eq!(with_v("(loop :for x :across (iter v) :collect x)"), "#<vector 0 1 2 3>");
+    assert_eq!(with_v("(loop :for x :across (iter v) :collect x)"), "#<vector<i32> 0 1 2 3>");
     // `:on` yields fresh `Vector`s, not shared tail conses.
-    assert_eq!(with_v("(loop :for s :on (iter v) :collect (len s))"), "#<vector 4 3 2 1>");
+    assert_eq!(with_v("(loop :for s :on (iter v) :collect (len s))"), "#<vector<i32> 4 3 2 1>");
 }
 
 #[test]
 fn repeat_counts_passes_and_equals_then_walks_its_own_recurrence() {
-    assert_eq!(show("(loop :repeat 3 :collect 7)"), "#<vector 7 7 7>");
-    assert_eq!(show("(loop :repeat 4 :for x = 1 :then (* x 2) :collect x)"), "#<vector 1 2 4 8>");
+    assert_eq!(show("(loop :repeat 3 :collect 7)"), "#<vector<i32> 7 7 7>");
+    assert_eq!(show("(loop :repeat 4 :for x = 1 :then (* x 2) :collect x)"), "#<vector<i32> 1 2 4 8>");
 }
 
 #[test]
 fn parallel_for_clauses_stop_with_the_shortest() {
     assert_eq!(with_v("(loop :for i :from 10 :to 99 :for x :in (iter v) :collect (+ i x))"),
-               "#<vector 10 12 14 16>");
+               "#<vector<i32> 10 12 14 16>");
 }
 
 #[test]
 fn with_binds_once_and_can_read_an_earlier_clause() {
     assert_eq!(show("(loop :for i :from 1 :to 3 :with k = 10 :collect (+ i k))"),
-               "#<vector 11 12 13>");
+               "#<vector<i32> 11 12 13>");
 }
 
 // ----------------------------------------------------------- accumulating
@@ -96,7 +96,7 @@ fn every_accumulation_clause_answers() {
     assert_eq!(with_v("(loop :for x :in (iter v) :maximize x)"), "(some 3)");
     assert_eq!(with_v("(loop :for x :in (iter v) :minimize x)"), "(some 0)");
     assert_eq!(with_v("(loop :for i :from 1 :to 2 :append (iter v))"),
-               "#<vector 0 1 2 3 0 1 2 3>");
+               "#<vector<i32> 0 1 2 3 0 1 2 3>");
 }
 
 #[test]
@@ -115,9 +115,9 @@ fn the_accumulator_element_type_is_whatever_was_collected() {
     // type argument comes from the expected type, so the checker works it out
     // and writes it in. A non-numeric element proves it is not hardcoded.
     assert_eq!(show("(loop :for i :from 1 :to 3 :collect (format false \"n~a\" i))"),
-               "#<vector n1 n2 n3>");
+               "#<vector<string> n1 n2 n3>");
     assert_eq!(show("(loop :for i :from 1 :to 3 :collect (evenp i))"),
-               "#<vector false true false>");
+               "#<vector<bool> false true false>");
 }
 
 #[test]
@@ -129,16 +129,16 @@ fn into_names_an_accumulator_that_finally_can_read() {
 
 #[test]
 fn when_unless_and_if_else_guard_one_clause() {
-    assert_eq!(show("(loop :for i :from 1 :to 6 :when (evenp i) :collect i)"), "#<vector 2 4 6>");
-    assert_eq!(show("(loop :for i :from 1 :to 6 :unless (evenp i) :collect i)"), "#<vector 1 3 5>");
+    assert_eq!(show("(loop :for i :from 1 :to 6 :when (evenp i) :collect i)"), "#<vector<i32> 2 4 6>");
+    assert_eq!(show("(loop :for i :from 1 :to 6 :unless (evenp i) :collect i)"), "#<vector<i32> 1 3 5>");
     assert_eq!(show("(loop :for i :from 1 :to 4 :if (evenp i) :collect i :else :collect 0)"),
-               "#<vector 0 2 0 4>");
+               "#<vector<i32> 0 2 0 4>");
 }
 
 #[test]
 fn while_and_until_end_the_loop_normally_so_finally_still_runs() {
-    assert_eq!(show("(loop :for i :from 1 :to 100 :while (< i 4) :collect i)"), "#<vector 1 2 3>");
-    assert_eq!(show("(loop :for i :from 1 :to 100 :until (> i 3) :collect i)"), "#<vector 1 2 3>");
+    assert_eq!(show("(loop :for i :from 1 :to 100 :while (< i 4) :collect i)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(show("(loop :for i :from 1 :to 100 :until (> i 3) :collect i)"), "#<vector<i32> 1 2 3>");
     assert_eq!(show("(loop :for i :from 1 :to 100 :until (> i 3) :sum i :into s \
                       :finally (return (- s 1)))"), "5");
 }
@@ -178,7 +178,7 @@ fn one_loop_nests_inside_another() {
     // shadows the outer, and the outer's stepping sits outside it.
     assert_eq!(
         show("(loop :for i :from 1 :to 3 :collect (loop :for j :from 1 :to i :sum j))"),
-        "#<vector 1 3 6>"
+        "#<vector<i32> 1 3 6>"
     );
 }
 

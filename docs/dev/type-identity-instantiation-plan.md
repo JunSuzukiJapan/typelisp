@@ -1,7 +1,8 @@
 # 型 identity に実体化を載せる計画
 
-作成: 2026-08-31。状態: **Stage 1〜4 完了**（2026-08-31）。残るのは Stage 5 の締め
-（直列の全実行）と docs。実装の経緯は [implementation-log.md](implementation-log.md) の該当節。
+作成: 2026-08-31。状態: **完了**（2026-08-31）。実装の経緯は
+[implementation-log.md](implementation-log.md) の該当節。締め（直列の全実行）で出た
+取りこぼしは §6。
 
 ## 0. なぜ
 
@@ -162,3 +163,60 @@ Stage 1〜4 を 1 コミットで入れた。段階を分けて出せないの�
 match_value_test 23 / dyn_dispatch_test 34 / array_test 40 / hashtable_test 16 /
 vector_test 16 / enum_test 19 / check_test 87 / error_test 21 / type_identity_guard_test 7、
 島と prelude の成果物は再生成済み。ダンプの版は 4 → 5。
+
+## 6. 締めで出たもの（2026-08-31）
+
+Stage 6（`scripts/test-serial.sh`、105 ターゲット）で **14 ターゲット・62 テスト**が落ちた。
+全部が「個別のスイートを回して green だった」ことで見えていなかったもの。
+**本物のバグが 3 件**入っている。
+
+### 取りこぼし（機構の変更に追随していなかったもの）
+
+1. **`cargo test --lib` がコンパイルできていなかった。** `core_eval.rs` の
+   `#[cfg(test)]` の中に、引数を 1 つ増やした `alloc_builtin_fn` の旧呼び出しが
+   残っていた。統合テストは全部通るので、この 1 行は最後まで気づかれない。
+2. **手書きの core IR を持つ lib テスト 27 本**（`core_bridge` 14 / `core_eval` 13）。
+   `compile_test.rs` の手書き IR は直したのに、同じものが lib の中にもあった。
+   `(construct PATH KEY ...)` / `(pat-ctor PATH KEY ...)` / `(assoc ... KEY ARGS...)` /
+   `(methodref ... KEY)` / `(pat-typetest PATH KEY SUB)` の 5 形。
+3. **`mem_test` がコンパイルできず、`typelisp-rt` の lib テストが SIGABRT。**
+   どちらも鍵を要求するようになった構築 API（`Heap::alloc_hashtable`、
+   `rt_hashtable_new`/`_keys`/`_entries`）の旧呼び出し。abort なのは
+   `fatal()` が引数不足で落ちるため——テスト失敗ではなくプロセスごと死ぬので、
+   同じバイナリの後続テストも道連れになる。
+
+### 本物のバグ 3 件
+
+4. **`try-as i64`**（`as_conversion_test` 2 本）。`Checker::check_as` は
+   `bignum->int` を `i32` 幅で呼び、戻り型だけを `i64` に**付け替える**。付け替えて
+   いたのは静的型だけで、`assoc` ノードが運ぶ実行時の鍵は `option<i32>` のままだった。
+   この計画の前は鍵が `option` だったので両方に当たっていた——**実体化を鍵にしたことで
+   初めて表に出た、元からあった不整合**。`retype_option` が鍵も書き換えるようにした。
+5. **enum の variant 名が引けない**（9 スイート 31 本）。`(some 1)` が
+   `(<unknown-variant> 1)` と印字される。variant 名の登録は enum の**型**ごと
+   （`option`）、値が運ぶ鍵は**実体化**（`option<i32>`）。`Interp::enum_variant_name`
+   が基底を取らずに引いていた。AOT 側（`typelisp-print/src/aot.rs`）にも同じズレが
+   あり、そちらは**どのテストにも掛かっていなかった**ので新しくテストを足した。
+   基底を取る関数は `typelisp-mem::base_type_key` に置いた——プリンタの AOT 層は
+   `typelisp-front` を見られないので、下の層に 1 つ置く以外に「同じ綴りで割る」方法が無い。
+6. **`eval`/`macroexpand` の `Err` が受け取れない**（`eval_builtin_test` 2 本）。
+   `result_err` が `Result` の箱を**素の `result`** で建てていた（`Ok` 側だけが鍵を
+   受け取るようになっていた）。`result` の鍵を持つ箱は
+   `result<option<sexpr>,evalerror>` のパターンに 1 つも当たらないので、
+   `(is-err (eval ...))` が「no matching match arm」になる——**`eval` のエラーが
+   一切扱えない**状態だった。
+
+### 印字の変更（意図どおり、期待値の更新 54 箇所）
+
+組み込みコンテナも実体化まで名乗るようになった: `#<vector 1 2 3>` →
+`#<vector<i32> 1 2 3>`、`#<cons-cell 0.75 0>` → `#<cons-cell<f64,i32> 0.75 0>`。
+`struct_test` の `struct_type_name` の表明も `pair` → `pair<i32,bool>`。
+組み込みだけ素の名前に戻す道は採らない——「実体化を鍵にする、ただし組み込みは別」は
+[type_key.rs](../../crates/typelisp-front/src/type_key.rs) 冒頭が戒めている分裂した規則そのもの。
+
+### 組み込みのジェネリック型が同じ穴のままだった
+
+`impl print-object Vector<T>` は型検査を通り `(print-object v true)` と名前で呼べるのに
+プリンタからは選ばれない——鍵は `vector<point>` で正しいのに、`Vector::new` は
+`construct` ノードを作らないので**特殊化を誰も要求しない**（§5 の 4 番と同じ形）。
+`assoc_form`/`methodref_form` にも要求を置いて解消した（`Checker::request_print_object`）。

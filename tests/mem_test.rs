@@ -1112,10 +1112,21 @@ fn as_boxed(v: Value) -> BoxId {
     }
 }
 
+/// An empty table, with a type key.
+///
+/// `Heap::alloc_hashtable` takes the value's runtime identity because
+/// `HashTable<string,i32>` and `HashTable<string,string>` are different types
+/// and an empty table says nothing about which it is. At *this* layer the key
+/// is only a string nobody reads back, so one spelling serves every test here.
+fn new_hashtable(h: &mut Heap) -> Value {
+    let key = h.intern_type_key("hashtable<i32,i32>");
+    h.alloc_hashtable(key)
+}
+
 #[test]
 fn hashtable_starts_empty() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     assert_eq!(h.hashtable_count(id), 0);
     assert_eq!(h.hashtable_get(id, Value::Int(1)), None);
 }
@@ -1123,7 +1134,7 @@ fn hashtable_starts_empty() {
 #[test]
 fn hashtable_stores_and_reads_back_values() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     assert_eq!(h.hashtable_set(id, Value::Int(1), Value::Char('a')), None);
     assert_eq!(h.hashtable_set(id, Value::Bool(true), Value::Char('b')), None);
     assert_eq!(h.hashtable_get(id, Value::Int(1)), Some(Value::Char('a')));
@@ -1134,7 +1145,7 @@ fn hashtable_stores_and_reads_back_values() {
 #[test]
 fn hashtable_set_on_existing_key_returns_previous_value() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     assert_eq!(h.hashtable_set(id, Value::Int(1), Value::Int(10)), None);
     assert_eq!(h.hashtable_set(id, Value::Int(1), Value::Int(20)), Some(Value::Int(10)));
     assert_eq!(h.hashtable_get(id, Value::Int(1)), Some(Value::Int(20)));
@@ -1144,7 +1155,7 @@ fn hashtable_set_on_existing_key_returns_previous_value() {
 #[test]
 fn hashtable_remove_deletes_the_entry() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     h.hashtable_set(id, Value::Int(1), Value::Int(10));
     assert_eq!(h.hashtable_remove(id, Value::Int(1)), Some(Value::Int(10)));
     assert_eq!(h.hashtable_get(id, Value::Int(1)), None);
@@ -1154,14 +1165,14 @@ fn hashtable_remove_deletes_the_entry() {
 #[test]
 fn hashtable_remove_of_missing_key_is_none() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     assert_eq!(h.hashtable_remove(id, Value::Int(1)), None);
 }
 
 #[test]
 fn hashtable_clear_empties_the_map() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     h.hashtable_set(id, Value::Int(1), Value::Int(10));
     h.hashtable_set(id, Value::Int(2), Value::Int(20));
     h.hashtable_clear(id);
@@ -1175,7 +1186,7 @@ fn hashtable_clear_empties_the_map() {
 #[test]
 fn string_keys_hash_by_content_not_by_allocation_identity() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     let key_in = h.alloc_string("x".to_string());
     h.hashtable_set(id, key_in, Value::Int(42));
     let key_out = h.alloc_string("x".to_string()); // separate allocation, same content
@@ -1186,7 +1197,7 @@ fn string_keys_hash_by_content_not_by_allocation_identity() {
 #[test]
 fn string_keys_with_different_content_do_not_collide() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     let x = h.alloc_string("x".to_string());
     let y = h.alloc_string("y".to_string());
     h.hashtable_set(id, x, Value::Int(1));
@@ -1200,7 +1211,7 @@ fn string_keys_with_different_content_do_not_collide() {
 #[test]
 fn keys_of_different_types_do_not_collide() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     h.hashtable_set(id, Value::Int(0), Value::Char('i'));
     h.hashtable_set(id, Value::Bool(false), Value::Char('b'));
     assert_eq!(h.hashtable_get(id, Value::Int(0)), Some(Value::Char('i')));
@@ -1228,7 +1239,7 @@ fn hashtable_accessor_on_a_boxed_struct_panics() {
 #[should_panic(expected = "unsupported key type")]
 fn unsupported_key_type_panics() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     let bad_key = h.cons(Value::Int(1), Value::Empty).unwrap();
     h.hashtable_set(id, bad_key, Value::Int(1));
 }
@@ -1236,7 +1247,7 @@ fn unsupported_key_type_panics() {
 #[test]
 fn is_hashtable_distinguishes_hashtable_from_struct_and_float() {
     let mut h = Heap::with_capacity(8);
-    let map = as_boxed(h.alloc_hashtable());
+    let map = as_boxed(new_hashtable(&mut h));
     let s = as_boxed(alloc_named_struct(&mut h, "point", vec![Value::Int(1)]));
     let f = as_boxed(h.alloc_float(1.5));
     assert!(h.is_hashtable(map));
@@ -1249,7 +1260,7 @@ fn is_hashtable_distinguishes_hashtable_from_struct_and_float() {
 #[test]
 fn unreachable_hashtables_are_collected() {
     let mut h = Heap::with_capacity(8);
-    let _ = h.alloc_hashtable();
+    let _ = new_hashtable(&mut h);
     assert_eq!(h.box_count(), 1);
     h.gc(); // not rooted, not in any cell -> reclaimed
     assert_eq!(h.box_count(), 0);
@@ -1258,12 +1269,12 @@ fn unreachable_hashtables_are_collected() {
 #[test]
 fn hashtable_reachable_via_rooted_cons_survives() {
     let mut h = Heap::with_capacity(8);
-    let map = h.alloc_hashtable();
+    let map = new_hashtable(&mut h);
     let id = as_boxed(map);
     h.hashtable_set(id, Value::Int(1), Value::Int(99));
     let cell = h.cons(map, Value::Empty).unwrap();
     h.push_root(cell);
-    let _ = h.alloc_hashtable(); // unrooted garbage
+    let _ = new_hashtable(&mut h); // unrooted garbage
     h.gc();
     assert_eq!(h.box_count(), 1); // only the rooted map survives
     assert_eq!(h.hashtable_get(id, Value::Int(1)), Some(Value::Int(99)));
@@ -1277,7 +1288,7 @@ fn hashtable_reachable_via_rooted_cons_survives() {
 fn gc_traces_into_a_rooted_hashtables_values() {
     let mut h = Heap::with_capacity(64);
     let inner = list_of(&mut h, &[10, 20, 30]);
-    let map = h.alloc_hashtable();
+    let map = new_hashtable(&mut h);
     let id = as_boxed(map);
     h.hashtable_set(id, Value::Int(1), inner);
     h.push_root(map);
@@ -1296,7 +1307,7 @@ fn gc_traces_into_a_rooted_hashtables_values() {
 #[test]
 fn gc_keeps_a_rooted_hashtables_string_keys_alive() {
     let mut h = Heap::with_capacity(64);
-    let map = h.alloc_hashtable();
+    let map = new_hashtable(&mut h);
     let id = as_boxed(map);
     let key = h.alloc_string("k".to_string());
     h.hashtable_set(id, key, Value::Int(1));
@@ -1638,7 +1649,7 @@ fn scope_frame_count_tracks_push_and_pop() {
 #[should_panic(expected = "does not hold a Scope")]
 fn scope_accessor_on_a_hashtable_panics() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_hashtable());
+    let id = as_boxed(new_hashtable(&mut h));
     h.scope_get(id, "x");
 }
 
@@ -1654,7 +1665,7 @@ fn hashtable_accessor_on_a_scope_panics() {
 fn is_scope_distinguishes_scopes_from_other_boxes() {
     let mut h = Heap::with_capacity(8);
     let scope = as_boxed(h.alloc_scope());
-    let table = as_boxed(h.alloc_hashtable());
+    let table = as_boxed(new_hashtable(&mut h));
     let strukt = as_boxed(alloc_named_struct(&mut h, "point", vec![Value::Int(1)]));
     let float = as_boxed(h.alloc_float(1.5));
     assert!(h.is_scope(scope));

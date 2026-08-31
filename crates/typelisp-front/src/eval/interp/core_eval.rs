@@ -1548,11 +1548,13 @@ fn match_core_pattern(
     }
 }
 
-/// `(pat-ctor PATH N DOWNCAST (REPR...) P...)` against `v`.
+/// `(pat-ctor PATH KEY N DOWNCAST (REPR...) P...)` against `v`.
 ///
-/// The `PATH` guard is what keeps two unrelated ADTs that happen to share a
+/// The `KEY` guard is what keeps two unrelated ADTs that happen to share a
 /// shape apart once a heterogeneous `Sexpr` can hold either — a variant index
-/// and a field count are not an identity. It is also why a genuine `Sexpr`
+/// and a field count are not an identity. It is the *instantiation*, not the
+/// path (`gen<i32>`, not `gen`), which is what stops a `gen<string>` from
+/// reaching a `(the gen<i32> ...)` arm and having its field read as an `i32`. It is also why a genuine `Sexpr`
 /// datum must only reach the `Sexpr` arm when `PATH` really is `sexpr`: that
 /// arm indexes by *bare* variant number, where a struct's sole variant 0 would
 /// spuriously match `Sexpr::Nil`.
@@ -2769,13 +2771,13 @@ mod tests {
     fn a_struct_is_built_read_and_written_through_the_same_box() {
         let mut h = stress_heap();
         assert_eq!(
-            eval_ok(&mut h, "(field-get (construct point 0 true (int int) (int 1) (int 2)) 1 int)"),
+            eval_ok(&mut h, "(field-get (construct point \"point\" 0 true (int int) (int 1) (int 2)) 1 int)"),
             Value::Int(2)
         );
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((p sexpr (construct point 0 true (int int) (int 1) (int 2))))
+                "(let ((p sexpr (construct point \"point\" 0 true (int int) (int 1) (int 2))))
                    (let ((q sexpr (var p)))
                      (field-set (var q) 0 int (int 9))
                      (field-get (var p) 0 int)))",
@@ -2792,7 +2794,7 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((p sexpr (construct point 0 true (int int) (int 1) (int 2))))
+                "(let ((p sexpr (construct point \"point\" 0 true (int int) (int 1) (int 2))))
                    (field-set (var p) 0 sexpr (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 8) (unit)))
                    (call (sexpr-car) () sexpr-car (sexpr) (field-get (var p) 0 int)))",
             ),
@@ -2805,7 +2807,7 @@ mod tests {
     #[test]
     fn an_enum_carries_its_variant_and_fields() {
         let mut h = stress_heap();
-        let v = eval_ok(&mut h, "(construct my-enum 2 false (int bool) (int 41) (bool true))");
+        let v = eval_ok(&mut h, "(construct my-enum \"my-enum\" 2 false (int bool) (int 41) (bool true))");
         match v {
             Value::Boxed(id) => {
                 assert!(h.is_enum(id), "expected an enum box");
@@ -2824,10 +2826,10 @@ mod tests {
     #[test]
     fn constructing_a_sexpr_datum() {
         let mut h = stress_heap();
-        assert_eq!(eval_ok(&mut h, "(construct sexpr 0 false ())"), Value::Empty);
-        assert_eq!(eval_ok(&mut h, "(construct sexpr 1 false (int) (int 3))"), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, "(construct sexpr \"sexpr\" 0 false ())"), Value::Empty);
+        assert_eq!(eval_ok(&mut h, "(construct sexpr \"sexpr\" 1 false (int) (int 3))"), Value::Int(3));
 
-        let v = eval_ok(&mut h, "(construct sexpr 7 false (sexpr sexpr) (int 1) (int 2))");
+        let v = eval_ok(&mut h, "(construct sexpr \"sexpr\" 7 false (sexpr sexpr) (int 1) (int 2))");
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
 
@@ -2835,7 +2837,7 @@ mod tests {
         // datum is `eq` to the string it was built from.
         let v = eval_ok(
             &mut h,
-            r#"(let ((s sexpr (str "hi"))) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var s) (construct sexpr 6 false (str) (var s))))"#,
+            r#"(let ((s sexpr (str "hi"))) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var s) (construct sexpr "sexpr" 6 false (str) (var s))))"#,
         );
         assert_eq!(h.car(v).unwrap(), h.cdr(v).unwrap());
     }
@@ -2898,17 +2900,17 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct point 0 true (int int) (int 1) (int 2)) struct
-                   ((pat-ctor point 0 false (int int) (pat-bind a) (pat-bind b)) (var b)))",
+                "(match (construct point \"point\" 0 true (int int) (int 1) (int 2)) struct
+                   ((pat-ctor point \"point\" 0 false (int int) (pat-bind a) (pat-bind b)) (var b)))",
             ),
             Value::Int(2)
         );
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct my-enum 1 false (int) (int 42)) struct
-                   ((pat-ctor my-enum 0 false (int) (pat-bind x)) (int 0))
-                   ((pat-ctor my-enum 1 false (int) (pat-bind x)) (var x)))",
+                "(match (construct my-enum \"my-enum\" 1 false (int) (int 42)) struct
+                   ((pat-ctor my-enum \"my-enum\" 0 false (int) (pat-bind x)) (int 0))
+                   ((pat-ctor my-enum \"my-enum\" 1 false (int) (pat-bind x)) (var x)))",
             ),
             Value::Int(42)
         );
@@ -2923,8 +2925,8 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct point 0 true (int int) (int 1)) struct
-                   ((pat-ctor other 0 false (int) (pat-bind a)) (int 10))
+                "(match (construct point \"point\" 0 true (int int) (int 1)) struct
+                   ((pat-ctor other \"other\" 0 false (int) (pat-bind a)) (int 10))
                    ((pat-wild) (int 99)))",
             ),
             Value::Int(99)
@@ -2938,13 +2940,13 @@ mod tests {
             eval_ok(
                 &mut h,
                 "(match (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1) (int 2)) sexpr
-                   ((pat-ctor sexpr 0 false ()) (int 100))
-                   ((pat-ctor sexpr 7 false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))",
+                   ((pat-ctor sexpr \"sexpr\" 0 false ()) (int 100))
+                   ((pat-ctor sexpr \"sexpr\" 7 false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))",
             ),
             Value::Int(2)
         );
         assert_eq!(
-            eval_ok(&mut h, "(match (unit) unit ((pat-ctor sexpr 0 false ()) (int 100)) ((pat-wild) (int 0)))"),
+            eval_ok(&mut h, "(match (unit) unit ((pat-ctor sexpr \"sexpr\" 0 false ()) (int 100)) ((pat-wild) (int 0)))"),
             Value::Int(100)
         );
     }
@@ -2980,7 +2982,7 @@ mod tests {
 
         let form = read1(
             &mut h,
-            "(match (var p) sexpr ((pat-ctor sexpr 10 false (sexpr) (pat-bind segs))
+            "(match (var p) sexpr ((pat-ctor sexpr \"sexpr\" 10 false (sexpr) (pat-bind segs))
                (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 0) (var segs))))",
         );
         h.push_root(form);
@@ -3025,9 +3027,9 @@ mod tests {
         let form = read1(
             &mut h,
             "(match (var v) sexpr
-               ((pat-ctor sexpr 7 false (sexpr sexpr)
-                  (pat-ctor sexpr 10 false (sexpr) (pat-bind l))
-                  (pat-ctor sexpr 10 false (sexpr) (pat-bind r)))
+               ((pat-ctor sexpr \"sexpr\" 7 false (sexpr sexpr)
+                  (pat-ctor sexpr \"sexpr\" 10 false (sexpr) (pat-bind l))
+                  (pat-ctor sexpr \"sexpr\" 10 false (sexpr) (pat-bind r)))
                  (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var l) (var r))))",
         );
         h.push_root(form);
@@ -3050,8 +3052,8 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(match (construct point 0 true (int int) (int 7) (int 8)) struct
-               ((pat-ctor point 0 false (int int) (pat-bind a) (pat-bind b))
+            "(match (construct point \"point\" 0 true (int int) (int 7) (int 8)) struct
+               ((pat-ctor point \"point\" 0 false (int int) (pat-bind a) (pat-bind b))
                  (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1) (int 2))
                  (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var a) (var b))))",
         );
@@ -3419,7 +3421,7 @@ mod tests {
         let form = read1(&mut h, "(apply (var f) int (int int) (int 1) (int 2))");
         h.push_root(form);
         let recv = crate::types::intern_path_id(&mut h, &crate::Path::root("i64"));
-        let plus = h.alloc_builtin_fn(Some(recv), "+");
+        let plus = h.alloc_builtin_fn(Some(recv), "+", "i64");
         h.push_root(plus);
         let name = match h.intern_symbol("f") {
             Value::Symbol(id) => id,
@@ -3472,7 +3474,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            r#"(dyn-new "point" shape ((point area)) () struct (construct point 0 true (int int) (int 3)))"#,
+            r#"(dyn-new "point" shape ((point area)) () struct (construct point "point" 0 true (int int) (int 3)))"#,
         );
         h.push_root(v);
         match v {
@@ -3481,7 +3483,7 @@ mod tests {
         }
         let inner = eval_ok(
             &mut h,
-            r#"(field-get (dyn-value (dyn-new "point" shape ((point area)) () struct (construct point 0 true (int int) (int 3)))) 0 int)"#,
+            r#"(field-get (dyn-value (dyn-new "point" shape ((point area)) () struct (construct point "point" 0 true (int int) (int 3)))) 0 int)"#,
         );
         assert_eq!(inner, Value::Int(3));
     }
@@ -3496,7 +3498,7 @@ mod tests {
         let v = eval_ok(
             &mut h,
             r#"(dyn-upcast named
-                 (dyn-new "point" shape ((point area)) ((named ((point name)))) struct (construct point 0 true (int int) (int 3))))"#,
+                 (dyn-new "point" shape ((point area)) ((named ((point name)))) struct (construct point "point" 0 true (int int) (int 3))))"#,
         );
         h.push_root(v);
         let inner = match v {
@@ -3526,7 +3528,7 @@ mod tests {
         let form = read1(
             &mut h,
             r#"(let ((b sexpr (dyn-new "point" shape ((point area)) ((named ((point name))))
-                                struct (construct point 0 true (int int) (int 3)))))
+                                struct (construct point "point" 0 true (int int) (int 3)))))
                  (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var b) (dyn-upcast shape (var b))))"#,
         );
         h.push_root(form);
@@ -3546,7 +3548,7 @@ mod tests {
             &mut h,
             r#"(dyn-upcast never-registered
                  (dyn-new "point" shape ((point area)) ((named ((point name))))
-                   struct (construct point 0 true (int int) (int 3))))"#,
+                   struct (construct point "point" 0 true (int int) (int 3))))"#,
         )
         .unwrap_err();
         assert!(

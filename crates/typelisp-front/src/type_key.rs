@@ -159,9 +159,13 @@ pub fn heap_type_is_key(heap: &Heap, id: BoxId, key: &str) -> bool {
 /// <i32>`), so a dispatcher holding a value's key needs both halves — the
 /// path to find the type, the arguments to name the specialization.
 pub fn split_key(key: &str) -> (&str, Option<&str>) {
-    match key.find('<') {
-        Some(i) if key.ends_with('>') => (&key[..i], Some(&key[i + 1..key.len() - 1])),
-        _ => (key, None),
+    // The base half comes from `typelisp-mem` so the printer's AOT tier — which
+    // cannot see this crate — splits a key exactly the same way.
+    let base = typelisp_mem::base_type_key(key);
+    if base.len() == key.len() {
+        (key, None)
+    } else {
+        (base, Some(&key[base.len() + 1..key.len() - 1]))
     }
 }
 
