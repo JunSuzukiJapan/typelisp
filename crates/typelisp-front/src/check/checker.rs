@@ -14067,48 +14067,16 @@ fn fn_value_type(sig: &FnSig) -> Type {
     Type::Fn(fn_value_params(sig), sig.rest.clone().map(Box::new), Box::new(sig.ret.clone()))
 }
 
+/// The spelling of `t` as one token — a type's *identity as written*.
+///
+/// The one producer lives in [`crate::type_key`], because the three things
+/// that need such a spelling must not drift apart: a specialization's name
+/// ([`mangled_method_name`]), a `:dyn` box's concrete key, and a heap value's
+/// runtime type key are all *the same question* — which instantiation is this
+/// — and answering it two ways is what made `gen<i32>` and `gen<string>`
+/// indistinguishable to the printer.
 fn mangle_type(t: &Type) -> String {
-    match t {
-        Type::I8 => "i8".into(),
-        Type::I16 => "i16".into(),
-        Type::I32 => "i32".into(),
-        Type::I64 => "i64".into(),
-        Type::Isize => "isize".into(),
-        Type::U8 => "u8".into(),
-        Type::U16 => "u16".into(),
-        Type::U32 => "u32".into(),
-        Type::U64 => "u64".into(),
-        Type::Usize => "usize".into(),
-        Type::F32 => "f32".into(),
-        Type::F64 => "f64".into(),
-        Type::Bignum => "bignum".into(),
-        Type::Ratio => "ratio".into(),
-        Type::RandomState => "random-state".into(),
-        Type::Bool => "bool".into(),
-        Type::Char => "char".into(),
-        Type::Str => "string".into(),
-        Type::Symbol => "symbol".into(),
-        Type::Unit => "()".into(),
-        Type::Never => "!".into(),
-        Type::Named(p, args) if args.is_empty() => p.to_string(),
-        Type::Named(p, args) => {
-            format!("{}<{}>", p, args.iter().map(mangle_type).collect::<Vec<_>>().join(","))
-        }
-        // The space is load-bearing, the same way `mangled_method_name`'s is:
-        // the reader treats it as a token boundary outside `<>`, so no
-        // user-written name can ever collide with a mangled one.
-        Type::Dyn(p, pins) if pins.is_empty() => format!("dyn {}", p),
-        Type::Dyn(p, pins) => {
-            format!("dyn {}<{}>", p, pins.iter().map(mangle_type).collect::<Vec<_>>().join(","))
-        }
-        Type::Fn(ps, rest, r) => {
-            let mut inner: Vec<String> = ps.iter().map(mangle_type).collect();
-            if let Some(t) = rest {
-                inner.push(format!("&rest {}", mangle_type(t)));
-            }
-            format!("(fn ({}) {})", inner.join(","), mangle_type(r))
-        }
-    }
+    crate::type_key::type_key_of_type(t)
 }
 
 /// The specialized function's [`Path`] for `base` instantiated at `args`:

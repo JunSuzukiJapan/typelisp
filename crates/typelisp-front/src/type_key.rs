@@ -36,7 +36,7 @@
 use std::borrow::Cow;
 
 use crate::mem::BoxId;
-use crate::{Heap, Path, TypeKeyId};
+use crate::{Heap, Path, Type, TypeKeyId};
 
 /// How `p` is spelled when interned as (or looked up among) type identities.
 /// The one place a type identity *name* is produced.
@@ -115,4 +115,65 @@ pub fn heap_type_path(heap: &Heap, id: BoxId) -> Option<Path> {
         Path::from_segments(heap.type_key_name(k).split("::").map(str::to_string).collect())
         // type-identity-ok: reading the spelling back out is this function's job
     })
+}
+
+/// How the type `t` is spelled as a runtime identity: the whole path, plus
+/// its type arguments when it has any (`gen<i32>`, `hashtable<string,i32>`).
+///
+/// The one place a type identity *name* is produced from a [`Type`], and the
+/// same spelling three separate mechanisms need:
+///
+/// * a heap value's type key — which instantiation this value is,
+/// * a specialization's registered name (`Checker::mangled_method_name`),
+/// * a `:dyn` box's concrete key (`Checker::check_as_dyn`).
+///
+/// They are one question asked in three places. `:dyn` was the only one that
+/// answered it with the type arguments included, which is exactly why a
+/// generic type's `print-object` could never be found: the value said `gen`
+/// and the registration said `print-object <i32>`.
+///
+/// For a type with no arguments this is [`type_key_of`] of its path, character
+/// for character — so the keys of every non-generic type are unchanged.
+pub fn type_key_of_type(t: &Type) -> String {
+    match t {
+        Type::I8 => "i8".into(),
+        Type::I16 => "i16".into(),
+        Type::I32 => "i32".into(),
+        Type::I64 => "i64".into(),
+        Type::Isize => "isize".into(),
+        Type::U8 => "u8".into(),
+        Type::U16 => "u16".into(),
+        Type::U32 => "u32".into(),
+        Type::U64 => "u64".into(),
+        Type::Usize => "usize".into(),
+        Type::F32 => "f32".into(),
+        Type::F64 => "f64".into(),
+        Type::Bignum => "bignum".into(),
+        Type::Ratio => "ratio".into(),
+        Type::RandomState => "random-state".into(),
+        Type::Bool => "bool".into(),
+        Type::Char => "char".into(),
+        Type::Str => "string".into(),
+        Type::Symbol => "symbol".into(),
+        Type::Unit => "()".into(),
+        Type::Never => "!".into(),
+        Type::Named(p, args) if args.is_empty() => p.to_string(),
+        Type::Named(p, args) => {
+            format!("{}<{}>", p, args.iter().map(type_key_of_type).collect::<Vec<_>>().join(","))
+        }
+        // The space is load-bearing, the same way `mangled_method_name`'s is:
+        // the reader treats it as a token boundary outside `<>`, so no
+        // user-written name can ever collide with a mangled one.
+        Type::Dyn(p, pins) if pins.is_empty() => format!("dyn {}", p),
+        Type::Dyn(p, pins) => {
+            format!("dyn {}<{}>", p, pins.iter().map(type_key_of_type).collect::<Vec<_>>().join(","))
+        }
+        Type::Fn(ps, rest, r) => {
+            let mut inner: Vec<String> = ps.iter().map(type_key_of_type).collect();
+            if let Some(t) = rest {
+                inner.push(format!("&rest {}", type_key_of_type(t)));
+            }
+            format!("(fn ({}) {})", inner.join(","), type_key_of_type(r))
+        }
+    }
 }
