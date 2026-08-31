@@ -116,6 +116,15 @@ pub enum Pattern {
     /// A constructor pattern, e.g. `(Some v)` / `(Cons a d)`.
     Ctor {
         type_name: Path,
+        /// The type arguments this pattern's ADT is instantiated at, so the
+        /// lowered node can spell the *value's* runtime identity
+        /// (`type_key::type_key_of_type`) rather than just the ADT's path.
+        ///
+        /// Recorded for the same reason `field_types` is: the pattern site is
+        /// where the instantiation is known. Without it a downcast tested only
+        /// the base path, and `(the gen<i32> x)` accepted a `gen<string>` —
+        /// then read its field as an `i32`.
+        targs: Vec<Type>,
         variant: usize,
         args: Vec<Pattern>,
         /// Per-field: the field's declared type with the scrutinee's own type

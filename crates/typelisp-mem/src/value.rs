@@ -382,7 +382,12 @@ pub(crate) enum BoxedObj {
     /// shims all test `is_compiled_closure` and refuse anything else, and the
     /// interpreter refuses to marshal one across the boundary, so this box
     /// stays interpreter-side until `rt_apply_any` exists.
-    Builtin { recv_type: Option<PathId>, name: StrId },
+    /// `ret_key` is the runtime identity of what this builtin *returns*, for
+    /// the container constructors whose result is a box with no field to read
+    /// an instantiation off (`Vector::new`, `HashTable::keys`). Spelled by the
+    /// checker at the reference site, since applying the value later is too
+    /// late to ask.
+    Builtin { recv_type: Option<PathId>, name: StrId, ret_key: StrId },
     /// A `random-state` (CL's `random-state`): the current seed of a mutable
     /// PRNG stream, advanced in place on every draw.
     ///

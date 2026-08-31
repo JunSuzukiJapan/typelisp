@@ -5900,7 +5900,7 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
 /// node, which is a later stage. Only the *body* is bridged here.
 #[test]
 fn the_island_compiles_a_body_the_new_bridge_produced() {
-    let body = bridge_to_island_text("(assoc i64 + true () int (int int) (var a) (var b))");
+    let body = bridge_to_island_text("(assoc i64 + true () int (int int) \"i64\" (var a) (var b))");
     // The bridge reproduces exactly the text the hand-written test above
     // feeds `compile-function` — the two are checked against each other here
     // rather than only against the island, so a change to either is visible.
@@ -5930,9 +5930,9 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
 #[test]
 fn the_island_compiles_a_bridged_let_and_if() {
     let body = bridge_to_island_text(
-        "(let ((d int (assoc i64 - true () int (int int) (var a) (var b))))
-           (if (assoc i64 < true () bool (int int) (var d) (int 0))
-               (assoc i64 - true () int (int int) (int 0) (var d))
+        "(let ((d int (assoc i64 - true () int (int int) \"i64\" (var a) (var b))))
+           (if (assoc i64 < true () bool (int int) \"bool\" (var d) (int 0))
+               (assoc i64 - true () int (int int) \"i64\" (int 0) (var d))
                (var d)))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&format!(
@@ -5986,10 +5986,10 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
     let defs = ["(defstruct point (int int))", "(defenum maybe-int (none some) (() (int)))"];
     let body = bridge_to_island_text_with(
         &defs,
-        "(let ((p struct (construct point 0 true (int int) (var a) (var b))))
-           (match (construct maybe-int 1 false (int) (field-get (var p) 1 int)) enum
-             ((pat-ctor maybe-int 0 false ()) (int -1))
-             ((pat-ctor maybe-int 1 false (int) (pat-bind x)) (var x))))",
+        "(let ((p struct (construct point \"point\" 0 true (int int) (var a) (var b))))
+           (match (construct maybe-int \"maybe-int\" 1 false (int) (field-get (var p) 1 int)) enum
+             ((pat-ctor maybe-int \"maybe-int\" 0 false ()) (int -1))
+             ((pat-ctor maybe-int \"maybe-int\" 1 false (int) (pat-bind x)) (var x))))",
     );
     let src = compile_function_source("second", "((a . 0) (b . 0))", &body);
     let ir = eval_string_with_compiler(&format!("(to-string {})", src));
@@ -6019,11 +6019,11 @@ fn the_island_runs_a_bridged_loop() {
     let body = bridge_to_island_text(
         "(let ((acc int (int 0)) (i int (int 0)))
            (loop
-             (if (assoc i64 < true () bool (int int) (var i) (var b))
+             (if (assoc i64 < true () bool (int int) \"bool\" (var i) (var b))
                  (unit)
                  (break))
-             (set acc (assoc i64 + true () int (int int) (var acc) (var a)))
-             (set i (assoc i64 + true () int (int int) (var i) (int 1))))
+             (set acc (assoc i64 + true () int (int int) \"i64\" (var acc) (var a)))
+             (set i (assoc i64 + true () int (int int) \"i64\" (var i) (int 1))))
            (var acc))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
@@ -6057,11 +6057,11 @@ fn the_island_runs_a_bridged_loop() {
 fn the_island_runs_a_bridged_labels_block() {
     let body = bridge_to_island_text(
         "(labels ((go ((n int) (acc int)) int
-                    (if (assoc i64 < true () bool (int int) (var n) (int 1))
+                    (if (assoc i64 < true () bool (int int) \"bool\" (var n) (int 1))
                         (var acc)
                         (apply (var go) int (int int)
-                          (assoc i64 - true () int (int int) (var n) (int 1))
-                          (assoc i64 * true () int (int int) (var acc) (var n))))))
+                          (assoc i64 - true () int (int int) \"i64\" (var n) (int 1))
+                          (assoc i64 * true () int (int int) \"i64\" (var acc) (var n))))))
            (apply (var go) int (int int) (var a) (int 1)))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
@@ -6097,7 +6097,7 @@ fn the_island_runs_a_bridged_labels_block() {
 fn the_island_accepts_a_bridged_escaping_closure() {
     let body = bridge_to_island_text(
         "(let ((n int (var a)))
-           (let ((f fn (lambda ((x int)) int (assoc i64 + true () int (int int) (var x) (var n)))))
+           (let ((f fn (lambda ((x int)) int (assoc i64 + true () int (int int) \"i64\" (var x) (var n)))))
              (apply (var f) int (int) (int 1))))",
     );
     // The capture really is a cell on both sides of the boundary.
@@ -6162,9 +6162,9 @@ fn the_island_runs_a_whole_bridged_defun() {
         .read_all(
             &mut h,
             "(defun m::clamp ((x int) (lo int) (hi int)) int true
-               (if (assoc i64 < true () bool (int int) (var x) (var lo))
+               (if (assoc i64 < true () bool (int int) \"bool\" (var x) (var lo))
                    (var lo)
-                   (if (assoc i64 < true () bool (int int) (var hi) (var x))
+                   (if (assoc i64 < true () bool (int int) \"bool\" (var hi) (var x))
                        (var hi)
                        (var x))))",
         )

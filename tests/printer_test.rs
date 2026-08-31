@@ -310,29 +310,47 @@ fn a_call_directive_works_through_a_stream_destination() {
     ));
 }
 
-// ---- print-object on a generic type (a known gap, pinned here) ---------------
+// ---- print-object on a generic type ----------------------------------------
 
+/// The printer looks a method up by the key the value carries, and that key
+/// includes the instantiation now (`gen<i32>`), so the body monomorphization
+/// registered for it (`print-object <i32>`) is findable.
+///
+/// This test used to assert the opposite, pinning a known gap: the key was
+/// `gen`, the registration was `print-object <i32>`, and the impl silently
+/// never applied — while still type-checking and still working when called by
+/// name, which is what made it a trap rather than a missing feature.
 #[test]
-fn print_object_does_not_reach_a_generic_type() {
-    // Not the behaviour anyone wants — it is recorded as a test because the
-    // impl below *type-checks* and can be called by name, so nothing else
-    // would notice it silently not applying. The printer looks a method up by
-    // the type key the value carries, and monomorphization has erased the
-    // type argument by then: the key is `gen`, not `gen<i64>`. See
-    // docs/dev/TODO.md; when that is fixed this test should start failing.
-    let src = r#"
-      (defstruct gen<T> (v T))
-      (impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
-      (format false "~a" (gen::new 1))"#;
-    let printed = eval_ok(src);
-    let shown = format!("{:?}", printed);
-    assert!(!shown.contains("GEN"), "the generic gap closed — update this test: {}", shown);
-
-    // The same method *is* reachable by name, which is what makes the gap a
-    // trap rather than a missing feature.
+fn print_object_reaches_a_generic_type() {
+    is_true(
+        r#"(defstruct gen<T> (v T))
+           (impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
+           (equal (format false "~a" (gen::new 1)) "GEN")"#,
+    );
+    // Still reachable by name, as it always was.
     is_true(
         r#"(defstruct gen<T> (v T))
            (impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
            (equal (print-object (gen::new 1) true) "GEN")"#,
+    );
+}
+
+/// Each instantiation gets *its own* body — what a key with no type arguments
+/// could not express even in principle, since one key would have to choose
+/// between two compiled bodies.
+#[test]
+fn each_instantiation_reaches_its_own_print_object() {
+    is_true(
+        r#"(defstruct wi (n i32))
+           (impl print-object wi (print-object ((self Self) (escape bool)) string "INT"))
+           (defstruct ws (s string))
+           (impl print-object ws (print-object ((self Self) (escape bool)) string "STR"))
+           (defstruct gen<T> (v T))
+           (impl print-object gen<T>
+             (where (print-object T))
+             (print-object ((self Self) (escape bool)) string
+               (append "gen-of-" (print-object (v self) escape))))
+           (and (equal (format false "~a" (gen::new (wi::new 1))) "gen-of-INT")
+                (equal (format false "~a" (gen::new (ws::new "x"))) "gen-of-STR"))"#,
     );
 }

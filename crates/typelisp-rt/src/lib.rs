@@ -1809,15 +1809,24 @@ pub unsafe extern "C" fn rt_struct_pop_field(args: *const i64, argc: u32) -> i64
 // iteration (which needs only build/populate/enumerate) — see
 // `docs/dev/iter-compile-plan.md`.
 
-/// `(rt-hashtable-new)` for compiled code — an empty `HashTable<K,V>`
-/// (`HashTable::new`). Ignores its arguments (the method takes none).
+/// `(rt-hashtable-new key)` for compiled code — an empty `HashTable<K,V>`
+/// under the runtime identity `key` spells.
 ///
 /// # Safety
 ///
-/// A `Heap` must already be registered on this thread.
+/// A `Heap` must already be registered on this thread, and `args[0]` must be
+/// a tagged string.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_new(_args: *const i64, _argc: u32) -> i64 {
-    encode(active_heap().alloc_hashtable())
+pub unsafe extern "C" fn rt_hashtable_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_hashtable_new: expected 1 argument (the type key)");
+    }
+    // The table's own runtime identity, spelled by the checker and handed
+    // down through the island (`Checker::assoc_form` -> `hashtable-op`'s name
+    // slot): `HashTable<string,i32>` and `HashTable<string,string>` are
+    // different types and nothing in an empty table says which this is.
+    let key = type_key_arg(*args, "rt_hashtable_new");
+    encode(active_heap().alloc_hashtable(key))
 }
 
 /// `(rt-hashtable-set ht key val)` for compiled code — inserts/overwrites,
@@ -1909,8 +1918,11 @@ unsafe fn hashtable_arg(args: *const i64, argc: u32, who: &str) -> BoxId {
 #[no_mangle]
 pub unsafe extern "C" fn rt_hashtable_keys(args: *const i64, argc: u32) -> i64 {
     let id = hashtable_arg(args, argc, "rt_hashtable_keys");
+    // `args[1]` is the result's own key — a `Vector<K>`, whose instantiation
+    // no value here carries. See `rt_hashtable_new`.
+    let key = type_key_arg(*args.add(1), "rt_hashtable_keys");
     let fields: Vec<Value> = active_heap().hashtable_pairs(id).into_iter().map(|(k, _)| k).collect();
-    encode(active_heap().alloc_struct(TypeKeyId::VECTOR, fields))
+    encode(active_heap().alloc_struct(key, fields))
 }
 
 /// `(rt-hashtable-values ht)` — a fresh `Vector<V>` of the map's values; see
@@ -1922,8 +1934,9 @@ pub unsafe extern "C" fn rt_hashtable_keys(args: *const i64, argc: u32) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn rt_hashtable_values(args: *const i64, argc: u32) -> i64 {
     let id = hashtable_arg(args, argc, "rt_hashtable_values");
+    let key = type_key_arg(*args.add(1), "rt_hashtable_values");
     let fields: Vec<Value> = active_heap().hashtable_pairs(id).into_iter().map(|(_, v)| v).collect();
-    encode(active_heap().alloc_struct(TypeKeyId::VECTOR, fields))
+    encode(active_heap().alloc_struct(key, fields))
 }
 
 /// `(rt-hashtable-entries ht)` — a fresh `Vector<cons-cell<K,V>>`, each entry
@@ -1940,16 +1953,30 @@ pub unsafe extern "C" fn rt_hashtable_values(args: *const i64, argc: u32) -> i64
 #[no_mangle]
 pub unsafe extern "C" fn rt_hashtable_entries(args: *const i64, argc: u32) -> i64 {
     let id = hashtable_arg(args, argc, "rt_hashtable_entries");
+    // Two identities, one handed in: the result is a `Vector<cons-cell<K,V>>`,
+    // so each cell's key is one level inside the vector's
+    // (`typelisp_mem::inner_type_key`, shared with the interpreted side so the
+    // two spell the cells the same).
+    let vec_key_name = match decode(*args.add(1)) {
+        Value::Str(id) => active_heap().string(id).to_string(),
+        other => fatal(&format!("rt_hashtable_entries: the result key is not a string: {:?}", other)),
+    };
+    let cell_key_name = match typelisp_mem::inner_type_key(&vec_key_name) {
+        Some(k) => k.to_string(),
+        None => fatal("rt_hashtable_entries: the result key is not a one-argument container key"),
+    };
+    let vec_key = active_heap().intern_type_key(&vec_key_name);
+    let cell_key = active_heap().intern_type_key(&cell_key_name);
     let pairs = active_heap().hashtable_pairs(id);
     let mut fields = Vec::with_capacity(pairs.len());
     let mut rooted = 0usize;
     for (k, v) in pairs {
-        let cell = active_heap().alloc_struct(TypeKeyId::CONS_CELL, vec![k, v]);
+        let cell = active_heap().alloc_struct(cell_key, vec![k, v]);
         active_heap().push_root(cell);
         rooted += 1;
         fields.push(cell);
     }
-    let vec = active_heap().alloc_struct(TypeKeyId::VECTOR, fields);
+    let vec = active_heap().alloc_struct(vec_key, fields);
     for _ in 0..rooted {
         active_heap().pop_root();
     }

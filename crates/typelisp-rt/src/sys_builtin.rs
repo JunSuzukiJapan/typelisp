@@ -24,17 +24,40 @@ use typelisp_mem::{Heap, TypeKeyId, Value};
 // pre-interned table — same standing exception (and same guard test) as
 // [`crate::stream_builtin`]: this crate has no `Path` to derive a name from.
 
+/// The runtime type key each of these builtins' results carries — the same
+/// table [`crate::stream_builtin::RESULT_KEYS`] keeps, for the same reason
+/// (a type's identity includes its instantiation, and this crate has no
+/// `Path` to derive one from), checked against the registry by the same
+/// guard test.
+pub const RESULT_KEYS: &[(&str, &str)] = &[
+    ("parse-int", "result<i32,parseinterror>"),
+    ("parse-float", "result<f64,parsefloaterror>"),
+    ("command-line-args", "vector<string>"),
+    ("getenv", "option<string>"),
+    ("home-directory", "option<string>"),
+];
+
+fn key_of(name: &str) -> &'static str {
+    match RESULT_KEYS.iter().find(|(n, _)| *n == name) {
+        Some((_, key)) => key,
+        None => crate::fatal(&format!("sys_builtin: no result type key for `{}`", name)),
+    }
+}
+
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
-fn result_ok(heap: &mut Heap, v: Value) -> Value {
-    heap.alloc_enum(TypeKeyId::RESULT, 0, vec![v])
+fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
+    let key = heap.intern_type_key(key_of(name));
+    heap.alloc_enum(key, 0, vec![v])
 }
 
 /// `Err(<ErrType>(msg))`: the concrete single-variant error type of the
-/// failing builtin, wrapped in `Result`'s `err`.
-fn result_err(heap: &mut Heap, err_type_key: TypeKeyId, msg: String) -> Value {
+/// failing builtin, wrapped in `Result`'s `err`. The error types take no type
+/// arguments, so their own keys are unchanged by the instantiation rule.
+fn result_err(heap: &mut Heap, name: &str, err_type_key: TypeKeyId, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
     let err_val = heap.alloc_enum(err_type_key, 0, vec![msg_val]);
-    heap.alloc_enum(TypeKeyId::RESULT, 1, vec![err_val])
+    let key = heap.intern_type_key(key_of(name));
+    heap.alloc_enum(key, 1, vec![err_val])
 }
 
 /// `(parse-int s)`: a decimal `i32` via `str::parse`, `Err` on anything else.
@@ -43,9 +66,10 @@ fn result_err(heap: &mut Heap, err_type_key: TypeKeyId, msg: String) -> Value {
 /// though the runtime representation is a uniform `i64`.
 pub fn parse_int(heap: &mut Heap, s: &str) -> Value {
     match s.parse::<i32>() {
-        Ok(n) => result_ok(heap, Value::Int(n as i64)),
+        Ok(n) => result_ok(heap, "parse-int", Value::Int(n as i64)),
         Err(_) => result_err(
             heap,
+            "parse-int",
             TypeKeyId::PARSE_INT_ERROR,
             format!("parse-int: invalid integer literal: {:?}", s),
         ),
@@ -59,10 +83,11 @@ pub fn parse_float(heap: &mut Heap, s: &str) -> Value {
     match s.parse::<f64>() {
         Ok(f) => {
             let v = heap.alloc_float(f);
-            result_ok(heap, v)
+            result_ok(heap, "parse-float", v)
         }
         Err(_) => result_err(
             heap,
+            "parse-float",
             TypeKeyId::PARSE_FLOAT_ERROR,
             format!("parse-float: invalid float literal: {:?}", s),
         ),
@@ -139,7 +164,10 @@ pub fn command_line_args(heap: &mut Heap) -> Value {
         None => std::env::args().collect(),
     };
     let elems: Vec<Value> = args.into_iter().map(|a| heap.alloc_string(a)).collect();
-    heap.alloc_struct(TypeKeyId::VECTOR, elems)
+    {
+        let key = heap.intern_type_key(key_of("command-line-args"));
+        heap.alloc_struct(key, elems)
+    }
 }
 
 /// `(getenv name)`: the environment variable's value, or `none` when it is
@@ -153,7 +181,7 @@ pub fn command_line_args(heap: &mut Heap) -> Value {
 /// answer a `Option<string>` can give.
 pub fn getenv(heap: &mut Heap, name: &str) -> Value {
     let v = std::env::var(name).ok().map(|s| heap.alloc_string(s));
-    option_value(heap, v)
+    option_value(heap, "getenv", v)
 }
 
 /// `(home-directory)`: `$HOME`, or `none` when it is unset — the primitive
@@ -165,19 +193,20 @@ pub fn getenv(heap: &mut Heap, name: &str) -> Value {
 /// real one.
 pub fn home_directory(heap: &mut Heap) -> Value {
     let v = std::env::var("HOME").ok().map(|s| heap.alloc_string(s));
-    option_value(heap, v)
+    option_value(heap, "home-directory", v)
 }
 
 /// `Some(v)`/`None` under `option_def`'s variant order (`some` = 0,
 /// `none` = 1) — the same shape [`crate::stream_builtin`] builds, spelled
 /// again here rather than shared so neither module has to be linked for the
 /// other's sake (see this module's note on archive-member granularity).
-fn option_value(heap: &mut Heap, v: Option<Value>) -> Value {
+fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
     let (variant, fields) = match v {
         Some(x) => (0, vec![x]),
         None => (1, vec![]),
     };
-    heap.alloc_enum(TypeKeyId::OPTION, variant, fields)
+    let key = heap.intern_type_key(key_of(name));
+    heap.alloc_enum(key, variant, fields)
 }
 
 /// `(lisp-implementation-version)` (CLHS 25.1): this build's version, taken

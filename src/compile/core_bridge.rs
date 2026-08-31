@@ -60,7 +60,6 @@ use typelisp_mem::{wk, Error, Heap, RootScope, SymRef, Value};
 
 use crate::check::core::{self, Items};
 use crate::check::repr::Repr;
-use crate::type_key::type_key_of;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES};
 
 use super::symbols::{
@@ -689,7 +688,7 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
 /// are building.
 fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
-    if parts.len() < 6 {
+    if parts.len() < 7 {
         return Err(malformed(heap, form));
     }
     let type_name = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
@@ -697,16 +696,21 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     let Value::Bool(instance) = parts[2] else { return Err(malformed(heap, form)) };
     let ret = Repr::read(heap, parts[4]).ok_or_else(|| malformed(heap, form))?;
     let reprs = repr_list(heap, parts[5])?;
-    let args = parts[6..].to_vec();
+    // The result's runtime identity — see `Checker::assoc_form`. A container
+    // op that builds a box hands this to the shim that builds it; everything
+    // else ignores it.
+    let Value::Str(ret_key_id) = parts[6] else { return Err(malformed(heap, form)) };
+    let ret_key = heap.string(ret_key_id).to_string();
+    let args = parts[7..].to_vec();
     // The receiver is `args[0]` by the same convention the checker builds an
     // instance call with, so its representation is the first of the list.
     let self_repr = if instance { reprs.first().unwrap_or(&ret) } else { &ret }.clone();
 
     if path_is_builtin(&type_name, "vector") && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
-        return translate_vector_op(heap, &method, &self_repr, &args, cx);
+        return translate_vector_op(heap, &method, &self_repr, &ret_key, &args, cx);
     }
     if path_is_builtin(&type_name, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
-        return translate_hashtable_op(heap, &method, &self_repr, &args, cx);
+        return translate_hashtable_op(heap, &method, &self_repr, &ret_key, &args, cx);
     }
     if let Some(key) = llvm_op_key(&type_name, &self_repr) {
         let opid = Value::Int(llvm_op_id(key, &method));
@@ -762,7 +766,14 @@ fn llvm_op_key(type_name: &Path, self_repr: &Repr) -> Option<&'static str> {
 /// element to tag, so it carries `0` and a `"vector"` type-name literal
 /// instead; `pop` returns `Option<T>` and needs an `"option"` literal to build
 /// the result with.
-fn translate_vector_op(heap: &mut Heap, method: &str, self_repr: &Repr, args: &[Value], cx: Ctx) -> Result<Value, Error> {
+fn translate_vector_op(
+    heap: &mut Heap,
+    method: &str,
+    self_repr: &Repr,
+    ret_key: &str,
+    args: &[Value],
+    cx: Ctx,
+) -> Result<Value, Error> {
     let kind = match self_repr {
         Repr::Vector(t) if method != "new" => t.field_kind(),
         _ => 0,
@@ -772,7 +783,10 @@ fn translate_vector_op(heap: &mut Heap, method: &str, self_repr: &Repr, args: &[
     f.push(method_v);
     f.push(Value::Int(kind));
     if method == "new" {
-        let name = str_form(f.heap(), "vector")?;
+        // The instantiated key, not the bare `vector`: this string *is* the
+        // value's runtime identity, and a pattern that tests it was compiled
+        // from the same spelling (`Checker::pattern_form`).
+        let name = str_form(f.heap(), ret_key)?;
         f.push(name);
     } else {
         for a in args {
@@ -781,7 +795,8 @@ fn translate_vector_op(heap: &mut Heap, method: &str, self_repr: &Repr, args: &[
         }
     }
     if method == "pop" {
-        let name = str_form(f.heap(), "option")?;
+        // `pop`'s result *is* the `Option<T>` this key spells.
+        let name = str_form(f.heap(), ret_key)?;
         f.push(name);
     }
     f.finish("vector-op")
@@ -798,6 +813,7 @@ fn translate_hashtable_op(
     heap: &mut Heap,
     method: &str,
     self_repr: &Repr,
+    ret_key: &str,
     args: &[Value],
     cx: Ctx,
 ) -> Result<Value, Error> {
@@ -810,9 +826,13 @@ fn translate_hashtable_op(
     f.push(method_v);
     f.push(Value::Int(kk));
     f.push(Value::Int(vk));
-    let option_name =
-        if method == "get" || method == "remove" { str_form(f.heap(), "option")? } else { Value::Empty };
-    f.push(option_name);
+    // The name slot: whatever *this* op's result is, spelled as the runtime
+    // identity it must carry. `get`/`remove` build an `Option<V>`; `new`
+    // builds the table itself; `keys`/`values`/`entries` build a `Vector<_>`.
+    // The ops that build nothing (`set`, `len`, `contains`) leave it empty.
+    let builds_a_box = matches!(method, "get" | "remove" | "new" | "keys" | "values" | "entries");
+    let result_name = if builds_a_box { str_form(f.heap(), ret_key)? } else { Value::Empty };
+    f.push(result_name);
     if method != "new" {
         for a in args {
             let v = to_island(f.heap(), *a, cx)?;
@@ -1888,20 +1908,24 @@ fn forwarding_lambda(
 /// the island derives them and the fields go untagged.
 fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
-    if parts.len() < 4 {
+    if parts.len() < 5 {
         return Err(malformed(heap, form));
     }
     let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
-    let Value::Int(variant) = parts[1] else { return Err(malformed(heap, form)) };
-    let Value::Bool(mutable) = parts[2] else { return Err(malformed(heap, form)) };
-    let field_reprs = repr_list(heap, parts[3])?;
-    let args = parts[4..].to_vec();
+    let Value::Str(key_id) = parts[1] else { return Err(malformed(heap, form)) };
+    let Value::Int(variant) = parts[2] else { return Err(malformed(heap, form)) };
+    let Value::Bool(mutable) = parts[3] else { return Err(malformed(heap, form)) };
+    let field_reprs = repr_list(heap, parts[4])?;
+    let args = parts[5..].to_vec();
     let is_sexpr = path == Path::root("sexpr");
 
-    // The *fully qualified* path, because this string is the value's runtime
-    // type identity: interpreted and compiled code both write it and test it,
-    // so the two have to spell it the same way.
-    let type_name = if is_sexpr { Value::Empty } else { str_form(heap, &type_key_of(&path))? };
+    // The value's runtime type identity, taken from the node rather than
+    // rebuilt from the path: the checker spelled it where the instantiation
+    // was known, and interpreted and compiled code have to agree on it down to
+    // the character — `gen<i32>` here and `gen` there is exactly the split
+    // this field exists to prevent.
+    let key = heap.string(key_id).to_string();
+    let type_name = if is_sexpr { Value::Empty } else { str_form(heap, &key)? };
     let mut f = Items::new(heap);
     f.push(Value::Bool(is_sexpr));
     f.push(Value::Bool(mutable));
@@ -2119,11 +2143,11 @@ fn pattern_bindings(
         }
         "pat-ctor" => {
             let parts = core::fields(heap, pat)?;
-            if parts.len() < 4 {
+            if parts.len() < 5 {
                 return Err(malformed(heap, pat));
             }
-            let field_reprs = repr_list(heap, parts[3])?;
-            for (sub, repr) in parts[4..].iter().zip(field_reprs.iter()) {
+            let field_reprs = repr_list(heap, parts[4])?;
+            for (sub, repr) in parts[5..].iter().zip(field_reprs.iter()) {
                 pattern_bindings(heap, *sub, repr, cx, out)?;
             }
         }
@@ -2133,7 +2157,7 @@ fn pattern_bindings(
         "pat-typetest" => {
             let path = as_path(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
                 .ok_or_else(|| malformed(heap, pat))?;
-            let sub = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
+            let sub = core::field(heap, pat, 2).ok_or_else(|| malformed(heap, pat))?;
             let repr = if path == Path::root("sexpr") {
                 Repr::Sexpr
             } else if cx.defs.is_struct(heap, &path)? {
@@ -2215,10 +2239,13 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
         }
         "pat-ctor" => translate_ctor_pattern(heap, pat, cx),
         "pat-typetest" => {
-            let path = as_path(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
-                .ok_or_else(|| malformed(heap, pat))?;
-            let inner = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
-            let name = str_form(heap, &type_key_of(&path))?;
+            // The node's own key, not one rebuilt from the path: the checker
+            // spelled the instantiation, and the island compares the string it
+            // is given against the one `construct` wrote.
+            let Some(Value::Str(key_id)) = core::field(heap, pat, 1) else { return Err(malformed(heap, pat)) };
+            let inner = core::field(heap, pat, 2).ok_or_else(|| malformed(heap, pat))?;
+            let key = heap.string(key_id).to_string();
+            let name = str_form(heap, &key)?;
             let mut f = Items::new(heap);
             f.push(name);
             let inner = translate_pattern(f.heap(), inner, cx)?;
@@ -2233,14 +2260,16 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
 /// (subpat...) kind (field-kind...) downcast type-name-form)`.
 fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, pat)?;
-    if parts.len() < 4 {
+    if parts.len() < 5 {
         return Err(malformed(heap, pat));
     }
     let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, pat))?;
-    let Value::Int(variant) = parts[1] else { return Err(malformed(heap, pat)) };
-    let Value::Bool(downcast) = parts[2] else { return Err(malformed(heap, pat)) };
-    let field_reprs = repr_list(heap, parts[3])?;
-    let subpats = parts[4..].to_vec();
+    let Value::Str(key_id) = parts[1] else { return Err(malformed(heap, pat)) };
+    let Value::Int(variant) = parts[2] else { return Err(malformed(heap, pat)) };
+    let Value::Bool(downcast) = parts[3] else { return Err(malformed(heap, pat)) };
+    let field_reprs = repr_list(heap, parts[4])?;
+    let subpats = parts[5..].to_vec();
+    let key = heap.string(key_id).to_string();
 
     let kind = if path == Path::root("sexpr") {
         MATCH_KIND_SEXPR
@@ -2288,7 +2317,7 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
     // Only compiled when `downcast` is true: an ordinary pattern already knows
     // the scrutinee's type from its static type, and only a downcast has to
     // test it at run time.
-    let type_name = if downcast { str_form(f.heap(), &type_key_of(&path))? } else { Value::Empty };
+    let type_name = if downcast { str_form(f.heap(), &key)? } else { Value::Empty };
     f.push(type_name);
     f.finish("pat-ctor")
 }

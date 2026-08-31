@@ -31,7 +31,7 @@ use typelisp_mem::RootScope;
 
 use crate::check::core;
 use crate::check::repr::Repr;
-use crate::{wk, BoxId, Heap, MacroExpander, MacroLambda, Path, Ref, SymRef, TypeKeyId, Value};
+use crate::{wk, BoxId, Heap, MacroExpander, MacroLambda, Path, Ref, SymRef, Value};
 
 use super::scope;
 pub use super::value::EvalError;
@@ -1874,6 +1874,15 @@ impl Interp {
         let Some(type_path) = heap_type_path(heap, id) else {
             return Ok(None);
         };
+        // The *specialization*'s name when this value is a generic type's
+        // instantiation. Monomorphization registers one body per
+        // instantiation (`print-object <i32>`), and the value's key is what
+        // says which — the thing it did not carry until 2026-08-31, which is
+        // why a generic type's `print-object` never fired.
+        let method = match crate::type_key::heap_type_key(heap, id) {
+            Some(key) => crate::type_key::specialized_method_name(key, "print-object"),
+            None => "print-object".to_string(),
+        };
         // A value already being printed by its own method is rendered the
         // built-in way instead, so `(impl print-object point (... (format
         // false "~a" self)))` degrades to `#<point 1 2>` rather than
@@ -1882,7 +1891,7 @@ impl Interp {
         if self.printing.borrow().contains(&v) {
             return Ok(None);
         }
-        let Some(f) = self.root.borrow().get_method(&type_path, "print-object") else {
+        let Some(f) = self.root.borrow().get_method(&type_path, &method) else {
             return Ok(None);
         };
         match f.sig.as_ref() {
@@ -1945,9 +1954,19 @@ impl Interp {
             Value::Empty | Value::Cons(_) | Value::Path(_) => vec![Path::root("sexpr")],
             Value::Int(_) => vec![Path::root("i64"), Path::root("i32")],
         };
+        // A generic receiver's method is registered per instantiation, so the
+        // name to look up comes off the value's own key — see
+        // `Self::print_object`.
+        let looked_up = match v {
+            Value::Boxed(id) => match crate::type_key::heap_type_key(heap, id) {
+                Some(key) => crate::type_key::specialized_method_name(key, name),
+                None => name.to_string(),
+            },
+            _ => name.to_string(),
+        };
         let mut found: Vec<(Path, std::rc::Rc<FnDef>)> = Vec::new();
         for type_path in &candidates {
-            if let Some(f) = self.root.borrow().get_method(type_path, name) {
+            if let Some(f) = self.root.borrow().get_method(type_path, &looked_up) {
                 found.push((type_path.clone(), f));
             }
         }
@@ -2138,17 +2157,17 @@ impl Interp {
         match self.expand_step(heap, form) {
             Ok(Some(v)) => {
                 heap.push_root(v);
-                let some = option_value(heap, Some(v));
+                let some = option_value(heap, MACROEXPAND_OPTION_KEY, Some(v));
                 heap.pop_root();
                 heap.push_root(some);
-                let out = result_ok(heap, some);
+                let out = result_ok(heap, MACROEXPAND_RESULT_KEY, some);
                 heap.pop_root();
                 Ok(out)
             }
             Ok(None) => {
-                let none = option_value(heap, None);
+                let none = option_value(heap, MACROEXPAND_OPTION_KEY, None);
                 heap.push_root(none);
-                let out = result_ok(heap, none);
+                let out = result_ok(heap, MACROEXPAND_RESULT_KEY, none);
                 heap.pop_root();
                 Ok(out)
             }
@@ -2178,7 +2197,7 @@ impl Interp {
         }
         heap.truncate_roots(mark);
         heap.push_root(cur);
-        let out = result_ok(heap, cur);
+        let out = result_ok(heap, MACROEXPAND_RESULT_KEY, cur);
         heap.pop_root();
         Ok(out)
     }
@@ -2247,7 +2266,7 @@ impl Interp {
                 None => Value::Empty,
             },
         };
-        Ok(result_ok(heap, result))
+        Ok(result_ok(heap, EVAL_RESULT_KEY, result))
     }
 }
 
@@ -2561,12 +2580,12 @@ fn int_to_char(args: &[Value]) -> Result<Value, EvalError> {
 /// `try-int->char` (`registry::int_assoc`): the `Option`-returning
 /// counterpart of [`int_to_char`], for `Checker::check_as`'s `try-as` —
 /// same Unicode-scalar-value validity check, `None` instead of a panic.
-fn try_int_to_char(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+fn try_int_to_char(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     match args.first() {
         Some(Value::Int(n)) => {
             let in_u32_range = *n >= 0 && *n <= i64::from(u32::MAX);
             let c = in_u32_range.then_some(*n as u32).and_then(char::from_u32);
-            Ok(option_value(heap, c.map(Value::Char)))
+            Ok(option_value(heap, ret_key, c.map(Value::Char)))
         }
         other => Err(EvalError::Internal(format!("try-int->char: expected an integer, got {:?}", other))),
     }
@@ -2828,10 +2847,10 @@ fn bignum_to_int(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// `try-bignum->int` (`registry::bignum_assoc`): the `Option`-returning
 /// counterpart of [`bignum_to_int`], for `Checker::check_as`'s `try-as` —
 /// same "fits in an `i64`" check, `None` instead of a panic on overflow.
-fn try_bignum_to_int(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+fn try_bignum_to_int(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let n = expect_bignum(heap, &args[0])?;
     let int = n.to_i64().map(Value::Int);
-    Ok(option_value(heap, int))
+    Ok(option_value(heap, ret_key, int))
 }
 
 /// `bignum->float` (`registry::bignum_assoc`): widening, possibly lossy for
@@ -3084,30 +3103,40 @@ fn is_float_receiver(type_name: &Path) -> bool {
 /// one value world left, that decode is the identity — a stored field *is* the
 /// value — so `decode_field_typed`/`option_payload_ty`/`scope_elem_ty` are gone
 /// and nothing here needs to know `V`.
-fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+fn eval_builtin_method(
+    heap: &mut Heap,
+    type_name: &Path,
+    method: &str,
+    args: &[Value],
+    ret_key: &str,
+) -> Option<Result<Value, EvalError>> {
     if *type_name == Path::root("hashtable") {
         return match method {
-            "new" => Some(Ok(heap.alloc_hashtable())),
-            "get" => Some(hashtable_get(heap, args)),
+            // `ret_key` is the *result's* runtime identity, spelled by the
+            // checker (`Checker::assoc_form`): these builders have no field to
+            // read an instantiation off, and `Vector<i32>` and `Vector<i64>`
+            // share a representation, so nothing here could derive it.
+            "new" => Some(Ok(crate::type_key::alloc_hashtable_keyed(heap, ret_key))),
+            "get" => Some(hashtable_get(heap, args, ret_key)),
             "set" => Some(hashtable_set(heap, args)),
-            "remove" => Some(hashtable_remove(heap, args)),
+            "remove" => Some(hashtable_remove(heap, args, ret_key)),
             "count" => Some(hashtable_count(heap, args)),
             "clear" => Some(hashtable_clear(heap, args)),
-            "keys" => Some(hashtable_keys(heap, args)),
-            "values" => Some(hashtable_values(heap, args)),
-            "entries" => Some(hashtable_entries(heap, args)),
+            "keys" => Some(hashtable_keys(heap, args, ret_key)),
+            "values" => Some(hashtable_values(heap, args, ret_key)),
+            "entries" => Some(hashtable_entries(heap, args, ret_key)),
             _ => None,
         };
     }
     if *type_name == Path::root("vector") {
         return match method {
             // type-identity-ok: the built-in `Vector`, a root name spelled in full
-            "new" => Some(Ok(heap.alloc_struct(TypeKeyId::VECTOR, Vec::new()))),
+            "new" => Some(Ok(crate::type_key::alloc_struct_keyed(heap, ret_key, Vec::new()))),
             "push" => Some(vector_push(heap, args)),
             "get" => Some(vector_get(heap, args)),
             "set" => Some(vector_set(heap, args)),
             "len" => Some(vector_len(heap, args)),
-            "pop" => Some(vector_pop(heap, args)),
+            "pop" => Some(vector_pop(heap, args, ret_key)),
             _ => None,
         };
     }
@@ -3122,7 +3151,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[
             "clone-frames" => Some(scope_clone_frames_heap(heap, args)),
             "push-frame" => Some(scope_push_frame_heap(heap, args)),
             "pop-frame" => Some(scope_pop_frame_heap(heap, args)),
-            "get" => Some(scope_get_heap(heap, args)),
+            "get" => Some(scope_get_heap(heap, args, ret_key)),
             "set" => Some(scope_set_heap(heap, args)),
             _ => None,
         };
@@ -3187,7 +3216,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[
             "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args),
             "int->float" => Some(int_to_float(heap, args)),
             "int->char" => Some(int_to_char(args)),
-            "try-int->char" => Some(try_int_to_char(heap, args)),
+            "try-int->char" => Some(try_int_to_char(heap, args, ret_key)),
             "int->bignum" => Some(int_to_bignum(heap, args)),
             "int->ratio" => Some(int_to_ratio(heap, args)),
             "print" => Some(rt_i64(&args[0]).and_then(|n| write_stdout(&n.to_string(), false))),
@@ -3236,7 +3265,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[
             "lognot" | "logcount" | "integer-length" => Some(bignum_unary(heap, args, method)),
             "eq" | "eql" | "equal" | "equalp" => eval_bignum_builtin(heap, "=", args),
             "bignum->int" => Some(bignum_to_int(heap, args)),
-            "try-bignum->int" => Some(try_bignum_to_int(heap, args)),
+            "try-bignum->int" => Some(try_bignum_to_int(heap, args, ret_key)),
             "bignum->float" => Some(bignum_to_float(heap, args)),
             "bignum->ratio" => Some(bignum_to_ratio(heap, args)),
             "print" => Some(expect_bignum(heap, &args[0]).and_then(|n| write_stdout(&n.to_string(), false))),
@@ -3459,19 +3488,31 @@ impl Interp {
     }
 }
 
+/// `macroexpand`/`macroexpand-1`'s result and its inner `Option`, as runtime
+/// type keys. Both have a fixed signature, so unlike a container method's
+/// there is nothing for a call site to say — but the *spelling* still has to
+/// be the one `type_key::type_key_of_type` produces, which
+/// `tests/type_identity_guard_test.rs` checks against the registry.
+const MACROEXPAND_RESULT_KEY: &str = "result<option<sexpr>,evalerror>";
+const MACROEXPAND_OPTION_KEY: &str = "option<sexpr>";
+
+/// `eval`'s result key — the same shape as `macroexpand`'s, and the same
+/// fixed signature (`registry`'s `eval`: `Result<Option<Sexpr>, EvalError>`).
+const EVAL_RESULT_KEY: &str = "result<option<sexpr>,evalerror>";
+
 /// `Some(v)`/`None`, matching `option_def`'s variant order (`some` = 0,
 /// `none` = 1).
-fn option_value(heap: &mut Heap, v: Option<Value>) -> Value {
+fn option_value(heap: &mut Heap, key: &str, v: Option<Value>) -> Value {
     let (variant, fields) = match v {
         Some(x) => (0, vec![x]),
         None => (1, vec![]),
     };
-    build_enum_value(heap, Path::root("option"), variant, fields)
+    crate::type_key::alloc_enum_keyed(heap, key, variant, fields)
 }
 
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
-fn result_ok(heap: &mut Heap, v: Value) -> Value {
-    build_enum_value(heap, Path::root("result"), 0, vec![v])
+fn result_ok(heap: &mut Heap, key: &str, v: Value) -> Value {
+    crate::type_key::alloc_enum_keyed(heap, key, 0, vec![v])
 }
 
 
@@ -3503,11 +3544,11 @@ fn expect_hashable_key(v: &Value) -> Result<(), EvalError> {
     }
 }
 
-fn hashtable_get(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+fn hashtable_get(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
     let found = heap.hashtable_get(id, args[1]);
-    Ok(option_value(heap, found))
+    Ok(option_value(heap, ret_key, found))
 }
 
 fn hashtable_set(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
@@ -3519,11 +3560,11 @@ fn hashtable_set(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Empty)
 }
 
-fn hashtable_remove(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+fn hashtable_remove(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
     let removed = heap.hashtable_remove(id, args[1]);
-    Ok(option_value(heap, removed))
+    Ok(option_value(heap, ret_key, removed))
 }
 
 fn hashtable_count(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
@@ -3542,21 +3583,20 @@ fn hashtable_clear(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> 
 /// already-encoded `mem::Value` fields — the shared tail of `hashtable_keys`/
 /// `hashtable_values`/`hashtable_entries`, whose fields come straight from
 /// `Heap::hashtable_pairs` and so need no conversion on the way out.
-fn vector_of_raw(heap: &mut Heap, fields: Vec<Value>) -> Value {
-    // type-identity-ok: the built-in `Vector`, a root name spelled in full
-    heap.alloc_struct(TypeKeyId::VECTOR, fields)
+fn vector_of_raw(heap: &mut Heap, key: &str, fields: Vec<Value>) -> Value {
+    crate::type_key::alloc_struct_keyed(heap, key, fields)
 }
 
-fn hashtable_keys(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+fn hashtable_keys(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let fields = heap.hashtable_pairs(id).into_iter().map(|(k, _)| k).collect();
-    Ok(vector_of_raw(heap, fields))
+    Ok(vector_of_raw(heap, ret_key, fields))
 }
 
-fn hashtable_values(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+fn hashtable_values(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let fields = heap.hashtable_pairs(id).into_iter().map(|(_, v)| v).collect();
-    Ok(vector_of_raw(heap, fields))
+    Ok(vector_of_raw(heap, ret_key, fields))
 }
 
 /// Each entry becomes a `cons-cell<K,V>` (`prelude.rs`'s generic `car`/`cdr`
@@ -3566,15 +3606,20 @@ fn hashtable_values(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError>
 /// something only the checker/prelude can construct) wrapping the pair's
 /// already-encoded key/value `mem::Value`s straight from
 /// `Heap::hashtable_pairs`.
-fn hashtable_entries(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+fn hashtable_entries(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
+    // Two identities here, and only the outer one was handed in: the result is
+    // a `Vector<cons-cell<K,V>>`, so each cell's own key is one level inside
+    // it. `inner_key` is the inverse of the spelling, for exactly this.
+    let cell_key = crate::type_key::inner_key(ret_key)
+        .unwrap_or_else(|| panic!("hashtable::entries: `{}` is not a one-argument container key", ret_key))
+        .to_string();
     let fields = heap
         .hashtable_pairs(id)
         .into_iter()
-        // type-identity-ok: the built-in `cons-cell`, a root name spelled in full
-        .map(|(k, v)| heap.alloc_struct(TypeKeyId::CONS_CELL, vec![k, v]))
+        .map(|(k, v)| crate::type_key::alloc_struct_keyed(heap, &cell_key, vec![k, v]))
         .collect();
-    Ok(vector_of_raw(heap, fields))
+    Ok(vector_of_raw(heap, ret_key, fields))
 }
 
 /// The `BoxId` behind a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance —
@@ -3648,10 +3693,10 @@ fn vector_len(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// "might not be there" result. `ret_ty` is the call site's checked
 /// `Option<T>` return type; [`option_payload_ty`] extracts `T` for
 /// [`decode_field_typed`]'s type-directed decode of the popped element.
-fn vector_pop(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+fn vector_pop(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let popped = heap.struct_pop_field(id);
-    Ok(option_value(heap, popped))
+    Ok(option_value(heap, ret_key, popped))
 }
 
 
@@ -3800,11 +3845,11 @@ pub fn scope_pop_frame_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, Ev
     Ok(Value::Empty)
 }
 
-pub(crate) fn scope_get_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+pub(crate) fn scope_get_heap(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let name = expect_str(heap, &args[1])?;
     let found = heap.scope_get(id, name);
-    Ok(option_value(heap, found))
+    Ok(option_value(heap, ret_key, found))
 }
 
 /// `Heap::scope_set` panics on an empty frame stack (the mem layer's

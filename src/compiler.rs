@@ -4468,10 +4468,17 @@ pub const SOURCE: &str = r#"
 (defun compile-hashtable-op ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let ((method (sexpr-str (sexpr-car (sexpr-cdr e)))))
       (if (equal method "new")
-          (let* ((args-ptr (alloca-args builder 1))
-                 (result (build-call builder (get-function m "rt_hashtable_new") args-ptr 0)))
-            (push-permanent-sexpr-root builder m result)
-            result)
+          ;; The table's own runtime identity travels in the name slot: a type
+          ;; key includes its instantiation now, and an empty table has no
+          ;; field to read one off. `rt_hashtable_new` interns what it is
+          ;; given.
+          (let* ((name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+                 (name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup name-form))
+                 (args-ptr (alloca-args builder 1)))
+            (store-arg builder args-ptr 0 name-v)
+            (let ((result (build-call builder (get-function m "rt_hashtable_new") args-ptr 1)))
+              (push-permanent-sexpr-root builder m result)
+              result))
           (let* ((key-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
                  (val-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                  (option-type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
@@ -4561,9 +4568,14 @@ pub const SOURCE: &str = r#"
                (store-arg builder args-ptr 0 ht)
                (let ((ignored (build-call builder (get-function m "rt_hashtable_clear") args-ptr 1)))
                  (const-i64 builder 0))))
-            (else (let ((args-ptr (alloca-args builder 1)))
+            ;; `keys`/`values`/`entries`, each of which builds a `Vector<_>`
+            ;; whose instantiation only the checker knows — so the name slot's
+            ;; key goes with the table as a second argument.
+            (else (let* ((name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup option-type-name-form))
+                         (args-ptr (alloca-args builder 2)))
                      (store-arg builder args-ptr 0 ht)
-                     (let ((result (build-call builder (get-function m (append "rt_hashtable_" method)) args-ptr 1)))
+                     (store-arg builder args-ptr 1 name-v)
+                     (let ((result (build-call builder (get-function m (append "rt_hashtable_" method)) args-ptr 2)))
                        (push-permanent-sexpr-root builder m result)
                        result))))))))
 

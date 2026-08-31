@@ -9614,3 +9614,56 @@ TODO は「全型の全メソッドを起動時に登録することになる」
 
 `rt_extern_functions()` に 1 つ足したので**島の成果物は変わる**（extern の表は成果物の
 3 つ目の入力）。再生成は 1 回で不動点だった——島が吐くものは変えていないため。
+
+## 2026-08-31（続き） — 値が自分の実体化を持つ
+
+`print-object` がジェネリック型に発火しない件。調べたらおかしいのは `print-object` では
+なく**値が自分の実体化を持っていないこと**だった。計画と段階は
+[type-identity-instantiation-plan.md](type-identity-instantiation-plan.md)。
+
+同じ言語の中に両方の答えが並んでいた。`:dyn` の箱詰めは `mangle_type(&value.ty)` を
+鍵にする（`gen<wi>`）。struct/enum の構築は `type_key_of(p)` で型引数を捨てる（`gen`）。
+どちらも具象型が手元にあるチェッカーの地点なのに、片方だけ捨てていた。だから
+`:dyn` 越しなら実体化ごとに正しい特殊化へ飛ぶのに、プリンタからは選べない。
+
+直しは「構築地点でも実体化を鍵にする」。`construct` と `pat-ctor`/`pat-typetest` に
+鍵を載せ、組み込みビルダにも実体化を渡した。
+
+### 見つけた不健全（副産物）
+
+```lisp
+(defun probe ((s Sexpr)) i32 (match s ((the gen<i32> g) (v g)) (_ 0)))
+(probe (the Sexpr (gen::new "abc")))   ; 以前: フィールドを i32 として読む
+```
+
+downcast が基底パスだけを比べていたので、`gen<string>` の値が `(the gen<i32> ...)` に
+通っていた。実体化を鍵にすると閉じる。
+
+### 計画から変わった 5 点
+
+1. **パターン側が同時に要った。** `pat-ctor` は downcast でなくても型キーを見ている
+   （`match_ctor`）ので、`construct` だけ実体化すると enum の `match` が全部落ちる。
+2. **組み込みシムはヘルパを共有していた。** `stream_builtin` の `ok`/`option_value` は
+   ~40 操作が共有し、戻り型は操作ごとに違う。ディスパッチが組み込み名で分岐している
+   ので**名前→鍵の表**にした。表もレジストリも組み込み名で引けるので、番人
+   （`the_runtime_result_keys_match_the_registry`）が全行を機械的に照合する。
+3. **島の変更は hashtable の 4 操作だけ。** `vector-op` は `new`/`pop` の型名を既に
+   文字列で渡していたので bridge の文字列を替えるだけで済んだ。
+4. **鍵だけでは `print-object` は発火しなかった。** 単型化は*呼ばれた地点*で特殊化を
+   作るが、プリンタのディスパッチは実行時。誰も静的に呼ばない `print-object <i32>` は
+   存在しない。**構築地点で特殊化を要求**して解決（`:dyn` が箱詰め地点で vtable を
+   要求するのと同じ形）。
+5. **関数値経由**（`(methodref Vector::new)`）には呼び出し地点が無いので、
+   `methodref` に戻り値の鍵を載せ、`BoxedObj::Builtin` が自分で運ぶ。
+
+### 効果
+
+```lisp
+(impl print-object gen<T> (where (print-object T))
+  (print-object ((self Self) (escape bool)) string (append "gen-of-" (print-object (v self) escape))))
+(println "~a" (gen::new (wi::new 1)))   ; => gen-of-INT
+(println "~a" (gen::new (ws::new "x"))) ; => gen-of-STR
+```
+
+実体化ごとに別の本体へ飛ぶ。`:dyn` にできて `print-object` にできなかったことが、
+同じ仕組みの上で揃った。

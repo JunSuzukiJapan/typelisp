@@ -567,7 +567,7 @@ impl Interp {
         }
     }
 
-    /// `(construct PATH N MUTABLE E...)`.
+    /// `(construct PATH KEY N MUTABLE (R...) E...)`.
     ///
     /// Three shapes behind one tag, exactly as the old `construct`:
     /// the built-in `Sexpr`, whose "fields" are really constructor arguments
@@ -576,16 +576,21 @@ impl Interp {
     /// apart — a struct is the mutable one.
     fn construct_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
         let path = path_field(heap, form, 0, "construct")?;
-        let variant = int_field(heap, form, 1, "construct")? as usize;
-        let mutable = bool_field(heap, form, 2, "construct")?;
+        // The value's runtime identity, spelled by the checker where the
+        // instantiation was known (`Checker::construct_form`). The path above
+        // still answers "struct or enum?"; this answers "which instantiation?"
+        // — `gen<i32>` and `gen<string>` share the former and differ here.
+        let key = str_field(heap, form, 1, "construct")?;
+        let variant = int_field(heap, form, 2, "construct")? as usize;
+        let mutable = bool_field(heap, form, 3, "construct")?;
 
-        // Field 3 is the per-field representation list, which only the bridge
+        // Field 4 is the per-field representation list, which only the bridge
         // reads: the interpreter stores a field as the value it already is.
         let arg_forms = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (construct ..): {}", e)))?;
-        if arg_forms.len() < 4 {
+        if arg_forms.len() < 5 {
             return Err(EvalError::Internal(format!("eval: malformed construct: {}", core::print(heap, form))));
         }
-        let arg_forms = arg_forms[4..].to_vec();
+        let arg_forms = arg_forms[5..].to_vec();
 
         let mut s = RootScope::new(heap);
         let mut argv = Vec::with_capacity(arg_forms.len());
@@ -601,9 +606,9 @@ impl Interp {
             // The values go in as they are: the old evaluator mapped each field
             // across the two value worlds first, and with one world there is
             // nothing to map.
-            Ok(crate::type_key::alloc_typed_struct(&mut s, &path, argv))
+            Ok(crate::type_key::alloc_struct_keyed(&mut s, &key, argv))
         } else {
-            Ok(super::build_enum_value(&mut s, path, variant, argv))
+            Ok(crate::type_key::alloc_enum_keyed(&mut s, &key, variant, argv))
         }
     }
 
@@ -850,7 +855,8 @@ impl Interp {
                     },
                     Some(pid) => {
                         let type_name = crate::types::path_from_id(&s, pid);
-                        match super::eval_builtin_method(&mut s, &type_name, &name, &argv) {
+                        let ret_key = s.builtin_fn_ret_key(id).to_string();
+                        match super::eval_builtin_method(&mut s, &type_name, &name, &argv, &ret_key) {
                             Some(r) => r.map(Step::Done),
                             None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, name))),
                         }
@@ -1067,14 +1073,18 @@ impl Interp {
         let type_name = path_field(heap, form, 0, "assoc")?;
         let method = sym_field(heap, form, 1, "assoc")?;
         let home = self.name_list(heap, form, 3, "assoc")?;
+        // The result's runtime identity, for the built-in methods that build
+        // a box: `Vector::new` has no field to read an instantiation off, and
+        // this crate is below the checker. See `Checker::assoc_form`.
+        let ret_key = str_field(heap, form, 6, "assoc")?;
 
         let mut s = RootScope::new(heap);
-        let argv = self.eval_rest(&mut s, form, 6, env, "assoc")?;
+        let argv = self.eval_rest(&mut s, form, 7, env, "assoc")?;
 
         let f = self.root.borrow().resolve_method(&home, &type_name, &method);
         match f {
             Some(f) => self.enter(&mut s, &f, argv),
-            None => match super::eval_builtin_method(&mut s, &type_name, &method, &argv) {
+            None => match super::eval_builtin_method(&mut s, &type_name, &method, &argv, &ret_key) {
                 Some(result) => result,
                 None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
             },
@@ -1193,7 +1203,12 @@ impl Interp {
         let path = path_field(heap, form, 2, "fnref")?;
         match self.resolve_fn_named(&home, &written, &path) {
             Some(f) => self.reify(heap, &f),
-            None => Ok(heap.alloc_builtin_fn(None, path.last_segment())),
+            // A free built-in's own result key is not carried: the ones that
+            // build a box (`parse-int`'s `Result`) spell it from their own
+            // fixed signature in `typelisp_rt`, so there is nothing for the
+            // reference site to say. `""` records that absence rather than a
+            // key nobody wrote.
+            None => Ok(heap.alloc_builtin_fn(None, path.last_segment(), "")),
         }
     }
 
@@ -1208,7 +1223,8 @@ impl Interp {
             Some(f) => self.reify(heap, &f),
             None => {
                 let recv = crate::types::intern_path_id(heap, &type_name);
-                Ok(heap.alloc_builtin_fn(Some(recv), &method))
+                let ret_key = str_field(heap, form, 4, "methodref")?;
+                Ok(heap.alloc_builtin_fn(Some(recv), &method, &ret_key))
             }
         }
     }
@@ -1495,29 +1511,36 @@ fn match_core_pattern(
         }
         "pat-ctor" => {
             let path = path_field(heap, pat, 0, "pat-ctor")?;
-            let variant = int_field(heap, pat, 1, "pat-ctor")? as usize;
-            // Field 2 is the downcast flag. The interpreter applies the type
+            // The instantiation this pattern accepts — see `Pattern::Ctor`'s
+            // `targs`. The path above still says `sexpr`-or-not; this says
+            // which `gen<_>`.
+            let key = str_field(heap, pat, 1, "pat-ctor")?;
+            let variant = int_field(heap, pat, 2, "pat-ctor")? as usize;
+            // Field 3 is the downcast flag. The interpreter applies the type
             // guard below either way, so it changes nothing here; it is the
             // *compiled* side that emits an instance test only when it is set.
-            // Field 3 is the per-field representation list, for the bridge
+            // Field 4 is the per-field representation list, for the bridge
             // only — the interpreter binds a field as the value it already is.
             let subs = core::fields(heap, pat).map_err(|e| EvalError::Internal(format!("eval: (pat-ctor ..): {}", e)))?;
-            if subs.len() < 4 {
+            if subs.len() < 5 {
                 return Err(EvalError::Internal(format!("eval: malformed pattern: {}", core::print(heap, pat))));
             }
-            let subs = subs[4..].to_vec();
-            match_ctor(it, heap, env, &path, variant, &subs, v)
+            let subs = subs[5..].to_vec();
+            match_ctor(it, heap, env, &path, &key, variant, &subs, v)
         }
         "pat-typetest" => {
             let path = path_field(heap, pat, 0, "pat-typetest")?;
-            let inner = core::field(heap, pat, 1)
+            let key = str_field(heap, pat, 1, "pat-typetest")?;
+            let inner = core::field(heap, pat, 2)
                 .ok_or_else(|| EvalError::Internal("eval: (pat-typetest ..) has no sub-pattern".to_string()))?;
             // `(the sexpr p)` tests nothing: every value is a `Sexpr`.
             if crate::types::path_is_builtin(&path, "sexpr") {
                 return match_core_pattern(it, heap, env, inner, v);
             }
             match v {
-                Value::Boxed(id) if crate::type_key::heap_type_is(heap, id, &path) => match_core_pattern(it, heap, env, inner, v),
+                Value::Boxed(id) if crate::type_key::heap_type_is_key(heap, id, &key) => {
+                    match_core_pattern(it, heap, env, inner, v)
+                }
                 _ => Ok(None),
             }
         }
@@ -1538,6 +1561,7 @@ fn match_ctor(
     heap: &mut Heap,
     env: Value,
     path: &crate::Path,
+    key: &str,
     variant: usize,
     subs: &[Value],
     v: Value,
@@ -1545,7 +1569,7 @@ fn match_ctor(
     match v {
         Value::Boxed(id)
             if heap.is_enum(id)
-                && crate::type_key::heap_type_is(heap, id, path)
+                && crate::type_key::heap_type_is_key(heap, id, key)
                 && heap.enum_variant(id) == variant
                 && heap.enum_field_count(id) == subs.len() =>
         {
@@ -1567,7 +1591,7 @@ fn match_ctor(
         // field count and the sub-patterns can fail here.
         Value::Boxed(id)
             if heap.is_struct(id)
-                && crate::type_key::heap_type_is(heap, id, path)
+                && crate::type_key::heap_type_is_key(heap, id, key)
                 && variant == 0
                 && heap.struct_field_count(id) == subs.len() =>
         {
@@ -1846,6 +1870,15 @@ fn int_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<i64, Eval
     match core::field(heap, form, i) {
         Some(Value::Int(n)) => Ok(n),
         other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not an integer: {:?}", what, i, other))),
+    }
+}
+
+/// A field holding a string — a `construct` node's runtime type key, the one
+/// place the core IR carries a name rather than a path.
+fn str_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, EvalError> {
+    match core::field(heap, form, i) {
+        Some(Value::Str(id)) => Ok(heap.string(id).to_string()),
+        other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a string: {:?}", what, i, other))),
     }
 }
 

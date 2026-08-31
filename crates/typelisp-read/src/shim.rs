@@ -22,17 +22,32 @@ use crate::reader::Reader;
 // `read-datum-at` pairs its datum with its end index in, since this language
 // has no multiple values for CL's second return value to be.
 
+/// The runtime type keys these two builtins' results carry.
+///
+/// A type's identity includes its instantiation
+/// (`typelisp::type_key::type_key_of_type`), and this crate has no `Path` to
+/// derive one from — so they are spelled here and compared against the
+/// registry's own return types by `tests/type_identity_guard_test.rs`, the
+/// same arrangement `typelisp_rt::stream_builtin` uses.
+///
+/// `Option<Sexpr>` inside them is niche-represented — `some v` *is* `v` — so
+/// it builds no box and needs no key of its own.
+pub const READ_RESULT_KEY: &str = "result<option<sexpr>,readerror>";
+pub const READ_DATUM_RESULT_KEY: &str = "result<cons-cell<option<sexpr>,i64>,readerror>";
+pub const READ_DATUM_PAIR_KEY: &str = "cons-cell<option<sexpr>,i64>";
+
 /// `(read s) => Result<Sexpr, ReadError>` — the whole of the builtin, called
 /// from both sides of the compile boundary (`Interp::eval_builtin`'s `read`
 /// arm is the other caller).
 pub fn read_builtin(heap: &mut Heap, source: &str) -> Value {
     let reader = Reader::new();
+    let key = heap.intern_type_key(READ_RESULT_KEY);
     match reader.read(heap, source) {
-        Ok(v) => heap.alloc_enum(TypeKeyId::RESULT, 0, vec![v]),
+        Ok(v) => heap.alloc_enum(key, 0, vec![v]),
         Err(e) => {
             let msg = heap.alloc_string(format!("read: {}", e));
             let err = heap.alloc_enum(TypeKeyId::READ_ERROR, 0, vec![msg]);
-            heap.alloc_enum(TypeKeyId::RESULT, 1, vec![err])
+            heap.alloc_enum(key, 1, vec![err])
         }
     }
 }
@@ -47,17 +62,19 @@ pub fn read_builtin(heap: &mut Heap, source: &str) -> Value {
 pub fn read_datum_at_builtin(heap: &mut Heap, source: &str, start: i64, preserve: bool) -> Value {
     let reader = Reader::new();
     let start = if start < 0 { 0usize } else { start as usize };
+    let key = heap.intern_type_key(READ_DATUM_RESULT_KEY);
+    let pair_key = heap.intern_type_key(READ_DATUM_PAIR_KEY);
     match reader.read_from(heap, source, start, preserve) {
         Ok((v, end)) => {
             heap.push_root(v);
-            let pair = heap.alloc_struct(TypeKeyId::CONS_CELL, vec![v, Value::Int(end as i64)]);
+            let pair = heap.alloc_struct(pair_key, vec![v, Value::Int(end as i64)]);
             heap.pop_root();
-            heap.alloc_enum(TypeKeyId::RESULT, 0, vec![pair])
+            heap.alloc_enum(key, 0, vec![pair])
         }
         Err(e) => {
             let msg = heap.alloc_string(format!("read: {}", e));
             let err = heap.alloc_enum(TypeKeyId::READ_ERROR, 0, vec![msg]);
-            heap.alloc_enum(TypeKeyId::RESULT, 1, vec![err])
+            heap.alloc_enum(key, 1, vec![err])
         }
     }
 }

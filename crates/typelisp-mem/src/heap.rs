@@ -1124,12 +1124,16 @@ impl Heap {
     /// `name` is interned, so the box is two permanent indices wide and
     /// allocating one never triggers a collection (like
     /// [`alloc_cell`](Self::alloc_cell)).
-    pub fn alloc_builtin_fn(&mut self, recv_type: Option<PathId>, name: &str) -> Value {
+    pub fn alloc_builtin_fn(&mut self, recv_type: Option<PathId>, name: &str, ret_key: &str) -> Value {
         let name = match self.intern_string(name) {
             Value::Str(id) => id,
             _ => unreachable!("intern_string always returns Value::Str"),
         };
-        self.alloc_boxed(BoxedObj::Builtin { recv_type, name })
+        let ret_key = match self.intern_string(ret_key) {
+            Value::Str(id) => id,
+            _ => unreachable!("intern_string always returns Value::Str"),
+        };
+        self.alloc_boxed(BoxedObj::Builtin { recv_type, name, ret_key })
     }
 
     /// True if `id` holds a `BoxedObj::Builtin`.
@@ -1153,6 +1157,15 @@ impl Heap {
     pub fn builtin_fn_name(&self, id: BoxId) -> &str {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::Builtin { name, .. }) => self.string(*name),
+            _ => panic!("BoxId does not hold a Builtin"),
+        }
+    }
+
+    /// The runtime identity of what a built-in function value returns — see
+    /// [`BoxedObj::Builtin`]'s `ret_key`.
+    pub fn builtin_fn_ret_key(&self, id: BoxId) -> &str {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Builtin { ret_key, .. }) => self.string(*ret_key),
             _ => panic!("BoxId does not hold a Builtin"),
         }
     }
@@ -1282,8 +1295,8 @@ impl Heap {
     /// Stores an empty hash map, returning its `Value::Boxed` —
     /// `HashTable<K,V>`'s runtime representation (see `BoxedObj`/
     /// `StructPayload::Map`'s doc comments).
-    pub fn alloc_hashtable(&mut self) -> Value {
-        self.alloc_boxed(BoxedObj::Struct { type_key: TypeKeyId::HASHTABLE, payload: StructPayload::Map(HashMap::new()) })
+    pub fn alloc_hashtable(&mut self, type_key: TypeKeyId) -> Value {
+        self.alloc_boxed(BoxedObj::Struct { type_key, payload: StructPayload::Map(HashMap::new()) })
     }
 
     /// `(gethash key table)`'s primitive: the value `key` maps to, or `None`
@@ -2038,4 +2051,31 @@ impl Drop for Heap {
             }
         }
     }
+}
+
+/// The key one level inside `key`: `vector<cons-cell<i32,string>>` ->
+/// `cons-cell<i32,string>`, `option<char>` -> `char`.
+///
+/// The inverse of a type key's `Name<args>` spelling for a *single* argument.
+/// A type's runtime identity includes its instantiation, and two callers build
+/// an inner box out of an outer box's key: `HashTable::entries` (interpreted
+/// and compiled both) builds `cons-cell`s for a `Vector<cons-cell<K,V>>`.
+/// They must agree on the spelling, so the unwrapping lives here — below both
+/// — rather than once in each.
+///
+/// `None` when the key names no instantiation, or names more than one
+/// argument: "the first of several" is not a question any caller is asking.
+pub fn inner_type_key(key: &str) -> Option<&str> {
+    let open = key.find('<')?;
+    let inner = key[open + 1..].strip_suffix('>')?;
+    let mut depth = 0i32;
+    for c in inner.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            ',' if depth == 0 => return None,
+            _ => {}
+        }
+    }
+    Some(inner)
 }

@@ -242,6 +242,68 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
     }
 }
 
+/// Every key a runtime shim spells for a builtin's *result* must be the one
+/// `type_key_of_type` produces for that builtin's registered return type.
+///
+/// A type's runtime identity includes its instantiation now, and the shims
+/// below the checker (`typelisp_rt`, `typelisp_read`) have no `Path` to derive
+/// one from — so they carry tables of hand-written spellings, one row per
+/// builtin. Both sides are keyed by the *builtin's name*, which is what makes
+/// this check mechanical rather than a second hand-written list: the registry
+/// says what `stream-read-char` returns, the table says what key it builds,
+/// and they must agree character for character.
+///
+/// Getting this wrong is silent in exactly the way the module comment
+/// describes — the value would be unmatchable by a pattern the checker
+/// compiled from its own spelling.
+#[test]
+fn the_runtime_result_keys_match_the_registry() {
+    use typelisp::check::Registry;
+    use typelisp::types::Path;
+
+    let reg = Registry::with_builtins();
+    let expected = |name: &str| -> String {
+        let sig = reg
+            .fn_sig(&Path::root(name))
+            .unwrap_or_else(|| panic!("`{}` has a result-key row but no registry entry", name));
+        typelisp::type_key::type_key_of_type(&sig.ret)
+    };
+
+    for (name, key) in typelisp_rt::stream_builtin::RESULT_KEYS {
+        assert_eq!(*key, expected(name), "`{}`'s result key", name);
+    }
+    for (name, key) in typelisp_rt::sys_builtin::RESULT_KEYS {
+        assert_eq!(*key, expected(name), "`{}`'s result key", name);
+    }
+    assert_eq!(typelisp_read::shim::READ_RESULT_KEY, expected("read"), "`read`'s result key");
+    assert_eq!(
+        typelisp_read::shim::READ_DATUM_RESULT_KEY,
+        expected("read-datum-at"),
+        "`read-datum-at`'s result key"
+    );
+
+    // The *inner* keys: the box a `Result`'s `ok` payload is. Taken from the
+    // registry's own type rather than by unwrapping the outer key's spelling,
+    // so the check is about the identity and not about the parsing.
+    let ok_payload = |name: &str| -> String {
+        let sig = reg.fn_sig(&Path::root(name)).expect("registered");
+        match &sig.ret {
+            typelisp::Type::Named(_, args) if !args.is_empty() => {
+                typelisp::type_key::type_key_of_type(&args[0])
+            }
+            other => panic!("`{}` returns {:?}, which has no payload type", name, other),
+        }
+    };
+    for (name, inner) in typelisp_rt::stream_builtin::INNER_KEYS {
+        assert_eq!(*inner, ok_payload(name), "`{}`'s inner key", name);
+    }
+    assert_eq!(
+        typelisp_read::shim::READ_DATUM_PAIR_KEY,
+        ok_payload("read-datum-at"),
+        "`read-datum-at`'s pair key"
+    );
+}
+
 /// The `TypeKeyId` constants must be the indices `Heap::with_capacity` interns
 /// [`BUILTIN_TYPE_KEYS`] at — the whole reason those constants can exist.
 ///

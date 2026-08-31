@@ -256,7 +256,7 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // written, home, path, representations, then the arguments.
         wk::CALL => from(4),
         // type, method, instance, home, result, representations, then the rest.
-        wk::ASSOC => from(6),
+        wk::ASSOC => from(7),
         // The callee, then (past the return representation and the argument
         // representations) the arguments.
         wk::APPLY => {
@@ -289,7 +289,7 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
             v
         }
         // path, variant, mutable, field representations, then the fields.
-        wk::CONSTRUCT => from(4),
+        wk::CONSTRUCT => from(5),
         // The boxed value, past the vtable tables and the value's own
         // representation.
         wk::DYN_NEW => from(5),
@@ -311,13 +311,14 @@ fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymRef>) -> Resul
             out.insert(sym(heap, pat, 0)?);
         }
         wk::PAT_CTOR => {
-            // path, variant, downcast, field representations, then sub-patterns.
-            for p in core::fields(heap, pat)?.iter().skip(4) {
+            // path, key, variant, downcast, field representations, then
+            // sub-patterns.
+            for p in core::fields(heap, pat)?.iter().skip(5) {
                 pattern_bindings(heap, *p, out)?;
             }
         }
         wk::PAT_TYPETEST => {
-            if let Some(inner) = core::field(heap, pat, 1) {
+            if let Some(inner) = core::field(heap, pat, 2) {
                 pattern_bindings(heap, inner, out)?;
             }
         }

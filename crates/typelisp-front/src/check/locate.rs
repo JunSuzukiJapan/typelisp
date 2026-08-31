@@ -399,15 +399,15 @@ fn pattern_bind_names(heap: &Heap, pat: Value, scope: &mut Vec<String>) {
                 scope.push(n);
             }
         }
-        // `(pat-ctor PATH VARIANT DOWNCAST (REPR...) SUB...)`.
+        // `(pat-ctor PATH KEY VARIANT DOWNCAST (REPR...) SUB...)`.
         Some(wk::PAT_CTOR) => {
-            for sub in fields_from(heap, pat, 4) {
+            for sub in fields_from(heap, pat, 5) {
                 pattern_bind_names(heap, sub, scope);
             }
         }
-        // `(pat-typetest PATH SUB)`.
+        // `(pat-typetest PATH KEY SUB)`.
         Some(wk::PAT_TYPETEST) => {
-            if let Some(sub) = core::field(heap, pat, 1) {
+            if let Some(sub) = core::field(heap, pat, 2) {
                 pattern_bind_names(heap, sub, scope);
             }
         }

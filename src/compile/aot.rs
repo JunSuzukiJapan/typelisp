@@ -299,9 +299,27 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let print_objects: Vec<(String, String)> = node_names
         .iter()
         .filter_map(|(node, symbol)| {
-            let type_name = node.strip_suffix("::print-object")?;
+            // Two shapes, because a generic type's `print-object` is
+            // monomorphized: `point::print-object` for a plain type, and
+            // `gen::print-object <i32>` for one instantiation of a generic —
+            // whose *value* carries the key `gen<i32>`, so that is what the
+            // table has to be keyed by (`type_key::specialized_method_name`
+            // is the same correspondence read the other way).
+            let (type_name, targs) = match node.rsplit_once("::print-object") {
+                Some((ty, "")) => (ty, None),
+                Some((ty, rest)) => {
+                    let args = rest.strip_prefix(" <")?.strip_suffix('>')?;
+                    (ty, Some(args))
+                }
+                None => return None,
+            };
             let path = Path::from_segments(type_name.split("::").map(str::to_string).collect());
-            Some((crate::type_key::type_key_of(&path).into_owned(), symbol.clone()))
+            let base = crate::type_key::type_key_of(&path).into_owned();
+            let key = match targs {
+                Some(args) => format!("{}<{}>", base, args),
+                None => base,
+            };
+            Some((key, symbol.clone()))
         })
         .collect();
 

@@ -1162,10 +1162,19 @@ impl Checker {
         f.push(Value::Bool(instance));
         let home = forms::sym_list(f.heap(), home)?;
         f.push(home);
-        let ret = self.repr_form(f.heap(), ret)?;
-        f.push(ret);
+        let ret_repr = self.repr_form(f.heap(), ret)?;
+        f.push(ret_repr);
         let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
         f.push(reprs);
+        // The *result's* runtime identity. A built-in container method builds
+        // its box in Rust (`Vector::new`, `HashTable::keys`), below the
+        // checker and with no `Path` to derive an instantiation from — so the
+        // instantiation travels from here, the one place that knows it. The
+        // representation above cannot stand in: `Repr::Vector(Int)` is
+        // `Vector<i32>` and `Vector<i64>` at once.
+        let key = crate::type_key::type_key_of_type(ret);
+        let key = f.heap().alloc_string(key);
+        f.push(key);
         f.extend(args.iter().map(|a| a.form));
         f.finish("assoc")
     }
@@ -1190,8 +1199,14 @@ impl Checker {
         f.finish("fnref")
     }
 
-    /// `(methodref PATH SYM (HOME...) (PARAM-REPR...))` — see
+    /// `(methodref PATH SYM (HOME...) (PARAM-REPR...) RET-KEY)` — see
     /// [`Self::fnref_form`] for the representation list.
+    ///
+    /// `RET-KEY` is the runtime identity of what the method returns, for the
+    /// same reason [`Self::assoc_form`] carries one: a built-in container
+    /// method builds its box in Rust, and reaching it *through a function
+    /// value* is too late to ask what instantiation the reference was at. The
+    /// value carries it (`BoxedObj::Builtin`'s `ret_key`).
     fn methodref_form(
         &self,
         heap: &mut Heap,
@@ -1199,6 +1214,7 @@ impl Checker {
         method: &str,
         home: &[String],
         params: &[Type],
+        ret: &Type,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let ty_path = forms::path_form(f.heap(), type_name);
@@ -1209,6 +1225,9 @@ impl Checker {
         f.push(home);
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
+        let key = crate::type_key::type_key_of_type(ret);
+        let key = f.heap().alloc_string(key);
+        f.push(key);
         f.finish("methodref")
     }
 
@@ -1270,6 +1289,7 @@ impl Checker {
         &self,
         heap: &mut Heap,
         type_name: &Path,
+        targs: &[Type],
         variant: usize,
         mutable: bool,
         field_tys: &[Type],
@@ -1278,6 +1298,15 @@ impl Checker {
         let mut f = Items::new(heap);
         let path = forms::path_form(f.heap(), type_name);
         f.push(path);
+        // The value's runtime identity, spelled here because here is the only
+        // place the instantiation is known — the same reason `field_tys` is
+        // computed at the site rather than read off the definition. The path
+        // above stays for the questions that are about the *definition*
+        // (struct or enum, where it was defined); this is the one about the
+        // *value* (which instantiation it is).
+        let key = crate::type_key::type_key_of_type(&Type::Named(type_name.clone(), targs.to_vec()));
+        let key = f.heap().alloc_string(key);
+        f.push(key);
         f.push(Value::Int(variant as i64));
         f.push(Value::Bool(mutable));
         let reprs = self.repr_forms(f.heap(), field_tys.iter().cloned())?;
@@ -1417,10 +1446,20 @@ impl Checker {
             {
                 core::tagged(heap, "pat-empty", &[])?
             }
-            Pattern::Ctor { type_name, variant, args, field_types, downcast, .. } => {
+            Pattern::Ctor { type_name, targs, variant, args, field_types, downcast } => {
                 let mut f = Items::new(heap);
                 let tp = forms::path_form(f.heap(), type_name);
                 f.push(tp);
+                // The instantiation this pattern accepts, spelled the way the
+                // constructing site spells it (`Checker::construct_form`). For
+                // an ordinary same-ADT pattern the scrutinee's static type
+                // already guarantees a match, so this changes nothing; for a
+                // *downcast* it is the whole point — testing the base path
+                // alone let a `gen<string>` value into a `(the gen<i32> ...)`
+                // arm, which then read its field as an `i32`.
+                let key = crate::type_key::type_key_of_type(&Type::Named(type_name.clone(), targs.clone()));
+                let key = f.heap().alloc_string(key);
+                f.push(key);
                 f.push(Value::Int(*variant as i64));
                 f.push(Value::Bool(*downcast));
                 // Per-field representations, for the same reason
@@ -1434,8 +1473,6 @@ impl Checker {
                 f.finish("pat-ctor")?
             }
             Pattern::TypeTest(ty, sub) => {
-                // The ADT path only: a heap box's `type_name` never encodes
-                // type arguments, so the runtime test cannot see them either.
                 let path = match ty {
                     Type::Named(p, _) => p.clone(),
                     other => prim_type_path(other).ok_or_else(|| {
@@ -1445,6 +1482,14 @@ impl Checker {
                 let mut f = Items::new(heap);
                 let tp = forms::path_form(f.heap(), &path);
                 f.push(tp);
+                // The full instantiation, not just the ADT path. The comment
+                // here used to say a heap box's type name never encodes type
+                // arguments — it does now, and this is where that stops being
+                // decoration: `(the gen<i32> x)` no longer accepts a
+                // `gen<string>` and then reads its field as an `i32`.
+                let key = crate::type_key::type_key_of_type(ty);
+                let key = f.heap().alloc_string(key);
+                f.push(key);
                 let one = self.pattern_form(f.heap(), sub)?;
                 f.push(one);
                 f.finish("pat-typetest")?
@@ -2706,7 +2751,7 @@ impl Checker {
         })?;
         let (type_name, variant) = self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
         let field_tys = self.variant_field_tys(&type_name, variant, &[]);
-        let form = self.construct_form(heap, &type_name, variant, false, &field_tys, &[e.form])?;
+        let form = self.construct_form(heap, &type_name, &[], variant, false, &field_tys, &[e.form])?;
         Ok(Checked::new(forms::rooted(heap, form), sexpr_ty()))
     }
 
@@ -3061,13 +3106,13 @@ impl Checker {
                 {
                     let mangled = self.request_method_specialization(&type_fq, name, targs);
                     let resolved_ty = subst_apply(&ty, &subst);
-                    let params = match &resolved_ty {
-                        Type::Fn(ps, _, _) => ps.clone(),
-                        _ => Vec::new(),
+                    let (params, ret) = match &resolved_ty {
+                        Type::Fn(ps, _, r) => (ps.clone(), (**r).clone()),
+                        _ => (Vec::new(), Type::Unit),
                     };
                     let home = self.ns.clone();
                     return Some(
-                        self.methodref_form(heap, &type_fq, &mangled, &home, &params)
+                        self.methodref_form(heap, &type_fq, &mangled, &home, &params, &ret)
                             .map(|form| Checked::new(form, resolved_ty)),
                     );
                 }
@@ -3078,8 +3123,9 @@ impl Checker {
             return None;
         }
         let params = af.sig.params.clone();
+        let ret = af.sig.ret.clone();
         let home = self.ns.clone();
-        Some(self.methodref_form(heap, &type_fq, name, &home, &params).map(|form| Checked::new(form, ty)))
+        Some(self.methodref_form(heap, &type_fq, name, &home, &params, &ret).map(|form| Checked::new(form, ty)))
     }
 
     /// `var::field`: if `segs` is `[recv, method]` and `recv` names a bound
@@ -8706,7 +8752,7 @@ impl Checker {
                             self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
                         let field_tys = self.variant_field_tys(&type_name, variant, &[]);
                         let form =
-                            self.construct_form(heap, &type_name, variant, false, &field_tys, &[typed.form])?;
+                            self.construct_form(heap, &type_name, &[], variant, false, &field_tys, &[typed.form])?;
                         return Ok(Checked::new(form, e.clone()));
                     }
                 }
@@ -10329,7 +10375,7 @@ impl Checker {
             let (adt, cons_idx) = self.sexpr_cons_ctor();
             let field_tys = self.variant_field_tys(&adt, cons_idx, &[]);
             let form =
-                self.construct_form(heap, &adt, cons_idx, false, &field_tys, &[car_t.form, cdr_t.form])?;
+                self.construct_form(heap, &adt, &[], cons_idx, false, &field_tys, &[car_t.form, cdr_t.form])?;
             return Ok(Checked::new(forms::rooted(heap, form), sexpr_ty));
         }
         // A leaf of the template: literal data, so the datum travels as the
@@ -11612,14 +11658,14 @@ impl Checker {
         // `resolve_ctor("nil")` cannot answer any more (`nil` is gone from
         // the surface — see `SEXPR_RESERVED_VARIANT`), and the checker is
         // exactly the caller that is still allowed to name it.
-        let mut acc = self.construct_form(heap, &adt, SEXPR_RESERVED_VARIANT, false, &[], &[])?;
+        let mut acc = self.construct_form(heap, &adt, &[], SEXPR_RESERVED_VARIANT, false, &[], &[])?;
         for (i, &elem) in args.iter().enumerate().rev() {
             // The accumulator is a finished node that the next element's own
             // checking can collect, so it stays rooted across that step.
             let mut s = RootScope::new(heap);
             s.push_root(acc);
             let e = self.check_at(&mut s, interp, env, elem, Some(&sexpr_ty), nth_loc(arg_locs, i))?;
-            acc = self.construct_form(&mut s, &adt, cons_idx, false, &cons_tys, &[e.form, acc])?;
+            acc = self.construct_form(&mut s, &adt, &[], cons_idx, false, &cons_tys, &[e.form, acc])?;
         }
         Ok(Checked::new(acc, sexpr_ty))
     }
@@ -12713,11 +12759,23 @@ impl Checker {
                 // `(none)` is the empty list, which the core IR still spells
                 // as `sexpr`'s variant 0 — see the null-elimination plan's
                 // "変種番号は詰めない".
-                _ => self.construct_form(heap, &Path::root("sexpr"), 0, false, &[], &[])?,
+                _ => self.construct_form(heap, &Path::root("sexpr"), &[], 0, false, &[], &[])?,
             };
             return Ok(Checked::new(forms::rooted(heap, form), Type::Named(adt_name.clone(), result_args)));
         }
-        let form = self.construct_form(heap, adt_name, variant, mutable, &field_tys, &arg_forms)?;
+        // A generic type whose `print-object` the *printer* will look up needs
+        // that specialization to exist, and nothing else asks for one: the
+        // printer's dispatch happens at run time, while specializations are
+        // generated on demand at check time. The construction site is where
+        // both halves are in hand — this instantiation, and the fact that the
+        // type has an impl at all — the same reason `field_tys` and the
+        // value's own key are spelled here.
+        if !result_args.is_empty()
+            && self.generic_method_templates.contains_key(&(adt_name.clone(), "print-object".to_string()))
+        {
+            self.request_method_specialization(adt_name, "print-object", result_args.clone());
+        }
+        let form = self.construct_form(heap, adt_name, &result_args, variant, mutable, &field_tys, &arg_forms)?;
         Ok(Checked::new(forms::rooted(heap, form), Type::Named(adt_name.clone(), result_args)))
     }
 
@@ -13599,7 +13657,7 @@ impl Checker {
                 }
             }
         }
-        Ok((Pattern::Ctor { type_name: adt_name, variant, args: sub_pats, field_types, downcast }, binds))
+        Ok((Pattern::Ctor { type_name: adt_name, targs, variant, args: sub_pats, field_types, downcast }, binds))
     }
 
     // ---- helpers ----------------------------------------------------------
@@ -13786,7 +13844,7 @@ fn vtable_form(heap: &mut Heap, slots: &[(Path, String)]) -> Result<Value, Error
 /// total conversion's already-computed result.
 fn wrap_some(heap: &mut Heap, checker: &Checker, inner: Checked, target: Type) -> Result<Checked, Error> {
     let ty = Type::Named(Path::root("option"), vec![target.clone()]);
-    let form = checker.construct_form(heap, &Path::root("option"), 0, false, &[target], &[inner.form])?;
+    let form = checker.construct_form(heap, &Path::root("option"), &[target.clone()], 0, false, &[target], &[inner.form])?;
     Ok(Checked::new(forms::rooted(heap, form), ty))
 }
 
@@ -13796,7 +13854,14 @@ fn wrap_some(heap: &mut Heap, checker: &Checker, inner: Checked, target: Type) -
 /// (see `check::registry::option_def`), the CL-`nil` counterpart of
 /// `wrap_some`'s `variant: 0`.
 fn option_none(heap: &mut Heap, checker: &Checker, ty: Type) -> Result<Checked, Error> {
-    let form = checker.construct_form(heap, &Path::root("option"), 1, false, &[], &[])?;
+    // `none` carries no field, but the *value* is still an `Option<T>` and its
+    // runtime identity says which `T` — so the instantiation comes off `ty`,
+    // the only place it is written here.
+    let targs = match &ty {
+        Type::Named(_, args) => args.clone(),
+        _ => Vec::new(),
+    };
+    let form = checker.construct_form(heap, &Path::root("option"), &targs, 1, false, &[], &[])?;
     Ok(Checked::new(forms::rooted(heap, form), ty))
 }
 

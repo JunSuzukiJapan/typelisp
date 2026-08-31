@@ -41,28 +41,86 @@ use crate::stream::with_streams;
 // representation `value.rs`'s `BoxedObj` doc comment describes, whose *fields
 // are its elements*. `file-list-directory` builds one directly.
 
+/// The runtime type key each builtin's *result* carries, and — for the ones
+/// that wrap something generic inside it — the key of that inner value.
+///
+/// A type's identity includes its instantiation
+/// (`typelisp::type_key::type_key_of_type`), and these shims build their
+/// `Result`/`Option`/`Vector` boxes with no `Path` to derive one from: this
+/// crate sits below the checker. So the spelling is written here, once per
+/// builtin, and `tests/type_identity_guard_test.rs` compares every row
+/// against that builtin's own registry return type. Checked rather than
+/// assumed for the reason the module comment gives: a value built under a key
+/// nobody else spells is unmatchable and prints as `<unknown-variant>`.
+///
+/// A builtin whose result is not a box (`stream-stdin`'s handle,
+/// `stream-open-p`'s `bool`) has no row and needs none.
+pub const RESULT_KEYS: &[(&str, &str)] = &[
+    ("stream-open-file", "result<i64,fileerror>"),
+    ("stream-close", "result<(),fileerror>"),
+    ("stream-input-p", "result<bool,fileerror>"),
+    ("stream-output-p", "result<bool,fileerror>"),
+    ("stream-listen", "result<bool,fileerror>"),
+    ("stream-at-line-start", "result<bool,fileerror>"),
+    ("stream-read-char", "result<option<char>,fileerror>"),
+    ("stream-unread-char", "result<(),fileerror>"),
+    ("stream-read-byte", "result<option<i64>,fileerror>"),
+    ("stream-write-byte", "result<(),fileerror>"),
+    ("stream-write-string", "result<(),fileerror>"),
+    ("stream-finish-output", "result<(),fileerror>"),
+    ("stream-take-output-string", "result<string,fileerror>"),
+    ("file-delete", "result<(),fileerror>"),
+    ("file-truename", "result<string,fileerror>"),
+    ("file-modified-date", "result<i64,fileerror>"),
+    ("file-list-directory", "result<vector<string>,fileerror>"),
+    ("file-create-directories", "result<(),fileerror>"),
+    ("file-rename", "result<(),fileerror>"),
+];
+
+/// The key of the value *inside* the `Result` — [`RESULT_KEYS`]' companion for
+/// the three builtins whose payload is itself a box.
+pub const INNER_KEYS: &[(&str, &str)] = &[
+    ("stream-read-char", "option<char>"),
+    ("stream-read-byte", "option<i64>"),
+    ("file-list-directory", "vector<string>"),
+];
+
+fn lookup(table: &[(&str, &'static str)], name: &str, what: &str) -> &'static str {
+    match table.iter().find(|(n, _)| *n == name) {
+        Some((_, key)) => key,
+        // Not a recoverable condition: a builtin that builds a box without a
+        // row would give that value an identity nothing else spells.
+        None => crate::fatal(&format!("stream_builtin: no {} type key for `{}`", what, name)),
+    }
+}
+
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
-fn result_ok(heap: &mut Heap, v: Value) -> Value {
-    heap.alloc_enum(TypeKeyId::RESULT, 0, vec![v])
+fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
+    let key = heap.intern_type_key(lookup(RESULT_KEYS, name, "result"));
+    heap.alloc_enum(key, 0, vec![v])
 }
 
 /// `Err(FileError(msg))` — the concrete error type every stream and file
 /// operation fails with, wrapped in `Result`'s `err` variant. `FileError` has
 /// exactly one variant (index 0) carrying the message.
-fn result_err(heap: &mut Heap, msg: String) -> Value {
+fn result_err(heap: &mut Heap, name: &str, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
+    // `FileError` takes no type arguments, so its key is unchanged by the
+    // instantiation rule and stays the pre-interned constant.
     let err_val = heap.alloc_enum(TypeKeyId::FILE_ERROR, 0, vec![msg_val]);
-    heap.alloc_enum(TypeKeyId::RESULT, 1, vec![err_val])
+    let key = heap.intern_type_key(lookup(RESULT_KEYS, name, "result"));
+    heap.alloc_enum(key, 1, vec![err_val])
 }
 
 /// `Some(v)`/`None`, matching `option_def`'s variant order (`some` = 0,
 /// `none` = 1).
-fn option_value(heap: &mut Heap, v: Option<Value>) -> Value {
+fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
     let (variant, fields) = match v {
         Some(x) => (0, vec![x]),
         None => (1, vec![]),
     };
-    heap.alloc_enum(TypeKeyId::OPTION, variant, fields)
+    let key = heap.intern_type_key(lookup(INNER_KEYS, name, "inner"));
+    heap.alloc_enum(key, variant, fields)
 }
 
 /// An argument that isn't the shape its signature promises. Unreachable
@@ -106,8 +164,8 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
     macro_rules! wrap {
         ($e:expr, $ok:expr) => {
             match $e {
-                Ok(v) => Ok(result_ok(heap, $ok(v))),
-                Err(m) => Ok(result_err(heap, m)),
+                Ok(v) => Ok(result_ok(heap, name, $ok(v))),
+                Err(m) => Ok(result_err(heap, name, m)),
             }
         };
     }
@@ -155,27 +213,27 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
             let h = arg!(int(args, 0, name));
             match with_streams(|t| t.read_char(h)) {
                 Ok(c) => {
-                    let inner = option_value(heap, c.map(Value::Char));
-                    Ok(result_ok(heap, inner))
+                    let inner = option_value(heap, name, c.map(Value::Char));
+                    Ok(result_ok(heap, name, inner))
                 }
-                Err(m) => Ok(result_err(heap, m)),
+                Err(m) => Ok(result_err(heap, name, m)),
             }
         }
         "stream-read-byte" => {
             let h = arg!(int(args, 0, name));
             match with_streams(|t| t.read_byte(h)) {
                 Ok(b) => {
-                    let inner = option_value(heap, b.map(|b| Value::Int(b as i64)));
-                    Ok(result_ok(heap, inner))
+                    let inner = option_value(heap, name, b.map(|b| Value::Int(b as i64)));
+                    Ok(result_ok(heap, name, inner))
                 }
-                Err(m) => Ok(result_err(heap, m)),
+                Err(m) => Ok(result_err(heap, name, m)),
             }
         }
         "stream-write-byte" => {
             let (h, b) = (arg!(int(args, 0, name)), arg!(int(args, 1, name)));
             match u8::try_from(b) {
                 Ok(b) => wrap!(with_streams(|t| t.write_byte(h, b)), |_v: ()| Value::Empty),
-                Err(_) => Ok(result_err(heap, format!("write-byte: {} is not a byte (0..255)", b))),
+                Err(_) => Ok(result_err(heap, name, format!("write-byte: {} is not a byte (0..255)", b))),
             }
         }
         "stream-unread-char" => {
@@ -203,9 +261,9 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
             match with_streams(|t| t.take_output_string(h)) {
                 Ok(s) => {
                     let sv = heap.alloc_string(s);
-                    Ok(result_ok(heap, sv))
+                    Ok(result_ok(heap, name, sv))
                 }
-                Err(m) => Ok(result_err(heap, m)),
+                Err(m) => Ok(result_err(heap, name, m)),
             }
         }
         "file-exists-p" => {
@@ -215,8 +273,8 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
         "file-delete" => {
             let p = arg!(text(heap, args, 0, name));
             match std::fs::remove_file(&p) {
-                Ok(()) => Ok(result_ok(heap, Value::Empty)),
-                Err(e) => Ok(result_err(heap, format!("delete-file: {}: {}", p, e))),
+                Ok(()) => Ok(result_ok(heap, name, Value::Empty)),
+                Err(e) => Ok(result_err(heap, name, format!("delete-file: {}: {}", p, e))),
             }
         }
         // The queries that only look at the filesystem, no stream involved
@@ -234,9 +292,9 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
             match std::fs::canonicalize(&p) {
                 Ok(c) => {
                     let sv = heap.alloc_string(c.to_string_lossy().into_owned());
-                    Ok(result_ok(heap, sv))
+                    Ok(result_ok(heap, name, sv))
                 }
-                Err(e) => Ok(result_err(heap, format!("truename: {}: {}", p, e))),
+                Err(e) => Ok(result_err(heap, name, format!("truename: {}: {}", p, e))),
             }
         }
         // The result is a *universal* time — seconds since 1900-01-01 UTC,
@@ -248,10 +306,10 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
             const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
             match std::fs::metadata(&p).and_then(|m| m.modified()) {
                 Ok(t) => match t.duration_since(std::time::UNIX_EPOCH) {
-                    Ok(d) => Ok(result_ok(heap, Value::Int(d.as_secs() as i64 + UNIX_TO_CL_EPOCH_SECS))),
-                    Err(e) => Ok(result_err(heap, format!("file-write-date: {}: timestamp precedes the Unix epoch: {}", p, e))),
+                    Ok(d) => Ok(result_ok(heap, name, Value::Int(d.as_secs() as i64 + UNIX_TO_CL_EPOCH_SECS))),
+                    Err(e) => Ok(result_err(heap, name, format!("file-write-date: {}: timestamp precedes the Unix epoch: {}", p, e))),
                 },
-                Err(e) => Ok(result_err(heap, format!("file-write-date: {}: {}", p, e))),
+                Err(e) => Ok(result_err(heap, name, format!("file-write-date: {}: {}", p, e))),
             }
         }
         // `false` for a plain file *and* for something that isn't there —
@@ -275,33 +333,33 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
             let p = arg!(text(heap, args, 0, name));
             let entries = match std::fs::read_dir(&p) {
                 Ok(rd) => rd,
-                Err(e) => return Some(Ok(result_err(heap, format!("directory: {}: {}", p, e)))),
+                Err(e) => return Some(Ok(result_err(heap, name, format!("directory: {}: {}", p, e)))),
             };
             let mut names: Vec<String> = Vec::new();
             for entry in entries {
                 match entry {
                     Ok(e) => names.push(e.path().to_string_lossy().into_owned()),
-                    Err(e) => return Some(Ok(result_err(heap, format!("directory: {}: {}", p, e)))),
+                    Err(e) => return Some(Ok(result_err(heap, name, format!("directory: {}: {}", p, e)))),
                 }
             }
             let elems: Vec<Value> = names.into_iter().map(|n| heap.alloc_string(n)).collect();
-            let vec_val = heap.alloc_struct(TypeKeyId::VECTOR, elems);
-            Ok(result_ok(heap, vec_val))
+            let vec_val = { let k = heap.intern_type_key(lookup(INNER_KEYS, name, "inner")); heap.alloc_struct(k, elems) };
+            Ok(result_ok(heap, name, vec_val))
         }
         // Succeeds when the directory already exists: `create_dir_all` is
         // idempotent, which is exactly what "ensure" means in CL's name.
         "file-create-directories" => {
             let p = arg!(text(heap, args, 0, name));
             match std::fs::create_dir_all(&p) {
-                Ok(()) => Ok(result_ok(heap, Value::Empty)),
-                Err(e) => Ok(result_err(heap, format!("ensure-directories-exist: {}: {}", p, e))),
+                Ok(()) => Ok(result_ok(heap, name, Value::Empty)),
+                Err(e) => Ok(result_err(heap, name, format!("ensure-directories-exist: {}: {}", p, e))),
             }
         }
         "file-rename" => {
             let (a, b) = (arg!(text(heap, args, 0, name)), arg!(text(heap, args, 1, name)));
             match std::fs::rename(&a, &b) {
-                Ok(()) => Ok(result_ok(heap, Value::Empty)),
-                Err(e) => Ok(result_err(heap, format!("rename-file: {}: {}", a, e))),
+                Ok(()) => Ok(result_ok(heap, name, Value::Empty)),
+                Err(e) => Ok(result_err(heap, name, format!("rename-file: {}: {}", a, e))),
             }
         }
         _ => return None,

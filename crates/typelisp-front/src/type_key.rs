@@ -82,6 +82,38 @@ pub fn alloc_typed_enum(
     heap.alloc_enum(key, variant, fields)
 }
 
+/// The key one level inside `key` — see [`typelisp_mem::inner_type_key`],
+/// which lives a crate down because the runtime shims spell keys too
+/// (`typelisp_rt`'s `rt_hashtable_entries` builds the cells of a
+/// `Vector<cons-cell<K,V>>` and is handed only the vector's key).
+pub use typelisp_mem::inner_type_key as inner_key;
+
+/// Allocate a boxed struct whose runtime identity is `key` — the spelling
+/// [`type_key_of_type`] produced at the construction site, carried through the
+/// core IR's `construct` node.
+///
+/// The [`Path`]-taking [`alloc_typed_struct`] answers the same question for a
+/// caller that has no instantiation to speak of (a non-generic type, where the
+/// two spellings are identical anyway).
+pub fn alloc_struct_keyed(heap: &mut Heap, key: &str, fields: Vec<crate::Value>) -> crate::Value {
+    let key = heap.intern_type_key(key);
+    heap.alloc_struct(key, fields)
+}
+
+/// A fresh `HashTable<K,V>` under the identity `key` spells — the map-payload
+/// counterpart of [`alloc_struct_keyed`], here for the same reason: writing a
+/// type identity is this module's job.
+pub fn alloc_hashtable_keyed(heap: &mut Heap, key: &str) -> crate::Value {
+    let key = heap.intern_type_key(key);
+    heap.alloc_hashtable(key)
+}
+
+/// [`alloc_struct_keyed`]'s enum counterpart.
+pub fn alloc_enum_keyed(heap: &mut Heap, key: &str, variant: usize, fields: Vec<crate::Value>) -> crate::Value {
+    let key = heap.intern_type_key(key);
+    heap.alloc_enum(key, variant, fields)
+}
+
 /// The type key stored in boxed value `id`, or `None` when the box is neither
 /// a struct nor an enum (a closure, a cell, a string builder, ...).
 fn stored_key(heap: &Heap, id: BoxId) -> Option<TypeKeyId> {
@@ -107,13 +139,65 @@ pub fn heap_type_is(heap: &Heap, id: BoxId, p: &Path) -> bool {
     }
 }
 
+/// Whether boxed value `id` is an instance of the type spelled `key` — the
+/// [`type_key_of_type`] spelling a pattern node carries.
+///
+/// The instantiation-aware counterpart of [`heap_type_is`]: `gen<i32>` and
+/// `gen<string>` answer differently here and identically there.
+pub fn heap_type_is_key(heap: &Heap, id: BoxId, key: &str) -> bool {
+    match stored_key(heap, id) {
+        Some(k) => heap.type_key_id(key) == Some(k),
+        None => false,
+    }
+}
+
+/// A key split into the type's path and its type arguments, as written:
+/// `gen<i32>` -> `("gen", Some("i32"))`, `point` -> `("point", None)`.
+///
+/// What a *lookup* needs. A generic type's methods are registered on the base
+/// type under a mangled name (`Checker::mangled_method_name`: `print-object
+/// <i32>`), so a dispatcher holding a value's key needs both halves — the
+/// path to find the type, the arguments to name the specialization.
+pub fn split_key(key: &str) -> (&str, Option<&str>) {
+    match key.find('<') {
+        Some(i) if key.ends_with('>') => (&key[..i], Some(&key[i + 1..key.len() - 1])),
+        _ => (key, None),
+    }
+}
+
+/// The method name a *specialization* of `method` is registered under for a
+/// value whose key is `key` — `("gen<i32>", "print-object")` ->
+/// `"print-object <i32>"`, and plain `"print-object"` for a non-generic type.
+///
+/// The reader's half of `Checker::mangled_method_name`, which is what makes a
+/// generic type's `print-object` findable at all: the registration names the
+/// instantiation, and until values carried theirs, nothing holding one could
+/// spell it.
+pub fn specialized_method_name(key: &str, method: &str) -> String {
+    match split_key(key).1 {
+        Some(args) => format!("{} <{}>", method, args),
+        None => method.to_string(),
+    }
+}
+
+/// The raw key stored in boxed value `id` — the spelling, instantiation and
+/// all. [`heap_type_path`] is the same thing reduced to a [`Path`], for
+/// callers that want the *type* rather than the instantiation.
+pub fn heap_type_key(heap: &Heap, id: BoxId) -> Option<&str> {
+    stored_key(heap, id).map(|k| heap.type_key_name(k))
+    // type-identity-ok: reading the spelling back out is this function's job
+}
+
 /// The type boxed value `id` belongs to, or `None` when the box carries no
 /// type identity. The one place a stored key is parsed back into a [`Path`] —
 /// lossless because a path segment can never contain `::`.
 pub fn heap_type_path(heap: &Heap, id: BoxId) -> Option<Path> {
-    stored_key(heap, id).map(|k| {
-        Path::from_segments(heap.type_key_name(k).split("::").map(str::to_string).collect())
-        // type-identity-ok: reading the spelling back out is this function's job
+    heap_type_key(heap, id).map(|k| {
+        // The *base*: a key carries its instantiation now (`gen<i32>`), and a
+        // `Path` has no room for one. Callers that need the arguments ask
+        // [`heap_type_key`]/[`split_key`] instead — the printer's dispatch is
+        // the one that does.
+        Path::from_segments(split_key(k).0.split("::").map(str::to_string).collect())
     })
 }
 

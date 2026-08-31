@@ -41,7 +41,7 @@ use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue};
 use inkwell::AddressSpace;
 
-use typelisp_mem::{Heap, TypeKeyId, Value};
+use typelisp_mem::{Heap, Value};
 
 use crate::eval::interp::{
     expect_str, expect_struct_box, scope_clone_frames_heap, scope_pop_frame_heap, scope_push_frame_heap,
@@ -1421,11 +1421,16 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
             (Ok(id), Ok(name)) => heap.scope_get(id, name),
             (Err(e), _) | (_, Err(e)) => rt_llvm_fatal(&format!("rt_llvm_call: native-scope::get: {:?}", e)),
         };
+        // `Option<llvm-value>`, spelled through the one producer: a type's
+        // runtime identity includes its instantiation, and `native-scope::get`
+        // is the one builtin here that returns a generic box.
+        let key = typelisp_front::type_key::type_key_of_type(&crate::types::Type::Named(
+            crate::Path::root("option"),
+            vec![crate::types::Type::Named(crate::Path::root("llvm-value"), vec![])],
+        ));
         let boxed = match found {
-            // type-identity-ok: the built-in `Option`, a root name spelled in full
-            Some(v) => heap.alloc_enum(TypeKeyId::OPTION, 0, vec![v]),
-            // type-identity-ok: the built-in `Option`, a root name spelled in full
-            None => heap.alloc_enum(TypeKeyId::OPTION, 1, vec![]),
+            Some(v) => typelisp_front::type_key::alloc_enum_keyed(heap, &key, 0, vec![v]),
+            None => typelisp_front::type_key::alloc_enum_keyed(heap, &key, 1, vec![]),
         };
         return crate::compile::runtime::encode(boxed);
     }

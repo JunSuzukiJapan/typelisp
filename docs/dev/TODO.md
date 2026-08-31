@@ -111,44 +111,17 @@ Phase 6c で**同じ原因の 3 件目**が出た。グローバルだけの話�
 「フォーム *k* を実行してから *k+1* を読む」ことを要求する。詳細は
 [implementation-log.md](implementation-log.md) の該当節。
 
-`print-object` は**ジェネリック型に対して一度も発火しない**（Phase 8a で判明）。
-これは登録漏れではなく、実行時ディスパッチの前提が無いという話:
+`print-object` がジェネリック型に発火しなかった件は**直した**（2026-08-31、
+[type-identity-instantiation-plan.md](type-identity-instantiation-plan.md)）。
+値の実行時型キーが実体化を含むようになり（`gen<i32>`）、単型化が登録する
+`print-object <i32>` を引けるようになった。副産物で downcast の不健全
+（`(the gen<i32> x)` が `gen<string>` を通していた）も閉じた。
 
-```lisp
-(defstruct gen<T> (v T))
-(impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
-(println "~a" (gen::new 1))          ; => #<gen 1>   （"GEN" ではない）
-(println "~a" (print-object (gen::new 1) true))  ; => GEN  （名前で呼べば動く）
-```
-
-プリンタは値が持つ型キーでメソッドを引くが、単型化が型引数を消しているのでキーは
-`gen` であって `gen<i64>` ではない。**型検査は通り、名前で呼べば動き、プリンタからだけ
-見えない**ので、書いた人が気づかない。
-`tests/printer_test.rs::print_object_does_not_reach_a_generic_type` が現状を固定しており、
-直ったらそのテストが落ちる。これに依存して見送ったのが `*print-array*` と
-`Array<T>` の `print-object`（cl-parity-plan.md Phase 8a）。
-
-**2026-08-31 の調査で、これは `print-object` 固有の話だと分かった。** ジェネリック型の
-メソッドは実行時に呼べている——`:dyn` 越しなら、実体化ごとに**正しい特殊化**へ飛ぶ:
-
-```lisp
-(impl Show gen<T> (where (Show T)) (show ((self Self)) string (append "gen-of-" (show (v self)))))
-(defun say ((s :dyn Show)) string (show s))
-(say (gen::new (wi::new 1)))   ; => "gen-of-INT"
-(say (gen::new (ws::new "x"))) ; => "gen-of-STR"
-```
-
-違いは 1 行。`:dyn` の箱を作る所（`checker.rs` の `check_as_dyn`）は
-`mangle_type(&value.ty)` を鍵にする——**型引数ごと**。struct/enum の箱を作る所
-（`type_key.rs` の `type_key_id`）は `type_key_of(&path)` で、`Path` は型引数を持たない。
-どちらも具象型が手元にあるチェッカーの地点なのに、片方だけ捨てている。
-
-**直し方（決定）: 構築地点でも実体化を鍵にする。**普通の箱にも `:dyn` の箱と同じものを
-持たせれば、プリンタは `gen<i32>` を受け取り、基底 `gen` と引数に割って
-`print-object <i32>`（単型化された特殊化の登録名、`mangled_method_name`）を引ける。
-波及先は型キーを見ている所すべて: downcast の型テスト（今は型引数を捨てて比較しているので
-`gen<string>` の値が `gen<i32>` として通る穴がある）・`equalp`・印字の `#<gen ...>` 表示・
-`enum_variant_name`・ダンプ／FASL の版・島（`construct` が渡す型名文字列が変わる＝再生成）。
+**この作業が残したもの**: 締めの直列全実行（`scripts/test-serial.sh`）と、
+docs の追随（[functions.md](../functions.md) の `print-object` の「ジェネリック型には
+効かない（既知の穴）」の削除、[syntax.md](../syntax.md) の downcast に「実体化まで見る」）。
+`*print-array*` と `Array<T>` の `print-object`（cl-parity-plan.md Phase 8a）は
+この穴に依存して見送っていたので、**もう入れられる**。
 
 Phase 2/3 の副産物として checker のバグを 4 件見つけて直した。4 件とも
 **「型変数の名前がたまたま一致したときだけ動いていた」同じ形**（詳細は同計画の Phase 0 / Phase 3 の節）:
