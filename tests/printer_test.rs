@@ -184,7 +184,7 @@ fn with_standard_io_syntax_restores_the_escape_flag() {
 // ---- ~/name/ ----------------------------------------------------------------
 
 const POINT: &str = r#"
-(defstruct point (x i64) (y i64))
+(defstruct point (x i32) (y i32))
 (defmethod brief ((self point) (colon bool) (at bool)) string
   (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
 "#;
@@ -241,7 +241,7 @@ fn a_string_argument_dispatches_on_string() {
 #[test]
 fn an_integer_argument_dispatches_when_only_one_width_defines_the_name() {
     is_true(
-        r#"(defmethod twice ((self i64) (colon bool) (at bool)) string (format false "~a ~a" self self))
+        r#"(defmethod twice ((self i32) (colon bool) (at bool)) string (format false "~a ~a" self self))
            (equal (format false "~/twice/" 7) "7 7")"#,
     );
 }
@@ -251,7 +251,7 @@ fn an_integer_argument_is_refused_when_both_widths_define_the_name() {
     // Nothing in the value says which width was written, and guessing would
     // silently run the wrong body.
     let e = eval_err(
-        r#"(defmethod both ((self i64) (colon bool) (at bool)) string "64")
+        r#"(defmethod both ((self i32) (colon bool) (at bool)) string "64")
            (defmethod both ((self i32) (colon bool) (at bool)) string "32")
            (format false "~/both/" 7)"#,
     );

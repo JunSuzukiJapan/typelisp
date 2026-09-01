@@ -53,10 +53,10 @@ fn make_random_state_fresh_states_are_independent_objects() {
     // Two independently-seeded states drawing the same, sufficiently long
     // sequence should disagree somewhere — this would only spuriously fail
     // with astronomically low probability.
-    let src = "(defun draws ((s random-state)) i64
-                 (let ((acc (the i64 0)) (i 0))
+    let src = "(defun draws ((s random-state)) i32
+                 (let ((acc (the i32 0)) (i 0))
                    (while (< i 15)
-                     (setf acc (+ (* acc 10) (as i64 (random 10 s))))
+                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
                (let ((a (make-random-state)) (b (make-random-state)))
@@ -68,10 +68,10 @@ fn make_random_state_fresh_states_are_independent_objects() {
 fn random_state_copy_replays_the_same_sequence() {
     // A copy starts at the same point as the original, so drawing the same
     // number of values from each must agree exactly.
-    let src = "(defun draws ((s random-state)) i64
-                 (let ((acc (the i64 0)) (i 0))
+    let src = "(defun draws ((s random-state)) i32
+                 (let ((acc (the i32 0)) (i 0))
                    (while (< i 15)
-                     (setf acc (+ (* acc 10) (as i64 (random 10 s))))
+                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
                (let ((a (make-random-state)))
@@ -88,10 +88,10 @@ fn random_state_copy_replays_the_same_sequence() {
 /// would also pass for an implementation that copied on every read.
 #[test]
 fn two_draws_from_one_state_advance_the_same_stream() {
-    let src = "(defun draws ((s random-state)) i64
-                 (let ((acc (the i64 0)) (i 0))
+    let src = "(defun draws ((s random-state)) i32
+                 (let ((acc (the i32 0)) (i 0))
                    (while (< i 15)
-                     (setf acc (+ (* acc 10) (as i64 (random 10 s))))
+                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
                (let ((a (make-random-state)))

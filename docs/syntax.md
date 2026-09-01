@@ -10,8 +10,10 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - **真偽値**: `true` / `false`。
 - **整数**: 10進（`42`, `-7`）と `0x` 接頭辞の16進（`0xff`）。符号 `+`/`-` を前置可能。
   型注釈のない整数リテラルは既定で `i32`（期待される型が他の整数型ならその型になる）。
-  `i64` の範囲を超える整数リテラルは（10進・16進とも）自動的に `bignum` になる
-  （CL 同様、固定長か多倍長かは値の大きさで決まり、専用構文はない）。
+  `i32` の範囲を超える整数リテラルは（10進・16進とも）自動的に `bignum` になる
+  （CL 同様、固定長か多倍長かは値の大きさで決まり、専用構文はない）。`i32` が固定幅整数型の
+  中で最も広いので、そこに入らない値には名乗れる固定幅型が無い——`u32` の
+  2147483648 以上をリテラルで書けないのはこの帰結。
 - **浮動小数点数**: 小数点または指数表記（`e`/`E`）を含むもの（`1.5`, `3.0e10`）。
   既定で `f64`（期待される型が `f32` ならその型になる）。
 - **比 (ratio)**: `分子/分母`（10進のみ、例 `1/3`）。読み取り時に CL 仕様どおり既約化される
@@ -45,8 +47,8 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
 型はソース上では通常のシンボルまたはリストとして書く。
 
-- **プリミティブ型**: `i8` `i16` `i32` `i64` `isize` `u8` `u16` `u32` `u64` `usize`
-  `f32` `f64` `bool` `char` `string`
+- **プリミティブ型**: `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `bool` `char` `string`
+  （64bit 幅の整数型は無い——[functions.md](functions.md) §1 参照）
 - **多倍長数値型**: `bignum`（任意精度整数）、`ratio`（既約な有理数）。CL 準拠でヒープ確保され、
   `i32`/`f64` 等との暗黙変換はない（`as`/`try-as` または変換メソッドで明示。functions.md 参照）。
 - **不透明な可変型**: `random-state`（PRNG の状態）。ネイティブ表現なので
@@ -164,9 +166,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 自分より**後**に定義される `defun` を呼ぶには、先にこう宣言する。相互再帰はこれでしか書けない:
 
 ```lisp
-(defsignature odd2? (i64) bool)
-(defun even2? ((n i64)) bool (if (= n 0) true  (odd2? (- n 1))))
-(defun odd2?  ((n i64)) bool (if (= n 0) false (even2? (- n 1))))
+(defsignature odd2? (i32) bool)
+(defun even2? ((n i32)) bool (if (= n 0) true  (odd2? (- n 1))))
+(defun odd2?  ((n i32)) bool (if (= n 0) false (even2? (- n 1))))
 ```
 
 引数は**型だけ**を並べる。本体が無いので名前を付ける対象が無い。`&rest` は最後に
@@ -191,7 +193,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   コード自身が必要とするもの」でシグネチャのように自己完結しない。`defmethod` は所有型の
   `TypeDef` に登録するので型に従う。
 
-CL の対応物は `(declaim (ftype (function (i64) bool) even2?))` だが、あちらは宣言システム
+CL の対応物は `(declaim (ftype (function (i32) bool) even2?))` だが、あちらは宣言システム
 一式を伴い、かつ**助言**でしかない。こちらは静的型付けなので宣言は検査される。
 
 ### defvar / defconstant — グローバル変数
@@ -821,9 +823,12 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 各自の型のまま `Sexpr` へ包まれて渡る——`(println "~a" my-struct)` がそのまま動くのはこのため。
 書式ディレクティブと pretty printer の詳細は [functions.md](functions.md) §15 / §15.1。
 
-`as`/`try-as` が扱えるのは数値・文字カタログのみ（`i32`/`i64`/`f64`/`bignum`/`ratio`/`char` 間）。
-同一型・`i32`↔`i64` は無変換。`i32`/`i64`→`char` と `bignum`→`i32`/`i64` は範囲外で失敗しうるため
-`as` は panic・`try-as` は `None`、それ以外（拡大変換や `float->int` 等の切り捨て）は常に成功する。
+`as`/`try-as` が扱えるのは数値・文字カタログのみ（整数型・`f32`/`f64`/`bignum`/`ratio`/`char` 間）。
+同一型は無変換。**整数の幅どうし・`f32`↔`f64` は本物の変換**——`as` は切り詰め／丸め、`try-as` は
+その幅（精度）に入るかどうかを答える。`i32`→`char` と `bignum`→`i32` も範囲外で失敗しうるので
+`as` は panic・`try-as` は `None`。それ以外（拡大変換や `float->int` 等の切り捨て）は常に成功する。
+他の族から狭い整数への `try-as`（例 `(try-as u8 some-bignum)`）は拒否される——1つの `Option` に
+「変換できたか」と「その幅に入るか」の2つの問いを詰め込むことになるため、分けて書く。
 内部的には対応する変換メソッド（functions.md の `int->char`/`int->bignum`/`bignum->int` 等）へ
 展開される糖衣構文。
 
@@ -893,7 +898,7 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 呼び先も推移的にコンパイルされるので、**コンパイルできない組み込みを（間接的にでも）呼ぶ関数は
 コンパイルできない**。2026-08-14 に prelude 側の穴を、2026-08-18 にシステム組み込み・等価述語・
 印字・リーダの穴を、2026-08-19 に `eval` を塞いだ結果、**この表は 5 つまで減った**。残っているのは
-`char` の `upcase` / `downcase` / `alphap` / `digitp` と、`i32`・`i64` の `int->char`。この 5 つは
+`char` の `upcase` / `downcase` / `alphap` / `digitp` と、整数の `int->char`。この 5 つは
 島に lowering が無い（`externs::native_lowered_primitive_methods` の `char` 行と整数行）。
 プロセスが落ちるのではなく、その旨を述べるエラーで断られる:
 

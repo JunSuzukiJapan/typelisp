@@ -148,7 +148,7 @@ fn eq_on_i32() {
 
 #[test]
 fn eq_on_i64() {
-    let src = "(defun f ((a i64) (b i64)) bool (eq a b)) (f 1 1)";
+    let src = "(defun f ((a i32) (b i32)) bool (eq a b)) (f 1 1)";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
@@ -383,7 +383,7 @@ fn int_to_float_converts_i32() {
 
 #[test]
 fn int_to_float_converts_i64() {
-    assert_eq!(eval_f64("(int->float (the i64 3))"), 3.0);
+    assert_eq!(eval_f64("(int->float (the i32 3))"), 3.0);
 }
 
 #[test]

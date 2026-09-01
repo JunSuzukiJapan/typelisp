@@ -2,16 +2,16 @@
 //! between all of them —
 //! [cl-parity-plan.md](../docs/dev/cl-parity-plan.md) Phase 1a/1b.
 //!
-//! Before this, `i8`/`i16`/`isize`/`u8`/`u16`/`u32`/`u64`/`usize`/`f32` were
-//! registered as types a `defmethod` could name and had no methods at all —
-//! not even `+`. They now carry the same built-in catalog `i32`/`f64` do, the
-//! same `Eq`/`Ord` impls, and the arithmetic traits that let a generic
-//! function ask for a type it can add.
+//! Before this, `i8`/`i16`/`u8`/`u16`/`u32`/`f32` were registered as types a
+//! `defmethod` could name and had no methods at all — not even `+`. They now
+//! carry the same built-in catalog `i32`/`f64` do, the same `Eq`/`Ord` impls,
+//! and the arithmetic traits that let a generic function ask for a type it
+//! can add.
 //!
-//! Width is a static distinction and nothing else here: the runtime value is
-//! an `i64` or an `f64` whichever type labels it, which is exactly why
-//! crossing widths with `as` is a relabel. The tests that pin that down say so
-//! by name.
+//! Width is *not* a static distinction and nothing else: a type name means
+//! its width and its signedness (`types::int_width_signed`), so arithmetic
+//! wraps at that width and `f32` rounds to binary32. Crossing widths with
+//! `as` is a real conversion. The tests that pin that down say so by name.
 
 extern crate typelisp;
 use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
@@ -66,11 +66,11 @@ fn check_error(src: &str) -> String {
 fn every_integer_width_can_do_arithmetic() {
     assert_eq!(show(r#"(format false "~a" (+ (the u8 40) (the u8 2)))"#), "42");
     assert_eq!(show(r#"(format false "~a" (* (the i8 6) (the i8 7)))"#), "42");
-    assert_eq!(show(r#"(format false "~a" (- (the usize 50) (the usize 8)))"#), "42");
-    assert_eq!(show(r#"(format false "~a" (/ (the u64 84) (the u64 2)))"#), "42");
+    assert_eq!(show(r#"(format false "~a" (- (the u16 50) (the u16 8)))"#), "42");
+    assert_eq!(show(r#"(format false "~a" (/ (the u32 84) (the u32 2)))"#), "42");
     assert_eq!(show(r#"(format false "~a" (mod (the u32 142) (the u32 100)))"#), "42");
     assert_eq!(show(r#"(format false "~a" (rem (the i16 -7) (the i16 3)))"#), "-1");
-    assert_eq!(show(r#"(format false "~a" (max (the isize 42) (the isize 7)))"#), "42");
+    assert_eq!(show(r#"(format false "~a" (max (the i16 42) (the i16 7)))"#), "42");
     assert_eq!(show(r#"(format false "~a" (logand (the u16 63) (the u16 42)))"#), "42");
 }
 
@@ -81,17 +81,53 @@ fn f32_has_the_f64_catalog() {
     assert_eq!(show(r#"(format false "~a" (< (the f32 1.5) (the f32 2.5)))"#), "true");
 }
 
-/// The runtime value does not change when the static width does: an `i64`
-/// holding 300 keeps holding 300 after `(as u8 ...)`. Pinned as a test because
-/// it is the one thing about these types a reader is most likely to assume
-/// wrongly.
+/// Crossing widths converts. `300` does not fit a `u8`, so `as` truncates it
+/// to `44` and `try-as` answers `none` — the two halves of what a width cast
+/// means. Pinned as a test because this is the one thing about these types a
+/// reader is most likely to assume wrongly; it used to be a relabel, and a
+/// `u8` could hold `300`.
 #[test]
-fn crossing_integer_widths_is_a_relabel_and_does_not_truncate() {
-    assert_eq!(show(r#"(format false "~a" (as u8 (the i32 300)))"#), "300");
-    assert_eq!(show(r#"(format false "~a" (as i64 (the u8 42)))"#), "42");
-    assert_eq!(show(r#"(format false "~a" (as isize (the u16 42)))"#), "42");
-    // ...and `try-as` between two widths therefore always succeeds.
-    assert_eq!(show(r#"(format false "~a" (unwrap (try-as u8 (the i64 300))))"#), "300");
+fn crossing_integer_widths_converts() {
+    assert_eq!(show(r#"(format false "~a" (as u8 (the i32 300)))"#), "44");
+    assert_eq!(show(r#"(format false "~a" (as i32 (the u8 42)))"#), "42");
+    assert_eq!(show(r#"(format false "~a" (as i16 (the u16 42)))"#), "42");
+    // A value that does fit crosses unchanged, and `try-as` says so.
+    assert_eq!(show(r#"(format false "~a" (unwrap (try-as u8 (the i32 200))))"#), "200");
+    // One that does not is `none`, not a truncated `some`.
+    assert_eq!(
+        show(r#"(format false "~a" (match (try-as u8 (the i32 300)) ((some n) n) ((none) -1)))"#),
+        "-1"
+    );
+}
+
+/// Arithmetic wraps at the receiver's own width and signedness, which is the
+/// whole content of a type name.
+#[test]
+fn arithmetic_wraps_at_the_types_own_width() {
+    assert_eq!(show(r#"(format false "~a" (+ (the u8 200) (the u8 100)))"#), "44");
+    assert_eq!(show(r#"(format false "~a" (* (the i8 100) (the i8 3)))"#), "44");
+    assert_eq!(show(r#"(format false "~a" (+ (the i32 2147483647) 1))"#), "-2147483648");
+    assert_eq!(show(r#"(format false "~a" (lognot (the u32 0)))"#), "4294967295");
+    assert_eq!(show(r#"(format false "~a" (lognot (the i32 0)))"#), "-1");
+    // A shift past the type's own width is `0`, not the 64-bit register's.
+    assert_eq!(show(r#"(format false "~a" (ash (the u16 1) 20))"#), "0");
+}
+
+/// `f32` is binary32, not a label on an `f64`.
+#[test]
+fn f32_arithmetic_rounds_to_binary32() {
+    assert_eq!(show(r#"(format false "~a" (/ (the f32 1.0) (the f32 3.0)))"#), "0.3333333432674408");
+    assert_eq!(show(r#"(format false "~a" (/ 1.0 3.0))"#), "0.3333333333333333");
+    assert_eq!(show(r#"(format false "~a" (as f32 0.1))"#), "0.10000000149011612");
+    // `try-as` reports whether the rounding lost anything.
+    assert_eq!(
+        show(r#"(format false "~a" (match (try-as f32 0.1) ((some _) "some") ((none) "none")))"#),
+        "none"
+    );
+    assert_eq!(
+        show(r#"(format false "~a" (match (try-as f32 0.5) ((some _) "some") ((none) "none")))"#),
+        "some"
+    );
 }
 
 #[test]
@@ -135,7 +171,7 @@ fn a_generic_function_can_add_its_own_arguments() {
         (format false "~a ~a ~a"
           (sum3 (the u8 1) (the u8 2) (the u8 3))
           (sum3 1.5 2.5 3.5)
-          (sum3 (the i64 10) (the i64 20) (the i64 12)))
+          (sum3 (the i16 10) (the i16 20) (the i16 12)))
     "#;
     assert_eq!(show(src), "6 7.5 42");
 }

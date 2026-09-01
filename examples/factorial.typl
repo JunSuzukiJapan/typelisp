@@ -1,4 +1,4 @@
-;; 階乗。i64 でもすぐ桁あふれするので、正確な任意精度演算には bignum を使う。
+;; 階乗。固定幅の整数ではすぐ桁あふれするので、正確な任意精度演算には bignum を使う。
 (defun factorial ((n i32)) bignum
   (let ((acc (int->bignum 1)))
     (dotimes (i n)

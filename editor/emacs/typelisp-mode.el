@@ -143,10 +143,10 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; transcendental functions (f64 only)
     "sin" "cos" "tan" "asin" "acos" "atan" "sinh" "cosh" "tanh"
     "asinh" "acosh" "atanh" "exp" "log"
-    ;; bitwise operators (i32/i64, plus bignum for the first nine)
+    ;; bitwise operators (fixed-width integers, plus bignum for the first nine)
     "logand" "logior" "logxor" "lognot" "ash" "logbitp" "logcount" "logtest"
     "integer-length"
-    ;; the rest of the bitwise catalog (i32/i64/bignum, built from the above)
+    ;; the rest of the bitwise catalog (fixed-width integers and bignum, built from the above)
     "logeqv" "lognand" "lognor" "logandc1" "logandc2" "logorc1" "logorc2"
     ;; byte-specifier mini-API (i32 only)
     "byte" "byte-size" "byte-position" "ldb" "ldb-test" "dpb" "mask-field"
@@ -302,7 +302,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
   "Builtin functions and methods from the standard catalog (docs/functions.md).")
 
 (defconst typelisp-primitive-types
-  '("i8" "i16" "i32" "i64" "isize" "u8" "u16" "u32" "u64" "usize"
+  '("i8" "i16" "i32" "u8" "u16" "u32"
     "f32" "f64" "bignum" "ratio" "random-state" "bool" "char" "string" "symbol")
   "Primitive/scalar type names.
 Includes the heap-boxed arbitrary-precision `bignum' / `ratio', which are

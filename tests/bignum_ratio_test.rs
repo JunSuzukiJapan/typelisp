@@ -1,9 +1,9 @@
 //! Tests for `bignum` (arbitrary-precision integer) and `ratio` (exact
 //! rational), added following Common Lisp's bignum/ratio semantics: reader
-//! literals (an integer past `i64`'s range, and CL's `n/d` ratio syntax,
+//! literals (an integer past `i32`'s range, and CL's `n/d` ratio syntax,
 //! both normalizing the same way CL's reader does), arithmetic/comparison
 //! instance methods (`registry::bignum_assoc`/`ratio_assoc`), and mutual
-//! conversions with `i32`/`i64`/`f64`.
+//! conversions with `i32`/`f64`.
 
 extern crate typelisp;
 use std::cell::RefCell;
@@ -90,7 +90,7 @@ fn assert_ratio(actual: Value, numer: &str, denom: &str) {
 // ---- reader literals --------------------------------------------------------
 
 #[test]
-fn an_integer_literal_past_i64_range_reads_as_a_bignum() {
+fn an_integer_literal_past_i32_range_reads_as_a_bignum() {
     let src = "(defun f () bignum 99999999999999999999999999999) (f)";
     assert_bignum(eval_ok(src), "99999999999999999999999999999");
 }
@@ -126,7 +126,7 @@ fn a_negative_ratio_literal_normalizes_the_sign_onto_the_numerator() {
 #[test]
 fn bignum_addition() {
     // A plain `i32` literal never implicitly widens to `bignum` (no implicit
-    // numeric coercions anywhere in this language — same as `i32`/`i64`);
+    // numeric coercions anywhere in this language — same as between two integer widths);
     // `int->bignum` makes the small operand's type explicit.
     let src = "(defun f ((a bignum) (b bignum)) bignum (+ a b)) \
                (f 99999999999999999999 (int->bignum 1))";

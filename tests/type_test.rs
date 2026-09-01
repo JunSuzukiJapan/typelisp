@@ -13,9 +13,9 @@ fn parse(src: &str) -> Type {
 #[test]
 fn primitives() {
     assert_eq!(parse("i32"), Type::I32);
-    assert_eq!(parse("i64"), Type::I64);
+    assert_eq!(parse("i16"), Type::I16);
     assert_eq!(parse("u8"), Type::U8);
-    assert_eq!(parse("usize"), Type::Usize);
+    assert_eq!(parse("u32"), Type::U32);
     assert_eq!(parse("f64"), Type::F64);
     assert_eq!(parse("bool"), Type::Bool);
     assert_eq!(parse("char"), Type::Char);

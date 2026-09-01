@@ -518,17 +518,17 @@ fn unquote_splicing_without_the_prelude_loaded_is_a_clean_type_error() {
 #[test]
 fn if_let_binds_in_then_branch_and_falls_through_to_else() {
     // `default` (rather than a bare literal in the `else` branch) sidesteps
-    // integer literals' `i32` default conflicting with `x`'s `i64` in the
+    // integer literals' `i32` default conflicting with `x`'s `u16` in the
     // `then` branch — `-1` here is a normal *call argument*, checked
-    // against `f`'s own declared `i64` parameter type, so it adopts `i64`
+    // against `f`'s own declared `u16` parameter type, so it adopts `u16`
     // directly with no such conflict.
     let (v, _) = eval_ok_with_prelude(
-        "(defun f ((o Option<i64>) (default i64)) i64 (if-let ((Some x) o) (+ x 1) default))
+        "(defun f ((o Option<i32>) (default i32)) i32 (if-let ((Some x) o) (+ x 1) default))
          (f (option::some 41) -1)",
     );
     assert_eq!(v, Value::Int(42));
     let (v2, _) = eval_ok_with_prelude(
-        "(defun f ((o Option<i64>) (default i64)) i64 (if-let ((Some x) o) (+ x 1) default))
+        "(defun f ((o Option<i32>) (default i32)) i32 (if-let ((Some x) o) (+ x 1) default))
          (f (option::none) -1)",
     );
     assert_eq!(v2, Value::Int(-1));
@@ -540,7 +540,7 @@ fn cond_with_several_clauses_selects_the_first_true_one() {
     // (`Checker::check_list`'s macro arm re-expanding its own output,
     // peeling off one clause per recursion) must unwind correctly more
     // than once, not just the 1-clause base case.
-    let src = "(defun band ((n i64)) string
+    let src = "(defun band ((n i32)) string
                  (cond ((< n 0) \"neg\")
                        ((= n 0) \"zero\")
                        ((< n 10) \"small\")

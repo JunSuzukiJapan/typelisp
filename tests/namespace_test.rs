@@ -62,7 +62,7 @@ fn unknown_qualified_path_errors() {
 // exercises the same dispatch machinery.
 
 // ---- defmethod on primitive receivers ---------------------------------------
-// `i32`/`i64`/`f64`/`char`/`bool`/`Str`/etc. are primitive `Type` variants, not
+// `i32`/`f64`/`char`/`bool`/`Str`/etc. are primitive `Type` variants, not
 // `Type::Named`, but are still valid `defmethod` receivers (see
 // `crate::prim_type_path`).
 

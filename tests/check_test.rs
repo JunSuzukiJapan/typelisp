@@ -303,16 +303,16 @@ fn nil_is_no_longer_a_sexpr_constructor() {
 #[test]
 fn an_option_sexpr_does_not_narrow_to_a_bare_sexpr() {
     // Widening: fine, and free.
-    assert!(program("(defun f ((s Option<Sexpr>)) i64 1) (f (Int 1))").is_ok());
+    assert!(program("(defun f ((s Option<Sexpr>)) i32 1) (f (Int 1))").is_ok());
     // Narrowing: rejected.
-    let err = program("(defun f ((s Sexpr)) i64 1) (f (the Option<Sexpr> ()))")
+    let err = program("(defun f ((s Sexpr)) i32 1) (f (the Option<Sexpr> ()))")
         .expect_err("narrowing should be rejected");
     let msg = format!("{:?}", err);
     assert!(msg.contains("type mismatch"), "unexpected error: {}", msg);
     // A user ADT still widens into an S-expression slot — the rule this
     // exclusion is carved out of must stay intact.
     assert!(program(
-        "(defstruct point (x i64)) (defun f ((s Option<Sexpr>)) i64 1) (f (point::new 1))"
+        "(defstruct point (x i32)) (defun f ((s Option<Sexpr>)) i32 1) (f (point::new 1))"
     )
     .is_ok());
 }
@@ -327,7 +327,7 @@ fn the_empty_list_is_an_option_sexpr_none() {
 }
 
 #[test]
-fn construct_int_field_adopts_i64() {
+fn construct_int_field_adopts_the_declared_width() {
     // Sexpr::Int holds an i64; the integer literal must adopt that type.
     assert_eq!(ty("(Int 5)"), Type::Named(Path::root("sexpr"), vec![]));
 }
@@ -722,7 +722,7 @@ fn list_elements_are_auto_wrapped_into_sexpr() {
     // (`~/.claude/plans/async-conjuring-hanrahan.md`, `tests/
     // sexpr_user_adt_test.rs` has the fuller coverage): `check_list_lit`
     // checks each element against `expected = Sexpr`, and a scalar with a
-    // `Sexpr` encoding (`i32`/`i64`/`f64`/.../`Str`) now auto-wraps through
+    // `Sexpr` encoding (`i32`/`f64`/.../`Str`) now auto-wraps through
     // its constructor there — `(list 1 2)` mirrors CL's `(list 1 2)`
     // instead of demanding the caller pre-wrap every element by hand.
     assert_eq!(ty("(list 1 2)"), opt_sexpr());
@@ -801,7 +801,7 @@ fn a_checked_form_is_a_core_expression_with_a_type() {
 
 #[test]
 fn the_overrides_an_integer_literals_default_type() {
-    assert_eq!(ty("(the i64 5)"), Type::I64);
+    assert_eq!(ty("(the u16 5)"), Type::U16);
     assert_eq!(ty("(the f32 1.5)"), Type::F32);
 }
 
@@ -830,7 +830,7 @@ fn the_pins_a_generic_calls_type_argument() {
     // `identity` is a generic `defun` (T -> T); annotating its argument's
     // type with `the` is enough to resolve `T`, the same as an outer
     // `expected` type would.
-    assert_eq!(ty_with_prelude("(identity (the i64 5))"), Type::I64);
+    assert_eq!(ty_with_prelude("(identity (the u16 5))"), Type::U16);
 }
 
 // ---- exit ---------------------------------------------------------------------
@@ -909,9 +909,9 @@ fn type_error_carries_source_location() {
 fn equality_requires_its_two_arguments_to_have_one_type() {
     for src in [
         // Two unrelated user structs — the case that used to answer `false`.
-        "(defstruct pa (x i64)) (defstruct pb (y string)) (equalp (pa::new 1) (pb::new \"z\"))",
+        "(defstruct pa (x i32)) (defstruct pb (y string)) (equalp (pa::new 1) (pb::new \"z\"))",
         // Two different instantiations of the same generic.
-        "(equalp (the Option<char> (option::none)) (the Option<i64> (option::none)))",
+        "(equalp (the Option<char> (option::none)) (the Option<i32> (option::none)))",
         // And the case that was already an error, still is.
         "(equalp 1 \"a\")",
     ] {
@@ -929,7 +929,7 @@ fn equality_still_compares_every_same_typed_pair() {
     for src in [
         "(equal (quote (1 2 3)) (quote (1 2 3)))",
         "(equalp (option::some #\\x) (option::some #\\x))",
-        "(defstruct pt (x i64)) (equalp (pt::new 1) (pt::new 1))",
+        "(defstruct pt (x i32)) (equalp (pt::new 1) (pt::new 1))",
     ] {
         assert!(program(src).is_ok(), "should check: {}", src);
     }

@@ -47,7 +47,7 @@ fn build_prelude_and_drop() {
     load_prelude(&mut heap, &mut checker, &mut interp);
     let reader = Reader::new();
     let forms = reader
-        .read_all(&mut heap, "(defun f ((a i64) (b i64)) i64 (+ a b)) (f 20 22)")
+        .read_all(&mut heap, "(defun f ((a i32) (b i32)) i32 (+ a b)) (f 20 22)")
         .expect("read failed");
     let mut last = Value::Empty;
     for form in forms {
@@ -74,7 +74,7 @@ fn compile_and_drop() {
     typelisp::load_compiler(&mut heap, &mut checker, &mut interp);
     let reader = Reader::new();
     let forms = reader
-        .read_all(&mut heap, "(defun f ((a i64) (b i64)) i64 (+ a b)) (compile f) (f 20 22)")
+        .read_all(&mut heap, "(defun f ((a i32) (b i32)) i32 (+ a b)) (compile f) (f 20 22)")
         .expect("read failed");
     let mut last = Value::Empty;
     for form in forms {

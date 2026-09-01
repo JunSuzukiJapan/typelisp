@@ -441,7 +441,7 @@ fn match_on_a_struct_binds_a_sexpr_typed_field_as_a_sexpr() {
     // The `match` destructuring path decodes fields itself
     // (`Pattern::Ctor::sexpr_fields`, baked at check time), independently
     // of the accessor path the tests above cover.
-    let src = "(defstruct holder (content Option<Sexpr>) (k i64)) \
+    let src = "(defstruct holder (content Option<Sexpr>) (k i32)) \
                (match (holder::new '7 3) \
                  ((new c n) (+ (sexpr-int c) n)))";
     assert_eq!(eval_ok(src), Value::Int(10));
@@ -460,28 +460,28 @@ fn match_on_a_struct_binds_a_sexpr_typed_field_as_a_sexpr() {
 
 #[test]
 fn a_unit_typed_field_reads_back_as_unit() {
-    let src = "(defstruct holder (u ()) (k i64)) \
+    let src = "(defstruct holder (u ()) (k i32)) \
                (let ((h (holder::new () 5))) h::u)";
     assert_eq!(eval_ok(src), Value::Empty);
 }
 
 #[test]
 fn a_unit_typed_field_does_not_disturb_its_neighbours() {
-    let src = "(defstruct holder (u ()) (k i64)) \
+    let src = "(defstruct holder (u ()) (k i32)) \
                (let ((h (holder::new () 5))) h::k)";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
 fn match_binds_a_unit_typed_field_as_unit() {
-    let src = "(defstruct holder (u ()) (k i64)) \
+    let src = "(defstruct holder (u ()) (k i32)) \
                (match (holder::new () 3) ((new u n) u))";
     assert_eq!(eval_ok(src), Value::Empty);
 }
 
 #[test]
 fn match_reads_the_fields_beside_a_unit_one_correctly() {
-    let src = "(defstruct holder (u ()) (k i64)) \
+    let src = "(defstruct holder (u ()) (k i32)) \
                (match (holder::new () 3) ((new u n) n))";
     assert_eq!(eval_ok(src), Value::Int(3));
 }

@@ -60,9 +60,9 @@ fn fnref_of_a_plain_function_is_callable() {
 
 #[test]
 fn methodref_of_a_defstruct_field_accessor_is_callable() {
-    let src = "(defstruct point (x i64) (y i64)) \
-               (defun make-point ((a i64) (b i64)) point (point::new a b)) \
-               (defun call-getter ((f (fn (point) i64)) (p point)) i64 (f p)) \
+    let src = "(defstruct point (x i32) (y i32)) \
+               (defun make-point ((a i32) (b i32)) point (point::new a b)) \
+               (defun call-getter ((f (fn (point) i32)) (p point)) i32 (f p)) \
                (call-getter x (make-point 7 1))";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
@@ -124,9 +124,9 @@ fn labels_mutual_recursion_via_independent_sibling_jit() {
 /// `read-it` (which never itself writes) observes the mutation.
 #[test]
 fn setf_through_one_labels_sibling_is_visible_through_another_sharing_the_same_capture() {
-    let src = "(defun make-pair ((start i64)) i64
-                 (labels ((bump () i64 (setf start (+ start 1)))
-                          (read-it () i64 start))
+    let src = "(defun make-pair ((start i32)) i32
+                 (labels ((bump () i32 (setf start (+ start 1)))
+                          (read-it () i32 start))
                    (let ((ignored1 (bump)))
                      (let ((ignored2 (bump)))
                        (read-it)))))
@@ -145,9 +145,9 @@ fn setf_through_one_labels_sibling_is_visible_through_another_sharing_the_same_c
 /// sibling's `env`; the fix binds captures first so parameters shadow them.
 #[test]
 fn a_labels_param_shadows_a_captured_name_of_the_same_spelling() {
-    let src = "(defun outer ((n i64)) i64
-                 (labels ((use-cap ((x i64)) i64 (+ x n))
-                          (shadow-it ((n i64)) i64 n))
+    let src = "(defun outer ((n i32)) i32
+                 (labels ((use-cap ((x i32)) i32 (+ x n))
+                          (shadow-it ((n i32)) i32 n))
                    (+ (use-cap 1) (shadow-it 100))))
                (outer 5)";
     // use-cap: 1 + captured n(5) = 6; shadow-it: param n(100) = 100; sum 106.
@@ -178,9 +178,9 @@ fn a_unit_returning_closure_performs_its_effect_and_returns_unit() {
 /// closure sees a fixed 2-argument call.
 #[test]
 fn a_variadic_lambda_jits_and_collects_its_rest_list() {
-    let src = "(defun sexpr-len ((s Option<Sexpr>)) i64 \
-                 (if (sexpr-consp s) (+ (the i64 1) (sexpr-len (sexpr-cdr s))) (the i64 0))) \
-               ((lambda ((a i64) &rest (xs i64)) i64 (+ a (sexpr-len xs))) 1 2 3)";
+    let src = "(defun sexpr-len ((s Option<Sexpr>)) i32 \
+                 (if (sexpr-consp s) (+ (the i32 1) (sexpr-len (sexpr-cdr s))) (the i32 0))) \
+               ((lambda ((a i32) &rest (xs i32)) i32 (+ a (sexpr-len xs))) 1 2 3)";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
 
@@ -190,10 +190,10 @@ fn a_variadic_lambda_jits_and_collects_its_rest_list() {
 /// fix), now reached through definition-time JIT instead of `(compile ...)`.
 #[test]
 fn fnref_of_a_variadic_function_jits_and_forwards_the_rest_list() {
-    let src = "(defun sexpr-len ((s Option<Sexpr>)) i64 \
-                 (if (sexpr-consp s) (+ (the i64 1) (sexpr-len (sexpr-cdr s))) (the i64 0))) \
-               (defun count-extra ((base i64) &rest (xs i64)) i64 (+ base (sexpr-len xs))) \
-               (defun use-it ((f (fn (i64 &rest i64) i64))) i64 (f 10 1 2 3)) \
+    let src = "(defun sexpr-len ((s Option<Sexpr>)) i32 \
+                 (if (sexpr-consp s) (+ (the i32 1) (sexpr-len (sexpr-cdr s))) (the i32 0))) \
+               (defun count-extra ((base i32) &rest (xs i32)) i32 (+ base (sexpr-len xs))) \
+               (defun use-it ((f (fn (i32 &rest i32) i32))) i32 (f 10 1 2 3)) \
                (use-it count-extra)";
     assert_eq!(eval_ok(src), Value::Int(13));
 }

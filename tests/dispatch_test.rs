@@ -83,8 +83,8 @@ fn integer_literal_still_gets_the_free_functions_exact_parameter_width() {
     // before falling back to the free function. If that peek's default type
     // (`i32`) leaked into the free-function call instead of being re-checked
     // against the real parameter type, this would fail to type-check at all
-    // (a function expecting `i64` would see an `i32` literal).
-    let src = "(defun takes-i64 ((x i64)) i64 x) (takes-i64 42)";
+    // (a function expecting `u16` would see an `i32` literal).
+    let src = "(defun takes-i32 ((x i32)) i32 x) (takes-i32 42)";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 

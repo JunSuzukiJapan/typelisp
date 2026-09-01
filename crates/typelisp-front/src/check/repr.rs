@@ -568,7 +568,7 @@ mod tests {
         let (structs, enums) = sets();
         let of = |t: Type| Repr::of(&t, &structs, &enums);
         assert_eq!(of(Type::I32), Repr::Int);
-        assert_eq!(of(Type::I64), Repr::Int);
+        assert_eq!(of(Type::U32), Repr::Int);
         assert_eq!(of(Type::F64), Repr::Float);
         assert_eq!(of(Type::Char), Repr::Char);
         assert_eq!(of(Type::Bool), Repr::Bool);
@@ -583,7 +583,7 @@ mod tests {
         // The parametric builtins classify their elements too — the whole
         // reason they have variants of their own.
         assert_eq!(
-            of(Type::Named(Path::root("vector"), vec![Type::I64])),
+            of(Type::Named(Path::root("vector"), vec![Type::U32])),
             Repr::Vector(Box::new(Repr::Int))
         );
         assert_eq!(

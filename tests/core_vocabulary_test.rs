@@ -205,9 +205,9 @@ fn calls() {
     all_round_trip(&[
         "(call (f) () f (int int) (int 1) (int 2))",
         "(call (helper) (m) m::helper ())",
-        // An instance method on `i64`, `true` meaning it takes a receiver,
+        // An instance method on `i32`, `true` meaning it takes a receiver,
         // returning an int, over two int arguments.
-        "(assoc i64 + true () int (int int) (var a) (var b))",
+        "(assoc i32 + true () int (int int) (var a) (var b))",
         // A static associated function: no receiver.
         "(assoc point new false () struct (int int) (int 1) (int 2))",
         // A builtin whose result is what identifies it: an empty vector of
@@ -239,7 +239,7 @@ fn calls() {
 /// definition has no answer: `Option`'s `Some` field is declared `T`, and a
 /// type variable has no representation. The instantiation is known only at the
 /// site — and a definition-keyed table could not be made to hold it either,
-/// since monomorphization erases and `Maybe<i64>`/`Maybe<string>` share the one
+/// since monomorphization erases and `Maybe<i32>`/`Maybe<string>` share the one
 /// path `Maybe`. The reprs are the *declared* field types with this site's type
 /// arguments substituted in, never the argument expressions' own types, which
 /// can be narrower.
@@ -366,7 +366,7 @@ fn trait_objects() {
 #[test]
 fn top_level() {
     all_round_trip(&[
-        "(defun m::add ((a int) (b int)) int true (assoc i64 + true () int (int int) (var a) (var b)))",
+        "(defun m::add ((a int) (b int)) int true (assoc i32 + true () int (int int) (var a) (var b)))",
         "(defun m::nothing () unit false (unit))",
         "(defmethod point area false ((self struct)) int true (field-get (var self) 0 int))",
         // params, then whether it takes `&rest`, then the `&optional`/`&key`

@@ -81,7 +81,7 @@ fn dolist_dispatches_on_element_shape() {
 fn dolist_sums_matched_int_bindings() {
     // `var` is `Sexpr`-typed (inferred from `sexpr-car`); the `(int n)` pattern
     // narrows it and binds `n : i64`, checked by the ordinary match machinery.
-    let src = "(let ((acc (the i64 0)))
+    let src = "(let ((acc (the i32 0)))
                  (dolist (x (quote (1 2 3 4)))
                    (match x ((int n) (setf acc (+ acc n)) ()) (_ ())))
                  acc)";
@@ -100,7 +100,7 @@ fn dolist_over_empty_list_runs_zero_times() {
 #[test]
 fn dolist_returns_its_result_form() {
     // The optional third spec element is the whole construct's value.
-    let src = "(let ((acc (the i64 0)))
+    let src = "(let ((acc (the i32 0)))
                  (dolist (x (quote (5 7 9)) acc)
                    (match x ((int n) (setf acc (+ acc n)) ()) (_ ()))))";
     assert_eq!(eval_ok(src), Value::Int(21));
@@ -115,7 +115,7 @@ fn dolist_without_result_form_is_unit() {
 #[test]
 fn break_exits_dolist_early() {
     // Stop accumulating once a `2` is seen (`break` exits the nearest loop).
-    let src = "(let ((acc (the i64 0)))
+    let src = "(let ((acc (the i32 0)))
                  (dolist (x (quote (1 2 3 4)))
                    (match x
                      ((int n) (if (= n 2) (break) (progn (setf acc (+ acc n)) ())))

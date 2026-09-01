@@ -1,6 +1,6 @@
 //! interp-closure removal Stage 1: LLVM handle types (`llvm-builder`,
 //! `llvm-value`, native `Scope<V>`, ...) have a compiled representation —
-//! an `i64` registry handle — and their builtin methods compile to the
+//! an opaque registry handle — and their builtin methods compile to the
 //! generic `rt_llvm_call` dispatch shim. These tests compile small
 //! functions whose parameters/returns/bodies use those types (exactly what
 //! the self-hosted compiler island's own `defun`s do), call them with real
@@ -83,7 +83,7 @@ fn a_compiled_function_drives_a_native_scope_and_matches_its_option() {
 
 #[test]
 fn a_compiled_function_sees_none_for_a_missing_scope_name() {
-    let src = "(defun probe ((s Scope<llvm-value>)) i64 \
+    let src = "(defun probe ((s Scope<llvm-value>)) i32 \
                  (match (get s \"absent\") \
                    ((Some w) 1) \
                    (None 0))) \

@@ -1,6 +1,6 @@
 //! Tests for `BitVector` — cl-parity-plan.md Phase 6c.
 //!
-//! A prelude `defstruct` over a `Vector<i64>` of packed words plus a length.
+//! A prelude `defstruct` over a `Vector<i32>` of packed words plus a length.
 //! What the tests here are mostly watching is the seam between those two: the
 //! bits past the length in the final word must stay clear, or `lognot` leaves
 //! phantom bits behind and two bit vectors of equal length stop agreeing.
@@ -95,14 +95,14 @@ fn clearing_a_bit_leaves_its_neighbours_alone() {
 
 #[test]
 fn bits_are_addressed_independently_across_a_word_boundary() {
-    // 32 bits to a word, so 31 and 32 are the last bit of word 0 and the
-    // first of word 1. The bit at the top of a word is the one that used to
-    // be lost: a prelude method runs compiled, and a compiled store of a
-    // wide `i64` into a container truncates it (see the type's own note).
+    // 31 bits to a word, so 30 and 31 are the last bit of word 0 and the
+    // first of word 1. The bit at the top of a word is the one worth pinning:
+    // packing 31 rather than 32 is what keeps the sign bit clear, so a word
+    // is always a non-negative number (see the type's own note).
     let src = "(let ((v (BitVector::make 70)))
-                 (progn (set v 31 true) (set v 32 true)
-                        (+ (if (get v 31) 1 0) (* 2 (if (get v 32) 1 0))
-                           (* 4 (if (get v 30) 1 0)) (* 8 (if (get v 33) 1 0)))))";
+                 (progn (set v 30 true) (set v 31 true)
+                        (+ (if (get v 30) 1 0) (* 2 (if (get v 31) 1 0))
+                           (* 4 (if (get v 29) 1 0)) (* 8 (if (get v 32) 1 0)))))";
     assert_eq!(eval_ok(&with_helpers(src)), Value::Int(3));
 }
 
@@ -217,7 +217,7 @@ fn a_complement_round_trip_is_the_identity() {
 
 #[test]
 fn the_padding_stays_clear_across_a_word_boundary() {
-    // 65 bits: word 2 holds one live bit and 31 padding bits.
+    // 65 bits: word 2 holds three live bits and 28 padding bits.
     let src = "(let ((v (bit-not (BitVector::make 65))) (n 0))
                  (progn
                    (let ((i 0))
@@ -229,7 +229,7 @@ fn the_padding_stays_clear_across_a_word_boundary() {
 
 #[test]
 fn two_bit_vectors_with_the_same_bits_are_the_same_value() {
-    // `lognot` sets all 64 bits of a word while only 32 are packed, so
+    // `lognot` sets all 32 bits of a word while only 31 are packed, so
     // without masking every word (not just the last) the complement of an
     // all-zero vector would carry different words from an all-ones vector
     // built bit by bit, while showing the same bits.

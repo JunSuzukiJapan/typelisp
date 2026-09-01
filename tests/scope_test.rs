@@ -225,7 +225,7 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
 #[test]
 fn heap_scope_set_then_get_roundtrips() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun f () i64
+               (defun f () i32
                  (let ((s (make-s)))
                    (set s \"x\" (quote 42))
                    (match (get s \"x\")
@@ -248,7 +248,7 @@ fn heap_scope_get_missing_key_returns_none() {
 #[test]
 fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun as-int ((o Option<Option<Sexpr>>)) i64
+               (defun as-int ((o Option<Option<Sexpr>>)) i32
                  (match o
                    ((Some v) (sexpr-int v))
                    ((None) -1)))
@@ -281,7 +281,7 @@ fn heap_scope_pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
 #[test]
 fn heap_scope_clone_frames_shares_existing_frames() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun f () i64
+               (defun f () i32
                  (let ((s (make-s)))
                    (set s \"x\" (quote 7))
                    (let ((s2 (clone-frames s)))
@@ -295,7 +295,7 @@ fn heap_scope_clone_frames_shares_existing_frames() {
 #[test]
 fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun f () i64
+               (defun f () i32
                  (let ((s (make-s)))
                    (set s \"x\" (quote 1))
                    (let ((s2 (clone-frames s)))

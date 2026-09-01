@@ -2594,7 +2594,10 @@ mod tests {
     #[test]
     fn the_word_sized_literals_pass_through_unchanged() {
         assert_eq!(bridged("(int 42)"), "(int 0 42)");
-        assert_eq!(bridged("(int -7)"), "(int 4294967295 4294967289)");
+        // Each half is a bit pattern read back as a signed `i32` (`half`),
+        // so a negative literal's halves print negative rather than as the
+        // 32-bit numbers they stand for.
+        assert_eq!(bridged("(int -7)"), "(int -1 -7)");
         assert_eq!(bridged("(bool true)"), "(bool true)");
         assert_eq!(bridged(r"(char #\a)"), r"(char #\a)");
         assert_eq!(bridged("(unit)"), "(unit)");
@@ -2629,7 +2632,7 @@ mod tests {
     #[test]
     fn a_bignum_becomes_its_sign_and_digits() {
         assert_eq!(bridged("(bignum 18446744073709551616)"), "(bignum (int 0 1) (int 0 0) (int 0 0) (int 0 1))");
-        assert_eq!(bridged("(bignum -18446744073709551616)"), "(bignum (int 4294967295 4294967295) (int 0 0) (int 0 0) (int 0 1))");
+        assert_eq!(bridged("(bignum -18446744073709551616)"), "(bignum (int -1 -1) (int 0 0) (int 0 0) (int 0 1))");
         assert_eq!(bridged("(ratio 1/3)"), "(ratio (bignum (int 0 1) (int 0 1)) (bignum (int 0 1) (int 0 3)))");
     }
 

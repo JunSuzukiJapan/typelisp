@@ -108,14 +108,14 @@ struct Case {
 /// run-time one on both sides.
 const CASES: &[Case] = &[
     Case {
-        what: "i64 division by zero",
-        defs: "(defun f ((a i64) (b i64)) i64 (/ a b))",
+        what: "i32 division by zero",
+        defs: "(defun f ((a i32) (b i32)) i32 (/ a b))",
         call: "(f 5 0)",
         message: "divide by zero",
     },
     Case {
-        what: "i64 mod by zero",
-        defs: "(defun f ((a i64) (b i64)) i64 (mod a b))",
+        what: "i32 mod by zero",
+        defs: "(defun f ((a i32) (b i32)) i32 (mod a b))",
         call: "(f 5 0)",
         message: "mod by zero",
     },
@@ -126,9 +126,9 @@ const CASES: &[Case] = &[
         // `-9223372036854775808` back as a bignum — so `mk-min` builds it,
         // with an `i64`-typed first operand so `-` dispatches on `i64`
         // rather than defaulting to `i32`.
-        what: "i64 division overflowing",
-        defs: "(defun mk-min ((z i64)) i64 (- (- z 9223372036854775807) 1))
-               (defun f ((a i64) (b i64)) i64 (/ a b))",
+        what: "i32 division overflowing",
+        defs: "(defun mk-min ((z i32)) i32 (- (- z 9223372036854775807) 1))
+               (defun f ((a i32) (b i32)) i32 (/ a b))",
         call: "(f (mk-min 0) -1)",
         message: "arithmetic overflow: -9223372036854775808 / -1",
     },
@@ -326,7 +326,7 @@ fn a_runtime_failure_unwinds_through_intermediate_compiled_frames() {
 #[test]
 fn a_session_survives_a_compiled_runtime_failure_and_keeps_evaluating() {
     let mut s = Session::new();
-    s.ok("(defun f ((a i64) (b i64)) i64 (/ a b)) (compile f)");
+    s.ok("(defun f ((a i32) (b i32)) i32 (/ a b)) (compile f)");
     assert_eq!(s.panics("(f 5 0)"), "divide by zero");
     // The same compiled function, this time with a divisor it can use.
     assert_eq!(s.ok("(f 10 2)"), Value::Int(5), "the session did not survive");

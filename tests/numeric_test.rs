@@ -1,6 +1,6 @@
 //! Tests for the numeric extension
 //! ([cl-equivalence-catalog.md](../docs/dev/cl-equivalence-catalog.md) §2.2 f,
-//! roadmap step 6): `i64`/`f64` arithmetic/comparison instance methods
+//! roadmap step 6): integer/`f64` arithmetic/comparison instance methods
 //! (`registry::int_assoc`/`float_assoc`), `f64`'s `expt`/`sqrt`/`floor`/
 //! `ceiling`/`round`/`truncate`, and the free function `random`.
 //!
@@ -85,64 +85,24 @@ fn assert_close(actual: Value, expected: f64) {
     assert!((f - expected).abs() < 1e-9, "{} != {}", f, expected);
 }
 
-// ---- i64 ----------------------------------------------------------------------
+// The block that used to sit here re-ran every `i32` test above under `i64`,
+// a second width with the same catalog. There is no 64-bit-wide integer type
+// any more (`types::Type::is_integer`), and the widths that remain are
+// covered — as *widths*, with their own wrapping — by
+// `tests/numeric_widths_test.rs`.
 
 #[test]
-fn i64_arithmetic() {
-    let src = "(defun add ((a i64) (b i64)) i64 (+ a b)) (add 3 4)";
-    assert_eq!(eval_ok(src), Value::Int(7));
-}
-
-#[test]
-fn i64_comparison() {
-    let src = "(defun lt ((a i64) (b i64)) bool (< a b)) (lt 3 4)";
-    assert_eq!(eval_ok(src), Value::Bool(true));
-}
-
-#[test]
-fn i64_divide_by_zero_panics() {
-    let src = "(defun f ((a i64) (b i64)) i64 (/ a b)) (f 1 0)";
-    assert!(matches!(run(src), Err(EvalError::Panic(_))));
-}
-
-#[test]
-fn i64_mod_is_floored_and_rem_is_truncated() {
-    let m = "(defun f ((a i64) (b i64)) i64 (mod a b)) (f -7 3)";
-    let r = "(defun f ((a i64) (b i64)) i64 (rem a b)) (f -7 3)";
-    assert_eq!(eval_ok(m), Value::Int(2));
-    assert_eq!(eval_ok(r), Value::Int(-1));
-}
-
-#[test]
-fn i64_abs_and_signum() {
-    let a = "(defun f ((x i64)) i64 (abs x)) (f -9000000000)";
-    let s = "(defun f ((x i64)) i64 (signum x)) (f -9000000000)";
-    assert_eq!(eval_ok(a), Value::Int(9000000000));
-    assert_eq!(eval_ok(s), Value::Int(-1));
-}
-
-#[test]
-fn i64_gcd_and_lcm() {
-    let g = "(defun f ((a i64) (b i64)) i64 (gcd a b)) (f 12 18)";
-    let l = "(defun f ((a i64) (b i64)) i64 (lcm a b)) (f 4 6)";
-    let l0 = "(defun f ((a i64) (b i64)) i64 (lcm a b)) (f 0 5)";
-    assert_eq!(eval_ok(g), Value::Int(6));
-    assert_eq!(eval_ok(l), Value::Int(12));
-    assert_eq!(eval_ok(l0), Value::Int(0));
-}
-
-#[test]
-fn int_literal_adopts_i64_from_the_dispatched_operands_expected_type() {
-    // A bare literal's default type is `i32`, but `+`'s `i64` instance
-    // method expects `i64` for its second operand too — the literal `1`
-    // adopts that expected type rather than forcing dispatch back to `i32`.
-    let src = "(defun f ((a i64)) i64 (+ a 1)) (f 1)";
+fn int_literal_adopts_the_dispatched_operands_expected_type() {
+    // A bare literal's default type is `i32`, but `+`'s `u16` instance method
+    // expects `u16` for its second operand too — the literal `1` adopts that
+    // expected type rather than forcing dispatch back to `i32`.
+    let src = "(defun f ((a u16)) u16 (+ a 1)) (f 1)";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
-fn i32_value_cannot_be_passed_where_i64_is_expected() {
-    let src = "(defun mk () i32 5) (defun f ((a i64)) i64 (+ a 1)) (f (mk))";
+fn a_value_of_one_width_cannot_be_passed_where_another_is_expected() {
+    let src = "(defun mk () i32 5) (defun f ((a u16)) u16 (+ a 1)) (f (mk))";
     type_error(src);
 }
 
@@ -216,7 +176,7 @@ fn f64_truncate() {
 // comment just above `floor-div`) -----------------------------------------------
 
 #[test]
-fn i64_floor_div() {
+fn i32_floor_div() {
     // CL: (floor 7 2) => 3, 1 ; (floor -7 2) => -4, 1
     assert_eq!(eval_ok("(car (floor-div 7 2))"), Value::Int(3));
     assert_eq!(eval_ok("(cdr (floor-div 7 2))"), Value::Int(1));
@@ -225,7 +185,7 @@ fn i64_floor_div() {
 }
 
 #[test]
-fn i64_ceiling_div() {
+fn i32_ceiling_div() {
     // CL: (ceiling 7 2) => 4, -1 ; (ceiling -7 2) => -3, -1 ; exact division
     // carries no remainder.
     assert_eq!(eval_ok("(car (ceiling-div 7 2))"), Value::Int(4));
@@ -237,7 +197,7 @@ fn i64_ceiling_div() {
 }
 
 #[test]
-fn i64_truncate_div() {
+fn i32_truncate_div() {
     // CL: (truncate -7 2) => -3, -1 (remainder's sign follows the dividend,
     // unlike `floor-div`'s).
     assert_eq!(eval_ok("(car (truncate-div -7 2))"), Value::Int(-3));
@@ -245,7 +205,7 @@ fn i64_truncate_div() {
 }
 
 #[test]
-fn i64_round_div_ties_to_even() {
+fn i32_round_div_ties_to_even() {
     // CL round-half-to-even: (round 7 2) => 4, -1 (3.5 -> 4, even);
     // (round 5 2) => 2, 1 (2.5 -> 2, even); (round 3 2) => 2, -1 (1.5 -> 2,
     // even); (round -5 2) => -2, -1 (-2.5 -> -2, even).

@@ -61,7 +61,7 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
             r#"(defstruct money (yen i32))
                (defmethod jp ((self money) (colon bool) (at bool)) string
                  (format false "~a yen" (yen self)))
-               (defun main () i64
+               (defun main () i32
                  (if (equal (format false "~/jp/" (money::new 300)) "300 yen") 0 1))"#,
         ),
         0
@@ -80,7 +80,7 @@ fn an_enum_variant_name_survives_an_instantiated_key_in_an_executable() {
     assert_eq!(
         compile_and_run(
             "enum_variant_key",
-            r#"(defun main () i64
+            r#"(defun main () i32
                  (if (equal (format false "~a" (option::some 1)) "(some 1)") 0 1))"#,
         ),
         0
@@ -89,12 +89,12 @@ fn an_enum_variant_name_survives_an_instantiated_key_in_an_executable() {
 
 #[test]
 fn compiles_and_runs_a_constant_main() {
-    assert_eq!(compile_and_run("answer", "(defun main () i64 42)"), 42);
+    assert_eq!(compile_and_run("answer", "(defun main () i32 42)"), 42);
 }
 
 #[test]
 fn compiles_and_runs_arithmetic_in_main() {
-    // `i32`, not `i64`: a bare integer literal with no surrounding type
+    // `i32`: a bare integer literal with no surrounding type
     // context (no typed parameter or `let` — `main` can't have either,
     // see this module's doc comment) always defaults to `i32` (the
     // checker resolves `+`/`-`/`*`'s receiver type from its *first*
@@ -118,8 +118,8 @@ fn compiles_a_file_with_a_non_main_helper_function_too() {
     // uncalled helper still compiles and links into the same executable
     // without colliding with anything.
     let src = r#"
-        (defun add2 ((a i64) (b i64)) i64 (+ a b))
-        (defun main () i64 7)
+        (defun add2 ((a i32) (b i32)) i32 (+ a b))
+        (defun main () i32 7)
     "#;
     assert_eq!(compile_and_run("with_helper", src), 7);
 }
@@ -132,8 +132,8 @@ fn compiles_a_file_with_a_non_main_helper_function_too() {
 #[test]
 fn compiles_and_runs_main_calling_a_helper_function() {
     let src = r#"
-        (defun square ((x i64)) i64 (* x x))
-        (defun main () i64 (+ (square 3) (square 4)))
+        (defun square ((x i32)) i32 (* x x))
+        (defun main () i32 (+ (square 3) (square 4)))
     "#;
     assert_eq!(compile_and_run("calls_helper", src), 25);
 }
@@ -150,9 +150,9 @@ fn compiles_and_runs_main_calling_a_helper_function() {
 #[test]
 fn compiles_and_runs_an_escaping_capturing_lambda_through_a_helper() {
     let src = r#"
-        (defun adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
-        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
-        (defun main () i64 (apply-fn (adder 5) 10))
+        (defun adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
+        (defun apply-fn ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun main () i32 (apply-fn (adder 5) 10))
     "#;
     assert_eq!(compile_and_run("escaping_lambda", src), 15);
 }
@@ -170,10 +170,10 @@ fn compiles_and_runs_an_escaping_capturing_lambda_through_a_helper() {
 #[test]
 fn compiles_a_file_with_a_capturing_labels_helper_function_too() {
     let src = r#"
-        (defun add-offset ((offset i64) (n i64)) i64
-          (labels ((go ((k i64)) i64 (+ k offset)))
+        (defun add-offset ((offset i32) (n i32)) i32
+          (labels ((go ((k i32)) i32 (+ k offset)))
             (go n)))
-        (defun main () i64 (add-offset 10 5))
+        (defun main () i32 (add-offset 10 5))
     "#;
     assert_eq!(compile_and_run("with_capturing_helper", src), 15);
 }
@@ -186,9 +186,9 @@ fn compiles_a_file_with_a_capturing_labels_helper_function_too() {
 #[test]
 fn compiles_and_runs_a_labels_body_in_main() {
     let src = r#"
-        (defun main () i64
-          (labels ((square ((x i64)) i64 (* x x))
-                   (sum-helper ((x i64) (y i64)) i64 (+ (square x) (square y))))
+        (defun main () i32
+          (labels ((square ((x i32)) i32 (* x x))
+                   (sum-helper ((x i32) (y i32)) i32 (+ (square x) (square y))))
             (sum-helper 3 4)))
     "#;
     assert_eq!(compile_and_run("labels_in_main", src), 25);
@@ -205,8 +205,8 @@ fn compiles_and_runs_a_labels_body_in_main() {
 #[test]
 fn compiles_and_runs_a_self_recursive_function_with_a_base_case() {
     let src = r#"
-        (defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))
-        (defun main () i64 (fact 5))
+        (defun fact ((n i32)) i32 (if (<= n 1) 1 (* n (fact (- n 1)))))
+        (defun main () i32 (fact 5))
     "#;
     assert_eq!(compile_and_run("self_recursive_base_case", src), 120);
 }
@@ -259,9 +259,9 @@ fn compiles_and_runs_nested_loops_through_a_helper() {
 #[test]
 fn exit_code_is_truncated_to_32_bits() {
     // Process exit codes are a byte on POSIX (`status.code()` already
-    // reports the OS's truncated view) — 256 wraps to 0, matching `i64`
+    // reports the OS's truncated view) — 256 wraps to 0, matching the
     // wrapping down through the wrapper's `i32` truncation.
-    assert_eq!(compile_and_run("wraps", "(defun main () i64 256)"), 0);
+    assert_eq!(compile_and_run("wraps", "(defun main () i32 256)"), 0);
 }
 
 #[test]
@@ -269,7 +269,7 @@ fn errors_without_a_zero_argument_main() {
     let dir = tmp_dir();
     let src_path = dir.join("no_main.typl");
     let out_path = dir.join("no_main");
-    std::fs::write(&src_path, "(defun answer () i64 42)").unwrap();
+    std::fs::write(&src_path, "(defun answer () i32 42)").unwrap();
 
     let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
         .expect_err("expected a missing-entry-point error");
@@ -281,7 +281,7 @@ fn errors_on_a_non_defun_top_level_form() {
     let dir = tmp_dir();
     let src_path = dir.join("bad_top_level.typl");
     let out_path = dir.join("bad_top_level");
-    std::fs::write(&src_path, "(defun main () i64 42)\n(+ 1 2)").unwrap();
+    std::fs::write(&src_path, "(defun main () i32 42)\n(+ 1 2)").unwrap();
 
     let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
         .expect_err("expected an unsupported-top-level-form error");
@@ -296,7 +296,7 @@ fn errors_on_a_non_defun_top_level_form() {
 fn jit_and_aot_agree_on_the_same_source() {
     use typelisp::{Checker, Heap, Interp, Reader, Value};
 
-    // `i32`, not `i64` — see `compiles_and_runs_arithmetic_in_main`'s doc
+    // `i32` — see `compiles_and_runs_arithmetic_in_main`'s doc
     // comment.
     let src = "(defun main () i32 (- (* 6 8) (+ 4 2)))";
 
@@ -333,9 +333,9 @@ fn jit_and_aot_agree_on_a_labels_body() {
     use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
-        (defun main () i64
-          (labels ((square ((x i64)) i64 (* x x))
-                   (sum-helper ((x i64) (y i64)) i64 (+ (square x) (square y))))
+        (defun main () i32
+          (labels ((square ((x i32)) i32 (* x x))
+                   (sum-helper ((x i32) (y i32)) i32 (+ (square x) (square y))))
             (sum-helper 3 4)))
     "#;
 
@@ -375,8 +375,8 @@ fn jit_and_aot_agree_on_a_cross_function_call() {
     use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
-        (defun square ((x i64)) i64 (* x x))
-        (defun main () i64 (+ (square 3) (square 4)))
+        (defun square ((x i32)) i32 (* x x))
+        (defun main () i32 (+ (square 3) (square 4)))
     "#;
 
     let mut h = Heap::with_capacity(1 << 16);
@@ -415,9 +415,9 @@ fn jit_and_aot_agree_on_an_escaping_capturing_lambda() {
     use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
-        (defun adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
-        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
-        (defun main () i64 (apply-fn (adder 5) 10))
+        (defun adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
+        (defun apply-fn ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun main () i32 (apply-fn (adder 5) 10))
     "#;
 
     let mut h = Heap::with_capacity(1 << 16);
@@ -455,8 +455,8 @@ fn jit_and_aot_agree_on_a_self_recursive_function_with_a_base_case() {
     use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
-        (defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))
-        (defun main () i64 (fact 5))
+        (defun fact ((n i32)) i32 (if (<= n 1) 1 (* n (fact (- n 1)))))
+        (defun main () i32 (fact 5))
     "#;
 
     let mut h = Heap::with_capacity(1 << 16);
@@ -534,8 +534,8 @@ fn jit_and_aot_agree_on_a_loop_based_function() {
 #[test]
 fn compiles_and_runs_main_that_reads_a_global() {
     let src = r#"
-        (defvar (answer i64) 42)
-        (defun main () i64 answer)
+        (defvar (answer i32) 42)
+        (defun main () i32 answer)
     "#;
     assert_eq!(compile_and_run("global_read", src), 42);
 }
@@ -548,9 +548,9 @@ fn compiles_and_runs_main_that_reads_a_global() {
 #[test]
 fn compiles_and_runs_main_that_writes_a_global() {
     let src = r#"
-        (defvar (counter i64) 0)
-        (defun bump () i64 (setf counter (+ counter 1)))
-        (defun main () i64 (let ((ignored (bump))) (bump)))
+        (defvar (counter i32) 0)
+        (defun bump () i32 (setf counter (+ counter 1)))
+        (defun main () i32 (let ((ignored (bump))) (bump)))
     "#;
     assert_eq!(compile_and_run("global_write", src), 2);
 }
@@ -566,9 +566,9 @@ fn jit_and_aot_agree_on_a_global_read_and_write() {
     use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
-        (defvar (counter i64) 0)
-        (defun bump () i64 (setf counter (+ counter 1)))
-        (defun main () i64 (let ((ignored (bump))) (bump)))
+        (defvar (counter i32) 0)
+        (defun bump () i32 (setf counter (+ counter 1)))
+        (defun main () i32 (let ((ignored (bump))) (bump)))
     "#;
 
     let mut h = Heap::with_capacity(1 << 16);
@@ -604,9 +604,9 @@ fn jit_and_aot_agree_on_a_global_read_and_write() {
 #[test]
 fn compiles_and_runs_main_that_reads_a_defenum_global() {
     let src = r#"
-        (defenum shape (Circle i64) (Rect i64 i64))
+        (defenum shape (Circle i32) (Rect i32 i32))
         (defvar (s shape) (shape::Rect 6 7))
-        (defun main () i64 (match s ((Circle r) (* r r)) ((Rect w h) (* w h))))
+        (defun main () i32 (match s ((Circle r) (* r r)) ((Rect w h) (* w h))))
     "#;
     assert_eq!(compile_and_run("defenum_global_read", src), 42);
 }
@@ -619,11 +619,11 @@ fn jit_and_aot_agree_on_a_defenum_global_read_and_write() {
     use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
-        (defenum counter (At i64))
+        (defenum counter (At i32))
         (defvar (c counter) (counter::At 0))
-        (defun bump () i64
+        (defun bump () i32
           (match c ((At n) (progn (setf c (counter::At (+ n 1))) (+ n 1)))))
-        (defun main () i64 (let ((ignored (bump))) (bump)))
+        (defun main () i32 (let ((ignored (bump))) (bump)))
     "#;
 
     let mut h = Heap::with_capacity(1 << 16);
@@ -665,7 +665,7 @@ fn compiles_a_defstruct_with_a_method() {
             r#"
             (defstruct point (x i32) (y i32))
             (defmethod norm ((self point)) i32 (+ (* self::x self::x) (* self::y self::y)))
-            (defun main () i64 (as i64 (norm (point::new 3 4))))
+            (defun main () i32 (as i32 (norm (point::new 3 4))))
             "#
         ),
         25
@@ -683,7 +683,7 @@ fn compiles_an_impl_block() {
             (deftrait Counted () (count ((self Self)) i32))
             (defstruct box-a (n i32))
             (impl Counted box-a (count ((self Self)) i32 self::n))
-            (defun main () i64 (as i64 (count (box-a::new 9))))
+            (defun main () i32 (as i32 (count (box-a::new 9))))
             "#
         ),
         9
@@ -708,8 +708,8 @@ fn compiles_and_runs_dynamic_dispatch_through_a_trait_object() {
             (impl Drawable circle (draw ((self Self)) i32 1))
             (impl Drawable square (draw ((self Self)) i32 2))
             (defun render ((d :dyn Drawable)) i32 (draw d))
-            (defun main () i64
-              (as i64 (+ (* 10 (render (circle::new 3))) (render (square::new 4)))))
+            (defun main () i32
+              (as i32 (+ (* 10 (render (circle::new 3))) (render (square::new 4)))))
             "#
         ),
         12
@@ -739,7 +739,7 @@ fn compiles_and_runs_an_upcast_to_a_non_first_supertrait() {
             (impl D pair (d-tag ((self Self)) i32 6))
             (defun only-c ((c :dyn C)) i32 (c-tag c))
             (defun via ((d :dyn D)) i32 (only-c d))
-            (defun main () i64 (as i64 (+ (* 10 (via (cell::new 0))) (via (pair::new 0)))))
+            (defun main () i32 (as i32 (+ (* 10 (via (cell::new 0))) (via (pair::new 0)))))
             "#
         ),
         25
@@ -762,7 +762,7 @@ fn compiles_and_runs_a_multi_slot_vtable() {
               (sides ((self Self)) i32 3))
             (defun paint ((s :dyn Shape)) i32 (draw s))
             (defun outline ((s :dyn Shape)) i32 (sides s))
-            (defun main () i64 (as i64 (+ (* 10 (paint (tri::new 1))) (outline (tri::new 1)))))
+            (defun main () i32 (as i32 (+ (* 10 (paint (tri::new 1))) (outline (tri::new 1)))))
             "#
         ),
         73
@@ -783,7 +783,7 @@ fn compiles_and_runs_a_multi_slot_vtable() {
 /// a script cannot tell the two front ends apart.
 #[test]
 fn a_panic_reaching_the_entry_point_exits_rather_than_aborting() {
-    let (code, stderr) = compile_and_capture("panics", r#"(defun main () i64 (panic "from aot"))"#);
+    let (code, stderr) = compile_and_capture("panics", r#"(defun main () i32 (panic "from aot"))"#);
     assert_eq!(code, 1, "stderr was: {}", stderr);
     assert!(stderr.contains("panic: from aot"), "stderr was: {}", stderr);
 }
@@ -797,7 +797,7 @@ fn a_panic_unwinds_through_a_compiled_call_in_an_aot_executable() {
         r#"
         (defun inner ((n i32)) i32 (if (< n 0) (panic "negative") n))
         (defun outer ((n i32)) i32 (inner n))
-        (defun main () i64 (as i64 (outer -1)))
+        (defun main () i32 (as i32 (outer -1)))
         "#,
     );
     assert_eq!(code, 1, "stderr was: {}", stderr);
@@ -820,7 +820,7 @@ fn catch_and_throw_work_in_an_aot_executable() {
             r#"
             (defun deep ((n i32)) i32 (throw 'done (* n 2)))
             (defun middle ((n i32)) i32 (+ 1 (deep n)))
-            (defun main () i64 (as i64 (catch 'done (middle 21))))
+            (defun main () i32 (as i32 (catch 'done (middle 21))))
             "#
         ),
         42
@@ -837,7 +837,7 @@ fn an_unwind_protect_cleanup_runs_in_an_aot_executable() {
             r#"
             (defvar (ran i32) 0)
             (defun body () i32 (unwind-protect (throw 'done 40) (setf ran 2)))
-            (defun main () i64 (as i64 (+ (catch 'done (body)) ran)))
+            (defun main () i32 (as i32 (+ (catch 'done (body)) ran)))
             "#
         ),
         42
@@ -853,7 +853,7 @@ fn an_uncaught_throw_reaching_the_entry_point_exits_rather_than_aborting() {
         "aot_uncaught_throw",
         r#"
         (defun thrower () i32 (throw 'nobody 1))
-        (defun main () i64 (as i64 (thrower)))
+        (defun main () i32 (as i32 (thrower)))
         "#,
     );
     assert_eq!(code, 1, "stderr was: {}", stderr);
@@ -861,10 +861,10 @@ fn an_uncaught_throw_reaching_the_entry_point_exits_rather_than_aborting() {
 }
 
 /// A runtime failure the *runtime* raises — here a zero divisor inside
-/// `rt_i64_div` — ends an AOT executable the same way an explicit
+/// `rt_int_div` — ends an AOT executable the same way an explicit
 /// `(panic ...)` does: message on stderr, exit code 1.
 ///
-/// It used to abort with 134 instead, because `rt_i64_div` reached
+/// It used to abort with 134 instead, because `rt_int_div` reached
 /// `typelisp_rt::fatal()`. That it now unwinds all the way to `rt_run_entry`
 /// is what makes an AOT program's arithmetic failures reportable rather than
 /// fatal; `tests/runtime_error_parity_test.rs` covers the same failures on the
@@ -878,7 +878,7 @@ fn a_zero_divisor_exits_rather_than_aborting_in_an_aot_executable() {
         "aot_divide_by_zero",
         r#"
         (defun zero () i32 0)
-        (defun main () i64 (as i64 (/ 5 (zero))))
+        (defun main () i32 (as i32 (/ 5 (zero))))
         "#,
     );
     assert_eq!(code, 1, "stderr was: {}", stderr);
@@ -899,7 +899,7 @@ fn a_cleanup_runs_when_a_zero_divisor_unwinds_in_an_aot_executable() {
         (defvar (ran i32) 0)
         (defun zero () i32 0)
         (defun body () i32 (unwind-protect (/ 5 (zero)) (setf ran 1)))
-        (defun main () i64 (as i64 (+ (body) ran)))
+        (defun main () i32 (as i32 (+ (body) ran)))
         "#,
     );
     assert_eq!(code, 1, "stderr was: {}", stderr);
@@ -917,7 +917,7 @@ fn a_break_runs_an_unwind_protect_cleanup_in_an_aot_executable() {
             r#"
             (defvar (ran i32) 0)
             (defun body () i32 (progn (loop (unwind-protect (break) (setf ran 40))) ran))
-            (defun main () i64 (as i64 (+ (body) 2)))
+            (defun main () i32 (as i32 (+ (body) 2)))
             "#
         ),
         42
@@ -960,7 +960,7 @@ fn an_aot_executable_evaluates_a_call_to_its_own_function() {
         compile_and_run(
             "aot_eval_own_function",
             r#"
-            (defun double ((n i64)) i64 (* n 2))
+            (defun double ((n i32)) i32 (* n 2))
             (defun main () i32
               (match (eval (quote (double 21)))
                 ((ok v) (as i32 (sexpr-int v)))
@@ -981,7 +981,7 @@ fn an_aot_executable_evaluates_a_read_of_a_global_the_program_wrote() {
         compile_and_run(
             "aot_eval_global_read",
             r#"
-            (defvar (counter i64) 1)
+            (defvar (counter i32) 1)
             (defun main () i32
               (progn
                 (setf counter 42)
@@ -1002,7 +1002,7 @@ fn an_aot_executable_sees_a_global_an_evaluated_form_wrote() {
         compile_and_run(
             "aot_eval_global_write",
             r#"
-            (defvar (counter i64) 1)
+            (defvar (counter i32) 1)
             (defun main () i32
               (progn
                 (eval (quote (setf counter 42)))
@@ -1024,9 +1024,9 @@ fn an_aot_executable_runs_each_defvar_initializer_once() {
         compile_and_run(
             "aot_eval_single_init",
             r#"
-            (defvar (times i64) 0)
-            (defun bump () i64 (progn (setf times (+ times 1)) 7))
-            (defvar (v i64) (bump))
+            (defvar (times i32) 0)
+            (defun bump () i32 (progn (setf times (+ times 1)) 7))
+            (defvar (v i32) (bump))
             (defun main () i32
               (match (eval (quote times))
                 ((ok r) (as i32 (sexpr-int r)))
@@ -1047,7 +1047,7 @@ fn an_aot_executable_keeps_definitions_made_by_an_evaluated_form() {
             r#"
             (defun main () i32
               (progn
-                (eval (quote (defun tripled ((n i64)) i64 (* n 3))))
+                (eval (quote (defun tripled ((n i32)) i32 (* n 3))))
                 (match (eval (quote (tripled 14)))
                   ((ok v) (as i32 (sexpr-int v)))
                   ((err _) -1))))

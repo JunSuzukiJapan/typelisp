@@ -457,7 +457,7 @@ mod tests {
         let mut interp = Interp::new();
         crate::prelude::load_interpreted(&mut heap, &mut chk, &mut interp);
         let reader = Reader::new();
-        let forms = reader.read_all(&mut heap, "(defvar (island-probe-global i64) 1)").expect("read failed");
+        let forms = reader.read_all(&mut heap, "(defvar (island-probe-global i32) 1)").expect("read failed");
         let tl = chk.check_form(&mut heap, &interp, forms[0]).expect("check failed");
         let mut items = Vec::new();
         let err = collect_island_items(&heap, tl, &mut items).expect_err("a defvar must be refused");

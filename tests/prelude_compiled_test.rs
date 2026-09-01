@@ -47,7 +47,7 @@ fn eval(heap: &mut Heap, chk: &mut Checker, interp: &Interp, src: &str) -> Value
 #[test]
 fn loading_the_prelude_installs_native_bodies() {
     let (_heap, _chk, interp) = env(true);
-    for name in ["not", "sexpr-map", "i64::gcd", "i32::abs", "bignum::signum", "f64::rem", "i64::equals"] {
+    for name in ["not", "sexpr-map", "i32::gcd", "i32::abs", "bignum::signum", "f64::rem", "i32::equals"] {
         assert!(interp.is_compiled(name), "`{}` should have a compiled body after load_prelude", name);
     }
 }

@@ -86,7 +86,7 @@ const ISLAND_DEFUNS: &[&str] = &[
     "ratio-unary-call",
     "raising-binop-call",
     "sexpr-list-length",
-    "sexpr-list-length-i64",
+    "sexpr-list-length-i32",
     "bind-let-values",
     "unroot-let-sexpr-values",
     "compile-sexpr-tag-test",

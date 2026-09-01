@@ -60,7 +60,7 @@ fn isqrt_is_the_greatest_root_that_does_not_overshoot() {
     assert_eq!(show("(isqrt 16)"), "4");
     assert_eq!(show("(isqrt 24)"), "4");
     assert_eq!(show("(isqrt 1000000)"), "1000");
-    assert_eq!(show("(isqrt (the i64 1000000000000))"), "1000000");
+    assert_eq!(show("(isqrt (the i32 1000000000000))"), "1000000");
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn integer_expt_squares_and_rejects_a_negative_exponent() {
     assert_eq!(show("(expt 3 0)"), "1");
     assert_eq!(show("(expt 5 3)"), "125");
     assert_eq!(show("(expt -2 3)"), "-8");
-    assert_eq!(show("(expt (the i64 2) (the i64 40))"), "1099511627776");
+    assert_eq!(show("(expt (the i32 2) (the i32 40))"), "1099511627776");
 }
 
 #[test]

@@ -699,7 +699,7 @@ fn labels_function_can_be_bound_to_a_variable_like_any_other() {
 // `&rest`'s collected arguments are bound to a plain `Sexpr` list (an
 // ordinary Lisp list of cons cells, like every Lisp's `&rest` parameter —
 // never a homogeneous array type), with each element wrapped in its
-// `Sexpr` constructor (`(Int n)` for an `i32`/`i64` element here) — see
+// `Sexpr` constructor (`(Int n)` for an integer element here) — see
 // `Checker::wrap_rest_elem`'s doc comment. These tests use `run`/`eval_ok`
 // (no prelude loaded), so list length/indexing is done directly via the
 // `sexpr-*` accessor layer (`match` on `Sexpr` is fenced off — Symbol/Sexpr
@@ -742,11 +742,11 @@ fn defun_rest_with_no_fixed_params_collects_every_argument() {
 
 #[test]
 fn defun_rest_elements_keep_their_order_and_values() {
-    // `Sexpr`'s own `Int` constructor always holds an `i64` (regardless of
-    // whether the `&rest` element type was declared `i32` or `i64` — both
-    // wrap into the same `Sexpr` variant, see `sexpr_ctor_for`), so
-    // extracting one back out via `sexpr-int` yields `i64`, not `i32`.
-    let src = "(defun second-extra ((a i32) &rest (xs i32)) i64
+    // `Sexpr`'s own `Int` constructor holds an `i32` whatever integer width
+    // the `&rest` element type was declared as — every width wraps into the
+    // same `Sexpr` variant (see `sexpr_ctor_for`), so extracting one back out
+    // via `sexpr-int` yields `i32`.
+    let src = "(defun second-extra ((a i32) &rest (xs i32)) i32
                  (sexpr-int (sexpr-car (sexpr-cdr xs))))
                (second-extra 1 10 20 30)";
     assert_eq!(eval_ok(src), Value::Int(20));
@@ -771,7 +771,7 @@ fn generic_rest_function_works_at_different_element_types() {
 
 #[test]
 fn apply_calls_a_named_variadic_function_with_a_runtime_list() {
-    let src = "(defun first-extra ((a i32) &rest (xs i32)) i64
+    let src = "(defun first-extra ((a i32) &rest (xs i32)) i32
                  (sexpr-int (sexpr-car xs)))
                (apply first-extra 1 (quote (10 20)))";
     assert_eq!(eval_ok(src), Value::Int(10));
@@ -803,7 +803,7 @@ fn apply_with_no_fixed_arguments_passes_the_whole_list_as_rest() {
 
 #[test]
 fn the_is_transparent_at_runtime() {
-    assert_eq!(eval_ok("(the i64 5)"), Value::Int(5));
+    assert_eq!(eval_ok("(the i32 5)"), Value::Int(5));
 }
 
 // ---- unreachable / todo -------------------------------------------------------

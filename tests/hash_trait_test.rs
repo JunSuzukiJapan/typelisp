@@ -98,8 +98,8 @@ fn a_user_type_can_implement_hash() {
         (defstruct point (x i32) (y i32))
         (impl Eq point (equals ((self Self) (other Self)) bool
           (and (= self::x other::x) (= self::y other::y))))
-        (impl Hash point (sxhash ((self Self)) i64
-          (logand (+ (* (as i64 self::x) 31) (as i64 self::y)) *sxhash-mask*)))
+        (impl Hash point (sxhash ((self Self)) i32
+          (logand (+ (* (as i32 self::x) 31) (as i32 self::y)) *sxhash-mask*)))
         (sxhash (point::new 1 2))
     ";
     assert_eq!(eval_ok(src), Value::Int(33));
@@ -108,7 +108,7 @@ fn a_user_type_can_implement_hash() {
 #[test]
 fn a_generic_function_can_require_hash() {
     let src = "
-        (defun both<T> ((a T) (b T)) i64 (where (Hash T)) (+ (sxhash a) (sxhash b)))
+        (defun both<T> ((a T) (b T)) i32 (where (Hash T)) (+ (sxhash a) (sxhash b)))
         (both 3 4)
     ";
     assert_eq!(eval_ok(src), Value::Int(7));

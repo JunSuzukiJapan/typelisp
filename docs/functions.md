@@ -8,9 +8,12 @@
 
 構文（特殊形・定義方法）は [syntax.md](syntax.md) を参照。
 
-## 1. 算術・比較（`i32` / `i64`）
+## 1. 算術・比較（整数）
 
-第一引数の型で `i32` 用と `i64` 用のどちらに解決されるかが決まる（両者は独立で、暗黙変換はない）。
+整数型は `i8` `i16` `i32` `u8` `u16` `u32` の6つ。第一引数の型でどれ用に解決されるかが決まる
+（互いに独立で、暗黙変換はない）。**64bit 幅の整数型は無い**——実行時の値は下位3bitがタグの
+1語なので即値の整数には61bitしか残らず、64bitを名乗る型はどこかで上位3bitを落とすことになる。
+`i32` より大きい数は `bignum` を使う。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
@@ -31,21 +34,31 @@
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio` への拡大変換（常に正確） |
 | `int->char` | `(int->char x)` | `T→char` | Unicode スカラ値として解釈。不正な値は panic |
 | `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` の失敗を `None` で返す版 |
+| `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | 幅変換。入らない値は切り詰める（Rust の `as` と同じ） |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 同じ変換を問いとして。値がその幅に入らなければ `None` |
 
 これらの変換は `(as Type x)`/`(try-as Type x)` 特殊形（[syntax.md](syntax.md) 参照）の実体でもある。
 ビット演算（`logand`/`ash`/`ldb` 等）と述語（`zerop`/`evenp` 等）は型をまたいで同じ形なので §4 に
 まとめてある。
 
-`i8` `i16` `isize` `u8` `u16` `u32` `u64` `usize` はこの節の表をそのまま持ち、`f32` は §2 の
-`f64` の表をそのまま持つ。**幅は静的な区別だけで、実行時表現は共通**——整数はどの型でも
-`i64`、浮動小数点はどちらも `f64` なので、`u8` の算術は 8 ビットで巻き戻らず、`f32` の算術は
-f32 精度に丸めない。これは `i32` が最初からそうだった扱い（`i32` の加算も 32 ビットで
-巻き戻らない）をそのまま広げたもの。
+`i8` `i16` `u8` `u16` `u32` はこの節の表をそのまま持ち、`f32` は §2 の `f64` の表をそのまま持つ。
+
+**型名は幅と符号そのもの**——`i32` は「32bit を符号付きとして扱う」、`u32` は「32bit を
+符号なしとして扱う」以上の意味を持たない。`(+ (the u8 200) (the u8 100))` は `44`、
+`(+ 2147483647 1)`（`i32`）は `-2147483648`、`(lognot (the u32 0))` は `4294967295`。
+`f32` も同じで、本物の binary32——`(/ (the f32 1.0) (the f32 3.0))` は
+`0.3333333432674408` であって `f64` の `0.3333333333333333` ではない。
+
+値は 64bit の語に、型が名乗る数を符号拡張（符号付き）／ゼロ拡張（符号なし）して持つ。
+`f32` の値も binary32 に丸めた `f64` として持つ。表現が広いのと演算が名乗った幅で行われるのは
+別のことで、後者だけが型の意味。
+
+（かつてここには「**幅は静的な区別だけで、実行時表現は共通**」「狭い幅が要るのはデータを
+*名指す*ためで、計算する型としてではない」と書いてあった。2026-09-01 に撤回した。）
 
 CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と §4 の述語）は
-`i32`/`i64`/`f64`/`bignum`/`ratio` のまま。CL 側に対応物が無い幅なので、同じ名前を 8 型ぶん
-並べても CL 準拠には近づかない——狭い幅が要るのはデータを*名指す*ためで、計算する型としてでは
-ない。必要なら `(as i32 x)` で移る（§1b の変換は全ペアにある）。
+`i32`/`f64`/`bignum`/`ratio` のまま。他の幅で必要なら `(as i32 x)` で移る
+（§1b の変換は全ペアにある）。
 
 ## 2. 算術・比較（`f64`）
 
@@ -86,7 +99,7 @@ CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と §4 の
 ## 2.5 多倍長数値（`bignum` / `ratio`）
 
 CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常に既約・正の分母で保たれる有理数。
-どちらもヒープ確保され、`i32`/`i64`/`f64` との暗黙変換はない（明示的な変換メソッドまたは
+どちらもヒープ確保され、固定幅の整数型や `f64` との暗黙変換はない（明示的な変換メソッドまたは
 `as`/`try-as` を使う）。整数/比リテラル構文は [syntax.md](syntax.md) を参照。
 
 **`bignum`**（CL の整数と同じ演算集合。`/` はゼロ方向切り捨て、除算・剰余系はゼロ除算で panic）:
@@ -108,7 +121,7 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 | `logbitp` `logtest` | `(op a b)` | `(bignum,bignum)→bool` | 同上（述語） |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(bignum,bignum)→bool` | 比較 |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(bignum,bignum)→bool` | いずれも `=` と同じ |
-| `bignum->int` | `(bignum->int x)` | `bignum→i32` | 縮小変換。`i64` に収まらなければ panic |
+| `bignum->int` | `(bignum->int x)` | `bignum→i32` | 縮小変換。`i32` に収まらなければ panic |
 | `try-bignum->int` | `(try-bignum->int x)` | `bignum→Option<i32>` | 収まらなければ `None` |
 | `bignum->float` | `(bignum->float x)` | `bignum→f64` | `f64` へ変換 |
 | `bignum->ratio` | `(bignum->ratio x)` | `bignum→ratio` | `ratio` への拡大変換（正確） |
@@ -134,7 +147,7 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | `f64` へ変換 |
 | `print` `println` | `(op x)` | `ratio→Unit` | 標準出力へ書く（§15） |
 
-`i32`/`i64`/`f64` からの入口は `int->bignum`/`int->ratio`（§1）と `float->bignum`/`float->ratio`
+固定幅整数・`f64` からの入口は `int->bignum`/`int->ratio`（§1）と `float->bignum`/`float->ratio`
 （§2）。`bignum`/`ratio` は `i32` 等とは独立した別型で、混在した算術には明示変換が必要。
 
 > **実装と compile 対応**: `abs`/`signum`/`rem`/`gcd`/`lcm`/`expt`（および `f64`/`ratio` の
@@ -219,7 +232,7 @@ CL の算術・比較は可変長だが、`defmethod` はレシーバ型でし�
 
 各項は左から1回だけ評価される（比較の可変長版が一時変数を挟むのはこのため）。
 
-`isqrt` / 整数の `expt`（`i32`/`i64`）:
+`isqrt` / 整数の `expt`（`i32`）:
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
@@ -230,8 +243,8 @@ CL の算術・比較は可変長だが、`defmethod` はレシーバ型でし�
 
 | 名前 | 形式 | 型 | 対応する型 |
 |---|---|---|---|
-| `zerop` `plusp` `minusp` | `(op x)` | `T→bool` | `i32` `i64` `f64` `bignum` `ratio` |
-| `evenp` `oddp` | `(op x)` | `T→bool` | `i32` `i64` `bignum`（CL 同様、整数型のみ） |
+| `zerop` `plusp` `minusp` | `(op x)` | `T→bool` | `i32` `f64` `bignum` `ratio` |
+| `evenp` `oddp` | `(op x)` | `T→bool` | `i32` `bignum`（CL 同様、整数型のみ） |
 
 CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型付けなので実行時に型を問う場面が
 無い（[language-design.md](dev/language-design.md) §0）。
@@ -247,7 +260,7 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 
 | 名前 | 型 | 説明 |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `i64` | ここでの fixnum は実行時が運ぶ即値整数＝`i64`（静的型が `i32` でも実行時表現は `i64`） |
+| `most-positive-fixnum` / `most-negative-fixnum` | `i32` | ここでの fixnum は「多倍長でない整数」＝固定幅整数型のうち最も広い `i32` |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | 有限で最大／最小 |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | 非正規化数を含む、0 でない最小の絶対値 |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | 正規化数に限った同じもの |
@@ -255,7 +268,7 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 
 ### 4.4 ビット演算
 
-無限精度の2の補数として定義される（CL §12.10）。`i32`/`i64`/`bignum` に実装があり、`ratio` には
+無限精度の2の補数として定義される（CL §12.10）。固定幅整数型と `bignum` に実装があり、`ratio` には
 無い（CL 自体もビット演算は整数専用）。
 
 | 名前 | 形式 | 型 | 説明 |
@@ -306,9 +319,12 @@ xorshift64 で、インタプリタと compiled コードは同じ列を返す�
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `get-universal-time` | `(get-universal-time)` | `()→i64` | CL の紀元（1900-01-01 UTC）からの秒 |
-| `get-internal-real-time` | `(get-internal-real-time)` | `()→i64` | プロセス基準の経過時間。単位は次の定数 |
-| `internal-time-units-per-second` | — | `i64` | `1000000`（マイクロ秒）。CL 同様、値は処理系の選択 |
+| `universal-time` | — | `defstruct` | `day`（1900-01-01 からの日数）と `second`（その日の中の秒、0..86399）の2フィールド |
+| `internal-time` | — | `defstruct` | `second` と `microsecond`（その秒の中、0..999999）の2フィールド |
+| `get-universal-time` | `(get-universal-time)` | `()→universal-time` | CL の紀元（1900-01-01 UTC）からの時刻 |
+| `get-internal-real-time` | `(get-internal-real-time)` | `()→internal-time` | プロセス基準の経過時間 |
+| `internal-time-seconds` | `(internal-time-seconds it)` | `internal-time→f64` | 秒数として。2つの読みの差を報告するときの形 |
+| `internal-time-units-per-second` | — | `i32` | `1000000`（マイクロ秒）＝`microsecond` フィールドの単位。CL 同様、値は処理系の選択 |
 | `time` | `(time form)` | マクロ | `form` を実行し、かかった実時間を1行印字して `form` の値をそのまま返す |
 
 #### 日時への分解・合成
@@ -316,8 +332,8 @@ xorshift64 で、インタプリタと compiled コードは同じ列を返す�
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `decoded-time` | — | `defstruct` | `second` / `minute` / `hour` / `date` / `month` / `year` / `day-of-week` の7フィールド。CL の9個の返り値の代わり（多値が無いため） |
-| `decode-universal-time` | `(decode-universal-time ut &optional zone)` | `(i64,i32)→decoded-time` | 万国時を暦の成分へ。`zone` はグリニッジ以西の時間数（CL と同じ向き）、既定 `0`＝UTC |
-| `encode-universal-time` | `(encode-universal-time sec min hour date month year &optional zone)` | `(i32×6,i32)→i64` | 逆向き |
+| `decode-universal-time` | `(decode-universal-time ut &optional zone)` | `(universal-time,i32)→decoded-time` | 万国時を暦の成分へ。`zone` はグリニッジ以西の時間数（CL と同じ向き）、既定 `0`＝UTC |
+| `encode-universal-time` | `(encode-universal-time sec min hour date month year &optional zone)` | `(i32×6,i32)→universal-time` | 逆向き |
 | `get-decoded-time` | `(get-decoded-time)` | `()→decoded-time` | いまを分解したもの |
 
 `day-of-week` は CL と同じく **0 が月曜、6 が日曜**。万国時 0（1900-01-01）が月曜なので、
@@ -401,7 +417,7 @@ Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用�
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | 空リストかどうか |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | `Cons` でないか |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | `Sym`（シンボル）かどうか |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→i64` | `Int` の中身を取り出す。`Int` でなければ panic |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→i32` | `Int` の中身を取り出す。`Int` でなければ panic |
 | `sexpr-float` | `(sexpr-float s)` | `Option<Sexpr>→f64` | `Float` の中身。型違いは panic |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | `Char` の中身。型違いは panic |
 | `sexpr-bool` | `(sexpr-bool s)` | `Option<Sexpr>→bool` | `Bool` の中身。型違いは panic |
@@ -717,7 +733,7 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string,string?)→string` | 両端/左/右から `bag` に含まれる文字を除く（CL `string-trim` 等）。`bag` 省略時は空白類 `" \t\n\r"` |
 | `capitalize` | `(capitalize s)` | `string→string` | 各語の先頭を大文字・残りを小文字（CL `string-capitalize`）。語＝英数字の極大連続 |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | `sep` で分割。CL に対応物は無い。連続する区切りは空要素を生む。`sep` が空なら panic |
-| `to-string` | `(to-string x)` | `T→string` | `~a` 相当の文字列化。`i32`/`i64`/`f64`/`bool`/`char`/`string` に実装（CL `princ-to-string`） |
+| `to-string` | `(to-string x)` | `T→string` | `~a` 相当の文字列化。`i32`/`f64`/`bool`/`char`/`string` に実装（CL `princ-to-string`） |
 
 `trim` 系と `digit-weight`/`digit->char`（§9）だけ `defmethod` でなく `defun` なのは、
 `defmethod` が `&optional`/`&key` を受け付けないため（`parse_defmethod_sig_inner`）。
@@ -828,7 +844,7 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
 
 ## 11.2 `BitVector`（ビットベクタ）
 
-固定長のビット列。`Vector<i64>` に **1 語 32bit** で詰めた prelude の `defstruct`
+固定長のビット列。`Vector<i32>` に **1 語 31bit** で詰めた prelude の `defstruct`
 （64bit にしない理由は [dev/TODO.md](dev/TODO.md) の整数切り詰めの節）。
 
 | 名前 | 形式 | 型 | 説明 |
@@ -890,7 +906,7 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` 実装済み: 全数値型（`i8`〜`usize` / `f32` / `f64` / `bignum` / `ratio`）と `bool` `char`
+`Eq` 実装済み: 全数値型（`i8`〜`u32` / `f32` / `f64` / `bignum` / `ratio`）と `bool` `char`
 `string` `symbol`、および `cons-cell<A,B>`（要素が `Eq` なら再帰的に）。`Ord` 実装済み:
 全数値型と `char` `string`、および `cons-cell<A,B>`（辞書順、要素が `Ord` なら）。メソッド名が組み込み演算子
 （`= /= < <= > >=`）・`eq`/`lt` と重複
@@ -990,7 +1006,7 @@ CL にあってここに無いもの（cl-parity-plan.md Phase 4c に理由を�
 どの引数も答えられない `~/name/` が**チェック時のエラー**になり、AOT 実行ファイルでも
 `~/name/` が動く（下記）。文字列を組み立てて出したいときは `(format false ...)` で作って
 `(println "~a" s)` と印字する。
-`(list ...)` と同じく、可変長引数は各自の型のまま `Sexpr` へ包まれてから渡る——`i32`/`i64`/`f64`/
+`(list ...)` と同じく、可変長引数は各自の型のまま `Sexpr` へ包まれてから渡る——`i32`/`f64`/
 `bignum`/`ratio`/`char`/`bool`/`string`/`Sexpr` はスカラ用の `Sexpr` コンストラクタでラップされ、
 ユーザ定義 `defstruct`/`defenum`/`Vector<T>`/`HashTable<K,V>` 等ヒープ表現の ADT インスタンスは
 無変換のまま `Sexpr` へ retype される（`(println "~a" my-struct)` はそのまま動く）。ネイティブ表現の
@@ -1019,7 +1035,7 @@ CL にあってここに無いもの（cl-parity-plan.md Phase 4c に理由を�
 ```lisp
 (println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i64>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 ```
 
 **1 引数プリンタ**（CLHS 22.1.3）は書式展開ではなく、値ひとつをそのまま印字する。
@@ -1103,7 +1119,7 @@ CL の `format` ディレクティブをほぼ網羅する。各ディレクテ�
 1 つに潰す。名前だけで引くと `point` 用のヘルパを `pathname` に対して呼べてしまう。値の型で
 ディスパッチすれば、そのメソッドはまさにその型に対して型検査済みなので健全（`print-object` と
 同じ仕組み）。`string`/`bool`/`char`/`symbol`/リストのような即値も引ける。整数だけは
-`i32`/`i64` を値から区別できないため、**両方が同名メソッドを定義しているときだけ**エラーになる。
+整数の幅を値から区別できないため、**複数の整数型が同名メソッドを定義しているときだけ**エラーになる。
 
 **どの引数に当たるかは決まらないが、どのメソッドを呼びうるかは決まる。** チェッカーは
 リテラルの制御文字列を走査して `~/name/` を全部拾い、その呼び出し地点の引数の型のうち
@@ -1112,7 +1128,7 @@ CL の `format` ディレクティブをほぼ網羅する。各ディレクテ�
 記録された `(型, メソッド)` を起動時に登録する（`print-object` の登録と同じ隣）。
 
 ```lisp
-(defstruct point (x i64) (y i64))
+(defstruct point (x i32) (y i32))
 (defmethod brief ((self point) (colon bool) (at bool)) string
   (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
 (println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
@@ -1159,8 +1175,8 @@ CL では特殊変数（`let` で動的に束縛する）だが、typelisp に�
 | 変数 | 型 | 既定 | 意味 |
 |---|---|---|---|
 | `*print-pretty*` | `bool` | `false` | 真なら `~a`/`~s`/`~w` と pretty ディレクティブが整形経路に入る |
-| `*print-right-margin*` | `i64` | `80` | 右マージン（桁）。0 以下は「マージン無し＝折らない」 |
-| `*print-miser-width*` | `i64` | `0` | miser スタイルに入る幅。0 以下は CL の `nil`（miser 無効）に相当 |
+| `*print-right-margin*` | `i32` | `80` | 右マージン（桁）。0 以下は「マージン無し＝折らない」 |
+| `*print-miser-width*` | `i32` | `0` | miser スタイルに入る幅。0 以下は CL の `nil`（miser 無効）に相当 |
 
 既定が `false` なのは、既存プログラムの出力を一切変えないため（CL でも初期値は処理系定義）。
 `pprint` 系と `pprint-logical-block` は `*print-pretty*` に関わらず常に整形する（CL の `pprint` の定義通り）。
@@ -1190,9 +1206,9 @@ CL では特殊変数（`let` で動的に束縛する）だが、typelisp に�
 ;; =>
 ;; (1 2 3 4 5 6 7 8 9
 ;;  10 11 12 13 14 15)
-(pprint '(defun f (x) i64 (+ x 1) (* x 2)))
+(pprint '(defun f (x) i32 (+ x 1) (* x 2)))
 ;; =>
-;; (defun f (x) i64
+;; (defun f (x) i32
 ;;   (+ x 1)
 ;;   (* x 2))
 ```
@@ -1259,7 +1275,7 @@ typelisp には第一級ストリームが無いので、**開いている論理
 `impl` を書かない限り既存の出力（`#<point 1 2>` 形式）は1バイトも変わらない。
 
 ```lisp
-(defstruct point (x i64) (y i64))
+(defstruct point (x i32) (y i32))
 (impl print-object point
   (print-object ((self Self) (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
@@ -1308,8 +1324,8 @@ CLHS 22.1.1 の「値のどこまでを印字するか」を決める制御変�
 
 | 変数 | 型 | 既定 | 意味 |
 |---|---|---|---|
-| `*print-level*` | `i64` | `0` | この深さ以上に入れ子になったオブジェクトを `#` で置き換える。印字対象そのものが深さ 0。0 以下は無制限 |
-| `*print-length*` | `i64` | `0` | リストの要素（`defstruct`/`defenum` 値のフィールドも）をこの個数まで印字し、残りを `...` にする。0 以下は無制限 |
+| `*print-level*` | `i32` | `0` | この深さ以上に入れ子になったオブジェクトを `#` で置き換える。印字対象そのものが深さ 0。0 以下は無制限 |
+| `*print-length*` | `i32` | `0` | リストの要素（`defstruct`/`defenum` 値のフィールドも）をこの個数まで印字し、残りを `...` にする。0 以下は無制限 |
 | `*print-circle*` | `bool` | `false` | 真なら、印字前に値を走査して**2回以上現れるオブジェクトにラベルを振る**。最初の出現が `#n=…`、以降が `#n#` |
 
 CL は「無制限」を `nil` で表すが typelisp に `nil` は無いので、`*print-right-margin*` 等と同じく
@@ -1337,7 +1353,7 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 
 ```lisp
 (defenum link (no-link) (to node))
-(defstruct node (val i64) (next link))
+(defstruct node (val i32) (next link))
 
 (let ((a (node::new 1 (link::no-link))))
   (setf a::next (link::to a))       ; a が a 自身を指す
@@ -1362,11 +1378,11 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 
 | 変数 | 型 | 既定 | 意味 |
 |---|---|---|---|
-| `*print-base*` | `i64` | `10` | 整数（`i64` と `bignum`）を印字する基数。2〜36 の外は**印字エラー**（CL も範囲を規定している） |
+| `*print-base*` | `i32` | `10` | 整数（固定幅と `bignum`）を印字する基数。2〜36 の外は**印字エラー**（CL も範囲を規定している） |
 | `*print-radix*` | `bool` | `false` | 真なら基数の印を付ける。`#b`/`#o`/`#x`、それ以外は `#NNr`、基数 10 は末尾の `.`。印は符号の**前**（`#x-ff`） |
 | `*print-case*` | `symbol` | `:downcase` | シンボル名の大小。`:upcase` / `:downcase` / `:capitalize`（CL と同じ綴り。この言語のキーワードは自己評価する `symbol`） |
 | `*print-readably*` | `bool` | `false` | 真なら読み戻せる形で印字する。エスケープを強制し、`*print-level*`/`*print-length*` の打ち切りを無効化する |
-| `*print-lines*` | `i64` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 以下は無制限 |
+| `*print-lines*` | `i32` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 以下は無制限 |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string` が `prin1` と `princ` のどちらをするか。**これを読むのはその 2 つだけ** |
 
 ```lisp
@@ -1415,7 +1431,7 @@ CL はこれらを `let` で束縛するが、この言語の `let` は字句束
 | `parse-int` | `(parse-int s)` | `string→Result<i32,ParseIntError>` | 10進整数（`+`/`-`前置可）。Rust の `str::parse::<i32>` と同じ受理範囲 |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
 | `read` | `(read s)` | `string→Result<Sexpr,ReadError>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err`。CL の `read-from-string` に当たる——ストリームから読むのは `read-sexpr`（§18.5） |
-| `read-from-string` | `(read-from-string s [start])` | `(string,i64)→Result<cons-cell<Sexpr,i64>,ReadError>` | `read` に**読み終わり位置**を添えたもの。`(car r)` が値、`(cdr r)` が次に読む文字位置。`start` 省略時は 0 |
+| `read-from-string` | `(read-from-string s [start])` | `(string,i32)→Result<cons-cell<Sexpr,i32>,ReadError>` | `read` に**読み終わり位置**を添えたもの。`(car r)` が値、`(cdr r)` が次に読む文字位置。`start` 省略時は 0 |
 | `read-from-string-preserving-whitespace` | 同上 | 同上 | 同上だが datum を終わらせた空白を消費しない。違いは返る位置に出る |
 | `eval` | `(eval form)` | `Sexpr→Result<Sexpr,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
 
@@ -1424,11 +1440,11 @@ CL は `read-from-string` から**2 値**（値と位置）を返すが、この
 ループになる:
 
 ```lisp
-(let ((s "1 2 3") (i (the i64 0)) (going true))
+(let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
       ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
-                     (if (>= i (as i64 (length s))) (progn (setf going false) ()) ()) ()))
+                     (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
       ((err e) (progn (setf going false) ())))))
 ```
 
@@ -1437,7 +1453,7 @@ CL は `read-from-string` から**2 値**（値と位置）を返すが、この
 preserving 版は 2 を返す。
 
 リーダが読む数値表記は10進のほか、`0x`（16進）と CL の **radix マクロ** `#b`（2進）・`#o`（8進）・
-`#x`（16進）・`#NNr`（基数 NN、2〜36）。符号は印の**後ろ**（`#x-ff`）で、`i64` に収まらなければ
+`#x`（16進）・`#NNr`（基数 NN、2〜36）。符号は印の**後ろ**（`#x-ff`）で、`i32` に収まらなければ
 `bignum` になる。`*print-radix*`（§15.3）が印字するのはこの表記なので、印字したものはそのまま
 読み戻せる。CL の `*read-base*` は無い——理由は cl-parity-plan.md Stage 7b の表に記録した。
 
@@ -1609,12 +1625,12 @@ panic ではない）。ファイル名は文字列でも `pathname` でもよ�
 CL 同様、`close` 後でも取り出せる。
 
 **バイト I/O** は `ByteInput`/`ByteOutput`。`InputStream`/`OutputStream` の `Item` を
-`i64` に固定したもので、`CharInput`/`CharOutput` が `char` に固定しているのと同じ形。
+`i32` に固定したもので、`CharInput`/`CharOutput` が `char` に固定しているのと同じ形。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<i64>` where `ByteInput S` | 次の1バイト。ファイル終端で `none` |
-| `write-byte` | `(write-byte s b)` | `(S,i64)→()` where `ByteOutput S` | 1バイト書く。0..255 の外はエラー |
+| `read-byte` | `(read-byte s)` | `(S)→Option<i32>` where `ByteInput S` | 次の1バイト。ファイル終端で `none` |
+| `write-byte` | `(write-byte s b)` | `(S,i32)→()` where `ByteOutput S` | 1バイト書く。0..255 の外はエラー |
 
 CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出し**で決めるが、
 ここでは要素型はストリームの**型**なので、違うのは開く関数の側になる。文字ストリームから
@@ -1658,7 +1674,7 @@ native 層でも拒否する——次の文字の UTF-8 エンコーディング
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | 存在するか |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | 削除・改名（引数は `Pathish`） |
 | `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | シンボリックリンクと `.`/`..` を解いた絶対パス。存在しなければ `Err` |
-| `file-write-date` | `(file-write-date name)` | `(P)→Result<i64,FileError>` where `Pathish P` | 最終更新時刻。**万国時**なので `decode-universal-time`（§4.6）が読める |
+| `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | 最終更新時刻。**万国時**なので `decode-universal-time`（§4.6）が読める |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | ディレクトリか。**無い場合も `false`** ——両者を分けるのは `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 中身を絶対パスで並べる。`.`/`..` は入らない。順序は OS のまま |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | 親ごと作る。既にあれば成功（「ensure」の意味） |

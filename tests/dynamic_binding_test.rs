@@ -374,7 +374,7 @@ fn a_radix_macro_round_trips_what_print_radix_produced() {
 }
 
 #[test]
-fn a_radix_macro_past_i64_reads_as_a_bignum() {
+fn a_radix_macro_past_i32_reads_as_a_bignum() {
     let src = "(match (unwrap (read \"#xffffffffffffffffff\")) ((Bignum _) true) (_ false))";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }

@@ -232,7 +232,7 @@ fn match_nested_pattern_mismatch_falls_through_to_the_next_arm() {
 #[test]
 fn match_literal_sub_pattern_narrows_within_a_variant() {
     let src = r#"
-        (defun pick ((s Sexpr)) i64
+        (defun pick ((s Sexpr)) i32
           (match s
             ((int 5) 50)
             ((int n) n)
@@ -247,7 +247,7 @@ fn match_walks_a_quoted_list() {
     // `quote` and macro arguments are the pre-`read` producers of compound
     // Sexpr data; summing a quoted list exercises match-driven recursion.
     let src = r#"
-        (defun sum ((s Option<Sexpr>)) i64
+        (defun sum ((s Option<Sexpr>)) i32
           (match s
             ((cons (int n) rest) (+ n (sum rest)))
             (_ 0)))
@@ -267,7 +267,7 @@ fn if_let_binds_a_sexpr_pattern() {
 #[test]
 fn while_let_loops_over_a_sexpr_condition() {
     let src = r#"
-        (let ((x (the Option<Sexpr> (Int 3))) (acc (the i64 0)))
+        (let ((x (the Option<Sexpr> (Int 3))) (acc (the i32 0)))
           (while-let ((int n) x)
             (setf acc (+ acc n))
             (setf x (if (> n 1) (Int (- n 1)) (the Option<Sexpr> ()))))

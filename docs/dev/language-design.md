@@ -285,7 +285,7 @@
 **分離原則**: ヒープ/ランタイム/IO/プリミティブ演算/ネイティブ codegen を要するものは **Rust 実装**。
 それらの組合せで書けるものは **typelisp 自身で実装**（ライブラリ）。すべて型付き（引数/戻り型を明示）。
 
-> 実装状況: 本節（§4）のカタログはほぼ全項目が実装済み——i8/i16/i32/i64/f32/f64/bignum/ratio の
+> 実装状況: 本節（§4）のカタログはほぼ全項目が実装済み——i8/i16/i32/u8/u16/u32/f32/f64/bignum/ratio の
 > 算術・比較、`Sexpr`/`Symbol`/`char`/`string` 操作、`Option`/`Result` ヘルパー、`HashTable<K,V>`/
 > `Vector<T>` の関連メソッド、`compile`/`compile-file` まで含む。個別の未実装項目は
 > [functions.md](../functions.md) の該当箇所に明記。`Sexpr` の実行時値は §1 のとおり cons ヒープ

@@ -269,20 +269,20 @@ fn pprint_lays_code_shaped_forms_out_with_a_body_indent() {
     let out = stdout_of(
         r#"
         (setf *print-right-margin* 30)
-        (pprint-fill '(defun f (x) i64 (+ x 1) (* x 2)))
+        (pprint-fill '(defun f (x) i32 (+ x 1) (* x 2)))
     "#,
     );
     // `pprint-fill` is asked for explicitly, so the code layout does not apply.
-    assert_eq!(out, "(defun f (x) i64 (+ x 1)\n (* x 2))");
+    assert_eq!(out, "(defun f (x) i32 (+ x 1)\n (* x 2))");
     let out = stdout_of(
         r#"
         (setf *print-right-margin* 30)
-        (pprint '(defun f (x) i64 (+ x 1) (* x 2)))
+        (pprint '(defun f (x) i32 (+ x 1) (* x 2)))
     "#,
     );
     // The default dispatch recognizes `defun`: head plus three distinguished
     // arguments, then one body form per line.
-    assert_eq!(out, "\n(defun f (x) i64\n  (+ x 1)\n  (* x 2))");
+    assert_eq!(out, "\n(defun f (x) i32\n  (+ x 1)\n  (* x 2))");
 }
 
 #[test]
@@ -400,7 +400,7 @@ fn pprint_newline_rejects_an_unknown_keyword() {
 /// A `point` whose `print-object` renders differently under `~a` and `~s`, so
 /// one impl exercises both the dispatch and CL's `*print-escape*`.
 const POINT: &str = r##"
-(defstruct point (x i64) (y i64))
+(defstruct point (x i32) (y i32))
 (impl print-object point
   (print-object ((self Self) (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
@@ -434,7 +434,7 @@ fn a_nested_value_dispatches_too() {
 
 #[test]
 fn a_type_without_an_impl_keeps_the_built_in_representation() {
-    let out = stdout_of(r#"(defstruct plain (n i64)) (print "~a" (plain::new 7))"#);
+    let out = stdout_of(r#"(defstruct plain (n i32)) (print "~a" (plain::new 7))"#);
     assert!(out.ends_with("plain 7>"), "unexpected output: {}", out);
 }
 
@@ -444,8 +444,8 @@ fn a_method_named_print_object_that_is_not_the_trait_is_ignored() {
     // being mistaken for an implementation of the trait.
     let out = stdout_of(
         r#"
-        (defstruct thing (n i64))
-        (defmethod print-object ((self thing)) i64 self::n)
+        (defstruct thing (n i32))
+        (defmethod print-object ((self thing)) i32 self::n)
         (print "~a" (thing::new 7))
     "#,
     );
@@ -457,7 +457,7 @@ fn a_print_object_that_prints_itself_falls_back_instead_of_looping() {
     // The re-entry guard renders the inner occurrence the built-in way.
     let out = stdout_of(
         r#"
-        (defstruct loopy (n i64))
+        (defstruct loopy (n i32))
         (impl print-object loopy
           (print-object ((self Self) (escape bool)) string (format false "<~a>" self)))
         (print "~a" (loopy::new 1))
@@ -484,7 +484,7 @@ fn a_print_object_that_conses_heavily_survives_collections() {
     let out = stdout_of_with(
         &["--heap-cells", "20000"],
         r#"
-        (defstruct heavy (n i64))
+        (defstruct heavy (n i32))
         (impl print-object heavy
           (print-object ((self Self) (escape bool)) string
             (let ((acc "x"))
@@ -492,7 +492,7 @@ fn a_print_object_that_conses_heavily_survives_collections() {
                 (setf acc (format false "~a" (list 1 2 3 4 5 6 7 8 9 10))))
               (format false "H~d" self::n))))
         (dotimes (i 100)
-          (println "~a" (list (heavy::new (as i64 i)) (heavy::new (as i64 i)))))
+          (println "~a" (list (heavy::new (as i32 i)) (heavy::new (as i32 i)))))
     "#,
     );
     let lines: Vec<&str> = out.lines().collect();

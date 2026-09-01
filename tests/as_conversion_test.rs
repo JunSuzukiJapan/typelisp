@@ -6,7 +6,8 @@
 //! Both desugar to an existing `registry.rs` instance method
 //! (`int_assoc`/`float_assoc`/`bignum_assoc`/`ratio_assoc`/`char_assoc`) —
 //! see `as_conversion`'s doc comment in `src/check/checker.rs` for the exact
-//! table and the `i32`/`i64`-target relabeling it does.
+//! table, and `Checker::width_cast` for the same-family width casts it
+//! chains onto the result.
 
 extern crate typelisp;
 use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
@@ -118,18 +119,24 @@ fn try_as_on_the_same_type_wraps_in_some() {
     assert_eq!(eval_ok("(is-some (try-as i32 5))"), Value::Bool(true));
 }
 
-// ---- i32 <-> i64: pure relabel ------------------------------------------------
+// ---- between two integer widths: a real conversion ----------------------------
 
+/// Crossing widths used to be a relabel, back when every integer shared one
+/// 64-bit representation. It converts now: `as` truncates to the target's
+/// width, which is what a width cast means.
 #[test]
-fn as_crosses_i32_and_i64_by_relabeling() {
-    assert_eq!(eval_ok("(as i64 (the i32 7))"), Value::Int(7));
-    assert_eq!(eval_ok("(as i32 (the i64 7))"), Value::Int(7));
+fn as_crosses_integer_widths_by_truncating() {
+    assert_eq!(eval_ok("(as u8 (the i32 7))"), Value::Int(7));
+    assert_eq!(eval_ok("(as i32 (the u8 7))"), Value::Int(7));
+    assert_eq!(eval_ok("(as u8 (the i32 300))"), Value::Int(44));
+    assert_eq!(eval_ok("(as i8 (the i32 200))"), Value::Int(-56));
 }
 
 #[test]
-fn try_as_crosses_i32_and_i64_and_wraps_in_some() {
-    assert_eq!(eval_ok("(is-some (try-as i64 (the i32 7)))"), Value::Bool(true));
-    assert_eq!(eval_ok("(unwrap (try-as i64 (the i32 7)))"), Value::Int(7));
+fn try_as_between_integer_widths_answers_whether_it_fits() {
+    assert_eq!(eval_ok("(is-some (try-as u8 (the i32 7)))"), Value::Bool(true));
+    assert_eq!(eval_ok("(unwrap (try-as u8 (the i32 7)))"), Value::Int(7));
+    assert_eq!(eval_ok("(is-none (try-as u8 (the i32 300)))"), Value::Bool(true));
 }
 
 // ---- total conversions: int <-> f64 -------------------------------------------
@@ -137,22 +144,23 @@ fn try_as_crosses_i32_and_i64_and_wraps_in_some() {
 #[test]
 fn as_widens_an_int_to_f64() {
     assert_eq!(eval_f64("(as f64 42)"), 42.0);
-    assert_eq!(eval_f64("(as f64 (the i64 42))"), 42.0);
+    assert_eq!(eval_f64("(as f64 (the u8 42))"), 42.0);
 }
 
 #[test]
 fn as_narrows_f64_to_int_truncating_toward_zero() {
     assert_eq!(eval_ok("(as i32 3.9)"), Value::Int(3));
     assert_eq!(eval_ok("(as i32 (- 0.0 3.9))"), Value::Int(-3));
-    // i64 target: same underlying `float->int` call, relabeled.
-    assert_eq!(eval_ok("(as i64 3.9)"), Value::Int(3));
+    // A narrower target: the same `float->int` call, with the width cast
+    // chained onto its `i32` result.
+    assert_eq!(eval_ok("(as u8 3.9)"), Value::Int(3));
 }
 
 #[test]
 fn try_as_int_f64_round_trip_always_succeeds() {
     assert_eq!(eval_f64("(unwrap (try-as f64 42))"), 42.0);
     assert_eq!(eval_ok("(unwrap (try-as i32 3.9))"), Value::Int(3));
-    assert_eq!(eval_ok("(unwrap (try-as i64 3.9))"), Value::Int(3));
+    assert_eq!(eval_ok("(unwrap (try-as u8 3.9))"), Value::Int(3));
 }
 
 // ---- total conversions: int/bignum/ratio widening -----------------------------
@@ -160,7 +168,7 @@ fn try_as_int_f64_round_trip_always_succeeds() {
 #[test]
 fn as_widens_int_to_bignum_and_ratio() {
     assert_bignum("(as bignum 42)", "42");
-    assert_bignum("(as bignum (the i64 42))", "42");
+    assert_bignum("(as bignum (the u8 42))", "42");
     assert_ratio("(as ratio 42)", "42", "1");
 }
 
@@ -199,7 +207,7 @@ fn as_narrows_ratio_to_bignum_by_truncating() {
 #[test]
 fn as_widens_char_to_int() {
     assert_eq!(eval_ok("(as i32 #\\A)"), Value::Int(65));
-    assert_eq!(eval_ok("(as i64 #\\A)"), Value::Int(65));
+    assert_eq!(eval_ok("(as u16 #\\A)"), Value::Int(65));
 }
 
 #[test]
@@ -212,7 +220,7 @@ fn try_as_char_to_int_always_succeeds() {
 #[test]
 fn as_narrows_a_valid_scalar_int_to_char() {
     assert_eq!(eval_ok("(as char 65)"), Value::Char('A'));
-    assert_eq!(eval_ok("(as char (the i64 65))"), Value::Char('A'));
+    assert_eq!(eval_ok("(as char (the u8 65))"), Value::Char('A'));
 }
 
 #[test]
@@ -225,8 +233,8 @@ fn as_panics_converting_an_invalid_scalar_int_to_char() {
 fn try_as_returns_some_or_none_converting_int_to_char() {
     assert_eq!(eval_ok("(unwrap (try-as char 65))"), Value::Char('A'));
     assert_eq!(eval_ok("(is-none (try-as char -1))"), Value::Bool(true));
-    // i64 source reaches the same `try-int->char` builtin.
-    assert_eq!(eval_ok("(is-none (try-as char (the i64 -1)))"), Value::Bool(true));
+    // Another width's source reaches the same `try-int->char` builtin.
+    assert_eq!(eval_ok("(is-none (try-as char (the i16 -1)))"), Value::Bool(true));
 }
 
 // ---- partial conversion: bignum -> int ----------------------------------------
@@ -240,22 +248,22 @@ fn as_narrows_an_in_range_bignum_to_int() {
 fn as_panics_narrowing_an_out_of_range_bignum_to_int() {
     let msg = eval_panics("(as i32 99999999999999999999999999999)");
     assert!(msg.contains("bignum->int"), "unexpected message: {}", msg);
-    let msg64 = eval_panics("(as i64 99999999999999999999999999999)");
-    assert!(msg64.contains("bignum->int"), "unexpected message: {}", msg64);
+    // A narrower target fails in the same place: `bignum->int` runs first,
+    // and the width cast is only chained onto a result it produced.
+    let msg8 = eval_panics("(as u8 99999999999999999999999999999)");
+    assert!(msg8.contains("bignum->int"), "unexpected message: {}", msg8);
 }
 
 #[test]
 fn try_as_returns_none_narrowing_an_out_of_range_bignum_to_int() {
     assert_eq!(eval_ok("(is-none (try-as i32 99999999999999999999999999999))"), Value::Bool(true));
-    assert_eq!(eval_ok("(is-none (try-as i64 99999999999999999999999999999))"), Value::Bool(true));
 }
 
 #[test]
 fn try_as_returns_some_narrowing_an_in_range_bignum_to_int() {
     // `(as bignum 42)` widens a plain int literal into a genuine `bignum`
-    // value that comfortably fits back in an `i64`.
+    // value that comfortably fits back in an `i32`.
     assert_eq!(eval_ok("(unwrap (try-as i32 (as bignum 42)))"), Value::Int(42));
-    assert_eq!(eval_ok("(unwrap (try-as i64 (as bignum 42)))"), Value::Int(42));
 }
 
 // ---- excluded pairs and out-of-domain types (check-time errors) --------------

@@ -127,7 +127,7 @@ fn is_excluded(name: &str) -> bool {
     let earmuffed = name.len() > 2 && name.starts_with('*') && name.ends_with('*');
 
     // The native stream layer (`check::registry::register_stream_builtins`).
-    // These take an opaque `i64` handle and exist only for the prelude's
+    // These take an opaque `i32` handle and exist only for the prelude's
     // trait implementations to call; a user writes `read-char`/`write-string`
     // on a stream value and never names one of these.
     let native_stream = name.starts_with("stream-") || name.starts_with("file-");
