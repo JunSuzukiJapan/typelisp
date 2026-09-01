@@ -1937,11 +1937,15 @@ impl Interp {
         // `Value::Str` *is* a `string`, so a method registered on `string`
         // receives what it declared.
         //
-        // `Value::Int` is the one that is not exact: `i32` and `i64` share the
-        // raw word, and nothing in the value says which was written. Rather
-        // than guess, both are candidates and it is only an error when *both*
-        // define the name — one definition is unambiguous whichever width the
-        // author meant.
+        // `Value::Int` is the one that is not exact: every integer width
+        // shares the raw word, and nothing in the value says which was
+        // written. Rather than guess, all six are candidates and it is only an
+        // error when more than one defines the name — a single definition is
+        // unambiguous whichever width the author meant.
+        //
+        // Deleting the 64-bit types did not remove this ambiguity, only
+        // narrow the word: a normalized `u8` and a normalized `i32` are still
+        // the same `Value::Int` when they hold the same small number.
         let candidates: Vec<Path> = match v {
             Value::Boxed(id) => match heap_type_path(heap, id) {
                 Some(p) => vec![p],
@@ -1952,7 +1956,7 @@ impl Interp {
             Value::Char(_) => vec![Path::root("char")],
             Value::Symbol(_) => vec![Path::root("symbol")],
             Value::Empty | Value::Cons(_) | Value::Path(_) => vec![Path::root("sexpr")],
-            Value::Int(_) => vec![Path::root("i64"), Path::root("i32")],
+            Value::Int(_) => crate::types::INT_TYPE_NAMES.iter().map(|n| Path::root(n)).collect(),
         };
         // A generic receiver's method is registered per instantiation, so the
         // name to look up comes off the value's own key — see
@@ -1982,9 +1986,11 @@ impl Interp {
             }
             _ => {
                 return Err(format!(
-                    "format: ~/{}/ — an integer argument could be either width and both \
-                     `i64` and `i32` define `{}`; there is nothing in the value to choose by",
-                    name, name
+                    "format: ~/{}/ — an integer argument could be any width and {} each define \
+                     `{}`; there is nothing in the value to choose by",
+                    name,
+                    found.iter().map(|(p, _)| format!("`{}`", p)).collect::<Vec<_>>().join(" and "),
+                    name
                 ))
             }
         };
@@ -3351,6 +3357,11 @@ fn eval_builtin_method(
             "float->f32" => Some(float_to_width(heap, args, true)),
             "float->f64" => Some(float_to_width(heap, args, false)),
             "try-float->f32" => Some(try_float_to_f32(heap, args, ret_key)),
+            // Always `some`: widening is exact.
+            "try-float->f64" => Some(float_to_width(heap, args, false).and_then(|v| {
+                let some = Some(v);
+                Ok(option_value(heap, ret_key, some))
+            })),
             "expt" => Some(float_expt(heap, args, single)),
             "sqrt" => Some(float_unary(heap, args, f64::sqrt, single)),
             "floor" => Some(float_unary(heap, args, f64::floor, single)),

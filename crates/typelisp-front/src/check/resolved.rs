@@ -167,7 +167,7 @@ pub enum Pattern {
     /// because a nullary ctor pattern carries no `field_types`, so nothing
     /// downstream could tell `Option<Sexpr>`'s `none` — which is the
     /// empty-list *immediate* under the niche (`check/repr.rs`) — from
-    /// `Option<i64>`'s, which is a real box. The scrutinee's type arguments
+    /// `Option<i32>`'s, which is a real box. The scrutinee's type arguments
     /// are known in `check_ctor_pattern_fields` and nowhere later, so the
     /// decision is made there and recorded as a shape, the same reasoning
     /// `Ctor::field_types` records for the fields it can carry.

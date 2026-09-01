@@ -3405,7 +3405,7 @@ mod tests {
     /// A built-in used as a function value is dispatched *by name* — the box
     /// carries only which name (and, for a method, which receiver type), so it
     /// goes through the very same `eval_builtin_method` a direct `(+ a b)` call
-    /// site does. `+` is a method on `i64`, not a free builtin, so the box
+    /// site does. `+` is a method on `i32`, not a free builtin, so the box
     /// carries the receiver type.
     ///
     /// This test used to assert the opposite: that `apply` *refused* a
@@ -3420,8 +3420,8 @@ mod tests {
         let mut h = stress_heap();
         let form = read1(&mut h, "(apply (var f) int (int int) (int 1) (int 2))");
         h.push_root(form);
-        let recv = crate::types::intern_path_id(&mut h, &crate::Path::root("i64"));
-        let plus = h.alloc_builtin_fn(Some(recv), "+", "i64");
+        let recv = crate::types::intern_path_id(&mut h, &crate::Path::root("i32"));
+        let plus = h.alloc_builtin_fn(Some(recv), "+", "i32");
         h.push_root(plus);
         let name = match h.intern_symbol("f") {
             Value::Symbol(id) => id,

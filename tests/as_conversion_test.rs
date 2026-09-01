@@ -288,3 +288,28 @@ fn try_as_rejects_a_type_outside_the_numeric_char_catalog() {
     let err = check("(try-as string 5)").expect_err("str is out of try-as's domain");
     assert!(format!("{:?}", err).contains("no conversion"), "unexpected error: {:?}", err);
 }
+
+/// A `try-as` that would have to cross families *and* narrow is refused
+/// rather than answered: `(try-as u8 some-bignum)` would pack "did it
+/// convert" and "does it then fit `u8`" into one `option`, and the `none`
+/// could not say which. The message spells out the two-step form.
+#[test]
+fn try_as_refuses_to_cross_a_family_and_narrow_in_one_question() {
+    let err = check("(try-as u8 99999999999999999999999999999)")
+        .expect_err("bignum -> u8 in one `try-as` should be refused");
+    let msg = format!("{:?}", err);
+    assert!(msg.contains("two questions"), "unexpected error: {}", msg);
+}
+
+// ---- between the two float widths ---------------------------------------------
+
+/// `f32` is binary32, so narrowing rounds and `try-as` reports whether the
+/// rounding lost anything. Widening is exact in both spellings.
+#[test]
+fn as_crosses_float_widths_by_rounding() {
+    assert!((eval_f64("(as f64 (as f32 0.5))") - 0.5).abs() < f64::EPSILON);
+    assert_eq!(eval_ok("(is-some (try-as f32 0.5))"), Value::Bool(true));
+    assert_eq!(eval_ok("(is-none (try-as f32 0.1))"), Value::Bool(true));
+    // Widening never fails, and `try-as` says so.
+    assert_eq!(eval_ok("(is-some (try-as f64 (as f32 0.5)))"), Value::Bool(true));
+}

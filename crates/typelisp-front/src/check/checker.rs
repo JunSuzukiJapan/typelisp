@@ -14227,13 +14227,13 @@ fn format_call_owners(ty: &Type) -> Option<Vec<Path>> {
     match ty {
         Type::Named(p, _) => Some(vec![p.clone()]),
         Type::Dyn(..) => None,
-        // Every width at once, and exactly the two the runtime tries: an
+        // Every width at once, and exactly the set the runtime tries: an
         // integer's machine word does not say which width was written, so
-        // `Interp::format_call` looks in `i64` and `i32` whatever the static
-        // type was. A static scan that used the written width instead would
-        // reject `(format false "~/twice/" 7)` — the literal is `i32`, the
-        // method is on `i64` — for a call that runs.
-        t if t.is_integer() => Some(vec![Path::root("i64"), Path::root("i32")]),
+        // `Interp::format_call` looks in all six whatever the static type was.
+        // A static scan that used the written width instead would reject
+        // `(format false "~/twice/" 7)` — the literal is `i32`, the method
+        // could be on `u8` — for a call that runs.
+        t if t.is_integer() => Some(crate::types::INT_TYPE_NAMES.iter().map(|n| Path::root(n)).collect()),
         other => crate::types::prim_type_path(other).map(|p| vec![p]),
     }
 }

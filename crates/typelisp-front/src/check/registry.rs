@@ -600,14 +600,14 @@ impl Registry {
         // method table too, so `defmethod` can target them (see
         // `check_defmethod`/`check_instance_method`, which map a primitive
         // `Type` to its registry `Path` via `prim_type_path`). `string`/`char`/
-        // `i32`/`i64`/`f64` additionally get a built-in method set (no
+        // The integer widths and `f64` additionally get a built-in method set (no
         // `defmethod` body to check; the runtime implementation lives in
         // `eval_builtin_method` in `crate::eval::interp`, the same
         // metadata-only pattern as `hashtable_def`) — every
         // other primitive's table starts empty. Arithmetic/comparison
         // operators are *instance* methods (not free functions) precisely so
         // the same symbol (`+`, `<`, ...) can be overloaded per receiver
-        // type — `i32`/`i64` share one `+` symbol, and `f64` another,
+        // type — every integer width shares one `+` symbol, and `f64` another,
         // resolved by `check_instance_method` on the first argument's static
         // type exactly like `(get h k)` resolves to `HashTable`'s `get`.
         for ty in crate::types::primitive_types() {
@@ -620,14 +620,14 @@ impl Registry {
                 Type::Bool => bool_assoc(),
                 Type::Symbol => symbol_assoc(),
                 // Every integer width and both float widths get the same
-                // catalog as `i32`/`f64` did alone. Width is a *static*
-                // distinction here and nothing else: a `Value::Int` is an
-                // `i64` and a `Value::Float` an `f64` whichever type labels
-                // it, so `u8` arithmetic neither wraps at 8 bits nor rounds —
-                // exactly the treatment `i32` has always had (`i32` overflow
-                // does not wrap at 32 bits either). What this removes is the
-                // state these types were in before: registered, nameable, and
-                // with no `+` at all.
+                // catalog as `i32`/`f64` did alone. The catalog is shared but
+                // the *arithmetic* is not: a type name means its width and
+                // its signedness (`types::int_width_signed`), so `u8`
+                // addition wraps at 8 bits and `f32` division rounds to
+                // binary32 — `eval_int_builtin`/`float_at` cut every result
+                // back at the receiver's own width. What this entry removes
+                // is the state these types were in before: registered,
+                // nameable, and with no `+` at all.
                 ref t if t.is_integer() => int_assoc(t.clone()),
                 ref t if t.is_float() => float_assoc(t.clone()),
                 _ => BTreeMap::new(),
@@ -1037,7 +1037,7 @@ pub const BUILTIN_ERROR_TYPES: [&str; 5] =
 
 /// The `stream-*` / `file-*` primitives (`eval::interp::Interp::
 /// eval_stream_builtin`). Deliberately minimal and untyped-looking: a stream
-/// is an opaque `i64` handle here, and the whole CL-shaped surface — the
+/// is an opaque `i32` handle here, and the whole CL-shaped surface — the
 /// `Stream`/`InputStream`/`OutputStream` traits, the concrete stream types
 /// that wrap a handle in a `defstruct`, every composite stream, and the
 /// `with-...` macros — is written in `prelude.rs` on top of these.
@@ -1706,7 +1706,7 @@ pub fn llvm_builder_def() -> AdtDef {
     // `xor` (CL `logxor`, plus `lognot`'s `(xor n -1)` — a bare LLVM
     // instruction like `build-and`/`build-or`).
     assoc.insert("build-xor".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
-    // `(select cond then else)`: `max`/`min` (`i64`, `bignum`, `ratio`) all
+    // `(select cond then else)`: `max`/`min` (integers, `bignum`, `ratio`) all
     // lower to this — see `llvm_builder_build_select`'s doc comment.
     assoc.insert(
         "build-select".to_string(),
@@ -2174,6 +2174,15 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     m.insert(
         "try-float->f32".to_string(),
         AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(Type::F32), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+    );
+    // `try-float->f64` can only answer `some` — widening is exact — but it is
+    // registered all the same, because `Checker::width_cast` names the method
+    // from the target alone and has no "this direction cannot fail" case. The
+    // integer side is the same shape: `try-int->i32` from an `i8` is always
+    // `some` too.
+    m.insert(
+        "try-float->f64".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(Type::F64), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });

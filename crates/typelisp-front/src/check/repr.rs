@@ -82,7 +82,7 @@ pub fn is_enum_ty_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> b
 /// representation has to be written down here or it is gone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Repr {
-    /// `i32`/`i64` — a raw machine word.
+    /// Every integer width — a raw machine word.
     Int,
     /// `f64` — raw `f64::to_bits` in an `i64`.
     Float,
@@ -197,7 +197,7 @@ impl Repr {
             // `Value::Empty`. Requiring the argument to be the `sexpr` type
             // itself drops the outer one through to `Repr::Enum` (a real
             // box), which is the same rule Rust's niche optimization uses.
-            // `Option<Option<i64>>` is an existing, tested shape
+            // `Option<Option<i32>>` is an existing, tested shape
             // (`tests/compile_test.rs`) and `HashTable<K,Option<V>>::get`
             // produces one, so this is reachable, not hypothetical.
             Type::Named(p, args)
