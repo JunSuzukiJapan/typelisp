@@ -557,7 +557,8 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
         // Positively `is_float`: the bare fall-through this replaces read
         // every other box kind as an `f64`, which `float_value` answers with
         // a panic.
-        Value::Boxed(id) if heap.is_float(id) => format_float(heap.float_value(id)),
+        Value::Boxed(id) if heap.is_f64(id) => format_f64(heap.f64_value(id)),
+        Value::Boxed(id) if heap.is_f32(id) => format_f32(heap.f32_value(id)),
         Value::Boxed(_) => "#<unprintable>".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
@@ -592,7 +593,18 @@ fn format_list(heap: &Heap, reg: &Registry, mut v: Value) -> String {
 
 /// Render an `f64` guaranteeing a decimal point, so e.g. `2.0` doesn't print
 /// as `2` (which would be confusable with an `Int`).
-fn format_float(f: f64) -> String {
+fn format_f64(f: f64) -> String {
+    if f.is_finite() && f == f.trunc() {
+        format!("{:.1}", f)
+    } else {
+        f.to_string()
+    }
+}
+
+/// [`format_f64`] for an `f32` — `f32::to_string` is the shortest text that
+/// reads back as the same binary32 value, which is a different (shorter)
+/// answer than the widened `f64`'s.
+fn format_f32(f: f32) -> String {
     if f.is_finite() && f == f.trunc() {
         format!("{:.1}", f)
     } else {

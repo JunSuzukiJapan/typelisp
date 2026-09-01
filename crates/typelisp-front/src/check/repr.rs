@@ -85,7 +85,16 @@ pub enum Repr {
     /// Every integer width — a raw machine word.
     Int,
     /// `f64` — raw `f64::to_bits` in an `i64`.
-    Float,
+    F64,
+    /// `f32` — also a raw `f64::to_bits` pattern, of the binary32 value
+    /// widened into binary64.
+    ///
+    /// A separate representation from [`Repr::F64`] even though the carrier
+    /// word is identical, because the carrier is not the only thing a `Repr`
+    /// decides: a compiled value coming *back* has to be put in a box, and
+    /// the box has to say which width it is. One `Float` variant meant the
+    /// return path had to guess, and it guessed `f64`.
+    F32,
     Char,
     Bool,
     /// `()` — one value, so the word carries no information.
@@ -171,7 +180,8 @@ impl Repr {
         match ty {
             _ if ty.is_integer() => Repr::Int,
             _ if is_llvm_handle_ty(ty) => Repr::Handle,
-            _ if ty.is_float() => Repr::Float,
+            Type::F32 => Repr::F32,
+            _ if ty.is_float() => Repr::F64,
             Type::Char => Repr::Char,
             Type::Bool => Repr::Bool,
             Type::Unit => Repr::Unit,
@@ -241,7 +251,8 @@ impl Repr {
     pub fn tag(&self) -> &'static str {
         match self {
             Repr::Int => "int",
-            Repr::Float => "float",
+            Repr::F64 => "f64",
+            Repr::F32 => "f32",
             Repr::Char => "char",
             Repr::Bool => "bool",
             Repr::Unit => "unit",
@@ -265,9 +276,10 @@ impl Repr {
 
     /// Every simple representation, for [`Repr::read`] and for a test that
     /// wants to enumerate the vocabulary.
-    pub const SIMPLE: [Repr; 17] = [
+    pub const SIMPLE: [Repr; 18] = [
         Repr::Int,
-        Repr::Float,
+        Repr::F64,
+        Repr::F32,
         Repr::Char,
         Repr::Bool,
         Repr::Unit,
@@ -362,7 +374,7 @@ impl Repr {
             // untraced `i64`, so the int tag/detag bit ops are exactly right
             // and no GC root is ever wanted.
             Repr::Int | Repr::Handle => Class::Int,
-            Repr::Float => Class::Float,
+            Repr::F64 | Repr::F32 => Class::Float,
             Repr::Char => Class::Char,
             Repr::Bool => Class::Bool,
             // A unit type has exactly one value, already known from the
@@ -443,12 +455,14 @@ impl Repr {
     /// `compile-tag-struct-field` (encode) and `compile-sexpr-field` (decode).
     ///
     /// Derived from [`Repr::class`]. The numbers are `Sexpr`'s own variant
-    /// numbering (`registry::sexpr_def`: `1`=int `2`=float `3`=char `4`=bool
-    /// `6`=str) rather than a parallel scheme, so those two island functions
+    /// numbering (`registry::sexpr_def`: `1`=i32 `2`=f64 `3`=char `4`=bool
+    /// `6`=str `11`=f32) rather than a parallel scheme, so those two island functions
     /// reuse the same per-variant bit manipulation instead of duplicating it.
-    /// `11` is the first number past that numbering, for `Unit`, which is not a
-    /// `Sexpr` variant and so has none to borrow — `0` being taken by the "not
-    /// representable" case.
+    /// `Unit` is not a `Sexpr` variant and so has no number to borrow; it sits
+    /// at `100`, deliberately clear of the `Sexpr` numbering so that adding a
+    /// variant never collides with it. (It used to be `11`, "the first number
+    /// past" — which stopped being past anything the moment `Sexpr` grew a
+    /// twelfth variant.) `0` is taken by the "not representable" case.
     ///
     /// **This numbering space has a second producer.** `compile-sexpr-field`
     /// also decodes `5` (sym), `7` (cons), `8` (bignum), `9` (ratio) and `10`
@@ -456,7 +470,14 @@ impl Repr {
     /// (`compile-construct-sexpr` / `match_sexpr_ctor`'s `SEXPR_*`), not from
     /// here — this function folds sym/bignum/ratio into the `6` passthrough.
     /// Anything renumbering these must account for both producers.
+    ///
+    /// Read off the `Repr`, not off [`Repr::class`]: the two float widths
+    /// share a class (they compute alike) but not a kind (they box
+    /// differently), and it is the boxing this number drives.
     pub fn field_kind(&self) -> i64 {
+        if matches!(self, Repr::F32) {
+            return 11;
+        }
         match self.class() {
             Class::Int => 1,
             Class::Float => 2,
@@ -467,7 +488,7 @@ impl Repr {
             // Both directions ignore the word they are handed and emit a
             // constant; the slot only has to hold something the GC can decode
             // safely.
-            Class::Unit => 11,
+            Class::Unit => 100,
             // The one type that genuinely reaches this is a still-generic type
             // variable ([`Repr::None`]). The island's `compile-sexpr-field`
             // panics on it with "field type is not representable in compiled
@@ -569,7 +590,8 @@ mod tests {
         let of = |t: Type| Repr::of(&t, &structs, &enums);
         assert_eq!(of(Type::I32), Repr::Int);
         assert_eq!(of(Type::U32), Repr::Int);
-        assert_eq!(of(Type::F64), Repr::Float);
+        assert_eq!(of(Type::F64), Repr::F64);
+        assert_eq!(of(Type::F32), Repr::F32);
         assert_eq!(of(Type::Char), Repr::Char);
         assert_eq!(of(Type::Bool), Repr::Bool);
         assert_eq!(of(Type::Unit), Repr::Unit);
@@ -658,7 +680,7 @@ mod tests {
     /// `compile_reads_a_hashtable_field_out_of_a_struct`).
     #[test]
     fn only_a_generic_type_variable_is_not_representable() {
-        for r in [Repr::Int, Repr::Handle, Repr::Float, Repr::Char, Repr::Bool, Repr::Unit] {
+        for r in [Repr::Int, Repr::Handle, Repr::F64, Repr::F32, Repr::Char, Repr::Bool, Repr::Unit] {
             assert_eq!(r.binding_kind(), 0, "{:?} is a scalar and needs no root", r);
             assert_ne!(r.field_kind(), 0, "{:?} is representable in a field", r);
         }

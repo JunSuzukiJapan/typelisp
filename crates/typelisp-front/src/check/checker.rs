@@ -2738,7 +2738,7 @@ impl Checker {
         // tag — `(format false "~a" x)` in a compiled function printed
         // `to_bits(x) >> 3` instead of the number. Going through the `Float`
         // constructor instead is free in the interpreter
-        // (`construct_sexpr_core`'s `SEXPR_FLOAT` arm validates and passes the
+        // (`construct_sexpr_core`'s `SEXPR_F64`/`SEXPR_F32` arms validate and pass the
         // value straight back) and is exactly the `rt_float_new` box the
         // island emits for that variant. `string`/`bignum`/`ratio` genuinely
         // do share their tagged word between both worlds and stay on the
@@ -13833,7 +13833,8 @@ fn nth_loc(locs: &[Option<Loc>], i: usize) -> Option<Loc> {
 fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
     match v {
         Value::Str(_) => "str",
-        Value::Boxed(id) if heap.is_float(id) => "float",
+        Value::Boxed(id) if heap.is_f64(id) => "f64",
+        Value::Boxed(id) if heap.is_f32(id) => "f32",
         Value::Boxed(id) if heap.is_bignum(id) => "bignum",
         Value::Boxed(id) if heap.is_ratio(id) => "ratio",
         _ => "the sexpr",
@@ -14095,8 +14096,9 @@ fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
         // value, so there is nothing else they could encode as. Written as
         // guards rather than a variant list so a width added later is
         // encodable the day it is added.
-        _ if elem_ty.is_integer() => Some("int"),
-        _ if elem_ty.is_float() => Some("float"),
+        Type::F32 => Some("f32"),
+        _ if elem_ty.is_integer() => Some("i32"),
+        _ if elem_ty.is_float() => Some("f64"),
         Type::Bignum => Some("bignum"),
         Type::Ratio => Some("ratio"),
         Type::Char => Some("char"),

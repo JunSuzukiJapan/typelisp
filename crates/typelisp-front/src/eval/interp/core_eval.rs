@@ -236,12 +236,23 @@ impl Interp {
             // them `eq`.
             Op::Int | Op::Char | Op::Bool | Op::Sym => self.literal_field(heap, form).map(Step::Done),
             Op::Unit => Ok(Step::Done(Value::Empty)),
+            // A float literal is re-boxed rather than handed straight back,
+            // so two literals of the same number are not `eq`. Each width
+            // re-boxes into its own kind: widening an `f32` literal here
+            // would be the literal quietly changing type.
             Op::Float => {
-                let f = match self.literal_field(heap, form)? {
-                    Value::Boxed(id) if heap.is_float(id) => heap.float_value(id),
+                let v = match self.literal_field(heap, form)? {
+                    Value::Boxed(id) if heap.is_f32(id) => {
+                        let f = heap.f32_value(id);
+                        heap.alloc_f32(f)
+                    }
+                    Value::Boxed(id) if heap.is_f64(id) => {
+                        let f = heap.f64_value(id);
+                        heap.alloc_f64(f)
+                    }
                     other => return Err(EvalError::Internal(format!("eval: (float ..) holds {:?}", other))),
                 };
-                Ok(Step::Done(heap.alloc_float(f)))
+                Ok(Step::Done(v))
             }
             Op::Bignum => {
                 let n = match self.literal_field(heap, form)? {
@@ -1621,7 +1632,7 @@ fn match_sexpr_core(
     subs: &[Value],
     v: Value,
 ) -> Result<Option<Vec<(SymRef, Value)>>, EvalError> {
-    use super::{SEXPR_BIGNUM, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_FLOAT, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_STR, SEXPR_SYM};
+    use super::{SEXPR_BIGNUM, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_I32, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_STR, SEXPR_SYM};
 
     // Each of these binds the scrutinee (or a piece of it) straight through:
     // a float/bignum/ratio/string box *is* its value, so there is nothing to
@@ -1635,12 +1646,16 @@ fn match_sexpr_core(
 
     match (variant, v) {
         (SEXPR_NIL, Value::Empty) => Ok(Some(Vec::new())),
-        (SEXPR_INT, Value::Int(_)) => one(heap, v),
+        (SEXPR_I32, Value::Int(_)) => one(heap, v),
         (SEXPR_CHAR, Value::Char(_)) => one(heap, v),
         (SEXPR_BOOL, Value::Bool(_)) => one(heap, v),
         (SEXPR_SYM, Value::Symbol(_)) => one(heap, v),
         (SEXPR_STR, Value::Str(_)) => one(heap, v),
-        (SEXPR_FLOAT, Value::Boxed(id)) if heap.is_float(id) => one(heap, v),
+        // One arm per width, each testing its own box: an `f32` node must not
+        // match `(f64 x)`, or the pattern would be handing out a binding of a
+        // type the value does not have.
+        (SEXPR_F64, Value::Boxed(id)) if heap.is_f64(id) => one(heap, v),
+        (SEXPR_F32, Value::Boxed(id)) if heap.is_f32(id) => one(heap, v),
         (SEXPR_BIGNUM, Value::Boxed(id)) if heap.is_bignum(id) => one(heap, v),
         (SEXPR_RATIO, Value::Boxed(id)) if heap.is_ratio(id) => one(heap, v),
         (SEXPR_CONS, Value::Cons(_)) => {
@@ -1690,7 +1705,7 @@ fn match_sexpr_core(
 
 /// `(construct sexpr N E...)` — build a `Sexpr` datum from evaluated fields.
 fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Value]) -> Result<Value, EvalError> {
-    use super::{SEXPR_BIGNUM, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_FLOAT, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_STR, SEXPR_SYM};
+    use super::{SEXPR_BIGNUM, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_I32, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_STR, SEXPR_SYM};
 
     let arg = |i: usize| -> Result<Value, EvalError> {
         argv.get(i)
@@ -1702,13 +1717,20 @@ fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Value]) -> Resu
         // Each of these validates the argument and then passes the value
         // itself through: the box *is* the datum, so `(eq s (sexpr-str (Str
         // s)))` holds, as CL requires.
-        SEXPR_INT => Ok(Value::Int(super::rt_i64(&arg(0)?)?)),
+        SEXPR_I32 => Ok(Value::Int(super::rt_i64(&arg(0)?)?)),
         SEXPR_CHAR => Ok(Value::Char(super::rt_char(&arg(0)?)?)),
         SEXPR_BOOL => Ok(Value::Bool(super::rt_bool(&arg(0)?)?)),
         SEXPR_SYM => arg(0),
-        SEXPR_FLOAT => {
+        // Each width validates against its own box. The check is what makes
+        // `(f64 x)` on an `f32` a failure rather than a silent widening.
+        SEXPR_F64 => {
             let v = arg(0)?;
             super::rt_f64(heap, &v)?;
+            Ok(v)
+        }
+        SEXPR_F32 => {
+            let v = arg(0)?;
+            super::rt_f32(heap, &v)?;
             Ok(v)
         }
         SEXPR_STR => {

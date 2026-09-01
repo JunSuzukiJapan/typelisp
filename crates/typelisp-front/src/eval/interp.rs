@@ -893,12 +893,20 @@ impl Interp {
             // so the word is a placeholder the callee never reads; it just has
             // to be the one both sides agree on.
             Repr::Unit => Ok(0),
-            // An `f64` is its raw `f64::to_bits` pattern in an `i64`
+            // A float is its raw `f64::to_bits` pattern in an `i64`
             // (`compile-float`/`llvm_builder_build_float_op`), the inverse of
-            // `decode_compiled_return`'s `Repr::Float` arm.
-            Repr::Float => match v {
-                Value::Boxed(id) if heap.is_float(*id) => Ok(heap.float_value(*id).to_bits() as i64),
+            // `decode_compiled_return`'s float arms. An `f32` crosses as the
+            // binary32 value widened into that same pattern — the carrier is
+            // wider than the type, exactly as a `u8` rides in an `i64` word —
+            // so each width is read out of its own box and then widened here,
+            // rather than one arm accepting whichever box turns up.
+            Repr::F64 => match v {
+                Value::Boxed(id) if heap.is_f64(*id) => Ok(heap.f64_value(*id).to_bits() as i64),
                 other => Err(EvalError::Internal(format!("compiled call: expected an f64 argument, got {:?}", other))),
+            },
+            Repr::F32 => match v {
+                Value::Boxed(id) if heap.is_f32(*id) => Ok(f64::from(heap.f32_value(*id)).to_bits() as i64),
+                other => Err(EvalError::Internal(format!("compiled call: expected an f32 argument, got {:?}", other))),
             },
             // An LLVM handle crosses as the *raw* registry index — never
             // tagged. Without its own arm it would fall into the tagged
@@ -971,7 +979,11 @@ impl Interp {
             },
             // Raw `f64::to_bits` in the return register
             // (`llvm_builder_build_float_op`'s final `bitcast`).
-            Repr::Float => float_rt(heap, f64::from_bits(raw as u64)),
+            // The width the *declared return type* named decides the box, which
+            // is the whole reason the two are separate `Repr`s: the word coming
+            // back is the same bit pattern either way.
+            Repr::F64 => heap.alloc_f64(f64::from_bits(raw as u64)),
+            Repr::F32 => heap.alloc_f32(f64::from_bits(raw as u64) as f32),
             // A tagged word whose decode must land on the shape the
             // declaration promised — a mismatch here means the compiled side
             // and this side disagree about the ABI, which is an internal
@@ -1169,7 +1181,7 @@ impl Interp {
         let mut s = RootScope::new(heap);
         // The closure box is reachable from the caller's compiled frame,
         // which the collector cannot see; the arguments the caller passed are
-        // rooted on its side, but their *decoded* forms (a `Repr::Float`
+        // rooted on its side, but their *decoded* forms (a float
         // argument allocates a box) are new objects reachable from nothing.
         s.push_root(f);
         let mut args = Vec::with_capacity(argv.len());
@@ -1805,12 +1817,21 @@ impl Interp {
             // `Value::Boxed` — see `BoxedObj`). Added with the Phase 5 `match`
             // fence so a `Sexpr::Float` payload can still be read out without a
             // `(match s ((Float f) f) ..)`.
-            "sexpr-float" => match args.first() {
+            // One accessor per width, and each accepts only its own box. A
+            // single `sexpr-float` would have to widen an `f32` to answer
+            // with the `f64` its return type promised, which is the width
+            // being thrown away at exactly the point the value is read.
+            "sexpr-f64" => match args.first() {
                 // The node *is* the float box since the scalar
                 // unification, so reading the payload out is the identity.
-                Some(v @ Value::Boxed(id)) if heap.is_float(*id) => Some(Ok(v.clone())),
-                Some(_) => Some(Err(EvalError::Panic("sexpr-float: expected a Float Sexpr node".into()))),
-                _ => Some(Err(EvalError::Internal("sexpr-float: expected a Sexpr argument".into()))),
+                Some(v @ Value::Boxed(id)) if heap.is_f64(*id) => Some(Ok(v.clone())),
+                Some(_) => Some(Err(EvalError::Panic("sexpr-f64: expected an f64 Sexpr node".into()))),
+                _ => Some(Err(EvalError::Internal("sexpr-f64: expected a Sexpr argument".into()))),
+            },
+            "sexpr-f32" => match args.first() {
+                Some(v @ Value::Boxed(id)) if heap.is_f32(*id) => Some(Ok(v.clone())),
+                Some(_) => Some(Err(EvalError::Panic("sexpr-f32: expected an f32 Sexpr node".into()))),
+                _ => Some(Err(EvalError::Internal("sexpr-f32: expected a Sexpr argument".into()))),
             },
             "sexpr-str" => match args.first() {
                 // The node *is* the heap string since the scalar
@@ -2389,8 +2410,18 @@ pub(crate) fn rt_i64(v: &Value) -> Result<i64, EvalError> {
 
 pub(crate) fn rt_f64(heap: &Heap, v: &Value) -> Result<f64, EvalError> {
     match v {
-        Value::Boxed(id) if heap.is_float(*id) => Ok(heap.float_value(*id)),
+        Value::Boxed(id) if heap.is_f64(*id) => Ok(heap.f64_value(*id)),
         _ => Err(EvalError::Internal("sexpr: expected an f64 field".into())),
+    }
+}
+
+/// [`rt_f64`] for an `f32` field. An `f64` box is refused rather than
+/// narrowed: the field's declared type said `f32`, so a value of the other
+/// width arriving here is a bug, not something to round.
+pub(crate) fn rt_f32(heap: &Heap, v: &Value) -> Result<f32, EvalError> {
+    match v {
+        Value::Boxed(id) if heap.is_f32(*id) => Ok(heap.f32_value(*id)),
+        _ => Err(EvalError::Internal("sexpr: expected an f32 field".into())),
     }
 }
 
@@ -2454,8 +2485,8 @@ fn sexpr_list_to_symbols(heap: &Heap, mut v: Value) -> Result<Vec<SymRef>, EvalE
 
 /// Variant indices of `Sexpr`'s constructors (see `check::registry::sexpr_def`).
 const SEXPR_NIL: usize = 0;
-const SEXPR_INT: usize = 1;
-const SEXPR_FLOAT: usize = 2;
+const SEXPR_I32: usize = 1;
+const SEXPR_F64: usize = 2;
 const SEXPR_CHAR: usize = 3;
 const SEXPR_BOOL: usize = 4;
 const SEXPR_SYM: usize = 5;
@@ -2464,6 +2495,9 @@ const SEXPR_CONS: usize = 7;
 const SEXPR_BIGNUM: usize = 8;
 const SEXPR_RATIO: usize = 9;
 const SEXPR_PATH: usize = 10;
+/// Appended after `path`, so the numbers above keep the values burned into
+/// the island's IR and into compiled code. See `registry::sexpr_def`.
+const SEXPR_F32: usize = 11;
 
 /// Evaluate a built-in integer arithmetic/comparison instance method
 /// (`registry::int_assoc`), at the receiver type's own `width` and
@@ -2586,10 +2620,20 @@ fn int_integer_length(args: &[Value], width: u32) -> Result<Value, EvalError> {
     Ok(Value::Int(i64::from(64 - (v & mask).leading_zeros())))
 }
 
+/// A float operand's number, whichever width labels it.
+///
+/// The arithmetic below computes in binary64 and rounds afterwards
+/// ([`float_at`]), so an operand is read as `f64` here — an `f32` widens
+/// exactly. The width is not lost by doing so: it is the *receiver's declared
+/// type* that decides the rounding and the result box, not the operand's box.
 fn expect_float(heap: &Heap, v: &Value) -> Result<f64, EvalError> {
     match v {
-        Value::Boxed(id) if heap.is_float(*id) => Ok(heap.float_value(*id)),
-        other => Err(EvalError::Internal(format!("expected a Float, got {:?}", other))),
+        Value::Boxed(id) => match heap.float_box(*id) {
+            Some(typelisp_mem::FloatBox::F32(f)) => Ok(f64::from(f)),
+            Some(typelisp_mem::FloatBox::F64(f)) => Ok(f),
+            None => Err(EvalError::Internal(format!("expected a float, got {:?}", v))),
+        },
+        other => Err(EvalError::Internal(format!("expected a float, got {:?}", other))),
     }
 }
 
@@ -2599,7 +2643,7 @@ fn expect_float(heap: &Heap, v: &Value) -> Result<f64, EvalError> {
 /// six — the carrier already says which number it is.
 fn int_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     match args.first() {
-        Some(Value::Int(n)) => Ok(float_rt(heap, *n as f64)),
+        Some(Value::Int(n)) => Ok(heap.alloc_f64(*n as f64)),
         other => Err(EvalError::Internal(format!("int->float: expected an integer, got {:?}", other))),
     }
 }
@@ -2610,7 +2654,13 @@ fn int_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// magnitudes the island's `llvm.fptosi.sat` gives).
 fn float_to_int(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     match args.first() {
-        Some(Value::Boxed(id)) if heap.is_float(*id) => Ok(Value::Int(i64::from(heap.float_value(*id) as i32))),
+        // Either width truncates the same way — the operand's number is what
+        // `fptosi` sees — so the width is read out and then used, not assumed.
+        Some(Value::Boxed(id)) => match heap.float_box(*id) {
+            Some(typelisp_mem::FloatBox::F32(f)) => Ok(Value::Int(i64::from(f as i32))),
+            Some(typelisp_mem::FloatBox::F64(f)) => Ok(Value::Int(i64::from(f as i32))),
+            None => Err(EvalError::Internal(format!("float->int: expected a float, got {:?}", args.first()))),
+        },
         other => Err(EvalError::Internal(format!("float->int: expected a float, got {:?}", other))),
     }
 }
@@ -2678,13 +2728,17 @@ fn eval_float_builtin(heap: &mut Heap, name: &str, args: &[Value], single: bool)
 /// `v` boxed at the receiver's precision: rounded to binary32 first when the
 /// receiver is `f32`.
 ///
-/// A float value is carried in an `f64` box whichever type labels it — every
-/// binary32 value is exactly a binary64 value, the same way a narrow integer
-/// is carried sign-extended in a 64-bit word — but the *arithmetic* is the
-/// one the type names. Rounding here, after each operation, is what makes
-/// `f32` binary32 rather than a label on an `f64` (`docs/functions.md` §1b).
+/// The *arithmetic* is the one the type names: it is computed in binary64 and
+/// rounded here, which is what makes `f32` binary32 rather than a label on an
+/// `f64` (`docs/functions.md` §1b). And the box is the one the type names
+/// too — an `f32` result goes in an `f32` box, so that everything downstream
+/// (printing, `eql`, a dump) can still tell which width it is.
 fn float_at(heap: &mut Heap, v: f64, single: bool) -> Value {
-    float_rt(heap, if single { f64::from(v as f32) } else { v })
+    if single {
+        heap.alloc_f32(v as f32)
+    } else {
+        heap.alloc_f64(v)
+    }
 }
 
 fn float_unary(heap: &mut Heap, args: &[Value], f: fn(f64) -> f64, single: bool) -> Result<Value, EvalError> {
@@ -2712,7 +2766,7 @@ fn float_to_width(heap: &mut Heap, args: &[Value], single: bool) -> Result<Value
 fn try_float_to_f32(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let v = expect_float(heap, &args[0])?;
     let exact = f64::from(v as f32).to_bits() == v.to_bits();
-    let narrowed = if exact { Some(float_rt(heap, v)) } else { None };
+    let narrowed = if exact { Some(heap.alloc_f32(v as f32)) } else { None };
     Ok(option_value(heap, ret_key, narrowed))
 }
 
@@ -2798,9 +2852,6 @@ pub fn str_rt(heap: &mut Heap, s: impl Into<String>) -> Value {
 /// the compiled tier keeps floats in native registers (`binding_kind`'s float
 /// kind), and the interpreter was already boxing at every boundary. It is the
 /// interpreter's own locals that move onto the heap.
-fn float_rt(heap: &mut Heap, f: f64) -> Value {
-    heap.alloc_float(f)
-}
 
 /// Evaluate a built-in `bignum` arithmetic/comparison instance method
 /// (`registry::bignum_assoc`). Core integer operations: `+ - * /` (`/`
@@ -2969,7 +3020,7 @@ fn try_bignum_to_int(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<V
 fn bignum_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let n = expect_bignum(heap, &args[0])?;
     let f = n.to_f64().unwrap_or(f64::INFINITY.copysign(if n.sign() == num_bigint::Sign::Minus { -1.0 } else { 1.0 }));
-    Ok(float_rt(heap, f))
+    Ok(heap.alloc_f64(f))
 }
 
 /// `bignum->ratio` (`registry::bignum_assoc`): always-exact widening.
@@ -3014,7 +3065,7 @@ fn ratio_to_bignum(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> 
 fn ratio_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let r = expect_ratio(heap, &args[0])?;
     let f = r.to_f64().unwrap_or(f64::NAN);
-    Ok(float_rt(heap, f))
+    Ok(heap.alloc_f64(f))
 }
 
 /// `numerator`/`denominator` (`registry::ratio_assoc`): the reduced

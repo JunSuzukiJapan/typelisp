@@ -335,11 +335,17 @@ fn hash_form(
                 stack.push(cdr);
                 stack.push(car);
             }
-            Value::Boxed(id) if heap.is_float(id) => {
+            // Bit pattern, not the float: a float isn't `Hash`, and two
+            // literals that differ only as NaN payloads differ in source. The
+            // two widths get different discriminants, so a source that says
+            // `f32` does not hash the same as one that says `f64`.
+            Value::Boxed(id) if heap.is_f64(id) => {
                 8u8.hash(hasher);
-                // Bit pattern, not the `f64`: `f64` isn't `Hash`, and two
-                // literals that differ only as NaN payloads differ in source.
-                heap.float_value(id).to_bits().hash(hasher);
+                heap.f64_value(id).to_bits().hash(hasher);
+            }
+            Value::Boxed(id) if heap.is_f32(id) => {
+                14u8.hash(hasher);
+                heap.f32_value(id).to_bits().hash(hasher);
             }
             Value::Boxed(id) if heap.is_bignum(id) => {
                 9u8.hash(hasher);

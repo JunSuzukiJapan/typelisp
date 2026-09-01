@@ -338,7 +338,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 200] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 202] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -369,8 +369,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 200] {
         rt_stream_write_byte, rt_stream_write_string,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
         rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len,
-        rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum,
-        rt_float_to_ratio, rt_float_value, rt_global_get, rt_global_new, rt_global_set, rt_int_div, rt_int_mod,
+        rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_float_to_bignum,
+        rt_float_to_ratio, rt_f64_value, rt_f32_value, rt_global_get, rt_global_new, rt_global_set, rt_int_div, rt_int_mod,
         rt_int_ash, rt_int_logbitp, rt_int_logcount, rt_int_integer_length,
         rt_f64_tan, rt_f64_asin, rt_f64_acos, rt_f64_atan, rt_f64_sinh, rt_f64_cosh, rt_f64_tanh, rt_f64_asinh, rt_f64_acosh,
         rt_f64_atanh,
@@ -519,8 +519,10 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 200] {
         ("rt_str_lt", rt_str_lt as usize),
         ("rt_str_append", rt_str_append as usize),
         ("rt_str_substring", rt_str_substring as usize),
-        ("rt_float_new", rt_float_new as usize),
-        ("rt_float_value", rt_float_value as usize),
+        ("rt_f64_new", rt_f64_new as usize),
+        ("rt_f64_value", rt_f64_value as usize),
+        ("rt_f32_new", rt_f32_new as usize),
+        ("rt_f32_value", rt_f32_value as usize),
         ("rt_box_kind", rt_box_kind as usize),
         ("rt_struct_new", rt_struct_new as usize),
         ("rt_struct_field_get", rt_struct_field_get as usize),

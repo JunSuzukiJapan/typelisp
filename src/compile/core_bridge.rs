@@ -355,9 +355,19 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             _ => Err(malformed(heap, form)),
         },
         "unit" => core::tagged(heap, "unit", &[]),
+        // The literal's payload is the *already rounded* number — an `f32`
+        // literal arrives as the binary32 value widened into binary64 — so
+        // the constant this emits is right for either width without the node
+        // having to name one. What the width does decide is the box, and that
+        // travels the other channel: `Repr::field_kind` (2 for `f64`, 11 for
+        // `f32`), which is what `compile-sexpr-field` reads.
         "float" => {
             let bits = match core::field(heap, form, 0) {
-                Some(Value::Boxed(id)) if heap.is_float(id) => heap.float_value(id).to_bits(),
+                Some(Value::Boxed(id)) => match heap.float_box(id) {
+                    Some(typelisp_mem::FloatBox::F32(f)) => f64::from(f).to_bits(),
+                    Some(typelisp_mem::FloatBox::F64(f)) => f.to_bits(),
+                    None => return Err(malformed(heap, form)),
+                },
                 _ => return Err(malformed(heap, form)),
             };
             // Two 32-bit halves, not one word: the island reads a `Sexpr` int
@@ -1243,8 +1253,11 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
 /// (`registry::sexpr_def`), so `compile-construct-sexpr` builds each one the
 /// same way it would from written source.
 const SEXPR_NIL: i64 = 0;
-const SEXPR_INT: i64 = 1;
-const SEXPR_FLOAT: i64 = 2;
+const SEXPR_I32: i64 = 1;
+const SEXPR_F64: i64 = 2;
+/// Appended past `path`, so the numbers above keep the values burned into the
+/// island's IR — see `registry::sexpr_def`.
+const SEXPR_F32: i64 = 11;
 const SEXPR_CHAR: i64 = 3;
 const SEXPR_BOOL: i64 = 4;
 const SEXPR_STR: i64 = 6;
@@ -1325,7 +1338,7 @@ fn sym_form(heap: &mut Heap, sym: SymRef) -> Result<Value, Error> {
 fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
     match datum {
         Value::Empty => sexpr_construct(heap, SEXPR_NIL, &[]),
-        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| int_node(h, n)),
+        Value::Int(n) => sexpr_leaf(heap, SEXPR_I32, |h| int_node(h, n)),
         Value::Bool(b) => sexpr_leaf(heap, SEXPR_BOOL, |h| core::tagged(h, "bool", &[Value::Bool(b)])),
         Value::Char(c) => sexpr_leaf(heap, SEXPR_CHAR, |h| core::tagged(h, "char", &[Value::Char(c)])),
         Value::Str(id) => {
@@ -1346,9 +1359,15 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
             let fields = f.as_slice().to_vec();
             sexpr_construct(f.heap(), SEXPR_PATH, &fields)
         }
-        Value::Boxed(id) if heap.is_float(id) => {
-            let bits = heap.float_value(id).to_bits();
-            sexpr_leaf(heap, SEXPR_FLOAT, move |h| {
+        Value::Boxed(id) if heap.is_f32(id) => {
+            let bits = f64::from(heap.f32_value(id)).to_bits();
+            sexpr_leaf(heap, SEXPR_F32, move |h| {
+                core::tagged(h, "float", &[half(bits >> 32), half(bits)])
+            })
+        }
+        Value::Boxed(id) if heap.is_f64(id) => {
+            let bits = heap.f64_value(id).to_bits();
+            sexpr_leaf(heap, SEXPR_F64, move |h| {
                 core::tagged(
                     h,
                     "float",

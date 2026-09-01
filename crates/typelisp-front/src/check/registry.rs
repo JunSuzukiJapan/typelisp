@@ -781,8 +781,9 @@ impl Registry {
         // predicate its non-panic-fallback caller (`form-is-borrowed?`) needs
         // to branch on a `Sym` node — a peer of
         // `sexpr-consp`/`sexpr-null`/`sexpr-atom`.
-        root.fns.insert("sexpr-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-i32".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-f64".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-f32".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-bool".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-char".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Char, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-str".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
@@ -1216,7 +1217,7 @@ fn builtin_error_defs() -> Vec<AdtDef> {
 
 /// The built-in `Sexpr` sum type (the result type of `read`).
 ///
-/// `Sexpr = Int | Float | Char | Bool | Sym | Str | Cons(Option<Sexpr>,
+/// `Sexpr = i32 | f64 | f32 | Char | Bool | Sym | Str | Cons(Option<Sexpr>,
 /// Option<Sexpr>) | Bignum | Ratio | Path`: every S-expression **but** the
 /// empty list, which is `Option<Sexpr>`'s `none` since the null-elimination
 /// work (`docs/dev/null-elimination-plan.md`). So the type S-expression data
@@ -1240,8 +1241,8 @@ fn sexpr_def() -> AdtDef {
             // Index 0, and never constructible — see this function's doc
             // comment. `Checker` rejects it by name.
             Variant { name: "nil".to_string(), fields: vec![] },
-            Variant { name: "int".to_string(), fields: vec![Type::I32] },
-            Variant { name: "float".to_string(), fields: vec![Type::F64] },
+            Variant { name: "i32".to_string(), fields: vec![Type::I32] },
+            Variant { name: "f64".to_string(), fields: vec![Type::F64] },
             Variant { name: "char".to_string(), fields: vec![Type::Char] },
             Variant { name: "bool".to_string(), fields: vec![Type::Bool] },
             Variant { name: "sym".to_string(), fields: vec![Type::Symbol] },
@@ -1268,6 +1269,12 @@ fn sexpr_def() -> AdtDef {
             // already-heap-resident data) — see that function's own doc
             // comment for the GC-rooting this requires.
             Variant { name: "path".to_string(), fields: vec![option_of(sexpr())] },
+            // Index 11 onwards: the widths that used to be folded into `i32`
+            // and `f64` above. Appended rather than inserted, because the
+            // variant numbers are burned into the island's IR and into
+            // compiled code, and because `Repr::field_kind` reads off the
+            // same numbering (`Unit` was moved out to 100 to make room).
+            Variant { name: "f32".to_string(), fields: vec![Type::F32] },
         ],
         assoc: sexpr_assoc(),
         public: true,
