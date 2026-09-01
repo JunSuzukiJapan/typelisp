@@ -415,14 +415,15 @@ pub(super) fn wrap_let_star(heap: &mut Heap, bindings: Vec<(Value, Value)>, body
 /// language's own default for a context-free integer literal, see
 /// `Checker::int_lit_ty`) — there being no argument to infer a type from
 /// is exactly the situation that fallback exists for. Builds a
-/// heap-boxed float/bignum/ratio directly (`Heap::alloc_float`/
+/// heap-boxed float/bignum/ratio directly (`Heap::alloc_f64`/`alloc_f32`/
 /// `alloc_bignum`/`alloc_ratio`) rather than a `(int->bignum 0)`-style
 /// call form — the same representation the reader itself produces for a
 /// literal, so `Self::check`'s existing `Value::Boxed` handling picks up
 /// the right type with no special-casing needed here.
 pub(super) fn numeric_identity_literal(heap: &mut Heap, expected: Option<&Type>, value: i64) -> Value {
     match expected {
-        Some(Type::F64) => heap.alloc_float(value as f64),
+        Some(Type::F64) => heap.alloc_f64(value as f64),
+        Some(Type::F32) => heap.alloc_f32(value as f32),
         Some(Type::Bignum) => heap.alloc_bignum(num_bigint::BigInt::from(value)),
         Some(Type::Ratio) => heap.alloc_ratio(num_rational::BigRational::from_integer(num_bigint::BigInt::from(value))),
         _ => Value::Int(value),

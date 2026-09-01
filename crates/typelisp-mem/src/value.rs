@@ -244,14 +244,24 @@ impl BoxId {
 /// `Vector<T>`/`HashTable<K,V>`/`Scope<V>`/closures) is meant to eventually
 /// live here, as one uniform heap-resident, GC-traced representation instead
 /// of a separate, `Rc`-managed value universe — see the project's `Sexpr`/
-/// `RtValue` unification plan. `Float` is the first case, and a deliberately
-/// forced one: an `f64` doesn't fit losslessly alongside a 3-bit tag in a
-/// 64-bit word (unlike `Int`/`Char`/`Bool`/every interned-index variant), so
-/// `Sexpr::Float` was never representable in the tagged compiled-code ABI at
-/// all (`typelisp-rt`'s `encode`/`decode` used to `fatal()` on it) — boxing
-/// it here (heap-resident behind a small index, exactly like `Value::Str`
-/// already is) is what makes it representable, closing that gap as the
-/// first proof of this mechanism.
+/// `RtValue` unification plan. The floats are the first case, and a
+/// deliberately forced one: an `f64` doesn't fit losslessly alongside a 3-bit
+/// tag in a 64-bit word (unlike `Int`/`Char`/`Bool`/every interned-index
+/// variant), so a float was never representable in the tagged compiled-code
+/// ABI at all (`typelisp-rt`'s `encode`/`decode` used to `fatal()` on it) —
+/// boxing it here (heap-resident behind a small index, exactly like
+/// `Value::Str` already is) is what makes it representable, closing that gap
+/// as the first proof of this mechanism.
+///
+/// **One variant per width.** `f32` and `f64` are different types, and a
+/// value always *is* the number its type names — so the box says which,
+/// rather than storing both as `f64` and leaving every reader to guess. One
+/// `Float(f64)` variant was the older design, and it made `(the f32 0.1)`
+/// print as `0.10000000149011612`: the printer had no way to ask for
+/// binary32's shortest round-trip. Detecting it from the value is unsound —
+/// `0.10000000149011612` *is* a binary32-representable `f64`, so a genuine
+/// `f64` holding it would print as `0.1` and read back as a different
+/// number.
 ///
 /// `Struct` is the second case: `defstruct` instances, `Vector<T>`, and
 /// `cons-cell<K,V>` all share this one variant rather than getting one each
@@ -262,11 +272,27 @@ impl BoxId {
 /// of the same "a name and some fields" shape.
 ///
 /// No longer `Copy` (a `Struct`'s `Vec<Value>` owns heap memory of its own,
-/// unlike `Float`'s bare `f64`) — every read site now borrows instead of
-/// implicitly copying, e.g. [`super::heap::Heap::float_value`].
+/// unlike a float's bare payload) — every read site now borrows instead of
+/// implicitly copying, e.g. [`super::heap::Heap::f64_value`].
+/// A boxed float, read back as the width it actually is.
+///
+/// [`BoxedObj`] is crate-private, so this is how a caller outside
+/// `typelisp-mem` handles "a float of either width" without the heap having
+/// to pick one for it. Every arm names a width: there is no way to read a
+/// float out of the heap without saying which one you got.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FloatBox {
+    F32(f32),
+    F64(f64),
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum BoxedObj {
-    Float(f64),
+    /// A `f32`, stored as a `f32`: the type says binary32, so the box holds
+    /// binary32. Storing it widened to `f64` would be a second place the
+    /// width could drift from the type.
+    Float32(f32),
+    Float64(f64),
     /// A `bignum` (arbitrary-precision integer, CL's bignum). Heap-boxed for
     /// the same reason `Float` is — the value doesn't fit alongside a tag in
     /// one 64-bit word — with the payload (a `num_bigint::BigInt`) living in

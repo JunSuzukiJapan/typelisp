@@ -259,7 +259,7 @@ pub unsafe extern "C" fn rt_set_cdr(args: *const i64, argc: u32) -> i64 {
 // The rest of the `sexpr-*` island layer beyond `car`/`cdr`/`cons`: the tag
 // predicates (`sexpr-consp`/`sexpr-null`/`sexpr-atom`/`sexpr-symp`) and the
 // typed payload extractors (`sexpr-int`/`sexpr-bool`/`sexpr-char`/
-// `sexpr-str`/`sexpr-sym-name`; `sexpr-float` reuses [`rt_float_value`],
+// `sexpr-str`/`sexpr-sym-name`; `sexpr-f64` reuses [`rt_f64_value`],
 // whose bits-in-`i64` result is exactly the compiled `f64` convention).
 // Before Stage 8 these builtins had no compiled lowering at all, so any
 // user function walking a `Sexpr` list (every `&rest` consumer, above all)
@@ -424,7 +424,7 @@ pub unsafe extern "C" fn rt_sym_name(args: *const i64, argc: u32) -> i64 {
 // `Float` is the first, deliberately trivial occupant (an `f64` doesn't fit
 // losslessly alongside a 3-bit tag, so `Sexpr::Float` was never actually
 // representable in compiled code before this). Unlike `rt_cons`'s `car`/
-// `cdr` (already-tagged `Sexpr` values), `rt_float_new`'s argument is a raw
+// `cdr` (already-tagged `Sexpr` values), `rt_f64_new`'s argument is a raw
 // `f64` bit pattern (`f64::to_bits`), not a tagged `Sexpr` — there is no
 // existing `Sexpr` value to decode, this constructs a brand new one, the
 // same way `compile-construct-sexpr`'s other constructors take their raw
@@ -439,50 +439,91 @@ pub unsafe extern "C" fn rt_sym_name(args: *const i64, argc: u32) -> i64 {
 /// (the `f64`'s `to_bits()` reinterpreted as `i64`); a `Heap` must already
 /// be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_float_new(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_f64_new(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
-        fatal("rt_float_new: expected 1 argument");
+        fatal("rt_f64_new: expected 1 argument");
     }
     let f = f64::from_bits(*args as u64);
-    encode(active_heap().alloc_float(f))
+    encode(active_heap().alloc_f64(f))
+}
+
+/// [`rt_f64_new`] for an `f32`.
+///
+/// The argument is still an `f64` bit pattern: a compiled `f32` lives in an
+/// `f64` register already rounded to binary32 (`build-fround32`), exactly the
+/// way a compiled `u8` lives in an `i64` register already cut to 8 bits. The
+/// carrier being wider than the type is not the type being lost — the value
+/// *is* the number its type names either way. What changes here is the box,
+/// which stores a real `f32` so that every later reader can tell.
+///
+/// # Safety
+///
+/// Same as [`rt_f64_new`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_f32_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_f32_new: expected 1 argument");
+    }
+    let f = f64::from_bits(*args as u64);
+    encode(active_heap().alloc_f32(f as f32))
 }
 
 /// Reads the `f64` bit pattern out of a boxed `Sexpr` float — `args[0]` is a
-/// tagged `Sexpr` value (as [`rt_car`] etc. take), unlike `rt_float_new`'s
+/// tagged `Sexpr` value (as [`rt_car`] etc. take), unlike `rt_f64_new`'s
 /// raw payload. Fatal if it isn't actually a boxed float — the checker is
 /// responsible for guaranteeing that never happens, same convention as
 /// [`rt_car`] on a non-cons.
 ///
 /// # Safety
 ///
-/// Same as [`rt_float_new`].
+/// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_float_value(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_f64_value(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
-        fatal("rt_float_value: expected 1 argument");
+        fatal("rt_f64_value: expected 1 argument");
     }
     match decode(*args) {
-        // Positively `is_float`, not "any box": every other `BoxedObj` kind
-        // would make `float_value` *panic*, and a panic out of this
-        // `nounwind` shim aborts the process instead of reporting anything —
-        // so the doc'd fatal has to be an explicit test.
-        Value::Boxed(id) if active_heap().is_float(id) => {
-            active_heap().float_value(id).to_bits() as i64
+        // Positively `is_f64`, not "any box": every other `BoxedObj` kind
+        // would make `f64_value` *panic*, and a panic out of this `nounwind`
+        // shim aborts the process instead of reporting anything — so the
+        // doc'd fatal has to be an explicit test. An `f32` box is refused
+        // here too: widening it would be this shim deciding a width its
+        // caller already knew.
+        Value::Boxed(id) if active_heap().is_f64(id) => active_heap().f64_value(id).to_bits() as i64,
+        _ => fatal("rt_f64_value: argument is not a boxed f64"),
+    }
+}
+
+/// [`rt_f64_value`] for an `f32`, widened into the `f64` bit pattern a
+/// compiled `f32` register holds — see [`rt_f32_new`] for why the carrier is
+/// wider than the type.
+///
+/// # Safety
+///
+/// Same as [`rt_f64_new`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_f32_value(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_f32_value: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Boxed(id) if active_heap().is_f32(id) => {
+            f64::from(active_heap().f32_value(id)).to_bits() as i64
         }
-        _ => fatal("rt_float_value: argument is not a boxed float"),
+        _ => fatal("rt_f32_value: argument is not a boxed f32"),
     }
 }
 
 /// Discriminates the numeric boxed `Sexpr` kinds that share `TAG_BOXED`'s
-/// one tag: `1` for a boxed float, `2` for a bignum, `3` for a ratio, `0`
-/// for everything else — *including* non-boxed values, so it's total over
+/// one tag: `1` for a boxed `f64`, `4` for a boxed `f32`, `2` for a bignum,
+/// `3` for a ratio, `0` for everything else — *including* non-boxed values, so it's total over
 /// every tagged word and `compile-sexpr-tag-test` can call it without a
 /// prior tag check (a `kind == 1` result already implies `TAG_BOXED`).
-/// `args[0]` is a tagged `Sexpr` value, like [`rt_float_value`]'s.
+/// `args[0]` is a tagged `Sexpr` value, like [`rt_f64_value`]'s.
 ///
 /// # Safety
 ///
-/// Same as [`rt_float_new`].
+/// Same as [`rt_f64_new`].
 #[no_mangle]
 pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
@@ -491,8 +532,10 @@ pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
     match decode(*args) {
         Value::Boxed(id) => {
             let heap = active_heap();
-            if heap.is_float(id) {
+            if heap.is_f64(id) {
                 1
+            } else if heap.is_f32(id) {
+                4
             } else if heap.is_bignum(id) {
                 2
             } else if heap.is_ratio(id) {
@@ -522,7 +565,7 @@ pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
 // already does for any tagged argument it passes in: allocating a new
 // `BoxedObj` (`box_slots`) never triggers the cons-heap's mark-sweep (that
 // only fires on cons-arena exhaustion), the same assumption `rt_struct_new`/
-// `rt_float_new` already rely on above.
+// `rt_f64_new` already rely on above.
 //
 // Division by zero is checked explicitly (`Sign::NoSign`) before calling
 // into `BigInt`/`BigRational`'s `Div`/`Rem` operators, which otherwise raise

@@ -1130,7 +1130,7 @@ fn parse_number(heap: &mut Heap, tok: &str) -> Result<Option<Value>, Error> {
         && (body.contains('.') || body.contains('e') || body.contains('E'))
     {
         if let Ok(f) = body.parse::<f64>() {
-            return Ok(Some(heap.alloc_float(if neg { -f } else { f })));
+            return Ok(Some(heap.alloc_f64(if neg { -f } else { f })));
         }
     }
     Ok(None)

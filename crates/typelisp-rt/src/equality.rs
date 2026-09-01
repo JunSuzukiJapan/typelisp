@@ -22,7 +22,7 @@
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{FloatBox, Heap, Value};
 
 /// The concrete value inside a trait object, or `v` unchanged. Comparison
 /// (like printing) sees straight through a `BoxedObj::Dyn`: the box is a
@@ -61,10 +61,18 @@ pub fn eq_val(heap: &Heap, a: Value, b: Value) -> bool {
 pub fn eql_val(heap: &Heap, a: Value, b: Value) -> bool {
     let (a, b) = (strip_dyn(heap, a), strip_dyn(heap, b));
     if let (Value::Boxed(ia), Value::Boxed(ib)) = (a, b) {
-        if heap.is_float(ia) && heap.is_float(ib) {
-            return heap.float_value(ia) == heap.float_value(ib);
+        // Two floats are `eql` when they are the *same width* and the same
+        // number, which is CL: `(eql 1.0f0 1.0d0)` is false there because the
+        // two are different types. Matching the pair rather than comparing
+        // through a common width is what keeps that true here.
+        if let (Some(fa), Some(fb)) = (heap.float_box(ia), heap.float_box(ib)) {
+            return match (fa, fb) {
+                (FloatBox::F32(x), FloatBox::F32(y)) => x == y,
+                (FloatBox::F64(x), FloatBox::F64(y)) => x == y,
+                _ => false,
+            };
         }
-        // Same rationale as `Float` above: two separately-allocated but
+        // Same rationale as the floats above: two separately-allocated but
         // equal-valued `bignum`/`ratio` boxes must still be `eql`.
         if heap.is_bignum(ia) && heap.is_bignum(ib) {
             return heap.bignum_value(ia) == heap.bignum_value(ib);
@@ -91,15 +99,24 @@ pub fn equal_val(heap: &Heap, a: Value, b: Value) -> bool {
     }
 }
 
-/// Any of the four numeric shapes (`Int`, boxed `Float`/`bignum`/`ratio`) as
+/// Any of the numeric shapes (`Int`, a boxed `f32`/`f64`/`bignum`/`ratio`) as
 /// one exact rational, so [`equalp_val`] can compare across type the way CL's
 /// `equalp` requires. `None` for anything that isn't a number.
+///
+/// Unlike [`eql_val`], this deliberately *crosses* the float widths: `equalp`
+/// on numbers is CL's `=`, which is about the numbers rather than the types.
+/// An `f32` widens to `f64` exactly, so reading the width out and widening is
+/// lossless — but the width is still read rather than assumed.
 fn numeric_as_ratio(heap: &Heap, v: Value) -> Option<BigRational> {
     match v {
         Value::Int(n) => Some(BigRational::from_integer(BigInt::from(n))),
-        Value::Boxed(id) if heap.is_float(id) => BigRational::from_float(heap.float_value(id)),
-        Value::Boxed(id) if heap.is_bignum(id) => Some(BigRational::from_integer(heap.bignum_value(id).clone())),
-        Value::Boxed(id) if heap.is_ratio(id) => Some(heap.ratio_value(id).clone()),
+        Value::Boxed(id) => match heap.float_box(id) {
+            Some(FloatBox::F32(f)) => BigRational::from_float(f64::from(f)),
+            Some(FloatBox::F64(f)) => BigRational::from_float(f),
+            None if heap.is_bignum(id) => Some(BigRational::from_integer(heap.bignum_value(id).clone())),
+            None if heap.is_ratio(id) => Some(heap.ratio_value(id).clone()),
+            None => None,
+        },
         _ => None,
     }
 }

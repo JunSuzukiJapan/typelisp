@@ -41,7 +41,7 @@ use std::ptr;
 
 use crate::Error;
 use super::symbols::{self, SymRef};
-use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, MemHashKey, PathId, StrId, StructPayload, TypeKeyId, Value};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, FloatBox, LocId, MemHashKey, PathId, StrId, StructPayload, TypeKeyId, Value};
 
 /// How far past its initial capacity a heap may grow by default — see
 /// [`Heap::with_capacity`]. Large enough that program text plus a working set
@@ -690,23 +690,57 @@ impl Heap {
         }
     }
 
-    /// Store an `f64`, returning its `Value::Boxed` — `Sexpr::Float`'s
-    /// runtime representation (see [`BoxedObj`]'s doc comment for why a
-    /// float can't be an immediate `Value` variant the way `Int`/`Char`/
-    /// `Bool` are).
-    pub fn alloc_float(&mut self, f: f64) -> Value {
-        self.alloc_boxed(BoxedObj::Float(f))
+    /// Store an `f64`, returning its `Value::Boxed` — `Sexpr`'s `f64`
+    /// variant's runtime representation (see [`BoxedObj`]'s doc comment for
+    /// why a float can't be an immediate `Value` variant the way `Int`/
+    /// `Char`/`Bool` are).
+    pub fn alloc_f64(&mut self, f: f64) -> Value {
+        self.alloc_boxed(BoxedObj::Float64(f))
     }
 
-    /// The `f64` behind a boxed float. Panics if `id` doesn't hold a
-    /// `BoxedObj::Float` — an internal-invariant trap, not a user-facing
+    /// Store an `f32`. A separate box from [`alloc_f64`](Self::alloc_f64),
+    /// because `f32` and `f64` are separate types and the box has to say
+    /// which one it is — see [`BoxedObj`]'s doc comment.
+    pub fn alloc_f32(&mut self, f: f32) -> Value {
+        self.alloc_boxed(BoxedObj::Float32(f))
+    }
+
+    /// The `f64` behind a boxed `f64`. Panics if `id` doesn't hold a
+    /// `BoxedObj::Float64` — an internal-invariant trap, not a user-facing
     /// error, the same convention [`string`](Self::string)'s dangling-`StrId`
     /// panic already uses: a correctly type-checked program never passes a
     /// mismatched `BoxId` here.
-    pub fn float_value(&self, id: BoxId) -> f64 {
+    ///
+    /// Deliberately *not* widening an `f32` box: a caller that would accept
+    /// either width has to say so, with [`float_box`](Self::float_box).
+    pub fn f64_value(&self, id: BoxId) -> f64 {
         match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Float(f)) => *f,
-            _ => panic!("BoxId does not hold a Float"),
+            Some(BoxedObj::Float64(f)) => *f,
+            _ => panic!("BoxId does not hold an f64"),
+        }
+    }
+
+    /// The `f32` behind a boxed `f32`. Panics like
+    /// [`f64_value`](Self::f64_value), and for the same reason.
+    pub fn f32_value(&self, id: BoxId) -> f32 {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Float32(f)) => *f,
+            _ => panic!("BoxId does not hold an f32"),
+        }
+    }
+
+    /// A boxed float of either width, as the width it actually is — `None`
+    /// when `id` is not a float box at all.
+    ///
+    /// The one reader for code that genuinely handles both (printing,
+    /// equality, `Sexpr` dispatch). It hands back the width rather than
+    /// hiding it, so those call sites still have to decide what each width
+    /// means instead of silently treating everything as `f64`.
+    pub fn float_box(&self, id: BoxId) -> Option<FloatBox> {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Float32(f)) => Some(FloatBox::F32(*f)),
+            Some(BoxedObj::Float64(f)) => Some(FloatBox::F64(*f)),
+            _ => None,
         }
     }
 
@@ -1049,12 +1083,21 @@ impl Heap {
 
     // ---- closures --------------------------------------------------------------
 
-    /// True if `id` holds a `BoxedObj::Float` — the *positive* float test
+    /// True if `id` holds a `BoxedObj::Float64` — the *positive* `f64` test
     /// callers decoding an unknown `Value::Boxed` must use now that "not a
     /// struct and not a hashtable" no longer implies float (cells and
     /// closures are boxed too).
-    pub fn is_float(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Float(_)))
+    ///
+    /// There is deliberately no width-agnostic `is_float`: a caller that
+    /// accepts either width has to name both, or read the width out with
+    /// [`float_box`](Self::float_box).
+    pub fn is_f64(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Float64(_)))
+    }
+
+    /// True if `id` holds a `BoxedObj::Float32`. See [`is_f64`](Self::is_f64).
+    pub fn is_f32(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Float32(_)))
     }
 
     // ---- compiled closures ------------------------------------------------------
@@ -1730,7 +1773,7 @@ impl Heap {
             // `Str`'s buffer) and hold no nested `Value` — nothing to trace.
             // A `RandomState`'s payload is a bare `u64` seed — same "ordinary
             // Rust memory, nothing nested" case as the numeric boxes.
-            BoxedObj::Float(_) | BoxedObj::Bignum(_) | BoxedObj::Ratio(_) | BoxedObj::RandomState(_) => {}
+            BoxedObj::Float32(_) | BoxedObj::Float64(_) | BoxedObj::Bignum(_) | BoxedObj::Ratio(_) | BoxedObj::RandomState(_) => {}
             BoxedObj::Struct { payload: StructPayload::Fields(fields), .. } => {
                 for &v in fields {
                     stack.push(v);

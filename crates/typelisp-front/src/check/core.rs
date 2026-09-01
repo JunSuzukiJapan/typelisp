@@ -360,11 +360,15 @@ fn write_form(heap: &Heap, v: Value, out: &mut String) {
         // numeric box prints its value. Anything else is not supposed to be
         // here at all, and says what it is so a failing assertion names the
         // surprise instead of hiding it.
-        Value::Boxed(id) if heap.is_float(id) => {
-            let f = heap.float_value(id);
-            // `{:?}` so an integral float keeps its point (`1.0`, not `1`) and
-            // stays distinguishable from `(int 1)` in a comparison.
-            let _ = write!(out, "{:?}", f);
+        // `{:?}` so an integral float keeps its point (`1.0`, not `1`) and
+        // stays distinguishable from `(int 1)` in a comparison. The `f32` is
+        // marked, so an assertion over one cannot pass by matching the `f64`
+        // that happens to hold the same number.
+        Value::Boxed(id) if heap.is_f32(id) => {
+            let _ = write!(out, "{:?}f32", heap.f32_value(id));
+        }
+        Value::Boxed(id) if heap.is_f64(id) => {
+            let _ = write!(out, "{:?}", heap.f64_value(id));
         }
         Value::Boxed(id) if heap.is_bignum(id) => {
             let _ = write!(out, "{}", heap.bignum_value(id));

@@ -48,7 +48,11 @@ pub enum OwnedForm {
     Str(String),
     /// A `::`-path, by segment names (re-interned on load).
     Path(Vec<String>),
-    Float(f64),
+    /// One variant per float width. Not one `Float(f64)` with the width left
+    /// to the reader: a dump is a round trip, and a round trip that widens an
+    /// `f32` gives back a value whose box no longer matches its type.
+    F32(f32),
+    F64(f64),
     #[serde(with = "num_str")]
     Bignum(BigInt),
     #[serde(with = "num_str")]
@@ -195,7 +199,8 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
             };
             OwnedForm::Cons { cells, tail: Box::new(tail) }
         }
-        Value::Boxed(id) if heap.is_float(id) => OwnedForm::Float(heap.float_value(id)),
+        Value::Boxed(id) if heap.is_f32(id) => OwnedForm::F32(heap.f32_value(id)),
+        Value::Boxed(id) if heap.is_f64(id) => OwnedForm::F64(heap.f64_value(id)),
         Value::Boxed(id) if heap.is_bignum(id) => OwnedForm::Bignum(heap.bignum_value(id).clone()),
         Value::Boxed(id) if heap.is_ratio(id) => OwnedForm::Ratio(heap.ratio_value(id).clone()),
         Value::Boxed(_) => {
@@ -237,7 +242,8 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
                 .collect();
             heap.intern_path(&ids)
         }
-        OwnedForm::Float(x) => heap.alloc_float(*x),
+        OwnedForm::F32(x) => heap.alloc_f32(*x),
+        OwnedForm::F64(x) => heap.alloc_f64(*x),
         OwnedForm::Bignum(n) => heap.alloc_bignum(n.clone()),
         OwnedForm::Ratio(r) => heap.alloc_ratio(r.clone()),
         OwnedForm::Cons { cells, tail } => {

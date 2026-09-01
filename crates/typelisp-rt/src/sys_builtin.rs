@@ -82,7 +82,7 @@ pub fn parse_int(heap: &mut Heap, s: &str) -> Value {
 pub fn parse_float(heap: &mut Heap, s: &str) -> Value {
     match s.parse::<f64>() {
         Ok(f) => {
-            let v = heap.alloc_float(f);
+            let v = heap.alloc_f64(f);
             result_ok(heap, "parse-float", v)
         }
         Err(_) => result_err(

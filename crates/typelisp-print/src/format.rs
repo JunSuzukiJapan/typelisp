@@ -32,7 +32,7 @@
 
 use std::collections::HashMap;
 
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{FloatBox, Heap, Value};
 
 use crate::pprint::{self, IndentKind, NewlineKind, Op, Opts, Out, Style, TabKind};
 use crate::PrintEnv;
@@ -1181,7 +1181,7 @@ impl State<'_> {
         let padchar = Self::char_param(&vals, 4, ' ');
         let f = self.next_float()?;
         let scaled = f * 10f64.powi(k as i32);
-        let mut s = if d >= 0 { format!("{:.*}", d as usize, scaled) } else { trim_float(scaled) };
+        let mut s = if d >= 0 { format!("{:.*}", d as usize, scaled) } else { trim_f64(scaled) };
         if head.at && !s.starts_with('-') {
             s.insert(0, '+');
         }
@@ -1356,12 +1356,21 @@ fn float_of(heap: &Heap, v: Value) -> Option<f64> {
         Value::Int(n) => Some(n as f64),
         Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).to_f64(),
         Value::Boxed(id) if heap.is_ratio(id) => heap.ratio_value(id).to_f64(),
-        // Positively `is_float`. This used to be "any box that isn't one of
+        // Both float widths, widened to `f64`. This is the *numeric* reader —
+        // `~f`/`~e`/`~$` compute in binary64 whatever the argument's width —
+        // so widening is what the caller wants; `render`'s `~a` path is the
+        // one that has to keep the width, and it reads `float_box` itself.
+        //
+        // Positively a float box. This used to be "any box that isn't one of
         // the six aggregate kinds", which meant every new `BoxedObj` variant
         // silently became a float here until someone remembered to extend the
-        // negative chain — and `float_value` panics on a non-float, so the
+        // negative chain — and the accessor panics on a non-float, so the
         // failure was an abort, not a `None`.
-        Value::Boxed(id) if heap.is_float(id) => Some(heap.float_value(id)),
+        Value::Boxed(id) => match heap.float_box(id) {
+            Some(FloatBox::F32(f)) => Some(f64::from(f)),
+            Some(FloatBox::F64(f)) => Some(f),
+            None => None,
+        },
         _ => None,
     }
 }
@@ -1594,7 +1603,27 @@ fn group_digits(digits: &str, commachar: char, interval: usize) -> String {
     out.into_iter().collect()
 }
 
-fn trim_float(f: f64) -> String {
+fn trim_f64(f: f64) -> String {
+    if f == f.trunc() && f.is_finite() {
+        format!("{:.1}", f)
+    } else {
+        f.to_string()
+    }
+}
+
+/// [`trim_f64`] for an `f32`.
+///
+/// A separate function rather than widening and reusing the `f64` one:
+/// `f32::to_string` gives the shortest text that reads back as the same
+/// binary32 value, and `f64::to_string` on the widened number gives the
+/// shortest that reads back as the same binary64 one. Those differ — 0.1 as
+/// an `f32` is `0.1` here and `0.10000000149011612` there — and the first is
+/// the right answer for a value whose type says binary32.
+///
+/// Widening and then shortening for binary32 is not an option either: it
+/// would print a genuine `f64` that happens to be binary32-representable
+/// with too few digits, and that one no longer reads back.
+fn trim_f32(f: f32) -> String {
     if f == f.trunc() && f.is_finite() {
         format!("{:.1}", f)
     } else {
@@ -2132,10 +2161,19 @@ impl Renderer {
                 let inner = heap.dyn_value(id);
                 self.render(heap, ctx, inner, standard, depth, out)?;
             }
-            // Positively `is_float` for the same reason `float_of` is: the
+            // Each width printed at its own precision. `trim_f32` gives the
+            // shortest text that reads back as the same *binary32* value,
+            // which is the whole reason the box carries the width: an `f32`
+            // holding 0.1 prints `0.1`, not binary64's `0.10000000149011612`.
+            //
+            // Positively a float box for the same reason `float_of` is: the
             // bare `Value::Boxed(id)` fall-through this replaces turned every
-            // unhandled box kind into a `float_value` panic.
-            Value::Boxed(id) if heap.is_float(id) => out.push_str(&trim_float(heap.float_value(id))),
+            // unhandled box kind into an accessor panic.
+            Value::Boxed(id) if heap.float_box(id).is_some() => match heap.float_box(id) {
+                Some(FloatBox::F32(f)) => out.push_str(&trim_f32(f)),
+                Some(FloatBox::F64(f)) => out.push_str(&trim_f64(f)),
+                None => unreachable!("guarded by float_box above"),
+            },
             // A `BoxedObj::Cell` — a binding slot, never a value handed to the
             // printer. Reaching here is an interpreter bug, reported rather
             // than mis-rendered as a float.
