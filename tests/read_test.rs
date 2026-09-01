@@ -66,8 +66,17 @@ fn integers() {
     roundtrip("42", "42");
     roundtrip("-7", "-7");
     roundtrip("+9", "9");
-    roundtrip("0x20", "32");
-    roundtrip("-0xff", "-255");
+}
+
+/// `0x20` is not a number. CL has no `0x` syntax — its radix macros are
+/// `#x`/`#b`/`#o`/`#NNr` — so a token starting `0x` is an ordinary symbol,
+/// which is what this reader does since the `0x` branch was removed
+/// (2026-09-01). The hexadecimal spelling is `#x20`.
+#[test]
+fn zero_x_is_a_symbol_not_a_hexadecimal_integer() {
+    roundtrip("0x20", "0x20");
+    roundtrip("#x20", "32");
+    roundtrip("#x-ff", "-255");
 }
 
 #[test]

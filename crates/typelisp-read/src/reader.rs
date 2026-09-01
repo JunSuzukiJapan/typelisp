@@ -9,8 +9,8 @@
 //! the heap's root stack until it is linked into its parent, so the collector
 //! never reclaims a structure that is still being read.
 //!
-//! Supported v1 syntax: integers (decimal, `0x` hex, signed; past `i32`'s
-//! range they read as `bignum`s), ratios (`1/3`, normalized like CL — `4/2`
+//! Supported v1 syntax: integers (decimal or a CL radix macro `#b`/`#o`/
+//! `#x`/`#NNr`, signed; past `i32`'s range they read as `bignum`s), ratios (`1/3`, normalized like CL — `4/2`
 //! reads as the integer `2`), floats, booleans
 //! `true`/`false`, strings with escapes, characters `#\a` / `#\Space`, symbols
 //! (operators, `::` paths, `Vec<T>`-style tokens), lists, dotted pairs `(a . b)`,
@@ -847,7 +847,7 @@ fn int_or_bignum(heap: &mut Heap, n: BigInt) -> Value {
 /// comes *after* the marker, which is where CL's printer puts it.
 ///
 /// Past `i32`'s range it reads as a `bignum`, the same fixnum-or-bignum split
-/// [`parse_number`] makes for decimal and `0x` tokens.
+/// [`parse_number`] makes for decimal tokens.
 fn read_radix(cur: &mut Cursor, heap: &mut Heap, radix: u32) -> Result<Value, Error> {
     let mut tok = String::new();
     while let Some(c) = cur.peek() {
@@ -1085,18 +1085,15 @@ fn parse_number(heap: &mut Heap, tok: &str) -> Result<Option<Value>, Error> {
         (false, tok)
     };
 
-    // hexadecimal integer: 0x... An integer past `i32`'s range reads as a
-    // `bignum` (CL: fixnum vs bignum is a value-range distinction the reader
-    // makes, not separate syntax).
-    if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
-        if !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()) {
-            let n = BigInt::parse_bytes(hex.as_bytes(), 16).expect("all-hex-digit token parses as BigInt");
-            return Ok(Some(int_or_bignum(heap, if neg { -n } else { n })));
-        }
-        return Ok(None);
-    }
+    // No `0x` hexadecimal literal: CL has no such syntax — its radix macros
+    // are `#x`/`#b`/`#o`/`#NNr` (`read_radix`) — and `0xFF` there is not a
+    // number token at all but the symbol `|0XFF|`. This reader used to accept
+    // `0x` as a C/Rust import; it was removed on 2026-09-01 so that a token
+    // falls through to the symbol case here exactly as CL says it does.
 
-    // decimal integer — same fixnum-or-bignum split as hex above.
+    // decimal integer: an integer past `i32`'s range reads as a `bignum`
+    // (CL: fixnum vs bignum is a value-range distinction the reader makes,
+    // not separate syntax).
     if !body.is_empty() && body.chars().all(|c| c.is_ascii_digit()) {
         let n = BigInt::parse_bytes(body.as_bytes(), 10).expect("all-digit token parses as BigInt");
         return Ok(Some(int_or_bignum(heap, if neg { -n } else { n })));
