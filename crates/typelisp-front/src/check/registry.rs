@@ -2011,7 +2011,7 @@ fn char_assoc() -> BTreeMap<String, AssocFn> {
 }
 
 /// Built-in arithmetic/comparison instance methods for an integer type
-/// (`i32`/`i64`): `+ - * / mod` (binary, same-type) and `< <= > >= = /=`
+/// (one call per name in `types::INT_TYPE_NAMES`): `+ - * / mod` (binary, same-type) and `< <= > >= = /=`
 /// (binary, `Bool`-valued). `mod` is floored (CL, sign of the divisor);
 /// `/`/`mod` panic on a zero divisor at runtime
 /// (`crate::eval::interp::eval_int_builtin`) — the type system can't express
@@ -2026,11 +2026,12 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = BTreeMap::new();
-    // `max`/`min` (CL) and the bitwise operators (`logand`/`logior`/`logxor`,
-    // infinite-two's-complement per CL §12.10 since `Value::Int` is a
-    // uniform `i64` regardless of whether the static type is `i32`/`i64` —
-    // see `eval_int_builtin`'s doc comment) and `ash` (arithmetic shift,
-    // positive = left) are all same-type binary ops like `+`/`-`/`*`.
+    // `max`/`min` (CL) and the bitwise operators (`logand`/`logior`/`logxor`)
+    // and `ash` (arithmetic shift, positive = left) are all same-type binary
+    // ops like `+`/`-`/`*`. Every one of them works in the receiver type's
+    // own width and signedness — the value in hand is always the number its
+    // type names, sign- or zero-extended into the 64-bit carrier (see
+    // `types::normalize_int` and `eval_int_builtin`'s doc comment).
     for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor", "ash"] {
         m.insert(op.to_string(), binop());
     }
@@ -2064,8 +2065,8 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
         m.insert(name.to_string(), cmp());
     }
     // `int->float`: widening numeric conversion (`docs/language-design.md`
-    // §4.1's planned conversion catalog) — registered for both `i32`/`i64`
-    // widths since each gets its own `int_assoc` call. This is also what
+    // §4.1's planned conversion catalog) — registered for every integer
+    // width, since each gets its own `int_assoc` call. This is also what
     // `equalp`'s `Sexpr` `Int`<->`Float` cross-type comparison
     // (`prelude.rs`) needed and previously lacked (see
     // `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section).
@@ -2192,7 +2193,7 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
 /// Built-in arithmetic/comparison instance methods for `bignum` (CL's
 /// bignum: an arbitrary-precision integer). Core operation set: `+ - * /`
 /// (`/` truncates toward zero) and `mod` (floored, CL — sign of the divisor),
-/// all panicking on a zero divisor, plus conversions to/from `i32`/`i64`
+/// all panicking on a zero divisor, plus conversions to/from `i32`
 /// (narrowing; panics if the value doesn't fit — same precedent as
 /// `int_assoc`'s `int->char`), `f64` (both directions), and `ratio`
 /// (widening, exact). The rest of CL's integer catalog

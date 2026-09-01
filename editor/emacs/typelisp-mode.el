@@ -154,6 +154,12 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; numeric / char conversions (§4, §2.5).  The `as'/`try-as' special
     ;; forms are sugar over exactly these.
     "int->float" "int->char" "try-int->char" "float->int" "char->int"
+    ;; the width casts, one pair per fixed-width type -- `as'/`try-as'
+    ;; between two integer (or two float) types desugars into these
+    "int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32"
+    "try-int->i8" "try-int->i16" "try-int->i32"
+    "try-int->u8" "try-int->u16" "try-int->u32"
+    "float->f32" "float->f64" "try-float->f32" "try-float->f64"
     "int->bignum" "bignum->int" "try-bignum->int" "bignum->float"
     "float->bignum" "bignum->ratio" "ratio->bignum" "int->ratio"
     "float->ratio" "ratio->float" "numerator" "denominator"
@@ -283,7 +289,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "random-state-copy" "random-state-next"
     ;; time (CLHS 25.1)
     "time" "get-universal-time" "get-internal-real-time"
-    "internal-time-units-per-second"
+    "internal-time-units-per-second" "internal-time-seconds"
     ;; universal time, decomposed (CLHS 25.1).  UTC only -- see functions.md
     ;; §20 for the divergence from CL's local-time default.
     "decode-universal-time" "encode-universal-time" "get-decoded-time"
@@ -337,6 +343,11 @@ stream (CLHS 12.1.6).")
     ;; the struct `decode-universal-time' answers with, standing in for CL's
     ;; nine return values
     "decoded-time"
+    ;; the structs the two clocks answer with.  They are structs rather than
+    ;; a single integer because there is no 64-bit-wide integer type to hold
+    ;; the count (2026-09-01): `universal-time' splits it into whole days and
+    ;; the second within the day, `internal-time' into seconds and microseconds.
+    "universal-time" "internal-time"
     ;; builtin traits
     "Iter" "Eq" "Ord" "Error" "Hash"
     ;; the arithmetic traits (Phase 1a)

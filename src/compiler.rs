@@ -1233,8 +1233,8 @@ pub const SOURCE: &str = r#"
 ;; code point, so the content comparisons lower to the same integer `icmp`s
 ;; the int branch uses. `equalp` (ASCII case-insensitive) has no single
 ;; instruction and stays non-native. `char->int` is the identity at the
-;; compiled level (a `char`'s value *is* its code point, and `i32`/`i64`
-;; share width) — needed so the island's own `compile-char` (which calls
+;; compiled level (a `char`'s value *is* its code point, and it fits the
+;; carrier unchanged) — needed so the island's own `compile-char` (which calls
 ;; `(char->int (sexpr-char ...))`) is itself compilable.
 ;; `char->string` is a one-character `rt_str_new` call, since that shim's
 ;; arguments are exactly raw code points — the single most expensive gap the

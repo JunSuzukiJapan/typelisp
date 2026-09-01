@@ -2593,9 +2593,10 @@ fn expect_float(heap: &Heap, v: &Value) -> Result<f64, EvalError> {
     }
 }
 
-/// `int->float` (`registry::int_assoc`): widen an `i32`/`i64` to `f64`. Both
-/// widths share `Value::Int(i64)` at runtime (see `eval_int_builtin`'s doc
-/// comment), so one implementation covers both.
+/// `int->float` (`registry::int_assoc`): widen an integer to `f64`. Every
+/// width holds its number sign- or zero-extended in one `Value::Int(i64)`
+/// (see `eval_int_builtin`'s doc comment), so one implementation covers all
+/// six — the carrier already says which number it is.
 fn int_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     match args.first() {
         Some(Value::Int(n)) => Ok(float_rt(heap, *n as f64)),

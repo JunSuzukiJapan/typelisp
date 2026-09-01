@@ -63,7 +63,7 @@ fn result_err(heap: &mut Heap, name: &str, err_type_key: TypeKeyId, msg: String)
 /// `(parse-int s)`: a decimal `i32` via `str::parse`, `Err` on anything else.
 /// The `Ok` payload is an `i32`-typed `Value::Int` — the checker's return
 /// type is `Result<i32, ParseIntError>`, so the value must fit `i32` even
-/// though the runtime representation is a uniform `i64`.
+/// though the runtime carrier is a 64-bit word.
 pub fn parse_int(heap: &mut Heap, s: &str) -> Value {
     match s.parse::<i32>() {
         Ok(n) => result_ok(heap, "parse-int", Value::Int(n as i64)),

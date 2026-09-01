@@ -59,11 +59,11 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 
 | CL のクラス | typelisp | 備考 |
 |---|---|---|
-| `number` | ⛔ | 数値型を束ねる抽象型が無い。`i32`/`i64`/`f64`/`bignum`/`ratio` は互いに独立で暗黙変換もない (D1) |
+| `number` | ⛔ | 数値型を束ねる抽象型が無い。`i32` 等の固定幅整数・`f64`/`bignum`/`ratio` は互いに独立で暗黙変換もない (D1) |
 | `real` | ⛔ | 同上 |
 | `rational` | ⛔ | 同上（`bignum` と `ratio` を束ねる型が無い） |
-| `integer` | ⚠️ | `i32`/`i64`/`bignum` が別型として存在。CL のような「fixnum→bignum の自動昇格」は無い |
-| `fixnum` | ✅ | `i32` / `i64`（`i8`/`i16`/`u8`/`u16`/`u32`/`u64`/`isize`/`usize` は**型登録だけで演算メソッドが1つも無い**） |
+| `integer` | ⚠️ | `i8`/`i16`/`i32`/`u8`/`u16`/`u32`/`bignum` が別型として存在。CL のような「fixnum→bignum の自動昇格」は無い |
+| `fixnum` | ✅ | `i32`（`i8`/`i16`/`u8`/`u16`/`u32` は組み込み演算は全部あるが、`prelude.rs` 側の派生メソッド（`abs`/`gcd`/`logeqv` 等）は `i32` にしか無い）。2026-09-01 に 64bit 幅の `i64`/`u64`/`isize`/`usize` を削除——即値は 3bit のタグを引くので 64bit 幅の整数型は表現できない |
 | `bignum` | ✅ | `bignum` |
 | `ratio` | ✅ | `ratio` |
 | `float` | ⚠️ | `f64` のみ。`f32` は型登録だけで演算が無い |
@@ -275,8 +275,8 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `zerop` `plusp` `minusp` | ✅ | `i32`/`i64`/`f64`/`bignum`/`ratio` 全型の `defmethod`（`prelude.rs`） |
-| `evenp` `oddp` | ✅ | `i32`/`i64`/`bignum`（整数型のみ、CL 仕様通り） |
+| `zerop` `plusp` `minusp` | ✅ | `i32`/`f64`/`bignum`/`ratio`/`complex` の `defmethod`（`prelude.rs`） |
+| `evenp` `oddp` | ✅ | `i32`/`bignum`（整数型のみ、CL 仕様通り） |
 | `numberp` `integerp` `rationalp` `floatp` `realp` `complexp` | ⛔ | (D1) 静的型付けのため実行時型問い合わせが原理的に載らない |
 
 **基本演算**:
@@ -286,10 +286,10 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 | `+` `-` `*` `/` `=` `/=` `<` `<=` `>` `>=` | ✅ | **2026-07-31 可変長化+0/1引数対応**。`Checker::check_variadic_arith`/`check_variadic_cmp`（`checker.rs`）が `(+ a b c)` を `(+ (+ a b) c)` に、`(< a b c)` を一時変数束縛＋`(and (< a b) (< b c))` に構文糖衣展開。`Checker::check_nullary_or_unary_numeric_op` が CL の0/1引数版も実装: `(+)=0`、`(*)=1`、`(- x)`/`(/ x)`（単項否定・逆数、`(let ((%t x)) (- (- %t %t) %t))` 型のトリックでリテラル型変換問題を回避）、`(< x)=true` 等 |
 | `max` / `min` | ✅ | 型ごとの2引数ビルトイン(`icmp`+`select`、`bignum`/`ratio`は`rt_*_cmp`+`select`) + 可変長糖衣展開で3引数以上にも対応 |
 | `1+` / `1-` | ✅ | 型ごとの `defmethod`（`prelude.rs`） |
-| `abs` `signum` `gcd` `lcm` `mod` `rem` `expt` | ✅ | 型ごとのメソッド。`gcd`/`lcm` は 0/1/n 引数すべて（チェッカー糖衣、`(gcd)`=0・`(lcm)`=1・1引数は `abs`）、整数の `expt` も `i32`/`i64` に（2026-08-20、Phase 1c） |
-| `floor` `ceiling` `round` `truncate` | ⚠️ | 1引数版（`f64→f64`）はCL相当。~~除数を取る2引数版も商・剰余の多値も無い~~ → **2026-07-29 `floor-div`/`ceiling-div`/`round-div`/`truncate-div` として実装済み**（`i32`/`i64`/`f64`、商・剰余を`cons-cell`で返す。多値そのものは非採用、§3.4参照）。CL と同名の2引数オーバーロードにしなかったのは `defmethod` が受け手の型でのみ解決しアリティでは解決しないため |
+| `abs` `signum` `gcd` `lcm` `mod` `rem` `expt` | ✅ | 型ごとのメソッド。`gcd`/`lcm` は 0/1/n 引数すべて（チェッカー糖衣、`(gcd)`=0・`(lcm)`=1・1引数は `abs`）、整数の `expt` も `i32` に（2026-08-20、Phase 1c） |
+| `floor` `ceiling` `round` `truncate` | ⚠️ | 1引数版（`f64→f64`）はCL相当。~~除数を取る2引数版も商・剰余の多値も無い~~ → **2026-07-29 `floor-div`/`ceiling-div`/`round-div`/`truncate-div` として実装済み**（`i32`/`f64`、商・剰余を`cons-cell`で返す。多値そのものは非採用、§3.4参照）。CL と同名の2引数オーバーロードにしなかったのは `defmethod` が受け手の型でのみ解決しアリティでは解決しないため |
 | `ffloor` `fceiling` `fround` `ftruncate` | ✅ | 既存の `f64` `floor` 等の別名（CL では無印が整数を返すので `f` 付きの方が一致する）（2026-08-20、Phase 1c）。**丸め方だけ CL と違う**——0 から遠い方へ丸める |
-| `sqrt` | ✅ | `f64` の `sqrt` と、整数の `isqrt`（`i32`/`i64`）（2026-08-20、Phase 1c） |
+| `sqrt` | ✅ | `f64` の `sqrt` と、整数の `isqrt`（`i32`）（2026-08-20、Phase 1c） |
 | `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | ✅ | **2026-07-31実装**（`f64`、`registry.rs`/`interp.rs`）。`log` は自然対数のみ（1引数）に加え、`(log number base)` の2引数版は `Checker::check_log_with_base` が `(/ (log number) (log base))` へアリティ展開して対応 |
 | `pi` | ✅ | **2026-07-31実装**。`f64` 定数（`prelude.rs` の `defconstant`） |
 | `float` `rational` `rationalize` | ✅ | `int->float`/`float->ratio`（CL の `rational`）に加え `rationalize`（読み戻せる最も簡単な有理数。`(rationalize 0.1)`=`1/10`）（2026-08-20、Phase 1c） |
@@ -302,9 +302,9 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `logand` `logior` `logxor` `lognot` `ash` `logbitp` `logcount` `logtest` `integer-length` | ✅ | `i32`/`i64`（`registry.rs`/`interp.rs`）+ `bignum`（`num-bigint`のネイティブビット演算+独自popcount/bit-length実装）。無限精度2の補数として実装。`ratio` には未対応（CL自体もビット演算は整数専用でratioには定義が無い） |
-| `logeqv` `lognand` `lognor` `logandc1` `logandc2` `logorc1` `logorc2` | ✅ | `i32`/`i64`/`bignum` の `defmethod`（`prelude.rs`、上記プリミティブから合成） |
-| `byte` `byte-size` `byte-position` `ldb` `ldb-test` `dpb` `mask-field` `deposit-field` | ⚠️ | `i32` のみ（`prelude.rs`）。バイト指定子は新規struct型を作らず既存の`cons-cell<i32,i32>`を流用。**`i64`/`bignum` への拡張は保留**——`defmethod` は受け手でしか解決せず、CL の `(ldb bytespec integer)` は指定子が先なので、整数側の幅で実装を選べない（引数順を変えるか指定子に幅を持たせるかの設計判断が要る） |
+| `logand` `logior` `logxor` `lognot` `ash` `logbitp` `logcount` `logtest` `integer-length` | ✅ | 固定幅整数 6 型（`registry.rs`/`interp.rs`。2026-09-01 以降は受け手の型が名乗る幅と符号で計算する）+ `bignum`（`num-bigint`のネイティブビット演算+独自popcount/bit-length実装）。無限精度2の補数として実装。`ratio` には未対応（CL自体もビット演算は整数専用でratioには定義が無い） |
+| `logeqv` `lognand` `lognor` `logandc1` `logandc2` `logorc1` `logorc2` | ✅ | `i32`/`bignum` の `defmethod`（`prelude.rs`、上記プリミティブから合成） |
+| `byte` `byte-size` `byte-position` `ldb` `ldb-test` `dpb` `mask-field` `deposit-field` | ⚠️ | `i32` のみ（`prelude.rs`）。バイト指定子は新規struct型を作らず既存の`cons-cell<i32,i32>`を流用。**他の幅や `bignum` への拡張は保留**——`defmethod` は受け手でしか解決せず、CL の `(ldb bytespec integer)` は指定子が先なので、整数側の幅で実装を選べない（引数順を変えるか指定子に幅を持たせるかの設計判断が要る） |
 | `boole` | ✅ | `i32` のみ。16個の `boole-*` 定数(`i32`コード、CLのキーワードの代わり)+ `defmethod`（`prelude.rs`） |
 
 **定数** — ✅（2026-08-20、Phase 1c）:
@@ -316,8 +316,8 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 `single-float`/`long-float` 系の同名定数は `f32`/`long-float` を持たないので無い。
 
 **コンパイル(JIT/AOT)対応**: 2026-07-31、上記の新規実装すべてに `compile`/`compile-file` 対応を追加。
-`i32`/`i64` のビット演算・`max`/`min` はLLVM命令直結(`build-and`/`build-or`/`build-xor`/`build-select`)
-または `rt_i64_*` シム(`ash`/`logbitp`/`logcount`/`integer-length`、可変シフト量のUB回避のため)。`f64` の
+固定幅整数のビット演算・`max`/`min` はLLVM命令直結(`build-and`/`build-or`/`build-xor`/`build-select`)
+または `rt_int_*` シム(`ash`/`logbitp`/`logcount`/`integer-length`、可変シフト量のUB回避のため)。`f64` の
 `sin`/`cos`/`exp`/`log`/`max`/`min` はLLVM intrinsic(`llvm.sin.f64`等、`build-fsin`等)、`tan`/`asin`/
 `acos`/`atan`/`sinh`/`cosh`/`tanh`/`asinh`/`acosh`/`atanh` はこのプロジェクトが固定するLLVMバージョンに
 intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` は既存の `rt_*_cmp` 三値比較 +
@@ -509,7 +509,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `read-from-string` | ⚠️ | これが `(read s)`。ただし読んだ位置（第2値）が返らない |
 | `read-preserving-whitespace` / `read-delimited-list` | ❌ | |
 | `readtable` 関連（`copy-readtable` / `set-macro-character` / `get-macro-character` / `set-dispatch-macro-character` / `make-dispatch-macro-character` / `readtable-case` / `*readtable*`） | ❌ | **リーダマクロが定義できない**。`#.` も無い（`#+`/`#-` はある） |
-| radix マクロ `#b` / `#o` / `#x` / `#NNr` | ✅ | 2026-08-22（Phase 7b の副産物）。`*print-radix*` が付ける印を読み戻すために入れた。符号は印の後ろ、`i64` を超えれば `bignum` |
+| radix マクロ `#b` / `#o` / `#x` / `#NNr` | ✅ | 2026-08-22（Phase 7b の副産物）。`*print-radix*` が付ける印を読み戻すために入れた。符号は印の後ろ、`i32` を超えれば `bignum` |
 | `*read-base*` | ⛔ | 見送り（Phase 7b で判断）。`read` はコンパイル済みコードからも `rt_read` 経由で呼ばれ、そちら側に typelisp のグローバルへの経路が無い（`PrintHooks` に相当するリーダ側の表が要る）。CL 自身の落とし穴（基数 16 では `abc` が数になる）もあり、「別の基数で読む」需要は radix マクロが明示的に満たす |
 | `*read-default-float-format*` | ⛔ | 浮動小数点型が `f64` 1 つしか無い |
 | `*read-suppress*` / `*read-eval*` | ⛔ | `#.` が無く、`#+`/`#-` はリーダ内部で読み飛ばしを完結させている |
@@ -524,7 +524,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `require` / `provide` / `*modules*` | ⚠️ | `module`/`use`＋ファイル↔モジュール対応が相当 |
 | `*features*` / `#+` / `#-` | ⚠️ | 2026-07-30実装。`#+`/`#-`（`and`/`or`/`not`合成式込み）をリーダに追加。`*features*`はCLと違い**読み込み中に書き換え不可の固定集合**（全フォームを読んでからチェック/評価する既存アーキテクチャのため）。デフォルトはホストOS/アーキテクチャ＋`:typelisp`、`typl`の`--feature NAME`で追加可能 |
 | `compile-file-pathname` / `*compile-file-pathname*` / `*load-pathname*` 等 | ❌ | |
-| `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ⚠️ | 2026-07-31 実装。`get-internal-real-time`（`i64`、マイクロ秒＝`internal-time-units-per-second` は 1_000_000）と、それを使う `time` マクロ（経過実時間を1行印字して `form` の値をそのまま返す）。**`get-internal-run-time`（CPU 時間）は無い**——`getrusage` に `libc` が要り、ワークスペースは `libc` に依存していない。実時間で代用すると嘘になる |
+| `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ⚠️ | 2026-07-31 実装。`get-internal-real-time`（`internal-time` 構造体、`second`/`microsecond`。`internal-time-units-per-second` は 1_000_000。2026-09-01 に `i64` 廃止で構造体化）と、それを使う `time` マクロ（経過実時間を1行印字して `form` の値をそのまま返す）。**`get-internal-run-time`（CPU 時間）は無い**——`getrusage` に `libc` が要り、ワークスペースは `libc` に依存していない。実時間で代用すると嘘になる |
 | `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ✅ | 分解・合成を 2026-08-20 実装（Phase 9c）。多値が無いので `decoded-time` という `defstruct` 7 フィールドで返す。**CL は zone 省略時に地方時へ分解するが、ここは UTC**（タイムゾーンデータベースが無い）。CL にもある明示 zone 引数が代わり |
 | `sleep` | ❌ | |
 | `room` / `ed` / `dribble` / `apropos` / `apropos-list` / `inspect` / `describe` | ❌ | 対話環境向け。REPL があるので `apropos`/`describe` は相性が良い |
