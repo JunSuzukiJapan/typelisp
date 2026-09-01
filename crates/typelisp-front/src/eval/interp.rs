@@ -1663,8 +1663,8 @@ impl Interp {
             "make-random-state-fresh" => Some(eval_make_random_state_fresh(heap, args)),
             "random-state-copy" => Some(eval_random_state_copy(heap, args)),
             "random-state-next" => Some(eval_random_state_next(heap, args)),
-            "get-universal-time" => Some(eval_get_universal_time(args)),
-            "get-internal-real-time" => Some(eval_get_internal_real_time(args)),
+            "get-universal-time" => Some(eval_get_universal_time(heap, args)),
+            "get-internal-real-time" => Some(eval_get_internal_real_time(heap, args)),
             // The environment and the running implementation. Each is one
             // call into `typelisp_rt::sys_builtin`, the same implementation
             // the compiled shims wrap — the `file-*` half of Phase 9c needs
@@ -2986,8 +2986,9 @@ fn eval_random_state_next(heap: &mut Heap, args: &[Value]) -> Result<Value, Eval
 /// `get-universal-time` (CLHS 25.1): seconds since 1900-01-01 00:00:00 UTC
 /// (CL's epoch) — the Unix epoch offset by the well-known 2208988800s
 /// between the two.
-fn eval_get_universal_time(_args: &[Value]) -> Result<Value, EvalError> {
-    Ok(Value::Int(typelisp_rt::sys_builtin::get_universal_time()))
+fn eval_get_universal_time(heap: &mut Heap, _args: &[Value]) -> Result<Value, EvalError> {
+    let now = typelisp_rt::sys_builtin::get_universal_time();
+    Ok(typelisp_rt::sys_builtin::universal_time_value(heap, now))
 }
 
 /// `get-internal-real-time` (CLHS 25.1): elapsed `internal-time-units-per-
@@ -2995,8 +2996,9 @@ fn eval_get_universal_time(_args: &[Value]) -> Result<Value, EvalError> {
 /// arbitrary reference point fixed at first call — a monotonic
 /// `std::time::Instant`, not wall-clock time, so `time`'s elapsed-time
 /// measurement can't go backwards under a clock adjustment.
-fn eval_get_internal_real_time(_args: &[Value]) -> Result<Value, EvalError> {
-    Ok(Value::Int(typelisp_rt::sys_builtin::get_internal_real_time()))
+fn eval_get_internal_real_time(heap: &mut Heap, _args: &[Value]) -> Result<Value, EvalError> {
+    let now = typelisp_rt::sys_builtin::get_internal_real_time();
+    Ok(typelisp_rt::sys_builtin::internal_time_value(heap, now))
 }
 
 /// Shared tail of every scalar `print`/`println` method (`registry.rs`'s

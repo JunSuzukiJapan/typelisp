@@ -209,9 +209,9 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // fold or recurse into), so all four are the same `icmp eq`. Only
         // `eq` used to be here, which is what made `case` — whose expansion
         // compares with `equal` — uncompilable for every integer scrutinee.
-        "i64" | "i32" | "i8" | "i16" | "isize" | "u8" | "u16" | "u32" | "u64" | "usize" => &[
+        "i32" | "i8" | "i16" | "u8" | "u16" | "u32" => &[
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
-            "int->bignum", "int->ratio",
+            "int->bignum", "int->ratio", "int->float",
             "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
             "ash", "logbitp",
         ],
@@ -721,7 +721,7 @@ mod native_method_list_tests {
     /// Every primitive receiver whose builtin methods either side lowers, with
     /// the island predicate that decides for it.
     const PRIMITIVES: &[(&str, &[&str])] = &[
-        ("int", &["i64", "i32", "i8", "i16", "isize", "u8", "u16", "u32", "u64", "usize"]),
+        ("int", &["i32", "i8", "i16", "u8", "u16", "u32"]),
         ("string", &["string"]),
         ("char", &["char"]),
         ("float", &["f64", "f32"]),

@@ -33,7 +33,7 @@ fn eval_ok(src: &str) -> Value {
 }
 
 /// The `i64` constant an `llvm-value` handle holds, for asserting a
-/// compiled `b::const-i64` round-tripped through the handle registry.
+/// compiled `b::const-word` round-tripped through the handle registry.
 fn const_int_of(v: &Value) -> i64 {
     match v {
         ref v if typelisp::llvm_value_of(v).is_some() => typelisp::llvm_value_of(v).unwrap()
@@ -48,8 +48,8 @@ fn const_int_of(v: &Value) -> i64 {
 fn a_compiled_function_with_llvm_typed_params_builds_a_constant() {
     // `mk-const` takes an `llvm-builder` (crossing in as a handle) and
     // returns an `llvm-value` (crossing back out) — compiled, its body is a
-    // single `rt_llvm_call` into `llvm-builder::const-i64`.
-    let src = "(defun mk-const ((b llvm-builder)) llvm-value (const-i64 b 42)) \
+    // single `rt_llvm_call` into `llvm-builder::const-word`.
+    let src = "(defun mk-const ((b llvm-builder)) llvm-value (const-word b 42)) \
                (compile mk-const) \
                (let ((b (llvm-builder::create))) (mk-const b))";
     assert_eq!(const_int_of(&eval_ok(src)), 42);
@@ -57,7 +57,7 @@ fn a_compiled_function_with_llvm_typed_params_builds_a_constant() {
 
 #[test]
 fn compiled_and_interpreted_results_agree_for_an_llvm_method_body() {
-    let defs = "(defun mk-const ((b llvm-builder)) llvm-value (const-i64 b 7))";
+    let defs = "(defun mk-const ((b llvm-builder)) llvm-value (const-word b 7))";
     let interp_src = format!("{} (let ((b (llvm-builder::create))) (mk-const b))", defs);
     let compiled_src = format!("{} (compile mk-const) (let ((b (llvm-builder::create))) (mk-const b))", defs);
     assert_eq!(const_int_of(&eval_ok(&interp_src)), const_int_of(&eval_ok(&compiled_src)));
@@ -77,7 +77,7 @@ fn a_compiled_function_drives_a_native_scope_and_matches_its_option() {
                (compile keep) \
                (defun new-scope () Scope<llvm-value> (Scope::new)) \
                (let ((b (llvm-builder::create))) \
-                 (keep (new-scope) (const-i64 b 9)))";
+                 (keep (new-scope) (const-word b 9)))";
     assert_eq!(const_int_of(&eval_ok(src)), 9);
 }
 

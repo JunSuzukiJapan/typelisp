@@ -378,7 +378,7 @@ pub const SOURCE: &str = r##"
 ;; *methods* — not Rust builtins — so they compile through the normal function
 ;; path (`(compile f)` where `f` uses them) instead of needing a native-lowered
 ;; `rt_*` shim per operation. `defmethod` dispatches on the receiver type, so
-;; the same `abs`/`signum`/... name overloads across `i32`/`i64`/`bignum`/`f64`/
+;; the same `abs`/`signum`/... name overloads across `i32`/`bignum`/`f64`/
 ;; `ratio`; each is built only from that type's primitives. `mod`/`rem` follow
 ;; CL: `mod` is floored (integer `mod` is a builtin; `f64`/`ratio` `mod` here
 ;; is `a - b*floor(a/b)`), `rem` truncated (`a - b*truncate(a/b)`, i.e.
@@ -388,7 +388,7 @@ pub const SOURCE: &str = r##"
 ;; its *first* argument's type, and a bare integer literal there defaults to
 ;; `i32`, so integer negation must be `(* self -1)` (receiver-first), never
 ;; `(- 0 self)`. (2) A bare literal in tail position doesn't adopt an
-;; `i64`/`bignum`/`ratio` result type, so `signum` uses CL's own
+;; `i32`/`bignum`/`ratio` result type, so `signum` uses CL's own
 ;; `(if (zerop x) x (/ x (abs x)))` (which also gives `f64` the CL result: the
 ;; zero itself for `0.0`, not Rust's `1.0`) and `lcm`'s zero case uses
 ;; `(- self self)` — both carry the receiver's type without a bare literal.
@@ -399,14 +399,6 @@ pub const SOURCE: &str = r##"
 (defmethod rem ((self i32) (b i32)) i32 (- self (* b (/ self b))))
 (defmethod gcd ((self i32) (b i32)) i32 (if (= b 0) (abs self) (gcd b (mod self b))))
 (defmethod lcm ((self i32) (b i32)) i32
-  (if (or (= self 0) (= b 0)) (- self self) (/ (abs (* self b)) (gcd self b))))
-
-;; --- i64 ---
-(defmethod abs ((self i64)) i64 (if (< self 0) (* self -1) self))
-(defmethod signum ((self i64)) i64 (if (= self 0) self (/ self (abs self))))
-(defmethod rem ((self i64) (b i64)) i64 (- self (* b (/ self b))))
-(defmethod gcd ((self i64) (b i64)) i64 (if (= b 0) (abs self) (gcd b (mod self b))))
-(defmethod lcm ((self i64) (b i64)) i64
   (if (or (= self 0) (= b 0)) (- self self) (/ (abs (* self b)) (gcd self b))))
 
 ;; --- f64 --- (`mod`/`rem` via the quotient identity)
@@ -469,7 +461,7 @@ pub const SOURCE: &str = r##"
 ;; above the same way `abs`/`signum`/`rem` are — per-type `defmethod`s rather
 ;; than one generic definition, for the same reason (`defmethod` resolves by
 ;; the receiver's exact type, not by a trait bound). `evenp`/`oddp` are
-;; integer-only (CL signals a type error on a non-integer; `i32`/`i64`/
+;; integer-only (CL signals a type error on a non-integer; `i32`/
 ;; `bignum` here). See the `--- bignum ---`/`--- ratio ---` sections above
 ;; for why their `0`/`1` literals are spelled `(int->bignum 0)`/`(int->ratio
 ;; 1)` rather than bare `0`/`1`: a literal argument doesn't pick up the
@@ -482,14 +474,6 @@ pub const SOURCE: &str = r##"
 (defmethod oddp ((self i32)) bool (/= (mod self 2) 0))
 (defmethod 1+ ((self i32)) i32 (+ self 1))
 (defmethod 1- ((self i32)) i32 (- self 1))
-;; --- i64 ---
-(defmethod zerop ((self i64)) bool (= self 0))
-(defmethod plusp ((self i64)) bool (> self 0))
-(defmethod minusp ((self i64)) bool (< self 0))
-(defmethod evenp ((self i64)) bool (= (mod self 2) 0))
-(defmethod oddp ((self i64)) bool (/= (mod self 2) 0))
-(defmethod 1+ ((self i64)) i64 (+ self 1))
-(defmethod 1- ((self i64)) i64 (- self 1))
 ;; --- f64 --- (no evenp/oddp: CL requires an integer argument)
 (defmethod zerop ((self f64)) bool (= self 0.0))
 (defmethod plusp ((self f64)) bool (> self 0.0))
@@ -527,14 +511,6 @@ pub const SOURCE: &str = r##"
 (defmethod logandc2 ((self i32) (b i32)) i32 (logand self (lognot b)))
 (defmethod logorc1 ((self i32) (b i32)) i32 (logior (lognot self) b))
 (defmethod logorc2 ((self i32) (b i32)) i32 (logior self (lognot b)))
-;; --- i64 ---
-(defmethod logeqv ((self i64) (b i64)) i64 (lognot (logxor self b)))
-(defmethod lognand ((self i64) (b i64)) i64 (lognot (logand self b)))
-(defmethod lognor ((self i64) (b i64)) i64 (lognot (logior self b)))
-(defmethod logandc1 ((self i64) (b i64)) i64 (logand (lognot self) b))
-(defmethod logandc2 ((self i64) (b i64)) i64 (logand self (lognot b)))
-(defmethod logorc1 ((self i64) (b i64)) i64 (logior (lognot self) b))
-(defmethod logorc2 ((self i64) (b i64)) i64 (logior self (lognot b)))
 ;; --- bignum ---
 (defmethod logeqv ((self bignum) (b bignum)) bignum (lognot (logxor self b)))
 (defmethod lognand ((self bignum) (b bignum)) bignum (lognot (logand self b)))
@@ -805,7 +781,6 @@ pub const SOURCE: &str = r##"
 ;; `&rest` demands a concretely Sexpr-encodable element type and rejects a
 ;; type variable outright.
 (defmethod to-string ((self i32)) string (format false "~a" self))
-(defmethod to-string ((self i64)) string (format false "~a" self))
 (defmethod to-string ((self f64)) string (format false "~a" self))
 (defmethod to-string ((self bool)) string (format false "~a" self))
 (defmethod to-string ((self char)) string (char->string self))
@@ -1271,24 +1246,6 @@ pub const SOURCE: &str = r##"
                 (if (= (mod fq 2) 0) fd
                     (let ((q (+ fq 1))) (cons q (- self (* q b)))))))))))
 
-;; --- i64 ---
-(defmethod floor-div ((self i64) (b i64)) cons-cell<i64,i64>
-  (let ((r (mod self b))) (cons (/ (- self r) b) r)))
-(defmethod truncate-div ((self i64) (b i64)) cons-cell<i64,i64>
-  (cons (/ self b) (rem self b)))
-(defmethod ceiling-div ((self i64) (b i64)) cons-cell<i64,i64>
-  (let ((fd (floor-div self b)))
-    (if (= (cdr fd) 0) fd
-        (let ((q (+ (car fd) 1))) (cons q (- self (* q b)))))))
-(defmethod round-div ((self i64) (b i64)) cons-cell<i64,i64>
-  (let ((fd (floor-div self b)))
-    (let ((fq (car fd)) (fr (cdr fd)))
-      (let ((afr2 (abs (* fr 2))) (ab (abs b)))
-        (if (< afr2 ab) fd
-            (if (> afr2 ab) (let ((q (+ fq 1))) (cons q (- self (* q b))))
-                (if (= (mod fq 2) 0) fd
-                    (let ((q (+ fq 1))) (cons q (- self (* q b)))))))))))
-
 ;; --- f64 ---
 (defmethod floor-div ((self f64) (b f64)) cons-cell<f64,f64>
   (let ((r (mod self b))) (cons (/ (- self r) b) r)))
@@ -1475,7 +1432,6 @@ user-visible capacity."
 ;; the arithmetic traits: they had no `=`/`<` to delegate to until Phase 1a
 ;; gave every width the same built-in catalog `i32` had.
 (impl Eq i32    (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq i64    (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq f64    (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq bignum (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq ratio  (equals ((self Self) (other Self)) bool (= self other)))
@@ -1513,7 +1469,6 @@ user-visible capacity."
 ;; order, so no `Ord` for them. Each also needs its `Eq` impl above, since
 ;; `Ord` inherits `Eq`.
 (impl Ord i32    (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord i64    (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord f64    (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord bignum (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord ratio  (less ((self Self) (other Self)) bool (< self other)))
@@ -1521,27 +1476,21 @@ user-visible capacity."
 (impl Ord string (less ((self Self) (other Self)) bool (< self other)))
 
 ;; The widths that had no methods at all until Phase 1a — every integer
-;; other than `i32`/`i64`, plus `f32` — joining `Eq`/`Ord`. The comment
+;; other than `i32`, plus `f32` — joining `Eq`/`Ord`. The comment
 ;; above used to end "...so they stay outside `Eq`/`Ord` until they grow
 ;; real arithmetic": they have, so they do.
 (impl Eq i8    (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq i16   (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq isize (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq u8    (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq u16   (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq u32   (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq u64   (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq usize (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq f32   (equals ((self Self) (other Self)) bool (= self other)))
 
 (impl Ord i8    (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord i16   (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord isize (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord u8    (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord u16   (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord u32   (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord u64   (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord usize (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord f32   (less ((self Self) (other Self)) bool (< self other)))
 
 ;; ---------------------------------------------------------------------
@@ -1562,49 +1511,45 @@ user-visible capacity."
 ;; docstring (`take_leading_docstring`'s rule), and this method has no
 ;; default body. Its contract is the paragraph above.
 (deftrait Hash (Eq)
-  (sxhash ((self Self)) i64))
+  (sxhash ((self Self)) i32))
 
 ;; The mask that keeps a hash non-negative and fixnum-sized: 2^30-1.
-(pub defconstant (*sxhash-mask* i64) 1073741823)
+(pub defconstant (*sxhash-mask* i32) 1073741823)
 
 ;; FNV-1a over a string's code points, written in typelisp rather than Rust:
 ;; it is pure arithmetic on values the language already has, which is the
 ;; side of the Rust-builtin policy line it falls on.
 ;;
-;; The **32-bit** variant, deliberately. `i64` arithmetic here is ordinary
-;; checked arithmetic, so the 64-bit variant's `h * 1099511628211` would
-;; overflow on the second character; masking to 32 bits after each step keeps
-;; the product below 2^56 and can never overflow. The 32-bit intermediate is
-;; then narrowed to `*sxhash-mask*`, so every `sxhash` in this file lands in
-;; the same 30-bit range.
-(pub defconstant (*fnv-offset-basis* i64) 2166136261)
-(pub defconstant (*fnv-prime* i64) 16777619)
-(pub defconstant (*fnv-mask* i64) 4294967295)
+;; The **32-bit** variant, deliberately, and exactly: `i32` arithmetic is
+;; arithmetic modulo 2^32 read as signed (`docs/functions.md` §1b), which is
+;; the ring FNV-32 is defined over — so `h * prime` here *is* FNV-32's step,
+;; with no masking to arrange it. The offset basis is written as the signed
+;; reading of its 32-bit pattern (`0x811C9DC5`, whose top bit is set) for the
+;; same reason. The final `*sxhash-mask*` is what makes the result the
+;; non-negative 30-bit fixnum `Hash`'s contract promises.
+(pub defconstant (*fnv-offset-basis* i32) -2128831035)
+(pub defconstant (*fnv-prime* i32) 16777619)
 
-(pub defun sxhash-string ((s string)) i64
+(pub defun sxhash-string ((s string)) i32
   "FNV-1a over `s`'s code points — the hash `string`'s `Hash` impl uses."
   (let ((h *fnv-offset-basis*) (i 0) (n (length s)))
     (progn
       (while (< i n)
         (progn
-          (setf h (logand (* (logxor h (as i64 (char->int (ref s i)))) *fnv-prime*) *fnv-mask*))
+          (setf h (* (logxor h (char->int (ref s i))) *fnv-prime*))
           (setf i (+ i 1))))
       (logand h *sxhash-mask*))))
 
-(impl Hash i32    (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
-(impl Hash i64    (sxhash ((self Self)) i64 (logand self *sxhash-mask*)))
-(impl Hash i8     (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
-(impl Hash i16    (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
-(impl Hash isize  (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
-(impl Hash u8     (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
-(impl Hash u16    (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
-(impl Hash u32    (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
-(impl Hash u64    (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
-(impl Hash usize  (sxhash ((self Self)) i64 (logand (as i64 self) *sxhash-mask*)))
-(impl Hash bool   (sxhash ((self Self)) i64 (if self 1231 1237)))
-(impl Hash char   (sxhash ((self Self)) i64 (as i64 (char->int self))))
-(impl Hash string (sxhash ((self Self)) i64 (sxhash-string self)))
-(impl Hash symbol (sxhash ((self Self)) i64 (sxhash-string (symbol->string self))))
+(impl Hash i32    (sxhash ((self Self)) i32 (logand self *sxhash-mask*)))
+(impl Hash i8     (sxhash ((self Self)) i32 (logand (as i32 self) *sxhash-mask*)))
+(impl Hash i16    (sxhash ((self Self)) i32 (logand (as i32 self) *sxhash-mask*)))
+(impl Hash u8     (sxhash ((self Self)) i32 (logand (as i32 self) *sxhash-mask*)))
+(impl Hash u16    (sxhash ((self Self)) i32 (logand (as i32 self) *sxhash-mask*)))
+(impl Hash u32    (sxhash ((self Self)) i32 (logand (as i32 self) *sxhash-mask*)))
+(impl Hash bool   (sxhash ((self Self)) i32 (if self 1231 1237)))
+(impl Hash char   (sxhash ((self Self)) i32 (char->int self)))
+(impl Hash string (sxhash ((self Self)) i32 (sxhash-string self)))
+(impl Hash symbol (sxhash ((self Self)) i32 (sxhash-string (symbol->string self))))
 
 ;; ---------------------------------------------------------------------
 ;; The arithmetic traits.
@@ -1656,91 +1601,68 @@ user-visible capacity."
 (deftrait Number (Add Sub Mul Div Rem Ord))
 
 ;; `mod`/`rem` for the widths that did not have them. Same bodies the
-;; `i32`/`i64` (integer) and `f64` (float) methods above carry — floored for
+;; `i32` (integer) and `f64` (float) methods above carry — floored for
 ;; `mod`, truncated for `rem`. The integer widths get `mod` from the built-in
 ;; table, so only `f32` needs one here.
 (defmethod mod ((self f32) (b f32)) f32 (- self (* b (floor (/ self b)))))
 (defmethod rem ((self f32) (b f32)) f32 (- self (* b (truncate (/ self b)))))
 (defmethod rem ((self i8   ) (b i8   )) i8    (- self (* b (/ self b))))
 (defmethod rem ((self i16  ) (b i16  )) i16   (- self (* b (/ self b))))
-(defmethod rem ((self isize) (b isize)) isize (- self (* b (/ self b))))
 (defmethod rem ((self u8   ) (b u8   )) u8    (- self (* b (/ self b))))
 (defmethod rem ((self u16  ) (b u16  )) u16   (- self (* b (/ self b))))
 (defmethod rem ((self u32  ) (b u32  )) u32   (- self (* b (/ self b))))
-(defmethod rem ((self u64  ) (b u64  )) u64   (- self (* b (/ self b))))
-(defmethod rem ((self usize) (b usize)) usize (- self (* b (/ self b))))
 
 ;; The impls. Each is the built-in operator under the trait's name.
 (impl Add i32    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add i64    (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add i8     (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add i16    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add isize  (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add u8     (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add u16    (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add u32    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add u64    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add usize  (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add f64    (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add f32    (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add bignum (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add ratio  (add ((self Self) (other Self)) Self (+ self other)))
 
 (impl Sub i32    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub i64    (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub i8     (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub i16    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub isize  (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub u8     (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub u16    (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub u32    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub u64    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub usize  (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub f64    (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub f32    (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub bignum (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub ratio  (sub ((self Self) (other Self)) Self (- self other)))
 
 (impl Mul i32    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul i64    (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul i8     (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul i16    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul isize  (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul u8     (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul u16    (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul u32    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul u64    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul usize  (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul f64    (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul f32    (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul bignum (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul ratio  (mul ((self Self) (other Self)) Self (* self other)))
 
 (impl Div i32    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div i64    (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div i8     (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div i16    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div isize  (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div u8     (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div u16    (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div u32    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div u64    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div usize  (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div f64    (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div f32    (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div bignum (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div ratio  (div ((self Self) (other Self)) Self (/ self other)))
 
 (impl Rem i32    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem i64    (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem i8     (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem i16    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem isize  (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem u8     (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem u16    (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem u32    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem u64    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem usize  (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem f64    (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem f32    (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem bignum (remainder ((self Self) (other Self)) Self (rem self other)))
@@ -1751,22 +1673,12 @@ user-visible capacity."
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
   (bit-not ((self Self)) Self (lognot self)))
-(impl Bits i64
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
 (impl Bits i8
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
   (bit-not ((self Self)) Self (lognot self)))
 (impl Bits i16
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
-(impl Bits isize
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
@@ -1786,16 +1698,6 @@ user-visible capacity."
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
   (bit-not ((self Self)) Self (lognot self)))
-(impl Bits u64
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
-(impl Bits usize
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
 (impl Bits bignum
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
@@ -1805,15 +1707,11 @@ user-visible capacity."
 ;; `Number` has no methods, so its impls are the bare conjunction: this
 ;; type has all six.
 (impl Number i32)
-(impl Number i64)
 (impl Number i8)
 (impl Number i16)
-(impl Number isize)
 (impl Number u8)
 (impl Number u16)
 (impl Number u32)
-(impl Number u64)
-(impl Number usize)
 (impl Number f64)
 (impl Number f32)
 (impl Number bignum)
@@ -2614,28 +2512,12 @@ user-visible capacity."
             (progn
               (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
               g)))))
-(defmethod isqrt ((self i64)) i64
-  (if (< self 0)
-      (panic "isqrt: negative argument")
-      (if (< self 2)
-          self
-          (let ((g self) (k (/ (+ self 1) 2)))
-            (progn
-              (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
-              g)))))
 
 ;; CL's integer `expt`, by squaring. CL answers a *ratio* for a negative
-;; exponent; an `i32`/`i64` result cannot hold one, so that case is a panic
+;; exponent; an `i32` result cannot hold one, so that case is a panic
 ;; rather than a silent truncation — convert to `ratio` first if you want it
 ;; (`bignum`/`ratio` already have their own `expt` above).
 (defmethod expt ((self i32) (e i32)) i32
-  (if (< e 0)
-      (panic "expt: a negative exponent on an integer is not an integer")
-      (if (= e 0)
-          1
-          (let ((half (expt self (/ e 2))))
-            (if (evenp e) (* half half) (* self (* half half)))))))
-(defmethod expt ((self i64) (e i64)) i64
   (if (< e 0)
       (panic "expt: a negative exponent on an integer is not an integer")
       (if (= e 0)
@@ -2715,14 +2597,14 @@ user-visible capacity."
                   (progn (setf b (/ 1.0 (- b a))) ()))))))
       out)))
 
-;; CL's numeric limit constants (CLHS 12.1.4.2 / 12.1.3). "fixnum" here is the
-;; immediate integer the runtime carries, which is an `i64` regardless of
-;; whether a value's static type is `i32` or `i64` — so these are `i64`'s
-;; bounds. `(- (* most-positive-fixnum -1) 1)` rather than the literal:
-;; `-9223372036854775808` reads as the *bignum* 9223372036854775808 negated,
-;; since the magnitude alone overflows `i64`.
-(pub defconstant (most-positive-fixnum i64) 9223372036854775807)
-(pub defconstant (most-negative-fixnum i64) (- (* most-positive-fixnum -1) 1))
+;; CL's numeric limit constants (CLHS 12.1.4.2 / 12.1.3). "fixnum" is `i32`
+;; here: it is the only fixed-width integer type left (`types::Type::
+;; is_integer`), so the widest integer that is not a `bignum` is an `i32`,
+;; and these are its bounds. `(- (* most-positive-fixnum -1) 1)` rather than
+;; the literal: `-2147483648` reads as the *bignum* 2147483648 negated, since
+;; the magnitude alone is past `i32`.
+(pub defconstant (most-positive-fixnum i32) 2147483647)
+(pub defconstant (most-negative-fixnum i32) (- (* most-positive-fixnum -1) 1))
 (pub defconstant (most-positive-double-float f64) 1.7976931348623157e308)
 (pub defconstant (most-negative-double-float f64) -1.7976931348623157e308)
 (pub defconstant (least-positive-double-float f64) 5.0e-324)
@@ -2862,8 +2744,8 @@ user-visible capacity."
 ;; type-checks and can be called by name, but the printer never finds it, so
 ;; the value still prints the built-in way. The printer looks a method up by
 ;; the type key the *value* carries, and monomorphization has erased the type
-;; argument by then -- the key is `box`, not `box<i64>`, so there is nothing
-;; in the value to choose `box<i64>`'s method by. Nor would one shared body
+;; argument by then -- the key is `box`, not `box<i32>`, so there is nothing
+;; in the value to choose `box<i32>`'s method by. Nor would one shared body
 ;; do: printing a `box<T>` means printing its `T`. See docs/dev/TODO.md.
 (deftrait print-object ()
   (print-object ((self Self) (escape bool)) string))
@@ -2881,8 +2763,8 @@ user-visible capacity."
 (pub defmacro pprint-exit-if-list-exhausted ()
   `(if (pprint-list-exhausted) (break) ()))
 (pub defvar (*print-pretty* bool) false)
-(pub defvar (*print-right-margin* i64) 80)
-(pub defvar (*print-miser-width* i64) 0)
+(pub defvar (*print-right-margin* i32) 80)
+(pub defvar (*print-miser-width* i32) 0)
 
 ;; The "what to print" controls (CLHS 22.1.1), read by `Interp::print_vars`
 ;; on every printing operation just like the three above.
@@ -2902,25 +2784,25 @@ user-visible capacity."
 ;; process dies. A structure can only become circular through `setf` of a
 ;; field, e.g.
 ;;
-;;   (defstruct node (val i64) (next Option<node>))
+;;   (defstruct node (val i32) (next Option<node>))
 ;;   (let ((a (node::new 1 (option::none))))
 ;;     (setf a::next (option::some a))
 ;;     (setf *print-circle* true)
 ;;     (println "~a" a))            ; => #1=#<node 1 (some #1#)>
 (pub defvar (*print-circle* bool) false)
-(pub defvar (*print-level* i64) 0)
-(pub defvar (*print-length* i64) 0)
+(pub defvar (*print-level* i32) 0)
+(pub defvar (*print-length* i32) 0)
 
 ;; The rest of CLHS 22.1.1's "what to print" controls (cl-parity-plan.md
 ;; Phase 7b). Rebind them for one printing operation with `dlet`, which is
 ;; what CL's `let` on a special variable does.
 ;;
-;; `*print-base*` is the radix integers (`i64` and `bignum`) print in, 2..36;
+;; `*print-base*` is the radix integers (`i32` and `bignum`) print in, 2..36;
 ;; anything else is a printing error, as CL says it is. `*print-radix*` adds
 ;; the marker that makes the result read back as the same number whatever
 ;; `*read-base*` is: `#b`/`#o`/`#x` or `#NNr` before the sign, and a trailing
 ;; `.` in base 10.
-(pub defvar (*print-base* i64) 10)
+(pub defvar (*print-base* i32) 10)
 (pub defvar (*print-radix* bool) false)
 
 ;; `*print-case*` takes CL's own spelling: the keywords `:upcase`,
@@ -2942,7 +2824,7 @@ user-visible capacity."
 ;; marking the cut with CL's `..`. A layout control like
 ;; `*print-right-margin*`, so it only bites while `*print-pretty*` is on; 0 or
 ;; less is CL's `nil` (no limit).
-(pub defvar (*print-lines* i64) 0)
+(pub defvar (*print-lines* i32) 0)
 
 ;; `*print-escape*` is the default `prin1`-vs-`princ` choice, and the one
 ;; thing `write`/`write-to-string` consult that the other printers do not.
@@ -3000,7 +2882,37 @@ user-visible capacity."
 ;; implementation's choice (microseconds), not something CL fixes, matching
 ;; every real CL implementation's own "implementation-defined granularity"
 ;; latitude.
-(pub defvar (internal-time-units-per-second i64) 1000000)
+(pub defvar (internal-time-units-per-second i32) 1000000)
+
+;; The two clock readings, as structs rather than numbers.
+;;
+;; Neither count fits an `i32`, and `i32` is the widest fixed-width integer
+;; type there is (`types::Type::is_integer`): a universal time passed 2^31
+;; seconds in 1968, and a microsecond count does so in about 35 minutes. So
+;; each is split along the seam its own domain already has — a universal time
+;; into days and the second within the day, an internal time into seconds and
+;; the microsecond within the second. `decode-universal-time`'s first step
+;; used to be exactly that division, so the split costs nothing and removes
+;; one.
+;;
+;; `Heap`'s builtin type-key table names both (`TypeKeyId::UNIVERSAL_TIME` /
+;; `INTERNAL_TIME`): `get-universal-time`, `get-internal-real-time` and
+;; `file-modified-date` build them from Rust, below the checker.
+(pub defstruct universal-time
+  "A CL universal time: whole days since 1900-01-01 UTC, and the second
+   within that day (0..86399)."
+  (pub day i32) (pub second i32))
+
+(pub defstruct internal-time
+  "A `get-internal-real-time` reading: whole seconds since the process's
+   reference point, and the microsecond within that second (0..999999)."
+  (pub second i32) (pub microsecond i32))
+
+(pub defun internal-time-seconds ((it internal-time)) f64
+  "`it` as a number of seconds — what a difference of two readings is
+   reported in."
+  (+ (int->float it::second)
+     (/ (int->float it::microsecond) (int->float internal-time-units-per-second))))
 
 ;; CL's `time` macro: run `form`, print how long it took to standard output,
 ;; and return `form`'s own value unchanged — CL doesn't specify `time`'s
@@ -3011,12 +2923,11 @@ user-visible capacity."
 ;; values" rule this also respects).
 (pub defmacro time (form)
   (let ((t0 (gensym)) (result (gensym)))
-    `(let ((,t0 (get-internal-real-time)))
+    `(let ((,t0 (internal-time-seconds (get-internal-real-time))))
        (let ((,result ,form))
          (progn
            (format *trace-output* "Real time: ~,3f seconds~%"
-                   (/ (int->float (- (get-internal-real-time) ,t0))
-                      (int->float internal-time-units-per-second)))
+                   (- (internal-time-seconds (get-internal-real-time)) ,t0))
            ,result)))))
 
 
@@ -3343,7 +3254,7 @@ user-visible capacity."
 ;;     every function below works on it.
 ;;
 ;; The native layer (`typelisp_rt::stream`) knows only about leaf backends -- files,
-;; strings, the three standard streams -- addressed by an opaque `i64` handle.
+;; strings, the three standard streams -- addressed by an opaque `i32` handle.
 ;; A concrete stream type is a struct holding one, and the field is not `pub`,
 ;; so handles cannot be forged.
 ;;
@@ -3463,17 +3374,17 @@ user-visible capacity."
 ;; type, so a byte file is its own type and the question is settled where the
 ;; value is bound.
 ;;
-;; `Item` is `i64` rather than a byte type this language does not have. The
+;; `Item` is `i32` rather than a byte type this language does not have. The
 ;; value is always 0..255 -- `write-byte` refuses anything else, as CL's does.
-(deftrait ByteInput ((InputStream (Item i64)))
+(deftrait ByteInput ((InputStream (Item i32)))
   "A byte input stream. Every method has a default body."
-  (read-byte ((self Self)) Option<i64>
+  (read-byte ((self Self)) Option<i32>
     "The next byte, or `none` at end of input."
     (read-item self)))
 
-(deftrait ByteOutput ((OutputStream (Item i64)))
+(deftrait ByteOutput ((OutputStream (Item i32)))
   "A byte output stream. Every method has a default body."
-  (write-byte ((self Self) (b i64)) ()
+  (write-byte ((self Self) (b i32)) ()
     "Write one byte. `b` outside 0..255 is an error."
     (write-item self b))
   (finish-output ((self Self)) ()
@@ -3484,11 +3395,11 @@ user-visible capacity."
 ;; The native-backed stream types. Each is a struct around one handle; the
 ;; field is deliberately not `pub`.
 
-(pub defstruct file-stream (h i64))
-(pub defstruct binary-file-stream (h i64))
-(pub defstruct string-input-stream (h i64))
-(pub defstruct string-output-stream (h i64))
-(pub defstruct standard-stream (h i64))
+(pub defstruct file-stream (h i32))
+(pub defstruct binary-file-stream (h i32))
+(pub defstruct string-input-stream (h i32))
+(pub defstruct string-output-stream (h i32))
+(pub defstruct standard-stream (h i32))
 
 (impl Error FileError
   (message ((self Self)) string (match self ((FileError m) m))))
@@ -3528,11 +3439,11 @@ user-visible capacity."
   (open-stream-p ((self Self)) bool (stream-open-p self::h))
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 (impl InputStream binary-file-stream
-  (type Item i64)
-  (read-item ((self Self)) Option<i64> (unwrap-io (stream-read-byte self::h))))
+  (type Item i32)
+  (read-item ((self Self)) Option<i32> (unwrap-io (stream-read-byte self::h))))
 (impl OutputStream binary-file-stream
-  (type Item i64)
-  (write-item ((self Self) (b i64)) () (unwrap-io (stream-write-byte self::h b))))
+  (type Item i32)
+  (write-item ((self Self) (b i32)) () (unwrap-io (stream-write-byte self::h b))))
 (impl ByteInput binary-file-stream)
 (impl ByteOutput binary-file-stream
   (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
@@ -3750,11 +3661,11 @@ user-visible capacity."
 ;; least as well as `:direction :output` when there is nothing to default.
 ;; (`&key` does exist -- `make-pathname` uses it, where most components are
 ;; genuinely optional.)
-(pub defconstant (direction-input i64) 0)
-(pub defconstant (direction-output i64) 1)
-(pub defconstant (direction-append i64) 2)
+(pub defconstant (direction-input i32) 0)
+(pub defconstant (direction-output i32) 1)
+(pub defconstant (direction-append i32) 2)
 
-(pub defun open-file<P> ((name P) (direction i64)) Result<file-stream, FileError> (where (Pathish P))
+(pub defun open-file<P> ((name P) (direction i32)) Result<file-stream, FileError> (where (Pathish P))
   "Open `name` -- a string or a `pathname` -- in one of `direction-input` /
    `direction-output` / `direction-append`. `Err` if the file cannot be
    opened: a missing file is an ordinary outcome, not a panic."
@@ -3768,7 +3679,7 @@ user-visible capacity."
 ;; The byte-stream openers. CL writes these as `open` with
 ;; `:element-type '(unsigned-byte 8)`; the difference here is the *type* of
 ;; what comes back, so it is the opener that differs.
-(pub defun open-binary<P> ((name P) (direction i64)) Result<binary-file-stream, FileError> (where (Pathish P))
+(pub defun open-binary<P> ((name P) (direction i32)) Result<binary-file-stream, FileError> (where (Pathish P))
   "Open `name` for byte I/O in one of `direction-input` / `direction-output` /
    `direction-append`."
   (match (stream-open-file (namestring name) direction)
@@ -4166,14 +4077,14 @@ user-visible capacity."
 ;;
 ;; `read` (the builtin) is the same read without the index: CL's
 ;; `read-from-string` used for its first value only, which is the common case.
-(pub defun read-from-string ((s string) &optional (start i64 0)) Result<cons-cell<Option<Sexpr>, i64>, ReadError>
+(pub defun read-from-string ((s string) &optional (start i32 0)) Result<cons-cell<Option<Sexpr>, i32>, ReadError>
   "One datum from `s` beginning at character index `start`, paired with the
    index reading stopped at. Consumes the whitespace character that ended the
    datum, as CL's `read-from-string` does."
   (read-datum-at s start false))
 
-(pub defun read-from-string-preserving-whitespace ((s string) &optional (start i64 0))
-    Result<cons-cell<Option<Sexpr>, i64>, ReadError>
+(pub defun read-from-string-preserving-whitespace ((s string) &optional (start i32 0))
+    Result<cons-cell<Option<Sexpr>, i32>, ReadError>
   "`read-from-string` without consuming the whitespace that ended the datum --
    CL's `read-from-string` with `:preserve-whitespace t`. The difference shows
    in the returned index, and so in what the next read sees."
@@ -4311,7 +4222,7 @@ user-visible capacity."
    `Err` if it does not exist -- resolving a path means looking at it."
   (file-truename (namestring name)))
 
-(pub defun file-write-date<P> ((name P)) Result<i64, FileError> (where (Pathish P))
+(pub defun file-write-date<P> ((name P)) Result<universal-time, FileError> (where (Pathish P))
   "When `name` was last modified, as a universal time -- the same scale
    `get-universal-time` counts on, so `decode-universal-time` reads it."
   (file-modified-date (namestring name)))
@@ -4396,31 +4307,40 @@ user-visible capacity."
 
 (pub defun encode-universal-time ((second i32) (minute i32) (hour i32)
                                   (date i32) (month i32) (year i32)
-                                  &optional (zone i32 0)) i64
+                                  &optional (zone i32 0)) universal-time
   "The universal time for this date and time. `zone` is an offset in hours
    west of Greenwich, as CL's is; 0 (the default) means the arguments are
    UTC."
-  (+ (* (as i64 (days-from-civil year month date)) 86400)
-     (as i64 (+ (* (+ hour zone) 3600) (* minute 60) second))))
+  (let ((s (+ (* (+ hour zone) 3600) (* minute 60) second)))
+    ;; `s` need not be inside one day: an hour, minute or second argument may
+    ;; be out of its usual range, and `zone` moves it either way. `mod` floors,
+    ;; so the remainder is the second within the day and the difference
+    ;; divides exactly however `s` is signed — the same reasoning
+    ;; `decode-universal-time` gives below.
+    (let ((sec (mod s 86400)))
+      (universal-time::new (+ (days-from-civil year month date) (/ (- s sec) 86400))
+                           sec))))
 
-(pub defun decode-universal-time ((ut i64) &optional (zone i32 0)) decoded-time
+(pub defun decode-universal-time ((ut universal-time) &optional (zone i32 0)) decoded-time
   "`ut` broken into its calendar components. `zone` is an offset in hours west
    of Greenwich, as CL's is; 0 (the default) decodes into UTC.
 
    `day-of-week` is CL's: 0 is Monday, 6 is Sunday. 1900-01-01 -- universal
    time 0 -- was a Monday, which is what makes it a plain remainder."
-  (if (< ut 0)
+  (if (< ut::day 0)
       (panic "decode-universal-time: universal time is never negative")
-      (let ((local (- ut (as i64 (* zone 3600))))
+      (let ((local (- ut::second (* zone 3600)))
             (days 0) (secs 0) (z 0)
             (era 0) (doe 0) (yoe 0) (y 0) (doy 0) (mp 0) (d 0) (m 0))
         (progn
-          ;; `mod` floors and `/` truncates, so they disagree on a negative
-          ;; `local` (reachable for a small `ut` with a positive `zone`).
-          ;; Taking the remainder first and dividing the difference makes the
-          ;; division exact, so the two can never disagree.
-          (setf secs (as i32 (mod local 86400)))
-          (setf days (as i32 (/ (- local (as i64 secs)) 86400)))
+          ;; `local` is the second within the day, shifted by the zone, so it
+          ;; can fall outside `0..86400` in either direction and carry into
+          ;; the day count. `mod` floors and `/` truncates, so they disagree
+          ;; on a negative `local`; taking the remainder first and dividing
+          ;; the difference makes the division exact, so the two can never
+          ;; disagree.
+          (setf secs (mod local 86400))
+          (setf days (+ ut::day (/ (- local secs) 86400)))
           ;; `z` is days since 1970-01-01 shifted by 719468, which restarts
           ;; the era arithmetic below from a March-based year 0000-03-01.
           (setf z (+ (- days 25567) 719468))
@@ -4708,19 +4628,16 @@ user-visible capacity."
 ;; Bit vectors (CLHS 15.2) — cl-parity-plan.md Phase 6c.
 ;;
 ;; A prelude type for the same reason `Array<T>` above is one: a bit vector is
-;; a packed word sequence and a length, and `Vector<i64>` plus the integer
+;; a packed word sequence and a length, and `Vector<i32>` plus the integer
 ;; bit operations (§4.4 of `docs/functions.md`) are all that takes.
 ;;
-;; **32 bits to a word, not 64.** A compiled function stores a container
-;; element through the tagged representation compiled code passes values in
-;; (`typelisp-abi`'s `encode`: three tag bits in the low end, the integer in
-;; the rest), so an `i64` wider than that payload does not survive the round
-;; trip — `(set v 0 (ash 1 60))` on a `Vector<i64>` reads back as a different
-;; number *when the function holding it is compiled*, which every prelude
-;; method is. That is a bug in its own right and is recorded as one in
-;; `docs/dev/TODO.md`; packing 32 bits a word keeps this type well inside
-;; what the payload carries instead of at its edge, and `(/ i 32)` /
-;; `(mod i 32)` say plainly which word a bit is in.
+;; **31 bits to a word, not 32.** The word type is `i32` — the widest
+;; fixed-width integer there is — and its 32nd bit is the sign. Packing 31
+;; leaves the sign bit permanently clear, so a word is always a non-negative
+;; number, `(ash 1 30)` is the widest shift any of this needs, and the
+;; last-word mask `(- (ash 1 used) 1)` (with `used` at most 30) never reaches
+;; the bit that would make it negative. Packing 32 would need `(ash 1 31)`,
+;; which is `i32`'s minimum rather than a mask.
 ;;
 ;; The bits past the length in the final word are kept clear
 ;; (`bitvector-trim`), so the representation of a given bit vector is unique
@@ -4732,8 +4649,8 @@ user-visible capacity."
 ;; `bit-vector-p` does not exist — the static type has already answered it.
 
 (pub defstruct BitVector
-  "A fixed-length sequence of bits, packed 32 to an `i64` word."
-  (words Vector<i64>)
+  "A fixed-length sequence of bits, packed 31 to an `i32` word."
+  (words Vector<i32>)
   (nbits i32))
 
 ;; CL's `(make-array n :element-type 'bit)`. Every bit starts at 0, which is
@@ -4741,7 +4658,7 @@ user-visible capacity."
 (pub defmethod make (BitVector (n i32)) BitVector
   (if (< n 0)
       (panic (format false "BitVector::make: length ~a is negative" n))
-      (BitVector::new (Vector::filled (/ (+ n 31) 32) (the i64 0)) n)))
+      (BitVector::new (Vector::filled (/ (+ n 30) 31) (the i32 0)) n)))
 
 (pub defmethod len ((self BitVector)) i32 self::nbits)
 
@@ -4751,12 +4668,12 @@ user-visible capacity."
 (pub defmethod get ((self BitVector) (i i32)) bool
   (if (or (< i 0) (>= i self::nbits))
       (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
-      (logbitp (as i64 (mod i 32)) (get self::words (/ i 32)))))
+      (logbitp (mod i 31) (get self::words (/ i 31)))))
 
 (pub defmethod set ((self BitVector) (i i32) (b bool)) ()
   (if (or (< i 0) (>= i self::nbits))
       (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
-      (let ((w (/ i 32)) (mask (ash (the i64 1) (as i64 (mod i 32)))))
+      (let ((w (/ i 31)) (mask (ash (the i32 1) (mod i 31))))
         (set self::words w
              (if b
                  (logior (get self::words w) mask)
@@ -4773,11 +4690,12 @@ user-visible capacity."
 ;; and both have to be undone or two bit vectors holding the same bits stop
 ;; being the same value (`equalp` compares the words):
 ;;
-;; 1. `lognot` sets all 64 bits of a word, not just the 32 this packing uses.
+;; 1. `lognot` sets all 32 bits of a word, not just the 31 this packing uses
+;;    — including the sign bit, which would make the word negative.
 ;; 2. The last word reaches past the length.
 ;;
 ;; Every operation that can do either ends here.
-(defconstant (*bitvector-word-mask* i64) 4294967295)
+(defconstant (*bitvector-word-mask* i32) 2147483647)
 (defun bitvector-trim ((v BitVector)) ()
   (let ((n (len v::words)) (i 0))
     (progn
@@ -4785,19 +4703,19 @@ user-visible capacity."
         (progn
           (set v::words i (logand (get v::words i) *bitvector-word-mask*))
           (setf i (+ i 1))))
-      (let ((used (mod v::nbits 32)))
+      (let ((used (mod v::nbits 31)))
         (if (= used 0)
             ()
             (set v::words (- n 1)
                  (logand (get v::words (- n 1))
-                         (- (ash (the i64 1) (as i64 used)) (the i64 1)))))))))
+                         (- (ash (the i32 1) used) (the i32 1)))))))))
 
 ;; The shared body of CL's `bit-and` family: same length in, a fresh bit
 ;; vector out, one word at a time. `who` is only for the length-mismatch
 ;; message. CL's optional third argument (write into an existing vector, or
 ;; into the first one when it is `t`) is not offered — the caller writes
 ;; `(setf a (bit-and a b))`, and the aliasing question never comes up.
-(defun bitvector-zip ((a BitVector) (b BitVector) (who string) (f (fn (i64 i64) i64))) BitVector
+(defun bitvector-zip ((a BitVector) (b BitVector) (who string) (f (fn (i32 i32) i32))) BitVector
   (if (/= a::nbits b::nbits)
       (panic (format false "~a: bit vectors differ in length (~a and ~a)" who a::nbits b::nbits))
       (let ((out (BitVector::make a::nbits)) (i 0) (n (len a::words)))
@@ -4810,27 +4728,27 @@ user-visible capacity."
           out))))
 
 (pub defmethod bit-and ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-and" (lambda ((x i64) (y i64)) i64 (logand x y))))
+  (bitvector-zip self other "bit-and" (lambda ((x i32) (y i32)) i32 (logand x y))))
 (pub defmethod bit-ior ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-ior" (lambda ((x i64) (y i64)) i64 (logior x y))))
+  (bitvector-zip self other "bit-ior" (lambda ((x i32) (y i32)) i32 (logior x y))))
 (pub defmethod bit-xor ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-xor" (lambda ((x i64) (y i64)) i64 (logxor x y))))
+  (bitvector-zip self other "bit-xor" (lambda ((x i32) (y i32)) i32 (logxor x y))))
 ;; The rest of CL's family. Nothing new is needed for any of them: each is
 ;; the same word-wise walk over the integer operation of the same name.
 (pub defmethod bit-eqv ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-eqv" (lambda ((x i64) (y i64)) i64 (logeqv x y))))
+  (bitvector-zip self other "bit-eqv" (lambda ((x i32) (y i32)) i32 (logeqv x y))))
 (pub defmethod bit-nand ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-nand" (lambda ((x i64) (y i64)) i64 (lognand x y))))
+  (bitvector-zip self other "bit-nand" (lambda ((x i32) (y i32)) i32 (lognand x y))))
 (pub defmethod bit-nor ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-nor" (lambda ((x i64) (y i64)) i64 (lognor x y))))
+  (bitvector-zip self other "bit-nor" (lambda ((x i32) (y i32)) i32 (lognor x y))))
 (pub defmethod bit-andc1 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-andc1" (lambda ((x i64) (y i64)) i64 (logandc1 x y))))
+  (bitvector-zip self other "bit-andc1" (lambda ((x i32) (y i32)) i32 (logandc1 x y))))
 (pub defmethod bit-andc2 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-andc2" (lambda ((x i64) (y i64)) i64 (logandc2 x y))))
+  (bitvector-zip self other "bit-andc2" (lambda ((x i32) (y i32)) i32 (logandc2 x y))))
 (pub defmethod bit-orc1 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-orc1" (lambda ((x i64) (y i64)) i64 (logorc1 x y))))
+  (bitvector-zip self other "bit-orc1" (lambda ((x i32) (y i32)) i32 (logorc1 x y))))
 (pub defmethod bit-orc2 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-orc2" (lambda ((x i64) (y i64)) i64 (logorc2 x y))))
+  (bitvector-zip self other "bit-orc2" (lambda ((x i32) (y i32)) i32 (logorc2 x y))))
 
 (pub defmethod bit-not ((self BitVector)) BitVector
   (let ((out (BitVector::make self::nbits)) (i 0) (n (len self::words)))

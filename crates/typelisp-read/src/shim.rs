@@ -33,8 +33,8 @@ use crate::reader::Reader;
 /// `Option<Sexpr>` inside them is niche-represented — `some v` *is* `v` — so
 /// it builds no box and needs no key of its own.
 pub const READ_RESULT_KEY: &str = "result<option<sexpr>,readerror>";
-pub const READ_DATUM_RESULT_KEY: &str = "result<cons-cell<option<sexpr>,i64>,readerror>";
-pub const READ_DATUM_PAIR_KEY: &str = "cons-cell<option<sexpr>,i64>";
+pub const READ_DATUM_RESULT_KEY: &str = "result<cons-cell<option<sexpr>,i32>,readerror>";
+pub const READ_DATUM_PAIR_KEY: &str = "cons-cell<option<sexpr>,i32>";
 
 /// `(read s) => Result<Sexpr, ReadError>` — the whole of the builtin, called
 /// from both sides of the compile boundary (`Interp::eval_builtin`'s `read`
@@ -52,7 +52,7 @@ pub fn read_builtin(heap: &mut Heap, source: &str) -> Value {
     }
 }
 
-/// `(read-datum-at s start preserve) => Result<cons-cell<Sexpr, i64>, ReadError>`
+/// `(read-datum-at s start preserve) => Result<cons-cell<Sexpr, i32>, ReadError>`
 /// — one datum from `s` beginning at character index `start`, paired with the
 /// index reading stopped at.
 ///

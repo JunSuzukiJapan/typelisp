@@ -94,6 +94,46 @@ pub fn parse_float(heap: &mut Heap, s: &str) -> Value {
     }
 }
 
+/// The seconds in a day — the divisor that splits a universal time into a
+/// [`universal_time_value`]'s two fields.
+const SECS_PER_DAY: i64 = 86_400;
+
+/// The type key of the `universal-time` struct (a prelude `defstruct`, and
+/// `get-universal-time`/`file-modified-date`'s registry return type). Spelled
+/// here rather than derived because this crate sits below the checker — the
+/// same reason `stream_builtin::RESULT_KEYS` spells its keys, and
+/// `tests/type_identity_guard_test.rs` checks both against the registry.
+pub const UNIVERSAL_TIME_KEY: &str = "universal-time";
+
+/// [`UNIVERSAL_TIME_KEY`]'s monotonic counterpart: the `internal-time` struct
+/// `get-internal-real-time` returns.
+pub const INTERNAL_TIME_KEY: &str = "internal-time";
+
+/// A universal time (seconds since 1900-01-01 UTC) as the `universal-time`
+/// struct: whole days, and seconds within that day.
+///
+/// The split is what lets a universal time have a type at all — the count
+/// passed `i32` in 1968 and this language has no wider fixed-width integer
+/// (`types::Type::is_integer`). It is also the division
+/// `decode-universal-time` performs first thing, so nothing is spent on it.
+/// Floored (`div_euclid`), so a pre-1900 timestamp still has a second-of-day
+/// in `0..86400` rather than a negative one.
+pub fn universal_time_value(heap: &mut Heap, secs: i64) -> Value {
+    let day = secs.div_euclid(SECS_PER_DAY);
+    let sec = secs.rem_euclid(SECS_PER_DAY);
+    heap.alloc_struct(TypeKeyId::UNIVERSAL_TIME, vec![Value::Int(day), Value::Int(sec)])
+}
+
+/// A microsecond count as the `internal-time` struct: whole seconds, and
+/// microseconds within that second — [`universal_time_value`]'s counterpart
+/// for `get-internal-real-time`, whose raw count overflows `i32` in about 35
+/// minutes.
+pub fn internal_time_value(heap: &mut Heap, micros: i64) -> Value {
+    let sec = micros.div_euclid(1_000_000);
+    let usec = micros.rem_euclid(1_000_000);
+    heap.alloc_struct(TypeKeyId::INTERNAL_TIME, vec![Value::Int(sec), Value::Int(usec)])
+}
+
 /// `(get-universal-time)` (CLHS 25.1): seconds since CL's epoch,
 /// 1900-01-01 UTC — 2_208_988_800 seconds before the Unix one.
 pub fn get_universal_time() -> i64 {
@@ -287,27 +327,31 @@ pub unsafe extern "C" fn rt_parse_float(args: *const i64, argc: u32) -> i64 {
     encode(parse_float(active_heap(), &s))
 }
 
-/// `(get-universal-time)` for compiled code — a raw `i64`, not a tagged
-/// value: the checker's return type is `i64`, whose compiled representation
-/// is the bare machine word.
+/// `(get-universal-time)` for compiled code — a tagged value, since the
+/// checker's return type is the `universal-time` struct (a heap box), not a
+/// number.
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). Touches no heap.
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_get_universal_time(_args: *const i64, _argc: u32) -> i64 {
-    get_universal_time()
+    let v = universal_time_value(active_heap(), get_universal_time());
+    encode(v)
 }
 
-/// `(get-internal-real-time)` for compiled code — a raw `i64`, as
-/// [`rt_get_universal_time`].
+/// `(get-internal-real-time)` for compiled code — a tagged `internal-time`
+/// box, as [`rt_get_universal_time`].
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). Touches no heap.
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_get_internal_real_time(_args: *const i64, _argc: u32) -> i64 {
-    get_internal_real_time()
+    let v = internal_time_value(active_heap(), get_internal_real_time());
+    encode(v)
 }
 
 /// The one-string argument every filesystem query below takes, decoded at the

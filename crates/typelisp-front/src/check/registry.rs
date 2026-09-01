@@ -662,13 +662,17 @@ impl Registry {
         // `internal-time-units-per-second` (a prelude `defvar`, 1_000_000 —
         // i.e. microseconds) since an arbitrary process-start reference point,
         // matching CL's own "units are implementation-defined, only the ratio
-        // between two calls means anything" contract. Both `i64` — CL leaves
-        // the numeric type unspecified (a bignum in real implementations),
-        // but `get-universal-time`'s Unix-epoch-relative value already
-        // overflows `i32` today, so `i64` is the minimum that doesn't need
-        // `bignum` for the ordinary case.
-        root.fns.insert("get-universal-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::I64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("get-internal-real-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::I64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // between two calls means anything" contract.
+        //
+        // Both return a *struct*, not a number: neither count fits an `i32`
+        // (1900-epoch seconds passed 2^31 in 1968; microseconds overflow in
+        // about 35 minutes) and this language has no 64-bit-wide integer type
+        // — see `Type::is_integer`. Splitting the count the way the domain
+        // already splits it costs nothing: `decode-universal-time`'s first
+        // step is exactly this division, and `time`'s subtraction is two
+        // field subtractions.
+        root.fns.insert("get-universal-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: universal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("get-internal-real-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: internal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `parse-int`/`parse-float`: untrusted-text numeric parsing
         // (`docs/language-design.md` §4.1's planned conversion catalog) —
         // `Result`, not a panic, since the input is runtime text the caller
@@ -694,9 +698,9 @@ impl Registry {
             FnSig {
                 type_params: vec![],
                 rest: None,
-                params: vec![Type::Str, Type::I64, Type::Bool],
+                params: vec![Type::Str, Type::I32, Type::Bool],
                 ret: result_of(
-                    Type::Named(Path::root("cons-cell"), vec![option_of(sexpr()), Type::I64]),
+                    Type::Named(Path::root("cons-cell"), vec![option_of(sexpr()), Type::I32]),
                     error_ty(READ_ERROR),
                 ),
                 public: true,
@@ -736,8 +740,8 @@ impl Registry {
         // `pprint-list-exhausted` is the predicate to test first (the prelude
         // macro `pprint-exit-if-list-exhausted` is the CL-spelled wrapper).
         root.fns.insert("pprint-newline".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("pprint-indent".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I64], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("pprint-tab".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I64, Type::I64], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("pprint-indent".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I32], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("pprint-tab".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I32, Type::I32], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("pprint-pop".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("pprint-list-exhausted".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
@@ -777,7 +781,7 @@ impl Registry {
         // predicate its non-panic-fallback caller (`form-is-borrowed?`) needs
         // to branch on a `Sym` node — a peer of
         // `sexpr-consp`/`sexpr-null`/`sexpr-atom`.
-        root.fns.insert("sexpr-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::I64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-bool".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-char".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Char, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
@@ -1058,7 +1062,7 @@ fn register_stream_builtins(root: &mut Namespace) {
             },
         );
     };
-    let h = Type::I64;
+    let h = Type::I32;
     let unit_or_err = result_of(Type::Unit, file_err.clone());
 
     // Constructors. The three standard streams hand out a fresh handle per
@@ -1090,8 +1094,8 @@ fn register_stream_builtins(root: &mut Namespace) {
     // stream is a sequence of characters, and CL calls `read-byte` on a
     // character stream an error rather than handing back a UTF-8 encoding
     // nobody wrote.
-    native("stream-read-byte", vec![h.clone()], result_of(option_of(Type::I64), file_err.clone()));
-    native("stream-write-byte", vec![h.clone(), Type::I64], unit_or_err.clone());
+    native("stream-read-byte", vec![h.clone()], result_of(option_of(Type::I32), file_err.clone()));
+    native("stream-write-byte", vec![h.clone(), Type::I32], unit_or_err.clone());
     native("stream-listen", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
 
     // Output. Only whole strings cross this boundary — a per-character
@@ -1118,7 +1122,7 @@ fn register_stream_builtins(root: &mut Namespace) {
     native("file-truename", vec![Type::Str], result_of(Type::Str, file_err.clone()));
     // A universal time, on `get-universal-time`'s 1900-epoch scale, so the
     // two are comparable and either decodes with the same prelude function.
-    native("file-modified-date", vec![Type::Str], result_of(Type::I64, file_err.clone()));
+    native("file-modified-date", vec![Type::Str], result_of(universal_time(), file_err.clone()));
     native("file-directory-p", vec![Type::Str], Type::Bool);
     native(
         "file-list-directory",
@@ -1236,7 +1240,7 @@ fn sexpr_def() -> AdtDef {
             // Index 0, and never constructible — see this function's doc
             // comment. `Checker` rejects it by name.
             Variant { name: "nil".to_string(), fields: vec![] },
-            Variant { name: "int".to_string(), fields: vec![Type::I64] },
+            Variant { name: "int".to_string(), fields: vec![Type::I32] },
             Variant { name: "float".to_string(), fields: vec![Type::F64] },
             Variant { name: "char".to_string(), fields: vec![Type::Char] },
             Variant { name: "bool".to_string(), fields: vec![Type::Bool] },
@@ -1329,6 +1333,21 @@ fn symbol_assoc() -> BTreeMap<String, AssocFn> {
 
 fn sexpr() -> Type {
     Type::Named(Path::root("sexpr"), vec![])
+}
+
+/// `universal-time` (a prelude `defstruct`): a CL universal time split into
+/// whole days since 1900-01-01 and seconds within that day. The return type
+/// of `get-universal-time`/`file-modified-date` — see the comment at
+/// `get-universal-time`'s registration for why a struct and not a number.
+pub fn universal_time() -> Type {
+    Type::Named(Path::root("universal-time"), vec![])
+}
+
+/// `internal-time` (a prelude `defstruct`): `get-internal-real-time`'s
+/// reading, as whole seconds plus microseconds within that second.
+/// [`universal_time`]'s monotonic counterpart.
+pub fn internal_time() -> Type {
+    Type::Named(Path::root("internal-time"), vec![])
 }
 
 fn hashtable_ty() -> Type {
@@ -1661,7 +1680,14 @@ pub fn llvm_builder_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
     assoc.insert("create".to_string(), assoc_fn(vec![], llvm_builder_ty(), false));
     assoc.insert("position-at-end".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit, true));
-    assoc.insert("const-i64".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I64], llvm_value_ty(), true));
+    // `const-word`: an LLVM 64-bit constant. The *generated* code's word is 64
+    // bits whatever the source language's integer types are, so this builtin
+    // outlives `i64` (the name it used to carry, which claimed a source type
+    // that no longer exists). Its argument is an `i32` because every caller
+    // passes something small — a tag mask, a slot index, `0`/`1`/`-1`; the two
+    // places that need a full-width constant (`compile-int`/`compile-float`)
+    // assemble it from two 32-bit halves in LLVM instead.
+    assoc.insert("const-word".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I32], llvm_value_ty(), true));
     assoc.insert("build-ret".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
     assoc.insert("load-arg".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty(), true));
     assoc.insert("build-add".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
@@ -1732,6 +1758,12 @@ pub fn llvm_builder_def() -> AdtDef {
     // unlike `float->bignum`/`float->ratio`, which stay non-native (see
     // `float-native-method?`'s doc comment).
     assoc.insert("build-fptosi".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    // `int->float` (widening, always exact for the widths this language has):
+    // `sitofp` to `double`, then `bitcast` back to the raw word a compiled
+    // `f64` is carried in. No module parameter — unlike `fptosi`'s saturating
+    // form, `sitofp` is a plain instruction with no intrinsic to overload and
+    // no input it is undefined on.
+    assoc.insert("build-sitofp".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
     // `alloca-args`/`store-arg`/`build-call`: building a direct call to an
     // already-declared function (`get-function`'s result). `alloca-args`
     // stack-allocates a fresh `[count x i64]` array (mirroring the fixed-ABI
@@ -1800,7 +1832,7 @@ pub fn llvm_builder_def() -> AdtDef {
     assoc.insert(
         "build-make-closure".to_string(),
         assoc_fn(
-            vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32, Type::I64],
+            vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32, Type::I32, Type::I32],
             llvm_value_ty(),
             true,
         ),
@@ -1878,7 +1910,7 @@ pub fn llvm_builder_def() -> AdtDef {
 }
 
 /// An LLVM SSA value (e.g. a constant). No methods of its own yet — produced
-/// by `llvm-builder::const-i64`, consumed by `llvm-builder::build-ret`.
+/// by `llvm-builder::const-word`, consumed by `llvm-builder::build-ret`.
 fn llvm_value_def() -> AdtDef {
     AdtDef { name: Path::root("llvm-value"), params: vec![], variants: vec![], assoc: BTreeMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
 }

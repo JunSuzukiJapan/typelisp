@@ -56,7 +56,7 @@ use crate::stream::with_streams;
 /// A builtin whose result is not a box (`stream-stdin`'s handle,
 /// `stream-open-p`'s `bool`) has no row and needs none.
 pub const RESULT_KEYS: &[(&str, &str)] = &[
-    ("stream-open-file", "result<i64,fileerror>"),
+    ("stream-open-file", "result<i32,fileerror>"),
     ("stream-close", "result<(),fileerror>"),
     ("stream-input-p", "result<bool,fileerror>"),
     ("stream-output-p", "result<bool,fileerror>"),
@@ -64,14 +64,14 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("stream-at-line-start", "result<bool,fileerror>"),
     ("stream-read-char", "result<option<char>,fileerror>"),
     ("stream-unread-char", "result<(),fileerror>"),
-    ("stream-read-byte", "result<option<i64>,fileerror>"),
+    ("stream-read-byte", "result<option<i32>,fileerror>"),
     ("stream-write-byte", "result<(),fileerror>"),
     ("stream-write-string", "result<(),fileerror>"),
     ("stream-finish-output", "result<(),fileerror>"),
     ("stream-take-output-string", "result<string,fileerror>"),
     ("file-delete", "result<(),fileerror>"),
     ("file-truename", "result<string,fileerror>"),
-    ("file-modified-date", "result<i64,fileerror>"),
+    ("file-modified-date", "result<universal-time,fileerror>"),
     ("file-list-directory", "result<vector<string>,fileerror>"),
     ("file-create-directories", "result<(),fileerror>"),
     ("file-rename", "result<(),fileerror>"),
@@ -81,7 +81,7 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
 /// the three builtins whose payload is itself a box.
 pub const INNER_KEYS: &[(&str, &str)] = &[
     ("stream-read-char", "option<char>"),
-    ("stream-read-byte", "option<i64>"),
+    ("stream-read-byte", "option<i32>"),
     ("file-list-directory", "vector<string>"),
 ];
 
@@ -306,7 +306,13 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
             const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
             match std::fs::metadata(&p).and_then(|m| m.modified()) {
                 Ok(t) => match t.duration_since(std::time::UNIX_EPOCH) {
-                    Ok(d) => Ok(result_ok(heap, name, Value::Int(d.as_secs() as i64 + UNIX_TO_CL_EPOCH_SECS))),
+                    Ok(d) => {
+                        let tv = crate::sys_builtin::universal_time_value(
+                            heap,
+                            d.as_secs() as i64 + UNIX_TO_CL_EPOCH_SECS,
+                        );
+                        Ok(result_ok(heap, name, tv))
+                    }
                     Err(e) => Ok(result_err(heap, name, format!("file-write-date: {}: timestamp precedes the Unix epoch: {}", p, e))),
                 },
                 Err(e) => Ok(result_err(heap, name, format!("file-write-date: {}: {}", p, e))),

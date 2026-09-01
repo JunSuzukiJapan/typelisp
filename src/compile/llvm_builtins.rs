@@ -80,7 +80,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
         return match method {
             "create" => Some(llvm_builder_create()),
             "position-at-end" => Some(llvm_builder_position_at_end(args)),
-            "const-i64" => Some(llvm_builder_const_i64(args)),
+            "const-word" => Some(llvm_builder_const_word(args)),
             "build-ret" => Some(llvm_builder_build_ret(args)),
             "load-arg" => Some(llvm_builder_load_arg(args)),
             "build-add" => Some(llvm_builder_build_int_op(args, "add", Builder::build_int_add)),
@@ -117,6 +117,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "build-fexp" => Some(llvm_builder_build_float_unary_intrinsic(args, "fexp", "llvm.exp.f64")),
             "build-flog" => Some(llvm_builder_build_float_unary_intrinsic(args, "flog", "llvm.log.f64")),
             "build-fptosi" => Some(llvm_builder_build_fptosi(args)),
+            "build-sitofp" => Some(llvm_builder_build_sitofp(args)),
             "alloca-args" => Some(llvm_builder_alloca_args(args)),
             "store-arg" => Some(llvm_builder_store_arg(args)),
             "build-call" => Some(llvm_builder_build_call(args)),
@@ -314,7 +315,15 @@ fn llvm_builder_position_at_end(args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Empty)
 }
 
-fn llvm_builder_const_i64(args: &[Value]) -> Result<Value, EvalError> {
+/// `(const-word builder n)`: an LLVM 64-bit integer constant.
+///
+/// The *generated* code's word is 64 bits whatever the source language's
+/// integer types are, which is why this outlived `i64` (the source type it
+/// used to be named for). `n` is an `i32` and is sign-extended, so a caller
+/// passing `-1` gets the all-ones word it means; the two places that need a
+/// constant wider than `i32` (`compile-int`/`compile-float`) shift two halves
+/// together in IR rather than asking for one here.
+fn llvm_builder_const_word(args: &[Value]) -> Result<Value, EvalError> {
     let _builder = expect_llvm_builder(&args[0])?;
     let n = match &args[1] {
         Value::Int(n) => *n,
@@ -585,6 +594,25 @@ fn llvm_builder_build_fptosi(args: &[Value]) -> Result<Value, EvalError> {
     Ok(llvm_value_value(result.into()))
 }
 
+/// `int->float`: `sitofp` the operand (every compiled integer is carried in a
+/// full `i64` register, whatever its static width) to `double`, then
+/// `bitcast` it back to the raw word a compiled `f64` is carried in — the
+/// exact inverse of [`llvm_builder_build_fptosi`]'s opening `bitcast`.
+///
+/// No saturating intrinsic and no `module` parameter: `sitofp` is total on
+/// every input, so there is nothing to clamp, which matches the interpreter's
+/// `int_to_float` (`n as f64`).
+fn llvm_builder_build_sitofp(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let x = expect_llvm_value(&args[1])?.into_int_value();
+    let bld = builder.borrow();
+    let ctx = crate::compile::llvm_context();
+    let err = |e: String| EvalError::Internal(format!("build-sitofp: {}", e));
+    let f = bld.build_signed_int_to_float(x, ctx.f64_type(), "x_f").map_err(|e| err(e.to_string()))?;
+    let bits = bld.build_bit_cast(f, ctx.i64_type(), "x_bits").map_err(|e| err(e.to_string()))?;
+    Ok(llvm_value_value(bits.into_int_value().into()))
+}
+
 /// Stack-allocates a `[count x i64]` array and returns its base pointer, to
 /// be filled in by `store-arg` and passed to `build-call` — the compiled-IR
 /// equivalent of building the `i64* args` array every compiled function's
@@ -790,10 +818,18 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
         Value::Int(n) => *n as u64,
         other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
     };
-    let sexpr_mask = match &args[5] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    // The mask arrives as two 32-bit halves: it has one bit per captured slot
+    // and the island's widest fixed-width integer is `i32`, so 64 slots do not
+    // fit one of its words. Each half is a *bit pattern* (`pow2` doubles into
+    // `i32`'s sign bit for slot 31), so it is masked back to 32 bits here
+    // rather than sign-extended.
+    let mask_half = |i: usize| -> Result<u64, EvalError> {
+        match &args[i] {
+            Value::Int(n) => Ok(*n as u64 & 0xFFFF_FFFF),
+            other => Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+        }
     };
+    let sexpr_mask = mask_half(5)? | (mask_half(6)? << 32);
     let ctx = crate::compile::llvm_context();
     let b = builder.borrow();
     let module = module.borrow();

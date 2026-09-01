@@ -367,7 +367,7 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             core::tagged(
                 heap,
                 "float",
-                &[Value::Int((bits >> 32) as i64), Value::Int((bits & 0xFFFF_FFFF) as i64)],
+                &[half(bits >> 32), half(bits)],
             )
         }
         "bignum" => match core::field(heap, form, 0) {
@@ -1352,7 +1352,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
                 core::tagged(
                     h,
                     "float",
-                    &[Value::Int((bits >> 32) as i64), Value::Int((bits & 0xFFFF_FFFF) as i64)],
+                    &[half(bits >> 32), half(bits)],
                 )
             })
         }
@@ -2201,7 +2201,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
             f.push(name_v);
             f.finish("pat-bind")
         }
-        // The island compares against one `const-i64`, whatever the literal's
+        // The island compares against one `const-word`, whatever the literal's
         // kind, so the conversion happens here: there is no `char`/`bool` to
         // `i64` primitive in the compiled language to do it there.
         "pat-lit" => {
@@ -2220,7 +2220,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
             core::tagged(
                 heap,
                 "pat-lit",
-                &[Value::Int(((n as u64) >> 32) as i64), Value::Int((n as u64 & 0xFFFF_FFFF) as i64)],
+                &[half((n as u64) >> 32), half(n as u64)],
             )
         }
         // `(pat-guard SYM TEST)` -> `(pat-guard "SYM" TEST)`. The name
@@ -2423,6 +2423,21 @@ fn repr_kind(heap: &Heap, form: Value, i: usize) -> Result<i64, Error> {
     Ok(repr.field_kind())
 }
 
+/// One 32-bit half of a 64-bit literal, as the `Sexpr` `Int` that carries it
+/// across into the island.
+///
+/// The half is the *bit pattern*, read back as a signed `i32`: the island's
+/// `sexpr-int` yields an `i32` (the language has no wider fixed-width integer
+/// — `types::Type::is_integer`), and a low half can be anything up to
+/// `0xFFFF_FFFF`, which no `i32` holds as a number. Reading it as a pattern
+/// costs nothing and loses nothing: `compile-int`/`compile-float` shift the
+/// two halves back together in LLVM, where the word is 64 bits wide, and
+/// mask the sign extension off with a shift pair rather than a 32-bit-wide
+/// `and` constant that could not be written here either.
+fn half(bits: u64) -> Value {
+    Value::Int((bits & 0xFFFF_FFFF) as u32 as i32 as i64)
+}
+
 /// `(int HI LO)` — an integer literal as two 32-bit halves.
 ///
 /// One helper rather than three call sites writing `(int N)`, because the
@@ -2436,7 +2451,7 @@ fn int_node(heap: &mut Heap, n: i64) -> Result<Value, Error> {
     core::tagged(
         heap,
         "int",
-        &[Value::Int(((n as u64) >> 32) as i64), Value::Int((n as u64 & 0xFFFF_FFFF) as i64)],
+        &[half((n as u64) >> 32), half(n as u64)],
     )
 }
 
@@ -2730,12 +2745,12 @@ mod tests {
     /// name strings.
     #[test]
     fn an_llvm_method_becomes_an_operation_id() {
-        let printed = bridged("(assoc llvm-builder const-i64 true () handle (handle int) \"llvm-value\" (var b) (int 42))");
+        let printed = bridged("(assoc llvm-builder const-word true () handle (handle int) \"llvm-value\" (var b) (int 42))");
         assert_eq!(
             printed,
             format!(
                 r#"(llvm-op {} (0 var "b" false) (0 int 0 42))"#,
-                llvm_op_id("llvm-builder", "const-i64")
+                llvm_op_id("llvm-builder", "const-word")
             )
         );
     }
@@ -2854,7 +2869,7 @@ mod tests {
     }
 
     /// Whatever the literal's kind, the island compares against one
-    /// `const-i64` — there is no `char`/`bool` conversion primitive in the
+    /// `const-word` — there is no `char`/`bool` conversion primitive in the
     /// compiled language, so the conversion happens here.
     #[test]
     fn a_literal_pattern_is_reduced_to_one_integer() {

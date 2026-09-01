@@ -166,8 +166,8 @@ pub const LLVM_METHOD_RECEIVER_TYPES: [&str; 4] =
 /// LLVM instructions or `rt_*` calls rather than function calls
 /// (`Interp::is_native_lowered_primitive_method` says *which* methods; this
 /// says which receivers can have them).
-pub const NATIVE_LOWERED_PRIMITIVES: [&str; 19] = [
-    "i64", "i32", "i8", "i16", "isize", "u8", "u16", "u32", "u64", "usize",
+pub const NATIVE_LOWERED_PRIMITIVES: [&str; 15] = [
+    "i32", "i8", "i16", "u8", "u16", "u32",
     "char", "string", "f64", "f32", "bignum", "ratio", "sexpr", "bool", "symbol",
 ];
 
@@ -176,13 +176,9 @@ pub enum Type {
     I8,
     I16,
     I32,
-    I64,
-    Isize,
     U8,
     U16,
     U32,
-    U64,
-    Usize,
     F32,
     F64,
     /// The `bignum` type: an arbitrary-precision integer (CL's bignum). A
@@ -243,16 +239,18 @@ pub enum Type {
 }
 
 impl Type {
-    /// The ten built-in integer types (`i8`..`isize`, `u8`..`usize`). The one
-    /// authoritative list, so callers that need to single out "an integer
-    /// type" (`Checker::int_lit_ty`/pattern checking, `core_bridge`'s
+    /// The six built-in integer types (`i8`/`i16`/`i32`, `u8`/`u16`/`u32`).
+    /// The one authoritative list, so callers that need to single out "an
+    /// integer type" (`Checker::int_lit_ty`/pattern checking, `core_bridge`'s
     /// struct-field classifier) share it instead of each re-enumerating all
-    /// ten variants.
+    /// six variants.
+    ///
+    /// There is deliberately no 64-bit-wide integer type: a runtime value is
+    /// a tagged word whose low 3 bits are the tag, so an immediate integer
+    /// has 61 bits — a type that claims 64 would have to lose the top 3
+    /// somewhere. Wider-than-`i32` arithmetic is `bignum`'s job.
     pub fn is_integer(&self) -> bool {
-        matches!(
-            self,
-            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Isize | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::Usize
-        )
+        matches!(self, Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32)
     }
 
     /// The two built-in floating-point types (`f32`/`f64`) — the float
@@ -268,7 +266,7 @@ impl Type {
 /// (which methods a receiver has), the interpreter (which arm runs them), the
 /// compile bridge's native-method table, and the island's own dispatch
 /// predicate.
-pub const INT_TYPE_NAMES: [&str; 10] = ["i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize"];
+pub const INT_TYPE_NAMES: [&str; 6] = ["i8", "i16", "i32", "u8", "u16", "u32"];
 
 /// [`INT_TYPE_NAMES`]'s float counterpart.
 pub const FLOAT_TYPE_NAMES: [&str; 2] = ["f32", "f64"];
@@ -278,8 +276,8 @@ pub const FLOAT_TYPE_NAMES: [&str; 2] = ["f32", "f64"];
 /// one's (empty) method table in [`crate::Registry::with_builtins`].
 pub fn primitive_types() -> Vec<Type> {
     vec![
-        Type::I8, Type::I16, Type::I32, Type::I64, Type::Isize,
-        Type::U8, Type::U16, Type::U32, Type::U64, Type::Usize,
+        Type::I8, Type::I16, Type::I32,
+        Type::U8, Type::U16, Type::U32,
         Type::F32, Type::F64, Type::Bignum, Type::Ratio, Type::RandomState,
         Type::Bool, Type::Char, Type::Str, Type::Symbol,
     ]
@@ -295,13 +293,9 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
         Type::I8 => "i8",
         Type::I16 => "i16",
         Type::I32 => "i32",
-        Type::I64 => "i64",
-        Type::Isize => "isize",
         Type::U8 => "u8",
         Type::U16 => "u16",
         Type::U32 => "u32",
-        Type::U64 => "u64",
-        Type::Usize => "usize",
         Type::F32 => "f32",
         Type::F64 => "f64",
         Type::Bignum => "bignum",
@@ -667,13 +661,9 @@ fn primitive_by_name(name: &str) -> Option<Type> {
         "i8" => Type::I8,
         "i16" => Type::I16,
         "i32" => Type::I32,
-        "i64" => Type::I64,
-        "isize" => Type::Isize,
         "u8" => Type::U8,
         "u16" => Type::U16,
         "u32" => Type::U32,
-        "u64" => Type::U64,
-        "usize" => Type::Usize,
         "f32" => Type::F32,
         "f64" => Type::F64,
         "bignum" => Type::Bignum,

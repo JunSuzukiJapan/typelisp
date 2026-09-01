@@ -173,6 +173,8 @@ pub const BUILTIN_TYPE_KEYS: &[&str] = &[
     "fileerror",
     "parseinterror",
     "parsefloaterror",
+    "universal-time",
+    "internal-time",
 ];
 
 impl TypeKeyId {
@@ -187,6 +189,8 @@ impl TypeKeyId {
     pub const FILE_ERROR: TypeKeyId = TypeKeyId(8);
     pub const PARSE_INT_ERROR: TypeKeyId = TypeKeyId(9);
     pub const PARSE_FLOAT_ERROR: TypeKeyId = TypeKeyId(10);
+    pub const UNIVERSAL_TIME: TypeKeyId = TypeKeyId(11);
+    pub const INTERNAL_TIME: TypeKeyId = TypeKeyId(12);
 
     pub fn as_u32(&self) -> u32 {
         self.0

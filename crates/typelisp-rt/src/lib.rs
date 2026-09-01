@@ -2714,7 +2714,7 @@ pub unsafe extern "C-unwind" fn rt_protected_throw(args: *const i64, argc: u32) 
 ///
 /// `compiler.rs`'s `compile-str` is the only caller: a string literal's
 /// content is entirely known at compile time, so each character becomes an
-/// ordinary `const-i64` operand (`core_bridge::str_form` builds a
+/// ordinary `const-word` operand (`core_bridge::str_form` builds a
 /// `(str (int c0) (int c1) ...)` node, reusing `compile-value`'s existing
 /// `int` handling for every character rather than needing a new
 /// literal-embedding mechanism) — unlike every other allocating `rt_*`

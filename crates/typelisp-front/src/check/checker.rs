@@ -11999,8 +11999,8 @@ impl Checker {
         // The column width is only meaningful to `pprint-tabular`; the other
         // three take the default (1) so one builtin serves all four.
         let colinc = match args.get(1) {
-            Some(a) => self.check_at(heap, interp, env, *a, Some(&Type::I64), nth_loc(arg_locs, 1))?,
-            None => Checked::new(core::tagged(heap, "int", &[Value::Int(0)])?, Type::I64),
+            Some(a) => self.check_at(heap, interp, env, *a, Some(&Type::I32), nth_loc(arg_locs, 1))?,
+            None => Checked::new(core::tagged(heap, "int", &[Value::Int(0)])?, Type::I32),
         };
         let which = Checked::new(forms::str_lit_form(heap, form)?, Type::Str);
         let r = Ref::synthetic(Path::root("pprint-rt"));

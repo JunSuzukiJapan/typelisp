@@ -9,7 +9,7 @@
 //! the heap's root stack until it is linked into its parent, so the collector
 //! never reclaims a structure that is still being read.
 //!
-//! Supported v1 syntax: integers (decimal, `0x` hex, signed; past `i64`'s
+//! Supported v1 syntax: integers (decimal, `0x` hex, signed; past `i32`'s
 //! range they read as `bignum`s), ratios (`1/3`, normalized like CL — `4/2`
 //! reads as the integer `2`), floats, booleans
 //! `true`/`false`, strings with escapes, characters `#\a` / `#\Space`, symbols
@@ -827,10 +827,26 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
     }
 }
 
+/// An integer literal as the narrowest value that holds it: a `Value::Int`
+/// when it fits `i32` — the one fixed-width integer type an integer literal
+/// can have — and a heap `bignum` otherwise.
+///
+/// The cut is at `i32`, not at the 61 bits a tagged immediate could carry,
+/// because `i32` is the widest fixed-width integer type the language has
+/// (`types::Type::is_integer`): a literal that does not fit it has no
+/// fixed-width type to be, so it is a `bignum` the way CL's reader makes any
+/// too-large literal one.
+fn int_or_bignum(heap: &mut Heap, n: BigInt) -> Value {
+    match i32::try_from(&n) {
+        Ok(v) => Value::Int(v as i64),
+        Err(_) => heap.alloc_bignum(n),
+    }
+}
+
 /// The integer after a radix macro (`#x-1f`, `#b101`, `#36rZZ`). The sign
 /// comes *after* the marker, which is where CL's printer puts it.
 ///
-/// Past `i64`'s range it reads as a `bignum`, the same fixnum-or-bignum split
+/// Past `i32`'s range it reads as a `bignum`, the same fixnum-or-bignum split
 /// [`parse_number`] makes for decimal and `0x` tokens.
 fn read_radix(cur: &mut Cursor, heap: &mut Heap, radix: u32) -> Result<Value, Error> {
     let mut tok = String::new();
@@ -851,11 +867,8 @@ fn read_radix(cur: &mut Cursor, heap: &mut Heap, radix: u32) -> Result<Value, Er
             tok, radix
         )));
     }
-    if let Ok(n) = i64::from_str_radix(body, radix) {
-        return Ok(Value::Int(if neg { -n } else { n }));
-    }
     let n = BigInt::parse_bytes(body.as_bytes(), radix).expect("digits of this radix parse as BigInt");
-    Ok(heap.alloc_bignum(if neg { -n } else { n }))
+    Ok(int_or_bignum(heap, if neg { -n } else { n }))
 }
 
 fn read_char(cur: &mut Cursor) -> Result<Value, Error> {
@@ -1072,27 +1085,21 @@ fn parse_number(heap: &mut Heap, tok: &str) -> Result<Option<Value>, Error> {
         (false, tok)
     };
 
-    // hexadecimal integer: 0x... An integer past `i64`'s range reads as a
+    // hexadecimal integer: 0x... An integer past `i32`'s range reads as a
     // `bignum` (CL: fixnum vs bignum is a value-range distinction the reader
     // makes, not separate syntax).
     if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
         if !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()) {
-            if let Ok(n) = i64::from_str_radix(hex, 16) {
-                return Ok(Some(Value::Int(if neg { -n } else { n })));
-            }
             let n = BigInt::parse_bytes(hex.as_bytes(), 16).expect("all-hex-digit token parses as BigInt");
-            return Ok(Some(heap.alloc_bignum(if neg { -n } else { n })));
+            return Ok(Some(int_or_bignum(heap, if neg { -n } else { n })));
         }
         return Ok(None);
     }
 
     // decimal integer — same fixnum-or-bignum split as hex above.
     if !body.is_empty() && body.chars().all(|c| c.is_ascii_digit()) {
-        if let Ok(n) = body.parse::<i64>() {
-            return Ok(Some(Value::Int(if neg { -n } else { n })));
-        }
         let n = BigInt::parse_bytes(body.as_bytes(), 10).expect("all-digit token parses as BigInt");
-        return Ok(Some(heap.alloc_bignum(if neg { -n } else { n })));
+        return Ok(Some(int_or_bignum(heap, if neg { -n } else { n })));
     }
 
     // ratio: `numer/denom`, both all-digit (CL ratio syntax, decimal only).
@@ -1113,10 +1120,7 @@ fn parse_number(heap: &mut Heap, tok: &str) -> Result<Option<Value>, Error> {
             let r = BigRational::new(if neg { -n } else { n }, d);
             if r.is_integer() {
                 let i = r.to_integer();
-                return Ok(Some(match i64::try_from(&i) {
-                    Ok(n) => Value::Int(n),
-                    Err(_) => heap.alloc_bignum(i),
-                }));
+                return Ok(Some(int_or_bignum(heap, i)));
             }
             return Ok(Some(heap.alloc_ratio(r)));
         }
