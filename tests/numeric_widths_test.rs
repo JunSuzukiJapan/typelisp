@@ -93,10 +93,13 @@ fn crossing_integer_widths_converts() {
     assert_eq!(show(r#"(format false "~a" (as i16 (the u16 42)))"#), "42");
     // A value that does fit crosses unchanged, and `try-as` says so.
     assert_eq!(show(r#"(format false "~a" (unwrap (try-as u8 (the i32 200))))"#), "200");
-    // One that does not is `none`, not a truncated `some`.
+    // One that does not is `none`, not a truncated `some`. Answered as text
+    // rather than a sentinel number: a sentinel would have to be a `u8` too,
+    // and the out-of-range one this test used to use (`-1`) is exactly the
+    // thing `int_lit_in_range` now refuses.
     assert_eq!(
-        show(r#"(format false "~a" (match (try-as u8 (the i32 300)) ((some n) n) ((none) -1)))"#),
-        "-1"
+        show(r#"(match (try-as u8 (the i32 300)) ((some n) (format false "some ~a" n)) ((none) "none"))"#),
+        "none"
     );
 }
 
@@ -261,4 +264,70 @@ fn phase_and_abs_are_the_polar_pair() {
 fn atan_takes_two_arguments_as_in_cl() {
     assert_eq!(show(r#"(format false "~a" (round (* 4.0 (atan 1.0 1.0))))"#), "3.0");
     assert_eq!(show(r#"(format false "~a" (round (* 4.0 (atan 1.0))))"#), "3.0");
+}
+
+// ---- integer literals ---------------------------------------------------
+//
+// A literal is the one place a program states a number and a type
+// independently of each other, so it is the one place the invariant behind
+// every width-aware operation — a value *is* the number its type names — can
+// be broken just by writing it down. These pin both halves of the rule the
+// checker applies: a literal takes the type its context names, and only if
+// that type can hold it.
+
+/// The top half of `u32` is writable. The reader cannot know the type a token
+/// lands in, so it turns everything past `i32` into a `bignum`; the checker
+/// knows, and takes it back as the width the context names. Without this,
+/// `u32`'s upper half had no literal syntax at all.
+#[test]
+fn a_literal_past_i32_takes_the_width_its_context_names() {
+    assert_eq!(show(r#"(format false "~a" (the u32 4294967295))"#), "4294967295");
+    assert_eq!(show(r#"(format false "~a" (the u32 #xFFFFFFFF))"#), "4294967295");
+    // And it is a real `u32`, not a relabelled `bignum`: it wraps.
+    assert_eq!(show(r#"(format false "~a" (+ (the u32 4294967295) (the u32 1)))"#), "0");
+}
+
+/// With no context to name a width, a literal past `i32` is still a `bignum`
+/// — which is what keeps `*print-radix*` round-tripping (`#x...` printed for
+/// a `bignum` reads back as one).
+#[test]
+fn a_literal_past_i32_is_still_a_bignum_without_a_context() {
+    assert_eq!(show(r#"(format false "~a" #x10000000000000000)"#), "18446744073709551616");
+}
+
+/// A literal outside its type's range is refused rather than cut. The cut is
+/// a thing a caller can ask for and mean, and it is spelled `as`.
+#[test]
+fn a_literal_outside_its_types_range_is_a_type_error() {
+    let e = check_error("(the u8 300)");
+    assert!(e.contains("out of range for u8 (0..=255)"), "{}", e);
+    assert!(e.contains("(as u8 300)"), "{}", e);
+
+    let e = check_error("(the u32 -5)");
+    assert!(e.contains("out of range for u32 (0..=4294967295)"), "{}", e);
+
+    let e = check_error("(the i8 128)");
+    assert!(e.contains("out of range for i8 (-128..=127)"), "{}", e);
+
+    // The boundaries themselves are fine.
+    assert_eq!(show(r#"(format false "~a" (the u8 255))"#), "255");
+    assert_eq!(show(r#"(format false "~a" (the i8 -128))"#), "-128");
+}
+
+/// A `bignum` literal too big for any fixed-width type says so, and does
+/// *not* suggest `as`: a `bignum` reaches the width cast through
+/// `bignum->int`, which is itself `i32`-wide, so `as` would fail a second
+/// time rather than do what the message promised.
+#[test]
+fn a_bignum_literal_in_a_width_position_does_not_suggest_as() {
+    let e = check_error("(the u32 #x10000000000000000)");
+    assert!(e.contains("out of range for u32"), "{}", e);
+    assert!(e.contains("read as a `bignum`"), "{}", e);
+    assert!(!e.contains("(as u32"), "{}", e);
+}
+
+/// The cut-back is still available, spelled out.
+#[test]
+fn as_still_cuts_a_literal_to_width() {
+    assert_eq!(show(r#"(format false "~a" (as u8 300))"#), "44");
 }
