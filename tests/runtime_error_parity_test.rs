@@ -120,17 +120,16 @@ const CASES: &[Case] = &[
         message: "mod by zero",
     },
     Case {
-        // The other case integer division has no answer for: `i64::MIN / -1`
-        // is one past `i64::MAX`, and the expression's declared type is
-        // `i64`. Not writable as a literal — the reader hands
-        // `-9223372036854775808` back as a bignum — so `mk-min` builds it,
-        // with an `i64`-typed first operand so `-` dispatches on `i64`
-        // rather than defaulting to `i32`.
+        // The other case integer division has no answer for: the most
+        // negative value over `-1`, whose quotient is one past the type's
+        // maximum. CL would widen to a bignum, but the expression's declared
+        // type is a fixed width, so it fails instead. Written as a literal
+        // directly — `i32::MIN` is a number an `i32` holds, so the reader and
+        // the literal range check both accept it.
         what: "i32 division overflowing",
-        defs: "(defun mk-min ((z i32)) i32 (- (- z 9223372036854775807) 1))
-               (defun f ((a i32) (b i32)) i32 (/ a b))",
-        call: "(f (mk-min 0) -1)",
-        message: "arithmetic overflow: -9223372036854775808 / -1",
+        defs: "(defun f ((a i32) (b i32)) i32 (/ a b))",
+        call: "(f -2147483648 -1)",
+        message: "arithmetic overflow: -2147483648 / -1",
     },
     Case {
         // `rem` is a prelude method built out of `/`, so this is the

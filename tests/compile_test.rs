@@ -285,8 +285,8 @@ const BUILD_ANSWER_MODULE: &str = r#"
 fn builds_a_module_with_a_constant_returning_function() {
     let src = format!("{}\n(build-answer-module)", BUILD_ANSWER_MODULE);
     let ir = eval_string(&src);
-    assert!(ir.contains("define i32 @answer("), "IR was:\n{}", ir);
-    assert!(ir.contains("ret i32 42"), "IR was:\n{}", ir);
+    assert!(ir.contains("define i64 @answer("), "IR was:\n{}", ir);
+    assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
 }
 
 #[test]
@@ -317,8 +317,8 @@ fn the_compiler_body_compiles_an_int_literal_node() {
     let ir = eval_string_with_compiler(
         r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int 0 42)))"#,
     );
-    assert!(ir.contains("define i32 @answer"), "IR was:\n{}", ir);
-    assert!(ir.contains("ret i32 42"), "IR was:\n{}", ir);
+    assert!(ir.contains("define i64 @answer"), "IR was:\n{}", ir);
+    assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
 }
 
 // (Removed `the_compiler_body_panics_on_an_unsupported_tag` in interp-closure
@@ -582,7 +582,7 @@ fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
                     (position-at-end builder2 b2)
                     (let ((env-arr (alloca-args builder2 1)))
                       (store-arg builder2 env-arr 0 (const-word builder2 100))
-                      (let ((closure (build-make-closure builder2 m add-offset-fn env-arr 1 0)))
+                      (let ((closure (build-make-closure builder2 m add-offset-fn env-arr 1 0 0)))
                         (let ((args-arr (alloca-args builder2 1)))
                           (store-arg builder2 args-arr 0 (const-word builder2 5))
                           (build-ret builder2 (build-closure-apply builder2 m closure args-arr 1)))))))
@@ -751,7 +751,7 @@ fn two_modules_built_back_to_back_do_not_interfere() {
     // shared process-wide `Context` (see `compile::llvm_context`) tolerates
     // repeated use rather than e.g. colliding on the function name.
     let ir = eval_string(&src);
-    assert!(ir.contains("ret i32 42"), "IR was:\n{}", ir);
+    assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
 }
 
 /// The end-to-end Stage 1 slice, from real typelisp source (not a hand-fed
@@ -873,8 +873,8 @@ fn the_compiler_body_compiles_a_self_referencing_call() {
     let ir = eval_string_with_compiler(
         r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . 0)) '(call "f" (0 var "n" false))))"#,
     );
-    assert!(ir.contains("define i32 @f("), "IR was:\n{}", ir);
-    assert!(ir.contains("call i32 @f("), "IR was:\n{}", ir);
+    assert!(ir.contains("define i64 @f("), "IR was:\n{}", ir);
+    assert!(ir.contains("call i64 @f("), "IR was:\n{}", ir);
 }
 
 /// The end-to-end Stage 3 slice (top-level `Expr::Call`, non-recursive),
@@ -1526,7 +1526,7 @@ fn the_compiler_body_boxes_a_labels_sibling_that_bare_references_itself() {
              (let ((ignored (add-function m "rt_closure_new"))) ())
              (to-string (compile-function m "outer" '() '(labels () (("f" () (var "f" true))) (apply "f")))))"#,
     );
-    assert!(ir.contains("call i32 @rt_closure_new"), "IR was:\n{}", ir);
+    assert!(ir.contains("call i64 @rt_closure_new"), "IR was:\n{}", ir);
 }
 
 /// The end-to-end follow-up to Stage 4: `make-adder` returns one of its own
@@ -1789,7 +1789,7 @@ fn the_compiler_body_compiles_a_bool_literal_node() {
     let ir = eval_string_with_compiler(
         r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(bool true)))"#,
     );
-    assert!(ir.contains("ret i32 1"), "IR was:\n{}", ir);
+    assert!(ir.contains("ret i64 1"), "IR was:\n{}", ir);
 }
 
 /// `compile-assoc`'s new comparison arms (`<`/`<=`/`>`/`>=`/`=`/`eq`/`/=`) —
@@ -4736,7 +4736,7 @@ fn compile_dispatches_f64_arithmetic() {
 }
 
 /// `mod` on `i64`/`i32` is floored (CL, sign of the divisor) in both the
-/// interpreter (`eval_int_builtin`) and compiled code (`rt_i64_mod`) — this
+/// interpreter (`eval_int_builtin`) and compiled code (`rt_int_mod`) — this
 /// locks the two paths together for a negative dividend, where floored and
 /// truncated diverge (`-7 mod 3 = 2`, not `-1`).
 #[test]
@@ -4780,7 +4780,7 @@ fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
         ("(defun f ((a i32) (b i32)) i32 (gcd a b))", "(f -12 18)"),
         ("(defun f ((a i32) (b i32)) i32 (lcm a b))", "(f 4 6)"),
         ("(defun f ((a i32) (b i32)) i32 (rem a b))", "(f -7 3)"),
-        ("(defun f ((x i32)) i32 (signum x))", "(f -9000000000)"),
+        ("(defun f ((x i32)) i32 (signum x))", "(f -123456789)"),
         ("(defun f ((a bignum) (b bignum)) bignum (gcd a b))", "(f (int->bignum 48) (int->bignum 36))"),
         ("(defun f ((a bignum) (b bignum)) bignum (expt a b))", "(f (int->bignum 2) (int->bignum 64))"),
         ("(defun f ((a ratio) (b ratio)) ratio (mod a b))", "(f -7/2 3/2)"),
@@ -4899,7 +4899,7 @@ fn compile_dispatches_max_min_across_every_numeric_type_and_agrees_with_the_inte
 /// The bitwise catalog (`logand`/`logior`/`logxor`/`lognot`/`ash`/`logbitp`/
 /// `logcount`/`logtest`/`integer-length`) on `i32`: `logand`/`logior`/
 /// `logxor`/`lognot` are bare LLVM instructions, `ash`/`logbitp`/`logcount`/
-/// `integer-length` lower to `rt_i64_*` shims (a variable shift/count past
+/// `integer-length` lower to `rt_int_*` shims (a variable shift/count past
 /// the operand's bit width being undefined behavior in LLVM, unlike this
 /// language's clamped semantics), `logtest` composes `build-and` with an
 /// existing `build-icmp-ne`.
@@ -4957,25 +4957,27 @@ fn compile_dispatches_float_to_int_and_agrees_with_the_interpreter() {
     assert_eq!(compiled, interpreted, "compiled float->int agrees with the interpreter");
 }
 
-/// `llvm.fptosi.sat` clamps exactly like Rust's `as i64` cast (the
-/// interpreter's own `float_to_int`, `*f as i64`) — unlike a plain `fptosi`
-/// instruction, which is a poison value on NaN/out-of-range input. Covers
-/// every edge case that distinction matters for: NaN -> `0`, `+inf`/an
-/// overflowing magnitude -> `i64::MAX`, `-inf`/an underflowing magnitude ->
-/// `i64::MIN`, and one ordinary finite value as a sanity check that the
-/// intrinsic swap didn't change everyday behavior.
+/// `llvm.fptosi.sat` clamps exactly like Rust's `as i32` cast (the
+/// interpreter's own `float_to_int`, `i64::from(*f as i32)`) — unlike a plain
+/// `fptosi` instruction, which is a poison value on NaN/out-of-range input.
+/// The saturation point is `i32`'s, not the carrier's: `float->int` returns
+/// the widest fixed-width integer the language has, and since 2026-09-01 that
+/// is `i32`. Covers every edge case that distinction matters for: NaN -> `0`,
+/// `+inf`/an overflowing magnitude -> `i32::MAX`, `-inf`/an underflowing
+/// magnitude -> `i32::MIN`, and one ordinary finite value as a sanity check
+/// that the intrinsic swap didn't change everyday behavior.
 #[test]
 fn compile_dispatches_float_to_int_on_nan_and_out_of_range_inputs_and_agrees_with_the_interpreter() {
     let src = r#"
         (defun to-int ((x f64)) i32 (float->int x))
     "#;
     let cases: &[(&str, i64)] = &[
-        ("(/ 0.0 0.0)", 0),                // NaN -> 0
-        ("(/ 1.0 0.0)", i64::MAX),          // +inf -> i64::MAX
-        ("(/ -1.0 0.0)", i64::MIN),         // -inf -> i64::MIN
-        ("1e300", i64::MAX),                // overflowing magnitude -> i64::MAX
-        ("-1e300", i64::MIN),               // underflowing magnitude -> i64::MIN
-        ("7.9", 7),                         // ordinary finite value, unaffected
+        ("(/ 0.0 0.0)", 0),                       // NaN -> 0
+        ("(/ 1.0 0.0)", i32::MAX as i64),         // +inf -> i32::MAX
+        ("(/ -1.0 0.0)", i32::MIN as i64),        // -inf -> i32::MIN
+        ("1e300", i32::MAX as i64),               // overflowing magnitude -> i32::MAX
+        ("-1e300", i32::MIN as i64),              // underflowing magnitude -> i32::MIN
+        ("7.9", 7),                               // ordinary finite value, unaffected
     ];
     for (expr, expected) in cases {
         let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(to-int {expr})"))
@@ -5996,7 +5998,7 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
     // The struct is built and read, and the enum box is built and tested —
     // i.e. the island really took each of the three tags, rather than
     // compiling something degenerate that happens to verify.
-    for expected in ["rt_struct_new", "rt_struct_field_get", "rt_data_new", "define i32 @second"] {
+    for expected in ["rt_struct_new", "rt_struct_field_get", "rt_data_new", "define i64 @second"] {
         assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
     }
     assert!(
@@ -6109,7 +6111,7 @@ fn the_island_accepts_a_bridged_escaping_closure() {
 
     let src = compile_function_source("addn", "((a . 0))", &body);
     let ir = eval_string_with_compiler(&format!("(to-string {})", src));
-    for expected in ["rt_cell_new", "rt_cell_get", "define i32 @addn"] {
+    for expected in ["rt_cell_new", "rt_cell_get", "define i64 @addn"] {
         assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
     }
     assert!(
@@ -6131,7 +6133,7 @@ fn the_island_accepts_a_bridged_quoted_datum() {
     let body = bridge_to_island_text(r#"(quote (1 foo "hi"))"#);
     let src = compile_function_source("datum", "()", &body);
     let ir = eval_string_with_compiler(&format!("(to-string {})", src));
-    for expected in ["rt_cons", "rt_intern_symbol", "rt_str_new", "define i32 @datum"] {
+    for expected in ["rt_cons", "rt_intern_symbol", "rt_str_new", "define i64 @datum"] {
         assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
     }
     assert!(
@@ -6336,23 +6338,15 @@ fn run_compiled(src: &str) -> Value {
     run_and_read(src, 1 << 16, |_h, v| v).expect("eval failed")
 }
 
-#[test]
-fn a_literal_wider_than_the_sexpr_tag_allows_survives_compilation() {
-    let src = "
-        (defun big () i32 4611686018427387903)
-        (compile big)
-        (big)
-    ";
-    assert_eq!(run_compiled(src), Value::Int(4611686018427387903));
-}
-
-#[test]
-fn the_extreme_i64_literals_survive_compilation() {
-    let hi = "(defun hi () i32 9223372036854775807) (compile hi) (hi)";
-    assert_eq!(run_compiled(hi), Value::Int(i64::MAX));
-    let lo = "(defun lo () i32 -9223372036854775807) (compile lo) (lo)";
-    assert_eq!(run_compiled(lo), Value::Int(-9223372036854775807));
-}
+// Two tests lived here — `a_literal_wider_than_the_sexpr_tag_allows_...` and
+// `the_extreme_i64_literals_...` — that compiled literals like `2^62 - 1` and
+// `i64::MAX` and checked they came back whole. Both were about `i64`, and the
+// case they covered cannot arise since it was removed (2026-09-01): the
+// widest fixed-width integer is now `i32`, so every literal of one fits the
+// `Sexpr` tag's 61 bits with room to spare. The remaining literal that does
+// not fit a machine word is a `bignum`, which is a heap box rather than an
+// immediate, and `compile_constructs_a_bignum_literal_and_agrees_with_the_
+// interpreter` covers it.
 
 // ---- `Array<T>` (cl-parity-plan.md Phase 6b) --------------------------------
 //

@@ -55,7 +55,7 @@ fn make_random_state_fresh_states_are_independent_objects() {
     // with astronomically low probability.
     let src = "(defun draws ((s random-state)) i32
                  (let ((acc (the i32 0)) (i 0))
-                   (while (< i 15)
+                   (while (< i 9)
                      (setf acc (+ (* acc 10) (as i32 (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
@@ -70,7 +70,7 @@ fn random_state_copy_replays_the_same_sequence() {
     // number of values from each must agree exactly.
     let src = "(defun draws ((s random-state)) i32
                  (let ((acc (the i32 0)) (i 0))
-                   (while (< i 15)
+                   (while (< i 9)
                      (setf acc (+ (* acc 10) (as i32 (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
@@ -90,7 +90,7 @@ fn random_state_copy_replays_the_same_sequence() {
 fn two_draws_from_one_state_advance_the_same_stream() {
     let src = "(defun draws ((s random-state)) i32
                  (let ((acc (the i32 0)) (i 0))
-                   (while (< i 15)
+                   (while (< i 9)
                      (setf acc (+ (* acc 10) (as i32 (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
@@ -156,19 +156,30 @@ fn random_with_an_explicit_state_stays_within_bounds() {
 
 #[test]
 fn get_universal_time_is_a_plausible_unix_era_value() {
-    // Seconds since 1900-01-01 UTC; 2026 is comfortably past 3.9e9 and well
-    // under 4.2e9 (which would be the year ~2033 in this epoch).
-    let src = "(get-universal-time)";
+    // Whole days since 1900-01-01 UTC, plus the second within that day. The
+    // reading used to be one count of seconds; it is a `universal-time`
+    // struct since the 64-bit-wide integer types were removed (2026-09-01),
+    // because no fixed-width type holds ~4e9 seconds. The bounds are the same
+    // instants the seconds-valued version checked (3.9e9 and 4.2e9 seconds,
+    // i.e. roughly 2023-08 and 2033-01), divided by 86400.
+    let src = "(let ((now (get-universal-time))) now::day)";
     match eval_ok(src) {
-        Value::Int(secs) => assert!(secs > 3_900_000_000 && secs < 4_200_000_000, "got {}", secs),
+        Value::Int(day) => assert!(day > 45_139 && day < 48_611, "got day {}", day),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+    let src = "(let ((now (get-universal-time))) now::second)";
+    match eval_ok(src) {
+        Value::Int(sec) => assert!((0..86_400).contains(&sec), "got second {}", sec),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
 
 #[test]
 fn get_internal_real_time_is_monotonic() {
-    let src = "(let ((a (get-internal-real-time)))
-                 (let ((b (get-internal-real-time)))
+    // Compared through `internal-time-seconds`, since a reading is a struct
+    // of whole seconds and microseconds rather than one number.
+    let src = "(let ((a (internal-time-seconds (get-internal-real-time))))
+                 (let ((b (internal-time-seconds (get-internal-real-time))))
                    (<= a b)))";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }

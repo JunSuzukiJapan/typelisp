@@ -60,7 +60,9 @@ fn isqrt_is_the_greatest_root_that_does_not_overshoot() {
     assert_eq!(show("(isqrt 16)"), "4");
     assert_eq!(show("(isqrt 24)"), "4");
     assert_eq!(show("(isqrt 1000000)"), "1000");
-    assert_eq!(show("(isqrt (the i32 1000000000000))"), "1000000");
+    // The largest exact square an `i32` holds: 46340^2 = 2147395600.
+    assert_eq!(show("(isqrt 2147395600)"), "46340");
+    assert_eq!(show("(isqrt 1000000000)"), "31622");
 }
 
 #[test]
@@ -69,7 +71,9 @@ fn integer_expt_squares_and_rejects_a_negative_exponent() {
     assert_eq!(show("(expt 3 0)"), "1");
     assert_eq!(show("(expt 5 3)"), "125");
     assert_eq!(show("(expt -2 3)"), "-8");
-    assert_eq!(show("(expt (the i32 2) (the i32 40))"), "1099511627776");
+    // 2^30, the largest power of two an `i32` holds. Past that the result
+    // wraps at the type's own width, as every other `i32` operation does.
+    assert_eq!(show("(expt (the i32 2) (the i32 30))"), "1073741824");
 }
 
 #[test]
@@ -116,8 +120,11 @@ fn rationalize_finds_the_simplest_rational_not_the_exact_one() {
 
 #[test]
 fn the_limit_constants_hold_their_defining_properties() {
-    assert_eq!(show("most-positive-fixnum"), "9223372036854775807");
-    assert_eq!(show("most-negative-fixnum"), "-9223372036854775808");
+    // A fixnum is an `i32` since the 64-bit-wide integer types were
+    // removed (2026-09-01): an immediate loses three bits to the tag, so a
+    // 64-bit-wide integer type cannot be represented at all.
+    assert_eq!(show("most-positive-fixnum"), "2147483647");
+    assert_eq!(show("most-negative-fixnum"), "-2147483648");
     // CL defines the epsilons by these predicates, and they are the reason
     // `double-float-epsilon` is one ULP above 2^-53 rather than 2^-53 itself.
     assert_eq!(show("(/= (+ 1.0 double-float-epsilon) 1.0)"), "true");

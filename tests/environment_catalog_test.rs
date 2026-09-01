@@ -37,6 +37,18 @@ fn part(time_expr: &str, field: &str) -> String {
     run(&format!("(let ((d {})) (format false \"~a\" d::{}))", time_expr, field))
 }
 
+/// One component of `(decode-universal-time <ut> [zone])`, where `ut_expr`
+/// produces the `universal-time` to decode.
+///
+/// A universal time is a struct (`day`/`second`) rather than one integer,
+/// because there is no 64-bit-wide integer type to hold the count. So it
+/// cannot be printed and spliced back into a later program's source the way
+/// these tests used to do with the integer — the value has to stay inside the
+/// program that produced it, which is what this composes.
+fn decoded(ut_expr: &str, field: &str) -> String {
+    part(&format!("(decode-universal-time {})", ut_expr), field)
+}
+
 /// Runs a whole program (definitions and all), rendering the last form.
 fn run(src: &str) -> String {
     let mut h = Heap::with_capacity(1 << 18);
@@ -64,14 +76,14 @@ fn run(src: &str) -> String {
 /// which is what makes `day-of-week` (CL's 0 = Monday) a plain remainder.
 #[test]
 fn universal_time_zero_is_the_start_of_1900() {
-    let t = "(decode-universal-time 0)";
-    assert_eq!(part(&t, "second"), "0");
-    assert_eq!(part(&t, "minute"), "0");
-    assert_eq!(part(&t, "hour"), "0");
-    assert_eq!(part(&t, "date"), "1");
-    assert_eq!(part(&t, "month"), "1");
-    assert_eq!(part(&t, "year"), "1900");
-    assert_eq!(part(&t, "day-of-week"), "0");
+    let t = "(universal-time::new 0 0)";
+    assert_eq!(decoded(t, "second"), "0");
+    assert_eq!(decoded(t, "minute"), "0");
+    assert_eq!(decoded(t, "hour"), "0");
+    assert_eq!(decoded(t, "date"), "1");
+    assert_eq!(decoded(t, "month"), "1");
+    assert_eq!(decoded(t, "year"), "1900");
+    assert_eq!(decoded(t, "day-of-week"), "0");
 }
 
 /// A date past several century boundaries, where a wrong leap-year rule shows
@@ -79,21 +91,23 @@ fn universal_time_zero_is_the_start_of_1900() {
 #[test]
 fn decoding_gets_the_century_leap_year_rule_right() {
     // 2000-02-29 12:34:56 UTC. 2000 is a leap year, so this date exists.
-    let ut = show("(encode-universal-time 56 34 12 29 2 2000)");
-    let t = format!("(decode-universal-time {})", ut);
-    assert_eq!(part(&t, "year"), "2000");
-    assert_eq!(part(&t, "month"), "2");
-    assert_eq!(part(&t, "date"), "29");
-    assert_eq!(part(&t, "hour"), "12");
-    assert_eq!(part(&t, "minute"), "34");
-    assert_eq!(part(&t, "second"), "56");
+    let t = "(encode-universal-time 56 34 12 29 2 2000)";
+    assert_eq!(decoded(t, "year"), "2000");
+    assert_eq!(decoded(t, "month"), "2");
+    assert_eq!(decoded(t, "date"), "29");
+    assert_eq!(decoded(t, "hour"), "12");
+    assert_eq!(decoded(t, "minute"), "34");
+    assert_eq!(decoded(t, "second"), "56");
     // 1900 was *not* a leap year, so 1900-03-01 is day 60 of that year, not
-    // 61: one day after 1900-02-28.
-    let feb28 = show("(encode-universal-time 0 0 0 28 2 1900)");
-    let mar01 = show("(encode-universal-time 0 0 0 1 3 1900)");
+    // 61: one day after 1900-02-28. Differenced inside the language, since
+    // the two instants are structs.
     assert_eq!(
-        mar01.parse::<i64>().unwrap() - feb28.parse::<i64>().unwrap(),
-        86400,
+        show(
+            "(let ((a (encode-universal-time 0 0 0 28 2 1900))
+                   (b (encode-universal-time 0 0 0 1 3 1900)))
+               (+ (* (- b::day a::day) 86400) (- b::second a::second)))"
+        ),
+        "86400",
         "1900 must not have a February 29th"
     );
 }
@@ -109,14 +123,13 @@ fn encode_and_decode_round_trip() {
         (0, 0, 12, 4, 7, 1976),
         (1, 2, 3, 15, 8, 2100),
     ] {
-        let ut = show(&format!("(encode-universal-time {} {} {} {} {} {})", s, mi, h, d, mo, y));
-        let t = format!("(decode-universal-time {})", ut);
-        assert_eq!(part(&t, "year"), y.to_string(), "year, ut={}", ut);
-        assert_eq!(part(&t, "month"), mo.to_string(), "month, ut={}", ut);
-        assert_eq!(part(&t, "date"), d.to_string(), "date, ut={}", ut);
-        assert_eq!(part(&t, "hour"), h.to_string(), "hour, ut={}", ut);
-        assert_eq!(part(&t, "minute"), mi.to_string(), "minute, ut={}", ut);
-        assert_eq!(part(&t, "second"), s.to_string(), "second, ut={}", ut);
+        let t = format!("(encode-universal-time {} {} {} {} {} {})", s, mi, h, d, mo, y);
+        assert_eq!(decoded(&t, "year"), y.to_string(), "year, ut={}", t);
+        assert_eq!(decoded(&t, "month"), mo.to_string(), "month, ut={}", t);
+        assert_eq!(decoded(&t, "date"), d.to_string(), "date, ut={}", t);
+        assert_eq!(decoded(&t, "hour"), h.to_string(), "hour, ut={}", t);
+        assert_eq!(decoded(&t, "minute"), mi.to_string(), "minute, ut={}", t);
+        assert_eq!(decoded(&t, "second"), s.to_string(), "second, ut={}", t);
     }
 }
 
@@ -126,15 +139,22 @@ fn encode_and_decode_round_trip() {
 #[test]
 fn the_zone_argument_shifts_west_of_greenwich() {
     // 5 hours west: 1970-01-01 00:00 UTC decodes as 1969-12-31 19:00.
-    let ut = show("(encode-universal-time 0 0 0 1 1 1970)");
-    let t = format!("(decode-universal-time {} 5)", ut);
-    assert_eq!(part(&t, "year"), "1969");
-    assert_eq!(part(&t, "month"), "12");
-    assert_eq!(part(&t, "date"), "31");
-    assert_eq!(part(&t, "hour"), "19");
+    let t = "(encode-universal-time 0 0 0 1 1 1970) 5";
+    assert_eq!(decoded(t, "year"), "1969");
+    assert_eq!(decoded(t, "month"), "12");
+    assert_eq!(decoded(t, "date"), "31");
+    assert_eq!(decoded(t, "hour"), "19");
     // And encoding that local time back with the same zone returns the
-    // instant we started from.
-    assert_eq!(show("(encode-universal-time 0 0 19 31 12 1969 5)"), ut);
+    // instant we started from — compared field by field, since a
+    // `universal-time` is a struct.
+    assert_eq!(
+        show(
+            "(let ((a (encode-universal-time 0 0 0 1 1 1970))
+                   (b (encode-universal-time 0 0 19 31 12 1969 5)))
+               (and (= a::day b::day) (= a::second b::second)))"
+        ),
+        "true"
+    );
 }
 
 /// A negative universal time has no meaning — CL defines the scale as
@@ -146,7 +166,9 @@ fn a_negative_universal_time_is_rejected() {
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, "(decode-universal-time -1)").expect("read failed");
+    let vs = r
+        .read_all(&mut h, "(decode-universal-time (universal-time::new -1 0))")
+        .expect("read failed");
     let tl = chk.check_form(&mut h, &interp, vs[0]).expect("check failed");
     match interp.exec(&mut h, tl) {
         Err(e) => assert!(

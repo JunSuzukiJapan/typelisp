@@ -151,7 +151,7 @@ fn a_declared_rest_argument_is_collected_at_the_call() {
     let src = "
         (defsignature total (&rest i32) i32)
         (defun a () i32 (total 1 2 3))
-        (defun total (&rest (xs i32)) i32 (sexpr-list-length-i32 xs))
+        (defun total (&rest (xs i32)) i32 (sexpr-list-length xs))
         (a)";
     assert_eq!(eval_ok_with_island(src), Value::Int(3));
 }
