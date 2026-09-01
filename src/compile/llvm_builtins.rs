@@ -118,6 +118,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "build-flog" => Some(llvm_builder_build_float_unary_intrinsic(args, "flog", "llvm.log.f64")),
             "build-fptosi" => Some(llvm_builder_build_fptosi(args)),
             "build-sitofp" => Some(llvm_builder_build_sitofp(args)),
+            "build-fround32" => Some(llvm_builder_build_fround32(args)),
             "alloca-args" => Some(llvm_builder_alloca_args(args)),
             "store-arg" => Some(llvm_builder_store_arg(args)),
             "build-call" => Some(llvm_builder_build_call(args)),
@@ -561,16 +562,21 @@ fn llvm_builder_build_select(args: &[Value]) -> Result<Value, EvalError> {
 
 /// `float->int` (`f64->i32`, narrowing, truncating toward zero): `bitcast`
 /// the `i64`-carried operand to `double`, then the `llvm.fptosi.sat`
-/// intrinsic (overloaded on both its `i64` result and `f64` operand type,
+/// intrinsic (overloaded on both its result and its `f64` operand type,
 /// hence the `module` parameter every other overloaded-intrinsic builtin
 /// here already takes — see [`llvm_builder_build_float_unary_intrinsic`]/
-/// [`llvm_builder_build_fpow`]) straight to `i64` (every compiled integer,
-/// `i32` included, is carried in a full `i64` register — see
-/// `int-native-method?`'s doc comment). Unlike a plain `fptosi`
-/// instruction (poison on NaN/out-of-range input), `.sat` clamps: NaN -> 0,
-/// `+inf`/an overflowing magnitude -> `i64::MAX`, `-inf`/an underflowing
-/// magnitude -> `i64::MIN` — exactly Rust's `as` cast semantics, matching
-/// the interpreter's `float_to_int` (`*f as i64`) bit for bit.
+/// [`llvm_builder_build_fpow`]) to `i32`, then `sext` back to the full `i64`
+/// register every compiled integer is carried in (see
+/// `int-native-method?`'s doc comment).
+///
+/// Saturating to `i32` and not to the register: `float->int`'s declared
+/// return type *is* `i32`, and a value in a register always holds the number
+/// its type claims, sign-extended (`types::normalize_int`). Unlike a plain
+/// `fptosi` instruction (poison on NaN/out-of-range input), `.sat` clamps:
+/// NaN -> 0, `+inf`/an overflowing magnitude -> `i32::MAX`, `-inf`/an
+/// underflowing magnitude -> `i32::MIN` — exactly Rust's `as` cast
+/// semantics, matching the interpreter's `float_to_int` (`f as i32`) bit for
+/// bit.
 fn llvm_builder_build_fptosi(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
@@ -578,19 +584,21 @@ fn llvm_builder_build_fptosi(args: &[Value]) -> Result<Value, EvalError> {
     let bld = builder.borrow();
     let ctx = crate::compile::llvm_context();
     let f64_ty = ctx.f64_type();
+    let i32_ty = ctx.i32_type();
     let i64_ty = ctx.i64_type();
     let err = |e: String| EvalError::Internal(format!("build-fptosi: {}", e));
     let x = bld.build_bit_cast(x_bits, f64_ty, "x_f").map_err(|e| err(e.to_string()))?.into_float_value();
     let intrinsic =
         inkwell::intrinsics::Intrinsic::find("llvm.fptosi.sat").ok_or_else(|| err("no such LLVM intrinsic llvm.fptosi.sat".into()))?;
     let decl = intrinsic
-        .get_declaration(&module.borrow(), &[i64_ty.into(), f64_ty.into()])
+        .get_declaration(&module.borrow(), &[i32_ty.into(), f64_ty.into()])
         .ok_or_else(|| err("failed to declare llvm.fptosi.sat".into()))?;
     let call = bld.build_call(decl, &[x.into()], "fptosi_sat").map_err(|e| err(e.to_string()))?;
-    let result = match call.try_as_basic_value() {
+    let narrow = match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
         inkwell::values::ValueKind::Instruction(_) => return Err(err("llvm.fptosi.sat produced no value".into())),
     };
+    let result = bld.build_int_s_extend(narrow, i64_ty, "fptosi_sext").map_err(|e| err(e.to_string()))?;
     Ok(llvm_value_value(result.into()))
 }
 
@@ -610,6 +618,27 @@ fn llvm_builder_build_sitofp(args: &[Value]) -> Result<Value, EvalError> {
     let err = |e: String| EvalError::Internal(format!("build-sitofp: {}", e));
     let f = bld.build_signed_int_to_float(x, ctx.f64_type(), "x_f").map_err(|e| err(e.to_string()))?;
     let bits = bld.build_bit_cast(f, ctx.i64_type(), "x_bits").map_err(|e| err(e.to_string()))?;
+    Ok(llvm_value_value(bits.into_int_value().into()))
+}
+
+/// The nearest binary32 value, still carried as an `f64`: `fptrunc` to
+/// `float`, then `fpext` straight back to `double`.
+///
+/// This is what makes `f32` a width rather than a label. A float value lives
+/// in a 64-bit word whichever type names it — every binary32 value is exactly
+/// a binary64 value — but an `f32` *operation* rounds its result to binary32,
+/// and this is that rounding. The interpreter's `float_at` does the same
+/// thing as `v as f32 as f64`.
+fn llvm_builder_build_fround32(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let x_bits = expect_llvm_value(&args[1])?.into_int_value();
+    let bld = builder.borrow();
+    let ctx = crate::compile::llvm_context();
+    let err = |e: String| EvalError::Internal(format!("build-fround32: {}", e));
+    let x = bld.build_bit_cast(x_bits, ctx.f64_type(), "x_f").map_err(|e| err(e.to_string()))?.into_float_value();
+    let narrow = bld.build_float_trunc(x, ctx.f32_type(), "x_f32").map_err(|e| err(e.to_string()))?;
+    let wide = bld.build_float_ext(narrow, ctx.f64_type(), "x_f64").map_err(|e| err(e.to_string()))?;
+    let bits = bld.build_bit_cast(wide, ctx.i64_type(), "x_bits").map_err(|e| err(e.to_string()))?;
     Ok(llvm_value_value(bits.into_int_value().into()))
 }
 

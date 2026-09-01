@@ -682,7 +682,7 @@ pub unsafe extern "C" fn rt_bignum_mul(args: *const i64, argc: u32) -> i64 {
 /// `bignum::/` for compiled code — truncates toward zero (CL `truncate`),
 /// like `int_assoc`'s own `/`. A zero divisor [`raise`]s the same
 /// `"divide by zero"` `eval_bignum_builtin` gives the interpreted path,
-/// exactly as [`rt_i64_div`] does for fixnums.
+/// exactly as [`rt_int_div`] does for fixnums.
 ///
 /// # Safety
 ///
@@ -2808,154 +2808,195 @@ pub unsafe extern "C" fn rt_wk_symbol(args: *const i64, argc: u32) -> i64 {
 }
 
 
-/// Signed integer division `a / b` — the compiled-code half of `i64`/`i32`
-/// `/`, which (unlike `+`/`-`/`*`) can't be a bare LLVM instruction because
-/// LLVM `sdiv` by zero is undefined behavior. Operands are raw untagged
-/// `i64`s (the int branch of `compile-assoc` computes them the same way
-/// `build-add` does), so there is no decode/encode here.
+/// The receiver type's width and signedness, as the extra raw operand every
+/// integer shim below takes: `width * 2 + (signed as i64)`.
+///
+/// A type name means its width and its signedness and nothing else
+/// (`types::int_width_signed`), so the six integer types share one shim per
+/// operation and are told apart by this one number rather than by six copies
+/// of each. The island builds it as a constant at the call site — the
+/// receiver's type name is right there in `compile-assoc`.
+fn wsig(code: i64) -> (u32, bool) {
+    ((code >> 1) as u32, code & 1 == 1)
+}
+
+/// `v` cut back to `width` bits and re-extended into the 64-bit word compiled
+/// code carries every integer in — the runtime half of
+/// `types::normalize_int`, spelled here because this crate sits below the
+/// checker.
+fn normalize(v: i64, width: u32, signed: bool) -> i64 {
+    let sh = 64 - width;
+    if signed {
+        (v << sh) >> sh
+    } else {
+        (((v as u64) << sh) >> sh) as i64
+    }
+}
+
+/// Integer division `a / b` at the receiver's width — the compiled-code half
+/// of `/`, which (unlike `+`/`-`/`*`) can't be a bare LLVM instruction
+/// because LLVM `sdiv` by zero is undefined behavior. Operands are raw
+/// untagged `i64`s (the int branch of `compile-assoc` computes them the same
+/// way `build-add` does), so there is no decode/encode here.
+///
+/// `sdiv` serves the unsigned types too: every width here is at most 32 and
+/// a normalized unsigned value is a non-negative `i64`, so the signed
+/// quotient *is* the unsigned one.
 ///
 /// A zero divisor [`raise`]s `"divide by zero"` — the very message
 /// `eval_int_builtin` gives the interpreted path, since the two paths running
 /// the same form must fail the same way (`tests/runtime_error_parity_test.rs`
-/// is the guard). `checked_div`'s other `None` case, `i64::MIN / -1`, is an
-/// overflow rather than a divisor problem and says so; `eval_int_builtin`
-/// uses `checked_div` and this same wording for it too, so that case is a
-/// recoverable failure on both paths rather than a Rust overflow trap on one.
+/// is the guard). The one other failure is the type's most negative value
+/// over `-1`, whose quotient is one past its maximum; that is an overflow
+/// rather than a divisor problem and says so. Unsigned types have no such
+/// case.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_i64_div(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_i64_div: expected 2 arguments");
+pub unsafe extern "C-unwind" fn rt_int_div(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_int_div: expected 3 arguments");
     }
     let (a, b) = (*args, *args.add(1));
+    let (width, signed) = wsig(*args.add(2));
     if b == 0 {
         raise("divide by zero".to_string());
     }
-    match a.checked_div(b) {
-        Some(q) => q,
-        None => raise(format!("arithmetic overflow: {} / {}", a, b)),
+    if signed && b == -1 && a == normalize(1i64 << (width - 1), width, true) {
+        raise(format!("arithmetic overflow: {} / {}", a, b));
     }
+    normalize(a / b, width, signed)
 }
 
-/// Floored remainder `a mod b` (CL `mod`) — the compiled-code half of
-/// `i64`/`i32` `mod`, matching the interpreter's `eval_int_builtin`. The
-/// result takes the sign of the divisor `b` (unlike `srem`/`rem`, which take
-/// the sign of the dividend), so `-7 mod 3 = 2`. Same zero-divisor handling
-/// as [`rt_i64_div`] — a catchable `"mod by zero"`, `eval_int_builtin`'s own
-/// wording; `i64::MIN % -1` is mathematically `0` (`checked_rem` returns
-/// `None` on that overflow case, treated as the exact `0` here).
-/// Raw-`i64` operand convention.
+/// Floored remainder `a mod b` (CL `mod`) at the receiver's width — the
+/// compiled-code half of `mod`, matching the interpreter's
+/// `eval_int_builtin`. The result takes the sign of the divisor `b` (unlike
+/// `srem`/`rem`, which take the sign of the dividend), so `-7 mod 3 = 2`.
+/// Same zero-divisor handling as [`rt_int_div`] — a catchable
+/// `"mod by zero"`, `eval_int_builtin`'s own wording; the most-negative-over-
+/// `-1` case that overflows for `/` is mathematically `0` here, which
+/// `wrapping_rem` answers directly. Raw-`i64` operand convention.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_i64_mod(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_i64_mod: expected 2 arguments");
+pub unsafe extern "C-unwind" fn rt_int_mod(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_int_mod: expected 3 arguments");
     }
     let (a, b) = (*args, *args.add(1));
+    let (width, signed) = wsig(*args.add(2));
     if b == 0 {
         raise("mod by zero".to_string());
     }
-    let r = a.checked_rem(b).unwrap_or(0);
-    if r != 0 && (r < 0) != (b < 0) {
-        r + b
-    } else {
-        r
-    }
+    let r = a.wrapping_rem(b);
+    normalize(if r != 0 && (r < 0) != (b < 0) { r + b } else { r }, width, signed)
 }
 
-/// `(ash integer count)` — the compiled-code half of `i64`/`i32` `ash`,
+/// `(ash integer count)` at the receiver's width — the compiled-code half,
 /// matching `eval_int_builtin`'s. Not a bare LLVM `shl`/`ashr` because both
 /// are undefined behavior once the shift amount reaches the operand's bit
-/// width, which `count >= 64`/`count <= -64` would hit directly; those are
-/// clamped here to their limiting value (`0` left, sign-smeared `-1`/`0`
-/// right) instead. `args[0]` is the integer, `args[1]` the count (receiver-
-/// first, CL's own argument order).
+/// width; a count at or past the *type's* width is clamped here to its
+/// limiting value (`0` left, and right either `0` or, for a signed negative
+/// operand, the sign smeared to `-1`). `args[0]` is the integer, `args[1]`
+/// the count (receiver-first, CL's own argument order).
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_i64_ash(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_i64_ash: expected 2 arguments");
+pub unsafe extern "C" fn rt_int_ash(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_int_ash: expected 3 arguments");
     }
     let (n, count) = (*args, *args.add(1));
-    if count >= 0 {
-        if count >= 64 {
+    let (width, signed) = wsig(*args.add(2));
+    let w = i64::from(width);
+    let r = if count >= 0 {
+        if count >= w {
             0
         } else {
             n.wrapping_shl(count as u32)
         }
-    } else if -count >= 64 {
-        if n < 0 {
+    } else if -count >= w {
+        if signed && n < 0 {
             -1
         } else {
             0
         }
     } else {
         n >> (-count)
+    };
+    normalize(r, width, signed)
+}
+
+/// `(logbitp index integer)` at the receiver's width — the compiled-code
+/// half, matching `eval_int_builtin`'s. Not a bare `lshr`+`and` because a
+/// variable shift by an index at or past the width is undefined behavior in
+/// LLVM; that case is handled directly (past the width there is no bit to
+/// read — every one is the sign for a signed value, zero for an unsigned
+/// one). `args[0]` is the index (receiver-first), `args[1]` the integer.
+///
+/// # Safety
+///
+/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_int_logbitp(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_int_logbitp: expected 3 arguments");
+    }
+    let (index, n) = (*args, *args.add(1));
+    let (width, signed) = wsig(*args.add(2));
+    if index >= i64::from(width) {
+        (signed && n < 0) as i64
+    } else {
+        (n >> index) & 1
     }
 }
 
-/// `(logbitp index integer)` — the compiled-code half, matching
-/// `eval_int_builtin`'s. Not a bare `lshr`+`and` because a variable shift by
-/// `index >= 64` is undefined behavior in LLVM; that case is handled
-/// directly (any bit position beyond the width just reads the sign).
-/// `args[0]` is the index (receiver-first), `args[1]` the integer.
+/// `logcount` at the receiver's width (population count of a nonnegative
+/// integer, or of the 0-bits of a negative one — CL's own "infinite two's
+/// complement" reading, cut to the type's own bits) — the compiled-code
+/// half, matching `eval_int_builtin`'s. Not a bare `llvm.ctpop.i64` call
+/// because the negative case first needs a conditional `lognot` and a mask,
+/// cheaper to express directly here than as extra IR at every call site.
 ///
 /// # Safety
 ///
 /// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_i64_logbitp(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_int_logcount(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {
-        fatal("rt_i64_logbitp: expected 2 arguments");
+        fatal("rt_int_logcount: expected 2 arguments");
     }
-    let (index, n) = (*args, *args.add(1));
-    let bit = if index >= 64 { (n < 0) as i64 } else { (n >> index) & 1 };
-    bit
+    let n = *args;
+    let (width, _) = wsig(*args.add(1));
+    let mask = if width >= 64 { !0u64 } else { (1u64 << width) - 1 };
+    let bits = (n as u64) & mask;
+    i64::from(if n >= 0 { bits.count_ones() } else { (!bits & mask).count_ones() })
 }
 
-/// `logcount` (population count of a nonnegative integer, or of the 0-bits
-/// of a negative one — CL's own "infinite two's complement" reading) — the
-/// compiled-code half, matching `eval_int_builtin`'s. Not a bare
-/// `llvm.ctpop.i64` call because the negative case first needs a conditional
-/// `lognot`, cheaper to express directly here than as extra IR at every call
-/// site.
+/// `integer-length` at the receiver's width (bits needed, excluding sign) —
+/// the compiled-code half, matching `eval_int_builtin`'s: `n`'s own bit
+/// length when nonnegative, else `!n`'s (CL's negative-integer-length
+/// identity), both read inside the type's own bits.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_i64_logcount(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_i64_logcount: expected 1 argument");
+pub unsafe extern "C" fn rt_int_integer_length(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_int_integer_length: expected 2 arguments");
     }
     let n = *args;
-    (if n >= 0 { n.count_ones() } else { (!n).count_ones() }) as i64
-}
-
-/// `integer-length` (bits needed, excluding sign) — the compiled-code half,
-/// matching `eval_int_builtin`'s: `n`'s own bit length when nonnegative,
-/// else `!n`'s (CL's negative-integer-length identity).
-///
-/// # Safety
-///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
-#[no_mangle]
-pub unsafe extern "C" fn rt_i64_integer_length(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_i64_integer_length: expected 1 argument");
-    }
-    let n = *args;
-    let m = if n >= 0 { n } else { !n };
-    (64 - m.leading_zeros()) as i64
+    let (width, _) = wsig(*args.add(1));
+    let v = if n >= 0 { n as u64 } else { !(n as u64) };
+    let mask = if width >= 64 { !0u64 } else { (1u64 << width) - 1 };
+    i64::from(64 - (v & mask).leading_zeros())
 }
 
 /// Shared shape for the `f64` transcendental unaries that have no LLVM

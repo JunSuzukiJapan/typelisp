@@ -9961,18 +9961,15 @@ impl Checker {
         if src.ty == target {
             return if try_variant { wrap_some(heap, self, src, target) } else { Ok(src) };
         }
-        // Between two integer widths, or between the two float widths: a pure
-        // relabel, no runtime effect. `Value::Int` is uniformly `i64` and
-        // `Value::Float` uniformly `f64` regardless of which static width
-        // labels them (see `registry::int_assoc`'s `int->float` doc comment) —
-        // there is no truncating representation anywhere in this codebase for
-        // `as`/`try-as` to imitate, so crossing widths is total in both
-        // directions. `try-as` between them is therefore always `some`, which
-        // is worth knowing when reading code that asks: it says the *static*
-        // type changed and nothing else did.
+        // Between two integer widths, or between the two float widths: a real
+        // conversion. A type name means its width and its signedness
+        // (`types::int_width_signed`), and `f32` is binary32, so crossing
+        // widths truncates or rounds — `as` performs it, `try-as` reports
+        // whether anything was lost. This used to be a pure relabel, back
+        // when every integer shared one 64-bit representation and both floats
+        // one `f64`.
         if (src.ty.is_integer() && target.is_integer()) || (src.ty.is_float() && target.is_float()) {
-            let relabeled = Checked::new(src.form, target.clone());
-            return if try_variant { wrap_some(heap, self, relabeled, target) } else { Ok(relabeled) };
+            return self.width_cast(heap, interp, env, src, &target, try_variant);
         }
         // Boxing as a trait object — the explicit spelling of the same
         // widening the expectation-driven coercion performs. Never a
@@ -9989,6 +9986,7 @@ impl Checker {
             return self.coerce_to_dyn(heap, env, src, trait_path, pins);
         }
 
+        let src_ty = src.ty.clone();
         let (panic_method, try_method) = as_conversion(&src.ty, &target).ok_or_else(|| {
             Error::TypeError(format!(
                 "{}: no conversion from {:?} to {:?} (as/try-as cover only the numeric/char catalog: int/f64/bignum/ratio/char)",
@@ -10006,33 +10004,68 @@ impl Checker {
             &[],
         )?;
 
-        // `float->int`/`bignum->int`/`char->int` are always registered with
-        // an `I32` return, and `int->float` with an `F64` one, whichever width
-        // the caller asked for — see `as_conversion`'s doc comment. The result
-        // is relabeled to the target here, which is all a width is: by
-        // construction of `as_conversion`'s table, `called`'s (unwrapped, for
-        // a `try_method` result) type is the catalog width of the target's own
-        // family.
-        let relabel = target != called_width(&target);
+        // `float->int`/`bignum->int`/`char->int` land on `i32`, and
+        // `int->float` on `f64`, whichever width the caller asked for — see
+        // `as_conversion`'s doc comment. A narrower target is reached by
+        // *chaining* the same-family width cast onto that result, which is a
+        // real conversion now and not a relabel.
+        let narrower = target != called_width(&target);
         if try_variant {
             match try_method {
-                Some(_) => {
-                    if relabel {
-                        retype_option(heap, called, target)
-                    } else {
-                        Ok(called)
-                    }
-                }
+                // A partial conversion whose result then has to be narrowed
+                // would be partial twice over, and there is one `Option` to
+                // say so with. Rather than pick which failure the `none`
+                // reports, say so: the two questions are asked separately.
+                Some(_) if narrower => Err(Error::TypeError(format!(
+                    "try-as: no direct {:?} -> {:?} — that would be two questions in one `option` (does the value convert, and does it then fit {:?}). Ask them apart: `(try-as {} x)`, then `(try-as {} n)` on the result.",
+                    src_ty, target, target, crate::type_key::type_key_of_type(&called_width(&target)), crate::type_key::type_key_of_type(&target)
+                ))),
+                Some(_) => Ok(called),
                 None => {
-                    let called = if relabel { Checked::new(called.form, target.clone()) } else { called };
+                    let called = if narrower {
+                        self.width_cast(heap, interp, env, called, &target, false)?
+                    } else {
+                        called
+                    };
                     wrap_some(heap, self, called, target)
                 }
             }
-        } else if relabel {
-            Ok(Checked::new(called.form, target))
+        } else if narrower {
+            self.width_cast(heap, interp, env, called, &target, false)
         } else {
             Ok(called)
         }
+    }
+
+    /// `as`/`try-as` between two widths of one family — two integer types, or
+    /// the two float types.
+    ///
+    /// `int->u8`/`float->f32`/... (`registry::int_assoc`/`float_assoc`) is the
+    /// conversion; `try-int->u8`/`try-float->f32` is the same conversion
+    /// asked as a question. Both are real work: a width cast truncates and a
+    /// float cast rounds, which is what makes `i8` an 8-bit type and `f32` a
+    /// binary32 one rather than labels on a wider register.
+    fn width_cast(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        src: Checked,
+        target: &Type,
+        try_variant: bool,
+    ) -> Result<Checked, Error> {
+        let family = if target.is_integer() { "int" } else { "float" };
+        let name = crate::type_key::type_key_of_type(target);
+        let method = if try_variant { format!("try-{}->{}", family, name) } else { format!("{}->{}", family, name) };
+        let owner = prim_type_path(&src.ty).expect("a width cast's source is a primitive type");
+        self.check_assoc_call(
+            heap,
+            interp,
+            env,
+            AssocCall { type_fq: &owner, method: &method, receiver: Some(src), expected: None },
+            &[],
+            &[],
+        )
     }
 
     /// `(compile name)` / `(compile type::method)`: the name being compiled
@@ -13894,36 +13927,6 @@ fn option_none(heap: &mut Heap, checker: &Checker, ty: Type) -> Result<Checked, 
     Ok(Checked::new(forms::rooted(heap, form), ty))
 }
 
-/// Relabels an already-computed `Option<I32>` [`Checked`] (an `as_conversion`
-/// `try_method` call's result) to `Option<inner_target>` — `Checker::check_as`'s
-/// `i64`-target counterpart of the plain relabel it does for a total
-/// conversion; see [`as_conversion`]'s doc comment for why the underlying
-/// `Option`'s runtime payload doesn't actually change.
-fn retype_option(heap: &mut Heap, opt: Checked, inner_target: Type) -> Result<Checked, Error> {
-    let ty = Type::Named(Path::root("option"), vec![inner_target]);
-    // The static relabel alone is not enough. An `assoc` node also carries the
-    // *runtime* identity of its result (`Checker::assoc_form`'s key slot), and
-    // the registry spelled this one at the catalog width — `option<i32>`. A
-    // box whose key says `option<i32>` matches no `option<i64>` pattern, so
-    // `(unwrap (try-as i64 n))` would find no arm at all. Of everything
-    // `Checker::check_as` relabels this is the only case that produces a box:
-    // the other relabels are scalars, which carry no identity to move.
-    let key = crate::type_key::type_key_of_type(&ty);
-    let key = heap.alloc_string(key);
-    let tag = match heap.car(opt.form)? {
-        Value::Symbol(s) => heap.symbol_name(s),
-        _ => "",
-    };
-    assert_eq!(tag, "assoc", "retype_option: `try-as`'s conversion call is an `assoc` node");
-    // `(assoc TYPE METHOD INSTANCE HOME RET-REPR (ARG-REPR...) KEY ARGS...)`
-    // — the key is the 7th field after the tag.
-    let mut cell = opt.form;
-    for _ in 0..7 {
-        cell = heap.cdr(cell)?;
-    }
-    heap.set_car(cell, key)?;
-    Ok(Checked::new(opt.form, ty))
-}
 
 /// `Some(t)` unless `t` is `Never` (which never constrains an expectation).
 fn non_never(t: &Type) -> Option<&Type> {

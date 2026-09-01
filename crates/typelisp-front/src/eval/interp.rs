@@ -2459,45 +2459,59 @@ const SEXPR_BIGNUM: usize = 8;
 const SEXPR_RATIO: usize = 9;
 const SEXPR_PATH: usize = 10;
 
-/// Evaluate a built-in `i32`/`i64` arithmetic/comparison instance method
-/// (`registry::int_assoc`) — shared by both widths since `Value::Int`
-/// represents every integer type uniformly as `i64`.
-fn eval_int_builtin(name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+/// Evaluate a built-in integer arithmetic/comparison instance method
+/// (`registry::int_assoc`), at the receiver type's own `width` and
+/// signedness.
+///
+/// One function for all six integer types, but *not* one behaviour: a type
+/// name means its width and its signedness and nothing else
+/// (`types::int_width_signed`), so every arithmetic result is cut back to
+/// that width here. The operands arrive already normalized — that is the
+/// invariant every producer of an integer maintains — which is what lets the
+/// comparisons, the division and the remainder below stay plain `i64`
+/// operations for the unsigned types too: a normalized `u32` is a
+/// non-negative `i64`.
+fn eval_int_builtin(name: &str, args: &[Value], width: u32, signed: bool) -> Option<Result<Value, EvalError>> {
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(Value::Int(a)), Some(Value::Int(b))) => (*a, *b),
         _ => return Some(Err(EvalError::Internal(format!("{}: expected two integers", name)))),
     };
+    let norm = |v: i64| Value::Int(crate::types::normalize_int(v, width, signed));
     let v = match name {
-        "+" => Value::Int(a + b),
-        "-" => Value::Int(a - b),
-        "*" => Value::Int(a * b),
+        // Wrapping, then cut: the low `width` bits of a 64-bit sum are the
+        // sum's own low `width` bits, so the wide operation is a correct way
+        // to compute the narrow one. `wrapping_*` rather than `+`/`-`/`*`
+        // only because Rust's own overflow check would fire on the 64-bit
+        // intermediate, which is not the overflow anyone asked about.
+        "+" => norm(a.wrapping_add(b)),
+        "-" => norm(a.wrapping_sub(b)),
+        "*" => norm(a.wrapping_mul(b)),
         "/" => {
             if b == 0 {
                 return Some(Err(EvalError::Panic("divide by zero".into())));
             }
-            match a.checked_div(b) {
-                Some(q) => Value::Int(q),
-                // `i64::MIN / -1`, whose quotient is one past `i64::MAX`. CL
-                // would widen to a bignum here, but the *declared* type of
-                // this expression is `i64` and a checked program cannot be
-                // handed a wider result than it asked for — so it fails, with
-                // `rt_i64_div`'s wording. Plain `a / b` would have trapped as
-                // a Rust overflow panic instead, killing the process where
-                // compiled code reported an ordinary error.
-                None => {
-                    return Some(Err(EvalError::Panic(format!("arithmetic overflow: {} / {}", a, b))))
-                }
+            // The one overflow a division has: the most negative value over
+            // `-1`, whose quotient is one past the type's maximum. CL would
+            // widen to a bignum, but the *declared* type of this expression
+            // is a fixed width and a checked program cannot be handed a wider
+            // result than it asked for — so it fails, with `rt_int_div`'s
+            // wording. Unsigned types have no such case (no negative
+            // operands), and the check below says so by construction.
+            if signed && b == -1 && a == crate::types::normalize_int(1i64 << (width - 1), width, true) {
+                return Some(Err(EvalError::Panic(format!("arithmetic overflow: {} / {}", a, b))));
             }
+            norm(a / b)
         }
         "mod" => {
             if b == 0 {
                 return Some(Err(EvalError::Panic("mod by zero".into())));
             }
             // CL `mod`: floored remainder, result takes the sign of the
-            // divisor (`-7 mod 3 = 2`). `i64::MIN % -1` is mathematically 0
-            // (`checked_rem` returns `None` on that overflow case).
-            let r = a.checked_rem(b).unwrap_or(0);
-            Value::Int(if r != 0 && (r < 0) != (b < 0) { r + b } else { r })
+            // divisor (`-7 mod 3 = 2`). The most-negative-over-`-1` case that
+            // traps for `/` is mathematically 0 here, and `wrapping_rem`
+            // answers exactly that.
+            let r = a.wrapping_rem(b);
+            norm(if r != 0 && (r < 0) != (b < 0) { r + b } else { r })
         }
         "<" => Value::Bool(a < b),
         "<=" => Value::Bool(a <= b),
@@ -2505,36 +2519,65 @@ fn eval_int_builtin(name: &str, args: &[Value]) -> Option<Result<Value, EvalErro
         ">=" => Value::Bool(a >= b),
         "=" => Value::Bool(a == b),
         "/=" => Value::Bool(a != b),
-        "max" => Value::Int(a.max(b)),
-        "min" => Value::Int(a.min(b)),
-        "logand" => Value::Int(a & b),
-        "logior" => Value::Int(a | b),
-        "logxor" => Value::Int(a ^ b),
+        "max" => norm(a.max(b)),
+        "min" => norm(a.min(b)),
+        // Bitwise: the operands' bits above `width` are the extension, and
+        // the result's have to be the extension of the *result* — which for
+        // an unsigned `and`/`or`/`xor` they already are, but for `xor` on
+        // signed operands (or `lognot`, below) they are not.
+        "logand" => norm(a & b),
+        "logior" => norm(a | b),
+        "logxor" => norm(a ^ b),
         // `(ash integer count)`: positive `count` shifts left, negative
         // shifts right (arithmetic — sign-extending), matching CL §12.10.
-        // Shifts by 64+ places are clamped rather than handed to Rust's `<<`/
-        // `>>` (which panic once the shift amount reaches the operand's bit
-        // width): the result at that point is just `0` (left) or the sign
-        // bit smeared across every bit (right).
-        "ash" => Value::Int(if b >= 0 {
-            if b >= 64 { 0 } else { a.wrapping_shl(b as u32) }
-        } else if -b >= 64 {
-            if a < 0 { -1 } else { 0 }
-        } else {
-            a >> (-b)
-        }),
-        "logbitp" => Value::Bool(if a >= 64 { b < 0 } else { (b >> a) & 1 == 1 }),
+        // Shifts by `width` or more places are clamped rather than handed to
+        // Rust's `<<`/`>>`: the result at that point is just `0` (left), and
+        // for a right shift `0` or, for a signed negative operand, `-1` —
+        // the sign bit smeared across every bit.
+        "ash" => {
+            let w = i64::from(width);
+            norm(if b >= 0 {
+                if b >= w { 0 } else { a.wrapping_shl(b as u32) }
+            } else if -b >= w {
+                if signed && a < 0 { -1 } else { 0 }
+            } else {
+                a >> (-b)
+            })
+        }
+        // Past the type's width there is no bit to read: for a signed value
+        // every one of them is the sign, for an unsigned value every one is
+        // zero.
+        "logbitp" => Value::Bool(if a >= i64::from(width) { signed && b < 0 } else { (b >> a) & 1 == 1 }),
         "logtest" => Value::Bool((a & b) != 0),
         _ => unreachable!(),
     };
     Some(Ok(v))
 }
 
-/// A unary `i32`/`i64` builtin (`lognot`/`logcount`/`integer-length`,
-/// `registry::int_assoc`) — the unary counterpart of [`eval_int_builtin`]'s
-/// binary ops, mirroring [`float_unary`] below.
-fn int_unary(args: &[Value], f: fn(i64) -> i64) -> Result<Value, EvalError> {
-    Ok(Value::Int(f(rt_i64(&args[0])?)))
+/// `lognot` at the receiver's width: complement, then cut — the complement of
+/// a normalized value is not itself normalized (`(lognot (the u8 0))` is
+/// `255`, not `-1`).
+fn int_lognot(args: &[Value], width: u32, signed: bool) -> Result<Value, EvalError> {
+    Ok(Value::Int(crate::types::normalize_int(!rt_i64(&args[0])?, width, signed)))
+}
+
+/// CL's `logcount` at the receiver's width: the number of one bits in a
+/// non-negative value, of zero bits in a negative one — counted inside
+/// `width`, not across the 64-bit word the value is carried in.
+fn int_logcount(args: &[Value], width: u32) -> Result<Value, EvalError> {
+    let n = rt_i64(&args[0])?;
+    let mask = if width == 64 { !0u64 } else { (1u64 << width) - 1 };
+    let bits = (n as u64) & mask;
+    Ok(Value::Int(i64::from(if n >= 0 { bits.count_ones() } else { (!bits & mask).count_ones() })))
+}
+
+/// CL's `integer-length` at the receiver's width: the bits needed to
+/// represent the value excluding the sign.
+fn int_integer_length(args: &[Value], width: u32) -> Result<Value, EvalError> {
+    let n = rt_i64(&args[0])?;
+    let v = if n >= 0 { n as u64 } else { !(n as u64) };
+    let mask = if width == 64 { !0u64 } else { (1u64 << width) - 1 };
+    Ok(Value::Int(i64::from(64 - (v & mask).leading_zeros())))
 }
 
 fn expect_float(heap: &Heap, v: &Value) -> Result<f64, EvalError> {
@@ -2554,12 +2597,13 @@ fn int_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     }
 }
 
-/// `float->int` (`registry::float_assoc`): narrow an `f64` to an integer,
-/// truncating toward zero (Rust's `as i64`, same rounding direction as CL's
-/// `truncate`).
+/// `float->int` (`registry::float_assoc`): narrow a float to an `i32`,
+/// truncating toward zero (Rust's `as i32`, same rounding direction as CL's
+/// `truncate`, and the same saturating behaviour on NaN and out-of-range
+/// magnitudes the island's `llvm.fptosi.sat` gives).
 fn float_to_int(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     match args.first() {
-        Some(Value::Boxed(id)) if heap.is_float(*id) => Ok(Value::Int(heap.float_value(*id) as i64)),
+        Some(Value::Boxed(id)) if heap.is_float(*id) => Ok(Value::Int(i64::from(heap.float_value(*id) as i32))),
         other => Err(EvalError::Internal(format!("float->int: expected a float, got {:?}", other))),
     }
 }
@@ -2601,37 +2645,90 @@ fn try_int_to_char(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Val
 /// a zero divisor — IEEE-754 division yields `inf`/`NaN` instead, the natural
 /// float semantics (no "can't express nonzero" gap to plug). `mod`/`rem` are
 /// defined in `prelude.rs` as typelisp methods (`a - b*floor|truncate(a/b)`).
-fn eval_float_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+fn eval_float_builtin(heap: &mut Heap, name: &str, args: &[Value], single: bool) -> Option<Result<Value, EvalError>> {
     let (a, b) = match (args.first().map(|v| expect_float(heap, v)), args.get(1).map(|v| expect_float(heap, v))) {
         (Some(Ok(a)), Some(Ok(b))) => (a, b),
         _ => return Some(Err(EvalError::Internal(format!("{}: expected two floats", name)))),
     };
     let v = match name {
-        "+" => float_rt(heap, a + b),
-        "-" => float_rt(heap, a - b),
-        "*" => float_rt(heap, a * b),
-        "/" => float_rt(heap, a / b),
+        "+" => float_at(heap, a + b, single),
+        "-" => float_at(heap, a - b, single),
+        "*" => float_at(heap, a * b, single),
+        "/" => float_at(heap, a / b, single),
         "<" => Value::Bool(a < b),
         "<=" => Value::Bool(a <= b),
         ">" => Value::Bool(a > b),
         ">=" => Value::Bool(a >= b),
         "=" => Value::Bool(a == b),
         "/=" => Value::Bool(a != b),
-        "max" => float_rt(heap, a.max(b)),
-        "min" => float_rt(heap, a.min(b)),
+        "max" => float_at(heap, a.max(b), single),
+        "min" => float_at(heap, a.min(b), single),
         _ => unreachable!(),
     };
     Some(Ok(v))
 }
 
-fn float_unary(heap: &mut Heap, args: &[Value], f: fn(f64) -> f64) -> Result<Value, EvalError> {
-    let r = f(expect_float(heap, &args[0])?);
-    Ok(float_rt(heap, r))
+/// `v` boxed at the receiver's precision: rounded to binary32 first when the
+/// receiver is `f32`.
+///
+/// A float value is carried in an `f64` box whichever type labels it — every
+/// binary32 value is exactly a binary64 value, the same way a narrow integer
+/// is carried sign-extended in a 64-bit word — but the *arithmetic* is the
+/// one the type names. Rounding here, after each operation, is what makes
+/// `f32` binary32 rather than a label on an `f64` (`docs/functions.md` §1b).
+fn float_at(heap: &mut Heap, v: f64, single: bool) -> Value {
+    float_rt(heap, if single { f64::from(v as f32) } else { v })
 }
 
-fn float_expt(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+fn float_unary(heap: &mut Heap, args: &[Value], f: fn(f64) -> f64, single: bool) -> Result<Value, EvalError> {
+    let r = f(expect_float(heap, &args[0])?);
+    Ok(float_at(heap, r, single))
+}
+
+fn float_expt(heap: &mut Heap, args: &[Value], single: bool) -> Result<Value, EvalError> {
     let r = expect_float(heap, &args[0])?.powf(expect_float(heap, &args[1])?);
-    Ok(float_rt(heap, r))
+    Ok(float_at(heap, r, single))
+}
+
+/// `float->f32`/`float->f64` (`registry::float_assoc`): a cast between the
+/// two float widths. Narrowing rounds to nearest binary32; widening is exact,
+/// since the value in the box is already a binary32 one.
+fn float_to_width(heap: &mut Heap, args: &[Value], single: bool) -> Result<Value, EvalError> {
+    let v = expect_float(heap, &args[0])?;
+    Ok(float_at(heap, v, single))
+}
+
+/// `try-float->f32` (`registry::float_assoc`): [`float_to_width`] asked as a
+/// question — `none` when rounding to binary32 would lose something. NaN
+/// converts (every NaN is a NaN in either width), which is why the test is
+/// written as a round trip rather than an equality.
+fn try_float_to_f32(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+    let v = expect_float(heap, &args[0])?;
+    let exact = f64::from(v as f32).to_bits() == v.to_bits();
+    let narrowed = if exact { Some(float_rt(heap, v)) } else { None };
+    Ok(option_value(heap, ret_key, narrowed))
+}
+
+/// `int->i8`/`int->u32`/... (`registry::int_assoc`): a cast between two
+/// integer widths — truncating, which is what a width cast means.
+fn int_to_width(args: &[Value], width: u32, signed: bool) -> Result<Value, EvalError> {
+    Ok(Value::Int(crate::types::normalize_int(rt_i64(&args[0])?, width, signed)))
+}
+
+/// `try-int->i8`/... (`registry::int_assoc`): [`int_to_width`] asked as a
+/// question — `none` when the value does not fit the target width, which is
+/// exactly when truncating would change it.
+fn try_int_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, ret_key: &str) -> Result<Value, EvalError> {
+    let n = rt_i64(&args[0])?;
+    let fits = crate::types::normalize_int(n, width, signed) == n;
+    Ok(option_value(heap, ret_key, fits.then_some(Value::Int(n))))
+}
+
+/// The target width and signedness a `int->W`/`try-int->W` method name
+/// carries, or `None` for any other method — the `W` is the only place a
+/// width cast's target can be written (`registry::int_assoc`).
+fn width_cast_target(method: &str, prefix: &str) -> Option<(u32, bool)> {
+    method.strip_prefix(prefix).and_then(crate::types::int_width_signed)
 }
 
 /// The `BigInt` behind a `bignum` value, cloned out of its heap box.
@@ -2844,17 +2941,17 @@ fn int_to_ratio(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// precedent as `int->char`'s Unicode-scalar-value check.
 fn bignum_to_int(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let n = expect_bignum(heap, &args[0])?;
-    n.to_i64()
-        .map(Value::Int)
-        .ok_or_else(|| EvalError::Panic(format!("bignum->int: {} does not fit in an i64", n)))
+    n.to_i32()
+        .map(|v| Value::Int(i64::from(v)))
+        .ok_or_else(|| EvalError::Panic(format!("bignum->int: {} does not fit in an i32", n)))
 }
 
 /// `try-bignum->int` (`registry::bignum_assoc`): the `Option`-returning
 /// counterpart of [`bignum_to_int`], for `Checker::check_as`'s `try-as` —
-/// same "fits in an `i64`" check, `None` instead of a panic on overflow.
+/// same "fits in an `i32`" check, `None` instead of a panic on overflow.
 fn try_bignum_to_int(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let n = expect_bignum(heap, &args[0])?;
-    let int = n.to_i64().map(Value::Int);
+    let int = n.to_i32().map(|v| Value::Int(i64::from(v)));
     Ok(option_value(heap, ret_key, int))
 }
 
@@ -3067,14 +3164,19 @@ fn eval_read_datum_at(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalErro
     Ok(typelisp_read::shim::read_datum_at_builtin(heap, &s, start, preserve))
 }
 
-/// Whether `type_name` is one of the integer types — every one of which shares
-/// the same catalog and the same runtime representation (`Value::Int`, an
-/// `i64`, whatever width the static type claims; see `registry::int_assoc`).
-fn is_int_receiver(type_name: &Path) -> bool {
-    crate::types::INT_TYPE_NAMES.iter().any(|n| *type_name == Path::root(n))
+/// The width and signedness of `type_name`, when it is one of the integer
+/// types — every one of which shares the same catalog and the same runtime
+/// carrier (`Value::Int`, an `i64`) but *not* the same arithmetic: the pair
+/// this returns is what `eval_int_builtin` cuts every result back to. `None`
+/// for anything that is not an integer type.
+fn int_receiver_width(type_name: &Path) -> Option<(u32, bool)> {
+    crate::types::INT_TYPE_NAMES
+        .iter()
+        .find(|n| *type_name == Path::root(n))
+        .and_then(|n| crate::types::int_width_signed(n))
 }
 
-/// [`is_int_receiver`]'s float counterpart: `f32` and `f64` are one
+/// [`int_receiver_width`]'s float counterpart: `f32` and `f64` are one
 /// `Value::Float` (an `f64`) apart from which type labels them.
 fn is_float_receiver(type_name: &Path) -> bool {
     crate::types::FLOAT_TYPE_NAMES.iter().any(|n| *type_name == Path::root(n))
@@ -3207,56 +3309,68 @@ fn eval_builtin_method(
             _ => None,
         };
     }
-    if is_int_receiver(type_name) {
+    if let Some((width, signed)) = int_receiver_width(type_name) {
         return match method {
             "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
-            | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_int_builtin(method, args),
-            "lognot" => Some(int_unary(args, |n| !n)),
-            "logcount" => Some(int_unary(args, |n| if n >= 0 { n.count_ones() as i64 } else { (!n).count_ones() as i64 })),
-            "integer-length" => Some(int_unary(args, |n| {
-                if n >= 0 { (64 - n.leading_zeros()) as i64 } else { (64 - (!n).leading_zeros()) as i64 }
-            })),
+            | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_int_builtin(method, args, width, signed),
+            "lognot" => Some(int_lognot(args, width, signed)),
+            "logcount" => Some(int_logcount(args, width)),
+            "integer-length" => Some(int_integer_length(args, width)),
             // `eq`/`eql`/`equal`/`equalp` are all registered as aliases for
             // `=` (see `registry::int_assoc`'s doc comment for why every one
             // of these four is meaningful to register even though none can
             // diverge from `=` here).
-            "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args),
+            "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args, width, signed),
             "int->float" => Some(int_to_float(heap, args)),
             "int->char" => Some(int_to_char(args)),
             "try-int->char" => Some(try_int_to_char(heap, args, ret_key)),
             "int->bignum" => Some(int_to_bignum(heap, args)),
             "int->ratio" => Some(int_to_ratio(heap, args)),
+            _ if width_cast_target(method, "int->").is_some() => {
+                let (w, sg) = width_cast_target(method, "int->").expect("just matched");
+                Some(int_to_width(args, w, sg))
+            }
+            _ if width_cast_target(method, "try-int->").is_some() => {
+                let (w, sg) = width_cast_target(method, "try-int->").expect("just matched");
+                Some(try_int_to_width(heap, args, w, sg, ret_key))
+            }
             "print" => Some(rt_i64(&args[0]).and_then(|n| write_stdout(&n.to_string(), false))),
             "println" => Some(rt_i64(&args[0]).and_then(|n| write_stdout(&n.to_string(), true))),
             _ => None,
         };
     }
     if is_float_receiver(type_name) {
+        // `f32` is binary32 and `f64` binary64: the receiver's own width says
+        // what each result is rounded to (`float_at`).
+        let single = *type_name == Path::root("f32");
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
-                eval_float_builtin(heap, method, args)
+                eval_float_builtin(heap, method, args, single)
             }
-            "eq" | "eql" | "equal" | "equalp" => eval_float_builtin(heap, "=", args),
-            "expt" => Some(float_expt(heap, args)),
-            "sqrt" => Some(float_unary(heap, args, f64::sqrt)),
-            "floor" => Some(float_unary(heap, args, f64::floor)),
-            "ceiling" => Some(float_unary(heap, args, f64::ceil)),
-            "round" => Some(float_unary(heap, args, f64::round)),
-            "truncate" => Some(float_unary(heap, args, f64::trunc)),
-            "sin" => Some(float_unary(heap, args, f64::sin)),
-            "cos" => Some(float_unary(heap, args, f64::cos)),
-            "tan" => Some(float_unary(heap, args, f64::tan)),
-            "asin" => Some(float_unary(heap, args, f64::asin)),
-            "acos" => Some(float_unary(heap, args, f64::acos)),
-            "atan" => Some(float_unary(heap, args, f64::atan)),
-            "sinh" => Some(float_unary(heap, args, f64::sinh)),
-            "cosh" => Some(float_unary(heap, args, f64::cosh)),
-            "tanh" => Some(float_unary(heap, args, f64::tanh)),
-            "asinh" => Some(float_unary(heap, args, f64::asinh)),
-            "acosh" => Some(float_unary(heap, args, f64::acosh)),
-            "atanh" => Some(float_unary(heap, args, f64::atanh)),
-            "exp" => Some(float_unary(heap, args, f64::exp)),
-            "log" => Some(float_unary(heap, args, f64::ln)),
+            "eq" | "eql" | "equal" | "equalp" => eval_float_builtin(heap, "=", args, single),
+            "float->f32" => Some(float_to_width(heap, args, true)),
+            "float->f64" => Some(float_to_width(heap, args, false)),
+            "try-float->f32" => Some(try_float_to_f32(heap, args, ret_key)),
+            "expt" => Some(float_expt(heap, args, single)),
+            "sqrt" => Some(float_unary(heap, args, f64::sqrt, single)),
+            "floor" => Some(float_unary(heap, args, f64::floor, single)),
+            "ceiling" => Some(float_unary(heap, args, f64::ceil, single)),
+            "round" => Some(float_unary(heap, args, f64::round, single)),
+            "truncate" => Some(float_unary(heap, args, f64::trunc, single)),
+            "sin" => Some(float_unary(heap, args, f64::sin, single)),
+            "cos" => Some(float_unary(heap, args, f64::cos, single)),
+            "tan" => Some(float_unary(heap, args, f64::tan, single)),
+            "asin" => Some(float_unary(heap, args, f64::asin, single)),
+            "acos" => Some(float_unary(heap, args, f64::acos, single)),
+            "atan" => Some(float_unary(heap, args, f64::atan, single)),
+            "sinh" => Some(float_unary(heap, args, f64::sinh, single)),
+            "cosh" => Some(float_unary(heap, args, f64::cosh, single)),
+            "tanh" => Some(float_unary(heap, args, f64::tanh, single)),
+            "asinh" => Some(float_unary(heap, args, f64::asinh, single)),
+            "acosh" => Some(float_unary(heap, args, f64::acosh, single)),
+            "atanh" => Some(float_unary(heap, args, f64::atanh, single)),
+            "exp" => Some(float_unary(heap, args, f64::exp, single)),
+            "log" => Some(float_unary(heap, args, f64::ln, single)),
             "float->int" => Some(float_to_int(heap, args)),
             "float->bignum" => Some(float_to_bignum(heap, args)),
             "float->ratio" => Some(float_to_ratio(heap, args)),

@@ -268,6 +268,46 @@ impl Type {
 /// predicate.
 pub const INT_TYPE_NAMES: [&str; 6] = ["i8", "i16", "i32", "u8", "u16", "u32"];
 
+/// The bit width and signedness `name` claims, for the integer type names in
+/// [`INT_TYPE_NAMES`].
+///
+/// A type name says exactly two things and nothing else — how many bits, and
+/// whether the top one is a sign — and this is where both are read off. Both
+/// execution engines carry every integer in a 64-bit word, so this pair is
+/// what tells them where to cut it back after an operation: the value in the
+/// word is always the one the type claims, sign-extended (signed) or
+/// zero-extended (unsigned) into the rest. Keeping that invariant is what
+/// lets a comparison, a division and a remainder stay ordinary *signed*
+/// 64-bit instructions for the unsigned types too — every width here is at
+/// most 32, so a normalized unsigned value is a non-negative `i64`.
+pub fn int_width_signed(name: &str) -> Option<(u32, bool)> {
+    Some(match name {
+        "i8" => (8, true),
+        "i16" => (16, true),
+        "i32" => (32, true),
+        "u8" => (8, false),
+        "u16" => (16, false),
+        "u32" => (32, false),
+        _ => return None,
+    })
+}
+
+/// `v` cut back to `width` bits and re-extended into the 64-bit word both
+/// engines carry integers in: sign-extended when `signed`, zero-extended
+/// otherwise. See [`int_width_signed`] for why this is the one invariant.
+///
+/// Written as a shift pair rather than a mask because the mask for a 32-bit
+/// width is itself past `i32` — a constant this language cannot write, and
+/// the island compiles the identical pair for the same reason.
+pub fn normalize_int(v: i64, width: u32, signed: bool) -> i64 {
+    let sh = 64 - width;
+    if signed {
+        (v << sh) >> sh
+    } else {
+        (((v as u64) << sh) >> sh) as i64
+    }
+}
+
 /// [`INT_TYPE_NAMES`]'s float counterpart.
 pub const FLOAT_TYPE_NAMES: [&str; 2] = ["f32", "f64"];
 
@@ -656,7 +696,11 @@ fn parse_type_arg<'a>(toks: &mut Toks<'a>, rec: &mut Option<SpanRec<'_>>) -> Res
 /// The primitive type a bare single-segment name denotes, if any — the one
 /// authoritative name table behind [`named_or_primitive`] and the span
 /// recorder's "is this a nominal name at all" test.
-fn primitive_by_name(name: &str) -> Option<Type> {
+///
+/// Public because the registry builds the width-conversion methods
+/// (`int->u8` and friends) by walking [`INT_TYPE_NAMES`]: those names have to
+/// become `Type`s, and this is where a name becomes a type.
+pub fn primitive_by_name(name: &str) -> Option<Type> {
     Some(match name {
         "i8" => Type::I8,
         "i16" => Type::I16,

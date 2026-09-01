@@ -1764,6 +1764,11 @@ pub fn llvm_builder_def() -> AdtDef {
     // form, `sitofp` is a plain instruction with no intrinsic to overload and
     // no input it is undefined on.
     assoc.insert("build-sitofp".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    // `float->f32` (and every `f32` arithmetic result): round the operand to
+    // binary32 and widen it straight back. Two instructions, no intrinsic and
+    // no module lookup — `fptrunc` then `fpext`, which is exactly "the
+    // nearest binary32 value" written in IR.
+    assoc.insert("build-fround32".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
     // `alloca-args`/`store-arg`/`build-call`: building a direct call to an
     // already-declared function (`get-function`'s result). `alloca-args`
     // stack-allocates a fresh `[count x i64]` array (mirroring the fixed-ABI
@@ -2084,6 +2089,28 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // unlike `bignum->int`/`ratio->int`'s narrowing counterparts.
     m.insert("int->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m.insert("int->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    // `int->i8`/`int->u32`/... and their `try-` counterparts: a cast between
+    // two integer *widths*, which is a real conversion now that a type name
+    // means its width and its signedness (`types::int_width_signed`) rather
+    // than labelling a shared 64-bit one. `int->W` truncates — that is what a
+    // width cast means, the same as Rust's `as` — and `try-int->W` answers
+    // `none` instead when the value does not fit, which is the question
+    // `try-as` asks. `Checker::check_as` picks between them.
+    //
+    // One pair per *target*, on every integer receiver, because the target is
+    // the only thing a conversion's name can carry: there is no way to spell
+    // "narrow to whatever width the context wants" as one method.
+    for target in crate::types::INT_TYPE_NAMES {
+        let to = crate::types::primitive_by_name(target).expect("INT_TYPE_NAMES names a primitive type");
+        m.insert(
+            format!("int->{}", target),
+            AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: to.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        );
+        m.insert(
+            format!("try-int->{}", target),
+            AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(to), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        );
+    }
     m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m
@@ -2123,12 +2150,11 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), cmp());
     }
-    // `float->int`: narrowing numeric conversion, truncating toward zero
-    // (Rust's `as i64`, same as CL's `truncate`) — the other half of
-    // `int_assoc`'s `int->float`. Returns `i32` (this language's default
-    // integer type, `Checker::int_lit_ty`'s fallback) even though the
-    // runtime value is a uniform `Value::Int(i64)` either way (see
-    // `eval_int_builtin`'s doc comment).
+    // `float->int`: narrowing numeric conversion, truncating toward zero and
+    // saturating (Rust's `as i32`) — the other half of `int_assoc`'s
+    // `int->float`. Returns `i32`, this language's widest fixed-width integer
+    // and `Checker::int_lit_ty`'s fallback; a narrower target is reached by
+    // chaining `int->W` (`Checker::check_as`).
     m.insert("float->int".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `float->bignum`: narrowing, truncating toward zero (`f64 as i64`'s
     // multi-precision analogue — see `crate::eval::interp::float_to_bignum`).
@@ -2137,6 +2163,18 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // `rationalize`), via `num_rational::BigRational::from_float`.
     m.insert("float->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m.insert("float->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    // `float->f32`/`float->f64` and `try-float->f32`: a cast between the two
+    // float *widths*, a real conversion now that `f32` is binary32 rather
+    // than a label on an `f64` (`docs/functions.md` §1b). `float->f32` rounds
+    // to nearest, `float->f64` is exact in both directions (every binary32
+    // value is a binary64 value), and `try-float->f32` answers `none` when
+    // the rounding would lose something — the question `try-as` asks.
+    m.insert("float->f32".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::F32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("float->f64".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert(
+        "try-float->f32".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(Type::F32), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+    );
     m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m
