@@ -8608,8 +8608,24 @@ impl Checker {
             Value::Boxed(id) if heap.is_ratio(id) => {
                 Checked::new(core::tagged(heap, "ratio", &[Value::Boxed(id)])?, Type::Ratio)
             }
+            // A float literal reads as an `f64` box, because a token cannot
+            // know the type it will land in. Here that type is known: in an
+            // `f32` position the literal *is* an `f32`, so it is re-boxed as
+            // one — otherwise the box and the type would disagree from the
+            // very first thing the program says, and every later reader (the
+            // printer, `eql`, a dump) would believe the box.
+            //
+            // The value is rounded to binary32 in the same step, which is
+            // what the type already claims of it.
             Value::Boxed(id) => {
-                Checked::new(core::tagged(heap, "float-any-width", &[Value::Boxed(id)])?, float_lit_ty(expected))
+                let ty = float_lit_ty(expected);
+                let boxed = if ty == Type::F32 && heap.is_f64(id) {
+                    let f = heap.f64_value(id);
+                    heap.alloc_f32(f as f32)
+                } else {
+                    Value::Boxed(id)
+                };
+                Checked::new(core::tagged(heap, "float-any-width", &[boxed])?, ty)
             }
             Value::Bool(b) => Checked::new(core::tagged(heap, "bool", &[Value::Bool(b)])?, Type::Bool),
             Value::Char(c) => Checked::new(core::tagged(heap, "char", &[Value::Char(c)])?, Type::Char),

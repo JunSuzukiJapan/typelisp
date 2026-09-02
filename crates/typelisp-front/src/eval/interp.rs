@@ -1792,17 +1792,17 @@ impl Interp {
             // `match_sexpr_ctor`'s corresponding arm binds — panicking (not
             // `None`-matching) on a tag mismatch, the same contract the old
             // `(_ (panic ...))` catch-all arms had.
-            "sexpr-int" => match args.first() {
+            "sexpr-i32" => match args.first() {
                 Some(Value::Int(n)) => Some(Ok(Value::Int(*n))),
-                Some(_) => Some(Err(EvalError::Panic("sexpr-int: expected an Int Sexpr node".into()))),
-                _ => Some(Err(EvalError::Internal("sexpr-int: expected a Sexpr argument".into()))),
+                Some(_) => Some(Err(EvalError::Panic("sexpr-i32: expected an i32 Sexpr node".into()))),
+                _ => Some(Err(EvalError::Internal("sexpr-i32: expected a Sexpr argument".into()))),
             },
             "sexpr-bool" => match args.first() {
                 Some(Value::Bool(b)) => Some(Ok(Value::Bool(*b))),
                 Some(_) => Some(Err(EvalError::Panic("sexpr-bool: expected a Bool Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-bool: expected a Sexpr argument".into()))),
             },
-            // `sexpr-char`: peer of `sexpr-int`/`sexpr-bool` for a `Char` node
+            // `sexpr-char`: peer of `sexpr-i32`/`sexpr-bool` for a `Char` node
             // (`Value::Char`, an ordinary immediate, unlike `Float`'s boxed
             // payload) — added alongside `compile-char`/the `char` dispatch tag
             // (compiled code previously had no way to build/read a bare `char`
@@ -1813,7 +1813,7 @@ impl Interp {
                 Some(_) => Some(Err(EvalError::Panic("sexpr-char: expected a Char Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-char: expected a Sexpr argument".into()))),
             },
-            // `sexpr-float`: peer of `sexpr-int` for a `Float` node (heap-boxed,
+            // `sexpr-f64`/`sexpr-f32`: peers of `sexpr-i32` for a float node (heap-boxed,
             // `Value::Boxed` — see `BoxedObj`). Added with the Phase 5 `match`
             // fence so a `Sexpr::Float` payload can still be read out without a
             // `(match s ((Float f) f) ..)`.

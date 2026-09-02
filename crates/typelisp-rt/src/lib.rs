@@ -258,7 +258,7 @@ pub unsafe extern "C" fn rt_set_cdr(args: *const i64, argc: u32) -> i64 {
 //
 // The rest of the `sexpr-*` island layer beyond `car`/`cdr`/`cons`: the tag
 // predicates (`sexpr-consp`/`sexpr-null`/`sexpr-atom`/`sexpr-symp`) and the
-// typed payload extractors (`sexpr-int`/`sexpr-bool`/`sexpr-char`/
+// typed payload extractors (`sexpr-i32`/`sexpr-bool`/`sexpr-char`/
 // `sexpr-str`/`sexpr-sym-name`; `sexpr-f64` reuses [`rt_f64_value`],
 // whose bits-in-`i64` result is exactly the compiled `f64` convention).
 // Before Stage 8 these builtins had no compiled lowering at all, so any
@@ -322,20 +322,20 @@ pub unsafe extern "C" fn rt_symp(args: *const i64, argc: u32) -> i64 {
     i64::from(matches!(decode(*args), Value::Symbol(_)))
 }
 
-/// `(sexpr-int x)`: the raw `i64` payload of an `Int` node. Fatal on any
-/// other tag — the same panic contract the interpreter's `sexpr-int` has.
+/// `(sexpr-i32 x)`: the raw `i64` payload of an `i32` node. Fatal on any
+/// other tag — the same panic contract the interpreter's `sexpr-i32` has.
 ///
 /// # Safety
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_sexpr_i32(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
-        fatal("rt_sexpr_int: expected 1 argument");
+        fatal("rt_sexpr_i32: expected 1 argument");
     }
     match decode(*args) {
         Value::Int(n) => n,
-        _ => fatal("sexpr-int: expected an Int Sexpr node"),
+        _ => fatal("sexpr-i32: expected an i32 Sexpr node"),
     }
 }
 
