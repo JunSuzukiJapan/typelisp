@@ -213,7 +213,7 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
 
 /// Rebuilds an [`OwnedForm`] as a live `Value` in `heap` — the load-time
 /// half, allocating **through the heap's own APIs** (`intern_symbol`/
-/// `alloc_string`/`intern_path`/`alloc_float`/`alloc_bignum`/`alloc_ratio`/
+/// `alloc_string`/`intern_path`/`alloc_f32`/`alloc_f64`/`alloc_bignum`/`alloc_ratio`/
 /// `cons`), never copying raw memory.
 ///
 /// The returned value is *unrooted* — like a reader result, the caller must

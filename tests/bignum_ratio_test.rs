@@ -71,7 +71,7 @@ fn assert_bignum(actual: Value, expected: &str) {
 /// unification, so it needs the heap too.
 fn assert_float(actual: Value, expected: f64) {
     with_heap(|h| match actual {
-        typelisp::Value::Boxed(id) if h.is_float(id) => assert_eq!(h.float_value(id), expected),
+        typelisp::Value::Boxed(id) if h.is_f64(id) => assert_eq!(h.f64_value(id), expected),
         other => panic!("expected an f64, got {:?}", other),
     })
 }

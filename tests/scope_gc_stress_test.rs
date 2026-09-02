@@ -134,7 +134,7 @@ fn interpreted_scopes_survive_constant_collection() {
                    (set s \"b\" (quote 7))
                    (pop-frame s)
                    (match (get s \"a\")
-                     ((Some v) (sexpr-int v))
+                     ((Some v) (sexpr-i32 v))
                      ((None) -1))))
                (f)";
     let got = eval_in(&mut h, &mut chk, &mut interp, src).expect("interpreted scope failed under gc stress");

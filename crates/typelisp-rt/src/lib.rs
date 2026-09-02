@@ -422,7 +422,7 @@ pub unsafe extern "C" fn rt_sym_name(args: *const i64, argc: u32) -> i64 {
 // struct/closure/`HashTable<K,V>`/`Scope<V>` values into `Sexpr` uniformly,
 // instead of leaving them in a separate `Rc`-managed `RtValue` universe.
 // `Float` is the first, deliberately trivial occupant (an `f64` doesn't fit
-// losslessly alongside a 3-bit tag, so `Sexpr::Float` was never actually
+// losslessly alongside a 3-bit tag, so `Sexpr::f64` was never actually
 // representable in compiled code before this). Unlike `rt_cons`'s `car`/
 // `cdr` (already-tagged `Sexpr` values), `rt_f64_new`'s argument is a raw
 // `f64` bit pattern (`f64::to_bits`), not a tagged `Sexpr` — there is no
@@ -514,9 +514,148 @@ pub unsafe extern "C" fn rt_f32_value(args: *const i64, argc: u32) -> i64 {
     }
 }
 
+// ---- narrow integers (`i8`/`i16`/`u8`/`u16`/`u32`) ----------------------
+//
+// The integer half of the float split above, and the same argument: a
+// compiled `u8` lives in an `i64` register already cut to 8 bits, so the
+// register cannot say which of the five narrow types it is. Inside a
+// `Sexpr` — the one place a value has no declared type to be read off — it
+// therefore gets a box that says (`BoxedObj::Narrow`). `i32` keeps its bare
+// tagged word: that width is what an untagged `Sexpr` integer already means.
+
+/// Allocates a boxed narrow-integer `Sexpr` from a raw register word plus
+/// the `wsig` code naming its type — `args[0]` is the value (already
+/// normalized by the arithmetic that produced it, and normalized again by
+/// `Heap::alloc_narrow` regardless), `args[1]` is `width * 2 + signed`.
+///
+/// The `wsig` is a *constant* the island emits from the declared type, not
+/// something read off the value: the word is the same bit pattern for a `u8`
+/// `200` and an `i32` `200`, which is precisely why the box is needed.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s;
+/// a `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_narrow_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_narrow_new: expected 2 arguments");
+    }
+    let (width, signed) = wsig(*args.add(1));
+    encode(active_heap().alloc_narrow(width as u8, signed, *args))
+}
+
+/// Reads the raw register word out of a boxed narrow-integer `Sexpr` of
+/// exactly the type `args[1]`'s `wsig` names — `args[0]` is a tagged `Sexpr`
+/// value, as [`rt_f64_value`]'s is.
+///
+/// Fatal on any other box, the `wsig` included: a `u8` box handed to a
+/// `u16` read would be this shim silently widening a type its caller already
+/// knew, the same refusal [`rt_f64_value`] makes about an `f32` box.
+///
+/// # Safety
+///
+/// Same as [`rt_narrow_new`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_narrow_value(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_narrow_value: expected 2 arguments");
+    }
+    let (width, signed) = wsig(*args.add(1));
+    narrow_value_of(*args, width as u8, signed, "rt_narrow_value")
+}
+
+/// The shared body of [`rt_narrow_value`] and the five `rt_sexpr_*`
+/// accessors: decode, insist on this exact type, hand back the word.
+///
+/// # Safety
+///
+/// A `Heap` must already be registered on this thread.
+unsafe fn narrow_value_of(v: i64, width: u8, signed: bool, who: &str) -> i64 {
+    match decode(v) {
+        Value::Boxed(id) => match active_heap().narrow_box(id) {
+            Some(n) if n.width == width && n.signed == signed => n.value,
+            _ => fatal(&format!("{who}: argument is not a boxed {}{width}", if signed { "i" } else { "u" })),
+        },
+        _ => fatal(&format!("{who}: argument is not a boxed {}{width}", if signed { "i" } else { "u" })),
+    }
+}
+
+/// `(sexpr-i8 x)` and its four siblings: the typed payload extractors for
+/// the narrow-integer `Sexpr` variants, alongside `sexpr-i32`/`sexpr-f64`/
+/// `sexpr-f32` above. One shim per type rather than one taking a `wsig`,
+/// because a builtin accessor is called with exactly its own arguments and
+/// the type is in the *name* — `compile-call`'s rename table
+/// (`compile::externs`) maps each name to its own symbol.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`;
+/// a `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_i8(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_i8: expected 1 argument");
+    }
+    narrow_value_of(*args, 8, true, "rt_sexpr_i8")
+}
+
+/// [`rt_sexpr_i8`] for `i16`.
+///
+/// # Safety
+///
+/// Same as [`rt_sexpr_i8`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_i16(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_i16: expected 1 argument");
+    }
+    narrow_value_of(*args, 16, true, "rt_sexpr_i16")
+}
+
+/// [`rt_sexpr_i8`] for `u8`.
+///
+/// # Safety
+///
+/// Same as [`rt_sexpr_i8`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_u8(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_u8: expected 1 argument");
+    }
+    narrow_value_of(*args, 8, false, "rt_sexpr_u8")
+}
+
+/// [`rt_sexpr_i8`] for `u16`.
+///
+/// # Safety
+///
+/// Same as [`rt_sexpr_i8`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_u16(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_u16: expected 1 argument");
+    }
+    narrow_value_of(*args, 16, false, "rt_sexpr_u16")
+}
+
+/// [`rt_sexpr_i8`] for `u32`.
+///
+/// # Safety
+///
+/// Same as [`rt_sexpr_i8`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_u32(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_u32: expected 1 argument");
+    }
+    narrow_value_of(*args, 32, false, "rt_sexpr_u32")
+}
+
 /// Discriminates the numeric boxed `Sexpr` kinds that share `TAG_BOXED`'s
 /// one tag: `1` for a boxed `f64`, `4` for a boxed `f32`, `2` for a bignum,
-/// `3` for a ratio, `0` for everything else — *including* non-boxed values, so it's total over
+/// `3` for a ratio, `5`/`6`/`7`/`8`/`9` for a boxed `i8`/`i16`/`u8`/`u16`/
+/// `u32`, `0` for everything else — *including* non-boxed values, so it's total over
 /// every tagged word and `compile-sexpr-tag-test` can call it without a
 /// prior tag check (a `kind == 1` result already implies `TAG_BOXED`).
 /// `args[0]` is a tagged `Sexpr` value, like [`rt_f64_value`]'s.
@@ -540,6 +679,18 @@ pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
                 2
             } else if heap.is_ratio(id) {
                 3
+            } else if let Some(n) = heap.narrow_box(id) {
+                // The five narrow integer types get five numbers, not one:
+                // this is the test `compile-sexpr-tag-test` uses to decide
+                // which `Sexpr` variant a box is, and a `u8` and a `u16` are
+                // different variants.
+                match (n.width, n.signed) {
+                    (8, true) => 5,
+                    (16, true) => 6,
+                    (8, false) => 7,
+                    (16, false) => 8,
+                    _ => 9,
+                }
             } else {
                 0
             }
@@ -2864,17 +3015,11 @@ fn wsig(code: i64) -> (u32, bool) {
 }
 
 /// `v` cut back to `width` bits and re-extended into the 64-bit word compiled
-/// code carries every integer in — the runtime half of
-/// `types::normalize_int`, spelled here because this crate sits below the
-/// checker.
-fn normalize(v: i64, width: u32, signed: bool) -> i64 {
-    let sh = 64 - width;
-    if signed {
-        (v << sh) >> sh
-    } else {
-        (((v as u64) << sh) >> sh) as i64
-    }
-}
+/// code carries every integer in.
+///
+/// One statement of the invariant, in `typelisp-mem` (below both this crate
+/// and the checker), rather than a copy here that could drift from it.
+use typelisp_mem::normalize_int as normalize;
 
 /// Integer division `a / b` at the receiver's width — the compiled-code half
 /// of `/`, which (unlike `+`/`-`/`*`) can't be a bare LLVM instruction

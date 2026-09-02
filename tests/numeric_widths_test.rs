@@ -116,12 +116,20 @@ fn arithmetic_wraps_at_the_types_own_width() {
     assert_eq!(show(r#"(format false "~a" (ash (the u16 1) 20))"#), "0");
 }
 
-/// `f32` is binary32, not a label on an `f64`.
+/// `f32` is binary32, not a label on an `f64` — in the arithmetic *and* in
+/// the printing.
+///
+/// These three used to read `0.3333333432674408` and `0.10000000149011612`:
+/// the arithmetic was already binary32, but every float went into one
+/// `BoxedObj::Float` that could not say which width it held, so the printer
+/// had no choice but to print binary64's shortest round-trip digits for a
+/// number that is not a binary64 value. Splitting the box (`Float32`/
+/// `Float64`) is what makes the text read back as the same `f32`.
 #[test]
 fn f32_arithmetic_rounds_to_binary32() {
-    assert_eq!(show(r#"(format false "~a" (/ (the f32 1.0) (the f32 3.0)))"#), "0.3333333432674408");
+    assert_eq!(show(r#"(format false "~a" (/ (the f32 1.0) (the f32 3.0)))"#), "0.33333334");
     assert_eq!(show(r#"(format false "~a" (/ 1.0 3.0))"#), "0.3333333333333333");
-    assert_eq!(show(r#"(format false "~a" (as f32 0.1))"#), "0.10000000149011612");
+    assert_eq!(show(r#"(format false "~a" (as f32 0.1))"#), "0.1");
     // `try-as` reports whether the rounding lost anything.
     assert_eq!(
         show(r#"(format false "~a" (match (try-as f32 0.1) ((some _) "some") ((none) "none")))"#),

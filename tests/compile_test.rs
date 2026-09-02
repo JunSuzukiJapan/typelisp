@@ -214,10 +214,13 @@ fn run_and_read<R>(src: &str, capacity: usize, f: impl FnOnce(&Heap, Value) -> R
 enum Readback {
     Bignum(String),
     Ratio(String, String),
-    /// An `f64`, compared exactly. Two runs of the same computation are
-    /// deterministic, so a tolerance would only hide a real divergence; the
-    /// tests that *do* want one read the number out with [`run_f64`].
-    Float(f64),
+    /// A float, compared exactly *and at its own width*. Two runs of the
+    /// same computation are deterministic, so a tolerance would only hide a
+    /// real divergence; the tests that *do* want one read the number out
+    /// with [`run_f64`]. One case per width, so that an `f32` result and an
+    /// `f64` result can never compare equal by being widened to meet.
+    F32(f32),
+    F64(f64),
     Str(String),
     /// A result that `RtValue` still carries by value — `Int`, `Bool`,
     /// `Unit`.
@@ -233,7 +236,14 @@ fn run_readback(src: &str) -> Result<Readback, EvalError> {
             let r = h.ratio_value(id);
             Readback::Ratio(r.numer().to_string(), r.denom().to_string())
         }
-        typelisp::Value::Boxed(id) if h.is_float(id) => Readback::Float(h.float_value(id)),
+        // Read as the width the box actually is, and *kept* as that width:
+        // an `f32` compared as an `f64` would compare the widened number,
+        // which is the comparison this reader exists to make honest.
+        typelisp::Value::Boxed(id) if h.float_box(id).is_some() => match h.float_box(id) {
+            Some(typelisp::FloatBox::F32(f)) => Readback::F32(f),
+            Some(typelisp::FloatBox::F64(f)) => Readback::F64(f),
+            None => unreachable!("guarded by float_box above"),
+        },
         typelisp::Value::Str(id) => Readback::Str(h.string(id).to_string()),
         // Any *other* heap box is a value this reader cannot compare across
         // heaps, so it must fail loudly rather than silently compare box ids
@@ -252,7 +262,7 @@ fn run_readback(src: &str) -> Result<Readback, EvalError> {
 /// rather than exact equality.
 fn run_f64(src: &str) -> f64 {
     match run_readback(src).expect("eval failed") {
-        Readback::Float(f) => f,
+        Readback::F64(f) => f,
         other => panic!("expected an f64, got {:?}", other),
     }
 }
@@ -308,14 +318,14 @@ fn a_freshly_built_module_verifies_successfully() {
 
 /// The self-hosted compiler body (`src/compiler.rs`'s `compile-value`/
 /// `compile-function`) compiling the exact shape `ast_bridge::ast_to_sexpr`
-/// produces for `Expr::Int` — `'(int 0 42)` here stands in for what the bridge
+/// produces for `Expr::Int` — `'(int-any-width 0 42)` here stands in for what the bridge
 /// would build from the real typed AST (the Rust-side `ast_bridge` unit
 /// tests already cover that translation in isolation; this covers the
 /// compiler body consuming it). No parameters, hence the empty `'()`.
 #[test]
 fn the_compiler_body_compiles_an_int_literal_node() {
     let ir = eval_string_with_compiler(
-        r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int 0 42)))"#,
+        r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int-any-width 0 42)))"#,
     );
     assert!(ir.contains("define i64 @answer"), "IR was:\n{}", ir);
     assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
@@ -371,7 +381,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
 #[test]
 fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
     let module = expect_llvm_module(eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int 0 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int-any-width 0 5))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
@@ -716,11 +726,11 @@ fn fnref_of_a_variadic_function_forwards_the_rest_list() {
         r#"
         (defun target ((a i32) &rest (xs i32)) i32
           (match (sexpr-car xs)
-            ((int n) n)
+            ((i32 n) n)
             (_ -1)))
         (defun run-it () i32
           (let ((f target))
-            (apply f 1 (sexpr-cons (Int 10) (Int 20)))))
+            (apply f 1 (sexpr-cons (i32 10) (i32 20)))))
         (compile target)
         (compile run-it)
         (run-it)
@@ -1258,7 +1268,7 @@ fn compile_applies_an_interpreted_closure_handed_to_a_compiled_function() {
 ///
 /// The word itself says nothing about which of the two it is — that is the
 /// whole reason `BoxedObj::Closure` carries its own `params`/`ret`. Deciding
-/// by the value's shape instead is the mistake `(which (Float 1.5))` caught
+/// by the value's shape instead is the mistake `(which (f64 1.5))` caught
 /// when `f64` unified into one value world.
 #[test]
 fn an_interpreted_closure_called_from_compiled_code_crosses_tagged_values() {
@@ -1268,7 +1278,7 @@ fn an_interpreted_closure_called_from_compiled_code_crosses_tagged_values() {
           (lambda ((x Option<Sexpr>)) Option<Sexpr> (sexpr-cons x tail)))
         (defun apply-fn ((f (fn (Option<Sexpr>) Option<Sexpr>)) (v Option<Sexpr>)) Option<Sexpr> (f v))
         (compile apply-fn)
-        (sexpr-int (sexpr-car (apply-fn (consr (Int 2)) (Int 1))))
+        (sexpr-i32 (sexpr-car (apply-fn (consr (i32 2)) (i32 1))))
         "#,
     );
     assert_eq!(v, Value::Int(1));
@@ -1303,7 +1313,7 @@ fn an_interpreted_closure_held_by_compiled_code_survives_gc_pressure() {
         (defun outer ((f (fn (i32) i32)) (x i32)) i32
           (let ((ignored (loop
                            (if (eq x 0) (break) ())
-                           (sexpr-cons (Int 0) (Int 0))
+                           (sexpr-cons (i32 0) (i32 0))
                            (setf x (- x 1)))))
             (f 5)))
         (compile outer)
@@ -1433,7 +1443,7 @@ fn compile_dispatches_a_defstruct_field_of_fn_type_to_native_code() {
 /// not found in the ordinary `env`, found instead in `fn-env`, so it gets
 /// boxed into a fresh `ClosureBox` on the spot (`build-make-closure`, the
 /// same builtin `compile-lambda` already uses). `(apply-indirect (var "f")
-/// (int 0 5))` then calls through that box, proving the boxing produced a
+/// (int-any-width 0 5))` then calls through that box, proving the boxing produced a
 /// genuinely callable closure, not just a value that type-checks.
 #[test]
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
@@ -1450,7 +1460,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_closure_new"))) ())
              (let ((ignored-apply (add-function m "rt_apply_any"))) ())
-             (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int 0 5)))))"#,
+             (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int-any-width 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
@@ -1487,7 +1497,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
              (let ((ignored-new (add-function m "rt_closure_new"))) ())
              (let ((ignored-apply (add-function m "rt_apply_any"))) ())
              (let ((ignored-push (add-function m "rt_push_sexpr_root"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "go" true) (0 int 0 5)))))"#,
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "go" true) (0 int-any-width 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
@@ -1638,7 +1648,7 @@ fn repeated_calls_through_a_captured_closure_survive_gc_pressure() {
             (labels ((go ((y i32)) i32 (cb y)))
               (let ((ignored (loop
                                (if (eq x 0) (break) ())
-                               (sexpr-cons (Int 0) (Int 0))
+                               (sexpr-cons (i32 0) (i32 0))
                                (setf x (- x 1)))))
                 (go 5)))))
         (compile make-adder)
@@ -1673,7 +1683,7 @@ fn an_escaping_lambdas_captured_closure_survives_gc_pressure() {
           (let ((wrapper (make-wrapper n)))
             (let ((ignored (loop
                              (if (eq count 0) (break) ())
-                             (sexpr-cons (Int 0) (Int 0))
+                             (sexpr-cons (i32 0) (i32 0))
                              (setf count (- count 1)))))
               (wrapper 7))))
         (compile make-adder)
@@ -1763,7 +1773,7 @@ fn compile_a_captured_cell_survives_gc_pressure_across_many_calls() {
         (defun pump ((c (fn () i32)) (n i32)) i32
           (let ((ignored (loop
                            (if (eq n 0) (break) ())
-                           (sexpr-cons (Int 0) (Int 0))
+                           (sexpr-cons (i32 0) (i32 0))
                            (setf n (- n 1)))))
             (c)))
         (defun run-it ((start i32) (n i32)) i32
@@ -1850,7 +1860,7 @@ fn let_shadowing_is_correctly_restored_after_the_let_ends() {
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . 0))
               '(assoc "i32" "+" true
-                 (0 let (((x . 0) . (int 0 99))) (var "x" false))
+                 (0 let (((x . 0) . (int-any-width 0 99))) (var "x" false))
                  (0 var "x" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -2085,7 +2095,7 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
 /// and `sexpr-consp`/`sexpr-car`/`sexpr-cdr` walking — all already compilable
 /// (`Sexpr` `match` support, plus the `sexpr-*` `rt_*` shims
 /// `is_rt_builtin_name` recognizes). So a `dolist`-using function compiles with
-/// no `dolist`-specific machinery: this sums the `(int n)` elements of a
+/// no `dolist`-specific machinery: this sums the `(i32 n)` elements of a
 /// `Sexpr` list argument entirely in native code (the quoted list is built by
 /// the tree-walking interpreter and handed to the compiled function), asserting
 /// the real total — not just that compilation succeeded — so a "compiles but
@@ -2099,7 +2109,7 @@ fn compile_dispatches_a_dolist_summing_a_sexpr_list() {
         (defun sum-list-ints ((lst Option<Sexpr>)) i32
           (let ((acc (the i32 0)))
             (dolist (x lst acc)
-              (match x ((int n) (setf acc (+ acc n)) ()) (_ ())))))
+              (match x ((i32 n) (setf acc (+ acc n)) ()) (_ ())))))
         (compile not)
         (compile sum-list-ints)
         (sum-list-ints (quote (1 2 3 4 5)))
@@ -2112,7 +2122,7 @@ fn compile_dispatches_a_dolist_summing_a_sexpr_list() {
     }
 }
 
-/// `build-shl`/`build-ashr` round-trip a `Sexpr::Int` fixnum through the
+/// `build-shl`/`build-ashr` round-trip a `Sexpr::i32` fixnum through the
 /// planned tagged representation (`docs/TODO.md`'s tag table: tag `000`,
 /// payload in the upper 61 bits) — *arithmetic*, not logical, right shift,
 /// so a negative payload's sign survives untagging. No `ast_bridge`/
@@ -2197,7 +2207,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
 
 // ---- Stage 6 of the Sexpr-representation plan: Construct/FieldGet/FieldSet --
 
-/// `Expr::Construct` over `Sexpr` itself: `(Int n)`/`(Bool b)`/`()` all
+/// `Expr::Construct` over `Sexpr` itself: `(i32 n)`/`(Bool b)`/`()` all
 /// compile to `compile-construct-sexpr`'s pure bit-tagging path (no heap
 /// allocation at all), round-tripping through `Expr::Call`'s existing
 /// `Sexpr` decode step (Stage 5) with no further bridging needed. Every
@@ -2216,7 +2226,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
 fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun make-int ((n i32)) Sexpr (Int n))
+        (defun make-int ((n i32)) Sexpr (i32 n))
         (compile make-int)
         (make-int 42)
         "#,
@@ -2285,7 +2295,7 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_
           (let ((s (append "hello" " world")))
             (let ((ignored (loop
                              (if (eq n 0) (break) ())
-                             (sexpr-cons (Int 0) (Int 0))
+                             (sexpr-cons (i32 0) (i32 0))
                              (setf n (- n 1)))))
               (length s))))
         (compile str-survives-gc)
@@ -3138,7 +3148,7 @@ fn compile_let_does_not_emit_instructions_after_an_early_return_from_its_body() 
         r#"
         (defun make-thing () i32
           (loop
-            (let ((s (sexpr-cons (Int 1) (Int 2))))
+            (let ((s (sexpr-cons (i32 1) (i32 2))))
               (return 42))))
         (compile make-thing)
         (make-thing)
@@ -3191,7 +3201,7 @@ fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_firs
         (compile trivial)
         (defun leaky-inner () i32
           (loop
-            (let ((s (sexpr-cons (Int 1) (Int 2))))
+            (let ((s (sexpr-cons (i32 1) (i32 2))))
               (return 7))))
         (compile leaky-inner)
         "#;
@@ -3627,11 +3637,11 @@ fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
         r#"
         (defun f ((s Option<Sexpr>)) i32
           (match s
-            ((int n) n)
-            ((cons (int a) _) a)
+            ((i32 n) n)
+            ((cons (i32 a) _) a)
             (_ 0)))
         (compile f)
-        (+ (f (Int 40)) (f (sexpr-cons (Int 2) (Str "tail"))))
+        (+ (f (i32 40)) (f (sexpr-cons (i32 2) (Str "tail"))))
         "#,
     );
     assert_eq!(v, Value::Int(42));
@@ -3650,8 +3660,8 @@ fn compile_of_a_user_function_literally_named_rt_cons_does_not_collide_with_the_
         (defun rt_cons ((a i32) (b i32)) i32 (+ a b))
         (compile rt_cons)
         (defun cons-and-extract () i32
-          (match (sexpr-cons (Int 5) (Int 9))
-            ((cons (int x) (int y)) (+ x y))
+          (match (sexpr-cons (i32 5) (i32 9))
+            ((cons (i32 x) (i32 y)) (+ x y))
             (_ 0)))
         (compile cons-and-extract)
         (+ (rt_cons 3 4) (cons-and-extract))
@@ -3665,24 +3675,92 @@ fn compile_of_a_user_function_literally_named_rt_cons_does_not_collide_with_the_
 
 /// The three numeric boxed variants share `TAG_BOXED`, so their arms dispatch
 /// through `rt_box_kind` — a bignum/ratio scrutinee must *not* take a
-/// preceding `(float _)` arm even though it carries the same 3-bit tag.
+/// preceding `(f64 _)` arm even though it carries the same 3-bit tag.
 #[test]
 fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
     let v = eval_ok_with_compiler(
         r#"
         (defun which ((s Sexpr)) i32
           (match s
-            ((float _) 1)
+            ((f64 _) 1)
             ((bignum _) 2)
             ((ratio _) 3)
             (_ 0)))
         (compile which)
-        (+ (+ (which (Float 1.5))
+        (+ (+ (which (f64 1.5))
               (* (the i32 10) (which (Bignum 99999999999999999999999999))))
            (* (the i32 100) (which (Ratio 2/3))))
         "#,
     );
     assert_eq!(v, Value::Int(321));
+}
+
+/// Compiled code tells the six integer widths apart inside a `Sexpr`, and
+/// round-trips each one's value back out.
+///
+/// Both halves are new machinery: `compile-construct-sexpr` boxes through
+/// `rt_narrow_new` with a `wsig` constant taken from the *variant*, and
+/// `compile-sexpr-tag-test` asks `rt_box_kind` which box it got. Neither can
+/// be derived from the value — `100` is the same machine word in all six
+/// types — which is exactly why the box exists.
+#[test]
+fn compile_match_distinguishes_every_integer_width_in_a_sexpr() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun tag ((s Option<Sexpr>)) i32
+          (match s
+            ((i8 _) 1) ((i16 _) 2) ((i32 _) 3)
+            ((u8 _) 4) ((u16 _) 5) ((u32 _) 6)
+            (_ 0)))
+        (compile tag)
+        (+ (+ (+ (tag (i8 100)) (* 10 (tag (i16 100))))
+              (+ (* 100 (tag (i32 100))) (* 1000 (tag (u8 100)))))
+           (+ (* 10000 (tag (u16 100))) (* 100000 (tag (u32 100)))))
+        "#,
+    );
+    // One digit per width, so a wrong arm shows up as a wrong digit rather
+    // than as a plausible total.
+    assert_eq!(v, Value::Int(654_321));
+}
+
+/// The payload comes back out of a compiled narrow-integer arm, at its own
+/// width — including a `u32` past `i32`'s range, which is the value the old
+/// single `int` variant genuinely corrupted rather than merely mislabelled.
+#[test]
+fn compile_extracts_a_narrow_integer_payload_at_its_own_width() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun small ((s Option<Sexpr>)) i32
+          (match s ((u8 n) (as i32 n)) (_ -1)))
+        (defun big ((s Option<Sexpr>)) u32
+          (match s ((u32 n) n) (_ 0)))
+        (compile small)
+        (compile big)
+        (+ (small (u8 200)) (as i32 (- (big (u32 4000000000)) (the u32 3999999000))))
+        "#,
+    );
+    // 200 + (4000000000 - 3999999000) = 200 + 1000.
+    assert_eq!(v, Value::Int(1200));
+}
+
+/// A compiled `match` on an `f32` node takes the `f32` arm and not the `f64`
+/// one.
+///
+/// The two share `TAG_BOXED` *and* the same bit pattern in a register, so
+/// only `rt_box_kind` can tell them apart. `compile-sexpr-tag-test` had no
+/// arm for the `f32` variant at all when it was added, which made this
+/// dispatch a `panic` in the compiler rather than a wrong answer at run time.
+#[test]
+fn compile_match_distinguishes_the_two_float_widths() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun which ((s Option<Sexpr>)) i32
+          (match s ((f32 _) 1) ((f64 _) 2) (_ 0)))
+        (compile which)
+        (+ (which (f32 1.5)) (* 10 (which (f64 1.5))))
+        "#,
+    );
+    assert_eq!(v, Value::Int(21));
 }
 
 /// Tag-only dispatch covers every variant, including `sym`.
@@ -3772,7 +3850,7 @@ fn compile_and_interpret_agree_on_a_sexpr_match() {
             r#"
             (defun sum ((s Option<Sexpr>)) i32
               (match s
-                ((cons (int n) rest) (+ n (sum rest)))
+                ((cons (i32 n) rest) (+ n (sum rest)))
                 (_ 0)))
             {}
             (sum (quote (1 2 3 4)))
@@ -4163,7 +4241,7 @@ fn compile_dispatches_a_user_defined_method_reified_as_a_value_to_native_code() 
 }
 
 /// `(quote (1 2 3))` compiles to the same `compile-construct-sexpr`
-/// machinery an ordinary `(Cons (Int 1) ...)` construction already uses
+/// machinery an ordinary `(Cons (i32 1) ...)` construction already uses
 /// (`ast_bridge::translate_quote`) — a compiled function can build a quoted
 /// literal, and an ordinary compiled `match`-based `sum` (already proven
 /// correct against `Sexpr` scrutinees elsewhere in this file) can consume it.
@@ -4172,7 +4250,7 @@ fn compile_dispatches_a_function_that_constructs_a_quoted_list_to_native_code() 
     let v = eval_ok_with_compiler(
         r#"
         (defun make-quoted () Option<Sexpr> (quote (1 2 3)))
-        (defun sum ((s Option<Sexpr>)) i32 (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
+        (defun sum ((s Option<Sexpr>)) i32 (match s ((cons (i32 n) rest) (+ n (sum rest))) (_ 0)))
         (compile make-quoted)
         (compile sum)
         (sum (make-quoted))
@@ -4187,7 +4265,7 @@ fn compile_dispatches_a_function_that_constructs_a_quoted_list_to_native_code() 
 fn compile_and_interpret_agree_on_a_quoted_list() {
     let prog = r#"
         (defun make-quoted () Option<Sexpr> (quote (1 2 3)))
-        (defun sum ((s Option<Sexpr>)) i32 (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
+        (defun sum ((s Option<Sexpr>)) i32 (match s ((cons (i32 n) rest) (+ n (sum rest))) (_ 0)))
     "#;
     let compiled = eval_ok_with_compiler(&format!("{}\n(compile make-quoted)\n(compile sum)\n(sum (make-quoted))", prog));
     let interpreted = eval_ok(&format!("{}\n(sum (make-quoted))", prog));
@@ -4714,11 +4792,11 @@ fn compile_dispatches_string_equalp() {
 // (`build-fsqrt`/.../`build-fpow`), and `float->int` to a single `fptosi`
 // instruction (`build-fptosi`). The JIT boundary encodes an `f64` argument as
 // its bits and decodes an `f64` result back (`Interp::call_compiled`) — an
-// `f64` is a `BoxedObj::Float` on the interpreter side since the scalar
+// `f64` is a `BoxedObj::Float64` on the interpreter side since the scalar
 // unification, but the compiled side still keeps one in a native register,
 // so the boundary is where the two representations meet.
 
-/// Float arithmetic returning an `f64` across the JIT boundary — exercises
+/// f64 arithmetic returning an `f64` across the JIT boundary — exercises
 /// `build-fadd`/`build-fsub`/`build-fmul`/`build-fdiv` and the `f64`
 /// argument/return marshaling.
 #[test]
@@ -4819,7 +4897,7 @@ fn compile_of_a_user_function_named_like_a_libm_symbol_does_not_collide() {
     assert_eq!(v, Value::Int(15));
 }
 
-/// Float comparisons lower to `build-fcmp-*` (ordered `<`/`<=`/`>`/`>=`/`=`,
+/// f64 comparisons lower to `build-fcmp-*` (ordered `<`/`<=`/`>`/`>=`/`=`,
 /// unordered `/=`) — a `bool` result crosses the boundary. Agrees with the
 /// interpreter for the same source.
 #[test]
@@ -4940,7 +5018,7 @@ fn compile_dispatches_f64_expt_and_agrees_with_the_interpreter() {
     "#;
     let interpreted = run_readback(&format!("{src}\n(power 2.0 10.0)")).expect("interpreted failed");
     let compiled = run_readback(&format!("{src}\n(compile power)\n(power 2.0 10.0)")).expect("compiled failed");
-    assert_eq!(interpreted, Readback::Float(1024.0));
+    assert_eq!(interpreted, Readback::F64(1024.0));
     assert_eq!(compiled, interpreted, "compiled expt agrees with the interpreter");
 }
 
@@ -5186,10 +5264,10 @@ fn compile_dispatches_sexpr_accessors_and_agrees_with_the_interpreter() {
         ("(defun f ((s Option<Sexpr>)) bool (sexpr-atom s))", "(f '(1 2))"),
         ("(defun f ((s Option<Sexpr>)) bool (sexpr-symp s))", "(f 'hello)"),
         // Typed payload extractors.
-        ("(defun f ((s Option<Sexpr>)) i32 (sexpr-int (sexpr-car s)))", "(f '(42 43))"),
+        ("(defun f ((s Option<Sexpr>)) i32 (sexpr-i32 (sexpr-car s)))", "(f '(42 43))"),
         ("(defun f ((s Option<Sexpr>)) bool (sexpr-bool (sexpr-car s)))", "(f '(true))"),
         ("(defun f ((s Option<Sexpr>)) char (sexpr-char (sexpr-car s)))", r#"(f '(#\A #\B))"#),
-        ("(defun f ((s Option<Sexpr>)) f64 (sexpr-float (sexpr-car s)))", "(f '(2.5))"),
+        ("(defun f ((s Option<Sexpr>)) f64 (sexpr-f64 (sexpr-car s)))", "(f '(2.5))"),
         ("(defun f ((s Option<Sexpr>)) string (sexpr-str (sexpr-car s)))", r#"(f '("hi"))"#),
         ("(defun f ((s Option<Sexpr>)) string (sexpr-sym-name (sexpr-car s)))", "(f '(hello))"),
     ];
@@ -5902,7 +5980,7 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
 /// node, which is a later stage. Only the *body* is bridged here.
 #[test]
 fn the_island_compiles_a_body_the_new_bridge_produced() {
-    let body = bridge_to_island_text("(assoc i32 + true () int (int int) \"i32\" (var a) (var b))");
+    let body = bridge_to_island_text("(assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))");
     // The bridge reproduces exactly the text the hand-written test above
     // feeds `compile-function` — the two are checked against each other here
     // rather than only against the island, so a change to either is visible.
@@ -5932,9 +6010,9 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
 #[test]
 fn the_island_compiles_a_bridged_let_and_if() {
     let body = bridge_to_island_text(
-        "(let ((d int (assoc i32 - true () int (int int) \"i32\" (var a) (var b))))
-           (if (assoc i32 < true () bool (int int) \"bool\" (var d) (int 0))
-               (assoc i32 - true () int (int int) \"i32\" (int 0) (var d))
+        "(let ((d int-any-width (assoc i32 - true () int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))))
+           (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var d) (int-any-width 0))
+               (assoc i32 - true () int-any-width (int-any-width int-any-width) \"i32\" (int-any-width 0) (var d))
                (var d)))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&format!(
@@ -5985,13 +6063,13 @@ fn compile_function_source(name: &str, params: &str, body: &str) -> String {
 /// LLVM validated the module that came out.
 #[test]
 fn the_island_accepts_a_bridged_construct_field_and_match() {
-    let defs = ["(defstruct point (int int))", "(defenum maybe-int (none some) (() (int)))"];
+    let defs = ["(defstruct point (int-any-width int-any-width))", "(defenum maybe-int (none some) (() (int-any-width)))"];
     let body = bridge_to_island_text_with(
         &defs,
-        "(let ((p struct (construct point \"point\" 0 true (int int) (var a) (var b))))
-           (match (construct maybe-int \"maybe-int\" 1 false (int) (field-get (var p) 1 int)) enum
-             ((pat-ctor maybe-int \"maybe-int\" 0 false ()) (int -1))
-             ((pat-ctor maybe-int \"maybe-int\" 1 false (int) (pat-bind x)) (var x))))",
+        "(let ((p struct (construct point \"point\" 0 true (int-any-width int-any-width) (var a) (var b))))
+           (match (construct maybe-int \"maybe-int\" 1 false (int-any-width) (field-get (var p) 1 int-any-width)) enum
+             ((pat-ctor maybe-int \"maybe-int\" 0 false ()) (int-any-width -1))
+             ((pat-ctor maybe-int \"maybe-int\" 1 false (int-any-width) (pat-bind x)) (var x))))",
     );
     let src = compile_function_source("second", "((a . 0) (b . 0))", &body);
     let ir = eval_string_with_compiler(&format!("(to-string {})", src));
@@ -6019,13 +6097,13 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
 #[test]
 fn the_island_runs_a_bridged_loop() {
     let body = bridge_to_island_text(
-        "(let ((acc int (int 0)) (i int (int 0)))
+        "(let ((acc int-any-width (int-any-width 0)) (i int-any-width (int-any-width 0)))
            (loop
-             (if (assoc i32 < true () bool (int int) \"bool\" (var i) (var b))
+             (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var i) (var b))
                  (unit)
                  (break))
-             (set acc (assoc i32 + true () int (int int) \"i32\" (var acc) (var a)))
-             (set i (assoc i32 + true () int (int int) \"i32\" (var i) (int 1))))
+             (set acc (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var a)))
+             (set i (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var i) (int-any-width 1))))
            (var acc))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
@@ -6058,13 +6136,13 @@ fn the_island_runs_a_bridged_loop() {
 #[test]
 fn the_island_runs_a_bridged_labels_block() {
     let body = bridge_to_island_text(
-        "(labels ((go ((n int) (acc int)) int
-                    (if (assoc i32 < true () bool (int int) \"bool\" (var n) (int 1))
+        "(labels ((go ((n int-any-width) (acc int-any-width)) int-any-width
+                    (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var n) (int-any-width 1))
                         (var acc)
-                        (apply (var go) int (int int)
-                          (assoc i32 - true () int (int int) \"i32\" (var n) (int 1))
-                          (assoc i32 * true () int (int int) \"i32\" (var acc) (var n))))))
-           (apply (var go) int (int int) (var a) (int 1)))",
+                        (apply (var go) int-any-width (int-any-width int-any-width)
+                          (assoc i32 - true () int-any-width (int-any-width int-any-width) \"i32\" (var n) (int-any-width 1))
+                          (assoc i32 * true () int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var n))))))
+           (apply (var go) int-any-width (int-any-width int-any-width) (var a) (int-any-width 1)))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
         "fact",
@@ -6098,9 +6176,9 @@ fn the_island_runs_a_bridged_labels_block() {
 #[test]
 fn the_island_accepts_a_bridged_escaping_closure() {
     let body = bridge_to_island_text(
-        "(let ((n int (var a)))
-           (let ((f fn (lambda ((x int)) int (assoc i32 + true () int (int int) \"i32\" (var x) (var n)))))
-             (apply (var f) int (int) (int 1))))",
+        "(let ((n int-any-width (var a)))
+           (let ((f fn (lambda ((x int-any-width)) int-any-width (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var x) (var n)))))
+             (apply (var f) int-any-width (int-any-width) (int-any-width 1))))",
     );
     // The capture really is a cell on both sides of the boundary.
     assert!(body.contains("(n . 11)"), "the captured binding should be a cell: {}", body);
@@ -6163,10 +6241,10 @@ fn the_island_runs_a_whole_bridged_defun() {
     let form = r
         .read_all(
             &mut h,
-            "(defun m::clamp ((x int) (lo int) (hi int)) int true
-               (if (assoc i32 < true () bool (int int) \"bool\" (var x) (var lo))
+            "(defun m::clamp ((x int-any-width) (lo int-any-width) (hi int-any-width)) int-any-width true
+               (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var x) (var lo))
                    (var lo)
-                   (if (assoc i32 < true () bool (int int) \"bool\" (var hi) (var x))
+                   (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var hi) (var x))
                        (var hi)
                        (var x))))",
         )
@@ -6292,7 +6370,7 @@ fn an_interpreted_callee_of_compiled_code_still_returns_normally() {
 /// (`Checker::wrap_rest_elem`), and that wrap used to skip the constructor
 /// entirely for any type `is_heap_repr` calls heap-resident — which `f64` is,
 /// *in the interpreter*, where an `f64` is a `BoxedObj::Float` and therefore
-/// already a `Sexpr::Float`. A compiled `f64` is neither boxed nor tagged: it
+/// already a `Sexpr::f64`. A compiled `f64` is neither boxed nor tagged: it
 /// is the raw `f64::to_bits` pattern, whose low three bits read as the `Int`
 /// tag, so the printer rendered `to_bits(x) >> 3` — a large integer — instead
 /// of the number. The interpreted run got it right, which is what made the

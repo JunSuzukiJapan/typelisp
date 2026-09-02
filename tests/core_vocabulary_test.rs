@@ -17,7 +17,8 @@
 //! On its own this property is weak, and it is worth saying why rather than
 //! letting it look stronger than it is: *any* well-formed s-expression round
 //! trips. It says nothing about whether these are the right tags. Changing an
-//! example from `(int 42)` to `(int 43)` — or to a tag that does not exist —
+//! example from `(int-any-width 42)` to `(int-any-width 43)` — or to a tag that
+//! does not exist —
 //! still passes.
 //!
 //! **2. The vocabulary is closed.** Every tag used above appears in one
@@ -48,7 +49,8 @@
 //! The old bridge read all of these off the `Type` hanging on each AST node.
 //! Nothing downstream of the checker has a `Type` any more, so each one is
 //! written into the form instead — as a repr list beside the argument list
-//! (`(call (f) () f (int int) (int 1) (int 2))`), the same parallel-list idiom
+//! (`(call (f) () f (int-any-width int-any-width) (int-any-width 1)
+//! (int-any-width 2))`), the same parallel-list idiom
 //! `defstruct`/`defenum` already use, rather than as a wrapper around every
 //! argument.
 //!
@@ -116,11 +118,11 @@ fn record_tags(src: &str) {
 #[test]
 fn literals() {
     all_round_trip(&[
-        "(int 42)",
-        "(int -7)",
-        "(float 1.5)",
-        // Keeps its point, so it is not the same form as `(int 1)`.
-        "(float 1.0)",
+        "(int-any-width 42)",
+        "(int-any-width -7)",
+        "(float-any-width 1.5)",
+        // Keeps its point, so it is not the same form as `(int-any-width 1)`.
+        "(float-any-width 1.0)",
         "(bignum 123456789012345678901234567890)",
         "(ratio 1/3)",
         r"(char #\a)",
@@ -149,13 +151,13 @@ fn literals() {
 fn variables_and_globals() {
     all_round_trip(&[
         "(var x)",
-        "(set x (int 1))",
+        "(set x (int-any-width 1))",
         // Written `counter`, in module `m`, resolved to `m::counter`, an int.
-        "(global (counter) (m) m::counter int)",
+        "(global (counter) (m) m::counter int-any-width)",
         // A root-module global: `home` is the empty list, because the root has
         // zero segments and so cannot be spelled as a `Path`.
         "(global (n) () n sexpr)",
-        "(set-global (counter) (m) m::counter int (int 5))",
+        "(set-global (counter) (m) m::counter int-any-width (int-any-width 5))",
     ]);
 }
 
@@ -167,15 +169,15 @@ fn variables_and_globals() {
 #[test]
 fn binding_and_control() {
     all_round_trip(&[
-        "(let ((x int (int 1))) (var x))",
-        "(let ((x int (int 1)) (y sexpr (quote a))) (var y))",
+        "(let ((x int-any-width (int-any-width 1))) (var x))",
+        "(let ((x int-any-width (int-any-width 1)) (y sexpr (quote a))) (var y))",
         // progn
-        "(let () (int 1) (int 2))",
-        "(if (bool true) (int 1) (int 2))",
+        "(let () (int-any-width 1) (int-any-width 2))",
+        "(if (bool true) (int-any-width 1) (int-any-width 2))",
         "(loop (break))",
         "(break)",
         "(return)",
-        "(return (int 3))",
+        "(return (int-any-width 3))",
         r#"(panic (str "boom"))"#,
     ]);
 }
@@ -203,23 +205,23 @@ fn binding_and_control() {
 #[test]
 fn calls() {
     all_round_trip(&[
-        "(call (f) () f (int int) (int 1) (int 2))",
+        "(call (f) () f (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))",
         "(call (helper) (m) m::helper ())",
         // An instance method on `i32`, `true` meaning it takes a receiver,
         // returning an int, over two int arguments.
-        "(assoc i32 + true () int (int int) (var a) (var b))",
+        "(assoc i32 + true () int-any-width (int-any-width int-any-width) (var a) (var b))",
         // A static associated function: no receiver.
-        "(assoc point new false () struct (int int) (int 1) (int 2))",
+        "(assoc point new false () struct (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))",
         // A builtin whose result is what identifies it: an empty vector of
         // ints, which the bridge lowers to a `vector-op` rather than a method
         // call, because there is no compiled body to call.
-        "(assoc vector new false () (vector int) ())",
-        "(fnref (f) () f (int int))",
-        "(methodref point new () (int int))",
+        "(assoc vector new false () (vector int-any-width) ())",
+        "(fnref (f) () f (int-any-width int-any-width))",
+        "(methodref point new () (int-any-width int-any-width))",
         // The callee is a value, so the *return* representation rides on the
         // node — a compiled closure's result has no name to look a signature
         // up by. Then the argument representations, then the arguments.
-        "(apply (var g) int (int) (int 1))",
+        "(apply (var g) int-any-width (int-any-width) (int-any-width 1))",
         "(compile-fn (fn (f) () f))",
         "(compile-fn (method point new ()))",
     ]);
@@ -250,10 +252,10 @@ fn calls() {
 #[test]
 fn data() {
     all_round_trip(&[
-        "(construct point 0 false (int int) (int 1) (int 2))",
-        "(construct option 1 false (int) (int 9))",
-        "(field-get (var p) 0 int)",
-        "(field-set (var p) 1 int (int 5))",
+        "(construct point 0 false (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))",
+        "(construct option 1 false (int-any-width) (int-any-width 9))",
+        "(field-get (var p) 0 int-any-width)",
+        "(field-set (var p) 1 int-any-width (int-any-width 5))",
     ]);
 }
 
@@ -285,22 +287,22 @@ fn data() {
 #[test]
 fn patterns() {
     all_round_trip(&[
-        "(match (var v) sexpr ((pat-wild) (int 0)))",
+        "(match (var v) sexpr ((pat-wild) (int-any-width 0)))",
         // The empty list. Its own node rather than `Sexpr`'s variant 0:
         // the empty list outlives `nil` (docs/dev/null-elimination-plan.md).
-        "(match (var v) sexpr ((pat-empty) (int 0)) ((pat-wild) (int 1)))",
+        "(match (var v) sexpr ((pat-empty) (int-any-width 0)) ((pat-wild) (int-any-width 1)))",
         // `Option<Sexpr>`'s `(some P)`: reject the empty list, then match
         // `P` against the same word (the niche makes them one value).
-        "(match (var v) sexpr ((pat-nonempty (pat-bind x)) (var x)) ((pat-empty) (int 0)))",
-        "(match (var v) int ((pat-bind x) (var x)))",
-        "(match (var v) sexpr ((pat-lit (int 1)) (int 10)) ((pat-wild) (int 0)))",
+        "(match (var v) sexpr ((pat-nonempty (pat-bind x)) (var x)) ((pat-empty) (int-any-width 0)))",
+        "(match (var v) int-any-width ((pat-bind x) (var x)))",
+        "(match (var v) sexpr ((pat-lit (int-any-width 1)) (int-any-width 10)) ((pat-wild) (int-any-width 0)))",
         // A value pattern: the test is an ordinary expression — here the
         // `equals` call a `"a"` literal pattern lowers to — and the symbol is
         // the name that expression reads the value under test through.
-        r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true () bool (str str) (var $match-scrut) (str "a"))) (int 1)) ((pat-wild) (int 0)))"#,
-        "(match (var v) enum ((pat-ctor option 0 false ()) (int 0)) ((pat-ctor option 1 false (int) (pat-bind x)) (var x)))",
+        r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true () bool (str str) (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
+        "(match (var v) enum ((pat-ctor option 0 false ()) (int-any-width 0)) ((pat-ctor option 1 false (int-any-width) (pat-bind x)) (var x)))",
         // A downcast arm, for matching a trait object against a concrete type.
-        "(match (var d) sexpr ((pat-ctor point 0 true (int int) (pat-bind p)) (var p)))",
+        "(match (var d) sexpr ((pat-ctor point 0 true (int-any-width int-any-width) (pat-bind p)) (var p)))",
         "(match (var d) sexpr ((pat-typetest point (pat-bind p)) (var p)))",
     ]);
     // Each pattern tag standalone as well: a pattern only ever appears nested
@@ -310,9 +312,9 @@ fn patterns() {
         "(pat-empty)",
         "(pat-nonempty (pat-bind x))",
         "(pat-bind x)",
-        "(pat-lit (int 1))",
+        "(pat-lit (int-any-width 1))",
         "(pat-guard $match-scrut (bool true))",
-        "(pat-ctor option 1 false (int) (pat-bind x))",
+        "(pat-ctor option 1 false (int-any-width) (pat-bind x))",
         "(pat-typetest point (pat-bind p))",
     ]);
 }
@@ -325,9 +327,9 @@ fn patterns() {
 #[test]
 fn functions() {
     all_round_trip(&[
-        "(lambda ((x int)) int (var x))",
+        "(lambda ((x int-any-width)) int-any-width (var x))",
         "(lambda () unit (unit))",
-        "(labels ((go ((i int)) int (var i))) (call (go) () go (int) (int 1)))",
+        "(labels ((go ((i int-any-width)) int-any-width (var i))) (call (go) () go (int-any-width) (int-any-width 1)))",
     ]);
 }
 
@@ -366,22 +368,22 @@ fn trait_objects() {
 #[test]
 fn top_level() {
     all_round_trip(&[
-        "(defun m::add ((a int) (b int)) int true (assoc i32 + true () int (int int) (var a) (var b)))",
+        "(defun m::add ((a int-any-width) (b int-any-width)) int-any-width true (assoc i32 + true () int-any-width (int-any-width int-any-width) (var a) (var b)))",
         "(defun m::nothing () unit false (unit))",
-        "(defmethod point area false ((self struct)) int true (field-get (var self) 0 int))",
+        "(defmethod point area false ((self struct)) int-any-width true (field-get (var self) 0 int-any-width))",
         // params, then whether it takes `&rest`, then the `&optional`/`&key`
         // structure, then `pub`, then the body.
         "(defmacro m::when (c body) true (1 () ()) false (quote ()))",
-        "(defvar m::counter int true true (int 0))",
+        "(defvar m::counter int-any-width true true (int-any-width 0))",
         // A struct publishes its fields' representations, which is where the
         // bridge reads a pattern's field kinds from.
-        "(defstruct point (int int))",
+        "(defstruct point (int-any-width int-any-width))",
         "(defenum m::color (red green blue) (() () ()))",
         "(defenum option (none some) (() (sexpr)))",
-        "(module m (defvar m::x int false false (int 1)))",
+        "(module m (defvar m::x int-any-width false false (int-any-width 1)))",
         "(use m::helper other::helper)",
         r#"(load "lib.typl")"#,
-        "(expr (int 42))",
+        "(expr (int-any-width 42))",
     ]);
 }
 
@@ -394,7 +396,7 @@ fn top_level() {
 /// unchanged, an `EXPR_ONLY` tag has to be translated into something the island
 /// knows, and a `TOP_LEVEL` tag never reaches the island at all.
 const SHARED_WITH_ISLAND: &[&str] = &[
-    "int", "float", "bignum", "ratio", "char", "bool", "str", "unit", "var", "set", "global",
+    "int-any-width", "float-any-width", "bignum", "ratio", "char", "bool", "str", "unit", "var", "set", "global",
     "set-global", "let", "lambda", "labels", "call", "assoc", "apply", "if", "loop", "break",
     "return", "panic", "match", "construct", "field-get", "field-set", "dyn-new", "dyn-upcast",
     "dyn-call", "dyn-value",
@@ -472,11 +474,11 @@ fn zz_the_vocabulary_is_closed() {
 /// the tag in `compiler::SOURCE` — so the accepted set can be read straight out
 /// of the source it is compiled from, with no guessing.
 ///
-/// The keys are bare symbols in clause-head position (`(int ...)`) since the
+/// The keys are bare symbols in clause-head position (`(int-any-width ...)`) since the
 /// dispatch compares tag *symbols* rather than their names, so the scan walks
 /// the `case` form by paren depth and takes the first token of each clause.
 /// It has now been through two shapes before this one — `(equal s "TAG")`
-/// across the whole SOURCE, then `("int" ...)` string keys — and both times it
+/// across the whole SOURCE, then `("int-any-width" ...)` string keys — and both times it
 /// was the `accepted.len() > 30` assertion below that caught the change rather
 /// than the test quietly passing on an empty set. Keep that assertion.
 ///

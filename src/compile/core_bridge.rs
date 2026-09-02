@@ -1247,7 +1247,7 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
     Ok(Some(f.finish("global-init")?))
 }
 
-/// `sexpr`'s own variant numbers, which a quoted datum is built out of./// `sexpr`'s own variant numbers, which a quoted datum is built out of.
+/// `sexpr`'s own variant numbers, which a quoted datum is built out of.
 ///
 /// Not a scheme of this module's: these are the variants of the built-in type
 /// (`registry::sexpr_def`), so `compile-construct-sexpr` builds each one the
@@ -2446,7 +2446,7 @@ fn repr_kind(heap: &Heap, form: Value, i: usize) -> Result<i64, Error> {
 /// across into the island.
 ///
 /// The half is the *bit pattern*, read back as a signed `i32`: the island's
-/// `sexpr-int` yields an `i32` (the language has no wider fixed-width integer
+/// `sexpr-i32` yields an `i32` (the language has no wider fixed-width integer
 /// — `types::Type::is_integer`), and a low half can be anything up to
 /// `0xFFFF_FFFF`, which no `i32` holds as a number. Reading it as a pattern
 /// costs nothing and loses nothing: `compile-int`/`compile-float` shift the
@@ -2608,15 +2608,15 @@ mod tests {
 
     /// A `point` with two int fields and an `option` over a `sexpr`, which is
     /// enough to show both a struct's and an enum's field kinds.
-    const DEFS: [&str; 2] = ["(defstruct point (int int))", "(defenum option (none some) (() (sexpr)))"];
+    const DEFS: [&str; 2] = ["(defstruct point (int-any-width int-any-width))", "(defenum option (none some) (() (sexpr)))"];
 
     #[test]
     fn the_word_sized_literals_pass_through_unchanged() {
-        assert_eq!(bridged("(int 42)"), "(int 0 42)");
+        assert_eq!(bridged("(int-any-width 42)"), "(int-any-width 0 42)");
         // Each half is a bit pattern read back as a signed `i32` (`half`),
         // so a negative literal's halves print negative rather than as the
         // 32-bit numbers they stand for.
-        assert_eq!(bridged("(int -7)"), "(int -1 -7)");
+        assert_eq!(bridged("(int-any-width -7)"), "(int-any-width -1 -7)");
         assert_eq!(bridged("(bool true)"), "(bool true)");
         assert_eq!(bridged(r"(char #\a)"), r"(char #\a)");
         assert_eq!(bridged("(unit)"), "(unit)");
@@ -2627,9 +2627,9 @@ mod tests {
     /// only ones set, so an untruncated word would decode as `0.0`.
     #[test]
     fn a_float_is_split_into_two_halves_that_reassemble() {
-        let printed = bridged("(float 2.0)");
+        let printed = bridged("(float-any-width 2.0)");
         let bits = 2.0f64.to_bits();
-        assert_eq!(printed, format!("(float {} {})", bits >> 32, bits & 0xFFFF_FFFF));
+        assert_eq!(printed, format!("(float-any-width {} {})", bits >> 32, bits & 0xFFFF_FFFF));
         // Neither half has anything in the top three bits the tag needs.
         for half in [bits >> 32, bits & 0xFFFF_FFFF] {
             assert_eq!((half as i64) << 3 >> 3, half as i64);
@@ -2638,7 +2638,7 @@ mod tests {
 
     #[test]
     fn a_string_becomes_one_node_per_character() {
-        assert_eq!(bridged(r#"(str "hi")"#), "(str (int 0 104) (int 0 105))");
+        assert_eq!(bridged(r#"(str "hi")"#), "(str (int-any-width 0 104) (int-any-width 0 105))");
         assert_eq!(bridged(r#"(str "")"#), "(str)");
     }
 
@@ -2650,9 +2650,9 @@ mod tests {
     /// Its digits are `0, 0, 1`, which also shows the ordering.
     #[test]
     fn a_bignum_becomes_its_sign_and_digits() {
-        assert_eq!(bridged("(bignum 18446744073709551616)"), "(bignum (int 0 1) (int 0 0) (int 0 0) (int 0 1))");
-        assert_eq!(bridged("(bignum -18446744073709551616)"), "(bignum (int -1 -1) (int 0 0) (int 0 0) (int 0 1))");
-        assert_eq!(bridged("(ratio 1/3)"), "(ratio (bignum (int 0 1) (int 0 1)) (bignum (int 0 1) (int 0 3)))");
+        assert_eq!(bridged("(bignum 18446744073709551616)"), "(bignum (int-any-width 0 1) (int-any-width 0 0) (int-any-width 0 0) (int-any-width 0 1))");
+        assert_eq!(bridged("(bignum -18446744073709551616)"), "(bignum (int-any-width -1 -1) (int-any-width 0 0) (int-any-width 0 0) (int-any-width 0 1))");
+        assert_eq!(bridged("(ratio 1/3)"), "(ratio (bignum (int-any-width 0 1) (int-any-width 0 1)) (bignum (int-any-width 0 1) (int-any-width 0 3)))");
     }
 
     #[test]
@@ -2665,25 +2665,25 @@ mod tests {
     #[test]
     fn a_let_carries_each_bindings_kind() {
         assert_eq!(
-            bridged("(let ((x int (int 1))) (var x))"),
-            r#"(let (((x . 0) int 0 1)) (var "x" false))"#
+            bridged("(let ((x int-any-width (int-any-width 1))) (var x))"),
+            r#"(let (((x . 0) int-any-width 0 1)) (var "x" false))"#
         );
         // A `sexpr` binding is the one that needs a GC root, hence kind 2.
         assert_eq!(
             bridged(r#"(let ((s sexpr (str "a"))) (var s))"#),
-            r#"(let (((s . 2) str (int 0 97))) (var "s" false))"#
+            r#"(let (((s . 2) str (int-any-width 0 97))) (var "s" false))"#
         );
         // `progn` is a `let` with no bindings, on both sides.
-        assert_eq!(bridged("(let () (int 1) (int 2))"), "(let () (int 0 1) (int 0 2))");
+        assert_eq!(bridged("(let () (int-any-width 1) (int-any-width 2))"), "(let () (int-any-width 0 1) (int-any-width 0 2))");
     }
 
     #[test]
     fn if_and_panic_keep_their_shape() {
         assert_eq!(
-            bridged("(if (bool true) (int 1) (int 2))"),
-            "(if false (bool true) (int 0 1) (int 0 2))"
+            bridged("(if (bool true) (int-any-width 1) (int-any-width 2))"),
+            "(if false (bool true) (int-any-width 0 1) (int-any-width 0 2))"
         );
-        assert_eq!(bridged(r#"(panic (str "boom"))"#), "(panic (str (int 0 98) (int 0 111) (int 0 111) (int 0 109)))");
+        assert_eq!(bridged(r#"(panic (str "boom"))"#), "(panic (str (int-any-width 0 98) (int-any-width 0 111) (int-any-width 0 111) (int-any-width 0 109)))");
     }
 
     /// Each argument becomes `(kind . form)`, and the kind is the argument's
@@ -2692,8 +2692,8 @@ mod tests {
     #[test]
     fn a_call_tags_every_argument_with_its_kind() {
         assert_eq!(
-            bridged("(call (f) () f (int sexpr) (int 1) (int 2))"),
-            r#"(call "tl_f" (0 int 0 1) (2 int 0 2))"#
+            bridged("(call (f) () f (int-any-width sexpr) (int-any-width 1) (int-any-width 2))"),
+            r#"(call "tl_f" (0 int-any-width 0 1) (2 int-any-width 0 2))"#
         );
         assert_eq!(bridged("(call (f) () f ())"), r#"(call "tl_f")"#);
         // A module-qualified callee mangles by its full path, so `m::inc` and
@@ -2718,11 +2718,11 @@ mod tests {
     #[test]
     fn an_ordinary_method_call_keeps_its_qualified_type_name() {
         assert_eq!(
-            bridged("(assoc i64 + true () int (int int) \"i64\" (var a) (var b))"),
-            r#"(assoc "i64" "+" true (0 var "a" false) (0 var "b" false))"#
+            bridged("(assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))"),
+            r#"(assoc "i32" "+" true (0 var "a" false) (0 var "b" false))"#
         );
         assert_eq!(
-            bridged("(assoc m::point area true () int (struct) \"i32\" (var p))"),
+            bridged("(assoc m::point area true () int-any-width (struct) \"i32\" (var p))"),
             r#"(assoc "m::point" "area" true (2 var "p" false))"#
         );
     }
@@ -2732,8 +2732,8 @@ mod tests {
     #[test]
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
-            bridged("(assoc vector get true () int ((vector int) int) \"i32\" (var v) (int 0))"),
-            r#"(vector-op "get" 1 (var "v" false) (int 0 0))"#
+            bridged("(assoc vector get true () int-any-width ((vector int-any-width) int-any-width) \"i32\" (var v) (int-any-width 0))"),
+            r#"(vector-op "get" 1 (var "v" false) (int-any-width 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
         assert_eq!(
@@ -2743,22 +2743,22 @@ mod tests {
         // `new` has no receiver and no element to tag; the result is what
         // says it is a vector at all.
         assert_eq!(
-            bridged("(assoc vector new false () (vector int) () \"vector<i32>\")"),
-            r#"(vector-op "new" 0 (str (int 0 118) (int 0 101) (int 0 99) (int 0 116) (int 0 111) (int 0 114) (int 0 60) (int 0 105) (int 0 51) (int 0 50) (int 0 62)))"#
+            bridged("(assoc vector new false () (vector int-any-width) () \"vector<i32>\")"),
+            r#"(vector-op "new" 0 (str (int-any-width 0 118) (int-any-width 0 101) (int-any-width 0 99) (int-any-width 0 116) (int-any-width 0 111) (int-any-width 0 114) (int-any-width 0 60) (int-any-width 0 105) (int-any-width 0 51) (int-any-width 0 50) (int-any-width 0 62)))"#
         );
     }
 
     #[test]
     fn a_hash_table_builtin_carries_both_key_and_value_kinds() {
         assert_eq!(
-            bridged("(assoc hashtable set true () unit ((hashtable str int) str int) \"()\" (var h) (var k) (var x))"),
+            bridged("(assoc hashtable set true () unit ((hashtable str int-any-width) str int-any-width) \"()\" (var h) (var k) (var x))"),
             r#"(hashtable-op "set" 6 1 () (var "h" false) (var "k" false) (var "x" false))"#
         );
         // `get` returns an `Option`, which the island builds itself and needs
         // the type-name literal for.
         assert_eq!(
-            bridged("(assoc hashtable get true () enum ((hashtable str int) str) \"option<i32>\" (var h) (var k))"),
-            r#"(hashtable-op "get" 6 1 (str (int 0 111) (int 0 112) (int 0 116) (int 0 105) (int 0 111) (int 0 110) (int 0 60) (int 0 105) (int 0 51) (int 0 50) (int 0 62)) (var "h" false) (var "k" false))"#
+            bridged("(assoc hashtable get true () enum ((hashtable str int-any-width) str) \"option<i32>\" (var h) (var k))"),
+            r#"(hashtable-op "get" 6 1 (str (int-any-width 0 111) (int-any-width 0 112) (int-any-width 0 116) (int-any-width 0 105) (int-any-width 0 111) (int-any-width 0 110) (int-any-width 0 60) (int-any-width 0 105) (int-any-width 0 51) (int-any-width 0 50) (int-any-width 0 62)) (var "h" false) (var "k" false))"#
         );
     }
 
@@ -2767,11 +2767,11 @@ mod tests {
     /// name strings.
     #[test]
     fn an_llvm_method_becomes_an_operation_id() {
-        let printed = bridged("(assoc llvm-builder const-word true () handle (handle int) \"llvm-value\" (var b) (int 42))");
+        let printed = bridged("(assoc llvm-builder const-word true () handle (handle int-any-width) \"llvm-value\" (var b) (int-any-width 42))");
         assert_eq!(
             printed,
             format!(
-                r#"(llvm-op {} (0 var "b" false) (0 int 0 42))"#,
+                r#"(llvm-op {} (0 var "b" false) (0 int-any-width 0 42))"#,
                 llvm_op_id("llvm-builder", "const-word")
             )
         );
@@ -2786,7 +2786,7 @@ mod tests {
         let printed = bridged("(assoc scope get true () enum ((scope handle) str) \"option<llvm-value>\" (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc scope get true () enum ((scope int) str) \"option<i32>\" (var e) (var n))"),
+            bridged("(assoc scope get true () enum ((scope int-any-width) str) \"option<i32>\" (var e) (var n))"),
             r#"(assoc "scope" "get" true (2 var "e" false) (2 var "n" false))"#
         );
     }
@@ -2799,18 +2799,18 @@ mod tests {
     #[test]
     fn a_construct_tags_its_fields_from_its_own_representations() {
         assert_eq!(
-            bridged_with(&DEFS, "(construct point \"point\" 0 true (int int) (int 1) (int 2))"),
-            r#"(construct false true (str (int 0 112) (int 0 111) (int 0 105) (int 0 110) (int 0 116)) 0 (1 int 0 1) (1 int 0 2))"#
+            bridged_with(&DEFS, "(construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
+            r#"(construct false true (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) 0 (1 int-any-width 0 1) (1 int-any-width 0 2))"#
         );
         // An enum field of `sexpr` is already tagged, hence the passthrough
         // kind 6.
         assert_eq!(
             bridged_with(&DEFS, "(construct option \"option<sexpr>\" 1 false (sexpr) (var x))"),
-            r#"(construct false false (str (int 0 111) (int 0 112) (int 0 116) (int 0 105) (int 0 111) (int 0 110) (int 0 60) (int 0 115) (int 0 101) (int 0 120) (int 0 112) (int 0 114) (int 0 62)) 1 (6 var "x" false))"#
+            r#"(construct false false (str (int-any-width 0 111) (int-any-width 0 112) (int-any-width 0 116) (int-any-width 0 105) (int-any-width 0 111) (int-any-width 0 110) (int-any-width 0 60) (int-any-width 0 115) (int-any-width 0 101) (int-any-width 0 120) (int-any-width 0 112) (int-any-width 0 114) (int-any-width 0 62)) 1 (6 var "x" false))"#
         );
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
-        assert_eq!(bridged_with(&DEFS, "(construct sexpr \"sexpr\" 7 false (sexpr sexpr) (int 1) (int 2))"), "(construct true false () 7 (int 0 1) (int 0 2))");
+        assert_eq!(bridged_with(&DEFS, "(construct sexpr \"sexpr\" 7 false (sexpr sexpr) (int-any-width 1) (int-any-width 2))"), "(construct true false () 7 (int-any-width 0 1) (int-any-width 0 2))");
     }
 
     /// A construct needs no definition on hand at all: the `MUTABLE` flag says
@@ -2818,8 +2818,8 @@ mod tests {
     #[test]
     fn a_construct_needs_no_definition_recorded() {
         assert_eq!(
-            bridged_with(&[], "(construct point \"point\" 0 true (int int) (int 1) (int 2))"),
-            r#"(construct false true (str (int 0 112) (int 0 111) (int 0 105) (int 0 110) (int 0 116)) 0 (1 int 0 1) (1 int 0 2))"#
+            bridged_with(&[], "(construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
+            r#"(construct false true (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) 0 (1 int-any-width 0 1) (1 int-any-width 0 2))"#
         );
     }
 
@@ -2828,7 +2828,7 @@ mod tests {
     /// kind.
     #[test]
     fn a_construct_whose_arity_disagrees_with_its_representations_is_refused() {
-        let e = refused_with(&DEFS, "(construct point \"point\" 0 true (int int) (int 1))");
+        let e = refused_with(&DEFS, "(construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1))");
         assert!(e.contains("has 2 fields, constructed with 1"), "{}", e);
     }
 
@@ -2839,7 +2839,7 @@ mod tests {
     /// wrong box shape.
     #[test]
     fn a_pattern_on_an_unrecorded_type_is_refused() {
-        let e = refused_with(&[], "(match (var v) struct ((pat-ctor point \"point\" 0 false (int int) (pat-wild) (pat-wild)) (int 1)))");
+        let e = refused_with(&[], "(match (var v) struct ((pat-ctor point \"point\" 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(e.contains("no definition recorded"), "{}", e);
     }
 
@@ -2848,11 +2848,11 @@ mod tests {
     /// narrowing primitive — but it can measure a list.
     #[test]
     fn a_field_access_encodes_its_index_as_a_list_length() {
-        assert_eq!(bridged("(field-get (var p) 0 int)"), r#"(field-get () 1 (var "p" false))"#);
+        assert_eq!(bridged("(field-get (var p) 0 int-any-width)"), r#"(field-get () 1 (var "p" false))"#);
         assert_eq!(bridged("(field-get (var p) 2 sexpr)"), r#"(field-get (false false) 6 (var "p" false))"#);
         assert_eq!(
-            bridged("(field-set (var p) 1 int (int 5))"),
-            r#"(field-set (false) 1 (var "p" false) (int 0 5))"#
+            bridged("(field-set (var p) 1 int-any-width (int-any-width 5))"),
+            r#"(field-set (false) 1 (var "p" false) (int-any-width 0 5))"#
         );
     }
 
@@ -2868,13 +2868,13 @@ mod tests {
     #[test]
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option \"option<sexpr>\" 0 false ()) (int 0)) ((pat-ctor option \"option<sexpr>\" 1 false (sexpr) (pat-bind x)) (var x)))"),
-            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int 0 0) ((pat-ctor 1 ((pat-bind "x")) 1 (6) false ()) var "x" false)) 2)"#
+            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option \"option<sexpr>\" 0 false ()) (int-any-width 0)) ((pat-ctor option \"option<sexpr>\" 1 false (sexpr) (pat-bind x)) (var x)))"),
+            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int-any-width 0 0) ((pat-ctor 1 ((pat-bind "x")) 1 (6) false ()) var "x" false)) 2)"#
         );
         // A struct scrutinee: pattern kind 2, and the field kinds come from
         // the `defstruct`.
         assert_eq!(
-            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor point \"point\" 0 false (int int) (pat-bind a) (pat-wild)) (var a)))"),
+            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor point \"point\" 0 false (int-any-width int-any-width) (pat-bind a) (pat-wild)) (var a)))"),
             r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a") (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
         );
     }
@@ -2885,8 +2885,8 @@ mod tests {
     #[test]
     fn a_multi_form_arm_body_becomes_a_progn() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var v) sexpr ((pat-wild) (int 1) (int 2)))"),
-            r#"(match false (var "v" false) (((pat-wild) let () (int 0 1) (int 0 2))) 2)"#
+            bridged_with(&DEFS, "(match (var v) sexpr ((pat-wild) (int-any-width 1) (int-any-width 2)))"),
+            r#"(match false (var "v" false) (((pat-wild) let () (int-any-width 0 1) (int-any-width 0 2))) 2)"#
         );
     }
 
@@ -2897,7 +2897,7 @@ mod tests {
     fn a_literal_pattern_is_reduced_to_one_integer() {
         let printed = bridged_with(
             &DEFS,
-            r"(match (var v) sexpr ((pat-lit (int 7)) (int 1)) ((pat-lit (bool true)) (int 2)) ((pat-lit (char #\A)) (int 3)))",
+            r"(match (var v) sexpr ((pat-lit (int-any-width 7)) (int-any-width 1)) ((pat-lit (bool true)) (int-any-width 2)) ((pat-lit (char #\A)) (int-any-width 3)))",
         );
         assert!(printed.contains("(pat-lit 0 7)"), "{}", printed);
         assert!(printed.contains("(pat-lit 0 1)"), "{}", printed);
@@ -2909,13 +2909,13 @@ mod tests {
     /// placeholder.
     #[test]
     fn only_a_downcast_pattern_carries_a_type_name() {
-        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point \"point\" 0 false (int int) (pat-wild) (pat-wild)) (int 1)))");
+        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point \"point\" 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (1 1) false ())"), "{}", plain);
-        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point \"point\" 0 true (int int) (pat-wild) (pat-wild)) (int 1)))");
-        assert!(down.contains("true (str (int 0 112)"), "{}", down);
+        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point \"point\" 0 true (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        assert!(down.contains("true (str (int-any-width 0 112)"), "{}", down);
         // A whole-value type test always tests, so it always carries one.
         let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest point \"point\" (pat-bind p)) (var p)))");
-        assert!(tt.contains(r#"(pat-typetest (str (int 0 112) (int 0 111) (int 0 105) (int 0 110) (int 0 116)) (pat-bind "p"))"#), "{}", tt);
+        assert!(tt.contains(r#"(pat-typetest (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) (pat-bind "p"))"#), "{}", tt);
     }
 
     /// A scalar scrutinee translates, and asks for no GC root.
@@ -2929,8 +2929,8 @@ mod tests {
     #[test]
     fn a_match_on_a_scalar_translates_and_asks_for_no_root() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var n) int ((pat-lit (int 1)) (int 10)))"),
-            r#"(match false (var "n" false) (((pat-lit 0 1) int 0 10)) 0)"#
+            bridged_with(&DEFS, "(match (var n) int-any-width ((pat-lit (int-any-width 1)) (int-any-width 10)))"),
+            r#"(match false (var "n" false) (((pat-lit 0 1) int-any-width 0 10)) 0)"#
         );
     }
 
@@ -2940,7 +2940,7 @@ mod tests {
     fn a_value_pattern_crosses_as_a_name_and_a_test() {
         let printed = bridged_with(
             &DEFS,
-            r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true () bool (str str) "bool" (var $match-scrut) (str "a"))) (int 1)) ((pat-wild) (int 0)))"#,
+            r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true () bool (str str) "bool" (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
         );
         assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc "string" "equals" true"#), "{}", printed);
         // A `str` scrutinee is a heap pointer, so this one *is* rooted.
@@ -2955,16 +2955,16 @@ mod tests {
     #[test]
     fn set_takes_its_kind_from_the_binding_it_targets() {
         assert_eq!(
-            bridged("(let ((x int (int 1))) (set x (int 2)))"),
-            r#"(let (((x . 0) int 0 1)) (set "x" 0 (int 0 2)))"#
+            bridged("(let ((x int-any-width (int-any-width 1))) (set x (int-any-width 2)))"),
+            r#"(let (((x . 0) int-any-width 0 1)) (set "x" 0 (int-any-width 0 2)))"#
         );
         // A `sexpr` binding is the one with a GC root to keep in step.
         assert_eq!(
             bridged(r#"(let ((s sexpr (str "a"))) (set s (str "b")))"#),
-            r#"(let (((s . 2) str (int 0 97))) (set "s" 2 (str (int 0 98))))"#
+            r#"(let (((s . 2) str (int-any-width 0 97))) (set "s" 2 (str (int-any-width 0 98))))"#
         );
         // An inner binding shadows an outer one of a different kind.
-        let shadowed = bridged(r#"(let ((x sexpr (str "a"))) (let ((x int (int 1))) (set x (int 2))))"#);
+        let shadowed = bridged(r#"(let ((x sexpr (str "a"))) (let ((x int-any-width (int-any-width 1))) (set x (int-any-width 2))))"#);
         assert!(shadowed.contains(r#"(set "x" 0"#), "the inner binding should win: {}", shadowed);
     }
 
@@ -2972,15 +2972,15 @@ mod tests {
     /// island would need a kind, and there is nothing honest to give it.
     #[test]
     fn assigning_to_a_name_that_is_not_in_scope_is_refused() {
-        let e = refused("(set nope (int 1))");
+        let e = refused("(set nope (int-any-width 1))");
         assert!(e.contains("`nope`, which is not in scope"), "{}", e);
     }
 
     #[test]
     fn a_loop_keeps_its_body_untagged() {
         assert_eq!(
-            bridged("(loop (int 1) (break))"),
-            "(loop (int 0 1) (break))"
+            bridged("(loop (int-any-width 1) (break))"),
+            "(loop (int-any-width 0 1) (break))"
         );
         assert_eq!(bridged("(break)"), "(break)");
     }
@@ -2989,7 +2989,7 @@ mod tests {
     /// shape to compile rather than two.
     #[test]
     fn return_always_carries_a_value() {
-        assert_eq!(bridged("(return (int 3))"), "(return false (int 0 3))");
+        assert_eq!(bridged("(return (int-any-width 3))"), "(return false (int-any-width 0 3))");
         assert_eq!(bridged("(return)"), "(return false (unit))");
     }
 
@@ -2997,11 +2997,11 @@ mod tests {
     /// time, and a kind that says how to untag the stored value.
     #[test]
     fn a_global_becomes_its_promoted_id_and_kind() {
-        assert_eq!(bridged("(global (counter) () counter int)"), "(global 3 1)");
+        assert_eq!(bridged("(global (counter) () counter int-any-width)"), "(global 3 1)");
         assert_eq!(bridged("(global (total) (m) m::total sexpr)"), "(global 7 6)");
         assert_eq!(
-            bridged("(set-global (counter) () counter int (int 5))"),
-            "(set-global 3 1 (int 0 5))"
+            bridged("(set-global (counter) () counter int-any-width (int-any-width 5))"),
+            "(set-global 3 1 (int-any-width 0 5))"
         );
     }
 
@@ -3009,7 +3009,7 @@ mod tests {
     /// and this walk have gone out of step.
     #[test]
     fn an_unpromoted_global_is_refused() {
-        let e = refused("(global (missing) () missing int)");
+        let e = refused("(global (missing) () missing int-any-width)");
         assert!(e.contains("was not promoted before translation"), "{}", e);
     }
 
@@ -3021,7 +3021,7 @@ mod tests {
     /// The name is process-wide unique, so the assertion matches around it.
     #[test]
     fn a_lambda_lists_its_captures_and_parameters() {
-        let printed = bridged("(lambda ((x int)) int (var x))");
+        let printed = bridged("(lambda ((x int-any-width)) int-any-width (var x))");
         assert!(
             printed.ends_with(r#" () ((x . 0)) (var "x" false))"#),
             "unexpected lambda shape: {}",
@@ -3035,10 +3035,10 @@ mod tests {
     /// one place visible in another.
     #[test]
     fn a_captured_binding_becomes_a_cell() {
-        let printed = bridged("(let ((n int (int 1))) (lambda () int (var n)))");
+        let printed = bridged("(let ((n int-any-width (int-any-width 1))) (lambda () int-any-width (var n)))");
         // The binding itself gains the island's `10 +` cell marker over the
         // int field classification.
-        assert!(printed.starts_with("(let (((n . 11) int 0 1))"), "the binder should create the cell: {}", printed);
+        assert!(printed.starts_with("(let (((n . 11) int-any-width 0 1))"), "the binder should create the cell: {}", printed);
         // The capture is a cell in the closure that receives it...
         assert!(printed.contains("((n . 11))"), "{}", printed);
         // ...and the reference reads through it.
@@ -3049,8 +3049,8 @@ mod tests {
     /// machinery is not simply always on.
     #[test]
     fn an_uncaptured_binding_stays_a_plain_slot() {
-        let printed = bridged("(let ((n int (int 1))) (lambda ((m int)) int (var m)))");
-        assert!(printed.starts_with("(let (((n . 0)) int 0 1))") || printed.contains("(n . 0)"), "{}", printed);
+        let printed = bridged("(let ((n int-any-width (int-any-width 1))) (lambda ((m int-any-width)) int-any-width (var m)))");
+        assert!(printed.starts_with("(let (((n . 0)) int-any-width 0 1))") || printed.contains("(n . 0)"), "{}", printed);
         assert!(!printed.contains("cellvar"), "nothing is captured here: {}", printed);
     }
 
@@ -3058,8 +3058,8 @@ mod tests {
     /// is a different island tag from an ordinary one.
     #[test]
     fn assigning_a_captured_binding_writes_through_the_cell() {
-        let printed = bridged("(let ((n int (int 1))) (lambda () unit (set n (int 2))))");
-        assert!(printed.contains(r#"(cellset "n" 1 (int 0 2))"#), "{}", printed);
+        let printed = bridged("(let ((n int-any-width (int-any-width 1))) (lambda () unit (set n (int-any-width 2))))");
+        assert!(printed.contains(r#"(cellset "n" 1 (int-any-width 0 2))"#), "{}", printed);
     }
 
     /// `labels` siblings are callable directly, through the function
@@ -3068,8 +3068,8 @@ mod tests {
     #[test]
     fn labels_siblings_are_called_directly() {
         let printed =
-            bridged("(labels ((go ((i int)) int (var i))) (apply (var go) int (int) (int 1)))");
-        assert_eq!(printed, r#"(labels () (("go" ((i . 0)) (var "i" false))) (apply "go" (0 int 0 1)))"#);
+            bridged("(labels ((go ((i int-any-width)) int-any-width (var i))) (apply (var go) int-any-width (int-any-width) (int-any-width 1)))");
+        assert_eq!(printed, r#"(labels () (("go" ((i . 0)) (var "i" false))) (apply "go" (0 int-any-width 0 1)))"#);
     }
 
     /// A `labels` block captures what its defs refer to from outside, and
@@ -3077,7 +3077,7 @@ mod tests {
     #[test]
     fn a_labels_block_captures_what_its_defs_refer_to() {
         let printed = bridged(
-            "(let ((k int (int 5))) (labels ((go ((i int)) int (var k))) (apply (var go) int (int) (int 1))))",
+            "(let ((k int-any-width (int-any-width 5))) (labels ((go ((i int-any-width)) int-any-width (var k))) (apply (var go) int-any-width (int-any-width) (int-any-width 1))))",
         );
         assert!(printed.contains("(labels ((k . 11))"), "the captured list should be a cell: {}", printed);
         assert!(printed.contains(r#"(cellvar "k" 1)"#), "{}", printed);
@@ -3087,8 +3087,8 @@ mod tests {
     #[test]
     fn an_unknown_callee_is_dispatched_indirectly() {
         assert_eq!(
-            bridged("(let ((f fn (var g))) (apply (var f) int (int) (int 1)))"),
-            r#"(let (((f . 2) var "g" false)) (apply-indirect (var "f" false) (0 int 0 1)))"#
+            bridged("(let ((f fn (var g))) (apply (var f) int-any-width (int-any-width) (int-any-width 1)))"),
+            r#"(let (((f . 2) var "g" false)) (apply-indirect (var "f" false) (0 int-any-width 0 1)))"#
         );
     }
 
@@ -3097,9 +3097,9 @@ mod tests {
     /// at all.
     #[test]
     fn an_immediately_invoked_lambda_becomes_a_labels_block() {
-        let printed = bridged("(apply (lambda ((x int)) int (var x)) int (int) (int 2))");
+        let printed = bridged("(apply (lambda ((x int-any-width)) int-any-width (var x)) int-any-width (int-any-width) (int-any-width 2))");
         assert!(printed.starts_with("(labels () ((\"__lambda$"), "{}", printed);
-        assert!(printed.ends_with(r#"((x . 0)) (var "x" false))) (apply "__lambda$0" (0 int 0 2)))"#)
+        assert!(printed.ends_with(r#"((x . 0)) (var "x" false))) (apply "__lambda$0" (0 int-any-width 0 2)))"#)
             || printed.contains(r#"((x . 0)) (var "x" false)))"#), "{}", printed);
         assert!(!printed.contains("apply-indirect"), "it does not escape: {}", printed);
     }
@@ -3109,7 +3109,7 @@ mod tests {
     /// a second runtime representation.
     #[test]
     fn a_function_reference_becomes_a_forwarding_closure() {
-        let printed = bridged("(fnref (f) () f (int int))");
+        let printed = bridged("(fnref (f) () f (int-any-width int-any-width))");
         assert!(
             printed.ends_with(
                 r#" () ((arg0 . 0) (arg1 . 0)) (call "tl_f" (0 var "arg0" false) (0 var "arg1" false)))"#
@@ -3137,21 +3137,21 @@ mod tests {
     #[test]
     fn a_quoted_datum_becomes_the_nodes_that_rebuild_it() {
         assert_eq!(bridged("(quote ())"), "(construct true false () 0)");
-        assert_eq!(bridged("(quote 7)"), "(construct true false () 1 (int 0 7))");
+        assert_eq!(bridged("(quote 7)"), "(construct true false () 1 (int-any-width 0 7))");
         assert_eq!(bridged("(quote true)"), "(construct true false () 4 (bool true))");
         assert_eq!(bridged(r"(quote #\a)"), r"(construct true false () 3 (char #\a))");
         assert_eq!(
             bridged(r#"(quote "hi")"#),
-            "(construct true false () 6 (str (int 0 104) (int 0 105)))"
+            "(construct true false () 6 (str (int-any-width 0 104) (int-any-width 0 105)))"
         );
         // A symbol is interned at run time rather than stored, hence a marker
         // past the variant numbering.
-        assert_eq!(bridged("(quote foo)"), "(construct true false () 100 (str (int 0 102) (int 0 111) (int 0 111)))");
+        assert_eq!(bridged("(quote foo)"), "(construct true false () 100 (str (int-any-width 0 102) (int-any-width 0 111) (int-any-width 0 111)))");
         assert_eq!(bridged("(sym foo)"), bridged("(quote foo)"));
         // A path's segments each become a string, interned back at run time.
         assert_eq!(
             bridged("(quote m::x)"),
-            "(construct true false () 101 (str (int 0 109)) (str (int 0 120)))"
+            "(construct true false () 101 (str (int-any-width 0 109)) (str (int-any-width 0 120)))"
         );
     }
 
@@ -3161,8 +3161,8 @@ mod tests {
     fn a_quoted_list_is_built_cons_by_cons() {
         assert_eq!(
             bridged("(quote (1 2))"),
-            "(construct true false () 7 (construct true false () 1 (int 0 1)) \
-(construct true false () 7 (construct true false () 1 (int 0 2)) (construct true false () 0)))"
+            "(construct true false () 7 (construct true false () 1 (int-any-width 0 1)) \
+(construct true false () 7 (construct true false () 1 (int-any-width 0 2)) (construct true false () 0)))"
         );
     }
 
@@ -3193,7 +3193,7 @@ mod tests {
     fn the_boxed_values_kind_follows_its_representation() {
         let as_struct = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () struct (var p))"#);
         let as_enum = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () enum (var p))"#);
-        let as_int = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () int (var p))"#);
+        let as_int = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () int-any-width (var p))"#);
         assert!(as_struct.contains("(2 var"), "{}", as_struct);
         assert!(as_enum.contains("(2 var"), "{}", as_enum);
         assert!(as_int.contains("(0 var"), "{}", as_int);
@@ -3230,11 +3230,11 @@ mod tests {
     #[test]
     fn a_defun_becomes_the_boundary_triple() {
         let (name, params, body) =
-            top_level(&[], "(defun m::add ((a int) (b int)) int true (assoc i64 + true () int (int int) \"i64\" (var a) (var b)))")
+            top_level(&[], "(defun m::add ((a int-any-width) (b int-any-width)) int-any-width true (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b)))")
                 .expect("a defun is compiled");
         assert_eq!(name, "tl_m::add");
         assert_eq!(params, "((a . 0) (b . 0))");
-        assert_eq!(body, r#"(assoc "i64" "+" true (0 var "a" false) (0 var "b" false))"#);
+        assert_eq!(body, r#"(assoc "i32" "+" true (0 var "a" false) (0 var "b" false))"#);
         // The same mangling a call to it produces.
         assert!(bridged("(call (add) (m) m::add ())").contains(r#""tl_m::add""#));
     }
@@ -3244,7 +3244,7 @@ mod tests {
     #[test]
     fn a_defmethod_mangles_through_its_type() {
         let (name, params, body) =
-            top_level(&[], "(defmethod m::point area false ((self struct)) int true (field-get (var self) 0 int))")
+            top_level(&[], "(defmethod m::point area false ((self struct)) int-any-width true (field-get (var self) 0 int-any-width))")
                 .expect("a defmethod is compiled");
         assert_eq!(name, "tl_m::point::area");
         assert_eq!(params, "((self . 2))");
@@ -3254,8 +3254,8 @@ mod tests {
     /// A multi-form body collapses to a `progn`, the same as everywhere else.
     #[test]
     fn a_multi_form_body_collapses() {
-        let (_, _, body) = top_level(&[], "(defun f () unit false (int 1) (unit))").expect("compiled");
-        assert_eq!(body, "(let () (int 0 1) (unit))");
+        let (_, _, body) = top_level(&[], "(defun f () unit false (int-any-width 1) (unit))").expect("compiled");
+        assert_eq!(body, "(let () (int-any-width 0 1) (unit))");
     }
 
     /// The cell set is derived from the body rather than asked for, since
@@ -3264,7 +3264,7 @@ mod tests {
     #[test]
     fn a_parameter_a_closure_captures_is_a_cell_without_being_told() {
         let (_, params, body) =
-            top_level(&[], "(defun f ((n int)) fn true (lambda () int (var n)))").expect("compiled");
+            top_level(&[], "(defun f ((n int-any-width)) fn true (lambda () int-any-width (var n)))").expect("compiled");
         assert_eq!(params, "((n . 11))", "the parameter should be bound as a cell");
         assert!(body.contains(r#"(cellvar "n" 1)"#), "{}", body);
     }
@@ -3276,13 +3276,13 @@ mod tests {
     #[test]
     fn the_rest_of_the_top_level_is_not_compiled() {
         for src in [
-            "(defstruct point (int int))",
+            "(defstruct point (int-any-width int-any-width))",
             "(defenum m::color (red green blue) (() () ()))",
             "(defmacro m::when (c body) true (1 () ()) false (quote ()))",
             "(use m::helper other::helper)",
             r#"(load "lib.typl")"#,
-            "(expr (int 0 42))",
-            "(module m (expr (int 0 1)))",
+            "(expr (int-any-width 0 42))",
+            "(module m (expr (int-any-width 0 1)))",
         ] {
             assert!(top_level(&[], src).is_none(), "{} should not be compiled as a function", src);
         }
@@ -3313,10 +3313,10 @@ mod tests {
     fn a_type_inside_a_module_is_recorded_too() {
         assert_eq!(
             bridged_with(
-                &["(module m (defstruct m::point (int sexpr)))"],
-                "(construct m::point \"m::point\" 0 true (int sexpr) (int 1) (quote ()))"
+                &["(module m (defstruct m::point (int-any-width sexpr)))"],
+                "(construct m::point \"m::point\" 0 true (int-any-width sexpr) (int-any-width 1) (quote ()))"
             )
-            .contains("(1 int 0 1)"),
+            .contains("(1 int-any-width 0 1)"),
             true
         );
     }
@@ -3332,8 +3332,8 @@ mod tests {
     #[test]
     fn an_untranslated_tag_names_itself() {
         assert!(refused("(defun m::f () unit true (unit))").contains("`defun`"));
-        assert!(refused("(defvar m::x int true true (int 0))").contains("`defvar`"));
-        assert!(refused("(module m (expr (int 1)))").contains("`module`"));
+        assert!(refused("(defvar m::x int-any-width true true (int-any-width 0))").contains("`defvar`"));
+        assert!(refused("(module m (expr (int-any-width 1)))").contains("`module`"));
     }
 
     /// A mismatched representation list is an internal error, not something
@@ -3341,7 +3341,7 @@ mod tests {
     /// argument.
     #[test]
     fn an_argument_list_that_disagrees_with_its_representations_is_refused() {
-        let e = refused("(call (f) () f (int) (int 1) (int 2))");
+        let e = refused("(call (f) () f (int-any-width) (int-any-width 1) (int-any-width 2))");
         assert!(e.contains("1 argument representations for 2 arguments"), "{}", e);
     }
 }

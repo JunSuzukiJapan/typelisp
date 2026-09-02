@@ -493,7 +493,7 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
     match v {
         Value::Empty => "()".to_string(),
         Value::Int(i) => i.to_string(),
-        // `Sexpr::Float`, a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance,
+        // `Sexpr::f64`, a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance,
         // a `HashTable<K,V>`, and an enum value are all heap-boxed
         // (`Value::Boxed`, see `BoxedObj`) — `heap.is_struct`/
         // `is_hashtable`/`is_enum` tell them apart. A boxed struct prints
@@ -554,9 +554,15 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
             let r = heap.ratio_value(id);
             format!("{}/{}", r.numer(), r.denom())
         }
-        // Positively `is_float`: the bare fall-through this replaces read
-        // every other box kind as an `f64`, which `float_value` answers with
-        // a panic.
+        // A narrow integer inside a `Sexpr` prints as the number it is — the
+        // same text an `i32` of that value gives. The box carries the width so
+        // the *type* survives, not to make the number look different.
+        Value::Boxed(id) if heap.narrow_box(id).is_some() => {
+            heap.narrow_box(id).expect("just tested").value.to_string()
+        }
+        // Positively `is_f64`/`is_f32`: the bare fall-through these replace
+        // read every other box kind as an `f64`, which the accessor answers
+        // with a panic.
         Value::Boxed(id) if heap.is_f64(id) => format_f64(heap.f64_value(id)),
         Value::Boxed(id) if heap.is_f32(id) => format_f32(heap.f32_value(id)),
         Value::Boxed(_) => "#<unprintable>".to_string(),

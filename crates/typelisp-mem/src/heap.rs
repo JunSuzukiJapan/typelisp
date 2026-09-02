@@ -41,7 +41,7 @@ use std::ptr;
 
 use crate::Error;
 use super::symbols::{self, SymRef};
-use super::value::{BoxId, BoxedObj, Cell, ConsRef, FloatBox, LocId, MemHashKey, PathId, StrId, StructPayload, TypeKeyId, Value};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, FloatBox, LocId, MemHashKey, NarrowInt, PathId, StrId, StructPayload, TypeKeyId, Value};
 
 /// How far past its initial capacity a heap may grow by default — see
 /// [`Heap::with_capacity`]. Large enough that program text plus a working set
@@ -744,8 +744,82 @@ impl Heap {
         }
     }
 
+    /// Store an `i8`/`i16`/`u8`/`u16`/`u32`, returning its `Value::Boxed` —
+    /// the runtime representation of those five `Sexpr` variants.
+    ///
+    /// `value` is normalized on the way in rather than trusted, so the box's
+    /// contents satisfy [`NarrowInt`]'s invariant no matter what the caller
+    /// had in its register. `i32` has no box: a bare `Value::Int` already
+    /// means exactly that width.
+    ///
+    /// Panics on a width this can't be (`32` signed, or anything not in
+    /// `{8, 16, 32}`) — an internal-invariant trap like
+    /// [`f64_value`](Self::f64_value)'s, since the caller reaches here from a
+    /// declared type.
+    pub fn alloc_narrow(&mut self, width: u8, signed: bool, value: i64) -> Value {
+        if !matches!((width, signed), (8, _) | (16, _) | (32, false)) {
+            panic!("alloc_narrow: {}{} is not a boxed integer type", if signed { "i" } else { "u" }, width);
+        }
+        let value = crate::normalize_int(value, u32::from(width), signed);
+        self.alloc_boxed(BoxedObj::Narrow(NarrowInt { width, signed, value }))
+    }
+
+    /// A boxed narrow integer, as the type it actually is — `None` when `id`
+    /// is not one.
+    ///
+    /// The integer twin of [`float_box`](Self::float_box), and the only
+    /// reader: there is deliberately no `narrow_value` that hands back the
+    /// word without its width, because that word alone is what the five
+    /// types were being confused through in the first place.
+    pub fn narrow_box(&self, id: BoxId) -> Option<NarrowInt> {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Narrow(n)) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// True if `id` holds a boxed narrow integer of exactly this width and
+    /// signedness — the positive per-type test, like
+    /// [`is_f32`](Self::is_f32)/[`is_f64`](Self::is_f64). There is no
+    /// width-agnostic `is_narrow` for the same reason there is no
+    /// `is_float`.
+    pub fn is_narrow(&self, id: BoxId, width: u8, signed: bool) -> bool {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Narrow(n)) => n.width == width && n.signed == signed,
+            _ => false,
+        }
+    }
+
+    /// The primitive type a numeric box *is*, spelled the way the checker
+    /// spells it (`typelisp_front::type_key::type_key_of_type`) — `None` for
+    /// every other box (a struct, an enum, a closure, a cell, ...), which
+    /// carries an interned type key instead.
+    ///
+    /// The boxes below are the values whose type is written down nowhere but
+    /// in the box itself: a struct says what it is through its stored key, an
+    /// immediate `Value::Char` *is* a `char`, but a box holding the number
+    /// `200` is a `u8` or a `u16` only because it says so. Dispatchers that
+    /// need the receiver's type name (`format`'s `~/name/`) ask here.
+    pub fn primitive_box_type_name(&self, id: BoxId) -> Option<&'static str> {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Float32(_)) => Some("f32"),
+            Some(BoxedObj::Float64(_)) => Some("f64"),
+            Some(BoxedObj::Narrow(n)) => Some(match (n.width, n.signed) {
+                (8, true) => "i8",
+                (16, true) => "i16",
+                (8, false) => "u8",
+                (16, false) => "u16",
+                _ => "u32",
+            }),
+            Some(BoxedObj::Bignum(_)) => Some("bignum"),
+            Some(BoxedObj::Ratio(_)) => Some("ratio"),
+            Some(BoxedObj::RandomState(_)) => Some("random-state"),
+            _ => None,
+        }
+    }
+
     /// Store a `bignum` (arbitrary-precision integer), returning its
-    /// `Value::Boxed` — heap-boxed like [`alloc_float`](Self::alloc_float),
+    /// `Value::Boxed` — heap-boxed like [`alloc_f64`](Self::alloc_f64),
     /// and for the same reason (the payload can't ride alongside a tag in
     /// one 64-bit word).
     pub fn alloc_bignum(&mut self, n: num_bigint::BigInt) -> Value {
@@ -754,7 +828,7 @@ impl Heap {
 
     /// The `BigInt` behind a boxed bignum. Panics if `id` doesn't hold a
     /// `BoxedObj::Bignum` — same internal-invariant-trap convention as
-    /// [`float_value`](Self::float_value).
+    /// [`f64_value`](Self::f64_value).
     pub fn bignum_value(&self, id: BoxId) -> &num_bigint::BigInt {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::Bignum(n)) => n,
@@ -763,7 +837,7 @@ impl Heap {
     }
 
     /// True if `id` holds a `BoxedObj::Bignum` — the peer of
-    /// [`is_float`](Self::is_float) for callers decoding an unknown
+    /// [`is_f64`](Self::is_f64) for callers decoding an unknown
     /// `Value::Boxed`.
     pub fn is_bignum(&self, id: BoxId) -> bool {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Bignum(_)))
@@ -807,7 +881,7 @@ impl Heap {
 
     /// The type identity of a boxed struct — what a "is this a `point`?" test
     /// compares. Panics if `id` doesn't hold a `BoxedObj::Struct` — same
-    /// internal-invariant-trap convention as [`float_value`](Self::float_value).
+    /// internal-invariant-trap convention as [`f64_value`](Self::f64_value).
     pub fn struct_type_key(&self, id: BoxId) -> TypeKeyId {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::Struct { type_key, .. }) => *type_key,
@@ -899,7 +973,7 @@ impl Heap {
     /// so a caller holding only a `Value::Boxed` (e.g. decoding a struct
     /// field or a generic `match` scrutinee back into an interpreter-level
     /// value) can tell a nested struct apart from a boxed float *or* a
-    /// `HashTable` without risking [`float_value`](Self::float_value)'s or
+    /// `HashTable` without risking [`f64_value`](Self::f64_value)'s or
     /// [`struct_field`](Self::struct_field)'s "wrong kind" panic.
     pub fn is_struct(&self, id: BoxId) -> bool {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Fields(_), .. }))
@@ -1044,7 +1118,7 @@ impl Heap {
 
     /// The current contents of a cell. Panics if `id` doesn't hold a
     /// `BoxedObj::Cell` — same internal-invariant-trap convention as
-    /// [`float_value`](Self::float_value).
+    /// [`f64_value`](Self::f64_value).
     pub fn cell_get(&self, id: BoxId) -> Value {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::Cell(v)) => *v,
@@ -1134,7 +1208,7 @@ impl Heap {
 
     /// An interpreted closure's parts: `(params, body, env)`. Panics if `id`
     /// does not hold one — the same internal-invariant-trap convention as
-    /// [`float_value`](Self::float_value).
+    /// [`f64_value`](Self::f64_value).
     pub fn closure_parts(&self, id: BoxId) -> (Value, Value, Value) {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::Closure { params, body, env, .. }) => (*params, *body, *env),
@@ -1187,7 +1261,7 @@ impl Heap {
     /// A built-in function value's receiver type — `None` for a free
     /// built-in. Panics if `id` doesn't hold a `BoxedObj::Builtin`, the same
     /// internal-invariant-trap convention as
-    /// [`float_value`](Self::float_value).
+    /// [`f64_value`](Self::f64_value).
     pub fn builtin_fn_recv(&self, id: BoxId) -> Option<PathId> {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::Builtin { recv_type, .. }) => *recv_type,
@@ -1229,7 +1303,7 @@ impl Heap {
 
     /// A `random-state`'s current seed. Panics if `id` doesn't hold a
     /// `BoxedObj::RandomState` — the same internal-invariant-trap convention as
-    /// [`float_value`](Self::float_value).
+    /// [`f64_value`](Self::f64_value).
     pub fn random_state_seed(&self, id: BoxId) -> u64 {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::RandomState(seed)) => *seed,
@@ -1249,7 +1323,7 @@ impl Heap {
 
     /// A compiled closure's native entry point. Panics if `id` doesn't hold
     /// a `BoxedObj::CompiledClosure` — the same internal-invariant-trap
-    /// convention as [`float_value`](Self::float_value).
+    /// convention as [`f64_value`](Self::f64_value).
     pub fn compiled_closure_fnptr(&self, id: BoxId) -> usize {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::CompiledClosure { fn_ptr, .. }) => *fn_ptr,
@@ -1299,8 +1373,11 @@ impl Heap {
     /// actually stored went through [`intern_hash_key`](Self::intern_hash_key)
     /// first), so `None` here correctly means "not in the map" rather than
     /// requiring a spurious allocation just to look. Panics on a
-    /// non-hashable `Value` shape (`Cons`/`Symbol`/`Path`/a non-`Float`
-    /// boxed object) — the type checker can't express a "hashable" bound (no
+    /// non-hashable `Value` shape — `Cons`, `Symbol`, `Path`, and *every*
+    /// boxed object, floats and narrow integers included (the comment here
+    /// used to say "a non-`Float` boxed object", which read as though a
+    /// float key worked; it never has) — the type checker can't express a
+    /// "hashable" bound (no
     /// traits in this language), so this is the same runtime-panic fallback
     /// [`struct_field`](Self::struct_field) uses for an out-of-range index.
     fn lookup_hash_key(&self, key: Value) -> Option<MemHashKey> {
@@ -1773,7 +1850,7 @@ impl Heap {
             // `Str`'s buffer) and hold no nested `Value` — nothing to trace.
             // A `RandomState`'s payload is a bare `u64` seed — same "ordinary
             // Rust memory, nothing nested" case as the numeric boxes.
-            BoxedObj::Float32(_) | BoxedObj::Float64(_) | BoxedObj::Bignum(_) | BoxedObj::Ratio(_) | BoxedObj::RandomState(_) => {}
+            BoxedObj::Float32(_) | BoxedObj::Float64(_) | BoxedObj::Narrow(_) | BoxedObj::Bignum(_) | BoxedObj::Ratio(_) | BoxedObj::RandomState(_) => {}
             BoxedObj::Struct { payload: StructPayload::Fields(fields), .. } => {
                 for &v in fields {
                     stack.push(v);

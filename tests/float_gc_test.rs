@@ -47,8 +47,8 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
 
 fn assert_float(h: &Heap, v: &Value, expected: f64) {
     match v {
-        typelisp::Value::Boxed(id) if h.is_float(*id) => {
-            let got = h.float_value(*id);
+        typelisp::Value::Boxed(id) if h.is_f64(*id) => {
+            let got = h.f64_value(*id);
             assert!((got - expected).abs() < 1e-9, "expected {}, got {}", expected, got);
         }
         other => panic!("expected the float {}, got {:?}", expected, other),

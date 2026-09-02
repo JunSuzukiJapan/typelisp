@@ -449,13 +449,22 @@ fn eval_sexpr(src: &str) -> (Heap, Value) {
 
 /// Structural equality for `Sexpr` values: `Value::Cons`'s derived
 /// `PartialEq` is pointer identity, so cons-shaped results need this instead.
-/// `Value::Boxed` (a `Sexpr::Float` today, see `BoxedObj`) is identity-based
-/// for the same reason, so it needs the same treatment.
+/// `Value::Boxed` (a float or a narrow integer, see `BoxedObj`) is
+/// identity-based for the same reason, so it needs the same treatment — and
+/// compares *within* a width, never across one: two boxes are equal only
+/// when they are the same type holding the same number.
 fn sexpr_eq(h: &Heap, a: Value, b: Value) -> bool {
     match (a, b) {
         (Value::Empty, Value::Empty) => true,
         (Value::Int(x), Value::Int(y)) => x == y,
-        (Value::Boxed(x), Value::Boxed(y)) => h.float_value(x) == h.float_value(y),
+        (Value::Boxed(x), Value::Boxed(y)) => match (h.float_box(x), h.float_box(y)) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) => match (h.narrow_box(x), h.narrow_box(y)) {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            },
+            _ => false,
+        },
         (Value::Char(x), Value::Char(y)) => x == y,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Symbol(x), Value::Symbol(y)) => h.symbol_name(x) == h.symbol_name(y),
@@ -483,12 +492,13 @@ fn assert_sexpr_eq(src: &str, expected: impl FnOnce(&mut Heap) -> Value) {
 
 #[test]
 fn float_sexpr_constructs_and_extracts_through_a_heap_boxed_value() {
-    // `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`) — this
-    // exercises `Heap::alloc_float`/`Interp::construct_sexpr`'s `SEXPR_FLOAT`
-    // arm end to end, not just the mem-layer plumbing `mem_test.rs` covers.
-    assert_sexpr_eq("(Float 3.5)", |h| h.alloc_float(3.5));
-    assert_sexpr_eq("(sexpr-cons (Float 1.5) ())", |h| {
-        let f = h.alloc_float(1.5);
+    // `Sexpr`'s float variants are heap-boxed (`Value::Boxed`, see
+    // `BoxedObj`) — this exercises `Heap::alloc_f64`/`construct_sexpr_core`'s
+    // `SEXPR_F64` arm end to end, not just the mem-layer plumbing
+    // `mem_test.rs` covers.
+    assert_sexpr_eq("(f64 3.5)", |h| h.alloc_f64(3.5));
+    assert_sexpr_eq("(sexpr-cons (f64 1.5) ())", |h| {
+        let f = h.alloc_f64(1.5);
         h.cons(f, Value::Empty).unwrap()
     });
     // (The former `(match (Float 2.0) ((Float f) ...))` extraction assertion
@@ -503,17 +513,17 @@ fn sexpr_cons_car_cdr_mirror_the_user_facing_ops() {
     // `sexpr-cons`/`sexpr-car`/`sexpr-cdr` are the island's `Sexpr` cons/nil
     // operations — the free `cons`/`car`/`cdr` names are the generic `cons<T,U>`
     // pair now (Phase 4b), so a `Sexpr` list is built and walked here.
-    assert_sexpr_eq("(sexpr-cons (Int 1) ())", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
-    assert_sexpr_eq("(sexpr-car (sexpr-cons (Int 1) ()))", |_| Value::Int(1));
-    assert_sexpr_eq("(sexpr-cdr (sexpr-cons (Int 1) ()))", |_| Value::Empty);
+    assert_sexpr_eq("(sexpr-cons (i32 1) ())", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
+    assert_sexpr_eq("(sexpr-car (sexpr-cons (i32 1) ()))", |_| Value::Int(1));
+    assert_sexpr_eq("(sexpr-cdr (sexpr-cons (i32 1) ()))", |_| Value::Empty);
 }
 
 #[test]
 fn sexpr_car_and_cdr_of_a_non_cons_atom_panic() {
     // An *atom* is a type confusion, so it still panics — CL rejects
     // `(car 5)` too.
-    assert_eq!(run("(sexpr-car (Int 5))"), Err(EvalError::Panic("sexpr-car: not a cons".into())));
-    assert_eq!(run("(sexpr-cdr (Int 5))"), Err(EvalError::Panic("sexpr-cdr: not a cons".into())));
+    assert_eq!(run("(sexpr-car (i32 5))"), Err(EvalError::Panic("sexpr-car: not a cons".into())));
+    assert_eq!(run("(sexpr-cdr (i32 5))"), Err(EvalError::Panic("sexpr-cdr: not a cons".into())));
     // The empty list is not a confusion, it is the end of a list — and both
     // tiers answer with the empty list rather than panicking (CL's
     // `(car nil) => nil`). `tests/match_sexpr_test.rs` asserts the value; the
@@ -526,22 +536,22 @@ fn sexpr_car_and_cdr_of_a_non_cons_atom_panic() {
 fn sexpr_tag_predicates_read_the_runtime_tag() {
     // The `sexpr-consp`/`sexpr-null`/`sexpr-atom` predicates inspect the runtime
     // tag directly (no `match`), so they survive Phase 5's `match`-to-enum fence.
-    assert_eq!(eval_ok("(sexpr-consp (sexpr-cons (Int 1) ()))"), Value::Bool(true));
+    assert_eq!(eval_ok("(sexpr-consp (sexpr-cons (i32 1) ()))"), Value::Bool(true));
     assert_eq!(eval_ok("(sexpr-consp ())"), Value::Bool(false));
-    assert_eq!(eval_ok("(sexpr-consp (Int 3))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-consp (i32 3))"), Value::Bool(false));
 
     assert_eq!(eval_ok("(sexpr-null ())"), Value::Bool(true));
-    assert_eq!(eval_ok("(sexpr-null (sexpr-cons (Int 1) ()))"), Value::Bool(false));
-    assert_eq!(eval_ok("(sexpr-null (Int 3))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-null (sexpr-cons (i32 1) ()))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-null (i32 3))"), Value::Bool(false));
 
     assert_eq!(eval_ok("(sexpr-atom ())"), Value::Bool(true));
-    assert_eq!(eval_ok("(sexpr-atom (Int 3))"), Value::Bool(true));
-    assert_eq!(eval_ok("(sexpr-atom (sexpr-cons (Int 1) ()))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-atom (i32 3))"), Value::Bool(true));
+    assert_eq!(eval_ok("(sexpr-atom (sexpr-cons (i32 1) ()))"), Value::Bool(false));
 }
 
 #[test]
 fn list_builds_cons_chain() {
-    assert_sexpr_eq("(list (Int 1) (Int 2))", |h| {
+    assert_sexpr_eq("(list (i32 1) (i32 2))", |h| {
         let tail = h.cons(Value::Int(2), Value::Empty).unwrap();
         h.cons(Value::Int(1), tail).unwrap()
     });
@@ -557,7 +567,7 @@ fn sexpr_cons_as_value() {
     // the generic `cons<T,U>` pair now — Symbol/Sexpr redesign Phase 4b).
     let src = "(defun apply2 ((f (fn (Option<Sexpr> Option<Sexpr>) Option<Sexpr>)) \
                               (a Option<Sexpr>) (b Option<Sexpr>)) Option<Sexpr> (f a b)) \
-               (apply2 sexpr-cons (Int 1) ())";
+               (apply2 sexpr-cons (i32 1) ())";
     assert_sexpr_eq(src, |h| h.cons(Value::Int(1), Value::Empty).unwrap());
 }
 
@@ -572,8 +582,8 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
     // instead of the loop's garbage.
     let mut src_heap = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let src = "(let ((kept (cons (Int 1) (the Option<Sexpr> ())))) \
-                 (dotimes (i 50) (cons (Int 2) (the Option<Sexpr> ()))) \
+    let src = "(let ((kept (cons (i32 1) (the Option<Sexpr> ())))) \
+                 (dotimes (i 50) (cons (i32 2) (the Option<Sexpr> ()))) \
                  (car kept))";
     let vs = r.read_all(&mut src_heap, src).expect("read failed");
     let mut chk = Checker::new();
@@ -745,9 +755,9 @@ fn defun_rest_elements_keep_their_order_and_values() {
     // `Sexpr`'s own `Int` constructor holds an `i32` whatever integer width
     // the `&rest` element type was declared as — every width wraps into the
     // same `Sexpr` variant (see `sexpr_ctor_for`), so extracting one back out
-    // via `sexpr-int` yields `i32`.
+    // via `sexpr-i32` yields `i32`.
     let src = "(defun second-extra ((a i32) &rest (xs i32)) i32
-                 (sexpr-int (sexpr-car (sexpr-cdr xs))))
+                 (sexpr-i32 (sexpr-car (sexpr-cdr xs))))
                (second-extra 1 10 20 30)";
     assert_eq!(eval_ok(src), Value::Int(20));
 }
@@ -772,7 +782,7 @@ fn generic_rest_function_works_at_different_element_types() {
 #[test]
 fn apply_calls_a_named_variadic_function_with_a_runtime_list() {
     let src = "(defun first-extra ((a i32) &rest (xs i32)) i32
-                 (sexpr-int (sexpr-car xs)))
+                 (sexpr-i32 (sexpr-car xs)))
                (apply first-extra 1 (quote (10 20)))";
     assert_eq!(eval_ok(src), Value::Int(10));
 }
@@ -863,9 +873,9 @@ fn setf_on_a_sexpr_binding_survives_gc_and_releases_the_old_value() {
     // `s` is rebound mid-loop; the *new* cons must survive every later
     // collection and the old one must be reclaimable (with only 3 cells,
     // the loop can't run at all unless the old value's cell is freed).
-    let src = "(let ((s (cons (Int 1) (the Option<Sexpr> ())))) \
-                 (setf s (cons (Int 5) (the Option<Sexpr> ()))) \
-                 (dotimes (i 40) (cons (Int 2) (the Option<Sexpr> ()))) \
+    let src = "(let ((s (cons (i32 1) (the Option<Sexpr> ())))) \
+                 (setf s (cons (i32 5) (the Option<Sexpr> ()))) \
+                 (dotimes (i 40) (cons (i32 2) (the Option<Sexpr> ()))) \
                  (car s))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(5));
 }
@@ -875,16 +885,16 @@ fn a_sexpr_car_bound_sexpr_survives_gc_pressure() {
     // `match` on a `Sexpr` is fenced off (Symbol/Sexpr redesign Phase 5); the
     // extracted `car` is now bound with `sexpr-car` instead, exercising the
     // same "a let-bound `Sexpr` local stays rooted across GC" path.
-    let src = "(let ((s (sexpr-cons (Int 8) ()))) \
+    let src = "(let ((s (sexpr-cons (i32 8) ()))) \
                  (let ((h (sexpr-car s))) \
-                   (dotimes (i 40) (sexpr-cons (Int 2) ())) h))";
+                   (dotimes (i 40) (sexpr-cons (i32 2) ())) h))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(8));
 }
 
 #[test]
 fn a_defvar_sexpr_global_survives_gc_pressure_across_forms() {
-    let src = "(defvar (g Option<Sexpr>) (sexpr-cons (Int 3) ())) \
-               (dotimes (i 40) (sexpr-cons (Int 2) ())) \
+    let src = "(defvar (g Option<Sexpr>) (sexpr-cons (i32 3) ())) \
+               (dotimes (i 40) (sexpr-cons (i32 2) ())) \
                (sexpr-car g)";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(3));
 }
@@ -897,9 +907,9 @@ fn a_lambda_captured_sexpr_binding_survives_gc_pressure() {
     // margin; the churn count (200, far over the heap size) is what now forces
     // the repeated collections the captured `s` must survive, so the test still
     // fails if the capture isn't rooted through GC.
-    let src = "(let ((s (cons (Int 6) (the Option<Sexpr> ())))) \
+    let src = "(let ((s (cons (i32 6) (the Option<Sexpr> ())))) \
                  (let ((f (lambda () Sexpr (car s)))) \
-                   (dotimes (i 200) (cons (Int 2) (the Option<Sexpr> ()))) \
+                   (dotimes (i 200) (cons (i32 2) (the Option<Sexpr> ()))) \
                    (f)))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(6));
 }
@@ -916,8 +926,8 @@ fn an_unnamed_callee_survives_argument_evaluation_under_gc_pressure() {
     // churn, far over the heap size, is what forces the collections now.
     let src = "(let ((mk (lambda ((s Option<Sexpr>)) (fn (i32) Option<Sexpr>) \
                           (lambda ((n i32)) Option<Sexpr> (sexpr-car s))))) \
-                 (let ((f (mk (sexpr-cons (Int 4) ())))) \
-                   (dotimes (i 200) (sexpr-cons (Int 2) ())) \
+                 (let ((f (mk (sexpr-cons (i32 4) ())))) \
+                   (dotimes (i 200) (sexpr-cons (i32 2) ())) \
                    (f 0)))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(4));
 }
@@ -932,8 +942,8 @@ fn labels_siblings_mutually_recurse_under_gc_pressure() {
     // must survive.
     let src = "(labels ((is-even ((n i32)) bool (if (= n 0) true (is-odd (- n 1)))) \
                         (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1))))) \
-                 (dotimes (i 200) (cons (Int 2) (the Option<Sexpr> ()))) \
-                 (if (is-even 10) (Int 1) (Int 0)))";
+                 (dotimes (i 200) (cons (i32 2) (the Option<Sexpr> ()))) \
+                 (if (is-even 10) (i32 1) (i32 0)))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(1));
 }
 
@@ -942,8 +952,8 @@ fn setf_through_a_shared_capture_is_visible_to_the_sibling_closure() {
     // Two closures capture the same `Sexpr` binding; a write through one is
     // observed by the other — the shared-mutable-cell semantics the heap
     // cell representation must preserve.
-    let src = "(let ((s (cons (Int 1) (the Option<Sexpr> ())))) \
-                 (let ((write (lambda () () (setf s (cons (Int 9) (the Option<Sexpr> ()))) ())) \
+    let src = "(let ((s (cons (i32 1) (the Option<Sexpr> ())))) \
+                 (let ((write (lambda () () (setf s (cons (i32 9) (the Option<Sexpr> ()))) ())) \
                        (read (lambda () Sexpr (car s)))) \
                    (write) \
                    (read)))";

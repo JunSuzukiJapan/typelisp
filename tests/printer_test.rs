@@ -33,13 +33,6 @@ fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
-fn eval_err(src: &str) -> String {
-    match run(src) {
-        Err(e) => format!("{:?}", e),
-        Ok(v) => panic!("expected a runtime error, got {:?}", v),
-    }
-}
-
 /// The first *check*-time error `src` raises.
 ///
 /// Since the control string became a literal (`Checker::control_string`), a
@@ -246,29 +239,35 @@ fn an_integer_argument_dispatches_when_only_one_width_defines_the_name() {
     );
 }
 
+/// Two widths defining the same name is not ambiguous: each argument says
+/// which type it is, so each reaches its own method.
+///
+/// This used to be an *error* — "could be any width" — because a normalized
+/// `u8` and a normalized `i32` were the same `Value::Int` when they held the
+/// same small number, and the runtime offered all six integer types as
+/// candidates rather than guess. Giving the narrow widths a box that names
+/// them settled it: `7` is an `i32` and `(the u8 7)` is a `u8`.
 #[test]
-fn an_integer_argument_is_refused_when_two_widths_define_the_name() {
-    // Nothing in the value says which width was written, and guessing would
-    // silently run the wrong body. Deleting the 64-bit types narrowed the
-    // word but did not settle this: a normalized `u8` and a normalized `i32`
-    // are still the same `Value::Int` when they hold the same small number.
-    let e = eval_err(
-        r#"(defmethod both ((self i32) (colon bool) (at bool)) string "32")
-           (defmethod both ((self u8) (colon bool) (at bool)) string "8")
-           (format false "~/both/" 7)"#,
-    );
-    assert!(e.contains("could be any width"), "{}", e);
+fn each_integer_width_dispatches_to_its_own_method() {
+    const DEFS: &str = r#"(defmethod both ((self i32) (colon bool) (at bool)) string "32")
+           (defmethod both ((self u8) (colon bool) (at bool)) string "8")"#;
+    is_true(&format!(r#"{DEFS}
+           (equal (format false "~/both/" 7) "32")"#));
+    is_true(&format!(r#"{DEFS}
+           (equal (format false "~/both/" (the u8 7)) "8")"#));
 }
 
-/// A method on a width other than the literal's own default still runs: the
-/// scan looks in every integer type, because the value cannot say which one
-/// the author wrote.
+/// A method on a width other than the argument's own is *not* reached — the
+/// argument's type is the whole of the dispatch, and a bare literal is an
+/// `i32`.
 #[test]
-fn an_integer_argument_reaches_a_method_on_another_width() {
-    is_true(
-        r#"(defmethod thrice ((self u8) (colon bool) (at bool)) string (format false "~a ~a ~a" self self self))
-           (equal (format false "~/thrice/" 7) "7 7 7")"#,
-    );
+fn an_integer_argument_reaches_only_its_own_widths_method() {
+    const DEF: &str = r#"(defmethod thrice ((self u8) (colon bool) (at bool)) string (format false "~a ~a ~a" self self self))"#;
+    let e = check_err(&format!(r#"{DEF}
+           (format false "~/thrice/" 7)"#));
+    assert!(e.contains("no argument here has a method `thrice`"), "{}", e);
+    is_true(&format!(r#"{DEF}
+           (equal (format false "~/thrice/" (the u8 7)) "7 7 7")"#));
 }
 
 #[test]

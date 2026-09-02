@@ -104,7 +104,7 @@ fn sexpr_to_string(heap: &Heap, v: Value) -> String {
     match v {
         Value::Empty => "()".to_string(),
         Value::Int(i) => i.to_string(),
-        Value::Boxed(id) => heap.float_value(id).to_string(),
+        Value::Boxed(id) => heap.f64_value(id).to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
         Value::Symbol(id) => heap.symbol_name(id).to_string(),

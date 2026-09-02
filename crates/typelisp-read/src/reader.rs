@@ -1071,7 +1071,7 @@ fn split_path_top_level(tok: &str) -> Option<Vec<&str>> {
 
 /// Interpret a token as a number, or `Ok(None)` if it is a symbol. Takes
 /// `heap` (unlike an otherwise-pure parser) because a float/bignum/ratio
-/// literal must be heap-boxed (`Heap::alloc_float`/`alloc_bignum`/
+/// literal must be heap-boxed (`Heap::alloc_f64`/`alloc_bignum`/
 /// `alloc_ratio`, see `BoxedObj`'s doc comment) — those payloads don't fit
 /// alongside `Value`'s tag the way an int/char does. The only `Err` is a
 /// ratio literal with a zero denominator (`1/0`), which CL's reader also

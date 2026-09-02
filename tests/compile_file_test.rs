@@ -100,13 +100,14 @@ fn compiles_and_runs_arithmetic_in_main() {
     // checker resolves `+`/`-`/`*`'s receiver type from its *first*
     // argument checked with `expected: None`, by design — see
     // `Checker::try_instance_method`'s doc comment — so the outer
-    // `expected: Some(I64)` from `main`'s declared return type never
-    // reaches it). That's purely a type-checking-time distinction, not a
-    // codegen one: every integer is `RtValue::Int(i64)`/an LLVM `i64` IR
-    // value regardless of typelisp-level width (`compile::ast_bridge`
-    // always emits `(int n)`, `compiler.rs`'s `compile-int` always builds
-    // an `i64` constant), so declaring `main`'s return type `i32` here
-    // changes nothing about what actually runs.
+    // expectation from `main`'s declared return type never reaches it).
+    // That's a type-checking-time distinction, not a codegen one: the core
+    // IR's literal node is `int-any-width` and the island's
+    // `compile-int-any-width` builds an `i64` constant whatever the
+    // declared width, because a narrow integer *is* its number in a wider
+    // carrier. The width still exists — it decides what the arithmetic
+    // normalizes to and which box the value gets on its way into a `Sexpr`
+    // — it just isn't what a literal's own IR looks like.
     assert_eq!(compile_and_run("arith", "(defun main () i32 (- (* 6 8) (+ 4 2)))"), 42);
 }
 
@@ -943,7 +944,7 @@ fn an_aot_executable_evaluates_a_form_at_runtime() {
             r#"
             (defun main () i32
               (match (eval (quote (+ 40 2)))
-                ((ok v) (as i32 (sexpr-int v)))
+                ((ok v) (as i32 (sexpr-i32 v)))
                 ((err _) -1)))
             "#
         ),
@@ -963,7 +964,7 @@ fn an_aot_executable_evaluates_a_call_to_its_own_function() {
             (defun double ((n i32)) i32 (* n 2))
             (defun main () i32
               (match (eval (quote (double 21)))
-                ((ok v) (as i32 (sexpr-int v)))
+                ((ok v) (as i32 (sexpr-i32 v)))
                 ((err _) -1)))
             "#
         ),
@@ -986,7 +987,7 @@ fn an_aot_executable_evaluates_a_read_of_a_global_the_program_wrote() {
               (progn
                 (setf counter 42)
                 (match (eval (quote counter))
-                  ((ok v) (as i32 (sexpr-int v)))
+                  ((ok v) (as i32 (sexpr-i32 v)))
                   ((err _) -1))))
             "#
         ),
@@ -1029,7 +1030,7 @@ fn an_aot_executable_runs_each_defvar_initializer_once() {
             (defvar (v i32) (bump))
             (defun main () i32
               (match (eval (quote times))
-                ((ok r) (as i32 (sexpr-int r)))
+                ((ok r) (as i32 (sexpr-i32 r)))
                 ((err _) -1)))
             "#
         ),
@@ -1049,7 +1050,7 @@ fn an_aot_executable_keeps_definitions_made_by_an_evaluated_form() {
               (progn
                 (eval (quote (defun tripled ((n i32)) i32 (* n 3))))
                 (match (eval (quote (tripled 14)))
-                  ((ok v) (as i32 (sexpr-int v)))
+                  ((ok v) (as i32 (sexpr-i32 v)))
                   ((err _) -1))))
             "#
         ),
@@ -1097,7 +1098,7 @@ fn an_aot_executable_instantiates_a_generic_from_a_restored_template() {
             r#"
             (defun main () i32
               (match (eval (quote (if (is-some (pathname-name "/a/b.txt")) 42 0)))
-                ((ok v) (as i32 (sexpr-int v)))
+                ((ok v) (as i32 (sexpr-i32 v)))
                 ((err _) -1)))
             "#
         ),
@@ -1118,7 +1119,7 @@ fn an_aot_executable_expands_a_prelude_macro_from_a_snapshot() {
             r#"
             (defun main () i32
               (match (eval (quote (length (with-output-to-string (s) (write-string "hello" s)))))
-                ((ok v) (as i32 (sexpr-int v)))
+                ((ok v) (as i32 (sexpr-i32 v)))
                 ((err _) -1)))
             "#
         ),

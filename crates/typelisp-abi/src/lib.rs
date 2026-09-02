@@ -236,7 +236,7 @@ pub fn unwind_interpreted_error() -> ! {
 /// uses for a `Sexpr`. `Value::Boxed` needs no allocation here — unlike a
 /// hypothetical unboxed `Float` payload, a `BoxId` is already just a small
 /// integer index, exactly like `Symbol`/`Str`/`Path`; the caller must have
-/// already allocated the box (via e.g. `Heap::alloc_float`) the same way a
+/// already allocated the box (via e.g. `Heap::alloc_f64`) the same way a
 /// `Value::Cons` must already be a live heap cell before reaching this
 /// function.
 ///

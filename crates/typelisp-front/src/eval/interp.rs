@@ -1797,6 +1797,29 @@ impl Interp {
                 Some(_) => Some(Err(EvalError::Panic("sexpr-i32: expected an i32 Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-i32: expected a Sexpr argument".into()))),
             },
+            // `sexpr-i8`/`sexpr-i16`/`sexpr-u8`/`sexpr-u16`/`sexpr-u32`: the
+            // narrow widths' peers of `sexpr-i32`. Each accepts only its own
+            // box, for exactly the reason `sexpr-f64` refuses an `f32` one —
+            // answering with a width the caller did not ask for is the loss
+            // these variants exist to prevent. The result is the plain
+            // normalized word, because that is what a statically typed `u8`
+            // is everywhere outside a `Sexpr`.
+            name @ ("sexpr-i8" | "sexpr-i16" | "sexpr-u8" | "sexpr-u16" | "sexpr-u32") => {
+                let (width, signed) = match name {
+                    "sexpr-i8" => (8u8, true),
+                    "sexpr-i16" => (16, true),
+                    "sexpr-u8" => (8, false),
+                    "sexpr-u16" => (16, false),
+                    _ => (32, false),
+                };
+                match args.first() {
+                    Some(Value::Boxed(id)) if heap.is_narrow(*id, width, signed) => {
+                        Some(Ok(Value::Int(heap.narrow_box(*id).expect("just tested").value)))
+                    }
+                    Some(_) => Some(Err(EvalError::Panic(format!("{name}: expected a {} Sexpr node", &name[6..])))),
+                    _ => Some(Err(EvalError::Internal(format!("{name}: expected a Sexpr argument")))),
+                }
+            }
             "sexpr-bool" => match args.first() {
                 Some(Value::Bool(b)) => Some(Ok(Value::Bool(*b))),
                 Some(_) => Some(Err(EvalError::Panic("sexpr-bool: expected a Bool Sexpr node".into()))),
@@ -1815,7 +1838,7 @@ impl Interp {
             },
             // `sexpr-f64`/`sexpr-f32`: peers of `sexpr-i32` for a float node (heap-boxed,
             // `Value::Boxed` — see `BoxedObj`). Added with the Phase 5 `match`
-            // fence so a `Sexpr::Float` payload can still be read out without a
+            // fence so a `Sexpr::f64` payload can still be read out without a
             // `(match s ((Float f) f) ..)`.
             // One accessor per width, and each accepts only its own box. A
             // single `sexpr-float` would have to widen an `f32` to answer
@@ -1952,32 +1975,35 @@ impl Interp {
         colon: bool,
         at: bool,
     ) -> Result<String, String> {
-        // The type(s) `v` could be a value of, as method-table keys. Boxed
-        // values carry their own; the immediate ones do not, so they are
-        // mapped here — soundly, because each mapping is exact: every
-        // `Value::Str` *is* a `string`, so a method registered on `string`
-        // receives what it declared.
+        // The type `v` is a value of, as a method-table key. Boxed values
+        // carry their own; the immediate ones do not, so they are mapped
+        // here — soundly, because each mapping is exact: every `Value::Str`
+        // *is* a `string`, so a method registered on `string` receives what
+        // it declared.
         //
-        // `Value::Int` is the one that is not exact: every integer width
-        // shares the raw word, and nothing in the value says which was
-        // written. Rather than guess, all six are candidates and it is only an
-        // error when more than one defines the name — a single definition is
-        // unambiguous whichever width the author meant.
-        //
-        // Deleting the 64-bit types did not remove this ambiguity, only
-        // narrow the word: a normalized `u8` and a normalized `i32` are still
-        // the same `Value::Int` when they hold the same small number.
-        let candidates: Vec<Path> = match v {
-            Value::Boxed(id) => match heap_type_path(heap, id) {
-                Some(p) => vec![p],
+        // One type, not a list of candidates. `Value::Int` is an `i32` and
+        // nothing else, because the five narrow integer types reach the
+        // printer as boxes that name themselves (`BoxedObj::Narrow`). This
+        // used to offer all six integer types and call it an error when more
+        // than one defined the name — a guess dressed as a diagnostic, forced
+        // by the value having no width to read. Deleting the 64-bit types did
+        // *not* remove that ambiguity (it only narrowed the word); giving
+        // narrow integers a box did.
+        let type_path: Path = match v {
+            Value::Boxed(id) => match heap
+                .primitive_box_type_name(id)
+                .map(Path::root)
+                .or_else(|| heap_type_path(heap, id))
+            {
+                Some(p) => p,
                 None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
             },
-            Value::Str(_) => vec![Path::root("string")],
-            Value::Bool(_) => vec![Path::root("bool")],
-            Value::Char(_) => vec![Path::root("char")],
-            Value::Symbol(_) => vec![Path::root("symbol")],
-            Value::Empty | Value::Cons(_) | Value::Path(_) => vec![Path::root("sexpr")],
-            Value::Int(_) => crate::types::INT_TYPE_NAMES.iter().map(|n| Path::root(n)).collect(),
+            Value::Str(_) => Path::root("string"),
+            Value::Bool(_) => Path::root("bool"),
+            Value::Char(_) => Path::root("char"),
+            Value::Symbol(_) => Path::root("symbol"),
+            Value::Empty | Value::Cons(_) | Value::Path(_) => Path::root("sexpr"),
+            Value::Int(_) => Path::root("i32"),
         };
         // A generic receiver's method is registered per instantiation, so the
         // name to look up comes off the value's own key — see
@@ -1989,35 +2015,18 @@ impl Interp {
             },
             _ => name.to_string(),
         };
-        let mut found: Vec<(Path, std::rc::Rc<FnDef>)> = Vec::new();
-        for type_path in &candidates {
-            if let Some(f) = self.root.borrow().get_method(type_path, &looked_up) {
-                found.push((type_path.clone(), f));
-            }
-        }
-        let (type_path, f) = match found.len() {
-            1 => found.pop().expect("just checked there is one"),
-            0 => {
-                return Err(format!(
-                    "format: ~/{}/ — {} has no method `{}`",
-                    name,
-                    candidates.iter().map(|c| format!("`{}`", c)).collect::<Vec<_>>().join(" or "),
-                    name
-                ))
-            }
-            _ => {
-                return Err(format!(
-                    "format: ~/{}/ — an integer argument could be any width and {} each define \
-                     `{}`; there is nothing in the value to choose by",
-                    name,
-                    found.iter().map(|(p, _)| format!("`{}`", p)).collect::<Vec<_>>().join(" and "),
-                    name
-                ))
-            }
+        let Some(f) = self.root.borrow().get_method(&type_path, &looked_up) else {
+            return Err(format!("format: ~/{}/ — `{}` has no method `{}`", name, type_path, name));
         };
-        match f.sig.as_ref() {
+        // Whether the receiver's *declared* representation is a raw machine
+        // word — which is the question that decides what to hand the method,
+        // not the shape the printer happens to be holding.
+        let receiver_is_word = match f.sig.as_ref() {
             Some((params, ret))
-                if params.len() == 3 && params[1] == Repr::Bool && params[2] == Repr::Bool && *ret == Repr::Str => {}
+                if params.len() == 3 && params[1] == Repr::Bool && params[2] == Repr::Bool && *ret == Repr::Str =>
+            {
+                params[0] == Repr::Int
+            }
             _ => {
                 return Err(format!(
                     "format: ~/{}/ — `{}`'s `{}` must be \
@@ -2025,8 +2034,22 @@ impl Interp {
                     name, type_path, name
                 ))
             }
-        }
-        match self.apply(heap, &f, vec![v, Value::Bool(colon), Value::Bool(at)]).map_err(|e| e.to_string())? {
+        };
+        // A narrow integer arrives here as a `BoxedObj::Narrow`, because a
+        // `Sexpr` is the one place a value's width is written down. A `u8`
+        // *parameter* is the plain normalized word, like every statically
+        // typed integer. So the box is opened on the way in — the crossing is
+        // driven by the declared type, which is the only thing that can say
+        // which side is which (`encode_crossing_args` got this wrong three
+        // times by asking the value instead).
+        let receiver = match v {
+            Value::Boxed(id) if receiver_is_word => match heap.narrow_box(id) {
+                Some(n) => Value::Int(n.value),
+                None => v,
+            },
+            _ => v,
+        };
+        match self.apply(heap, &f, vec![receiver, Value::Bool(colon), Value::Bool(at)]).map_err(|e| e.to_string())? {
             Value::Str(id) => Ok(heap.string(id).to_string()),
             other => Err(format!("format: ~/{}/ on `{}` returned {:?}, not a string", name, type_path, other)),
         }
@@ -2498,6 +2521,29 @@ const SEXPR_PATH: usize = 10;
 /// Appended after `path`, so the numbers above keep the values burned into
 /// the island's IR and into compiled code. See `registry::sexpr_def`.
 const SEXPR_F32: usize = 11;
+/// The five integer widths that are not `i32`. A `Sexpr` is the one place a
+/// value's type is written nowhere else, so each width is its own variant
+/// carrying its own [`typelisp_mem::NarrowInt`] box; `i32` alone keeps the
+/// bare tagged word, which is the width that word already means.
+const SEXPR_I8: usize = 12;
+const SEXPR_I16: usize = 13;
+const SEXPR_U8: usize = 14;
+const SEXPR_U16: usize = 15;
+const SEXPR_U32: usize = 16;
+
+/// The `(width, signed)` pair each narrow-integer `Sexpr` variant names, or
+/// `None` for every other variant — the one table mapping between the two,
+/// read by `match_sexpr_core`, `construct_sexpr_core` and the accessors.
+pub(crate) fn narrow_variant(variant: usize) -> Option<(u8, bool)> {
+    Some(match variant {
+        SEXPR_I8 => (8, true),
+        SEXPR_I16 => (16, true),
+        SEXPR_U8 => (8, false),
+        SEXPR_U16 => (16, false),
+        SEXPR_U32 => (32, false),
+        _ => return None,
+    })
+}
 
 /// Evaluate a built-in integer arithmetic/comparison instance method
 /// (`registry::int_assoc`), at the receiver type's own `width` and
@@ -3248,8 +3294,8 @@ fn is_float_receiver(type_name: &Path) -> bool {
 /// Argument count/types are trusted (the checker already validated them
 /// against the type's `AdtDef` signatures), so arms index `args` directly
 /// rather than re-checking shape. Takes `heap` (unlike most of these arms
-/// need) for `sexpr`'s `eql`, which must read a boxed `Sexpr::Float`'s
-/// actual value (`Heap::float_value`) to tell it apart from `eq`'s identity
+/// need) for `sexpr`'s `eql`, which must read a boxed `Sexpr::f64`'s
+/// actual value (`Heap::f64_value`) to tell it apart from `eq`'s identity
 /// comparison — see `sexpr_eql`'s doc comment.
 /// `ret_ty` is the call site's checked return type (`assoc`/
 /// the unreachable-`panic` node a bounded generic's method call leaves behind) — [`vector_get`]
@@ -3493,7 +3539,7 @@ fn eval_builtin_method(
     if *type_name == Path::root("sexpr") {
         return match method {
             // `eq`/`eql` now diverge, as anticipated by this arm's own prior
-            // history (see `sexpr_eql`'s doc comment): `Sexpr::Float` became
+            // history (see `sexpr_eql`'s doc comment): `Sexpr::f64` became
             // heap-boxed (`Value::Boxed`, see `BoxedObj`) for the `Sexpr`/
             // `RtValue` unification plan, the "boxed numeric representation"
             // this comment used to say didn't exist yet. `equal`/`equalp`
@@ -4249,7 +4295,7 @@ fn sexpr_eq(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// `eql` on `Sexpr`: CL's `eql` is `eq` plus "two numbers of the same type
 /// and value are equivalent even when they aren't the same object" — the
 /// one case that can actually diverge from `eq`'s plain `Value` equality
-/// now that `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`):
+/// now that `Sexpr::f64` is heap-boxed (`Value::Boxed`, see `BoxedObj`):
 /// `eq`'s `==` compares two boxed floats by `BoxId` identity (correctly not
 /// `eq` for separately-allocated equal floats, the same way two separately
 /// built `Str`s aren't `eq` — see `registry::sexpr_assoc`'s doc comment),

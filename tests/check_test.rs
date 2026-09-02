@@ -267,11 +267,11 @@ fn construct_some_infers_type_argument() {
 
 #[test]
 fn sexpr_cons_yields_an_option_sexpr() {
-    // `(sexpr-cons (Int 1) ())`: both slots are `Option<Sexpr>`, and `()`
+    // `(sexpr-cons (i32 1) ())`: both slots are `Option<Sexpr>`, and `()`
     // adopts `none` there. (The free `cons`/`Cons` name is the generic
     // `cons<T,U>` pair now — the Sexpr cons cell is built through the
     // `sexpr-*` layer — Phase 4b.)
-    assert_eq!(ty("(sexpr-cons (Int 1) ())"), opt_sexpr());
+    assert_eq!(ty("(sexpr-cons (i32 1) ())"), opt_sexpr());
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn nil_is_no_longer_a_sexpr_constructor() {
 #[test]
 fn an_option_sexpr_does_not_narrow_to_a_bare_sexpr() {
     // Widening: fine, and free.
-    assert!(program("(defun f ((s Option<Sexpr>)) i32 1) (f (Int 1))").is_ok());
+    assert!(program("(defun f ((s Option<Sexpr>)) i32 1) (f (i32 1))").is_ok());
     // Narrowing: rejected.
     let err = program("(defun f ((s Sexpr)) i32 1) (f (the Option<Sexpr> ()))")
         .expect_err("narrowing should be rejected");
@@ -328,8 +328,8 @@ fn the_empty_list_is_an_option_sexpr_none() {
 
 #[test]
 fn construct_int_field_adopts_the_declared_width() {
-    // Sexpr::Int holds an i64; the integer literal must adopt that type.
-    assert_eq!(ty("(Int 5)"), Type::Named(Path::root("sexpr"), vec![]));
+    // The `i32` variant's field is an `i32`; the literal must adopt that type.
+    assert_eq!(ty("(i32 5)"), Type::Named(Path::root("sexpr"), vec![]));
 }
 
 // ---- match ------------------------------------------------------------------
@@ -674,7 +674,7 @@ fn apply_auto_wraps_a_scalar_rest_list_argument_into_sexpr() {
     // (`Checker::check_apply_form`), which now goes through the same
     // scalar-auto-wrap fallback `(list 1 2)` does (`Checker::check_inner`'s
     // expected-type reconciliation, not scoped to `list`/`&rest` alone) —
-    // `2` auto-wraps to `Sexpr::Int(2)`, same CL-conformant relaxation.
+    // `2` auto-wraps to `Sexpr::i32(2)`, same CL-conformant relaxation.
     // (A non-list shape there — as here — is still rejected, just at
     // *runtime*, the same way CL's own `apply` signals a runtime condition
     // for a malformed trailing list rather than a compile-time error.)
@@ -685,17 +685,17 @@ fn apply_auto_wraps_a_scalar_rest_list_argument_into_sexpr() {
 
 #[test]
 fn sexpr_car_and_cdr_yield_an_option_sexpr() {
-    assert_eq!(ty("(sexpr-car (sexpr-cons (Int 1) ()))"), opt_sexpr());
-    assert_eq!(ty("(sexpr-cdr (sexpr-cons (Int 1) ()))"), opt_sexpr());
+    assert_eq!(ty("(sexpr-car (sexpr-cons (i32 1) ()))"), opt_sexpr());
+    assert_eq!(ty("(sexpr-cdr (sexpr-cons (i32 1) ()))"), opt_sexpr());
 }
 
 #[test]
 fn sexpr_car_auto_wraps_a_scalar_argument_into_sexpr() {
     // Was a `TypeError` before the Sexpr-user-ADT design plan — `1` now
-    // auto-wraps to `Sexpr::Int(1)` wherever `Sexpr` is expected (see
+    // auto-wraps to `Sexpr::i32(1)` wherever `Sexpr` is expected (see
     // `list_elements_are_auto_wrapped_into_sexpr` below). `sexpr-car`'s own
     // "must be a `Cons`" requirement is still enforced, just at *runtime*
-    // now (a `Sexpr::Int` isn't a cons) — the same CL-conformant shift
+    // now (a `Sexpr::i32` isn't a cons) — the same CL-conformant shift
     // `apply_auto_wraps_a_scalar_rest_list_argument_into_sexpr` documents.
     assert_eq!(ty("(sexpr-car 1)"), opt_sexpr());
 }
@@ -704,13 +704,13 @@ fn sexpr_car_auto_wraps_a_scalar_argument_into_sexpr() {
 fn sexpr_cons_usable_as_function_value() {
     let src = "(defun apply2 ((f (fn (Option<Sexpr> Option<Sexpr>) Option<Sexpr>)) \
                               (a Option<Sexpr>) (b Option<Sexpr>)) Option<Sexpr> (f a b)) \
-               (apply2 sexpr-cons (Int 1) ())";
+               (apply2 sexpr-cons (i32 1) ())";
     assert_eq!(ty_program(src), opt_sexpr());
 }
 
 #[test]
 fn list_builds_sexpr_cons_chain() {
-    assert_eq!(ty("(list (Int 1) (Int 2))"), opt_sexpr());
+    assert_eq!(ty("(list (i32 1) (i32 2))"), opt_sexpr());
     // `(list)` is the empty list, so its type has to be the one that can
     // hold it.
     assert_eq!(ty("(list)"), opt_sexpr());
@@ -793,7 +793,7 @@ fn nested_loop_break_targets_innermost() {
 #[test]
 fn a_checked_form_is_a_core_expression_with_a_type() {
     let c = form("(if true 1 2)").unwrap();
-    assert_eq!(c.printed, "(expr (if (bool true) (int 1) (int 2)))");
+    assert_eq!(c.printed, "(expr (if (bool true) (int-any-width 1) (int-any-width 2)))");
     assert_eq!(c.ty, Some(Type::I32));
 }
 
@@ -808,9 +808,9 @@ fn the_overrides_an_integer_literals_default_type() {
 #[test]
 fn the_produces_the_same_expr_as_its_inner_form() {
     // `the` contributes no node of its own — checking `(the i32 5)` yields
-    // exactly the same `(int 5)` the bare literal would.
+    // exactly the same `(int-any-width 5)` the bare literal would.
     let c = form("(the i32 5)").unwrap();
-    assert_eq!(c.printed, "(expr (int 5))");
+    assert_eq!(c.printed, "(expr (int-any-width 5))");
     assert_eq!(c.ty, Some(Type::I32));
 }
 

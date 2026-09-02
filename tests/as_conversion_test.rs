@@ -96,7 +96,7 @@ fn assert_ratio(src: &str, numer: &str, denom: &str) {
 fn eval_f64(src: &str) -> f64 {
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
-        typelisp::Value::Boxed(id) if h.is_float(id) => h.float_value(id),
+        typelisp::Value::Boxed(id) if h.is_f64(id) => h.f64_value(id),
         other => panic!("expected an f64, got {:?}", other),
     }
 }

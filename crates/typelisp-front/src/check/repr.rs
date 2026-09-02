@@ -462,7 +462,8 @@ impl Repr {
     ///
     /// Derived from [`Repr::class`]. The numbers are `Sexpr`'s own variant
     /// numbering (`registry::sexpr_def`: `1`=i32 `2`=f64 `3`=char `4`=bool
-    /// `6`=str `11`=f32) rather than a parallel scheme, so those two island functions
+    /// `6`=str `11`=f32 `12`..`16`=i8/i16/u8/u16/u32) rather than a parallel
+    /// scheme, so those two island functions
     /// reuse the same per-variant bit manipulation instead of duplicating it.
     /// `Unit` is not a `Sexpr` variant and so has no number to borrow; it sits
     /// at `100`, deliberately clear of the `Sexpr` numbering so that adding a
@@ -471,11 +472,21 @@ impl Repr {
     /// twelfth variant.) `0` is taken by the "not representable" case.
     ///
     /// **This numbering space has a second producer.** `compile-sexpr-field`
-    /// also decodes `5` (sym), `7` (cons), `8` (bignum), `9` (ratio) and `10`
-    /// (path), which come from `Sexpr` *construction*
-    /// (`compile-construct-sexpr` / `match_sexpr_ctor`'s `SEXPR_*`), not from
-    /// here — this function folds sym/bignum/ratio into the `6` passthrough.
+    /// also decodes `5` (sym), `7` (cons), `8` (bignum), `9` (ratio), `10`
+    /// (path) and `12`..`16` (the narrow integer widths), which come from
+    /// `Sexpr` *construction* (`compile-construct-sexpr` / `match_sexpr_ctor`'s
+    /// `SEXPR_*`), not from here — this function folds sym/bignum/ratio into
+    /// the `6` passthrough.
     /// Anything renumbering these must account for both producers.
+    ///
+    /// The narrow integers are the clearest case of the two producers meaning
+    /// different things by the same *kind of* value. A `u8` **field of a
+    /// struct** is `1`, a raw word, because the `defstruct` already wrote the
+    /// width down and nothing has to be carried alongside the value. A `u8`
+    /// **inside a `Sexpr`** is variant `14`, a `BoxedObj::Narrow`, because
+    /// there the width is written down nowhere else. Same type, same machine
+    /// word, two encodings — decided by where the value is going, which is
+    /// what this number says.
     ///
     /// Read off the `Repr`, not off [`Repr::class`]: the two float widths
     /// share a class (they compute alike) but not a kind (they box
@@ -571,7 +582,7 @@ mod tests {
         };
         assert_eq!(printed(&mut h, Repr::Int), "int-any-width");
         assert_eq!(printed(&mut h, Repr::Scope(Box::new(Repr::Handle))), "(scope handle)");
-        assert_eq!(printed(&mut h, Repr::Vector(Box::new(Repr::Int))), "(vector int)");
+        assert_eq!(printed(&mut h, Repr::Vector(Box::new(Repr::Int))), "(vector int-any-width)");
         assert_eq!(
             printed(&mut h, Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr))),
             "(hashtable str sexpr)"
@@ -584,7 +595,16 @@ mod tests {
     fn a_malformed_form_is_not_a_representation() {
         let mut h = Heap::with_capacity(1 << 12);
         let r = crate::Reader::new();
-        for src in ["not-a-repr", "(vector)", "(vector int int)", "(scope not-a-repr)", "(42)", "()"] {
+        for src in [
+            "not-a-repr",
+            "(vector)",
+            // Arity, not spelling: both elements *are* representations, so
+            // this is refused only for having two of them.
+            "(vector int-any-width int-any-width)",
+            "(scope not-a-repr)",
+            "(42)",
+            "()",
+        ] {
             let v = r.read_all(&mut h, src).expect("read failed").pop().unwrap();
             assert_eq!(Repr::read(&h, v), None, "{:?} should not be a representation", src);
         }

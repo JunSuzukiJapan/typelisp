@@ -255,7 +255,7 @@ fn defvar_initializers_run_deferred_but_before_the_dependent() {
         &[
             (
                 "dep.typl",
-                "(pub defvar (xs Option<Sexpr>) '(1 2 3))\n(pub defun head () i32 (sexpr-int (sexpr-car xs)))",
+                "(pub defvar (xs Option<Sexpr>) '(1 2 3))\n(pub defun head () i32 (sexpr-i32 (sexpr-car xs)))",
             ),
             ("main.typl", "(use dep)\n(dep::head)"),
         ],

@@ -608,13 +608,13 @@ pub const SOURCE: &str = r#"
 
 ;; Extracts Sexpr variant `variant`'s field `idx` (0-based) from tagged
 ;; value `v` -- the inverse of `typelisp-rt`'s `encode` for each field
-;; kind representable in compiled code today: `int`'s `i64` payload
+;; kind representable in compiled code today: `i32`'s `i64` payload
 ;; (signed, `build-ashr`), `char`'s scalar (`build-lshr`), `bool`'s
 ;; payload (`1`/`2` -> `0`/`1`, matching `compile-bool`'s own convention),
 ;; `cons`'s two `Sexpr` fields (via `rt_car`/`rt_cdr` -- the only field kind
 ;; that needs a real heap read rather than pure bit manipulation), and (Stage
 ;; 7) `str`'s `Str` field. `str` is deliberately the *odd one out* among
-;; these: unlike `int`/`char`/`bool`, extraction here does *not* strip the
+;; these: unlike `i32`/`char`/`bool`, extraction here does *not* strip the
 ;; 3-bit tag -- it returns `v` unchanged. That's not an oversight: a bare
 ;; `Type::Str` value's compiled representation is *defined* to be the exact
 ;; same tagged immediate a `Sexpr::Str` already is (`typelisp-rt`'s
@@ -623,7 +623,7 @@ pub const SOURCE: &str = r#"
 ;; `rt_push_sexpr_root`/`rt_pop_sexpr_root`'s existing generic `decode` --
 ;; stripping the tag the way `char` does would make a `Str` field
 ;; indistinguishable from a plain integer to that machinery, silently
-;; reopening the exact GC-safety gap Stage 4/6 closed for `Sexpr`. `float`'s
+;; reopening the exact GC-safety gap Stage 4/6 closed for `Sexpr`. `f64`'s
 ;; `f64` field (Sexpr/RtValue unification, Stage 0) goes through
 ;; `rt_f64_value`/`rt_f32_value` -- a real heap read, like `cons`, since a float is now
 ;; boxed rather than an immediate bit pattern (see `typelisp-rt`'s
@@ -631,7 +631,7 @@ pub const SOURCE: &str = r#"
 ;; compiled code (a `Sym`'s tagged payload is the address of an interned
 ;; symbol's header; `Type::Symbol` has
 ;; no compiled representation, and `Interp::call_compiled`'s return-value
-;; decode would degrade one to a plain `Int` at the JIT boundary), and
+;; decode would degrade one to a plain `i32` at the JIT boundary), and
 ;; neither are `bignum`/`ratio`'s payloads (`Type::Bignum`/`Type::Ratio`
 ;; are heap objects with no `rt_bignum_*`/`rt_ratio_*` support yet — see
 ;; `core_bridge::bignum_form`), so a `Bind` pattern trying to
@@ -647,6 +647,15 @@ pub const SOURCE: &str = r#"
 ;; this same source string (see this module's doc comment's "Helpers that
 ;; only ever call *out* of the ring" paragraph for the general shape of this
 ;; constraint). Purely a textual move; neither function's own body changed.
+;; The `wsig` code (`width * 2 + signed`, `typelisp-rt`'s `wsig`) the five
+;; narrow-integer `Sexpr` variants name: 12=i8 13=i16 14=u8 15=u16 16=u32.
+;; A constant emitted from the *variant*, never read off the value — the
+;; word a compiled `u8` sits in is the same bit pattern an `i32` would have,
+;; which is the whole reason these are separate variants.
+(defun narrow-wsig ((variant i32)) i32
+  (case variant (12 17) (13 33) (14 16) (15 32) (16 64)
+    (else (panic "narrow-wsig: not a narrow-integer Sexpr variant"))))
+
 (defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i32) (idx i32)) llvm-value
   (case variant
     ;; `i32`(1): the signed value sits above the 3 tag bits.
@@ -685,6 +694,16 @@ pub const SOURCE: &str = r#"
     (10 (let ((args-ptr (alloca-args builder 1)))
           (store-arg builder args-ptr 0 v)
           (build-call builder (get-function m "rt_path_to_list") args-ptr 1)))
+    ;; `i8`(12)/`i16`(13)/`u8`(14)/`u16`(15)/`u32`(16): the payload is inside
+    ;; a `BoxedObj::Narrow`, and the variant says which type that box must
+    ;; be. `rt_narrow_value` refuses any other, so a `(u8 x)` pattern can
+    ;; never bind a `u16` node's value. What comes back is the plain
+    ;; normalized word compiled code carries every integer in.
+    ((12 13 14 15 16)
+     (let ((args-ptr (alloca-args builder 2)))
+       (store-arg builder args-ptr 0 v)
+       (store-arg builder args-ptr 1 (const-word builder (narrow-wsig variant)))
+       (build-call builder (get-function m "rt_narrow_value") args-ptr 2)))
     ;; `unit`(100): never a real `Sexpr` variant — this number only ever
     ;; arrives as a *struct/enum field* kind (`Repr::field_kind`), the decode
     ;; half of `compile-tag-struct-field`'s constant `6`. The stored word is
@@ -696,8 +715,8 @@ pub const SOURCE: &str = r#"
     (else (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))
 
 ;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
-;; same `Repr::field_kind`/`Sexpr`-variant numbering (`1`=int
-;; `2`=float `3`=char `4`=bool `6`=str/`Sexpr`/nested-boxed-struct/`Fn`
+;; same `Repr::field_kind`/`Sexpr`-variant numbering (`1`=i32
+;; `2`=f64 `3`=char `4`=bool `6`=str/`Sexpr`/nested-boxed-struct/`Fn`
 ;; passthrough — a `defstruct`/`Vector<T>`/`cons-cell<K,V>`/closure-typed
 ;; field's value is already a properly tagged `Sexpr`, so it passes through
 ;; unchanged exactly like a `Str` — `0`=not representable yet: a
@@ -707,7 +726,7 @@ pub const SOURCE: &str = r#"
 ;; `Sexpr` for kind `6`) into the properly tagged `Sexpr` `rt_struct_new`/
 ;; `rt_struct_field_set` require (Stage 3 of the Sexpr/RtValue unification
 ;; plan, `docs/implementation-log.md`). Mirrors `compile-construct-sexpr`'s
-;; own per-variant `int`/`float`/`char`/`bool`/`str` arms bit-for-bit rather
+;; own per-variant `i32`/`f64`/`char`/`bool`/`str` arms bit-for-bit rather
 ;; than calling into that function directly, since here `v` is already a
 ;; compiled value (there is no `arg-forms` sub-expression left to compile) --
 ;; see that function's own doc comment for why each shift/tag constant is
@@ -1225,7 +1244,8 @@ pub const SOURCE: &str = r#"
 
 ;; `sexpr`'s natively-compilable methods (`registry::sexpr_assoc` registers
 ;; exactly these two). `eq` is an `icmp eq` on the tagged handle; `eql` is the
-;; `rt_sexpr_eql` shim, since it has to see inside `Float`/`bignum`/`ratio`
+;; `rt_sexpr_eql` shim, since it has to see inside float/narrow-integer/
+;; `bignum`/`ratio`
 ;; boxes. The structural `equal`/`equalp` are free *functions*, not methods,
 ;; so they reach their own shims through `rt_builtin_symbol` instead of here.
 (defun sexpr-native-method? ((method string)) bool
@@ -1580,14 +1600,19 @@ pub const SOURCE: &str = r#"
       ()))
 
 ;; Tests whether tagged Sexpr value `v` is Sexpr variant `variant`
-;; (`registry::sexpr_def`'s variant order: 0=nil 1=int 2=float 3=char
-;; 4=bool 5=sym 6=str 7=cons 8=bignum 9=ratio 10=path) -- `nil`/`bool` both compile
+;; (`registry::sexpr_def`'s variant order: 0=nil 1=i32 2=f64 3=char
+;; 4=bool 5=sym 6=str 7=cons 8=bignum 9=ratio 10=path 11=f32 12=i8 13=i16
+;; 14=u8 15=u16 16=u32) -- `nil`/`bool` both compile
 ;; to the same 3-bit tag (`typelisp-rt`'s `TAG_IMMEDIATE`, 6) and are told
 ;; apart by `v`'s payload bits instead (`0` vs non-zero, see that crate's
-;; `encode`/`decode`). `float`/`bignum`/`ratio` all share `TAG_BOXED` (7)
+;; `encode`/`decode`). The two float widths, the five narrow integer widths,
+;; `bignum` and `ratio` all share `TAG_BOXED` (7)
 ;; with every other heap-boxed object, so the tag alone can't tell them
-;; apart -- they go through `rt_box_kind` (`1`/`2`/`3`; a match already
+;; apart -- they go through `rt_box_kind` (a match already
 ;; implies the tag is `TAG_BOXED`, so no separate tag check is emitted).
+;; Only `i32` reads its value straight out of the tagged word: that is the
+;; width a bare `Sexpr` integer means, and the other five say which they are
+;; from inside their box.
 ;; Every remaining variant has its own dedicated tag.
 ;; Whether `v`'s low three bits are `tag` — the shared half of every
 ;; non-boxed `Sexpr` tag test below.
@@ -1595,8 +1620,9 @@ pub const SOURCE: &str = r#"
   (build-icmp-eq builder (build-and builder v (const-word builder 7)) (const-word builder tag)))
 
 ;; Whether `v` is a heap box of kind `kind` (`rt_box_kind`'s numbering:
-;; 1 = float, 2 = bignum, 3 = ratio) — the three `Sexpr` variants that a tag
-;; test cannot tell apart, since they all carry `TAG_BOXED`.
+;; 1 = f64, 2 = bignum, 3 = ratio, 4 = f32, 5/6/7/8/9 = i8/i16/u8/u16/u32) —
+;; the nine `Sexpr` variants that a tag test cannot tell apart, since they
+;; all carry `TAG_BOXED`.
 (defun compile-box-kind-test ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind i32)) llvm-value
   (let ((args-ptr (alloca-args builder 1)))
     (store-arg builder args-ptr 0 v)
@@ -1606,11 +1632,18 @@ pub const SOURCE: &str = r#"
 
 (defun compile-sexpr-tag-test ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i32)) llvm-value
   (case variant
-    ;; `float`(2)/`bignum`(8)/`ratio`(9) are heap boxes that share one tag,
-    ;; so what tells them apart is the box's own kind, not the tag bits.
+    ;; `f64`(2)/`bignum`(8)/`ratio`(9)/`f32`(11) and the five narrow integer
+    ;; widths(12..16) are heap boxes that share one tag, so what tells them
+    ;; apart is the box's own kind, not the tag bits.
     (2 (compile-box-kind-test builder m v 1))
     (8 (compile-box-kind-test builder m v 2))
     (9 (compile-box-kind-test builder m v 3))
+    (11 (compile-box-kind-test builder m v 4))
+    (12 (compile-box-kind-test builder m v 5))
+    (13 (compile-box-kind-test builder m v 6))
+    (14 (compile-box-kind-test builder m v 7))
+    (15 (compile-box-kind-test builder m v 8))
+    (16 (compile-box-kind-test builder m v 9))
     ;; `nil`(0) and `bool`(4) share the immediate tag `6` and differ only in
     ;; the payload: nil's is zero, a bool's never is.
     (0 (build-and builder
@@ -1850,11 +1883,11 @@ pub const SOURCE: &str = r#"
 (defun compile-bool ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
     (if (sexpr-bool (sexpr-car (sexpr-cdr e))) (const-word builder 1) (const-word builder 0)))
 
-;; `(float bits)` (Sexpr/RtValue unification, Stage 0)
-;; -- a bare `f64` literal. `bits` is the literal's raw
-;; `f64::to_bits` pattern embedded as a plain `Int`
-;; node by `core_bridge::to_island`'s
-;; `Expr::Float` arm. Like `compile-int-any-width`, this returns
+;; `(float-any-width hi lo)` (Sexpr/RtValue unification,
+;; Stage 0) -- a bare float literal, of either width. `bits`
+;; is the literal's raw `f64::to_bits` pattern embedded as
+;; two plain integer halves by `core_bridge`'s
+;; `float-any-width` node. Like `compile-int-any-width`, this returns
 ;; the *plain, untagged* bit pattern -- **not** a boxed
 ;; a float `Sexpr` node (that would be `rt_f64_new`,
 ;; wrongly called twice: once here, once more by
@@ -1864,10 +1897,10 @@ pub const SOURCE: &str = r#"
 ;; same division of labor `compile-int-any-width`/variant-1
 ;; already has: `compile-int-any-width` returns a bare `i64`,
 ;; `compile-construct-sexpr`'s `build-shl`/tag-OR is
-;; what actually makes it a `Sexpr::Int`).
-;; `bits` arrives as two 32-bit halves `(float hi lo)`
-;; (`core_bridge`'s `float` node, interp-closure removal
-;; Stage 8a): a single tagged `Sexpr` `Int` would lose
+;; what actually makes it a `Sexpr::i32`).
+;; `bits` arrives as two 32-bit halves `(float-any-width hi lo)`
+;; (`core_bridge`'s `float-any-width` node, interp-closure removal
+;; Stage 8a): a single tagged `Sexpr` `i32` would lose
 ;; the top 3 bits of a full-width `f64` pattern when
 ;; read back here (`sexpr-i32` = `>> 3`), decoding e.g.
 ;; `2.0` to `0.0`. Reassemble with `(hi << 32) | lo` —
@@ -4307,12 +4340,13 @@ pub const SOURCE: &str = r#"
         (push-permanent-sexpr-root builder m result)
         result)))
 
-;; `Sexpr`'s own 8 variants, encoded directly as the
+;; `Sexpr`'s own variants, encoded directly as the
 ;; tagged `i64` `typelisp-rt`'s `encode` (and this
 ;; file's own `compile-sexpr-field`) already use —
 ;; see `registry::sexpr_def`'s variant order (`0`=nil
-;; `1`=int `2`=float `3`=char `4`=bool `5`=sym `6`=str
-;; `7`=cons), the exact inverse of
+;; `1`=i32 `2`=f64 `3`=char `4`=bool `5`=sym `6`=str
+;; `7`=cons `8`=bignum `9`=ratio `10`=path `11`=f32
+;; `12`=i8 `13`=i16 `14`=u8 `15`=u16 `16`=u32), the exact inverse of
 ;; `compile-sexpr-tag-test`/`compile-sexpr-field`'s
 ;; own extraction. `str`'s single field is itself a
 ;; `Type::Str`-typed sub-expression, which
@@ -4323,8 +4357,8 @@ pub const SOURCE: &str = r#"
 ;; and a `Sexpr::Str` are the same bits) — so unlike
 ;; every other variant here, `str` needs no further bit
 ;; manipulation at all, just the field's own compiled
-;; value passed straight through. `float`'s `f64`
-;; field (Sexpr/RtValue unification, Stage 0) is
+;; value passed straight through. The float and narrow-integer
+;; fields (Sexpr/RtValue unification, Stage 0) are
 ;; boxed via `rt_f64_new`/`rt_f32_new` (`typelisp-rt`'s
 ;; `TAG_BOXED`) rather than any bit manipulation here
 ;; — `f64` doesn't fit alongside a 3-bit tag the way
@@ -4386,6 +4420,16 @@ pub const SOURCE: &str = r#"
       (10 (let ((args-ptr (alloca-args builder 1)))
             (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car arg-forms)))
             (build-call builder (get-function m "rt_list_to_path") args-ptr 1)))
+      ;; `i8`(12)/`i16`(13)/`u8`(14)/`u16`(15)/`u32`(16): the compiled
+      ;; argument is the plain normalized word, which says nothing about
+      ;; which of the five types it is -- so the box is told, from the
+      ;; variant, exactly the way `f32`/`f64` above are. `i32` needs no box
+      ;; because the bare tagged word already means that width.
+      ((12 13 14 15 16)
+       (let ((args-ptr (alloca-args builder 2)))
+         (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car arg-forms)))
+         (store-arg builder args-ptr 1 (const-word builder (narrow-wsig variant)))
+         (build-call builder (get-function m "rt_narrow_new") args-ptr 2)))
       (else (panic "compile-construct-sexpr: field type is not representable in compiled code yet"))))
 
 ;; `(field-get idx-unary-list kind-i64 obj-form)`
@@ -4411,7 +4455,7 @@ pub const SOURCE: &str = r#"
 ;; `idx` (the *field* index, unrelated to `kind`) is
 ;; recovered from `idx-unary-list`'s own length
 ;; (`core_bridge::translate_field`'s doc comment
-;; explains why it isn't simply a `Sexpr` `Int`) — no
+;; explains why it isn't simply a `Sexpr` `i32`) — no
 ;; header offset here, unlike the general-ADT box
 ;; layout's own variant-tag slot: a `BoxedObj::Struct`'s
 ;; own field vector has no variant-tag slot of its own.

@@ -81,7 +81,7 @@ fn list_mixes_a_struct_instance_with_a_scalar() {
             let cdr = h.cdr(car_cell).expect("cons");
             let cadr = h.car(cdr).expect("cons");
             // The scalar `42` went through the auto-wrap (real `int` ctor,
-            // not a retype), so it decodes as a `Sexpr::Int` payload.
+            // not a retype), so it decodes as a `Sexpr::i32` payload.
             assert_eq!(cadr, Value::Int(42));
         }
     }

@@ -360,7 +360,7 @@ fn the_radix_macros_read_the_numbers_print_radix_writes() {
         ("#5r11", 6),
         ("#x-ff", -255),
     ] {
-        let src = format!("(match (unwrap (read \"{}\")) ((Int n) n) (_ -1))", text);
+        let src = format!("(match (unwrap (read \"{}\")) ((i32 n) n) (_ -1))", text);
         assert_eq!(eval_ok(&src), Value::Int(n), "{}", text);
     }
 }
@@ -369,7 +369,7 @@ fn the_radix_macros_read_the_numbers_print_radix_writes() {
 fn a_radix_macro_round_trips_what_print_radix_produced() {
     let src = "(match (unwrap (read (dlet ((*print-base* 16) (*print-radix* true))
                                      (format false \"~a\" 48879))))
-                 ((Int n) n) (_ -1))";
+                 ((i32 n) n) (_ -1))";
     assert_eq!(eval_ok(src), Value::Int(48879));
 }
 

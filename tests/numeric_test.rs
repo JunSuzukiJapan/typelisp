@@ -74,7 +74,7 @@ fn as_f64(actual: Value) -> f64 {
         let opt = cell.borrow();
         let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
         match actual {
-            typelisp::Value::Boxed(id) if h.is_float(id) => h.float_value(id),
+            typelisp::Value::Boxed(id) if h.is_f64(id) => h.f64_value(id),
             other => panic!("expected an f64, got {:?}", other),
         }
     })

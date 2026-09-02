@@ -113,7 +113,7 @@ fn a_global_shadowed_by_a_local_is_still_seen_by_its_global_value() {
 #[test]
 fn a_compiled_function_can_call_eval() {
     let out = repl_stdout(
-        "(defun ev () i32 (match (eval (quote (+ 40 2))) ((ok v) (sexpr-int v)) ((err _) -1)))\n\
+        "(defun ev () i32 (match (eval (quote (+ 40 2))) ((ok v) (sexpr-i32 v)) ((err _) -1)))\n\
          (ev)\n(compile ev)\n(ev)\n:quit\n",
     );
     assert_eq!(out.matches("42").count(), 2, "stdout was:\n{}", out);
@@ -125,7 +125,7 @@ fn a_compiled_function_can_call_eval() {
 fn a_compiled_function_evaluating_a_form_sees_the_programs_globals() {
     let out = repl_stdout(
         "(defvar (g i32) 7)\n\
-         (defun ev () i32 (match (eval (quote g)) ((ok v) (sexpr-int v)) ((err _) -1)))\n\
+         (defun ev () i32 (match (eval (quote g)) ((ok v) (sexpr-i32 v)) ((err _) -1)))\n\
          (compile ev)\n(ev)\n:quit\n",
     );
     assert!(out.contains('7'), "stdout was:\n{}", out);

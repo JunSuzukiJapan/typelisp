@@ -8,7 +8,10 @@ fn show(h: &Heap, v: Value) -> String {
     match v {
         Value::Empty => "()".to_string(),
         Value::Int(n) => n.to_string(),
-        Value::Boxed(id) => h.float_value(id).to_string(),
+        // The reader only ever makes an `f64` box: a source literal with no
+        // declared type around it is a binary64 number, and narrowing to
+        // `f32` is the checker's doing (`float_lit_ty`), not the reader's.
+        Value::Boxed(id) => h.f64_value(id).to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
         Value::Symbol(id) => h.symbol_name(id).to_string(),

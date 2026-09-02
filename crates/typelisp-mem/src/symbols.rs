@@ -315,6 +315,17 @@ well_known_symbols! {
     KW_UNLESS => ":unless"
     KW_ELSE => ":else"
     KW_INTO => ":into"
+
+    "Appended after the narrow-integer `Sexpr` variants (2026-09-02), at the very end of the table for the reason `RETIRED_INT` records."
+    // `Sexpr`'s constructors for the five integer widths that are not `i32`
+    // — peers of `I32`/`F64`/`F32` above, listed here rather than beside
+    // them because this table is positional and appending is the only edit
+    // that moves nothing.
+    I8 => "i8"
+    I16 => "i16"
+    U8 => "u8"
+    U16 => "u16"
+    U32 => "u32"
 }
 
 

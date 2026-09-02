@@ -54,6 +54,14 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "sexpr-char" => "rt_sexpr_char",
         "sexpr-f64" => "rt_f64_value",
         "sexpr-f32" => "rt_f32_value",
+        // One shim per narrow width, not one taking the width as an operand:
+        // a builtin accessor is called with exactly its own arguments, and
+        // the type it reads is in its name.
+        "sexpr-i8" => "rt_sexpr_i8",
+        "sexpr-i16" => "rt_sexpr_i16",
+        "sexpr-u8" => "rt_sexpr_u8",
+        "sexpr-u16" => "rt_sexpr_u16",
+        "sexpr-u32" => "rt_sexpr_u32",
         "sexpr-str" => "rt_sexpr_str",
         "sexpr-sym-name" => "rt_sym_name",
         // `symbol->string` is `sexpr-sym-name` under the checker's `symbol`
@@ -322,7 +330,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 ///
 /// `rt_float_new`/`rt_float_value` (Sexpr/RtValue unification, Stage 0):
 /// `compiler.rs`'s `compile-construct-sexpr`/`compile-sexpr-field` variant-2
-/// arms call these to box/unbox a `Sexpr::Float` (`Value::Boxed`, see
+/// arms call these to box/unbox a `Sexpr::f64` (`Value::Boxed`, see
 /// `BoxedObj`) — the first `rt_*` pair for the new boxed-object store, same
 /// declare-into-every-module mechanism every other `rt_*` function here
 /// already uses.
@@ -339,7 +347,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 202] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 209] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -370,7 +378,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 202] {
         rt_stream_write_byte, rt_stream_write_string,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
         rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len,
-        rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_float_to_bignum,
+        rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_narrow_new, rt_narrow_value, rt_float_to_bignum,
         rt_float_to_ratio, rt_f64_value, rt_f32_value, rt_global_get, rt_global_new, rt_global_set, rt_int_div, rt_int_mod,
         rt_int_ash, rt_int_logbitp, rt_int_logcount, rt_int_integer_length,
         rt_f64_tan, rt_f64_asin, rt_f64_acos, rt_f64_atan, rt_f64_sinh, rt_f64_cosh, rt_f64_tanh, rt_f64_asinh, rt_f64_acosh,
@@ -380,7 +388,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 202] {
         rt_intern_path, rt_intern_symbol, rt_wk_symbol, rt_list_to_path, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
-        rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_i32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
+        rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_i32, rt_sexpr_i8, rt_sexpr_i16, rt_sexpr_u8, rt_sexpr_u16, rt_sexpr_u32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
         rt_dyn_call, rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
@@ -479,6 +487,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 202] {
         ("rt_atom", rt_atom as usize),
         ("rt_symp", rt_symp as usize),
         ("rt_sexpr_i32", rt_sexpr_i32 as usize),
+        ("rt_sexpr_i8", rt_sexpr_i8 as usize),
+        ("rt_sexpr_i16", rt_sexpr_i16 as usize),
+        ("rt_sexpr_u8", rt_sexpr_u8 as usize),
+        ("rt_sexpr_u16", rt_sexpr_u16 as usize),
+        ("rt_sexpr_u32", rt_sexpr_u32 as usize),
         ("rt_sexpr_bool", rt_sexpr_bool as usize),
         ("rt_sexpr_char", rt_sexpr_char as usize),
         ("rt_sexpr_str", rt_sexpr_str as usize),
@@ -524,6 +537,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 202] {
         ("rt_f64_value", rt_f64_value as usize),
         ("rt_f32_new", rt_f32_new as usize),
         ("rt_f32_value", rt_f32_value as usize),
+        ("rt_narrow_new", rt_narrow_new as usize),
+        ("rt_narrow_value", rt_narrow_value as usize),
         ("rt_box_kind", rt_box_kind as usize),
         ("rt_struct_new", rt_struct_new as usize),
         ("rt_struct_field_get", rt_struct_field_get as usize),

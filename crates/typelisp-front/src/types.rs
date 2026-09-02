@@ -293,20 +293,13 @@ pub fn int_width_signed(name: &str) -> Option<(u32, bool)> {
 }
 
 /// `v` cut back to `width` bits and re-extended into the 64-bit word both
-/// engines carry integers in: sign-extended when `signed`, zero-extended
-/// otherwise. See [`int_width_signed`] for why this is the one invariant.
+/// engines carry integers in. See [`int_width_signed`] for why this is the
+/// one invariant.
 ///
-/// Written as a shift pair rather than a mask because the mask for a 32-bit
-/// width is itself past `i32` — a constant this language cannot write, and
-/// the island compiles the identical pair for the same reason.
-pub fn normalize_int(v: i64, width: u32, signed: bool) -> i64 {
-    let sh = 64 - width;
-    if signed {
-        (v << sh) >> sh
-    } else {
-        (((v as u64) << sh) >> sh) as i64
-    }
-}
+/// Defined in `typelisp-mem` rather than here, because the heap enforces it
+/// too when it boxes a narrow integer (`Heap::alloc_narrow`) and an
+/// invariant with two statements of it has two chances to drift.
+pub use typelisp_mem::normalize_int;
 
 /// [`INT_TYPE_NAMES`]'s float counterpart.
 pub const FLOAT_TYPE_NAMES: [&str; 2] = ["f32", "f64"];

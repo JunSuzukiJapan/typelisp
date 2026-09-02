@@ -806,11 +806,11 @@ fn set_car_and_set_cdr_mutate() {
     let mut h = Heap::with_capacity(8);
     let c = h.cons(Value::Int(1), Value::Int(2)).unwrap();
     h.set_car(c, Value::Char('x')).unwrap();
-    let fv = h.alloc_float(3.5);
+    let fv = h.alloc_f64(3.5);
     h.set_cdr(c, fv).unwrap();
     assert_eq!(h.car(c).unwrap(), Value::Char('x'));
     match h.cdr(c).unwrap() {
-        Value::Boxed(id) => assert_eq!(h.float_value(id), 3.5),
+        Value::Boxed(id) => assert_eq!(h.f64_value(id), 3.5),
         other => panic!("expected a boxed float, got {:?}", other),
     }
 }
@@ -994,7 +994,7 @@ fn struct_field_out_of_range_panics() {
 #[should_panic(expected = "does not hold a Struct")]
 fn struct_accessor_on_a_boxed_float_panics() {
     let mut h = Heap::with_capacity(8);
-    let f = h.alloc_float(1.5);
+    let f = h.alloc_f64(1.5);
     let id = match f {
         Value::Boxed(id) => id,
         other => panic!("expected a boxed float, got {:?}", other),
@@ -1076,7 +1076,7 @@ fn struct_push_field_grows_field_count() {
 #[should_panic(expected = "does not hold a Struct")]
 fn struct_push_field_on_a_boxed_float_panics() {
     let mut h = Heap::with_capacity(8);
-    let f = h.alloc_float(1.5);
+    let f = h.alloc_f64(1.5);
     let id = match f {
         Value::Boxed(id) => id,
         other => panic!("expected a boxed float, got {:?}", other),
@@ -1088,7 +1088,7 @@ fn struct_push_field_on_a_boxed_float_panics() {
 fn is_struct_distinguishes_struct_from_float() {
     let mut h = Heap::with_capacity(8);
     let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1)]);
-    let f = h.alloc_float(1.5);
+    let f = h.alloc_f64(1.5);
     let (sid, fid) = match (s, f) {
         (Value::Boxed(sid), Value::Boxed(fid)) => (sid, fid),
         other => panic!("expected two boxed values, got {:?}", other),
@@ -1223,7 +1223,7 @@ fn keys_of_different_types_do_not_collide() {
 #[should_panic(expected = "does not hold a HashTable")]
 fn hashtable_accessor_on_a_boxed_float_panics() {
     let mut h = Heap::with_capacity(8);
-    let id = as_boxed(h.alloc_float(1.5));
+    let id = as_boxed(h.alloc_f64(1.5));
     h.hashtable_count(id);
 }
 
@@ -1249,7 +1249,7 @@ fn is_hashtable_distinguishes_hashtable_from_struct_and_float() {
     let mut h = Heap::with_capacity(8);
     let map = as_boxed(new_hashtable(&mut h));
     let s = as_boxed(alloc_named_struct(&mut h, "point", vec![Value::Int(1)]));
-    let f = as_boxed(h.alloc_float(1.5));
+    let f = as_boxed(h.alloc_f64(1.5));
     assert!(h.is_hashtable(map));
     assert!(!h.is_hashtable(s));
     assert!(!h.is_hashtable(f));
@@ -1667,14 +1667,14 @@ fn is_scope_distinguishes_scopes_from_other_boxes() {
     let scope = as_boxed(h.alloc_scope());
     let table = as_boxed(new_hashtable(&mut h));
     let strukt = as_boxed(alloc_named_struct(&mut h, "point", vec![Value::Int(1)]));
-    let float = as_boxed(h.alloc_float(1.5));
+    let float = as_boxed(h.alloc_f64(1.5));
     assert!(h.is_scope(scope));
     assert!(!h.is_scope(table));
     assert!(!h.is_scope(strukt));
     assert!(!h.is_scope(float));
     assert!(!h.is_struct(scope));
     assert!(!h.is_hashtable(scope));
-    assert!(!h.is_float(scope));
+    assert!(!h.is_f64(scope));
 }
 
 #[test]

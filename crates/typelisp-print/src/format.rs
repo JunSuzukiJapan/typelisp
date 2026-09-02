@@ -611,10 +611,11 @@ impl State<'_> {
     /// A `v` parameter consumes one argument, which must be an integer or a
     /// character (its code point).
     fn param_from_arg(&mut self) -> Result<i64, String> {
-        match self.next_arg()? {
-            Value::Int(n) => Ok(n),
+        let arg = self.next_arg()?;
+        match arg {
             Value::Char(c) => Ok(c as i64),
-            _ => Err("format: a 'v' parameter requires an integer or character argument".to_string()),
+            _ => int_of(self.heap, arg)
+                .ok_or_else(|| "format: a 'v' parameter requires an integer or character argument".to_string()),
         }
     }
 
@@ -729,9 +730,9 @@ impl State<'_> {
             return Ok(Flow::Normal);
         }
         // Plain `~[`: an integer argument selects the clause by index.
-        let sel = match self.next_arg()? {
-            Value::Int(n) => n,
-            _ => return Err("format: ~[ requires an integer argument".to_string()),
+        let arg = self.next_arg()?;
+        let Some(sel) = int_of(self.heap, arg) else {
+            return Err("format: ~[ requires an integer argument".to_string());
         };
         let chosen = if sel >= 0 && (sel as usize) < clauses.len() {
             // A default clause (if any) is not selectable by index.
@@ -1003,8 +1004,9 @@ impl State<'_> {
                     // Back up to reuse the previous argument.
                     self.pos = self.pos.saturating_sub(1);
                 }
-                let n = match self.next_arg()? {
-                    Value::Int(n) => n,
+                let arg = self.next_arg()?;
+                let n = match arg {
+                    _ if int_of(self.heap, arg).is_some() => int_of(self.heap, arg).expect("just tested"),
                     Value::Boxed(id) if self.heap.is_bignum(id) => {
                         if self.heap.bignum_value(id).to_string() == "1" { 1 } else { 2 }
                     }
@@ -1129,7 +1131,9 @@ impl State<'_> {
     /// Returns `None` for a non-integer argument.
     fn integer_in_radix(&self, v: Value, radix: u32) -> Option<String> {
         match v {
-            Value::Int(n) => Some(int_to_radix(n, radix)),
+            _ if int_of(self.heap, v).is_some() => {
+                Some(int_to_radix(int_of(self.heap, v).expect("just tested"), radix))
+            }
             Value::Boxed(id) if self.heap.is_bignum(id) => {
                 let big = self.heap.bignum_value(id);
                 Some(big.to_str_radix(radix))
@@ -1158,9 +1162,8 @@ impl State<'_> {
         }
         // No radix parameter: English/Roman spellings.
         let arg = self.next_arg()?;
-        let n = match arg {
-            Value::Int(n) => n,
-            _ => return Err("format: ~R without a radix requires an integer argument".to_string()),
+        let Some(n) = int_of(self.heap, arg) else {
+            return Err("format: ~R without a radix requires an integer argument".to_string());
         };
         let text = match (head.colon, head.at) {
             (false, false) => english_cardinal(n),
@@ -1348,12 +1351,34 @@ impl State<'_> {
     }
 }
 
+/// The integer value of `v` for the integer directives: a bare `Value::Int`
+/// (which is the `i32` case and nothing else) or a boxed narrow integer,
+/// whose stored word already *is* the number its type names. `None` for
+/// anything that isn't a fixed-width integer.
+///
+/// Every directive that wants "an integer argument" goes through this rather
+/// than matching `Value::Int` itself, so that `(format nil "~d" (the u8 200))`
+/// prints `200` instead of reporting a non-integer argument — the box is how
+/// a `u8` reaches the printer at all.
+fn int_of(heap: &Heap, v: Value) -> Option<i64> {
+    match v {
+        Value::Int(n) => Some(n),
+        Value::Boxed(id) => heap.narrow_box(id).map(|n| n.value),
+        _ => None,
+    }
+}
+
 /// The numeric value of `v` as `f64` for the float directives (accepts every
 /// numeric `Sexpr` scalar).
 fn float_of(heap: &Heap, v: Value) -> Option<f64> {
     use num_traits::ToPrimitive;
     match v {
         Value::Int(n) => Some(n as f64),
+        // A narrow integer is a number like any other: `~f` on a `u8` is
+        // binary64 arithmetic on its value, exactly as on an `i32`.
+        Value::Boxed(id) if heap.narrow_box(id).is_some() => {
+            heap.narrow_box(id).map(|n| n.value as f64)
+        }
         Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).to_f64(),
         Value::Boxed(id) if heap.is_ratio(id) => heap.ratio_value(id).to_f64(),
         // Both float widths, widened to `f64`. This is the *numeric* reader —
@@ -2169,6 +2194,15 @@ impl Renderer {
             // Positively a float box for the same reason `float_of` is: the
             // bare `Value::Boxed(id)` fall-through this replaces turned every
             // unhandled box kind into an accessor panic.
+            // A narrow integer prints as the number it is — the same text an
+            // `i32` of that value gives, `*print-base*`/`*print-radix*`
+            // included. The box exists so the *type* survives into a `Sexpr`,
+            // not to make the number print differently.
+            Value::Boxed(id) if heap.narrow_box(id).is_some() => {
+                let n = heap.narrow_box(id).expect("just tested").value;
+                let text = Self::integer_text(ctx, || n.to_string(), |r| int_to_radix(n, r))?;
+                out.push_str(&text);
+            }
             Value::Boxed(id) if heap.float_box(id).is_some() => match heap.float_box(id) {
                 Some(FloatBox::F32(f)) => out.push_str(&trim_f32(f)),
                 Some(FloatBox::F64(f)) => out.push_str(&trim_f64(f)),

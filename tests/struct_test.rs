@@ -402,11 +402,11 @@ fn sexpr_typed_field_reads_back_as_a_sexpr_not_a_scalar() {
     // `RtValue::Int(42)` — which no `Sexpr` constructor pattern matches —
     // so this fell through to the wildcard arm.
     // `match` on a `Sexpr` is fenced off (Symbol/Sexpr redesign Phase 5); the
-    // stored node is read back with `sexpr-int`, which still panics (rather
+    // stored node is read back with `sexpr-i32`, which still panics (rather
     // than silently succeeding) if `content` decoded to a bare scalar.
     let src = "(defstruct holder (content Option<Sexpr>)) \
                (let ((h (holder::new '42))) \
-                 (sexpr-int (content h)))";
+                 (sexpr-i32 (content h)))";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 
@@ -417,12 +417,12 @@ fn sexpr_typed_field_holding_a_quoted_float_reads_back_as_a_sexpr() {
     // `f64` field stores).
     let src = "(defstruct holder (content Option<Sexpr>)) \
                (let ((h (holder::new '2.5))) \
-                 (sexpr-float (content h)))";
+                 (sexpr-f64 (content h)))";
     // A float is a `BoxedObj::Float` since the scalar unification, so reading
     // the result needs the heap it lives in.
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
-        typelisp::Value::Boxed(id) if h.is_float(id) => assert_eq!(h.float_value(id), 2.5),
+        typelisp::Value::Boxed(id) if h.is_f64(id) => assert_eq!(h.f64_value(id), 2.5),
         other => panic!("expected an f64, got {:?}", other),
     }
 }
@@ -432,7 +432,7 @@ fn setf_then_read_of_a_sexpr_typed_field_round_trips() {
     let src = "(defstruct holder (content Option<Sexpr>)) \
                (let ((h (holder::new '1))) \
                  (setf h::content '99) \
-                 (sexpr-int h::content))";
+                 (sexpr-i32 h::content))";
     assert_eq!(eval_ok(src), Value::Int(99));
 }
 
@@ -443,7 +443,7 @@ fn match_on_a_struct_binds_a_sexpr_typed_field_as_a_sexpr() {
     // of the accessor path the tests above cover.
     let src = "(defstruct holder (content Option<Sexpr>) (k i32)) \
                (match (holder::new '7 3) \
-                 ((new c n) (+ (sexpr-int c) n)))";
+                 ((new c n) (+ (sexpr-i32 c) n)))";
     assert_eq!(eval_ok(src), Value::Int(10));
 }
 

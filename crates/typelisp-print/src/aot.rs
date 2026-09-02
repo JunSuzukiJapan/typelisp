@@ -122,22 +122,24 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
 /// this hook used to be.
 ///
 /// The type key is read off the value the same way the interpreter reads it
-/// (`Interp::format_call`): a boxed value carries its own, and each immediate
-/// maps to exactly the type it *is*. `Value::Int` is the one that does not:
-/// `i32` and `i64` share the raw word, so both are tried and it is an error
-/// only when both were registered.
+/// (`Interp::format_call`): a numeric box names the primitive it is, any
+/// other box carries its own key, and each immediate maps to exactly the
+/// type it *is* — `Value::Int` included, which is an `i32` and nothing else
+/// now that the narrow widths are boxed.
 fn aot_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
     let keys: Vec<String> = match v {
-        Value::Boxed(id) => match stored_type_key(heap, id) {
-            Some(k) => vec![k.to_string()],
-            None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
-        },
+        Value::Boxed(id) => {
+            match heap.primitive_box_type_name(id).map(str::to_string).or_else(|| stored_type_key(heap, id).map(str::to_string)) {
+                Some(k) => vec![k],
+                None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
+            }
+        }
         Value::Str(_) => vec!["string".to_string()],
         Value::Bool(_) => vec!["bool".to_string()],
         Value::Char(_) => vec!["char".to_string()],
         Value::Symbol(_) => vec!["symbol".to_string()],
         Value::Empty | Value::Cons(_) | Value::Path(_) => vec!["sexpr".to_string()],
-        Value::Int(_) => vec!["i64".to_string(), "i32".to_string()],
+        Value::Int(_) => vec!["i32".to_string()],
     };
     let found: Vec<usize> = FORMAT_CALL
         .with(|t| keys.iter().filter_map(|k| t.borrow().get(&(k.clone(), name.to_string())).copied()).collect());

@@ -784,6 +784,18 @@ impl Registry {
         root.fns.insert("sexpr-i32".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-f64".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-f32".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // One extractor per integer type, not one per machine word: the five
+        // narrow widths are separate `Sexpr` variants carrying separate boxes
+        // (`BoxedObj::Narrow`), and each of these returns exactly its own.
+        for (name, ty) in [
+            ("sexpr-i8", Type::I8),
+            ("sexpr-i16", Type::I16),
+            ("sexpr-u8", Type::U8),
+            ("sexpr-u16", Type::U16),
+            ("sexpr-u32", Type::U32),
+        ] {
+            root.fns.insert(name.to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: ty, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        }
         root.fns.insert("sexpr-bool".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-char".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Char, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("sexpr-str".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
@@ -1217,8 +1229,9 @@ fn builtin_error_defs() -> Vec<AdtDef> {
 
 /// The built-in `Sexpr` sum type (the result type of `read`).
 ///
-/// `Sexpr = i32 | f64 | f32 | Char | Bool | Sym | Str | Cons(Option<Sexpr>,
-/// Option<Sexpr>) | Bignum | Ratio | Path`: every S-expression **but** the
+/// `Sexpr = i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | Char | Bool | Sym |
+/// Str | Cons(Option<Sexpr>, Option<Sexpr>) | Bignum | Ratio | Path`: every
+/// S-expression **but** the
 /// empty list, which is `Option<Sexpr>`'s `none` since the null-elimination
 /// work (`docs/dev/null-elimination-plan.md`). So the type S-expression data
 /// is passed around as is `Option<Sexpr>`, not `Sexpr` — that is the point of
@@ -1274,7 +1287,19 @@ fn sexpr_def() -> AdtDef {
             // variant numbers are burned into the island's IR and into
             // compiled code, and because `Repr::field_kind` reads off the
             // same numbering (`Unit` was moved out to 100 to make room).
+            //
+            // Eight numeric variants where there were two. `Sexpr` is the
+            // one place a value's type is not written down anywhere else, so
+            // it is the one place every width has to be its own variant —
+            // folding `u8` and `i32` into one `int` did not merely lose the
+            // name, it let `(the u32 4000000000)` come back out as an `i32`
+            // holding a number no `i32` can hold.
             Variant { name: "f32".to_string(), fields: vec![Type::F32] },
+            Variant { name: "i8".to_string(), fields: vec![Type::I8] },
+            Variant { name: "i16".to_string(), fields: vec![Type::I16] },
+            Variant { name: "u8".to_string(), fields: vec![Type::U8] },
+            Variant { name: "u16".to_string(), fields: vec![Type::U16] },
+            Variant { name: "u32".to_string(), fields: vec![Type::U32] },
         ],
         assoc: sexpr_assoc(),
         public: true,
@@ -1723,7 +1748,7 @@ pub fn llvm_builder_def() -> AdtDef {
     // Logical (unsigned) vs. arithmetic (sign-extending) right shift: the
     // tagged representation's payload bits must never be sign-extended back
     // in when shifting a Cons/Symbol/Str/Path pointer or index out from
-    // under its tag (`build-lshr`), but a genuine signed `Sexpr::Int`
+    // under its tag (`build-lshr`), but a genuine signed `Sexpr::i32`
     // fixnum's sign bit must survive untagging (`build-ashr`) or negative
     // integers would come back corrupted.
     assoc.insert("build-lshr".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));

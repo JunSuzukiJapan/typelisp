@@ -17,4 +17,26 @@ pub mod value;
 pub use errors::{Error, Loc};
 pub use heap::{base_type_key, inner_type_key, Heap, RootScope};
 pub use symbols::{wk, NsId, SymRef, Symbol, BUILTIN_SYMBOLS, NOT_WELL_KNOWN};
-pub use value::{BoxId, ConsRef, FloatBox, PathId, StrId, TypeKeyId, Value, BUILTIN_TYPE_KEYS};
+pub use value::{BoxId, ConsRef, FloatBox, NarrowInt, PathId, StrId, TypeKeyId, Value, BUILTIN_TYPE_KEYS};
+
+/// `v` cut back to `width` bits and re-extended into the 64-bit word both
+/// engines carry integers in: sign-extended when `signed`, zero-extended
+/// otherwise.
+///
+/// This is *the* invariant of the integer representation — a value always
+/// **is** the number its type names — so it lives at the bottom of the crate
+/// stack, below both the heap that stores narrow integers
+/// ([`Heap::alloc_narrow`]) and the front end that decides their types
+/// (`typelisp_front::types::normalize_int` re-exports this one).
+///
+/// Written as a shift pair rather than a mask because the mask for a 32-bit
+/// width is itself past `i32` — a constant this language cannot write, and
+/// the island compiles the identical pair for the same reason.
+pub fn normalize_int(v: i64, width: u32, signed: bool) -> i64 {
+    let sh = 64 - width;
+    if signed {
+        (v << sh) >> sh
+    } else {
+        (((v as u64) << sh) >> sh) as i64
+    }
+}

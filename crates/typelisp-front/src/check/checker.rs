@@ -2709,12 +2709,14 @@ impl Checker {
     /// plain list — see [`sexpr_ty`]'s doc comment. `elem_ty` itself needs no
     /// wrapping (already `Sexpr`); every other supported element type goes
     /// through its own `Sexpr` constructor (`sexpr_ctor_for`) exactly as if
-    /// the caller had written e.g. `(Int e)` by hand — `construct_sexpr`
-    /// (`crate::eval::interp`) only ever reads the field's *runtime* value
-    /// (an `i32` and a `u8` argument both evaluate to a `Value::Int`),
-    /// so this never goes through the normal field-type validation
-    /// `check_construct` would otherwise apply, but is sound for the same
-    /// reason. An `elem_ty` with no `Sexpr` encoding (e.g. `Option<T>`) is a
+    /// the caller had written e.g. `(u8 e)` by hand. The variant is chosen
+    /// from `elem_ty` itself and its field type *is* `elem_ty`, so
+    /// `construct_form` is handed a field list that already agrees — nothing
+    /// is being waved past `check_construct`. (It was, while every integer
+    /// width shared one `int` variant whose field said `i32`: the argument
+    /// and the declared field type genuinely disagreed, and the mismatch was
+    /// excused by both evaluating to a `Value::Int`.) An `elem_ty` with no
+    /// `Sexpr` encoding (e.g. `Option<T>`) is a
     /// `TypeError` here, not a panic — unlike most of `&rest`'s checking,
     /// this can't happen any earlier than this, since a generic `&rest`'s
     /// declared type may only resolve to something concrete at a given call
@@ -2732,7 +2734,7 @@ impl Checker {
         // take.
         // `is_heap_repr` answers about the **interpreter's** representation,
         // where an `f64` is a `BoxedObj::Float` and therefore already a
-        // `Sexpr::Float`. A *compiled* `f64` is neither boxed nor tagged: it
+        // `Sexpr::f64`. A *compiled* `f64` is neither boxed nor tagged: it
         // is the raw `f64::to_bits` pattern in an i64 slot, so retyping it
         // hands the printer a word whose low bits happen to read as the `Int`
         // tag — `(format false "~a" x)` in a compiled function printed
@@ -8573,7 +8575,7 @@ impl Checker {
                 }
                 Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(n)])?, ty)
             }
-            // A `Value::Boxed` read-literal is `Sexpr::Float`, `bignum` (an
+            // A `Value::Boxed` read-literal is `Sexpr::f64`, `bignum` (an
             // integer literal past `i32`'s range), or `ratio` (`n/d` syntax)
             // — all heap-boxed for the same reason (`BoxedObj`'s doc comment).
             // The literal node keeps the *same box* the reader made rather
@@ -11852,25 +11854,23 @@ impl Checker {
             let mut named = false;
             let mut unprovable = false;
             for item in items {
-                let Some(paths) = format_call_owners(&item.ty) else {
+                let Some(path) = format_call_owners(&item.ty) else {
                     unprovable = true;
                     continue;
                 };
-                for path in paths {
-                    let Some(def) = self.reg.type_def(&path) else {
-                        // A type variable: no definition to ask until this
-                        // body is specialized.
-                        unprovable = true;
-                        continue;
-                    };
-                    if crate::types::path_is_builtin(&path, "sexpr") {
-                        unprovable = true;
-                    }
-                    let Some(af) = def.assoc.get(&name) else { continue };
-                    if directive_shaped(&af.sig) {
-                        self.format_calls.borrow_mut().insert((path, name.clone()));
-                        named = true;
-                    }
+                let Some(def) = self.reg.type_def(&path) else {
+                    // A type variable: no definition to ask until this
+                    // body is specialized.
+                    unprovable = true;
+                    continue;
+                };
+                if crate::types::path_is_builtin(&path, "sexpr") {
+                    unprovable = true;
+                }
+                let Some(af) = def.assoc.get(&name) else { continue };
+                if directive_shaped(&af.sig) {
+                    self.format_calls.borrow_mut().insert((path, name.clone()));
+                    named = true;
                 }
             }
             if !named && !unprovable {
@@ -13524,9 +13524,9 @@ impl Checker {
         // Sexpr downcast patterns (design plan's "出す" section — the CL-
         // conformant counterpart of Stage 1's "入れる" retype/wrap). Only
         // attempted against a `Sexpr` scrutinee, and only for a head that
-        // isn't one of `Sexpr`'s own eleven built-in variant names, so
-        // `(int n)`/`(cons a d)`/... keep meaning exactly what they always
-        // have.
+        // isn't one of `Sexpr`'s own built-in variant names, so
+        // `(i32 n)`/`(u8 n)`/`(cons a d)`/... keep meaning exactly what they
+        // always have.
         if is_sexpr_expectation(expected) {
             if let Value::Symbol(id) = parts[0] {
                 if id.is(wk::THE) {
@@ -13535,7 +13535,12 @@ impl Checker {
             }
             const BUILTIN_SEXPR_CTORS: &[u32] = &[
                 wk::NIL,
+                wk::I8,
+                wk::I16,
                 wk::I32,
+                wk::U8,
+                wk::U16,
+                wk::U32,
                 wk::F64,
                 wk::F32,
                 wk::CHAR,
@@ -13562,14 +13567,14 @@ impl Checker {
         };
 
         // An `Option<Sexpr>` scrutinee accepts `Sexpr`'s own constructors
-        // directly, as if the `some` had already been peeled: `(int n)` and
+        // directly, as if the `some` had already been peeled: `(i32 n)` and
         // `(none)` sit in one arm list. Without this a caller would have to
         // nest — `((some x) (match x ((int n) ..) ..)) ((none) ..)` — which
         // is a plain regression against the single-level `match` that
         // `Sexpr` (with its own `nil`) allows today.
         //
         // Exactly `Option<sexpr>`, matching the niche's own rule
-        // (`check/repr.rs`): in an `Option<Option<Sexpr>>` an `(int n)` arm
+        // (`check/repr.rs`): in an `Option<Option<Sexpr>>` an `(i32 n)` arm
         // could not say which level it peeled.
         //
         // The `some` needs no test of its own here. Under the niche the
@@ -13577,8 +13582,10 @@ impl Checker {
         // already rejects the empty-list immediate, so re-checking the
         // pattern against `Sexpr` produces the right code as it stands.
         if is_option_of_sexpr(expected) {
-            const BUILTIN_SEXPR_CTORS: &[&str] =
-                &["nil", "i32", "f64", "f32", "char", "bool", "sym", "str", "cons", "bignum", "ratio", "path"];
+            const BUILTIN_SEXPR_CTORS: &[&str] = &[
+                "nil", "i8", "i16", "i32", "u8", "u16", "u32", "f64", "f32", "char", "bool", "sym",
+                "str", "cons", "bignum", "ratio", "path",
+            ];
             if BUILTIN_SEXPR_CTORS.contains(&ctor.as_str()) {
                 return self.check_ctor_pattern(heap, interp, env, &sexpr_ty(), v);
             }
@@ -14108,14 +14115,18 @@ fn is_option_of_sexpr(ty: &Type) -> bool {
 /// nothing else has a lossless `Sexpr` encoding to collect into a list with.
 fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
     match elem_ty {
-        // Every integer width is one `Sexpr::Int` and both float widths one
-        // `Sexpr::Float`: the widths differ statically and share a runtime
-        // value, so there is nothing else they could encode as. Written as
-        // guards rather than a variant list so a width added later is
-        // encodable the day it is added.
+        // One variant per width, spelled by the type's own name. There is no
+        // folding left to do: `Sexpr` has an `i8` and a `u32` because the
+        // types do, and a value that arrives here as a `u32` comes back out
+        // of the `Sexpr` as a `u32`.
+        Type::I8 => Some("i8"),
+        Type::I16 => Some("i16"),
+        Type::I32 => Some("i32"),
+        Type::U8 => Some("u8"),
+        Type::U16 => Some("u16"),
+        Type::U32 => Some("u32"),
         Type::F32 => Some("f32"),
-        _ if elem_ty.is_integer() => Some("i32"),
-        _ if elem_ty.is_float() => Some("f64"),
+        Type::F64 => Some("f64"),
         Type::Bignum => Some("bignum"),
         Type::Ratio => Some("ratio"),
         Type::Char => Some("char"),
@@ -14305,24 +14316,23 @@ fn mangled_method_name(base: &str, args: &[Type]) -> String {
     format!("{} <{}>", base, args.iter().map(mangle_type).collect::<Vec<_>>().join(","))
 }
 
-/// The types whose method tables a `~/name/` directive would look `name` up
-/// in, or `None` when this type answers no such question — a trait object
-/// (the concrete type is gone), or anything with no name to key a table by.
+/// The type whose method table a `~/name/` directive would look `name` up in,
+/// or `None` when this type answers no such question — a trait object (the
+/// concrete type is gone), or anything with no name to key a table by.
 ///
 /// The same mapping [`crate::eval::interp::Interp::format_call`] makes at run
 /// time, from the static side: each primitive maps to exactly the type it is.
-fn format_call_owners(ty: &Type) -> Option<Vec<Path>> {
+///
+/// One type, not a list. It returned all six integer widths while a narrow
+/// integer's machine word was indistinguishable from an `i32`'s and the
+/// runtime had to try them all; now that the five narrow widths reach the
+/// printer as boxes that name themselves, the static answer and the runtime
+/// answer are the same single type.
+fn format_call_owners(ty: &Type) -> Option<Path> {
     match ty {
-        Type::Named(p, _) => Some(vec![p.clone()]),
+        Type::Named(p, _) => Some(p.clone()),
         Type::Dyn(..) => None,
-        // Every width at once, and exactly the set the runtime tries: an
-        // integer's machine word does not say which width was written, so
-        // `Interp::format_call` looks in all six whatever the static type was.
-        // A static scan that used the written width instead would reject
-        // `(format false "~/twice/" 7)` — the literal is `i32`, the method
-        // could be on `u8` — for a call that runs.
-        t if t.is_integer() => Some(crate::types::INT_TYPE_NAMES.iter().map(|n| Path::root(n)).collect()),
-        other => crate::types::prim_type_path(other).map(|p| vec![p]),
+        other => crate::types::prim_type_path(other),
     }
 }
 

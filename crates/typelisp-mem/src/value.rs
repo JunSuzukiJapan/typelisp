@@ -286,6 +286,23 @@ pub enum FloatBox {
     F64(f64),
 }
 
+/// A boxed narrow integer, read back as the type it actually is.
+///
+/// The integer counterpart of [`FloatBox`], and for the same reason: `i8`,
+/// `i16`, `u8`, `u16` and `u32` all ride in an `i64` carrier, so the carrier
+/// alone cannot say which of the five it is. Reading one out means being told.
+///
+/// `width` is in bits and `signed` says which end the value was extended
+/// from; `value` is normalized (`crate::normalize_int`'s invariant: the word
+/// *is* the number the type names, sign-extended or zero-extended into 64
+/// bits), so `value` may be compared and printed directly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NarrowInt {
+    pub width: u8,
+    pub signed: bool,
+    pub value: i64,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum BoxedObj {
     /// A `f32`, stored as a `f32`: the type says binary32, so the box holds
@@ -293,6 +310,20 @@ pub(crate) enum BoxedObj {
     /// width could drift from the type.
     Float32(f32),
     Float64(f64),
+    /// An `i8`/`i16`/`u8`/`u16`/`u32`, carrying its own width and signedness.
+    ///
+    /// Boxed for the same reason a float is: the tagged word has three bits
+    /// of tag and all eight patterns are spoken for, so a value that must
+    /// also say *which* integer type it is has nowhere to put that. A plain
+    /// `Value::Int` is the `i32` case and needs no box — it is the width the
+    /// bare tagged word already means.
+    ///
+    /// A narrow integer is boxed **only where its type is not otherwise
+    /// written down**: inside a `Sexpr`. In a statically typed position (a
+    /// local, a parameter, a `defstruct` field) the declared type says the
+    /// width, and the value stays the raw normalized word it always was —
+    /// nothing about arithmetic changes.
+    Narrow(NarrowInt),
     /// A `bignum` (arbitrary-precision integer, CL's bignum). Heap-boxed for
     /// the same reason `Float` is — the value doesn't fit alongside a tag in
     /// one 64-bit word — with the payload (a `num_bigint::BigInt`) living in
@@ -525,7 +556,7 @@ pub enum Value {
     /// decides whether each segment names a module or a type.
     Path(PathId),
     /// A heap-resident, GC-collected boxed object — see [`BoxedObj`].
-    /// `Sexpr::Float` is the first case (`f64` doesn't fit an immediate
+    /// `Sexpr::f64` is the first case (`f64` doesn't fit an immediate
     /// tagged word); further "Lisp-writable" runtime values (structs,
     /// closures, `HashTable<K,V>`, `Scope<V>`) are planned to migrate here
     /// too, per the `Sexpr`/`RtValue` unification plan.

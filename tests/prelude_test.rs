@@ -89,7 +89,7 @@ fn eval_f64(src: &str) -> f64 {
         let opt = cell.borrow();
         let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
         match v {
-            typelisp::Value::Boxed(id) if h.is_float(id) => h.float_value(id),
+            typelisp::Value::Boxed(id) if h.is_f64(id) => h.f64_value(id),
             other => panic!("expected an f64, got {:?}", other),
         }
     })
@@ -233,7 +233,7 @@ fn eq_on_sexpr_cons_is_identity_not_structural() {
 
 #[test]
 fn eq_on_sexpr_float_is_identity_not_value() {
-    // `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`), so two
+    // `Sexpr::f64` is heap-boxed (`Value::Boxed`, see `BoxedObj`), so two
     // separately-quoted equal floats are `Cons`/`Str`-like: not the same
     // box, hence not `eq` — see `eql_on_sexpr_float_compares_by_value` for
     // the predicate that *does* treat them as equivalent.
@@ -257,7 +257,7 @@ fn eql_on_sexpr_float_is_false_for_different_values() {
 fn equal_on_sexpr_float_compares_by_value() {
     // `equal` delegates to `eql` for non-`Cons`/`Str` atoms (CL's own
     // definition) — regression check for the catch-all arm switching from
-    // `eq` to `eql` when `Sexpr::Float` became heap-boxed.
+    // `eq` to `eql` when `Sexpr::f64` became heap-boxed.
     assert_eq!(eval_ok("(equal (quote 1.5) (quote 1.5))"), Value::Bool(true));
 }
 
