@@ -1,6 +1,6 @@
 # 幅を捨てている設計をすべて無くす
 
-状態: 着手（2026-09-01、ブランチは `feature/preserve-bit-width` を予定）
+状態: 完了（2026-09-02、ブランチ `feature/preserve-bit-width`、S1〜S7 すべて）
 前提: `docs/dev/remove-i64-plan.md`（64bit 幅の整数型の削除）が完了していること。
 
 ## 方針（決定事項）
@@ -100,6 +100,49 @@ producer が 2 つある」と明記している）、`Unit` が「その番号�
 
 値が幅を言えるようになるので候補は 1 つに定まり、曖昧さエラーが消える。
 `Interp::format_call` と `Checker::format_call_owners` を単一候補に戻す。
+
+## 進捗（2026-09-02）
+
+- **S1 完了**: `BoxedObj::Float32`/`Float64`、`FloatBox`、`Repr::F32`/`F64`、
+  `Sexpr` の `f32`(11)、核 IR の `int-any-width`/`float-any-width`、島の再生成。
+  `(the f32 0.1)` が `0.1` と印字されるようになった。
+- **S2 完了**: `BoxedObj::Narrow(NarrowInt)`。`Heap::alloc_narrow`/`narrow_box`/
+  `is_narrow`、`rt_narrow_new`/`rt_narrow_value`、`rt_box_kind` の 5..9、
+  `eql`（幅ごと）/`equalp`（幅を跨ぐ）、印字。`normalize_int` の 3 つ目の写しを
+  `typelisp-mem` の 1 つに畳んだ。
+- **S3/S4 完了**: `Sexpr` の 12..16（`i8 i16 u8 u16 u32`）、アクセサ
+  `sexpr-i8` 〜 `sexpr-u32`、`sexpr_ctor_for` の畳み込み廃止、島の
+  `compile-sexpr-tag-test`/`compile-sexpr-field`/`compile-construct-sexpr`。
+  **S1 の穴も塞いだ**: `compile-sexpr-tag-test` に `f32`(11) の分岐が無く、
+  compiled な `match` が `(f32 x)` の腕で panic していた。
+- **S5 完了**: `~/name/` の候補が単一に。`Interp::format_call`/
+  `aot_format_call`/`Checker::format_call_owners`。ついでに `f64`/`bignum`/
+  `ratio` 受け手の `~/name/` が「型名を持たない」で落ちていたのも直した
+  （`Heap::primitive_box_type_name`）。
+
+- **S6/S7 完了**: テストの追随（核 IR の `(int …)`→`(int-any-width …)`、`Sexpr` の
+  `(Int …)`→`(i32 …)`、`sexpr-int`→`sexpr-i32`）と直列全実行。
+  幅ごとの往復テストを 5 本（インタプリタ）+ 3 本（compiled）新設。
+
+### S6/S7 で出た赤 52 件の内訳
+
+| ターゲット | 件数 | 中身 |
+|---|---|---|
+| `--lib` | 46+43+1 | 手書きの核 IR が `(int …)` のまま（3 クレートに分散） |
+| `compile_test` | 3 | 手書きの島 IR `(0 int 0 5)` |
+| `numeric_widths_test` | 1 | **期待値のほうが古い**（`0.3333333432674408`）——今回消した欠陥そのものを固定していた |
+| `printer_test` | 2 | **削除した挙動を固定していた**（幅の曖昧さエラー・別の幅のメソッドに届く） |
+
+書き換えた `printer_test` が**本物のバグを 1 件釣った**: `format_call` が受け手を
+宣言型で渡していなかった（`docs/dev/TODO.md` の該当節）。
+
+直列全実行（`scripts/test-serial.sh`）は 118 個の `test result` すべて ok、
+`ALL TESTS PASSED (serial)`。`cargo check --all-targets` は警告 0 件。
+
+最後に `NarrowInt::wsig` を削除した。`pub` なだけで呼び出しが 1 つも無く、
+`pub` が dead code 警告を消していた（[[typelisp-pub-hides-dead-code]] の形）。
+必要になるのは「箱から `wsig` を作る」向きだが、島は宣言型から定数として
+`wsig` を出すので、その向きは存在しない。
 
 ## 段階
 

@@ -172,7 +172,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "cons" "car" "cdr"
     ;; Sexpr accessors/constructors used by macro bodies (§5)
     "sexpr-car" "sexpr-cdr" "sexpr-cons" "sexpr-consp" "sexpr-null"
-    "sexpr-atom" "sexpr-symp" "sexpr-sym-name" "sexpr-int" "sexpr-float"
+    "sexpr-atom" "sexpr-symp" "sexpr-sym-name"
+    "sexpr-i8" "sexpr-i16" "sexpr-i32" "sexpr-u8" "sexpr-u16" "sexpr-u32"
+    "sexpr-f32" "sexpr-f64"
     "sexpr-char" "sexpr-bool" "sexpr-str" "sexpr-append" "sexpr-map"
     ;; equality
     "eq" "eql" "equal" "equalp"

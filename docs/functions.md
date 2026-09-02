@@ -392,7 +392,7 @@ Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用�
 | `car` | `(car p)` | `cons-cell<A,B>→A` | 先頭（`defstruct` フィールドアクセサ、インスタンスメソッドとして呼べる） |
 | `cdr` | `(cdr p)` | `cons-cell<A,B>→B` | 残り（同上） |
 
-`read` が返すデータ型 `Sexpr`（`Int | Float | Char | Bool | Sym | Str | Cons | Bignum | Ratio | Path`）
+`read` が返すデータ型 `Sexpr`（`i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | Char | Bool | Sym | Str | Cons | Bignum | Ratio | Path`）
 自体のセル操作は、上記の汎用 `cons`/`car`/`cdr` とは別の内部 island 層 `sexpr-*` が担う
 （`read`/`eval`/`print`/`defmacro`/自己ホストコンパイラ `compiler.rs` の内部でのみ使われ、
 ユーザー向けライブラリ関数からは `sexpr-*` を直接呼ぶ場面はほぼ無い）。
@@ -417,13 +417,23 @@ Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用�
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | 空リストかどうか |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | `Cons` でないか |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | `Sym`（シンボル）かどうか |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→i32` | `Int` の中身を取り出す。`Int` でなければ panic |
-| `sexpr-float` | `(sexpr-float s)` | `Option<Sexpr>→f64` | `Float` の中身。型違いは panic |
+| `sexpr-i8` | `(sexpr-i8 s)` | `Option<Sexpr>→i8` | `i8` 変種の中身。型違いは panic |
+| `sexpr-i16` | `(sexpr-i16 s)` | `Option<Sexpr>→i16` | `i16` 変種の中身。型違いは panic |
+| `sexpr-i32` | `(sexpr-i32 s)` | `Option<Sexpr>→i32` | `i32` 変種の中身。型違いは panic |
+| `sexpr-u8` | `(sexpr-u8 s)` | `Option<Sexpr>→u8` | `u8` 変種の中身。型違いは panic |
+| `sexpr-u16` | `(sexpr-u16 s)` | `Option<Sexpr>→u16` | `u16` 変種の中身。型違いは panic |
+| `sexpr-u32` | `(sexpr-u32 s)` | `Option<Sexpr>→u32` | `u32` 変種の中身。型違いは panic |
+| `sexpr-f32` | `(sexpr-f32 s)` | `Option<Sexpr>→f32` | `f32` 変種の中身。型違いは panic |
+| `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f64` | `f64` 変種の中身。型違いは panic |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | `Char` の中身。型違いは panic |
 | `sexpr-bool` | `(sexpr-bool s)` | `Option<Sexpr>→bool` | `Bool` の中身。型違いは panic |
 | `sexpr-str` | `(sexpr-str s)` | `Option<Sexpr>→string` | `Str` の中身。型違いは panic |
 | `sexpr-sym-name` | `(sexpr-sym-name s)` | `Option<Sexpr>→string` | `Sym` の名前。型違いは panic |
 | `eq` `eql` | `(op a b)` | `(Option<Sexpr>,Option<Sexpr>)→bool` | 同一性比較（`Cons`/`Str` はポインタ、それ以外は値） |
+
+数値のアクセサが幅ごとに 8 本あるのは、`Sexpr` が「値の型がほかのどこにも書かれていない
+唯一の場所」だから。`Sexpr` に入れた `u8` は `u8` の変種として入り、`(sexpr-u8 s)` でしか
+出てこない。`(sexpr-i32 s)` に渡せば panic する——黙って幅を広げて答えることはしない。
 
 上の `sexpr-*` アクセサは Rust 組み込み。これらの上に、`Sexpr` リスト全体を扱う次の2つが
 `prelude.rs` に typelisp の `defun` として定義されている（`defmacro` の本体で引数の `Sexpr`

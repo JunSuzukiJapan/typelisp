@@ -858,7 +858,7 @@ docstring を返す（`(documentation Type::method)` はメソッド専用）。
 (defun find-first ((xs Sexpr)) i32
   (catch 'found
     (dolist (x xs)
-      (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+      (match x ((i32 n) (if (> n 10) (throw 'found n) ())) (_ ())))
     -1))                            ; 見つからなければ通常どおり末尾の値
 ```
 

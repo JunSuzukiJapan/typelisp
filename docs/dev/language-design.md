@@ -19,7 +19,9 @@
 - **真偽値は `true`/`false`**。`nil`/`t` は言語に存在しない。
 - **`nil` の代替は `Option<T>`**（組み込みの直和型——`Some(value T)`/`None` の2構成子）。
 - **`read` の戻り値は組み込み直和型 `Sexpr`**。
-  `Sexpr = Nil|Int|Float|Char|Bool|Sym|Str|Cons(Sexpr, Sexpr)`。
+  `Sexpr = Nil|i8|i16|i32|u8|u16|u32|f32|f64|Char|Bool|Sym|Str|Cons(Sexpr, Sexpr)|Bignum|Ratio|Path`。
+  数値の構成子が幅ごとに分かれているのは、`Sexpr` が「値の型がほかのどこにも
+  書かれていない唯一の場所」だから（`docs/dev/preserve-bit-width-plan.md`）。
   空リスト `()` は `Sexpr` の値としての `Nil`（cons と並ぶ第一級の構成子）。car/cdr はどちらも `Sexpr`
   （`Option` で包まない）。`Sexpr` 専用の cons 操作は `sexpr-cons`/`sexpr-car`/`sexpr-cdr`/
   `sexpr-consp`/`sexpr-null`/`sexpr-atom`（内部 island 層、§4.1）。裸の `cons`/`car`/`cdr` は
@@ -97,8 +99,10 @@
   裸名のスコープ解決・各セグメントが module か型かの判定は、すべて型検査器（checker）が行う。
 - **Sexpr コアの拡張**: 読み取り結果のデータ型 `Sexpr` に `Path` を追加する。
   ```
-  Sexpr = Nil | Int | Float | Char | Bool | Sym | Str
+  Sexpr = Nil | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64
+        | Char | Bool | Sym | Str
         | Cons(Sexpr, Sexpr)
+        | Bignum | Ratio
         | Path([Sym, ...])          ; 例 'std::process::exit
   ```
   （`Nil`/`Cons(Sexpr, Sexpr)`/`Path` いずれも実装済み——`Value::Path`は`crates/typelisp-mem/src/heap.rs`
