@@ -83,6 +83,12 @@ pub fn is_enum_ty_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> b
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Repr {
     /// Every integer width — a raw machine word.
+    ///
+    /// Named `int-any-width` in the core IR: one representation really does
+    /// serve all six, because the word already holds the number the type
+    /// names (sign- or zero-extended, `types::normalize_int`). What a width
+    /// still decides is how the value is *boxed*, and that is
+    /// [`Repr::field_kind`]'s business, not this tag's.
     Int,
     /// `f64` — raw `f64::to_bits` in an `i64`.
     F64,
@@ -250,7 +256,7 @@ impl Repr {
     /// the head of the list for a parametric one.
     pub fn tag(&self) -> &'static str {
         match self {
-            Repr::Int => "int",
+            Repr::Int => "int-any-width",
             Repr::F64 => "f64",
             Repr::F32 => "f32",
             Repr::Char => "char",
@@ -563,7 +569,7 @@ mod tests {
             let v = r.write(h).expect("write failed");
             crate::check::core::print(h, v)
         };
-        assert_eq!(printed(&mut h, Repr::Int), "int");
+        assert_eq!(printed(&mut h, Repr::Int), "int-any-width");
         assert_eq!(printed(&mut h, Repr::Scope(Box::new(Repr::Handle))), "(scope handle)");
         assert_eq!(printed(&mut h, Repr::Vector(Box::new(Repr::Int))), "(vector int)");
         assert_eq!(

@@ -103,7 +103,7 @@ fn walk(
         // No sub-forms at all. `quote`'s datum is the important one: it is
         // user data, and descending into it is exactly the mistake the module
         // comment describes.
-        wk::INT | wk::FLOAT | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::BREAK => Ok(()),
+        wk::INT_ANY_WIDTH | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::BREAK => Ok(()),
 
         wk::VAR => {
             note(sym(heap, form, 0)?, bound, siblings, seen, order);
@@ -470,7 +470,7 @@ fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymRef>) -> Result<()
             }
             Ok(())
         }
-        wk::INT | wk::FLOAT | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::VAR | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::BREAK => Ok(()),
+        wk::INT_ANY_WIDTH | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::VAR | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::BREAK => Ok(()),
         _ => {
             for f in plain_sub_forms(heap, form, tag)? {
                 walk_nested(heap, f, out)?;

@@ -8,7 +8,7 @@
 //! of the program uses.
 //!
 //! Compiles the node shapes `core_bridge::to_island` actually produces a
-//! real translation for today — integer literals (`(int n)`), `i64`
+//! real translation for today — integer literals (`(int-any-width n)`), fixed-width
 //! arithmetic (`(var name is-fn)`/`(assoc type method instance arg...)`, for
 //! `+`/`-`/`*` only), `labels`-sibling/self direct calls
 //! (`(apply name (is-fn . arg-form)...)`/`(labels ((captured . is-fn)...)
@@ -149,7 +149,7 @@
 //! reclaim sole ownership) sidesteps the cycle entirely — see
 //! `Interp::add_compiled_function`.
 //!
-//! `compile-value`/`compile-int`/`compile-var`/`compile-assoc`/`compile-apply`/
+//! `compile-value`/`compile-int-any-width`/`compile-var`/`compile-assoc`/`compile-apply`/
 //! `compile-labels`/... are ordinary top-level `defun`s that call each other
 //! freely. They used to be one ~2700-line `labels` block nested inside
 //! `compile-function`, purely because a `defun` could not then reference one
@@ -581,9 +581,9 @@ pub const SOURCE: &str = r#"
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> Option<Sexpr>)
   llvm-value)
 (defsignature compile-char (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
-(defsignature compile-float (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
+(defsignature compile-float-any-width (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
 (defsignature compile-global (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
-(defsignature compile-int (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
+(defsignature compile-int-any-width (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
 (defsignature compile-unit (llvm-module string llvm-builder) llvm-value)
 (defsignature compile-var
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> Option<Sexpr>)
@@ -598,7 +598,7 @@ pub const SOURCE: &str = r#"
   llvm-value)
 
 
-;; `sexpr-str`/`sexpr-bool`/`sexpr-sym-name`/`sexpr-int` — the island's typed
+;; `sexpr-str`/`sexpr-bool`/`sexpr-sym-name`/`sexpr-i32` — the island's typed
 ;; `Sexpr` field extractors — are now Rust builtins (`Interp::eval_builtin`,
 ;; registered in `check::registry`), not `match`-based typelisp defuns.
 ;; Symbol/Sexpr redesign Phase 2 moved them out of this source so the island
@@ -625,7 +625,7 @@ pub const SOURCE: &str = r#"
 ;; indistinguishable from a plain integer to that machinery, silently
 ;; reopening the exact GC-safety gap Stage 4/6 closed for `Sexpr`. `float`'s
 ;; `f64` field (Sexpr/RtValue unification, Stage 0) goes through
-;; `rt_float_value` -- a real heap read, like `cons`, since a float is now
+;; `rt_f64_value`/`rt_f32_value` -- a real heap read, like `cons`, since a float is now
 ;; boxed rather than an immediate bit pattern (see `typelisp-rt`'s
 ;; `TAG_BOXED`). `sym`'s `Symbol` field still isn't representable in
 ;; compiled code (a `Sym`'s tagged payload is the address of an interned
@@ -649,12 +649,18 @@ pub const SOURCE: &str = r#"
 ;; constraint). Purely a textual move; neither function's own body changed.
 (defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i32) (idx i32)) llvm-value
   (case variant
-    ;; `int`(1): the signed value sits above the 3 tag bits.
+    ;; `i32`(1): the signed value sits above the 3 tag bits.
     (1 (build-ashr builder v (const-word builder 3)))
-    ;; `float`(2): the payload is inside the box.
+    ;; `f64`(2)/`f32`(11): the payload is inside the box, and which box it is
+    ;; is what the two numbers say. `rt_f32_value` widens back into the `f64`
+    ;; bit pattern a compiled float register holds -- the carrier is wider
+    ;; than the type, the same way a `u8` rides in an `i64` word.
     (2 (let ((args-ptr (alloca-args builder 1)))
          (store-arg builder args-ptr 0 v)
-         (build-call builder (get-function m "rt_float_value") args-ptr 1)))
+         (build-call builder (get-function m "rt_f64_value") args-ptr 1)))
+    (11 (let ((args-ptr (alloca-args builder 1)))
+          (store-arg builder args-ptr 0 v)
+          (build-call builder (get-function m "rt_f32_value") args-ptr 1)))
     ;; `char`(3) is unsigned; `bool`(4) undoes `compile-bool`'s `1`/`2`.
     (3 (build-lshr builder v (const-word builder 3)))
     (4 (build-sub builder (build-lshr builder v (const-word builder 3)) (const-word builder 1)))
@@ -679,13 +685,14 @@ pub const SOURCE: &str = r#"
     (10 (let ((args-ptr (alloca-args builder 1)))
           (store-arg builder args-ptr 0 v)
           (build-call builder (get-function m "rt_path_to_list") args-ptr 1)))
-    ;; `unit`(11): never a real `Sexpr` variant — this number only ever
+    ;; `unit`(100): never a real `Sexpr` variant — this number only ever
     ;; arrives as a *struct/enum field* kind (`Repr::field_kind`), the decode
     ;; half of `compile-tag-struct-field`'s constant `6`. The stored word is
     ;; discarded for the same reason it was ignored on the way in, and the
     ;; result is the plain `0` every other `Unit`-typed value in compiled
-    ;; code already is (`compile-unit`).
-    (11 (const-word builder 0))
+    ;; code already is (`compile-unit`). It sat at `11` until `Sexpr` grew a
+    ;; twelfth variant and wanted that number back.
+    (100 (const-word builder 0))
     (else (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))
 
 ;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
@@ -707,17 +714,23 @@ pub const SOURCE: &str = r#"
 ;; what it is.
 (defun compile-tag-struct-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind i32)) llvm-value
   (case kind
-    ;; `int`(1): the value moves above the 3 tag bits.
+    ;; `i32`(1): the value moves above the 3 tag bits.
     (1 (build-shl builder v (const-word builder 3)))
-    ;; `float`(2): the only kind that allocates.
+    ;; `f64`(2)/`f32`(11): the two kinds that allocate, and they allocate
+    ;; *different boxes*. Which one is not a detail the value can be asked
+    ;; for at run time — the word is the same bit pattern either way — so it
+    ;; has to come from the declared type, which is what this number is.
     (2 (let ((args-ptr (alloca-args builder 1)))
          (store-arg builder args-ptr 0 v)
-         (build-call builder (get-function m "rt_float_new") args-ptr 1)))
+         (build-call builder (get-function m "rt_f64_new") args-ptr 1)))
+    (11 (let ((args-ptr (alloca-args builder 1)))
+          (store-arg builder args-ptr 0 v)
+          (build-call builder (get-function m "rt_f32_new") args-ptr 1)))
     (3 (build-or builder (build-shl builder v (const-word builder 3)) (const-word builder 4)))
     (4 (build-or builder (build-shl builder (build-add builder v (const-word builder 1)) (const-word builder 3)) (const-word builder 6)))
     ;; `6` is every already-tagged word: both directions leave it alone.
     (6 v)
-    ;; `unit`(11): the slot holds a tagged `Value::Empty` -- `(IMMEDIATE_NIL
+    ;; `unit`(100): the slot holds a tagged `Value::Empty` -- `(IMMEDIATE_NIL
     ;; << 3) | TAG_IMMEDIATE`, i.e. the constant `6` (`typelisp-rt`'s
     ;; `encode`), the same word an interpreted writer puts in a `()` field,
     ;; so the two produce identical boxes. `v` (the plain `0` `compile-unit`
@@ -725,7 +738,7 @@ pub const SOURCE: &str = r#"
     ;; slot carries no information and only has to hold a word the GC can
     ;; `decode` safely -- an immediate nil references nothing.
     ;; `compile-sexpr-field` above is the inverse.
-    (11 (const-word builder 6))
+    (100 (const-word builder 6))
     (else (panic "compile-tag-struct-field: field type is not representable in compiled code yet"))))
 
 ;; `names` is now a list of `(name . kind)` pairs (`core_bridge::name_kind_list`
@@ -764,7 +777,7 @@ pub const SOURCE: &str = r#"
 ;; struct field's own write already uses) since `rt_cell_new` expects an
 ;; already-tagged `Sexpr`; the tagged value is transiently rooted around that
 ;; one call (`push-sexpr-root`/`pop-sexpr-root`) since tagging a `kind = 2`
-;; (`f64`) payload allocates a fresh `rt_float_new` box that would otherwise
+;; (`f64`) payload allocates a fresh `rt_f64_new` box that would otherwise
 ;; sit one GC away from being reclaimed before `rt_cell_new` gets to copy it
 ;; in. The resulting cell reference is then given its own *permanent* root —
 ;; pushed here and never popped by this function, unlike the transient one
@@ -782,7 +795,7 @@ pub const SOURCE: &str = r#"
 (defun bind-params ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Option<Sexpr>) (idx i32)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
-        (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-int (sexpr-cdr name-pair))))
+        (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-i32 (sexpr-cdr name-pair))))
           (let* ((raw (load-arg builder f idx))
                  (slot (alloca-args builder 2)))
             (if (>= kind 10)
@@ -828,7 +841,7 @@ pub const SOURCE: &str = r#"
 (defun bind-captures ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Option<Sexpr>) (idx i32)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
-        (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-int (sexpr-cdr name-pair))))
+        (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-i32 (sexpr-cdr name-pair))))
           (let ((slot (alloca-args builder 2)))
             (let ((v (load-env builder f idx)))
               (store-arg builder slot 0 v)
@@ -875,7 +888,7 @@ pub const SOURCE: &str = r#"
 (defun compute-sexpr-mask-part ((names Option<Sexpr>) (idx i32) (base i32)) i32
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
-        (let ((kind (sexpr-int (sexpr-cdr name-pair))))
+        (let ((kind (sexpr-i32 (sexpr-cdr name-pair))))
           ;; Trace a slot whose tag is `2` (a plain tagged `Sexpr` value) *or*
           ;; `>= 10` (a cell-boxed capture — `tagged_sym_list`'s `10 +
           ;; struct_field_kind`): the cell slot holds a `BoxedObj::Cell`
@@ -949,7 +962,7 @@ pub const SOURCE: &str = r#"
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
        (let* ((nm (sexpr-sym-name (sexpr-car name-pair)))
-              (kind (sexpr-int (sexpr-cdr name-pair))))
+              (kind (sexpr-i32 (sexpr-cdr name-pair))))
          (if (eq kind 2)
            (match (get env nm)
              ((Some slot)
@@ -993,7 +1006,7 @@ pub const SOURCE: &str = r#"
 (defun release-bindings ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (names Option<Sexpr>)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
-       (let ((kind (sexpr-int (sexpr-cdr name-pair))))
+       (let ((kind (sexpr-i32 (sexpr-cdr name-pair))))
          (if (if (eq kind 2) true (>= kind 10))
              (let* ((args-ptr (alloca-args builder 0))
                     (ignored (build-call builder (get-function m "rt_pop_sexpr_root") args-ptr 0)))
@@ -1500,7 +1513,7 @@ pub const SOURCE: &str = r#"
       (let ((pair (sexpr-car bindings)) (rest (sexpr-cdr bindings)))
        (let* ((name-pair (sexpr-car pair))
               (nm (sexpr-sym-name (sexpr-car name-pair)))
-              (kind (sexpr-int (sexpr-cdr name-pair))))
+              (kind (sexpr-i32 (sexpr-cdr name-pair))))
          (match (get acc nm)
          ((Some v) (let ((slot (alloca-args builder 2)))
                      (if (>= kind 10)
@@ -1557,7 +1570,7 @@ pub const SOURCE: &str = r#"
 (defun unroot-let-sexpr-values ((builder llvm-builder) (m llvm-module) (bindings Option<Sexpr>)) ()
   (if (sexpr-consp bindings)
       (let ((pair (sexpr-car bindings)) (rest (sexpr-cdr bindings)))
-       (let ((kind (sexpr-int (sexpr-cdr (sexpr-car pair)))))
+       (let ((kind (sexpr-i32 (sexpr-cdr (sexpr-car pair)))))
          (if (if (eq kind 2) true (>= kind 10))
              (let* ((args-ptr (alloca-args builder 0))
                     (ignored (build-call builder (get-function m "rt_pop_sexpr_root") args-ptr 0)))
@@ -1722,10 +1735,10 @@ pub const SOURCE: &str = r#"
     ;; `fn-env` are `Scope<V>`, `String`-keyed `HashMap`
     ;; frames.)
     (case (sexpr-car e)
-      (int (compile-int m fn-name builder e))
+      (int-any-width (compile-int-any-width m fn-name builder e))
       (char (compile-char m fn-name builder e))
       (bool (compile-bool m fn-name builder e))
-      (float (compile-float m fn-name builder e))
+      (float-any-width (compile-float-any-width m fn-name builder e))
       (str (compile-str m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
       (bignum (compile-bignum-literal m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
       (ratio (compile-ratio-literal m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup e))
@@ -1778,9 +1791,9 @@ pub const SOURCE: &str = r#"
     (const-word builder 0))
 
 ;; The low 32 bits of `lo`, sign extension cleared -- the
-;; shared tail of `compile-int` and `compile-float`, both of
+;; shared tail of `compile-int-any-width` and `compile-float-any-width`, both of
 ;; which reassemble a 64-bit literal from two signed `i32`
-;; halves. See `compile-int`'s doc comment for why a mask
+;; halves. See `compile-int-any-width`'s doc comment for why a mask
 ;; constant can't be used instead.
 (defun low-half-word ((builder llvm-builder) (lo i32)) llvm-value
     (build-lshr builder
@@ -1788,7 +1801,7 @@ pub const SOURCE: &str = r#"
                 (const-word builder 32)))
 
 ;; `(int HI LO)` -- two 32-bit halves, not one word, for
-;; the same reason `compile-float` takes two: this island
+;; the same reason `compile-float-any-width` takes two: this island
 ;; reads a `Sexpr` int back through its 3-bit tag, so only
 ;; 61 bits survive the crossing and a wider literal arrived
 ;; sign-extended from bit 60. Reassembled here in LLVM,
@@ -1797,30 +1810,30 @@ pub const SOURCE: &str = r#"
 ;;
 ;; Each half is a *bit pattern* read back as a signed `i32`
 ;; (`core_bridge::half`) -- a low half of `0xFFFF_FFFF` is
-;; no `i32` number, and `sexpr-int` hands back an `i32`
+;; no `i32` number, and `sexpr-i32` hands back an `i32`
 ;; because that is the widest fixed-width integer the
 ;; language has. So `const-word` sign-extends both halves,
 ;; and the low one has to have that extension cleared
 ;; before the `or`. `shl 32` then `lshr 32` does it: the
 ;; obvious mask, `0xFFFF_FFFF`, is itself past `i32` and
 ;; could not be written here.
-(defun compile-int ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
-    (let ((hi (sexpr-int (sexpr-car (sexpr-cdr e))))
-          (lo (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+(defun compile-int-any-width ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
+    (let ((hi (sexpr-i32 (sexpr-car (sexpr-cdr e))))
+          (lo (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
       (build-or builder
                 (build-shl builder (const-word builder hi) (const-word builder 32))
                 (low-half-word builder lo))))
 
 
 ;; `(char c)` -- a bare `char` literal. Compiled the same
-;; way `compile-int` is (a plain, untagged `i64` scalar --
+;; way `compile-int-any-width` is (a plain, untagged `i64` scalar --
 ;; `char->int`'s own Unicode-scalar-value payload, widened
 ;; from its `i32` result via the zero-cost `i32`<->`i64`
 ;; `as` relabel `Checker::check_as` already allows), never
 ;; a tagged `Sexpr::Char` (that's `compile-construct-
 ;; sexpr`'s own variant-3 arm, which calls this exactly
-;; like `compile-int`'s own variant-1 arm calls
-;; `compile-int`). Added alongside `sexpr-char`
+;; like `compile-int-any-width`'s own variant-1 arm calls
+;; `compile-int-any-width`). Added alongside `sexpr-char`
 ;; (`registry.rs`/`Interp::eval_builtin`) -- a bare
 ;; `char` literal previously had no dispatch tag at all
 ;; (an oversight discovered while implementing
@@ -1841,29 +1854,29 @@ pub const SOURCE: &str = r#"
 ;; -- a bare `f64` literal. `bits` is the literal's raw
 ;; `f64::to_bits` pattern embedded as a plain `Int`
 ;; node by `core_bridge::to_island`'s
-;; `Expr::Float` arm. Like `compile-int`, this returns
+;; `Expr::Float` arm. Like `compile-int-any-width`, this returns
 ;; the *plain, untagged* bit pattern -- **not** a boxed
-;; `Sexpr::Float` (that would be `rt_float_new`,
+;; a float `Sexpr` node (that would be `rt_f64_new`,
 ;; wrongly called twice: once here, once more by
 ;; `compile-construct-sexpr`'s own variant-2 arm on
 ;; the tagged result this function already returned --
 ;; boxing belongs to construct-sexpr alone, the exact
-;; same division of labor `compile-int`/variant-1
-;; already has: `compile-int` returns a bare `i64`,
+;; same division of labor `compile-int-any-width`/variant-1
+;; already has: `compile-int-any-width` returns a bare `i64`,
 ;; `compile-construct-sexpr`'s `build-shl`/tag-OR is
 ;; what actually makes it a `Sexpr::Int`).
 ;; `bits` arrives as two 32-bit halves `(float hi lo)`
 ;; (`core_bridge`'s `float` node, interp-closure removal
 ;; Stage 8a): a single tagged `Sexpr` `Int` would lose
 ;; the top 3 bits of a full-width `f64` pattern when
-;; read back here (`sexpr-int` = `>> 3`), decoding e.g.
+;; read back here (`sexpr-i32` = `>> 3`), decoding e.g.
 ;; `2.0` to `0.0`. Reassemble with `(hi << 32) | lo` —
 ;; LLVM constant-folds it back to the exact 64-bit
 ;; pattern. `low-half-word` clears the low half's sign
-;; extension; see `compile-int` for why that is needed.
-(defun compile-float ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
-    (let ((hi (sexpr-int (sexpr-car (sexpr-cdr e))))
-          (lo (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+;; extension; see `compile-int-any-width` for why that is needed.
+(defun compile-float-any-width ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
+    (let ((hi (sexpr-i32 (sexpr-car (sexpr-cdr e))))
+          (lo (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
       (build-or builder
                 (build-shl builder (const-word builder hi) (const-word builder 32))
                 (low-half-word builder lo))))
@@ -1988,7 +2001,7 @@ pub const SOURCE: &str = r#"
 ;; already knows is a cell-boxed local/param/capture).
 (defun compile-cellvar ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (e Option<Sexpr>))llvm-value
     (let* ((name (sexpr-str (sexpr-car (sexpr-cdr e))))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
       (match (get env name)
         ((Some slot)
          (let* ((cell-ref (load-raw builder slot 0))
@@ -2653,7 +2666,7 @@ pub const SOURCE: &str = r#"
 ;; boxed `Option`) is dictated by the node's checked
 ;; type, the same as every other compiled value.
 (defun compile-llvm-op ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((opid (sexpr-int (sexpr-car (sexpr-cdr e))))
+    (let* ((opid (sexpr-i32 (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (+ (sexpr-list-length arg-forms) 1))
            (args-ptr (alloca-args builder argc)))
@@ -2673,7 +2686,7 @@ pub const SOURCE: &str = r#"
 ;; roots the tagged-`Sexpr` ones across the
 ;; allocation `rt_dyn_new` itself performs.
 (defun compile-dyn-new ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((vtable-id (sexpr-int (sexpr-car (sexpr-cdr e))))
+    (let* ((vtable-id (sexpr-i32 (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (args-ptr (alloca-args builder 2)))
       (store-arg builder args-ptr 0 (const-word builder vtable-id))
@@ -2696,7 +2709,7 @@ pub const SOURCE: &str = r#"
 ;; `rt_dyn_upcast` performs — which is also what keeps
 ;; the concrete value inside it alive.
 (defun compile-dyn-upcast ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((trait-id (sexpr-int (sexpr-car (sexpr-cdr e))))
+    (let* ((trait-id (sexpr-i32 (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (args-ptr (alloca-args builder 2)))
       (store-arg builder args-ptr 0 (const-word builder trait-id))
@@ -2744,7 +2757,7 @@ pub const SOURCE: &str = r#"
 ;; argument), which is what keeps the unwrapped
 ;; concrete value alive too.
 (defun compile-dyn-call ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((slot (sexpr-int (sexpr-car (sexpr-cdr e))))
+    (let* ((slot (sexpr-i32 (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
            (args-ptr (alloca-args builder argc))
@@ -2927,7 +2940,7 @@ pub const SOURCE: &str = r#"
 (defun compile-call-args ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Option<Sexpr>) (idx i32))i32
     (if (sexpr-consp forms)
         (let ((arg-pair (sexpr-car forms)) (rest (sexpr-cdr forms)))
-         (let* ((kind (sexpr-int (sexpr-car arg-pair)))
+         (let* ((kind (sexpr-i32 (sexpr-car arg-pair)))
                 (form (sexpr-cdr arg-pair))
                 (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup form)))
            (store-arg builder args-ptr idx v)
@@ -3681,7 +3694,7 @@ pub const SOURCE: &str = r#"
 ;; test demonstrates the resulting corruption directly.
 (defun compile-set ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (is-fn (eq kind 1))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (v (compile-if-branch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup is-fn value-form)))
@@ -3728,7 +3741,7 @@ pub const SOURCE: &str = r#"
 ;; evaluates to the value that was set" convention.
 (defun compile-cellset ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup value-form)))
       (match (get env nm)
@@ -3795,8 +3808,8 @@ pub const SOURCE: &str = r#"
        (compile-pattern-guard builder cur-fn
          (build-icmp-eq builder v
            (build-or builder
-                     (build-shl builder (const-word builder (sexpr-int (sexpr-car (sexpr-cdr pat)))) (const-word builder 32))
-                     (const-word builder (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))))
+                     (build-shl builder (const-word builder (sexpr-i32 (sexpr-car (sexpr-cdr pat)))) (const-word builder 32))
+                     (const-word builder (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))))
          fail-block))
       ;; `(pat-guard NAME TEST)` -- the value pattern: bind the value under
       ;; test to NAME (exactly as `pat-bind` binds, and into this arm's own
@@ -3846,9 +3859,9 @@ pub const SOURCE: &str = r#"
 ;; instance test the ordinary case never did. `downcast` false is a total
 ;; no-op, exactly the pre-existing scrut-kind 1/2 behavior unchanged.
 (defun compile-ctor-pattern ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (pat Option<Sexpr>) (fail-block llvm-basic-block))()
-  (let* ((variant (sexpr-int (sexpr-car (sexpr-cdr pat))))
+  (let* ((variant (sexpr-i32 (sexpr-car (sexpr-cdr pat))))
          (subpats (sexpr-car (sexpr-cdr (sexpr-cdr pat))))
-         (scrut-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr pat))))))
+         (scrut-kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr pat))))))
          (field-kinds (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat))))))
          (downcast (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat))))))))
          (type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))))
@@ -3906,8 +3919,8 @@ pub const SOURCE: &str = r#"
                             ;; A boxed struct and a sum-ADT box both carry a
                             ;; per-field kind; a tagged `Sexpr` (`0`) reads its
                             ;; field shape off the variant instead.
-                            (2 (compile-struct-field builder m v (sexpr-int (sexpr-car field-kinds)) idx))
-                            (1 (compile-box-field builder m v (sexpr-int (sexpr-car field-kinds)) idx))
+                            (2 (compile-struct-field builder m v (sexpr-i32 (sexpr-car field-kinds)) idx))
+                            (1 (compile-box-field builder m v (sexpr-i32 (sexpr-car field-kinds)) idx))
                             (else (compile-sexpr-field builder m v variant idx)))))
              (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup field-v p fail-block)
              (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)))))
@@ -3985,7 +3998,7 @@ pub const SOURCE: &str = r#"
     (let* ((is-fn (sexpr-bool (sexpr-car (sexpr-cdr e))))
            (scrut-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (arms (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
-           (root-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+           (root-kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
            (scrut-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup scrut-form))
            (ignored (if (eq root-kind 2) (push-sexpr-root builder m scrut-v) ()))
            (merge-block (append-block cur-fn "match-merge"))
@@ -4084,7 +4097,7 @@ pub const SOURCE: &str = r#"
     (let* ((is-sexpr (sexpr-bool (sexpr-car (sexpr-cdr e))))
            (mutable (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
-           (variant (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+           (variant (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
            (arg-forms (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
       (case variant
         (100 (compile-construct-sym m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup arg-forms))
@@ -4142,7 +4155,7 @@ pub const SOURCE: &str = r#"
 ;; interned.
 (defun compile-construct-wk-sym ((m llvm-module) (fn-name string) (builder llvm-builder) (arg-forms Option<Sexpr>))llvm-value
     (let ((args-ptr (alloca-args builder 1)))
-      (store-arg builder args-ptr 0 (const-word builder (sexpr-int (sexpr-car arg-forms))))
+      (store-arg builder args-ptr 0 (const-word builder (sexpr-i32 (sexpr-car arg-forms))))
       (build-call builder (get-function m "rt_wk_symbol") args-ptr 1)))
 
 ;; `(construct true false empty 101 seg-form...)` — a
@@ -4248,7 +4261,7 @@ pub const SOURCE: &str = r#"
 (defun compile-construct-boxed-struct-fields ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Option<Sexpr>) (idx i32))()
     (if (sexpr-consp forms)
         (let ((field-pair (sexpr-car forms)) (rest (sexpr-cdr forms)))
-         (let* ((kind (sexpr-int (sexpr-car field-pair)))
+         (let* ((kind (sexpr-i32 (sexpr-car field-pair)))
                 (form (sexpr-cdr field-pair))
                 (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup form))
                 (tagged-v (compile-tag-struct-field builder m v kind)))
@@ -4312,12 +4325,12 @@ pub const SOURCE: &str = r#"
 ;; manipulation at all, just the field's own compiled
 ;; value passed straight through. `float`'s `f64`
 ;; field (Sexpr/RtValue unification, Stage 0) is
-;; boxed via `rt_float_new` (`typelisp-rt`'s
+;; boxed via `rt_f64_new`/`rt_f32_new` (`typelisp-rt`'s
 ;; `TAG_BOXED`) rather than any bit manipulation here
 ;; — `f64` doesn't fit alongside a 3-bit tag the way
 ;; `int`/`char`/`bool` do. The field's own compiled
 ;; value is already the raw `f64` bit pattern
-;; (`f64::to_bits`), the convention `rt_float_new`
+;; (`f64::to_bits`), the convention `rt_f64_new`
 ;; expects. `sym`'s `Str` field still isn't
 ;; representable in compiled code yet (a `Sym`'s tag
 ;; payload is an interned symbol's address, a separate
@@ -4334,7 +4347,7 @@ pub const SOURCE: &str = r#"
       (1 (build-shl builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car arg-forms)) (const-word builder 3)))
       (2 (let ((args-ptr (alloca-args builder 1)))
            (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car arg-forms)))
-           (build-call builder (get-function m "rt_float_new") args-ptr 1)))
+           (build-call builder (get-function m "rt_f64_new") args-ptr 1)))
       (3 (build-or builder
                    (build-shl builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car arg-forms)) (const-word builder 3))
                    (const-word builder 4)))
@@ -4363,6 +4376,13 @@ pub const SOURCE: &str = r#"
       ;; of `sym`s (the shape `compile-sexpr-field`'s own `path` extraction
       ;; produces) — `rt_list_to_path` walks it at runtime and interns the
       ;; result, the construct-side mirror of `rt_path_to_list`.
+      ;; `f32`(11): the same shape as `f64`(2) with the other box. The two
+      ;; are separate variants precisely so this choice is made from the
+      ;; declared type rather than guessed from a bit pattern that is
+      ;; identical either way.
+      (11 (let ((args-ptr (alloca-args builder 1)))
+            (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car arg-forms)))
+            (build-call builder (get-function m "rt_f32_new") args-ptr 1)))
       (10 (let ((args-ptr (alloca-args builder 1)))
             (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car arg-forms)))
             (build-call builder (get-function m "rt_list_to_path") args-ptr 1)))
@@ -4404,7 +4424,7 @@ pub const SOURCE: &str = r#"
 ;; value, needs the protected form.
 (defun compile-field-get ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((idx (sexpr-list-length (sexpr-car (sexpr-cdr e))))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (obj-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (obj-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup obj-form))
            (args-ptr (alloca-args builder 2)))
@@ -4424,7 +4444,7 @@ pub const SOURCE: &str = r#"
 ;; `Expr::FieldSet`'s own checked type.
 (defun compile-field-set ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((idx (sexpr-list-length (sexpr-car (sexpr-cdr e))))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (obj-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
            (obj-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup obj-form))
@@ -4474,7 +4494,7 @@ pub const SOURCE: &str = r#"
 ;; field`/`rt_struct_pop_field` allocate nothing.
 (defun compile-vector-op ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((method (sexpr-str (sexpr-car (sexpr-cdr e))))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
       (if (equal method "new")
           (compile-construct-boxed-struct m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))) (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
       (let* ((v-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
@@ -4607,8 +4627,8 @@ pub const SOURCE: &str = r#"
             (let ((result (build-call builder (get-function m "rt_hashtable_new") args-ptr 1)))
               (push-permanent-sexpr-root builder m result)
               result))
-          (let* ((key-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
-                 (val-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+          (let* ((key-kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+                 (val-kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                  (option-type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                  (ht-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
                  (ht (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup ht-form)))
@@ -4728,8 +4748,8 @@ pub const SOURCE: &str = r#"
 ;; another passthrough value here, no different from
 ;; a boxed struct or `Str` global.
 (defun compile-global ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
-    (let* ((id (sexpr-int (sexpr-car (sexpr-cdr e))))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+    (let* ((id (sexpr-i32 (sexpr-car (sexpr-cdr e))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (args-ptr (alloca-args builder 1)))
       (store-arg builder args-ptr 0 (const-word builder id))
       (let ((raw (build-call builder (get-function m "rt_global_get") args-ptr 1)))
@@ -4752,8 +4772,8 @@ pub const SOURCE: &str = r#"
 ;; already-untagged compiled representation),
 ;; matching `Expr::SetGlobal`'s own checked type.
 (defun compile-set-global ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((id (sexpr-int (sexpr-car (sexpr-cdr e))))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+    (let* ((id (sexpr-i32 (sexpr-car (sexpr-cdr e))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup value-form))
            (tagged-v (compile-tag-struct-field builder m v kind))
@@ -4778,7 +4798,7 @@ pub const SOURCE: &str = r#"
 ;; discarded here (nothing at this call site needs it);
 ;; this tag exists purely for its side effect.
 (defun compile-global-init ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((kind (sexpr-int (sexpr-car (sexpr-cdr e))))
+    (let* ((kind (sexpr-i32 (sexpr-car (sexpr-cdr e))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup value-form))
            (tagged-v (compile-tag-struct-field builder m v kind))
@@ -4806,7 +4826,7 @@ pub const SOURCE: &str = r#"
 ;; `core_bridge` baked in for exactly this.
 (defun compile-catch ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((tag-form (sexpr-car (sexpr-cdr e)))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (body (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (tag (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup tag-form))
            (slot (alloca-args builder 1))
@@ -4860,7 +4880,7 @@ pub const SOURCE: &str = r#"
 ;; never leaves this function, and it has to be caught all the same.
 (defun compile-throw ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((tag-form (sexpr-car (sexpr-cdr e)))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (tag (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup tag-form))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup value-form))

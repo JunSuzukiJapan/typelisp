@@ -144,8 +144,16 @@ well_known_symbols! {
     COLON_EQUALS => ":="
 
     "Core-IR operator tags shared with the island (`compile-value`'s dispatch)."
-    INT => "int"
-    FLOAT => "float"
+    // `-any-width`, not `int`/`float`: one node serves every width of its
+    // family, and the name has to say so. The literal's payload is already
+    // the number the type names — a narrow integer normalized, a binary32
+    // float rounded and widened — so the constant this compiles to is
+    // correct whichever width the type was, and no width is being discarded
+    // by leaving it out. The width that *does* matter downstream is the one
+    // the value is boxed at, and that reaches the island by a different
+    // route: `Repr::field_kind`.
+    INT_ANY_WIDTH => "int-any-width"
+    FLOAT_ANY_WIDTH => "float-any-width"
     BIGNUM => "bignum"
     RATIO => "ratio"
     CHAR => "char"
@@ -214,6 +222,13 @@ well_known_symbols! {
     NIL => "nil"
     CONS => "cons"
     PATH => "path"
+    // The numeric ones are spelled by width, because a `Sexpr` node keeps the
+    // width of the value put into it. These used to share `INT`/`FLOAT` with
+    // the core-IR tags above — the same spelling standing for two different
+    // things, which is exactly what the widths being folded away allowed.
+    I32 => "i32"
+    F64 => "f64"
+    F32 => "f32"
 
     "Forms the pretty printer lays out code-shaped, beyond those already above."
     PROGN => "progn"

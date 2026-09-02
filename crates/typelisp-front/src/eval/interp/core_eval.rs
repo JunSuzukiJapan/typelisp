@@ -119,8 +119,8 @@ impl Op {
     /// closed from the other side.
     fn from_sym(tag: SymRef) -> Option<Op> {
         Some(match tag.well_known() {
-            wk::INT => Op::Int,
-            wk::FLOAT => Op::Float,
+            wk::INT_ANY_WIDTH => Op::Int,
+            wk::FLOAT_ANY_WIDTH => Op::Float,
             wk::BIGNUM => Op::Bignum,
             wk::RATIO => Op::Ratio,
             wk::CHAR => Op::Char,
@@ -1465,7 +1465,7 @@ fn match_core_pattern(
             // equality is *identity*, so it would silently never match; that
             // is why anything else is refused here instead of compared.
             let want = match core::op_sym(heap, lit).map(|s| s.well_known()) {
-                Some(wk::INT) | Some(wk::BOOL) | Some(wk::CHAR) => core::field(heap, lit, 0)
+                Some(wk::INT_ANY_WIDTH) | Some(wk::BOOL) | Some(wk::CHAR) => core::field(heap, lit, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (pat-lit ..) literal has no value".to_string()))?,
                 _ => {
                     return Err(EvalError::Internal(format!(
@@ -2652,12 +2652,12 @@ mod tests {
         // Built with stress off: it is `DEPTH` nodes of setup, and collecting
         // at each of them would be quadratic for no added coverage. The
         // *evaluation* below is what runs under stress.
-        let mut form = core::tagged(&mut h, "int", &[Value::Int(7)]).unwrap();
+        let mut form = core::tagged(&mut h, "int-any-width", &[Value::Int(7)]).unwrap();
         h.push_root(form);
         for _ in 0..DEPTH {
             let cond = core::tagged(&mut h, "bool", &[Value::Bool(false)]).unwrap();
             h.push_root(cond);
-            let then = core::tagged(&mut h, "int", &[Value::Int(0)]).unwrap();
+            let then = core::tagged(&mut h, "int-any-width", &[Value::Int(0)]).unwrap();
             h.push_root(then);
             form = core::tagged(&mut h, "if", &[cond, then, form]).unwrap();
             h.push_root(form);
@@ -2678,7 +2678,7 @@ mod tests {
         let mut h = Heap::with_capacity(1 << 20);
         h.set_growth_limit(1 << 24);
 
-        let mut form = core::tagged(&mut h, "int", &[Value::Int(7)]).unwrap();
+        let mut form = core::tagged(&mut h, "int-any-width", &[Value::Int(7)]).unwrap();
         h.push_root(form);
         for _ in 0..DEPTH {
             let empty = Value::Empty;

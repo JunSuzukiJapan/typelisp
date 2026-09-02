@@ -350,7 +350,7 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         // and let `compile-int` reassemble them in LLVM (where a full 64-bit
         // word is ordinary) rather than in the island's own tagged
         // arithmetic, where the shift would overflow again.
-        "int" => match core::field(heap, form, 0) {
+        "int-any-width" => match core::field(heap, form, 0) {
             Some(Value::Int(n)) => int_node(heap, n),
             _ => Err(malformed(heap, form)),
         },
@@ -361,7 +361,7 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         // having to name one. What the width does decide is the box, and that
         // travels the other channel: `Repr::field_kind` (2 for `f64`, 11 for
         // `f32`), which is what `compile-sexpr-field` reads.
-        "float" => {
+        "float-any-width" => {
             let bits = match core::field(heap, form, 0) {
                 Some(Value::Boxed(id)) => match heap.float_box(id) {
                     Some(typelisp_mem::FloatBox::F32(f)) => f64::from(f).to_bits(),
@@ -373,10 +373,10 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             // Two 32-bit halves, not one word: the island reads a `Sexpr` int
             // back through its 3-bit tag, which would silently drop the top
             // bits of a full-width bit pattern (`2.0` decoding as `0.0`).
-            // Each half fits, and `compile-float` reassembles them.
+            // Each half fits, and `compile-float-any-width` reassembles them.
             core::tagged(
                 heap,
-                "float",
+                "float-any-width",
                 &[half(bits >> 32), half(bits)],
             )
         }
@@ -1362,7 +1362,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         Value::Boxed(id) if heap.is_f32(id) => {
             let bits = f64::from(heap.f32_value(id)).to_bits();
             sexpr_leaf(heap, SEXPR_F32, move |h| {
-                core::tagged(h, "float", &[half(bits >> 32), half(bits)])
+                core::tagged(h, "float-any-width", &[half(bits >> 32), half(bits)])
             })
         }
         Value::Boxed(id) if heap.is_f64(id) => {
@@ -1370,7 +1370,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
             sexpr_leaf(heap, SEXPR_F64, move |h| {
                 core::tagged(
                     h,
-                    "float",
+                    "float-any-width",
                     &[half(bits >> 32), half(bits)],
                 )
             })
@@ -2226,7 +2226,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
         "pat-lit" => {
             let lit = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
             let n = match (core::op(heap, lit), core::field(heap, lit, 0)) {
-                (Some("int"), Some(Value::Int(n))) => n,
+                (Some("int-any-width"), Some(Value::Int(n))) => n,
                 (Some("bool"), Some(Value::Bool(b))) => i64::from(b),
                 (Some("char"), Some(Value::Char(c))) => c as i64,
                 _ => return Err(malformed(heap, pat)),
@@ -2463,13 +2463,13 @@ fn half(bits: u64) -> Value {
 /// split is not an optimization: this island reads a `Sexpr` int back through
 /// its 3-bit tag, so a one-word payload silently loses everything above bit
 /// 60 (`4611686018427387903` compiled to `-1` while the interpreter returned
-/// it whole). `compile-int` reassembles the halves in LLVM, where a full
+/// it whole). `compile-int-any-width` reassembles the halves in LLVM, where a full
 /// 64-bit word is ordinary. `float_form` has taken the same two-half shape
 /// since it was written, for the same reason.
 fn int_node(heap: &mut Heap, n: i64) -> Result<Value, Error> {
     core::tagged(
         heap,
-        "int",
+        "int-any-width",
         &[half((n as u64) >> 32), half(n as u64)],
     )
 }

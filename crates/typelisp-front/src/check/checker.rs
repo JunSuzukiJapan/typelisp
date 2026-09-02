@@ -1400,7 +1400,7 @@ impl Checker {
                 core::tagged(heap, "pat-bind", &[sym])?
             }
             Pattern::Int(n) => {
-                let lit = core::tagged(heap, "int", &[Value::Int(*n)])?;
+                let lit = core::tagged(heap, "int-any-width", &[Value::Int(*n)])?;
                 let mut s = RootScope::new(heap);
                 s.push_root(lit);
                 core::tagged(&mut s, "pat-lit", &[lit])?
@@ -8571,7 +8571,7 @@ impl Checker {
                 if !int_lit_in_range(n, &ty) {
                     return Err(int_lit_range_error(&n.to_string(), &ty, true));
                 }
-                Checked::new(core::tagged(heap, "int", &[Value::Int(n)])?, ty)
+                Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(n)])?, ty)
             }
             // A `Value::Boxed` read-literal is `Sexpr::Float`, `bignum` (an
             // integer literal past `i32`'s range), or `ratio` (`n/d` syntax)
@@ -8599,7 +8599,7 @@ impl Checker {
                         (i64::try_from(big).ok().filter(|v| int_lit_in_range(*v, t)), big.to_string())
                     };
                     match fitted {
-                        Some(v) => Checked::new(core::tagged(heap, "int", &[Value::Int(v)])?, t.clone()),
+                        Some(v) => Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(v)])?, t.clone()),
                         None => return Err(int_lit_range_error(&text, t, false)),
                     }
                 }
@@ -8609,7 +8609,7 @@ impl Checker {
                 Checked::new(core::tagged(heap, "ratio", &[Value::Boxed(id)])?, Type::Ratio)
             }
             Value::Boxed(id) => {
-                Checked::new(core::tagged(heap, "float", &[Value::Boxed(id)])?, float_lit_ty(expected))
+                Checked::new(core::tagged(heap, "float-any-width", &[Value::Boxed(id)])?, float_lit_ty(expected))
             }
             Value::Bool(b) => Checked::new(core::tagged(heap, "bool", &[Value::Bool(b)])?, Type::Bool),
             Value::Char(c) => Checked::new(core::tagged(heap, "char", &[Value::Char(c)])?, Type::Char),
@@ -12057,7 +12057,7 @@ impl Checker {
         // three take the default (1) so one builtin serves all four.
         let colinc = match args.get(1) {
             Some(a) => self.check_at(heap, interp, env, *a, Some(&Type::I32), nth_loc(arg_locs, 1))?,
-            None => Checked::new(core::tagged(heap, "int", &[Value::Int(0)])?, Type::I32),
+            None => Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(0)])?, Type::I32),
         };
         let which = Checked::new(forms::str_lit_form(heap, form)?, Type::Str);
         let r = Ref::synthetic(Path::root("pprint-rt"));
@@ -13519,8 +13519,9 @@ impl Checker {
             }
             const BUILTIN_SEXPR_CTORS: &[u32] = &[
                 wk::NIL,
-                wk::INT,
-                wk::FLOAT,
+                wk::I32,
+                wk::F64,
+                wk::F32,
                 wk::CHAR,
                 wk::BOOL,
                 wk::SYM,
@@ -13561,7 +13562,7 @@ impl Checker {
         // pattern against `Sexpr` produces the right code as it stands.
         if is_option_of_sexpr(expected) {
             const BUILTIN_SEXPR_CTORS: &[&str] =
-                &["nil", "int", "float", "char", "bool", "sym", "str", "cons", "bignum", "ratio", "path"];
+                &["nil", "i32", "f64", "f32", "char", "bool", "sym", "str", "cons", "bignum", "ratio", "path"];
             if BUILTIN_SEXPR_CTORS.contains(&ctor.as_str()) {
                 return self.check_ctor_pattern(heap, interp, env, &sexpr_ty(), v);
             }
