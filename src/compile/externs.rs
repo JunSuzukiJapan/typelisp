@@ -220,7 +220,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // compares with `equal` — uncompilable for every integer scrutinee.
         "i32" | "i8" | "i16" | "u8" | "u16" | "u32" => &[
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
-            "int->bignum", "int->ratio", "int->float",
+            "int->bignum", "int->ratio", "int->float", "int->char",
             "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
             "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
             "ash", "logbitp",
@@ -239,7 +239,16 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // `get-function` **aborts the process** at compile time. The
         // disagreement is what `the_rust_and_island_native_method_lists_agree`
         // exists to catch.
-        "char" => &["eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "char->int", "char->string"],
+        // `upcase`/`downcase`/`alphap`/`digitp` are one `rt_char_*` call each,
+        // ASCII-only on both tiers because both tiers run the same shim's
+        // rule. Until they were lowered, a `defun` that so much as mentioned
+        // one of them could not be compiled at all — which is why the whole
+        // `char`/`string` catalog in the prelude is written on code points
+        // and `string::ref` instead (cl-parity-plan.md Phase 2's note 1).
+        "char" => &[
+            "eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "char->int", "char->string",
+            "upcase", "downcase", "alphap", "digitp",
+        ],
         "f64" | "f32" => &[
             "+", "-", "*", "/", "expt", "sqrt", "floor", "ceiling", "round", "truncate",
             "float->int", "float->bignum", "float->ratio", "float->f32", "float->f64",
@@ -347,7 +356,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 209] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 215] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -377,14 +386,17 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 209] {
         rt_stream_string_input, rt_stream_string_output, rt_stream_take_output_string, rt_stream_unread_char,
         rt_stream_write_byte, rt_stream_write_string,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
-        rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len,
+        rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_alphap, rt_char_digitp, rt_char_downcase,
+        rt_char_equalp, rt_char_upcase, rt_int_to_char, rt_closure_env_get, rt_closure_env_len,
         rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_narrow_new, rt_narrow_value, rt_float_to_bignum,
         rt_float_to_ratio, rt_f64_value, rt_f32_value, rt_global_get, rt_global_new, rt_global_set, rt_int_div, rt_int_mod,
         rt_int_ash, rt_int_logbitp, rt_int_logcount, rt_int_integer_length,
         rt_f64_tan, rt_f64_asin, rt_f64_acos, rt_f64_atan, rt_f64_sinh, rt_f64_cosh, rt_f64_tanh, rt_f64_asinh, rt_f64_acosh,
         rt_f64_atanh,
-        rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys,
-        rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
+        rt_hashtable_bucket_count, rt_hashtable_bucket_delete, rt_hashtable_bucket_key, rt_hashtable_bucket_put,
+        rt_hashtable_bucket_value,
+        rt_hashtable_clear, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys,
+        rt_hashtable_new, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
         rt_intern_path, rt_intern_symbol, rt_wk_symbol, rt_list_to_path, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
@@ -530,6 +542,15 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 209] {
         ("rt_str_eq", rt_str_eq as usize),
         ("rt_str_equalp", rt_str_equalp as usize),
         ("rt_char_equalp", rt_char_equalp as usize),
+        // The four `char` methods the island can now lower in place
+        // (cl-parity-plan.md Phase 1's leftover from Phase 2), plus
+        // `int->char` — the only one of the five that can fail, and so the
+        // only one declared `extern "C-unwind"`.
+        ("rt_char_upcase", rt_char_upcase as usize),
+        ("rt_char_downcase", rt_char_downcase as usize),
+        ("rt_char_alphap", rt_char_alphap as usize),
+        ("rt_char_digitp", rt_char_digitp as usize),
+        ("rt_int_to_char", rt_int_to_char as usize),
         ("rt_str_lt", rt_str_lt as usize),
         ("rt_str_append", rt_str_append as usize),
         ("rt_str_substring", rt_str_substring as usize),
@@ -559,15 +580,20 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 209] {
         ("rt_data_field", rt_data_field as usize),
         ("rt_sexpr_instance_test", rt_sexpr_instance_test as usize),
         ("rt_hashtable_new", rt_hashtable_new as usize),
-        ("rt_hashtable_set", rt_hashtable_set as usize),
         ("rt_hashtable_count", rt_hashtable_count as usize),
         ("rt_hashtable_clear", rt_hashtable_clear as usize),
         ("rt_hashtable_keys", rt_hashtable_keys as usize),
         ("rt_hashtable_values", rt_hashtable_values as usize),
         ("rt_hashtable_entries", rt_hashtable_entries as usize),
-        ("rt_hashtable_contains", rt_hashtable_contains as usize),
-        ("rt_hashtable_get_raw", rt_hashtable_get_raw as usize),
-        ("rt_hashtable_remove_raw", rt_hashtable_remove_raw as usize),
+        // The bucket family. `set`/`get`/`remove` used to be here as three
+        // whole-lookup shims; they are prelude methods now, because hashing a
+        // key and comparing two keys are the key type's own methods and a
+        // shim cannot call them.
+        ("rt_hashtable_bucket_count", rt_hashtable_bucket_count as usize),
+        ("rt_hashtable_bucket_key", rt_hashtable_bucket_key as usize),
+        ("rt_hashtable_bucket_value", rt_hashtable_bucket_value as usize),
+        ("rt_hashtable_bucket_put", rt_hashtable_bucket_put as usize),
+        ("rt_hashtable_bucket_delete", rt_hashtable_bucket_delete as usize),
         ("rt_global_new", rt_global_new as usize),
         ("rt_global_get", rt_global_get as usize),
         ("rt_global_set", rt_global_set as usize),

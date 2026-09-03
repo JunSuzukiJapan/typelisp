@@ -73,6 +73,8 @@ const ISLAND_DEFUNS: &[&str] = &[
     "sexpr-native-method?",
     "string-native-method?",
     "char-native-method?",
+    "char-unary-shim-method?",
+    "char-unary-shim-name",
     "bool-native-method?",
     "symbol-native-method?",
     "float-native-method?",

@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-09-01 / ブランチ: `feature/remove-i64`
+最終更新: 2026-09-03 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。
 
@@ -15,17 +15,53 @@ Common Lisp にあって typelisp に無いものを Phase 0〜9 に落とした
 | Phase | 状態 |
 |---|---|
 | 0（実装前に確かめる 6 件） | **完了** 2026-08-20。結果と、それが計画本体に強いた訂正は同計画の該当節 |
-| 1（数値層 1a〜1d） | **全完了**（1a/1b/1d は 2026-08-21）。1c の保留 2 項目（乱数のシード指定・`ldb` 系の幅拡張）はそのまま。1d の complex は prelude の `defstruct`（成分は `f64` 固定、`(sqrt -1.0)` は実数 NaN のまま——[implementation-log.md](implementation-log.md) 該当節）。Phase 2 が残した「char/int の native lowering 5 つ」は未着手——1a と同じ島の分岐を触る作業 |
+| 1（数値層 1a〜1d） | **全完了**（1a/1b/1d は 2026-08-21）。1c の保留 2 項目（乱数のシード指定・`ldb` 系の幅拡張）はそのまま。1d の complex は prelude の `defstruct`（成分は `f64` 固定、`(sqrt -1.0)` は実数 NaN のまま——[implementation-log.md](implementation-log.md) 該当節）。Phase 2 が残した「char/int の native lowering 5 つ」は **2026-09-03 完了**——これで [syntax.md](../syntax.md) §10 の「コンパイルできない組み込み」の表は空 |
 | 2（文字・文字列 2a/2b） | **完了** 2026-08-20 |
-| 3（リスト・シーケンス 3a〜3e） | **全完了**（3e は 2026-08-21）。3e は Phase 5b に依存しなかった——対象は全部ジェネリック `defun` で、`defun` の `&key` は既に通っていた。まだキーワードを取れないのは `defmethod` の側（破壊的操作と `search`/`mismatch`）——Phase 5b で機構は入ったので、あとは対象の書き換えだけ |
-| 4（制御構造・マクロ） | **4a 部分完了** 2026-08-20（`prog1`/`prog2`/`do*`/`ecase`/`ccase`/`setq`/`psetq`/`psetf`/`pushnew`）。残るは `block`/`return-from`（島の引数引き回しに全面的に触る）・`prog`/`prog*`・`destructuring-bind`・`sleep`、および `loop` の `:named`（`block` 依存）。**4b 完了** 2026-08-21（`:named` を除く拡張 `loop`）。**4c 部分完了** 2026-08-21（`macroexpand`/`macroexpand-1`、`complement`、`gensym` のプレフィクスと `*gensym-counter*`）——残るは `macrolet`/`symbol-macrolet` のみで、やり方は同計画に書いた（他の項目は「入れない」理由つきで確定） |
+| 3（リスト・シーケンス 3a〜3e） | **全完了**（3e は 2026-08-21、`defmethod` 側は 2026-09-03）。3e は Phase 5b に依存しなかった——対象は全部ジェネリック `defun` で、`defun` の `&key` は既に通っていた。残っていた `defmethod` 側（破壊的操作と `search`/`mismatch`）も CL のキーワード集合を持つ。`search` のキーワードだけ番号でなく名前にした（受け手が先なので CL の番号は逆の意味になる） |
+| 4（制御構造・マクロ） | **4a 部分完了** 2026-08-20（`prog1`/`prog2`/`do*`/`ecase`/`ccase`/`setq`/`psetq`/`psetf`/`pushnew`）。残るは `block`/`return-from`（島の引数引き回しに全面的に触る）・`prog`/`prog*`・`destructuring-bind`・`sleep`、および `loop` の `:named`（`block` 依存）。**4b 完了** 2026-08-21（`:named` を除く拡張 `loop`）。**4c 完了** 2026-09-03（`macroexpand`/`macroexpand-1`、`complement`、`gensym` のプレフィクスと `*gensym-counter*` が 2026-08-21、`macrolet`/`symbol-macrolet` が 09-03。他の項目は「入れない」理由つきで確定） |
 | 5（定義形の拡張 5a〜5c） | **5b 完了** 2026-08-21（`defmethod` が `&optional`/`&key`/`&rest` を取る。`lambda`/`labels` とトレイトのメソッドは「入れない」理由つきで確定）。**5c 完了** 2026-08-21（`deftype`。型の綴りであって型ではない——展開は型パーサの中で起き、エラーメッセージも展開後を見せる）。**5a 完了** 2026-08-21（オプションリスト・スロットのデフォルト・`:constructor`・`:copier`・`:include`。`:conc-name` と `:predicate` は「入れない」理由つきで確定）。**Phase 5 全完了** |
-| 6（コレクション 6a〜6c） | **6a 部分完了** 2026-08-22（`Hash` トレイト＋`sxhash`、鍵のハッシュ可能性が静的に、`maphash`/`size`）。残るはユーザ定義型を鍵にする分（mem 層のバケットが要る）。**6b 完了** 2026-08-22（`Array<T>`。`Vector` 2 本の上の prelude `defstruct` で、Rust 側の追加はゼロ。`(aref a i j)` だけ checker の糖衣）。**6c 完了** 2026-08-22（`BitVector`。1 語 **32bit** ——64bit は上の整数切り詰めに当たる） |
+| 6（コレクション 6a〜6c） | **6a 完了**（`Hash` トレイト＋`sxhash`、鍵のハッシュ可能性が静的に、`maphash`/`size` が 2026-08-22、**ユーザ定義型を鍵にする分が 2026-09-03**）。表は `hash -> バケット`になり、`get`/`set`/`remove` は prelude の `defmethod` へ移った。**6b 完了** 2026-08-22（`Array<T>`。`Vector` 2 本の上の prelude `defstruct` で、Rust 側の追加はゼロ。`(aref a i j)` だけ checker の糖衣）。**6c 完了** 2026-08-22（`BitVector`。1 語 **31bit** ——32 番目の bit は `i32` の符号） |
 | 7（エラーと動的束縛 7a/7b） | **全完了** 2026-08-22。7a は `SimpleError`/`WrappedError`/`wrap-error`/`describe-error`/`assert`/`warn`（コンディションシステムは予定どおり非採用）。7b は `dlet`（保存→代入→`unwind-protect` で復元）と印字制御変数一式＋`with-standard-io-syntax`、副産物で radix リーダマクロ `#b`/`#o`/`#x`/`#NNr`。入れなかった変数は同計画の表に 1 つずつ理由つき |
-| 8（印字とリーダ 8a〜8c） | **8a/8b 完了** 2026-08-23（プリンタとリーダ）。この Stage で分かった 3 件——ジェネリック型に `print-object` が発火しない・`~/name/` が AOT で使えない・それに依存して見送った `*print-array*`／`Array<T>` の `print-object`——は下に別項で書いた。**残るは 8c**（`readtable` とリーダマクロ）で、これだけは先行条件が別物: 「全フォームを読んでから検査／評価する」を**フォーム単位の「読む→チェック→評価」ループ**に転換するのが先で、影響範囲は `prelude::load_interpreted_with`・`project.rs`・`main.rs`・LSP の各ドライバ。転換自体を独立した Stage として切る |
+| 8（印字とリーダ 8a〜8c） | **8a/8b 完了** 2026-08-23（プリンタとリーダ）+ 2026-09-03（`*print-array*` と `Array<T>` の `print-object`）。この Stage で分かった 3 件のうち、ジェネリック型に `print-object` が発火しない件は 2026-08-31 に、それに依存して見送っていた `*print-array*` は 09-03 に閉じた。残るのは `~/name/` が AOT で使えないことだけ。**残るは 8c**（`readtable` とリーダマクロ）で、これだけは先行条件が別物: 「全フォームを読んでから検査／評価する」を**フォーム単位の「読む→チェック→評価」ループ**に転換するのが先で、影響範囲は `prelude::load_interpreted_with`・`project.rs`・`main.rs`・LSP の各ドライバ。転換自体を独立した Stage として切る |
 | 9（シンボル・パッケージ・環境） | **9c 完了** 2026-08-20（コマンドライン引数・環境変数・ファイルシステム問い合わせ・日時の分解合成・`y-or-n-p`）。保留は `libc` が要る 4 群と REPL ツール層。9a/9b/9d 未着手 |
 | 付録 C（小さな不整合 4 件） | **完了** 2026-08-20 |
 | 付録 D（範囲外の既存問題 2 件） | **完了** 2026-08-21。D-2 は `Heap::cons` の成長条件（回収後の空きが 1/4 未満なら伸ばす）、D-1 は AOT 実行ファイルが prelude を持ち歩くように |
+
+**cl-parity-plan.md の残り 5 件を埋めた**（2026-09-03）。8a の `*print-array*`、3e の
+`defmethod` 側、Phase 1 の char/int lowering、4c の `macrolet`/`symbol-macrolet`、
+6a のユーザ定義型キー。経緯と設計判断は各 Stage の節（[cl-parity-plan.md](cl-parity-plan.md)）と
+[implementation-log.md](implementation-log.md) に書いた。**この 5 件が「ついでに」暴いた
+既存のバグが 3 件**あり、そちらのほうが記録の価値がある:
+
+1. **`where` 境界の受け手が、引数を入れ替えて別の型に当てられていた。**
+   `try_instance_method` の覗き見は境界を見ないので型変数の受け手を解決できず、
+   `try_instance_method_swapped` が「では引数が逆順なのだろう」と第 2 引数の型に
+   当てる。`bool` が `print-object` を実装した瞬間、`(print-object x true)` が
+   「expected Bool, found t」——**誰も書いていない呼び出しについての診断**——で落ちた。
+   潜在期間の長さではなく、*新しい impl が 1 つ増えるだけで発火する*ことが怖い形。
+2. **特殊化の名前に埋まったモジュール修飾された型引数**。`hashtable::get <m::pt,i32>`
+   のような名前を `Interp::method_key` が `rsplit_once("::")` で切ると、型引数の内側で
+   切れる。**ルートで書いたプログラムでは絶対に再現しない**（型が 1 セグメントなので）。
+   [[typelisp-type-identity-invariant]] と同じ族で、`(module m ...)` を張って試す
+   という当時の教訓がそのまま効いた。
+3. **`(if cond (setf ...) ())` は型エラー**。`setf` は代入した値を返すので分岐の型が
+   揃わない。新しく書いた prelude コードで 4 回踏んだ。既存コードは
+   `(progn (setf ...) ())` か `when`/`unless` を使っている。
+
+**設計として引き受けたことも 3 つ**:
+
+- `print-object` は「印字できる」という**境界**になった。スカラ型 14 個に impl を
+  足したのは、`format` の `&rest` が型変数を受け取れない以上、ジェネリックなコードが
+  「この値は描画してよい」と言う手段が境界しかないから（Rust の `T: Display`）。
+  プリンタがそれを引くことは無い——引くのは型キーを持つ値だけ。
+- `HashTable` の `get`/`set`/`remove` は**組み込みをやめて prelude のメソッドになった**。
+  キーをハッシュすることも 2 つのキーを比べることも、キーの型自身の typelisp メソッド
+  なので、Rust のシムからは呼べない。計画は逆に「バケットは Rust 側に置くことになる」と
+  書いていたが、その根拠（組み込みのシグネチャに `(K,V)` を書けない）は**事実として
+  誤り**だった。副産物で `symbol` キーの実行時 panic も消えた。
+- 破壊的シーケンス操作のキーワードは**転送できない**（キーワード引数は `Option` で
+  届き、呼び先は裸の値を要求し、`Option<(fn ...)>` は型として書けない）。共有するのは
+  引数リストではなくループの中身で、繰り返すのは 2 行。
 
 2026-08-27〜30 の 4 件（[implementation-log.md](implementation-log.md) の該当節）は
 **残作業を 1 つも足していない**。null 排除（`Sexpr` の `nil` を `Option` へ）は
@@ -175,8 +211,8 @@ Phase 6a/6c で見つかった**コンパイル済みコードの整数切り詰
 `construct` ノードを作らず Rust 側で箱を建てるので、特殊化の要求を `assoc`/`methodref`
 ノード側にも置いた（`Checker::request_print_object`）。
 
-**残り**: `*print-array*` と `Array<T>` の `print-object`（cl-parity-plan.md Phase 8a）は
-この穴に依存して見送っていたので、**もう入れられる**。
+`*print-array*` と `Array<T>` の `print-object` はこの穴に依存して見送っていたもので、
+2026-09-03 に入れた（下記）。
 
 Phase 2/3 の副産物として checker のバグを 4 件見つけて直した。4 件とも
 **「型変数の名前がたまたま一致したときだけ動いていた」同じ形**（詳細は同計画の Phase 0 / Phase 3 の節）:

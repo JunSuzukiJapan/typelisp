@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-09-01 / ブランチ: `feature/remove-i64`
+最終更新: 2026-09-03 / ブランチ: `main`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -9832,3 +9832,107 @@ CL に `0x` 接頭辞は無い。CL の基数構文は `#b`/`#o`/`#x`/`#NNr` だ
 
 副産物として、`0xFF` と `#xFF` が同じ 16 進の 2 通りの綴りでありながら別の型になる、
 という不整合の可能性が消えた（`#x` 側だけ固定幅にする案を検討していた時点で見つかった）。
+
+## cl-parity-plan の残り 5 件（2026-09-03）
+
+[cl-parity-plan.md](cl-parity-plan.md) が残していた 5 件——8a の `*print-array*` と
+`Array<T>` の `print-object`、3e の `defmethod` 側キーワード、Phase 1 の char/int
+lowering、4c の `macrolet`/`symbol-macrolet`、6a のユーザ定義型キー——を埋めた。
+各 Stage 固有の判断は同計画の該当節に書いたので、ここには**5 件をまたいで効いたこと**を
+残す。
+
+### 「ついでに」出た既存バグ 3 件
+
+どれも新機能そのものではなく、新機能が**初めてその形の呼び出しを書いた**ことで出た。
+
+**1. `where` 境界の受け手が、引数を入れ替えて別の型に当てられていた。**
+`(print-object x true)` を `(where (print-object T))` の下で書くと
+「expected Bool, found t」で落ちた。追うと `try_instance_method_swapped` に着いた:
+受け手優先で解決できなかった 2 引数の呼び出しを、引数が逆順に書かれた可能性として
+もう一度試す機構（`(push v x)` と CL の `(push x place)` のため）。ところが
+`try_instance_method` の覗き見は `reg.type_def` で止まるので、**`where` 境界の型変数を
+受け手にした呼び出しは常にそこで失敗する**——境界を見る解決は `check_list` のもっと
+下（`check_instance_method`）にある。だから入れ替えが先に成功してしまい、
+`bool` が `print-object` を実装した瞬間に `x` が `escape` の位置に嵌った。
+
+怖いのは潜伏期間ではなく**発火条件**で、`impl` を 1 つ足すだけでよい。診断が
+*誰も書いていない呼び出し*について語るので、読んでも原因に辿り着けない。
+入れ替えの前に「境界がこのメソッドを供給するか」を訊くようにした
+（`Checker::bound_supplies_method`）。演算子の別名（`+` → `Add` の `add`）も同じ扱い。
+
+**2. 特殊化の名前に埋まった、モジュール修飾された型引数。**
+`(compile f)` が `no such function: array::make <t15::pt>` で断る。特殊化の名前は
+型引数を埋め込む（`mangled_method_name`）が、`Interp::method_key` は
+`name.rsplit_once("::")` で所有者とメソッドを分ける——**最後の `::` は型引数の内側**に
+ある。`array::make <t15` 型の `pt>` メソッドを探しに行っていた。
+
+**ルートで書いたプログラムでは絶対に再現しない**（型が 1 セグメントなので `::` が
+1 つしかない）。[[typelisp-compiled-adt-type-name-qualification]] の「compile 系の
+名前がらみは `(module m ...)` を張って試す」がそのまま効いた教訓。
+`own_name_end`（` <` の手前で切る）を `method_key` と
+`fn_path_from_node_name` の両方に入れた。
+
+**3. `(if cond (setf ...) ())` は型エラー。** `setf` は代入した値を返す（CL と同じ）ので
+`if` の 2 つの腕が `Str` と `Unit` になる。新しく書いた prelude コードで 4 回踏んだ。
+既存コードが `(progn (setf ...) ())` や `when`/`unless` を使っているのはこのため——
+「そう書く習慣」ではなく型が要求している。
+
+### `print-object` は境界になった
+
+`Array<T>` の印字には要素の印字が要る。`format` の `&rest` は型変数を受け取れない
+（`(defun show<T> ((x T)) string (format false "~a" x))` は
+"element type has no Sexpr encoding" で弾かれる）ので、ジェネリックなコードが
+「この値は描画してよい」と言う手段は**トレイト境界しか無い**。CL の `print-object` は
+組み込みクラスにもメソッドを持つので、スカラ型 14 個に impl を足すのは CL 準拠でもある。
+
+出力は 1 バイトも変わらない: プリンタがこのトレイトを引くのは**型キーを持つ値**、
+つまり `defstruct`/`defenum` の箱だけで、スカラは即値か型を持たない箱として届き、
+一度も尋ねられない。買ったのは境界だけ——`Array<i32>` が CL 構文で印字できること。
+
+代償は Rust の `Display` と同じで、`print-object` を書いていない `defstruct` の配列は
+組み込み表現で出る。**その要求は黙って落とす**必要があった: `print-object` の特殊化を
+要求するのはユーザが書いた呼び出しではなく*構築地点*なので、エラーにすると
+「配列を作っただけで print-object を実装していないと言われる」ことになる。
+
+### `HashTable` の `get`/`set`/`remove` は組み込みをやめた
+
+計画は「バケットは Rust 側（typelisp-mem と interp、および `rt_hashtable_*`）に
+置くことになる」と書いていた。理由は「prelude 側に置こうとすると型が合わない——
+組み込みメソッドのシグネチャに `(K,V)` のバケットを書けない」。**それが事実として
+誤り**だった: 組み込みのシグネチャは Rust が `Type` を組み立てて作るので、`entries` が
+既に `Vector<cons-cell<K,V>>` を返しているとおり、その型は書ける。
+
+そして書ける以上、Rust 側に置いてはいけなかった。**キーをハッシュすることも 2 つの
+キーを比べることも、キーの型自身の typelisp メソッド**（`sxhash` と、`Hash` の
+スーパトレイト `Eq` の `equals`）で、Rust のシムからは呼べない。呼ぼうとすれば
+`rt_eval` と同じ「インタプリタへの逆呼び出し」を JIT と AOT の両方に足すことになる。
+prelude のメソッドは**それ自体がインタプリタ**で、しかも他の定義と同じようにコンパイル
+される。
+
+- 表は `hash -> バケット`。`MemHashKey`（`Int`/`Bool`/`Char`/`Str` の閉じた集合）は
+  消えた。文字列キーの intern も要らない——キーは `equals` で比べる。
+- 下の層が答えるのは、キーについて意見の要らない部分だけ:
+  `bucket-count`/`bucket-key`/`bucket-value` が読み、`bucket-put`/`bucket-delete` が書く。
+  5 つとも**非公開**の組み込みメソッド（prelude は根モジュールなので届く）。
+- 島の `compile-hashtable-op` からは `get`/`set`/`remove` の 40 行——
+  `rt_hashtable_contains` を先に呼び、見つかった枝でだけ `_get_raw` を呼び、
+  `Option` を `rt_data_new` で自分で組み立てる制御フロー——が丸ごと消えた。
+  `Option` は prelude が作る。
+- **`symbol` キーの実行時 panic が消えた**。`Hash` の impl はずっとあり、型検査もずっと
+  通り、実行時にはずっと落ちていた。シンボルについて何かを直したのではなく、
+  **下の層が知る必要をなくした**——閉じた集合を列挙する層があるかぎり、その集合に
+  入っていない型は全部同じ壊れ方をする。
+
+### char/int lowering: 規則はシムが持つ
+
+`upcase`/`downcase`/`alphap`/`digitp` は ASCII 限定で、その規則は
+`rt_char_*` シムの中にある。島は「このメソッドはこのシムを呼ぶ」としか言わない。
+2 つの層が同じ規則を*書く*のではなく同じ関数を*呼ぶ*ので、コンパイル済みの答えが
+インタプリタの答えから離れようがない。
+
+`int->char` だけが失敗しうる（Unicode スカラ値でないコードポイント）ので
+`extern "C-unwind"` で `raise` する。逆向きの `char->int` が命令すら要らない——
+コンパイル済みの `char` は生のコードポイント——のに対し、この検査があることが
+シムである理由そのもの。
+
+これで [syntax.md](../syntax.md) §10 の「コンパイルできない組み込み」の表は空になった。

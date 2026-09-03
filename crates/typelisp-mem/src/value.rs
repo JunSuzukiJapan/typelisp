@@ -484,39 +484,24 @@ pub(crate) enum BoxedObj {
     Dyn { vtable_id: u32, value: Value },
 }
 
-/// A `HashTable<K,V>` key at the mem layer — the runtime encoding of a
-/// hashable `Sexpr`/language scalar. Restricted to the same set the
-/// pre-unification interpreter-level `HashKey` (`src/eval/value.rs`)
-/// accepted: `Int`/`Bool`/`Char`/`Str` — notably excluding `Float` (`f64`
-/// has no total `Eq` because of `NaN`) and any heap-aggregate shape (a
-/// structural notion of key equality wouldn't be meaningful for those).
-///
-/// `Str` holds a [`StrId`] rather than an owned `String` — but *only* ever
-/// one produced by [`super::heap::Heap::intern_string`], which deduplicates
-/// by content: two `"foo"` string values (even from separate, non-`eq`
-/// `Sexpr::Str` allocations, since ordinary [`super::heap::Heap::alloc_string`]
-/// does not intern) must still hash/compare equal as *keys* — the same
-/// "equal, not eq" semantics `equal`-based hash tables use elsewhere in this
-/// language (see `docs/cl-equivalence-catalog.md`). An arbitrary,
-/// non-interned `Value::Str` must never be wrapped here directly; the only
-/// constructors are `Heap`'s private `lookup_hash_key`/`intern_hash_key`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum MemHashKey {
-    Int(i64),
-    Bool(bool),
-    Char(char),
-    Str(StrId),
-}
 
 /// The fields behind a [`BoxedObj::Struct`]. `Fields` is a fixed-length
 /// `defstruct` instance or a variable-length `Vector<T>`/`cons-cell<K,V>`
 /// (both just "a `Vec<Value>`" at this layer — length-checking a fixed-arity
 /// struct's field count is the caller's job, same as it already is for the
-/// pre-unification `RtValue::Struct`). `Map` is a `HashTable<K,V>` — the
-/// `HashMap`'s own bucket storage is ordinary Rust memory (like
+/// pre-unification `RtValue::Struct`). `Map` is a `HashTable<K,V>`, stored as
+/// **hash -> bucket**: this layer neither hashes a key nor compares two,
+/// because it cannot. Both questions belong to the key's type — `sxhash` and
+/// `equals`, written in typelisp — so the prelude's own `get`/`set`/`remove`
+/// ask them and hand the answers down here as a plain number and an index
+/// into a bucket. That is what lets a `defstruct` be a key at all; before it,
+/// a mem-layer key enum listed the four scalar shapes it knew how to
+/// hash, and no user type could ever join them.
+///
+/// The `HashMap`'s own bucket storage is ordinary Rust memory (like
 /// `str_slots`'s `String` buffers), so the mark phase only needs to trace
-/// the [`Value`]s it holds (both keys — [`MemHashKey::Str`]'s `StrId` — and
-/// values), not the map structure itself.
+/// the [`Value`]s it holds — every key and every value — not the map
+/// structure itself.
 ///
 /// `Frames` is a `Scope<V>`: a stack of frames, each an ordinary
 /// name-keyed binding map. The frames are **not stored inline** — each is a
@@ -535,7 +520,7 @@ pub(crate) enum MemHashKey {
 #[derive(Clone, Debug)]
 pub(crate) enum StructPayload {
     Fields(Vec<Value>),
-    Map(HashMap<MemHashKey, Value>),
+    Map(HashMap<i64, Vec<(Value, Value)>>),
     Frame(HashMap<String, Value>),
     Frames(Vec<BoxId>),
 }

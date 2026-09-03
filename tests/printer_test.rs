@@ -400,3 +400,129 @@ fn an_enum_variant_name_survives_an_instantiated_key() {
            (equal (format false "~a" (the box<string> (box::full "x"))) "(full x)")"#,
     );
 }
+
+// ---- `Array<T>` and `*print-array*` ------------------------------------------
+//
+// The remainder of Phase 8a, deferred until a generic type's `print-object`
+// could be reached at all. What makes an array printable in generic code is
+// the trait used as a *bound*: `(impl print-object Array<T> (where
+// (print-object T)))` needs its elements renderable, so the scalar types
+// implement the trait for that purpose alone (the printer never consults it
+// for them — a scalar carries no type key).
+
+/// CL's array syntax: `#(…)` at rank 1, `#nA` plus one nesting level per
+/// dimension otherwise, and `#0A` on the lone element of a rank-0 array.
+#[test]
+fn an_array_prints_in_cl_syntax() {
+    is_true(
+        r##"(let ((d (the Vector<i32> (Vector::new))))
+             (progn (push d 2) (push d 3)
+               (let ((a (Array::make d 0)))
+                 (progn (setf (aref a 0 0) 7)
+                        (equal (format false "~a" a) "#2A((7 0 0) (0 0 0))")))))"##,
+    );
+    is_true(
+        r##"(let ((d (the Vector<i32> (Vector::new))))
+             (progn (push d 3)
+               (equal (format false "~a" (Array::make d 1)) "#(1 1 1)")))"##,
+    );
+    is_true(
+        r##"(let ((d (the Vector<i32> (Vector::new))))
+             (equal (format false "~a" (Array::make d 5)) "#0A5"))"##,
+    );
+}
+
+/// `escape` reaches the elements, so `~s` prints an array of strings the way
+/// the reader would want them back and `~a` prints them bare.
+#[test]
+fn an_arrays_elements_follow_the_escape_choice() {
+    is_true(
+        r##"(let ((d (the Vector<i32> (Vector::new))))
+             (progn (push d 2)
+               (let ((a (Array::make d "q")))
+                 (and (equal (format false "~s" a) "#(\"q\" \"q\")")
+                      (equal (format false "~a" a) "#(q q)")))))"##,
+    );
+}
+
+/// A fill pointer cuts the printed contents, as CL's printer does: past it
+/// the storage is not part of the array's contents.
+#[test]
+fn a_fill_pointer_cuts_what_prints() {
+    is_true(
+        r##"(let ((d (the Vector<i32> (Vector::new))))
+             (progn (push d 4)
+               (equal (format false "~a" (Array::make d 0 :fill-pointer 2)) "#(0 0)")))"##,
+    );
+}
+
+/// `*print-array*` false prints the shape instead of the contents — CL's "in
+/// a way that does not reveal the contents", spelled for the one array type
+/// this language has.
+#[test]
+fn print_array_false_shows_only_the_shape() {
+    is_true(
+        r##"(let ((d (the Vector<i32> (Vector::new))))
+             (progn (push d 2) (push d 3)
+               (let ((a (Array::make d 0)))
+                 (dlet ((*print-array* false))
+                   (equal (format false "~a" a) "#<array 2x3>")))))"##,
+    );
+    // And it is scoped: `dlet` restores it.
+    is_true(r##"*print-array*"##);
+}
+
+/// An element type that never implemented the trait leaves the impl
+/// inapplicable, and the array prints the built-in way. What matters is that
+/// this is not an *error*: the specialization the printer would need is
+/// requested by nobody the user can see, so an unsatisfiable request has to be
+/// dropped rather than reported at the site that merely built the array.
+#[test]
+fn an_array_of_a_type_with_no_print_object_still_builds() {
+    is_true(
+        r##"(defstruct plain (n i32))
+           (let ((d (the Vector<i32> (Vector::new))))
+             (progn (push d 1)
+               (let ((a (Array::make d (plain::new 1))))
+                 (equal (format false "~a" a)
+                        "#<array<plain> #<vector<i32> 1> #<vector<plain> #<plain 1>> none>"))))"##,
+    );
+}
+
+/// The bound is what generic code asks for, and the scalars answer it —
+/// including through a container of containers, where the element being
+/// rendered is itself an `Array`.
+#[test]
+fn arrays_nest_through_the_bound() {
+    is_true(
+        r##"(let ((d (the Vector<i32> (Vector::new))))
+             (progn (push d 2)
+               (let ((inner (Array::make d 1)))
+                 (equal (format false "~a" (Array::make d inner)) "#(#(1 1) #(1 1))"))))"##,
+    );
+}
+
+/// A scalar's own impl is callable by name and says what the printer would
+/// have said — the point of having it at all, since the printer itself never
+/// consults the trait for a value that carries no type key.
+#[test]
+fn the_scalar_impls_render_what_the_printer_renders() {
+    is_true(r##"(equal (print-object 5 false) "5")"##);
+    is_true(r##"(equal (print-object "x" true) "\"x\"")"##);
+    is_true(r##"(equal (print-object "x" false) "x")"##);
+    is_true(r##"(equal (print-object #\a true) "#\\a")"##);
+}
+
+/// A `where`-bounded receiver keeps its method even when some *other* type
+/// implements the same trait with a matching argument in the second position.
+/// `(print-object x true)` under `(where (print-object T))` used to be re-read
+/// with its arguments swapped — `try_instance_method`'s peek stops before the
+/// bounds, and the swapped order then resolved against `bool`'s impl, so the
+/// error named a call nobody wrote ("expected Bool, found t").
+#[test]
+fn a_bound_method_is_not_re_read_with_swapped_arguments() {
+    is_true(
+        r##"(defun render<T> ((x T)) string (where (print-object T)) (print-object x true))
+           (equal (render 7) "7")"##,
+    );
+}

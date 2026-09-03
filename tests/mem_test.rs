@@ -1097,13 +1097,15 @@ fn is_struct_distinguishes_struct_from_float() {
     assert!(!h.is_struct(fid));
 }
 
-// ---- boxed hash tables (Sexpr/RtValue unification, Stage 4) -------------
+// ---- boxed hash tables ---------------------------------------------------
 //
-// `alloc_hashtable`/`hashtable_get`/`hashtable_set`/`hashtable_remove`/
-// `hashtable_count`/`hashtable_clear` are the mem-layer representation
-// `HashTable<K,V>` is meant to share once the interpreter is wired up to it
-// (Stage 5) — see `docs/TODO.md`'s Sexpr/RtValue unification plan. These
-// tests exercise the representation itself, independent of that wiring.
+// The mem-layer representation of `HashTable<K,V>`: **hash -> bucket**, and
+// nothing more. This layer neither hashes a key nor compares two, because it
+// cannot — both are the key type's own `sxhash`/`equals`, written in
+// typelisp, so the prelude's `get`/`set`/`remove` ask them and hand the
+// answers down as a number and an index. That is what lets a `defstruct` be a
+// key; the closed set of scalar shapes a `MemHashKey` used to enumerate never
+// could. These tests exercise the representation itself.
 
 fn as_boxed(v: Value) -> BoxId {
     match v {
@@ -1128,95 +1130,111 @@ fn hashtable_starts_empty() {
     let mut h = Heap::with_capacity(8);
     let id = as_boxed(new_hashtable(&mut h));
     assert_eq!(h.hashtable_count(id), 0);
-    assert_eq!(h.hashtable_get(id, Value::Int(1)), None);
+    assert_eq!(h.hashtable_bucket_count(id, 1), 0, "no bucket at any hash");
 }
 
 #[test]
-fn hashtable_stores_and_reads_back_values() {
+fn a_bucket_stores_and_reads_back_both_halves() {
     let mut h = Heap::with_capacity(8);
     let id = as_boxed(new_hashtable(&mut h));
-    assert_eq!(h.hashtable_set(id, Value::Int(1), Value::Char('a')), None);
-    assert_eq!(h.hashtable_set(id, Value::Bool(true), Value::Char('b')), None);
-    assert_eq!(h.hashtable_get(id, Value::Int(1)), Some(Value::Char('a')));
-    assert_eq!(h.hashtable_get(id, Value::Bool(true)), Some(Value::Char('b')));
+    h.hashtable_bucket_put(id, 3, 0, Value::Int(1), Value::Char('a'));
+    assert_eq!(h.hashtable_bucket_count(id, 3), 1);
+    assert_eq!(h.hashtable_bucket_key(id, 3, 0), Value::Int(1));
+    assert_eq!(h.hashtable_bucket_value(id, 3, 0), Value::Char('a'));
+    assert_eq!(h.hashtable_count(id), 1);
+}
+
+/// Writing at an index that exists overwrites; writing at the bucket's length
+/// appends. The caller decides which by looking first, which is the same look
+/// it needed anyway to answer "was this key already here".
+#[test]
+fn a_bucket_put_overwrites_in_place_or_appends_at_the_end() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(new_hashtable(&mut h));
+    h.hashtable_bucket_put(id, 3, 0, Value::Int(1), Value::Int(10));
+    h.hashtable_bucket_put(id, 3, 0, Value::Int(1), Value::Int(20));
+    assert_eq!(h.hashtable_bucket_count(id, 3), 1, "overwrite must not grow the bucket");
+    assert_eq!(h.hashtable_bucket_value(id, 3, 0), Value::Int(20));
+    h.hashtable_bucket_put(id, 3, 1, Value::Int(2), Value::Int(30));
+    assert_eq!(h.hashtable_bucket_count(id, 3), 2);
+    assert_eq!(h.hashtable_count(id), 2);
+}
+
+/// Two different hashes are two different buckets, and neither knows about
+/// the other.
+#[test]
+fn buckets_at_different_hashes_are_independent() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(new_hashtable(&mut h));
+    h.hashtable_bucket_put(id, 1, 0, Value::Int(1), Value::Char('a'));
+    h.hashtable_bucket_put(id, 2, 0, Value::Bool(true), Value::Char('b'));
+    assert_eq!(h.hashtable_bucket_value(id, 1, 0), Value::Char('a'));
+    assert_eq!(h.hashtable_bucket_value(id, 2, 0), Value::Char('b'));
     assert_eq!(h.hashtable_count(id), 2);
 }
 
 #[test]
-fn hashtable_set_on_existing_key_returns_previous_value() {
+fn deleting_from_a_bucket_keeps_the_rest_in_order() {
     let mut h = Heap::with_capacity(8);
     let id = as_boxed(new_hashtable(&mut h));
-    assert_eq!(h.hashtable_set(id, Value::Int(1), Value::Int(10)), None);
-    assert_eq!(h.hashtable_set(id, Value::Int(1), Value::Int(20)), Some(Value::Int(10)));
-    assert_eq!(h.hashtable_get(id, Value::Int(1)), Some(Value::Int(20)));
-    assert_eq!(h.hashtable_count(id), 1, "overwrite must not grow the entry count");
+    h.hashtable_bucket_put(id, 7, 0, Value::Int(1), Value::Int(10));
+    h.hashtable_bucket_put(id, 7, 1, Value::Int(2), Value::Int(20));
+    h.hashtable_bucket_put(id, 7, 2, Value::Int(3), Value::Int(30));
+    h.hashtable_bucket_delete(id, 7, 1);
+    assert_eq!(h.hashtable_bucket_count(id, 7), 2);
+    assert_eq!(h.hashtable_bucket_key(id, 7, 0), Value::Int(1));
+    assert_eq!(h.hashtable_bucket_key(id, 7, 1), Value::Int(3), "the tail moves up");
 }
 
+/// An emptied bucket is dropped, so a hash nobody uses costs nothing.
 #[test]
-fn hashtable_remove_deletes_the_entry() {
+fn an_emptied_bucket_disappears() {
     let mut h = Heap::with_capacity(8);
     let id = as_boxed(new_hashtable(&mut h));
-    h.hashtable_set(id, Value::Int(1), Value::Int(10));
-    assert_eq!(h.hashtable_remove(id, Value::Int(1)), Some(Value::Int(10)));
-    assert_eq!(h.hashtable_get(id, Value::Int(1)), None);
+    h.hashtable_bucket_put(id, 7, 0, Value::Int(1), Value::Int(10));
+    h.hashtable_bucket_delete(id, 7, 0);
+    assert_eq!(h.hashtable_bucket_count(id, 7), 0);
     assert_eq!(h.hashtable_count(id), 0);
-}
-
-#[test]
-fn hashtable_remove_of_missing_key_is_none() {
-    let mut h = Heap::with_capacity(8);
-    let id = as_boxed(new_hashtable(&mut h));
-    assert_eq!(h.hashtable_remove(id, Value::Int(1)), None);
 }
 
 #[test]
 fn hashtable_clear_empties_the_map() {
     let mut h = Heap::with_capacity(8);
     let id = as_boxed(new_hashtable(&mut h));
-    h.hashtable_set(id, Value::Int(1), Value::Int(10));
-    h.hashtable_set(id, Value::Int(2), Value::Int(20));
+    h.hashtable_bucket_put(id, 1, 0, Value::Int(1), Value::Int(10));
+    h.hashtable_bucket_put(id, 2, 0, Value::Int(2), Value::Int(20));
     h.hashtable_clear(id);
     assert_eq!(h.hashtable_count(id), 0);
-    assert_eq!(h.hashtable_get(id, Value::Int(1)), None);
+    assert_eq!(h.hashtable_bucket_count(id, 1), 0);
 }
 
-/// Two distinct `alloc_string` calls with identical content are two
-/// distinct, non-`eq` `Value::Str`s — but as `HashTable` keys they must
-/// still compare equal ("equal, not eq" — see `MemHashKey`'s doc comment).
+/// `hashtable_pairs` flattens every bucket — the snapshot
+/// `keys`/`values`/`entries` are built from.
 #[test]
-fn string_keys_hash_by_content_not_by_allocation_identity() {
+fn hashtable_pairs_sees_every_bucket() {
     let mut h = Heap::with_capacity(8);
     let id = as_boxed(new_hashtable(&mut h));
-    let key_in = h.alloc_string("x".to_string());
-    h.hashtable_set(id, key_in, Value::Int(42));
-    let key_out = h.alloc_string("x".to_string()); // separate allocation, same content
-    assert_ne!(key_in, key_out, "sanity: alloc_string does not itself dedupe");
-    assert_eq!(h.hashtable_get(id, key_out), Some(Value::Int(42)));
+    h.hashtable_bucket_put(id, 1, 0, Value::Int(1), Value::Int(10));
+    h.hashtable_bucket_put(id, 1, 1, Value::Int(2), Value::Int(20));
+    h.hashtable_bucket_put(id, 9, 0, Value::Int(3), Value::Int(30));
+    let mut pairs = h.hashtable_pairs(id);
+    pairs.sort_by_key(|(k, _)| match k {
+        Value::Int(n) => *n,
+        other => panic!("expected an int key, got {:?}", other),
+    });
+    assert_eq!(pairs, vec![
+        (Value::Int(1), Value::Int(10)),
+        (Value::Int(2), Value::Int(20)),
+        (Value::Int(3), Value::Int(30)),
+    ]);
 }
 
 #[test]
-fn string_keys_with_different_content_do_not_collide() {
+#[should_panic(expected = "bucket index 2 out of range")]
+fn a_bucket_put_past_the_end_panics() {
     let mut h = Heap::with_capacity(8);
     let id = as_boxed(new_hashtable(&mut h));
-    let x = h.alloc_string("x".to_string());
-    let y = h.alloc_string("y".to_string());
-    h.hashtable_set(id, x, Value::Int(1));
-    h.hashtable_set(id, y, Value::Int(2));
-    assert_eq!(h.hashtable_get(id, x), Some(Value::Int(1)));
-    assert_eq!(h.hashtable_get(id, y), Some(Value::Int(2)));
-}
-
-/// `MemHashKey`'s variants must not collide across key *types* that happen
-/// to encode to the same underlying integer bit pattern.
-#[test]
-fn keys_of_different_types_do_not_collide() {
-    let mut h = Heap::with_capacity(8);
-    let id = as_boxed(new_hashtable(&mut h));
-    h.hashtable_set(id, Value::Int(0), Value::Char('i'));
-    h.hashtable_set(id, Value::Bool(false), Value::Char('b'));
-    assert_eq!(h.hashtable_get(id, Value::Int(0)), Some(Value::Char('i')));
-    assert_eq!(h.hashtable_get(id, Value::Bool(false)), Some(Value::Char('b')));
-    assert_eq!(h.hashtable_count(id), 2);
+    h.hashtable_bucket_put(id, 1, 2, Value::Int(1), Value::Int(10));
 }
 
 #[test]
@@ -1233,15 +1251,6 @@ fn hashtable_accessor_on_a_boxed_struct_panics() {
     let mut h = Heap::with_capacity(8);
     let id = as_boxed(alloc_named_struct(&mut h, "point", vec![Value::Int(1)]));
     h.hashtable_count(id);
-}
-
-#[test]
-#[should_panic(expected = "unsupported key type")]
-fn unsupported_key_type_panics() {
-    let mut h = Heap::with_capacity(8);
-    let id = as_boxed(new_hashtable(&mut h));
-    let bad_key = h.cons(Value::Int(1), Value::Empty).unwrap();
-    h.hashtable_set(id, bad_key, Value::Int(1));
 }
 
 #[test]
@@ -1271,13 +1280,13 @@ fn hashtable_reachable_via_rooted_cons_survives() {
     let mut h = Heap::with_capacity(8);
     let map = new_hashtable(&mut h);
     let id = as_boxed(map);
-    h.hashtable_set(id, Value::Int(1), Value::Int(99));
+    h.hashtable_bucket_put(id, 1, 0, Value::Int(1), Value::Int(99));
     let cell = h.cons(map, Value::Empty).unwrap();
     h.push_root(cell);
     let _ = new_hashtable(&mut h); // unrooted garbage
     h.gc();
     assert_eq!(h.box_count(), 1); // only the rooted map survives
-    assert_eq!(h.hashtable_get(id, Value::Int(1)), Some(Value::Int(99)));
+    assert_eq!(h.hashtable_bucket_value(id, 1, 0), Value::Int(99));
 }
 
 /// A hash-table value that itself holds an unrelated cons must survive a GC
@@ -1290,35 +1299,38 @@ fn gc_traces_into_a_rooted_hashtables_values() {
     let inner = list_of(&mut h, &[10, 20, 30]);
     let map = new_hashtable(&mut h);
     let id = as_boxed(map);
-    h.hashtable_set(id, Value::Int(1), inner);
+    h.hashtable_bucket_put(id, 1, 0, Value::Int(1), inner);
     h.push_root(map);
     for i in 0..20 {
         let _ = h.cons(Value::Int(i), Value::Empty).unwrap(); // unrelated garbage
     }
     h.gc();
-    assert_eq!(to_vec(&h, h.hashtable_get(id, Value::Int(1)).unwrap()), vec![10, 20, 30]);
+    assert_eq!(to_vec(&h, h.hashtable_bucket_value(id, 1, 0)), vec![10, 20, 30]);
     assert_accounting(&h);
 }
 
 /// A string used as a hash-table key must survive a GC through the map
-/// alone (the key, not just the value, must be traced) — otherwise a
-/// second, unrelated GC pass could recycle its `StrId` slot for something
-/// else while the map still holds it.
+/// alone — the key, not just the value, has to be traced. This matters more
+/// than it used to: a key is an ordinary `Value` now (a `defstruct` can be
+/// one), so nothing interns it and nothing else keeps it alive.
 #[test]
 fn gc_keeps_a_rooted_hashtables_string_keys_alive() {
     let mut h = Heap::with_capacity(64);
     let map = new_hashtable(&mut h);
     let id = as_boxed(map);
     let key = h.alloc_string("k".to_string());
-    h.hashtable_set(id, key, Value::Int(1));
+    h.hashtable_bucket_put(id, 1, 0, key, Value::Int(1));
     h.push_root(map);
     for i in 0..20 {
         let _ = h.alloc_string(format!("garbage{}", i)); // unrooted garbage strings
     }
     h.gc();
-    // the key string must still resolve to the stored value after GC
-    let key2 = h.alloc_string("k".to_string());
-    assert_eq!(h.hashtable_get(id, key2), Some(Value::Int(1)));
+    // the key string must still read back with its content intact
+    match h.hashtable_bucket_key(id, 1, 0) {
+        Value::Str(sid) => assert_eq!(h.string(sid), "k"),
+        other => panic!("expected the string key, got {:?}", other),
+    }
+    assert_eq!(h.hashtable_bucket_value(id, 1, 0), Value::Int(1));
 }
 
 // ---- roots bookkeeping --------------------------------------------------

@@ -138,9 +138,10 @@ fn a_scalar_key_is_accepted() {
 
 #[test]
 fn a_key_type_the_table_cannot_hold_is_a_type_error() {
-    // This used to be a runtime panic out of `Heap::lookup_hash_key`
-    // ("HashTable: unsupported key type"), whose comment said the checker
-    // could not express a hashable bound. It can, and this is the result.
+    // This used to be a runtime panic out of the mem layer ("HashTable:
+    // unsupported key type"), whose comment said the checker could not
+    // express a hashable bound. It can, and this is the result — and `point`
+    // *can* be a key, once it implements `Hash` (see the tests at the end).
     let src = "
         (defstruct point (x i32) (y i32))
         (defvar (h HashTable<point,i32>) (HashTable::new))
@@ -185,4 +186,123 @@ fn size_reports_the_occupancy() {
         (progn (set h \"a\" 1) (set h \"b\" 2) (size h))
     ";
     assert_eq!(eval_ok(src), Value::Int(2));
+}
+
+// ---- a user-defined type as a key (cl-parity-plan.md Phase 6a's remainder) --
+//
+// What `Hash` was put in for. The table is stored as hash -> bucket, and
+// neither hashing a key nor comparing two is something the layer below can
+// do: both are the key type's own methods. So `get`/`set`/`remove` are
+// prelude `defmethod`s carrying `(where (Hash K))`, written on five bucket
+// primitives — and a `defstruct` that implements `Hash` is a key like any
+// other.
+
+/// The `point` from `a_key_type_the_table_cannot_hold_is_a_type_error`, with
+/// the two impls that make it a key.
+const POINT: &str = r#"
+    (defstruct point (x i32) (y i32))
+    (impl Eq point
+      (equals ((self Self) (other Self)) bool
+        (if (= self::x other::x) (= self::y other::y) false)))
+    (impl Hash point
+      (sxhash ((self Self)) i32 (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+"#;
+
+#[test]
+fn a_user_type_that_implements_hash_is_a_key() {
+    let src = format!(
+        "{}
+         (defvar (h HashTable<point,string>) (HashTable::new))
+         (progn
+           (set h (point::new 1 2) \"a\")
+           (set h (point::new 3 4) \"b\")
+           (match (get h (point::new 1 2)) ((some v) v) ((none) \"missing\")))",
+        POINT
+    );
+    match eval_ok(&src) {
+        Value::Str(_) => {}
+        other => panic!("expected a string, got {:?}", other),
+    }
+    // And a key that is `equals` to a stored one — a *different* object with
+    // the same fields — finds it, which is the whole point of hashing by the
+    // type's own methods rather than by identity.
+    let src = format!(
+        "{}
+         (defvar (h HashTable<point,i32>) (HashTable::new))
+         (progn (set h (point::new 1 2) 7)
+                (match (get h (point::new 1 2)) ((some v) v) ((none) -1)))",
+        POINT
+    );
+    assert_eq!(eval_ok(&src), Value::Int(7));
+}
+
+#[test]
+fn a_user_key_overwrites_removes_and_counts_like_a_scalar_one() {
+    let src = format!(
+        "{}
+         (defvar (h HashTable<point,i32>) (HashTable::new))
+         (progn
+           (set h (point::new 1 2) 1)
+           (set h (point::new 3 4) 2)
+           (set h (point::new 1 2) 9)          ; overwrite, not a second entry
+           (let ((after-overwrite (count h))
+                 (removed (match (remove h (point::new 1 2)) ((some v) v) ((none) -1)))
+                 (after-remove (count h))
+                 (gone (match (remove h (point::new 1 2)) ((some v) v) ((none) -1))))
+             (+ (* 1000 after-overwrite) (+ (* 100 removed) (+ (* 10 after-remove) (+ 1 gone))))))",
+        POINT
+    );
+    // 2 entries, removed 9, 1 left, second remove answers none (-1 -> 0).
+    assert_eq!(eval_ok(&src), Value::Int(2000 + 900 + 10));
+}
+
+/// Two keys that collide — the same `sxhash`, different `equals` — stay two
+/// entries. The bucket is where that is decided, and a hash function is
+/// allowed to collide; `Hash`'s contract only runs the other way.
+#[test]
+fn colliding_keys_stay_separate_entries() {
+    let src = r#"
+        (defstruct k (n i32))
+        (impl Eq k (equals ((self Self) (other Self)) bool (= self::n other::n)))
+        ;; Every key hashes to 0.
+        (impl Hash k (sxhash ((self Self)) i32 0))
+        (defvar (h HashTable<k,i32>) (HashTable::new))
+        (progn
+          (set h (k::new 1) 10)
+          (set h (k::new 2) 20)
+          (+ (* 100 (count h))
+             (+ (match (get h (k::new 1)) ((some v) v) ((none) 0))
+                (match (get h (k::new 2)) ((some v) v) ((none) 0)))))
+    "#;
+    assert_eq!(eval_ok(src), Value::Int(230));
+}
+
+/// A `symbol` key works too. It has always had a `Hash` impl and always
+/// type-checked, and it always panicked at run time: the layer below knew
+/// four scalar shapes and `Symbol` was not one of them. Nothing about symbols
+/// was fixed — the layer stopped needing to know.
+#[test]
+fn a_symbol_key_works() {
+    let src = "
+        (defvar (h HashTable<symbol,i32>) (HashTable::new))
+        (progn (set h 'a 1) (set h 'b 2)
+               (+ (match (get h 'a) ((some v) v) ((none) 0))
+                  (match (get h 'b) ((some v) v) ((none) 0))))
+    ";
+    assert_eq!(eval_ok(src), Value::Int(3));
+}
+
+/// The keys the table hands back are the keys that went in — `keys`/`entries`
+/// snapshot the buckets, which hold the stored `Value`s themselves.
+#[test]
+fn keys_and_entries_see_user_keys() {
+    let src = format!(
+        "{}
+         (defvar (h HashTable<point,i32>) (HashTable::new))
+         (progn (set h (point::new 1 2) 5) (set h (point::new 3 4) 6)
+                (+ (* 10 (len (keys h)))
+                   (foldl (iter (values h)) (lambda ((a i32) (b i32)) i32 (+ a b)) 0)))",
+        POINT
+    );
+    assert_eq!(eval_ok(&src), Value::Int(31));
 }

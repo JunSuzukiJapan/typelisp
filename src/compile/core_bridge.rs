@@ -813,12 +813,11 @@ fn translate_vector_op(
 }
 
 /// A `HashTable<K,V>` builtin -> `(hashtable-op method key-kind val-kind
-/// option-name form...)`, the map counterpart of [`translate_vector_op`].
+/// result-name form...)`, the map counterpart of [`translate_vector_op`].
 ///
-/// `get`/`remove` return `Option<V>`, which `compile-hashtable-op` builds
-/// itself — there is no `Option::some` call site in the source to translate —
-/// so they carry the type-name literal it needs; the rest carry an unused
-/// placeholder in that position.
+/// The name slot carries the runtime identity of whatever this op *builds*:
+/// `new` the table, `keys`/`values`/`entries` a `Vector<_>`. The bucket
+/// primitives build nothing, so they leave it empty.
 fn translate_hashtable_op(
     heap: &mut Heap,
     method: &str,
@@ -837,10 +836,10 @@ fn translate_hashtable_op(
     f.push(Value::Int(kk));
     f.push(Value::Int(vk));
     // The name slot: whatever *this* op's result is, spelled as the runtime
-    // identity it must carry. `get`/`remove` build an `Option<V>`; `new`
-    // builds the table itself; `keys`/`values`/`entries` build a `Vector<_>`.
-    // The ops that build nothing (`set`, `len`, `contains`) leave it empty.
-    let builds_a_box = matches!(method, "get" | "remove" | "new" | "keys" | "values" | "entries");
+    // identity it must carry. `new` builds the table itself;
+    // `keys`/`values`/`entries` build a `Vector<_>`. The ops that build
+    // nothing (`count`, `clear`, and the whole bucket family) leave it empty.
+    let builds_a_box = matches!(method, "new" | "keys" | "values" | "entries");
     let result_name = if builds_a_box { str_form(f.heap(), ret_key)? } else { Value::Empty };
     f.push(result_name);
     if method != "new" {
@@ -2748,17 +2747,21 @@ mod tests {
         );
     }
 
+    /// `get`/`set`/`remove` are prelude methods now, so the ops that reach
+    /// here are the bucket primitives — but they still carry both kinds, for
+    /// the same reason: the key and the value cross the boundary tagged, and
+    /// only the declared type says how.
     #[test]
     fn a_hash_table_builtin_carries_both_key_and_value_kinds() {
         assert_eq!(
-            bridged("(assoc hashtable set true () unit ((hashtable str int-any-width) str int-any-width) \"()\" (var h) (var k) (var x))"),
-            r#"(hashtable-op "set" 6 1 () (var "h" false) (var "k" false) (var "x" false))"#
+            bridged("(assoc hashtable bucket-put true () unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) \"()\" (var h) (var n) (var i) (var k) (var x))"),
+            r#"(hashtable-op "bucket-put" 6 1 () (var "h" false) (var "n" false) (var "i" false) (var "k" false) (var "x" false))"#
         );
-        // `get` returns an `Option`, which the island builds itself and needs
-        // the type-name literal for.
+        // A bucket read builds no box, so the name slot stays empty; the
+        // island decodes the result by `key-kind`/`val-kind` instead.
         assert_eq!(
-            bridged("(assoc hashtable get true () enum ((hashtable str int-any-width) str) \"option<i32>\" (var h) (var k))"),
-            r#"(hashtable-op "get" 6 1 (str (int-any-width 0 111) (int-any-width 0 112) (int-any-width 0 116) (int-any-width 0 105) (int-any-width 0 111) (int-any-width 0 110) (int-any-width 0 60) (int-any-width 0 105) (int-any-width 0 51) (int-any-width 0 50) (int-any-width 0 62)) (var "h" false) (var "k" false))"#
+            bridged("(assoc hashtable bucket-value true () int-any-width ((hashtable str int-any-width) int-any-width int-any-width) \"i32\" (var h) (var n) (var i))"),
+            r#"(hashtable-op "bucket-value" 6 1 () (var "h" false) (var "n" false) (var "i" false))"#
         );
     }
 

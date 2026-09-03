@@ -533,15 +533,15 @@ pub const SOURCE: &str = r##"
 ;; `docs/functions.md` §9 lists the CL correspondence for each.
 ;;
 ;; EVERY body below works on `char->int` code points and never calls
-;; `upcase`/`downcase`/`alphap`/`digitp`/`int->char`. That is not style: those
-;; five are builtins the island has no lowering for (`externs::
-;; native_lowered_primitive_methods`'s `"char"` and `"i32"` rows), so reaching
-;; one would make this whole section interpreted-only and open a
+;; `upcase`/`downcase`/`alphap`/`digitp`/`int->char`. That was once a
+;; *constraint*: those five had no island lowering, so reaching one would have
+;; made this whole section interpreted-only and opened a
 ;; `PRELUDE_COMPILE_UNSUPPORTED` hole — which is exactly what the first draft
-;; of this section did, and what that list exists to catch. `char->int`, the
-;; comparison operators and `string`'s `ref` *are* lowered, so everything here
-;; compiles through the ordinary prelude path. (Closing the lowering gap for
-;; those five is separate work; until then this constraint stands.)
+;; of this section did, and what `externs::native_lowered_primitive_methods`
+;; exists to catch. The five are lowered now (one `rt_char_*` shim each, and
+;; `rt_int_to_char` for the conversion), so the constraint is gone and the
+;; code-point spelling is merely what is already here and already tested.
+;; Anything new may call them directly.
 ;;
 ;; ASCII-only, like `char_assoc`'s own `upcase`/`alphap`: classifying a
 ;; non-ASCII code point needs Unicode tables the runtime does not carry.
@@ -595,9 +595,10 @@ pub const SOURCE: &str = r##"
 ;; predicate.
 ;;
 ;; A free `defun` rather than a `defmethod`, and likewise `digit->char`: CL
-;; gives both an optional radix, and `defmethod` accepts neither `&optional`
-;; nor `&key` (`parse_defmethod_sig_inner` only calls `parse_param_pairs`)
-;; until cl-parity-plan.md Phase 5b lifts that.
+;; gives both an optional radix, which `defmethod` could not declare when
+;; these were written. Phase 5b lifted that restriction and they stayed
+;; `defun`s — nothing at a call site tells the two apart for a `char`
+;; receiver, so moving them would be churn.
 (defun digit-weight ((c char) &optional (radix i32 10)) Option<i32>
   (let* ((n (char->int c))
          ;; `-1` means "not a digit character at all", which the range test
@@ -689,39 +690,147 @@ pub const SOURCE: &str = r##"
       (while (< i n) (progn (setf out (append out (char->string c))) (setf i (+ i 1))))
       out)))
 
+;; cl-parity-plan.md Phase 3e: the readers for CL's sequence keywords
+;; (`:key`/`:test`/`:test-not`/`:start`/`:end`/`:from-end`/`:count`). Each
+;; turns one omitted-or-given keyword into the plain value a loop wants; the
+;; loop *cores* that use them are further down, with the `Iter` library.
+;;
+;; **Every keyword is declared without a default.** That is forced, not
+;; stylistic: a defaulted `&optional`/`&key` parameter's declared type may not
+;; mention the function's own type parameters (`Checker::check_defun_opt_key`),
+;; and `:key`/`:test` are function types over the element type. A defaultless
+;; parameter arrives as `Option<...>`, so the default lives in the body.
+(defun seq-in-bounds ((i i32) (start Option<i32>) (end Option<i32>)) bool
+  "Whether index `i` lies in the `:start`/`:end` window `[start, end)`."
+  (if (match start ((some s) (< i s)) ((none) false))
+      false
+      (match end ((some e) (< i e)) ((none) true))))
+
+(defun seq-flag ((b Option<bool>)) bool
+  "A boolean keyword (`:from-end`); false when the caller omitted it."
+  (match b ((some v) v) ((none) false)))
+
+(defun seq-limit ((n Option<i32>)) i32
+  "`:count` as a plain limit; -1 (no limit) when the caller omitted it."
+  (match n ((some v) v) ((none) -1)))
+
+;; `seq-in-bounds` answers "is this index inside the window" for a scan that
+;; walks the whole sequence anyway. The two below are for the other shape —
+;; a loop that *starts* at the window and stops at its end (`replace`'s two
+;; cursors), where the bound has to be a number before the loop begins.
+(defun seq-window-start ((s Option<i32>)) i32
+  "`:start` as an index; 0 when the caller omitted it."
+  (match s ((some v) v) ((none) 0)))
+
+(defun seq-window-end ((e Option<i32>) (n i32)) i32
+  "`:end` as an index; the sequence's length `n` when the caller omitted it."
+  (match e ((some v) v) ((none) n)))
+
+;; Whether `n` characters of `a` from `ai` and of `b` from `bi` all satisfy
+;; `same`, which is called with `b`'s character first — CL's rule for `:test`
+;; in this family is that the *first* sequence's element goes first, and `b`
+;; is the pattern at both call sites below.
+(defun string-window-equal ((a string) (ai i32) (b string) (bi i32) (n i32)
+                            (same (fn (char char) bool)))
+    bool
+  (let ((k 0) (ok true))
+    (progn
+      (while (if ok (< k n) false)
+        (progn
+          (unless (same (ref b (+ bi k)) (ref a (+ ai k))) (setf ok false))
+          (setf k (+ k 1))))
+      ok)))
+
 ;; `search`: the index where `sub` first occurs in `self`, or `none`.
 ;; CL spells the arguments the other way round (`(search pattern sequence)`);
 ;; this takes the receiver first like every other method here, and
 ;; `docs/functions.md` §8 records the difference.
 ;; The empty string occurs at index 0, as CL says.
-(defmethod search ((self string) (sub string)) Option<i32>
-  (let ((n (length self)) (m (length sub)) (i 0) (found (the Option<i32> (option::none))))
-    (progn
-      (while (and (<= i (- n m)) (is-none found))
-        (progn
-          (if (equal (substring self i (+ i m)) sub) (progn (setf found (option::some i)) ()) ())
-          (setf i (+ i 1))))
-      found)))
+;;
+;; **The window keywords are named, not numbered.** CL calls them
+;; `:start1`/`:end1` (the pattern) and `:start2`/`:end2` (the sequence
+;; searched); with the arguments the other way round those numbers would each
+;; mean the opposite of what a CL programmer expects, and would do so
+;; silently. `:start`/`:end` bound the receiver and `:sub-start`/`:sub-end`
+;; the pattern, so a `:start1` written out of habit is an unknown keyword
+;; rather than a wrong answer. `mismatch` below keeps CL's numbers, because
+;; there the argument order does agree.
+(defmethod search ((self string) (sub string)
+                   &key (key (fn (char) char)) (test (fn (char char) bool))
+                        (test-not (fn (char char) bool)) (from-end bool)
+                        (start i32) (end i32) (sub-start i32) (sub-end i32))
+    Option<i32>
+  (let ((proj (match key ((some f) f) ((none) (lambda ((c char)) char c)))))
+    (let ((same (lambda ((p char) (q char)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equal (proj p) (proj q)))))))))
+      (let ((e (seq-window-end end (length self)))
+            (ps (seq-window-start sub-start))
+            (last (seq-flag from-end))
+            (found (the Option<i32> (option::none)))
+            (i (seq-window-start start)))
+        (let ((m (- (seq-window-end sub-end (length sub)) ps)))
+          (progn
+            (while (if (<= (+ i m) e) (if last true (is-none found)) false)
+              (progn
+                (when (string-window-equal self i sub ps m same)
+                  (setf found (option::some i)))
+                (setf i (+ i 1))))
+            found))))))
 ;; `mismatch`: the index of the first position where the two differ, or `none`
 ;; when one is a prefix of the other *and* they are the same length — i.e.
 ;; `none` exactly when they are `equal`. A length difference mismatches at the
 ;; shorter one's end, which is CL's answer too.
-(defmethod mismatch ((self string) (b string)) Option<i32>
-  (let ((n (min (length self) (length b))) (i 0) (found (the Option<i32> (option::none))))
-    (progn
-      (while (and (< i n) (is-none found))
-        (progn
-          (if (equal (ref self i) (ref b i)) () (progn (setf found (option::some i)) ()))
-          (setf i (+ i 1))))
-      (match found
-        ((some k) (option::some k))
-        ((none) (if (= (length self) (length b)) (option::none) (option::some n)))))))
+;;
+;; `:from-end` aligns the two windows at their *ends* and answers one past the
+;; rightmost difference, which is what CL's own wording ("one plus the index
+;; of the rightmost position in which the sequences differ") comes to. Every
+;; index returned is an index into the receiver, windows or no windows.
+(defmethod mismatch ((self string) (b string)
+                     &key (key (fn (char) char)) (test (fn (char char) bool))
+                          (test-not (fn (char char) bool)) (from-end bool)
+                          (start1 i32) (end1 i32) (start2 i32) (end2 i32))
+    Option<i32>
+  (let ((proj (match key ((some f) f) ((none) (lambda ((c char)) char c)))))
+    (let ((same (lambda ((p char) (q char)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equal (proj p) (proj q)))))))))
+      (let ((s1 (seq-window-start start1)) (e1 (seq-window-end end1 (length self)))
+            (s2 (seq-window-start start2)) (e2 (seq-window-end end2 (length b))))
+        (let ((n (min (- e1 s1) (- e2 s2)))
+              (found (the Option<i32> (option::none)))
+              (k 0))
+          (if (seq-flag from-end)
+              (progn
+                (while (if (is-none found) (< k n) false)
+                  (progn
+                    (setf k (+ k 1))
+                    (unless (same (ref b (- e2 k)) (ref self (- e1 k)))
+                      (setf found (option::some (+ (- e1 k) 1))))))
+                (match found
+                  ((some j) (option::some j))
+                  ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (- e1 n))))))
+              (progn
+                (while (if (is-none found) (< k n) false)
+                  (progn
+                    (unless (same (ref b (+ s2 k)) (ref self (+ s1 k)))
+                      (setf found (option::some (+ s1 k))))
+                    (setf k (+ k 1))))
+                (match found
+                  ((some j) (option::some j))
+                  ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (+ s1 n)))))))))))) 
 
 ;; The `string-trim` family. `bag` is the set of characters to strip, spelled
 ;; as a string (CL takes any character sequence; a string *is* the character
 ;; sequence this language has). A free `defun` with an `&optional` default of
-;; the usual whitespace, because `defmethod` takes neither `&optional` nor
-;; `&key` until cl-parity-plan.md Phase 5b.
+;; the usual whitespace — the same history as `digit-weight` above: written
+;; before `defmethod` could take `&optional`, and left alone once it could.
 (defun char-in-bag ((c char) (bag string)) bool
   (let ((i 0) (n (length bag)) (hit false))
     (progn
@@ -1001,17 +1110,9 @@ pub const SOURCE: &str = r##"
         (setf i (- i 1)))
       out)))
 ;; ---------------------------------------------------------------------------
-;; cl-parity-plan.md Phase 3e: the sequence keywords.
-;;
-;; CL's `:key`/`:test`/`:test-not`/`:start`/`:end`/`:from-end`/`:count`, on the
-;; generic `defun`s of this library. Three small readers and four loop cores,
-;; so each public function below spells only what is its own.
-;;
-;; **Every keyword is declared without a default.** That is forced, not
-;; stylistic: a defaulted `&optional`/`&key` parameter's declared type may not
-;; mention the function's own type parameters (`Checker::check_defun_opt_key`),
-;; and `:key`/`:test` are function types over the element type. A defaultless
-;; parameter arrives as `Option<...>`, so the default lives in the body.
+;; cl-parity-plan.md Phase 3e: the loop cores the sequence keywords feed.
+;; The five keyword *readers* are further up (they are needed by `string`'s
+;; own `search`/`mismatch`, which come before this section).
 ;;
 ;; **Why the cores take a `hit` closure rather than the keywords themselves.**
 ;; `Option<(fn (A) A)>` is not writable as a declared type — the reader ends a
@@ -1020,19 +1121,6 @@ pub const SOURCE: &str = r##"
 ;; that type without anyone spelling it. So the keyword unpacking has to stay
 ;; in the function that declared the keywords, and what crosses into a core is
 ;; an ordinary `(fn (i32 A) bool)` closed over them.
-(defun seq-in-bounds ((i i32) (start Option<i32>) (end Option<i32>)) bool
-  "Whether index `i` lies in the `:start`/`:end` window `[start, end)`."
-  (if (match start ((some s) (< i s)) ((none) false))
-      false
-      (match end ((some e) (< i e)) ((none) true))))
-
-(defun seq-flag ((b Option<bool>)) bool
-  "A boolean keyword (`:from-end`); false when the caller omitted it."
-  (match b ((some v) v) ((none) false)))
-
-(defun seq-limit ((n Option<i32>)) i32
-  "`:count` as a plain limit; -1 (no limit) when the caller omitted it."
-  (match n ((some v) v) ((none) -1)))
 
 ;; The forward scan the searches share. `last` is `:from-end`: instead of a
 ;; second pass it simply stops breaking, so the final match wins — which is
@@ -1118,6 +1206,37 @@ pub const SOURCE: &str = r##"
       (while (if found false (< i (len hay)))
         (progn (when (hit (get hay i)) (setf found true)) (setf i (+ i 1)) ()))
       found)))
+
+;; The duplicate-removal both `remove-duplicates` and `delete-duplicates`
+;; perform, with `:key`/`:test`/`:test-not` already folded into `same`.
+;; `last` is `:from-end`, which chooses *which* of a group of equals survives:
+;; off (CL's default) keeps the last, on keeps the first. An element outside
+;; the `[start, end)` window is neither dropped nor compared against.
+(defun seq-dedup-core<I,A> ((it I) (same (fn (A A) bool))
+                            (start Option<i32>) (end Option<i32>) (last bool))
+    Vector<A>
+  (where (Iter I (Item A)))
+  (let ((buf (the Vector<A> (Vector::new))) (out (the Vector<A> (Vector::new))) (i 0))
+    (progn
+      (doiter (x it) (push buf x))
+      (while (< i (len buf))
+        (let ((x (get buf i)))
+          (progn
+            (if (seq-in-bounds i start end)
+                (let ((dup false) (j (if last 0 (+ i 1))) (stop (if last i (len buf))))
+                  (progn
+                    (while (< j stop)
+                      (progn
+                        (when (if (seq-in-bounds j start end) (same x (get buf j)) false)
+                          (setf dup true))
+                        (setf j (+ j 1))
+                        ()))
+                    (if dup () (push out x))
+                    ()))
+                (progn (push out x) ()))
+            (setf i (+ i 1))
+            ())))
+      out)))
 
 ;; Non-destructive insertion sort, stable: the inner shift uses strict `cmp`,
 ;; so elements equal under `cmp` keep their input order. `proj` is `:key`,
@@ -1347,8 +1466,11 @@ pub const SOURCE: &str = r##"
 ;; through the `sexpr-*` layer (`sexpr-consp`/`sexpr-car`/`sexpr-cdr`) is the
 ;; correct way to walk a `Sexpr` list.
 
-;; `HashTable<K,V>` iteration: `keys`/`values`/
-;; `entries` are Rust builtins (`registry::hashtable_def`,
+;; `HashTable<K,V>` iteration. (Its `get`/`set`/`remove` are further down,
+;; with `Hash` — they need the key type's own `sxhash` and `equals`, so they
+;; cannot be written before the trait that supplies them.)
+;;
+;; `keys`/`values`/`entries` are Rust builtins (`registry::hashtable_def`,
 ;; `eval_builtin_method`'s `"hashtable"` arm) — a `HashMap` has no stable,
 ;; resumable cursor the way `Vector<T>`'s index does, so each call snapshots
 ;; the table's current contents into a fresh `Vector`, the same "iterating
@@ -1550,6 +1672,57 @@ user-visible capacity."
 (impl Hash char   (sxhash ((self Self)) i32 (char->int self)))
 (impl Hash string (sxhash ((self Self)) i32 (sxhash-string self)))
 (impl Hash symbol (sxhash ((self Self)) i32 (sxhash-string (symbol->string self))))
+
+;; ---------------------------------------------------------------------------
+;; `HashTable<K,V>`'s lookup, insert and delete — cl-parity-plan.md Phase 6a.
+;;
+;; **Prelude methods, not builtins**, and that is the whole of what lets a
+;; `defstruct` be a key. Looking a key up means hashing it and comparing it,
+;; and both are the key type's own methods — `sxhash`, and `Eq`'s `equals`
+;; reached through `Hash`'s supertrait — which are written in typelisp, so no
+;; Rust shim can call them. A builtin `get` would have had to call back into
+;; the interpreter to ask; a prelude method already *is* the interpreter, and
+;; compiles like any other definition.
+;;
+;; What the layer below answers is the part that needs no opinion about keys:
+;; `bucket-count`/`bucket-key`/`bucket-value` read the entries that share one
+;; hash, and `bucket-put`/`bucket-delete` write them
+;; (`registry::hashtable_def`). `Hash`'s contract — `(equals x y)` implies
+;; `(= (sxhash x) (sxhash y))` — is exactly what makes one bucket the right
+;; and only place to look.
+(defun hashtable-bucket-index<K,V> ((self HashTable<K,V>) (h i32) (k K)) i32
+  (where (Hash K))
+  "Where `k` sits in `h`'s bucket, or -1 when it is not there."
+  (let ((n (bucket-count self h)) (i 0) (found -1))
+    (progn
+      (while (if (< found 0) (< i n) false)
+        (progn
+          (when (equals (bucket-key self h i) k) (setf found i))
+          (setf i (+ i 1))))
+      found)))
+
+(pub defmethod get ((self HashTable<K,V>) (k K)) Option<V>
+  (where (Hash K))
+  "The value `k` maps to, or `none`. CL's `gethash`."
+  (let* ((h (sxhash k)) (i (hashtable-bucket-index self h k)))
+    (if (< i 0) (Option::none) (Option::some (bucket-value self h i)))))
+
+(pub defmethod set ((self HashTable<K,V>) (k K) (v V)) ()
+  (where (Hash K))
+  "Maps `k` to `v`, replacing whatever it mapped to before. CL's
+   `(setf (gethash k table) v)`."
+  (let* ((h (sxhash k)) (i (hashtable-bucket-index self h k)))
+    (bucket-put self h (if (< i 0) (bucket-count self h) i) k v)))
+
+(pub defmethod remove ((self HashTable<K,V>) (k K)) Option<V>
+  (where (Hash K))
+  "Removes `k` and answers the value it held, or `none`. CL's `remhash`
+   answers a boolean; answering the value says that and more."
+  (let* ((h (sxhash k)) (i (hashtable-bucket-index self h k)))
+    (if (< i 0)
+        (Option::none)
+        (let ((v (bucket-value self h i)))
+          (progn (bucket-delete self h i) (Option::some v))))))
 
 ;; ---------------------------------------------------------------------
 ;; The arithmetic traits.
@@ -2134,28 +2307,8 @@ user-visible capacity."
                     ((some f) (f (proj p) (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q))))))))
-          (buf (copy-seq it)) (out (the Vector<A> (Vector::new)))
-          (last (seq-flag from-end)) (i 0))
-      (progn
-        (while (< i (len buf))
-          (let ((x (get buf i)))
-            (progn
-              (if (seq-in-bounds i start end)
-                  (let ((dup false) (j (if last 0 (+ i 1))) (stop (if last i (len buf))))
-                    (progn
-                      (while (< j stop)
-                        (progn
-                          (when (if (seq-in-bounds j start end) (same x (get buf j)) false)
-                            (setf dup true))
-                          (setf j (+ j 1))
-                          ()))
-                      (if dup () (push out x))
-                      ()))
-                  (progn (push out x) ()))
-              (setf i (+ i 1))
-              ())))
-        out))))
+                              ((none) (equals (proj p) (proj q)))))))))
+      (seq-dedup-core it same start end (seq-flag from-end)))))
 (defun substitute<I,A> ((new A) (old A) (it I)
                         &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                              (start i32) (end i32) (from-end bool) (count i32))
@@ -2439,28 +2592,118 @@ user-visible capacity."
             (setf j (- j 1))
             ())))
       self)))
-(defmethod delete ((self Vector<T>) (x T)) Vector<T> (where (Eq T))
-  (set-contents self (remove x (iter self))))
-(defmethod delete-if ((self Vector<T>) (pred (fn (T) bool))) Vector<T>
-  (set-contents self (remove-if (iter self) pred)))
-(defmethod delete-if-not ((self Vector<T>) (pred (fn (T) bool))) Vector<T>
-  (set-contents self (filter (iter self) pred)))
-(defmethod delete-duplicates ((self Vector<T>)) Vector<T> (where (Eq T))
-  (set-contents self (remove-duplicates (iter self))))
-(defmethod nsubstitute ((self Vector<T>) (new T) (old T)) Vector<T> (where (Eq T))
-  (set-contents self (substitute new old (iter self))))
-(defmethod nsubstitute-if ((self Vector<T>) (new T) (pred (fn (T) bool))) Vector<T>
-  (set-contents self (substitute-if new pred (iter self))))
+;; **The keywords are CL's own set for each operation**, and each one is
+;; unpacked here rather than handed on to the non-destructive function above.
+;; A keyword parameter arrives as an `Option`, while the callee's keyword
+;; wants the bare value — and `Option<(fn (A) A)>` cannot be written as a type
+;; at all (the note above `member`), so there is no forwarding to write, in
+;; either direction. What the two halves do share is the *core* that does the
+;; work (`seq-edit-core`, `seq-dedup-core`), which takes the resolved
+;; closures; only the two `let` lines that resolve them repeat.
+(defmethod delete ((self Vector<T>) (x T)
+                   &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
+                        (start i32) (end i32) (from-end bool) (count i32))
+    Vector<T>
+  (where (Eq T))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
+    (let ((same (lambda ((p T) (q T)) bool
+                  (match test
+                    ((some f) (f p (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g p (proj q))))
+                              ((none) (equals p (proj q)))))))))
+      (set-contents self
+        (seq-edit-core (iter self)
+          (lambda ((i i32) (y T)) bool
+            (if (seq-in-bounds i start end) (same x y) false))
+          (lambda ((y T)) Option<T> (Option::none))
+          (seq-limit count) (seq-flag from-end))))))
+(defmethod delete-if ((self Vector<T>) (pred (fn (T) bool))
+                      &key (key (fn (T) T)) (start i32) (end i32) (from-end bool) (count i32))
+    Vector<T>
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
+    (set-contents self
+      (seq-edit-core (iter self)
+        (lambda ((i i32) (y T)) bool
+          (if (seq-in-bounds i start end) (pred (proj y)) false))
+        (lambda ((y T)) Option<T> (Option::none))
+        (seq-limit count) (seq-flag from-end)))))
+(defmethod delete-if-not ((self Vector<T>) (pred (fn (T) bool))
+                          &key (key (fn (T) T)) (start i32) (end i32) (from-end bool) (count i32))
+    Vector<T>
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
+    (set-contents self
+      (seq-edit-core (iter self)
+        (lambda ((i i32) (y T)) bool
+          (if (seq-in-bounds i start end) (not (pred (proj y))) false))
+        (lambda ((y T)) Option<T> (Option::none))
+        (seq-limit count) (seq-flag from-end)))))
+(defmethod delete-duplicates ((self Vector<T>)
+                              &key (key (fn (T) T)) (test (fn (T T) bool))
+                                   (test-not (fn (T T) bool))
+                                   (start i32) (end i32) (from-end bool))
+    Vector<T>
+  (where (Eq T))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
+    (let ((same (lambda ((p T) (q T)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equals (proj p) (proj q)))))))))
+      (set-contents self
+        (seq-dedup-core (iter self) same start end (seq-flag from-end))))))
+(defmethod nsubstitute ((self Vector<T>) (new T) (old T)
+                        &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
+                             (start i32) (end i32) (from-end bool) (count i32))
+    Vector<T>
+  (where (Eq T))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
+    (let ((same (lambda ((p T) (q T)) bool
+                  (match test
+                    ((some f) (f p (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g p (proj q))))
+                              ((none) (equals p (proj q)))))))))
+      (set-contents self
+        (seq-edit-core (iter self)
+          (lambda ((i i32) (y T)) bool
+            (if (seq-in-bounds i start end) (same old y) false))
+          (lambda ((y T)) Option<T> (Option::some new))
+          (seq-limit count) (seq-flag from-end))))))
+(defmethod nsubstitute-if ((self Vector<T>) (new T) (pred (fn (T) bool))
+                           &key (key (fn (T) T)) (start i32) (end i32)
+                                (from-end bool) (count i32))
+    Vector<T>
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
+    (set-contents self
+      (seq-edit-core (iter self)
+        (lambda ((i i32) (y T)) bool
+          (if (seq-in-bounds i start end) (pred (proj y)) false))
+        (lambda ((y T)) Option<T> (Option::some new))
+        (seq-limit count) (seq-flag from-end)))))
 (defmethod nbutlast ((self Vector<T>)) Vector<T>
   (progn (if (> (len self) 0) (progn (pop self) ()) ()) self))
 ;; CL's `fill`/`replace`/`map-into` all write into an existing sequence and
 ;; leave its length alone, copying `(min (len self) (len src))` elements.
-(defmethod fill ((self Vector<T>) (x T)) Vector<T>
+;; `fill` takes CL's `:start`/`:end`, and `replace` CL's four-window set —
+;; whose numbering means here exactly what it means in CL, since the receiver
+;; is CL's own `sequence-1`.
+(defmethod fill ((self Vector<T>) (x T) &key (start i32) (end i32)) Vector<T>
   (let ((i 0))
-    (progn (while (< i (len self)) (progn (set self i x) (setf i (+ i 1)))) self)))
-(defmethod replace ((self Vector<T>) (src Vector<T>)) Vector<T>
-  (let ((i 0) (n (min (len self) (len src))))
-    (progn (while (< i n) (progn (set self i (get src i)) (setf i (+ i 1)))) self)))
+    (progn
+      (while (< i (len self))
+        (progn (when (seq-in-bounds i start end) (set self i x)) (setf i (+ i 1))))
+      self)))
+(defmethod replace ((self Vector<T>) (src Vector<T>)
+                    &key (start1 i32) (end1 i32) (start2 i32) (end2 i32))
+    Vector<T>
+  (let ((i (seq-window-start start1)) (j (seq-window-start start2))
+        (stop1 (seq-window-end end1 (len self))) (stop2 (seq-window-end end2 (len src))))
+    (progn
+      (while (if (< i stop1) (< j stop2) false)
+        (progn (set self i (get src j)) (setf i (+ i 1)) (setf j (+ j 1))))
+      self)))
 (defmethod map-into ((self Vector<T>) (src Vector<T>) (f (fn (T) T))) Vector<T>
   (let ((i 0) (n (min (len self) (len src))))
     (progn (while (< i n) (progn (set self i (f (get src i))) (setf i (+ i 1)))) self)))
@@ -2736,19 +2979,54 @@ user-visible capacity."
 ;; syntax), false under `~a`/`princ` (human-facing). A printer that doesn't
 ;; care can ignore it — Rust's `Display` and `Debug` folded into one method.
 ;;
-;; No built-in type implements this: every existing program's output stays
-;; byte-for-byte what it was, and a custom representation is something a type
-;; opts into.
+;; A generic type reaches its own method too: the type key a value carries
+;; names its instantiation (`box<i32>`), which is what a lookup needs to find
+;; the body monomorphization registered for it. That was not true before
+;; 2026-08-31 -- the key said `box`, the registration said `print-object
+;; <i32>`, and the impl silently never applied.
 ;;
-;; **A generic type cannot use this yet.** `(impl print-object box<T> ...)`
-;; type-checks and can be called by name, but the printer never finds it, so
-;; the value still prints the built-in way. The printer looks a method up by
-;; the type key the *value* carries, and monomorphization has erased the type
-;; argument by then -- the key is `box`, not `box<i32>`, so there is nothing
-;; in the value to choose `box<i32>`'s method by. Nor would one shared body
-;; do: printing a `box<T>` means printing its `T`. See docs/dev/TODO.md.
+;; This is also the *bound* generic code asks for when it has to render a
+;; value of a type it does not know: `(impl print-object Array<T> (where
+;; (print-object T)) ...)` below, exactly as Rust's containers ask for
+;; `T: Display`. `format`'s `&rest` cannot take a type variable at all
+;; (`(defun show<T> ((x T)) string (format false "~a" x))` is refused: a
+;; `Sexpr` encoding needs a type), so a bound is the only way to say
+;; "renderable" here, and this trait is CL's name for that question.
+;;
+;; **The scalar types implement it** (right below) for that reason, and
+;; because CL's `print-object` likewise has methods on every built-in class.
+;; No *output* changes: the printer consults this trait only for a value that
+;; carries a type key, which is to say a `defstruct` or `defenum` box --
+;; every scalar reaches the printer as an immediate or as an untyped box and
+;; never asks. What the impls buy is the bound.
 (deftrait print-object ()
   (print-object ((self Self) (escape bool)) string))
+
+;; The scalar impls. Each renders its receiver the way the printer would
+;; anyway, `escape` picking `~s` over `~a` -- so `(print-object x escape)` in
+;; generic code is the built-in rendering when `x` is a scalar, and the
+;; author's when it is a type that wrote its own.
+;;
+;; A container's element type has to be one of these or a type with its own
+;; impl; a bare `defstruct` that never opted in is not renderable *through
+;; the bound*, and an `Array` of one prints the built-in `#<array ...>` way.
+;; That is the same trade Rust makes with `Display`, and the alternative --
+;; a blanket impl -- cannot be written: its body would need to render a `T`
+;; it knows nothing about, which is the problem the bound exists to solve.
+(impl print-object i8      (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object i16     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object i32     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object u8      (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object u16     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object u32     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object f32     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object f64     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object bignum  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object ratio   (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object bool    (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object char    (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object string  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object symbol  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 
 ;; `pprint-exit-if-list-exhausted` (CLHS): leave the enclosing
 ;; `pprint-logical-block` when its list is used up. CL implements this as a
@@ -2825,6 +3103,21 @@ user-visible capacity."
 ;; `*print-right-margin*`, so it only bites while `*print-pretty*` is on; 0 or
 ;; less is CL's `nil` (no limit).
 (pub defvar (*print-lines* i32) 0)
+
+;; `*print-array*` chooses whether an `Array<T>` shows its contents. True
+;; (CL's default) prints CL's own array syntax -- `#(1 2 3)` for a rank-1
+;; array, `#2A((1 2) (3 4))` for any other rank; false prints just the shape,
+;; `#<array 2x3>`, which is what CL's "in a way that does not reveal the
+;; contents" comes to here. Read by `Array<T>`'s own `print-object` method
+;; rather than by the built-in printer, because the array is a prelude type
+;; and its rendering is written in typelisp like any other.
+;;
+;; It governs `Array<T>` and nothing else. CL counts a bit vector as an array
+;; and lets this variable suppress that too, but `BitVector` here has no
+;; `print-object` of its own to suppress -- it prints the built-in
+;; `#<bitvector ...>` way, and giving it CL's `#*1011` syntax is a separate
+;; piece of work this one does not need.
+(pub defvar (*print-array* bool) true)
 
 ;; `*print-escape*` is the default `prin1`-vs-`princ` choice, and the one
 ;; thing `write`/`write-to-string` consult that the other printers do not.
@@ -4623,6 +4916,80 @@ user-visible capacity."
           (match self::fill-pointer
             ((none) ())
             ((some f) (setf self::fill-pointer (Option::some (min f n))))))))))
+
+
+;; CL's array syntax (CLHS 22.1.3.4), written as the type's own
+;; `print-object` rather than in the built-in printer -- `Array<T>` is a
+;; prelude type, so its rendering belongs in the prelude beside the rest of
+;; it.
+;;
+;; Rank 1 is `#(a b c)`, any other rank is `#nA` followed by one level of
+;; parentheses per dimension (`#2A((1 2 3) (4 5 6))`), and rank 0 is `#0Ax`
+;; -- all three fall out of the same recursion, which is why the special
+;; cases here are only about where the `#` goes.
+;;
+;; A fill pointer cuts the rank-1 case at `(len self)`, as CL's printer does:
+;; the elements past it are storage rather than contents.
+;;
+;; `(where (print-object T))` is what an element of an unknown type costs.
+;; Every scalar implements the trait, so `Array<i32>` and friends print this
+;; way with nothing further asked of the caller; an array whose elements are
+;; a `defstruct` that never implemented it falls back to the built-in
+;; `#<array<...> ...>` rendering, since the impl does not apply at all.
+
+;; How far apart two neighbours along dimension `d` are in row-major storage:
+;; the product of every dimension after it.
+(defun array-print-stride<T> ((a Array<T>) (d i32)) i32
+  (let ((s 1) (i (+ d 1)) (r (len a::dims)))
+    (progn
+      (while (< i r)
+        (progn (setf s (* s (get a::dims i))) (setf i (+ i 1))))
+      s)))
+
+
+;; The sub-array rooted at depth `d`, whose first element is at flat index
+;; `off`. At `d` = the rank there is no dimension left to walk and the flat
+;; index names an element, which is where the recursion bottoms out.
+(defun array-print-sub<T> ((a Array<T>) (d i32) (off i32) (escape bool)) string
+  (where (print-object T))
+  (if (>= d (len a::dims))
+      (print-object (row-major-get a off) escape)
+      ;; `(len a)` is the fill pointer when there is one, and only a rank-1
+      ;; array can have one — which is also the only rank where `d` can be
+      ;; nothing but 0 here, so the depth needs no test of its own.
+      (let ((n (if (= (len a::dims) 1) (len a) (get a::dims d)))
+            (stride (array-print-stride a d))
+            (out "(")
+            (i 0))
+        (progn
+          (while (< i n)
+            (progn
+              (setf out (append out (if (> i 0) " " "")))
+              (setf out (append out (array-print-sub a (+ d 1) (+ off (* i stride)) escape)))
+              (setf i (+ i 1))))
+          (append out ")")))))
+
+;; The shape alone, `2x3`, for the `*print-array*`-is-false rendering.
+(defun array-print-dims<T> ((a Array<T>)) string
+  (let ((out "") (i 0) (r (len a::dims)))
+    (progn
+      (while (< i r)
+        (progn
+          (setf out (append out (if (> i 0) "x" "")))
+          (setf out (append out (to-string (get a::dims i))))
+          (setf i (+ i 1))))
+      out)))
+
+(impl print-object Array<T> (where (print-object T))
+  (print-object ((self Self) (escape bool)) string
+    (if *print-array*
+        (let ((r (len self::dims)))
+          (if (= r 1)
+              (append "#" (array-print-sub self 0 0 escape))
+              (format false "#~aA~a" r (array-print-sub self 0 0 escape))))
+        (if (= (len self::dims) 0)
+            "#<array>"
+            (format false "#<array ~a>" (array-print-dims self))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Bit vectors (CLHS 15.2) — cl-parity-plan.md Phase 6c.

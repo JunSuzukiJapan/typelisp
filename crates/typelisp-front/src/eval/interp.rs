@@ -323,11 +323,34 @@ impl CallEdge {
 /// [`Interp::method_key`] has already ruled out as a `type::method`, so a
 /// `"::"` here is unambiguously a module separator.
 pub fn fn_path_from_node_name(name: &str) -> Path {
-    if name.contains("::") {
-        Path::from_segments(name.split("::").map(|s| s.to_string()).collect())
+    let cut = own_name_end(name);
+    if name[..cut].contains("::") {
+        let mut segs: Vec<String> = name[..cut].split("::").map(|s| s.to_string()).collect();
+        // The mangled type arguments belong to the *last* segment, whole:
+        // they are part of that one name, not further path structure.
+        let last = segs.len() - 1;
+        segs[last].push_str(&name[cut..]);
+        Path::from_segments(segs)
     } else {
         Path::root(name)
     }
+}
+
+/// Where a name's own `::`-separated path ends and its mangled type
+/// arguments begin.
+///
+/// A specialization's name embeds the types it was instantiated at —
+/// `array::make <m::point>` — and a type argument can be module-qualified.
+/// So the `::` that separates a name from its owner is the last one *before*
+/// the mangler's ` <`, never simply the last one in the string: splitting on
+/// that one reads `array::make <m::point>` as the method `point>` on the
+/// type `array::make <m`, which resolves to nothing. The failure surfaces as
+/// "no such function", far from the split, and only for a type argument that
+/// is module-qualified — which is why a program written at the top level
+/// never sees it. Same family as the type-identity qualification bugs of
+/// 2026-08-04.
+fn own_name_end(name: &str) -> usize {
+    name.find(" <").unwrap_or(name.len())
 }
 
 impl Interp {
@@ -1197,10 +1220,11 @@ impl Interp {
 
     /// Finds the registered `(Path, String)` key for a `"type-path::method"`
     /// name — `None` for a plain name (no `"::"`) or a method that isn't
-    /// registered. `name`'s *last* `"::"`-separated segment is always the
-    /// method; everything before it is the type's own full `::`-joined
-    /// path (`rsplit_once`, not `split_once` — a module-qualified type has
-    /// more than one segment of its own before the method). Resolved by
+    /// registered. The method is `name`'s last `"::"`-separated segment
+    /// *before* any mangled type-argument list ([`own_name_end`]);
+    /// everything ahead of it is the type's own full `::`-joined path
+    /// (`rsplit_once`, not `split_once` — a module-qualified type has more
+    /// than one segment of its own before the method). Resolved by
     /// direct descent ([`scope::ModuleScope::get_method`]) against that
     /// full path, not a whole-tree scan by local type name alone — two
     /// different types in different modules sharing both a local name and
@@ -1212,10 +1236,12 @@ impl Interp {
     /// (which `(compile name)` for a method) — both need the exact same
     /// `(Path, String)` key.
     pub fn method_key(&self, name: &str) -> Option<(Path, String)> {
-        let (type_part, method) = name.rsplit_once("::")?;
+        let cut = own_name_end(name);
+        let (type_part, base) = name[..cut].rsplit_once("::")?;
+        let method = format!("{}{}", base, &name[cut..]);
         let type_path = Path::from_segments(type_part.split("::").map(|s| s.to_string()).collect());
-        self.root.borrow().get_method(&type_path, method)?;
-        Some((type_path, method.to_string()))
+        self.root.borrow().get_method(&type_path, &method)?;
+        Some((type_path, method))
     }
 
     /// Resolves a `(compile name)` argument against either the scope tree's
@@ -2410,6 +2436,16 @@ impl MacroExpander for Interp {
             Err(e) => Err(e.to_string()),
         }
     }
+
+    /// Install a `macrolet` binding's checked `(defmacro ...)` form —
+    /// [`Self::exec`] on it, which is the same arm a top-level `defmacro`
+    /// takes. The name it registers under is synthesized and unwritable
+    /// (`Checker::check_macrolet`), so nothing else can collide with it and
+    /// nothing needs to remove it afterwards: the *scope* is the checker's
+    /// table, not this registration.
+    fn define_macro(&self, heap: &mut Heap, form: Value) -> Result<(), String> {
+        self.exec(heap, form).map(|_| ()).map_err(|e| e.to_string())
+    }
 }
 
 impl Default for Interp {
@@ -3330,9 +3366,13 @@ fn eval_builtin_method(
             // read an instantiation off, and `Vector<i32>` and `Vector<i64>`
             // share a representation, so nothing here could derive it.
             "new" => Some(Ok(crate::type_key::alloc_hashtable_keyed(heap, ret_key))),
-            "get" => Some(hashtable_get(heap, args, ret_key)),
-            "set" => Some(hashtable_set(heap, args)),
-            "remove" => Some(hashtable_remove(heap, args, ret_key)),
+            // `get`/`set`/`remove` are prelude methods, written on these
+            // five — see `registry::hashtable_def`.
+            "bucket-count" => Some(hashtable_bucket_count(heap, args)),
+            "bucket-key" => Some(hashtable_bucket_key(heap, args)),
+            "bucket-value" => Some(hashtable_bucket_value(heap, args)),
+            "bucket-put" => Some(hashtable_bucket_put(heap, args)),
+            "bucket-delete" => Some(hashtable_bucket_delete(heap, args)),
             "count" => Some(hashtable_count(heap, args)),
             "clear" => Some(hashtable_clear(heap, args)),
             "keys" => Some(hashtable_keys(heap, args, ret_key)),
@@ -3765,43 +3805,49 @@ fn result_err(heap: &mut Heap, result_key: &str, err_type: &str, msg: String) ->
     crate::type_key::alloc_enum_keyed(heap, result_key, 1, vec![err_val])
 }
 
-/// Rejects a `HashTable<K,V>` key argument before it ever reaches
-/// `Heap::hashtable_get`/`_set`/`_remove` — those panic (a hard internal-
-/// invariant trap, the same convention every other `Heap` accessor uses) on
-/// an unhashable `Value` shape, since the type checker can't express a
-/// "hashable" bound (no traits in this language) and so can't rule out e.g.
-/// `HashTable<f64,T>` at check time. Catching it here instead, as an
-/// `EvalError::Panic`, keeps a user mistake (an unsupported `K`) a catchable
-/// evaluation error rather than an uncatchable Rust panic unwinding out of
-/// `Heap` — mirroring the pre-unification `HashKey::from_rtvalue`'s contract.
-fn expect_hashable_key(v: &Value) -> Result<(), EvalError> {
-    match v {
-        Value::Int(_) | Value::Bool(_) | Value::Char(_) | Value::Str(_) => Ok(()),
-        other => Err(EvalError::Panic(format!("HashTable: unsupported key type {:?}", other))),
-    }
+/// The bucket primitives, the interpreted half of `rt_hashtable_bucket_*`.
+/// The hash and the index are ordinary `i32`s the prelude computed; this
+/// layer neither hashes nor compares, because it cannot — see
+/// `registry::hashtable_def`.
+fn bucket_args(args: &[Value], who: &str) -> Result<(BoxId, i64, usize), EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    let Value::Int(hash) = args[1] else {
+        return Err(EvalError::Internal(format!("{}: hash is not an integer", who)));
+    };
+    let i = match args.get(2) {
+        Some(Value::Int(n)) => usize::try_from(*n)
+            .map_err(|_| EvalError::Panic(format!("{}: negative bucket index {}", who, n)))?,
+        Some(_) => return Err(EvalError::Internal(format!("{}: index is not an integer", who))),
+        None => 0,
+    };
+    Ok((id, hash, i))
 }
 
-fn hashtable_get(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
-    let id = expect_struct_box(&args[0])?;
-    expect_hashable_key(&args[1])?;
-    let found = heap.hashtable_get(id, args[1]);
-    Ok(option_value(heap, ret_key, found))
+fn hashtable_bucket_count(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
+    let (id, hash, _) = bucket_args(args, "bucket-count")?;
+    Ok(Value::Int(heap.hashtable_bucket_count(id, hash) as i64))
 }
 
-fn hashtable_set(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let id = expect_struct_box(&args[0])?;
-    expect_hashable_key(&args[1])?;
-    let key = args[1];
-    let val = args[2];
-    heap.hashtable_set(id, key, val);
+fn hashtable_bucket_key(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
+    let (id, hash, i) = bucket_args(args, "bucket-key")?;
+    Ok(heap.hashtable_bucket_key(id, hash, i))
+}
+
+fn hashtable_bucket_value(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
+    let (id, hash, i) = bucket_args(args, "bucket-value")?;
+    Ok(heap.hashtable_bucket_value(id, hash, i))
+}
+
+fn hashtable_bucket_put(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+    let (id, hash, i) = bucket_args(args, "bucket-put")?;
+    heap.hashtable_bucket_put(id, hash, i, args[3], args[4]);
     Ok(Value::Empty)
 }
 
-fn hashtable_remove(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
-    let id = expect_struct_box(&args[0])?;
-    expect_hashable_key(&args[1])?;
-    let removed = heap.hashtable_remove(id, args[1]);
-    Ok(option_value(heap, ret_key, removed))
+fn hashtable_bucket_delete(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+    let (id, hash, i) = bucket_args(args, "bucket-delete")?;
+    heap.hashtable_bucket_delete(id, hash, i);
+    Ok(Value::Empty)
 }
 
 fn hashtable_count(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {

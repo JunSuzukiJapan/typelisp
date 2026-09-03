@@ -8,13 +8,15 @@ use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Va
 /// Read, type-check, and evaluate a program; return the last expression's
 /// value alongside the heap (so `Sexpr` results can be inspected).
 ///
-/// Loads the prelude, which the key methods now require: `get`/`set`/`remove`
-/// carry a `(where (Hash K))` bound (`registry::hashtable_def`), and `Hash` is
-/// a prelude trait. That bound is what turned "unsupported key type" from a
-/// runtime panic into a type error, so depending on the prelude for it is the
-/// trade — and every real program loads the prelude anyway. The one thing that
-/// deliberately does not is the compiler island, which never holds a
-/// `HashTable` value of its own (it only *emits* the `rt_hashtable_*` calls).
+/// Loads the prelude, because `get`/`set`/`remove` **are** prelude
+/// `defmethod`s: looking a key up means hashing it and comparing it, and both
+/// are the key type's own `sxhash`/`equals`, so no builtin could do it. Their
+/// `(where (Hash K))` bound is what turned "unsupported key type" from a
+/// runtime panic into a type error — and then into no restriction at all, a
+/// `defstruct` included. Every real program loads the prelude anyway; the one
+/// thing that deliberately does not is the compiler island, which never holds
+/// a `HashTable` value of its own (it only *emits* the `rt_hashtable_*`
+/// calls).
 fn run(src: &str) -> Result<(Value, Heap), EvalError> {
     run_with_capacity(src, 1 << 16)
 }

@@ -243,3 +243,180 @@ fn position_if_not_exists_now_completing_the_if_pairs() {
         "(some 1)"
     );
 }
+
+// ---------------- the `defmethod` side (the Phase 3e remainder) --------------
+//
+// Phase 3e left two groups without keywords because `defmethod` took neither
+// `&optional` nor `&key`: the destructive `Vector<T>` operations and
+// `string`'s `search`/`mismatch`. Phase 5b put that machinery in; these are
+// the rewritten declarations.
+//
+// Each destructive operation unpacks its own keywords rather than handing
+// them to the non-destructive twin: a keyword parameter arrives as an
+// `Option` and the callee's keyword wants the bare value, so what the two
+// share is the loop core underneath, not a forwarded argument list. These
+// tests are therefore against the *pairs* — a destructive call must answer
+// what its non-destructive twin answers, and mutate the receiver to match.
+
+/// A fresh `#<vector<i32> 1 2 2 3>` per expression, since these mutate it.
+fn with_vec(expr: &str) -> String {
+    show(&format!(
+        "(let ((v (the Vector<i32> (Vector::new))))
+           (progn (push v 1) (push v 2) (push v 2) (push v 3) {}))",
+        expr
+    ))
+}
+
+#[test]
+fn delete_takes_removes_whole_keyword_set() {
+    assert_eq!(with_vec("(delete v 2)"), "#<vector<i32> 1 3>");
+    assert_eq!(with_vec("(delete v 2 :count 1)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(with_vec("(delete v 2 :count 1 :from-end true)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(with_vec("(delete v 2 :start 2)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(with_vec("(delete v 2 :end 2)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(
+        with_vec("(delete v 2 :test (lambda ((p i32) (q i32)) bool (/= p q)))"),
+        "#<vector<i32> 2 2>"
+    );
+    assert_eq!(
+        with_vec("(delete v 4 :key (lambda ((x i32)) i32 (* x 2)))"),
+        "#<vector<i32> 1 3>"
+    );
+}
+
+/// The receiver itself is left holding the answer — that is what makes these
+/// the destructive versions rather than a second spelling of `remove`.
+#[test]
+fn a_destructive_call_leaves_the_answer_in_the_receiver() {
+    assert_eq!(
+        with_vec("(progn (delete v 2 :count 1) (format false \"~a\" v))"),
+        "#<vector<i32> 1 2 3>"
+    );
+    assert_eq!(
+        with_vec("(progn (fill v 7 :start 1 :end 3) (format false \"~a\" v))"),
+        "#<vector<i32> 1 7 7 3>"
+    );
+}
+
+#[test]
+fn the_predicate_and_substitute_forms_take_theirs() {
+    let gt1 = "(lambda ((x i32)) bool (> x 1))";
+    assert_eq!(with_vec(&format!("(delete-if v {})", gt1)), "#<vector<i32> 1>");
+    assert_eq!(with_vec(&format!("(delete-if v {} :count 1)", gt1)), "#<vector<i32> 1 2 3>");
+    assert_eq!(with_vec(&format!("(delete-if-not v {})", gt1)), "#<vector<i32> 2 2 3>");
+    assert_eq!(with_vec(&format!("(delete-if-not v {} :count 1)", gt1)), "#<vector<i32> 2 2 3>");
+    assert_eq!(with_vec("(nsubstitute v 9 2)"), "#<vector<i32> 1 9 9 3>");
+    assert_eq!(with_vec("(nsubstitute v 9 2 :count 1)"), "#<vector<i32> 1 9 2 3>");
+    assert_eq!(
+        with_vec("(nsubstitute v 9 2 :count 1 :from-end true)"),
+        "#<vector<i32> 1 2 9 3>"
+    );
+    assert_eq!(with_vec(&format!("(nsubstitute-if v 0 {})", gt1)), "#<vector<i32> 1 0 0 0>");
+    assert_eq!(
+        with_vec(&format!("(nsubstitute-if v 0 {} :start 2)", gt1)),
+        "#<vector<i32> 1 2 0 0>"
+    );
+}
+
+/// `delete-duplicates` keeps CL's default — the *last* of each group — and
+/// `:from-end` keeps the first, exactly as `remove-duplicates` does.
+#[test]
+fn delete_duplicates_follows_remove_duplicates() {
+    assert_eq!(with_vec("(delete-duplicates v)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(with_vec("(delete-duplicates v :from-end true)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(
+        with_vec("(delete-duplicates v :key (lambda ((x i32)) i32 (mod x 2)))"),
+        "#<vector<i32> 2 3>"
+    );
+    assert_eq!(
+        with_vec("(delete-duplicates v :key (lambda ((x i32)) i32 (mod x 2)) :from-end true)"),
+        "#<vector<i32> 1 2>"
+    );
+}
+
+/// `replace` keeps CL's *numbers*, because the receiver is CL's own
+/// `sequence-1` — the one place in this rewrite where they line up.
+#[test]
+fn replace_takes_cls_four_windows() {
+    let src = "(let ((s (the Vector<i32> (Vector::new)))) (progn (push s 8) (push s 9) (push s 10) s))";
+    assert_eq!(
+        with_vec(&format!("(replace v {})", src)),
+        "#<vector<i32> 8 9 10 3>"
+    );
+    assert_eq!(
+        with_vec(&format!("(replace v {} :start1 2 :start2 1)", src)),
+        "#<vector<i32> 1 2 9 10>"
+    );
+    assert_eq!(
+        with_vec(&format!("(replace v {} :end1 1)", src)),
+        "#<vector<i32> 8 2 2 3>"
+    );
+    assert_eq!(
+        with_vec(&format!("(replace v {} :start2 2 :end2 3)", src)),
+        "#<vector<i32> 10 2 2 3>"
+    );
+}
+
+#[test]
+fn search_takes_named_windows_and_the_test_keywords() {
+    assert_eq!(show(r#"(search "xabcabc" "abc")"#), "(some 1)");
+    assert_eq!(show(r#"(search "xabcabc" "abc" :from-end true)"#), "(some 4)");
+    assert_eq!(show(r#"(search "xabcabc" "abc" :start 2)"#), "(some 4)");
+    assert_eq!(show(r#"(search "xabcabc" "abc" :end 4)"#), "(some 1)");
+    assert_eq!(show(r#"(search "xyz" "abc")"#), "none");
+    // CL: an empty pattern occurs at the start of the window.
+    assert_eq!(show(r#"(search "xyz" "")"#), "(some 0)");
+    assert_eq!(show(r#"(search "xyz" "" :start 2)"#), "(some 2)");
+    // `:sub-start`/`:sub-end` bound the pattern — CL's `:start1`/`:end1`,
+    // renamed because the arguments are in the other order here.
+    assert_eq!(show(r#"(search "xbcabc" "abc" :sub-start 1)"#), "(some 1)");
+    assert_eq!(
+        show(
+            r#"(search "xABc" "abc" :test
+                 (lambda ((p char) (q char)) bool (equal (downcase p) (downcase q))))"#
+        ),
+        "(some 1)"
+    );
+    assert_eq!(
+        show(r#"(search "xABc" "abc" :key (lambda ((c char)) char (downcase c)))"#),
+        "(some 1)"
+    );
+}
+
+/// CL's own numbers for `mismatch`, whose argument order does agree, and
+/// CL's `:from-end` rule: one *past* the rightmost difference.
+#[test]
+fn mismatch_takes_cls_numbered_windows() {
+    assert_eq!(show(r#"(mismatch "abc" "abc")"#), "none");
+    assert_eq!(show(r#"(mismatch "abc" "abd")"#), "(some 2)");
+    assert_eq!(show(r#"(mismatch "abcd" "ab")"#), "(some 2)");
+    assert_eq!(show(r#"(mismatch "abcd" "cd" :from-end true)"#), "(some 2)");
+    assert_eq!(show(r#"(mismatch "abcd" "abxd" :from-end true)"#), "(some 3)");
+    assert_eq!(show(r#"(mismatch "xabc" "abc" :start1 1)"#), "none");
+    assert_eq!(show(r#"(mismatch "abc" "xabc" :start2 1)"#), "none");
+    assert_eq!(show(r#"(mismatch "abcz" "abc" :end1 3)"#), "none");
+    assert_eq!(
+        show(r#"(mismatch "ABC" "abc" :key (lambda ((c char)) char (downcase c)))"#),
+        "none"
+    );
+    assert_eq!(
+        show(r#"(mismatch "ABC" "abd" :test (lambda ((p char) (q char)) bool (equal (downcase p) (downcase q))))"#),
+        "(some 2)"
+    );
+}
+
+/// A keyword CL spells but this language does not is a *check* error, which
+/// is the whole reason `search`'s windows were renamed rather than
+/// renumbered: `:start1` on `search` means the pattern in CL and would have
+/// meant the sequence here.
+#[test]
+fn a_cl_keyword_that_does_not_apply_is_rejected() {
+    let mut h = Heap::with_capacity(1 << 18);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, r#"(search "abc" "b" :start1 0)"#).expect("read failed");
+    let err = chk.check_form(&mut h, &interp, vs[0]).expect_err("expected a check error");
+    assert!(format!("{:?}", err).contains("unknown keyword argument :start1"), "{:?}", err);
+}

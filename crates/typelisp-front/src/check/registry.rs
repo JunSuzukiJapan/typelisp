@@ -1408,48 +1408,43 @@ fn result_of(t: Type, e: Type) -> Type {
 /// `crate::eval::interp`.
 fn hashtable_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
-    // The key methods require `K: Hash`. `Hash` is a *prelude* trait
-    // (`deftrait Hash (Eq)`), declared after this registry is built, which is
-    // fine: a bound is validated at the call site (`validate_where_bounds`),
-    // by which time the prelude has loaded.
-    //
-    // This is what turned "unsupported key type" from a runtime panic into a
-    // type error. The old comment on `Heap::lookup_hash_key` said the checker
-    // "can't express a hashable bound (no traits in this language)"; traits
-    // arrived in 2026-06-30, and this is that comment's answer.
-    let hashable = || {
-        let mut b: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
-        b.insert("k".to_string(), vec![TraitBound { trait_path: Path::root("hash"), assoc: BTreeMap::new() }]);
-        b
-    };
+    // The key methods require `K: Hash` — and they are in the *prelude*
+    // now, where the bound is written as an ordinary `(where (Hash K))`.
+    // That is what turned "unsupported key type" from a runtime panic into a
+    // type error, and then into no restriction at all: the bound gives the
+    // prelude's `get`/`set`/`remove` the key type's own `sxhash` and
+    // `equals`, so any type that implements `Hash` can be a key.
     assoc.insert(
         "new".to_string(),
         AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: hashtable_ty(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: false, builtin: true },
     );
+    // `get`/`set`/`remove` are **not here**. They are prelude `defmethod`s
+    // (`(where (Hash K))`), written on the five bucket primitives below —
+    // because looking a key up means hashing it and comparing it, and both of
+    // those are the key type's own methods, written in typelisp. A builtin
+    // that did the whole lookup would have to call back into the interpreter
+    // to ask; a prelude method already is the interpreter, and compiles like
+    // any other definition.
+    //
+    // The bucket primitives take the hash the caller computed. `i` is an
+    // index the caller got from `bucket-count`; `bucket-put` also accepts the
+    // count itself, which appends.
+    // Not `public`: these are the layer under `get`/`set`/`remove`, not API.
+    // The prelude reaches them because it is the root module, where the table
+    // itself lives; nothing outside can, and nothing outside should.
+    let bucket = |params: Vec<Type>, ret: Type| AssocFn {
+        sig: FnSig { type_params: vec![], rest: None, params, ret, public: false, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+        instance: true,
+        builtin: true,
+    };
+    assoc.insert("bucket-count".to_string(), bucket(vec![hashtable_ty(), Type::I32], Type::I32));
+    assoc.insert("bucket-key".to_string(), bucket(vec![hashtable_ty(), Type::I32, Type::I32], tvar("k")));
+    assoc.insert("bucket-value".to_string(), bucket(vec![hashtable_ty(), Type::I32, Type::I32], tvar("v")));
     assoc.insert(
-        "get".to_string(),
-        AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true, bounds: hashable(), optionals: Vec::new(), keys: Vec::new() },
-            instance: true,
-            builtin: true,
-        },
+        "bucket-put".to_string(),
+        bucket(vec![hashtable_ty(), Type::I32, Type::I32, tvar("k"), tvar("v")], Type::Unit),
     );
-    assoc.insert(
-        "set".to_string(),
-        AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k"), tvar("v")], ret: Type::Unit, public: true, builtin: true, bounds: hashable(), optionals: Vec::new(), keys: Vec::new() },
-            instance: true,
-            builtin: true,
-        },
-    );
-    assoc.insert(
-        "remove".to_string(),
-        AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true, bounds: hashable(), optionals: Vec::new(), keys: Vec::new() },
-            instance: true,
-            builtin: true,
-        },
-    );
+    assoc.insert("bucket-delete".to_string(), bucket(vec![hashtable_ty(), Type::I32, Type::I32], Type::Unit));
     assoc.insert(
         "count".to_string(),
         AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },

@@ -138,7 +138,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | `eval` | ✅ | 戻り型は `Result<Sexpr,EvalError>` 固定（functions.md §16） |
 | `macroexpand` / `macroexpand-1` / `*macroexpand-hook*` | ⚠️ | 4c で `macroexpand` / `macroexpand-1` ✅（チェッカーと同じ 1 段展開器を共有）。`macroexpand-1` は CL の第 2 返り値の代わりに `Option<Sexpr>` を返す。`*macroexpand-hook*` は無い |
 | `eval-when` | ❌ | 入れない。`compile-file` は定義形を全部実行し裸のトップレベル式を拒否するので、CL の 3 situation が常に一致する（4c で確定） |
-| `macrolet` / `symbol-macrolet` | ❌ | 未実装。式位置の検査が `&self` なのに対しマクロ定義は登録（`&mut self`）を要する。やり方は `docs/dev/cl-parity-plan.md` の 4c に書いた |
+| `macrolet` / `symbol-macrolet` | ✅ | 2026-09-03。`check_defmacro` を検査側（`&self`）と登録側に割り、`Checker` にスコープ付きの表を足した。`docs/functions.md` §14.1 |
 | `define-compiler-macro` / `compiler-macro-function` | ❌ | 入れない。コンパイラ用の別展開経路を持つと `macroexpand` の答えと実際のコンパイル結果がずれる（4c で確定） |
 | `load-time-value` | ❌ | 入れない。`eval-when` と同じ理由でロード時と実行時が分かれていない（4c で確定） |
 | `declare` / `declaim` / `proclaim` / `locally` | ⛔ | 型宣言は不要 (D1)、`optimize`/`inline`/`special` も現状概念が無い |
@@ -496,7 +496,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `*print-lines*` | ✅ | 同上。pretty printer の行数上限、打ち切りは CL と同じ `..` |
 | `*print-readably*` | ⚠️ | 同上。エスケープを強制し `*print-level*`/`*print-length*` を無効化する分は入っている。**読めない値にエラーを上げる半分は無い**（上げるコンディションが無く、`print-object` が何でも印字しうる型について可否を決められない） |
 | `*print-gensym*` | ⛔ | 未 intern シンボルが無い |
-| `*print-array*` | ❌ | `Array<T>` の `print-object` と一緒に Phase 8a で決める |
+| `*print-array*` | ✅ | 2026-09-03。`Array<T>` の `print-object` と一緒に入った（`docs/functions.md` §15.1）|
 | `with-standard-io-syntax` | ✅ | 2026-08-22（Phase 7b）。上を全部標準値に `dlet` する |
 | `set-pprint-dispatch` / `*print-pprint-dispatch*` / `copy-pprint-dispatch` | ⛔ | 採用しないと確定済み（language-design.md §9、`print-object` トレイトで置き換え） |
 | `write-byte` / `read-byte` | ❌ | バイナリ I/O |

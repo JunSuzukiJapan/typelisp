@@ -40,6 +40,29 @@ fn show_after(defs: &str, expr: &str) -> String {
     }
 }
 
+/// The first check-time error `src` raises, as a string. For the forms whose
+/// whole behaviour is a scoping rule, where "this does not resolve" *is* the
+/// observation.
+fn check_error(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 18);
+    let chk = Rc::new(RefCell::new(Checker::new()));
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk.borrow_mut(), &mut interp);
+    interp.set_checker(Rc::clone(&chk));
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    for v in vs {
+        let checked = chk.borrow_mut().check_form(&mut h, &interp, v);
+        match checked {
+            Err(e) => return format!("{:?}", e),
+            Ok(tl) => {
+                interp.exec(&mut h, tl).expect("eval failed");
+            }
+        }
+    }
+    panic!("expected a check error, got none");
+}
+
 /// `expr` with `(defmacro twice (x) `(+ ,x ,x))` already defined.
 fn with_twice(expr: &str) -> String {
     show_after("(defmacro twice (x) `(+ ,x ,x))", expr)
@@ -111,5 +134,115 @@ fn complement_answers_the_opposite_of_its_predicate() {
                 (progn (push v 1) (push v 2) (push v 3)
                   (filter (iter v) (complement (lambda ((n i32)) bool (> n 1))))))"),
         "#<vector<i32> 1>"
+    );
+}
+
+// ---- `macrolet` / `symbol-macrolet` -----------------------------------------
+//
+// The rest of Stage 4c. Both are lexically scoped *bindings* of a name that
+// is not a value: `macrolet` binds a macro, `symbol-macrolet` binds a form a
+// bare name stands for. Neither exists at run time — what the body compiles
+// to is the expansion — so every test below is about what the checker sees.
+
+#[test]
+fn macrolet_binds_a_macro_for_its_body() {
+    assert_eq!(show("(macrolet ((twice (x) `(+ ,x ,x))) (twice 21))"), "42");
+}
+
+/// A local binding shadows a global macro of the same name, and only for the
+/// extent of its body.
+#[test]
+fn macrolet_shadows_a_global_macro_and_gives_it_back() {
+    assert_eq!(
+        show_after(
+            "(defmacro sq (x) `(* ,x ,x))",
+            "(list (macrolet ((sq (x) `(+ ,x 100))) (sq 5)) (sq 5))"
+        ),
+        "(105 25)"
+    );
+}
+
+/// Nested `macrolet`s see the enclosing ones, so a local macro can expand
+/// into another local macro's call.
+#[test]
+fn a_local_macro_can_expand_into_an_enclosing_one() {
+    assert_eq!(
+        show("(macrolet ((inc (x) `(+ ,x 1))) (macrolet ((inc2 (x) `(inc (inc ,x)))) (inc2 10)))"),
+        "12"
+    );
+}
+
+/// CL's rule, and the difference from `labels`: a binding's *body* does not
+/// see its siblings — each is checked in the scope that was open before the
+/// `macrolet`, and the new scope opens only once all of them are checked.
+///
+/// What a sibling name *does* reach is the expansion: `(earlier 1)` expanding
+/// to `(later 1)` works, because the expansion is checked at the use site,
+/// where both are in scope. CL says the same, and
+/// [`a_local_macro_can_expand_into_an_enclosing_one`] is the nested version.
+#[test]
+fn a_macrolet_body_does_not_see_its_siblings() {
+    let err = check_error("(macrolet ((later () `1) (earlier () (later))) (earlier))");
+    assert!(err.contains("NoSuchFunction(\"later\")"), "{}", err);
+    // The expansion path, by contrast, resolves.
+    assert_eq!(show("(macrolet ((later (x) `(+ ,x 1)) (earlier (x) `(later ,x))) (earlier 1))"), "2");
+}
+
+/// A `macrolet` binding takes the same lambda list a `defmacro` does — it is
+/// checked by the same code, which is the point of splitting that function
+/// rather than writing a second one.
+#[test]
+fn a_local_macro_takes_the_full_lambda_list() {
+    assert_eq!(
+        show("(macrolet ((sum (a &optional (b 10) &rest more) `(+ ,a ,b))) (sum 1))"),
+        "11"
+    );
+    assert_eq!(
+        show("(macrolet ((sum (a &optional (b 10)) `(+ ,a ,b))) (sum 1 2))"),
+        "3"
+    );
+}
+
+#[test]
+fn symbol_macrolet_makes_a_name_stand_for_a_form() {
+    assert_eq!(
+        show("(let ((v (the Vector<i32> (Vector::new))))
+                (progn (push v 7)
+                  (symbol-macrolet ((head (get v 0))) head)))"),
+        "7"
+    );
+}
+
+/// The reason the form exists: an alias you can assign through. `(setf head
+/// 42)` is `(setf (get v 0) 42)`.
+#[test]
+fn setf_through_a_symbol_macro_assigns_to_the_form() {
+    assert_eq!(
+        show("(let ((v (the Vector<i32> (Vector::new))))
+                (progn (push v 7)
+                  (symbol-macrolet ((head (get v 0)))
+                    (progn (setf head 42) head))))"),
+        "42"
+    );
+}
+
+/// CL's shadowing, both directions, and neither is a rule of its own: the
+/// name is an ordinary environment binding, so an inner `let` hides the
+/// symbol macro and the symbol macro hides an outer variable.
+#[test]
+fn a_symbol_macro_shadows_and_is_shadowed_like_any_binding() {
+    assert_eq!(show("(let ((x 1)) (symbol-macrolet ((x 99)) (let ((x 5)) x)))"), "5");
+    assert_eq!(show("(let ((x 1)) (symbol-macrolet ((x 99)) x))"), "99");
+    // And it is over when the body is.
+    assert_eq!(show("(let ((x 1)) (progn (symbol-macrolet ((x 99)) x) x))"), "1");
+}
+
+/// The expansion is checked where the *use* is, not where the binding is —
+/// CL says the same, and it is what lets an alias name a local of the body.
+#[test]
+fn a_symbol_macro_expansion_is_checked_at_the_use_site() {
+    assert_eq!(
+        show("(symbol-macrolet ((twice-n (* n 2))) (let ((n 21)) twice-n))"),
+        "42"
     );
 }
