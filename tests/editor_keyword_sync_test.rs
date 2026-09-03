@@ -39,7 +39,7 @@ fn repo_root() -> PathBuf {
 /// functions, macros, global variables, types, traits, and the associated
 /// functions and trait methods reachable on them, across every namespace.
 fn registry_names() -> BTreeSet<String> {
-    collected().0
+    collected().0.clone()
 }
 
 /// The field names of every registered type, and the `set-` setters that go
@@ -48,10 +48,22 @@ fn registry_names() -> BTreeSet<String> {
 /// `vec` and `snapshot` are fields of the built-in iterator structs, and no
 /// editor should paint every occurrence of the word "pos" as a builtin.
 fn field_accessors() -> BTreeSet<String> {
-    collected().1
+    collected().1.clone()
 }
 
-fn collected() -> (BTreeSet<String>, BTreeSet<String>) {
+/// The registry walk, done once per process.
+///
+/// Both readers above go through here, and `is_excluded` calls
+/// [`field_accessors`] *per name* — so without the cache this loaded the
+/// whole prelude once for every name in the registry, roughly 1800 loads and
+/// twenty minutes of the serial suite. The data is immutable once built and
+/// `OnceLock` is `Sync`, so the tests can still run in parallel.
+fn collected() -> &'static (BTreeSet<String>, BTreeSet<String>) {
+    static CACHE: std::sync::OnceLock<(BTreeSet<String>, BTreeSet<String>)> = std::sync::OnceLock::new();
+    CACHE.get_or_init(build_collected)
+}
+
+fn build_collected() -> (BTreeSet<String>, BTreeSet<String>) {
     let mut heap = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
