@@ -41,7 +41,7 @@ use std::ptr;
 
 use crate::Error;
 use super::symbols::{self, SymRef};
-use super::value::{BoxId, BoxedObj, Cell, ConsRef, FloatBox, LocId, MemHashKey, NarrowInt, PathId, StrId, StructPayload, TypeKeyId, Value};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, FloatBox, LocId, NarrowInt, PathId, StrId, StructPayload, TypeKeyId, Value};
 
 /// How far past its initial capacity a heap may grow by default — see
 /// [`Heap::with_capacity`]. Large enough that program text plus a working set
@@ -644,9 +644,11 @@ impl Heap {
     /// independently-identified allocation every call, preserving `Sexpr`'s
     /// `eq`-by-identity semantics for ordinary strings), a repeated call
     /// with equal content always returns the *same* `StrId`. This is what
-    /// gives a `HashTable<K,V>` string key "equal, not eq" lookup semantics
-    /// (see [`MemHashKey`]'s doc comment) — it is not meant as a
-    /// general-purpose string constructor.
+    /// is what a `Sexpr` symbol name and a quoted string literal share, and
+    /// it is not meant as a general-purpose string constructor. (A
+    /// `HashTable<K,V>` string key no longer relies on it: keys are compared
+    /// with the key type's own `equals`, which for `string` is content
+    /// equality, so nothing has to be interned to be found.)
     ///
     /// Interned strings are rooted permanently (never swept, like
     /// [`push_permanent_root`](Self::push_permanent_root)): a `str_intern`
@@ -1365,53 +1367,6 @@ impl Heap {
 
     // ---- hash tables --------------------------------------------------------
 
-    /// Converts a key argument at the `HashTable` method boundary into a
-    /// [`MemHashKey`] *without* interning a not-yet-seen string — used by
-    /// read-only lookups ([`hashtable_get`](Self::hashtable_get)/
-    /// [`hashtable_remove`](Self::hashtable_remove)): if `key`'s content was
-    /// never interned, it cannot possibly be present as a map key (every key
-    /// actually stored went through [`intern_hash_key`](Self::intern_hash_key)
-    /// first), so `None` here correctly means "not in the map" rather than
-    /// requiring a spurious allocation just to look. Panics on a
-    /// non-hashable `Value` shape — `Cons`, `Symbol`, `Path`, and *every*
-    /// boxed object, floats and narrow integers included (the comment here
-    /// used to say "a non-`Float` boxed object", which read as though a
-    /// float key worked; it never has) — the type checker can't express a
-    /// "hashable" bound (no
-    /// traits in this language), so this is the same runtime-panic fallback
-    /// [`struct_field`](Self::struct_field) uses for an out-of-range index.
-    fn lookup_hash_key(&self, key: Value) -> Option<MemHashKey> {
-        match key {
-            Value::Int(n) => Some(MemHashKey::Int(n)),
-            Value::Bool(b) => Some(MemHashKey::Bool(b)),
-            Value::Char(c) => Some(MemHashKey::Char(c)),
-            Value::Str(id) => self.str_intern.get(self.string(id)).copied().map(MemHashKey::Str),
-            other => panic!("HashTable: unsupported key type {:?}", other),
-        }
-    }
-
-    /// [`lookup_hash_key`](Self::lookup_hash_key)'s mutating counterpart,
-    /// used by [`hashtable_set`](Self::hashtable_set): interns `key`'s
-    /// string content (via [`intern_string`](Self::intern_string)) if this
-    /// is the first time it's been used as a key, so the resulting
-    /// `MemHashKey::Str` will compare equal to any other string with the
-    /// same content used as a key from now on.
-    fn intern_hash_key(&mut self, key: Value) -> MemHashKey {
-        match key {
-            Value::Int(n) => MemHashKey::Int(n),
-            Value::Bool(b) => MemHashKey::Bool(b),
-            Value::Char(c) => MemHashKey::Char(c),
-            Value::Str(id) => {
-                let s = self.string(id).to_string();
-                match self.intern_string(&s) {
-                    Value::Str(interned) => MemHashKey::Str(interned),
-                    _ => unreachable!("intern_string always returns Value::Str"),
-                }
-            }
-            other => panic!("HashTable: unsupported key type {:?}", other),
-        }
-    }
-
     /// Stores an empty hash map, returning its `Value::Boxed` —
     /// `HashTable<K,V>`'s runtime representation (see `BoxedObj`/
     /// `StructPayload::Map`'s doc comments).
@@ -1419,35 +1374,79 @@ impl Heap {
         self.alloc_boxed(BoxedObj::Struct { type_key, payload: StructPayload::Map(HashMap::new()) })
     }
 
-    /// `(gethash key table)`'s primitive: the value `key` maps to, or `None`
-    /// if absent. Panics if `id` doesn't hold a `BoxedObj::Struct` with a
-    /// `StructPayload::Map` payload.
-    pub fn hashtable_get(&self, id: BoxId, key: Value) -> Option<Value> {
-        let hk = self.lookup_hash_key(key)?;
+    /// The bucket at `hash`, or `&[]` when there is none. Every read below
+    /// goes through here.
+    fn bucket(&self, id: BoxId, hash: i64) -> &[(Value, Value)] {
         match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.get(&hk).copied(),
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
+                map.get(&hash).map(Vec::as_slice).unwrap_or(&[])
+            }
             _ => panic!("BoxId does not hold a HashTable"),
         }
     }
 
-    /// `(sethash key table val)`'s primitive: inserts/overwrites `key` ->
-    /// `val`, returning the previous value if `key` was already present
-    /// (same convention as `HashMap::insert`). Panics if `id` doesn't hold a
-    /// `BoxedObj::Struct` with a `StructPayload::Map` payload.
-    pub fn hashtable_set(&mut self, id: BoxId, key: Value, val: Value) -> Option<Value> {
-        let hk = self.intern_hash_key(key);
+    /// How many entries share `hash`. The caller walks them with
+    /// [`hashtable_bucket_key`](Self::hashtable_bucket_key) and compares each
+    /// with the key type's own `equals` — this layer has no opinion about
+    /// what makes two keys the same.
+    pub fn hashtable_bucket_count(&self, id: BoxId, hash: i64) -> usize {
+        self.bucket(id, hash).len()
+    }
+
+    /// The `i`th key in `hash`'s bucket. Panics on an index the caller did
+    /// not get from [`hashtable_bucket_count`](Self::hashtable_bucket_count)
+    /// — an internal-invariant trap, like every other index here.
+    pub fn hashtable_bucket_key(&self, id: BoxId, hash: i64, i: usize) -> Value {
+        match self.bucket(id, hash).get(i) {
+            Some((k, _)) => *k,
+            None => panic!("HashTable: bucket index {} out of range", i),
+        }
+    }
+
+    /// The `i`th value in `hash`'s bucket. See
+    /// [`hashtable_bucket_key`](Self::hashtable_bucket_key).
+    pub fn hashtable_bucket_value(&self, id: BoxId, hash: i64, i: usize) -> Value {
+        match self.bucket(id, hash).get(i) {
+            Some((_, v)) => *v,
+            None => panic!("HashTable: bucket index {} out of range", i),
+        }
+    }
+
+    /// Writes `key -> val` at position `i` of `hash`'s bucket — replacing the
+    /// entry already there, or appending when `i` is the bucket's current
+    /// length. The caller decides which by looking first, which is the same
+    /// call it had to make anyway to answer "was this key already present".
+    pub fn hashtable_bucket_put(&mut self, id: BoxId, hash: i64, i: usize, key: Value, val: Value) {
         match self.box_slots[id.0 as usize].as_mut() {
-            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.insert(hk, val),
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
+                let bucket = map.entry(hash).or_default();
+                if i < bucket.len() {
+                    bucket[i] = (key, val);
+                } else if i == bucket.len() {
+                    bucket.push((key, val));
+                } else {
+                    panic!("HashTable: bucket index {} out of range (len {})", i, bucket.len());
+                }
+            }
             _ => panic!("BoxId does not hold a HashTable"),
         }
     }
 
-    /// Removes `key`, returning its value if it was present. Panics if `id`
-    /// doesn't hold a `BoxedObj::Struct` with a `StructPayload::Map` payload.
-    pub fn hashtable_remove(&mut self, id: BoxId, key: Value) -> Option<Value> {
-        let hk = self.lookup_hash_key(key)?;
+    /// Removes the `i`th entry of `hash`'s bucket, keeping the rest in order.
+    pub fn hashtable_bucket_delete(&mut self, id: BoxId, hash: i64, i: usize) {
         match self.box_slots[id.0 as usize].as_mut() {
-            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.remove(&hk),
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
+                let Some(bucket) = map.get_mut(&hash) else {
+                    panic!("HashTable: no bucket at hash {}", hash);
+                };
+                if i >= bucket.len() {
+                    panic!("HashTable: bucket index {} out of range (len {})", i, bucket.len());
+                }
+                bucket.remove(i);
+                if bucket.is_empty() {
+                    map.remove(&hash);
+                }
+            }
             _ => panic!("BoxId does not hold a HashTable"),
         }
     }
@@ -1456,7 +1455,9 @@ impl Heap {
     /// hold a `BoxedObj::Struct` with a `StructPayload::Map` payload.
     pub fn hashtable_count(&self, id: BoxId) -> usize {
         match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.len(),
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
+                map.values().map(Vec::len).sum()
+            }
             _ => panic!("BoxId does not hold a HashTable"),
         }
     }
@@ -1473,10 +1474,6 @@ impl Heap {
     /// Every `(key, value)` pair currently stored, as plain [`Value`]s — the
     /// primitive `HashTable<K,V>::keys`/`values`/`entries` snapshot off of
     /// (see those builtins in `crate::eval::interp`'s `"hashtable"` arm).
-    /// [`MemHashKey`] has no direct `Value` counterpart (that's the whole
-    /// point of interning it in the first place — see that type's doc
-    /// comment), so this reconstructs one from each key, the mem-layer
-    /// mirror of the pre-unification `HashKey::from_rtvalue`'s inverse.
     /// Order is whatever the underlying `HashMap` iterates in (unspecified,
     /// like `HashTable<K,V>`'s method surface always has been). Panics if
     /// `id` doesn't hold a `BoxedObj::Struct` with a `StructPayload::Map`
@@ -1484,18 +1481,9 @@ impl Heap {
     pub fn hashtable_pairs(&self, id: BoxId) -> Vec<(Value, Value)> {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
-                map.iter().map(|(k, v)| (Self::hash_key_to_value(*k), *v)).collect()
+                map.values().flat_map(|b| b.iter().copied()).collect()
             }
             _ => panic!("BoxId does not hold a HashTable"),
-        }
-    }
-
-    fn hash_key_to_value(k: MemHashKey) -> Value {
-        match k {
-            MemHashKey::Int(n) => Value::Int(n),
-            MemHashKey::Bool(b) => Value::Bool(b),
-            MemHashKey::Char(c) => Value::Char(c),
-            MemHashKey::Str(id) => Value::Str(id),
         }
     }
 
@@ -1516,7 +1504,7 @@ impl Heap {
     /// The frame stack of a scope box. Panics if `id` doesn't hold a
     /// `BoxedObj::Struct` with a `StructPayload::Frames` payload — same
     /// internal-invariant-trap convention as
-    /// [`hashtable_get`](Self::hashtable_get)'s.
+    /// [`hashtable_bucket_key`](Self::hashtable_bucket_key)'s.
     fn scope_frames(&self, id: BoxId) -> &Vec<BoxId> {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::Struct { payload: StructPayload::Frames(frames), .. }) => frames,
@@ -1836,12 +1824,10 @@ impl Heap {
     /// `Struct`'s `Fields` payload holds a `Vec<Value>` of fields, each of
     /// which must be traced the same as a cons cell's `car`/`cdr` (a struct
     /// field can itself hold a cons, a string, or another boxed struct).
-    /// `Struct`'s `Map` payload traces both the values *and* any `Str` keys
-    /// (`MemHashKey`'s other variants are immediate, nothing to trace) —
-    /// belt-and-suspenders alongside `intern_string`'s permanent rooting:
-    /// tracing here keeps the invariant "a live map keeps its own keys/
-    /// values live" true from the mark phase's perspective alone, without
-    /// leaning on that rooting detail. Later `BoxedObj` kinds (a closure's
+    /// `Struct`'s `Map` payload traces every key and every value: a key is
+    /// an ordinary `Value` (a `defstruct` can be one), so "a live map keeps
+    /// its own keys and values live" is a claim the mark phase has to make
+    /// on its own rather than lean on any interning. Later `BoxedObj` kinds (a closure's
     /// captured environment, ...) will extend this `match` with their own
     /// fan-out.
     fn push_boxed_nested(obj: &BoxedObj, stack: &mut Vec<Value>) {
@@ -1886,12 +1872,15 @@ impl Heap {
             // method identities and raw function pointers, so there is
             // nothing else here to trace (see [`BoxedObj::Dyn`]).
             BoxedObj::Dyn { value, .. } => stack.push(*value),
+            // Both halves of every entry: a key is an ordinary `Value` now
+            // (it has to be — a `defstruct` can be one), so it is traced the
+            // same way its value is.
             BoxedObj::Struct { payload: StructPayload::Map(map), .. } => {
-                for (k, &v) in map {
-                    if let MemHashKey::Str(id) = k {
-                        stack.push(Value::Str(*id));
+                for bucket in map.values() {
+                    for &(k, v) in bucket {
+                        stack.push(k);
+                        stack.push(v);
                     }
-                    stack.push(v);
                 }
             }
             // A live frame keeps its bound values live (keys are plain Rust

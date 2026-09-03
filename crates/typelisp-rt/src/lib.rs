@@ -1007,7 +1007,7 @@ pub unsafe extern "C" fn rt_bignum_to_int(args: *const i64, argc: u32) -> i64 {
 /// `(rt-bignum-fits-i32 n)` — raw `0`/`1`: does `n` fit in an `i32`?
 /// `try-bignum->int`'s (`Option<i32>`) first half — `compiler.rs`'s
 /// `compile-assoc` only calls [`rt_bignum_to_int_raw`] after this confirms
-/// `1`, the same two-call `Option`-building shape `rt_hashtable_contains`/
+/// `1`, the same two-call `Option`-building shape `rt_struct_field_count`/
 /// `_get_raw` already establish.
 ///
 /// # Safety
@@ -1025,7 +1025,7 @@ pub unsafe extern "C" fn rt_bignum_fits_i32(args: *const i64, argc: u32) -> i64 
 /// `try-bignum->int`'s second half — only ever called after
 /// [`rt_bignum_fits_i32`] confirmed `1`; fatal if it turns out not to fit
 /// (an internal-invariant trap, the same convention
-/// [`rt_hashtable_get_raw`] uses for its own "caller already checked" case).
+/// [`rt_struct_pop_field`] uses for its own "caller already checked" case).
 ///
 /// # Safety
 ///
@@ -1954,13 +1954,11 @@ pub unsafe extern "C" fn rt_struct_push_field(args: *const i64, argc: u32) -> i6
 /// [`rt_struct_push_field`]. Only ever called after the compiled caller's
 /// own `rt_struct_field_count` check confirmed at least one field present
 /// (`compiler.rs`'s `compile-vector-op` "pop" branch) — mirrors
-/// [`rt_hashtable_remove_raw`]'s "caller already checked
-/// `rt_hashtable_contains`" precondition, since `pop`, like `remove`,
+/// the "caller already checked the count" precondition, since `pop`,
 /// returns `Option<T>` (`None` on empty is a legitimate outcome the checked
 /// branch builds directly, never by calling this). Fatal if `args[0]` isn't
 /// a boxed struct, or if it turns out empty anyway (an internal-invariant
-/// trap, the same convention [`rt_hashtable_get_raw`]'s "key not present"
-/// fatal follows).
+/// trap, the same convention every other `rt_*` bounds violation follows).
 ///
 /// **Deliberately still `extern "C"` and `fatal`**, unlike its
 /// [`rt_struct_field_get`]/[`rt_struct_field_set`] neighbours: `pop` on an
@@ -1993,15 +1991,13 @@ pub unsafe extern "C" fn rt_struct_pop_field(args: *const i64, argc: u32) -> i64
 // ---- Iter-compile plan, Stage C: `HashTable<K,V>` primitives ------------
 //
 // A `HashTable<K,V>` is a `BoxedObj::Struct` with a `StructPayload::Map`
-// payload (unlike a `Vector<T>`/`defstruct`'s `StructPayload::Fields`); the
-// mem layer owns the key hashing/interning (`Heap::hashtable_set` takes the
-// already-*tagged* key/value `Value`s and computes the `MemHashKey` itself),
-// so these are thin adapters, the same shape as the `rt_struct_*` family
-// above. The `Option`-returning lookups (`get`/`remove`) are deliberately
-// *not* here: a compiled `Option` is a `malloc`'d sum-ADT box, and bridging a
-// runtime map lookup into that representation is a separate problem from
-// iteration (which needs only build/populate/enumerate) — see
-// `docs/dev/iter-compile-plan.md`.
+// payload (unlike a `Vector<T>`/`defstruct`'s `StructPayload::Fields`) —
+// hash to bucket, with the mem layer neither hashing a key nor comparing
+// two. Both are the key type's own `sxhash`/`equals`, so `get`/`set`/
+// `remove` are prelude methods that ask them and then reach the bucket
+// through the five shims below. These are thin adapters, the same shape as
+// the `rt_struct_*` family above; every key and value crossing them is
+// already tagged, exactly as a struct field is.
 
 /// `(rt-hashtable-new key)` for compiled code — an empty `HashTable<K,V>`
 /// under the runtime identity `key` spells.
@@ -2023,29 +2019,95 @@ pub unsafe extern "C" fn rt_hashtable_new(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_hashtable(key))
 }
 
-/// `(rt-hashtable-set ht key val)` for compiled code — inserts/overwrites,
-/// with `args[1]`/`args[2]` already tagged `Sexpr`s (the mem layer hashes the
-/// key). Returns the compiled `Unit` (`0`), like `HashTable<K,V>::set`. Only
-/// stores already-decoded `Value`s into the map (no cons-heap allocation), so
-/// triggers no GC.
+/// The bucket family: `(rt-hashtable-bucket-* ht hash ...)` for compiled
+/// code. `hash` and every index are raw `i64`s (an `i32` in the language);
+/// keys and values are already-tagged `Sexpr`s, as a struct field is.
 ///
 /// # Safety
 ///
-/// `argc >= 3`, `args` valid for 3 `i64`s, `args[0]` a boxed `HashTable`; a
-/// `Heap` must be registered on this thread.
+/// `argc >= 2`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_set(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_hashtable_set: expected 3 arguments");
+pub unsafe extern "C" fn rt_hashtable_bucket_count(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_hashtable_bucket_count: expected 2 arguments");
     }
-    let id = match decode(*args) {
-        Value::Boxed(id) => id,
-        _ => fatal("rt_hashtable_set: first argument is not a boxed HashTable"),
-    };
-    let key = decode(*args.add(1));
-    let val = decode(*args.add(2));
-    active_heap().hashtable_set(id, key, val);
+    let id = hashtable_arg(args, argc, "rt_hashtable_bucket_count");
+    active_heap().hashtable_bucket_count(id, *args.add(1)) as i64
+}
+
+/// The `i`th key in `hash`'s bucket, still tagged — the caller decodes it
+/// per `K`'s own kind. See [`rt_hashtable_bucket_count`].
+///
+/// # Safety
+///
+/// `argc >= 3`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_bucket_key(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_hashtable_bucket_key: expected 3 arguments");
+    }
+    let id = hashtable_arg(args, argc, "rt_hashtable_bucket_key");
+    encode(active_heap().hashtable_bucket_key(id, *args.add(1), bucket_index(*args.add(2), "rt_hashtable_bucket_key")))
+}
+
+/// The `i`th value in `hash`'s bucket. See [`rt_hashtable_bucket_key`].
+///
+/// # Safety
+///
+/// `argc >= 3`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_bucket_value(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_hashtable_bucket_value: expected 3 arguments");
+    }
+    let id = hashtable_arg(args, argc, "rt_hashtable_bucket_value");
+    encode(active_heap().hashtable_bucket_value(id, *args.add(1), bucket_index(*args.add(2), "rt_hashtable_bucket_value")))
+}
+
+/// Writes `key -> val` at index `i` of `hash`'s bucket, appending when `i` is
+/// the bucket's current length. Returns the compiled `Unit` (`0`). Stores
+/// already-decoded `Value`s (no cons-heap allocation), so triggers no GC.
+///
+/// # Safety
+///
+/// `argc >= 5`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_bucket_put(args: *const i64, argc: u32) -> i64 {
+    if argc < 5 {
+        fatal("rt_hashtable_bucket_put: expected 5 arguments");
+    }
+    let id = hashtable_arg(args, argc, "rt_hashtable_bucket_put");
+    let i = bucket_index(*args.add(2), "rt_hashtable_bucket_put");
+    let key = decode(*args.add(3));
+    let val = decode(*args.add(4));
+    active_heap().hashtable_bucket_put(id, *args.add(1), i, key, val);
     0
+}
+
+/// Removes the `i`th entry of `hash`'s bucket. Returns the compiled `Unit`.
+///
+/// # Safety
+///
+/// `argc >= 3`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_bucket_delete(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_hashtable_bucket_delete: expected 3 arguments");
+    }
+    let id = hashtable_arg(args, argc, "rt_hashtable_bucket_delete");
+    let i = bucket_index(*args.add(2), "rt_hashtable_bucket_delete");
+    active_heap().hashtable_bucket_delete(id, *args.add(1), i);
+    0
+}
+
+/// A bucket index. Negative is an internal-invariant break — every index a
+/// caller passes came from `bucket-count` — so it traps rather than wrapping
+/// into an enormous `usize`.
+fn bucket_index(n: i64, who: &str) -> usize {
+    match usize::try_from(n) {
+        Ok(i) => i,
+        Err(_) => fatal(&format!("{}: negative bucket index {}", who, n)),
+    }
 }
 
 /// `(rt-hashtable-count ht)` for compiled code — the entry count as a raw
@@ -2085,8 +2147,9 @@ pub unsafe extern "C" fn rt_hashtable_clear(args: *const i64, argc: u32) -> i64 
     0
 }
 
-/// The `BoxId` of `args[0]` decoded as a boxed struct — shared preamble of the
-/// three `Vector`-building `HashTable` enumerators below.
+/// The `BoxId` of `args[0]` decoded as a boxed struct — shared preamble of
+/// every `HashTable` shim: the bucket family above and the three
+/// `Vector`-building enumerators below.
 ///
 /// # Safety
 ///
@@ -2175,89 +2238,6 @@ pub unsafe extern "C" fn rt_hashtable_entries(args: *const i64, argc: u32) -> i6
         active_heap().pop_root();
     }
     encode(vec)
-}
-
-
-/// `(rt-hashtable-contains ht key)` for compiled code — a raw `i64` 0/1: does
-/// `key` (already tagged) exist in the map? `HashTable<K,V>::get`/`remove`'s
-/// primitive (compiled): since a `mem::Value`'s tag space is fully used by
-/// real values, there is no free bit pattern to signal "absent" from a
-/// value-returning call alone, so `get`/`remove` are compiled as *two* calls
-/// — check here first, then [`rt_hashtable_get_raw`]/
-/// [`rt_hashtable_remove_raw`] only if this returned `1`. Safe (no race) in
-/// single-threaded compiled code: nothing between the two calls can remove
-/// the entry this one just confirmed present.
-///
-/// # Safety
-///
-/// `argc >= 2`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
-#[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_contains(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_hashtable_contains: expected 2 arguments");
-    }
-    let id = match decode(*args) {
-        Value::Boxed(id) => id,
-        _ => fatal("rt_hashtable_contains: first argument is not a boxed HashTable"),
-    };
-    let key = decode(*args.add(1));
-    if active_heap().hashtable_get(id, key).is_some() {
-        1
-    } else {
-        0
-    }
-}
-
-/// `(rt-hashtable-get-raw ht key)` — the tagged `Sexpr` value at `key`, for
-/// compiled code. Only ever called after [`rt_hashtable_contains`] confirmed
-/// `key` present; fatal if it turns out absent (an internal-invariant trap,
-/// the same convention every other `rt_*` bounds/shape violation here uses —
-/// the compiled caller's own `if` guard is responsible for never letting that
-/// happen). The caller (`compiler.rs`'s `compile-hashtable-op`) still decodes
-/// the raw tagged result per `V`'s `struct_field_kind` before storing it into
-/// a freshly built `Option<V>` box (`compile-sexpr-field`, the same decode a
-/// `BoxedObj::Struct` field read already uses).
-///
-/// # Safety
-///
-/// `argc >= 2`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
-#[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_get_raw(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_hashtable_get_raw: expected 2 arguments");
-    }
-    let id = match decode(*args) {
-        Value::Boxed(id) => id,
-        _ => fatal("rt_hashtable_get_raw: first argument is not a boxed HashTable"),
-    };
-    let key = decode(*args.add(1));
-    match active_heap().hashtable_get(id, key) {
-        Some(v) => encode(v),
-        None => fatal("rt_hashtable_get_raw: key not present (caller must check rt_hashtable_contains first)"),
-    }
-}
-
-/// `(rt-hashtable-remove-raw ht key)` — like [`rt_hashtable_get_raw`], but
-/// also deletes the entry (`HashTable<K,V>::remove`'s primitive). Same
-/// "caller already checked [`rt_hashtable_contains`]" precondition.
-///
-/// # Safety
-///
-/// `argc >= 2`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
-#[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_remove_raw(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_hashtable_remove_raw: expected 2 arguments");
-    }
-    let id = match decode(*args) {
-        Value::Boxed(id) => id,
-        _ => fatal("rt_hashtable_remove_raw: first argument is not a boxed HashTable"),
-    };
-    let key = decode(*args.add(1));
-    match active_heap().hashtable_remove(id, key) {
-        Some(v) => encode(v),
-        None => fatal("rt_hashtable_remove_raw: key not present (caller must check rt_hashtable_contains first)"),
-    }
 }
 
 
@@ -3524,6 +3504,99 @@ pub unsafe extern "C" fn rt_char_equalp(args: *const i64, argc: u32) -> i64 {
     }
 }
 
+/// `char::upcase`/`char::downcase` for compiled code. A compiled `char` is a
+/// bare code point, so these take and return one.
+///
+/// ASCII-only, exactly as the interpreter's own arms are
+/// (`Interp::eval_char_builtin`): `char::to_ascii_uppercase` leaves every
+/// non-ASCII scalar value alone. The two tiers share the rule by sharing the
+/// method, not by each spelling it.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_char_upcase(args: *const i64, argc: u32) -> i64 {
+    char_map(args, argc, "rt_char_upcase", |c| c.to_ascii_uppercase() as i64)
+}
+
+/// See [`rt_char_upcase`].
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_char_downcase(args: *const i64, argc: u32) -> i64 {
+    char_map(args, argc, "rt_char_downcase", |c| c.to_ascii_lowercase() as i64)
+}
+
+/// `char::alphap` — CL's `alpha-char-p`, ASCII-only like the interpreter's.
+/// Returns a bare `0`/`1`, which is what a compiled `bool` is.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_char_alphap(args: *const i64, argc: u32) -> i64 {
+    char_map(args, argc, "rt_char_alphap", |c| i64::from(c.is_ascii_alphabetic()))
+}
+
+/// `char::digitp` — the `bool` predicate, not CL's weight-returning
+/// `digit-char-p` (which is `digit-weight`, a prelude function). See
+/// [`rt_char_alphap`].
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_char_digitp(args: *const i64, argc: u32) -> i64 {
+    char_map(args, argc, "rt_char_digitp", |c| i64::from(c.is_ascii_digit()))
+}
+
+/// The one-code-point-in, one-word-out shape the four `char` shims above
+/// share. A compiled `char` always holds a valid scalar value; a word that is
+/// not one would be an internal invariant break, and is passed through
+/// unchanged rather than invented into something else — the same reading
+/// [`rt_char_equalp`] takes of the same impossibility.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+unsafe fn char_map(args: *const i64, argc: u32, who: &str, f: impl FnOnce(char) -> i64) -> i64 {
+    if argc < 1 {
+        fatal(&format!("{}: expected 1 argument", who));
+    }
+    let a = *args;
+    match char::from_u32(a as u32) {
+        Some(c) => f(c),
+        None => a,
+    }
+}
+
+/// `int->char` for compiled code: the identity on the word, plus the
+/// validity check that makes it a `char` at all.
+///
+/// The check is why this is a shim rather than the no-op `char->int` is.
+/// `Interp`'s own `int_to_char` panics on a code point that is not a Unicode
+/// scalar value, and a compiled body has to raise the same, catchable error —
+/// hence `extern "C-unwind"`, like every other raising shim.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_int_to_char(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_int_to_char: expected 1 argument");
+    }
+    let n = *args;
+    let valid = n >= 0 && n <= i64::from(u32::MAX) && char::from_u32(n as u32).is_some();
+    if !valid {
+        raise(format!("int->char: {} is not a valid Unicode scalar value", n));
+    }
+    n
+}
+
 /// `str::append` for compiled code — concatenates the content of
 /// `args[0]`/`args[1]` into a freshly allocated string, matching the
 /// interpreter's own `string_append`. Returns the tagged form, exactly like
@@ -4224,8 +4297,9 @@ mod tests {
         active_heap, decode, encode, reset_global_table, rt_car, rt_cdr, rt_cons, rt_global_get, rt_global_new, rt_global_set,
         rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count,
         rt_char_equalp, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_equalp, rt_str_length, rt_str_lt,
-        rt_str_new, rt_str_ref, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw,
-        rt_hashtable_keys, rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_data_field, rt_data_new, rt_data_variant,
+        rt_str_new, rt_str_ref, rt_hashtable_bucket_count, rt_hashtable_bucket_delete, rt_hashtable_bucket_key,
+        rt_hashtable_bucket_put, rt_hashtable_bucket_value, rt_hashtable_count, rt_hashtable_entries,
+        rt_hashtable_keys, rt_hashtable_new, rt_data_field, rt_data_new, rt_data_variant,
         rt_cell_get, rt_cell_new, rt_cell_set, rt_closure_env_get, rt_closure_env_len, rt_closure_fnptr, rt_closure_new,
         rt_struct_field_count, rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_pop_field, rt_struct_push_field, set_active_heap,
     };
@@ -4900,11 +4974,14 @@ mod tests {
         let ht = unsafe { rt_hashtable_new([make_str("hashtable<i32,i32>")].as_ptr(), 1) };
         assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 0, "a fresh map is empty");
 
-        // Two int->int entries (keys/values as raw tagged `Sexpr` ints).
-        assert_eq!(unsafe { rt_hashtable_set([ht, encode(Value::Int(1)), encode(Value::Int(10))].as_ptr(), 3) }, 0);
-        assert_eq!(unsafe { rt_hashtable_set([ht, encode(Value::Int(2)), encode(Value::Int(20))].as_ptr(), 3) }, 0);
-        // Overwriting an existing key doesn't grow the count.
-        assert_eq!(unsafe { rt_hashtable_set([ht, encode(Value::Int(1)), encode(Value::Int(99))].as_ptr(), 3) }, 0);
+        // Two int->int entries (keys/values as raw tagged `Sexpr` ints). The
+        // hash and the index are the caller's: this layer never computes
+        // either, which is what lets a `defstruct` be a key.
+        assert_eq!(unsafe { rt_hashtable_bucket_put([ht, 1, 0, encode(Value::Int(1)), encode(Value::Int(10))].as_ptr(), 5) }, 0);
+        assert_eq!(unsafe { rt_hashtable_bucket_put([ht, 2, 0, encode(Value::Int(2)), encode(Value::Int(20))].as_ptr(), 5) }, 0);
+        // Writing at an index that already exists overwrites rather than
+        // appending, so the count doesn't grow.
+        assert_eq!(unsafe { rt_hashtable_bucket_put([ht, 1, 0, encode(Value::Int(1)), encode(Value::Int(99))].as_ptr(), 5) }, 0);
         assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 2, "two distinct keys");
 
         // `keys` builds a `Vector` whose field count matches the entry count.
@@ -4930,23 +5007,32 @@ mod tests {
         }
     }
 
+    /// Two keys that share a hash sit in one bucket, in insertion order, and
+    /// deleting one keeps the other — the collision handling the prelude's
+    /// `get`/`set`/`remove` walk with the key type's own `equals`.
     #[test]
-    fn rt_hashtable_contains_get_raw_and_remove_raw_round_trip() {
+    fn rt_hashtable_bucket_holds_colliding_keys_and_deletes_one() {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
         let ht = unsafe { rt_hashtable_new([make_str("hashtable<i32,i32>")].as_ptr(), 1) };
-        let key = encode(Value::Int(7));
-        let val = encode(Value::Int(70));
+        let hash = 5;
+        assert_eq!(unsafe { rt_hashtable_bucket_count([ht, hash].as_ptr(), 2) }, 0, "no bucket yet");
 
-        assert_eq!(unsafe { rt_hashtable_contains([ht, key].as_ptr(), 2) }, 0, "not present yet");
+        unsafe { rt_hashtable_bucket_put([ht, hash, 0, encode(Value::Int(7)), encode(Value::Int(70))].as_ptr(), 5) };
+        unsafe { rt_hashtable_bucket_put([ht, hash, 1, encode(Value::Int(8)), encode(Value::Int(80))].as_ptr(), 5) };
+        assert_eq!(unsafe { rt_hashtable_bucket_count([ht, hash].as_ptr(), 2) }, 2);
+        assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 2, "the table counts every bucket");
 
-        unsafe { rt_hashtable_set([ht, key, val].as_ptr(), 3) };
-        assert_eq!(unsafe { rt_hashtable_contains([ht, key].as_ptr(), 2) }, 1, "present after set");
-        assert_eq!(decode(unsafe { rt_hashtable_get_raw([ht, key].as_ptr(), 2) }), Value::Int(70));
+        assert_eq!(decode(unsafe { rt_hashtable_bucket_key([ht, hash, 0].as_ptr(), 3) }), Value::Int(7));
+        assert_eq!(decode(unsafe { rt_hashtable_bucket_value([ht, hash, 1].as_ptr(), 3) }), Value::Int(80));
 
-        assert_eq!(decode(unsafe { rt_hashtable_remove_raw([ht, key].as_ptr(), 2) }), Value::Int(70), "remove returns the removed value");
-        assert_eq!(unsafe { rt_hashtable_contains([ht, key].as_ptr(), 2) }, 0, "gone after remove");
+        unsafe { rt_hashtable_bucket_delete([ht, hash, 0].as_ptr(), 3) };
+        assert_eq!(unsafe { rt_hashtable_bucket_count([ht, hash].as_ptr(), 2) }, 1, "the other survives");
+        assert_eq!(decode(unsafe { rt_hashtable_bucket_key([ht, hash, 0].as_ptr(), 3) }), Value::Int(8), "and moves up");
+
+        unsafe { rt_hashtable_bucket_delete([ht, hash, 0].as_ptr(), 3) };
+        assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 0, "an emptied bucket is dropped");
     }
 
     #[test]

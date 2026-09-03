@@ -85,6 +85,9 @@ a spelling for a type, expanded where it is written.")
     "catch" "throw" "unwind-protect"
     ;; function values & application (§6)
     "lambda" "labels" "apply"
+    ;; local macro bindings (functions.md §14.1) — like `labels', but the
+    ;; names they bind are not values
+    "macrolet" "symbol-macrolet"
     ;; other special forms (§7)
     "setf" "incf" "decf" "rotatef" "shiftf"
     "list" "quote" "quasiquote" "unquote" "unquote-splicing"
@@ -229,8 +232,10 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "seq-equals" "set-difference" "set-exclusive-or" "subsetp" "substitute" "substitute-if"
     "tailp" "union"
     ;; the Phase 3e keyword layer's shared loop cores (§6.3)
-    "seq-any-core" "seq-count-core" "seq-edit-core" "seq-find-core" "seq-flag"
-    "seq-in-bounds" "seq-limit" "seq-position-core" "seq-sort-core"
+    "seq-any-core" "seq-count-core" "seq-dedup-core" "seq-edit-core"
+    "seq-find-core" "seq-flag" "seq-in-bounds" "seq-limit"
+    "seq-position-core" "seq-sort-core" "seq-window-start" "seq-window-end"
+    "string-window-equal"
     ;; the 28 `c*r' pair accessors (§6.1)
     "caaaar" "caaadr" "caaar" "caadar" "caaddr" "caadr"
     "caar" "cadaar" "cadadr" "cadar" "caddar" "cadddr"
@@ -858,6 +863,8 @@ has already claimed it for `font-lock-string-face'."
     ("let"         . 1)
     ("let*"        . 1)
     ("labels"      . 1)
+    ("macrolet"    . 1)
+    ("symbol-macrolet" . 1)
     ;; `if' takes exactly three elements -- the `else' branch is mandatory --
     ;; so all three are distinguished and the two branches line up with each
     ;; other, the Common Lisp style the examples are written in.  (Emacs Lisp's

@@ -65,6 +65,24 @@ fn eval_ok_with_prelude(src: &str) -> Value {
     last
 }
 
+/// [`check`], but with the prelude loaded first -- same reason as
+/// [`eval_ok_with_prelude`]: without the prelude's `Hash` impls the
+/// `(where (Hash K))` on `get`/`set` cannot be discharged, so the check
+/// fails for lack of a *method*, which would let a test that means to
+/// assert a genuine type error pass for the wrong reason.
+fn check_with_prelude(src: &str) -> Result<Option<Type>, Error> {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    for v in vs {
+        chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
+    }
+    Ok(chk.expr_type().cloned())
+}
+
 // ---- incf / decf --------------------------------------------------------
 
 #[test]
@@ -99,7 +117,7 @@ fn incf_on_a_hashtable_value_type_mismatch_is_rejected() {
     // `gethash`), so `incf` can never paper over a missing entry.
     let src = "(defun make-h () HashTable<string,i32> (HashTable::new))
                (let ((h (make-h))) (set h \"a\" 1) (incf (get h \"a\")))";
-    assert!(matches!(check(src), Err(Error::TypeError(_))));
+    assert!(matches!(check_with_prelude(src), Err(Error::TypeError(_))));
 }
 
 // ---- rotatef / shiftf -----------------------------------------------------

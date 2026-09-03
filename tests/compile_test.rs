@@ -2719,9 +2719,10 @@ fn compile_transitively_compiles_a_called_user_method() {
 
 /// The other half of `Interp::compile_function`'s `Expr::Assoc`-target check:
 /// a *non-native* builtin method on an otherwise-native receiver — here
-/// `i32::int->char` (`registry::int_assoc`'s conversion, no compiled
-/// primitive backing it, unlike the arithmetic/comparison methods
-/// `compile-assoc`'s integer branch lowers) — is rejected up front by
+/// `i32::try-int->char` (`registry::int_assoc`'s checked conversion, whose
+/// `Option<char>` result is what keeps it out of the native list its
+/// unchecked sibling `int->char` joined in Phase 1: the shims lowered there
+/// return a value, not a value-or-absence) — is rejected up front by
 /// `call_graph_edges` (via `is_native_lowered_primitive_method`, the Rust
 /// twin of the island's `int-native-method?`), with a clear "builtin method
 /// with no compiled implementation" message, rather than reaching the
@@ -2733,11 +2734,11 @@ fn compile_transitively_compiles_a_called_user_method() {
 fn compile_of_a_function_calling_an_unsupported_int_method_is_a_clean_error() {
     let err = run_with_compiler_and_prelude(
         r#"
-        (defun root ((a i32)) char (int->char a))
+        (defun root ((a i32)) Option<char> (try-int->char a))
         (compile root)
         "#,
     )
-    .expect_err("expected compiling a caller of the non-native i32 `int->char` to fail");
+    .expect_err("expected compiling a caller of the non-native i32 `try-int->char` to fail");
     // A variant rather than a `Panic` carrying the same words: `target` is what
     // `compile::prelude_bootstrap` reconciles against its record of the
     // compiler's gaps, so it has to survive as data. The rendered message is
@@ -2745,7 +2746,7 @@ fn compile_of_a_function_calling_an_unsupported_int_method_is_a_clean_error() {
     match err {
         EvalError::Uncompilable { caller, target } => {
             assert_eq!(caller, "root");
-            assert_eq!(target, "i32::int->char");
+            assert_eq!(target, "i32::try-int->char");
             let rendered = EvalError::Uncompilable { caller, target }.to_string();
             assert!(rendered.contains("no compiled implementation"), "message was: {}", rendered);
         }
@@ -6533,4 +6534,121 @@ fn a_compiled_function_builds_and_reads_an_error_chain() {
 fn a_compiled_assert_passes_and_fails_the_same_way() {
     let ok = "(defun fine () i32 (progn (assert (= 1 1)) 7)) (compile fine) (fine)";
     assert_eq!(run_compiled(ok), Value::Int(7));
+}
+
+// ---- the `char`/`int->char` lowerings (cl-parity-plan.md Phase 1's leftover) --
+//
+// `upcase`/`downcase`/`alphap`/`digitp` and `int->char` were the five builtin
+// methods the island had no lowering for, so a `defun` that called one could
+// not be compiled at all — a clean refusal rather than a crash, but a refusal.
+// The prelude's whole character/string catalog is written on `char->int` code
+// points because of it (`docs/dev/cl-parity-plan.md` Phase 2's note 1).
+
+/// Each of the five agrees with the interpreter, which is the only claim a
+/// lowering makes. The four `char` methods share one `rt_char_*` shim shape
+/// and are ASCII-only on both tiers *because* both tiers run the same shim.
+#[test]
+fn compile_and_interpret_agree_on_the_char_methods() {
+    let prog = r#"
+        (defun cu ((c char)) char (upcase c))
+        (defun cd ((c char)) char (downcase c))
+        (defun ca ((c char)) bool (alphap c))
+        (defun cg ((c char)) bool (digitp c))
+        (defun ic ((n i32)) char (int->char n))
+        ;; 42 only if every one of the seven answers is right, so one
+        ;; number carries the whole comparison across two heaps (a `Str`
+        ;; would come back as two unequal `StrId`s).
+        (defun probe () i32
+          (if (equal (upcase #\a) #\A)
+            (if (equal (downcase #\Z) #\z)
+              (if (alphap #\q)
+                (if (alphap #\7) 0
+                  (if (digitp #\7)
+                    (if (digitp #\q) 0 (if (equal (ic 66) #\B) 42 0))
+                    0))
+                0)
+              0)
+            0))
+    "#;
+    let compiled = eval_ok_with_compiler(&format!(
+        "{}\n(compile cu)(compile cd)(compile ca)(compile cg)(compile ic)(compile probe)\n(probe)",
+        prog
+    ));
+    let interpreted = eval_ok(&format!("{}\n(probe)", prog));
+    assert_eq!(compiled, interpreted);
+    assert_eq!(compiled, Value::Int(42));
+}
+
+/// A code point that is not a Unicode scalar value raises, rather than
+/// inventing a character — the check is the reason `int->char` is a shim at
+/// all while its inverse `char->int` is nothing.
+#[test]
+fn a_compiled_int_to_char_raises_on_a_bad_code_point() {
+    let err = run_with_compiler(
+        r#"(defun ic ((n i32)) char (int->char n))
+           (compile ic)
+           (ic -1)"#,
+    )
+    .expect_err("expected a panic");
+    assert!(
+        format!("{:?}", err).contains("not a valid Unicode scalar value"),
+        "{:?}",
+        err
+    );
+}
+
+// ---- a `HashTable` with a user-defined key, compiled ------------------------
+
+/// `get`/`set`/`remove` are prelude `defmethod`s now (cl-parity-plan.md Phase
+/// 6a's remainder), so a compiled call to one is a call to a monomorphized
+/// prelude body that calls `sxhash` and `equals` and then the bucket
+/// primitives. That is three layers of new call graph, and this checks it
+/// arrives at the same answer the interpreter does.
+#[test]
+fn compile_and_interpret_agree_on_a_hashtable_with_a_user_key() {
+    let prog = r#"
+        (defstruct pt (x i32) (y i32))
+        (impl Eq pt
+          (equals ((self Self) (other Self)) bool
+            (if (= self::x other::x) (= self::y other::y) false)))
+        (impl Hash pt
+          (sxhash ((self Self)) i32 (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+        (defun probe ((a i32) (b i32)) i32
+          (let ((h (the HashTable<pt,i32> (HashTable::new))))
+            (progn
+              (set h (pt::new a b) 7)
+              (set h (pt::new b a) 9)
+              (let ((hit (match (get h (pt::new a b)) ((some v) v) ((none) -1)))
+                    (miss (match (get h (pt::new 99 99)) ((some v) v) ((none) 0)))
+                    (gone (match (remove h (pt::new b a)) ((some v) v) ((none) -1))))
+                (+ hit (+ miss (+ gone (count h))))))))
+    "#;
+    let compiled = run_with_compiler_and_prelude(&format!("{}\n(compile probe)\n(probe 1 2)", prog))
+        .expect("compiled run failed");
+    let interpreted =
+        run_with_compiler_and_prelude(&format!("{}\n(probe 1 2)", prog)).expect("interpreted run failed");
+    assert_eq!(compiled, interpreted);
+    // 7 (hit) + 0 (miss) + 9 (removed) + 1 (left) = 17.
+    assert_eq!(compiled, Value::Int(17));
+}
+
+/// A module-qualified type argument in a specialization's name. The name a
+/// specialization is registered under embeds its type arguments — `hashtable::get
+/// <m::pt,i32>` — and the split that finds the method in it used to take the
+/// *last* `::` in the string, which lands inside the type argument. Nothing at
+/// the top level could show it, because a type there has one segment.
+#[test]
+fn a_specialization_at_a_module_qualified_type_resolves() {
+    let src = r#"
+        (module m
+          (pub defstruct pt (x i32))
+          (pub defun probe ((n i32)) i32
+            (let ((d (the Vector<i32> (Vector::new))))
+              (progn (push d 1)
+                (let ((a (Array::make d (pt::new n))))
+                  (x (get a (Vector::filled 1 0))))))))
+        (compile m::probe)
+        (m::probe 7)
+    "#;
+    assert_eq!(run_with_compiler_and_prelude(src).expect("run failed"), Value::Int(7));
 }

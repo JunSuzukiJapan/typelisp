@@ -36,6 +36,7 @@ use crate::eval::interp::{
 use crate::compile::externs::{
     is_native_lowered_primitive_method, is_rt_builtin_name, rt_extern_functions,
 };
+use crate::compile::symbols::HASHTABLE_BUILTIN_METHODS;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES, NATIVE_LOWERED_PRIMITIVES};
 use crate::CompileTarget;
 
@@ -577,12 +578,11 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
             }
             // `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op`
             // node (`core_bridge::translate_hashtable_method`) are likewise
-            // never a real call target. `iter` (a real `defmethod`) is
-            // deliberately absent so it's validated/transitively compiled
-            // normally.
-            if path_is_builtin(&key.0, "hashtable")
-                && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
-            {
+            // never a real call target. The prelude `defmethod`s — `iter`,
+            // and `get`/`set`/`remove`/`maphash`/`size` — are deliberately
+            // absent from that list, so they are validated and transitively
+            // compiled like any other method.
+            if path_is_builtin(&key.0, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&key.1.as_str()) {
                 return false;
             }
             // `llvm-*`/`scope` builtin methods are natively lowered to

@@ -1217,6 +1217,11 @@ pub const SOURCE: &str = r#"
     ;; conversions are. `int->float` is the third of them and a single
     ;; `sitofp`, the inverse of `float->int`'s `fptosi`.
     (("int->bignum" "int->ratio" "int->float") true)
+    ;; `int->char`: the identity on the word, plus the Unicode-scalar-value
+    ;; check that makes it a `char`. The check is the whole reason it is a
+    ;; shim (`rt_int_to_char`) while its inverse `char->int` is nothing at
+    ;; all, and the reason it goes through `emit-direct-call`: it can raise.
+    ("int->char" true)
     ;; `max`/`min`: `icmp`+`select`, branch-free (`build-select`).
     (("max" "min") true)
     ;; `logand`/`logior`/`logxor`: bare LLVM instructions
@@ -1280,7 +1285,29 @@ pub const SOURCE: &str = r#"
     ;; is a one-character `rt_str_new`; both are unary, which is why
     ;; `compile-assoc` checks them before reading a second operand.
     (("char->int" "char->string") true)
+    ;; `upcase`/`downcase`/`alphap`/`digitp`: one `rt_char_*` call each, all
+    ;; unary for the same reason. The rule they apply is ASCII-only, and it
+    ;; is the shim's rule rather than one written here — so the compiled
+    ;; answer cannot drift from the interpreted one.
+    (("upcase" "downcase" "alphap" "digitp") true)
     (else false)))
+
+;; The four `char` methods that are a shim call rather than an instruction,
+;; and the shim each one names. Split from `char-native-method?` because the
+;; lowering needs the *name*, and a predicate that answered `true` would leave
+;; `compile-assoc` re-deriving it.
+(defun char-unary-shim-method? ((method string)) bool
+  (case method
+    (("upcase" "downcase" "alphap" "digitp") true)
+    (else false)))
+
+(defun char-unary-shim-name ((method string)) string
+  (case method
+    ("upcase" "rt_char_upcase")
+    ("downcase" "rt_char_downcase")
+    ("alphap" "rt_char_alphap")
+    ("digitp" "rt_char_digitp")
+    (else (panic (append "char-unary-shim-name: not a char shim method " method)))))
 
 ;; `bool`'s natively-compilable methods. `registry::bool_assoc` registers
 ;; `eq`/`eql`/`equal`/`equalp` as four names for one operation (two immediate
@@ -2335,6 +2362,10 @@ pub const SOURCE: &str = r#"
                 (build-call builder (get-function m "rt_int_to_ratio") args-ptr 1)))
              ("int->float"
               (build-sitofp builder a))
+             ("int->char"
+              (let ((args-ptr (alloca-args builder 1)))
+                (store-arg builder args-ptr 0 a)
+                (emit-direct-call builder m cur-fn (get-function m "rt_int_to_char") args-ptr 1 protect)))
              ;; A width cast is the normalization on its own: cut the value to
              ;; the *target*'s width and re-extend. `int-wsig` reads the target
              ;; out of the method name, which is the only place it is written.
@@ -2422,6 +2453,8 @@ pub const SOURCE: &str = r#"
                (let ((args-ptr (alloca-args builder 1)))
                  (store-arg builder args-ptr 0 a)
                  (build-call builder (get-function m "rt_str_new") args-ptr 1))
+           (if (char-unary-shim-method? method)
+               (unary-shim-call builder m (char-unary-shim-name method) a)
            (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
              (case method
                ("equalp"
@@ -2437,7 +2470,7 @@ pub const SOURCE: &str = r#"
                 (build-icmp-gt builder a b2))
                (">="
                 (build-icmp-ge builder a b2))
-               (else (build-icmp-eq builder a b2))))))))
+               (else (build-icmp-eq builder a b2)))))))))
         ;; `bool`/`symbol`: one `icmp eq` each, over a raw `0`/`1` and
         ;; over an interned handle respectively. Both receivers reach
         ;; `compile-assoc` with the type name the checker spells
@@ -4642,21 +4675,22 @@ pub const SOURCE: &str = r#"
 ;; `(hashtable-op method key-kind val-kind ht-form
 ;; ...)` — a `HashTable<K,V>` builtin
 ;; (`core_bridge::translate_hashtable_op`), lowered to the
-;; `rt_hashtable_*` family (the mem layer owns the key
-;; hashing). `new` builds an empty map (no operands);
-;; `set` tags its key/value by `key-kind`/`val-kind`
-;; (`compile-tag-struct-field`, as `compile-field-set`
-;; does) before the mem layer hashes the key; `count`
-;; returns a raw `i64`; `clear` returns `Unit`; and
-;; `keys`/`values`/`entries` each build a fresh
-;; `Vector` (`entries`'s of `cons-cell`s) that — like a
-;; `compile-construct-boxed-struct` result — is
-;; `push-permanent-sexpr-root`ed on the spot so a later
-;; allocation can't reclaim it. `get`/`remove` are not
-;; here: their `Option` return is a `malloc`'d sum-ADT
-;; box, a separate problem from iteration (see
-;; `docs/dev/iter-compile-plan.md`), so they fall
-;; through to `compile-assoc` and panic clearly.
+;; `rt_hashtable_*` family. `new` builds an empty map (no
+;; operands); `count` returns a raw `i64`; `clear`
+;; returns `Unit`; and `keys`/`values`/`entries` each
+;; build a fresh `Vector` (`entries`'s of `cons-cell`s)
+;; that — like a `compile-construct-boxed-struct` result
+;; — is `push-permanent-sexpr-root`ed on the spot so a
+;; later allocation can't reclaim it.
+;;
+;; `get`/`set`/`remove` are **not** here, and no longer
+;; anywhere in this file: they are prelude methods
+;; written on the `bucket-*` primitives, because hashing
+;; a key and comparing two keys are the key type's own
+;; `sxhash`/`equals`. What is left here is what this
+;; layer can answer alone — a bucket by hash, an entry by
+;; index — with the key and value tagged/decoded by
+;; `key-kind`/`val-kind` exactly as a struct field is.
 (defun compile-hashtable-op ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let ((method (sexpr-str (sexpr-car (sexpr-cdr e)))))
       (if (equal method "new")
@@ -4677,80 +4711,49 @@ pub const SOURCE: &str = r#"
                  (ht-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
                  (ht (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup ht-form)))
             (case method
-            ("set"
-             (let* ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
-                    (val-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
-                    (k (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup key-form))
-                    (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup val-form))
-                    (tk (compile-tag-struct-field builder m k key-kind))
-                    (tv (compile-tag-struct-field builder m v val-kind))
+            ;; The bucket family. Every operand but the key and the value is
+            ;; a raw word already (the hash and the index are `i32`s), so
+            ;; only those two are tagged/decoded — by `key-kind`/`val-kind`,
+            ;; exactly as a struct field is.
+            ("bucket-count"
+             (let* ((h (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
+                    (args-ptr (alloca-args builder 2)))
+               (store-arg builder args-ptr 0 ht)
+               (store-arg builder args-ptr 1 h)
+               (build-call builder (get-function m "rt_hashtable_bucket_count") args-ptr 2)))
+            (("bucket-key" "bucket-value")
+             (let* ((h (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
+                    (i (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))
                     (args-ptr (alloca-args builder 3)))
                (store-arg builder args-ptr 0 ht)
-               (store-arg builder args-ptr 1 tk)
-               (store-arg builder args-ptr 2 tv)
-               (let ((ignored (build-call builder (get-function m "rt_hashtable_set") args-ptr 3)))
-                 (const-word builder 0))))
-            (("get" "remove")
-             ;; `get`/`remove`: a runtime lookup whose found/not-found
-             ;; outcome decides *which sum-ADT variant* to build, so
-             ;; (unlike an ordinary `Option::some`/`none` source call,
-             ;; which `compile-construct-box` builds from a
-             ;; compile-time-known variant) this can't reuse that
-             ;; function directly — it needs real control flow. Follows
-             ;; `compile-if`'s own "alloca a merge slot, branch, store
-             ;; each arm's result, load after the merge block" shape
-             ;; (no `phi` builtin exists here) rather than a new one.
-             ;; `rt_hashtable_contains` is checked first (a `mem::Value`'s
-             ;; tag space has no free bit pattern to serve as a "not
-             ;; found" sentinel from a single value-returning call), then
-             ;; only the confirmed-present branch calls
-             ;; `rt_hashtable_get_raw`/`_remove_raw` — safe with no race,
-             ;; single-threaded compiled code can't remove the entry
-             ;; between the two calls. The found value, still tagged, is
-             ;; decoded into the `Option` box's own "verbatim compiled
-             ;; value" field convention via `compile-sexpr-field` — the
-             ;; exact same decode a `BoxedObj::Struct` field read already
-             ;; uses. `Some`/`None` build a real `BoxedObj::Enum` via
-             ;; `rt_data_new` now (the enum-representation unification's
-             ;; compiler flip) — `option-name-v` (compiled once, from
-             ;; `option-type-name-form`, before the branch so both arms
-             ;; can use the same SSA value) plus the raw variant index,
-             ;; so `Interp::call_compiled` decodes the result exactly as
-             ;; it already does for a source-level `Option::some`/`none`.
-             (let* ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
-                    (k (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup key-form))
+               (store-arg builder args-ptr 1 h)
+               (store-arg builder args-ptr 2 i)
+               (let ((raw (build-call builder (get-function m (if (equal method "bucket-key") "rt_hashtable_bucket_key" "rt_hashtable_bucket_value")) args-ptr 3)))
+                 (compile-sexpr-field builder m raw (if (equal method "bucket-key") key-kind val-kind) 0))))
+            ("bucket-put"
+             (let* ((h (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
+                    (i (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))
+                    (k (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))))
+                    (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))))
                     (tk (compile-tag-struct-field builder m k key-kind))
-                    (option-name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup option-type-name-form))
-                    (lookup-args (alloca-args builder 2)))
-               (store-arg builder lookup-args 0 ht)
-             (store-arg builder lookup-args 1 tk)
-             (let* ((found (build-call builder (get-function m "rt_hashtable_contains") lookup-args 2))
-                    (then-block (append-block cur-fn "ht-found"))
-                    (else-block (append-block cur-fn "ht-not-found"))
-                    (merge-block (append-block cur-fn "ht-merge"))
-                    (slot (alloca-args builder 1)))
-               (build-cond-br builder found then-block else-block)
-               (position-at-end builder then-block)
-               (let* ((raw-fn (if (equal method "get") "rt_hashtable_get_raw" "rt_hashtable_remove_raw"))
-                      (raw (build-call builder (get-function m raw-fn) lookup-args 2))
-                      (some-args (alloca-args builder 3)))
-                 (store-arg builder some-args 0 option-name-v)
-                 (store-arg builder some-args 1 (const-word builder 0))
-                 (store-arg builder some-args 2 raw)
-                 (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
-                   (push-permanent-sexpr-root builder m some-box)
-                   (let ((ignored (store-arg builder slot 0 some-box)))
-                     (build-br builder merge-block))))
-               (position-at-end builder else-block)
-               (let ((none-args (alloca-args builder 2)))
-                 (store-arg builder none-args 0 option-name-v)
-                 (store-arg builder none-args 1 (const-word builder 1))
-                 (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
-                   (push-permanent-sexpr-root builder m none-box)
-                   (let ((ignored (store-arg builder slot 0 none-box)))
-                     (build-br builder merge-block))))
-               (position-at-end builder merge-block)
-               (load-raw builder slot 0))))
+                    (tv (compile-tag-struct-field builder m v val-kind))
+                    (args-ptr (alloca-args builder 5)))
+               (store-arg builder args-ptr 0 ht)
+               (store-arg builder args-ptr 1 h)
+               (store-arg builder args-ptr 2 i)
+               (store-arg builder args-ptr 3 tk)
+               (store-arg builder args-ptr 4 tv)
+               (let ((ignored (build-call builder (get-function m "rt_hashtable_bucket_put") args-ptr 5)))
+                 (const-word builder 0))))
+            ("bucket-delete"
+             (let* ((h (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
+                    (i (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))
+                    (args-ptr (alloca-args builder 3)))
+               (store-arg builder args-ptr 0 ht)
+               (store-arg builder args-ptr 1 h)
+               (store-arg builder args-ptr 2 i)
+               (let ((ignored (build-call builder (get-function m "rt_hashtable_bucket_delete") args-ptr 3)))
+                 (const-word builder 0))))
             ("count"
              (let ((args-ptr (alloca-args builder 1)))
                (store-arg builder args-ptr 0 ht)

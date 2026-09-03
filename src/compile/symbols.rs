@@ -151,16 +151,19 @@ pub const VECTOR_BUILTIN_METHODS: [&str; 6] = ["new", "get", "set", "len", "push
 
 /// `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op` node
 /// (`translate_hashtable_method` -> the `rt_hashtable_*` family) rather than
-/// the generic `assoc` path — every one except `iter` (a genuine prelude
-/// `defmethod`, `hashtable-iter::new`). `get`/`remove` return `Option<V>`, a
-/// `BoxedObj::Enum` built directly by `compiler.rs`'s `compile-hashtable-op`
-/// via `rt_data_new` (`rt_hashtable_contains` + `rt_hashtable_get_raw`/
-/// `rt_hashtable_remove_raw` supply the found/not-found outcome and the
-/// already-tagged stored value) rather than through the ordinary
-/// `construct` path — there is no *source* `Option::some`/`none` call
-/// site here to translate, so [`translate_hashtable_method`] supplies the
-/// `"option"` type-name form itself.
-pub const HASHTABLE_BUILTIN_METHODS: [&str; 9] = ["new", "set", "get", "remove", "count", "clear", "keys", "values", "entries"];
+/// the generic `assoc` path — every one except `iter`, `get`, `set`,
+/// `remove`, `maphash` and `size`, which are genuine prelude `defmethod`s.
+///
+/// `get`/`set`/`remove` were here once, as three whole-lookup shims. They
+/// could not stay: looking a key up means hashing it and comparing it, and
+/// both of those are the key type's own `sxhash`/`equals` — typelisp
+/// methods a Rust shim cannot call. The bucket primitives take the hash the
+/// prelude computed and an index it found, which is the part this layer can
+/// answer on its own.
+pub const HASHTABLE_BUILTIN_METHODS: [&str; 11] = [
+    "new", "count", "clear", "keys", "values", "entries",
+    "bucket-count", "bucket-key", "bucket-value", "bucket-put", "bucket-delete",
+];
 
 /// The stable operation id compiled code passes as `rt_llvm_call`'s first
 /// argument: FNV-1a over `"type-key::method"`, folded into a tagged-`Sexpr`

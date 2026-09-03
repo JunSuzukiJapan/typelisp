@@ -329,14 +329,27 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 そのまま）。回帰テストは `compile_test::compiled_format_renders_a_float_parameter_as_a_number`。
 [[typelisp-crossing-must-be-type-driven]] と同じ形の誤りで、これで 4 回目。
 
-### 残タスク: char / int の native lowering 5 つ
+### 残タスク: char / int の native lowering 5 つ — **完了 2026-09-03**
 
-`char::upcase` / `char::downcase` / `char::alphap` / `char::digitp` / `i32`・`i64` の
-`int->char` はコンパイルできない。ユーザコードが `(upcase c)` を呼ぶ関数を `compile` すると
-（プロセス abort ではなく）クリーンなエラーで断られる、という既知の穴。§2-4 の触点
-フルセット（rt シム 5 本 → externs 3 表 → 島の `char-native-method?` と lowering →
-島再生成 ×2 → prelude 再生成）が要る。Phase 2 の本文からは独立しているので、
-着手は Phase 1a（同じく島の分岐を増やす作業）とまとめるのが安い。
+`char::upcase` / `char::downcase` / `char::alphap` / `char::digitp` と整数の `int->char`。
+触点は §2-4 が予告したフルセットそのままだった（rt シム 5 本 → externs 2 表 →
+島の `char-native-method?` と lowering → 島再生成 → prelude 再生成）。
+
+- 4 つの `char` メソッドは `rt_char_upcase`/`_downcase`/`_alphap`/`_digitp` を 1 回呼ぶだけ。
+  **ASCII 限定という規則はシムが持っている**ので、コンパイル済みの答えがインタプリタの
+  答えから離れようがない——2 つの層が同じ規則を書くのではなく、同じ関数を呼ぶ。
+- `int->char` だけが失敗しうる（Unicode スカラ値でないコードポイント）ので、
+  `extern "C-unwind"` で宣言して `raise` する。逆向きの `char->int` が命令すら要らない
+  のに対し、この検査があることがシムである理由そのもの。
+- 島側は `char-native-method?` に 4 つ足し、`compile-assoc` の char 分岐に
+  「unary シム呼び出し」の腕を 1 つ、整数分岐に `int->char` の腕を 1 つ。
+  メソッド名から**シム名を返す関数**（`char-unary-shim-name`）を分けたのは、述語が
+  `true` を返すだけでは `compile-assoc` が名前を再導出することになるため。
+- prelude の文字カタログは**書き換えていない**。コードポイント上で書かれているのは
+  この穴があったからだが、既にあってテストも通っているものを触る理由が無い。制約が
+  無くなったことだけをコメントに書いた。
+
+これで [syntax.md](../syntax.md) §10 の「コンパイルできない組み込み」の表は**空**になった。
 
 ### Stage 2a — 文字
 
@@ -457,9 +470,30 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 **前提の訂正**: 本文は「`lambda` と `defmethod` の `&optional`/`&key` 対応（Phase 5b）」を
 前提に挙げていたが、**Phase 5b は要らなかった**。Stage 3a が受け手を `Iter` 実装型に
 統一した結果、対象は全部 `defmethod` ではなく**ジェネリック `defun`** で、`defun` の
-`&optional`/`&key` は既に通っていた。逆にまだ届かないのは `defmethod` の側——
+`&optional`/`&key` は既に通っていた。届かなかったのは `defmethod` の側——
 破壊的操作（§3d、`Vector<T>` の `defmethod`）と `search`/`mismatch`（`string` の
-`defmethod`）はキーワードを取れないままで、これは Phase 5b 待ち。
+`defmethod`）——で、そちらは Phase 5b のあと **2026-09-03 に埋めた**（下記）。
+
+**`defmethod` 側（2026-09-03）**。`delete`/`delete-if`/`delete-if-not`/
+`delete-duplicates`/`nsubstitute`/`nsubstitute-if`/`fill`/`replace` と、`string` の
+`search`/`mismatch` に CL のキーワード集合を持たせた。テストは
+`tests/seq_keywords_test.rs` の末尾、カタログは [functions.md](../functions.md) §6.3。
+
+- **転送はできない、どちらの向きにも。** キーワード引数は本体では `Option` として
+  受け取り、呼び先のキーワードは裸の値を要求する——そして
+  `Option<(fn (A) A)>` は型として書けない（上の発見 1）。だから破壊版は
+  非破壊版へ「そのまま渡す」ことができず、自分でキーワードを開く。共有されるのは
+  引数リストではなく**ループの中身**（`seq-edit-core`、および `remove-duplicates` から
+  括り出した `seq-dedup-core`）で、繰り返すのは `proj`/`same` を組み立てる 2 行だけ。
+- **`search` のキーワードだけ番号でなく名前**。CL の `:start1`/`:end1` はパターン、
+  `:start2`/`:end2` は探される列を指すが、この言語は受け手が先なので同じ番号が
+  逆の意味になる——しかも黙って。`:start`/`:end`（受け手）と `:sub-start`/`:sub-end`
+  （パターン）に改名したので、つい書いた `:start1` は「未知のキーワード」エラーになる。
+  **間違った答えより、名前が無いほうがよい。** `mismatch` と `replace` は引数順が CL と
+  一致するので CL の番号のまま。
+- **`(if cond (setf ...) ())` は型エラー**。`setf` は代入した値を返す（CL と同じ）ので
+  分岐の型が揃わない。既存コードの `(progn (setf ...) ())` か `when`/`unless` を使う。
+  この作業で 4 回踏んだ。
 
 **`:test` と `Eq` 境界の噛み合わせ**: 既定は `Eq` 境界の `equals`、`:test` を渡すとその場で
 差し替える——CL が `:test` の既定を `eql` としているのと同じ形なので、名前を分ける必要は
@@ -613,13 +647,27 @@ acc)` へ展開すれば要素型が推論で決まる」——決まらない:
   （明示的な型適用も無い）ので `(the (fn (i32) string) (constantly "hi"))` でも決まらない。
   0 引数のサンクに縮めれば書けるが、CL の用途（`:key` 等）に届かない。
   `(lambda ((x T)) A v)` が同じ字数で同じことを言う。`const`（2 引数版）は既にある。
-- **`macrolet` / `symbol-macrolet`** — 障害は 1 つで、はっきりしている。**式の位置の検査は
-  `&self`** で、マクロを定義するには (1) レジストリへの登録（`check_defmacro` は
-  `&mut self`）と (2) **インタプリタ側でのラムダの登録**（`exec` 相当）の両方が要る。
-  やるなら: `check_defmacro` を「本体を検査して部品を返す `&self` 部分」と「登録する
-  `&mut self` 部分」に割り、`Checker` にスコープ付きのローカルマクロ表（`RefCell`）を足して
-  `resolve_macro` がレジストリより先に引き、`MacroExpander` に「この defmacro コア形を
-  定義せよ」という 1 メソッドを足す。**設計は決まっているが片手間には入らない**ので別立て。
+**`macrolet` / `symbol-macrolet` は入った（2026-09-03）**。上に書いた手順がそのまま
+通った——`check_defmacro` を `defmacro_body`（`&self`、検査だけ）と登録側に割り、
+`Checker` にスコープ付きの表（`local_macros`/`local_symbol_macros`、どちらも `RefCell`）
+を足し、`resolve_macro` がレジストリより先にそれを引き、`MacroExpander` に
+`define_macro` を 1 つ足した。テストは `tests/macro_tools_test.rs`、ドキュメントは
+[functions.md](../functions.md) §14.1。
+
+計画に書いていなかったことが 2 つある。
+
+1. **`symbol-macrolet` の名前は `Env` に束縛する**（`symbol_macro_mark` という、
+   ソースに書けない型で）。すると CL の入れ子規則——内側の `let` が symbol macro を
+   隠し、symbol macro が外側の変数を隠す——が**規則を書かずに出てくる**。第 2 の探索表を
+   引く実装だと、この順序を手で再現することになっていた。
+2. **兄弟は互いの*本体*からは見えない**（CL と同じ。`labels` との違い）が、
+   *展開結果*からは見える——展開は使用位置で検査され、そこでは両方がスコープに居る。
+   最初のテストはこれを取り違えていて、「見えない」ことを確かめたつもりが
+   展開経路を確かめていた。
+
+`macrolet` が入れた定義は**消さない**。名前は一意（`" macrolet <n> <name>"`、先頭の
+空白はソースに書けない）なのでスコープを抜ければ誰も届かず、スコープはチェッカーの表の
+ほうにある。
 - **`eval-when`** — **選ぶべき区別が無い**。`typl` は各トップレベル形を検査→実行と 1 本で
   進み、`compile-file` は**定義形を全部 `exec` する**うえに裸のトップレベル式を受け付けない
   （`aot.rs`)。つまり CL の `:compile-toplevel`/`:load-toplevel`/`:execute` の 3 つは
@@ -790,7 +838,7 @@ Phase 4c で `gensym` が `&optional` を得たときに踏んでいたが、そ
 
 ### Stage 6a — ハッシュ表
 
-状態: 部分完了（2026-08-22）。**ユーザ定義型をキーにする**分だけ残した（理由は下）。
+状態: **完了**（6a 前半 2026-08-22、ユーザ定義型のキー 2026-09-03）。
 
 **`Hash` トレイト ＋ `sxhash`** が入った。CL は契約を含意で述べる——`(equal x y)` ならば
 `(= (sxhash x) (sxhash y))`。`Eq` をスーパトレイトに持つトレイトにすると、同じことが
@@ -816,13 +864,37 @@ prelude のトレイトに依存する（島は `HashTable` の値を持たず `
 `:rehash-threshold` は `HashMap` にユーザから見える再ハッシュ方針が無い。受け取って無視
 するのは、受け取らないより悪い。
 
-**ユーザ定義型をキーにするのは別作業。** mem 層の表は `MemHashKey`（`Int`/`Bool`/`Char`/
-`Str` の閉じた集合）で引いており、ユーザ型を入れるには `get`/`set`/`remove`/`keys`/
-`values`/`entries` の下にバケット層——ハッシュ衝突を構造的等価で解決する層——を敷く必要が
-ある。それを prelude 側に置こうとすると型が合わない（表の宣言型 `V` と、格納したい
-「`(K,V)` のバケット」が別物で、組み込みメソッドのシグネチャに後者を書けない）ので、
-バケットは Rust 側（typelisp-mem と interp、および `rt_hashtable_*`）に置くことになる。
-`sxhash` と `(where (Hash K))` はその作業の入口として先に入れてある。
+**ユーザ定義型をキーにする分（2026-09-03 完了）。** 表は `hash -> バケット` になり、
+`get`/`set`/`remove` は **prelude の `defmethod`** になった。
+
+計画のこの節は「バケットは Rust 側に置くことになる（prelude 側に置こうとすると
+組み込みメソッドのシグネチャに `(K,V)` のバケットを書けない）」と言っていた。**その前提が
+誤り**だった: 組み込みのシグネチャは Rust が `Type` を組み立てて作るので、`entries` が
+既に `Vector<cons-cell<K,V>>` を返しているとおり、その型はいくらでも書ける。だから
+バケット層を Rust に置く必要は無く、置いてはいけなかった——**キーをハッシュすることも
+2 つのキーを比べることも、キーの型自身のメソッド**（`sxhash` と、`Hash` のスーパトレイト
+`Eq` の `equals`）で、typelisp で書かれている。それを呼べる場所は prelude だけ。
+Rust のシムが呼ぼうとすれば、`rt_eval` と同じ「インタプリタへの逆呼び出し」機構を
+JIT と AOT の両方に足すことになっていた。
+
+結果として下の層が答えるのは、キーについて何の意見も要らない部分だけになった:
+`bucket-count`/`bucket-key`/`bucket-value` が 1 つのハッシュを共有するエントリを読み、
+`bucket-put`/`bucket-delete` が書く。5 つとも非公開の組み込みメソッドで、prelude が
+根モジュールに居るから届く。
+
+- **`MemHashKey` は消えた**（`Int`/`Bool`/`Char`/`Str` の閉じた集合）。文字列キーの
+  intern も要らない——キーは `equals` で比べるので、内容が等しければ見つかる。
+- **`symbol` キーが直った**。`Hash` の impl はずっとあり、型検査もずっと通り、
+  実行時にはずっと panic していた（`MemHashKey` に `Symbol` が無かった）。
+  シンボルについて何かを直したのではなく、**下の層が知る必要をなくした**。
+- 島の `compile-hashtable-op` からは `get`/`set`/`remove` の 3 本（`rt_hashtable_contains`
+  + `_get_raw`/`_remove_raw` の 2 段呼び出しと、`Option` を `rt_data_new` で自分で
+  組み立てる 40 行）が消え、代わりにバケット 5 本の素直な腕が入った。`Option` は
+  prelude が作る。
+- **副産物で既存のバグを 1 つ直した**: 特殊化の名前に埋まった型引数が
+  モジュール修飾されていると（`hashtable::get <m::pt,i32>`）、`Interp::method_key` の
+  `rsplit_once("::")` が型引数の内側で切っていた。ルートで書いたプログラムでは
+  型が 1 セグメントなので絶対に出ない。[[typelisp-type-identity-invariant]] と同じ族。
 
 **副産物: コンパイル済みコードの整数切り詰めを 2 件見つけた**（[TODO.md](TODO.md) に記録）。
 1 件は直した——整数リテラルは島へ `Sexpr` として渡るので 3bit タグを引いた 61bit しか
@@ -938,7 +1010,7 @@ cleanup は body をどう抜けても走る（正常終了・`throw`・`panic`�
 | `*print-lines*` | ✅ pretty printer の行数上限。打ち切りは CL と同じ `..` |
 | `*trace-output*` | ✅ `time` の報告先（CL 準拠） |
 | `*print-gensym*` | ⛔ この言語に未 intern シンボルが無い |
-| `*print-array*` / `*print-escape*` | ⏳ Phase 8a へ。前者は `Array<T>` の `print-object`、後者は `princ`/`prin1` と一緒に決める話 |
+| `*print-array*` / `*print-escape*` | ✅ Phase 8a（`*print-escape*` 2026-08-23、`*print-array*` は `Array<T>` の `print-object` と一緒に 2026-09-03）|
 | `*terminal-io*` / `*query-io*` / `*debug-io*` | ⛔ **作れない**。CL ではどれも two-way ストリームで、`two-way-stream` は両半分を `:dyn` へアップキャストして作る。それは prelude の本体がやってはいけない唯一のこと（`dyn-new`/`dyn-upcast` は箱詰め/アップキャスト地点ごとに vtable id・trait id を焼き込み、成果物にはその番号を再生して vtable アドレスを公開する起動列が無い——`prelude_bootstrap::build_dump` 末尾の検査）。ユーザコードは `(make-two-way-stream ...)` を自由に作れる |
 | `*read-base*` | ⛔ 見送り。`read` はコンパイル済みコードからも `rt_read` 経由で呼ばれ、そちら側に typelisp のグローバルへの経路が無い（`PrintHooks` に相当するリーダ側の表が要る）。CL 自身の落とし穴（基数 16 では `abc` が数になる）もあり、「別の基数で読む」需要は下の radix マクロが明示的に満たす |
 | `*read-default-float-format*` | ⛔ 浮動小数点型が 1 つしか無い |
@@ -957,7 +1029,7 @@ cleanup は body をどう抜けても走る（正常終了・`throw`・`panic`�
 
 ## Phase 8 — 印字とリーダ
 
-### Stage 8a — プリンタ（完了 2026-08-23）
+### Stage 8a — プリンタ（完了 2026-08-23、`*print-array*` は 2026-09-03）
 
 **1 引数プリンタ**。`prin1`（`~s`）/ `princ`（`~a`）/ `write`（`*print-escape*` で選ぶ）と
 `prin1-to-string` / `princ-to-string` / `write-to-string`。前 3 者は CL と同じく
@@ -1001,15 +1073,28 @@ CL の `print`（改行 → `prin1` → 空白）とは別の仕事なので、�
 （次の文字の UTF-8 エンコーディングを返すのは「そこに無いファイルを発明する」こと）。
 `unread-char` が保留中のときも拒否する。
 
-**入れなかったもの**: `*print-array*` と `Array<T>` の `print-object`。
-**`print-object` はジェネリック型に対して一度も発火しない**ことが分かった
-（`(impl print-object gen<T> ...)` は型検査を通り直接呼べば動くのに、プリンタからは
-見えない）。プリンタは値の持つ型キーで引くが、単型化が型引数を消すのでキーは `gen` で
-あって `gen<i64>` ではなく、値に実体化の情報が無い。全 T で 1 本の本体を共有する手も、
-`Array<T>` の印字は要素を印字するので成立しない。登録漏れを直せば済む話ではないので
-独立した作業とし、`Array` だけ組み込みプリンタに型名で特別扱いさせるのは
-（このコードベースが避けている「型名で分岐する」やり方なので）しない。
-テストで固定してある（`tests/printer_test.rs::print_object_does_not_reach_a_generic_type`）。
+**`*print-array*` と `Array<T>` の `print-object` は 2026-09-03 に入った。** 見送った
+理由——「`print-object` はジェネリック型に対して一度も発火しない」——は 2026-08-31 に
+値の型キーが実体化を含むようになって消えた（[type-identity-instantiation-plan.md](type-identity-instantiation-plan.md)）。
+
+- ランク 1 は `#(a b c)`、それ以外は `#nA` と次元ぶんの括弧、ランク 0 は `#0Ax`。
+  3 つとも同じ再帰から落ちてくるので、場合分けは `#` をどこに置くかだけ。
+  fill pointer はランク 1 を `(len self)` で切る（CL のプリンタと同じ）。
+- **境界が要る**: 要素を印字するには要素の型を印字できなければならず、`format` の
+  `&rest` は型変数を受け取れない（`(defun show<T> ((x T)) string (format false "~a" x))`
+  は弾かれる）。だから `(where (print-object T))`——Rust の `T: Display` と同じ形——で、
+  **スカラ型 14 個に `print-object` の impl を足した**。出力は何も変わらない:
+  プリンタがこの trait を引くのは型キーを持つ値、つまり `defstruct`/`defenum` の箱だけで、
+  スカラは即値か型を持たない箱として届き、一度も尋ねられない。買ったのは境界だけ。
+- **境界を満たさない実体化は黙って落とす**。`print-object` の特殊化を要求するのは
+  ユーザが書いた呼び出しではなく*構築地点*なので、要求が成立しないときにエラーにすると
+  「`Array` を作っただけで print-object を実装していないと言われる」ことになる
+  （`Checker::print_object_bounds_hold`）。
+- **副産物で既存のバグを 1 つ直した**: 受け手が `where` 境界の型変数のとき、
+  `try_instance_method` の覗き見はそれを解決できず、`try_instance_method_swapped` が
+  引数を入れ替えて別の型の impl に当ててしまう。`bool` が `print-object` を実装した
+  瞬間に `(print-object x true)` が「expected Bool, found t」で落ちた——**誰も書いて
+  いない呼び出しについての診断**。境界が答えられる呼び出しは入れ替えないようにした。
 
 テストは `tests/printer_test.rs`（31 本）と `tests/byte_io_test.rs`（13 本）。
 

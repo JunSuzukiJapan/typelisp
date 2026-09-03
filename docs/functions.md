@@ -614,8 +614,24 @@ CL のシーケンス関数が取るキーワード `:key` / `:test` / `:test-no
    CL の既定は**最後**を残す。以前の挙動は `:from-end true`。
 
 破壊的な版（§6.2、`Vector<T>` の `defmethod`）と `search`/`mismatch`（`string` の
-`defmethod`）はまだキーワードを取らない。`defmethod` は `&optional`/`&key` を受け付けない
-（cl-parity-plan.md Phase 5b）。
+`defmethod`）も同じキーワードを取る。`defmethod` が `&optional`/`&key` を受け付けるように
+なった（cl-parity-plan.md Phase 5b）ので、Phase 3e が残していた分を埋めたもの。
+
+| 破壊的な版 | 取るキーワード |
+|---|---|
+| `delete` `nsubstitute` | `:key` `:test` `:test-not` `:start` `:end` `:from-end` `:count` |
+| `delete-if` `delete-if-not` `nsubstitute-if` | `:key` `:start` `:end` `:from-end` `:count` |
+| `delete-duplicates` | `:key` `:test` `:test-not` `:start` `:end` `:from-end` |
+| `fill` | `:start` `:end` |
+| `replace` | `:start1` `:end1` `:start2` `:end2`（受け手が CL の `sequence-1`） |
+| `search` | `:key` `:test` `:test-not` `:from-end` `:start` `:end` `:sub-start` `:sub-end` |
+| `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
+
+**`search` のキーワードだけ番号でなく名前**。CL は `:start1`/`:end1` が**パターン**、
+`:start2`/`:end2` が探される列だが、この言語は受け手が先なので同じ番号が逆の意味になる——
+しかも黙って。`:start`/`:end` が受け手、`:sub-start`/`:sub-end` がパターンなので、
+つい書いた `:start1` は「未知のキーワード」エラーになる。`mismatch` と `replace` は
+引数の順序が CL と一致するので CL の番号のまま。
 
 ### 6.2 破壊的操作（cl-parity-plan.md Phase 3d）
 
@@ -636,6 +652,9 @@ CL のシーケンス関数が取るキーワード `:key` / `:test` / `:test-no
 | `nreconc` | `(nreconc v w)` | `(nconc (nreverse v) w)` |
 | `set-contents` | `(set-contents v src)` | `v` の中身を `src` で置き換える（長さも変わる）。上の `delete`/`n...` 系の共通土台 |
 | `rplaca` `rplacd` | `(rplaca p x)` | `cons-cell` の `set-car`/`set-cdr` に、セル自身を返す形を被せたもの |
+
+それぞれが取るキーワード（`:key`/`:test`/`:start`/`:count` 等）は §6.3 の表にある。
+省略時の意味は上の欄に書いたとおりで、キーワードを足しても既存の呼び出しは変わらない。
 
 `vector-push-extend`/`vector-pop` は既存の `push`/`pop` そのもの——`Vector<T>` は常に伸びるので、
 CL の「fill pointer を持つベクタ」と「simple なベクタ」の区別に対応するものが無い。
@@ -738,8 +757,8 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `/=` | `(/= s1 s2)` | `(string,string)→bool` | 内容が異なるか（CL `string/=`。可変長形は隣接ペア比較——§4.1） |
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | 大文字小文字を無視した順序比較（CL `string-lessp` 等）。共通接頭辞なら短い方が小 |
 | `string::filled` | `(string::filled n c)` | `(i32,char)→string` | `c` を `n` 個並べた文字列（CL `make-string`） |
-| `search` | `(search s sub)` | `(string,string)→Option<i32>` | `sub` が最初に現れる位置。**CL の `search` は引数順が逆**（`(search pattern sequence)`）。空文字列は 0 |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<i32>` | 最初に食い違う位置。`equal` なときだけ `none`。片方が接頭辞なら短い方の末尾 |
+| `search` | `(search s sub)` | `(string,string)→Option<i32>` | `sub` が最初に現れる位置。**CL の `search` は引数順が逆**（`(search pattern sequence)`）。空文字列は 0。キーワードは §6.3 |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<i32>` | 最初に食い違う位置。`equal` なときだけ `none`。片方が接頭辞なら短い方の末尾。キーワードは §6.3 |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string,string?)→string` | 両端/左/右から `bag` に含まれる文字を除く（CL `string-trim` 等）。`bag` 省略時は空白類 `" \t\n\r"` |
 | `capitalize` | `(capitalize s)` | `string→string` | 各語の先頭を大文字・残りを小文字（CL `string-capitalize`）。語＝英数字の極大連続 |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | `sep` で分割。CL に対応物は無い。連続する区切りは空要素を生む。`sep` が空なら panic |
@@ -774,10 +793,12 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `name->char` | `(name->char s)` | `string→Option<char>` | 文字名から文字。大文字小文字を無視し、リーダの別名（`linefeed`/`null`）も受ける（CL `name-char`） |
 
 この節の実装は全て `char->int` のコードポイント上で書かれていて、`upcase`/`downcase`/`alphap`/
-`digitp`/`int->char` を**呼ばない**。この 5 つは島に lowering が無い組み込み
-（`externs::native_lowered_primitive_methods`）なので、触れると prelude 全体が
-インタプリタ専用に落ちて `PRELUDE_COMPILE_UNSUPPORTED` に穴が開く。ASCII 限定なのも
-既存の `upcase`/`alphap` と同じ理由（Unicode の表を実行時に持っていない）。
+`digitp`/`int->char` を**呼ばない**。書かれた当時この 5 つに島の lowering が無く、触れると
+prelude 全体がインタプリタ専用に落ちたため。2026-09-03 に 5 つとも lowering が入った
+（[syntax.md](syntax.md) §10）ので `char` 側の制約は無くなったが、既にあるコードは
+そのままにしてある。**`string` の `upcase`/`downcase` にはまだ lowering が無い**ので、
+そちらを呼ぶ関数は今もコンパイルできない。
+ASCII 限定なのは既存の `upcase`/`alphap` と同じ理由（Unicode の表を実行時に持っていない）。
 
 `char-code-limit` に当たる定数は無い（`char` は Unicode スカラ値で、上限は言語の性質ではなく
 Unicode の性質）。`char-int` は `char->int` と同じ。
@@ -820,6 +841,35 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
 | `values` | `(values h)` | `HashTable<K,V>→Vector<V>` | 値のスナップショット |
 | `entries` | `(entries h)` | `HashTable<K,V>→Vector<cons-cell<K,V>>` | `(k . v)` ペアのスナップショット |
 | `iter` | `(iter h)` | `HashTable<K,V>→hashtable-iter<K,V>` | `Iter` を実装するカーソル（ライブラリ定義） |
+| `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL `maphash` |
+| `size` | `(size h)` | `HashTable<K,V>→i32` | CL `hash-table-size`。この表では占有数（＝`count`） |
+
+**キーの型は `Hash` を実装していれば何でもよい**——`defstruct`/`defenum` も含めて。
+`get`/`set`/`remove` は `(where (Hash K))` を持つので、実装していない型をキーにした表は
+**型エラー**（`f64` に `Hash` が無いのは `NaN` のため）。
+
+```lisp
+(defstruct point (x i32) (y i32))
+(impl Eq point
+  (equals ((self Self) (other Self)) bool
+    (if (= self::x other::x) (= self::y other::y) false)))
+(impl Hash point
+  (sxhash ((self Self)) i32 (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+
+(let ((h (the HashTable<point,string> (HashTable::new))))
+  (progn (set h (point::new 1 2) "a")
+         (get h (point::new 1 2))))          ; => (some a)
+```
+
+キーが同じかどうかを決めるのは**キーの型自身**（`sxhash` と、`Hash` のスーパトレイト
+`Eq` の `equals`）で、ポインタの同一性ではない。だから上のように「別の値だが等しい」
+キーで引ける。`get`/`set`/`remove` が prelude の `defmethod` なのはそのため——キーを
+ハッシュすることも 2 つのキーを比べることも typelisp のメソッドなので、Rust のシムからは
+呼べない。下の層が答えるのは「あるハッシュのバケット」だけ
+（`registry::hashtable_def` の `bucket-*`、ユーザからは見えない）。
+
+`sxhash` が衝突しても構わない（`Hash` の契約は逆向き——`equals` なら同じハッシュ、としか
+言っていない）。衝突したキーは同じバケットに並び、`equals` で区別される。
 
 ## 11.1 `Array<T>`（多次元配列）
 
@@ -851,6 +901,13 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
   `array-has-fill-pointer-p` は**無い**。受け手の静的型が既に答えている問い。
 - `Array::new` は `defstruct` が生成するフィールド順のコンストラクタ（次元列・平坦な格納・
   fill pointer）で、作るときに使うものではない。`Array::make` を使う。
+- **印字は CL の配列構文**。ランク 1 は `#(1 2 3)`、それ以外は `#nA` と次元ぶんの括弧
+  （`#2A((1 2 3) (4 5 6))`）、ランク 0 は `#0A5`。fill pointer があればそこで切る。
+  `*print-array*`（§15.1）を偽にすると形だけの `#<array 2x3>` になる。
+  要素の印字には `print-object` を使うので、`Array<T>` のこの `print-object` は
+  `(where (print-object T))` を持つ——スカラは全部その実装を持っているが、
+  `print-object` を書いていない `defstruct` を要素にした配列だけは組み込みの
+  `#<array<...> ...>` で出る（エラーにはならない）。
 
 ## 11.2 `BitVector`（ビットベクタ）
 
@@ -995,9 +1052,35 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 (macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
 ```
 
+### 14.1 局所的なマクロ束縛（`macrolet` / `symbol-macrolet`）
+
+どちらも**値でない名前**を字句的に束縛する特殊形。実行時には何も残らない——本体が
+コンパイルされるのは展開後の形。
+
+```lisp
+(macrolet ((twice (x) `(+ ,x ,x)))
+  (twice 21))                       ; => 42
+
+(let ((v (the Vector<i32> (Vector::new))))
+  (progn (push v 7)
+    (symbol-macrolet ((head (get v 0)))
+      (progn (setf head 42) head))))  ; => 42
+```
+
+- `macrolet` の束縛は同名の大域マクロを**本体の間だけ**隠す。ラムダリストは `defmacro`
+  と同じ（`&optional`/`&rest`/`&key`）——検査するコードも同じ。
+- **同じ `macrolet` の兄弟どうしは、互いの*本体*からは見えない**（CL と同じ。`labels`
+  との違い）。展開結果は使用位置で検査されるので、`earlier` が `(later ...)` へ展開する
+  のは通る——その位置では両方が見えている。
+- `symbol-macrolet` の名前は環境にふつうの束縛として入る。だから内側の `let` が同名を
+  隠し、外側の変数は隠される——CL の規則がそのまま出てくる。
+- **`setf` は展開先へ書く**。`(setf head 42)` は `(setf (get v 0) 42)`。CL でこの形が
+  使われる理由（スロットの別名）がまさにこれ。
+- 展開は**使用位置の環境**で検査される（束縛位置ではない）。
+
 CL にあってここに無いもの（cl-parity-plan.md Phase 4c に理由を記録）:
 `constantly`（無視する引数の型が戻り型にしか現れず決まらない。`(lambda ((x T)) A v)` を書く）、
-`macrolet`/`symbol-macrolet`、`eval-when`（`:compile-toplevel`/`:load-toplevel`/`:execute` が
+`eval-when`（`:compile-toplevel`/`:load-toplevel`/`:execute` が
 常に一致するので選ぶ区別が無い）、`define-compiler-macro`、`load-time-value`、
 `make-symbol`/`copy-symbol`/`gentemp`（uninterned シンボル。束縛子は名前で引かれるので買えるものが無い）。
 
@@ -1319,6 +1402,16 @@ pretty printer とも合成される（§15.1）。`*print-pretty*` が真なら
   値に対して選ばれる——`Vector::new` は `construct` ノードを作らず Rust 側で箱を建てるが、
   実体化を鍵として運ぶのも特殊化を要求するのも `assoc` ノードが同じようにやる。
   書かなければ従来どおり組み込みの描画が要素へ再帰し、各要素がそこでディスパッチされる。
+- **スカラ型は全部この trait を実装している**。プリンタがそれを引くことは無い（型キーを
+  運ぶのは `defstruct`/`defenum` の箱だけで、スカラは即値か型を持たない箱として届く）——
+  実装があるのは**境界として使うため**。`format` の `&rest` は型変数を受け取れないので、
+  「知らない型の値を描画してよい」とジェネリックなコードが言う手段はこの境界しかない
+  （Rust の `T: Display` と同じ形）。`Array<T>` の `print-object` がその最初の利用者。
+- **境界を満たさない実体化は黙って落ちる**。`(impl print-object Array<T> (where
+  (print-object T)))` は `Array<i32>` には効くが、`print-object` を書いていない
+  `defstruct` を要素にした `Array` には効かない。この特殊化はユーザが書いた呼び出しでは
+  なく構築地点が要求するものなので、要求が成立しないときは**エラーにせず捨てる**——
+  配列を作っただけで「print-object を実装していない」と言われるのは筋が通らない。
 - CL のもう一方の機構 `set-pprint-dispatch` / `*print-pprint-dispatch*`（型指定子をキーに
   した実行時の登録表）は**採用しない**。文字列キーもプリンタのシグネチャも無検査で、
   「登録時点で分かっていた型を捨ててから `match` で復元する」形になり、静的型付け言語には
@@ -1394,6 +1487,7 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 | `*print-readably*` | `bool` | `false` | 真なら読み戻せる形で印字する。エスケープを強制し、`*print-level*`/`*print-length*` の打ち切りを無効化する |
 | `*print-lines*` | `i32` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 以下は無制限 |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string` が `prin1` と `princ` のどちらをするか。**これを読むのはその 2 つだけ** |
+| `*print-array*` | `bool` | `true` | `Array<T>` が中身を見せるか。真なら CL の配列構文（`#(1 2 3)` / `#2A((1 2) (3 4))`）、偽なら形だけの `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
@@ -1417,9 +1511,6 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 この大域変数ではなく自分の `escape` 引数を読むこと——そちらが directive の選んだ値を運ぶ。
 
 **CL にあって無いもの**: `*print-gensym*`（未 intern シンボルが無い）。
-`*print-array*` は入っていない——`Array<T>` 自身の印字（`print-object`）がまだ無い。
-それを塞いでいた「`print-object` がジェネリック型に効かない」ほうは 2026-08-31 に
-解消した（§15.2）ので、残っているのは `Array<T>` 側だけ（docs/dev/TODO.md）。
 
 #### 一時的な差し替え
 

@@ -7,6 +7,12 @@
 > 意図的に対象外としていた `HashTable::get`/`remove`（`Option` 返し）も同日中に追加解消 —
 > `rt_hashtable_contains`/`_get_raw`/`_remove_raw` + 実行時分岐（`compile-if`と同型のalloca+
 > 分岐+merge、phiビルトインなし）で対応。
+>
+> **追記（2026-09-03）**: この 3 本のシムと、それを使う `compile-hashtable-op` の
+> 制御フローは**もう無い**。`HashTable` の `get`/`set`/`remove` は prelude の
+> `defmethod` になり（キーをハッシュすることも 2 つのキーを比べることもキーの型自身の
+> typelisp メソッドなので、Rust のシムからは呼べない）、`Option` は prelude が作る。
+> 下の層に残ったのは `bucket-*` 5 本。以下の記述は起案・完了当時のもの。
 
 ## 背景・目的（起案時点、2026-07-13）
 

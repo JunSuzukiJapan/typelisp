@@ -135,7 +135,7 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 13] = [
+    const PRELUDE_PRIVATE: [&str; 16] = [
         "unwrap-io",
         "io-ok",
         "split-on-slash",
@@ -151,6 +151,13 @@ fn is_excluded(name: &str) -> bool {
         // space. A user writes `row-major-index`/`in-bounds`.
         "array-decode",
         "array-subs-in-bounds",
+        // `Array<T>`'s printer (Phase 8a): the stride of one axis, the
+        // recursive per-axis walk that builds `(1 2 3)`, and the `2x3` in
+        // `#<array 2x3>` when `*print-array*` is off. A user writes
+        // `print-object`, or just prints the array.
+        "array-print-stride",
+        "array-print-sub",
+        "array-print-dims",
         // `BitVector`'s word-level internals (Phase 6c): the shared body of
         // the `bit-and` family, and the "clear the bits past the length"
         // step every operation that can set them ends with.
@@ -174,6 +181,14 @@ fn is_excluded(name: &str) -> bool {
     // single key. They register like any other `defun` because the layer
     // loads with the prelude, but a user writes `case`.
     let case_expander = name == "case-key-test" || name == "case-key-atom-test";
+    // `HashTable<K,V>`'s bucket layer (Phase 6a). The five `bucket-*` are
+    // registry builtins over the raw `i32`-keyed storage and know nothing
+    // about hashing or key equality; `hashtable-bucket-index` is the
+    // prelude-private linear scan that supplies both. Together they are what
+    // `get`/`set`/`remove` are written in terms of, which is what a user
+    // writes -- the same relationship the native stream layer has to
+    // `read-char`/`write-string` above.
+    let hashtable_bucket = name.starts_with("bucket-") || name == "hashtable-bucket-index";
 
     operator
         || type_param
@@ -181,6 +196,7 @@ fn is_excluded(name: &str) -> bool {
         || native_stream
         || datum_scanner
         || case_expander
+        || hashtable_bucket
         || PRELUDE_PRIVATE.contains(&name)
         || name.ends_with("-rt")
         || ISLAND_PREFIXES.iter().any(|p| name.starts_with(p))

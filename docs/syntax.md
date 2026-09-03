@@ -533,6 +533,17 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
     （順不同）。省略時はデフォルト式（無ければ `nil`）。未知のキーワードや奇数個の `:key` 列はエラー。
 - 例: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`。
 
+### macrolet / symbol-macrolet — 局所的なマクロ束縛
+
+```lisp
+(macrolet ((name (ラムダリスト) body...) ...) body...)   ; 字句スコープのマクロ
+(symbol-macrolet ((name 展開形) ...) body...)            ; 名前が形を表す
+```
+
+どちらも**式**の特殊形で、実行時には何も残らない（本体がコンパイルされるのは展開後の形）。
+ラムダリストは `defmacro` と同じ。詳しい規則と例は
+[functions.md](functions.md) §14.1。
+
 ## 4. 束縛・条件分岐
 
 ```lisp
@@ -898,22 +909,32 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 チェック時に落ちる。
 
 呼び先も推移的にコンパイルされるので、**コンパイルできない組み込みを（間接的にでも）呼ぶ関数は
-コンパイルできない**。2026-08-14 に prelude 側の穴を、2026-08-18 にシステム組み込み・等価述語・
-印字・リーダの穴を、2026-08-19 に `eval` を塞いだ結果、**この表は 5 つまで減った**。残っているのは
-`char` の `upcase` / `downcase` / `alphap` / `digitp` と、整数の `int->char`。この 5 つは
-島に lowering が無い（`externs::native_lowered_primitive_methods` の `char` 行と整数行）。
-プロセスが落ちるのではなく、その旨を述べるエラーで断られる:
+コンパイルできない**。プロセスが落ちるのではなく、その旨を述べるエラーで断られる:
 
 ```lisp
-(defun f ((c char)) char (upcase c))
+(defun f ((s string)) string (upcase s))
 (compile f)
-; => compile: "f" calls "char::upcase", a builtin method with no compiled implementation
+; => compile: "f" calls "string::upcase", a builtin method with no compiled implementation
 ```
 
-`char->int`・比較演算子・`string` の `ref` には lowering があるので、コードポイントの上で書けば
-この 5 つを踏まずに済む——[functions.md](functions.md) §9 の文字関数はすべてそう書いてあり、
-prelude が事前コンパイル済みで出荷できるのはそのため。穴を塞ぐ作業は
-[dev/TODO.md](dev/TODO.md) の Phase 2 残タスク。
+2026-08-14 に prelude 側の穴を、2026-08-18 にシステム組み込み・等価述語・印字・リーダの
+穴を、2026-08-19 に `eval` を塞ぎ、**2026-09-03 に `char` の `upcase` / `downcase` /
+`alphap` / `digitp` と整数の `int->char`**（cl-parity-plan.md Phase 2 の残タスク）を
+塞いだ。5 つはそれぞれ `rt_char_upcase` / `rt_char_downcase` / `rt_char_alphap` /
+`rt_char_digitp` / `rt_int_to_char` を呼ぶ（`externs::native_lowered_primitive_methods`
+の `char` 行と整数行）。ASCII 限定という規則は**シムが持っている**ので、コンパイル済みの
+答えがインタプリタの答えから離れようがない。`int->char` だけが失敗しうる（Unicode
+スカラ値でないコードポイント）ので、これだけが raise する側の呼び出し規約で宣言されている。
+
+**まだ残っているもの**（`native_lowered_primitive_methods` と島の `*-native-method?` に
+無い組み込みメソッド。この 2 つは互いに一致することがテストで保証されているが、
+*レジストリの全メソッドを網羅している*ことは保証されていない）:
+
+| 組み込み | 理由 |
+|---|---|
+| `string::upcase` / `string::downcase` | `char` 側と同じ形のシムを足せば閉じる。`char` 側を塞いだときに一緒に見つかった |
+| `try-int->char` / `try-int->i8`…`try-int->u32` / `try-float->f32` / `try-float->f64` | 戻り値が `Option`。箱を組み立てる分だけ別種の作業（`(as ...)` 側は全部コンパイルできる） |
+| `bignum` の `ash` / `logbitp` / `logtest` / `logcount` / `integer-length` | **意図的**。prelude のどの定義もここへ到達しないので、lowering を書いても誰も実行しない |
 
 `compile`/`compile-file`/`dump` はこの表に入らない——定義上インタプリタ専用の操作で、
 コンパイルできないのではなくコンパイルする側だから（`dump` が書き出すのはインタプリタの環境

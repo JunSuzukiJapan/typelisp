@@ -114,6 +114,17 @@ fn parse_generic_name_header(raw: &str) -> Result<(String, Vec<String>), Error> 
 
 pub trait MacroExpander {
     fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String>;
+
+    /// Install a checked `(defmacro ...)` core form, so that a later
+    /// [`Self::expand_macro`] on its path finds a body to run.
+    ///
+    /// Every other definition reaches the evaluator through `exec`, called by
+    /// the driver on the form the checker returned. A `macrolet` binding has
+    /// no such moment: it is created *while an expression is being checked*,
+    /// by a `&self` method, and its body has to be runnable before the very
+    /// next form of the same expression is checked. This is the one edge
+    /// where checking installs something itself.
+    fn define_macro(&self, heap: &mut Heap, form: Value) -> Result<(), String>;
 }
 
 /// What checking a top-level form produces: a *core top-level form*, one of
@@ -191,6 +202,18 @@ impl MacroShape {
     fn of(def: &MacroDef) -> MacroShape {
         MacroShape { required: def.required, optional: def.optional, rest: def.rest, has_keys: !def.keys.is_empty() }
     }
+}
+
+/// The `Env` type a `symbol-macrolet` name is bound to. Not a type any
+/// program can write — a path segment cannot contain a space — so finding it
+/// in the environment means exactly one thing: this name stands for the form
+/// [`Checker::local_symbol_macros`] holds for it.
+///
+/// Binding the name at all is the point. It puts symbol macros in the same
+/// shadowing order as every other binding, instead of a second lookup that
+/// would have to reproduce the order by hand.
+fn symbol_macro_mark() -> Type {
+    Type::Named(Path::root(" symbol-macro"), Vec::new())
 }
 
 /// The variables a pattern binds: each `(name, type, name's source position)`,
@@ -708,6 +731,26 @@ pub struct Checker {
     /// form already produced, and `Interp::exec` silently overwriting the
     /// identical earlier registration — is compile-time-only.
     spec_memo: RefCell<HashSet<(Path, Option<String>)>>,
+    /// `macrolet` scopes, innermost last: each maps a locally bound macro
+    /// name to the synthesized global path its body was installed under and
+    /// the call-site arity shape [`Self::resolve_macro`] answers with.
+    ///
+    /// A `RefCell` because expression checking is `&self` — the whole reason
+    /// `macrolet` needed a table of its own rather than the registry's.
+    local_macros: RefCell<Vec<HashMap<String, (Path, MacroShape)>>>,
+    /// `symbol-macrolet` scopes, innermost last: name -> the form the name
+    /// stands for.
+    ///
+    /// Shadowing is not decided here. Each scope also binds its names in the
+    /// `Env` at [`SYMBOL_MACRO_MARK`], so an inner `let` of the same name
+    /// hides the symbol macro (it rebinds the name to a real type) and the
+    /// symbol macro hides an outer variable (it rebinds the name to the
+    /// mark) — which is exactly CL's rule, arrived at by the environment
+    /// doing what it already does.
+    local_symbol_macros: RefCell<Vec<HashMap<String, Value>>>,
+    /// Makes each `macrolet` binding's synthesized name unique, so two
+    /// occurrences of the same local macro name never share a body.
+    local_macro_seq: Cell<u32>,
     /// Instantiations requested but not yet generated — see [`SpecRequest`].
     /// Always empty outside `check_form`.
     spec_pending: RefCell<Vec<SpecRequest>>,
@@ -788,6 +831,9 @@ impl Checker {
             generic_fn_templates: HashMap::new(),
             generic_method_templates: HashMap::new(),
             spec_memo: RefCell::new(HashSet::new()),
+            local_macros: RefCell::new(Vec::new()),
+            local_symbol_macros: RefCell::new(Vec::new()),
+            local_macro_seq: Cell::new(0),
             spec_pending: RefCell::new(Vec::new()),
             type_var_bindings: BTreeMap::new(),
             type_uses: RefCell::new(Vec::new()),
@@ -2522,6 +2568,14 @@ impl Checker {
     /// [`Self::resolve_fn`] (without `use`-alias support, which `defmacro`
     /// doesn't have yet).
     fn resolve_macro(&self, name: &str) -> Option<(Path, MacroShape)> {
+        // `macrolet` first, innermost scope first: a local macro shadows a
+        // global one of the same name for the extent of its body, which is
+        // what "lexically scoped macro definition" means.
+        for scope in self.local_macros.borrow().iter().rev() {
+            if let Some(found) = scope.get(name) {
+                return Some(found.clone());
+            }
+        }
         for prefix in self.ns_ancestors() {
             if let Some(m) = self.reg.root.module(prefix) {
                 if let Some(def) = m.macros.get(name) {
@@ -2567,7 +2621,8 @@ impl Checker {
             // expression special forms (`check_list`)
             "if" | "let" | "let*" | "progn" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
-                | "lambda" | "labels" | "match" | "panic" | "the" | "as" | "try-as" | "compile"
+                | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
+                | "match" | "panic" | "the" | "as" | "try-as" | "compile"
                 | "quote" | "quasiquote" | "format" | "print" | "println"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block"
@@ -3819,9 +3874,39 @@ impl Checker {
         if args.is_empty() {
             return;
         }
-        if self.generic_method_templates.contains_key(&(path.clone(), "print-object".to_string())) {
-            self.request_method_specialization(path, "print-object", args.clone());
+        if !self.generic_method_templates.contains_key(&(path.clone(), "print-object".to_string())) {
+            return;
         }
+        // Only if the impl's own `where` clause holds at these arguments.
+        // `(impl print-object Array<T> (where (print-object T)) ...)` applies
+        // to an `Array<i32>` and not to an `Array<point>` whose `point` never
+        // implemented the trait — and this request is not a call anyone
+        // wrote, so an unsatisfiable one has to be *dropped*, not reported:
+        // building an array of a type that prints the built-in way is not an
+        // error, and specializing it anyway turns `(Array::make d (point::new
+        // 1))` into "does not implement trait print-object".
+        if !self.print_object_bounds_hold(path, args) {
+            return;
+        }
+        self.request_method_specialization(path, "print-object", args.clone());
+    }
+
+    /// Whether the `print-object` impl on the generic type `path` accepts the
+    /// instantiation `args` — its `where` clause read against the owner's
+    /// declared type-parameter names, which is what an impl's bounds are
+    /// keyed by (see the `cons-cell` impls in the prelude).
+    fn print_object_bounds_hold(&self, path: &Path, args: &[Type]) -> bool {
+        let Some(def) = self.reg.type_def(path) else { return false };
+        let Some(af) = def.assoc.get("print-object") else { return false };
+        if af.sig.bounds.is_empty() {
+            return true;
+        }
+        let subst: BTreeMap<String, Type> =
+            def.params.iter().cloned().zip(args.iter().cloned()).collect();
+        af.sig.bounds.iter().all(|(tparam, tbs)| match subst.get(tparam) {
+            None => true,
+            Some(concrete) => tbs.iter().all(|tb| self.type_implements(concrete, tb, 0)),
+        })
     }
 
     fn request_method_specialization(&self, type_fq: &Path, base: &str, args: Vec<Type>) -> String {
@@ -4574,6 +4659,37 @@ impl Checker {
         if let Some(doc) = doc {
             self.reg.docs.macros.insert(fq_name.clone(), doc);
         }
+        self.defmacro_body(
+            heap, interp, parts, parts_locs, &fq_name, public, body_start,
+            &required_names, &optionals, &rest_name, &key_specs, &params,
+        )
+    }
+
+    /// The half of [`Self::check_defmacro`] that only *checks*: the lambda
+    /// list is already parsed, nothing is registered, and what comes back is
+    /// the `(defmacro ...)` core form.
+    ///
+    /// Split out for `macrolet`, which needs exactly this and none of the
+    /// registration — expression checking is `&self`, so a local macro cannot
+    /// reach `self.reg` at all, and does not want to: its scope is a table of
+    /// its own ([`Self::local_macros`]).
+    #[allow(clippy::too_many_arguments)]
+    fn defmacro_body(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        fq_name: &Path,
+        public: bool,
+        body_start: usize,
+        required_names: &[String],
+        optionals: &[(String, Option<Value>)],
+        rest_name: &Option<String>,
+        key_specs: &[(String, Option<Value>)],
+        params: &[String],
+    ) -> Result<TopLevelForm, Error> {
+        let rest = rest_name.is_some();
 
         // Every parameter — and the macro's implicit result — is an
         // S-expression, which is `Option<Sexpr>`: a macro is handed the forms
@@ -4587,16 +4703,16 @@ impl Checker {
             required_names.iter().map(|n| (n.clone(), sexpr_ty.clone())).collect();
 
         let mut opt_defaults: Vec<Vec<Value>> = Vec::with_capacity(optionals.len());
-        for (n, default) in &optionals {
+        for (n, default) in optionals {
             let checked = self.check_macro_default(heap, interp, &bindings, *default, &sexpr_ty)?;
             opt_defaults.push(checked);
             bindings.push((n.clone(), sexpr_ty.clone()));
         }
-        if let Some(r) = &rest_name {
+        if let Some(r) = rest_name {
             bindings.push((r.clone(), sexpr_ty.clone()));
         }
         let mut key_defaults: Vec<(String, Vec<Value>)> = Vec::with_capacity(key_specs.len());
-        for (n, default) in &key_specs {
+        for (n, default) in key_specs {
             let checked = self.check_macro_default(heap, interp, &bindings, *default, &sexpr_ty)?;
             key_defaults.push((n.clone(), checked));
             bindings.push((n.clone(), sexpr_ty.clone()));
@@ -4606,7 +4722,7 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&sexpr_ty))?;
         let lambda = MacroLambda { required: required_names.len(), optionals: opt_defaults, keys: key_defaults };
-        forms::defmacro_form(heap, &fq_name, &params, rest, &lambda, public, &body)
+        forms::defmacro_form(heap, fq_name, params, rest, &lambda, public, &body)
     }
 
     /// Check one `&optional`/`&key` default-value form (or none) against
@@ -8673,6 +8789,19 @@ impl Checker {
                     // interning with no separate keyword table.
                     Checked::new(core::tagged(heap, "sym", &[Value::Symbol(id)])?, Type::Symbol)
                 } else if let Some(t) = env.get(name) {
+                    // A `symbol-macrolet` binding: the name is not a variable
+                    // at all, it stands for a form, which is checked here in
+                    // the use site's own environment (CL's rule — the
+                    // expansion is not closed over the binding site).
+                    if *t == symbol_macro_mark() {
+                        let Some(form) = self.symbol_macro_form(name) else {
+                            return Err(Error::TypeError(format!(
+                                "symbol macro `{}` has no expansion in scope",
+                                name
+                            )));
+                        };
+                        return self.check(heap, interp, env, form, expected);
+                    }
                     let t = t.clone();
                     Checked::new(forms::var_form(heap, name)?, t)
                 } else if let Some((path, vi)) = self.resolve_global(name) {
@@ -8927,6 +9056,10 @@ impl Checker {
             "pprint-logical-block" => return self.check_pprint_logical_block(heap, interp, env, args, arg_locs),
             "lambda" => return self.check_lambda(heap, interp, env, args, arg_locs),
             "labels" => return self.check_labels(heap, interp, env, args, arg_locs, expected),
+            "macrolet" => return self.check_macrolet(heap, interp, env, args, arg_locs, expected),
+            "symbol-macrolet" => {
+                return self.check_symbol_macrolet(heap, interp, env, args, arg_locs, expected)
+            }
             "apply" => return self.check_apply_form(heap, interp, env, args, arg_locs),
             "match" => return self.check_match(heap, interp, env, args, arg_locs, expected),
             "panic" => return self.check_panic(heap, interp, env, args, arg_locs),
@@ -9082,6 +9215,173 @@ impl Checker {
         let (body, _) = result?;
         let form = self.lambda_form(heap, &params, &ret, &body)?;
         Ok(Checked::new(form, fn_ty))
+    }
+
+    /// `(macrolet ((name (params) body...)...) body...)` — CL's `macrolet`,
+    /// lexically scoped macro definitions.
+    ///
+    /// Each binding is checked by exactly the machinery a top-level
+    /// `defmacro` uses ([`Self::defmacro_body`]), installed under a
+    /// synthesized name no source can write, and recorded in
+    /// [`Self::local_macros`] for the extent of the body. Expansion then
+    /// needs nothing new: [`Self::resolve_macro`] finds the local binding
+    /// first, and the call site expands and re-checks the way it always has.
+    ///
+    /// **Sibling bindings do not see each other**, as in CL — `macrolet`, not
+    /// `labels`: each body is checked with only the scopes that were already
+    /// open, and the new scope is pushed once all of them are checked.
+    ///
+    /// The installed definition is never removed. It carries a unique name,
+    /// so nothing can reach it once the scope is popped; the scope is the
+    /// checker's table, and the evaluator's registry is only where a body
+    /// lives.
+    fn check_macrolet(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError("macrolet: (macrolet ((name (params) body...)...) body...)".into()));
+        }
+        let bindings = heap
+            .list_to_vec(args[0])
+            .map_err(|_| Error::TypeError("macrolet: the binding list must be a proper list".into()))?;
+        let mut scope: HashMap<String, (Path, MacroShape)> = HashMap::new();
+        for b in bindings {
+            let parts_locs = heap.list_to_vec_locs(b).map_err(|_| {
+                Error::TypeError("macrolet: each binding is (name (params) body...)".into())
+            })?;
+            let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
+            let locs: Vec<Option<Loc>> = parts_locs.iter().map(|(_, l)| l.clone()).collect();
+            if parts.len() < 2 {
+                return Err(Error::TypeError("macrolet: each binding is (name (params) body...)".into()));
+            }
+            let name = match parts[0] {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => return Err(Error::TypeError("macrolet: the binding name must be a symbol".into())),
+            };
+            let param_vals = heap.list_to_vec(parts[1])?;
+            let (required_names, optionals, rest_name, key_specs) =
+                parse_macro_lambda_list(heap, &param_vals)?;
+            let mut params: Vec<String> = required_names.clone();
+            params.extend(optionals.iter().map(|(n, _)| n.clone()));
+            if let Some(r) = &rest_name {
+                params.push(r.clone());
+            }
+            params.extend(key_specs.iter().map(|(n, _)| n.clone()));
+            let shape = MacroShape {
+                required: required_names.len(),
+                optional: optionals.len(),
+                rest: rest_name.is_some(),
+                has_keys: !key_specs.is_empty(),
+            };
+            // A leading space is unwritable in source (the same trick
+            // `gensym`'s counter uses), and the sequence number keeps two
+            // occurrences of one name — or one occurrence re-checked per
+            // monomorphization — from sharing a body.
+            let seq = self.local_macro_seq.get();
+            self.local_macro_seq.set(seq + 1);
+            let path = Path::root(&format!(" macrolet {} {}", seq, name));
+            let doc = take_leading_docstring(heap, &parts, 2);
+            let body_start = if doc.is_some() { 3 } else { 2 };
+            let form = self.defmacro_body(
+                heap, interp, &parts, &locs, &path, false, body_start,
+                &required_names, &optionals, &rest_name, &key_specs, &params,
+            )?;
+            heap.push_root(form);
+            let installed = interp.define_macro(heap, form);
+            heap.pop_root();
+            installed.map_err(|e| Error::TypeError(format!("macrolet `{}`: {}", name, e)))?;
+            scope.insert(name, (path, shape));
+        }
+        self.local_macros.borrow_mut().push(scope);
+        let result = self.check_seq(heap, interp, env, &args[1..], arg_locs.get(1..).unwrap_or(&[]), expected);
+        self.local_macros.borrow_mut().pop();
+        let (body, ty) = result?;
+        let form = self.let_form(heap, &[], &body)?;
+        Ok(Checked::new(form, ty))
+    }
+
+    /// `(symbol-macrolet ((name form)...) body...)` — CL's
+    /// `symbol-macrolet`: inside the body, each `name` *is* its form.
+    ///
+    /// The names are bound in the environment at [`symbol_macro_mark`], which
+    /// is what makes the shadowing right without a rule of its own: an inner
+    /// `let` of the same name rebinds it to a real type and wins, an outer
+    /// variable of the same name is hidden because this binding is nearer.
+    /// [`Self::check_inner`]'s symbol arm and [`Self::check_setf`] both look
+    /// for the mark and substitute the form — the latter because CL's whole
+    /// use for this (`with-slots`-style aliases) is places you assign to.
+    fn check_symbol_macrolet(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError(
+                "symbol-macrolet: (symbol-macrolet ((name form)...) body...)".into(),
+            ));
+        }
+        let bindings = heap.list_to_vec(args[0]).map_err(|_| {
+            Error::TypeError("symbol-macrolet: the binding list must be a proper list".into())
+        })?;
+        let mut scope: HashMap<String, Value> = HashMap::new();
+        let mut binds: Vec<(String, Type)> = Vec::with_capacity(bindings.len());
+        for b in bindings {
+            let parts = heap.list_to_vec(b).map_err(|_| {
+                Error::TypeError("symbol-macrolet: each binding is (name form)".into())
+            })?;
+            if parts.len() != 2 {
+                return Err(Error::TypeError("symbol-macrolet: each binding is (name form)".into()));
+            }
+            let name = match parts[0] {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => {
+                    return Err(Error::TypeError(
+                        "symbol-macrolet: the binding name must be a symbol".into(),
+                    ))
+                }
+            };
+            scope.insert(name.clone(), parts[1]);
+            binds.push((name, symbol_macro_mark()));
+        }
+        // The expansion forms are ordinary heap values held in a Rust table
+        // the collector cannot see, so they are rooted for the extent of the
+        // body — the same discipline every other `Vec<Value>` in this checker
+        // follows.
+        for form in scope.values() {
+            heap.push_root(*form);
+        }
+        let n = scope.len();
+        self.local_symbol_macros.borrow_mut().push(scope);
+        let child = env.extended(binds);
+        let result = self.check_seq(heap, interp, &child, &args[1..], arg_locs.get(1..).unwrap_or(&[]), expected);
+        self.local_symbol_macros.borrow_mut().pop();
+        for _ in 0..n {
+            heap.pop_root();
+        }
+        let (body, ty) = result?;
+        let form = self.let_form(heap, &[], &body)?;
+        Ok(Checked::new(form, ty))
+    }
+
+    /// The form `name` stands for, if a `symbol-macrolet` scope in view binds
+    /// it. Innermost scope first, the way `Env` itself resolves.
+    fn symbol_macro_form(&self, name: &str) -> Option<Value> {
+        for scope in self.local_symbol_macros.borrow().iter().rev() {
+            if let Some(form) = scope.get(name) {
+                return Some(*form);
+            }
+        }
+        None
     }
 
     /// `(labels ((name (params) ret body...)...) body...)`: like several
@@ -10648,6 +10948,18 @@ impl Checker {
             )),
         };
         if let Some(ty) = env.get(&name).cloned() {
+            // `(setf x v)` where `x` is a `symbol-macrolet` name assigns to
+            // the *form* it stands for — CL says so, and it is the reason the
+            // form exists: an alias you can only read is a `let`.
+            if ty == symbol_macro_mark() {
+                let Some(place) = self.symbol_macro_form(&name) else {
+                    return Err(Error::TypeError(format!(
+                        "symbol macro `{}` has no expansion in scope",
+                        name
+                    )));
+                };
+                return self.check_setf(heap, interp, env, &[place, args[1]], arg_locs);
+            }
             let value = self.check_at(heap, interp, env, args[1], Some(&ty), value_loc)?;
             let form = forms::set_form(heap, &name, value.form)?;
             return Ok(Checked::new(form, ty));
@@ -11286,6 +11598,32 @@ impl Checker {
         result
     }
 
+    /// Whether a `where` bound on `ty` already supplies `method` — the
+    /// lookup [`Self::check_instance_method`]'s bounds branch performs, asked
+    /// on its own by [`Self::try_instance_method_swapped`] so that a
+    /// bound-served call is never re-read with its arguments the other way
+    /// round.
+    ///
+    /// `false` for anything that is not a bare type variable: a receiver with
+    /// a real `AdtDef` was already offered to `Self::try_instance_method`,
+    /// which answers for it.
+    fn bound_supplies_method(&self, env: &Env, ty: &Type, method: &str) -> bool {
+        let Some(type_fq) = self.assoc_receiver_path(ty, method) else { return false };
+        if self.reg.type_def(&type_fq).is_some() {
+            return false;
+        }
+        let Some(bounds) = env.bounds.get(type_fq.last_segment()) else { return false };
+        // The operator alias too, since the bounds branch accepts `(+ a b)`
+        // as the `Add` bound's `add` — a swap must not get in front of that
+        // either.
+        let names = [Some(method), trait_operator_method(method)];
+        bounds.iter().any(|tb| {
+            self.reg.trait_def(&tb.trait_path).is_some_and(|t| {
+                names.iter().flatten().any(|m| self.reg.trait_method(t, m).is_some())
+            })
+        })
+    }
+
     /// A same-named 2-argument instance method may be defined with the
     /// receiver in *either* position — e.g. this project's own `Vector<T>`
     /// method `push` takes the vector first (`(push vec item)`, the
@@ -11305,6 +11643,21 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Option<Result<Checked, Error>> {
         if args.len() != 2 {
+            return None;
+        }
+        // Receiver-first failing is not enough to conclude the call was
+        // written the other way round: `Self::try_instance_method`'s peek
+        // stops at `reg.type_def`, so a receiver that is one of the enclosing
+        // function's own `where`-bounded type variables *always* fails it —
+        // that resolution lives in `Self::check_instance_method`, further
+        // down `check_list`'s chain. Swapping first would hand the call to
+        // whatever type the second argument happens to be, and its diagnostic
+        // then describes a call nobody wrote: `(print-object x true)` under
+        // `(where (print-object T))` became `bool`'s method with `x` in the
+        // `escape` position ("expected Bool, found t"), the moment `bool`
+        // gained an impl.
+        let recv_ty = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0)).ok().map(|c| c.ty);
+        if recv_ty.is_some_and(|t| self.bound_supplies_method(env, &t, method)) {
             return None;
         }
         let swapped_args = [args[1], args[0]];
