@@ -1699,6 +1699,7 @@ impl Interp {
                 self.eval_stream_builtin(heap, name, args)
             }
             "make-random-state-fresh" => Some(eval_make_random_state_fresh(heap, args)),
+            "seed-random-state" => Some(eval_seed_random_state(heap, args)),
             "random-state-copy" => Some(eval_random_state_copy(heap, args)),
             "random-state-next" => Some(eval_random_state_next(heap, args)),
             "get-universal-time" => Some(eval_get_universal_time(heap, args)),
@@ -2669,7 +2670,9 @@ fn eval_int_builtin(name: &str, args: &[Value], width: u32, signed: bool) -> Opt
         // Past the type's width there is no bit to read: for a signed value
         // every one of them is the sign, for an unsigned value every one is
         // zero.
-        "logbitp" => Value::Bool(if a >= i64::from(width) { signed && b < 0 } else { (b >> a) & 1 == 1 }),
+        // `a` is the integer and `b` the bit position — the argument order
+        // reversed when the position became an `i32` (`registry::int_assoc`).
+        "logbitp" => Value::Bool(if b >= i64::from(width) { signed && a < 0 } else { (a >> b) & 1 == 1 }),
         "logtest" => Value::Bool((a & b) != 0),
         _ => unreachable!(),
     };
@@ -2944,6 +2947,12 @@ pub fn str_rt(heap: &mut Heap, s: impl Into<String>) -> Value {
 /// `prelude.rs` as typelisp methods built from these.
 fn eval_bignum_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
     use num_integer::Integer;
+    // `ash` and `logbitp` take a bit count as their second operand, not
+    // another bignum (`registry::bignum_assoc`), so they cannot go through
+    // the two-bignum decode below.
+    if name == "ash" || name == "logbitp" {
+        return Some(eval_bignum_shift(heap, name, args));
+    }
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(a), Some(b)) => match (expect_bignum(heap, a), expect_bignum(heap, b)) {
             (Ok(a), Ok(b)) => (a, b),
@@ -2979,27 +2988,51 @@ fn eval_bignum_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
         "logand" => bignum_rt(heap, &a & &b),
         "logior" => bignum_rt(heap, &a | &b),
         "logxor" => bignum_rt(heap, &a ^ &b),
-        // `(ash integer count)`: `a` is the integer (receiver), `b` the shift
-        // count. `BigInt`'s own `Shr` is already floor-based (arithmetic,
-        // sign-extending) like `i64`'s, so this mirrors `eval_int_builtin`'s
-        // `ash` with no width limit to clamp against. A shift count so large
-        // it doesn't fit `i64` is astronomically implausible for any bignum
-        // that fits in memory, so it's treated as "shift past every bit" —
-        // `0` left, sign-extended `-1`/`0` right.
-        "ash" => bignum_rt(heap, match b.to_i64() {
-            Some(count) if count >= 0 => &a << (count as u64),
-            Some(count) => &a >> ((-count) as u64),
-            None if b.sign() == num_bigint::Sign::Minus => if a.sign() == num_bigint::Sign::Minus { BigInt::from(-1) } else { BigInt::from(0) },
-            None => BigInt::from(0),
-        }),
-        "logbitp" => Value::Bool(match a.to_u64() {
-            Some(idx) => ((&b >> idx) & BigInt::from(1)) == BigInt::from(1),
-            None => b.sign() == num_bigint::Sign::Minus,
-        }),
         "logtest" => Value::Bool(!(&a & &b).is_zero()),
         _ => unreachable!(),
     };
     Some(Ok(v))
+}
+
+/// `bignum`'s `ash`/`logbitp` — the two whose second operand counts bits
+/// rather than being another bignum.
+///
+/// A bit count is an `i32` here for the reason `registry::bignum_assoc`
+/// gives: `(ash big huge)` with an arbitrary-precision `huge` names a result
+/// nothing can build, so the wider type describes no usable call. Both
+/// operations are therefore shaped exactly like their fixed-width
+/// counterparts in `eval_int_builtin`, minus the width to clamp against —
+/// `BigInt`'s own `Shr` is floor-based (arithmetic, sign-extending) like
+/// `i64`'s, so a right shift past every bit lands on `-1` or `0` by itself.
+fn eval_bignum_shift(heap: &mut Heap, name: &str, args: &[Value]) -> Result<Value, EvalError> {
+    let n = match args.first() {
+        Some(v) => expect_bignum(heap, v)?,
+        None => return Err(EvalError::Internal(format!("{}: expected a bignum receiver", name))),
+    };
+    let count = match args.get(1) {
+        Some(v) => rt_i64(v)?,
+        None => return Err(EvalError::Internal(format!("{}: expected a bit count", name))),
+    };
+    Ok(match name {
+        "ash" => {
+            if count >= 0 {
+                bignum_rt(heap, n << (count as u64))
+            } else {
+                bignum_rt(heap, n >> ((-count) as u64))
+            }
+        }
+        // A negative position has no bit to read; CL leaves it undefined, and
+        // the fixed-width `logbitp` never sees one because it compares
+        // against the width first. Reading the sign is the answer that agrees
+        // with "infinite two's complement" for every position at or past the
+        // value's own length.
+        "logbitp" => Value::Bool(if count < 0 {
+            n.sign() == num_bigint::Sign::Minus
+        } else {
+            ((n >> (count as u64)) & BigInt::from(1)) == BigInt::from(1)
+        }),
+        _ => unreachable!("eval_bignum_shift: {}", name),
+    })
 }
 
 /// Unary `bignum` builtins (`lognot`/`logcount`/`integer-length`,
@@ -3193,6 +3226,21 @@ fn expect_random_state(heap: &Heap, v: &Value) -> Result<BoxId, EvalError> {
 /// and it backs CL's `(make-random-state t)` case.
 fn eval_make_random_state_fresh(heap: &mut Heap, _args: &[Value]) -> Result<Value, EvalError> {
     Ok(heap.alloc_random_state(fresh_random_seed()))
+}
+
+/// The integer-to-state map a user-supplied seed goes through. Lives in
+/// `typelisp-rt` beside the compiled lowering (`rt_seed_random_state`), like
+/// [`xorshift64_step`] and [`fresh_random_seed`], so a seeded run is the same
+/// run whichever tier it executes on.
+use typelisp_rt::seeded_random_state;
+
+/// `seed-random-state`: the stream a given integer names. Unlike
+/// `make-random-state-fresh` this is reproducible — the point of it — so the
+/// mapping must be stable across releases, which is why it is written down
+/// once in [`seeded_random_state`] rather than inlined here.
+fn eval_seed_random_state(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+    let seed = rt_i64(&args[0])?;
+    Ok(heap.alloc_random_state(seeded_random_state(seed)))
 }
 
 /// `random-state-copy`: an independent stream starting from the same point

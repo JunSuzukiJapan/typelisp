@@ -116,9 +116,11 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 | `expt` | `(expt a b)` | `(bignum,bignum)→bignum` | 冪乗。指数が負なら panic（結果が `ratio` になり `bignum` で表せないため） |
 | `max` `min` | `(op a b)` | `(bignum,bignum)→bignum` | 大きい方／小さい方 |
 | `1+` `1-` | `(op x)` | `bignum→bignum` | `x±1` |
-| `logand` `logior` `logxor` `ash` | `(op a b)` | `(bignum,bignum)→bignum` | ビット演算（無限精度2の補数、§4） |
+| `logand` `logior` `logxor` | `(op a b)` | `(bignum,bignum)→bignum` | ビット演算（無限精度2の補数、§4） |
+| `ash` | `(ash x count)` | `(bignum,i32)→bignum` | 算術シフト。`count` はビット数なので `i32`（§4.4） |
 | `lognot` `logcount` `integer-length` | `(op x)` | `bignum→bignum` | 同上（単項） |
-| `logbitp` `logtest` | `(op a b)` | `(bignum,bignum)→bool` | 同上（述語） |
+| `logtest` | `(logtest a b)` | `(bignum,bignum)→bool` | `(/= (logand a b) 0)` |
+| `logbitp` | `(logbitp x index)` | `(bignum,i32)→bool` | `index` ビット目（**CL と引数順が逆**、§4.4） |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(bignum,bignum)→bool` | 比較 |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(bignum,bignum)→bool` | いずれも `=` と同じ |
 | `bignum->int` | `(bignum->int x)` | `bignum→i32` | 縮小変換。`i32` に収まらなければ panic |
@@ -211,8 +213,8 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 
 以下は 2026-07-31 に CL 準拠で追加した残りの数値カタログ。可変長・0/1引数の呼び出し形（§4.1）、
 述語（§4.2）、定数（§4.3）、ビット演算とバイト指定子（§4.4）、乱数（§4.5）、時間（§4.6）。
-すべて JIT/AOT コンパイルできる
-（コンパイルできないものの一覧は [syntax.md](syntax.md) §10）。
+すべて JIT/AOT コンパイルできる（[syntax.md](syntax.md) §10 の
+「コンパイルできない組み込み」の表は 2026-09-03 に空になった）。
 
 ### 4.1 可変長・0/1引数（チェッカーの糖衣）
 
@@ -275,26 +277,58 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 |---|---|---|---|
 | `logand` `logior` `logxor` | `(op a b)` | `(T,T)→T` | 論理積・論理和・排他的論理和（可変長・0引数版は §4.1） |
 | `lognot` | `(lognot x)` | `T→T` | ビット反転 |
-| `ash` | `(ash x count)` | `(T,T)→T` | 算術シフト。`count` が正なら左 |
-| `logbitp` | `(logbitp index x)` | `(T,T)→bool` | `index` ビット目が立っているか |
+| `ash` | `(ash x count)` | `(T,i32)→T` | 算術シフト。`count` が正なら左、負なら右 |
+| `logbitp` | `(logbitp x index)` | `(T,i32)→bool` | `index` ビット目が立っているか（**CL と引数順が逆**、§4.4） |
 | `logtest` | `(logtest a b)` | `(T,T)→bool` | `(/= (logand a b) 0)` |
 | `logcount` | `(logcount x)` | `T→T` | 立っているビット数（負数なら 0 ビットの数） |
 | `integer-length` | `(integer-length x)` | `T→T` | 符号を除いて表現に要するビット数 |
 | `logeqv` `lognand` `lognor` `logandc1` `logandc2` `logorc1` `logorc2` | `(op a b)` | `(T,T)→T` | 上記から合成した残り7種（`prelude.rs`） |
 
-**バイト指定子**（`i32` のみ）。CL の `byte` が返す不透明なオブジェクトの代わりに、既存の
-`cons-cell<i32,i32>`（`car`=サイズ、`cdr`=位置）を流用する。
+**`ash` の第 2 引数だけが `T` でなく `i32`。** これはビット単位の**距離**であって受け手の型の
+値ではないので、受け手の幅と符号は距離について何も言わない（CL の `(ash integer count)` の
+`count` が任意の整数なのと同じ理由）。以前は `T` だったため、符号なし幅では右シフトが
+**書けなかった**——`(ash (the u8 x) -3)` は「`-3` は `u8` の範囲外」で撥ねられ、他に
+「右シフト」の綴りが無かった。符号なしの右シフトは論理シフト（`(ash (the u8 200) -3)` = `25`）、
+符号付きは算術シフトで負の無限大方向へ丸まる（`(ash (the i32 -100) -4)` = `-7`）。
+
+`logbitp` の `index` も同じ理由で `i32`。ただしこちらは受け手が `index` のほうだったため、
+型を変えるだけでは済まなかった——メソッドのキーは `(受け手の型, メソッド名)` なので、
+`i32` の `logbitp` に幅ごとのシグネチャを持たせることはできず、整数側も `i32` に固定されていた。
+`ldb` 系と同じく整数を第 1 引数へ移してある。
+
+`bignum` の `ash`/`logbitp` も第 2 引数は `i32`（§3）。任意精度のシフト量は使える呼び出しを
+何も表さない——`(ash big huge)` は `big` より `huge` ビット多い結果を名指すので、どんな機械も
+終わらない。
+
+**バイト指定子**。CL の `byte` が返す不透明なオブジェクトの代わりに、既存の
+`cons-cell<i32,i32>`（`car`=サイズ、`cdr`=位置）を流用する。サイズも位置もビットの個数なので、
+取り出される整数がどの幅でも `i32`。
+
+**整数が第 1 引数——CL と順番が違う。** CL は `(ldb bytespec integer)` と書くが、この言語では
+それだと*指定子*が受け手の位置に来る。指定子の型は適用先によらず `cons-cell<i32,i32>` の 1 種類
+なので、それを受け手にした単一ディスパッチのメソッドは整数型を 1 つしか担当できず、実際
+`ldb` は長らく `i32` 専用だった。他のビット演算はすべて `(op integer ...)` の形（`(logand a b)`・
+`(ash x count)`・`(lognot x)`）で、逆だったのは `ldb` 系と `logbitp` だけ。残りの引数は CL の
+相対順を保つので、`(dpb newbyte spec n)` は `(dpb n newbyte spec)` になる。
+
+実装は幅ごとの `defmethod` ではなく `(where (Bits T))` 付きの総称自由関数。本体が全幅で同一の
+テキストになるので、5 定義 × 8 型 = 40 個を書く理由が無い。`Bits` にシフトが 1 つ増えている
+（`(shift x count)`、各 impl は `(ash self count)` の一行）。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `byte` | `(byte size position)` | `(i32,i32)→cons-cell<i32,i32>` | バイト指定子を作る |
 | `byte-size` / `byte-position` | `(byte-size b)` | `cons-cell<i32,i32>→i32` | 成分を取り出す |
-| `ldb` | `(ldb b x)` | `(cons-cell<i32,i32>,i32)→i32` | `x` から指定バイトを取り出して右詰め |
-| `ldb-test` | `(ldb-test b x)` | `(cons-cell<i32,i32>,i32)→bool` | 指定バイトに立っているビットがあるか |
-| `mask-field` | `(mask-field b x)` | `(cons-cell<i32,i32>,i32)→i32` | 指定バイト以外を 0 にする（位置は保つ） |
-| `dpb` | `(dpb newbyte b x)` | `(i32,cons-cell<i32,i32>,i32)→i32` | 右詰めの `newbyte` を `x` の指定バイトへ埋める |
-| `deposit-field` | `(deposit-field newbyte b x)` | `(i32,cons-cell<i32,i32>,i32)→i32` | `dpb` の「位置を保ったまま」版 |
-| `boole` | `(boole op a b)` | `(i32,i32,i32)→i32` | `op`（§4.3 の `boole-*` 定数）で選んだ 16 種の2項論理演算 |
+| `ldb` | `(ldb x b)` | `(T,cons-cell<i32,i32>)→T` | `x` から指定バイトを取り出して右詰め |
+| `ldb-test` | `(ldb-test x b)` | `(T,cons-cell<i32,i32>)→bool` | 指定バイトに立っているビットがあるか |
+| `mask-field` | `(mask-field x b)` | `(T,cons-cell<i32,i32>)→T` | 指定バイト以外を 0 にする（位置は保つ） |
+| `dpb` | `(dpb x newbyte b)` | `(T,T,cons-cell<i32,i32>)→T` | 右詰めの `newbyte` を `x` の指定バイトへ埋める |
+| `deposit-field` | `(deposit-field x newbyte b)` | `(T,T,cons-cell<i32,i32>)→T` | `dpb` の「位置を保ったまま」版 |
+| `boole` | `(boole op a b)` | `(i32,T,T)→T` | `op`（§4.3 の `boole-*` 定数）で選んだ 16 種の2項論理演算 |
+
+`T` は `Bits` を実装する型、つまり `i8`/`i16`/`i32`/`u8`/`u16`/`u32`/`bignum`。`boole` だけ
+`op` が先頭のまま——自由関数は何もディスパッチしないので整数が受け手の位置を争う必要が無く、
+CL の並びを保つ費用がゼロだから。
 
 ### 4.5 乱数
 
@@ -307,13 +341,32 @@ xorshift64 で、インタプリタと compiled コードは同じ列を返す�
 | `make-random-state` | `(make-random-state [state])` | `&optional random-state → random-state` | 引数なしなら新しい状態、渡せばその複製（複製は同じ列を再生する） |
 | `random-state-p` | `(random-state-p x)` | `random-state→bool` | 常に `true`（静的型が既に他の型を排除しているため。CL との対応のためだけに在る） |
 | `*random-state*` | — | `random-state` | `random` の既定の状態。動的束縛が無いので**代入可能なグローバル**（`setf` で差し替える） |
+| `seed-random-state` | `(seed-random-state n)` | `i32→random-state` | その整数が名指す状態。同じ種は必ず同じ列を再生する |
 
-新しい状態のシードは壁時計から採る。**シード値を外から与える手段は無い**ので、実行を跨いで
-同じ列を再現することはできない（同一プロセス内なら `make-random-state` の複製で再生できる）。
+`make-random-state` の新しい状態は壁時計からシードを採るので、実行を跨いで再現はできない。
+再現したいときは `seed-random-state` を使う:
 
-上の4つは `make-random-state-fresh` / `random-state-copy` / `random-state-next` という Rust
+```lisp
+(let ((s (seed-random-state 12345)))
+  (println "~a ~a ~a" (random 100 s) (random 100 s) (random 100 s)))
+;; 何回実行しても同じ 3 つの数が出る
+```
+
+**CL には移植可能なシード指定が無い**（`make-random-state` が取るのは `nil`/`t`/状態だけ）ので、
+これは CL の名前ではなく SBCL の `sb-ext:seed-random-state` に倣った名前。標準に無い操作に
+標準の名前を借りない、という区別を保つため。
+
+種は状態そのものではなく、`typelisp_rt::seeded_random_state` の全単射を通す。xorshift64 は
+`0` が不動点で、そこから始めた列は永遠に `0` のままなので、状態の空間は `0` を除いた
+`1..=u64::MAX` であり、何らかの写像が要る。素朴な `種 | 1` だと偶数の種が隣の奇数に潰れて
+`(seed-random-state 0)` と `(seed-random-state 1)` が同じ列になってしまう——再現性のために
+種を指定した人にとって、これは最も壊れてはいけない性質。負の種は絶対値でもクランプでもなく
+別の種（`-7` と `7` は違う列）。
+
+上の 4 つは `make-random-state-fresh` / `random-state-copy` / `random-state-next` という Rust
 プリミティブ（ビットをいじる部分だけ）の上に載った prelude の `defun`。プリミティブ側も呼べるが、
-`&optional` を持てるのは `defun` の側なので、通常は上の名前を使う。
+`&optional` を持てるのは `defun` の側なので、通常は上の名前を使う。`seed-random-state` だけは
+`&optional` を持たないので prelude の層を挟まず、レジストリの組み込みがそのまま表の名前。
 
 ### 4.6 時間
 
@@ -795,9 +848,8 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 この節の実装は全て `char->int` のコードポイント上で書かれていて、`upcase`/`downcase`/`alphap`/
 `digitp`/`int->char` を**呼ばない**。書かれた当時この 5 つに島の lowering が無く、触れると
 prelude 全体がインタプリタ専用に落ちたため。2026-09-03 に 5 つとも lowering が入った
-（[syntax.md](syntax.md) §10）ので `char` 側の制約は無くなったが、既にあるコードは
-そのままにしてある。**`string` の `upcase`/`downcase` にはまだ lowering が無い**ので、
-そちらを呼ぶ関数は今もコンパイルできない。
+（[syntax.md](syntax.md) §10）ので制約は無くなったが、既にあるコードはそのままにしてある。
+`string` の `upcase`/`downcase` も同日 lowering が入った（`rt_str_upcase`/`rt_str_downcase`）。
 ASCII 限定なのは既存の `upcase`/`alphap` と同じ理由（Unicode の表を実行時に持っていない）。
 
 `char-code-limit` に当たる定数は無い（`char` は Unicode スカラ値で、上限は言語の性質ではなく
@@ -1822,8 +1874,8 @@ terminating macro character にすることでこれを実現するが、リー�
   ファイナライザは予測できない時点で動くか一度も動かない）。`with-open-file` を使うのが安全。
 - **ストリーム操作は JIT/AOT コンパイルできる**（2026-08-14 の「コンパイル経路の穴」で解消。
   ストリーム表を `typelisp-rt` へ移したため、インタプリタの無い AOT 実行ファイルからも同じ表を
-  引ける）。prelude のストリーム定義は事前コンパイル済みで出荷される。コンパイルできないものは
-  [syntax.md](syntax.md) §10 に一覧がある（2026-08-18 時点で `eval` のみ）。
+  引ける）。prelude のストリーム定義は事前コンパイル済みで出荷される。コンパイルできない組み込みは
+  [syntax.md](syntax.md) §10 に一覧があり、2026-09-03 に空になった。
 
 ## 19. パス名 (`pathname`)
 

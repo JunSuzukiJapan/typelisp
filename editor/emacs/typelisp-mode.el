@@ -259,7 +259,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; are builtins; these are what a `where'-bounded type variable spells
     ;; them as.
     "add" "sub" "mul" "div" "remainder"
-    "bit-and" "bit-or" "bit-xor" "bit-not"
+    "bit-and" "bit-or" "bit-xor" "bit-not" "shift"
     ;; `Array<T>' (Phase 6b).  `aref' is checker sugar rather than a
     ;; registered name, so it is here for highlighting only.
     "make" "aref" "rank" "dimension" "dimensions" "total-size"
@@ -293,7 +293,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; `random-state-copy'/`random-state-next' are the native primitives
     ;; `random'/`make-random-state'/`random-state-p' are built on.
     "random-state-p" "make-random-state" "make-random-state-fresh"
-    "random-state-copy" "random-state-next"
+    "random-state-copy" "random-state-next" "seed-random-state"
     ;; time (CLHS 25.1)
     "time" "get-universal-time" "get-internal-real-time"
     "internal-time-units-per-second" "internal-time-seconds"

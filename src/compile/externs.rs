@@ -131,10 +131,11 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "pprint-pop" => "rt_pprint_pop",
         "pprint-list-exhausted" => "rt_pprint_list_exhausted",
         // The `random-state` builtins. Nothing about a random-state lives
-        // outside the heap, so all three lower.
+        // outside the heap, so all four lower.
         "random-state-next" => "rt_random_state_next",
         "random-state-copy" => "rt_random_state_copy",
         "make-random-state-fresh" => "rt_make_random_state_fresh",
+        "seed-random-state" => "rt_seed_random_state",
         // The stream/file builtins. Every one is a thin conversion around
         // `typelisp_rt::stream_builtin::stream_builtin`, which the
         // interpreter calls too — see `Interp::eval_stream_builtin`. They can
@@ -222,6 +223,11 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
             "int->bignum", "int->ratio", "int->float", "int->char",
             "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
+            // The `Option`-returning halves. No prelude definition reaches
+            // them; they are lowered so a user's own `(try-as u8 n)` can be
+            // compiled — see `docs/syntax.md` §10.
+            "try-int->char",
+            "try-int->i8", "try-int->i16", "try-int->i32", "try-int->u8", "try-int->u16", "try-int->u32",
             "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
             "ash", "logbitp",
         ],
@@ -230,6 +236,10 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // comparisons and go through `rt_str_eq`/`rt_str_equalp`.
         "string" => &[
             "length", "ref", "eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "append", "substring",
+            // `upcase`/`downcase` are one `rt_str_*` call each, ASCII-only on
+            // both tiers because both tiers run the same shim's rule — the
+            // same shape and the same reasoning as `char`'s pair below.
+            "upcase", "downcase",
         ],
         // `char->string` is here *and* in `char-native-method?` now. It was
         // here alone once, and that is worth remembering: this list is what
@@ -252,6 +262,9 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         "f64" | "f32" => &[
             "+", "-", "*", "/", "expt", "sqrt", "floor", "ceiling", "round", "truncate",
             "float->int", "float->bignum", "float->ratio", "float->f32", "float->f64",
+            // Same reason as the integer `try-*` group above: no prelude
+            // caller, lowered so a user's `(try-as f32 x)` can compile.
+            "try-float->f32", "try-float->f64",
             "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
             "max", "min", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh",
             "asinh", "acosh", "atanh", "exp", "log",
@@ -259,17 +272,23 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         "bignum" => &[
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
             "bignum->int", "try-bignum->int", "bignum->float", "bignum->ratio", "max", "min",
-            // The three bitwise primitives the prelude's derived bignum
-            // operators (`logeqv`/`lognand`/`lognor`/`logandc1`/`logandc2`/
-            // `logorc1`/`logorc2`) are written in terms of. The rest of
-            // `bignum_assoc`'s bitwise catalog (`logxor`/`ash`/`logbitp`/
-            // `logtest`/`logcount`/`integer-length`) stays interpreted: no
-            // prelude definition reaches it, so lowering it would be code
-            // nothing exercises. `logxor` is here because `logeqv` is
-            // `lognot` of it — a blocker that only became visible once
-            // `lognot` had a lowering, which is the reconcile check in
-            // `prelude_bootstrap` doing its job.
-            "logand", "logior", "logxor", "lognot",
+            // The bitwise primitives the prelude's derived bignum operators
+            // (`logeqv`/`lognand`/`lognor`/`logandc1`/`logandc2`/`logorc1`/
+            // `logorc2`) are written in terms of, plus `ash`, which `Bits`'s
+            // `shift` impl for `bignum` reaches. The rest of
+            // `bignum_assoc`'s bitwise catalog (`logbitp`/`logtest`/
+            // `logcount`/`integer-length`) stays interpreted: no prelude
+            // definition reaches it, so lowering it would be code nothing
+            // exercises. `logxor` is here because `logeqv` is `lognot` of it
+            // — a blocker that only became visible once `lognot` had a
+            // lowering, which is the reconcile check in `prelude_bootstrap`
+            // doing its job, and `ash` arrived the same way.
+            "logand", "logior", "logxor", "lognot", "ash",
+            // `logbitp`/`logtest`/`logcount`/`integer-length` have no prelude
+            // caller either; they are lowered so that a *user's* `defun`
+            // naming one can be compiled at all, which is what
+            // `docs/syntax.md` §10's list is about.
+            "logbitp", "logtest", "logcount", "integer-length",
         ],
         "ratio" => &[
             "+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
@@ -356,7 +375,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 215] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 226] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -375,8 +394,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 215] {
     };
     use typelisp_rt::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
-        rt_bignum_logand, rt_bignum_logior, rt_bignum_lognot, rt_bignum_logxor,
-        rt_make_random_state_fresh, rt_random_state_copy, rt_random_state_next,
+        rt_bignum_ash, rt_bignum_integer_length, rt_bignum_logand, rt_bignum_logbitp, rt_bignum_logcount, rt_bignum_logtest, rt_bignum_logior, rt_bignum_lognot, rt_bignum_logxor,
+        rt_make_random_state_fresh, rt_random_state_copy, rt_random_state_next, rt_seed_random_state,
 
         rt_file_create_directories, rt_file_delete, rt_file_directory_p, rt_file_exists_p,
         rt_file_list_directory, rt_file_modified_date, rt_file_rename, rt_file_truename,
@@ -401,7 +420,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 215] {
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
         rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_i32, rt_sexpr_i8, rt_sexpr_i16, rt_sexpr_u8, rt_sexpr_u16, rt_sexpr_u32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
-        rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
+        rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_str_upcase, rt_str_downcase, rt_int_fits, rt_int_fits_char, rt_f64_fits_f32, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
         rt_dyn_call, rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
         rt_throw, rt_throw_matches, rt_throw_take_value, rt_unwind_pending, rt_resume_unwind,
@@ -554,6 +573,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 215] {
         ("rt_str_lt", rt_str_lt as usize),
         ("rt_str_append", rt_str_append as usize),
         ("rt_str_substring", rt_str_substring as usize),
+        ("rt_str_upcase", rt_str_upcase as usize),
+        ("rt_int_fits", rt_int_fits as usize),
+        ("rt_int_fits_char", rt_int_fits_char as usize),
+        ("rt_f64_fits_f32", rt_f64_fits_f32 as usize),
+        ("rt_str_downcase", rt_str_downcase as usize),
         ("rt_f64_new", rt_f64_new as usize),
         ("rt_f64_value", rt_f64_value as usize),
         ("rt_f32_new", rt_f32_new as usize),
@@ -604,6 +628,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 215] {
         ("rt_bignum_mul", rt_bignum_mul as usize),
         ("rt_bignum_div", rt_bignum_div as usize),
         ("rt_bignum_mod", rt_bignum_mod as usize),
+        ("rt_bignum_ash", rt_bignum_ash as usize),
+        ("rt_bignum_logbitp", rt_bignum_logbitp as usize),
+        ("rt_bignum_logtest", rt_bignum_logtest as usize),
+        ("rt_bignum_logcount", rt_bignum_logcount as usize),
+        ("rt_bignum_integer_length", rt_bignum_integer_length as usize),
         ("rt_bignum_logand", rt_bignum_logand as usize),
         ("rt_bignum_logior", rt_bignum_logior as usize),
         ("rt_bignum_logxor", rt_bignum_logxor as usize),
@@ -611,6 +640,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 215] {
         ("rt_random_state_next", rt_random_state_next as usize),
         ("rt_random_state_copy", rt_random_state_copy as usize),
         ("rt_make_random_state_fresh", rt_make_random_state_fresh as usize),
+        ("rt_seed_random_state", rt_seed_random_state as usize),
         ("rt_stream_stdin", rt_stream_stdin as usize),
         ("rt_stream_stdout", rt_stream_stdout as usize),
         ("rt_stream_stderr", rt_stream_stderr as usize),
@@ -865,6 +895,56 @@ mod native_method_list_tests {
                 );
             }
         }
+    }
+
+    /// Neither list above is checked against the **registry**, and that gap is
+    /// the one a user falls into: a builtin the registry registers and neither
+    /// side lowers is a method an ordinary call can name, and naming it makes
+    /// the calling `defun` uncompilable. `docs/syntax.md` §10 carried a table
+    /// of exactly those, filled in by hand as they were discovered; this is
+    /// the check that keeps it empty without anyone having to notice.
+    ///
+    /// `print`/`println` are the standing exception, and are not a hole. The
+    /// checker intercepts both as special forms before any method resolution
+    /// happens (`Checker::check_print_like` — the control string has to be a
+    /// literal, since its directives decide what the remaining arguments may
+    /// be), so neither ever becomes an `Expr::Assoc` for `call_graph_edges` to
+    /// reject or the island to lower; a qualified `(i32::print x)` is refused
+    /// at check time as an instance method. `registry::int_assoc` and its
+    /// siblings still register them because they are the receiver-typed
+    /// printing entry points `eval_builtin_method` dispatches on.
+    #[test]
+    fn every_registered_builtin_method_on_a_native_receiver_lowers() {
+        // See this test's doc comment: registered, but unreachable as a method
+        // call, so no lowering can be asked for.
+        const CHECKER_SPECIAL_FORMS: [&str; 2] = ["print", "println"];
+        let registry = typelisp_front::check::registry::Registry::with_builtins();
+        let mut gaps: Vec<String> = Vec::new();
+        for (_, type_locals) in PRIMITIVES {
+            for type_local in *type_locals {
+                let def = registry
+                    .root
+                    .types
+                    .get(*type_local)
+                    .unwrap_or_else(|| panic!("`{}` is not a built-in type in the registry", type_local));
+                for (method, f) in &def.assoc {
+                    if !f.builtin || CHECKER_SPECIAL_FORMS.contains(&method.as_str()) {
+                        continue;
+                    }
+                    if !native_lowered_primitive_methods(type_local).contains(&method.as_str()) {
+                        gaps.push(format!("{}::{}", type_local, method));
+                    }
+                }
+            }
+        }
+        assert!(
+            gaps.is_empty(),
+            "these builtin methods are registered but have no compiled lowering, so a `defun` \
+             calling one cannot be compiled: {:?}\n  Add each to `native_lowered_primitive_methods` \
+             *and* the island's matching `*-native-method?`, or — if it is unreachable as a method \
+             call the way `print` is — say so in `CHECKER_SPECIAL_FORMS`.",
+            gaps
+        );
     }
 }
 

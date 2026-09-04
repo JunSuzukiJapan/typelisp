@@ -1222,6 +1222,11 @@ pub const SOURCE: &str = r#"
     ;; shim (`rt_int_to_char`) while its inverse `char->int` is nothing at
     ;; all, and the reason it goes through `emit-direct-call`: it can raise.
     ("int->char" true)
+    ;; The `Option`-returning conversions. No prelude definition reaches
+    ;; these; they are lowered so a *user's* `defun` naming one — which is
+    ;; what `(try-as char n)` expands to — can be compiled at all.
+    ("try-int->char" true)
+    (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32") true)
     ;; `max`/`min`: `icmp`+`select`, branch-free (`build-select`).
     (("max" "min") true)
     ;; `logand`/`logior`/`logxor`: bare LLVM instructions
@@ -1265,7 +1270,25 @@ pub const SOURCE: &str = r#"
     ;; `substring` is the one three-operand string method
     ;; (`rt_str_substring`); every other one here is unary or binary.
     ("substring" true)
+    (("upcase" "downcase") true)
     (else false)))
+
+;; The string methods that take the receiver and nothing else, and so must be
+;; recognized before `compile-assoc`'s string branch reads a second operand.
+;; `length` is not here: it has a differently-shaped result (a bare count, not
+;; a string) and its own arm already.
+(defun string-unary-shim-method? ((method string)) bool
+  (case method
+    (("upcase" "downcase") true)
+    (else false)))
+
+;; The `rt_str_*` shim behind each of those — the string counterpart of
+;; [`char-unary-shim-name`].
+(defun string-unary-shim-name ((method string)) string
+  (case method
+    ("upcase" "rt_str_upcase")
+    ("downcase" "rt_str_downcase")
+    (else (panic (append "string-unary-shim-name: not a string shim method " method)))))
 
 ;; `char`'s natively-compilable methods: a compiled `char` is a raw `i64`
 ;; code point, so the content comparisons lower to the same integer `icmp`s
@@ -1353,6 +1376,7 @@ pub const SOURCE: &str = r#"
     ;; the register is already the binary32 one. `try-float->f32` is not here:
     ;; it builds an `Option`, and shares `try-int->char`'s gap.
     (("float->f32" "float->f64") true)
+    (("try-float->f32" "try-float->f64") true)
     ;; `max`/`min`: `llvm.maxnum.f64`/`llvm.minnum.f64` (`build-fmaxnum`/
     ;; `build-fminnum`), same intrinsic-call shape as `expt`'s `llvm.pow.f64`.
     (("max" "min") true)
@@ -1415,11 +1439,21 @@ pub const SOURCE: &str = r#"
     ;; bare LLVM instructions `i64` gets — the operands are boxed
     ;; arbitrary-precision values. These four are what the prelude's
     ;; derived bitwise operators (`logeqv`/`lognand`/`lognor`/`logandc1`/
-    ;; `logandc2`/`logorc1`/`logorc2`) are written in terms of; the rest
-    ;; of `bignum_assoc`'s bitwise catalog (`ash`/`logbitp`/`logtest`/
-    ;; `logcount`/`integer-length`) has no prelude caller and stays
-    ;; interpreted.
+    ;; `logandc2`/`logorc1`/`logorc2`) are written in terms of.
     (("logand" "logior" "logxor" "lognot") true)
+    ;; `ash` joined them when `Bits`'s `shift` impl for `bignum` gave it a
+    ;; prelude caller. Its second operand is a raw bit count rather than a
+    ;; second boxed value, which `bignum-binop-call` does not care about (it
+    ;; stores two words) but `rt_bignum_ash` does.
+    (("ash") true)
+    ;; The rest of `bignum_assoc`'s bitwise catalog. No prelude definition
+    ;; reaches these — they are here so that a *user's* `defun` naming one
+    ;; can still be compiled, which is the whole content of the "builtins
+    ;; with no compiled implementation" list in `docs/syntax.md` §10.
+    ;; `logbitp`'s second operand is a raw position like `ash`'s count;
+    ;; `logbitp`/`logtest` return a bare `0`/`1` (a compiled `bool`), and
+    ;; `logcount`/`integer-length` return fresh boxed bignums.
+    (("logbitp" "logtest" "logcount" "integer-length") true)
     (else false)))
 
 ;; `ratio` (`registry::ratio_assoc`)'s natively-compilable methods — the
@@ -1753,6 +1787,53 @@ pub const SOURCE: &str = r#"
     (store-arg builder args-ptr 4 (const-word builder 111))
     (store-arg builder args-ptr 5 (const-word builder 110))
     (build-call builder (get-function m "rt_str_new") args-ptr 6)))
+
+;; The `(some raw)` an always-succeeding conversion returns. `kind` is the
+;; field's `Repr::field_kind` — the payload has to be tagged the way every
+;; other struct/enum field is, `rt_data_new`'s contract being the same
+;; tagged-field one `rt_struct_new` has.
+(defun build-some-of ((builder llvm-builder) (m llvm-module) (raw llvm-value) (kind i32)) llvm-value
+  (let ((some-args (alloca-args builder 3)))
+    (store-arg builder some-args 0 (compile-option-type-name builder m))
+    (store-arg builder some-args 1 (const-word builder 0))
+    (store-arg builder some-args 2 (compile-tag-struct-field builder m raw kind))
+    (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
+      (push-permanent-sexpr-root builder m some-box)
+      some-box)))
+
+;; The `(none)` of the same `Option`.
+(defun build-none-of ((builder llvm-builder) (m llvm-module)) llvm-value
+  (let ((none-args (alloca-args builder 2)))
+    (store-arg builder none-args 0 (compile-option-type-name builder m))
+    (store-arg builder none-args 1 (const-word builder 1))
+    (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
+      (push-permanent-sexpr-root builder m none-box)
+      none-box)))
+
+;; The `Option` a `try-*` conversion returns: `(some raw)` when `fits` is
+;; nonzero, `(none)` otherwise.
+;;
+;; Real control flow, the same `compile-if`-shaped "alloca a merge slot,
+;; branch, store each arm's result, load after the merge block" shape
+;; `compile-hashtable-op`'s `get`/`remove` uses. `raw` is computed by the
+;; caller *before* the branch, which is safe only because every conversion
+;; routed through here is pure (a normalization, an identity, or an `fptrunc`)
+;; — `try-bignum->int` is not, and keeps its own arm where the raw call is
+;; made after the test.
+(defun build-try-option ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (fits llvm-value) (raw llvm-value) (kind i32)) llvm-value
+  (let* ((then-block (append-block cur-fn "try-some"))
+         (else-block (append-block cur-fn "try-none"))
+         (merge-block (append-block cur-fn "try-merge"))
+         (slot (alloca-args builder 1)))
+    (build-cond-br builder fits then-block else-block)
+    (position-at-end builder then-block)
+    (store-arg builder slot 0 (build-some-of builder m raw kind))
+    (build-br builder merge-block)
+    (position-at-end builder else-block)
+    (store-arg builder slot 0 (build-none-of builder m))
+    (build-br builder merge-block)
+    (position-at-end builder merge-block)
+    (load-raw builder slot 0)))
 
 (defun compile-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     ;; The AST-tag dispatch. `case` (the core macro layer's
@@ -2280,6 +2361,10 @@ pub const SOURCE: &str = r#"
                (let ((args-ptr (alloca-args builder 1)))
                  (store-arg builder args-ptr 0 a)
                  (build-call builder (get-function m "rt_str_length") args-ptr 1))
+           (if (string-unary-shim-method? method)
+               (let ((args-ptr (alloca-args builder 1)))
+                 (store-arg builder args-ptr 0 a)
+                 (build-call builder (get-function m (string-unary-shim-name method)) args-ptr 1))
                (let ((b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
                  (case method
                    ;; `ref` can raise (an out-of-range index), so it goes
@@ -2343,7 +2428,7 @@ pub const SOURCE: &str = r#"
                       (store-arg builder args-ptr 1 b)
                       (store-arg builder args-ptr 2 c)
                       (emit-direct-call builder m cur-fn (get-function m "rt_str_substring") args-ptr 3 protect)))
-                   (else (panic (append "compile-assoc: unsupported str method " method))))))))
+                   (else (panic (append "compile-assoc: unsupported str method " method)))))))))
         ((if (int-receiver-type? type-name) (int-native-method? method) false)
          (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base protect exit-cleanup (sexpr-cdr (sexpr-car rest))))
                (wsig (int-wsig type-name)))
@@ -2371,6 +2456,21 @@ pub const SOURCE: &str = r#"
              ;; out of the method name, which is the only place it is written.
              (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32")
               (build-normalize-int builder a (int-wsig (substring method 5 (length method)))))
+             ;; The `Option`-returning halves of those two. `rt_int_fits*`
+             ;; answers the question and nothing else: a value that fits its
+             ;; target is *unchanged* by the cast, so the `some` payload is
+             ;; the operand already in hand rather than a converted one.
+             ("try-int->char"
+              (let ((fits-args (alloca-args builder 1)))
+                (store-arg builder fits-args 0 a)
+                (build-try-option builder m cur-fn
+                  (build-call builder (get-function m "rt_int_fits_char") fits-args 1) a 3)))
+             (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32")
+              (let ((fits-args (alloca-args builder 2)))
+                (store-arg builder fits-args 0 a)
+                (store-arg builder fits-args 1 (const-word builder (int-wsig (substring method 9 (length method)))))
+                (build-try-option builder m cur-fn
+                  (build-call builder (get-function m "rt_int_fits") fits-args 2) a 1)))
              ("logcount"
               (int-unary-shim-call builder m "rt_int_logcount" a wsig))
              ("integer-length"
@@ -2494,6 +2594,18 @@ pub const SOURCE: &str = r#"
              ;; register is already the nearest binary32 one.
              ("float->f64"
               a)
+             ;; `try-float->f32` narrows only when the value survives the
+             ;; round trip; `try-float->f64` widens, which is always exact, so
+             ;; it has no question to ask and emits the `some` directly rather
+             ;; than branching on a constant.
+             ("try-float->f32"
+              (let ((fits-args (alloca-args builder 1)))
+                (store-arg builder fits-args 0 a)
+                (build-try-option builder m cur-fn
+                  (build-call builder (get-function m "rt_f64_fits_f32") fits-args 1)
+                  (build-fround32 builder a) 11)))
+             ("try-float->f64"
+              (build-some-of builder m a 2))
              ("sqrt"
               (build-fsqrt builder m a))
              ("floor"
@@ -2584,6 +2696,10 @@ pub const SOURCE: &str = r#"
              ;; checked before `b2` is read.
              ("lognot"
               (bignum-unary-call builder m "rt_bignum_lognot" a))
+             ("logcount"
+              (bignum-unary-call builder m "rt_bignum_logcount" a))
+             ("integer-length"
+              (bignum-unary-call builder m "rt_bignum_integer_length" a))
              ("try-bignum->int"
               ;; `Option<i32>` result: real control flow (found/overflow), the
               ;; same `compile-if`-shaped "alloca a merge slot, branch, store
@@ -2645,6 +2761,12 @@ pub const SOURCE: &str = r#"
                          (bignum-binop-call builder m "rt_bignum_logior" a b2))
                         ("logxor"
                          (bignum-binop-call builder m "rt_bignum_logxor" a b2))
+                        ("ash"
+                         (bignum-binop-call builder m "rt_bignum_ash" a b2))
+                        ("logbitp"
+                         (bignum-binop-call builder m "rt_bignum_logbitp" a b2))
+                        ("logtest"
+                         (bignum-binop-call builder m "rt_bignum_logtest" a b2))
                         ("<"
                          (build-icmp-lt builder (bignum-cmp-call builder m a b2) (const-word builder 0)))
                         ("<="

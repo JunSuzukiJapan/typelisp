@@ -1383,77 +1383,6 @@ pub const SOURCE: &str = r##"
                 (if (= (mod fq 2.0) 0.0) fd
                     (let ((q (+ fq 1.0))) (cons q (- self (* q b)))))))))))
 
-;; CL's byte-specifier mini-API (CLHS 22.1.3): `(byte size position)` builds
-;; an opaque specifier consumed by `ldb`/`dpb`/`mask-field`/`deposit-field`/
-;; `ldb-test`. No dedicated struct type is worth introducing for two `i32`s —
-;; `cons-cell<i32,i32>` (the generic pair already used throughout this file,
-;; e.g. `floor-div` above) *is* the byte specifier: `car` the size, `cdr` the
-;; position. `i32` only (like the rest of this file's bit-twiddling
-;; primitives) — a historical PDP-10-era API whose CL usage is overwhelmingly
-;; on fixnums.
-(defmethod byte-size ((self cons-cell<i32,i32>)) i32 (car self))
-(defmethod byte-position ((self cons-cell<i32,i32>)) i32 (cdr self))
-(defun byte ((size i32) (position i32)) cons-cell<i32,i32> (cons size position))
-;; `(ldb bytespec integer)`: extract the `size`-bit field starting at
-;; `position`, right-justified — `(logand (ash integer (- position)) (1-
-;; (ash 1 size)))`.
-(defmethod ldb ((self cons-cell<i32,i32>) (n i32)) i32
-  (logand (ash n (* -1 (byte-position self))) (1- (ash 1 (byte-size self)))))
-;; `(ldb-test bytespec integer)`: does that field have any 1 bits?
-(defmethod ldb-test ((self cons-cell<i32,i32>) (n i32)) bool (/= (ldb self n) 0))
-;; `(mask-field bytespec integer)`: like `ldb`, but left in place rather than
-;; right-justified — `(logand integer (ash (1- (ash 1 size)) position))`.
-(defmethod mask-field ((self cons-cell<i32,i32>) (n i32)) i32
-  (logand n (ash (1- (ash 1 (byte-size self))) (byte-position self))))
-;; `(dpb newbyte bytespec integer)`: deposit `newbyte`'s low `size` bits into
-;; that field of `integer`, leaving every other bit of `integer` untouched.
-(defmethod dpb ((newbyte i32) (self cons-cell<i32,i32>) (n i32)) i32
-  (let ((mask (ash (1- (ash 1 (byte-size self))) (byte-position self))))
-    (logior (logand n (lognot mask)) (logand (ash newbyte (byte-position self)) mask))))
-;; `(deposit-field newbyte bytespec integer)`: like `dpb`, but `newbyte` is
-;; already positioned (only its bits inside the field matter) rather than
-;; right-justified.
-(defmethod deposit-field ((newbyte i32) (self cons-cell<i32,i32>) (n i32)) i32
-  (let ((mask (ash (1- (ash 1 (byte-size self))) (byte-position self))))
-    (logior (logand n (lognot mask)) (logand newbyte mask))))
-
-;; `(boole op a b)`: CL's 16-way generic bitwise-op selector. `op` is one of
-;; the 16 `boole-*` constants below (an `i32` code, not a keyword — this
-;; language has no keyword-symbol type for CL's `boole-and` etc to be).
-(defconstant (boole-clr i32) 0 "boole: always 0.")
-(defconstant (boole-set i32) 1 "boole: always -1 (all bits set).")
-(defconstant (boole-1 i32) 2 "boole: a, unchanged.")
-(defconstant (boole-2 i32) 3 "boole: b, unchanged.")
-(defconstant (boole-c1 i32) 4 "boole: (lognot a).")
-(defconstant (boole-c2 i32) 5 "boole: (lognot b).")
-(defconstant (boole-and i32) 6 "boole: (logand a b).")
-(defconstant (boole-ior i32) 7 "boole: (logior a b).")
-(defconstant (boole-xor i32) 8 "boole: (logxor a b).")
-(defconstant (boole-eqv i32) 9 "boole: (logeqv a b).")
-(defconstant (boole-nand i32) 10 "boole: (lognand a b).")
-(defconstant (boole-nor i32) 11 "boole: (lognor a b).")
-(defconstant (boole-andc1 i32) 12 "boole: (logandc1 a b).")
-(defconstant (boole-andc2 i32) 13 "boole: (logandc2 a b).")
-(defconstant (boole-orc1 i32) 14 "boole: (logorc1 a b).")
-(defconstant (boole-orc2 i32) 15 "boole: (logorc2 a b).")
-(defmethod boole ((self i32) (a i32) (b i32)) i32
-  (if (= self boole-clr) 0
-  (if (= self boole-set) -1
-  (if (= self boole-1) a
-  (if (= self boole-2) b
-  (if (= self boole-c1) (lognot a)
-  (if (= self boole-c2) (lognot b)
-  (if (= self boole-and) (logand a b)
-  (if (= self boole-ior) (logior a b)
-  (if (= self boole-xor) (logxor a b)
-  (if (= self boole-eqv) (logeqv a b)
-  (if (= self boole-nand) (lognand a b)
-  (if (= self boole-nor) (lognor a b)
-  (if (= self boole-andc1) (logandc1 a b)
-  (if (= self boole-andc2) (logandc2 a b)
-  (if (= self boole-orc1) (logorc1 a b)
-  (if (= self boole-orc2) (logorc2 a b)
-      (panic "boole: unknown op code"))))))))))))))))))
 
 ;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
 ;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
@@ -1767,7 +1696,14 @@ user-visible capacity."
   (bit-and ((self Self) (other Self)) Self)
   (bit-or ((self Self) (other Self)) Self)
   (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self))
+  (bit-not ((self Self)) Self)
+  ;; `shift` is the only member whose second parameter is not `Self`: a
+  ;; shift distance measures bits, so the receiver's width and signedness
+  ;; have nothing to say about it (the same reasoning that made `ash`'s own
+  ;; second parameter an `i32`). It could not have been written before that
+  ;; change — an impl for `u8` would have had no way to say "shift right".
+  ;; Positive is left, negative is right, exactly like `ash`.
+  (shift ((self Self) (count i32)) Self))
 ;; What "a number" means as a bound: arithmetic and an ordering, with no
 ;; methods of its own — a name for the conjunction, so `(where (Number T))`
 ;; says in one bound what six would.
@@ -1845,37 +1781,44 @@ user-visible capacity."
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
+  (bit-not ((self Self)) Self (lognot self))
+  (shift ((self Self) (count i32)) Self (ash self count)))
 (impl Bits i8
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
+  (bit-not ((self Self)) Self (lognot self))
+  (shift ((self Self) (count i32)) Self (ash self count)))
 (impl Bits i16
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
+  (bit-not ((self Self)) Self (lognot self))
+  (shift ((self Self) (count i32)) Self (ash self count)))
 (impl Bits u8
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
+  (bit-not ((self Self)) Self (lognot self))
+  (shift ((self Self) (count i32)) Self (ash self count)))
 (impl Bits u16
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
+  (bit-not ((self Self)) Self (lognot self))
+  (shift ((self Self) (count i32)) Self (ash self count)))
 (impl Bits u32
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
+  (bit-not ((self Self)) Self (lognot self))
+  (shift ((self Self) (count i32)) Self (ash self count)))
 (impl Bits bignum
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self)))
+  (bit-not ((self Self)) Self (lognot self))
+  (shift ((self Self) (count i32)) Self (ash self count)))
 
 ;; `Number` has no methods, so its impls are the bare conjunction: this
 ;; type has all six.
@@ -1889,6 +1832,121 @@ user-visible capacity."
 (impl Number f32)
 (impl Number bignum)
 (impl Number ratio)
+
+;; CL's byte-specifier mini-API (CLHS 22.1.3): `(byte size position)` builds
+;; an opaque specifier consumed by `ldb`/`dpb`/`mask-field`/`deposit-field`/
+;; `ldb-test`. No dedicated struct type is worth introducing for two `i32`s —
+;; `cons-cell<i32,i32>` (the generic pair already used throughout this file,
+;; e.g. `floor-div` above) *is* the byte specifier: `car` the size, `cdr` the
+;; position. A size and a position are counts of bits, so both are `i32`
+;; whatever width the integer being taken apart happens to be.
+;;
+;; **The integer comes first, unlike CL.** CL writes `(ldb bytespec integer)`,
+;; which in this language would put the *specifier* in the receiver slot —
+;; and a specifier's type is `cons-cell<i32,i32>` no matter what it is
+;; applied to, so a single-dispatch method keyed on it could serve exactly
+;; one integer type and `ldb` was stuck at `i32` for as long as that order
+;; held. Every other bit operation here already reads `(op integer ...)`
+;; (`(logand a b)`, `(ash x count)`, `(lognot x)`); `ldb` and `logbitp` were
+;; the two that did not, and they now do. The other operands keep CL's
+;; relative order, so `(dpb newbyte spec n)` becomes `(dpb n newbyte spec)`.
+;;
+;; These are generic free functions rather than one `defmethod` per width:
+;; the bodies below are identical text at every width, so eight copies of
+;; each of five definitions would be forty definitions saying one thing.
+(defmethod byte-size ((self cons-cell<i32,i32>)) i32 (car self))
+(defmethod byte-position ((self cons-cell<i32,i32>)) i32 (cdr self))
+(defun byte ((size i32) (position i32)) cons-cell<i32,i32> (cons size position))
+
+;; The low `size` bits set, in `sample`'s own type.
+;;
+;; Written from `sample` rather than from a literal because a literal has to
+;; have a type, and there is no way to spell "1 of type T" for an open `T`.
+;; `(bit-xor sample sample)` is `T`'s zero whatever `T` is, its complement is
+;; all ones, and shifting those left by `size` and complementing again leaves
+;; exactly the low `size` bits. At a width where `size` reaches the width
+;; itself the shift is `0` (`ash` past the width) and the complement is the
+;; whole word, which is the right answer there too.
+(defun bits-mask<T> ((sample T) (size i32)) T
+  (where (Bits T))
+  (bit-not (shift (bit-not (bit-xor sample sample)) size)))
+
+;; `(ldb integer bytespec)`: extract the `size`-bit field starting at
+;; `position`, right-justified.
+(pub defun ldb<T> ((n T) (spec cons-cell<i32,i32>)) T
+  (where (Bits T))
+  (bit-and (shift n (* -1 (byte-position spec))) (bits-mask n (byte-size spec))))
+;; `(ldb-test integer bytespec)`: does that field have any 1 bits?
+(pub defun ldb-test<T> ((n T) (spec cons-cell<i32,i32>)) bool
+  (where (Bits T) (Eq T))
+  (not-equals (ldb n spec) (bit-xor n n)))
+;; `(mask-field integer bytespec)`: like `ldb`, but left in place rather than
+;; right-justified.
+(pub defun mask-field<T> ((n T) (spec cons-cell<i32,i32>)) T
+  (where (Bits T))
+  (bit-and n (shift (bits-mask n (byte-size spec)) (byte-position spec))))
+;; `(dpb integer newbyte bytespec)`: deposit `newbyte`'s low `size` bits into
+;; that field of `integer`, leaving every other bit of `integer` untouched.
+(pub defun dpb<T> ((n T) (newbyte T) (spec cons-cell<i32,i32>)) T
+  (where (Bits T))
+  (let ((mask (shift (bits-mask n (byte-size spec)) (byte-position spec))))
+    (bit-or (bit-and n (bit-not mask))
+            (bit-and (shift newbyte (byte-position spec)) mask))))
+;; `(deposit-field integer newbyte bytespec)`: like `dpb`, but `newbyte` is
+;; already positioned (only its bits inside the field matter) rather than
+;; right-justified.
+(pub defun deposit-field<T> ((n T) (newbyte T) (spec cons-cell<i32,i32>)) T
+  (where (Bits T))
+  (let ((mask (shift (bits-mask n (byte-size spec)) (byte-position spec))))
+    (bit-or (bit-and n (bit-not mask)) (bit-and newbyte mask))))
+
+;; `(boole op a b)`: CL's 16-way generic bitwise-op selector. `op` is one of
+;; the 16 `boole-*` constants below (an `i32` code, not a keyword — this
+;; language has no keyword-symbol type for CL's `boole-and` etc to be).
+;; `op` stays first, unlike the byte-specifier family above: a free function
+;; dispatches on nothing, so there is no receiver slot to compete for and
+;; CL's own order costs nothing to keep.
+(pub defconstant (boole-clr i32) 0 "boole: always 0.")
+(pub defconstant (boole-set i32) 1 "boole: always -1 (all bits set).")
+(pub defconstant (boole-1 i32) 2 "boole: a, unchanged.")
+(pub defconstant (boole-2 i32) 3 "boole: b, unchanged.")
+(pub defconstant (boole-c1 i32) 4 "boole: (lognot a).")
+(pub defconstant (boole-c2 i32) 5 "boole: (lognot b).")
+(pub defconstant (boole-and i32) 6 "boole: (logand a b).")
+(pub defconstant (boole-ior i32) 7 "boole: (logior a b).")
+(pub defconstant (boole-xor i32) 8 "boole: (logxor a b).")
+(pub defconstant (boole-eqv i32) 9 "boole: (logeqv a b).")
+(pub defconstant (boole-nand i32) 10 "boole: (lognand a b).")
+(pub defconstant (boole-nor i32) 11 "boole: (lognor a b).")
+(pub defconstant (boole-andc1 i32) 12 "boole: (logandc1 a b).")
+(pub defconstant (boole-andc2 i32) 13 "boole: (logandc2 a b).")
+(pub defconstant (boole-orc1 i32) 14 "boole: (logorc1 a b).")
+(pub defconstant (boole-orc2 i32) 15 "boole: (logorc2 a b).")
+;; The sixteen are written in `Bits` operations rather than in the derived
+;; `logeqv`/`lognand`/... methods: those are defined per type earlier in this
+;; file and only for `i32`/`bignum`, so reaching for them would have pinned
+;; `boole` to the same two types the byte-specifier family just escaped.
+;; `boole-clr`/`boole-set` need `T`'s zero and all-ones, which come from the
+;; operand the same way `bits-mask` gets them.
+(pub defun boole<T> ((op i32) (a T) (b T)) T
+  (where (Bits T))
+  (if (= op boole-clr) (bit-xor a a)
+  (if (= op boole-set) (bit-not (bit-xor a a))
+  (if (= op boole-1) a
+  (if (= op boole-2) b
+  (if (= op boole-c1) (bit-not a)
+  (if (= op boole-c2) (bit-not b)
+  (if (= op boole-and) (bit-and a b)
+  (if (= op boole-ior) (bit-or a b)
+  (if (= op boole-xor) (bit-xor a b)
+  (if (= op boole-eqv) (bit-not (bit-xor a b))
+  (if (= op boole-nand) (bit-not (bit-and a b))
+  (if (= op boole-nor) (bit-not (bit-or a b))
+  (if (= op boole-andc1) (bit-and (bit-not a) b)
+  (if (= op boole-andc2) (bit-and a (bit-not b))
+  (if (= op boole-orc1) (bit-or (bit-not a) b)
+  (if (= op boole-orc2) (bit-or a (bit-not b))
+      (panic "boole: unknown op code"))))))))))))))))))
 
 ;; `cons-cell<A,B>`'s Eq/Ord: recursive (structural) comparison. The field
 ;; comparisons go through the methods' own `where` bounds — checked as
@@ -5035,7 +5093,7 @@ user-visible capacity."
 (pub defmethod get ((self BitVector) (i i32)) bool
   (if (or (< i 0) (>= i self::nbits))
       (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
-      (logbitp (mod i 31) (get self::words (/ i 31)))))
+      (logbitp (get self::words (/ i 31)) (mod i 31))))
 
 (pub defmethod set ((self BitVector) (i i32) (b bool)) ()
   (if (or (< i 0) (>= i self::nbits))

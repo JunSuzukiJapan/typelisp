@@ -1827,8 +1827,14 @@ fn the_compiler_body_compiles_an_integer_comparison() {
 // native-code boundary), so the assertion can't hold in-process. The
 // user-facing path — a real `defun` calling `int->char`, then `(compile ...)`d
 // — is now rejected cleanly and up front by `call_graph_edges`
-// (`is_native_lowered_primitive_method`), covered by
-// `compile_of_a_function_calling_an_unsupported_int_method_is_a_clean_error`.
+// (`is_native_lowered_primitive_method`).
+//
+// That rejection has no subject left to test end to end: every builtin method
+// on a natively lowered receiver now *has* a lowering, `i32::try-int->char`
+// (which this pair of tests used last) included. What guards it instead is
+// `externs::native_method_list_tests::every_registered_builtin_method_on_a_native_receiver_lowers`,
+// which compares the registry against both native-method lists — so a new
+// builtin that opens the gap again fails there, at the list, rather than here.
 
 /// `compile-if`: `(if is-fn cond-form then-form else-form)` end to end —
 /// `max(a, b)` via a comparison feeding the branch, JIT-executed both ways
@@ -2717,41 +2723,57 @@ fn compile_transitively_compiles_a_called_user_method() {
     assert_eq!(v, Value::Int(7), "3 + 4 = 7, with `point::x`/`point::y` auto-compiled");
 }
 
-/// The other half of `Interp::compile_function`'s `Expr::Assoc`-target check:
-/// a *non-native* builtin method on an otherwise-native receiver — here
-/// `i32::try-int->char` (`registry::int_assoc`'s checked conversion, whose
-/// `Option<char>` result is what keeps it out of the native list its
-/// unchecked sibling `int->char` joined in Phase 1: the shims lowered there
-/// return a value, not a value-or-absence) — is rejected up front by
-/// `call_graph_edges` (via `is_native_lowered_primitive_method`, the Rust
-/// twin of the island's `int-native-method?`), with a clear "builtin method
-/// with no compiled implementation" message, rather than reaching the
-/// island's `get-function` guard (an unrecoverable `rt_llvm_call` abort under
-/// the AOT-native island — interp-closure removal Stage 8a). Before Stage 8a
-/// this was caught later, by that `get-function` returning a catchable error
-/// from the *interpreted* island.
+/// The compiled tier shifts by the same distance the interpreter does, at a
+/// width where the answer differs between a logical and an arithmetic shift.
+///
+/// `ash`'s distance became an `i32` (from "another value of the receiver's
+/// type", which made right shift unwritable on unsigned widths). Nothing in
+/// the island changed — the distance was always passed as a raw word and
+/// `rt_int_ash` always read it as signed — and this test is what says so
+/// rather than assuming it.
 #[test]
-fn compile_of_a_function_calling_an_unsupported_int_method_is_a_clean_error() {
-    let err = run_with_compiler_and_prelude(
+fn a_negative_shift_distance_lowers_at_every_width() {
+    let v = run_with_compiler_and_prelude(
         r#"
-        (defun root ((a i32)) Option<char> (try-int->char a))
-        (compile root)
+        (defun shr-u8 ((x u8)) u8 (ash x -3))
+        (defun shr-i8 ((x i8)) i8 (ash x -2))
+        (compile shr-u8)
+        (compile shr-i8)
+        (+ (as i32 (shr-u8 200)) (as i32 (shr-i8 -16)))
         "#,
     )
-    .expect_err("expected compiling a caller of the non-native i32 `try-int->char` to fail");
-    // A variant rather than a `Panic` carrying the same words: `target` is what
-    // `compile::prelude_bootstrap` reconciles against its record of the
-    // compiler's gaps, so it has to survive as data. The rendered message is
-    // unchanged.
-    match err {
-        EvalError::Uncompilable { caller, target } => {
-            assert_eq!(caller, "root");
-            assert_eq!(target, "i32::try-int->char");
-            let rendered = EvalError::Uncompilable { caller, target }.to_string();
-            assert!(rendered.contains("no compiled implementation"), "message was: {}", rendered);
-        }
-        other => panic!("expected an Uncompilable, got {:?}", other),
-    }
+    .expect("a compiled right shift should run");
+    // 200 >>> 3 = 25 (logical: `u8` has no sign bit to extend), and
+    // -16 >> 2 = -4 (arithmetic). 25 + -4 = 21.
+    assert_eq!(v, Value::Int(21));
+}
+
+/// A seeded run is the same run on either tier.
+///
+/// That is the whole reason `seed-random-state` has a compiled lowering
+/// (`rt_seed_random_state`) rather than being left interpreter-only: a caller
+/// reaches for a seed to make a run reproducible, and a reproducibility that
+/// evaporated the moment the enclosing function got compiled would be worse
+/// than none. The two halves — the integer-to-state map and the xorshift step
+/// — both live in `typelisp-rt` for this, so neither tier has its own copy to
+/// drift.
+#[test]
+fn a_seeded_stream_agrees_across_the_compile_boundary() {
+    let draws = "(defun draws ((s random-state)) i32
+                   (let ((acc (the i32 0)) (i 0))
+                     (while (< i 9)
+                       (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                       (setf i (+ i 1)))
+                     acc))";
+    let interpreted = run_with_compiler_and_prelude(&format!(
+        "{draws} (draws (seed-random-state 2024))"
+    ))
+    .expect("the interpreted draw should succeed");
+    let compiled = run_with_compiler_and_prelude(&format!(
+        "{draws} (compile draws) (draws (seed-random-state 2024))"
+    ))
+    .expect("the compiled draw should succeed");
+    assert_eq!(compiled, interpreted, "seed 2024 must name one stream, not one per tier");
 }
 
 /// A name `(compile ...)` can't resolve is rejected at *check* time, with a
@@ -4988,11 +5010,103 @@ fn compile_dispatches_i32_bitwise_operators_and_agrees_with_the_interpreter() {
         (defun combine ((a i32) (b i32)) i32
           (+ (logand a b) (+ (logior a b) (+ (logxor a b) (+ (lognot a)
              (+ (ash a 2) (+ (logcount a) (+ (integer-length a)
-                (+ (if (logbitp 1 a) 1 0) (if (logtest a b) 1 0))))))))))
+                (+ (if (logbitp a 1) 1 0) (if (logtest a b) 1 0))))))))))
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine 12 10)")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine 12 10)")).expect("compiled failed");
     assert_eq!(compiled, interpreted, "compiled i32 bitwise operators agree with the interpreter");
+}
+
+/// The builtins that had no compiled lowering, now that they do.
+///
+/// `docs/syntax.md` §10 carried a table of "builtins with no compiled
+/// implementation" — methods a user's own `defun` could name and thereby
+/// become uncompilable. It had three rows, and this covers all three:
+/// `string::upcase`/`downcase` (`rt_str_upcase`/`rt_str_downcase`), the
+/// `Option`-returning conversions (`rt_int_fits`/`rt_int_fits_char`/
+/// `rt_f64_fits_f32` plus the island's `build-try-option`), and `bignum`'s
+/// remaining bitwise catalog.
+///
+/// None of these has a prelude caller, which is why none of them shows up in
+/// `PRELUDE_COMPILE_UNSUPPORTED` — the gap was only ever reachable by writing
+/// the call yourself, which is what this test does.
+#[test]
+fn the_builtins_that_used_to_block_compilation_now_lower() {
+    let src = r#"
+        (defun su ((s string)) string (append (upcase s) (downcase s)))
+        (defun bb ((b bignum)) bignum (+ (logcount b) (integer-length b)))
+        (defun bp ((b bignum)) bool (if (logbitp b 3) (logtest b (as bignum 7)) false))
+        (defun tc ((n i32)) i32 (match (try-as char n) ((some c) (as i32 (char->int c))) ((none) -1)))
+        (defun tu ((n i32)) i32 (match (try-as u8 n) ((some v) (as i32 v)) ((none) -1)))
+        (defun tf ((x f64)) i32 (match (try-as f32 x) ((some v) 1) ((none) 0)))
+        (defun tw ((x f32)) i32 (match (try-as f64 x) ((some v) 1) ((none) 0)))
+        (defun all () i32
+          (+ (length (su "Ab"))
+             (+ (as i32 (bignum->int (bb (as bignum 255))))
+                (+ (if (bp (as bignum 255)) 1 0)
+                   (+ (tc 65) (+ (tc 55296) (+ (tu 200) (+ (tu 300)
+                      (+ (tf 0.5) (+ (tf 0.1) (tw (as f32 0.5)))))))))))) 
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}
+(all)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!(
+        "{src}
+(compile su)
+(compile bb)
+(compile bp)
+(compile tc)
+(compile tu)
+(compile tf)
+(compile tw)
+(compile all)
+(all)"
+    ))
+    .expect("compiled failed");
+    assert_eq!(compiled, interpreted, "the newly lowered builtins agree with the interpreter");
+    // 4 ("ABab") + 16 (8 one-bits + 8 bits) + 1 + 65 + -1 + 200 + -1 + 1 + 0 + 1
+    assert_eq!(compiled, Value::Int(286));
+}
+
+/// The byte-specifier family compiles at a width that is not `i32`, and at
+/// `bignum`.
+///
+/// These are generic functions bounded by `Bits`, so each call site
+/// monomorphizes to its own specialization — the ordinary path, but one that
+/// only opened when the integer moved into the first argument. The `bignum`
+/// half also pulled `bignum::ash` into the island's lowering: it had been
+/// left out on the grounds that no prelude definition reached it, and
+/// `Bits`'s `shift` impl reaches it.
+#[test]
+fn the_byte_specifier_family_compiles_at_every_width() {
+    let src = r#"
+        (defun nibble ((x u8)) u8 (ldb x (byte 4 4)))
+        (defun put ((x i32)) i32 (dpb x 255 (byte 8 0)))
+        (defun high ((x u8)) bool (logbitp x 7))
+        (defun wide ((x bignum)) bignum (ash x 100))
+        (defun nand8 ((x u8) (y u8)) u8 (boole boole-nand x y))
+        (defun all () i32
+          (+ (as i32 (nibble (the u8 165)))
+             (+ (put 62848)
+                (+ (if (high (the u8 128)) 1 0)
+                   (+ (as i32 (bignum->int (ash (wide (as bignum 1)) -100)))
+                      (as i32 (nand8 (the u8 240) (the u8 60))))))))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}
+(all)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!(
+        "{src}
+(compile nibble)
+(compile put)
+(compile high)
+(compile wide)
+(compile nand8)
+(compile all)
+(all)"
+    ))
+    .expect("compiled failed");
+    assert_eq!(compiled, interpreted, "the compiled byte-specifier family agrees with the interpreter");
+    // 10 + 62975 + 1 + 1 + 207
+    assert_eq!(compiled, Value::Int(63194));
 }
 
 /// CL's variadic sugar (`Checker::check_variadic_arith`/`check_variadic_cmp`,

@@ -646,8 +646,8 @@ impl Registry {
         // `random-state` (CL's `random-state`): a mutable PRNG stream, its
         // actual bit-twiddling done in Rust (`interp::eval_random_state_next`
         // — the fixed-width xorshift step isn't expressible in typelisp,
-        // which has no bitwise operators). None of these three has a natural
-        // receiver to dispatch on, so all stay free functions. `random`/`make-random-state`/`random-state-p`
+        // which has no bitwise operators). None of these has a natural
+        // receiver to dispatch on, so all four stay free functions. `random`/`make-random-state`/`random-state-p`
         // are ordinary `defun`s in the prelude built on top of these — a
         // `random-state` has nowhere else to hang an `&optional` parameter
         // off of, since `check_call_opt_key` only resolves `&optional`/`&key`
@@ -655,6 +655,15 @@ impl Registry {
         root.fns.insert("make-random-state-fresh".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::RandomState, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("random-state-copy".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::RandomState], ret: Type::RandomState, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("random-state-next".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::RandomState, Type::I32], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // `seed-random-state` (SBCL's `sb-ext:seed-random-state`, not in the
+        // standard): the stream a given integer names, for a caller who wants
+        // a run to be reproducible. CL itself has no portable way to seed —
+        // `make-random-state` takes `nil`/`t`/a state and nothing else — so
+        // this deliberately does *not* borrow a standard name for a
+        // non-standard operation. The integer-to-state map lives in
+        // `typelisp_rt::seeded_random_state`, which is where the reason it
+        // isn't the identity is written down.
+        root.fns.insert("seed-random-state".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::RandomState, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `get-universal-time`/`get-internal-real-time` (CLHS 25.1): wall-clock
         // and monotonic-ish timers, respectively. `get-universal-time` counts
         // seconds since 1900-01-01 UTC (CL's epoch, 2208988800s before the
@@ -2054,23 +2063,44 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = BTreeMap::new();
     // `max`/`min` (CL) and the bitwise operators (`logand`/`logior`/`logxor`)
-    // and `ash` (arithmetic shift, positive = left) are all same-type binary
-    // ops like `+`/`-`/`*`. Every one of them works in the receiver type's
-    // own width and signedness — the value in hand is always the number its
-    // type names, sign- or zero-extended into the 64-bit carrier (see
-    // `types::normalize_int` and `eval_int_builtin`'s doc comment).
-    for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor", "ash"] {
+    // are same-type binary ops like `+`/`-`/`*`. Every one of them works in
+    // the receiver type's own width and signedness — the value in hand is
+    // always the number its type names, sign- or zero-extended into the
+    // 64-bit carrier (see `types::normalize_int` and `eval_int_builtin`'s
+    // doc comment).
+    for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor"] {
         m.insert(op.to_string(), binop());
     }
+    // `ash` (arithmetic shift, positive = left) is *not* one of them, and
+    // used to be: its second operand is a shift **distance**, not another
+    // value of the receiver's type, and typing it as the latter made right
+    // shift unwritable on every unsigned width — `(ash (the u8 x) -3)` was
+    // rejected because `-3` is out of `u8`'s range, and no other spelling of
+    // "shift right" existed. The distance is an `i32` for the same reason
+    // CL's `(ash integer count)` lets `count` be any integer: it measures
+    // bits, so the receiver's width and signedness have nothing to say about
+    // it. Nothing below the checker changes — the compiled tier passes the
+    // distance as a raw word and `rt_int_ash` already read it as a signed
+    // count, as did `eval_int_builtin`.
+    m.insert("ash".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), Type::I32], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
-    // `logbitp`/`logtest`: bitwise `Bool`-valued predicates, receiver-first
-    // like every other binary op here (`(logbitp index integer)`,
-    // `(logtest a b)`).
-    for op in ["logbitp", "logtest"] {
-        m.insert(op.to_string(), cmp());
-    }
+    // `logtest`: a bitwise `Bool`-valued predicate on two values of the
+    // receiver's type (`(logtest a b)`).
+    m.insert("logtest".to_string(), cmp());
+    // `logbitp` is *not* one of those, and used to be registered as if it
+    // were. Its index is a bit **position**, the same kind of quantity as
+    // `ash`'s distance, so it is an `i32` at every width. The argument order
+    // changed with it: CL writes `(logbitp index integer)`, which put the
+    // *index* in the receiver slot — and since a method is keyed by
+    // `(receiver type, name)`, an `i32` index could carry only one signature,
+    // so the integer could never be anything but an `i32` either. The value
+    // being asked about comes first here, as it does in every other bit
+    // operation this file registers (`(logand a b)`, `(ash x count)`,
+    // `(lognot x)`); `ldb` and its family moved the same way and for the same
+    // reason (`prelude.rs`'s byte-specifier section).
+    m.insert("logbitp".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), Type::I32], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `lognot` (bitwise complement), `logcount` (population count of a
     // nonnegative integer, or of the zero bits of a negative one — CL
     // §12.10's "infinite precision" reading), `integer-length` (bits needed,
@@ -2231,15 +2261,21 @@ fn bignum_assoc() -> BTreeMap<String, AssocFn> {
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = BTreeMap::new();
-    for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor", "ash"] {
+    for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor"] {
         m.insert(op.to_string(), binop());
     }
+    // `ash`'s distance and `logbitp`'s index are `i32` here for exactly the
+    // reasons `int_assoc` gives, and one more that is specific to `bignum`:
+    // a shift distance that could itself be arbitrary precision is not a
+    // quantity anyone can use. `(ash big huge)` names a result with `huge`
+    // more bits than `big` — no machine finishes that, so the wider type
+    // buys nothing and only makes the ordinary call awkward to write.
+    m.insert("ash".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::I32], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("logbitp".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::I32], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
-    for op in ["logbitp", "logtest"] {
-        m.insert(op.to_string(), cmp());
-    }
+    m.insert("logtest".to_string(), cmp());
     for op in ["lognot", "logcount", "integer-length"] {
         m.insert(op.to_string(), unary());
     }
