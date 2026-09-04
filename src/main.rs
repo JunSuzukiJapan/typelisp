@@ -12,7 +12,7 @@ use std::rc::Rc;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
-use typelisp::project::{find_src_root, load_file_flat, needs_immediate_exec, Loader};
+use typelisp::project::{find_src_root, load_file_flat, Loader};
 use typelisp::*;
 
 const PROMPT_PRIMARY: &str = "typl> ";
@@ -337,24 +337,25 @@ fn history_path() -> PathBuf {
     }
 }
 
-/// Read+check+execute whatever is currently in `pending`. On a recoverable
-/// "need more input" error, leaves `pending` untouched so the caller keeps
-/// accumulating lines. On success or a real error, clears `pending`.
+/// Read+check+execute whatever is currently in `pending`, **one form at a
+/// time**: each form is read, checked and run before the next one is read
+/// (`Reader::forms_in`), which is what a Lisp REPL has always meant by
+/// reading from a stream and is what lets a form affect how the text after it
+/// is read.
 ///
-/// GC-root discipline: `read_all`'s temporary roots protect the raw forms
-/// across checking (macro expansion conses, and can collect), and are the
-/// only thing doing so — `check_form`'s output never retains the raw
-/// `Value`. So: pop back to `mark` immediately on any read failure (nothing
-/// left to check yet), or only after every form in the batch has been
-/// through `check_form` — never pop in between.
+/// On a recoverable "need more input" error, `pending` is cut back to the
+/// unread tail — the forms already read have already *run*, so leaving them
+/// in `pending` would run them a second time when the next line arrives. On
+/// success or a real error, clears `pending`.
 ///
-/// One exception: a `(defmacro ...)` form is `exec`'d *immediately* once
-/// checked, right here in the check loop, instead of waiting for the batch
-/// exec pass below — a macro use later in the *same* pasted/typed batch needs
-/// the macro's body already present in `Interp` to expand during checking
-/// (see `MacroExpander`/`check::checker::check_list`). This doesn't violate
-/// the invariant above: `Interp::exec` on a `Defmacro` is just a `HashMap`
-/// insert, so it allocates nothing and cannot collect.
+/// GC-root discipline: the reader's roots protect the raw forms across
+/// checking (macro expansion conses, and can collect), and are the only thing
+/// doing so — `check_form`'s output never retains the raw `Value`. They
+/// accumulate interleaved with the checked forms' own roots and are all
+/// popped together at the end; nothing pops in between, so the stack stays
+/// LIFO. `Interp::exec` is balanced on that stack (it roots a definition
+/// permanently, on the other stack), so running a form mid-batch leaves the
+/// discipline intact.
 fn try_run_pending(
     heap: &mut Heap,
     reader: &Reader,
@@ -364,45 +365,54 @@ fn try_run_pending(
     pending: &mut String,
 ) {
     let mark = heap.root_count();
-    let forms = match reader.read_all_in_spanned(heap, "<stdin>", pending) {
-        Ok(forms) => forms,
-        Err(e) => {
-            while heap.root_count() > mark {
-                heap.pop_root();
-            }
-            if is_incomplete(&e) {
-                return; // keep accumulating
-            }
-            eprintln!("error: {}", e);
-            pending.clear();
-            return;
-        }
-    };
+    let mut forms = reader.forms_in("<stdin>", pending);
+    // Where the reader stopped after the last *completed* form, in characters.
+    // Only used on the "need more input" path, to decide what is left over.
+    let mut consumed = 0usize;
+    let mut fatal: Option<Error> = None;
+    let mut incomplete = false;
 
-    // Load any `use` dependencies before checking, so `check_use` finds them
-    // in the registry (see `typelisp::project`). A nested load pushes and
-    // pops its own read roots strictly above this batch's, so the root-stack
-    // discipline below is undisturbed.
-    let form_values: Vec<Value> = forms.iter().map(|(v, _)| *v).collect();
-    if let Err(e) = loader.load_uses_in(heap, reader, &mut checker.borrow_mut(), interp, &form_values) {
-        while heap.root_count() > mark {
-            heap.pop_root();
-        }
-        for w in checker.borrow_mut().take_warnings() {
-            eprintln!("{}", w);
-        }
-        eprintln!("error: {}", e);
-        pending.clear();
-        return;
-    }
+    loop {
+        let (v, loc) = match forms.next_form(heap) {
+            Ok(Some(pair)) => pair,
+            Ok(None) => break,
+            Err(e) => {
+                if is_incomplete(&e) {
+                    incomplete = true;
+                } else {
+                    fatal = Some(e);
+                }
+                break;
+            }
+        };
 
-    let mut checked = Vec::with_capacity(forms.len());
-    let mut check_err = None;
-    for (v, loc) in forms {
+        // Load this form's `use` dependencies before checking it, so
+        // `check_use` finds them in the registry (see `typelisp::project`). A
+        // nested load pushes and pops its own read roots strictly above ours,
+        // so the root-stack discipline is undisturbed.
+        if let Err(e) = loader.load_uses_in(heap, reader, &mut checker.borrow_mut(), interp, &[v]) {
+            fatal = Some(e);
+            break;
+        }
+        // A loaded module's own forms run before the form that `use`d it —
+        // its definitions and `defvar` initializers must exist by the time
+        // this form does anything.
+        let mut load_failed = false;
+        for tl in loader.take_pending() {
+            if let Err(e) = interp.exec(heap, tl) {
+                eprintln!("error: {}", e);
+                load_failed = true;
+                break;
+            }
+        }
+        if load_failed {
+            break;
+        }
+
         // Borrow the checker only for the check itself, so the borrow is
-        // released before any `interp.exec` below — a `defmacro`'s immediate
-        // exec, or the batch exec further down, must be free to let a runtime
-        // `(eval ...)` re-borrow the checker (`Interp::eval_form`).
+        // released before any `interp.exec` below — a form's exec must be
+        // free to let a runtime `(eval ...)` re-borrow the checker
+        // (`Interp::eval_form`).
         let result = checker.borrow_mut().check_form_at(heap, &*interp, v, Some(loc));
         for w in checker.borrow_mut().take_warnings() {
             eprintln!("{}", w);
@@ -410,7 +420,7 @@ fn try_run_pending(
         let tl = match result {
             Ok(tl) => tl,
             Err(e) => {
-                check_err = Some(e);
+                fatal = Some(e);
                 break;
             }
         };
@@ -423,44 +433,42 @@ fn try_run_pending(
         // in practice.)
         if let Some(path) = typelisp::project::load_path_of(heap, tl) {
             if let Err(e) = load_file_flat(heap, reader, &mut checker.borrow_mut(), interp, FsPath::new("."), &path) {
-                check_err = Some(e);
+                fatal = Some(e);
                 break;
             }
-        } else if needs_immediate_exec(heap, tl) {
-            let _ = interp.exec(heap, tl);
         } else {
-            checked.push(tl);
+            match interp.exec(heap, tl) {
+                Ok(Some(v)) => println!("{}", format_value(heap, checker.borrow().registry(), &v)),
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    break;
+                }
+            }
         }
+        consumed = forms.pos();
+    }
+
+    // Anything the dependency loads warned about: the per-form drain below
+    // only covers this batch's own forms, and a `use` that failed never
+    // reached it.
+    for w in checker.borrow_mut().take_warnings() {
+        eprintln!("{}", w);
     }
     while heap.root_count() > mark {
         heap.pop_root();
     }
-    pending.clear();
 
-    if let Some(e) = check_err {
-        eprintln!("error: {}", e);
+    if incomplete {
+        // Keep only what has not been read. Everything before `consumed` has
+        // already run; re-reading it when the rest of the form arrives would
+        // run it twice.
+        *pending = pending.chars().skip(consumed).collect();
         return;
     }
-
-    // Loaded modules' forms run before the batch that `use`d them (their
-    // definitions and `defvar` initializers must exist by the time the
-    // batch's own forms execute).
-    for tl in loader.take_pending() {
-        if let Err(e) = interp.exec(heap, tl) {
-            eprintln!("error: {}", e);
-            return;
-        }
-    }
-
-    for tl in checked {
-        match interp.exec(heap, tl) {
-            Ok(Some(v)) => println!("{}", format_value(heap, checker.borrow().registry(), &v)),
-            Ok(None) => {}
-            Err(e) => {
-                eprintln!("error: {}", e);
-                break;
-            }
-        }
+    pending.clear();
+    if let Some(e) = fatal {
+        eprintln!("error: {}", e);
     }
 }
 

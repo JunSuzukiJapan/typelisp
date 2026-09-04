@@ -161,8 +161,10 @@ pub fn capture_program_dump(
     let mark = heap.root_count();
     let mut forms: Vec<crate::Value> = Vec::new();
     let reader = crate::Reader::new();
-    let program = reader.read_all_in(heap, typelisp_front::dump::PROGRAM_LABEL, source).map_err(|e| e.to_string())?;
-    for v in program {
+    // Read, check and run one form before the next is read — the same order
+    // the session being recorded ran them in (`Reader::forms_in`).
+    let mut program = reader.forms_in(typelisp_front::dump::PROGRAM_LABEL, source);
+    while let Some((v, _)) = program.next_form(heap).map_err(|e| e.to_string())? {
         let tl = chk.check_form(heap, &interp, v).map_err(|e| e.to_string())?;
         // The warnings were already reported by the caller's own check of this
         // same source; repeating them would double every one.

@@ -48,13 +48,17 @@
 //! immediately rather than the stale file on disk.
 //!
 //! GC-root discipline (the `main.rs::try_run_pending` invariant): each file's
-//! `read_all_in` roots are popped as soon as that file's forms are checked —
-//! nested loads are strictly LIFO above the outer file's roots, so stack
-//! order holds. Checked forms are queued (dependency-first, since a
-//! dependency's load completes before the dependent's check resumes) and
-//! executed by the driver only after every root is popped; the one exception
-//! is `defmacro` registration, which must precede later macro *uses* in the
-//! same load and is safe mid-load because it never touches the root stack.
+//! read roots are popped as soon as that file's forms are checked — nested
+//! loads are strictly LIFO above the outer file's roots, so stack order
+//! holds. A form is rooted by [`crate::read::Forms::next_form`] as it is
+//! read, and the roots of a file accumulate interleaved with its checked
+//! forms' roots until the whole file is done; nothing pops in between, which
+//! is what keeps the stack LIFO even though the read no longer happens all at
+//! once. Checked forms are queued (dependency-first, since a dependency's
+//! load completes before the dependent's check resumes) and executed by the
+//! driver only after every root is popped; the one exception is `defmacro`
+//! registration, which must precede later macro *uses* in the same load and
+//! is safe mid-load because it never touches the root stack.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -214,9 +218,14 @@ impl Loader {
         self.load_source(heap, reader, checker, interp, file, src, segs)
     }
 
-    /// Scan `forms` (a batch read from stdin — the REPL's case, where no
-    /// entry file exists) for `use` dependencies and load them. The REPL then
-    /// checks the batch itself as today, in the root namespace.
+    /// Scan `forms` for `use` dependencies and load them — the REPL's case,
+    /// where there is no entry file. The REPL then checks and runs the forms
+    /// themselves, in the root namespace.
+    ///
+    /// It passes one form at a time (it reads them one at a time), so a `use`
+    /// is a dependency of what comes after it, exactly as in a file — see
+    /// [`Loader::load_source_inner`]'s loop. The slice stays in the signature
+    /// because nothing about the scan needs it to be a single form.
     pub fn load_uses_in(
         &mut self,
         heap: &mut Heap,
@@ -278,37 +287,56 @@ impl Loader {
         // (`segs` is the path `module_segs_for` derived). An explicit
         // `(module ...)` inside nests further, handled while reading.
         let ns = crate::mem::symbols::ns_of(segs);
-        let forms = match reader.read_all_in_spanned_within(heap, &file_name, src, ns) {
-            Ok(forms) => forms,
-            Err(e) => {
-                pop_roots_to(heap, mark);
-                return Err(e);
-            }
-        };
-
-        // Load dependencies first (recursive; each nested load pushes and
-        // pops its own roots strictly above ours). `segs` is threaded
-        // through as the enclosing file's own module path, so a `use` can
-        // also resolve against a sibling file in the same directory — see
-        // `ensure_loaded`'s doc comment.
-        for (v, _) in &forms {
-            if let Err(e) = self.scan_form(heap, reader, checker, interp, *v, segs) {
-                pop_roots_to(heap, mark);
-                return Err(e);
-            }
-        }
         let file_dir = file.parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
         let path = checker.enter_file_module(segs);
+        // One form at a time: read, resolve that form's dependencies, check
+        // it, and run it, before the next form is read at all
+        // (`Reader::forms_within`). The file used to be read to the end first
+        // and scanned for `use` in a pass of its own, which is what made
+        // read-time evaluation impossible — the text was fixed before any of
+        // it ran.
+        //
+        // Two things follow from the change, both deliberate:
+        //
+        // * A `use` is a dependency of the forms that come *after* it, not of
+        //   the whole file. A file that names `m::f` above its own `(use m)`
+        //   used to work because the scan had already loaded `m`; now it
+        //   reports the unresolved name. Every convention already puts the
+        //   `use`s at the top, and this is the reading a per-form loader can
+        //   give.
+        // * The scan now runs *inside* this file's module context rather than
+        //   before `enter_file_module`. `ensure_loaded` already suspends the
+        //   namespace context around a dependency load for exactly this case
+        //   (a `use` surfaced mid-check by macro expansion), so a dependency
+        //   still registers under its own path.
+        let mut forms = reader.forms_within(&file_name, src, ns);
         let mut body = Vec::new();
         let mut check_err = None;
-        for (v, loc) in forms {
+        loop {
+            let read = match forms.next_form(heap) {
+                Ok(Some(pair)) => pair,
+                Ok(None) => break,
+                Err(e) => {
+                    check_err = Some(e);
+                    break;
+                }
+            };
+            let (v, loc) = read;
+            // Dependencies of this form (recursive; each nested load pushes
+            // and pops its own roots strictly above ours). `segs` is threaded
+            // through as the enclosing file's own module path, so a `use` can
+            // also resolve against a sibling file in the same directory — see
+            // `ensure_loaded`'s doc comment.
+            if let Err(e) = self.scan_form(heap, reader, checker, interp, v, segs) {
+                check_err = Some(e);
+                break;
+            }
             // A top-level macro call may expand to `(use ...)` (or to a
-            // `(module ...)` containing one) — a dependency the pre-check
-            // scan above cannot see, since the macro only got registered by
-            // checking an earlier form of this very file. Expand here, scan
-            // each expansion so its dependency files get loaded, and check
-            // the final expansion directly (the checker then has nothing
-            // left to expand at top level, so nothing expands twice).
+            // `(module ...)` containing one) — a dependency the scan of the
+            // raw form above cannot see. Expand here, scan each expansion so
+            // its dependency files get loaded, and check the final expansion
+            // directly (the checker then has nothing left to expand at top
+            // level, so nothing expands twice).
             // Expansion *errors* are deliberately ignored: `check_form_at`
             // re-expands and reports them with proper location and recovery
             // handling.
@@ -625,16 +653,20 @@ fn load_source_flat(
 ) -> Result<(), Error> {
     let file_name = file.to_string_lossy();
     let mark = heap.root_count();
-    let forms = match reader.read_all_in_spanned(heap, &file_name, src) {
-        Ok(forms) => forms,
-        Err(e) => {
-            pop_roots_to(heap, mark);
-            return Err(e);
-        }
-    };
     let dir = file.parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
+    // Read, check and run one form before the next is read — see
+    // `load_source_inner`'s loop for why the read is interleaved.
+    let mut forms = reader.forms_in(&file_name, src);
     let mut result = Ok(());
-    for (v, loc) in forms {
+    loop {
+        let (v, loc) = match forms.next_form(heap) {
+            Ok(Some(pair)) => pair,
+            Ok(None) => break,
+            Err(e) => {
+                result = Err(e);
+                break;
+            }
+        };
         match checker.check_form_at(heap, &*interp, v, Some(loc)) {
             Ok(tl) if core::op_is(heap, tl, wk::LOAD) => {
                 let Some(path) = load_path_of(heap, tl) else {
