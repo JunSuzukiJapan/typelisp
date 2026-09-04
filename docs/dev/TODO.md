@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-09-03 / ブランチ: `main`
+最終更新: 2026-09-04 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。
 
@@ -221,10 +221,14 @@ Phase 2/3 の副産物として checker のバグを 4 件見つけて直した�
 
 Phase 9c の作業中に見つけた**計画の範囲外の既存問題 2 件**（同計画の付録 D）は
 2026-08-21 に両方入れた。経緯は [implementation-log.md](implementation-log.md) の
-「付録 D の 2 件」節。D-2 のほうで 1 つ分かったことを残しておく:
-`editor_keyword_sync_test` の 649 秒は GC スラッシュ**だけ**が原因ではなく、
-修正後も 502 秒かかる。残りは 6 テストがそれぞれ prelude を JIT していることで、
-この 1 本を速くしたければ次はそちらを見る。
+「付録 D の 2 件」節。そこに書いた
+「`editor_keyword_sync_test` は修正後も 502 秒、残りは 6 テストがそれぞれ prelude を
+JIT しているぶん」は**2 段階で解消した**。JIT 6 回ぶんは 2026-09-03 の `OnceLock`
+キャッシュ（`924066a`）で 1 回になり、そのあとに残っていた数十秒は**テストの中に
+無かった**——`target/debug/deps` に溜まった 177 万個の `.o` のせいで、そのディレクトリ
+からの `exec` 自体が 21〜40 秒かかっていた。経緯は
+[implementation-log.md](implementation-log.md) の 2026-09-04 の節、掃除の手順は
+[development.md](development.md) の該当節。
 
 2026-08-20 に「ダンプ」（ビットコードと型情報を 1 ファイルに対で持つ）を入れ、起動は
 1.50s → 1.07s になった。経緯は [implementation-log.md](implementation-log.md) の該当節。
