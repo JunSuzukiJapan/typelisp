@@ -171,14 +171,22 @@ pub fn load_interpreted_plan(heap: &mut Heap, chk: &mut crate::Checker, interp: 
     // Two separate locals, not two closures over `plan`: the callbacks are
     // live at the same time, so each has to capture something the other does
     // not touch.
-    let mut source_hash: u64 = 0;
+    //
+    // The read forms are collected here and hashed after the load rather than
+    // hashed in one call during it: the loader reads them one at a time now,
+    // interleaved with checking and `exec` (`prelude::load_interpreted_with`),
+    // so there is no moment at which the whole list exists inside it. The
+    // hash is over the same values in the same order, so it is the same
+    // number the committed artifacts were built against. They stay rooted for
+    // the same reason `plan.forms` does — the reader roots each one and this
+    // generator never pops.
+    let mut read_forms: Vec<crate::Value> = Vec::new();
     crate::prelude::load_interpreted_with(
         heap,
         chk,
         interp,
-        &mut |heap, forms| {
-            source_hash = crate::compile::bootstrap::hash_read_forms(heap, forms)
-                .expect("prelude: hashing the read forms failed");
+        &mut |_heap, v| {
+            read_forms.push(v);
         },
         &mut |heap, tl| {
             // Rooted and never popped: the generator writes these into the
@@ -189,7 +197,8 @@ pub fn load_interpreted_plan(heap: &mut Heap, chk: &mut crate::Checker, interp: 
             collect_item(heap, tl, &mut plan).expect("prelude: collect failed");
         },
     );
-    plan.source_hash = source_hash;
+    plan.source_hash = crate::compile::bootstrap::hash_read_forms(heap, &read_forms)
+        .expect("prelude: hashing the read forms failed");
     plan
 }
 

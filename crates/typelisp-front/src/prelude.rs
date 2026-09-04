@@ -5355,10 +5355,17 @@ pub fn load_interpreted(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp)
 }
 
 /// [`load_interpreted`] with the two points a *generator* needs to look in:
-/// `on_read` sees the whole form list once, right after the read and before
-/// anything has been checked (the prelude's source hash is taken over exactly
-/// these forms); `on_checked` sees each top-level form after checking and
-/// before `exec` (where the artifact's item list is collected from).
+/// `on_read` sees each form as it is read, before that form is checked (the
+/// prelude's source hash is taken over exactly these forms, in exactly this
+/// order); `on_checked` sees each top-level form after checking and before
+/// `exec` (where the artifact's item list is collected from).
+///
+/// `on_read` is per form rather than "the whole list, once" because the read
+/// is interleaved with the check and the `exec` now — form *n+1* is read only
+/// after form *n* has run (`Reader::forms`). A generator that wants the whole
+/// list still gets it, by accumulating; what it cannot have is the list
+/// before anything has been evaluated, because that ordering is precisely
+/// what makes read-time evaluation impossible.
 ///
 /// Both are `&mut dyn FnMut` rather than generic parameters so this stays a
 /// single, non-inlined function no matter who calls it: it is the one place
@@ -5368,7 +5375,7 @@ pub fn load_interpreted_with(
     heap: &mut Heap,
     chk: &mut Checker,
     interp: &mut Interp,
-    on_read: &mut dyn FnMut(&mut Heap, &[Value]),
+    on_read: &mut dyn FnMut(&mut Heap, Value),
     on_checked: &mut dyn FnMut(&mut Heap, Value),
 ) {
     // The core macro layer first: `SOURCE` below is written in `when`/`cond`/
@@ -5379,9 +5386,9 @@ pub fn load_interpreted_with(
     crate::core_macros::load_with(heap, chk, interp, on_checked);
 
     let r = Reader::new();
-    let forms = r.read_all(heap, SOURCE).expect("prelude: read failed");
-    on_read(heap, &forms);
-    for v in forms {
+    let mut forms = r.forms(SOURCE);
+    while let Some((v, _)) = forms.next_form(heap).expect("prelude: read failed") {
+        on_read(heap, v);
         let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");
         for w in chk.take_warnings() {
             eprintln!("{}", w);

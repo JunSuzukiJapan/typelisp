@@ -212,23 +212,101 @@ impl Reader {
         src: &str,
         ns: NsId,
     ) -> Result<Vec<(Value, Loc)>, Error> {
-        let mut cur = Cursor::new(file, src);
+        let mut forms = self.forms_within(file, src, ns);
         let mut out = Vec::new();
-        loop {
-            if let Err(e) = skip_ws_comments(&mut cur, heap, &self.features) {
-                return Err(e.at(cur.loc()));
-            }
-            if cur.at_end() {
-                break;
-            }
-            let (v, loc) = match read_datum_spanned(&mut cur, heap, &self.features, ns) {
-                Ok(pair) => pair,
-                Err(e) => return Err(e.at(cur.loc())),
-            };
-            heap.push_root(v);
-            out.push((v, loc));
+        while let Some(pair) = forms.next_form(heap)? {
+            out.push(pair);
         }
         Ok(out)
+    }
+
+    /// The same top-level data [`Reader::read_all_in_spanned_within`] returns,
+    /// but handed over **one at a time**, so a caller can check and evaluate
+    /// form *n* before form *n+1* is read.
+    ///
+    /// That order is the whole point. Reading a file to the end first makes
+    /// the source text a fixed thing decided before any of it runs, which is
+    /// why `#+`/`#-` can only see a feature set fixed in advance and why
+    /// there is nowhere to put a reader macro: the form that would install
+    /// one has not run when the text it is meant to affect is read. Every
+    /// driver that loads source goes through here for that reason — see
+    /// `prelude::load_interpreted_with`, `project::Loader::load_source_inner`
+    /// and `typl`'s own REPL batch.
+    ///
+    /// `read_all_*` remain, built on this: a caller that only wants the data
+    /// (a test, a `read-from-string`, a generator hashing its input) should
+    /// keep asking for all of it.
+    ///
+    /// The returned [`Forms`] borrows the *reader*, not `src` — the cursor
+    /// takes its own copy of the characters — so a driver is free to edit or
+    /// drop the source string it was given (`typl`'s REPL rewrites its
+    /// pending buffer from [`Forms::pos`] while the `Forms` is still alive).
+    pub fn forms_within<'a>(&'a self, file: &str, src: &str, ns: NsId) -> Forms<'a> {
+        Forms { cur: Cursor::new(file, src), features: &self.features, ns }
+    }
+
+    /// [`Reader::forms_within`] at the root namespace — the REPL, the prelude
+    /// and the island, which have no module of their own to intern into.
+    pub fn forms_in<'a>(&'a self, file: &str, src: &str) -> Forms<'a> {
+        self.forms_within(file, src, NsId::ROOT)
+    }
+
+    /// [`Reader::forms_in`] with the placeholder file name `<input>`.
+    pub fn forms<'a>(&'a self, src: &str) -> Forms<'a> {
+        self.forms_in("<input>", src)
+    }
+}
+
+/// One source text being read a form at a time — [`Reader::forms_within`].
+///
+/// Holds the read position (and, through the [`Reader`] it borrows, the
+/// feature set the `#+`/`#-` conditionals consult), so the text between two
+/// calls is text that has not been looked at yet.
+pub struct Forms<'a> {
+    cur: Cursor,
+    features: &'a Features,
+    ns: NsId,
+}
+
+impl Forms<'_> {
+    /// The next top-level datum and its span, or `Ok(None)` at end of input.
+    ///
+    /// Each datum is registered as a GC root before it is returned, exactly
+    /// as [`Reader::read_all_in_spanned_within`] does — the caller pops them,
+    /// and must not pop one while a later form is still to be read (the root
+    /// stack is LIFO).
+    pub fn next_form(&mut self, heap: &mut Heap) -> Result<Option<(Value, Loc)>, Error> {
+        if let Err(e) = skip_ws_comments(&mut self.cur, heap, self.features) {
+            return Err(e.at(self.cur.loc()));
+        }
+        if self.cur.at_end() {
+            return Ok(None);
+        }
+        match read_datum_spanned(&mut self.cur, heap, self.features, self.ns) {
+            Ok((v, loc)) => {
+                heap.push_root(v);
+                Ok(Some((v, loc)))
+            }
+            Err(e) => Err(e.at(self.cur.loc())),
+        }
+    }
+
+    /// How far into the source the reader has got, as a **character** index
+    /// (the unit [`Reader::read_from`] uses too).
+    ///
+    /// Read one form at a time and the text splits in two at this point: what
+    /// has been read, and what has not. An interactive driver needs the
+    /// split — `typl`'s REPL runs each form as it is read, so when the last
+    /// one turns out to be incomplete it has to keep *only* the unread tail
+    /// and wait for the rest of it, or the forms it already ran would run
+    /// again on the next line.
+    ///
+    /// A datum ends where it ends: the whitespace that separated it from the
+    /// next one has not been consumed and is part of the tail. (Only
+    /// [`Reader::read_from`] eats that one character, because CL's
+    /// `read-from-string` does.)
+    pub fn pos(&self) -> usize {
+        self.cur.pos()
     }
 }
 

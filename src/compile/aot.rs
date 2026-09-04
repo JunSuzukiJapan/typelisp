@@ -159,7 +159,10 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     crate::load_compiler(&mut heap, &mut chk, &mut interp);
 
     let reader = Reader::new();
-    let forms = reader.read_all_in_spanned(&mut heap, source_path, &source).map_err(|e| e.to_string())?;
+    // One form at a time, like every other loader (`Reader::forms_in`): the
+    // file an AOT build reads is the same file the interpreter reads, so it
+    // has to be read the same way.
+    let mut forms = reader.forms_in(source_path, &source);
 
     // Every top-level form in an AOT source file must be something with a
     // compiled body or none at all: `defun`/`defmethod` (bodies),
@@ -181,7 +184,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // `Interp::compile_scc` uses for the JIT's call graph.
     let mut node_names: Vec<(String, String)> = Vec::new(); // (node name, LLVM symbol)
     let mut defvar_inits: Vec<(Path, Value)> = Vec::new();
-    for (v, loc) in forms {
+    while let Some((v, loc)) = forms.next_form(&mut heap).map_err(|e| e.to_string())? {
         let tl = chk.check_form_at(&mut heap, &interp, v, Some(loc)).map_err(|e| e.to_string())?;
         collect_aot_item(&mut heap, &mut interp, tl, &mut node_names, &mut defvar_inits)?;
     }
