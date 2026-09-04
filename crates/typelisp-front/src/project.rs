@@ -454,16 +454,23 @@ impl Loader {
             _ => return Ok(()),
         };
         match name.as_str() {
-            "use" => {
-                let rest = heap.cdr(v)?;
-                if let Value::Cons(_) = rest {
+            // Every spelling of an import, and *every* path in one: the forms
+            // take a list (`(use a::f b::g)`), and a path whose file has not
+            // been loaded resolves for no other reason than this scan.
+            "use" | "import" | "shadowing-import" => {
+                let mut rest = heap.cdr(v)?;
+                while let Value::Cons(_) = rest {
                     let arg = heap.car(rest)?;
                     if let Some(segs) = value_path_segs(heap, arg) {
                         self.ensure_loaded(heap, reader, checker, interp, &segs, cur_segs)?;
                     }
+                    rest = heap.cdr(rest)?;
                 }
                 Ok(())
             }
+            // `(in-module path)` names a module to *enter*, not one to load:
+            // it nests inside this file, so there is no file behind it.
+            "in-module" => Ok(()),
             "module" => {
                 // Skip the path argument, scan the body forms.
                 let mut rest = heap.cdr(v)?;

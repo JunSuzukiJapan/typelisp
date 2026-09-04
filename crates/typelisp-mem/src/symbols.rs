@@ -336,6 +336,15 @@ well_known_symbols! {
     // is resolved where it is written and never travels at run time the way a
     // `throw`'s tag does.
     RETURN_FROM => "return-from"
+
+    "Appended for Stage 9a (2026-09-04), again at the very end. `in-module` is
+     the flat form of `(module ...)`; `import` is the CL-compatible spelling of
+     `use`, and `shadowing-import` the one that means to take a bare name
+     another binding already holds. CL's `shadow` and `unuse-package` have no
+     entries because they are not adopted — see cl-parity-plan.md Stage 9a."
+    IN_MODULE => "in-module"
+    IMPORT => "import"
+    SHADOWING_IMPORT => "shadowing-import"
 }
 
 
