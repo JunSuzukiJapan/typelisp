@@ -80,8 +80,11 @@ a spelling for a type, expanded where it is written.")
     ;; iteration (§5)
     "loop" "while" "until" "dotimes" "dolist" "do" "do*" "doiter"
     "break" "return"
-    ;; non-local exit (§8) — `break'/`return' above are the *static* exits,
-    ;; these are the dynamic ones
+    ;; the lexical named escape (Phase 4a): `block' is the target,
+    ;; `return-from' leaves it — still a *static* exit, like `break'
+    "block" "return-from"
+    ;; non-local exit (§8) — `break'/`return'/`return-from' above are the
+    ;; *static* exits, these are the dynamic ones
     "catch" "throw" "unwind-protect"
     ;; function values & application (§6)
     "lambda" "labels" "apply"

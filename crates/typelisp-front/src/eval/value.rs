@@ -89,6 +89,13 @@ pub enum EvalError {
     Throw(String, Box<Value>),
     /// `return value`: unwinding to the nearest enclosing loop with `value`.
     Return(Box<Value>),
+    /// `(return-from name value)`: unwinding to the enclosing `(block name
+    /// ...)`. Named, unlike [`EvalError::Break`]/[`EvalError::Return`], and
+    /// *lexical*, unlike [`EvalError::Throw`] — the checker already proved
+    /// which `block` catches it, so the name here only tells nested blocks
+    /// apart while the signal passes through them, and can never fail to find
+    /// a frame the way a `throw` can.
+    ReturnFrom(String, Box<Value>),
     /// A runtime error carrying the source location where it occurred. Wraps
     /// the underlying error; [`fmt::Display`] prefixes it with `file:line:col`.
     /// Built only via [`EvalError::at`], which never wraps the `Break`/`Return`
@@ -98,13 +105,18 @@ pub enum EvalError {
 }
 
 impl EvalError {
-    /// Attach a source location to this error. The `Break`/`Return`/`Throw`
+    /// Attach a source location to this error. The
+    /// `Break`/`Return`/`ReturnFrom`/`Throw`
     /// non-local-exit signals are returned unchanged — they are control flow,
     /// not errors, and whatever catches them matches on the bare variant. An
     /// already-located error also keeps its original (innermost) location.
     pub fn at(self, loc: Loc) -> EvalError {
         match self {
-            EvalError::Break | EvalError::Return(_) | EvalError::Throw(..) | EvalError::At(..) => self,
+            EvalError::Break
+            | EvalError::Return(_)
+            | EvalError::ReturnFrom(..)
+            | EvalError::Throw(..)
+            | EvalError::At(..) => self,
             other => EvalError::At(loc, Box::new(other)),
         }
     }
@@ -148,6 +160,9 @@ impl fmt::Display for EvalError {
             EvalError::Internal(m) => write!(f, "internal error: {}", m),
             EvalError::Break => write!(f, "internal error: break escaped its loop"),
             EvalError::Return(_) => write!(f, "internal error: return escaped its loop"),
+            EvalError::ReturnFrom(name, _) => {
+                write!(f, "internal error: (return-from {}) escaped its block", name)
+            }
             EvalError::Throw(tag, _) => write!(f, "throw: no enclosing (catch '{}) for this throw", tag),
             EvalError::At(loc, inner) => write!(f, "{}: {}", loc, inner),
         }

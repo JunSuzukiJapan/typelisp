@@ -153,6 +153,44 @@ pub(super) fn return_form(heap: &mut Heap, value: Option<Value>) -> Result<Value
     }
 }
 
+/// `(block NAME BODY...)` — a named escape target, left by
+/// `(return-from NAME v)`.
+///
+/// The name is carried as a plain string field, not as a quoted symbol the way
+/// [`catch_form`] carries its tag. The difference is the one that separates the
+/// two mechanisms: a `block`'s name is resolved *where it is written* — the
+/// checker matches a `return-from` to an enclosing frame at check time, and
+/// nothing compares names at run time — whereas a `throw`'s tag is compared
+/// against live `catch` frames while unwinding, so it has to survive as a
+/// value. Written as a string for the same reason `lambda`'s parameter names
+/// are: the island reads it to label a basic block, and never as a datum.
+pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value) -> Result<Value, Error> {
+    // One body form, not a sequence: the checker wraps the body in a
+    // binding-less `let` first, so every consumer — the evaluator, the bridge,
+    // the island — has one form to run and none of them re-implements
+    // sequencing. `catch` carries its body the same way, for the same reason.
+    //
+    // `body` is rooted *first*, before anything else here allocates. It
+    // arrives from `Checker::let_form`, which builds under an `Items` and so
+    // has already unrooted it — and the very next line allocates a string and
+    // a node for the name. This is the window `rooted`'s doc comment
+    // describes, and this was the fifth leak to live in it: without the root,
+    // `gc_stress` reports `push_root given freed cell` from inside `tagged`.
+    let body = rooted(heap, body);
+    let name = str_lit_form(heap, name)?;
+    core::tagged(heap, "block", &[name, body])
+}
+
+/// `(return-from NAME)` / `(return-from NAME FORM)` — leave the enclosing
+/// [`block_form`] of that name.
+pub(super) fn return_from_form(heap: &mut Heap, name: &str, value: Option<Value>) -> Result<Value, Error> {
+    let name = str_lit_form(heap, name)?;
+    match value {
+        Some(v) => core::tagged(heap, "return-from", &[name, v]),
+        None => core::tagged(heap, "return-from", &[name]),
+    }
+}
+
 /// `(catch SYMBOL BODY REPR)` — run `BODY`, and if a `(throw SYMBOL v)` fires
 /// anywhere it reaches (through any number of calls), produce `v` instead.
 ///

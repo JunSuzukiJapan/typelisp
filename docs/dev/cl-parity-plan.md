@@ -574,19 +574,31 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
 `defmacro` は保護された組み込み形を*呼べない*が*生成する*のは構わない——展開はチェッカーへ
 返って検査されるので、既存の `do` が変数をステップするのと同じ手が使える。
 
+**`block` / `return-from` は完了（2026-09-04）。** 経緯と設計判断は
+[implementation-log.md](implementation-log.md) の該当節、仕様は
+[syntax.md](../syntax.md) §5.0、テストは `tests/block_test.rs`（26 本、うち 5 本は
+コンパイル経路、1 本は `gc_stress`）。見立てのうち当たっていたもの・外れていたものは:
+
+- checker 側が `loop_stack` と同型で足りる、は当たり。`block_stack` は
+  `(name, 脱出型, 使われたか)` のフレームで、`return-from` は名前で探して型を合流する。
+- **`defun` の暗黙ブロックは「使われたときだけノードを出す」**ことにした。フレームは常に
+  積むが `block` ノードは `return-from` が名指したときだけ——自分の名前を書かない関数の
+  コードは 1 命令も変わらない。
+- **島の引数列は 3 本増えた**（`block-names` / `block-exits` / `block-slots`）。
+  引き回しは 162 箇所。見立ての「4000 行全体に触る」は量として正しかった。
+- **`block-names` が `string`** なのは、島が `Sexpr` を*作らない*（分解しかしない）ため。
+  名前に空白は入りようがない（リーダがそこでシンボルを終える）ので、空白区切りで足りる。
+  列挙が要る消費者は `compile-unwind-protect` 1 つだけで、名前引きは `Scope` が既にやる。
+- **いちばん重かったのは引き回しではなく `unwind-protect` との相互作用**。静的脱出が
+  cleanup を走らせる仕組み（`xexit`）は脱出先が 1 つである前提で書かれていた。ブロックは
+  N 個あるので、`unwind-protect` が**囲む block ごとに cleanup の複製を 1 つ**作り、その名前を
+  自分の cleanup ブロックへ束縛し直す形にした。根の切り詰めを**脱出地点ではなく block の
+  出口**へ移したのが鍵で、これで連鎖の途中は「自分が最後かどうか」を知らなくてよくなる。
+
 **残っているもの（それぞれ理由つき）**:
 
-- **`block` / `return-from`** — 本 Stage の主役で、いちばん重い。checker 側は
-  `loop_stack` と同型の名前付きブロックスタックで足りるが、実行時は
-  (1) インタプリタに `EvalError::ReturnFrom(name, value)` と、それを捕まえる `Block` op、
-  (2) **島に名前付き脱出先を通す仕組み**が要る。島の `compile-value` は `loop-exit`/
-  `loop-slot` を全呼び出し地点に引数として引き回しており、名前付きブロックの*スタック*を
-  足すとその引数列がもう一段増える——4000 行の自己ホストコンパイラ全体に触る変更。
-  「compiled 側は既存の `break`/`return` の分岐鎖にそのまま乗る」という計画本文の見立ては
-  制御フローの形については正しいが、**引数の引き回しの量を見積もっていない**。
-- **`prog` / `prog*`** — CL では `block nil` ＋ `tagbody` の糖衣。`block` に依存し、
-  `tagbody` は goto なので対象外。`block` が入ったら「`tagbody` 抜きの `prog`」の
-  是非を判断する。
+- **`prog` / `prog*`** — CL では `block nil` ＋ `tagbody` の糖衣。`block` は入ったが
+  `tagbody` は goto なので対象外。残るのは「`tagbody` 抜きの `prog`」の是非の判断。
 - **`destructuring-bind`** — `defmacro` のラムダリストは分配束縛できるが、あれは全て
   無型の `Sexpr`。式としての `destructuring-bind` は束縛される各変数に静的型を与える
   必要があり、`Sexpr` の異種の入れ子から型を取り出す手段が無い（`match` の downcast
@@ -595,12 +607,9 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
 - **`sleep`** — Rust 組み込みが要る（§2-4 の触点フルセット）。
 
 
-- **`block` / `return-from`**（本 Phase の主役）。現在 `return` は**直近のループからしか脱出できず**、
-  名前付きブロックも関数からの早期リターンも無い。`defun` が関数名の暗黙ブロックを作る CL 規則も
-  含めて実装する。既存の `loop_stack`（checker.rs の `check_loop_body`）と同型のブロックスタックで
-  足りる。**これは静的な脱出**なので、compiled 側は既存の `break`/`return` の分岐鎖にそのまま乗る
-  ——動的な `catch`/`throw` とは混ぜない（language-design.md §7.5 の「静的な脱出と動的な脱出は
-  混ぜない」）。
+- ~~**`block` / `return-from`**（本 Phase の主役）~~ — 2026-09-04 完了（上記）。
+  「compiled 側は既存の `break`/`return` の分岐鎖にそのまま乗る」という見立ては当たり:
+  静的な脱出のまま、`catch`/`throw` には落としていない。
 - `setq` / `psetq` / `psetf`（place 機構自体は 2026-07-30 に入っているが、この 3 つは未実装）
 - `pushnew` / `remf`
 - `prog` / `prog*` / `prog1` / `prog2`、`do*`

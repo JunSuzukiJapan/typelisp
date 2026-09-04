@@ -86,6 +86,8 @@ enum Op {
     Loop,
     Break,
     Return,
+    Block,
+    ReturnFrom,
     Catch,
     Throw,
     UnwindProtect,
@@ -141,6 +143,8 @@ impl Op {
             wk::LOOP => Op::Loop,
             wk::BREAK => Op::Break,
             wk::RETURN => Op::Return,
+            wk::BLOCK => Op::Block,
+            wk::RETURN_FROM => Op::ReturnFrom,
             wk::CATCH => Op::Catch,
             wk::THROW => Op::Throw,
             wk::UNWIND_PROTECT => Op::UnwindProtect,
@@ -406,6 +410,46 @@ impl Interp {
                 }
                 None => Err(EvalError::Return(Box::new(Value::Empty))),
             },
+            // `(block NAME BODY...)`: the *lexical* named escape. The name is
+            // matched here only to tell nested blocks apart while the signal
+            // travels — the checker already decided which block a
+            // `return-from` belongs to, so an unmatched one is not a runtime
+            // possibility the way a `throw` with no `catch` is.
+            //
+            // The last body form is evaluated here rather than handed to the
+            // trampoline as a tail step: a `return-from` inside it has to be
+            // caught by *this* frame, and a tail step has already left it.
+            // `catch` gives up its tail position for the same reason.
+            Op::Block => {
+                let name = self.block_name_of(heap, form)?;
+                let body = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (block ..) has no body".to_string()))?;
+                match self.eval_core(heap, body, env) {
+                    Err(EvalError::ReturnFrom(from, v)) if from == name => {
+                        // The flight is over — release the root `Op::ReturnFrom`
+                        // registered, exactly as `Op::Catch` does.
+                        heap.set_in_flight_throw(None);
+                        Ok(Step::Done(*v))
+                    }
+                    other => other.map(Step::Done),
+                }
+            }
+            Op::ReturnFrom => {
+                let name = self.block_name_of(heap, form)?;
+                let v = match core::field(heap, form, 1) {
+                    Some(val) => self.eval_core(heap, val, env)?,
+                    None => Value::Empty,
+                };
+                // Rooted for the flight, exactly as `Op::Throw` roots its
+                // value and for the same reason: an `unwind-protect` between
+                // here and the block allocates while this value is in a `Box`
+                // the collector cannot see. `break`/`return` get away without
+                // it because `Op::UnwindProtect` roots them from its own side;
+                // this one can also be in flight across *several* blocks, so
+                // it carries its own root.
+                heap.set_in_flight_throw(Some(v));
+                Err(EvalError::ReturnFrom(name, Box::new(v)))
+            }
             // `(catch 'tag body)`: run `body`, and if a `throw` on this very
             // tag comes back through, produce its value instead. A throw on
             // some *other* tag keeps travelling — it belongs to an outer
@@ -465,6 +509,8 @@ impl Interp {
                 match &outcome {
                     Ok(v) => s.push_root(*v),
                     Err(EvalError::Return(v)) => s.push_root(**v),
+                    // A `return-from`'s value is already rooted for its whole
+                    // flight (`Op::ReturnFrom`), like a thrown one.
                     Err(_) => {}
                 }
                 self.eval_core(&mut s, cleanup, env)?;
@@ -559,6 +605,18 @@ impl Interp {
                     }
                 }
             }
+        }
+    }
+
+    /// The block name a `block`/`return-from` node's first field carries.
+    ///
+    /// A plain `(str "name")` node, not a quoted symbol: the name is settled at
+    /// check time (`Checker::block_stack`) and exists at run time only to tell
+    /// nested blocks apart, so nothing here needs a symbol's identity.
+    fn block_name_of(&self, heap: &Heap, form: Value) -> Result<String, EvalError> {
+        match core::field(heap, form, 0).and_then(|n| core::field(heap, n, 0)) {
+            Some(Value::Str(id)) => Ok(heap.string(id).to_string()),
+            other => Err(EvalError::Internal(format!("eval: block name is {:?}", other))),
         }
     }
 

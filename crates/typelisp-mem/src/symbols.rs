@@ -326,6 +326,16 @@ well_known_symbols! {
     U8 => "u8"
     U16 => "u16"
     U32 => "u32"
+
+    "Appended for `return-from` (2026-09-04), at the very end for the reason `RETIRED_INT` records."
+    // `block`'s own entry is already above, among the forms the pretty printer
+    // lays out code-shaped; it is now a core-IR tag as well, which changes
+    // nothing about the table. Both are a source special form and a core-IR
+    // tag, the way `loop`/`break`/`return` are. `block` is the *lexical* named
+    // escape — `catch`/`throw` remain the dynamic one — so the name it carries
+    // is resolved where it is written and never travels at run time the way a
+    // `throw`'s tag does.
+    RETURN_FROM => "return-from"
 }
 
 

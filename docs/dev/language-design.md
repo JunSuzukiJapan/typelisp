@@ -719,9 +719,16 @@ supers は「接頭辞にならない相手だけ」ではなく**閉包すべ�
 
 | | 静的な脱出 | 動的な脱出 |
 |---|---|---|
-| 構文 | `break` / `return` | `throw` / `panic` |
-| 行き先 | checker が決定済み（最内 `loop`、関数境界を越えない） | 実行時にタグで決まる、関数を跨ぐ |
+| 構文 | `break` / `return` / `return-from` | `throw` / `panic` |
+| 行き先 | checker が決定済み（`break`/`return` は最内 `loop`、`return-from` は名前で解決した `block`。どちらも関数境界を越えない） | 実行時にタグで決まる、関数を跨ぐ |
 | compiled | `br` 命令 | unwind（Rust panic） |
+
+`block`/`return-from`（2026-09-04）は**静的な側**に入れた。意味論だけを見れば
+`block`→`catch`、`return-from`→`throw` に落としても等価になる——チェッカーが名前を字句的に
+解決し、関数境界を越えられないので、「いちばん内側の動的な catch」と「字句的に決まった block」が
+必ず一致する。それでも採らなかったのは、行き先が実行時に決まらないものを実行時に決める機構へ
+載せると、この表の 1 行目と 3 行目が意味を失うため。実装は
+[implementation-log.md](implementation-log.md) の 2026-09-04 の節。
 
 この区別は実装方針でもある。compiled 側で `catch` の本体を別関数に切り出す案（unwind を止める
 `catch_unwind` を Rust フレームに置くための素直な手）は、この理由で**却下した**——本体が別関数に

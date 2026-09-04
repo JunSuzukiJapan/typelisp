@@ -714,7 +714,43 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 
 `break`/`return` はどちらも **直近の囲むループのみ** を脱出する（関数の早期リターンではない。
 `lambda` の境界は越えられない）。`loop` の型は内部で見つかった `break`/`return` の値型の合流型
-（一度も脱出しなければ `!`）。
+（一度も脱出しなければ `!`）。関数から抜けたいときは次の `return-from` を使う。
+
+### 5.0 `block` / `return-from` — 名前付きの脱出（cl-parity-plan.md Phase 4a）
+
+```lisp
+(block name body...)                ; 名前付きの脱出先。値は最後のフォーム、
+                                    ; または return-from が渡した値
+(return-from name)                  ; その block を Unit で抜ける
+(return-from name value)            ; 値を伴って抜ける
+```
+
+**`defun` / `defmethod` / `labels` の各関数は、自分の名前の block を暗黙に張る**（CL と同じ）。
+だから `(return-from f v)` が関数の早期リターンになる:
+
+```lisp
+(defun first-even ((a i32) (b i32)) i32
+  (if (= (mod a 2) 0) (return-from first-even a) ())
+  (if (= (mod b 2) 0) (return-from first-even b) ())
+  -1)
+```
+
+`block` は**字句的**な脱出で、名前は**書かれた場所で解決される**——チェッカーが
+`return-from` を囲む `block` に対応づけ、その値の型をブロックの脱出型に合流させる。したがって:
+
+- 対応する `block` が無い `return-from` は**型エラー**（実行時エラーではない）。
+- 値の型が他の脱出や本体の型と合わなければ**型エラー**（`match` の腕と同じ規則）。
+- 同名の `block` が入れ子なら**内側が勝つ**（CL の遮蔽規則）。
+- **関数の境界は越えられない**。`lambda` の中から外の `block` へは抜けられない
+  （`lambda` はブロックを張らない——CL の暗黙ブロックは*名前*を要求し、無名関数には無い）。
+  越える必要があるものは `catch`/`throw`（§8、こちらは**動的**）。
+
+`break`/`return`(§5) と同じ**静的**な脱出なので、コンパイル済みコードでは
+コンパイル時に決まっている基本ブロックへの分岐になる。途中に `unwind-protect` があれば
+その `cleanup` は走る（§8）。
+
+`return-from` を一度も書かなければ、その関数のコードは block が無かったときとまったく同じ
+（チェッカーは名前が実際に使われたときだけ `block` ノードを出す）。
 
 ### 5.1 拡張 `loop`（CL の LOOP DSL、cl-parity-plan.md Phase 4b）
 
@@ -774,7 +810,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 - `:maximize`/`:minimize`/`:thereis` は `Option<T>` を返す（nil が無いため）。
 - **`:return` だけ書いて集約も `:finally` も無いのはエラー**。CL は尽きたとき nil を返すが、
   ここにはそれが無いので「尽きたときの値」をループが言う必要がある。
-- `:named`（`block`/`return-from` 依存。Phase 4a の残件）、`:and` による並行節の連結、
+- `:named`（`block`/`return-from` は入ったので、残るのは `loop` 側の対応だけ）、`:and` による並行節の連結、
   `:being`/ハッシュ表の専用反復、`:it`、`:nconc` は入っていない。
 - `:collect` の要素型はチェッカーが集約式を先に検査して決め、`(the Vector<T> …)` として
   書き込む。`Vector::new` の型引数は期待型から前向きに来るので、後ろの `push` からは
@@ -879,7 +915,8 @@ docstring を返す（`(documentation Type::method)` はメソッド専用）。
 - `throw` の型は `!`（発散）。`(catch 'tag expr)` の型は `expr` の型とタグの型の合流型。
 - `unwind-protect` の値は `protected` の値。`cleanup` の値は捨てられる。
   `cleanup` は `protected` をどう抜けても走る——正常終了・`throw`・`panic` に加えて、
-  `break`/`return` で抜けた場合も走る。`cleanup` 自身の非局所脱出は、飛行中の脱出に勝つ。
+  `break`/`return`/`return-from` で抜けた場合も走る。`cleanup` 自身の非局所脱出は、
+  飛行中の脱出に勝つ。
 - 入れ子の `unwind-protect` は内側から順に走る。`protected` の**内側**のループを抜ける
   `break` は `protected` から出ていないので、その `cleanup` は走らない。
 

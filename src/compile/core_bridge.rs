@@ -473,6 +473,43 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         }
         "break" => core::tagged(heap, "break", &[]),
 
+        // ---- named blocks ------------------------------------------------
+        // `(block NAME BODY)` and `(return-from NAME [VALUE])` keep their
+        // shape; the name becomes a bare string datum, which is what the
+        // island reads with `sexpr-str`. It is a *compile-time* name — the
+        // island uses it to key a `Scope` while translating and to label a
+        // basic block — never a value the generated code compares, which is
+        // the whole difference from `catch`/`throw`'s tag.
+        "block" => {
+            let name = block_name(heap, form)?;
+            let body = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+            let mut f = Items::new(heap);
+            let name_v = f.heap().alloc_string(name);
+            f.push(name_v);
+            let b = to_island(f.heap(), body, cx)?;
+            f.push(b);
+            f.finish("block")
+        }
+        "return-from" => {
+            let name = block_name(heap, form)?;
+            let value = core::field(heap, form, 1);
+            let mut f = Items::new(heap);
+            let name_v = f.heap().alloc_string(name);
+            f.push(name_v);
+            // `is-fn`, exactly as `return` carries it: `compile-if-branch`
+            // reads it to decide whether the value needs a retain before it
+            // goes into a slot that outlives this activation.
+            f.push(Value::Bool(false));
+            // A value-less `(return-from n)` becomes an explicit `(unit)`, so
+            // `compile-return-from` has one shape to handle — `return`'s rule.
+            let v = match value {
+                Some(value) => to_island(f.heap(), value, cx)?,
+                None => core::tagged(f.heap(), "unit", &[])?,
+            };
+            f.push(v);
+            f.finish("return-from")
+        }
+
         // ---- non-local exits ---------------------------------------------
         // `(catch TAG BODY REPR)` -> `(catch TAG-NODE KIND BODY)` and
         // `(throw TAG VALUE REPR)` -> `(throw TAG-NODE KIND VALUE)`.
@@ -2403,6 +2440,15 @@ fn as_path(heap: &Heap, v: Value) -> Option<Path> {
         Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
         Value::Symbol(id) => Some(Path::root(heap.symbol_name(id))),
         _ => None,
+    }
+}
+
+/// The block name a `block`/`return-from` node's first field carries — a
+/// `(str "...")` node, the shape `forms::block_form` builds.
+fn block_name(heap: &Heap, form: Value) -> Result<String, Error> {
+    match core::field(heap, form, 0).and_then(|n| core::field(heap, n, 0)) {
+        Some(Value::Str(id)) => Ok(heap.string(id).to_string()),
+        _ => Err(malformed(heap, form)),
     }
 }
 

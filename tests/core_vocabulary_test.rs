@@ -178,6 +178,12 @@ fn binding_and_control() {
         "(break)",
         "(return)",
         "(return (int-any-width 3))",
+        // The named escape. The name is a `(str ...)` node and the body is a
+        // single form — the checker wraps its sequence in a binding-less
+        // `let` first, so nothing downstream re-implements sequencing.
+        r#"(block (str "b") (let () (int-any-width 1)))"#,
+        r#"(return-from (str "b"))"#,
+        r#"(return-from (str "b") (int-any-width 3))"#,
         r#"(panic (str "boom"))"#,
     ]);
 }
@@ -398,8 +404,8 @@ fn top_level() {
 const SHARED_WITH_ISLAND: &[&str] = &[
     "int-any-width", "float-any-width", "bignum", "ratio", "char", "bool", "str", "unit", "var", "set", "global",
     "set-global", "let", "lambda", "labels", "call", "assoc", "apply", "if", "loop", "break",
-    "return", "panic", "match", "construct", "field-get", "field-set", "dyn-new", "dyn-upcast",
-    "dyn-call", "dyn-value",
+    "return", "block", "return-from", "panic", "match", "construct", "field-get", "field-set",
+    "dyn-new", "dyn-upcast", "dyn-call", "dyn-value",
 ];
 
 /// Core tags with no island counterpart: the bridge turns each into something

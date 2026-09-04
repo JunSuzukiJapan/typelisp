@@ -152,6 +152,15 @@ const ISLAND_DEFUNS: &[&str] = &[
     "compile-labels",
     "compile-loop",
     "compile-loop-body",
+    // The named escape and the string walk its `block-names` list needs
+    // (the island builds no `Sexpr`, so the list is a space-separated string).
+    "name-sep-index",
+    "names-head",
+    "names-tail",
+    "compile-block",
+    "compile-return-from",
+    "install-block-cleanups",
+    "emit-block-cleanups",
     "compile-break",
     "compile-return",
     "compile-set",

@@ -367,6 +367,30 @@ impl Definable for TraitDef {
     }
 }
 
+/// One enclosing `block` — see [`Checker::block_stack`].
+///
+/// `used` is what keeps the implicit block CL puts around every `defun` from
+/// costing anything: the frame is always *pushed* (so a `return-from` naming
+/// the function has something to find), but the `block` node is only emitted
+/// when a `return-from` actually named it. A function that never mentions its
+/// own name lowers to exactly the tree it lowered to before this existed —
+/// no extra node for the evaluator to walk, and no extra basic block, slot or
+/// root-depth read for the island to emit.
+struct BlockFrame {
+    name: String,
+    /// The accumulated exit type: the seed (a `defun`'s declared return type,
+    /// or `Never` for a bare `block`) joined with every `return-from`'s value.
+    ty: Type,
+    used: bool,
+}
+
+/// Both escape stacks, saved and restored together across a specialization —
+/// see [`Checker::enter_specialization`].
+struct Escapes {
+    loops: Vec<Type>,
+    blocks: Vec<BlockFrame>,
+}
+
 /// A generic `defun`'s retained raw source form, for re-checking at each
 /// concrete instantiation — see [`Checker::specialize_defun`]. The checked
 /// `Typed` body can't serve this purpose: it was lowered once with the type
@@ -648,6 +672,21 @@ pub struct Checker {
     /// their type on the symbol rather than on this stack for exactly that
     /// reason ([`Self::throw_tags`]).
     loop_stack: RefCell<Vec<Type>>,
+    /// Stack of enclosing `block`s, innermost last — the *lexical* named
+    /// escape ([`Self::loop_stack`]'s named sibling).
+    ///
+    /// A `return-from` names one of these frames and unifies its value's type
+    /// into it, exactly as `break`/`return` do with the top loop frame; the
+    /// difference is only that the frame is found by name instead of by being
+    /// innermost. Nothing about the name survives checking — the match happens
+    /// here, and the `block` node the checker emits carries the name solely so
+    /// the island can label a basic block with it.
+    ///
+    /// Function boundaries clear this for the same reason they clear
+    /// `loop_stack`: `return-from` is a *static* escape, so it may never need
+    /// to cross an activation this compiler does not already see. CL leaves a
+    /// `return-from` to an exited block undefined; here it does not typecheck.
+    block_stack: RefCell<Vec<BlockFrame>>,
     /// The type each `catch`/`throw` symbol carries, learned from the first
     /// use of that symbol and enforced on every later one.
     ///
@@ -820,6 +859,7 @@ impl Checker {
             ns: Vec::new(),
             file_ns: Vec::new(),
             loop_stack: RefCell::new(Vec::new()),
+            block_stack: RefCell::new(Vec::new()),
             throw_tags: RefCell::new(std::collections::BTreeMap::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
@@ -3602,7 +3642,8 @@ impl Checker {
             .collect();
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
+        let body =
+            self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
         self.definition_form(heap, &fq_name, &type_params, &params, &ret, public, &body)
     }
 
@@ -3761,7 +3802,8 @@ impl Checker {
             params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
+        let body =
+            self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
         self.definition_form(heap, &fq_name, &type_params, &params, &ret, public, &body)
     }
 
@@ -4021,21 +4063,26 @@ impl Checker {
         &mut self,
         ns: Vec<String>,
         bindings: BTreeMap<String, Type>,
-    ) -> (Vec<String>, Vec<Type>, BTreeMap<String, Type>) {
+    ) -> (Vec<String>, Escapes, BTreeMap<String, Type>) {
         let saved_ns = std::mem::replace(&mut self.ns, ns);
         let saved_loops = std::mem::take(&mut *self.loop_stack.borrow_mut());
+        // Cleared alongside the loop stack, and for the same reason: a
+        // specialization re-checks a *different* function's body, so an
+        // enclosing `block` of the site that triggered it is not in scope.
+        let saved_blocks = std::mem::take(&mut *self.block_stack.borrow_mut());
         let saved_bindings = std::mem::replace(&mut self.type_var_bindings, bindings);
-        (saved_ns, saved_loops, saved_bindings)
+        (saved_ns, Escapes { loops: saved_loops, blocks: saved_blocks }, saved_bindings)
     }
 
     fn exit_specialization(
         &mut self,
         saved_ns: Vec<String>,
-        saved_loops: Vec<Type>,
+        saved: Escapes,
         saved_bindings: BTreeMap<String, Type>,
     ) {
         self.type_var_bindings = saved_bindings;
-        *self.loop_stack.borrow_mut() = saved_loops;
+        *self.loop_stack.borrow_mut() = saved.loops;
+        *self.block_stack.borrow_mut() = saved.blocks;
         self.ns = saved_ns;
     }
 
@@ -4093,7 +4140,7 @@ impl Checker {
         mangled: &str,
         public: bool,
     ) -> Result<TopLevelForm, Error> {
-        let MethodSig { instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
+        let MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
             self.parse_defmethod_sig(heap, parts, &[])?;
         // The receiver is the first parameter, not a field beside them: the
         // core form binds what the body binds, in order.
@@ -4107,7 +4154,9 @@ impl Checker {
         // every bounded method call resolves against the real receiver type
         // (and was already validated at the call site).
         let env = Env::new().extended(all.clone());
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], &[], Some(&ret))?;
+        // The *written* name, not the mangled one: the body's own
+        // `(return-from NAME ...)` was written against the name in the source.
+        let body = self.check_definition_body(heap, interp, &env, &parts[body_start..], &[], &method, &ret)?;
         self.defmethod_form(heap, &type_fq, mangled, instance, &all, &ret, public, &body)
     }
 
@@ -4181,7 +4230,11 @@ impl Checker {
             params.push((rname.clone(), option_of_sexpr()));
         }
         let env = Env::new().extended(params.clone());
-        let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
+        // As in `specialize_method_form`: the implicit block keeps the name
+        // the source wrote, which is not the mangled one this emits under.
+        let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
+        let body =
+            self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
         self.defun_form(heap, mangled, &params, &ret, public, &body)
     }
 
@@ -4249,7 +4302,11 @@ impl Checker {
         }
 
         let env = Env::new().extended(params.clone());
-        let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
+        // As in `specialize_method_form`: the implicit block keeps the name
+        // the source wrote, which is not the mangled one this emits under.
+        let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
+        let body =
+            self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
         self.defun_form(heap, mangled, &params, &ret, public, &body)
     }
 
@@ -6386,7 +6443,9 @@ impl Checker {
         for m in methods {
             let (elems, locs) = self.subst_method_item(heap, *m, &subst, impl_where)?;
             let sig = self.parse_defmethod_sig_inner(heap, &elems, &locs, true)?;
-            let MethodSig { self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, .. } = sig;
+            let MethodSig {
+                method, self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
+            } = sig;
             // The rebuilt header slots (`elems[..body_start]`: the receiver
             // list always, the return type and merged `where` when
             // substitution changed them) are freshly allocated and reachable
@@ -6407,7 +6466,7 @@ impl Checker {
             binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
             let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
             let body_locs = locs.get(body_start..).unwrap_or(&[]);
-            self.check_seq(heap, interp, &env, &elems[body_start..], body_locs, Some(&ret))?;
+            self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, &method, &ret)?;
         }
         Ok(())
     }
@@ -6458,7 +6517,7 @@ impl Checker {
         for (elems, locs) in items {
             let sig = self.parse_defmethod_sig_inner(heap, elems, locs, true)?;
             let MethodSig {
-                self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
+                method, self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
             } = sig;
             // Keyed by the type variable's name, which for `Self` is `"self"`
             // — what `is_self_tvar` matches and what `Type::Named`'s single
@@ -6471,7 +6530,7 @@ impl Checker {
             binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
             let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
             let body_locs = locs.get(body_start..).unwrap_or(&[]);
-            self.check_seq(heap, interp, &env, &elems[body_start..], body_locs, Some(&ret))?;
+            self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, &method, &ret)?;
         }
         Ok(())
     }
@@ -7521,11 +7580,12 @@ impl Checker {
             let bindings = self.type_var_bindings.clone();
             self.enter_specialization(ns, bindings)
         });
-        let checked = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret));
+        let checked =
+            self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &method, &ret);
         if let Some((sn, sl, sb)) = saved {
             self.exit_specialization(sn, sl, sb);
         }
-        let (body, _) = checked?;
+        let body = checked?;
         let type_params = if is_generic_template { written_vars } else { Vec::new() };
         let mut all: Vec<(String, Type)> = Vec::new();
         if let Some(s) = &self_name {
@@ -9035,6 +9095,8 @@ impl Checker {
             "rotatef" => return self.check_rotatef_shiftf(heap, interp, env, args, false),
             "shiftf" => return self.check_rotatef_shiftf(heap, interp, env, args, true),
             "loop" => return self.check_loop(heap, interp, env, args, arg_locs, expected),
+            "block" => return self.check_block(heap, interp, env, args, arg_locs, expected),
+            "return-from" => return self.check_return_from(heap, interp, env, args, arg_locs),
             "catch" => return self.check_catch(heap, interp, env, args, arg_locs, expected),
             "throw" => return self.check_throw(heap, interp, env, args, arg_locs),
             "unwind-protect" => return self.check_unwind_protect(heap, interp, env, args, arg_locs, expected),
@@ -9208,9 +9270,14 @@ impl Checker {
         let child = env.extended_with_locs(binds);
         // A lambda is a new function boundary: `break`/`return` cannot reach an
         // outer loop through it, so it checks its body against an empty loop
-        // stack (restored afterwards, even on error).
+        // stack (restored afterwards, even on error). Named blocks are cleared
+        // for the same reason — and a `lambda` establishes none of its own,
+        // since CL's implicit block comes with a *name*, which is exactly what
+        // an anonymous function has not got.
         let saved = self.loop_stack.replace(Vec::new());
+        let saved_blocks = self.block_stack.replace(Vec::new());
         let result = self.check_seq(heap, interp, &child, &args[2..], &arg_locs[2..], Some(&ret));
+        self.block_stack.replace(saved_blocks);
         self.loop_stack.replace(saved);
         let (body, _) = result?;
         let form = self.lambda_form(heap, &params, &ret, &body)?;
@@ -9459,11 +9526,30 @@ impl Checker {
                 params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
             let fn_env = labels_env.extended_with_locs(binds);
             // A new function boundary, same as `lambda`: `break`/`return`
-            // can't reach an outer loop through it.
+            // can't reach an outer loop through it. A local function *does*
+            // get CL's implicit block, named after itself, so `return-from`
+            // works inside it the way it does in a `defun`.
             let saved = self.loop_stack.replace(Vec::new());
-            let result = self.check_seq(heap, interp, &fn_env, &raw_body, &body_locs, Some(&ret));
+            let saved_blocks = self.block_stack.replace(Vec::new());
+            let result = self.check_block_body(
+                heap,
+                interp,
+                &fn_env,
+                &raw_body,
+                &body_locs,
+                &name,
+                ret.clone(),
+                Some(&ret),
+            );
+            self.block_stack.replace(saved_blocks);
             self.loop_stack.replace(saved);
-            let (body, _) = result?;
+            let (body, _, used) = result?;
+            let body = if used {
+                let seq = self.let_form(heap, &[], &body)?;
+                vec![forms::block_form(heap, &name, seq)?]
+            } else {
+                body
+            };
             defs.push((name, params, ret, body));
         }
         let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], &arg_locs[1..], expected)?;
@@ -12084,6 +12170,167 @@ impl Checker {
         self.contribute_loop_exit(ty)?;
         let form = forms::return_form(heap, value.map(|c| c.form))?;
         Ok(Checked::new(form, Type::Never))
+    }
+
+    /// `(block NAME BODY...)` — CL's lexical named escape. The value is the
+    /// last body form's, or whatever a `(return-from NAME v)` inside it
+    /// delivered; the two are joined the same way `match`/`cond` arms are.
+    ///
+    /// `NAME` is a bare symbol, never a computed form and never quoted: it is
+    /// resolved here, against [`Self::block_stack`], and does not exist after
+    /// checking. That is the whole difference from `catch`, whose tag is a
+    /// *value* compared while unwinding.
+    fn check_block(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        let name = Self::escape_name(heap, args.first().copied(), "block")?;
+        let seed = expected.filter(|t| non_never(t).is_some()).cloned().unwrap_or(Type::Never);
+        let (body, ty, used) = self.check_block_body(
+            heap,
+            interp,
+            env,
+            &args[1..],
+            arg_locs.get(1..).unwrap_or(&[]),
+            &name,
+            seed,
+            expected,
+        )?;
+        if !used {
+            // Nothing named it, so the block is not an escape target at all.
+            // Emitting the node anyway would cost the evaluator a frame and
+            // the island a basic block, a slot and a root-depth read, for an
+            // escape that provably cannot happen. A binding-less `let` is how
+            // this vocabulary spells a sequence (see the `progn` arm).
+            let form = self.let_form(heap, &[], &body)?;
+            return Ok(Checked::new(form, ty));
+        }
+        let seq = self.let_form(heap, &[], &body)?;
+        let form = forms::block_form(heap, &name, seq)?;
+        Ok(Checked::new(form, ty))
+    }
+
+    /// Check a body sequence with a fresh [`Self::block_stack`] frame named
+    /// `name`, seeded at `seed`. Returns the checked body, the frame's exit
+    /// type joined with the body's own, and whether any `return-from` named
+    /// it. The frame is popped even if checking the body fails.
+    ///
+    /// Shared by `block` and by every definition form's implicit block, which
+    /// is why the seed is a parameter: a `defun`'s is its declared return
+    /// type, so a `return-from` is checked against it exactly as the trailing
+    /// form is.
+    #[allow(clippy::too_many_arguments)]
+    fn check_block_body(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        body: &[Value],
+        body_locs: &[Option<Loc>],
+        name: &str,
+        seed: Type,
+        expected: Option<&Type>,
+    ) -> Result<(Vec<Value>, Type, bool), Error> {
+        self.block_stack.borrow_mut().push(BlockFrame { name: name.to_string(), ty: seed, used: false });
+        let result = self.check_seq(heap, interp, env, body, body_locs, expected);
+        let frame = self.block_stack.borrow_mut().pop().expect("pushed above");
+        let (body, body_ty) = result?;
+        let ty = join_types(&frame.ty, &body_ty)?;
+        Ok((body, ty, frame.used))
+    }
+
+    /// A definition's body, with CL's implicit block named after the thing
+    /// being defined — `defun`, `defmethod` and each `labels` function all
+    /// establish one.
+    ///
+    /// The frame is always pushed; the node appears only when a `return-from`
+    /// named it ([`BlockFrame`]'s `used`), so a body that never mentions its
+    /// own name lowers exactly as it did before this form existed.
+    fn check_definition_body(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        body: &[Value],
+        body_locs: &[Option<Loc>],
+        name: &str,
+        ret: &Type,
+    ) -> Result<Vec<Value>, Error> {
+        let (body, _, used) =
+            self.check_block_body(heap, interp, env, body, body_locs, name, ret.clone(), Some(ret))?;
+        if used {
+            let seq = self.let_form(heap, &[], &body)?;
+            Ok(vec![forms::block_form(heap, name, seq)?])
+        } else {
+            Ok(body)
+        }
+    }
+
+    /// `(return-from NAME)` / `(return-from NAME value)`: leave the enclosing
+    /// `block` of that name. Type `Never`, like `break`/`return`.
+    fn check_return_from(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Checked, Error> {
+        if args.len() > 2 {
+            return Err(Error::TypeError(
+                "return-from: (return-from name) or (return-from name value)".into(),
+            ));
+        }
+        let name = Self::escape_name(heap, args.first().copied(), "return-from")?;
+        let seed = {
+            let stack = self.block_stack.borrow();
+            // Innermost wins, so a `block` may shadow an outer one of the same
+            // name — CL's rule, and the reason this searches backwards.
+            let frame = stack.iter().rev().find(|f| f.name == name).ok_or_else(|| {
+                Error::TypeError(format!("return-from: no enclosing block named `{}`", name))
+            })?;
+            non_never(&frame.ty).cloned()
+        };
+        let value = match args.get(1) {
+            Some(v) => Some(self.check_at(heap, interp, env, *v, seed.as_ref(), nth_loc(arg_locs, 1))?),
+            None => None,
+        };
+        let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
+        self.contribute_block_exit(&name, ty)?;
+        let form = forms::return_from_form(heap, &name, value.map(|c| c.form))?;
+        Ok(Checked::new(form, Type::Never))
+    }
+
+    /// The bare symbol a `block`/`return-from` names.
+    ///
+    /// Not a quoted datum and not a path: a block name is resolved where it is
+    /// written, so anything that would need looking up somewhere else is a
+    /// spelling this form does not have.
+    fn escape_name(heap: &Heap, arg: Option<Value>, who: &str) -> Result<String, Error> {
+        match arg {
+            Some(Value::Symbol(id)) => Ok(heap.symbol_name(id).to_string()),
+            Some(_) => Err(Error::TypeError(format!("{}: the name must be a bare symbol", who))),
+            None => Err(Error::TypeError(format!("{}: missing the block name", who))),
+        }
+    }
+
+    /// Unify a `return-from` value's type into the named block's accumulated
+    /// exit type — [`Self::contribute_loop_exit`]'s named counterpart.
+    fn contribute_block_exit(&self, name: &str, ty: Type) -> Result<(), Error> {
+        let mut stack = self.block_stack.borrow_mut();
+        let frame = stack
+            .iter_mut()
+            .rev()
+            .find(|f| f.name == name)
+            .ok_or_else(|| Error::TypeError(format!("return-from: no enclosing block named `{}`", name)))?;
+        frame.ty = join_types(&frame.ty, &ty)?;
+        frame.used = true;
+        Ok(())
     }
 
     /// Unify a `break`/`return` value's type into the nearest enclosing loop's

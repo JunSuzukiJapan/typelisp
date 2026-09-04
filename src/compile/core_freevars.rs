@@ -266,6 +266,12 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         }
         wk::LOOP => from(0),
         wk::RETURN | wk::PANIC | wk::DYN_VALUE => from(0),
+        // `(block NAME BODY)` / `(return-from NAME [VALUE])` — everything past
+        // the name. The name is a `(str ...)` node and *not* a sub-form to
+        // walk: it is a compile-time label, resolved by the checker, so a
+        // variable can never hide in it. Walking it would be harmless here but
+        // would say the opposite about what a block name is.
+        wk::BLOCK | wk::RETURN_FROM => from(1),
         // `(field-get OBJ IDX REPR)` — the object only. The index is an
         // integer and the representation is not a form at all: a parametric one
         // (`(vector int)`, `(hashtable str int)`) is a *list* whose head is a
