@@ -147,7 +147,7 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 16] = [
+    const PRELUDE_PRIVATE: [&str; 17] = [
         "unwrap-io",
         "io-ok",
         "split-on-slash",
@@ -163,6 +163,11 @@ fn is_excluded(name: &str) -> bool {
         // space. A user writes `row-major-index`/`in-bounds`.
         "array-decode",
         "array-subs-in-bounds",
+        // The low-`size`-bits mask the byte-specifier family is built on,
+        // in the operand's own type. It takes a sample value rather than a
+        // width because there is no way to spell "1 of type T" for an open
+        // `T`; a user writes `ldb` and its siblings.
+        "bits-mask",
         // `Array<T>`'s printer (Phase 8a): the stride of one axis, the
         // recursive per-axis walk that builds `(1 2 3)`, and the `2x3` in
         // `#<array 2x3>` when `*print-array*` is off. A user writes

@@ -926,15 +926,28 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 答えがインタプリタの答えから離れようがない。`int->char` だけが失敗しうる（Unicode
 スカラ値でないコードポイント）ので、これだけが raise する側の呼び出し規約で宣言されている。
 
-**まだ残っているもの**（`native_lowered_primitive_methods` と島の `*-native-method?` に
-無い組み込みメソッド。この 2 つは互いに一致することがテストで保証されているが、
-*レジストリの全メソッドを網羅している*ことは保証されていない）:
+**この表は 2026-09-03 に空になった。** 残っていたのは 3 群で、順に:
+`string::upcase`/`downcase`（`rt_str_upcase`/`rt_str_downcase`）、`Option` を返す変換
+（`try-int->char`・`try-int->W`・`try-float->f32|f64`——判定だけを行う
+`rt_int_fits`/`rt_int_fits_char`/`rt_f64_fits_f32` と、島の `build-try-option` が
+`some`/`none` の箱を組む）、`bignum` の `ash`/`logbitp`/`logtest`/`logcount`/
+`integer-length`。
 
-| 組み込み | 理由 |
-|---|---|
-| `string::upcase` / `string::downcase` | `char` 側と同じ形のシムを足せば閉じる。`char` 側を塞いだときに一緒に見つかった |
-| `try-int->char` / `try-int->i8`…`try-int->u32` / `try-float->f32` / `try-float->f64` | 戻り値が `Option`。箱を組み立てる分だけ別種の作業（`(as ...)` 側は全部コンパイルできる） |
-| `bignum` の `ash` / `logbitp` / `logtest` / `logcount` / `integer-length` | **意図的**。prelude のどの定義もここへ到達しないので、lowering を書いても誰も実行しない |
+どれも prelude からは到達しないので `PRELUDE_COMPILE_UNSUPPORTED` には現れなかった
+——ユーザーが自分で呼び出しを書いたときだけ出る穴で、`compile_test.rs` の
+`the_builtins_that_used_to_block_compilation_now_lower` がその書き方で全部を踏んでいる。
+
+`native_lowered_primitive_methods` と島の `*-native-method?` が一致することは
+`the_rust_and_island_native_method_lists_agree` が、**この 2 つがレジストリの組み込み
+メソッドを網羅していること**は `every_registered_builtin_method_on_a_native_receiver_lowers`
+が保証する。後者は「新しい組み込みを足したら、それを呼ぶ `defun` をコンパイルしてみるまで
+穴が空いたか分からない」という状態を無くすために足した——この表が手作業で埋められていた
+理由がそれだった。
+
+唯一の例外は `print`/`println` で、これは穴ではない。レジストリは受け手ごとに登録している
+（インタプリタの `eval_builtin_method` が受け手で分岐するため）が、チェッカーがメソッド解決の
+前に特殊形として横取りする（`Checker::check_print_like`——制御文字列がリテラルでなければ
+ならない）ので `Expr::Assoc` になることが無く、lowering を要求されることもない。
 
 `compile`/`compile-file`/`dump` はこの表に入らない——定義上インタプリタ専用の操作で、
 コンパイルできないのではなくコンパイルする側だから（`dump` が書き出すのはインタプリタの環境

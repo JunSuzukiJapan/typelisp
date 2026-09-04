@@ -923,6 +923,32 @@ pub unsafe extern "C" fn rt_bignum_logand(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_bignum(a & b))
 }
 
+/// `bignum::ash` for compiled code — `args[0]` shifted by the **raw** count
+/// in `args[1]` (positive left, negative right), mirroring
+/// `interp::eval_bignum_shift`.
+///
+/// The odd one out among the `rt_bignum_*` binops: its second operand is a
+/// bit count rather than a second boxed bignum, so it cannot use
+/// [`bignum_pair`]. That is also why it is lowered at all now — the whole
+/// `ash`/`logbitp` group used to be left uncompiled on the grounds that no
+/// prelude definition reached it, and `Bits`'s `shift` impl for `bignum`
+/// reaches it.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2`, `args[0]` must decode to a boxed bignum, and a
+/// `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_bignum_ash(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_bignum_ash: expected 2 arguments");
+    }
+    let n = bignum_arg(args, 0, "rt_bignum_ash");
+    let count = *args.add(1);
+    let r = if count >= 0 { n << (count as u64) } else { n >> ((-count) as u64) };
+    encode(active_heap().alloc_bignum(r))
+}
+
 /// `bignum::logior` for compiled code — the `or` counterpart of
 /// [`rt_bignum_logand`].
 ///
@@ -964,6 +990,78 @@ pub unsafe extern "C" fn rt_bignum_lognot(args: *const i64, argc: u32) -> i64 {
     }
     let a = bignum_arg(args, 0, "rt_bignum_lognot");
     encode(active_heap().alloc_bignum(!a))
+}
+
+/// `bignum::logcount` for compiled code — the number of 1-bits of a
+/// nonnegative value, of 0-bits of a negative one (CL §12.10's infinite
+/// two's complement reading), mirroring `interp::bignum_unary`. Result is a
+/// fresh `bignum`, like the interpreter's.
+///
+/// # Safety
+///
+/// Same as [`bignum_arg`], for `args[0]`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_bignum_logcount(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_bignum_logcount: expected 1 argument");
+    }
+    let a = bignum_arg(args, 0, "rt_bignum_logcount");
+    let n = if a.sign() == num_bigint::Sign::Minus { !&a } else { a.clone() };
+    let count: u64 = n.magnitude().to_u32_digits().iter().map(|d| d.count_ones() as u64).sum();
+    encode(active_heap().alloc_bignum(BigInt::from(count)))
+}
+
+/// `bignum::integer-length` for compiled code — bits needed excluding the
+/// sign, mirroring `interp::bignum_unary`.
+///
+/// # Safety
+///
+/// Same as [`bignum_arg`], for `args[0]`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_bignum_integer_length(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_bignum_integer_length: expected 1 argument");
+    }
+    let a = bignum_arg(args, 0, "rt_bignum_integer_length");
+    let bits =
+        if a.sign() == num_bigint::Sign::Minus { (-(&a) - 1u32).magnitude().bits() } else { a.magnitude().bits() };
+    encode(active_heap().alloc_bignum(BigInt::from(bits)))
+}
+
+/// `bignum::logbitp` for compiled code — is bit `args[1]` of `args[0]` set?
+///
+/// The second operand is a **raw** bit position, like [`rt_bignum_ash`]'s
+/// count and for the same reason. Returns a bare `0`/`1`, the compiled
+/// representation of a `bool`.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2`, `args[0]` must decode to a boxed bignum, and a
+/// `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_bignum_logbitp(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_bignum_logbitp: expected 2 arguments");
+    }
+    let n = bignum_arg(args, 0, "rt_bignum_logbitp");
+    let index = *args.add(1);
+    let set = if index < 0 {
+        n.sign() == num_bigint::Sign::Minus
+    } else {
+        ((n >> (index as u64)) & BigInt::from(1)) == BigInt::from(1)
+    };
+    set as i64
+}
+
+/// `bignum::logtest` for compiled code — do the two share a 1-bit?
+///
+/// # Safety
+///
+/// Same as [`bignum_pair`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_bignum_logtest(args: *const i64, argc: u32) -> i64 {
+    let (a, b) = bignum_pair(args, argc, "rt_bignum_logtest");
+    ((a & b) != BigInt::from(0)) as i64
 }
 
 /// Three-way comparison (`-1`/`0`/`1`) for compiled code — the single
@@ -3116,7 +3214,10 @@ pub unsafe extern "C" fn rt_int_logbitp(args: *const i64, argc: u32) -> i64 {
     if argc < 3 {
         fatal("rt_int_logbitp: expected 3 arguments");
     }
-    let (index, n) = (*args, *args.add(1));
+    // Integer first, position second — the order `registry::int_assoc`
+    // registers and `eval_int_builtin` reads. The island passes the two
+    // operands through unchanged, so this shim is where the order lives.
+    let (n, index) = (*args, *args.add(1));
     let (width, signed) = wsig(*args.add(2));
     if index >= i64::from(width) {
         (signed && n < 0) as i64
@@ -3165,6 +3266,69 @@ pub unsafe extern "C" fn rt_int_integer_length(args: *const i64, argc: u32) -> i
     let v = if n >= 0 { n as u64 } else { !(n as u64) };
     let mask = if width >= 64 { !0u64 } else { (1u64 << width) - 1 };
     i64::from(64 - (v & mask).leading_zeros())
+}
+
+/// `try-int->i8`/.../`try-int->u32`'s question, for compiled code — does
+/// `args[0]` already hold a number the target width and signedness can
+/// represent? `args[1]` is that target's `wsig` code.
+///
+/// The *answer* is all a compiled `try-int->W` needs from a shim: when it is
+/// yes the value is already the result (an integer that fits its target is
+/// unchanged by the cast — `interp::try_int_to_width`), so the island builds
+/// the `some` box around the operand it already has rather than calling back
+/// for a converted one.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_int_fits(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_int_fits: expected 2 arguments");
+    }
+    let n = *args;
+    let (width, signed) = wsig(*args.add(1));
+    (normalize(n, width, signed) == n) as i64
+}
+
+/// `try-int->char`'s question — is `args[0]` a Unicode scalar value?
+///
+/// Not merely "in `u32` range": the surrogate range `D800..=DFFF` is `u32` and
+/// is not a `char`, which is exactly the case `int->char` raises on and this
+/// answers `0` for (`interp::try_int_to_char`).
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to a valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_int_fits_char(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_int_fits_char: expected 1 argument");
+    }
+    let n = *args;
+    let in_u32_range = n >= 0 && n <= i64::from(u32::MAX);
+    (in_u32_range && char::from_u32(n as u32).is_some()) as i64
+}
+
+/// `try-float->f32`'s question — does `args[0]` survive the round trip
+/// through binary32 unchanged?
+///
+/// Bit equality rather than `==` so the answer matches
+/// `interp::try_float_to_f32` on the values `==` is silent about: a `NaN` is
+/// never `==` itself but does round-trip, and `-0.0 == 0.0` while their bits
+/// differ.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to a valid `i64` holding an
+/// `f64`'s bit pattern.
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_fits_f32(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_f64_fits_f32: expected 1 argument");
+    }
+    let v = f64::from_bits(*args as u64);
+    (f64::from(v as f32).to_bits() == v.to_bits()) as i64
 }
 
 /// Shared shape for the `f64` transcendental unaries that have no LLVM
@@ -3623,6 +3787,51 @@ pub unsafe extern "C" fn rt_str_append(args: *const i64, argc: u32) -> i64 {
     encode(heap.alloc_string(s))
 }
 
+/// The shared body of [`rt_str_upcase`] and [`rt_str_downcase`] — decode,
+/// map, allocate.
+///
+/// # Safety
+///
+/// Same as [`rt_str_eq`], for `args[0]` alone.
+unsafe fn str_map_case(args: *const i64, argc: u32, who: &str, up: bool) -> i64 {
+    if argc < 1 {
+        fatal(&format!("{who}: expected 1 argument"));
+    }
+    let id = match decode(*args) {
+        Value::Str(id) => id,
+        _ => fatal(&format!("{who}: argument is not a Str")),
+    };
+    let heap = active_heap();
+    let s = if up { heap.string(id).to_ascii_uppercase() } else { heap.string(id).to_ascii_lowercase() };
+    encode(heap.alloc_string(s))
+}
+
+/// `string::upcase` for compiled code — `args[0]`'s content with every ASCII
+/// letter folded up, as a freshly allocated string, matching the
+/// interpreter's own arm in `eval_builtin_method`.
+///
+/// ASCII-only on both tiers because both tiers run this rule; `char::upcase`
+/// (`rt_char_upcase`) has the same contract for the same reason.
+///
+/// # Safety
+///
+/// Same as [`str_map_case`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_str_upcase(args: *const i64, argc: u32) -> i64 {
+    str_map_case(args, argc, "rt_str_upcase", true)
+}
+
+/// `string::downcase` for compiled code — the folding-down counterpart of
+/// [`rt_str_upcase`].
+///
+/// # Safety
+///
+/// Same as [`str_map_case`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_str_downcase(args: *const i64, argc: u32) -> i64 {
+    str_map_case(args, argc, "rt_str_downcase", false)
+}
+
 /// `str::substring` for compiled code — the `[start, end)` character range of
 /// `args[0]`'s content as a freshly allocated string, matching the
 /// interpreter's own `string_substring`. `args[1]`/`args[2]` are bare
@@ -3693,6 +3902,38 @@ pub fn fresh_random_seed() -> u64 {
         | 1
 }
 
+/// The state a user-supplied seed names, for `seed-random-state`.
+///
+/// Not the seed itself. [`xorshift64_step`] has exactly one fixed point, 0,
+/// and a stream started there stays there forever, so the state space is
+/// `1..=u64::MAX` and *some* map from the user's integer into it is
+/// unavoidable. The obvious one, `seed as u64 | 1`, is wrong: it sends every
+/// even seed onto its odd neighbour, so `(seed-random-state 0)` and
+/// `(seed-random-state 1)` would name the same stream and half of all seeds
+/// would be aliases of the other half. A caller reaching for a seed wants
+/// reproducibility, and silently sharing a stream with a different seed is
+/// the one property that breaks it.
+///
+/// So: SplitMix64's finalizer, which is a *bijection* on `u64`. Exactly one
+/// input maps to 0 and is redirected to a constant; every other pair of
+/// distinct seeds gets a distinct state. One collision is the least any map
+/// into a space one element smaller than its domain can have.
+///
+/// The seed arrives as `i64` (the language hands over an `i32`, sign
+/// extended) and is reinterpreted, not clamped, so `-1` and `1` are
+/// different seeds.
+pub fn seeded_random_state(seed: i64) -> u64 {
+    let mut z = (seed as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    if z == 0 {
+        0x9E37_79B9_7F4A_7C15
+    } else {
+        z
+    }
+}
+
 /// `make-random-state-fresh` for compiled code — a brand new, independently
 /// seeded stream (`eval_make_random_state_fresh`). Nullary; the result is a
 /// fresh allocation, as unrooted as [`rt_str_new`]'s until a caller protects
@@ -3705,6 +3946,24 @@ pub fn fresh_random_seed() -> u64 {
 #[no_mangle]
 pub unsafe extern "C" fn rt_make_random_state_fresh(_args: *const i64, _argc: u32) -> i64 {
     encode(active_heap().alloc_random_state(fresh_random_seed()))
+}
+
+/// `seed-random-state` for compiled code — the stream a given seed names
+/// (`eval_seed_random_state`), through [`seeded_random_state`]. Like
+/// [`rt_make_random_state_fresh`] the result is a fresh, still-unrooted
+/// allocation.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args[0]` must decode to an integer; a `Heap`
+/// must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_seed_random_state(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_seed_random_state: expected 1 argument");
+    }
+    let seed = *args;
+    encode(active_heap().alloc_random_state(seeded_random_state(seed)))
 }
 
 /// Decodes `args[idx]` as a boxed random-state.

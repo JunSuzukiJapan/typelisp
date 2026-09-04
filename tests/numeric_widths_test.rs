@@ -116,6 +116,38 @@ fn arithmetic_wraps_at_the_types_own_width() {
     assert_eq!(show(r#"(format false "~a" (ash (the u16 1) 20))"#), "0");
 }
 
+/// `ash`'s second operand is a shift **distance**, not another value of the
+/// receiver's type — so it is an `i32` at every width, and a right shift is
+/// writable everywhere.
+///
+/// It used to be the receiver's own type, which made this whole test
+/// impossible to write on an unsigned width: `(ash (the u8 x) -3)` was
+/// rejected with "integer literal -3 is out of range for u8 (0..=255)", and
+/// there was no other spelling of "shift right" to reach for. Half the
+/// integer types simply had no right shift. Nothing under the checker had to
+/// change to fix it — `eval_int_builtin` and `rt_int_ash` both already read
+/// the operand as a signed count — which is the sign that the *type* was the
+/// only thing that had ever been wrong.
+#[test]
+fn a_shift_distance_is_an_i32_at_every_width() {
+    // Unsigned right shifts are logical: the sign bit is not a sign here.
+    assert_eq!(show(r#"(format false "~a" (ash (the u8 200) -3))"#), "25");
+    assert_eq!(show(r#"(format false "~a" (ash (the u16 60000) -4))"#), "3750");
+    assert_eq!(show(r#"(format false "~a" (ash (the u32 4000000000) -8))"#), "15625000");
+    // Signed right shifts are arithmetic, and round toward negative infinity
+    // the way CL's `ash` does (`-100 >> 4` is `-7`, not `-6`).
+    assert_eq!(show(r#"(format false "~a" (ash (the i8 -16) -2))"#), "-4");
+    assert_eq!(show(r#"(format false "~a" (ash (the i32 -100) -4))"#), "-7");
+    // Left shifts still wrap at the receiver's own width.
+    assert_eq!(show(r#"(format false "~a" (ash (the u8 30) 3))"#), "240");
+    assert_eq!(show(r#"(format false "~a" (ash (the u8 200) 3))"#), "64");
+    // Past the width in either direction: `0`, or all-ones for a negative
+    // signed value, never the 64-bit register's answer.
+    assert_eq!(show(r#"(format false "~a" (ash (the u16 1) 20))"#), "0");
+    assert_eq!(show(r#"(format false "~a" (ash (the u16 65535) -20))"#), "0");
+    assert_eq!(show(r#"(format false "~a" (ash (the i8 -1) -20))"#), "-1");
+}
+
 /// `f32` is binary32, not a label on an `f64` — in the arithmetic *and* in
 /// the printing.
 ///

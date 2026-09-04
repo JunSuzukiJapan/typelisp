@@ -80,6 +80,83 @@ fn random_state_copy_replays_the_same_sequence() {
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
+/// The point of `seed-random-state`: the same seed names the same stream, so
+/// a run can be replayed. `make-random-state-fresh` deliberately cannot do
+/// this, which is why a separate entry point exists at all.
+#[test]
+fn the_same_seed_replays_the_same_sequence() {
+    let src = "(defun draws ((s random-state)) i32
+                 (let ((acc (the i32 0)) (i 0))
+                   (while (< i 9)
+                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf i (+ i 1)))
+                   acc))
+               (= (draws (seed-random-state 12345)) (draws (seed-random-state 12345)))";
+    assert_eq!(eval_ok(src), Value::Bool(true));
+}
+
+/// Distinct seeds must name distinct streams. The naive map into the state
+/// space, `seed | 1`, passes the replay test above and fails this one for
+/// every even seed — `0` and `1` would share a stream. See
+/// `typelisp_rt::seeded_random_state` for why the map is a bijection instead.
+#[test]
+fn neighbouring_seeds_name_different_streams() {
+    let src = "(defun draws ((s random-state)) i32
+                 (let ((acc (the i32 0)) (i 0))
+                   (while (< i 9)
+                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf i (+ i 1)))
+                   acc))
+               (= (draws (seed-random-state 0)) (draws (seed-random-state 1)))";
+    assert_eq!(eval_ok(src), Value::Bool(false));
+}
+
+/// Seed `0` is the one value that would land on `xorshift64_step`'s fixed
+/// point if the seed were used as the state directly: every draw would be
+/// `0` forever. A run seeded with the most obvious integer a caller can type
+/// must not be the one degenerate run.
+#[test]
+fn seed_zero_is_not_a_degenerate_stream() {
+    let src = "(defun any-nonzero ((s random-state)) bool
+                 (let ((found false) (i 0))
+                   (while (< i 20)
+                     (when (/= (random 1000 s) 0) (setf found true))
+                     (setf i (+ i 1)))
+                   found))
+               (any-nonzero (seed-random-state 0))";
+    assert_eq!(eval_ok(src), Value::Bool(true));
+}
+
+/// A negative seed is a different seed, not a clamped or absolute one — the
+/// language hands the shim a sign-extended integer and it is reinterpreted.
+#[test]
+fn a_negative_seed_differs_from_its_absolute_value() {
+    let src = "(defun draws ((s random-state)) i32
+                 (let ((acc (the i32 0)) (i 0))
+                   (while (< i 9)
+                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf i (+ i 1)))
+                   acc))
+               (= (draws (seed-random-state -7)) (draws (seed-random-state 7)))";
+    assert_eq!(eval_ok(src), Value::Bool(false));
+}
+
+/// A seeded state is an ordinary `random-state`: it copies, and the copy
+/// replays, like any other.
+#[test]
+fn a_seeded_state_copies_like_any_other() {
+    let src = "(defun draws ((s random-state)) i32
+                 (let ((acc (the i32 0)) (i 0))
+                   (while (< i 9)
+                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf i (+ i 1)))
+                   acc))
+               (let ((a (seed-random-state 99)))
+                 (let ((b (make-random-state a)))
+                   (= (draws a) (draws b))))";
+    assert_eq!(eval_ok(src), Value::Bool(true));
+}
+
 /// The other half of `random_state_copy_replays_the_same_sequence`: drawing
 /// twice from *one* state must not replay, because both draws advance the same
 /// stream. This is what makes a `random-state` an identity rather than a value
