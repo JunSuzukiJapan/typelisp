@@ -1725,6 +1725,14 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | 次の1文字 |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | 次の改行まで（改行は消費して除去）。改行で終わらない最終行も返る |
 | `read-all` | `(read-all s)` | `(S)→string` | 残り全部 |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | すでに手元にある1文字だけ。待たされるくらいなら `none` |
+| `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,i32)→i32` | 最大 `n` 文字を `v` へ push し、実際に読めた数を返す。`n` に満たないのは末尾のときだけ |
+
+`listen` は `InputStream`（`CharInput` の親）にある:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `listen` | `(listen s)` | `(S)→bool` | 次の読みが待たされずに答えられるか。デフォルトは `false`——**決して嘘にならない側**で、`at-line-start` と同じ選択。`true` は推測になり、外すと `read-char-no-hang` がブロックする。組み込みストリームは全て上書き済み（メモリ上のものだけが `true` を返しうる）。**上書きしないユーザ定義ストリームでは `read-char-no-hang` が常に `none` を返す** |
 
 `PeekInput`（`CharInput` を継承）は**1文字の押し戻し**を足す。デフォルト本体を持てない唯一の
 入力操作なので別トレイトにしてある——押し戻した文字を置く場所はストリーム自身しか持たない。
@@ -1748,6 +1756,7 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 | `fresh-line` | `(fresh-line s)` | `(S)→()` | 行頭でなければ改行を1つ |
 | `at-line-start` | `(at-line-start s)` | `(S)→bool` | 次に書く文字が行頭になるか。デフォルトは `false`（＝`fresh-line` は改行を書く。分からないなら書くほうが安全）。組み込みストリームは全て上書き済み |
 | `finish-output` | `(finish-output s)` | `(S)→()` | バッファを送り出す |
+| `write-sequence` | `(write-sequence s v)` | `(S,Vector<char>)→()` | `v` の全文字を順に書く |
 
 `at-line-start` が覚えているのは**そのストリーム経由で書かれた分だけ**。`print`/`println`/
 `(format true ...)` は標準出力へ直接書く（`*standard-output*` のハンドルを通らない）ので、
@@ -1785,6 +1794,8 @@ CL 同様、`close` 後でも取り出せる。
 |---|---|---|---|
 | `read-byte` | `(read-byte s)` | `(S)→Option<i32>` where `ByteInput S` | 次の1バイト。ファイル終端で `none` |
 | `write-byte` | `(write-byte s b)` | `(S,i32)→()` where `ByteOutput S` | 1バイト書く。0..255 の外はエラー |
+| `read-sequence` | `(read-sequence s v n)` | `(S,Vector<i32>,i32)→i32` where `ByteInput S` | 文字版と同じものをバイトで |
+| `write-sequence` | `(write-sequence s v)` | `(S,Vector<i32>)→()` where `ByteOutput S` | 同上 |
 
 CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出し**で決めるが、
 ここでは要素型はストリームの**型**なので、違うのは開く関数の側になる。文字ストリームから

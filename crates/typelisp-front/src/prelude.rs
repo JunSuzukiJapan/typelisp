@@ -3629,7 +3629,18 @@ user-visible capacity."
   ;; `string` where `Option<Item>` is declared -- which is exactly what this
   ;; docstring used to be, unnoticed until `deftrait` began checking its
   ;; default bodies at the declaration.
-  (read-item ((self Self)) Option<Item>))
+  (read-item ((self Self)) Option<Item>)
+  ;; Whether the next `read-item` can answer without waiting.
+  ;;
+  ;; The default is `false`, and it is the same choice `at-line-start` makes
+  ;; below and for the same reason: only the stream itself knows, so the
+  ;; default has to be the answer that is never a lie. `false` says "nothing
+  ;; is known to be ready", which is always true; `true` would be a guess,
+  ;; and a wrong one makes `read-char-no-hang` block -- the one thing its
+  ;; name promises it will not do. Every built-in stream overrides this. A
+  ;; user stream that can tell should too: with the default it never reports
+  ;; anything ready, so `read-char-no-hang` on it always answers `none`.
+  (listen ((self Self)) bool false))
 
 (deftrait OutputStream (Stream)
   "A stream that accepts items."
@@ -3645,6 +3656,24 @@ user-visible capacity."
   (read-char ((self Self)) Option<char>
     "The next character, or `none` at end of input."
     (read-item self))
+  (read-char-no-hang ((self Self)) Option<char>
+    "The next character, but only if it is already there: `none` rather than
+     a wait. Answers `none` for a stream whose `listen` is the default."
+    (if (listen self) (read-char self) (option::none)))
+  (read-sequence ((self Self) (into Vector<char>) (n i32)) i32
+    "Read up to `n` characters, pushing each onto `into`; the count actually
+     read, which is short of `n` only at end of input. CL's `read-sequence`
+     fills an existing sequence between `:start` and `:end` and answers the
+     index it stopped at; a `Vector` grows, so this appends and answers the
+     count -- the same fact without the index arithmetic."
+    (let ((got 0) (going true))
+      (while going
+        (if (>= got n)
+            (progn (setf going false) ())
+            (match (read-char self)
+              ((some c) (progn (push into c) (setf got (+ got 1)) ()))
+              ((none) (progn (setf going false) ())))))
+      got))
   (read-line ((self Self)) Option<string>
     "Up to (and consuming) the next newline. `none` only at end of input, so
      a final line with no newline is still returned."
@@ -3702,6 +3731,10 @@ user-visible capacity."
   (terpri ((self Self)) ()
     "Write a newline. CL's name for it."
     (write-item self #\newline))
+  (write-sequence ((self Self) (from Vector<char>)) ()
+    "Every character of `from`, in order. CL's `write-sequence` takes
+     `:start`/`:end`; slice the vector instead."
+    (doiter (c (iter from)) (write-char self c)))
   (write-line ((self Self) (s string)) ()
     "Write `s` followed by a newline."
     (progn (write-string self s) (write-item self #\newline)))
@@ -3731,13 +3764,26 @@ user-visible capacity."
   "A byte input stream. Every method has a default body."
   (read-byte ((self Self)) Option<i32>
     "The next byte, or `none` at end of input."
-    (read-item self)))
+    (read-item self))
+  (read-sequence ((self Self) (into Vector<i32>) (n i32)) i32
+    "`CharInput`'s, over bytes."
+    (let ((got 0) (going true))
+      (while going
+        (if (>= got n)
+            (progn (setf going false) ())
+            (match (read-byte self)
+              ((some b) (progn (push into b) (setf got (+ got 1)) ()))
+              ((none) (progn (setf going false) ())))))
+      got)))
 
 (deftrait ByteOutput ((OutputStream (Item i32)))
   "A byte output stream. Every method has a default body."
   (write-byte ((self Self) (b i32)) ()
     "Write one byte. `b` outside 0..255 is an error."
     (write-item self b))
+  (write-sequence ((self Self) (from Vector<i32>)) ()
+    "Every byte of `from`, in order."
+    (doiter (b (iter from)) (write-byte self b)))
   (finish-output ((self Self)) ()
     "Push buffered output to its destination. A no-op unless overridden."
     ()))
@@ -3770,7 +3816,8 @@ user-visible capacity."
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 (impl InputStream file-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h))))
+  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h)))
+  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
 (impl OutputStream file-stream
   (type Item char)
   (write-item ((self Self) (c char)) ()
@@ -3791,7 +3838,8 @@ user-visible capacity."
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 (impl InputStream binary-file-stream
   (type Item i32)
-  (read-item ((self Self)) Option<i32> (unwrap-io (stream-read-byte self::h))))
+  (read-item ((self Self)) Option<i32> (unwrap-io (stream-read-byte self::h)))
+  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
 (impl OutputStream binary-file-stream
   (type Item i32)
   (write-item ((self Self) (b i32)) () (unwrap-io (stream-write-byte self::h b))))
@@ -3804,7 +3852,9 @@ user-visible capacity."
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 (impl InputStream string-input-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h))))
+  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h)))
+  ;; The one kind that can honestly say `true`: the whole text is in memory.
+  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
 (impl CharInput string-input-stream)
 (impl PeekInput string-input-stream
   (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
@@ -3826,7 +3876,8 @@ user-visible capacity."
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 (impl InputStream standard-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h))))
+  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h)))
+  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
 (impl OutputStream standard-stream
   (type Item char)
   (write-item ((self Self) (c char)) ()
@@ -3910,7 +3961,8 @@ user-visible capacity."
   (close ((self Self)) () (progn (close self::in) (close self::out))))
 (impl InputStream two-way-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (read-char self::in)))
+  (read-item ((self Self)) Option<char> (read-char self::in))
+  (listen ((self Self)) bool (listen self::in)))
 (impl OutputStream two-way-stream
   (type Item char)
   (write-item ((self Self) (c char)) () (write-char self::out c)))
@@ -3930,7 +3982,8 @@ user-visible capacity."
   (read-item ((self Self)) Option<char>
     (match (read-char self::in)
       ((some c) (progn (write-char self::out c) (option::some c)))
-      ((none) (option::none)))))
+      ((none) (option::none))))
+  (listen ((self Self)) bool (listen self::in)))
 (impl CharInput echo-stream)
 
 ;; Reads through the components in order; each one's end of input advances to
@@ -3949,7 +4002,12 @@ user-visible capacity."
             (match (read-char (get self::parts self::at))
               ((some c) (progn (setf answer (option::some c)) (setf going false) ()))
               ((none) (progn (setf self::at (+ self::at 1)) ())))))
-      answer)))
+      answer))
+  ;; Only about the component being read now: whether a *later* one is ready
+  ;; says nothing about the next character, and finding out would consume
+  ;; this one's end of input.
+  (listen ((self Self)) bool
+    (if (>= self::at (len self::parts)) false (listen (get self::parts self::at)))))
 (impl CharInput concatenated-stream)
 
 ;; Gives any input stream one character of pushback, so that a stream without
@@ -3965,7 +4023,10 @@ user-visible capacity."
   (read-item ((self Self)) Option<char>
     (match self::pending
       ((some c) (progn (setf self::pending (option::none)) (option::some c)))
-      ((none) (read-char self::inner)))))
+      ((none) (read-char self::inner))))
+  ;; A pushed-back character is already in hand.
+  (listen ((self Self)) bool
+    (match self::pending ((some c) true) ((none) (listen self::inner)))))
 (impl CharInput peek-stream)
 (impl PeekInput peek-stream
   ;; A second `unread-char` without a read in between overwrites the first --

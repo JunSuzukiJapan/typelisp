@@ -2157,9 +2157,22 @@ impl Interp {
             // The representation is not read: it used to pick the global's slot
             // kind, which no longer varies. `mutable` is the checker's business
             // (it rejects a write to a constant), not the runtime's.
+            // `(defvar PATH REPR MUTABLE PUBLIC INIT [REASSIGN])`.
+            //
+            // A sixth field means the source form was `defparameter`, which
+            // assigns whether or not the global is already bound. Plain
+            // `defvar` initializes **only if unbound**, as CL's does: the
+            // initializer is not evaluated at all the second time, so
+            // re-loading a file neither repeats its side effects nor throws
+            // away what the session has since stored there. Absent reads as
+            // `defvar` — see `Checker::defvar_form`.
             "defvar" => {
                 let name = path_field(heap, tl, 0, "defvar")?;
                 let public = bool_field(heap, tl, 3, "defvar")?;
+                let reassign = matches!(core::field(heap, tl, 5), Some(Value::Bool(true)));
+                if !reassign && self.global_is_bound(&name) {
+                    return Ok(None);
+                }
                 let value = core::field(heap, tl, 4)
                     .ok_or_else(|| EvalError::Internal("exec: (defvar ..) has no initializer".to_string()))?;
                 let v = self.eval_core(heap, value, Value::Empty)?;

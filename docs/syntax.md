@@ -198,16 +198,22 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 CL の対応物は `(declaim (ftype (function (i32) bool) even2?))` だが、あちらは宣言システム
 一式を伴い、かつ**助言**でしかない。こちらは静的型付けなので宣言は検査される。
 
-### defvar / defconstant — グローバル変数
+### defvar / defparameter / defconstant — グローバル変数
 
 ```lisp
-(defvar (name Type) init-expr)
+(defvar (name Type) init-expr)        ; まだ束縛されていないときだけ初期化する
+(defparameter (name Type) init-expr)  ; 毎回代入する
 (defconstant (name Type) init-expr)
 
 ; docstring 付き（CL の defvar/defparameter/defconstant と同じ順序: 値の後ろ）
 (defvar (name Type) init-expr "doc")
 (defconstant (name Type) init-expr "doc")
 ```
+
+**`defvar` と `defparameter` の違いは再ロードのとき**に出る（CL と同じ）。`defvar` は
+そのグローバルが**すでに束縛されていれば初期化式を評価すらしない**ので、設定ファイルを
+編集して読み直しても、セッションが変更した値はそのまま残る。`defparameter` は毎回
+代入するので、読み直せば書かれたとおりの値に戻る。
 
 型注釈は必須（初期化式から推論しない）。`defvar` は書き換え可能、`defconstant` は不可（`setf` でエラー）。
 
@@ -871,6 +877,11 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
                                      ; symbol)は対応する Sexpr コンストラクタでラップ、defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> 等ヒープ表現ADTは無変換の
                                      ; まま retype（実行時コストなし）。&rest/format引数も同様。
+(source-file)                       ; このフォームが読まれたファイル名（string）。チェック時に
+                                     ; 定数畳み込みされる。CL の *load-pathname* に当たるが変数では
+                                     ; ない——モジュールの本体は検査の後に実行されるので「いま
+                                     ; ロード中」は当てにならず、チェッカーのほうは常に知っている。
+                                     ; ファイルでないソースはリーダの呼び名（<stdin>/<input>）
 (quote datum)                       ; 'datum と同義。評価せず Sexpr データとして返す
 (quasiquote template)               ; `template と同義。,/,@ でテンプレート内に式を埋め込む
 (documentation name)                ; name（裸名または Type::method）の docstring を Option<string> で返す

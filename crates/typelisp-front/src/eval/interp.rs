@@ -1394,6 +1394,22 @@ impl Interp {
         self.compiled_globals.borrow().contains_key(path)
     }
 
+    /// Whether `path` already names a global with a value — either in the
+    /// module tree or, for a program whose globals the compiler took over, in
+    /// `compiled_globals`.
+    ///
+    /// This is what makes `defvar` mean CL's `defvar` ("initialize only if
+    /// unbound") rather than its `defparameter`. Both tables have to be
+    /// consulted for the same reason `Interp::promote_global` moves entries
+    /// between them: a global that has been promoted is bound, and is no
+    /// longer in the tree.
+    pub fn global_is_bound(&self, path: &Path) -> bool {
+        if self.has_compiled_global(path) {
+            return true;
+        }
+        self.root.borrow().get_global(path).is_some()
+    }
+
     /// The compiled-global slot id [`Self::promote_global`] assigned `path`,
     /// if it has one.
     pub fn compiled_global_id(&self, path: &Path) -> Option<usize> {

@@ -23,7 +23,7 @@ Common Lisp にあって typelisp に無いものを Phase 0〜9 に落とした
 | 6（コレクション 6a〜6c） | **6a 完了**（`Hash` トレイト＋`sxhash`、鍵のハッシュ可能性が静的に、`maphash`/`size` が 2026-08-22、**ユーザ定義型を鍵にする分が 2026-09-03**）。表は `hash -> バケット`になり、`get`/`set`/`remove` は prelude の `defmethod` へ移った。**6b 完了** 2026-08-22（`Array<T>`。`Vector` 2 本の上の prelude `defstruct` で、Rust 側の追加はゼロ。`(aref a i j)` だけ checker の糖衣）。**6c 完了** 2026-08-22（`BitVector`。1 語 **31bit** ——32 番目の bit は `i32` の符号） |
 | 7（エラーと動的束縛 7a/7b） | **全完了** 2026-08-22。7a は `SimpleError`/`WrappedError`/`wrap-error`/`describe-error`/`assert`/`warn`（コンディションシステムは予定どおり非採用）。7b は `dlet`（保存→代入→`unwind-protect` で復元）と印字制御変数一式＋`with-standard-io-syntax`、副産物で radix リーダマクロ `#b`/`#o`/`#x`/`#NNr`。入れなかった変数は同計画の表に 1 つずつ理由つき |
 | 8（印字とリーダ 8a〜8c） | **8a/8b 完了** 2026-08-23（プリンタとリーダ）+ 2026-09-03（`*print-array*` と `Array<T>` の `print-object`）。この Stage で分かった 3 件は**全部閉じた**——ジェネリック型に `print-object` が発火しない件と `~/name/` が AOT で使えない件が 2026-08-31（後者は制御文字列をリテラルに限って解決、`e7f54e0`）、それに依存して見送っていた `*print-array*` が 09-03。**先行条件のアーキテクチャ転換は 2026-09-04 完了**——全ドライバがフォーム単位で「読む→チェック→評価」するようになった（`tests/read_check_eval_test.rs` 16 本）。**残るは 8c 本体**（`readtable` とリーダマクロ） |
-| 9（シンボル・パッケージ・環境） | **9c 完了** 2026-08-20（コマンドライン引数・環境変数・ファイルシステム問い合わせ・日時の分解合成・`y-or-n-p`）。保留は `libc` が要る 4 群と REPL ツール層。**9a 完了** 2026-09-04（`in-module`、可変長 `use`/`import`/`shadowing-import`、裸名の衝突報告。`in-package`/`shadow`/`unuse-package` は理由つきで非採用）。9b/9d 未着手 |
+| 9（シンボル・パッケージ・環境） | **9c 完了** 2026-08-20（コマンドライン引数・環境変数・ファイルシステム問い合わせ・日時の分解合成・`y-or-n-p`）。保留は `libc` が要る 4 群と REPL ツール層。**9a/9b/9d 完了** 2026-09-04。9a は `in-module`・可変長 `use`/`import`/`shadowing-import`・裸名の衝突報告、9b は `defparameter` と CL 準拠になった `defvar`・`(source-file)`、9d は `listen`/`read-char-no-hang`/`read-sequence`/`write-sequence`。非採用は `in-package`/`shadow`/`unuse-package`/`compile-file-pathname`/`require`/`provide`/`clear-input`/`clear-output`/`make-synonym-stream` で、いずれも理由つき（cl-parity-plan.md の各 Stage）。**Phase 9 全完了** |
 | 付録 C（小さな不整合 4 件） | **完了** 2026-08-20 |
 | 付録 D（範囲外の既存問題 2 件） | **完了** 2026-08-21。D-2 は `Heap::cons` の成長条件（回収後の空きが 1/4 未満なら伸ばす）、D-1 は AOT 実行ファイルが prelude を持ち歩くように |
 
@@ -244,6 +244,27 @@ JIT しているぶん」は**2 段階で解消した**。JIT 6 回ぶんは 202
 [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md)（TODO ではなく測定）。
 そこから作った実行計画が上記の [cl-parity-plan.md](cl-parity-plan.md) で、地図の全行が
 どの Phase に落ちたか（落ちていないなら理由）は同計画の付録 A にある。
+
+## 見つかっている実装の穴
+
+### 関連型が総称名の内側にあると `impl` の置換が届かない
+
+`(deftrait T () (type Item) (m ((self Self) (v Vector<Item>)) () <デフォルト本体>))` と書くと、
+`impl` がその既定メソッドを継承したときに署名が未置換のまま残る:
+
+```
+impl inputstream file-stream: method `read-sequence` is `(file-stream vector<item> i32) i32`,
+but `inputstream` declares `(file-stream vector<char> i32) i32`
+```
+
+原因は、`Vector<Item>` が**リーダにとってシンボル 1 つ**であること（`impl<T>` が 1 シンボルなのと
+同じ理由、`parse_generic_name_header`）。`impl` の関連型置換は `subst_method_item` が
+シンボル単位で行うので、名前の内側までは書き換えない。`Option<Item>` が動いているのは
+`read-item` にデフォルト本体が無く、置換の対象にならないから——**署名に関連型を使う
+デフォルト本体が今まで 1 つも無かった**ので踏まれていなかった。
+
+2026-09-04 の Stage 9d で発見。そのときは層を下げて回避した（`Vector<char>` を
+`CharInput` に、`Vector<i32>` を `ByteInput` に）ので、いま困っているコードは無い。
 
 ## 関連ドキュメント
 

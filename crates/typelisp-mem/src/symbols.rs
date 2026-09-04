@@ -345,6 +345,11 @@ well_known_symbols! {
     IN_MODULE => "in-module"
     IMPORT => "import"
     SHADOWING_IMPORT => "shadowing-import"
+
+    "Appended for Stage 9b (2026-09-04). A *source* form only — it lowers to the
+     same `(defvar ...)` node with a trailing `true`, so the core vocabulary is
+     unchanged (see `Checker::defvar_form`)."
+    DEFPARAMETER => "defparameter"
 }
 
 

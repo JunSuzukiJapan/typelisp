@@ -68,8 +68,11 @@ take the same name.  A `deftype' alias occupies that same namespace -- it is
 a spelling for a type, expanded where it is written.")
 
 (defconst typelisp-variable-definition-forms
-  '("defvar" "defconstant")
-  "Definition forms whose defined name is a variable.")
+  '("defvar" "defparameter" "defconstant")
+  "Definition forms whose defined name is a variable.
+`defvar' initializes only an unbound global, `defparameter' always assigns --
+CL's distinction, which is what makes re-loading a file keep the values a
+session has changed.")
 
 (defconst typelisp-special-forms
   '(;; binding & conditionals (docs/syntax.md §4)
@@ -95,6 +98,9 @@ a spelling for a type, expanded where it is written.")
     "setf" "incf" "decf" "rotatef" "shiftf"
     "list" "quote" "quasiquote" "unquote" "unquote-splicing"
     "panic" "unreachable" "todo" "as" "try-as" "compile" "documentation"
+    ;; the file this form was read from, folded to a literal at check time
+    ;; (Stage 9b) — CL's `*load-pathname*' in the place it can be right
+    "source-file"
     ;; formatted output — special forms so that each variadic argument keeps
     ;; its own type on the way into `Sexpr' (functions.md §15)
     "print" "println" "format"
@@ -108,8 +114,11 @@ a spelling for a type, expanded where it is written.")
   "Clause markers recognized inside `cond' / `case' forms.")
 
 (defconst typelisp-declaration-keywords
-  '("pub" "module" "use" "load" "impl" "where")
-  "Declaration / namespace keywords.")
+  '("pub" "module" "in-module" "use" "import" "shadowing-import" "load" "impl" "where")
+  "Declaration / namespace keywords.
+`in-module' is the flat form of `module'; `import' is CL's spelling of `use',
+and `shadowing-import' the one that means to take a bare name something else
+already holds.")
 
 (defconst typelisp-lambda-list-keywords
   '("&rest" "&optional" "&key")
@@ -127,10 +136,11 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "open-binary" "open-binary-input" "open-binary-output"
     "read-datum-at" "read-delimited-list" "read-from-string"
     "read-from-string-preserving-whitespace" "read-sexpr-preserving-whitespace"
-    "open-file" "open-input" "open-output" "open-stream-p" "peek-char"
+    "listen" "open-file" "open-input" "open-output" "open-stream-p" "peek-char"
     "read-byte" "write-byte"
-    "probe-file" "read-all" "read-char" "read-file-lines"
-    "read-file-string" "read-item" "read-line" "read-lines" "read-sexpr" "rename-file"
+    "probe-file" "read-all" "read-char" "read-char-no-hang" "read-file-lines"
+    "read-file-string" "read-item" "read-line" "read-lines" "read-sequence" "read-sexpr"
+    "rename-file" "write-sequence"
     "terpri" "unread-char" "with-input-from-string" "with-open-file" "with-output-to-string"
     "write-char" "write-file-string" "write-item" "write-line"
     "write-lines" "write-string"

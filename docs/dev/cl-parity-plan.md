@@ -1273,8 +1273,37 @@ CL の `read` に合わせ（1 文字消費する。端末で打った form が�
 
 ### Stage 9b — システム構築
 
-`require` / `provide` / `*modules*`、`compile-file-pathname` / `*compile-file-pathname*` /
-`*load-pathname*`、`defparameter`（`defvar` との「再ロード時に再初期化するか」の区別）。
+**状態: 完了（2026-09-04）**。テストは `tests/system_construction_test.rs`（11 本）。
+
+入ったもの:
+
+- **`defparameter`**、そして **`defvar` が CL 準拠になった**——束縛済みのグローバルには
+  **初期化式を評価すらしない**。設定ファイルを編集して読み直しても、セッションが
+  変更した値が残る。これが CL がこの区別を持つ理由そのもの。
+  `dump.rs` の `already_initialized_global` の doc コメントが
+  「typelisp の `defvar` は CL の "unbound のときだけ" ではない」と明記していた回避策で、
+  その前提のほうを直した。
+- **`(source-file)`** — このフォームが読まれたファイル名を、**チェック時に定数畳み込みした
+  `string`** として返す。
+
+**計画から変えた点**:
+
+1. **`*load-pathname*` は変数でなく `(source-file)` にした。** CL で特殊変数なのは
+   `load` が読みと評価を 1 パスでやるから。ここではモジュールのフォームは単位として
+   検査され、実行は `use` した側なので、「いまロード中のファイル」という変数は
+   コードが読む頃には未束縛か古い。**チェッカーは自分がどのファイルを読んでいるか
+   正確に知っている**（全フォームが位置を持っている）ので、静的に畳み込めば間違えようがない。
+   `(directory-namestring (source-file))` で 9c のパス名層とつながる。
+2. **`compile-file-pathname` / `*compile-file-pathname*` は対象が無い。** CL のそれは
+   `compile-file` が書く `.fasl` の名前を計算するもの。ここでは `compile-file` は
+   `cc` でリンクした**ネイティブ実行ファイル**を出力し、名前は呼び出し側が決める。
+   コンパイル済みモジュール形式そのものが無い（language-design.md §0——`.typlc` という
+   拡張子は実装上使われていない）。導出する名前が存在しない。
+3. **`require` / `provide` / `*modules*` は `use` が既にそれ。** `use` はモジュールの
+   ファイルをオンデマンドで、モジュールパスをキーにちょうど 1 回読み込む——これが
+   `require` の全部で、`self.loaded` が `*modules*` に当たる。`provide`（ファイルの無い
+   モジュールを「提供済み」と宣言する）は、モジュールがファイルであるこの設計では
+   宣言する対象が無い。
 
 ### Stage 9c — 環境・時間・ファイルシステム
 
@@ -1340,10 +1369,37 @@ CL の `read` に合わせ（1 文字消費する。端末で打った form が�
 
 ### Stage 9d — ストリーム残差
 
-`make-synonym-stream`（シンボルを介した間接参照。Phase 7b の後なら意味が出る）、
-`clear-output` / `clear-input` / `listen` / `read-char-no-hang`
-（**ネイティブ層に `listen` はあるが typelisp へ未公開**）、
-`read-sequence` / `write-sequence`（現在は `copy-stream`/`read-all`/`write-lines` で代替）。
+**状態: 完了（2026-09-04）**。テストは `tests/stream_remainder_test.rs`（11 本）。
+
+入ったもの:
+
+- **`listen`** — `InputStream` のメソッド。ネイティブ層には最初からあったが typelisp へ
+  公開されていなかった。既定は **`false`**。これは `at-line-start` が採ったのと同じ
+  「決して嘘にならない側」で、`true` は推測になり、外すと `read-char-no-hang` が
+  ブロックする——その名前が唯一約束していないこと。組み込みストリーム 8 つは全部
+  override する（実際に答えられる: ハンドルを持つ 4 つはネイティブへ、合成 4 つは委譲）。
+- **`read-char-no-hang`** — `CharInput` のデフォルト本体。`(if (listen self) (read-char self) none)`。
+- **`read-sequence` / `write-sequence`** — `CharInput`/`CharOutput` と
+  `ByteInput`/`ByteOutput` の 4 つに、それぞれの項目型で。
+
+**この Stage で分かったこと**:
+
+1. **`read-sequence` を `InputStream` に `Vector<Item>` で置こうとして落ちた。**
+   総称名はリーダにとって**シンボル 1 つ**なので、`impl` が行う関連型の置換が
+   `Vector<Item>` の内側まで届かず、継承したデフォルトの署名が未置換のまま残る
+   （`impl inputstream file-stream: method read-sequence is (vector<item> i32) i32,
+   but inputstream declares (vector<char> i32) i32`）。既存のデフォルト本体はどれも
+   署名に関連型を使っていなかったので、この穴は踏まれたことが無かった。
+   **直す代わりに層を下げた**——prelude 自身のコメントが
+   「`Item` をスーパトレイトで `char` に固定することが、文字で書いたデフォルト本体を
+   可能にしている」と書いており、項目型が確定するのはまさにその層だから、
+   バルク転送はそこに属する。穴は [TODO.md](TODO.md) に記録した。
+2. **`clear-input` / `clear-output` は入れられない。** typelisp 側にバッファは
+   pushback しか無く、OS レベルで捨てる手段も無い。「捨てた」と言えないものについて
+   「捨てた」と名乗る関数は置かない。
+3. **`make-synonym-stream` は表現できない。** シンボルの値セルを介した間接参照が要り、
+   それは §0 で対象外にしたもの（`symbol-value` 一式）。`*standard-output*` 等は
+   ふつうの代入可能なグローバルで、間接参照の対象になるシンボルではない。
 
 ---
 

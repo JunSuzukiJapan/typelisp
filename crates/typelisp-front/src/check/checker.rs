@@ -1852,6 +1852,18 @@ impl Checker {
 
     /// `(defvar PATH REPR MUTABLE PUBLIC FORM)` — a global variable
     /// (`mutable`) or constant.
+    /// `(defvar PATH REPR MUTABLE PUBLIC INIT)`, plus a sixth field for
+    /// `defparameter`.
+    ///
+    /// That sixth field says **assign even if the global is already bound** —
+    /// the difference between CL's `defparameter` and its `defvar`, which is a
+    /// run-time question and so cannot be settled here. It is a trailing field
+    /// rather than a tag of its own because every other consumer of a `defvar`
+    /// node (the dump, the AOT collector, the prelude generator, the pretty
+    /// printer, `Interp::note_definitions`) reads the fields it cares about by
+    /// index and is right to ignore this one; only `Interp::exec` looks. An
+    /// absent field reads as `false`, so a node built before this existed —
+    /// one sitting in an older dump — means `defvar`.
     fn defvar_form(
         &self,
         heap: &mut Heap,
@@ -1860,6 +1872,7 @@ impl Checker {
         mutable: bool,
         public: bool,
         value: Value,
+        reassign: bool,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let path = forms::path_form(f.heap(), name);
@@ -1869,6 +1882,9 @@ impl Checker {
         f.push(Value::Bool(mutable));
         f.push(Value::Bool(public));
         f.push(value);
+        if reassign {
+            f.push(Value::Bool(true));
+        }
         f.finish("defvar")
     }
 
@@ -2348,8 +2364,11 @@ impl Checker {
                     wk::PUB => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
                     wk::DEFUN => return self.check_defun(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFSIGNATURE => return self.check_defsignature(heap, &elems[1..], parts_locs, false),
-                    wk::DEFVAR => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc),
-                    wk::DEFCONSTANT => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc),
+                    wk::DEFVAR => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc, false),
+                    wk::DEFPARAMETER => {
+                        return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc, true)
+                    }
+                    wk::DEFCONSTANT => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc, false),
                     wk::DEFMACRO => return self.check_defmacro(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::MODULE => return self.check_module(heap, interp, &elems[1..]),
                     wk::DEFMETHOD => return self.check_defmethod(heap, interp, &elems[1..], parts_locs, false, def_loc),
@@ -2423,8 +2442,11 @@ impl Checker {
             match id.well_known() {
                 wk::DEFUN => return self.check_defun(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFSIGNATURE => return self.check_defsignature(heap, &parts[1..], inner_locs, true),
-                wk::DEFVAR => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc),
-                wk::DEFCONSTANT => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc),
+                wk::DEFVAR => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc, false),
+                wk::DEFPARAMETER => {
+                    return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc, true)
+                }
+                wk::DEFCONSTANT => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc, false),
                 wk::DEFMACRO => return self.check_defmacro(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFMETHOD => return self.check_defmethod(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFSTRUCT => return self.check_defstruct(heap, interp, &parts[1..], inner_locs, true, def_loc),
@@ -2434,7 +2456,8 @@ impl Checker {
             }
         }
         Err(Error::TypeError(
-            "pub: expected defun/defsignature/defmacro/defmethod/defstruct/defenum/deftype/defvar/defconstant".into(),
+            "pub: expected defun/defsignature/defmacro/defmethod/defstruct/defenum/deftype/defvar/defparameter/defconstant"
+                .into(),
         ))
     }
 
@@ -2675,11 +2698,11 @@ impl Checker {
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
                 | "match" | "panic" | "the" | "as" | "try-as" | "compile"
-                | "quote" | "quasiquote" | "format" | "print" | "println"
+                | "quote" | "quasiquote" | "format" | "print" | "println" | "source-file"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block"
                 // top-level forms (`check_form_dispatch`)
-                | "pub" | "defun" | "defsignature" | "defvar" | "defconstant" | "defmacro" | "module"
+                | "pub" | "defun" | "defsignature" | "defvar" | "defparameter" | "defconstant" | "defmacro" | "module"
                 | "defmethod" | "defstruct" | "defenum" | "deftrait" | "deftype" | "impl" | "use" | "load"
                 | "import" | "shadowing-import" | "in-module"
         )
@@ -8568,6 +8591,37 @@ impl Checker {
         }
     }
 
+    /// `(source-file)` — the name of the file this form was read from, as a
+    /// `string` fixed at check time.
+    ///
+    /// **CL's `*load-pathname*` in the place it can actually be right.** There
+    /// the file being loaded is a dynamic fact, because `load` reads and
+    /// evaluates in one pass; here a module's forms are checked as a unit and
+    /// run later, by whoever `use`s it, so a variable saying "the file being
+    /// loaded" would be unbound or stale by the time the code that reads it
+    /// runs. The checker, on the other hand, knows exactly which file it is
+    /// reading — the position every form already carries — so this is
+    /// constant-folded and cannot be wrong.
+    ///
+    /// What comes back is the name the reader was given: a path for a file, and
+    /// the reader's own placeholder (`<stdin>`, `<input>`) for source that
+    /// never was one. Pair it with the prelude's pathname functions —
+    /// `(directory-namestring (source-file))` for the directory a data file
+    /// sits next to.
+    fn check_source_file(&self, heap: &mut Heap, v: Value, args: &[Value]) -> Result<Checked, Error> {
+        if !args.is_empty() {
+            return Err(Error::TypeError("source-file: (source-file) takes no arguments".into()));
+        }
+        let file = match heap.cons_loc(v) {
+            Some(loc) => loc.file.to_string(),
+            // Every form read by the reader has a position. One built by a
+            // macro expansion may not, and there is no file to name then.
+            None => "<unknown>".to_string(),
+        };
+        let form = forms::str_lit_form(heap, &file)?;
+        Ok(Checked::new(form, Type::Str))
+    }
+
     /// Report an import that takes a bare name the current namespace already
     /// holds — unless it is the *same* import again (idempotent, and a module
     /// reached from two places is normal), or `shadowing` says the collision
@@ -9296,6 +9350,7 @@ impl Checker {
             "try-as" => return self.check_as(heap, interp, env, args, arg_locs, true),
             "compile" => return self.check_compile(heap, args),
             "documentation" => return self.check_documentation(heap, args),
+            "source-file" => return self.check_source_file(heap, v, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
             // Top-level-only forms reaching expression position (e.g. a
@@ -11927,6 +11982,13 @@ impl Checker {
     /// post-monomorphization is what lets e.g. a generic function value
     /// (`(defvar (f (fn (i32) i32)) identity)`) resolve its type arguments
     /// at all.
+    /// `defvar` / `defconstant` / `defparameter`.
+    ///
+    /// `reassign` is what separates `defparameter` from `defvar`: CL's
+    /// `defvar` initializes a global **only if it is not already bound**, so
+    /// re-loading a file keeps whatever the session has since put there, and
+    /// `defparameter` always assigns. See [`Self::defvar_form`] for where the
+    /// distinction is carried.
     fn check_defvar(
         &mut self,
         heap: &mut Heap,
@@ -11935,6 +11997,7 @@ impl Checker {
         mutable: bool,
         public: bool,
         def_loc: Option<Loc>,
+        reassign: bool,
     ) -> Result<TopLevelForm, Error> {
         if parts.len() != 2 && parts.len() != 3 {
             return Err(Error::TypeError(
@@ -11988,7 +12051,7 @@ impl Checker {
         if let Some(doc) = doc {
             self.reg.docs.vars.insert(fq_name.clone(), doc);
         }
-        self.defvar_form(heap, &fq_name, &ty, mutable, public, value.form)
+        self.defvar_form(heap, &fq_name, &ty, mutable, public, value.form, reassign)
     }
 
     /// `(loop body...)`: an infinite loop, exited via `break`/`return`. Its
