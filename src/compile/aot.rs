@@ -184,7 +184,12 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // `Interp::compile_scc` uses for the JIT's call graph.
     let mut node_names: Vec<(String, String)> = Vec::new(); // (node name, LLVM symbol)
     let mut defvar_inits: Vec<(Path, Value)> = Vec::new();
-    while let Some((v, loc)) = forms.next_form(&mut heap).map_err(|e| e.to_string())? {
+    loop {
+        let next = {
+            let hook = typelisp_front::read::DriverReadEval::new(&mut chk, &interp);
+            forms.next_form_with(&mut heap, Some(&hook)).map_err(|e| e.to_string())?
+        };
+        let Some((v, loc)) = next else { break };
         let tl = chk.check_form_at(&mut heap, &interp, v, Some(loc)).map_err(|e| e.to_string())?;
         collect_aot_item(&mut heap, &mut interp, tl, &mut node_names, &mut defvar_inits)?;
     }

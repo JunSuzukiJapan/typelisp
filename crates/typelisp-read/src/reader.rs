@@ -88,6 +88,41 @@ impl Features {
     }
 }
 
+/// What the reader needs from the evaluator to run code **while reading**.
+///
+/// The reader is otherwise a pure function of its text, and was entirely so
+/// until this: `#.` evaluates the datum after it and reads the value in its
+/// place. Somebody has to run that datum, and running anything means the
+/// checker and the interpreter — neither of which this crate can see (they
+/// depend on it, not the other way round). So the evaluator implements this
+/// and the driver hands it in, the same shape `MacroExpander` has on the
+/// checker's side.
+///
+/// It is threaded per call rather than held in the [`Reader`]: a driver's
+/// loop holds `&mut Interp` for its own work between reads, and a borrow
+/// living as long as the reader would collide with it.
+pub trait ReadEval {
+    /// Check and evaluate `form`, returning what it produced as a datum.
+    ///
+    /// The error is a message, not an [`Error`]: what comes back is a *type*
+    /// error or an evaluation error, neither of which is a reader error, and
+    /// the reader adds its own position to whatever it is told.
+    fn read_eval(&self, heap: &mut Heap, form: Value) -> Result<Value, String>;
+}
+
+/// Everything a read carries besides the cursor: which `#+` features are on,
+/// which module bare symbols intern into, and how (if at all) to run code at
+/// read time.
+///
+/// One struct rather than three parameters because the list grows: `#.` added
+/// the third, and a readtable would be the fourth.
+#[derive(Clone, Copy)]
+struct Ctx<'a> {
+    features: &'a Features,
+    ns: NsId,
+    eval: Option<&'a dyn ReadEval>,
+}
+
 pub struct Reader {
     features: Features,
 }
@@ -125,7 +160,7 @@ impl Reader {
     /// prefix of any error message).
     pub fn read_in(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Value, Error> {
         let mut cur = Cursor::new(file, src);
-        read_datum(&mut cur, heap, &self.features, NsId::ROOT).map_err(|e| e.at(cur.loc()))
+        read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval: None }).map_err(|e| e.at(cur.loc()))
     }
 
     /// Read one datum starting at character index `start`, and say where
@@ -152,7 +187,7 @@ impl Reader {
     ) -> Result<(Value, usize), Error> {
         let mut cur = Cursor::new("<input>", src);
         cur.seek(start);
-        let v = read_datum(&mut cur, heap, &self.features, NsId::ROOT).map_err(|e| e.at(cur.loc()))?;
+        let v = read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval: None }).map_err(|e| e.at(cur.loc()))?;
         if !preserve_whitespace {
             if let Some(c) = cur.peek() {
                 if c.is_whitespace() {
@@ -276,13 +311,28 @@ impl Forms<'_> {
     /// and must not pop one while a later form is still to be read (the root
     /// stack is LIFO).
     pub fn next_form(&mut self, heap: &mut Heap) -> Result<Option<(Value, Loc)>, Error> {
-        if let Err(e) = skip_ws_comments(&mut self.cur, heap, self.features) {
+        self.next_form_with(heap, None)
+    }
+
+    /// [`Self::next_form`] with an evaluator on hand, so a `#.` in the text
+    /// can be run as it is read.
+    ///
+    /// The hook is passed per call rather than kept in the `Forms`: a driver
+    /// holds `&mut Interp` for its own work between reads, and a borrow that
+    /// lived as long as the `Forms` would collide with it.
+    pub fn next_form_with(
+        &mut self,
+        heap: &mut Heap,
+        eval: Option<&dyn ReadEval>,
+    ) -> Result<Option<(Value, Loc)>, Error> {
+        let ctx = Ctx { features: self.features, ns: self.ns, eval };
+        if let Err(e) = skip_ws_comments(&mut self.cur, heap, ctx) {
             return Err(e.at(self.cur.loc()));
         }
         if self.cur.at_end() {
             return Ok(None);
         }
-        match read_datum_spanned(&mut self.cur, heap, self.features, self.ns) {
+        match read_datum_spanned(&mut self.cur, heap, ctx) {
             Ok((v, loc)) => {
                 heap.push_root(v);
                 Ok(Some((v, loc)))
@@ -414,7 +464,7 @@ fn is_delim_or_eof(c: Option<char>) -> bool {
 // Whitespace & comments
 // ----------------------------------------------------------------------
 
-fn skip_ws_comments(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> Result<(), Error> {
+fn skip_ws_comments(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<(), Error> {
     loop {
         match cur.peek() {
             Some(c) if is_ws(c) => {
@@ -432,7 +482,7 @@ fn skip_ws_comments(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> R
                 skip_block_comment(cur);
             }
             Some('#') if matches!(cur.peek2(), Some('+') | Some('-')) => {
-                skip_feature_conditional(cur, heap, features)?;
+                skip_feature_conditional(cur, heap, ctx)?;
             }
             _ => break,
         }
@@ -451,17 +501,17 @@ fn skip_ws_comments(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> R
 /// test fails, the guarded form is read (so parens stay balanced, nested
 /// `#+`/`#-` inside it still apply) and discarded — it never becomes part of
 /// any result, exactly as if it had been whitespace.
-fn skip_feature_conditional(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> Result<(), Error> {
+fn skip_feature_conditional(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<(), Error> {
     cur.next(); // '#'
     let want_present = match cur.next() {
         Some('+') => true,
         Some('-') => false,
         c => unreachable!("skip_ws_comments only dispatches here on #+/#-, got {:?}", c),
     };
-    let expr = read_datum(cur, heap, features, NsId::ROOT)?;
-    let present = eval_feature_expr(heap, features, expr)?;
+    let expr = read_datum(cur, heap, Ctx { ns: NsId::ROOT, ..ctx })?;
+    let present = eval_feature_expr(heap, ctx.features, expr)?;
     if present != want_present {
-        read_datum(cur, heap, features, NsId::ROOT)?; // test failed: read and discard the guarded form
+        read_datum(cur, heap, Ctx { ns: NsId::ROOT, ..ctx })?; // test failed: read and discard the guarded form
     }
     Ok(())
 }
@@ -561,29 +611,29 @@ fn skip_block_comment(cur: &mut Cursor) {
 // Datum dispatch
 // ----------------------------------------------------------------------
 
-fn read_datum(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) -> Result<Value, Error> {
-    skip_ws_comments(cur, heap, features)?;
+fn read_datum(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
+    skip_ws_comments(cur, heap, ctx)?;
     match cur.peek() {
         None => Err(Error::ReadError("unexpected end of input".to_string())),
-        Some('(') => read_list(cur, heap, features, ns),
+        Some('(') => read_list(cur, heap, ctx),
         Some(')') => Err(Error::UnmatchedParen),
-        Some('\'') => read_wrapped(cur, heap, features, ns, "quote"),
-        Some('`') => read_wrapped(cur, heap, features, ns, "quasiquote"),
+        Some('\'') => read_wrapped(cur, heap, ctx, "quote"),
+        Some('`') => read_wrapped(cur, heap, ctx, "quasiquote"),
         Some(',') => {
             let start = cur.loc(); // before the prefix, like read_wrapped
             cur.next(); // the ','
             if cur.peek() == Some('@') {
                 cur.next(); // the '@'
-                read_wrapped_body(cur, heap, features, ns, "unquote-splicing", start)
+                read_wrapped_body(cur, heap, ctx, "unquote-splicing", start)
             } else {
-                read_wrapped_body(cur, heap, features, ns, "unquote", start)
+                read_wrapped_body(cur, heap, ctx, "unquote", start)
             }
         }
         Some('"') => read_string(cur, heap),
-        Some('#') => read_hash(cur, heap),
+        Some('#') => read_hash(cur, heap, ctx),
         Some(_) => {
             let start = cur.loc();
-            let v = read_atom(cur, heap, ns)?;
+            let v = read_atom(cur, heap, ctx.ns)?;
             // `:dyn Trait` (the trait-object type, TODO T4) is written as two
             // whitespace-separated words, so the reader joins them into the
             // single datum `(:dyn Trait)` — exactly the treatment `'x` gets.
@@ -594,11 +644,11 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) 
             // handled a level down, by `extend_angle_token` + the type
             // parser, since there is no datum boundary there at all.
             if matches!(v, Value::Symbol(id) if id.is(wk::DYN)) {
-                skip_ws_comments(cur, heap, features)?;
+                skip_ws_comments(cur, heap, ctx)?;
                 if matches!(cur.peek(), None | Some(')')) {
                     return Err(Error::ReadError("`:dyn` must be followed by a trait name".to_string()));
                 }
-                return read_wrapped_body(cur, heap, features, ns, ":dyn", start);
+                return read_wrapped_body(cur, heap, ctx, ":dyn", start);
             }
             Ok(v)
         }
@@ -610,10 +660,10 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) 
 /// own leading skip is a no-op) and the end right after the datum's last
 /// character — no read function consumes trailing whitespace, so the cursor
 /// sits exactly past the datum when `read_datum` returns.
-fn read_datum_spanned(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) -> Result<(Value, Loc), Error> {
-    skip_ws_comments(cur, heap, features)?;
+fn read_datum_spanned(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<(Value, Loc), Error> {
+    skip_ws_comments(cur, heap, ctx)?;
     let start = cur.loc();
-    let v = read_datum(cur, heap, features, ns)?;
+    let v = read_datum(cur, heap, ctx)?;
     Ok((v, start.with_end(cur.line, cur.col)))
 }
 
@@ -624,10 +674,10 @@ fn read_datum_spanned(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns
 /// 2-element list) to [`read_wrapped_body`] — `,@` needs to consume *two*
 /// prefix characters (`,` then `@`), so its caller in [`read_datum`] does
 /// that part itself and calls `read_wrapped_body` directly.
-fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId, head: &str) -> Result<Value, Error> {
+fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, head: &str) -> Result<Value, Error> {
     let start = cur.loc(); // the prefix character — where the whole form begins
     cur.next(); // the prefix character
-    read_wrapped_body(cur, heap, features, ns, head, start)
+    read_wrapped_body(cur, heap, ctx, head, start)
 }
 
 /// Read `datum` and build `(head datum)`, the shared tail of [`read_wrapped`]
@@ -637,9 +687,9 @@ fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId
 /// head cell's `cons_loc` spans prefix through datum end, the `head` symbol's
 /// `elem_loc` covers the prefix character(s), and the datum's `elem_loc` its
 /// own span.
-fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId, head: &str, start: Loc) -> Result<Value, Error> {
+fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, head: &str, start: Loc) -> Result<Value, Error> {
     let head_loc = start.clone().with_end(cur.line, cur.col); // the consumed prefix
-    let (d, d_loc) = read_datum_spanned(cur, heap, features, ns)?;
+    let (d, d_loc) = read_datum_spanned(cur, heap, ctx)?;
     let form_loc = start.with_end(cur.line, cur.col);
     heap.push_root(d);
     let q = heap.intern_symbol(head); // symbols are permanent; no rooting needed
@@ -696,7 +746,7 @@ fn module_body_ns(heap: &Heap, ns: NsId, head: Value, path: Value) -> Option<NsI
     Some(cur)
 }
 
-fn read_list(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) -> Result<Value, Error> {
+fn read_list(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
     let open_loc = cur.loc(); // position of the '(' — the list form's location
     cur.next(); // '('
     let mark = heap.root_count();
@@ -704,7 +754,7 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) -
     // list turns out to be `(module PATH body...)`, at which point everything
     // after `PATH` belongs to that module — see `module_body_ns`. Nesting is
     // lexical, so one pass settles it with no dynamic `*package*` to bind.
-    let mut body_ns = ns;
+    let mut body_ns = ctx.ns;
     let mut elems: Vec<Value> = Vec::new();
     // Source location of each element in `elems`, captured just before reading
     // it — parallel to `elems`, so the build loop below can tag each spine
@@ -713,7 +763,7 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) -
     let mut tail = Value::Empty;
 
     loop {
-        if let Err(e) = skip_ws_comments(cur, heap, features) {
+        if let Err(e) = skip_ws_comments(cur, heap, ctx) {
             restore_roots(heap, mark);
             return Err(e);
         }
@@ -733,7 +783,7 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) -
                     restore_roots(heap, mark);
                     return Err(Error::ReadError("dotted pair has no car".to_string()));
                 }
-                let d = match read_datum(cur, heap, features, ns) {
+                let d = match read_datum(cur, heap, ctx) {
                     Ok(d) => d,
                     Err(e) => {
                         restore_roots(heap, mark);
@@ -742,7 +792,7 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) -
                 };
                 heap.push_root(d);
                 tail = d;
-                if let Err(e) = skip_ws_comments(cur, heap, features) {
+                if let Err(e) = skip_ws_comments(cur, heap, ctx) {
                     restore_roots(heap, mark);
                     return Err(e);
                 }
@@ -755,7 +805,7 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) -
                 break;
             }
             Some(_) => {
-                let (e, elem_loc) = match read_datum_spanned(cur, heap, features, body_ns) {
+                let (e, elem_loc) = match read_datum_spanned(cur, heap, Ctx { ns: body_ns, ..ctx }) {
                     Ok(pair) => pair,
                     Err(err) => {
                         restore_roots(heap, mark);
@@ -766,7 +816,7 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, features: &Features, ns: NsId) -
                 elems.push(e);
                 elem_locs.push(elem_loc);
                 if elems.len() == 2 {
-                    if let Some(inner) = module_body_ns(heap, ns, elems[0], elems[1]) {
+                    if let Some(inner) = module_body_ns(heap, ctx.ns, elems[0], elems[1]) {
                         body_ns = inner;
                     }
                 }
@@ -849,12 +899,33 @@ fn read_string(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
     Ok(heap.alloc_string(s))
 }
 
-fn read_hash(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
+fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
     cur.next(); // '#'
     match cur.peek() {
         Some('\\') => {
             cur.next(); // '\\'
             read_char(cur)
+        }
+        // `#.` — read the next datum, run it, and read the value in its
+        // place. The one place the reader is not a function of its text
+        // alone, and the reason `ReadEval` exists.
+        Some('.') => {
+            cur.next(); // '.'
+            let form = read_datum(cur, heap, ctx)?;
+            let Some(eval) = ctx.eval else {
+                return Err(Error::ReadError(
+                    "`#.` needs to run code while reading, and this reader was given no evaluator \
+                     (a plain `read`/`read-from-string` has none — `#.` works where source is \
+                     being loaded)"
+                        .to_string(),
+                ));
+            };
+            // Rooted across the call: evaluating allocates, and `form` is
+            // reachable from nothing else until the value replaces it.
+            heap.push_root(form);
+            let result = eval.read_eval(heap, form);
+            heap.pop_root();
+            result.map_err(Error::ReadError)
         }
         // CL's radix macros. The counterpart of `*print-radix*`, which prints
         // exactly these: without them the marker it adds so a number "reads

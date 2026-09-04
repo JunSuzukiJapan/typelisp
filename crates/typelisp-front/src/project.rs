@@ -313,7 +313,11 @@ impl Loader {
         let mut body = Vec::new();
         let mut check_err = None;
         loop {
-            let read = match forms.next_form(heap) {
+            let read = {
+                let hook = crate::read::DriverReadEval::new(checker, interp);
+                forms.next_form_with(heap, Some(&hook))
+            };
+            let read = match read {
                 Ok(Some(pair)) => pair,
                 Ok(None) => break,
                 Err(e) => {
@@ -666,7 +670,11 @@ fn load_source_flat(
     let mut forms = reader.forms_in(&file_name, src);
     let mut result = Ok(());
     loop {
-        let (v, loc) = match forms.next_form(heap) {
+        let next = {
+            let hook = crate::read::DriverReadEval::new(checker, interp);
+            forms.next_form_with(heap, Some(&hook))
+        };
+        let (v, loc) = match next {
             Ok(Some(pair)) => pair,
             Ok(None) => break,
             Err(e) => {

@@ -373,7 +373,7 @@ fn try_run_pending(
     let mut incomplete = false;
 
     loop {
-        let (v, loc) = match forms.next_form(heap) {
+        let (v, loc) = match forms.next_form_with(heap, Some(&*interp)) {
             Ok(Some(pair)) => pair,
             Ok(None) => break,
             Err(e) => {

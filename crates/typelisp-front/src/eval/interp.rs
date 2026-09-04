@@ -2315,6 +2315,35 @@ impl Interp {
         out.map_err(|e| e.to_string())
     }
 
+    /// [`typelisp_read::reader::ReadEval`] for the reader's `#.`.
+    ///
+    /// The same act as [`Self::eval_form`] — check this datum, run it — with
+    /// the CL-conformant `eval` wrapping left off: `eval` answers a
+    /// `Result<Sexpr, Error>` because a program calling it wants to handle a
+    /// failure, while a `#.` that does not check is a *read* error and the
+    /// reader reports it with the position, like any other.
+    ///
+    /// A definition placed in a `#.` still defines; what the reader splices in
+    /// is whatever the form produced, which for a definition is nothing
+    /// (`()`).
+    pub fn read_eval_form(&self, heap: &mut Heap, form: Value) -> Result<Value, String> {
+        let Some(checker) = self.checker.as_ref().map(Rc::clone) else {
+            return Err("`#.` needs a checker handle, and this session has none".to_string());
+        };
+        let mark = heap.root_count();
+        heap.push_root(form);
+        let checked = checker.borrow_mut().check_form_at(heap, self, form, None);
+        while heap.root_count() > mark {
+            heap.pop_root();
+        }
+        let tl = checked.map_err(|e| e.to_string())?;
+        match self.exec(heap, tl) {
+            Ok(Some(v)) => Ok(v),
+            Ok(None) => Ok(Value::Empty),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
     pub fn eval_form(&self, heap: &mut Heap, arg: &Value) -> Result<Value, EvalError> {
         let checker = match &self.checker {
             Some(c) => Rc::clone(c),
@@ -4435,4 +4464,12 @@ fn sexpr_equal(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// numeric, struct/enum-recursive sibling. Same shared implementation.
 fn sexpr_equalp(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Bool(typelisp_rt::equality::equalp_val(heap, args[0], args[1])))
+}
+
+/// The reader's hook into the evaluator, for `#.` — see
+/// [`Interp::read_eval_form`].
+impl typelisp_read::reader::ReadEval for Interp {
+    fn read_eval(&self, heap: &mut Heap, form: Value) -> Result<Value, String> {
+        self.read_eval_form(heap, form)
+    }
 }

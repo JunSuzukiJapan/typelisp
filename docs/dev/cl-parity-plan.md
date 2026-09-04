@@ -1219,17 +1219,35 @@ CL の `read` に合わせ（1 文字消費する。端末で打った form が�
 
 ### Stage 8c — `readtable` とリーダマクロ
 
-**前提条件は解消済み**（上の Stage 8b-2、2026-09-04）。読み込み中にユーザーコードを
-走らせられるようになったので、以下は素直に載る:
-`copy-readtable` / `set-macro-character` / `get-macro-character` /
-`set-dispatch-macro-character` / `make-dispatch-macro-character` / `readtable-case` / `*readtable*`、
-読み込み時制御 `#.`（`#+`/`#-` は 2026-07-30 実装済み）。
+**前提条件は解消済み**（上の Stage 8b-2、2026-09-04）。
 
-残っている設計上の宿題は 2 つ: リーダの feature 集合と readtable は今も `Reader` が
-不変に持っているので、**フォームがそれを書き換える経路**（`*features*` /
-`*readtable*` を評価器側の状態にして、次の `next_form` がそれを見る）を作ること。
-そして**モジュールファイルでの発火**——上のとおり `needs_immediate_exec` の分類に
-リーダマクロ設置フォームを入れるかどうか。
+**`#.`（読み込み時評価）は完了（2026-09-05）**。テストは
+`tests/read_time_eval_test.rs`（12 本）。
+
+- リーダに `ReadEval` フックを足した。`typelisp-read` はチェッカーも評価器も見られない
+  （向きが逆）ので、評価器側が実装しドライバが手渡す——チェッカー側の `MacroExpander` と
+  同じ形。**呼び出しごとに渡す**のは、ドライバが読みと読みの間に `&mut Interp` を
+  自分の仕事に使っており、リーダと同じ寿命の借用は衝突するため。
+- ドライバは `&mut Checker` を丸ごと借りているので `Rc<RefCell<Checker>>` は使えない。
+  `read::DriverReadEval` が 1 回の読みのあいだだけ両方を貸す（自前の `RefCell` を
+  reborrow の上にかぶせる）。`run_file` がチェッカーハンドルをロード**後**に設置するのは
+  そのままでよくなった。
+- リーダの引数は `Ctx { features, ns, eval }` に束ねた。`#.` が 3 つ目を足したので。
+
+**`#.` が届く範囲は経路で変わり、これは CL と同じ**——`load`/REPL は 1 フォームずつ
+評価するので手前の定義に届き、モジュールファイルは単位として検査されるので届かない
+（`use` したモジュールの定義にも届かない。ローダは全モジュールの本体をキューに積み、
+実行はドライバがあとでやる——**LSP がドライバの 1 つで、検査中の文書を実行しては
+ならない**から、この順序は動かせない）。
+
+**残り**: `copy-readtable` / `set-macro-character` / `get-macro-character` /
+`set-dispatch-macro-character` / `make-dispatch-macro-character` / `*readtable*`。
+`readtable-case` については、**このリーダは既に CL の `:downcase` を固定で行っている**
+（シンボルは読み取り時に小文字へ正規化される、syntax.md §1）。残る 3 設定のうち
+`:upcase` は CL 既定だがここでは全ソースが小文字前提なので持ち込めず、`:invert` は
+`:upcase` の補正なので同じ。意味があるのは `:preserve` だけで、それは
+「識別子の大文字小文字を区別する」という**言語の決定**であってリーダの設定ではない
+（Rust がそうであるように）。可否は 8c の残りを実装するときに判断する。
 
 ---
 
