@@ -6163,10 +6163,15 @@ impl Checker {
         for item in &items {
             let form = Self::owned_item_to_form(heap, item)?;
             heap.push_permanent_root(form);
-            parts.push(Self::subst_value(heap, form, &subst)?);
-        }
-        for &p in &parts {
-            heap.push_permanent_root(p);
+            // Rooted where it lands rather than in a second pass after the
+            // loop: `subst_value` hands back a freshly rebuilt tree that
+            // nothing references yet (a `Vec<Value>` is invisible to the
+            // collector), and the *next* item's rebuild allocates. Permanent
+            // like the rest of what this materialization builds, since
+            // `check_impl` may retain it as a `MethodTemplate::Form`.
+            let substituted = Self::subst_value(heap, form, &subst)?;
+            heap.push_permanent_root(substituted);
+            parts.push(substituted);
         }
         let locs: Vec<Option<Loc>> = vec![None; parts.len()];
         let saved = self.enter_specialization(ns, self.type_var_bindings.clone());
@@ -7254,7 +7259,24 @@ impl Checker {
         match v {
             Value::Symbol(id) => {
                 let name = heap.symbol_name(id).to_string();
-                Ok(subst.get(&name).copied().unwrap_or(v))
+                match subst.get(&name) {
+                    Some(bound) => Ok(*bound),
+                    None => Self::subst_inside_name(heap, v, &name, subst),
+                }
+            }
+            // A `::`-qualified name is one token to the reader too, so it can
+            // carry generic arguments on its last segment (`geo::pair<item>`)
+            // exactly as a bare one does. The whole-name lookup is skipped:
+            // every key of `subst` is a single-segment name (`self`, an
+            // associated type), so a joined path can never be one.
+            Value::Path(id) => {
+                let name = heap
+                    .path_segments(id)
+                    .iter()
+                    .map(|s| heap.symbol_name(*s))
+                    .collect::<Vec<_>>()
+                    .join("::");
+                Self::subst_inside_name(heap, v, &name, subst)
             }
             Value::Cons(_) => {
                 let car = heap.car(v)?;
@@ -7273,6 +7295,65 @@ impl Checker {
             }
             other => Ok(other),
         }
+    }
+
+    /// Substitute *inside* a type name — the half of [`Self::subst_value`]
+    /// the whole-name lookup cannot reach.
+    ///
+    /// `Vector<Item>` is a single symbol to the reader (the same reason
+    /// `impl<T>` is — `parse_generic_name_header`), so a trait's associated
+    /// type mentioned in a *generic argument* of a default method's signature
+    /// never matched anything, and the inherited signature reached
+    /// `Checker::check_impl_conformance` still saying `vector<item>` while
+    /// the trait's own declaration had been substituted to `vector<char>`.
+    ///
+    /// So the name is parsed into a [`Type`] — where the arguments are
+    /// structure rather than text — substituted there with the same
+    /// [`subst_apply`] the conformance check uses, and emitted back as syntax
+    /// by [`forms::type_to_form`]. Emitting *structure* and not a rebuilt
+    /// name is what makes the substitution total: an argument may end up
+    /// being something no name can spell, such as a `(fn ...)` type an
+    /// `impl` bound the associated type to.
+    ///
+    /// Returns `v` untouched unless a substitution actually applies, so an
+    /// ordinary concrete annotation keeps the spelling — and the source span
+    /// — it was written with.
+    fn subst_inside_name(
+        heap: &mut Heap,
+        v: Value,
+        name: &str,
+        subst: &HashMap<String, Value>,
+    ) -> Result<Value, Error> {
+        // `<` is the only way a name can carry a type inside it, and a
+        // generic name always closes with `>`. Both halves matter: the
+        // *parse* is deliberately tolerant of a premature end (`Result<`,
+        // whose speculative extension the reader rewound, has to reach the
+        // checker as an error rather than a panic), so without the closing
+        // test a comparison written tight — `a<b` — would parse as `a<b>`
+        // and be rewritten inside a body. `vector<t>::new` fails it too.
+        if !name.contains('<') || !name.ends_with('>') {
+            return Ok(v);
+        }
+        // Not everything `subst_value` walks is a type: a `(where ...)`
+        // bound leads with a trait name, and the clause is rewritten by the
+        // same walk. A name the type grammar rejects is left exactly as
+        // written — whatever reads it next parses it with a span to blame,
+        // which is a better place to report it from than here.
+        let Ok(ty) = crate::types::parse_type_name(name) else {
+            return Ok(v);
+        };
+        let mut vars = BTreeSet::new();
+        type_var_names(&ty, &mut vars);
+        let mut tsubst: BTreeMap<String, Type> = BTreeMap::new();
+        for var in vars {
+            if let Some(bound) = subst.get(&var) {
+                tsubst.insert(var, parse_type_spanned(heap, *bound, None, &mut Vec::new())?);
+            }
+        }
+        if tsubst.is_empty() {
+            return Ok(v);
+        }
+        forms::type_to_form(heap, &subst_apply(&ty, &tsubst))
     }
 
     // ---- module / defmethod / use -----------------------------------------
@@ -15173,6 +15254,28 @@ fn format_call_owners(ty: &Type) -> Option<Path> {
 /// since by then the address has already been handed to a `transmute`.
 fn directive_shaped(sig: &crate::check::registry::FnSig) -> bool {
     sig.params.len() == 3 && sig.params[1] == Type::Bool && sig.params[2] == Type::Bool && sig.ret == Type::Str
+}
+
+/// Every name [`subst_apply`] would look up: the simple, argument-less
+/// `Named` leaves of `t`, which are the only positions a type *variable* can
+/// occupy. A generic's head is not one of them — `vector<item>` mentions
+/// `item`, not `vector` — which is exactly the rule `subst_apply` follows.
+fn type_var_names(t: &Type, out: &mut BTreeSet<String>) {
+    match t {
+        Type::Named(n, args) if args.is_empty() && n.is_simple() => {
+            out.insert(n.last_segment().to_string());
+        }
+        Type::Named(_, args) => args.iter().for_each(|a| type_var_names(a, out)),
+        Type::Fn(ps, rest, r) => {
+            ps.iter().for_each(|p| type_var_names(p, out));
+            if let Some(t) = rest {
+                type_var_names(t, out);
+            }
+            type_var_names(r, out);
+        }
+        Type::Dyn(_, pins) => pins.iter().for_each(|p| type_var_names(p, out)),
+        _ => {}
+    }
 }
 
 /// Replace type parameters in `t` with their bindings from `subst`.

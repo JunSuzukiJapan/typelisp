@@ -792,3 +792,103 @@ fn an_inherited_self_returning_trait_method_resolves_to_the_bounded_type_variabl
         Value::Int(12)
     );
 }
+
+// ---- an associated type inside a generic name -----------------------------
+
+/// A trait method's *default body* whose signature mentions the trait's
+/// associated type inside a generic argument — `Vector<Item>`, not a bare
+/// `Item`.
+///
+/// The reader reads `Vector<Item>` as a single symbol (the same reason
+/// `impl<T>` is one), so `Checker::subst_value`'s whole-name lookup never
+/// reached the `Item` inside it: the inherited signature stayed
+/// `(holder vector<item>)` while the trait's own declaration substituted to
+/// `(holder vector<char>)`, and the two failed to match. `Option<Item>` had
+/// never shown it because no default body's signature used an associated
+/// type until Stage 9d's stream layering did.
+const SINK: &str = "
+(defstruct holder (n i32))
+(deftrait Sink ()
+  (type Item)
+  (size ((self Self)) i32)
+  (put-all ((self Self) (vs Vector<Item>)) i32 (size self)))
+";
+
+#[test]
+fn an_associated_type_inside_a_generic_is_substituted() {
+    // The call is the proof: `(two)` is a `Vector<char>`, and it is only
+    // accepted because the inherited `put-all` was registered taking one.
+    assert_eq!(
+        eval_ok(&format!(
+            "{}
+             (impl Sink holder
+               (type Item char)
+               (size ((self Self)) i32 self::n))
+             (defun empty-chars () Vector<char> (Vector::new))
+             (defun two () Vector<char>
+               (let ((v (empty-chars)))
+                 (push v #\\a)
+                 (push v #\\b)
+                 v))
+             (put-all (holder::new 7) (two))",
+            SINK
+        )),
+        Value::Int(7)
+    );
+}
+
+/// The substitution goes through the *structure* of the type, so it reaches
+/// any depth and works for `Self` as well as for an associated type.
+#[test]
+fn substitution_reaches_a_nested_argument_and_self() {
+    check(
+        "(defstruct holder (n i32))
+         (deftrait Sink ()
+           (type Item)
+           (size ((self Self)) i32)
+           (nested ((self Self) (vs Vector<Option<Item>>)) i32 (size self))
+           (selves ((self Self) (vs Vector<Self>)) i32 (size self)))
+         (impl Sink holder
+           (type Item char)
+           (size ((self Self)) i32 self::n))",
+    )
+    .expect("check failed");
+}
+
+/// What emitting *structure* rather than a rebuilt name buys: an `impl` may
+/// bind the associated type to something the name grammar cannot spell, and
+/// `Vector<(fn (i32) i32)>` has no written form at all. The substituted
+/// signature comes out as the applied spelling `(vector (fn (i32) i32))`
+/// instead — see `tests/type_test.rs`.
+#[test]
+fn an_associated_type_may_be_bound_to_a_type_no_name_can_spell() {
+    check(
+        "(defstruct holder (n i32))
+         (deftrait Sink ()
+           (type Item)
+           (size ((self Self)) i32)
+           (put-all ((self Self) (vs Vector<Item>)) i32 (size self)))
+         (impl Sink holder
+           (type Item (fn (i32) i32))
+           (size ((self Self)) i32 self::n))",
+    )
+    .expect("check failed");
+}
+
+/// A `:dyn` binding, which the name grammar *can* spell — the two spellings
+/// have to agree, since the conformance check compares parsed types.
+#[test]
+fn an_associated_type_may_be_bound_to_a_trait_object() {
+    check(
+        "(defstruct holder (n i32))
+         (deftrait Drawable () (draw ((self Self)) ()))
+         (deftrait Sink ()
+           (type Item)
+           (size ((self Self)) i32)
+           (put-all ((self Self) (vs Vector<Item>)) i32 (size self)))
+         (impl Sink holder
+           (type Item :dyn Drawable)
+           (size ((self Self)) i32 self::n))",
+    )
+    .expect("check failed");
+}

@@ -3,8 +3,10 @@
 //! Types appear in source as `Sexpr`: a symbol such as `i32`, `bool`, `String`,
 //! or a generic written without spaces like `Option<i32>` / `Vec<String>` /
 //! `Pair<K,V>` (read as a *single* symbol token, so generics are split out of
-//! the symbol's name here), the empty list `()` for the unit type, or a list
-//! `(fn (param-types...) ret-type)` for a function type.
+//! the symbol's name here), the empty list `()` for the unit type, a list
+//! `(fn (param-types...) ret-type)` for a function type, or the *applied*
+//! spelling of a generic, `(pair k v)` — see [`parse_applied_type`] for why
+//! that second spelling exists.
 //!
 //! Symbols are case-folded by the reader, so all type names are lowercase here.
 
@@ -407,7 +409,8 @@ pub fn parse_type_spanned(
         // Trait` spelling (`read::reader::read_datum`). Checked before
         // the `(fn ...)` case since both are lists.
         Value::Cons(_) if is_dyn_form(heap, v) => parse_dyn_type(heap, v, out),
-        Value::Cons(_) => parse_fn_type(heap, v, out),
+        Value::Cons(_) if is_fn_form(heap, v) => parse_fn_type(heap, v, out),
+        Value::Cons(_) => parse_applied_type(heap, v, out),
         other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
     }
 }
@@ -415,6 +418,76 @@ pub fn parse_type_spanned(
 /// Whether `v` is a `(:dyn ...)` list.
 pub fn is_dyn_form(heap: &Heap, v: Value) -> bool {
     matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::DYN))
+}
+
+/// Whether `v` is a `(fn ...)` list. Only the head is examined, so a
+/// malformed function type still reaches [`parse_fn_type`] and is reported as
+/// one rather than as a mis-shaped type application.
+fn is_fn_form(heap: &Heap, v: Value) -> bool {
+    matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::FN))
+}
+
+/// Parse the *applied* spelling of a generic type — `(vector char)`, the
+/// list form of `vector<char>`.
+///
+/// The two spell the same type and parse to the same [`Type`]. The name form
+/// is what a program is normally written in; this one exists because a type
+/// *argument* is a whole type expression, and the name grammar
+/// ([`parse_qualified_generic`]) can only spell arguments that are themselves
+/// names, `()`, or `:dyn` — never a `(fn ...)`. Substituting a trait's
+/// associated type into a signature has to be able to produce whatever the
+/// `impl` bound it to, so `Checker::subst_value` emits this form (see
+/// `check::forms::type_to_form`) instead of splicing text into a symbol's
+/// name.
+///
+/// The head is parsed as an ordinary type expression so a qualified spelling
+/// (`geo::pair`) works and its span is recorded like any other name; it must
+/// come out as a nominal type with no arguments of its own, since its
+/// arguments are exactly what the list supplies.
+fn parse_applied_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
+    let elems = heap.list_to_vec_locs(v)?;
+    if elems.len() < 2 {
+        return Err(Error::TypeError(
+            "a type application must be (Name Arg...), with at least one argument".to_string(),
+        ));
+    }
+    let head = match parse_type_spanned(heap, elems[0].0, elems[0].1.as_ref(), out)? {
+        Type::Named(p, args) if args.is_empty() => p,
+        other => {
+            return Err(Error::TypeError(format!(
+                "a type application's head must be a plain type name, found `{:?}`",
+                other
+            )))
+        }
+    };
+    let mut args = Vec::with_capacity(elems.len() - 1);
+    for (a, l) in &elems[1..] {
+        args.push(parse_type_spanned(heap, *a, l.as_ref(), out)?);
+    }
+    Ok(Type::Named(head, args))
+}
+
+/// [`parse_type`] for a type written as a bare *name* string — the spelling
+/// that reaches the checker as one symbol because the reader reads
+/// `vector<char>` as a single token. Records no spans; when a span is
+/// available the caller has a `Value` and wants [`parse_type_spanned`].
+///
+/// Stricter than the parse behind [`parse_type_spanned`] in one way: the
+/// whole string has to be the type. `parse_qualified_generic` stops at the
+/// `>` that closes the argument list and its caller ignores whatever
+/// follows, which is harmless when a *type* is what was written — but this
+/// entry point is asked "is this name a type at all?" about symbols that may
+/// be nothing of the kind, and `vector<t>::new` (a method path) must not
+/// come back as the type `vector<t>`.
+pub fn parse_type_name(name: &str) -> Result<Type, Error> {
+    let mut toks = Toks::new(name);
+    let ty = parse_qualified_generic(&mut toks, &mut None, false)
+        .map(|(segs, args)| named_or_primitive(segs, args))?;
+    skip_space(&mut toks);
+    match toks.peek() {
+        None => Ok(ty),
+        Some(_) => Err(Error::TypeError(format!("`{}`: unexpected tokens after the type name", name))),
+    }
 }
 
 /// Parse the reader-joined `(:dyn Trait)` / `(:dyn Trait<Pin,...>)` form. The
