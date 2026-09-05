@@ -1194,3 +1194,41 @@ fn an_aot_executable_initializes_the_preludes_globals() {
     "#;
     assert_eq!(compile_and_run("aot_prelude_globals", src), 42);
 }
+
+/// The operating-system builtins taken with `libc` (2026-09-05) reach a
+/// standalone executable.
+///
+/// An AOT binary has no interpreter and no extern *address* table: the shims
+/// are ordinary linker symbols the island declared, so a missing entry shows
+/// up only here. The exit code carries the answers — a hostname, a CPU time,
+/// a local zone and a file owner all had to come back for it to be 0.
+#[test]
+fn the_system_information_builtins_run_in_an_executable() {
+    let src = r#"
+(defun main () i32
+  (let ((host (is-some (machine-instance)))
+        (rel (is-some (software-version)))
+        (cpu (> (internal-time-seconds (get-internal-run-time)) 0.0))
+        (zone (match (timezone-offset-seconds 46000 0) ((some _) true) ((none) false)))
+        (dst (match (timezone-daylight-p 46000 0) ((some _) true) ((none) false)))
+        (owner (is-ok (file-author "Cargo.toml"))))
+    (if (and host (and rel (and cpu (and zone (and dst owner))))) 0 1)))
+"#;
+    assert_eq!(compile_and_run("sysinfo_aot", src), 0);
+}
+
+/// `decode-universal-time`'s no-zone default is CL's local time, in a
+/// standalone executable too — the path that calls `localtime_r` through the
+/// prelude rather than through the interpreter.
+#[test]
+fn local_time_decoding_runs_in_an_executable() {
+    let src = r#"
+(defun main () i32
+  (let ((now (get-decoded-time)))
+    (if (and (> now::year 2020)
+             (and (>= now::hour 0) (< now::hour 24)))
+        0
+        1)))
+"#;
+    assert_eq!(compile_and_run("localtime_aot", src), 0);
+}

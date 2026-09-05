@@ -1733,6 +1733,7 @@ impl Interp {
             "random-state-next" => Some(eval_random_state_next(heap, args)),
             "get-universal-time" => Some(eval_get_universal_time(heap, args)),
             "get-internal-real-time" => Some(eval_get_internal_real_time(heap, args)),
+            "get-internal-run-time" => Some(eval_get_internal_run_time(heap, args)),
             // The environment and the running implementation. Each is one
             // call into `typelisp_rt::sys_builtin`, the same implementation
             // the compiled shims wrap — the `file-*` half of Phase 9c needs
@@ -1754,6 +1755,21 @@ impl Interp {
             "lisp-implementation-version" => Some(Ok(typelisp_rt::sys_builtin::lisp_implementation_version(heap))),
             "machine-type" => Some(Ok(typelisp_rt::sys_builtin::machine_type(heap))),
             "software-type" => Some(Ok(typelisp_rt::sys_builtin::software_type(heap))),
+            // The three that have to ask the host, and the two that ask it
+            // what the local time zone was at a given instant. `file-author`
+            // needs no arm for the same reason the rest of the `file-*`
+            // family does not — the prefix guard above routed it already.
+            "machine-instance" => Some(Ok(typelisp_rt::sys_builtin::machine_instance(heap))),
+            "machine-version" => Some(Ok(typelisp_rt::sys_builtin::machine_version(heap))),
+            "software-version" => Some(Ok(typelisp_rt::sys_builtin::software_version(heap))),
+            "timezone-offset-seconds" => Some(match int_pair(args, "timezone-offset-seconds") {
+                Ok((day, sec)) => Ok(typelisp_rt::sys_builtin::timezone_offset_seconds(heap, day, sec)),
+                Err(e) => Err(e),
+            }),
+            "timezone-daylight-p" => Some(match int_pair(args, "timezone-daylight-p") {
+                Ok((day, sec)) => Ok(typelisp_rt::sys_builtin::timezone_daylight_p(heap, day, sec)),
+                Err(e) => Err(e),
+            }),
             "parse-int" => Some(eval_parse_int(heap, args)),
             "parse-float" => Some(eval_parse_float(heap, args)),
             // Both pass `self` as the evaluator: an interpreted `(read ...)`
@@ -3396,6 +3412,21 @@ fn eval_get_universal_time(heap: &mut Heap, _args: &[Value]) -> Result<Value, Ev
 fn eval_get_internal_real_time(heap: &mut Heap, _args: &[Value]) -> Result<Value, EvalError> {
     let now = typelisp_rt::sys_builtin::get_internal_real_time();
     Ok(typelisp_rt::sys_builtin::internal_time_value(heap, now))
+}
+
+fn eval_get_internal_run_time(heap: &mut Heap, _args: &[Value]) -> Result<Value, EvalError> {
+    let used = typelisp_rt::sys_builtin::get_internal_run_time();
+    Ok(typelisp_rt::sys_builtin::internal_time_value(heap, used))
+}
+
+/// The two `i32` arguments of the time-zone builtins. Unreachable through
+/// the checker, so the error is the internal-shape one every other builtin
+/// argument mismatch here reports.
+fn int_pair(args: &[Value], who: &str) -> Result<(i64, i64), EvalError> {
+    match (args.first(), args.get(1)) {
+        (Some(Value::Int(a)), Some(Value::Int(b))) => Ok((*a, *b)),
+        other => Err(EvalError::Panic(format!("{}: arguments are not two integers, got {:?}", who, other))),
+    }
 }
 
 /// Shared tail of every scalar `print`/`println` method (`registry.rs`'s

@@ -3446,19 +3446,23 @@ user-visible capacity."
      (/ (int->float it::microsecond) (int->float internal-time-units-per-second))))
 
 ;; CL's `time` macro: run `form`, print how long it took to standard output,
-;; and return `form`'s own value unchanged — CL doesn't specify `time`'s
-;; report format either, so this prints one real-time-only line (no
-;; multiple-value `values`, no separate "run time" figure — CPU time needs an
-;; OS-specific call this codebase has no other use for; see docs/dev/
-;; cl-missing-classes-and-methods.md §3.4 for the standing "no multiple
-;; values" rule this also respects).
+;; and return `form`'s own value unchanged. CL doesn't specify the report's
+;; format, so this prints the two figures that mean different things: elapsed
+;; time, and the CPU time `get-internal-run-time` reads out of `getrusage`.
+;; A form that is mostly waiting on I/O shows a large gap between them, which
+;; is exactly what a single "real time" line hid until 2026-09-05. (Still no
+;; multiple-value `values` — see docs/dev/cl-missing-classes-and-methods.md
+;; §3.4 for that standing rule.)
 (pub defmacro time (form)
-  (let ((t0 (gensym)) (result (gensym)))
-    `(let ((,t0 (internal-time-seconds (get-internal-real-time))))
+  (let ((t0 (gensym)) (r0 (gensym)) (result (gensym)))
+    `(let ((,t0 (internal-time-seconds (get-internal-real-time)))
+           (,r0 (internal-time-seconds (get-internal-run-time))))
        (let ((,result ,form))
          (progn
            (format *trace-output* "Real time: ~,3f seconds~%"
                    (- (internal-time-seconds (get-internal-real-time)) ,t0))
+           (format *trace-output* "Run time: ~,3f seconds~%"
+                   (- (internal-time-seconds (get-internal-run-time)) ,r0))
            ,result)))))
 
 
@@ -4843,6 +4847,13 @@ user-visible capacity."
    `get-universal-time` counts on, so `decode-universal-time` reads it."
   (file-modified-date (namestring name)))
 
+(pub defun file-author<P> ((name P)) Result<Option<string>, FileError> (where (Pathish P))
+  "Who owns file `name` (CLHS 20.1). `none` -- not an error -- when the
+   owning user id has no entry in the password database: CL separates the
+   two, saying `NIL` when the author cannot be determined and signalling
+   only when the file itself is not there."
+  (file-owner-name (namestring name)))
+
 (pub defun directory-p<P> ((name P)) bool (where (Pathish P))
   "Whether `name` is a directory. `false` for a plain file and for something
    that is not there at all; `probe-file` is what separates those two."
@@ -4874,6 +4885,21 @@ user-visible capacity."
    than spent on a builtin."
   "typelisp")
 
+(pub defun short-site-name () Option<string>
+  "The site's short name (CLHS 25.1), or `none`.
+
+   Always `none`: nothing on a POSIX system records a site name, and CL
+   explicitly permits `NIL` -- which is what SBCL answers too. It is here so
+   that a program asking gets CL's answer rather than `no such function`,
+   and it is `none` rather than an invented constant because there is no
+   fact to report."
+  (option::none))
+
+(pub defun long-site-name () Option<string>
+  "The site's long name (CLHS 25.1), or `none`. `none` for the same reason
+   `short-site-name` is."
+  (option::none))
+
 (pub defun user-homedir-pathname () Option<pathname>
   "The user's home directory, or `none` when `$HOME` is unset. CL allows
    `NIL` here for exactly this case, so the `Option` is not an extra."
@@ -4885,19 +4911,26 @@ user-visible capacity."
 ;; Universal time, decomposed (CLHS 25.1).
 ;;
 ;; CL returns nine values from `decode-universal-time`; there are no multiple
-;; values here, so the components come back as one struct. Two of CL's nine
-;; are missing rather than faked: `daylight-p` and the `zone` a *default*
-;; decode would have used both need a timezone database, and this language's
-;; runtime has none. What is offered instead is the explicit-zone form CL also
-;; has -- `zone` is an offset in hours west of Greenwich, and 0 (the default
-;; here) is UTC.
+;; values here, so all nine come back as one struct -- including `daylight-p`
+;; and `zone`, which were missing until 2026-09-05 for want of anything that
+;; could answer them. `local-zone-west` can now ask the operating system, so
+;; the no-zone default decodes into *local* time exactly as CL's does.
 ;;
-;; **This is the divergence to know about**: CL's `decode-universal-time` with
-;; no zone argument decodes into *local* time. Here it decodes into UTC.
+;; `zone` is CL's: an offset in hours west of Greenwich, positive going west,
+;; so UTC+9 reads as -9. It is an `f64` in the *result* because not every real
+;; offset is a whole number of hours -- India is +5:30, Nepal +5:45 -- and
+;; rounding the reported zone would be a silent lie. The *argument* stays
+;; whole hours, which is what anyone writes by hand and what CL source says.
+;;
+;; The argument is `&optional (zone i32)` with **no default expression**, so
+;; the body sees `Option<i32>`: omitted is `none`, and `(decode-universal-time
+;; ut 9)` still passes a bare `9`. That is CL's `&optional time-zone` with its
+;; `nil` default, and the static-type shape of CL's supplied-p variable.
 
 (pub defstruct decoded-time
   (pub second i32) (pub minute i32) (pub hour i32)
-  (pub date i32) (pub month i32) (pub year i32) (pub day-of-week i32))
+  (pub date i32) (pub month i32) (pub year i32) (pub day-of-week i32)
+  (pub daylight-p bool) (pub zone f64))
 
 ;; The civil-calendar conversions are Howard Hinnant's `civil_from_days` /
 ;; `days_from_civil`, shifted from the Unix epoch to CL's. They are exact
@@ -4921,40 +4954,77 @@ user-visible capacity."
       ;; CL's, which is 25567 days earlier.
       (+ (- (+ (* era 146097) doe) 719468) 25567))))
 
+(defun ut-shift ((day i32) (second i32) (by i32)) universal-time
+  "`(day, second)` moved `by` seconds, renormalised so the second is back
+   inside one day.
+
+   The sum need not be: an hour, minute or second argument may be outside its
+   usual range and a zone offset moves it either way. `mod` floors and `/`
+   truncates, so they disagree on a negative sum; taking the remainder first
+   and dividing the difference makes the division exact, so the two can never
+   disagree."
+  (let ((s (+ second by)))
+    (let ((sec (mod s 86400)))
+      (universal-time::new (+ day (/ (- s sec) 86400)) sec))))
+
+(defun local-zone-west ((day i32) (second i32)) i32
+  "Seconds west of Greenwich in the local zone, at that universal time.
+
+   The offset is a property of the *instant*, not of the machine: the same
+   host is 5 hours west in January and 4 in July. Panics when the C library
+   cannot represent the instant -- a silent 0 would claim UTC, and there is
+   no other answer to give."
+  (match (timezone-offset-seconds day second)
+    ((some w) w)
+    ((none) (panic "the local time zone at this universal time is unknown"))))
+
+(defun local-zone-daylight ((day i32) (second i32)) bool
+  "Whether daylight saving time was in force locally at that universal
+   time -- CL's eighth returned value. Panics on the same unknown instant
+   `local-zone-west` does."
+  (match (timezone-daylight-p day second)
+    ((some d) d)
+    ((none) (panic "the local time zone at this universal time is unknown"))))
+
 (pub defun encode-universal-time ((second i32) (minute i32) (hour i32)
                                   (date i32) (month i32) (year i32)
-                                  &optional (zone i32 0)) universal-time
+                                  &optional (zone i32)) universal-time
   "The universal time for this date and time. `zone` is an offset in hours
-   west of Greenwich, as CL's is; 0 (the default) means the arguments are
-   UTC."
-  (let ((s (+ (* (+ hour zone) 3600) (* minute 60) second)))
-    ;; `s` need not be inside one day: an hour, minute or second argument may
-    ;; be out of its usual range, and `zone` moves it either way. `mod` floors,
-    ;; so the remainder is the second within the day and the difference
-    ;; divides exactly however `s` is signed — the same reasoning
-    ;; `decode-universal-time` gives below.
-    (let ((sec (mod s 86400)))
-      (universal-time::new (+ (days-from-civil year month date) (/ (- s sec) 86400))
-                           sec))))
+   west of Greenwich, as CL's is; omitting it means the arguments are in
+   *local* time, which is CL's default too."
+  (let ((day0 (days-from-civil year month date))
+        (s0 (+ (* hour 3600) (* minute 60) second)))
+    (match zone
+      ((some z) (ut-shift day0 s0 (* z 3600)))
+      ;; Local time is a guess and one correction, which is what SBCL's
+      ;; `encode-universal-time` does. The components name a *local* time,
+      ;; but the offset that turns them into a universal time is itself a
+      ;; function of the universal time -- so read the offset at the instant
+      ;; the components would name in UTC, apply it, and read it again: the
+      ;; second reading differs only across a daylight-saving transition, and
+      ;; a local time inside one is ambiguous in any case (CL does not say
+      ;; which side to pick, and neither does this).
+      ((none)
+       (let ((utc (ut-shift day0 s0 0)))
+         (let ((west0 (local-zone-west utc::day utc::second)))
+           (let ((guess (ut-shift utc::day utc::second west0)))
+             (let ((west1 (local-zone-west guess::day guess::second)))
+               (ut-shift guess::day guess::second (- west1 west0))))))))))
 
-(pub defun decode-universal-time ((ut universal-time) &optional (zone i32 0)) decoded-time
-  "`ut` broken into its calendar components. `zone` is an offset in hours west
-   of Greenwich, as CL's is; 0 (the default) decodes into UTC.
-
-   `day-of-week` is CL's: 0 is Monday, 6 is Sunday. 1900-01-01 -- universal
-   time 0 -- was a Monday, which is what makes it a plain remainder."
+(defun decode-at-west ((ut universal-time) (west i32) (daylight bool)) decoded-time
+  "`ut` broken into calendar components `west` seconds west of Greenwich.
+   The shared body of both of `decode-universal-time`'s arms; the reported
+   `zone` is `west` back in CL's hours, where a half-hour offset survives as
+   a fraction."
   (if (< ut::day 0)
       (panic "decode-universal-time: universal time is never negative")
-      (let ((local (- ut::second (* zone 3600)))
+      (let ((local (- ut::second west))
             (days 0) (secs 0) (z 0)
             (era 0) (doe 0) (yoe 0) (y 0) (doy 0) (mp 0) (d 0) (m 0))
         (progn
           ;; `local` is the second within the day, shifted by the zone, so it
           ;; can fall outside `0..86400` in either direction and carry into
-          ;; the day count. `mod` floors and `/` truncates, so they disagree
-          ;; on a negative `local`; taking the remainder first and dividing
-          ;; the difference makes the division exact, so the two can never
-          ;; disagree.
+          ;; the day count -- the same flooring `ut-shift` explains.
           (setf secs (mod local 86400))
           (setf days (+ ut::day (/ (- local secs) 86400)))
           ;; `z` is days since 1970-01-01 shifted by 719468, which restarts
@@ -4970,10 +5040,30 @@ user-visible capacity."
           (setf m (+ mp (if (< mp 10) 3 -9)))
           (if (<= m 2) (progn (setf y (+ y 1)) ()) ())
           (decoded-time::new (mod secs 60) (mod (/ secs 60) 60) (/ secs 3600)
-                             d m y (mod days 7))))))
+                             d m y (mod days 7)
+                             daylight
+                             (/ (int->float west) (int->float 3600)))))))
+
+(pub defun decode-universal-time ((ut universal-time) &optional (zone i32)) decoded-time
+  "`ut` broken into its calendar components. `zone` is an offset in hours west
+   of Greenwich, as CL's is; omitting it decodes into *local* time, which is
+   CL's default.
+
+   With a zone supplied, `daylight-p` is `false` and `zone` is the one given
+   -- CL says the same (`If a time-zone is supplied, daylight saving time
+   information is ignored`).
+
+   `day-of-week` is CL's: 0 is Monday, 6 is Sunday. 1900-01-01 -- universal
+   time 0 -- was a Monday, which is what makes it a plain remainder."
+  (match zone
+    ((some z) (decode-at-west ut (* z 3600) false))
+    ((none) (decode-at-west ut
+                            (local-zone-west ut::day ut::second)
+                            (local-zone-daylight ut::day ut::second)))))
 
 (pub defun get-decoded-time () decoded-time
-  "Now, in UTC, broken into its calendar components."
+  "Now, in local time, broken into its calendar components -- CL's
+   `get-decoded-time`, which is exactly this composition."
   (decode-universal-time (get-universal-time)))
 
 ;; ---------------------------------------------------------------------------

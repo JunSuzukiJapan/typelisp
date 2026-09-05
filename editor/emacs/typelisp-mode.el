@@ -311,22 +311,27 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; `random'/`make-random-state'/`random-state-p' are built on.
     "random-state-p" "make-random-state" "make-random-state-fresh"
     "random-state-copy" "random-state-next" "seed-random-state"
-    ;; time (CLHS 25.1)
+    ;; time (CLHS 25.1).  `get-internal-run-time' is CPU time, its sibling
+    ;; elapsed time; `time' reports both.
     "time" "get-universal-time" "get-internal-real-time"
+    "get-internal-run-time"
     "internal-time-units-per-second" "internal-time-seconds"
-    ;; universal time, decomposed (CLHS 25.1).  UTC only -- see functions.md
-    ;; §20 for the divergence from CL's local-time default.
+    ;; universal time, decomposed (CLHS 25.1).  The no-zone default is CL's
+    ;; local time; the two `timezone-' primitives are what answers it.
     "decode-universal-time" "encode-universal-time" "get-decoded-time"
+    "timezone-offset-seconds" "timezone-daylight-p"
     ;; filesystem queries that need no open stream (CLHS 20.1).  The `file-'
     ;; primitives these call are deliberately absent, like `file-exists-p'
     ;; before them: a user writes the `Pathish' wrapper, never the primitive.
-    "truename" "file-write-date" "directory" "directory-p"
+    "truename" "file-write-date" "file-author" "directory" "directory-p"
     "ensure-directories-exist"
     ;; the environment and the running implementation (CLHS 25.1), plus the
     ;; two things CL has no equivalent of at all
     "command-line-args" "getenv" "home-directory" "user-homedir-pathname"
     "lisp-implementation-type" "lisp-implementation-version"
     "machine-type" "software-type"
+    "machine-instance" "machine-version" "software-version"
+    "short-site-name" "long-site-name"
     ;; asking the user a question (CLHS 25.2)
     "y-or-n-p" "yes-or-no-p")
   "Builtin functions and methods from the standard catalog (docs/functions.md).")

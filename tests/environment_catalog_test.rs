@@ -42,7 +42,13 @@ fn part(time_expr: &str, field: &str) -> String {
 }
 
 /// One component of `(decode-universal-time <ut> [zone])`, where `ut_expr`
-/// produces the `universal-time` to decode.
+/// produces the `universal-time` to decode — and may carry the zone with it,
+/// which is how the tests below ask for a *specific* one.
+///
+/// Every test that asserts a wall-clock value passes `0`, because the
+/// no-zone default is CL's: the machine's own zone, which a test cannot
+/// know. The local default has tests of its own further down, written so
+/// that they hold in any zone.
 ///
 /// A universal time is a struct (`day`/`second`) rather than one integer,
 /// because there is no 64-bit-wide integer type to hold the count. So it
@@ -80,7 +86,7 @@ fn run(src: &str) -> String {
 /// which is what makes `day-of-week` (CL's 0 = Monday) a plain remainder.
 #[test]
 fn universal_time_zero_is_the_start_of_1900() {
-    let t = "(universal-time::new 0 0)";
+    let t = "(universal-time::new 0 0) 0";
     assert_eq!(decoded(t, "second"), "0");
     assert_eq!(decoded(t, "minute"), "0");
     assert_eq!(decoded(t, "hour"), "0");
@@ -95,7 +101,7 @@ fn universal_time_zero_is_the_start_of_1900() {
 #[test]
 fn decoding_gets_the_century_leap_year_rule_right() {
     // 2000-02-29 12:34:56 UTC. 2000 is a leap year, so this date exists.
-    let t = "(encode-universal-time 56 34 12 29 2 2000)";
+    let t = "(encode-universal-time 56 34 12 29 2 2000 0) 0";
     assert_eq!(decoded(t, "year"), "2000");
     assert_eq!(decoded(t, "month"), "2");
     assert_eq!(decoded(t, "date"), "29");
@@ -107,8 +113,8 @@ fn decoding_gets_the_century_leap_year_rule_right() {
     // the two instants are structs.
     assert_eq!(
         show(
-            "(let ((a (encode-universal-time 0 0 0 28 2 1900))
-                   (b (encode-universal-time 0 0 0 1 3 1900)))
+            "(let ((a (encode-universal-time 0 0 0 28 2 1900 0))
+                   (b (encode-universal-time 0 0 0 1 3 1900 0)))
                (+ (* (- b::day a::day) 86400) (- b::second a::second)))"
         ),
         "86400",
@@ -127,7 +133,7 @@ fn encode_and_decode_round_trip() {
         (0, 0, 12, 4, 7, 1976),
         (1, 2, 3, 15, 8, 2100),
     ] {
-        let t = format!("(encode-universal-time {} {} {} {} {} {})", s, mi, h, d, mo, y);
+        let t = format!("(encode-universal-time {} {} {} {} {} {} 0) 0", s, mi, h, d, mo, y);
         assert_eq!(decoded(&t, "year"), y.to_string(), "year, ut={}", t);
         assert_eq!(decoded(&t, "month"), mo.to_string(), "month, ut={}", t);
         assert_eq!(decoded(&t, "date"), d.to_string(), "date, ut={}", t);
@@ -143,7 +149,7 @@ fn encode_and_decode_round_trip() {
 #[test]
 fn the_zone_argument_shifts_west_of_greenwich() {
     // 5 hours west: 1970-01-01 00:00 UTC decodes as 1969-12-31 19:00.
-    let t = "(encode-universal-time 0 0 0 1 1 1970) 5";
+    let t = "(encode-universal-time 0 0 0 1 1 1970 0) 5";
     assert_eq!(decoded(t, "year"), "1969");
     assert_eq!(decoded(t, "month"), "12");
     assert_eq!(decoded(t, "date"), "31");
@@ -153,7 +159,7 @@ fn the_zone_argument_shifts_west_of_greenwich() {
     // `universal-time` is a struct.
     assert_eq!(
         show(
-            "(let ((a (encode-universal-time 0 0 0 1 1 1970))
+            "(let ((a (encode-universal-time 0 0 0 1 1 1970 0))
                    (b (encode-universal-time 0 0 19 31 12 1969 5)))
                (and (= a::day b::day) (= a::second b::second)))"
         ),
@@ -349,4 +355,142 @@ fn sleep_takes_seconds_as_a_float() {
     let vs = r.read_all(&mut h, "(sleep 1)").expect("read failed");
     let err = chk.check_form(&mut h, &interp, vs[0]).expect_err("an integer literal is not an f64");
     assert!(err.to_string().contains("F64"), "{}", err);
+}
+
+// ----------------------------------------------------------------------
+// What only the operating system knows (the Phase 9c items held back until
+// 2026-09-05, when `libc` was taken as a dependency)
+// ----------------------------------------------------------------------
+
+/// The no-zone default is CL's: *local* time, not UTC.
+///
+/// A test cannot know which zone the machine is in, so it asserts the
+/// relation instead — decoding with no zone must equal decoding with the
+/// offset the runtime itself reports for that instant. That holds in Tokyo,
+/// in Kathmandu (+5:45, where a whole-hour zone could not even name it), and
+/// under UTC in CI.
+#[test]
+fn the_no_zone_default_decodes_into_local_time() {
+    let same = show(
+        "(let ((ut (get-universal-time)))
+           (let ((west (match (timezone-offset-seconds ut::day ut::second)
+                         ((some w) w)
+                         ((none) (panic \"no zone\"))))
+                 (local (decode-universal-time ut)))
+             (let ((shifted (decode-universal-time (universal-time::new ut::day (- ut::second west)) 0)))
+               (and (= local::hour shifted::hour)
+                    (and (= local::minute shifted::minute)
+                         (= local::date shifted::date))))))",
+    );
+    assert_eq!(same, "true");
+}
+
+/// CL's eighth and ninth values, which did not exist before there was
+/// anything that could answer them.
+///
+/// With a zone supplied they are fixed by the specification — "if a
+/// time-zone is supplied, daylight saving time information is ignored and
+/// the daylight saving time flag is nil" — so this half is exact. The
+/// reported zone comes back as the one that was asked for.
+#[test]
+fn an_explicit_zone_reports_itself_and_no_daylight_saving() {
+    let t = "(universal-time::new 0 0) 5";
+    assert_eq!(decoded(t, "daylight-p"), "false");
+    assert_eq!(decoded(t, "zone"), "5.0");
+    assert_eq!(decoded("(universal-time::new 0 0) -9", "zone"), "-9.0");
+}
+
+/// The reported zone is an `f64` so that a half-hour offset survives it.
+///
+/// The *argument* is whole hours, as CL source writes it; the *result* is
+/// not, because India (+5:30) and Nepal (+5:45) exist and a rounded report
+/// would be a silent lie. This pins the type by reading a zone the runtime
+/// reports rather than one that was passed in — on a whole-hour machine it
+/// is still a float, which is the property under test.
+#[test]
+fn the_reported_zone_is_a_fraction_of_an_hour() {
+    let z = run("(let ((d (get-decoded-time))) (format false \"~a\" d::zone))");
+    assert!(z.contains('.'), "the reported zone is not a float: {}", z);
+    let hours: f64 = z.parse().expect("a float");
+    assert!((-14.0..=12.0).contains(&hours), "zone out of range: {}", hours);
+}
+
+/// `encode` and `decode` invert each other in *local* time too, which is the
+/// path with the correction step in it (`encode-universal-time` reads the
+/// offset, applies it, and reads again).
+///
+/// Noon on purpose: a daylight-saving transition happens in the small hours,
+/// and a local time inside a "spring forward" gap does not exist at all —
+/// CL does not say which side to pick there and neither does this.
+#[test]
+fn encode_and_decode_round_trip_in_local_time() {
+    for (d, mo, y) in [(15, 1, 2024), (4, 7, 1976), (29, 2, 2024), (1, 11, 2021)] {
+        let t = format!("(encode-universal-time 0 30 12 {} {} {})", d, mo, y);
+        assert_eq!(decoded(&t, "year"), y.to_string(), "year, ut={}", t);
+        assert_eq!(decoded(&t, "month"), mo.to_string(), "month, ut={}", t);
+        assert_eq!(decoded(&t, "date"), d.to_string(), "date, ut={}", t);
+        assert_eq!(decoded(&t, "hour"), "12", "hour, ut={}", t);
+        assert_eq!(decoded(&t, "minute"), "30", "minute, ut={}", t);
+    }
+}
+
+/// `get-internal-run-time` is CPU time, in the same unit and struct
+/// `get-internal-real-time` uses.
+///
+/// The assertion is the one that holds on any machine: a process that has
+/// just loaded the prelude has used *some* CPU, and it cannot have used more
+/// than the wall clock has advanced since it started — that inequality is
+/// exactly what distinguishes run time from real time, and a stand-in that
+/// returned elapsed time would sit right at the boundary rather than below
+/// it.
+#[test]
+fn run_time_is_cpu_time_and_not_elapsed_time() {
+    let used: f64 = run("(format false \"~a\" (internal-time-seconds (get-internal-run-time)))")
+        .parse()
+        .expect("a number of seconds");
+    assert!(used > 0.0, "the process has used no CPU at all: {}", used);
+    assert!(used < 3600.0, "implausible CPU time: {}", used);
+}
+
+/// The three CLHS 25.1 names that have to ask the host. Each may honestly
+/// answer `none`, so the test is that the answer is well-formed and — where
+/// the OS certainly knows — that it is actually there.
+#[test]
+fn the_host_identifies_itself() {
+    // A hostname and an OS release exist on every Unix.
+    assert_eq!(show("(is-some (machine-instance))"), "true");
+    assert_eq!(show("(is-some (software-version))"), "true");
+    assert_eq!(
+        show("(match (machine-instance) ((some h) (> (length h) 0)) ((none) false))"),
+        "true"
+    );
+    // `machine-version` is the chip, which not every platform can name;
+    // `none` is CL's own permitted answer, so only the shape is pinned.
+    assert!(matches!(show("(is-some (machine-version))").as_str(), "true" | "false"));
+    // A site name is what nothing records, so it is always `none` — and that
+    // is the answer CL allows rather than an invented constant.
+    assert_eq!(show("(is-some (short-site-name))"), "false");
+    assert_eq!(show("(is-some (long-site-name))"), "false");
+}
+
+/// `file-author` keeps CL's two answers apart: a missing file is an error,
+/// and an owner with no password-database entry is `none`.
+#[test]
+fn file_author_names_the_owner() {
+    let f = std::env::temp_dir().join(format!("typelisp-author-{}.txt", std::process::id()));
+    std::fs::write(&f, b"x").expect("write the probe file");
+    let path = f.to_string_lossy().replace('\\', "/");
+    // The file was just created by this process, so its owner is this user
+    // and the lookup must find a name.
+    assert_eq!(show(&format!("(is-ok (file-author \"{}\"))", path)), "true");
+    assert_eq!(
+        show(&format!(
+            "(match (file-author \"{}\") ((ok who) (is-some who)) ((err _) false))",
+            path
+        )),
+        "true"
+    );
+    let _ = std::fs::remove_file(&f);
+    // Gone: an `Err`, not a `none`.
+    assert_eq!(show(&format!("(is-ok (file-author \"{}\"))", path)), "false");
 }

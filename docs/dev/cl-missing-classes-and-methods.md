@@ -452,7 +452,7 @@ prelude の `defstruct`（`Array<T>` は `Vector<T>` 2 本、`BitVector` は詰�
 | `directory-namestring` | ✅ | |
 | `probe-file` / `delete-file` / `rename-file` | ✅ | |
 | `truename` / `file-write-date` / `directory` / `ensure-directories-exist` | ✅ | 2026-08-20 実装（Phase 9c）。`file-*` プリミティブの上に `Pathish` の薄い層。`directory` はワイルドカード照合ではなく「そのディレクトリを並べる」（この言語のパス名にワイルドカードが無いため）。おまけで `directory-p` も |
-| `file-author` | ⛔ | uid→ユーザ名の引き当てに `libc` が要る。ワークスペースは `libc` に依存していない |
+| `file-author` | ✅ | 2026-09-05 実装（`libc` 採用）。`Result<Option<string>,FileError>`——ファイルが無ければ `Err`、uid にパスワードデータベースの項目が無ければ `Ok(none)`。CL が分けている2つをそのまま分けている |
 | `wild-pathname-p` / `translate-logical-pathname` / `logical-pathname` | ⛔ | ワイルドカードも論理パス名も採用しない（この処理系が走らないファイルシステム向けの機能） |
 | ホスト・デバイス・バージョン成分 | ⛔ | 同上。区切りは `/` 固定 |
 
@@ -524,13 +524,13 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `require` / `provide` / `*modules*` | ⚠️ | `module`/`use`＋ファイル↔モジュール対応が相当 |
 | `*features*` / `#+` / `#-` | ⚠️ | 2026-07-30実装。`#+`/`#-`（`and`/`or`/`not`合成式込み）をリーダに追加。`*features*`はCLと違い**読み込み中に書き換え不可の固定集合**（全フォームを読んでからチェック/評価する既存アーキテクチャのため）。デフォルトはホストOS/アーキテクチャ＋`:typelisp`、`typl`の`--feature NAME`で追加可能 |
 | `compile-file-pathname` / `*compile-file-pathname*` / `*load-pathname*` 等 | ❌ | |
-| `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ⚠️ | 2026-07-31 実装。`get-internal-real-time`（`internal-time` 構造体、`second`/`microsecond`。`internal-time-units-per-second` は 1_000_000。2026-09-01 に `i64` 廃止で構造体化）と、それを使う `time` マクロ（経過実時間を1行印字して `form` の値をそのまま返す）。**`get-internal-run-time`（CPU 時間）は無い**——`getrusage` に `libc` が要り、ワークスペースは `libc` に依存していない。実時間で代用すると嘘になる |
-| `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ✅ | 分解・合成を 2026-08-20 実装（Phase 9c）。多値が無いので `decoded-time` という `defstruct` 7 フィールドで返す。**CL は zone 省略時に地方時へ分解するが、ここは UTC**（タイムゾーンデータベースが無い）。CL にもある明示 zone 引数が代わり |
+| `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ✅ | 2026-07-31 実装、2026-09-05 完了。`get-internal-real-time`（`internal-time` 構造体、`second`/`microsecond`。`internal-time-units-per-second` は 1_000_000。2026-09-01 に `i64` 廃止で構造体化）と `get-internal-run-time`（CPU 時間、`getrusage`。`libc` 採用で入った）。`time` マクロは両方を1行ずつ印字して `form` の値をそのまま返す——I/O 待ちが主な処理では両者が大きく開く |
+| `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ✅ | 分解・合成を 2026-08-20 実装（Phase 9c）、2026-09-05 に地方時を追加。多値が無いので `decoded-time` という `defstruct` で返し、`libc` 採用で `daylight-p`/`zone` が加わって **CL の 9 個の返り値が全部揃った**。zone 省略時は CL と同じ**地方時**。結果の `zone` だけ `f64`——+5:30 のような offset を丸めないため |
 | `sleep` | ❌ | |
 | `room` / `ed` / `dribble` / `apropos` / `apropos-list` / `inspect` / `describe` | ❌ | 対話環境向け。REPL があるので `apropos`/`describe` は相性が良い |
 | `documentation` / docstring | ✅ | 2026-07-30実装。`defun`/`defmethod`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftrait` が docstring を持てる（位置は各フォームの CL 規則通り）。`documentation` は名前を評価せず解決する特殊形（`quote`/`compile` と同様）で check 時に定数へ畳み込まれる。LSP hover にも統合済み。`(setf documentation)` は対象外（functions.md §17） |
 | `lisp-implementation-type` / `lisp-implementation-version` / `machine-type` / `software-type` | ✅ | 2026-08-20 実装（Phase 9c）。版数は Cargo から、機種と OS は `std::env::consts` から、いずれもコンパイル時に決まる |
-| `machine-version` / `machine-instance` / `software-version` / `short-site-name` / `long-site-name` | ⛔ | ホスト名の取得に `libc` が要る。残りは CL でも `NIL` を返してよい——中身の無い定数を並べるより置かない方を選んだ |
+| `machine-version` / `machine-instance` / `software-version` / `short-site-name` / `long-site-name` | ✅ | 2026-09-05 実装（`libc` 採用）。全部 `Option<string>`——CL の *or nil if no such name can be determined* に対応。`machine-instance`/`software-version` は `uname`、`machine-version` は実行中のチップ名（macOS は `sysctlbyname`、Linux は `/proc/cpuinfo`）。site 名は POSIX に記録場所が無いので**常に `none`**で、これは捏造した定数ではなく CL が認める答え（SBCL も同じ） |
 | `user-homedir-pathname` | ✅ | 2026-08-20 実装（Phase 9c）。`$HOME` が無ければ `none`（CL も `NIL` を許す）。環境変数を読む `getenv` と、CL に無い `command-line-args` も同時に入った |
 | `trace` / `untrace` / `step` / `disassemble` | ❌ | |
 | コマンドライン引数の取得 | ❌ | CL 標準にも無いが、`typl file.typl` でスクリプトを書く以上ほぼ必須 |
@@ -572,8 +572,8 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
    （`-if` 系）と並立した。残るのは 2 の後半、つまり `:key`/`:test` 等のキーワード引数。
 7. ⚠️ **乱数の再現性**（§2.10）— 2026-07-31 に `time`/`get-internal-real-time`/
    `get-universal-time` と `random-state` 一式、2026-08-20 に日時の分解・合成
-   （`decode-universal-time` 等、Phase 9c）が入った。残差は CPU 時間
-   （`get-internal-run-time`、`libc` 依存）と、**乱数のシードを外から与える手段**——
+   （`decode-universal-time` 等、Phase 9c）、2026-09-05 に CPU 時間
+   （`get-internal-run-time`）が入った。残差は**乱数のシードを外から与える手段**だけ——
    同一プロセス内なら `make-random-state` の複製で列を再生できるが、実行を跨いだ再現はできない。
 8. ~~**多次元配列・集合演算・文字列ユーティリティ**（§2.13/§2.12/§2.14）~~ — 3 つとも解消。
    文字列ユーティリティは 2026-08-20（Phase 2）、集合演算は同（Phase 3）、多次元配列と
