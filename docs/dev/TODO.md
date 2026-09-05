@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-09-04 / ブランチ: `main`
+最終更新: 2026-09-05 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。
 
@@ -247,24 +247,9 @@ JIT しているぶん」は**2 段階で解消した**。JIT 6 回ぶんは 202
 
 ## 見つかっている実装の穴
 
-### 関連型が総称名の内側にあると `impl` の置換が届かない
-
-`(deftrait T () (type Item) (m ((self Self) (v Vector<Item>)) () <デフォルト本体>))` と書くと、
-`impl` がその既定メソッドを継承したときに署名が未置換のまま残る:
-
-```
-impl inputstream file-stream: method `read-sequence` is `(file-stream vector<item> i32) i32`,
-but `inputstream` declares `(file-stream vector<char> i32) i32`
-```
-
-原因は、`Vector<Item>` が**リーダにとってシンボル 1 つ**であること（`impl<T>` が 1 シンボルなのと
-同じ理由、`parse_generic_name_header`）。`impl` の関連型置換は `subst_method_item` が
-シンボル単位で行うので、名前の内側までは書き換えない。`Option<Item>` が動いているのは
-`read-item` にデフォルト本体が無く、置換の対象にならないから——**署名に関連型を使う
-デフォルト本体が今まで 1 つも無かった**ので踏まれていなかった。
-
-2026-09-04 の Stage 9d で発見。そのときは層を下げて回避した（`Vector<char>` を
-`CharInput` に、`Vector<i32>` を `ByteInput` に）ので、いま困っているコードは無い。
+いまは無い。直近まであった「関連型が総称名の内側にあると `impl` の置換が届かない」は
+2026-09-05 に解消（経緯は [implementation-log.md](implementation-log.md) の
+「関連型が総称名の内側にある場合」）。
 
 ## 関連ドキュメント
 

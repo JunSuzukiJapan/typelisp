@@ -393,6 +393,91 @@ pub(super) fn splice_default(
     Ok(Checked::new(rooted(heap, form), decl_ty.clone()))
 }
 
+/// Emit a [`Type`] as the type *syntax* that parses back to it — the inverse
+/// of [`crate::types::parse_type`], and the reason
+/// [`crate::types::parse_applied_type`]'s list spelling of a generic exists.
+///
+/// A generic comes out applied (`(vector char)`) rather than as the name
+/// `vector<char>`, because the arguments here are arbitrary `Type`s and the
+/// name grammar cannot spell all of them: `Vector<(fn (i32) i32)>` has no
+/// written form at all. Emitting the list form makes the round trip total,
+/// which is what `Checker::subst_value` needs to substitute a trait's
+/// associated type into a signature no matter what the `impl` bound it to.
+///
+/// Every nested result is rooted as it is produced: each sibling's emission
+/// allocates, and a `Vec<Value>` is invisible to the collector.
+pub(super) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
+    match t {
+        Type::Unit => Ok(Value::Empty),
+        // Not in `prim_type_path` (`!` has no method table), so spelled here.
+        Type::Never => Ok(heap.intern_symbol("!")),
+        Type::Named(p, args) if args.is_empty() => Ok(type_name_value(heap, p)),
+        Type::Named(p, args) => {
+            let head = type_name_value(heap, p);
+            let mut s = RootScope::new(heap);
+            s.push_root(head);
+            let mut items: Vec<(Value, Option<Loc>)> = vec![(head, None)];
+            for a in args {
+                let f = type_to_form(&mut s, a)?;
+                s.push_root(f);
+                items.push((f, None));
+            }
+            list_from_vec_locs(&mut s, &items)
+        }
+        // The reader's joined `(:dyn Trait)` form. The associated-type pins
+        // ride along as the head's arguments, which is where
+        // `types::parse_dyn_type` reads them back out of.
+        Type::Dyn(p, pins) => {
+            let head = heap.intern_symbol(":dyn");
+            let mut s = RootScope::new(heap);
+            s.push_root(head);
+            let inner = type_to_form(&mut s, &Type::Named(p.clone(), pins.clone()))?;
+            s.push_root(inner);
+            list_from_vec_locs(&mut s, &[(head, None), (inner, None)])
+        }
+        Type::Fn(params, rest, ret) => {
+            let fn_sym = heap.intern_symbol("fn");
+            let mut s = RootScope::new(heap);
+            s.push_root(fn_sym);
+            let mut ps: Vec<(Value, Option<Loc>)> = Vec::with_capacity(params.len() + 2);
+            for p in params {
+                let f = type_to_form(&mut s, p)?;
+                s.push_root(f);
+                ps.push((f, None));
+            }
+            if let Some(r) = rest {
+                let marker = s.intern_symbol("&rest");
+                s.push_root(marker);
+                let f = type_to_form(&mut s, r)?;
+                s.push_root(f);
+                ps.push((marker, None));
+                ps.push((f, None));
+            }
+            let param_list = list_from_vec_locs(&mut s, &ps)?;
+            s.push_root(param_list);
+            let ret_form = type_to_form(&mut s, ret)?;
+            s.push_root(ret_form);
+            list_from_vec_locs(&mut s, &[(fn_sym, None), (param_list, None), (ret_form, None)])
+        }
+        prim => {
+            let p = crate::types::prim_type_path(prim)
+                .expect("every remaining `Type` variant is a primitive with a path");
+            Ok(type_name_value(heap, &p))
+        }
+    }
+}
+
+/// A type name as the reader would have produced it: one symbol for a plain
+/// name, an interned path for a `::`-qualified one. Both tables are
+/// permanent, so the result needs no rooting of its own.
+fn type_name_value(heap: &mut Heap, p: &Path) -> Value {
+    if p.is_simple() {
+        heap.intern_symbol(p.last_segment())
+    } else {
+        Value::Path(crate::types::intern_path_id(heap, p))
+    }
+}
+
 /// Build a proper list `Value` from `items`, in order — the inverse of
 /// `heap.list_to_vec`, used by `Checker::check_impl` to reassemble a
 /// receiver/parameter form after substituting just its type position.

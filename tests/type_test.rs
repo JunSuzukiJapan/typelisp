@@ -4,10 +4,14 @@ extern crate typelisp;
 use typelisp::{parse_type, Heap, Path, Reader, Type};
 
 fn parse(src: &str) -> Type {
+    parse_result(src).expect("parse_type failed")
+}
+
+fn parse_result(src: &str) -> Result<Type, typelisp::Error> {
     let mut h = Heap::with_capacity(256);
     let r = Reader::new();
     let v = r.read(&mut h, src).expect("read failed");
-    parse_type(&h, v).expect("parse_type failed")
+    parse_type(&h, v)
 }
 
 #[test]
@@ -333,4 +337,70 @@ fn without_a_span_the_parse_still_succeeds_and_records_nothing() {
     let ty = typelisp::parse_type_spanned(&h, v, None, &mut out).expect("parse failed");
     assert_eq!(ty, Type::Named(Path::root("vector"), vec![Type::Named(Path::root("rect"), vec![])]));
     assert!(out.is_empty());
+}
+
+/// The *applied* spelling of a generic — `(vector char)` for `Vector<char>`.
+///
+/// Both are one type. The name form is what programs are written in; the
+/// list form exists because a generic *argument* is a whole type expression
+/// and the name grammar can only spell arguments that are names, `()` or
+/// `:dyn` — see the test below for the one that has no name form at all.
+#[test]
+fn a_generic_can_be_written_applied() {
+    let vector_char = Type::Named(Path::root("vector"), vec![Type::Char]);
+    assert_eq!(parse("(vector char)"), vector_char);
+    assert_eq!(parse("Vector<char>"), vector_char);
+    // Nested, and with a qualified head — the head is parsed as an ordinary
+    // type expression, so every name spelling works there too.
+    assert_eq!(
+        parse("(vector (option char))"),
+        Type::Named(
+            Path::root("vector"),
+            vec![Type::Named(Path::root("option"), vec![Type::Char])]
+        )
+    );
+    assert_eq!(
+        parse("(geo::pair i32 char)"),
+        Type::Named(Path::from_segments(vec!["geo".into(), "pair".into()]), vec![Type::I32, Type::Char])
+    );
+}
+
+/// What the applied form is for: `Vector<(fn (i32) i32)>` cannot be written
+/// as a name, because a `(fn ...)` type is a list and the name grammar has no
+/// token for it. Substituting a trait's associated type into a signature has
+/// to be able to produce it anyway (`Checker::subst_inside_name`), so the
+/// syntax it emits has to be able to hold one.
+#[test]
+fn an_applied_generic_carries_an_argument_no_name_can_spell() {
+    assert_eq!(
+        parse("(vector (fn (i32) i32))"),
+        Type::Named(
+            Path::root("vector"),
+            vec![Type::Fn(vec![Type::I32], None, Box::new(Type::I32))]
+        )
+    );
+    assert!(parse_result("Vector<(fn (i32) i32)>").is_err());
+}
+
+#[test]
+fn an_applied_generic_is_rejected_without_arguments_or_with_an_applied_head() {
+    // `(vector)` supplies no arguments, so it says nothing `vector` doesn't.
+    assert!(parse_result("(vector)").is_err());
+    // `(vector<char> i32)` gives `vector` two argument lists.
+    assert!(parse_result("(vector<char> i32)").is_err());
+}
+
+/// [`parse_type_name`] answers "is this *name* a type?" for symbols that may
+/// be nothing of the kind (`Checker::subst_inside_name` asks it about every
+/// name in a signature being substituted), so it has to consume the whole
+/// string. The parse it wraps stops at the closing `>` and would otherwise
+/// report the method path `vector<t>::new` as the type `vector<t>`.
+#[test]
+fn a_type_name_must_be_the_whole_string() {
+    assert_eq!(
+        typelisp::parse_type_name("vector<char>").unwrap(),
+        Type::Named(Path::root("vector"), vec![Type::Char])
+    );
+    assert!(typelisp::parse_type_name("vector<t>::new").is_err());
+    assert!(typelisp::parse_type_name("vector<char>>").is_err());
 }
