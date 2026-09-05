@@ -9432,6 +9432,7 @@ impl Checker {
             "compile" => return self.check_compile(heap, args),
             "documentation" => return self.check_documentation(heap, args),
             "ed" => return self.check_ed(heap, args),
+            "trace" | "untrace" => return self.check_trace(heap, head.as_str(), args),
             "source-file" => return self.check_source_file(heap, v, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
@@ -10836,11 +10837,32 @@ impl Checker {
             args[0],
             "compile: expected a symbol or path naming a function, e.g. (compile foo) or (compile point::x) — not a string",
         )?;
+        let target = self.resolve_callable(&name, "compile")?;
+        let form = forms::compile_fn_form(heap, &target)?;
+        Ok(Checked::new(form, Type::Bool))
+    }
+
+    /// Which function or method a bare name or a `::`-path names — the
+    /// resolution `compile`, `trace`, `untrace` and `disassemble` share.
+    ///
+    /// All four ask the same question of a name (*which single compiled-or-
+    /// compilable body is this?*) and all four reject the same three things
+    /// in the same words: a name that resolves to nothing, a `Type::method`
+    /// whose type resolved but has no such member, and a **generic**
+    /// function, which has no single body for any of them to point at.
+    /// `who` is the form's own name, so the messages still say which one
+    /// asked.
+    ///
+    /// Builds the [`CompileTarget`] out of the resolution it has to perform
+    /// anyway, rather than discarding it and handing `Interp` a bare string
+    /// to re-resolve with a module-blind search — see this type's own doc
+    /// comment for the bug that replaced.
+    fn resolve_callable(&self, name: &str, who: &str) -> Result<CompileTarget, Error> {
         let generic_err = || {
             Error::TypeError(format!(
-                "compile: `{}` is generic — a generic function has no single compiled body; \
-                 call it at concrete types and compile those uses' enclosing functions instead",
-                name
+                "{}: `{}` is generic — monomorphization runs per use, so there is no single body \
+                 to name; call it at concrete types and name those uses' enclosing functions instead",
+                who, name
             ))
         };
         // Shared by both places that build a `CompileTarget::Fn`: a bare name
@@ -10849,7 +10871,7 @@ impl Checker {
         // same "no resolution -> check-time error".
         let fn_target = |written: Vec<String>, resolved: Option<Path>| -> Result<CompileTarget, Error> {
             let resolved = resolved.ok_or_else(|| {
-                Error::TypeError(format!("compile: no function `{}` is visible from here", name))
+                Error::TypeError(format!("{}: no function `{}` is visible from here", who, name))
             })?;
             if self.generic_fn_templates.contains_key(&resolved) {
                 return Err(generic_err());
@@ -10865,8 +10887,8 @@ impl Checker {
         // that is the existing resolution, and this only widens what a name
         // that resolved to nothing can still mean.
         let fn_or_macro = |name: &str| self.resolve_fn(name).or_else(|| self.resolve_macro(name).map(|(p, _)| p));
-        let target = match name.rsplit_once("::") {
-            None => fn_target(vec![name.clone()], fn_or_macro(&name))?,
+        match name.rsplit_once("::") {
+            None => fn_target(vec![name.to_string()], fn_or_macro(name)),
             Some((type_part, method)) => {
                 let type_segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
                 // Kept separate from `type_fq` below: whether the *type* half
@@ -10888,7 +10910,7 @@ impl Checker {
                         if self.generic_method_templates.contains_key(&(type_fq.clone(), method.to_string())) {
                             return Err(generic_err());
                         }
-                        CompileTarget::Method { type_name: type_fq, method: method.to_string(), home: self.ns.clone() }
+                        Ok(CompileTarget::Method { type_name: type_fq, method: method.to_string(), home: self.ns.clone() })
                     }
                     // Not a type::method — a module-qualified free function
                     // instead (e.g. `(compile m::inc)`), or genuinely nothing
@@ -10896,26 +10918,57 @@ impl Checker {
                     None => {
                         let full_segs: Vec<String> = name.split("::").map(|s| s.to_string()).collect();
                         match self.resolve_fn_path(&full_segs) {
-                            Some(resolved) => fn_target(full_segs, Some(resolved))?,
-                            None => {
-                                return Err(Error::TypeError(match &type_path {
-                                    Some(tp) => format!(
-                                        "compile: type `{}` has no associated function or method `{}`",
-                                        tp, method
-                                    ),
-                                    None => format!(
-                                        "compile: `{}` names neither a type's method nor a function visible from here",
-                                        name
-                                    ),
-                                }))
-                            }
+                            Some(resolved) => fn_target(full_segs, Some(resolved)),
+                            None => Err(Error::TypeError(match &type_path {
+                                Some(tp) => {
+                                    format!("{}: type `{}` has no associated function or method `{}`", who, tp, method)
+                                }
+                                None => format!(
+                                    "{}: `{}` names neither a type's method nor a function visible from here",
+                                    who, name
+                                ),
+                            })),
                         }
                     }
                 }
             }
-        };
-        let form = forms::compile_fn_form(heap, &target)?;
-        Ok(Checked::new(form, Type::Bool))
+        }
+    }
+
+    /// `(trace f g point::x)` / `(untrace f)` / `(untrace)` — CLHS 25.2.
+    ///
+    /// Names, not values, so — like `(compile ...)`, whose resolution this
+    /// shares ([`Self::resolve_callable`]) — every argument reads as an
+    /// unevaluated symbol or `::`-path. A generic function is refused there
+    /// for the same reason `compile` refuses one: monomorphization runs per
+    /// use, so there is no single body to watch.
+    ///
+    /// Both answer with the set of names traced *afterwards*, as a `Sexpr`
+    /// list of symbols. That is what makes `(trace)` with no arguments CL's
+    /// "tell me what is traced" and leaves the two answers comparable.
+    ///
+    /// Treated exactly as `documentation` is, down to staying out of
+    /// [`Self::is_builtin_form_head`] — that list governs only whether a
+    /// *top-level* form's head may be pre-expanded as a macro while the
+    /// loader scans for `(use ...)`, and these forms are settled here either
+    /// way. (The head is reserved in expression position regardless: this
+    /// dispatch runs before the local-variable lookup, so a `let` binding
+    /// named `trace` does *not* shadow the form. Same as `documentation`.)
+    fn check_trace(&self, heap: &mut Heap, tag: &str, args: &[Value]) -> Result<Checked, Error> {
+        let mut targets = Vec::with_capacity(args.len());
+        for a in args {
+            let name = unevaluated_name(
+                heap,
+                *a,
+                &format!(
+                    "{}: expected symbols or `::`-paths naming functions, e.g. ({} foo point::x) — not a string",
+                    tag, tag
+                ),
+            )?;
+            targets.push(self.resolve_callable(&name, tag)?);
+        }
+        let form = forms::trace_form(heap, tag, &targets)?;
+        Ok(Checked::new(form, sexpr_ty()))
     }
 
     /// `(documentation name)` / `(documentation Type::method)`: like

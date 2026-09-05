@@ -105,6 +105,8 @@ enum Op {
     FnRef,
     MethodRef,
     CompileFn,
+    Trace,
+    Untrace,
 }
 
 impl Op {
@@ -162,6 +164,8 @@ impl Op {
             wk::FNREF => Op::FnRef,
             wk::METHODREF => Op::MethodRef,
             wk::COMPILE_FN => Op::CompileFn,
+            wk::TRACE => Op::Trace,
+            wk::UNTRACE => Op::Untrace,
             _ => return None,
         })
     }
@@ -569,6 +573,8 @@ impl Interp {
             Op::FnRef => self.fnref_core(heap, form).map(Step::Done),
             Op::MethodRef => self.methodref_core(heap, form).map(Step::Done),
             Op::CompileFn => self.compile_fn_core(heap, form).map(Step::Done),
+            Op::Trace => self.trace_core(heap, form, true).map(Step::Done),
+            Op::Untrace => self.trace_core(heap, form, false).map(Step::Done),
 
             // ---- trait objects -------------------------------------------
             Op::DynNew => self.dyn_new_core(heap, form, env).map(Step::Done),
@@ -1307,27 +1313,104 @@ impl Interp {
     fn compile_fn_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
         let payload = core::field(heap, form, 0)
             .ok_or_else(|| EvalError::Internal("eval: (compile-fn ..) has no target".to_string()))?;
-        let target = match core::op_sym(heap, payload).map(|s| s.well_known()) {
+        let target = self.compile_target(heap, payload, "compile-fn")?;
+        (crate::eval::interp::backend_compile_function()?)(self, heap, &target)
+    }
+
+    /// One `(fn ..)`/`(method ..)` payload read back into the `CompileTarget`
+    /// it was built from — shared by every form that names a single body
+    /// (`compile`, `trace`, `untrace`, `disassemble`), which is why the
+    /// payload shape is shared too.
+    fn compile_target(&self, heap: &mut Heap, payload: Value, who: &str) -> Result<crate::CompileTarget, EvalError> {
+        Ok(match core::op_sym(heap, payload).map(|s| s.well_known()) {
             Some(wk::FN) => {
-                let written = self.name_list(heap, payload, 0, "compile-fn/fn")?;
-                let home = self.name_list(heap, payload, 1, "compile-fn/fn")?;
-                let resolved = path_field(heap, payload, 2, "compile-fn/fn")?;
+                let written = self.name_list(heap, payload, 0, who)?;
+                let home = self.name_list(heap, payload, 1, who)?;
+                let resolved = path_field(heap, payload, 2, who)?;
                 crate::CompileTarget::Fn(crate::check::Ref { written, home, resolved })
             }
             Some(wk::METHOD) => {
-                let type_name = path_field(heap, payload, 0, "compile-fn/method")?;
-                let method = sym_field(heap, payload, 1, "compile-fn/method")?;
-                let home = self.name_list(heap, payload, 2, "compile-fn/method")?;
+                let type_name = path_field(heap, payload, 0, who)?;
+                let method = sym_field(heap, payload, 1, who)?;
+                let home = self.name_list(heap, payload, 2, who)?;
                 crate::CompileTarget::Method { type_name, method, home }
             }
             other => {
                 return Err(EvalError::Internal(format!(
-                    "eval: (compile-fn ..) target is `{:?}`, expected `fn` or `method`",
-                    other
+                    "eval: ({} ..) target is `{:?}`, expected `fn` or `method`",
+                    who, other
                 )))
             }
-        };
-        (crate::eval::interp::backend_compile_function()?)(self, heap, &target)
+        })
+    }
+
+    /// The definition a resolved [`crate::CompileTarget`] names.
+    ///
+    /// Goes through the *same* two lookups `compile::driver::compile_function`
+    /// does, and for the same reason: a `Fn` target's `written`+`home` walk
+    /// can land on a different definition than its `resolved` path names, so
+    /// the answer has to be the thing actually found rather than the name
+    /// written down. Which is also why `trace` reads its key off the
+    /// [`FnDef`] instead of rebuilding one from the target.
+    fn target_def(&self, target: &crate::CompileTarget) -> Option<Rc<FnDef>> {
+        match target {
+            crate::CompileTarget::Fn(r) => self.resolve_fn_ref(r),
+            crate::CompileTarget::Method { type_name, method, home } => {
+                self.root.borrow().resolve_method(home, type_name, method)
+            }
+        }
+    }
+
+    /// `(trace TARGET...)` and `(untrace TARGET...)` — CLHS 25.2's pair.
+    ///
+    /// Both return the set of names traced *after* the operation, as a
+    /// `Sexpr` list of symbols in sorted order. That makes `(trace)` with no
+    /// arguments CL's "just tell me what is traced", `(untrace)` with none
+    /// the documented untrace-everything, and the two answers comparable.
+    ///
+    /// Tracing a definition that already has a compiled body is allowed and
+    /// says so: the hook is in [`Self::enter`], which is above the
+    /// compiled/interpreted split, so calls *into* it are still seen — but a
+    /// call made from inside other compiled code never reaches `enter` and is
+    /// invisible. SBCL says the same thing about its own local calls, and a
+    /// trace that quietly showed half the calls would be worse than one that
+    /// warns.
+    fn trace_core(&self, heap: &mut Heap, form: Value, on: bool) -> Result<Value, EvalError> {
+        let payloads = core::fields(heap, form)
+            .map_err(|e| EvalError::Internal(format!("eval: ({} ..): {}", if on { "trace" } else { "untrace" }, e)))?;
+        let who = if on { "trace" } else { "untrace" };
+        if !on && payloads.is_empty() {
+            self.traced.borrow_mut().clear();
+        }
+        for payload in payloads {
+            let target = self.compile_target(heap, payload, who)?;
+            let def = self.target_def(&target).ok_or_else(|| {
+                EvalError::Internal(format!("{}: a name that resolved at check time does not resolve here", who))
+            })?;
+            if on {
+                if def.compiled.borrow().is_some() {
+                    let note = format!(
+                        "; note: `{}` has a compiled body — calls to it from other compiled code are not traced\n",
+                        def.name
+                    );
+                    self.trace_write(heap, &note);
+                }
+                self.traced.borrow_mut().insert(def.name.clone());
+            } else {
+                self.traced.borrow_mut().remove(&def.name);
+            }
+        }
+        let mut names: Vec<String> = self.traced.borrow().iter().cloned().collect();
+        names.sort();
+        self.trace_armed.set(!names.is_empty());
+        let mut s = RootScope::new(heap);
+        let mut list = Value::Empty;
+        for name in names.iter().rev() {
+            let sym = s.intern_symbol(name);
+            list = s.cons(sym, list).map_err(heap_err)?;
+            s.push_root(list);
+        }
+        Ok(list)
     }
 
     /// Evaluate a node's trailing argument forms, rooting each for the whole
@@ -1363,12 +1446,129 @@ impl Interp {
     /// through `compiled_fn_body`, which requires `sig` — so the `expect` is an
     /// internal invariant, not a user-reachable error.
     pub(crate) fn enter(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<Value, EvalError> {
+        if self.trace_armed.get() && self.traced.borrow().contains(&f.name) {
+            return self.enter_traced(heap, f, argv);
+        }
+        self.enter_plain(heap, f, argv)
+    }
+
+    /// [`Self::enter`] with nothing watching — the whole of it before `trace`
+    /// existed, kept as its own function so the hook above is one branch on a
+    /// `Cell` and not a second copy of the compiled/interpreted dispatch.
+    fn enter_plain(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<Value, EvalError> {
         let compiled = f.compiled.borrow().clone();
         if let Some(compiled) = compiled {
             let sig = f.sig.as_ref().expect("a compiled function always has a type signature");
             return self.call_compiled(heap, compiled.as_ref(), &argv, &sig.0, &sig.1);
         }
         self.apply(heap, f, argv)
+    }
+
+    /// One call to a traced function, reported around it in CL's own shape:
+    /// `  0: (fact 3)` going in and `  0: fact returned 6` coming out, two
+    /// spaces of indentation per open frame.
+    ///
+    /// The depth is restored *before* the return is reported, so the two lines
+    /// of one call line up. It is restored on the failure path too, and the
+    /// failure itself is reported: an unwind past a traced frame is exactly
+    /// the moment a trace is most worth having.
+    fn enter_traced(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<Value, EvalError> {
+        let depth = self.trace_depth.get();
+        let call = {
+            let rendered: Vec<String> = argv.iter().map(|a| self.trace_render(heap, *a)).collect();
+            if rendered.is_empty() {
+                format!("({})", f.name)
+            } else {
+                format!("({} {})", f.name, rendered.join(" "))
+            }
+        };
+        self.trace_line(heap, depth, &call);
+        self.trace_depth.set(depth + 1);
+        let result = self.enter_plain(heap, f, argv);
+        self.trace_depth.set(depth);
+        match &result {
+            Ok(v) => {
+                let v = *v;
+                let text = self.trace_render(heap, v);
+                self.trace_line(heap, depth, &format!("{} returned {}", f.name, text));
+            }
+            Err(e) => self.trace_line(heap, depth, &format!("{} exited non-locally: {}", f.name, e)),
+        }
+        result
+    }
+
+    /// Writes one trace line, indented for `depth` and numbered the way CL
+    /// numbers them.
+    ///
+    /// The destination is `*trace-output*`, which is what CL specifies and
+    /// what `time` already writes to. The global holds a `standard-stream`,
+    /// whose single field is the native handle — the one place outside the
+    /// prelude that reads it, and the reason it is read *defensively*: an
+    /// `Interp` with no prelude loaded (a unit test) has no such global, and
+    /// its trace still has to go somewhere. That somewhere is the printer's
+    /// own stdout, which is where `*trace-output*` points anyway by default.
+    fn trace_line(&self, heap: &mut Heap, depth: usize, body: &str) {
+        let text = format!("{:width$}{}: {}\n", "", depth, body, width = 2 + depth * 2);
+        self.trace_write(heap, &text);
+    }
+
+    /// Puts `text` on `*trace-output*` verbatim — [`Self::trace_line`]'s
+    /// destination half, also used for the notes `trace` itself emits.
+    fn trace_write(&self, heap: &mut Heap, text: &str) {
+        match self.trace_stream(heap) {
+            Some(h) => {
+                let _ = typelisp_rt::stream::with_streams(|t| t.write_str(h, &text));
+            }
+            None => {
+                let opts = typelisp_print::runtime::current_opts(heap);
+                let mut out = typelisp_print::pprint::Out::new();
+                for c in text.chars() {
+                    out.push(c);
+                }
+                let _ = typelisp_print::runtime::emit(heap, out, false, &opts);
+            }
+        }
+    }
+
+    /// `*trace-output*`'s native stream handle, if the prelude that defines it
+    /// is loaded and it still holds a stream-shaped value.
+    fn trace_stream(&self, heap: &mut Heap) -> Option<i64> {
+        let v = self.global_value(heap, &crate::Path::root("*trace-output*"))?;
+        let Value::Boxed(id) = v else { return None };
+        if !heap.is_struct(id) || heap.struct_field_count(id) < 1 {
+            return None;
+        }
+        match heap.struct_field(id, 0) {
+            Value::Int(h) => Some(h),
+            _ => None,
+        }
+    }
+
+    /// One value as `~s` would print it — the same printer `format` uses, so
+    /// a `print-object` method and the `*print-*` control variables apply to
+    /// a trace line exactly as they do to a program's own output.
+    ///
+    /// Built and laid out here rather than emitted: `emit` would merge into an
+    /// open `pprint-logical-block` session, and a trace line that arrives in
+    /// the middle of a program's own pretty-printed document belongs to
+    /// neither.
+    fn trace_render(&self, heap: &mut Heap, v: Value) -> String {
+        self.install_print_hooks();
+        heap.push_root(v);
+        let list = heap.cons(v, Value::Empty);
+        let rendered = match list {
+            Ok(list) => {
+                heap.push_root(list);
+                let opts = typelisp_print::runtime::current_opts(heap);
+                let text = typelisp_print::runtime::build_format(heap, "~s", list)
+                    .map(|out| typelisp_print::format::finish(out, &opts));
+                heap.pop_root();
+                text.unwrap_or_else(|_| "#<unprintable>".to_string())
+            }
+            Err(_) => "#<unprintable>".to_string(),
+        };
+        heap.pop_root();
+        rendered
     }
 
     /// A registered function as a closure value, capturing nothing.
@@ -2094,6 +2294,7 @@ impl Interp {
                 let body = body_forms(heap, tl, 6, "defmethod")?;
                 heap.push_permanent_root(tl);
                 let def = FnDef {
+                    name: format!("{}::{}", type_name, method),
                     params,
                     body,
                     rest: false,
@@ -2137,6 +2338,7 @@ impl Interp {
                 // arguments into one `Sexpr` before the call.
                 let sig = (vec![Repr::Sexpr; params.len()], Repr::Sexpr);
                 let def = FnDef {
+                    name: name.to_string(),
                     params,
                     body,
                     rest,
@@ -2340,7 +2542,8 @@ impl Interp {
         lambda: Option<MacroLambda>,
     ) {
         heap.push_permanent_root(tl);
-        let def = FnDef { params, body, rest, lambda, sig: Some((param_reprs, ret)), public, compiled: RefCell::new(None) };
+        let def =
+            FnDef { name: name.to_string(), params, body, rest, lambda, sig: Some((param_reprs, ret)), public, compiled: RefCell::new(None) };
         self.root
             .borrow_mut()
             .get_or_create(name.parent())

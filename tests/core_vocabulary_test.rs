@@ -236,6 +236,29 @@ fn calls() {
     all_round_trip(&["(fn (f) () f)", "(method point new ())"]);
 }
 
+/// The REPL tool forms that name a definition: `(trace ...)` and
+/// `(untrace ...)`.
+///
+/// They carry the *same* `(fn ..)`/`(method ..)` payloads `compile-fn` does,
+/// because they ask a name the same question — which single body is this? —
+/// and share the checker's resolution for it. Unlike `compile-fn` they take
+/// any number, including none: `(trace)` is CL's "tell me what is traced" and
+/// `(untrace)` its untrace-everything.
+///
+/// No island counterpart, for the reason `compile-fn` has none: these act on
+/// the interpreter's own environment, so a compiled program has nothing for
+/// them to act on.
+#[test]
+fn repl_tools() {
+    all_round_trip(&[
+        "(trace (fn (f) () f))",
+        "(trace (fn (f) () f) (method point new ()))",
+        "(trace)",
+        "(untrace (fn (f) () f))",
+        "(untrace)",
+    ]);
+}
+
 // ---- data ---------------------------------------------------------------
 
 /// `construct` names the type, the variant index, and whether the value is
@@ -418,6 +441,8 @@ const EXPR_ONLY: &[&str] = &[
     "fnref",
     "methodref",
     "compile-fn",
+    "trace",
+    "untrace",
     "fn",
     "method",
     "pat-wild",
@@ -456,6 +481,7 @@ fn zz_the_vocabulary_is_closed() {
     variables_and_globals();
     binding_and_control();
     calls();
+    repl_tools();
     data();
     patterns();
     functions();
