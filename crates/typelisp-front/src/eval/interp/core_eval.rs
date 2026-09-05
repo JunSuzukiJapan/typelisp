@@ -108,6 +108,7 @@ enum Op {
     Trace,
     Untrace,
     Step,
+    DisassembleFn,
 }
 
 impl Op {
@@ -168,6 +169,7 @@ impl Op {
             wk::TRACE => Op::Trace,
             wk::UNTRACE => Op::Untrace,
             wk::STEP => Op::Step,
+            wk::DISASSEMBLE_FN => Op::DisassembleFn,
             _ => return None,
         })
     }
@@ -590,6 +592,7 @@ impl Interp {
             Op::Trace => self.trace_core(heap, form, true).map(Step::Done),
             Op::Untrace => self.trace_core(heap, form, false).map(Step::Done),
             Op::Step => self.stepper_core(heap, form, env).map(Step::Done),
+            Op::DisassembleFn => self.disassemble_fn_core(heap, form).map(Step::Done),
 
             // ---- trait objects -------------------------------------------
             Op::DynNew => self.dyn_new_core(heap, form, env).map(Step::Done),
@@ -1615,9 +1618,22 @@ impl Interp {
     /// Puts `text` on `*trace-output*` verbatim — [`Self::trace_line`]'s
     /// destination half, also used for the notes `trace` itself emits.
     fn trace_write(&self, heap: &mut Heap, text: &str) {
-        match self.trace_stream(heap) {
+        self.write_stream_global(heap, "*trace-output*", text)
+    }
+
+    /// Writes `text` to whatever stream the global `name` holds.
+    ///
+    /// This is how the tool layer honours CL's stream variables from Rust:
+    /// the global holds a `standard-stream`, whose single field is the native
+    /// handle. It is the only place outside the prelude that reads that
+    /// field, and it reads it *defensively* — an `Interp` with no prelude
+    /// loaded (a unit test) has no such global, and the output still has to go
+    /// somewhere. That somewhere is the printer's own stdout, which is where
+    /// these variables point by default anyway.
+    fn write_stream_global(&self, heap: &mut Heap, name: &str, text: &str) {
+        match self.stream_global(heap, name) {
             Some(h) => {
-                let _ = typelisp_rt::stream::with_streams(|t| t.write_str(h, &text));
+                let _ = typelisp_rt::stream::with_streams(|t| t.write_str(h, text));
             }
             None => {
                 let opts = typelisp_print::runtime::current_opts(heap);
@@ -1630,10 +1646,10 @@ impl Interp {
         }
     }
 
-    /// `*trace-output*`'s native stream handle, if the prelude that defines it
-    /// is loaded and it still holds a stream-shaped value.
-    fn trace_stream(&self, heap: &mut Heap) -> Option<i64> {
-        let v = self.global_value(heap, &crate::Path::root("*trace-output*"))?;
+    /// The native stream handle a stream-valued global holds, if the prelude
+    /// that defines it is loaded and it still holds a stream-shaped value.
+    fn stream_global(&self, heap: &mut Heap, name: &str) -> Option<i64> {
+        let v = self.global_value(heap, &crate::Path::root(name))?;
         let Value::Boxed(id) = v else { return None };
         if !heap.is_struct(id) || heap.struct_field_count(id) < 1 {
             return None;
@@ -1642,6 +1658,25 @@ impl Interp {
             Value::Int(h) => Some(h),
             _ => None,
         }
+    }
+
+    /// `(disassemble-fn TARGET LLVM)` — the `(disassemble name [llvm])` form.
+    ///
+    /// Prints and answers `()`, which is CL's shape: `disassemble` is a thing
+    /// you look at, not a value you compute with. It goes to
+    /// `*standard-output*`, again as CL specifies, through the same handle
+    /// `trace` writes its own reports to.
+    fn disassemble_fn_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
+        let payload = core::field(heap, form, 0)
+            .ok_or_else(|| EvalError::Internal("eval: (disassemble-fn ..) has no target".to_string()))?;
+        let llvm_ir = bool_field(heap, form, 1, "disassemble-fn")?;
+        let target = self.compile_target(heap, payload, "disassemble-fn")?;
+        let text = (crate::eval::interp::backend_disassemble_function()?)(self, heap, &target, llvm_ir)?;
+        self.write_stream_global(heap, "*standard-output*", &text);
+        if !text.ends_with('\n') {
+            self.write_stream_global(heap, "*standard-output*", "\n");
+        }
+        Ok(Value::Empty)
     }
 
     /// One value as `~s` would print it — the same printer `format` uses, so

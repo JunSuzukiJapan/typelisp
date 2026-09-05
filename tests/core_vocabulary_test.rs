@@ -259,6 +259,11 @@ fn repl_tools() {
         // `step` is the odd one: it names no definition, it wraps a *form*.
         // The form keeps its own type, so the node carries nothing else.
         "(step (call (f) () f ()))",
+        // `disassemble-fn` carries the same payload plus one flag: `true`
+        // asks for LLVM IR rather than host assembly. A literal, because the
+        // answer decides what to emit.
+        "(disassemble-fn (fn (f) () f) false)",
+        "(disassemble-fn (method point new ()) true)",
     ]);
 }
 
@@ -447,6 +452,7 @@ const EXPR_ONLY: &[&str] = &[
     "trace",
     "untrace",
     "step",
+    "disassemble-fn",
     "fn",
     "method",
     "pat-wild",

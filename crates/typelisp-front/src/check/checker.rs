@@ -9434,6 +9434,7 @@ impl Checker {
             "ed" => return self.check_ed(heap, args),
             "trace" | "untrace" => return self.check_trace(heap, head.as_str(), args),
             "step" => return self.check_step(heap, interp, env, args, arg_locs, expected),
+            "disassemble" => return self.check_disassemble(heap, args),
             "source-file" => return self.check_source_file(heap, v, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
@@ -10970,6 +10971,50 @@ impl Checker {
         }
         let form = forms::trace_form(heap, tag, &targets)?;
         Ok(Checked::new(form, sexpr_ty()))
+    }
+
+    /// `(disassemble name)` / `(disassemble name true)` — CLHS 25.2.
+    ///
+    /// A name, resolved here the way `compile` resolves one
+    /// ([`Self::resolve_callable`]), because it asks the same question: which
+    /// single body is this? A generic definition is refused for the same
+    /// reason.
+    ///
+    /// The optional second argument asks for **LLVM IR** instead of host
+    /// assembly. Assembly is the default because that is what CL's
+    /// `disassemble` promises — the instructions this machine will run — and
+    /// the IR is the same module one step earlier, which is what to look at
+    /// when the question is about this compiler rather than about the chip.
+    /// It is a literal `true`/`false` and not an expression: the answer is
+    /// needed to decide what to emit, and there is nothing to gain by
+    /// deferring it.
+    ///
+    /// Prints and answers `()`, as CL does. Interpreter-only, the same
+    /// category `compile`/`compile-file`/`dump` are in (docs/syntax.md §10):
+    /// it is not that it cannot be compiled, it is that it is the compiler.
+    fn check_disassemble(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
+        let (name_arg, llvm_ir) = match args {
+            [one] => (one, false),
+            [one, Value::Bool(b)] => (one, *b),
+            [_, _] => {
+                return Err(Error::TypeError(
+                    "disassemble: the second argument selects LLVM IR and must be a literal `true` or `false`".into(),
+                ))
+            }
+            _ => {
+                return Err(Error::TypeError(
+                    "disassemble: (disassemble name [llvm]) — expected 1 or 2 arguments".into(),
+                ))
+            }
+        };
+        let name = unevaluated_name(
+            heap,
+            *name_arg,
+            "disassemble: expected a symbol or path naming a function, e.g. (disassemble foo) or (disassemble point::x) — not a string",
+        )?;
+        let target = self.resolve_callable(&name, "disassemble")?;
+        let form = forms::disassemble_fn_form(heap, &target, llvm_ir)?;
+        Ok(Checked::new(form, Type::Unit))
     }
 
     /// `(step form)` — CLHS 25.2's stepper. Evaluates `form` and returns its

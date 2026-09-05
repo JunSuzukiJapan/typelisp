@@ -350,6 +350,13 @@ pub(super) fn trace_form(heap: &mut Heap, tag: &str, targets: &[CompileTarget]) 
     core::tagged(heap, tag, &payloads)
 }
 
+/// `(disassemble-fn PAYLOAD LLVM)` — one target and whether to print LLVM IR
+/// instead of host assembly.
+pub(super) fn disassemble_fn_form(heap: &mut Heap, target: &CompileTarget, llvm_ir: bool) -> Result<Value, Error> {
+    let payload = compile_target_payload(heap, target)?;
+    core::tagged(heap, "disassemble-fn", &[payload, Value::Bool(llvm_ir)])
+}
+
 /// `(fn (WRITTEN...) (HOME...) PATH)` or `(method PATH SYM (HOME...))` — one
 /// resolved target, as the node payload every form that takes one carries.
 fn compile_target_payload(heap: &mut Heap, target: &CompileTarget) -> Result<Value, Error> {

@@ -103,7 +103,7 @@ fn walk(
         // No sub-forms at all. `quote`'s datum is the important one: it is
         // user data, and descending into it is exactly the mistake the module
         // comment describes.
-        wk::INT_ANY_WIDTH | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::BREAK => Ok(()),
+        wk::INT_ANY_WIDTH | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::TRACE | wk::UNTRACE | wk::DISASSEMBLE_FN | wk::BREAK => Ok(()),
 
         wk::VAR => {
             note(sym(heap, form, 0)?, bound, siblings, seen, order);
@@ -265,6 +265,13 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
             v
         }
         wk::LOOP => from(0),
+        // `(step FORM)` — the form is an ordinary expression and names
+        // whatever the surrounding scope holds. The three REPL tool nodes
+        // beside it (`trace`/`untrace`/`disassemble-fn`) carry only resolved
+        // *names* and so are leaves, listed with `compile-fn` above. All four
+        // are refused a lowering by the bridge; walking them correctly is what
+        // lets that refusal be the error a user sees.
+        wk::STEP => from(0),
         wk::RETURN | wk::PANIC | wk::DYN_VALUE => from(0),
         // `(block NAME BODY)` / `(return-from NAME [VALUE])` — everything past
         // the name. The name is a `(str ...)` node and *not* a sub-form to
@@ -476,7 +483,7 @@ fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymRef>) -> Result<()
             }
             Ok(())
         }
-        wk::INT_ANY_WIDTH | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::VAR | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::BREAK => Ok(()),
+        wk::INT_ANY_WIDTH | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::VAR | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::TRACE | wk::UNTRACE | wk::DISASSEMBLE_FN | wk::BREAK => Ok(()),
         _ => {
             for f in plain_sub_forms(heap, form, tag)? {
                 walk_nested(heap, f, out)?;

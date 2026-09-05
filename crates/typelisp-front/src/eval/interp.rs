@@ -3883,6 +3883,9 @@ pub struct Backend {
     pub handle_is_live: fn(i64) -> bool,
     /// `(compile name)`.
     pub compile_function: fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>,
+    /// `(disassemble name [llvm])` — the text, for the caller to print. The
+    /// `bool` asks for LLVM IR instead of host assembly.
+    pub disassemble_function: fn(&Interp, &mut Heap, &crate::CompileTarget, bool) -> Result<String, EvalError>,
     /// `(compile-file source output)`.
     pub compile_file: fn(&str, &str) -> Result<(), String>,
     /// `(dump path)`.
@@ -3920,6 +3923,13 @@ fn backend(who: &str) -> Result<Backend, EvalError> {
 pub(crate) fn backend_compile_function(
 ) -> Result<fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>, EvalError> {
     Ok(backend("compile")?.compile_function)
+}
+
+/// The registered backend's `(disassemble name)`, for the evaluator's own
+/// `disassemble` special form.
+pub(crate) fn backend_disassemble_function(
+) -> Result<fn(&Interp, &mut Heap, &crate::CompileTarget, bool) -> Result<String, EvalError>, EvalError> {
+    Ok(backend("disassemble")?.disassemble_function)
 }
 
 /// Runs one `llvm-*`/native-scope builtin through the registered backend.
