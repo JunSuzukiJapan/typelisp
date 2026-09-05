@@ -362,6 +362,12 @@ impl StreamTable {
             }
             Backend::FileOut(w) => w.write_all(text.as_bytes()).map_err(|e| format!("write: {}", e)),
             Backend::Stdout => {
+                // One of the three doors a session's output leaves by; see
+                // `typelisp_abi::dribble`'s module docs for the other two.
+                // Only the character path is copied: `write-byte` to stdout is
+                // binary output, and a dribble file is text a person reads
+                // back.
+                typelisp_abi::dribble::note(text);
                 std::io::stdout().write_all(text.as_bytes()).map_err(|e| format!("write: {}", e))
             }
             Backend::Stderr => {

@@ -302,6 +302,9 @@ pub fn list_exhausted(heap: &Heap) -> bool {
 /// printed without a newline must still be visible before the process blocks
 /// reading stdin.
 fn write_stdout(text: &str) -> Result<(), String> {
+    // One of the three doors a session's output leaves by; see
+    // `typelisp_abi::dribble`'s module docs for the other two.
+    typelisp_abi::dribble::note(text);
     let mut out = std::io::stdout();
     write!(out, "{}", text)
         .and_then(|()| out.flush())

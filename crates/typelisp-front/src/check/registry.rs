@@ -1231,6 +1231,26 @@ fn register_system_builtins(root: &mut Namespace) {
     // `none` when the C library cannot represent that instant.
     native("timezone-offset-seconds", vec![Type::I32, Type::I32], option_of(Type::I32));
     native("timezone-daylight-p", vec![Type::I32, Type::I32], option_of(Type::Bool));
+
+    // The REPL tool layer's runtime half (CLHS 25.2 / 25.1). The other four
+    // tools — `trace`/`untrace`/`step`/`disassemble` — have no entry here and
+    // never will: they are interpreter-only special forms, the same category
+    // `compile`/`compile-file`/`dump` are in. These three are ordinary
+    // builtins, so a `defun` that calls them still compiles.
+    //
+    // `heap-info` returns the prelude's `heap-info` struct — `room`'s report,
+    // built on the runtime's side of the boundary the way `universal-time`
+    // is, because the statistics belong to the `Heap` and not to the checker.
+    let file_err = error_ty(FILE_ERROR);
+    native("heap-info", vec![], heap_info());
+    // `dribble` itself is a prelude `defun` with an `&optional` path; these
+    // two are the halves it dispatches to. Both `Result`, since both touch a
+    // file — and stopping *flushes*, which is where a full disk is found.
+    native("dribble-start", vec![Type::Str], result_of(Type::Unit, file_err.clone()));
+    native("dribble-stop", vec![], result_of(Type::Unit, file_err.clone()));
+    // The runtime half of the `ed` special form, which resolved the name at
+    // check time and reduced to this. Line 0 means "no line".
+    native("ed-open", vec![Type::Str, Type::I32], result_of(Type::Unit, file_err));
 }
 
 /// The type of a reader macro: what `set-macro-character` stores and what the
@@ -1489,6 +1509,13 @@ pub fn universal_time() -> Type {
 /// [`universal_time`]'s monotonic counterpart.
 pub fn internal_time() -> Type {
     Type::Named(Path::root("internal-time"), vec![])
+}
+
+/// `heap-info` (a prelude `defstruct`): what `(heap-info)` reports and what
+/// `room` prints — [`universal_time`]'s shape, for the same reason (the
+/// runtime builds it, so the checker only has to name it).
+pub fn heap_info() -> Type {
+    Type::Named(Path::root("heap-info"), vec![])
 }
 
 fn hashtable_ty() -> Type {

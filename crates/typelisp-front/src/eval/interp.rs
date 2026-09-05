@@ -1748,6 +1748,26 @@ impl Interp {
                 other => Err(EvalError::Panic(format!("getenv: argument is not a string, got {:?}", other))),
             }),
             "home-directory" => Some(Ok(typelisp_rt::sys_builtin::home_directory(heap))),
+            // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
+            // `disassemble` are *not* here — those are special forms with
+            // their own core nodes, the same way `compile` is.
+            "heap-info" => Some(Ok(typelisp_rt::sys_builtin::heap_info(heap))),
+            "dribble-start" => Some(match &args[0] {
+                Value::Str(id) => {
+                    let path = heap.string(*id).to_string();
+                    Ok(typelisp_rt::sys_builtin::dribble_start(heap, &path))
+                }
+                other => Err(EvalError::Panic(format!("dribble: argument is not a string, got {:?}", other))),
+            }),
+            "dribble-stop" => Some(Ok(typelisp_rt::sys_builtin::dribble_stop(heap))),
+            "ed-open" => Some(match (&args[0], &args[1]) {
+                (Value::Str(id), Value::Int(line)) => {
+                    let path = heap.string(*id).to_string();
+                    let line = *line;
+                    Ok(typelisp_rt::sys_builtin::ed_open(heap, &path, line))
+                }
+                other => Err(EvalError::Panic(format!("ed: arguments are not a string and a line, got {:?}", other))),
+            }),
             "sleep" => Some(match rt_f64(heap, &args[0]) {
                 Ok(secs) => typelisp_rt::sys_builtin::sleep(secs).map(|()| Value::Empty).map_err(EvalError::Panic),
                 Err(e) => Err(e),

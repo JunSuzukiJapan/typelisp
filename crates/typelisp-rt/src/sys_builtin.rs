@@ -40,6 +40,9 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("software-version", "option<string>"),
     ("timezone-offset-seconds", "option<i32>"),
     ("timezone-daylight-p", "option<bool>"),
+    ("dribble-start", "result<(),fileerror>"),
+    ("dribble-stop", "result<(),fileerror>"),
+    ("ed-open", "result<(),fileerror>"),
 ];
 
 fn key_of(name: &str) -> &'static str {
@@ -358,6 +361,120 @@ fn local_zone(day: i64, second: i64) -> Option<(i32, bool)> {
     crate::os::timezone_at(unix)
 }
 
+/// `(heap-info)`: what the collector knows about itself, as the prelude's
+/// `heap-info` struct — the numbers CL's `room` prints, in a form a program
+/// can also read.
+///
+/// The counts are `i32` and the collection counter is a `bignum`, and the
+/// difference is not stylistic. Every count here is bounded by the arena, and
+/// an arena `i32` cannot count is one this machine cannot hold (2^31 cells is
+/// ~51 GB) — `typl`'s `--heap-cells` refuses such a request outright rather
+/// than letting this truncate one. A *collection* counter has no such bound:
+/// it only goes up, and a long-running process really can pass 2^31. Rounding
+/// it would be a lie of exactly the kind this language keeps refusing to tell,
+/// so it gets the type that never has to.
+///
+/// `growable` rather than the growth ceiling in cells: the ceiling is the one
+/// figure here that is not bounded by the arena (it is a multiple of it), and
+/// what a reader wants from it is the yes/no.
+pub fn heap_info(heap: &mut Heap) -> Value {
+    let capacity = heap.capacity();
+    let free = heap.free_count();
+    let live = heap.live_count();
+    let symbols = heap.symbol_count();
+    let strings = heap.string_count();
+    let boxes = heap.box_count();
+    let growable = heap.growth_limit() > capacity;
+    let gc_count = heap.alloc_bignum(num_bigint::BigInt::from(heap.gc_count()));
+    heap.alloc_struct(
+        TypeKeyId::HEAP_INFO,
+        vec![
+            Value::Int(capacity as i64),
+            Value::Int(live as i64),
+            Value::Int(free as i64),
+            Value::Int(symbols as i64),
+            Value::Int(strings as i64),
+            Value::Int(boxes as i64),
+            gc_count,
+            Value::Bool(growable),
+        ],
+    )
+}
+
+/// `(dribble-start path)`: begin copying the session into `path`, truncating
+/// it. The recording itself lives in [`typelisp_abi::dribble`] — see that
+/// module's docs for why it is a crate below this one.
+pub fn dribble_start(heap: &mut Heap, path: &str) -> Value {
+    match typelisp_abi::dribble::start(path) {
+        Ok(()) => result_ok(heap, "dribble-start", Value::Empty),
+        Err(e) => result_err(heap, "dribble-start", TypeKeyId::FILE_ERROR, format!("dribble: {}: {}", path, e)),
+    }
+}
+
+/// `(dribble-stop)`: close the dribble file. A no-op when none is open, as
+/// CL's argument-less `dribble` is.
+///
+/// `Result`, not `()`, because the close *flushes*: a full disk is discovered
+/// here or nowhere, and discovering it nowhere would mean a truncated
+/// transcript reported as a complete one.
+pub fn dribble_stop(heap: &mut Heap) -> Value {
+    match typelisp_abi::dribble::stop() {
+        Ok(()) => result_ok(heap, "dribble-stop", Value::Empty),
+        Err(e) => result_err(heap, "dribble-stop", TypeKeyId::FILE_ERROR, format!("dribble: {}", e)),
+    }
+}
+
+/// `(ed-open path line)`: run the user's editor on `path`, positioned at
+/// `line` — the runtime half of the `ed` special form, which did the *name*
+/// resolution at check time and reduced to this call.
+///
+/// `$VISUAL` first, then `$EDITOR`: that is the order every Unix tool uses,
+/// and it is the one the two variables were invented to express (`VISUAL` for
+/// a full-screen editor, `EDITOR` for whatever works on a teletype). Neither
+/// set is an `Err`, not a guess at `vi` — inventing an editor is how `ed`
+/// ends up launching something the user cannot exit.
+///
+/// The variable's value is split on whitespace so `EDITOR="code -w"` and
+/// `EDITOR="emacsclient -nw"` work; the first word is the program and the
+/// rest are leading arguments. This is the same treatment `git` gives it
+/// short of running a shell, and running a shell would make the value a
+/// command injection surface for no benefit.
+///
+/// `+N` is the line argument, understood by vi, emacs, nano, ed, joe and
+/// `code --goto`'s fallback. It is omitted for line 0, which is what the
+/// `ed`-with-a-path and `ed`-with-nothing forms produce.
+///
+/// Waits for the editor to exit (CL's `ed` returns when editing is done), and
+/// reports a non-zero exit rather than swallowing it.
+pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
+    let err = |heap: &mut Heap, msg: String| result_err(heap, "ed-open", TypeKeyId::FILE_ERROR, msg);
+    let spec = match std::env::var("VISUAL").ok().filter(|s| !s.trim().is_empty()) {
+        Some(v) => v,
+        None => match std::env::var("EDITOR").ok().filter(|s| !s.trim().is_empty()) {
+            Some(v) => v,
+            None => return err(heap, "ed: neither $VISUAL nor $EDITOR is set".to_string()),
+        },
+    };
+    let mut words = spec.split_whitespace();
+    let program = match words.next() {
+        Some(p) => p,
+        None => return err(heap, "ed: the editor variable is empty".to_string()),
+    };
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(words);
+    if !path.is_empty() {
+        if line > 0 {
+            cmd.arg(format!("+{}", line));
+        }
+        cmd.arg(path);
+    }
+    match cmd.status() {
+        Ok(st) if st.success() => result_ok(heap, "ed-open", Value::Empty),
+        Ok(st) => err(heap, format!("ed: {} exited with {}", program, st)),
+        Err(e) => err(heap, format!("ed: cannot run {}: {}", program, e)),
+    }
+}
+
 // ---- The compiled-code edge -------------------------------------------
 //
 // The `#[no_mangle]` shims live *beside* their implementation rather than in
@@ -636,6 +753,61 @@ pub unsafe extern "C" fn rt_timezone_daylight_p(args: *const i64, argc: u32) -> 
         fatal("rt_timezone_daylight_p: expected 2 arguments");
     }
     encode(timezone_daylight_p(active_heap(), *args, *args.add(1)))
+}
+
+/// `(heap-info)` for compiled code — a freshly allocated `heap-info` struct,
+/// as unrooted as every other allocating shim's result until its caller
+/// protects it.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_heap_info(_args: *const i64, _argc: u32) -> i64 {
+    encode(heap_info(active_heap()))
+}
+
+/// `(dribble-start path)` for compiled code.
+///
+/// # Safety
+///
+/// Same as [`str_arg`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_dribble_start(args: *const i64, argc: u32) -> i64 {
+    let path = str_arg(args, argc, "rt_dribble_start");
+    encode(dribble_start(active_heap(), &path))
+}
+
+/// `(dribble-stop)` for compiled code.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_dribble_stop(_args: *const i64, _argc: u32) -> i64 {
+    encode(dribble_stop(active_heap()))
+}
+
+/// `(ed-open path line)` for compiled code: `args[0]` is a tagged `string`,
+/// `args[1]` a raw `i32` line number.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to 2 valid `i64`s, the first
+/// encoding a `Value::Str`; a `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_ed_open(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_ed_open: expected 2 arguments");
+    }
+    let path = match decode(*args) {
+        Value::Str(id) => active_heap().string(id).to_string(),
+        other => fatal(&format!("ed-open: argument is not a string, got {:?}", other)),
+    };
+    let line = *args.add(1);
+    encode(ed_open(active_heap(), &path, line))
 }
 
 /// `(exit code)` for compiled code: terminates the process through the OS

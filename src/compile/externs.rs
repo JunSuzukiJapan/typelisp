@@ -169,6 +169,16 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "set-dispatch-macro-character" => "rt_set_dispatch_macro_character",
         "get-dispatch-macro-character" => "rt_get_dispatch_macro_character",
         "sleep" => "rt_sleep",
+        // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
+        // `disassemble` have no row and never will — those are
+        // interpreter-only forms, the same category `compile`/`compile-file`/
+        // `dump` are in (docs/syntax.md §10). These three are ordinary
+        // builtins: the heap statistics and the dribble sink are the
+        // runtime's own, and launching an editor is a process call.
+        "heap-info" => "rt_heap_info",
+        "dribble-start" => "rt_dribble_start",
+        "dribble-stop" => "rt_dribble_stop",
+        "ed-open" => "rt_ed_open",
         "stream-listen" => "rt_stream_listen",
         "stream-position" => "rt_stream_position",
         "stream-write-string" => "rt_stream_write_string",
@@ -390,7 +400,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 239] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 243] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -403,8 +413,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 239] {
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
     use typelisp_rt::sys_builtin::{
-        rt_command_line_args, rt_exit, rt_get_internal_real_time, rt_get_internal_run_time,
-        rt_get_universal_time, rt_getenv, rt_home_directory, rt_lisp_implementation_version,
+        rt_command_line_args, rt_dribble_start, rt_dribble_stop, rt_ed_open, rt_exit,
+        rt_get_internal_real_time, rt_get_internal_run_time,
+        rt_get_universal_time, rt_getenv, rt_heap_info, rt_home_directory, rt_lisp_implementation_version,
         rt_machine_instance, rt_machine_type, rt_machine_version, rt_parse_float, rt_parse_int,
         rt_sleep, rt_software_type, rt_software_version, rt_timezone_daylight_p,
         rt_timezone_offset_seconds,
@@ -706,6 +717,10 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 239] {
         ("rt_timezone_offset_seconds", rt_timezone_offset_seconds as usize),
         ("rt_timezone_daylight_p", rt_timezone_daylight_p as usize),
         ("rt_software_type", rt_software_type as usize),
+        ("rt_heap_info", rt_heap_info as usize),
+        ("rt_dribble_start", rt_dribble_start as usize),
+        ("rt_dribble_stop", rt_dribble_stop as usize),
+        ("rt_ed_open", rt_ed_open as usize),
         ("rt_bignum_cmp", rt_bignum_cmp as usize),
         ("rt_bignum_to_int", rt_bignum_to_int as usize),
         ("rt_bignum_fits_i32", rt_bignum_fits_i32 as usize),

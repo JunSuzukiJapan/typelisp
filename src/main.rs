@@ -145,8 +145,22 @@ fn parse_heap_cells(args: Vec<String>) -> (usize, Vec<String>) {
 /// Parses the value half of `--heap-cells`; exits with a diagnostic if it is
 /// not a positive integer (zero is rejected — an empty arena exhausts on the
 /// first `cons`, so it is never a useful request).
+///
+/// The ceiling is `i32::MAX` cells, because that is the largest arena `room`
+/// can report on: `heap-info`'s counts are `i32`, the language's widest
+/// fixed-width integer. It costs nothing real — 2^31 cells is about 51 GB of
+/// arena — and stating the limit here is the alternative to `heap-info`
+/// silently truncating a number it was asked for.
 fn parse_heap_cells_value(v: &str) -> usize {
+    const MAX_HEAP_CELLS: usize = i32::MAX as usize;
     match v.parse::<usize>() {
+        Ok(n) if n > MAX_HEAP_CELLS => {
+            eprintln!(
+                "--heap-cells: `{}` is more cells than this implementation can count ({} is the maximum)",
+                v, MAX_HEAP_CELLS
+            );
+            std::process::exit(1);
+        }
         Ok(n) if n > 0 => n,
         _ => {
             eprintln!("--heap-cells: `{}` is not a positive integer", v);
@@ -289,6 +303,11 @@ fn repl(heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> rus
                     break;
                 }
                 let _ = rl.add_history_entry(line.as_str());
+                // The REPL's own half of `dribble`: the line as typed. The
+                // other two doors a session's output leaves by are inside the
+                // runtime — see `typelisp_abi::dribble`'s module docs.
+                typelisp_abi::dribble::note(&line);
+                typelisp_abi::dribble::note("\n");
                 pending.push_str(&line);
                 pending.push('\n');
                 try_run_pending(&mut heap, &reader, &checker, &mut interp, &mut loader, &mut pending);
@@ -438,7 +457,13 @@ fn try_run_pending(
             }
         } else {
             match interp.exec(heap, tl) {
-                Ok(Some(v)) => println!("{}", format_value(heap, checker.borrow().registry(), &v)),
+                // The REPL's other half of `dribble`: the value echoed back.
+                Ok(Some(v)) => {
+                    let text = format_value(heap, checker.borrow().registry(), &v);
+                    typelisp_abi::dribble::note(&text);
+                    typelisp_abi::dribble::note("\n");
+                    println!("{}", text);
+                }
                 Ok(None) => {}
                 Err(e) => {
                     eprintln!("error: {}", e);

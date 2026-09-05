@@ -4908,6 +4908,73 @@ user-visible capacity."
     ((some h) (option::some (to-pathname h)))))
 
 ;; ---------------------------------------------------------------------------
+;; The REPL tool layer (CLHS 25.2): `room` and `dribble`.
+;;
+;; The other five tools -- `trace`, `untrace`, `step`, `disassemble` and `ed`
+;; -- are special forms, because each takes the *name* of a definition rather
+;; than a value. These two take neither, so they are ordinary functions here.
+
+(pub defstruct heap-info
+  "What the collector knows about itself: the numbers `room` prints.
+
+   `capacity` is the whole cons arena, `live` and `free` the two halves it is
+   divided into at this instant, and they always sum to it. `symbols`,
+   `strings` and `boxes` count the other three things the heap holds.
+
+   `gc-count` is a `bignum` and the rest are `i32` on purpose. Every count
+   here is bounded by the arena, and an arena an `i32` could not count is one
+   this machine could not hold -- but a collection counter only ever goes up,
+   and a process that runs for weeks really does pass 2^31. Rounding it would
+   be a lie, so it gets the type that never has to tell one.
+
+   `growable` is whether the arena may still be extended. The ceiling itself
+   is not reported: it is a multiple of the capacity and so the one figure
+   here with no bound, and what a reader wants from it is the yes or no."
+  (pub capacity i32) (pub live i32) (pub free i32)
+  (pub symbols i32) (pub strings i32) (pub boxes i32)
+  (pub gc-count bignum) (pub growable bool))
+
+(pub defun room (&optional (verbose bool)) ()
+  "Print what the heap looks like right now (CL's `room`), to
+   `*standard-output*`.
+
+   CL's argument chooses how much to print and CL does not say what the
+   output looks like; here the argument is a plain `bool` with no default, so
+   an omitted one is `none` -- the middle amount CL calls `:default` -- and
+   `(room true)` adds the three object counts and the arena's growth policy.
+
+   Returns nothing. The numbers themselves are `(heap-info)`, which is what
+   to call when a program wants to *act* on them rather than read them."
+  (let ((info (heap-info)))
+    (progn
+      (format *standard-output* "Cons cells: ~d in use, ~d free, ~d total~%"
+              info::live info::free info::capacity)
+      (format *standard-output* "Collections: ~d~%" info::gc-count)
+      (when (match verbose ((some v) v) ((none) false))
+        (progn
+          (format *standard-output* "Symbols:    ~d~%" info::symbols)
+          (format *standard-output* "Strings:    ~d~%" info::strings)
+          (format *standard-output* "Boxes:      ~d~%" info::boxes)
+          (format *standard-output* "Arena:      ~a~%"
+                  (if info::growable "growable" "fixed")))))))
+
+(pub defun dribble (&optional (path string)) Result<(), FileError>
+  "Start recording this session into `path`, or -- called with nothing --
+   stop recording and close the file. CL's `dribble`.
+
+   What gets recorded is everything the session puts on standard output: what
+   a program prints, what it writes to a stream backed by standard output,
+   and, at the REPL, the lines typed in and the values echoed back. Starting a
+   second dribble closes the first.
+
+   `&optional` with no default expression, so the body sees `Option<string>`
+   -- this language's shape for CL's supplied-p, and the reason one name can
+   mean both `start` and `stop` the way CL's does."
+  (match path
+    ((some p) (dribble-start p))
+    ((none) (dribble-stop))))
+
+;; ---------------------------------------------------------------------------
 ;; Universal time, decomposed (CLHS 25.1).
 ;;
 ;; CL returns nine values from `decode-universal-time`; there are no multiple

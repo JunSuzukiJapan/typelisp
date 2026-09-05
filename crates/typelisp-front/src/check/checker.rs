@@ -9431,6 +9431,7 @@ impl Checker {
             "try-as" => return self.check_as(heap, interp, env, args, arg_locs, true),
             "compile" => return self.check_compile(heap, args),
             "documentation" => return self.check_documentation(heap, args),
+            "ed" => return self.check_ed(heap, args),
             "source-file" => return self.check_source_file(heap, v, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
@@ -10830,20 +10831,11 @@ impl Checker {
         if args.len() != 1 {
             return Err(Error::TypeError("compile: (compile name) — expected exactly 1 argument".into()));
         }
-        let name = match args[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            Value::Path(pid) => heap
-                .path_segments(pid)
-                .iter()
-                .map(|s| heap.symbol_name(*s).to_string())
-                .collect::<Vec<_>>()
-                .join("::"),
-            _ => {
-                return Err(Error::TypeError(
-                    "compile: expected a symbol or path naming a function, e.g. (compile foo) or (compile point::x) — not a string".into(),
-                ))
-            }
-        };
+        let name = unevaluated_name(
+            heap,
+            args[0],
+            "compile: expected a symbol or path naming a function, e.g. (compile foo) or (compile point::x) — not a string",
+        )?;
         let generic_err = || {
             Error::TypeError(format!(
                 "compile: `{}` is generic — a generic function has no single compiled body; \
@@ -10947,40 +10939,54 @@ impl Checker {
         if args.len() != 1 {
             return Err(Error::TypeError("documentation: (documentation name) — expected exactly 1 argument".into()));
         }
-        let name = match args[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            Value::Path(pid) => heap
-                .path_segments(pid)
-                .iter()
-                .map(|s| heap.symbol_name(*s).to_string())
-                .collect::<Vec<_>>()
-                .join("::"),
-            _ => {
-                return Err(Error::TypeError(
-                    "documentation: expected a symbol or path naming a definition, e.g. (documentation foo) or (documentation point::x) — not a string".into(),
-                ))
-            }
-        };
+        let name = unevaluated_name(
+            heap,
+            args[0],
+            "documentation: expected a symbol or path naming a definition, e.g. (documentation foo) or (documentation point::x) — not a string",
+        )?;
         // Resolved to the docstring first, then built — `self.reg` lookups
         // borrow `self` while `doc_option` needs `heap` mutably, so the two
         // cannot be nested.
-        let doc: Option<Option<String>> = match name.rsplit_once("::") {
+        let doc = match self.resolve_definition(&name, "documentation")? {
+            DefRef::Var(p) => self.reg.docs.vars.get(&p).cloned(),
+            DefRef::Fn(p) => self.reg.docs.fns.get(&p).cloned(),
+            DefRef::Type(p) => self.reg.docs.types.get(&p).cloned(),
+            DefRef::Trait(p) => self.reg.docs.traits.get(&p).cloned(),
+            DefRef::Macro(p) => self.reg.docs.macros.get(&p).cloned(),
+            DefRef::Method(t, m) => self.reg.docs.methods.get(&(t, m)).cloned(),
+        };
+        self.doc_option(heap, doc)
+    }
+
+    /// Which definition a bare name or a `Type::method` path names — the
+    /// resolution `documentation` and `ed` share.
+    ///
+    /// The two want different *columns* of the same pair of tables
+    /// (`Registry::docs` and `Registry::def_locs`, which are keyed
+    /// identically and populated at the same registration points), so what
+    /// they can share is exactly this: the ladder that decides which column
+    /// to read. A bare name is tried as a variable, a function, a type, a
+    /// trait, then a macro — first hit wins, the same var-before-fn priority
+    /// a bare identifier gets as an ordinary expression.
+    ///
+    /// Resolving to nothing is a check-time error, like any other unbound
+    /// reference: the checker always knows where a name resolves, so there is
+    /// nothing left for the runtime to look up.
+    fn resolve_definition(&self, name: &str, who: &str) -> Result<DefRef, Error> {
+        match name.rsplit_once("::") {
             None => {
-                if let Some((path, _)) = self.resolve_global(&name) {
-                    Some(self.reg.docs.vars.get(&path).cloned())
-                } else if let Some(path) = self.resolve_fn(&name) {
-                    Some(self.reg.docs.fns.get(&path).cloned())
-                } else if let Some(path) = self.resolve_bare_type(&name) {
-                    Some(self.reg.docs.types.get(&path).cloned())
-                } else if let Ok(path) = self.resolve_trait_name(&name) {
-                    Some(self.reg.docs.traits.get(&path).cloned())
-                } else if let Some((path, _)) = self.resolve_macro(&name) {
-                    Some(self.reg.docs.macros.get(&path).cloned())
+                if let Some((path, _)) = self.resolve_global(name) {
+                    Ok(DefRef::Var(path))
+                } else if let Some(path) = self.resolve_fn(name) {
+                    Ok(DefRef::Fn(path))
+                } else if let Some(path) = self.resolve_bare_type(name) {
+                    Ok(DefRef::Type(path))
+                } else if let Ok(path) = self.resolve_trait_name(name) {
+                    Ok(DefRef::Trait(path))
+                } else if let Some((path, _)) = self.resolve_macro(name) {
+                    Ok(DefRef::Macro(path))
                 } else {
-                    return Err(Error::TypeError(format!(
-                        "documentation: no definition named `{}`",
-                        name
-                    )));
+                    Err(Error::TypeError(format!("{}: no definition named `{}`", who, name)))
                 }
             }
             Some((type_part, method)) => {
@@ -10988,19 +10994,82 @@ impl Checker {
                 let type_fq = if type_segs.len() == 1 { self.resolve_bare_type(&type_segs[0]) } else { self.resolve_type_path(&type_segs) }
                     .filter(|tp| self.reg.type_def(tp).is_some_and(|def| def.assoc.contains_key(method)));
                 match type_fq {
-                    Some(type_fq) => {
-                        Some(self.reg.docs.methods.get(&(type_fq, method.to_string())).cloned())
-                    }
+                    Some(type_fq) => Ok(DefRef::Method(type_fq, method.to_string())),
+                    None => Err(Error::TypeError(format!(
+                        "{}: `{}` is not a known `Type::method` — module-qualified free names/types/traits/macros are not supported here",
+                        who, name
+                    ))),
+                }
+            }
+        }
+    }
+
+    /// `(ed)` / `(ed name)` / `(ed "path")` (CLHS 25.2): open the user's
+    /// editor, on nothing, on where a definition is written, or on a file.
+    ///
+    /// Like `(compile ...)` and `(documentation ...)`, a *name* here is
+    /// program structure rather than runtime data, so it reads as an
+    /// unevaluated symbol or `::`-path. Unlike those two, a **string** is
+    /// meaningful and not an error: CL's `ed` takes either a pathname or a
+    /// function name, and the two are told apart by shape exactly as they are
+    /// in CL.
+    ///
+    /// Everything this form does is resolution, and all of it happens here:
+    /// what survives checking is a call to the ordinary builtin `ed-open`
+    /// with a file and a line baked in as constants. That is why `ed` needs
+    /// no interpreter-only category of its own — a `defun` that calls it
+    /// still compiles, because by then there is nothing left but a call.
+    ///
+    /// The line comes from [`crate::check::registry::DefLocs`], the same
+    /// table the LSP's goto-definition reads. A definition with no recorded
+    /// location (a builtin) is an error naming that fact, rather than an
+    /// editor opened on line 0 of nothing.
+    fn check_ed(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
+        let (file, line) = match args {
+            [] => (String::new(), 0),
+            [Value::Str(id)] => (heap.string(*id).to_string(), 0),
+            [one] => {
+                let name = unevaluated_name(
+                    heap,
+                    *one,
+                    "ed: expected a symbol or path naming a definition, or a string naming a file, e.g. (ed foo) or (ed \"x.typl\")",
+                )?;
+                let loc = match self.resolve_definition(&name, "ed")? {
+                    DefRef::Var(p) => self.reg.def_locs.vars.get(&p).cloned(),
+                    DefRef::Fn(p) => self.reg.def_locs.fns.get(&p).cloned(),
+                    DefRef::Type(p) => self.reg.def_locs.types.get(&p).cloned(),
+                    DefRef::Trait(p) => self.reg.def_locs.traits.get(&p).cloned(),
+                    DefRef::Macro(p) => self.reg.def_locs.macros.get(&p).cloned(),
+                    DefRef::Method(t, m) => self.reg.def_locs.methods.get(&(t, m)).cloned(),
+                };
+                match loc {
+                    Some(loc) => (loc.file.to_string(), loc.line as i64),
                     None => {
                         return Err(Error::TypeError(format!(
-                            "documentation: `{}` is not a known `Type::method` — module-qualified free names/types/traits/macros are not supported here",
+                            "ed: `{}` has no source location — it is built in, so there is no file to open",
                             name
                         )))
                     }
                 }
             }
+            _ => return Err(Error::TypeError("ed: (ed [name-or-path]) — expected at most 1 argument".into())),
         };
-        self.doc_option(heap, doc.flatten())
+        // Lowered to an ordinary call, exactly as `pprint` lowers to
+        // `pprint-rt`: the resolution above is everything `ed` does, so what
+        // reaches the evaluator is a builtin call with two constants in it.
+        //
+        // The result type is read back out of the registry rather than
+        // rebuilt here, so the form and the builtin cannot drift apart.
+        let ret = self
+            .reg
+            .fn_sig(&Path::root("ed-open"))
+            .map(|sig| sig.ret.clone())
+            .ok_or_else(|| Error::TypeError("ed: the `ed-open` builtin is not registered".into()))?;
+        let file = Checked::new(forms::str_lit_form(heap, &file)?, Type::Str);
+        let line = Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(line)])?, Type::I32);
+        let r = Ref::synthetic(Path::root("ed-open"));
+        let node = self.call_form(heap, &r, &[file, line])?;
+        Ok(Checked::new(node, ret))
     }
 
     /// `(documentation ...)`'s result baked in: `Option::some` of the
@@ -15461,6 +15530,41 @@ mod header_tests {
         assert!(parse_generic_name_header("pair<a").is_err());
         assert!(parse_generic_name_header("pair<a,>").is_err());
     }
+}
+
+/// A name that reads as *program structure* rather than as an expression —
+/// `(compile foo)`, `(documentation point::x)`, `(trace m::f)`, `(ed foo)`.
+///
+/// One spelling, so a definition cannot be named two incompatible ways: an
+/// unevaluated symbol, or a `::`-path rejoined with the separator the reader
+/// split it on. A string is not a second spelling of the same thing and is
+/// rejected with `msg`, which says what this particular form wanted.
+fn unevaluated_name(heap: &Heap, v: Value, msg: &str) -> Result<String, Error> {
+    match v {
+        Value::Symbol(id) => Ok(heap.symbol_name(id).to_string()),
+        Value::Path(pid) => Ok(heap
+            .path_segments(pid)
+            .iter()
+            .map(|s| heap.symbol_name(*s).to_string())
+            .collect::<Vec<_>>()
+            .join("::")),
+        _ => Err(Error::TypeError(msg.into())),
+    }
+}
+
+/// What a name resolved to, for the two forms that ask about a *definition*
+/// rather than about a value: `documentation` and `ed`.
+///
+/// The variants are the six columns `Registry::docs` and `Registry::def_locs`
+/// are both keyed by; see [`Checker::resolve_definition`], which is the
+/// ladder that produces one.
+enum DefRef {
+    Var(Path),
+    Fn(Path),
+    Type(Path),
+    Trait(Path),
+    Macro(Path),
+    Method(Path, String),
 }
 
 /// The lowercase segments of a module/use path (a symbol or a `Value::Path`).
