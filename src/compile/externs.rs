@@ -160,6 +160,7 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "get-macro-character" => "rt_get_macro_character",
         "set-dispatch-macro-character" => "rt_set_dispatch_macro_character",
         "get-dispatch-macro-character" => "rt_get_dispatch_macro_character",
+        "sleep" => "rt_sleep",
         "stream-listen" => "rt_stream_listen",
         "stream-position" => "rt_stream_position",
         "stream-write-string" => "rt_stream_write_string",
@@ -380,7 +381,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 231] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 232] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -395,7 +396,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 231] {
     use typelisp_rt::sys_builtin::{
         rt_command_line_args, rt_exit, rt_get_internal_real_time, rt_get_universal_time, rt_getenv,
         rt_home_directory, rt_lisp_implementation_version, rt_machine_type, rt_parse_float,
-        rt_parse_int, rt_software_type,
+        rt_parse_int, rt_sleep, rt_software_type,
     };
     use typelisp_rt::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
@@ -661,6 +662,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 231] {
         ("rt_stream_read_byte", rt_stream_read_byte as usize),
         ("rt_stream_write_byte", rt_stream_write_byte as usize),
         ("rt_stream_unread_char", rt_stream_unread_char as usize),
+        ("rt_sleep", rt_sleep as usize),
         ("rt_stream_listen", rt_stream_listen as usize),
         ("rt_stream_position", rt_stream_position as usize),
         ("rt_set_macro_character", rt_set_macro_character as usize),

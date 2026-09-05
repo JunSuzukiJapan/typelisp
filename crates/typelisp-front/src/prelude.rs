@@ -1022,6 +1022,187 @@ pub const SOURCE: &str = r##"
            ,@(sexpr-map (lambda ((tr Option<Sexpr>)) Option<Sexpr> (list (quote setf) (sexpr-car (sexpr-cdr tr)) (sexpr-car tr))) temps)))
        ,@result)))
 
+;; ---------------------------------------------------------------------------
+;; `destructuring-bind` (cl-parity-plan.md Phase 4a).
+;;
+;; CL's binding form for taking a list apart by shape. Every variable it binds
+;; has type `Option<Sexpr>` -- not a limitation of the implementation but of
+;; what there is to bind: an S-expression list is the only kind of list this
+;; language has, so there is no other type its elements could be given.
+;; Narrow with `match` where a scalar is wanted, the way a `defmacro` body
+;; does.
+;;
+;; The lambda list is `defmacro`'s, for the reason CL shares one between them:
+;; the two forms exist to take apart the same thing. Required parameters,
+;; then `&optional` (with defaults), then `&rest`/`&body`, then `&key` (with
+;; defaults). Nested lambda lists are not supported -- `defmacro` does not
+;; take them either, and the two should stay one rule.
+;;
+;; A shape mismatch is a `panic`, which is what CL's error is. The check has
+;; to be written because `sexpr-car`/`sexpr-cdr` are lenient: `(sexpr-car ())`
+;; is `()`, so a chain of them binds a short list to a row of empties and says
+;; nothing at all.
+;;
+;; The expansion is nested `let*`s, one per parameter, each reading the tail
+;; variable the one before it left. Not nested `match`es, which is the other
+;; obvious shape: a defaulted parameter would need the whole remainder
+;; duplicated into both arms, and the duplication compounds per `&optional`.
+
+(defun dbind-head ((l Option<Sexpr>) (ll Option<Sexpr>)) Option<Sexpr>
+  "The first element of `l`; an error naming the lambda list if there is none."
+  (match l
+    ((cons a _) a)
+    (_ (panic (format false "destructuring-bind: too few elements for ~a" ll)))))
+
+(defun dbind-end ((l Option<Sexpr>) (ll Option<Sexpr>)) ()
+  "Nothing may be left over -- a lambda list is exact unless it says `&rest`
+   or `&key`."
+  (match l
+    ((cons _ _) (panic (format false "destructuring-bind: too many elements for ~a" ll)))
+    (_ ())))
+
+;; A `&key` parameter is looked up by the *name* of its keyword rather than by
+;; the keyword itself, and the expansion carries the plain parameter name.
+;; Building `:a` out of the parameter `a` would need a symbol constructor, and
+;; the only one there is is the reader -- which would make this form's meaning
+;; depend on the readtable. So the `:` is put on at the point of comparison.
+
+(defun dbind-keyword-name ((name Option<Sexpr>)) string
+  "The keyword a `&key` parameter is passed under, as text: `a` -> `\":a\"`."
+  (format false ":~a" name))
+
+(defun dbind-key-lookup ((l Option<Sexpr>) (name Option<Sexpr>)) Option<Option<Sexpr>>
+  "The value the plist `l` gives the `&key` parameter `name`. The first one
+   wins, as CL's does. `none` tells absent from present-and-`()`, which is
+   what lets the default stay unevaluated."
+  (match l
+    ((cons k rest)
+      (match rest
+        ((cons v more)
+          (if (and (sexpr-symp k) (equal (sexpr-sym-name k) (dbind-keyword-name name)))
+              (option::some v)
+              (dbind-key-lookup more name)))
+        (_ (panic "destructuring-bind: the &key part has an odd number of elements"))))
+    (_ (option::none))))
+
+(defun dbind-name-memberp ((kw string) (params Option<Sexpr>)) bool
+  "Whether the keyword named `kw` is one of `params`' parameter names."
+  (match params
+    ((cons a rest) (if (equal kw (dbind-keyword-name a)) true (dbind-name-memberp kw rest)))
+    (_ false)))
+
+(defun dbind-keys-known ((l Option<Sexpr>) (allowed Option<Sexpr>) (ll Option<Sexpr>)) ()
+  "Every keyword in the plist `l` is one the lambda list named. CL's
+   `&allow-other-keys` has no counterpart, the same as in `defmacro`."
+  (match l
+    ((cons k rest)
+      (match rest
+        ((cons _ more)
+          (if (and (sexpr-symp k) (dbind-name-memberp (sexpr-sym-name k) allowed))
+              (dbind-keys-known more allowed ll)
+              (panic (format false "destructuring-bind: ~a is not a keyword of ~a" k ll))))
+        (_ (panic (format false "destructuring-bind: the &key part of ~a has an odd number of elements" ll)))))
+    (_ ())))
+
+;; --- building the expansion ----------------------------------------------
+
+(defun dbind-par-name ((p Option<Sexpr>)) Option<Sexpr>
+  "A parameter's name: `x`, or the `x` of `(x default)`."
+  (match p ((cons a _) a) (_ p)))
+
+(defun dbind-par-default ((p Option<Sexpr>)) Option<Sexpr>
+  "A parameter's default form, or `()` when it was written bare."
+  (match p ((cons _ d) (sexpr-car d)) (_ (quote ()))))
+
+(defun dbind-plain-name ((p Option<Sexpr>) (whole Option<Sexpr>)) Option<Sexpr>
+  "A parameter that may not carry a default: a required one, or the one after
+   `&rest`. A list here can only be CL's *nested* lambda list, which is not
+   supported -- and saying so is the whole point of this check, because
+   `dbind-par-name` would otherwise read `(b c)` as `b` defaulting to `c` and
+   bind the sublist to `b` without a word."
+  (match p
+    ((cons _ _) (panic (format false "destructuring-bind: ~a is a nested lambda list, which is not supported (in ~a)" p whole)))
+    (_ p)))
+
+(defun dbind-keyword-list ((params Option<Sexpr>)) Option<Sexpr>
+  "The `&key` section's parameter names, for the unknown-key check."
+  (sexpr-map (lambda ((q Option<Sexpr>)) Option<Sexpr> (dbind-par-name q)) params))
+
+(defun dbind-tail ((closed bool) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  "What runs once everything is bound: the body, preceded by the
+   nothing-left-over check when the lambda list was an exact one."
+  (if closed
+      `(progn (dbind-end ,tv (quote ,whole)) ,@body)
+      `(progn ,@body)))
+
+(defun dbind-keys ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  "The `&key` section: one binding per keyword, all reading the same tail."
+  (match ll
+    ((cons p rest)
+      (let ((g (gensym)))
+        `(let ((,(dbind-par-name p)
+                 (match (dbind-key-lookup ,tv (quote ,(dbind-par-name p)))
+                   ((some ,g) ,g)
+                   ((none) ,(dbind-par-default p)))))
+           ,(dbind-keys rest tv whole body))))
+    (_ (dbind-tail false tv whole body))))
+
+(defun dbind-restkey ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  "The `&rest`/`&body` and `&key` sections. Its own function so that the
+   required walk and the `&optional` walk can both hand off to it without
+   calling each other -- nothing in the prelude may be forward-declared, and
+   two walks that call each other would need it."
+  (match ll
+    ((cons p rest)
+      (cond
+        ((or (equal p (quote &rest)) (equal p (quote &body)))
+         `(let ((,(dbind-plain-name (dbind-head rest whole) whole) ,tv))
+            ,(dbind-restkey (sexpr-cdr rest) tv whole body)))
+        ((equal p (quote &key))
+         `(progn
+            (dbind-keys-known ,tv (quote ,(dbind-keyword-list rest)) (quote ,whole))
+            ,(dbind-keys rest tv whole body)))
+        (true (panic (format false "destructuring-bind: ~a comes after &rest in ~a" p whole)))))
+    (_ (dbind-tail false tv whole body))))
+
+(defun dbind-opts ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  "The `&optional` section: the element if there is one, else the default --
+   which is written into the arm that needs it, so it is not evaluated when
+   the element was there."
+  (match ll
+    ((cons p rest)
+      (cond
+        ((or (equal p (quote &rest)) (equal p (quote &body)) (equal p (quote &key)))
+         (dbind-restkey ll tv whole body))
+        (true
+          (let ((g (gensym)) (next (gensym)))
+            `(let* ((,(dbind-par-name p) (match ,tv ((cons ,g _) ,g) (_ ,(dbind-par-default p))))
+                    (,next (sexpr-cdr ,tv)))
+               ,(dbind-opts rest next whole body))))))
+    (_ (dbind-tail true tv whole body))))
+
+(defun dbind-parts ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  "The required section, and the hand-off to each marker's own builder."
+  (match ll
+    ((cons p rest)
+      (cond
+        ((equal p (quote &optional)) (dbind-opts rest tv whole body))
+        ((or (equal p (quote &rest)) (equal p (quote &body)) (equal p (quote &key)))
+         (dbind-restkey ll tv whole body))
+        (true
+          (let ((next (gensym)))
+            `(let* ((,(dbind-plain-name p whole) (dbind-head ,tv (quote ,whole)))
+                    (,next (sexpr-cdr ,tv)))
+               ,(dbind-parts rest next whole body))))))
+    (_ (dbind-tail true tv whole body))))
+
+(pub defmacro destructuring-bind (lambda-list form &rest body)
+  "Bind the variables of `lambda-list` to the parts of the list `form`
+   evaluates to, then run `body`. Every variable is an `Option<Sexpr>`."
+  (let ((tv (gensym)))
+    `(let ((,tv ,form))
+       ,(dbind-parts lambda-list tv lambda-list body))))
+
 ;; `Iter`: the trait `doiter` requires every iterable type to implement — a single
 ;; `next` method returning the next element, or `(none)` once exhausted.
 ;; `Self` mutates in place across calls (no immutable "next state" returned

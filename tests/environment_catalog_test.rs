@@ -22,6 +22,10 @@
 //!
 //! — which shows all three behaviours that matter: an unrecognized answer
 //! re-asks, the match is case-insensitive, and `no` is `false`.
+//!
+//! `sleep` (Phase 4a) is here rather than with the control forms: it is a
+//! system call, and the only thing to check about it is that the process
+//! really waited.
 
 extern crate typelisp;
 use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
@@ -311,4 +315,38 @@ fn the_queries_take_a_pathname_too() {
     assert_eq!(show(&format!("(directory-p (to-pathname \"{}\"))", dir_s)), "true");
     assert_eq!(show(&format!("(is-ok (truename (to-pathname \"{}\")))", dir_s)), "true");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ----------------------------------------------------------------------
+// `sleep` (cl-parity-plan.md Phase 4a)
+// ----------------------------------------------------------------------
+
+/// The wait actually happens.
+///
+/// A wall-clock assertion, which is the only kind there is for this: the
+/// bound is one-sided and generous (50ms asked for, 30ms demanded) so a busy
+/// machine cannot fail it, and a `sleep` that returned immediately would miss
+/// it by the whole margin.
+#[test]
+fn sleep_waits() {
+    let before = std::time::Instant::now();
+    assert_eq!(show("(progn (sleep 0.05) 1)"), "1");
+    assert!(before.elapsed() >= std::time::Duration::from_millis(30), "it did not wait: {:?}", before.elapsed());
+}
+
+/// Seconds, and therefore `f64`. An integer literal does not become a float
+/// here (the rule Rust has), so CL's `(sleep 1)` has to be written `(sleep
+/// 1.0)` — worth pinning, because the alternative reading is "the argument is
+/// a count of something else".
+#[test]
+fn sleep_takes_seconds_as_a_float() {
+    assert_eq!(show("(progn (sleep 0.0) 1)"), "1");
+    let mut h = Heap::with_capacity(1 << 18);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, "(sleep 1)").expect("read failed");
+    let err = chk.check_form(&mut h, &interp, vs[0]).expect_err("an integer literal is not an f64");
+    assert!(err.to_string().contains("F64"), "{}", err);
 }

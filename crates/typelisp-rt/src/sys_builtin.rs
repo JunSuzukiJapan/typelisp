@@ -384,6 +384,24 @@ pub unsafe extern "C" fn rt_command_line_args(_args: *const i64, _argc: u32) -> 
     encode(command_line_args(active_heap()))
 }
 
+/// `(sleep secs)` — block this thread for `secs` seconds.
+///
+/// Seconds, as CL's `sleep` takes them, and `f64` because that is the type
+/// a fractional wait has to be written in: an integer literal does not
+/// become a float here (`(sleep 1)` is a type error, `(sleep 1.0)` is not),
+/// the same rule Rust has.
+///
+/// A negative or NaN wait is an error in CL. Here it is nothing at all —
+/// there is no duration to construct from it, and `Duration::from_secs_f64`
+/// panics on one. Zero is a real answer (yield-ish) and goes through.
+pub fn sleep(secs: f64) -> Result<(), String> {
+    if !(secs >= 0.0) {
+        return Err(format!("sleep: {} is not a non-negative number of seconds", secs));
+    }
+    std::thread::sleep(std::time::Duration::from_secs_f64(secs));
+    Ok(())
+}
+
 /// `(getenv name)` for compiled code.
 ///
 /// # Safety
@@ -393,6 +411,22 @@ pub unsafe extern "C" fn rt_command_line_args(_args: *const i64, _argc: u32) -> 
 pub unsafe extern "C" fn rt_getenv(args: *const i64, argc: u32) -> i64 {
     let name = str_arg(args, argc, "rt_getenv");
     encode(getenv(active_heap(), &name))
+}
+
+/// `(sleep secs)` for compiled code: `args[0]` is an `f64`'s raw bit pattern.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_sleep(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        crate::fatal("rt_sleep: expected 1 argument");
+    }
+    match sleep(f64::from_bits(*args as u64)) {
+        Ok(()) => 0,
+        Err(e) => crate::fatal(&e),
+    }
 }
 
 /// `(home-directory)` for compiled code.

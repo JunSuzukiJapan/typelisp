@@ -412,6 +412,10 @@ CPU 時間（`get-internal-run-time`）は無い。`libc` の `getrusage` が要
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | Cargo のパッケージ版数 |
 | `machine-type` | `(machine-type)` | `()→string` | CPU アーキテクチャ（`x86_64` / `aarch64` …） |
 | `software-type` | `(software-type)` | `()→string` | OS（`macos` / `linux` …） |
+| `sleep` | `(sleep secs)` | `f64→()` | `secs` 秒だけこのスレッドを止める。負や NaN は panic |
+
+`sleep` は CL と同じ**秒**。整数リテラルは浮動小数点数に馴染まない（Rust と同じ規則）ので、
+CL の `(sleep 1)` はここでは `(sleep 1.0)` と書く——`(sleep 1)` は型エラーになる。
 
 `command-line-args` の要素0は、`typl script.typl a b` ならスクリプトのパス、AOT 実行ファイル
 `./prog a b` なら実行ファイル自身。**どちらの走らせ方でも同じ添字で同じ引数が読める**ようにこう

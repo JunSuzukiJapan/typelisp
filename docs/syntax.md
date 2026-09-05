@@ -607,6 +607,34 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (the Type expr)                     ; 型注釈（実行時の効果なし）
 ```
 
+### destructuring-bind — リストを形で分解する
+
+```lisp
+(destructuring-bind ラムダリスト form body...)
+```
+
+`form` が作るリストを**形**で分解して束縛する。ラムダリストは `defmacro` のもの
+（必須 → `&optional` → `&rest`/`&body` → `&key`、それぞれデフォルト式つき）で、CL が両者で
+1 つを共有しているのと同じ理由——同じものを分解する 2 つの形だから。
+
+```lisp
+(destructuring-bind (op a b) (quote (+ 1 2)) (format false "~a ~a ~a" op a b))  ; "+ 1 2"
+(destructuring-bind (head &rest tail) xs (format false "~a | ~a" head tail))
+(destructuring-bind (a &optional (b 9)) (quote (1)) b)                          ; 9
+(destructuring-bind (&key (x 0) y) (quote (:y 7)) (format false "~a ~a" x y))   ; "0 7"
+```
+
+- **束縛される変数はすべて `Option<Sexpr>`**。実装の制約ではなく、束縛する対象の性質:
+  S 式リストがこの言語で唯一のリストなので、要素に与えられる他の型が無い。スカラが要る
+  ところで `match` に落とすのは `defmacro` の本体と同じ。
+- **形が合わなければ panic**（CL のエラーに当たる）。要素が足りない・多い、`&key` の並びが
+  奇数個、知らないキーワード、のいずれも。`sexpr-car` は `()` に対して `()` を返す寛容な
+  関数なので、チェックを書かなければ短いリストが黙って空の並びに束縛される。
+- **入れ子のラムダリストは非対応**。`defmacro` も取らないので、規則は 1 つに保つ。
+  `(a (b c))` は黙って `b` にサブリストを束縛したりせず、その旨のエラーになる。
+- `&optional` / `&key` のデフォルト式は**使うときだけ評価**される（CL と同じ）。
+- CL の `&allow-other-keys` に当たるものは無い（`defmacro` にも無い）。
+
 ### match — パターンマッチ
 
 ```lisp
@@ -835,6 +863,21 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 | `:return e` | 即座にその値で脱出（`:finally` は走らない。CL と同じ） |
 | `:initially form...` / `:finally form...` | ループの前 / 正常終了時 |
 
+**`:named name`**（他のどの節よりも先に、1 つだけ）はループ全体を `(block name …)` で囲む。
+`(return-from name e)` が入れ子のループの中からでも一気に脱出でき、`:return` と同じく
+`:finally` は走らない。名前を付けなければ block も張らない——CL の無名 `loop` は `block nil`
+を張るが、ここに `nil` は無く、`break`/`return`（§5）が既に「直近のループを抜ける」を持って
+いる。
+
+```lisp
+(loop :named outer :for i :from 1 :to 3
+  :do (loop :for j :from 1 :to 3 :do (if (= (* i j) 4) (return-from outer (* 100 i)) ()))
+  :finally (return 0))                                  ; 200
+```
+
+`:finally (return 0)` を省くと**型エラー**になる。`block` の規則がそのまま効くだけで
+（§5.0）、脱出の型 `i32` と、尽きたときにループが残す `()` が合わない。
+
 **ループの値**は、集約節があればその蓄積（複数あれば最初のもの）、`:always`/`:never` なら
 `true`、`:thereis` なら `none`、どれも無ければ `()`。`:finally` の最後が `(return e)` なら
 それが値になる——CL の `finally (return …)` の慣用で、集約しないループが自分の答えを
@@ -846,8 +889,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 - `:maximize`/`:minimize`/`:thereis` は `Option<T>` を返す（nil が無いため）。
 - **`:return` だけ書いて集約も `:finally` も無いのはエラー**。CL は尽きたとき nil を返すが、
   ここにはそれが無いので「尽きたときの値」をループが言う必要がある。
-- `:named`（`block`/`return-from` は入ったので、残るのは `loop` 側の対応だけ）、`:and` による並行節の連結、
-  `:being`/ハッシュ表の専用反復、`:it`、`:nconc` は入っていない。
+- `:and` による並行節の連結、`:being`/ハッシュ表の専用反復、`:it`、`:nconc` は入っていない。
 - `:collect` の要素型はチェッカーが集約式を先に検査して決め、`(the Vector<T> …)` として
   書き込む。`Vector::new` の型引数は期待型から前向きに来るので、後ろの `push` からは
   決まらない（計画のこの前提は誤りだった）。関数型のように**書き表せない型**を集めようと

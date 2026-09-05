@@ -120,6 +120,14 @@ pub(super) enum VarKind {
 /// Everything [`build`] needs, with nothing resolved.
 #[derive(Debug)]
 pub(super) struct Plan {
+    /// `:named foo` — the name of the `block` this loop is wrapped in, so
+    /// `(return-from foo v)` leaves it. `None` for a loop with no name, which
+    /// is then wrapped in nothing at all.
+    ///
+    /// CL's unnamed extended `loop` establishes `block nil`; there is no
+    /// `nil` here and `break`/`return` already leave the nearest loop, so an
+    /// unnamed loop needs no block and gets none.
+    pub named: Option<String>,
     pub vars: Vec<Var>,
     /// `:repeat n` — an iteration count, independent of any variable.
     pub repeat: Option<Value>,
@@ -267,6 +275,7 @@ impl<'a> Cursor<'a> {
 pub(super) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result<Plan, Error> {
     let mut c = Cursor { args, locs, i: 0 };
     let mut plan = Plan {
+        named: None,
         vars: Vec::new(),
         repeat: None,
         initially: Vec::new(),
@@ -275,6 +284,20 @@ pub(super) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result
         accs: Vec::new(),
         verdict: None,
     };
+
+    // `:named` first, and only first — CL requires it to precede every other
+    // clause, and a name introduced halfway down would not cover what came
+    // before it either.
+    if let Some(word) = c.peek_keyword(heap) {
+        if word.is(wk::KW_NAMED) {
+            c.i += 1;
+            let (name_v, _) = c.next_value(heap, ":named")?;
+            let Some(name) = var_name(heap, name_v) else {
+                return Err(err(":named needs a block name".to_string()));
+            };
+            plan.named = Some(name);
+        }
+    }
 
     // CL's own order: every variable clause first, then the main clauses.
     // Enforced rather than tolerated, because a `:for` written after a `:do`
@@ -748,6 +771,20 @@ pub(super) fn build(heap: &mut Heap, plan: &Plan, resolved: &Resolved) -> Result
         b.progn(&items)?
     };
     let out = b.let_star(&outer, out)?;
+    // `:named` wraps everything, the bindings included: CL's block encloses
+    // the whole construct, and a `return-from` out of a `:for` clause's own
+    // initialization has to land outside it.
+    //
+    // Outside `:finally` too, so a named escape skips the epilogue — which is
+    // what CL says a `return` from a loop does.
+    let out = match &plan.named {
+        None => out,
+        Some(name) => {
+            let head = b.sym("block");
+            let label = b.sym(name);
+            b.list(&[head, label, out])?
+        }
+    };
     // The scope drops here, unrooting `out` — the caller re-roots before it
     // allocates again (`forms::rooted`).
     Ok(out)

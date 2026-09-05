@@ -138,6 +138,10 @@ fn is_excluded(name: &str) -> bool {
     // user's own special variable gets the same treatment.
     let earmuffed = name.len() > 2 && name.starts_with('*') && name.ends_with('*');
 
+    // `destructuring-bind`'s expansion helpers. Half run inside the macro to
+    // build the expansion and half inside the expansion to check the shape;
+    // a user writes `destructuring-bind` and never one of these.
+    let dbind_helper = name.starts_with("dbind-");
     // The native stream layer (`check::registry::register_stream_builtins`).
     // These take an opaque `i32` handle and exist only for the prelude's
     // trait implementations to call; a user writes `read-char`/`write-string`
@@ -220,6 +224,7 @@ fn is_excluded(name: &str) -> bool {
         || datum_scanner
         || case_expander
         || hashtable_bucket
+        || dbind_helper
         || PRELUDE_PRIVATE.contains(&name)
         || name.ends_with("-rt")
         || ISLAND_PREFIXES.iter().any(|p| name.starts_with(p))

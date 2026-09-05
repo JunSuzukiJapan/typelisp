@@ -1197,6 +1197,11 @@ fn register_system_builtins(root: &mut Namespace) {
     // `$HOME`, or `none` — the primitive under `user-homedir-pathname`, which
     // CL explicitly allows to answer `NIL`.
     native("home-directory", vec![], option_of(Type::Str));
+    // CL's `sleep`, in CL's unit. `f64` and not an integer type because a
+    // fractional wait has to be writable; an integer literal does not become
+    // a float here, so `(sleep 1)` is a type error and `(sleep 1.0)` is not
+    // (the rule Rust has, and the reason the docs say so out loud).
+    native("sleep", vec![Type::F64], Type::Unit);
     native("lisp-implementation-version", vec![], Type::Str);
     native("machine-type", vec![], Type::Str);
     native("software-type", vec![], Type::Str);

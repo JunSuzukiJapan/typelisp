@@ -350,6 +350,12 @@ well_known_symbols! {
      same `(defvar ...)` node with a trailing `true`, so the core vocabulary is
      unchanged (see `Checker::defvar_form`)."
     DEFPARAMETER => "defparameter"
+
+    "Appended for Stage 4a (2026-09-05): the extended `loop`'s `:named`, held
+     back until `block`/`return-from` existed to give it a meaning. A clause
+     word like its neighbours above, listed here rather than beside them
+     because this table is positional — see the module comment."
+    KW_NAMED => ":named"
 }
 
 

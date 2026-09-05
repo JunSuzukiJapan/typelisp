@@ -1747,6 +1747,10 @@ impl Interp {
                 other => Err(EvalError::Panic(format!("getenv: argument is not a string, got {:?}", other))),
             }),
             "home-directory" => Some(Ok(typelisp_rt::sys_builtin::home_directory(heap))),
+            "sleep" => Some(match rt_f64(heap, &args[0]) {
+                Ok(secs) => typelisp_rt::sys_builtin::sleep(secs).map(|()| Value::Empty).map_err(EvalError::Panic),
+                Err(e) => Err(e),
+            }),
             "lisp-implementation-version" => Some(Ok(typelisp_rt::sys_builtin::lisp_implementation_version(heap))),
             "machine-type" => Some(Ok(typelisp_rt::sys_builtin::machine_type(heap))),
             "software-type" => Some(Ok(typelisp_rt::sys_builtin::software_type(heap))),

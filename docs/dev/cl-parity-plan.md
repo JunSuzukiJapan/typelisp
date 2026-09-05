@@ -595,16 +595,31 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
   自分の cleanup ブロックへ束縛し直す形にした。根の切り詰めを**脱出地点ではなく block の
   出口**へ移したのが鍵で、これで連鎖の途中は「自分が最後かどうか」を知らなくてよくなる。
 
-**残っているもの（それぞれ理由つき）**:
+**残りも完了（2026-09-05）。Phase 4 全完了**:
 
-- **`prog` / `prog*`** — CL では `block nil` ＋ `tagbody` の糖衣。`block` は入ったが
-  `tagbody` は goto なので対象外。残るのは「`tagbody` 抜きの `prog`」の是非の判断。
-- **`destructuring-bind`** — `defmacro` のラムダリストは分配束縛できるが、あれは全て
-  無型の `Sexpr`。式としての `destructuring-bind` は束縛される各変数に静的型を与える
-  必要があり、`Sexpr` の異種の入れ子から型を取り出す手段が無い（`match` の downcast
-  パターンが相当する既存機構）。**設計判断が要る項目**で、片手間には入らない。
+- **`loop` の `:named`** — `Plan` に `named` を足し、`build` の最外周を `(block name …)` で
+  包むだけ。`block` が入った時点で機械的になっていた。`:finally` の外側なので、名前つきの
+  脱出は CL どおりエピローグを飛ばす。テストは `tests/loop_dsl_test.rs`（+8 本、計 28 本）。
+  無名のループには block を張らない——CL は `block nil` を張るが、ここに `nil` は無く、
+  `break`/`return` が既に「直近のループを抜ける」を持っている。
+- **`destructuring-bind`** — **プランの前提が誤っていた**。「束縛される各変数に静的型を
+  与える必要があり、`Sexpr` の異種の入れ子から型を取り出す手段が無い」——取り出すべき型が
+  最初から無い。S 式リストがこの言語で唯一のリストなので、束縛される変数は全部
+  `Option<Sexpr>`、`defmacro` のラムダリストとまったく同じ。判断は「型をどうするか」では
+  なく「どの層に置くか」で、**prelude のマクロ**にした（checker には 1 行も足していない）。
+  展開は入れ子の `let*`——入れ子の `match` は、デフォルトつき引数のたびに残り全体を両腕に
+  複製することになる。形が合わなければ panic、入れ子のラムダリストは**黙って誤読せず
+  拒否**する（`(b c)` を「b、既定は c」と読んでサブリストを `b` に束縛してしまうため）。
+  テストは `tests/control_forms_test.rs`（+13 本）。
+- **`sleep`** — `f64` の秒（CL と同じ単位）。整数リテラルは浮動小数点数に馴染まない
+  （Rust と同じ規則）ので `(sleep 1)` は型エラー、`(sleep 1.0)` と書く。
+  テストは `tests/environment_catalog_test.rs`（+2 本）。
+- **`prog` / `prog*`** — **入れない**。CL では `block nil` ＋ `tagbody` の糖衣で、
+  `tagbody` は goto なので対象外。残るのは `(block ??? (let vars body))` だけ——`let` も
+  `block` も既に在り、そちらのほうが読める。ブロック名は CL では `nil` だが、この言語に
+  `nil` は無く、`prog` のためだけに名前空間へ 1 つ持ち込む理由が無い。加えて `(return x)` は
+  ここでは「直近のループを抜ける」なので、CL のコードを貼っても動かない。
 - **`remf`** — プロパティリストごと対象外（Phase 3c の判断）。
-- **`sleep`** — Rust 組み込みが要る（§2-4 の触点フルセット）。
 
 
 - ~~**`block` / `return-from`**（本 Phase の主役）~~ — 2026-09-04 完了（上記）。
@@ -612,7 +627,7 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
   静的な脱出のまま、`catch`/`throw` には落としていない。
 - `setq` / `psetq` / `psetf`（place 機構自体は 2026-07-30 に入っているが、この 3 つは未実装）
 - `pushnew` / `remf`
-- `prog` / `prog*` / `prog1` / `prog2`、`do*`
+- `prog1` / `prog2`、`do*`（`prog`/`prog*` は非採用——上記）
 - `destructuring-bind`（`defmacro` のラムダリストでは分配束縛できるが、式としては無い）
 - `ecase` / `ccase`（網羅性を要求する `case`。checker が枝を検査する）
 - `sleep`
