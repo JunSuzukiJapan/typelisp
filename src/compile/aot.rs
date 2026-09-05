@@ -369,11 +369,12 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         })
         .collect::<Result<_, String>>()?;
 
-    // Only when the program actually calls `eval`: naming the shim is what
-    // makes the linker pull the checker and the interpreter in, the same rule
-    // the printer's registration block follows. Asked under its own short lock
-    // so the environment below — which runs the checker and the interpreter,
-    // and touches no LLVM at all — is built without holding it.
+    // Only when the program actually needs an interpreter ([`EVAL_SHIMS`]):
+    // naming one of those shims is what makes the linker pull the checker and
+    // the interpreter in, the same rule the printer's registration block
+    // follows. Asked under its own short lock so the environment below —
+    // which runs the checker and the interpreter, and touches no LLVM at all
+    // — is built without holding it.
     let calls_eval = {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let m = module.borrow();
@@ -706,7 +707,16 @@ const EVAL_HEAP_CAPACITY: usize = 1 << 18;
 
 /// The name of the `eval` shim (`typelisp_front::shim`), which is what "this
 /// program evaluates at runtime" means at the IR level.
-const EVAL_SHIMS: [&str; 1] = ["rt_eval"];
+/// The shims whose presence means the executable needs a whole interpreter in
+/// it, not just the runtime.
+///
+/// `rt_eval` is the obvious one. The two registration shims are here because
+/// a program that installs a reader macro means to *call* it while reading,
+/// and calling one goes through the prelude's `call-reader-macro`
+/// (`Interp::call_reader_macro_fn`) — so `read` in such a program would
+/// otherwise report that there is no evaluator, having been given the
+/// function and asked to run it. The price is the same one `eval` pays.
+const EVAL_SHIMS: [&str; 3] = ["rt_eval", "rt_set_macro_character", "rt_set_dispatch_macro_character"];
 
 /// Emits one call to the `rt_*` shim `name` with `words` as its argument
 /// array — the startup-registration calling pattern, spelled once.

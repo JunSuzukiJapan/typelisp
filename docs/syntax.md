@@ -1116,3 +1116,59 @@ AOT 実行ファイルの `print-object` は `(defmethod print-object ...)` の�
 読まない（コンパイラ島だけを読む）ため——これは以前からの制限で、印字対応で変わっていない。
 
 内部実装（LLVM バックエンド）の詳細は開発用ドキュメント（[docs/dev/](dev/)）を参照。
+
+## 11. リーダマクロ（readtable）
+
+リーダが**ある文字に出会ったとき何をするか**を、プログラムから差し替えられる（CLHS 23.1）。
+
+```lisp
+(set-macro-character c f)             ; 文字 c を f が読む
+(get-macro-character c)               ; Option<f>
+(set-dispatch-macro-character d s f)  ; 2文字並び d s を f が読む
+(get-dispatch-macro-character d s)    ; Option<f>
+```
+
+`f` の型は `(fn (string-input-stream char) Option<Sexpr>)`。第 1 引数は**読み残しのテキストを
+張ったストリーム**、第 2 引数は**発火した文字**（ディスパッチなら 2 文字目）。返り値がそこに
+読まれたデータになる。ストリームが `:dyn PeekInput` でなく具体型なのは、リーダが渡すものが
+常にこれ 1 種類だから——`read-sexpr` / `read-char` / `peek-char` / `unread-char` /
+`read-delimited-list` はどれも `(where (PeekInput S))` なので、具体型のまま全部使える。
+
+```lisp
+(set-macro-character #\!
+  (lambda ((s string-input-stream) (c char)) Option<Sexpr>
+    (match (read-sexpr s)
+      ((ok o) (match o
+                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((eof) (quote ()))))
+      ((err e) (quote ())))))
+
+!(equal 1 2)   ; => (not (equal 1 2)) と読まれる、つまり true
+```
+
+リーダは**マクロ文字を組み込み構文より先に見る**ので、`(` や `'` も奪える。`#` のサブ文字は
+組み込みの `#b`/`#x`/`#.` より登録が優先される。`#` 以外の文字も
+`set-dispatch-macro-character` に渡せばその場でディスパッチ文字になる——CL の
+`make-dispatch-macro-character` に当たるものは**無い**。登録がその役をしてしまうので、
+別の段として残しても何もすることが無い。
+
+**いつ効くか**は `#.`（§1）と同じで、読み込み経路によって変わる:
+
+- REPL と `(load ...)` は 1 フォームずつ実行するので、**手前のフォームで定義した関数**を
+  そのまま登録できる。
+- モジュールファイルは単位として検査され実行は後——なので `set-macro-character` /
+  `set-dispatch-macro-character` の**呼び出しだけが即時実行される**
+  （`project::needs_immediate_exec`、CL の `(eval-when (:compile-toplevel) ...)` の役）。
+  即時に走る以上、**渡す関数はその時点で在らねばならない**。同じファイルの `defun` は
+  まだ走っていないので、`lambda` で書くか、prelude / 既に走ったものを使う。
+  トップレベルの呼び出しだけが対象で、`progn` や `let` の中は見ない。
+- 純粋な読み（評価器を渡されていない `Reader`）では、マクロ文字はその旨のエラーになる。
+
+組み込みの `read` / `read-from-string` も readtable を見る（CL と同じ）。コンパイル済みの
+実行ファイルでも動くが、そのぶん**チェッカーとインタプリタが実行ファイルに入る**——
+`eval` と同じ値段で、理由も同じ（登録した関数を呼ぶのは評価器の仕事）。
+
+**無いもの**: `*readtable*` と `copy-readtable`、および `readtable-case`。前の 2 つは
+readtable が**値でない**ため——値なら「リーダに手渡せるもの」でなければならないが、
+リーダを呼ぶのは Rust 側のドライバで、渡す先が無い。`readtable-case` は、この言語のリーダが
+常に小文字化する（CL の `:downcase`）と§1 で決めているため。

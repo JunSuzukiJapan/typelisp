@@ -1383,7 +1383,6 @@ pub const SOURCE: &str = r##"
                 (if (= (mod fq 2.0) 0.0) fd
                     (let ((q (+ fq 1.0))) (cons q (- self (* q b)))))))))))
 
-
 ;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
 ;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
 ;; iter<K,V>`'s is `cons-cell<K,V>`, both parameters fixed once per
@@ -4502,6 +4501,28 @@ user-visible capacity."
    in the returned index, and so in what the next read sees."
   (read-datum-at s start true))
 
+
+;; ---------------------------------------------------------------------------
+;; Reader macros.
+;;
+;; `set-macro-character` stores a function; the *reader* -- Rust, one crate
+;; below this one -- is what calls it. It cannot make that call itself: a
+;; reader macro takes a stream, and turning the text it has not read yet into
+;; one is work with a type on it. So the reader hands the pieces here.
+;;
+;; The answer has to say how far the macro got as well as what it produced,
+;; because the macro read from a stream of its own and the reader's cursor has
+;; to be moved to match. That is what the `cons-cell` carries -- the same
+;; shape, and for the same reason, as `read-from-string`'s.
+
+(defun call-reader-macro ((f (fn (string-input-stream char) Option<Sexpr>)) (c char) (rest string))
+    cons-cell<Option<Sexpr>, i32>
+  "Run the reader macro `f` on the character `c` that triggered it and the
+   text after it, answering what it read and how much of `rest` it consumed."
+  (let ((in (make-string-input-stream rest)))
+    (let ((v (f in c)))
+      (cons v (unwrap-io (stream-position in::h))))))
+
 (defun sexpr-list-from ((v Vector<Option<Sexpr>>)) Option<Sexpr>
   "The elements of `v` as a list, front to back."
   (let ((out (quote ())) (i (- (len v) 1)))
@@ -4515,8 +4536,10 @@ user-visible capacity."
 ;; a missing `)` is a mistake, and CL signals it too.
 ;;
 ;; CL's third argument (`recursive-p`) has nothing to correspond to here: it
-;; exists to tell CL's reader that the call is inside a reader macro, and
-;; there are no reader macros (cl-parity-plan.md Phase 8c).
+;; exists to tell CL's reader whether the call is nested inside another read,
+;; which decides how `#n=` labels and the like are scoped. This reader has no
+;; such cross-call state, so a reader macro calling this is not a different
+;; kind of call from a program doing it.
 (pub defun read-delimited-list<S> ((terminator char) (s S)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
   "Every datum on `s` up to `terminator`, as a list. The terminator is
    consumed; reaching end of input first is an `Err`."

@@ -50,4 +50,18 @@ impl reader::ReadEval for DriverReadEval<'_> {
             Err(e) => Err(e.to_string()),
         }
     }
+
+    /// Straight to the interpreter: calling a reader macro needs no checker
+    /// at all. The function was type-checked where it was written, and the
+    /// glue it goes through (`Interp::call_reader_macro_fn`) was checked with
+    /// the prelude.
+    fn call_reader_macro(
+        &self,
+        heap: &mut crate::Heap,
+        f: crate::Value,
+        ch: char,
+        rest: &str,
+    ) -> Result<(crate::Value, usize), String> {
+        self.interp.call_reader_macro_fn(heap, f, ch, rest)
+    }
 }

@@ -373,7 +373,13 @@ impl Loader {
                     }
                 }
                 Ok(tl) if needs_immediate_exec(heap, tl) => {
-                    let _ = interp.exec(heap, tl);
+                    // Reported, not swallowed: a registration that has to
+                    // happen *now* and silently did not is a file that reads
+                    // differently from here on, with nothing said about why.
+                    if let Err(e) = interp.exec(heap, tl) {
+                        check_err = Some(Error::TypeError(e.to_string()));
+                        break;
+                    }
                 }
                 // Rooted as it lands. `body` is a `Vec<Value>`, which the
                 // collector cannot see, and checking the *next* form of this
@@ -733,6 +739,15 @@ fn value_path_segs(heap: &Heap, v: Value) -> Option<Vec<String>> {
 pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
     match core::op_sym(heap, tl).map(|s| s.well_known()) {
         Some(wk::DEFMACRO) => true,
+        // A readtable registration, which has to take effect before the
+        // *next form is read* — earlier still than a `defmacro`, which only
+        // has to beat the next form's check.
+        //
+        // What it registers has to exist *now*, which a `defun` in the same
+        // file does not: that one is collected into the module's bundle and
+        // runs when the bundle does. So the function is written as a
+        // `lambda`, or comes from the prelude. See `docs/syntax.md`.
+        Some(wk::EXPR) => core::field(heap, tl, 0).map(|e| is_readtable_registration(heap, e)).unwrap_or(false),
         Some(wk::MODULE) => {
             let bundle = match core::field(heap, tl, 0) {
                 Some(Value::Path(id)) => crate::types::path_from_id(heap, id) == Path::root(MONO_BUNDLE_MODULE),
@@ -746,6 +761,21 @@ pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
         }
         _ => false,
     }
+}
+
+/// Whether `form` is a call to one of the two builtins that install a reader
+/// macro.
+///
+/// By callee, because it is an ordinary call and not a definition: field 2 of
+/// a `call` node is the resolved path (`core_eval::call_core`). Only a call
+/// *directly* at top level counts — one buried in a `progn` or a `let` would
+/// have to be evaluated to be found, which is the thing being decided.
+fn is_readtable_registration(heap: &Heap, form: Value) -> bool {
+    core::op_sym(heap, form).map(|s| s.well_known()) == Some(wk::CALL)
+        && matches!(
+            core::path_field(heap, form, 2).as_ref().map(|p| p.to_string()).as_deref(),
+            Some("set-macro-character") | Some("set-dispatch-macro-character")
+        )
 }
 
 /// The path string a `(load "PATH")` form names, or `None` for any other form.

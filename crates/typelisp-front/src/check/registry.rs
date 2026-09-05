@@ -694,6 +694,7 @@ impl Registry {
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
         register_stream_builtins(&mut root);
         register_system_builtins(&mut root);
+        register_readtable_builtins(&mut root);
         root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(option_of(sexpr()), error_ty(READ_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `read-datum-at`: one datum from a string starting at a character
         // index, paired with where reading stopped — CL's `read-from-string`
@@ -1119,6 +1120,11 @@ fn register_stream_builtins(root: &mut Namespace) {
     native("stream-read-byte", vec![h.clone()], result_of(option_of(Type::I32), file_err.clone()));
     native("stream-write-byte", vec![h.clone(), Type::I32], unit_or_err.clone());
     native("stream-listen", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
+    // How many characters have been read out of a *string* input stream.
+    // Narrow on purpose: this is what tells a reader macro's caller how much
+    // of the text the macro consumed, and no other backend has a position in
+    // the same unit. Not CL's `file-position` — that one also seeks.
+    native("stream-position", vec![h.clone()], result_of(Type::I32, file_err.clone()));
 
     // Output. Only whole strings cross this boundary — a per-character
     // built-in call would dominate the cost of writing anything.
@@ -1194,6 +1200,69 @@ fn register_system_builtins(root: &mut Namespace) {
     native("lisp-implementation-version", vec![], Type::Str);
     native("machine-type", vec![], Type::Str);
     native("software-type", vec![], Type::Str);
+}
+
+/// The type of a reader macro: what `set-macro-character` stores and what the
+/// reader calls when the character turns up.
+///
+/// The stream is a `string-input-stream` and not a `:dyn PeekInput`, because
+/// that is honestly what it is. The reader hands its unread text to the
+/// evaluator and gets back a character count (`Interp::call_reader_macro_fn`),
+/// so the stream a macro sees is *always* one made over that text — a trait
+/// object would be a generality with exactly one inhabitant. Nothing is lost
+/// with it: every reader operation a macro wants (`read-sexpr`, `read-char`,
+/// `peek-char`, `unread-char`) is generic over `(where (PeekInput S))` and
+/// takes the concrete type directly.
+///
+/// The character comes second, as in CL, and is the *sub*-character for a
+/// two-character sequence — `#\{` for `(set-dispatch-macro-character #\# #\{ ...)`
+/// — so one function can serve several of them by looking at it.
+///
+/// `Option<Sexpr>` rather than `Sexpr` because `()` is `none`: a macro that
+/// reads an empty list has to be able to say so. A macro that wants to
+/// produce *nothing at all* (CL's zero values, what a comment reader macro
+/// returns) has no way to say that and is not supported; there is one datum
+/// per call.
+pub fn reader_macro_fn_type() -> Type {
+    Type::Fn(
+        vec![Type::Named(Path::root("string-input-stream"), vec![]), Type::Char],
+        None,
+        Box::new(option_of(sexpr())),
+    )
+}
+
+/// The readtable (CLHS 23.1): the character-to-function table the reader
+/// consults before it does anything else with a character.
+///
+/// Four functions, not CL's eight. There is no `*readtable*` and no
+/// `copy-readtable`, because there is no readtable *object* — a first-class
+/// one would have to be a value the reader can be handed, and the reader
+/// here is called from Rust drivers that have nowhere to take it from.
+/// `make-dispatch-macro-character` is absent for a different reason:
+/// `set-dispatch-macro-character` makes the character dispatching by itself,
+/// which leaves the separate step nothing to do.
+fn register_readtable_builtins(root: &mut Namespace) {
+    let mut native = |name: &str, params: Vec<Type>, ret: Type| {
+        root.fns.insert(
+            name.to_string(),
+            FnSig {
+                type_params: vec![],
+                params,
+                ret,
+                public: true,
+                rest: None,
+                builtin: true,
+                bounds: BTreeMap::new(),
+                optionals: Vec::new(),
+                keys: Vec::new(),
+            },
+        );
+    };
+    let f = reader_macro_fn_type();
+    native("set-macro-character", vec![Type::Char, f.clone()], Type::Unit);
+    native("get-macro-character", vec![Type::Char], option_of(f.clone()));
+    native("set-dispatch-macro-character", vec![Type::Char, Type::Char, f.clone()], Type::Unit);
+    native("get-dispatch-macro-character", vec![Type::Char, Type::Char], option_of(f));
 }
 
 /// Whether `p` names one of [`BUILTIN_ERROR_TYPES`].

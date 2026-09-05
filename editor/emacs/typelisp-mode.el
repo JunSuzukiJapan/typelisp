@@ -134,6 +134,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "make-echo-stream" "make-peek-stream" "make-string-input-stream" "make-string-output-stream"
     "make-two-way-stream"
     "open-binary" "open-binary-input" "open-binary-output"
+    ;; the readtable (syntax.md §11)
+    "get-dispatch-macro-character" "get-macro-character"
+    "set-dispatch-macro-character" "set-macro-character"
     "read-datum-at" "read-delimited-list" "read-from-string"
     "read-from-string-preserving-whitespace" "read-sexpr-preserving-whitespace"
     "listen" "open-file" "open-input" "open-output" "open-stream-p" "peek-char"

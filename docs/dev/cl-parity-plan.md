@@ -1157,12 +1157,13 @@ CL の `read` に合わせ（1 文字消費する。端末で打った form が�
 **`read-delimited-list`**。終端文字まで読み、終端は消費する。入力が尽きたら短いリストでは
 なく `Err`（CL も上げる。読めた分を返すと間違いが隠れる）。CL の第 3 引数 `recursive-p` には
 対応物が無い——あれは「この呼び出しはリーダマクロの中だ」と CL のリーダに伝えるためのもので、
-リーダマクロが無い以上、伝える相手がいない。
+伝えるべき呼び出し間の状態（`#n=` ラベルなど）がこのリーダに無い以上、
+リーダマクロからの読みが他と違う種類の読みにならない。
 
 **副産物として本物のバグを 1 件修正**: 終端文字がトークンを終わらせていなかった。
 `(read-delimited-list #\] s)` を `1]x` に対して使うと `1]x` が 1 つのアトムになる。CL は
 終端文字をリードテーブルの *terminating macro character* にすることでこれを解決するが、
-リードテーブルが無いのでスキャナに直接教える必要がある。`reader-scan-atom` /
+readtable に「終端かどうか」の区別を持たせていないので、スキャナに直接教える必要がある。`reader-scan-atom` /
 `reader-scan-hash` / `reader-scan-datum` に呼び出し側の追加区切りを通し、**深さ 0 でだけ**
 効くようにした（`(1 2]` の `]` はリスト自身のテキストの一部で、壊れたリストとして `read` が
 報告するのが正しい）。
@@ -1240,14 +1241,48 @@ CL の `read` に合わせ（1 文字消費する。端末で打った form が�
 実行はドライバがあとでやる——**LSP がドライバの 1 つで、検査中の文書を実行しては
 ならない**から、この順序は動かせない）。
 
-**残り**: `copy-readtable` / `set-macro-character` / `get-macro-character` /
-`set-dispatch-macro-character` / `make-dispatch-macro-character` / `*readtable*`。
-`readtable-case` については、**このリーダは既に CL の `:downcase` を固定で行っている**
-（シンボルは読み取り時に小文字へ正規化される、syntax.md §1）。残る 3 設定のうち
-`:upcase` は CL 既定だがここでは全ソースが小文字前提なので持ち込めず、`:invert` は
-`:upcase` の補正なので同じ。意味があるのは `:preserve` だけで、それは
-「識別子の大文字小文字を区別する」という**言語の決定**であってリーダの設定ではない
-（Rust がそうであるように）。可否は 8c の残りを実装するときに判断する。
+**リーダマクロも完了（2026-09-05）**。テストは `tests/reader_macro_test.rs`（22 本）。
+入ったのは `set-macro-character` / `get-macro-character` /
+`set-dispatch-macro-character` / `get-dispatch-macro-character` の 4 つ。
+
+- **表は `Heap` に置いた**。スレッドローカルではなく。格納するのはヒープ値なので、
+  ヒープより長生きする表は次のセッションに「誰のものでもないセル」を渡す。登録時に
+  permanent root へ入れるのも `Heap` にしかできない。
+- **リーダマクロの型は `(fn (string-input-stream char) Option<Sexpr>)`**。
+  `:dyn PeekInput` にしなかったのは、リーダが渡すものが常にこの 1 種類だから——
+  リーダは読み残しのテキストを評価器に渡し、消費文字数を受け取る規約なので、
+  マクロが見るストリームは必ずそのテキストの上に張られたもの。**住人が 1 人しかいない
+  トレイトオブジェクト**になる。失うものも無い（`read-sexpr` 等はどれも
+  `(where (PeekInput S))` で具体型のまま呼べる）。
+  なお prelude をダンプするときに `:dyn` へのアップキャストを含む本体は
+  シリアライズできない（vtable id が場所ごとに焼かれる）ので、そもそも通らなかった。
+- **呼ぶ経路は prelude の糊関数 1 本**（`call-reader-macro`）。Rust から直接呼ぶと
+  引数のエンコードを手で書くことになり、それは
+  [[typelisp-crossing-must-be-type-driven]] が 3 回同じバグを出した場所。糊を通すと
+  **コンパイル済みのリーダマクロもそのまま動く**（`(f in c)` が普通の呼び出しになる）。
+  消費文字数はネイティブ演算 `stream-position` を足して読み戻す。
+- **`make-dispatch-macro-character` は作らない**。`set-dispatch-macro-character` が
+  その場でディスパッチ文字にしてしまうので、別の段に残すことが無い。
+- **`*readtable*` / `copy-readtable` も作らない**。readtable を値にするなら
+  「リーダに手渡せるもの」でなければならないが、リーダを呼ぶのは Rust 側のドライバで、
+  渡す先が無い。
+- **`readtable-case` も作らない**。**このリーダは既に CL の `:downcase` を固定で行って
+  いる**（syntax.md §1）。残る 3 設定のうち `:upcase` は CL 既定だがここでは全ソースが
+  小文字前提なので持ち込めず、`:invert` は `:upcase` の補正なので同じ。意味があるのは
+  `:preserve` だけで、それは「識別子の大文字小文字を区別する」という**言語の決定**で
+  あってリーダの設定ではない（Rust がそうであるように）。
+- **`set-macro-character` の呼び出しが `needs_immediate_exec` に入った**。プランが
+  予告していたとおり。`defmacro` より要求が強い——`defmacro` は次のフォームの*検査*に
+  間に合えばよいが、これは次のフォームが*読まれる*前でなければならない。**即時に走る
+  以上、渡す関数はその時点で在らねばならず、同じファイルの `defun` はまだ走っていない**
+  ので `lambda` で書くことになる。ここで初めて、即時実行のエラーを握り潰さないように
+  した（黙って登録されないと、そこから先のファイルが違うふうに読まれる）。
+- **組み込みの `read` / `read-from-string` も readtable を見る**。インタプリタは
+  `Interp` 自身を `ReadEval` として渡す。コンパイル済みの `rt_read` には渡せる
+  `Interp` が無いので、`typelisp_read::runtime` のフック（`PrintHooks` と同じ形）を
+  使う。**AOT では `rt_set_macro_character` を `EVAL_SHIMS` に入れた**——登録した関数を
+  呼ぶのは評価器の仕事なので、リーダマクロを設置するプログラムは `eval` と同じ理由で
+  インタプリタを実行ファイルに要する。
 
 ---
 

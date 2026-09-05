@@ -1868,10 +1868,23 @@ native 層でも拒否する——次の文字の UTF-8 エンコーディング
 `(read-sexpr (make-peek-stream my-stream))` と包めば `read` できる。
 
 `read-delimited-list` の終端文字は**トークンも終わらせる**。CL は終端文字をリードテーブルの
-terminating macro character にすることでこれを実現するが、リードテーブルが無い（Phase 8c）ので
-スキャナに直接渡している。効くのは深さ 0 だけで、`(1 2]` の `]` はリスト自身のテキストの一部
-として `read` に渡り、壊れたリストとして報告される。CL の第3引数 `recursive-p` に対応物は無い
-（リーダマクロが無いので伝える相手がいない）。
+terminating macro character にすることでこれを実現するが、ここではスキャナに直接渡している
+（readtable はあるが、終端かどうかの区別は持たせていない）。効くのは深さ 0 だけで、`(1 2]` の
+`]` はリスト自身のテキストの一部として `read` に渡り、壊れたリストとして報告される。CL の
+第3引数 `recursive-p` に対応物は無い——伝えるべき呼び出し間の状態（`#n=` ラベルなど）が
+このリーダには無いので、リーダマクロからの読みが他と違う種類の読みにならない。
+
+### 18.6.1 readtable
+
+| 名前 | 呼び方 | 型 | 説明 |
+|---|---|---|---|
+| `set-macro-character` | `(set-macro-character c f)` | `(char, F)→()` | 文字 `c` を `f` が読む |
+| `get-macro-character` | `(get-macro-character c)` | `(char)→Option<F>` | 登録されているものを返す |
+| `set-dispatch-macro-character` | `(set-dispatch-macro-character d s f)` | `(char,char,F)→()` | 2文字並び `d s` を `f` が読む |
+| `get-dispatch-macro-character` | `(get-dispatch-macro-character d s)` | `(char,char)→Option<F>` | 同上 |
+
+`F` は `(fn (string-input-stream char) Option<Sexpr>)`。使い方・いつ効くか・CL との差分は
+[syntax.md](syntax.md) §11 に書いてある。
 
 ### 18.7 CL との違い
 

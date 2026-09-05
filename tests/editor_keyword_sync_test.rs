@@ -147,8 +147,14 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 17] = [
+    const PRELUDE_PRIVATE: [&str; 18] = [
         "unwrap-io",
+        // The bridge the *reader* calls a macro character's function
+        // through (Stage 8c): it wraps the unread text in a stream, calls
+        // the function, and reports how much of it was consumed. Reached
+        // only from Rust (`Interp::call_reader_macro_fn`); a user writes
+        // `set-macro-character`.
+        "call-reader-macro",
         "io-ok",
         "split-on-slash",
         "name-type-dot",

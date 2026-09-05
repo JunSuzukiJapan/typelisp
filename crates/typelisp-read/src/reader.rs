@@ -108,6 +108,28 @@ pub trait ReadEval {
     /// error or an evaluation error, neither of which is a reader error, and
     /// the reader adds its own position to whatever it is told.
     fn read_eval(&self, heap: &mut Heap, form: Value) -> Result<Value, String>;
+
+    /// Call the reader macro `f` on the character `ch` that triggered it and
+    /// the unread text after it, answering the datum it produced and **how
+    /// many characters of `rest` it consumed**.
+    ///
+    /// The text is passed rather than the cursor because a reader macro is an
+    /// ordinary typelisp function taking a stream, and building one is the
+    /// evaluator's side of the fence — this crate knows nothing of streams.
+    /// The implementor makes a stream over `rest`, calls `f`, and reads the
+    /// position back off it.
+    ///
+    /// The cost is a copy of the remaining text per call. Worth naming: a
+    /// file that is mostly reader macros copies its own tail once per macro.
+    /// The alternative is exposing the reader's cursor as a stream backend,
+    /// which is a lifetime problem this does not have.
+    fn call_reader_macro(
+        &self,
+        heap: &mut Heap,
+        f: Value,
+        ch: char,
+        rest: &str,
+    ) -> Result<(Value, usize), String>;
 }
 
 /// Everything a read carries besides the cursor: which `#+` features are on,
@@ -159,8 +181,22 @@ impl Reader {
     /// Like [`Reader::read`], but `file` names the source (used in the location
     /// prefix of any error message).
     pub fn read_in(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Value, Error> {
+        self.read_in_with(heap, file, src, None)
+    }
+
+    /// [`Reader::read_in`] with an evaluator, so `#.` and macro characters
+    /// work. The `read` *builtin* takes this path — CL's `read` consults the
+    /// readtable, and a program that installed a macro character means it to
+    /// apply to its own reads too.
+    pub fn read_in_with(
+        &self,
+        heap: &mut Heap,
+        file: &str,
+        src: &str,
+        eval: Option<&dyn ReadEval>,
+    ) -> Result<Value, Error> {
         let mut cur = Cursor::new(file, src);
-        read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval: None }).map_err(|e| e.at(cur.loc()))
+        read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval }).map_err(|e| e.at(cur.loc()))
     }
 
     /// Read one datum starting at character index `start`, and say where
@@ -185,9 +221,21 @@ impl Reader {
         start: usize,
         preserve_whitespace: bool,
     ) -> Result<(Value, usize), Error> {
+        self.read_from_with(heap, src, start, preserve_whitespace, None)
+    }
+
+    /// [`Reader::read_from`] with an evaluator — see [`Reader::read_in_with`].
+    pub fn read_from_with(
+        &self,
+        heap: &mut Heap,
+        src: &str,
+        start: usize,
+        preserve_whitespace: bool,
+        eval: Option<&dyn ReadEval>,
+    ) -> Result<(Value, usize), Error> {
         let mut cur = Cursor::new("<input>", src);
         cur.seek(start);
-        let v = read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval: None }).map_err(|e| e.at(cur.loc()))?;
+        let v = read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval }).map_err(|e| e.at(cur.loc()))?;
         if !preserve_whitespace {
             if let Some(c) = cur.peek() {
                 if c.is_whitespace() {
@@ -412,6 +460,11 @@ impl Cursor {
     fn pos(&self) -> usize {
         self.pos
     }
+    /// The text from here to the end, as a fresh `String` — what a reader
+    /// macro is handed to read from.
+    fn rest(&self) -> String {
+        self.chars[self.pos..].iter().collect()
+    }
     fn at_end(&self) -> bool {
         self.pos >= self.chars.len()
     }
@@ -613,6 +666,31 @@ fn skip_block_comment(cur: &mut Cursor) {
 
 fn read_datum(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
     skip_ws_comments(cur, heap, ctx)?;
+    // A registered macro character wins over everything the reader would
+    // otherwise do with it — that is what registering one means. Looked up
+    // before the built-in dispatch below, so `(` and `'` can be taken over
+    // too; a character with no entry costs one hash lookup.
+    if let Some(c) = cur.peek() {
+        if let Some(f) = heap.macro_character(c) {
+            return call_macro_char(cur, heap, ctx, f, c);
+        }
+        // A *dispatching* character: the one after it selects the function.
+        // `#` never arrives here (`is_dispatch_char` excludes it) — it has a
+        // built-in dispatch of its own, and that one already looks in the
+        // same table first.
+        if heap.is_dispatch_char(c) {
+            cur.next(); // the dispatching character
+            let Some(sub) = cur.peek() else {
+                return Err(Error::ReadError(format!("`{}` at end of input: a dispatching character needs one more", c)));
+            };
+            match heap.dispatch_macro_character(c, sub) {
+                Some(f) => return call_macro_char(cur, heap, ctx, f, sub),
+                None => {
+                    return Err(Error::ReadError(format!("`{}{}` has no reader macro", c, sub)));
+                }
+            }
+        }
+    }
     match cur.peek() {
         None => Err(Error::ReadError("unexpected end of input".to_string())),
         Some('(') => read_list(cur, heap, ctx),
@@ -665,6 +743,33 @@ fn read_datum_spanned(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result
     let start = cur.loc();
     let v = read_datum(cur, heap, ctx)?;
     Ok((v, start.with_end(cur.line, cur.col)))
+}
+
+/// Hand the rest of the text to a reader macro, and advance the cursor by
+/// however much of it the macro read.
+///
+/// The macro character itself is consumed first, so what the function sees
+/// begins after it — CL's convention, where the character is passed
+/// separately rather than left in the stream.
+fn call_macro_char(
+    cur: &mut Cursor,
+    heap: &mut Heap,
+    ctx: Ctx<'_>,
+    f: Value,
+    ch: char,
+) -> Result<Value, Error> {
+    let Some(eval) = ctx.eval else {
+        return Err(Error::ReadError(format!(
+            "`{}` is a reader macro, and running one needs an evaluator this \
+             reader was not given (a plain `read`/`read-from-string` has none)",
+            ch
+        )));
+    };
+    cur.next(); // the macro character
+    let rest: String = cur.rest();
+    let (v, used) = eval.call_reader_macro(heap, f, ch, &rest).map_err(Error::ReadError)?;
+    cur.seek(cur.pos() + used);
+    Ok(v)
 }
 
 /// Read `<prefix-char><datum>` as `(<head> datum)` — the shared shape behind
@@ -901,6 +1006,15 @@ fn read_string(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
 
 fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
     cur.next(); // '#'
+    // A registered `#<sub>` wins over the built-in ones, which is what makes
+    // `set-dispatch-macro-character` worth having: `#b`/`#x`/`#.` are exactly
+    // the shape a program wants to extend, and overriding one is the caller's
+    // business.
+    if let Some(sub) = cur.peek() {
+        if let Some(f) = heap.dispatch_macro_character('#', sub) {
+            return call_macro_char(cur, heap, ctx, f, sub);
+        }
+    }
     match cur.peek() {
         Some('\\') => {
             cur.next(); // '\\'
