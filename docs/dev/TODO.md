@@ -6,9 +6,9 @@
 
 ## 残っている作業
 
-**CL 残差を埋める実装計画**（[cl-parity-plan.md](cl-parity-plan.md)、2026-08-20 策定）。
-Common Lisp にあって typelisp に無いものを Phase 0〜9 に落とした計画。
-着手順の目安は同計画の「実施順序と依存」節。
+**CL 残差を埋める実装計画**（[cl-parity-plan.md](cl-parity-plan.md)、2026-08-20 策定）は
+**2026-09-05 に全完了**した。最後に残っていた REPL ツール層（Stage 9e）が入り、
+同計画に保留は無い。以下は経緯の記録として残す。
 
 進捗:
 
@@ -23,7 +23,7 @@ Common Lisp にあって typelisp に無いものを Phase 0〜9 に落とした
 | 6（コレクション 6a〜6c） | **6a 完了**（`Hash` トレイト＋`sxhash`、鍵のハッシュ可能性が静的に、`maphash`/`size` が 2026-08-22、**ユーザ定義型を鍵にする分が 2026-09-03**）。表は `hash -> バケット`になり、`get`/`set`/`remove` は prelude の `defmethod` へ移った。**6b 完了** 2026-08-22（`Array<T>`。`Vector` 2 本の上の prelude `defstruct` で、Rust 側の追加はゼロ。`(aref a i j)` だけ checker の糖衣）。**6c 完了** 2026-08-22（`BitVector`。1 語 **31bit** ——32 番目の bit は `i32` の符号） |
 | 7（エラーと動的束縛 7a/7b） | **全完了** 2026-08-22。7a は `SimpleError`/`WrappedError`/`wrap-error`/`describe-error`/`assert`/`warn`（コンディションシステムは予定どおり非採用）。7b は `dlet`（保存→代入→`unwind-protect` で復元）と印字制御変数一式＋`with-standard-io-syntax`、副産物で radix リーダマクロ `#b`/`#o`/`#x`/`#NNr`。入れなかった変数は同計画の表に 1 つずつ理由つき |
 | 8（印字とリーダ 8a〜8c） | **8a/8b 完了** 2026-08-23（プリンタとリーダ）+ 2026-09-03（`*print-array*` と `Array<T>` の `print-object`）。この Stage で分かった 3 件は**全部閉じた**——ジェネリック型に `print-object` が発火しない件と `~/name/` が AOT で使えない件が 2026-08-31（後者は制御文字列をリテラルに限って解決、`e7f54e0`）、それに依存して見送っていた `*print-array*` が 09-03。**先行条件のアーキテクチャ転換は 2026-09-04 完了**——全ドライバがフォーム単位で「読む→チェック→評価」するようになった（`tests/read_check_eval_test.rs` 16 本）。**8c 完了** 2026-09-05——`#.`（`tests/read_time_eval_test.rs` 12 本）とリーダマクロ 4 種（`tests/reader_macro_test.rs` 22 本）。`*readtable*`/`copy-readtable`/`make-dispatch-macro-character`/`readtable-case` は「入れない」理由つきで確定。**Phase 8 全完了** |
-| 9（シンボル・パッケージ・環境） | **9c 完了** 2026-08-20（コマンドライン引数・環境変数・ファイルシステム問い合わせ・日時の分解合成・`y-or-n-p`）。`libc` が要る 4 群は 2026-09-05 に解消（`get-internal-run-time`・ホストの素性・`file-author`・タイムゾーン）、残る保留は REPL ツール層だけ。**9a/9b/9d 完了** 2026-09-04。9a は `in-module`・可変長 `use`/`import`/`shadowing-import`・裸名の衝突報告、9b は `defparameter` と CL 準拠になった `defvar`・`(source-file)`、9d は `listen`/`read-char-no-hang`/`read-sequence`/`write-sequence`。非採用は `in-package`/`shadow`/`unuse-package`/`compile-file-pathname`/`require`/`provide`/`clear-input`/`clear-output`/`make-synonym-stream` で、いずれも理由つき（cl-parity-plan.md の各 Stage）。**Phase 9 全完了** |
+| 9（シンボル・パッケージ・環境） | **9c 完了** 2026-08-20（コマンドライン引数・環境変数・ファイルシステム問い合わせ・日時の分解合成・`y-or-n-p`）。`libc` が要る 4 群は 2026-09-05 に解消（`get-internal-run-time`・ホストの素性・`file-author`・タイムゾーン）、残る保留は REPL ツール層だけ。**9a/9b/9d 完了** 2026-09-04。9a は `in-module`・可変長 `use`/`import`/`shadowing-import`・裸名の衝突報告、9b は `defparameter` と CL 準拠になった `defvar`・`(source-file)`、9d は `listen`/`read-char-no-hang`/`read-sequence`/`write-sequence`。非採用は `in-package`/`shadow`/`unuse-package`/`compile-file-pathname`/`require`/`provide`/`clear-input`/`clear-output`/`make-synonym-stream` で、いずれも理由つき（cl-parity-plan.md の各 Stage）。**9e（REPL ツール層）完了** 2026-09-05——`room`/`heap-info`/`dribble`/`ed`/`trace`/`untrace`/`step`/`disassemble`。**Phase 9 全完了** |
 | 付録 C（小さな不整合 4 件） | **完了** 2026-08-20 |
 | 付録 D（範囲外の既存問題 2 件） | **完了** 2026-08-21。D-2 は `Heap::cons` の成長条件（回収後の空きが 1/4 未満なら伸ばす）、D-1 は AOT 実行ファイルが prelude を持ち歩くように |
 

@@ -10488,3 +10488,109 @@ prelude の `Pathish` ラッパにした——`file-truename`→`truename` と�
 壁時計の値を検査していたテストは機械依存になる。全部に明示 `0` を渡して決定的に戻し、
 地方時の側には**どの地域でも成り立つ書き方**のテストを別に足した（「zone 無しの分解は、
 ランタイムが報告する offset で分解したものと一致する」）。
+
+---
+
+## 2026-09-05（続き 4） — REPL ツール層（Stage 9e）: `trace` / `untrace` / `step` / `disassemble` / `room` / `ed` / `dribble`
+
+`cl-parity-plan.md` で最後まで保留だった 7 つ。これで同計画に保留は無くなった。
+
+7 つは「CL の関数が 7 個足りない」のではなく、**処理系が自分自身について答える層が
+1 つも無い**という一点の帰結だった。いままで REPL でできたのは「式を評価する」だけで、
+いまどの関数が呼ばれているか・その関数はどんなコードになったか・ヒープはどれだけ
+埋まっているか・この定義はどこに書いてあるか・このセッションを後で読み返す、
+どれも訊けなかった。
+
+テストは `tests/trace_test.rs`（16 本）と `tests/repl_tools_test.rs`（19 本）。
+
+### 分類が設計の核心
+
+`compile`/`compile-file`/`dump` が「コンパイルできない組み込み」の表
+（[syntax.md](../syntax.md) §10）に入らないのは、コンパイルできないのではなく
+**コンパイルする側**だから。7 つはその線でちょうど 2 つに割れた。
+
+- **インタプリタ専用**（同じ族）: `trace` / `untrace` / `step` / `disassemble`。
+  走っているインタプリタの呼び出し経路や scope 木に作用するので、AOT 実行ファイルには
+  作用する対象が無い。`core_bridge` が lowering を断る。
+- **普通の組み込み**: `room` / `dribble` / `ed`。`PRELUDE_COMPILE_UNSUPPORTED` は空のまま。
+
+この分類は「どれが CL でマクロか」ではなく「**何に作用するか**」で決めた。`ed` は特殊形
+だが、特殊形がやるのは*解決*だけで、チェックを抜けると `ed-open` の呼び出し 1 個になる
+——だから `ed` のためだけの「インタプリタ専用」区分が要らない。
+
+### 分かったこと
+
+**1. `Interp::enter` が唯一の合流点だった。**
+通常呼び出し（`call_core`）・メソッド呼び出し（`assoc_core`）・`dyn-call`・マクロ展開の
+4 経路すべてが通り、しかも **compiled/interpreted の分岐より手前**にある。だから `trace` も
+`step` もフックは 1 箇所で足りた。帰結として、compiled 本体を持つ定義もインタプリタ側の
+呼び出し地点からは見える。見えないのは compiled なコードの*中*の呼び出し地点で、これは
+SBCL が local call について言っているのと同じ制限——黙って半分だけ見せないよう、
+compiled 本体を持つ名前を `trace` した時点で 1 行注記する。
+
+**2. トレース表は `FnDef` でなく `Interp` に置く。**
+再定義は `Rc<FnDef>` を差し替えるので、フラグなら一緒に消える。CL は*名前*を trace する
+ので、これも名前を trace する（`tracing_survives_redefinition` が実証）。そのために
+`FnDef` に `name`（リンク名）を足した——スコープ木は名前空間の中で最終セグメントを鍵に
+するので、**見つけるには足りても名乗るには足りない**。`enter` が持っているのは
+`Rc<FnDef>` だけ。
+
+**3. 自由変数の走査は bridge より先に走る。**
+新しいタグを `core_bridge` で断るだけでは足りず、`core_freevars` にも教える必要があった。
+教えないと「free-variable walk does not know the tag \`trace\`」——**何も言っていない
+エラー**が先に出て、本当の断り文句が読み手に届かない。`step` は中の form を実際に歩き、
+残り 3 つは葉。
+
+**4. `gc-count` だけ `bignum`。**
+`heap-info` の数え上げは全部アリーナの大きさで頭打ちになり、`i32` で数えられない
+アリーナはこの機械が持てないアリーナ（2^31 セル ≒ 51GB）。だが**収集回数だけは
+上がり続けて 2^31 を超えうる**ので、丸めない型を与えた。対称として `typl --heap-cells`
+に `i32::MAX` の上限を入れてある——数えられないアリーナを黙って切り詰めるより、
+限界を述べる。成長の*上限*は報告しない（アリーナに縛られない唯一の数で、読み手が
+知りたいのは可否のほう）。
+
+**5. セッションの出力がプロセスを出る扉は 3 つあり、どの 2 つも同じクレートに無い。**
+`typelisp-print` の `write_stdout`、`typelisp-rt` の `Backend::Stdout`、`typl` の
+`println!`。3 つすべての下にあるクレートは `typelisp-abi` だけで、`ACTIVE_HEAP` が
+同じ理由でそこに居る。`dribble` の sink はそこに置いた。
+
+**6. `disassemble` は JIT の手前で止まるので副作用が無い。**
+`compiled` スロットを触らないので、disassemble した関数は interpreted のまま
+（`trace` の注記が出ないことで検証している）。宣言だけは `compile_scc` と同じだけ要る
+——島の `compile-call` は callee を `get-function` で引き、宣言が無いと**プロセスを
+abort する**——が、JIT が要る*アドレス*は要らない。だから、それ自体はコンパイルできない
+呼び先があっても disassemble はできる。既定を機械語にしたのは CL が約束しているのが
+それだから。LLVM IR は第 2 引数 `true` で、問いが「このチップ」でなく「このコンパイラ」に
+ついてのときに見る。
+
+**7. `*trace-output*` / `*standard-output*` を Rust から尊重する経路。**
+グローバルが持つ `standard-stream` の第 0 フィールドが native ハンドル。prelude の外で
+これを読む唯一の場所なので防御的に読み、読めなければ printer の stdout へ落とす
+（prelude を持たない `Interp`＝単体テストのため）。値の描画は `format` と同じ印字器を
+通すので `print-object` も `*print-*` 制御変数も効くが、`emit` は通さない——開いている
+`pprint-logical-block` に割り込むトレース行はどちらの文書にも属さない。
+副産物として、この経路のおかげで**トレース出力を文字列ストリームへ差し替えてテストできる**
+（`*trace-output*` の型は `standard-stream` なので `:dyn` に差し替えることはできないが、
+`(standard-stream::new (stream-string-output))` なら型が合う）。
+
+**8. `pprint` 族の「これは shadowable な特殊形」というコメントは事実に反していた。**
+局所束縛は勝たない（`documentation` も同じ）。同じ主張を繰り返さず、実際の挙動を
+テストに書き下した（`the_form_head_is_reserved_against_a_local_binding`）。
+[feedback-comments-outliving-implementations] と同じ形。
+
+**9. `step` の粒度は呼び出し。**
+式ノード単位のフックは `eval_core`（いちばん熱い経路）に入り、かつ `if` と変数参照の
+たびに止まるステッパは人が使えない。SBCL のステッパも同じ理由で呼び出しで止まる。
+**標準入力が端末でなければ、ただ `form` を評価する**——CLHS が明示的に許している退化
+（"step ... may be a no-op that evaluates form"）で、代わりにプロンプトを出せば誰も
+答えられないままスクリプトやテストが固まる。判定は `isatty`（環境変数からの推測ではなく、
+それが実際の問い）。入力の終端は quit でなく continue——入力が尽きるのは計算を捨てる
+決断ではないし、そこで回ると固まる。
+
+### 触った表
+
+新しい組み込み 4 つ（`heap-info`/`dribble-start`/`dribble-stop`/`ed-open`）は
+registry / interp / rt / externs の 4 箇所。`rt_extern_functions()` に足したので
+**島の成果物のバイト列が変わり**、島 → prelude の順で再生成した（Phase 9c で 11 個
+足して 452 バイト差で落ちたのと同じ）。`BUILTIN_SYMBOLS` と `BUILTIN_TYPE_KEYS` への
+追加は**どちらも末尾のみ**（位置表）。

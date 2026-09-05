@@ -527,12 +527,13 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ✅ | 2026-07-31 実装、2026-09-05 完了。`get-internal-real-time`（`internal-time` 構造体、`second`/`microsecond`。`internal-time-units-per-second` は 1_000_000。2026-09-01 に `i64` 廃止で構造体化）と `get-internal-run-time`（CPU 時間、`getrusage`。`libc` 採用で入った）。`time` マクロは両方を1行ずつ印字して `form` の値をそのまま返す——I/O 待ちが主な処理では両者が大きく開く |
 | `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ✅ | 分解・合成を 2026-08-20 実装（Phase 9c）、2026-09-05 に地方時を追加。多値が無いので `decoded-time` という `defstruct` で返し、`libc` 採用で `daylight-p`/`zone` が加わって **CL の 9 個の返り値が全部揃った**。zone 省略時は CL と同じ**地方時**。結果の `zone` だけ `f64`——+5:30 のような offset を丸めないため |
 | `sleep` | ❌ | |
-| `room` / `ed` / `dribble` / `apropos` / `apropos-list` / `inspect` / `describe` | ❌ | 対話環境向け。REPL があるので `apropos`/`describe` は相性が良い |
+| `room` / `ed` / `dribble` | ✅ | 2026-09-05（Phase 9e）。`room` は `heap-info`（`defstruct`）を印字し、その構造体自体も公開——CL は印字しか持たないが、プログラムが数を取る手段が要る。`dribble` は出力がプロセスを出る 3 つの扉すべてを記録する |
+| `apropos` / `apropos-list` / `inspect` / `describe` | ❌ | 対話環境向け。REPL があるので相性は良い |
 | `documentation` / docstring | ✅ | 2026-07-30実装。`defun`/`defmethod`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftrait` が docstring を持てる（位置は各フォームの CL 規則通り）。`documentation` は名前を評価せず解決する特殊形（`quote`/`compile` と同様）で check 時に定数へ畳み込まれる。LSP hover にも統合済み。`(setf documentation)` は対象外（functions.md §17） |
 | `lisp-implementation-type` / `lisp-implementation-version` / `machine-type` / `software-type` | ✅ | 2026-08-20 実装（Phase 9c）。版数は Cargo から、機種と OS は `std::env::consts` から、いずれもコンパイル時に決まる |
 | `machine-version` / `machine-instance` / `software-version` / `short-site-name` / `long-site-name` | ✅ | 2026-09-05 実装（`libc` 採用）。全部 `Option<string>`——CL の *or nil if no such name can be determined* に対応。`machine-instance`/`software-version` は `uname`、`machine-version` は実行中のチップ名（macOS は `sysctlbyname`、Linux は `/proc/cpuinfo`）。site 名は POSIX に記録場所が無いので**常に `none`**で、これは捏造した定数ではなく CL が認める答え（SBCL も同じ） |
 | `user-homedir-pathname` | ✅ | 2026-08-20 実装（Phase 9c）。`$HOME` が無ければ `none`（CL も `NIL` を許す）。環境変数を読む `getenv` と、CL に無い `command-line-args` も同時に入った |
-| `trace` / `untrace` / `step` / `disassemble` | ❌ | |
+| `trace` / `untrace` / `step` / `disassemble` | ✅ | 2026-09-05（Phase 9e）。フックは `Interp::enter` 1 箇所——名前のある関数への呼び出しが全部通り、compiled/interpreted の分岐より手前。`step` は呼び出し粒度で、端末が無ければ CLHS が許すとおり単に評価する。`disassemble` の既定はホストの機械語（`true` で LLVM IR）で、JIT の手前で止まるので副作用が無い |
 | コマンドライン引数の取得 | ❌ | CL 標準にも無いが、`typl file.typl` でスクリプトを書く以上ほぼ必須 |
 
 ---

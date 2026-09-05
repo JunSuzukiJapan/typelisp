@@ -458,6 +458,65 @@ CL が認める答えで、SBCL も同じものを返す。`machine-type` と `m
 
 どちらも `*standard-input*` から読む。入力の終端だけが問い直しを止め、そのときは `false`。
 
+### 4.9 処理系の道具（CLHS 25.2）
+
+処理系が自分自身について答える層。7 つのうち **`room` / `dribble` は普通の関数**、
+残りの 5 つは**特殊形**（`trace` / `untrace` / `disassemble` / `ed` は定義の*名前*を、
+`step` は*フォーム*を、いずれも未評価で受ける）。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `heap-info` | `(heap-info)` | `()→heap-info` | ヒープの現況を構造体で。`room` が印字するのと同じ数 |
+| `room` | `(room &optional verbose)` | `(bool)→()` | `heap-info` を `*standard-output*` へ報告する。`(room true)` で詳しく |
+| `dribble` | `(dribble &optional path)` | `(string)→Result<(),FileError>` | セッションの出力を `path` へ記録し始める／引数なしで記録を終える |
+| `trace` | `(trace name...)` | `Sexpr` | 名前を挙げた定義の呼び出しを `*trace-output*` へ報告する。いま traced な名前の一覧を返す |
+| `untrace` | `(untrace name...)` | `Sexpr` | 報告をやめる。**引数なしで全解除** |
+| `step` | `(step form)` | `form` の型 | `form` を評価しながら、呼び出しごとに止まって訊く |
+| `disassemble` | `(disassemble name [llvm])` | `()` | その定義が何になるかを印字する。既定はホストの機械語、`true` で LLVM IR |
+| `ed` | `(ed)` / `(ed name)` / `(ed "path")` | `Result<(),FileError>` | `$VISUAL`／`$EDITOR` を起動する。名前を渡すとその定義が書いてある行を開く |
+
+#### `heap-info` の欄
+
+| 欄 | 型 | 中身 |
+|---|---|---|
+| `capacity` / `live` / `free` | `i32` | cons アリーナ全体と、その内訳。3 つは必ず `live + free = capacity` |
+| `symbols` / `strings` / `boxes` | `i32` | ヒープが持つ他の 3 種の現在数 |
+| `gc-count` | `bignum` | この処理系が始めてからの収集回数 |
+| `growable` | `bool` | アリーナがまだ伸びうるか |
+
+**`gc-count` だけ `bignum`** なのは、ここで唯一「アリーナで頭打ちにならない数」だから。
+数え上げは全部アリーナの大きさに縛られ、`i32` で数えられないアリーナはこの機械が
+持てないアリーナ（2^31 セル ≒ 51GB）——だから `typl --heap-cells` は
+`i32` を超える要求をその場で断る。収集回数だけは上がり続けるので、丸めない型を与えてある。
+成長の**上限**は報告しない: ここで唯一アリーナに縛られない数（アリーナの倍数）で、
+読み手が知りたいのは可否のほうだから。
+
+#### `trace` / `step` が見えるもの・見えないもの
+
+フックは `Interp::enter`——名前のある関数への呼び出しが**すべて**通る唯一の合流点で、
+しかも compiled/interpreted の分岐より手前にある。だから:
+
+- **compiled な本体を持つ定義も、インタプリタ側の呼び出し地点からは見える。**
+- **compiled なコードの*中*の呼び出し地点は見えない**（`enter` を通らない）。
+  compiled 本体を持つ名前を `trace` すると、その旨を 1 行注記する。SBCL が local call に
+  ついて言っているのと同じ制限。
+- **クロージャ値越しの呼び出し（`funcall`/`apply`）は見えない**。クロージャの箱は名前を
+  持たない。
+- **ジェネリックな定義は対象外**。単型化は使用箇所ごとに走るので、名指しできる単一の
+  本体が無い（`compile` が断るのと同じ理由・同じ文言）。
+
+`step` のコマンドは `s`（この呼び出しへ入る／空行も同じ）・`n`（この呼び出しは飛ばす）・
+`c`（以後訊かない）・`q`（中止）。**標準入力が端末でなければ `step` はただ `form` を評価する**
+——CLHS が明示的に許している退化で、スクリプトやテストが答えようのないプロンプトで
+固まらないため。
+
+`ed` の `$VISUAL`／`$EDITOR` は空白で分割されるので `EDITOR="code -w"` も書ける。
+どちらも未設定なら `Err`——`vi` を推測しない。行番号は `+N` の形で先頭に渡す。
+
+`dribble` が記録するのは、セッションの出力がプロセスを出る 3 つの扉すべて:
+`print`/`println`/`format` が書くもの、標準出力を backend に持つストリームへ書いたもの、
+そして REPL で打った行と REPL が印字し返した値。
+
 ## 5. `cons`/`car`/`cdr`（ジェネリックなペア）と `Sexpr`
 
 Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用ではなく**ジェネリックな

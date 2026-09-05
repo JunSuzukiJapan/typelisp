@@ -98,6 +98,11 @@ session has changed.")
     "setf" "incf" "decf" "rotatef" "shiftf"
     "list" "quote" "quasiquote" "unquote" "unquote-splicing"
     "panic" "unreachable" "todo" "as" "try-as" "compile" "documentation"
+    ;; the REPL tool layer (CLHS 25.2).  Special forms because each takes the
+    ;; *name* of a definition rather than a value — `step' is the exception,
+    ;; which takes a form.  `room'/`dribble' are ordinary functions and are
+    ;; listed with the builtins below.
+    "trace" "untrace" "step" "disassemble" "ed"
     ;; the file this form was read from, folded to a literal at check time
     ;; (Stage 9b) — CL's `*load-pathname*' in the place it can be right
     "source-file"
@@ -333,7 +338,12 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "machine-instance" "machine-version" "software-version"
     "short-site-name" "long-site-name"
     ;; asking the user a question (CLHS 25.2)
-    "y-or-n-p" "yes-or-no-p")
+    "y-or-n-p" "yes-or-no-p"
+    ;; the REPL tool layer's ordinary functions (CLHS 25.2).  `heap-info' is
+    ;; what `room' prints and what a program reads the same numbers from;
+    ;; `dribble-start'/`dribble-stop'/`ed-open' are the primitives the
+    ;; `dribble' function and the `ed' special form reduce to.
+    "room" "heap-info" "dribble" "dribble-start" "dribble-stop" "ed-open")
   "Builtin functions and methods from the standard catalog (docs/functions.md).")
 
 (defconst typelisp-primitive-types
