@@ -20,6 +20,8 @@
 //! would mean a printer shim looking for a heap the interpreter registered in
 //! the other one.
 
+pub mod dribble;
+
 use std::cell::Cell;
 
 use typelisp_mem::{BoxId, ConsRef, Heap, PathId, StrId, SymRef, Value};

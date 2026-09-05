@@ -1426,9 +1426,10 @@ readtable に「終端かどうか」の区別を持たせていないので、�
    AOT 側は `build_main_wrapper` の `main` が `argc`/`argv` を取らないが、Rust の `std` は
    プロセス開始時に argv を捕まえている（macOS は `_NSGetArgv`、Linux は `.init_array`）ので
    そのまま読める。**両方の走らせ方で実際に確かめた**——同じソースが同じ添字で同じ引数を読む。
-4. **保留だった 3 群は 2026-09-05 に解消**（下記「libc を取った」）。残る保留は
-   `trace` / `untrace` / `step` / `disassemble` / `room` / `ed` / `dribble` だけで、
-   これは REPL のツール層——このカタログとは別の作業。
+4. **保留だった 3 群は 2026-09-05 に解消**（下記「libc を取った」）。最後まで残った
+   `trace` / `untrace` / `step` / `disassemble` / `room` / `ed` / `dribble` の 7 つ
+   （REPL のツール層）も **2026-09-05 に完了**——下記「Stage 9e」。
+   **この計画に保留は無くなった。**
 
 ### libc を取った（2026-09-05）
 
@@ -1445,6 +1446,58 @@ readtable に「終端かどうか」の区別を持たせていないので、�
 **`decode-universal-time` の既定が UTC から地方時に変わった**（CL 準拠）。`decoded-time` は
 7 フィールドから **9 フィールド**になり、CL の 9 個の返り値が全部揃った。`time` マクロは
 実時間に加えて CPU 時間も印字する。
+
+### Stage 9e — REPL ツール層
+
+**状態: 完了（2026-09-05）**。テストは `tests/trace_test.rs`（16 本）と
+`tests/repl_tools_test.rs`（19 本）、ドキュメントは
+[functions.md](../functions.md) §4.9 と [syntax.md](../syntax.md) §10。
+
+入ったもの: `room` / `heap-info` / `dribble` / `ed` / `trace` / `untrace` / `step` /
+`disassemble`。
+
+**分類が設計の核心だった。** `compile`/`compile-file`/`dump` が「コンパイルできない
+組み込み」の表に入らないのは、コンパイルできないのではなく*コンパイルする側*だから
+（syntax.md §10）。7 つはその線でちょうど 2 つに割れる:
+
+- **インタプリタ専用**（同じ族）: `trace` / `untrace` / `step` / `disassemble`。
+  走っているインタプリタの呼び出し経路や scope 木に作用するので、AOT 実行ファイルには
+  作用する対象が無い。core_bridge が lowering を断る。
+- **普通の組み込み**: `room` / `dribble` / `ed`。ヒープ統計も dribble の sink も実行時の
+  ものだし、エディタを起動するのはプロセス呼び出し。`PRELUDE_COMPILE_UNSUPPORTED` は
+  空のまま。
+
+**分かったこと**:
+
+1. **`Interp::enter` が唯一の合流点だった。** 通常呼び出し・メソッド呼び出し・`dyn-call`・
+   マクロ展開の 4 経路すべてが通り、しかも compiled/interpreted の分岐より*手前*。
+   だから `trace` も `step` もフックは 1 箇所で足り、compiled 本体を持つ定義も
+   インタプリタ側の呼び出し地点からは見える。見えないのは compiled なコードの*中*の
+   呼び出し地点で、これは SBCL が local call について言っているのと同じ制限——
+   黙って半分だけ見せないよう、`trace` した時点で 1 行注記する。
+2. **トレース表は `FnDef` でなく `Interp` に置く。** 再定義は `Rc<FnDef>` を差し替えるので、
+   フラグなら一緒に消える。CL は名前を trace するので、これも名前を trace する。
+   そのために `FnDef` に `name`（リンク名）を足した——スコープ木は名前空間の中で
+   最終セグメントを鍵にするので、*見つける*には足りても*名乗る*には足りない。
+3. **自由変数の走査は bridge より先に走る。** 新しいタグを bridge で断るだけでは、
+   「free-variable walk does not know the tag `trace`」という何も言っていないエラーが
+   先に出る。走査にも 4 つのタグを教えて初めて、断りの文言が読み手に届く。
+4. **`gc-count` だけ `bignum`。** 数え上げは全部アリーナで頭打ちになるが、収集回数は
+   上がり続けて 2^31 を超えうる。丸めるのは嘘なので、嘘をつかなくてよい型にした。
+   対称として `typl --heap-cells` に `i32::MAX` の上限を入れた——数えられないアリーナを
+   黙って切り詰めるより、限界を述べる。
+5. **セッションの出力がプロセスを出る扉は 3 つあり、どの 2 つも同じクレートに無い**
+   （`typelisp-print` の `write_stdout` / `typelisp-rt` の `Backend::Stdout` /
+   `typl` の `println!`）。3 つすべての下にあるのは `typelisp-abi` だけで、
+   `ACTIVE_HEAP` が同じ理由でそこに居る。
+6. **`ed` は特殊形だがコンパイルできる。** 特殊形がやるのは解決だけで、チェックを抜けると
+   `ed-open` の呼び出し 1 個になる。行番号は `DefLocs`（LSP の goto-definition と同じ表）から。
+7. **`disassemble` は JIT の手前で止まるので副作用が無い**——`compiled` スロットを触らない。
+   宣言だけは `compile_scc` と同じだけ要る（島の `compile-call` は `get-function` で
+   callee を引き、宣言が無いと**プロセスを abort する**）が、*アドレス*は要らないので、
+   それ自体はコンパイルできない呼び先があっても disassemble はできる。
+8. **`pprint` 族の「これは shadowable な特殊形」というコメントは事実に反していた**
+   （局所束縛は勝たない）。同じ主張を繰り返さず、実際の挙動をテストに書き下した。
 
 ### Stage 9d — ストリーム残差
 
@@ -1704,7 +1757,7 @@ D-2 は実在するが、`typl` の通常の起動には出ていない。
 | | `get-internal-run-time` | **Phase 9c** |
 | | `decode-`/`encode-universal-time`/`get-decoded-time` | **Phase 9c** |
 | | `sleep` | **Phase 4a** |
-| | `room`/`ed`/`dribble`/`trace`/`untrace`/`step`/`disassemble` | **Phase 9c** |
+| | `room`/`ed`/`dribble`/`trace`/`untrace`/`step`/`disassemble` | **Phase 9e** |
 | | `apropos`/`apropos-list`/`inspect`/`describe` | 対象外 (D1) |
 | | `lisp-implementation-type` ほか環境問い合わせ | **Phase 9c** |
 | | `user-homedir-pathname`・環境変数・コマンドライン引数 | **Phase 9c** |

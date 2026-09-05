@@ -1027,6 +1027,7 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 (compile name)                      ; 定義済みの defun/メソッドをネイティブコードへ JIT コンパイル
 (compile-file src-path out-path)    ; ソースファイルをネイティブ実行ファイルへ AOT コンパイル
 (dump path)                         ; いまの環境（型情報 + コンパイル済み本体）を1ファイルへ
+(disassemble name)                  ; その定義が何になるかを印字（既定はホストの機械語、第2引数 true で LLVM IR）
 ```
 
 `compile` は特殊形で、`name` は評価されず未評価の裸シンボル/`::`パスとして読む（文字列は型エラー）。
@@ -1077,10 +1078,16 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 前に特殊形として横取りする（`Checker::check_print_like`——制御文字列がリテラルでなければ
 ならない）ので `Expr::Assoc` になることが無く、lowering を要求されることもない。
 
-`compile`/`compile-file`/`dump` はこの表に入らない——定義上インタプリタ専用の操作で、
+`compile`/`compile-file`/`dump`、および `trace`/`untrace`/`step`/`disassemble`
+（[functions.md](functions.md) §4.9）はこの表に入らない——定義上インタプリタ専用の操作で、
 コンパイルできないのではなくコンパイルする側だから（`dump` が書き出すのはインタプリタの環境
-そのもので、AOT 実行ファイルにはその環境が無い）。コンパイル済み関数から呼ぶと
-`no such function` になる。ジェネリックな関数がコンパイルできないのは
+そのもので、AOT 実行ファイルにはその環境が無い。`trace` が見ているのも `step` が止まるのも
+走っているインタプリタの呼び出し経路で、`disassemble` は*コンパイラそのもの*）。
+これらを呼ぶ `defun` をコンパイルしようとすると、穴の報告ではなく
+「`(trace ...)` is an interpreter-only action and cannot itself be compiled」と断られる。
+`room`/`dribble`/`ed` は**この族ではない**——ヒープ統計も dribble の sink も実行時のもので、
+エディタを起動するのはプロセス呼び出しなので、普通にコンパイルできる。
+ジェネリックな関数がコンパイルできないのは
 上記のとおり単型化の帰結であって、組み込みの穴ではない。
 
 コンパイル**できる**もの: ストリーム・ファイル I/O、`random`、`gensym`、

@@ -356,6 +356,16 @@ well_known_symbols! {
      word like its neighbours above, listed here rather than beside them
      because this table is positional — see the module comment."
     KW_NAMED => ":named"
+
+    "Appended for the REPL tool layer (2026-09-05). Four core-IR tags with no
+     island counterpart: `trace`/`untrace`/`step`/`disassemble-fn` are
+     interpreter-only, the same category `compile-fn` is in, so the bridge
+     never sees one. Appended rather than filed beside `COMPILE_FN` because
+     this table is positional — see the module comment."
+    TRACE => "trace"
+    UNTRACE => "untrace"
+    STEP => "step"
+    DISASSEMBLE_FN => "disassemble-fn"
 }
 
 

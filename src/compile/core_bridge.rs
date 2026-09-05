@@ -617,14 +617,28 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             f.finish("dyn-value")
         }
 
-        // Reflection: `(compile ...)` JIT-compiles a target against the
-        // *running* interpreter's own heap and scope tree, which has no
-        // meaning inside code being compiled ahead of time. Unreachable from
-        // any compilable source, and refused rather than given a lowering.
-        "compile-fn" => Err(Error::TypeError(
-            "compile: `(compile ...)` is an interpreter-only action and cannot itself be compiled"
-                .to_string(),
-        )),
+        // Reflection: the REPL tool layer acts on the *running* interpreter's
+        // own heap and scope tree, which has no meaning inside code being
+        // compiled ahead of time. `(compile ...)` JIT-compiles against it,
+        // `trace`/`untrace` watch its call graph, `step` prompts inside its
+        // evaluator, and `disassemble` *is* the compiler. All unreachable
+        // from any compilable source, and refused rather than given a
+        // lowering — the same category `compile-file` and `dump` are in
+        // (docs/syntax.md §10).
+        //
+        // `room`/`dribble`/`ed` are deliberately absent from this list: they
+        // are ordinary builtins, and a `defun` that calls one compiles.
+        "compile-fn" | "trace" | "untrace" | "step" | "disassemble-fn" => {
+            let what = match tag.as_str() {
+                "compile-fn" => "compile",
+                "disassemble-fn" => "disassemble",
+                other => other,
+            };
+            Err(Error::TypeError(format!(
+                "{}: `({} ...)` is an interpreter-only action and cannot itself be compiled",
+                what, what
+            )))
+        }
 
         // ---- functions ---------------------------------------------------
         "lambda" => translate_lambda(heap, form, cx),

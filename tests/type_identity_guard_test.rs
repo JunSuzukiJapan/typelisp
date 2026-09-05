@@ -231,6 +231,13 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
         (TypeKeyId::HASHTABLE, "hashtable"),
         (TypeKeyId::SCOPE, "scope"),
         (TypeKeyId::SCOPE_FRAME, "scope-frame"),
+        // Three prelude `defstruct`s the runtime builds itself, because the
+        // facts in them belong to the runtime and not to the checker: two
+        // clocks (`get-universal-time` / `get-internal-real-time`) and the
+        // heap's own statistics (`heap-info`, which `room` prints).
+        (TypeKeyId::UNIVERSAL_TIME, "universal-time"),
+        (TypeKeyId::INTERNAL_TIME, "internal-time"),
+        (TypeKeyId::HEAP_INFO, "heap-info"),
     ] {
         assert_eq!(
             BUILTIN_TYPE_KEYS[key.as_u32() as usize],

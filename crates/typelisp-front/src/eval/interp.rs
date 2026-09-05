@@ -16,7 +16,7 @@
 //! across an allocation: partially-built structures inside a builder, and
 //! arguments staged for a crossing into compiled code.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::rc::Rc;
@@ -48,6 +48,16 @@ mod core_eval;
 /// exactly one [`scope::ModuleScope`] tree node — its own defining module —
 /// rather than in a flat program-wide table; see that module's doc comment.
 pub struct FnDef {
+    /// This definition's link name: a free function's fully-qualified path
+    /// (`m::inc`), or a method's `type::method` — the exact spelling
+    /// [`Interp::method_key`] parses back and `compile::driver`'s
+    /// `method_link_name` builds, so the three cannot drift.
+    ///
+    /// The scope tree keys these by their *last* segment inside a namespace,
+    /// which is enough to find one but not enough to *name* one: `enter` has
+    /// an `Rc<FnDef>` in hand and nothing else. `trace` needs both — a name
+    /// to look up in its table, and a name to print.
+    pub name: String,
     /// Parameter names, including the receiver name first for instance methods.
     pub params: Vec<String>,
     /// The body's core forms, in order.
@@ -212,6 +222,30 @@ pub struct Interp {
     /// The values currently being rendered by their own `print-object`
     /// method, innermost last — [`Self::print_object`]'s re-entry guard.
     pub(crate) printing: RefCell<Vec<Value>>,
+    /// The link names `trace` is currently watching ([`FnDef::name`]).
+    ///
+    /// Here rather than a flag on each [`FnDef`] so that tracing survives
+    /// **redefinition**: redefining a function replaces the `Rc<FnDef>` in
+    /// the scope tree, and a flag on the old one would go with it. CL traces
+    /// a *name*, and so does this.
+    pub(crate) traced: RefCell<HashSet<String>>,
+    /// `!traced.is_empty()`, kept as a `Cell` so the check on the hot path in
+    /// [`Self::enter`] is a load and not a `RefCell` borrow. Every write to
+    /// `traced` updates it.
+    pub(crate) trace_armed: Cell<bool>,
+    /// How many traced (or stepped) frames are open — the indentation depth
+    /// in a trace report, and CL's own `0:`/`1:`/`2:` prefix.
+    pub(crate) trace_depth: Cell<usize>,
+    /// Whether a `(step form)` is in progress: every call reached from inside
+    /// `form` stops and asks, using the same [`Self::enter`] hook `trace`
+    /// uses. Restored by `step_core` when the form finishes, however it
+    /// finishes.
+    pub(crate) stepping: Cell<bool>,
+    /// The depth a `next` command was given at — while the current depth is
+    /// *below* it, the stepper does not ask. `usize::MAX` means "ask at every
+    /// depth", which is where a step starts and what returning to the
+    /// commanding frame restores.
+    pub(crate) step_quiet_depth: Cell<usize>,
     /// The dumps whose units this environment was built from, in the order
     /// they were applied — the bytes `(dump ...)` re-emits ahead of the
     /// session's own unit, so that what it writes is self-contained.
@@ -421,6 +455,11 @@ impl Interp {
             trait_ids: RefCell::new(HashMap::new()),
             dyn_dispatch_compiled: RefCell::new(HashSet::new()),
             printing: RefCell::new(Vec::new()),
+            traced: RefCell::new(HashSet::new()),
+            trace_armed: Cell::new(false),
+            trace_depth: Cell::new(0),
+            stepping: Cell::new(false),
+            step_quiet_depth: Cell::new(usize::MAX),
             dump_sources: RefCell::new(Vec::new()),
             recording: RefCell::new(None),
         }
@@ -1748,6 +1787,26 @@ impl Interp {
                 other => Err(EvalError::Panic(format!("getenv: argument is not a string, got {:?}", other))),
             }),
             "home-directory" => Some(Ok(typelisp_rt::sys_builtin::home_directory(heap))),
+            // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
+            // `disassemble` are *not* here — those are special forms with
+            // their own core nodes, the same way `compile` is.
+            "heap-info" => Some(Ok(typelisp_rt::sys_builtin::heap_info(heap))),
+            "dribble-start" => Some(match &args[0] {
+                Value::Str(id) => {
+                    let path = heap.string(*id).to_string();
+                    Ok(typelisp_rt::sys_builtin::dribble_start(heap, &path))
+                }
+                other => Err(EvalError::Panic(format!("dribble: argument is not a string, got {:?}", other))),
+            }),
+            "dribble-stop" => Some(Ok(typelisp_rt::sys_builtin::dribble_stop(heap))),
+            "ed-open" => Some(match (&args[0], &args[1]) {
+                (Value::Str(id), Value::Int(line)) => {
+                    let path = heap.string(*id).to_string();
+                    let line = *line;
+                    Ok(typelisp_rt::sys_builtin::ed_open(heap, &path, line))
+                }
+                other => Err(EvalError::Panic(format!("ed: arguments are not a string and a line, got {:?}", other))),
+            }),
             "sleep" => Some(match rt_f64(heap, &args[0]) {
                 Ok(secs) => typelisp_rt::sys_builtin::sleep(secs).map(|()| Value::Empty).map_err(EvalError::Panic),
                 Err(e) => Err(e),
@@ -3824,6 +3883,9 @@ pub struct Backend {
     pub handle_is_live: fn(i64) -> bool,
     /// `(compile name)`.
     pub compile_function: fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>,
+    /// `(disassemble name [llvm])` — the text, for the caller to print. The
+    /// `bool` asks for LLVM IR instead of host assembly.
+    pub disassemble_function: fn(&Interp, &mut Heap, &crate::CompileTarget, bool) -> Result<String, EvalError>,
     /// `(compile-file source output)`.
     pub compile_file: fn(&str, &str) -> Result<(), String>,
     /// `(dump path)`.
@@ -3861,6 +3923,13 @@ fn backend(who: &str) -> Result<Backend, EvalError> {
 pub(crate) fn backend_compile_function(
 ) -> Result<fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>, EvalError> {
     Ok(backend("compile")?.compile_function)
+}
+
+/// The registered backend's `(disassemble name)`, for the evaluator's own
+/// `disassemble` special form.
+pub(crate) fn backend_disassemble_function(
+) -> Result<fn(&Interp, &mut Heap, &crate::CompileTarget, bool) -> Result<String, EvalError>, EvalError> {
+    Ok(backend("disassemble")?.disassemble_function)
 }
 
 /// Runs one `llvm-*`/native-scope builtin through the registered backend.

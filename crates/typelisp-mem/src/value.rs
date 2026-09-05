@@ -175,6 +175,7 @@ pub const BUILTIN_TYPE_KEYS: &[&str] = &[
     "parsefloaterror",
     "universal-time",
     "internal-time",
+    "heap-info",
 ];
 
 impl TypeKeyId {
@@ -191,6 +192,9 @@ impl TypeKeyId {
     pub const PARSE_FLOAT_ERROR: TypeKeyId = TypeKeyId(10);
     pub const UNIVERSAL_TIME: TypeKeyId = TypeKeyId(11);
     pub const INTERNAL_TIME: TypeKeyId = TypeKeyId(12);
+    /// `(heap-info)`'s result — `room`'s report, as a struct a program can
+    /// also read the numbers out of (`crate::Heap`'s own statistics).
+    pub const HEAP_INFO: TypeKeyId = TypeKeyId(13);
 
     pub fn as_u32(&self) -> u32 {
         self.0

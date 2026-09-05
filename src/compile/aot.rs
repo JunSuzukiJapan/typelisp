@@ -852,16 +852,21 @@ fn staticlib_path() -> String {
     format!("{}/target/{}/libtypelisp_front.a", env!("CARGO_MANIFEST_DIR"), profile)
 }
 
-/// Emits `module` to an object file and links it into a native executable
-/// at `output_path` via the system `cc`. Must be called with
-/// [`crate::compile::COMPILE_LOCK`] held.
-fn write_executable(module: &Module<'static>, output_path: &str) -> Result<(), String> {
+/// A [`TargetMachine`] for the machine this process is running on.
+///
+/// Shared by the two things that turn a module into machine code:
+/// [`write_executable`], which writes an object file and links it, and
+/// `driver::disassemble_function`, which writes assembly text and shows it to
+/// a person. One target machine and one set of options, so what
+/// `disassemble` prints is the code `compile-file` would actually emit —
+/// including `OptimizationLevel::None`, which is why the assembly reads the
+/// way the IR does.
+fn host_target_machine() -> Result<TargetMachine, String> {
     Target::initialize_native(&InitializationConfig::default())
         .map_err(|e| format!("failed to initialize native target: {}", e))?;
-
     let triple = TargetMachine::get_default_triple();
     let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
-    let target_machine = target
+    target
         .create_target_machine(
             &triple,
             &TargetMachine::get_host_cpu_name().to_string(),
@@ -870,7 +875,28 @@ fn write_executable(module: &Module<'static>, output_path: &str) -> Result<(), S
             RelocMode::Default,
             CodeModel::Default,
         )
-        .ok_or_else(|| "failed to create a target machine for the host triple".to_string())?;
+        .ok_or_else(|| "failed to create a target machine for the host triple".to_string())
+}
+
+/// `module` as host assembly text — `(disassemble name)`'s answer.
+///
+/// Emitted to memory rather than to a file: the caller is showing it to a
+/// person, not linking it, so there is nothing for a temporary file to be
+/// for. Must be called with [`crate::compile::COMPILE_LOCK`] held, like every
+/// other use of the shared LLVM context.
+pub(crate) fn assembly_of(module: &Module<'static>) -> Result<String, String> {
+    let tm = host_target_machine()?;
+    let buf = tm
+        .write_to_memory_buffer(module, FileType::Assembly)
+        .map_err(|e| format!("failed to emit assembly: {}", e))?;
+    String::from_utf8(buf.as_slice().to_vec()).map_err(|e| format!("the assembler emitted invalid UTF-8: {}", e))
+}
+
+/// Emits `module` to an object file and links it into a native executable
+/// at `output_path` via the system `cc`. Must be called with
+/// [`crate::compile::COMPILE_LOCK`] held.
+fn write_executable(module: &Module<'static>, output_path: &str) -> Result<(), String> {
+    let target_machine = host_target_machine()?;
 
     // Named from `output_path` (not e.g. the process id) so it can't
     // collide across concurrently-running `cargo test` threads in the same

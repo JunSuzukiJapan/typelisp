@@ -334,7 +334,33 @@ pub(super) fn expr_form(heap: &mut Heap, form: Value) -> Result<Value, Error> {
 /// `(compile-fn (fn (WRITTEN...) (HOME...) PATH))` or
 /// `(compile-fn (method PATH SYM (HOME...)))`.
 pub(super) fn compile_fn_form(heap: &mut Heap, target: &CompileTarget) -> Result<Value, Error> {
-    let payload = match target {
+    let payload = compile_target_payload(heap, target)?;
+    core::tagged(heap, "compile-fn", &[payload])
+}
+
+/// `(trace PAYLOAD...)` / `(untrace PAYLOAD...)`, whose payloads are the same
+/// `(fn ..)`/`(method ..)` resolutions `compile-fn` carries — the four forms
+/// that name a single body all resolve it the same way, so they all travel in
+/// the same shape.
+pub(super) fn trace_form(heap: &mut Heap, tag: &str, targets: &[CompileTarget]) -> Result<Value, Error> {
+    let mut payloads = Vec::with_capacity(targets.len());
+    for t in targets {
+        payloads.push(compile_target_payload(heap, t)?);
+    }
+    core::tagged(heap, tag, &payloads)
+}
+
+/// `(disassemble-fn PAYLOAD LLVM)` — one target and whether to print LLVM IR
+/// instead of host assembly.
+pub(super) fn disassemble_fn_form(heap: &mut Heap, target: &CompileTarget, llvm_ir: bool) -> Result<Value, Error> {
+    let payload = compile_target_payload(heap, target)?;
+    core::tagged(heap, "disassemble-fn", &[payload, Value::Bool(llvm_ir)])
+}
+
+/// `(fn (WRITTEN...) (HOME...) PATH)` or `(method PATH SYM (HOME...))` — one
+/// resolved target, as the node payload every form that takes one carries.
+fn compile_target_payload(heap: &mut Heap, target: &CompileTarget) -> Result<Value, Error> {
+    match target {
         CompileTarget::Fn(r) => {
             let mut f = Items::new(heap);
             let written = sym_list(f.heap(), &r.written)?;
@@ -343,7 +369,7 @@ pub(super) fn compile_fn_form(heap: &mut Heap, target: &CompileTarget) -> Result
             f.push(home);
             let path = path_form(f.heap(), &r.resolved);
             f.push(path);
-            f.finish("fn")?
+            f.finish("fn")
         }
         CompileTarget::Method { type_name, method, home } => {
             let mut f = Items::new(heap);
@@ -353,10 +379,9 @@ pub(super) fn compile_fn_form(heap: &mut Heap, target: &CompileTarget) -> Result
             f.push(m);
             let home = sym_list(f.heap(), home)?;
             f.push(home);
-            f.finish("method")?
+            f.finish("method")
         }
-    };
-    core::tagged(heap, "compile-fn", &[payload])
+    }
 }
 
 /// A `Never`-typed placeholder for a sub-expression that failed to check.

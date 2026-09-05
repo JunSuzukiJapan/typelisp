@@ -495,6 +495,91 @@ pub fn compile_function(interp: &Interp, heap: &mut Heap, target: &CompileTarget
     Ok(Value::Bool(true))
 }
 
+/// `(disassemble name)` / `(disassemble name true)` — the machine code a
+/// definition compiles to, or the LLVM IR it compiles through.
+///
+/// Emits into a module of its own and stops before the JIT, which is what
+/// makes this *free of side effects*: nothing is installed, the definition's
+/// `compiled` slot is untouched, and a function that was interpreted before
+/// still is afterwards. Disassembling is a question, not a request to compile.
+///
+/// The declarations are exactly [`compile_scc`]'s: the function itself, every
+/// direct call target ([`call_graph_edges`]) and the whole `rt_*` table. They
+/// have to be there even though nothing is linked — the island's
+/// `compile-call` looks a callee up with `get-function`, which **aborts the
+/// process** when the declaration is missing rather than returning an error.
+/// Their *addresses* are what a JIT would need and this does not, which is
+/// why a callee that could not itself be compiled is no obstacle here: only
+/// this one body is translated.
+///
+/// Assembly by default, because that is what CL's `disassemble` promises —
+/// the instructions this machine will actually run. The LLVM IR is the same
+/// module one step earlier, and is what to look at when the question is about
+/// this compiler rather than about the chip.
+pub fn disassemble_function(
+    interp: &Interp,
+    heap: &mut Heap,
+    target: &CompileTarget,
+    llvm_ir: bool,
+) -> Result<String, EvalError> {
+    let name = match target {
+        CompileTarget::Fn(r) => {
+            interp.resolve_fn_ref(r).ok_or_else(|| {
+                EvalError::Internal(format!(
+                    "disassemble: `{}` resolved at check time but not here",
+                    r.written.join("::")
+                ))
+            })?;
+            r.resolved.to_string()
+        }
+        CompileTarget::Method { type_name, method, home } => {
+            interp.root.borrow().resolve_method(home, type_name, method).ok_or_else(|| {
+                EvalError::Internal(format!(
+                    "disassemble: `{}` resolved at check time but not here",
+                    method_link_name(type_name, method)
+                ))
+            })?;
+            method_link_name(type_name, method)
+        }
+    };
+    let symbol = crate::compile::symbols::user_symbol_name(&name);
+    let edges = call_graph_edges(interp, heap, &name)?;
+
+    let module = {
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("disassemble")));
+        crate::compile::llvm_builtins::declare_external_function(&module, &symbol);
+        for edge in &edges {
+            let target_symbol = match edge {
+                CallEdge::Fn(p) => crate::compile::symbols::user_symbol_name(&p.to_string()),
+                CallEdge::Method(t, m) => crate::compile::symbols::user_method_symbol_name(t, m),
+            };
+            if target_symbol != symbol {
+                crate::compile::llvm_builtins::declare_external_function(&module, &target_symbol);
+            }
+        }
+        for (rt_name, _) in rt_extern_functions() {
+            crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
+        }
+        module
+    };
+
+    add_compiled_function(interp, heap, module.clone(), &name, &symbol)?;
+
+    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    module
+        .borrow()
+        .verify()
+        .map_err(|e| EvalError::Panic(format!("disassemble: module failed verification: {}", e)))?;
+    if llvm_ir {
+        return Ok(module.borrow().print_to_string().to_string());
+    }
+    // Bound rather than returned directly: the `borrow()` temporary would
+    // otherwise outlive `module` in tail position.
+    let assembly = crate::compile::aot::assembly_of(&module.borrow());
+    assembly.map_err(EvalError::Panic)
+}
+
 /// Answers "would compiling `name` reach something with no compilable
 /// body?" without emitting anything.
 ///

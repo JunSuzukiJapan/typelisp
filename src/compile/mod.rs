@@ -43,6 +43,7 @@ pub fn install_llvm_backend() {
         llvm_builtin: llvm_builtins::eval_llvm_builtin_method,
         handle_is_live: |h| llvm_builtins::llvm_handle_get(h).is_some(),
         compile_function: driver::compile_function,
+        disassemble_function: driver::disassemble_function,
         compile_file: aot::compile_file,
         dump_image: dump::dump_image,
     });

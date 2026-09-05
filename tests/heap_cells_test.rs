@@ -54,3 +54,35 @@ fn zero_is_rejected() {
 fn a_missing_value_is_rejected() {
     assert_eq!(run_typl(&["--heap-cells"], ""), 1);
 }
+
+/// Like [`run_typl`], but keeps stderr: a rejection that does not say *why*
+/// is not much better than a silent one.
+fn run_typl_stderr(flags: &[&str], input: &str) -> (i32, String) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_typl"))
+        .args(flags)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to start the typl binary");
+    child.stdin.take().unwrap().write_all(input.as_bytes()).expect("failed to write stdin");
+    let out = child.wait_with_output().expect("failed to wait on typl");
+    (out.status.code().expect("typl did not exit normally"), String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+/// A capacity above `i32::MAX` is refused, and the message says what the
+/// ceiling is rather than just that the number is wrong.
+///
+/// The ceiling is not arbitrary: `room` answers with a `heap-info` whose cell
+/// counts are `i32` (`gc-count` alone is a `bignum`, being the one field an
+/// arena size does not bound). A capacity the report could not *name* would
+/// have to be truncated there, and a truncated count is a lie told at the far
+/// end from where it could still be explained. Refusing at the flag says it
+/// once, while the number is still the one the user typed.
+#[test]
+fn a_capacity_beyond_what_room_can_report_is_rejected_with_its_ceiling() {
+    let (code, err) = run_typl_stderr(&["--heap-cells", "2147483648"], "");
+    assert_eq!(code, 1, "stderr was: {}", err);
+    assert!(err.contains("more cells than this implementation can count"), "stderr was: {}", err);
+    assert!(err.contains("2147483647"), "the message names the ceiling; stderr was: {}", err);
+}

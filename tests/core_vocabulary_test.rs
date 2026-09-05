@@ -236,6 +236,37 @@ fn calls() {
     all_round_trip(&["(fn (f) () f)", "(method point new ())"]);
 }
 
+/// The REPL tool forms that name a definition: `(trace ...)` and
+/// `(untrace ...)`.
+///
+/// They carry the *same* `(fn ..)`/`(method ..)` payloads `compile-fn` does,
+/// because they ask a name the same question — which single body is this? —
+/// and share the checker's resolution for it. Unlike `compile-fn` they take
+/// any number, including none: `(trace)` is CL's "tell me what is traced" and
+/// `(untrace)` its untrace-everything.
+///
+/// No island counterpart, for the reason `compile-fn` has none: these act on
+/// the interpreter's own environment, so a compiled program has nothing for
+/// them to act on.
+#[test]
+fn repl_tools() {
+    all_round_trip(&[
+        "(trace (fn (f) () f))",
+        "(trace (fn (f) () f) (method point new ()))",
+        "(trace)",
+        "(untrace (fn (f) () f))",
+        "(untrace)",
+        // `step` is the odd one: it names no definition, it wraps a *form*.
+        // The form keeps its own type, so the node carries nothing else.
+        "(step (call (f) () f ()))",
+        // `disassemble-fn` carries the same payload plus one flag: `true`
+        // asks for LLVM IR rather than host assembly. A literal, because the
+        // answer decides what to emit.
+        "(disassemble-fn (fn (f) () f) false)",
+        "(disassemble-fn (method point new ()) true)",
+    ]);
+}
+
 // ---- data ---------------------------------------------------------------
 
 /// `construct` names the type, the variant index, and whether the value is
@@ -418,6 +449,10 @@ const EXPR_ONLY: &[&str] = &[
     "fnref",
     "methodref",
     "compile-fn",
+    "trace",
+    "untrace",
+    "step",
+    "disassemble-fn",
     "fn",
     "method",
     "pat-wild",
@@ -456,6 +491,7 @@ fn zz_the_vocabulary_is_closed() {
     variables_and_globals();
     binding_and_control();
     calls();
+    repl_tools();
     data();
     patterns();
     functions();
