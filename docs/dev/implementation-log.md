@@ -7614,6 +7614,9 @@ really? (yes/no) false
 
 ### 直さずに記録した CL との差
 
+> **2026-09-05 に解消**（この節より下の「`libc` を取って保留 4 群を閉じた」）。以下は
+> 当時の記録。
+
 **`decode-universal-time` は zone 省略時に UTC へ分解する**（CL は地方時）。
 ランタイムがタイムゾーンデータベースを持たないため。CL の 9 個の返り値のうち
 `daylight-p` と「既定の分解が使った zone」は、偽の値を返すのではなく用意していない。
@@ -10396,3 +10399,92 @@ but `sink` declares `(holder vector<char>) ()`
 `read-sequence`/`write-sequence` を `InputStream`/`OutputStream` へ上げ直せるように
 なったが、`CharInput`/`ByteInput` に置く形（要素型が具象）は層としても素直なので
 そのままにした。**穴が塞がったことと、その回避を撤回すべきかは別の判断。**
+
+---
+
+## 2026-09-05（続き 3） — `libc` を取って保留 4 群を閉じた
+
+Stage 9c が保留にしていた 3 群と `file-author` を実装した。**4 つとも同じ 1 個の依存で
+片付く**というのが判断の全部で、`std` に相当物が無いだけで `getrusage` / `uname` /
+`getpwuid_r` / `localtime_r` はどれも POSIX にある。tz データだけを解く TZif パーサを
+自前で書く（Go 方式）や、tz データベースを同梱する（Java 方式）は、1 群しか解かない上に
+後者は年数回の更新責任まで背負う。
+
+入ったもの: `get-internal-run-time`、`machine-instance` / `machine-version` /
+`software-version`、`short-site-name` / `long-site-name`、`file-author`、
+`timezone-offset-seconds` / `timezone-daylight-p`。
+
+### 「libc に依存する」で実際に変わるのはリンクではない
+
+C ライブラリには**もう繋がっている**。`otool -L target/debug/typl` は `libSystem.B.dylib`
+を出すし、`std` がその上に建っているのだから当然で、この言語の `getenv` 組み込みすら
+`std::env::var` 経由で C の `getenv` に落ちている。`libc` クレート自体もライブラリではなく、
+`extern "C"` ブロックとプラットフォーム別の `struct`/定数の定義がほぼ全部である。
+
+変わるのは **`unsafe` の持ち主**。いままで `std` が持っていた責任がこちらへ来る。
+FFI 自体は新しくもない——`extern "C"` は既に 245 箇所あり、相手は LLVM（inkwell 経由）と
+自分のランタイム `rt_*` だった。**やっていなかったのはシステムの C ライブラリを*直に*
+呼ぶことだけ。**
+
+なので `unsafe` を 1 箇所に閉じ込めた: **`crates/typelisp-rt/src/os.rs` がワークスペースで
+唯一 C ライブラリを直接呼ぶモジュール**で、公開しているのは全部*安全な*シグネチャ。
+このコードベース初の `#[cfg]` 分岐もここに入った（非 Unix は `unimplemented!()`——
+もっともらしい答えを返さない）。
+
+### `localtime_r` のスレッド安全性は、この処理系では制約であって危険ではない
+
+`localtime_r` は内部で `getenv("TZ")` し、それが**他スレッドの `setenv` と競合**する
+（[RUSTSEC-2020-0071]）。Rust はこれを libc の罪とせず、2024 edition で
+`std::env::set_var` を `unsafe` にした——縛られたのは*書く側*である。
+
+この処理系では:
+
+```
+$ grep -rn "set_var\|setenv\|remove_var" --include=*.rs crates/ src/
+（0 件）
+```
+
+環境変数を**書く**コードが 1 行も無く、実行時はほぼ単スレッド。std の doc の言葉どおり
+"sound to call in a single-threaded program" に当てはまる。**背負ったのは UB のリスクでは
+なく「`setenv` を組み込みに足さない」という制約**で、`os.rs` の doc コメントにそう書いた。
+
+[RUSTSEC-2020-0071]: https://rustsec.org/advisories/RUSTSEC-2020-0071
+
+### `decode-universal-time` の既定が地方時になった（CL 準拠）
+
+`&optional (zone i32 0)` を **`&optional (zone i32)`** にした。デフォルト式を書かなければ
+本体は `Option<i32>` を見るのに呼び出し側は裸の `9` を渡せる——**CL の supplied-p 変数が
+静的型の側に出た形**で、`(decode-universal-time ut 9)` は 1 文字も変えずに動く。
+
+`decoded-time` は 7 → **9 フィールド**（`daylight-p` / `zone` 追加）で、CL の 9 個の返り値が
+全部揃った。
+
+**`zone` は引数が `i32` 時間、結果が `f64` 時間**という非対称にした。CL の zone は有理数の
+時間数で、実在する offset は時間の整数倍とは限らない（インド +5:30、ネパール +5:45）。
+手で書く zone は整数時間なので引数は `i32` のまま、**報告値を丸めると 10 億人に対して
+黙って嘘になる**ので結果は `f64`。内部の計算は最初から**秒**で、`localtime_r` の
+`tm_gmtoff` をそのまま運ぶ（符号だけ反転——CL は西が正、`tm_gmtoff` は東が正）。
+
+`encode-universal-time` の地方時経路は**一度当てて一度直す**。成分が指すのは地方時だが、
+それを万国時に変える offset 自体が万国時の関数なので、成分を UTC とみなした瞬間の offset を
+読んで当て、その結果でもう一度読む。SBCL の同関数と手順まで同じで、あちらも
+`sb-unix::get-timezone` を 2 回呼ぶ。夏時間の切り替わりの中にある地方時はそもそも一意でなく、
+CL もどちらを取るとは言っていない。
+
+### site 名を `none` で置いたのは、前の判断の撤回ではない
+
+Stage 9c は「中身の無い定数を並べるより置かない方を選んだ」。今回置いたが、返すのは
+**`Option<string>` の `none`** であって捏造した定数ではない。CL が *or nil* を明示的に
+許している項目で、SBCL も `NIL` を返す。**`none` は答えであって、答えの不在ではない。**
+
+### 落とし穴 2 つ
+
+**`file-` は命名規約ではなく経路規則**（Stage 9c が記録したとおり）。`Interp::eval_builtin` は
+`file-` で始まる名前を全部 `stream_builtin` へ丸投げするので、`file-author` の実装は
+`sys_builtin` に置けない。組み込みを `file-owner-name` にして、CL の名前 `file-author` は
+prelude の `Pathish` ラッパにした——`file-truename`→`truename` と同じ形。
+
+**既存テストの既定が変わる**。`decode-universal-time` の zone 省略が地方時になったので、
+壁時計の値を検査していたテストは機械依存になる。全部に明示 `0` を渡して決定的に戻し、
+地方時の側には**どの地域でも成り立つ書き方**のテストを別に足した（「zone 無しの分解は、
+ランタイムが報告する offset で分解したものと一致する」）。

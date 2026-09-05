@@ -515,6 +515,7 @@ dependencies = [
 name = "typelisp-rt"
 version = "0.0.2"
 dependencies = [
+ "libc",
  "num-bigint",
  "num-integer",
  "num-rational",

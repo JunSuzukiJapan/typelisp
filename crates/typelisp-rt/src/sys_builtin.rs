@@ -35,6 +35,11 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("command-line-args", "vector<string>"),
     ("getenv", "option<string>"),
     ("home-directory", "option<string>"),
+    ("machine-instance", "option<string>"),
+    ("machine-version", "option<string>"),
+    ("software-version", "option<string>"),
+    ("timezone-offset-seconds", "option<i32>"),
+    ("timezone-daylight-p", "option<bool>"),
 ];
 
 fn key_of(name: &str) -> &'static str {
@@ -267,6 +272,92 @@ pub fn software_type(heap: &mut Heap) -> Value {
     heap.alloc_string(std::env::consts::OS.to_string())
 }
 
+// ---- What only the operating system knows -----------------------------
+//
+// The four below are the ones `std` has no equivalent of, so each is one
+// call into [`crate::os`] — the single module that owns this workspace's
+// direct C calls. Every one may honestly answer `none`; CL says so for
+// `machine-instance`, `machine-version` and `software-version` in as many
+// words ("or nil if no such ... can be determined").
+
+/// `(get-internal-run-time)` (CLHS 25.1): CPU time this process has used,
+/// user plus system, in the same microseconds `get-internal-real-time`
+/// counts.
+///
+/// The pair is the point: real time says how long you waited, run time says
+/// how long the CPU worked, and a program that is mostly blocked on I/O
+/// shows a large difference. Substituting one for the other — which is what
+/// this returned before there was a `getrusage` to call — is a lie precisely
+/// when the number is interesting.
+pub fn get_internal_run_time() -> i64 {
+    match crate::os::run_time_micros() {
+        Some(us) => us,
+        // Unreachable: `getrusage(RUSAGE_SELF, &valid)` has no failure mode.
+        // Reported rather than papered over, because a zero here would read
+        // as "this program used no CPU".
+        None => fatal("get-internal-run-time: getrusage(RUSAGE_SELF) failed"),
+    }
+}
+
+/// `(machine-instance)` (CLHS 25.1): the host's name, or `none`.
+pub fn machine_instance(heap: &mut Heap) -> Value {
+    let v = crate::os::host_name().map(|s| heap.alloc_string(s));
+    option_value(heap, "machine-instance", v)
+}
+
+/// `(machine-version)` (CLHS 25.1): the hardware this is *running* on
+/// (`Apple M1`, `Intel(R) Xeon(R) …`), or `none` where nothing can say.
+///
+/// Distinct from `machine-type`, which is `std::env::consts::ARCH` — the
+/// architecture this binary was *built* for.
+pub fn machine_version(heap: &mut Heap) -> Value {
+    let v = crate::os::machine_version().map(|s| heap.alloc_string(s));
+    option_value(heap, "machine-version", v)
+}
+
+/// `(software-version)` (CLHS 25.1): the OS release string (`uname -r`,
+/// e.g. `24.6.0`), or `none`. Its companion `software-type` is a
+/// compile-time constant and needs no call.
+pub fn software_version(heap: &mut Heap) -> Value {
+    let v = crate::os::os_release().map(|s| heap.alloc_string(s));
+    option_value(heap, "software-version", v)
+}
+
+/// The seconds a universal time is west of Greenwich in the *local* zone —
+/// the primitive under `decode-universal-time`'s and
+/// `encode-universal-time`'s no-zone default.
+///
+/// Takes the universal time already split into `day`/`second`, the two
+/// fields of the `universal-time` struct, because the whole count does not
+/// fit the `i32` a builtin argument can be. The offset depends on the
+/// instant and not just the machine (a host is 5 hours west in January and
+/// 4 in July), which is why there is an argument at all.
+///
+/// Seconds and not CL's hours because the offset is not always a whole
+/// number of them — India is +5:30, Nepal +5:45 — and the prelude divides
+/// once, into an `f64`, where the fraction survives.
+pub fn timezone_offset_seconds(heap: &mut Heap, day: i64, second: i64) -> Value {
+    let v = local_zone(day, second).map(|(west, _)| Value::Int(west as i64));
+    option_value(heap, "timezone-offset-seconds", v)
+}
+
+/// Whether daylight saving time is in force locally at that universal time —
+/// `decode-universal-time`'s `daylight-p`, CL's eighth returned value.
+pub fn timezone_daylight_p(heap: &mut Heap, day: i64, second: i64) -> Value {
+    let v = local_zone(day, second).map(|(_, dst)| Value::Bool(dst));
+    option_value(heap, "timezone-daylight-p", v)
+}
+
+/// `(seconds west, daylight in force)` for a universal time, or `None` when
+/// the C library cannot represent that instant. The CL epoch is
+/// 2_208_988_800 seconds before the Unix one; `i64` is wide enough that only
+/// an absurd `day` overflows, and that arrives as the same `None`.
+fn local_zone(day: i64, second: i64) -> Option<(i32, bool)> {
+    const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
+    let unix = day.checked_mul(SECS_PER_DAY)?.checked_add(second)?.checked_sub(UNIX_TO_CL_EPOCH_SECS)?;
+    crate::os::timezone_at(unix)
+}
+
 // ---- The compiled-code edge -------------------------------------------
 //
 // The `#[no_mangle]` shims live *beside* their implementation rather than in
@@ -471,6 +562,80 @@ pub unsafe extern "C" fn rt_machine_type(_args: *const i64, _argc: u32) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn rt_software_type(_args: *const i64, _argc: u32) -> i64 {
     encode(software_type(active_heap()))
+}
+
+/// `(get-internal-run-time)` for compiled code — a tagged `internal-time`
+/// struct, like [`rt_get_internal_real_time`].
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_get_internal_run_time(_args: *const i64, _argc: u32) -> i64 {
+    let v = internal_time_value(active_heap(), get_internal_run_time());
+    encode(v)
+}
+
+/// `(machine-instance)` for compiled code.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_machine_instance(_args: *const i64, _argc: u32) -> i64 {
+    encode(machine_instance(active_heap()))
+}
+
+/// `(machine-version)` for compiled code.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_machine_version(_args: *const i64, _argc: u32) -> i64 {
+    encode(machine_version(active_heap()))
+}
+
+/// `(software-version)` for compiled code.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_software_version(_args: *const i64, _argc: u32) -> i64 {
+    encode(software_version(active_heap()))
+}
+
+/// `(timezone-offset-seconds day second)` for compiled code. Both arguments
+/// are `i32`s, so both arrive as bare machine words.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to two valid `i64`s; a `Heap`
+/// must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_timezone_offset_seconds(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_timezone_offset_seconds: expected 2 arguments");
+    }
+    encode(timezone_offset_seconds(active_heap(), *args, *args.add(1)))
+}
+
+/// `(timezone-daylight-p day second)` for compiled code.
+///
+/// # Safety
+///
+/// Same as [`rt_timezone_offset_seconds`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_timezone_daylight_p(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_timezone_daylight_p: expected 2 arguments");
+    }
+    encode(timezone_daylight_p(active_heap(), *args, *args.add(1)))
 }
 
 /// `(exit code)` for compiled code: terminates the process through the OS

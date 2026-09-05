@@ -151,7 +151,7 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 18] = [
+    const PRELUDE_PRIVATE: [&str; 22] = [
         "unwrap-io",
         // The bridge the *reader* calls a macro character's function
         // through (Stage 8c): it wraps the unread text in a stream, calls
@@ -167,6 +167,16 @@ fn is_excluded(name: &str) -> bool {
         // The civil-calendar formula under `encode-universal-time` /
         // `decode-universal-time` (Phase 9c). A user writes those two.
         "days-from-civil",
+        // The rest of the universal-time machinery, private for the same
+        // reason: `ut-shift` renormalises a `(day, second)` pair after
+        // adding an offset, `decode-at-west` is the shared body of both of
+        // `decode-universal-time`'s arms, and the two `local-zone-*` turn
+        // the runtime's `Option` into a value or a panic. A user writes
+        // `decode-`/`encode-universal-time`.
+        "ut-shift",
+        "decode-at-west",
+        "local-zone-west",
+        "local-zone-daylight",
         // `Array<T>`'s subscript arithmetic (Phase 6b): `array-decode` is
         // `row-major-index`'s inverse and `array-subs-in-bounds` its
         // range test, both used only by `adjust` walking the new index

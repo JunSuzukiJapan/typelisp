@@ -73,6 +73,7 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("file-delete", "result<(),fileerror>"),
     ("file-truename", "result<string,fileerror>"),
     ("file-modified-date", "result<universal-time,fileerror>"),
+    ("file-owner-name", "result<option<string>,fileerror>"),
     ("file-list-directory", "result<vector<string>,fileerror>"),
     ("file-create-directories", "result<(),fileerror>"),
     ("file-rename", "result<(),fileerror>"),
@@ -84,6 +85,7 @@ pub const INNER_KEYS: &[(&str, &str)] = &[
     ("stream-read-char", "option<char>"),
     ("stream-read-byte", "option<i32>"),
     ("file-list-directory", "vector<string>"),
+    ("file-owner-name", "option<string>"),
 ];
 
 fn lookup(table: &[(&str, &'static str)], name: &str, what: &str) -> &'static str {
@@ -321,6 +323,23 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
                     Err(e) => Ok(result_err(heap, name, format!("file-write-date: {}: timestamp precedes the Unix epoch: {}", p, e))),
                 },
                 Err(e) => Ok(result_err(heap, name, format!("file-write-date: {}: {}", p, e))),
+            }
+        }
+        // CL's `file-author`, under a `file-`-prefixed name because that
+        // prefix is what routes a builtin here at all (see the note above).
+        // Two failures that CL keeps apart stay apart: a missing file is an
+        // `Err`, an owner with no password-database entry is `Ok(none)` —
+        // which is exactly what CL means by "or nil if the author's name
+        // cannot be determined".
+        "file-owner-name" => {
+            let p = arg!(text(heap, args, 0, name));
+            match crate::os::file_owner(&p) {
+                Ok(who) => {
+                    let inner = who.map(|s| heap.alloc_string(s));
+                    let ov = option_value(heap, name, inner);
+                    Ok(result_ok(heap, name, ov))
+                }
+                Err(e) => Ok(result_err(heap, name, format!("file-author: {}: {}", p, e))),
             }
         }
         // `false` for a plain file *and* for something that isn't there —

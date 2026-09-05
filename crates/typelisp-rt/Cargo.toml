@@ -21,3 +21,13 @@ num-bigint = "0.4"
 num-rational = "0.4"
 num-traits = "0.2"
 num-integer = "0.1"
+# The one dependency that is not pure Rust: the C library's own declarations.
+# `libc` is (almost) not a library at all — it is `extern "C"` blocks plus the
+# per-platform `struct`/constant definitions — and the code behind them is the
+# system C library this process already links (`std` is built on it). What
+# changes by taking it is not the link line but *who owns the `unsafe`*: these
+# calls no longer go through a `std` wrapper. Taken for the four things `std`
+# has no equivalent of, all in `sys_builtin`/`stream_builtin`: CPU time
+# (`getrusage`), the host's name and OS release (`uname`), a file's owner
+# (`getpwuid_r`) and the local time zone (`localtime_r`).
+libc = "0.2"

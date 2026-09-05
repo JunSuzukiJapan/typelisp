@@ -682,6 +682,13 @@ impl Registry {
         // field subtractions.
         root.fns.insert("get-universal-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: universal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("get-internal-real-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: internal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // `get-internal-run-time` (CLHS 25.1): the same unit and the same
+        // struct, but CPU time (`getrusage`) instead of elapsed time. The
+        // pair is the point — a program blocked on I/O shows a large
+        // difference, and that difference is exactly what a single "real
+        // time" figure hides. Left out until 2026-09-05 because standing in
+        // real time for it would have been a lie.
+        root.fns.insert("get-internal-run-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: internal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `parse-int`/`parse-float`: untrusted-text numeric parsing
         // (`docs/language-design.md` §4.1's planned conversion catalog) —
         // `Result`, not a panic, since the input is runtime text the caller
@@ -1158,6 +1165,10 @@ fn register_stream_builtins(root: &mut Namespace) {
         result_of(Type::Named(Path::root("vector"), vec![Type::Str]), file_err.clone()),
     );
     native("file-create-directories", vec![Type::Str], unit_or_err);
+    // CL's `file-author`, spelled with the routing prefix. `Option` inside
+    // the `Result` because CL separates the two failures: the file not being
+    // there is an error, an owner with no password-database entry is `NIL`.
+    native("file-owner-name", vec![Type::Str], result_of(option_of(Type::Str), file_err.clone()));
 }
 
 /// The environment the program is running in (CLHS 25.1) — plus the two
@@ -1205,6 +1216,21 @@ fn register_system_builtins(root: &mut Namespace) {
     native("lisp-implementation-version", vec![], Type::Str);
     native("machine-type", vec![], Type::Str);
     native("software-type", vec![], Type::Str);
+    // The three CLHS 25.1 names that need the host rather than a build-time
+    // constant, and that CL explicitly lets answer `NIL`. `machine-version`
+    // is the chip this is *running* on; `machine-type` above is the
+    // architecture the binary was *built* for.
+    native("machine-instance", vec![], option_of(Type::Str));
+    native("machine-version", vec![], option_of(Type::Str));
+    native("software-version", vec![], option_of(Type::Str));
+    // The local time zone at a given universal time — the primitive under
+    // `decode-`/`encode-universal-time`'s no-zone default, which is CL's
+    // local time. Split into `day`/`second` because a whole universal time
+    // does not fit an `i32`, and reported in *seconds* west because the
+    // offset is not always a whole number of hours (India is +5:30).
+    // `none` when the C library cannot represent that instant.
+    native("timezone-offset-seconds", vec![Type::I32, Type::I32], option_of(Type::I32));
+    native("timezone-daylight-p", vec![Type::I32, Type::I32], option_of(Type::Bool));
 }
 
 /// The type of a reader macro: what `set-macro-character` stores and what the

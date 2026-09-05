@@ -1426,18 +1426,25 @@ readtable に「終端かどうか」の区別を持たせていないので、�
    AOT 側は `build_main_wrapper` の `main` が `argc`/`argv` を取らないが、Rust の `std` は
    プロセス開始時に argv を捕まえている（macOS は `_NSGetArgv`、Linux は `.init_array`）ので
    そのまま読める。**両方の走らせ方で実際に確かめた**——同じソースが同じ添字で同じ引数を読む。
-4. **保留: `get-internal-run-time`（CPU 時間）と `file-author`。** どちらも `libc`
-   （`getrusage` / uid→名前）が要り、ワークスペースは `libc` に依存していない。
-   実時間で CPU 時間を代用すると嘘になる。
-5. **保留: `machine-version` / `machine-instance` / `software-version` /
-   `short-site-name` / `long-site-name`。** ホスト名に `libc` が要り、残りは CL でも `NIL`
-   を返してよい。中身の無い定数を並べるより置かない方を選んだ。
-6. **保留: `trace` / `untrace` / `step` / `disassemble` / `room` / `ed` / `dribble`。**
-   REPL のツール層で、このカタログとは別の作業。
-7. **見つけた CL との差（直していない）**: `decode-universal-time` は zone 省略時に
-   **UTC** へ分解する（CL は地方時）。タイムゾーンデータベースが無いため。
-   CL の 9 個の返り値のうち `daylight-p` と「既定の分解が使った zone」は、
-   偽の値を返すのではなく用意していない。CL にもある明示 zone 引数が代わり。
+4. **保留だった 3 群は 2026-09-05 に解消**（下記「libc を取った」）。残る保留は
+   `trace` / `untrace` / `step` / `disassemble` / `room` / `ed` / `dribble` だけで、
+   これは REPL のツール層——このカタログとは別の作業。
+
+### libc を取った（2026-09-05）
+
+上の 3 群（CPU 時間 / ホストの素性 / タイムゾーン）と `file-author` は**同じ 1 個の依存**で
+片付く。`std` に相当物が無いだけで、`getrusage` / `uname` / `getpwuid_r` / `localtime_r` は
+どれも POSIX にある。4 つ同時に解けるなら依存 1 つは安いと判断し、`typelisp-rt` に
+`libc` を足した。詳細と設計判断は
+[implementation-log.md](implementation-log.md) の「libc を取って保留 4 群を閉じた」。
+
+入ったもの: `get-internal-run-time`、`machine-instance` / `machine-version` /
+`software-version`、`short-site-name` / `long-site-name`（常に `none`＝CL が認める答え）、
+`file-author`、`timezone-offset-seconds` / `timezone-daylight-p`。
+
+**`decode-universal-time` の既定が UTC から地方時に変わった**（CL 準拠）。`decoded-time` は
+7 フィールドから **9 フィールド**になり、CL の 9 個の返り値が全部揃った。`time` マクロは
+実時間に加えて CPU 時間も印字する。
 
 ### Stage 9d — ストリーム残差
 

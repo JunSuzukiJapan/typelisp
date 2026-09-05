@@ -94,6 +94,14 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "lisp-implementation-version" => "rt_lisp_implementation_version",
         "machine-type" => "rt_machine_type",
         "software-type" => "rt_software_type",
+        // The four CLHS 25.1 names that ask the running host, and the two
+        // time-zone primitives under `decode-`/`encode-universal-time`.
+        "get-internal-run-time" => "rt_get_internal_run_time",
+        "machine-instance" => "rt_machine_instance",
+        "machine-version" => "rt_machine_version",
+        "software-version" => "rt_software_version",
+        "timezone-offset-seconds" => "rt_timezone_offset_seconds",
+        "timezone-daylight-p" => "rt_timezone_daylight_p",
         "exit" => "rt_exit",
         // `read` (`typelisp_read::shim`), which could not lower while the
         // reader was a module of this crate: a shim naming it would have had
@@ -171,6 +179,7 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "file-delete" => "rt_file_delete",
         "file-truename" => "rt_file_truename",
         "file-modified-date" => "rt_file_modified_date",
+        "file-owner-name" => "rt_file_owner_name",
         "file-directory-p" => "rt_file_directory_p",
         "file-list-directory" => "rt_file_list_directory",
         "file-create-directories" => "rt_file_create_directories",
@@ -381,7 +390,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 232] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 239] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -394,9 +403,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 232] {
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
     use typelisp_rt::sys_builtin::{
-        rt_command_line_args, rt_exit, rt_get_internal_real_time, rt_get_universal_time, rt_getenv,
-        rt_home_directory, rt_lisp_implementation_version, rt_machine_type, rt_parse_float,
-        rt_parse_int, rt_sleep, rt_software_type,
+        rt_command_line_args, rt_exit, rt_get_internal_real_time, rt_get_internal_run_time,
+        rt_get_universal_time, rt_getenv, rt_home_directory, rt_lisp_implementation_version,
+        rt_machine_instance, rt_machine_type, rt_machine_version, rt_parse_float, rt_parse_int,
+        rt_sleep, rt_software_type, rt_software_version, rt_timezone_daylight_p,
+        rt_timezone_offset_seconds,
     };
     use typelisp_rt::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
@@ -404,7 +415,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 232] {
         rt_make_random_state_fresh, rt_random_state_copy, rt_random_state_next, rt_seed_random_state,
 
         rt_file_create_directories, rt_file_delete, rt_file_directory_p, rt_file_exists_p,
-        rt_file_list_directory, rt_file_modified_date, rt_file_rename, rt_file_truename,
+        rt_file_list_directory, rt_file_modified_date, rt_file_owner_name, rt_file_rename,
+        rt_file_truename,
         rt_stream_at_line_start, rt_stream_close,
         rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p,
         rt_stream_output_p, rt_stream_position, rt_stream_read_byte, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
@@ -678,6 +690,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 232] {
         ("rt_file_rename", rt_file_rename as usize),
         ("rt_file_truename", rt_file_truename as usize),
         ("rt_file_modified_date", rt_file_modified_date as usize),
+        ("rt_file_owner_name", rt_file_owner_name as usize),
         ("rt_file_directory_p", rt_file_directory_p as usize),
         ("rt_file_list_directory", rt_file_list_directory as usize),
         ("rt_file_create_directories", rt_file_create_directories as usize),
@@ -686,6 +699,12 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 232] {
         ("rt_home_directory", rt_home_directory as usize),
         ("rt_lisp_implementation_version", rt_lisp_implementation_version as usize),
         ("rt_machine_type", rt_machine_type as usize),
+        ("rt_get_internal_run_time", rt_get_internal_run_time as usize),
+        ("rt_machine_instance", rt_machine_instance as usize),
+        ("rt_machine_version", rt_machine_version as usize),
+        ("rt_software_version", rt_software_version as usize),
+        ("rt_timezone_offset_seconds", rt_timezone_offset_seconds as usize),
+        ("rt_timezone_daylight_p", rt_timezone_daylight_p as usize),
         ("rt_software_type", rt_software_type as usize),
         ("rt_bignum_cmp", rt_bignum_cmp as usize),
         ("rt_bignum_to_int", rt_bignum_to_int as usize),

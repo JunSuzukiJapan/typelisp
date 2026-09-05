@@ -376,30 +376,44 @@ xorshift64 で、インタプリタと compiled コードは同じ列を返す�
 | `internal-time` | — | `defstruct` | `second` と `microsecond`（その秒の中、0..999999）の2フィールド |
 | `get-universal-time` | `(get-universal-time)` | `()→universal-time` | CL の紀元（1900-01-01 UTC）からの時刻 |
 | `get-internal-real-time` | `(get-internal-real-time)` | `()→internal-time` | プロセス基準の経過時間 |
+| `get-internal-run-time` | `(get-internal-run-time)` | `()→internal-time` | このプロセスが使った **CPU 時間**（ユーザ＋システム、`getrusage`）|
 | `internal-time-seconds` | `(internal-time-seconds it)` | `internal-time→f64` | 秒数として。2つの読みの差を報告するときの形 |
 | `internal-time-units-per-second` | — | `i32` | `1000000`（マイクロ秒）＝`microsecond` フィールドの単位。CL 同様、値は処理系の選択 |
-| `time` | `(time form)` | マクロ | `form` を実行し、かかった実時間を1行印字して `form` の値をそのまま返す |
+| `time` | `(time form)` | マクロ | `form` を実行し、実時間と CPU 時間を1行ずつ印字して `form` の値をそのまま返す |
+
+実時間と CPU 時間は別のことを言う。I/O 待ちが主な処理は両者が大きく開き、その差こそが
+知りたい情報なので、`time` は両方を出す。
 
 #### 日時への分解・合成
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `decoded-time` | — | `defstruct` | `second` / `minute` / `hour` / `date` / `month` / `year` / `day-of-week` の7フィールド。CL の9個の返り値の代わり（多値が無いため） |
-| `decode-universal-time` | `(decode-universal-time ut &optional zone)` | `(universal-time,i32)→decoded-time` | 万国時を暦の成分へ。`zone` はグリニッジ以西の時間数（CL と同じ向き）、既定 `0`＝UTC |
-| `encode-universal-time` | `(encode-universal-time sec min hour date month year &optional zone)` | `(i32×6,i32)→universal-time` | 逆向き |
-| `get-decoded-time` | `(get-decoded-time)` | `()→decoded-time` | いまを分解したもの |
+| `decoded-time` | — | `defstruct` | `second` / `minute` / `hour` / `date` / `month` / `year` / `day-of-week` / `daylight-p` / `zone` の**9フィールド**。CL の9個の返り値を1つの構造体にしたもの（多値が無いため） |
+| `decode-universal-time` | `(decode-universal-time ut &optional zone)` | `(universal-time,i32)→decoded-time` | 万国時を暦の成分へ。`zone` はグリニッジ以西の時間数（CL と同じ向き）。**省略すると地方時**（CL と同じ） |
+| `encode-universal-time` | `(encode-universal-time sec min hour date month year &optional zone)` | `(i32×6,i32)→universal-time` | 逆向き。`zone` を省くと引数は**地方時**として読まれる |
+| `get-decoded-time` | `(get-decoded-time)` | `()→decoded-time` | いまを地方時で分解したもの |
+| `timezone-offset-seconds` | `(timezone-offset-seconds day second)` | `(i32,i32)→Option<i32>` | その万国時における地方時のグリニッジ以西**秒**数。上2つの既定の土台 |
+| `timezone-daylight-p` | `(timezone-daylight-p day second)` | `(i32,i32)→Option<bool>` | その万国時に夏時間が施行されていたか |
 
 `day-of-week` は CL と同じく **0 が月曜、6 が日曜**。万国時 0（1900-01-01）が月曜なので、
 単なる剰余で出る。暦の計算は Howard Hinnant の `civil_from_days` / `days_from_civil` を
 CL の紀元へずらしたもので、表も閏年の場合分けも持たない厳密な整数演算。
 
-**CL との違い**: CL の `decode-universal-time` は zone 引数を省くと**地方時**へ分解するが、
-ここでは **UTC** へ分解する。この処理系のランタイムはタイムゾーンのデータベースを持たないので、
-CL の9個の返り値のうち `daylight-p` と「既定の分解が使った zone」の2つは、
-偽の値を返すのではなく**用意していない**。明示的な zone を渡す形（CL にもある）が代わり。
+**zone を省くと地方時**——CL と同じ。offset は OS に訊く（`localtime_r`）ので、機械が
+どの地域にあるかで結果が変わる。**明示的な zone を渡せば決定的**になり、`0` は UTC。
 
-CPU 時間（`get-internal-run-time`）は無い。`libc` の `getrusage` が要るが、
-このワークスペースは `libc` に依存していない——実時間で代用すると嘘になるので置いていない。
+`zone` の単位は CL と同じ「グリニッジ以西の**時間**数」で、UTC+9 は `-9` と読む。ただし
+**引数は整数、結果の `zone` フィールドは `f64`**。実在するオフセットは時間の整数倍とは限らず
+（インドは +5:30、ネパールは +5:45）、報告値を丸めると黙って嘘になるため。手で書く zone は
+整数時間なので引数側は `i32` のままにしてある。
+
+`zone` を明示したときは CL の規定どおり `daylight-p` は `false`、`zone` は渡した値そのもの
+（*If a time-zone is supplied, daylight saving time information is ignored*）。
+
+`encode-universal-time` の地方時経路は「一度当てて一度直す」——成分が指すのは地方時だが、
+それを万国時に変える offset 自体が万国時の関数なので、成分を UTC とみなした瞬間の offset を
+読んで当て、その結果でもう一度読む。SBCL の同関数と同じ手順。夏時間の切り替わりの中にある
+地方時はそもそも一意でなく、CL もどちらを取るとは言っていない。
 
 ### 4.7 実行環境
 
@@ -410,12 +424,22 @@ CPU 時間（`get-internal-run-time`）は無い。`libc` の `getrusage` が要
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`。`user-homedir-pathname`（§19.2）の土台 |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | Cargo のパッケージ版数 |
-| `machine-type` | `(machine-type)` | `()→string` | CPU アーキテクチャ（`x86_64` / `aarch64` …） |
+| `machine-type` | `(machine-type)` | `()→string` | CPU アーキテクチャ（`x86_64` / `aarch64` …）。**ビルド先**の値 |
+| `machine-instance` | `(machine-instance)` | `()→Option<string>` | ホスト名（`uname` の `nodename`） |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | **実行中**のハードウェア名（`Apple M1` / `Intel(R) Xeon(R) …`）。分からない環境では `none` |
 | `software-type` | `(software-type)` | `()→string` | OS（`macos` / `linux` …） |
+| `software-version` | `(software-version)` | `()→Option<string>` | OS のリリース（`uname -r`、例 `24.6.0`）|
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | 設置場所の短い名前。**常に `none`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | 同じく長い名前。**常に `none`** |
 | `sleep` | `(sleep secs)` | `f64→()` | `secs` 秒だけこのスレッドを止める。負や NaN は panic |
 
 `sleep` は CL と同じ**秒**。整数リテラルは浮動小数点数に馴染まない（Rust と同じ規則）ので、
 CL の `(sleep 1)` はここでは `(sleep 1.0)` と書く——`(sleep 1)` は型エラーになる。
+
+`Option` を返すものは CL が `NIL` を許している項目（*or nil if no such name can be
+determined*）。site 名は POSIX に記録場所が無いので常に `none` ——これは捏造した定数ではなく
+CL が認める答えで、SBCL も同じものを返す。`machine-type` と `machine-version` の違いに注意:
+前者はこのバイナリが**ビルドされた**アーキテクチャ、後者はいま**動いている**チップ。
 
 `command-line-args` の要素0は、`typl script.typl a b` ならスクリプトのパス、AOT 実行ファイル
 `./prog a b` なら実行ファイル自身。**どちらの走らせ方でも同じ添字で同じ引数が読める**ようにこう
@@ -1844,6 +1868,7 @@ native 層でも拒否する——次の文字の UTF-8 エンコーディング
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | 削除・改名（引数は `Pathish`） |
 | `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | シンボリックリンクと `.`/`..` を解いた絶対パス。存在しなければ `Err` |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | 最終更新時刻。**万国時**なので `decode-universal-time`（§4.6）が読める |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 所有者のログイン名。ファイルが無ければ `Err`、所有者の uid にパスワードデータベースの項目が無ければ `Ok(none)`——CL が分けている2つをそのまま分けている |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | ディレクトリか。**無い場合も `false`** ——両者を分けるのは `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 中身を絶対パスで並べる。`.`/`..` は入らない。順序は OS のまま |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | 親ごと作る。既にあれば成功（「ensure」の意味） |
