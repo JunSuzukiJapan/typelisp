@@ -227,8 +227,7 @@ prelude.rs:95-104 が既に選んでいた道（"redesigned on top of `Vector<T>
 
 ### Stage 1c — CL 残差
 
-**状態: 完了（2026-08-20）**、ただし 1 項目は保留（下記の 3）。乱数のシードは
-2026-09-03 に解消。実装は `prelude.rs` の `SOURCE`
+**状態: 完了（2026-08-20、保留 2 項目とも 2026-09-03 に解消）。** 実装は `prelude.rs` の `SOURCE`
 （`gcd`/`lcm` のアリティだけ checker 糖衣）で、`PRELUDE_COMPILE_UNSUPPORTED` に穴を開けずに
 通っている。テストは `tests/numeric_catalog_test.rs`（8 本）、ドキュメントは
 [functions.md](../functions.md) §1／§2／§4.1／§4.3。
@@ -566,8 +565,11 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
 
 ### Stage 4a — 脱出と代入
 
-**状態: 部分完了（2026-08-20）。** マクロで書ける半分は入った。テストは
-`tests/control_forms_test.rs`（6 本）、ドキュメントは [syntax.md](../syntax.md) §4／§5／§7。
+**状態: 完了（`block`/`return-from` が 2026-09-04、残りが 2026-09-05）。**
+`prog`/`prog*` だけは非採用（下記）。テストは `tests/control_forms_test.rs`（20 本）、
+`tests/block_test.rs`（26 本）、`tests/environment_catalog_test.rs` の `sleep` 2 本、
+`loop` の `:named` は Stage 4b 側（`tests/loop_dsl_test.rs`）。ドキュメントは
+[syntax.md](../syntax.md) §4／§5／§5.0／§7 と [functions.md](../functions.md) §4.7。
 
 入ったもの: `prog1`/`prog2`、`do*`、`ecase`/`ccase`、`setq`/`psetq`/`psetf`、`pushnew`。
 いずれも prelude の `defmacro`（`pushnew` だけ `Vector<T>` の `defmethod`）。
@@ -634,9 +636,9 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
 
 ### Stage 4b — 拡張 `loop` DSL
 
-**状態: 完了（2026-08-21）、`:named` を除く。** 実装は
+**状態: 完了（2026-08-21、`:named` は 2026-09-05）。** 実装は
 `crates/typelisp-front/src/check/loop_dsl.rs`（節の読み取りと再構成）と
-`Checker::check_loop_dsl`（型を決める側）、テストは `tests/loop_dsl_test.rs`（20 本）、
+`Checker::check_loop_dsl`（型を決める側）、テストは `tests/loop_dsl_test.rs`（28 本）、
 ドキュメントは [syntax.md](../syntax.md) §5.1。
 
 分岐は Phase 0.6 の結論どおり **第 1 要素がキーワードかどうか**。CL 自身の simple loop
@@ -674,9 +676,11 @@ acc)` へ展開すれば要素型が推論で決まる」——決まらない:
 
 ### Stage 4c — 評価とマクロ
 
-**状態: 部分完了（2026-08-21）。** 入ったのは `macroexpand`/`macroexpand-1`、`complement`、
-`gensym` のプレフィクス引数と `*gensym-counter*`。テストは `tests/macro_tools_test.rs`、
-ドキュメントは [functions.md](../functions.md) §14。
+**状態: 完了（2026-08-21、`macrolet`/`symbol-macrolet` が 2026-09-03）。** 入ったのは
+`macroexpand`/`macroexpand-1`、`complement`、`gensym` のプレフィクス引数と
+`*gensym-counter*`、`macrolet`/`symbol-macrolet`。残りは「入れない」理由つきで確定
+（下記）。テストは `tests/macro_tools_test.rs`、ドキュメントは
+[functions.md](../functions.md) §14／§14.1。
 
 **`macroexpand-1` は `Option<Sexpr>` を返す。** CL は「展開したか」を第 2 返り値で伝えるが
 多値が無いので、`none` が「マクロ呼び出しではない」を表す。CL の真偽値より情報が多い——
