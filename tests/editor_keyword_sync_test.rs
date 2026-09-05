@@ -138,6 +138,10 @@ fn is_excluded(name: &str) -> bool {
     // user's own special variable gets the same treatment.
     let earmuffed = name.len() > 2 && name.starts_with('*') && name.ends_with('*');
 
+    // `destructuring-bind`'s expansion helpers. Half run inside the macro to
+    // build the expansion and half inside the expansion to check the shape;
+    // a user writes `destructuring-bind` and never one of these.
+    let dbind_helper = name.starts_with("dbind-");
     // The native stream layer (`check::registry::register_stream_builtins`).
     // These take an opaque `i32` handle and exist only for the prelude's
     // trait implementations to call; a user writes `read-char`/`write-string`
@@ -147,8 +151,14 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 17] = [
+    const PRELUDE_PRIVATE: [&str; 18] = [
         "unwrap-io",
+        // The bridge the *reader* calls a macro character's function
+        // through (Stage 8c): it wraps the unread text in a stream, calls
+        // the function, and reports how much of it was consumed. Reached
+        // only from Rust (`Interp::call_reader_macro_fn`); a user writes
+        // `set-macro-character`.
+        "call-reader-macro",
         "io-ok",
         "split-on-slash",
         "name-type-dot",
@@ -214,6 +224,7 @@ fn is_excluded(name: &str) -> bool {
         || datum_scanner
         || case_expander
         || hashtable_bucket
+        || dbind_helper
         || PRELUDE_PRIVATE.contains(&name)
         || name.ends_with("-rt")
         || ISLAND_PREFIXES.iter().any(|p| name.starts_with(p))

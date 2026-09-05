@@ -595,16 +595,31 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
   自分の cleanup ブロックへ束縛し直す形にした。根の切り詰めを**脱出地点ではなく block の
   出口**へ移したのが鍵で、これで連鎖の途中は「自分が最後かどうか」を知らなくてよくなる。
 
-**残っているもの（それぞれ理由つき）**:
+**残りも完了（2026-09-05）。Phase 4 全完了**:
 
-- **`prog` / `prog*`** — CL では `block nil` ＋ `tagbody` の糖衣。`block` は入ったが
-  `tagbody` は goto なので対象外。残るのは「`tagbody` 抜きの `prog`」の是非の判断。
-- **`destructuring-bind`** — `defmacro` のラムダリストは分配束縛できるが、あれは全て
-  無型の `Sexpr`。式としての `destructuring-bind` は束縛される各変数に静的型を与える
-  必要があり、`Sexpr` の異種の入れ子から型を取り出す手段が無い（`match` の downcast
-  パターンが相当する既存機構）。**設計判断が要る項目**で、片手間には入らない。
+- **`loop` の `:named`** — `Plan` に `named` を足し、`build` の最外周を `(block name …)` で
+  包むだけ。`block` が入った時点で機械的になっていた。`:finally` の外側なので、名前つきの
+  脱出は CL どおりエピローグを飛ばす。テストは `tests/loop_dsl_test.rs`（+8 本、計 28 本）。
+  無名のループには block を張らない——CL は `block nil` を張るが、ここに `nil` は無く、
+  `break`/`return` が既に「直近のループを抜ける」を持っている。
+- **`destructuring-bind`** — **プランの前提が誤っていた**。「束縛される各変数に静的型を
+  与える必要があり、`Sexpr` の異種の入れ子から型を取り出す手段が無い」——取り出すべき型が
+  最初から無い。S 式リストがこの言語で唯一のリストなので、束縛される変数は全部
+  `Option<Sexpr>`、`defmacro` のラムダリストとまったく同じ。判断は「型をどうするか」では
+  なく「どの層に置くか」で、**prelude のマクロ**にした（checker には 1 行も足していない）。
+  展開は入れ子の `let*`——入れ子の `match` は、デフォルトつき引数のたびに残り全体を両腕に
+  複製することになる。形が合わなければ panic、入れ子のラムダリストは**黙って誤読せず
+  拒否**する（`(b c)` を「b、既定は c」と読んでサブリストを `b` に束縛してしまうため）。
+  テストは `tests/control_forms_test.rs`（+13 本）。
+- **`sleep`** — `f64` の秒（CL と同じ単位）。整数リテラルは浮動小数点数に馴染まない
+  （Rust と同じ規則）ので `(sleep 1)` は型エラー、`(sleep 1.0)` と書く。
+  テストは `tests/environment_catalog_test.rs`（+2 本）。
+- **`prog` / `prog*`** — **入れない**。CL では `block nil` ＋ `tagbody` の糖衣で、
+  `tagbody` は goto なので対象外。残るのは `(block ??? (let vars body))` だけ——`let` も
+  `block` も既に在り、そちらのほうが読める。ブロック名は CL では `nil` だが、この言語に
+  `nil` は無く、`prog` のためだけに名前空間へ 1 つ持ち込む理由が無い。加えて `(return x)` は
+  ここでは「直近のループを抜ける」なので、CL のコードを貼っても動かない。
 - **`remf`** — プロパティリストごと対象外（Phase 3c の判断）。
-- **`sleep`** — Rust 組み込みが要る（§2-4 の触点フルセット）。
 
 
 - ~~**`block` / `return-from`**（本 Phase の主役）~~ — 2026-09-04 完了（上記）。
@@ -612,7 +627,7 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
   静的な脱出のまま、`catch`/`throw` には落としていない。
 - `setq` / `psetq` / `psetf`（place 機構自体は 2026-07-30 に入っているが、この 3 つは未実装）
 - `pushnew` / `remf`
-- `prog` / `prog*` / `prog1` / `prog2`、`do*`
+- `prog1` / `prog2`、`do*`（`prog`/`prog*` は非採用——上記）
 - `destructuring-bind`（`defmacro` のラムダリストでは分配束縛できるが、式としては無い）
 - `ecase` / `ccase`（網羅性を要求する `case`。checker が枝を検査する）
 - `sleep`
@@ -1157,12 +1172,13 @@ CL の `read` に合わせ（1 文字消費する。端末で打った form が�
 **`read-delimited-list`**。終端文字まで読み、終端は消費する。入力が尽きたら短いリストでは
 なく `Err`（CL も上げる。読めた分を返すと間違いが隠れる）。CL の第 3 引数 `recursive-p` には
 対応物が無い——あれは「この呼び出しはリーダマクロの中だ」と CL のリーダに伝えるためのもので、
-リーダマクロが無い以上、伝える相手がいない。
+伝えるべき呼び出し間の状態（`#n=` ラベルなど）がこのリーダに無い以上、
+リーダマクロからの読みが他と違う種類の読みにならない。
 
 **副産物として本物のバグを 1 件修正**: 終端文字がトークンを終わらせていなかった。
 `(read-delimited-list #\] s)` を `1]x` に対して使うと `1]x` が 1 つのアトムになる。CL は
 終端文字をリードテーブルの *terminating macro character* にすることでこれを解決するが、
-リードテーブルが無いのでスキャナに直接教える必要がある。`reader-scan-atom` /
+readtable に「終端かどうか」の区別を持たせていないので、スキャナに直接教える必要がある。`reader-scan-atom` /
 `reader-scan-hash` / `reader-scan-datum` に呼び出し側の追加区切りを通し、**深さ 0 でだけ**
 効くようにした（`(1 2]` の `]` はリスト自身のテキストの一部で、壊れたリストとして `read` が
 報告するのが正しい）。
@@ -1219,17 +1235,69 @@ CL の `read` に合わせ（1 文字消費する。端末で打った form が�
 
 ### Stage 8c — `readtable` とリーダマクロ
 
-**前提条件は解消済み**（上の Stage 8b-2、2026-09-04）。読み込み中にユーザーコードを
-走らせられるようになったので、以下は素直に載る:
-`copy-readtable` / `set-macro-character` / `get-macro-character` /
-`set-dispatch-macro-character` / `make-dispatch-macro-character` / `readtable-case` / `*readtable*`、
-読み込み時制御 `#.`（`#+`/`#-` は 2026-07-30 実装済み）。
+**前提条件は解消済み**（上の Stage 8b-2、2026-09-04）。
 
-残っている設計上の宿題は 2 つ: リーダの feature 集合と readtable は今も `Reader` が
-不変に持っているので、**フォームがそれを書き換える経路**（`*features*` /
-`*readtable*` を評価器側の状態にして、次の `next_form` がそれを見る）を作ること。
-そして**モジュールファイルでの発火**——上のとおり `needs_immediate_exec` の分類に
-リーダマクロ設置フォームを入れるかどうか。
+**`#.`（読み込み時評価）は完了（2026-09-05）**。テストは
+`tests/read_time_eval_test.rs`（12 本）。
+
+- リーダに `ReadEval` フックを足した。`typelisp-read` はチェッカーも評価器も見られない
+  （向きが逆）ので、評価器側が実装しドライバが手渡す——チェッカー側の `MacroExpander` と
+  同じ形。**呼び出しごとに渡す**のは、ドライバが読みと読みの間に `&mut Interp` を
+  自分の仕事に使っており、リーダと同じ寿命の借用は衝突するため。
+- ドライバは `&mut Checker` を丸ごと借りているので `Rc<RefCell<Checker>>` は使えない。
+  `read::DriverReadEval` が 1 回の読みのあいだだけ両方を貸す（自前の `RefCell` を
+  reborrow の上にかぶせる）。`run_file` がチェッカーハンドルをロード**後**に設置するのは
+  そのままでよくなった。
+- リーダの引数は `Ctx { features, ns, eval }` に束ねた。`#.` が 3 つ目を足したので。
+
+**`#.` が届く範囲は経路で変わり、これは CL と同じ**——`load`/REPL は 1 フォームずつ
+評価するので手前の定義に届き、モジュールファイルは単位として検査されるので届かない
+（`use` したモジュールの定義にも届かない。ローダは全モジュールの本体をキューに積み、
+実行はドライバがあとでやる——**LSP がドライバの 1 つで、検査中の文書を実行しては
+ならない**から、この順序は動かせない）。
+
+**リーダマクロも完了（2026-09-05）**。テストは `tests/reader_macro_test.rs`（22 本）。
+入ったのは `set-macro-character` / `get-macro-character` /
+`set-dispatch-macro-character` / `get-dispatch-macro-character` の 4 つ。
+
+- **表は `Heap` に置いた**。スレッドローカルではなく。格納するのはヒープ値なので、
+  ヒープより長生きする表は次のセッションに「誰のものでもないセル」を渡す。登録時に
+  permanent root へ入れるのも `Heap` にしかできない。
+- **リーダマクロの型は `(fn (string-input-stream char) Option<Sexpr>)`**。
+  `:dyn PeekInput` にしなかったのは、リーダが渡すものが常にこの 1 種類だから——
+  リーダは読み残しのテキストを評価器に渡し、消費文字数を受け取る規約なので、
+  マクロが見るストリームは必ずそのテキストの上に張られたもの。**住人が 1 人しかいない
+  トレイトオブジェクト**になる。失うものも無い（`read-sexpr` 等はどれも
+  `(where (PeekInput S))` で具体型のまま呼べる）。
+  なお prelude をダンプするときに `:dyn` へのアップキャストを含む本体は
+  シリアライズできない（vtable id が場所ごとに焼かれる）ので、そもそも通らなかった。
+- **呼ぶ経路は prelude の糊関数 1 本**（`call-reader-macro`）。Rust から直接呼ぶと
+  引数のエンコードを手で書くことになり、それは
+  [[typelisp-crossing-must-be-type-driven]] が 3 回同じバグを出した場所。糊を通すと
+  **コンパイル済みのリーダマクロもそのまま動く**（`(f in c)` が普通の呼び出しになる）。
+  消費文字数はネイティブ演算 `stream-position` を足して読み戻す。
+- **`make-dispatch-macro-character` は作らない**。`set-dispatch-macro-character` が
+  その場でディスパッチ文字にしてしまうので、別の段に残すことが無い。
+- **`*readtable*` / `copy-readtable` も作らない**。readtable を値にするなら
+  「リーダに手渡せるもの」でなければならないが、リーダを呼ぶのは Rust 側のドライバで、
+  渡す先が無い。
+- **`readtable-case` も作らない**。**このリーダは既に CL の `:downcase` を固定で行って
+  いる**（syntax.md §1）。残る 3 設定のうち `:upcase` は CL 既定だがここでは全ソースが
+  小文字前提なので持ち込めず、`:invert` は `:upcase` の補正なので同じ。意味があるのは
+  `:preserve` だけで、それは「識別子の大文字小文字を区別する」という**言語の決定**で
+  あってリーダの設定ではない（Rust がそうであるように）。
+- **`set-macro-character` の呼び出しが `needs_immediate_exec` に入った**。プランが
+  予告していたとおり。`defmacro` より要求が強い——`defmacro` は次のフォームの*検査*に
+  間に合えばよいが、これは次のフォームが*読まれる*前でなければならない。**即時に走る
+  以上、渡す関数はその時点で在らねばならず、同じファイルの `defun` はまだ走っていない**
+  ので `lambda` で書くことになる。ここで初めて、即時実行のエラーを握り潰さないように
+  した（黙って登録されないと、そこから先のファイルが違うふうに読まれる）。
+- **組み込みの `read` / `read-from-string` も readtable を見る**。インタプリタは
+  `Interp` 自身を `ReadEval` として渡す。コンパイル済みの `rt_read` には渡せる
+  `Interp` が無いので、`typelisp_read::runtime` のフック（`PrintHooks` と同じ形）を
+  使う。**AOT では `rt_set_macro_character` を `EVAL_SHIMS` に入れた**——登録した関数を
+  呼ぶのは評価器の仕事なので、リーダマクロを設置するプログラムは `eval` と同じ理由で
+  インタプリタを実行ファイルに要する。
 
 ---
 
@@ -1237,15 +1305,73 @@ CL の `read` に合わせ（1 文字消費する。端末で打った form が�
 
 ### Stage 9a — パッケージ
 
-`in-package`（ファイル冒頭で名前空間を宣言する形。現在は入れ子の `module` とファイル↔モジュール
-対応のみ）、`import` / `shadowing-import` / `shadow`（`use` の個別シンボル取り込み・遮蔽）、
-`unuse-package`。`*package*` は §0 の「パッケージは実行時オブジェクトでない」に留まるが、
-`in-package` を入れるなら「現在のモジュール」の概念は checker 側に既にあるので矛盾しない。
+**状態: 完了（2026-09-04）**。テストは `tests/module_decl_test.rs`（16 本）。
+
+入ったもの:
+
+- **`(in-module path)`** — 以降そのユニット（ファイル、または囲む `module` の本体）の
+  末尾まで `path` の中。`(module path body...)` の平たい形で、ファイル自身のモジュールの
+  内側に入る。空の `(module PATH)` に落ちるので**語彙は増えていない**。
+- **`use` が可変長に**（`(use a::f b::g)`）、**`import`** はその CL 互換の綴り。
+  依存走査（`project::Loader::scan_form`）も全パスを見るようになった——これを直すまで
+  `import` は「他の何かが先にそのファイルを読んでいたときだけ」解決していた。
+- **裸名の衝突を報告するようになった**。**これが実質の中身**で、直すまで
+  `(defun twice ...)` の後の `(use m::twice)` は**黙って何もしなかった**。裸名の解決は
+  そのモジュール自身の定義をエイリアスより先に見るので、負けるのは import のほう。
+  **`(shadowing-import ...)`** がその escape hatch。衝突の 2 種類は勝つ側が逆なので
+  メッセージも別（定義に対しては import が負け、先行するエイリアスに対しては勝つ）。
+
+**計画から変えた点**:
+
+1. **`in-package` は入れず `in-module` にした。** CL で `in-package` が要るのは
+   ファイルがパッケージでないから。ここでは**ファイルが既にモジュール**（パスが導出する）
+   なので「選ぶ」対象が無い。フォームにできるのは入れ子にすることだけで、それは
+   module の操作だから module の名前を持つべき。`(in-package foo)` を「ファイルの
+   導出モジュールを上書きする」と読む道もあったが、ローダが `(module PATH BODY...)` を
+   `segs` から組む以上ファイル↔モジュール対応そのものが壊れる。
+2. **`shadow` と `unuse-package` は採らない。** どちらも CL の
+   **use-package が一括で名前を流し込む**ことへの後始末で、`shadow` は「流れ込む前に
+   自分の名前だと宣言する」、`unuse-package` は「流し込みを取り消す」。
+   typelisp の `use` は一括取り込みをしない——`(use m)` はモジュール別名を作るだけで
+   `m` の中身は裸名にならず、裸で入るのは `(use m::f)` と名指ししたものだけ（**これが
+   既に CL の `import`**）。流し込みが無いので遮蔽する対象も取り消す対象も無い。
+   なお `unuse` を作らなかった実利上の理由がもう 1 つある: ダンプはチェッカーの表の
+   **差分**を記録するので、表からエントリを**消す**操作は記録できない。
+3. **`*package*` は §0 のとおり実行時オブジェクトにしない**（変更なし）。
 
 ### Stage 9b — システム構築
 
-`require` / `provide` / `*modules*`、`compile-file-pathname` / `*compile-file-pathname*` /
-`*load-pathname*`、`defparameter`（`defvar` との「再ロード時に再初期化するか」の区別）。
+**状態: 完了（2026-09-04）**。テストは `tests/system_construction_test.rs`（11 本）。
+
+入ったもの:
+
+- **`defparameter`**、そして **`defvar` が CL 準拠になった**——束縛済みのグローバルには
+  **初期化式を評価すらしない**。設定ファイルを編集して読み直しても、セッションが
+  変更した値が残る。これが CL がこの区別を持つ理由そのもの。
+  `dump.rs` の `already_initialized_global` の doc コメントが
+  「typelisp の `defvar` は CL の "unbound のときだけ" ではない」と明記していた回避策で、
+  その前提のほうを直した。
+- **`(source-file)`** — このフォームが読まれたファイル名を、**チェック時に定数畳み込みした
+  `string`** として返す。
+
+**計画から変えた点**:
+
+1. **`*load-pathname*` は変数でなく `(source-file)` にした。** CL で特殊変数なのは
+   `load` が読みと評価を 1 パスでやるから。ここではモジュールのフォームは単位として
+   検査され、実行は `use` した側なので、「いまロード中のファイル」という変数は
+   コードが読む頃には未束縛か古い。**チェッカーは自分がどのファイルを読んでいるか
+   正確に知っている**（全フォームが位置を持っている）ので、静的に畳み込めば間違えようがない。
+   `(directory-namestring (source-file))` で 9c のパス名層とつながる。
+2. **`compile-file-pathname` / `*compile-file-pathname*` は対象が無い。** CL のそれは
+   `compile-file` が書く `.fasl` の名前を計算するもの。ここでは `compile-file` は
+   `cc` でリンクした**ネイティブ実行ファイル**を出力し、名前は呼び出し側が決める。
+   コンパイル済みモジュール形式そのものが無い（language-design.md §0——`.typlc` という
+   拡張子は実装上使われていない）。導出する名前が存在しない。
+3. **`require` / `provide` / `*modules*` は `use` が既にそれ。** `use` はモジュールの
+   ファイルをオンデマンドで、モジュールパスをキーにちょうど 1 回読み込む——これが
+   `require` の全部で、`self.loaded` が `*modules*` に当たる。`provide`（ファイルの無い
+   モジュールを「提供済み」と宣言する）は、モジュールがファイルであるこの設計では
+   宣言する対象が無い。
 
 ### Stage 9c — 環境・時間・ファイルシステム
 
@@ -1311,10 +1437,37 @@ CL の `read` に合わせ（1 文字消費する。端末で打った form が�
 
 ### Stage 9d — ストリーム残差
 
-`make-synonym-stream`（シンボルを介した間接参照。Phase 7b の後なら意味が出る）、
-`clear-output` / `clear-input` / `listen` / `read-char-no-hang`
-（**ネイティブ層に `listen` はあるが typelisp へ未公開**）、
-`read-sequence` / `write-sequence`（現在は `copy-stream`/`read-all`/`write-lines` で代替）。
+**状態: 完了（2026-09-04）**。テストは `tests/stream_remainder_test.rs`（11 本）。
+
+入ったもの:
+
+- **`listen`** — `InputStream` のメソッド。ネイティブ層には最初からあったが typelisp へ
+  公開されていなかった。既定は **`false`**。これは `at-line-start` が採ったのと同じ
+  「決して嘘にならない側」で、`true` は推測になり、外すと `read-char-no-hang` が
+  ブロックする——その名前が唯一約束していないこと。組み込みストリーム 8 つは全部
+  override する（実際に答えられる: ハンドルを持つ 4 つはネイティブへ、合成 4 つは委譲）。
+- **`read-char-no-hang`** — `CharInput` のデフォルト本体。`(if (listen self) (read-char self) none)`。
+- **`read-sequence` / `write-sequence`** — `CharInput`/`CharOutput` と
+  `ByteInput`/`ByteOutput` の 4 つに、それぞれの項目型で。
+
+**この Stage で分かったこと**:
+
+1. **`read-sequence` を `InputStream` に `Vector<Item>` で置こうとして落ちた。**
+   総称名はリーダにとって**シンボル 1 つ**なので、`impl` が行う関連型の置換が
+   `Vector<Item>` の内側まで届かず、継承したデフォルトの署名が未置換のまま残る
+   （`impl inputstream file-stream: method read-sequence is (vector<item> i32) i32,
+   but inputstream declares (vector<char> i32) i32`）。既存のデフォルト本体はどれも
+   署名に関連型を使っていなかったので、この穴は踏まれたことが無かった。
+   **直す代わりに層を下げた**——prelude 自身のコメントが
+   「`Item` をスーパトレイトで `char` に固定することが、文字で書いたデフォルト本体を
+   可能にしている」と書いており、項目型が確定するのはまさにその層だから、
+   バルク転送はそこに属する。穴は [TODO.md](TODO.md) に記録した。
+2. **`clear-input` / `clear-output` は入れられない。** typelisp 側にバッファは
+   pushback しか無く、OS レベルで捨てる手段も無い。「捨てた」と言えないものについて
+   「捨てた」と名乗る関数は置かない。
+3. **`make-synonym-stream` は表現できない。** シンボルの値セルを介した間接参照が要り、
+   それは §0 で対象外にしたもの（`symbol-value` 一式）。`*standard-output*` 等は
+   ふつうの代入可能なグローバルで、間接参照の対象になるシンボルではない。
 
 ---
 

@@ -226,3 +226,78 @@ fn a_return_with_no_answer_for_exhaustion_says_so() {
     assert!(msg.contains("exhaustion"), "{}", msg);
     assert_eq!(show("(loop :for i :from 1 :to 9 :when (= i 4) :return i :finally (return 0))"), "4");
 }
+
+// ----------------------------------------------------------------------
+// `:named` (Stage 4a — held back until `block`/`return-from` existed)
+// ----------------------------------------------------------------------
+
+#[test]
+fn named_gives_the_loop_a_block_to_return_from() {
+    assert_eq!(
+        show("(loop :named o :for i :from 1 :to 9 :do (if (= i 4) (return-from o (* i 10)) ()) :finally (return 0))"),
+        "40"
+    );
+}
+
+#[test]
+fn a_named_escape_skips_the_finally_clause() {
+    // CL's rule: `return` out of a loop does not run the epilogue. The block
+    // is outside `:finally`, so leaving through it jumps past.
+    assert_eq!(
+        show("(loop :named o :for i :from 1 :to 3 :do (return-from o 1) :finally (return 2))"),
+        "1"
+    );
+}
+
+#[test]
+fn a_name_is_optional_and_changes_nothing_when_absent() {
+    assert_eq!(show("(loop :for i :from 1 :to 3 :collect i)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(show("(loop :named o :for i :from 1 :to 3 :collect i)"), "#<vector<i32> 1 2 3>");
+}
+
+#[test]
+fn the_name_reaches_out_of_a_nested_loop() {
+    assert_eq!(
+        show(
+            "(loop :named outer :for i :from 1 :to 3 \
+               :do (loop :for j :from 1 :to 3 :do (if (= (* i j) 4) (return-from outer (* 100 i)) ())) \
+             :finally (return 0))"
+        ),
+        "200"
+    );
+}
+
+#[test]
+fn a_named_escape_must_agree_with_what_exhaustion_leaves() {
+    // The same rule every `block` has: the body's value and each exit's value
+    // join. Without a `:finally` the loop leaves `Unit`, and an `i32` escape
+    // has nothing to join with.
+    let msg = fails("(loop :named o :for i :from 1 :to 3 :do (if (= i 2) (return-from o i) ()))");
+    assert!(msg.contains("incompatible"), "{}", msg);
+}
+
+#[test]
+fn named_must_come_first() {
+    let msg = fails("(loop :for i :from 1 :to 3 :named o :collect i)");
+    assert!(!msg.is_empty(), "expected a rejection, got {}", msg);
+}
+
+#[test]
+fn named_needs_a_name() {
+    let msg = fails("(loop :named :for i :from 1 :to 3 :collect i)");
+    assert!(msg.contains(":named"), "{}", msg);
+}
+
+#[test]
+fn break_and_return_still_mean_the_nearest_loop() {
+    // `:named` adds an escape; it does not take the old ones away, and a
+    // plain `return` in a nested loop still leaves only that one.
+    assert_eq!(
+        show(
+            "(loop :named outer :for i :from 1 :to 3 \
+               :do (loop :for j :from 1 :to 9 :do (if (= j 2) (return ()) ())) \
+             :finally (return 7))"
+        ),
+        "7"
+    );
+}

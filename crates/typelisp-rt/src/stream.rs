@@ -317,6 +317,25 @@ impl StreamTable {
         Ok(())
     }
 
+    /// How far into its text a string input stream has read, in characters.
+    ///
+    /// Only a string input stream answers. It is the one backend whose
+    /// position is a character index a caller can act on: a file stream's is
+    /// a *byte* offset inside a buffered reader, which is neither the same
+    /// unit nor useful without a seek to go with it.
+    ///
+    /// Pushback counts backwards, because an unread character has not been
+    /// consumed. The floor at zero is for the program that unreads more than
+    /// it read — CL leaves that undefined, and a negative position would
+    /// travel further than the mistake did.
+    pub fn position(&mut self, h: Handle) -> StreamResult<i64> {
+        let s = self.readable(h)?;
+        match &s.backend {
+            Backend::StringIn { pos, .. } => Ok((*pos as i64 - s.pushback.len() as i64).max(0)),
+            _ => Err("stream-position: only a string input stream has a character position".to_string()),
+        }
+    }
+
     /// Whether a character is available without blocking. Only ever `true`
     /// for a source already in memory — an OS read may always block, and
     /// answering otherwise would be a guess.

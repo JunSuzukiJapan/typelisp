@@ -36,13 +36,35 @@ pub const READ_RESULT_KEY: &str = "result<option<sexpr>,readerror>";
 pub const READ_DATUM_RESULT_KEY: &str = "result<cons-cell<option<sexpr>,i32>,readerror>";
 pub const READ_DATUM_PAIR_KEY: &str = "cons-cell<option<sexpr>,i32>";
 
+/// The evaluator these two builtins read *with*, so `#.` and macro characters
+/// work the same way in a program's own `read` as they do in the loader's —
+/// CL's `read` consults the readtable, and a program that installed a macro
+/// character means it for its own reads too.
+///
+/// `None` when no interpreter has registered on this thread: a unit test
+/// reading a datum with no program standing behind it, where a `#.` or a
+/// macro character could not have been installed in the first place.
+fn evaluator() -> Option<&'static dyn crate::reader::ReadEval> {
+    crate::runtime::read_hooks().map(|_| &crate::runtime::HookEval as &dyn crate::reader::ReadEval)
+}
+
 /// `(read s) => Result<Sexpr, ReadError>` — the whole of the builtin, called
 /// from both sides of the compile boundary (`Interp::eval_builtin`'s `read`
 /// arm is the other caller).
 pub fn read_builtin(heap: &mut Heap, source: &str) -> Value {
+    read_builtin_with(heap, source, evaluator())
+}
+
+/// [`read_builtin`] against a caller-supplied evaluator.
+///
+/// The interpreter passes itself (it *is* a `ReadEval`), which is why an
+/// interpreted `(read ...)` honours the readtable without anything having
+/// been registered on the thread. Only the compiled shim, which has no
+/// `Interp` to pass, falls back to [`evaluator`].
+pub fn read_builtin_with(heap: &mut Heap, source: &str, eval: Option<&dyn crate::reader::ReadEval>) -> Value {
     let reader = Reader::new();
     let key = heap.intern_type_key(READ_RESULT_KEY);
-    match reader.read(heap, source) {
+    match reader.read_in_with(heap, "<input>", source, eval) {
         Ok(v) => heap.alloc_enum(key, 0, vec![v]),
         Err(e) => {
             let msg = heap.alloc_string(format!("read: {}", e));
@@ -60,11 +82,23 @@ pub fn read_builtin(heap: &mut Heap, source: &str) -> Value {
 /// `read-from-string`/`read-from-string-preserving-whitespace` are the two
 /// `preserve` settings with the default `start`.
 pub fn read_datum_at_builtin(heap: &mut Heap, source: &str, start: i64, preserve: bool) -> Value {
+    read_datum_at_builtin_with(heap, source, start, preserve, evaluator())
+}
+
+/// [`read_datum_at_builtin`] against a caller-supplied evaluator — see
+/// [`read_builtin_with`].
+pub fn read_datum_at_builtin_with(
+    heap: &mut Heap,
+    source: &str,
+    start: i64,
+    preserve: bool,
+    eval: Option<&dyn crate::reader::ReadEval>,
+) -> Value {
     let reader = Reader::new();
     let start = if start < 0 { 0usize } else { start as usize };
     let key = heap.intern_type_key(READ_DATUM_RESULT_KEY);
     let pair_key = heap.intern_type_key(READ_DATUM_PAIR_KEY);
-    match reader.read_from(heap, source, start, preserve) {
+    match reader.read_from_with(heap, source, start, preserve, eval) {
         Ok((v, end)) => {
             heap.push_root(v);
             let pair = heap.alloc_struct(pair_key, vec![v, Value::Int(end as i64)]);

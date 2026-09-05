@@ -16,6 +16,7 @@
 
 pub mod name_lexer;
 pub mod reader;
+pub mod runtime;
 pub mod shim;
 
 pub use reader::*;

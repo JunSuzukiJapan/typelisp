@@ -45,6 +45,7 @@ pub use typelisp_print;
 pub use typelisp_read;
 
 pub mod equality;
+pub mod readtable;
 pub mod stream;
 pub mod stream_builtin;
 pub mod sys_builtin;
@@ -4519,6 +4520,59 @@ macro_rules! stream_shim {
     };
 }
 
+/// The readtable builtins for compiled code — see
+/// [`crate::readtable::readtable_builtin`], which is also what the
+/// interpreter calls. A character argument is a bare scalar value and a
+/// function argument is tagged, per the compiled calling convention;
+/// `set-*` answers `()` (the zero word) and `get-*` a tagged `Option`.
+///
+/// # Safety
+///
+/// `args` must point to at least as many valid `i64`s as the builtin has
+/// parameters, each in the representation its signature gives it; a `Heap`
+/// must already be registered on this thread.
+macro_rules! readtable_shim {
+    ($shim:ident, $name:literal, $chars:literal, $fn_arg:literal, $ret:ident) => {
+        #[doc = concat!("`", $name, "` for compiled code.")]
+        ///
+        /// # Safety
+        ///
+        /// See [`readtable_shim`].
+        #[no_mangle]
+        pub unsafe extern "C" fn $shim(args: *const i64, argc: u32) -> i64 {
+            let want = $chars + if $fn_arg { 1 } else { 0 };
+            if (argc as usize) < want {
+                fatal(concat!(stringify!($shim), ": too few arguments"));
+            }
+            let mut decoded: Vec<Value> = Vec::new();
+            for i in 0..$chars {
+                match char::from_u32(*args.add(i) as u32) {
+                    Some(c) => decoded.push(Value::Char(c)),
+                    None => fatal(concat!(stringify!($shim), ": argument is not a valid char scalar value")),
+                }
+            }
+            if $fn_arg {
+                decoded.push(tagged_arg(args, $chars));
+            }
+            match crate::readtable::readtable_builtin(active_heap(), $name, &decoded) {
+                Some(Ok(v)) => readtable_shim!(@ret $ret, v),
+                Some(Err(e)) => fatal(&e),
+                None => fatal(concat!(stringify!($shim), ": ", $name, " is not a readtable builtin")),
+            }
+        }
+    };
+    (@ret unit, $v:expr) => {{
+        let _ = $v;
+        0
+    }};
+    (@ret tagged, $v:expr) => { encode($v) };
+}
+
+readtable_shim!(rt_set_macro_character, "set-macro-character", 1, true, unit);
+readtable_shim!(rt_get_macro_character, "get-macro-character", 1, false, tagged);
+readtable_shim!(rt_set_dispatch_macro_character, "set-dispatch-macro-character", 2, true, unit);
+readtable_shim!(rt_get_dispatch_macro_character, "get-dispatch-macro-character", 2, false, tagged);
+
 stream_shim!(rt_stream_stdin, "stream-stdin", [], raw);
 stream_shim!(rt_stream_stdout, "stream-stdout", [], raw);
 stream_shim!(rt_stream_stderr, "stream-stderr", [], raw);
@@ -4534,6 +4588,7 @@ stream_shim!(rt_stream_read_byte, "stream-read-byte", [int], tagged);
 stream_shim!(rt_stream_write_byte, "stream-write-byte", [int, int], tagged);
 stream_shim!(rt_stream_unread_char, "stream-unread-char", [int, char], tagged);
 stream_shim!(rt_stream_listen, "stream-listen", [int], tagged);
+stream_shim!(rt_stream_position, "stream-position", [int], tagged);
 stream_shim!(rt_stream_write_string, "stream-write-string", [int, str], tagged);
 stream_shim!(rt_stream_at_line_start, "stream-at-line-start", [int], tagged);
 stream_shim!(rt_stream_finish_output, "stream-finish-output", [int], tagged);

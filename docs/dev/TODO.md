@@ -18,12 +18,12 @@ Common Lisp にあって typelisp に無いものを Phase 0〜9 に落とした
 | 1（数値層 1a〜1d） | **全完了**（1a/1b/1d は 2026-08-21）。1c の保留 2 項目は **2026-09-03 に両方解消**——乱数は `seed-random-state`、`ldb`/`dpb`/`boole` は整数を第 1 引数に移して `Bits` 境界付きの総称に（`logbitp` も同じ並びへ）。途中で `ash` のバグも直した（第 2 引数が値と同じ型で、符号なし幅に右シフトが無かった。距離は `i32` に）。1d の complex は prelude の `defstruct`（成分は `f64` 固定、`(sqrt -1.0)` は実数 NaN のまま——[implementation-log.md](implementation-log.md) 該当節）。Phase 2 が残した「char/int の native lowering 5 つ」は **2026-09-03 完了**——直後に [syntax.md](../syntax.md) §10 の「コンパイルできない組み込み」の表も**空にした**——`string::upcase`/`downcase`、`try-*` 系（`Option` を返す変換）、`bignum` の残りのビット演算の 3 群。どれも prelude から到達しないので `PRELUDE_COMPILE_UNSUPPORTED` には現れず、ユーザーが自分で呼んだときだけ出る穴だった |
 | 2（文字・文字列 2a/2b） | **完了** 2026-08-20 |
 | 3（リスト・シーケンス 3a〜3e） | **全完了**（3e は 2026-08-21、`defmethod` 側は 2026-09-03）。3e は Phase 5b に依存しなかった——対象は全部ジェネリック `defun` で、`defun` の `&key` は既に通っていた。残っていた `defmethod` 側（破壊的操作と `search`/`mismatch`）も CL のキーワード集合を持つ。`search` のキーワードだけ番号でなく名前にした（受け手が先なので CL の番号は逆の意味になる） |
-| 4（制御構造・マクロ） | **4a 部分完了** 2026-08-20（`prog1`/`prog2`/`do*`/`ecase`/`ccase`/`setq`/`psetq`/`psetf`/`pushnew`）。**`block`/`return-from` は 2026-09-04 完了**（`tests/block_test.rs` 26 本、うち 5 本はコンパイル経路・1 本は `gc_stress`。島の引数列は 3 本増え、引き回しは 162 箇所。いちばん重かったのは引き回しではなく `unwind-protect` との相互作用で、静的脱出が cleanup を走らせる仕組みが「脱出先は 1 つ」を前提にしていた。`forms.rs` の既知のルート漏れの窓に 5 件目を落として `gc_stress` で釣った）。残るは `prog`/`prog*`・`destructuring-bind`・`sleep`、および `loop` の `:named`。**4b 完了** 2026-08-21（`:named` を除く拡張 `loop`）。**4c 完了** 2026-09-03（`macroexpand`/`macroexpand-1`、`complement`、`gensym` のプレフィクスと `*gensym-counter*` が 2026-08-21、`macrolet`/`symbol-macrolet` が 09-03。他の項目は「入れない」理由つきで確定） |
+| 4（制御構造・マクロ） | **4a 部分完了** 2026-08-20（`prog1`/`prog2`/`do*`/`ecase`/`ccase`/`setq`/`psetq`/`psetf`/`pushnew`）。**`block`/`return-from` は 2026-09-04 完了**（`tests/block_test.rs` 26 本、うち 5 本はコンパイル経路・1 本は `gc_stress`。島の引数列は 3 本増え、引き回しは 162 箇所。いちばん重かったのは引き回しではなく `unwind-protect` との相互作用で、静的脱出が cleanup を走らせる仕組みが「脱出先は 1 つ」を前提にしていた。`forms.rs` の既知のルート漏れの窓に 5 件目を落として `gc_stress` で釣った）。**4a 完了** 2026-09-05——`loop` の `:named`（`block` が入って機械的になった）、`destructuring-bind`（**プランの「型を与える手段が無い」は前提が誤り**——リストは `Sexpr` しか無いので束縛は全部 `Option<Sexpr>`。prelude のマクロで checker には 1 行も足していない）、`sleep`（`f64` の秒）。`prog`/`prog*` は非採用（`tagbody` 抜きでは `let`+`block` そのもので、ブロック名 `nil` を持ち込む理由が無い）。**4b 完了** 2026-08-21（`:named` を除く拡張 `loop`）。**4c 完了** 2026-09-03（`macroexpand`/`macroexpand-1`、`complement`、`gensym` のプレフィクスと `*gensym-counter*` が 2026-08-21、`macrolet`/`symbol-macrolet` が 09-03。他の項目は「入れない」理由つきで確定）。**Phase 4 全完了** |
 | 5（定義形の拡張 5a〜5c） | **5b 完了** 2026-08-21（`defmethod` が `&optional`/`&key`/`&rest` を取る。`lambda`/`labels` とトレイトのメソッドは「入れない」理由つきで確定）。**5c 完了** 2026-08-21（`deftype`。型の綴りであって型ではない——展開は型パーサの中で起き、エラーメッセージも展開後を見せる）。**5a 完了** 2026-08-21（オプションリスト・スロットのデフォルト・`:constructor`・`:copier`・`:include`。`:conc-name` と `:predicate` は「入れない」理由つきで確定）。**Phase 5 全完了** |
 | 6（コレクション 6a〜6c） | **6a 完了**（`Hash` トレイト＋`sxhash`、鍵のハッシュ可能性が静的に、`maphash`/`size` が 2026-08-22、**ユーザ定義型を鍵にする分が 2026-09-03**）。表は `hash -> バケット`になり、`get`/`set`/`remove` は prelude の `defmethod` へ移った。**6b 完了** 2026-08-22（`Array<T>`。`Vector` 2 本の上の prelude `defstruct` で、Rust 側の追加はゼロ。`(aref a i j)` だけ checker の糖衣）。**6c 完了** 2026-08-22（`BitVector`。1 語 **31bit** ——32 番目の bit は `i32` の符号） |
 | 7（エラーと動的束縛 7a/7b） | **全完了** 2026-08-22。7a は `SimpleError`/`WrappedError`/`wrap-error`/`describe-error`/`assert`/`warn`（コンディションシステムは予定どおり非採用）。7b は `dlet`（保存→代入→`unwind-protect` で復元）と印字制御変数一式＋`with-standard-io-syntax`、副産物で radix リーダマクロ `#b`/`#o`/`#x`/`#NNr`。入れなかった変数は同計画の表に 1 つずつ理由つき |
-| 8（印字とリーダ 8a〜8c） | **8a/8b 完了** 2026-08-23（プリンタとリーダ）+ 2026-09-03（`*print-array*` と `Array<T>` の `print-object`）。この Stage で分かった 3 件は**全部閉じた**——ジェネリック型に `print-object` が発火しない件と `~/name/` が AOT で使えない件が 2026-08-31（後者は制御文字列をリテラルに限って解決、`e7f54e0`）、それに依存して見送っていた `*print-array*` が 09-03。**先行条件のアーキテクチャ転換は 2026-09-04 完了**——全ドライバがフォーム単位で「読む→チェック→評価」するようになった（`tests/read_check_eval_test.rs` 16 本）。**残るは 8c 本体**（`readtable` とリーダマクロ） |
-| 9（シンボル・パッケージ・環境） | **9c 完了** 2026-08-20（コマンドライン引数・環境変数・ファイルシステム問い合わせ・日時の分解合成・`y-or-n-p`）。保留は `libc` が要る 4 群と REPL ツール層。9a/9b/9d 未着手 |
+| 8（印字とリーダ 8a〜8c） | **8a/8b 完了** 2026-08-23（プリンタとリーダ）+ 2026-09-03（`*print-array*` と `Array<T>` の `print-object`）。この Stage で分かった 3 件は**全部閉じた**——ジェネリック型に `print-object` が発火しない件と `~/name/` が AOT で使えない件が 2026-08-31（後者は制御文字列をリテラルに限って解決、`e7f54e0`）、それに依存して見送っていた `*print-array*` が 09-03。**先行条件のアーキテクチャ転換は 2026-09-04 完了**——全ドライバがフォーム単位で「読む→チェック→評価」するようになった（`tests/read_check_eval_test.rs` 16 本）。**8c 完了** 2026-09-05——`#.`（`tests/read_time_eval_test.rs` 12 本）とリーダマクロ 4 種（`tests/reader_macro_test.rs` 22 本）。`*readtable*`/`copy-readtable`/`make-dispatch-macro-character`/`readtable-case` は「入れない」理由つきで確定。**Phase 8 全完了** |
+| 9（シンボル・パッケージ・環境） | **9c 完了** 2026-08-20（コマンドライン引数・環境変数・ファイルシステム問い合わせ・日時の分解合成・`y-or-n-p`）。保留は `libc` が要る 4 群と REPL ツール層。**9a/9b/9d 完了** 2026-09-04。9a は `in-module`・可変長 `use`/`import`/`shadowing-import`・裸名の衝突報告、9b は `defparameter` と CL 準拠になった `defvar`・`(source-file)`、9d は `listen`/`read-char-no-hang`/`read-sequence`/`write-sequence`。非採用は `in-package`/`shadow`/`unuse-package`/`compile-file-pathname`/`require`/`provide`/`clear-input`/`clear-output`/`make-synonym-stream` で、いずれも理由つき（cl-parity-plan.md の各 Stage）。**Phase 9 全完了** |
 | 付録 C（小さな不整合 4 件） | **完了** 2026-08-20 |
 | 付録 D（範囲外の既存問題 2 件） | **完了** 2026-08-21。D-2 は `Heap::cons` の成長条件（回収後の空きが 1/4 未満なら伸ばす）、D-1 は AOT 実行ファイルが prelude を持ち歩くように |
 
@@ -244,6 +244,27 @@ JIT しているぶん」は**2 段階で解消した**。JIT 6 回ぶんは 202
 [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md)（TODO ではなく測定）。
 そこから作った実行計画が上記の [cl-parity-plan.md](cl-parity-plan.md) で、地図の全行が
 どの Phase に落ちたか（落ちていないなら理由）は同計画の付録 A にある。
+
+## 見つかっている実装の穴
+
+### 関連型が総称名の内側にあると `impl` の置換が届かない
+
+`(deftrait T () (type Item) (m ((self Self) (v Vector<Item>)) () <デフォルト本体>))` と書くと、
+`impl` がその既定メソッドを継承したときに署名が未置換のまま残る:
+
+```
+impl inputstream file-stream: method `read-sequence` is `(file-stream vector<item> i32) i32`,
+but `inputstream` declares `(file-stream vector<char> i32) i32`
+```
+
+原因は、`Vector<Item>` が**リーダにとってシンボル 1 つ**であること（`impl<T>` が 1 シンボルなのと
+同じ理由、`parse_generic_name_header`）。`impl` の関連型置換は `subst_method_item` が
+シンボル単位で行うので、名前の内側までは書き換えない。`Option<Item>` が動いているのは
+`read-item` にデフォルト本体が無く、置換の対象にならないから——**署名に関連型を使う
+デフォルト本体が今まで 1 つも無かった**ので踏まれていなかった。
+
+2026-09-04 の Stage 9d で発見。そのときは層を下げて回避した（`Vector<char>` を
+`CharInput` に、`Vector<i32>` を `ByteInput` に）ので、いま困っているコードは無い。
 
 ## 関連ドキュメント
 

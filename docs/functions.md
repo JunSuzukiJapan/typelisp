@@ -412,6 +412,10 @@ CPU 時間（`get-internal-run-time`）は無い。`libc` の `getrusage` が要
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | Cargo のパッケージ版数 |
 | `machine-type` | `(machine-type)` | `()→string` | CPU アーキテクチャ（`x86_64` / `aarch64` …） |
 | `software-type` | `(software-type)` | `()→string` | OS（`macos` / `linux` …） |
+| `sleep` | `(sleep secs)` | `f64→()` | `secs` 秒だけこのスレッドを止める。負や NaN は panic |
+
+`sleep` は CL と同じ**秒**。整数リテラルは浮動小数点数に馴染まない（Rust と同じ規則）ので、
+CL の `(sleep 1)` はここでは `(sleep 1.0)` と書く——`(sleep 1)` は型エラーになる。
 
 `command-line-args` の要素0は、`typl script.typl a b` ならスクリプトのパス、AOT 実行ファイル
 `./prog a b` なら実行ファイル自身。**どちらの走らせ方でも同じ添字で同じ引数が読める**ようにこう
@@ -1725,6 +1729,14 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | 次の1文字 |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | 次の改行まで（改行は消費して除去）。改行で終わらない最終行も返る |
 | `read-all` | `(read-all s)` | `(S)→string` | 残り全部 |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | すでに手元にある1文字だけ。待たされるくらいなら `none` |
+| `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,i32)→i32` | 最大 `n` 文字を `v` へ push し、実際に読めた数を返す。`n` に満たないのは末尾のときだけ |
+
+`listen` は `InputStream`（`CharInput` の親）にある:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `listen` | `(listen s)` | `(S)→bool` | 次の読みが待たされずに答えられるか。デフォルトは `false`——**決して嘘にならない側**で、`at-line-start` と同じ選択。`true` は推測になり、外すと `read-char-no-hang` がブロックする。組み込みストリームは全て上書き済み（メモリ上のものだけが `true` を返しうる）。**上書きしないユーザ定義ストリームでは `read-char-no-hang` が常に `none` を返す** |
 
 `PeekInput`（`CharInput` を継承）は**1文字の押し戻し**を足す。デフォルト本体を持てない唯一の
 入力操作なので別トレイトにしてある——押し戻した文字を置く場所はストリーム自身しか持たない。
@@ -1748,6 +1760,7 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 | `fresh-line` | `(fresh-line s)` | `(S)→()` | 行頭でなければ改行を1つ |
 | `at-line-start` | `(at-line-start s)` | `(S)→bool` | 次に書く文字が行頭になるか。デフォルトは `false`（＝`fresh-line` は改行を書く。分からないなら書くほうが安全）。組み込みストリームは全て上書き済み |
 | `finish-output` | `(finish-output s)` | `(S)→()` | バッファを送り出す |
+| `write-sequence` | `(write-sequence s v)` | `(S,Vector<char>)→()` | `v` の全文字を順に書く |
 
 `at-line-start` が覚えているのは**そのストリーム経由で書かれた分だけ**。`print`/`println`/
 `(format true ...)` は標準出力へ直接書く（`*standard-output*` のハンドルを通らない）ので、
@@ -1785,6 +1798,8 @@ CL 同様、`close` 後でも取り出せる。
 |---|---|---|---|
 | `read-byte` | `(read-byte s)` | `(S)→Option<i32>` where `ByteInput S` | 次の1バイト。ファイル終端で `none` |
 | `write-byte` | `(write-byte s b)` | `(S,i32)→()` where `ByteOutput S` | 1バイト書く。0..255 の外はエラー |
+| `read-sequence` | `(read-sequence s v n)` | `(S,Vector<i32>,i32)→i32` where `ByteInput S` | 文字版と同じものをバイトで |
+| `write-sequence` | `(write-sequence s v)` | `(S,Vector<i32>)→()` where `ByteOutput S` | 同上 |
 
 CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出し**で決めるが、
 ここでは要素型はストリームの**型**なので、違うのは開く関数の側になる。文字ストリームから
@@ -1857,10 +1872,23 @@ native 層でも拒否する——次の文字の UTF-8 エンコーディング
 `(read-sexpr (make-peek-stream my-stream))` と包めば `read` できる。
 
 `read-delimited-list` の終端文字は**トークンも終わらせる**。CL は終端文字をリードテーブルの
-terminating macro character にすることでこれを実現するが、リードテーブルが無い（Phase 8c）ので
-スキャナに直接渡している。効くのは深さ 0 だけで、`(1 2]` の `]` はリスト自身のテキストの一部
-として `read` に渡り、壊れたリストとして報告される。CL の第3引数 `recursive-p` に対応物は無い
-（リーダマクロが無いので伝える相手がいない）。
+terminating macro character にすることでこれを実現するが、ここではスキャナに直接渡している
+（readtable はあるが、終端かどうかの区別は持たせていない）。効くのは深さ 0 だけで、`(1 2]` の
+`]` はリスト自身のテキストの一部として `read` に渡り、壊れたリストとして報告される。CL の
+第3引数 `recursive-p` に対応物は無い——伝えるべき呼び出し間の状態（`#n=` ラベルなど）が
+このリーダには無いので、リーダマクロからの読みが他と違う種類の読みにならない。
+
+### 18.6.1 readtable
+
+| 名前 | 呼び方 | 型 | 説明 |
+|---|---|---|---|
+| `set-macro-character` | `(set-macro-character c f)` | `(char, F)→()` | 文字 `c` を `f` が読む |
+| `get-macro-character` | `(get-macro-character c)` | `(char)→Option<F>` | 登録されているものを返す |
+| `set-dispatch-macro-character` | `(set-dispatch-macro-character d s f)` | `(char,char,F)→()` | 2文字並び `d s` を `f` が読む |
+| `get-dispatch-macro-character` | `(get-dispatch-macro-character d s)` | `(char,char)→Option<F>` | 同上 |
+
+`F` は `(fn (string-input-stream char) Option<Sexpr>)`。使い方・いつ効くか・CL との差分は
+[syntax.md](syntax.md) §11 に書いてある。
 
 ### 18.7 CL との違い
 

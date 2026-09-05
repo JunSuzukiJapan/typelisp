@@ -1135,6 +1135,7 @@ impl Interp {
     pub fn install_print_hooks(&self) {
         ACTIVE_INTERP.with(|cell| cell.set(self as *const Interp));
         typelisp_print::runtime::set_print_hooks(Some(INTERP_PRINT_HOOKS));
+        typelisp_read::runtime::set_read_hooks(Some(INTERP_READ_HOOKS));
     }
 
     /// The closure an unfilled vtable slot's method reifies to —
@@ -1392,6 +1393,22 @@ impl Interp {
     /// [`Self::bind_compiled_global`]).
     pub fn has_compiled_global(&self, path: &Path) -> bool {
         self.compiled_globals.borrow().contains_key(path)
+    }
+
+    /// Whether `path` already names a global with a value — either in the
+    /// module tree or, for a program whose globals the compiler took over, in
+    /// `compiled_globals`.
+    ///
+    /// This is what makes `defvar` mean CL's `defvar` ("initialize only if
+    /// unbound") rather than its `defparameter`. Both tables have to be
+    /// consulted for the same reason `Interp::promote_global` moves entries
+    /// between them: a global that has been promoted is bound, and is no
+    /// longer in the tree.
+    pub fn global_is_bound(&self, path: &Path) -> bool {
+        if self.has_compiled_global(path) {
+            return true;
+        }
+        self.root.borrow().get_global(path).is_some()
     }
 
     /// The compiled-global slot id [`Self::promote_global`] assigned `path`,
@@ -1698,6 +1715,18 @@ impl Interp {
             name if name.starts_with("stream-") || name.starts_with("file-") => {
                 self.eval_stream_builtin(heap, name, args)
             }
+            // The readtable (CLHS 23.1). Routed by name rather than by
+            // prefix: `set-`/`get-` are far too common to claim, and there
+            // are only four.
+            "set-macro-character"
+            | "get-macro-character"
+            | "set-dispatch-macro-character"
+            | "get-dispatch-macro-character" => {
+                Some(match typelisp_rt::readtable::readtable_builtin(heap, name, args)? {
+                    Ok(v) => Ok(v),
+                    Err(e) => Err(EvalError::Internal(e)),
+                })
+            }
             "make-random-state-fresh" => Some(eval_make_random_state_fresh(heap, args)),
             "seed-random-state" => Some(eval_seed_random_state(heap, args)),
             "random-state-copy" => Some(eval_random_state_copy(heap, args)),
@@ -1718,13 +1747,21 @@ impl Interp {
                 other => Err(EvalError::Panic(format!("getenv: argument is not a string, got {:?}", other))),
             }),
             "home-directory" => Some(Ok(typelisp_rt::sys_builtin::home_directory(heap))),
+            "sleep" => Some(match rt_f64(heap, &args[0]) {
+                Ok(secs) => typelisp_rt::sys_builtin::sleep(secs).map(|()| Value::Empty).map_err(EvalError::Panic),
+                Err(e) => Err(e),
+            }),
             "lisp-implementation-version" => Some(Ok(typelisp_rt::sys_builtin::lisp_implementation_version(heap))),
             "machine-type" => Some(Ok(typelisp_rt::sys_builtin::machine_type(heap))),
             "software-type" => Some(Ok(typelisp_rt::sys_builtin::software_type(heap))),
             "parse-int" => Some(eval_parse_int(heap, args)),
             "parse-float" => Some(eval_parse_float(heap, args)),
-            "read" => Some(eval_read(heap, args)),
-            "read-datum-at" => Some(eval_read_datum_at(heap, args)),
+            // Both pass `self` as the evaluator: an interpreted `(read ...)`
+            // honours `#.` and the readtable, the way CL's does. The compiled
+            // shims have no `Interp` to pass and go through the thread-local
+            // registration instead (`typelisp_read::runtime`).
+            "read" => Some(self.eval_read(heap, args)),
+            "read-datum-at" => Some(self.eval_read_datum_at(heap, args)),
             "eval" => Some(self.eval_form(heap, &args[0])),
             "macroexpand-1" => Some(self.macroexpand_1_form(heap, args[0])),
             "macroexpand" => Some(self.macroexpand_form(heap, args[0])),
@@ -2297,6 +2334,81 @@ impl Interp {
         let out = checker.borrow().try_expand_toplevel_macro(heap, self, form);
         heap.truncate_roots(mark);
         out.map_err(|e| e.to_string())
+    }
+
+    /// [`typelisp_read::reader::ReadEval`] for the reader's `#.`.
+    ///
+    /// The same act as [`Self::eval_form`] — check this datum, run it — with
+    /// the CL-conformant `eval` wrapping left off: `eval` answers a
+    /// `Result<Sexpr, Error>` because a program calling it wants to handle a
+    /// failure, while a `#.` that does not check is a *read* error and the
+    /// reader reports it with the position, like any other.
+    ///
+    /// A definition placed in a `#.` still defines; what the reader splices in
+    /// is whatever the form produced, which for a definition is nothing
+    /// (`()`).
+    pub fn read_eval_form(&self, heap: &mut Heap, form: Value) -> Result<Value, String> {
+        let Some(checker) = self.checker.as_ref().map(Rc::clone) else {
+            return Err("`#.` needs a checker handle, and this session has none".to_string());
+        };
+        let mark = heap.root_count();
+        heap.push_root(form);
+        let checked = checker.borrow_mut().check_form_at(heap, self, form, None);
+        while heap.root_count() > mark {
+            heap.pop_root();
+        }
+        let tl = checked.map_err(|e| e.to_string())?;
+        match self.exec(heap, tl) {
+            Ok(Some(v)) => Ok(v),
+            Ok(None) => Ok(Value::Empty),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// The reader's hook for a macro character: run `f` on `ch` and the text
+    /// the reader has not consumed, answering the datum and how many
+    /// characters of `rest` went into it.
+    ///
+    /// The call goes through the prelude's `call-reader-macro`, not straight
+    /// through [`Self::apply`]. A reader macro takes a *stream*, and making
+    /// one out of `rest` — a `string-input-stream` upcast to
+    /// `:dyn PeekInput` — is work with a type on it, which is to say the
+    /// checker's; doing it from Rust would mean assembling a trait object by
+    /// hand. Going through typelisp also means `f` is called the ordinary
+    /// way, so a *compiled* reader macro works with nothing added here.
+    pub fn call_reader_macro_fn(
+        &self,
+        heap: &mut Heap,
+        f: Value,
+        ch: char,
+        rest: &str,
+    ) -> Result<(Value, usize), String> {
+        let def = self.resolve_fn_def(READER_MACRO_GLUE).map_err(|e| e.to_string())?;
+        let mark = heap.root_count();
+        // `f` is rooted first: allocating the string can collect, and the
+        // readtable's permanent root is not the only thing that has to be
+        // true here — a `f` built on the fly and passed straight in has no
+        // other holder.
+        heap.push_root(f);
+        let text = heap.alloc_string(rest.to_string());
+        heap.push_root(text);
+        let out = self.apply(heap, &def, vec![f, Value::Char(ch), text]);
+        while heap.root_count() > mark {
+            heap.pop_root();
+        }
+        let out = out.map_err(|e| e.to_string())?;
+        // `cons-cell<Option<Sexpr>, i32>` — a `defstruct`, so a two-field
+        // struct box. Anything else means the glue was redefined out from
+        // under this, which is a broken image rather than a user error.
+        let Value::Boxed(id) = out else {
+            return Err(format!("{}: expected a cons-cell, got {:?}", READER_MACRO_GLUE, out));
+        };
+        let datum = heap.struct_field(id, 0);
+        let used = match heap.struct_field(id, 1) {
+            Value::Int(n) if n >= 0 => n as usize,
+            other => return Err(format!("{}: consumed count is not a count: {:?}", READER_MACRO_GLUE, other)),
+        };
+        Ok((datum, used))
     }
 
     pub fn eval_form(&self, heap: &mut Heap, arg: &Value) -> Result<Value, EvalError> {
@@ -3334,22 +3446,24 @@ fn eval_parse_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError>
 /// runtime on a string value instead of a file/stdin. `Err` (not a panic)
 /// on malformed input, e.g. an unterminated list or string — this reads
 /// data the running program doesn't control.
-fn eval_read(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let s = expect_str(heap, &args[0])?.to_string();
-    // `typelisp_read::shim`, the same implementation `rt_read` calls: one
-    // reader, one `Result` shape, whichever side of the compile boundary the
-    // caller is on.
-    Ok(typelisp_read::shim::read_builtin(heap, &s))
-}
+impl Interp {
+    fn eval_read(&self, heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+        let s = expect_str(heap, &args[0])?.to_string();
+        // `typelisp_read::shim`, the same implementation `rt_read` calls: one
+        // reader, one `Result` shape, whichever side of the compile boundary the
+        // caller is on.
+        Ok(typelisp_read::shim::read_builtin_with(heap, &s, Some(self)))
+    }
 
-fn eval_read_datum_at(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let s = expect_str(heap, &args[0])?.to_string();
-    let start = match args[1] {
-        Value::Int(n) => n,
-        ref other => return Err(EvalError::Internal(format!("read-datum-at: start is not an integer: {:?}", other))),
-    };
-    let preserve = matches!(args[2], Value::Bool(true));
-    Ok(typelisp_read::shim::read_datum_at_builtin(heap, &s, start, preserve))
+    fn eval_read_datum_at(&self, heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+        let s = expect_str(heap, &args[0])?.to_string();
+        let start = match args[1] {
+            Value::Int(n) => n,
+            ref other => return Err(EvalError::Internal(format!("read-datum-at: start is not an integer: {:?}", other))),
+        };
+        let preserve = matches!(args[2], Value::Bool(true));
+        Ok(typelisp_read::shim::read_datum_at_builtin_with(heap, &s, start, preserve, Some(self)))
+    }
 }
 
 /// The width and signedness of `type_name`, when it is one of the integer
@@ -3811,6 +3925,10 @@ impl Interp {
 /// there is nothing for a call site to say — but the *spelling* still has to
 /// be the one `type_key::type_key_of_type` produces, which
 /// `tests/type_identity_guard_test.rs` checks against the registry.
+/// The prelude function the reader's macro-character hook goes through — see
+/// [`Interp::call_reader_macro_fn`].
+const READER_MACRO_GLUE: &str = "call-reader-macro";
+
 const MACROEXPAND_RESULT_KEY: &str = "result<option<sexpr>,evalerror>";
 const MACROEXPAND_OPTION_KEY: &str = "option<sexpr>";
 
@@ -4055,6 +4173,25 @@ const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
     },
     opts: |heap| with_active_interp(|i| i.pretty_opts(heap)).unwrap_or_default(),
     print_vars: |heap| with_active_interp(|i| i.print_vars(heap)).unwrap_or_default(),
+};
+
+/// The reader's [`typelisp_read::runtime::ReadHooks`] pointing at the
+/// interpreter — what makes the `read`/`read-datum-at` *builtins* honour `#.`
+/// and macro characters, which the drivers' own reads already do by being
+/// handed a `ReadEval` directly.
+///
+/// Same shape and same reason as [`INTERP_PRINT_HOOKS`]: plain `fn` pointers
+/// reaching the running interpreter through [`ACTIVE_INTERP`], refreshed at
+/// the point of use so a nested `Interp` cannot leave a finished one behind.
+const INTERP_READ_HOOKS: typelisp_read::runtime::ReadHooks = typelisp_read::runtime::ReadHooks {
+    read_eval: |heap, form| match with_active_interp(|i| i.read_eval_form(heap, form)) {
+        Some(r) => r,
+        None => Err("`#.` needs a program to run the form in".to_string()),
+    },
+    call_reader_macro: |heap, f, ch, rest| match with_active_interp(|i| i.call_reader_macro_fn(heap, f, ch, rest)) {
+        Some(r) => r,
+        None => Err(format!("`{}` is a reader macro, and there is no program to run it in", ch)),
+    },
 };
 
 /// Runs `f` against this thread's registered `Interp`, or `None` when there
@@ -4419,4 +4556,22 @@ fn sexpr_equal(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// numeric, struct/enum-recursive sibling. Same shared implementation.
 fn sexpr_equalp(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Bool(typelisp_rt::equality::equalp_val(heap, args[0], args[1])))
+}
+
+/// The reader's hook into the evaluator, for `#.` — see
+/// [`Interp::read_eval_form`].
+impl typelisp_read::reader::ReadEval for Interp {
+    fn read_eval(&self, heap: &mut Heap, form: Value) -> Result<Value, String> {
+        self.read_eval_form(heap, form)
+    }
+
+    fn call_reader_macro(
+        &self,
+        heap: &mut Heap,
+        f: Value,
+        ch: char,
+        rest: &str,
+    ) -> Result<(Value, usize), String> {
+        self.call_reader_macro_fn(heap, f, ch, rest)
+    }
 }

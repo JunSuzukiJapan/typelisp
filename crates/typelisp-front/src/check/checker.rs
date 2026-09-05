@@ -662,6 +662,12 @@ pub struct Checker {
     /// scan-before-check ordering), so this never needs more than simple
     /// stack discipline.
     file_ns: Vec<Vec<String>>,
+    /// Namespace lengths to restore on [`Self::exit_file_module`] /
+    /// [`Self::check_module`], innermost last. A closing form used to be
+    /// enough — every push had one — but `(in-module ...)` pushes segments
+    /// that stay in effect for the rest of the enclosing unit, so how far to
+    /// unwind is the saved base rather than a count of segments.
+    ns_base: Vec<usize>,
     /// Stack of enclosing loops' accumulated exit type, innermost last.
     /// `break`/`return` unify their (optional) value's type into the top
     /// frame; `while`/`dotimes`/`dolist` seed it with `Unit` (their fixed
@@ -858,6 +864,7 @@ impl Checker {
             reg: Registry::with_builtins(),
             ns: Vec::new(),
             file_ns: Vec::new(),
+            ns_base: Vec::new(),
             loop_stack: RefCell::new(Vec::new()),
             block_stack: RefCell::new(Vec::new()),
             throw_tags: RefCell::new(std::collections::BTreeMap::new()),
@@ -1845,6 +1852,18 @@ impl Checker {
 
     /// `(defvar PATH REPR MUTABLE PUBLIC FORM)` — a global variable
     /// (`mutable`) or constant.
+    /// `(defvar PATH REPR MUTABLE PUBLIC INIT)`, plus a sixth field for
+    /// `defparameter`.
+    ///
+    /// That sixth field says **assign even if the global is already bound** —
+    /// the difference between CL's `defparameter` and its `defvar`, which is a
+    /// run-time question and so cannot be settled here. It is a trailing field
+    /// rather than a tag of its own because every other consumer of a `defvar`
+    /// node (the dump, the AOT collector, the prelude generator, the pretty
+    /// printer, `Interp::note_definitions`) reads the fields it cares about by
+    /// index and is right to ignore this one; only `Interp::exec` looks. An
+    /// absent field reads as `false`, so a node built before this existed —
+    /// one sitting in an older dump — means `defvar`.
     fn defvar_form(
         &self,
         heap: &mut Heap,
@@ -1853,6 +1872,7 @@ impl Checker {
         mutable: bool,
         public: bool,
         value: Value,
+        reassign: bool,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let path = forms::path_form(f.heap(), name);
@@ -1862,6 +1882,9 @@ impl Checker {
         f.push(Value::Bool(mutable));
         f.push(Value::Bool(public));
         f.push(value);
+        if reassign {
+            f.push(Value::Bool(true));
+        }
         f.finish("defvar")
     }
 
@@ -2341,8 +2364,11 @@ impl Checker {
                     wk::PUB => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
                     wk::DEFUN => return self.check_defun(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFSIGNATURE => return self.check_defsignature(heap, &elems[1..], parts_locs, false),
-                    wk::DEFVAR => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc),
-                    wk::DEFCONSTANT => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc),
+                    wk::DEFVAR => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc, false),
+                    wk::DEFPARAMETER => {
+                        return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc, true)
+                    }
+                    wk::DEFCONSTANT => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc, false),
                     wk::DEFMACRO => return self.check_defmacro(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::MODULE => return self.check_module(heap, interp, &elems[1..]),
                     wk::DEFMETHOD => return self.check_defmethod(heap, interp, &elems[1..], parts_locs, false, def_loc),
@@ -2351,7 +2377,12 @@ impl Checker {
                     wk::DEFTRAIT => return self.check_deftrait(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFTYPE => return self.check_deftype(heap, &elems[1..], parts_locs, false, def_loc),
                     wk::IMPL => return self.check_impl(heap, interp, &elems[1..], parts_locs),
-                    wk::USE => return self.check_use(heap, &elems[1..], parts_locs),
+                    wk::USE => return self.check_use_forms(heap, &elems[1..], parts_locs, false),
+                    wk::IMPORT => return self.check_use_forms(heap, &elems[1..], parts_locs, false),
+                    wk::SHADOWING_IMPORT => {
+                        return self.check_use_forms(heap, &elems[1..], parts_locs, true)
+                    }
+                    wk::IN_MODULE => return self.check_in_module(heap, &elems[1..]),
                     wk::LOAD => return self.check_load(heap, &elems[1..]),
                     _ => {}
                 }
@@ -2411,8 +2442,11 @@ impl Checker {
             match id.well_known() {
                 wk::DEFUN => return self.check_defun(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFSIGNATURE => return self.check_defsignature(heap, &parts[1..], inner_locs, true),
-                wk::DEFVAR => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc),
-                wk::DEFCONSTANT => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc),
+                wk::DEFVAR => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc, false),
+                wk::DEFPARAMETER => {
+                    return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc, true)
+                }
+                wk::DEFCONSTANT => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc, false),
                 wk::DEFMACRO => return self.check_defmacro(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFMETHOD => return self.check_defmethod(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFSTRUCT => return self.check_defstruct(heap, interp, &parts[1..], inner_locs, true, def_loc),
@@ -2422,7 +2456,8 @@ impl Checker {
             }
         }
         Err(Error::TypeError(
-            "pub: expected defun/defsignature/defmacro/defmethod/defstruct/defenum/deftype/defvar/defconstant".into(),
+            "pub: expected defun/defsignature/defmacro/defmethod/defstruct/defenum/deftype/defvar/defparameter/defconstant"
+                .into(),
         ))
     }
 
@@ -2663,12 +2698,13 @@ impl Checker {
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
                 | "match" | "panic" | "the" | "as" | "try-as" | "compile"
-                | "quote" | "quasiquote" | "format" | "print" | "println"
+                | "quote" | "quasiquote" | "format" | "print" | "println" | "source-file"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block"
                 // top-level forms (`check_form_dispatch`)
-                | "pub" | "defun" | "defsignature" | "defvar" | "defconstant" | "defmacro" | "module"
+                | "pub" | "defun" | "defsignature" | "defvar" | "defparameter" | "defconstant" | "defmacro" | "module"
                 | "defmethod" | "defstruct" | "defenum" | "deftrait" | "deftype" | "impl" | "use" | "load"
+                | "import" | "shadowing-import" | "in-module"
         )
     }
 
@@ -7246,6 +7282,10 @@ impl Checker {
             return Err(Error::TypeError("module: (module path body...)".into()));
         }
         let segs = path_to_segs(heap, parts[0])?;
+        // Saved before entering: an `(in-module ...)` in this body pushes
+        // segments of its own that no closing form pops, so the body's end is
+        // what restores the namespace — see `Checker::ns_base`.
+        let base = self.ns.len();
         let path = self.enter_module(&segs);
 
         let mut body = Vec::new();
@@ -7262,7 +7302,7 @@ impl Checker {
                 }
             }
         }
-        self.exit_module(segs.len());
+        self.ns.truncate(base);
         result?;
         forms::module_form(heap, &path, &body)
     }
@@ -7299,15 +7339,30 @@ impl Checker {
     /// to; a nested `(module ...)` form inside that file still goes through
     /// plain [`Self::enter_module`] via [`Self::check_module`].
     pub fn enter_file_module(&mut self, segs: &[String]) -> Path {
+        self.ns_base.push(self.ns.len());
         let path = self.enter_module(segs);
         self.file_ns.push(self.ns.clone());
         path
     }
 
-    /// Pop `depth` segments pushed by [`Self::enter_file_module`], plus its
-    /// `file_ns` frame.
+    /// Undo [`Self::enter_file_module`]: restore the namespace this file was
+    /// entered from and drop its `file_ns` frame.
+    ///
+    /// `depth` is the number of segments the matching `enter_file_module`
+    /// pushed. It is no longer what decides how far to unwind — an
+    /// `(in-module ...)` in the file pushes further segments that have no
+    /// closing form to pop them, so the saved base is what restores the
+    /// namespace. The argument stays because a caller passing the wrong
+    /// depth is a bug worth catching.
     pub fn exit_file_module(&mut self, depth: usize) {
-        self.exit_module(depth);
+        let base = self.ns_base.pop().unwrap_or(0);
+        debug_assert!(
+            self.ns.len() >= base + depth,
+            "exit_file_module({}) below the {} segments it entered",
+            depth,
+            self.ns.len() - base
+        );
+        self.ns.truncate(base);
         self.file_ns.pop();
     }
 
@@ -8536,7 +8591,169 @@ impl Checker {
         }
     }
 
-    fn check_use(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
+    /// `(source-file)` — the name of the file this form was read from, as a
+    /// `string` fixed at check time.
+    ///
+    /// **CL's `*load-pathname*` in the place it can actually be right.** There
+    /// the file being loaded is a dynamic fact, because `load` reads and
+    /// evaluates in one pass; here a module's forms are checked as a unit and
+    /// run later, by whoever `use`s it, so a variable saying "the file being
+    /// loaded" would be unbound or stale by the time the code that reads it
+    /// runs. The checker, on the other hand, knows exactly which file it is
+    /// reading — the position every form already carries — so this is
+    /// constant-folded and cannot be wrong.
+    ///
+    /// What comes back is the name the reader was given: a path for a file, and
+    /// the reader's own placeholder (`<stdin>`, `<input>`) for source that
+    /// never was one. Pair it with the prelude's pathname functions —
+    /// `(directory-namestring (source-file))` for the directory a data file
+    /// sits next to.
+    fn check_source_file(&self, heap: &mut Heap, v: Value, args: &[Value]) -> Result<Checked, Error> {
+        if !args.is_empty() {
+            return Err(Error::TypeError("source-file: (source-file) takes no arguments".into()));
+        }
+        let file = match heap.cons_loc(v) {
+            Some(loc) => loc.file.to_string(),
+            // Every form read by the reader has a position. One built by a
+            // macro expansion may not, and there is no file to name then.
+            None => "<unknown>".to_string(),
+        };
+        let form = forms::str_lit_form(heap, &file)?;
+        Ok(Checked::new(form, Type::Str))
+    }
+
+    /// Report an import that takes a bare name the current namespace already
+    /// holds — unless it is the *same* import again (idempotent, and a module
+    /// reached from two places is normal), or `shadowing` says the collision
+    /// is the point.
+    ///
+    /// Worth reporting because the loser is not always the one you expect:
+    /// bare-name resolution puts this namespace's own definitions ahead of its
+    /// `use` aliases, so `(defun twice ...)` followed by `(use m::twice)`
+    /// leaves the import doing **nothing at all**, silently. That is the case
+    /// `shadowing-import` exists to make deliberate — it cannot actually win
+    /// against a definition (nothing un-defines one), but it says so, and the
+    /// import that merely replaces an earlier import does win.
+    fn report_import_collision(&self, bare: &str, target: &[String], shadowing: bool) -> Result<(), Error> {
+        if shadowing {
+            return Ok(());
+        }
+        let ns = self.cur_ns();
+        // The same path imported again binds what is already bound.
+        if ns.aliases.get(bare).map(|a| a.as_slice()) == Some(target)
+            || ns.mod_aliases.get(bare).map(|a| a.as_slice()) == Some(target)
+        {
+            return Ok(());
+        }
+        // Which side loses says which message is true, so they are not one
+        // message with a word substituted.
+        let message = if ns.aliases.contains_key(bare) || ns.mod_aliases.contains_key(bare) {
+            format!("import of `{}` replaces an earlier import of the same name", bare)
+        } else {
+            let held = if ns.fns.contains_key(bare) {
+                "function"
+            } else if ns.types.contains_key(bare) {
+                "type"
+            } else if ns.traits.contains_key(bare) {
+                "trait"
+            } else if ns.macros.contains_key(bare) {
+                "macro"
+            } else if ns.vars.contains_key(bare) {
+                "global"
+            } else if ns.type_aliases.contains_key(bare) {
+                "type alias"
+            } else {
+                return Ok(());
+            };
+            format!(
+                "import of `{}` does nothing: the {} of that name defined here wins. \
+                 Call it by its path, or say `shadowing-import` to mean it",
+                bare, held
+            )
+        };
+        match self.redef_policy {
+            RedefPolicy::Error => Err(Error::TypeError(message)),
+            RedefPolicy::Warn => {
+                self.warnings.borrow_mut().push(format!("warning: {}", message));
+                Ok(())
+            }
+            RedefPolicy::Silent => Ok(()),
+        }
+    }
+
+    /// `(in-module path)` — the rest of the enclosing unit (this file, or the
+    /// `(module ...)` body this sits in) belongs to module `path`, nested
+    /// inside whatever module encloses it.
+    ///
+    /// The flat spelling of `(module path body...)`, for a file whose whole
+    /// content belongs to one nested module and would otherwise be indented
+    /// inside it. Several may appear in one file, each running to the end of
+    /// the unit or to the next one — `(in-module a)` then `(in-module b)`
+    /// gives `<file>::a` then `<file>::a::b`, since each nests in what it
+    /// finds, exactly as a written `module` would.
+    ///
+    /// **This is not CL's `in-package`**, and does not carry that name. A file
+    /// here already *is* a module (its path derives one), so there is nothing
+    /// for a form to select; what it can do is nest further, which is a module
+    /// operation and says so. See cl-parity-plan.md Stage 9a.
+    ///
+    /// It lowers to an empty `(module PATH)`, whose whole effect at run time is
+    /// to make sure the namespace exists — the same thing an empty written
+    /// `module` does, and the reason this needs no vocabulary of its own.
+    fn check_in_module(&mut self, heap: &mut Heap, parts: &[Value]) -> Result<TopLevelForm, Error> {
+        if parts.len() != 1 {
+            return Err(Error::TypeError("in-module: (in-module path)".into()));
+        }
+        let segs = path_to_segs(heap, parts[0])?;
+        let path = self.enter_module(&segs);
+        forms::module_form(heap, &path, &[])
+    }
+
+    /// `(use path...)` / `(import path...)` / `(shadowing-import path...)`.
+    ///
+    /// One path per import, checked left to right, so a later one may build on
+    /// what an earlier one brought in. `import` is CL's spelling of the same
+    /// act and means exactly `use`; `shadowing-import` is `use` that means to
+    /// take a bare name something else already holds, and so is the one form
+    /// that does not report the collision.
+    ///
+    /// The forms `use` bundles into are recorded in a dump one by one
+    /// (`dump::record_definitions`), so several paths lower to several `use`
+    /// nodes rather than one node naming several targets.
+    fn check_use_forms(
+        &mut self,
+        heap: &mut Heap,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        shadowing: bool,
+    ) -> Result<TopLevelForm, Error> {
+        let what = if shadowing { "shadowing-import" } else { "use" };
+        if parts.is_empty() {
+            return Err(Error::TypeError(format!("{}: ({} path...)", what, what)));
+        }
+        if parts.len() == 1 {
+            return self.check_use(heap, parts, parts_locs, shadowing);
+        }
+        let mut nodes = Vec::with_capacity(parts.len());
+        for (i, p) in parts.iter().enumerate() {
+            let loc = parts_locs.get(i).cloned().unwrap_or(None);
+            let node = self.check_use(heap, std::slice::from_ref(p), &[loc], shadowing)?;
+            nodes.push(forms::rooted(heap, node));
+        }
+        // The bundle's path is the namespace the imports landed in — the
+        // wrapper only groups, and `Interp::exec` on a `use` does nothing
+        // either way (the whole effect was the checker's).
+        let path = Path::from_segments(self.ns.clone());
+        forms::module_form(heap, &path, &nodes)
+    }
+
+    fn check_use(
+        &mut self,
+        heap: &mut Heap,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        shadowing: bool,
+    ) -> Result<TopLevelForm, Error> {
         if parts.len() != 1 {
             return Err(Error::TypeError("use: (use path)".into()));
         }
@@ -8546,6 +8763,7 @@ impl Checker {
 
         // Try: free function.
         if let Some(target) = self.resolve_fn_path(&segs) {
+            self.report_import_collision(&bare, &segs, shadowing)?;
             self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
             let alias = self.fq(&bare);
             return forms::use_form(heap, &alias, &target);
@@ -8561,6 +8779,7 @@ impl Checker {
         if let Some(target) = self.resolve_type_path(&segs) {
             // Unlike `rect::new`, a `use` path's *last* segment is the type
             // itself — the import names it and nothing else.
+            self.report_import_collision(&bare, &segs, shadowing)?;
             self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
             self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
             let def = self.reg.type_def(&target).expect("resolved type exists").clone();
@@ -8605,6 +8824,7 @@ impl Checker {
         // names keeps its own name). The `aliases` entry is what
         // `resolve_type_alias`'s bare-name branch follows.
         if let Some(a) = self.resolve_type_alias_path(&segs) {
+            self.report_import_collision(&bare, &segs, shadowing)?;
             self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
             let alias = self.fq(&bare);
             return forms::use_form(heap, &alias, &a.name);
@@ -9130,13 +9350,14 @@ impl Checker {
             "try-as" => return self.check_as(heap, interp, env, args, arg_locs, true),
             "compile" => return self.check_compile(heap, args),
             "documentation" => return self.check_documentation(heap, args),
+            "source-file" => return self.check_source_file(heap, v, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
             // Top-level-only forms reaching expression position (e.g. a
             // macro expanding to `(use ...)` inside a function body) get a
             // clear error instead of the misleading "unbound variable" the
             // fallthrough resolution below would produce.
-            "use" | "module" => {
+            "use" | "module" | "import" | "shadowing-import" | "in-module" => {
                 return Err(Error::TypeError(format!(
                     "{}: only allowed at top level, not in expression position",
                     head
@@ -11761,6 +11982,13 @@ impl Checker {
     /// post-monomorphization is what lets e.g. a generic function value
     /// (`(defvar (f (fn (i32) i32)) identity)`) resolve its type arguments
     /// at all.
+    /// `defvar` / `defconstant` / `defparameter`.
+    ///
+    /// `reassign` is what separates `defparameter` from `defvar`: CL's
+    /// `defvar` initializes a global **only if it is not already bound**, so
+    /// re-loading a file keeps whatever the session has since put there, and
+    /// `defparameter` always assigns. See [`Self::defvar_form`] for where the
+    /// distinction is carried.
     fn check_defvar(
         &mut self,
         heap: &mut Heap,
@@ -11769,6 +11997,7 @@ impl Checker {
         mutable: bool,
         public: bool,
         def_loc: Option<Loc>,
+        reassign: bool,
     ) -> Result<TopLevelForm, Error> {
         if parts.len() != 2 && parts.len() != 3 {
             return Err(Error::TypeError(
@@ -11822,7 +12051,7 @@ impl Checker {
         if let Some(doc) = doc {
             self.reg.docs.vars.insert(fq_name.clone(), doc);
         }
-        self.defvar_form(heap, &fq_name, &ty, mutable, public, value.form)
+        self.defvar_form(heap, &fq_name, &ty, mutable, public, value.form, reassign)
     }
 
     /// `(loop body...)`: an infinite loop, exited via `break`/`return`. Its

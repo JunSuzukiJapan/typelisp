@@ -87,6 +87,18 @@ pub struct Heap {
     // The value of a `throw` currently travelling up the stack — see
     // `set_in_flight_throw`.
     in_flight_throw: Option<Value>,
+    // Reader macros: the function each macro character dispatches to, and for
+    // a dispatching character (`#`-like) the function each sub-character
+    // dispatches to. See `set_macro_character`.
+    //
+    // Here rather than in a thread-local of the reader's, for two reasons
+    // that point the same way. A stored function is a heap value, so it only
+    // means anything alongside the heap it came from — a table outliving the
+    // heap would hand the next session cells belonging to nobody. And the
+    // values need rooting: they are pushed as *permanent* roots when
+    // registered, which is a thing only a `Heap` can do.
+    macro_chars: HashMap<char, Value>,
+    dispatch_chars: HashMap<(char, char), Value>,
 
     // Symbols are *not* here: they live in one process-global, permanent
     // table (`super::symbols`), so a symbol means the same thing in every
@@ -202,6 +214,8 @@ impl Heap {
             permanent_roots: Vec::new(),
             session_roots: Vec::new(),
             in_flight_throw: None,
+            macro_chars: HashMap::new(),
+            dispatch_chars: HashMap::new(),
             type_keys: Vec::new(),
             type_key_ids: HashMap::new(),
             paths: Vec::new(),
@@ -524,6 +538,53 @@ impl Heap {
     /// overwriting this slot does.
     pub fn in_flight_throw(&self) -> Option<Value> {
         self.in_flight_throw
+    }
+
+    /// Register `f` as the reader macro for `ch` — the function the reader
+    /// calls when it meets that character where a datum would start.
+    ///
+    /// `f` becomes a **permanent root**: it has to survive every collection
+    /// between now and the last read that might use it, and nothing else
+    /// refers to it. Re-registering the same character replaces the entry and
+    /// leaves the old function rooted, which is the same small, bounded leak
+    /// a redefined global has and for the same reason (`permanent_roots` is
+    /// not LIFO, so an entry cannot be withdrawn).
+    pub fn set_macro_character(&mut self, ch: char, f: Value) {
+        self.push_permanent_root(f);
+        self.macro_chars.insert(ch, f);
+    }
+
+    /// The reader macro registered for `ch`, if any.
+    pub fn macro_character(&self, ch: char) -> Option<Value> {
+        self.macro_chars.get(&ch).copied()
+    }
+
+    /// [`Self::set_macro_character`] for a *dispatching* character: `f`
+    /// handles `disp` followed by `sub` (CL's `#`-style two-character
+    /// syntax).
+    ///
+    /// Registering makes `disp` dispatching; there is no separate
+    /// `make-dispatch-macro-character` step, because after this there would
+    /// be nothing left for one to do.
+    pub fn set_dispatch_macro_character(&mut self, disp: char, sub: char, f: Value) {
+        self.push_permanent_root(f);
+        self.dispatch_chars.insert((disp, sub), f);
+    }
+
+    /// The function registered for the two-character sequence, if any.
+    pub fn dispatch_macro_character(&self, disp: char, sub: char) -> Option<Value> {
+        self.dispatch_chars.get(&(disp, sub)).copied()
+    }
+
+    /// Whether `ch` begins a two-character dispatch sequence — i.e. whether
+    /// anything at all has been registered under it.
+    ///
+    /// `#` is *not* reported here even when it has entries: the reader hands
+    /// `#` to its own built-in dispatch, which consults
+    /// [`Self::dispatch_macro_character`] before any of `#b`/`#x`/`#.`/…
+    /// and so already covers the user's registrations.
+    pub fn is_dispatch_char(&self, ch: char) -> bool {
+        ch != '#' && self.dispatch_chars.keys().any(|(d, _)| *d == ch)
     }
 
     /// Park (or, with `None`, release) the in-flight throw's value — see

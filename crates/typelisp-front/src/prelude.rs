@@ -1022,6 +1022,187 @@ pub const SOURCE: &str = r##"
            ,@(sexpr-map (lambda ((tr Option<Sexpr>)) Option<Sexpr> (list (quote setf) (sexpr-car (sexpr-cdr tr)) (sexpr-car tr))) temps)))
        ,@result)))
 
+;; ---------------------------------------------------------------------------
+;; `destructuring-bind` (cl-parity-plan.md Phase 4a).
+;;
+;; CL's binding form for taking a list apart by shape. Every variable it binds
+;; has type `Option<Sexpr>` -- not a limitation of the implementation but of
+;; what there is to bind: an S-expression list is the only kind of list this
+;; language has, so there is no other type its elements could be given.
+;; Narrow with `match` where a scalar is wanted, the way a `defmacro` body
+;; does.
+;;
+;; The lambda list is `defmacro`'s, for the reason CL shares one between them:
+;; the two forms exist to take apart the same thing. Required parameters,
+;; then `&optional` (with defaults), then `&rest`/`&body`, then `&key` (with
+;; defaults). Nested lambda lists are not supported -- `defmacro` does not
+;; take them either, and the two should stay one rule.
+;;
+;; A shape mismatch is a `panic`, which is what CL's error is. The check has
+;; to be written because `sexpr-car`/`sexpr-cdr` are lenient: `(sexpr-car ())`
+;; is `()`, so a chain of them binds a short list to a row of empties and says
+;; nothing at all.
+;;
+;; The expansion is nested `let*`s, one per parameter, each reading the tail
+;; variable the one before it left. Not nested `match`es, which is the other
+;; obvious shape: a defaulted parameter would need the whole remainder
+;; duplicated into both arms, and the duplication compounds per `&optional`.
+
+(defun dbind-head ((l Option<Sexpr>) (ll Option<Sexpr>)) Option<Sexpr>
+  "The first element of `l`; an error naming the lambda list if there is none."
+  (match l
+    ((cons a _) a)
+    (_ (panic (format false "destructuring-bind: too few elements for ~a" ll)))))
+
+(defun dbind-end ((l Option<Sexpr>) (ll Option<Sexpr>)) ()
+  "Nothing may be left over -- a lambda list is exact unless it says `&rest`
+   or `&key`."
+  (match l
+    ((cons _ _) (panic (format false "destructuring-bind: too many elements for ~a" ll)))
+    (_ ())))
+
+;; A `&key` parameter is looked up by the *name* of its keyword rather than by
+;; the keyword itself, and the expansion carries the plain parameter name.
+;; Building `:a` out of the parameter `a` would need a symbol constructor, and
+;; the only one there is is the reader -- which would make this form's meaning
+;; depend on the readtable. So the `:` is put on at the point of comparison.
+
+(defun dbind-keyword-name ((name Option<Sexpr>)) string
+  "The keyword a `&key` parameter is passed under, as text: `a` -> `\":a\"`."
+  (format false ":~a" name))
+
+(defun dbind-key-lookup ((l Option<Sexpr>) (name Option<Sexpr>)) Option<Option<Sexpr>>
+  "The value the plist `l` gives the `&key` parameter `name`. The first one
+   wins, as CL's does. `none` tells absent from present-and-`()`, which is
+   what lets the default stay unevaluated."
+  (match l
+    ((cons k rest)
+      (match rest
+        ((cons v more)
+          (if (and (sexpr-symp k) (equal (sexpr-sym-name k) (dbind-keyword-name name)))
+              (option::some v)
+              (dbind-key-lookup more name)))
+        (_ (panic "destructuring-bind: the &key part has an odd number of elements"))))
+    (_ (option::none))))
+
+(defun dbind-name-memberp ((kw string) (params Option<Sexpr>)) bool
+  "Whether the keyword named `kw` is one of `params`' parameter names."
+  (match params
+    ((cons a rest) (if (equal kw (dbind-keyword-name a)) true (dbind-name-memberp kw rest)))
+    (_ false)))
+
+(defun dbind-keys-known ((l Option<Sexpr>) (allowed Option<Sexpr>) (ll Option<Sexpr>)) ()
+  "Every keyword in the plist `l` is one the lambda list named. CL's
+   `&allow-other-keys` has no counterpart, the same as in `defmacro`."
+  (match l
+    ((cons k rest)
+      (match rest
+        ((cons _ more)
+          (if (and (sexpr-symp k) (dbind-name-memberp (sexpr-sym-name k) allowed))
+              (dbind-keys-known more allowed ll)
+              (panic (format false "destructuring-bind: ~a is not a keyword of ~a" k ll))))
+        (_ (panic (format false "destructuring-bind: the &key part of ~a has an odd number of elements" ll)))))
+    (_ ())))
+
+;; --- building the expansion ----------------------------------------------
+
+(defun dbind-par-name ((p Option<Sexpr>)) Option<Sexpr>
+  "A parameter's name: `x`, or the `x` of `(x default)`."
+  (match p ((cons a _) a) (_ p)))
+
+(defun dbind-par-default ((p Option<Sexpr>)) Option<Sexpr>
+  "A parameter's default form, or `()` when it was written bare."
+  (match p ((cons _ d) (sexpr-car d)) (_ (quote ()))))
+
+(defun dbind-plain-name ((p Option<Sexpr>) (whole Option<Sexpr>)) Option<Sexpr>
+  "A parameter that may not carry a default: a required one, or the one after
+   `&rest`. A list here can only be CL's *nested* lambda list, which is not
+   supported -- and saying so is the whole point of this check, because
+   `dbind-par-name` would otherwise read `(b c)` as `b` defaulting to `c` and
+   bind the sublist to `b` without a word."
+  (match p
+    ((cons _ _) (panic (format false "destructuring-bind: ~a is a nested lambda list, which is not supported (in ~a)" p whole)))
+    (_ p)))
+
+(defun dbind-keyword-list ((params Option<Sexpr>)) Option<Sexpr>
+  "The `&key` section's parameter names, for the unknown-key check."
+  (sexpr-map (lambda ((q Option<Sexpr>)) Option<Sexpr> (dbind-par-name q)) params))
+
+(defun dbind-tail ((closed bool) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  "What runs once everything is bound: the body, preceded by the
+   nothing-left-over check when the lambda list was an exact one."
+  (if closed
+      `(progn (dbind-end ,tv (quote ,whole)) ,@body)
+      `(progn ,@body)))
+
+(defun dbind-keys ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  "The `&key` section: one binding per keyword, all reading the same tail."
+  (match ll
+    ((cons p rest)
+      (let ((g (gensym)))
+        `(let ((,(dbind-par-name p)
+                 (match (dbind-key-lookup ,tv (quote ,(dbind-par-name p)))
+                   ((some ,g) ,g)
+                   ((none) ,(dbind-par-default p)))))
+           ,(dbind-keys rest tv whole body))))
+    (_ (dbind-tail false tv whole body))))
+
+(defun dbind-restkey ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  "The `&rest`/`&body` and `&key` sections. Its own function so that the
+   required walk and the `&optional` walk can both hand off to it without
+   calling each other -- nothing in the prelude may be forward-declared, and
+   two walks that call each other would need it."
+  (match ll
+    ((cons p rest)
+      (cond
+        ((or (equal p (quote &rest)) (equal p (quote &body)))
+         `(let ((,(dbind-plain-name (dbind-head rest whole) whole) ,tv))
+            ,(dbind-restkey (sexpr-cdr rest) tv whole body)))
+        ((equal p (quote &key))
+         `(progn
+            (dbind-keys-known ,tv (quote ,(dbind-keyword-list rest)) (quote ,whole))
+            ,(dbind-keys rest tv whole body)))
+        (true (panic (format false "destructuring-bind: ~a comes after &rest in ~a" p whole)))))
+    (_ (dbind-tail false tv whole body))))
+
+(defun dbind-opts ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  "The `&optional` section: the element if there is one, else the default --
+   which is written into the arm that needs it, so it is not evaluated when
+   the element was there."
+  (match ll
+    ((cons p rest)
+      (cond
+        ((or (equal p (quote &rest)) (equal p (quote &body)) (equal p (quote &key)))
+         (dbind-restkey ll tv whole body))
+        (true
+          (let ((g (gensym)) (next (gensym)))
+            `(let* ((,(dbind-par-name p) (match ,tv ((cons ,g _) ,g) (_ ,(dbind-par-default p))))
+                    (,next (sexpr-cdr ,tv)))
+               ,(dbind-opts rest next whole body))))))
+    (_ (dbind-tail true tv whole body))))
+
+(defun dbind-parts ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  "The required section, and the hand-off to each marker's own builder."
+  (match ll
+    ((cons p rest)
+      (cond
+        ((equal p (quote &optional)) (dbind-opts rest tv whole body))
+        ((or (equal p (quote &rest)) (equal p (quote &body)) (equal p (quote &key)))
+         (dbind-restkey ll tv whole body))
+        (true
+          (let ((next (gensym)))
+            `(let* ((,(dbind-plain-name p whole) (dbind-head ,tv (quote ,whole)))
+                    (,next (sexpr-cdr ,tv)))
+               ,(dbind-parts rest next whole body))))))
+    (_ (dbind-tail true tv whole body))))
+
+(pub defmacro destructuring-bind (lambda-list form &rest body)
+  "Bind the variables of `lambda-list` to the parts of the list `form`
+   evaluates to, then run `body`. Every variable is an `Option<Sexpr>`."
+  (let ((tv (gensym)))
+    `(let ((,tv ,form))
+       ,(dbind-parts lambda-list tv lambda-list body))))
+
 ;; `Iter`: the trait `doiter` requires every iterable type to implement — a single
 ;; `next` method returning the next element, or `(none)` once exhausted.
 ;; `Self` mutates in place across calls (no immutable "next state" returned
@@ -1382,7 +1563,6 @@ pub const SOURCE: &str = r##"
             (if (> afr2 ab) (let ((q (+ fq 1.0))) (cons q (- self (* q b))))
                 (if (= (mod fq 2.0) 0.0) fd
                     (let ((q (+ fq 1.0))) (cons q (- self (* q b)))))))))))
-
 
 ;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
 ;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
@@ -3629,7 +3809,18 @@ user-visible capacity."
   ;; `string` where `Option<Item>` is declared -- which is exactly what this
   ;; docstring used to be, unnoticed until `deftrait` began checking its
   ;; default bodies at the declaration.
-  (read-item ((self Self)) Option<Item>))
+  (read-item ((self Self)) Option<Item>)
+  ;; Whether the next `read-item` can answer without waiting.
+  ;;
+  ;; The default is `false`, and it is the same choice `at-line-start` makes
+  ;; below and for the same reason: only the stream itself knows, so the
+  ;; default has to be the answer that is never a lie. `false` says "nothing
+  ;; is known to be ready", which is always true; `true` would be a guess,
+  ;; and a wrong one makes `read-char-no-hang` block -- the one thing its
+  ;; name promises it will not do. Every built-in stream overrides this. A
+  ;; user stream that can tell should too: with the default it never reports
+  ;; anything ready, so `read-char-no-hang` on it always answers `none`.
+  (listen ((self Self)) bool false))
 
 (deftrait OutputStream (Stream)
   "A stream that accepts items."
@@ -3645,6 +3836,24 @@ user-visible capacity."
   (read-char ((self Self)) Option<char>
     "The next character, or `none` at end of input."
     (read-item self))
+  (read-char-no-hang ((self Self)) Option<char>
+    "The next character, but only if it is already there: `none` rather than
+     a wait. Answers `none` for a stream whose `listen` is the default."
+    (if (listen self) (read-char self) (option::none)))
+  (read-sequence ((self Self) (into Vector<char>) (n i32)) i32
+    "Read up to `n` characters, pushing each onto `into`; the count actually
+     read, which is short of `n` only at end of input. CL's `read-sequence`
+     fills an existing sequence between `:start` and `:end` and answers the
+     index it stopped at; a `Vector` grows, so this appends and answers the
+     count -- the same fact without the index arithmetic."
+    (let ((got 0) (going true))
+      (while going
+        (if (>= got n)
+            (progn (setf going false) ())
+            (match (read-char self)
+              ((some c) (progn (push into c) (setf got (+ got 1)) ()))
+              ((none) (progn (setf going false) ())))))
+      got))
   (read-line ((self Self)) Option<string>
     "Up to (and consuming) the next newline. `none` only at end of input, so
      a final line with no newline is still returned."
@@ -3702,6 +3911,10 @@ user-visible capacity."
   (terpri ((self Self)) ()
     "Write a newline. CL's name for it."
     (write-item self #\newline))
+  (write-sequence ((self Self) (from Vector<char>)) ()
+    "Every character of `from`, in order. CL's `write-sequence` takes
+     `:start`/`:end`; slice the vector instead."
+    (doiter (c (iter from)) (write-char self c)))
   (write-line ((self Self) (s string)) ()
     "Write `s` followed by a newline."
     (progn (write-string self s) (write-item self #\newline)))
@@ -3731,13 +3944,26 @@ user-visible capacity."
   "A byte input stream. Every method has a default body."
   (read-byte ((self Self)) Option<i32>
     "The next byte, or `none` at end of input."
-    (read-item self)))
+    (read-item self))
+  (read-sequence ((self Self) (into Vector<i32>) (n i32)) i32
+    "`CharInput`'s, over bytes."
+    (let ((got 0) (going true))
+      (while going
+        (if (>= got n)
+            (progn (setf going false) ())
+            (match (read-byte self)
+              ((some b) (progn (push into b) (setf got (+ got 1)) ()))
+              ((none) (progn (setf going false) ())))))
+      got)))
 
 (deftrait ByteOutput ((OutputStream (Item i32)))
   "A byte output stream. Every method has a default body."
   (write-byte ((self Self) (b i32)) ()
     "Write one byte. `b` outside 0..255 is an error."
     (write-item self b))
+  (write-sequence ((self Self) (from Vector<i32>)) ()
+    "Every byte of `from`, in order."
+    (doiter (b (iter from)) (write-byte self b)))
   (finish-output ((self Self)) ()
     "Push buffered output to its destination. A no-op unless overridden."
     ()))
@@ -3770,7 +3996,8 @@ user-visible capacity."
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 (impl InputStream file-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h))))
+  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h)))
+  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
 (impl OutputStream file-stream
   (type Item char)
   (write-item ((self Self) (c char)) ()
@@ -3791,7 +4018,8 @@ user-visible capacity."
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 (impl InputStream binary-file-stream
   (type Item i32)
-  (read-item ((self Self)) Option<i32> (unwrap-io (stream-read-byte self::h))))
+  (read-item ((self Self)) Option<i32> (unwrap-io (stream-read-byte self::h)))
+  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
 (impl OutputStream binary-file-stream
   (type Item i32)
   (write-item ((self Self) (b i32)) () (unwrap-io (stream-write-byte self::h b))))
@@ -3804,7 +4032,9 @@ user-visible capacity."
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 (impl InputStream string-input-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h))))
+  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h)))
+  ;; The one kind that can honestly say `true`: the whole text is in memory.
+  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
 (impl CharInput string-input-stream)
 (impl PeekInput string-input-stream
   (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
@@ -3826,7 +4056,8 @@ user-visible capacity."
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 (impl InputStream standard-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h))))
+  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h)))
+  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
 (impl OutputStream standard-stream
   (type Item char)
   (write-item ((self Self) (c char)) ()
@@ -3910,7 +4141,8 @@ user-visible capacity."
   (close ((self Self)) () (progn (close self::in) (close self::out))))
 (impl InputStream two-way-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (read-char self::in)))
+  (read-item ((self Self)) Option<char> (read-char self::in))
+  (listen ((self Self)) bool (listen self::in)))
 (impl OutputStream two-way-stream
   (type Item char)
   (write-item ((self Self) (c char)) () (write-char self::out c)))
@@ -3930,7 +4162,8 @@ user-visible capacity."
   (read-item ((self Self)) Option<char>
     (match (read-char self::in)
       ((some c) (progn (write-char self::out c) (option::some c)))
-      ((none) (option::none)))))
+      ((none) (option::none))))
+  (listen ((self Self)) bool (listen self::in)))
 (impl CharInput echo-stream)
 
 ;; Reads through the components in order; each one's end of input advances to
@@ -3949,7 +4182,12 @@ user-visible capacity."
             (match (read-char (get self::parts self::at))
               ((some c) (progn (setf answer (option::some c)) (setf going false) ()))
               ((none) (progn (setf self::at (+ self::at 1)) ())))))
-      answer)))
+      answer))
+  ;; Only about the component being read now: whether a *later* one is ready
+  ;; says nothing about the next character, and finding out would consume
+  ;; this one's end of input.
+  (listen ((self Self)) bool
+    (if (>= self::at (len self::parts)) false (listen (get self::parts self::at)))))
 (impl CharInput concatenated-stream)
 
 ;; Gives any input stream one character of pushback, so that a stream without
@@ -3965,7 +4203,10 @@ user-visible capacity."
   (read-item ((self Self)) Option<char>
     (match self::pending
       ((some c) (progn (setf self::pending (option::none)) (option::some c)))
-      ((none) (read-char self::inner)))))
+      ((none) (read-char self::inner))))
+  ;; A pushed-back character is already in hand.
+  (listen ((self Self)) bool
+    (match self::pending ((some c) true) ((none) (listen self::inner)))))
 (impl CharInput peek-stream)
 (impl PeekInput peek-stream
   ;; A second `unread-char` without a read in between overwrites the first --
@@ -4441,6 +4682,28 @@ user-visible capacity."
    in the returned index, and so in what the next read sees."
   (read-datum-at s start true))
 
+
+;; ---------------------------------------------------------------------------
+;; Reader macros.
+;;
+;; `set-macro-character` stores a function; the *reader* -- Rust, one crate
+;; below this one -- is what calls it. It cannot make that call itself: a
+;; reader macro takes a stream, and turning the text it has not read yet into
+;; one is work with a type on it. So the reader hands the pieces here.
+;;
+;; The answer has to say how far the macro got as well as what it produced,
+;; because the macro read from a stream of its own and the reader's cursor has
+;; to be moved to match. That is what the `cons-cell` carries -- the same
+;; shape, and for the same reason, as `read-from-string`'s.
+
+(defun call-reader-macro ((f (fn (string-input-stream char) Option<Sexpr>)) (c char) (rest string))
+    cons-cell<Option<Sexpr>, i32>
+  "Run the reader macro `f` on the character `c` that triggered it and the
+   text after it, answering what it read and how much of `rest` it consumed."
+  (let ((in (make-string-input-stream rest)))
+    (let ((v (f in c)))
+      (cons v (unwrap-io (stream-position in::h))))))
+
 (defun sexpr-list-from ((v Vector<Option<Sexpr>>)) Option<Sexpr>
   "The elements of `v` as a list, front to back."
   (let ((out (quote ())) (i (- (len v) 1)))
@@ -4454,8 +4717,10 @@ user-visible capacity."
 ;; a missing `)` is a mistake, and CL signals it too.
 ;;
 ;; CL's third argument (`recursive-p`) has nothing to correspond to here: it
-;; exists to tell CL's reader that the call is inside a reader macro, and
-;; there are no reader macros (cl-parity-plan.md Phase 8c).
+;; exists to tell CL's reader whether the call is nested inside another read,
+;; which decides how `#n=` labels and the like are scoped. This reader has no
+;; such cross-call state, so a reader macro calling this is not a different
+;; kind of call from a program doing it.
 (pub defun read-delimited-list<S> ((terminator char) (s S)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
   "Every datum on `s` up to `terminator`, as a list. The terminator is
    consumed; reaching end of input first is an `Err`."

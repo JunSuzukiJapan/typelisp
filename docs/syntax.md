@@ -7,6 +7,15 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
 - **大文字小文字は区別しない**。シンボルは読み取り時にすべて小文字へ正規化される。
 - **コメント**: `;` で始まり行末まで（行コメント）。`#| ... |#`（ネスト可能なブロックコメント）。
+- **読み込み時評価**: `#.(式)` は続くフォームを**読みながら実行**し、その値を読んだことにする。
+  リーダがテキストだけの関数でなくなる唯一の場所。届く範囲は読み込み経路で変わり、これは
+  CL と同じ:
+  - `(load ...)` と REPL は 1 フォームずつ評価するので、**同じテキストの手前で定義した関数**を
+    呼べる（CL の `load`）。
+  - モジュールファイルは単位として検査され実行は `use` した側なので、`#.` から届くのは
+    prelude と、そのセッションが既に実行したものだけ。ファイル自身の定義も、`use` した
+    モジュールの定義も**まだ走っていない**（CL の `compile-file` で `eval-when` が要るのと同じ）。
+  - `read-from-string` のような純粋な読みには評価器が無いので、`#.` はその旨のエラーになる。
 - **真偽値**: `true` / `false`。
 - **整数**: 10進（`42`, `-7`）。符号 `+`/`-` を前置可能。10進以外は CL の radix マクロ
   `#b`/`#o`/`#x`/`#NNr` で書く（符号は印の後ろ、`#x-ff`）。`0x` 接頭辞は CL に無いので
@@ -198,16 +207,22 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 CL の対応物は `(declaim (ftype (function (i32) bool) even2?))` だが、あちらは宣言システム
 一式を伴い、かつ**助言**でしかない。こちらは静的型付けなので宣言は検査される。
 
-### defvar / defconstant — グローバル変数
+### defvar / defparameter / defconstant — グローバル変数
 
 ```lisp
-(defvar (name Type) init-expr)
+(defvar (name Type) init-expr)        ; まだ束縛されていないときだけ初期化する
+(defparameter (name Type) init-expr)  ; 毎回代入する
 (defconstant (name Type) init-expr)
 
 ; docstring 付き（CL の defvar/defparameter/defconstant と同じ順序: 値の後ろ）
 (defvar (name Type) init-expr "doc")
 (defconstant (name Type) init-expr "doc")
 ```
+
+**`defvar` と `defparameter` の違いは再ロードのとき**に出る（CL と同じ）。`defvar` は
+そのグローバルが**すでに束縛されていれば初期化式を評価すらしない**ので、設定ファイルを
+編集して読み直しても、セッションが変更した値はそのまま残る。`defparameter` は毎回
+代入するので、読み直せば書かれたとおりの値に戻る。
 
 型注釈は必須（初期化式から推論しない）。`defvar` は書き換え可能、`defconstant` は不可（`setf` でエラー）。
 
@@ -451,8 +466,11 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 ### module / use — 名前空間
 
 ```lisp
-(module path body...)   ; path は foo または foo::bar のようなセグメント列
-(use path)              ; 関数・型・モジュールをカレント名前空間へエイリアス導入
+(module path body...)      ; path は foo または foo::bar のようなセグメント列
+(in-module path)           ; 以降このユニットの末尾まで path の中（module の平たい形）
+(use path...)              ; 関数・型・モジュールをカレント名前空間へエイリアス導入
+(import path...)           ; use と同じ（CL 互換の綴り）
+(shadowing-import path...) ; 既に埋まっている裸名を承知の上で取る use
 ```
 
 - `module` は名前空間を作る。**型は名前空間ではない**（Rust と同様、型は関連関数/メソッドを持つのみ）。
@@ -465,6 +483,17 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 - **`use` はそれより後のフォームに効く。** ファイルは 1 フォームずつ読まれ、依存も
   そのフォームを検査する直前に解決されるので、`(use m)` より**上**で `m::f` と書くと
   `unresolved path` になる。`use` はファイルの先頭に置く。
+- **`use` は複数のパスを取れる**（`(use a::f b::g)`）。`import` は同じ動作の CL 互換の綴り。
+- **裸名がすでに埋まっている `use` は報告される。** 裸名の解決はそのモジュール自身の定義を
+  エイリアスより先に見るので、`(defun twice ...)` の後の `(use m::twice)` は**何もしない**。
+  承知の上でやるなら `shadowing-import` と書く（ただし定義には勝てない——定義を取り消す
+  手段は無い。勝てるのは先行するエイリアスに対してだけ）。
+- **`in-module` は `(module path body...)` の平たい形**。`(in-module geometry)` と書くと
+  以降そのユニット（ファイル、または囲む `module` の本体）の末尾まで `geometry` の中になる。
+  ファイル自身のモジュールの**内側**に入る（`main.typl` なら `main::geometry`）。
+  2 つ並べれば順に入れ子になる。CL の `in-package` とは別物で、名前も別にしてある——
+  このシステムではファイルが既にモジュールなので「選ぶ」対象が無く、フォームにできるのは
+  入れ子にすることだけだから。
 
 ### ファイル↔モジュール対応（マルチファイルプロジェクト）
 
@@ -577,6 +606,34 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (prog2 a b more...)                 ; 全部評価し、値は b のもの。defmacro
 (the Type expr)                     ; 型注釈（実行時の効果なし）
 ```
+
+### destructuring-bind — リストを形で分解する
+
+```lisp
+(destructuring-bind ラムダリスト form body...)
+```
+
+`form` が作るリストを**形**で分解して束縛する。ラムダリストは `defmacro` のもの
+（必須 → `&optional` → `&rest`/`&body` → `&key`、それぞれデフォルト式つき）で、CL が両者で
+1 つを共有しているのと同じ理由——同じものを分解する 2 つの形だから。
+
+```lisp
+(destructuring-bind (op a b) (quote (+ 1 2)) (format false "~a ~a ~a" op a b))  ; "+ 1 2"
+(destructuring-bind (head &rest tail) xs (format false "~a | ~a" head tail))
+(destructuring-bind (a &optional (b 9)) (quote (1)) b)                          ; 9
+(destructuring-bind (&key (x 0) y) (quote (:y 7)) (format false "~a ~a" x y))   ; "0 7"
+```
+
+- **束縛される変数はすべて `Option<Sexpr>`**。実装の制約ではなく、束縛する対象の性質:
+  S 式リストがこの言語で唯一のリストなので、要素に与えられる他の型が無い。スカラが要る
+  ところで `match` に落とすのは `defmacro` の本体と同じ。
+- **形が合わなければ panic**（CL のエラーに当たる）。要素が足りない・多い、`&key` の並びが
+  奇数個、知らないキーワード、のいずれも。`sexpr-car` は `()` に対して `()` を返す寛容な
+  関数なので、チェックを書かなければ短いリストが黙って空の並びに束縛される。
+- **入れ子のラムダリストは非対応**。`defmacro` も取らないので、規則は 1 つに保つ。
+  `(a (b c))` は黙って `b` にサブリストを束縛したりせず、その旨のエラーになる。
+- `&optional` / `&key` のデフォルト式は**使うときだけ評価**される（CL と同じ）。
+- CL の `&allow-other-keys` に当たるものは無い（`defmacro` にも無い）。
 
 ### match — パターンマッチ
 
@@ -806,6 +863,21 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 | `:return e` | 即座にその値で脱出（`:finally` は走らない。CL と同じ） |
 | `:initially form...` / `:finally form...` | ループの前 / 正常終了時 |
 
+**`:named name`**（他のどの節よりも先に、1 つだけ）はループ全体を `(block name …)` で囲む。
+`(return-from name e)` が入れ子のループの中からでも一気に脱出でき、`:return` と同じく
+`:finally` は走らない。名前を付けなければ block も張らない——CL の無名 `loop` は `block nil`
+を張るが、ここに `nil` は無く、`break`/`return`（§5）が既に「直近のループを抜ける」を持って
+いる。
+
+```lisp
+(loop :named outer :for i :from 1 :to 3
+  :do (loop :for j :from 1 :to 3 :do (if (= (* i j) 4) (return-from outer (* 100 i)) ()))
+  :finally (return 0))                                  ; 200
+```
+
+`:finally (return 0)` を省くと**型エラー**になる。`block` の規則がそのまま効くだけで
+（§5.0）、脱出の型 `i32` と、尽きたときにループが残す `()` が合わない。
+
 **ループの値**は、集約節があればその蓄積（複数あれば最初のもの）、`:always`/`:never` なら
 `true`、`:thereis` なら `none`、どれも無ければ `()`。`:finally` の最後が `(return e)` なら
 それが値になる——CL の `finally (return …)` の慣用で、集約しないループが自分の答えを
@@ -817,8 +889,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 - `:maximize`/`:minimize`/`:thereis` は `Option<T>` を返す（nil が無いため）。
 - **`:return` だけ書いて集約も `:finally` も無いのはエラー**。CL は尽きたとき nil を返すが、
   ここにはそれが無いので「尽きたときの値」をループが言う必要がある。
-- `:named`（`block`/`return-from` は入ったので、残るのは `loop` 側の対応だけ）、`:and` による並行節の連結、
-  `:being`/ハッシュ表の専用反復、`:it`、`:nconc` は入っていない。
+- `:and` による並行節の連結、`:being`/ハッシュ表の専用反復、`:it`、`:nconc` は入っていない。
 - `:collect` の要素型はチェッカーが集約式を先に検査して決め、`(the Vector<T> …)` として
   書き込む。`Vector::new` の型引数は期待型から前向きに来るので、後ろの `push` からは
   決まらない（計画のこの前提は誤りだった）。関数型のように**書き表せない型**を集めようと
@@ -857,6 +928,11 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
                                      ; symbol)は対応する Sexpr コンストラクタでラップ、defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> 等ヒープ表現ADTは無変換の
                                      ; まま retype（実行時コストなし）。&rest/format引数も同様。
+(source-file)                       ; このフォームが読まれたファイル名（string）。チェック時に
+                                     ; 定数畳み込みされる。CL の *load-pathname* に当たるが変数では
+                                     ; ない——モジュールの本体は検査の後に実行されるので「いま
+                                     ; ロード中」は当てにならず、チェッカーのほうは常に知っている。
+                                     ; ファイルでないソースはリーダの呼び名（<stdin>/<input>）
 (quote datum)                       ; 'datum と同義。評価せず Sexpr データとして返す
 (quasiquote template)               ; `template と同義。,/,@ でテンプレート内に式を埋め込む
 (documentation name)                ; name（裸名または Type::method）の docstring を Option<string> で返す
@@ -1082,3 +1158,59 @@ AOT 実行ファイルの `print-object` は `(defmethod print-object ...)` の�
 読まない（コンパイラ島だけを読む）ため——これは以前からの制限で、印字対応で変わっていない。
 
 内部実装（LLVM バックエンド）の詳細は開発用ドキュメント（[docs/dev/](dev/)）を参照。
+
+## 11. リーダマクロ（readtable）
+
+リーダが**ある文字に出会ったとき何をするか**を、プログラムから差し替えられる（CLHS 23.1）。
+
+```lisp
+(set-macro-character c f)             ; 文字 c を f が読む
+(get-macro-character c)               ; Option<f>
+(set-dispatch-macro-character d s f)  ; 2文字並び d s を f が読む
+(get-dispatch-macro-character d s)    ; Option<f>
+```
+
+`f` の型は `(fn (string-input-stream char) Option<Sexpr>)`。第 1 引数は**読み残しのテキストを
+張ったストリーム**、第 2 引数は**発火した文字**（ディスパッチなら 2 文字目）。返り値がそこに
+読まれたデータになる。ストリームが `:dyn PeekInput` でなく具体型なのは、リーダが渡すものが
+常にこれ 1 種類だから——`read-sexpr` / `read-char` / `peek-char` / `unread-char` /
+`read-delimited-list` はどれも `(where (PeekInput S))` なので、具体型のまま全部使える。
+
+```lisp
+(set-macro-character #\!
+  (lambda ((s string-input-stream) (c char)) Option<Sexpr>
+    (match (read-sexpr s)
+      ((ok o) (match o
+                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((eof) (quote ()))))
+      ((err e) (quote ())))))
+
+!(equal 1 2)   ; => (not (equal 1 2)) と読まれる、つまり true
+```
+
+リーダは**マクロ文字を組み込み構文より先に見る**ので、`(` や `'` も奪える。`#` のサブ文字は
+組み込みの `#b`/`#x`/`#.` より登録が優先される。`#` 以外の文字も
+`set-dispatch-macro-character` に渡せばその場でディスパッチ文字になる——CL の
+`make-dispatch-macro-character` に当たるものは**無い**。登録がその役をしてしまうので、
+別の段として残しても何もすることが無い。
+
+**いつ効くか**は `#.`（§1）と同じで、読み込み経路によって変わる:
+
+- REPL と `(load ...)` は 1 フォームずつ実行するので、**手前のフォームで定義した関数**を
+  そのまま登録できる。
+- モジュールファイルは単位として検査され実行は後——なので `set-macro-character` /
+  `set-dispatch-macro-character` の**呼び出しだけが即時実行される**
+  （`project::needs_immediate_exec`、CL の `(eval-when (:compile-toplevel) ...)` の役）。
+  即時に走る以上、**渡す関数はその時点で在らねばならない**。同じファイルの `defun` は
+  まだ走っていないので、`lambda` で書くか、prelude / 既に走ったものを使う。
+  トップレベルの呼び出しだけが対象で、`progn` や `let` の中は見ない。
+- 純粋な読み（評価器を渡されていない `Reader`）では、マクロ文字はその旨のエラーになる。
+
+組み込みの `read` / `read-from-string` も readtable を見る（CL と同じ）。コンパイル済みの
+実行ファイルでも動くが、そのぶん**チェッカーとインタプリタが実行ファイルに入る**——
+`eval` と同じ値段で、理由も同じ（登録した関数を呼ぶのは評価器の仕事）。
+
+**無いもの**: `*readtable*` と `copy-readtable`、および `readtable-case`。前の 2 つは
+readtable が**値でない**ため——値なら「リーダに手渡せるもの」でなければならないが、
+リーダを呼ぶのは Rust 側のドライバで、渡す先が無い。`readtable-case` は、この言語のリーダが
+常に小文字化する（CL の `:downcase`）と§1 で決めているため。

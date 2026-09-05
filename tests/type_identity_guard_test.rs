@@ -277,6 +277,16 @@ fn the_runtime_result_keys_match_the_registry() {
     }
     assert_eq!(typelisp_read::shim::READ_RESULT_KEY, expected("read"), "`read`'s result key");
     assert_eq!(
+        typelisp_rt::readtable::READER_MACRO_OPTION_KEY,
+        expected("get-macro-character"),
+        "`get-macro-character`'s result key"
+    );
+    assert_eq!(
+        typelisp_rt::readtable::READER_MACRO_OPTION_KEY,
+        expected("get-dispatch-macro-character"),
+        "`get-dispatch-macro-character`'s result key"
+    );
+    assert_eq!(
         typelisp_read::shim::READ_DATUM_RESULT_KEY,
         expected("read-datum-at"),
         "`read-datum-at`'s result key"

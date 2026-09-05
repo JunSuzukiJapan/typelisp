@@ -61,6 +61,7 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("stream-input-p", "result<bool,fileerror>"),
     ("stream-output-p", "result<bool,fileerror>"),
     ("stream-listen", "result<bool,fileerror>"),
+    ("stream-position", "result<i32,fileerror>"),
     ("stream-at-line-start", "result<bool,fileerror>"),
     ("stream-read-char", "result<option<char>,fileerror>"),
     ("stream-unread-char", "result<(),fileerror>"),
@@ -243,6 +244,10 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
         "stream-listen" => {
             let h = arg!(int(args, 0, name));
             wrap!(with_streams(|t| t.listen(h)), |v: bool| Value::Bool(v))
+        }
+        "stream-position" => {
+            let h = arg!(int(args, 0, name));
+            wrap!(with_streams(|t| t.position(h)), |v: i64| Value::Int(v))
         }
         "stream-write-string" => {
             let (h, s) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
