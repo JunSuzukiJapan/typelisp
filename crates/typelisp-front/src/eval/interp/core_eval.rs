@@ -1421,14 +1421,11 @@ impl Interp {
         let mut names: Vec<String> = self.traced.borrow().iter().cloned().collect();
         names.sort();
         self.trace_armed.set(!names.is_empty());
-        let mut s = RootScope::new(heap);
-        let mut list = Value::Empty;
-        for name in names.iter().rev() {
-            let sym = s.intern_symbol(name);
-            list = s.cons(sym, list).map_err(heap_err)?;
-            s.push_root(list);
-        }
-        Ok(list)
+        // Symbols are interned pointers rather than cells, so the `Vec` holding
+        // them is not something the collector has to see; the list built from
+        // them is, and `core::list` roots as it conses.
+        let syms: Vec<Value> = names.iter().map(|n| heap.intern_symbol(n)).collect();
+        core::list(heap, &syms).map_err(heap_err)
     }
 
     /// Evaluate a node's trailing argument forms, rooting each for the whole
@@ -1551,6 +1548,7 @@ impl Interp {
     /// blocks.
     fn step_prompt(&self, heap: &mut Heap) -> StepCmd {
         self.trace_write(heap, "step [s]tep-into [n]ext [c]ontinue [q]uit> ");
+        self.trace_flush(heap);
         let mut line = String::new();
         match std::io::stdin().read_line(&mut line) {
             Ok(0) | Err(_) => return StepCmd::Continue,
@@ -1621,6 +1619,20 @@ impl Interp {
         self.write_stream_global(heap, "*trace-output*", text)
     }
 
+    /// Pushes whatever is buffered for `*trace-output*` out to the OS.
+    ///
+    /// The step prompt deliberately ends without a newline, and stdout is
+    /// line-buffered when it is a terminal — so without this the prompt would
+    /// still be sitting in the buffer while `read_line` blocks, and a stepping
+    /// session would look hung rather than waiting. Only the stream path needs
+    /// it: the fallback in [`Self::write_stream_global`] goes through the
+    /// printer's `write_stdout`, which flushes for exactly this reason.
+    fn trace_flush(&self, heap: &mut Heap) {
+        if let Some(h) = self.stream_global(heap, "*trace-output*") {
+            let _ = typelisp_rt::stream::with_streams(|t| t.finish_output(h));
+        }
+    }
+
     /// Writes `text` to whatever stream the global `name` holds.
     ///
     /// This is how the tool layer honours CL's stream variables from Rust:
@@ -1689,9 +1701,10 @@ impl Interp {
     /// neither.
     fn trace_render(&self, heap: &mut Heap, v: Value) -> String {
         self.install_print_hooks();
-        heap.push_root(v);
-        let list = heap.cons(v, Value::Empty);
-        let rendered = match list {
+        // `core::list` roots `v` across the one `cons` it takes to wrap it, and
+        // rooting the finished list keeps `v` reachable through the format run,
+        // which allocates.
+        match core::list(heap, &[v]) {
             Ok(list) => {
                 heap.push_root(list);
                 let opts = typelisp_print::runtime::current_opts(heap);
@@ -1701,9 +1714,7 @@ impl Interp {
                 text.unwrap_or_else(|_| "#<unprintable>".to_string())
             }
             Err(_) => "#<unprintable>".to_string(),
-        };
-        heap.pop_root();
-        rendered
+        }
     }
 
     /// A registered function as a closure value, capturing nothing.
