@@ -4456,7 +4456,7 @@ prelude に `Error` トレイト（`message` / `source`）と4型の `impl`、�
 ## pretty printer（CLHS 22.2 相当、2026-07-26、旧 TODO T5 の Tier1/Tier2、branch `feature/pretty-printer`）
 
 `format` の pretty 系ディレクティブが no-op のままだった穴を埋め、CL の Lisp Pretty Printer に
-相当する整形機構を入れた。TODO T5 の Tier1（`*print-*` 変数 + `format` ディレクティブ + `pprint` 系）と
+相当する整形機構を入れた。旧 TODO T5 の Tier1（`*print-*` 変数 + `format` ディレクティブ + `pprint` 系）と
 Tier2（`pprint-logical-block` 等のユーザ呼び出し可能 API）が対象。Tier3（`set-pprint-dispatch`）は
 **未実装で TODO に残した**——理由は下記「Tier3 を見送った理由」。
 
@@ -4471,7 +4471,7 @@ typelisp の印字経路はすべて `format` を通り、`format` は既に**�
 
 そこで「テキスト＋バイトオフセットに紐づく命令列」（`Out`）を組み立て、最後に1回レイアウトする2パスにした。
 XP が近似している問いが「この区間は収まるか」なので、**直接それを計算するだけで結果は同じ**になる。
-TODO T5 の調査メモがこの簡略化を明示的に容認していた。`Out` に命令が1つも記録されていなければ
+旧 TODO T5 の調査メモがこの簡略化を明示的に容認していた。`Out` に命令が1つも記録されていなければ
 （`*print-pretty*` が偽なら常にそう）レイアウトパス自体を通らないので、既存の出力経路のコストは変わらない。
 
 改行判定は CLHS `pprint-newline` の規則をそのまま実装（`:linear` はセクション単位ではなく**ブロック単位**で

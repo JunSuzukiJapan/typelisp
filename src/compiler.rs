@@ -2931,8 +2931,8 @@ pub const SOURCE: &str = r#"
         result)))
 
 ;; `(dyn-new vtable-id (kind . value-form))` — box a
-;; concrete value as a trait object (`Expr::DynBox`,
-;; TODO T4). The vtable id is a translate-time
+;; concrete value as a trait object (`Expr::DynBox`).
+;; The vtable id is a translate-time
 ;; constant (`core_bridge::translate_dyn_new`), so this
 ;; is just `rt_dyn_new(id, value)`. Argument handling
 ;; is `compile-llvm-op`'s: slot 0 holds the raw

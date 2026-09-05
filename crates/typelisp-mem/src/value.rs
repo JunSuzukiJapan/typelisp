@@ -463,7 +463,7 @@ pub(crate) enum BoxedObj {
     /// runtime value with no heap form, and so the last thing standing between
     /// the two value worlds and their unification.
     RandomState(u64),
-    /// A trait object (`:dyn Trait`, TODO T4): a vtable identifier alongside
+    /// A trait object (`:dyn Trait`): a vtable identifier alongside
     /// the concrete value it dispatches for.
     ///
     /// This is the C++ vtbl scheme with the vptr moved off the *object* and

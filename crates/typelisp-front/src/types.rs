@@ -218,7 +218,8 @@ pub enum Type {
     Named(Path, Vec<Type>),
     /// A trait object `:dyn Trait` / `:dyn Trait<Pin,...>` — a value whose
     /// concrete type is only known at run time, dispatched through a vtable
-    /// (TODO T4). The [`Path`] is the *trait*'s fully-qualified path (traits
+    /// (`docs/dev/language-design.md` §5.2). The [`Path`] is the *trait*'s
+    /// fully-qualified path (traits
     /// live in `Namespace::traits`, a different table from types, so this is
     /// deliberately not a `Named`); the `Vec<Type>` pins the trait's
     /// associated types, positionally in `TraitDef::assoc_types` declaration

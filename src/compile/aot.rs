@@ -477,7 +477,7 @@ fn build_main_wrapper(
     let null_args = ctx.ptr_type(AddressSpace::default()).const_null();
     let argc_zero = ctx.i32_type().const_int(0, false);
 
-    // Trait-object vtables (TODO T4). Ordered before `rt_heap_init` only
+    // Trait-object vtables. Ordered before `rt_heap_init` only
     // because nothing here touches the heap; what matters is that every
     // table is complete before `tl_main` can reach a `:dyn` call site.
     if !vtables.is_empty() {

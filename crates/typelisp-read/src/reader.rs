@@ -712,7 +712,7 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, 
         Some(_) => {
             let start = cur.loc();
             let v = read_atom(cur, heap, ctx.ns)?;
-            // `:dyn Trait` (the trait-object type, TODO T4) is written as two
+            // `:dyn Trait` (the trait-object type) is written as two
             // whitespace-separated words, so the reader joins them into the
             // single datum `(:dyn Trait)` — exactly the treatment `'x` gets.
             // Every type position (parameter/field pairs, return types, `(fn

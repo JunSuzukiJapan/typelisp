@@ -4168,7 +4168,7 @@ pub unsafe extern "C" fn rt_global_set(args: *const i64, argc: u32) -> i64 {
 }
 
 // ===========================================================================
-// Trait objects and vtables (TODO T4)
+// Trait objects and vtables
 // ===========================================================================
 //
 // A trait object is a `BoxedObj::Dyn` fat box: a vtable id plus the concrete

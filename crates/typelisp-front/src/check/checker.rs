@@ -9166,7 +9166,7 @@ impl Checker {
                 // `HashTable<K,V>`, `cons-cell<K,V>`) is a valid `Sexpr` datum
                 // wherever a `Sexpr` is expected — the CL-conformant "cons
                 // cells hold arbitrary objects" behavior the pretty-printer
-                // design discussion (TODO T5) decided this codebase should
+                // design discussion decided this codebase should
                 // have. Exactly like the `Symbol` case just above, its
                 // runtime representation needs no conversion: every
                 // `is_heap_repr` type's instantiation already evaluates to

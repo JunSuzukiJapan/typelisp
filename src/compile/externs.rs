@@ -443,7 +443,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 232] {
         // `compile-file` output never emits a call to it — an unreferenced
         // declaration emits no symbol for the linker to miss).
         ("rt_llvm_call", crate::compile::llvm_builtins::rt_llvm_call as usize),
-        // Trait objects and vtables (TODO T4): `rt_dyn_new` boxes,
+        // Trait objects and vtables: `rt_dyn_new` boxes,
         // `rt_dyn_vtable`/`rt_dyn_value` decode, and `rt_dyn_call` performs
         // the dispatch itself (`compiler.rs`'s `compile-dyn-*`) — including
         // the case where the slot's implementation is interpreted.
