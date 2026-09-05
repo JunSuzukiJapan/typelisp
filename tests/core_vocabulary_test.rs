@@ -256,6 +256,9 @@ fn repl_tools() {
         "(trace)",
         "(untrace (fn (f) () f))",
         "(untrace)",
+        // `step` is the odd one: it names no definition, it wraps a *form*.
+        // The form keeps its own type, so the node carries nothing else.
+        "(step (call (f) () f ()))",
     ]);
 }
 
@@ -443,6 +446,7 @@ const EXPR_ONLY: &[&str] = &[
     "compile-fn",
     "trace",
     "untrace",
+    "step",
     "fn",
     "method",
     "pat-wild",

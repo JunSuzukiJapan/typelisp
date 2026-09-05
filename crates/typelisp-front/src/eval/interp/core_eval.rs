@@ -107,6 +107,7 @@ enum Op {
     CompileFn,
     Trace,
     Untrace,
+    Step,
 }
 
 impl Op {
@@ -166,9 +167,22 @@ impl Op {
             wk::COMPILE_FN => Op::CompileFn,
             wk::TRACE => Op::Trace,
             wk::UNTRACE => Op::Untrace,
+            wk::STEP => Op::Step,
             _ => return None,
         })
     }
+}
+
+/// What a person answered at a `step` prompt.
+enum StepCmd {
+    /// Stop again at the next call inside this one.
+    Into,
+    /// Run this call to completion, then stop at the following one.
+    Over,
+    /// Stop asking for the rest of this `(step ...)`.
+    Continue,
+    /// Abandon the computation.
+    Quit,
 }
 
 /// What one step of the trampoline produced: either the answer, or the form
@@ -575,6 +589,7 @@ impl Interp {
             Op::CompileFn => self.compile_fn_core(heap, form).map(Step::Done),
             Op::Trace => self.trace_core(heap, form, true).map(Step::Done),
             Op::Untrace => self.trace_core(heap, form, false).map(Step::Done),
+            Op::Step => self.stepper_core(heap, form, env).map(Step::Done),
 
             // ---- trait objects -------------------------------------------
             Op::DynNew => self.dyn_new_core(heap, form, env).map(Step::Done),
@@ -1446,8 +1461,12 @@ impl Interp {
     /// through `compiled_fn_body`, which requires `sig` — so the `expect` is an
     /// internal invariant, not a user-reachable error.
     pub(crate) fn enter(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<Value, EvalError> {
-        if self.trace_armed.get() && self.traced.borrow().contains(&f.name) {
-            return self.enter_traced(heap, f, argv);
+        // Two `Cell` loads on the path every call takes. Anything more — a
+        // `RefCell` borrow, a hash lookup — belongs behind them, which is why
+        // the set membership is tested only once one of the two is armed.
+        let stepping = self.stepping.get() && self.trace_depth.get() <= self.step_quiet_depth.get();
+        if stepping || (self.trace_armed.get() && self.traced.borrow().contains(&f.name)) {
+            return self.enter_watched(heap, f, argv, stepping);
         }
         self.enter_plain(heap, f, argv)
     }
@@ -1472,7 +1491,13 @@ impl Interp {
     /// of one call line up. It is restored on the failure path too, and the
     /// failure itself is reported: an unwind past a traced frame is exactly
     /// the moment a trace is most worth having.
-    fn enter_traced(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<Value, EvalError> {
+    fn enter_watched(
+        &self,
+        heap: &mut Heap,
+        f: &Rc<FnDef>,
+        argv: Vec<Value>,
+        stepping: bool,
+    ) -> Result<Value, EvalError> {
         let depth = self.trace_depth.get();
         let call = {
             let rendered: Vec<String> = argv.iter().map(|a| self.trace_render(heap, *a)).collect();
@@ -1483,9 +1508,22 @@ impl Interp {
             }
         };
         self.trace_line(heap, depth, &call);
+        if stepping {
+            match self.step_prompt(heap) {
+                StepCmd::Into => {}
+                // Quiet *below* this frame: the command is "run this call",
+                // and the frame it was given at is the one to ask at again.
+                StepCmd::Over => self.step_quiet_depth.set(depth),
+                StepCmd::Continue => self.stepping.set(false),
+                StepCmd::Quit => return Err(EvalError::Panic("step: aborted".to_string())),
+            }
+        }
         self.trace_depth.set(depth + 1);
         let result = self.enter_plain(heap, f, argv);
         self.trace_depth.set(depth);
+        if self.step_quiet_depth.get() == depth {
+            self.step_quiet_depth.set(usize::MAX);
+        }
         match &result {
             Ok(v) => {
                 let v = *v;
@@ -1494,6 +1532,68 @@ impl Interp {
             }
             Err(e) => self.trace_line(heap, depth, &format!("{} exited non-locally: {}", f.name, e)),
         }
+        result
+    }
+
+    /// Asks what to do at a stepped call, and reads the answer from standard
+    /// input.
+    ///
+    /// Four commands, and a bare newline means the commonest one. End of
+    /// input means `continue` rather than `quit`: input running out is not a
+    /// decision to abandon the computation, and looping on it would hang.
+    ///
+    /// The prompt goes to `*trace-output*` with everything else `step` says,
+    /// and is *not* newline-terminated — `write_str` on a stdout-backed
+    /// stream writes through immediately, so it is visible before the read
+    /// blocks.
+    fn step_prompt(&self, heap: &mut Heap) -> StepCmd {
+        self.trace_write(heap, "step [s]tep-into [n]ext [c]ontinue [q]uit> ");
+        let mut line = String::new();
+        match std::io::stdin().read_line(&mut line) {
+            Ok(0) | Err(_) => return StepCmd::Continue,
+            Ok(_) => {}
+        }
+        match line.trim() {
+            "" | "s" | "step" => StepCmd::Into,
+            "n" | "next" => StepCmd::Over,
+            "c" | "continue" => StepCmd::Continue,
+            "q" | "quit" => StepCmd::Quit,
+            other => {
+                self.trace_write(heap, &format!("; `{}` is not a step command; stepping into\n", other));
+                StepCmd::Into
+            }
+        }
+    }
+
+    /// `(step form)` — CLHS 25.2's stepper, at *call* granularity.
+    ///
+    /// Every call reached from inside `form` stops and asks, through the same
+    /// [`Self::enter`] hook `trace` uses. Call granularity and not expression
+    /// granularity for two reasons: an expression-level hook would sit in
+    /// `eval_core`, the hottest path there is, and a prompt at every `if` and
+    /// every variable reference is not something a person can step through.
+    /// SBCL's stepper stops at calls for the same reason.
+    ///
+    /// **With no terminal on standard input, this just evaluates `form`.**
+    /// CLHS explicitly allows exactly that ("`step` ... may be a no-op that
+    /// evaluates form"), and the alternative is a script or a test hanging on
+    /// a prompt nobody can answer.
+    ///
+    /// The flags are saved and restored around the evaluation rather than
+    /// simply cleared, so a `(step ...)` reached from inside another one
+    /// leaves the outer step exactly as it found it.
+    fn stepper_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        let inner = core::field(heap, form, 0)
+            .ok_or_else(|| EvalError::Internal("eval: (step ..) has no form".to_string()))?;
+        if !typelisp_rt::sys_builtin::stdin_is_tty() {
+            return self.eval_core(heap, inner, env);
+        }
+        let (was_stepping, was_quiet) = (self.stepping.get(), self.step_quiet_depth.get());
+        self.stepping.set(true);
+        self.step_quiet_depth.set(usize::MAX);
+        let result = self.eval_core(heap, inner, env);
+        self.stepping.set(was_stepping);
+        self.step_quiet_depth.set(was_quiet);
         result
     }
 

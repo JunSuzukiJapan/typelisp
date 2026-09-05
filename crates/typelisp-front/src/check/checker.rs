@@ -9433,6 +9433,7 @@ impl Checker {
             "documentation" => return self.check_documentation(heap, args),
             "ed" => return self.check_ed(heap, args),
             "trace" | "untrace" => return self.check_trace(heap, head.as_str(), args),
+            "step" => return self.check_step(heap, interp, env, args, arg_locs, expected),
             "source-file" => return self.check_source_file(heap, v, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
@@ -10969,6 +10970,32 @@ impl Checker {
         }
         let form = forms::trace_form(heap, tag, &targets)?;
         Ok(Checked::new(form, sexpr_ty()))
+    }
+
+    /// `(step form)` — CLHS 25.2's stepper. Evaluates `form` and returns its
+    /// value, so the form has `form`'s own type and can stand anywhere `form`
+    /// could.
+    ///
+    /// Everything that decides *how* it steps is at run time
+    /// (`Interp::stepper_core`): whether there is a terminal to prompt, and
+    /// the prompting itself. All this does is wrap the checked form in a node
+    /// that says "watch what happens inside this".
+    fn check_step(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        if args.len() != 1 {
+            return Err(Error::TypeError("step: (step form) — expected exactly 1 form".into()));
+        }
+        let inner = self.check_at(heap, interp, env, args[0], expected, nth_loc(arg_locs, 0))?;
+        let ty = inner.ty.clone();
+        let form = core::tagged(heap, "step", &[inner.form])?;
+        Ok(Checked::new(form, ty))
     }
 
     /// `(documentation name)` / `(documentation Type::method)`: like

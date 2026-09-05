@@ -236,6 +236,16 @@ pub struct Interp {
     /// How many traced (or stepped) frames are open — the indentation depth
     /// in a trace report, and CL's own `0:`/`1:`/`2:` prefix.
     pub(crate) trace_depth: Cell<usize>,
+    /// Whether a `(step form)` is in progress: every call reached from inside
+    /// `form` stops and asks, using the same [`Self::enter`] hook `trace`
+    /// uses. Restored by `step_core` when the form finishes, however it
+    /// finishes.
+    pub(crate) stepping: Cell<bool>,
+    /// The depth a `next` command was given at — while the current depth is
+    /// *below* it, the stepper does not ask. `usize::MAX` means "ask at every
+    /// depth", which is where a step starts and what returning to the
+    /// commanding frame restores.
+    pub(crate) step_quiet_depth: Cell<usize>,
     /// The dumps whose units this environment was built from, in the order
     /// they were applied — the bytes `(dump ...)` re-emits ahead of the
     /// session's own unit, so that what it writes is self-contained.
@@ -448,6 +458,8 @@ impl Interp {
             traced: RefCell::new(HashSet::new()),
             trace_armed: Cell::new(false),
             trace_depth: Cell::new(0),
+            stepping: Cell::new(false),
+            step_quiet_depth: Cell::new(usize::MAX),
             dump_sources: RefCell::new(Vec::new()),
             recording: RefCell::new(None),
         }

@@ -475,6 +475,24 @@ pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
     }
 }
 
+/// Whether standard input is a terminal.
+///
+/// The one question `step` has to ask before it does anything: a stepper
+/// prompts, and prompting something that is not a person — a piped script,
+/// a test harness, `typl file.typl` in CI — would hang forever waiting for a
+/// keystroke nobody is there to press. CLHS explicitly allows `step` to
+/// simply evaluate its form, and that is what it does when the answer here is
+/// `false`.
+///
+/// `isatty` and not a guess from an environment variable: this is the actual
+/// question, and `libc` is already a dependency of this crate.
+pub fn stdin_is_tty() -> bool {
+    // SAFETY: `isatty` reads a file descriptor's type and touches no memory.
+    // 0 is standard input, which every process has (or does not, in which case
+    // `isatty` answers 0 — the same answer, for the same reason).
+    unsafe { libc::isatty(0) == 1 }
+}
+
 // ---- The compiled-code edge -------------------------------------------
 //
 // The `#[no_mangle]` shims live *beside* their implementation rather than in

@@ -295,6 +295,50 @@ fn the_form_head_is_reserved_against_a_local_binding() {
     assert!(msg.starts_with("trace: expected symbols or `::`-paths"), "{}", msg);
 }
 
+// ---- step ----------------------------------------------------------------
+
+/// `(step form)` evaluates `form` and answers with its value, so it has
+/// `form`'s own type and stands wherever `form` could.
+#[test]
+fn step_has_the_type_of_the_form_it_wraps() {
+    let (h, v) = eval("(+ 1 (step (* 3 4)))");
+    assert!(matches!(v, Value::Int(13)), "expected 13, got {:?}", v);
+    drop(h);
+    assert_eq!(eval_string("(step (format false \"~d\" 7))"), "7");
+}
+
+/// With no terminal on standard input — a script, a pipe, this test — `step`
+/// simply evaluates its form.
+///
+/// CLHS allows exactly that, and the alternative is a prompt nobody is there
+/// to answer. The assertion is that *nothing else* changes: the same value,
+/// and the same side effects in the same order.
+#[test]
+fn without_a_terminal_step_just_evaluates() {
+    let stepped = traced(
+        "(defun note ((n i32)) i32 (progn (println \"call ~d\" n) n))\n\
+         (defun both () i32 (+ (note 1) (note 2)))\n\
+         (trace note)\n\
+         (step (both))",
+    );
+    let plain = traced(
+        "(defun note ((n i32)) i32 (progn (println \"call ~d\" n) n))\n\
+         (defun both () i32 (+ (note 1) (note 2)))\n\
+         (trace note)\n\
+         (both)",
+    );
+    assert_eq!(stepped, plain, "`step` changed what happened, with no terminal to step with");
+    assert!(plain.contains("0: (note 1)"), "the trace should still be there: {:?}", plain);
+}
+
+/// One form, and it is a form rather than a name — the opposite of `trace`'s
+/// argument, which is why the two do not share a checker path.
+#[test]
+fn step_takes_exactly_one_form() {
+    assert_eq!(check_error("(step)"), "step: (step form) — expected exactly 1 form");
+    assert_eq!(check_error("(step 1 2)"), "step: (step form) — expected exactly 1 form");
+}
+
 // ---- the collector -------------------------------------------------------
 
 /// Rendering a trace line allocates — a one-element list per argument, and a
