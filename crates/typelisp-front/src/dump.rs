@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 7;
+pub const FORMAT_VERSION: u32 = 8;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -871,7 +871,7 @@ pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8]) -> Result<crate::Inter
 pub fn record_definitions(heap: &crate::Heap, tl: crate::Value, out: &mut Vec<crate::Value>) {
     if matches!(
         crate::check::core::op(heap, tl),
-        Some("defun" | "defmethod" | "defvar" | "defstruct" | "defenum" | "defmacro" | "use")
+        Some("defun" | "defmethod" | "defvar" | "defstruct" | "defenum" | "defmacro" | "use" | "defffi")
     ) {
         out.push(tl);
     }

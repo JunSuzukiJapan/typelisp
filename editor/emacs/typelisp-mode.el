@@ -54,10 +54,12 @@
 ;;; Keyword tables ----------------------------------------------------------
 
 (defconst typelisp-definition-forms
-  '("defun" "defsignature" "defmethod" "defmacro")
+  '("defun" "defsignature" "defffi" "defmethod" "defmacro")
   "Definition forms whose defined name is a function name.
 `defsignature' declares one ahead of its definition -- the only way to write
-mutual recursion at top level, since forms are checked in source order.")
+mutual recursion at top level, since forms are checked in source order.
+`defffi' declares one whose body is a C function, reached through a thunk;
+like `defsignature' it has no body here, so neither takes an indent rule.")
 
 (defconst typelisp-type-definition-forms
   '("defstruct" "defenum" "deftrait" "deftype")
@@ -76,7 +78,7 @@ session has changed.")
 
 (defconst typelisp-special-forms
   '(;; binding & conditionals (docs/syntax.md §4)
-    "let" "let*" "if" "when" "unless" "cond" "case" "and" "or" "progn"
+    "let" "let*" "if" "when" "unless" "cond" "case" "and" "or" "progn" "unsafe"
     "the" "match" "if-let" "while-let"
     ;; CL's chapter-5 control forms (cl-parity-plan.md Phase 4a, §4/§7)
     "ecase" "ccase" "prog1" "prog2" "setq" "psetq" "psetf"
@@ -184,6 +186,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32"
     "try-int->i8" "try-int->i16" "try-int->i32"
     "try-int->u8" "try-int->u16" "try-int->u32"
+    ;; the same casts into and out of the two C-boundary words -- these are
+    ;; all a `c-long' / `c-ulong' carries, since they have no arithmetic
+    "int->c-long" "int->c-ulong" "try-int->c-long" "try-int->c-ulong"
     "float->f32" "float->f64" "try-float->f32" "try-float->f64"
     "int->bignum" "bignum->int" "try-bignum->int" "bignum->float"
     "float->bignum" "bignum->ratio" "ratio->bignum" "int->ratio"
@@ -348,12 +353,17 @@ function types; `&optional' and `&key' are `defmacro'-only.")
 
 (defconst typelisp-primitive-types
   '("i8" "i16" "i32" "u8" "u16" "u32"
-    "f32" "f64" "bignum" "ratio" "random-state" "bool" "char" "string" "symbol")
+    "f32" "f64" "bignum" "ratio" "random-state" "bool" "char" "string" "symbol"
+    "ptr" "c-long" "c-ulong")
   "Primitive/scalar type names.
 Includes the heap-boxed arbitrary-precision `bignum' / `ratio', which are
 their own static types with no implicit conversion to or from the fixed-width
 numerics (docs/syntax.md §2), and the opaque mutable `random-state' PRNG
-stream (CLHS 12.1.6).")
+stream (CLHS 12.1.6).
+
+`ptr' / `c-long' / `c-ulong' are the C-boundary words: only writable inside
+`unsafe', and only as an argument, a return type or a local (docs/syntax.md
+§3).")
 
 (defconst typelisp-builtin-types
   '(;; stream traits and concrete stream types (§18)
@@ -911,6 +921,7 @@ has already claimed it for `font-lock-string-face'."
     ("and"         . 0)
     ("or"          . 0)
     ("progn"       . 0)
+    ("unsafe"      . 0)
     ("the"         . 1)
     ("match"       . 1)
     ("while-let"   . 1)

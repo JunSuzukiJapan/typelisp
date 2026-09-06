@@ -66,6 +66,7 @@ export const INDENT_SPECS: ReadonlyMap<string, IndentSpec> = new Map<string, Ind
   ["and", 0],
   ["or", 0],
   ["progn", 0],
+  ["unsafe", 0],
   ["the", 1],
   ["match", 1],
   ["while-let", 1],

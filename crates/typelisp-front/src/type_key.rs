@@ -224,6 +224,9 @@ pub fn heap_type_path(heap: &Heap, id: BoxId) -> Option<Path> {
 /// for character — so the keys of every non-generic type are unchanged.
 pub fn type_key_of_type(t: &Type) -> String {
     match t {
+        Type::Ptr => "ptr".into(),
+        Type::CLong => "c-long".into(),
+        Type::CULong => "c-ulong".into(),
         Type::I8 => "i8".into(),
         Type::I16 => "i16".into(),
         Type::I32 => "i32".into(),

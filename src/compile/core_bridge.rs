@@ -274,11 +274,27 @@ impl<'a> Ctx<'a> {
     /// The island's kind number for a binding of `name` at `repr`: the plain
     /// one, or the `10 +` cell marker and the field classification the cell's
     /// contents are tagged with.
-    fn binding_kind(&self, name: SymRef, repr: &Repr) -> i64 {
+    ///
+    /// Fallible for one case. A cell *tags* what it holds, and a raw C word
+    /// (`Repr::RawWord`) has no tagged form — its `field_kind` is `0`, "no
+    /// representation", which the island rejects on its own everywhere else.
+    /// Here the `10 +` would turn that `0` into `10`, the cell marker for a
+    /// `path`, and the island would happily tag a pointer as one. So the `0`
+    /// is caught before the arithmetic can hide it.
+    fn binding_kind(&self, heap: &Heap, name: SymRef, repr: &Repr) -> Result<i64, Error> {
         if self.cell_names.contains(&name) {
-            10 + repr.field_kind()
+            if repr.field_kind() == 0 {
+                return Err(Error::TypeError(format!(
+                    "compile: `{}` is a `{}` captured by a nested function, which stores it in a \
+                     cell — and a cell tags what it holds, which a raw C word has no room for. \
+                     Keep it in the function that obtained it, or convert it (`as i32`, `as bignum`).",
+                    heap.symbol_name(name),
+                    repr.tag()
+                )));
+            }
+            Ok(10 + repr.field_kind())
         } else {
-            repr.binding_kind()
+            Ok(repr.binding_kind())
         }
     }
 }
@@ -677,7 +693,7 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             let Value::Symbol(_) = name else { return Err(malformed(&s, *b)) };
             let Some(repr) = Repr::read(&s, repr) else { return Err(malformed(&s, *b)) };
             let Value::Symbol(name_sym) = name else { return Err(malformed(&s, *b)) };
-            let kind = Value::Int(cx.binding_kind(name_sym, &repr));
+            let kind = Value::Int(cx.binding_kind(&s, name_sym, &repr)?);
             let name_pair = core::pair(&mut s, name, kind)?;
             s.push_root(name_pair);
             let init = to_island(&mut s, init, cx)?;
@@ -1545,7 +1561,7 @@ fn translate_dyn_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Er
 fn name_kind_list(heap: &mut Heap, names: &[(SymRef, Repr)], cx: Ctx) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     for (name, repr) in names {
-        let kind = Value::Int(cx.binding_kind(*name, repr));
+        let kind = Value::Int(cx.binding_kind(f.heap(), *name, repr)?);
         let p = core::pair(f.heap(), Value::Symbol(*name), kind)?;
         f.push(p);
     }
@@ -2164,7 +2180,8 @@ fn cell_bindings(heap: &mut Heap, cells: &[(SymRef, Repr)], cx: Ctx) -> Result<V
     let mut s = RootScope::new(heap);
     let mut pairs = Vec::with_capacity(cells.len());
     for (name, repr) in cells {
-        let name_pair = core::pair(&mut s, Value::Symbol(*name), Value::Int(cx.binding_kind(*name, repr)))?;
+        let bk = cx.binding_kind(&s, *name, repr)?;
+        let name_pair = core::pair(&mut s, Value::Symbol(*name), Value::Int(bk))?;
         s.push_root(name_pair);
         let text = s.symbol_name(*name).to_string();
         let name_v = s.alloc_string(text);

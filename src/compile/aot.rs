@@ -78,12 +78,13 @@ fn collect_aot_item(
     tl: TopLevelForm,
     node_names: &mut Vec<(String, String)>,
     defvar_inits: &mut Vec<(Path, Value)>,
+    ffi_decls: &mut Vec<typelisp_front::eval::interp::FfiDecl>,
 ) -> Result<(), String> {
     let tag = core::op(heap, tl).map(str::to_string).unwrap_or_default();
     if tag == "module" {
         let body = core::fields(heap, tl).map_err(|e| e.to_string())?;
         for item in body.into_iter().skip(1) {
-            collect_aot_item(heap, interp, item, node_names, defvar_inits)?;
+            collect_aot_item(heap, interp, item, node_names, defvar_inits, ffi_decls)?;
         }
         return Ok(());
     }
@@ -116,9 +117,20 @@ fn collect_aot_item(
         // variants and a struct's field representations, which
         // `collect_struct_and_enum_types` hands to the compile bridge.
         "defenum" | "defstruct" => None,
+        // A thunk to emit, but not through `add_compiled_function` — there is
+        // no body to translate. Kept aside for the module-building step,
+        // which puts it in before any body is translated (a compiled call
+        // site looks its callee up by name, and the island aborts on a name
+        // it cannot find). `exec` below still runs, and building the JIT
+        // thunk it builds is how a missing symbol is reported now rather than
+        // by the linker later.
+        "defffi" => {
+            ffi_decls.push(typelisp_front::eval::interp::read_ffi_decl(heap, tl).map_err(|e| e.to_string())?);
+            None
+        }
         other => {
             return Err(format!(
-                "compile-file only supports top-level `defun`/`defmethod`/`defvar`/`defconstant`/`defstruct`/`defenum`/`module`/`impl`, found `{}`",
+                "compile-file only supports top-level `defun`/`defmethod`/`defvar`/`defconstant`/`defstruct`/`defenum`/`defffi`/`module`/`impl`, found `{}`",
                 other
             ))
         }
@@ -184,6 +196,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // `Interp::compile_scc` uses for the JIT's call graph.
     let mut node_names: Vec<(String, String)> = Vec::new(); // (node name, LLVM symbol)
     let mut defvar_inits: Vec<(Path, Value)> = Vec::new();
+    let mut ffi_decls: Vec<typelisp_front::eval::interp::FfiDecl> = Vec::new();
     loop {
         let next = {
             let hook = typelisp_front::read::DriverReadEval::new(&mut chk, &interp);
@@ -191,7 +204,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         };
         let Some((v, loc)) = next else { break };
         let tl = chk.check_form_at(&mut heap, &interp, v, Some(loc)).map_err(|e| e.to_string())?;
-        collect_aot_item(&mut heap, &mut interp, tl, &mut node_names, &mut defvar_inits)?;
+        collect_aot_item(&mut heap, &mut interp, tl, &mut node_names, &mut defvar_inits, &mut ffi_decls)?;
     }
 
     if !node_names.iter().any(|(n, _)| n == ENTRY_POINT_NAME) {
@@ -200,6 +213,15 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             ENTRY_POINT_NAME
         ));
     }
+
+    // Deduplicated and ordered, so a file declaring three functions from one
+    // library links it once and the command line is the same on every build.
+    let link_libraries: Vec<String> = ffi_decls
+        .iter()
+        .filter_map(|d| d.library.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
 
     let ctx = crate::compile::llvm_context();
     let module = {
@@ -218,6 +240,16 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         for (name, _) in crate::compile::externs::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
+        }
+        // The FFI thunks, before the prelude is linked in and long before any
+        // body is translated: a compiled call to `c-strlen` resolves
+        // `tl_c-strlen` with `get-function`, and the island **aborts the
+        // process** on a name it cannot find. Each thunk declares its C
+        // function too; unlike the JIT path nothing maps an address here —
+        // these resolve as ordinary linker symbols, which is what the `-l`
+        // flags below are for.
+        for decl in &ffi_decls {
+            crate::compile::ffi::emit_thunk(&module, decl)?;
         }
         // The prelude's compiled bodies, merged in here — *before* the first
         // `add_compiled_function` below, not after. The island's
@@ -412,7 +444,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             eval_env.as_deref(),
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
-            .and_then(|()| write_executable(&m, output_path))
+            .and_then(|()| write_executable(&m, output_path, &link_libraries))
     };
     // Destroyed here rather than left to fall out of scope: `module` was
     // declared before the guard, so its own drop would run *after* the guard
@@ -895,7 +927,7 @@ pub(crate) fn assembly_of(module: &Module<'static>) -> Result<String, String> {
 /// Emits `module` to an object file and links it into a native executable
 /// at `output_path` via the system `cc`. Must be called with
 /// [`crate::compile::COMPILE_LOCK`] held.
-fn write_executable(module: &Module<'static>, output_path: &str) -> Result<(), String> {
+fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[String]) -> Result<(), String> {
     let target_machine = host_target_machine()?;
 
     // Named from `output_path` (not e.g. the process id) so it can't
@@ -907,9 +939,13 @@ fn write_executable(module: &Module<'static>, output_path: &str) -> Result<(), S
         .write_to_file(module, FileType::Object, std::path::Path::new(&object_path))
         .map_err(|e| format!("failed to emit object file: {}", e))?;
 
+    // `-l` for every library a `defffi` named. Nothing is needed for a
+    // declaration without one: what it reaches is already linked (libc comes
+    // with `cc`, and the rest is in the static library beside it).
     let status = Command::new("cc")
         .arg(&object_path)
         .arg(staticlib_path())
+        .args(libraries.iter().map(|l| format!("-l{}", l)))
         .arg("-o")
         .arg(output_path)
         .status()
@@ -976,7 +1012,7 @@ mod tests {
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
-        write_executable(&module, out_path.to_str().unwrap()).expect("write_executable failed");
+        write_executable(&module, out_path.to_str().unwrap(), &[]).expect("write_executable failed");
 
         let status = Command::new(&out_path).status().expect("failed to run the compiled executable");
         assert_eq!(status.code(), Some(42));
@@ -1015,7 +1051,7 @@ mod tests {
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");
-        write_executable(&module, out_path.to_str().unwrap()).expect("write_executable failed");
+        write_executable(&module, out_path.to_str().unwrap(), &[]).expect("write_executable failed");
 
         let status = Command::new(&out_path).status().expect("failed to run the compiled executable");
         assert_eq!(status.code(), Some(0));

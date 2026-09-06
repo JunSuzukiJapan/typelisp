@@ -141,6 +141,22 @@ pub enum Repr {
     HashTable(Box<Repr>, Box<Repr>),
     /// A function value: a `BoxedObj::CompiledClosure` reference.
     Fn,
+    /// A raw 64-bit machine word: the FFI's `ptr`/`c-long`/`c-ulong`.
+    ///
+    /// Like [`Repr::Handle`] it is untagged and untraced, and unlike it there
+    /// is no registry behind it — the word is whatever C said. What separates
+    /// the two is [`Repr::field_kind`]: a handle is small enough to survive
+    /// tagging and is stored like an integer, and this is not. All 64 bits are
+    /// meaningful, so there is nowhere to put a 3-bit tag, and the answer to
+    /// "how is this stored in a tagged slot" is that it is not stored in one
+    /// at all. `Checker` refuses the declarations that would ask
+    /// (`defstruct`/`defenum` fields, `defvar`, `Vector<ptr>`).
+    ///
+    /// One variant for all three types because the boundary asks one question
+    /// — is this word tagged — and the answer is the same. The *width and
+    /// sign*, which the FFI thunk does need, are a different question, asked
+    /// of the declared C type instead (`crate::compile::ffi::CType`).
+    RawWord,
     /// No compiled representation. The one type that genuinely reaches this is
     /// a still-generic type variable — a `defstruct`'s own `T` field compiled
     /// from the generic definition, which needs monomorphization rather than
@@ -184,6 +200,11 @@ impl Repr {
     /// and enum), so each earlier arm is also an exclusion for the later ones.
     pub fn of_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> Repr {
         match ty {
+            // Ahead of `is_integer`, which these deliberately fail (they carry
+            // no arithmetic), and ahead of everything else for the same reason
+            // the `Handle` arm is early: falling through to the tagged
+            // catch-all would shift a pointer left by three.
+            Type::Ptr | Type::CLong | Type::CULong => Repr::RawWord,
             _ if ty.is_integer() => Repr::Int,
             _ if is_llvm_handle_ty(ty) => Repr::Handle,
             Type::F32 => Repr::F32,
@@ -263,6 +284,7 @@ impl Repr {
             Repr::Bool => "bool",
             Repr::Unit => "unit",
             Repr::Handle => "handle",
+            Repr::RawWord => "raw-word",
             Repr::Str => "str",
             Repr::Sym => "sym",
             Repr::Bignum => "bignum",
@@ -282,8 +304,9 @@ impl Repr {
 
     /// Every simple representation, for [`Repr::read`] and for a test that
     /// wants to enumerate the vocabulary.
-    pub const SIMPLE: [Repr; 18] = [
+    pub const SIMPLE: [Repr; 19] = [
         Repr::Int,
+        Repr::RawWord,
         Repr::F64,
         Repr::F32,
         Repr::Char,
@@ -380,6 +403,9 @@ impl Repr {
             // untraced `i64`, so the int tag/detag bit ops are exactly right
             // and no GC root is ever wanted.
             Repr::Int | Repr::Handle => Class::Int,
+            // *Not* `Class::Int`, which a handle is: an integer field is
+            // stored tagged, and this word has no room for a tag.
+            Repr::RawWord => Class::RawWord,
             Repr::F64 | Repr::F32 => Class::Float,
             Repr::Char => Class::Char,
             Repr::Bool => Class::Bool,
@@ -506,6 +532,15 @@ impl Repr {
             // constant; the slot only has to hold something the GC can decode
             // safely.
             Class::Unit => 100,
+            // A raw word has no encoding here on purpose. `1` (a plain word)
+            // is what it looks like it should be and is exactly wrong: a
+            // struct field is *tagged* on the way in, and shifting a pointer
+            // left by three drops its top three bits. That is the bug that
+            // removing the 64-bit integer type was meant to make unwritable,
+            // and giving this a number would write it again. `Checker` refuses
+            // the declarations that would reach here, so this is the second
+            // line rather than the first.
+            Class::RawWord => 0,
             // The one type that genuinely reaches this is a still-generic type
             // variable ([`Repr::None`]). The island's `compile-sexpr-field`
             // panics on it with "field type is not representable in compiled
@@ -534,6 +569,10 @@ enum Class {
     /// `collectable` is whether the collector can reclaim what it points at —
     /// see [`Repr::class`]'s `Sym` arm for the one case where it cannot.
     Tagged { collectable: bool },
+    /// A raw 64-bit word: passed and returned untagged like [`Class::Int`],
+    /// but with no way to be *stored* in a tagged slot, because tagging it
+    /// would drop its top three bits. See [`Repr::RawWord`].
+    RawWord,
     /// No compiled representation.
     NotRepresentable,
 }

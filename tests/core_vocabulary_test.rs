@@ -418,6 +418,12 @@ fn top_level() {
         "(defenum m::color (red green blue) (() () ()))",
         "(defenum option (none some) (() (sexpr)))",
         "(module m (defvar m::x int-any-width false false (int-any-width 1)))",
+        // A C function, declared. Fields 3-5 are `defun`'s own; field 2 is the
+        // library to look the symbol up in (`()` for "the running process"),
+        // and the last two spell the C types, which the `REPR`s beside them
+        // cannot — `int-any-width` is all six widths at once.
+        r#"(defffi m::c-abs "abs" () ((a0 int-any-width)) int-any-width true (i32) i32)"#,
+        r#"(defffi c-sqrt "sqrt" "m" ((a0 f64)) f64 true (f64) f64)"#,
         "(use m::helper other::helper)",
         r#"(load "lib.typl")"#,
         "(expr (int-any-width 42))",
@@ -467,8 +473,9 @@ const EXPR_ONLY: &[&str] = &[
 
 /// New vocabulary — `TopLevel` was a Rust enum, so none of this ever reached
 /// the island.
-const TOP_LEVEL: &[&str] =
-    &["defun", "defmethod", "defmacro", "defvar", "defstruct", "defenum", "module", "use", "load", "expr"];
+const TOP_LEVEL: &[&str] = &[
+    "defun", "defmethod", "defmacro", "defvar", "defstruct", "defenum", "defffi", "module", "use", "load", "expr",
+];
 
 /// The examples above use exactly the declared vocabulary — no more, no less.
 ///

@@ -542,6 +542,19 @@ pub fn disassemble_function(
             method_link_name(type_name, method)
         }
     };
+    // An FFI declaration has no forms to translate, so the module built below
+    // would hold a function with an empty body — not the thunk the name
+    // actually reaches, and disassembling it would be a confident wrong
+    // answer. The thunk's own machine code is not reachable from here: it was
+    // JIT'd into an engine this function does not have.
+    if interp.fn_is_ffi(&name) {
+        return Err(EvalError::Panic(format!(
+            "disassemble: `{}` is a C function declared by `defffi`. What it reaches is the C \
+             function's own machine code, which this compiler did not produce and cannot show; \
+             the thunk in between is emitted by `crate::compile::ffi`.",
+            name
+        )));
+    }
     let symbol = crate::compile::symbols::user_symbol_name(&name);
     let edges = call_graph_edges(interp, heap, &name)?;
 

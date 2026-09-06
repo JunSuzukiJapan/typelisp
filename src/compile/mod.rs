@@ -23,6 +23,7 @@ pub mod core_freevars;
 pub mod driver;
 pub mod dump;
 pub mod externs;
+pub mod ffi;
 pub mod llvm_builtins;
 
 /// Registers this crate's `llvm-*` builtin implementations with the
@@ -46,6 +47,7 @@ pub fn install_llvm_backend() {
         disassemble_function: driver::disassemble_function,
         compile_file: aot::compile_file,
         dump_image: dump::dump_image,
+        define_ffi: ffi::define_ffi,
     });
 }
 pub mod prelude_bootstrap;

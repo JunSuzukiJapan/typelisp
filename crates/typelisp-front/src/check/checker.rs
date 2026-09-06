@@ -59,6 +59,40 @@ const CL_COMPARISON_OPERATORS: &[&str] = &[
 /// the name with no type parameters, so operator-named `defun`s keep working.
 /// A name that *does* start `ident<` and isn't a known operator must be a
 /// well-formed `ident<Ident,Ident...>`.
+/// Whether `ty` is, or contains, one of the FFI's raw machine words.
+///
+/// Recursive because a type argument can hold one *syntactically* — the checker
+/// refuses `Vector<ptr>` where it is written (see `Checker::reject_raw_word_nested`),
+/// and this is the second line rather than the first, so a spelling that slips
+/// past there still cannot become a value outside `unsafe`.
+fn type_mentions_raw_word(ty: &Type) -> bool {
+    match ty {
+        Type::Ptr | Type::CLong | Type::CULong => true,
+        Type::Named(_, args) | Type::Dyn(_, args) => args.iter().any(type_mentions_raw_word),
+        Type::Fn(ps, rest, ret) => {
+            ps.iter().any(type_mentions_raw_word)
+                || rest.as_deref().map(type_mentions_raw_word).unwrap_or(false)
+                || type_mentions_raw_word(ret)
+        }
+        _ => false,
+    }
+}
+
+/// Whether `v` is written as `(unsafe ...)`.
+///
+/// Asked of the *source* form, not the lowered node: `unsafe` lowers to the
+/// same binding-less `let` `progn` does, so by then the two are the same thing
+/// — and only one of them grants the permission being checked.
+fn is_unsafe_form(heap: &Heap, v: Value) -> bool {
+    match v {
+        Value::Cons(_) => matches!(
+            heap.car(v),
+            Ok(Value::Symbol(id)) if heap.symbol_name(id) == "unsafe"
+        ),
+        _ => false,
+    }
+}
+
 fn parse_generic_name_header(raw: &str) -> Result<(String, Vec<String>), Error> {
     // A known comparison operator (`char<`, `string<=`, ...) whose `<`/`>`
     // would otherwise read as the start of a generic-parameter list.
@@ -389,6 +423,7 @@ struct BlockFrame {
 struct Escapes {
     loops: Vec<Type>,
     blocks: Vec<BlockFrame>,
+    unsafe_depth: u32,
 }
 
 /// A generic `defun`'s retained raw source form, for re-checking at each
@@ -693,6 +728,23 @@ pub struct Checker {
     /// to cross an activation this compiler does not already see. CL leaves a
     /// `return-from` to an exited block undefined; here it does not typecheck.
     block_stack: RefCell<Vec<BlockFrame>>,
+    /// How many `unsafe` forms enclose the expression being checked.
+    ///
+    /// Internal mutability for the same reason [`Self::loop_stack`] has it:
+    /// `check_at`/`check_inner` recurse under `&self`. A count rather than a
+    /// stack because an `unsafe` carries neither a name nor a type — nothing
+    /// a frame would hold. `block_stack` needs frames because `return-from`
+    /// names one; nothing names an `unsafe`.
+    ///
+    /// **Lexical, and cleared only where checking leaves the text.** A
+    /// `lambda`/`labels` body written inside an `unsafe` inherits it, the way
+    /// a closure written inside Rust's `unsafe` block does: the author wrote
+    /// those operations there, and writing them is what takes on the
+    /// obligation. [`Self::enter_specialization`] is the one place that
+    /// clears it, because that re-checks a *different* function's body —
+    /// source that is not inside the `unsafe` that happened to trigger the
+    /// instantiation. That is the same reason it clears `loop_stack`.
+    unsafe_depth: Cell<u32>,
     /// The type each `catch`/`throw` symbol carries, learned from the first
     /// use of that symbol and enforced on every later one.
     ///
@@ -867,6 +919,7 @@ impl Checker {
             ns_base: Vec::new(),
             loop_stack: RefCell::new(Vec::new()),
             block_stack: RefCell::new(Vec::new()),
+            unsafe_depth: Cell::new(0),
             throw_tags: RefCell::new(std::collections::BTreeMap::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
@@ -1767,6 +1820,65 @@ impl Checker {
         f.finish("defun")
     }
 
+    /// `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR PUBLIC (CTYPE...) RET-CTYPE)`.
+    ///
+    /// Fields 3-5 are `defun`'s own, so `Interp::exec` reads them back with
+    /// the readers it already has: what it registers is an ordinary [`FnDef`]
+    /// with an empty body, which is what makes the thunk reachable through the
+    /// same `enter` every other call goes through. Parameter names are
+    /// synthesized (`a0`, `a1`, ...) — a C declaration has none, and `FnDef`
+    /// wants one per parameter.
+    ///
+    /// The last two fields spell the C types, and are *deliberately* redundant
+    /// with the `REPR`s beside them. A `Repr` folds all six integer widths into
+    /// `Repr::Int` (see its doc comment), which is the right answer for the
+    /// question a `Repr` exists to answer — how a value crosses the compiled
+    /// boundary — and the wrong one for the thunk, which has to emit
+    /// `trunc i64 to i8`. Two questions about one type, the way `field_kind`
+    /// and `binding_kind` are. One producer (`Checker::check_defffi`), so they
+    /// cannot drift.
+    #[allow(clippy::too_many_arguments)]
+    fn defffi_form(
+        &self,
+        heap: &mut Heap,
+        name: &Path,
+        c_symbol: &str,
+        library: Option<&str>,
+        params: &[Type],
+        ret: &Type,
+        public: bool,
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let path = forms::path_form(f.heap(), name);
+        f.push(path);
+        let sym = f.heap().alloc_string(c_symbol.to_string());
+        f.push(sym);
+        // No `:library` is `()`, not a name to look up — the empty string is
+        // a library whose name is empty, and the two must not read alike.
+        let lib = match library {
+            Some(l) => f.heap().alloc_string(l.to_string()),
+            None => Value::Empty,
+        };
+        f.push(lib);
+        let named: Vec<(String, Type)> =
+            params.iter().enumerate().map(|(i, t)| (format!("a{}", i), t.clone())).collect();
+        let ps = self.param_list_form(f.heap(), &named)?;
+        f.push(ps);
+        let r = self.repr_form(f.heap(), ret)?;
+        f.push(r);
+        f.push(Value::Bool(public));
+        let mut cs = Items::new(f.heap());
+        for t in params {
+            let k = cs.heap().intern_symbol(&crate::type_key::type_key_of_type(t));
+            cs.push(k);
+        }
+        let ctypes = cs.finish_list()?;
+        f.push(ctypes);
+        let rk = f.heap().intern_symbol(&crate::type_key::type_key_of_type(ret));
+        f.push(rk);
+        f.finish("defffi")
+    }
+
     /// [`Self::defun_form`] unless this `defun` is *generic*, in which case an
     /// empty `(module PATH)`.
     ///
@@ -2253,6 +2365,7 @@ impl Checker {
         }
 
         let sig = FnSig {
+            ffi: false,
             type_params: Vec::new(),
             params,
             ret,
@@ -2302,6 +2415,171 @@ impl Checker {
             params.push(self.parse_type_here_at(heap, *v, loc.as_ref())?);
         }
         Ok((params, rest_ty))
+    }
+
+    /// `(defffi name (T...) Ret [:library "name"])` — a C function, declared.
+    ///
+    /// Shaped after [`Self::check_defsignature`], and for the same reason: a
+    /// name, the types it takes, the type it answers with, and no body. The
+    /// two differ in what the missing body *means*. A `defsignature` promises
+    /// one later in the same file and [`Self::finish_unit`] holds it to that;
+    /// a `defffi` says the body is somebody else's, already compiled, reached
+    /// through a thunk the backend emits (`crate::compile::ffi`). So this
+    /// registers the signature and — deliberately — does **not** join
+    /// [`Self::predeclared`].
+    ///
+    /// The name comes in two spellings. `(defffi abs (i32) i32)` uses one name
+    /// for both sides; `(defffi (c-strlen "strlen") ...)` separates them,
+    /// which is the usual case, since a typelisp identifier normally has a `-`
+    /// in it and a C one cannot.
+    ///
+    /// # What is not decided here
+    ///
+    /// Whether a declared type can be spelled in C at all. That question is
+    /// answered once, by `CType::from_key` in the backend, because the backend
+    /// is what has to emit the conversion — a second list here would be a
+    /// second list to keep in agreement. `Interp::exec` reaches the backend
+    /// while checking this very form's file, so the answer still arrives
+    /// before anything can call the declaration.
+    fn check_defffi(
+        &mut self,
+        heap: &mut Heap,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+    ) -> Result<TopLevelForm, Error> {
+        if parts.len() < 3 {
+            return Err(Error::TypeError(
+                "defffi: (defffi name (param-type...) return-type [:library \"name\"])".into(),
+            ));
+        }
+        let (name, c_symbol) = Self::parse_defffi_name(heap, parts[0])?;
+        let (params, rest) = self.parse_signature_params(heap, parts[1])?;
+        if rest.is_some() {
+            return Err(Error::TypeError(
+                "defffi: `&rest` cannot be declared — a variadic C function passes its variadic \
+                 arguments under different rules than its fixed ones (on the stack, on AArch64 \
+                 Darwin), which a thunk built from a fixed signature does not follow. Declare each \
+                 arity you call as its own name."
+                    .into(),
+            ));
+        }
+        let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
+        let library = Self::parse_defffi_options(heap, &parts[3..])?;
+
+        if let Some(existing) = self.cur_ns().fns.get(&name) {
+            if existing.builtin {
+                self.check_redef("function", &name, Some(existing))?;
+            }
+            return Err(Error::TypeError(format!(
+                "defffi: `{}` is already defined",
+                name
+            )));
+        }
+
+        let sig = FnSig {
+            ffi: true,
+            type_params: Vec::new(),
+            params: params.clone(),
+            ret: ret.clone(),
+            public,
+            rest: None,
+            builtin: false,
+            bounds: BTreeMap::new(),
+            optionals: Vec::new(),
+            keys: Vec::new(),
+        };
+        self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
+        self.defffi_form(heap, &self.fq(&name), &c_symbol, library.as_deref(), &params, &ret, public)
+    }
+
+    /// A `defffi`'s name: either a bare symbol, used for both sides, or
+    /// `(typelisp-name "c_symbol")`.
+    fn parse_defffi_name(heap: &Heap, v: Value) -> Result<(String, String), Error> {
+        // A generic declaration is refused for the reason `defsignature`
+        // refuses one: instantiating a template needs a body to re-check, and
+        // there is none here. C has no generics for it to mean, either.
+        let plain = |n: String| -> Result<String, Error> {
+            let (name, type_params) = parse_generic_name_header(&n)?;
+            if type_params.is_empty() {
+                Ok(name)
+            } else {
+                Err(Error::TypeError(format!(
+                    "defffi: `{}` takes type parameters, and a C function has none to take",
+                    name
+                )))
+            }
+        };
+        match v {
+            Value::Symbol(id) => {
+                let n = plain(heap.symbol_name(id).to_string())?;
+                Ok((n.clone(), n))
+            }
+            Value::Cons(_) => {
+                let elems = heap.list_to_vec(v)?;
+                let bad = || {
+                    Error::TypeError(
+                        "defffi: a name is either `name` or `(name \"c_symbol\")`".into(),
+                    )
+                };
+                if elems.len() != 2 {
+                    return Err(bad());
+                }
+                let name = match elems[0] {
+                    Value::Symbol(id) => plain(heap.symbol_name(id).to_string())?,
+                    _ => return Err(bad()),
+                };
+                let c_symbol = match elems[1] {
+                    Value::Str(id) => heap.string(id).to_string(),
+                    _ => return Err(bad()),
+                };
+                if c_symbol.is_empty() {
+                    return Err(Error::TypeError("defffi: the C symbol name is empty".into()));
+                }
+                Ok((name, c_symbol))
+            }
+            _ => Err(Error::TypeError(
+                "defffi: a name is either `name` or `(name \"c_symbol\")`".into(),
+            )),
+        }
+    }
+
+    /// A `defffi`'s trailing options. Only `:library "name"` today, which says
+    /// where to look for the symbol; without it the symbol is looked for in
+    /// the running process, which is what reaches libc and everything else
+    /// already linked.
+    fn parse_defffi_options(heap: &Heap, rest: &[Value]) -> Result<Option<String>, Error> {
+        let mut library = None;
+        let mut i = 0;
+        while i < rest.len() {
+            let key = match rest[i] {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => return Err(Error::TypeError("defffi: expected an option keyword".into())),
+            };
+            match key.as_str() {
+                ":library" => {
+                    let v = rest.get(i + 1).ok_or_else(|| {
+                        Error::TypeError("defffi: `:library` needs a name, as a string".into())
+                    })?;
+                    match v {
+                        Value::Str(id) => library = Some(heap.string(*id).to_string()),
+                        _ => {
+                            return Err(Error::TypeError(
+                                "defffi: `:library` needs a name, as a string".into(),
+                            ))
+                        }
+                    }
+                    i += 2;
+                }
+                other => {
+                    return Err(Error::TypeError(format!(
+                        "defffi: `{}` is not an option here (only `:library` is)",
+                        other
+                    )))
+                }
+            }
+        }
+        Ok(library)
     }
 
     /// Reports every `defsignature` in this unit that never got a definition.
@@ -2364,6 +2642,7 @@ impl Checker {
                     wk::PUB => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
                     wk::DEFUN => return self.check_defun(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFSIGNATURE => return self.check_defsignature(heap, &elems[1..], parts_locs, false),
+                    wk::DEFFFI => return self.check_defffi(heap, &elems[1..], parts_locs, false),
                     wk::DEFVAR => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc, false),
                     wk::DEFPARAMETER => {
                         return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc, true)
@@ -2442,6 +2721,7 @@ impl Checker {
             match id.well_known() {
                 wk::DEFUN => return self.check_defun(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFSIGNATURE => return self.check_defsignature(heap, &parts[1..], inner_locs, true),
+                wk::DEFFFI => return self.check_defffi(heap, &parts[1..], inner_locs, true),
                 wk::DEFVAR => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc, false),
                 wk::DEFPARAMETER => {
                     return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc, true)
@@ -2456,7 +2736,7 @@ impl Checker {
             }
         }
         Err(Error::TypeError(
-            "pub: expected defun/defsignature/defmacro/defmethod/defstruct/defenum/deftype/defvar/defparameter/defconstant"
+            "pub: expected defun/defsignature/defffi/defmacro/defmethod/defstruct/defenum/deftype/defvar/defparameter/defconstant"
                 .into(),
         ))
     }
@@ -2694,7 +2974,7 @@ impl Checker {
         matches!(
             name,
             // expression special forms (`check_list`)
-            "if" | "let" | "let*" | "progn" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
+            "if" | "let" | "let*" | "progn" | "unsafe" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
                 | "match" | "panic" | "the" | "as" | "try-as" | "compile"
@@ -2702,7 +2982,7 @@ impl Checker {
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block"
                 // top-level forms (`check_form_dispatch`)
-                | "pub" | "defun" | "defsignature" | "defvar" | "defparameter" | "defconstant" | "defmacro" | "module"
+                | "pub" | "defun" | "defsignature" | "defffi" | "defvar" | "defparameter" | "defconstant" | "defmacro" | "module"
                 | "defmethod" | "defstruct" | "defenum" | "deftrait" | "deftype" | "impl" | "use" | "load"
                 | "import" | "shadowing-import" | "in-module"
         )
@@ -3129,6 +3409,25 @@ impl Checker {
     /// `FnRef` that could never be applied anyway).
     fn fn_ref_node(&self, heap: &mut Heap, written: Vec<String>, fq: Path, expected: Option<&Type>) -> Result<Checked, Error> {
         let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
+        // An FFI declaration cannot be reified, in an `unsafe` or out of one.
+        //
+        // Not a permission question. `Interp::reify` builds an *interpreted*
+        // closure out of the definition's body forms, and an FFI declaration
+        // has no body — what makes it callable is the thunk hanging on its
+        // `FnDef`, which a closure does not carry. (A *compiled* closure could
+        // carry an address, but not this one: `compiled_fn_type_with_env`
+        // takes a captured environment, and a thunk has no parameter for it.)
+        // So the value would be a function that quietly answers `()`, which is
+        // worth an error to rule out.
+        //
+        // A `lambda` around the call is the spelling that works, for the
+        // ordinary reason: its body is a call site like any other.
+        if sig.ffi {
+            return Err(Error::TypeError(format!(
+                "`{0}` is a C function declared by `defffi` and cannot be used as a value — it has no body to close over, only a native entry point. Wrap it: `(unsafe (lambda (...) ... ({0} ...)))`.",
+                fq
+            )));
+        }
         let tmpl_ty = fn_value_type(&sig);
         let home = self.ns.clone();
         // The referenced function's own parameter types, which the bridge
@@ -3417,7 +3716,57 @@ impl Checker {
             self.record_type_span(span);
         }
         self.reject_trait_in_type_position(&ty)?;
+        Self::reject_raw_word_nested(&ty)?;
         Ok(ty)
+    }
+
+    /// Rule C, half one: a raw word may be a whole type, never part of one.
+    ///
+    /// `ptr` as a parameter or return type is the point of having it. `ptr`
+    /// *inside* another type — `Vector<ptr>`, `Option<ptr>`,
+    /// `HashTable<string,ptr>`, `(fn (ptr) i32)` — is a slot that tags what it
+    /// holds, and tagging a pointer drops its top three bits. There is nothing
+    /// `unsafe` could add here: it is not a permission question but a
+    /// representation that does not exist.
+    fn reject_raw_word_nested(ty: &Type) -> Result<(), Error> {
+        let nested = match ty {
+            Type::Named(_, args) | Type::Dyn(_, args) => args.iter().any(type_mentions_raw_word),
+            Type::Fn(ps, rest, ret) => {
+                ps.iter().any(type_mentions_raw_word)
+                    || rest.as_deref().map(type_mentions_raw_word).unwrap_or(false)
+                    || type_mentions_raw_word(ret)
+            }
+            _ => false,
+        };
+        if nested {
+            return Err(Error::TypeError(format!(
+                "`{}` puts a raw C word inside another type, and every such slot tags what it \
+                 holds — which would drop the word's top three bits. A `ptr`/`c-long`/`c-ulong` \
+                 can be a parameter or a return type, and nothing else.",
+                crate::type_key::type_key_of_type(ty)
+            )));
+        }
+        Ok(())
+    }
+
+    /// Rule C, half two: the storage a raw word may not go into.
+    ///
+    /// [`Self::reject_raw_word_nested`] covers the slots that are spelled as
+    /// part of a type; these are spelled as declarations. Same reason, and the
+    /// same non-answer from `unsafe`.
+    fn reject_raw_word_storage(ty: &Type, what: &str, name: &str) -> Result<(), Error> {
+        if type_mentions_raw_word(ty) {
+            return Err(Error::TypeError(format!(
+                "{} `{}` is declared `{}`, and a raw C word cannot be stored: the slot tags what \
+                 it holds, which would drop the word's top three bits — the same reason this \
+                 language has no 64-bit integer type. Keep it in a local inside `(unsafe ...)`, \
+                 or convert it (`as i32`, `as bignum`).",
+                what,
+                name,
+                crate::type_key::type_key_of_type(ty)
+            )));
+        }
+        Ok(())
     }
 
     /// Resolve one written name from an annotation and, when it names a
@@ -3635,6 +3984,7 @@ impl Checker {
         }
 
         let sig = FnSig {
+            ffi: false,
             type_params: type_params.clone(),
             params: params.iter().map(|(_, t)| t.clone()).collect(),
             ret: ret.clone(),
@@ -3794,6 +4144,7 @@ impl Checker {
         }
 
         let sig = FnSig {
+            ffi: false,
             type_params: type_params.clone(),
             params: required.iter().map(|(_, t)| t.clone()).collect(),
             ret: ret.clone(),
@@ -4106,8 +4457,13 @@ impl Checker {
         // specialization re-checks a *different* function's body, so an
         // enclosing `block` of the site that triggered it is not in scope.
         let saved_blocks = std::mem::take(&mut *self.block_stack.borrow_mut());
+        // Cleared for the third time here, and for the same reason: an
+        // `unsafe` around the *call site* that requested this instantiation
+        // says nothing about the template's own body, which was written
+        // somewhere else entirely.
+        let saved_unsafe = self.unsafe_depth.replace(0);
         let saved_bindings = std::mem::replace(&mut self.type_var_bindings, bindings);
-        (saved_ns, Escapes { loops: saved_loops, blocks: saved_blocks }, saved_bindings)
+        (saved_ns, Escapes { loops: saved_loops, blocks: saved_blocks, unsafe_depth: saved_unsafe }, saved_bindings)
     }
 
     fn exit_specialization(
@@ -4119,6 +4475,7 @@ impl Checker {
         self.type_var_bindings = saved_bindings;
         *self.loop_stack.borrow_mut() = saved.loops;
         *self.block_stack.borrow_mut() = saved.blocks;
+        self.unsafe_depth.set(saved.unsafe_depth);
         self.ns = saved_ns;
     }
 
@@ -5459,6 +5816,7 @@ impl Checker {
                 at += 1;
             }
             let sig = FnSig {
+                ffi: false,
                 type_params: vec![],
                 params: params.iter().map(|(_, t)| t.clone()).collect(),
                 ret,
@@ -7674,6 +8032,7 @@ impl Checker {
             })
             .collect();
         let sig = FnSig {
+            ffi: false,
             type_params: vec![],
             params: sig_params,
             ret: rename(&ret),
@@ -7964,6 +8323,9 @@ impl Checker {
         }
         let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
         let field_types: Vec<Type> = fields.iter().map(|f| f.ty.clone()).collect();
+        for f in &fields {
+            Self::reject_raw_word_storage(&f.ty, "the field", &f.name)?;
+        }
         for (i, n) in field_names.iter().enumerate() {
             if field_names[..i].contains(n) {
                 return Err(Error::TypeError(format!("defstruct: duplicate field `{}`", n)));
@@ -7998,6 +8360,7 @@ impl Checker {
             let (field_name, field_ty) = (&field.name, &field.ty);
             let field_public = field.public;
             let getter_sig = FnSig {
+                ffi: false,
                 type_params: vec![],
                 params: vec![recv_ty.clone()],
                 ret: field_ty.clone(),
@@ -8036,6 +8399,7 @@ impl Checker {
             // `Checker::check_setf`, which calls this via `(setf p::x v)`).
             let setter_name = format!("set-{}", field_name);
             let setter_sig = FnSig {
+                ffi: false,
                 type_params: vec![],
                 params: vec![recv_ty.clone(), field_ty.clone()],
                 ret: Type::Unit,
@@ -8613,6 +8977,9 @@ impl Checker {
                 .iter()
                 .map(|(v, l)| self.parse_type_here_at(heap, *v, l.as_ref()))
                 .collect::<Result<Vec<Type>, Error>>()?;
+            for f in &fields {
+                Self::reject_raw_word_storage(f, "the variant", &vname)?;
+            }
             variants.push(Variant { name: vname, fields });
         }
         if variants.is_empty() {
@@ -8979,6 +9346,32 @@ impl Checker {
             // is fixed by the vocabulary. `core::tagged_at` is the same act
             // performed at build time by a site that has the position in hand.
             Ok(checked) => {
+                // Rule B: a raw word may only be a value inside `(unsafe ...)`.
+                //
+                // Here because this is the one place an expression and the
+                // type just proved for it are both in hand — so one check
+                // covers every way a `ptr` can turn up: the FFI call that
+                // produced it, the variable it was bound to, the argument
+                // position it is being passed in.
+                //
+                // The `unsafe` form's own value is the exception, so that
+                // `(defun open-it (..) ptr (unsafe (c-fopen ..)))` can be
+                // written. Whoever *uses* what it answers with is inside an
+                // `unsafe` of their own, by this same rule.
+                if self.unsafe_depth.get() == 0
+                    && type_mentions_raw_word(&checked.ty)
+                    && !is_unsafe_form(heap, v)
+                {
+                    let e = Error::TypeError(format!(
+                        "a `{}` is a raw machine word from the C FFI and can only be a value \
+                         inside `(unsafe ...)` — nothing here can check that it points at anything",
+                        crate::type_key::type_key_of_type(&checked.ty)
+                    ));
+                    return Err(match &loc {
+                        Some(l) => e.at(l.clone()),
+                        None => e,
+                    });
+                }
                 // Root the node for the rest of this top-level form, with no
                 // matching pop of its own (`check_form_at` truncates the stack
                 // back to where it started).
@@ -9387,6 +9780,26 @@ impl Checker {
             "progn" => {
                 let (body, ty) = self.check_seq(heap, interp, env, args, arg_locs, expected)?;
                 // Represent progn as a let with no bindings.
+                let form = self.let_form(heap, &[], &body)?;
+                return Ok(Checked::new(form, ty));
+            }
+            // `(unsafe body...)` — a `progn` that also grants permission to
+            // write the operations this compiler cannot check: an FFI call
+            // (the declared C signature is taken on faith) and the raw words
+            // `ptr`/`c-long`/`c-ulong`. It produces no node of its own for
+            // the same reason `progn` produces none — sequencing already has
+            // a spelling — so nothing downstream of the checker learns that
+            // `unsafe` was ever written. Permission is a question about the
+            // source, and it is answered here.
+            "unsafe" => {
+                self.unsafe_depth.set(self.unsafe_depth.get() + 1);
+                let result = self.check_seq(heap, interp, env, args, arg_locs, expected);
+                // Restored on the error path too: in recovery mode the
+                // checker keeps going after this returns `Err`, and a depth
+                // left standing would make every later form in the file
+                // unsafe.
+                self.unsafe_depth.set(self.unsafe_depth.get() - 1);
+                let (body, ty) = result?;
                 let form = self.let_form(heap, &[], &body)?;
                 return Ok(Checked::new(form, ty));
             }
@@ -10702,7 +11115,11 @@ impl Checker {
         // whether anything was lost. This used to be a pure relabel, back
         // when every integer shared one 64-bit representation and both floats
         // one `f64`.
-        if (src.ty.is_integer() && target.is_integer()) || (src.ty.is_float() && target.is_float()) {
+        // A C word counts as a width on both sides: `(as c-ulong 16)` makes
+        // one to pass, `(as i32 n)` reads one that came back. It is the only
+        // way to do either, since these types carry no arithmetic of their own.
+        let int_like = |t: &Type| t.is_integer() || t.is_c_word();
+        if (int_like(&src.ty) && int_like(&target)) || (src.ty.is_float() && target.is_float()) {
             return self.width_cast(heap, interp, env, src, &target, try_variant);
         }
         // Boxing as a trait object — the explicit spelling of the same
@@ -10788,7 +11205,10 @@ impl Checker {
         target: &Type,
         try_variant: bool,
     ) -> Result<Checked, Error> {
-        let family = if target.is_integer() { "int" } else { "float" };
+        // A C word is in the integer family here: the method that performs the
+        // cast is `int->W`, and `W` being a C word does not change which
+        // family asked for it.
+        let family = if target.is_integer() || target.is_c_word() { "int" } else { "float" };
         let name = crate::type_key::type_key_of_type(target);
         let method = if try_variant { format!("try-{}->{}", family, name) } else { format!("{}->{}", family, name) };
         let owner = prim_type_path(&src.ty).expect("a width cast's source is a primitive type");
@@ -12309,6 +12729,7 @@ impl Checker {
             }
             _ => return Err(Error::TypeError("defvar: name must be (name Type)".into())),
         };
+        Self::reject_raw_word_storage(&ann, "the global", &name)?;
         // The value is checked at the top level (no locals), but globals/fns are
         // visible via the registry.
         let value = self.check(heap, interp, &Env::new(), parts[1], Some(&ann))?;
@@ -13364,6 +13785,16 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
         let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
+        // Rule A. Before the arity check, so the message a caller gets is the
+        // one about permission rather than one about the shape of a call it
+        // was never allowed to write. Ahead of the `&optional`/`&key`
+        // delegation too, though a `defffi` declares neither.
+        if sig.ffi && self.unsafe_depth.get() == 0 {
+            return Err(Error::TypeError(format!(
+                "`{}` is a C function declared by `defffi`, so calling it needs `(unsafe ...)`.                  Whether its declared signature is the one the C function really has is not                  something this compiler can check — `unsafe` is where that is taken on. Wrap the                  call, or wrap it once inside a `defun` that offers a checked signature.",
+                name
+            )));
+        }
         if !sig.optionals.is_empty() || !sig.keys.is_empty() {
             return self.check_call_opt_key(heap, interp, env, written, name, &sig, args, arg_locs);
         }
@@ -15003,6 +15434,18 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
     // result to the width that was actually asked for.
     let to_key = called_width(to);
     match (from, &to_key) {
+        // A C word can be *read* as a `bignum`, and as nothing else here. It is
+        // the only target that never loses anything, which is the whole point:
+        // it is how a `size_t` too large for `i32` is read at all (`as i32`
+        // truncates and `try-as i32` answers `none`). `f64` would round,
+        // `ratio` and `char` are not what a machine word means, and none of
+        // the three is registered for these types anyway
+        // (`registry::c_word_assoc`). Ahead of the integer arm, which these
+        // deliberately fail.
+        _ if from.is_c_word() => match &to_key {
+            Bignum => Some(("int->bignum", None)),
+            _ => None,
+        },
         _ if from.is_integer() => match &to_key {
             F64 => Some(("int->float", None)),
             Bignum => Some(("int->bignum", None)),
@@ -15275,7 +15718,12 @@ fn trait_operator_method(op: &str) -> Option<&'static str> {
 
 fn int_lit_ty(expected: Option<&Type>) -> Type {
     match expected {
-        Some(t) if t.is_integer() => t.clone(),
+        // A C word too, so `(c-malloc 16)` reads the way it should. Nothing is
+        // loosened by it: the literal's type is then `c-ulong`, which
+        // `check_at`'s rule B still refuses outside `(unsafe ...)`, and
+        // `int_lit_in_range` still checks 16 against a 64-bit unsigned width
+        // — `int_width_signed` answers for these two.
+        Some(t) if t.is_integer() || t.is_c_word() => t.clone(),
         _ => Type::I32,
     }
 }

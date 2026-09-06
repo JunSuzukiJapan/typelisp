@@ -244,15 +244,21 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // fold or recurse into), so all four are the same `icmp eq`. Only
         // `eq` used to be here, which is what made `case` — whose expansion
         // compares with `equal` — uncompilable for every integer scrutinee.
-        "i32" | "i8" | "i16" | "u8" | "u16" | "u32" => &[
+        // `c-long`/`c-ulong` share this arm: to the island they are integer
+        // receivers like any other (`int-receiver-type?`), and what makes them
+        // different is upstream — the checker registers only conversions for
+        // them, so the arithmetic listed here can never be asked for.
+        "i32" | "i8" | "i16" | "u8" | "u16" | "u32" | "c-long" | "c-ulong" => &[
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
             "int->bignum", "int->ratio", "int->float", "int->char",
             "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
+            "int->c-long", "int->c-ulong",
             // The `Option`-returning halves. No prelude definition reaches
             // them; they are lowered so a user's own `(try-as u8 n)` can be
             // compiled — see `docs/syntax.md` §10.
             "try-int->char",
             "try-int->i8", "try-int->i16", "try-int->i32", "try-int->u8", "try-int->u16", "try-int->u32",
+            "try-int->c-long", "try-int->c-ulong",
             "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
             "ash", "logbitp",
         ],
@@ -400,7 +406,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 243] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 247] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -445,11 +451,12 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 243] {
         rt_hashtable_bucket_count, rt_hashtable_bucket_delete, rt_hashtable_bucket_key, rt_hashtable_bucket_put,
         rt_hashtable_bucket_value,
         rt_hashtable_clear, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys,
-        rt_hashtable_new, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
+        rt_hashtable_new, rt_hashtable_values, rt_int_to_bignum, rt_uint_to_bignum, rt_int_to_ratio,
         rt_intern_path, rt_intern_symbol, rt_wk_symbol, rt_list_to_path, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
         rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_i32, rt_sexpr_i8, rt_sexpr_i16, rt_sexpr_u8, rt_sexpr_u16, rt_sexpr_u32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
+        rt_ffi_cstring_new, rt_ffi_cstring_free, rt_ffi_string_from_cstr,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_str_upcase, rt_str_downcase, rt_int_fits, rt_int_fits_char, rt_f64_fits_f32, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
         rt_dyn_call, rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
@@ -585,6 +592,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 243] {
         ("rt_root_count", rt_root_count as usize),
         ("rt_set_sexpr_root", rt_set_sexpr_root as usize),
         ("rt_truncate_sexpr_roots", rt_truncate_sexpr_roots as usize),
+        // The C FFI's string conversions, called by a thunk rather than by
+        // any compiled typelisp — see `crate::compile::ffi`.
+        ("rt_ffi_cstring_new", rt_ffi_cstring_new as usize),
+        ("rt_ffi_cstring_free", rt_ffi_cstring_free as usize),
+        ("rt_ffi_string_from_cstr", rt_ffi_string_from_cstr as usize),
         ("rt_str_new", rt_str_new as usize),
         ("rt_str_length", rt_str_length as usize),
         ("rt_str_ref", rt_str_ref as usize),
@@ -728,6 +740,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 243] {
         ("rt_bignum_to_float", rt_bignum_to_float as usize),
         ("rt_bignum_to_ratio", rt_bignum_to_ratio as usize),
         ("rt_int_to_bignum", rt_int_to_bignum as usize),
+        ("rt_uint_to_bignum", rt_uint_to_bignum as usize),
         ("rt_int_to_ratio", rt_int_to_ratio as usize),
         ("rt_float_to_bignum", rt_float_to_bignum as usize),
         ("rt_float_to_ratio", rt_float_to_ratio as usize),
@@ -817,7 +830,7 @@ mod scc_tests {
             heap.pop_root();
             interp.root.borrow_mut().define_fn(
                 name.to_string(),
-                Rc::new(FnDef {
+                Rc::new(FnDef { ffi: false,
                     name: name.to_string(),
                     params: vec![],
                     body: vec![call],
@@ -844,7 +857,7 @@ mod native_method_list_tests {
     /// Every primitive receiver whose builtin methods either side lowers, with
     /// the island predicate that decides for it.
     const PRIMITIVES: &[(&str, &[&str])] = &[
-        ("int", &["i32", "i8", "i16", "u8", "u16", "u32"]),
+        ("int", &["i32", "i8", "i16", "u8", "u16", "u32", "c-long", "c-ulong"]),
         ("string", &["string"]),
         ("char", &["char"]),
         ("float", &["f64", "f32"]),

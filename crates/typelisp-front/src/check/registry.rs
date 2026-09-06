@@ -54,6 +54,19 @@ pub struct FnSig {
     /// Redefining a builtin is always an error; redefining anything else
     /// follows the configurable [`crate::check::checker::RedefPolicy`].
     pub builtin: bool,
+    /// Declared by `(defffi ...)`: the body is a C function, reached through
+    /// a thunk (`crate::compile::ffi`) rather than through typelisp code.
+    ///
+    /// What the checker does with it is refuse the call outside an `unsafe`
+    /// (`Checker::check_call`). The reason holds even when every parameter is
+    /// a scalar: whether the declared signature is the one the C function
+    /// actually has is not a fact this compiler can reach — it is taken on the
+    /// declaration's word, and `unsafe` is where that word is given.
+    ///
+    /// Distinct from `builtin`, which also means "no typelisp body": a builtin
+    /// is Rust the workspace ships and has checked, and needs no permission to
+    /// call.
+    pub ffi: bool,
     /// Trait bounds declared by this function's own `(where (Trait T
     /// (Assoc Concrete)...)...)` clause (`Checker::check_defun`), keyed by
     /// type-parameter name — empty for a non-generic function or a generic
@@ -628,6 +641,9 @@ impl Registry {
                 // back at the receiver's own width. What this entry removes
                 // is the state these types were in before: registered,
                 // nameable, and with no `+` at all.
+                // Ahead of the integer arm, which they would not match anyway
+                // — spelled out because the difference is the point.
+                ref t if t.is_c_word() => c_word_assoc(t.clone()),
                 ref t if t.is_integer() => int_assoc(t.clone()),
                 ref t if t.is_float() => float_assoc(t.clone()),
                 _ => BTreeMap::new(),
@@ -652,9 +668,9 @@ impl Registry {
         // `random-state` has nowhere else to hang an `&optional` parameter
         // off of, since `check_call_opt_key` only resolves `&optional`/`&key`
         // for a `defun`'s own `FnSig`, not an ad hoc native one.
-        root.fns.insert("make-random-state-fresh".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::RandomState, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("random-state-copy".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::RandomState], ret: Type::RandomState, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("random-state-next".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::RandomState, Type::I32], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("make-random-state-fresh".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![], ret: Type::RandomState, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("random-state-copy".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::RandomState], ret: Type::RandomState, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("random-state-next".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::RandomState, Type::I32], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `seed-random-state` (SBCL's `sb-ext:seed-random-state`, not in the
         // standard): the stream a given integer names, for a caller who wants
         // a run to be reproducible. CL itself has no portable way to seed —
@@ -663,7 +679,7 @@ impl Registry {
         // non-standard operation. The integer-to-state map lives in
         // `typelisp_rt::seeded_random_state`, which is where the reason it
         // isn't the identity is written down.
-        root.fns.insert("seed-random-state".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::RandomState, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("seed-random-state".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::RandomState, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `get-universal-time`/`get-internal-real-time` (CLHS 25.1): wall-clock
         // and monotonic-ish timers, respectively. `get-universal-time` counts
         // seconds since 1900-01-01 UTC (CL's epoch, 2208988800s before the
@@ -680,29 +696,29 @@ impl Registry {
         // already splits it costs nothing: `decode-universal-time`'s first
         // step is exactly this division, and `time`'s subtraction is two
         // field subtractions.
-        root.fns.insert("get-universal-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: universal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("get-internal-real-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: internal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("get-universal-time".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![], ret: universal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("get-internal-real-time".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![], ret: internal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `get-internal-run-time` (CLHS 25.1): the same unit and the same
         // struct, but CPU time (`getrusage`) instead of elapsed time. The
         // pair is the point — a program blocked on I/O shows a large
         // difference, and that difference is exactly what a single "real
         // time" figure hides. Left out until 2026-09-05 because standing in
         // real time for it would have been a lie.
-        root.fns.insert("get-internal-run-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: internal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("get-internal-run-time".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![], ret: internal_time(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `parse-int`/`parse-float`: untrusted-text numeric parsing
         // (`docs/language-design.md` §4.1's planned conversion catalog) —
         // `Result`, not a panic, since the input is runtime text the caller
         // doesn't control (unlike a source literal, which the reader/checker
         // already validate before this code ever runs).
-        root.fns.insert("parse-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::I32, error_ty(PARSE_INT_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("parse-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("parse-int".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::I32, error_ty(PARSE_INT_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("parse-float".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `read`: parses one `Sexpr` form out of a string with the same
         // reader `typl`/the REPL use for source text
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
         register_stream_builtins(&mut root);
         register_system_builtins(&mut root);
         register_readtable_builtins(&mut root);
-        root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(option_of(sexpr()), error_ty(READ_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("read".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(option_of(sexpr()), error_ty(READ_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `read-datum-at`: one datum from a string starting at a character
         // index, paired with where reading stopped — CL's `read-from-string`
         // and its second return value, which this language has no multiple
@@ -713,6 +729,7 @@ impl Registry {
         root.fns.insert(
             "read-datum-at".to_string(),
             FnSig {
+                ffi: false,
                 type_params: vec![],
                 rest: None,
                 params: vec![Type::Str, Type::I32, Type::Bool],
@@ -732,7 +749,7 @@ impl Registry {
         // but not the caller's lexical locals; a definition form registers
         // immediately. Result is a `Sexpr` (the value, or a definition's name
         // symbol); malformed/ill-typed input is `Err`, not a panic.
-        root.fns.insert("eval".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("eval".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `macroexpand-1`/`macroexpand`: what the checker does to a macro
         // call, made available to a program (CL's own, and the only way to
         // see a `defmacro`'s output without reading the checker's mind).
@@ -743,8 +760,8 @@ impl Registry {
         // strictly more than CL's boolean, since the caller cannot mistake a
         // macro that expands to itself for a non-macro. `macroexpand` repeats
         // until `none` and answers the final form, as CL's does.
-        root.fns.insert("macroexpand-1".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("macroexpand".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("macroexpand-1".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("macroexpand".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: result_of(option_of(sexpr()), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // The pretty printer's user-callable layout operators (CLHS 22.2.1),
         // minus the stream argument typelisp has no streams for. They act on
         // the logical block the `pprint-logical-block` special form opened
@@ -756,11 +773,11 @@ impl Registry {
         // `pprint-pop` returns `()` once the block's list is exhausted;
         // `pprint-list-exhausted` is the predicate to test first (the prelude
         // macro `pprint-exit-if-list-exhausted` is the CL-spelled wrapper).
-        root.fns.insert("pprint-newline".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("pprint-indent".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I32], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("pprint-tab".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I32, Type::I32], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("pprint-pop".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("pprint-list-exhausted".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("pprint-newline".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Symbol], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("pprint-indent".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I32], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("pprint-tab".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I32, Type::I32], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("pprint-pop".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("pprint-list-exhausted".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
         // the Symbol/Sexpr redesign (Phase 4b) repurposes `cons`/`car`/`cdr` to
         // the generic `cons<T,U>` pair (`prelude.rs`'s free `cons` +
@@ -783,12 +800,12 @@ impl Registry {
         // `is_empty`) rather than pattern-matching, so they survive that
         // fence. Same heap operations as `cons`/`car`/`cdr` (see
         // `Interp::eval_builtin`), so no new runtime machinery is needed.
-        root.fns.insert("sexpr-cons".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr()), option_of(sexpr())], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-consp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-null".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-atom".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-cons".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr()), option_of(sexpr())], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-car".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-cdr".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: option_of(sexpr()), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-consp".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-null".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-atom".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // Internal `Sexpr` payload extractors (Symbol/Sexpr redesign Phase 2):
         // typed field readers that used to be `match`-based typelisp defuns in
         // `compiler.rs` (`(match s ((Int n) n) (_ (panic ...)))`), moved to Rust
@@ -798,9 +815,9 @@ impl Registry {
         // predicate its non-panic-fallback caller (`form-is-borrowed?`) needs
         // to branch on a `Sym` node — a peer of
         // `sexpr-consp`/`sexpr-null`/`sexpr-atom`.
-        root.fns.insert("sexpr-i32".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-f64".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-f32".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-i32".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-f64".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-f32".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::F32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // One extractor per integer type, not one per machine word: the five
         // narrow widths are separate `Sexpr` variants carrying separate boxes
         // (`BoxedObj::Narrow`), and each of these returns exactly its own.
@@ -811,13 +828,13 @@ impl Registry {
             ("sexpr-u16", Type::U16),
             ("sexpr-u32", Type::U32),
         ] {
-            root.fns.insert(name.to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: ty, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+            root.fns.insert(name.to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: ty, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         }
-        root.fns.insert("sexpr-bool".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-char".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Char, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-str".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-sym-name".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("sexpr-symp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-bool".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-char".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Char, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-str".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-sym-name".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("sexpr-symp".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `equal`/`equalp`: structural equality (CL `equal`/`equalp`), Rust
         // builtins (`Interp::eval_builtin`'s `sexpr_equal`/`sexpr_equalp`)
         // since the Symbol/Sexpr redesign fenced `match` off `Sexpr` (Phase 5).
@@ -844,6 +861,7 @@ impl Registry {
         // comment) — the runtime already compares `Value`s structurally
         // whatever they hold, so nothing downstream changes.
         let eq_generic = || FnSig {
+            ffi: false,
             type_params: vec!["t".to_string()],
             rest: None,
             params: vec![tvar("t"), tvar("t")],
@@ -866,15 +884,15 @@ impl Registry {
         // symbol intern table directly; `Sexpr::Sym` now wraps `Symbol` (not
         // `Str`), so the old prelude `(match s (Sym name) name)` /
         // `(Sym s)` definitions no longer type-check.
-        root.fns.insert("symbol->string".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("string->symbol".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Symbol, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("symbol->string".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Symbol], ret: Type::Str, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("string->symbol".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Symbol, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `exit`: process termination (cl-equivalence-catalog.md §1.2). Unlike
         // `panic`/`unreachable`/`todo` (which unwind through `EvalError::Panic`,
         // a typelisp-level signal), this needs an actual OS call
         // (`std::process::exit`, in `Interp::eval_builtin`'s `"exit"` arm), so
         // it stays an ordinary `Rust` builtin rather than a `defmacro`. `Never`
         // return type, same as `panic`, so it satisfies any expected type.
-        root.fns.insert("exit".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::Never, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("exit".to_string(), FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::Never, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `compile` is a genuine special form (`Checker::check_compile`,
         // dispatched by name in `Checker::check_list` alongside `quote`/
         // `panic`/etc. — never an ordinary call), so unlike `compile-file`
@@ -888,7 +906,7 @@ impl Registry {
         // path) instead of one.
         root.fns.insert(
             "compile-file".to_string(),
-            FnSig { type_params: vec![], rest: None, params: vec![Type::Str, Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+            FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Str, Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
         );
         // `dump`: writes this session's whole environment — the units it was
         // loaded from, plus one for what it has defined since — to a file
@@ -896,7 +914,7 @@ impl Registry {
         // `compile-file`, one path argument (see `compile::dump::dump_image`).
         root.fns.insert(
             "dump".to_string(),
-            FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+            FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
         );
         Registry { root, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
     }
@@ -1080,6 +1098,7 @@ fn register_stream_builtins(root: &mut Namespace) {
         root.fns.insert(
             name.to_string(),
             FnSig {
+                ffi: false,
                 type_params: vec![],
                 params,
                 ret,
@@ -1185,6 +1204,7 @@ fn register_system_builtins(root: &mut Namespace) {
         root.fns.insert(
             name.to_string(),
             FnSig {
+                ffi: false,
                 type_params: vec![],
                 params,
                 ret,
@@ -1297,6 +1317,7 @@ fn register_readtable_builtins(root: &mut Namespace) {
         root.fns.insert(
             name.to_string(),
             FnSig {
+                ffi: false,
                 type_params: vec![],
                 params,
                 ret,
@@ -1456,7 +1477,7 @@ fn sexpr_def() -> AdtDef {
 /// structural comparisons) special-case `Str` to compare content instead.
 fn sexpr_assoc() -> BTreeMap<String, AssocFn> {
     let mut m = BTreeMap::new();
-    let eq_fn = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![option_of(sexpr()), option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let eq_fn = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![option_of(sexpr()), option_of(sexpr())], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     m.insert("eq".to_string(), eq_fn());
     m.insert("eql".to_string(), eq_fn());
     m
@@ -1470,12 +1491,12 @@ fn bool_assoc() -> BTreeMap<String, AssocFn> {
     // value comparison. See `docs/cl-equivalence-catalog.md`'s eq/eql/equal/
     // equalp section for why every one of these four is still registered
     // explicitly rather than leaving `eql`/`equal`/`equalp` undefined.
-    let eq_fn = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let eq_fn = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), eq_fn());
     }
-    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("print".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bool], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bool], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m
 }
 
@@ -1486,7 +1507,7 @@ fn bool_assoc() -> BTreeMap<String, AssocFn> {
 /// registered (there is no structure to recurse into beyond `eq`'s identity).
 fn symbol_assoc() -> BTreeMap<String, AssocFn> {
     let mut m = BTreeMap::new();
-    let eq_fn = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::Symbol], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let eq_fn = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Symbol, Type::Symbol], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     m.insert("eq".to_string(), eq_fn());
     m.insert("eql".to_string(), eq_fn());
     m
@@ -1552,7 +1573,7 @@ fn hashtable_def() -> AdtDef {
     // `equals`, so any type that implements `Hash` can be a key.
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: hashtable_ty(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: false, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![], ret: hashtable_ty(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: false, builtin: true },
     );
     // `get`/`set`/`remove` are **not here**. They are prelude `defmethod`s
     // (`(where (Hash K))`), written on the five bucket primitives below —
@@ -1569,7 +1590,7 @@ fn hashtable_def() -> AdtDef {
     // The prelude reaches them because it is the root module, where the table
     // itself lives; nothing outside can, and nothing outside should.
     let bucket = |params: Vec<Type>, ret: Type| AssocFn {
-        sig: FnSig { type_params: vec![], rest: None, params, ret, public: false, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+        sig: FnSig { ffi: false, type_params: vec![], rest: None, params, ret, public: false, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
         instance: true,
         builtin: true,
     };
@@ -1583,11 +1604,11 @@ fn hashtable_def() -> AdtDef {
     assoc.insert("bucket-delete".to_string(), bucket(vec![hashtable_ty(), Type::I32, Type::I32], Type::Unit));
     assoc.insert(
         "count".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "clear".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     // `keys`/`values`/`entries`: a Rust `HashMap` has no stable, resumable cursor the way `Vector<T>`'s
     // own index-based iterator does, so each call snapshots the table's
@@ -1602,16 +1623,17 @@ fn hashtable_def() -> AdtDef {
     // this snapshot, the same way `vector-iter<T>` walks `Vector<T>`.
     assoc.insert(
         "keys".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Named(Path::root("vector"), vec![tvar("k")]), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Named(Path::root("vector"), vec![tvar("k")]), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "values".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Named(Path::root("vector"), vec![tvar("v")]), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Named(Path::root("vector"), vec![tvar("v")]), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "entries".to_string(),
         AssocFn {
             sig: FnSig {
+                ffi: false,
                 type_params: vec![],
                 rest: None,
                 params: vec![hashtable_ty()],
@@ -1654,12 +1676,12 @@ fn vector_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: vector_ty(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: false, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![], ret: vector_ty(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: false, builtin: true },
     );
     assoc.insert(
         "push".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), tvar("t")], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+            sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![vector_ty(), tvar("t")], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
             instance: true,
             builtin: true,
         },
@@ -1667,7 +1689,7 @@ fn vector_def() -> AdtDef {
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), Type::I32], ret: tvar("t"), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+            sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![vector_ty(), Type::I32], ret: tvar("t"), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
             instance: true,
             builtin: true,
         },
@@ -1675,18 +1697,18 @@ fn vector_def() -> AdtDef {
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), Type::I32, tvar("t")], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+            sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![vector_ty(), Type::I32, tvar("t")], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
             instance: true,
             builtin: true,
         },
     );
     assoc.insert(
         "len".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty()], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![vector_ty()], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "pop".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty()], ret: option_of(tvar("t")), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![vector_ty()], ret: option_of(tvar("t")), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     AdtDef {
         name: Path::root("vector"),
@@ -1715,7 +1737,7 @@ fn scope_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: scope_ty(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: false, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![], ret: scope_ty(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: false, builtin: true },
     );
     assoc.insert(
         // Shares every existing frame (by reference, not by copying their
@@ -1725,20 +1747,20 @@ fn scope_def() -> AdtDef {
         // comment for why a *fresh* top frame, not the shared ones
         // themselves, must receive that def's own parameter bindings).
         "clone-frames".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: scope_ty(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![scope_ty()], ret: scope_ty(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "push-frame".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![scope_ty()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "pop-frame".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![scope_ty()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty(), Type::Str], ret: option_of(tvar("v")), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+            sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![scope_ty(), Type::Str], ret: option_of(tvar("v")), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
             instance: true,
             builtin: true,
         },
@@ -1746,7 +1768,7 @@ fn scope_def() -> AdtDef {
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty(), Type::Str, tvar("v")], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+            sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![scope_ty(), Type::Str, tvar("v")], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
             instance: true,
             builtin: true,
         },
@@ -1785,7 +1807,7 @@ fn llvm_value_ty() -> Type {
 }
 
 fn assoc_fn(params: Vec<Type>, ret: Type, instance: bool) -> AssocFn {
-    AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance, builtin: true }
+    AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance, builtin: true }
 }
 
 /// An in-progress LLVM module. `add-function` always declares a function
@@ -2103,7 +2125,7 @@ fn llvm_value_def() -> AdtDef {
 /// `upcase`/`downcase` are) instead; two separately-built equal-content
 /// `Str`s are correctly *not* `eq`/`eql`.
 fn string_assoc() -> BTreeMap<String, AssocFn> {
-    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = BTreeMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Str], Type::Str));
     m.insert("downcase".to_string(), method(vec![Type::Str], Type::Str));
@@ -2143,7 +2165,7 @@ fn string_assoc() -> BTreeMap<String, AssocFn> {
 /// `equalp` is the one that differs for real: CL requires case-insensitive
 /// comparison there (`(equalp #\A #\a)` is true).
 fn char_assoc() -> BTreeMap<String, AssocFn> {
-    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = BTreeMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Char], Type::Char));
     m.insert("downcase".to_string(), method(vec![Type::Char], Type::Char));
@@ -2185,9 +2207,9 @@ fn char_assoc() -> BTreeMap<String, AssocFn> {
 /// ordinary typelisp methods (so it compiles via the normal path); only the
 /// operations needing a genuinely primitive machine op live here.
 fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
-    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = BTreeMap::new();
     // `max`/`min` (CL) and the bitwise operators (`logand`/`logior`/`logxor`)
     // are same-type binary ops like `+`/`-`/`*`. Every one of them works in
@@ -2209,7 +2231,7 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // it. Nothing below the checker changes — the compiled tier passes the
     // distance as a raw word and `rt_int_ash` already read it as a signed
     // count, as did `eval_int_builtin`.
-    m.insert("ash".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), Type::I32], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("ash".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone(), Type::I32], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
@@ -2227,7 +2249,7 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // operation this file registers (`(logand a b)`, `(ash x count)`,
     // `(lognot x)`); `ldb` and its family moved the same way and for the same
     // reason (`prelude.rs`'s byte-specifier section).
-    m.insert("logbitp".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), Type::I32], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("logbitp".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone(), Type::I32], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `lognot` (bitwise complement), `logcount` (population count of a
     // nonnegative integer, or of the zero bits of a negative one — CL
     // §12.10's "infinite precision" reading), `integer-length` (bits needed,
@@ -2254,26 +2276,26 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // `equalp`'s `Sexpr` `Int`<->`Float` cross-type comparison
     // (`prelude.rs`) needed and previously lacked (see
     // `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section).
-    m.insert("int->float".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("int->float".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `int->char`: the other half of `char_assoc`'s `char->int` — a Unicode
     // scalar value back to `char`. Panics at runtime on a value outside the
     // valid range (surrogates, or past `U+10FFFF`) — the type system can't
     // express "valid scalar value", same precedent as `car`/`cdr` on a
     // non-`Cons` `Sexpr` or division by zero.
-    m.insert("int->char".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Char, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("int->char".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Char, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `try-int->char`: the `Option`-returning counterpart of `int->char`,
     // for `(try-as char n)` (`Checker::check_as`) — same Unicode-scalar-
     // value validity check, `None` instead of a panic on failure.
     m.insert(
         "try-int->char".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(Type::Char), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(Type::Char), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     // `int->bignum`/`int->ratio`: widening conversions into the two
     // arbitrary-precision types (`docs/cl-equivalence-catalog.md`'s planned
     // conversion catalog, extended for `bignum`/`ratio`) — always exact,
     // unlike `bignum->int`/`ratio->int`'s narrowing counterparts.
-    m.insert("int->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("int->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("int->bignum".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("int->ratio".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `int->i8`/`int->u32`/... and their `try-` counterparts: a cast between
     // two integer *widths*, which is a real conversion now that a type name
     // means its width and its signedness (`types::int_width_signed`) rather
@@ -2285,19 +2307,55 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // One pair per *target*, on every integer receiver, because the target is
     // the only thing a conversion's name can carry: there is no way to spell
     // "narrow to whatever width the context wants" as one method.
-    for target in crate::types::INT_TYPE_NAMES {
-        let to = crate::types::primitive_by_name(target).expect("INT_TYPE_NAMES names a primitive type");
+    // The C words are targets as well as the six widths: `(as c-ulong n)` is
+    // how a size is made for a C function, and without it a `c-ulong`
+    // parameter could be declared and never passed anything.
+    for target in crate::types::INT_TYPE_NAMES.iter().chain(crate::types::C_WORD_TYPE_NAMES.iter()) {
+        let to = crate::types::primitive_by_name(target).expect("the width names are primitive types");
         m.insert(
             format!("int->{}", target),
-            AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: to.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+            AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: to.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
         );
         m.insert(
             format!("try-int->{}", target),
-            AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(to), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+            AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(to), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
         );
     }
-    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("print".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m
+}
+
+/// The conversions a `c-long`/`c-ulong` gets, and nothing else.
+///
+/// Deliberately not [`int_assoc`]. These are words on the way to or from C,
+/// and giving them `+` would invite exactly the thing this language removed
+/// its 64-bit integer type to prevent: arithmetic on a value that cannot be
+/// stored anywhere, quietly different in width from every other number here.
+/// What they do need is a way out — `strlen` answering `c-ulong` is useless if
+/// nothing can read it — so every narrowing target is here, plus `bignum` for
+/// the values that do not fit in one.
+///
+/// The runtime side needs no new code: `Interp::eval_assoc_builtin` dispatches
+/// `int->W` by parsing `W`'s own width out of its name
+/// (`types::int_width_signed`), which now answers for these two.
+fn c_word_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
+    let mut m = BTreeMap::new();
+    let conv = |ret: Type| AssocFn {
+        sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+        instance: true,
+        builtin: true,
+    };
+    for target in crate::types::INT_TYPE_NAMES.iter().chain(crate::types::C_WORD_TYPE_NAMES.iter()) {
+        let to = crate::types::primitive_by_name(target).expect("the width names are primitive types");
+        m.insert(format!("int->{}", target), conv(to.clone()));
+        m.insert(format!("try-int->{}", target), conv(option_of(to)));
+    }
+    // Always exact, which is what makes it the honest way to read a `size_t`
+    // that does not fit in an `i32`.
+    m.insert("int->bignum".to_string(), conv(Type::Bignum));
+    m.insert("print".to_string(), conv(Type::Unit));
+    m.insert("println".to_string(), conv(Type::Unit));
     m
 }
 
@@ -2309,9 +2367,9 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
 /// these primitives — `mod`/`rem` via `a - b*floor|truncate(a/b)`), so they
 /// compile via the normal path.
 fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
-    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = BTreeMap::new();
     for op in ["+", "-", "*", "/", "max", "min"] {
         m.insert(op.to_string(), binop());
@@ -2340,25 +2398,25 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // `int->float`. Returns `i32`, this language's widest fixed-width integer
     // and `Checker::int_lit_ty`'s fallback; a narrower target is reached by
     // chaining `int->W` (`Checker::check_as`).
-    m.insert("float->int".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("float->int".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `float->bignum`: narrowing, truncating toward zero (`f64 as i64`'s
     // multi-precision analogue — see `crate::eval::interp::float_to_bignum`).
     // `float->ratio`: widening and *exact* — every finite `f64` is itself an
     // exact dyadic rational (CL's `rational`, not the lossy-round-trip
     // `rationalize`), via `num_rational::BigRational::from_float`.
-    m.insert("float->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("float->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("float->bignum".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("float->ratio".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `float->f32`/`float->f64` and `try-float->f32`: a cast between the two
     // float *widths*, a real conversion now that `f32` is binary32 rather
     // than a label on an `f64` (`docs/functions.md` §1b). `float->f32` rounds
     // to nearest, `float->f64` is exact in both directions (every binary32
     // value is a binary64 value), and `try-float->f32` answers `none` when
     // the rounding would lose something — the question `try-as` asks.
-    m.insert("float->f32".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::F32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("float->f64".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("float->f32".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::F32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("float->f64".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m.insert(
         "try-float->f32".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(Type::F32), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(Type::F32), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
     // `try-float->f64` can only answer `some` — widening is exact — but it is
     // registered all the same, because `Checker::width_cast` names the method
@@ -2367,10 +2425,10 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // `some` too.
     m.insert(
         "try-float->f64".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(Type::F64), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: option_of(Type::F64), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
-    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("print".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m
 }
 
@@ -2384,9 +2442,9 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
 /// (`rem`/`abs`/`signum`/`gcd`/`lcm`/`expt`) is defined in `prelude.rs` as
 /// typelisp methods (built from these primitives), so it compiles normally.
 fn bignum_assoc() -> BTreeMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
-    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = BTreeMap::new();
     for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor"] {
         m.insert(op.to_string(), binop());
@@ -2397,8 +2455,8 @@ fn bignum_assoc() -> BTreeMap<String, AssocFn> {
     // quantity anyone can use. `(ash big huge)` names a result with `huge`
     // more bits than `big` — no machine finishes that, so the wider type
     // buys nothing and only makes the ordinary call awkward to write.
-    m.insert("ash".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::I32], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("logbitp".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::I32], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("ash".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum, Type::I32], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("logbitp".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum, Type::I32], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
@@ -2413,18 +2471,18 @@ fn bignum_assoc() -> BTreeMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), cmp());
     }
-    m.insert("bignum->int".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("bignum->int".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::I32, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     // `try-bignum->int`: the `Option`-returning counterpart of `bignum->int`,
     // for `(try-as i32 n)`/`(try-as i64 n)` (`Checker::check_as`) — same
     // "fits in an `i64`" check, `None` instead of a panic on overflow.
     m.insert(
         "try-bignum->int".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: option_of(Type::I32), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum], ret: option_of(Type::I32), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
     );
-    m.insert("bignum->float".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("bignum->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("bignum->float".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("bignum->ratio".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("print".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m
 }
 
@@ -2437,8 +2495,8 @@ fn bignum_assoc() -> BTreeMap<String, AssocFn> {
 /// methods (built from `/` plus `ratio->bignum`/`bignum->ratio` truncation),
 /// so it compiles via the normal path.
 fn ratio_assoc() -> BTreeMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio, Type::Ratio], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio, Type::Ratio], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Ratio, Type::Ratio], ret: Type::Ratio, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Ratio, Type::Ratio], ret: Type::Bool, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = BTreeMap::new();
     for op in ["+", "-", "*", "/", "max", "min"] {
         m.insert(op.to_string(), binop());
@@ -2449,12 +2507,12 @@ fn ratio_assoc() -> BTreeMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), cmp());
     }
-    m.insert("ratio->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("ratio->float".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("numerator".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("denominator".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("ratio->bignum".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("ratio->float".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::F64, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("numerator".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("denominator".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("print".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m
 }
 

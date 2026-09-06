@@ -44,6 +44,8 @@ use super::value::Slot;
 /// it will replace.
 mod core_eval;
 
+pub use core_eval::read_ffi_decl;
+
 /// A registered function or method body with its parameter names. Lives at
 /// exactly one [`scope::ModuleScope`] tree node — its own defining module —
 /// rather than in a flat program-wide table; see that module's doc comment.
@@ -124,6 +126,15 @@ pub struct FnDef {
     /// field keeps that borrow-and-mutate pair independent, exactly like the
     /// old design's two separate top-level fields (`fns`/`compiled`) did.
     pub compiled: RefCell<Option<Rc<dyn CompiledBody>>>,
+    /// Declared by `(defffi ...)`: `body` is empty and `compiled` is the thunk
+    /// that reaches the C function — the runtime twin of `FnSig::ffi`.
+    ///
+    /// The interpreter itself never consults this: `enter` prefers a compiled
+    /// body whatever the definition is, which is exactly right here. It exists
+    /// so the tools can tell the two kinds of empty body apart —
+    /// `disassemble` would otherwise build a module from no forms and show a
+    /// function that is not the one the name reaches.
+    pub ffi: bool,
 }
 
 /// What the interpreter needs from a compiled function body: where it is.
@@ -981,6 +992,14 @@ impl Interp {
                 Value::Int(h) => Ok(*h),
                 other => Err(EvalError::Internal(format!("compiled call: expected an llvm handle argument, got {:?}", other))),
             },
+            // A `ptr`/`c-long`/`c-ulong` crosses raw, for the same reason a
+            // handle does and with more at stake: all 64 bits are meaningful,
+            // so the tagged catch-all would not merely misread it — it would
+            // discard the top three. Must stay ahead of that catch-all.
+            Repr::RawWord => match v {
+                Value::Int(n) => Ok(*n),
+                other => Err(EvalError::Internal(format!("compiled call: expected a raw word argument, got {:?}", other))),
+            },
             // Every remaining representation — `Sexpr`, `string`,
             // `bignum`/`ratio`, structs, enums, closures, trait objects, and a
             // `Scope<V>` (one heap object since Phase 1a) — is already a heap
@@ -1016,6 +1035,10 @@ impl Interp {
             },
             // Raw machine words on the way out, mirroring the argument encode.
             Repr::Int => Value::Int(raw),
+            // Also raw, and — unlike `Handle` above — with no registry to
+            // check it against. Whatever C answered is the answer; the FFI
+            // declaration is what claimed it would be a pointer.
+            Repr::RawWord => Value::Int(raw),
             // A `Unit`-typed body compiles to a plain `0` (`compile-unit`) —
             // decode it back to the real unit value rather than surfacing the
             // raw word as a bogus `Int(0)`, so a `Unit`-returning compiled
@@ -1341,6 +1364,16 @@ impl Interp {
     /// [`Self::compile_function`]/[`Self::call_graph_edges`] (which need the
     /// body slightly earlier — to collect `call` targets — before
     /// `add_compiled_function` ever runs).
+    /// Whether `name` is a `(defffi ...)` declaration.
+    ///
+    /// For the tools, which otherwise cannot tell its empty body from an
+    /// ordinary one: [`Self::compiled_fn_body`] answers `(params, [])` for
+    /// both, and building a module out of no forms produces a function that
+    /// is not the one the name reaches.
+    pub fn fn_is_ffi(&self, name: &str) -> bool {
+        self.resolve_fn_def(name).map(|f| f.ffi).unwrap_or(false)
+    }
+
     pub fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Repr)>, Vec<Value>), EvalError> {
         let f = self.resolve_fn_def(name)?;
         let sig = f
@@ -3286,9 +3319,21 @@ fn eval_ratio_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
     Some(Ok(v))
 }
 
-/// `int->bignum` (`registry::int_assoc`): always-exact widening.
-fn int_to_bignum(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    Ok(bignum_rt(heap, BigInt::from(rt_i64(&args[0])?)))
+/// `int->bignum` (`registry::int_assoc`, `registry::c_word_assoc`):
+/// always-exact widening.
+///
+/// "Always exact" is a claim about the *receiver's* type, so the receiver's
+/// width and signedness decide how the word reads. Every integer type narrower
+/// than the register is already the number it names — the normalization
+/// invariant sign- or zero-extends it into the 64-bit word — so for those the
+/// word's own sign is the right one. The single width where the two disagree
+/// is 64: `c-ulong`'s word with its top bit set is a number above `i64::MAX`,
+/// not a negative one. Reading it as `i64` would make the one conversion that
+/// promises to lose nothing lose the most.
+fn int_to_bignum(heap: &mut Heap, args: &[Value], width: u32, signed: bool) -> Result<Value, EvalError> {
+    let word = rt_i64(&args[0])?;
+    let n = if !signed && width == 64 { BigInt::from(word as u64) } else { BigInt::from(word) };
+    Ok(bignum_rt(heap, n))
 }
 
 /// `int->ratio` (`registry::int_assoc`): always-exact widening.
@@ -3564,6 +3609,7 @@ impl Interp {
 fn int_receiver_width(type_name: &Path) -> Option<(u32, bool)> {
     crate::types::INT_TYPE_NAMES
         .iter()
+        .chain(crate::types::C_WORD_TYPE_NAMES.iter())
         .find(|n| *type_name == Path::root(n))
         .and_then(|n| crate::types::int_width_signed(n))
 }
@@ -3720,7 +3766,7 @@ fn eval_builtin_method(
             "int->float" => Some(int_to_float(heap, args)),
             "int->char" => Some(int_to_char(args)),
             "try-int->char" => Some(try_int_to_char(heap, args, ret_key)),
-            "int->bignum" => Some(int_to_bignum(heap, args)),
+            "int->bignum" => Some(int_to_bignum(heap, args, width, signed)),
             "int->ratio" => Some(int_to_ratio(heap, args)),
             _ if width_cast_target(method, "int->").is_some() => {
                 let (w, sg) = width_cast_target(method, "int->").expect("just matched");
@@ -3859,6 +3905,34 @@ struct Recording {
     globals_before: usize,
 }
 
+/// One `(defffi ...)` declaration, as the backend needs to see it.
+///
+/// Plain data rather than the core-IR node it was read from, for the reason
+/// [`Backend`] is `fn` pointers: this crosses to the crate holding LLVM, and
+/// what crosses should be the answer, not the question. `Interp::exec` reads
+/// the node (it owns the readers), and the backend emits the thunk (it owns
+/// the codegen).
+///
+/// `params`/`ret` are *C type* spellings — `type_key::type_key_of_type`'s
+/// output, so `"i8"`, `"f32"`, `"string"`, `"ptr"`. The `Repr`s beside them in
+/// the node say how each value crosses the compiled boundary; these say what
+/// the C function is declared to take, which is a different question with a
+/// different answer for all six integer widths. Which spellings are actually
+/// callable is the backend's to decide, and it decides it in one place.
+#[derive(Clone, Debug)]
+pub struct FfiDecl {
+    /// The typelisp-side name, which is also what the thunk's LLVM symbol is
+    /// built from — so a compiled call site resolves it with no special case.
+    pub path: crate::Path,
+    /// The symbol to look up: the C function's own name.
+    pub c_symbol: String,
+    /// The library to look it up in. `None` means the running process, which
+    /// is what reaches libc and everything else already linked.
+    pub library: Option<String>,
+    pub params: Vec<String>,
+    pub ret: String,
+}
+
 /// Everything the interpreter needs from the LLVM backend, as plain `fn`
 /// pointers.
 ///
@@ -3890,6 +3964,13 @@ pub struct Backend {
     pub compile_file: fn(&str, &str) -> Result<(), String>,
     /// `(dump path)`.
     pub dump_image: fn(&Interp, &mut Heap, &str) -> Result<(), String>,
+    /// `(defffi ...)` — resolve the C symbol and emit the thunk that reaches
+    /// it, returning a body to hang on the declaration's [`FnDef`].
+    ///
+    /// Returns the body rather than installing it, so the one place that
+    /// decides where a `FnDef` lives stays the one place that puts anything
+    /// into it (`Interp::exec`).
+    pub define_ffi: fn(&Interp, &FfiDecl) -> Result<Rc<dyn CompiledBody>, String>,
 }
 
 thread_local! {
@@ -3923,6 +4004,13 @@ fn backend(who: &str) -> Result<Backend, EvalError> {
 pub(crate) fn backend_compile_function(
 ) -> Result<fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>, EvalError> {
     Ok(backend("compile")?.compile_function)
+}
+
+/// The registered backend's `(defffi ...)`, for the evaluator's own
+/// declaration handling.
+pub(crate) fn backend_define_ffi(
+) -> Result<fn(&Interp, &FfiDecl) -> Result<Rc<dyn CompiledBody>, String>, EvalError> {
+    Ok(backend("defffi")?.define_ffi)
 }
 
 /// The registered backend's `(disassemble name)`, for the evaluator's own
