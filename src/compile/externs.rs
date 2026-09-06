@@ -400,7 +400,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 243] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 246] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -450,6 +450,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 243] {
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
         rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_i32, rt_sexpr_i8, rt_sexpr_i16, rt_sexpr_u8, rt_sexpr_u16, rt_sexpr_u32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
+        rt_ffi_cstring_new, rt_ffi_cstring_free, rt_ffi_string_from_cstr,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_str_upcase, rt_str_downcase, rt_int_fits, rt_int_fits_char, rt_f64_fits_f32, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
         rt_dyn_call, rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
@@ -585,6 +586,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 243] {
         ("rt_root_count", rt_root_count as usize),
         ("rt_set_sexpr_root", rt_set_sexpr_root as usize),
         ("rt_truncate_sexpr_roots", rt_truncate_sexpr_roots as usize),
+        // The C FFI's string conversions, called by a thunk rather than by
+        // any compiled typelisp — see `crate::compile::ffi`.
+        ("rt_ffi_cstring_new", rt_ffi_cstring_new as usize),
+        ("rt_ffi_cstring_free", rt_ffi_cstring_free as usize),
+        ("rt_ffi_string_from_cstr", rt_ffi_string_from_cstr as usize),
         ("rt_str_new", rt_str_new as usize),
         ("rt_str_length", rt_str_length as usize),
         ("rt_str_ref", rt_str_ref as usize),

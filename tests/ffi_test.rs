@@ -107,6 +107,81 @@ fn narrows_a_signed_argument() {
     assert_eq!(int(r#"(defffi (c-toupper "toupper") (i32) i32) (unsafe (c-toupper 97))"#), 65);
 }
 
+// ------------------------------------------------------------------ strings
+
+/// The string a program answers with.
+fn text(src: &str) -> String {
+    let (h, v) = eval(src).expect("evaluation failed");
+    match v {
+        Value::Str(id) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
+#[test]
+fn passes_a_string() {
+    // A typelisp string is not NUL-terminated, so this is a copy into a C
+    // string and a free afterwards, not a pointer handed over.
+    assert_eq!(int(r#"(defffi (c-strlen "strlen") (string) i32) (unsafe (c-strlen "hello"))"#), 5);
+}
+
+#[test]
+fn returns_a_string() {
+    // Copied out of C's memory, not borrowed from it: what `getenv` returns
+    // points into the process environment and is not ours to hold.
+    let path = text(r#"(defffi (c-getenv "getenv") (string) string) (unsafe (c-getenv "PATH"))"#);
+    assert!(!path.is_empty(), "PATH came back empty");
+}
+
+#[test]
+fn a_result_pointing_into_an_argument_is_copied_before_the_argument_is_freed() {
+    // `strchr` answers with a pointer *into* the string it was given — which
+    // here is the temporary C string this call made. Copying the result before
+    // freeing that temporary is the whole reason the thunk orders the two that
+    // way; the other order reads freed memory.
+    assert_eq!(
+        text(r#"(defffi (c-strchr "strchr") (string i32) string) (unsafe (c-strchr "hello world" 119))"#),
+        "world"
+    );
+}
+
+#[test]
+fn a_string_argument_survives_a_collection() {
+    // `rt_ffi_string_from_cstr` allocates, so a GC can run inside the thunk
+    // while the argument's own string is still live. It is rooted by
+    // `encode_crossing_args` before the call, which is what makes that safe.
+    assert_eq!(
+        text(
+            r#"
+            (defffi (c-strchr "strchr") (string i32) string)
+            (defun probe ((s string)) string (unsafe (c-strchr s 119)))
+            (probe (append "hello " "world"))
+            "#
+        ),
+        "world"
+    );
+}
+
+#[test]
+fn a_null_result_says_so_rather_than_inventing_a_string() {
+    // `string` has no value for "there wasn't one".
+    let e = err(
+        r#"(defffi (c-getenv "getenv") (string) string) (unsafe (c-getenv "TYPELISP_DEFINITELY_UNSET_XYZZY"))"#,
+    );
+    assert!(e.contains("null") && e.contains("ptr"), "unexpected error: {}", e);
+}
+
+#[test]
+fn a_nul_inside_a_string_argument_is_refused() {
+    let e = err(
+        r#"
+        (defffi (c-strlen "strlen") (string) i32)
+        (unsafe (c-strlen (append "ab" (char->string (int->char 0)))))
+        "#,
+    );
+    assert!(e.contains("NUL"), "unexpected error: {}", e);
+}
+
 // --------------------------------------------------------- the compiled path
 
 #[test]

@@ -73,6 +73,12 @@ enum CType {
     F64,
     Bool,
     Void,
+    /// `const char *`. Not a word the boundary can hand over as-is: a typelisp
+    /// `string` is a Rust `String` in the heap's string table, neither
+    /// NUL-terminated nor guaranteed free of NULs. It is copied into a C
+    /// string for one call and copied back out of one — see
+    /// `typelisp_rt::rt_ffi_cstring_new` and its two siblings.
+    Str,
 }
 
 impl CType {
@@ -90,6 +96,7 @@ impl CType {
             "f64" => Some(CType::F64),
             "bool" => Some(CType::Bool),
             "()" | "unit" => Some(CType::Void),
+            "string" => Some(CType::Str),
             _ => None,
         }
     }
@@ -115,6 +122,7 @@ impl CType {
             CType::F32 => ctx.f32_type().into(),
             CType::F64 => ctx.f64_type().into(),
             CType::Bool => ctx.bool_type().into(),
+            CType::Str => ctx.ptr_type(inkwell::AddressSpace::default()).into(),
             CType::Void => return None,
         })
     }
@@ -183,7 +191,21 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
     let i64_ty = ctx.i64_type();
     let args_ptr = thunk.get_nth_param(0).expect("the shared signature has two parameters").into_pointer_value();
 
+    // One scratch slot, reused: every shim call below takes exactly one word
+    // and consumes it before the next is stored. In the entry block because
+    // that is where LLVM wants an `alloca`.
+    let scratch = builder
+        .build_alloca(i64_ty, "ffi_scratch")
+        .map_err(|e| format!("ffi: failed to reserve the shim argument slot: {}", e))?;
+    let one = ctx.i32_type().const_int(1, false);
+    let shim = |name: &str| match module.get_function(name) {
+        Some(f) => f,
+        None => module.add_function(name, compiled_fn_type(), None),
+    };
+
     let mut call_args: Vec<BasicMetadataValueEnum<'static>> = Vec::with_capacity(params.len());
+    // The C strings made for this call, to be freed once it has returned.
+    let mut owned_cstrings: Vec<IntValue<'static>> = Vec::new();
     for (i, c) in params.iter().enumerate() {
         // `args[i]`, the word the caller put there. Its shape is the
         // *declared* one — `encode_crossing_args` was driven by the same
@@ -197,21 +219,67 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
             .build_load(i64_ty, slot, "arg_word")
             .map_err(|e| format!("ffi: failed to load an argument: {}", e))?
             .into_int_value();
-        call_args.push(word_to_c(&builder, word, *c)?);
+        if *c == CType::Str {
+            let made = call_shim(&builder, shim("rt_ffi_cstring_new"), scratch, one, word, "cstr")?;
+            owned_cstrings.push(made);
+            let p = builder
+                .build_int_to_ptr(made, ctx.ptr_type(inkwell::AddressSpace::default()), "cstr_ptr")
+                .map_err(|e| format!("ffi: failed to make a pointer from a C string: {}", e))?;
+            call_args.push(p.into());
+        } else {
+            call_args.push(word_to_c(&builder, word, *c)?);
+        }
     }
 
     let call = builder
         .build_call(c_fn, &call_args, "ffi_call")
         .map_err(|e| format!("ffi: failed to build the call to `{}`: {}", decl.c_symbol, e))?;
     let out = match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) if ret == CType::Str => {
+            // Copied *before* the arguments are freed: a C function that
+            // answers with a pointer into one of them (`strchr`, `strstr`) is
+            // ordinary, and freeing first would leave this reading freed
+            // memory. The cost is that a `raise` in here — a null result, or
+            // bytes that are not UTF-8 — leaks the argument strings, on a
+            // path that is ending the call anyway.
+            let raw = builder
+                .build_ptr_to_int(v.into_pointer_value(), i64_ty, "ret_cstr")
+                .map_err(|e| format!("ffi: failed to take the address of a string result: {}", e))?;
+            call_shim(&builder, shim("rt_ffi_string_from_cstr"), scratch, one, raw, "ret_str")?
+        }
         inkwell::values::ValueKind::Basic(v) => c_to_word(&builder, v, ret)?,
         // A `void` C function still has to answer with a word, because the
         // shared signature says so. `Repr::Unit` crosses as 0, so this is the
         // same placeholder every other unit-valued call produces.
         inkwell::values::ValueKind::Instruction(_) => i64_ty.const_zero(),
     };
+    for made in owned_cstrings {
+        call_shim(&builder, shim("rt_ffi_cstring_free"), scratch, one, made, "freed")?;
+    }
     builder.build_return(Some(&out)).map_err(|e| format!("ffi: failed to build the return: {}", e))?;
     Ok(thunk)
+}
+
+/// Call a one-word `rt_*` shim: store `word` in `scratch` and call under the
+/// shared signature, which is what every shim is written to.
+fn call_shim(
+    builder: &inkwell::builder::Builder<'static>,
+    f: FunctionValue<'static>,
+    scratch: inkwell::values::PointerValue<'static>,
+    one: IntValue<'static>,
+    word: IntValue<'static>,
+    name: &str,
+) -> Result<IntValue<'static>, String> {
+    builder.build_store(scratch, word).map_err(|e| format!("ffi: failed to store a shim argument: {}", e))?;
+    let call = builder
+        .build_call(f, &[scratch.into(), one.into()], name)
+        .map_err(|e| format!("ffi: failed to call a runtime shim: {}", e))?;
+    match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => Ok(v.into_int_value()),
+        inkwell::values::ValueKind::Instruction(_) => {
+            Err("internal error: a runtime shim produced no value".to_string())
+        }
+    }
 }
 
 /// Every declared parameter as a [`CType`], or an error naming the first one
@@ -232,7 +300,7 @@ fn ctypes(keys: &[String], decl: &FfiDecl) -> Result<Vec<CType>, String> {
 fn unspellable(key: &str, where_: &str, decl: &FfiDecl) -> String {
     format!(
         "defffi: `{}` declares `{}` as {}, which the FFI cannot spell in C. \
-         It can spell the integer widths (i8/i16/i32/u8/u16/u32), f32, f64, bool, and `()`.",
+         It can spell the integer widths (i8/i16/i32/u8/u16/u32), f32, f64, bool, string, and `()`.",
         decl.path, key, where_
     )
 }
@@ -270,7 +338,11 @@ fn word_to_c(
                 .map_err(|e| format!("ffi: failed to narrow an f32 argument: {}", e))?
                 .into()
         }
-        CType::Void => return Err("internal error: a void parameter reached the thunk".to_string()),
+        // Both of these are handled in `emit_thunk`, beside the runtime shims
+        // they need and this converter cannot reach.
+        CType::Str | CType::Void => {
+            Err(format!("internal error: {:?} reached the scalar argument converter", c))?
+        }
     })
 }
 
@@ -316,7 +388,9 @@ fn c_to_word(
                 .map_err(|e| format!("ffi: failed to reinterpret an f32 result: {}", e))?
                 .into_int_value()
         }
-        CType::Void => return Err("internal error: a void result reached the converter".to_string()),
+        CType::Str | CType::Void => {
+            Err(format!("internal error: {:?} reached the scalar result converter", c))?
+        }
     })
 }
 
@@ -434,7 +508,18 @@ pub fn define_ffi(_interp: &Interp, decl: &FfiDecl) -> Result<Rc<dyn CompiledBod
         .verify()
         .map_err(|e| format!("ffi: the thunk for `{}` is not valid IR: {}", decl.c_symbol, e.to_string()))?;
 
-    let code = CompiledFn::new(&module, &name, &[(decl.c_symbol.clone(), addr)])
+    // The C function, plus every `rt_*` shim the thunk actually declared (a
+    // string conversion, or nothing at all). Filtered to what is in the module
+    // because `CompiledFn::new` requires a forward declaration for each name
+    // it is asked to map — the same filter `driver`'s bitcode path uses.
+    let mut externals: Vec<(String, usize)> = vec![(decl.c_symbol.clone(), addr)];
+    externals.extend(
+        crate::compile::externs::rt_extern_functions()
+            .iter()
+            .filter(|(n, _)| module.get_function(n).is_some())
+            .map(|(n, a)| (n.to_string(), *a)),
+    );
+    let code = CompiledFn::new(&module, &name, &externals)
         .map_err(|e| format!("ffi: failed to JIT the thunk for `{}`: {}", decl.c_symbol, e))?;
     let addr = code.address();
     Ok(Rc::new(FfiThunk { _code: code, addr }))
