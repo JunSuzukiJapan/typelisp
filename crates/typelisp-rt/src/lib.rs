@@ -1193,6 +1193,32 @@ pub unsafe extern "C" fn rt_int_to_bignum(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_bignum(BigInt::from(*args)))
 }
 
+/// [`rt_int_to_bignum`] for a receiver whose 64 bits are *unsigned* — `c-ulong`
+/// and nothing else.
+///
+/// Every other unsigned type is narrower than the register, so the
+/// normalization invariant has already zero-extended it and its word is
+/// non-negative; `rt_int_to_bignum` reads those correctly. At 64 bits there is
+/// no room left to zero-extend into, so the word's top bit is the value's own
+/// and reading it as `i64` would turn `2^64 - 1` into `-1`. The island picks
+/// between the two by the receiver's `int-wsig` (128 is unsigned-64).
+///
+/// A separate entry point rather than a width operand on the existing one:
+/// changing a shim's arity makes the previous generation of the self-hosted
+/// island unable to compile the new source, which costs a temporary shim and
+/// an extra regeneration pass. A new name costs neither.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1`; a `Heap` must be registered.
+#[no_mangle]
+pub unsafe extern "C" fn rt_uint_to_bignum(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_uint_to_bignum: expected 1 argument");
+    }
+    encode(active_heap().alloc_bignum(BigInt::from(*args as u64)))
+}
+
 /// `int->ratio` for compiled code — always exact widening, denominator `1`.
 /// A direct primitive rather than routing through [`rt_int_to_bignum`] +
 /// [`rt_ratio_from_bignums`], since a native-int receiver's compiled

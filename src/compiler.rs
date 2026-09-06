@@ -2515,9 +2515,17 @@ pub const SOURCE: &str = r#"
            ;; second argument form to compile for these).
            (case method
              ("int->bignum"
+              ;; The receiver's own signedness decides how its word reads.
+              ;; Every narrower unsigned type is already non-negative in the
+              ;; register (the normalization invariant zero-extended it), so
+              ;; only unsigned-64 -- `c-ulong`, wsig 128 -- needs the other
+              ;; entry point. `rt_int_to_bignum` would read its top bit as a
+              ;; sign and turn 2^64-1 into -1.
               (let ((args-ptr (alloca-args builder 1)))
                 (store-arg builder args-ptr 0 a)
-                (build-call builder (get-function m "rt_int_to_bignum") args-ptr 1)))
+                (build-call builder
+                  (get-function m (if (= wsig 128) "rt_uint_to_bignum" "rt_int_to_bignum"))
+                  args-ptr 1)))
              ("int->ratio"
               (let ((args-ptr (alloca-args builder 1)))
                 (store-arg builder args-ptr 0 a)

@@ -215,6 +215,68 @@ fn a_64_bit_result_keeps_its_top_bits() {
 }
 
 #[test]
+fn a_c_word_is_read_as_a_bignum_by_the_declaration_s_signedness() {
+    // `atol("-1")` puts all ones in the register. What that word *means* is
+    // whatever the declaration claimed, and `bignum` is the only target that
+    // can hold either reading — `as i32` truncates and `try-as i32` answers
+    // `none`, so without this there is no way to read a `size_t` at all.
+    //
+    // This is the one width where "unsigned" and "the word's own sign bit"
+    // disagree: every narrower unsigned type is already non-negative in the
+    // register.
+    assert_eq!(
+        text(
+            r#"
+            (defffi (c-atol "atol") (string) c-long)
+            (format false "~a" (as bignum (unsafe (c-atol "-1"))))
+            "#
+        ),
+        "-1"
+    );
+    assert_eq!(
+        text(
+            r#"
+            (defffi (c-atol "atol") (string) c-ulong)
+            (format false "~a" (as bignum (unsafe (c-atol "-1"))))
+            "#
+        ),
+        "18446744073709551615"
+    );
+}
+
+#[test]
+fn a_compiled_body_reads_a_c_word_the_same_way() {
+    // The interpreter reads the word in `int_to_bignum` and compiled code in
+    // `rt_uint_to_bignum`, chosen by the island from the receiver's `int-wsig`
+    // — two places, one answer.
+    assert_eq!(
+        text(
+            r#"
+            (defffi (c-atol "atol") (string) c-ulong)
+            (defun f () bignum (as bignum (unsafe (c-atol "-1"))))
+            (compile f)
+            (format false "~a" (f))
+            "#
+        ),
+        "18446744073709551615"
+    );
+}
+
+#[test]
+fn a_c_word_converts_to_nothing_but_a_bignum_and_the_widths() {
+    // `f64` would round and `ratio`/`char` are not what a machine word means,
+    // so the message is the plain "no conversion" one rather than a special
+    // case. The width casts and `bignum` are the whole catalog.
+    let e = err(
+        r#"
+        (defffi (c-atol "atol") (string) c-ulong)
+        (defun f () f64 (as f64 (unsafe (c-atol "1"))))
+        "#,
+    );
+    assert!(e.contains("no conversion"), "unexpected error: {e}");
+}
+
+#[test]
 fn a_wrapper_may_return_a_pointer() {
     // The `unsafe` form's own value is the one exception to rule B, so a
     // function that hands a pointer back can be written at all.

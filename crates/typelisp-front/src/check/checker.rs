@@ -15434,6 +15434,18 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
     // result to the width that was actually asked for.
     let to_key = called_width(to);
     match (from, &to_key) {
+        // A C word can be *read* as a `bignum`, and as nothing else here. It is
+        // the only target that never loses anything, which is the whole point:
+        // it is how a `size_t` too large for `i32` is read at all (`as i32`
+        // truncates and `try-as i32` answers `none`). `f64` would round,
+        // `ratio` and `char` are not what a machine word means, and none of
+        // the three is registered for these types anyway
+        // (`registry::c_word_assoc`). Ahead of the integer arm, which these
+        // deliberately fail.
+        _ if from.is_c_word() => match &to_key {
+            Bignum => Some(("int->bignum", None)),
+            _ => None,
+        },
         _ if from.is_integer() => match &to_key {
             F64 => Some(("int->float", None)),
             Bignum => Some(("int->bignum", None)),

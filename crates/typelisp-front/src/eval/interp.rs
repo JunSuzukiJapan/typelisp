@@ -3319,9 +3319,21 @@ fn eval_ratio_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
     Some(Ok(v))
 }
 
-/// `int->bignum` (`registry::int_assoc`): always-exact widening.
-fn int_to_bignum(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    Ok(bignum_rt(heap, BigInt::from(rt_i64(&args[0])?)))
+/// `int->bignum` (`registry::int_assoc`, `registry::c_word_assoc`):
+/// always-exact widening.
+///
+/// "Always exact" is a claim about the *receiver's* type, so the receiver's
+/// width and signedness decide how the word reads. Every integer type narrower
+/// than the register is already the number it names — the normalization
+/// invariant sign- or zero-extends it into the 64-bit word — so for those the
+/// word's own sign is the right one. The single width where the two disagree
+/// is 64: `c-ulong`'s word with its top bit set is a number above `i64::MAX`,
+/// not a negative one. Reading it as `i64` would make the one conversion that
+/// promises to lose nothing lose the most.
+fn int_to_bignum(heap: &mut Heap, args: &[Value], width: u32, signed: bool) -> Result<Value, EvalError> {
+    let word = rt_i64(&args[0])?;
+    let n = if !signed && width == 64 { BigInt::from(word as u64) } else { BigInt::from(word) };
+    Ok(bignum_rt(heap, n))
 }
 
 /// `int->ratio` (`registry::int_assoc`): always-exact widening.
@@ -3754,7 +3766,7 @@ fn eval_builtin_method(
             "int->float" => Some(int_to_float(heap, args)),
             "int->char" => Some(int_to_char(args)),
             "try-int->char" => Some(try_int_to_char(heap, args, ret_key)),
-            "int->bignum" => Some(int_to_bignum(heap, args)),
+            "int->bignum" => Some(int_to_bignum(heap, args, width, signed)),
             "int->ratio" => Some(int_to_ratio(heap, args)),
             _ if width_cast_target(method, "int->").is_some() => {
                 let (w, sg) = width_cast_target(method, "int->").expect("just matched");

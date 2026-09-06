@@ -168,9 +168,17 @@ pub const LLVM_METHOD_RECEIVER_TYPES: [&str; 4] =
 /// LLVM instructions or `rt_*` calls rather than function calls
 /// (`Interp::is_native_lowered_primitive_method` says *which* methods; this
 /// says which receivers can have them).
-pub const NATIVE_LOWERED_PRIMITIVES: [&str; 15] = [
+pub const NATIVE_LOWERED_PRIMITIVES: [&str; 17] = [
     "i32", "i8", "i16", "u8", "u16", "u32",
     "char", "string", "f64", "f32", "bignum", "ratio", "sexpr", "bool", "symbol",
+    // The two C-boundary words are integer receivers to `compile-assoc`
+    // (`int-receiver-type?`), so their conversions are lowered the same way.
+    // Listing the *methods* is not enough: a receiver missing from here makes
+    // every one of its calls a real graph edge, and a builtin with no user
+    // body then fails the `has_method` check with "no compiled
+    // implementation" — which is exactly what a compiled `(as bignum ...)` on
+    // a `c-ulong` did.
+    "c-long", "c-ulong",
 ];
 
 #[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]

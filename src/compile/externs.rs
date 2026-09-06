@@ -406,7 +406,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 246] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 247] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -451,7 +451,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 246] {
         rt_hashtable_bucket_count, rt_hashtable_bucket_delete, rt_hashtable_bucket_key, rt_hashtable_bucket_put,
         rt_hashtable_bucket_value,
         rt_hashtable_clear, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys,
-        rt_hashtable_new, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
+        rt_hashtable_new, rt_hashtable_values, rt_int_to_bignum, rt_uint_to_bignum, rt_int_to_ratio,
         rt_intern_path, rt_intern_symbol, rt_wk_symbol, rt_list_to_path, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
@@ -740,6 +740,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 246] {
         ("rt_bignum_to_float", rt_bignum_to_float as usize),
         ("rt_bignum_to_ratio", rt_bignum_to_ratio as usize),
         ("rt_int_to_bignum", rt_int_to_bignum as usize),
+        ("rt_uint_to_bignum", rt_uint_to_bignum as usize),
         ("rt_int_to_ratio", rt_int_to_ratio as usize),
         ("rt_float_to_bignum", rt_float_to_bignum as usize),
         ("rt_float_to_ratio", rt_float_to_ratio as usize),
