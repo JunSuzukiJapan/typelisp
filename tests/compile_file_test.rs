@@ -88,6 +88,57 @@ fn an_enum_variant_name_survives_an_instantiated_key_in_an_executable() {
 }
 
 #[test]
+fn compiles_and_runs_a_call_to_a_declared_c_function() {
+    // The AOT half of the FFI. The thunk goes into the executable's own
+    // module; the C function it calls is left to the linker, which finds
+    // `abs` in the libc `cc` already links.
+    assert_eq!(
+        compile_and_run(
+            "ffi_abs",
+            r#"
+            (defffi (c-abs "abs") (i32) i32)
+            (defun main () i32 (unsafe (c-abs -7)))
+            "#
+        ),
+        7
+    );
+}
+
+#[test]
+fn compiles_and_runs_a_c_call_through_a_helper() {
+    // The call site is a compiled body, not the entry point — which is what
+    // exercises the naming: the island emits an ordinary call to `tl_c-abs`
+    // and resolves it against this module like any other.
+    assert_eq!(
+        compile_and_run(
+            "ffi_helper",
+            r#"
+            (defffi (c-abs "abs") (i32) i32)
+            (defun magnitude ((n i32)) i32 (unsafe (c-abs n)))
+            (defun main () i32 (+ (magnitude -3) (magnitude 4)))
+            "#
+        ),
+        7
+    );
+}
+
+#[test]
+fn compiles_and_runs_a_c_call_taking_a_string() {
+    // The string conversions are `rt_*` shims, so this also checks that the
+    // thunk's calls to them resolve against the static library.
+    assert_eq!(
+        compile_and_run(
+            "ffi_strlen",
+            r#"
+            (defffi (c-strlen "strlen") (string) c-ulong)
+            (defun main () i32 (as i32 (unsafe (c-strlen "hello"))))
+            "#
+        ),
+        5
+    );
+}
+
+#[test]
 fn compiles_and_runs_a_constant_main() {
     assert_eq!(compile_and_run("answer", "(defun main () i32 42)"), 42);
 }

@@ -2614,30 +2614,11 @@ impl Interp {
             // `()` — which is exactly the silent wrong answer worth spending
             // an error to avoid.
             "defffi" => {
-                let name = path_field(heap, tl, 0, "defffi")?;
-                let c_symbol = str_field(heap, tl, 1, "defffi")?;
-                let library = match core::field(heap, tl, 2) {
-                    Some(Value::Str(id)) => Some(heap.string(id).to_string()),
-                    Some(Value::Empty) => None,
-                    other => {
-                        return Err(EvalError::Internal(format!(
-                            "exec: (defffi ..) field 2 is not a library name: {:?}",
-                            other
-                        )))
-                    }
-                };
+                let decl = read_ffi_decl(heap, tl)?;
+                let name = decl.path.clone();
                 let (params, param_reprs) = param_list(heap, tl, 3, "defffi")?;
                 let ret = repr_field(heap, tl, 4, "defffi")?;
                 let public = bool_field(heap, tl, 5, "defffi")?;
-                let ctypes = sym_list_field(heap, tl, 6, "defffi")?;
-                let ret_ctype = sym_field(heap, tl, 7, "defffi")?;
-                let decl = crate::eval::interp::FfiDecl {
-                    path: name.clone(),
-                    c_symbol,
-                    library,
-                    params: ctypes,
-                    ret: ret_ctype,
-                };
                 // Before registering, so a declaration that cannot be
                 // resolved leaves no name behind.
                 let thunk = (crate::eval::interp::backend_define_ffi()?)(self, &decl)
@@ -2819,6 +2800,33 @@ fn param_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<(Vec<Str
         }
     }
     Ok((names, reprs))
+}
+
+/// The declaration a `(defffi ...)` node carries.
+///
+/// Public because it has two readers: `Interp::exec`, which resolves the
+/// symbol and hangs the thunk on a `FnDef`, and `compile::aot`, which emits
+/// the same thunk into the executable it is building. One reader so the two
+/// cannot come to disagree about what the node says.
+pub fn read_ffi_decl(heap: &Heap, tl: Value) -> Result<crate::eval::interp::FfiDecl, EvalError> {
+    Ok(crate::eval::interp::FfiDecl {
+        path: path_field(heap, tl, 0, "defffi")?,
+        c_symbol: str_field(heap, tl, 1, "defffi")?,
+        // `()` is "look in the running process", which is not a library name
+        // — and must not read as one.
+        library: match core::field(heap, tl, 2) {
+            Some(Value::Str(id)) => Some(heap.string(id).to_string()),
+            Some(Value::Empty) => None,
+            other => {
+                return Err(EvalError::Internal(format!(
+                    "exec: (defffi ..) field 2 is not a library name: {:?}",
+                    other
+                )))
+            }
+        },
+        params: sym_list_field(heap, tl, 6, "defffi")?,
+        ret: sym_field(heap, tl, 7, "defffi")?,
+    })
 }
 
 /// A field holding a bare symbol list `(SYM...)` — a `defmacro`'s parameters

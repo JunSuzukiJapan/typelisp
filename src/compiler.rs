@@ -1228,6 +1228,11 @@ pub const SOURCE: &str = r#"
 (defun int-receiver-type? ((name string)) bool
   (case name
     (("i8" "i16" "i32" "u8" "u16" "u32") true)
+    ;; The C-boundary words are 64-bit integers as far as *lowering* is
+    ;; concerned. What sets them apart is written down elsewhere: the checker
+    ;; gives them no arithmetic and refuses to store them, so only the
+    ;; conversions ever arrive here.
+    (("c-long" "c-ulong") true)
     (else false)))
 
 (defun float-receiver-type? ((name string)) bool
@@ -1244,6 +1249,10 @@ pub const SOURCE: &str = r#"
   (case name
     ("i8" 17) ("i16" 33) ("i32" 65)
     ("u8" 16) ("u16" 32) ("u32" 64)
+    ;; 64 bits under LP64. `build-normalize-int` shifts by `64 - 64`, so a
+    ;; cast to one of these is the identity — which is what a cast to the
+    ;; register's own width should be.
+    ("c-long" 129) ("c-ulong" 128)
     (else (panic (append "int-wsig: not an integer type: " name)))))
 
 ;; `v` cut back to the type's width and re-extended into the 64-bit register
@@ -1291,6 +1300,7 @@ pub const SOURCE: &str = r#"
     ;; what `(try-as char n)` expands to — can be compiled at all.
     ("try-int->char" true)
     (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32") true)
+    (("try-int->c-long" "try-int->c-ulong") true)
     ;; `max`/`min`: `icmp`+`select`, branch-free (`build-select`).
     (("max" "min") true)
     ;; `logand`/`logior`/`logxor`: bare LLVM instructions
@@ -1314,6 +1324,7 @@ pub const SOURCE: &str = r#"
     ;; not here: they build an `Option`, like `try-int->char`, and share its
     ;; gap.
     (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32") true)
+    (("int->c-long" "int->c-ulong") true)
     (else false)))
 
 ;; `sexpr`'s natively-compilable methods (`registry::sexpr_assoc` registers
@@ -2520,7 +2531,7 @@ pub const SOURCE: &str = r#"
              ;; A width cast is the normalization on its own: cut the value to
              ;; the *target*'s width and re-extend. `int-wsig` reads the target
              ;; out of the method name, which is the only place it is written.
-             (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32")
+             (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong")
               (build-normalize-int builder a (int-wsig (substring method 5 (length method)))))
              ;; The `Option`-returning halves of those two. `rt_int_fits*`
              ;; answers the question and nothing else: a value that fits its
@@ -2531,7 +2542,7 @@ pub const SOURCE: &str = r#"
                 (store-arg builder fits-args 0 a)
                 (build-try-option builder m cur-fn
                   (build-call builder (get-function m "rt_int_fits_char") fits-args 1) a 3)))
-             (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32")
+             (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32" "try-int->c-long" "try-int->c-ulong")
               (let ((fits-args (alloca-args builder 2)))
                 (store-arg builder fits-args 0 a)
                 (store-arg builder fits-args 1 (const-word builder (int-wsig (substring method 9 (length method)))))

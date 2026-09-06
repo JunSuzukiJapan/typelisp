@@ -244,15 +244,21 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // fold or recurse into), so all four are the same `icmp eq`. Only
         // `eq` used to be here, which is what made `case` — whose expansion
         // compares with `equal` — uncompilable for every integer scrutinee.
-        "i32" | "i8" | "i16" | "u8" | "u16" | "u32" => &[
+        // `c-long`/`c-ulong` share this arm: to the island they are integer
+        // receivers like any other (`int-receiver-type?`), and what makes them
+        // different is upstream — the checker registers only conversions for
+        // them, so the arithmetic listed here can never be asked for.
+        "i32" | "i8" | "i16" | "u8" | "u16" | "u32" | "c-long" | "c-ulong" => &[
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
             "int->bignum", "int->ratio", "int->float", "int->char",
             "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
+            "int->c-long", "int->c-ulong",
             // The `Option`-returning halves. No prelude definition reaches
             // them; they are lowered so a user's own `(try-as u8 n)` can be
             // compiled — see `docs/syntax.md` §10.
             "try-int->char",
             "try-int->i8", "try-int->i16", "try-int->i32", "try-int->u8", "try-int->u16", "try-int->u32",
+            "try-int->c-long", "try-int->c-ulong",
             "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
             "ash", "logbitp",
         ],
@@ -823,7 +829,7 @@ mod scc_tests {
             heap.pop_root();
             interp.root.borrow_mut().define_fn(
                 name.to_string(),
-                Rc::new(FnDef {
+                Rc::new(FnDef { ffi: false,
                     name: name.to_string(),
                     params: vec![],
                     body: vec![call],
@@ -850,7 +856,7 @@ mod native_method_list_tests {
     /// Every primitive receiver whose builtin methods either side lowers, with
     /// the island predicate that decides for it.
     const PRIMITIVES: &[(&str, &[&str])] = &[
-        ("int", &["i32", "i8", "i16", "u8", "u16", "u32"]),
+        ("int", &["i32", "i8", "i16", "u8", "u16", "u32", "c-long", "c-ulong"]),
         ("string", &["string"]),
         ("char", &["char"]),
         ("float", &["f64", "f32"]),

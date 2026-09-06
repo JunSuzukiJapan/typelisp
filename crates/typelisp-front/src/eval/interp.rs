@@ -44,6 +44,8 @@ use super::value::Slot;
 /// it will replace.
 mod core_eval;
 
+pub use core_eval::read_ffi_decl;
+
 /// A registered function or method body with its parameter names. Lives at
 /// exactly one [`scope::ModuleScope`] tree node — its own defining module —
 /// rather than in a flat program-wide table; see that module's doc comment.
