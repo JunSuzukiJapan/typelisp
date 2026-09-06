@@ -120,7 +120,7 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
   `check_instance_method` が `Type::Named` と同様にこの `Path` で解決する。trait/動的ディスパッチは
   導入せず、既存の「受け手の静的型で一意に解決する」仕組みを対象範囲だけ広げたもの。
 - **assoc呼び出しのジェネリック受け手対応**（[cl-equivalence-catalog.md](cl-equivalence-catalog.md) ステップ3a）:
-  `check_assoc_call`（[src/check/checker.rs](../src/check/checker.rs)）が、`check_construct` と同型の
+  `check_assoc_call`（[src/check/checker.rs](../../crates/typelisp-front/src/check/checker.rs)）が、`check_construct` と同型の
   `subst`/`subst_apply` で、メソッド署名中の型変数（受け手の `def.params`、例 `HashTable<K,V>` の
   `k`/`v`）を具体型へ代入するようになった。インスタンス呼び出しは受け手の確定型から、引数からは
   何も推論できない static 呼び出し（`HashTable::new` 等）は呼び出し元の `expected`（戻り値の期待型）
@@ -339,7 +339,7 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
   - 実装済み（4q）: TypeLispライブラリ関数 ステップ7a（基盤+基礎述語のみ。シーケンス操作/sort/
     gcd/lcm/signum/リスト一式/Option・Result補助/高階関数/数値補助は7b以降へ先送り——
     範囲が非常に広いため、まず土台と`case`(ステップ8)等が前提とする`eq`/`equal`を固めた）。
-    - **新規基盤: prelude機構**（[src/prelude.rs](../src/prelude.rs)）。これまで「TypeLisp側
+    - **新規基盤: prelude機構**（[src/prelude.rs](../../crates/typelisp-front/src/prelude.rs)）。これまで「TypeLisp側
       ライブラリ関数」は定義しても自動では使えなかった（`Checker::new`/`Interp::new`は
       組み込みメタデータのみで、`defun`等を事前ロードする仕組みが無かった）。`prelude::SOURCE`
       （typelisp自身で書いた`defun`定義の文字列）+ `prelude::load(heap, chk, interp)`
@@ -402,7 +402,7 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
     （[[feedback-impl-priority]]: 「Xが前提」と書いた時点でXの方が影響範囲が広いので先にやる
     べき、という補強）。
     - `mem::Heap::set_car`/`set_cdr`は**既に実装済みだった**（`rplaca`/`rplacd`相当、
-      [src/mem/heap.rs:235](../src/mem/heap.rs)）が、言語レベル（registry/eval）に配線されて
+      [src/mem/heap.rs:235](../../crates/typelisp-mem/src/heap.rs)）が、言語レベル（registry/eval）に配線されて
       いなかった。`registry.rs`に自由関数として登録（`(Sexpr,Sexpr)->Unit`）、
       `eval_builtin`に`heap.set_car`/`set_cdr`を呼ぶ分岐を追加するだけで済んだ。
       非Consでpanic（`car`/`cdr`と同じ方針）。
@@ -1171,7 +1171,7 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   同時に扱わないのでスレッドローカルで十分）と、診断用`rt_heap_live_count`
   /AOT起動時専用`rt_heap_init`（`Heap`を確保してそのまま登録、プロセス
   終了まで解放しない意図的なリーク）を実装。JIT側は
-  [`Interp::eval`のコンパイル済み呼び出し箇所](src/eval/interp.rs#L273)で
+  [`Interp::eval`のコンパイル済み呼び出し箇所](../../crates/typelisp-front/src/eval/interp.rs#L273)で
   呼び出し直前に`set_active_heap`、AOT側は`build_main_wrapper`が生成する
   `main`が`tl_main`を呼ぶ前に必ず`rt_heap_init`を呼ぶよう変更。JIT/AOT
   双方の単体テストで実証、全テストgreen・clippy警告0・3回連続実行で安定。
@@ -1227,7 +1227,7 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   テスト」を想定していたが、実装を進める中で2つの未解決ギャップが先に
   判明したため、それらは本ステージの範囲外として明示的に先送りした：
   (1) `Expr::Call`がコンパイル済み関数を呼ぶ際の引数/戻り値は今も
-  `RtValue::Int`決め打ち（[interp.rs](src/eval/interp.rs#L266)）——
+  `RtValue::Int`決め打ち（[interp.rs](../../crates/typelisp-front/src/eval/interp.rs#L266)）——
   `Sexpr`型の引数/戻り値を実際にtypelisp呼び出し構文`(f sexpr式)`から
   渡すには、ここにエンコード/デコードの橋渡しを追加する必要がある。
   (2) `cons`の引数を作るには`(Int 5)`のような`Sexpr`コンストラクタ
@@ -1255,7 +1255,7 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   可能になることを確認した。
 
   **`Expr::Call`のSexpr引き渡し**（Stage 4で判明していた前提ギャップを解消）:
-  [interp.rs](src/eval/interp.rs#L266)のコンパイル済み呼び出し分岐が、呼び出し先の
+  [interp.rs](../../crates/typelisp-front/src/eval/interp.rs#L266)のコンパイル済み呼び出し分岐が、呼び出し先の
   `FnDef.sig`（パラメータ型・戻り値型）を見て、各引数/戻り値が`Sexpr`型なら
   `typelisp-rt`の`encode`/`decode`（Stage 3で実装、本ステージで`pub`化——別
   クレートをまたぐため）でタグ付きi64に変換、それ以外は従来通り素の`i64`
@@ -1563,7 +1563,7 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   （1要素リストでは入れ子が浅く踏み切らなかった）。
   修正は`Interp::eval`の`Expr::If`評価をループ化——`els`が`Expr::If`である
   限り再帰せず`cur`を書き換えて回り続け、条件式自身の評価と最終的に
-  選ばれた1つの葉だけが再帰する形にした（[interp.rs](src/eval/interp.rs)）。
+  選ばれた1つの葉だけが再帰する形にした（[interp.rs](../../crates/typelisp-front/src/eval/interp.rs)）。
   `compile-value`のような分岐数の多いタグディスパッチだけでなく、`cond`
   マクロの展開等、典型的なtypelisp全体のif連鎖に効くため
   影響範囲は本ステージの範囲を超える——根本原因のインタプリタ側を直した
@@ -4251,7 +4251,7 @@ CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`pri
   `Checker::check_format`/`check_print_like`（`check_list_lit` と同系統。`&rest` は単一要素型
   なので使えず、`cons_hetero_sexpr` が各要素を `wrap_rest_elem`/`sexpr_ctor_for` で包む。対象は
   i32/i64/f64/bignum/ratio/char/bool/string/Sexpr、それ以外は型エラー）、(2) 書式エンジン専用
-  モジュール [src/eval/format.rs](../../src/eval/format.rs)（制御文字列を `Node` 木にパース——block 系
+  モジュール [src/eval/format.rs](../../crates/typelisp-print/src/format.rs)（制御文字列を `Node` 木にパース——block 系
   `~[ ~{ ~< ~(` の入れ子と clause 分割 `~;` を再帰下降で処理——→引数を `Vec<Value>` 化して `~*` 等の
   カーソル移動に対応→`State` が解釈。値描画 `render_value` は GCヒープ走査+enum 変種名解決を要する
   Rust 専用処理で `main.rs` の `format_sexpr`（REPL echo）の姉妹、standard/aesthetic フラグで
@@ -4272,7 +4272,7 @@ CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`pri
   （`(defmacro dup (x &optional (y x)) ...)` が動く）。デフォルトを書かなければ `()`=`Sexpr::Nil`。
   `&key` は呼び出し側 `:name 値`（順不同）。キーワードはシンボル名が `:` で始まる素のシンボル
   （typelisp に専用キーワード型は無く、リーダは `:b` を名前 `:b` のシンボルとして読む）。
-- **表現**: 共有型 [`MacroLambda`](../../src/check/checker.rs)（`required`/`optionals: Vec<Vec<Typed>>`/
+- **表現**: 共有型 [`MacroLambda`](../../crates/typelisp-front/src/check/checker.rs)（`required`/`optionals: Vec<Vec<Typed>>`/
   `keys: Vec<(String, Vec<Typed>)>`）を新設し `TopLevel::Defmacro` と `FnDef` に持たせた。`params`
   は従来通り全束縛名を順に並べたフラット列（`apply` 用）で、`MacroLambda` は必須以降の各領域の
   埋め方（デフォルト式・キーワード名）だけを足す。`FnDef.rest: bool` は据え置き（`&rest` 有無）。
@@ -4462,7 +4462,7 @@ Tier2（`pprint-logical-block` 等のユーザ呼び出し可能 API）が対象
 
 利用者向けの仕様は [functions.md](../functions.md) §15.1。
 
-### 中核: XP をストリームではなく2パスで実装した（[pprint.rs](../../src/eval/pprint.rs)）
+### 中核: XP をストリームではなく2パスで実装した（[pprint.rs](../../crates/typelisp-print/src/pprint.rs)）
 
 CL の pretty printer（R. Waters の XP）は**本物の出力ストリームをラップし、行幅ぶんの有界先読みで
 改行を確定する1パスのストリーム方式**。有界先読みが要るのは、ストリームが無限に続きうるから。
@@ -4492,7 +4492,7 @@ XP が近似している問いが「この区間は収まるか」なので、**
 「条件改行の直後のタブ」だけは実際の着地桁を計算してから測る（`skip_tab`）。これが無いと表形式が
 右マージンを1桁はみ出す。
 
-### `format` 側（[format.rs](../../src/eval/format.rs)）
+### `format` 側（[format.rs](../../crates/typelisp-print/src/format.rs)）
 
 出力先を `String` から `Out` に差し替え、`~_`（条件改行）/ `~i`（インデント）/ `~:t`（セクション相対タブ）/
 `~<...~:>`（**論理ブロック**。閉じの `:` で桁揃えの `~<...~>` と分岐）を実装。`~a`/`~s`/`~w` は
@@ -4547,7 +4547,7 @@ T5 は「前提は T4 動的ディスパッチ、それが済めば残るは可�
 
 [pprint_test.rs](../../tests/pprint_test.rs) 25件（`format` のディレクティブは戻り値の文字列で、
 標準出力へ書く `pprint`/`pprint-logical-block` は `typl` バイナリを起動して stdout を読む）と、
-[pprint.rs](../../src/eval/pprint.rs) 内のレイアウト単体テスト10件。
+[pprint.rs](../../crates/typelisp-print/src/pprint.rs) 内のレイアウト単体テスト10件。
 
 ## `print-object` トレイト（型ごとの印字表現、2026-07-26、旧 TODO T5-b、branch `feature/print-object`）
 

@@ -3938,9 +3938,10 @@ pub struct FfiDecl {
 ///
 /// A hook rather than direct calls because all four are the *backend*
 /// (`crate::compile`), and this file is the front end. Inverting the
-/// reference is what lets the front end stop naming `inkwell` at all — and,
-/// eventually, become a crate that does not depend on the one holding LLVM
-/// (`docs/dev/TODO.md`).
+/// reference is what lets the front end stop naming `inkwell` at all — and
+/// let it become a crate that does not depend on the one holding LLVM,
+/// which it now is: `typelisp-front` (`docs/dev/implementation-log.md`,
+/// "typelisp-front クレートと AOT 内 eval").
 ///
 /// Plain `fn` pointers rather than a trait object for the reason
 /// [`typelisp_print::runtime::PrintHooks`] uses them: these are only ever

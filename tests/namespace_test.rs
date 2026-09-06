@@ -56,10 +56,11 @@ fn unknown_qualified_path_errors() {
 // ---- instance methods -------------------------------------------------------
 //
 // `defmethod` on a user-defined type's own dedicated instance-method-
-// dispatch test used `defstruct` as its receiver type — `defstruct` no
-// longer exists (see docs/TODO.md), so that scenario is no longer
-// expressible; `defmethod` on built-in/primitive receivers (below) still
-// exercises the same dispatch machinery.
+// dispatch test used `defstruct` as its receiver type, and was dropped when
+// `defstruct` was deleted on 2026-06-23. `defstruct` came back redesigned the
+// next day, so the scenario is expressible again — it is covered in
+// `tests/struct_test.rs` rather than here. `defmethod` on built-in/primitive
+// receivers (below) exercises the same dispatch machinery.
 
 // ---- defmethod on primitive receivers ---------------------------------------
 // `i32`/`f64`/`char`/`bool`/`Str`/etc. are primitive `Type` variants, not
@@ -119,8 +120,9 @@ fn use_injects_name_into_current_scope() {
 
 // `cross_module_static_method_and_construct`/`cross_module_qualified_constructor_and_match`
 // used to define a type + static method inside a module via `defstruct` and
-// resolve both via fully-qualified paths — `defstruct` no longer exists (see
-// docs/TODO.md); cross-module *function* resolution is still covered below
+// resolve both via fully-qualified paths — dropped when `defstruct` was
+// deleted on 2026-06-23, and not restored here after it came back the next
+// day; cross-module *function* resolution is still covered below
 // (`use_module_alias`/`use_module_then_item`/`absolute_path_*`).
 
 // ---- regression: builtins still resolve at root ----------------------------

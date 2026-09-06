@@ -1418,7 +1418,7 @@ CL の `~:a`/`~@[` の nil 特有挙動は typelisp の `false` に読み替え�
 プロンプトが確実に見えるようにするため）。書式エンジンは
 [typelisp-print](../crates/typelisp-print/src/format.rs)（制御文字列を [`Node`] 木にパース→引数リストに
 対して解釈。`~a`/`~s` の値描画は GC ヒープ走査が要る Rust 専用処理）。可変長引数を `Sexpr` リストへ
-まとめる特殊形は [checker.rs](../src/check/checker.rs) の `check_format`/`check_print_like`。
+まとめる特殊形は [checker.rs](../crates/typelisp-front/src/check/checker.rs) の `check_format`/`check_print_like`。
 
 **JIT/AOT コンパイルできる**（2026-08-18）。ヒープから読めない2つの事実——enum の変種*名*と型の
 `print-object` メソッド——は `PrintEnv` 越しに渡す。インタプリタは自分のスコープ木から答え、AOT 実行
@@ -1428,7 +1428,7 @@ CL の `~:a`/`~@[` の nil 特有挙動は typelisp の `false` に読み替え�
 ### 15.1 pretty printer（CLHS 22.2）
 
 CL の Lisp Pretty Printer 相当。**行幅に収まらない出力を、論理ブロックと条件改行の指定に従って
-折り返す**。実体は [pprint.rs](../src/eval/pprint.rs)。
+折り返す**。実体は [pprint.rs](../crates/typelisp-print/src/pprint.rs)。
 
 #### 制御変数
 
@@ -1814,7 +1814,7 @@ check 時のエラー（未定義変数参照などと同様）。解決はで�
   （通常どおり「後ろに本体が続くときだけ docstring」の規則が効く）。
 
 LSP のホバーにも統合されている: 定義済みの名前にカーソルを合わせると、型の下に docstring が
-表示される（`src/check/locate.rs` の `doc_for`/`hover_text`）。
+表示される（`crates/typelisp-front/src/check/locate.rs` の `doc_for`/`hover_text`）。
 
 ## 18. ストリームとファイル I/O
 

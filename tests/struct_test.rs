@@ -1,6 +1,7 @@
 //! Tests for `defstruct` — the redesigned, mutable user-defined struct type
-//! (see `docs/TODO.md`/[[typelisp-vector-defstruct-revert]] for why the old
-//! design was deleted: no field read/write, and `Vector<T>`'s asymmetry).
+//! (see `docs/dev/implementation-log.md`'s 2026-06-23 entry and
+//! [[typelisp-vector-defstruct-revert]] for why the old design was deleted:
+//! no field read/write, and `Vector<T>`'s asymmetry).
 //!
 //! `defstruct` registers a single-variant `AdtKind::Struct` type whose sole
 //! constructor is named `new` — reached only as `Type::new` (no bare name),

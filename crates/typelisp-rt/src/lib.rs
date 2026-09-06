@@ -1,8 +1,8 @@
 //! The shared Rust-only runtime library compiled code calls into directly —
 //! the destination for builtins that genuinely can't be written in typelisp
-//! (direct cons-heap access, raw GC-heap bookkeeping; see the `typelisp`
-//! crate's `docs/TODO.md`, "Sexpr表現 + Match/Construct/共有Rustライブラリ
-//! 実装計画" section, for the full plan this crate is Stage 0/1 of).
+//! (direct cons-heap access, raw GC-heap bookkeeping; see
+//! `docs/dev/implementation-log.md`, "Sexpr表現 + Match/Construct/共有Rust
+//! ライブラリ 実装計画" section, for the full plan this crate is Stage 0/1 of).
 //!
 //! A separate crate, depending on nothing but `typelisp-mem` (no
 //! `inkwell`/LLVM) — Stage 1 found that linking the *whole* `typelisp` crate
@@ -140,12 +140,14 @@ use typelisp_mem::{BoxId, TypeKeyId, Value};
 /// `(cons car cdr)` for compiled code.
 ///
 /// Like the interpreter's own `cons` builtin, this may run a GC
-/// (`Heap::cons` does so internally when its free list is empty) — but
-/// unlike the interpreter, nothing here pushes any *other* live `Sexpr`
-/// value the calling compiled frame still holds onto [`active_heap`]'s
-/// root set first. That's Stage 4's job (`docs/TODO.md`); until it lands, a
-/// GC triggered by this call could reclaim a cons cell a caller still
-/// needs.
+/// (`Heap::cons` does so internally when its free list is empty), and
+/// nothing here pushes the calling compiled frame's other live `Sexpr`
+/// values onto [`active_heap`]'s root set. That is the *caller's* job now
+/// and the island does it: `compile-*` brackets a compiled frame's live
+/// values with `rt_push_sexpr_root`/`rt_pop_sexpr_root` (34 call sites in
+/// `src/compiler.rs`), and `tests/compiled_binding_gc_test.rs` holds it
+/// down. Stage 4 of the representation plan, long landed — this comment
+/// used to say the rooting was still missing.
 ///
 /// # Safety
 ///
@@ -711,7 +713,8 @@ pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
 // the same convention `Type::Str` already uses (never bare bits the way
 // `f64` is). `rt_box_kind` above already discriminates them (`2`/`3`); the
 // functions below are the construction/arithmetic/conversion primitives that
-// were still missing (`docs/dev/TODO.md`'s "bignum/ratioにcompiled表現を与える"
+// were still missing (`docs/dev/implementation-log.md`'s "`bignum`/`ratio`型の
+// compile対応"
 // follow-up).
 //
 // None of these need extra GC-root bookkeeping beyond what the caller
@@ -1414,7 +1417,8 @@ pub unsafe extern "C" fn rt_ratio_denominator(args: *const i64, argc: u32) -> i6
 // `defstruct` instance, `Vector<T>`, and `cons-cell<K,V>` alike — see its
 // doc comment. This mem/rt-layer plumbing is deliberately unwired from
 // `compiler.rs`/the interpreter for now (that's Stage 2/3 of the
-// unification plan, per `docs/TODO.md`): these three functions exist so the
+// unification plan, per `docs/dev/implementation-log.md`'s "Sexpr/RtValue
+// 内部表現統合 実装計画"): these three functions exist so the
 // representation itself can be exercised and tested in isolation first.
 
 /// The interned type identity named by a tagged `Sexpr` `Str` argument.

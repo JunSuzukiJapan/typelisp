@@ -3211,7 +3211,8 @@ user-visible capacity."
 ;; class's method is written once, at the class, and type-checked there. (CL's
 ;; other mechanism, `set-pprint-dispatch`, keys a runtime table by type
 ;; *specifier* — an unchecked string here, forcing the printer to re-`match`
-;; the very type its registration already knew. See docs/dev/TODO.md's T5-b.)
+;; the very type its registration already knew. See implementation-log.md's
+;; "print-object トレイト" section, the old TODO T5-b.)
 ;;
 ;; `escape` is CL's `*print-escape*`: true under `~s`/`prin1`/`pprint` (reader
 ;; syntax), false under `~a`/`princ` (human-facing). A printer that doesn't

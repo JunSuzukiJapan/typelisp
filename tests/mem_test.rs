@@ -936,7 +936,8 @@ fn string_slots_are_recycled() {
 // `alloc_struct`/`struct_type_name`/`struct_field`/`struct_set_field` are
 // the mem-layer representation `defstruct`/`Vector<T>`/`cons-cell<K,V>` are
 // all meant to share once the interpreter/compiler are wired up to them
-// (Stage 2/3) — see `docs/TODO.md`'s Sexpr/RtValue unification plan. These
+// (Stage 2/3) — see `docs/dev/implementation-log.md`'s "Sexpr/RtValue
+// 内部表現統合 実装計画". These
 // tests exercise the representation itself, independent of that wiring.
 
 #[test]
@@ -1550,7 +1551,8 @@ fn gc_traces_an_interpreted_closures_params_ret_body_and_env() {
 // `alloc_scope`/`scope_clone_frames`/`scope_push_frame`/`scope_pop_frame`/
 // `scope_get`/`scope_set` are the mem-layer representation `Scope<V>` is
 // meant to share once the interpreter is wired up to it (Stage 8) — see
-// `docs/TODO.md`'s Sexpr/RtValue unification plan. Each frame is a box of
+// `docs/dev/implementation-log.md`'s "Sexpr/RtValue内部表現統合 実装計画".
+// Each frame is a box of
 // its own referenced by `BoxId` (not stored inline in the scope) so that
 // `clone-frames` shares frames *by reference*, exactly like the
 // pre-unification `Rc<ScopeFrame>` representation — these tests pin that
