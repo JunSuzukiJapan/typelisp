@@ -38,16 +38,16 @@
 `i32`/`i64`/`f64`/`char`/`bool`/`Str` は `Type` のプリミティブ variant であり、`Type::Named` を
 経由しないため、以下2箇所の型分岐をどちらも素通りして `defmethod` を使えない:
 
-- `check_defmethod`（[src/check/checker.rs:653-660](../src/check/checker.rs)）— 受け手型が
+- `check_defmethod`（[src/check/checker.rs:653-660](../../crates/typelisp-front/src/check/checker.rs)）— 受け手型が
   `Type::Named` でなければ `"defmethod: receiver must be a data type"` エラー。
-- `check_instance_method`（[src/check/checker.rs:997-1000](../src/check/checker.rs)）— 受け手の
+- `check_instance_method`（[src/check/checker.rs:997-1000](../../crates/typelisp-front/src/check/checker.rs)）— 受け手の
   静的型が `Type::Named` でなければ即 `type_fq = None` となり、インスタンスメソッド解決が
   発生しない。
 
 **拡張内容**: 上記2箇所に、プリミティブ `Type` をレジストリ上の合成パス（例 `Type::Char →
 Path::root("char")`、`Type::Str → Path::root("str")`、`Type::I32 → Path::root("i32")` 等）に
 マップするケースを追加し、レジストリにプリミティブ型用の空 `AdtDef`（`variants` は空、`assoc`
-のみ使う）を `with_builtins`（[src/check/registry.rs:135](../src/check/registry.rs)、
+のみ使う）を `with_builtins`（[src/check/registry.rs:135](../../crates/typelisp-front/src/check/registry.rs)、
 `option_def`/`result_def`/`sexpr_def` と同型のパターン）で登録する。
 
 **trait/動的ディスパッチは不要**。[language-design.md](language-design.md) §8 で対象外とされている
@@ -77,7 +77,7 @@ Path::root("char")`、`Type::Str → Path::root("str")`、`Type::I32 → Path::r
 
 [language-design.md](language-design.md) §3・§4.1・§7.3 もこの方針に合わせて修正済み
 （`panic`/`unreachable`/`todo`/`set-car`/`set-cdr`/`vector-set`/`vector-push`、すべて `!` なし）。
-実装済みの `panic` キーワード（[src/check/checker.rs](../src/check/checker.rs)）と関連テストも
+実装済みの `panic` キーワード（[src/check/checker.rs](../../crates/typelisp-front/src/check/checker.rs)）と関連テストも
 本タスクでリネーム済み。
 
 ## 1. 特殊形・マクロ
@@ -119,7 +119,7 @@ IO系（`print`/`println`/`princ`/`format`/`read`/`read-line`）・型変換・i
 #### a. ハッシュテーブル（提案当時は既存ドキュメントに記載なしだったが【実装済み】、`src/check/registry.rs`の`hashtable_def`）
 
 `HashTable<K,V>` を `Option`/`Result`/`Sexpr` と同じ仕組みの組み込み **nominal型** として登録する
-（[src/check/registry.rs](../src/check/registry.rs) の `option_def`/`result_def` と同型のパターン。
+（[src/check/registry.rs](../../crates/typelisp-front/src/check/registry.rs) の `option_def`/`result_def` と同型のパターン。
 `Type::Named` なので §0.1 の拡張は不要、`defmethod` がそのまま使える）。CL流のハイフン付き自由関数
 （`make-hash-table`/`gethash`等）ではなく、メソッドAPIとして設計する。
 
@@ -153,9 +153,9 @@ IO系（`print`/`println`/`princ`/`format`/`read`/`read-line`）・型変換・i
 
 > 名前（`get`/`set`/`length`/`count`等）はインスタンスメソッドとして**型ごとの assoc テーブル**に
 > 登録されるため、`Vector` と `HashTable` で同名メソッドを使っても衝突しない
-> （[src/check/checker.rs:1001-1003](../src/check/checker.rs) で型ごとに別のテーブルを引く）。
+> （[src/check/checker.rs:1001-1003](../../crates/typelisp-front/src/check/checker.rs) で型ごとに別のテーブルを引く）。
 > ただし**同名の自由関数（`defun`）が既に存在する場合は常にそちらが優先され、インスタンスメソッドへ
-> フォールバックしない**（[src/check/checker.rs:875-886](../src/check/checker.rs)）。既存の
+> フォールバックしない**（[src/check/checker.rs:875-886](../../crates/typelisp-front/src/check/checker.rs)）。既存の
 > `length`/`map`/`filter` 等（Sexpr/リスト向け、§4.2想定）は自由関数のままとする方針なので、本書の
 > 範囲では問題にならないが、実装時はこの優先順位を踏まえて命名する。
 

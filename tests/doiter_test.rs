@@ -1,5 +1,6 @@
 //! Tests for `doiter` — `(doiter (var coll) body...)`, the `Iter`-trait
-//! generalization of `dolist` (`docs/TODO.md`'s `doiter` entry).
+//! generalization of `dolist` (`docs/dev/implementation-log.md`'s
+//! "trait機構（deftrait/impl/where） + Vector<T> + doiter").
 
 extern crate typelisp;
 use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};

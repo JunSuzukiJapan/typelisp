@@ -13,8 +13,9 @@
 //! That removes the only reason for the lookahead machinery: instead of asking
 //! "has the buffer overflowed before the section ended?", this module can ask
 //! the question XP is *approximating* — "does this section fit?" — directly.
-//! The observable layout is the same; see `docs/dev/TODO.md`'s T5 notes, which
-//! sanction exactly this simplification.
+//! The observable layout is the same; see `docs/dev/implementation-log.md`'s
+//! "pretty printer" section (the old TODO T5), which sanctions exactly this
+//! simplification.
 //!
 //! ## The document model
 //!

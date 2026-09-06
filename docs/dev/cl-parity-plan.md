@@ -543,15 +543,21 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
    していなかったので `(remove-duplicates (iter v))` が "cannot infer type parameter `a`"
    で落ちた。`check_call` の該当ブロックを `Checker::infer_pinned_assoc_types` として
    括り出し、両方から呼ぶようにした。
-3. **`lambda` が `match` の束縛を捕獲すると compile できない（未修正）。**
+3. **~~`lambda` が `match` の束縛を捕獲すると compile できない。~~** → 2026-08-31 解消。
    `(match o ((some g) (lambda ... (g ...))))` が
-   "compile: `g` is referenced but no binder in scope states its representation" で落ちる。
-   `core_bridge::translate_match` はアームの本体を `cx` を広げずに変換するので、
-   パターン束縛の `Repr` がスコープに入らない。**Phase 3e の範囲外**（島側でセル化も
-   要るので一行では済まない）。prelude はこの形を避けて書いてある。[TODO.md](TODO.md) 参照。
-4. **`where` 付き `defun` は前方参照できない。** `predeclare_program` は SOURCE の実行前に
-   走るので `deftrait Iter` がまだ登録されておらず、`where` 節が解決できずヘッダごと
-   黙って捨てられる。この節の定義順が今までどおり必須である理由。
+   "compile: `g` is referenced but no binder in scope states its representation" で落ちていた。
+   `core_bridge::translate_match` がアームの本体を `cx` を広げずに変換するので、パターン
+   束縛の `Repr` がスコープに入らない、という食い違い。**Phase 3e の範囲外**として残した分
+   （当時は「島側でセル化も要るので一行では済まない」と見ていた）。実際の直しは
+   `pattern_bindings` で束縛と表現を集めて `cx` に入れ、捕獲のあるアームを同じ名前で
+   束縛し直す `let` で包む形で、**島は 1 行も変えていない**——経緯は
+   [implementation-log.md](implementation-log.md) の 2026-08-31 の節。
+4. **`where` 付き `defun` は前方参照できない。** 当時の理由は `predeclare_program`
+   （SOURCE の実行前に走る先読みパス）で、`deftrait Iter` がまだ登録されておらず `where` 節が
+   解決できずヘッダごと黙って捨てられていた。**そのパスは 2026-08-24 に廃止**され、前方参照は
+   `defsignature` による明示宣言になった（[implementation-log.md](implementation-log.md) の
+   「トップレベル前方参照の廃止」）。ジェネリックは `defsignature` に書けないので、この節の
+   定義順が必須であることは結論として変わらない。
 
 **`remove-duplicates` の既定を変えた**（挙動の変更）。以前は無条件に最初の出現を残していたが、
 CL の既定は最後を残す。以前の挙動は `:from-end true`。
@@ -1010,8 +1016,8 @@ JIT/AOT を通る。1d の `complex` と同じ判断（[[typelisp-vector-defstru
 （`typelisp-abi` の `encode`、下位 3bit がタグ）で往復させるので、payload に入らない
 `i64` は往復で壊れる——prelude のメソッドは全部コンパイル済みで走るから、64bit で詰めると
 上位 3 ビットが黙って消える。これは `BitVector` の問題ではなく既存のバグで、
-Phase 6a で見つけた整数切り詰めの 3 件目として [TODO.md](TODO.md) に再現手順つきで
-記録した。直し方（payload に入らない整数を `TAG_BOXED` の箱へ逃がす）は 1 フェーズ分の
+Phase 6a で見つけた整数切り詰めの 3 件目として当時 TODO.md に再現手順つきで
+記録した（[completed-work.md](completed-work.md) へ移設。3 件とも解消済み）。直し方（payload に入らない整数を `TAG_BOXED` の箱へ逃がす）は 1 フェーズ分の
 作業なので、ここでは端に近寄らない語幅を選んである。
 
 長さの先にあるビットは常に 0 に保つ（`bitvector-trim`）。そうしないと `lognot` が
@@ -1525,7 +1531,10 @@ readtable に「終端かどうか」の区別を持たせていないので、�
    **直す代わりに層を下げた**——prelude 自身のコメントが
    「`Item` をスーパトレイトで `char` に固定することが、文字で書いたデフォルト本体を
    可能にしている」と書いており、項目型が確定するのはまさにその層だから、
-   バルク転送はそこに属する。穴は [TODO.md](TODO.md) に記録した。
+   バルク転送はそこに属する。穴は当時 TODO.md に記録し、**2026-09-05 に解消**した
+   （[implementation-log.md](implementation-log.md) の「関連型が総称名の内側にある場合」。
+   ただし Stage 9d のこの回避自体は戻していない——穴が塞がったことと、回避を撤回すべきかは
+   別の判断）。
 2. **`clear-input` / `clear-output` は入れられない。** typelisp 側にバッファは
    pushback しか無く、OS レベルで捨てる手段も無い。「捨てた」と言えないものについて
    「捨てた」と名乗る関数は置かない。

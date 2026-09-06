@@ -287,9 +287,9 @@ pub fn run_compile_function(
     // backend's. Installed here rather than once at startup for the reason
     // [`crate::eval::interp::Interp::enter_compiled`] re-registers the heap on every crossing: it
     // is one store, and there is no ordering rule left to remember. (This
-    // line is one of the last front-end references to `crate::compile`; it
-    // goes away with this method, which belongs to the backend — see
-    // `docs/dev/TODO.md`.)
+    // used to be one of the last front-end references to `crate::compile`,
+    // waiting for the method to move to the backend; the move happened, and
+    // this file is the backend.)
     crate::compile::install_llvm_backend();
     let compiler_path = Path::root("compile-function");
     let argv = vec![

@@ -22,8 +22,9 @@
 //! [`crate::eval::interp::set_llvm_builtin_hook`] instead, installed by
 //! whichever backend entry point is about to run the island. That is an
 //! inversion, not indirection for its own sake: the dependency now points
-//! backend -> front end, which is the direction it has to point for the front
-//! end to become a crate of its own (`docs/dev/TODO.md`).
+//! backend -> front end, which is the direction it had to point for the front
+//! end to become a crate of its own — which it now is, `typelisp-front`
+//! (`docs/dev/implementation-log.md`, "typelisp-front クレートと AOT 内 eval").
 //!
 //! # Locking
 //!

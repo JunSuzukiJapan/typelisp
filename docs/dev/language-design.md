@@ -126,7 +126,7 @@
   （`geo::point::bar`）——ファイル境界と `module` 宣言を調停する整合性ルールは不要（衝突しようがない）。
 - **ソースルート**: マニフェスト `typelisp.toml`（空でよい、任意キーは `src = "dir"` のみ・
   手書きパース）を上方探索。無ければエントリファイルのディレクトリ（REPLはcwd）。
-- **オンデマンドロード**（`src/project.rs` の `Loader`）: ファイルのチェック前にトップレベルの
+- **オンデマンドロード**（`crates/typelisp-front/src/project.rs` の `Loader`）: ファイルのチェック前にトップレベルの
   `(use ...)`（`(module ...)` 内も含む）を走査し、未ロードの対応ファイルを再帰的に
   読み込み→チェック→同一 `Registry` へ登録。**走査先行方式**（チェック中の
   `Error::ModuleNotLoaded` を捕捉してリトライする方式ではない）なので同じフォームが
@@ -152,7 +152,8 @@
   （`Sexpr`組み込みADTに`Path`バリアントを追加するのではなく、`Sym`同様チェッカー内部の
   ミラー表現として）。`(quote (dep::head))`や`` `(dep::head) ``（マクロ本体で他モジュールの
   関数を指す典型パターン）が型チェックを通るようになった。`value_to_quoted`
-  （`src/check/checker.rs`）↔`alloc_quoted`（`src/eval/interp.rs`、`heap.intern_path`で復元）
+  （`crates/typelisp-front/src/check/checker.rs`）↔`alloc_quoted`
+  （`crates/typelisp-front/src/eval/interp.rs`、`heap.intern_path`で復元）
   が対。~~compile（LLVM JIT/AOT）は非対応のまま（`Sym`/`Bignum`/`Ratio`と同じグループで
   `unsupported`）~~ **→ 2026-07-15 `Sym`/`Path`ともcompile対応**（`rt_intern_symbol`/
   `rt_intern_path`を新設、`str`リテラルと同じ「タグ付き`Sexpr`をrt呼び出しで構築」方式、
@@ -213,7 +214,7 @@
 実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `case` `setf` `while` `until` `loop` `break`
 `return` `lambda` `match` `if-let` `while-let` `do` `doiter` `the` `panic` `defvar` `defconstant` `module` `use`
 `defmethod` `deftrait` `impl` `quote` `quasiquote` `defmacro` `defstruct` `defenum`
-は実装済（[src/check/checker.rs](../src/check/checker.rs)。`the`のみchecker特殊形、
+は実装済（[src/check/checker.rs](../../crates/typelisp-front/src/check/checker.rs)。`the`のみchecker特殊形、
 `case`/`until`/`while-let`/`do`/`doiter`は`prelude.rs`の`defmacro`）。`unreachable`/`todo`/`exit`（§4.1/§7）も実装済
 （前2つは`panic`を呼ぶ`defmacro`、`exit`は`std::process::exit`を呼ぶRust組み込み自由関数）。
 `doiter`も実装済（2026-06-30、`prelude.rs`の`defmacro`——`var`の型はマクロ展開時には分からないが、
@@ -307,7 +308,7 @@
 | 解析 | `parse-int parse-float` | `Result<_, ParseIntError>` / `Result<_, ParseFloatError>`（§7.4） |
 | IO | `print println princ format read read-line` | `read : (fn (String) Result<Sexpr, ReadError>)` |
 | 発散 | `panic unreachable todo exit` | 戻り型 `!`（§7） |
-| システム | `eval gc compile compile-file` | `compile`/`compile-file` は実装済み（§0、[src/compile/](../src/compile/)） |
+| システム | `eval gc compile compile-file` | `compile`/`compile-file` は実装済み（§0、[src/compile/](../../src/compile)） |
 | マクロ | `gensym` | 引数なし、フレッシュな `Symbol` を返す。symbol は常に intern される仕様のため衝突耐性のみ（CL の unforgeable な未intern symbol ではない） |
 
 ### 4.2 typelisp ライブラリ（derived）
@@ -672,7 +673,7 @@ supers は「接頭辞にならない相手だけ」ではなく**閉包すべ�
 
 - **具象エラー型は発生源ごと**: 組み込みの失敗する操作はそれぞれ自分の型を返す
   （`parse-int`→`ParseIntError`、`parse-float`→`ParseFloatError`、`read`→`ReadError`、
-  `eval`→`EvalError`。[registry.rs](../../src/check/registry.rs) の `builtin_error_defs`）。
+  `eval`→`EvalError`。[registry.rs](../../crates/typelisp-front/src/check/registry.rs) の `builtin_error_defs`）。
   いずれもメッセージ文字列1つを持つ単一変種の直和型で、型名＝変種名。
 - **ユーザ定義型がそのまま E に載る**: `Result<T, MyError>` の `MyError` は `defstruct` でも
   `defenum` でも良い。`Result<T,E>` の `E` は最初から任意の型を取れる総称パラメタなので、
@@ -793,11 +794,12 @@ compiled 側では `break`/`return` を「最内の cleanup ブロックへの `
   ジェネリック対応、`RtValue::Struct`ベース）。**`Vector<T>`も2026-06-30に再設計完了**——専用
   `RtValue`バリアントを作らず`RtValue::Struct`をそのまま使い（`StructData.fields`を可変長
   コレクションとして扱う）、push/get/set/lenをRust組み込みの`assoc`メソッドとして実装
-  （`src/check/registry.rs`の`vector_def`、`src/eval/interp.rs`の`eval_builtin_method`の
+  （`crates/typelisp-front/src/check/registry.rs`の`vector_def`、
+  `crates/typelisp-front/src/eval/interp.rs`の`eval_builtin_method`の
   `"vector"`アーム）。
 - **`compile`/`compile-file`の再実装**（2026-06-23に全面削除、2026-06-24以降`feature/compiler`
   ブランチで再構築・main へマージ済み）: self-hosting方針（コンパイラ本体は`src/compiler.rs`に
-  typelisp自身で書き、Rustは inkwell バインディング・AST ブリッジ（`src/compile/ast_bridge.rs`）・
+  typelisp自身で書き、Rustは inkwell バインディング・コア IR ブリッジ（`src/compile/core_bridge.rs`）・
   ランタイムシムのみを担う）で JIT（`compile`）/AOT（`compile-file`）とも実装済み。対応構文の
   範囲は段階的に拡張中——詳細な進捗は[implementation-log.md](implementation-log.md)参照。
 
@@ -811,7 +813,7 @@ compiled 側では `break`/`return` を「最内の cleanup ブロックへの `
   `Iter<Item>` を被せるのは型システム上不適切というユーザー判断（§5 末尾、
   [[typelisp-typechecking-is-not-design-soundness]]）。一度実装したが撤回済み。
   なお、cons セルのリストを走査する反復手段としては **`dolist` マクロが別途ある**
-  （`src/prelude.rs` の `defmacro dolist`）。`Iter` トレイトを介さず `sexpr-consp`/`sexpr-car`/
+  （`crates/typelisp-front/src/prelude.rs` の `defmacro dolist`）。`Iter` トレイトを介さず `sexpr-consp`/`sexpr-car`/
   `sexpr-cdr` で直接歩いて各要素を束縛する（要素は動的に `Sexpr`。使う側が `match` で具体型に
   分解する）ので、上記の「ジェネリックな `Iter<Item>` を被せない」方針と両立している。
 - **`?`/`try` 構文**、および `!`/`?` の命名接尾辞: CL に倣い非採用（§7.3）。

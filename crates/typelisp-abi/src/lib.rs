@@ -82,7 +82,7 @@ pub unsafe fn active_heap() -> &'static mut Heap {
 const TAG_BITS: i64 = 3;
 const TAG_MASK: i64 = 0b111;
 
-// Stage 2's tag table (`docs/TODO.md`): 8 tags in the low 3 bits. `Nil`/
+// Stage 2's tag table (`docs/dev/implementation-log.md, "Sexpr表現 + Match/Construct/共有Rustライブラリ 実装計画"`): 8 tags in the low 3 bits. `Nil`/
 // `Bool` share one "immediate constant" tag (`TAG_IMMEDIATE`) since `Value`
 // has 9 variants but only 8 tag slots — see that doc for the full rationale
 // (why this needs no more than 3 bits, the alignment argument for `Cons`

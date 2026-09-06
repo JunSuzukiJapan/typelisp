@@ -2129,7 +2129,9 @@ fn compile_dispatches_a_dolist_summing_a_sexpr_list() {
 }
 
 /// `build-shl`/`build-ashr` round-trip a `Sexpr::i32` fixnum through the
-/// planned tagged representation (`docs/TODO.md`'s tag table: tag `000`,
+/// planned tagged representation (the tag table in
+/// `docs/dev/implementation-log.md`'s "Sexpr表現 + Match/Construct/共有Rust
+/// ライブラリ 実装計画": tag `000`,
 /// payload in the upper 61 bits) — *arithmetic*, not logical, right shift,
 /// so a negative payload's sign survives untagging. No `ast_bridge`/
 /// `compiler.rs` involvement — these are the raw builtins Stage 5/6's real
@@ -3500,8 +3502,8 @@ fn compile_string_ge_and_le_derive_from_rt_str_lt() {
 // slot 1+ = fields); these exercise the box-scrutinee `match` path added
 // alongside `defenum` — `ast_bridge::translate_match`'s `is-box` branch plus
 // `compiler.rs`'s `compile-box-tag-test`/`compile-box-field`. Closes the
-// `docs/dev/TODO.md` gap where `Match` on a non-`Sexpr` scrutinee was
-// `unsupported`.
+// gap where `Match` on a non-`Sexpr` scrutinee was `unsupported` (recorded in
+// TODO.md at the time; see `docs/dev/implementation-log.md`'s 2026-07-12 entry).
 
 /// A compiled `match` on a payload variant tests the box's tag slot and
 /// extracts the field from slot 1.
@@ -3594,8 +3596,9 @@ fn compile_matches_a_builtin_option() {
 // variant (its own `new` constructor), so no tag test is ever emitted for it
 // — only per-field extraction via `rt_struct_field_get`/`compile-sexpr-field`
 // (`ast_bridge::pattern_to_sexpr`'s `MATCH_KIND_STRUCT` branch,
-// `compiler.rs`'s `compile-struct-field`). Closes the last remaining
-// `docs/dev/TODO.md` gap for compiled `Match`.
+// `compiler.rs`'s `compile-struct-field`). Closes the last remaining gap for
+// compiled `Match` (recorded in TODO.md at the time; see
+// `docs/dev/implementation-log.md`'s 2026-07-12 entry).
 
 /// A compiled `match` destructures a `defstruct` instance's fields by
 /// position, the same as the interpreter's own
@@ -4145,7 +4148,8 @@ fn compile_of_a_function_referencing_a_str_defenum_global_survives_gc() {
 
 // ---- `Expr::Panic`/`Expr::MethodRef`/`Expr::Quote` in compiled code --------
 //
-// Closes the three remaining `docs/dev/TODO.md` `unsupported` gaps.
+// Closes the three remaining `unsupported` gaps (recorded in TODO.md at the
+// time; see `docs/dev/implementation-log.md`'s 2026-07-12 entries).
 
 /// A `(panic msg)` branch compiles cleanly (`ast_bridge::translate_panic`/
 /// `compiler.rs`'s `compile-panic`), and the *non*-panicking path through the

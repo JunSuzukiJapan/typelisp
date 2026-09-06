@@ -1,7 +1,7 @@
 //! Tests for the trait machinery (`deftrait`/`impl`/`where`-bounded generic
-//! functions) introduced for `doiter` — see `docs/TODO.md`'s entry on
-//! `doiter` for why a real trait mechanism (not just a `doiter`-specific
-//! duck-typing rule) was chosen.
+//! functions) introduced for `doiter` — see `docs/dev/implementation-log.md`'s
+//! "trait機構（deftrait/impl/where） + Vector<T> + doiter" for why a real trait
+//! mechanism (not just a `doiter`-specific duck-typing rule) was chosen.
 
 extern crate typelisp;
 use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
