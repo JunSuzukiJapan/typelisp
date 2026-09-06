@@ -12,6 +12,10 @@
 //! (`localtime_r`). `std` has no equivalent of any of them, deliberately in
 //! the last case — see [`timezone_at`].
 //!
+//! Since the C FFI, one more: the dynamic linker ([`dl_open`]/[`dl_sym`]),
+//! which is how a `(defffi ...)` finds the function it names. Same rule as
+//! the rest — a safe signature over one C call, `unsafe` kept inside.
+//!
 //! Every one of these returns `Option`, and the `None`s are real: CL says
 //! `machine-instance`, `machine-version`, `software-version` and
 //! `file-author` may all answer `NIL`. That is what makes reporting a failure
@@ -276,6 +280,63 @@ pub fn timezone_at(_unix_secs: i64) -> Option<(i32, bool)> {
     unimplemented!("the local time zone needs localtime_r and tm_gmtoff, which are POSIX")
 }
 
+/// Open the shared library at `path`, or `None` if it cannot be opened.
+///
+/// **Never closed.** JIT-compiled thunks and, in an AOT build, the program's
+/// own code hold pointers into whatever this maps; the only lifetime that is
+/// correct for those is the process's. `dlclose` would be a way to unmap code
+/// that is about to be called.
+///
+/// `RTLD_NOW` so a missing symbol is a failure here rather than a crash at the
+/// first call, and `RTLD_GLOBAL` so a library loaded later can resolve against
+/// this one — the ordinary way a set of related libraries is loaded.
+#[cfg(unix)]
+pub fn dl_open(path: &str) -> Option<usize> {
+    let c = std::ffi::CString::new(path).ok()?;
+    // SAFETY: `c` is a NUL-terminated string that outlives the call, and the
+    // flags are the constants libc defines. `dlopen` reads the name and
+    // returns either a handle or null; it writes nothing through our pointer.
+    let handle = unsafe { libc::dlopen(c.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
+    if handle.is_null() {
+        None
+    } else {
+        Some(handle as usize)
+    }
+}
+
+/// The address of `symbol` in `handle`, or `None` if it is not there.
+///
+/// A `handle` of 0 means the running process and everything already linked
+/// into it (`RTLD_DEFAULT`) — which is how a declaration with no `:library`
+/// reaches libc.
+///
+/// A symbol whose value is genuinely 0 would be indistinguishable from
+/// absence. No such symbol is callable, which is all this is used for.
+#[cfg(unix)]
+pub fn dl_sym(handle: usize, symbol: &str) -> Option<usize> {
+    let c = std::ffi::CString::new(symbol).ok()?;
+    let h = if handle == 0 { libc::RTLD_DEFAULT } else { handle as *mut libc::c_void };
+    // SAFETY: `c` outlives the call. `handle` is either `RTLD_DEFAULT` or a
+    // value `dl_open` returned from `dlopen` and never closed, so it is still
+    // a live handle. `dlsym` reads both and returns an address.
+    let addr = unsafe { libc::dlsym(h, c.as_ptr()) };
+    if addr.is_null() {
+        None
+    } else {
+        Some(addr as usize)
+    }
+}
+
+#[cfg(not(unix))]
+pub fn dl_open(_path: &str) -> Option<usize> {
+    unimplemented!("the FFI needs dlopen, which is POSIX")
+}
+
+#[cfg(not(unix))]
+pub fn dl_sym(_handle: usize, _symbol: &str) -> Option<usize> {
+    unimplemented!("the FFI needs dlsym, which is POSIX")
+}
+
 #[cfg(test)]
 mod tests {
     //! Shape, not values: every answer here is the machine's, so a test can
@@ -349,6 +410,21 @@ mod tests {
         // `decode-universal-time` reaches one for any date before 1970.
         let pre = super::timezone_at(-2_208_988_800).expect("1900-01-01");
         assert!((-50_400..=43_200).contains(&pre.0), "1900: {}s west", pre.0);
+    }
+
+    #[test]
+    fn the_process_resolves_its_own_libc_symbols() {
+        // `abs` is in libc, and this process links libc.
+        assert!(super::dl_sym(0, "abs").is_some(), "abs is not resolvable in this process");
+        assert!(
+            super::dl_sym(0, "a_symbol_no_library_defines_xyzzy").is_none(),
+            "a name nothing defines resolved to something"
+        );
+    }
+
+    #[test]
+    fn a_library_that_is_not_there_does_not_open() {
+        assert!(super::dl_open("libnothing-typelisp-probe.so").is_none());
     }
 
     #[test]

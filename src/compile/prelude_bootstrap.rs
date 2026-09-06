@@ -328,7 +328,11 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         // No codegen of their own. `exec` still registers what they define:
         // an enum's variants and a struct's field representations, which the
         // compile bridge reads back through `Interp::compile_definitions`.
-        "defstruct" | "defenum" | "use" => {}
+        // A declaration, not a body to emit: `Interp::exec` resolved the
+        // symbol and hung a thunk on the `FnDef`, and there is nothing here to
+        // compile. (The prelude itself declares no FFI — see `docs/syntax.md`
+        // — but a dump replaying one reaches this walk.)
+        "defstruct" | "defenum" | "use" | "defffi" => {}
         other => {
             return Err(format!(
                 "prelude: top-level `{}` has no place in the compiled artifact — \

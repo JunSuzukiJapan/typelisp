@@ -1786,6 +1786,65 @@ impl Checker {
         f.finish("defun")
     }
 
+    /// `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR PUBLIC (CTYPE...) RET-CTYPE)`.
+    ///
+    /// Fields 3-5 are `defun`'s own, so `Interp::exec` reads them back with
+    /// the readers it already has: what it registers is an ordinary [`FnDef`]
+    /// with an empty body, which is what makes the thunk reachable through the
+    /// same `enter` every other call goes through. Parameter names are
+    /// synthesized (`a0`, `a1`, ...) — a C declaration has none, and `FnDef`
+    /// wants one per parameter.
+    ///
+    /// The last two fields spell the C types, and are *deliberately* redundant
+    /// with the `REPR`s beside them. A `Repr` folds all six integer widths into
+    /// `Repr::Int` (see its doc comment), which is the right answer for the
+    /// question a `Repr` exists to answer — how a value crosses the compiled
+    /// boundary — and the wrong one for the thunk, which has to emit
+    /// `trunc i64 to i8`. Two questions about one type, the way `field_kind`
+    /// and `binding_kind` are. One producer (`Checker::check_defffi`), so they
+    /// cannot drift.
+    #[allow(clippy::too_many_arguments)]
+    fn defffi_form(
+        &self,
+        heap: &mut Heap,
+        name: &Path,
+        c_symbol: &str,
+        library: Option<&str>,
+        params: &[Type],
+        ret: &Type,
+        public: bool,
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let path = forms::path_form(f.heap(), name);
+        f.push(path);
+        let sym = f.heap().alloc_string(c_symbol.to_string());
+        f.push(sym);
+        // No `:library` is `()`, not a name to look up — the empty string is
+        // a library whose name is empty, and the two must not read alike.
+        let lib = match library {
+            Some(l) => f.heap().alloc_string(l.to_string()),
+            None => Value::Empty,
+        };
+        f.push(lib);
+        let named: Vec<(String, Type)> =
+            params.iter().enumerate().map(|(i, t)| (format!("a{}", i), t.clone())).collect();
+        let ps = self.param_list_form(f.heap(), &named)?;
+        f.push(ps);
+        let r = self.repr_form(f.heap(), ret)?;
+        f.push(r);
+        f.push(Value::Bool(public));
+        let mut cs = Items::new(f.heap());
+        for t in params {
+            let k = cs.heap().intern_symbol(&crate::type_key::type_key_of_type(t));
+            cs.push(k);
+        }
+        let ctypes = cs.finish_list()?;
+        f.push(ctypes);
+        let rk = f.heap().intern_symbol(&crate::type_key::type_key_of_type(ret));
+        f.push(rk);
+        f.finish("defffi")
+    }
+
     /// [`Self::defun_form`] unless this `defun` is *generic*, in which case an
     /// empty `(module PATH)`.
     ///
@@ -2272,6 +2331,7 @@ impl Checker {
         }
 
         let sig = FnSig {
+            ffi: false,
             type_params: Vec::new(),
             params,
             ret,
@@ -2321,6 +2381,171 @@ impl Checker {
             params.push(self.parse_type_here_at(heap, *v, loc.as_ref())?);
         }
         Ok((params, rest_ty))
+    }
+
+    /// `(defffi name (T...) Ret [:library "name"])` — a C function, declared.
+    ///
+    /// Shaped after [`Self::check_defsignature`], and for the same reason: a
+    /// name, the types it takes, the type it answers with, and no body. The
+    /// two differ in what the missing body *means*. A `defsignature` promises
+    /// one later in the same file and [`Self::finish_unit`] holds it to that;
+    /// a `defffi` says the body is somebody else's, already compiled, reached
+    /// through a thunk the backend emits (`crate::compile::ffi`). So this
+    /// registers the signature and — deliberately — does **not** join
+    /// [`Self::predeclared`].
+    ///
+    /// The name comes in two spellings. `(defffi abs (i32) i32)` uses one name
+    /// for both sides; `(defffi (c-strlen "strlen") ...)` separates them,
+    /// which is the usual case, since a typelisp identifier normally has a `-`
+    /// in it and a C one cannot.
+    ///
+    /// # What is not decided here
+    ///
+    /// Whether a declared type can be spelled in C at all. That question is
+    /// answered once, by `CType::from_key` in the backend, because the backend
+    /// is what has to emit the conversion — a second list here would be a
+    /// second list to keep in agreement. `Interp::exec` reaches the backend
+    /// while checking this very form's file, so the answer still arrives
+    /// before anything can call the declaration.
+    fn check_defffi(
+        &mut self,
+        heap: &mut Heap,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+    ) -> Result<TopLevelForm, Error> {
+        if parts.len() < 3 {
+            return Err(Error::TypeError(
+                "defffi: (defffi name (param-type...) return-type [:library \"name\"])".into(),
+            ));
+        }
+        let (name, c_symbol) = Self::parse_defffi_name(heap, parts[0])?;
+        let (params, rest) = self.parse_signature_params(heap, parts[1])?;
+        if rest.is_some() {
+            return Err(Error::TypeError(
+                "defffi: `&rest` cannot be declared — a variadic C function passes its variadic \
+                 arguments under different rules than its fixed ones (on the stack, on AArch64 \
+                 Darwin), which a thunk built from a fixed signature does not follow. Declare each \
+                 arity you call as its own name."
+                    .into(),
+            ));
+        }
+        let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
+        let library = Self::parse_defffi_options(heap, &parts[3..])?;
+
+        if let Some(existing) = self.cur_ns().fns.get(&name) {
+            if existing.builtin {
+                self.check_redef("function", &name, Some(existing))?;
+            }
+            return Err(Error::TypeError(format!(
+                "defffi: `{}` is already defined",
+                name
+            )));
+        }
+
+        let sig = FnSig {
+            ffi: true,
+            type_params: Vec::new(),
+            params: params.clone(),
+            ret: ret.clone(),
+            public,
+            rest: None,
+            builtin: false,
+            bounds: BTreeMap::new(),
+            optionals: Vec::new(),
+            keys: Vec::new(),
+        };
+        self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
+        self.defffi_form(heap, &self.fq(&name), &c_symbol, library.as_deref(), &params, &ret, public)
+    }
+
+    /// A `defffi`'s name: either a bare symbol, used for both sides, or
+    /// `(typelisp-name "c_symbol")`.
+    fn parse_defffi_name(heap: &Heap, v: Value) -> Result<(String, String), Error> {
+        // A generic declaration is refused for the reason `defsignature`
+        // refuses one: instantiating a template needs a body to re-check, and
+        // there is none here. C has no generics for it to mean, either.
+        let plain = |n: String| -> Result<String, Error> {
+            let (name, type_params) = parse_generic_name_header(&n)?;
+            if type_params.is_empty() {
+                Ok(name)
+            } else {
+                Err(Error::TypeError(format!(
+                    "defffi: `{}` takes type parameters, and a C function has none to take",
+                    name
+                )))
+            }
+        };
+        match v {
+            Value::Symbol(id) => {
+                let n = plain(heap.symbol_name(id).to_string())?;
+                Ok((n.clone(), n))
+            }
+            Value::Cons(_) => {
+                let elems = heap.list_to_vec(v)?;
+                let bad = || {
+                    Error::TypeError(
+                        "defffi: a name is either `name` or `(name \"c_symbol\")`".into(),
+                    )
+                };
+                if elems.len() != 2 {
+                    return Err(bad());
+                }
+                let name = match elems[0] {
+                    Value::Symbol(id) => plain(heap.symbol_name(id).to_string())?,
+                    _ => return Err(bad()),
+                };
+                let c_symbol = match elems[1] {
+                    Value::Str(id) => heap.string(id).to_string(),
+                    _ => return Err(bad()),
+                };
+                if c_symbol.is_empty() {
+                    return Err(Error::TypeError("defffi: the C symbol name is empty".into()));
+                }
+                Ok((name, c_symbol))
+            }
+            _ => Err(Error::TypeError(
+                "defffi: a name is either `name` or `(name \"c_symbol\")`".into(),
+            )),
+        }
+    }
+
+    /// A `defffi`'s trailing options. Only `:library "name"` today, which says
+    /// where to look for the symbol; without it the symbol is looked for in
+    /// the running process, which is what reaches libc and everything else
+    /// already linked.
+    fn parse_defffi_options(heap: &Heap, rest: &[Value]) -> Result<Option<String>, Error> {
+        let mut library = None;
+        let mut i = 0;
+        while i < rest.len() {
+            let key = match rest[i] {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => return Err(Error::TypeError("defffi: expected an option keyword".into())),
+            };
+            match key.as_str() {
+                ":library" => {
+                    let v = rest.get(i + 1).ok_or_else(|| {
+                        Error::TypeError("defffi: `:library` needs a name, as a string".into())
+                    })?;
+                    match v {
+                        Value::Str(id) => library = Some(heap.string(*id).to_string()),
+                        _ => {
+                            return Err(Error::TypeError(
+                                "defffi: `:library` needs a name, as a string".into(),
+                            ))
+                        }
+                    }
+                    i += 2;
+                }
+                other => {
+                    return Err(Error::TypeError(format!(
+                        "defffi: `{}` is not an option here (only `:library` is)",
+                        other
+                    )))
+                }
+            }
+        }
+        Ok(library)
     }
 
     /// Reports every `defsignature` in this unit that never got a definition.
@@ -2383,6 +2608,7 @@ impl Checker {
                     wk::PUB => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
                     wk::DEFUN => return self.check_defun(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFSIGNATURE => return self.check_defsignature(heap, &elems[1..], parts_locs, false),
+                    wk::DEFFFI => return self.check_defffi(heap, &elems[1..], parts_locs, false),
                     wk::DEFVAR => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc, false),
                     wk::DEFPARAMETER => {
                         return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc, true)
@@ -2461,6 +2687,7 @@ impl Checker {
             match id.well_known() {
                 wk::DEFUN => return self.check_defun(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFSIGNATURE => return self.check_defsignature(heap, &parts[1..], inner_locs, true),
+                wk::DEFFFI => return self.check_defffi(heap, &parts[1..], inner_locs, true),
                 wk::DEFVAR => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc, false),
                 wk::DEFPARAMETER => {
                     return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc, true)
@@ -2475,7 +2702,7 @@ impl Checker {
             }
         }
         Err(Error::TypeError(
-            "pub: expected defun/defsignature/defmacro/defmethod/defstruct/defenum/deftype/defvar/defparameter/defconstant"
+            "pub: expected defun/defsignature/defffi/defmacro/defmethod/defstruct/defenum/deftype/defvar/defparameter/defconstant"
                 .into(),
         ))
     }
@@ -2721,7 +2948,7 @@ impl Checker {
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block"
                 // top-level forms (`check_form_dispatch`)
-                | "pub" | "defun" | "defsignature" | "defvar" | "defparameter" | "defconstant" | "defmacro" | "module"
+                | "pub" | "defun" | "defsignature" | "defffi" | "defvar" | "defparameter" | "defconstant" | "defmacro" | "module"
                 | "defmethod" | "defstruct" | "defenum" | "deftrait" | "deftype" | "impl" | "use" | "load"
                 | "import" | "shadowing-import" | "in-module"
         )
@@ -3148,6 +3375,25 @@ impl Checker {
     /// `FnRef` that could never be applied anyway).
     fn fn_ref_node(&self, heap: &mut Heap, written: Vec<String>, fq: Path, expected: Option<&Type>) -> Result<Checked, Error> {
         let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
+        // An FFI declaration cannot be reified, in an `unsafe` or out of one.
+        //
+        // Not a permission question. `Interp::reify` builds an *interpreted*
+        // closure out of the definition's body forms, and an FFI declaration
+        // has no body — what makes it callable is the thunk hanging on its
+        // `FnDef`, which a closure does not carry. (A *compiled* closure could
+        // carry an address, but not this one: `compiled_fn_type_with_env`
+        // takes a captured environment, and a thunk has no parameter for it.)
+        // So the value would be a function that quietly answers `()`, which is
+        // worth an error to rule out.
+        //
+        // A `lambda` around the call is the spelling that works, for the
+        // ordinary reason: its body is a call site like any other.
+        if sig.ffi {
+            return Err(Error::TypeError(format!(
+                "`{0}` is a C function declared by `defffi` and cannot be used as a value — it has no body to close over, only a native entry point. Wrap it: `(unsafe (lambda (...) ... ({0} ...)))`.",
+                fq
+            )));
+        }
         let tmpl_ty = fn_value_type(&sig);
         let home = self.ns.clone();
         // The referenced function's own parameter types, which the bridge
@@ -3654,6 +3900,7 @@ impl Checker {
         }
 
         let sig = FnSig {
+            ffi: false,
             type_params: type_params.clone(),
             params: params.iter().map(|(_, t)| t.clone()).collect(),
             ret: ret.clone(),
@@ -3813,6 +4060,7 @@ impl Checker {
         }
 
         let sig = FnSig {
+            ffi: false,
             type_params: type_params.clone(),
             params: required.iter().map(|(_, t)| t.clone()).collect(),
             ret: ret.clone(),
@@ -5484,6 +5732,7 @@ impl Checker {
                 at += 1;
             }
             let sig = FnSig {
+                ffi: false,
                 type_params: vec![],
                 params: params.iter().map(|(_, t)| t.clone()).collect(),
                 ret,
@@ -7699,6 +7948,7 @@ impl Checker {
             })
             .collect();
         let sig = FnSig {
+            ffi: false,
             type_params: vec![],
             params: sig_params,
             ret: rename(&ret),
@@ -8023,6 +8273,7 @@ impl Checker {
             let (field_name, field_ty) = (&field.name, &field.ty);
             let field_public = field.public;
             let getter_sig = FnSig {
+                ffi: false,
                 type_params: vec![],
                 params: vec![recv_ty.clone()],
                 ret: field_ty.clone(),
@@ -8061,6 +8312,7 @@ impl Checker {
             // `Checker::check_setf`, which calls this via `(setf p::x v)`).
             let setter_name = format!("set-{}", field_name);
             let setter_sig = FnSig {
+                ffi: false,
                 type_params: vec![],
                 params: vec![recv_ty.clone(), field_ty.clone()],
                 ret: Type::Unit,
@@ -13409,6 +13661,16 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
         let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
+        // Rule A. Before the arity check, so the message a caller gets is the
+        // one about permission rather than one about the shape of a call it
+        // was never allowed to write. Ahead of the `&optional`/`&key`
+        // delegation too, though a `defffi` declares neither.
+        if sig.ffi && self.unsafe_depth.get() == 0 {
+            return Err(Error::TypeError(format!(
+                "`{}` is a C function declared by `defffi`, so calling it needs `(unsafe ...)`.                  Whether its declared signature is the one the C function really has is not                  something this compiler can check — `unsafe` is where that is taken on. Wrap the                  call, or wrap it once inside a `defun` that offers a checked signature.",
+                name
+            )));
+        }
         if !sig.optionals.is_empty() || !sig.keys.is_empty() {
             return self.check_call_opt_key(heap, interp, env, written, name, &sig, args, arg_locs);
         }

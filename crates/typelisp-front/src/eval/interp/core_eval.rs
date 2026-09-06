@@ -2439,7 +2439,7 @@ impl Interp {
                 let public = bool_field(heap, tl, 5, "defmethod")?;
                 let body = body_forms(heap, tl, 6, "defmethod")?;
                 heap.push_permanent_root(tl);
-                let def = FnDef {
+                let def = FnDef { ffi: false,
                     name: format!("{}::{}", type_name, method),
                     params,
                     body,
@@ -2483,7 +2483,7 @@ impl Interp {
                 // `bind_macro_args` produces, since it collects the rest
                 // arguments into one `Sexpr` before the call.
                 let sig = (vec![Repr::Sexpr; params.len()], Repr::Sexpr);
-                let def = FnDef {
+                let def = FnDef { ffi: false,
                     name: name.to_string(),
                     params,
                     body,
@@ -2601,6 +2601,65 @@ impl Interp {
             // A forward declaration produced no code — its whole effect
             // happened in the checker (`Checker::check_defsignature`).
             "defsignature" => Ok(None),
+            // `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR PUBLIC (CTYPE...) RET-CTYPE)`
+            //
+            // The opposite of `defsignature` above: its effect is *here*. The
+            // checker only wrote the signature down; what makes the name
+            // callable is the thunk, and the thunk needs a C symbol resolved
+            // against the running process.
+            //
+            // So this fails rather than registering a name that cannot run. A
+            // `FnDef` with an empty body and no compiled form is not an error
+            // anywhere downstream — `apply` would walk no forms and answer
+            // `()` — which is exactly the silent wrong answer worth spending
+            // an error to avoid.
+            "defffi" => {
+                let name = path_field(heap, tl, 0, "defffi")?;
+                let c_symbol = str_field(heap, tl, 1, "defffi")?;
+                let library = match core::field(heap, tl, 2) {
+                    Some(Value::Str(id)) => Some(heap.string(id).to_string()),
+                    Some(Value::Empty) => None,
+                    other => {
+                        return Err(EvalError::Internal(format!(
+                            "exec: (defffi ..) field 2 is not a library name: {:?}",
+                            other
+                        )))
+                    }
+                };
+                let (params, param_reprs) = param_list(heap, tl, 3, "defffi")?;
+                let ret = repr_field(heap, tl, 4, "defffi")?;
+                let public = bool_field(heap, tl, 5, "defffi")?;
+                let ctypes = sym_list_field(heap, tl, 6, "defffi")?;
+                let ret_ctype = sym_field(heap, tl, 7, "defffi")?;
+                let decl = crate::eval::interp::FfiDecl {
+                    path: name.clone(),
+                    c_symbol,
+                    library,
+                    params: ctypes,
+                    ret: ret_ctype,
+                };
+                // Before registering, so a declaration that cannot be
+                // resolved leaves no name behind.
+                let thunk = (crate::eval::interp::backend_define_ffi()?)(self, &decl)
+                    .map_err(EvalError::Panic)?;
+                heap.push_permanent_root(tl);
+                let def = FnDef { ffi: true,
+                    name: name.to_string(),
+                    params,
+                    body: Vec::new(),
+                    rest: false,
+                    lambda: None,
+                    sig: Some((param_reprs, ret)),
+                    public,
+                    compiled: RefCell::new(Some(thunk)),
+                };
+                self.root
+                    .borrow_mut()
+                    .get_or_create(name.parent())
+                    .fns
+                    .insert(name.last_segment().to_string(), Rc::new(def));
+                Ok(None)
+            }
             // `(expr FORM)`
             "expr" => {
                 let form = core::field(heap, tl, 0)
@@ -2689,7 +2748,7 @@ impl Interp {
     ) {
         heap.push_permanent_root(tl);
         let def =
-            FnDef { name: name.to_string(), params, body, rest, lambda, sig: Some((param_reprs, ret)), public, compiled: RefCell::new(None) };
+            FnDef { ffi: false, name: name.to_string(), params, body, rest, lambda, sig: Some((param_reprs, ret)), public, compiled: RefCell::new(None) };
         self.root
             .borrow_mut()
             .get_or_create(name.parent())
@@ -2763,7 +2822,8 @@ fn param_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<(Vec<Str
 }
 
 /// A field holding a bare symbol list `(SYM...)` — a `defmacro`'s parameters
-/// (all `Sexpr`, so no representations) or a `defenum`'s variant names.
+/// (all `Sexpr`, so no representations), a `defenum`'s variant names, or a
+/// `defffi`'s C parameter types.
 fn sym_list_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<String>, EvalError> {
     let list = core::field(heap, form, i)
         .ok_or_else(|| EvalError::Internal(format!("exec: ({} ..) has no field {}", what, i)))?;

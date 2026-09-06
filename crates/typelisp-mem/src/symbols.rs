@@ -366,6 +366,12 @@ well_known_symbols! {
     UNTRACE => "untrace"
     STEP => "step"
     DISASSEMBLE_FN => "disassemble-fn"
+
+    "Appended for the C FFI (2026-09-06). A top-level tag, so its natural
+     home is beside `DEFSIGNATURE` — the declaration it is shaped after —
+     but this table is positional and an entry may only be appended; see
+     the module comment."
+    DEFFFI => "defffi"
 }
 
 

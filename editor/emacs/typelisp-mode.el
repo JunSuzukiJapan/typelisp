@@ -54,10 +54,12 @@
 ;;; Keyword tables ----------------------------------------------------------
 
 (defconst typelisp-definition-forms
-  '("defun" "defsignature" "defmethod" "defmacro")
+  '("defun" "defsignature" "defffi" "defmethod" "defmacro")
   "Definition forms whose defined name is a function name.
 `defsignature' declares one ahead of its definition -- the only way to write
-mutual recursion at top level, since forms are checked in source order.")
+mutual recursion at top level, since forms are checked in source order.
+`defffi' declares one whose body is a C function, reached through a thunk;
+like `defsignature' it has no body here, so neither takes an indent rule.")
 
 (defconst typelisp-type-definition-forms
   '("defstruct" "defenum" "deftrait" "deftype")

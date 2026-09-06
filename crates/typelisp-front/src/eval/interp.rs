@@ -124,6 +124,15 @@ pub struct FnDef {
     /// field keeps that borrow-and-mutate pair independent, exactly like the
     /// old design's two separate top-level fields (`fns`/`compiled`) did.
     pub compiled: RefCell<Option<Rc<dyn CompiledBody>>>,
+    /// Declared by `(defffi ...)`: `body` is empty and `compiled` is the thunk
+    /// that reaches the C function — the runtime twin of `FnSig::ffi`.
+    ///
+    /// The interpreter itself never consults this: `enter` prefers a compiled
+    /// body whatever the definition is, which is exactly right here. It exists
+    /// so the tools can tell the two kinds of empty body apart —
+    /// `disassemble` would otherwise build a module from no forms and show a
+    /// function that is not the one the name reaches.
+    pub ffi: bool,
 }
 
 /// What the interpreter needs from a compiled function body: where it is.
@@ -1341,6 +1350,16 @@ impl Interp {
     /// [`Self::compile_function`]/[`Self::call_graph_edges`] (which need the
     /// body slightly earlier — to collect `call` targets — before
     /// `add_compiled_function` ever runs).
+    /// Whether `name` is a `(defffi ...)` declaration.
+    ///
+    /// For the tools, which otherwise cannot tell its empty body from an
+    /// ordinary one: [`Self::compiled_fn_body`] answers `(params, [])` for
+    /// both, and building a module out of no forms produces a function that
+    /// is not the one the name reaches.
+    pub fn fn_is_ffi(&self, name: &str) -> bool {
+        self.resolve_fn_def(name).map(|f| f.ffi).unwrap_or(false)
+    }
+
     pub fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Repr)>, Vec<Value>), EvalError> {
         let f = self.resolve_fn_def(name)?;
         let sig = f
@@ -3859,6 +3878,34 @@ struct Recording {
     globals_before: usize,
 }
 
+/// One `(defffi ...)` declaration, as the backend needs to see it.
+///
+/// Plain data rather than the core-IR node it was read from, for the reason
+/// [`Backend`] is `fn` pointers: this crosses to the crate holding LLVM, and
+/// what crosses should be the answer, not the question. `Interp::exec` reads
+/// the node (it owns the readers), and the backend emits the thunk (it owns
+/// the codegen).
+///
+/// `params`/`ret` are *C type* spellings — `type_key::type_key_of_type`'s
+/// output, so `"i8"`, `"f32"`, `"string"`, `"ptr"`. The `Repr`s beside them in
+/// the node say how each value crosses the compiled boundary; these say what
+/// the C function is declared to take, which is a different question with a
+/// different answer for all six integer widths. Which spellings are actually
+/// callable is the backend's to decide, and it decides it in one place.
+#[derive(Clone, Debug)]
+pub struct FfiDecl {
+    /// The typelisp-side name, which is also what the thunk's LLVM symbol is
+    /// built from — so a compiled call site resolves it with no special case.
+    pub path: crate::Path,
+    /// The symbol to look up: the C function's own name.
+    pub c_symbol: String,
+    /// The library to look it up in. `None` means the running process, which
+    /// is what reaches libc and everything else already linked.
+    pub library: Option<String>,
+    pub params: Vec<String>,
+    pub ret: String,
+}
+
 /// Everything the interpreter needs from the LLVM backend, as plain `fn`
 /// pointers.
 ///
@@ -3890,6 +3937,13 @@ pub struct Backend {
     pub compile_file: fn(&str, &str) -> Result<(), String>,
     /// `(dump path)`.
     pub dump_image: fn(&Interp, &mut Heap, &str) -> Result<(), String>,
+    /// `(defffi ...)` — resolve the C symbol and emit the thunk that reaches
+    /// it, returning a body to hang on the declaration's [`FnDef`].
+    ///
+    /// Returns the body rather than installing it, so the one place that
+    /// decides where a `FnDef` lives stays the one place that puts anything
+    /// into it (`Interp::exec`).
+    pub define_ffi: fn(&Interp, &FfiDecl) -> Result<Rc<dyn CompiledBody>, String>,
 }
 
 thread_local! {
@@ -3923,6 +3977,13 @@ fn backend(who: &str) -> Result<Backend, EvalError> {
 pub(crate) fn backend_compile_function(
 ) -> Result<fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>, EvalError> {
     Ok(backend("compile")?.compile_function)
+}
+
+/// The registered backend's `(defffi ...)`, for the evaluator's own
+/// declaration handling.
+pub(crate) fn backend_define_ffi(
+) -> Result<fn(&Interp, &FfiDecl) -> Result<Rc<dyn CompiledBody>, String>, EvalError> {
+    Ok(backend("defffi")?.define_ffi)
 }
 
 /// The registered backend's `(disassemble name)`, for the evaluator's own

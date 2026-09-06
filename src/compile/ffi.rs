@@ -1,0 +1,441 @@
+//! The C FFI: what `(defffi ...)` compiles to.
+//!
+//! # The problem this solves
+//!
+//! Everything compiled in this workspace shares one signature —
+//! `i64 f(const i64 *args, u32 argc)`, [`compiled_fn_type`] — and every
+//! `rt_*` shim is written to match it. A C function is not written to match
+//! it. `strlen` takes a pointer and answers with a `size_t`; `sqrt` takes and
+//! answers with a `double` (in a floating-point register, which the shared
+//! signature has no way to name at all).
+//!
+//! So each declaration gets a **thunk**: a function *in* the shared signature
+//! whose body unpacks `args`, converts each word to the C type declared for
+//! it, calls the real function under its real signature, and converts the
+//! answer back. One function, emitted here, in LLVM IR.
+//!
+//! # Why that makes the rest of the compiler unaware of the FFI
+//!
+//! The thunk is named by [`crate::compile::symbols::user_symbol_name`] — the
+//! same rule a `defun`'s compiled body is named by. Two things follow, and
+//! they are the whole reason for this design:
+//!
+//! - **The interpreter needs no wiring.** A thunk is a `CompiledBody` hung on
+//!   the declaration's `FnDef`, and `Interp::enter` already prefers a compiled
+//!   body over walking forms.
+//! - **The self-hosted compiler needs no changes.** A compiled call site asks
+//!   `symbols::callee_symbol_name` for the callee's symbol and emits a call to
+//!   it; for an FFI declaration that is the thunk's own name, in the shared
+//!   signature the island always emits. The island never learns that C is
+//!   involved, so `src/compiler.rs` — and the artifact built from it — is
+//!   untouched by any of this.
+//!
+//! # What is deliberately not here
+//!
+//! Variadic C functions (`printf`) and struct-by-value arguments. Both need
+//! the platform's argument-classification rules — where AArch64 Darwin puts a
+//! variadic argument is not where it puts a fixed one — and a thunk built
+//! from a fixed signature does not follow them. The type vocabulary below is
+//! what closes that off: neither can be spelled, so neither can be declared.
+
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::Mutex;
+
+use inkwell::module::Module;
+use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
+use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue};
+
+use typelisp_front::eval::interp::{CompiledBody, FfiDecl, Interp};
+
+use crate::compile::llvm_builtins::compiled_fn_type;
+use crate::compile::{llvm_context, CompiledFn, COMPILE_LOCK};
+
+/// A type as the C side of the boundary sees it.
+///
+/// A second vocabulary beside `Repr`, and the reason is [`Repr::Int`]: it
+/// folds all six integer widths into one, because how a value crosses the
+/// compiled boundary is the same for all of them (a sign-extended machine
+/// word). The thunk needs the other answer — `i8` really is one byte to the C
+/// function, and getting there is a `trunc`.
+///
+/// **This enum is the one list of what the FFI can spell.** The checker
+/// deliberately does not keep a second one: it parses the declared types like
+/// any other annotation and lets [`Self::from_key`] be the judge, because the
+/// judge should be whatever actually has to emit the conversion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CType {
+    /// A C integer of this width. `signed` picks `sext` over `zext` when the
+    /// value comes back, and is read from the type's own name rather than
+    /// decided here — see `types::int_width_signed`.
+    Int { bits: u32, signed: bool },
+    F32,
+    F64,
+    Bool,
+    Void,
+}
+
+impl CType {
+    /// The C type a declared typelisp type means, or `None` if it means none.
+    ///
+    /// The spellings are `type_key::type_key_of_type`'s, which is what the
+    /// `defffi` node carries — one producer, so there is nothing to keep in
+    /// agreement.
+    fn from_key(key: &str) -> Option<CType> {
+        if let Some((bits, signed)) = typelisp_front::types::int_width_signed(key) {
+            return Some(CType::Int { bits, signed });
+        }
+        match key {
+            "f32" => Some(CType::F32),
+            "f64" => Some(CType::F64),
+            "bool" => Some(CType::Bool),
+            "()" | "unit" => Some(CType::Void),
+            _ => None,
+        }
+    }
+
+    /// This width as an LLVM integer type. Only the four the declarable
+    /// widths use, so there is no custom-width case to get wrong.
+    fn int_type(bits: u32) -> inkwell::types::IntType<'static> {
+        let ctx = llvm_context();
+        match bits {
+            8 => ctx.i8_type(),
+            16 => ctx.i16_type(),
+            32 => ctx.i32_type(),
+            _ => ctx.i64_type(),
+        }
+    }
+
+    /// What a value of this type is, as an LLVM type — `None` for `Void`,
+    /// which is not a value.
+    fn llvm(self) -> Option<BasicTypeEnum<'static>> {
+        let ctx = llvm_context();
+        Some(match self {
+            CType::Int { bits, .. } => CType::int_type(bits).into(),
+            CType::F32 => ctx.f32_type().into(),
+            CType::F64 => ctx.f64_type().into(),
+            CType::Bool => ctx.bool_type().into(),
+            CType::Void => return None,
+        })
+    }
+
+    /// The attribute the platform ABI requires at a call site for this type,
+    /// if any.
+    ///
+    /// Not decoration. AArch64 on Darwin requires the *caller* to extend an
+    /// argument narrower than a register, and to expect a narrow return
+    /// already extended; without these, a `char`-taking function reads the
+    /// bits that happened to be above it. The development platform for this
+    /// workspace is arm64 macOS, so an omission here is not a portability
+    /// footnote but the first thing that breaks.
+    fn extension_attribute(self) -> Option<&'static str> {
+        match self {
+            CType::Int { bits, signed } if bits < 32 => Some(if signed { "signext" } else { "zeroext" }),
+            // `_Bool` is one byte in memory and passed extended.
+            CType::Bool => Some("zeroext"),
+            _ => None,
+        }
+    }
+}
+
+/// Emit `decl`'s thunk into `module` and answer with it.
+///
+/// The C function is declared here too, by its own name and its own
+/// signature; who resolves that name to an address is the caller's business
+/// (the JIT maps it eagerly, an AOT build leaves it to the linker).
+pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<FunctionValue<'static>, String> {
+    let ctx = llvm_context();
+    let builder = ctx.create_builder();
+
+    let params = ctypes(&decl.params, decl)?;
+    let ret = CType::from_key(&decl.ret)
+        .ok_or_else(|| unspellable(&decl.ret, "a return type", decl))?;
+
+    // ---- the C function, under its real signature ----
+    let arg_tys: Vec<BasicMetadataTypeEnum<'static>> =
+        params.iter().map(|c| c.llvm().expect("a parameter is never void").into()).collect();
+    let c_fn_ty = match ret.llvm() {
+        Some(t) => t.fn_type(&arg_tys, false),
+        None => ctx.void_type().fn_type(&arg_tys, false),
+    };
+    let c_fn = match module.get_function(&decl.c_symbol) {
+        Some(f) => f,
+        None => module.add_function(&decl.c_symbol, c_fn_ty, None),
+    };
+    for (i, c) in params.iter().enumerate() {
+        if let Some(attr) = c.extension_attribute() {
+            add_attribute(c_fn, inkwell::attributes::AttributeLoc::Param(i as u32), attr);
+        }
+    }
+    if let Some(attr) = ret.extension_attribute() {
+        add_attribute(c_fn, inkwell::attributes::AttributeLoc::Return, attr);
+    }
+
+    // ---- the thunk, under the shared signature ----
+    let name = crate::compile::symbols::user_symbol_name(&decl.path.to_string());
+    if module.get_function(&name).is_some() {
+        return Err(format!("internal error: `{}` is already defined in this module", name));
+    }
+    let thunk = module.add_function(&name, compiled_fn_type(), None);
+    let entry = ctx.append_basic_block(thunk, "entry");
+    builder.position_at_end(entry);
+
+    let i64_ty = ctx.i64_type();
+    let args_ptr = thunk.get_nth_param(0).expect("the shared signature has two parameters").into_pointer_value();
+
+    let mut call_args: Vec<BasicMetadataValueEnum<'static>> = Vec::with_capacity(params.len());
+    for (i, c) in params.iter().enumerate() {
+        // `args[i]`, the word the caller put there. Its shape is the
+        // *declared* one — `encode_crossing_args` was driven by the same
+        // signature this thunk was built from.
+        let slot = unsafe {
+            builder
+                .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "arg_slot")
+                .map_err(|e| format!("ffi: failed to index the argument array: {}", e))?
+        };
+        let word = builder
+            .build_load(i64_ty, slot, "arg_word")
+            .map_err(|e| format!("ffi: failed to load an argument: {}", e))?
+            .into_int_value();
+        call_args.push(word_to_c(&builder, word, *c)?);
+    }
+
+    let call = builder
+        .build_call(c_fn, &call_args, "ffi_call")
+        .map_err(|e| format!("ffi: failed to build the call to `{}`: {}", decl.c_symbol, e))?;
+    let out = match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => c_to_word(&builder, v, ret)?,
+        // A `void` C function still has to answer with a word, because the
+        // shared signature says so. `Repr::Unit` crosses as 0, so this is the
+        // same placeholder every other unit-valued call produces.
+        inkwell::values::ValueKind::Instruction(_) => i64_ty.const_zero(),
+    };
+    builder.build_return(Some(&out)).map_err(|e| format!("ffi: failed to build the return: {}", e))?;
+    Ok(thunk)
+}
+
+/// Every declared parameter as a [`CType`], or an error naming the first one
+/// that is not spellable in C.
+fn ctypes(keys: &[String], decl: &FfiDecl) -> Result<Vec<CType>, String> {
+    keys.iter()
+        .map(|k| match CType::from_key(k) {
+            Some(CType::Void) => Err(format!(
+                "defffi: `{}` declares a `()` parameter, which is not a value C can be passed",
+                decl.path
+            )),
+            Some(c) => Ok(c),
+            None => Err(unspellable(k, "a parameter type", decl)),
+        })
+        .collect()
+}
+
+fn unspellable(key: &str, where_: &str, decl: &FfiDecl) -> String {
+    format!(
+        "defffi: `{}` declares `{}` as {}, which the FFI cannot spell in C. \
+         It can spell the integer widths (i8/i16/i32/u8/u16/u32), f32, f64, bool, and `()`.",
+        decl.path, key, where_
+    )
+}
+
+/// The i64 the shared signature carries, as the C type the declaration named.
+fn word_to_c(
+    builder: &inkwell::builder::Builder<'static>,
+    word: IntValue<'static>,
+    c: CType,
+) -> Result<BasicMetadataValueEnum<'static>, String> {
+    let ctx = llvm_context();
+    Ok(match c {
+        CType::Int { bits, .. } if bits == 64 => word.into(),
+        CType::Int { bits, .. } => builder
+            .build_int_truncate(word, CType::int_type(bits), "arg_narrow")
+            .map_err(|e| format!("ffi: failed to narrow an integer argument: {}", e))?
+            .into(),
+        CType::Bool => builder
+            .build_int_truncate(word, ctx.bool_type(), "arg_bool")
+            .map_err(|e| format!("ffi: failed to narrow a bool argument: {}", e))?
+            .into(),
+        // A float crosses as the bits of its `f64` — that is what
+        // `encode_crossing_value` puts in the word, for `f32` too.
+        CType::F64 => builder
+            .build_bit_cast(word, ctx.f64_type(), "arg_f64")
+            .map_err(|e| format!("ffi: failed to reinterpret an f64 argument: {}", e))?
+            .into(),
+        CType::F32 => {
+            let wide = builder
+                .build_bit_cast(word, ctx.f64_type(), "arg_f32_wide")
+                .map_err(|e| format!("ffi: failed to reinterpret an f32 argument: {}", e))?
+                .into_float_value();
+            builder
+                .build_float_trunc(wide, ctx.f32_type(), "arg_f32")
+                .map_err(|e| format!("ffi: failed to narrow an f32 argument: {}", e))?
+                .into()
+        }
+        CType::Void => return Err("internal error: a void parameter reached the thunk".to_string()),
+    })
+}
+
+/// What the C function answered with, as the i64 the shared signature returns.
+fn c_to_word(
+    builder: &inkwell::builder::Builder<'static>,
+    v: BasicValueEnum<'static>,
+    c: CType,
+) -> Result<IntValue<'static>, String> {
+    let ctx = llvm_context();
+    let i64_ty = ctx.i64_type();
+    Ok(match c {
+        CType::Int { bits, signed } => {
+            let n = v.into_int_value();
+            if bits == 64 {
+                n
+            } else if signed {
+                builder
+                    .build_int_s_extend(n, i64_ty, "ret_sext")
+                    .map_err(|e| format!("ffi: failed to widen a signed result: {}", e))?
+            } else {
+                builder
+                    .build_int_z_extend(n, i64_ty, "ret_zext")
+                    .map_err(|e| format!("ffi: failed to widen an unsigned result: {}", e))?
+            }
+        }
+        // `false`/`true` cross as 0/1, so the one bit is zero-extended.
+        CType::Bool => builder
+            .build_int_z_extend(v.into_int_value(), i64_ty, "ret_bool")
+            .map_err(|e| format!("ffi: failed to widen a bool result: {}", e))?,
+        CType::F64 => builder
+            .build_bit_cast(v.into_float_value(), i64_ty, "ret_f64")
+            .map_err(|e| format!("ffi: failed to reinterpret an f64 result: {}", e))?
+            .into_int_value(),
+        // Widened to `f64` before its bits are taken, because that is the
+        // shape the boundary carries an `f32` in — see `Repr::F32`.
+        CType::F32 => {
+            let wide = builder
+                .build_float_ext(v.into_float_value(), ctx.f64_type(), "ret_f32_wide")
+                .map_err(|e| format!("ffi: failed to widen an f32 result: {}", e))?;
+            builder
+                .build_bit_cast(wide, i64_ty, "ret_f32")
+                .map_err(|e| format!("ffi: failed to reinterpret an f32 result: {}", e))?
+                .into_int_value()
+        }
+        CType::Void => return Err("internal error: a void result reached the converter".to_string()),
+    })
+}
+
+fn add_attribute(f: FunctionValue<'static>, loc: inkwell::attributes::AttributeLoc, name: &str) {
+    let ctx = llvm_context();
+    let kind = inkwell::attributes::Attribute::get_named_enum_kind_id(name);
+    f.add_attribute(loc, ctx.create_enum_attribute(kind, 0));
+}
+
+/// Libraries opened so far, by the name the declaration wrote.
+///
+/// Here rather than in `typelisp_rt::os`, which is a safe wrapper over one C
+/// call per function and has no business holding process-wide state. Never
+/// emptied: see [`typelisp_rt::os::dl_open`] for why nothing is ever closed.
+static OPEN_LIBS: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+
+/// The address `decl` names, or an error saying what was looked for and where.
+fn resolve(decl: &FfiDecl) -> Result<usize, String> {
+    let handle = match &decl.library {
+        None => 0,
+        Some(lib) => open_library(lib)?,
+    };
+    typelisp_rt::os::dl_sym(handle, &decl.c_symbol).ok_or_else(|| match &decl.library {
+        Some(lib) => format!(
+            "defffi: `{}` has no symbol `{}` — the library opened, so the name is what is wrong",
+            lib, decl.c_symbol
+        ),
+        None => format!(
+            "defffi: no symbol `{}` in this process. Nothing already linked defines it, so it \
+             needs a `:library \"name\"` saying where to find it.",
+            decl.c_symbol
+        ),
+    })
+}
+
+/// Open `name`, trying the platform's spellings of it in turn.
+fn open_library(name: &str) -> Result<usize, String> {
+    let mut guard = OPEN_LIBS.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = guard.get_or_insert_with(HashMap::new);
+    if let Some(h) = cache.get(name) {
+        return Ok(*h);
+    }
+    let candidates = library_candidates(name);
+    for c in &candidates {
+        if let Some(h) = typelisp_rt::os::dl_open(c) {
+            cache.insert(name.to_string(), h);
+            return Ok(h);
+        }
+    }
+    Err(format!(
+        "defffi: could not open library `{}` — tried {}",
+        name,
+        candidates.iter().map(|c| format!("`{}`", c)).collect::<Vec<_>>().join(", ")
+    ))
+}
+
+/// The filenames `name` might be, most conventional first.
+///
+/// A name with a `/` in it is a path and is used as written; anything else is
+/// a short name, decorated the way the platform decorates one.
+fn library_candidates(name: &str) -> Vec<String> {
+    if name.contains('/') {
+        return vec![name.to_string()];
+    }
+    let ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+    vec![format!("lib{}.{}", name, ext), format!("{}.{}", name, ext), name.to_string()]
+}
+
+/// A thunk, and the engine holding the code it lives in.
+struct FfiThunk {
+    /// Held for its lifetime, never called through — dropping it would free
+    /// the code at `addr`. `CompiledFn` holds an `ExecutionEngine` share for
+    /// exactly this reason; see its doc comment.
+    _code: CompiledFn,
+    addr: usize,
+}
+
+impl CompiledBody for FfiThunk {
+    fn address(&self) -> usize {
+        self.addr
+    }
+}
+
+/// `(defffi ...)`: resolve the symbol, emit the thunk, JIT it.
+///
+/// The `Interp` is unused today and taken anyway, so this matches the shape of
+/// every other [`typelisp_front::eval::interp::Backend`] hook.
+pub fn define_ffi(_interp: &Interp, decl: &FfiDecl) -> Result<Rc<dyn CompiledBody>, String> {
+    // A declaration whose *last segment* is a builtin's name would be
+    // miscompiled rather than rejected: `symbols::callee_symbol_name` maps
+    // that name to the builtin's `rt_*` shim, so a compiled call site would
+    // reach the shim instead of this thunk — and in a module other than the
+    // root, the checker's own redefinition check never sees a clash to report.
+    // Cheap to say so here, where the name and the shim table are both in
+    // reach.
+    let last = decl.path.last_segment();
+    if crate::compile::externs::is_rt_builtin_name(last) {
+        return Err(format!(
+            "defffi: `{}` is the name of a builtin, and a compiled call to it would reach the \
+             builtin rather than the C function. Declare it under another name, with the C symbol \
+             written out: (defffi (my-{} \"{}\") ...)",
+            last, last, decl.c_symbol
+        ));
+    }
+
+    // Before any IR is built: a name that cannot be resolved should be
+    // reported as the missing symbol it is, not as a link failure later.
+    let addr = resolve(decl)?;
+
+    let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let module = llvm_context().create_module(&format!("ffi_{}", decl.c_symbol));
+    let thunk = emit_thunk(&module, decl)?;
+    let name = thunk.get_name().to_str().map_err(|e| format!("ffi: thunk name: {}", e))?.to_string();
+    module
+        .verify()
+        .map_err(|e| format!("ffi: the thunk for `{}` is not valid IR: {}", decl.c_symbol, e.to_string()))?;
+
+    let code = CompiledFn::new(&module, &name, &[(decl.c_symbol.clone(), addr)])
+        .map_err(|e| format!("ffi: failed to JIT the thunk for `{}`: {}", decl.c_symbol, e))?;
+    let addr = code.address();
+    Ok(Rc::new(FfiThunk { _code: code, addr }))
+}

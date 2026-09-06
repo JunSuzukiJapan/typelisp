@@ -203,7 +203,7 @@ fn llvm_module_create(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// Shared by [`llvm_module_add_function`] and [`declare_external_function`]
 /// (labels/closures Stage 3's JIT-only forward declarations) — both declare
 /// a function under this exact same signature, just with or without a body.
-fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
+pub(crate) fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
     let ctx = crate::compile::llvm_context();
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
     ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
