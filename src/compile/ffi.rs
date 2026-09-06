@@ -79,6 +79,10 @@ enum CType {
     /// string for one call and copied back out of one — see
     /// `typelisp_rt::rt_ffi_cstring_new` and its two siblings.
     Str,
+    /// An opaque pointer. Crosses as a raw 64-bit word in both directions —
+    /// see [`typelisp_front::check::repr::Repr::RawWord`] for why it may not
+    /// be stored anywhere that tags what it holds.
+    Ptr,
 }
 
 impl CType {
@@ -88,6 +92,8 @@ impl CType {
     /// `defffi` node carries — one producer, so there is nothing to keep in
     /// agreement.
     fn from_key(key: &str) -> Option<CType> {
+        // Covers the six widths *and* `c-long`/`c-ulong`, which that function
+        // answers 64 for — the one place the LP64 assumption is written down.
         if let Some((bits, signed)) = typelisp_front::types::int_width_signed(key) {
             return Some(CType::Int { bits, signed });
         }
@@ -97,6 +103,7 @@ impl CType {
             "bool" => Some(CType::Bool),
             "()" | "unit" => Some(CType::Void),
             "string" => Some(CType::Str),
+            "ptr" => Some(CType::Ptr),
             _ => None,
         }
     }
@@ -122,7 +129,7 @@ impl CType {
             CType::F32 => ctx.f32_type().into(),
             CType::F64 => ctx.f64_type().into(),
             CType::Bool => ctx.bool_type().into(),
-            CType::Str => ctx.ptr_type(inkwell::AddressSpace::default()).into(),
+            CType::Str | CType::Ptr => ctx.ptr_type(inkwell::AddressSpace::default()).into(),
             CType::Void => return None,
         })
     }
@@ -166,8 +173,22 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
         Some(t) => t.fn_type(&arg_tys, false),
         None => ctx.void_type().fn_type(&arg_tys, false),
     };
+    // Reusing an existing declaration is right when two `defffi`s name the
+    // same C function, and wrong when the name is already taken by something
+    // declared under a different signature. An AOT module has every `rt_*`
+    // shim declared under the shared ABI before any thunk is emitted, so
+    // `(defffi (my-car "rt_car") (sexpr) sexpr)` would otherwise call one
+    // through a signature it does not have.
     let c_fn = match module.get_function(&decl.c_symbol) {
-        Some(f) => f,
+        Some(f) if f.get_type() == c_fn_ty => f,
+        Some(_) => {
+            return Err(format!(
+                "defffi: `{}` is already declared in this module under a different signature, so \
+                 the declared one cannot be the one that gets called. (A runtime shim's name is \
+                 the usual way to reach this.)",
+                decl.c_symbol
+            ))
+        }
         None => module.add_function(&decl.c_symbol, c_fn_ty, None),
     };
     for (i, c) in params.iter().enumerate() {
@@ -300,7 +321,8 @@ fn ctypes(keys: &[String], decl: &FfiDecl) -> Result<Vec<CType>, String> {
 fn unspellable(key: &str, where_: &str, decl: &FfiDecl) -> String {
     format!(
         "defffi: `{}` declares `{}` as {}, which the FFI cannot spell in C. \
-         It can spell the integer widths (i8/i16/i32/u8/u16/u32), f32, f64, bool, string, and `()`.",
+         It can spell the integer widths (i8/i16/i32/u8/u16/u32), c-long, c-ulong, f32, f64, \
+         bool, string, ptr, and `()`.",
         decl.path, key, where_
     )
 }
@@ -313,6 +335,11 @@ fn word_to_c(
 ) -> Result<BasicMetadataValueEnum<'static>, String> {
     let ctx = llvm_context();
     Ok(match c {
+        // A `ptr` is already the whole word; it only has to become a pointer.
+        CType::Ptr => builder
+            .build_int_to_ptr(word, ctx.ptr_type(inkwell::AddressSpace::default()), "arg_ptr")
+            .map_err(|e| format!("ffi: failed to make a pointer argument: {}", e))?
+            .into(),
         CType::Int { bits, .. } if bits == 64 => word.into(),
         CType::Int { bits, .. } => builder
             .build_int_truncate(word, CType::int_type(bits), "arg_narrow")
@@ -355,6 +382,9 @@ fn c_to_word(
     let ctx = llvm_context();
     let i64_ty = ctx.i64_type();
     Ok(match c {
+        CType::Ptr => builder
+            .build_ptr_to_int(v.into_pointer_value(), i64_ty, "ret_ptr")
+            .map_err(|e| format!("ffi: failed to take the address of a pointer result: {}", e))?,
         CType::Int { bits, signed } => {
             let n = v.into_int_value();
             if bits == 64 {

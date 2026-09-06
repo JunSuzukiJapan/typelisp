@@ -251,11 +251,21 @@ pub fn file_owner(_path: &str) -> std::io::Result<Option<String>> {
 /// **On thread safety.** `localtime_r` reads `TZ` through `getenv`, which
 /// races with any concurrent `setenv`: that is [RUSTSEC-2020-0071], and it is
 /// why Rust made `std::env::set_var` `unsafe` in edition 2024 rather than
-/// blame the C library. The call is sound here because **nothing in this
-/// workspace ever writes an environment variable** — there is no `setenv`
-/// builtin, and `std::env::set_var` appears nowhere. Adding one would make
-/// this function unsound, so: don't, or make it call `tzset` on the writing
-/// side and accept the single-threaded caveat.
+/// blame the C library.
+///
+/// Nothing in this workspace writes an environment variable — there is no
+/// `setenv` builtin and `std::env::set_var` appears nowhere — and that used to
+/// be the whole argument. **The C FFI ended it.** `(defffi (c-setenv "setenv")
+/// (string string i32) i32)` is a line any program may now write, and no
+/// promise this workspace makes about its own code can cover it.
+///
+/// So the obligation moved rather than disappeared: it belongs to whoever
+/// writes that declaration, which is exactly what `(unsafe ...)` is for — the
+/// mark that a premise nothing can check has been taken on. A program that
+/// writes the environment from one thread while another asks for the time zone
+/// has the race, and `docs/syntax.md` lists process-global state among the
+/// things `unsafe` accepts responsibility for. Adding a `setenv` *builtin*
+/// — reachable with no `unsafe` at all — is still the thing not to do.
 ///
 /// [RUSTSEC-2020-0071]: https://rustsec.org/advisories/RUSTSEC-2020-0071
 #[cfg(unix)]

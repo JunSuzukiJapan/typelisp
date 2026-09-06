@@ -59,6 +59,40 @@ const CL_COMPARISON_OPERATORS: &[&str] = &[
 /// the name with no type parameters, so operator-named `defun`s keep working.
 /// A name that *does* start `ident<` and isn't a known operator must be a
 /// well-formed `ident<Ident,Ident...>`.
+/// Whether `ty` is, or contains, one of the FFI's raw machine words.
+///
+/// Recursive because a type argument can hold one *syntactically* — the checker
+/// refuses `Vector<ptr>` where it is written (see `Checker::reject_raw_word_nested`),
+/// and this is the second line rather than the first, so a spelling that slips
+/// past there still cannot become a value outside `unsafe`.
+fn type_mentions_raw_word(ty: &Type) -> bool {
+    match ty {
+        Type::Ptr | Type::CLong | Type::CULong => true,
+        Type::Named(_, args) | Type::Dyn(_, args) => args.iter().any(type_mentions_raw_word),
+        Type::Fn(ps, rest, ret) => {
+            ps.iter().any(type_mentions_raw_word)
+                || rest.as_deref().map(type_mentions_raw_word).unwrap_or(false)
+                || type_mentions_raw_word(ret)
+        }
+        _ => false,
+    }
+}
+
+/// Whether `v` is written as `(unsafe ...)`.
+///
+/// Asked of the *source* form, not the lowered node: `unsafe` lowers to the
+/// same binding-less `let` `progn` does, so by then the two are the same thing
+/// — and only one of them grants the permission being checked.
+fn is_unsafe_form(heap: &Heap, v: Value) -> bool {
+    match v {
+        Value::Cons(_) => matches!(
+            heap.car(v),
+            Ok(Value::Symbol(id)) if heap.symbol_name(id) == "unsafe"
+        ),
+        _ => false,
+    }
+}
+
 fn parse_generic_name_header(raw: &str) -> Result<(String, Vec<String>), Error> {
     // A known comparison operator (`char<`, `string<=`, ...) whose `<`/`>`
     // would otherwise read as the start of a generic-parameter list.
@@ -3682,7 +3716,57 @@ impl Checker {
             self.record_type_span(span);
         }
         self.reject_trait_in_type_position(&ty)?;
+        Self::reject_raw_word_nested(&ty)?;
         Ok(ty)
+    }
+
+    /// Rule C, half one: a raw word may be a whole type, never part of one.
+    ///
+    /// `ptr` as a parameter or return type is the point of having it. `ptr`
+    /// *inside* another type — `Vector<ptr>`, `Option<ptr>`,
+    /// `HashTable<string,ptr>`, `(fn (ptr) i32)` — is a slot that tags what it
+    /// holds, and tagging a pointer drops its top three bits. There is nothing
+    /// `unsafe` could add here: it is not a permission question but a
+    /// representation that does not exist.
+    fn reject_raw_word_nested(ty: &Type) -> Result<(), Error> {
+        let nested = match ty {
+            Type::Named(_, args) | Type::Dyn(_, args) => args.iter().any(type_mentions_raw_word),
+            Type::Fn(ps, rest, ret) => {
+                ps.iter().any(type_mentions_raw_word)
+                    || rest.as_deref().map(type_mentions_raw_word).unwrap_or(false)
+                    || type_mentions_raw_word(ret)
+            }
+            _ => false,
+        };
+        if nested {
+            return Err(Error::TypeError(format!(
+                "`{}` puts a raw C word inside another type, and every such slot tags what it \
+                 holds — which would drop the word's top three bits. A `ptr`/`c-long`/`c-ulong` \
+                 can be a parameter or a return type, and nothing else.",
+                crate::type_key::type_key_of_type(ty)
+            )));
+        }
+        Ok(())
+    }
+
+    /// Rule C, half two: the storage a raw word may not go into.
+    ///
+    /// [`Self::reject_raw_word_nested`] covers the slots that are spelled as
+    /// part of a type; these are spelled as declarations. Same reason, and the
+    /// same non-answer from `unsafe`.
+    fn reject_raw_word_storage(ty: &Type, what: &str, name: &str) -> Result<(), Error> {
+        if type_mentions_raw_word(ty) {
+            return Err(Error::TypeError(format!(
+                "{} `{}` is declared `{}`, and a raw C word cannot be stored: the slot tags what \
+                 it holds, which would drop the word's top three bits — the same reason this \
+                 language has no 64-bit integer type. Keep it in a local inside `(unsafe ...)`, \
+                 or convert it (`as i32`, `as bignum`).",
+                what,
+                name,
+                crate::type_key::type_key_of_type(ty)
+            )));
+        }
+        Ok(())
     }
 
     /// Resolve one written name from an annotation and, when it names a
@@ -8239,6 +8323,9 @@ impl Checker {
         }
         let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
         let field_types: Vec<Type> = fields.iter().map(|f| f.ty.clone()).collect();
+        for f in &fields {
+            Self::reject_raw_word_storage(&f.ty, "the field", &f.name)?;
+        }
         for (i, n) in field_names.iter().enumerate() {
             if field_names[..i].contains(n) {
                 return Err(Error::TypeError(format!("defstruct: duplicate field `{}`", n)));
@@ -8890,6 +8977,9 @@ impl Checker {
                 .iter()
                 .map(|(v, l)| self.parse_type_here_at(heap, *v, l.as_ref()))
                 .collect::<Result<Vec<Type>, Error>>()?;
+            for f in &fields {
+                Self::reject_raw_word_storage(f, "the variant", &vname)?;
+            }
             variants.push(Variant { name: vname, fields });
         }
         if variants.is_empty() {
@@ -9256,6 +9346,32 @@ impl Checker {
             // is fixed by the vocabulary. `core::tagged_at` is the same act
             // performed at build time by a site that has the position in hand.
             Ok(checked) => {
+                // Rule B: a raw word may only be a value inside `(unsafe ...)`.
+                //
+                // Here because this is the one place an expression and the
+                // type just proved for it are both in hand — so one check
+                // covers every way a `ptr` can turn up: the FFI call that
+                // produced it, the variable it was bound to, the argument
+                // position it is being passed in.
+                //
+                // The `unsafe` form's own value is the exception, so that
+                // `(defun open-it (..) ptr (unsafe (c-fopen ..)))` can be
+                // written. Whoever *uses* what it answers with is inside an
+                // `unsafe` of their own, by this same rule.
+                if self.unsafe_depth.get() == 0
+                    && type_mentions_raw_word(&checked.ty)
+                    && !is_unsafe_form(heap, v)
+                {
+                    let e = Error::TypeError(format!(
+                        "a `{}` is a raw machine word from the C FFI and can only be a value \
+                         inside `(unsafe ...)` — nothing here can check that it points at anything",
+                        crate::type_key::type_key_of_type(&checked.ty)
+                    ));
+                    return Err(match &loc {
+                        Some(l) => e.at(l.clone()),
+                        None => e,
+                    });
+                }
                 // Root the node for the rest of this top-level form, with no
                 // matching pop of its own (`check_form_at` truncates the stack
                 // back to where it started).
@@ -10999,7 +11115,11 @@ impl Checker {
         // whether anything was lost. This used to be a pure relabel, back
         // when every integer shared one 64-bit representation and both floats
         // one `f64`.
-        if (src.ty.is_integer() && target.is_integer()) || (src.ty.is_float() && target.is_float()) {
+        // A C word counts as a width on both sides: `(as c-ulong 16)` makes
+        // one to pass, `(as i32 n)` reads one that came back. It is the only
+        // way to do either, since these types carry no arithmetic of their own.
+        let int_like = |t: &Type| t.is_integer() || t.is_c_word();
+        if (int_like(&src.ty) && int_like(&target)) || (src.ty.is_float() && target.is_float()) {
             return self.width_cast(heap, interp, env, src, &target, try_variant);
         }
         // Boxing as a trait object — the explicit spelling of the same
@@ -11085,7 +11205,10 @@ impl Checker {
         target: &Type,
         try_variant: bool,
     ) -> Result<Checked, Error> {
-        let family = if target.is_integer() { "int" } else { "float" };
+        // A C word is in the integer family here: the method that performs the
+        // cast is `int->W`, and `W` being a C word does not change which
+        // family asked for it.
+        let family = if target.is_integer() || target.is_c_word() { "int" } else { "float" };
         let name = crate::type_key::type_key_of_type(target);
         let method = if try_variant { format!("try-{}->{}", family, name) } else { format!("{}->{}", family, name) };
         let owner = prim_type_path(&src.ty).expect("a width cast's source is a primitive type");
@@ -12606,6 +12729,7 @@ impl Checker {
             }
             _ => return Err(Error::TypeError("defvar: name must be (name Type)".into())),
         };
+        Self::reject_raw_word_storage(&ann, "the global", &name)?;
         // The value is checked at the top level (no locals), but globals/fns are
         // visible via the registry.
         let value = self.check(heap, interp, &Env::new(), parts[1], Some(&ann))?;
@@ -15582,7 +15706,12 @@ fn trait_operator_method(op: &str) -> Option<&'static str> {
 
 fn int_lit_ty(expected: Option<&Type>) -> Type {
     match expected {
-        Some(t) if t.is_integer() => t.clone(),
+        // A C word too, so `(c-malloc 16)` reads the way it should. Nothing is
+        // loosened by it: the literal's type is then `c-ulong`, which
+        // `check_at`'s rule B still refuses outside `(unsafe ...)`, and
+        // `int_lit_in_range` still checks 16 against a 64-bit unsigned width
+        // — `int_width_signed` answers for these two.
+        Some(t) if t.is_integer() || t.is_c_word() => t.clone(),
         _ => Type::I32,
     }
 }

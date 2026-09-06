@@ -990,6 +990,14 @@ impl Interp {
                 Value::Int(h) => Ok(*h),
                 other => Err(EvalError::Internal(format!("compiled call: expected an llvm handle argument, got {:?}", other))),
             },
+            // A `ptr`/`c-long`/`c-ulong` crosses raw, for the same reason a
+            // handle does and with more at stake: all 64 bits are meaningful,
+            // so the tagged catch-all would not merely misread it — it would
+            // discard the top three. Must stay ahead of that catch-all.
+            Repr::RawWord => match v {
+                Value::Int(n) => Ok(*n),
+                other => Err(EvalError::Internal(format!("compiled call: expected a raw word argument, got {:?}", other))),
+            },
             // Every remaining representation — `Sexpr`, `string`,
             // `bignum`/`ratio`, structs, enums, closures, trait objects, and a
             // `Scope<V>` (one heap object since Phase 1a) — is already a heap
@@ -1025,6 +1033,10 @@ impl Interp {
             },
             // Raw machine words on the way out, mirroring the argument encode.
             Repr::Int => Value::Int(raw),
+            // Also raw, and — unlike `Handle` above — with no registry to
+            // check it against. Whatever C answered is the answer; the FFI
+            // declaration is what claimed it would be a pointer.
+            Repr::RawWord => Value::Int(raw),
             // A `Unit`-typed body compiles to a plain `0` (`compile-unit`) —
             // decode it back to the real unit value rather than surfacing the
             // raw word as a bogus `Int(0)`, so a `Unit`-returning compiled
@@ -3583,6 +3595,7 @@ impl Interp {
 fn int_receiver_width(type_name: &Path) -> Option<(u32, bool)> {
     crate::types::INT_TYPE_NAMES
         .iter()
+        .chain(crate::types::C_WORD_TYPE_NAMES.iter())
         .find(|n| *type_name == Path::root(n))
         .and_then(|n| crate::types::int_width_signed(n))
 }

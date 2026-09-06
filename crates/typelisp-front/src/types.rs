@@ -239,6 +239,34 @@ pub enum Type {
     /// `Checker::parse_params_rest` for the parallel `defun`/`lambda`
     /// parameter-list syntax).
     Fn(Vec<Type>, Option<Box<Type>>, Box<Type>),
+    /// An opaque C pointer — `void *`, `FILE *`, whatever the declaration
+    /// meant. Only ever produced or consumed by a `defffi` declaration, and
+    /// only inside `(unsafe ...)`.
+    ///
+    /// **A raw machine word, not a tagged one.** Every other heap-bearing
+    /// value in this language crosses the compiled boundary with a 3-bit tag
+    /// in its low bits; a pointer cannot, because it needs all 64. That is
+    /// what confines it: it may not be a `defstruct` field, a `defvar`, or a
+    /// type argument (`Vector<ptr>`), because each of those tags what it
+    /// stores. See [`crate::check::repr::Repr::RawWord`].
+    ///
+    /// The collector does not trace it, which is right — it points outside the
+    /// heap entirely — and is the other half of why it is confined.
+    Ptr,
+    /// C's `long` / `int64_t` / `intptr_t`, and [`Self::CULong`] its unsigned
+    /// twin (`unsigned long`, `size_t`, `uint64_t`).
+    ///
+    /// Named for C rather than spelled `i64`/`u64` on purpose. This language
+    /// deliberately has no 64-bit integer type — a tagged immediate has 61
+    /// bits (see [`Self::is_integer`]) — and the name says which of the two
+    /// things it is: a word on the way to or from C, not an integer of this
+    /// language. It is deliberately *not* in `INT_TYPE_NAMES`, so it carries
+    /// no arithmetic: to compute with one, convert (`as i32`, `as bignum`).
+    ///
+    /// LP64 is assumed, which every Unix this workspace supports uses (the
+    /// `#[cfg(unix)]` split in `typelisp_rt::os` is the same assumption).
+    CLong,
+    CULong,
 }
 
 impl Type {
@@ -252,6 +280,13 @@ impl Type {
     /// a tagged word whose low 3 bits are the tag, so an immediate integer
     /// has 61 bits — a type that claims 64 would have to lose the top 3
     /// somewhere. Wider-than-`i32` arithmetic is `bignum`'s job.
+    /// The two C-boundary word types. Not integers of this language (see
+    /// [`Self::is_integer`]) — they carry no arithmetic — but convertible to
+    /// and from one, which is the only way to compute with what C handed over.
+    pub fn is_c_word(&self) -> bool {
+        matches!(self, Type::CLong | Type::CULong)
+    }
+
     pub fn is_integer(&self) -> bool {
         matches!(self, Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32)
     }
@@ -271,6 +306,13 @@ impl Type {
 /// predicate.
 pub const INT_TYPE_NAMES: [&str; 6] = ["i8", "i16", "i32", "u8", "u16", "u32"];
 
+/// The two C-boundary word types, which are 64 bits wide and deliberately
+/// *not* in [`INT_TYPE_NAMES`]: they have no arithmetic, only conversions.
+/// Kept as their own list so the places that mean "an integer of this
+/// language" and the places that mean "a machine word of a known width" stay
+/// distinguishable.
+pub const C_WORD_TYPE_NAMES: [&str; 2] = ["c-long", "c-ulong"];
+
 /// The bit width and signedness `name` claims, for the integer type names in
 /// [`INT_TYPE_NAMES`].
 ///
@@ -284,6 +326,16 @@ pub const INT_TYPE_NAMES: [&str; 6] = ["i8", "i16", "i32", "u8", "u16", "u32"];
 /// 64-bit instructions for the unsigned types too — every width here is at
 /// most 32, so a normalized unsigned value is a non-negative `i64`.
 pub fn int_width_signed(name: &str) -> Option<(u32, bool)> {
+    // The C words first: 64 bits under LP64, which is every platform this
+    // workspace builds for. They are not in `INT_TYPE_NAMES`, so the callers
+    // that ask "is this an integer of this language" still say no — but the
+    // ones that ask "how wide is this word" need an answer, because the width
+    // casts and the FFI thunk are both driven by it.
+    match name {
+        "c-long" => return Some((64, true)),
+        "c-ulong" => return Some((64, false)),
+        _ => {}
+    }
     Some(match name {
         "i8" => (8, true),
         "i16" => (16, true),
@@ -316,6 +368,9 @@ pub fn primitive_types() -> Vec<Type> {
         Type::U8, Type::U16, Type::U32,
         Type::F32, Type::F64, Type::Bignum, Type::Ratio, Type::RandomState,
         Type::Bool, Type::Char, Type::Str, Type::Symbol,
+        // Registered so their conversions have somewhere to live. What they
+        // get is `c_word_assoc`, not `int_assoc` — see that function.
+        Type::CLong, Type::CULong,
     ]
 }
 
@@ -326,6 +381,12 @@ pub fn primitive_types() -> Vec<Type> {
 /// `Fn`, which are not primitive value types with their own method table here.
 pub fn prim_type_path(ty: &Type) -> Option<Path> {
     let name = match ty {
+        // `ptr` is genuinely opaque — nothing to call on it. The two C words
+        // are addressable, because their conversions hang here; what they do
+        // *not* get is arithmetic (see `registry::c_word_assoc`).
+        Type::Ptr => return None,
+        Type::CLong => "c-long",
+        Type::CULong => "c-ulong",
         Type::I8 => "i8",
         Type::I16 => "i16",
         Type::I32 => "i32",
@@ -785,6 +846,12 @@ pub fn primitive_by_name(name: &str) -> Option<Type> {
         "string" => Type::Str,
         "symbol" => Type::Symbol,
         "!" => Type::Never,
+        // The FFI's raw words. Spellable anywhere a type is, and usable only
+        // inside `(unsafe ...)` — that check is the checker's, not the
+        // parser's, because it is about the expression and not the spelling.
+        "ptr" => Type::Ptr,
+        "c-long" => Type::CLong,
+        "c-ulong" => Type::CULong,
         _ => return None,
     })
 }

@@ -641,6 +641,9 @@ impl Registry {
                 // back at the receiver's own width. What this entry removes
                 // is the state these types were in before: registered,
                 // nameable, and with no `+` at all.
+                // Ahead of the integer arm, which they would not match anyway
+                // — spelled out because the difference is the point.
+                ref t if t.is_c_word() => c_word_assoc(t.clone()),
                 ref t if t.is_integer() => int_assoc(t.clone()),
                 ref t if t.is_float() => float_assoc(t.clone()),
                 _ => BTreeMap::new(),
@@ -2304,8 +2307,11 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // One pair per *target*, on every integer receiver, because the target is
     // the only thing a conversion's name can carry: there is no way to spell
     // "narrow to whatever width the context wants" as one method.
-    for target in crate::types::INT_TYPE_NAMES {
-        let to = crate::types::primitive_by_name(target).expect("INT_TYPE_NAMES names a primitive type");
+    // The C words are targets as well as the six widths: `(as c-ulong n)` is
+    // how a size is made for a C function, and without it a `c-ulong`
+    // parameter could be declared and never passed anything.
+    for target in crate::types::INT_TYPE_NAMES.iter().chain(crate::types::C_WORD_TYPE_NAMES.iter()) {
+        let to = crate::types::primitive_by_name(target).expect("the width names are primitive types");
         m.insert(
             format!("int->{}", target),
             AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: to.clone(), public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true },
@@ -2317,6 +2323,39 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     }
     m.insert("print".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
     m.insert("println".to_string(), AssocFn { sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty], ret: Type::Unit, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true });
+    m
+}
+
+/// The conversions a `c-long`/`c-ulong` gets, and nothing else.
+///
+/// Deliberately not [`int_assoc`]. These are words on the way to or from C,
+/// and giving them `+` would invite exactly the thing this language removed
+/// its 64-bit integer type to prevent: arithmetic on a value that cannot be
+/// stored anywhere, quietly different in width from every other number here.
+/// What they do need is a way out — `strlen` answering `c-ulong` is useless if
+/// nothing can read it — so every narrowing target is here, plus `bignum` for
+/// the values that do not fit in one.
+///
+/// The runtime side needs no new code: `Interp::eval_assoc_builtin` dispatches
+/// `int->W` by parsing `W`'s own width out of its name
+/// (`types::int_width_signed`), which now answers for these two.
+fn c_word_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
+    let mut m = BTreeMap::new();
+    let conv = |ret: Type| AssocFn {
+        sig: FnSig { ffi: false, type_params: vec![], rest: None, params: vec![ty.clone()], ret, public: true, builtin: true, bounds: BTreeMap::new(), optionals: Vec::new(), keys: Vec::new() },
+        instance: true,
+        builtin: true,
+    };
+    for target in crate::types::INT_TYPE_NAMES.iter().chain(crate::types::C_WORD_TYPE_NAMES.iter()) {
+        let to = crate::types::primitive_by_name(target).expect("the width names are primitive types");
+        m.insert(format!("int->{}", target), conv(to.clone()));
+        m.insert(format!("try-int->{}", target), conv(option_of(to)));
+    }
+    // Always exact, which is what makes it the honest way to read a `size_t`
+    // that does not fit in an `i32`.
+    m.insert("int->bignum".to_string(), conv(Type::Bignum));
+    m.insert("print".to_string(), conv(Type::Unit));
+    m.insert("println".to_string(), conv(Type::Unit));
     m
 }
 

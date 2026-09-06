@@ -182,6 +182,135 @@ fn a_nul_inside_a_string_argument_is_refused() {
     assert!(e.contains("NUL"), "unexpected error: {}", e);
 }
 
+// ------------------------------------------------- pointers and 64-bit words
+
+#[test]
+fn round_trips_a_pointer_through_malloc_and_free() {
+    // The whole point of `ptr`: hold what C handed back, hand it back to C.
+    // `malloc` answers with something non-null for 16 bytes.
+    assert_eq!(
+        int(
+            r#"
+            (defffi (c-malloc "malloc") (c-ulong) ptr)
+            (defffi (c-free "free") (ptr) ())
+            (unsafe
+              (let ((p (c-malloc 16)))
+                (c-free p)
+                1))
+            "#
+        ),
+        1
+    );
+}
+
+#[test]
+fn a_64_bit_result_keeps_its_top_bits() {
+    // `strlen` answers with a `size_t`. The value here is small, but the
+    // declaration is what proves `c-ulong` reaches the thunk as a full word
+    // rather than being narrowed on the way.
+    assert_eq!(
+        int(r#"(defffi (c-strlen "strlen") (string) c-ulong) (as i32 (unsafe (c-strlen "hello")))"#),
+        5
+    );
+}
+
+#[test]
+fn a_wrapper_may_return_a_pointer() {
+    // The `unsafe` form's own value is the one exception to rule B, so a
+    // function that hands a pointer back can be written at all.
+    assert_eq!(
+        int(
+            r#"
+            (defffi (c-malloc "malloc") (c-ulong) ptr)
+            (defffi (c-free "free") (ptr) ())
+            (defun get-block () ptr (unsafe (c-malloc 8)))
+            (unsafe (c-free (get-block)))
+            0
+            "#
+        ),
+        0
+    );
+}
+
+// -------------------------------------------------- where a raw word may not go
+
+#[test]
+fn a_pointer_outside_unsafe_is_a_type_error() {
+    let e = err(
+        r#"
+        (defffi (c-malloc "malloc") (c-ulong) ptr)
+        (defun leak () ptr (unsafe (c-malloc 8)))
+        (defun use-it () i32 (let ((p (leak))) 1))
+        "#,
+    );
+    assert!(e.contains("unsafe"), "unexpected error: {}", e);
+}
+
+#[test]
+fn a_pointer_cannot_be_a_struct_field() {
+    // Tagging it would drop its top three bits — the same reason this
+    // language has no 64-bit integer type.
+    let e = err("(defstruct handle (p ptr))");
+    assert!(e.contains("tags what it holds"), "unexpected error: {}", e);
+}
+
+#[test]
+fn a_pointer_cannot_be_an_enum_field() {
+    let e = err("(defenum maybe-ptr (none) (some ptr))");
+    assert!(e.contains("tags what it holds"), "unexpected error: {}", e);
+}
+
+#[test]
+fn a_pointer_cannot_be_a_global() {
+    let e = err(
+        r#"
+        (defffi (c-malloc "malloc") (c-ulong) ptr)
+        (defvar (block ptr) (unsafe (c-malloc 8)))
+        "#,
+    );
+    assert!(e.contains("tags what it holds"), "unexpected error: {}", e);
+}
+
+#[test]
+fn a_pointer_cannot_be_a_type_argument() {
+    let e = err("(defffi (c-nope \"abs\") ((vector ptr)) i32)");
+    assert!(e.contains("inside another type"), "unexpected error: {}", e);
+}
+
+#[test]
+fn a_pointer_captured_by_a_closure_is_refused_at_compile_time() {
+    // A captured binding is stored in a cell, and a cell tags what it holds.
+    // The checker lets this through — captures are the bridge's notion — so
+    // the bridge is where it is caught, and only when the function is
+    // actually compiled.
+    let e = err(
+        r#"
+        (defffi (c-malloc "malloc") (c-ulong) ptr)
+        (defffi (c-free "free") (ptr) ())
+        (defun leak () i32
+          (unsafe
+            (let ((p (c-malloc 8)))
+              (labels ((cleanup () () (c-free p)))
+                (cleanup)
+                1))))
+        (compile leak)
+        "#,
+    );
+    assert!(e.contains("cell"), "unexpected error: {}", e);
+}
+
+#[test]
+fn a_raw_word_carries_no_arithmetic() {
+    // Deliberate: these are words on the way to or from C, not numbers.
+    let e = err(
+        r#"
+        (defffi (c-strlen "strlen") (string) c-ulong)
+        (unsafe (+ (c-strlen "ab") 1))
+        "#,
+    );
+    assert!(!e.is_empty(), "arithmetic on a c-ulong must not check");
+}
+
 // --------------------------------------------------------- the compiled path
 
 #[test]
