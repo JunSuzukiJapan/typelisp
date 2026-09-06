@@ -76,7 +76,7 @@ session has changed.")
 
 (defconst typelisp-special-forms
   '(;; binding & conditionals (docs/syntax.md §4)
-    "let" "let*" "if" "when" "unless" "cond" "case" "and" "or" "progn"
+    "let" "let*" "if" "when" "unless" "cond" "case" "and" "or" "progn" "unsafe"
     "the" "match" "if-let" "while-let"
     ;; CL's chapter-5 control forms (cl-parity-plan.md Phase 4a, §4/§7)
     "ecase" "ccase" "prog1" "prog2" "setq" "psetq" "psetf"
@@ -911,6 +911,7 @@ has already claimed it for `font-lock-string-face'."
     ("and"         . 0)
     ("or"          . 0)
     ("progn"       . 0)
+    ("unsafe"      . 0)
     ("the"         . 1)
     ("match"       . 1)
     ("while-let"   . 1)

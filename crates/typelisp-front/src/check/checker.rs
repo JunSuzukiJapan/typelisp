@@ -389,6 +389,7 @@ struct BlockFrame {
 struct Escapes {
     loops: Vec<Type>,
     blocks: Vec<BlockFrame>,
+    unsafe_depth: u32,
 }
 
 /// A generic `defun`'s retained raw source form, for re-checking at each
@@ -693,6 +694,23 @@ pub struct Checker {
     /// to cross an activation this compiler does not already see. CL leaves a
     /// `return-from` to an exited block undefined; here it does not typecheck.
     block_stack: RefCell<Vec<BlockFrame>>,
+    /// How many `unsafe` forms enclose the expression being checked.
+    ///
+    /// Internal mutability for the same reason [`Self::loop_stack`] has it:
+    /// `check_at`/`check_inner` recurse under `&self`. A count rather than a
+    /// stack because an `unsafe` carries neither a name nor a type — nothing
+    /// a frame would hold. `block_stack` needs frames because `return-from`
+    /// names one; nothing names an `unsafe`.
+    ///
+    /// **Lexical, and cleared only where checking leaves the text.** A
+    /// `lambda`/`labels` body written inside an `unsafe` inherits it, the way
+    /// a closure written inside Rust's `unsafe` block does: the author wrote
+    /// those operations there, and writing them is what takes on the
+    /// obligation. [`Self::enter_specialization`] is the one place that
+    /// clears it, because that re-checks a *different* function's body —
+    /// source that is not inside the `unsafe` that happened to trigger the
+    /// instantiation. That is the same reason it clears `loop_stack`.
+    unsafe_depth: Cell<u32>,
     /// The type each `catch`/`throw` symbol carries, learned from the first
     /// use of that symbol and enforced on every later one.
     ///
@@ -867,6 +885,7 @@ impl Checker {
             ns_base: Vec::new(),
             loop_stack: RefCell::new(Vec::new()),
             block_stack: RefCell::new(Vec::new()),
+            unsafe_depth: Cell::new(0),
             throw_tags: RefCell::new(std::collections::BTreeMap::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
@@ -2694,7 +2713,7 @@ impl Checker {
         matches!(
             name,
             // expression special forms (`check_list`)
-            "if" | "let" | "let*" | "progn" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
+            "if" | "let" | "let*" | "progn" | "unsafe" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
                 | "match" | "panic" | "the" | "as" | "try-as" | "compile"
@@ -4106,8 +4125,13 @@ impl Checker {
         // specialization re-checks a *different* function's body, so an
         // enclosing `block` of the site that triggered it is not in scope.
         let saved_blocks = std::mem::take(&mut *self.block_stack.borrow_mut());
+        // Cleared for the third time here, and for the same reason: an
+        // `unsafe` around the *call site* that requested this instantiation
+        // says nothing about the template's own body, which was written
+        // somewhere else entirely.
+        let saved_unsafe = self.unsafe_depth.replace(0);
         let saved_bindings = std::mem::replace(&mut self.type_var_bindings, bindings);
-        (saved_ns, Escapes { loops: saved_loops, blocks: saved_blocks }, saved_bindings)
+        (saved_ns, Escapes { loops: saved_loops, blocks: saved_blocks, unsafe_depth: saved_unsafe }, saved_bindings)
     }
 
     fn exit_specialization(
@@ -4119,6 +4143,7 @@ impl Checker {
         self.type_var_bindings = saved_bindings;
         *self.loop_stack.borrow_mut() = saved.loops;
         *self.block_stack.borrow_mut() = saved.blocks;
+        self.unsafe_depth.set(saved.unsafe_depth);
         self.ns = saved_ns;
     }
 
@@ -9387,6 +9412,26 @@ impl Checker {
             "progn" => {
                 let (body, ty) = self.check_seq(heap, interp, env, args, arg_locs, expected)?;
                 // Represent progn as a let with no bindings.
+                let form = self.let_form(heap, &[], &body)?;
+                return Ok(Checked::new(form, ty));
+            }
+            // `(unsafe body...)` — a `progn` that also grants permission to
+            // write the operations this compiler cannot check: an FFI call
+            // (the declared C signature is taken on faith) and the raw words
+            // `ptr`/`c-long`/`c-ulong`. It produces no node of its own for
+            // the same reason `progn` produces none — sequencing already has
+            // a spelling — so nothing downstream of the checker learns that
+            // `unsafe` was ever written. Permission is a question about the
+            // source, and it is answered here.
+            "unsafe" => {
+                self.unsafe_depth.set(self.unsafe_depth.get() + 1);
+                let result = self.check_seq(heap, interp, env, args, arg_locs, expected);
+                // Restored on the error path too: in recovery mode the
+                // checker keeps going after this returns `Err`, and a depth
+                // left standing would make every later form in the file
+                // unsafe.
+                self.unsafe_depth.set(self.unsafe_depth.get() - 1);
+                let (body, ty) = result?;
                 let form = self.let_form(heap, &[], &body)?;
                 return Ok(Checked::new(form, ty));
             }

@@ -182,7 +182,7 @@
       "name": "storage.modifier.lambda-list.typelisp"
     },
     "special-form": {
-      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:pprint\\-logical\\-block|unquote\\-splicing|symbol\\-macrolet|pprint\\-tabular|unwind\\-protect|documentation|pprint\\-linear|disassemble|pprint\\-fill|return\\-from|source\\-file|unreachable|quasiquote|while\\-let|macrolet|compile|dotimes|println|rotatef|unquote|untrace|doiter|dolist|format|if\\-let|labels|lambda|pprint|return|shiftf|try\\-as|unless|apply|block|break|catch|ccase|ecase|match|panic|print|prog1|prog2|progn|psetf|psetq|quote|throw|trace|until|while|case|cond|decf|incf|let\\*|list|loop|setf|setq|step|todo|when|and|do\\*|let|the|as|do|ed|if|or)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:pprint\\-logical\\-block|unquote\\-splicing|symbol\\-macrolet|pprint\\-tabular|unwind\\-protect|documentation|pprint\\-linear|disassemble|pprint\\-fill|return\\-from|source\\-file|unreachable|quasiquote|while\\-let|macrolet|compile|dotimes|println|rotatef|unquote|untrace|doiter|dolist|format|if\\-let|labels|lambda|pprint|return|shiftf|try\\-as|unless|unsafe|apply|block|break|catch|ccase|ecase|match|panic|print|prog1|prog2|progn|psetf|psetq|quote|throw|trace|until|while|case|cond|decf|incf|let\\*|list|loop|setf|setq|step|todo|when|and|do\\*|let|the|as|do|ed|if|or)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
       "name": "keyword.control.typelisp"
     },
     "clause": {
