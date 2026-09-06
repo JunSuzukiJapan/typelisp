@@ -134,7 +134,7 @@ producer が 2 つある」と明記している）、`Unit` が「その番号�
 | `printer_test` | 2 | **削除した挙動を固定していた**（幅の曖昧さエラー・別の幅のメソッドに届く） |
 
 書き換えた `printer_test` が**本物のバグを 1 件釣った**: `format_call` が受け手を
-宣言型で渡していなかった（`docs/dev/TODO.md` の該当節）。
+宣言型で渡していなかった（`docs/dev/completed-work.md` の該当節）。
 
 直列全実行（`scripts/test-serial.sh`）は 118 個の `test result` すべて ok、
 `ALL TESTS PASSED (serial)`。`cargo check --all-targets` は警告 0 件。

@@ -1082,7 +1082,7 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
 ## 11.2 `BitVector`（ビットベクタ）
 
 固定長のビット列。`Vector<i32>` に **1 語 31bit** で詰めた prelude の `defstruct`
-（64bit にしない理由は [dev/TODO.md](dev/TODO.md) の整数切り詰めの節）。
+（64bit にしない理由は [dev/completed-work.md](dev/completed-work.md) の整数切り詰めの節）。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
