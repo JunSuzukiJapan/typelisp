@@ -181,6 +181,26 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value) -> Result<Val
     core::tagged(heap, "block", &[name, body])
 }
 
+/// `(go CALL)` — run `CALL` in a new task.
+///
+/// One field, and it is an already-checked call node (`call`/`assoc`/
+/// `dyn-call`/`apply`). The callee and the arguments inside it are evaluated by
+/// the task that runs the `go`, in the order they are written; only the call
+/// itself happens in the new task. That is Go's rule for `go f(x)`, and it is
+/// why this wraps a call rather than a thunk — a thunk would capture the
+/// arguments instead of evaluating them.
+///
+/// `call` is rooted first because `tagged` allocates. Its caller has it rooted
+/// already (`check_at`'s contract), so this is belt and braces — but the window
+/// between an unrooted node and the next allocation is where four leaks in this
+/// file have lived, and a root here costs one stack slot until the top-level
+/// form releases them all.
+pub(super) fn go_form(heap: &mut Heap, call: Value) -> Result<Value, Error> {
+    let call = rooted(heap, call);
+    let form = core::tagged(heap, "go", &[call])?;
+    Ok(rooted(heap, form))
+}
+
 /// `(return-from NAME)` / `(return-from NAME FORM)` — leave the enclosing
 /// [`block_form`] of that name.
 pub(super) fn return_from_form(heap: &mut Heap, name: &str, value: Option<Value>) -> Result<Value, Error> {

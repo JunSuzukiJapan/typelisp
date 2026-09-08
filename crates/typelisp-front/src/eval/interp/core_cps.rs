@@ -51,6 +51,13 @@ enum State {
     Eval(Value, Value),
     /// A value is ready. Hand it to the top frame, or return it if there is none.
     Apply(Value),
+    /// Begin by completing a call whose callee and arguments are already
+    /// evaluated. **Only a task `go` started starts here**: the form that ran
+    /// the `go` did the evaluating, and this is what it handed over.
+    ///
+    /// `argv` is a heap list rather than a `Vec` so the two state slots can
+    /// root it — a `Vec<Value>` in a Rust local is invisible to the collector.
+    Enter { form: Value, argv: Value, kind: ArgsKind },
     /// A non-local exit is in flight. Discard frames until one claims it.
     ///
     /// This is where `break`/`return`/`return-from`/`throw` live. The value
@@ -64,6 +71,27 @@ enum State {
     /// The one-slot assumption survives there — something Phase B has to look
     /// at, since two tasks can then be unwinding at once.
     Unwind(EvalError),
+}
+
+/// The `ArgsKind` of an already-checked call node — what `(go CALL)` wraps.
+///
+/// `check_go` has already refused anything that is not one of these four, so a
+/// tag arriving here that is not a call means the checker and the evaluator
+/// disagree about what `go` accepts.
+fn call_kind(heap: &Heap, call: Value) -> Result<ArgsKind, EvalError> {
+    let tag = match heap.car(call) {
+        Ok(Value::Symbol(id)) => id,
+        _ => return Err(EvalError::Internal("eval: (go ..) does not wrap a node".to_string())),
+    };
+    match Op::from_sym(tag) {
+        Some(Op::Call) => Ok(ArgsKind::Call),
+        Some(Op::Assoc) => Ok(ArgsKind::Assoc),
+        Some(Op::DynCall) => Ok(ArgsKind::DynCall),
+        other => Err(EvalError::Internal(format!(
+            "eval: (go ..) wraps {:?}, which is not a call",
+            other
+        ))),
+    }
 }
 
 /// Which node an `Args` frame is collecting arguments for.
@@ -133,7 +161,9 @@ enum Frame {
     /// carries the rest. An argument evaluated three ago is as collectible as
     /// the one that just arrived, so all of them stay rooted until the call
     /// itself is made.
-    Args { form: Value, done: Vec<Value>, env: Value, kind: ArgsKind },
+    /// `spawn` marks the arguments of a `(go ...)`: when they are all in,
+    /// the call is handed to a new task instead of being made here.
+    Args { form: Value, done: Vec<Value>, env: Value, kind: ArgsKind, spawn: bool },
     /// `(step E)` — running `E` with stepping armed, holding what to restore.
     Step { was_stepping: bool, was_quiet: usize },
     /// A traced or stepped call, open around its callee's body.
@@ -345,6 +375,27 @@ impl Task {
         heap.push_root(form);
         Task { sbase, stack: CpsStack::new(), state: State::Eval(form, env) }
     }
+
+    /// Starts a task that completes a call whose callee and arguments have
+    /// already been evaluated — what `(go (f a b))` hands over.
+    fn start_call(heap: &mut Heap, form: Value, argv: Value, kind: ArgsKind) -> Task {
+        let sbase = heap.root_count();
+        heap.push_root(argv);
+        heap.push_root(form);
+        Task { sbase, stack: CpsStack::new(), state: State::Enter { form, argv, kind } }
+    }
+}
+
+/// The runtime value of a `Task<T>`: a boxed struct holding the scheduler's id.
+///
+/// The key carries no type argument. `Task<i32>` and `Task<string>` are the
+/// same thing at run time — no fields to read, and `wait`'s return type is
+/// spelled at the call site — so a type argument here would distinguish nothing.
+/// That is unlike `Vector<T>`, where the site has to carry its elements'
+/// representation because the definition cannot tell you.
+fn task_handle(heap: &mut Heap, id: TaskId) -> Value {
+    // type-identity-ok: the built-in `Task`, a root name spelled in full
+    crate::type_key::alloc_typed_struct(heap, &crate::Path::root("task"), vec![Value::Int(id.0 as i64)])
 }
 
 /// A task the scheduler owns, and the root stack that belongs to it.
@@ -373,8 +424,8 @@ pub(super) struct TaskId(usize);
 /// borrow.
 #[derive(Default)]
 pub(crate) struct Scheduler {
-    /// Occupied while a task exists and is not currently taken out to run.
-    slots: Vec<Option<TaskSlot>>,
+    /// One entry per task position — see [`Slot`].
+    slots: Vec<Slot>,
     /// Ids ready to run, oldest first.
     ready: std::collections::VecDeque<TaskId>,
     /// Whether a `drive` loop is on the Rust stack. A *nested* `eval_cps` — a
@@ -384,38 +435,61 @@ pub(crate) struct Scheduler {
     driving: bool,
 }
 
+/// One position in the scheduler's table.
+///
+/// `Running` exists so a position stays **reserved** while its task is out
+/// being stepped. Without it, `admit` reuses the position of whichever task is
+/// currently running — which is exactly what a `go` inside the main task does,
+/// and the new task then inherits main's id and is retired along with it.
+enum Slot {
+    /// No task here. `admit` may reuse this position.
+    Empty,
+    /// A task that exists and is not running.
+    Parked(TaskSlot),
+    /// A task that is taken out to be stepped.
+    Running,
+}
+
+impl Default for Slot {
+    fn default() -> Slot {
+        Slot::Empty
+    }
+}
+
 impl Scheduler {
     /// Adds a task and makes it ready to run.
     fn admit(&mut self, slot: TaskSlot) -> TaskId {
-        let id = match self.slots.iter().position(|s| s.is_none()) {
+        let id = match self.slots.iter().position(|s| matches!(s, Slot::Empty)) {
             Some(i) => TaskId(i),
             None => {
-                self.slots.push(None);
+                self.slots.push(Slot::Empty);
                 TaskId(self.slots.len() - 1)
             }
         };
-        self.slots[id.0] = Some(slot);
+        self.slots[id.0] = Slot::Parked(slot);
         self.ready.push_back(id);
         id
     }
 
-    /// Takes the next ready task *out* to be stepped. The caller puts it back
-    /// (`put_back`) or retires it.
+    /// Takes the next ready task *out* to be stepped, reserving its position.
+    /// The caller puts it back (`put_back`) or retires it.
     fn next_ready(&mut self) -> Option<(TaskId, TaskSlot)> {
         let id = self.ready.pop_front()?;
-        let slot = self.slots[id.0].take().expect("a ready task is in its slot");
-        Some((id, slot))
+        match std::mem::replace(&mut self.slots[id.0], Slot::Running) {
+            Slot::Parked(slot) => Some((id, slot)),
+            _ => unreachable!("a queued task is parked in its slot"),
+        }
     }
 
     /// Returns a task that is still running to the back of the queue.
     fn put_back(&mut self, id: TaskId, slot: TaskSlot) {
-        self.slots[id.0] = Some(slot);
+        self.slots[id.0] = Slot::Parked(slot);
         self.ready.push_back(id);
     }
 
-    /// Frees a finished task's slot.
+    /// Frees a finished task's position.
     fn retire(&mut self, id: TaskId) {
-        self.slots[id.0] = None;
+        self.slots[id.0] = Slot::Empty;
     }
 }
 
@@ -462,6 +536,10 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
     match state {
         State::Eval(form, env) => {
             heap.set_root(sbase, *env);
+            heap.set_root(sbase + 1, *form);
+        }
+        State::Enter { form, argv, .. } => {
+            heap.set_root(sbase, *argv);
             heap.set_root(sbase + 1, *form);
         }
         State::Apply(v) => {
@@ -660,6 +738,22 @@ impl Interp {
                     Err(e) => State::Unwind(place(e, loc)),
                 }
             }
+            // A task `go` started begins here: the call's parts are in hand,
+            // so there is nothing to evaluate before making it.
+            State::Enter { form, argv, kind } => {
+                let loc = heap.cons_loc(form);
+                match heap.list_to_vec(argv).map_err(heap_err).and_then(|argv| {
+                    self.finish_args(heap, form, argv, kind, false)
+                }) {
+                    Ok((next, pushed)) => {
+                        if let Some(f) = pushed {
+                            task.stack.push(heap, f, loc);
+                        }
+                        next
+                    }
+                    Err(e) => State::Unwind(place(e, loc)),
+                }
+            }
             State::Unwind(e) => match task.stack.pop() {
                 None => return Progress::Done(Err(e)),
                 Some((frame, fbase, loc)) => {
@@ -803,6 +897,17 @@ impl Interp {
             | Op::Untrace
             | Op::DisassembleFn => Ok(State::Apply(self.eval_leaf(heap, form, env)?)),
 
+            // `(go CALL)` — the call's own arguments are collected here, in
+            // this task, and only then handed over. `arg_forms` reads them out
+            // of the inner node, so the collection is the ordinary one; `spawn`
+            // is the single bit that changes what happens once they are in.
+            Op::Go => {
+                let call = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (go ..) has no call".to_string()))?;
+                let kind = call_kind(heap, call)?;
+                self.start_args(heap, stack, call, env, kind, true, loc)
+            }
+
             Op::If => {
                 let cond = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (if ..) has no condition".to_string()))?;
@@ -861,10 +966,10 @@ impl Interp {
                 Ok(State::Eval(init, env))
             }
 
-            Op::Call => self.start_args(heap, stack, form, env, ArgsKind::Call, loc),
-            Op::Construct => self.start_args(heap, stack, form, env, ArgsKind::Construct, loc),
-            Op::Assoc => self.start_args(heap, stack, form, env, ArgsKind::Assoc, loc),
-            Op::DynCall => self.start_args(heap, stack, form, env, ArgsKind::DynCall, loc),
+            Op::Call => self.start_args(heap, stack, form, env, ArgsKind::Call, false, loc),
+            Op::Construct => self.start_args(heap, stack, form, env, ArgsKind::Construct, false, loc),
+            Op::Assoc => self.start_args(heap, stack, form, env, ArgsKind::Assoc, false, loc),
+            Op::DynCall => self.start_args(heap, stack, form, env, ArgsKind::DynCall, false, loc),
 
             // `labels` evaluates nothing of its own: the closures are built
             // and bound, and only the body runs. Two passes, because the
@@ -1068,16 +1173,17 @@ impl Interp {
         form: Value,
         env: Value,
         kind: ArgsKind,
+        spawn: bool,
         loc: Option<crate::Loc>,
     ) -> Result<State, EvalError> {
         let args = arg_forms(heap, form, kind)?;
         match args.first() {
             Some(&first) => {
-                stack.push(heap, Frame::Args { form, done: Vec::new(), env, kind }, loc.clone());
+                stack.push(heap, Frame::Args { form, done: Vec::new(), env, kind, spawn }, loc.clone());
                 Ok(State::Eval(first, env))
             }
             None => {
-                let (next, pushed) = self.finish_args(heap, form, Vec::new(), kind)?;
+                let (next, pushed) = self.finish_args(heap, form, Vec::new(), kind, spawn)?;
                 if let Some(f) = pushed {
                     stack.push(heap, f, loc.clone());
                 }
@@ -1093,13 +1199,45 @@ impl Interp {
         form: Value,
         argv: Vec<Value>,
         kind: ArgsKind,
+        spawn: bool,
     ) -> Result<(State, Option<Frame>), EvalError> {
+        // `go`: the call does not happen here. It becomes a task of its own,
+        // and this form gets a handle on it instead of a result. Deciding it
+        // *before* the call is what keeps `(go (f x))` concurrent even when `f`
+        // is compiled — a compiled body runs to completion once entered, so
+        // entering it here would make the `go` a plain call.
+        if spawn {
+            let handle = self.spawn_task(heap, form, argv, kind)?;
+            return Ok((State::Apply(handle), None));
+        }
         match kind {
             ArgsKind::Call => self.finish_call(heap, form, argv),
             ArgsKind::Construct => self.finish_construct(heap, form, argv),
             ArgsKind::Assoc => self.finish_assoc(heap, form, argv),
             ArgsKind::DynCall => self.finish_dyn_call(heap, form, argv),
         }
+    }
+
+    /// Hands a fully-evaluated call over to a new task, and returns its handle.
+    fn spawn_task(
+        &self,
+        heap: &mut Heap,
+        form: Value,
+        argv: Vec<Value>,
+        kind: ArgsKind,
+    ) -> Result<Value, EvalError> {
+        let home = heap.current_root_stack();
+        let argv_list = core::list(heap, &argv).map_err(heap_err)?;
+        heap.push_root(argv_list);
+        let roots = heap.new_root_stack();
+        // `form` and `argv_list` are rooted in `home`, which the collector
+        // still walks, so they survive this switch.
+        heap.switch_to_root_stack(roots);
+        let task = Task::start_call(heap, form, argv_list, kind);
+        heap.switch_to_root_stack(home);
+        heap.pop_root();
+        let id = self.scheduler.borrow_mut().admit(TaskSlot { task, roots, done: None });
+        Ok(task_handle(heap, id))
     }
 
     /// Enters an interpreted or compiled function body with `argv` bound.
@@ -1484,12 +1622,14 @@ impl Interp {
                 Ok((State::Apply(v), None))
             }
 
-            Frame::Args { form, mut done, env, kind } => {
+            Frame::Args { form, mut done, env, kind, spawn } => {
                 done.push(v);
                 let args = arg_forms(heap, form, kind)?;
                 match args.get(done.len()) {
-                    Some(&next) => Ok((State::Eval(next, env), Some(Frame::Args { form, done, env, kind }))),
-                    None => self.finish_args(heap, form, done, kind),
+                    Some(&next) => {
+                        Ok((State::Eval(next, env), Some(Frame::Args { form, done, env, kind, spawn })))
+                    }
+                    None => self.finish_args(heap, form, done, kind, spawn),
                 }
             }
 

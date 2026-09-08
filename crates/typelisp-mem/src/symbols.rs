@@ -372,6 +372,14 @@ well_known_symbols! {
      but this table is positional and an entry may only be appended; see
      the module comment."
     DEFFFI => "defffi"
+
+    "Appended for the concurrency work (2026-09-09). `go` starts a task with a
+     call: `(go (f a b))` evaluates `f` and every argument where it stands and
+     only the call itself happens in the new task, which is why it is a form
+     with a callee and arguments rather than a thunk. It cannot be a macro over
+     a function — `lambda` needs its return type written out and a macro does
+     not know what `(f a b)` returns; only the checker does."
+    GO => "go"
 }
 
 

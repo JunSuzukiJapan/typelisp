@@ -596,6 +596,7 @@ impl Registry {
         root.add_type(def);
         root.add_type(hashtable_def());
         root.add_type(vector_def());
+        root.add_type(task_def());
         root.add_type(scope_def());
         // The (typelisp-hosted) `compile`/`compile-file` compiler's view of
         // LLVM: four more builtin types, metadata-only like `hashtable_def`
@@ -1719,6 +1720,39 @@ fn vector_def() -> AdtDef {
         builtin: true,
         kind: AdtKind::Struct,
         field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new(),
+    }
+}
+
+/// `Task<T>`, the type `(go (f ...))` yields.
+///
+/// Spelled once, here, rather than at the checker's `go` — a type's identity is
+/// its whole path, and two places writing it is two places to get it wrong.
+pub(super) fn task_of(t: Type) -> Type {
+    Type::Named(Path::root("task"), vec![t])
+}
+
+/// `Task<T>`: a handle on a task that is running — what `(go (f ...))` returns.
+///
+/// A builtin rather than a `defstruct` in the prelude because `go` is a core
+/// form: the checker builds this type where it checks `go`, so it has to exist
+/// in contexts the prelude was never loaded into (the island's own tests).
+///
+/// The runtime value is a boxed struct holding the scheduler's id for the task
+/// and **no readable fields** — the id is not a number a program may invent or
+/// forge, the same reasoning `file-stream`'s opaque handle follows. Nothing
+/// constructs one but `go`, so there is no `new` here either.
+fn task_def() -> AdtDef {
+    AdtDef {
+        name: Path::root("task"),
+        params: vec!["t".to_string()],
+        variants: vec![],
+        assoc: BTreeMap::new(),
+        public: true,
+        builtin: true,
+        kind: AdtKind::Struct,
+        field_names: Vec::new(),
+        impls: Vec::new(),
+        trait_assoc: BTreeMap::new(),
     }
 }
 

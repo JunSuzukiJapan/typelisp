@@ -2977,7 +2977,7 @@ impl Checker {
             "if" | "let" | "let*" | "progn" | "unsafe" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
-                | "match" | "panic" | "the" | "as" | "try-as" | "compile"
+                | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "go"
                 | "quote" | "quasiquote" | "format" | "print" | "println" | "source-file"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block"
@@ -9840,6 +9840,7 @@ impl Checker {
             "match" => return self.check_match(heap, interp, env, args, arg_locs, expected),
             "panic" => return self.check_panic(heap, interp, env, args, arg_locs),
             "the" => return self.check_the(heap, interp, env, args, arg_locs),
+            "go" => return self.check_go(heap, interp, env, args, arg_locs),
             "as" => return self.check_as(heap, interp, env, args, arg_locs, false),
             "try-as" => return self.check_as(heap, interp, env, args, arg_locs, true),
             "compile" => return self.check_compile(heap, args),
@@ -11058,6 +11059,62 @@ impl Checker {
     /// plays for a `defun` parameter or `let` binding annotation), and the
     /// returned form is exactly `expr`'s own (no node of its own; `the`
     /// vanishes after checking).
+    /// `(go (f args...))` — start a task with a call. Yields `Task<T>`, where
+    /// `T` is what the call returns.
+    ///
+    /// The callee and every argument are evaluated **here**, by the task
+    /// running the `go`, in the order written; only the call itself happens in
+    /// the new task. That is Go's own rule for `go f(x)`, and it is why this
+    /// takes a call form rather than a thunk — a thunk would capture the
+    /// arguments instead of evaluating them.
+    ///
+    /// It cannot be a macro over an ordinary function: `(spawn (lambda () T ...))`
+    /// needs `T` spelled out, because `lambda` requires its return type, and a
+    /// macro does not know what `(f a b)` returns. Only the checker does, which
+    /// is what makes `go` a form.
+    fn check_go(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Checked, Error> {
+        const SHAPE: &str = "`go` takes a call form: (go (f args...)). \
+                             To run an arbitrary body, call a lambda: (go ((lambda () RetType body...)))";
+        if args.len() != 1 {
+            return Err(Error::TypeError(SHAPE.to_string()));
+        }
+        // Name the real problem before checking the inner form, rather than
+        // letting a special form report whatever it would complain about in a
+        // position it was never going to be allowed in.
+        let Ok(head) = heap.car(args[0]) else {
+            return Err(Error::TypeError(SHAPE.to_string()));
+        };
+        if let Value::Symbol(id) = head {
+            let name = heap.symbol_name(id).to_string();
+            if Self::is_builtin_form_head(&name) {
+                return Err(Error::TypeError(format!("`go` cannot start `{}`. {}", name, SHAPE)));
+            }
+        }
+        // Checked as an ordinary call, so the callee resolves, the arguments
+        // are checked and generics instantiate exactly as they would without
+        // the `go`.
+        let inner = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+        // A macro can expand into something that is not a call even when what
+        // was written looked like one, so the node itself is the last word.
+        let is_call = matches!(
+            heap.car(inner.form),
+            Ok(Value::Symbol(id))
+                if matches!(heap.symbol_name(id), "call" | "assoc" | "dyn-call" | "apply")
+        );
+        if !is_call {
+            return Err(Error::TypeError(format!("`go` needs a call, and this is not one. {}", SHAPE)));
+        }
+        let form = forms::go_form(heap, inner.form)?;
+        Ok(Checked::new(form, super::registry::task_of(inner.ty)))
+    }
+
     fn check_the(
         &self,
         heap: &mut Heap,
