@@ -201,7 +201,21 @@ impl Interp {
     /// arguments are rooted here for the duration, so a caller holding them
     /// only in a Rust local is safe; a caller that *keeps* them past the call
     /// must root them itself.
+    ///
+    /// **The evaluation itself now happens in `core_cps`**, over a continuation
+    /// stack rather than the Rust stack. This entry point is kept so the ~50
+    /// call sites below (and `Interp::exec`, and the re-entry from compiled
+    /// code) do not each have to change; the recursive body underneath it is
+    /// dead except for the leaf tags `step_cps` still routes here, and comes
+    /// out with the rest of the move.
     pub(crate) fn eval_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        self.eval_cps(heap, form, env)
+    }
+
+    /// The recursive evaluator this replaced — reachable only from its own
+    /// leaf tags now. Kept until the removal commit so the two can be compared.
+    #[allow(dead_code)]
+    fn eval_core_recursive(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
         let mut s = RootScope::new(heap);
         let base = s.base();
         s.push_root(env);

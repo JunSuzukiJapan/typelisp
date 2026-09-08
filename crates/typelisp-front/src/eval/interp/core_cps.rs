@@ -204,9 +204,15 @@ enum Frame {
 }
 
 /// The continuation stack: frames, each with the root count from just before
-/// it was pushed, so unwinding one drops exactly the roots it added.
+/// it was pushed (so unwinding one drops exactly the roots it added) and the
+/// source location of the form that pushed it.
+///
+/// The location is what places a runtime error raised while *resuming* — the
+/// value is in hand by then, and the form it belongs to is no longer the one
+/// being evaluated. `EvalError::at` keeps the innermost, so a subexpression
+/// that already placed the error still wins.
 struct CpsStack {
-    frames: Vec<(Frame, usize)>,
+    frames: Vec<(Frame, usize, Option<crate::Loc>)>,
 }
 
 impl CpsStack {
@@ -215,7 +221,7 @@ impl CpsStack {
     }
 
     /// Pushes `frame`, rooting the values it holds.
-    fn push(&mut self, heap: &mut Heap, frame: Frame) {
+    fn push(&mut self, heap: &mut Heap, frame: Frame, loc: Option<crate::Loc>) {
         let base = heap.root_count();
         match &frame {
             Frame::If { form, env } => {
@@ -290,13 +296,13 @@ impl CpsStack {
             // slots, and the object they act on is reachable from it.
             Frame::Panic | Frame::FieldGet { .. } | Frame::DynValue => {}
         }
-        self.frames.push((frame, base));
+        self.frames.push((frame, base, loc));
     }
 
     /// Removes the top frame. **The caller must `truncate_roots` to the
     /// returned base** — after it has finished reading the frame, and with no
     /// allocation between that truncation and re-rooting the next state.
-    fn pop(&mut self) -> Option<(Frame, usize)> {
+    fn pop(&mut self) -> Option<(Frame, usize, Option<crate::Loc>)> {
         self.frames.pop()
     }
 }
@@ -412,30 +418,47 @@ impl Interp {
 
         let out = loop {
             match state {
-                State::Eval(form, env) => match self.step_cps(heap, &mut stack, form, env) {
-                    Ok(next) => {
-                        set_state(heap, sbase, &next);
-                        state = next;
+                State::Eval(form, env) => {
+                    // Read the location before stepping: it names the form the
+                    // error came from, and `EvalError::at` keeps the innermost
+                    // one, so a subexpression that already placed the error
+                    // wins over the form containing it.
+                    let loc = heap.cons_loc(form);
+                    match self.step_cps(heap, &mut stack, form, env) {
+                        Ok(next) => {
+                            set_state(heap, sbase, &next);
+                            state = next;
+                        }
+                        Err(e) => {
+                            break Err(match loc {
+                                Some(l) => e.at(l),
+                                None => e,
+                            })
+                        }
                     }
-                    Err(e) => break Err(e),
-                },
+                }
                 State::Unwind(e) => match stack.pop() {
                     None => break Err(e),
-                    Some((frame, fbase)) => match self.unwind_through(heap, frame, e) {
+                    Some((frame, fbase, loc)) => match self.unwind_through(heap, frame, e) {
                         Ok((next, pushed)) => {
                             heap.truncate_roots(fbase);
                             if let Some(f) = pushed {
-                                stack.push(heap, f);
+                                stack.push(heap, f, loc);
                             }
                             set_state(heap, sbase, &next);
                             state = next;
                         }
-                        Err(e) => break Err(e),
+                        Err(e) => {
+                            break Err(match loc {
+                                Some(l) => e.at(l),
+                                None => e,
+                            })
+                        }
                     },
                 },
                 State::Apply(v) => match stack.pop() {
                     None => break Ok(v),
-                    Some((frame, fbase)) => match self.resume(heap, frame, v) {
+                    Some((frame, fbase, loc)) => match self.resume(heap, frame, v) {
                         Ok((next, pushed)) => {
                             // Nothing from here to `set_state` may allocate:
                             // the frame's roots are gone and whatever the next
@@ -444,12 +467,17 @@ impl Interp {
                             // `set_root` all leave the heap alone.
                             heap.truncate_roots(fbase);
                             if let Some(f) = pushed {
-                                stack.push(heap, f);
+                                stack.push(heap, f, loc);
                             }
                             set_state(heap, sbase, &next);
                             state = next;
                         }
-                        Err(e) => break Err(e),
+                        Err(e) => {
+                            break Err(match loc {
+                                Some(l) => e.at(l),
+                                None => e,
+                            })
+                        }
                     },
                 },
             }
@@ -462,6 +490,9 @@ impl Interp {
     /// One step of evaluation: reduce `form` to a value, or to a
     /// subexpression with a frame remembering what to do with its value.
     fn step_cps(&self, heap: &mut Heap, stack: &mut CpsStack, form: Value, env: Value) -> Result<State, EvalError> {
+        // Every frame this pushes belongs to `form`, and carries its location
+        // so an error raised on resuming is placed there.
+        let loc = heap.cons_loc(form);
         let tag = match heap.car(form) {
             Ok(Value::Symbol(id)) => id,
             _ => return Err(EvalError::Internal(format!("eval: not a core form: {}", core::print(heap, form)))),
@@ -502,14 +533,14 @@ impl Interp {
             Op::If => {
                 let cond = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (if ..) has no condition".to_string()))?;
-                stack.push(heap, Frame::If { form, env });
+                stack.push(heap, Frame::If { form, env }, loc.clone());
                 Ok(State::Eval(cond, env))
             }
 
             Op::Panic => {
                 let msg = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (panic ..) has no message".to_string()))?;
-                stack.push(heap, Frame::Panic);
+                stack.push(heap, Frame::Panic, loc.clone());
                 Ok(State::Eval(msg, env))
             }
 
@@ -519,14 +550,14 @@ impl Interp {
                 // Field 2 is the field's representation, read by the bridge
                 // and by nothing here.
                 let idx = int_field(heap, form, 1, "field-get")? as usize;
-                stack.push(heap, Frame::FieldGet { idx });
+                stack.push(heap, Frame::FieldGet { idx }, loc.clone());
                 Ok(State::Eval(obj, env))
             }
 
             Op::DynValue => {
                 let inner = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (dyn-value ..) has no operand".to_string()))?;
-                stack.push(heap, Frame::DynValue);
+                stack.push(heap, Frame::DynValue, loc.clone());
                 Ok(State::Eval(inner, env))
             }
 
@@ -534,7 +565,7 @@ impl Interp {
                 let sym = self.sym_field(heap, form, 0, "set")?;
                 let val = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (set ..) has no value".to_string()))?;
-                stack.push(heap, Frame::Set { sym, env });
+                stack.push(heap, Frame::Set { sym, env }, loc.clone());
                 Ok(State::Eval(val, env))
             }
 
@@ -547,23 +578,20 @@ impl Interp {
                     // `(let () E...)` is `progn`.
                     let (next, pushed) = sequence_state(heap, body, env)?;
                     if let Some(f) = pushed {
-                        stack.push(heap, f);
+                        stack.push(heap, f, loc.clone());
                     }
                     return Ok(next);
                 }
                 let first = heap.car(binds).map_err(|_| bad("binding list is not a list"))?;
                 let (_, init) = bind_parts(heap, first)?;
-                stack.push(
-                    heap,
-                    Frame::LetInit { binds, rest: binds, done: Vec::new(), body, env },
-                );
+                stack.push(heap, Frame::LetInit { binds, rest: binds, done: Vec::new(), body, env }, loc.clone());
                 Ok(State::Eval(init, env))
             }
 
-            Op::Call => self.start_args(heap, stack, form, env, ArgsKind::Call),
-            Op::Construct => self.start_args(heap, stack, form, env, ArgsKind::Construct),
-            Op::Assoc => self.start_args(heap, stack, form, env, ArgsKind::Assoc),
-            Op::DynCall => self.start_args(heap, stack, form, env, ArgsKind::DynCall),
+            Op::Call => self.start_args(heap, stack, form, env, ArgsKind::Call, loc),
+            Op::Construct => self.start_args(heap, stack, form, env, ArgsKind::Construct, loc),
+            Op::Assoc => self.start_args(heap, stack, form, env, ArgsKind::Assoc, loc),
+            Op::DynCall => self.start_args(heap, stack, form, env, ArgsKind::DynCall, loc),
 
             // `labels` evaluates nothing of its own: the closures are built
             // and bound, and only the body runs. Two passes, because the
@@ -586,7 +614,7 @@ impl Interp {
                 };
                 self.stepping.set(true);
                 self.step_quiet_depth.set(usize::MAX);
-                stack.push(heap, frame);
+                stack.push(heap, frame, loc.clone());
                 Ok(State::Eval(inner, env))
             }
 
@@ -595,21 +623,21 @@ impl Interp {
                 // bridge and by nothing here.
                 let value = core::field(heap, form, 5)
                     .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) has no value".to_string()))?;
-                stack.push(heap, Frame::DynNew { form });
+                stack.push(heap, Frame::DynNew { form }, loc.clone());
                 Ok(State::Eval(value, env))
             }
 
             Op::DynUpcast => {
                 let value = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (dyn-upcast ..) has no operand".to_string()))?;
-                stack.push(heap, Frame::DynUpcast { form });
+                stack.push(heap, Frame::DynUpcast { form }, loc.clone());
                 Ok(State::Eval(value, env))
             }
 
             Op::Apply => {
                 let callee = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no callee".to_string()))?;
-                stack.push(heap, Frame::ApplyCallee { form, env });
+                stack.push(heap, Frame::ApplyCallee { form, env }, loc.clone());
                 Ok(State::Eval(callee, env))
             }
 
@@ -662,7 +690,7 @@ impl Interp {
                 // slots take it.
                 let (next, pushed) = sequence_state(heap, body, inner)?;
                 if let Some(f) = pushed {
-                    stack.push(heap, f);
+                    stack.push(heap, f, loc.clone());
                 }
                 Ok(next)
             }
@@ -670,21 +698,21 @@ impl Interp {
             Op::Match => {
                 let scrut = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (match ..) has no scrutinee".to_string()))?;
-                stack.push(heap, Frame::MatchArms { form, env });
+                stack.push(heap, Frame::MatchArms { form, env }, loc.clone());
                 Ok(State::Eval(scrut, env))
             }
 
             Op::FieldSet => {
                 let obj = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (field-set ..) has no object".to_string()))?;
-                stack.push(heap, Frame::FieldSetObj { form, env });
+                stack.push(heap, Frame::FieldSetObj { form, env }, loc.clone());
                 Ok(State::Eval(obj, env))
             }
 
             Op::SetGlobal => {
                 let value = core::field(heap, form, 4)
                     .ok_or_else(|| EvalError::Internal("eval: (set-global ..) has no value form".to_string()))?;
-                stack.push(heap, Frame::SetGlobal { form });
+                stack.push(heap, Frame::SetGlobal { form }, loc.clone());
                 Ok(State::Eval(value, env))
             }
 
@@ -698,7 +726,7 @@ impl Interp {
                 let first = heap
                     .car(body)
                     .map_err(|e| EvalError::Internal(format!("eval: (loop ..): {}", e)))?;
-                stack.push(heap, Frame::Loop { body, rest: body, env });
+                stack.push(heap, Frame::Loop { body, rest: body, env }, loc.clone());
                 Ok(State::Eval(first, env))
             }
 
@@ -706,7 +734,7 @@ impl Interp {
 
             Op::Return => match core::field(heap, form, 0) {
                 Some(val) => {
-                    stack.push(heap, Frame::Return);
+                    stack.push(heap, Frame::Return, loc.clone());
                     Ok(State::Eval(val, env))
                 }
                 None => Ok(State::Unwind(EvalError::Return(Box::new(Value::Empty)))),
@@ -716,7 +744,7 @@ impl Interp {
                 let name = self.block_name_of(heap, form)?;
                 let body = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (block ..) has no body".to_string()))?;
-                stack.push(heap, Frame::Block { name });
+                stack.push(heap, Frame::Block { name }, loc.clone());
                 Ok(State::Eval(body, env))
             }
 
@@ -724,7 +752,7 @@ impl Interp {
                 let name = self.block_name_of(heap, form)?;
                 match core::field(heap, form, 1) {
                     Some(val) => {
-                        stack.push(heap, Frame::ReturnFrom { name });
+                        stack.push(heap, Frame::ReturnFrom { name }, loc.clone());
                         Ok(State::Eval(val, env))
                     }
                     None => Ok(State::Unwind(EvalError::ReturnFrom(name, Box::new(Value::Empty)))),
@@ -735,7 +763,7 @@ impl Interp {
                 let tag = self.throw_tag_of(heap, form, "catch")?;
                 let body = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (catch ..) has no body".to_string()))?;
-                stack.push(heap, Frame::Catch { tag });
+                stack.push(heap, Frame::Catch { tag }, loc.clone());
                 Ok(State::Eval(body, env))
             }
 
@@ -743,7 +771,7 @@ impl Interp {
                 let tag = self.throw_tag_of(heap, form, "throw")?;
                 let value = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (throw ..) has no value".to_string()))?;
-                stack.push(heap, Frame::Throw { tag });
+                stack.push(heap, Frame::Throw { tag }, loc.clone());
                 Ok(State::Eval(value, env))
             }
 
@@ -752,7 +780,7 @@ impl Interp {
                     .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no protected form".to_string()))?;
                 let cleanup = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no cleanup form".to_string()))?;
-                stack.push(heap, Frame::Protect { cleanup, env });
+                stack.push(heap, Frame::Protect { cleanup, env }, loc.clone());
                 Ok(State::Eval(protected, env))
             }
 
@@ -768,17 +796,18 @@ impl Interp {
         form: Value,
         env: Value,
         kind: ArgsKind,
+        loc: Option<crate::Loc>,
     ) -> Result<State, EvalError> {
         let args = arg_forms(heap, form, kind)?;
         match args.first() {
             Some(&first) => {
-                stack.push(heap, Frame::Args { form, done: Vec::new(), env, kind });
+                stack.push(heap, Frame::Args { form, done: Vec::new(), env, kind }, loc.clone());
                 Ok(State::Eval(first, env))
             }
             None => {
                 let (next, pushed) = self.finish_args(heap, form, Vec::new(), kind)?;
                 if let Some(f) = pushed {
-                    stack.push(heap, f);
+                    stack.push(heap, f, loc.clone());
                 }
                 Ok(next)
             }
@@ -1483,6 +1512,16 @@ mod tests {
         out
     }
 
+    /// Peels the location layers off an error. A runtime error is placed at
+    /// the node it came from (`EvalError::At`), which is the right behaviour
+    /// and not what these tests are checking.
+    fn unlocated(e: &EvalError) -> &EvalError {
+        match e {
+            EvalError::At(_, inner) => unlocated(inner),
+            other => other,
+        }
+    }
+
     fn eval_ok(heap: &mut Heap, src: &str) -> Value {
         eval_src(heap, src).unwrap_or_else(|e| panic!("{:?} failed to evaluate: {}", src, e))
     }
@@ -1576,7 +1615,7 @@ mod tests {
         let mut h = stress_heap();
         let e = eval_src(&mut h, "(if (int-any-width 1) (int-any-width 1) (int-any-width 2))")
             .expect_err("a non-boolean condition should not evaluate");
-        assert!(matches!(e, EvalError::Internal(_)), "expected an internal error, got {:?}", e);
+        assert!(matches!(unlocated(&e), EvalError::Internal(_)), "expected an internal error, got {:?}", e);
     }
 
     // ---- let, sequences, assignment --------------------------------------
@@ -1597,7 +1636,7 @@ mod tests {
             "(let ((x r (int-any-width 1)) (y r (var x))) (var y))",
         )
         .expect_err("the second initialiser must not see the first binding");
-        assert!(matches!(e, EvalError::Unbound(_)), "expected Unbound, got {:?}", e);
+        assert!(matches!(unlocated(&e), EvalError::Unbound(_)), "expected Unbound, got {:?}", e);
     }
 
     /// `(let () E...)` is `progn`: every form runs, the last one's value wins.
@@ -1955,7 +1994,7 @@ mod tests {
     fn panic_carries_its_message() {
         let mut h = stress_heap();
         let e = eval_src(&mut h, r#"(panic (str "boom"))"#).expect_err("panic should not produce a value");
-        match e {
+        match unlocated(&e) {
             EvalError::Panic(m) => assert_eq!(m, "boom"),
             other => panic!("expected a panic, got {:?}", other),
         }
@@ -1967,7 +2006,7 @@ mod tests {
         let mut h = stress_heap();
         let e = eval_src(&mut h, r#"(let ((m r (str "late"))) (panic (var m)))"#)
             .expect_err("panic should not produce a value");
-        match e {
+        match unlocated(&e) {
             EvalError::Panic(m) => assert_eq!(m, "late"),
             other => panic!("expected a panic, got {:?}", other),
         }
