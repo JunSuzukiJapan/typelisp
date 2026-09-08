@@ -307,6 +307,15 @@ impl CpsStack {
     }
 }
 
+/// Places `e` at `loc`, if there is one. `EvalError::at` keeps the innermost
+/// location, so calling this more than once on the way out is harmless.
+fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
+    match loc {
+        Some(l) => e.at(l),
+        None => e,
+    }
+}
+
 /// Points the two state slots at whatever `state` carries.
 ///
 /// Must not allocate: it runs in the window right after a `truncate_roots`.
@@ -424,61 +433,50 @@ impl Interp {
                     // one, so a subexpression that already placed the error
                     // wins over the form containing it.
                     let loc = heap.cons_loc(form);
-                    match self.step_cps(heap, &mut stack, form, env) {
-                        Ok(next) => {
-                            set_state(heap, sbase, &next);
-                            state = next;
-                        }
-                        Err(e) => {
-                            break Err(match loc {
-                                Some(l) => e.at(l),
-                                None => e,
-                            })
-                        }
-                    }
+                    let next = match self.step_cps(heap, &mut stack, form, env) {
+                        Ok(next) => next,
+                        Err(e) => State::Unwind(place(e, loc)),
+                    };
+                    set_state(heap, sbase, &next);
+                    state = next;
                 }
                 State::Unwind(e) => match stack.pop() {
                     None => break Err(e),
-                    Some((frame, fbase, loc)) => match self.unwind_through(heap, frame, e) {
-                        Ok((next, pushed)) => {
-                            heap.truncate_roots(fbase);
-                            if let Some(f) = pushed {
-                                stack.push(heap, f, loc);
-                            }
-                            set_state(heap, sbase, &next);
-                            state = next;
+                    Some((frame, fbase, loc)) => {
+                        let (next, pushed) = match self.unwind_through(heap, frame, e) {
+                            Ok(pair) => pair,
+                            // An error *while* unwinding replaces the exit in
+                            // flight — the same rule a cleanup's own exit
+                            // follows.
+                            Err(e) => (State::Unwind(place(e, loc.clone())), None),
+                        };
+                        heap.truncate_roots(fbase);
+                        if let Some(f) = pushed {
+                            stack.push(heap, f, loc);
                         }
-                        Err(e) => {
-                            break Err(match loc {
-                                Some(l) => e.at(l),
-                                None => e,
-                            })
-                        }
-                    },
+                        set_state(heap, sbase, &next);
+                        state = next;
+                    }
                 },
                 State::Apply(v) => match stack.pop() {
                     None => break Ok(v),
-                    Some((frame, fbase, loc)) => match self.resume(heap, frame, v) {
-                        Ok((next, pushed)) => {
-                            // Nothing from here to `set_state` may allocate:
-                            // the frame's roots are gone and whatever the next
-                            // state carries lives only in Rust locals until it
-                            // is rooted again. `truncate_roots`, `push` and
-                            // `set_root` all leave the heap alone.
-                            heap.truncate_roots(fbase);
-                            if let Some(f) = pushed {
-                                stack.push(heap, f, loc);
-                            }
-                            set_state(heap, sbase, &next);
-                            state = next;
+                    Some((frame, fbase, loc)) => {
+                        let (next, pushed) = match self.resume(heap, frame, v) {
+                            Ok(pair) => pair,
+                            Err(e) => (State::Unwind(place(e, loc.clone())), None),
+                        };
+                        // Nothing from here to `set_state` may allocate: the
+                        // frame's roots are gone and whatever the next state
+                        // carries lives only in Rust locals until it is rooted
+                        // again. `truncate_roots`, `push` and `set_root` all
+                        // leave the heap alone.
+                        heap.truncate_roots(fbase);
+                        if let Some(f) = pushed {
+                            stack.push(heap, f, loc);
                         }
-                        Err(e) => {
-                            break Err(match loc {
-                                Some(l) => e.at(l),
-                                None => e,
-                            })
-                        }
-                    },
+                        set_state(heap, sbase, &next);
+                        state = next;
+                    }
                 },
             }
         };
