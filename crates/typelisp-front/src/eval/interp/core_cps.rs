@@ -356,6 +356,69 @@ struct TaskSlot {
     done: Option<Result<Value, EvalError>>,
 }
 
+/// Names a task the scheduler is holding.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct TaskId(usize);
+
+/// The tasks that exist and the order they run in.
+///
+/// Cooperative and single-threaded: nothing preempts a task, and one OS thread
+/// runs all of them. `ACTIVE_HEAP` has to be a single thread-local and `Heap`
+/// is `!Send`, so tasks cannot be spread across threads without making the heap
+/// shareable first — a bigger job than the concurrency itself.
+///
+/// Lives in `Interp` behind a `RefCell`, and **every borrow of it is short**: a
+/// task is taken *out* to be stepped, so stepping it — which re-enters the
+/// evaluator, and can run compiled code that calls back in — never holds the
+/// borrow.
+#[derive(Default)]
+pub(crate) struct Scheduler {
+    /// Occupied while a task exists and is not currently taken out to run.
+    slots: Vec<Option<TaskSlot>>,
+    /// Ids ready to run, oldest first.
+    ready: std::collections::VecDeque<TaskId>,
+    /// Whether a `drive` loop is on the Rust stack. A *nested* `eval_cps` — a
+    /// compiled callee re-entering, or `Interp::apply` — must not switch tasks:
+    /// there is a Rust frame waiting on its result, and no continuation stack
+    /// underneath it to come back to.
+    driving: bool,
+}
+
+impl Scheduler {
+    /// Adds a task and makes it ready to run.
+    fn admit(&mut self, slot: TaskSlot) -> TaskId {
+        let id = match self.slots.iter().position(|s| s.is_none()) {
+            Some(i) => TaskId(i),
+            None => {
+                self.slots.push(None);
+                TaskId(self.slots.len() - 1)
+            }
+        };
+        self.slots[id.0] = Some(slot);
+        self.ready.push_back(id);
+        id
+    }
+
+    /// Takes the next ready task *out* to be stepped. The caller puts it back
+    /// (`put_back`) or retires it.
+    fn next_ready(&mut self) -> Option<(TaskId, TaskSlot)> {
+        let id = self.ready.pop_front()?;
+        let slot = self.slots[id.0].take().expect("a ready task is in its slot");
+        Some((id, slot))
+    }
+
+    /// Returns a task that is still running to the back of the queue.
+    fn put_back(&mut self, id: TaskId, slot: TaskSlot) {
+        self.slots[id.0] = Some(slot);
+        self.ready.push_back(id);
+    }
+
+    /// Frees a finished task's slot.
+    fn retire(&mut self, id: TaskId) {
+        self.slots[id.0] = None;
+    }
+}
+
 /// When the scheduler moves on to the next task.
 #[derive(Clone, Copy)]
 enum Switching {
@@ -493,6 +556,35 @@ impl Interp {
     /// Rust frames. Every `Op` is handled here — `step_cps` matches without a
     /// catch-all, so a tag with no frame fails to build.
     pub(crate) fn eval_cps(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        if self.scheduler.borrow().driving {
+            // Nested: a Rust frame is waiting on this call — compiled code that
+            // re-entered, or `Interp::apply`. This evaluation cannot be
+            // suspended, because there is no continuation stack under that
+            // frame to come back to, so it runs straight through on the
+            // caller's own root stack.
+            return self.run_to_completion(heap, form, env);
+        }
+
+        // The outermost evaluation is the *main task*. Tasks `go` starts
+        // outlive it: this returns as soon as main is done, and whatever is
+        // left keeps its state for the next time the scheduler runs — which is
+        // what makes `(go ...)` at a REPL prompt behave.
+        let home = heap.current_root_stack();
+        let roots = heap.new_root_stack();
+        heap.switch_to_root_stack(roots);
+        let task = Task::start(heap, form, env);
+        heap.switch_to_root_stack(home);
+        let main = self.scheduler.borrow_mut().admit(TaskSlot { task, roots, done: None });
+
+        self.scheduler.borrow_mut().driving = true;
+        let out = self.drive(heap, main);
+        self.scheduler.borrow_mut().driving = false;
+        out
+    }
+
+    /// Runs one evaluation to its end on the caller's root stack, with no
+    /// scheduling. What a nested `eval_cps` does.
+    fn run_to_completion(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
         let mut task = Task::start(heap, form, env);
         let out = loop {
             match self.step_task(heap, &mut task) {
@@ -502,6 +594,48 @@ impl Interp {
         };
         heap.truncate_roots(task.sbase);
         out
+    }
+
+    /// Runs ready tasks until `main` finishes, and returns its result.
+    ///
+    /// The result is *not* rooted here, exactly as an ordinary evaluation's is
+    /// not: the caller has it in hand and roots it if it keeps it.
+    fn drive(&self, heap: &mut Heap, main: TaskId) -> Result<Value, EvalError> {
+        let home = heap.current_root_stack();
+        loop {
+            let Some((id, mut slot)) = self.scheduler.borrow_mut().next_ready() else {
+                // `main` has not finished and nothing can run: every remaining
+                // task is waiting on something that will never happen.
+                return Err(EvalError::Internal(
+                    "scheduler: every task is blocked and none can proceed".to_string(),
+                ));
+            };
+            heap.switch_to_root_stack(slot.roots);
+            let outcome = loop {
+                match self.step_task(heap, &mut slot.task) {
+                    Progress::Running => {}
+                    done => break done,
+                }
+            };
+            match outcome {
+                Progress::Running => {
+                    heap.switch_to_root_stack(home);
+                    self.scheduler.borrow_mut().put_back(id, slot);
+                }
+                Progress::Done(r) => {
+                    heap.truncate_roots(slot.task.sbase);
+                    heap.switch_to_root_stack(home);
+                    heap.drop_root_stack(slot.roots);
+                    self.scheduler.borrow_mut().retire(id);
+                    if id == main {
+                        return r;
+                    }
+                    // Another task finished. Its result has nowhere to go until
+                    // `wait` exists to ask for it.
+                    drop(r);
+                }
+            }
+        }
     }
 
     /// Runs `task` one step.
