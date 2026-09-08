@@ -44,6 +44,13 @@ use super::value::Slot;
 /// it will replace.
 mod core_eval;
 
+/// The same evaluator with the Rust recursion taken out: an explicit state
+/// machine over a continuation stack, so the depth of a Lisp recursion stops
+/// being the depth of the Rust stack and the continuation becomes data a task
+/// can be suspended on. Built alongside `core_eval` and replaces it when every
+/// `Op` has moved — `docs/dev/cps-evaluator-design.md`.
+mod core_cps;
+
 pub use core_eval::read_ffi_decl;
 
 /// A registered function or method body with its parameter names. Lives at

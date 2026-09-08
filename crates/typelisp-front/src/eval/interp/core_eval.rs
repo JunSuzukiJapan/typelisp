@@ -63,7 +63,7 @@ use super::{EnumDef, FnDef, Interp};
 /// other side: anything *off* it is deliberately absent, so reaching one is an
 /// internal error naming the tag rather than a silent mis-evaluation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Op {
+pub(super) enum Op {
     Int,
     Float,
     Bignum,
@@ -123,7 +123,7 @@ impl Op {
     /// built-in range and match nothing, which is the internal error the
     /// caller reports; `tests/core_vocabulary_test.rs` holds the vocabulary
     /// closed from the other side.
-    fn from_sym(tag: SymRef) -> Option<Op> {
+    pub(super) fn from_sym(tag: SymRef) -> Option<Op> {
         Some(match tag.well_known() {
             wk::INT_ANY_WIDTH => Op::Int,
             wk::FLOAT_ANY_WIDTH => Op::Float,
@@ -189,7 +189,7 @@ enum StepCmd {
 
 /// What one step of the trampoline produced: either the answer, or the form
 /// and environment to continue with in tail position.
-enum Step {
+pub(super) enum Step {
     Done(Value),
     Tail(Value, Value),
 }
@@ -234,7 +234,7 @@ impl Interp {
 
     /// One step: evaluate `form` far enough to produce a value, or to reduce
     /// it to a tail form the caller's loop continues with.
-    fn step_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Step, EvalError> {
+    pub(super) fn step_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Step, EvalError> {
         let tag = match heap.car(form) {
             Ok(Value::Symbol(id)) => id,
             _ => return Err(EvalError::Internal(format!("eval: not a core form: {}", core::print(heap, form)))),
@@ -1055,7 +1055,7 @@ impl Interp {
     }
 
     /// Field `i` of `form`, which must be a symbol.
-    fn sym_field(&self, heap: &Heap, form: Value, i: usize, what: &str) -> Result<SymRef, EvalError> {
+    pub(super) fn sym_field(&self, heap: &Heap, form: Value, i: usize, what: &str) -> Result<SymRef, EvalError> {
         match core::field(heap, form, i) {
             Some(Value::Symbol(id)) => Ok(id),
             other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a symbol: {:?}", what, i, other))),
@@ -1764,7 +1764,7 @@ impl Interp {
     ///
     /// The `written`/`home` ancestor walk first, `resolved` only as the
     /// fallback — see `resolve_fn_ref`'s doc comment for why both exist.
-    fn resolve_fn_named(&self, home: &[String], written: &[String], resolved: &crate::Path) -> Option<Rc<FnDef>> {
+    pub(super) fn resolve_fn_named(&self, home: &[String], written: &[String], resolved: &crate::Path) -> Option<Rc<FnDef>> {
         self.root.borrow().resolve_fn(home, written).or_else(|| self.root.borrow().get_fn(resolved))
     }
 
@@ -1779,7 +1779,7 @@ impl Interp {
     }
 
     /// A field holding a list of symbols (`written`, `home`), as strings.
-    fn name_list(&self, heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<String>, EvalError> {
+    pub(super) fn name_list(&self, heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<String>, EvalError> {
         let field = core::field(heap, form, i)
             .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) has no field {}", what, i)))?;
         let segs = heap
@@ -2307,7 +2307,7 @@ pub(super) fn param_reprs(heap: &Heap, params: Value) -> Result<Vec<Repr>, EvalE
 /// A single-segment path reads back as a bare `Value::Symbol` rather than a
 /// `Value::Path` — the reader only builds the latter when it sees `::` — so
 /// both spellings are accepted and mean the same one-segment path.
-fn path_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<crate::Path, EvalError> {
+pub(super) fn path_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<crate::Path, EvalError> {
     match core::field(heap, form, i) {
         Some(Value::Path(id)) => Ok(crate::types::path_from_id(heap, id)),
         Some(Value::Symbol(id)) => Ok(crate::Path::root(heap.symbol_name(id))),
@@ -2316,7 +2316,7 @@ fn path_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<crate::P
 }
 
 /// A field holding an integer.
-fn int_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<i64, EvalError> {
+pub(super) fn int_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<i64, EvalError> {
     match core::field(heap, form, i) {
         Some(Value::Int(n)) => Ok(n),
         other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not an integer: {:?}", what, i, other))),
@@ -2346,7 +2346,7 @@ fn bool_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<bool, Ev
 /// added binding wins — the order `env_get`'s `.rev()` gives, so a `let` that
 /// shadows an outer name (or, in a malformed one, itself) resolves the same
 /// way it always has.
-fn env_lookup(heap: &Heap, env: Value, name: SymRef) -> Option<Value> {
+pub(super) fn env_lookup(heap: &Heap, env: Value, name: SymRef) -> Option<Value> {
     let mut frames = env;
     while let Ok(frame) = heap.car(frames) {
         let mut cur = frame;
