@@ -912,7 +912,14 @@ impl Interp {
         // A top-level function closes over nothing, so its frame extends the
         // empty environment rather than the caller's — that is what makes the
         // scope lexical.
+        //
+        // Rooted for the rest of this function: consing the body below
+        // allocates, and nothing else refers to the environment yet. The root
+        // goes above whatever frames are open, so the caller's truncation
+        // drops it.
+        let base = heap.root_count();
         let env = extend_env(heap, &binds, Value::Empty)?;
+        heap.push_root(env);
         // A watched call has to hand back *its* frame, so the body cannot
         // also leave a sequence frame behind. Wrapping it as `(let () E...)`
         // — which is `progn` — makes it one form, and the `let` node opens
@@ -924,6 +931,7 @@ impl Interp {
             items.extend_from_slice(&f.body);
             let wrapped = core::tagged(heap, "let", &items)
                 .map_err(|e| EvalError::Internal(format!("eval: watched call body: {}", e)))?;
+            heap.truncate_roots(base);
             return Ok((State::Eval(wrapped, env), Some(w)));
         }
         // `FnDef::body` is a `Vec`, and a sequence frame walks a cons list, so
@@ -934,6 +942,8 @@ impl Interp {
         // collects — until the caller roots them again.
         let body =
             core::list(heap, &f.body).map_err(|e| EvalError::Internal(format!("eval: call body: {}", e)))?;
+        heap.truncate_roots(base);
+        // Nothing allocates from here: `sequence_state` only walks conses.
         sequence_state(heap, body, env)
     }
 
