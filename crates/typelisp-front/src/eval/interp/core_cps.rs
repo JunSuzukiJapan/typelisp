@@ -1,12 +1,11 @@
 //! The evaluator as an explicit state machine over a continuation stack.
 //!
-//! This is [`core_eval`](super::core_eval) with the Rust recursion taken out.
-//! The two produce the same values for the same programs; what differs is
-//! *where the rest of the computation lives*. In `core_eval` a non-tail
-//! subexpression is a recursive `self.eval_core(..)` call, so the depth of a
-//! Lisp recursion is the depth of the Rust stack. Here it is a `Frame` on a
-//! `Vec`, so the Rust stack stays flat and the continuation becomes data —
-//! which is what a task (goroutine) needs to be suspended and resumed.
+//! The evaluation loop lives here; [`core_eval`](super::core_eval) holds the
+//! tag vocabulary, the leaves, and the readers this calls into. What makes it
+//! a machine rather than a walk is *where the rest of the computation lives*:
+//! a non-tail subexpression is not a recursive Rust call but a `Frame` on a
+//! `Vec`. The Rust stack stays flat and the continuation becomes data — which
+//! is what a task (goroutine) needs in order to be suspended and resumed.
 //!
 //! The design, and the mapping from every `Op` to the frames it needs, is in
 //! `docs/dev/cps-evaluator-design.md`.
@@ -14,9 +13,9 @@
 //! # Roots
 //!
 //! Two slots at the bottom hold whatever the *current state* carries, and are
-//! overwritten in place (`set_root`) rather than pushed — the same trick
-//! `eval_core`'s trampoline uses to keep a tail loop from growing the root
-//! stack. Above them, each frame roots its own values when pushed and drops
+//! overwritten in place (`set_root`) rather than pushed, which is what keeps
+//! a tail loop from growing the root stack without bound. Above them, each
+//! frame roots its own values when pushed and drops
 //! them with `truncate_roots` when unwound:
 //!
 //! ```text
@@ -40,7 +39,7 @@ use crate::eval::value::EvalError;
 
 use super::core_eval::{
     bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, path_field,
-    repr_list, str_field, sym_field, tail_after, tail_after_value, Op, Step, StepCmd,
+    repr_list, str_field, sym_field, tail_after, tail_after_value, Op, StepCmd,
 };
 use super::{FnDef, Interp};
 
@@ -115,8 +114,9 @@ enum Frame {
     FieldGet { idx: usize },
     /// `(dyn-value INNER)` — waiting on the trait object.
     DynValue,
-    /// `(set SYM VALUE)` — waiting on the value. The binding is looked up
-    /// *after* the value is in hand, exactly as the recursive evaluator does.
+    /// `(set SYM VALUE)` — waiting on the value. The frame carries the *name*
+    /// rather than the cell: the lookup happens on resume, once the value is
+    /// in hand.
     Set { sym: SymRef, env: Value },
     /// A body's remaining forms. `rest` is a non-empty cons list of forms not
     /// yet evaluated; the value being resumed on is discarded, since only a
@@ -347,8 +347,7 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
 /// of the last one as the result.
 ///
 /// An empty sequence is unit, exactly as `(let () )` evaluates. A single form
-/// is a *tail jump*: no frame, so a body's last form costs no stack — the
-/// property `Step::Tail` gives the recursive evaluator.
+/// is a *tail jump*: no frame, so a body's last form costs no stack.
 fn sequence_state(heap: &Heap, forms: Value, env: Value) -> Result<(State, Option<Frame>), EvalError> {
     if matches!(forms, Value::Empty) {
         return Ok((State::Apply(Value::Empty), None));
@@ -413,10 +412,10 @@ fn bind_parts(heap: &Heap, b: Value) -> Result<(SymRef, Value), EvalError> {
 impl Interp {
     /// Evaluate `form` in `env` with no Rust recursion.
     ///
-    /// The eventual replacement for [`Interp::eval_core`](super::Interp::eval_core).
-    /// Until every `Op` is here, the ones that are not reach `unimplemented!`
-    /// rather than falling back to the recursive evaluator: a fallback would
-    /// run correctly and hide which tags still have to move.
+    /// What [`Interp::eval_core`](super::Interp::eval_core) is: the depth of a
+    /// Lisp computation costs continuation frames on the heap-side stack, not
+    /// Rust frames. Every `Op` is handled here — `step_cps` matches without a
+    /// catch-all, so a tag with no frame fails to build.
     pub(crate) fn eval_cps(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
         let sbase = heap.root_count();
         heap.push_root(env);
@@ -520,13 +519,7 @@ impl Interp {
             | Op::CompileFn
             | Op::Trace
             | Op::Untrace
-            | Op::DisassembleFn => match self.step_core(heap, form, env)? {
-                Step::Done(v) => Ok(State::Apply(v)),
-                Step::Tail(..) => Err(EvalError::Internal(format!(
-                    "eval: leaf op {:?} produced a tail step",
-                    op
-                ))),
-            },
+            | Op::DisassembleFn => Ok(State::Apply(self.eval_leaf(heap, form, env)?)),
 
             Op::If => {
                 let cond = core::field(heap, form, 0)
@@ -598,8 +591,7 @@ impl Interp {
             // already names them all.
             // Arming the stepper is a side effect with an extent, so what to
             // restore rides on a frame — restored on the way out however the
-            // body is left, which the recursive evaluator gets from the Rust
-            // frame it has here.
+            // body is left.
             Op::Step => {
                 let inner = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (step ..) has no form".to_string()))?;
@@ -831,15 +823,15 @@ impl Interp {
     /// Enters an interpreted or compiled function body with `argv` bound.
     ///
     /// A user function's body becomes a sequence in a fresh environment, so
-    /// **its last form is a tail jump** — a property the recursive evaluator
-    /// does not have here (`Interp::apply` evaluates the last form with a
-    /// native frame still waiting on it).
+    /// **its last form is a tail jump**. `Interp::apply` — the other way into a
+    /// body, for a caller that is a Rust frame — cannot do that: it evaluates
+    /// the last form with that frame still waiting on it.
     fn enter_fn(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<(State, Option<Frame>), EvalError> {
         // Tracing and stepping report a call *around* the callee, in CL's own
         // shape: `  0: (fact 3)` going in and `  0: fact returned 6` coming
         // out. That needs a frame to come back to, so a watched call gives up
-        // its tail position — the same trade the recursive evaluator makes,
-        // where a traced call is a real Rust frame.
+        // its tail position: tracing a self-tail-recursive function makes it
+        // grow the continuation stack again, for as long as it is traced.
         //
         // Two `Cell` loads on the path every call takes; the set membership is
         // tested only once one of them is armed.
@@ -1170,8 +1162,7 @@ impl Interp {
             }
 
             // A non-string message is not reachable from a checked program
-            // and carries nothing to report, so it panics with no text — the
-            // recursive evaluator's behaviour, kept deliberately.
+            // and carries nothing to report, so it panics with no text.
             Frame::Panic => Err(EvalError::Panic(match v {
                 Value::Str(id) => heap.string(id).to_string(),
                 _ => String::new(),
@@ -1244,8 +1235,8 @@ impl Interp {
 
             // Boxing is where the concrete type is still known, so it is
             // where every vtable this value could be viewed through gets
-            // interned. Shared with the recursive evaluator rather than
-            // copied — see `Interp::dyn_new_with_value`.
+            // interned. That part is in `Interp::dyn_new_with_value`, next to
+            // the table it interns into.
             Frame::DynNew { form } => Ok((State::Apply(self.dyn_new_with_value(heap, form, v)?), None)),
             Frame::DynUpcast { form } => Ok((State::Apply(self.dyn_upcast_with_value(heap, form, v)?), None)),
 
@@ -1866,10 +1857,10 @@ mod tests {
     /// Builds `(cons 1 (cons 1 ... (cons 1 ())))` by recursion that is **not**
     /// in tail position: each call has to come back to cons its result.
     ///
-    /// In the recursive evaluator every one of those pending calls is a live
-    /// Rust frame. **Measured**: the same form through `eval_core` aborts with
-    /// `fatal runtime error: stack overflow` at this depth — with the default
-    /// test stack *and* with `RUST_MIN_STACK=32MB`, the value
+    /// In the recursive evaluator this replaced, every one of those pending
+    /// calls was a live Rust frame. **Measured before it was deleted**: the
+    /// same form aborted with `fatal runtime error: stack overflow` at this
+    /// depth — with the default test stack *and* with `RUST_MIN_STACK=32MB`, the value
     /// `scripts/test-serial.sh` sets. Here the pending calls are frames on a
     /// `Vec` and the Rust stack stays flat, which is the property a task needs
     /// in order to be suspended at all.
@@ -2247,13 +2238,12 @@ mod tests {
 
     /// Every `Op` is handled: `step_cps`'s match has no catch-all, so the
     /// compiler is the one holding this. Adding a tag to `Op` without giving
-    /// it a frame is a build error, not a run-time surprise — which is what a
-    /// `unimplemented!()` arm bought while the move was in progress.
+    /// it a frame is a build error, not a run-time surprise.
     ///
     /// This test exists to say so where a reader looks for it; there is
     /// nothing to assert at run time.
     #[test]
-    fn every_op_has_moved() {
+    fn every_op_has_a_frame() {
         let mut h = stress_heap();
         // A form of each shape, as a smoke test that the arms are wired at all.
         assert_eq!(eval_ok(&mut h, "(int-any-width 1)"), Value::Int(1));

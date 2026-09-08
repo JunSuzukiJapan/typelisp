@@ -7,28 +7,35 @@
 //! tests still read that way, and why they are the cheapest place to pin a
 //! tag's shape.
 //!
+//! **The loop that drives it lives in [`core_cps`](super::core_cps)**, over a
+//! continuation stack rather than the Rust stack. What stays here is the tag
+//! vocabulary ([`Op`]), the leaves that reach a value without a continuation
+//! ([`Interp::eval_leaf`]), the readers for a node's fields, and the top level
+//! ([`Interp::exec`]).
+//!
 //! # Roots
 //!
 //! Every value here is a heap value and [`Heap::cons`] collects whenever the
 //! free list is empty, so anything the evaluator is holding *in a Rust local*
 //! is invisible to the collector unless it is rooted. Two things are rooted for
 //! the whole of an [`eval_core`](super::Interp::eval_core) call, in two
-//! dedicated slots the trampoline overwrites in place rather than pushing onto:
+//! dedicated slots the loop overwrites in place rather than pushing onto:
 //!
-//! - the **environment**, which the trampoline replaces as it descends;
+//! - the **environment**, which the loop replaces as it descends;
 //! - the **form**, so a body reached by a tail jump stays reachable even when
 //!   it belongs to a different tree than the one the caller rooted.
 //!
 //! Overwriting (`set_root`) rather than pushing is what keeps a tail loop from
-//! growing the root stack without bound — the whole point of trampolining.
+//! growing the root stack without bound. Continuation frames push *above*
+//! those two slots, and are truncated back down to them as they resume.
 //!
 //! # Tail positions
 //!
-//! `if` branches, a `let` body's last form and (from Stage A4) a call's body
-//! are *jumps*, not recursive calls: the loop reassigns `form`/`env` and
-//! continues. The old evaluator special-cased only `if` to survive long
-//! `cond` chains; here every tail position is constant-stack, so mutual
-//! recursion through a tail call is too.
+//! `if` branches, a `let` body's last form and a call's body are *jumps*, not
+//! recursive calls: the loop moves on to the next form without pushing a
+//! frame. The Rust-tree evaluator this replaced special-cased only `if`, to
+//! survive long `cond` chains; here every tail position is constant-stack, so
+//! mutual recursion through a tail call is too.
 //!
 //! # Environment
 //!
@@ -187,13 +194,6 @@ pub(super) enum StepCmd {
     Quit,
 }
 
-/// What one step of the trampoline produced: either the answer, or the form
-/// and environment to continue with in tail position.
-pub(super) enum Step {
-    Done(Value),
-    Tail(Value, Value),
-}
-
 impl Interp {
     /// Evaluate the core form `form` in environment `env`.
     ///
@@ -212,43 +212,15 @@ impl Interp {
         self.eval_cps(heap, form, env)
     }
 
-    /// The recursive evaluator this replaced — reachable only from its own
-    /// leaf tags now. Kept until the removal commit so the two can be compared.
-    #[allow(dead_code)]
-    fn eval_core_recursive(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        let mut s = RootScope::new(heap);
-        let base = s.base();
-        s.push_root(env);
-        s.push_root(form);
-
-        let mut form = form;
-        let mut env = env;
-        loop {
-            // Read the location before stepping: it names the form the error
-            // came from, and `EvalError::at` keeps the innermost one, so a
-            // deeper frame that already placed the error wins.
-            let loc = s.cons_loc(form);
-            match self.step_core(&mut s, form, env) {
-                Ok(Step::Done(v)) => return Ok(v),
-                Ok(Step::Tail(next_form, next_env)) => {
-                    form = next_form;
-                    env = next_env;
-                    s.set_root(base, env);
-                    s.set_root(base + 1, form);
-                }
-                Err(e) => {
-                    return Err(match loc {
-                        Some(l) => e.at(l),
-                        None => e,
-                    })
-                }
-            }
-        }
-    }
-
-    /// One step: evaluate `form` far enough to produce a value, or to reduce
-    /// it to a tail form the caller's loop continues with.
-    pub(super) fn step_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Step, EvalError> {
+    /// Evaluate a *leaf* core form — one with no subexpression, so it reaches
+    /// its value without a continuation.
+    ///
+    /// `step_cps` routes exactly these tags here; every other tag needs a
+    /// frame and never leaves `core_cps`. A non-leaf tag arriving here is an
+    /// internal error rather than a fallback, and cannot happen by omission:
+    /// `step_cps` matches on `Op` with no catch-all, so adding a tag without
+    /// giving it a frame fails to build.
+    pub(super) fn eval_leaf(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
         let tag = match heap.car(form) {
             Ok(Value::Symbol(id)) => id,
             _ => return Err(EvalError::Internal(format!("eval: not a core form: {}", core::print(heap, form)))),
@@ -272,8 +244,8 @@ impl Interp {
             // literal have always produced distinct values (see `str_rt`), and
             // returning the checker's single stored box would silently make
             // them `eq`.
-            Op::Int | Op::Char | Op::Bool | Op::Sym => self.literal_field(heap, form).map(Step::Done),
-            Op::Unit => Ok(Step::Done(Value::Empty)),
+            Op::Int | Op::Char | Op::Bool | Op::Sym => self.literal_field(heap, form),
+            Op::Unit => Ok(Value::Empty),
             // A float literal is re-boxed rather than handed straight back,
             // so two literals of the same number are not `eq`. Each width
             // re-boxes into its own kind: widening an `f32` literal here
@@ -290,277 +262,48 @@ impl Interp {
                     }
                     other => return Err(EvalError::Internal(format!("eval: (float ..) holds {:?}", other))),
                 };
-                Ok(Step::Done(v))
+                Ok(v)
             }
             Op::Bignum => {
                 let n = match self.literal_field(heap, form)? {
                     Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).clone(),
                     other => return Err(EvalError::Internal(format!("eval: (bignum ..) holds {:?}", other))),
                 };
-                Ok(Step::Done(heap.alloc_bignum(n)))
+                Ok(heap.alloc_bignum(n))
             }
             Op::Ratio => {
                 let r = match self.literal_field(heap, form)? {
                     Value::Boxed(id) if heap.is_ratio(id) => heap.ratio_value(id).clone(),
                     other => return Err(EvalError::Internal(format!("eval: (ratio ..) holds {:?}", other))),
                 };
-                Ok(Step::Done(heap.alloc_ratio(r)))
+                Ok(heap.alloc_ratio(r))
             }
             Op::Str => {
                 let s = match self.literal_field(heap, form)? {
                     Value::Str(id) => heap.string(id).to_string(),
                     other => return Err(EvalError::Internal(format!("eval: (str ..) holds {:?}", other))),
                 };
-                Ok(Step::Done(heap.alloc_string(s)))
+                Ok(heap.alloc_string(s))
             }
 
             // ---- variables -----------------------------------------------
             Op::Var => {
                 let sym = self.sym_field(heap, form, 0, "var")?;
                 match env_lookup(heap, env, sym) {
-                    Some(cell) => Ok(Step::Done(cell_value(heap, cell)?)),
+                    Some(cell) => cell_value(heap, cell),
                     None => Err(EvalError::Unbound(heap.symbol_name(sym).to_string())),
                 }
             }
 
-            // ---- binding and control -------------------------------------
-            Op::Let => {
-                let binds = core::field(heap, form, 0)
-                    .ok_or_else(|| EvalError::Internal("eval: (let ..) has no binding list".to_string()))?;
-                // The extended environment is deliberately *not* rooted here.
-                // It only ever goes two places, and both root it before they
-                // can allocate: into `eval_core`, whose first act is to root
-                // it, or out as the tail step, which the trampoline roots
-                // with nothing allocating in between. Adding a root here
-                // would look like protection against a window that does not
-                // exist. `a_let_frame_survives_a_collection_in_an_earlier_
-                // body_form` is what would notice if that ever stopped being
-                // true.
-                let env = self.extend_let(heap, binds, env)?;
-                // `(let () E...)` is `progn`, so an empty body is the empty
-                // sequence: unit, exactly as `eval_seq` returns for one.
-                let body = core::fields(heap, form)
-                    .map_err(|e| EvalError::Internal(format!("eval: (let ..) body: {}", e)))?;
-                let body = &body[1..];
-                let Some((last, rest)) = body.split_last() else {
-                    return Ok(Step::Done(Value::Empty));
-                };
-                for e in rest {
-                    self.eval_core(heap, *e, env)?;
-                }
-                Ok(Step::Tail(*last, env))
-            }
-            Op::If => {
-                let cond = core::field(heap, form, 0)
-                    .ok_or_else(|| EvalError::Internal("eval: (if ..) has no condition".to_string()))?;
-                let taken = match self.eval_core(heap, cond, env)? {
-                    Value::Bool(true) => 1,
-                    Value::Bool(false) => 2,
-                    other => return Err(EvalError::Internal(format!("eval: (if ..) condition is {:?}", other))),
-                };
-                let branch = core::field(heap, form, taken)
-                    .ok_or_else(|| EvalError::Internal("eval: (if ..) is missing a branch".to_string()))?;
-                Ok(Step::Tail(branch, env))
-            }
-            Op::Panic => {
-                let msg = core::field(heap, form, 0)
-                    .ok_or_else(|| EvalError::Internal("eval: (panic ..) has no message".to_string()))?;
-                // A non-string message is not reachable from a checked program
-                // and carries nothing to report, so it panics with no text —
-                // the old evaluator's behaviour, kept deliberately.
-                match self.eval_core(heap, msg, env)? {
-                    Value::Str(id) => Err(EvalError::Panic(heap.string(id).to_string())),
-                    _ => Err(EvalError::Panic(String::new())),
-                }
-            }
-
-            // ---- calls ---------------------------------------------------
-            Op::Call => self.call_core(heap, form, env).map(Step::Done),
-
-            // ---- data ----------------------------------------------------
-            Op::Construct => self.construct_core(heap, form, env).map(Step::Done),
-            Op::FieldGet => {
-                let obj = core::field(heap, form, 0)
-                    .ok_or_else(|| EvalError::Internal("eval: (field-get ..) has no object".to_string()))?;
-                let idx = int_field(heap, form, 1, "field-get")? as usize;
-                // Field 2 is the field's representation, read by the bridge
-                // and by nothing here.
-                let obj = self.eval_core(heap, obj, env)?;
-                let id = super::expect_struct_box(&obj)?;
-                // No decode. The old evaluator ran the stored word through
-                // `decode_field_typed`, which needed the field's declared
-                // type; with one value world left that function is the
-                // identity, so the field *is* the value.
-                Ok(Step::Done(heap.struct_field(id, idx)))
-            }
-            Op::FieldSet => {
-                let obj = core::field(heap, form, 0)
-                    .ok_or_else(|| EvalError::Internal("eval: (field-set ..) has no object".to_string()))?;
-                let idx = int_field(heap, form, 1, "field-set")? as usize;
-                // Field 2 is the field's representation — see `field-get`.
-                let val = core::field(heap, form, 3)
-                    .ok_or_else(|| EvalError::Internal("eval: (field-set ..) has no value".to_string()))?;
-                let mut s = RootScope::new(heap);
-                let obj = self.eval_core(&mut s, obj, env)?;
-                // The box has to stay reachable while the value expression
-                // runs — that expression can allocate, and nothing else
-                // refers to the box.
-                s.push_root(obj);
-                let v = self.eval_core(&mut s, val, env)?;
-                let id = super::expect_struct_box(&obj)?;
-                s.struct_set_field(id, idx, v);
-                Ok(Step::Done(Value::Empty))
-            }
-            Op::Match => self.match_core(heap, form, env),
-
-            // ---- assignment and loops ------------------------------------
-            Op::Set => {
-                let sym = self.sym_field(heap, form, 0, "set")?;
-                let val = core::field(heap, form, 1)
-                    .ok_or_else(|| EvalError::Internal("eval: (set ..) has no value".to_string()))?;
-                let v = self.eval_core(heap, val, env)?;
-                let cell = env_lookup(heap, env, sym)
-                    .ok_or_else(|| EvalError::Unbound(heap.symbol_name(sym).to_string()))?;
-                // Written through the cell rather than rebuilding the frame,
-                // which is what makes the assignment visible through every
-                // other reference to the same binding — a closure's capture,
-                // or compiled code handed the same cell.
-                match cell {
-                    Value::Boxed(id) if heap.is_cell(id) => heap.cell_set(id, v),
-                    other => return Err(EvalError::Internal(format!("eval: binding does not hold a cell: {:?}", other))),
-                }
-                Ok(Step::Done(v))
-            }
-            // `break`/`return` are not errors: they are non-local exits
-            // riding `Result`'s propagation, so that every intervening frame
-            // unwinds without each one having to know about them. The
-            // enclosing `loop` is the only thing that catches them, and the
-            // checker guarantees there is one.
-            Op::Break => Err(EvalError::Break),
-            Op::Return => match core::field(heap, form, 0) {
-                Some(val) => {
-                    let v = self.eval_core(heap, val, env)?;
-                    Err(EvalError::Return(Box::new(v)))
-                }
-                None => Err(EvalError::Return(Box::new(Value::Empty))),
-            },
-            // `(block NAME BODY...)`: the *lexical* named escape. The name is
-            // matched here only to tell nested blocks apart while the signal
-            // travels — the checker already decided which block a
-            // `return-from` belongs to, so an unmatched one is not a runtime
-            // possibility the way a `throw` with no `catch` is.
-            //
-            // The last body form is evaluated here rather than handed to the
-            // trampoline as a tail step: a `return-from` inside it has to be
-            // caught by *this* frame, and a tail step has already left it.
-            // `catch` gives up its tail position for the same reason.
-            Op::Block => {
-                let name = self.block_name_of(heap, form)?;
-                let body = core::field(heap, form, 1)
-                    .ok_or_else(|| EvalError::Internal("eval: (block ..) has no body".to_string()))?;
-                match self.eval_core(heap, body, env) {
-                    Err(EvalError::ReturnFrom(from, v)) if from == name => {
-                        // The flight is over — release the root `Op::ReturnFrom`
-                        // registered, exactly as `Op::Catch` does.
-                        heap.set_in_flight_throw(None);
-                        Ok(Step::Done(*v))
-                    }
-                    other => other.map(Step::Done),
-                }
-            }
-            Op::ReturnFrom => {
-                let name = self.block_name_of(heap, form)?;
-                let v = match core::field(heap, form, 1) {
-                    Some(val) => self.eval_core(heap, val, env)?,
-                    None => Value::Empty,
-                };
-                // Rooted for the flight, exactly as `Op::Throw` roots its
-                // value and for the same reason: an `unwind-protect` between
-                // here and the block allocates while this value is in a `Box`
-                // the collector cannot see. `break`/`return` get away without
-                // it because `Op::UnwindProtect` roots them from its own side;
-                // this one can also be in flight across *several* blocks, so
-                // it carries its own root.
-                heap.set_in_flight_throw(Some(v));
-                Err(EvalError::ReturnFrom(name, Box::new(v)))
-            }
-            // `(catch 'tag body)`: run `body`, and if a `throw` on this very
-            // tag comes back through, produce its value instead. A throw on
-            // some *other* tag keeps travelling — it belongs to an outer
-            // catch, and swallowing it here is exactly the bug CL's `eq` tag
-            // comparison exists to prevent.
-            Op::Catch => {
-                let tag = self.throw_tag_of(heap, form, "catch")?;
-                let body = core::field(heap, form, 1)
-                    .ok_or_else(|| EvalError::Internal("eval: (catch ..) has no body".to_string()))?;
-                match self.eval_core(heap, body, env) {
-                    Err(EvalError::Throw(thrown, v)) if thrown == tag => {
-                        // The flight is over: release the root `Op::Throw`
-                        // registered, now that an ordinary rooted value is
-                        // taking over again.
-                        heap.set_in_flight_throw(None);
-                        Ok(Step::Done(*v))
-                    }
-                    other => other.map(Step::Done),
-                }
-            }
-            Op::Throw => {
-                let tag = self.throw_tag_of(heap, form, "throw")?;
-                let value = core::field(heap, form, 1)
-                    .ok_or_else(|| EvalError::Internal("eval: (throw ..) has no value".to_string()))?;
-                let v = self.eval_core(heap, value, env)?;
-                // The value travels in a `Box` from here, where the collector
-                // cannot see it, while every scope that *did* root it is
-                // discarded — and unlike `break`/`return`, whose exits reach
-                // their `loop` without running anything, this flight can run
-                // `unwind-protect` cleanups, which allocate. `in_flight_throw`
-                // is the root that spans the flight; the catch that claims the
-                // value releases it.
-                heap.set_in_flight_throw(Some(v));
-                Err(EvalError::Throw(tag, Box::new(v)))
-            }
-            // `(unwind-protect protected cleanup)`: `cleanup` runs on every
-            // way out of `protected` — normal return, `throw`, `break`,
-            // `return`, or an error. A non-local exit *from the cleanup
-            // itself* wins over whatever was in flight, matching CLHS ("the
-            // cleanup-forms of unwind-protect are not protected by that
-            // unwind-protect").
-            Op::UnwindProtect => {
-                let protected = core::field(heap, form, 0)
-                    .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no protected form".to_string()))?;
-                let cleanup = core::field(heap, form, 1)
-                    .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no cleanup form".to_string()))?;
-                let outcome = self.eval_core(heap, protected, env);
-                // Whatever the protected form produced is sitting in a Rust
-                // local, where the collector cannot see it — and this is the
-                // one unwind in the evaluator that runs code before
-                // continuing: a cleanup allocates, so a collection here would
-                // reclaim the very value being carried past it. That is what
-                // the `loop` arm's "unwinding allocates nothing" reasoning
-                // cannot cover. (A thrown value is already rooted for its
-                // whole flight — see `Op::Throw` — so only these two need it.)
-                let mut s = RootScope::new(heap);
-                match &outcome {
-                    Ok(v) => s.push_root(*v),
-                    Err(EvalError::Return(v)) => s.push_root(**v),
-                    // A `return-from`'s value is already rooted for its whole
-                    // flight (`Op::ReturnFrom`), like a thrown one.
-                    Err(_) => {}
-                }
-                self.eval_core(&mut s, cleanup, env)?;
-                drop(s);
-                outcome.map(Step::Done)
-            }
             // ---- closures ------------------------------------------------
             //
             // No JIT attempt. The old evaluator compiled every `lambda` and
             // `labels` sibling at definition time and raised a hard error if
             // the compiler declined — the closure had nowhere else to live,
             // since its body was a Rust AST the box could not hold. With the
-            // body a core form there is somewhere, so the JIT becomes an
+            // body a core form there is somewhere, so the JIT is an
             // optimisation the checker's own driver applies rather than a
-            // requirement of the representation. Re-attaching it is the
-            // switch commit's business, not this stage's.
+            // requirement of the representation.
             Op::Lambda => {
                 let params = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (lambda ..) has no parameter list".to_string()))?;
@@ -572,10 +315,8 @@ impl Interp {
                 let body = tail_after(heap, form, 2)?;
                 // `alloc_closure` cannot collect (only `cons` does), so the
                 // four values need no rooting across it.
-                Ok(Step::Done(heap.alloc_closure(params, ret, body, env)))
+                Ok(heap.alloc_closure(params, ret, body, env))
             }
-            Op::Labels => self.labels_core(heap, form, env),
-            Op::Apply => self.apply_core(heap, form, env),
 
             // ---- quoted data ---------------------------------------------
             //
@@ -591,58 +332,23 @@ impl Interp {
             // each time, where rebuilding gave a fresh copy — which is what CL
             // specifies for a literal, and the reason its consequences are
             // undefined if one is destructively modified.
-            Op::Quote => self.literal_field(heap, form).map(Step::Done),
+            Op::Quote => self.literal_field(heap, form),
 
             // ---- globals -------------------------------------------------
-            Op::Global => self.global_core(heap, form).map(Step::Done),
-            Op::SetGlobal => self.set_global_core(heap, form, env).map(Step::Done),
+            Op::Global => self.global_core(heap, form),
 
-            // ---- methods and function values ------------------------------
-            Op::Assoc => self.assoc_core(heap, form, env).map(Step::Done),
-            Op::DynCall => self.dyn_call_core(heap, form, env).map(Step::Done),
-            Op::FnRef => self.fnref_core(heap, form).map(Step::Done),
-            Op::MethodRef => self.methodref_core(heap, form).map(Step::Done),
-            Op::CompileFn => self.compile_fn_core(heap, form).map(Step::Done),
-            Op::Trace => self.trace_core(heap, form, true).map(Step::Done),
-            Op::Untrace => self.trace_core(heap, form, false).map(Step::Done),
-            Op::Step => self.stepper_core(heap, form, env).map(Step::Done),
-            Op::DisassembleFn => self.disassemble_fn_core(heap, form).map(Step::Done),
+            // ---- function values and the tools that name them -------------
+            Op::FnRef => self.fnref_core(heap, form),
+            Op::MethodRef => self.methodref_core(heap, form),
+            Op::CompileFn => self.compile_fn_core(heap, form),
+            Op::Trace => self.trace_core(heap, form, true),
+            Op::Untrace => self.trace_core(heap, form, false),
+            Op::DisassembleFn => self.disassemble_fn_core(heap, form),
 
-            // ---- trait objects -------------------------------------------
-            Op::DynNew => self.dyn_new_core(heap, form, env).map(Step::Done),
-            Op::DynUpcast => self.dyn_upcast_core(heap, form, env).map(Step::Done),
-            Op::DynValue => {
-                let inner = core::field(heap, form, 0)
-                    .ok_or_else(|| EvalError::Internal("eval: (dyn-value ..) has no operand".to_string()))?;
-                match self.eval_core(heap, inner, env)? {
-                    Value::Boxed(id) if heap.is_dyn(id) => Ok(Step::Done(heap.dyn_value(id))),
-                    other => Err(EvalError::Internal(format!("eval: (dyn-value ..): not a trait object: {:?}", other))),
-                }
-            }
-
-            // Not a tail jump: the body repeats, so this is a real Rust loop
-            // rather than a `Step::Tail`. Each iteration's `eval_core` balances
-            // its own roots, so the root stack does not grow with the
-            // iteration count.
-            Op::Loop => {
-                let body = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (loop ..): {}", e)))?;
-                loop {
-                    for e in &body {
-                        match self.eval_core(heap, *e, env) {
-                            Ok(_) => {}
-                            // The exit value travels in a Rust `Box`, where
-                            // the collector cannot see it — safe only because
-                            // unwinding allocates nothing: a `RootScope`'s
-                            // drop truncates, it does not cons. The value is
-                            // handed straight back to the trampoline, which
-                            // roots it before anything else runs.
-                            Err(EvalError::Break) => return Ok(Step::Done(Value::Empty)),
-                            Err(EvalError::Return(v)) => return Ok(Step::Done(*v)),
-                            Err(e) => return Err(e),
-                        }
-                    }
-                }
-            }
+            other => Err(EvalError::Internal(format!(
+                "eval: {:?} is not a leaf; `step_cps` owes it a continuation frame",
+                other
+            ))),
         }
     }
 
@@ -672,69 +378,6 @@ impl Interp {
             Value::Symbol(id) => Ok(heap.symbol_name(id).to_string()),
             other => Err(EvalError::Internal(format!("eval: ({} ..) tag is not a symbol: {:?}", who, other))),
         }
-    }
-
-    /// `(construct PATH KEY N MUTABLE (R...) E...)`.
-    ///
-    /// Three shapes behind one tag, exactly as the old `construct`:
-    /// the built-in `Sexpr`, whose "fields" are really constructor arguments
-    /// for a datum; a mutable `defstruct` box; and an enum (`Option`,
-    /// `Result`, a user `defenum`). `MUTABLE` is what tells the last two
-    /// apart — a struct is the mutable one.
-    fn construct_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        let path = path_field(heap, form, 0, "construct")?;
-        // The value's runtime identity, spelled by the checker where the
-        // instantiation was known (`Checker::construct_form`). The path above
-        // still answers "struct or enum?"; this answers "which instantiation?"
-        // — `gen<i32>` and `gen<string>` share the former and differ here.
-        let key = str_field(heap, form, 1, "construct")?;
-        let variant = int_field(heap, form, 2, "construct")? as usize;
-        let mutable = bool_field(heap, form, 3, "construct")?;
-
-        // Field 4 is the per-field representation list, which only the bridge
-        // reads: the interpreter stores a field as the value it already is.
-        let arg_forms = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (construct ..): {}", e)))?;
-        if arg_forms.len() < 5 {
-            return Err(EvalError::Internal(format!("eval: malformed construct: {}", core::print(heap, form))));
-        }
-        let arg_forms = arg_forms[5..].to_vec();
-
-        let mut s = RootScope::new(heap);
-        let mut argv = Vec::with_capacity(arg_forms.len());
-        for a in &arg_forms {
-            let v = self.eval_core(&mut s, *a, env)?;
-            s.push_root(v);
-            argv.push(v);
-        }
-
-        if super::is_sexpr_type(&path) {
-            construct_sexpr_core(&mut s, variant, &argv)
-        } else if mutable {
-            // The values go in as they are: the old evaluator mapped each field
-            // across the two value worlds first, and with one world there is
-            // nothing to map.
-            Ok(crate::type_key::alloc_struct_keyed(&mut s, &key, argv))
-        } else {
-            Ok(crate::type_key::alloc_enum_keyed(&mut s, &key, variant, argv))
-        }
-    }
-
-    /// `(dyn-new STR PATH ((PATH SYM)...) ((PATH ((PATH SYM)...))...) R E)`.
-    ///
-    /// Boxing is where the concrete type is still known, so it is where every
-    /// vtable this value could ever be viewed through gets interned — its own
-    /// and each supertrait's. An upcast later has only the runtime vtable id
-    /// to go on, and could not re-derive them.
-    fn dyn_new_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        // Fields 0..3 name the concrete type, the trait, its slots and its
-        // supertraits; field 4 is the boxed value's representation, read by
-        // the bridge. All of them are read by `dyn_new_with_value` below,
-        // which is where they are needed.
-        let value = core::field(heap, form, 5)
-            .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) has no value".to_string()))?;
-
-        let v = self.eval_core(heap, value, env)?;
-        self.dyn_new_with_value(heap, form, v)
     }
 
     /// [`Self::dyn_new_core`] from the point its operand has a value.
@@ -804,20 +447,6 @@ impl Interp {
         Ok(s.alloc_dyn(id, v))
     }
 
-    /// `(dyn-upcast PATH E)` — view a trait object through a supertrait.
-    ///
-    /// The concrete type is gone by now, so the target table is found through
-    /// the map the boxing site filled in, keyed by the runtime vtable id. A
-    /// miss is a compiler bug rather than anything user code can provoke: the
-    /// boxing site registers a table for every trait the checker admits an
-    /// upcast to.
-    fn dyn_upcast_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        let value = core::field(heap, form, 1)
-            .ok_or_else(|| EvalError::Internal("eval: (dyn-upcast ..) has no operand".to_string()))?;
-        let v = self.eval_core(heap, value, env)?;
-        self.dyn_upcast_with_value(heap, form, v)
-    }
-
     /// [`Self::dyn_upcast_core`] from the point its operand has a value —
     /// split for the same reason [`Self::dyn_new_with_value`] is.
     pub(super) fn dyn_upcast_with_value(&self, heap: &mut Heap, form: Value, v: Value) -> Result<Value, EvalError> {
@@ -852,155 +481,6 @@ impl Interp {
         Ok(s.alloc_dyn(to, inner))
     }
 
-    /// `(labels ((SYM ((SYM R)...) RET-R E...) ...) E...)`.
-    ///
-    /// The siblings are mutually recursive, so each one has to capture an
-    /// environment that already contains all of them. That is not a cycle to
-    /// tie off after the fact: the frame is built first with an empty *cell*
-    /// per name, so the environment is complete before any closure is made,
-    /// and filling a cell afterwards is an ordinary write the closures see
-    /// because they share it. It is the same mechanism `set` uses.
-    fn labels_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Step, EvalError> {
-        let defs = core::field(heap, form, 0)
-            .ok_or_else(|| EvalError::Internal("eval: (labels ..) has no definitions".to_string()))?;
-        let defs = heap
-            .list_to_vec(defs)
-            .map_err(|e| EvalError::Internal(format!("eval: (labels ..) definitions: {}", e)))?;
-
-        let mut s = RootScope::new(heap);
-        let placeholders: Vec<(SymRef, Value)> = defs
-            .iter()
-            .map(|d| match s.car(*d) {
-                Ok(Value::Symbol(sym)) => Ok((sym, Value::Empty)),
-                other => Err(EvalError::Internal(format!("eval: (labels ..) definition names {:?}", other))),
-            })
-            .collect::<Result<_, _>>()?;
-        let env = extend_env(&mut s, &placeholders, env)?;
-        s.push_root(env);
-
-        for d in &defs {
-            // A definition is `(SYM PARAMS RET-R E...)` — positional, like a
-            // `let` binding and unlike a tagged node.
-            let (sym, _) = match s.car(*d) {
-                Ok(Value::Symbol(sym)) => (sym, ()),
-                other => return Err(EvalError::Internal(format!("eval: (labels ..) definition names {:?}", other))),
-            };
-            let rest = s.cdr(*d).map_err(heap_err)?;
-            let params = s.car(rest).map_err(heap_err)?;
-            let ret = s.cdr(rest).and_then(|d| s.car(d)).map_err(heap_err)?;
-            let body = tail_after_value(&s, rest, 2)?;
-            let f = s.alloc_closure(params, ret, body, env);
-            let cell = env_lookup(&s, env, sym)
-                .ok_or_else(|| EvalError::Internal(format!("eval: (labels ..) lost the slot for `{}`", s.symbol_name(sym))))?;
-            match cell {
-                Value::Boxed(id) if s.is_cell(id) => s.cell_set(id, f),
-                other => return Err(EvalError::Internal(format!("eval: (labels ..) slot is {:?}", other))),
-            }
-        }
-
-        let body = tail_after(&mut s, form, 1)?;
-        let body = s
-            .list_to_vec(body)
-            .map_err(|e| EvalError::Internal(format!("eval: (labels ..) body: {}", e)))?;
-        let Some((last, rest)) = body.split_last() else {
-            return Ok(Step::Done(Value::Empty));
-        };
-        for e in rest {
-            self.eval_core(&mut s, *e, env)?;
-        }
-        Ok(Step::Tail(*last, env))
-    }
-
-    /// `(apply E RET-R (R...) E...)` — call the value `E` produces.
-    ///
-    /// An interpreted closure's body is entered as a *tail jump*, so a
-    /// self-call or a mutual call in tail position costs no stack. The old
-    /// evaluator could not do that: a closure was always native code, and
-    /// entering it meant a real call.
-    fn apply_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Step, EvalError> {
-        let callee = core::field(heap, form, 0)
-            .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no callee".to_string()))?;
-        let arg_forms = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (apply ..): {}", e)))?;
-        // The callee, the return representation, the argument representations,
-        // then the arguments.
-        if arg_forms.len() < 3 {
-            return Err(EvalError::Internal(format!("eval: malformed apply: {}", core::print(heap, form))));
-        }
-        let ret_repr_field = arg_forms[1];
-        let arg_reprs_field = arg_forms[2];
-        let arg_forms = arg_forms[3..].to_vec();
-
-        let mut s = RootScope::new(heap);
-        let f = self.eval_core(&mut s, callee, env)?;
-        // An unnamed callee — `((make-adder 1) 2)` — has no binding keeping
-        // its box alive while the arguments allocate.
-        s.push_root(f);
-        let mut argv = Vec::with_capacity(arg_forms.len());
-        for a in &arg_forms {
-            let v = self.eval_core(&mut s, *a, env)?;
-            s.push_root(v);
-            argv.push(v);
-        }
-
-        let id = match f {
-            Value::Boxed(id) if s.is_closure(id) => id,
-            // A closure that came *out* of compiled code. Its arguments cross
-            // the boundary and its result comes back, both driven by the
-            // declared representations this node carries.
-            Value::Boxed(id) if s.is_compiled_closure(id) => {
-                let arg_reprs = repr_list(&s, arg_reprs_field, "apply")?;
-                let ret = Repr::read(&s, ret_repr_field)
-                    .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no return representation".to_string()))?;
-                let (int_args, crossing_roots) = self.encode_crossing_args(&mut s, &argv, &arg_reprs, false)?;
-                self.enter_compiled(&mut s);
-                // An unwinding `(panic ...)` inside the closure runs none of
-                // the pops below, and leaves whatever roots the compiled body
-                // had pushed. Returning here drops `s`, whose `RootScope`
-                // truncates the stack back to this call's own base — the same
-                // repair every other error path out of `apply_core` gets.
-                let raw = match crate::eval::crossing::catch_compiled_panic(|| Interp::call_closure_box(&s, id, &int_args)) {
-                    Ok(raw) => raw,
-                    Err(e) => return Err(e),
-                };
-                for _ in 0..crossing_roots {
-                    s.pop_root();
-                }
-                return self.decode_compiled_return(&mut s, raw, &ret).map(Step::Done);
-            }
-            // A built-in used as a function value — dispatched by name through
-            // the very same `eval_builtin`/`eval_builtin_method` a direct
-            // `(gensym)`/`(+ a b)` call site goes through; the box carries only
-            // which name.
-            Value::Boxed(id) if s.is_builtin_fn(id) => {
-                let name = s.builtin_fn_name(id).to_string();
-                return match s.builtin_fn_recv(id) {
-                    None => match self.eval_builtin(&mut s, &name, &argv) {
-                        Some(r) => r.map(Step::Done),
-                        None => Err(EvalError::NoSuchFunction(name)),
-                    },
-                    Some(pid) => {
-                        let type_name = crate::types::path_from_id(&s, pid);
-                        let ret_key = s.builtin_fn_ret_key(id).to_string();
-                        match super::eval_builtin_method(&mut s, &type_name, &name, &argv, &ret_key) {
-                            Some(r) => r.map(Step::Done),
-                            None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, name))),
-                        }
-                    }
-                };
-            }
-            other => return Err(EvalError::Internal(format!("eval: (apply ..) callee is not a function: {:?}", other))),
-        };
-
-        let (call_env, body) = self.closure_frame(&mut s, id, argv)?;
-        let Some((last, rest)) = body.split_last() else {
-            return Ok(Step::Done(Value::Empty));
-        };
-        for e in rest {
-            self.eval_core(&mut s, *e, call_env)?;
-        }
-        Ok(Step::Tail(*last, call_env))
-    }
-
     /// Bind `argv` to interpreted closure `id`'s parameters, returning the
     /// environment its body runs in and that body's forms.
     ///
@@ -1029,12 +509,11 @@ impl Interp {
 
     /// Applies interpreted closure `id` to values, all the way to a result.
     ///
-    /// [`Self::apply_core`]'s counterpart for a caller that is *not* the
-    /// evaluator's own loop — `Interp::apply_interpreted`, re-entered from
-    /// compiled code. There is a native frame waiting on this call, so the
-    /// body's last form is evaluated here rather than handed back as a
-    /// [`Step::Tail`] jump: the tail call optimisation applies within an
-    /// interpreted call chain, and this is a boundary crossing.
+    /// For a caller that is *not* the evaluator's own loop —
+    /// `Interp::apply_interpreted`, re-entered from compiled code. There is a
+    /// native frame waiting on this call, so the body's last form is evaluated
+    /// here rather than continued as a tail jump: tail calls are constant-stack
+    /// *within* an interpreted chain, and this is a boundary crossing.
     pub(super) fn call_interpreted_closure(&self, heap: &mut Heap, id: BoxId, argv: Vec<Value>) -> Result<Value, EvalError> {
         let mut s = RootScope::new(heap);
         let (call_env, body) = self.closure_frame(&mut s, id, argv)?;
@@ -1043,42 +522,6 @@ impl Interp {
             last = self.eval_core(&mut s, *e, call_env)?;
         }
         Ok(last)
-    }
-
-    /// `(match E R (P E...) ...)` — the first arm whose pattern matches wins.
-    fn match_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Step, EvalError> {
-        let scrut = core::field(heap, form, 0)
-            .ok_or_else(|| EvalError::Internal("eval: (match ..) has no scrutinee".to_string()))?;
-        let v = self.eval_core(heap, scrut, env)?;
-
-        let mut s = RootScope::new(heap);
-        // The scrutinee is reachable from nothing else, and matching a
-        // `Sexpr` path pattern allocates, so it is rooted for the whole
-        // search rather than just across one arm.
-        s.push_root(v);
-        let arms = core::fields(&s, form).map_err(|e| EvalError::Internal(format!("eval: (match ..): {}", e)))?;
-
-        // The scrutinee, its representation (the bridge's), then the arms.
-        for arm in arms.iter().skip(2) {
-            let parts = s
-                .list_to_vec(*arm)
-                .map_err(|e| EvalError::Internal(format!("eval: (match ..) arm: {}", e)))?;
-            let Some((pat, body)) = parts.split_first() else {
-                return Err(EvalError::Internal("eval: (match ..) arm is empty".to_string()));
-            };
-            let Some(binds) = match_core_pattern(self, &mut s, env, *pat, v)? else {
-                continue;
-            };
-            let env = extend_env(&mut s, &binds, env)?;
-            let Some((last, rest)) = body.split_last() else {
-                return Ok(Step::Done(Value::Empty));
-            };
-            for e in rest {
-                self.eval_core(&mut s, *e, env)?;
-            }
-            return Ok(Step::Tail(*last, env));
-        }
-        Err(EvalError::Internal("eval: no matching match arm".to_string()))
     }
 
     /// A one-field literal node's payload.
@@ -1091,170 +534,6 @@ impl Interp {
         match core::field(heap, form, i) {
             Some(Value::Symbol(id)) => Ok(id),
             other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a symbol: {:?}", what, i, other))),
-        }
-    }
-
-    /// Build the frame a `(let ((SYM R E) ...) ...)` introduces and return the
-    /// extended environment.
-    ///
-    /// CL `let`: every initialiser is evaluated in the *outer* environment, so
-    /// all of them run before the frame is linked in. The repr tag `R` is for
-    /// the compiler bridge and is not read here — with one value world left,
-    /// every binding holds the same thing.
-    fn extend_let(&self, heap: &mut Heap, binds: Value, env: Value) -> Result<Value, EvalError> {
-        let binds = heap
-            .list_to_vec(binds)
-            .map_err(|e| EvalError::Internal(format!("eval: (let ..) binding list: {}", e)))?;
-        // `progn` — a `let` with no bindings — extends nothing. Skipping the
-        // empty frame is not just an optimisation: `progn` is how every body
-        // sequence is spelled, so consing one per body would put an allocation
-        // (and so a possible collection) on a path that has no reason to have
-        // one, and would grow the environment a lookup has to walk.
-        if binds.is_empty() {
-            return Ok(env);
-        }
-
-        let mut s = RootScope::new(heap);
-        let mut pairs = Vec::with_capacity(binds.len());
-        for b in &binds {
-            // A binding is `(SYM R E)` — a plain three-element list, not a
-            // tagged node, so its elements are read positionally.
-            // `core::field` would skip the first as a tag.
-            let parts = s
-                .list_to_vec(*b)
-                .map_err(|e| EvalError::Internal(format!("eval: (let ..) binding: {}", e)))?;
-            let [name, _repr, init] = parts[..] else {
-                return Err(EvalError::Internal(format!(
-                    "eval: (let ..) binding is not (SYM R E): {}",
-                    core::print(&s, *b)
-                )));
-            };
-            let Value::Symbol(sym) = name else {
-                return Err(EvalError::Internal(format!("eval: (let ..) binding name is {:?}", name)));
-            };
-            let v = self.eval_core(&mut s, init, env)?;
-            // Rooted for the rest of the initialisers, not just across the
-            // next allocation: a value bound three initialisers ago is just
-            // as collectible as this one.
-            s.push_root(v);
-            pairs.push((sym, v));
-        }
-        extend_env(&mut s, &pairs, env)
-    }
-
-    /// `(call WRITTEN HOME PATH (R...) ARG...)`.
-    ///
-    /// Only built-in operators are reachable so far. A call to a user-defined
-    /// function needs `FnDef::body` to be a core form, which happens in the
-    /// commit that switches the checker over; until then this says so rather
-    /// than reporting the function as missing. The call *machinery* — argument
-    /// evaluation, frames, the tail jump — is exercised through `labels` and
-    /// `lambda`, so nothing about it is left untested by the wait.
-    fn call_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        let written = self.name_list(heap, form, 0, "call")?;
-        let home = self.name_list(heap, form, 1, "call")?;
-
-        let arg_forms = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (call ..): {}", e)))?;
-        // written, home, path, the argument representations, then the
-        // arguments. The representations are the bridge's; evaluation is
-        // uniform over `Value` and skips them.
-        if arg_forms.len() < 4 {
-            return Err(EvalError::Internal(format!("eval: malformed call: {}", core::print(heap, form))));
-        }
-        let arg_forms = &arg_forms[4..];
-
-        let mut s = RootScope::new(heap);
-        let mut argv = Vec::with_capacity(arg_forms.len());
-        for a in arg_forms {
-            let v = self.eval_core(&mut s, *a, env)?;
-            // Rooted for the rest of the argument evaluation *and* the call:
-            // an earlier argument is just as collectible as the one being
-            // built now.
-            s.push_root(v);
-            argv.push(v);
-        }
-
-        let path = path_field(&s, form, 2, "call")?;
-        if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
-            return self.enter(&mut s, &f, argv);
-        }
-        // Otherwise a built-in operator, which lives at the root and so is
-        // always spelled as a bare name.
-        if written.len() == 1 {
-            if let Some(result) = self.eval_builtin(&mut s, &written[0], &argv) {
-                return result;
-            }
-        }
-        Err(EvalError::NoSuchFunction(path.to_string()))
-    }
-
-    /// `(assoc PATH SYM INSTANCE (HOME...) RET-REPR (REPR...) ARG...)` — a
-    /// method call. The receiver, when there is one, is `args[0]`.
-    ///
-    /// The two representation fields are the bridge's: evaluation is uniform
-    /// over `Value`, and even the built-in container methods need no element
-    /// type any more (see `eval_builtin_method`).
-    fn assoc_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        let type_name = path_field(heap, form, 0, "assoc")?;
-        let method = sym_field(heap, form, 1, "assoc")?;
-        let home = self.name_list(heap, form, 3, "assoc")?;
-        // The result's runtime identity, for the built-in methods that build
-        // a box: `Vector::new` has no field to read an instantiation off, and
-        // this crate is below the checker. See `Checker::assoc_form`.
-        let ret_key = str_field(heap, form, 6, "assoc")?;
-
-        let mut s = RootScope::new(heap);
-        let argv = self.eval_rest(&mut s, form, 7, env, "assoc")?;
-
-        let f = self.root.borrow().resolve_method(&home, &type_name, &method);
-        match f {
-            Some(f) => self.enter(&mut s, &f, argv),
-            None => match super::eval_builtin_method(&mut s, &type_name, &method, &argv, &ret_key) {
-                Some(result) => result,
-                None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
-            },
-        }
-    }
-
-    /// `(dyn-call PATH SYM SLOT VTABLE (REPR...) ARG...)` — a call through a
-    /// trait object's vtable.
-    ///
-    /// `args[0]` is the fat box; the callee is an ordinary method body with an
-    /// ordinary receiver, so the concrete value is substituted in its place and
-    /// nothing about the callee knows it was reached dynamically.
-    fn dyn_call_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        let trait_path = path_field(heap, form, 0, "dyn-call")?;
-        let method = sym_field(heap, form, 1, "dyn-call")?;
-        let slot = int_field(heap, form, 2, "dyn-call")? as usize;
-
-        let mut s = RootScope::new(heap);
-        let mut argv = self.eval_rest(&mut s, form, 5, env, "dyn-call")?;
-
-        let (vtable_id, inner) = match argv.first() {
-            Some(Value::Boxed(id)) if s.is_dyn(*id) => (s.dyn_vtable_id(*id), s.dyn_value(*id)),
-            other => {
-                return Err(EvalError::Internal(format!(
-                    "eval: (dyn-call {}::{} ..): receiver is not a trait object ({:?})",
-                    trait_path, method, other
-                )))
-            }
-        };
-        let target = self.vtables.borrow().get(vtable_id as usize).and_then(|slots| slots.get(slot)).cloned();
-        let Some((target_type, target_method)) = target else {
-            return Err(EvalError::Internal(format!(
-                "eval: (dyn-call {}::{} ..): vtable {} has no slot {}",
-                trait_path, method, vtable_id, slot
-            )));
-        };
-        argv[0] = inner;
-        s.push_root(inner);
-        // Visibility was settled where the value was boxed
-        // (`Checker::dyn_vtable_slots` went through the `impl`), so this is the
-        // direct lookup, not `resolve_method`'s `home`-relative one.
-        let f = self.root.borrow().get_method(&target_type, &target_method);
-        match f {
-            Some(f) => self.enter(&mut s, &f, argv),
-            None => Err(EvalError::NoSuchFunction(format!("{}::{}", target_type, target_method))),
         }
     }
 
@@ -1284,35 +563,6 @@ impl Interp {
         self.resolve_global_named(&home, &written, &path)
             .map(|slot| slot.get(heap))
             .ok_or_else(|| EvalError::Unbound(path.to_string()))
-    }
-
-    /// `(set-global (WRITTEN...) (HOME...) PATH REPR FORM)` — assign a
-    /// `defvar`. Returns unit, like every other assignment.
-    fn set_global_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        let written = self.name_list(heap, form, 0, "set-global")?;
-        let home = self.name_list(heap, form, 1, "set-global")?;
-        let path = path_field(heap, form, 2, "set-global")?;
-        let value = core::field(heap, form, 4)
-            .ok_or_else(|| EvalError::Internal("eval: (set-global ..) has no value form".to_string()))?;
-
-        let mut s = RootScope::new(heap);
-        let v = self.eval_core(&mut s, value, env)?;
-        s.push_root(v);
-        // See `global_core` for why a promoted global is written through the
-        // permanent root rather than its cell.
-        if let Some(&id) = self.compiled_globals.borrow().get(&path) {
-            let perm_idx = typelisp_rt::global_perm_idx(id)
-                .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id)))?;
-            s.set_permanent_root(perm_idx, v);
-            return Ok(Value::Empty);
-        }
-        match self.resolve_global_named(&home, &written, &path) {
-            Some(slot) => {
-                slot.set(&mut s, v)?;
-                Ok(Value::Empty)
-            }
-            None => Err(EvalError::Unbound(path.to_string())),
-        }
     }
 
     /// `(fnref (WRITTEN...) (HOME...) PATH (PARAM-REPR...))` — a named free
@@ -1460,31 +710,6 @@ impl Interp {
         core::list(heap, &syms).map_err(heap_err)
     }
 
-    /// Evaluate a node's trailing argument forms, rooting each for the whole
-    /// run: an argument built three allocations ago is just as collectible as
-    /// the one being built now.
-    fn eval_rest(
-        &self,
-        s: &mut RootScope<'_>,
-        form: Value,
-        skip: usize,
-        env: Value,
-        what: &str,
-    ) -> Result<Vec<Value>, EvalError> {
-        let fields = core::fields(s, form).map_err(|e| EvalError::Internal(format!("eval: ({} ..): {}", what, e)))?;
-        if fields.len() < skip {
-            return Err(EvalError::Internal(format!("eval: malformed {}: {}", what, core::print(s, form))));
-        }
-        let arg_forms = fields[skip..].to_vec();
-        let mut argv = Vec::with_capacity(arg_forms.len());
-        for a in &arg_forms {
-            let v = self.eval_core(s, *a, env)?;
-            s.push_root(v);
-            argv.push(v);
-        }
-        Ok(argv)
-    }
-
     /// Call `f` with already-evaluated `argv`: through its compiled body if it
     /// has one, otherwise by tree-walking.
     ///
@@ -1596,38 +821,6 @@ impl Interp {
                 StepCmd::Into
             }
         }
-    }
-
-    /// `(step form)` — CLHS 25.2's stepper, at *call* granularity.
-    ///
-    /// Every call reached from inside `form` stops and asks, through the same
-    /// [`Self::enter`] hook `trace` uses. Call granularity and not expression
-    /// granularity for two reasons: an expression-level hook would sit in
-    /// `eval_core`, the hottest path there is, and a prompt at every `if` and
-    /// every variable reference is not something a person can step through.
-    /// SBCL's stepper stops at calls for the same reason.
-    ///
-    /// **With no terminal on standard input, this just evaluates `form`.**
-    /// CLHS explicitly allows exactly that ("`step` ... may be a no-op that
-    /// evaluates form"), and the alternative is a script or a test hanging on
-    /// a prompt nobody can answer.
-    ///
-    /// The flags are saved and restored around the evaluation rather than
-    /// simply cleared, so a `(step ...)` reached from inside another one
-    /// leaves the outer step exactly as it found it.
-    fn stepper_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        let inner = core::field(heap, form, 0)
-            .ok_or_else(|| EvalError::Internal("eval: (step ..) has no form".to_string()))?;
-        if !typelisp_rt::sys_builtin::stdin_is_tty() {
-            return self.eval_core(heap, inner, env);
-        }
-        let (was_stepping, was_quiet) = (self.stepping.get(), self.step_quiet_depth.get());
-        self.stepping.set(true);
-        self.step_quiet_depth.set(usize::MAX);
-        let result = self.eval_core(heap, inner, env);
-        self.stepping.set(was_stepping);
-        self.step_quiet_depth.set(was_quiet);
-        result
     }
 
     /// Writes one trace line, indented for `depth` and numbered the way CL
@@ -3112,9 +2305,9 @@ mod tests {
     /// body.
     ///
     /// The frame and its cells are reachable only through the environment,
-    /// which the trampoline roots — but there is a gap between `extend_let`
-    /// building it and the trampoline taking it, and the body runs in that
-    /// gap. Every other `let` test here has a body that never allocates, so
+    /// which the loop roots in its state slot — but there is a gap between
+    /// `extend_env` building the frame and the loop taking it, and the body
+    /// runs in that gap. Every other `let` test here never allocates, so
     /// none of them can see the difference; this one conses *before* reading
     /// the binding, which under `gc_stress` collects between the two.
     #[test]
@@ -3177,7 +2370,7 @@ mod tests {
         );
     }
 
-    /// The trampoline's reason for existing. The old evaluator had an
+    /// The loop's reason for existing. The Rust-tree evaluator had an
     /// iterative special case for `if` alone, because a long `cond`
     /// expands into an `if` nested in the *else* position and recursing
     /// through it overflowed the stack. Here it is a jump, so the depth costs
@@ -3915,7 +3108,7 @@ mod tests {
 
     /// A closure keeps its own code alive.
     ///
-    /// The trampoline roots the form it is evaluating, so for as long as the
+    /// The loop roots the form it is evaluating, so for as long as the
     /// `lambda` node is being walked its body is reachable that way — which
     /// is why this test deliberately gets rid of the form. It replaces the
     /// form's root with the closure, collects, and only then calls it. If the

@@ -1,26 +1,28 @@
 # 評価器の CPS 化（設計）
 
-最終更新: 2026-09-08 / ブランチ: `feature/cps-evaluator`
+最終更新: 2026-09-08 / ブランチ: `feature/cps-evaluator` / **移行は完了している**
 
-この文書は、ツリーウォーク評価器を **Rust の再帰から継続スタックへ**移す作業の設計を記録する。
-実行の意味は変えない。変えるのは「計算の残り」がどこにあるか、それだけ。
+この文書は、ツリーウォーク評価器を **Rust の再帰から継続スタックへ**移した作業の設計を記録する。
+実行の意味は変えていない。変えたのは「計算の残り」がどこにあるか、それだけ。
 
-作業計画（段階と完了条件）は別途プランに、完了後の経緯は
-[implementation-log.md](implementation-log.md) に書く。
+評価のループは `crates/typelisp-front/src/eval/interp/core_cps.rs` にあり、`core_eval.rs` には
+タグの語彙（`Op`）・葉の評価（`eval_leaf`）・ノードの読み取り・トップレベルが残っている。
+再帰版（`eval_core_recursive` と `step_core` の非葉アーム、855 行）は削除した。
+
+作業の経緯は [implementation-log.md](implementation-log.md) に書く。
 
 ---
 
 ## 1. なぜ
 
-**Lisp の再帰の深さが、そのまま Rust のスタックの深さになっている。**
+**Lisp の再帰の深さが、そのまま Rust のスタックの深さになっていた。**
 
-`Interp::eval_core`（`crates/typelisp-front/src/eval/interp/core_eval.rs:204`）は
-`step_core` を呼ぶループだが、`step_core` の中から `self.eval_core(...)` を呼び返している
-箇所が **36 箇所**ある。末尾でない部分式 — `if` の条件、引数、`let` の初期化式、`match` の
-scrutinee — はすべてここを通る。
+旧 `Interp::eval_core` は `step_core` を呼ぶループだったが、`step_core` の中から
+`self.eval_core(...)` を呼び返している箇所が **36 箇所**あった。末尾でない部分式 — `if` の
+条件、引数、`let` の初期化式、`match` の scrutinee — はすべてそこを通っていた。
 
-その帰結が、`scripts/test-serial.sh:52` の `RUST_MIN_STACK=32MB` と、
-`src/bin/bootstrap_island.rs:26` が 64MB スタックのスレッドを明示的に立てていること。
+その帰結が、`scripts/test-serial.sh` の `RUST_MIN_STACK=32MB` と、
+`src/bin/bootstrap_island.rs` が 64MB スタックのスレッドを明示的に立てていること。
 
 得られるものは 3 つ:
 
@@ -32,30 +34,30 @@ scrutinee — はすべてここを通る。
 
 ---
 
-## 2. 現状 — トランポリンは半分できている
+## 2. 出発点 — トランポリンは半分できていた
+
+旧評価器には既にトランポリンがあった（以下はいずれも削除済み）:
 
 ```rust
-// core_eval.rs:191
 enum Step {
     Done(Value),
     Tail(Value, Value),
 }
 ```
 
-`eval_core` のループは `Step::Tail` を受けたら再帰せずにループ先頭へ戻る（`:210-224`）。
-**末尾位置は既にスタックを食わない。** 各 `Op` の実装が「最後の本体式は `Step::Tail` で返し、
-それ以外は `eval_core` を再帰呼び出しする」という形で一貫している:
+`eval_core` のループは `Step::Tail` を受けたら再帰せずにループ先頭へ戻っていたので、
+**末尾位置は既にスタックを食わなかった**。各 `Op` の実装が「最後の本体式は `Step::Tail` で
+返し、それ以外は `eval_core` を再帰呼び出しする」という形で一貫していた:
 
 ```rust
-// core_eval.rs:334-337 (Op::Let)
 for e in rest {
     self.eval_core(heap, *e, env)?;     // ← 再帰
 }
 Ok(Step::Tail(*last, env))              // ← 末尾はジャンプ
 ```
 
-CPS 化とは、**この `for` ループを継続フレームに置き換える**ことに尽きる。
-`Step::Tail` の考え方はそのまま活きる。
+CPS 化とは、**この `for` ループを継続フレームに置き換える**ことに尽きた。
+`Step::Tail` の役目は `sequence_state`（残り 1 個ならフレームを積まずに `Eval` へ）が継いでいる。
 
 ---
 
@@ -97,91 +99,114 @@ loop {
 
 ---
 
-## 4. 継続フレーム
+## 4. 継続フレーム — 27 種
 
-45 個の `Op`（`core_eval.rs:66-111`）を、必要なフレームで分類する。
+45 個の `Op`（`core_eval.rs` の `enum Op`）に対して、フレームは 27 種。`step_cps` の `match` に
+catch-all は無いので、**`Op` を足してフレームを与えないとビルドが落ちる**。
 
 ### 4.1 フレーム不要（葉）— 19 個
 
 `Int` `Float` `Bignum` `Ratio` `Char` `Bool` `Str` `Sym` `Unit` `Var` `Quote` `Lambda`
 `FnRef` `MethodRef` `Global` `CompileFn` `Trace` `Untrace` `DisassembleFn`
 
-即座に `Apply(値)` へ。`Break` も葉だが `Unwind` へ行く。
+これだけが `core_eval.rs` に `Interp::eval_leaf` として残っている。`Break` も部分式を持たないが、
+値ではなく `State::Unwind` へ行く。
 
 ### 4.2 部分式が 1 つ
 
 | Op | フレーム | 値を受け取って何をするか |
 |---|---|---|
-| `If` | `If { then, else, env }` | `Bool` で分岐先を選び `Eval(分岐, env)`（末尾ジャンプ） |
+| `If` | `If { form, env }` | `Bool` で分岐先を選び `Eval(分岐, env)`（末尾ジャンプ） |
 | `Panic` | `Panic` | 文字列を取り出して `Unwind(Panic)` |
-| `Set` | `Set { cell }` | セルへ書く |
-| `SetGlobal` | `SetGlobal { path }` | グローバルへ書く |
-| `FieldGet` | `FieldGet { field }` | フィールドを読む |
+| `Set` | `Set { sym, env }` | **セルでなく名前を持つ** — 引くのは値が揃ってから |
+| `SetGlobal` | `SetGlobal { form }` | グローバルへ書く |
+| `FieldGet` | `FieldGet { idx }` | フィールドを読む |
 | `DynValue` | `DynValue` | 箱から中身を取る |
-| `Match` | `MatchArms { form, env }` | 腕を順に試し、当たった腕で `extend_env` して `Seq` |
+| `Match` | `MatchArms { form, env }` | 腕を順に試し、当たった腕で環境を伸ばして `Seq` |
 | `Throw` | `Throw { tag }` | `Unwind(Throw)` |
 | `Return` / `ReturnFrom` | `Return` / `ReturnFrom { name }` | `Unwind` |
+| `DynNew` / `DynUpcast` | `DynNew { form }` / `DynUpcast { form }` | 箱に入れる／vtable を差し替える |
 
 ### 4.3 部分式が複数
 
-- **`Seq { rest, env }`** — 本体の残り。`resume` で先頭を取り出し、
-  **残り 1 個なら積み直さずに `Eval` へ**（これが `Step::Tail` の役目を引き継ぐ）
-- **`Args { callee, done, rest, env }`** — 引数を 1 つずつ。`done` に積み上げる。
-  `Call` `Assoc` `DynCall` `Apply` `Construct` `DynNew` `DynUpcast` が共有する
-- **`LetInit { done, rest, body, env }`** — `let` の初期化式を 1 つずつ。揃ったら
-  `extend_env` して `Seq` を積む（現 `extend_let`、`:1085-1111`）
-- **`FieldSet { obj, field }`** — レシーバ → 値の 2 段
+- **`Seq { rest, env }`** — 本体の残り。`sequence_state` が作る。
+  **残り 1 個なら積まずに `Eval` へ**（`Step::Tail` の役目を継いだのはここ）
+- **`Args { form, done, env, kind }`** — 引数を 1 つずつ `done` に積む。`ArgsKind` が
+  `Call`/`Construct`/`Assoc`/`DynCall` を分けるが、違いは**ノードの何番目から引数が始まるか**
+  （4/5/7/5）だけ。揃ったら `finish_args` が種別ごとの処理へ振る
+- **`ApplyCallee { form, env }` → `ApplyArgs { form, callee, done, env }`** — `apply` は
+  呼ぶものが先に来るので 2 段
+- **`LetInit { .. }`** — 初期化式を 1 つずつ。揃ったら `extend_env` して `Seq`
+- **`FieldSetObj { form, env }` → `FieldSetVal { obj, idx }`** — レシーバ → 値の 2 段
 
 ### 4.4 制御
 
 | Op | フレーム | 巻き戻しでの振る舞い |
 |---|---|---|
-| `Loop` | `Loop { body, pos, env }` | `Break` を吸って `Apply(())`、`Return(v)` を吸って `Apply(v)` |
+| `Loop` | `Loop { body, rest, env }` | `Break` を吸って `Apply(())`、`Return(v)` を吸って `Apply(v)` |
 | `Block` | `Block { name }` | 同名の `ReturnFrom(v)` を吸って `Apply(v)` |
 | `Catch` | `Catch { tag }` | 同タグの `Throw(v)` を吸って `Apply(v)` |
-| `UnwindProtect` | `Unwind { cleanup, env }` | **どの脱出でも** cleanup を評価してから巻き戻しを再開 |
-| `Call` | `Call { .. }` | 関数フレーム。トレース（`Interp::enter`）と暗黙 block の境界 |
+| `UnwindProtect` | `Protect { cleanup, env }` → `CleanupValue { value }` / `CleanupUnwind { pending }` | **どの脱出でも** cleanup を評価し、終わったら保留したものを再開する |
+| `Step` | `Step { was_stepping, was_quiet }` | ステッパの状態を戻す |
+| 監視された呼び出し | `TracedCall { name, depth }` | 戻り値を印字する |
 
-`UnwindProtect` の「cleanup 自身の脱出が飛行中のものに勝つ」規則は、cleanup の評価中に
-新しい `Unwind` が起きたら古いほうを捨てる、というスタック操作として自然に出る。
+`UnwindProtect` が 3 フレームに割れているのは、cleanup が**何を中断して走っているか**で戻り先が
+違うから — 値を持って抜けようとしていたのか（`CleanupValue`）、脱出中だったのか
+（`CleanupUnwind`）。cleanup 自身の脱出が飛行中のものに勝つ規則は、`CleanupUnwind` を resume
+せずに新しい `Unwind` がそのまま上へ行くことで自然に出る。
 
----
+**`Call` フレームは無い。** 関数に入るのは `enter_fn` で、本体はそのまま `Seq` になる — だから
+呼び出しの末尾位置が末尾ジャンプになる。例外は 2 つ:
+
+- **トレース／ステップ中の呼び出し**は `TracedCall` を積むので末尾位置を失う。戻り値を印字する
+  には戻ってくる場所が要るため
+- **`Interp::apply`**（コンパイル済みコードからの再入口）は本体の最後の式を `eval_core` で
+  評価するので、そこはネイティブフレームが待ったままになる
 
 ## 5. GC — 継続フレームが持つ値のルート
 
-### Phase A — 既存の `roots` をそのまま使う
+### 既存の `roots` にそのまま乗った
 
-`crates/typelisp-mem/src/heap.rs:83` の `roots` は**厳密な LIFO** で、`push_root`/`pop_root`/
+`crates/typelisp-mem/src/heap.rs` の `roots` は**厳密な LIFO** で、`push_root`/`pop_root`/
 `truncate_roots` で操作する。**継続スタックも LIFO なので、そのまま乗る**:
 
-- フレームを積むとき、そのフレームが持つ `Value`（`env`、集めかけの引数、`Loop` の本体…）を
-  `push_root` する
-- フレームごとに積んだ時点の `root_count()` を覚えておき、フレームを畳むときに
-  `truncate_roots(base)` する — 既存の `RootScope`（`heap.rs:2174`）とまったく同じ規律
-- `Args` フレームのように値が増えていくものは、1 つ増えるたびに `push_root` すればよい
+```text
+roots: [ ..., state-env, state-form, frame0 の値.., frame1 の値.., ... ]
+              ^ sbase                ^ frame0 の base
+```
 
-**新しいルート源は要らない。** `heap.rs` は Phase A では変更しない。
+- 状態が運ぶもの（環境と形、または `Apply` の値）は**底の 2 スロット**に置き、`set_root` で
+  上書きする。押し込まないので、末尾ループがルートスタックを伸ばさない
+- フレームを積むときにその値を `push_root` し、積んだ時点の `root_count()` をフレームと一緒に
+  覚える。畳むときに `truncate_roots(base)` — 既存の `RootScope` と同じ規律
 
-### 消えるもの
+**新しいルート源は要らなかった。** `heap.rs` は Phase A では 1 行も変えていない。
 
-- **`RootScope` による一時的な rooting の大半**。いまは「引数を集める間だけ `push_root`」
-  （`core_eval.rs:906-911`）という形が随所にあるが、集めかけの引数は `Args` フレームが
-  持ち続けるので、フレームの寿命がそのまま root の寿命になる
-- **`in_flight_throw`（`heap.rs:88` の 1 スロット）**。飛行中の値は `State::Unwind` が持ち、
-  巻き戻し中も root されたままにできる。`Loop` の `Break` の値がいま Rust の `Box` で運ばれ
-  「コレクタから見えないが、巻き戻しが allocate しないから安全」という綱渡り
-  （`core_eval.rs:619-624` のコメント）も同じ理由で消える
+### 実装で確定した 2 つの規律
+
+1. **`truncate_roots` → `push` → `set_state` の窓では確保しない。** フレームを畳んで次の状態を
+   root するまでの間、生きている値がどのルートからも見えない瞬間がある。ここで `cons` すると
+   GC が走って回収されうる
+2. **`resume` はフレームを積まない。** 積むべきフレームを**返し**、呼び出し側が
+   truncate → push → `set_state` の順に実行する。resume の中で push すると、直後の
+   `truncate_roots` が今積んだばかりのルートを巻き添えにする（LIFO なので位置で切るため）
+
+### 消えたもの
+
+- **`in_flight_throw`（`heap.rs` の 1 スロット）を使わなくなった。** 飛行中の値は
+  `State::Unwind` が持ち、状態スロットから root される。`Loop` の `Break` の値が Rust の
+  `Box` で運ばれ「コレクタから見えないが、巻き戻しが allocate しないから安全」という綱渡りも
+  同じ理由で消えた。**Phase B で「同時に飛ぶ throw は高々 1 つ」という前提はどのみち壊れる**ので、
+  ここで先に解消できたのは大きい
+- **引数を集める間だけの `RootScope`**。集めかけの引数は `Args` フレームが持ち続けるので、
+  フレームの寿命がそのまま root の寿命になる
 
 ### Phase B — タスクごとに分ける
 
-`gc()`（`heap.rs:2019`）は現在 5 つの源を歩く: `roots` / `permanent_roots` / `session_roots` /
+`gc()` は現在 5 つの源を歩く: `roots` / `permanent_roots` / `session_roots` /
 `in_flight_throw` / `cell_registry`。**タスクを入れると `roots` の単一 LIFO が壊れる**
-（複数の実行文脈が同時にフレームを積むため）ので、そこで初めて
-「タスクごとのルートスタック」という 6 つ目の源に作り変える。
-
-`in_flight_throw` が 1 スロットしかない前提も、そこでどのみち壊れる。だから Phase A の
-うちに `State::Unwind` へ移して**先に解消しておく** — Phase B で 2 つの前提を同時に
-壊さずに済む。
+（複数の実行文脈が同時にフレームを積むため）ので、そこで初めて「タスクごとのルートスタック」
+という源に作り変える。
 
 ## 6. compiled コードとの境界
 
@@ -193,9 +218,8 @@ loop {
 - **interpreted → compiled**: `Interp::enter_compiled`（`eval/interp.rs:1173`）。
   継続スタック上の**1 フレーム**として扱う。呼び出しが返るまでインタプリタは何もしない
 - **compiled → interpreted**: `rt_apply_any`（`crates/typelisp-rt/src/lib.rs:1882`）→
-  `call_interpreted_closure`（`core_eval.rs:1005`）。**新しい継続スタックを立てて完了まで回す**。
-  現在この関数が「native フレームが待っているので `Step::Tail` を返さず自分で評価しきる」と
-  書いているのと同じ理由
+  `call_interpreted_closure`（`core_eval.rs`）。**新しい継続スタックを立てて完了まで回す**。
+  ネイティブフレームが待っているので、末尾位置を諦めてその場で評価しきるしかない
 
 帰結: **タスクの切り替え点は interpreted 経路にしか置けない。** compiled 関数の実行中は
 切り替えられない。並行機構ではこれを「compiled 呼び出しは切り替えの単位として atomic、
@@ -203,26 +227,55 @@ loop {
 
 ---
 
-## 7. 移行の方法
+## 7. 移行で分かったこと
 
-- **新しいファイル `crates/typelisp-front/src/eval/interp/core_cps.rs` に書く。**
-  旧 `core_eval.rs` は切り替えまで手を触れない
-- **未実装の `Op` は `unimplemented!()`。旧経路へフォールバックしない** —
-  フォールバックは黙って動いてしまい、移行の穴を隠す
-- 段階ごとに新経路を直接叩くテストを `tests/cps_eval_test.rs` に足す。
-  既存の 117 本は最後の切り替えで初めて新経路を通る
-- **全段階で GC ストレス（`heap.set_gc_stress(true)`）を回す**。継続フレームが持つ値の
-  ルート漏れが最も起きやすい失敗（`check/forms.rs:176` が 5 例目のルートリークを記録している）
+方法は当初のとおりに進めた。新しいファイル `core_cps.rs` に書き、**未実装の `Op` は
+`unimplemented!()` にして旧経路へフォールバックしない**（フォールバックは黙って動いてしまい、
+移行の穴を隠す）。全段階を GC ストレス（`heap.set_gc_stress(true)`）下でテストした。
+切り替え後は既存の 117 ファイルがそのまま回帰試験になった — CPS 化は意味を変えない書き換えなので、
+1 本でも落ちれば移行のバグ。
+
+以下は、設計の段階では見えていなかったもの。
+
+### 7.1 `Err` が継続スタックを素通りしていた（設計の見落とし）
+
+`State::Unwind` は「インタプリタ自身が起こした脱出」のために作ったが、**エラーはそこからだけ
+来るのではない**。コンパイル済みコードからの `throw` は Rust の `Err` として `step_cps` の
+戻り値に現れるので、素直に `?` で返すと `Frame::Catch` を飛び越えてしまう。同じ理由で
+`panic` が `unwind-protect` の cleanup を走らせなかった。
+
+**すべての `Err` を `State::Unwind` に載せ直す**のが答え。継続スタックが空になって初めて
+`Err` として関数から出る。`step_cps`・`resume`・`unwind_through` の 3 箇所すべてで、
+エラーは「返す」のではなく「状態にする」。
+
+### 7.2 `enter_fn` のルート漏れ（本物のバグ）
+
+`extend_env` の結果を root せずに `core::list`（確保する）を呼んでいた。GC ストレス下の
+`bignum_ratio_gc_test` が `gc-root-audit: set_root given freed cell` で捕まえた。監視付きの
+呼び出しの経路にも同じ穴があった。
+
+[[typelisp-checker-syntax-rebuild-gc-leak]] と同じ形 — **Rust のローカルに置いた `Value` は
+コレクタから見えない**。フレームを設計しても、フレームを作るまでの数行は従来どおりの規律が要る。
+
+### 7.3 エラーのソース位置はフレームにも要る
+
+旧評価器はトランポリンの各周回で `EvalError::at` を呼んでいた（`form` が手元にあるので位置が
+読める）。CPS では `State::Eval` で `heap.cons_loc(form)` を読むだけでは足りない —
+**resume 中に起きたエラーは、フレームを積んだ form に属する**。だからフレーム自身にも
+`Option<Loc>` を持たせている。
+
+### 7.4 監視された呼び出しは本体を 1 フォームに包む
+
+`TracedCall` フレームを積むと、本体が複数フォームのときに「本体を回すフレーム」と
+「戻り値を印字するフレーム」の 2 つが要る。`resume` は 1 つしか返せない。
+**本体を `(let () E...)` で包んで 1 フォームにする**ことで解いた。
 
 ### 完了の判定
 
-`scripts/test-serial.sh` が**移行前と同じ結果**になること。CPS 化は意味を変えない書き換えなので、
-1 本でも落ちれば移行のバグ。加えて:
-
-- 現在スタックオーバーフローする深さの再帰が通ること（CPS 化の目に見える成果）
-- `RUST_MIN_STACK=32MB` と bootstrap の 64MB スタックを下げられるかを測る
-
----
+- `scripts/test-serial.sh` が全 117 ファイル green（129 の test result、失敗ゼロ）
+- **深さ 20,000 の非末尾再帰が通る**。同じ形を旧評価器に通すと、既定のテストスタックでも
+  `RUST_MIN_STACK=32MB` でも `fatal runtime error: stack overflow` で abort した
+  （削除する前に実測し、`core_cps.rs` のテストにコメントとして残した）
 
 ## 8. 失うもの
 
