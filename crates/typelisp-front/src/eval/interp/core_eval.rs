@@ -176,7 +176,7 @@ impl Op {
 }
 
 /// What a person answered at a `step` prompt.
-enum StepCmd {
+pub(super) enum StepCmd {
     /// Stop again at the next call inside this one.
     Into,
     /// Run this call to completion, then stop at the following one.
@@ -712,6 +712,23 @@ impl Interp {
     /// and each supertrait's. An upcast later has only the runtime vtable id
     /// to go on, and could not re-derive them.
     fn dyn_new_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        // Fields 0..3 name the concrete type, the trait, its slots and its
+        // supertraits; field 4 is the boxed value's representation, read by
+        // the bridge. All of them are read by `dyn_new_with_value` below,
+        // which is where they are needed.
+        let value = core::field(heap, form, 5)
+            .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) has no value".to_string()))?;
+
+        let v = self.eval_core(heap, value, env)?;
+        self.dyn_new_with_value(heap, form, v)
+    }
+
+    /// [`Self::dyn_new_core`] from the point its operand has a value.
+    ///
+    /// Split out so the continuation-stack evaluator, which evaluates the
+    /// operand through a frame rather than a recursive call, reaches the same
+    /// boxing here rather than a second copy of it.
+    pub(super) fn dyn_new_with_value(&self, heap: &mut Heap, form: Value, v: Value) -> Result<Value, EvalError> {
         let concrete_key = match core::field(heap, form, 0) {
             Some(Value::Str(id)) => heap.string(id).to_string(),
             other => return Err(EvalError::Internal(format!("eval: (dyn-new ..) concrete key is {:?}", other))),
@@ -719,12 +736,7 @@ impl Interp {
         let trait_path = path_field(heap, form, 1, "dyn-new")?;
         let slots = method_list(heap, form, 2, "dyn-new")?;
         let supers = super_list(heap, form, 3)?;
-        // Field 4 is the boxed value's representation, read by the bridge and
-        // by nothing here.
-        let value = core::field(heap, form, 5)
-            .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) has no value".to_string()))?;
 
-        let v = self.eval_core(heap, value, env)?;
         let mut s = RootScope::new(heap);
         // `alloc_dyn` cannot collect, but compiling a slot below does, and the
         // boxed value is reachable from nothing else meanwhile.
@@ -786,10 +798,16 @@ impl Interp {
     /// boxing site registers a table for every trait the checker admits an
     /// upcast to.
     fn dyn_upcast_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        let to_trait = path_field(heap, form, 0, "dyn-upcast")?;
         let value = core::field(heap, form, 1)
             .ok_or_else(|| EvalError::Internal("eval: (dyn-upcast ..) has no operand".to_string()))?;
         let v = self.eval_core(heap, value, env)?;
+        self.dyn_upcast_with_value(heap, form, v)
+    }
+
+    /// [`Self::dyn_upcast_core`] from the point its operand has a value —
+    /// split for the same reason [`Self::dyn_new_with_value`] is.
+    pub(super) fn dyn_upcast_with_value(&self, heap: &mut Heap, form: Value, v: Value) -> Result<Value, EvalError> {
+        let to_trait = path_field(heap, form, 0, "dyn-upcast")?;
 
         let id = match v {
             Value::Boxed(id) if heap.is_dyn(id) => id,
@@ -1546,7 +1564,7 @@ impl Interp {
     /// and is *not* newline-terminated — `write_str` on a stdout-backed
     /// stream writes through immediately, so it is visible before the read
     /// blocks.
-    fn step_prompt(&self, heap: &mut Heap) -> StepCmd {
+    pub(super) fn step_prompt(&self, heap: &mut Heap) -> StepCmd {
         self.trace_write(heap, "step [s]tep-into [n]ext [c]ontinue [q]uit> ");
         self.trace_flush(heap);
         let mut line = String::new();
@@ -1608,7 +1626,7 @@ impl Interp {
     /// `Interp` with no prelude loaded (a unit test) has no such global, and
     /// its trace still has to go somewhere. That somewhere is the printer's
     /// own stdout, which is where `*trace-output*` points anyway by default.
-    fn trace_line(&self, heap: &mut Heap, depth: usize, body: &str) {
+    pub(super) fn trace_line(&self, heap: &mut Heap, depth: usize, body: &str) {
         let text = format!("{:width$}{}: {}\n", "", depth, body, width = 2 + depth * 2);
         self.trace_write(heap, &text);
     }
@@ -1699,7 +1717,7 @@ impl Interp {
     /// open `pprint-logical-block` session, and a trace line that arrives in
     /// the middle of a program's own pretty-printed document belongs to
     /// neither.
-    fn trace_render(&self, heap: &mut Heap, v: Value) -> String {
+    pub(super) fn trace_render(&self, heap: &mut Heap, v: Value) -> String {
         self.install_print_hooks();
         // `core::list` roots `v` across the one `cons` it takes to wrap it, and
         // rooting the finished list keeps `v` reachable through the format run,

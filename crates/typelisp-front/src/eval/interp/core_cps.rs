@@ -40,7 +40,7 @@ use crate::eval::value::EvalError;
 
 use super::core_eval::{
     bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, path_field,
-    repr_list, str_field, sym_field, tail_after, tail_after_value, Op, Step,
+    repr_list, str_field, sym_field, tail_after, tail_after_value, Op, Step, StepCmd,
 };
 use super::{FnDef, Interp};
 
@@ -129,6 +129,20 @@ enum Frame {
     /// the one that just arrived, so all of them stay rooted until the call
     /// itself is made.
     Args { form: Value, done: Vec<Value>, env: Value, kind: ArgsKind },
+    /// `(step E)` — running `E` with stepping armed, holding what to restore.
+    Step { was_stepping: bool, was_quiet: usize },
+    /// A traced or stepped call, open around its callee's body.
+    ///
+    /// This is the one frame a call gets: `enter_fn` normally makes a body a
+    /// tail jump, which leaves nothing to report a return from. Tracing needs
+    /// the frame, so it costs the tail position — as it does in the recursive
+    /// evaluator, where a traced call is a real Rust frame too.
+    TracedCall { name: String, depth: usize },
+    /// `(dyn-new STR PATH ((PATH SYM)...) (...) R E)` — waiting on the value
+    /// to box.
+    DynNew { form: Value },
+    /// `(dyn-upcast PATH E)` — waiting on the trait object to re-view.
+    DynUpcast { form: Value },
     /// `(apply E RET-R (R...) E...)` — waiting on the callee.
     ApplyCallee { form: Value, env: Value },
     /// `(apply E RET-R (R...) E...)` — waiting on one argument, callee in hand.
@@ -224,7 +238,9 @@ impl CpsStack {
             // The box has to stay reachable while the value expression runs:
             // that expression can allocate, and nothing else refers to it.
             Frame::FieldSetVal { obj, .. } => heap.push_root(*obj),
-            Frame::SetGlobal { form } => heap.push_root(*form),
+            Frame::SetGlobal { form } | Frame::DynNew { form } | Frame::DynUpcast { form } => {
+                heap.push_root(*form)
+            }
             Frame::Loop { body, rest, env } => {
                 heap.push_root(*body);
                 heap.push_root(*rest);
@@ -243,7 +259,8 @@ impl CpsStack {
                 }
             }
             // Names and tags are `String`s, and an exit carries its value in
-            // the state slots rather than here.
+            // the state slots rather than here. So do the stepping flags.
+            Frame::Step { .. } | Frame::TracedCall { .. } => {}
             Frame::Block { .. } | Frame::Catch { .. } | Frame::Return | Frame::ReturnFrom { .. } | Frame::Throw { .. } => {}
             Frame::Args { form, done, env, .. } => {
                 heap.push_root(*form);
@@ -553,6 +570,42 @@ impl Interp {
             // siblings have to see each other — placeholders first, then each
             // closure written through its cell over the environment that
             // already names them all.
+            // Arming the stepper is a side effect with an extent, so what to
+            // restore rides on a frame — restored on the way out however the
+            // body is left, which the recursive evaluator gets from the Rust
+            // frame it has here.
+            Op::Step => {
+                let inner = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (step ..) has no form".to_string()))?;
+                if !typelisp_rt::sys_builtin::stdin_is_tty() {
+                    return Ok(State::Eval(inner, env));
+                }
+                let frame = Frame::Step {
+                    was_stepping: self.stepping.get(),
+                    was_quiet: self.step_quiet_depth.get(),
+                };
+                self.stepping.set(true);
+                self.step_quiet_depth.set(usize::MAX);
+                stack.push(heap, frame);
+                Ok(State::Eval(inner, env))
+            }
+
+            Op::DynNew => {
+                // Field 4 is the boxed value's representation, read by the
+                // bridge and by nothing here.
+                let value = core::field(heap, form, 5)
+                    .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) has no value".to_string()))?;
+                stack.push(heap, Frame::DynNew { form });
+                Ok(State::Eval(value, env))
+            }
+
+            Op::DynUpcast => {
+                let value = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (dyn-upcast ..) has no operand".to_string()))?;
+                stack.push(heap, Frame::DynUpcast { form });
+                Ok(State::Eval(value, env))
+            }
+
             Op::Apply => {
                 let callee = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no callee".to_string()))?;
@@ -703,7 +756,6 @@ impl Interp {
                 Ok(State::Eval(protected, env))
             }
 
-            other => unimplemented!("eval_cps: {:?} has not moved to the continuation stack yet", other),
         }
     }
 
@@ -756,19 +808,60 @@ impl Interp {
     /// does not have here (`Interp::apply` evaluates the last form with a
     /// native frame still waiting on it).
     fn enter_fn(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<(State, Option<Frame>), EvalError> {
-        // Tracing and stepping report a call around the frame it opens, which
-        // a tail jump does not leave behind. They move in the stage that gives
-        // calls their own frame — until then, saying so beats quietly losing
-        // the trace.
-        if self.trace_armed.get() || self.stepping.get() {
-            unimplemented!("eval_cps: trace/step over a call has not moved to the continuation stack yet");
-        }
+        // Tracing and stepping report a call *around* the callee, in CL's own
+        // shape: `  0: (fact 3)` going in and `  0: fact returned 6` coming
+        // out. That needs a frame to come back to, so a watched call gives up
+        // its tail position — the same trade the recursive evaluator makes,
+        // where a traced call is a real Rust frame.
+        //
+        // Two `Cell` loads on the path every call takes; the set membership is
+        // tested only once one of them is armed.
+        let stepping = self.stepping.get() && self.trace_depth.get() <= self.step_quiet_depth.get();
+        let watched = stepping || (self.trace_armed.get() && self.traced.borrow().contains(&f.name));
+        let watch = if watched {
+            let depth = self.trace_depth.get();
+            let call = {
+                let rendered: Vec<String> = argv.iter().map(|a| self.trace_render(heap, *a)).collect();
+                if rendered.is_empty() {
+                    format!("({})", f.name)
+                } else {
+                    format!("({} {})", f.name, rendered.join(" "))
+                }
+            };
+            self.trace_line(heap, depth, &call);
+            if stepping {
+                match self.step_prompt(heap) {
+                    StepCmd::Into => {}
+                    // Quiet *below* this frame: the command is "run this
+                    // call", and the frame it was given at is the one to ask
+                    // at again.
+                    StepCmd::Over => self.step_quiet_depth.set(depth),
+                    StepCmd::Continue => self.stepping.set(false),
+                    StepCmd::Quit => return Err(EvalError::Panic("step: aborted".to_string())),
+                }
+            }
+            self.trace_depth.set(depth + 1);
+            Some(Frame::TracedCall { name: f.name.clone(), depth })
+        } else {
+            None
+        };
+
         // A compiled callee runs on the Rust stack: the boundary is one frame
         // from the machine's point of view, and nothing can suspend inside it.
         let compiled = f.compiled.borrow().clone();
         if let Some(compiled) = compiled {
             let sig = f.sig.as_ref().expect("a compiled function always has a type signature");
             let v = self.call_compiled(heap, compiled.as_ref(), &argv, &sig.0, &sig.1)?;
+            // The call is over already, so a watch frame would have nothing to
+            // wait for: report the return here instead.
+            if let Some(Frame::TracedCall { name, depth }) = watch {
+                self.trace_depth.set(depth);
+                if self.step_quiet_depth.get() == depth {
+                    self.step_quiet_depth.set(usize::MAX);
+                }
+                let text = self.trace_render(heap, v);
+                self.trace_line(heap, depth, &format!("{} returned {}", name, text));
+            }
             return Ok((State::Apply(v), None));
         }
         if f.params.len() != argv.len() {
@@ -791,14 +884,27 @@ impl Interp {
         // empty environment rather than the caller's — that is what makes the
         // scope lexical.
         let env = extend_env(heap, &binds, Value::Empty)?;
+        // A watched call has to hand back *its* frame, so the body cannot
+        // also leave a sequence frame behind. Wrapping it as `(let () E...)`
+        // — which is `progn` — makes it one form, and the `let` node opens
+        // the sequence frame itself one step later. Only on the watched path,
+        // which is already paying for a frame.
+        if let Some(w) = watch {
+            let mut items = Vec::with_capacity(f.body.len() + 1);
+            items.push(Value::Empty);
+            items.extend_from_slice(&f.body);
+            let wrapped = core::tagged(heap, "let", &items)
+                .map_err(|e| EvalError::Internal(format!("eval: watched call body: {}", e)))?;
+            return Ok((State::Eval(wrapped, env), Some(w)));
+        }
         // `FnDef::body` is a `Vec`, and a sequence frame walks a cons list, so
         // the body is consed up here. `core::list` roots every item and every
-        // partial tail, so a collection mid-build is safe.
+        // partial tail, so a collection mid-build is safe. It is the last
+        // allocation on this path: `sequence_state` only walks conses, so
+        // `body` and `env` stay in Rust locals — live because nothing
+        // collects — until the caller roots them again.
         let body =
             core::list(heap, &f.body).map_err(|e| EvalError::Internal(format!("eval: call body: {}", e)))?;
-        // The last allocation on this path: `sequence_state` only walks
-        // conses, so `body` and `env` stay in Rust locals — live because
-        // nothing collects — until the caller roots them again.
         sequence_state(heap, body, env)
     }
 
@@ -1081,6 +1187,31 @@ impl Interp {
             // one is discarded.
             Frame::Seq { rest, env } => sequence_state(heap, rest, env),
 
+            Frame::Step { was_stepping, was_quiet } => {
+                self.stepping.set(was_stepping);
+                self.step_quiet_depth.set(was_quiet);
+                Ok((State::Apply(v), None))
+            }
+
+            // The depth is restored *before* the return is reported, so the
+            // two lines of one call line up.
+            Frame::TracedCall { name, depth } => {
+                self.trace_depth.set(depth);
+                if self.step_quiet_depth.get() == depth {
+                    self.step_quiet_depth.set(usize::MAX);
+                }
+                let text = self.trace_render(heap, v);
+                self.trace_line(heap, depth, &format!("{} returned {}", name, text));
+                Ok((State::Apply(v), None))
+            }
+
+            // Boxing is where the concrete type is still known, so it is
+            // where every vtable this value could be viewed through gets
+            // interned. Shared with the recursive evaluator rather than
+            // copied — see `Interp::dyn_new_with_value`.
+            Frame::DynNew { form } => Ok((State::Apply(self.dyn_new_with_value(heap, form, v)?), None)),
+            Frame::DynUpcast { form } => Ok((State::Apply(self.dyn_upcast_with_value(heap, form, v)?), None)),
+
             // An unnamed callee — `((make-adder 1) 2)` — has no binding
             // keeping its box alive while the arguments allocate, so the
             // frame roots it.
@@ -1241,7 +1372,7 @@ impl Interp {
     /// makes a non-local exit skip the intervening computation. Three claim an
     /// exit (`Loop`, `Block`, `Catch`) and one runs code on the way past
     /// (`Protect`).
-    fn unwind_through(&self, _heap: &mut Heap, frame: Frame, exit: EvalError) -> Result<(State, Option<Frame>), EvalError> {
+    fn unwind_through(&self, heap: &mut Heap, frame: Frame, exit: EvalError) -> Result<(State, Option<Frame>), EvalError> {
         match frame {
             // `break` and `return` are caught by the nearest enclosing loop —
             // the checker guarantees there is one.
@@ -1260,6 +1391,24 @@ impl Interp {
                 EvalError::Throw(thrown, v) if thrown == tag => Ok((State::Apply(*v), None)),
                 other => Ok((State::Unwind(other), None)),
             },
+
+            // The flags are restored however the body is left.
+            Frame::Step { was_stepping, was_quiet } => {
+                self.stepping.set(was_stepping);
+                self.step_quiet_depth.set(was_quiet);
+                Ok((State::Unwind(exit), None))
+            }
+
+            // An unwind past a traced frame is exactly the moment a trace is
+            // most worth having, so the exit is reported rather than silent.
+            Frame::TracedCall { name, depth } => {
+                self.trace_depth.set(depth);
+                if self.step_quiet_depth.get() == depth {
+                    self.step_quiet_depth.set(usize::MAX);
+                }
+                self.trace_line(heap, depth, &format!("{} exited non-locally: {}", name, exit));
+                Ok((State::Unwind(exit), None))
+            }
 
             // The cleanup runs on *every* way out, with the exit parked in a
             // frame until it is done.
@@ -1289,6 +1438,8 @@ impl Interp {
             | Frame::FieldSetObj { .. }
             | Frame::FieldSetVal { .. }
             | Frame::SetGlobal { .. }
+            | Frame::DynNew { .. }
+            | Frame::DynUpcast { .. }
             | Frame::LetInit { .. } => Ok((State::Unwind(exit), None)),
         }
     }
@@ -2045,15 +2196,23 @@ mod tests {
         assert_eq!(agrees(&mut h, src), Value::Int(2));
     }
 
-    // ---- what has not moved yet ------------------------------------------
+    // ---- the vocabulary is closed ----------------------------------------
 
-    /// Ops still on the recursive evaluator reach `unimplemented!` rather than
-    /// falling back to it. The panic is the point: a fallback would run
-    /// correctly and hide which tags are left.
+    /// Every `Op` is handled: `step_cps`'s match has no catch-all, so the
+    /// compiler is the one holding this. Adding a tag to `Op` without giving
+    /// it a frame is a build error, not a run-time surprise — which is what a
+    /// `unimplemented!()` arm bought while the move was in progress.
+    ///
+    /// This test exists to say so where a reader looks for it; there is
+    /// nothing to assert at run time.
     #[test]
-    #[should_panic(expected = "has not moved to the continuation stack yet")]
-    fn an_op_that_has_not_moved_says_so() {
+    fn every_op_has_moved() {
         let mut h = stress_heap();
-        let _ = eval_src(&mut h, "(step (int-any-width 1))");
+        // A form of each shape, as a smoke test that the arms are wired at all.
+        assert_eq!(eval_ok(&mut h, "(int-any-width 1)"), Value::Int(1));
+        assert_eq!(eval_ok(&mut h, "(if (bool true) (int-any-width 1) (int-any-width 2))"), Value::Int(1));
+        assert_eq!(eval_ok(&mut h, "(let ((x r (int-any-width 3))) (var x))"), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, "(loop (return (int-any-width 4)))"), Value::Int(4));
+        assert_eq!(eval_ok(&mut h, "(catch (quote t) (throw (quote t) (int-any-width 5)))"), Value::Int(5));
     }
 }
