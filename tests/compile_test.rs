@@ -6240,6 +6240,14 @@ fn the_island_runs_a_bridged_loop() {
             .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("mul")
             .expect("failed to look up the compiled `mul` function")
     };
+    // A `loop` unwinds GC roots on the way out (`rt_truncate_sexpr_roots`), so
+    // this needs a live heap even though the arithmetic itself never allocates.
+    // It ran without one until 2026-09-08 by reading whatever `ACTIVE_HEAP`
+    // still pointed at from an earlier test — undefined behaviour that only
+    // stopped looking harmless when `Heap` gained a field and the garbage
+    // landed in an index instead of a `Vec`'s length.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     for (a, b) in [(6i64, 7i64), (0, 5), (3, 0), (-4, 3)] {
         let argv = [a, b];
         assert_eq!(unsafe { mul.call(argv.as_ptr(), argv.len() as u32) }, a * b.max(0), "a={} b={}", a, b);
