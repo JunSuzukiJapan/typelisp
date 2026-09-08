@@ -26,7 +26,10 @@
 //!   (iteratively — no native recursion), then rebuilds the cons free list and
 //!   sweeps strings. Cycles are reclaimed (unlike reference counting).
 //! * **Four root sets.** `roots` is a strict LIFO stack (push on scope entry,
-//!   pop on scope exit). `permanent_roots` holds values whose owner outlives
+//!   pop on scope exit) — **one per task**, since a suspended task keeps the
+//!   roots it will resume into; only the running one is pushed and popped, and
+//!   the discipline holds within each stack separately (see
+//!   [`Heap::new_root_stack`]). `permanent_roots` holds values whose owner outlives
 //!   any single activation (e.g. a field inside a heap-external, never-freed
 //!   box) — appended to, never popped. `session_roots` holds values that must
 //!   survive a bracketed span of work but not outlive it, released in bulk at
@@ -62,6 +65,10 @@ struct Chunk {
     len: usize,
 }
 
+/// Identifies one task's root stack — see [`Heap::new_root_stack`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RootStackId(usize);
+
 pub struct Heap {
     // The cons arena, as one or more chunks. Always at least one entry (a
     // zero-capacity heap holds a single zero-length chunk). Never reordered:
@@ -80,7 +87,12 @@ pub struct Heap {
     // How many collections have run, for tests that assert an allocation
     // pattern does not thrash — see `gc_count`.
     gc_count: u64,
-    roots: Vec<Value>,
+    // Every task's roots. `current_stack` names the one that is running; the
+    // rest belong to suspended tasks and are walked by the collector but by
+    // nothing else — a task that is not running pushes and pops nothing. See
+    // `new_root_stack`.
+    root_stacks: Vec<Option<Vec<Value>>>,
+    current_stack: usize,
     permanent_roots: Vec<Value>,
     // Roots for the duration of a bracketed session — see `push_session_root`.
     session_roots: Vec<Value>,
@@ -210,7 +222,8 @@ impl Heap {
             free_count: capacity,
             gc_stress: false,
             gc_count: 0,
-            roots: Vec::new(),
+            root_stacks: vec![Some(Vec::new())],
+            current_stack: 0,
             permanent_roots: Vec::new(),
             session_roots: Vec::new(),
             in_flight_throw: None,
@@ -354,12 +367,28 @@ impl Heap {
 
     // ---- roots ------------------------------------------------------------
 
+    /// The running task's roots.
+    ///
+    /// `current_stack` always names an occupied slot: `switch_to_root_stack`
+    /// refuses an empty one, and `drop_root_stack` refuses the running one.
+    fn roots(&self) -> &[Value] {
+        self.root_stacks[self.current_stack]
+            .as_ref()
+            .expect("the running root stack is always present")
+    }
+
+    fn roots_mut(&mut self) -> &mut Vec<Value> {
+        self.root_stacks[self.current_stack]
+            .as_mut()
+            .expect("the running root stack is always present")
+    }
+
     /// Register `v` as a GC root.
     pub fn push_root(&mut self, v: Value) {
         if self.gc_stress {
             self.assert_not_freed("push_root", v);
         }
-        self.roots.push(v);
+        self.roots_mut().push(v);
     }
 
     /// Debug-only (`gc_stress`): trap the *moment* an already-reclaimed cell is
@@ -390,12 +419,12 @@ impl Heap {
 
     /// Remove the most recently pushed root.
     pub fn pop_root(&mut self) -> Option<Value> {
-        self.roots.pop()
+        self.roots_mut().pop()
     }
 
     /// Number of registered roots.
     pub fn root_count(&self) -> usize {
-        self.roots.len()
+        self.roots().len()
     }
 
     /// Discards every root pushed since the stack was `len` roots deep, in
@@ -412,7 +441,7 @@ impl Heap {
     /// does nothing" behavior as [`Vec::truncate`], which this delegates to
     /// directly.
     pub fn truncate_roots(&mut self, len: usize) {
-        self.roots.truncate(len);
+        self.roots_mut().truncate(len);
     }
 
     /// Overwrites the root at absolute stack position `idx` in place — unlike
@@ -429,7 +458,66 @@ impl Heap {
         if self.gc_stress {
             self.assert_not_freed("set_root", v);
         }
-        self.roots[idx] = v;
+        self.roots_mut()[idx] = v;
+    }
+
+    // ---- root stacks, one per task ----------------------------------------
+
+    /// Adds an empty root stack for a new task, and returns its id. It is *not*
+    /// made current — [`switch_to_root_stack`](Self::switch_to_root_stack)
+    /// does that.
+    ///
+    /// A task that is waiting keeps the roots its continuation frames hold, so
+    /// they have to outlive collections triggered by whatever runs meanwhile.
+    /// Splitting the stack rather than sharing one is what makes that possible:
+    /// a single stack could only be truncated in the order it was pushed, and
+    /// tasks do not finish in that order.
+    pub fn new_root_stack(&mut self) -> RootStackId {
+        // Reuse a slot a finished task freed, so spawning many short-lived
+        // tasks does not grow this vector without bound.
+        if let Some(i) = self.root_stacks.iter().position(|s| s.is_none()) {
+            self.root_stacks[i] = Some(Vec::new());
+            RootStackId(i)
+        } else {
+            self.root_stacks.push(Some(Vec::new()));
+            RootStackId(self.root_stacks.len() - 1)
+        }
+    }
+
+    /// The stack that is running.
+    pub fn current_root_stack(&self) -> RootStackId {
+        RootStackId(self.current_stack)
+    }
+
+    /// Makes `id` the running stack. The outgoing one stays where it is —
+    /// suspended, and still walked by the collector.
+    ///
+    /// **Only safe where no Rust frame holds a root index.** A `RootScope`, or
+    /// anything holding a `root_count()` it means to truncate back to, would be
+    /// pointing into a different stack afterwards. In the evaluator that means
+    /// a task-step boundary and nothing finer.
+    pub fn switch_to_root_stack(&mut self, id: RootStackId) {
+        assert!(
+            self.root_stacks.get(id.0).is_some_and(|s| s.is_some()),
+            "switch_to_root_stack: {:?} is not a live stack",
+            id
+        );
+        self.current_stack = id.0;
+    }
+
+    /// Frees a finished task's stack.
+    ///
+    /// It must not be the running one. A non-empty stack here means the task
+    /// left roots behind, which is a bug in whoever ran it — the values would
+    /// stop being reachable at exactly this point.
+    pub fn drop_root_stack(&mut self, id: RootStackId) {
+        assert_ne!(id.0, self.current_stack, "drop_root_stack: that stack is running");
+        let stack = self.root_stacks[id.0].take();
+        debug_assert!(
+            stack.map(|s| s.is_empty()).unwrap_or(true),
+            "drop_root_stack: {:?} still holds roots",
+            id
+        );
     }
 
     /// Registers `v` as a root with no matching pop, ever — for a value
@@ -1995,8 +2083,12 @@ impl Heap {
                 }
             }
         };
-        for (i, &v) in self.roots.iter().enumerate() {
-            check("roots", i, v);
+        for (s, stack) in self.root_stacks.iter().enumerate() {
+            let Some(stack) = stack else { continue };
+            let what = if s == self.current_stack { "roots".to_string() } else { format!("roots[task {}]", s) };
+            for (i, &v) in stack.iter().enumerate() {
+                check(&what, i, v);
+            }
         }
         for (i, &v) in self.permanent_roots.iter().enumerate() {
             check("permanent_roots", i, v);
@@ -2037,8 +2129,12 @@ impl Heap {
         // `Value::Boxed` payload's own nested `Value`s can be pushed onto
         // the very same stack once traced — see `push_boxed_nested`.
         let mut stack: Vec<Value> = Vec::new();
-        for i in 0..self.roots.len() {
-            stack.push(self.roots[i]);
+        // Every task's roots, not just the running one: a suspended task will
+        // resume into the frames these belong to.
+        for roots in self.root_stacks.iter().flatten() {
+            for &v in roots {
+                stack.push(v);
+            }
         }
         for i in 0..self.permanent_roots.len() {
             stack.push(self.permanent_roots[i]);

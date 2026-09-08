@@ -1840,3 +1840,94 @@ fn plentiful_garbage_does_not_grow_the_arena() {
     assert_eq!(h.capacity(), 1000, "900 free cells after each collection is headroom enough");
     assert_accounting(&h);
 }
+
+// ---- root stacks, one per task -----------------------------------------
+//
+// A suspended task keeps the roots its continuation frames hold, so the stack
+// cannot be a single LIFO: tasks do not finish in the order they started, and
+// truncating one back to its own base would take another's roots with it.
+
+/// A suspended task's roots survive a collection triggered by another task.
+#[test]
+fn a_parked_root_stack_still_roots() {
+    let mut h = Heap::with_capacity(64);
+    let first = h.current_root_stack();
+
+    // The first task roots a cell, then stops running.
+    let kept = h.cons(Value::Int(1), Value::Int(2)).unwrap();
+    h.push_root(kept);
+
+    let other = h.new_root_stack();
+    h.switch_to_root_stack(other);
+    assert_eq!(h.root_count(), 0, "a new task starts with no roots");
+
+    // The second task allocates enough garbage to fill the arena, and collects.
+    // Nothing here is rooted, so all of it is reclaimable — the point is that
+    // the *other* task's cell is not.
+    for i in 0..200 {
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap();
+    }
+    assert!(h.gc() > 0, "the garbage was not collectable, so this proves nothing");
+
+    // The first task's cell is intact, and so is its stack.
+    assert_eq!(h.car(kept).unwrap(), Value::Int(1));
+    assert_eq!(h.cdr(kept).unwrap(), Value::Int(2));
+    h.switch_to_root_stack(first);
+    assert_eq!(h.root_count(), 1, "the parked stack came back as it was");
+}
+
+/// Truncating one task's stack leaves the others alone — the property a single
+/// shared stack could not give.
+#[test]
+fn truncating_one_stack_does_not_touch_another() {
+    let mut h = Heap::with_capacity(32);
+    let first = h.current_root_stack();
+    h.push_root(Value::Int(1));
+    h.push_root(Value::Int(2));
+
+    let other = h.new_root_stack();
+    h.switch_to_root_stack(other);
+    h.push_root(Value::Int(3));
+    h.truncate_roots(0);
+    assert_eq!(h.root_count(), 0);
+
+    h.switch_to_root_stack(first);
+    assert_eq!(h.root_count(), 2, "the other task's truncation reached this stack");
+}
+
+/// A finished task's stack is freed, and its slot is reused rather than the
+/// vector growing once per task ever spawned.
+#[test]
+fn a_dropped_root_stack_frees_its_slot() {
+    let mut h = Heap::with_capacity(16);
+    let main = h.current_root_stack();
+    let t = h.new_root_stack();
+    h.switch_to_root_stack(t);
+    h.switch_to_root_stack(main);
+    h.drop_root_stack(t);
+    assert_eq!(h.new_root_stack(), t, "the freed slot was not reused");
+}
+
+/// The running stack cannot be dropped: the task using it would lose its roots
+/// mid-step.
+#[test]
+#[should_panic(expected = "that stack is running")]
+fn dropping_the_running_root_stack_is_refused() {
+    let mut h = Heap::with_capacity(16);
+    let t = h.new_root_stack();
+    h.switch_to_root_stack(t);
+    h.drop_root_stack(t);
+}
+
+/// Switching to a stack that was freed is refused rather than reviving it.
+#[test]
+#[should_panic(expected = "is not a live stack")]
+fn switching_to_a_dropped_root_stack_is_refused() {
+    let mut h = Heap::with_capacity(16);
+    let main = h.current_root_stack();
+    let t = h.new_root_stack();
+    h.switch_to_root_stack(t);
+    h.switch_to_root_stack(main);
+    h.drop_root_stack(t);
+    h.switch_to_root_stack(t);
+}
