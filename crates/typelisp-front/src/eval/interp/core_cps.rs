@@ -53,11 +53,16 @@ enum State {
     Apply(Value),
     /// A non-local exit is in flight. Discard frames until one claims it.
     ///
-    /// This is where `break`/`return`/`return-from`/`throw` live, and it is
-    /// what replaces `Heap::set_in_flight_throw`: the value being carried past
-    /// the frames being discarded is rooted through the state slots, so there
-    /// is no need for a dedicated single-slot root — and no "at most one throw
-    /// in flight" assumption to break once tasks exist.
+    /// This is where `break`/`return`/`return-from`/`throw` live. The value
+    /// carried past the frames being discarded is rooted through the state
+    /// slots, so the interpreter needs no dedicated single-slot root, and makes
+    /// no "at most one throw in flight" assumption.
+    ///
+    /// `Heap::set_in_flight_throw` is still there for the *compiled* side: a
+    /// compiled `throw` travels as a Rust panic, whose payload the collector
+    /// cannot see, so `typelisp_rt::park_throw` parks the value in that slot.
+    /// The one-slot assumption survives there — something Phase B has to look
+    /// at, since two tasks can then be unwinding at once.
     Unwind(EvalError),
 }
 
@@ -2142,8 +2147,8 @@ mod tests {
 
     /// The thrown value stays rooted for the whole flight. Under `gc_stress`
     /// the cleanup on the way out collects, so a value the state slots failed
-    /// to root would be gone by the time the catch claims it. This is what
-    /// replaces `Heap::set_in_flight_throw`.
+    /// to root would be gone by the time the catch claims it — which is what
+    /// the interpreter does instead of parking it in a dedicated slot.
     #[test]
     fn a_thrown_value_survives_a_cleanup_that_allocates() {
         let mut h = stress_heap();

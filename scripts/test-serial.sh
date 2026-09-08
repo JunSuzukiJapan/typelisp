@@ -34,22 +34,22 @@ if command -v brew >/dev/null 2>&1; then
     fi
 fi
 
-# `Checker::check_if`/`Interp::eval`'s `if`-chain handling recurses per
-# nesting level (never loopified the way `compile-value`'s own dispatch was,
-# per the "interp if chain stack overflow" note in
-# docs/dev/implementation-log.md) — checking/running the self-hosted
+# No `RUST_MIN_STACK` here: the default (~2MB per test thread) is enough.
+#
+# It was 32MB until 2026-09-08. Two things recursed per `if`-nesting level —
+# `Checker::check_if` and the evaluator — and checking/running the self-hosted
 # compiler's own deeply-nested dispatch functions (`compile-sexpr-field` and
-# friends) against the default ~2MB test-thread stack is already close to
-# the edge, so an unrelated, modest addition elsewhere in the binary
-# (observed: a handful of new top-level functions in `src/eval/interp.rs`,
-# with no new recursion of their own) can tip a specific test over —
-# `compile_dispatches_bignum_comparisons_and_agrees_with_the_interpreter`
-# hit exactly this in 2026-07-15's compiled-global work. Not a correctness
-# bug in the tipping change itself; widening every test thread's stack is
-# the same trade-off `docs/dev/implementation-log.md` already accepts for
-# this whole class of issue, cheaper than loopifying the checker's `if`
-# handling for a one-test margin.
-export RUST_MIN_STACK=$((32 * 1024 * 1024))
+# friends) sat close to the edge, so an unrelated, modest addition elsewhere in
+# the binary could tip a single test over (that is what
+# `compile_dispatches_bignum_comparisons_and_agrees_with_the_interpreter` hit in
+# 2026-07-15's compiled-global work).
+#
+# The evaluator half is gone: it now runs on a continuation stack in the heap
+# (`crates/typelisp-front/src/eval/interp/core_cps.rs`), so a Lisp recursion no
+# longer costs Rust frames. Measured with the whole suite at the default stack:
+# 117 files, 129 test results, all green. `Checker::check_if` still recurses,
+# so if this class of failure comes back it is the checker's `if` handling that
+# has to be loopified — widening the stack again would only move the edge.
 
 # Split args into target names (before `--`) and passthrough flags (after).
 targets=()

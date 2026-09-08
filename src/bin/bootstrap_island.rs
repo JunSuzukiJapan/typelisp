@@ -17,21 +17,17 @@
 use std::path::Path;
 
 fn main() {
+    // This ran on a thread with an explicit 64MB stack until 2026-09-08.
     // Building the dump drives `core_freevars`'s walk over `compile-function`'s
-    // huge `labels` body — the same deep recursion the compile tests need
-    // `RUST_MIN_STACK=32MB` for. `RUST_MIN_STACK` only sizes *spawned*
-    // threads, not `main`, so run the work on a thread with an explicit
-    // large stack (matching `scripts/test-serial.sh`'s 32MB, doubled for
-    // headroom).
-    let dump = std::thread::Builder::new()
-        .stack_size(64 * 1024 * 1024)
-        .spawn(|| {
-            typelisp::compile::bootstrap::build_island_artifact()
-                .unwrap_or_else(|e| panic!("failed to build the compiler-island dump: {}", e))
-        })
-        .expect("failed to spawn bootstrap thread")
-        .join()
-        .expect("bootstrap thread panicked");
+    // huge `labels` body, which checks and runs the self-hosted compiler, and
+    // the evaluator recursed once per `if`-nesting level along the way. That
+    // half now runs on a continuation stack in the heap
+    // (`crates/typelisp-front/src/eval/interp/core_cps.rs`), so the Rust stack
+    // stays flat. Measured: with the work moved onto a 2MB thread this still
+    // wrote a byte-identical artifact, so `main`'s own stack is more room than
+    // it needs and the thread has no reason to exist.
+    let dump = typelisp::compile::bootstrap::build_island_artifact()
+        .unwrap_or_else(|e| panic!("failed to build the compiler-island dump: {}", e));
 
     let root = env!("CARGO_MANIFEST_DIR");
     let path = Path::new(root).join("src").join("compiler_island.typld");
