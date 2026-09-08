@@ -38,7 +38,8 @@ use crate::check::core;
 use crate::eval::value::EvalError;
 
 use super::core_eval::{
-    bool_field, construct_sexpr_core, env_lookup, extend_env, int_field, path_field, str_field, sym_field, Op, Step,
+    bool_field, construct_sexpr_core, env_lookup, extend_env, int_field, match_core_pattern, path_field, str_field,
+    sym_field, Op, Step,
 };
 use super::{FnDef, Interp};
 
@@ -127,6 +128,15 @@ enum Frame {
     /// the one that just arrived, so all of them stay rooted until the call
     /// itself is made.
     Args { form: Value, done: Vec<Value>, env: Value, kind: ArgsKind },
+    /// `(match E R (P E...) ...)` — waiting on the scrutinee. The first arm
+    /// whose pattern matches wins.
+    MatchArms { form: Value, env: Value },
+    /// `(field-set OBJ IDX R VALUE)` — waiting on the object.
+    FieldSetObj { form: Value, env: Value },
+    /// `(field-set OBJ IDX R VALUE)` — waiting on the value, object in hand.
+    FieldSetVal { obj: Value, idx: usize },
+    /// `(set-global (WRITTEN...) (HOME...) PATH R VALUE)` — waiting on the value.
+    SetGlobal { form: Value },
     /// `(loop BODY...)` — running the body round and round. `rest` is what
     /// is left of this pass; when it runs out the frame starts over from
     /// `body`. The only way out is an exit this frame claims.
@@ -194,6 +204,14 @@ impl CpsStack {
                 heap.push_root(*env);
             }
             Frame::Set { env, .. } => heap.push_root(*env),
+            Frame::MatchArms { form, env } | Frame::FieldSetObj { form, env } => {
+                heap.push_root(*form);
+                heap.push_root(*env);
+            }
+            // The box has to stay reachable while the value expression runs:
+            // that expression can allocate, and nothing else refers to it.
+            Frame::FieldSetVal { obj, .. } => heap.push_root(*obj),
+            Frame::SetGlobal { form } => heap.push_root(*form),
             Frame::Loop { body, rest, env } => {
                 heap.push_root(*body);
                 heap.push_root(*rest);
@@ -504,6 +522,27 @@ impl Interp {
             Op::Construct => self.start_args(heap, stack, form, env, ArgsKind::Construct),
             Op::Assoc => self.start_args(heap, stack, form, env, ArgsKind::Assoc),
             Op::DynCall => self.start_args(heap, stack, form, env, ArgsKind::DynCall),
+
+            Op::Match => {
+                let scrut = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (match ..) has no scrutinee".to_string()))?;
+                stack.push(heap, Frame::MatchArms { form, env });
+                Ok(State::Eval(scrut, env))
+            }
+
+            Op::FieldSet => {
+                let obj = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (field-set ..) has no object".to_string()))?;
+                stack.push(heap, Frame::FieldSetObj { form, env });
+                Ok(State::Eval(obj, env))
+            }
+
+            Op::SetGlobal => {
+                let value = core::field(heap, form, 4)
+                    .ok_or_else(|| EvalError::Internal("eval: (set-global ..) has no value form".to_string()))?;
+                stack.push(heap, Frame::SetGlobal { form });
+                Ok(State::Eval(value, env))
+            }
 
             Op::Loop => {
                 let body = heap
@@ -863,6 +902,77 @@ impl Interp {
             // one is discarded.
             Frame::Seq { rest, env } => sequence_state(heap, rest, env),
 
+            // The scrutinee is rooted through the state slots for the whole
+            // search, which matters because matching a `Sexpr` path pattern
+            // allocates.
+            Frame::MatchArms { form, env } => {
+                let arms = core::fields(heap, form)
+                    .map_err(|e| EvalError::Internal(format!("eval: (match ..): {}", e)))?;
+                // The scrutinee, its representation (the bridge's), then the arms.
+                for arm in arms.iter().skip(2) {
+                    let parts = heap
+                        .list_to_vec(*arm)
+                        .map_err(|e| EvalError::Internal(format!("eval: (match ..) arm: {}", e)))?;
+                    let Some((pat, body)) = parts.split_first() else {
+                        return Err(EvalError::Internal("eval: (match ..) arm is empty".to_string()));
+                    };
+                    let Some(binds) = match_core_pattern(self, heap, env, *pat, v)? else {
+                        continue;
+                    };
+                    // Both of these allocate, so the first result is rooted
+                    // across the second. The root goes above this frame's, so
+                    // the caller's truncation drops it.
+                    let base = heap.root_count();
+                    let new_env = extend_env(heap, &binds, env)?;
+                    heap.push_root(new_env);
+                    let body = core::list(heap, body)
+                        .map_err(|e| EvalError::Internal(format!("eval: (match ..) arm body: {}", e)))?;
+                    heap.truncate_roots(base);
+                    // Nothing allocates from here: `sequence_state` only walks
+                    // conses.
+                    return sequence_state(heap, body, new_env);
+                }
+                Err(EvalError::Internal("eval: no matching match arm".to_string()))
+            }
+
+            // Field 2 is the field's representation, read by the bridge and
+            // by nothing here.
+            Frame::FieldSetObj { form, env } => {
+                let idx = int_field(heap, form, 1, "field-set")? as usize;
+                let val = core::field(heap, form, 3)
+                    .ok_or_else(|| EvalError::Internal("eval: (field-set ..) has no value".to_string()))?;
+                Ok((State::Eval(val, env), Some(Frame::FieldSetVal { obj: v, idx })))
+            }
+            Frame::FieldSetVal { obj, idx } => {
+                let id = super::expect_struct_box(&obj)?;
+                heap.struct_set_field(id, idx, v);
+                Ok((State::Apply(Value::Empty), None))
+            }
+
+            // A global some compiled function reads or writes lives in a
+            // permanent GC root instead of an ordinary cell, and must be
+            // written through that same storage — otherwise an interpreted
+            // read could see a stale value a compiled write already updated.
+            Frame::SetGlobal { form } => {
+                let written = self.name_list(heap, form, 0, "set-global")?;
+                let home = self.name_list(heap, form, 1, "set-global")?;
+                let path = path_field(heap, form, 2, "set-global")?;
+                if let Some(&id) = self.compiled_globals.borrow().get(&path) {
+                    let perm_idx = typelisp_rt::global_perm_idx(id).ok_or_else(|| {
+                        EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id))
+                    })?;
+                    heap.set_permanent_root(perm_idx, v);
+                    return Ok((State::Apply(Value::Empty), None));
+                }
+                match self.resolve_global_named(&home, &written, &path) {
+                    Some(slot) => {
+                        slot.set(heap, v)?;
+                        Ok((State::Apply(Value::Empty), None))
+                    }
+                    None => Err(EvalError::Unbound(path.to_string())),
+                }
+            }
+
             // A loop body's value is discarded and the body starts again. The
             // frame is rebuilt rather than kept, so the stack does not grow
             // with the iteration count.
@@ -969,6 +1079,10 @@ impl Interp {
             | Frame::ReturnFrom { .. }
             | Frame::Throw { .. }
             | Frame::Args { .. }
+            | Frame::MatchArms { .. }
+            | Frame::FieldSetObj { .. }
+            | Frame::FieldSetVal { .. }
+            | Frame::SetGlobal { .. }
             | Frame::LetInit { .. } => Ok((State::Unwind(exit), None)),
         }
     }
@@ -1019,6 +1133,13 @@ mod tests {
     /// The same form through both evaluators, asserting they agree. The whole
     /// premise of the rewrite is that it changes no program's meaning, so most
     /// tests here should be able to say exactly this.
+    ///
+    /// **Not for forms that produce a freshly allocated value.** `Value`
+    /// compares strings and boxes by identity, and a string literal allocates
+    /// a new string every time it is evaluated (deliberately — see
+    /// `a_string_literal_is_a_fresh_string_every_time` in `core_eval`), so the
+    /// two runs would differ on the id even when they agree on the content.
+    /// Use `eval_ok` and compare what is inside.
     fn agrees(heap: &mut Heap, src: &str) -> Value {
         let form = read1(heap, src);
         heap.push_root(form);
@@ -1287,6 +1408,76 @@ mod tests {
                                     (int-any-width 5) (int-any-width 6))))
                      (field-get (var p) 1 int-any-width))";
         assert_eq!(agrees(&mut h, src), Value::Int(6));
+    }
+
+    // ---- match -----------------------------------------------------------
+
+    #[test]
+    fn match_takes_the_first_arm_that_matches() {
+        let mut h = stress_heap();
+        let src = "(match (int-any-width 2) int-any-width \
+                     ((pat-lit (int-any-width 1)) (int-any-width 10)) \
+                     ((pat-lit (int-any-width 2)) (int-any-width 20)) \
+                     ((pat-wild) (int-any-width 99)))";
+        assert_eq!(agrees(&mut h, src), Value::Int(20));
+    }
+
+    #[test]
+    fn a_wildcard_arm_catches_what_the_others_do_not() {
+        let mut h = stress_heap();
+        let src = "(match (int-any-width 7) int-any-width \
+                     ((pat-lit (int-any-width 1)) (int-any-width 10)) \
+                     ((pat-wild) (int-any-width 99)))";
+        assert_eq!(agrees(&mut h, src), Value::Int(99));
+    }
+
+    /// A binding pattern extends the environment the arm's body runs in.
+    #[test]
+    fn a_binding_pattern_is_visible_in_the_arm() {
+        let mut h = stress_heap();
+        assert_eq!(
+            agrees(&mut h, "(match (int-any-width 5) int-any-width ((pat-bind x) (var x)))"),
+            Value::Int(5)
+        );
+    }
+
+    /// An arm body of several forms runs in order, last value wins — and the
+    /// bound value has to survive the earlier ones allocating.
+    #[test]
+    fn an_arm_body_is_a_sequence() {
+        let mut h = stress_heap();
+        let src = r#"(match (str "kept") string ((pat-bind x) (str "discarded") (var x)))"#;
+        match eval_ok(&mut h, src) {
+            Value::Str(id) => assert_eq!(h.string(id), "kept"),
+            other => panic!("expected the bound string, got {:?}", other),
+        }
+    }
+
+    // ---- field-set / set-global ------------------------------------------
+
+    #[test]
+    fn field_set_writes_through_the_struct() {
+        let mut h = stress_heap();
+        let src = "(let ((p sexpr (construct point \"point\" 0 true (int-any-width int-any-width) \
+                                    (int-any-width 1) (int-any-width 2))))
+                     (field-set (var p) 1 int-any-width (int-any-width 42))
+                     (field-get (var p) 1 int-any-width))";
+        assert_eq!(agrees(&mut h, src), Value::Int(42));
+    }
+
+    /// The object is evaluated before the value, and has to stay reachable
+    /// while the value expression allocates.
+    #[test]
+    fn the_object_survives_an_allocating_value_expression() {
+        let mut h = stress_heap();
+        let src = r#"(let ((p sexpr (construct point "point" 0 true (int-any-width str)
+                                      (int-any-width 1) (str "old"))))
+                       (field-set (var p) 1 str (str "new"))
+                       (field-get (var p) 1 str))"#;
+        match eval_ok(&mut h, src) {
+            Value::Str(id) => assert_eq!(h.string(id), "new"),
+            other => panic!("expected the new string, got {:?}", other),
+        }
     }
 
     // ---- panic -----------------------------------------------------------

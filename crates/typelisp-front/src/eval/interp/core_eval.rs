@@ -1769,7 +1769,7 @@ impl Interp {
     }
 
     /// [`Self::resolve_fn_named`]'s twin for `global`/`set-global`.
-    fn resolve_global_named(
+    pub(super) fn resolve_global_named(
         &self,
         home: &[String],
         written: &[String],
@@ -1839,7 +1839,7 @@ pub(crate) fn extend_env(heap: &mut Heap, binds: &[(SymRef, Value)], env: Value)
 /// caller's scope closes. That is not belt-and-braces: the `Path` pattern
 /// builds its binding *fresh* rather than pointing into the scrutinee, so a
 /// later sub-pattern's allocation would collect it.
-fn match_core_pattern(
+pub(super) fn match_core_pattern(
     it: &Interp,
     heap: &mut Heap,
     env: Value,
