@@ -31,7 +31,7 @@
 //! drops a frame's values) and the `set_state` that re-roots what the next
 //! state carries. Nothing in between touches the heap.
 
-use typelisp_mem::{Heap, SymRef, Value};
+use typelisp_mem::{Heap, RootStackId, SymRef, Value};
 
 use crate::check::core;
 use crate::check::repr::Repr;
@@ -347,6 +347,42 @@ impl Task {
     }
 }
 
+/// A task the scheduler owns, and the root stack that belongs to it.
+struct TaskSlot {
+    task: Task,
+    roots: RootStackId,
+    /// Set once the task finishes. By then its value is rooted in the
+    /// *starter's* stack, not this task's — that one is about to be dropped.
+    done: Option<Result<Value, EvalError>>,
+}
+
+/// When the scheduler moves on to the next task.
+#[derive(Clone, Copy)]
+enum Switching {
+    /// Run each task until it finishes before starting the next. What a single
+    /// task sees today; explicit yield points join this in B2.
+    RunToCompletion,
+    /// Switch after every single step. Not a policy anyone would want, but the
+    /// harshest check there is that a suspended task's frames and roots survive
+    /// whatever another task does in between — which is what the tests use, the
+    /// same way `gc_stress` collects on every `cons`.
+    EveryStep,
+}
+
+/// Roots whatever a finished task's result carries, in the running stack.
+///
+/// A result is a heap value like any other and its own task's roots are gone,
+/// so it needs one here or the next collection takes it.
+fn root_result(heap: &mut Heap, r: &Result<Value, EvalError>) {
+    match r {
+        Ok(v) => heap.push_root(*v),
+        Err(EvalError::Return(v)) | Err(EvalError::ReturnFrom(_, v)) | Err(EvalError::Throw(_, v)) => {
+            heap.push_root(**v)
+        }
+        Err(_) => {}
+    }
+}
+
 /// Places `e` at `loc`, if there is one. `EvalError::at` keeps the innermost
 /// location, so calling this more than once on the way out is harmless.
 fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
@@ -529,6 +565,71 @@ impl Interp {
         set_state(heap, task.sbase, &next);
         task.state = next;
         Progress::Running
+    }
+
+    /// Runs `starts` as independent tasks until every one finishes, and returns
+    /// their results in the order they were given.
+    ///
+    /// Each task gets **its own root stack**, so a task that is not running
+    /// keeps the roots its frames hold. That is the whole reason
+    /// [`Heap::new_root_stack`] exists: tasks do not finish in the order they
+    /// started, and a single LIFO could not be truncated in the order they do.
+    ///
+    /// Cooperative and single-threaded: nothing preempts a task, and there is
+    /// one OS thread for all of them. `ACTIVE_HEAP` has to be a single
+    /// thread-local (`typelisp-abi`), and `Heap` is `!Send`, so tasks cannot be
+    /// spread across threads without making the heap shareable first.
+    fn run_tasks(
+        &self,
+        heap: &mut Heap,
+        starts: Vec<(Value, Value)>,
+        switching: Switching,
+    ) -> Vec<Result<Value, EvalError>> {
+        let home = heap.current_root_stack();
+        let mut slots: Vec<TaskSlot> = Vec::with_capacity(starts.len());
+        for (form, env) in starts {
+            let roots = heap.new_root_stack();
+            // `form` and `env` are rooted in `home` by the caller, so they stay
+            // reachable across this switch — the collector walks every stack.
+            heap.switch_to_root_stack(roots);
+            let task = Task::start(heap, form, env);
+            heap.switch_to_root_stack(home);
+            slots.push(TaskSlot { task, roots, done: None });
+        }
+
+        let mut remaining = slots.len();
+        while remaining > 0 {
+            for i in 0..slots.len() {
+                if slots[i].done.is_some() {
+                    continue;
+                }
+                heap.switch_to_root_stack(slots[i].roots);
+                loop {
+                    match self.step_task(heap, &mut slots[i].task) {
+                        Progress::Running => {
+                            if matches!(switching, Switching::EveryStep) {
+                                break;
+                            }
+                        }
+                        Progress::Done(r) => {
+                            let sbase = slots[i].task.sbase;
+                            heap.truncate_roots(sbase);
+                            heap.switch_to_root_stack(home);
+                            root_result(heap, &r);
+                            slots[i].done = Some(r);
+                            remaining -= 1;
+                            break;
+                        }
+                    }
+                }
+                heap.switch_to_root_stack(home);
+            }
+        }
+
+        for s in &slots {
+            heap.drop_root_stack(s.roots);
+        }
+        slots.into_iter().map(|s| s.done.expect("the loop only exits once every task is done")).collect()
     }
 
     /// One step of evaluation: reduce `form` to a value, or to a
@@ -2279,6 +2380,119 @@ mod tests {
                          (throw (quote inner) (int-any-width 1))
                          (throw (quote outer) (int-any-width 2)))))";
         assert_eq!(agrees(&mut h, src), Value::Int(2));
+    }
+
+    // ---- tasks -----------------------------------------------------------
+
+    /// Runs `srcs` as independent tasks, switching after every single step.
+    ///
+    /// Every task's roots have to survive whatever the others do between two
+    /// of its own steps, and under `stress_heap` that includes a collection per
+    /// `cons`. This is the harshest arrangement the scheduler will ever see.
+    fn run_interleaved(heap: &mut Heap, srcs: &[&str]) -> Vec<Result<Value, EvalError>> {
+        let base = heap.root_count();
+        let mut starts = Vec::new();
+        for src in srcs {
+            let form = read1(heap, src);
+            heap.push_root(form);
+            starts.push((form, Value::Empty));
+        }
+        let interp = Interp::new();
+        let out = interp.run_tasks(heap, starts, Switching::EveryStep);
+        // The forms it was handed are still rooted, and each result that
+        // carries a value added one of its own.
+        assert!(
+            heap.root_count() >= base + srcs.len(),
+            "the scheduler dropped roots it was given ({} < {})",
+            heap.root_count(),
+            base + srcs.len()
+        );
+        out
+    }
+
+    /// Two tasks stepped alternately each reach their own answer.
+    #[test]
+    fn two_tasks_interleaved_keep_their_own_bindings() {
+        let mut h = stress_heap();
+        let out = run_interleaved(
+            &mut h,
+            &[
+                "(let ((x r (int-any-width 1))) (var x))",
+                "(let ((x r (int-any-width 2))) (var x))",
+            ],
+        );
+        assert_eq!(out[0].as_ref().unwrap(), &Value::Int(1));
+        assert_eq!(out[1].as_ref().unwrap(), &Value::Int(2));
+    }
+
+    /// A task's half-built structure survives the other task's allocations.
+    ///
+    /// Each `cons` collects under `gc_stress` and the two tasks take turns, so
+    /// every cell one task is holding in an `Args` frame is exposed to a
+    /// collection driven by the other before it is used.
+    #[test]
+    fn a_half_built_structure_survives_the_other_task() {
+        let mut h = stress_heap();
+        let build = |tag: i64| {
+            format!(
+                "(call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width {}) \
+                   (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width {}) (unit)))",
+                tag,
+                tag + 1
+            )
+        };
+        let (a, b) = (build(11), build(22));
+        let out = run_interleaved(&mut h, &[&a, &b]);
+        for (i, expect) in [(0usize, 11i64), (1, 22)] {
+            let v = *out[i].as_ref().unwrap_or_else(|e| panic!("task {} failed: {}", i, e));
+            assert_eq!(h.car(v).unwrap(), Value::Int(expect));
+            assert_eq!(h.car(h.cdr(v).unwrap()).unwrap(), Value::Int(expect + 1));
+        }
+    }
+
+    /// One task failing does not disturb the others: each result stands alone.
+    #[test]
+    fn a_failing_task_does_not_take_the_others_with_it() {
+        let mut h = stress_heap();
+        let out = run_interleaved(
+            &mut h,
+            &["(int-any-width 1)", "(var nope)", "(int-any-width 3)"],
+        );
+        assert_eq!(out[0].as_ref().unwrap(), &Value::Int(1));
+        match &out[1] {
+            Err(e) => assert!(matches!(unlocated(e), EvalError::Unbound(n) if n == "nope"), "got {}", e),
+            Ok(v) => panic!("expected an unbound-variable error, got {:?}", v),
+        }
+        assert_eq!(out[2].as_ref().unwrap(), &Value::Int(3));
+    }
+
+    /// A thrown value reaches the starter rooted, even though the stack that
+    /// carried it is dropped the moment the task ends.
+    #[test]
+    fn a_task_that_throws_hands_its_value_over_rooted() {
+        let mut h = stress_heap();
+        let out = run_interleaved(
+            &mut h,
+            &[
+                "(throw (quote escaped) \
+                   (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 5) (unit)))",
+                "(call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))",
+            ],
+        );
+        // Allocating now would collect an unrooted carried value.
+        for _ in 0..64 {
+            let _ = h.cons(Value::Int(0), Value::Empty).unwrap();
+        }
+        match &out[0] {
+            Err(e) => match unlocated(e) {
+                EvalError::Throw(tag, v) => {
+                    assert_eq!(tag, "escaped");
+                    assert_eq!(h.car(**v).unwrap(), Value::Int(5));
+                }
+                other => panic!("expected a throw, got {:?}", other),
+            },
+            Ok(v) => panic!("expected a throw, got {:?}", v),
+        }
     }
 
     // ---- the vocabulary is closed ----------------------------------------
