@@ -2122,7 +2122,7 @@ fn match_sexpr_core(
 }
 
 /// `(construct sexpr N E...)` — build a `Sexpr` datum from evaluated fields.
-fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Value]) -> Result<Value, EvalError> {
+pub(super) fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Value]) -> Result<Value, EvalError> {
     use super::{narrow_variant, SEXPR_BIGNUM, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_I32, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_STR, SEXPR_SYM};
 
     let arg = |i: usize| -> Result<Value, EvalError> {
@@ -2209,7 +2209,7 @@ fn tail_after_value(heap: &Heap, list: Value, n: usize) -> Result<Value, EvalErr
 
 /// A field holding a vtable's slots: `((PATH SYM)...)`, the owning type and
 /// method name for each of the trait's methods, in slot order.
-fn method_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<(crate::Path, String)>, EvalError> {
+pub(super) fn method_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<(crate::Path, String)>, EvalError> {
     let field = core::field(heap, form, i)
         .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) has no field {}", what, i)))?;
     let entries = heap
@@ -2238,7 +2238,7 @@ fn method_entry(heap: &Heap, entry: Value) -> Result<(crate::Path, String), Eval
 }
 
 /// The supertrait tables field: `((PATH ((PATH SYM)...))...)`.
-fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<(crate::Path, Vec<(crate::Path, String)>)>, EvalError> {
+pub(super) fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<(crate::Path, Vec<(crate::Path, String)>)>, EvalError> {
     let field = core::field(heap, form, i)
         .ok_or_else(|| EvalError::Internal(format!("eval: (dyn-new ..) has no field {}", i)))?;
     let entries = heap
@@ -2325,7 +2325,7 @@ pub(super) fn int_field(heap: &Heap, form: Value, i: usize, what: &str) -> Resul
 
 /// A field holding a string — a `construct` node's runtime type key, the one
 /// place the core IR carries a name rather than a path.
-fn str_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, EvalError> {
+pub(super) fn str_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, EvalError> {
     match core::field(heap, form, i) {
         Some(Value::Str(id)) => Ok(heap.string(id).to_string()),
         other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a string: {:?}", what, i, other))),
@@ -2333,7 +2333,7 @@ fn str_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, E
 }
 
 /// A field holding a boolean.
-fn bool_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<bool, EvalError> {
+pub(super) fn bool_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<bool, EvalError> {
     match core::field(heap, form, i) {
         Some(Value::Bool(b)) => Ok(b),
         other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a boolean: {:?}", what, i, other))),
@@ -2739,7 +2739,7 @@ impl Interp {
 }
 
 /// A field holding an interned symbol, as a `String`.
-fn sym_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, EvalError> {
+pub(super) fn sym_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, EvalError> {
     match core::field(heap, form, i) {
         Some(Value::Symbol(id)) => Ok(heap.symbol_name(id).to_string()),
         other => Err(EvalError::Internal(format!("exec: ({} ..) field {} is not a symbol: {:?}", what, i, other))),

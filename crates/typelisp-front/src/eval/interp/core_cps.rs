@@ -37,8 +37,12 @@ use typelisp_mem::{Heap, SymRef, Value};
 use crate::check::core;
 use crate::eval::value::EvalError;
 
-use super::core_eval::{env_lookup, extend_env, int_field, path_field, Op, Step};
-use super::Interp;
+use super::core_eval::{
+    bool_field, construct_sexpr_core, env_lookup, extend_env, int_field, path_field, str_field, sym_field, Op, Step,
+};
+use super::{FnDef, Interp};
+
+use std::rc::Rc;
 
 /// What one step of the machine produced.
 enum State {
@@ -54,6 +58,45 @@ enum State {
     /// is no need for a dedicated single-slot root — and no "at most one throw
     /// in flight" assumption to break once tasks exist.
     Unwind(EvalError),
+}
+
+/// Which node an `Args` frame is collecting arguments for.
+///
+/// Four core forms share one shape — a run of argument forms at a fixed offset,
+/// evaluated left to right — and differ only in what happens once they are all
+/// in hand. The leading fields they skip are the checker's and the bridge's
+/// (names, paths, representations); evaluation is uniform over `Value`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ArgsKind {
+    /// `(call WRITTEN HOME PATH (R...) ARG...)`
+    Call,
+    /// `(construct PATH KEY VARIANT MUTABLE (R...) ARG...)`
+    Construct,
+    /// `(assoc PATH SYM INSTANCE (HOME...) RET-REPR (R...) ARG...)`
+    Assoc,
+    /// `(dyn-call PATH SYM SLOT VTABLE (R...) ARG...)`
+    DynCall,
+}
+
+impl ArgsKind {
+    /// How many leading fields are not arguments.
+    fn skip(self) -> usize {
+        match self {
+            ArgsKind::Call => 4,
+            ArgsKind::Construct => 5,
+            ArgsKind::Assoc => 7,
+            ArgsKind::DynCall => 5,
+        }
+    }
+
+    fn what(self) -> &'static str {
+        match self {
+            ArgsKind::Call => "call",
+            ArgsKind::Construct => "construct",
+            ArgsKind::Assoc => "assoc",
+            ArgsKind::DynCall => "dyn-call",
+        }
+    }
 }
 
 /// A suspended computation: what to do once the subexpression being evaluated
@@ -77,13 +120,13 @@ enum Frame {
     /// yet evaluated; the value being resumed on is discarded, since only a
     /// sequence's last form contributes its value.
     Seq { rest: Value, env: Value },
-    /// `(call WRITTEN HOME PATH (R...) ARG...)` — waiting on one argument.
+    /// Waiting on one argument of a call, construction or method dispatch.
     ///
     /// `done` holds the arguments already evaluated, in order; the form
     /// carries the rest. An argument evaluated three ago is as collectible as
     /// the one that just arrived, so all of them stay rooted until the call
     /// itself is made.
-    CallArgs { form: Value, done: Vec<Value>, env: Value },
+    Args { form: Value, done: Vec<Value>, env: Value, kind: ArgsKind },
     /// `(loop BODY...)` — running the body round and round. `rest` is what
     /// is left of this pass; when it runs out the frame starts over from
     /// `body`. The only way out is an exit this frame claims.
@@ -171,7 +214,7 @@ impl CpsStack {
             // Names and tags are `String`s, and an exit carries its value in
             // the state slots rather than here.
             Frame::Block { .. } | Frame::Catch { .. } | Frame::Return | Frame::ReturnFrom { .. } | Frame::Throw { .. } => {}
-            Frame::CallArgs { form, done, env } => {
+            Frame::Args { form, done, env, .. } => {
                 heap.push_root(*form);
                 heap.push_root(*env);
                 for v in done {
@@ -261,17 +304,19 @@ fn sequence_state(heap: &Heap, forms: Value, env: Value) -> Result<(State, Optio
     Ok((State::Eval(first, env), frame))
 }
 
-/// The argument forms of a `(call WRITTEN HOME PATH (R...) ARG...)` node.
-///
-/// The first four fields are the written name, the home module, the resolved
-/// path and the argument representations — the last of these is the bridge's,
-/// and evaluation is uniform over `Value`, so it is skipped here.
-fn call_arg_forms(heap: &Heap, form: Value) -> Result<Vec<Value>, EvalError> {
-    let fields = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (call ..): {}", e)))?;
-    if fields.len() < 4 {
-        return Err(EvalError::Internal(format!("eval: malformed call: {}", core::print(heap, form))));
+/// The argument forms of a node whose arguments start at a fixed offset.
+fn arg_forms(heap: &Heap, form: Value, kind: ArgsKind) -> Result<Vec<Value>, EvalError> {
+    let fields =
+        core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: ({} ..): {}", kind.what(), e)))?;
+    let skip = kind.skip();
+    if fields.len() < skip {
+        return Err(EvalError::Internal(format!(
+            "eval: malformed {}: {}",
+            kind.what(),
+            core::print(heap, form)
+        )));
     }
-    Ok(fields[4..].to_vec())
+    Ok(fields[skip..].to_vec())
 }
 
 /// A `let` binding's name and initialiser.
@@ -455,22 +500,10 @@ impl Interp {
                 Ok(State::Eval(init, env))
             }
 
-            Op::Call => {
-                let args = call_arg_forms(heap, form)?;
-                match args.first() {
-                    None => {
-                        let (next, pushed) = self.finish_call(heap, form, Vec::new())?;
-                        if let Some(f) = pushed {
-                            stack.push(heap, f);
-                        }
-                        Ok(next)
-                    }
-                    Some(&first) => {
-                        stack.push(heap, Frame::CallArgs { form, done: Vec::new(), env });
-                        Ok(State::Eval(first, env))
-                    }
-                }
-            }
+            Op::Call => self.start_args(heap, stack, form, env, ArgsKind::Call),
+            Op::Construct => self.start_args(heap, stack, form, env, ArgsKind::Construct),
+            Op::Assoc => self.start_args(heap, stack, form, env, ArgsKind::Assoc),
+            Op::DynCall => self.start_args(heap, stack, form, env, ArgsKind::DynCall),
 
             Op::Loop => {
                 let body = heap
@@ -544,65 +577,109 @@ impl Interp {
         }
     }
 
-    /// Every argument of a `call` is in hand: resolve the callee and enter it.
+    /// Begins evaluating an argument run: the first argument, with a frame to
+    /// collect it, or the node's own work when there are no arguments at all.
+    fn start_args(
+        &self,
+        heap: &mut Heap,
+        stack: &mut CpsStack,
+        form: Value,
+        env: Value,
+        kind: ArgsKind,
+    ) -> Result<State, EvalError> {
+        let args = arg_forms(heap, form, kind)?;
+        match args.first() {
+            Some(&first) => {
+                stack.push(heap, Frame::Args { form, done: Vec::new(), env, kind });
+                Ok(State::Eval(first, env))
+            }
+            None => {
+                let (next, pushed) = self.finish_args(heap, form, Vec::new(), kind)?;
+                if let Some(f) = pushed {
+                    stack.push(heap, f);
+                }
+                Ok(next)
+            }
+        }
+    }
+
+    /// Every argument is in hand: do the node's own work.
+    fn finish_args(
+        &self,
+        heap: &mut Heap,
+        form: Value,
+        argv: Vec<Value>,
+        kind: ArgsKind,
+    ) -> Result<(State, Option<Frame>), EvalError> {
+        match kind {
+            ArgsKind::Call => self.finish_call(heap, form, argv),
+            ArgsKind::Construct => self.finish_construct(heap, form, argv),
+            ArgsKind::Assoc => self.finish_assoc(heap, form, argv),
+            ArgsKind::DynCall => self.finish_dyn_call(heap, form, argv),
+        }
+    }
+
+    /// Enters an interpreted or compiled function body with `argv` bound.
     ///
     /// A user function's body becomes a sequence in a fresh environment, so
     /// **its last form is a tail jump** — a property the recursive evaluator
     /// does not have here (`Interp::apply` evaluates the last form with a
     /// native frame still waiting on it).
+    fn enter_fn(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<(State, Option<Frame>), EvalError> {
+        // Tracing and stepping report a call around the frame it opens, which
+        // a tail jump does not leave behind. They move in the stage that gives
+        // calls their own frame — until then, saying so beats quietly losing
+        // the trace.
+        if self.trace_armed.get() || self.stepping.get() {
+            unimplemented!("eval_cps: trace/step over a call has not moved to the continuation stack yet");
+        }
+        // A compiled callee runs on the Rust stack: the boundary is one frame
+        // from the machine's point of view, and nothing can suspend inside it.
+        let compiled = f.compiled.borrow().clone();
+        if let Some(compiled) = compiled {
+            let sig = f.sig.as_ref().expect("a compiled function always has a type signature");
+            let v = self.call_compiled(heap, compiled.as_ref(), &argv, &sig.0, &sig.1)?;
+            return Ok((State::Apply(v), None));
+        }
+        if f.params.len() != argv.len() {
+            return Err(EvalError::Internal(format!(
+                "apply: the body takes {} argument(s), given {}",
+                f.params.len(),
+                argv.len()
+            )));
+        }
+        let binds: Vec<(SymRef, Value)> = f
+            .params
+            .iter()
+            .zip(argv)
+            .map(|(name, v)| match heap.intern_symbol(name) {
+                Value::Symbol(id) => (id, v),
+                _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
+            })
+            .collect();
+        // A top-level function closes over nothing, so its frame extends the
+        // empty environment rather than the caller's — that is what makes the
+        // scope lexical.
+        let env = extend_env(heap, &binds, Value::Empty)?;
+        // `FnDef::body` is a `Vec`, and a sequence frame walks a cons list, so
+        // the body is consed up here. `core::list` roots every item and every
+        // partial tail, so a collection mid-build is safe.
+        let body =
+            core::list(heap, &f.body).map_err(|e| EvalError::Internal(format!("eval: call body: {}", e)))?;
+        // The last allocation on this path: `sequence_state` only walks
+        // conses, so `body` and `env` stay in Rust locals — live because
+        // nothing collects — until the caller roots them again.
+        sequence_state(heap, body, env)
+    }
+
     fn finish_call(&self, heap: &mut Heap, form: Value, argv: Vec<Value>) -> Result<(State, Option<Frame>), EvalError> {
         let written = self.name_list(heap, form, 0, "call")?;
         let home = self.name_list(heap, form, 1, "call")?;
         let path = path_field(heap, form, 2, "call")?;
 
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
-            // Tracing and stepping report a call around the frame it opens,
-            // which a tail jump does not leave behind. They move in the stage
-            // that gives calls their own frame — until then, saying so beats
-            // quietly losing the trace.
-            if self.trace_armed.get() || self.stepping.get() {
-                unimplemented!("eval_cps: trace/step over a call has not moved to the continuation stack yet");
-            }
-            // A compiled callee runs on the Rust stack: the boundary is one
-            // frame from the machine's point of view, and nothing can suspend
-            // inside it.
-            let compiled = f.compiled.borrow().clone();
-            if let Some(compiled) = compiled {
-                let sig = f.sig.as_ref().expect("a compiled function always has a type signature");
-                let v = self.call_compiled(heap, compiled.as_ref(), &argv, &sig.0, &sig.1)?;
-                return Ok((State::Apply(v), None));
-            }
-            if f.params.len() != argv.len() {
-                return Err(EvalError::Internal(format!(
-                    "apply: the body takes {} argument(s), given {}",
-                    f.params.len(),
-                    argv.len()
-                )));
-            }
-            let binds: Vec<(SymRef, Value)> = f
-                .params
-                .iter()
-                .zip(argv)
-                .map(|(name, v)| match heap.intern_symbol(name) {
-                    Value::Symbol(id) => (id, v),
-                    _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-                })
-                .collect();
-            // A top-level function closes over nothing, so its frame extends
-            // the empty environment rather than the caller's — that is what
-            // makes the scope lexical.
-            let env = extend_env(heap, &binds, Value::Empty)?;
-            // `FnDef::body` is a `Vec`, and a sequence frame walks a cons
-            // list, so the body is consed up here. `core::list` roots every
-            // item and every partial tail, so a collection mid-build is safe.
-            let body = core::list(heap, &f.body)
-                .map_err(|e| EvalError::Internal(format!("eval: call body: {}", e)))?;
-            // The last allocation on this path: `sequence_state` only walks
-            // conses, so `body` and `env` stay in Rust locals — live because
-            // nothing collects — until the caller roots them again.
-            return sequence_state(heap, body, env);
+            return self.enter_fn(heap, &f, argv);
         }
-
         // Otherwise a built-in operator, which lives at the root and so is
         // always spelled as a bare name.
         if written.len() == 1 {
@@ -611,6 +688,99 @@ impl Interp {
             }
         }
         Err(EvalError::NoSuchFunction(path.to_string()))
+    }
+
+    /// `(construct PATH KEY VARIANT MUTABLE (R...) ARG...)` — a struct, enum
+    /// variant or `Sexpr` constructor.
+    fn finish_construct(
+        &self,
+        heap: &mut Heap,
+        form: Value,
+        argv: Vec<Value>,
+    ) -> Result<(State, Option<Frame>), EvalError> {
+        let path = path_field(heap, form, 0, "construct")?;
+        // The value's runtime identity, spelled by the checker where the
+        // instantiation was known: `gen<i32>` and `gen<string>` share `path`
+        // and differ here.
+        let key = str_field(heap, form, 1, "construct")?;
+        let variant = int_field(heap, form, 2, "construct")? as usize;
+        let mutable = bool_field(heap, form, 3, "construct")?;
+
+        let v = if super::is_sexpr_type(&path) {
+            construct_sexpr_core(heap, variant, &argv)?
+        } else if mutable {
+            crate::type_key::alloc_struct_keyed(heap, &key, argv)
+        } else {
+            crate::type_key::alloc_enum_keyed(heap, &key, variant, argv)
+        };
+        Ok((State::Apply(v), None))
+    }
+
+    /// `(assoc PATH SYM INSTANCE (HOME...) RET-REPR (R...) ARG...)` — a method
+    /// call. The receiver, when there is one, is `argv[0]`.
+    fn finish_assoc(
+        &self,
+        heap: &mut Heap,
+        form: Value,
+        argv: Vec<Value>,
+    ) -> Result<(State, Option<Frame>), EvalError> {
+        let type_name = path_field(heap, form, 0, "assoc")?;
+        let method = sym_field(heap, form, 1, "assoc")?;
+        let home = self.name_list(heap, form, 3, "assoc")?;
+        // The result's runtime identity, for the built-in methods that build a
+        // box: `Vector::new` has no field to read an instantiation off.
+        let ret_key = str_field(heap, form, 6, "assoc")?;
+
+        let f = self.root.borrow().resolve_method(&home, &type_name, &method);
+        match f {
+            Some(f) => self.enter_fn(heap, &f, argv),
+            None => match super::eval_builtin_method(heap, &type_name, &method, &argv, &ret_key) {
+                Some(result) => Ok((State::Apply(result?), None)),
+                None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
+            },
+        }
+    }
+
+    /// `(dyn-call PATH SYM SLOT VTABLE (R...) ARG...)` — a call through a
+    /// trait object's vtable.
+    ///
+    /// `argv[0]` is the fat box; the callee is an ordinary method body with an
+    /// ordinary receiver, so the concrete value is substituted in its place and
+    /// nothing about the callee knows it was reached dynamically.
+    fn finish_dyn_call(
+        &self,
+        heap: &mut Heap,
+        form: Value,
+        mut argv: Vec<Value>,
+    ) -> Result<(State, Option<Frame>), EvalError> {
+        let trait_path = path_field(heap, form, 0, "dyn-call")?;
+        let method = sym_field(heap, form, 1, "dyn-call")?;
+        let slot = int_field(heap, form, 2, "dyn-call")? as usize;
+
+        let (vtable_id, inner) = match argv.first() {
+            Some(Value::Boxed(id)) if heap.is_dyn(*id) => (heap.dyn_vtable_id(*id), heap.dyn_value(*id)),
+            other => {
+                return Err(EvalError::Internal(format!(
+                    "eval: (dyn-call {}::{} ..): receiver is not a trait object ({:?})",
+                    trait_path, method, other
+                )))
+            }
+        };
+        let target = self.vtables.borrow().get(vtable_id as usize).and_then(|slots| slots.get(slot)).cloned();
+        let Some((target_type, target_method)) = target else {
+            return Err(EvalError::Internal(format!(
+                "eval: (dyn-call {}::{} ..): vtable {} has no slot {}",
+                trait_path, method, vtable_id, slot
+            )));
+        };
+        argv[0] = inner;
+        // Visibility was settled where the value was boxed, so this is the
+        // direct lookup, not `resolve_method`'s `home`-relative one.
+        let f = self.root.borrow().get_method(&target_type, &target_method);
+        match f {
+            Some(f) => self.enter_fn(heap, &f, argv),
+            None => Err(EvalError::NoSuchFunction(format!("{}::{}", target_type, target_method))),
+        }
     }
 
     /// Hands `v` to `frame` — the frame's "what to do with the value" half.
@@ -680,15 +850,12 @@ impl Interp {
                 Ok((State::Apply(v), None))
             }
 
-            Frame::CallArgs { form, mut done, env } => {
+            Frame::Args { form, mut done, env, kind } => {
                 done.push(v);
-                let args = call_arg_forms(heap, form)?;
+                let args = arg_forms(heap, form, kind)?;
                 match args.get(done.len()) {
-                    Some(&next) => Ok((
-                        State::Eval(next, env),
-                        Some(Frame::CallArgs { form, done, env }),
-                    )),
-                    None => self.finish_call(heap, form, done),
+                    Some(&next) => Ok((State::Eval(next, env), Some(Frame::Args { form, done, env, kind }))),
+                    None => self.finish_args(heap, form, done, kind),
                 }
             }
 
@@ -801,7 +968,7 @@ impl Interp {
             | Frame::Return
             | Frame::ReturnFrom { .. }
             | Frame::Throw { .. }
-            | Frame::CallArgs { .. }
+            | Frame::Args { .. }
             | Frame::LetInit { .. } => Ok((State::Unwind(exit), None)),
         }
     }
@@ -1079,6 +1246,49 @@ mod tests {
         }
     }
 
+    // ---- construct / field-get -------------------------------------------
+
+    #[test]
+    fn construct_builds_a_struct_and_field_get_reads_it() {
+        let mut h = stress_heap();
+        let point = "(construct point \"point\" 0 true (int-any-width int-any-width) \
+                       (int-any-width 1) (int-any-width 2))";
+        assert_eq!(
+            agrees(&mut h, &format!("(field-get {} 1 int-any-width)", point)),
+            Value::Int(2)
+        );
+        assert_eq!(
+            agrees(&mut h, &format!("(field-get {} 0 int-any-width)", point)),
+            Value::Int(1)
+        );
+    }
+
+    /// A field whose value is itself a construction: the outer node's earlier
+    /// fields have to survive the inner one's allocation.
+    #[test]
+    fn a_nested_construction_does_not_lose_the_outer_fields() {
+        let mut h = stress_heap();
+        let inner = "(construct point \"point\" 0 true (int-any-width int-any-width) \
+                       (int-any-width 3) (int-any-width 4))";
+        let outer = format!(
+            "(construct pair \"pair\" 0 true (str point) (str \"tag\") {})",
+            inner
+        );
+        let src = format!("(field-get (field-get {} 1 point) 0 int-any-width)", outer);
+        assert_eq!(agrees(&mut h, &src), Value::Int(3));
+    }
+
+    /// `set` on a struct field's binding, then reading it back: the value
+    /// written has to be the value read, through the same cell.
+    #[test]
+    fn a_struct_survives_being_bound_and_read_back() {
+        let mut h = stress_heap();
+        let src = "(let ((p sexpr (construct point \"point\" 0 true (int-any-width int-any-width) \
+                                    (int-any-width 5) (int-any-width 6))))
+                     (field-get (var p) 1 int-any-width))";
+        assert_eq!(agrees(&mut h, src), Value::Int(6));
+    }
+
     // ---- panic -----------------------------------------------------------
 
     #[test]
@@ -1335,6 +1545,6 @@ mod tests {
     #[should_panic(expected = "has not moved to the continuation stack yet")]
     fn an_op_that_has_not_moved_says_so() {
         let mut h = stress_heap();
-        let _ = eval_src(&mut h, "(construct point (i32 i32) (int-any-width 1) (int-any-width 2))");
+        let _ = eval_src(&mut h, "(labels () (int-any-width 1))");
     }
 }
