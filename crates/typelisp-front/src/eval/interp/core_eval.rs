@@ -637,7 +637,7 @@ impl Interp {
     /// A plain `(str "name")` node, not a quoted symbol: the name is settled at
     /// check time (`Checker::block_stack`) and exists at run time only to tell
     /// nested blocks apart, so nothing here needs a symbol's identity.
-    fn block_name_of(&self, heap: &Heap, form: Value) -> Result<String, EvalError> {
+    pub(super) fn block_name_of(&self, heap: &Heap, form: Value) -> Result<String, EvalError> {
         match core::field(heap, form, 0).and_then(|n| core::field(heap, n, 0)) {
             Some(Value::Str(id)) => Ok(heap.string(id).to_string()),
             other => Err(EvalError::Internal(format!("eval: block name is {:?}", other))),
@@ -650,7 +650,7 @@ impl Interp {
     /// is the same shape `Op::Quote` produces — read back by name because
     /// that is what `EvalError::Throw` carries between the throw site and its
     /// catch, which may be in a different function entirely.
-    fn throw_tag_of(&self, heap: &Heap, form: Value, who: &str) -> Result<String, EvalError> {
+    pub(super) fn throw_tag_of(&self, heap: &Heap, form: Value, who: &str) -> Result<String, EvalError> {
         let quoted = core::field(heap, form, 0)
             .and_then(|q| core::field(heap, q, 0))
             .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) has no tag", who)))?;

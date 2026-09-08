@@ -46,6 +46,14 @@ enum State {
     Eval(Value, Value),
     /// A value is ready. Hand it to the top frame, or return it if there is none.
     Apply(Value),
+    /// A non-local exit is in flight. Discard frames until one claims it.
+    ///
+    /// This is where `break`/`return`/`return-from`/`throw` live, and it is
+    /// what replaces `Heap::set_in_flight_throw`: the value being carried past
+    /// the frames being discarded is rooted through the state slots, so there
+    /// is no need for a dedicated single-slot root — and no "at most one throw
+    /// in flight" assumption to break once tasks exist.
+    Unwind(EvalError),
 }
 
 /// A suspended computation: what to do once the subexpression being evaluated
@@ -76,6 +84,39 @@ enum Frame {
     /// the one that just arrived, so all of them stay rooted until the call
     /// itself is made.
     CallArgs { form: Value, done: Vec<Value>, env: Value },
+    /// `(loop BODY...)` — running the body round and round. `rest` is what
+    /// is left of this pass; when it runs out the frame starts over from
+    /// `body`. The only way out is an exit this frame claims.
+    Loop { body: Value, rest: Value, env: Value },
+    /// `(block NAME BODY)` — the lexical named escape's landing site.
+    ///
+    /// The name is matched only to tell nested blocks apart while the signal
+    /// travels: the checker already decided which block a `return-from`
+    /// belongs to, so an unmatched one is not a runtime possibility the way a
+    /// `throw` with no `catch` is.
+    Block { name: String },
+    /// `(catch 'TAG BODY)` — the dynamic escape's landing site. A throw on
+    /// some *other* tag keeps travelling; swallowing it here is the bug CL's
+    /// `eq` tag comparison exists to prevent.
+    Catch { tag: String },
+    /// `(return VALUE)` — waiting on the value to carry out.
+    Return,
+    /// `(return-from NAME VALUE)` — waiting on the value.
+    ReturnFrom { name: String },
+    /// `(throw 'TAG VALUE)` — waiting on the value.
+    Throw { tag: String },
+    /// `(unwind-protect PROTECTED CLEANUP)` — running `PROTECTED`. However it
+    /// is left, the cleanup runs.
+    Protect { cleanup: Value, env: Value },
+    /// Running a cleanup after its protected form produced `value`; the
+    /// cleanup's own value is discarded.
+    CleanupValue { value: Value },
+    /// Running a cleanup while `pending` waits to resume its flight.
+    ///
+    /// A non-local exit *from the cleanup itself* wins over the pending one,
+    /// matching CLHS: "the cleanup-forms of unwind-protect are not protected
+    /// by that unwind-protect".
+    CleanupUnwind { pending: EvalError },
     /// `(let ((SYM R INIT)...) BODY...)` — waiting on one initialiser.
     ///
     /// `binds` is the whole binding list (the names are read back from it once
@@ -110,6 +151,26 @@ impl CpsStack {
                 heap.push_root(*env);
             }
             Frame::Set { env, .. } => heap.push_root(*env),
+            Frame::Loop { body, rest, env } => {
+                heap.push_root(*body);
+                heap.push_root(*rest);
+                heap.push_root(*env);
+            }
+            Frame::Protect { cleanup, env } => {
+                heap.push_root(*cleanup);
+                heap.push_root(*env);
+            }
+            // The protected form's value has to outlive the cleanup, which
+            // allocates — the one unwind that runs code before continuing.
+            Frame::CleanupValue { value } => heap.push_root(*value),
+            Frame::CleanupUnwind { pending } => {
+                if let EvalError::Return(v) | EvalError::ReturnFrom(_, v) | EvalError::Throw(_, v) = pending {
+                    heap.push_root(**v);
+                }
+            }
+            // Names and tags are `String`s, and an exit carries its value in
+            // the state slots rather than here.
+            Frame::Block { .. } | Frame::Catch { .. } | Frame::Return | Frame::ReturnFrom { .. } | Frame::Throw { .. } => {}
             Frame::CallArgs { form, done, env } => {
                 heap.push_root(*form);
                 heap.push_root(*env);
@@ -160,6 +221,17 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         }
         State::Apply(v) => {
             heap.set_root(sbase, *v);
+            heap.set_root(sbase + 1, Value::Empty);
+        }
+        // The exit's value keeps its root for the whole flight: a cleanup on
+        // the way out allocates, and every scope that rooted it is being
+        // discarded. `Break` and a plain `Return` with no value carry nothing.
+        State::Unwind(e) => {
+            let carried = match e {
+                EvalError::Return(v) | EvalError::ReturnFrom(_, v) | EvalError::Throw(_, v) => **v,
+                _ => Value::Empty,
+            };
+            heap.set_root(sbase, carried);
             heap.set_root(sbase + 1, Value::Empty);
         }
     }
@@ -241,6 +313,20 @@ impl Interp {
                         state = next;
                     }
                     Err(e) => break Err(e),
+                },
+                State::Unwind(e) => match stack.pop() {
+                    None => break Err(e),
+                    Some((frame, fbase)) => match self.unwind_through(heap, frame, e) {
+                        Ok((next, pushed)) => {
+                            heap.truncate_roots(fbase);
+                            if let Some(f) = pushed {
+                                stack.push(heap, f);
+                            }
+                            set_state(heap, sbase, &next);
+                            state = next;
+                        }
+                        Err(e) => break Err(e),
+                    },
                 },
                 State::Apply(v) => match stack.pop() {
                     None => break Ok(v),
@@ -384,6 +470,74 @@ impl Interp {
                         Ok(State::Eval(first, env))
                     }
                 }
+            }
+
+            Op::Loop => {
+                let body = heap
+                    .cdr(form)
+                    .map_err(|e| EvalError::Internal(format!("eval: (loop ..): {}", e)))?;
+                if matches!(body, Value::Empty) {
+                    return Err(EvalError::Internal("eval: (loop ..) has no body".to_string()));
+                }
+                let first = heap
+                    .car(body)
+                    .map_err(|e| EvalError::Internal(format!("eval: (loop ..): {}", e)))?;
+                stack.push(heap, Frame::Loop { body, rest: body, env });
+                Ok(State::Eval(first, env))
+            }
+
+            Op::Break => Ok(State::Unwind(EvalError::Break)),
+
+            Op::Return => match core::field(heap, form, 0) {
+                Some(val) => {
+                    stack.push(heap, Frame::Return);
+                    Ok(State::Eval(val, env))
+                }
+                None => Ok(State::Unwind(EvalError::Return(Box::new(Value::Empty)))),
+            },
+
+            Op::Block => {
+                let name = self.block_name_of(heap, form)?;
+                let body = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (block ..) has no body".to_string()))?;
+                stack.push(heap, Frame::Block { name });
+                Ok(State::Eval(body, env))
+            }
+
+            Op::ReturnFrom => {
+                let name = self.block_name_of(heap, form)?;
+                match core::field(heap, form, 1) {
+                    Some(val) => {
+                        stack.push(heap, Frame::ReturnFrom { name });
+                        Ok(State::Eval(val, env))
+                    }
+                    None => Ok(State::Unwind(EvalError::ReturnFrom(name, Box::new(Value::Empty)))),
+                }
+            }
+
+            Op::Catch => {
+                let tag = self.throw_tag_of(heap, form, "catch")?;
+                let body = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (catch ..) has no body".to_string()))?;
+                stack.push(heap, Frame::Catch { tag });
+                Ok(State::Eval(body, env))
+            }
+
+            Op::Throw => {
+                let tag = self.throw_tag_of(heap, form, "throw")?;
+                let value = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (throw ..) has no value".to_string()))?;
+                stack.push(heap, Frame::Throw { tag });
+                Ok(State::Eval(value, env))
+            }
+
+            Op::UnwindProtect => {
+                let protected = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no protected form".to_string()))?;
+                let cleanup = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no cleanup form".to_string()))?;
+                stack.push(heap, Frame::Protect { cleanup, env });
+                Ok(State::Eval(protected, env))
             }
 
             other => unimplemented!("eval_cps: {:?} has not moved to the continuation stack yet", other),
@@ -542,6 +696,33 @@ impl Interp {
             // one is discarded.
             Frame::Seq { rest, env } => sequence_state(heap, rest, env),
 
+            // A loop body's value is discarded and the body starts again. The
+            // frame is rebuilt rather than kept, so the stack does not grow
+            // with the iteration count.
+            Frame::Loop { body, rest, env } => {
+                let bad = |e| EvalError::Internal(format!("eval: (loop ..): {}", e));
+                let next = heap.cdr(rest).map_err(bad)?;
+                let rest = if matches!(next, Value::Empty) { body } else { next };
+                let first = heap.car(rest).map_err(bad)?;
+                Ok((State::Eval(first, env), Some(Frame::Loop { body, rest, env })))
+            }
+
+            // Reached without an exit: the body's value is the form's.
+            Frame::Block { .. } | Frame::Catch { .. } => Ok((State::Apply(v), None)),
+
+            Frame::Return => Ok((State::Unwind(EvalError::Return(Box::new(v))), None)),
+            Frame::ReturnFrom { name } => Ok((State::Unwind(EvalError::ReturnFrom(name, Box::new(v))), None)),
+            Frame::Throw { tag } => Ok((State::Unwind(EvalError::Throw(tag, Box::new(v))), None)),
+
+            // The protected form finished normally. Its value waits in a
+            // frame while the cleanup runs.
+            Frame::Protect { cleanup, env } => {
+                Ok((State::Eval(cleanup, env), Some(Frame::CleanupValue { value: v })))
+            }
+            // A cleanup's own value is discarded.
+            Frame::CleanupValue { value } => Ok((State::Apply(value), None)),
+            Frame::CleanupUnwind { pending } => Ok((State::Unwind(pending), None)),
+
             Frame::LetInit { binds, rest, mut done, body, env } => {
                 done.push(v);
                 let bad = |what: &str| EvalError::Internal(format!("eval: (let ..) {}", what));
@@ -570,6 +751,58 @@ impl Interp {
                 let new_env = extend_env(heap, &pairs, env)?;
                 sequence_state(heap, body, new_env)
             }
+        }
+    }
+
+    /// Carries `exit` past `frame` — the unwinding half of a frame's job.
+    ///
+    /// Most frames have nothing to say and are simply discarded: that is what
+    /// makes a non-local exit skip the intervening computation. Three claim an
+    /// exit (`Loop`, `Block`, `Catch`) and one runs code on the way past
+    /// (`Protect`).
+    fn unwind_through(&self, _heap: &mut Heap, frame: Frame, exit: EvalError) -> Result<(State, Option<Frame>), EvalError> {
+        match frame {
+            // `break` and `return` are caught by the nearest enclosing loop —
+            // the checker guarantees there is one.
+            Frame::Loop { .. } => match exit {
+                EvalError::Break => Ok((State::Apply(Value::Empty), None)),
+                EvalError::Return(v) => Ok((State::Apply(*v), None)),
+                other => Ok((State::Unwind(other), None)),
+            },
+
+            Frame::Block { name } => match exit {
+                EvalError::ReturnFrom(from, v) if from == name => Ok((State::Apply(*v), None)),
+                other => Ok((State::Unwind(other), None)),
+            },
+
+            Frame::Catch { tag } => match exit {
+                EvalError::Throw(thrown, v) if thrown == tag => Ok((State::Apply(*v), None)),
+                other => Ok((State::Unwind(other), None)),
+            },
+
+            // The cleanup runs on *every* way out, with the exit parked in a
+            // frame until it is done.
+            Frame::Protect { cleanup, env } => {
+                Ok((State::Eval(cleanup, env), Some(Frame::CleanupUnwind { pending: exit })))
+            }
+
+            // An exit raised by a cleanup itself replaces the one that was in
+            // flight (CLHS: the cleanup-forms are not protected by their own
+            // unwind-protect). The pending exit is simply dropped.
+            Frame::CleanupValue { .. } | Frame::CleanupUnwind { .. } => Ok((State::Unwind(exit), None)),
+
+            // Everything else is computation the exit is escaping past.
+            Frame::If { .. }
+            | Frame::Panic
+            | Frame::FieldGet { .. }
+            | Frame::DynValue
+            | Frame::Set { .. }
+            | Frame::Seq { .. }
+            | Frame::Return
+            | Frame::ReturnFrom { .. }
+            | Frame::Throw { .. }
+            | Frame::CallArgs { .. }
+            | Frame::LetInit { .. } => Ok((State::Unwind(exit), None)),
         }
     }
 }
@@ -870,6 +1103,229 @@ mod tests {
         }
     }
 
+    // ---- loop, break, return ---------------------------------------------
+
+    /// Arithmetic lowers to method calls (`Op::Assoc`), which have not moved
+    /// yet, so a loop here counts down a cons list with the `sexpr-*`
+    /// builtins instead.
+    fn countdown_list(n: usize) -> String {
+        let mut src = String::from("(unit)");
+        for i in (0..n).rev() {
+            src = format!(
+                "(call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width {}) {})",
+                i, src
+            );
+        }
+        src
+    }
+
+    #[test]
+    fn a_loop_runs_until_it_is_broken_out_of() {
+        let mut h = stress_heap();
+        let src = format!(
+            "(let ((lst r {}) (seen r (int-any-width 0)))
+               (loop (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call (sexpr-car) () sexpr-car (sexpr) (var lst)))
+                     (set lst (call (sexpr-cdr) () sexpr-cdr (sexpr) (var lst))))
+               (var seen))",
+            countdown_list(5)
+        );
+        // The last element seen before the list ran out.
+        assert_eq!(agrees(&mut h, &src), Value::Int(4));
+    }
+
+    /// `return` carries a value out of the nearest loop; `break` carries unit.
+    #[test]
+    fn return_carries_a_value_out_of_the_loop() {
+        let mut h = stress_heap();
+        assert_eq!(agrees(&mut h, "(loop (return (int-any-width 7)))"), Value::Int(7));
+        assert_eq!(agrees(&mut h, "(loop (break))"), Value::Empty);
+        assert_eq!(agrees(&mut h, "(loop (return))"), Value::Empty);
+    }
+
+    /// The *nearest* loop claims the exit, so an inner `break` leaves the
+    /// outer one running.
+    #[test]
+    fn break_leaves_only_the_nearest_loop() {
+        let mut h = stress_heap();
+        // The inner `(loop (break))` must not end the outer one, which walks
+        // the whole list.
+        let src = format!(
+            "(let ((lst r {}) (seen r (int-any-width 0)))
+               (loop (loop (break))
+                     (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call (sexpr-car) () sexpr-car (sexpr) (var lst)))
+                     (set lst (call (sexpr-cdr) () sexpr-cdr (sexpr) (var lst))))
+               (var seen))",
+            countdown_list(3)
+        );
+        assert_eq!(agrees(&mut h, &src), Value::Int(2));
+    }
+
+    /// A loop of any length costs one frame: it is rebuilt, not stacked. 300
+    /// iterations, each allocating, with a collection at every allocation.
+    #[test]
+    fn a_long_loop_does_not_grow_the_stack() {
+        let mut h = stress_heap();
+        let src = format!(
+            "(let ((lst r {}) (seen r (int-any-width 0)))
+               (loop (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call (sexpr-car) () sexpr-car (sexpr) (var lst)))
+                     (set lst (call (sexpr-cdr) () sexpr-cdr (sexpr) (var lst))))
+               (var seen))",
+            countdown_list(300)
+        );
+        assert_eq!(eval_ok(&mut h, &src), Value::Int(299));
+    }
+
+    // ---- block / return-from ---------------------------------------------
+
+    #[test]
+    fn return_from_leaves_the_named_block() {
+        let mut h = stress_heap();
+        assert_eq!(
+            agrees(&mut h, r#"(block (str "b") (let () (return-from (str "b") (int-any-width 3)) (int-any-width 9)))"#),
+            Value::Int(3)
+        );
+    }
+
+    /// A block reached without an exit is just its body.
+    #[test]
+    fn a_block_without_an_exit_is_its_body() {
+        let mut h = stress_heap();
+        assert_eq!(agrees(&mut h, r#"(block (str "b") (int-any-width 4))"#), Value::Int(4));
+    }
+
+    /// The exit passes through the inner block, which does not claim it.
+    #[test]
+    fn return_from_passes_through_blocks_of_other_names() {
+        let mut h = stress_heap();
+        let src = r#"(block (str "outer")
+                       (block (str "inner")
+                         (return-from (str "outer") (int-any-width 8))))"#;
+        assert_eq!(agrees(&mut h, src), Value::Int(8));
+    }
+
+    // ---- catch / throw ---------------------------------------------------
+
+    #[test]
+    fn a_catch_without_a_throw_is_its_body() {
+        let mut h = stress_heap();
+        assert_eq!(agrees(&mut h, "(catch (quote done) (int-any-width 3))"), Value::Int(3));
+    }
+
+    #[test]
+    fn a_throw_reaches_the_catch_on_its_tag() {
+        let mut h = stress_heap();
+        let src = "(catch (quote done) (let () (throw (quote done) (int-any-width 42)) (int-any-width 9)))";
+        assert_eq!(agrees(&mut h, src), Value::Int(42));
+    }
+
+    /// A throw on another tag keeps travelling — the bug CL's `eq` tag
+    /// comparison exists to prevent.
+    #[test]
+    fn a_throw_passes_through_a_catch_on_another_tag() {
+        let mut h = stress_heap();
+        let src = "(catch (quote outer)
+                     (catch (quote inner)
+                       (throw (quote outer) (int-any-width 5))))";
+        assert_eq!(agrees(&mut h, src), Value::Int(5));
+    }
+
+    /// The thrown value stays rooted for the whole flight. Under `gc_stress`
+    /// the cleanup on the way out collects, so a value the state slots failed
+    /// to root would be gone by the time the catch claims it. This is what
+    /// replaces `Heap::set_in_flight_throw`.
+    #[test]
+    fn a_thrown_value_survives_a_cleanup_that_allocates() {
+        let mut h = stress_heap();
+        let src = r#"(catch (quote done)
+                       (unwind-protect
+                         (throw (quote done) (str "carried"))
+                         (str "the cleanup allocates")))"#;
+        match eval_ok(&mut h, src) {
+            Value::Str(id) => assert_eq!(h.string(id), "carried"),
+            other => panic!("the thrown value did not survive the cleanup: {:?}", other),
+        }
+    }
+
+    // ---- unwind-protect --------------------------------------------------
+
+    /// The cleanup runs and its value is discarded.
+    #[test]
+    fn unwind_protect_returns_the_protected_value() {
+        let mut h = stress_heap();
+        let src = "(let ((n r (int-any-width 0)))
+                     (unwind-protect (int-any-width 1) (set n (int-any-width 99)))
+                     (var n))";
+        assert_eq!(agrees(&mut h, src), Value::Int(99));
+        assert_eq!(
+            agrees(&mut h, "(unwind-protect (int-any-width 1) (int-any-width 2))"),
+            Value::Int(1)
+        );
+    }
+
+    /// The cleanup runs however the protected form is left — here by `break`.
+    #[test]
+    fn the_cleanup_runs_on_a_break_out_of_the_protected_form() {
+        let mut h = stress_heap();
+        let src = "(let ((n r (int-any-width 0)))
+                     (loop (unwind-protect (break) (set n (int-any-width 7))))
+                     (var n))";
+        assert_eq!(agrees(&mut h, src), Value::Int(7));
+    }
+
+    /// The protected form's value survives a cleanup that allocates — the one
+    /// unwind that runs code before continuing.
+    #[test]
+    fn the_protected_value_survives_an_allocating_cleanup() {
+        let mut h = stress_heap();
+        let src = r#"(unwind-protect (str "kept") (str "the cleanup allocates"))"#;
+        match eval_ok(&mut h, src) {
+            Value::Str(id) => assert_eq!(h.string(id), "kept"),
+            other => panic!("the protected value did not survive: {:?}", other),
+        }
+    }
+
+    /// Nested `unwind-protect`s run innermost first: the trail is consed in
+    /// the order the cleanups ran, so the outer one ends up at the head.
+    #[test]
+    fn nested_cleanups_run_innermost_first() {
+        let mut h = stress_heap();
+        let src = r#"(let ((trail r (unit)))
+                       (catch (quote done)
+                         (unwind-protect
+                           (unwind-protect
+                             (throw (quote done) (int-any-width 0))
+                             (set trail (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (str "i") (var trail))))
+                           (set trail (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (str "o") (var trail)))))
+                       (var trail))"#;
+        let v = eval_ok(&mut h, src);
+        let head = h.car(v).unwrap();
+        let second = h.car(h.cdr(v).unwrap()).unwrap();
+        match (head, second) {
+            (Value::Str(a), Value::Str(b)) => {
+                assert_eq!(h.string(a), "o", "the outer cleanup should have run last");
+                assert_eq!(h.string(b), "i", "the inner cleanup should have run first");
+            }
+            other => panic!("expected two strings, got {:?}", other),
+        }
+    }
+
+    /// An exit raised by the cleanup itself wins over the one in flight
+    /// (CLHS: the cleanup-forms are not protected by their own
+    /// unwind-protect).
+    #[test]
+    fn an_exit_from_the_cleanup_beats_the_one_in_flight() {
+        let mut h = stress_heap();
+        let src = "(catch (quote outer)
+                     (catch (quote inner)
+                       (unwind-protect
+                         (throw (quote inner) (int-any-width 1))
+                         (throw (quote outer) (int-any-width 2)))))";
+        assert_eq!(agrees(&mut h, src), Value::Int(2));
+    }
+
     // ---- what has not moved yet ------------------------------------------
 
     /// Ops still on the recursive evaluator reach `unimplemented!` rather than
@@ -879,6 +1335,6 @@ mod tests {
     #[should_panic(expected = "has not moved to the continuation stack yet")]
     fn an_op_that_has_not_moved_says_so() {
         let mut h = stress_heap();
-        let _ = eval_src(&mut h, "(loop (int-any-width 1))");
+        let _ = eval_src(&mut h, "(construct point (i32 i32) (int-any-width 1) (int-any-width 2))");
     }
 }
