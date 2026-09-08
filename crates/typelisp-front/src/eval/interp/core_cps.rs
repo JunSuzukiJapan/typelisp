@@ -312,6 +312,41 @@ impl CpsStack {
     }
 }
 
+/// One unit of execution: a continuation stack, the state it is in, and the
+/// bottom of the roots that belong to it.
+///
+/// [`Interp::eval_cps`] starts one and runs it straight through. A task
+/// (goroutine) is this same structure *kept across suspensions* instead — which
+/// is the whole reason the evaluator moved off the Rust stack, since a Rust
+/// recursion cannot be stopped between two steps and picked up later.
+struct Task {
+    /// Where this task's roots begin. The two state slots are `sbase` and
+    /// `sbase + 1`; frames root above them. **The starter owns these**: whoever
+    /// called [`Task::start`] must `truncate_roots(sbase)` once it is done.
+    sbase: usize,
+    stack: CpsStack,
+    state: State,
+}
+
+/// What one step of a task did.
+enum Progress {
+    /// Still running. Step it again.
+    Running,
+    /// Finished: the continuation stack ran out. The result is rooted in the
+    /// state slots until the caller truncates them.
+    Done(Result<Value, EvalError>),
+}
+
+impl Task {
+    /// Starts a task that evaluates `form` in `env`.
+    fn start(heap: &mut Heap, form: Value, env: Value) -> Task {
+        let sbase = heap.root_count();
+        heap.push_root(env);
+        heap.push_root(form);
+        Task { sbase, stack: CpsStack::new(), state: State::Eval(form, env) }
+    }
+}
+
 /// Places `e` at `loc`, if there is one. `EvalError::at` keeps the innermost
 /// location, so calling this more than once on the way out is harmless.
 fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
@@ -422,71 +457,78 @@ impl Interp {
     /// Rust frames. Every `Op` is handled here — `step_cps` matches without a
     /// catch-all, so a tag with no frame fails to build.
     pub(crate) fn eval_cps(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        let sbase = heap.root_count();
-        heap.push_root(env);
-        heap.push_root(form);
-
-        let mut stack = CpsStack::new();
-        let mut state = State::Eval(form, env);
-
+        let mut task = Task::start(heap, form, env);
         let out = loop {
-            match state {
-                State::Eval(form, env) => {
-                    // Read the location before stepping: it names the form the
-                    // error came from, and `EvalError::at` keeps the innermost
-                    // one, so a subexpression that already placed the error
-                    // wins over the form containing it.
-                    let loc = heap.cons_loc(form);
-                    let next = match self.step_cps(heap, &mut stack, form, env) {
-                        Ok(next) => next,
-                        Err(e) => State::Unwind(place(e, loc)),
-                    };
-                    set_state(heap, sbase, &next);
-                    state = next;
-                }
-                State::Unwind(e) => match stack.pop() {
-                    None => break Err(e),
-                    Some((frame, fbase, loc)) => {
-                        let (next, pushed) = match self.unwind_through(heap, frame, e) {
-                            Ok(pair) => pair,
-                            // An error *while* unwinding replaces the exit in
-                            // flight — the same rule a cleanup's own exit
-                            // follows.
-                            Err(e) => (State::Unwind(place(e, loc.clone())), None),
-                        };
-                        heap.truncate_roots(fbase);
-                        if let Some(f) = pushed {
-                            stack.push(heap, f, loc);
-                        }
-                        set_state(heap, sbase, &next);
-                        state = next;
-                    }
-                },
-                State::Apply(v) => match stack.pop() {
-                    None => break Ok(v),
-                    Some((frame, fbase, loc)) => {
-                        let (next, pushed) = match self.resume(heap, frame, v) {
-                            Ok(pair) => pair,
-                            Err(e) => (State::Unwind(place(e, loc.clone())), None),
-                        };
-                        // Nothing from here to `set_state` may allocate: the
-                        // frame's roots are gone and whatever the next state
-                        // carries lives only in Rust locals until it is rooted
-                        // again. `truncate_roots`, `push` and `set_root` all
-                        // leave the heap alone.
-                        heap.truncate_roots(fbase);
-                        if let Some(f) = pushed {
-                            stack.push(heap, f, loc);
-                        }
-                        set_state(heap, sbase, &next);
-                        state = next;
-                    }
-                },
+            match self.step_task(heap, &mut task) {
+                Progress::Running => {}
+                Progress::Done(r) => break r,
             }
         };
-
-        heap.truncate_roots(sbase);
+        heap.truncate_roots(task.sbase);
         out
+    }
+
+    /// Runs `task` one step.
+    ///
+    /// A step is one `Eval` decomposition, one frame resumed, or one frame
+    /// unwound through. Between two calls the task holds everything it needs to
+    /// continue, so a scheduler may leave it alone and step a different one —
+    /// that is what makes a task suspendable.
+    fn step_task(&self, heap: &mut Heap, task: &mut Task) -> Progress {
+        // Taken out to be consumed; every path below either puts the next state
+        // back or returns `Done`, in which case what is left here is never read.
+        let state = std::mem::replace(&mut task.state, State::Apply(Value::Empty));
+        let next = match state {
+            State::Eval(form, env) => {
+                // Read the location before stepping: it names the form the
+                // error came from, and `EvalError::at` keeps the innermost
+                // one, so a subexpression that already placed the error
+                // wins over the form containing it.
+                let loc = heap.cons_loc(form);
+                match self.step_cps(heap, &mut task.stack, form, env) {
+                    Ok(next) => next,
+                    Err(e) => State::Unwind(place(e, loc)),
+                }
+            }
+            State::Unwind(e) => match task.stack.pop() {
+                None => return Progress::Done(Err(e)),
+                Some((frame, fbase, loc)) => {
+                    let (next, pushed) = match self.unwind_through(heap, frame, e) {
+                        Ok(pair) => pair,
+                        // An error *while* unwinding replaces the exit in
+                        // flight — the same rule a cleanup's own exit follows.
+                        Err(e) => (State::Unwind(place(e, loc.clone())), None),
+                    };
+                    heap.truncate_roots(fbase);
+                    if let Some(f) = pushed {
+                        task.stack.push(heap, f, loc);
+                    }
+                    next
+                }
+            },
+            State::Apply(v) => match task.stack.pop() {
+                None => return Progress::Done(Ok(v)),
+                Some((frame, fbase, loc)) => {
+                    let (next, pushed) = match self.resume(heap, frame, v) {
+                        Ok(pair) => pair,
+                        Err(e) => (State::Unwind(place(e, loc.clone())), None),
+                    };
+                    // Nothing from here to `set_state` may allocate: the
+                    // frame's roots are gone and whatever the next state
+                    // carries lives only in Rust locals until it is rooted
+                    // again. `truncate_roots`, `push` and `set_root` all
+                    // leave the heap alone.
+                    heap.truncate_roots(fbase);
+                    if let Some(f) = pushed {
+                        task.stack.push(heap, f, loc);
+                    }
+                    next
+                }
+            },
+        };
+        set_state(heap, task.sbase, &next);
+        task.state = next;
+        Progress::Running
     }
 
     /// One step of evaluation: reduce `form` to a value, or to a
