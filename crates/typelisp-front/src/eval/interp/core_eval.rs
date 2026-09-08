@@ -976,7 +976,7 @@ impl Interp {
     /// not the caller's: that is what makes this lexical scope rather than
     /// dynamic. `call_env` is rooted on `heap` — the caller is inside a
     /// [`RootScope`] that will release it.
-    fn closure_frame(&self, heap: &mut Heap, id: BoxId, argv: Vec<Value>) -> Result<(Value, Vec<Value>), EvalError> {
+    pub(super) fn closure_frame(&self, heap: &mut Heap, id: BoxId, argv: Vec<Value>) -> Result<(Value, Vec<Value>), EvalError> {
         let (params, body, closure_env) = heap.closure_parts(id);
         let names = param_names(heap, params)?;
         if names.len() != argv.len() {
@@ -2193,13 +2193,13 @@ pub(super) fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Valu
 /// list: it is already a proper list of forms sitting in the node, so a
 /// closure can hold it directly with no allocation and no second copy to keep
 /// in step.
-fn tail_after(heap: &Heap, form: Value, n: usize) -> Result<Value, EvalError> {
+pub(super) fn tail_after(heap: &Heap, form: Value, n: usize) -> Result<Value, EvalError> {
     tail_after_value(heap, heap.cdr(form).map_err(heap_err)?, n)
 }
 
 /// [`tail_after`] over an already-taken tail — for a positional list (a
 /// `labels` definition) that has no tag to skip.
-fn tail_after_value(heap: &Heap, list: Value, n: usize) -> Result<Value, EvalError> {
+pub(super) fn tail_after_value(heap: &Heap, list: Value, n: usize) -> Result<Value, EvalError> {
     let mut cur = list;
     for _ in 0..n {
         cur = heap.cdr(cur).map_err(heap_err)?;
@@ -2372,7 +2372,7 @@ fn cell_value(heap: &Heap, cell: Value) -> Result<Value, EvalError> {
 }
 
 /// A heap failure (arena exhaustion) as an evaluation error.
-fn heap_err(e: typelisp_mem::Error) -> EvalError {
+pub(super) fn heap_err(e: typelisp_mem::Error) -> EvalError {
     EvalError::Internal(format!("eval: {}", e))
 }
 
@@ -2756,7 +2756,7 @@ fn repr_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Repr, Ev
 }
 
 /// A list of representations, e.g. one variant's field reprs.
-fn repr_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<Repr>, EvalError> {
+pub(super) fn repr_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<Repr>, EvalError> {
     let vs = heap
         .list_to_vec(list)
         .map_err(|e| EvalError::Internal(format!("exec: ({} ..) representation list: {}", what, e)))?;

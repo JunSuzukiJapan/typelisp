@@ -35,11 +35,12 @@
 use typelisp_mem::{Heap, SymRef, Value};
 
 use crate::check::core;
+use crate::check::repr::Repr;
 use crate::eval::value::EvalError;
 
 use super::core_eval::{
-    bool_field, construct_sexpr_core, env_lookup, extend_env, int_field, match_core_pattern, path_field, str_field,
-    sym_field, Op, Step,
+    bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, path_field,
+    repr_list, str_field, sym_field, tail_after, tail_after_value, Op, Step,
 };
 use super::{FnDef, Interp};
 
@@ -128,6 +129,10 @@ enum Frame {
     /// the one that just arrived, so all of them stay rooted until the call
     /// itself is made.
     Args { form: Value, done: Vec<Value>, env: Value, kind: ArgsKind },
+    /// `(apply E RET-R (R...) E...)` — waiting on the callee.
+    ApplyCallee { form: Value, env: Value },
+    /// `(apply E RET-R (R...) E...)` — waiting on one argument, callee in hand.
+    ApplyArgs { form: Value, callee: Value, done: Vec<Value>, env: Value },
     /// `(match E R (P E...) ...)` — waiting on the scrutinee. The first arm
     /// whose pattern matches wins.
     MatchArms { form: Value, env: Value },
@@ -204,7 +209,15 @@ impl CpsStack {
                 heap.push_root(*env);
             }
             Frame::Set { env, .. } => heap.push_root(*env),
-            Frame::MatchArms { form, env } | Frame::FieldSetObj { form, env } => {
+            Frame::ApplyArgs { form, callee, done, env } => {
+                heap.push_root(*form);
+                heap.push_root(*callee);
+                heap.push_root(*env);
+                for v in done {
+                    heap.push_root(*v);
+                }
+            }
+            Frame::ApplyCallee { form, env } | Frame::MatchArms { form, env } | Frame::FieldSetObj { form, env } => {
                 heap.push_root(*form);
                 heap.push_root(*env);
             }
@@ -335,6 +348,18 @@ fn arg_forms(heap: &Heap, form: Value, kind: ArgsKind) -> Result<Vec<Value>, Eva
         )));
     }
     Ok(fields[skip..].to_vec())
+}
+
+/// The argument forms of an `(apply E RET-R (R...) E...)` node.
+///
+/// Unlike the `Args` kinds, the callee is field 0 rather than part of the run,
+/// so this node needs its own pair of frames.
+fn apply_arg_forms(heap: &Heap, form: Value) -> Result<Vec<Value>, EvalError> {
+    let fields = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (apply ..): {}", e)))?;
+    if fields.len() < 3 {
+        return Err(EvalError::Internal(format!("eval: malformed apply: {}", core::print(heap, form))));
+    }
+    Ok(fields[3..].to_vec())
 }
 
 /// A `let` binding's name and initialiser.
@@ -522,6 +547,72 @@ impl Interp {
             Op::Construct => self.start_args(heap, stack, form, env, ArgsKind::Construct),
             Op::Assoc => self.start_args(heap, stack, form, env, ArgsKind::Assoc),
             Op::DynCall => self.start_args(heap, stack, form, env, ArgsKind::DynCall),
+
+            // `labels` evaluates nothing of its own: the closures are built
+            // and bound, and only the body runs. Two passes, because the
+            // siblings have to see each other — placeholders first, then each
+            // closure written through its cell over the environment that
+            // already names them all.
+            Op::Apply => {
+                let callee = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no callee".to_string()))?;
+                stack.push(heap, Frame::ApplyCallee { form, env });
+                Ok(State::Eval(callee, env))
+            }
+
+            Op::Labels => {
+                let defs = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (labels ..) has no definitions".to_string()))?;
+                let defs = heap
+                    .list_to_vec(defs)
+                    .map_err(|e| EvalError::Internal(format!("eval: (labels ..) definitions: {}", e)))?;
+
+                let names = |heap: &Heap, d: Value| match heap.car(d) {
+                    Ok(Value::Symbol(sym)) => Ok(sym),
+                    other => Err(EvalError::Internal(format!("eval: (labels ..) definition names {:?}", other))),
+                };
+                let placeholders: Vec<(SymRef, Value)> = defs
+                    .iter()
+                    .map(|d| names(heap, *d).map(|sym| (sym, Value::Empty)))
+                    .collect::<Result<_, _>>()?;
+
+                // The environment is rooted while the closures are built:
+                // `alloc_closure` allocates, and nothing else refers to it
+                // yet. The root goes above whatever frames are open, and comes
+                // off before the body starts.
+                let base = heap.root_count();
+                let inner = extend_env(heap, &placeholders, env)?;
+                heap.push_root(inner);
+                for d in &defs {
+                    // A definition is `(SYM PARAMS RET-R E...)` — positional,
+                    // like a `let` binding and unlike a tagged node.
+                    let sym = names(heap, *d)?;
+                    let rest = heap.cdr(*d).map_err(heap_err)?;
+                    let params = heap.car(rest).map_err(heap_err)?;
+                    let ret = heap.cdr(rest).and_then(|d| heap.car(d)).map_err(heap_err)?;
+                    let body = tail_after_value(heap, rest, 2)?;
+                    let f = heap.alloc_closure(params, ret, body, inner);
+                    let cell = env_lookup(heap, inner, sym).ok_or_else(|| {
+                        EvalError::Internal(format!("eval: (labels ..) lost the slot for `{}`", heap.symbol_name(sym)))
+                    })?;
+                    match cell {
+                        Value::Boxed(id) if heap.is_cell(id) => heap.cell_set(id, f),
+                        other => {
+                            return Err(EvalError::Internal(format!("eval: (labels ..) slot is {:?}", other)))
+                        }
+                    }
+                }
+                let body = tail_after(heap, form, 1)?;
+                heap.truncate_roots(base);
+                // Nothing allocates from here: `sequence_state` only walks
+                // conses, so `inner` survives in a Rust local until the state
+                // slots take it.
+                let (next, pushed) = sequence_state(heap, body, inner)?;
+                if let Some(f) = pushed {
+                    stack.push(heap, f);
+                }
+                Ok(next)
+            }
 
             Op::Match => {
                 let scrut = core::field(heap, form, 0)
@@ -729,6 +820,94 @@ impl Interp {
         Err(EvalError::NoSuchFunction(path.to_string()))
     }
 
+    /// The callee and every argument of an `apply` are in hand.
+    ///
+    /// Four kinds of callee: an interpreted closure (entered as a tail jump,
+    /// so a self-call in tail position costs no stack), one that came *out* of
+    /// compiled code (crossed on the Rust stack — the boundary is one frame
+    /// and nothing suspends inside it), a built-in used as a function value,
+    /// or something the checker should have rejected.
+    fn finish_apply(
+        &self,
+        heap: &mut Heap,
+        form: Value,
+        f: Value,
+        argv: Vec<Value>,
+    ) -> Result<(State, Option<Frame>), EvalError> {
+        let fields = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (apply ..): {}", e)))?;
+        if fields.len() < 3 {
+            return Err(EvalError::Internal(format!("eval: malformed apply: {}", core::print(heap, form))));
+        }
+        let ret_repr_field = fields[1];
+        let arg_reprs_field = fields[2];
+
+        let id = match f {
+            Value::Boxed(id) if heap.is_closure(id) => id,
+
+            // Its arguments cross the boundary and its result comes back, both
+            // driven by the declared representations this node carries.
+            Value::Boxed(id) if heap.is_compiled_closure(id) => {
+                let arg_reprs = repr_list(heap, arg_reprs_field, "apply")?;
+                let ret = Repr::read(heap, ret_repr_field)
+                    .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no return representation".to_string()))?;
+                let (int_args, crossing_roots) = self.encode_crossing_args(heap, &argv, &arg_reprs, false)?;
+                self.enter_compiled(heap);
+                // An unwinding `(panic ...)` inside the closure runs none of
+                // the pops below and leaves whatever roots the compiled body
+                // pushed; the caller's `truncate_roots` past this frame is the
+                // repair.
+                let raw = crate::eval::crossing::catch_compiled_panic(|| Interp::call_closure_box(heap, id, &int_args))?;
+                for _ in 0..crossing_roots {
+                    heap.pop_root();
+                }
+                let v = self.decode_compiled_return(heap, raw, &ret)?;
+                return Ok((State::Apply(v), None));
+            }
+
+            // A built-in used as a function value — dispatched by name through
+            // the very same `eval_builtin`/`eval_builtin_method` a direct call
+            // site goes through; the box carries only which name.
+            Value::Boxed(id) if heap.is_builtin_fn(id) => {
+                let name = heap.builtin_fn_name(id).to_string();
+                let v = match heap.builtin_fn_recv(id) {
+                    None => match self.eval_builtin(heap, &name, &argv) {
+                        Some(r) => r?,
+                        None => return Err(EvalError::NoSuchFunction(name)),
+                    },
+                    Some(pid) => {
+                        let type_name = crate::types::path_from_id(heap, pid);
+                        let ret_key = heap.builtin_fn_ret_key(id).to_string();
+                        match super::eval_builtin_method(heap, &type_name, &name, &argv, &ret_key) {
+                            Some(r) => r?,
+                            None => {
+                                return Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, name)))
+                            }
+                        }
+                    }
+                };
+                return Ok((State::Apply(v), None));
+            }
+
+            other => {
+                return Err(EvalError::Internal(format!(
+                    "eval: (apply ..) callee is not a function: {:?}",
+                    other
+                )))
+            }
+        };
+
+        // The call environment extends the environment the closure *captured*,
+        // not the caller's: that is what makes this lexical scope rather than
+        // dynamic. `closure_frame` roots it on the heap.
+        let base = heap.root_count();
+        let (call_env, body) = self.closure_frame(heap, id, argv)?;
+        let body = core::list(heap, &body)
+            .map_err(|e| EvalError::Internal(format!("eval: (apply ..) body: {}", e)))?;
+        heap.truncate_roots(base);
+        // Nothing allocates from here: `sequence_state` only walks conses.
+        sequence_state(heap, body, call_env)
+    }
+
     /// `(construct PATH KEY VARIANT MUTABLE (R...) ARG...)` — a struct, enum
     /// variant or `Sexpr` constructor.
     fn finish_construct(
@@ -901,6 +1080,31 @@ impl Interp {
             // Only the last form of a sequence contributes a value, so this
             // one is discarded.
             Frame::Seq { rest, env } => sequence_state(heap, rest, env),
+
+            // An unnamed callee — `((make-adder 1) 2)` — has no binding
+            // keeping its box alive while the arguments allocate, so the
+            // frame roots it.
+            Frame::ApplyCallee { form, env } => {
+                let args = apply_arg_forms(heap, form)?;
+                match args.first() {
+                    Some(&first) => Ok((
+                        State::Eval(first, env),
+                        Some(Frame::ApplyArgs { form, callee: v, done: Vec::new(), env }),
+                    )),
+                    None => self.finish_apply(heap, form, v, Vec::new()),
+                }
+            }
+            Frame::ApplyArgs { form, callee, mut done, env } => {
+                done.push(v);
+                let args = apply_arg_forms(heap, form)?;
+                match args.get(done.len()) {
+                    Some(&next) => Ok((
+                        State::Eval(next, env),
+                        Some(Frame::ApplyArgs { form, callee, done, env }),
+                    )),
+                    None => self.finish_apply(heap, form, callee, done),
+                }
+            }
 
             // The scrutinee is rooted through the state slots for the whole
             // search, which matters because matching a `Sexpr` path pattern
@@ -1079,6 +1283,8 @@ impl Interp {
             | Frame::ReturnFrom { .. }
             | Frame::Throw { .. }
             | Frame::Args { .. }
+            | Frame::ApplyCallee { .. }
+            | Frame::ApplyArgs { .. }
             | Frame::MatchArms { .. }
             | Frame::FieldSetObj { .. }
             | Frame::FieldSetVal { .. }
@@ -1410,6 +1616,118 @@ mod tests {
         assert_eq!(agrees(&mut h, src), Value::Int(6));
     }
 
+    // ---- labels / apply --------------------------------------------------
+
+    #[test]
+    fn a_lambda_is_applied_to_its_arguments() {
+        let mut h = stress_heap();
+        let src = "(apply (lambda ((x int-any-width)) int-any-width (var x)) int-any-width \
+                     (int-any-width) (int-any-width 5))";
+        assert_eq!(agrees(&mut h, src), Value::Int(5));
+        assert_eq!(
+            agrees(&mut h, "(apply (lambda () int-any-width (int-any-width 7)) int-any-width ())"),
+            Value::Int(7)
+        );
+    }
+
+    /// A closure sees what it captured, not what the caller has bound.
+    #[test]
+    fn a_closure_captures_its_defining_environment() {
+        let mut h = stress_heap();
+        let src = "(let ((n int-any-width (int-any-width 3)))
+                     (apply (lambda () int-any-width (var n)) int-any-width ()))";
+        assert_eq!(agrees(&mut h, src), Value::Int(3));
+    }
+
+    /// `labels` siblings see each other — the placeholder pass is what makes
+    /// mutual recursion work.
+    #[test]
+    fn labels_siblings_can_call_each_other() {
+        let mut h = stress_heap();
+        let src = "(labels ((f ((x int-any-width)) int-any-width \
+                              (apply (var g) int-any-width (int-any-width) (var x))) \
+                            (g ((y int-any-width)) int-any-width (var y))) \
+                     (apply (var f) int-any-width (int-any-width) (int-any-width 3)))";
+        assert_eq!(agrees(&mut h, src), Value::Int(3));
+    }
+
+    /// A builtin used as a function value goes through the same dispatch a
+    /// direct call site does — the `fnref` box carries only which name.
+    #[test]
+    fn a_builtin_can_be_applied_as_a_value() {
+        let mut h = stress_heap();
+        let src = "(apply (fnref (sexpr-cons) () sexpr-cons) sexpr (sexpr sexpr) \
+                     (int-any-width 1) (int-any-width 2))";
+        let v = agrees(&mut h, src);
+        assert_eq!(h.car(v).unwrap(), Value::Int(1));
+        assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
+    }
+
+    // ---- the point of the whole rewrite ----------------------------------
+
+    /// Builds `(cons 1 (cons 1 ... (cons 1 ())))` by recursion that is **not**
+    /// in tail position: each call has to come back to cons its result.
+    ///
+    /// In the recursive evaluator every one of those pending calls is a live
+    /// Rust frame. **Measured**: the same form through `eval_core` aborts with
+    /// `fatal runtime error: stack overflow` at this depth — with the default
+    /// test stack *and* with `RUST_MIN_STACK=32MB`, the value
+    /// `scripts/test-serial.sh` sets. Here the pending calls are frames on a
+    /// `Vec` and the Rust stack stays flat, which is the property a task needs
+    /// in order to be suspended at all.
+    ///
+    /// No `gc_stress`: the point is depth, and collecting at every one of the
+    /// allocations below would make this quadratic.
+    #[test]
+    fn deep_non_tail_recursion_does_not_touch_the_rust_stack() {
+        const DEPTH: i64 = 20_000;
+        let mut h = Heap::with_capacity(1 << 20);
+
+        let src = format!(
+            "(labels ((build ((n int-any-width)) sexpr
+                        (if (call (sexpr-null) () sexpr-null (sexpr) (var n))
+                            (unit)
+                            (call (sexpr-cons) () sexpr-cons (sexpr sexpr)
+                              (int-any-width 1)
+                              (apply (var build) sexpr (sexpr)
+                                (call (sexpr-cdr) () sexpr-cdr (sexpr) (var n)))))))
+               (apply (var build) sexpr (sexpr) (var xs)))"
+        );
+
+        // `xs` is a list of DEPTH elements, built on the Rust side so the
+        // source stays small.
+        let mut xs = Value::Empty;
+        h.push_root(xs);
+        for _ in 0..DEPTH {
+            xs = h.cons(Value::Int(0), xs).expect("heap exhausted building the input");
+            h.set_root(0, xs);
+        }
+        let sym = match h.intern_symbol("xs") {
+            Value::Symbol(id) => id,
+            _ => unreachable!(),
+        };
+        let env = extend_env(&mut h, &[(sym, xs)], Value::Empty).expect("could not build the environment");
+        h.push_root(env);
+
+        let form = read1(&mut h, &src);
+        h.push_root(form);
+
+        let interp = Interp::new();
+        let v = interp
+            .eval_cps(&mut h, form, env)
+            .expect("deep non-tail recursion failed");
+
+        // The result is a list of DEPTH ones.
+        let mut n = 0i64;
+        let mut cur = v;
+        while !matches!(cur, Value::Empty) {
+            assert_eq!(h.car(cur).unwrap(), Value::Int(1));
+            cur = h.cdr(cur).unwrap();
+            n += 1;
+        }
+        assert_eq!(n, DEPTH, "the rebuilt list is the wrong length");
+    }
+
     // ---- match -----------------------------------------------------------
 
     #[test]
@@ -1736,6 +2054,6 @@ mod tests {
     #[should_panic(expected = "has not moved to the continuation stack yet")]
     fn an_op_that_has_not_moved_says_so() {
         let mut h = stress_heap();
-        let _ = eval_src(&mut h, "(labels () (int-any-width 1))");
+        let _ = eval_src(&mut h, "(step (int-any-width 1))");
     }
 }
