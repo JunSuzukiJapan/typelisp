@@ -2116,6 +2116,35 @@ pub fn llvm_builder_def() -> AdtDef {
         "build-slot-ptr".to_string(),
         assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
     );
+    // The frame under construction (Phase C1). A function's locals live in a
+    // `BoxedObj::Frame`, and two things about it cannot be held in the island:
+    // a slot counter, and the frame's size — which is only known once the body
+    // has been emitted, since the body is what allocates the slots.
+    //
+    // All four are keyed on the *builder*, which is one-to-one with the
+    // function being built (each of `compile-function`/`compile-lambda`/
+    // `compile-labels-bodies` makes its own). That is why none of the island's
+    // signatures grows an argument to carry the frame around — `compile-value`
+    // already has 16, and this phase exists partly to shorten that list.
+    //
+    // `frame-begin` emits the prologue and hands back the tagged frame (the
+    // island roots it); `frame-slot` and `frame-slot-rooted` carve out the
+    // next slot, the second marking it for the collector; `frame-end` writes
+    // the final count into the prologue's placeholder. The count is therefore
+    // by construction the number of slots handed out — there is no separate
+    // counting pass to drift from the emitting one.
+    //
+    // `frame-end` returns `()` rather than the count: the island has no use
+    // for it, and `rt_llvm_call` marshals only handles, `()`, `bool` and
+    // `string` back from an `llvm-*` builtin (`llvm_ret_kind`). Tests read the
+    // count from the frame itself, which is the number that matters.
+    assoc.insert("frame-begin".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], llvm_value_ty(), true));
+    assoc.insert("frame-slot".to_string(), assoc_fn(vec![llvm_builder_ty()], llvm_value_ty(), true));
+    assoc.insert(
+        "frame-slot-rooted".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], llvm_value_ty(), true),
+    );
+    assoc.insert("frame-end".to_string(), assoc_fn(vec![llvm_builder_ty()], Type::Unit, true));
     // `build-icmp-lt`/`-le`/`-gt`/`-ge`/`-eq`/`-ne`: `i64` comparisons —
     // `compiler.rs`'s `compile-assoc` dispatches `<`/`<=`/`>`/`>=`/(`=`,`eq`)/`/=`
     // to these (`if`/comparisons work, labels/closures Stage 5). Each widens

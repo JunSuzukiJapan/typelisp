@@ -39,7 +39,7 @@ use std::rc::Rc;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::module::Module;
-use inkwell::values::{BasicValueEnum, FunctionValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, InstructionValue, PointerValue};
 use inkwell::AddressSpace;
 
 use typelisp_mem::{Heap, Value};
@@ -129,6 +129,10 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "build-closure-apply" => Some(llvm_builder_build_closure_apply(args)),
             "load-raw" => Some(llvm_builder_load_raw(args)),
             "build-slot-ptr" => Some(llvm_builder_build_slot_ptr(args)),
+            "frame-begin" => Some(llvm_builder_frame_begin(args)),
+            "frame-slot" => Some(llvm_builder_frame_slot(args)),
+            "frame-slot-rooted" => Some(llvm_builder_frame_slot_rooted(args)),
+            "frame-end" => Some(llvm_builder_frame_end(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
             "build-icmp-gt" => Some(llvm_builder_build_icmp(args, "icmp_gt", inkwell::IntPredicate::SGT)),
@@ -733,6 +737,204 @@ fn llvm_builder_build_slot_ptr(args: &[Value]) -> Result<Value, EvalError> {
             .map_err(|e| EvalError::Internal(format!("build-slot-ptr: {}", e)))?
     };
     Ok(llvm_value_value(elem_ptr.into()))
+}
+
+// ---- the frame under construction ---------------------------------------
+//
+// Phase C1. Locals move off the machine stack into a `BoxedObj::Frame`, and
+// that needs two things the island cannot hold: a slot counter, and the
+// frame's size — which is not known until the body has been emitted, because
+// the body is what allocates the slots.
+//
+// **The builder is the key.** Each of the three places that builds a function
+// (`compile-function`, `compile-lambda`, `compile-labels-bodies`) creates its
+// own `llvm-builder::create`, so a builder is one-to-one with the function
+// under construction. Keying this state on it is why none of the island's 56
+// signatures grows an argument — `compile-value` already carries 16, and this
+// phase is supposed to shorten that list, not lengthen it.
+//
+// This is the same division `alloca-args` already draws: the island decides
+// *which* binding needs storage and when, Rust knows *where* the storage is.
+
+/// The frame being built for one function, keyed by its builder.
+struct FrameCtx {
+    /// The tagged frame, for `rt_frame_mask_bit`.
+    frame: BasicValueEnum<'static>,
+    /// The address of its word array, to GEP slots out of.
+    data: PointerValue<'static>,
+    /// The `store` holding the slot count `rt_frame_new` reads. Its value
+    /// operand starts at zero and is replaced by [`llvm_builder_frame_end`]
+    /// once the true count is known.
+    size_store: InstructionValue<'static>,
+    /// How many slots have been handed out.
+    next: u64,
+}
+
+thread_local! {
+    /// Keyed by `Rc::as_ptr` of the builder. An entry lives from `frame-begin`
+    /// to `frame-end`, which is exactly one function's construction; the three
+    /// call sites each drop their builder afterwards, so nothing accumulates.
+    static FRAME_CTXS: RefCell<HashMap<usize, FrameCtx>> = RefCell::new(HashMap::new());
+}
+
+fn builder_key(b: &Rc<RefCell<Builder<'static>>>) -> usize {
+    Rc::as_ptr(b) as usize
+}
+
+/// `(frame-begin builder m)` — emit a function's frame prologue and return the
+/// tagged frame, which the caller must root.
+///
+/// The size passed to `rt_frame_new` is a placeholder zero. It cannot be
+/// anything else yet: the count is what the body turns out to need, and the
+/// body has not been emitted. [`llvm_builder_frame_end`] replaces it in place
+/// once it is known, so the count in the emitted IR is by construction the
+/// number of slots that were actually handed out — there is no second pass
+/// over the body to keep in agreement with the first.
+fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let ctx = crate::compile::llvm_context();
+    let i64t = ctx.i64_type();
+    let err = |what: &str, e: String| EvalError::Internal(format!("frame-begin: {}: {}", what, e));
+
+    let m = module.borrow();
+    let frame_new = m
+        .get_function("rt_frame_new")
+        .ok_or_else(|| EvalError::Internal("frame-begin: rt_frame_new is not declared in this module".to_string()))?;
+    let frame_data = m
+        .get_function("rt_frame_data")
+        .ok_or_else(|| EvalError::Internal("frame-begin: rt_frame_data is not declared in this module".to_string()))?;
+
+    let b = builder.borrow();
+    // rt_frame_new(&[0])
+    let size_args = b
+        .build_alloca(i64t.array_type(1), "frame_size_args")
+        .map_err(|e| err("alloca", e.to_string()))?;
+    let size_slot = unsafe {
+        b.build_gep(i64t, size_args, &[i64t.const_int(0, false)], "frame_size_slot")
+            .map_err(|e| err("gep", e.to_string()))?
+    };
+    let size_store = b
+        .build_store(size_slot, i64t.const_int(0, false))
+        .map_err(|e| err("store", e.to_string()))?;
+    let frame = match b
+        .build_call(frame_new, &[size_args.into(), ctx.i32_type().const_int(1, false).into()], "frame")
+        .map_err(|e| err("call rt_frame_new", e.to_string()))?
+        .try_as_basic_value()
+    {
+        inkwell::values::ValueKind::Basic(v) => v,
+        inkwell::values::ValueKind::Instruction(_) => {
+            return Err(EvalError::Internal("frame-begin: rt_frame_new returned no value".to_string()))
+        }
+    };
+
+    // rt_frame_data(&[frame])
+    let data_args = b
+        .build_alloca(i64t.array_type(1), "frame_data_args")
+        .map_err(|e| err("alloca", e.to_string()))?;
+    let data_slot = unsafe {
+        b.build_gep(i64t, data_args, &[i64t.const_int(0, false)], "frame_data_slot")
+            .map_err(|e| err("gep", e.to_string()))?
+    };
+    b.build_store(data_slot, frame).map_err(|e| err("store", e.to_string()))?;
+    let data_word = match b
+        .build_call(frame_data, &[data_args.into(), ctx.i32_type().const_int(1, false).into()], "frame_data")
+        .map_err(|e| err("call rt_frame_data", e.to_string()))?
+        .try_as_basic_value()
+    {
+        inkwell::values::ValueKind::Basic(v) => v,
+        inkwell::values::ValueKind::Instruction(_) => {
+            return Err(EvalError::Internal("frame-begin: rt_frame_data returned no value".to_string()))
+        }
+    };
+    let data = b
+        .build_int_to_ptr(data_word.into_int_value(), ctx.ptr_type(inkwell::AddressSpace::default()), "frame_ptr")
+        .map_err(|e| err("inttoptr", e.to_string()))?;
+
+    FRAME_CTXS.with(|c| {
+        c.borrow_mut().insert(builder_key(&builder), FrameCtx { frame, data, size_store, next: 0 });
+    });
+    Ok(llvm_value_value(frame))
+}
+
+/// `(frame-slot builder)` — the address of a fresh, **unmasked** frame slot.
+///
+/// Unmasked means the collector never reads it as a reference, which is what a
+/// raw `i32`/`f64` local needs (`Repr::class`'s non-collectable case).
+fn llvm_builder_frame_slot(args: &[Value]) -> Result<Value, EvalError> {
+    frame_slot_impl(args, false)
+}
+
+/// `(frame-slot-rooted builder m)` — the address of a fresh frame slot, marked
+/// so the collector traces it.
+///
+/// The `rt_frame_mask_bit` call this emits stands exactly where that binding's
+/// `rt_push_sexpr_root` used to, and there is no pop to match it: the slot is
+/// a root for as long as the frame lives, so no early exit can leave the root
+/// stack out of step.
+fn llvm_builder_frame_slot_rooted(args: &[Value]) -> Result<Value, EvalError> {
+    frame_slot_impl(args, true)
+}
+
+fn frame_slot_impl(args: &[Value], rooted: bool) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let ctx = crate::compile::llvm_context();
+    let i64t = ctx.i64_type();
+    let key = builder_key(&builder);
+
+    let (frame, data, idx) = FRAME_CTXS.with(|c| {
+        let mut map = c.borrow_mut();
+        let f = map
+            .get_mut(&key)
+            .ok_or_else(|| EvalError::Internal("frame-slot: no frame is open on this builder".to_string()))?;
+        let idx = f.next;
+        f.next += 1;
+        Ok::<_, EvalError>((f.frame, f.data, idx))
+    })?;
+
+    let b = builder.borrow();
+    if rooted {
+        let module = expect_llvm_module(&args[1])?;
+        let mask_fn = module
+            .borrow()
+            .get_function("rt_frame_mask_bit")
+            .ok_or_else(|| EvalError::Internal("frame-slot-rooted: rt_frame_mask_bit is not declared in this module".to_string()))?;
+        let err = |what: &str, e: String| EvalError::Internal(format!("frame-slot-rooted: {}: {}", what, e));
+        let mask_args = b.build_alloca(i64t.array_type(2), "mask_args").map_err(|e| err("alloca", e.to_string()))?;
+        let a0 = unsafe {
+            b.build_gep(i64t, mask_args, &[i64t.const_int(0, false)], "mask_a0").map_err(|e| err("gep", e.to_string()))?
+        };
+        b.build_store(a0, frame).map_err(|e| err("store", e.to_string()))?;
+        let a1 = unsafe {
+            b.build_gep(i64t, mask_args, &[i64t.const_int(1, false)], "mask_a1").map_err(|e| err("gep", e.to_string()))?
+        };
+        b.build_store(a1, i64t.const_int(idx, false)).map_err(|e| err("store", e.to_string()))?;
+        b.build_call(mask_fn, &[mask_args.into(), ctx.i32_type().const_int(2, false).into()], "")
+            .map_err(|e| err("call rt_frame_mask_bit", e.to_string()))?;
+    }
+    let elem_ptr = unsafe {
+        b.build_gep(i64t, data, &[i64t.const_int(idx, false)], "frame_slot")
+            .map_err(|e| EvalError::Internal(format!("frame-slot: gep: {}", e)))?
+    };
+    Ok(llvm_value_value(elem_ptr.into()))
+}
+
+/// `(frame-end builder)` — write the true slot count into the prologue and
+/// close the frame.
+fn llvm_builder_frame_end(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let ctx = crate::compile::llvm_context();
+    let key = builder_key(&builder);
+    FRAME_CTXS.with(|c| {
+        let f = c
+            .borrow_mut()
+            .remove(&key)
+            .ok_or_else(|| EvalError::Internal("frame-end: no frame is open on this builder".to_string()))?;
+        if !f.size_store.set_operand(0, ctx.i64_type().const_int(f.next, false)) {
+            return Err(EvalError::Internal("frame-end: could not write the slot count into the prologue".to_string()));
+        }
+        Ok(Value::Empty)
+    })
 }
 
 /// Shared by every `build-icmp-*` builtin (if/let/comparisons, labels/closures

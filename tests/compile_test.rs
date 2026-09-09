@@ -6793,6 +6793,73 @@ fn a_specialization_at_a_module_qualified_type_resolves() {
 /// machine stack and into a frame is a change of *where the slot lives* and
 /// nothing else.
 ///
+/// **The frame's size is written after the body decides it.**
+///
+/// `frame-begin` emits `rt_frame_new(0)` because the count cannot be known
+/// yet — the body is what allocates the slots. `frame-end` replaces that zero
+/// with the number actually handed out. This test is the proof that the
+/// placeholder really is patched: the function asks for three slots, and the
+/// frame the call leaves on the heap has three, not zero.
+///
+/// A zero here would not be a silent wrong answer for long — `frame_word`
+/// asserts the index is in range — but it would fail at the first local
+/// rather than at the mechanism, so this pins the mechanism itself.
+///
+/// The count is read back off the heap rather than returned by `frame-end`,
+/// which yields `()`: `rt_llvm_call` marshals only handles, `()`, `bool` and
+/// `string` back from an `llvm-*` builtin, and the island has no use for the
+/// number anyway.
+#[test]
+fn a_frames_size_is_patched_in_once_the_body_is_emitted() {
+    let src = r#"
+        (defun build-sized-frame-module () llvm-module
+          (let* ((m (llvm-module::create "mod"))
+                 (ignored-new (add-function m "rt_frame_new"))
+                 (ignored-data (add-function m "rt_frame_data"))
+                 (ignored-mask (add-function m "rt_frame_mask_bit"))
+                 (f (add-function m "sized_frame"))
+                 (b (append-block f "entry"))
+                 (builder (llvm-builder::create)))
+            (position-at-end builder b)
+            ;; Three slots: raw, collectable, raw. Only the middle is masked,
+            ;; so the mask has to track the index rather than the call order.
+            (let* ((ignored-frame (frame-begin builder m))
+                   (s0 (frame-slot builder))
+                   (s1 (frame-slot-rooted builder m))
+                   (s2 (frame-slot builder)))
+              (store-arg builder s0 0 (const-word builder 100))
+              (store-arg builder s1 0 (load-arg builder f 0))
+              (store-arg builder s2 0 (const-word builder 300))
+              (frame-end builder)
+              (build-ret builder (const-word builder 0)))
+            m))
+        (build-sized-frame-module)
+    "#;
+    let module = expect_llvm_module(eval_ok(src));
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let sized = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("sized_frame")
+            .expect("failed to look up the compiled `sized_frame` function")
+    };
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
+    let argv: [i64; 1] = [typelisp::encode(Value::Int(7))];
+    assert_eq!(unsafe { sized.call(argv.as_ptr(), argv.len() as u32) }, 0);
+
+    let id = typelisp::BoxId::from_u32(0);
+    assert!(heap.is_frame(id));
+    assert_eq!(heap.frame_len(id), 3, "and the frame on the heap has three — the placeholder was patched");
+    assert!(!heap.frame_mask_bit(id, 0) && heap.frame_mask_bit(id, 1) && !heap.frame_mask_bit(id, 2));
+    assert_eq!(heap.frame_word(id, 0), 100);
+    assert_eq!(typelisp::decode(heap.frame_word(id, 1)), Value::Int(7));
+    assert_eq!(heap.frame_word(id, 2), 300);
+}
+
 /// Built by hand, so the three `rt_*` shims are declared bodyless and resolved
 /// by LLVM's process-symbol lookup, and a `Heap` is registered active for the
 /// call because `rt_frame_new` allocates on it — the same idiom the closure
