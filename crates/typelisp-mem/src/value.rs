@@ -397,6 +397,45 @@ pub(crate) enum BoxedObj {
     /// exact raw word it stored (`rt_closure_env_get` re-encodes masked
     /// slots and unwraps unmasked ones).
     CompiledClosure { fn_ptr: usize, env: Vec<Value>, sexpr_mask: u64 },
+    /// A **compiled function's activation record** (Phase C): its locals, as
+    /// the tagged machine words compiled code loads and stores them as.
+    ///
+    /// The shape is [`CompiledClosure`]'s env with one difference that
+    /// decides everything else: `words` is `Vec<i64>`, not `Vec<Value>`.
+    /// Compiled code reaches a local through a raw pointer
+    /// (`Heap::frame_data_ptr`) and a plain `load`/`store` — that is what a
+    /// local *is* once the machine has it — so the storage has to be machine
+    /// words. A closure's env can afford `Vec<Value>` because it is converted
+    /// once, at the apply.
+    ///
+    /// `mask` says which slots hold a tagged value rather than a raw one, bit
+    /// `i` for slot `i` — but as a **`Vec<u64>` of bit words**, not
+    /// `sexpr_mask`'s single `u64`, so a frame is not capped at 64 slots.
+    /// The cap is not hypothetical: the island's own `compile-assoc` has 69
+    /// binding sites, and a frame slot is allocated per site (the faithful
+    /// translation of today's one-`alloca-args`-per-binding scheme, where
+    /// disjoint `match` arms each get their own stack slot too). One
+    /// function over the line on day one is enough to pay for a `Vec`.
+    ///
+    /// **Only masked slots are interpreted at all**: an unmasked slot holds
+    /// a raw `i32`/`f64` bit pattern whose low three bits mean nothing, and
+    /// reading it as a tag would invent a heap reference. A masked slot
+    /// still needs the tag checked — a `Sexpr`-repr local may hold a fixnum
+    /// — which is `tagged::references_heap`'s job.
+    ///
+    /// The mask starts empty and is filled in one bit at a time, at each
+    /// binding, by [`Heap::set_frame_mask_bit`]. That is not a concession to
+    /// the `Vec`: it is what lets the frame be allocated knowing only how
+    /// many slots the function needs, with no second pass over the body to
+    /// classify them first. It also costs nothing — the call that sets the
+    /// bit stands exactly where the `rt_push_sexpr_root` for that binding
+    /// used to.
+    ///
+    /// `pc` is where to resume: 0 on entry, and the id of a call site
+    /// afterwards. The frame is what makes a compiled call suspendable —
+    /// everything the function still needs is in here rather than on the
+    /// machine stack, so the driver can put it down and pick it up later.
+    Frame { words: Vec<i64>, mask: Vec<u64>, pc: u32 },
     /// An *interpreted* closure: a `lambda` or a `labels` sibling the
     /// evaluator walks rather than a native entry point it jumps to.
     ///

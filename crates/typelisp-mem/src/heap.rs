@@ -1345,6 +1345,138 @@ impl Heap {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::CompiledClosure { .. }))
     }
 
+    // ---- compiled frames --------------------------------------------------
+
+    /// Allocate a compiled function's activation record: `nslots` words, all
+    /// zero, and an all-clear mask. See [`BoxedObj::Frame`].
+    ///
+    /// **The mask is not an argument.** Which slots hold tagged values is
+    /// settled one binding at a time by
+    /// [`set_frame_mask_bit`](Self::set_frame_mask_bit), so allocating a
+    /// frame needs only the slot count — which the compiler knows from
+    /// counting binding sites, without classifying them. An all-clear mask
+    /// is also the safe starting point: a slot nothing has bound yet is not
+    /// traced, and cannot be mistaken for a reference.
+    ///
+    /// Zero, not `Value::Empty`'s encoding: an unmasked slot is a raw word and
+    /// zero is a fine raw word, while a masked slot reads as `TAG_FIXNUM` 0
+    /// until the prologue writes it — a fixnum references nothing, so a
+    /// collection between the allocation and the first store traces nothing
+    /// bogus.
+    ///
+    /// Like [`alloc_cell`](Self::alloc_cell), never itself triggers a
+    /// collection.
+    pub fn alloc_frame(&mut self, nslots: usize) -> Value {
+        let words = (nslots + 63) / 64;
+        self.alloc_boxed(BoxedObj::Frame { words: vec![0; nslots], mask: vec![0; words], pc: 0 })
+    }
+
+    /// True if `id` holds a [`BoxedObj::Frame`].
+    pub fn is_frame(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Frame { .. }))
+    }
+
+    /// The address of a frame's word array, for compiled code to load and
+    /// store its locals through.
+    ///
+    /// # Stability
+    ///
+    /// The address stays valid for as long as the frame is *live*. Growing
+    /// `box_slots` moves the `BoxedObj` but not the `Vec`'s buffer, and the
+    /// sweep writes `None` in place rather than compacting — so the only way
+    /// to invalidate this pointer is to let the frame be collected, which is
+    /// the caller's job to prevent by keeping it reachable (the task's stack
+    /// does).
+    ///
+    /// Panics if `id` does not hold a frame — the compiler's own bookkeeping,
+    /// so an internal invariant.
+    pub fn frame_data_ptr(&mut self, id: BoxId) -> *mut i64 {
+        match &mut self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Frame { words, .. }) => words.as_mut_ptr(),
+            _ => panic!("BoxId does not hold a Frame"),
+        }
+    }
+
+    /// How many slots a frame holds. Panics like [`frame_data_ptr`](Self::frame_data_ptr).
+    pub fn frame_len(&self, id: BoxId) -> usize {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Frame { words, .. }) => words.len(),
+            _ => panic!("BoxId does not hold a Frame"),
+        }
+    }
+
+    /// One slot, as the raw word it is stored as. Panics like
+    /// [`frame_data_ptr`](Self::frame_data_ptr), and on an out-of-range slot —
+    /// the compiler's layout guarantee makes that an internal invariant too.
+    pub fn frame_word(&self, id: BoxId, idx: usize) -> i64 {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Frame { words, .. }) => {
+                *words.get(idx).unwrap_or_else(|| panic!("frame slot {} out of range", idx))
+            }
+            _ => panic!("BoxId does not hold a Frame"),
+        }
+    }
+
+    /// Writes one slot. Panics like [`frame_word`](Self::frame_word).
+    pub fn set_frame_word(&mut self, id: BoxId, idx: usize, w: i64) {
+        match &mut self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Frame { words, .. }) => match words.get_mut(idx) {
+                Some(slot) => *slot = w,
+                None => panic!("frame slot {} out of range", idx),
+            },
+            _ => panic!("BoxId does not hold a Frame"),
+        }
+    }
+
+    /// Whether slot `idx` holds a tagged value the collector should trace.
+    /// Panics like [`frame_word`](Self::frame_word).
+    pub fn frame_mask_bit(&self, id: BoxId, idx: usize) -> bool {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Frame { words, mask, .. }) => {
+                assert!(idx < words.len(), "frame slot {} out of range", idx);
+                mask[idx / 64] & (1u64 << (idx % 64)) != 0
+            }
+            _ => panic!("BoxId does not hold a Frame"),
+        }
+    }
+
+    /// Marks slot `idx` as holding a tagged value, so the collector traces
+    /// it from here on. Called once per collectable binding, where that
+    /// binding's `rt_push_sexpr_root` used to stand.
+    ///
+    /// There is deliberately no way to *clear* a bit. A slot belongs to one
+    /// binding for the whole activation — the compiler gives each binding
+    /// site its own slot rather than reusing one across disjoint scopes —
+    /// so a bit that could be cleared would mean a slot whose kind changes
+    /// under it, and then neither setting nor clearing is safe at the right
+    /// moment. Panics like [`frame_word`](Self::frame_word).
+    pub fn set_frame_mask_bit(&mut self, id: BoxId, idx: usize) {
+        match &mut self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Frame { words, mask, .. }) => {
+                assert!(idx < words.len(), "frame slot {} out of range", idx);
+                mask[idx / 64] |= 1u64 << (idx % 64);
+            }
+            _ => panic!("BoxId does not hold a Frame"),
+        }
+    }
+
+    /// Where the function resumes: 0 on entry, a call site's id afterwards.
+    /// Panics like [`frame_word`](Self::frame_word).
+    pub fn frame_pc(&self, id: BoxId) -> u32 {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Frame { pc, .. }) => *pc,
+            _ => panic!("BoxId does not hold a Frame"),
+        }
+    }
+
+    /// Sets the resume point. Panics like [`frame_word`](Self::frame_word).
+    pub fn set_frame_pc(&mut self, id: BoxId, pc: u32) {
+        match &mut self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Frame { pc: slot, .. }) => *slot = pc,
+            _ => panic!("BoxId does not hold a Frame"),
+        }
+    }
+
     /// Store an *interpreted* closure — parameter list, return
     /// representation, body, and captured environment, all core forms and all
     /// `Value` — returning its `Value::Boxed`. See [`BoxedObj::Closure`].
@@ -2057,6 +2189,19 @@ impl Heap {
             BoxedObj::CompiledClosure { env, .. } => {
                 for &v in env {
                     stack.push(v);
+                }
+            }
+            // Two filters, both needed. `mask` says the slot holds a *tagged*
+            // word at all — an unmasked slot is a raw `i32`/`f64` bit pattern
+            // whose low three bits are not a tag, and reading one as a tag
+            // would invent a heap reference out of arithmetic. The tag test
+            // then says whether that tagged word points at anything: a
+            // `Sexpr`-repr local legitimately holds fixnums and immediates.
+            BoxedObj::Frame { words, mask, .. } => {
+                for (i, &w) in words.iter().enumerate() {
+                    if mask[i / 64] & (1u64 << (i % 64)) != 0 && crate::tagged::references_heap(w) {
+                        stack.push(crate::tagged::decode(w));
+                    }
                 }
             }
         }

@@ -128,6 +128,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "build-make-closure" => Some(llvm_builder_build_make_closure(args)),
             "build-closure-apply" => Some(llvm_builder_build_closure_apply(args)),
             "load-raw" => Some(llvm_builder_load_raw(args)),
+            "build-slot-ptr" => Some(llvm_builder_build_slot_ptr(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
             "build-icmp-gt" => Some(llvm_builder_build_icmp(args, "icmp_gt", inkwell::IntPredicate::SGT)),
@@ -705,6 +706,33 @@ fn llvm_builder_load_raw(args: &[Value]) -> Result<Value, EvalError> {
     };
     let loaded = b.build_load(ctx.i64_type(), elem_ptr, "load_raw_val").map_err(|e| EvalError::Internal(format!("load-raw: {}", e)))?;
     Ok(llvm_value_value(loaded))
+}
+
+/// [`llvm_builder_load_raw`]'s GEP without the load: the *address* of one
+/// word in an `i64` array.
+///
+/// A compiled frame is an `i64` array (`BoxedObj::Frame`), and a local is one
+/// word in it. Everything that already handles a local —
+/// `resolve-value`/`compile-set`/`retain-bindings` — speaks in pointers,
+/// because a local has been a 1-element `alloca-args` slot since `setf` and
+/// loop re-entry needed somewhere to write. So carving the slot out of a frame
+/// instead of allocating it on the machine stack is the whole change, and this
+/// is the one primitive it needs.
+fn llvm_builder_build_slot_ptr(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let array_ptr = expect_llvm_value(&args[1])?.into_pointer_value();
+    let index = match &args[2] {
+        Value::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let ctx = crate::compile::llvm_context();
+    let idx_val = ctx.i64_type().const_int(index, false);
+    let b = builder.borrow();
+    let elem_ptr = unsafe {
+        b.build_gep(ctx.i64_type(), array_ptr, &[idx_val], "slot_ptr")
+            .map_err(|e| EvalError::Internal(format!("build-slot-ptr: {}", e)))?
+    };
+    Ok(llvm_value_value(elem_ptr.into()))
 }
 
 /// Shared by every `build-icmp-*` builtin (if/let/comparisons, labels/closures

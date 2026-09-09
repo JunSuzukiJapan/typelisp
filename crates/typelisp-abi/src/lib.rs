@@ -24,7 +24,7 @@ pub mod dribble;
 
 use std::cell::Cell;
 
-use typelisp_mem::{BoxId, ConsRef, Heap, PathId, StrId, SymRef, Value};
+use typelisp_mem::{Heap, Value};
 
 
 // The `Heap` every other `rt_*` function in this crate (from Stage 3
@@ -78,35 +78,6 @@ pub unsafe fn active_heap() -> &'static mut Heap {
     debug_assert!(!ptr.is_null(), "rt_* function called with no active Heap registered on this thread");
     &mut *ptr
 }
-
-const TAG_BITS: i64 = 3;
-const TAG_MASK: i64 = 0b111;
-
-// Stage 2's tag table (`docs/dev/implementation-log.md, "Sexpr表現 + Match/Construct/共有Rustライブラリ 実装計画"`): 8 tags in the low 3 bits. `Nil`/
-// `Bool` share one "immediate constant" tag (`TAG_IMMEDIATE`) since `Value`
-// has 9 variants but only 8 tag slots — see that doc for the full rationale
-// (why this needs no more than 3 bits, the alignment argument for `Cons`
-// pointers, etc.). `TAG_BOXED` (formerly `TAG_FLOAT`, reclaimed by the
-// `Sexpr`/`RtValue` unification plan — see `BoxedObj`'s doc comment in
-// `typelisp-mem`): `Value::Float` used to claim this tag directly and was
-// never actually representable in compiled code (`encode`/`decode` both
-// `fatal()`ed on it); an `f64` doesn't fit losslessly in the remaining bits
-// alongside a tag anyway, so this tag now means "payload is a `BoxId` into
-// the heap's boxed-object store" instead of trying to pack an immediate
-// float — `Float` is that store's first occupant, with more (structs,
-// closures, `HashTable<K,V>`, `Scope<V>`) planned to follow.
-const TAG_FIXNUM: i64 = 0b000;
-const TAG_CONS: i64 = 0b001;
-const TAG_SYMBOL: i64 = 0b010;
-const TAG_STR: i64 = 0b011;
-const TAG_CHAR: i64 = 0b100;
-const TAG_PATH: i64 = 0b101;
-const TAG_IMMEDIATE: i64 = 0b110;
-const TAG_BOXED: i64 = 0b111;
-
-const IMMEDIATE_NIL: i64 = 0;
-const IMMEDIATE_FALSE: i64 = 1;
-const IMMEDIATE_TRUE: i64 = 2;
 
 /// Prints `msg` to stderr and aborts the process — how an `rt_*` function
 /// fails when the *runtime itself* has been violated.
@@ -234,61 +205,14 @@ pub fn unwind_interpreted_error() -> ! {
 }
 
 
-/// Encodes a `Value` into the tagged `i64` representation compiled code
-/// uses for a `Sexpr`. `Value::Boxed` needs no allocation here — unlike a
-/// hypothetical unboxed `Float` payload, a `BoxId` is already just a small
-/// integer index, exactly like `Symbol`/`Str`/`Path`; the caller must have
-/// already allocated the box (via e.g. `Heap::alloc_f64`) the same way a
-/// `Value::Cons` must already be a live heap cell before reaching this
-/// function.
+/// The tagged-`i64` representation compiled code uses for a `Value`.
 ///
-/// `pub`, not `pub(crate)`: Stage 5's `Expr::Call` dispatch
-/// (`typelisp::eval::Interp::eval`) needs this same encoding from the
-/// `typelisp` crate, to marshal a `Sexpr`-typed argument/return value
-/// across the typelisp-call-syntax boundary into a compiled function — the
-/// same tagging scheme every `rt_*` function below already uses, so
-/// re-deriving it on the other side of the crate boundary would just be
-/// duplicated, easy-to-desync logic.
-pub fn encode(v: Value) -> i64 {
-    match v {
-        Value::Int(n) => (n << TAG_BITS) | TAG_FIXNUM,
-        Value::Cons(c) => (c.addr() as i64) | TAG_CONS,
-        // The address itself, `Cons`-style: a `Symbol` header is 8-byte
-        // aligned, so the low 3 bits are the tag's to use.
-        Value::Symbol(s) => (s.addr() as i64) | TAG_SYMBOL,
-        Value::Str(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_STR,
-        Value::Char(c) => ((c as i64) << TAG_BITS) | TAG_CHAR,
-        Value::Path(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_PATH,
-        Value::Empty => (IMMEDIATE_NIL << TAG_BITS) | TAG_IMMEDIATE,
-        Value::Bool(false) => (IMMEDIATE_FALSE << TAG_BITS) | TAG_IMMEDIATE,
-        Value::Bool(true) => (IMMEDIATE_TRUE << TAG_BITS) | TAG_IMMEDIATE,
-        Value::Boxed(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_BOXED,
-    }
-}
-
-/// The inverse of [`encode`]. `pub` for the same cross-crate reason — see
-/// [`encode`]'s doc comment.
-pub fn decode(tagged: i64) -> Value {
-    match tagged & TAG_MASK {
-        TAG_FIXNUM => Value::Int(tagged >> TAG_BITS),
-        TAG_CONS => Value::Cons(unsafe { ConsRef::from_addr((tagged & !TAG_MASK) as usize) }),
-        TAG_SYMBOL => Value::Symbol(unsafe { SymRef::from_addr((tagged & !TAG_MASK) as usize) }),
-        TAG_STR => Value::Str(StrId::from_u32((tagged >> TAG_BITS) as u32)),
-        TAG_CHAR => {
-            let scalar = (tagged >> TAG_BITS) as u32;
-            Value::Char(char::from_u32(scalar).unwrap_or_else(|| fatal("decode: invalid char scalar value")))
-        }
-        TAG_PATH => Value::Path(PathId::from_u32((tagged >> TAG_BITS) as u32)),
-        TAG_IMMEDIATE => match tagged >> TAG_BITS {
-            IMMEDIATE_NIL => Value::Empty,
-            IMMEDIATE_FALSE => Value::Bool(false),
-            IMMEDIATE_TRUE => Value::Bool(true),
-            other => fatal(&format!("decode: unknown immediate tag payload {}", other)),
-        },
-        TAG_BOXED => Value::Boxed(BoxId::from_u32((tagged >> TAG_BITS) as u32)),
-        _ => unreachable!("a 3-bit mask is always one of the 8 arms above"),
-    }
-}
+/// **Defined in `typelisp-mem`** ([`typelisp_mem::tagged`]) and re-exported
+/// here, where every caller has always named it. It moved down for the
+/// compiled-CPS work: a compiled frame holds tagged *words* rather than
+/// `Value`s, so the collector — which lives in `typelisp-mem`, below this
+/// crate — has to be able to decode them.
+pub use typelisp_mem::tagged::{decode, encode};
 
 /// Decodes one tagged argument.
 ///

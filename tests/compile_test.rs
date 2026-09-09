@@ -6778,3 +6778,75 @@ fn a_specialization_at_a_module_qualified_type_resolves() {
     "#;
     assert_eq!(run_with_compiler_and_prelude(src).expect("run failed"), Value::Int(7));
 }
+
+// ---- compiled frames (Phase C0) ------------------------------------------
+
+/// `rt_frame_new`/`rt_frame_data`/`build-slot-ptr`: a compiled function
+/// allocating its own activation record on the GC heap and reaching a local
+/// through it.
+///
+/// This is Phase C's whole toolkit in one module, exercised before anything
+/// depends on it — the same order Phase 0/1's raw-builtin tests preceded the
+/// self-hosted compiler body. What it pins down is that a frame slot is
+/// reachable by exactly the pair a local has always been read and written
+/// with (`store-arg`/`load-raw` against a pointer), so moving a local off the
+/// machine stack and into a frame is a change of *where the slot lives* and
+/// nothing else.
+///
+/// Built by hand, so the three `rt_*` shims are declared bodyless and resolved
+/// by LLVM's process-symbol lookup, and a `Heap` is registered active for the
+/// call because `rt_frame_new` allocates on it — the same idiom the closure
+/// test above needs.
+#[test]
+fn a_compiled_function_can_carry_a_local_in_a_heap_frame() {
+    let src = r#"
+        (defun build-frame-module () llvm-module
+          (let ((m (llvm-module::create "mod")))
+            (let ((ignored-new (add-function m "rt_frame_new"))) ())
+            (let ((ignored-data (add-function m "rt_frame_data"))) ())
+            (let ((ignored-mask (add-function m "rt_frame_mask_bit"))) ())
+            (let ((f (add-function m "frame_roundtrip")))
+              (let ((b (append-block f "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (let ((new-args (alloca-args builder 1)))
+                    (store-arg builder new-args 0 (const-word builder 3))
+                    (let ((frame (build-call builder (get-function m "rt_frame_new") new-args 1)))
+                      (let ((mask-args (alloca-args builder 2)))
+                        (store-arg builder mask-args 0 frame)
+                        (store-arg builder mask-args 1 (const-word builder 1))
+                        (let ((ignored-bit (build-call builder (get-function m "rt_frame_mask_bit") mask-args 2)))
+                          (let ((data-args (alloca-args builder 1)))
+                            (store-arg builder data-args 0 frame)
+                            (let ((data (build-call builder (get-function m "rt_frame_data") data-args 1)))
+                              (let ((slot (build-slot-ptr builder (build-int-to-ptr builder data) 1)))
+                                (store-arg builder slot 0 (load-arg builder f 0))
+                                (build-ret builder (load-raw builder slot 0))))))))))) 
+              m)))
+        (build-frame-module)
+    "#;
+    let module = expect_llvm_module(eval_ok(src));
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let roundtrip = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("frame_roundtrip")
+            .expect("failed to look up the compiled `frame_roundtrip` function")
+    };
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
+    let argv: [i64; 1] = [4242];
+    assert_eq!(unsafe { roundtrip.call(argv.as_ptr(), argv.len() as u32) }, 4242);
+    // One frame, and it is the shape the collector was told about. The call
+    // allocates nothing else, so it is box 0.
+    assert_eq!(heap.box_count(), 1, "the call allocated exactly one box");
+    let id = typelisp::BoxId::from_u32(0);
+    assert!(heap.is_frame(id), "and that box is the frame");
+    assert_eq!(heap.frame_len(id), 3);
+    assert!(heap.frame_mask_bit(id, 1), "the slot the function marked is masked");
+    assert!(!heap.frame_mask_bit(id, 0) && !heap.frame_mask_bit(id, 2), "and no other is");
+    assert_eq!(heap.frame_word(id, 1), 4242, "the local is in the slot it was written to");
+}

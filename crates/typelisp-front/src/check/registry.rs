@@ -2105,6 +2105,17 @@ pub fn llvm_builder_def() -> AdtDef {
         "load-raw".to_string(),
         assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
     );
+    // `build-slot-ptr`: `load-raw`'s GEP without the load — the *address* of
+    // one word in an `i64` array. What makes a compiled frame usable as the
+    // home of a local (Phase C): `env` maps a name to a pointer, and
+    // `resolve-value`/`compile-set`/`retain-bindings` read and write through
+    // it with `load-raw`/`store-arg`. Handing them a slot carved out of a
+    // frame rather than a fresh `alloca-args` is then the whole of the
+    // change — everything downstream already speaks pointers.
+    assoc.insert(
+        "build-slot-ptr".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
+    );
     // `build-icmp-lt`/`-le`/`-gt`/`-ge`/`-eq`/`-ne`: `i64` comparisons —
     // `compiler.rs`'s `compile-assoc` dispatches `<`/`<=`/`>`/`>=`/(`=`,`eq`)/`/=`
     // to these (`if`/comparisons work, labels/closures Stage 5). Each widens

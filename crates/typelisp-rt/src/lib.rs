@@ -2011,6 +2011,99 @@ pub unsafe extern "C" fn rt_cell_new(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_cell_unregistered(v))
 }
 
+/// `(rt-frame-new nslots)` for compiled code — a compiled function's
+/// activation record, as a tagged reference to a `BoxedObj::Frame`.
+///
+/// The argument is a **raw** word, not a tagged one: it is a compile-time
+/// constant the island emits with `const-word`, describing the frame's
+/// layout rather than being a value in it. There is no mask argument — the
+/// frame starts with every slot unmasked and each binding marks its own with
+/// `rt_frame_mask_bit`, so the island needs only to have counted the binding
+/// sites, not classified them.
+///
+/// Allocating a frame never itself collects, so the caller may hold unrooted
+/// values across this call. **The frame itself must then be rooted**, or the
+/// next collection takes it and the pointer `rt_frame_data` handed out dangles.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to a valid `i64`; a `Heap`
+/// must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_frame_new: expected 1 argument (slot count)");
+    }
+    let nslots = *args;
+    if nslots < 0 {
+        fatal(&format!("rt_frame_new: {} is not a slot count a frame can hold", nslots));
+    }
+    encode(active_heap().alloc_frame(nslots as usize))
+}
+
+/// `(rt-frame-mask-bit f idx)` for compiled code — marks slot `idx` of frame
+/// `args[0]` as holding a tagged value, so the collector traces it.
+///
+/// This stands exactly where the binding's `rt_push_sexpr_root` used to, and
+/// costs the same one call — but it is not a push onto a stack that has to be
+/// popped in order. The bit says "this slot is a root" for as long as the
+/// frame lives, which is the whole point: the frame *is* the root set, so
+/// there is no LIFO discipline left to get wrong on an early exit.
+///
+/// `idx` is a **raw** word (a compile-time slot index); `args[0]` is a tagged
+/// reference to the frame.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// the first decoding to a frame; a `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_mask_bit(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_frame_mask_bit: expected 2 arguments (frame, slot index)");
+    }
+    let idx = *args.add(1);
+    if idx < 0 {
+        fatal(&format!("rt_frame_mask_bit: {} is not a slot index", idx));
+    }
+    let heap = active_heap();
+    match decode(*args) {
+        Value::Boxed(id) if heap.is_frame(id) => {
+            heap.set_frame_mask_bit(id, idx as usize);
+            0
+        }
+        other => fatal(&format!("rt_frame_mask_bit: {:?} is not a frame", other)),
+    }
+}
+
+/// `(rt-frame-data f)` for compiled code — the address of frame `args[0]`'s
+/// word array, as an `i64`.
+///
+/// This is what makes a frame slot usable as a local: the island GEPs into
+/// this pointer (`build-slot-ptr`) and the existing `load-raw`/`store-arg`
+/// pair does the rest, exactly as it did against an `alloca`.
+///
+/// **The address is valid only while the frame is live.** Growing the box
+/// table moves the box but not the word array's buffer, and the sweep writes
+/// its slot back as empty rather than compacting — so the one way to
+/// invalidate this is to let the frame be collected.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to 1 valid `i64` holding a
+/// tagged reference to a frame; a `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_data(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_frame_data: expected 1 argument");
+    }
+    let heap = active_heap();
+    match decode(*args) {
+        Value::Boxed(id) if heap.is_frame(id) => heap.frame_data_ptr(id) as i64,
+        other => fatal(&format!("rt_frame_data: {:?} is not a frame", other)),
+    }
+}
+
 /// `(rt-cell-get c)` for compiled code — the current contents of binding
 /// cell `args[0]` (a tagged `Sexpr` reference to a `BoxedObj::Cell`), as a
 /// tagged `Sexpr`; per-kind untagging is the caller's job
