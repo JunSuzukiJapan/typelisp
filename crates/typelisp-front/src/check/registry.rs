@@ -2138,13 +2138,13 @@ pub fn llvm_builder_def() -> AdtDef {
     // for it, and `rt_llvm_call` marshals only handles, `()`, `bool` and
     // `string` back from an `llvm-*` builtin (`llvm_ret_kind`). Tests read the
     // count from the frame itself, which is the number that matters.
-    assoc.insert("frame-begin".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], llvm_value_ty(), true));
+    assoc.insert("frame-begin".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], Type::Unit, true));
     assoc.insert("frame-slot".to_string(), assoc_fn(vec![llvm_builder_ty()], llvm_value_ty(), true));
     assoc.insert(
         "frame-slot-rooted".to_string(),
         assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], llvm_value_ty(), true),
     );
-    assoc.insert("frame-end".to_string(), assoc_fn(vec![llvm_builder_ty()], Type::Unit, true));
+    assoc.insert("frame-end".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], Type::Unit, true));
     // `build-icmp-lt`/`-le`/`-gt`/`-ge`/`-eq`/`-ne`: `i64` comparisons —
     // `compiler.rs`'s `compile-assoc` dispatches `<`/`<=`/`>`/`>=`/(`=`,`eq`)/`/=`
     // to these (`if`/comparisons work, labels/closures Stage 5). Each widens

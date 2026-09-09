@@ -781,6 +781,18 @@ fn builder_key(b: &Rc<RefCell<Builder<'static>>>) -> usize {
     Rc::as_ptr(b) as usize
 }
 
+/// Get-or-create a bodyless `rt_*` declaration, for the same reason
+/// [`llvm_module_add_function`] is get-or-create: LLVM's `LLVMAddFunction`
+/// does not merge a colliding name, it uniquifies it to `name.1` — and a
+/// second, differently-named declaration is a symbol the JIT will not resolve.
+fn ensure_declared(module: &Rc<RefCell<Module<'static>>>, name: &str) -> FunctionValue<'static> {
+    let existing = module.borrow().get_function(name);
+    match existing {
+        Some(f) => f,
+        None => module.borrow_mut().add_function(name, compiled_fn_type(), None),
+    }
+}
+
 /// `(frame-begin builder m)` — emit a function's frame prologue and return the
 /// tagged frame, which the caller must root.
 ///
@@ -797,13 +809,18 @@ fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
     let i64t = ctx.i64_type();
     let err = |what: &str, e: String| EvalError::Internal(format!("frame-begin: {}: {}", what, e));
 
-    let m = module.borrow();
-    let frame_new = m
-        .get_function("rt_frame_new")
-        .ok_or_else(|| EvalError::Internal("frame-begin: rt_frame_new is not declared in this module".to_string()))?;
-    let frame_data = m
-        .get_function("rt_frame_data")
-        .ok_or_else(|| EvalError::Internal("frame-begin: rt_frame_data is not declared in this module".to_string()))?;
+    // The prologue declares what it emits. A module reaching `compile-function`
+    // need not have been through the driver — `tests/compile_test.rs` builds
+    // bare ones with `llvm-module::create` — and until now nothing in the
+    // prologue was unconditional, so those modules were never asked for an
+    // `rt_*` declaration they had not made. `frame-begin` is emitted for every
+    // function, so it owns its own dependencies rather than making every
+    // caller know them.
+    let frame_new = ensure_declared(&module, "rt_frame_new");
+    let frame_data = ensure_declared(&module, "rt_frame_data");
+    let push_root = ensure_declared(&module, "rt_push_sexpr_root");
+    ensure_declared(&module, "rt_pop_sexpr_root");
+    ensure_declared(&module, "rt_frame_mask_bit");
 
     let b = builder.borrow();
     // rt_frame_new(&[0])
@@ -851,10 +868,22 @@ fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
         .build_int_to_ptr(data_word.into_int_value(), ctx.ptr_type(inkwell::AddressSpace::default()), "frame_ptr")
         .map_err(|e| err("inttoptr", e.to_string()))?;
 
+    // rt_push_sexpr_root(frame) — the frame holds every collectable local, so
+    // nothing in the function is reachable until the frame itself is. One push
+    // per activation, where there used to be one per binding.
+    let root_args = b.build_alloca(i64t.array_type(1), "frame_root_args").map_err(|e| err("alloca", e.to_string()))?;
+    let root_slot = unsafe {
+        b.build_gep(i64t, root_args, &[i64t.const_int(0, false)], "frame_root_slot")
+            .map_err(|e| err("gep", e.to_string()))?
+    };
+    b.build_store(root_slot, frame).map_err(|e| err("store", e.to_string()))?;
+    b.build_call(push_root, &[root_args.into(), ctx.i32_type().const_int(1, false).into()], "")
+        .map_err(|e| err("call rt_push_sexpr_root", e.to_string()))?;
+
     FRAME_CTXS.with(|c| {
-        c.borrow_mut().insert(builder_key(&builder), FrameCtx { frame, data, size_store, next: 0 });
+        c.borrow_mut().insert(builder_key(&builder), FrameCtx { data, frame, size_store, next: 0 });
     });
-    Ok(llvm_value_value(frame))
+    Ok(Value::Empty)
 }
 
 /// `(frame-slot builder)` — the address of a fresh, **unmasked** frame slot.
@@ -895,10 +924,7 @@ fn frame_slot_impl(args: &[Value], rooted: bool) -> Result<Value, EvalError> {
     let b = builder.borrow();
     if rooted {
         let module = expect_llvm_module(&args[1])?;
-        let mask_fn = module
-            .borrow()
-            .get_function("rt_frame_mask_bit")
-            .ok_or_else(|| EvalError::Internal("frame-slot-rooted: rt_frame_mask_bit is not declared in this module".to_string()))?;
+        let mask_fn = ensure_declared(&module, "rt_frame_mask_bit");
         let err = |what: &str, e: String| EvalError::Internal(format!("frame-slot-rooted: {}: {}", what, e));
         let mask_args = b.build_alloca(i64t.array_type(2), "mask_args").map_err(|e| err("alloca", e.to_string()))?;
         let a0 = unsafe {
@@ -919,22 +945,36 @@ fn frame_slot_impl(args: &[Value], rooted: bool) -> Result<Value, EvalError> {
     Ok(llvm_value_value(elem_ptr.into()))
 }
 
-/// `(frame-end builder)` — write the true slot count into the prologue and
-/// close the frame.
+/// `(frame-end builder m)` — write the true slot count into the prologue,
+/// drop the frame's own GC root, and close the frame.
+///
+/// The pair with [`llvm_builder_frame_begin`] owns the frame's whole lifetime,
+/// which is why the island's three function-building sites are one line each
+/// at either end. It is also why the root push and pop are emitted here rather
+/// than by the island: a caller that had to remember them could forget one,
+/// and an unbalanced root stack is exactly the class of bug this phase exists
+/// to remove.
 fn llvm_builder_frame_end(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
     let ctx = crate::compile::llvm_context();
     let key = builder_key(&builder);
-    FRAME_CTXS.with(|c| {
-        let f = c
-            .borrow_mut()
+    let f = FRAME_CTXS.with(|c| {
+        c.borrow_mut()
             .remove(&key)
-            .ok_or_else(|| EvalError::Internal("frame-end: no frame is open on this builder".to_string()))?;
-        if !f.size_store.set_operand(0, ctx.i64_type().const_int(f.next, false)) {
-            return Err(EvalError::Internal("frame-end: could not write the slot count into the prologue".to_string()));
-        }
-        Ok(Value::Empty)
-    })
+            .ok_or_else(|| EvalError::Internal("frame-end: no frame is open on this builder".to_string()))
+    })?;
+    if !f.size_store.set_operand(0, ctx.i64_type().const_int(f.next, false)) {
+        return Err(EvalError::Internal("frame-end: could not write the slot count into the prologue".to_string()));
+    }
+    let pop_root = ensure_declared(&module, "rt_pop_sexpr_root");
+    let b = builder.borrow();
+    let empty = b
+        .build_alloca(ctx.i64_type().array_type(0), "frame_unroot_args")
+        .map_err(|e| EvalError::Internal(format!("frame-end: alloca: {}", e)))?;
+    b.build_call(pop_root, &[empty.into(), ctx.i32_type().const_int(0, false).into()], "")
+        .map_err(|e| EvalError::Internal(format!("frame-end: call rt_pop_sexpr_root: {}", e)))?;
+    Ok(Value::Empty)
 }
 
 /// Shared by every `build-icmp-*` builtin (if/let/comparisons, labels/closures

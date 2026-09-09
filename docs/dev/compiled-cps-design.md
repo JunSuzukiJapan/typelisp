@@ -167,3 +167,86 @@ C は「呼んだら結果が返る」しか知らないので、`defffi` のコ
 （`src/compile/ffi.rs`）はコルーチンにできない。完了まで回すシムにし、その中で中断したら
 エラーにする。**B6 の制限は消えるのではなく「C のコールバックの中では中断できない」まで
 縮む。**
+
+---
+
+# C1 — ローカルをフレームへ（実施記録）
+
+## 何が消えたか
+
+| | |
+|---|---|
+| `retain-bindings` / `release-bindings` | 削除 |
+| `unroot-let-sexpr-values` | 削除 |
+| `compile-set` の `rt_set_sexpr_root` 更新 | 削除 |
+| スロットの 2 語目（ルート添字） | 消滅 |
+| `bind-params` / `bind-let-values` の一時 push/pop | 消滅 |
+
+SOURCE は −213 / +84 行、島の成果物は 3489586 → 3303170 バイト。
+
+**いちばん効いたのは `compile-set`。** `setf` は「スロットに書く」だけでは済まず、
+ルートスタック上の**複製**を書き換える必要があった（`rt_set_sexpr_root`、スロットの
+2 語目がその添字）。フレームスロットは複製ではなく**コレクタが読む当のもの**なので、
+書けば新しい値が root される。`typelisp-rt` の
+`a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
+が名指ししているバグの種類が、構造ごと無くなった。
+
+## カウンタは島に置けない
+
+スロット添字を配るには可変な整数状態が要るが、島には置けない。実験した:
+`Scope<i32>` はインタプリタでは動くが **compile できない**——`llvm_op_key` は
+`Repr::Handle` の V しか `native-scope` に回さないので、`scope::get` が
+「モジュールに `tl_scope::get` が無い」で落ちる。島は関数型で `compile-value` の戻りは
+`llvm-value` 1 つ、タプルは無く、島は `Sexpr` を作らない。
+
+そこで**ビルダを鍵にして Rust 側に置いた**。関数を組み立てる 3 箇所
+（`compile-function` / `compile-lambda` / `compile-labels-bodies`）はそれぞれ自前の
+`llvm-builder::create` を持つので、ビルダは構築中の関数と 1 対 1。おかげで
+**島の 56 個の署名は 1 つも引数が増えていない**——`compile-value` は既に 16 引数で、
+この段はその一覧を短くするためにある。
+
+`alloca-args` が既に引いている線と同じ分け方でもある。島が「どの束縛に記憶域が要るか、
+いつか」を決め、Rust が「記憶域がどこか」を知る。
+
+## サイズは後から埋める
+
+`frame-begin` は `rt_frame_new(0)` を出すしかない——数は本体が決めるものだから。
+`frame-end` が `InstructionValue::set_operand` でその 0 を置き換えるので、出力される数は
+**構成上「実際に配られたスロット数」**になる。本体を歩いて数え直す第 2 のパスが無いので、
+第 1 のパスとずれようがない。
+
+`frame-begin` / `frame-end` はフレームの寿命を丸ごと持つ組にした（確保・自身の GC ルート・
+最後にスロット数）。島の 3 箇所が両端 1 行ずつで済むのはそのため。ルートの push/pop を
+島でなくここで出すのも同じ理由——呼び手が片方を忘れられる形にすると、
+**ルートスタックの不均衡というこの段が消しに来たバグ**をそのまま作ることになる。
+
+## 3 つ踏んだ
+
+**1. `llvm-*` 組み込みの署名を変えると、それを呼ぶ島が壊れる。** `frame-end` を
+1 引数から 2 引数にしたら、前回の再生成で作った島が古い arity で呼び続けて
+`store-arg` に `Int(0)` が渡った。島は自分自身をコンパイルするので、**署名を変える前の
+成果物に `git checkout` してから**回す。[[typelisp-island-regen-fixpoint]] の
+「2 回では足りない」とは別の、もう一段手前の話。
+
+**2. ハンドメイドのモジュールには `rt_*` の宣言が無い。** 旧 `retain-bindings` は
+`kind = 2` のときしか呼び出しを出さなかったので露見していなかった。`frame-begin` は
+無条件なので、**前段が自分の依存を自分で宣言する**ようにした。`declare_external_function`
+は素の `add_function` なので、既にある名前にそのまま呼ぶと `rt_frame_new.1` に化ける
+——get-or-create が要る（`llvm_module_add_function` が同じ理由で既にそうなっている）。
+
+**3. コンパイル済み関数は生きたヒープを要求するようになった。** 活性化記録がヒープに
+載る以上これは**新しい契約**であって、テストの都合ではない。JIT して呼ぶテスト 11 本に
+ヒープ登録を足した。うち 1 本は `drop(h)` の後に呼んでいて、宙に浮いた `ACTIVE_HEAP` で
+SIGSEGV——[[typelisp-dangling-active-heap]] の形そのもの。潜在的な UB を 11 箇所塞いだ
+ことになる。
+
+## プランとの差
+
+**`loop-root-base` は抜けなかった**（239 箇所そのまま）。無名の一時値——呼び出し引数、
+cons の被演算子——はまだルートスタックに載るので、`break`/`return` の巻き戻しが要る。
+プランが C1 に置いていた「ルート操作 ~85 → 0」は、**名前付き束縛の分（C1）と一時値の分**
+に割れる。残るのは `push-sexpr-root` 22 / `pop-sexpr-root` 32 / `pop-sexpr-roots` 14 で、
+すべて一時値かフレーム自身の root。
+
+一時値をフレームに移すのは C2 の前提でもある（中断点を跨いで生きる値はフレームに無いと
+いけない）。そのとき `loop-root-base` と `rt_truncate_sexpr_roots` が一緒に抜ける。

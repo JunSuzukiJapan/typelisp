@@ -881,25 +881,43 @@ pub const SOURCE: &str = r#"
 ;; `release-bindings` pops it at function exit, alongside every `kind = 2`
 ;; root `retain-bindings` pushed — see that function's own doc comment for
 ;; why popping order among a same-activation batch never matters.
+;; One binding's home in the current function's frame (Phase C1).
+;;
+;; `kind` is the whole of the decision, and it is the same three-way split
+;; `release-bindings` used to test before this function replaced it:
+;; `0` is a raw `i32`/`f64` word the collector must never read as a tag,
+;; `2` is a `Sexpr`, and `>= 10` is a cell-boxed (mutable, captured) binding
+;; whose slot holds the cell reference. The last two are collectable, so
+;; their slot is marked and the collector traces it for as long as the frame
+;; lives.
+;;
+;; **Marking a slot is what pushing a root used to be**, minus the pop. A GC
+;; root had to come off the stack in order, which is why an early exit out of
+;; a `let` had to truncate the stack by hand and why `setf` had to reach back
+;; and rewrite the root it had already pushed. A marked slot is a root
+;; because of where it *is*, so none of that has an analogue here.
+(defun binding-slot ((builder llvm-builder) (m llvm-module) (kind i32)) llvm-value
+  (if (if (eq kind 2) true (>= kind 10))
+      (frame-slot-rooted builder m)
+      (frame-slot builder)))
+
 (defun bind-params ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Option<Sexpr>) (idx i32)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
         (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-i32 (sexpr-cdr name-pair))))
           (let* ((raw (load-arg builder f idx))
-                 (slot (alloca-args builder 2)))
+                 (slot (binding-slot builder m kind)))
             (if (>= kind 10)
-                (let* ((tagged (compile-tag-struct-field builder m raw (- kind 10)))
-                       (tag-args-ptr (alloca-args builder 1)))
-                  (store-arg builder tag-args-ptr 0 tagged)
-                  (let* ((ignored1 (build-call builder (get-function m "rt_push_sexpr_root") tag-args-ptr 1))
-                         (cell-args-ptr (alloca-args builder 1)))
+                (let ((tagged (compile-tag-struct-field builder m raw (- kind 10))))
+                  ;; The store *is* the root: `rt_cell_new` allocates, and the
+                  ;; slot is what keeps `tagged` alive across it. This used to
+                  ;; be a push/pop pair around the call, then a second push for
+                  ;; the cell. Both are the same store now.
+                  (store-arg builder slot 0 tagged)
+                  (let ((cell-args-ptr (alloca-args builder 1)))
                     (store-arg builder cell-args-ptr 0 tagged)
-                    (let* ((cell-ref (build-call builder (get-function m "rt_cell_new") cell-args-ptr 1))
-                           (ignored2 (build-call builder (get-function m "rt_pop_sexpr_root") (alloca-args builder 0) 0))
-                           (root-args-ptr (alloca-args builder 1)))
-                      (store-arg builder root-args-ptr 0 cell-ref)
-                      (let ((ignored3 (build-call builder (get-function m "rt_push_sexpr_root") root-args-ptr 1)))
-                        (store-arg builder slot 0 cell-ref)))))
+                    (let ((cell-ref (build-call builder (get-function m "rt_cell_new") cell-args-ptr 1)))
+                      (store-arg builder slot 0 cell-ref))))
                 (store-arg builder slot 0 raw))
             (set env nm slot))
           (bind-params env builder m f rest (+ idx 1))))
@@ -917,28 +935,22 @@ pub const SOURCE: &str = r#"
 ;; now (closure-representation unification, Stage 4 — `core_bridge`'s shared
 ;; captured-list builder `captured_with_reprs` tags *every* capture as cell-boxed,
 ;; — see `Ctx::cell_names`'s doc comment), so unlike `bind-params` there is no
-;; plain-value branch to keep: the value copied out of the env array is
+;; tagging or `rt_cell_new` call here: the value copied out of the env array is
 ;; already a valid cell reference (whatever produced this closure's env array
 ;; — `compile-escaping-env-args`/`compile-env-args` — put it there without
-;; dereferencing), so no tagging or `rt_cell_new` call is needed here, just
-;; the same permanent `push-sexpr-root` `bind-params` gives a *freshly made*
-;; cell — this one protects the *copy* in this activation's own slot, for the
-;; identical "protect it before the next capture in this same batch might
-;; allocate" reason (a captured name is never rooted purely by inheriting the
-;; closure box's own rooting, since the copy lives in a plain stack slot, not
-;; scanned by the GC).
+;; dereferencing).
+;;
+;; The copy still needs to be reachable on its own — a captured name is never
+;; kept alive by inheriting the closure box's rooting, because the copy lives
+;; in this activation. That used to be a `push-sexpr-root`; it is now simply
+;; where the copy is stored, since `binding-slot` marks a collectable slot and
+;; the collector traces the frame.
 (defun bind-captures ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Option<Sexpr>) (idx i32)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
         (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-i32 (sexpr-cdr name-pair))))
-          (let ((slot (alloca-args builder 2)))
-            (let ((v (load-env builder f idx)))
-              (store-arg builder slot 0 v)
-              (if (if (eq kind 2) true (>= kind 10))
-                  (let ((args-ptr (alloca-args builder 1)))
-                    (store-arg builder args-ptr 0 v)
-                    (let ((ignored (build-call builder (get-function m "rt_push_sexpr_root") args-ptr 1))) ()))
-                  ()))
+          (let ((slot (binding-slot builder m kind)))
+            (store-arg builder slot 0 (load-env builder f idx))
             (set env nm slot))
           (bind-captures env builder m f rest (+ idx 1))))
       ()))
@@ -1019,90 +1031,6 @@ pub const SOURCE: &str = r#"
   (if (equal (sexpr-car form) (quote var))
       (name-is-borrowed? env (sexpr-str (sexpr-car (sexpr-cdr form))))
       false))
-
-;; R1 (function entry, design notes): pushes a GC root for every `kind = 2`
-;; name in `names` (a tagged params or captured list, as just bound by
-;; `bind-params`/`bind-captures`) — a `Sexpr`-, `Str`-, or (since the
-;; closure-representation unification) `Fn`-typed parameter/capture is a
-;; tagged `i64` that may point into the GC-managed heap, so without this, any
-;; allocation anywhere later in this activation's body (a `cons`, another
-;; `rt_*` call — including the `rt_closure_new` a nested `lambda`/`labels`
-;; sibling might build) could trigger a GC that reclaims it out from under a
-;; still-live binding (`typelisp-rt`'s `rt_push_sexpr_root` doc comment/tests
-;; demonstrate exactly this failure mode). `release-bindings`, at this same
-;; activation's exit, undoes it. A `Fn`-typed name used to get its own
-;; `ClosureBox` refcount-retain here instead (`kind = 1`, labels/closures
-;; Stage 4) — retired along with the rest of the ARC scheme once a compiled
-;; closure became an ordinary GC-heap value with nothing to refcount; every
-;; capture/parameter this function ever sees is `kind = 0` or `kind = 2` now
-;; (`binding_kind`'s doc comment), so a single `(eq kind 2)` test covers it.
-;;
-;; `setf`-reassignment fix: a `kind = 2` name also records, in its own slot's
-;; offset 1 (`bind-params`/`bind-captures`'s doc comment), the GC-root stack
-;; index `rt_push_sexpr_root`'s call is about to occupy — `rt_root_count`,
-;; called *before* that push, returns exactly that index (`push_root` always
-;; appends at the current length). Without recording it, `compile-set` would
-;; have no way to find the right root to update when a later `setf` reassigns
-;; this same name — that root would stay pinned to the value bound here
-;; forever, leaving every reassigned value unrooted (`typelisp-rt`'s
-;; `a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
-;; demonstrates the resulting corruption directly).
-(defun retain-bindings ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (names Option<Sexpr>)) ()
-  (if (sexpr-consp names)
-      (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
-       (let* ((nm (sexpr-sym-name (sexpr-car name-pair)))
-              (kind (sexpr-i32 (sexpr-cdr name-pair))))
-         (if (eq kind 2)
-           (match (get env nm)
-             ((Some slot)
-              (let* ((v (load-raw builder slot 0))
-                     (root-idx (build-call builder (get-function m "rt_root_count") (alloca-args builder 0) 0)))
-                (store-arg builder slot 1 root-idx)
-                (let ((args-ptr (alloca-args builder 1)))
-                  (store-arg builder args-ptr 0 v)
-                  (let ((ignored (build-call builder (get-function m "rt_push_sexpr_root") args-ptr 1))) ()))))
-             (None ()))
-           ())
-       (retain-bindings builder m env rest)))
-      ()))
-
-;; R2 (function exit, design notes): pops the GC root `retain-bindings`
-;; pushed for every `kind = 2` name in `names` — unconditionally: popping a
-;; root never frees anything (it only stops a GC root walk from visiting
-;; that slot), so even a name leaving as this activation's own bare return
-;; value has its root popped here just the same — the tagged `i64` itself
-;; still flows out via this activation's own `build-ret` regardless, and if
-;; its *caller* needs to keep it alive across further allocations, that's
-;; the caller's own binding (a `let`, another function's params) that pushes
-;; a fresh root for it, exactly as it would for any other fresh `Sexpr`
-;; value. Leaving this activation's own push on the stack past its own
-;; lifetime would otherwise grow `Heap`'s root stack without bound across
-;; repeated calls, eventually desyncing every later `rt_pop_sexpr_root`'s
-;; LIFO assumption. A `Fn`-typed name used to need an exception here (a
-;; `protected` name, carved out of an unconditional `ClosureBox`
-;; refcount-release — labels/closures Stage 4): retired along with the rest
-;; of the ARC scheme, since a GC root pop was never conditional on ownership
-;; to begin with — see `retain-bindings`'s doc comment for why every capture/
-;; parameter is `kind = 0` or `kind = 2` now.
-;;
-;; `kind >= 10` (Stage 4) also pops one — not because *this* function pushed
-;; it (unlike `kind = 2`, always `retain-bindings`'s own), but because
-;; whichever of `bind-params`/`bind-captures` bound this name pushed exactly
-;; one permanent root for it directly (see their own doc comments for why the
-;; push has to happen immediately at bind time, not deferred here the way
-;; `kind = 2`'s is) — `release-bindings` is where every binding's root, no
-;; matter which function pushed it, is popped in one place at function exit.
-(defun release-bindings ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (names Option<Sexpr>)) ()
-  (if (sexpr-consp names)
-      (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
-       (let ((kind (sexpr-i32 (sexpr-cdr name-pair))))
-         (if (if (eq kind 2) true (>= kind 10))
-             (let* ((args-ptr (alloca-args builder 0))
-                    (ignored (build-call builder (get-function m "rt_pop_sexpr_root") args-ptr 0)))
-               ())
-             ())
-         (release-bindings builder m env rest)))
-      ()))
 
 ;; The bare `rt_push_sexpr_root`/`rt_pop_sexpr_root` call `retain-bindings`/
 ;; `release-bindings`/`bind-let-values` each inline for a *named* `kind = 2`
@@ -1677,68 +1605,21 @@ pub const SOURCE: &str = r#"
               (nm (sexpr-sym-name (sexpr-car name-pair)))
               (kind (sexpr-i32 (sexpr-cdr name-pair))))
          (match (get acc nm)
-         ((Some v) (let ((slot (alloca-args builder 2)))
+         ((Some v) (let ((slot (binding-slot builder m kind)))
                      (if (>= kind 10)
                          (let ((tagged (compile-tag-struct-field builder m v (- kind 10))))
-                           (push-sexpr-root builder m tagged)
+                           ;; As in `bind-params`: the slot is what holds
+                           ;; `tagged` down while `rt_cell_new` allocates, so
+                           ;; the push/pop/push around the call is gone.
+                           (store-arg builder slot 0 tagged)
                            (let ((args-ptr (alloca-args builder 1)))
                              (store-arg builder args-ptr 0 tagged)
                              (let ((cell-ref (build-call builder (get-function m "rt_cell_new") args-ptr 1)))
-                               (pop-sexpr-root builder m)
-                               (push-sexpr-root builder m cell-ref)
                                (store-arg builder slot 0 cell-ref))))
-                         (let ((ignored (store-arg builder slot 0 v)))
-                           (if (eq kind 2)
-                               (let ((root-idx (build-call builder (get-function m "rt_root_count") (alloca-args builder 0) 0)))
-                                 (store-arg builder slot 1 root-idx)
-                                 (let ((args-ptr (alloca-args builder 1)))
-                                   (store-arg builder args-ptr 0 v)
-                                   (let ((ignored2 (build-call builder (get-function m "rt_push_sexpr_root") args-ptr 1))) ())))
-                               ())))
+                         (store-arg builder slot 0 v))
                      (set env nm slot)))
          (None (panic "bind-let-values: missing computed value")))
        (bind-let-values builder m env rest acc)))
-      ()))
-
-;; Pops the GC root `bind-let-values` pushed for each `kind = 2` binding —
-;; the `env`-restoration half of the old `restore-let-values` is gone
-;; entirely now: `compile-let`'s own `pop-frame` discards this `let`'s whole
-;; frame (every binding's slot at once, exact and order-independent), so
-;; there is nothing left to "undo" name by name here. Skipping this would
-;; leak a `Sexpr`-typed binding's GC root past the `let`'s own end.
-;;
-;; `compile-let` only reaches this call when the body did *not* already
-;; terminate the current block (see its own doc comment) — a `let` body that
-;; exits early via `break`/`return` has already built a `build-br` to the
-;; loop's exit block, and this function's own `build-call`s would otherwise
-;; land *after* that terminator: not a mere leak but invalid LLVM IR (a
-;; second instruction following a basic block's one-and-only terminator),
-;; caught by `module.verify()` (`Interp::compile_function`, added specifically
-;; because this bug could otherwise reach the JIT as undefined behavior)
-;; with "Terminator found in the middle of a basic block!". So on that path
-;; the `kind = 2` binding's GC root is *not* popped here — no longer a
-;; problem, though: `compile-break`/`compile-return` themselves now
-;; unconditionally truncate the GC root stack back to the depth it was at
-;; the nearest enclosing loop's own entry (`rt_truncate_sexpr_roots`, keyed
-;; off `loop-root-base` — see `compile-loop`'s doc comment) right before
-;; that same jump, which discards this exact root along with any other open
-;; scope's, however many are nested between here and the loop. This function
-;; only ever needs to handle the *normal* (falls off the end of the body)
-;; exit path now.
-;; `kind >= 10` (Stage 4) pops one too, matching `release-bindings`'s own
-;; broadened condition — `bind-let-values`'s cell branch pushes its cell
-;; reference's root permanently at bind time, so it needs the same unwind
-;; here as a `kind = 2` binding's does.
-(defun unroot-let-sexpr-values ((builder llvm-builder) (m llvm-module) (bindings Option<Sexpr>)) ()
-  (if (sexpr-consp bindings)
-      (let ((pair (sexpr-car bindings)) (rest (sexpr-cdr bindings)))
-       (let ((kind (sexpr-i32 (sexpr-cdr (sexpr-car pair)))))
-         (if (if (eq kind 2) true (>= kind 10))
-             (let* ((args-ptr (alloca-args builder 0))
-                    (ignored (build-call builder (get-function m "rt_pop_sexpr_root") args-ptr 0)))
-               ())
-             ())
-         (unroot-let-sexpr-values builder m rest)))
       ()))
 
 ;; Tests whether tagged Sexpr value `v` is Sexpr variant `variant`
@@ -3516,9 +3397,10 @@ pub const SOURCE: &str = r#"
       (push-frame env)
       (bind-let-values builder m env bindings acc)
       (let ((result (compile-let-body m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup body-forms)))
-        (if (block-terminated? builder)
-            ()
-            (unroot-let-sexpr-values builder m bindings))
+        ;; Nothing to undo on the root stack: a binding's slot is a root by
+        ;; where it is, and this `let`'s slots simply stop being written.
+        ;; `pop-frame` still discards the *names*, which is what shadowing
+        ;; needs; the slots themselves are the frame's and outlive the `let`.
         (pop-frame env)
         result)))
 
@@ -3567,19 +3449,14 @@ pub const SOURCE: &str = r#"
           ;; `compile-labels-bodies`'s matching
           ;; comment for why this ordering is
           ;; correct and root-neutral.
-          ;; No `retain-bindings` call for
-          ;; `lcaptured` (unlike `lparams`):
-          ;; every entry a captured-name list can
-          ;; ever hold is `kind >= 10` now
-          ;; (Stage 4), and `bind-captures`
-          ;; itself already pushes a permanent
-          ;; root for each one — a
-          ;; `retain-bindings` pass here would
-          ;; only ever match its now-unused
-          ;; `kind = 2` case, a pure no-op.
+          ;; Both lists bind into this nested
+          ;; function's own frame, which
+          ;; `frame-begin` opened just above —
+          ;; a captured name and a parameter
+          ;; are the same kind of slot.
+          (frame-begin nested-builder m)
           (bind-captures nested-env nested-builder m nested-fn lcaptured 0)
           (bind-params nested-env nested-builder m nested-fn lparams 0)
-          (retain-bindings nested-builder m nested-env lparams)
           ;; `loop`/`break`/`return`/`setf`: a
           ;; `lambda` is a new function
           ;; boundary — `break`/`return` can't
@@ -3591,8 +3468,7 @@ pub const SOURCE: &str = r#"
           ;; of whatever loop (if any) the
           ;; `lambda` form itself sits inside.
           (let ((v (compile-value m fn-name nested-builder nested-env (new-fn-env) lcaptured nested-fn (Option::none) (Option::none) (Option::none) "" (scope::new) (scope::new) (Option::none) (Option::none) lbody)))
-            (release-bindings nested-builder m nested-env lparams)
-            (release-bindings nested-builder m nested-env lcaptured)
+            (frame-end nested-builder m)
             (build-ret nested-builder v))))
       (let* ((env-len (sexpr-list-length lcaptured))
              (env-ptr (alloca-args builder env-len)))
@@ -3680,20 +3556,14 @@ pub const SOURCE: &str = r#"
                 ;; `declare-labels-siblings`
                 ;; genuinely needs; observed
                 ;; self-hosting the island). Root
-                ;; bookkeeping is unaffected:
-                ;; `release-bindings` is count-based
-                ;; (it pops the top of the root
-                ;; stack N times, never by name), so
-                ;; the two lists' pushes and pops
-                ;; stay balanced regardless of bind
-                ;; order. No `retain-bindings` call
-                ;; for `captured` — every entry is
-                ;; `kind >= 10` now, and
-                ;; `bind-captures` already roots each
-                ;; one itself.
+                ;; bookkeeping is unaffected by the
+                ;; order: each name gets its own
+                ;; frame slot, and a slot is a root
+                ;; by position rather than by when
+                ;; it was pushed.
+                (frame-begin sib-builder m)
                 (bind-captures sib-env sib-builder m sib-fn captured 0)
                 (bind-params sib-env sib-builder m sib-fn param-syms 0)
-                (retain-bindings sib-builder m sib-env param-syms)
                 ;; `loop`/`break`/`return`/`setf`:
                 ;; a `labels` sibling's own body is
                 ;; a new function boundary too
@@ -3705,8 +3575,7 @@ pub const SOURCE: &str = r#"
                 ;; here either.
                 (let* ((sib-fn-env (clone-frames inner-fn-env))
                        (v (compile-value m fn-name sib-builder sib-env sib-fn-env captured sib-fn (Option::none) (Option::none) (Option::none) "" (scope::new) (scope::new) (Option::none) (Option::none) def-body)))
-                  (release-bindings sib-builder m sib-env param-syms)
-                  (release-bindings sib-builder m sib-env captured)
+                  (frame-end sib-builder m)
                   (build-ret sib-builder v)
                   (compile-labels-bodies m fn-name inner-fn-env captured rest)))))
            (None (panic (append "compile-labels-bodies: missing declaration for " nm))))))
@@ -4107,17 +3976,23 @@ pub const SOURCE: &str = r#"
 ;; `core_bridge::translate_set`'s doc comment): `kind =
 ;; 1` still drives `compile-if-branch`'s existing
 ;; borrowed-`Fn`-retain logic exactly as `is-fn` did.
-;; `kind = 2` is new — the target's own slot has a
-;; second word (`bind-params`/`bind-captures`/
-;; `bind-let-values`) holding the GC-root stack index
-;; that name's root was pushed at; this `setf` updates
-;; *that exact root* via `rt_set_sexpr_root` rather
-;; than leaving it pointing at the value the binding
-;; started with. Without this, the freshly stored
-;; value has no GC root at all for the rest of the
+;; **The store is the whole of it now** (Phase C1).
+;; A `kind = 2` name used to need a second step: its
+;; slot carried the GC-root stack index its root had
+;; been pushed at, and `setf` had to rewrite *that
+;; root* (`rt_set_sexpr_root`) or the freshly stored
+;; value would have no root for the rest of the
 ;; binding's scope — `typelisp-rt`'s
 ;; `a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
-;; test demonstrates the resulting corruption directly.
+;; demonstrated exactly that corruption.
+;;
+;; The root stack held a *copy*, which is why writing
+;; the slot was not enough. A frame slot is not a copy
+;; — the collector reads the slot itself — so storing
+;; into it roots the new value by the same act. The
+;; second word, the index, and the second call are all
+;; gone, and with them the class of bug that test
+;; names.
 (defun compile-set ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
@@ -4127,13 +4002,6 @@ pub const SOURCE: &str = r#"
       (match (get env nm)
         ((Some slot)
          (store-arg builder slot 0 v)
-         (if (eq kind 2)
-             (let* ((root-idx (load-raw builder slot 1))
-                    (args-ptr (alloca-args builder 2)))
-               (store-arg builder args-ptr 0 root-idx)
-               (store-arg builder args-ptr 1 v)
-               (let ((ignored (build-call builder (get-function m "rt_set_sexpr_root") args-ptr 2))) ()))
-             ())
          v)
         (None (panic (append "compile-set: unbound variable " nm))))))
 
@@ -5425,11 +5293,11 @@ pub const SOURCE: &str = r#"
            (builder (llvm-builder::create)))
       (position-at-end builder b)
       (let ((env (new-env)))
+        (frame-begin builder m)
         (bind-params env builder m f param-names 0)
-        (retain-bindings builder m env param-names)
         (let* ((fn-env (new-fn-env))
                (v (compile-value m name builder env fn-env '() f (Option::none) (Option::none) (Option::none) "" (scope::new) (scope::new) (Option::none) (Option::none) body)))
-          (release-bindings builder m env param-names)
+          (frame-end builder m)
 (build-ret builder v)
 m))))
 

@@ -357,6 +357,11 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
     // call, even from a test driving the raw builtins directly rather than
     // going through `Interp::compile_function`, must hold this.
     let _guard = COMPILE_LOCK.lock().unwrap();
+    // Every compiled function allocates its activation record on the GC heap
+    // now (Phase C1), so running one needs a heap registered — a compiled
+    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
@@ -384,6 +389,11 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
         r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int-any-width 0 5))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    // Every compiled function allocates its activation record on the GC heap
+    // now (Phase C1), so running one needs a heap registered — a compiled
+    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
@@ -422,6 +432,11 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    // Every compiled function allocates its activation record on the GC heap
+    // now (Phase C1), so running one needs a heap registered — a compiled
+    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
@@ -857,6 +872,11 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
         "#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    // Every compiled function allocates its activation record on the GC heap
+    // now (Phase C1), so running one needs a heap registered — a compiled
+    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
@@ -1811,6 +1831,11 @@ fn the_compiler_body_compiles_an_integer_comparison() {
               '(assoc "i32" "<" true (0 var "a" false) (0 var "b" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    // Every compiled function allocates its activation record on the GC heap
+    // now (Phase C1), so running one needs a heap registered — a compiled
+    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
     let lt = unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("lt").expect("failed to look up `lt`") };
     assert_eq!(unsafe { lt.call([3, 5].as_ptr(), 2) }, 1);
@@ -1849,6 +1874,11 @@ fn the_compiler_body_compiles_an_if_expression() {
                    (var "b" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    // Every compiled function allocates its activation record on the GC heap
+    // now (Phase C1), so running one needs a heap registered — a compiled
+    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
     let maxab =
         unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("maxab").expect("failed to look up `maxab`") };
@@ -1870,6 +1900,11 @@ fn let_shadowing_is_correctly_restored_after_the_let_ends() {
                  (0 var "x" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    // Every compiled function allocates its activation record on the GC heap
+    // now (Phase C1), so running one needs a heap registered — a compiled
+    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
     let f = unsafe {
         engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("shadow_test").expect("failed to look up `shadow_test`")
@@ -6110,6 +6145,11 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
         body
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    // Every compiled function allocates its activation record on the GC heap
+    // now (Phase C1), so running one needs a heap registered — a compiled
+    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
@@ -6139,6 +6179,11 @@ fn the_island_compiles_a_bridged_let_and_if() {
         body
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    // Every compiled function allocates its activation record on the GC heap
+    // now (Phase C1), so running one needs a heap registered — a compiled
+    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
@@ -6277,6 +6322,11 @@ fn the_island_runs_a_bridged_labels_block() {
         &body,
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    // Every compiled function allocates its activation record on the GC heap
+    // now (Phase C1), so running one needs a heap registered — a compiled
+    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
@@ -6387,6 +6437,12 @@ fn the_island_runs_a_whole_bridged_defun() {
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
         &name, &params, &body,
     )));
+    // The bridging heap `h` is dropped above, and a compiled function now
+    // allocates its activation record on the heap (Phase C1) — so the call
+    // below needs one that is alive, not the dangling `ACTIVE_HEAP` the drop
+    // leaves behind.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -6823,14 +6879,14 @@ fn a_frames_size_is_patched_in_once_the_body_is_emitted() {
             (position-at-end builder b)
             ;; Three slots: raw, collectable, raw. Only the middle is masked,
             ;; so the mask has to track the index rather than the call order.
-            (let* ((ignored-frame (frame-begin builder m))
-                   (s0 (frame-slot builder))
+            (frame-begin builder m)
+            (let* ((s0 (frame-slot builder))
                    (s1 (frame-slot-rooted builder m))
                    (s2 (frame-slot builder)))
               (store-arg builder s0 0 (const-word builder 100))
               (store-arg builder s1 0 (load-arg builder f 0))
               (store-arg builder s2 0 (const-word builder 300))
-              (frame-end builder)
+              (frame-end builder m)
               (build-ret builder (const-word builder 0)))
             m))
         (build-sized-frame-module)

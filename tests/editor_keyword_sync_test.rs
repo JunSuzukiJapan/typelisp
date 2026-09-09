@@ -109,8 +109,13 @@ fn is_excluded(name: &str) -> bool {
     // code, but it is this repository's own compiler internals rather than
     // anything a user writes, and listing ~90 `build-*` names would drown the
     // real catalog.
-    const ISLAND_PREFIXES: [&str; 6] =
-        ["build-", "llvm-", "const-", "load-", "store-", "position-"];
+    //
+    // `frame-*` is the compiled frame under construction (Phase C1) — the
+    // slot allocator and the prologue/epilogue pair. Nothing outside
+    // `compiler.rs`'s SOURCE can call one: they read and write state keyed on
+    // the builder of the function being built.
+    const ISLAND_PREFIXES: [&str; 7] =
+        ["build-", "llvm-", "const-", "load-", "store-", "position-", "frame-"];
     const ISLAND_EXACT: [&str; 14] = [
         "add-function",
         "add-function-with-env",
