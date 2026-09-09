@@ -410,6 +410,11 @@ pub(super) enum Waiting {
     /// Nothing: the task gave up the rest of its turn — `(yield)`. It goes
     /// straight back onto the queue, behind whatever is already waiting.
     Yield,
+    /// The clock — `(sleep secs)`. **This stops the task, not the thread**:
+    /// everything else keeps running, and the program only reaches the OS's
+    /// `sleep` when nothing at all is ready, for as long as the nearest
+    /// deadline. `after` will ride on the same mechanism.
+    Until(std::time::Instant),
 }
 
 impl Task {
@@ -479,6 +484,10 @@ pub(crate) struct Scheduler {
     /// there is a Rust frame waiting on its result, and no continuation stack
     /// underneath it to come back to.
     driving: bool,
+    /// How many tasks are `Waiting::Until`. Only a count, so the common case —
+    /// nobody sleeping — costs one comparison per task switch instead of a
+    /// walk over every slot.
+    sleeping: usize,
     /// Whether to look at another task after **every single step**, rather
     /// than letting the running one keep going until it yields, waits or
     /// finishes.
@@ -573,6 +582,20 @@ impl Scheduler {
                 self.ready.push_back(id);
                 return Ok(());
             }
+            // A deadline that has already passed is not a wait at all — which
+            // is what makes `(sleep 0.0)` CL's yield-ish zero, with no special
+            // case for it anywhere.
+            Waiting::Until(t) => {
+                if t <= std::time::Instant::now() {
+                    slot.task.state = State::Apply(Value::Empty);
+                    self.slots[id.0] = Slot::Parked(slot);
+                    self.ready.push_back(id);
+                } else {
+                    self.sleeping += 1;
+                    self.slots[id.0] = Slot::Blocked(slot, w);
+                }
+                return Ok(());
+            }
             Waiting::Task(on) => on,
         };
         match self.slots.get(on.0) {
@@ -622,6 +645,46 @@ impl Scheduler {
                 self.ready.push_back(TaskId(i));
             }
         }
+    }
+
+    /// Puts every sleeping task whose deadline has passed back on the queue.
+    ///
+    /// Called before each task switch rather than only when nothing is ready:
+    /// a task that asked for 10ms while another runs for a second should be
+    /// runnable again after 10ms, not after the second.
+    fn wake_due(&mut self) {
+        if self.sleeping == 0 {
+            return;
+        }
+        let now = std::time::Instant::now();
+        for i in 0..self.slots.len() {
+            if !matches!(&self.slots[i], Slot::Blocked(_, Waiting::Until(t)) if *t <= now) {
+                continue;
+            }
+            if let Slot::Blocked(mut slot, _) = std::mem::replace(&mut self.slots[i], Slot::Running) {
+                slot.task.state = State::Apply(Value::Empty);
+                self.slots[i] = Slot::Parked(slot);
+                self.ready.push_back(TaskId(i));
+                self.sleeping -= 1;
+            }
+        }
+    }
+
+    /// The nearest deadline any task is sleeping until.
+    ///
+    /// `None` means nobody is: with nothing ready either, every remaining task
+    /// is waiting on something that will never happen.
+    fn earliest_deadline(&self) -> Option<std::time::Instant> {
+        if self.sleeping == 0 {
+            return None;
+        }
+        self.slots
+            .iter()
+            .filter_map(|s| match s {
+                Slot::Blocked(_, Waiting::Until(t)) => Some(*t),
+                _ => None,
+            })
+            .min()
     }
 
     /// The value a finished task answered with, for a caller that drove the
@@ -816,6 +879,7 @@ impl Interp {
                         match w {
                             Waiting::Task(_) => "`wait`",
                             Waiting::Yield => "`yield`",
+                            Waiting::Until(_) => "`sleep`",
                         }
                     )))
                 }
@@ -832,12 +896,29 @@ impl Interp {
     fn drive(&self, heap: &mut Heap, main: TaskId) -> Result<Value, EvalError> {
         let home = heap.current_root_stack();
         loop {
-            let Some((id, mut slot)) = self.scheduler.borrow_mut().next_ready() else {
-                // `main` has not finished and nothing can run: every remaining
-                // task is waiting on something that will never happen.
-                return Err(EvalError::Internal(
-                    "scheduler: every task is blocked and none can proceed".to_string(),
-                ));
+            let (id, mut slot) = loop {
+                self.scheduler.borrow_mut().wake_due();
+                let taken = self.scheduler.borrow_mut().next_ready();
+                if let Some(t) = taken {
+                    break t;
+                }
+                // Nothing can run. If a task is sleeping, what it waits for is
+                // the clock — so **this** is the one place the program reaches
+                // the OS's `sleep`, and only for as long as the nearest
+                // deadline. That is the difference between stopping a task and
+                // stopping the thread.
+                let Some(deadline) = self.scheduler.borrow().earliest_deadline() else {
+                    // `main` has not finished and nothing can run: every
+                    // remaining task is waiting on something that will never
+                    // happen.
+                    return Err(EvalError::Internal(
+                        "scheduler: every task is blocked and none can proceed".to_string(),
+                    ));
+                };
+                let now = std::time::Instant::now();
+                if deadline > now {
+                    std::thread::sleep(deadline - now);
+                }
             };
             heap.switch_to_root_stack(slot.roots);
             let every_step = self.scheduler.borrow().switch_every_step;
@@ -1421,6 +1502,28 @@ impl Interp {
         Ok(typelisp_rt::encode(handle))
     }
 
+    /// `(sleep secs)` — suspend **this task** until `secs` from now.
+    ///
+    /// Zero is CL's yield-ish zero and falls out of the deadline already
+    /// having passed: `Scheduler::block` puts such a task straight back on the
+    /// queue, which is exactly `yield`.
+    fn sleep_until(&self, heap: &Heap, argv: &[Value]) -> Result<(State, Option<Frame>), EvalError> {
+        let v = argv
+            .first()
+            .copied()
+            .ok_or_else(|| EvalError::Internal("eval: (sleep) has no argument".to_string()))?;
+        let secs = super::rt_f64(heap, &v)?;
+        // The same refusal `typelisp_rt::sys_builtin::sleep` makes, in the same
+        // words: CL calls a negative or NaN wait an error, and there is no
+        // duration to build from one.
+        if !(secs >= 0.0) {
+            return Err(EvalError::Panic(format!("sleep: {} is not a non-negative number of seconds", secs)));
+        }
+        let d = std::time::Duration::try_from_secs_f64(secs)
+            .map_err(|_| EvalError::Panic(format!("sleep: {} is longer than this can wait", secs)))?;
+        Ok((State::Blocked(Waiting::Until(std::time::Instant::now() + d)), None))
+    }
+
     /// Hands a fully-evaluated call over to a new task, and returns its handle.
     fn spawn_task(
         &self,
@@ -1570,6 +1673,13 @@ impl Interp {
         // has to say "stop here" instead.
         if path == crate::Path::root("yield") {
             return Ok((State::Blocked(Waiting::Yield), None));
+        }
+        // `(sleep secs)` is the same shape: it has to say "not before then",
+        // which no builtin's return value can. Intercepted here rather than
+        // left to `eval_builtin`, whose implementation stops the whole OS
+        // thread — with tasks, that would stop every one of them.
+        if path == crate::Path::root("sleep") {
+            return self.sleep_until(heap, &argv);
         }
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
             return self.enter_fn(heap, &f, argv);

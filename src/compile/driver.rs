@@ -640,6 +640,16 @@ pub(crate) fn precheck_compilable(interp: &Interp, heap: &Heap, name: &str) -> R
 /// the graph [`crate::eval::interp::Interp::compute_sccs`] walks. Shared by that graph walk and
 /// [`crate::eval::interp::Interp::compile_scc`] (which needs the same edges again, in typed
 /// form, to know what to forward-declare/wire as `externals`).
+/// The free functions that **suspend the running task**, and so cannot be
+/// compiled — see the refusal in [`call_graph_edges`].
+///
+/// `sleep` is here because with tasks it stops *the task*, not the thread
+/// (`core_cps`'s `Waiting::Until`). Compiled it could only ever stop the
+/// thread, so the same source would mean two different things depending on
+/// whether it had been through `(compile ...)` — silently. `task::wait` is
+/// the method-shaped member of the same set and is matched separately.
+const SUSPENDING_CALLS: &[&str] = &["yield", "sleep"];
+
 pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Result<Vec<CallEdge>, EvalError> {
     let path = fn_path_from_node_name(name);
     let method_key = interp.method_key(name);
@@ -663,7 +673,7 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
     let suspends = targets
         .calls
         .iter()
-        .find(|p| **p == Path::root("yield"))
+        .find(|p| SUSPENDING_CALLS.iter().any(|n| **p == Path::root(n)))
         .map(|p| p.to_string())
         .or_else(|| {
             targets

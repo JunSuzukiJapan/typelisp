@@ -459,3 +459,64 @@ fn yield_refuses_to_compile_and_says_why() {
     assert!(e.contains("suspends the running task"), "got {}", e);
     assert!(e.contains("`yield`"), "got {}", e);
 }
+
+// ---- sleep ---------------------------------------------------------------
+
+/// `(sleep secs)` stops **the task**, not the OS thread.
+///
+/// The ordering is the discriminator, and it needs no clock: `a` is spawned
+/// first and waited on first, but sleeps four times as long. If `sleep` held
+/// the thread, `a` would run to its end before `b` ever started and the trail
+/// would be "ab". Both tasks park instead, and the nearer deadline wins.
+#[test]
+fn sleep_suspends_only_the_calling_task() {
+    assert_eq!(
+        text(r#"(defvar (trail string) "")
+                (defun slow ((name string) (sec f64)) ()
+                  (progn (sleep sec)
+                         (when true (setf trail (append trail name)))))
+                (let ((a (go (slow "a" 0.20))) (b (go (slow "b" 0.05))))
+                  (progn (wait a) (wait b) trail))"#),
+        "ba"
+    );
+}
+
+/// A deadline that has already passed is not a wait at all, so CL's yield-ish
+/// `(sleep 0)` falls out with no special case: the task goes straight back on
+/// the queue, which is exactly what `yield` does.
+#[test]
+fn sleep_zero_is_a_yield() {
+    assert_eq!(
+        text(r#"(defvar (trail string) "")
+                (defun tick ((name string) (n i32)) ()
+                  (dotimes (i n)
+                    (setf trail (append trail name))
+                    (sleep 0.0)))
+                (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
+                  (progn (wait a) (wait b)))
+                trail"#),
+        "ababab"
+    );
+}
+
+/// A lone task still waits — nothing else is ready, so the *program* waits,
+/// and it is the scheduler that reaches the OS rather than the `sleep` call.
+#[test]
+fn a_lone_sleeper_still_waits_and_comes_back() {
+    assert_eq!(int("(progn (sleep 0.01) 7)"), 7);
+}
+
+/// `sleep` refuses to compile, for the reason `wait` and `yield` do.
+///
+/// It is the one of the three that *could* have been left alone — compiled
+/// code has always had `rt_sleep`. That is exactly the problem: the same
+/// source would stop one task interpreted and the whole program compiled.
+#[test]
+fn sleep_refuses_to_compile_and_says_why() {
+    let e = compile_err(
+        r#"(defun nap () () (sleep 0.01))
+           (compile nap)"#,
+    );
+    assert!(e.contains("suspends the running task"), "got {}", e);
+    assert!(e.contains("`sleep`"), "got {}", e);
+}
