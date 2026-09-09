@@ -91,6 +91,7 @@ fn call_kind(heap: &Heap, call: Value) -> Result<ArgsKind, EvalError> {
         Some(Op::Call) => Ok(ArgsKind::Call),
         Some(Op::Assoc) => Ok(ArgsKind::Assoc),
         Some(Op::DynCall) => Ok(ArgsKind::DynCall),
+        Some(Op::Apply) => Ok(ArgsKind::Apply),
         other => Err(EvalError::Internal(format!(
             "eval: (go ..) wraps {:?}, which is not a call",
             other
@@ -100,10 +101,16 @@ fn call_kind(heap: &Heap, call: Value) -> Result<ArgsKind, EvalError> {
 
 /// Which node an `Args` frame is collecting arguments for.
 ///
-/// Four core forms share one shape — a run of argument forms at a fixed offset,
+/// Five core forms share one shape — a run of argument forms at a fixed offset,
 /// evaluated left to right — and differ only in what happens once they are all
 /// in hand. The leading fields they skip are the checker's and the bridge's
 /// (names, paths, representations); evaluation is uniform over `Value`.
+///
+/// `Apply` is the odd one: its callee is a *form* at field 0 rather than a name
+/// the checker resolved, so it needs its own two frames to evaluate that first.
+/// Once the callee is a value it rejoins this path with the callee riding at
+/// the head of `argv` — which is what lets `go` hand an `apply` over to a task
+/// with no second `Enter` state.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ArgsKind {
     /// `(call WRITTEN HOME PATH (R...) ARG...)`
@@ -114,6 +121,9 @@ enum ArgsKind {
     Assoc,
     /// `(dyn-call PATH SYM SLOT VTABLE (R...) ARG...)`
     DynCall,
+    /// `(apply CALLEE RET-REPR (R...) ARG...)`, with the *evaluated* callee at
+    /// the head of the argument run rather than field 0's form.
+    Apply,
 }
 
 impl ArgsKind {
@@ -124,6 +134,7 @@ impl ArgsKind {
             ArgsKind::Construct => 5,
             ArgsKind::Assoc => 7,
             ArgsKind::DynCall => 5,
+            ArgsKind::Apply => 3,
         }
     }
 
@@ -133,6 +144,7 @@ impl ArgsKind {
             ArgsKind::Construct => "construct",
             ArgsKind::Assoc => "assoc",
             ArgsKind::DynCall => "dyn-call",
+            ArgsKind::Apply => "apply",
         }
     }
 }
@@ -183,9 +195,9 @@ enum Frame {
     /// `(dyn-upcast PATH E)` — waiting on the trait object to re-view.
     DynUpcast { form: Value },
     /// `(apply E RET-R (R...) E...)` — waiting on the callee.
-    ApplyCallee { form: Value, env: Value },
+    ApplyCallee { form: Value, env: Value, spawn: bool },
     /// `(apply E RET-R (R...) E...)` — waiting on one argument, callee in hand.
-    ApplyArgs { form: Value, callee: Value, done: Vec<Value>, env: Value },
+    ApplyArgs { form: Value, callee: Value, done: Vec<Value>, env: Value, spawn: bool },
     /// `(match E R (P E...) ...)` — waiting on the scrutinee. The first arm
     /// whose pattern matches wins.
     MatchArms { form: Value, env: Value },
@@ -268,7 +280,7 @@ impl CpsStack {
                 heap.push_root(*env);
             }
             Frame::Set { env, .. } => heap.push_root(*env),
-            Frame::ApplyArgs { form, callee, done, env } => {
+            Frame::ApplyArgs { form, callee, done, env, .. } => {
                 heap.push_root(*form);
                 heap.push_root(*callee);
                 heap.push_root(*env);
@@ -276,7 +288,7 @@ impl CpsStack {
                     heap.push_root(*v);
                 }
             }
-            Frame::ApplyCallee { form, env } | Frame::MatchArms { form, env } | Frame::FieldSetObj { form, env } => {
+            Frame::ApplyCallee { form, env, .. } | Frame::MatchArms { form, env } | Frame::FieldSetObj { form, env } => {
                 heap.push_root(*form);
                 heap.push_root(*env);
             }
@@ -721,18 +733,6 @@ fn arg_forms(heap: &Heap, form: Value, kind: ArgsKind) -> Result<Vec<Value>, Eva
     Ok(fields[skip..].to_vec())
 }
 
-/// The argument forms of an `(apply E RET-R (R...) E...)` node.
-///
-/// Unlike the `Args` kinds, the callee is field 0 rather than part of the run,
-/// so this node needs its own pair of frames.
-fn apply_arg_forms(heap: &Heap, form: Value) -> Result<Vec<Value>, EvalError> {
-    let fields = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (apply ..): {}", e)))?;
-    if fields.len() < 3 {
-        return Err(EvalError::Internal(format!("eval: malformed apply: {}", core::print(heap, form))));
-    }
-    Ok(fields[3..].to_vec())
-}
-
 /// A `let` binding's name and initialiser.
 ///
 /// A binding is `(SYM R E)` — a plain three-element list, not a tagged node,
@@ -994,8 +994,20 @@ impl Interp {
             Op::Go => {
                 let call = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (go ..) has no call".to_string()))?;
-                let kind = call_kind(heap, call)?;
-                self.start_args(heap, stack, call, env, kind, true, loc)
+                match call_kind(heap, call)? {
+                    // `(go (f x))` where `f` is a *value*: the callee is a form
+                    // like any argument and is evaluated here, in the starting
+                    // task, exactly as `go`'s rule says every part of the call
+                    // is. Only the application itself moves.
+                    ArgsKind::Apply => {
+                        let callee = core::field(heap, call, 0).ok_or_else(|| {
+                            EvalError::Internal("eval: (apply ..) has no callee".to_string())
+                        })?;
+                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: true }, loc.clone());
+                        Ok(State::Eval(callee, env))
+                    }
+                    kind => self.start_args(heap, stack, call, env, kind, true, loc),
+                }
             }
 
             Op::If => {
@@ -1104,7 +1116,7 @@ impl Interp {
             Op::Apply => {
                 let callee = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no callee".to_string()))?;
-                stack.push(heap, Frame::ApplyCallee { form, env }, loc.clone());
+                stack.push(heap, Frame::ApplyCallee { form, env, spawn: false }, loc.clone());
                 Ok(State::Eval(callee, env))
             }
 
@@ -1305,7 +1317,34 @@ impl Interp {
             ArgsKind::Construct => self.finish_construct(heap, form, argv),
             ArgsKind::Assoc => self.finish_assoc(heap, form, argv),
             ArgsKind::DynCall => self.finish_dyn_call(heap, form, argv),
+            ArgsKind::Apply => {
+                let mut it = argv.into_iter();
+                let callee = it
+                    .next()
+                    .ok_or_else(|| EvalError::Internal("eval: (apply ..) lost its callee".to_string()))?;
+                self.finish_apply(heap, form, callee, it.collect())
+            }
         }
+    }
+
+    /// The callee and every argument of an `apply` are in hand — so either the
+    /// application happens, or `go` hands it to a task.
+    ///
+    /// **The callee rides at the head of the argument list from here on.** That
+    /// is what lets an `apply` reach `State::Enter`, whose two root slots hold
+    /// one form and one list and have no third place to put a callee.
+    fn finish_apply_args(
+        &self,
+        heap: &mut Heap,
+        form: Value,
+        callee: Value,
+        args: Vec<Value>,
+        spawn: bool,
+    ) -> Result<(State, Option<Frame>), EvalError> {
+        let mut argv = Vec::with_capacity(args.len() + 1);
+        argv.push(callee);
+        argv.extend(args);
+        self.finish_args(heap, form, argv, ArgsKind::Apply, spawn)
     }
 
     /// Hands a fully-evaluated call over to a new task, and returns its handle.
@@ -1769,25 +1808,25 @@ impl Interp {
             // An unnamed callee — `((make-adder 1) 2)` — has no binding
             // keeping its box alive while the arguments allocate, so the
             // frame roots it.
-            Frame::ApplyCallee { form, env } => {
-                let args = apply_arg_forms(heap, form)?;
+            Frame::ApplyCallee { form, env, spawn } => {
+                let args = arg_forms(heap, form, ArgsKind::Apply)?;
                 match args.first() {
                     Some(&first) => Ok((
                         State::Eval(first, env),
-                        Some(Frame::ApplyArgs { form, callee: v, done: Vec::new(), env }),
+                        Some(Frame::ApplyArgs { form, callee: v, done: Vec::new(), env, spawn }),
                     )),
-                    None => self.finish_apply(heap, form, v, Vec::new()),
+                    None => self.finish_apply_args(heap, form, v, Vec::new(), spawn),
                 }
             }
-            Frame::ApplyArgs { form, callee, mut done, env } => {
+            Frame::ApplyArgs { form, callee, mut done, env, spawn } => {
                 done.push(v);
-                let args = apply_arg_forms(heap, form)?;
+                let args = arg_forms(heap, form, ArgsKind::Apply)?;
                 match args.get(done.len()) {
                     Some(&next) => Ok((
                         State::Eval(next, env),
-                        Some(Frame::ApplyArgs { form, callee, done, env }),
+                        Some(Frame::ApplyArgs { form, callee, done, env, spawn }),
                     )),
-                    None => self.finish_apply(heap, form, callee, done),
+                    None => self.finish_apply_args(heap, form, callee, done, spawn),
                 }
             }
 

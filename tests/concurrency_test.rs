@@ -282,3 +282,50 @@ fn without_yield_each_task_runs_to_its_end() {
 fn yield_with_nothing_else_ready_is_a_no_op() {
     assert_eq!(int("(progn (yield) 7)"), 7);
 }
+
+// ---- the callee can be a value ------------------------------------------
+
+/// `go` takes a *function value* too, not only a name the checker resolved.
+///
+/// The checker turns that into an `apply` node, whose callee is a form at
+/// field 0 rather than a resolved path — so it needs its callee evaluated
+/// before there is anything to hand over. It used to type-check and then fail
+/// at run time with "(go ..) wraps Some(Apply), which is not a call".
+#[test]
+fn go_starts_a_task_from_a_function_value() {
+    assert_eq!(
+        int(r#"(defun twice ((n i32)) i32 (* n 2))
+               (let ((f twice))
+                 (let ((t (go (f 21))))
+                   (wait t)))"#),
+        42
+    );
+}
+
+/// `(go ((lambda () RetType body...)))` — the idiom `go`'s own error message
+/// tells you to use when the body is not already a call.
+#[test]
+fn go_runs_an_immediately_called_lambda() {
+    assert_eq!(
+        text(r#"(defvar (trail string) "")
+                (let ((n 7))
+                  (let ((t (go ((lambda () () (when true (setf trail (append trail (to-string n)))))))))
+                    (progn (wait t) trail)))"#),
+        "7"
+    );
+}
+
+/// The lambda captures where it is *written*, so each turn of a loop starts a
+/// task over that turn's own binding — the capture trap `go`'s call-form rule
+/// avoids for arguments, kept for a closure body too.
+#[test]
+fn each_turn_of_a_loop_starts_a_task_over_its_own_binding() {
+    assert_eq!(
+        text(r#"(defvar (trail string) "")
+                (dotimes (i 3)
+                  (let ((t (go ((lambda () () (when true (setf trail (append trail (to-string i)))))))))
+                    (wait t)))
+                trail"#),
+        "012"
+    );
+}
