@@ -58,6 +58,10 @@ enum State {
     /// `argv` is a heap list rather than a `Vec` so the two state slots can
     /// root it — a `Vec<Value>` in a Rust local is invisible to the collector.
     Enter { form: Value, argv: Value, kind: ArgsKind },
+    /// Suspended until something else happens. The scheduler owns this task
+    /// from here; whatever it was waiting for arrives as the `Apply` that
+    /// replaces this state.
+    Blocked(Waiting),
     /// A non-local exit is in flight. Discard frames until one claims it.
     ///
     /// This is where `break`/`return`/`return-from`/`throw` live. The value
@@ -362,9 +366,22 @@ struct Task {
 enum Progress {
     /// Still running. Step it again.
     Running,
+    /// Suspended. The task keeps its frames and its roots; the scheduler puts
+    /// it back on the queue when what it waits for has happened.
+    Blocked(Waiting),
     /// Finished: the continuation stack ran out. The result is rooted in the
     /// state slots until the caller truncates them.
     Done(Result<Value, EvalError>),
+}
+
+/// What a suspended task is waiting for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Waiting {
+    /// Another task's result — `(wait t)`.
+    Task(TaskId),
+    /// Nothing: the task gave up the rest of its turn — `(yield)`. It goes
+    /// straight back onto the queue, behind whatever is already waiting.
+    Yield,
 }
 
 impl Task {
@@ -428,6 +445,10 @@ pub(crate) struct Scheduler {
     slots: Vec<Slot>,
     /// Ids ready to run, oldest first.
     ready: std::collections::VecDeque<TaskId>,
+    /// Where finished tasks' results are rooted: position `i` holds task `i`'s
+    /// value. Created on the first `finish`, and never truncated — see
+    /// [`Slot::Done`] for why a result outlives its task.
+    roots: Option<RootStackId>,
     /// Whether a `drive` loop is on the Rust stack. A *nested* `eval_cps` — a
     /// compiled callee re-entering, or `Interp::apply` — must not switch tasks:
     /// there is a Rust frame waiting on its result, and no continuation stack
@@ -448,6 +469,17 @@ enum Slot {
     Parked(TaskSlot),
     /// A task that is taken out to be stepped.
     Running,
+    /// A task that cannot run until `Waiting` is satisfied. It goes back to
+    /// `Parked` — and onto the queue — when that happens.
+    Blocked(TaskSlot, Waiting),
+    /// A task that finished, and the value it answered with.
+    ///
+    /// **Kept for the life of the program**, because `wait` may be asked again
+    /// at any time and has to give the same answer. A program that spawns
+    /// without bound therefore accumulates one of these per task — the v1
+    /// limit. Tying the result's lifetime to its handle's instead needs the
+    /// collector to tell the scheduler when a handle dies.
+    Done(Value),
 }
 
 impl Default for Slot {
@@ -487,9 +519,102 @@ impl Scheduler {
         self.ready.push_back(id);
     }
 
-    /// Frees a finished task's position.
+    /// Frees a task's position entirely — for the main task, whose result goes
+    /// back to the caller rather than being kept for a `wait`.
     fn retire(&mut self, id: TaskId) {
         self.slots[id.0] = Slot::Empty;
+    }
+
+    /// Suspends `id` until `w` is satisfied — or puts it straight back on the
+    /// queue if it already is.
+    fn block(&mut self, id: TaskId, mut slot: TaskSlot, w: Waiting) -> Result<(), EvalError> {
+        let on = match w {
+            // Nothing to wait for: straight back onto the queue, behind
+            // everything already on it. That is the whole of `yield`.
+            Waiting::Yield => {
+                slot.task.state = State::Apply(Value::Empty);
+                self.slots[id.0] = Slot::Parked(slot);
+                self.ready.push_back(id);
+                return Ok(());
+            }
+            Waiting::Task(on) => on,
+        };
+        match self.slots.get(on.0) {
+            // Already finished: nothing to wait for.
+            Some(Slot::Done(v)) => {
+                slot.task.state = State::Apply(*v);
+                self.slots[id.0] = Slot::Parked(slot);
+                self.ready.push_back(id);
+                Ok(())
+            }
+            Some(Slot::Parked(_)) | Some(Slot::Running) | Some(Slot::Blocked(..)) => {
+                self.slots[id.0] = Slot::Blocked(slot, w);
+                Ok(())
+            }
+            // The handle named a position nothing lives at. Only the main
+            // task's position is ever freed, and no `Task<T>` names it.
+            Some(Slot::Empty) | None => Err(EvalError::Internal(format!(
+                "wait: {:?} is not a live task",
+                on
+            ))),
+        }
+    }
+
+    /// Records `id`'s result and wakes everything that was waiting for it.
+    ///
+    /// The value is rooted in the scheduler's own stack first: it has outlived
+    /// the task's stack, and the tasks being woken will not touch it until they
+    /// are stepped.
+    fn finish(&mut self, heap: &mut Heap, id: TaskId, v: Value) {
+        let sched = *self.roots.get_or_insert_with(|| heap.new_root_stack());
+        let home = heap.current_root_stack();
+        heap.switch_to_root_stack(sched);
+        while heap.root_count() <= id.0 {
+            heap.push_root(Value::Empty);
+        }
+        heap.set_root(id.0, v);
+        heap.switch_to_root_stack(home);
+
+        self.slots[id.0] = Slot::Done(v);
+        for i in 0..self.slots.len() {
+            if !matches!(&self.slots[i], Slot::Blocked(_, Waiting::Task(on)) if *on == id) {
+                continue;
+            }
+            if let Slot::Blocked(mut slot, _) = std::mem::replace(&mut self.slots[i], Slot::Running) {
+                slot.task.state = State::Apply(v);
+                self.slots[i] = Slot::Parked(slot);
+                self.ready.push_back(TaskId(i));
+            }
+        }
+    }
+}
+
+/// The scheduler id inside a `Task<T>` handle.
+///
+/// The handle is a boxed struct with the id in field 0 and nothing else — see
+/// `task_handle`. Nothing in the language can build one, so a value of the
+/// wrong shape here means the evaluator built it wrong.
+fn task_id_of(heap: &Heap, v: Option<Value>) -> Result<TaskId, EvalError> {
+    match v {
+        Some(Value::Boxed(id)) if heap.struct_field_count(id) == 1 => {
+            match heap.struct_field(id, 0) {
+                Value::Int(n) if n >= 0 => Ok(TaskId(n as usize)),
+                other => Err(EvalError::Internal(format!("wait: a task handle holds {:?}", other))),
+            }
+        }
+        other => Err(EvalError::Internal(format!("wait: {:?} is not a task handle", other))),
+    }
+}
+
+/// What a task's failure does to the program.
+///
+/// A `throw` that leaves a task has no catch to reach — a tag does not cross a
+/// task boundary — and a panic is not recoverable by definition. Either way the
+/// program stops, which is Go's rule for an unrecovered panic in a goroutine.
+fn escaped_task_failure(e: EvalError) -> EvalError {
+    match e {
+        EvalError::Throw(tag, _) => EvalError::Panic(format!("`throw` of `{}` left its task", tag)),
+        other => other,
     }
 }
 
@@ -541,6 +666,13 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         State::Enter { form, argv, .. } => {
             heap.set_root(sbase, *argv);
             heap.set_root(sbase + 1, *form);
+        }
+        // A blocked task carries nothing in the state slots. What its frames
+        // hold is rooted by the frames, in this task's own stack, which stays
+        // exactly as it is while the task waits.
+        State::Blocked(_) => {
+            heap.set_root(sbase, Value::Empty);
+            heap.set_root(sbase + 1, Value::Empty);
         }
         State::Apply(v) => {
             heap.set_root(sbase, *v);
@@ -668,6 +800,18 @@ impl Interp {
             match self.step_task(heap, &mut task) {
                 Progress::Running => {}
                 Progress::Done(r) => break r,
+                // There is a Rust frame waiting on this evaluation, so there is
+                // nothing to switch *to*: suspending would strand it. Refused
+                // rather than deadlocked — see the plan's B6.
+                Progress::Blocked(w) => {
+                    break Err(EvalError::Panic(format!(
+                        "{} cannot block: it was reached from compiled code, which has no continuation stack to suspend",
+                        match w {
+                            Waiting::Task(_) => "`wait`",
+                            Waiting::Yield => "`yield`",
+                        }
+                    )))
+                }
             }
         };
         heap.truncate_roots(task.sbase);
@@ -700,17 +844,25 @@ impl Interp {
                     heap.switch_to_root_stack(home);
                     self.scheduler.borrow_mut().put_back(id, slot);
                 }
+                Progress::Blocked(w) => {
+                    heap.switch_to_root_stack(home);
+                    self.scheduler.borrow_mut().block(id, slot, w)?;
+                }
                 Progress::Done(r) => {
                     heap.truncate_roots(slot.task.sbase);
                     heap.switch_to_root_stack(home);
                     heap.drop_root_stack(slot.roots);
-                    self.scheduler.borrow_mut().retire(id);
                     if id == main {
+                        // The caller takes this result, so nothing keeps it —
+                        // main's position is freed rather than kept for a
+                        // `wait`, and no `Task<T>` names it.
+                        self.scheduler.borrow_mut().retire(id);
                         return r;
                     }
-                    // Another task finished. Its result has nowhere to go until
-                    // `wait` exists to ask for it.
-                    drop(r);
+                    match r {
+                        Ok(v) => self.scheduler.borrow_mut().finish(heap, id, v),
+                        Err(e) => return Err(escaped_task_failure(e)),
+                    }
                 }
             }
         }
@@ -754,6 +906,12 @@ impl Interp {
                     Err(e) => State::Unwind(place(e, loc)),
                 }
             }
+            // Only the scheduler moves a task out of this, by replacing the
+            // state with the value it was waiting for.
+            State::Blocked(w) => {
+                task.state = State::Blocked(w);
+                return Progress::Blocked(w);
+            }
             State::Unwind(e) => match task.stack.pop() {
                 None => return Progress::Done(Err(e)),
                 Some((frame, fbase, loc)) => {
@@ -791,6 +949,10 @@ impl Interp {
             },
         };
         set_state(heap, task.sbase, &next);
+        if let State::Blocked(w) = next {
+            task.state = next;
+            return Progress::Blocked(w);
+        }
         task.state = next;
         Progress::Running
     }
@@ -834,6 +996,9 @@ impl Interp {
                 heap.switch_to_root_stack(slots[i].roots);
                 loop {
                     match self.step_task(heap, &mut slots[i].task) {
+                        Progress::Blocked(_) => unimplemented!(
+                            "run_tasks has no waiting; `Interp::drive` is the scheduler that does"
+                        ),
                         Progress::Running => {
                             if matches!(switching, Switching::EveryStep) {
                                 break;
@@ -1362,6 +1527,12 @@ impl Interp {
         let home = self.name_list(heap, form, 1, "call")?;
         let path = path_field(heap, form, 2, "call")?;
 
+        // `(yield)` gives up the rest of this turn — not a builtin, for the
+        // same reason `wait` is not: a builtin answers with a value, and this
+        // has to say "stop here" instead.
+        if path == crate::Path::root("yield") {
+            return Ok((State::Blocked(Waiting::Yield), None));
+        }
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
             return self.enter_fn(heap, &f, argv);
         }
@@ -1503,6 +1674,14 @@ impl Interp {
         // The result's runtime identity, for the built-in methods that build a
         // box: `Vector::new` has no field to read an instantiation off.
         let ret_key = str_field(heap, form, 6, "assoc")?;
+
+        // `Task<T>::wait` cannot go through `eval_builtin_method`: it may have to
+        // *suspend*, and a builtin answers with a value or an error, with no way
+        // to say "not yet". Intercepted here, where a `State` can say it.
+        if method == "wait" && type_name == crate::Path::root("task") {
+            let on = task_id_of(heap, argv.first().copied())?;
+            return Ok((State::Blocked(Waiting::Task(on)), None));
+        }
 
         let f = self.root.borrow().resolve_method(&home, &type_name, &method);
         match f {

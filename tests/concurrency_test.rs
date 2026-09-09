@@ -170,3 +170,115 @@ fn a_task_can_be_annotated_with_its_own_type() {
         5
     );
 }
+
+// ---- wait ----------------------------------------------------------------
+
+/// `(wait t)` is the task's result.
+#[test]
+fn wait_answers_with_the_task_s_value() {
+    assert_eq!(int("(defun double ((n i32)) i32 (* n 2)) (wait (go (double 21)))"), 42);
+}
+
+/// Waiting does not consume the handle: a `Task<T>` is an ordinary value, and
+/// the answer is kept, so every asker gets the same one. (Rust's
+/// `JoinHandle::join` takes `self`; this deliberately does not.)
+///
+/// The two waits take different paths: the first suspends, and the second finds
+/// the task already finished and answers without suspending at all.
+#[test]
+fn a_task_can_be_waited_on_more_than_once() {
+    assert_eq!(
+        int(r#"(defun five () i32 5)
+               (let ((t (go (five)))) (+ (wait t) (wait t)))"#),
+        10
+    );
+}
+
+/// A task waits for another task. The waiter suspends, the inner one runs, and
+/// the waiter picks up its value — the whole point of the continuation stack.
+#[test]
+fn a_task_can_wait_on_another_task() {
+    assert_eq!(
+        int(r#"(defun double ((n i32)) i32 (* n 2))
+               (defun relay ((t Task<i32>)) i32 (+ (wait t) 1))
+               (let ((inner (go (double 20))))
+                 (wait (go (relay inner))))"#),
+        41
+    );
+}
+
+/// Several tasks, each waited on in turn.
+#[test]
+fn several_tasks_are_waited_on_in_turn() {
+    assert_eq!(
+        int(r#"(defun idn ((n i32)) i32 n)
+               (let ((a (go (idn 1))) (b (go (idn 2))) (c (go (idn 4))))
+                 (+ (wait a) (+ (wait b) (wait c))))"#),
+        7
+    );
+}
+
+/// A task that dies takes the program with it: a `throw` leaving a task has no
+/// `catch` to reach, since tags do not cross a task boundary.
+#[test]
+fn a_throw_that_leaves_a_task_stops_the_program() {
+    let msg = match run(r#"(defun bad () i32 (throw 'oops 1))
+                           (let ((t (go (bad)))) 0)
+                           1"#)
+    {
+        Err(e) => format!("{:?}", e),
+        Ok(_) => panic!("expected the escaping throw to stop the program"),
+    };
+    assert!(msg.contains("left its task"), "got: {}", msg);
+}
+
+// ---- yield ---------------------------------------------------------------
+
+/// The string a program answers with.
+fn text(src: &str) -> String {
+    let (h, v) = run(src).expect("eval failed");
+    match v {
+        Value::Str(id) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
+/// `(yield)` gives up the rest of the turn, so two tasks interleave.
+///
+/// Without it each task would run to its end before the other started, and the
+/// trail would read `aaabbb`. This is the concurrency made visible.
+#[test]
+fn yield_interleaves_two_tasks() {
+    assert_eq!(
+        text(r#"(defvar (trail string) "")
+                (defun tick ((name string) (n i32)) ()
+                  (dotimes (i n)
+                    (setf trail (append trail name))
+                    (yield)))
+                (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
+                  (progn (wait a) (wait b)))
+                trail"#),
+        "ababab"
+    );
+}
+
+/// Without `yield`, each task runs to its end before the next one starts —
+/// scheduling is cooperative, and nothing preempts a task.
+#[test]
+fn without_yield_each_task_runs_to_its_end() {
+    assert_eq!(
+        text(r#"(defvar (trail string) "")
+                (defun tick ((name string) (n i32)) ()
+                  (dotimes (i n) (setf trail (append trail name))))
+                (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
+                  (progn (wait a) (wait b)))
+                trail"#),
+        "aaabbb"
+    );
+}
+
+/// A `yield` with nothing else to run comes straight back.
+#[test]
+fn yield_with_nothing_else_ready_is_a_no_op() {
+    assert_eq!(int("(progn (yield) 7)"), 7);
+}

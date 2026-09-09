@@ -144,6 +144,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "make-two-way-stream"
     "open-binary" "open-binary-input" "open-binary-output"
     "destructuring-bind" "sleep"
+    ;; concurrency: the task handle's own method, and the voluntary switch
+    "wait" "yield"
     ;; the readtable (syntax.md §11)
     "get-dispatch-macro-character" "get-macro-character"
     "set-dispatch-macro-character" "set-macro-character"

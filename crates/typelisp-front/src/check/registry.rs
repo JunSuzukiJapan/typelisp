@@ -1234,6 +1234,11 @@ fn register_system_builtins(root: &mut Namespace) {
     // a float here, so `(sleep 1)` is a type error and `(sleep 1.0)` is not
     // (the rule Rust has, and the reason the docs say so out loud).
     native("sleep", vec![Type::F64], Type::Unit);
+    // `(yield)` — give up the rest of this task's turn (Go's `runtime.Gosched`).
+    // Registered as an ordinary nullary builtin, but the evaluator intercepts
+    // it: only a `State` can say "stop here", which a builtin's return value
+    // cannot.
+    native("yield", vec![], Type::Unit);
     native("lisp-implementation-version", vec![], Type::Str);
     native("machine-type", vec![], Type::Str);
     native("software-type", vec![], Type::Str);
@@ -1740,13 +1745,42 @@ pub(super) fn task_of(t: Type) -> Type {
 /// The runtime value is a boxed struct holding the scheduler's id for the task
 /// and **no readable fields** — the id is not a number a program may invent or
 /// forge, the same reasoning `file-stream`'s opaque handle follows. Nothing
-/// constructs one but `go`, so there is no `new` here either.
+/// constructs one but `go`, so there is no `new` here — only `wait`.
 fn task_def() -> AdtDef {
+    let mut assoc = BTreeMap::new();
+    // `(wait t)` — the task's result, waiting for it if it has not finished.
+    //
+    // May be asked as many times as you like: the answer is kept, so a handle
+    // passed to several places gives each of them the same value. Unlike Rust's
+    // `JoinHandle::join`, waiting does not consume the handle — a `Task<T>` is
+    // an ordinary value.
+    //
+    // The evaluator intercepts this before `eval_builtin_method`, because a
+    // builtin answers with a value or an error and has no way to say "not yet".
+    assoc.insert(
+        "wait".to_string(),
+        AssocFn {
+            sig: FnSig {
+                ffi: false,
+                type_params: vec![],
+                rest: None,
+                params: vec![task_of(tvar("t"))],
+                ret: tvar("t"),
+                public: true,
+                builtin: true,
+                bounds: BTreeMap::new(),
+                optionals: Vec::new(),
+                keys: Vec::new(),
+            },
+            instance: true,
+            builtin: true,
+        },
+    );
     AdtDef {
         name: Path::root("task"),
         params: vec!["t".to_string()],
         variants: vec![],
-        assoc: BTreeMap::new(),
+        assoc,
         public: true,
         builtin: true,
         kind: AdtKind::Struct,
