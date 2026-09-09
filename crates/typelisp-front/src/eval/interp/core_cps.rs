@@ -419,9 +419,6 @@ fn task_handle(heap: &mut Heap, id: TaskId) -> Value {
 struct TaskSlot {
     task: Task,
     roots: RootStackId,
-    /// Set once the task finishes. By then its value is rooted in the
-    /// *starter's* stack, not this task's — that one is about to be dropped.
-    done: Option<Result<Value, EvalError>>,
 }
 
 /// Names a task the scheduler is holding.
@@ -454,6 +451,17 @@ pub(crate) struct Scheduler {
     /// there is a Rust frame waiting on its result, and no continuation stack
     /// underneath it to come back to.
     driving: bool,
+    /// Whether to look at another task after **every single step**, rather
+    /// than letting the running one keep going until it yields, waits or
+    /// finishes.
+    ///
+    /// Cooperative scheduling means `false`, and nothing in the language can
+    /// set it. The tests do: switching every step is the harshest check there
+    /// is that a suspended task's frames and roots survive whatever another
+    /// task does in between — the same role `gc_stress` plays for a single
+    /// task's allocations, and the reason this knob is on the real scheduler
+    /// rather than in a test harness of its own.
+    switch_every_step: bool,
 }
 
 /// One position in the scheduler's table.
@@ -587,6 +595,16 @@ impl Scheduler {
             }
         }
     }
+
+    /// The value a finished task answered with, for a caller that drove the
+    /// tasks itself rather than through `wait`.
+    #[cfg(test)]
+    fn done_value(&self, id: TaskId) -> Option<Value> {
+        match self.slots.get(id.0) {
+            Some(Slot::Done(v)) => Some(*v),
+            _ => None,
+        }
+    }
 }
 
 /// The scheduler id inside a `Task<T>` handle.
@@ -615,33 +633,6 @@ fn escaped_task_failure(e: EvalError) -> EvalError {
     match e {
         EvalError::Throw(tag, _) => EvalError::Panic(format!("`throw` of `{}` left its task", tag)),
         other => other,
-    }
-}
-
-/// When the scheduler moves on to the next task.
-#[derive(Clone, Copy)]
-enum Switching {
-    /// Run each task until it finishes before starting the next. What a single
-    /// task sees today; explicit yield points join this in B2.
-    RunToCompletion,
-    /// Switch after every single step. Not a policy anyone would want, but the
-    /// harshest check there is that a suspended task's frames and roots survive
-    /// whatever another task does in between — which is what the tests use, the
-    /// same way `gc_stress` collects on every `cons`.
-    EveryStep,
-}
-
-/// Roots whatever a finished task's result carries, in the running stack.
-///
-/// A result is a heap value like any other and its own task's roots are gone,
-/// so it needs one here or the next collection takes it.
-fn root_result(heap: &mut Heap, r: &Result<Value, EvalError>) {
-    match r {
-        Ok(v) => heap.push_root(*v),
-        Err(EvalError::Return(v)) | Err(EvalError::ReturnFrom(_, v)) | Err(EvalError::Throw(_, v)) => {
-            heap.push_root(**v)
-        }
-        Err(_) => {}
     }
 }
 
@@ -784,7 +775,7 @@ impl Interp {
         heap.switch_to_root_stack(roots);
         let task = Task::start(heap, form, env);
         heap.switch_to_root_stack(home);
-        let main = self.scheduler.borrow_mut().admit(TaskSlot { task, roots, done: None });
+        let main = self.scheduler.borrow_mut().admit(TaskSlot { task, roots });
 
         self.scheduler.borrow_mut().driving = true;
         let out = self.drive(heap, main);
@@ -833,8 +824,10 @@ impl Interp {
                 ));
             };
             heap.switch_to_root_stack(slot.roots);
+            let every_step = self.scheduler.borrow().switch_every_step;
             let outcome = loop {
                 match self.step_task(heap, &mut slot.task) {
+                    Progress::Running if every_step => break Progress::Running,
                     Progress::Running => {}
                     done => break done,
                 }
@@ -955,74 +948,6 @@ impl Interp {
         }
         task.state = next;
         Progress::Running
-    }
-
-    /// Runs `starts` as independent tasks until every one finishes, and returns
-    /// their results in the order they were given.
-    ///
-    /// Each task gets **its own root stack**, so a task that is not running
-    /// keeps the roots its frames hold. That is the whole reason
-    /// [`Heap::new_root_stack`] exists: tasks do not finish in the order they
-    /// started, and a single LIFO could not be truncated in the order they do.
-    ///
-    /// Cooperative and single-threaded: nothing preempts a task, and there is
-    /// one OS thread for all of them. `ACTIVE_HEAP` has to be a single
-    /// thread-local (`typelisp-abi`), and `Heap` is `!Send`, so tasks cannot be
-    /// spread across threads without making the heap shareable first.
-    fn run_tasks(
-        &self,
-        heap: &mut Heap,
-        starts: Vec<(Value, Value)>,
-        switching: Switching,
-    ) -> Vec<Result<Value, EvalError>> {
-        let home = heap.current_root_stack();
-        let mut slots: Vec<TaskSlot> = Vec::with_capacity(starts.len());
-        for (form, env) in starts {
-            let roots = heap.new_root_stack();
-            // `form` and `env` are rooted in `home` by the caller, so they stay
-            // reachable across this switch — the collector walks every stack.
-            heap.switch_to_root_stack(roots);
-            let task = Task::start(heap, form, env);
-            heap.switch_to_root_stack(home);
-            slots.push(TaskSlot { task, roots, done: None });
-        }
-
-        let mut remaining = slots.len();
-        while remaining > 0 {
-            for i in 0..slots.len() {
-                if slots[i].done.is_some() {
-                    continue;
-                }
-                heap.switch_to_root_stack(slots[i].roots);
-                loop {
-                    match self.step_task(heap, &mut slots[i].task) {
-                        Progress::Blocked(_) => unimplemented!(
-                            "run_tasks has no waiting; `Interp::drive` is the scheduler that does"
-                        ),
-                        Progress::Running => {
-                            if matches!(switching, Switching::EveryStep) {
-                                break;
-                            }
-                        }
-                        Progress::Done(r) => {
-                            let sbase = slots[i].task.sbase;
-                            heap.truncate_roots(sbase);
-                            heap.switch_to_root_stack(home);
-                            root_result(heap, &r);
-                            slots[i].done = Some(r);
-                            remaining -= 1;
-                            break;
-                        }
-                    }
-                }
-                heap.switch_to_root_stack(home);
-            }
-        }
-
-        for s in &slots {
-            heap.drop_root_stack(s.roots);
-        }
-        slots.into_iter().map(|s| s.done.expect("the loop only exits once every task is done")).collect()
     }
 
     /// One step of evaluation: reduce `form` to a value, or to a
@@ -1401,7 +1326,7 @@ impl Interp {
         let task = Task::start_call(heap, form, argv_list, kind);
         heap.switch_to_root_stack(home);
         heap.pop_root();
-        let id = self.scheduler.borrow_mut().admit(TaskSlot { task, roots, done: None });
+        let id = self.scheduler.borrow_mut().admit(TaskSlot { task, roots });
         Ok(task_handle(heap, id))
     }
 
@@ -2837,21 +2762,58 @@ mod tests {
 
     // ---- tasks -----------------------------------------------------------
 
-    /// Runs `srcs` as independent tasks, switching after every single step.
+    /// Runs `srcs` as independent tasks on the real scheduler, switching after
+    /// every single step.
     ///
-    /// Every task's roots have to survive whatever the others do between two
-    /// of its own steps, and under `stress_heap` that includes a collection per
+    /// Every task's roots have to survive whatever the others do between two of
+    /// its own steps, and under `stress_heap` that includes a collection per
     /// `cons`. This is the harshest arrangement the scheduler will ever see.
+    ///
+    /// `Interp::drive` is the driver here — the same one `eval_cps` uses — so
+    /// what these tests exercise is the loop that ships. It returns when *its*
+    /// task finishes, and the others keep running meanwhile, so a task named
+    /// later may already be `Done` by the time its turn comes.
     fn run_interleaved(heap: &mut Heap, srcs: &[&str]) -> Vec<Result<Value, EvalError>> {
         let base = heap.root_count();
-        let mut starts = Vec::new();
+        let interp = Interp::new();
+        interp.scheduler.borrow_mut().switch_every_step = true;
+
+        let home = heap.current_root_stack();
+        let mut ids = Vec::new();
         for src in srcs {
             let form = read1(heap, src);
             heap.push_root(form);
-            starts.push((form, Value::Empty));
+            let roots = heap.new_root_stack();
+            // `form` is rooted in `home`, which the collector still walks.
+            heap.switch_to_root_stack(roots);
+            let task = Task::start(heap, form, Value::Empty);
+            heap.switch_to_root_stack(home);
+            ids.push(interp.scheduler.borrow_mut().admit(TaskSlot { task, roots }));
         }
-        let interp = Interp::new();
-        let out = interp.run_tasks(heap, starts, Switching::EveryStep);
+
+        let mut out = Vec::new();
+        for id in ids {
+            let done = interp.scheduler.borrow().done_value(id);
+            let r = match done {
+                // It finished while another task was being driven, and its
+                // value is rooted in the scheduler's own stack.
+                Some(v) => Ok(v),
+                None => interp.drive(heap, id),
+            };
+            // `drive` hands its result back unrooted — its task's stack is
+            // gone and nothing keeps it for a `wait` — so the starter roots it,
+            // which is the convention every caller of an evaluation follows.
+            // An *exit* carries a value the same way a normal return does.
+            match &r {
+                Ok(v) => heap.push_root(*v),
+                Err(EvalError::Return(v)) | Err(EvalError::ReturnFrom(_, v)) | Err(EvalError::Throw(_, v)) => {
+                    heap.push_root(**v)
+                }
+                Err(_) => {}
+            }
+            out.push(r);
+        }
+
         // The forms it was handed are still rooted, and each result that
         // carries a value added one of its own.
         assert!(
@@ -2919,8 +2881,9 @@ mod tests {
         assert_eq!(out[2].as_ref().unwrap(), &Value::Int(3));
     }
 
-    /// A thrown value reaches the starter rooted, even though the stack that
-    /// carried it is dropped the moment the task ends.
+    /// A thrown value is still alive when it reaches the starter, even though
+    /// the stack that carried it is dropped the moment the task ends — so
+    /// rooting it on arrival, as any caller of an evaluation does, is enough.
     #[test]
     fn a_task_that_throws_hands_its_value_over_rooted() {
         let mut h = stress_heap();
