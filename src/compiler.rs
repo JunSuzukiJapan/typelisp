@@ -351,7 +351,7 @@ pub const SOURCE: &str = r#"
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value>
    string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block>
    Option<llvm-basic-block> llvm-value Option<Sexpr> i32)
-  i32)
+  ())
 (defsignature compile-catch
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value>
@@ -1032,42 +1032,26 @@ pub const SOURCE: &str = r#"
       (name-is-borrowed? env (sexpr-str (sexpr-car (sexpr-cdr form))))
       false))
 
-;; The bare `rt_push_sexpr_root`/`rt_pop_sexpr_root` call `retain-bindings`/
-;; `release-bindings`/`bind-let-values` each inline for a *named* `kind = 2`
-;; binding (Stage 6 of the Sexpr-representation plan,
-;; `docs/implementation-log.md`), factored out for a *fresh*, unnamed `Sexpr` value instead
-;; (a `Cons`'s own car/cdr sub-expression, a call argument) — Stage 8's own
-;; residual gap, the "残る選択肢" entry that gap left for a later pass:
-;; a temporary `Sexpr` value sitting only in a raw stack slot (never bound
-;; to a name) has no GC root at all, so any allocation made while computing
-;; a *sibling* operand (another field, another argument) before the value is
-;; finally consumed (a `cons`, a call) could have it reclaimed out from
-;; under that slot. `push-sexpr-root` returns nothing — a GC root-stack push
-;; has no return value of its own worth threading through.
-(defun push-sexpr-root ((builder llvm-builder) (m llvm-module) (v llvm-value)) ()
-  (let ((args-ptr (alloca-args builder 1)))
-    (store-arg builder args-ptr 0 v)
-    (let ((ignored (build-call builder (get-function m "rt_push_sexpr_root") args-ptr 1))) ())))
-
-;; `push-sexpr-root`'s pop, undoing exactly one push — see that function's
-;; doc comment. Callers always know at LLVM-build time how many pushes they
-;; made (a fixed field count, or `compile-call-args`'s own returned count —
-;; see [`pop-sexpr-roots`] for the latter), so no runtime bookkeeping (a
-;; counter slot, ...) is needed to pair pushes with pops.
-(defun pop-sexpr-root ((builder llvm-builder) (m llvm-module)) ()
-  (let* ((args-ptr (alloca-args builder 0))
-         (ignored (build-call builder (get-function m "rt_pop_sexpr_root") args-ptr 0)))
-    ()))
-
-;; Calls `pop-sexpr-root` `n` times — `compile-call-args`'s own return value
-;; (how many of its arguments were `kind = 2` and so got a `push-sexpr-root`)
-;; tells each call site exactly how many to undo here, once the call those
-;; pushes were protecting is done.
-(defun pop-sexpr-roots ((builder llvm-builder) (m llvm-module) (n i32)) ()
-  (if (eq n 0)
-      ()
-      (let ((ignored (pop-sexpr-root builder m)))
-        (pop-sexpr-roots builder m (- n 1)))))
+;; A *fresh, unnamed* `Sexpr` value's home in the frame — a `Cons`'s car/cdr
+;; sub-expression, a call argument, a `match` scrutinee. Such a value sits in
+;; no binding, so without this it would have nothing keeping it alive, and any
+;; allocation made while computing a *sibling* operand (another field, another
+;; argument) before it is finally consumed could reclaim it out from under the
+;; raw stack slot holding it.
+;;
+;; **There is no matching release** (Phase C1b). This used to be a
+;; `rt_push_sexpr_root`, paired with a pop once the consuming call had run,
+;; and that pairing is what `loop-root-base`/`rt_truncate_sexpr_roots` existed
+;; to repair when a `break` jumped out between the two. A frame slot is a root
+;; by where it is, so there is no pairing left to break — and no way for an
+;; early exit to leave the root stack at the wrong depth.
+;;
+;; The cost of not releasing is that the slot goes on naming its last value
+;; until the activation ends. That is bounded: a call site has one slot, so a
+;; loop calling the same thing a million times overwrites one slot rather than
+;; retaining a million values.
+(defun root-temporary ((builder llvm-builder) (m llvm-module) (v llvm-value)) ()
+  (store-arg builder (frame-slot-rooted builder m) 0 v))
 
 ;; `push-sexpr-root`'s permanent counterpart (general-ADT box field GC root
 ;; protection): `compile-construct-box-fields` calls this for a `kind = 2`
@@ -2059,13 +2043,11 @@ pub const SOURCE: &str = r#"
       (let* ((args-ptr (alloca-args builder 2))
              (numer-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup numer-form)))
         (store-arg builder args-ptr 0 numer-v)
-        (push-sexpr-root builder m numer-v)
+        (root-temporary builder m numer-v)
         (let ((denom-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup denom-form)))
           (store-arg builder args-ptr 1 denom-v)
-          (push-sexpr-root builder m denom-v)
+          (root-temporary builder m denom-v)
           (let ((result (build-call builder (get-function m "rt_ratio_from_bignums") args-ptr 2)))
-            (pop-sexpr-root builder m)
-            (pop-sexpr-root builder m)
             result)))))
 
 ;; `(var name is-fn)` — a plain variable reference,
@@ -2806,9 +2788,8 @@ pub const SOURCE: &str = r#"
     (let* ((mangled (append "tl_" (append type-name (append "::" method))))
            (argc (sexpr-list-length rest))
            (args-ptr (alloca-args builder argc))
-           (sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr rest 0))
+           (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr rest 0))
            (result (emit-direct-call builder m cur-fn (get-function m mangled) args-ptr argc protect)))
-      (pop-sexpr-roots builder m sexpr-roots)
       result))
 
 ;; `(llvm-op opid (kind . arg)...)` — an `llvm-*`/
@@ -2832,9 +2813,8 @@ pub const SOURCE: &str = r#"
            (argc (+ (sexpr-list-length arg-forms) 1))
            (args-ptr (alloca-args builder argc)))
       (store-arg builder args-ptr 0 (const-word builder opid))
-      (let* ((sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1))
+      (let* ((ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1))
              (result (build-call builder (get-function m "rt_llvm_call") args-ptr argc)))
-        (pop-sexpr-roots builder m sexpr-roots)
         result)))
 
 ;; `(dyn-new vtable-id (kind . value-form))` — box a
@@ -2851,9 +2831,8 @@ pub const SOURCE: &str = r#"
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (args-ptr (alloca-args builder 2)))
       (store-arg builder args-ptr 0 (const-word builder vtable-id))
-      (let* ((sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1))
+      (let* ((ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1))
              (result (build-call builder (get-function m "rt_dyn_new") args-ptr 2)))
-        (pop-sexpr-roots builder m sexpr-roots)
         result)))
 
 ;; `(dyn-upcast trait-id (kind . value-form))` —
@@ -2874,9 +2853,8 @@ pub const SOURCE: &str = r#"
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (args-ptr (alloca-args builder 2)))
       (store-arg builder args-ptr 0 (const-word builder trait-id))
-      (let* ((sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1))
+      (let* ((ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1))
              (result (build-call builder (get-function m "rt_dyn_upcast") args-ptr 2)))
-        (pop-sexpr-roots builder m sexpr-roots)
         result)))
 
 ;; `(dyn-value (kind . form))` — unwrap a trait object
@@ -2884,9 +2862,8 @@ pub const SOURCE: &str = r#"
 (defun compile-dyn-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((arg-forms (sexpr-cdr e))
            (args-ptr (alloca-args builder 1))
-           (sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
+           (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
            (result (build-call builder (get-function m "rt_dyn_value") args-ptr 1)))
-      (pop-sexpr-roots builder m sexpr-roots)
       result))
 
 ;; `(dyn-call slot (kind . recv-form) (kind . arg-form)...)`
@@ -2922,7 +2899,7 @@ pub const SOURCE: &str = r#"
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
            (args-ptr (alloca-args builder argc))
-           (sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
+           (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
            (recv (load-raw builder args-ptr 0))
            (vt-ptr (alloca-args builder 1)))
       (store-arg builder vt-ptr 0 recv)
@@ -2935,7 +2912,6 @@ pub const SOURCE: &str = r#"
           (store-arg builder call-ptr 2 (build-ptr-to-int builder args-ptr))
           (store-arg builder call-ptr 3 (const-word builder argc))
           (let ((result (emit-rt-call builder m cur-fn "rt_dyn_call" "rt_protected_dyn_call" call-ptr 4 protect)))
-            (pop-sexpr-roots builder m sexpr-roots)
             result)))))
 
 ;; Fills a previously-`alloca-args`'d array, one
@@ -3098,18 +3074,16 @@ pub const SOURCE: &str = r#"
 ;; `compile-apply-indirect`) knows how many
 ;; `pop-sexpr-root` calls to make once the call these
 ;; roots were protecting is done.
-(defun compile-call-args ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Option<Sexpr>) (idx i32))i32
+(defun compile-call-args ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Option<Sexpr>) (idx i32))()
     (if (sexpr-consp forms)
         (let ((arg-pair (sexpr-car forms)) (rest (sexpr-cdr forms)))
          (let* ((kind (sexpr-i32 (sexpr-car arg-pair)))
                 (form (sexpr-cdr arg-pair))
                 (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup form)))
            (store-arg builder args-ptr idx v)
-         (if (eq kind 2)
-             (let ((ignored (push-sexpr-root builder m v)))
-               (+ 1 (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr rest (+ idx 1))))
-             (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr rest (+ idx 1)))))
-        0))
+           (if (eq kind 2) (root-temporary builder m v) ())
+           (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr rest (+ idx 1))))
+        ()))
 
 ;; `(apply name (is-fn . arg-form)...)` — a direct
 ;; call to a name `core_bridge::translate_apply`
@@ -3129,18 +3103,16 @@ pub const SOURCE: &str = r#"
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
            (args-ptr (alloca-args builder argc))
-           (sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0)))
+           (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0)))
       (match (get fn-env nm)
         ((Some target)
          (let ((env-len (sexpr-list-length captured)))
            (if (eq env-len 0)
                (let ((result (emit-direct-call builder m cur-fn target args-ptr argc protect)))
-                 (pop-sexpr-roots builder m sexpr-roots)
                  result)
                (let ((env-ptr (alloca-args builder env-len)))
                  (compile-env-args m fn-name builder env fn-env captured env-ptr captured 0)
                  (let ((result (emit-direct-call-with-env builder m cur-fn target args-ptr argc env-ptr env-len protect)))
-                   (pop-sexpr-roots builder m sexpr-roots)
                    result)))))
         (None (panic (append "compile-apply: no direct-callable function named " nm))))))
 
@@ -3187,9 +3159,8 @@ pub const SOURCE: &str = r#"
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
            (args-ptr (alloca-args builder argc))
-           (sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
+           (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
            (result (emit-direct-call builder m cur-fn (get-function m nm) args-ptr argc protect)))
-      (pop-sexpr-roots builder m sexpr-roots)
       result))
 
 ;; `(apply-indirect callee-form (is-fn . arg-form)...)`
@@ -3221,9 +3192,8 @@ pub const SOURCE: &str = r#"
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
            (args-ptr (alloca-args builder argc))
-           (sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
+           (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
            (result (emit-closure-apply builder m cur-fn closure args-ptr argc protect)))
-      (pop-sexpr-roots builder m sexpr-roots)
       result))
 
 ;; `compile-if`'s one helper (if/let/comparisons,
@@ -4294,14 +4264,12 @@ pub const SOURCE: &str = r#"
            (arms (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (root-kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
            (scrut-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup scrut-form))
-           (ignored (if (eq root-kind 2) (push-sexpr-root builder m scrut-v) ()))
+           (ignored (if (eq root-kind 2) (root-temporary builder m scrut-v) ()))
            (merge-block (append-block cur-fn "match-merge"))
            (slot (alloca-args builder 1)))
       (compile-match-arms m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup is-fn scrut-v slot merge-block arms)
       (position-at-end builder merge-block)
-      (let* ((result (load-raw builder slot 0))
-             (ignored2 (if (eq root-kind 2) (pop-sexpr-root builder m) ())))
-        result)))
+      (load-raw builder slot 0)))
 
 ;; Tries each `(pattern-form . body-form)` arm in
 ;; order: `push-frame env` a fresh frame for any name
@@ -4659,13 +4627,11 @@ pub const SOURCE: &str = r#"
       (7 (let* ((args-ptr (alloca-args builder 2))
                 (car-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms))))
            (store-arg builder args-ptr 0 car-v)
-           (push-sexpr-root builder m car-v)
+           (root-temporary builder m car-v)
            (let ((cdr-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr arg-forms)))))
              (store-arg builder args-ptr 1 cdr-v)
-             (push-sexpr-root builder m cdr-v)
+             (root-temporary builder m cdr-v)
              (let ((result (build-call builder (get-function m "rt_cons") args-ptr 2)))
-               (pop-sexpr-root builder m)
-               (pop-sexpr-root builder m)
                result))))
       ;; `path`(10): the argument compiles to an already-tagged `Sexpr` list
       ;; of `sym`s (the shape `compile-sexpr-field`'s own `path` extraction
@@ -5282,9 +5248,8 @@ pub const SOURCE: &str = r#"
     (let* ((arg-forms (sexpr-cdr e))
            (argc (sexpr-list-length arg-forms))
            (args-ptr (alloca-args builder argc))
-           (sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
+           (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
            (result (emit-rt-call builder m cur-fn "rt_go" "rt_protected_go" args-ptr argc protect)))
-      (pop-sexpr-roots builder m sexpr-roots)
       result))
 
 (defun compile-function ((m llvm-module) (name string) (param-names Option<Sexpr>) (body Option<Sexpr>)) llvm-module
