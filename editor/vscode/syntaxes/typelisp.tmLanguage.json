@@ -182,7 +182,7 @@
       "name": "storage.modifier.lambda-list.typelisp"
     },
     "special-form": {
-      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:pprint\\-logical\\-block|unquote\\-splicing|symbol\\-macrolet|pprint\\-tabular|unwind\\-protect|documentation|pprint\\-linear|disassemble|pprint\\-fill|return\\-from|source\\-file|unreachable|quasiquote|while\\-let|macrolet|compile|dotimes|println|rotatef|unquote|untrace|doiter|dolist|format|if\\-let|labels|lambda|pprint|return|shiftf|try\\-as|unless|unsafe|apply|block|break|catch|ccase|ecase|match|panic|print|prog1|prog2|progn|psetf|psetq|quote|throw|trace|until|while|case|cond|decf|incf|let\\*|list|loop|setf|setq|step|todo|when|and|do\\*|let|the|as|do|ed|if|or)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:pprint\\-logical\\-block|unquote\\-splicing|symbol\\-macrolet|pprint\\-tabular|unwind\\-protect|documentation|pprint\\-linear|disassemble|pprint\\-fill|return\\-from|source\\-file|unreachable|quasiquote|while\\-let|macrolet|compile|dotimes|println|rotatef|unquote|untrace|doiter|dolist|format|if\\-let|labels|lambda|pprint|return|shiftf|try\\-as|unless|unsafe|apply|block|break|catch|ccase|ecase|match|panic|print|prog1|prog2|progn|psetf|psetq|quote|throw|trace|until|while|case|cond|decf|incf|let\\*|list|loop|setf|setq|step|todo|when|and|do\\*|let|the|as|do|ed|go|if|or)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
       "name": "keyword.control.typelisp"
     },
     "clause": {
@@ -194,7 +194,7 @@
       "name": "support.function.typelisp"
     },
     "builtin-type": {
-      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:>])(?:string\\-output\\-stream|string\\-input\\-stream|binary\\-file\\-stream|concatenated\\-stream|broadcast\\-stream|standard\\-stream|two\\-way\\-stream|ParseFloatError|hashtable\\-iter|universal\\-time|internal\\-time|ParseIntError|decoded\\-time|random\\-state|WrappedError|echo\\-stream|outputstream|peek\\-stream|vector\\-iter|ReadOutcome|SimpleError|array\\-iter|inputstream|byteoutput|charoutput|cons\\-cell|BitVector|EvalError|HashTable|ReadError|byteinput|charinput|fileerror|peekinput|pathname|complex|pathish|c\\-ulong|c\\-long|Number|Option|Result|Vector|bignum|stream|string|symbol|Array|Error|Sexpr|ratio|Bits|Iter|Self|bool|char|hash|ptr|Add|Div|Mul|Ord|Rem|Sub|f32|f64|i16|i32|u16|u32|Eq|i8|u8)(?![-A-Za-z0-9_?!*/+.%&^~:])",
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:>])(?:string\\-output\\-stream|string\\-input\\-stream|binary\\-file\\-stream|concatenated\\-stream|broadcast\\-stream|standard\\-stream|two\\-way\\-stream|ParseFloatError|hashtable\\-iter|universal\\-time|internal\\-time|ParseIntError|decoded\\-time|random\\-state|WrappedError|echo\\-stream|outputstream|peek\\-stream|vector\\-iter|ReadOutcome|SimpleError|array\\-iter|inputstream|byteoutput|charoutput|cons\\-cell|BitVector|EvalError|HashTable|ReadError|byteinput|charinput|fileerror|peekinput|pathname|complex|pathish|c\\-ulong|c\\-long|Number|Option|Result|Vector|bignum|stream|string|symbol|Array|Error|Sexpr|ratio|Bits|Iter|Self|Task|bool|char|hash|ptr|Add|Div|Mul|Ord|Rem|Sub|f32|f64|i16|i32|u16|u32|Eq|i8|u8)(?![-A-Za-z0-9_?!*/+.%&^~:])",
       "name": "support.type.typelisp"
     },
     "never-type": {

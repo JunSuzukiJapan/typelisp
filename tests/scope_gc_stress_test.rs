@@ -89,9 +89,9 @@ fn compiling_a_nested_binding_function_survives_constant_collection() {
 fn compiling_labels_survives_constant_collection() {
     let (mut h, mut chk, mut interp) = stressed();
     let src = "(defun sum-to ((n i32)) i32
-                 (labels ((go ((i i32) (acc i32)) i32
-                            (if (> i n) acc (go (+ i 1) (+ acc i)))))
-                   (go 1 0)))
+                 (labels ((rec ((i i32) (acc i32)) i32
+                            (if (> i n) acc (rec (+ i 1) (+ acc i)))))
+                   (rec 1 0)))
                (compile sum-to)
                (sum-to 5)";
     let got = eval_in(&mut h, &mut chk, &mut interp, src).expect("compile+run failed under gc stress");

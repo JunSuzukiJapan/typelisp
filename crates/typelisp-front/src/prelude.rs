@@ -871,17 +871,17 @@ pub const SOURCE: &str = r##"
 ;; ends up writing. Adjacent separators produce empty pieces, and an empty
 ;; separator is rejected rather than looping forever.
 (defmethod split ((self string) (sep string)) Vector<string>
-  (let ((out (the Vector<string> (Vector::new))) (rest self) (go true))
+  (let ((out (the Vector<string> (Vector::new))) (rest self) (going true))
     (progn
       (if (= (length sep) 0) (panic "split: the separator must not be empty") ())
-      (while go
+      (while going
         (match (search rest sep)
           ((some k)
            (progn
              (push out (substring rest 0 k))
              (setf rest (substring rest (+ k (length sep)) (length rest)))
              ()))
-          ((none) (progn (push out rest) (setf go false) ()))))
+          ((none) (progn (push out rest) (setf going false) ()))))
       out)))
 
 ;; `to-string`: a value's `~a` rendering as a string. CL reaches this through
@@ -3064,9 +3064,9 @@ user-visible capacity."
 ;; over 1 — which is how the answer is assembled at the end.
 (defmethod rationalize ((self f64)) ratio
   (let ((h1 1.0) (h0 0.0) (k1 0.0) (k0 1.0) (b self)
-        (out (int->ratio 0)) (go true) (guard 0))
+        (out (int->ratio 0)) (going true) (guard 0))
     (progn
-      (while go
+      (while going
         (let ((a (floor b)))
           (let ((h2 (+ (* a h1) h0)) (k2 (+ (* a k1) k0)))
             (progn
@@ -3074,7 +3074,7 @@ user-visible capacity."
               (setf k0 k1) (setf k1 k2)
               (setf guard (+ guard 1))
               (if (or (= (/ h2 k2) self) (> guard 40))
-                  (progn (setf out (/ (float->ratio h2) (float->ratio k2))) (setf go false) ())
+                  (progn (setf out (/ (float->ratio h2) (float->ratio k2))) (setf going false) ())
                   (progn (setf b (/ 1.0 (- b a))) ()))))))
       out)))
 
@@ -5663,11 +5663,11 @@ user-visible capacity."
 ;; report is a single line); this is Rust's "caused by" chain, and it is the
 ;; only thing that makes `source` observable.
 (pub defun describe-error<E> ((e E)) string (where (Error E))
-  (let ((out (message e)) (cur (source e)) (go true))
+  (let ((out (message e)) (cur (source e)) (going true))
     (progn
-      (while go
+      (while going
         (match cur
-          ((none) (progn (setf go false) ()))
+          ((none) (progn (setf going false) ()))
           ((some c)
            (progn
              (setf out (append out (append "\n  caused by: " (message c))))

@@ -88,6 +88,8 @@ session has changed.")
     ;; the lexical named escape (Phase 4a): `block' is the target,
     ;; `return-from' leaves it — still a *static* exit, like `break'
     "block" "return-from"
+    ;; concurrency: `go' starts a task with a call
+    "go"
     ;; non-local exit (§8) — `break'/`return'/`return-from' above are the
     ;; *static* exits, these are the dynamic ones
     "catch" "throw" "unwind-protect"
@@ -376,6 +378,8 @@ stream (CLHS 12.1.6).
     "pathname" "pathish"
     ;; builtin generic/abstract types
     "Option" "Result" "Sexpr" "HashTable" "Vector" "Self"
+    ;; the handle `go' hands back
+    "Task"
     ;; builtin concrete error types, one per fallible builtin (§7.1).  `Error'
     ;; itself is *not* a type -- it is the prelude trait these implement, used
     ;; as `:dyn Error'.

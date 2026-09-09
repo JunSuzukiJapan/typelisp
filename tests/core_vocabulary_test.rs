@@ -366,7 +366,7 @@ fn functions() {
     all_round_trip(&[
         "(lambda ((x int-any-width)) int-any-width (var x))",
         "(lambda () unit (unit))",
-        "(labels ((go ((i int-any-width)) int-any-width (var i))) (call (go) () go (int-any-width) (int-any-width 1)))",
+        "(labels ((rec ((i int-any-width)) int-any-width (var i))) (call (rec) () rec (int-any-width) (int-any-width 1)))",
     ]);
 }
 

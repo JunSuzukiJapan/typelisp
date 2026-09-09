@@ -419,7 +419,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_push_sexpr_root"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply "go" (0 var "n" false)))))"#,
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
@@ -789,18 +789,18 @@ fn compile_dispatches_a_defun_with_a_labels_body_to_native_code() {
 }
 
 /// The end-to-end Stage 2 slice (outer-scope capture), from real typelisp
-/// source: `go`'s body references `offset`, the enclosing `defun`'s own
+/// source: `rec`'s body references `offset`, the enclosing `defun`'s own
 /// parameter — neither its own parameter `k` nor a sibling name — so
 /// `ast_bridge`'s `labels_free_vars` must collect it as a real capture, and
-/// `(compile add-offset)` must build `go` under the extended ABI and wire
+/// `(compile add-offset)` must build `rec` under the extended ABI and wire
 /// the trailing body's call to pass `offset` through.
 #[test]
 fn compile_dispatches_a_defun_with_a_capturing_labels_body_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
         (defun add-offset ((offset i32) (n i32)) i32
-          (labels ((go ((k i32)) i32 (+ k offset)))
-            (go n)))
+          (labels ((rec ((k i32)) i32 (+ k offset)))
+            (rec n)))
         (compile add-offset)
         (add-offset 10 5)
         "#,
@@ -813,10 +813,10 @@ fn compile_dispatches_a_defun_with_a_capturing_labels_body_to_native_code() {
 
 /// The multi-sibling case `compile_dispatches_a_defun_with_a_capturing_labels_body_to_native_code`
 /// doesn't exercise: `helper` itself never references `offset`, only its
-/// sibling `go` does — so the *block's* free-variable list (not `helper`'s
+/// sibling `rec` does — so the *block's* free-variable list (not `helper`'s
 /// own) must still include `offset`, and `helper` must still receive it (via
 /// `bind-captures`, even though its own body never reads it) purely so it
-/// can forward it on to `go`. This is the shared-environment design's load-
+/// can forward it on to `rec`. This is the shared-environment design's load-
 /// bearing claim (`compile::freevars::labels_free_vars`'s doc comment): if
 /// each sibling computed its own narrower captured list instead, `helper`
 /// would have no value to forward and this call would fail to compile.
@@ -825,8 +825,8 @@ fn a_sibling_that_never_references_a_capture_still_forwards_it_to_another_siblin
     let v = eval_ok_with_compiler(
         r#"
         (defun choose ((offset i32) (n i32)) i32
-          (labels ((helper ((k i32)) i32 (go k))
-                   (go ((k i32)) i32 (+ k offset)))
+          (labels ((helper ((k i32)) i32 (rec k))
+                   (rec ((k i32)) i32 (+ k offset)))
             (helper n)))
         (compile choose)
         (choose 10 5)
@@ -1497,7 +1497,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
              (let ((ignored-new (add-function m "rt_closure_new"))) ())
              (let ((ignored-apply (add-function m "rt_apply_any"))) ())
              (let ((ignored-push (add-function m "rt_push_sexpr_root"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "go" true) (0 int-any-width 0 5)))))"#,
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
@@ -1629,9 +1629,9 @@ fn compile_dispatches_an_escaping_lambda_that_indirectly_captures_a_labels_sibli
 /// closure `cb` internally (`make-adder`, itself `compile`d — the interp/
 /// compiled boundary's own remaining gap around a bare top-level function
 /// *value* is Stage 3's, not this one's, so `cb` is constructed and consumed
-/// entirely on the compiled side), then a `labels` sibling `go` captures and
+/// entirely on the compiled side), then a `labels` sibling `rec` captures and
 /// calls it indirectly through the *direct*, non-escaping `compile-env-args`
-/// path (`compile-apply` building `go`'s env array each call). A compiled
+/// path (`compile-apply` building `rec`'s env array each call). A compiled
 /// closure is now an ordinary GC-heap `BoxedObj::CompiledClosure` with
 /// nothing to leak a refcount on — this instead proves the same
 /// repeated-call path stays correct and crash-free under GC pressure
@@ -1645,12 +1645,12 @@ fn repeated_calls_through_a_captured_closure_survive_gc_pressure() {
         (defun make-adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
         (defun outer ((n i32) (x i32)) i32
           (let ((cb (make-adder n)))
-            (labels ((go ((y i32)) i32 (cb y)))
+            (labels ((rec ((y i32)) i32 (cb y)))
               (let ((ignored (loop
                                (if (eq x 0) (break) ())
                                (sexpr-cons (i32 0) (i32 0))
                                (setf x (- x 1)))))
-                (go 5)))))
+                (rec 5)))))
         (compile make-adder)
         (compile outer)
         (outer 10 5000)
@@ -5545,9 +5545,9 @@ fn compile_passes_arguments_through_a_trait_object_call() {
         (defstruct fixed (n i32))
         (impl Scaler fixed (scale ((self Self) (k i32)) i32 (* self::n k)))
         (defun apply-scale ((s :dyn Scaler) (k i32)) i32 (scale s k))
-        (defun go () i32 (apply-scale (fixed::new 6) 7))
-        (compile go)
-        (go)
+        (defun rec () i32 (apply-scale (fixed::new 6) 7))
+        (compile rec)
+        (rec)
         "#,
     )
     .expect("eval failed");
@@ -5569,10 +5569,10 @@ fn compile_and_interpret_agree_on_a_trait_object_match() {
             ((circle r) (* 100 r))
             ((the square s) s::side)
             (_ 0)))
-        (defun go () i32 (+ (area (circle::new 3)) (area (square::new 4))))
+        (defun rec () i32 (+ (area (circle::new 3)) (area (square::new 4))))
         "#;
-    let interpreted = run_with_compiler_and_prelude(&format!("{src} (go)")).expect("eval failed");
-    let compiled = run_with_compiler_and_prelude(&format!("{src} (compile go) (go)")).expect("eval failed");
+    let interpreted = run_with_compiler_and_prelude(&format!("{src} (rec)")).expect("eval failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src} (compile rec) (rec)")).expect("eval failed");
     assert_eq!(interpreted, Value::Int(304));
     assert_eq!(compiled, interpreted);
 }
@@ -6263,13 +6263,13 @@ fn the_island_runs_a_bridged_loop() {
 #[test]
 fn the_island_runs_a_bridged_labels_block() {
     let body = bridge_to_island_text(
-        "(labels ((go ((n int-any-width) (acc int-any-width)) int-any-width
+        "(labels ((rec ((n int-any-width) (acc int-any-width)) int-any-width
                     (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var n) (int-any-width 1))
                         (var acc)
-                        (apply (var go) int-any-width (int-any-width int-any-width)
+                        (apply (var rec) int-any-width (int-any-width int-any-width)
                           (assoc i32 - true () int-any-width (int-any-width int-any-width) \"i32\" (var n) (int-any-width 1))
                           (assoc i32 * true () int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var n))))))
-           (apply (var go) int-any-width (int-any-width int-any-width) (var a) (int-any-width 1)))",
+           (apply (var rec) int-any-width (int-any-width int-any-width) (var a) (int-any-width 1)))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
         "fact",

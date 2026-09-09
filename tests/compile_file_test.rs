@@ -211,7 +211,7 @@ fn compiles_and_runs_an_escaping_capturing_lambda_through_a_helper() {
 
 /// labels/closures Stage 2 (outer-scope capture) + Stage 3 (top-level
 /// `Expr::Call`) together: a non-`main` helper `defun` whose body is a
-/// *capturing* `labels` form (`go` references `add-offset`'s own parameter
+/// *capturing* `labels` form (`rec` references `add-offset`'s own parameter
 /// `offset`) compiles and links into the same shared module as `main`, and
 /// `main` now calls it directly with literal arguments — proving the AOT
 /// path handles the `add-function-with-env` ABI variant correctly alongside
@@ -223,8 +223,8 @@ fn compiles_and_runs_an_escaping_capturing_lambda_through_a_helper() {
 fn compiles_a_file_with_a_capturing_labels_helper_function_too() {
     let src = r#"
         (defun add-offset ((offset i32) (n i32)) i32
-          (labels ((go ((k i32)) i32 (+ k offset)))
-            (go n)))
+          (labels ((rec ((k i32)) i32 (+ k offset)))
+            (rec n)))
         (defun main () i32 (add-offset 10 5))
     "#;
     assert_eq!(compile_and_run("with_capturing_helper", src), 15);

@@ -305,7 +305,7 @@ impl Env {
     /// track individual binding positions (monomorphization's synthesized
     /// re-checks). See [`Self::extended_with_locs`] for the counterpart that
     /// does.
-    fn extended(&self, binds: Vec<(String, Type)>) -> Env {
+    fn extended(&self, binds: Vec<(String, Type)>) -> Result<Env, Error> {
         self.extended_with_locs(binds.into_iter().map(|(n, t)| (n, t, None)).collect())
     }
 
@@ -314,10 +314,19 @@ impl Env {
     /// `lambda`/`labels` parameters, and `defun`/`defmethod` parameters and
     /// receivers, so a later reference to the bound name can resolve back to
     /// where it was bound (`Checker::check_at`, `DefLocs::local_refs`).
-    fn extended_with_locs(&self, binds: Vec<(String, Type, Option<Loc>)>) -> Env {
+    /// Every local binding in the language is made here — a `let`/`let*`
+    /// binding, a `lambda`/`labels`/`defun`/`defmethod` parameter or receiver,
+    /// a `labels` function name, a `match`-pattern binding — which is what
+    /// makes this the one place a reserved name can be refused.
+    fn extended_with_locs(&self, binds: Vec<(String, Type, Option<Loc>)>) -> Result<Env, Error> {
+        for (name, _, _) in &binds {
+            if is_reserved_name(name) {
+                return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name)));
+            }
+        }
         let mut vars = self.vars.clone();
         vars.extend(binds);
-        Env { vars, bounds: self.bounds.clone() }
+        Ok(Env { vars, bounds: self.bounds.clone() })
     }
 
     /// A child environment that additionally declares `bounds` (a function's
@@ -325,6 +334,21 @@ impl Env {
     fn with_bounds(&self, bounds: BTreeMap<String, Vec<TraitBound>>) -> Env {
         Env { vars: self.vars.clone(), bounds: std::rc::Rc::new(bounds) }
     }
+}
+
+/// Names no binding may take.
+///
+/// `go` is always a special form in head position, so a variable called `go`
+/// could be bound but never called — a name that silently does nothing is worse
+/// than a rejected one.
+///
+/// The other special forms are *not* here. `(let ((if f)) ...)` has been legal
+/// since the beginning and the prelude and tests lean on names like `list` and
+/// `format` being ordinary words; closing that is a separate, breaking change.
+/// `go` is closed from the start because nothing has had the chance to depend
+/// on it.
+fn is_reserved_name(name: &str) -> bool {
+    name == "go"
 }
 
 /// Bundles [`Checker::check_assoc_call`]'s arguments to keep its arity down.
@@ -4026,7 +4050,7 @@ impl Checker {
             .zip(param_locs)
             .map(|((n, t), l)| (n, t, l))
             .collect();
-        let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
+        let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let body =
             self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
@@ -4187,7 +4211,7 @@ impl Checker {
 
         let binds: Vec<(String, Type, Option<Loc>)> =
             params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
-        let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
+        let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let body =
             self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
@@ -4546,7 +4570,7 @@ impl Checker {
         // `specialize_defun_body`: with the owner's type variables concrete,
         // every bounded method call resolves against the real receiver type
         // (and was already validated at the call site).
-        let env = Env::new().extended(all.clone());
+        let env = Env::new().extended(all.clone())?;
         // The *written* name, not the mangled one: the body's own
         // `(return-from NAME ...)` was written against the name in the source.
         let body = self.check_definition_body(heap, interp, &env, &parts[body_start..], &[], &method, &ret)?;
@@ -4622,7 +4646,7 @@ impl Checker {
         if let Some((rname, _, _)) = &rest {
             params.push((rname.clone(), option_of_sexpr()));
         }
-        let env = Env::new().extended(params.clone());
+        let env = Env::new().extended(params.clone())?;
         // As in `specialize_method_form`: the implicit block keeps the name
         // the source wrote, which is not the mangled one this emits under.
         let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
@@ -4694,7 +4718,7 @@ impl Checker {
             params.push((k.name.clone(), k.effective_ty()));
         }
 
-        let env = Env::new().extended(params.clone());
+        let env = Env::new().extended(params.clone())?;
         // As in `specialize_method_form`: the implicit block keeps the name
         // the source wrote, which is not the mangled one this emits under.
         let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
@@ -5168,7 +5192,7 @@ impl Checker {
             bindings.push((n.clone(), sexpr_ty.clone()));
         }
 
-        let env = Env::new().extended(bindings);
+        let env = Env::new().extended(bindings)?;
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&sexpr_ty))?;
         let lambda = MacroLambda { required: required_names.len(), optionals: opt_defaults, keys: key_defaults };
@@ -5190,7 +5214,7 @@ impl Checker {
         match default {
             None => Ok(Vec::new()),
             Some(form) => {
-                let env = Env::new().extended(bindings.to_vec());
+                let env = Env::new().extended(bindings.to_vec())?;
                 let checked = self.check(heap, interp, &env, form, Some(sexpr_ty))?;
                 Ok(vec![checked.form])
             }
@@ -6863,7 +6887,7 @@ impl Checker {
                 binds.push((s.clone(), recv_ty.clone(), self_name_loc));
             }
             binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
-            let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
+            let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
             let body_locs = locs.get(body_start..).unwrap_or(&[]);
             self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, &method, &ret)?;
         }
@@ -6927,7 +6951,7 @@ impl Checker {
                 binds.push((s.clone(), recv_ty.clone(), self_name_loc));
             }
             binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
-            let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
+            let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
             let body_locs = locs.get(body_start..).unwrap_or(&[]);
             self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, &method, &ret)?;
         }
@@ -8065,7 +8089,7 @@ impl Checker {
         // resolves through `check_instance_method`'s bounds branch to a
         // diagnostics-only unreachable `panic`, exactly as in generic `defun`
         // bodies.
-        let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
+        let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         // `enter_specialization` with the *current* type-variable bindings
         // carried over: only the namespace is meant to move, and a default
@@ -9987,7 +10011,7 @@ impl Checker {
         }
         let binds: Vec<(String, Type, Option<Loc>)> =
             params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
-        let child = env.extended_with_locs(binds);
+        let child = env.extended_with_locs(binds)?;
         // A lambda is a new function boundary: `break`/`return` cannot reach an
         // outer loop through it, so it checks its body against an empty loop
         // stack (restored afterwards, even on error). Named blocks are cleared
@@ -10149,7 +10173,7 @@ impl Checker {
         }
         let n = scope.len();
         self.local_symbol_macros.borrow_mut().push(scope);
-        let child = env.extended(binds);
+        let child = env.extended(binds)?;
         let result = self.check_seq(heap, interp, &child, &args[1..], arg_locs.get(1..).unwrap_or(&[]), expected);
         self.local_symbol_macros.borrow_mut().pop();
         for _ in 0..n {
@@ -10238,13 +10262,13 @@ impl Checker {
         // Every function's name is visible to every body (including its
         // own) and to the trailing `body` — registered up front, like
         // `check_defun`'s pre-body signature insert.
-        let labels_env = env.extended_with_locs(sigs);
+        let labels_env = env.extended_with_locs(sigs)?;
 
         let mut defs = Vec::new();
         for Spec { name, params, param_locs, ret, raw_body, body_locs } in parsed {
             let binds: Vec<(String, Type, Option<Loc>)> =
                 params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
-            let fn_env = labels_env.extended_with_locs(binds);
+            let fn_env = labels_env.extended_with_locs(binds)?;
             // A new function boundary, same as `lambda`: `break`/`return`
             // can't reach an outer loop through it. A local function *does*
             // get CL's implicit block, named after itself, so `return-from`
@@ -11895,7 +11919,7 @@ impl Checker {
             .zip(name_locs)
             .map(|((n, t), l)| (n.clone(), t.ty.clone(), l))
             .collect();
-        let child = env.extended_with_locs(env_binds);
+        let child = env.extended_with_locs(env_binds)?;
         let (body, ty) = self.check_seq(heap, interp, &child, &args[1..], &arg_locs[1..], expected)?;
         let node_binds: Vec<(String, Type, Value)> =
             binds.into_iter().map(|(n, c)| (n, c.ty, c.form)).collect();
@@ -11958,7 +11982,7 @@ impl Checker {
         // Recovery boundary (B4): see `check_let`.
         let checked = self.check_at(heap, interp, env, pair[1], None, val_loc.clone());
         let val = self.recovered(heap, checked, val_loc)?;
-        let child = env.extended_with_locs(vec![(name.clone(), val.ty.clone(), name_loc)]);
+        let child = env.extended_with_locs(vec![(name.clone(), val.ty.clone(), name_loc)])?;
         let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, body_locs, expected)?;
         let ty = inner.ty.clone();
         let form = self.let_form(heap, &[(name, val.ty, val.form)], &[inner.form])?;
@@ -12862,11 +12886,11 @@ impl Checker {
         for var in &plan.vars {
             let probe = loop_dsl::var_probe(heap, var)?;
             let probe = forms::rooted(heap, probe);
-            let scoped = env.extended_with_locs(binds.clone());
+            let scoped = env.extended_with_locs(binds.clone())?;
             let ty = self.check_at(heap, interp, &scoped, probe, None, var.loc.clone())?.ty;
             binds.push((var.name.clone(), ty, var.loc.clone()));
         }
-        let scoped = env.extended_with_locs(binds);
+        let scoped = env.extended_with_locs(binds)?;
 
         // Pass 1b: each accumulator's own type, and the `Option` a
         // `:thereis` leaves behind when nothing matched.
@@ -14678,7 +14702,7 @@ impl Checker {
                 Pattern::Wildcard | Pattern::Bind(..) => catchall = true,
                 _ => {}
             }
-            let arm_env = env.extended_with_locs(binds.clone());
+            let arm_env = env.extended_with_locs(binds.clone())?;
             // Diverging arms don't constrain the result type; concrete arms must
             // all agree (Never joins with anything).
             let arm_expected = result_ty.as_ref().and_then(non_never);
@@ -14759,7 +14783,7 @@ impl Checker {
             .filter(|t| !has_open_hole(t))
             .cloned();
         for d in deferred {
-            let arm_env = env.extended_with_locs(d.binds);
+            let arm_env = env.extended_with_locs(d.binds)?;
             let checked =
                 self.check_seq(heap, interp, &arm_env, &d.body, &d.body_locs, pooled.as_ref());
             let (body, body_ty) = match checked {
@@ -15020,7 +15044,7 @@ impl Checker {
             core::list(&mut s, &[equals, scrut, expr])?
         };
         let guard_env =
-            env.extended_with_locs(vec![(MATCH_SCRUT.to_string(), expected.clone(), None)]);
+            env.extended_with_locs(vec![(MATCH_SCRUT.to_string(), expected.clone(), None)])?;
         let checked = self.check_at(heap, interp, &guard_env, form, Some(&Type::Bool), loc)?;
         if checked.ty != Type::Bool && checked.ty != Type::Never {
             return Err(Error::TypeError(format!(
