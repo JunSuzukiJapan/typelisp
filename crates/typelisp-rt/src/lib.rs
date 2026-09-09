@@ -2104,6 +2104,132 @@ pub unsafe extern "C" fn rt_frame_data(args: *const i64, argc: u32) -> i64 {
     }
 }
 
+/// `(rt-frame-entered f)` for compiled code — publishes the frame a prologue
+/// just allocated, so the driver can reach it on the way back.
+///
+/// The driver cannot learn this any other way. The frame is made *inside* the
+/// callee, after the call has already started, and the ABI's single return
+/// value is the status word.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1`; `args[0]` is the tagged frame.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_entered(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_frame_entered: expected 1 argument");
+    }
+    typelisp_abi::call_state::set_current_frame(*args);
+    0
+}
+
+/// `(rt-pending-argc)` for compiled code — how many arguments the driver left
+/// for this entry.
+///
+/// # Safety
+///
+/// Takes no arguments; `args`/`argc` are ignored.
+#[no_mangle]
+pub unsafe extern "C" fn rt_pending_argc(_args: *const i64, _argc: u32) -> i64 {
+    typelisp_abi::call_state::pending_argc() as i64
+}
+
+/// `(rt-pending-arg i)` for compiled code — one of the arguments the driver
+/// left, as the raw word the caller stored.
+///
+/// `args[0]` is a raw index, not a value in the program.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_pending_arg(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_pending_arg: expected 1 argument");
+    }
+    let i = *args;
+    if i < 0 {
+        fatal(&format!("rt_pending_arg: {} is not an argument index", i));
+    }
+    typelisp_abi::call_state::pending_arg(i as usize)
+}
+
+/// `(rt-frame-call target arg...)` for compiled code — names the call the
+/// driver should make, immediately before the frame returns `STATUS_CALL`.
+///
+/// `args[0]` is the callee's address (`build-fn-address`); the rest are its
+/// arguments, already evaluated and in the callee's declared representations.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to `argc` valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_call(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_frame_call: expected at least 1 argument (the callee)");
+    }
+    let target = *args as usize;
+    let mut passed = Vec::with_capacity(argc as usize - 1);
+    for i in 1..argc as usize {
+        passed.push(*args.add(i));
+    }
+    typelisp_abi::call_state::set_pending_call(target, passed);
+    0
+}
+
+/// `(rt-frame-pc f)` for compiled code — where frame `args[0]` should resume,
+/// as a raw `i64`.
+///
+/// The prologue of every coroutine-ABI function reads this and branches on it:
+/// `0` is "start at the top", anything else names a call site this frame was
+/// waiting at. That branch is the whole of what makes a compiled function
+/// resumable — everything else it needs is already in the frame.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to a valid `i64` decoding to a
+/// frame; a `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_pc(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_frame_pc: expected 1 argument");
+    }
+    let heap = active_heap();
+    match decode(*args) {
+        Value::Boxed(id) if heap.is_frame(id) => heap.frame_pc(id) as i64,
+        other => fatal(&format!("rt_frame_pc: {:?} is not a frame", other)),
+    }
+}
+
+/// `(rt-frame-set-pc f n)` for compiled code — records where frame `args[0]`
+/// resumes, immediately before the function hands control back to the driver.
+///
+/// `args[1]` is a raw `i64`: a compile-time constant naming a call site, not a
+/// value in the program.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to 2 valid `i64`s, the first
+/// decoding to a frame; a `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_set_pc(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_frame_set_pc: expected 2 arguments (frame, resume point)");
+    }
+    let pc = *args.add(1);
+    if !(0..=(u32::MAX as i64)).contains(&pc) {
+        fatal(&format!("rt_frame_set_pc: {} is not a resume point", pc));
+    }
+    let heap = active_heap();
+    match decode(*args) {
+        Value::Boxed(id) if heap.is_frame(id) => {
+            heap.set_frame_pc(id, pc as u32);
+            0
+        }
+        other => fatal(&format!("rt_frame_set_pc: {:?} is not a frame", other)),
+    }
+}
+
 /// `(rt-cell-get c)` for compiled code — the current contents of binding
 /// cell `args[0]` (a tagged `Sexpr` reference to a `BoxedObj::Cell`), as a
 /// tagged `Sexpr`; per-kind untagging is the caller's job

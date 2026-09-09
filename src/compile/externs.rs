@@ -406,7 +406,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 252] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 258] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -462,7 +462,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 252] {
         rt_dyn_call, rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
         rt_throw, rt_throw_matches, rt_throw_take_value, rt_unwind_pending, rt_resume_unwind,
         rt_go, rt_protected_go,
-        rt_frame_new, rt_frame_data, rt_frame_mask_bit,
+        rt_frame_new, rt_frame_data, rt_frame_mask_bit, rt_frame_pc, rt_frame_set_pc,
+        rt_frame_entered, rt_frame_call, rt_pending_arg, rt_pending_argc,
         rt_protected_apply_any, rt_protected_call, rt_protected_call_env, rt_protected_dyn_call, rt_protected_panic,
         rt_protected_throw,
     };
@@ -574,6 +575,12 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 252] {
         ("rt_frame_new", rt_frame_new as usize),
         ("rt_frame_data", rt_frame_data as usize),
         ("rt_frame_mask_bit", rt_frame_mask_bit as usize),
+        ("rt_frame_pc", rt_frame_pc as usize),
+        ("rt_frame_set_pc", rt_frame_set_pc as usize),
+        ("rt_frame_entered", rt_frame_entered as usize),
+        ("rt_frame_call", rt_frame_call as usize),
+        ("rt_pending_arg", rt_pending_arg as usize),
+        ("rt_pending_argc", rt_pending_argc as usize),
         ("rt_protected_go", rt_protected_go as usize),
         // `catch`/`throw`/`unwind-protect` (`compiler.rs`'s `compile-catch`/
         // `compile-throw`/`compile-unwind-protect`). `rt_throw` raises the

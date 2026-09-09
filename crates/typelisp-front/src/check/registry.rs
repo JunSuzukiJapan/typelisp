@@ -1907,6 +1907,12 @@ pub fn llvm_module_def() -> AdtDef {
     // `compile-labels` doc comment for why captures aren't computed
     // per-sibling).
     assoc.insert("add-function-with-env".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
+    // The coroutine ABI (Phase C2): `i64 f(i64 frame)`. One parameter, because
+    // entering a function and resuming it have to be the same call — otherwise
+    // every indirect call would have to know which of the two it was making.
+    // What comes back is a status word, not the value; the value is in the
+    // frame, which is what makes stopping mid-body sayable at all.
+    assoc.insert("add-coroutine-function".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
     AdtDef { name: Path::root("llvm-module"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
 }
 
@@ -1914,6 +1920,10 @@ pub fn llvm_module_def() -> AdtDef {
 pub fn llvm_function_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
     assoc.insert("append-block".to_string(), assoc_fn(vec![llvm_function_ty(), Type::Str], llvm_basic_block_ty(), true));
+    // A function's raw LLVM parameter — distinct from `load-arg`, which reads a
+    // *logical* argument out of the `i64*` array the old ABI passes. Under the
+    // coroutine ABI the frame is a real parameter, so there is no array.
+    assoc.insert("function-param".to_string(), assoc_fn(vec![llvm_function_ty(), Type::I32], llvm_value_ty(), true));
     AdtDef { name: Path::root("llvm-function"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
 }
 
@@ -2139,6 +2149,7 @@ pub fn llvm_builder_def() -> AdtDef {
     // `string` back from an `llvm-*` builtin (`llvm_ret_kind`). Tests read the
     // count from the frame itself, which is the number that matters.
     assoc.insert("frame-begin".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], Type::Unit, true));
+    assoc.insert("frame-value".to_string(), assoc_fn(vec![llvm_builder_ty()], llvm_value_ty(), true));
     assoc.insert("frame-slot".to_string(), assoc_fn(vec![llvm_builder_ty()], llvm_value_ty(), true));
     assoc.insert(
         "frame-slot-rooted".to_string(),

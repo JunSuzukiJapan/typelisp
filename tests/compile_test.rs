@@ -6849,6 +6849,197 @@ fn a_specialization_at_a_module_qualified_type_resolves() {
 /// machine stack and into a frame is a change of *where the slot lives* and
 /// nothing else.
 ///
+/// **A compiled function can stop in the middle and be resumed** (Phase C2).
+///
+/// This is the claim the whole phase rests on, and nothing before it could be
+/// stated at all: under the old ABI a function's only way to stop was to
+/// return, because the rest of its work lived on the machine stack and nothing
+/// could pick that up again.
+///
+/// The function here runs in two halves. On first entry it makes its frame,
+/// writes 40 into a local, records where to resume, and hands back
+/// `STATUS_SUSPEND`. The driver calls it again with the same frame; it
+/// branches on `pc`, reads the local back, adds 2, and returns 42 in the
+/// protocol's value slot.
+///
+/// The 40 is the point. It is written before the suspension and read after,
+/// with the machine stack torn down and rebuilt in between — so the only way
+/// it can survive is by living in the frame.
+#[test]
+fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
+    let src = r#"
+        (defun build-suspending-module () llvm-module
+          (let* ((m (llvm-module::create "mod"))
+                 ;; The two protocol shims this body calls directly. The rest
+                 ;; (`rt_frame_new` and friends) `frame-begin` declares itself.
+                 (ignored-entered (add-function m "rt_frame_entered"))
+                 (ignored-setpc (add-function m "rt_frame_set_pc"))
+                 (f (add-coroutine-function m "two_halves"))
+                 (entry (append-block f "entry"))
+                 (first (append-block f "first"))
+                 (resumed (append-block f "resumed"))
+                 (builder (llvm-builder::create))
+                 (param (function-param f 0)))
+            ;; entry: a zero frame means first entry; anything else is a resume.
+            (position-at-end builder entry)
+            (build-cond-br builder (build-icmp-eq builder param (const-word builder 0)) first resumed)
+
+            ;; first: make the frame, publish it, stash 40 in a local, record
+            ;; where to resume, and hand control back.
+            (position-at-end builder first)
+            (frame-begin builder m)
+            (let* ((frame (frame-value builder))
+                   (slot (frame-slot builder))
+                   (pub-args (alloca-args builder 1))
+                   (setpc-args (alloca-args builder 2)))
+              (store-arg builder slot 0 (const-word builder 40))
+              (store-arg builder pub-args 0 frame)
+              (build-call builder (get-function m "rt_frame_entered") pub-args 1)
+              (store-arg builder setpc-args 0 frame)
+              (store-arg builder setpc-args 1 (const-word builder 1))
+              (build-call builder (get-function m "rt_frame_set_pc") setpc-args 2)
+              (build-ret builder (const-word builder 2))
+
+              ;; resumed: read the local back out of the frame we were handed,
+              ;; add 2, and leave it in the protocol's value slot.
+              (position-at-end builder resumed)
+              (let ((data-args (alloca-args builder 1)))
+                (store-arg builder data-args 0 param)
+                (let* ((data (build-call builder (get-function m "rt_frame_data") data-args 1))
+                       (base (build-int-to-ptr builder data))
+                       (stashed (load-raw builder (build-slot-ptr builder base 1) 0))
+                       (sum (build-add builder stashed (const-word builder 2))))
+                  (store-arg builder (build-slot-ptr builder base 0) 0 sum)
+                  (frame-end builder m)
+                  (build-ret builder (const-word builder 0)))))
+            m))
+        (build-suspending-module)
+    "#;
+    let module = expect_llvm_module(eval_ok(src));
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let two_halves = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(i64) -> i64>("two_halves")
+            .expect("failed to look up the compiled `two_halves` function")
+    };
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
+
+    // First entry: no frame yet.
+    assert_eq!(unsafe { two_halves.call(0) }, typelisp_abi::STATUS_SUSPEND, "the first half suspends");
+    let frame = typelisp_abi::call_state::take_current_frame().expect("the prologue published its frame");
+    let id = match typelisp::decode(frame) {
+        Value::Boxed(id) => id,
+        other => panic!("expected a frame, got {:?}", other),
+    };
+    assert_eq!(heap.frame_pc(id), 1, "and recorded where to resume");
+    assert_eq!(heap.frame_word(id, 1), 40, "with the local it wrote still in the frame");
+
+    // Resume with the same frame.
+    assert_eq!(unsafe { two_halves.call(frame) }, typelisp_abi::STATUS_RETURN, "the second half returns");
+    assert_eq!(heap.frame_word(id, typelisp_abi::FRAME_VALUE_SLOT), 42, "40 survived the suspension");
+}
+
+/// **The driver runs a call chain that never touches the machine stack.**
+///
+/// `outer` asks the driver to call `inner`, which returns a value; the driver
+/// hands it back and resumes `outer`, which adds to it and returns. Two frames
+/// exist at once on [`FrameStack`], and neither call is an LLVM `call`
+/// instruction — `outer` *returns* `STATUS_CALL` and is entered again later.
+///
+/// That is what makes the depth limit the heap rather than the OS stack, and
+/// it is the same move Phase A made for the interpreter: the stack becomes
+/// data.
+#[test]
+fn the_driver_runs_a_two_frame_call_chain() {
+    let src = r#"
+        (defun build-chain-module () llvm-module
+          (let* ((m (llvm-module::create "mod"))
+                 (ignored-entered (add-function m "rt_frame_entered"))
+                 (ignored-setpc (add-function m "rt_frame_set_pc"))
+                 (ignored-call (add-function m "rt_frame_call"))
+                 (inner (add-coroutine-function m "inner"))
+                 (outer (add-coroutine-function m "outer")))
+            ;; inner: make a frame, leave 5 in the value slot, return.
+            (let* ((ib (append-block inner "entry"))
+                   (ibuilder (llvm-builder::create)))
+              (position-at-end ibuilder ib)
+              (frame-begin ibuilder m)
+              (let* ((iframe (frame-value ibuilder))
+                     (ipub (alloca-args ibuilder 1))
+                     (idata-args (alloca-args ibuilder 1)))
+                (store-arg ibuilder ipub 0 iframe)
+                (build-call ibuilder (get-function m "rt_frame_entered") ipub 1)
+                (store-arg ibuilder idata-args 0 iframe)
+                (let* ((idata (build-call ibuilder (get-function m "rt_frame_data") idata-args 1))
+                       (ibase (build-int-to-ptr ibuilder idata)))
+                  (store-arg ibuilder (build-slot-ptr ibuilder ibase 0) 0 (const-word ibuilder 5))
+                  (frame-end ibuilder m)
+                  (build-ret ibuilder (const-word ibuilder 0)))))
+            ;; outer: ask the driver for `inner`, then add 37 to what comes back.
+            (let* ((oentry (append-block outer "entry"))
+                   (ofirst (append-block outer "first"))
+                   (oresumed (append-block outer "resumed"))
+                   (obuilder (llvm-builder::create))
+                   (oparam (function-param outer 0)))
+              (position-at-end obuilder oentry)
+              (build-cond-br obuilder (build-icmp-eq obuilder oparam (const-word obuilder 0)) ofirst oresumed)
+              (position-at-end obuilder ofirst)
+              (frame-begin obuilder m)
+              (let* ((oframe (frame-value obuilder))
+                     (opub (alloca-args obuilder 1))
+                     (ocall (alloca-args obuilder 1))
+                     (osetpc (alloca-args obuilder 2)))
+                (store-arg obuilder opub 0 oframe)
+                (build-call obuilder (get-function m "rt_frame_entered") opub 1)
+                (store-arg obuilder ocall 0 (build-fn-address obuilder inner))
+                (build-call obuilder (get-function m "rt_frame_call") ocall 1)
+                (store-arg obuilder osetpc 0 oframe)
+                (store-arg obuilder osetpc 1 (const-word obuilder 1))
+                (build-call obuilder (get-function m "rt_frame_set_pc") osetpc 2)
+                (build-ret obuilder (const-word obuilder 1))
+
+                (position-at-end obuilder oresumed)
+                (let ((odata-args (alloca-args obuilder 1)))
+                  (store-arg obuilder odata-args 0 oparam)
+                  (let* ((odata (build-call obuilder (get-function m "rt_frame_data") odata-args 1))
+                         (obase (build-int-to-ptr obuilder odata))
+                         (got (load-raw obuilder (build-slot-ptr obuilder obase 0) 0))
+                         (sum (build-add obuilder got (const-word obuilder 37))))
+                    (store-arg obuilder (build-slot-ptr obuilder obase 0) 0 sum)
+                    (frame-end obuilder m)
+                    (build-ret obuilder (const-word obuilder 0))))))
+            m))
+        (build-chain-module)
+    "#;
+    let module = expect_llvm_module(eval_ok(src));
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let outer = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(i64) -> i64>("outer")
+            .expect("failed to look up the compiled `outer` function")
+    };
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
+
+    let mut stack = typelisp::compile::coroutine::FrameStack::new();
+    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(outer.as_raw()) };
+    // The word is raw, not tagged: what the value slot means is the function's
+    // declared return representation, which the driver deliberately does not
+    // read. `inner` left 5; `outer` added 37 after being resumed with it.
+    let answer = stack.run(&mut heap, entry, &[]).expect("the chain ran to an answer");
+    assert_eq!(answer, 42, "the callee's value came back and the caller went on with it");
+    assert_eq!(stack.depth(), 0, "both frames were popped");
+}
+
 /// **The frame's size is written after the body decides it.**
 ///
 /// `frame-begin` emits `rt_frame_new(0)` because the count cannot be known
@@ -6909,11 +7100,15 @@ fn a_frames_size_is_patched_in_once_the_body_is_emitted() {
 
     let id = typelisp::BoxId::from_u32(0);
     assert!(heap.is_frame(id));
-    assert_eq!(heap.frame_len(id), 3, "and the frame on the heap has three — the placeholder was patched");
-    assert!(!heap.frame_mask_bit(id, 0) && heap.frame_mask_bit(id, 1) && !heap.frame_mask_bit(id, 2));
-    assert_eq!(heap.frame_word(id, 0), 100);
-    assert_eq!(typelisp::decode(heap.frame_word(id, 1)), Value::Int(7));
-    assert_eq!(heap.frame_word(id, 2), 300);
+    // Four, not three: slot 0 is the driver protocol's value slot, reserved by
+    // the prologue and never handed out, so the three the body asked for are
+    // 1, 2 and 3.
+    assert_eq!(heap.frame_len(id), 4, "the placeholder was patched with what was handed out");
+    assert!(!heap.frame_mask_bit(id, 0), "the reserved value slot is not a local");
+    assert!(!heap.frame_mask_bit(id, 1) && heap.frame_mask_bit(id, 2) && !heap.frame_mask_bit(id, 3));
+    assert_eq!(heap.frame_word(id, 1), 100);
+    assert_eq!(typelisp::decode(heap.frame_word(id, 2)), Value::Int(7));
+    assert_eq!(heap.frame_word(id, 3), 300);
 }
 
 /// Built by hand, so the three `rt_*` shims are declared bodyless and resolved

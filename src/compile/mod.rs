@@ -18,6 +18,7 @@ pub fn runtime_function_names() -> Vec<&'static str> {
 
 pub mod aot;
 pub mod bootstrap;
+pub mod coroutine;
 pub mod core_bridge;
 pub mod core_freevars;
 pub mod driver;

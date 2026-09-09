@@ -68,12 +68,14 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "to-string" => Some(llvm_module_to_string(heap, args)),
             "get-function" => Some(llvm_module_get_function(heap, args)),
             "add-function-with-env" => Some(llvm_module_add_function_with_env(heap, args)),
+            "add-coroutine-function" => Some(llvm_module_add_coroutine_function(heap, args)),
             _ => None,
         };
     }
     if *type_name == Path::root("llvm-function") {
         return match method {
             "append-block" => Some(llvm_function_append_block(heap, args)),
+            "function-param" => Some(llvm_function_param(args)),
             _ => None,
         };
     }
@@ -130,6 +132,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "load-raw" => Some(llvm_builder_load_raw(args)),
             "build-slot-ptr" => Some(llvm_builder_build_slot_ptr(args)),
             "frame-begin" => Some(llvm_builder_frame_begin(args)),
+            "frame-value" => Some(llvm_builder_frame_value(args)),
             "frame-slot" => Some(llvm_builder_frame_slot(args)),
             "frame-slot-rooted" => Some(llvm_builder_frame_slot_rooted(args)),
             "frame-end" => Some(llvm_builder_frame_end(args)),
@@ -236,6 +239,49 @@ fn llvm_module_add_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalEr
     let existing = module.borrow().get_function(name);
     let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(name, compiled_fn_type(), None));
     Ok(llvm_function_value(function))
+}
+
+/// The **coroutine ABI** (Phase C2): `i64 f(i64 frame)`.
+///
+/// One parameter, and it has to be one: entering a function and resuming it
+/// must be the same call, or every indirect call — a closure, a `:dyn` method
+/// — would have to know which of the two it was making. `0` in place of a
+/// frame means "first entry, make your own"; the arguments are waiting in
+/// `typelisp_abi::call_state`.
+///
+/// What comes back is a **status word**, not the value. The value is in the
+/// frame, which is what makes stopping in the middle sayable at all.
+pub(crate) fn coroutine_fn_type() -> inkwell::types::FunctionType<'static> {
+    let ctx = crate::compile::llvm_context();
+    ctx.i64_type().fn_type(&[ctx.i64_type().into()], false)
+}
+
+/// `(add-coroutine-function m name)` — get-or-create a function under
+/// [`coroutine_fn_type`], for the same reason [`llvm_module_add_function`] is
+/// get-or-create: LLVM uniquifies a colliding name rather than merging it.
+fn llvm_module_add_coroutine_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
+    let module = expect_llvm_module(&args[0])?;
+    let name = expect_str(heap, &args[1])?;
+    let existing = module.borrow().get_function(name);
+    let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(name, coroutine_fn_type(), None));
+    Ok(llvm_function_value(function))
+}
+
+/// `(function-param f idx)` — a function's raw LLVM parameter.
+///
+/// Distinct from `load-arg`, which reads a *logical* argument out of the
+/// `i64*` array the old ABI passes. Under the coroutine ABI the frame is a
+/// real parameter, so there is no array to read from.
+fn llvm_function_param(args: &[Value]) -> Result<Value, EvalError> {
+    let function = expect_llvm_function(&args[0])?;
+    let idx = match &args[1] {
+        Value::Int(n) => *n as u32,
+        other => return Err(EvalError::Internal(format!("function-param: expected an Int, got {:?}", other))),
+    };
+    function
+        .get_nth_param(idx)
+        .map(llvm_value_value)
+        .ok_or_else(|| EvalError::Internal(format!("function-param: no parameter {}", idx)))
 }
 
 /// Forward-declares `name` in `module` with the standard compiled-function
@@ -881,9 +927,32 @@ fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
         .map_err(|e| err("call rt_push_sexpr_root", e.to_string()))?;
 
     FRAME_CTXS.with(|c| {
-        c.borrow_mut().insert(builder_key(&builder), FrameCtx { data, frame, size_store, next: 0 });
+        // `next: 1` — slot 0 is the driver protocol's value slot
+        // (`typelisp_abi::FRAME_VALUE_SLOT`) and is never handed out as a
+        // local. A function's result leaves through it, and the result of a
+        // call it is waiting on arrives through it: from the resuming
+        // function's side those are the same thing, the answer it was waiting
+        // for.
+        c.borrow_mut().insert(builder_key(&builder), FrameCtx { data, frame, size_store, next: 1 });
     });
     Ok(Value::Empty)
+}
+
+/// `(frame-value builder)` — the tagged frame this function is building into.
+///
+/// [`llvm_builder_frame_begin`] returns `()` because most of what a prologue
+/// needs is already keyed on the builder, but the driver protocol has to name
+/// the frame itself: `rt_frame_set_pc` and `rt_frame_entered` both take it.
+fn llvm_builder_frame_value(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let key = builder_key(&builder);
+    FRAME_CTXS.with(|c| {
+        let map = c.borrow();
+        let f = map
+            .get(&key)
+            .ok_or_else(|| EvalError::Internal("frame-value: no frame is open on this builder".to_string()))?;
+        Ok(llvm_value_value(f.frame))
+    })
 }
 
 /// `(frame-slot builder)` — the address of a fresh, **unmasked** frame slot.

@@ -212,6 +212,106 @@ pub fn unwind_interpreted_error() -> ! {
 /// compiled-CPS work: a compiled frame holds tagged *words* rather than
 /// `Value`s, so the collector — which lives in `typelisp-mem`, below this
 /// crate — has to be able to decode them.
+// ---- the driver protocol (Phase C2) -------------------------------------
+//
+// A compiled function under the coroutine ABI is `i64 f(i64 frame)`, and what
+// it returns is not its value but a **status word** saying why it stopped.
+// Its value, when it has one, is in the frame.
+//
+// The status is what makes suspension possible at all. Under the old ABI a
+// function could only stop by returning, so "stop here and come back later"
+// had nowhere to be said — the machine stack held the rest of the work and
+// nothing could put it down. A frame plus a status word is exactly the pair
+// that can: the frame is the work, the status is why it paused.
+//
+// The value rides in **frame slot 0**, reserved by the prologue and never
+// handed out to a local. It carries the returned value on `RETURN`, and on
+// resumption it carries the value the call produced — the same slot, because
+// from the resuming function's side those are the same thing: the answer it
+// was waiting for.
+
+/// The function is finished; its value is in frame slot 0.
+pub const STATUS_RETURN: i64 = 0;
+/// The function wants to call another; the driver runs the callee and
+/// resumes this frame with the result in slot 0.
+pub const STATUS_CALL: i64 = 1;
+/// The function is suspending (a task yielded, slept, or blocked). The
+/// scheduler decides when its frame runs again.
+pub const STATUS_SUSPEND: i64 = 2;
+/// The function is unwinding — a `throw`, a `panic`, or a non-local exit
+/// that leaves this frame. Phase C4 gives this a payload; until then no
+/// compiled function produces it.
+pub const STATUS_UNWIND: i64 = 3;
+
+/// The frame slot the driver protocol reserves for the value in flight —
+/// a function's result, and the result of a call it is waiting on. The
+/// island's slot allocator hands out 1 upward.
+pub const FRAME_VALUE_SLOT: usize = 0;
+
+/// The state one coroutine-ABI call is in flight through.
+///
+/// Three thread-locals, for the same reason [`ACTIVE_HEAP`](set_active_heap)
+/// is one: the ABI has exactly **one** parameter — a frame, or `0` on first
+/// entry — and it must, so that entering a function and resuming it are the
+/// same call. Anything else that has to cross that boundary has nowhere to
+/// ride but here.
+///
+/// Each is live across exactly one call, between adjacent statements on the
+/// two sides. Nothing may allocate in those windows: the words are raw and
+/// tagged, sitting in Rust `Vec`s the collector does not trace.
+pub mod call_state {
+    use std::cell::RefCell;
+
+    thread_local! {
+        /// The arguments a not-yet-entered function will copy into its own
+        /// frame. Written by the driver, read by that function's prologue.
+        ///
+        /// The callee allocates its own frame, not the caller: only the callee
+        /// knows how many slots it needs, and under mutual recursion the
+        /// caller may be compiled before the callee exists at all.
+        static PENDING_ARGS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+        /// The frame a prologue just allocated, on its way in. The driver
+        /// cannot learn it any other way — it is made inside the callee, after
+        /// the call has started.
+        static CURRENT_FRAME: RefCell<Option<i64>> = const { RefCell::new(None) };
+        /// The callee and arguments a frame is asking the driver to call, set
+        /// immediately before it returns `STATUS_CALL`.
+        static PENDING_CALL: RefCell<Option<(usize, Vec<i64>)>> = const { RefCell::new(None) };
+    }
+
+    pub fn set_pending_args(args: &[i64]) {
+        PENDING_ARGS.with(|a| {
+            let mut v = a.borrow_mut();
+            v.clear();
+            v.extend_from_slice(args);
+        });
+    }
+
+    pub fn pending_arg(i: usize) -> i64 {
+        PENDING_ARGS.with(|a| a.borrow().get(i).copied().unwrap_or(0))
+    }
+
+    pub fn pending_argc() -> usize {
+        PENDING_ARGS.with(|a| a.borrow().len())
+    }
+
+    pub fn set_current_frame(f: i64) {
+        CURRENT_FRAME.with(|c| *c.borrow_mut() = Some(f));
+    }
+
+    pub fn take_current_frame() -> Option<i64> {
+        CURRENT_FRAME.with(|c| c.borrow_mut().take())
+    }
+
+    pub fn set_pending_call(target: usize, args: Vec<i64>) {
+        PENDING_CALL.with(|c| *c.borrow_mut() = Some((target, args)));
+    }
+
+    pub fn take_pending_call() -> Option<(usize, Vec<i64>)> {
+        PENDING_CALL.with(|c| c.borrow_mut().take())
+    }
+}
+
 pub use typelisp_mem::tagged::{decode, encode};
 
 /// Decodes one tagged argument.
