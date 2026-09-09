@@ -12,13 +12,31 @@
 //! without making the heap shareable first.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
+use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
 fn run(src: &str) -> Result<(Heap, Value), EvalError> {
+    run_with(src, false)
+}
+
+/// [`run`] with the LLVM backend and the compiler island loaded, for the tests
+/// that reach `(compile ...)`.
+///
+/// Kept apart because it is the expensive setup: the island's own bodies have
+/// to be installed before anything can be compiled, and most of this file
+/// never compiles anything.
+fn run_compiled(src: &str) -> Result<(Heap, Value), EvalError> {
+    run_with(src, true)
+}
+
+fn run_with(src: &str, with_compiler: bool) -> Result<(Heap, Value), EvalError> {
     let mut h = Heap::with_capacity(1 << 18);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
+    if with_compiler {
+        typelisp::compile::install_llvm_backend();
+        load_compiler(&mut h, &mut chk, &mut interp);
+    }
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
@@ -33,6 +51,31 @@ fn run(src: &str) -> Result<(Heap, Value), EvalError> {
 
 fn int(src: &str) -> i64 {
     match run(src).expect("eval failed").1 {
+        Value::Int(n) => n,
+        other => panic!("expected an integer, got {:?}", other),
+    }
+}
+
+/// What `(compile ...)` refuses with — an evaluation error, not a check error.
+fn compile_err(src: &str) -> String {
+    match run_compiled(src) {
+        Ok(_) => panic!("expected the compile to be refused"),
+        Err(e) => e.to_string(),
+    }
+}
+
+/// [`text`] for a source that compiles something.
+fn text_compiled(src: &str) -> String {
+    let (h, v) = run_compiled(src).expect("eval failed");
+    match v {
+        Value::Str(id) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
+/// [`int`] for a source that compiles something.
+fn int_compiled(src: &str) -> i64 {
+    match run_compiled(src).expect("eval failed").1 {
         Value::Int(n) => n,
         other => panic!("expected an integer, got {:?}", other),
     }
@@ -328,4 +371,91 @@ fn each_turn_of_a_loop_starts_a_task_over_its_own_binding() {
                 trail"#),
         "012"
     );
+}
+
+// ---- the compiled side ---------------------------------------------------
+//
+// A task is an interpreter continuation stack, and compiled code runs on the
+// Rust stack — so a compiled body can *start* a task but never suspend in one
+// (the plan's B6). These tests pin both halves of that line.
+
+/// `go` inside a compiled function starts a real task.
+///
+/// Everything up to the call happens in the compiled body — that is what `go`
+/// promises anywhere — and only the call is handed over. The waiting is done
+/// by the interpreted caller, which is the half that can suspend.
+#[test]
+fn a_compiled_body_can_start_tasks() {
+    assert_eq!(
+        text_compiled(r#"(defvar (trail string) "")
+                (defun work ((name string)) ()
+                  (when true (setf trail (append trail name))))
+                (defun spawn-two () Task<()>
+                  (progn (go (work "a")) (go (work "b"))))
+                (compile spawn-two)
+                (let ((t (spawn-two)))
+                  (progn (wait t) trail))"#),
+        "ab"
+    );
+}
+
+/// The arguments cross as machine words in their declared representations —
+/// a raw `i32`, a boxed `f64`, a tagged string — and are decoded back on the
+/// interpreter's side by those same representations. A word alone cannot say
+/// which it is.
+#[test]
+fn a_compiled_spawn_carries_arguments_of_every_representation() {
+    assert_eq!(
+        text_compiled(r#"(defvar (trail string) "")
+                (defun mixed ((n i32) (x f64) (s string)) ()
+                  (when true
+                    (setf trail (append (append (append trail (to-string n)) (to-string x)) s))))
+                (defun spawn-mixed ((n i32)) Task<()>
+                  (go (mixed n 2.5 "hi")))
+                (compile spawn-mixed)
+                (let ((t (spawn-mixed 7)))
+                  (progn (wait t) trail))"#),
+        "72.5hi"
+    );
+}
+
+/// A compiled `go` on a function *value* — an `apply` node, whose callee is a
+/// form rather than a name, so it is evaluated in the compiled body and rides
+/// at the head of the argument run.
+#[test]
+fn a_compiled_body_can_spawn_a_function_value() {
+    assert_eq!(
+        int_compiled(r#"(defun twice ((n i32)) i32 (* n 2))
+               (defun spawn-value ((n i32)) Task<i32>
+                 (let ((f twice)) (go (f n))))
+               (compile spawn-value)
+               (let ((t (spawn-value 21))) (wait t))"#),
+        42
+    );
+}
+
+/// `wait` refuses to compile, and says why.
+///
+/// It used to come out as the generic "a builtin method with no compiled
+/// implementation", which describes the table rather than the reason.
+#[test]
+fn wait_refuses_to_compile_and_says_why() {
+    let e = compile_err(
+        r#"(defun work ((n i32)) i32 n)
+           (defun waiter ((n i32)) i32 (let ((t (go (work n)))) (wait t)))
+           (compile waiter)"#,
+    );
+    assert!(e.contains("suspends the running task"), "got {}", e);
+    assert!(e.contains("task::wait"), "got {}", e);
+}
+
+/// `yield` likewise — and this one used to claim it did not exist at all.
+#[test]
+fn yield_refuses_to_compile_and_says_why() {
+    let e = compile_err(
+        r#"(defun tick ((n i32)) () (dotimes (i n) (yield)))
+           (compile tick)"#,
+    );
+    assert!(e.contains("suspends the running task"), "got {}", e);
+    assert!(e.contains("`yield`"), "got {}", e);
 }

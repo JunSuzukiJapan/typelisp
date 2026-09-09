@@ -1283,3 +1283,20 @@ fn local_time_decoding_runs_in_an_executable() {
 "#;
     assert_eq!(compile_and_run("localtime_aot", src), 0);
 }
+
+/// `(go ...)` in a standalone executable refuses, and says what is missing.
+///
+/// A task is an interpreter continuation stack, and an AOT-compiled program
+/// has no interpreter in it at all — so the task could never be run. `rt_go`
+/// says so rather than admitting one that would sit there forever, which is
+/// the difference between a limitation and a silently wrong answer.
+#[test]
+fn go_in_a_standalone_executable_says_there_is_no_interpreter() {
+    let (code, err) = compile_and_capture(
+        "go_no_interp",
+        r#"(defun work ((n i32)) i32 (* n 2))
+           (defun main () i32 (let ((t (go (work 21)))) 0))"#,
+    );
+    assert_ne!(code, 0, "expected the program to stop");
+    assert!(err.contains("needs an interpreter to run the task in"), "stderr was: {}", err);
+}

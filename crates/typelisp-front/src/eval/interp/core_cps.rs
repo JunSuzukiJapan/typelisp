@@ -31,7 +31,7 @@
 //! drops a frame's values) and the `set_state` that re-roots what the next
 //! state carries. Nothing in between touches the heap.
 
-use typelisp_mem::{Heap, RootStackId, SymRef, Value};
+use typelisp_mem::{Heap, RootScope, RootStackId, SymRef, Value};
 
 use crate::check::core;
 use crate::check::repr::Repr;
@@ -135,6 +135,22 @@ impl ArgsKind {
             ArgsKind::Assoc => 7,
             ArgsKind::DynCall => 5,
             ArgsKind::Apply => 3,
+        }
+    }
+
+    /// Which leading field holds the arguments' representations.
+    ///
+    /// The interpreter reads them for one thing only: decoding arguments that
+    /// arrive from compiled code, where the word alone cannot say whether it
+    /// is a raw `f64` bit pattern or a tagged pointer. `core_bridge`'s
+    /// `call_node_shape` is the same table on the compiling side.
+    fn repr_at(self) -> usize {
+        match self {
+            ArgsKind::Call => 3,
+            ArgsKind::Construct => 4,
+            ArgsKind::Assoc => 5,
+            ArgsKind::DynCall => 4,
+            ArgsKind::Apply => 2,
         }
     }
 
@@ -1345,6 +1361,64 @@ impl Interp {
         argv.push(callee);
         argv.extend(args);
         self.finish_args(heap, form, argv, ArgsKind::Apply, spawn)
+    }
+
+    /// `(go ...)` reached from **compiled** code: the parts arrive as machine
+    /// words, and a task is started from them.
+    ///
+    /// The node itself is `args[0]` — rebuilt by the compiled code that is
+    /// starting the task, because an ahead-of-time compiled program shares no
+    /// object table with the heap that compiled it (`core_bridge`'s
+    /// `translate_go`). Everything after it is an argument, in the callee's
+    /// **declared representation**, so the words are decoded by the same rule
+    /// that decodes a compiled call's result — a word is a raw `f64` bit
+    /// pattern or a tagged pointer, and only the declared type says which.
+    ///
+    /// The task is admitted and nothing is run: compiled code cannot suspend,
+    /// so the caller keeps going and the scheduler picks the new task up at the
+    /// next point some *interpreted* task yields, waits or finishes.
+    pub(super) fn spawn_from_compiled(&self, heap: &mut Heap, args: &[i64]) -> Result<i64, EvalError> {
+        let form = typelisp_rt::decode(args[0]);
+        let kind = call_kind(heap, form)?;
+        let reprs = {
+            let field = core::field(heap, form, kind.repr_at()).ok_or_else(|| {
+                EvalError::Internal(format!("go: ({} ..) has no representation list", kind.what()))
+            })?;
+            repr_list(heap, field, kind.what())?
+        };
+
+        let mut s = RootScope::new(heap);
+        s.push_root(form);
+        let mut argv = Vec::with_capacity(args.len() - 1);
+        let mut raw = &args[1..];
+        // An `apply`'s callee travels at the head of the argument run — see
+        // `finish_apply_args`. It is a function value, so it is already tagged.
+        if kind == ArgsKind::Apply {
+            let (callee, rest) = raw.split_first().ok_or_else(|| {
+                EvalError::Internal("go: (apply ..) arrived without its callee".to_string())
+            })?;
+            let callee = typelisp_rt::decode(*callee);
+            s.push_root(callee);
+            argv.push(callee);
+            raw = rest;
+        }
+        if raw.len() != reprs.len() {
+            return Err(EvalError::Internal(format!(
+                "go: {} argument(s) for {} representation(s)",
+                raw.len(),
+                reprs.len()
+            )));
+        }
+        for (w, r) in raw.iter().zip(&reprs) {
+            // Decoding allocates (a float argument builds a box), so each one
+            // is rooted before the next is decoded.
+            let v = self.decode_compiled_return(&mut s, *w, r)?;
+            s.push_root(v);
+            argv.push(v);
+        }
+
+        let handle = self.spawn_task(&mut s, form, argv, kind)?;
+        Ok(typelisp_rt::encode(handle))
     }
 
     /// Hands a fully-evaluated call over to a new task, and returns its handle.

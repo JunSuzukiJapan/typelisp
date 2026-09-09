@@ -1844,6 +1844,68 @@ pub fn set_apply_interpreted(f: Option<ApplyInterpretedFn>) {
     APPLY_INTERPRETED.with(|cell| cell.set(f));
 }
 
+/// How compiled `(go ...)` starts a task — the interpreter's half, installed
+/// the same way and for the same reason as [`ApplyInterpretedFn`].
+///
+/// `args[0]` is the call node, rebuilt by the compiled code that is starting
+/// the task (`core_bridge`'s `translate_go` explains why it travels as data);
+/// `args[1..]` are the already-evaluated arguments, in the callee's own
+/// declared representations. The result is a `Task<T>` handle as a tagged word.
+pub type SpawnTaskFn = unsafe extern "C-unwind" fn(args: *const i64, argc: u32) -> i64;
+
+thread_local! {
+    static SPAWN_TASK: Cell<Option<SpawnTaskFn>> = const { Cell::new(None) };
+}
+
+/// Installs (or clears) this thread's task-spawning hook — see [`SpawnTaskFn`].
+pub fn set_spawn_task(f: Option<SpawnTaskFn>) {
+    SPAWN_TASK.with(|cell| cell.set(f));
+}
+
+/// `(go (f a b))` in compiled code: the call's parts are in hand, and this
+/// hands them to the scheduler instead of making the call.
+///
+/// **A task is an interpreter continuation stack**, so the task itself cannot
+/// live here — compiled code runs on the Rust stack, which is what the plan's
+/// B6 restriction is about. What compiled code *can* do is everything up to
+/// the call, which is exactly what `go` promises: the callee and every
+/// argument are evaluated where the `go` is written.
+///
+/// Without an interpreter on this thread there is nothing that could ever run
+/// the task, so this refuses rather than admitting one that would sit forever.
+/// That is an ahead-of-time compiled program with no `eval` in it — see
+/// `typelisp_front::shim::rt_eval_init` for the one that does have one.
+///
+/// # Safety
+///
+/// `args` must point to `argc` valid `i64`s, with `args[0]` a tagged call
+/// node, and a `Heap` must be registered on this thread. Every heap-backed
+/// word among them must already be rooted by the caller — spawning allocates.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_go(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_go: expected at least the call node");
+    }
+    match SPAWN_TASK.with(|cell| cell.get()) {
+        Some(hook) => hook(args, argc),
+        None => raise(
+            "`go` needs an interpreter to run the task in, and this program has none: \
+             a task is a continuation stack, which compiled code does not have"
+                .to_string(),
+        ),
+    }
+}
+
+/// The protected form of [`rt_go`], for a `go` inside a region that catches.
+///
+/// # Safety
+///
+/// [`rt_go`]'s, unchanged.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_protected_go(args: *const i64, argc: u32) -> i64 {
+    protected(|| rt_go(args, argc))
+}
+
 /// `(rt-apply-any closure args-ptr argc)` — compiled code's one way to call
 /// a function *value*, whatever kind of function it turns out to hold.
 /// `args[0]` is the callee as a tagged word, `args[1]` the address of the

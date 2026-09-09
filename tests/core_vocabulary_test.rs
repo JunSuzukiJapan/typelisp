@@ -230,6 +230,13 @@ fn calls() {
         "(apply (var g) int-any-width (int-any-width) (int-any-width 1))",
         "(compile-fn (fn (f) () f))",
         "(compile-fn (method point new ()))",
+        // `(go CALL)` — the call is made in a task rather than here. It wraps
+        // a whole call node, so its own shape is the thinnest in the
+        // vocabulary; the bridge is what takes the wrapped node apart.
+        "(go (call (f) () f (int-any-width) (int-any-width 1)))",
+        // The callee can be a value, in which case the wrapped node is an
+        // `apply` and its callee is a form like any argument.
+        "(go (apply (var g) int-any-width (int-any-width) (int-any-width 1)))",
     ]);
     // `compile-fn`'s two payload shapes, standalone for the same reason the
     // pattern tags are.
@@ -442,7 +449,7 @@ const SHARED_WITH_ISLAND: &[&str] = &[
     "int-any-width", "float-any-width", "bignum", "ratio", "char", "bool", "str", "unit", "var", "set", "global",
     "set-global", "let", "lambda", "labels", "call", "assoc", "apply", "if", "loop", "break",
     "return", "block", "return-from", "panic", "match", "construct", "field-get", "field-set",
-    "dyn-new", "dyn-upcast", "dyn-call", "dyn-value",
+    "dyn-new", "dyn-upcast", "dyn-call", "dyn-value", "go",
 ];
 
 /// Core tags with no island counterpart: the bridge turns each into something

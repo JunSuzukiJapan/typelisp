@@ -10854,3 +10854,78 @@ GC ストレス下の `bignum_ratio_gc_test` が `gc-root-audit: set_root given 
 
 Rust のスタックトレースに Lisp の呼び出し階層が出なくなった。継続スタックを印字するデバッグ
 機能が代わりに要る（`Op::Step` のデバッガと同じ場所）— 未実装。
+
+## 並行機構 Phase B — `go` / `wait` / `yield`、島まで（2026-09-09）
+
+Phase A（評価器の CPS 化）の上に、タスクを乗せた。プランは
+`~/.claude/plans/go-gorutine-adaptive-raccoon.md`。
+
+### 形
+
+- `(go (f a b))` — `f` も各引数も **`go` が書かれた場所で**評価され、呼び出しだけが新しい
+  タスクになる。返るのは `Task<T>`
+- `(wait t)` — `Task<T>` のメソッド。何度でも聞ける（値を保持する）
+- `(yield)` — 残りの turn を譲る
+
+`wait` と `yield` は登録上ふつうの組み込みだが、**評価器が横取りする**。組み込みは「値」でしか
+答えられず、この 2 つが言わねばならないのは「まだだ」「ここで止まれ」——`State` にしか書けない
+返事だから。横取り点は `finish_assoc` と `finish_call`。
+
+`yield` の判定は**解決済みのパス**で行う。書かれた名前と `home` が空かどうかで見る形は効かない。
+
+### `go` は予約語にした
+
+プランの下調べは「`go` は well-known 表にも registry にも無いので空いている」と結論したが、
+**偽だった**。テスト 23 行が `labels` のループ補助関数名に使い、prelude が `while` の継続
+フラグに使っていた。表を 2 つ見ただけでは足りず、慣用句を grep する必要がある。
+ユーザーの判断で「`go` のままにして、変数名としては使えなくする」——予約は
+`Env::extended_with_locs` の一箇所で効く。
+
+### `apply` の spawn（後から見つかった穴）
+
+`check_go` は `call`/`assoc`/`dyn-call`/`apply` を受けるのに、`call_kind` は最初の 3 つしか
+知らなかった。`(let ((f twice)) (go (f 21)))` は**型検査を通ってから内部エラー**になる。
+
+`apply` が他と違うのは、callee が解決済みの名前でなく**フィールド 0 のフォーム**であること。
+評価が済んだあとは **callee を引数リストの先頭に乗せて**共通の道へ合流させた——`State::Enter`
+のルートスロットは「フォーム 1 つとリスト 1 つ」で、callee を置く 3 つ目が無いから。
+副産物として `ArgsKind::Apply`（skip=3）が入り、`apply_arg_forms` は `arg_forms` と同じものに
+なって畳めた。
+
+### 島（compile 経路）
+
+**タスクはインタプリタの継続スタック**で、コンパイル済みコードには無い（プランの B6）。
+だから compiled `go` がやるのは**呼び出しの手前まで**——それはちょうど `go` の約束と同じ範囲。
+
+渡すのは 2 つ:
+
+1. **呼び出しノードの先頭フィールド**（名前・パス・表現・キー）。これは **quoted data として
+   渡す**。`quote` が実行時に組み直すのと同じ理由で、AOT の実行ファイルはコンパイルした
+   ヒープとオブジェクト表を共有しないから、チェック済みノードへのポインタは何も指さない。
+   引数の部分式は落とす——もう評価済みで、`finish_call` たちは読まない
+2. **評価済みの引数**。callee の宣言表現のままなので、フロント側は
+   `decode_compiled_return` で戻す。語だけでは raw な f64 のビット列かタグ付きポインタか
+   区別できない
+
+これで `call`/`assoc`/`dyn-call`/`apply` の 4 種類が**一様に**載る。島側の `compile-go` は
+`compile-apply-indirect` と同じ形の 8 行で済んだ。
+
+配線は `core_freevars` → `core_bridge::translate_go` → `compiler.rs::SOURCE` の `compile-go` →
+`rt_go`（`typelisp-rt`、hook は `rt_apply_interpreted` と同じ設置の仕方）→
+`Interp::spawn_from_compiled`。externs の配列長は 247 → 249。島の再生成は 1 回で不動点に
+達した（`compile-go` 自身が `go` を含まないため）。
+
+### 断り方を直した
+
+`wait`/`yield` を含む関数を compile しようとしたときのメッセージが実態と違っていた:
+
+- `wait` → 「a builtin method with no compiled implementation」（表の都合を述べていて理由が無い）
+- `yield` → 「**no such function: yield**」（**存在するのに**「無い」と言っていた）
+
+`call_graph_edges` で、**タスクを中断する操作**として明示的に断る形にした。理由まで書く:
+コンパイル済みの本体は中断できない、タスクは継続スタックで compiled は Rust スタックの上を
+走るから、と。`go` はこの一覧に入れない——タスクを**始める**ことは何も中断しない。
+
+AOT の実行ファイルではインタプリタが 1 つも無いので、`rt_go` は hook が未設置なら
+`raise` する。**走らせる者が居ないタスクを黙って受け付けない**のが、制限と「静かに
+間違った答え」の違い。

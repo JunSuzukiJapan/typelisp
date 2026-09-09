@@ -470,6 +470,7 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         }
 
         // ---- calls -------------------------------------------------------
+        "go" => translate_go(heap, form, cx),
         "call" => translate_call(heap, form, cx),
         "assoc" => translate_assoc(heap, form, cx),
 
@@ -723,6 +724,97 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         f.push(v);
     }
     f.finish("let")
+}
+
+/// The leading fields of each call node — how many there are, and where the
+/// argument representations sit among them.
+///
+/// The *only* consumer is [`translate_go`], which has to hand the interpreter
+/// back a node it can finish the call from. Everything else about these nodes
+/// is decided here at compile time; these two numbers are the part that has to
+/// survive to run time.
+fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
+    match tag {
+        // `(call WRITTEN HOME PATH (R...) ARG...)`
+        "call" => Some((4, 3)),
+        // `(assoc PATH SYM INSTANCE HOME RET-R (R...) RET-KEY ARG...)`
+        "assoc" => Some((7, 5)),
+        // `(dyn-call PATH SYM SLOT VTABLE (R...) ARG...)`
+        "dyn-call" => Some((5, 4)),
+        // `(apply CALLEE RET-R (R...) ARG...)`
+        "apply" => Some((3, 2)),
+        _ => None,
+    }
+}
+
+/// `(go CALL)` -> `(go (2 . HEAD) (kind . E)...)`.
+///
+/// **The call happens in a task, and a task is an interpreter continuation
+/// stack** — compiled code has no such thing (the plan's B6). So compiled
+/// `go` does what the interpreted one does *up to* the call: it evaluates
+/// every argument here, in the starting task, and then hands the parts over.
+/// `rt_go` admits the task; the interpreter makes the call later.
+///
+/// What has to cross is the node's *leading* fields — the names, path,
+/// representations and keys that say which function this is. They cross as
+/// **quoted data**, rebuilt at run time by the same nodes a `quote` uses, for
+/// the same reason: an AOT-compiled program shares no object table with the
+/// heap that compiled it, so a pointer to the checked node would name nothing
+/// there. The argument sub-forms are dropped — they have already been
+/// evaluated, and `finish_call` and friends never read them.
+///
+/// An `apply`'s callee is a form rather than a name, so it is evaluated here
+/// like an argument and travels at the head of the argument run — which is
+/// exactly where `ArgsKind::Apply` expects it. Its slot in the head is blanked
+/// so nothing rebuilds a form that has already been evaluated.
+fn translate_go(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let call = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
+    let tag = core::op(heap, call).ok_or_else(|| malformed(heap, form))?.to_string();
+    let (skip, repr_at) = call_node_shape(&tag).ok_or_else(|| {
+        Error::TypeError(format!("compile: `go` wraps a `{}`, which is not a call (internal error)", tag))
+    })?;
+    let parts = core::fields(heap, call)?;
+    if parts.len() < skip {
+        return Err(malformed(heap, call));
+    }
+
+    let mut head_fields = parts[..skip].to_vec();
+    if tag == "apply" {
+        head_fields[0] = Value::Empty;
+    }
+    let reprs = repr_list(heap, parts[repr_at])?;
+    let args = parts[skip..].to_vec();
+
+    // Built before the node's own `Items`, the way `dyn_operand` builds its
+    // pair: every intermediate is rooted while the next one allocates.
+    let head_pair = {
+        let mut s = RootScope::new(heap);
+        let head = core::tagged(&mut s, &tag, &head_fields)?;
+        s.push_root(head);
+        let head_form = quoted_form(&mut s, head)?;
+        s.push_root(head_form);
+        // Kind 2: a rebuilt node is a heap structure, so the island roots it
+        // for as long as it sits in the argument array.
+        core::pair(&mut s, Value::Int(2), head_form)?
+    };
+
+    let mut f = Items::new(heap);
+    f.push(head_pair);
+    if tag == "apply" {
+        // Rooted before the pair is built, for `dyn_operand`'s reason: pairing
+        // allocates, and a `Vec`/local holding the callee is invisible to the
+        // collector.
+        let pair = {
+            let mut s = RootScope::new(f.heap());
+            let callee = to_island(&mut s, parts[0], cx)?;
+            s.push_root(callee);
+            // A function value is a heap box, so it is rooted like the head.
+            core::pair(&mut s, Value::Int(2), callee)?
+        };
+        f.push(pair);
+    }
+    arg_pairs(&mut f, &reprs, &args, cx)?;
+    f.finish("go")
 }
 
 /// `(call WRITTEN HOME PATH (R...) E...)` -> `(call "name" (kind . form)...)`.

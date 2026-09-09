@@ -553,6 +553,12 @@ pub const SOURCE: &str = r#"
    string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block>
    Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
+(defsignature compile-go
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
+   Option<llvm-basic-block> Option<llvm-value> Option<llvm-value>
+   string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Option<Sexpr>)
+  llvm-value)
 (defsignature compile-pattern-test
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value> Option<llvm-value>
@@ -1985,6 +1991,7 @@ pub const SOURCE: &str = r#"
       (set-global (compile-set-global m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup e))
       (global-init (compile-global-init m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup e))
       (panic (compile-panic m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup e))
+      (go (compile-go m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup e))
       (catch (compile-catch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup e))
       (throw (compile-throw m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup e))
       (unwind-protect (compile-unwind-protect m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup e))
@@ -5391,6 +5398,27 @@ pub const SOURCE: &str = r#"
       (store-arg builder args-ptr 0 msg-v)
       (emit-rt-call builder m cur-fn "rt_panic" "rt_protected_panic" args-ptr 1 protect)))
 
+;; `(go (2 . HEAD) (kind . E)...)` -- start a task.
+;; Every operand is compiled here, in the running
+;; task: the callee's identity (HEAD, a node rebuilt
+;; as data because an AOT program shares no object
+;; table with the heap that compiled it) and the
+;; already-evaluated arguments. `rt_go` admits the
+;; task and returns its handle; the call itself
+;; happens later, in the interpreter, because a task
+;; is a continuation stack and compiled code has none.
+;; Shaped exactly like `compile-apply-indirect`: one
+;; argument array, `compile-call-args` rooting the
+;; collectable operands for as long as they sit in it.
+(defun compile-go ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
+    (let* ((arg-forms (sexpr-cdr e))
+           (argc (sexpr-list-length arg-forms))
+           (args-ptr (alloca-args builder argc))
+           (sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
+           (result (emit-rt-call builder m cur-fn "rt_go" "rt_protected_go" args-ptr argc protect)))
+      (pop-sexpr-roots builder m sexpr-roots)
+      result))
+
 (defun compile-function ((m llvm-module) (name string) (param-names Option<Sexpr>) (body Option<Sexpr>)) llvm-module
     (let* ((f (add-function m name))
            (b (append-block f "entry"))
@@ -5419,10 +5447,14 @@ m))))
 /// embedded so [`load_aot`] needs no filesystem access at runtime. Kept in
 /// sync with `SOURCE` by `scripts/regen-compiler-island.sh` and the
 /// `island_artifacts_are_fresh` test.
-/// The committed island dump: the checked state the island's 121 `defun`s and
-/// one `defmacro` produce, paired with the bitcode holding their native
-/// bodies. Written by `scripts/regen-compiler-island.sh`, applied by
-/// [`load_aot`].
+/// The committed island dump: the checked state every top-level `defun` in
+/// [`SOURCE`] produces, paired with the bitcode holding their native bodies.
+/// Written by `scripts/regen-compiler-island.sh`, applied by [`load_aot`].
+///
+/// `tests/island_self_compile_test.rs`'s `ISLAND_DEFUNS` is the list of them,
+/// and `island_defun_list_is_exhaustive` is what keeps it honest — this used
+/// to name a count instead, and it was wrong by 27 (and about a `defmacro`
+/// that no longer exists) before anyone looked.
 pub const ISLAND_DUMP: &[u8] = include_bytes!("compiler_island.typld");
 
 /// What to run when the committed dump no longer matches [`SOURCE`].

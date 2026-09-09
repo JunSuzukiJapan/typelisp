@@ -650,6 +650,37 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
     };
     let mut edges = Vec::new();
 
+    // The operations that **suspend the running task**. A compiled body cannot
+    // suspend: a task is an interpreter continuation stack, and compiled code
+    // runs on the Rust stack with nothing to come back to (the plan's B6). So
+    // this is a deliberate refusal carrying the reason, rather than the
+    // "no such function"/"no compiled implementation" a missing lowering gives
+    // — `yield` and `task::wait` both exist, and neither is going to be
+    // lowered.
+    //
+    // `go` is deliberately absent from this: starting a task suspends nothing,
+    // and `compile-go` lowers it.
+    let suspends = targets
+        .calls
+        .iter()
+        .find(|p| **p == Path::root("yield"))
+        .map(|p| p.to_string())
+        .or_else(|| {
+            targets
+                .methods
+                .iter()
+                .find(|(t, m)| *t == Path::root("task") && m == "wait")
+                .map(|(t, m)| format!("{}::{}", t, m))
+        });
+    if let Some(target) = suspends {
+        return Err(EvalError::Panic(format!(
+            "compile: \"{}\" calls \"{}\", which suspends the running task — and compiled code \
+             cannot suspend, because a task is an interpreter continuation stack while a compiled \
+             body runs on the Rust stack. Leave the `{}` in an interpreted caller; `go` itself compiles.",
+            name, target, target
+        )));
+    }
+
     edges.extend(
         targets
             .calls
