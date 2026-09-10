@@ -405,3 +405,85 @@ LLVM の `call` ではない。マシンスタックは `FrameStack::run` の深
 `args-ptr` には新しい組み込みが要らない見込み：`frame-slot` は連番のスロットを
 配るので、引数の数だけ連続して呼べば先頭ポインタから `store-arg` の GEP が
 そのまま効く。
+
+## C2d. 島がコルーチン ABI を出す（**進行中 — labels が壊れている**）
+
+### 到達した点
+
+**自己ホストの不動点に達した。** ブートストラップは 3 ラウンドかかり、
+`ISLAND_DUMP_BODY_ABI` と `ISLAND_DUMP_EMITS_ABI` を間で進める:
+
+| ラウンド | サイズ | 本体 / 出力 |
+|---|---|---|
+| 0（元） | 3,200,164 | classic / classic |
+| 1 | 3,183,629 | classic / **coroutine** |
+| 2 | 3,845,765 | **coroutine** / coroutine |
+| 3 | 3,845,765 | 同上（**バイト同一 = 不動点**） |
+
+真ん中の世代が本当に存在することがこの表に出ている。C2b の 2 つの定数は
+ラウンド 1 の 1 行のためだけにある。
+
+**反復のたびにラウンド 0 から作り直す必要がある。** SOURCE を直しても、
+コードを出している島は 1 世代前なので検証器の文句は変わらない。
+`scratchpad/threeRounds.sh` が手順を持っている（島を HEAD へ戻し、定数を
+両方 CLASSIC にしてから走らせる）。
+
+### 検証器が作業リストを出した
+
+`Instruction does not dominate all uses` が 30 件。中身は 2 種類で、
+**2 番目は検証器が黙る**ぶん危ない:
+
+1. **レジスタに残したまま跨いだ値**。`compile-let-values` が全部の値を
+   計算してから `bind-let-values` がスロットへ置いていた——支配関係の違反
+   であると同時に**潜在的な GC 穴**でもあった（後の初期化式が確保すると
+   先の値が根なしで浮く）。スロットを先に配って計算した端から入れる形に
+   したので両方消えた
+2. **中断を跨いで埋まる配列**。`alloca` を entry ブロックへ持ち上げたので
+   支配関係は満たされるが、**マシンフレームは中断で消えるので中身が失われる**。
+   `compile-call-args`・`construct-*`・ratio リテラルの配列をフレームスロットへ
+
+`compile-assoc` は 19 箇所を個別に直す代わりに**被演算子の評価を dispatch の
+前に括り出した**。`rest` の長さがどの腕でもメソッドのアリティで、短絡する
+メソッドが 1 つも無いので、評価するものも順序も変わらない。
+
+**マスクは一律にできない。** `compile-construct-box` の配列はスロット 1 だけが
+生のバリアント番号で、marked にすると算術からヒープ参照を捏造する。1 本の
+run でなく 3 回に分けて配る。
+
+### 踏んだ罠
+
+- **`compile-call` は `rt_*` 組み込みも名前で呼ぶ。** 両方をドライバに渡すと
+  ドライバが `rt_consp` を「入場」させ（`f(0)`）、引数ポインタが null で落ちる。
+  `callee_symbol_name` が既にどちらかを決めていて、`rt_` 接頭辞がその答え
+- **Lisp 名の先行宣言が旧 ABI だった**（`declare_external_function`、
+  `bootstrap.rs`/`prelude_bootstrap.rs` の宣言ループ）。宣言と定義は名前で
+  結ばれるので、これは 2 つ目の宣言でなく**その宣言に本体を付けようとして**
+  型が食い違う
+- **一括置換が「使用箇所」と「引き継ぎ」を区別しない。** `compile-match-arms`
+  の `scrut-v` を全部 `(load-raw ...)` にしたら再帰呼び出しの引数まで置き換わり、
+  スロットを渡すべきところに読み出した値が入った
+
+### 残っている不具合（次はここから）
+
+**`labels` を含む関数のコンパイルが落ちる。** `tests/compile_test.rs` の
+`compile_dispatches_a_defun_with_a_labels_body_to_native_code` ほか labels 系。
+
+```
+llvm-builder::coroutine-begin: dangling llvm handle 140442234737264
+  (registry holds 18, args so far [17, 0, 140442234737264])
+```
+
+`sib-fn`（`(get inner-fn-env nm)` の結果）が**ハンドル番号でなくポインタ**。
+レジストリは 18 件しかないので、値そのものが別のもの——大きさからして
+native scope か `RtValue` のポインタに見える。`inner-fn-env` は
+`Scope<llvm-function>`（native scope）。
+
+疑わしい順:
+1. `declare-labels-siblings` の `if` を潰して両枝を `add-coroutine-function`
+   にしたこと（旧: 捕捉なしは `add-function`）
+2. `compile-llvm-op` の `frame-arg-slots builder m 1 arg-forms` —— native scope
+   のハンドルは生の i64 なので kind 0 のはずだが、`(kind . node)` の kind が
+   何を言っているか未確認
+3. `compile-match` のスクルーチニー spill が Option の箱の読み出しに影響した
+
+prelude の再生成も同じ理由で落ちる（prelude は `labels` を使う）。

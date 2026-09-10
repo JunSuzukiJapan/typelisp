@@ -78,17 +78,18 @@ pub struct CompiledLibrary<'a> {
 /// see its doc comment for why) re-exported under its old in-crate path so
 /// every existing `crate::compile::runtime::...` reference elsewhere in this
 /// crate keeps working unchanged.
-/// Which ABI the island compiled into **this binary** emits.
+/// Which ABI the code this process compiles comes out under.
 ///
-/// Not a property of the artifact but of `compiler.rs`'s `SOURCE`, which ships
-/// with the binary — so every function this process JIT-compiles answers to
-/// it, whatever generation of island happens to be doing the emitting.
+/// It is the *committed island's* answer, not `SOURCE`'s: the island doing the
+/// emitting in this process is the one loaded from `compiler_island.typld`,
+/// and across an ABI change that dump is a generation behind the source it was
+/// built from. So this tracks [`crate::compiler::ISLAND_DUMP_EMITS_ABI`] and
+/// moves when the artifact does.
 ///
-/// The changeover is exactly the one generation where this and
-/// [`crate::compiler::ISLAND_DUMP_BODY_ABI`] disagree: an island whose own
-/// bodies are old, emitting new code. Keeping them as two constants is what
-/// lets that generation exist at all.
-pub const EMITTED_BODY_ABI: u8 = typelisp_abi::BODY_ABI_CLASSIC;
+/// Everything the running island produces answers to it: the closure
+/// constructor `build-make-closure` names, and the ABI recorded on every
+/// JIT-compiled function.
+pub const EMITTED_BODY_ABI: u8 = crate::compiler::ISLAND_DUMP_EMITS_ABI;
 
 pub use typelisp_rt as runtime;
 

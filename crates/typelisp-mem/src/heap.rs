@@ -1333,8 +1333,32 @@ impl Heap {
     /// convention. Like [`alloc_cell`](Self::alloc_cell), never itself
     /// triggers a collection, so the env values may be un-rooted at the
     /// moment of the call.
-    pub fn alloc_compiled_closure(&mut self, fn_ptr: usize, env: Vec<Value>, sexpr_mask: u64) -> Value {
-        self.alloc_boxed(BoxedObj::CompiledClosure { fn_ptr, env, sexpr_mask })
+    pub fn alloc_compiled_closure(
+        &mut self,
+        fn_ptr: usize,
+        env: Vec<Value>,
+        sexpr_mask: u64,
+        body_abi: u8,
+    ) -> Value {
+        self.alloc_boxed(BoxedObj::CompiledClosure { fn_ptr, env, sexpr_mask, body_abi })
+    }
+
+    /// Which calling convention `fn_ptr` was compiled under — the classic
+    /// `f(args, argc, env, envlen)` or the coroutine `f(frame)` (Phase C2).
+    ///
+    /// The closure has to carry this rather than the process deciding it once,
+    /// because a single process really can hold both: the island loaded from
+    /// its committed dump makes closures under whatever ABI *it* was compiled
+    /// under, while code JIT-compiled in the same process makes them under the
+    /// ABI this binary emits, and across an ABI change those are two different
+    /// answers.
+    ///
+    /// Panics like [`compiled_closure_fnptr`](Self::compiled_closure_fnptr).
+    pub fn compiled_closure_body_abi(&self, id: BoxId) -> u8 {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::CompiledClosure { body_abi, .. }) => *body_abi,
+            _ => panic!("BoxId does not hold a CompiledClosure"),
+        }
     }
 
     /// True if `id` holds a `BoxedObj::CompiledClosure`. A function value can

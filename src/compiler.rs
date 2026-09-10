@@ -317,10 +317,7 @@ pub const SOURCE: &str = r#"
    Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-assoc-user
-  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
-   Option<llvm-basic-block> Option<llvm-value>
-   string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block>
-   Option<llvm-basic-block> string string Option<Sexpr>)
+  (llvm-module llvm-builder llvm-function Option<llvm-basic-block> string string llvm-value i32)
   llvm-value)
 (defsignature compile-bignum-literal
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
@@ -666,6 +663,12 @@ pub const SOURCE: &str = r#"
 (defsignature emit-direct-call
   (llvm-builder llvm-module llvm-function llvm-function llvm-value i32 Option<llvm-basic-block>)
   llvm-value)
+(defsignature emit-lisp-call
+  (llvm-builder llvm-module llvm-function llvm-function llvm-value i32 Option<llvm-basic-block>)
+  llvm-value)
+(defsignature emit-lisp-call-with-env
+  (llvm-builder llvm-module llvm-function llvm-function llvm-value i32 llvm-value i32 Option<llvm-basic-block>)
+  llvm-value)
 
 
 ;; `sexpr-str`/`sexpr-bool`/`sexpr-sym-name`/`sexpr-i32` — the island's typed
@@ -901,11 +904,70 @@ pub const SOURCE: &str = r#"
       (frame-slot-rooted builder m)
       (frame-slot builder)))
 
+;; One word out of what the driver left for this entry.
+;;
+;; Under the coroutine ABI a function has exactly one parameter -- the frame --
+;; so its arguments and its captures cannot arrive as parameters at all; they
+;; wait in `typelisp_abi::call_state` for the prologue to copy in. `entry` is
+;; `"rt_pending_arg"` or `"rt_pending_env"`, which are two lists because a
+;; capture and a parameter are different names read by different indices.
+(defun pending-word ((builder llvm-builder) (m llvm-module) (entry string) (idx i32)) llvm-value
+  (let ((idx-ptr (alloca-args builder 1)))
+    (store-arg builder idx-ptr 0 (const-word builder idx))
+    (build-call builder (get-function m entry) idx-ptr 1)))
+
+;; [`frame-arg-slots`] past the first slot: hands out the rest and throws the
+;; addresses away, because they are the first one's address plus an index.
+(defun fill-arg-slots ((builder llvm-builder) (m llvm-module) (lead i32) (forms Option<Sexpr>)) ()
+  (cond
+    ((> lead 0)
+     (let ((ignored (frame-slot builder)))
+       (fill-arg-slots builder m (- lead 1) forms)))
+    ((sexpr-consp forms)
+     (let ((ignored (binding-slot builder m (sexpr-i32 (sexpr-car (sexpr-car forms))))))
+       (fill-arg-slots builder m 0 (sexpr-cdr forms))))
+    (else ())))
+
+;; The address of a call's argument array, in the frame rather than on the
+;; stack.
+;;
+;; `lead` is how many leading slots hold a translate-time constant (an op id, a
+;; vtable id) rather than an evaluated form; `forms` is the rest, as the
+;; `(kind . node)` pairs `compile-call-args` walks. Each form's slot is marked
+;; according to that argument's own representation, so a collectable argument
+;; is a root for exactly as long as the frame lives -- which is what retires
+;; the `root-temporary` copy `compile-call-args` used to make beside it.
+;;
+;; Consecutive slots come back consecutive, so the first one's address indexes
+;; the rest exactly like the `alloca-args` array this replaces:
+;; `store-arg`/`load-raw` need no change.
+;;
+;; It has to be the frame and not the stack because the array is filled one
+;; argument at a time, and evaluating a later argument can suspend. An
+;; `alloca` holds nothing across that -- the machine frame is gone by the time
+;; the function is entered again -- and its *address* would not even dominate
+;; the block the rest of the arguments are emitted into.
+;;
+;; A call with no arguments still needs an address to pass, and an empty
+;; `alloca-args` is the honest one: there is no slot, so there is nothing to
+;; keep alive.
+(defun frame-arg-slots ((builder llvm-builder) (m llvm-module) (lead i32) (forms Option<Sexpr>)) llvm-value
+  (cond
+    ((> lead 0)
+     (let ((first (frame-slot builder)))
+       (fill-arg-slots builder m (- lead 1) forms)
+       first))
+    ((sexpr-consp forms)
+     (let ((first (binding-slot builder m (sexpr-i32 (sexpr-car (sexpr-car forms))))))
+       (fill-arg-slots builder m 0 (sexpr-cdr forms))
+       first))
+    (else (alloca-args builder 0))))
+
 (defun bind-params ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Option<Sexpr>) (idx i32)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
         (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-i32 (sexpr-cdr name-pair))))
-          (let* ((raw (load-arg builder f idx))
+          (let* ((raw (pending-word builder m "rt_pending_arg" idx))
                  (slot (binding-slot builder m kind)))
             (if (>= kind 10)
                 (let ((tagged (compile-tag-struct-field builder m raw (- kind 10))))
@@ -945,12 +1007,13 @@ pub const SOURCE: &str = r#"
 ;; in this activation. That used to be a `push-sexpr-root`; it is now simply
 ;; where the copy is stored, since `binding-slot` marks a collectable slot and
 ;; the collector traces the frame.
+
 (defun bind-captures ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Option<Sexpr>) (idx i32)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
         (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-i32 (sexpr-cdr name-pair))))
           (let ((slot (binding-slot builder m kind)))
-            (store-arg builder slot 0 (load-env builder f idx))
+            (store-arg builder slot 0 (pending-word builder m "rt_pending_env" idx))
             (set env nm slot))
           (bind-captures env builder m f rest (+ idx 1))))
       ()))
@@ -1050,6 +1113,40 @@ pub const SOURCE: &str = r#"
 ;; until the activation ends. That is bounded: a call site has one slot, so a
 ;; loop calling the same thing a million times overwrites one slot rather than
 ;; retaining a million values.
+;; Put `v` where it survives a suspension, and hand back the slot.
+;;
+;; Anything computed before a call and used after it needs this. The call hands
+;; control back to the driver, so the block that computed the value no longer
+;; reaches the block that uses it -- LLVM says so, in as many words -- and the
+;; machine frame that held the register is gone by the time the function is
+;; entered again. `kind` decides whether the collector traces the slot, exactly
+;; as it does for a binding.
+
+;; `n` consecutive frame slots of one representation; hands back nothing,
+;; because their addresses are the first one's plus an index.
+(defun fill-frame-slots ((builder llvm-builder) (m llvm-module) (kind i32) (n i32)) ()
+  (if (> n 0)
+      (let ((ignored (binding-slot builder m kind)))
+        (fill-frame-slots builder m kind (- n 1)))
+      ()))
+
+;; An argument array in the frame rather than on the stack: `n` consecutive
+;; slots of representation `kind`, the address of the first.
+;;
+;; An `alloca` array is fine while it is filled and read without a call in
+;; between. It is not fine when the *filling* spans one -- which is every array
+;; built one compiled subform at a time -- because the machine frame holding it
+;; is gone by the time the function is entered again.
+(defun frame-slots ((builder llvm-builder) (m llvm-module) (kind i32) (n i32)) llvm-value
+  (let ((first (binding-slot builder m kind)))
+    (fill-frame-slots builder m kind (- n 1))
+    first))
+
+(defun spill ((builder llvm-builder) (m llvm-module) (kind i32) (v llvm-value)) llvm-value
+  (let ((slot (binding-slot builder m kind)))
+    (store-arg builder slot 0 v)
+    slot))
+
 (defun root-temporary ((builder llvm-builder) (m llvm-module) (v llvm-value)) ()
   (store-arg builder (frame-slot-rooted builder m) 0 v))
 
@@ -1589,7 +1686,7 @@ pub const SOURCE: &str = r#"
               (nm (sexpr-sym-name (sexpr-car name-pair)))
               (kind (sexpr-i32 (sexpr-cdr name-pair))))
          (match (get acc nm)
-         ((Some v) (let ((slot (binding-slot builder m kind)))
+         ((Some slot) (let ((v (load-raw builder slot 0)))
                      (if (>= kind 10)
                          (let ((tagged (compile-tag-struct-field builder m v (- kind 10))))
                            ;; As in `bind-params`: the slot is what holds
@@ -1600,7 +1697,7 @@ pub const SOURCE: &str = r#"
                              (store-arg builder args-ptr 0 tagged)
                              (let ((cell-ref (build-call builder (get-function m "rt_cell_new") args-ptr 1)))
                                (store-arg builder slot 0 cell-ref))))
-                         (store-arg builder slot 0 v))
+                         ())
                      (set env nm slot)))
          (None (panic "bind-let-values: missing computed value")))
        (bind-let-values builder m env rest acc)))
@@ -2040,13 +2137,13 @@ pub const SOURCE: &str = r#"
 ;; collection.
 (defun compile-ratio-literal ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let ((numer-form (sexpr-car (sexpr-cdr e))) (denom-form (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
-      (let* ((args-ptr (alloca-args builder 2))
+      (let* ((args-ptr (frame-slots builder m 2 2))
              (numer-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup numer-form)))
+        ;; The slot is the root, and it is also what the numerator survives
+        ;; the denominator's own compilation in.
         (store-arg builder args-ptr 0 numer-v)
-        (root-temporary builder m numer-v)
         (let ((denom-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup denom-form)))
           (store-arg builder args-ptr 1 denom-v)
-          (root-temporary builder m denom-v)
           (let ((result (build-call builder (get-function m "rt_ratio_from_bignums") args-ptr 2)))
             result)))))
 
@@ -2291,11 +2388,24 @@ pub const SOURCE: &str = r#"
 (defun compile-assoc ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((type-name (sexpr-str (sexpr-car (sexpr-cdr e))))
            (method (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
-           (rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+           (rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
+           ;; Every operand, evaluated once, in order, into frame slots --
+           ;; before the dispatch rather than inside each arm.
+           ;;
+           ;; `rest`'s length is the method's arity in every arm (none of these
+           ;; methods short-circuits), so hoisting evaluates exactly what the
+           ;; arm would have, in the same order. What it buys is that no
+           ;; operand is left in an LLVM register while a *later* one is
+           ;; evaluated -- and a later one can be a call, which under the
+           ;; coroutine ABI splits the block underneath us, leaving the
+           ;; register defined in a block the rest of the arm is no longer
+           ;; reached from.
+           (ops (frame-arg-slots builder m 0 rest))
+           (ignored-ops (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup ops rest 0)))
       (cond
         ((if (equal type-name "sexpr") (sexpr-native-method? method) false)
-         (let* ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car rest))))
-                (b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+         (let* ((a (load-raw builder ops 0))
+                (b (load-raw builder ops 1)))
            (if (equal method "eq")
                (build-icmp-eq builder a b)
                (let ((args-ptr (alloca-args builder 2)))
@@ -2303,7 +2413,7 @@ pub const SOURCE: &str = r#"
                  (store-arg builder args-ptr 1 b)
                  (build-call builder (get-function m "rt_sexpr_eql") args-ptr 2)))))
         ((if (equal type-name "string") (string-native-method? method) false)
-         (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
+         (let ((a (load-raw builder ops 0)))
            (if (equal method "length")
                (let ((args-ptr (alloca-args builder 1)))
                  (store-arg builder args-ptr 0 a)
@@ -2312,7 +2422,7 @@ pub const SOURCE: &str = r#"
                (let ((args-ptr (alloca-args builder 1)))
                  (store-arg builder args-ptr 0 a)
                  (build-call builder (get-function m (string-unary-shim-name method)) args-ptr 1))
-               (let ((b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+               (let ((b (load-raw builder ops 1)))
                  (case method
                    ;; `ref` can raise (an out-of-range index), so it goes
                    ;; through `raising-binop-call` rather than a bare
@@ -2369,7 +2479,7 @@ pub const SOURCE: &str = r#"
                    ;; `raising-binop-call` is two-operand only, hence the
                    ;; `emit-direct-call` spelled out here.
                    ("substring"
-                    (let* ((c (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr (sexpr-cdr rest))))))
+                    (let* ((c (load-raw builder ops 2))
                            (args-ptr (alloca-args builder 3)))
                       (store-arg builder args-ptr 0 a)
                       (store-arg builder args-ptr 1 b)
@@ -2377,7 +2487,7 @@ pub const SOURCE: &str = r#"
                       (emit-direct-call builder m cur-fn (get-function m "rt_str_substring") args-ptr 3 protect)))
                    (else (panic (append "compile-assoc: unsupported str method " method)))))))))
         ((if (int-receiver-type? type-name) (int-native-method? method) false)
-         (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car rest))))
+         (let ((a (load-raw builder ops 0))
                (wsig (int-wsig type-name)))
            ;; `int->bignum`/`int->ratio`: unary, checked before `b2`
            ;; is read — same reason `float-native-method?`'s own
@@ -2435,7 +2545,7 @@ pub const SOURCE: &str = r#"
              ;; `255`, and the raw `xor` gives `-1`.
              ("lognot"
               (build-normalize-int builder (build-xor builder a (const-word builder -1)) wsig))
-             (else (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+             (else (let ((b2 (load-raw builder ops 1)))
                       (case method
                         ;; The low `w` bits of a 64-bit sum are the sum's
                         ;; own low `w` bits, so the wide instruction is a
@@ -2493,7 +2603,7 @@ pub const SOURCE: &str = r#"
                          (int-binop-shim-call builder m "rt_int_logbitp" a b2 wsig))
                         (else (panic (append "compile-assoc: unsupported method " method)))))))))
         ((if (equal type-name "char") (char-native-method? method) false)
-         (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
+         (let ((a (load-raw builder ops 0)))
            ;; `char->int` is unary (receiver only) and the
            ;; identity at the compiled level — return the
            ;; receiver's raw code point unchanged, before
@@ -2510,7 +2620,7 @@ pub const SOURCE: &str = r#"
                  (build-call builder (get-function m "rt_str_new") args-ptr 1))
            (if (char-unary-shim-method? method)
                (unary-shim-call builder m (char-unary-shim-name method) a)
-           (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+           (let ((b2 (load-raw builder ops 1)))
              (case method
                ("equalp"
                 (let ((args-ptr (alloca-args builder 2)))
@@ -2532,15 +2642,15 @@ pub const SOURCE: &str = r#"
         ;; (`prim_type_path`), so neither can be folded into the `sexpr`
         ;; arm above even though `symbol`'s lowering is identical to it.
         ((if (equal type-name "bool") (bool-native-method? method) false)
-         (let* ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car rest))))
-                (b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+         (let* ((a (load-raw builder ops 0))
+                (b2 (load-raw builder ops 1)))
            (build-icmp-eq builder a b2)))
         ((if (equal type-name "symbol") (symbol-native-method? method) false)
-         (let* ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car rest))))
-                (b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+         (let* ((a (load-raw builder ops 0))
+                (b2 (load-raw builder ops 1)))
            (build-icmp-eq builder a b2)))
         ((if (float-receiver-type? type-name) (float-native-method? method) false)
-         (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
+         (let ((a (load-raw builder ops 0)))
            (round-f32-if builder type-name method
            (case method
              ("float->f32"
@@ -2609,7 +2719,7 @@ pub const SOURCE: &str = r#"
               (unary-shim-call builder m "rt_f64_acosh" a))
              ("atanh"
               (unary-shim-call builder m "rt_f64_atanh" a))
-             (else (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+             (else (let ((b2 (load-raw builder ops 1)))
                       (case method
                         ("+"
                          (build-fadd builder a b2))
@@ -2639,7 +2749,7 @@ pub const SOURCE: &str = r#"
                          (build-fminnum builder m a b2))
                         (else (build-fcmp-eq builder a b2)))))))))
         ((if (equal type-name "bignum") (bignum-native-method? method) false)
-         (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
+         (let ((a (load-raw builder ops 0)))
            (case method
              ("bignum->int"
               (bignum-unary-call builder m "rt_bignum_to_int" a))
@@ -2696,7 +2806,7 @@ pub const SOURCE: &str = r#"
                         (build-br builder merge-block))))
                   (position-at-end builder merge-block)
                   (load-raw builder slot 0))))
-             (else (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+             (else (let ((b2 (load-raw builder ops 1)))
                       (case method
                         ("+"
                          (bignum-binop-call builder m "rt_bignum_add" a b2))
@@ -2738,7 +2848,7 @@ pub const SOURCE: &str = r#"
                          (build-select builder (build-icmp-le builder (bignum-cmp-call builder m a b2) (const-word builder 0)) a b2))
                         (else (build-icmp-eq builder (bignum-cmp-call builder m a b2) (const-word builder 0)))))))))
         ((if (equal type-name "ratio") (ratio-native-method? method) false)
-         (let ((a (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car rest)))))
+         (let ((a (load-raw builder ops 0)))
            (case method
              ("ratio->bignum"
               (ratio-unary-call builder m "rt_ratio_to_bignum" a))
@@ -2748,7 +2858,7 @@ pub const SOURCE: &str = r#"
               (ratio-unary-call builder m "rt_ratio_numerator" a))
              ("denominator"
               (ratio-unary-call builder m "rt_ratio_denominator" a))
-             (else (let ((b2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+             (else (let ((b2 (load-raw builder ops 1)))
                       (case method
                         ("+"
                          (ratio-binop-call builder m "rt_ratio_add" a b2))
@@ -2775,7 +2885,7 @@ pub const SOURCE: &str = r#"
                         ("min"
                          (build-select builder (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-word builder 0)) a b2))
                         (else (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-word builder 0)))))))))
-        (else (compile-assoc-user m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup type-name method rest)))))
+        (else (compile-assoc-user m builder cur-fn protect type-name method ops (sexpr-list-length rest))))))
 
 ;; The user-defined-method leg of `compile-assoc`'s
 ;; dispatch (see its doc comment): call the callee
@@ -2784,13 +2894,8 @@ pub const SOURCE: &str = r#"
 ;; an ordinary call's. A `labels` sibling (not a
 ;; toplevel `defun`) because it closes over `m` and
 ;; mutually recurses with `compile-call-args`.
-(defun compile-assoc-user ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name string) (method string) (rest Option<Sexpr>))llvm-value
-    (let* ((mangled (append "tl_" (append type-name (append "::" method))))
-           (argc (sexpr-list-length rest))
-           (args-ptr (alloca-args builder argc))
-           (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr rest 0))
-           (result (emit-direct-call builder m cur-fn (get-function m mangled) args-ptr argc protect)))
-      result))
+(defun compile-assoc-user ((m llvm-module) (builder llvm-builder) (cur-fn llvm-function) (protect Option<llvm-basic-block>) (type-name string) (method string) (args-ptr llvm-value) (argc i32)) llvm-value
+    (emit-lisp-call builder m cur-fn (get-function m (append "tl_" (append type-name (append "::" method)))) args-ptr argc protect))
 
 ;; `(llvm-op opid (kind . arg)...)` — an `llvm-*`/
 ;; native-`Scope<V>` builtin method call
@@ -2811,7 +2916,7 @@ pub const SOURCE: &str = r#"
     (let* ((opid (sexpr-i32 (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (+ (sexpr-list-length arg-forms) 1))
-           (args-ptr (alloca-args builder argc)))
+           (args-ptr (frame-arg-slots builder m 1 arg-forms)))
       (store-arg builder args-ptr 0 (const-word builder opid))
       (let* ((ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1))
              (result (build-call builder (get-function m "rt_llvm_call") args-ptr argc)))
@@ -2829,7 +2934,7 @@ pub const SOURCE: &str = r#"
 (defun compile-dyn-new ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((vtable-id (sexpr-i32 (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
-           (args-ptr (alloca-args builder 2)))
+           (args-ptr (frame-arg-slots builder m 1 arg-forms)))
       (store-arg builder args-ptr 0 (const-word builder vtable-id))
       (let* ((ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1))
              (result (build-call builder (get-function m "rt_dyn_new") args-ptr 2)))
@@ -2851,7 +2956,7 @@ pub const SOURCE: &str = r#"
 (defun compile-dyn-upcast ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((trait-id (sexpr-i32 (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
-           (args-ptr (alloca-args builder 2)))
+           (args-ptr (frame-arg-slots builder m 1 arg-forms)))
       (store-arg builder args-ptr 0 (const-word builder trait-id))
       (let* ((ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1))
              (result (build-call builder (get-function m "rt_dyn_upcast") args-ptr 2)))
@@ -2861,7 +2966,7 @@ pub const SOURCE: &str = r#"
 ;; to the concrete value inside (`Expr::DynValue`).
 (defun compile-dyn-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((arg-forms (sexpr-cdr e))
-           (args-ptr (alloca-args builder 1))
+           (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
            (result (build-call builder (get-function m "rt_dyn_value") args-ptr 1)))
       result))
@@ -2898,7 +3003,7 @@ pub const SOURCE: &str = r#"
     (let* ((slot (sexpr-i32 (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
-           (args-ptr (alloca-args builder argc))
+           (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
            (recv (load-raw builder args-ptr 0))
            (vt-ptr (alloca-args builder 1)))
@@ -3016,9 +3121,38 @@ pub const SOURCE: &str = r#"
            result)))
       (None (build-call builder target args-ptr argc))))
 
-;; [`emit-direct-call`] for the extended, captures-carrying ABI a `labels`
-;; sibling is declared under (`add-function-with-env`).
-(defun emit-direct-call-with-env ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (target llvm-function) (args-ptr llvm-value) (argc i32) (env-ptr llvm-value) (env-len i32) (protect Option<llvm-basic-block>)) llvm-value
+;; A call to another compiled Lisp function.
+;;
+;; Not an LLVM `call`: the callee is *named to the driver* and this function
+;; hands control back, to be entered again when the answer is ready. That is
+;; what makes the depth of a Lisp recursion cost the heap rather than the
+;; machine stack, and what will let a call suspend (C3).
+;;
+;; The block is split underneath this. Everything after the call is emitted
+;; into a resume block that only the pc dispatch chain branches to, so **no
+;; LLVM register may cross it** -- which is why arguments live in frame slots
+;; (`frame-arg-slots`) and why anything else that outlives a call must too.
+;;
+;; Inside a `catch`/`unwind-protect` region the call is driven to completion on
+;; a stack of its own instead (`rt_protected_drive`). A region needs the frame
+;; that catches to be the one making the call, and under the driver the
+;; caller's frame is a heap object with no machine frame to unwind into. Phase
+;; C4 makes unwinding a driver status and this leg goes away.
+(defun emit-lisp-call ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (target llvm-function) (args-ptr llvm-value) (argc i32) (protect Option<llvm-basic-block>)) llvm-value
+    (match protect
+      ((Some pad)
+       (let ((shim (alloca-args builder 3)))
+         (store-arg builder shim 0 (build-fn-address builder target))
+         (store-arg builder shim 1 (build-ptr-to-int builder args-ptr))
+         (store-arg builder shim 2 (const-word builder argc))
+         (let ((result (build-call builder (get-function m "rt_protected_drive") shim 3)))
+           (check-unwind builder m cur-fn protect)
+           result)))
+      (None (coroutine-call builder m (build-fn-address builder target) args-ptr argc))))
+
+;; [`emit-lisp-call`] for a callee that also has captures -- a `lambda` body or
+;; a `labels` sibling reached under the captures-carrying convention.
+(defun emit-lisp-call-with-env ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (target llvm-function) (args-ptr llvm-value) (argc i32) (env-ptr llvm-value) (env-len i32) (protect Option<llvm-basic-block>)) llvm-value
     (match protect
       ((Some pad)
        (let ((shim (alloca-args builder 5)))
@@ -3027,10 +3161,10 @@ pub const SOURCE: &str = r#"
          (store-arg builder shim 2 (const-word builder argc))
          (store-arg builder shim 3 (build-ptr-to-int builder env-ptr))
          (store-arg builder shim 4 (const-word builder env-len))
-         (let ((result (build-call builder (get-function m "rt_protected_call_env") shim 5)))
+         (let ((result (build-call builder (get-function m "rt_protected_drive_env") shim 5)))
            (check-unwind builder m cur-fn protect)
            result)))
-      (None (build-call-with-env builder target args-ptr argc env-ptr env-len))))
+      (None (coroutine-call-env builder m (build-fn-address builder target) args-ptr argc env-ptr env-len))))
 
 ;; Applying a function *value*. The protected branch builds `rt_apply_any`'s
 ;; own three-slot argument array by hand — the same one `build-closure-apply`
@@ -3074,7 +3208,10 @@ pub const SOURCE: &str = r#"
                 (form (sexpr-cdr arg-pair))
                 (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup form)))
            (store-arg builder args-ptr idx v)
-           (if (eq kind 2) (root-temporary builder m v) ())
+           ;; No `root-temporary` beside the store any more: `frame-arg-slots`
+           ;; marked this very slot, so writing the argument *is* rooting it.
+           ;; The copy existed because an `alloca` slot is invisible to the
+           ;; collector, which is the same reason the array had to move.
            (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr rest (+ idx 1))))
         ()))
 
@@ -3095,17 +3232,17 @@ pub const SOURCE: &str = r#"
     (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
-           (args-ptr (alloca-args builder argc))
+           (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0)))
       (match (get fn-env nm)
         ((Some target)
          (let ((env-len (sexpr-list-length captured)))
            (if (eq env-len 0)
-               (let ((result (emit-direct-call builder m cur-fn target args-ptr argc protect)))
+               (let ((result (emit-lisp-call builder m cur-fn target args-ptr argc protect)))
                  result)
                (let ((env-ptr (alloca-args builder env-len)))
                  (compile-env-args m fn-name builder env fn-env captured env-ptr captured 0)
-                 (let ((result (emit-direct-call-with-env builder m cur-fn target args-ptr argc env-ptr env-len protect)))
+                 (let ((result (emit-lisp-call-with-env builder m cur-fn target args-ptr argc env-ptr env-len protect)))
                    result)))))
         (None (panic (append "compile-apply: no direct-callable function named " nm))))))
 
@@ -3151,9 +3288,18 @@ pub const SOURCE: &str = r#"
     (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
-           (args-ptr (alloca-args builder argc))
+           (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
-           (result (emit-direct-call builder m cur-fn (get-function m nm) args-ptr argc protect)))
+           ;; `nm` is either a mangled Lisp function or a `crate::compile::
+           ;; runtime` shim -- `symbols::callee_symbol_name` decides which, and
+           ;; the `rt_` prefix is how it says so. A runtime entry point is Rust:
+           ;; it has no frame and no driver to hand control back to, so it is
+           ;; *called*, not driven. Handing one to `rt_frame_call` makes the
+           ;; driver enter it as a coroutine -- `f(0)` -- and its argument
+           ;; pointer arrives null.
+           (result (if (if (>= (length nm) 3) (equal (substring nm 0 3) "rt_") false)
+                       (emit-direct-call builder m cur-fn (get-function m nm) args-ptr argc protect)
+                       (emit-lisp-call builder m cur-fn (get-function m nm) args-ptr argc protect))))
       result))
 
 ;; `(apply-indirect callee-form (is-fn . arg-form)...)`
@@ -3181,12 +3327,12 @@ pub const SOURCE: &str = r#"
 ;; same as any other unreferenced heap value).
 (defun compile-apply-indirect ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((callee-form (sexpr-car (sexpr-cdr e)))
-           (closure (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup callee-form))
+           (closure-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup callee-form)))
            (arg-forms (sexpr-cdr (sexpr-cdr e)))
            (argc (sexpr-list-length arg-forms))
-           (args-ptr (alloca-args builder argc))
+           (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
-           (result (emit-closure-apply builder m cur-fn closure args-ptr argc protect)))
+           (result (emit-closure-apply builder m cur-fn (load-raw builder closure-slot 0) args-ptr argc protect)))
       result))
 
 ;; `compile-if`'s one helper (if/let/comparisons,
@@ -3281,10 +3427,18 @@ pub const SOURCE: &str = r#"
 (defun compile-let-values ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (bindings Option<Sexpr>) (acc Scope<llvm-value>))()
     (if (sexpr-consp bindings)
         (let ((pair (sexpr-car bindings)) (rest (sexpr-cdr bindings)))
-         (let* ((nm (sexpr-sym-name (sexpr-car (sexpr-car pair))))
+         (let* ((name-pair (sexpr-car pair))
+                (nm (sexpr-sym-name (sexpr-car name-pair)))
+                (kind (sexpr-i32 (sexpr-cdr name-pair)))
                 (form (sexpr-cdr pair))
+                ;; The slot comes first and the value goes straight into it.
+                ;; What `acc` carries is therefore the *address*, not the
+                ;; value: a later binding's form can suspend, and nothing an
+                ;; LLVM register holds survives that.
+                (slot (binding-slot builder m kind))
                 (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup form)))
-           (set acc nm v)
+           (store-arg builder slot 0 v)
+           (set acc nm slot)
          (compile-let-values m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup rest acc)))
         ()))
 
@@ -3401,7 +3555,7 @@ pub const SOURCE: &str = r#"
            (lcaptured (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (lparams (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (lbody (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
-           (nested-fn (add-function-with-env m lname)))
+           (nested-fn (add-coroutine-function m lname)))
       (let* ((nested-block (append-block nested-fn "entry"))
              (nested-builder (llvm-builder::create)))
         (position-at-end nested-builder nested-block)
@@ -3417,7 +3571,7 @@ pub const SOURCE: &str = r#"
           ;; `frame-begin` opened just above —
           ;; a captured name and a parameter
           ;; are the same kind of slot.
-          (frame-begin nested-builder m)
+          (coroutine-begin nested-builder m nested-fn)
           (bind-captures nested-env nested-builder m nested-fn lcaptured 0)
           (bind-params nested-env nested-builder m nested-fn lparams 0)
           ;; `loop`/`break`/`return`/`setf`: a
@@ -3431,8 +3585,7 @@ pub const SOURCE: &str = r#"
           ;; of whatever loop (if any) the
           ;; `lambda` form itself sits inside.
           (let ((v (compile-value m fn-name nested-builder nested-env (new-fn-env) lcaptured nested-fn (Option::none) (Option::none) "" (scope::new) (scope::new) (Option::none) (Option::none) lbody)))
-            (frame-end nested-builder m)
-            (build-ret nested-builder v))))
+            (coroutine-end nested-builder m v))))
       (let* ((env-len (sexpr-list-length lcaptured))
              (env-ptr (alloca-args builder env-len)))
         (compile-escaping-env-args m fn-name builder env fn-env captured env-ptr lcaptured 0)
@@ -3463,9 +3616,10 @@ pub const SOURCE: &str = r#"
         (let ((def (sexpr-car defs)) (rest (sexpr-cdr defs)))
          (let* ((nm (sexpr-str (sexpr-car def)))
                 (mangled (append fn-name (append "$" nm))))
-           (if (eq (sexpr-list-length captured) 0)
-             (set inner-fn-env nm (add-function m mangled))
-             (set inner-fn-env nm (add-function-with-env m mangled)))
+           ;; One ABI now, so the two legs the captures used to choose
+           ;; between have collapsed into one: captures arrive through the
+           ;; driver's pending state like arguments do, not as parameters.
+           (set inner-fn-env nm (add-coroutine-function m mangled))
          (declare-labels-siblings m fn-name inner-fn-env captured rest)))
         ()))
 
@@ -3524,7 +3678,7 @@ pub const SOURCE: &str = r#"
                 ;; frame slot, and a slot is a root
                 ;; by position rather than by when
                 ;; it was pushed.
-                (frame-begin sib-builder m)
+                (coroutine-begin sib-builder m sib-fn)
                 (bind-captures sib-env sib-builder m sib-fn captured 0)
                 (bind-params sib-env sib-builder m sib-fn param-syms 0)
                 ;; `loop`/`break`/`return`/`setf`:
@@ -3538,8 +3692,7 @@ pub const SOURCE: &str = r#"
                 ;; here either.
                 (let* ((sib-fn-env (clone-frames inner-fn-env))
                        (v (compile-value m fn-name sib-builder sib-env sib-fn-env captured sib-fn (Option::none) (Option::none) "" (scope::new) (scope::new) (Option::none) (Option::none) def-body)))
-                  (frame-end sib-builder m)
-                  (build-ret sib-builder v)
+                  (coroutine-end sib-builder m v)
                   (compile-labels-bodies m fn-name inner-fn-env captured rest)))))
            (None (panic (append "compile-labels-bodies: missing declaration for " nm))))))
         ()))
@@ -4238,11 +4391,14 @@ pub const SOURCE: &str = r#"
            (scrut-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (arms (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (root-kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
-           (scrut-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup scrut-form))
-           (ignored (if (eq root-kind 2) (root-temporary builder m scrut-v) ()))
+           ;; The scrutinee is read by every arm's test, and a value pattern's
+           ;; own form can be a call -- so it outlives a suspension and cannot
+           ;; stay in a register. The slot is also the root the
+           ;; `root-temporary` copy beside it used to be.
+           (scrut-slot (spill builder m root-kind (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup scrut-form)))
            (merge-block (append-block cur-fn "match-merge"))
            (slot (alloca-args builder 1)))
-      (compile-match-arms m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn scrut-v slot merge-block arms)
+      (compile-match-arms m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn scrut-slot slot merge-block arms)
       (position-at-end builder merge-block)
       (load-raw builder slot 0)))
 
@@ -4282,14 +4438,14 @@ pub const SOURCE: &str = r#"
 ;; was somehow wrong, the same role
 ;; `resolve-value`'s "unbound variable" panic plays
 ;; elsewhere in this file.
-(defun compile-match-arms ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (is-fn bool) (scrut-v llvm-value) (slot llvm-value) (merge-block llvm-basic-block) (arms Option<Sexpr>))()
+(defun compile-match-arms ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (is-fn bool) (scrut-slot llvm-value) (slot llvm-value) (merge-block llvm-basic-block) (arms Option<Sexpr>))()
     (if (sexpr-consp arms)
         (let ((arm (sexpr-car arms)) (rest (sexpr-cdr arms)))
          (let* ((pat (sexpr-car arm))
                 (body-form (sexpr-cdr arm)))
            (push-frame env)
          (let ((next-block (append-block cur-fn "match-next")))
-           (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup scrut-v pat next-block)
+           (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (load-raw builder scrut-slot 0) pat next-block)
            (let ((body-v (compile-if-branch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn body-form)))
              (pop-frame env)
              (if (block-terminated? builder)
@@ -4297,7 +4453,7 @@ pub const SOURCE: &str = r#"
                  (let ((ignored (store-arg builder slot 0 body-v)))
                    (build-br builder merge-block))))
            (position-at-end builder next-block)
-           (compile-match-arms m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn scrut-v slot merge-block rest))))
+           (compile-match-arms m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn scrut-slot slot merge-block rest))))
         (let* ((args-ptr (alloca-args builder 0))
                (fallback (build-call builder (get-function m "rt_match_fail") args-ptr 0)))
           (store-arg builder slot 0 fallback)
@@ -4365,7 +4521,7 @@ pub const SOURCE: &str = r#"
 ;; hold the spelling.
 (defun compile-construct-sym ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (arg-forms Option<Sexpr>))llvm-value
     (let* ((n (sexpr-list-length arg-forms))
-           (args-ptr (alloca-args builder n)))
+           (args-ptr (frame-slots builder m 2 n)))
       (compile-construct-sym-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0)
       (build-call builder (get-function m "rt_intern_symbol") args-ptr n)))
 
@@ -4405,7 +4561,7 @@ pub const SOURCE: &str = r#"
 ;; final tagged `Sexpr::Path`.
 (defun compile-construct-path ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (arg-forms Option<Sexpr>))llvm-value
     (let* ((n (sexpr-list-length arg-forms))
-           (args-ptr (alloca-args builder n)))
+           (args-ptr (frame-slots builder m 2 n)))
       (compile-construct-path-segs m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0)
       (build-call builder (get-function m "rt_intern_path") args-ptr n)))
 
@@ -4474,7 +4630,7 @@ pub const SOURCE: &str = r#"
 ;; bearing.
 (defun compile-construct-boxed-struct ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name-form Option<Sexpr>) (arg-forms Option<Sexpr>))llvm-value
     (let* ((argc (sexpr-list-length arg-forms))
-           (args-ptr (alloca-args builder (+ argc 1)))
+           (args-ptr (frame-slots builder m 2 (+ argc 1)))
            (name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup type-name-form)))
       (store-arg builder args-ptr 0 name-v)
       (compile-construct-boxed-struct-fields m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1)
@@ -4535,7 +4691,12 @@ pub const SOURCE: &str = r#"
 ;; value now, just never released early).
 (defun compile-construct-box ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name-form Option<Sexpr>) (variant i32) (arg-forms Option<Sexpr>))llvm-value
     (let* ((argc (sexpr-list-length arg-forms))
-           (args-ptr (alloca-args builder (+ argc 2)))
+           ;; Slot 1 holds the variant number as a raw word, so it is the one
+           ;; slot here the collector must *not* read as a reference -- hence
+           ;; three handouts rather than one run.
+           (args-ptr (binding-slot builder m 2))
+           (ignored-variant-slot (frame-slot builder))
+           (ignored-field-slots (fill-frame-slots builder m 2 argc))
            (name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup type-name-form)))
       (store-arg builder args-ptr 0 name-v)
       (store-arg builder args-ptr 1 (const-word builder variant))
@@ -4599,13 +4760,11 @@ pub const SOURCE: &str = r#"
       ((5 6 8 9) (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
       ;; `cons`(7): the only variant with two fields, and so the only one
       ;; that has to root the first while the second is built.
-      (7 (let* ((args-ptr (alloca-args builder 2))
+      (7 (let* ((args-ptr (frame-slots builder m 2 2))
                 (car-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms))))
            (store-arg builder args-ptr 0 car-v)
-           (root-temporary builder m car-v)
            (let ((cdr-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr arg-forms)))))
              (store-arg builder args-ptr 1 cdr-v)
-             (root-temporary builder m cdr-v)
              (let ((result (build-call builder (get-function m "rt_cons") args-ptr 2)))
                result))))
       ;; `path`(10): the argument compiles to an already-tagged `Sexpr` list
@@ -4693,11 +4852,11 @@ pub const SOURCE: &str = r#"
            (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (obj-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
-           (obj-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup obj-form))
+           (obj-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup obj-form)))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup value-form))
            (tagged-v (compile-tag-struct-field builder m v kind))
            (args-ptr (alloca-args builder 3)))
-      (store-arg builder args-ptr 0 obj-v)
+      (store-arg builder args-ptr 0 (load-raw builder obj-slot 0))
       (store-arg builder args-ptr 1 (const-word builder idx))
       (store-arg builder args-ptr 2 tagged-v)
       (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
@@ -4744,11 +4903,11 @@ pub const SOURCE: &str = r#"
       (if (equal method "new")
           (compile-construct-boxed-struct m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))) (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
       (let* ((v-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
-             (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v-form)))
+             (v-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v-form))))
         (case method
           ("len"
            (let ((args-ptr (alloca-args builder 1)))
-             (store-arg builder args-ptr 0 v)
+             (store-arg builder args-ptr 0 (load-raw builder v-slot 0))
              (build-call builder (get-function m "rt_struct_field_count") args-ptr 1)))
           ("pop"
            ;; `pop` returns `Option<T>`: an empty
@@ -4786,7 +4945,7 @@ pub const SOURCE: &str = r#"
            (let* ((option-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                   (option-name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup option-name-form))
                   (args-ptr (alloca-args builder 1)))
-             (store-arg builder args-ptr 0 v)
+             (store-arg builder args-ptr 0 (load-raw builder v-slot 0))
              (let* ((count (build-call builder (get-function m "rt_struct_field_count") args-ptr 1))
                     (empty (build-icmp-eq builder count (const-word builder 0)))
                     (then-block (append-block cur-fn "vec-pop-empty"))
@@ -4819,7 +4978,7 @@ pub const SOURCE: &str = r#"
                   (x (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup x-form))
                   (tagged-x (compile-tag-struct-field builder m x kind))
                   (args-ptr (alloca-args builder 2)))
-             (store-arg builder args-ptr 0 v)
+             (store-arg builder args-ptr 0 (load-raw builder v-slot 0))
              (store-arg builder args-ptr 1 tagged-x)
              (let ((ignored (build-call builder (get-function m "rt_struct_push_field") args-ptr 2)))
                (const-word builder 0))))
@@ -4827,7 +4986,7 @@ pub const SOURCE: &str = r#"
                        (idx (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup idx-form)))
                   (if (equal method "get")
                        (let ((args-ptr (alloca-args builder 2)))
-                         (store-arg builder args-ptr 0 v)
+                         (store-arg builder args-ptr 0 (load-raw builder v-slot 0))
                          (store-arg builder args-ptr 1 idx)
                          (let ((raw (emit-direct-call builder m cur-fn (get-function m "rt_struct_field_get") args-ptr 2 protect)))
                            (compile-sexpr-field builder m raw kind 0)))
@@ -4835,7 +4994,7 @@ pub const SOURCE: &str = r#"
                               (x (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup x-form))
                               (tagged-x (compile-tag-struct-field builder m x kind))
                               (args-ptr (alloca-args builder 3)))
-                         (store-arg builder args-ptr 0 v)
+                         (store-arg builder args-ptr 0 (load-raw builder v-slot 0))
                          (store-arg builder args-ptr 1 idx)
                          (store-arg builder args-ptr 2 tagged-x)
                          (let ((ignored (emit-direct-call builder m cur-fn (get-function m "rt_struct_field_set") args-ptr 3 protect)))
@@ -4878,7 +5037,7 @@ pub const SOURCE: &str = r#"
                  (val-kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                  (option-type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                  (ht-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
-                 (ht (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup ht-form)))
+                 (ht-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup ht-form))))
             (case method
             ;; The bucket family. Every operand but the key and the value is
             ;; a raw word already (the hash and the index are `i32`s), so
@@ -4887,14 +5046,14 @@ pub const SOURCE: &str = r#"
             ("bucket-count"
              (let* ((h (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
                     (args-ptr (alloca-args builder 2)))
-               (store-arg builder args-ptr 0 ht)
+               (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
                (store-arg builder args-ptr 1 h)
                (build-call builder (get-function m "rt_hashtable_bucket_count") args-ptr 2)))
             (("bucket-key" "bucket-value")
              (let* ((h (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
                     (i (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))
                     (args-ptr (alloca-args builder 3)))
-               (store-arg builder args-ptr 0 ht)
+               (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
                (store-arg builder args-ptr 1 h)
                (store-arg builder args-ptr 2 i)
                (let ((raw (build-call builder (get-function m (if (equal method "bucket-key") "rt_hashtable_bucket_key" "rt_hashtable_bucket_value")) args-ptr 3)))
@@ -4907,7 +5066,7 @@ pub const SOURCE: &str = r#"
                     (tk (compile-tag-struct-field builder m k key-kind))
                     (tv (compile-tag-struct-field builder m v val-kind))
                     (args-ptr (alloca-args builder 5)))
-               (store-arg builder args-ptr 0 ht)
+               (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
                (store-arg builder args-ptr 1 h)
                (store-arg builder args-ptr 2 i)
                (store-arg builder args-ptr 3 tk)
@@ -4918,18 +5077,18 @@ pub const SOURCE: &str = r#"
              (let* ((h (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
                     (i (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))
                     (args-ptr (alloca-args builder 3)))
-               (store-arg builder args-ptr 0 ht)
+               (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
                (store-arg builder args-ptr 1 h)
                (store-arg builder args-ptr 2 i)
                (let ((ignored (build-call builder (get-function m "rt_hashtable_bucket_delete") args-ptr 3)))
                  (const-word builder 0))))
             ("count"
              (let ((args-ptr (alloca-args builder 1)))
-               (store-arg builder args-ptr 0 ht)
+               (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
                (build-call builder (get-function m "rt_hashtable_count") args-ptr 1)))
             ("clear"
              (let ((args-ptr (alloca-args builder 1)))
-               (store-arg builder args-ptr 0 ht)
+               (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
                (let ((ignored (build-call builder (get-function m "rt_hashtable_clear") args-ptr 1)))
                  (const-word builder 0))))
             ;; `keys`/`values`/`entries`, each of which builds a `Vector<_>`
@@ -4937,7 +5096,7 @@ pub const SOURCE: &str = r#"
             ;; key goes with the table as a second argument.
             (else (let* ((name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup option-type-name-form))
                          (args-ptr (alloca-args builder 2)))
-                     (store-arg builder args-ptr 0 ht)
+                     (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
                      (store-arg builder args-ptr 1 name-v)
                      (let ((result (build-call builder (get-function m (append "rt_hashtable_" method)) args-ptr 2)))
                        (push-permanent-sexpr-root builder m result)
@@ -5098,11 +5257,11 @@ pub const SOURCE: &str = r#"
     (let* ((tag-form (sexpr-car (sexpr-cdr e)))
            (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
-           (tag (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup tag-form))
+           (tag-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup tag-form)))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup value-form))
            (tagged (if (eq kind 0) v (compile-tag-struct-field builder m v kind)))
            (args-ptr (alloca-args builder 2)))
-      (store-arg builder args-ptr 0 tag)
+      (store-arg builder args-ptr 0 (load-raw builder tag-slot 0))
       (store-arg builder args-ptr 1 tagged)
       (emit-rt-call builder m cur-fn "rt_throw" "rt_protected_throw" args-ptr 2 protect)))
 
@@ -5222,23 +5381,22 @@ pub const SOURCE: &str = r#"
 (defun compile-go ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((arg-forms (sexpr-cdr e))
            (argc (sexpr-list-length arg-forms))
-           (args-ptr (alloca-args builder argc))
+           (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
            (result (emit-rt-call builder m cur-fn "rt_go" "rt_protected_go" args-ptr argc protect)))
       result))
 
 (defun compile-function ((m llvm-module) (name string) (param-names Option<Sexpr>) (body Option<Sexpr>)) llvm-module
-    (let* ((f (add-function m name))
+    (let* ((f (add-coroutine-function m name))
            (b (append-block f "entry"))
            (builder (llvm-builder::create)))
       (position-at-end builder b)
       (let ((env (new-env)))
-        (frame-begin builder m)
+        (coroutine-begin builder m f)
         (bind-params env builder m f param-names 0)
         (let* ((fn-env (new-fn-env))
                (v (compile-value m name builder env fn-env '() f (Option::none) (Option::none) "" (scope::new) (scope::new) (Option::none) (Option::none) body)))
-          (frame-end builder m)
-(build-ret builder v)
+          (coroutine-end builder m v)
 m))))
 
 "#;
@@ -5267,19 +5425,31 @@ pub const ISLAND_DUMP: &[u8] = include_bytes!("compiler_island.typld");
 
 /// What to run when the committed dump no longer matches [`SOURCE`].
 pub const REGEN_SCRIPT: &str = "scripts/regen-compiler-island.sh";
+/// Which ABI the bodies inside [`ISLAND_DUMP`] answer to.
+///
+/// Hand-written because `build_island_artifact` deliberately does not read the
+/// committed dump's checked state (it is a generation behind by construction),
+/// so nothing else in this process knows. `island_artifacts_test`'s
+/// `the_committed_islands_recorded_abi_matches_the_constant` is what keeps a
+/// hand-written fact from drifting: it reads the number back out of the dump.
+///
+/// It moves in the same commit as the artifact.
+pub const ISLAND_DUMP_BODY_ABI: u8 = typelisp_abi::BODY_ABI_COROUTINE;
 
-/// Which ABI the **committed** [`ISLAND_DUMP`]'s bodies answer to.
+/// Which ABI the bodies inside [`ISLAND_DUMP`] *emit*.
 ///
-/// A hand-written statement about the bytes next to it, and it has to be:
-/// `build_island_artifact` installs that bitcode without reading its state
-/// (the committed dump is one generation behind by construction, so its
-/// checked half is deliberately ignored), and bitcode does not say what ABI it
-/// was built under.
+/// Different from [`ISLAND_DUMP_BODY_ABI`] for exactly one generation, and
+/// that generation is the whole of what makes an ABI changeover possible: an
+/// island whose own bodies are old, emitting new code. `SOURCE` decides this
+/// one -- but `SOURCE` as it stood when the artifact was built, which across a
+/// changeover is not `SOURCE` as it stands now.
+pub const ISLAND_DUMP_EMITS_ABI: u8 = typelisp_abi::BODY_ABI_COROUTINE;
+
+/// Which ABI [`SOURCE`] as it stands **now** emits.
 ///
-/// `island_artifacts_test` checks it against what the dump actually records,
-/// so it cannot quietly drift from the bytes it describes. It changes in the
-/// same commit that regenerates them.
-pub const ISLAND_DUMP_BODY_ABI: u8 = typelisp_abi::BODY_ABI_CLASSIC;
+/// The next artifact built from it will record this as its `emits_abi`, and
+/// the generation after that will have bodies under it.
+pub const SOURCE_EMITS_ABI: u8 = typelisp_abi::BODY_ABI_COROUTINE;
 
 /// Loads the compiler island as **native code** (interp-closure removal
 /// Stage 4): the committed dump's checked state and definitions — which

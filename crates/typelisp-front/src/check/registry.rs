@@ -2180,6 +2180,22 @@ pub fn llvm_builder_def() -> AdtDef {
         ),
     );
     assoc.insert(
+        "coroutine-call-env".to_string(),
+        assoc_fn(
+            vec![
+                llvm_builder_ty(),
+                llvm_module_ty(),
+                llvm_value_ty(),
+                llvm_value_ty(),
+                Type::I32,
+                llvm_value_ty(),
+                Type::I32,
+            ],
+            llvm_value_ty(),
+            true,
+        ),
+    );
+    assoc.insert(
         "coroutine-end".to_string(),
         assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], Type::Unit, true),
     );

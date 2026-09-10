@@ -396,7 +396,7 @@ pub(crate) enum BoxedObj {
     /// — the mask exists so the *accessors* can hand compiled code back the
     /// exact raw word it stored (`rt_closure_env_get` re-encodes masked
     /// slots and unwraps unmasked ones).
-    CompiledClosure { fn_ptr: usize, env: Vec<Value>, sexpr_mask: u64 },
+    CompiledClosure { fn_ptr: usize, env: Vec<Value>, sexpr_mask: u64, body_abi: u8 },
     /// A **compiled function's activation record** (Phase C): its locals, as
     /// the tagged machine words compiled code loads and stores them as.
     ///

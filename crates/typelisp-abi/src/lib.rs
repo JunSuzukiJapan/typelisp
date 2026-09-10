@@ -281,9 +281,17 @@ pub mod call_state {
         /// cannot learn it any other way — it is made inside the callee, after
         /// the call has started.
         static CURRENT_FRAME: RefCell<Option<i64>> = const { RefCell::new(None) };
-        /// The callee and arguments a frame is asking the driver to call, set
-        /// immediately before it returns `STATUS_CALL`.
-        static PENDING_CALL: RefCell<Option<(usize, Vec<i64>)>> = const { RefCell::new(None) };
+        /// The captured values a not-yet-entered closure body will copy into
+        /// its own frame, alongside `PENDING_ARGS`.
+        ///
+        /// Separate from the arguments because the callee reads the two by
+        /// separate indices — a capture and a parameter are different names in
+        /// different lists, and concatenating them would make every prologue
+        /// know how long the other list was.
+        static PENDING_ENV: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+        /// The callee, arguments and captures a frame is asking the driver to
+        /// call, set immediately before it returns `STATUS_CALL`.
+        static PENDING_CALL: RefCell<Option<(usize, Vec<i64>, Vec<i64>)>> = const { RefCell::new(None) };
     }
 
     pub fn set_pending_args(args: &[i64]) {
@@ -294,12 +302,34 @@ pub mod call_state {
         });
     }
 
-    pub fn pending_arg(i: usize) -> i64 {
-        PENDING_ARGS.with(|a| a.borrow().get(i).copied().unwrap_or(0))
+    /// The `i`th pending argument, or `None` if the caller passed fewer than
+    /// that. A prologue reads exactly as many as it has parameters, so a miss
+    /// is a broken calling convention rather than a case to paper over — the
+    /// caller turns it into a fatal error rather than a zero.
+    pub fn pending_arg(i: usize) -> Option<i64> {
+        PENDING_ARGS.with(|a| a.borrow().get(i).copied())
     }
 
     pub fn pending_argc() -> usize {
         PENDING_ARGS.with(|a| a.borrow().len())
+    }
+
+    pub fn set_pending_env(env: &[i64]) {
+        PENDING_ENV.with(|e| {
+            let mut v = e.borrow_mut();
+            v.clear();
+            v.extend_from_slice(env);
+        });
+    }
+
+    /// The `i`th pending capture, or `None` — same contract as
+    /// [`pending_arg`].
+    pub fn pending_env(i: usize) -> Option<i64> {
+        PENDING_ENV.with(|e| e.borrow().get(i).copied())
+    }
+
+    pub fn pending_envc() -> usize {
+        PENDING_ENV.with(|e| e.borrow().len())
     }
 
     pub fn set_current_frame(f: i64) {
@@ -310,11 +340,11 @@ pub mod call_state {
         CURRENT_FRAME.with(|c| c.borrow_mut().take())
     }
 
-    pub fn set_pending_call(target: usize, args: Vec<i64>) {
-        PENDING_CALL.with(|c| *c.borrow_mut() = Some((target, args)));
+    pub fn set_pending_call(target: usize, args: Vec<i64>, env: Vec<i64>) {
+        PENDING_CALL.with(|c| *c.borrow_mut() = Some((target, args, env)));
     }
 
-    pub fn take_pending_call() -> Option<(usize, Vec<i64>)> {
+    pub fn take_pending_call() -> Option<(usize, Vec<i64>, Vec<i64>)> {
         PENDING_CALL.with(|c| c.borrow_mut().take())
     }
 }

@@ -406,7 +406,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 258] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 264] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -443,7 +443,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 258] {
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
         rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_alphap, rt_char_digitp, rt_char_downcase,
         rt_char_equalp, rt_char_upcase, rt_int_to_char, rt_closure_env_get, rt_closure_env_len,
-        rt_closure_fnptr, rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_narrow_new, rt_narrow_value, rt_float_to_bignum,
+        rt_closure_fnptr, rt_closure_new, rt_coroutine_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_narrow_new, rt_narrow_value, rt_float_to_bignum,
         rt_float_to_ratio, rt_f64_value, rt_f32_value, rt_global_get, rt_global_new, rt_global_set, rt_int_div, rt_int_mod,
         rt_int_ash, rt_int_logbitp, rt_int_logcount, rt_int_integer_length,
         rt_f64_tan, rt_f64_asin, rt_f64_acos, rt_f64_atan, rt_f64_sinh, rt_f64_cosh, rt_f64_tanh, rt_f64_asinh, rt_f64_acosh,
@@ -463,8 +463,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 258] {
         rt_throw, rt_throw_matches, rt_throw_take_value, rt_unwind_pending, rt_resume_unwind,
         rt_go, rt_protected_go,
         rt_frame_new, rt_frame_data, rt_frame_mask_bit, rt_frame_pc, rt_frame_set_pc,
-        rt_frame_entered, rt_frame_call, rt_pending_arg, rt_pending_argc,
-        rt_protected_apply_any, rt_protected_call, rt_protected_call_env, rt_protected_dyn_call, rt_protected_panic,
+        rt_frame_entered, rt_frame_call, rt_frame_call_env, rt_pending_arg, rt_pending_argc,
+        rt_pending_env, rt_pending_envc,
+        rt_protected_apply_any, rt_protected_call, rt_protected_call_env, rt_protected_drive, rt_protected_drive_env, rt_protected_dyn_call, rt_protected_panic,
         rt_protected_throw,
     };
     [
@@ -579,8 +580,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 258] {
         ("rt_frame_set_pc", rt_frame_set_pc as usize),
         ("rt_frame_entered", rt_frame_entered as usize),
         ("rt_frame_call", rt_frame_call as usize),
+        ("rt_frame_call_env", rt_frame_call_env as usize),
         ("rt_pending_arg", rt_pending_arg as usize),
         ("rt_pending_argc", rt_pending_argc as usize),
+        ("rt_pending_env", rt_pending_env as usize),
+        ("rt_pending_envc", rt_pending_envc as usize),
         ("rt_protected_go", rt_protected_go as usize),
         // `catch`/`throw`/`unwind-protect` (`compiler.rs`'s `compile-catch`/
         // `compile-throw`/`compile-unwind-protect`). `rt_throw` raises the
@@ -595,6 +599,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 258] {
         ("rt_unwind_pending", rt_unwind_pending as usize),
         ("rt_resume_unwind", rt_resume_unwind as usize),
         ("rt_protected_call", rt_protected_call as usize),
+        ("rt_protected_drive", rt_protected_drive as usize),
+        ("rt_protected_drive_env", rt_protected_drive_env as usize),
         ("rt_protected_call_env", rt_protected_call_env as usize),
         ("rt_protected_apply_any", rt_protected_apply_any as usize),
         ("rt_protected_dyn_call", rt_protected_dyn_call as usize),
@@ -648,6 +654,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 258] {
         ("rt_struct_push_field", rt_struct_push_field as usize),
         ("rt_struct_pop_field", rt_struct_pop_field as usize),
         ("rt_closure_new", rt_closure_new as usize),
+        ("rt_coroutine_closure_new", rt_coroutine_closure_new as usize),
         ("rt_closure_fnptr", rt_closure_fnptr as usize),
         ("rt_closure_env_len", rt_closure_env_len as usize),
         ("rt_closure_env_get", rt_closure_env_get as usize),

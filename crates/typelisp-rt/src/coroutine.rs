@@ -99,8 +99,9 @@ impl FrameStack {
 
     /// Begin a call: the function is entered with no frame, so its prologue
     /// makes one and copies `args` out of `typelisp_abi::call_state`.
-    fn enter(&mut self, f: CoroutineFn, args: &[i64]) -> i64 {
+    fn enter(&mut self, f: CoroutineFn, args: &[i64], env: &[i64]) -> i64 {
         call_state::set_pending_args(args);
+        call_state::set_pending_env(env);
         // Nothing may allocate between here and the prologue's copy — see
         // `call_state`'s doc comment.
         unsafe { f(0) }
@@ -114,8 +115,20 @@ impl FrameStack {
     /// `SUSPEND` or `UNWIND` leaves the chain standing and gets out of the
     /// way, because who runs next is a scheduling question, not a calling one.
     pub fn run(&mut self, heap: &mut Heap, f: CoroutineFn, args: &[i64]) -> Result<i64, Paused> {
+        self.run_with_env(heap, f, args, &[])
+    }
+
+    /// [`run`](Self::run) for a callee that also has captures — a closure
+    /// body, entered from outside the compiled world.
+    pub fn run_with_env(
+        &mut self,
+        heap: &mut Heap,
+        f: CoroutineFn,
+        args: &[i64],
+        env: &[i64],
+    ) -> Result<i64, Paused> {
         let base = self.frames.len();
-        let mut status = self.enter(f, args);
+        let mut status = self.enter(f, args, env);
         // The frame the entered function made for itself, so the driver can
         // reach it on the way back.
         let mut current = take_current_frame();
@@ -135,8 +148,8 @@ impl FrameStack {
                     status = unsafe { caller_fn(typelisp_abi::encode(caller_frame)) };
                 }
                 STATUS_CALL => {
-                    let (callee, callee_args) = take_pending_call();
-                    status = self.enter(callee, &callee_args);
+                    let (callee, callee_args, callee_env) = take_pending_call();
+                    status = self.enter(callee, &callee_args, &callee_env);
                     current = take_current_frame();
                     self.frames.push((callee, current));
                 }
@@ -155,14 +168,14 @@ fn take_current_frame() -> Value {
     decode(word)
 }
 
-fn take_pending_call() -> (CoroutineFn, Vec<i64>) {
-    let (target, args) = call_state::take_pending_call()
+fn take_pending_call() -> (CoroutineFn, Vec<i64>, Vec<i64>) {
+    let (target, args, env) = call_state::take_pending_call()
         .unwrap_or_else(|| panic!("a frame returned STATUS_CALL without naming a callee"));
     // SAFETY: the address came from `build-fn-address` over a function this
     // module declared under the coroutine ABI, the same provenance every
     // indirect compiled call already relies on.
     let f: CoroutineFn = unsafe { std::mem::transmute::<usize, CoroutineFn>(target) };
-    (f, args)
+    (f, args, env)
 }
 
 fn frame_id(f: Value) -> BoxId {

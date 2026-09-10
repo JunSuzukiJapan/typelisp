@@ -561,14 +561,14 @@ pub fn disassemble_function(
     let module = {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("disassemble")));
-        crate::compile::llvm_builtins::declare_external_function(&module, &symbol);
+        crate::compile::llvm_builtins::declare_external_compiled_function(&module, &symbol);
         for edge in &edges {
             let target_symbol = match edge {
                 CallEdge::Fn(p) => crate::compile::symbols::user_symbol_name(&p.to_string()),
                 CallEdge::Method(t, m) => crate::compile::symbols::user_method_symbol_name(t, m),
             };
             if target_symbol != symbol {
-                crate::compile::llvm_builtins::declare_external_function(&module, &target_symbol);
+                crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol);
             }
         }
         for (rt_name, _) in rt_extern_functions() {
@@ -900,13 +900,13 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[String]) -> Resu
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")));
         for member in members {
-            crate::compile::llvm_builtins::declare_external_function(&module, &crate::compile::symbols::user_symbol_name(member));
+            crate::compile::llvm_builtins::declare_external_compiled_function(&module, &crate::compile::symbols::user_symbol_name(member));
         }
         for target in &call_targets {
-            crate::compile::llvm_builtins::declare_external_function(&module, &crate::compile::symbols::user_symbol_name(&target.to_string()));
+            crate::compile::llvm_builtins::declare_external_compiled_function(&module, &crate::compile::symbols::user_symbol_name(&target.to_string()));
         }
         for (type_name, method) in &method_targets {
-            crate::compile::llvm_builtins::declare_external_function(&module, &crate::compile::symbols::user_method_symbol_name(type_name, method));
+            crate::compile::llvm_builtins::declare_external_compiled_function(&module, &crate::compile::symbols::user_method_symbol_name(type_name, method));
         }
         for (rt_name, _) in rt_extern_functions() {
             crate::compile::llvm_builtins::declare_external_function(&module, rt_name);

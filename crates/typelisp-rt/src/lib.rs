@@ -1719,12 +1719,32 @@ pub unsafe extern "C" fn rt_sexpr_instance_test(args: *const i64, argc: u32) -> 
 /// already be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_closure_new(args: *const i64, argc: u32) -> i64 {
+    closure_new(args, argc, typelisp_abi::BODY_ABI_CLASSIC, "rt_closure_new")
+}
+
+/// [`rt_closure_new`] for a body compiled under the coroutine ABI (Phase C2).
+///
+/// A separate entry point rather than an extra argument, because the island
+/// that compiles the *next* island is the one already committed: it calls
+/// `rt_closure_new` with the layout it was built against, and an argument
+/// added in the middle would break the bootstrap at the one moment it cannot
+/// be repaired from. The name carries the fact instead.
+///
+/// # Safety
+///
+/// As [`rt_closure_new`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_coroutine_closure_new(args: *const i64, argc: u32) -> i64 {
+    closure_new(args, argc, typelisp_abi::BODY_ABI_COROUTINE, "rt_coroutine_closure_new")
+}
+
+unsafe fn closure_new(args: *const i64, argc: u32, body_abi: u8, what: &str) -> i64 {
     if argc < 2 {
-        fatal("rt_closure_new: expected at least 2 arguments (fn ptr, sexpr mask)");
+        fatal(&format!("{}: expected at least 2 arguments (fn ptr, sexpr mask)", what));
     }
     let env_len = argc as usize - 2;
     if env_len > 64 {
-        fatal("rt_closure_new: more than 64 captured slots");
+        fatal(&format!("{}: more than 64 captured slots", what));
     }
     let fn_ptr = *args as usize;
     let sexpr_mask = *args.add(1) as u64;
@@ -1737,7 +1757,7 @@ pub unsafe extern "C" fn rt_closure_new(args: *const i64, argc: u32) -> i64 {
             env.push(Value::Int(raw));
         }
     }
-    encode(active_heap().alloc_compiled_closure(fn_ptr, env, sexpr_mask))
+    encode(active_heap().alloc_compiled_closure(fn_ptr, env, sexpr_mask, body_abi))
 }
 
 /// `(rt-closure-fnptr clo)` for compiled code — the *raw* native entry
@@ -1982,7 +2002,30 @@ pub unsafe extern "C-unwind" fn rt_apply_any(args: *const i64, argc: u32) -> i64
         })
         .collect();
     let fn_ptr = heap.compiled_closure_fnptr(id);
-    // SAFETY: `rt_closure_new` is the only producer of a
+    if heap.compiled_closure_body_abi(id) == typelisp_abi::BODY_ABI_COROUTINE {
+        // A coroutine body cannot be called; it can only be *driven*. This
+        // caller is a C ABI function that has to come back with an answer, so
+        // it drives the callee to completion on a stack of its own.
+        //
+        // That is a boundary, not a shortcut: a chain rooted here lives on the
+        // machine stack of whoever called `rt_apply_any`, so it cannot be put
+        // down and picked up later. Phase C5 is where the outer driver takes
+        // this call over instead.
+        let passed: Vec<i64> = (0..callee_argc as usize).map(|i| *callee_args.add(i)).collect();
+        // SAFETY: `build-make-closure` only ever names a function it declared
+        // under `coroutine_fn_type`, which is what `rt_coroutine_closure_new`
+        // records by being the entry point that was called.
+        let f: crate::coroutine::CoroutineFn = std::mem::transmute(fn_ptr);
+        let mut stack = crate::coroutine::FrameStack::new();
+        return match stack.run_with_env(active_heap(), f, &passed, &env) {
+            Ok(v) => v,
+            Err(paused) => fatal(&format!(
+                "rt_apply_any: a compiled closure {:?} under a call that has to return.                  Nothing in this phase produces that yet — compiled code cannot suspend until C3.",
+                paused
+            )),
+        };
+    }
+    // SAFETY: `rt_closure_new` is the only producer of a classic-ABI
     // `BoxedObj::CompiledClosure`, and `build-make-closure` only ever hands
     // it an LLVM function compiled under `compiled_fn_type_with_env`'s exact
     // signature.
@@ -2153,7 +2196,53 @@ pub unsafe extern "C" fn rt_pending_arg(args: *const i64, argc: u32) -> i64 {
     if i < 0 {
         fatal(&format!("rt_pending_arg: {} is not an argument index", i));
     }
-    typelisp_abi::call_state::pending_arg(i as usize)
+    match typelisp_abi::call_state::pending_arg(i as usize) {
+        Some(w) => w,
+        None => fatal(&format!(
+            "rt_pending_arg: argument {} was not passed (the driver left {})",
+            i,
+            typelisp_abi::call_state::pending_argc()
+        )),
+    }
+}
+
+/// `(rt-pending-envc)` for compiled code — how many captures the driver left.
+///
+/// # Safety
+///
+/// Takes no arguments; `args`/`argc` are ignored.
+#[no_mangle]
+pub unsafe extern "C" fn rt_pending_envc(_args: *const i64, _argc: u32) -> i64 {
+    typelisp_abi::call_state::pending_envc() as i64
+}
+
+/// `(rt-pending-env i)` for compiled code — one of the captures the driver
+/// left, as the raw word the caller stored.
+///
+/// The capture counterpart of [`rt_pending_arg`], and separate for the same
+/// reason the two lists are: a closure body reads its captures and its
+/// parameters by separate indices.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_pending_env(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_pending_env: expected 1 argument");
+    }
+    let i = *args;
+    if i < 0 {
+        fatal(&format!("rt_pending_env: {} is not a capture index", i));
+    }
+    match typelisp_abi::call_state::pending_env(i as usize) {
+        Some(w) => w,
+        None => fatal(&format!(
+            "rt_pending_env: capture {} was not passed (the driver left {})",
+            i,
+            typelisp_abi::call_state::pending_envc()
+        )),
+    }
 }
 
 /// `(rt-frame-call target arg...)` for compiled code — names the call the
@@ -2175,7 +2264,42 @@ pub unsafe extern "C" fn rt_frame_call(args: *const i64, argc: u32) -> i64 {
     for i in 1..argc as usize {
         passed.push(*args.add(i));
     }
-    typelisp_abi::call_state::set_pending_call(target, passed);
+    typelisp_abi::call_state::set_pending_call(target, passed, Vec::new());
+    0
+}
+
+/// `(rt-frame-call-env target env-ptr env-len arg...)` — [`rt_frame_call`] for
+/// a callee that also has captures: a `lambda` body, or a `labels` sibling
+/// reached under the captures-carrying calling convention.
+///
+/// `args[1]` is a pointer to `args[2]` captured words, read here and copied,
+/// because the array it points at is on the caller's machine stack and the
+/// caller is about to return.
+///
+/// # Safety
+///
+/// `argc` must be `>= 3`, `args` must point to `argc` valid `i64`s, and
+/// `args[1]` must point to `args[2]` valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_call_env(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_frame_call_env: expected at least 3 arguments (callee, captures, capture count)");
+    }
+    let target = *args as usize;
+    let env_ptr = *args.add(1) as usize as *const i64;
+    let env_len = *args.add(2);
+    if env_len < 0 {
+        fatal(&format!("rt_frame_call_env: {} is not a capture count", env_len));
+    }
+    let mut env = Vec::with_capacity(env_len as usize);
+    for i in 0..env_len as usize {
+        env.push(*env_ptr.add(i));
+    }
+    let mut passed = Vec::with_capacity(argc as usize - 3);
+    for i in 3..argc as usize {
+        passed.push(*args.add(i));
+    }
+    typelisp_abi::call_state::set_pending_call(target, passed, env);
     0
 }
 
@@ -3234,6 +3358,71 @@ pub unsafe extern "C-unwind" fn rt_protected_call_env(args: *const i64, argc: u3
     let env = *args.add(3) as usize as *const i64;
     let env_len = *args.add(4) as u32;
     protected(|| target(callee_args, callee_argc, env, env_len))
+}
+
+/// [`rt_protected_call`] for a callee under the **coroutine ABI**: the call is
+/// driven to completion on a stack of its own, inside the catch.
+///
+/// A coroutine callee cannot simply be called, and it cannot join the caller's
+/// driver either: a `catch` region needs the frame that catches to be the one
+/// making the call, and under the driver the caller's frame is a heap object
+/// with no machine frame to unwind into. Phase C4 makes unwinding a driver
+/// status and this goes away; until then a `catch` around a call costs the
+/// machine stack that call would otherwise not have used.
+///
+/// # Safety
+///
+/// `argc` must be `>= 3`, `args[0]` must be the address of a function built
+/// under `coroutine_fn_type`, and `args[1]`/`args[2]` must describe a valid
+/// argument array for it.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_protected_drive(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_protected_drive: expected 3 arguments (target, argument array, argument count)");
+    }
+    let target: crate::coroutine::CoroutineFn = std::mem::transmute(*args as usize);
+    let passed = collect_words(*args.add(1) as usize as *const i64, *args.add(2));
+    protected(|| drive_to_completion(target, &passed, &[], "rt_protected_drive"))
+}
+
+/// [`rt_protected_drive`] for a callee that also has captures.
+///
+/// # Safety
+///
+/// `argc` must be `>= 5`; the two arrays must be valid for the target.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_protected_drive_env(args: *const i64, argc: u32) -> i64 {
+    if argc < 5 {
+        fatal("rt_protected_drive_env: expected 5 arguments (target, argument array, argument count, env, env length)");
+    }
+    let target: crate::coroutine::CoroutineFn = std::mem::transmute(*args as usize);
+    let passed = collect_words(*args.add(1) as usize as *const i64, *args.add(2));
+    let env = collect_words(*args.add(3) as usize as *const i64, *args.add(4));
+    protected(|| drive_to_completion(target, &passed, &env, "rt_protected_drive_env"))
+}
+
+unsafe fn collect_words(p: *const i64, n: i64) -> Vec<i64> {
+    if n < 0 {
+        fatal(&format!("{} is not a word count", n));
+    }
+    (0..n as usize).map(|i| *p.add(i)).collect()
+}
+
+unsafe fn drive_to_completion(
+    f: crate::coroutine::CoroutineFn,
+    args: &[i64],
+    env: &[i64],
+    what: &str,
+) -> i64 {
+    let mut stack = crate::coroutine::FrameStack::new();
+    match stack.run_with_env(active_heap(), f, args, env) {
+        Ok(v) => v,
+        Err(paused) => fatal(&format!(
+            "{}: the callee {:?} under a call that has to return. Nothing in this phase \
+             produces that yet — compiled code cannot suspend until C3.",
+            what, paused
+        )),
+    }
 }
 
 /// The protected form of [`rt_apply_any`] — same arguments, same result, with

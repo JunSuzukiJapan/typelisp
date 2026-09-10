@@ -138,6 +138,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "frame-end" => Some(llvm_builder_frame_end(args)),
             "coroutine-begin" => Some(llvm_builder_coroutine_begin(args)),
             "coroutine-call" => Some(llvm_builder_coroutine_call(args)),
+            "coroutine-call-env" => Some(llvm_builder_coroutine_call_env(args)),
             "coroutine-end" => Some(llvm_builder_coroutine_end(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
@@ -300,6 +301,25 @@ fn llvm_function_param(args: &[Value]) -> Result<Value, EvalError> {
 /// [`crate::compile::COMPILE_LOCK`] held.
 pub(crate) fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) {
     module.borrow_mut().add_function(name, compiled_fn_type(), None);
+}
+
+/// [`declare_external_function`] for a **compiled Lisp** function rather than
+/// an `rt_*` entry point: declared under whichever ABI this process emits.
+///
+/// The two cannot share one signature any more. A forward declaration is
+/// matched to its definition by name, and `add-coroutine-function` is
+/// get-or-create — so a Lisp symbol pre-declared under the original ABI is the
+/// declaration the island then tries to give a coroutine body to, and the
+/// mismatch shows up as a `ptr` where the frame parameter should be. The
+/// runtime keeps the original ABI regardless: `rt_*` functions are Rust, and
+/// Rust does not have a driver to hand control back to.
+pub(crate) fn declare_external_compiled_function(module: &Rc<RefCell<Module<'static>>>, name: &str) {
+    let ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
+        coroutine_fn_type()
+    } else {
+        compiled_fn_type()
+    };
+    module.borrow_mut().add_function(name, ty, None);
 }
 
 /// The captures counterpart of [`compiled_fn_type`]: `i64 name(i64* args,
@@ -713,7 +733,40 @@ fn llvm_builder_alloca_args(args: &[Value]) -> Result<Value, EvalError> {
     };
     let ctx = crate::compile::llvm_context();
     let array_ty = ctx.i64_type().array_type(count);
-    let ptr = builder.borrow().build_alloca(array_ty, "call_args").map_err(|e| EvalError::Internal(format!("alloca-args: {}", e)))?;
+    let b = builder.borrow();
+    // The array is emitted in the **entry block**, not where the island asked
+    // for it.
+    //
+    // An `alloca` is a definition like any other, so it has to dominate every
+    // use, and under the coroutine ABI the block that asks is often not the
+    // block that uses: a call splits the block underneath the island, and what
+    // follows the call is emitted into a resume block that only the pc
+    // dispatch chain branches to. The entry block dominates the whole
+    // function, and it is the only block that does.
+    //
+    // This is also where an `alloca` belongs anyway — one per activation
+    // rather than one per time round a loop, which is what LLVM's own
+    // stack-slot handling expects.
+    //
+    // What it does *not* buy is survival across a suspension. The machine
+    // frame is torn down when the function hands control back, so an `alloca`
+    // holds nothing on the way in again. Only a value that is stored and read
+    // without a call in between may live here; anything that has to outlive a
+    // call belongs in a frame slot.
+    let here = b.get_insert_block();
+    let entry = here
+        .and_then(|blk| blk.get_parent())
+        .and_then(|f| f.get_first_basic_block())
+        .ok_or_else(|| EvalError::Internal("alloca-args: the builder is not inside a function".to_string()))?;
+    match entry.get_terminator() {
+        Some(term) => b.position_before(&term),
+        None => b.position_at_end(entry),
+    }
+    let ptr =
+        b.build_alloca(array_ty, "call_args").map_err(|e| EvalError::Internal(format!("alloca-args: {}", e)))?;
+    if let Some(blk) = here {
+        b.position_at_end(blk);
+    }
     Ok(llvm_value_value(ptr.into()))
 }
 
@@ -1339,6 +1392,32 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
 /// frame slot of its own (`root-temporary`), which is the same reason they
 /// survived the callee's allocation under the original ABI.
 fn llvm_builder_coroutine_call(args: &[Value]) -> Result<Value, EvalError> {
+    coroutine_call_impl(args, None)
+}
+
+/// `(coroutine-call-env builder m target args-ptr argc env-ptr env-len)` —
+/// [`llvm_builder_coroutine_call`] for a callee that also has captures.
+///
+/// The captures are read out of the caller's array by `rt_frame_call_env`
+/// before the caller returns, because that array is on a machine stack that is
+/// about to go away. Under the original ABI they could be passed as a pointer
+/// and read by the callee, which is the difference a call that *returns*
+/// makes.
+fn llvm_builder_coroutine_call_env(args: &[Value]) -> Result<Value, EvalError> {
+    let env_ptr = expect_llvm_value(&args[5])?.into_pointer_value();
+    let env_len = match &args[6] {
+        Value::Int(n) if *n >= 0 => *n as u64,
+        other => {
+            return Err(EvalError::Internal(format!("coroutine-call-env: {:?} is not a capture count", other)))
+        }
+    };
+    coroutine_call_impl(args, Some((env_ptr, env_len)))
+}
+
+fn coroutine_call_impl(
+    args: &[Value],
+    env: Option<(PointerValue<'static>, u64)>,
+) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
     let target = expect_llvm_value(&args[2])?;
@@ -1369,13 +1448,21 @@ fn llvm_builder_coroutine_call(args: &[Value]) -> Result<Value, EvalError> {
     })?;
 
     let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
-    let frame_call = ensure_declared(&module, "rt_frame_call");
+    let frame_call =
+        ensure_declared(&module, if env.is_some() { "rt_frame_call_env" } else { "rt_frame_call" });
     let set_pc = ensure_declared(&module, "rt_frame_set_pc");
 
     let b = builder.borrow();
-    // rt_frame_call(callee, arg...) — one array, the callee first.
-    let mut call_args: Vec<BasicValueEnum<'static>> = Vec::with_capacity(argc as usize + 1);
+    // rt_frame_call(callee, arg...) — one array, the callee first; the
+    // captures-carrying form puts the env between them.
+    let mut call_args: Vec<BasicValueEnum<'static>> = Vec::with_capacity(argc as usize + 3);
     call_args.push(target);
+    if let Some((env_ptr, env_len)) = env {
+        call_args.push(
+            b.build_ptr_to_int(env_ptr, i64t, "coro_env_word").map_err(|e| err("ptrtoint", e.to_string()))?.into(),
+        );
+        call_args.push(i64t.const_int(env_len, false).into());
+    }
     for i in 0..argc {
         let slot = unsafe {
             b.build_gep(i64t, args_ptr, &[i64t.const_int(i, false)], "coro_arg")
@@ -1630,9 +1717,18 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
     let ctx = crate::compile::llvm_context();
     let b = builder.borrow();
     let module = module.borrow();
-    let rt_closure_new = module
-        .get_function("rt_closure_new")
-        .ok_or_else(|| EvalError::Internal("build-make-closure: rt_closure_new not declared in this module".into()))?;
+    // Which constructor names the ABI the body was emitted under, so the
+    // closure carries it. A process can hold both at once across an ABI
+    // change — the island runs from its committed dump while this binary JITs
+    // fresh code — so the answer cannot be a process-wide setting.
+    let ctor_name = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
+        "rt_coroutine_closure_new"
+    } else {
+        "rt_closure_new"
+    };
+    let rt_closure_new = module.get_function(ctor_name).ok_or_else(|| {
+        EvalError::Internal(format!("build-make-closure: {} not declared in this module", ctor_name))
+    })?;
 
     let i64_ty = ctx.i64_type();
     let argc = 2 + env_len;
@@ -2228,7 +2324,14 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         vals.push(match k {
             LlvmArgK::Handle => match value_of_handle(*raw) {
                 Some(v) => v,
-                None => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: dangling llvm handle {}", op.type_key, op.method, raw)),
+                None => rt_llvm_fatal(&format!(
+                    "rt_llvm_call: {}::{}: dangling llvm handle {} (registry holds {}, args so far {:?})",
+                    op.type_key,
+                    op.method,
+                    raw,
+                    llvm_handles_mark(),
+                    raw_args
+                )),
             },
             LlvmArgK::Str => match crate::compile::runtime::decode(*raw) {
                 v @ Value::Str(_) => v,

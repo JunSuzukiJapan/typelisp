@@ -155,10 +155,20 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         // (`llvm_module_add_function`), so a body compiled later simply fills
         // in the shell declared here. This is the same shape `Interp::
         // compile_scc` already uses for a JIT'd cycle.
+        // Under the coroutine ABI (Phase C2) a compiled Lisp function is
+        // `i64 f(i64 frame)`, not `i64 f(i64*, i32)`. A forward declaration is
+        // matched to its definition by name, so declaring these under the
+        // wrong one is not a second declaration — it is the declaration the
+        // island then tries to give a coroutine body to.
+        let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
+            ctx.i64_type().fn_type(&[ctx.i64_type().into()], false)
+        } else {
+            fn_ty
+        };
         for item in &items {
             let sym = item.symbol_name();
             if module.get_function(&sym).is_none() {
-                module.add_function(&sym, fn_ty, None);
+                module.add_function(&sym, lisp_fn_ty, None);
             }
         }
         Rc::new(RefCell::new(module))
@@ -204,7 +214,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         bitcode?
     };
 
-    let state = typelisp_front::dump::capture_types(
+    let state = typelisp_front::dump::capture_types_with_abi(
         &heap,
         delta,
         "compiler island",
@@ -215,6 +225,12 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         // The island defines 121 `defun`s and one `defmacro`, and no globals at
         // all — nothing here to give compiled-slot storage to.
         Vec::new(),
+        // The bodies just written came out of the island running *now*, so
+        // they answer to whatever it emits; what they will emit in turn is
+        // `SOURCE`'s business, and across a changeover those are two different
+        // answers for one generation.
+        crate::compile::EMITTED_BODY_ABI,
+        crate::compiler::SOURCE_EMITS_ABI,
     )?;
     let types = typelisp_front::dump::write_state(&state)?;
     Ok(typelisp_front::dump::write(&[(types, bitcode)]))

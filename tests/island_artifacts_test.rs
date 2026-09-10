@@ -159,6 +159,13 @@ fn the_committed_islands_recorded_abi_matches_the_constant() {
         compiler::ISLAND_DUMP_BODY_ABI,
         "src/compiler.rs's ISLAND_DUMP_BODY_ABI disagrees with what src/compiler_island.typld records"
     );
+    assert_eq!(
+        state.emits_abi,
+        compiler::ISLAND_DUMP_EMITS_ABI,
+        "src/compiler.rs's ISLAND_DUMP_EMITS_ABI disagrees with what src/compiler_island.typld records. \
+         This is the constant everything this process compiles answers to (compile::EMITTED_BODY_ABI), \
+         so a stale value here is a whole binary emitting one ABI and calling it another."
+    );
 }
 
 #[test]

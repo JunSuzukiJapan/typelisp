@@ -1199,6 +1199,28 @@ impl Interp {
             })
             .collect();
         let fn_ptr = heap.compiled_closure_fnptr(id);
+        if heap.compiled_closure_body_abi(id) == typelisp_abi::BODY_ABI_COROUTINE {
+            // The same boundary `rt_apply_any` draws, for the same reason:
+            // this caller is a Rust frame waiting for an answer, so the
+            // closure is driven to completion on a stack of its own rather
+            // than joining a chain that could be put down. See
+            // `Interp::call_coroutine`.
+            // SAFETY: as below, but under `coroutine_fn_type` — which is what
+            // `rt_coroutine_closure_new` having been the producer records.
+            let f: typelisp_rt::coroutine::CoroutineFn = unsafe { std::mem::transmute(fn_ptr) };
+            let mut stack = typelisp_rt::coroutine::FrameStack::new();
+            let heap_mut = unsafe { typelisp_abi::active_heap() };
+            return match stack.run_with_env(heap_mut, f, args, &env) {
+                Ok(v) => v,
+                Err(typelisp_rt::coroutine::Paused::Suspended) => typelisp_abi::raise(
+                    "a compiled closure suspended underneath an interpreted caller, which has no way to resume it"
+                        .to_string(),
+                ),
+                Err(typelisp_rt::coroutine::Paused::Unwinding) => typelisp_abi::raise(
+                    "a compiled closure unwound out to an interpreted caller (Phase C4)".to_string(),
+                ),
+            };
+        }
         // SAFETY: every `BoxedObj::CompiledClosure` in the heap was built by
         // `rt_closure_new` from a real LLVM function pointer compiled under
         // `compiled_fn_type_with_env`'s exact signature (`build-make-closure`

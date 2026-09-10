@@ -463,10 +463,20 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         for (name, _) in crate::compile::externs::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
         }
+        // Under the coroutine ABI (Phase C2) a compiled Lisp function is
+        // `i64 f(i64 frame)`, not `i64 f(i64*, i32)`. A forward declaration is
+        // matched to its definition by name, so declaring these under the
+        // wrong one is not a second declaration — it is the declaration the
+        // island then tries to give a coroutine body to.
+        let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
+            ctx.i64_type().fn_type(&[ctx.i64_type().into()], false)
+        } else {
+            fn_ty
+        };
         for item in &items {
             let sym = item.symbol_name();
             if module.get_function(&sym).is_none() {
-                module.add_function(&sym, fn_ty, None);
+                module.add_function(&sym, lisp_fn_ty, None);
             }
         }
         Rc::new(RefCell::new(module))
