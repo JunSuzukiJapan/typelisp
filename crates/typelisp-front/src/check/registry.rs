@@ -2156,6 +2156,33 @@ pub fn llvm_builder_def() -> AdtDef {
         assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], llvm_value_ty(), true),
     );
     assoc.insert("frame-end".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], Type::Unit, true));
+    // The coroutine prologue (Phase C2). Separate names rather than a wider
+    // `frame-begin`, because the island that compiles the *next* island is the
+    // one already committed: it calls these builtins through `rt_llvm_call`
+    // with the arity it was built against, so changing an existing signature
+    // breaks the bootstrap at the one moment it cannot be repaired from.
+    //
+    // `coroutine-begin` takes the function as well as the builder — it appends
+    // the prologue's blocks — and leaves the builder at the start of the body.
+    // `coroutine-call` returns the callee's value, having split the block
+    // underneath the caller. `coroutine-end` takes the body's value because
+    // under this ABI the `ret` carries the status, not the answer.
+    assoc.insert(
+        "coroutine-begin".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty()], Type::Unit, true),
+    );
+    assoc.insert(
+        "coroutine-call".to_string(),
+        assoc_fn(
+            vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32],
+            llvm_value_ty(),
+            true,
+        ),
+    );
+    assoc.insert(
+        "coroutine-end".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], Type::Unit, true),
+    );
     // `build-icmp-lt`/`-le`/`-gt`/`-ge`/`-eq`/`-ne`: `i64` comparisons —
     // `compiler.rs`'s `compile-assoc` dispatches `<`/`<=`/`>`/`>=`/(`=`,`eq`)/`/=`
     // to these (`if`/comparisons work, labels/closures Stage 5). Each widens

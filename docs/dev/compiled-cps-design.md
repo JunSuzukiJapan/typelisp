@@ -318,3 +318,90 @@ decode すると同じ間違いを 4 度目にやることになる。
 `rt_pop_sexpr_root` の対を出すが、ドライバ経由になると `FrameStack::roots()` が
 フレームを持つので不要になる。中断を跨ぐと対が崩れる（押して、戻って、あとで
 降ろす）ので、C2 本体で外す。
+
+## C2c. コルーチンの前段（機構だけ、島は触らない）
+
+C0・C2a と同じ形で、島に手を入れる前に機構だけを作り、手組みのモジュールで
+証明した。実装は `src/compile/llvm_builtins.rs` の `coroutine-begin` /
+`coroutine-call` / `coroutine-end`。
+
+### 名前を変えずに新しく足した理由
+
+`frame-begin` を広げるのでなく別の名前にした。**次の島をコンパイルするのは
+今コミットされている島**で、それは自分がビルドされた時のアリティで
+`rt_llvm_call` を呼ぶ。既存の署名を変えると、まさに直せない瞬間に
+ブートストラップが壊れる（C1b で 1 度踏んでいる）。
+
+### 前段が直線でない理由
+
+```text
+entry:      %cell = alloca i64;  br (%param == 0), fresh, resumed
+fresh:      %f = rt_frame_new(0);  store %f -> %cell
+            rt_push_sexpr_root(%f);  rt_frame_entered(%f);  br prologue
+resumed:    store %param -> %cell;  br prologue
+prologue:   %frame = load %cell;  %data = rt_frame_data(%frame)
+            %pc = rt_frame_pc(%frame);  br dispatch
+dispatch:   (空 —— `coroutine-end` が連鎖を書く)
+body:       ...
+```
+
+フレームとその data ポインタは、**入口の経路が一度も通らない再開ブロック**が
+使う。SSA は定義が使用を支配することを要求するので、入口の経路では定義できない。
+`prologue` は新規入場と再開の両方が落ちてくる唯一のブロックで、それが
+「すべてを支配する」の中身。
+
+フレームが phi でなく **セル（entry ブロックの alloca）** で合流するのは、
+島に phi を作る手段が無いからでもあるが、それ以前に必要が無い——1 つのアドレスが
+1 回の活性化を通じて同じ場所を指すなら、「作ったフレーム」と「渡されたフレーム」は
+そこへ store するだけで合流する。
+
+### 中断点を跨ぐ SSA 値は作れない
+
+これがこの ABI の中心的な制約で、**LLVM の検証器がそのまま言葉にする**——
+最初に書いたモジュールは `Instruction does not dominate all uses` で弾かれた。
+呼び出し地点のブロックは再開ブロックを支配しない（再開ブロックへは dispatch
+からしか来ない）ので、**呼び出しを跨いで生きる値はフレームスロットに無ければ
+ならない**。
+
+その帰結が `frame-slot` にも及んだ。スロットの**アドレス**（data からの GEP）は
+島が要求した場所でなく `prologue` に置く。マスクビットのほうは `coro.fresh` に
+置く——スロットを marked にするのはフレームについての事実で、フレームは 1 度しか
+作られない。**書く前に marked にしても安全**なのは、触っていないスロットが生の
+`0` すなわち `TAG_FIXNUM` で、コレクタが何も辿らないから。
+
+### 引数はどこで守られているか
+
+`rt_frame_call` は引数を `call_state` の Rust の `Vec` に写す。コレクタから
+見えないその窓の中で、呼び先の `rt_frame_new` が確保する。それでも生き残るのは、
+**呼び元が既に収集対象の引数を自分のフレームの marked スロットに持っている**
+から（`root-temporary`）——旧 ABI で呼び先の確保を生き延びていたのと同じ理由で、
+新しい穴ではない。
+
+### 証明したこと
+
+`tests/compile_test.rs` の
+`a_compiled_recursion_runs_two_hundred_thousand_frames_deep`：
+`sum_to(n) = n + sum_to(n-1)` を深さ 200,000 で。再帰の 1 段ごとが
+`rt_frame_call` + `ret STATUS_CALL` なので、降りていくのはドライバであって
+LLVM の `call` ではない。マシンスタックは `FrameStack::run` の深さのまま。
+
+`n` が二つ目の要点で、入場時に 1 度だけ pending 引数から読み、**再帰呼び出しの
+後で**もう一度使う。間でマシンスタックは崩れて作り直されるので、フレームに
+居る以外に生き残る道が無い。
+
+### C2d（島の切り替え）に持ち越した宿題
+
+**島の 137 個の `alloca-args` のうち、呼び出しを跨いで生きるものは全部フレーム
+スロットにしなければならない。** 検証器が漏れなく見つけるので、作業自体は機械的。
+分かっているものだけで:
+
+| 場所 | 何が跨ぐか |
+|---|---|
+| `compile-call-args` の `args-ptr` | 先に評価した引数。後の引数の評価が中断しうる |
+| `compile-if` の `slot` | 分岐前に alloca し、腕の中で store、merge で load |
+| `compile-let-values` の `acc` | `Scope<llvm-value>` に **SSA 値**を溜める。後の初期化式が中断しうる |
+| `compile-loop` / `compile-block` の slot | 同型 |
+
+`args-ptr` には新しい組み込みが要らない見込み：`frame-slot` は連番のスロットを
+配るので、引数の数だけ連続して呼べば先頭ポインタから `store-arg` の GEP が
+そのまま効く。

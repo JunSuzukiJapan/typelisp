@@ -39,7 +39,7 @@ use std::rc::Rc;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::module::Module;
-use inkwell::values::{BasicValueEnum, FunctionValue, InstructionValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, InstructionValue, IntValue, PointerValue};
 use inkwell::AddressSpace;
 
 use typelisp_mem::{Heap, Value};
@@ -136,6 +136,9 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "frame-slot" => Some(llvm_builder_frame_slot(args)),
             "frame-slot-rooted" => Some(llvm_builder_frame_slot_rooted(args)),
             "frame-end" => Some(llvm_builder_frame_end(args)),
+            "coroutine-begin" => Some(llvm_builder_coroutine_begin(args)),
+            "coroutine-call" => Some(llvm_builder_coroutine_call(args)),
+            "coroutine-end" => Some(llvm_builder_coroutine_end(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
             "build-icmp-gt" => Some(llvm_builder_build_icmp(args, "icmp_gt", inkwell::IntPredicate::SGT)),
@@ -814,6 +817,44 @@ struct FrameCtx {
     size_store: InstructionValue<'static>,
     /// How many slots have been handed out.
     next: u64,
+    /// The coroutine prologue's parts, absent under the original ABI.
+    coro: Option<CoroCtx>,
+}
+
+/// What the coroutine prologue leaves behind for the rest of the function.
+///
+/// A resume point is a basic block that only the dispatch chain branches to,
+/// so the chain cannot be written until every call site has been emitted and
+/// claimed its id — the same shape as the slot count, and patched the same
+/// way: [`llvm_builder_coroutine_begin`] leaves `dispatch` empty and
+/// [`llvm_builder_coroutine_end`] fills it.
+struct CoroCtx {
+    /// The function being built, to append resume blocks to.
+    function: FunctionValue<'static>,
+    /// Where the body starts — the dispatch chain's `pc == 0` arm.
+    body: BasicBlock<'static>,
+    /// Left empty by `coroutine-begin`, filled by `coroutine-end`.
+    dispatch: BasicBlock<'static>,
+    /// `rt_frame_pc(frame)`, read once in the prologue so it dominates the
+    /// whole chain.
+    pc: IntValue<'static>,
+    /// Every call site's id and the block it resumes into, in the order they
+    /// were claimed.
+    resumes: Vec<(u64, BasicBlock<'static>)>,
+    /// The `br` ending `coro.fresh`, to insert once-per-activation setup
+    /// before — a slot's mask bit is a fact about the frame, so it belongs on
+    /// the path that makes the frame, not on every resume.
+    fresh_end: InstructionValue<'static>,
+    /// The frame as `coro.fresh` knows it, for those mask-bit calls.
+    fresh_frame: BasicValueEnum<'static>,
+    /// The `br` ending `coro.prologue`, to insert slot *addresses* before.
+    ///
+    /// A slot address is a GEP off the frame's data pointer, and the resume
+    /// blocks use it — so it has to be defined where both the fresh and the
+    /// resuming entry can see it. Emitting it where the island asked would
+    /// put it in whatever block the binding happened to be in, which no
+    /// resume block is dominated by.
+    prologue_end: InstructionValue<'static>,
 }
 
 thread_local! {
@@ -933,7 +974,7 @@ fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
         // call it is waiting on arrives through it: from the resuming
         // function's side those are the same thing, the answer it was waiting
         // for.
-        c.borrow_mut().insert(builder_key(&builder), FrameCtx { data, frame, size_store, next: 1 });
+        c.borrow_mut().insert(builder_key(&builder), FrameCtx { data, frame, size_store, next: 1, coro: None });
     });
     Ok(Value::Empty)
 }
@@ -980,15 +1021,48 @@ fn frame_slot_impl(args: &[Value], rooted: bool) -> Result<Value, EvalError> {
     let i64t = ctx.i64_type();
     let key = builder_key(&builder);
 
-    let (frame, data, idx) = FRAME_CTXS.with(|c| {
+    let (frame, data, idx, coro) = FRAME_CTXS.with(|c| {
         let mut map = c.borrow_mut();
         let f = map
             .get_mut(&key)
             .ok_or_else(|| EvalError::Internal("frame-slot: no frame is open on this builder".to_string()))?;
         let idx = f.next;
         f.next += 1;
-        Ok::<_, EvalError>((f.frame, f.data, idx))
+        let coro = f.coro.as_ref().map(|c| (c.fresh_end, c.fresh_frame, c.prologue_end));
+        Ok::<_, EvalError>((f.frame, f.data, idx, coro))
     })?;
+
+    // Under the coroutine ABI a slot's address and its mask bit both move out
+    // of the block that asked for them. The address goes to `coro.prologue`,
+    // the one block every entry falls into, because the resume blocks use it
+    // and nothing in the body dominates them. The mask bit goes to
+    // `coro.fresh`, because marking a slot is a fact about the frame and the
+    // frame is made exactly once.
+    //
+    // Setting the bit before the slot is written is safe by construction: an
+    // untouched slot reads as a raw `0`, whose low bits are `TAG_FIXNUM`, so
+    // the collector follows nothing.
+    if let Some((fresh_end, fresh_frame, prologue_end)) = coro {
+        {
+            let b = builder.borrow();
+            let here = b.get_insert_block();
+            if rooted {
+                let module = expect_llvm_module(&args[1])?;
+                let mask_fn = ensure_declared(&module, "rt_frame_mask_bit");
+                b.position_before(&fresh_end);
+                emit_rt_call(&b, mask_fn, &[fresh_frame, i64t.const_int(idx, false).into()], "mask", "frame-slot")?;
+            }
+            b.position_before(&prologue_end);
+            let elem_ptr = unsafe {
+                b.build_gep(i64t, data, &[i64t.const_int(idx, false)], "frame_slot")
+                    .map_err(|e| EvalError::Internal(format!("frame-slot: gep: {}", e)))?
+            };
+            if let Some(block) = here {
+                b.position_at_end(block);
+            }
+            return Ok(llvm_value_value(elem_ptr.into()));
+        }
+    }
 
     let b = builder.borrow();
     if rooted {
@@ -1043,6 +1117,360 @@ fn llvm_builder_frame_end(args: &[Value]) -> Result<Value, EvalError> {
         .map_err(|e| EvalError::Internal(format!("frame-end: alloca: {}", e)))?;
     b.build_call(pop_root, &[empty.into(), ctx.i32_type().const_int(0, false).into()], "")
         .map_err(|e| EvalError::Internal(format!("frame-end: call rt_pop_sexpr_root: {}", e)))?;
+    Ok(Value::Empty)
+}
+
+// ---------------------------------------------------------------------------
+// The coroutine prologue (Phase C2)
+// ---------------------------------------------------------------------------
+//
+// `frame-begin`/`frame-end` above build a frame inside a function that still
+// runs to completion. The three below build one that can stop in the middle,
+// and the difference is entirely in the *shape of the function*, not in the
+// frame: a coroutine body is entered again, from the top, every time it
+// resumes, and has to find its way back to where it left off.
+//
+// That is why the prologue is not a straight line. Two things it computes —
+// the frame and the pointer into it — are used by resume blocks that the
+// entry path never reaches, so they cannot be computed on the entry path:
+// SSA requires a definition to dominate its uses. They are computed in a
+// `coro.prologue` block that both the fresh and the resuming entry fall into,
+// which is what makes it dominate everything after.
+//
+// The frame arrives through a cell rather than a phi node: an entry-block
+// `alloca` is one address for the whole activation, so "the frame I made" and
+// "the frame I was handed" merge by storing to the same place. The island has
+// no way to build a phi, and would not want one — this is the same trick
+// `alloca-args` already plays for every other value that has to outlive a
+// branch.
+
+/// Emits a call to an `rt_*` entry point with `vals` as its argument array.
+///
+/// Every one of them takes `(const i64 *args, u32 argc)`, so the array is an
+/// `alloca` filled by hand — the same three lines repeated at a dozen sites
+/// above, factored out here because the coroutine prologue makes eight such
+/// calls.
+fn emit_rt_call<'a>(
+    b: &Builder<'static>,
+    f: FunctionValue<'static>,
+    vals: &[BasicValueEnum<'static>],
+    name: &str,
+    what: &'a str,
+) -> Result<Option<BasicValueEnum<'static>>, EvalError> {
+    let ctx = crate::compile::llvm_context();
+    let i64t = ctx.i64_type();
+    let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
+    let arr = b
+        .build_alloca(i64t.array_type(vals.len().max(1) as u32), &format!("{}_args", name))
+        .map_err(|e| err("alloca", e.to_string()))?;
+    for (i, v) in vals.iter().enumerate() {
+        let slot = unsafe {
+            b.build_gep(i64t, arr, &[i64t.const_int(i as u64, false)], &format!("{}_a{}", name, i))
+                .map_err(|e| err("gep", e.to_string()))?
+        };
+        b.build_store(slot, *v).map_err(|e| err("store", e.to_string()))?;
+    }
+    let call = b
+        .build_call(f, &[arr.into(), ctx.i32_type().const_int(vals.len() as u64, false).into()], name)
+        .map_err(|e| err("call", e.to_string()))?;
+    Ok(match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => Some(v),
+        inkwell::values::ValueKind::Instruction(_) => None,
+    })
+}
+
+/// `(coroutine-begin builder m f)` — emit the prologue of a coroutine-ABI
+/// function and leave the builder at the start of its body.
+///
+/// ```text
+/// entry:      %cell = alloca i64;  br (%param == 0), fresh, resumed
+/// fresh:      %f = rt_frame_new(0);  store %f -> %cell
+///             rt_push_sexpr_root(%f);  rt_frame_entered(%f);  br prologue
+/// resumed:    store %param -> %cell;  br prologue
+/// prologue:   %frame = load %cell;  %data = rt_frame_data(%frame)
+///             %pc = rt_frame_pc(%frame);  br dispatch
+/// dispatch:   (empty — `coroutine-end` writes the chain)
+/// body:       ...
+/// ```
+///
+/// `rt_frame_entered` is how the driver learns the frame at all: it is made
+/// *inside* the callee, after the call has begun, so there is no other moment
+/// the caller could have been told.
+///
+/// The root push has no pop here and its pop is not on this path — one push
+/// on first entry, one pop at the single return. Between them the function may
+/// hand control back to the driver any number of times, and the frames of a
+/// call chain nest, so the root stack stays in order. That stops being true
+/// once a *task* can be put down mid-chain (C3), and the frame's own root
+/// moves to `FrameStack::roots()` then.
+fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let function = expect_llvm_function(&args[2])?;
+    let ctx = crate::compile::llvm_context();
+    let i64t = ctx.i64_type();
+    let what = "coroutine-begin";
+    let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
+
+    // The prologue owns its declarations for the same reason `frame-begin`
+    // does: a module can reach here without having been through the driver.
+    let frame_new = ensure_declared(&module, "rt_frame_new");
+    let frame_data = ensure_declared(&module, "rt_frame_data");
+    let frame_pc = ensure_declared(&module, "rt_frame_pc");
+    let entered = ensure_declared(&module, "rt_frame_entered");
+    let push_root = ensure_declared(&module, "rt_push_sexpr_root");
+    ensure_declared(&module, "rt_pop_sexpr_root");
+    ensure_declared(&module, "rt_frame_mask_bit");
+    ensure_declared(&module, "rt_frame_set_pc");
+    ensure_declared(&module, "rt_frame_call");
+    ensure_declared(&module, "rt_pending_arg");
+    ensure_declared(&module, "rt_pending_argc");
+
+    let param = function
+        .get_nth_param(0)
+        .ok_or_else(|| EvalError::Internal(format!("{}: the function takes no frame parameter", what)))?
+        .into_int_value();
+
+    let fresh = ctx.append_basic_block(function, "coro.fresh");
+    let resumed = ctx.append_basic_block(function, "coro.resumed");
+    let prologue = ctx.append_basic_block(function, "coro.prologue");
+    let dispatch = ctx.append_basic_block(function, "coro.dispatch");
+    let body = ctx.append_basic_block(function, "coro.body");
+
+    let b = builder.borrow();
+
+    // entry — the block the caller positioned us at.
+    let cell = b.build_alloca(i64t, "coro_frame_cell").map_err(|e| err("alloca", e.to_string()))?;
+    let is_first = b
+        .build_int_compare(inkwell::IntPredicate::EQ, param, i64t.const_int(0, false), "coro_first")
+        .map_err(|e| err("icmp", e.to_string()))?;
+    b.build_conditional_branch(is_first, fresh, resumed).map_err(|e| err("br", e.to_string()))?;
+
+    // fresh — make the frame this activation runs in. The size is a
+    // placeholder; `coroutine-end` writes the true count in.
+    b.position_at_end(fresh);
+    let size_args = b.build_alloca(i64t.array_type(1), "frame_size_args").map_err(|e| err("alloca", e.to_string()))?;
+    let size_slot = unsafe {
+        b.build_gep(i64t, size_args, &[i64t.const_int(0, false)], "frame_size_slot")
+            .map_err(|e| err("gep", e.to_string()))?
+    };
+    let size_store =
+        b.build_store(size_slot, i64t.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
+    let made = match b
+        .build_call(frame_new, &[size_args.into(), ctx.i32_type().const_int(1, false).into()], "frame")
+        .map_err(|e| err("call rt_frame_new", e.to_string()))?
+        .try_as_basic_value()
+    {
+        inkwell::values::ValueKind::Basic(v) => v,
+        inkwell::values::ValueKind::Instruction(_) => {
+            return Err(EvalError::Internal(format!("{}: rt_frame_new returned no value", what)))
+        }
+    };
+    b.build_store(cell, made).map_err(|e| err("store", e.to_string()))?;
+    emit_rt_call(&b, push_root, &[made], "frame_root", what)?;
+    emit_rt_call(&b, entered, &[made], "frame_entered", what)?;
+    let fresh_end = b.build_unconditional_branch(prologue).map_err(|e| err("br", e.to_string()))?;
+
+    // resumed — the driver handed back the frame we made last time.
+    b.position_at_end(resumed);
+    b.build_store(cell, param).map_err(|e| err("store", e.to_string()))?;
+    b.build_unconditional_branch(prologue).map_err(|e| err("br", e.to_string()))?;
+
+    // prologue — the one block both entries reach, so the only place the
+    // frame and its data pointer can be defined.
+    b.position_at_end(prologue);
+    let frame = b.build_load(i64t, cell, "coro_frame").map_err(|e| err("load", e.to_string()))?;
+    let data_word = emit_rt_call(&b, frame_data, &[frame], "frame_data", what)?
+        .ok_or_else(|| EvalError::Internal(format!("{}: rt_frame_data returned no value", what)))?;
+    let data = b
+        .build_int_to_ptr(data_word.into_int_value(), ctx.ptr_type(inkwell::AddressSpace::default()), "frame_ptr")
+        .map_err(|e| err("inttoptr", e.to_string()))?;
+    let pc = emit_rt_call(&b, frame_pc, &[frame], "frame_pc", what)?
+        .ok_or_else(|| EvalError::Internal(format!("{}: rt_frame_pc returned no value", what)))?
+        .into_int_value();
+    let prologue_end = b.build_unconditional_branch(dispatch).map_err(|e| err("br", e.to_string()))?;
+
+    // dispatch stays empty until every call site has claimed its id.
+
+    b.position_at_end(body);
+    FRAME_CTXS.with(|c| {
+        c.borrow_mut().insert(
+            builder_key(&builder),
+            FrameCtx {
+                data,
+                frame,
+                size_store,
+                // Slot 0 is the driver protocol's value slot, never a local.
+                next: 1,
+                coro: Some(CoroCtx {
+                    function,
+                    body,
+                    dispatch,
+                    pc,
+                    resumes: Vec::new(),
+                    fresh_end,
+                    fresh_frame: made,
+                    prologue_end,
+                }),
+            },
+        );
+    });
+    Ok(Value::Empty)
+}
+
+/// `(coroutine-call builder m target args-ptr argc)` — hand a call to the
+/// driver and come back with its answer.
+///
+/// This is where a compiled call stops being an LLVM `call`. The function
+/// names its callee, records where to resume, and **returns**; the driver
+/// enters the callee, and enters this function again when the answer is
+/// ready. Two frames exist at once, on the heap, and the machine stack is the
+/// same depth as it was — which is the whole point: the recursion limit
+/// becomes the heap.
+///
+/// The block is split here. Everything after the call in the source is
+/// emitted into a fresh resume block, so the island's `compile-value` goes on
+/// building at what is now a different basic block without knowing it.
+///
+/// The arguments are copied into `call_state` by `rt_frame_call` and live in
+/// a Rust `Vec` — invisible to the collector — until the callee's prologue
+/// reads them back, and `rt_frame_new` allocates in that window. They survive
+/// it because the caller already keeps every collectable argument in a marked
+/// frame slot of its own (`root-temporary`), which is the same reason they
+/// survived the callee's allocation under the original ABI.
+fn llvm_builder_coroutine_call(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let target = expect_llvm_value(&args[2])?;
+    let args_ptr = expect_llvm_value(&args[3])?.into_pointer_value();
+    let argc = match &args[4] {
+        Value::Int(n) if *n >= 0 => *n as u64,
+        other => return Err(EvalError::Internal(format!("coroutine-call: {:?} is not an argument count", other))),
+    };
+    let ctx = crate::compile::llvm_context();
+    let i64t = ctx.i64_type();
+    let what = "coroutine-call";
+    let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
+    let key = builder_key(&builder);
+
+    let (frame, data, function, id) = FRAME_CTXS.with(|c| {
+        let mut map = c.borrow_mut();
+        let f = map
+            .get_mut(&key)
+            .ok_or_else(|| EvalError::Internal(format!("{}: no frame is open on this builder", what)))?;
+        let coro = f
+            .coro
+            .as_mut()
+            .ok_or_else(|| EvalError::Internal(format!("{}: this function is not a coroutine", what)))?;
+        // Resume ids start at 1: 0 is "start at the top", which is what an
+        // untouched `pc` already says.
+        let id = coro.resumes.len() as u64 + 1;
+        Ok::<_, EvalError>((f.frame, f.data, coro.function, id))
+    })?;
+
+    let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
+    let frame_call = ensure_declared(&module, "rt_frame_call");
+    let set_pc = ensure_declared(&module, "rt_frame_set_pc");
+
+    let b = builder.borrow();
+    // rt_frame_call(callee, arg...) — one array, the callee first.
+    let mut call_args: Vec<BasicValueEnum<'static>> = Vec::with_capacity(argc as usize + 1);
+    call_args.push(target);
+    for i in 0..argc {
+        let slot = unsafe {
+            b.build_gep(i64t, args_ptr, &[i64t.const_int(i, false)], "coro_arg")
+                .map_err(|e| err("gep", e.to_string()))?
+        };
+        call_args.push(b.build_load(i64t, slot, "coro_arg_val").map_err(|e| err("load", e.to_string()))?);
+    }
+    emit_rt_call(&b, frame_call, &call_args, "frame_call", what)?;
+    emit_rt_call(&b, set_pc, &[frame, i64t.const_int(id, false).into()], "frame_set_pc", what)?;
+    b.build_return(Some(&i64t.const_int(typelisp_abi::STATUS_CALL as u64, false)))
+        .map_err(|e| err("ret", e.to_string()))?;
+
+    // Everything after the call belongs to the resume block.
+    b.position_at_end(resume);
+    let value_slot = unsafe {
+        b.build_gep(i64t, data, &[i64t.const_int(typelisp_abi::FRAME_VALUE_SLOT as u64, false)], "coro_result_slot")
+            .map_err(|e| err("gep", e.to_string()))?
+    };
+    let result = b.build_load(i64t, value_slot, "coro_result").map_err(|e| err("load", e.to_string()))?;
+
+    FRAME_CTXS.with(|c| {
+        let mut map = c.borrow_mut();
+        if let Some(coro) = map.get_mut(&key).and_then(|f| f.coro.as_mut()) {
+            coro.resumes.push((id, resume));
+        }
+    });
+    Ok(llvm_value_value(result))
+}
+
+/// `(coroutine-end builder m v)` — return `v` through the protocol, then
+/// write the two things that could not be known until now.
+///
+/// The value leaves in the frame's slot 0 rather than in the `ret`, because
+/// the `ret` is carrying the *status*. `STATUS_RETURN` is what says the frame
+/// is finished; the driver pops it and hands the slot's word to whoever was
+/// waiting, without looking inside it — what those bits mean is the
+/// function's declared return representation, which lives in the type system
+/// and nowhere else.
+///
+/// Then: the slot count goes into the prologue's placeholder, and the
+/// dispatch chain goes into the block `coroutine-begin` left empty. Both are
+/// facts about the whole body, so both are written by the only party that has
+/// seen all of it.
+fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let value = expect_llvm_value(&args[2])?;
+    let ctx = crate::compile::llvm_context();
+    let i64t = ctx.i64_type();
+    let what = "coroutine-end";
+    let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
+    let key = builder_key(&builder);
+
+    let f = FRAME_CTXS.with(|c| {
+        c.borrow_mut()
+            .remove(&key)
+            .ok_or_else(|| EvalError::Internal(format!("{}: no frame is open on this builder", what)))
+    })?;
+    let coro = f
+        .coro
+        .ok_or_else(|| EvalError::Internal(format!("{}: this function is not a coroutine", what)))?;
+    let pop_root = ensure_declared(&module, "rt_pop_sexpr_root");
+
+    let b = builder.borrow();
+    let value_slot = unsafe {
+        b.build_gep(i64t, f.data, &[i64t.const_int(typelisp_abi::FRAME_VALUE_SLOT as u64, false)], "coro_ret_slot")
+            .map_err(|e| err("gep", e.to_string()))?
+    };
+    b.build_store(value_slot, value).map_err(|e| err("store", e.to_string()))?;
+    emit_rt_call(&b, pop_root, &[], "frame_unroot", what)?;
+    b.build_return(Some(&i64t.const_int(typelisp_abi::STATUS_RETURN as u64, false)))
+        .map_err(|e| err("ret", e.to_string()))?;
+
+    if !f.size_store.set_operand(0, i64t.const_int(f.next, false)) {
+        return Err(EvalError::Internal(format!("{}: could not write the slot count into the prologue", what)));
+    }
+
+    // The dispatch chain: `pc == 0` is a fresh entry, anything else names a
+    // call site. The last arm is unconditional — `pc` is only ever written by
+    // `coroutine-call`'s own `rt_frame_set_pc`, so past the final comparison
+    // there is exactly one place left it can mean.
+    b.position_at_end(coro.dispatch);
+    let mut arms = std::iter::once((0u64, coro.body)).chain(coro.resumes.iter().copied()).peekable();
+    while let Some((id, target)) = arms.next() {
+        if arms.peek().is_none() {
+            b.build_unconditional_branch(target).map_err(|e| err("br", e.to_string()))?;
+            break;
+        }
+        let next = ctx.append_basic_block(coro.function, &format!("coro.dispatch{}", id + 1));
+        let hit = b
+            .build_int_compare(inkwell::IntPredicate::EQ, coro.pc, i64t.const_int(id, false), "coro_is")
+            .map_err(|e| err("icmp", e.to_string()))?;
+        b.build_conditional_branch(hit, target, next).map_err(|e| err("br", e.to_string()))?;
+        b.position_at_end(next);
+    }
     Ok(Value::Empty)
 }
 

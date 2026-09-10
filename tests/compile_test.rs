@@ -7040,6 +7040,99 @@ fn the_driver_runs_a_two_frame_call_chain() {
     assert_eq!(stack.depth(), 0, "both frames were popped");
 }
 
+/// **A compiled recursion 200,000 deep, on a machine stack that never grows.**
+///
+/// `sum_to(n) = n + sum_to(n-1)`, built with the coroutine prologue: every
+/// recursive step is `rt_frame_call` + `ret STATUS_CALL`, so the driver — not
+/// an LLVM `call` — is what descends. Two hundred thousand frames exist at
+/// once, on the heap, while the machine stack stays exactly as deep as
+/// `FrameStack::run`.
+///
+/// This is Phase C's visible result, and the compiled counterpart of what
+/// Phase A's A4 showed for the interpreter. Under the original ABI this
+/// function would have overflowed the stack long before the answer: the
+/// default thread gets 8MB, and each activation here needs a frame, an
+/// argument array and a return address.
+///
+/// The `n` is the second half of the point. It is read from the pending
+/// arguments once, on entry, and used again *after* the recursive call — with
+/// the machine stack torn down and rebuilt in between — so it can only have
+/// survived in the frame.
+#[test]
+fn a_compiled_recursion_runs_two_hundred_thousand_frames_deep() {
+    let src = r#"
+        (defun build-deep-module () llvm-module
+          (let* ((m (llvm-module::create "mod"))
+                 (ignored-arg (add-function m "rt_pending_arg"))
+                 (f (add-coroutine-function m "sum_to"))
+                 (entry (append-block f "entry"))
+                 (base (append-block f "base"))
+                 (rec (append-block f "rec"))
+                 (merge (append-block f "merge"))
+                 (builder (llvm-builder::create)))
+            (position-at-end builder entry)
+            (coroutine-begin builder m f)
+            ;; `n` and the result each get a frame slot, which is the only
+            ;; storage that outlives a suspension.
+            (let* ((n-slot (frame-slot builder))
+                   (r-slot (frame-slot builder))
+                   (arg0 (alloca-args builder 1)))
+              (store-arg builder arg0 0 (const-word builder 0))
+              (store-arg builder n-slot 0 (build-call builder (get-function m "rt_pending_arg") arg0 1))
+              (build-cond-br builder
+                             (build-icmp-eq builder (load-raw builder n-slot 0) (const-word builder 0))
+                             base rec)
+
+              (position-at-end builder base)
+              (store-arg builder r-slot 0 (const-word builder 0))
+              (build-br builder merge)
+
+              ;; The recursive step. `coroutine-call` splits the block: what
+              ;; follows it is emitted into a resume block the driver branches
+              ;; to once the callee has an answer.
+              (position-at-end builder rec)
+              (let ((call-args (alloca-args builder 1)))
+                (store-arg builder call-args 0
+                           (build-sub builder (load-raw builder n-slot 0) (const-word builder 1)))
+                (let ((below (coroutine-call builder m (build-fn-address builder f) call-args 1)))
+                  (store-arg builder r-slot 0 (build-add builder (load-raw builder n-slot 0) below))
+                  (build-br builder merge)))
+
+              (position-at-end builder merge)
+              (coroutine-end builder m (load-raw builder r-slot 0)))
+            m))
+        (build-deep-module)
+    "#;
+    let module = expect_llvm_module(eval_ok(src));
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    // The verifier is the guard here, not a formality: the first version of
+    // this module was rejected for "Instruction does not dominate all uses",
+    // which is the coroutine ABI's central constraint stated in LLVM's own
+    // words — a resume block is reached only from the dispatch chain, so
+    // nothing defined in the body reaches it.
+    module.borrow().verify().expect("the emitted module verifies");
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let sum_to = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(i64) -> i64>("sum_to")
+            .expect("failed to look up the compiled `sum_to` function")
+    };
+    // Two frames per activation's worth of cells, with room to spare: the
+    // frames are what the depth costs, and they are all live at the bottom.
+    let mut heap = Heap::with_capacity(1 << 22);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
+
+    let mut stack = typelisp::compile::coroutine::FrameStack::new();
+    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(sum_to.as_raw()) };
+    let n: i64 = 200_000;
+    let answer = stack.run(&mut heap, entry, &[n]).expect("the recursion ran to an answer");
+    assert_eq!(answer, n * (n + 1) / 2, "every frame added its own n on the way back up");
+    assert_eq!(stack.depth(), 0, "and every frame was popped");
+}
+
 /// **The frame's size is written after the body decides it.**
 ///
 /// `frame-begin` emits `rt_frame_new(0)` because the count cannot be known
