@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 8;
+pub const FORMAT_VERSION: u32 = 9;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -632,6 +632,27 @@ pub struct UnitState {
     pub forms: Vec<OwnedForm>,
     /// Every definition the bitcode section carries a body for.
     pub items: Vec<UnitItem>,
+    /// Which ABI the bodies in this unit's bitcode were emitted under
+    /// (`typelisp_abi::BODY_ABI_CLASSIC` or `BODY_ABI_COROUTINE`).
+    ///
+    /// **The one thing a dump cannot be asked to guess.** An artifact outlives
+    /// the process that made it, and the ABI is not visible in the bitcode —
+    /// calling a `f(args, argc)` body as `f(frame)` is not a type error
+    /// anywhere, it is a wrong answer or a crash. So it is written down.
+    ///
+    /// It is also not derivable from [`version`](Self::version): during the
+    /// changeover the island is compiled *by its predecessor*, so exactly one
+    /// generation has bodies in the old ABI inside a dump written by the new
+    /// code. That generation is the reason this field exists.
+    pub body_abi: u8,
+    /// For a unit whose bodies are themselves a *compiler* (the island): which
+    /// ABI the code **they emit** uses.
+    ///
+    /// Distinct from [`body_abi`](Self::body_abi), and the distinction is the
+    /// whole of the changeover: the middle generation's bodies are old while
+    /// what they emit is new. Meaningless, and equal to `body_abi`, for
+    /// everything that is not the island.
+    pub emits_abi: u8,
     /// `(global path, compiled slot id)`. Written as the pairs that were
     /// actually assigned rather than as an order to re-derive: `promote_global`
     /// is called both eagerly in declaration order *and* lazily by the compile
@@ -657,11 +678,42 @@ pub fn capture_types(
     items: Vec<UnitItem>,
     globals: Vec<(String, usize)>,
 ) -> Result<UnitState, String> {
+    capture_types_with_abi(
+        heap,
+        checker,
+        label,
+        source_digest,
+        forms_digest,
+        forms,
+        items,
+        globals,
+        typelisp_abi::BODY_ABI_CLASSIC,
+        typelisp_abi::BODY_ABI_CLASSIC,
+    )
+}
+
+/// [`capture_types`] for a unit that has something to say about ABIs — the
+/// island, whose bodies and whose *output* can differ for one generation.
+#[allow(clippy::too_many_arguments)]
+pub fn capture_types_with_abi(
+    heap: &crate::Heap,
+    checker: CheckerDelta,
+    label: &str,
+    source_digest: Option<u64>,
+    forms_digest: Option<u64>,
+    forms: &[crate::Value],
+    items: Vec<UnitItem>,
+    globals: Vec<(String, usize)>,
+    body_abi: u8,
+    emits_abi: u8,
+) -> Result<UnitState, String> {
     Ok(UnitState {
         version: FORMAT_VERSION,
         label: label.to_string(),
         source_digest,
         forms_digest,
+        body_abi,
+        emits_abi,
         checker,
         forms: forms
             .iter()

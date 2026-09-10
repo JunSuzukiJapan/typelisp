@@ -109,7 +109,7 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
         .filter(|(n, _)| module.get_function(n).is_some())
         .map(|(n, addr)| (n.to_string(), *addr))
         .collect();
-    let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals)
+    let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals, lib.body_abi)
         .map_err(|e| format!("{} JIT install failed: {}", lib.label, e))?;
 
     for (item, cf) in items.iter().zip(compiled_fns) {
@@ -944,7 +944,7 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[String]) -> Resu
     // `Panic` instead.
     module.borrow().verify().map_err(|e| EvalError::Panic(format!("compile: module failed verification: {}", e)))?;
     let internal_names: Vec<String> = members.iter().map(|m| crate::compile::symbols::user_symbol_name(m)).collect();
-    let compiled_fns = crate::compile::CompiledFn::new_multi(&module.borrow(), &internal_names, &externals)
+    let compiled_fns = crate::compile::CompiledFn::new_multi(&module.borrow(), &internal_names, &externals, crate::compile::EMITTED_BODY_ABI)
         .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
     for (member, compiled) in members.iter().zip(compiled_fns) {
         match interp.method_key(member) {

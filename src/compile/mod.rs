@@ -18,7 +18,6 @@ pub fn runtime_function_names() -> Vec<&'static str> {
 
 pub mod aot;
 pub mod bootstrap;
-pub mod coroutine;
 pub mod core_bridge;
 pub mod core_freevars;
 pub mod driver;
@@ -66,13 +65,37 @@ pub struct CompiledLibrary<'a> {
     pub bitcode: &'a [u8],
     /// Every definition whose native body this artifact carries.
     pub items: &'a [symbols::CompiledItem],
+    /// Which ABI those bodies answer to (`typelisp_abi::BODY_ABI_*`), straight
+    /// off the dump that carried them.
+    ///
+    /// The artifact is the only thing that knows. Bitcode does not say, and
+    /// calling a body under the wrong ABI is a wrong answer rather than an
+    /// error anyone would see — so this rides along from the file to the call.
+    pub body_abi: u8,
 }
 
 /// The shared Rust-only runtime library (`typelisp-rt`, a separate crate —
 /// see its doc comment for why) re-exported under its old in-crate path so
 /// every existing `crate::compile::runtime::...` reference elsewhere in this
 /// crate keeps working unchanged.
+/// Which ABI the island compiled into **this binary** emits.
+///
+/// Not a property of the artifact but of `compiler.rs`'s `SOURCE`, which ships
+/// with the binary — so every function this process JIT-compiles answers to
+/// it, whatever generation of island happens to be doing the emitting.
+///
+/// The changeover is exactly the one generation where this and
+/// [`crate::compiler::ISLAND_DUMP_BODY_ABI`] disagree: an island whose own
+/// bodies are old, emitting new code. Keeping them as two constants is what
+/// lets that generation exist at all.
+pub const EMITTED_BODY_ABI: u8 = typelisp_abi::BODY_ABI_CLASSIC;
+
 pub use typelisp_rt as runtime;
+
+/// The coroutine-ABI driver, which lives in `typelisp-rt` rather than here:
+/// it needs a `Heap` and a function pointer, and nothing from LLVM. Re-exported
+/// under the backend path the tests and the island's callers already use.
+pub use typelisp_rt::coroutine;
 
 /// Every *user*-defined `defun`/`defmethod`'s own LLVM symbol name (JIT and
 /// AOT alike) is this prefix followed by its typelisp name — never the bare
@@ -246,6 +269,9 @@ pub struct CompiledFn {
     engine: Option<ExecutionEngine<'static>>,
     /// This function's own JIT-resolved address — see [`Self::address`].
     addr: usize,
+    /// Which ABI that address answers to, carried from the artifact or set by
+    /// whatever just compiled it. Nothing about the address itself says.
+    body_abi: u8,
 }
 
 impl Drop for CompiledFn {
@@ -282,7 +308,7 @@ impl CompiledFn {
             engine.add_global_mapping(&decl, *addr);
         }
         let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
-        Ok(CompiledFn { engine: Some(engine), addr })
+        Ok(CompiledFn { engine: Some(engine), addr, body_abi: typelisp_abi::BODY_ABI_CLASSIC })
     }
 
     /// Like [`Self::new`], but resolves every name in `fn_names` out of one
@@ -305,7 +331,12 @@ impl CompiledFn {
     /// keeps it alive — dropping some of them early is safe. Must be called
     /// with [`COMPILE_LOCK`] held, and drains the retirement list for the
     /// same reason [`Self::new`] does.
-    pub fn new_multi(module: &Module<'static>, fn_names: &[String], externals: &[(String, usize)]) -> Result<Vec<CompiledFn>, String> {
+    pub fn new_multi(
+        module: &Module<'static>,
+        fn_names: &[String],
+        externals: &[(String, usize)],
+        body_abi: u8,
+    ) -> Result<Vec<CompiledFn>, String> {
         destroy_retired_llvm();
         let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
         for (name, addr) in externals {
@@ -318,7 +349,7 @@ impl CompiledFn {
             .iter()
             .map(|fn_name| {
                 let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
-                Ok(CompiledFn { engine: Some(engine.clone()), addr })
+                Ok(CompiledFn { engine: Some(engine.clone()), addr, body_abi })
             })
             .collect()
     }
@@ -349,6 +380,10 @@ impl CompiledFn {
 impl crate::eval::interp::CompiledBody for CompiledFn {
     fn address(&self) -> usize {
         self.addr
+    }
+
+    fn body_abi(&self) -> u8 {
+        self.body_abi
     }
 }
 

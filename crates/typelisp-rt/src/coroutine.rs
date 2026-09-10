@@ -38,7 +38,7 @@
 //! was making.
 
 use typelisp_abi::call_state;
-use typelisp_abi::{decode, encode, STATUS_CALL, STATUS_RETURN, STATUS_SUSPEND};
+use typelisp_abi::{decode, STATUS_CALL, STATUS_RETURN, STATUS_SUSPEND};
 use typelisp_mem::{BoxId, Heap, Value};
 
 // The value slot holds a **raw word**, and the driver never looks inside it.
@@ -132,7 +132,7 @@ impl FrameStack {
                     // Hand the answer to the waiting frame and resume it.
                     let (caller_fn, caller_frame) = *self.frames.last().expect("a waiting frame");
                     set_frame_value(heap, caller_frame, value);
-                    status = unsafe { caller_fn(encode(caller_frame)) };
+                    status = unsafe { caller_fn(typelisp_abi::encode(caller_frame)) };
                 }
                 STATUS_CALL => {
                     let (callee, callee_args) = take_pending_call();

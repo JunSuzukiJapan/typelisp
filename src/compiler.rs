@@ -5268,6 +5268,19 @@ pub const ISLAND_DUMP: &[u8] = include_bytes!("compiler_island.typld");
 /// What to run when the committed dump no longer matches [`SOURCE`].
 pub const REGEN_SCRIPT: &str = "scripts/regen-compiler-island.sh";
 
+/// Which ABI the **committed** [`ISLAND_DUMP`]'s bodies answer to.
+///
+/// A hand-written statement about the bytes next to it, and it has to be:
+/// `build_island_artifact` installs that bitcode without reading its state
+/// (the committed dump is one generation behind by construction, so its
+/// checked half is deliberately ignored), and bitcode does not say what ABI it
+/// was built under.
+///
+/// `island_artifacts_test` checks it against what the dump actually records,
+/// so it cannot quietly drift from the bytes it describes. It changes in the
+/// same commit that regenerates them.
+pub const ISLAND_DUMP_BODY_ABI: u8 = typelisp_abi::BODY_ABI_CLASSIC;
+
 /// Loads the compiler island as **native code** (interp-closure removal
 /// Stage 4): the committed dump's checked state and definitions — which
 /// registers each island `defun`'s `FnDef` and checker entry but allocates no

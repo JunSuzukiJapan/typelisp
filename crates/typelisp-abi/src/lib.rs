@@ -243,6 +243,13 @@ pub const STATUS_SUSPEND: i64 = 2;
 /// compiled function produces it.
 pub const STATUS_UNWIND: i64 = 3;
 
+/// A compiled body under the original ABI: `i64 f(const i64 *args, u32 argc)`,
+/// running to completion and returning its value.
+pub const BODY_ABI_CLASSIC: u8 = 0;
+/// A compiled body under the coroutine ABI: `i64 f(i64 frame)`, returning a
+/// status word.
+pub const BODY_ABI_COROUTINE: u8 = 1;
+
 /// The frame slot the driver protocol reserves for the value in flight —
 /// a function's result, and the result of a call it is waiting on. The
 /// island's slot allocator hands out 1 upward.

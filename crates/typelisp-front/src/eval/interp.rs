@@ -161,20 +161,64 @@ pub trait CompiledBody {
     /// (`crate::compile::CompiledSignature`).
     fn address(&self) -> usize;
 
+    /// Which ABI that address answers to — `typelisp_abi::BODY_ABI_CLASSIC`
+    /// (`f(args, argc)`, runs to completion) or `BODY_ABI_COROUTINE`
+    /// (`f(frame)`, returns a status word).
+    ///
+    /// **Not inferable from the address.** Calling one as the other is not a
+    /// type error anywhere — it is a wrong answer or a crash — so the artifact
+    /// that carried the body has to say, and this is where that answer arrives.
+    /// Defaults to classic, which is what every producer says until the island
+    /// itself changes over.
+    fn body_abi(&self) -> u8 {
+        typelisp_abi::BODY_ABI_CLASSIC
+    }
+
     /// Calls it with `args` already in the compiled representation.
     ///
-    /// Provided, not required: the ABI is one signature and the address is the
-    /// only thing that varies, so an implementor supplies the address and
-    /// nothing else. `extern "C-unwind"`, not `extern "C"`, because a
-    /// `(panic ...)` in the body unwinds out through here — see
+    /// Provided, not required: the address is the only thing that varies per
+    /// implementor. `extern "C-unwind"`, not `extern "C"`, because a
+    /// `(panic ...)` in a classic body unwinds out through here — see
     /// `crate::compile::CompiledSignature`.
     fn call(&self, args: &[i64]) -> i64 {
+        if self.body_abi() == typelisp_abi::BODY_ABI_COROUTINE {
+            return call_coroutine(self.address(), args);
+        }
         // SAFETY: `address` comes from a symbol the backend resolved out of a
         // module that defines it, so it points at a function built under the
         // shared ABI. `CompiledFn::new`/`new_multi` are the only producers.
         let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 =
             unsafe { std::mem::transmute::<usize, unsafe extern "C-unwind" fn(*const i64, u32) -> i64>(self.address()) };
         unsafe { f(args.as_ptr(), args.len() as u32) }
+    }
+}
+
+/// Runs a coroutine-ABI body to completion on a driver of its own.
+///
+/// This is the boundary an *interpreted* caller sits at, and it is exactly
+/// where suspension cannot cross: the interpreter is waiting on a Rust stack
+/// frame for an answer, so a task that suspends underneath has nobody to hand
+/// control back to. Saying so is the point — the alternative is a task that
+/// silently never runs again.
+///
+/// It goes away when the interpreter's own driver holds both kinds of frame
+/// (the plan's C2 end state); until then a compiled body reached from here is
+/// as atomic as it always was.
+fn call_coroutine(address: usize, args: &[i64]) -> i64 {
+    // SAFETY: same provenance as the classic branch — a symbol resolved out of
+    // a module that defines it, declared under `coroutine_fn_type`.
+    let f: typelisp_rt::coroutine::CoroutineFn =
+        unsafe { std::mem::transmute::<usize, typelisp_rt::coroutine::CoroutineFn>(address) };
+    let heap = unsafe { typelisp_abi::active_heap() };
+    let mut stack = typelisp_rt::coroutine::FrameStack::new();
+    match stack.run(heap, f, args) {
+        Ok(word) => word,
+        Err(typelisp_rt::coroutine::Paused::Suspended) => {
+            typelisp_abi::raise("a compiled function suspended underneath an interpreted caller, which has no way to resume it".to_string())
+        }
+        Err(typelisp_rt::coroutine::Paused::Unwinding) => {
+            typelisp_abi::raise("a compiled function unwound out to an interpreted caller (Phase C4)".to_string())
+        }
     }
 }
 

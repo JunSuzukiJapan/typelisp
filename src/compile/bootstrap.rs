@@ -128,6 +128,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
                 .first()
                 .ok_or_else(|| "island: the committed dump holds no units".to_string())?
                 .bitcode,
+            body_abi: crate::compiler::ISLAND_DUMP_BODY_ABI,
             items: &items,
         })
         .map_err(|e| format!("island bootstrap install of the committed .bc failed: {}", e))?;

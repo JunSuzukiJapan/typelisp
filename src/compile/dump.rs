@@ -64,6 +64,9 @@ fn load_unit_with(
 ) -> Result<(), String> {
     let label = state.label.clone();
     let globals = state.globals.clone();
+    // Read before `apply_types` consumes `state`: the dump is the only thing
+    // that knows what ABI its bodies answer to.
+    let body_abi = state.body_abi;
     let items: Vec<CompiledItem> = state
         .items
         .iter()
@@ -108,6 +111,7 @@ fn load_unit_with(
             label: &label,
             bitcode,
             items: &items,
+            body_abi,
         },
     )
 }

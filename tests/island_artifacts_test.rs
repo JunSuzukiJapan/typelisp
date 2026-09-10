@@ -142,6 +142,25 @@ fn the_committed_island_matches_a_fresh_build() {
 /// still *ends* with a zero, but `len - 1` stops being a multiple of 4. The
 /// same assertion fires if an inkwell upgrade stops appending the terminator,
 /// in which case the loader's pairing has to be revisited, not the artifact.
+/// **`ISLAND_DUMP_BODY_ABI` says what the committed bytes are, so it must.**
+///
+/// The constant is hand-written because `build_island_artifact` installs the
+/// committed bitcode without reading its checked state — that half is one
+/// generation stale by construction — and bitcode does not record what ABI it
+/// was built under. Calling a body under the wrong one is a wrong answer, not
+/// an error anyone would see, so the claim gets a guard rather than trust.
+#[test]
+fn the_committed_islands_recorded_abi_matches_the_constant() {
+    let units = parse(compiler::ISLAND_DUMP, "compiler island").expect("the committed island dump parses");
+    let unit = units.first().expect("the committed dump holds a unit");
+    let state = read_state(unit.types, "compiler island").expect("its state reads");
+    assert_eq!(
+        state.body_abi,
+        compiler::ISLAND_DUMP_BODY_ABI,
+        "src/compiler.rs's ISLAND_DUMP_BODY_ABI disagrees with what src/compiler_island.typld records"
+    );
+}
+
 #[test]
 fn the_committed_island_keeps_its_trailing_nul() {
     let bytes = committed();

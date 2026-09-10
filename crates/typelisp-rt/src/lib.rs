@@ -44,6 +44,8 @@
 pub use typelisp_print;
 pub use typelisp_read;
 
+pub mod coroutine;
+
 pub mod equality;
 pub mod os;
 pub mod readtable;
