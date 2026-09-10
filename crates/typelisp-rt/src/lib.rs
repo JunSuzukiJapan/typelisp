@@ -3054,6 +3054,91 @@ const EXIT_CODE_PANIC: i64 = 1;
 pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
     let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = std::mem::transmute(entry as usize);
     let call = std::panic::AssertUnwindSafe(|| f(std::ptr::null(), 0));
+    run_entry_payload(std::panic::catch_unwind(call))
+}
+
+/// [`rt_run_entry`] for an entry point built under the coroutine ABI: the
+/// same panic handling with a driver in front of it.
+///
+/// A generated `main` cannot drive one itself — the protocol is a loop over
+/// status words, and `main` is a handful of constant stores. Which of the two
+/// this executable's `main` calls is decided when it is generated, by the ABI
+/// that build emitted.
+///
+/// # Safety
+///
+/// [`rt_run_entry`]'s, for a `coroutine_fn_type` address.
+#[no_mangle]
+pub unsafe extern "C" fn rt_run_entry_driven(entry: i64) -> i64 {
+    let f: crate::coroutine::CoroutineFn = std::mem::transmute(entry as usize);
+    let call = std::panic::AssertUnwindSafe(|| {
+        let mut stack = crate::coroutine::FrameStack::new();
+        match stack.run(active_heap(), f, &[]) {
+            Ok(v) => v,
+            Err(paused) => fatal(&format!(
+                "rt_run_entry_driven: the entry point {:?} with nobody to resume it. Nothing in \
+                 this phase produces that yet -- compiled code cannot suspend until C3.",
+                paused
+            )),
+        }
+    });
+    run_entry_payload(std::panic::catch_unwind(call))
+}
+
+/// A classic-signature door onto a coroutine body: `args` is
+/// `[address, argument array, count]`, and the answer is the body's value.
+///
+/// For a caller that has to look like `(ptr, i32) -> i64` and cannot drive
+/// anything itself — `typelisp-print` holds the addresses `~/name/` and
+/// `print-object` dispatch to, and that crate deliberately does not depend on
+/// this one (see its `Cargo.toml`), so it has no `FrameStack` to reach for.
+/// `compile::aot` wraps each registered method in four instructions that come
+/// here instead, which puts the knowledge of the callee's ABI in the one
+/// place that has it: the code generator that emitted the callee.
+///
+/// # Safety
+///
+/// `argc` must be 3; `args[0]` must be a `coroutine_fn_type` address and
+/// `args[1]`/`args[2]` a valid argument array for it; a `Heap` must already
+/// be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_drive_body(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_drive_body: expected 3 arguments (the address, the argument array and its count)");
+    }
+    let f: crate::coroutine::CoroutineFn = std::mem::transmute(*args as usize);
+    let callee_args = *args.add(1) as usize as *const i64;
+    let callee_argc = *args.add(2);
+    let words = collect_words(callee_args, callee_argc);
+    drive_to_completion(f, &words, &[], "rt_drive_body")
+}
+
+/// Runs a coroutine-ABI, zero-argument function to completion and answers
+/// with its value.
+///
+/// The startup counterpart of [`rt_run_entry_driven`] for the steps that are
+/// *not* the entry point — a generated `main` runs one global initialiser per
+/// `defvar`, and each is an ordinary compiled body that now has to be driven
+/// like any other. No panic handling: the classic call this replaces let an
+/// unwind through, and an initialiser that panics is a program that never
+/// starts.
+///
+/// # Safety
+///
+/// `entry` must be the address of a `coroutine_fn_type` function that takes
+/// no arguments; a `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_drive_entry(entry: i64) -> i64 {
+    let f: crate::coroutine::CoroutineFn = std::mem::transmute(entry as usize);
+    drive_to_completion(f, &[], &[], "rt_drive_entry")
+}
+
+/// Turns whichever of the two entry points ran into an exit code.
+unsafe fn run_entry_payload(outcome: std::thread::Result<i64>) -> i64 {
+    let call = std::panic::AssertUnwindSafe(|| match outcome {
+        Ok(v) => v,
+        Err(payload) => std::panic::resume_unwind(payload),
+    });
     match std::panic::catch_unwind(call) {
         Ok(code) => code,
         // Only a typelisp-level `panic` is turned into an exit code; anything
@@ -3293,6 +3378,10 @@ pub unsafe extern "C-unwind" fn rt_resume_unwind(_args: *const i64, _argc: u32) 
 /// under it.
 unsafe fn protected(call: impl FnOnce() -> i64) -> i64 {
     let base = active_heap().root_count();
+    // The same bookkeeping for the frames entering calls have published: an
+    // unwind passes between a prologue's publish and its driver's take, so
+    // those entries are never taken. See `truncate_current_frames`.
+    let frames = typelisp_abi::call_state::current_frame_depth();
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
         Ok(v) => {
             UNWIND_PENDING.with(|cell| cell.set(false));
@@ -3311,6 +3400,7 @@ unsafe fn protected(call: impl FnOnce() -> i64) -> i64 {
                 clear_throw();
             }
             active_heap().truncate_roots(base);
+            typelisp_abi::call_state::truncate_current_frames(frames);
             CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = Some(payload));
             UNWIND_PENDING.with(|cell| cell.set(true));
             0

@@ -254,7 +254,7 @@ pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), St
         .collect();
     globals.sort_by_key(|(_, id)| *id);
 
-    let state = typelisp_front::dump::capture_types(
+    let state = typelisp_front::dump::capture_types_with_abi(
         heap,
         delta,
         "session",
@@ -263,6 +263,14 @@ pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), St
         &forms,
         compiled.iter().map(crate::compile::prelude_bootstrap::unit_item).collect(),
         globals,
+        // This unit carries bodies, so it has to say which ABI they answer to
+        // -- `capture_types`' classic default is only right for a unit with
+        // no bitcode at all (the program-forms unit above). The prelude made
+        // the same mistake, and it does not announce itself: the label is only
+        // read when something *calls* one of these bodies, and then it is a
+        // wrong convention rather than an error.
+        crate::compile::EMITTED_BODY_ABI,
+        typelisp_abi::BODY_ABI_CLASSIC,
     )?;
 
     let mut units: Vec<(Vec<u8>, Vec<u8>)> = interp.with_dump_sources(|sources| {
@@ -307,10 +315,20 @@ fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompiledItem]) -> Res
         for (name, _) in crate::compile::externs::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
         }
+        // A *Lisp* function's type follows this process's emit ABI, unlike the
+        // `rt_*` shims above whose `(ptr, i32)` never changes. The fourth
+        // copy of this loop (`bootstrap`, `prelude_bootstrap`, `aot`, here) --
+        // and the fourth time the wrong one made a body arrive at a
+        // declaration whose type disagreed.
+        let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
+            crate::compile::llvm_builtins::coroutine_fn_type()
+        } else {
+            fn_ty
+        };
         for item in items {
             let sym = item.symbol_name();
             if module.get_function(&sym).is_none() {
-                module.add_function(&sym, fn_ty, None);
+                module.add_function(&sym, lisp_fn_ty, None);
             }
         }
         Rc::new(RefCell::new(module))

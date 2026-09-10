@@ -284,11 +284,21 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // instantiate one either.
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let m = module.borrow();
-        let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        // A *Lisp* function's type, so it must follow this process's emit ABI
+        // rather than the fixed `(ptr, i32)` the `rt_*` shims keep. A
+        // declaration and its definition are joined by name, so getting this
+        // wrong is not a second declaration -- it is the body arriving at a
+        // declaration whose type disagrees, and the prologue then reading the
+        // argument pointer as a frame.
+        let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
+            crate::compile::llvm_builtins::coroutine_fn_type()
+        } else {
+            let ptr_ty = ctx.ptr_type(AddressSpace::default());
+            ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
+        };
         for (_, symbol) in &node_names {
             if m.get_function(symbol).is_none() {
-                m.add_function(symbol, fn_ty, None);
+                m.add_function(symbol, lisp_fn_ty, None);
             }
         }
     }
@@ -651,7 +661,7 @@ fn build_main_wrapper(
                 format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
             })?;
             let (key_ptr, key_len) = literal(&builder, key)?;
-            let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(i64_ty);
+            let fn_ptr = classic_door(ctx, module, target)?;
             call(&builder, "rt_print_object_method", &[key_ptr, key_len, fn_ptr])?;
         }
         for (key, method, symbol) in format_calls {
@@ -660,7 +670,7 @@ fn build_main_wrapper(
             })?;
             let (key_ptr, key_len) = literal(&builder, key)?;
             let (name_ptr, name_len) = literal(&builder, method)?;
-            let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(i64_ty);
+            let fn_ptr = classic_door(ctx, module, target)?;
             call(&builder, "rt_format_call_method", &[key_ptr, key_len, name_ptr, name_len, fn_ptr])?;
         }
     }
@@ -710,19 +720,42 @@ fn build_main_wrapper(
     if eval_env.is_some() {
         call_shim(ctx, module, &builder, "rt_eval_init", &[])?;
     }
+    // A global initialiser is an ordinary compiled body, so under the
+    // coroutine ABI it answers with a status word and its value is in a
+    // frame -- calling it as `f(args, argc)` is not even the right arity.
+    // `rt_drive_entry` is the driver that turns it back into a call.
+    let coroutine_abi = crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE;
+    let drive_entry = if coroutine_abi {
+        Some(module.add_function("rt_drive_entry", ctx.i64_type().fn_type(&[ctx.i64_type().into()], false), None))
+    } else {
+        None
+    };
     for name in global_init_names {
         let f = module
             .get_function(name)
             .ok_or_else(|| format!("internal error: global-init function \"{}\" not found in module", name))?;
-        builder
-            .build_call(f, &[null_args.into(), argc_zero.into()], "global_init_result")
-            .map_err(|e| format!("failed to build global-init call: {}", e))?;
+        match drive_entry {
+            Some(drive) => {
+                let addr = f.as_global_value().as_pointer_value().const_to_int(ctx.i64_type());
+                builder
+                    .build_call(drive, &[addr.into()], "global_init_result")
+                    .map_err(|e| format!("failed to build global-init call: {}", e))?;
+            }
+            None => {
+                builder
+                    .build_call(f, &[null_args.into(), argc_zero.into()], "global_init_result")
+                    .map_err(|e| format!("failed to build global-init call: {}", e))?;
+            }
+        }
     }
     // Through `rt_run_entry` rather than calling `tl_main` directly, so a
     // `(panic ...)` that unwinds out of the program has a Rust frame to be
     // caught in — see that function's doc comment. `main` is the C entry
     // point, and letting an unwind run off the end of it is undefined.
-    let rt_run_entry = module.add_function("rt_run_entry", ctx.i64_type().fn_type(&[ctx.i64_type().into()], false), None);
+    // Which of the two, decided by the ABI this build emitted: the driven one
+    // puts a `FrameStack` in front of the same panic handling.
+    let entry_shim = if coroutine_abi { "rt_run_entry_driven" } else { "rt_run_entry" };
+    let rt_run_entry = module.add_function(entry_shim, ctx.i64_type().fn_type(&[ctx.i64_type().into()], false), None);
     let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(ctx.i64_type());
     let call: CallSiteValue = builder
         .build_call(rt_run_entry, &[entry_addr.into()], "tl_main_result")
@@ -940,7 +973,87 @@ pub(crate) fn assembly_of(module: &Module<'static>) -> Result<String, String> {
 /// Emits `module` to an object file and links it into a native executable
 /// at `output_path` via the system `cc`. Must be called with
 /// [`crate::compile::COMPILE_LOCK`] held.
+/// The address `typelisp-print` should hold for `target`: its own, when
+/// `target` answers to the classic ABI, and otherwise a four-instruction
+/// classic function that hands it to `rt_drive_body`.
+///
+/// The printer's two registries (`~/name/` and `print-object`) call what they
+/// are given as `(ptr, i32) -> i64`, and that crate has no driver to reach for
+/// — it deliberately does not depend on `typelisp-rt`. So the wrapper is
+/// emitted here, where the callee's LLVM type says which ABI it answers to.
+/// Built once per method and reused if the same one is registered twice.
+fn classic_door(
+    ctx: &'static Context,
+    module: &Module<'static>,
+    target: inkwell::values::FunctionValue<'static>,
+) -> Result<inkwell::values::IntValue<'static>, String> {
+    let i64_ty = ctx.i64_type();
+    if target.get_type() != crate::compile::llvm_builtins::coroutine_fn_type() {
+        return Ok(target.as_global_value().as_pointer_value().const_to_int(i64_ty));
+    }
+    let name = format!("{}$classic", target.get_name().to_string_lossy());
+    if let Some(existing) = module.get_function(&name) {
+        return Ok(existing.as_global_value().as_pointer_value().const_to_int(i64_ty));
+    }
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    let classic_ty = i64_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+    let door = module.add_function(&name, classic_ty, None);
+    let drive = match module.get_function("rt_drive_body") {
+        Some(f) => f,
+        None => module.add_function("rt_drive_body", classic_ty, None),
+    };
+    let builder = ctx.create_builder();
+    builder.position_at_end(ctx.append_basic_block(door, "entry"));
+    let args = builder
+        .build_alloca(i64_ty.array_type(3), "drive_args")
+        .map_err(|e| format!("failed to alloca the driver arguments: {}", e))?;
+    let words = [
+        target.as_global_value().as_pointer_value().const_to_int(i64_ty),
+        builder
+            .build_ptr_to_int(
+                door.get_nth_param(0).expect("the classic signature has two parameters").into_pointer_value(),
+                i64_ty,
+                "callee_args",
+            )
+            .map_err(|e| format!("failed to take the argument array's address: {}", e))?,
+        builder
+            .build_int_z_extend(
+                door.get_nth_param(1).expect("the classic signature has two parameters").into_int_value(),
+                i64_ty,
+                "callee_argc",
+            )
+            .map_err(|e| format!("failed to widen the argument count: {}", e))?,
+    ];
+    for (i, w) in words.iter().enumerate() {
+        let p = unsafe {
+            builder
+                .build_gep(i64_ty, args, &[i64_ty.const_int(i as u64, false)], "drive_arg_ptr")
+                .map_err(|e| format!("failed to index the driver arguments: {}", e))?
+        };
+        builder.build_store(p, *w).map_err(|e| format!("failed to store a driver argument: {}", e))?;
+    }
+    let out = builder
+        .build_call(drive, &[args.into(), ctx.i32_type().const_int(3, false).into()], "drive_result")
+        .map_err(|e| format!("failed to build the rt_drive_body call: {}", e))?;
+    let out = match out.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+        inkwell::values::ValueKind::Instruction(_) => {
+            return Err("internal error: rt_drive_body produced no value".to_string())
+        }
+    };
+    builder.build_return(Some(&out)).map_err(|e| format!("failed to build the door's return: {}", e))?;
+    Ok(door.as_global_value().as_pointer_value().const_to_int(i64_ty))
+}
+
 fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[String]) -> Result<(), String> {
+    // The whole program's IR, for reading. An AOT module is the one the
+    // island's output is hardest to see: it is neither `disassemble`'s
+    // single function nor a committed dump, and by the time anything is
+    // wrong it is machine code. `TYPELISP_AOT_IR=<path>` writes it here.
+    if let Ok(path) = std::env::var("TYPELISP_AOT_IR") {
+        std::fs::write(&path, module.print_to_string().to_string())
+            .map_err(|e| format!("failed to write {}: {}", path, e))?;
+    }
     let target_machine = host_target_machine()?;
 
     // Named from `output_path` (not e.g. the process id) so it can't

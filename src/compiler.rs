@@ -2402,6 +2402,11 @@ pub const SOURCE: &str = r#"
            ;; reached from.
            (ops (frame-arg-slots builder m 0 rest))
            (ignored-ops (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup ops rest 0)))
+      ;; An operand that escaped took the block with it, so there is nothing
+      ;; left to dispatch on -- the arm's own code would be appended after a
+      ;; terminator. The word answered here is never read.
+      (if (block-terminated? builder)
+          (const-word builder 0)
       (cond
         ((if (equal type-name "sexpr") (sexpr-native-method? method) false)
          (let* ((a (load-raw builder ops 0))
@@ -2885,7 +2890,7 @@ pub const SOURCE: &str = r#"
                         ("min"
                          (build-select builder (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-word builder 0)) a b2))
                         (else (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-word builder 0)))))))))
-        (else (compile-assoc-user m builder cur-fn protect type-name method ops (sexpr-list-length rest))))))
+        (else (compile-assoc-user m builder cur-fn protect type-name method ops (sexpr-list-length rest)))))))
 
 ;; The user-defined-method leg of `compile-assoc`'s
 ;; dispatch (see its doc comment): call the callee
@@ -3207,12 +3212,21 @@ pub const SOURCE: &str = r#"
          (let* ((kind (sexpr-i32 (sexpr-car arg-pair)))
                 (form (sexpr-cdr arg-pair))
                 (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup form)))
-           (store-arg builder args-ptr idx v)
-           ;; No `root-temporary` beside the store any more: `frame-arg-slots`
-           ;; marked this very slot, so writing the argument *is* rooting it.
-           ;; The copy existed because an `alloca` slot is invisible to the
-           ;; collector, which is the same reason the array had to move.
-           (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr rest (+ idx 1))))
+           ;; An argument can *escape* -- `(+ (block b (return-from outer 7)) 10)`
+           ;; -- and then this block already ends in the jump that left. Every
+           ;; argument after it is unreachable, and appending its store would
+           ;; put an instruction after a terminator ("Terminator found in the
+           ;; middle of a basic block"). Nothing more belongs here; the
+           ;; caller checks the same thing before emitting its call.
+           (if (block-terminated? builder)
+               ()
+               (progn
+                 (store-arg builder args-ptr idx v)
+                 ;; No `root-temporary` beside the store any more: `frame-arg-slots`
+                 ;; marked this very slot, so writing the argument *is* rooting it.
+                 ;; The copy existed because an `alloca` slot is invisible to the
+                 ;; collector, which is the same reason the array had to move.
+                 (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr rest (+ idx 1))))))
         ()))
 
 ;; `(apply name (is-fn . arg-form)...)` — a direct
@@ -3555,7 +3569,22 @@ pub const SOURCE: &str = r#"
            (lcaptured (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (lparams (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (lbody (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
-           (nested-fn (add-coroutine-function m lname)))
+           ;; Mangled with the enclosing function's own name, exactly as
+           ;; `declare-labels-siblings` mangles a sibling's and for the same
+           ;; reason: the LLVM-level name has to be unique in whatever module
+           ;; this body lands in. `lname` is `core_bridge`'s `lambda$N` off a
+           ;; process-global counter, which is unique within one process --
+           ;; and an AOT module holds *two* processes' output, because the
+           ;; prelude's bitcode carries `lambda$0`..`lambda$20` frozen from
+           ;; the run that built it. `add-coroutine-function` is
+           ;; get-or-create by name, so a bare `lambda$0` here silently
+           ;; returned the prelude's function and the closure called that
+           ;; instead. (It went unnoticed while this process happened to
+           ;; bridge more than 21 lambdas of its own -- from monomorphized
+           ;; prelude generics -- before reaching the program's, which put
+           ;; its counter past the collision by luck.) Nothing outside this
+           ;; function names it, so the mangling costs nothing.
+           (nested-fn (add-coroutine-function m (append fn-name (append "$" lname)))))
       (let* ((nested-block (append-block nested-fn "entry"))
              (nested-builder (llvm-builder::create)))
         (position-at-end nested-builder nested-block)
@@ -4281,7 +4310,15 @@ pub const SOURCE: &str = r#"
       ;; `0` -- a tagged `Sexpr`.
       (else
        (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v variant) fail-block)))
-    (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v scrut-kind variant field-kinds subpats 0 fail-block)))
+    ;; The scrutinee goes to a slot before the fields are walked. It is read
+    ;; once per field, and a sub-pattern between two of those reads can be a
+    ;; `pat-guard` whose test is a call -- which under the coroutine ABI ends
+    ;; this activation, taking every register with it. Kind 2 with nothing to
+    ;; decide: a `pat-ctor` destructures an `Sexpr`, a sum-ADT box or a boxed
+    ;; struct, and all three are heap values. (A raw scalar scrutinee reaches
+    ;; `pat-lit`/`pat-wild`/`pat-guard`, never here.)
+    (let ((v-slot (spill builder m 2 v)))
+      (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v-slot scrut-kind variant field-kinds subpats 0 fail-block))))
 
 ;; Compiles `type-name-form` (a compile-time-known
 ;; `(str (int c)...)` literal, `str_literal_form`'s
@@ -4311,21 +4348,21 @@ pub const SOURCE: &str = r#"
 ;; reason to call `compile-sexpr-field`/
 ;; `compile-struct-field` -- and for `cons`, no
 ;; reason to emit an `rt_car`/`rt_cdr` call either).
-(defun compile-ctor-subpatterns ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v llvm-value) (scrut-kind i32) (variant i32) (field-kinds Option<Sexpr>) (subpats Option<Sexpr>) (idx i32) (fail-block llvm-basic-block))()
+(defun compile-ctor-subpatterns ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (v-slot llvm-value) (scrut-kind i32) (variant i32) (field-kinds Option<Sexpr>) (subpats Option<Sexpr>) (idx i32) (fail-block llvm-basic-block))()
     (if (sexpr-consp subpats)
         (let ((p (sexpr-car subpats)) (rest (sexpr-cdr subpats)))
          (let ((rest-kinds (if (eq scrut-kind 0) field-kinds (sexpr-cdr field-kinds))))
           (if (equal (sexpr-car p) (quote pat-wild))
-           (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)
+           (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v-slot scrut-kind variant rest-kinds rest (+ idx 1) fail-block)
            (let ((field-v (case scrut-kind
                             ;; A boxed struct and a sum-ADT box both carry a
                             ;; per-field kind; a tagged `Sexpr` (`0`) reads its
                             ;; field shape off the variant instead.
-                            (2 (compile-struct-field builder m v (sexpr-i32 (sexpr-car field-kinds)) idx))
-                            (1 (compile-box-field builder m v (sexpr-i32 (sexpr-car field-kinds)) idx))
-                            (else (compile-sexpr-field builder m v variant idx)))))
+                            (2 (compile-struct-field builder m (load-raw builder v-slot 0) (sexpr-i32 (sexpr-car field-kinds)) idx))
+                            (1 (compile-box-field builder m (load-raw builder v-slot 0) (sexpr-i32 (sexpr-car field-kinds)) idx))
+                            (else (compile-sexpr-field builder m (load-raw builder v-slot 0) variant idx)))))
              (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup field-v p fail-block)
-             (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)))))
+             (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v-slot scrut-kind variant rest-kinds rest (+ idx 1) fail-block)))))
         ()))
 
 ;; `(match is-fn scrutinee-form ((pattern-form .

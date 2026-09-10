@@ -205,7 +205,17 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
     if module.get_function(&name).is_some() {
         return Err(format!("internal error: `{}` is already defined in this module", name));
     }
-    let thunk = module.add_function(&name, compiled_fn_type(), None);
+    // The marshalling body keeps the shared `(args, argc)` signature -- it
+    // reads its arguments out of that array and returns a value, which is all
+    // a call into C ever needs. What changed in C2d is who calls *it*: a
+    // compiled Lisp caller now names its callee to the driver, so the symbol
+    // the *Lisp* name resolves to has to answer the coroutine ABI. So the
+    // body moves to a name of its own and `name` becomes a coroutine entry
+    // that copies the pending arguments into an array and calls it
+    // (`emit_coroutine_entry` below). One boundary, in one place, instead of
+    // teaching every call site which of its callees is a `defffi`.
+    let body_name = format!("{}$ffi", name);
+    let thunk = module.add_function(&body_name, compiled_fn_type(), None);
     let entry = ctx.append_basic_block(thunk, "entry");
     builder.position_at_end(entry);
 
@@ -278,7 +288,88 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
         call_shim(&builder, shim("rt_ffi_cstring_free"), scratch, one, made, "freed")?;
     }
     builder.build_return(Some(&out)).map_err(|e| format!("ffi: failed to build the return: {}", e))?;
-    Ok(thunk)
+
+    emit_coroutine_entry(module, &name, thunk, params.len())
+}
+
+/// A coroutine-ABI entry point for a classic body: `i64 f(i64 frame)` that
+/// makes a frame, copies the pending arguments into an array, calls `body`
+/// under the shared `(args, argc)` signature, leaves its answer in the
+/// frame's value slot and returns `STATUS_RETURN`.
+///
+/// There is no `pc` dispatch and no resume block, because there is nothing to
+/// resume: the body runs to completion by construction. `rt_frame_entered` is
+/// still required — the driver takes the frame it publishes on the way back,
+/// and a caller that never published one is a protocol break, not a shortcut.
+fn emit_coroutine_entry(
+    module: &Module<'static>,
+    name: &str,
+    body: FunctionValue<'static>,
+    argc: usize,
+) -> Result<FunctionValue<'static>, String> {
+    let ctx = llvm_context();
+    let i64_ty = ctx.i64_type();
+    let entry_fn = module.add_function(name, crate::compile::llvm_builtins::coroutine_fn_type(), None);
+    let builder = ctx.create_builder();
+    builder.position_at_end(ctx.append_basic_block(entry_fn, "entry"));
+
+    let shim = |n: &str| match module.get_function(n) {
+        Some(f) => f,
+        None => module.add_function(n, compiled_fn_type(), None),
+    };
+    let scratch = builder
+        .build_alloca(i64_ty, "ffi_entry_scratch")
+        .map_err(|e| format!("ffi: failed to reserve the entry scratch slot: {}", e))?;
+    let one = ctx.i32_type().const_int(1, false);
+
+    // One slot, so the frame has somewhere to put the answer.
+    let frame = call_shim(&builder, shim("rt_frame_new"), scratch, one, i64_ty.const_int(1, false), "ffi_frame")?;
+    call_shim(&builder, shim("rt_frame_entered"), scratch, one, frame, "ffi_entered")?;
+
+    let args = builder
+        .build_alloca(i64_ty.array_type(argc.max(1) as u32), "ffi_entry_args")
+        .map_err(|e| format!("ffi: failed to reserve the entry argument array: {}", e))?;
+    for i in 0..argc {
+        let word = call_shim(
+            &builder,
+            shim("rt_pending_arg"),
+            scratch,
+            one,
+            i64_ty.const_int(i as u64, false),
+            "ffi_pending",
+        )?;
+        let slot = unsafe {
+            builder
+                .build_gep(i64_ty, args, &[i64_ty.const_int(i as u64, false)], "ffi_entry_arg_ptr")
+                .map_err(|e| format!("ffi: failed to index the entry argument array: {}", e))?
+        };
+        builder.build_store(slot, word).map_err(|e| format!("ffi: failed to store an entry argument: {}", e))?;
+    }
+
+    let out = builder
+        .build_call(body, &[args.into(), ctx.i32_type().const_int(argc as u64, false).into()], "ffi_body")
+        .map_err(|e| format!("ffi: failed to call the marshalling body: {}", e))?;
+    let out = match out.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+        inkwell::values::ValueKind::Instruction(_) => {
+            return Err("internal error: the marshalling body produced no value".to_string())
+        }
+    };
+
+    let data = call_shim(&builder, shim("rt_frame_data"), scratch, one, frame, "ffi_frame_data")?;
+    let data = builder
+        .build_int_to_ptr(data, ctx.ptr_type(inkwell::AddressSpace::default()), "ffi_frame_ptr")
+        .map_err(|e| format!("ffi: failed to take the frame's data pointer: {}", e))?;
+    let value_slot = unsafe {
+        builder
+            .build_gep(i64_ty, data, &[i64_ty.const_zero()], "ffi_value_slot")
+            .map_err(|e| format!("ffi: failed to index the frame's value slot: {}", e))?
+    };
+    builder.build_store(value_slot, out).map_err(|e| format!("ffi: failed to store the result: {}", e))?;
+    builder
+        .build_return(Some(&i64_ty.const_zero()))
+        .map_err(|e| format!("ffi: failed to build the entry return: {}", e))?;
+    Ok(entry_fn)
 }
 
 /// Call a one-word `rt_*` shim: store `word` in `scratch` and call under the
@@ -501,6 +592,16 @@ struct FfiThunk {
 impl CompiledBody for FfiThunk {
     fn address(&self) -> usize {
         self.addr
+    }
+
+    /// The address is the coroutine entry `emit_thunk` puts under the Lisp
+    /// name, not the marshalling body behind it — so an interpreted caller
+    /// has to drive it like any other compiled body. Reporting classic here
+    /// made `CompiledBody::call` hand it `(args, argc)`, which the entry
+    /// answers by reading arguments that were never put in `call_state`
+    /// ("rt_pending_arg: argument 0 was not passed").
+    fn body_abi(&self) -> u8 {
+        typelisp_abi::BODY_ABI_COROUTINE
     }
 }
 

@@ -639,3 +639,133 @@ prelude は自分ではコードを出さないので `emits_abi` は無意味�
 完走させる。マシンスタックの上で待っている呼び出し元に値を返さなければ
 ならないため。C5 がこの 2 つをまとめて畳む。
 
+### 全体スイートが見つけた 6 つ
+
+`compile_test` 262 本が全部通っても、残りの 115 ファイルには別の経路がある。
+
+1. **`pat-ctor` のスクルーチニーがフィールドごとに再利用される。**
+   `((new "x" "y") 1)` のように部分パターンが値パターン（`pat-guard`）だと、
+   その test は呼び出しなので、次のフィールドを読むときには前の活性化が
+   終わっている。`compile-ctor-pattern` で kind 2 に退避——`pat-ctor` は
+   `Sexpr`/sum-ADT 箱/箱付き構造体のいずれかを分解するので、3 つとも
+   ヒープ値で判断の余地がない
+2. **被演算子が脱出すると、続く store がターミネータの後に積まれる。**
+   `(block outer (+ (block inner (return-from outer 7)) 10))`。被演算子を
+   dispatch の前へ括り出した帰結で、**括り出す前は「両方定数なので命令が
+   1 つも出ていなかった」から出なかった**。`compile-call-args` と
+   `compile-assoc` に `block-terminated?` の門を置いた
+3. **AOT の Lisp 名の先行宣言が旧 ABI だった**（`aot.rs`）。C2d で
+   `bootstrap.rs`/`prelude_bootstrap.rs` は直したが、ここが残っていた。
+   同じ罠の 3 度目
+4. **`protected()` が入場フレームのスタックを巻き戻していなかった。**
+   GC ルートは巻き戻していた（`truncate_roots(base)`）が、`CURRENT_FRAME`
+   を LIFO にしたので同じ規律が要る。unwind は publish と take の間を通る
+   ので、その窓の分は誰も take しない。結果は「値スロットに 0」——
+   ドライバが**別の呼び出しのフレーム**を受け取っていた
+5. **FFI の thunk は Lisp から呼ばれる入口。** プランの「C FFI の thunk は
+   非コルーチンで残る」は C→Lisp のコールバック方向の話で、Lisp→C の入口は
+   コルーチン ABI に答えなければならない。中身（マーシャリング）は
+   `$ffi` 接尾の名前へ移し、Lisp 名は最小の入場だけを持つ薄い包みにした
+   ——pc 分岐も再開ブロックも無い（再開するものが無い）
+6. **`ISLAND_DEFUNS` が 8 追加 1 削除ぶん古かった。**
+
+### 残っている不具合: 合流スロットが根でない
+
+`catch_throw_test` の 2 本（どちらも gc_stress）:
+
+```
+(loop (unwind-protect (return (append "sur" "vives")) (cons 3 (cons 4 ()))))
+```
+
+`compile-return` が値をループの結果スロットに置き、**その後 cleanup が走って
+確保する**。スロットは `alloca-args` なのでコレクタに見えず、回収される。
+`compile-block` と `compile-unwind-protect` の合流スロットも同じ形。
+`compile-if` の合流は store と load の間に確保が無いので安全。
+
+**C1 が push/pop を消したときの取りこぼし**で、今日の作業が壊したものでは
+ない（テストのコメント自身が「a plain `alloca`, not a GC root」と、捕まえたい
+バグを書いている）。全体スイートが C2c 以降走っていなかったので出なかった。
+
+**島だけでは直せない。** マスクを立てるには「その値が回収対象か」が要るが、
+`loop`/`block`/`unwind-protect` のノードは kind を運んでいない。一律に
+masked にするのは不可——生の i64 の下位 3 bit が箱のタグに見えたら、
+コレクタが算術からヒープ参照を捏造する（`compile-construct-box` と同じ話）。
+チェッカーが `loop`/`block`/`unwind-protect` に結果の `Repr` を載せる作業が
+先に来る（`core_vocabulary_test` と `core_cps` の読み手も動く）。
+
+### 「本体を運ぶダンプは自分の ABI を名乗る」は 5 箇所あった
+
+prelude で 1 度直したあと、同じ穴が続けて出た:
+
+| どこ | 症状 |
+|---|---|
+| `prelude_bootstrap` | `(sxhash 1)` が `rt_frame_data: ... is not a frame` |
+| `dump.rs` のセッション画像 | `typl --image` が abort |
+| `aot.rs` の Lisp 名の先行宣言 | `coroutine-begin` が `ptr %0` を受ける |
+| `dump.rs` の Lisp 名の先行宣言 | 同じ |
+| FFI thunk の `CompiledBody::body_abi` | `rt_pending_arg: argument 0 was not passed` |
+
+**どれも「間違った規約」で、エラーではない。** 宣言と定義は名前で結ばれ、
+ABI の札は「誰かがその本体を呼ぶとき」にしか読まれないので、書き間違いは
+その場では何も言わない。既定値が classic なのが効いていたのは島が classic
+だった間だけで、**その正しさの理由が消えても既定値は黙っていた**。
+
+`capture_types` の既定値（classic 固定）が正しいのは**ビットコードを持たない
+ユニット**だけ。本体を運ぶなら必ず `capture_types_with_abi`。
+
+### AOT の入口はドライバを通す
+
+`main` が状態語のループを回すことはできない（定数の store が数個の関数
+だから）。どちらを呼ぶかは生成時に決まる:
+
+- `$global_init$N` → `rt_drive_entry`（panic はそのまま通す。置き換えた
+  classic 呼びもそうだった）
+- `tl_main` → `rt_run_entry_driven`（`rt_run_entry` と同じ panic 処理の前に
+  `FrameStack` を置いただけ）
+
+**`rt_*` を足したら staticlib を作り直す。** AOT テストは `cargo test` が
+作らない `typelisp-front` の staticlib にリンクしているので、新しい shim は
+`cargo build -p typelisp-front` まで存在しない——症状は
+`linker failed with status exit status: 1` だけで、名前を言わない。
+
+### lambda の LLVM 名が prelude と衝突していた
+
+`(apply-fn (adder 5) 10)` が AOT で 15 でなく 10 を返した。捕捉が 0 に
+読めている。
+
+`core_bridge` は escaping lambda を**プロセス大域のカウンタ**で
+`lambda$N` と名づける。1 プロセスの中では一意だが、**AOT のモジュールは
+2 プロセスぶんの出力を持つ**——prelude のビットコードは、それを作った
+実行の `lambda$0`..`lambda$20` を凍らせて運んでいる。
+`add-coroutine-function` は名前で get-or-create なので、素の `lambda$0` は
+**prelude の関数を返し**、クロージャはそれを呼んでいた。
+
+**先在のバグで、C2d が露出させただけ。** このプロセスが自前の lambda を
+21 個以上（単型化された prelude のジェネリックから）先に橋渡ししている限り、
+カウンタが衝突を通り越していた。C2d でその数か順序が変わって当たった。
+——**「穴が無い」と「誰も踏んでいない」は見分けがつかない**（
+[[typelisp-remove-i64]] と同じ形）。
+
+直し方は `declare-labels-siblings` と同じ: 囲む関数の名前で mangle する。
+LLVM 名は誰も外から参照しないので、ただで済む。
+
+診断には AOT のモジュール全体の IR が要った（`disassemble` は 1 関数、
+ダンプは成果物、機械語になってからでは遅い）——`TYPELISP_AOT_IR=<path>` を
+`write_executable` に付けた。
+
+### 印字側は driver を持てない
+
+`~/name/` と `print-object` の登録先アドレスを持っているのは
+`typelisp-print` で、**この crate は `typelisp-rt` に依存しない**
+（`Cargo.toml` が理由を書いている——リンカはアーカイブのメンバ単位で
+引くので、印字系を別 crate にしておけば「使わないプログラムは払わない」）。
+つまり `FrameStack` に手が届かない。
+
+だから包みを**生成側**に出させた（`aot.rs` の `classic_door`）: 呼び先の
+LLVM 型がコルーチンなら、4 命令の classic な関数を作って
+`rt_drive_body` に渡す。呼び先の ABI を知っている唯一の場所は、その呼び先を
+出したコード生成器である。
+
+型を見て分岐するので、classic のままなら包みは出ない——`build-make-closure`
+と同じ判定を同じ理由で使っている。
+

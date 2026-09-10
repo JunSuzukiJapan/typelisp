@@ -351,6 +351,30 @@ pub mod call_state {
         CURRENT_FRAME.with(|c| c.borrow_mut().pop())
     }
 
+    /// How many entering calls have published a frame that nobody has taken
+    /// yet — the depth a catcher records so it can put the stack back.
+    pub fn current_frame_depth() -> usize {
+        CURRENT_FRAME.with(|c| c.borrow().len())
+    }
+
+    /// Drops everything published above `depth`.
+    ///
+    /// An unwind travels *between* a prologue's publish and the driver's
+    /// take, so the entries in that window are never taken: the compiled
+    /// frame that raised, and every frame below it in the same driver. A
+    /// catcher restores this the same way it restores the GC root stack —
+    /// without it, the next `take_current_frame` hands the caller a frame
+    /// belonging to a call that has already left, and the value read out of
+    /// it is whatever that frame happened to hold.
+    pub fn truncate_current_frames(depth: usize) {
+        CURRENT_FRAME.with(|c| {
+            let mut c = c.borrow_mut();
+            if c.len() > depth {
+                c.truncate(depth);
+            }
+        });
+    }
+
     pub fn set_pending_call(target: usize, args: Vec<i64>, env: Vec<i64>) {
         PENDING_CALL.with(|c| *c.borrow_mut() = Some((target, args, env)));
     }
