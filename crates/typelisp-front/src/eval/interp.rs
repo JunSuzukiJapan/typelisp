@@ -658,14 +658,17 @@ impl Interp {
             Some(s) => s.clone(),
             None => return,
         };
-        let addrs: Vec<usize> = slots
+        // The ABI travels with the address: which convention an entry point
+        // answers to is a property of that entry point, and a table of bare
+        // addresses cannot say.
+        let addrs: Vec<(usize, u8)> = slots
             .iter()
             .map(|(type_name, method)| {
                 self.root
                     .borrow()
                     .get_method(type_name, method)
-                    .and_then(|f| f.compiled.borrow().as_ref().map(|c| c.address()))
-                    .unwrap_or(0)
+                    .and_then(|f| f.compiled.borrow().as_ref().map(|c| (c.address(), c.body_abi())))
+                    .unwrap_or((0, typelisp_abi::BODY_ABI_CLASSIC))
             })
             .collect();
         typelisp_rt::vtable_define(id, addrs);

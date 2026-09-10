@@ -187,7 +187,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let bitcode = {
             let m = module.borrow();
-            m.verify().map_err(|e| format!("island module failed verification: {}", e)).map(|()| {
+            crate::compile::verify_module_naming_functions(&m, "island module").map(|()| {
                 // `as_slice` deliberately includes LLVM's guaranteed trailing
                 // NUL (inkwell's `MemoryBuffer::get_size` is
                 // `LLVMGetBufferSize() + 1`), so the committed artifact is one

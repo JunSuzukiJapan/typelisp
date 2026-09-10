@@ -223,6 +223,31 @@ static LLVM_CONTEXT: OnceLock<ContextCell> = OnceLock::new();
 /// which is what lets the interpreter's LLVM handle registry hold `'static`
 /// inkwell types instead of threading a lifetime through every value that
 /// could carry one.
+/// Verifies `module`, naming the functions that failed.
+///
+/// `Module::verify`'s own message is the verifier's complaint with no
+/// indication of *where* — five "Instruction does not dominate all uses" over
+/// a module holding hundreds of functions says nothing about which one to
+/// read. Each function is asked separately first, so the names come back with
+/// it.
+pub(crate) fn verify_module_naming_functions(module: &inkwell::module::Module<'static>, label: &str) -> Result<(), String> {
+    let Err(e) = module.verify() else { return Ok(()) };
+    let mut bad = Vec::new();
+    let mut f = module.get_first_function();
+    while let Some(func) = f {
+        // Declarations have nothing to verify, and asking anyway is a crash in
+        // some LLVM builds.
+        if func.count_basic_blocks() > 0 && !func.verify(false) {
+            bad.push(func.get_name().to_string_lossy().into_owned());
+        }
+        f = func.get_next_function();
+    }
+    if bad.is_empty() {
+        return Err(format!("{} failed verification: {}", label, e));
+    }
+    Err(format!("{} failed verification in {}: {}", label, bad.join(", "), e))
+}
+
 pub fn llvm_context() -> &'static Context {
     &LLVM_CONTEXT.get_or_init(|| ContextCell(Context::create())).0
 }

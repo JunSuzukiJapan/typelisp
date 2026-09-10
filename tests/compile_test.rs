@@ -14,6 +14,35 @@ use std::rc::Rc;
 use typelisp::compile::COMPILE_LOCK;
 use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
+/// Runs a `compile-function`-produced body and returns its value.
+///
+/// Under the coroutine ABI (Phase C2) a compiled function takes a *frame* and
+/// returns a *status word*, and its arguments arrive through
+/// `typelisp_abi::call_state` — so calling one as `f(args, argc)` hands the
+/// argument pointer over where the frame belongs, and the prologue reads it as
+/// one (`rt_frame_data: ... is not a frame`). `FrameStack` is the driver that
+/// turns the protocol back into "call it and get an answer"; every non-test
+/// caller reaches it through `Interp::call_compiled`.
+///
+/// The hand-built modules elsewhere in this file, whose bodies are declared
+/// with `add-function`/`add-function-with-env` rather than emitted by
+/// `compile-function`, are genuinely classic and keep calling directly.
+fn run_coroutine_entry(
+    engine: &inkwell::execution_engine::ExecutionEngine<'_>,
+    heap: &mut Heap,
+    name: &str,
+    args: &[i64],
+) -> i64 {
+    let f = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(i64) -> i64>(name)
+            .unwrap_or_else(|_| panic!("failed to look up the compiled `{}` function", name))
+    };
+    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(f.as_raw()) };
+    let mut stack = typelisp::compile::coroutine::FrameStack::new();
+    stack.run(heap, entry, args).expect("the chain ran to an answer")
+}
+
 fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
@@ -327,8 +356,12 @@ fn the_compiler_body_compiles_an_int_literal_node() {
     let ir = eval_string_with_compiler(
         r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int-any-width 0 42)))"#,
     );
-    assert!(ir.contains("define i64 @answer"), "IR was:\n{}", ir);
-    assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
+    assert!(ir.contains("define i64 @answer(i64"), "IR was:\n{}", ir);
+    // The value goes into the frame's slot 0 and the function returns a
+    // *status* word (`STATUS_RETURN` is 0) -- it used to be `ret i64 42`.
+    // Under the coroutine ABI (Phase C2) that is the only way a function that
+    // might instead stop in the middle can say which of the two it did.
+    assert!(ir.contains("store i64 42, ptr %coro_ret_slot"), "IR was:\n{}", ir);
 }
 
 // (Removed `the_compiler_body_panics_on_an_unsupported_tag` in interp-closure
@@ -366,13 +399,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let add2 = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("add2")
-            .expect("failed to look up the compiled `add2` function")
-    };
-    let argv: [i64; 2] = [10, 32];
-    assert_eq!(unsafe { add2.call(argv.as_ptr(), argv.len() as u32) }, 42);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "add2", &[10, 32]), 42);
 }
 
 /// labels compilation work (Stage 1): the compiler body compiling
@@ -398,12 +425,7 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let outer = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("outer")
-            .expect("failed to look up the compiled `outer` function")
-    };
-    assert_eq!(unsafe { outer.call(std::ptr::null(), 0) }, 5);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "outer", &[]), 5);
 }
 
 /// labels/closures Stage 2 (outer-scope capture): the compiler body
@@ -441,13 +463,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let outer = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("outer")
-            .expect("failed to look up the compiled `outer` function")
-    };
-    let argv: [i64; 2] = [3, 4];
-    assert_eq!(unsafe { outer.call(argv.as_ptr(), argv.len() as u32) }, 7);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "outer", &[3, 4]), 7);
 }
 
 /// Hands a real, JIT-executable `llvm-module` back to Rust (rather than its
@@ -586,7 +602,12 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
 /// binary) — the same idiom `rt_root_count`/`rt_truncate_sexpr_roots` need
 /// in the hand-built `loop`/`return` tests elsewhere in this file. `Heap`
 /// must be registered active for the duration of the call too, since
-/// `rt_closure_new` allocates on it.
+/// `rt_closure_new` allocates on it. **`rt_closure_new`, not
+/// `rt_coroutine_closure_new`**: the two record which ABI the boxed body
+/// answers to, and this module's bodies are hand-built under `add-function`/
+/// `add-function-with-env` — classic. Only a body that came out of
+/// `compile-function` is a coroutine, which is why the tests below that call
+/// it declare the other one.
 #[test]
 fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
     let src = r#"
@@ -881,13 +902,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let quadruple = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("quadruple")
-            .expect("failed to look up the compiled `quadruple` function")
-    };
-    let argv: [i64; 1] = [5];
-    assert_eq!(unsafe { quadruple.call(argv.as_ptr(), argv.len() as u32) }, 20);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "quadruple", &[5]), 20);
 }
 
 /// labels/closures Stage 3, self-recursion: `compile-function`'s own first
@@ -903,8 +918,13 @@ fn the_compiler_body_compiles_a_self_referencing_call() {
     let ir = eval_string_with_compiler(
         r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . 0)) '(call "f" (0 var "n" false))))"#,
     );
-    assert!(ir.contains("define i64 @f("), "IR was:\n{}", ir);
-    assert!(ir.contains("call i64 @f("), "IR was:\n{}", ir);
+    assert!(ir.contains("define i64 @f(i64"), "IR was:\n{}", ir);
+    // The self-call is no longer an LLVM `call` at all: it names `f` to the
+    // driver and returns `STATUS_CALL`, which is what lets a recursion go
+    // deeper than the machine stack. The address is what the module still
+    // mentions.
+    assert!(ir.contains("ptrtoint (ptr @f to i64)"), "IR was:\n{}", ir);
+    assert!(ir.contains("call i64 @rt_frame_call("), "IR was:\n{}", ir);
 }
 
 /// The end-to-end Stage 3 slice (top-level `Expr::Call`, non-recursive),
@@ -1470,15 +1490,16 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
     // This module is built by a direct `compile-function` call (bypassing
     // `Interp::compile_function`/`add_compiled_function`, which would
     // otherwise forward-declare every `rt_*` shim automatically), so
-    // `build-make-closure` needs `rt_closure_new` explicitly declared here —
+    // `build-make-closure` needs `rt_coroutine_closure_new` explicitly declared
+    // here —
     // a bodyless `add-function`, resolved via LLVM's default process-symbol
     // lookup since it's a `#[no_mangle]` symbol already linked into this
     // test binary, the same idiom `rt_root_count`/`rt_truncate_sexpr_roots`
     // need elsewhere in this file. `Heap` must be registered active for the
-    // call too, since `rt_closure_new` allocates on it.
+    // call too, since `rt_coroutine_closure_new` allocates on it.
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
-             (let ((ignored-new (add-function m "rt_closure_new"))) ())
+             (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
              (let ((ignored-apply (add-function m "rt_apply_any"))) ())
              (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int-any-width 0 5)))))"#,
     ));
@@ -1487,14 +1508,9 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let outer = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("outer")
-            .expect("failed to look up the compiled `outer` function")
-    };
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    assert_eq!(unsafe { outer.call(std::ptr::null(), 0) }, 5);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "outer", &[]), 5);
 }
 
 /// Same as above, but the sibling being boxed itself captures an outer-scope
@@ -1507,14 +1523,14 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
 #[test]
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_outer_value() {
     // See `the_compiler_body_boxes_a_bare_labels_sibling_reference`'s doc
-    // comment for why `rt_closure_new` needs an explicit declaration and
+    // comment for why `rt_coroutine_closure_new` needs an explicit declaration and
     // `Heap` needs to be active here. `rt_push_sexpr_root` needs one too now
     // — see `the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value`'s
     // own doc comment (`bind-captures` unconditionally roots every captured
     // value, closure-representation unification Stage 4).
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
-             (let ((ignored-new (add-function m "rt_closure_new"))) ())
+             (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
              (let ((ignored-apply (add-function m "rt_apply_any"))) ())
              (let ((ignored-push (add-function m "rt_push_sexpr_root"))) ())
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
@@ -1524,15 +1540,9 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let outer = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("outer")
-            .expect("failed to look up the compiled `outer` function")
-    };
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let argv: [i64; 2] = [10, 5];
-    assert_eq!(unsafe { outer.call(argv.as_ptr(), argv.len() as u32) }, 15);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "outer", &[10, 5]), 15);
 }
 
 /// A `labels` sibling whose own body bare-references *itself* — `declare-labels-siblings`
@@ -1543,20 +1553,20 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
 /// JIT-runs a self-referencing top-level `Expr::Call`: a closure that boxes
 /// itself and is then called would just box itself again, forever, with no
 /// base case — out of scope here (no `if`/comparison yet), but the boxing
-/// itself (a `call ... @rt_closure_new` showing up in the IR — the
+/// itself (a `call ... @rt_coroutine_closure_new` showing up in the IR — the
 /// closure-representation unification's flip off the old `build_array_malloc`
 /// this test used to look for) is exactly what this test confirms.
-/// `rt_closure_new` needs an explicit declaration for the same reason
+/// `rt_coroutine_closure_new` needs an explicit declaration for the same reason
 /// `the_compiler_body_boxes_a_bare_labels_sibling_reference`'s doc comment
 /// explains — this module is built by a direct `compile-function` call.
 #[test]
 fn the_compiler_body_boxes_a_labels_sibling_that_bare_references_itself() {
     let ir = eval_string_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
-             (let ((ignored (add-function m "rt_closure_new"))) ())
+             (let ((ignored (add-function m "rt_coroutine_closure_new"))) ())
              (to-string (compile-function m "outer" '() '(labels () (("f" () (var "f" true))) (apply "f")))))"#,
     );
-    assert!(ir.contains("call i64 @rt_closure_new"), "IR was:\n{}", ir);
+    assert!(ir.contains("call i64 @rt_coroutine_closure_new"), "IR was:\n{}", ir);
 }
 
 /// The end-to-end follow-up to Stage 4: `make-adder` returns one of its own
@@ -1813,13 +1823,15 @@ fn compile_a_captured_cell_survives_gc_pressure_across_many_calls() {
 
 /// `(bool b)` (`ast_bridge` already produced this tag; `compile-value` had no
 /// receiving arm for it until now) — every compiled value is a plain `i64`,
-/// so `true`/`false` compile straight to `1`/`0`.
+/// so `true`/`false` compile straight to `1`/`0`. Read out of the frame's
+/// value slot rather than off a `ret`, for the reason
+/// `the_compiler_body_compiles_an_int_literal_node` gives.
 #[test]
 fn the_compiler_body_compiles_a_bool_literal_node() {
     let ir = eval_string_with_compiler(
         r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(bool true)))"#,
     );
-    assert!(ir.contains("ret i64 1"), "IR was:\n{}", ir);
+    assert!(ir.contains("store i64 1, ptr %coro_ret_slot"), "IR was:\n{}", ir);
 }
 
 /// `compile-assoc`'s new comparison arms (`<`/`<=`/`>`/`>=`/`=`/`eq`/`/=`) —
@@ -1837,9 +1849,8 @@ fn the_compiler_body_compiles_an_integer_comparison() {
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
-    let lt = unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("lt").expect("failed to look up `lt`") };
-    assert_eq!(unsafe { lt.call([3, 5].as_ptr(), 2) }, 1);
-    assert_eq!(unsafe { lt.call([5, 3].as_ptr(), 2) }, 0);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "lt", &[3, 5]), 1);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "lt", &[5, 3]), 0);
 }
 
 // (Removed `compile_assoc_panics_on_an_unsupported_receiver_type` in
@@ -1880,10 +1891,8 @@ fn the_compiler_body_compiles_an_if_expression() {
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
-    let maxab =
-        unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("maxab").expect("failed to look up `maxab`") };
-    assert_eq!(unsafe { maxab.call([10, 32].as_ptr(), 2) }, 32);
-    assert_eq!(unsafe { maxab.call([50, 3].as_ptr(), 2) }, 50);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "maxab", &[10, 32]), 32);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "maxab", &[50, 3]), 50);
 }
 
 /// `compile-let`'s shadow/restore discipline (`bind-let-values`/
@@ -1906,11 +1915,8 @@ fn let_shadowing_is_correctly_restored_after_the_let_ends() {
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
-    let f = unsafe {
-        engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("shadow_test").expect("failed to look up `shadow_test`")
-    };
     assert_eq!(
-        unsafe { f.call([5].as_ptr(), 1) },
+        run_coroutine_entry(&engine, &mut heap, "shadow_test", &[5]),
         104,
         "the let must shadow x only within its own body, restoring the outer parameter afterward"
     );
@@ -6154,13 +6160,7 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let add2 = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("add2")
-            .expect("failed to look up the compiled `add2` function")
-    };
-    let argv: [i64; 2] = [10, 32];
-    assert_eq!(unsafe { add2.call(argv.as_ptr(), argv.len() as u32) }, 42);
+    assert_eq!(run_coroutine_entry(&engine, &mut heap, "add2", &[10, 32]), 42);
 }
 
 /// A body exercising the tags this stage covers beyond a bare method call:
@@ -6188,14 +6188,8 @@ fn the_island_compiles_a_bridged_let_and_if() {
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let absdiff = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("absdiff")
-            .expect("failed to look up the compiled `absdiff` function")
-    };
     for (a, b) in [(10i64, 4i64), (4, 10), (7, 7)] {
-        let argv = [a, b];
-        assert_eq!(unsafe { absdiff.call(argv.as_ptr(), argv.len() as u32) }, (a - b).abs(), "a={} b={}", a, b);
+        assert_eq!(run_coroutine_entry(&engine, &mut heap, "absdiff", &[a, b]), (a - b).abs(), "a={} b={}", a, b);
     }
 }
 
@@ -6280,11 +6274,6 @@ fn the_island_runs_a_bridged_loop() {
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let mul = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("mul")
-            .expect("failed to look up the compiled `mul` function")
-    };
     // A `loop` unwinds GC roots on the way out (`rt_truncate_sexpr_roots`), so
     // this needs a live heap even though the arithmetic itself never allocates.
     // It ran without one until 2026-09-08 by reading whatever `ACTIVE_HEAP`
@@ -6294,8 +6283,7 @@ fn the_island_runs_a_bridged_loop() {
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     for (a, b) in [(6i64, 7i64), (0, 5), (3, 0), (-4, 3)] {
-        let argv = [a, b];
-        assert_eq!(unsafe { mul.call(argv.as_ptr(), argv.len() as u32) }, a * b.max(0), "a={} b={}", a, b);
+        assert_eq!(run_coroutine_entry(&engine, &mut heap, "mul", &[a, b]), a * b.max(0), "a={} b={}", a, b);
     }
 }
 
@@ -6331,14 +6319,8 @@ fn the_island_runs_a_bridged_labels_block() {
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let fact = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("fact")
-            .expect("failed to look up the compiled `fact` function")
-    };
     for (n, want) in [(0i64, 1i64), (1, 1), (5, 120), (10, 3628800)] {
-        let argv = [n];
-        assert_eq!(unsafe { fact.call(argv.as_ptr(), argv.len() as u32) }, want, "n={}", n);
+        assert_eq!(run_coroutine_entry(&engine, &mut heap, "fact", &[n]), want, "n={}", n);
     }
 }
 
@@ -6448,14 +6430,8 @@ fn the_island_runs_a_whole_bridged_defun() {
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
-    let clamp = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>(&name)
-            .expect("failed to look up the compiled function")
-    };
     for (x, want) in [(-5i64, 0i64), (0, 0), (7, 7), (10, 10), (99, 10)] {
-        let argv = [x, 0, 10];
-        assert_eq!(unsafe { clamp.call(argv.as_ptr(), argv.len() as u32) }, want, "x={}", x);
+        assert_eq!(run_coroutine_entry(&engine, &mut heap, &name, &[x, 0, 10]), want, "x={}", x);
     }
 }
 

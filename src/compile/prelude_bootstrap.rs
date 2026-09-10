@@ -526,7 +526,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let bitcode = {
             let m = module.borrow();
-            m.verify().map_err(|e| format!("prelude module failed verification: {}", e)).map(|()| {
+            crate::compile::verify_module_naming_functions(&m, "prelude module").map(|()| {
                 // Carries a trailing NUL by design — see the identical call in
                 // `bootstrap.rs` for why it must not be trimmed.
                 m.write_bitcode_to_memory().as_slice().to_vec()
@@ -538,7 +538,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         bitcode?
     };
 
-    let state = typelisp_front::dump::capture_types(
+    let state = typelisp_front::dump::capture_types_with_abi(
         &heap,
         delta,
         "prelude",
@@ -547,6 +547,18 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         &plan.forms,
         items.iter().map(unit_item).collect(),
         globals,
+        // These bodies were emitted by whichever island this process is
+        // running, so that is the ABI they answer to. The prelude emits no
+        // code of its own, so `emits_abi` says nothing and stays classic.
+        //
+        // `capture_types`' classic default was right only while the island
+        // was classic too: the moment the island flipped, a regenerated
+        // prelude was coroutine code labelled classic, and an interpreted
+        // caller entered it as `f(args, argc)` -- the argument pointer
+        // arriving where the frame belongs, decoded as a fixnum by
+        // `rt_frame_data` ("... is not a frame").
+        crate::compile::EMITTED_BODY_ABI,
+        typelisp_abi::BODY_ABI_CLASSIC,
     )?;
     let types = typelisp_front::dump::write_state(&state)?;
     Ok(typelisp_front::dump::write(&[(types, bitcode)]))

@@ -580,13 +580,18 @@ pub fn disassemble_function(
     add_compiled_function(interp, heap, module.clone(), &name, &symbol)?;
 
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-    module
-        .borrow()
-        .verify()
-        .map_err(|e| EvalError::Panic(format!("disassemble: module failed verification: {}", e)))?;
+    let verified = crate::compile::verify_module_naming_functions(&module.borrow(), "disassemble: module");
     if llvm_ir {
-        return Ok(module.borrow().print_to_string().to_string());
+        // Printed even when it does not verify. Asking for the IR is what you
+        // do *because* something is wrong with it; refusing to show it then is
+        // backwards. The complaint goes on the end so it is not lost.
+        let text = module.borrow().print_to_string().to_string();
+        return Ok(match verified {
+            Ok(()) => text,
+            Err(e) => format!("{}\n; {}", text, e),
+        });
     }
+    verified.map_err(EvalError::Panic)?;
     // Bound rather than returned directly: the `borrow()` temporary would
     // otherwise outlive `module` in tail position.
     let assembly = crate::compile::aot::assembly_of(&module.borrow());

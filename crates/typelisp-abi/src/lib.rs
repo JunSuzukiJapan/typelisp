@@ -277,10 +277,21 @@ pub mod call_state {
         /// knows how many slots it needs, and under mutual recursion the
         /// caller may be compiled before the callee exists at all.
         static PENDING_ARGS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
-        /// The frame a prologue just allocated, on its way in. The driver
-        /// cannot learn it any other way — it is made inside the callee, after
-        /// the call has started.
-        static CURRENT_FRAME: RefCell<Option<i64>> = const { RefCell::new(None) };
+        /// The frames prologues have allocated on their way in, innermost
+        /// last. The driver cannot learn one any other way — it is made
+        /// inside the callee, after the call has started.
+        ///
+        /// **A stack, not a slot.** The driver takes the frame only once the
+        /// entering call has *returned*, and a callee can start a driver of
+        /// its own before then: `rt_apply_any` and `rt_protected_drive` both
+        /// run a nested `FrameStack` on the machine stack (the boundaries C4
+        /// and C5 retire). Every one of those publishes and takes in balanced
+        /// pairs within the outer callee's own activation, so LIFO hands each
+        /// driver back exactly the frame its own entry made. A single slot
+        /// let the innermost driver consume the outermost's, which surfaced
+        /// as "a coroutine function did not publish its frame on entry" —
+        /// blamed on the callee, whose prologue had in fact published.
+        static CURRENT_FRAME: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
         /// The captured values a not-yet-entered closure body will copy into
         /// its own frame, alongside `PENDING_ARGS`.
         ///
@@ -333,11 +344,11 @@ pub mod call_state {
     }
 
     pub fn set_current_frame(f: i64) {
-        CURRENT_FRAME.with(|c| *c.borrow_mut() = Some(f));
+        CURRENT_FRAME.with(|c| c.borrow_mut().push(f));
     }
 
     pub fn take_current_frame() -> Option<i64> {
-        CURRENT_FRAME.with(|c| c.borrow_mut().take())
+        CURRENT_FRAME.with(|c| c.borrow_mut().pop())
     }
 
     pub fn set_pending_call(target: usize, args: Vec<i64>, env: Vec<i64>) {

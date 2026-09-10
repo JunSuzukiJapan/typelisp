@@ -518,7 +518,7 @@ fn build_main_wrapper(
             .get_function("rt_vtable_set")
             .ok_or_else(|| "internal error: rt_vtable_set not declared in module".to_string())?;
         let args_ptr = builder
-            .build_alloca(i64_ty.array_type(3), "vtable_set_args")
+            .build_alloca(i64_ty.array_type(4), "vtable_set_args")
             .map_err(|e| format!("failed to alloca vtable-set args: {}", e))?;
         for (id, slots) in vtables {
             for (slot, (type_name, method)) in slots.iter().enumerate() {
@@ -533,7 +533,20 @@ fn build_main_wrapper(
                 // `IntValue` is `Copy`, so the deref below is free — spelled
                 // out because this crate is edition 2018, where an array's
                 // `into_iter()` still yields references.
-                let set_args = [i64_ty.const_int(*id as u64, false), i64_ty.const_int(slot as u64, false), fn_ptr];
+                // The fourth word is the ABI `target` answers to. Its LLVM
+                // type is the authority -- the same question
+                // `build-make-closure` asks of the function it boxes.
+                let body_abi = if target.get_type() == crate::compile::llvm_builtins::coroutine_fn_type() {
+                    typelisp_abi::BODY_ABI_COROUTINE
+                } else {
+                    typelisp_abi::BODY_ABI_CLASSIC
+                };
+                let set_args = [
+                    i64_ty.const_int(*id as u64, false),
+                    i64_ty.const_int(slot as u64, false),
+                    fn_ptr,
+                    i64_ty.const_int(u64::from(body_abi), false),
+                ];
                 for (i, v) in set_args.iter().enumerate() {
                     let v = *v;
                     let p = unsafe {
@@ -544,7 +557,7 @@ fn build_main_wrapper(
                     builder.build_store(p, v).map_err(|e| format!("failed to store vtable-set arg: {}", e))?;
                 }
                 builder
-                    .build_call(rt_vtable_set, &[args_ptr.into(), ctx.i32_type().const_int(3, false).into()], "vtable_set_result")
+                    .build_call(rt_vtable_set, &[args_ptr.into(), ctx.i32_type().const_int(4, false).into()], "vtable_set_result")
                     .map_err(|e| format!("failed to build rt_vtable_set call: {}", e))?;
             }
         }

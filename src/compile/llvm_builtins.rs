@@ -1278,6 +1278,14 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
     ensure_declared(&module, "rt_frame_call");
     ensure_declared(&module, "rt_pending_arg");
     ensure_declared(&module, "rt_pending_argc");
+    // The capture-side counterparts. A parameter and a capture are read by
+    // separate indices out of separate lists, so declaring only the argument
+    // half left any body with captures reaching for an undeclared
+    // `rt_pending_env` -- and a `labels` sibling that captures is the
+    // ordinary case, not an exotic one.
+    ensure_declared(&module, "rt_pending_env");
+    ensure_declared(&module, "rt_pending_envc");
+    ensure_declared(&module, "rt_frame_call_env");
 
     let param = function
         .get_nth_param(0)
@@ -1720,8 +1728,13 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
     // Which constructor names the ABI the body was emitted under, so the
     // closure carries it. A process can hold both at once across an ABI
     // change — the island runs from its committed dump while this binary JITs
-    // fresh code — so the answer cannot be a process-wide setting.
-    let ctor_name = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
+    // fresh code — so the answer cannot be a process-wide setting, and
+    // `EMITTED_BODY_ABI` (which is one) was the wrong place to read it. The
+    // right one is the function being boxed: its LLVM type *is* the ABI, so
+    // there is nothing to record separately and nothing to get out of step.
+    // `coroutine_fn_type` takes one `i64`; the classic type takes a pointer
+    // and a `u32`.
+    let ctor_name = if target.get_type() == coroutine_fn_type() {
         "rt_coroutine_closure_new"
     } else {
         "rt_closure_new"

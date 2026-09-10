@@ -2215,7 +2215,7 @@ fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             pattern_bindings(&s, pat_form, &scrut_repr, cx, &mut binds)?;
             let arm_reprs = cx.extended(binds.iter().cloned());
             let arm_cx = Ctx { reprs: &arm_reprs, ..cx };
-            let pat = translate_pattern(&mut s, pat_form, arm_cx)?;
+            let pat = translate_pattern(&mut s, pat_form, &scrut_repr, arm_cx)?;
             s.push_root(pat);
             // The bindings a closure nested in this body captures. `pat-bind`
             // binds an ordinary slot, and a capture reads a shared cell, so
@@ -2355,7 +2355,17 @@ fn pattern_bindings(
 /// A constructor pattern carries its *own* type's classification rather than
 /// inheriting the match's, because a nested sub-pattern can differ from its
 /// parent — a `sexpr`-typed field inside an enum box, say.
-fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Error> {
+///
+/// `value` is the representation of the value the pattern is applied to, and
+/// it is threaded exactly the way [`pattern_bindings`] threads it — for the
+/// same reason, one step further on. That walk tells the *body* what each
+/// bound name is; this one tells the *island* what kind of slot to bind it
+/// into, which under the coroutine ABI is no longer a detail it can shrug
+/// off: a `stack` slot is gone by the time a suspended function resumes, and
+/// a masked frame slot is a GC root while a plain one is not. Deriving it in
+/// the island instead would mean a second copy of [`Repr`]'s classification
+/// living in the self-hosted compiler.
+fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Result<Value, Error> {
     let Some(tag) = core::op(heap, pat).map(str::to_string) else {
         return Err(malformed(heap, pat));
     };
@@ -2368,15 +2378,22 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
         "pat-nonempty" => {
             let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
             let mut f = Items::new(heap);
-            let sub = translate_pattern(f.heap(), sub, cx)?;
+            let sub = translate_pattern(f.heap(), sub, value, cx)?;
             f.push(sub);
             f.finish("pat-nonempty")
         }
+        // `(pat-bind SYM)` -> `(pat-bind "SYM" KIND)`. The name crosses as a
+        // string because the island's `env` is keyed by one; the kind is
+        // `Repr::binding_kind`, the same number `bind-params` and
+        // `bind-let-values` already take off their own nodes. Never a cell
+        // (`10 +`): a captured arm binding is rebound by the `let` this match
+        // arm's body is wrapped in, and the pattern binder stays a plain slot.
         "pat-bind" => {
             let name = symbol_field(heap, pat, 0)?;
             let name_v = heap.alloc_string(name);
             let mut f = Items::new(heap);
             f.push(name_v);
+            f.push(Value::Int(value.binding_kind()));
             f.finish("pat-bind")
         }
         // The island compares against one `const-word`, whatever the literal's
@@ -2401,10 +2418,11 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
                 &[half((n as u64) >> 32), half(n as u64)],
             )
         }
-        // `(pat-guard SYM TEST)` -> `(pat-guard "SYM" TEST)`. The name
+        // `(pat-guard SYM TEST)` -> `(pat-guard "SYM" TEST KIND)`. The name
         // crosses as a string for the same reason `pat-bind`'s does — the
         // island's `env` is keyed by `string` — and the test is an ordinary
-        // expression, translated like any other.
+        // expression, translated like any other. The kind is the value under
+        // test's own, `pat-bind`'s trailing field for the same reason.
         "pat-guard" => {
             let name = symbol_field(heap, pat, 0)?;
             let test = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
@@ -2413,8 +2431,11 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
             f.push(name_v);
             let test = to_island(f.heap(), test, cx)?;
             f.push(test);
+            f.push(Value::Int(value.binding_kind()));
             f.finish("pat-guard")
         }
+        // Its sub-patterns bind at the per-field representations the node
+        // carries, so the enclosing value's is not passed on.
         "pat-ctor" => translate_ctor_pattern(heap, pat, cx),
         "pat-typetest" => {
             // The node's own key, not one rebuilt from the path: the checker
@@ -2423,10 +2444,23 @@ fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Erro
             let Some(Value::Str(key_id)) = core::field(heap, pat, 1) else { return Err(malformed(heap, pat)) };
             let inner = core::field(heap, pat, 2).ok_or_else(|| malformed(heap, pat))?;
             let key = heap.string(key_id).to_string();
+            // The same word seen as the downcast target, so the inner pattern
+            // binds at *that* type's representation rather than the enclosing
+            // value's — the three-way classification `pattern_bindings` makes
+            // for this node, made once more here.
+            let path = as_path(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
+                .ok_or_else(|| malformed(heap, pat))?;
+            let inner_repr = if path == Path::root("sexpr") {
+                Repr::Sexpr
+            } else if cx.defs.is_struct(heap, &path)? {
+                Repr::Struct
+            } else {
+                Repr::Enum
+            };
             let name = str_form(heap, &key)?;
             let mut f = Items::new(heap);
             f.push(name);
-            let inner = translate_pattern(f.heap(), inner, cx)?;
+            let inner = translate_pattern(f.heap(), inner, &inner_repr, cx)?;
             f.push(inner);
             f.finish("pat-typetest")
         }
@@ -2457,11 +2491,27 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
         MATCH_KIND_BOX
     };
 
+    // Checked before the walk below zips the two lists, and for every kind
+    // rather than only the two that go on to *emit* the field kinds: a
+    // sub-pattern with no representation beside it would otherwise be
+    // dropped from the translated pattern instead of reported.
+    if field_reprs.len() != subpats.len() {
+        return Err(Error::TypeError(format!(
+            "compile: `{}` variant {} has {} fields, matched with {} sub-patterns (internal error)",
+            path,
+            variant,
+            field_reprs.len(),
+            subpats.len()
+        )));
+    }
+
     let subs = {
         let mut s = RootScope::new(heap);
         let mut vs = Vec::with_capacity(subpats.len());
-        for p in &subpats {
-            let v = translate_pattern(&mut s, *p, cx)?;
+        // Each sub-pattern against its own field's representation, the same
+        // pairing `pattern_bindings` makes over these two lists.
+        for (p, repr) in subpats.iter().zip(field_reprs.iter()) {
+            let v = translate_pattern(&mut s, *p, repr, cx)?;
             s.push_root(v);
             vs.push(v);
         }
@@ -2478,15 +2528,6 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
     let kinds: Vec<Value> = if kind == MATCH_KIND_SEXPR {
         Vec::new()
     } else {
-        if field_reprs.len() != subpats.len() {
-            return Err(Error::TypeError(format!(
-                "compile: `{}` variant {} has {} fields, matched with {} sub-patterns (internal error)",
-                path,
-                variant,
-                field_reprs.len(),
-                subpats.len()
-            )));
-        }
         field_reprs.iter().map(|r| Value::Int(r.field_kind())).collect()
     };
     let kinds = core::list(f.heap(), &kinds)?;
@@ -3041,13 +3082,13 @@ mod tests {
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
             bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option \"option<sexpr>\" 0 false ()) (int-any-width 0)) ((pat-ctor option \"option<sexpr>\" 1 false (sexpr) (pat-bind x)) (var x)))"),
-            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int-any-width 0 0) ((pat-ctor 1 ((pat-bind "x")) 1 (6) false ()) var "x" false)) 2)"#
+            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int-any-width 0 0) ((pat-ctor 1 ((pat-bind "x" 2)) 1 (6) false ()) var "x" false)) 2)"#
         );
         // A struct scrutinee: pattern kind 2, and the field kinds come from
         // the `defstruct`.
         assert_eq!(
             bridged_with(&DEFS, "(match (var p) struct ((pat-ctor point \"point\" 0 false (int-any-width int-any-width) (pat-bind a) (pat-wild)) (var a)))"),
-            r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a") (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
+            r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a" 0) (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
         );
     }
 
@@ -3087,7 +3128,7 @@ mod tests {
         assert!(down.contains("true (str (int-any-width 0 112)"), "{}", down);
         // A whole-value type test always tests, so it always carries one.
         let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest point \"point\" (pat-bind p)) (var p)))");
-        assert!(tt.contains(r#"(pat-typetest (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) (pat-bind "p"))"#), "{}", tt);
+        assert!(tt.contains(r#"(pat-typetest (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) (pat-bind "p" 2))"#), "{}", tt);
     }
 
     /// A scalar scrutinee translates, and asks for no GC root.

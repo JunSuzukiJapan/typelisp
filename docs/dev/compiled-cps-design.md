@@ -463,10 +463,9 @@ run でなく 3 回に分けて配る。
   の `scrut-v` を全部 `(load-raw ...)` にしたら再帰呼び出しの引数まで置き換わり、
   スロットを渡すべきところに読み出した値が入った
 
-### 残っている不具合（次はここから）
+### パターン束縛が `alloca` に載っていた（解決）
 
-**`labels` を含む関数のコンパイルが落ちる。** `tests/compile_test.rs` の
-`compile_dispatches_a_defun_with_a_labels_body_to_native_code` ほか labels 系。
+**`labels` を含む関数のコンパイルが落ちた。**
 
 ```
 llvm-builder::coroutine-begin: dangling llvm handle 140442234737264
@@ -474,16 +473,169 @@ llvm-builder::coroutine-begin: dangling llvm handle 140442234737264
 ```
 
 `sib-fn`（`(get inner-fn-env nm)` の結果）が**ハンドル番号でなくポインタ**。
-レジストリは 18 件しかないので、値そのものが別のもの——大きさからして
-native scope か `RtValue` のポインタに見える。`inner-fn-env` は
-`Scope<llvm-function>`（native scope）。
+ハンドルは全部小さいレジストリ添字なので、値そのものが別のものだった。
 
-疑わしい順:
-1. `declare-labels-siblings` の `if` を潰して両枝を `add-coroutine-function`
-   にしたこと（旧: 捕捉なしは `add-function`）
-2. `compile-llvm-op` の `frame-arg-slots builder m 1 arg-forms` —— native scope
-   のハンドルは生の i64 なので kind 0 のはずだが、`(kind . node)` の kind が
-   何を言っているか未確認
-3. `compile-match` のスクルーチニー spill が Option の箱の読み出しに影響した
+診断は**島の IR を読んで**終わった。ダンプはビットコード区画を持つので
+（`dump.rs` の `parse`）、切り出して `llvm-dis` にかけると
+`tl_compile-labels-bodies` の中身が見える:
 
-prelude の再生成も同じ理由で落ちる（prelude は `labels` を使う）。
+```llvm
+pat-ok:
+  %call_result191 = call i64 @rt_data_field(...)   ; Some の中身
+  %ashr = ashr i64 %call_result191, 3
+  store i64 %ashr, ptr %call_args192               ; ← alloca [1 x i64]
+...
+  %frame_call = call i64 @rt_frame_call(... tl_new-env ...)
+  ret i64 1                                        ; 中断
+coro.resume1:
+  %load_raw_val257 = load i64, ptr %call_args192   ; ← 消えたフレームから読む
+```
+
+`compile-pattern-test` の `pat-bind`/`pat-guard` が `alloca-args` で束縛して
+いた。**「検証器が黙る」種類の 2 つ目**（上の分類の 2）そのもので、しかも
+今度は配列でなく名前付きの束縛だった。
+
+症状の形が診断を早めた: `(append-block sib-fn "entry")` は通り、その後の
+`(coroutine-begin sib-builder m sib-fn)` で落ちる。**同じ値の最初の使用は
+通って後の使用が壊れる**なら、跨いだのは呼び出しである。
+
+**なぜ島の再生成は成功していたのか。** ドライバは戻ってすぐ同じ関数へ
+再入するので、マシンスタックのその領域がまだ書き換わっていないことが多い。
+運がよければ読めてしまう——だから不動点にも達したし、テストでは落ちた。
+
+#### 直し方: 数字はブリッジが持っている
+
+島で「タグ付きか生か」を分類し直すことはしない。`pattern_bindings` が
+**既に束縛ごとの `Repr` を歩いている**（本体に何が見えるかを決めるため）ので、
+同じ歩きを 1 歩延ばして `Repr::binding_kind` をノードに載せた:
+
+```
+(pat-bind "NAME")       -> (pat-bind "NAME" KIND)
+(pat-guard "NAME" TEST) -> (pat-guard "NAME" TEST KIND)
+```
+
+島は `(binding-slot builder m KIND)` を呼ぶだけになる——`bind-params` や
+`bind-let-values` が自分のノードから kind を取るのと同じ形。セルには
+決してならない（`10 +` が来ない）: 捕捉される腕の束縛は、その腕の本体を
+包む `let` が別名で束ね直すので、パターン束縛は素のスロットのままでよい。
+
+副産物: `translate_ctor_pattern` の長さ検査を**ループの前**へ、しかも
+`sexpr` を含む全 kind へ移した。表現を伴わない部分パターンは、そのまま
+zip すると報告されずに**翻訳結果から落ちる**。
+
+#### 同じ形がほかに無いことを機械で確かめた
+
+検証器が黙る以上、目で探しても意味が無い。島の IR を全部走査して、
+「**どの store よりも後の活性化で load される alloca**」を探した
+（`coro.resume*` ラベルを跨ぐたびに活性化を 1 つ進める）。
+`scratchpad/scan_alloca.py`。
+
+島 4,000 関数超のうち該当は **4 つだけ**で、4 つとも同じ `pat-bind` だった
+（`compile-labels-bodies` / `resolve-value` / `bind-let-values` /
+`compile-apply`）。`if`/`match`/`loop`/`block` の合流スロットは store と load
+が同じ活性化にあるので該当しない。
+
+### 入場の公表は 1 スロットでは足りない
+
+`labels` が通ると次が出た:
+
+```
+a coroutine function did not publish its frame on entry
+```
+
+**呼ばれた関数は公表していた。** ドライバは `f(0)` が**戻ってから**
+`take_current_frame` を呼ぶが、その間に呼び先が自分のドライバを始めうる——
+`rt_apply_any` と `rt_protected_drive` はマシンスタックの上で入れ子の
+`FrameStack` を回す（C4/C5 が畳む境界）。内側のドライバの take が外側の分を
+食う。`CURRENT_FRAME` を `Vec` にして LIFO にした: 入れ子の公表と take は
+必ず外側の呼び先の活性化の中で釣り合うので、これで各ドライバが自分の入場で
+できたフレームを受け取る。
+
+**エラーが濡れ衣を着せていた**のが厄介だった——公表しなかったのは呼び先だと
+名指しするが、公表は済んでいて、後で消されていた。
+
+### ABI は関数のもので、プロセスのものではない
+
+`build-make-closure` が `rt_closure_new` と `rt_coroutine_closure_new` を
+`EMITTED_BODY_ABI` で選んでいた。**コメント自身が「プロセス全体の設定では
+答えられない」と書いてあるのに、プロセス全体の設定を読んでいた。**
+
+正しい出どころは箱に入れる関数そのもので、**その LLVM 型が既に ABI**
+（`coroutine_fn_type` は `i64(i64)`、classic は `i64(ptr, i32)`）。
+別に記録するものが無いのでずれようがない。手で組んだテストのモジュール
+（`add-function` で本体を作る＝classic）が、島の出す ABI に引きずられて
+壊れたのがこれを暴いた。
+
+### 検証器は「そのプログラムが通った経路」しか見ない
+
+島が自分をコンパイルして verify が通っても、**島が自分では通らない経路**の
+crossing は残る。prelude を作り直そうとして 5 件出た（`bitvector` の 4 関数）。
+
+犯人は `compile-vector-op` の `set`: **添字を先に計算してから値の部分式を
+コンパイル**していた。値が呼び出しを含むと添字が中断を跨ぐ。同じ形が
+`compile-hashtable-op` の `bucket-*` 4 腕（`h`/`i`/`k`/`v`）と、
+`compile-catch`・`compile-unwind-protect` の `root-base`、`compile-catch` の
+`tag` にもあった。
+
+**バケットのキーと値は「タグ付けしてから」退避する。** そうすればスロットの
+マスクに kind ごとの判断が要らない——`compile-tag-struct-field` の結果は常に
+タグ付き `Sexpr` で、スカラのタグは `TAG_FIXNUM`（コレクタは辿らない）。
+副産物で GC の穴も 1 つ塞がった: 旧コードは `k` をタグ付けせずに `v` の
+評価を跨いでいた。
+
+**この形も機械で探せる**（`scratchpad/scan_ssa.py`）。`let*` の束縛のうち
+**LLVM 値を作るもの**が、後続の `compile-value` より後で読まれていたら候補。
+落とし穴 2 つ:
+
+- **翻訳時の Lisp 値を除く**。`arg-forms` や `kind` は島自身のフレームに
+  載っているので関係ない。除かないと 75 件出て使いものにならない
+- **束縛式の「頭」で判定する**。中に `alloca-args` が出てくるだけの
+  `(build-call ... (alloca-args ...) ...)` を除外してしまい、`root-base` を
+  2 件取り逃していた
+
+修正前の版に当てると 9 件（実際に直した 9 箇所）、修正後は 0 件。
+
+### 「関数を名指ししない検証エラー」を直した
+
+`Module::verify` のメッセージは検証器の文句だけで、**どの関数か**を言わない。
+何百もある中で "Instruction does not dominate all uses" が 5 件と言われても
+読む先が分からない。1 関数ずつ聞いてから名前を添えるようにした
+（`compile::verify_module_naming_functions`）。
+
+`disassemble ... true` も、**検証に落ちても IR を印字する**ようにした。IR を
+求めるのは IR がおかしいからで、そこで見せないのは逆立ちしている。
+
+### prelude が自分の ABI を名乗っていなかった
+
+`(sxhash 1)` が `rt_frame_data: Int(17564761476804) is not a frame` で落ちた。
+数を 8 倍すると `0x7FCE...`——**ポインタ**である。インタプリタが
+`f(args, argc)` で呼び、引数ポインタがフレームの位置に届いていた。
+
+C2b でダンプに「本体がどの ABI に答えるか」を持たせたが、**入れたのは島の
+ダンプだけ**で、prelude は既定の `capture_types`（classic 固定）のままだった。
+島が classic なうちは正しかった——prelude の本体を出すのは島だから、両方
+classic で一致していた。島が翻った瞬間に、コルーチンの本体に classic の札が
+付く。
+
+prelude は自分ではコードを出さないので `emits_abi` は無意味、`body_abi` だけ
+が `EMITTED_BODY_ABI`。
+
+**成果物の既定値は、その既定値が正しかった理由が消えても黙っている。**
+
+### vtable のスロットも ABI を運ぶ
+
+`rt_dyn_call` は vtable のアドレスを classic に transmute していた。
+`build-make-closure` と同じ話が 2 度目に出た形で、しかも今度は**関数の LLVM
+型を見る手が使えない**——実行時の表にあるのはアドレスだけである。
+
+だからスロットを `(アドレス, ABI)` の組にした。書き手は 2 つあって、どちらも
+答えを持っている:
+
+- JIT（`Interp::publish_vtable`）は `CompiledBody::body_abi()` を持っている
+- AOT（`aot.rs` の `rt_vtable_set`）は**その関数の LLVM 型**を見られる
+  ——`build-make-closure` と同じ問い
+
+呼び出し側は `rt_apply_any` と同じ境界に立つ: コルーチンなら自前のドライバで
+完走させる。マシンスタックの上で待っている呼び出し元に値を返さなければ
+ならないため。C5 がこの 2 つをまとめて畳む。
+

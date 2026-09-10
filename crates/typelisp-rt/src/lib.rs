@@ -4791,7 +4791,11 @@ thread_local! {
     /// `i64 f(i64* args, i32 argc)`), or 0 for a slot never filled in.
     /// `thread_local!` for the same cross-test-isolation reason
     /// [`GLOBAL_INDEX`] is, and reset by the same `Interp::new` hook.
-    static VTABLES: RefCell<Vec<Vec<usize>>> = const { RefCell::new(Vec::new()) };
+    /// Each slot is `(entry address, the ABI that address answers to)`.
+    /// The pair travels together because an address alone does not say how to
+    /// call it, and calling one convention as the other is not a type error
+    /// anywhere -- it is a wrong answer or a crash.
+    static VTABLES: RefCell<Vec<Vec<(usize, u8)>>> = const { RefCell::new(Vec::new()) };
 
     /// `(vtable id, trait id)` -> the vtable id of the *same concrete type*
     /// for that trait — the supertrait upcast table ([`rt_dyn_upcast`]).
@@ -4825,7 +4829,7 @@ pub fn upcast_define(from: u32, trait_id: u32, to: u32) {
 /// once a compilation unit's function addresses are final
 /// (`Interp::compile_scc`) and from AOT startup; a slot holding 0 means "not
 /// compiled", which [`rt_dyn_call`] answers by asking the interpreter.
-pub fn vtable_define(id: u32, slots: Vec<usize>) {
+pub fn vtable_define(id: u32, slots: Vec<(usize, u8)>) {
     VTABLES.with(|t| {
         let mut t = t.borrow_mut();
         if t.len() <= id as usize {
@@ -4885,8 +4889,13 @@ pub unsafe extern "C" fn rt_dyn_value(args: *const i64, argc: u32) -> i64 {
     }
 }
 
-fn vtable_slot_addr(id: usize, slot: usize) -> usize {
-    VTABLES.with(|t| t.borrow().get(id).and_then(|s| s.get(slot).copied()).unwrap_or(0))
+fn vtable_slot_addr(id: usize, slot: usize) -> (usize, u8) {
+    VTABLES.with(|t| {
+        t.borrow()
+            .get(id)
+            .and_then(|s| s.get(slot).copied())
+            .unwrap_or((0, typelisp_abi::BODY_ABI_CLASSIC))
+    })
 }
 
 /// How [`rt_dyn_call`] asks the interpreter for the closure standing behind
@@ -4940,8 +4949,18 @@ pub unsafe extern "C-unwind" fn rt_dyn_call(args: *const i64, argc: u32) -> i64 
     let callee_args = *args.add(2) as usize as *const i64;
     let callee_argc = *args.add(3) as u32;
 
-    let ptr = vtable_slot_addr(id, slot);
+    let (ptr, body_abi) = vtable_slot_addr(id, slot);
     if ptr != 0 {
+        if body_abi == typelisp_abi::BODY_ABI_COROUTINE {
+            // Run to completion on a driver of its own, the boundary
+            // `rt_apply_any` already sits at: this call has to *return* a
+            // value to compiled code that is waiting on the machine stack.
+            // C5 replaces both with a `STATUS_CALL` the caller's own driver
+            // takes over.
+            let f: crate::coroutine::CoroutineFn = std::mem::transmute(ptr);
+            let words = collect_words(callee_args, i64::from(callee_argc));
+            return drive_to_completion(f, &words, &[], "rt_dyn_call");
+        }
         // SAFETY: every address in a vtable comes from `CompiledFn::address`
         // for a method compiled under the plain `compiled_fn_type` signature.
         let f: unsafe extern "C" fn(*const i64, u32) -> i64 = std::mem::transmute(ptr);
@@ -5024,21 +5043,23 @@ pub unsafe extern "C" fn rt_upcast_set(args: *const i64, argc: u32) -> i64 {
 }
 
 /// Sets slot `args[1]` of vtable `args[0]` to the native entry point
-/// `args[2]`, extending the table as needed. Used by AOT startup, where the
-/// pointers are `ptrtoint` constants the linker resolves; the JIT fills
-/// tables through [`vtable_define`] instead.
+/// `args[2]`, which answers to the ABI in `args[3]`, extending the table as
+/// needed. Used by AOT startup, where the pointers are `ptrtoint` constants
+/// the linker resolves; the JIT fills tables through [`vtable_define`]
+/// instead.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s.
+/// `argc` must be `>= 4` and `args` must point to at least 4 valid `i64`s.
 #[no_mangle]
 pub unsafe extern "C" fn rt_vtable_set(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_vtable_set: expected 3 arguments (the vtable id, the slot and the function pointer)");
+    if argc < 4 {
+        fatal("rt_vtable_set: expected 4 arguments (the vtable id, the slot, the function pointer and its ABI)");
     }
     let id = *args as usize;
     let slot = *args.add(1) as usize;
     let ptr = *args.add(2) as usize;
+    let body_abi = *args.add(3) as u8;
     VTABLES.with(|t| {
         let mut t = t.borrow_mut();
         if t.len() <= id {
@@ -5046,9 +5067,9 @@ pub unsafe extern "C" fn rt_vtable_set(args: *const i64, argc: u32) -> i64 {
         }
         let slots = &mut t[id];
         if slots.len() <= slot {
-            slots.resize(slot + 1, 0);
+            slots.resize(slot + 1, (0, typelisp_abi::BODY_ABI_CLASSIC));
         }
-        slots[slot] = ptr;
+        slots[slot] = (ptr, body_abi);
     });
     0
 }
