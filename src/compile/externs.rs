@@ -433,7 +433,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 266] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 255] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -488,13 +488,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 266] {
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_str_upcase, rt_str_downcase, rt_int_fits, rt_int_fits_char, rt_f64_fits_f32, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
         rt_dyn_call, rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
-        rt_throw, rt_throw_matches, rt_throw_take_value, rt_unwind_pending, rt_resume_unwind,
-        rt_go, rt_protected_go,
+        rt_throw, rt_throw_matches, rt_throw_take_value,
+        rt_go,
         rt_frame_new, rt_frame_data, rt_frame_mask_bit, rt_frame_pc, rt_frame_set_pc,
         rt_frame_entered, rt_frame_call, rt_frame_call_env, rt_pending_arg, rt_pending_argc,
         rt_pending_env, rt_pending_envc,
-        rt_protected_apply_any, rt_protected_call, rt_protected_call_env, rt_protected_drive, rt_protected_drive_env, rt_protected_dyn_call, rt_protected_panic,
-        rt_protected_throw,
     };
     [
         // The one main-crate entry: the generic `llvm-*`/native-scope
@@ -613,27 +611,16 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 266] {
         ("rt_pending_argc", rt_pending_argc as usize),
         ("rt_pending_env", rt_pending_env as usize),
         ("rt_pending_envc", rt_pending_envc as usize),
-        ("rt_protected_go", rt_protected_go as usize),
         // `catch`/`throw`/`unwind-protect` (`compiler.rs`'s `compile-catch`/
         // `compile-throw`/`compile-unwind-protect`). `rt_throw` raises the
-        // unwind; the three queries below are what a region's dispatch block
-        // asks about the one in flight; the `rt_protected_*` family is the
-        // Rust frame that catches it, one per kind of call a protected region
-        // can make — see that section of `typelisp-rt` for why the catch
-        // cannot be a landing pad instead.
+        // unwind; the two queries are what a region's dispatch block asks
+        // about the one in flight. Nothing here catches: since C4 that is the
+        // driver's job, at the boundary of the activation that raised — see
+        // the catch/throw section of `typelisp-rt` for why a landing pad
+        // cannot do it and why one catch per tier is enough.
         ("rt_throw", rt_throw as usize),
         ("rt_throw_matches", rt_throw_matches as usize),
         ("rt_throw_take_value", rt_throw_take_value as usize),
-        ("rt_unwind_pending", rt_unwind_pending as usize),
-        ("rt_resume_unwind", rt_resume_unwind as usize),
-        ("rt_protected_call", rt_protected_call as usize),
-        ("rt_protected_drive", rt_protected_drive as usize),
-        ("rt_protected_drive_env", rt_protected_drive_env as usize),
-        ("rt_protected_call_env", rt_protected_call_env as usize),
-        ("rt_protected_apply_any", rt_protected_apply_any as usize),
-        ("rt_protected_dyn_call", rt_protected_dyn_call as usize),
-        ("rt_protected_panic", rt_protected_panic as usize),
-        ("rt_protected_throw", rt_protected_throw as usize),
         ("rt_push_sexpr_root", rt_push_sexpr_root as usize),
         ("rt_pop_sexpr_root", rt_pop_sexpr_root as usize),
         ("rt_push_permanent_sexpr_root", rt_push_permanent_sexpr_root as usize),

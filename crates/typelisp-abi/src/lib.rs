@@ -299,9 +299,10 @@ pub mod call_state {
         ///
         /// **A stack, not a slot.** The driver takes the frame only once the
         /// entering call has *returned*, and a callee can start a driver of
-        /// its own before then: `rt_apply_any` and `rt_protected_drive` both
-        /// run a nested `FrameStack` on the machine stack (the boundaries C4
-        /// and C5 retire). Every one of those publishes and takes in balanced
+        /// its own before then: `rt_apply_any` and `rt_dyn_call` both run a
+        /// nested `FrameStack` on the machine stack (the boundaries C5
+        /// retires; C4 retired `rt_protected_drive`, which was a third).
+        /// Every one of those publishes and takes in balanced
         /// pairs within the outer callee's own activation, so LIFO hands each
         /// driver back exactly the frame its own entry made. A single slot
         /// let the innermost driver consume the outermost's, which surfaced

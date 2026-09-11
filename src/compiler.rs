@@ -1599,12 +1599,14 @@ pub const SOURCE: &str = r#"
 ;; [`bignum-binop-call`]'s shape for the shims that can *raise*: a zero
 ;; divisor (`rt_int_div`/`rt_int_mod`/`rt_bignum_div`/`rt_bignum_mod`/
 ;; `rt_ratio_div`), an index past the end of a string (`rt_str_ref`). Those
-;; unwind now (`typelisp_rt::raise`) instead of aborting the process, and an
-;; unwind is only caught by the frame that *made* the call — so this goes
-;; through `emit-direct-call`, which inside a `catch`/`unwind-protect` region
-;; hands the target to `rt_protected_call` rather than calling it here. A
-;; plain `build-call` would fly past the enclosing region's own cleanups.
-(defun raising-binop-call ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (protect Option<llvm-basic-block>) (fname string) (x llvm-value) (y llvm-value)) llvm-value
+;; unwind (`typelisp_rt::raise`) instead of aborting the process.
+;;
+;; A plain `build-call` is all it takes. This used to need the region-aware
+;; `emit-direct-call`, because the Rust frame that caught an unwind sat at the
+;; call and the target had to be *handed* to a trampoline; since C4 the
+;; driver catches at the activation's boundary and the frame's handler slot
+;; says where the unwind lands, so a raising shim is called like any other.
+(defun raising-binop-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value) (y llvm-value)) llvm-value
   (let ((args-ptr (alloca-args builder 2)))
     (store-arg builder args-ptr 0 x)
     (store-arg builder args-ptr 1 y)
@@ -2426,7 +2428,7 @@ pub const SOURCE: &str = r#"
                    ;; through `raising-binop-call` rather than a bare
                    ;; `build-call` — see that function.
                    ("ref"
-                    (raising-binop-call builder m cur-fn protect "rt_str_ref" a b))
+                    (raising-binop-call builder m "rt_str_ref" a b))
                    (("eq" "eql")
                     ;; `eq`/`eql` on a string are *identity*
                     ;; (`string_identity_eq`), and a compiled string is
@@ -2815,9 +2817,9 @@ pub const SOURCE: &str = r#"
                         ;; The two that can raise on a zero divisor —
                         ;; `raising-binop-call`, not `bignum-binop-call`.
                         ("/"
-                         (raising-binop-call builder m cur-fn protect "rt_bignum_div" a b2))
+                         (raising-binop-call builder m "rt_bignum_div" a b2))
                         ("mod"
-                         (raising-binop-call builder m cur-fn protect "rt_bignum_mod" a b2))
+                         (raising-binop-call builder m "rt_bignum_mod" a b2))
                         ("logand"
                          (bignum-binop-call builder m "rt_bignum_logand" a b2))
                         ("logior"
@@ -2867,7 +2869,7 @@ pub const SOURCE: &str = r#"
                         ;; Zero divisor: raises, so protected
                         ;; (`raising-binop-call`), like `bignum`'s `/`.
                         ("/"
-                         (raising-binop-call builder m cur-fn protect "rt_ratio_div" a b2))
+                         (raising-binop-call builder m "rt_ratio_div" a b2))
                         ("<"
                          (build-icmp-lt builder (ratio-cmp-call builder m a b2) (const-word builder 0)))
                         ("<="

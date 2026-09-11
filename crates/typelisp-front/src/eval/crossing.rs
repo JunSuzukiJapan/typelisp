@@ -53,8 +53,8 @@ use super::value::EvalError;
 pub fn catch_compiled_panic<R>(call: impl FnOnce() -> R) -> Result<R, EvalError> {
     // The frames entering calls published and their drivers never took: an
     // unwind travels through that window, so it leaves them behind. The
-    // compiled tier's own catcher (`typelisp_rt`'s `protected`) restores this
-    // for the same reason — see `truncate_current_frames`.
+    // driver's own catch restores this for the same reason (`FrameStack`'s
+    // `begin`) — see `truncate_current_frames`.
     let frames = typelisp_abi::call_state::current_frame_depth();
     let payload = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
         Ok(v) => return Ok(v),

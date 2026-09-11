@@ -1095,6 +1095,42 @@ compiled な `(panic ...)` は**ずっとこのポインタを通って unwind �
 `rt_truncate_sexpr_roots(root-base)` は残る——そちらは「領域の入口の深さ」で、
 フレームの入場より深い。2 つは入れ子で、どちらも縮める方向にしか動かない。
 
+### 消えたもの
+
+ランタイム側 12: `rt_protected_call` / `_call_env` / `_drive` / `_drive_env` /
+`_apply_any` / `_dyn_call` / `_panic` / `_throw` / `_go` の 9 本と、その共通の
+本体 `protected`、`rt_unwind_pending` と `UNWIND_PENDING`、`rt_resume_unwind`。
+extern の表は 266 → 255。
+
+島側 6: `check-unwind` と、守られた枝を失って別名になった 5 つの emitter。
+
+残したもの: `drive_to_completion` と `collect_words`（`rt_drive_body` /
+`rt_drive_entry` / `rt_dyn_call` がまだ使う）、`CAUGHT_UNWIND`（トランポリンの
+受け皿だったものが、そのままドライバの受け皿になった）、`IN_FLIGHT_TAG` と
+`rt_throw` / `rt_throw_matches` / `rt_throw_take_value`（投げる側と、pad が
+「これは自分のか」と訊く側は変わっていない）。
+
+`tests/protected_call_test.rs` は `tests/driver_unwind_test.rs` に置き換えた。
+旧版は**トランポリンの形**を LLVM IR で組み立てていた——その機構がもう無い。
+新版はコルーチン ABI を手書きの Rust の本体で守る（入場でフレームを作り、
+公表し、`pc` で分岐する）。IR でなく Rust なのは、ここで固定したいのが
+**規約**だから: ドライバがどのフレームに訊き、答えをどう扱い、何を残すか。
+IR のレベルは島が emit するようになった時点で `catch_throw_test` の 36 本が
+端から端まで通している。
+
+### 6 箇所のコメントがトランポリンを説明したままだった
+
+`grep -rn rt_protected_` が作業リストを出した。うち 1 つは**島の SOURCE の中**
+（`raising-binop-call` の「だから `emit-direct-call` を通す」）で、これは
+コメント 1 文字でも成果物が無効になるので regen も付いてくる。ほかは
+`build-fn-address` の宣言とドキュメント 2 箇所（「protected 形式が唯一の
+呼び出し元」——いまは*すべての* Lisp 呼び出しが呼び出し元）、`call_state` の
+「入れ子のドライバの例」、`crossing.rs` の「compiled 側の catcher」。
+
+**消した機構の名前で grep するのが、この種の作業の最後の一歩。**
+[[feedback-comments-outliving-implementations]] の「消したコードの帰結だけ残る」
+がそのまま出る場所で、型検査もテストも何も言わない。
+
 ### C4 で消えなかったもの
 
 - **`crossing.rs` は大半が残る。** プランは「139 行の大半が消える」と書いて

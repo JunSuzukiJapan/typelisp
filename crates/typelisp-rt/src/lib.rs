@@ -1918,16 +1918,6 @@ pub unsafe extern "C-unwind" fn rt_go(args: *const i64, argc: u32) -> i64 {
     }
 }
 
-/// The protected form of [`rt_go`], for a `go` inside a region that catches.
-///
-/// # Safety
-///
-/// [`rt_go`]'s, unchanged.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_protected_go(args: *const i64, argc: u32) -> i64 {
-    protected(|| rt_go(args, argc))
-}
-
 /// `(rt-apply-any closure args-ptr argc)` — compiled code's one way to call
 /// a function *value*, whatever kind of function it turns out to hold.
 /// `args[0]` is the callee as a tagged word, `args[1]` the address of the
@@ -3177,27 +3167,31 @@ unsafe fn run_entry_payload(outcome: std::thread::Result<i64>) -> i64 {
 // leave `thread::panicking()` true for the rest of the process.
 //
 // So the Rust frame that does the catching is put where a Rust frame can
-// legitimately go: around each *call* made inside a protected region. The
-// trampolines below are that frame. Compiled code calls one instead of
-// calling its target directly, then asks [`rt_unwind_pending`] whether an
-// unwind was caught and branches to the region's dispatch block if so — an
-// ordinary conditional branch. Nothing in `compile-break`/`compile-return`
-// changes: a static exit stays a `br`, and only dynamic exits come through
-// here.
+// legitimately go, and since C4 there is exactly one such place: the
+// **driver**, at the boundary where it enters a compiled activation
+// (`coroutine::activation`). One catch for the whole tier, rather than one
+// per call inside a protected region, because a Lisp call is a driver round
+// trip and not a machine call — so a panic raised in compiled code can only
+// travel as far as the activation that raised it, and the driver is standing
+// at its exit.
+//
+// Where it goes next is then frame bookkeeping: the driver asks each frame,
+// innermost first, whether it declares a handler
+// (`typelisp_abi::FRAME_HANDLER_SLOT`), and resumes the first that does. The
+// nine `rt_protected_*` trampolines this section used to hold were the
+// per-call version of that, and C4 deleted them.
 
 thread_local! {
     /// The tag of the throw currently in flight. Its *value* lives in
     /// `Heap::set_in_flight_throw` instead, where the collector can see it —
     /// see [`CompiledThrow`].
     static IN_FLIGHT_TAG: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// The panic payload a trampoline caught and has not yet handed on:
-    /// either to a `catch` that claims it ([`rt_throw_take_value`], which
-    /// drops it) or back to the unwinder ([`rt_resume_unwind`]).
+    /// The panic payload the driver caught and has not yet handed on: to a
+    /// `catch` that claims it ([`rt_throw_take_value`], which drops it), to
+    /// the interpreter as an `EvalError` ([`take_activation_unwind`]), or back
+    /// to the unwinder ([`resume_activation_unwind`]) when the drive's caller
+    /// is a machine frame.
     static CAUGHT_UNWIND: RefCell<Option<Box<dyn std::any::Any + Send>>> = const { RefCell::new(None) };
-    /// Whether the most recent trampoline call ended in a caught unwind.
-    /// Read (and cleared) by [`rt_unwind_pending`] immediately after that
-    /// call, which is the only reader.
-    static UNWIND_PENDING: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Parks a throw's tag and value for the unwind about to be raised for it,
@@ -3327,31 +3321,6 @@ pub unsafe extern "C" fn rt_throw_take_value(_args: *const i64, _argc: u32) -> i
     }
 }
 
-/// Whether the trampoline call just made ended in a caught unwind (`1`) or
-/// returned normally (`0`), clearing the flag as it reads it.
-///
-/// Compiled code emits exactly one of these immediately after each protected
-/// call, so the flag never has to survive past the branch it feeds.
-#[no_mangle]
-pub unsafe extern "C" fn rt_unwind_pending(_args: *const i64, _argc: u32) -> i64 {
-    UNWIND_PENDING.with(|cell| i64::from(cell.replace(false)))
-}
-
-/// Hands a caught unwind back to the unwinder — what a `catch` whose tag did
-/// not match, or an `unwind-protect` that has finished its cleanup, does when
-/// there is no enclosing region left in this function to pass it to.
-///
-/// # Safety
-///
-/// A trampoline must have caught an unwind that no `catch` has since claimed.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_resume_unwind(_args: *const i64, _argc: u32) -> i64 {
-    match CAUGHT_UNWIND.with(|cell| cell.borrow_mut().take()) {
-        Some(payload) => std::panic::resume_unwind(payload),
-        None => fatal("rt_resume_unwind: no unwind is being carried"),
-    }
-}
-
 /// Classifies an unwind caught at a compiled activation's boundary
 /// (`coroutine::activation`) and parks it for the driver to carry on with.
 ///
@@ -3406,138 +3375,6 @@ pub(crate) fn resume_activation_unwind() -> ! {
     }
 }
 
-/// The shared body of every `rt_protected_*` trampoline: run `call` with a
-/// catch around it, and report the outcome the way compiled code reads it.
-///
-/// On a caught unwind the GC root stack is cut back to the depth it had when
-/// the call started — the callee pushed roots as it ran and the unwind skipped
-/// every matching pop, the same repair `catch_compiled_panic` documents for
-/// its own callers. The region's own dispatch block cuts back further still,
-/// to the depth at the region's entry; this only undoes the callee.
-///
-/// Anything that is not one of the runtime's three deliberate payloads keeps
-/// unwinding: a genuine bug in the runtime or in generated code must not come
-/// back as a plausible-looking typelisp condition.
-///
-/// # Safety
-///
-/// A `Heap` must be registered on this thread, and `call` must be safe to run
-/// under it.
-unsafe fn protected(call: impl FnOnce() -> i64) -> i64 {
-    let base = active_heap().root_count();
-    // The same bookkeeping for the frames entering calls have published: an
-    // unwind passes between a prologue's publish and its driver's take, so
-    // those entries are never taken. See `truncate_current_frames`.
-    let frames = typelisp_abi::call_state::current_frame_depth();
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {
-        Ok(v) => {
-            UNWIND_PENDING.with(|cell| cell.set(false));
-            v
-        }
-        Err(payload) => {
-            let ours = payload.is::<CompiledThrow>() || payload.is::<CompiledPanic>() || payload.is::<InterpretedUnwind>();
-            if !ours {
-                std::panic::resume_unwind(payload);
-            }
-            // Anything but a throw *replaces* whatever was in flight — a
-            // cleanup that panics while a throw travels wins, and CLHS says so.
-            // Leaving the old tag parked would let a `catch` further up claim
-            // this panic as if it were its own throw.
-            if !payload.is::<CompiledThrow>() {
-                clear_throw();
-            }
-            active_heap().truncate_roots(base);
-            typelisp_abi::call_state::truncate_current_frames(frames);
-            CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = Some(payload));
-            UNWIND_PENDING.with(|cell| cell.set(true));
-            0
-        }
-    }
-}
-
-/// A protected direct call: `args[0]` is the target's address (the island's
-/// `build-fn-address`), `args[1]`/`args[2]` the argument array and count it
-/// would have been called with.
-///
-/// # Safety
-///
-/// `argc` must be `>= 3`, `args[0]` must be the address of a function built
-/// under the standard compiled-function ABI (`CompiledSignature`), and
-/// `args[1]`/`args[2]` must describe a valid argument array for it.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_protected_call(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_protected_call: expected 3 arguments (target, argument array, argument count)");
-    }
-    let target: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = std::mem::transmute(*args as usize);
-    let callee_args = *args.add(1) as usize as *const i64;
-    let callee_argc = *args.add(2) as u32;
-    protected(|| target(callee_args, callee_argc))
-}
-
-/// [`rt_protected_call`] for the extended, captures-carrying ABI a `labels`
-/// sibling with outer-scope captures is declared under
-/// (`add-function-with-env`): `args[3]`/`args[4]` are the environment array
-/// and its length.
-///
-/// # Safety
-///
-/// `argc` must be `>= 5` and `args[0]` must be the address of a function built
-/// under `compiled_fn_type_with_env`; the two arrays must be valid for it.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_protected_call_env(args: *const i64, argc: u32) -> i64 {
-    if argc < 5 {
-        fatal("rt_protected_call_env: expected 5 arguments (target, argument array, argument count, env, env length)");
-    }
-    let target: unsafe extern "C-unwind" fn(*const i64, u32, *const i64, u32) -> i64 = std::mem::transmute(*args as usize);
-    let callee_args = *args.add(1) as usize as *const i64;
-    let callee_argc = *args.add(2) as u32;
-    let env = *args.add(3) as usize as *const i64;
-    let env_len = *args.add(4) as u32;
-    protected(|| target(callee_args, callee_argc, env, env_len))
-}
-
-/// [`rt_protected_call`] for a callee under the **coroutine ABI**: the call is
-/// driven to completion on a stack of its own, inside the catch.
-///
-/// A coroutine callee cannot simply be called, and it cannot join the caller's
-/// driver either: a `catch` region needs the frame that catches to be the one
-/// making the call, and under the driver the caller's frame is a heap object
-/// with no machine frame to unwind into. Phase C4 makes unwinding a driver
-/// status and this goes away; until then a `catch` around a call costs the
-/// machine stack that call would otherwise not have used.
-///
-/// # Safety
-///
-/// `argc` must be `>= 3`, `args[0]` must be the address of a function built
-/// under `coroutine_fn_type`, and `args[1]`/`args[2]` must describe a valid
-/// argument array for it.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_protected_drive(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_protected_drive: expected 3 arguments (target, argument array, argument count)");
-    }
-    let target: crate::coroutine::CoroutineFn = std::mem::transmute(*args as usize);
-    let passed = collect_words(*args.add(1) as usize as *const i64, *args.add(2));
-    protected(|| drive_to_completion(target, &passed, &[], "rt_protected_drive"))
-}
-
-/// [`rt_protected_drive`] for a callee that also has captures.
-///
-/// # Safety
-///
-/// `argc` must be `>= 5`; the two arrays must be valid for the target.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_protected_drive_env(args: *const i64, argc: u32) -> i64 {
-    if argc < 5 {
-        fatal("rt_protected_drive_env: expected 5 arguments (target, argument array, argument count, env, env length)");
-    }
-    let target: crate::coroutine::CoroutineFn = std::mem::transmute(*args as usize);
-    let passed = collect_words(*args.add(1) as usize as *const i64, *args.add(2));
-    let env = collect_words(*args.add(3) as usize as *const i64, *args.add(4));
-    protected(|| drive_to_completion(target, &passed, &env, "rt_protected_drive_env"))
-}
-
 unsafe fn collect_words(p: *const i64, n: i64) -> Vec<i64> {
     if n < 0 {
         fatal(&format!("{} is not a word count", n));
@@ -3574,56 +3411,6 @@ unsafe fn drive_to_completion(
         Ok(v) => v,
         Err(paused) => pause_on_a_machine_frame(paused, what),
     }
-}
-
-/// The protected form of [`rt_apply_any`] — same arguments, same result, with
-/// the catch around it. Calling a function *value* is where a throw raised by
-/// an interpreted callee re-enters compiled code, so a `catch` region that
-/// contains an `apply` needs this one specifically.
-///
-/// # Safety
-///
-/// [`rt_apply_any`]'s, unchanged.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_protected_apply_any(args: *const i64, argc: u32) -> i64 {
-    protected(|| rt_apply_any(args, argc))
-}
-
-/// The protected form of [`rt_dyn_call`] — a trait-object dispatch inside a
-/// protected region, whose implementation may equally be compiled or
-/// interpreted.
-///
-/// # Safety
-///
-/// [`rt_dyn_call`]'s, unchanged.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_protected_dyn_call(args: *const i64, argc: u32) -> i64 {
-    protected(|| rt_dyn_call(args, argc))
-}
-
-/// The protected form of [`rt_panic`]. A `(panic ...)` inside an
-/// `unwind-protect` has to let the cleanup run before it continues outward,
-/// so the region catches it here and its dispatch block resumes afterwards.
-/// No `catch` ever claims it — [`rt_throw_matches`] is false for a panic.
-///
-/// # Safety
-///
-/// [`rt_panic`]'s, unchanged.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_protected_panic(args: *const i64, argc: u32) -> i64 {
-    protected(|| rt_panic(args, argc))
-}
-
-/// The protected form of [`rt_throw`], for a `throw` written *inside* the
-/// region that catches it — the one case where the unwind never leaves this
-/// function at all.
-///
-/// # Safety
-///
-/// [`rt_throw`]'s, unchanged.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_protected_throw(args: *const i64, argc: u32) -> i64 {
-    protected(|| rt_throw(args, argc))
 }
 
 // ---- Stage 7: Str --------------------------------------------------------

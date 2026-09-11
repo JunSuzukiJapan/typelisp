@@ -193,9 +193,9 @@ impl FrameStack {
     /// has exactly one parameter.
     ///
     /// **The chain is this driver's alone**, so the loop runs down to zero
-    /// frames rather than to some base: a nested drive (`rt_protected_drive`,
-    /// `rt_apply_any`) cannot suspend, so there is no such thing as resuming
-    /// into the middle of somebody else's stack.
+    /// frames rather than to some base: a nested drive (`rt_apply_any`,
+    /// `rt_dyn_call`, `rt_drive_body`) cannot suspend, so there is no such
+    /// thing as resuming into the middle of somebody else's stack.
     ///
     /// Whatever the resumed frame was waiting for must already be in its value
     /// slot ([`set_frame_value`]) — the same place a returning callee leaves

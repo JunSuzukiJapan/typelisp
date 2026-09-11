@@ -2284,11 +2284,9 @@ pub fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-ptr-to-int".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
     // `build-fn-address`: a declared function's address as a plain `i64` —
     // `build-ptr-to-int` applied to an `llvm-function` instead of to a
-    // `build-malloc`'d block. `compile-call` inside a `catch`/`unwind-protect`
-    // region needs it: there the call goes through `rt_protected_call`, which
-    // takes its target as an ordinary argument rather than being the callee of
-    // a `call` instruction (see `typelisp-rt`'s catch/throw section for why
-    // the Rust frame that catches the unwind has to sit at the call).
+    // `build-malloc`'d block. Every Lisp call needs it: `coroutine-call`
+    // names its callee to the driver rather than being a `call` instruction
+    // with it, so the target has to be a value that can be handed over.
     assoc.insert("build-fn-address".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty()], llvm_value_ty(), true));
     AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
 }

@@ -2098,11 +2098,13 @@ fn llvm_builder_build_ptr_to_int(args: &[Value]) -> Result<Value, EvalError> {
 /// every other compiled value already is — `build-ptr-to-int` applied to the
 /// function itself rather than to a `build-malloc`'d block.
 ///
-/// `compile-call`'s protected form is the only caller: inside a `catch`/
-/// `unwind-protect` region a direct call goes through `rt_protected_call`,
-/// which needs the target as a value it can be *handed* rather than as the
-/// callee of a `call` instruction. LLVM already treats a `FunctionValue` as a
-/// pointer constant, so this is a `ptrtoint` on it and nothing else.
+/// Every Lisp call is the caller: `coroutine-call` *names* its callee to the
+/// driver rather than being a `call` instruction with it, so the target has to
+/// be a value that can be handed over. LLVM already treats a `FunctionValue`
+/// as a pointer constant, so this is a `ptrtoint` on it and nothing else.
+///
+/// Until C4 the region-aware trampolines were the reason this existed. They
+/// are gone; the driver protocol needs it for the same reason they did.
 fn llvm_builder_build_fn_address(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let f = expect_llvm_function(&args[1])?;
