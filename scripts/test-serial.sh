@@ -19,6 +19,27 @@
 # Any extra `cargo test` flags after a `--` are forwarded (and win over the
 # default `--test-threads=1`, since libtest takes the last occurrence), e.g.
 #   scripts/test-serial.sh -- --nocapture
+#
+# EACH TARGET GETS A TIMEOUT (`TEST_TIMEOUT`, default 1200s). Nothing else in
+# this repo bounds a test's running time: libtest has no per-test timeout on
+# stable, an evaluated (or compiled) Lisp loop has no fuel, and the executables
+# `compile_file_test` builds are waited on with `Command::status()`. Without
+# this, one runaway costs the whole run: on 2026-09-11 a malformed `loop` in a
+# hand-written core-IR test span for **nine hours** at 100% CPU on the *first*
+# target, and the run reported nothing at all — not even which file it was in.
+# `COMPILE_LOCK` is the other documented way to hang here (`compile::mod`'s
+# `retire_llvm` explains why locking in a `Drop` would "trade a rare crash for
+# a reliable hang"). A timed-out target is named in `TIMEDOUT:` at the end and
+# is a failure, not a skip.
+#
+# 1200s is over three times the slowest target measured (island_self_compile_test
+# ~375s, compile_file_test ~182s). Raise it with `TEST_TIMEOUT=3600 scripts/...`
+# on a cold cache or a slower machine rather than removing it.
+#
+# **If you pipe this script, pass `grep --line-buffered` (or `stdbuf -oL`).**
+# grep buffers by block when its output is not a terminal, so a plain
+# `scripts/test-serial.sh | grep ...` hides which target is running — which is
+# how the nine hours went by unnoticed.
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -79,10 +100,27 @@ fi
 # a different target from its staticlib. Without this the AOT tests silently
 # link whatever `.a` was last left on disk, so a newly added `rt_*` shim fails
 # with an undefined symbol while every JIT test passes.
+# GNU coreutils' `timeout`, which macOS does not ship: Homebrew installs it as
+# `timeout` when coreutils is linked with default names and as `gtimeout`
+# otherwise. Resolved by name (never a hardcoded prefix) and **refused rather
+# than skipped** if it is missing — running unbounded is the failure mode this
+# exists to remove, so silently doing it anyway would be worse than stopping.
+timeout_bin=""
+for candidate in timeout gtimeout; do
+    if command -v "$candidate" >/dev/null 2>&1; then timeout_bin="$candidate"; break; fi
+done
+if [ -z "$timeout_bin" ]; then
+    echo "FAILED: no \`timeout\` on PATH (macOS does not ship one: \`brew install coreutils\`)."
+    echo "        This script will not run the suite unbounded — see its header comment."
+    exit 1
+fi
+: "${TEST_TIMEOUT:=1200}"
+
 echo "=== cargo build -p typelisp-front (staticlib for the AOT tests) ==="
 cargo build -p typelisp-front || { echo "FAILED: building typelisp-front's staticlib"; exit 1; }
 
 failed=()
+timedout=()
 for t in "${targets[@]}"; do
     if [ "$t" = "--lib" ]; then
         echo "=== cargo test --lib ==="
@@ -95,16 +133,35 @@ for t in "${targets[@]}"; do
     # comes after) wins — libtest honors the last occurrence. The `if` guard
     # avoids expanding an empty `passthrough` array under `set -u` (an error on
     # the bash 3.2 macOS ships).
+    #
+    # `-k 10`: SIGTERM first, then SIGKILL ten seconds later. A test binary
+    # spinning in a loop dies on the TERM, but the child processes an AOT test
+    # spawned may not, and a target that is not dead is a target that still
+    # holds cargo's build lock.
     if [ "${#passthrough[@]}" -gt 0 ]; then
-        cargo test "${sel[@]}" -- --test-threads=1 "${passthrough[@]}" || failed+=("$t")
+        "$timeout_bin" -k 10 "$TEST_TIMEOUT" cargo test "${sel[@]}" -- --test-threads=1 "${passthrough[@]}"
     else
-        cargo test "${sel[@]}" -- --test-threads=1 || failed+=("$t")
+        "$timeout_bin" -k 10 "$TEST_TIMEOUT" cargo test "${sel[@]}" -- --test-threads=1
+    fi
+    rc=$?
+    # 124 is `timeout`'s own "the command was still running"; 137 is a SIGKILL,
+    # which after `-k` means it ignored the TERM as well.
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+        echo "=== TIMED OUT after ${TEST_TIMEOUT}s: $t ==="
+        timedout+=("$t")
+    elif [ "$rc" -ne 0 ]; then
+        failed+=("$t")
     fi
 done
 
 echo
+if [ "${#timedout[@]}" -ne 0 ]; then
+    echo "TIMEDOUT: ${timedout[*]}"
+fi
 if [ "${#failed[@]}" -ne 0 ]; then
     echo "FAILED: ${failed[*]}"
+fi
+if [ "${#timedout[@]}" -ne 0 ] || [ "${#failed[@]}" -ne 0 ]; then
     exit 1
 fi
 echo "ALL TESTS PASSED (serial)"
