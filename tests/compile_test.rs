@@ -584,71 +584,95 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
     assert_eq!(unsafe { quadruple.call(argv.as_ptr(), argv.len() as u32) }, 20);
 }
 
-/// `build-make-closure`/`build-closure-apply`: a `BoxedObj::CompiledClosure`
+/// `build-make-closure`/`coroutine-apply`: a `BoxedObj::CompiledClosure`
 /// wrapping a capturing function (`add_offset`, declared via
 /// `add-function-with-env`, adding its one logical argument to a captured
 /// value), called *indirectly* through the closure value rather than
 /// `build-call-with-env`'s direct, statically-known-target path
-/// (labels/closures Stage 4) — no `ast_bridge`/`compiler.rs` involvement
-/// yet, raw builtins only, the same way Phase 0/1's and Stage 1's own
-/// raw-builtin tests preceded their self-hosted-compiler-body counterparts.
-/// This module is built entirely by hand (`llvm-module::create`, no
-/// `Interp::compile_function`/`add_compiled_function`), so it has to
-/// explicitly declare the `rt_closure_new`/`rt_apply_any` shims
-/// `build-make-closure`/`build-closure-apply` call into (bodyless
-/// `add-function` declarations,
-/// resolved via LLVM's default process-symbol lookup since every `rt_*`
-/// function is a `#[no_mangle]` symbol already linked into this test
-/// binary) — the same idiom `rt_root_count`/`rt_truncate_sexpr_roots` need
-/// in the hand-built `loop`/`return` tests elsewhere in this file. `Heap`
+/// (labels/closures Stage 4) — no `ast_bridge`/`compiler.rs` involvement,
+/// raw builtins only, the same way Phase 0/1's and Stage 1's own raw-builtin
+/// tests preceded their self-hosted-compiler-body counterparts.
+///
+/// **The caller is a coroutine and the callee is classic**, which is the
+/// point after C5. An indirect apply no longer calls a C function that
+/// returns the answer — `build-closure-apply` and the `rt_apply_any` it
+/// called are both retired, because a callee that turns out to be
+/// interpreted has no answer to give on that frame. It names the closure and
+/// returns `STATUS_CALL` instead, and the *driver* decides who runs it. Here
+/// `resolve_closure` finds a classic body, so the driver takes
+/// `Callee::Classic`: it calls the body itself, catches an unwind out of it,
+/// and hands the answer back through the frame's value slot. **This is the
+/// only test over that arm** — the coroutine and interpreted arms are
+/// covered in `concurrency_test`.
+///
+/// Which ABI the boxed body answers to is recorded by *which constructor
+/// `build-make-closure` called*, and that follows the target's LLVM type:
+/// `add-function-with-env` here, so `rt_closure_new`, which this hand-built
+/// module has to declare explicitly (a bodyless `add-function`, resolved via
+/// LLVM's default process-symbol lookup since every `rt_*` function is a
+/// `#[no_mangle]` symbol already linked into this test binary) — the same
+/// idiom the hand-built `loop`/`return` tests elsewhere in this file need.
+/// `coroutine-begin` and `coroutine-apply` declare their own shims. `Heap`
 /// must be registered active for the duration of the call too, since
-/// `rt_closure_new` allocates on it. **`rt_closure_new`, not
-/// `rt_coroutine_closure_new`**: the two record which ABI the boxed body
-/// answers to, and this module's bodies are hand-built under `add-function`/
-/// `add-function-with-env` — classic. Only a body that came out of
-/// `compile-function` is a coroutine, which is why the tests below that call
-/// it declare the other one.
+/// `rt_closure_new` allocates on it.
+///
+/// The closure goes in a frame slot rather than staying an SSA value both
+/// because that is what the island emits and for the ABI's central reason:
+/// nothing defined before `coroutine-apply` reaches the resume block after
+/// it.
 #[test]
 fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
     let src = r#"
         (defun build-and-run-closure-module () llvm-module
-          (let ((m (llvm-module::create "mod")))
-            (let ((ignored-new-decl (add-function m "rt_closure_new"))) ())
-            (let ((ignored-apply-decl (add-function m "rt_apply_any"))) ())
-            (let ((add-offset-fn (add-function-with-env m "add_offset")))
-              (let ((caller-fn (add-function m "caller")))
-                (let ((b1 (append-block add-offset-fn "entry")))
-                  (let ((builder1 (llvm-builder::create)))
-                    (position-at-end builder1 b1)
-                    (let ((x (load-arg builder1 add-offset-fn 0)))
-                      (let ((offset (load-env builder1 add-offset-fn 0)))
-                        (build-ret builder1 (build-add builder1 x offset))))))
-                (let ((b2 (append-block caller-fn "entry")))
-                  (let ((builder2 (llvm-builder::create)))
-                    (position-at-end builder2 b2)
-                    (let ((env-arr (alloca-args builder2 1)))
-                      (store-arg builder2 env-arr 0 (const-word builder2 100))
-                      (let ((closure (build-make-closure builder2 m add-offset-fn env-arr 1 0 0)))
-                        (let ((args-arr (alloca-args builder2 1)))
-                          (store-arg builder2 args-arr 0 (const-word builder2 5))
-                          (build-ret builder2 (build-closure-apply builder2 m closure args-arr 1)))))))
-                m))))
+          (let* ((m (llvm-module::create "mod"))
+                 (ignored-new (add-function m "rt_closure_new"))
+                 (add-offset-fn (add-function-with-env m "add_offset"))
+                 (caller-fn (add-coroutine-function m "caller"))
+                 (b1 (append-block add-offset-fn "entry"))
+                 (builder1 (llvm-builder::create)))
+            (position-at-end builder1 b1)
+            (build-ret builder1
+                       (build-add builder1
+                                  (load-arg builder1 add-offset-fn 0)
+                                  (load-env builder1 add-offset-fn 0)))
+            (let* ((b2 (append-block caller-fn "entry"))
+                   (builder2 (llvm-builder::create)))
+              (position-at-end builder2 b2)
+              (coroutine-begin builder2 m caller-fn)
+              (let* ((closure-slot (frame-slot builder2))
+                     (env-arr (alloca-args builder2 1))
+                     (args-arr (alloca-args builder2 1)))
+                (store-arg builder2 env-arr 0 (const-word builder2 100))
+                (store-arg builder2 closure-slot 0
+                           (build-make-closure builder2 m add-offset-fn env-arr 1 0 0))
+                (store-arg builder2 args-arr 0 (const-word builder2 5))
+                (coroutine-end builder2 m
+                               (coroutine-apply builder2 m
+                                                (load-raw builder2 closure-slot 0)
+                                                args-arr 1))))
+            m))
         (build-and-run-closure-module)
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    module.borrow().verify().expect("the emitted module verifies");
     let engine = module
         .borrow()
         .create_jit_execution_engine(OptimizationLevel::None)
         .expect("failed to create JIT execution engine");
     let caller = unsafe {
         engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("caller")
+            .get_function::<unsafe extern "C" fn(i64) -> i64>("caller")
             .expect("failed to look up the compiled `caller` function")
     };
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    assert_eq!(unsafe { caller.call(std::ptr::null(), 0) }, 105);
+
+    let mut stack = typelisp::compile::coroutine::FrameStack::new();
+    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(caller.as_raw()) };
+    let answer = stack.run(&mut heap, entry, &[]).expect("the chain ran to an answer");
+    assert_eq!(answer, 105, "the classic body's answer came back through the frame's value slot");
+    assert_eq!(stack.depth(), 0, "and the caller's frame was popped");
 }
 
 /// The end-to-end Phase 1 slice: `(compile name)` from typelisp source
@@ -1146,7 +1170,7 @@ fn compile_dispatches_a_defun_with_a_capturing_immediately_invoked_lambda_to_nat
 /// The end-to-end Stage 4 slice (escaping + capturing `lambda`): `adder`
 /// returns a closure that captures its own parameter `n`, and `apply-fn`
 /// (a separately-compiled function taking a `(fn (i64) i64)` *parameter*)
-/// calls it through `apply-indirect`/`build-closure-apply` — flowing from
+/// calls it through `apply-indirect`/`coroutine-apply` — flowing from
 /// one `compile`d function's `i64` return straight into another's `i64`
 /// argument via the ordinary `Expr::Call`-dispatches-to-`Interp::compiled`
 /// path (see `Interp::compile_function`'s doc comment). This closure value
@@ -1280,11 +1304,13 @@ fn a_niched_option_sexpr_pattern_binds_inside_an_enclosing_closure() {
 /// is an ordinary tree-walked `lambda` and yields a `BoxedObj::Closure`. It
 /// then crosses into `apply-fn`, which *is* compiled, and gets applied there.
 ///
-/// Before `rt_apply_any` this aborted the process: `build-closure-apply`
-/// emitted a `rt_closure_fnptr` call, which `fatal`s on anything that is not
-/// a `BoxedObj::CompiledClosure`, and `fatal` cannot be caught. Compiled code
-/// now calls a closure value through `rt_apply_any`, which dispatches on what
-/// the box actually holds and re-enters the interpreter for this case.
+/// Before this hole was closed the process aborted: the apply emitted a
+/// `rt_closure_fnptr` call, which `fatal`s on anything that is not a
+/// `BoxedObj::CompiledClosure`, and `fatal` cannot be caught. Compiled code
+/// now *names* the closure to its driver (`coroutine-apply`) instead of
+/// calling anything, and the driver dispatches on what the box actually
+/// holds — for this case handing the callee to the task's own continuation
+/// stack, which is where the interpreter reads it (`Paused::Applying`).
 #[test]
 fn compile_applies_an_interpreted_closure_handed_to_a_compiled_function() {
     let v = eval_ok_with_compiler(
@@ -1369,14 +1395,14 @@ fn an_interpreted_closure_held_by_compiled_code_survives_gc_pressure() {
 /// is used bare (no call syntax) where a `(fn (i64) i64)` is expected — the
 /// checker reifies that into a non-capturing forwarding `lambda` (`(lambda
 /// ... (call "square" (var arg0)))`), reaching the exact same closure-box/
-/// `build-closure-apply` machinery the closure-value test above does.
+/// `coroutine-apply` machinery the closure-value test above does.
 ///
 /// `run-it`'s body (not the top-level call site) is where `square` appears
 /// bare, so the whole chain — `run-it` -> `apply-fn` -> the `square` `FnRef`
 /// — stays compiled. (This routing used to be load-bearing: a bare top-level
 /// `(apply-fn square 5)` produced an *interpreted* closure that the compiled
 /// boundary rejected outright. It no longer is — an interpreted closure
-/// crosses and is applied through `rt_apply_any`, see
+/// crosses and is applied through the driver, see
 /// `compile_applies_an_interpreted_closure_handed_to_a_compiled_function` —
 /// but this test keeps the `run-it` form as the original end-to-end slice.)
 #[test]
@@ -1500,7 +1526,6 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
-             (let ((ignored-apply (add-function m "rt_apply_any"))) ())
              (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int-any-width 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -1523,16 +1548,14 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
 #[test]
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_outer_value() {
     // See `the_compiler_body_boxes_a_bare_labels_sibling_reference`'s doc
-    // comment for why `rt_coroutine_closure_new` needs an explicit declaration and
-    // `Heap` needs to be active here. `rt_push_sexpr_root` needs one too now
-    // — see `the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value`'s
-    // own doc comment (`bind-captures` unconditionally roots every captured
-    // value, closure-representation unification Stage 4).
+    // comment for why `rt_coroutine_closure_new` needs an explicit declaration
+    // and `Heap` needs to be active here. Nothing else needs one: the
+    // indirect apply's own shim is declared by `coroutine-apply`, and
+    // `bind-captures` stopped rooting captured values in C1 — a capture lives
+    // in a frame slot, which *is* the root.
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
-             (let ((ignored-apply (add-function m "rt_apply_any"))) ())
-             (let ((ignored-push (add-function m "rt_push_sexpr_root"))) ())
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -6491,8 +6514,9 @@ fn compile_captures_a_hashtable_in_a_closure() {
 ///
 /// This is the boundary crossed in the other direction from a compiled
 /// `panic`: `apply-it` is native, its `f` parameter is an ordinary
-/// interpreted function, so the call goes out through `rt_apply_any` into the
-/// interpreter and the failure has to travel back through a compiled frame.
+/// interpreted function, so the call goes out through the driver's apply
+/// boundary into the interpreter and the failure has to travel back through a
+/// compiled frame.
 /// `rt_apply_interpreted` used to have nowhere to report to and aborted —
 /// with the `EvalError`'s `Debug` formatting leaking into the message, at
 /// that.

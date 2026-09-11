@@ -195,10 +195,9 @@ fn compiles_and_runs_main_calling_a_helper_function() {
 /// `(adder 5)` directly — `main` still can't have parameters/`let`s of its
 /// own, but every value here comes from ordinary calls with literal
 /// arguments, which `main`'s body can already express (see this module's
-/// doc comment). Proves the `ClosureBox` (`build-make-closure`/
-/// `build-closure-apply`, `malloc`/`free`-based — see
-/// `registry::llvm_builder_def`'s doc comment) links and runs correctly
-/// from a real `cc`-built executable, not just under JIT.
+/// doc comment). Proves the closure box (`build-make-closure`/
+/// `coroutine-apply`, a `BoxedObj::CompiledClosure` on the GC heap) links and
+/// runs correctly from a real `cc`-built executable, not just under JIT.
 #[test]
 fn compiles_and_runs_an_escaping_capturing_lambda_through_a_helper() {
     let src = r#"

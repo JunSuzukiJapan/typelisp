@@ -1519,8 +1519,8 @@ fn gc_traces_through_cell_then_struct_then_cons() {
 ///
 /// `ret` is the one worth naming. The interpreter never reads it — it returns
 /// the `Value` it produced — so the only reader is the compiled -> interpreted
-/// boundary (`typelisp_rt::rt_apply_any`, which has to encode the result by
-/// its declared representation). A slot with one distant reader is exactly
+/// boundary (`begin_applying`, which has to encode the result by its
+/// declared representation). A slot with one distant reader is exactly
 /// the kind the mark phase can quietly stop tracing, and `live_count` is what
 /// notices.
 #[test]

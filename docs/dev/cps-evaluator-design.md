@@ -222,9 +222,12 @@ roots: [ ..., state-env, state-form, frame0 の値.., frame1 の値.., ... ]
 
 - **interpreted → compiled**: `Interp::enter_compiled`（`eval/interp.rs:1173`）。
   継続スタック上の**1 フレーム**として扱う。呼び出しが返るまでインタプリタは何もしない
-- **compiled → interpreted**: `rt_apply_any`（`crates/typelisp-rt/src/lib.rs:1882`）→
-  `call_interpreted_closure`（`core_eval.rs`）。**新しい継続スタックを立てて完了まで回す**。
-  ネイティブフレームが待っているので、末尾位置を諦めてその場で評価しきるしかない
+- **compiled → interpreted**: `rt_apply_any` → `call_interpreted_closure`（`core_eval.rs`）。
+  **新しい継続スタックを立てて完了まで回す**。ネイティブフレームが待っているので、
+  末尾位置を諦めてその場で評価しきるしかない
+  —— **Phase C5 でこの向きは変わった**（`rt_apply_any` は削除。呼び出し地点は呼び先を
+  名指ししてドライバへ戻り、インタプリタの呼び先はタスク自身の継続スタックに積まれる）。
+  `docs/dev/compiled-cps-design.md` の C5 節を参照
 
 帰結: **タスクの切り替え点は interpreted 経路にしか置けない。** compiled 関数の実行中は
 切り替えられない。並行機構ではこれを「compiled 呼び出しは切り替えの単位として atomic、

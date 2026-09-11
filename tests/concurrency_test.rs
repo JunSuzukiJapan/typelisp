@@ -783,8 +783,9 @@ fn an_applied_closure_s_throw_runs_a_compiled_cleanup() {
 ///
 /// The slot behind a trait object need not hold a compiled address at all:
 /// the concrete type can be the user's own struct whose method nothing ever
-/// compiled. That is `rt_dyn_call`'s whole reason for existing at the
-/// runtime — and since C5 the same reason puts the decision in the driver,
+/// compiled. That was `rt_dyn_call`'s whole reason for existing at the
+/// runtime rather than the call site — and since C5 the same reason puts the
+/// decision in the driver,
 /// which can hand the call to the continuation stack instead of running it on
 /// a machine frame.
 #[test]
