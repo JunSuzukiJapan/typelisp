@@ -2195,6 +2195,16 @@ pub fn llvm_builder_def() -> AdtDef {
             true,
         ),
     );
+    // `coroutine-suspend` is `coroutine-call` with the callee left out: set the
+    // resume point, hand control back with `STATUS_SUSPEND`, and answer with
+    // whatever the task was waiting for once it is resumed. The suspending
+    // builtin's own shim (`rt_suspend_*`) has already been called by then and
+    // has recorded *what* is being waited for, so nothing about that needs to
+    // reach this builtin.
+    assoc.insert(
+        "coroutine-suspend".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], llvm_value_ty(), true),
+    );
     assoc.insert(
         "coroutine-end".to_string(),
         assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], Type::Unit, true),

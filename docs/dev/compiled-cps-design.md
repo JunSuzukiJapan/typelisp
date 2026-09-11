@@ -882,3 +882,94 @@ cleanup は確保する。`gc-stress` の下で、スロットは `alloca` な�
 **先頭にあるものだけが「無いこと」を別の意味に化けさせる**から。
 ループの入場ごとに 1 回（`Frame::Loop` は本体から再開するのでノードを
 読み直さない）。
+
+
+## C3. 中断（`yield` まで）
+
+コンパイル済みのフレームが `STATUS_SUSPEND` を言えるようになった。
+`concurrency_test` の
+
+```lisp
+(defun tick ((name string) (n i32)) ()
+  (dotimes (i n) (setf trail (append trail name)) (yield)))
+(compile tick)
+(let ((a (go (tick "a" 3))) (b (go (tick "b" 3)))) (progn (wait a) (wait b)))
+trail                                  ; => "ababab"
+```
+
+が緑になった。`ababab` は **compiled な本体が途中で止まって 3 回ずつ再入する**
+以外の出方がない——何もタスクをプリエンプトしないので、止まらなければ
+`aaabbb`（`without_yield_each_task_runs_to_its_end` がそれを固定している）。
+
+### 呼び出しが既にこの形だったので、中断は 40 行だった
+
+`coroutine-suspend` は `coroutine-call` から**呼び先を抜いただけ**:
+
+| | `coroutine-call` | `coroutine-suspend` |
+|---|---|---|
+| 前に | `rt_frame_call(callee, args...)` | 中断する組み込みの `rt_suspend_*` |
+| pc | 立てる | 立てる |
+| `ret` | `STATUS_CALL` | `STATUS_SUSPEND` |
+| 再開ブロック | 値スロットを読む | 値スロットを読む |
+
+呼び出しが既に「活性を終えて pc で戻ってくる」形だったので、中断は同じ形の
+status 語が違うだけになる。C2 の投資がここで返った。
+
+島側の判定は **`rt_suspend_` という、より長い接頭辞**。`rt_` が「これは Rust
+だから*呼ぶ*」の構造的な合図であるのと同じで、`externs.rs` の表だけが
+「どの組み込みが中断するか」を決める——名前の第 2 のリストを作らない。
+
+「何を待つか」は `typelisp_abi::call_state` の**生の 2 語**（kind と payload）
+で渡す。`Waiting` は `TaskId` と `Instant` を名指すスケジューラの型で、
+公表する側の crate はその下にいる——`PENDING_CALL` がアドレスと
+`CoroutineFn` を分けているのと同じ分業。
+
+### タスクがフレーム鎖を持つ
+
+`Task::compiled` は `FrameStack` で、**タスクは一度に 1 本しか駆動しない**:
+鎖から出る道は「戻る」と「中断する」だけで、鎖が立っている間タスクは
+それを駆動しているか、それに対してブロックしているかのどちらか——`step_cps`
+は走れないので 2 本目を始められない。compiled が*インタプリタへ*戻る呼び出し
+（`rt_apply_any`）はマシンスタック上の入れ子ドライバで走るので、**その境界だけ
+は今も中断できない**。
+
+**スケジューラは 1 行も変えていない。** 起床は `State::Apply(v)` を置くだけ
+なので、それを受け取る CPS フレーム（`Frame::DriveCompiled`）を 1 つ足して
+compiled 側へ橋渡しした。`Blocked` を太らせるより、受け手を 1 つ足すほうが
+触る面が小さい。
+
+### 詰まった 1 点: crossing root が truncate に消されていた
+
+`enter_fn` で marshal した root を、直後の `heap.truncate_roots(fbase)` が
+消していた。同期版の `call_compiled` はこれに当たらない——push と pop を
+**1 回の Rust 呼び出しの中で完結**させ、truncate はその後だったから。
+
+だから引数は marshal を跨いで生き残らなければならない。`State::CompiledEnter`
+は引数を**ヒープリスト**で運び（状態スロットが根にする。`State::Enter` が
+`go` の引数にしているのと同じ理由——`Vec<Value>` はコレクタから見えない）、
+encode は切り替えの**後**で行う。`DriveStart` と `DriveCtx` が分かれているのは
+この一点のため。
+
+推測でなく計測で当てた: `set_state` ごとの root 数と rt 側の push/pop を出し、
+`xroots=1 on_entry=4` なのに `count=2` という 1 行で確定した。
+
+### 予告していたコメントが 2 つ外れた
+
+`coroutine-begin` のコメントは「C3 でこの push/pop の対は成り立たなくなり、
+frame の root は `FrameStack::roots()` へ移る」と書いていた。**移らなかった。
+理由はルートスタックがタスクごとだから**——タスクが待っている間、その stack
+には誰も push しない。鎖に入る他の道（別のタスク、compiled からの `go`、
+`rt_apply_any` のコールバック）はどれも自分の stack を持つか、1 活性の中で
+均衡する。だから LIFO は今も成り立ち、`FrameStack::roots()` は**答えの出て
+いる問いへの 2 つ目の答え**になった（C5 の、後ろにタスクのいないドライバの
+ためには要る）。
+
+予告を残すのは実装より長生きするコメントの典型なので、両方「なぜ成り立った
+か」に書き換えた。
+
+### 残り（C3c）
+
+`sleep` と `task::wait`。`yield` より 1 つずつ多く要る——前者は payload
+（秒）、後者は**起床値とその repr**。`yield` の起床値は unit なので、
+`Frame::DriveCompiled` が運ぶ `Repr` はまだ `Unit` しか取らない。
+`SUSPENDING_CALLS` は `["sleep"]` だけになった。

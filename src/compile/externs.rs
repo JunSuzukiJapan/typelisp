@@ -169,6 +169,13 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "set-dispatch-macro-character" => "rt_set_dispatch_macro_character",
         "get-dispatch-macro-character" => "rt_get_dispatch_macro_character",
         "sleep" => "rt_sleep",
+        // **The `rt_suspend_` prefix is load-bearing.** `compile-call` reads it
+        // to emit the suspension protocol (set the resume point, return
+        // `STATUS_SUSPEND`) instead of an ordinary call — the same structural
+        // test the `rt_` prefix already is for "this is Rust, call it". One
+        // list, read by the island, rather than a second list of names that
+        // would have to agree with this one.
+        "yield" => "rt_suspend_yield",
         // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
         // `disassemble` have no row and never will — those are
         // interpreter-only forms, the same category `compile`/`compile-file`/
@@ -406,7 +413,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 264] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 265] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -418,6 +425,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 264] {
     use typelisp_print::aot::{rt_format_call_method, rt_print_enum_variant, rt_print_object_method};
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
+    use typelisp_rt::coroutine::rt_suspend_yield;
     use typelisp_rt::sys_builtin::{
         rt_command_line_args, rt_dribble_start, rt_dribble_stop, rt_ed_open, rt_exit,
         rt_get_internal_real_time, rt_get_internal_run_time,
@@ -719,6 +727,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 264] {
         ("rt_stream_write_byte", rt_stream_write_byte as usize),
         ("rt_stream_unread_char", rt_stream_unread_char as usize),
         ("rt_sleep", rt_sleep as usize),
+        ("rt_suspend_yield", rt_suspend_yield as usize),
         ("rt_stream_listen", rt_stream_listen as usize),
         ("rt_stream_position", rt_stream_position as usize),
         ("rt_set_macro_character", rt_set_macro_character as usize),

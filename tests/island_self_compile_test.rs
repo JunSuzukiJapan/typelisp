@@ -142,6 +142,8 @@ const ISLAND_DEFUNS: &[&str] = &[
     "emit-rt-call",
     "compile-call-args",
     "compile-apply",
+    "compile-suspending-call",
+    "has-prefix",
     "compile-call",
     "compile-apply-indirect",
     "compile-if-branch",

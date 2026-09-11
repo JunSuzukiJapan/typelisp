@@ -303,6 +303,37 @@ pub mod call_state {
         /// The callee, arguments and captures a frame is asking the driver to
         /// call, set immediately before it returns `STATUS_CALL`.
         static PENDING_CALL: RefCell<Option<(usize, Vec<i64>, Vec<i64>)>> = const { RefCell::new(None) };
+        /// What a frame is asking to wait for, set immediately before it
+        /// returns `STATUS_SUSPEND`: a `SUSPEND_*` kind and one payload word.
+        ///
+        /// **Two raw words, not a `Waiting`.** The scheduler's own type names
+        /// a `TaskId` and an `Instant`, both of which live in the front end;
+        /// this crate is below it and below `typelisp-rt` (see this module's
+        /// doc comment), and a compiled body has nothing but words to hand
+        /// over anyway. The front end turns the pair back into a `Waiting`,
+        /// which is the same division `PENDING_CALL` makes between an address
+        /// and a `CoroutineFn`.
+        static PENDING_SUSPEND: RefCell<Option<(i64, i64)>> = const { RefCell::new(None) };
+    }
+
+    /// `(yield)` — nothing to wait for; the task gives up the rest of its
+    /// turn. Payload unused.
+    pub const SUSPEND_YIELD: i64 = 0;
+    /// `(sleep secs)` — the clock. Payload: the seconds as `f64::to_bits`.
+    pub const SUSPEND_SLEEP: i64 = 1;
+    /// `(wait t)` — another task's result. Payload: its scheduler id.
+    pub const SUSPEND_WAIT: i64 = 2;
+
+    /// Records what the frame about to return `STATUS_SUSPEND` is waiting for.
+    pub fn set_pending_suspend(kind: i64, payload: i64) {
+        PENDING_SUSPEND.with(|p| *p.borrow_mut() = Some((kind, payload)));
+    }
+
+    /// Takes it back out. `None` means a frame returned `STATUS_SUSPEND`
+    /// without saying what it was waiting for, which is a broken convention
+    /// rather than "waiting for nothing" — the caller says so and stops.
+    pub fn take_pending_suspend() -> Option<(i64, i64)> {
+        PENDING_SUSPEND.with(|p| p.borrow_mut().take())
     }
 
     pub fn set_pending_args(args: &[i64]) {

@@ -862,12 +862,7 @@ impl Interp {
         // discard the crossing roots and whatever compiled code pushed on top
         // of them in one shot — an unwinding `(panic ...)` runs none of the
         // pops that normally balance either.
-        let roots_on_entry = heap.root_count();
-        // A `defun`/`defmethod`'s `sig` lists only its fixed parameters; a
-        // `&rest` one that reached compilation would land in the "no declared
-        // representation" error above rather than be guessed at.
-        let (int_args, crossing_roots) = self.encode_crossing_args(heap, argv, param_reprs, false)?;
-        self.enter_compiled(heap);
+        let (int_args, crossing_roots, roots_on_entry) = self.begin_compiled(heap, argv, param_reprs)?;
         let raw = match crate::eval::crossing::catch_compiled_panic(|| compiled.call(&int_args)) {
             Ok(raw) => raw,
             Err(e) => {
@@ -875,6 +870,48 @@ impl Interp {
                 return Err(e);
             }
         };
+        self.finish_compiled(heap, raw, ret, crossing_roots)
+    }
+
+    /// [`Self::call_compiled`]'s marshaling half, for a caller that **drives**
+    /// the body instead of calling it.
+    ///
+    /// A coroutine-ABI body reached from a task is not a call: the task owns
+    /// the frame chain, so the crossing has to be split in two around however
+    /// many times the body stops and starts again. Everything between the two
+    /// halves — the encoded words, how many roots were pushed, where the root
+    /// stack stood — travels in the task's state (`core_cps`'s `DriveCtx`)
+    /// rather than in Rust locals, which is exactly what makes the suspension
+    /// in the middle survivable.
+    ///
+    /// Returns the encoded arguments, how many crossing roots were pushed (the
+    /// caller pops exactly that many through [`Self::finish_compiled`]), and
+    /// the root count from before any of it, for the unwind path to truncate
+    /// to — an unwinding `(panic ...)` runs none of the pops that balance.
+    pub(crate) fn begin_compiled(
+        &self,
+        heap: &mut Heap,
+        argv: &[Value],
+        param_reprs: &[Repr],
+    ) -> Result<(Vec<i64>, usize, usize), EvalError> {
+        let roots_on_entry = heap.root_count();
+        // A `defun`/`defmethod`'s `sig` lists only its fixed parameters; a
+        // `&rest` one that reached compilation would land in the "no declared
+        // representation" error above rather than be guessed at.
+        let (int_args, crossing_roots) = self.encode_crossing_args(heap, argv, param_reprs, false)?;
+        self.enter_compiled(heap);
+        Ok((int_args, crossing_roots, roots_on_entry))
+    }
+
+    /// The other half of [`Self::begin_compiled`]: discard the crossing roots
+    /// and read the returned word back as a value.
+    pub(crate) fn finish_compiled(
+        &self,
+        heap: &mut Heap,
+        raw: i64,
+        ret: &Repr,
+        crossing_roots: usize,
+    ) -> Result<Value, EvalError> {
         for _ in 0..crossing_roots {
             heap.pop_root();
         }

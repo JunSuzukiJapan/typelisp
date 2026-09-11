@@ -91,8 +91,15 @@ impl FrameStack {
     /// Every frame in the chain, for the collector to trace.
     ///
     /// A frame reached only from here is reachable from nowhere else — the
-    /// caller's frame does not point at the callee's — so this is the whole of
-    /// what keeps a suspended chain alive.
+    /// caller's frame does not point at the callee's.
+    ///
+    /// **Not what keeps a suspended chain alive today.** Each frame is rooted
+    /// by the prologue that made it (`coroutine-begin`'s
+    /// `rt_push_sexpr_root`), on the root stack of the task that owns the
+    /// chain, and `Heap::gc` marks every root stack rather than only the
+    /// running one — so a chain put down mid-call stays alive with nothing
+    /// extra registered. This exists for a driver that has no task behind it
+    /// to ask, which is what C5's boundaries will need.
     pub fn roots(&self) -> impl Iterator<Item = Value> + '_ {
         self.frames.iter().map(|(_, f)| *f)
     }
@@ -118,6 +125,45 @@ impl FrameStack {
         self.run_with_env(heap, f, args, &[])
     }
 
+    /// Hands a value to the innermost frame, where a returning callee would
+    /// have left it.
+    ///
+    /// What a suspension is waiting for arrives this way: the frame reads its
+    /// value slot on resuming, and it cannot tell — and must not be able to
+    /// tell — whether the word came from a callee or from a scheduler.
+    pub fn set_top_value(&self, heap: &mut Heap, word: i64) {
+        let (_, frame) = match self.frames.last() {
+            Some(top) => *top,
+            None => panic!("set_top_value: there is no suspended chain to deliver to"),
+        };
+        set_frame_value(heap, frame, word);
+    }
+
+    /// Pick a suspended chain back up: re-enter its innermost frame.
+    ///
+    /// The counterpart of [`Self::run`] for a stack that is already standing.
+    /// The frame says where to resume (its `pc`), so entering it is the same
+    /// call as entering it the first time — which is the whole reason the ABI
+    /// has exactly one parameter.
+    ///
+    /// **The chain is this driver's alone**, so the loop runs down to zero
+    /// frames rather than to some base: a nested drive (`rt_protected_drive`,
+    /// `rt_apply_any`) cannot suspend, so there is no such thing as resuming
+    /// into the middle of somebody else's stack.
+    ///
+    /// Whatever the resumed frame was waiting for must already be in its value
+    /// slot ([`set_frame_value`]) — the same place a returning callee leaves
+    /// its answer, because from the resuming function's side those are the
+    /// same thing.
+    pub fn resume(&mut self, heap: &mut Heap) -> Result<i64, Paused> {
+        let (f, frame) = match self.frames.last() {
+            Some(top) => *top,
+            None => panic!("resume: there is no suspended chain to resume"),
+        };
+        let status = unsafe { f(typelisp_abi::encode(frame)) };
+        self.drive(heap, 0, status)
+    }
+
     /// [`run`](Self::run) for a callee that also has captures — a closure
     /// body, entered from outside the compiled world.
     pub fn run_with_env(
@@ -128,12 +174,25 @@ impl FrameStack {
         env: &[i64],
     ) -> Result<i64, Paused> {
         let base = self.frames.len();
-        let mut status = self.enter(f, args, env);
+        let status = self.enter(f, args, env);
         // The frame the entered function made for itself, so the driver can
         // reach it on the way back.
-        let mut current = take_current_frame();
-        self.frames.push((f, current));
+        self.frames.push((f, take_current_frame()));
+        self.drive(heap, base, status)
+    }
 
+    /// The protocol loop, shared by entering ([`Self::run_with_env`]) and
+    /// picking a chain back up ([`Self::resume`]).
+    ///
+    /// A `RETURN` pops and hands its value to the frame below (or out, if
+    /// there is none below `base`); a `CALL` pushes; a `SUSPEND` or `UNWIND`
+    /// leaves the chain standing and gets out of the way, because who runs
+    /// next is a scheduling question, not a calling one.
+    ///
+    /// `base` is how many frames belonged to somebody else when this drive
+    /// began — nonzero only for a nested drive, whose caller is waiting on a
+    /// machine frame.
+    fn drive(&mut self, heap: &mut Heap, base: usize, mut status: i64) -> Result<i64, Paused> {
         loop {
             match status & 0b11 {
                 STATUS_RETURN => {
@@ -150,8 +209,7 @@ impl FrameStack {
                 STATUS_CALL => {
                     let (callee, callee_args, callee_env) = take_pending_call();
                     status = self.enter(callee, &callee_args, &callee_env);
-                    current = take_current_frame();
-                    self.frames.push((callee, current));
+                    self.frames.push((callee, take_current_frame()));
                 }
                 STATUS_SUSPEND => return Err(Paused::Suspended),
                 _ => return Err(Paused::Unwinding),
@@ -193,4 +251,26 @@ pub fn frame_value(heap: &Heap, f: Value) -> i64 {
 /// Writes the value slot the protocol reserves.
 pub fn set_frame_value(heap: &mut Heap, f: Value, w: i64) {
     heap.set_frame_word(frame_id(f), typelisp_abi::FRAME_VALUE_SLOT, w);
+}
+
+// ---- asking to be put down ------------------------------------------------
+//
+// A suspending builtin is not a call that blocks: it is two facts handed to
+// the driver. The shim records *what* the task is waiting for, and the
+// compiled code then sets its resume point and returns `STATUS_SUSPEND` —
+// which is the `coroutine-call` shape with the callee left out.
+//
+// So these shims never block, and there is nothing here for an AOT executable
+// with no scheduler to get wrong: the driver on the other side decides whether
+// a suspension is something it can honour.
+
+/// `(yield)` for compiled code: give up the rest of this task's turn.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary).
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_yield(_args: *const i64, _argc: u32) -> i64 {
+    call_state::set_pending_suspend(call_state::SUSPEND_YIELD, 0);
+    0
 }

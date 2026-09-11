@@ -645,15 +645,22 @@ pub(crate) fn precheck_compilable(interp: &Interp, heap: &Heap, name: &str) -> R
 /// the graph [`crate::eval::interp::Interp::compute_sccs`] walks. Shared by that graph walk and
 /// [`crate::eval::interp::Interp::compile_scc`] (which needs the same edges again, in typed
 /// form, to know what to forward-declare/wire as `externals`).
-/// The free functions that **suspend the running task**, and so cannot be
-/// compiled — see the refusal in [`call_graph_edges`].
+/// The free functions that **suspend the running task** and do not lower yet
+/// — see the refusal in [`call_graph_edges`].
 ///
-/// `sleep` is here because with tasks it stops *the task*, not the thread
-/// (`core_cps`'s `Waiting::Until`). Compiled it could only ever stop the
-/// thread, so the same source would mean two different things depending on
-/// whether it had been through `(compile ...)` — silently. `task::wait` is
-/// the method-shaped member of the same set and is matched separately.
-const SUSPENDING_CALLS: &[&str] = &["yield", "sleep"];
+/// `yield` came off this list in Phase C3: a compiled frame can now say
+/// `STATUS_SUSPEND` and the task it belongs to keeps the chain, so the same
+/// source means the same thing on both sides. `sleep` and `task::wait` are
+/// next (C3c) — each needs one more thing than `yield` did, a payload and a
+/// wake value respectively.
+///
+/// `sleep` is *here* rather than left to lower as the thread-sleeping shim it
+/// has always had, because with tasks it stops **the task**, not the thread
+/// (`core_cps`'s `Waiting::Until`). Lowering it to `rt_sleep` would make the
+/// same source mean two different things depending on whether it had been
+/// through `(compile ...)`, silently. `task::wait` is the method-shaped member
+/// of the same set and is matched separately.
+const SUSPENDING_CALLS: &[&str] = &["sleep"];
 
 pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Result<Vec<CallEdge>, EvalError> {
     let path = fn_path_from_node_name(name);
@@ -665,13 +672,14 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
     };
     let mut edges = Vec::new();
 
-    // The operations that **suspend the running task**. A compiled body cannot
-    // suspend: a task is an interpreter continuation stack, and compiled code
-    // runs on the Rust stack with nothing to come back to (the plan's B6). So
-    // this is a deliberate refusal carrying the reason, rather than the
-    // "no such function"/"no compiled implementation" a missing lowering gives
-    // — `yield` and `task::wait` both exist, and neither is going to be
-    // lowered.
+    // The suspending operations that do not lower **yet**. A deliberate
+    // refusal carrying the reason, rather than the "no such function"/"no
+    // compiled implementation" a missing lowering gives — these exist.
+    //
+    // This used to say a compiled body *cannot* suspend, full stop (the plan's
+    // B6). That stopped being true in C3: the frames are in the task, so
+    // `yield` compiles and is gone from the list. What remains is the two that
+    // need something `yield` did not.
     //
     // `go` is deliberately absent from this: starting a task suspends nothing,
     // and `compile-go` lowers it.
@@ -689,9 +697,8 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
         });
     if let Some(target) = suspends {
         return Err(EvalError::Panic(format!(
-            "compile: \"{}\" calls \"{}\", which suspends the running task — and compiled code \
-             cannot suspend, because a task is an interpreter continuation stack while a compiled \
-             body runs on the Rust stack. Leave the `{}` in an interpreted caller; `go` itself compiles.",
+            "compile: \"{}\" calls \"{}\", which suspends the running task and does not lower yet. \
+             Leave the `{}` in an interpreted caller; `yield` and `go` both compile.",
             name, target, target
         )));
     }

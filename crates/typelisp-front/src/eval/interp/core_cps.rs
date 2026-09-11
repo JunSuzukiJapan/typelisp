@@ -62,6 +62,23 @@ enum State {
     /// from here; whatever it was waiting for arrives as the `Apply` that
     /// replaces this state.
     Blocked(Waiting),
+    /// Enter a coroutine-ABI compiled body, with its arguments already
+    /// marshaled.
+    ///
+    /// **Not a call.** The chain of frames the body builds belongs to the
+    /// task (`Task::compiled`), so the body can stop in the middle and the
+    /// task can be put down with it — which is the whole of Phase C3. A
+    /// *classic* body still goes through `Interp::call_compiled` and is as
+    /// atomic as it always was: it has nowhere to keep its state.
+    CompiledEnter { argv: Value, start: DriveStart },
+    /// Keep driving a chain that is already standing — after a suspension, or
+    /// after a call it made was answered.
+    ///
+    /// `wake` is what the task was waiting for, to be written into the
+    /// innermost frame's value slot before it is re-entered: the same place a
+    /// returning callee leaves its answer, because from the resuming
+    /// function's side those are the same thing.
+    CompiledResume { drive: DriveCtx, wake: Option<(Value, Repr)> },
     /// A non-local exit is in flight. Discard frames until one claims it.
     ///
     /// This is where `break`/`return`/`return-from`/`throw` live. The value
@@ -75,6 +92,54 @@ enum State {
     /// The one-slot assumption survives there — something Phase B has to look
     /// at, since two tasks can then be unwinding at once.
     Unwind(EvalError),
+}
+
+/// Everything a task needs to keep about a compiled body it is driving.
+///
+/// This is what used to be Rust locals in `Interp::call_compiled`. It has to
+/// be data because the drive can stop in the middle: the marshaling happened
+/// before the first entry and the decoding happens after the last return, and
+/// any number of suspensions can sit between them.
+///
+/// It holds no `Value`, deliberately — the chain's frames are rooted by the
+/// prologues that made them (`frame-begin`'s `rt_push_sexpr_root`), on *this
+/// task's* root stack, and `Heap::gc` marks every root stack rather than only
+/// the running one. So a suspended chain stays alive with nothing extra to
+/// register.
+struct DriveCtx {
+    /// What the crossing was set up with, kept because the trace line and the
+    /// return representation are still owed after the last resume.
+    start: DriveStart,
+    /// Where the root stack stood before marshaling, for the unwind path.
+    roots_on_entry: usize,
+    /// How many roots marshaling pushed, for the ordinary path.
+    crossing_roots: usize,
+}
+
+/// What is known about a compiled crossing *before* its arguments are
+/// marshaled.
+///
+/// The split is not cosmetic. Marshaling pushes GC roots, and it has to happen
+/// **after** the continuation frame that named this call has released its own
+/// roots — `step_task` truncates to the frame's base right after `resume`
+/// returns, which would take the crossing's roots with it. So the arguments
+/// travel to `CompiledEnter` as a heap list (rooted through the state slots,
+/// the way `State::Enter`'s do) and are encoded there.
+///
+/// The synchronous `Interp::call_compiled` never had to think about this: it
+/// pushed and popped inside one Rust call, entirely before the truncate.
+struct DriveStart {
+    /// Held for as long as the drive lasts, so the machine code cannot be
+    /// dropped underneath a suspended chain by a redefinition.
+    body: std::rc::Rc<dyn super::CompiledBody>,
+    /// The callee's declared parameter representations — what the words the
+    /// arguments encode to mean.
+    params: Vec<Repr>,
+    /// The callee's declared return representation — what the final word
+    /// means. Nothing else can say: the driver hands raw bits through.
+    ret: Repr,
+    /// The trace line owed on the way back, if `trace` is on for this callee.
+    watch: Option<(String, usize)>,
 }
 
 /// The `ArgsKind` of an already-checked call node — what `(go CALL)` wraps.
@@ -205,6 +270,16 @@ enum Frame {
     /// the frame, so it costs the tail position — as it does in the recursive
     /// evaluator, where a traced call is a real Rust frame too.
     TracedCall { name: String, depth: usize },
+    /// A compiled chain is standing and this task was put down waiting for
+    /// something. When the value arrives, put it in the chain's value slot and
+    /// keep driving.
+    ///
+    /// A frame rather than a wider `Blocked` state, so the scheduler needs no
+    /// changes at all: it wakes a task by replacing its state with
+    /// `State::Apply(v)`, and this is the thing that catches that value on
+    /// behalf of the compiled world. `wake` is the representation to encode it
+    /// back through, which the suspension site knows and nothing else does.
+    DriveCompiled { drive: DriveCtx, wake: Repr },
     /// `(dyn-new STR PATH ((PATH SYM)...) (...) R E)` — waiting on the value
     /// to box.
     DynNew { form: Value },
@@ -333,7 +408,7 @@ impl CpsStack {
             }
             // Names and tags are `String`s, and an exit carries its value in
             // the state slots rather than here. So do the stepping flags.
-            Frame::Step { .. } | Frame::TracedCall { .. } => {}
+            Frame::Step { .. } | Frame::TracedCall { .. } | Frame::DriveCompiled { .. } => {}
             Frame::Block { .. } | Frame::Catch { .. } | Frame::Return | Frame::ReturnFrom { .. } | Frame::Throw { .. } => {}
             Frame::Args { form, done, env, .. } => {
                 heap.push_root(*form);
@@ -388,6 +463,15 @@ struct Task {
     sbase: usize,
     stack: CpsStack,
     state: State,
+    /// The compiled call chain this task is in the middle of, if any.
+    ///
+    /// **At most one, and empty whenever the task is doing interpreted work.**
+    /// A chain is left only by returning or suspending, and while it stands the
+    /// task is either driving it or blocked on it — so `step_cps` cannot run
+    /// and cannot start a second one. A compiled body that calls *back* into
+    /// the interpreter (`rt_apply_any`) runs a nested driver on the machine
+    /// stack instead, which is why that boundary still cannot suspend.
+    compiled: typelisp_rt::coroutine::FrameStack,
 }
 
 /// What one step of a task did.
@@ -423,7 +507,12 @@ impl Task {
         let sbase = heap.root_count();
         heap.push_root(env);
         heap.push_root(form);
-        Task { sbase, stack: CpsStack::new(), state: State::Eval(form, env) }
+        Task {
+            sbase,
+            stack: CpsStack::new(),
+            state: State::Eval(form, env),
+            compiled: typelisp_rt::coroutine::FrameStack::new(),
+        }
     }
 
     /// Starts a task that completes a call whose callee and arguments have
@@ -432,7 +521,12 @@ impl Task {
         let sbase = heap.root_count();
         heap.push_root(argv);
         heap.push_root(form);
-        Task { sbase, stack: CpsStack::new(), state: State::Enter { form, argv, kind } }
+        Task {
+            sbase,
+            stack: CpsStack::new(),
+            state: State::Enter { form, argv, kind },
+            compiled: typelisp_rt::coroutine::FrameStack::new(),
+        }
     }
 }
 
@@ -739,6 +833,28 @@ fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
 /// Points the two state slots at whatever `state` carries.
 ///
 /// Must not allocate: it runs in the window right after a `truncate_roots`.
+/// What a compiled frame that just returned `STATUS_SUSPEND` is waiting for,
+/// and the representation its answer will come back through.
+///
+/// The compiled side publishes two raw words (`typelisp_abi::call_state`),
+/// because the crate it publishes from sits below the one that owns `Waiting`
+/// — a `TaskId` and an `Instant` are the scheduler's types. This is the one
+/// place that turns them back.
+fn pending_wait() -> Result<(Waiting, Repr), EvalError> {
+    let (kind, payload) = typelisp_abi::call_state::take_pending_suspend().ok_or_else(|| {
+        EvalError::Internal(
+            "a compiled frame suspended without recording what it was waiting for".to_string(),
+        )
+    })?;
+    match kind {
+        typelisp_abi::call_state::SUSPEND_YIELD => Ok((Waiting::Yield, Repr::Unit)),
+        other => Err(EvalError::Internal(format!(
+            "a compiled frame asked to wait on kind {} (payload {}), which this build does not lower",
+            other, payload
+        ))),
+    }
+}
+
 fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
     match state {
         State::Eval(form, env) => {
@@ -752,8 +868,24 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         // A blocked task carries nothing in the state slots. What its frames
         // hold is rooted by the frames, in this task's own stack, which stays
         // exactly as it is while the task waits.
+        //
+        // A compiled drive is the same answer for the same reason, with one
+        // addition: the wake value on its way *into* the chain does need a
+        // root, because it is a Rust local until the frame slot is written.
         State::Blocked(_) => {
             heap.set_root(sbase, Value::Empty);
+            heap.set_root(sbase + 1, Value::Empty);
+        }
+        // The arguments are still values here, and they are the reason this
+        // state exists at all: they have to outlive the truncate that releases
+        // the frame which named the call, and a `Vec<Value>` in a Rust local
+        // is invisible to the collector.
+        State::CompiledEnter { argv, .. } => {
+            heap.set_root(sbase, *argv);
+            heap.set_root(sbase + 1, Value::Empty);
+        }
+        State::CompiledResume { wake, .. } => {
+            heap.set_root(sbase, wake.as_ref().map(|(v, _)| *v).unwrap_or(Value::Empty));
             heap.set_root(sbase + 1, Value::Empty);
         }
         State::Apply(v) => {
@@ -1002,6 +1134,56 @@ impl Interp {
                 task.state = State::Blocked(w);
                 return Progress::Blocked(w);
             }
+            State::CompiledEnter { argv, start } => {
+                // Marshaled *here* rather than where the call was named: the
+                // roots this pushes must outlive nothing and survive nothing,
+                // but they must be pushed after the truncate that released the
+                // naming frame's roots. See `DriveStart`.
+                match heap.list_to_vec(argv).map_err(heap_err).and_then(|argv| {
+                    let (args, crossing_roots, roots_on_entry) =
+                        self.begin_compiled(heap, &argv, &start.params)?;
+                    Ok((args, DriveCtx { start, roots_on_entry, crossing_roots }))
+                }) {
+                    Ok((args, drive)) => {
+                        // SAFETY: the address is a symbol the backend resolved
+                        // out of a module that defines it, declared under
+                        // `coroutine_fn_type` — the same provenance every
+                        // indirect compiled call relies on, and `body_abi` is
+                        // what said it was this one.
+                        let f: typelisp_rt::coroutine::CoroutineFn = unsafe {
+                            std::mem::transmute::<usize, typelisp_rt::coroutine::CoroutineFn>(
+                                drive.start.body.address(),
+                            )
+                        };
+                        debug_assert_eq!(task.compiled.depth(), 0, "a task drives one compiled chain at a time");
+                        let outcome = {
+                            let stack = &mut task.compiled;
+                            crate::eval::crossing::catch_compiled_panic(|| stack.run(heap, f, &args))
+                        };
+                        self.after_drive(heap, task, outcome, drive)
+                    }
+                    Err(e) => State::Unwind(e),
+                }
+            }
+            State::CompiledResume { drive, wake } => {
+                let delivered = match wake {
+                    Some((v, repr)) => self.deliver_wake(heap, task, v, &repr),
+                    None => Ok(()),
+                };
+                match delivered {
+                    Ok(()) => {
+                        let outcome = {
+                            let stack = &mut task.compiled;
+                            crate::eval::crossing::catch_compiled_panic(|| stack.resume(heap))
+                        };
+                        self.after_drive(heap, task, outcome, drive)
+                    }
+                    Err(e) => {
+                        heap.truncate_roots(drive.roots_on_entry);
+                        State::Unwind(e)
+                    }
+                }
+            }
             State::Unwind(e) => match task.stack.pop() {
                 None => return Progress::Done(Err(e)),
                 Some((frame, fbase, loc)) => {
@@ -1045,6 +1227,75 @@ impl Interp {
         }
         task.state = next;
         Progress::Running
+    }
+
+    /// What the driver's answer means for the task.
+    ///
+    /// The four outcomes are the protocol's own, one level up: an answer ends
+    /// the crossing, a suspension parks the task with its chain standing, an
+    /// unwind is Phase C4's, and a Rust panic is a compiled `(panic ...)` that
+    /// already crossed back through `catch_compiled_panic`.
+    fn after_drive(
+        &self,
+        heap: &mut Heap,
+        task: &mut Task,
+        outcome: Result<Result<i64, typelisp_rt::coroutine::Paused>, EvalError>,
+        drive: DriveCtx,
+    ) -> State {
+        match outcome {
+            Ok(Ok(word)) => match self.finish_compiled(heap, word, &drive.start.ret, drive.crossing_roots) {
+                Ok(v) => {
+                    if let Some((name, depth)) = &drive.start.watch {
+                        self.trace_depth.set(*depth);
+                        if self.step_quiet_depth.get() == *depth {
+                            self.step_quiet_depth.set(usize::MAX);
+                        }
+                        let text = self.trace_render(heap, v);
+                        self.trace_line(heap, *depth, &format!("{} returned {}", name, text));
+                    }
+                    State::Apply(v)
+                }
+                Err(e) => State::Unwind(e),
+            },
+            // The chain stays exactly as it is, rooted by the prologues that
+            // built it. The frame pushed here is what catches the value the
+            // scheduler eventually wakes this task with.
+            Ok(Err(typelisp_rt::coroutine::Paused::Suspended)) => match pending_wait() {
+                Ok((w, wake)) => {
+                    task.stack.push(heap, Frame::DriveCompiled { drive, wake }, None);
+                    State::Blocked(w)
+                }
+                Err(e) => State::Unwind(e),
+            },
+            Ok(Err(typelisp_rt::coroutine::Paused::Unwinding)) => State::Unwind(EvalError::Internal(
+                "a compiled frame is unwinding through the driver, which Phase C4 has still to teach it".to_string(),
+            )),
+            // A compiled `(panic ...)`/`throw` unwound out as a Rust panic and
+            // `catch_compiled_panic` turned it back into an error. None of the
+            // pops that balance the crossing ran, hence the truncate.
+            Err(e) => {
+                heap.truncate_roots(drive.roots_on_entry);
+                State::Unwind(e)
+            }
+        }
+    }
+
+    /// Writes what the task was waiting for into its chain's innermost frame.
+    ///
+    /// Encoded through the representation the *suspension site* recorded, for
+    /// the reason every crossing obeys: the word's meaning is in the type, and
+    /// the value cannot say. `(yield)` and `(sleep ..)` wake with unit, which
+    /// encodes to a word the collector never follows.
+    fn deliver_wake(&self, heap: &mut Heap, task: &mut Task, v: Value, repr: &Repr) -> Result<(), EvalError> {
+        let (words, roots) = self.encode_crossing_args(heap, &[v], std::slice::from_ref(repr), false)?;
+        let word = *words.first().ok_or_else(|| {
+            EvalError::Internal("delivering a wake value produced no word".to_string())
+        })?;
+        task.compiled.set_top_value(heap, word);
+        for _ in 0..roots {
+            heap.pop_root();
+        }
+        Ok(())
     }
 
     /// One step of evaluation: reduce `form` to a value, or to a
@@ -1618,11 +1869,35 @@ impl Interp {
             None
         };
 
-        // A compiled callee runs on the Rust stack: the boundary is one frame
-        // from the machine's point of view, and nothing can suspend inside it.
         let compiled = f.compiled.borrow().clone();
         if let Some(compiled) = compiled {
             let sig = f.sig.as_ref().expect("a compiled function always has a type signature");
+            // A coroutine-ABI body is **driven by this task**, not called: the
+            // frames it builds live in `Task::compiled`, so it can stop in the
+            // middle and the task can be put down with it. That is the whole
+            // of Phase C3, and it is why the crossing is split in two around
+            // however many times the body stops (`Interp::begin_compiled`).
+            if compiled.body_abi() == typelisp_abi::BODY_ABI_COROUTINE {
+                let watch = match &watch {
+                    Some(Frame::TracedCall { name, depth }) => Some((name.clone(), *depth)),
+                    _ => None,
+                };
+                let start = DriveStart {
+                    body: compiled,
+                    params: sig.0.clone(),
+                    ret: sig.1.clone(),
+                    watch,
+                };
+                // A heap list, not the `Vec`: it has to stay reachable across
+                // the truncate that releases this call's own frame, and only
+                // the state slots can root it (`set_state`).
+                let argv = core::list(heap, &argv).map_err(heap_err)?;
+                return Ok((State::CompiledEnter { argv, start }, None));
+            }
+            // A *classic* body runs on the Rust stack: the boundary is one
+            // frame from the machine's point of view, and nothing can suspend
+            // inside it. There is nowhere for it to keep its state, which is
+            // the shape the coroutine ABI exists to replace.
             let v = self.call_compiled(heap, compiled.as_ref(), &argv, &sig.0, &sig.1)?;
             // The call is over already, so a watch frame would have nothing to
             // wait for: report the return here instead.
@@ -1997,6 +2272,14 @@ impl Interp {
                 Ok((State::Apply(v), None))
             }
 
+            // The value the task was put down for. It goes back into the
+            // compiled chain rather than up the continuation stack, and
+            // `CompiledResume` is where the encoding happens — this frame is
+            // only what catches the scheduler's `Apply`.
+            Frame::DriveCompiled { drive, wake } => {
+                Ok((State::CompiledResume { drive, wake: Some((v, wake)) }, None))
+            }
+
             // The depth is restored *before* the return is reported, so the
             // two lines of one call line up.
             Frame::TracedCall { name, depth } => {
@@ -2202,6 +2485,16 @@ impl Interp {
                 self.step_quiet_depth.set(was_quiet);
                 Ok((State::Unwind(exit), None))
             }
+
+            // Unreachable by construction, said out loud: the only way out of
+            // `Blocked` is the scheduler replacing the state with the value
+            // waited for, so nothing can be unwinding while this frame is on
+            // the stack. If it ever is, the compiled chain underneath has been
+            // abandoned with its frames still rooted, and saying so beats
+            // continuing quietly.
+            Frame::DriveCompiled { .. } => Err(EvalError::Internal(
+                "an exit reached a task that was waiting to resume a compiled chain".to_string(),
+            )),
 
             // An unwind past a traced frame is exactly the moment a trace is
             // most worth having, so the exit is reported rather than silent.

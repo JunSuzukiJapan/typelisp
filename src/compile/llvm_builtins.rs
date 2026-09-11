@@ -138,6 +138,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "frame-end" => Some(llvm_builder_frame_end(args)),
             "coroutine-begin" => Some(llvm_builder_coroutine_begin(args)),
             "coroutine-call" => Some(llvm_builder_coroutine_call(args)),
+            "coroutine-suspend" => Some(llvm_builder_coroutine_suspend(args)),
             "coroutine-call-env" => Some(llvm_builder_coroutine_call_env(args)),
             "coroutine-end" => Some(llvm_builder_coroutine_end(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
@@ -1253,9 +1254,19 @@ fn emit_rt_call<'a>(
 /// The root push has no pop here and its pop is not on this path — one push
 /// on first entry, one pop at the single return. Between them the function may
 /// hand control back to the driver any number of times, and the frames of a
-/// call chain nest, so the root stack stays in order. That stops being true
-/// once a *task* can be put down mid-chain (C3), and the frame's own root
-/// moves to `FrameStack::roots()` then.
+/// call chain nest, so the root stack stays in order.
+///
+/// This comment used to predict that a task being put down mid-chain (C3)
+/// would break the pairing, and that the frame's root would have to move to
+/// `FrameStack::roots()`. **It did not, and the reason is that root stacks are
+/// per task** (`Heap::new_root_stack`, one per `TaskSlot`): while a task waits,
+/// nothing else pushes on *its* stack, and the only thing the interpreter puts
+/// there across a suspension is a continuation frame whose base the resume
+/// truncates back to. Every other way into a standing chain — another task, a
+/// `go` from compiled code, a callback into the interpreter through
+/// `rt_apply_any` — either has its own stack or balances within one
+/// activation. So LIFO still holds, and `FrameStack::roots()` is a second
+/// answer to a question that already has one.
 fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
@@ -1401,6 +1412,65 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
 /// survived the callee's allocation under the original ABI.
 fn llvm_builder_coroutine_call(args: &[Value]) -> Result<Value, EvalError> {
     coroutine_call_impl(args, None)
+}
+
+/// `(coroutine-suspend builder m)` — hand control back with `STATUS_SUSPEND`,
+/// and resume here when the scheduler says the wait is over.
+///
+/// [`llvm_builder_coroutine_call`] with the callee left out, and that is the
+/// whole of what suspension costs once calls already work this way: a call
+/// and a suspension both end the activation and both come back through the
+/// `pc` dispatch. What differs is the status word and who decides when to
+/// re-enter.
+///
+/// The suspending builtin's own shim (`rt_suspend_*`) has already been called
+/// by the time this runs and has recorded *what* the task waits for, so
+/// nothing about that reaches here. The answer arrives in the frame's value
+/// slot — the same place a returning callee leaves its answer, because from
+/// the resuming function's side those are the same thing.
+fn llvm_builder_coroutine_suspend(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let ctx = crate::compile::llvm_context();
+    let i64t = ctx.i64_type();
+    let what = "coroutine-suspend";
+    let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
+    let key = builder_key(&builder);
+
+    let (frame, data, function, id) = FRAME_CTXS.with(|c| {
+        let mut map = c.borrow_mut();
+        let f = map
+            .get_mut(&key)
+            .ok_or_else(|| EvalError::Internal(format!("{}: no frame is open on this builder", what)))?;
+        let coro = f
+            .coro
+            .as_mut()
+            .ok_or_else(|| EvalError::Internal(format!("{}: this function is not a coroutine", what)))?;
+        let id = coro.resumes.len() as u64 + 1;
+        Ok::<_, EvalError>((f.frame, f.data, coro.function, id))
+    })?;
+
+    let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
+    let set_pc = ensure_declared(&module, "rt_frame_set_pc");
+    let b = builder.borrow();
+    emit_rt_call(&b, set_pc, &[frame, i64t.const_int(id, false).into()], "frame_set_pc", what)?;
+    b.build_return(Some(&i64t.const_int(typelisp_abi::STATUS_SUSPEND as u64, false)))
+        .map_err(|e| err("ret", e.to_string()))?;
+
+    b.position_at_end(resume);
+    let value_slot = unsafe {
+        b.build_gep(i64t, data, &[i64t.const_int(typelisp_abi::FRAME_VALUE_SLOT as u64, false)], "coro_wake_slot")
+            .map_err(|e| err("gep", e.to_string()))?
+    };
+    let result = b.build_load(i64t, value_slot, "coro_wake").map_err(|e| err("load", e.to_string()))?;
+
+    FRAME_CTXS.with(|c| {
+        let mut map = c.borrow_mut();
+        if let Some(coro) = map.get_mut(&key).and_then(|f| f.coro.as_mut()) {
+            coro.resumes.push((id, resume));
+        }
+    });
+    Ok(llvm_value_value(result))
 }
 
 /// `(coroutine-call-env builder m target args-ptr argc env-ptr env-len)` —

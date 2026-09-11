@@ -449,15 +449,57 @@ fn wait_refuses_to_compile_and_says_why() {
     assert!(e.contains("task::wait"), "got {}", e);
 }
 
-/// `yield` likewise — and this one used to claim it did not exist at all.
+/// `yield` **compiles** (Phase C3), and a compiled task really is put down.
+///
+/// The same program as `yield_interleaves_two_tasks`, with `tick` compiled.
+/// The trail is the whole assertion: `ababab` can only be produced by a
+/// compiled body stopping in the middle and being re-entered, three times
+/// each, because nothing preempts a task
+/// (`without_yield_each_task_runs_to_its_end`).
+///
+/// What makes it possible is that the frames are in the task rather than on
+/// the machine stack — `Task::compiled`. Before C3 this was a refusal, and the
+/// test asserted the refusal's wording.
 #[test]
-fn yield_refuses_to_compile_and_says_why() {
-    let e = compile_err(
-        r#"(defun tick ((n i32)) () (dotimes (i n) (yield)))
-           (compile tick)"#,
+fn a_compiled_yield_interleaves_two_tasks() {
+    assert_eq!(
+        text_compiled(
+            r#"(defvar (trail string) "")
+               (defun tick ((name string) (n i32)) ()
+                 (dotimes (i n)
+                   (setf trail (append trail name))
+                   (yield)))
+               (compile tick)
+               (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
+                 (progn (wait a) (wait b)))
+               trail"#
+        ),
+        "ababab"
     );
-    assert!(e.contains("suspends the running task"), "got {}", e);
-    assert!(e.contains("`yield`"), "got {}", e);
+}
+
+/// A compiled `yield` with nothing else ready comes straight back, and the
+/// value after it is the function's.
+///
+/// The narrower claim, and the one that fails first if the resume point is
+/// wrong: the body has to carry on *after* the suspension rather than restart
+/// or fall out of its `dotimes`.
+#[test]
+fn a_compiled_yield_resumes_where_it_left_off() {
+    assert_eq!(
+        int_compiled(
+            r#"(defun counted ((n i32)) i32
+                 (let ((acc 0))
+                   (dotimes (i n)
+                     (yield)
+                     (setf acc (+ acc 1))
+                     (yield))
+                   acc))
+               (compile counted)
+               (counted 4)"#
+        ),
+        4
+    );
 }
 
 // ---- sleep ---------------------------------------------------------------
