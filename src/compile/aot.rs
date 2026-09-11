@@ -724,37 +724,44 @@ fn build_main_wrapper(
     // coroutine ABI it answers with a status word and its value is in a
     // frame -- calling it as `f(args, argc)` is not even the right arity.
     // `rt_drive_entry` is the driver that turns it back into a call.
-    let coroutine_abi = crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE;
-    let drive_entry = if coroutine_abi {
-        Some(module.add_function("rt_drive_entry", ctx.i64_type().fn_type(&[ctx.i64_type().into()], false), None))
-    } else {
-        None
+    //
+    // Asked of each function's own LLVM type, the way the `rt_vtable_set`
+    // block above asks it and for the same reason: the ABI belongs to the
+    // function, not to the process. `EMITTED_BODY_ABI` says what *this build*
+    // emits, and a module holds bodies this build did not emit -- the
+    // prelude's frozen bitcode, and (`aot::tests`) a hand-built `tl_main`.
+    // Reading the process constant there hands a classic body to the driver,
+    // whose first act is to ask for the frame the prologue never published.
+    let coroutine_fn_ty = crate::compile::llvm_builtins::coroutine_fn_type();
+    let drive_entry = |module: &Module<'static>| -> inkwell::values::FunctionValue<'static> {
+        match module.get_function("rt_drive_entry") {
+            Some(f) => f,
+            None => module.add_function("rt_drive_entry", ctx.i64_type().fn_type(&[ctx.i64_type().into()], false), None),
+        }
     };
     for name in global_init_names {
         let f = module
             .get_function(name)
             .ok_or_else(|| format!("internal error: global-init function \"{}\" not found in module", name))?;
-        match drive_entry {
-            Some(drive) => {
-                let addr = f.as_global_value().as_pointer_value().const_to_int(ctx.i64_type());
-                builder
-                    .build_call(drive, &[addr.into()], "global_init_result")
-                    .map_err(|e| format!("failed to build global-init call: {}", e))?;
-            }
-            None => {
-                builder
-                    .build_call(f, &[null_args.into(), argc_zero.into()], "global_init_result")
-                    .map_err(|e| format!("failed to build global-init call: {}", e))?;
-            }
+        if f.get_type() == coroutine_fn_ty {
+            let drive = drive_entry(module);
+            let addr = f.as_global_value().as_pointer_value().const_to_int(ctx.i64_type());
+            builder
+                .build_call(drive, &[addr.into()], "global_init_result")
+                .map_err(|e| format!("failed to build global-init call: {}", e))?;
+        } else {
+            builder
+                .build_call(f, &[null_args.into(), argc_zero.into()], "global_init_result")
+                .map_err(|e| format!("failed to build global-init call: {}", e))?;
         }
     }
     // Through `rt_run_entry` rather than calling `tl_main` directly, so a
     // `(panic ...)` that unwinds out of the program has a Rust frame to be
     // caught in — see that function's doc comment. `main` is the C entry
     // point, and letting an unwind run off the end of it is undefined.
-    // Which of the two, decided by the ABI this build emitted: the driven one
-    // puts a `FrameStack` in front of the same panic handling.
-    let entry_shim = if coroutine_abi { "rt_run_entry_driven" } else { "rt_run_entry" };
+    // Which of the two, decided by `tl_main`'s own type: the driven one puts
+    // a `FrameStack` in front of the same panic handling.
+    let entry_shim = if tl_main.get_type() == coroutine_fn_ty { "rt_run_entry_driven" } else { "rt_run_entry" };
     let rt_run_entry = module.add_function(entry_shim, ctx.i64_type().fn_type(&[ctx.i64_type().into()], false), None);
     let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(ctx.i64_type());
     let call: CallSiteValue = builder
