@@ -133,6 +133,7 @@ const ISLAND_DEFUNS: &[&str] = &[
     "compile-dyn-value",
     "compile-dyn-call",
     "install-handler",
+    "emit-loop-safepoint",
     "emit-unwind-onward",
     "emit-static-exit-onward",
     "compile-call-args",

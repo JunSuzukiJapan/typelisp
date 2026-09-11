@@ -879,6 +879,11 @@ fn pending_wait(heap: &Heap) -> Result<(Waiting, Repr), EvalError> {
         // does not read the frame's value slot at all (`(suspend ...)` carries
         // kind `0` for these).
         cs::SUSPEND_YIELD => Ok((Waiting::Yield, Repr::Unit)),
+        // A compiled loop's back edge offering a turn (C7). Indistinguishable
+        // from `(yield)` once a scheduler is the one answering — the two are
+        // separate kinds so that a driver *without* a scheduler can tell an
+        // offer from a request.
+        cs::SUSPEND_SAFEPOINT => Ok((Waiting::Yield, Repr::Unit)),
         cs::SUSPEND_SLEEP => {
             // The same refusals `Interp::sleep_until` makes, in the same
             // words: this is the same `sleep`, and a program must not be able

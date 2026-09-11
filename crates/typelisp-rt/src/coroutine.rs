@@ -245,6 +245,26 @@ impl FrameStack {
                     self.set_top_value(heap, v);
                     outcome = self.resume(heap, base);
                 }
+                // A loop's back edge offered a turn (C7). This driver has
+                // nowhere to put the chain down, but it does not have to:
+                // nothing is being waited for, so declining the offer and
+                // resuming is the whole of honouring it. The value slot is
+                // set because a resume block reads it like any other, and
+                // the island discards this one.
+                Err(Paused::Suspended) => match call_state::take_pending_suspend() {
+                    Some((call_state::SUSPEND_SAFEPOINT, _)) => {
+                        self.set_top_value(heap, 0);
+                        outcome = self.resume(heap, base);
+                    }
+                    // A real wait, which this driver cannot honour. Put it
+                    // back so the caller's error can still say what it was.
+                    other => {
+                        if let Some((kind, payload)) = other {
+                            call_state::set_pending_suspend(kind, payload);
+                        }
+                        return Err(Paused::Suspended);
+                    }
+                },
                 other => return other,
             }
         }
@@ -535,6 +555,57 @@ pub fn set_frame_value(heap: &mut Heap, f: Value, w: i64) {
 pub unsafe extern "C" fn rt_suspend_yield(_args: *const i64, _argc: u32) -> i64 {
     call_state::set_pending_suspend(call_state::SUSPEND_YIELD, 0);
     0
+}
+
+thread_local! {
+    /// Iterations left before the next compiled loop back edge offers the
+    /// driver a turn. See [`rt_loop_safepoint`].
+    static SAFEPOINT_COUNTDOWN: std::cell::Cell<u32> = const { std::cell::Cell::new(SAFEPOINT_PERIOD) };
+}
+
+/// How many back-edge polls pass between offers.
+///
+/// **An arbitrary number, and it has to be.** What it trades is how long a
+/// tight loop can hold the only thread against how often a loop that holds it
+/// briefly pays a driver round trip — and this project does not measure
+/// running time, so there is no measurement to pick it by. What matters for
+/// the reason the safepoint exists is only that the bound is *finite*: a
+/// collector that has to stop every thread needs every thread to reach a
+/// point where it can be stopped.
+const SAFEPOINT_PERIOD: u32 = 256;
+
+/// The back edge of a compiled `loop` asking whether to hand control back
+/// (Phase C7) — returns non-zero when it should, having already recorded
+/// [`call_state::SUSPEND_SAFEPOINT`].
+///
+/// **A loop with no call in it is the one place a driver never sees.** Every
+/// other way out of a compiled activation is a round trip: C2 made a Lisp
+/// call one, C3 a suspension, C4 an unwind, C5 an `apply` and a `:dyn`
+/// dispatch. A `loop` whose body calls nothing at all has none of those, so
+/// between its entry and its exit the driver — and therefore the scheduler,
+/// and therefore a collector that needs every thread parked — gets no turn.
+///
+/// The decision is made here rather than emitted inline because it is policy,
+/// not code generation: the island emits the poll and branches on the answer,
+/// which is the same division `rt_suspend_*` already draws between *deciding*
+/// what a task waits for and *ending* the activation.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused.
+#[no_mangle]
+pub unsafe extern "C" fn rt_loop_safepoint(_args: *const i64, _argc: u32) -> i64 {
+    SAFEPOINT_COUNTDOWN.with(|c| {
+        let left = c.get().saturating_sub(1);
+        if left == 0 {
+            c.set(SAFEPOINT_PERIOD);
+            call_state::set_pending_suspend(call_state::SUSPEND_SAFEPOINT, 0);
+            1
+        } else {
+            c.set(left);
+            0
+        }
+    })
 }
 
 /// `(sleep secs)` for compiled code: `args[0]` is an `f64`'s raw bit pattern.

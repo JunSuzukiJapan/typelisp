@@ -352,6 +352,16 @@ pub mod call_state {
     pub const SUSPEND_SLEEP: i64 = 1;
     /// `(wait t)` — another task's result. Payload: its scheduler id.
     pub const SUSPEND_WAIT: i64 = 2;
+    /// A loop's own safepoint (Phase C7) — nobody asked; the back edge of a
+    /// compiled `loop` offered. Payload unused.
+    ///
+    /// **Distinct from [`SUSPEND_YIELD`] on purpose.** A driver standing on a
+    /// machine frame cannot honour a real wait, and says so; but this one it
+    /// can honour by resuming at once, because nothing is being waited for.
+    /// Folding it into `SUSPEND_YIELD` would have made an explicit `(yield)`
+    /// silently do nothing in a `print-object` method or a reader macro,
+    /// which is a different promise from the one `(yield)` makes.
+    pub const SUSPEND_SAFEPOINT: i64 = 3;
 
     /// Records what the frame about to return `STATUS_SUSPEND` is waiting for.
     pub fn set_pending_suspend(kind: i64, payload: i64) {

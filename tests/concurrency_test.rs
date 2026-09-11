@@ -809,3 +809,79 @@ fn a_compiled_dyn_call_of_an_interpreted_method_can_suspend() {
         "ababab"
     );
 }
+
+// ---- a loop's own safepoint (C7) -----------------------------------------
+
+/// **A compiled loop with no call in it still lets another task run.**
+///
+/// `spin-then-mark`'s loop body is `>=`, `+` and `setf` — all lowered inline
+/// by the island, so there is no call anywhere in it. Before C7 the task held
+/// the only thread for all thousand iterations and `mark` could not run until
+/// it was done. The back edge now polls (`emit-loop-safepoint`), and the poll
+/// hands control back often enough that `b` lands first.
+///
+/// `ba`, not `ab`, is the whole assertion: `a` is spawned first and would
+/// finish first if nothing interrupted it.
+///
+/// **A driver round trip is not a scheduling point**, which is worth stating
+/// because the plan's C7 reasons as though it were ("a tight loop with no
+/// call in it gets no driver round trip"). `FrameStack::drive` loops on the
+/// status word: `STATUS_CALL` enters the callee and keeps going, and only
+/// `STATUS_SUSPEND` returns to whoever can reschedule. So for *starvation*
+/// every loop was a gap, not just a call-less one. The plan's framing is the
+/// right one for a **collector** — there, a round trip is an opportunity to
+/// stop the thread, so a call-less loop really is the only blind spot.
+#[test]
+fn a_compiled_loop_with_no_calls_still_yields_to_another_task() {
+    assert_eq!(
+        text_compiled(
+            r#"(defvar (trail string) "")
+               (defun spin-then-mark ((n i32)) i32
+                 (let ((i 0))
+                   (loop (if (>= i n) (break) ()) (setf i (+ i 1)))
+                   (setf trail (append trail "a"))
+                   0))
+               (defun mark () i32 (progn (setf trail (append trail "b")) 0))
+               (compile spin-then-mark)
+               (compile mark)
+               (let ((a (go (spin-then-mark 1000))) (b (go (mark))))
+                 (progn (wait a) (wait b)))
+               trail"#
+        ),
+        "ba"
+    );
+}
+
+/// **The same loop, under a driver that cannot put the chain down, runs to
+/// its answer.**
+///
+/// An interpreted caller applying a *compiled closure value* is a Rust frame
+/// waiting for the word: the drive standing on it has nowhere to park a
+/// suspended chain, and says so for a real `sleep` or `wait`. A safepoint is
+/// not a real wait — nothing is being waited for — so `run_to_end` declines
+/// the offer and resumes.
+///
+/// **This is what makes C7 safe to insert at all.** Without that arm, a poll
+/// on every loop back edge would turn every compiled loop reached through a
+/// closure value, the AOT entry point or a C callback into a failure — and
+/// the failure would name suspension, not loops.
+///
+/// The closure value, rather than a `print-object` method or `format`'s
+/// `~/.../`: those reach `Interp::apply`, which runs `FnDef::body` and never
+/// looks at `FnDef::compiled`, so the body under them is interpreted however
+/// many times it has been `compile`d.
+#[test]
+fn a_compiled_loop_safepoint_under_a_machine_frame_driver_just_resumes() {
+    assert_eq!(
+        int_compiled(
+            r#"(defun make-spin () (fn (i32) i32)
+                 (lambda ((n i32)) i32
+                   (let ((i 0))
+                     (loop (if (>= i n) (break) ()) (setf i (+ i 1)))
+                     i)))
+               (compile make-spin)
+               (let ((f (make-spin))) (f 1000))"#
+        ),
+        1000
+    );
+}

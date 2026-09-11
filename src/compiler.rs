@@ -3742,21 +3742,62 @@ pub const SOURCE: &str = r#"
         (pop-frame fn-env)
         result)))
 
+;; The poll a compiled `loop`'s back edge makes, and
+;; the only reason that edge is not a bare `br`.
+;;
+;; **A loop whose body calls nothing is the one place
+;; a driver never sees.** Every other way out of a
+;; compiled activation became a driver round trip: a
+;; Lisp call in C2, a suspension in C3, an unwind in
+;; C4, an `apply` and a `:dyn` dispatch in C5. A
+;; `loop` with no call in it has none of those, so
+;; between its entry and its exit the scheduler gets
+;; no turn — and neither would a collector that has to
+;; stop every thread, which is the reason this exists
+;; at all.
+;;
+;; `rt_loop_safepoint` decides and this only branches
+;; on the answer. That division is the same one
+;; `rt_suspend_*` already draws: the shim decides
+;; *what* a task waits for, `coroutine-suspend` only
+;; ends the activation. Non-zero means the shim has
+;; already recorded the suspension, so the poll block
+;; has nothing left to do but end the activation and
+;; come back through the `pc` dispatch like any other
+;; resume. The value it wakes with is discarded —
+;; nothing was asked for.
+;;
+;; The handler slot needs no reinstalling here: the
+;; poll block is written in the same region the loop
+;; is, and a `catch` inside the body restores that on
+;; its own normal path before control reaches the back
+;; edge.
+(defun emit-loop-safepoint ((m llvm-module) (builder llvm-builder) (cur-fn llvm-function) (loop-block llvm-basic-block)) ()
+    (let* ((poll (append-block cur-fn "loop-safepoint"))
+           (args-ptr (alloca-args builder 0))
+           (offered (build-call builder (get-function m "rt_loop_safepoint") args-ptr 0)))
+      (build-cond-br builder
+                     (build-icmp-eq builder offered (const-word builder 0))
+                     loop-block poll)
+      (position-at-end builder poll)
+      (let ((ignored (coroutine-suspend builder m)))
+        (build-br builder loop-block))))
+
 ;; `(loop body-form...)` — `Expr::Loop` (`loop`/
 ;; `break`/`return`/`setf`). Installs a fresh
-;; loop-exit block and a 1-slot result merge (the same
-;; alloca-args/store-arg/load-raw triple `compile-if`
-;; already uses for its own 2-way merge, here for an
-;; n-way set of `break`/`return` exits instead),
-;; branches into a fresh loop-body block, and compiles
-;; `body-forms` there in sequence (`compile-loop-body`)
-;; — installing `(Option::some ...)` for all three as
-;; it recurses into its own body is what makes a
-;; nested `break`/`return` resolve to *this* loop
+;; loop-exit block and a result merge slot for the
+;; n-way set of `break`/`return` exits (a frame slot,
+;; not the `alloca` triple `compile-if` uses — see the
+;; slot's own comment below), branches into a fresh
+;; loop-body block, and compiles `body-forms` there in
+;; sequence (`compile-loop-body`) — installing
+;; `(Option::some ...)` for the exit block and the
+;; slot as it recurses into its own body is what makes
+;; a nested `break`/`return` resolve to *this* loop
 ;; rather than whatever (if any) loop encloses it;
 ;; nothing further is needed to support nesting, since
 ;; ordinary call-stack scoping restores the outer
-;; loop's own trio the moment this call returns (just
+;; loop's own pair the moment this call returns (just
 ;; like `cur-fn`/`captured` already do for `labels`/
 ;; `lambda` nesting). Loops back to the body block
 ;; unless the body's own last statement already
@@ -3766,22 +3807,17 @@ pub const SOURCE: &str = r#"
 ;; for the identical reason (one terminator per block,
 ;; max).
 ;;
-;; `root-base` (the third of the trio, alongside
-;; `exit-block`/`slot`): reads the GC root stack's
-;; current depth (`rt_root_count`) once, in the
-;; pre-header block, *before* the loop's own body ever
-;; runs — every ordinary iteration returns the root
-;; stack to this exact depth on its own (each nested
-;; `let`/`match` scope pops what it pushed as control
-;; flow passes back out through it), so this is the
-;; depth a `break`/`return` reached from *anywhere*
-;; inside this loop's body — however many scopes deep
-;; — needs to unwind back to. See `compile-break`/
-;; `compile-return`'s own doc comments for why a
-;; single `rt_truncate_sexpr_roots` call against this
-;; value, rather than each scope's own ordinary pop,
-;; is what makes that unwind correct regardless of
-;; nesting depth.
+;; There used to be a third member of that trio,
+;; `root-base`: the GC root stack's depth read once in
+;; the pre-header (`rt_root_count`), which a `break`
+;; from any nesting depth truncated back to. C1
+;; deleted it along with every other explicit root
+;; operation — a binding lives in a frame slot now and
+;; the frame *is* the root, so leaving a scope early
+;; has nothing to undo.
+;;
+;; The back edge is not a bare `br`: it polls first
+;; (`emit-loop-safepoint`).
 (defun compile-loop ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((kind (sexpr-i32 (sexpr-car (sexpr-cdr e))))
            (body-forms (sexpr-cdr (sexpr-cdr e)))
@@ -3801,7 +3837,7 @@ pub const SOURCE: &str = r#"
       (compile-loop-body m fn-name builder env fn-env captured cur-fn (Option::some exit-block) (Option::some slot) block-names block-exits block-slots protect (Option::none) body-forms)
       (if (block-terminated? builder)
           ()
-          (build-br builder loop-block))
+          (emit-loop-safepoint m builder cur-fn loop-block))
       (position-at-end builder exit-block)
       ;; A `break` out of a `catch`/`unwind-protect` inside the body is a `br`
       ;; straight to here, leaving the handler slot naming a region control
