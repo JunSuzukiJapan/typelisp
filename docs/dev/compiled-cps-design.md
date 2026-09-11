@@ -1232,3 +1232,38 @@ C5 より前、compiled から届いたインタプリタの呼び先は*マシ�
 他人のスタックの途中を再開するということ自体が無い」というコメント付きだった
 ——C5 がその予告を偽にした。[[feedback-comments-outliving-implementations]] の
 3 度目。**assertion は同じ失敗の裏返しで、こちらは自分が壊れたことを言う。**
+
+### C5c: 3 つが死んだ
+
+`rt_apply_any`、`rt_dyn_call`、`build-closure-apply`。どれも「呼び出し地点から
+呼ばれる C の関数で、答えを持って返らなければならない」形をしていて、それが
+まさに下にマシンフレームを敷いていたもの。extern の表は 257 → 255。
+
+残ったもの: `resolve_closure`（ドライバが値を見るときに使う。`rt_apply_any` から
+切り出した本体そのまま）、`reify_dyn_slot` と `DYN_SLOT_CLOSURE`（スロットが
+空のときインタプリタに訊く口）、`apply_on_this_frame`（マシンフレームの上の
+ドライバが使う最後の手段）、`drive_to_completion`（`rt_drive_body` /
+`rt_drive_entry` / C FFI）。
+
+**SOURCE を 1 文字も変えていないのに成果物が変わった。** extern の表が
+[[typelisp-island-hash-reads-forms]] の言う「ハッシュが見ていない 2 つ目の入力」
+で、これはその実証。`git diff src/compiler.rs` が空のまま
+`island_artifacts_are_fresh` が落ちる。
+
+### 消した名前で grep すると 45 箇所出た
+
+うち present tense で嘘になっていたものを直した（`fatal` の文面 2 つ——
+使用者に見える——、ドキュメントリンク、`rt_dyn_call` が「スロットが空の場合を
+扱う」と書いてあった箇所など）。残りは「かつては」「retired した」の歴史的
+記述で、そのままが正しい。
+
+**C4 と同じ手順が 2 度目に効いた。** 消した機構の名前で grep するのが最後の
+一歩で、型検査もテストも何も言わない。
+
+### `run_to_completion` の拒否は残るが、理由が入れ替わった
+
+プランは C5 で消えると書いていたが、消えない——**指している相手が変わった**。
+「compiled から来たので中断できない」は C5 で偽になり、いま Rust フレームを
+本当に握っているのは `Interp::apply` と公開 API、`eval` 組み込み、
+`print-object` メソッド、リーダマクロ、そしてそれらから入ったドライバ。
+文面をそう直した。

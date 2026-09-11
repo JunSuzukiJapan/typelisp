@@ -225,7 +225,7 @@ impl FrameStack {
     ///
     /// The one thing a driver with no continuation stack behind it can do
     /// with [`Paused::Applying`]. It keeps the boundaries that still work
-    /// this way (`rt_drive_body`, `rt_dyn_call`, the C FFI thunk) behaving as
+    /// this way (`rt_drive_body`, `rt_drive_entry`, the C FFI thunk) behaving as
     /// they did, at the cost the plan's B6 names: a call made through one of
     /// them cannot suspend.
     pub fn run_to_end(
@@ -454,7 +454,7 @@ fn frame_handler(heap: &Heap, f: Value) -> i64 {
 ///
 /// This is where raising an unwind meets the driver protocol. Compiled code
 /// raises the way it always did — `rt_throw`/`rt_panic` unwind, and so does a
-/// runtime error or an interpreted callee reached through `rt_apply_any` —
+/// runtime error or an interpreted callee reached on a machine frame —
 /// but the unwind now travels no further than the one activation that raised
 /// it, because Lisp calls are driver round trips and not machine calls. The
 /// driver catches it here and turns it into a status, so the *travelling*

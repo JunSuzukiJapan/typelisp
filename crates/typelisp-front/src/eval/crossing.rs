@@ -31,7 +31,7 @@ use super::value::EvalError;
 ///   *interpreted* `(catch 'tag ...)` further up catches it exactly as it
 ///   would an interpreted throw.
 /// - [`typelisp_rt::InterpretedUnwind`] — compiled code called *back* into the
-///   interpreter (`rt_apply_any`/`rt_dyn_call`) and the interpreter failed.
+///   interpreter on a machine frame, and the interpreter failed.
 ///   The original `EvalError` travels whole, so a `Break`, an `Internal` and a
 ///   `Panic` stay distinguishable.
 ///
@@ -126,10 +126,10 @@ thread_local! {
 /// Parks `error` for the [`catch_compiled_panic`] that will catch the unwind
 /// about to be raised for it, and returns so the caller can raise it.
 ///
-/// Only `Interp`'s `rt_apply_any`/`rt_dyn_call` hooks call this, immediately
-/// before `typelisp_rt::unwind_interpreted_error`. Nesting is fine: each
-/// compiled call has its own catch, so the innermost one takes what the
-/// innermost failure parked.
+/// Only `Interp`'s `rt_apply_interpreted`/`rt_dyn_slot_closure` hooks call
+/// this, immediately before `typelisp_rt::unwind_interpreted_error`. Nesting
+/// is fine: each compiled call has its own catch, so the innermost one takes
+/// what the innermost failure parked.
 pub fn park_interpreted_error(error: EvalError) {
     INTERPRETED_ERROR.with(|cell| *cell.borrow_mut() = Some(error));
 }
@@ -174,7 +174,8 @@ pub fn park_for_compiled(error: EvalError) {
 /// crossed an interpreted frame on its way" invisible to the catcher, which is
 /// the whole point of a dynamic exit.
 ///
-/// Only `Interp`'s `rt_apply_any`/`rt_dyn_call` hooks call this.
+/// Only `Interp`'s `rt_apply_interpreted`/`rt_dyn_slot_closure` hooks call
+/// this.
 ///
 /// # Safety
 ///

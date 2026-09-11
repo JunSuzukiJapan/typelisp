@@ -128,7 +128,6 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "load-env" => Some(llvm_builder_load_env(args)),
             "build-call-with-env" => Some(llvm_builder_build_call_with_env(args)),
             "build-make-closure" => Some(llvm_builder_build_make_closure(args)),
-            "build-closure-apply" => Some(llvm_builder_build_closure_apply(args)),
             "load-raw" => Some(llvm_builder_load_raw(args)),
             "build-slot-ptr" => Some(llvm_builder_build_slot_ptr(args)),
             "frame-begin" => Some(llvm_builder_frame_begin(args)),
@@ -335,9 +334,8 @@ pub(crate) fn declare_external_compiled_function(module: &Rc<RefCell<Module<'sta
 /// Stage 4) for *every* function ever wrapped into a `ClosureBox` via
 /// `build-make-closure`, capturing or not — see that builtin's doc comment
 /// (`registry::llvm_builder_def`) for why unifying on one ABI regardless of
-/// whether a given closure actually captures anything is what lets
-/// `build-closure-apply` call through it without first checking which case
-/// it's in.
+/// whether a given closure actually captures anything is what lets the
+/// driver call through it without first checking which case it's in.
 fn compiled_fn_type_with_env() -> inkwell::types::FunctionType<'static> {
     let ctx = crate::compile::llvm_context();
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
@@ -1273,8 +1271,8 @@ fn emit_rt_call<'a>(
 /// nothing else pushes on *its* stack, and the only thing the interpreter puts
 /// there across a suspension is a continuation frame whose base the resume
 /// truncates back to. Every other way into a standing chain — another task, a
-/// `go` from compiled code, a callback into the interpreter through
-/// `rt_apply_any` — either has its own stack or balances within one
+/// `go` from compiled code, a callback into the interpreter on a machine
+/// frame — either has its own stack or balances within one
 /// activation. So LIFO still holds, and `FrameStack::roots()` is a second
 /// answer to a question that already has one.
 fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
@@ -1794,9 +1792,7 @@ fn llvm_builder_build_icmp(args: &[Value], name: &str, predicate: inkwell::IntPr
 
 /// `compile-if`'s branch primitive: branches to `then_block` when `cond`
 /// (an ordinary `i64`-valued `llvm-value`) is nonzero, `else_block`
-/// otherwise — built from an `icmp ne cond, 0` plus a conditional branch, the
-/// same shape [`llvm_builder_build_closure_apply`] already uses internally
-/// for its own env-loop bounds check.
+/// otherwise — built from an `icmp ne cond, 0` plus a conditional branch.
 fn llvm_builder_build_cond_br(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let cond = expect_llvm_value(&args[1])?.into_int_value();
@@ -1986,73 +1982,6 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
     match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
         inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-make-closure: rt_closure_new produced no value".into())),
-    }
-}
-
-/// `build-call-with-env`'s indirect counterpart: the callee isn't a
-/// statically-known `llvm-function` here, only a tagged `Sexpr` function
-/// value, so the call goes out through
-/// [`typelisp_rt::rt_apply_any`](crate::compile::runtime::rt_apply_any) —
-/// one `rt_*` call taking the closure word, the address of the argument
-/// array the caller already built, and its length.
-///
-/// This used to emit the dispatch inline: `rt_closure_fnptr` +
-/// `rt_closure_env_len`, an `rt_closure_env_get` copy loop into a fixed
-/// 64-slot scratch buffer, then a `build_indirect_call` through
-/// `compiled_fn_type_with_env`. That works for a `BoxedObj::CompiledClosure`
-/// and *only* for one — `rt_closure_fnptr` `fatal`s on anything else, and a
-/// `Type::Fn` value can equally be an interpreted `BoxedObj::Closure` since
-/// the JIT stopped being mandatory. Emitting a call to a shim that dispatches
-/// on the box instead moves the whole decision to where the value is, at the
-/// cost of one call for the compiled case (the loop it replaces was already
-/// three `rt_*` calls plus a per-slot one).
-///
-/// `compiler.rs` is untouched by this — it asks for `build-closure-apply`
-/// and gets whatever this emits — which is what let the change happen with
-/// the committed island bitcode frozen.
-fn llvm_builder_build_closure_apply(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let module = expect_llvm_module(&args[1])?;
-    let closure = expect_llvm_value(&args[2])?;
-    let args_ptr = expect_llvm_value(&args[3])?.into_pointer_value();
-    let argc = match &args[4] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
-    let ctx = crate::compile::llvm_context();
-    let b = builder.borrow();
-    let module = module.borrow();
-    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("build-closure-apply: {}", e));
-
-    let rt_apply_any = module
-        .get_function("rt_apply_any")
-        .ok_or_else(|| EvalError::Internal("build-closure-apply: rt_apply_any not declared in this module".into()))?;
-
-    // `rt_apply_any` shares the one uniform `(args_ptr, argc) -> i64` `rt_*`
-    // ABI (`compiled_fn_type`), so its own three arguments go into an
-    // `alloca`'d array first — exactly what `compiler.rs`'s
-    // `alloca-args`/`store-arg`/`build-call` triple does for every other
-    // `rt_*` call. The *callee's* argument array is passed by address, as an
-    // `i64`; it is a live `alloca` in this frame, so no copy is needed (and
-    // unlike a `Vec`'s buffer it cannot be moved by anything the shim does).
-    let i64_ty = ctx.i64_type();
-    let shim_args = b.build_alloca(i64_ty.array_type(3), "apply_any_args").map_err(err)?;
-    let store = |i: u64, v: BasicValueEnum<'static>, name: &str| -> Result<(), EvalError> {
-        let p = unsafe { b.build_gep(i64_ty, shim_args, &[i64_ty.const_int(i, false)], name).map_err(err)? };
-        b.build_store(p, v).map_err(err)?;
-        Ok(())
-    };
-    let args_ptr_int = b.build_ptr_to_int(args_ptr, i64_ty, "apply_any_callee_args_int").map_err(err)?;
-    store(0, closure, "apply_any_closure_ptr")?;
-    store(1, args_ptr_int.into(), "apply_any_args_ptr")?;
-    store(2, i64_ty.const_int(argc, false).into(), "apply_any_argc_ptr")?;
-
-    let call = b
-        .build_call(rt_apply_any, &[shim_args.into(), ctx.i32_type().const_int(3, false).into()], "closure_apply_result")
-        .map_err(err)?;
-    match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
-        inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-closure-apply: rt_apply_any produced no value".into())),
     }
 }
 

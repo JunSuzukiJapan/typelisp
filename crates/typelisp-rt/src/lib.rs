@@ -1842,7 +1842,7 @@ pub unsafe extern "C" fn rt_closure_env_get(args: *const i64, argc: u32) -> i64 
     }
 }
 
-/// How [`rt_apply_any`] re-enters the tree-walking interpreter: the closure
+/// How [`apply_on_this_frame`] re-enters the tree-walking interpreter: the closure
 /// as a tagged word, then the very same `(args_ptr, argc)` the compiled
 /// callee would have received.
 ///
@@ -1915,67 +1915,6 @@ pub unsafe extern "C-unwind" fn rt_go(args: *const i64, argc: u32) -> i64 {
              a task is a continuation stack, which compiled code does not have"
                 .to_string(),
         ),
-    }
-}
-
-/// `(rt-apply-any closure args-ptr argc)` — compiled code's one way to call
-/// a function *value*, whatever kind of function it turns out to hold.
-/// `args[0]` is the callee as a tagged word, `args[1]` the address of the
-/// caller's own argument array, and `args[2]` how many arguments it holds;
-/// the result is the callee's return word. `compiler.rs`'s
-/// `compile-apply-indirect` reaches this through the `build-closure-apply`
-/// builtin, which emits the single call.
-///
-/// Compiled code cannot know which kind it has: a `Type::Fn` value is a
-/// `BoxedObj::CompiledClosure` when its `lambda` was JIT/AOT compiled and a
-/// `BoxedObj::Closure` when it was not, and since the JIT became an
-/// optimisation rather than a requirement (the cons-cell interpreter's
-/// Phase 2) both reach the same apply site. What `build-closure-apply` used
-/// to emit — `rt_closure_fnptr` + an `rt_closure_env_get` copy loop + an
-/// indirect call — handled only the first and `fatal`'d on the second,
-/// aborting the process from a place no `Result` could catch. The dispatch
-/// belongs where the value is, so it is here.
-///
-/// The compiled case is the old emitted sequence, done in Rust: read the
-/// entry point, re-encode the captured environment (the exact per-slot rule
-/// [`rt_closure_env_get`] applies), and call through the one fixed
-/// `compiled_fn_type_with_env` ABI every closure-boxed function shares. The
-/// interpreted case hands off to [`set_apply_interpreted`]'s hook, which
-/// decodes the argument words by the closure's own declared parameter
-/// representations, evaluates the body, and encodes the result back.
-///
-/// # Safety
-///
-/// `args` must point to 3 valid `i64`s, `args[1]` to `args[2]` valid `i64`s
-/// that stay valid for the call, and a `Heap` must be registered on this
-/// thread. Every heap-backed word in the callee's argument array must
-/// already be rooted by the caller (`compile-call-args`' `push-sexpr-root`
-/// for a `kind = 2` argument does this): an interpreted body allocates, and
-/// an unrooted argument would be collected under it.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_apply_any(args: *const i64, argc: u32) -> i64 {
-    if argc != 3 {
-        fatal("rt_apply_any: expected 3 arguments (closure, argument array, argument count)");
-    }
-    let closure = *args;
-    let callee_args = *args.add(1) as usize as *const i64;
-    let callee_argc = *args.add(2) as u32;
-    let passed: Vec<i64> = (0..callee_argc as usize).map(|i| *callee_args.add(i)).collect();
-    match resolve_closure(closure) {
-        Callee::Interpreted => apply_on_this_frame(closure, &passed, "rt_apply_any"),
-        // A coroutine body cannot be called; it can only be *driven*, and
-        // this caller is a C ABI function that has to come back with an
-        // answer — so it drives on a stack of its own. A chain rooted here
-        // lives on the machine stack of whoever called in, so it cannot be
-        // put down and picked up later.
-        //
-        // **Compiled code no longer emits this.** Since C5 an `apply` names
-        // its callee to the caller's own driver (`rt_frame_apply`), which can
-        // put the chain down. What is left reaching here is the boundaries
-        // that hold a machine frame by construction — `rt_dyn_call`'s
-        // interpreted leg and the C FFI thunk.
-        Callee::Coroutine { f, env } => drive_to_completion(f, &passed, &env, "rt_apply_any"),
-        Callee::Classic { f, env } => f(callee_args, callee_argc, env.as_ptr(), env.len() as u32),
     }
 }
 
@@ -3168,7 +3107,8 @@ unsafe fn run_entry_payload(outcome: std::thread::Result<i64>) -> i64 {
 // A `throw` travels as a Rust panic, because that is the only unwind every
 // frame between the throw and its catch can survive: compiled frames are
 // walkable (`tests/compiled_unwind_test.rs`), and the interpreted frames that
-// may sit in between (compiled -> `rt_apply_any` -> interpreted -> compiled)
+// may sit in between (compiled -> a machine-frame driver -> interpreted ->
+// compiled)
 // are Rust ones, which can only catch Rust panics — a foreign exception
 // reaching `catch_unwind` aborts with "Rust cannot catch foreign exceptions".
 //
@@ -3465,7 +3405,7 @@ unsafe fn pause_on_a_machine_frame(paused: crate::coroutine::Paused, what: &str)
 ///
 /// In an AOT executable there is no interpreter and nothing should produce an
 /// interpreted closure either, so a missing hook is an invariant break rather
-/// than a limitation to work around — the same call `rt_apply_any` makes.
+/// than a limitation to work around.
 ///
 /// # Safety
 ///
@@ -4803,9 +4743,10 @@ pub unsafe extern "C" fn rt_global_set(args: *const i64, argc: u32) -> i64 {
 // value. The vtable itself lives *outside* the heap, here — one table per
 // (concrete type, trait) pair, holding raw native function pointers in the
 // trait's declared method order (`TraitDef::method_order`). A call site knows
-// its slot statically, so dispatch is `rt_dyn_vtable` -> `rt_dyn_call`, with
-// no lookup by name or type at run time — and `rt_dyn_call` is also where a
-// slot whose implementation is *interpreted* is handled. Ids are assigned by the interpreter
+// its slot statically, so dispatch is `rt_dyn_vtable` -> naming the slot to
+// the driver (`rt_frame_dyn_call`), with no lookup by name or type at run
+// time — and the driver is also where a slot whose implementation is
+// *interpreted* is handled. Ids are assigned by the interpreter
 // (`Interp::vtable_id_for`), which keeps its own parallel table of
 // `(type, method)` identities for tree-walking calls.
 
@@ -4851,7 +4792,8 @@ pub fn upcast_define(from: u32, trait_id: u32, to: u32) {
 /// Installs (or replaces) vtable `id`'s slots. Called from the interpreter
 /// once a compilation unit's function addresses are final
 /// (`Interp::compile_scc`) and from AOT startup; a slot holding 0 means "not
-/// compiled", which [`rt_dyn_call`] answers by asking the interpreter.
+/// compiled", which the driver answers by asking the interpreter
+/// ([`reify_dyn_slot`]).
 pub fn vtable_define(id: u32, slots: Vec<(usize, u8)>) {
     VTABLES.with(|t| {
         let mut t = t.borrow_mut();
@@ -4925,8 +4867,8 @@ pub(crate) fn vtable_slot_addr(id: usize, slot: usize) -> (usize, u8) {
 ///
 /// In an AOT executable every method the program can reach is compiled and no
 /// interpreter exists to ask, so a missing hook is an invariant break rather
-/// than a limitation — the same reading `rt_apply_any` makes of a missing
-/// apply hook.
+/// than a limitation — the same reading [`apply_on_this_frame`] makes of a
+/// missing apply hook.
 pub(crate) unsafe fn reify_dyn_slot(vtable: u32, slot: u32, what: &str) -> i64 {
     match DYN_SLOT_CLOSURE.with(|cell| cell.get()) {
         Some(hook) => hook(vtable, slot),
@@ -4937,9 +4879,9 @@ pub(crate) unsafe fn reify_dyn_slot(vtable: u32, slot: u32, what: &str) -> i64 {
     }
 }
 
-/// How [`rt_dyn_call`] asks the interpreter for the closure standing behind
-/// an unfilled vtable slot — `(vtable id, slot) -> a tagged interpreted
-/// closure value`.
+/// How [`reify_dyn_slot`] asks the interpreter for the closure standing
+/// behind an unfilled vtable slot — `(vtable id, slot) -> a tagged
+/// interpreted closure value`.
 pub type DynSlotClosureFn = unsafe extern "C-unwind" fn(u32, u32) -> i64;
 
 thread_local! {
@@ -5021,72 +4963,6 @@ pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
         // `BoxedObj::CompiledClosure`, and `build-make-closure` only ever
         // hands it a function compiled under `compiled_fn_type_with_env`.
         Callee::Classic { f: std::mem::transmute(fn_ptr), env }
-    }
-}
-
-/// A `:dyn` method call: slot `args[1]` of vtable `args[0]`, applied to the
-/// `args[3]` arguments at `args[2]` (a pointer, as an integer — the same way
-/// [`rt_apply_any`] takes its callee's argument array).
-///
-/// **Why the dispatch is here and not at the call site.** A compiled `:dyn`
-/// call used to be "read the slot, call it indirectly", which assumes every
-/// implementation behind a trait object is compiled. It need not be: the
-/// prelude's stream methods are compiled (as of the precompiled prelude), and
-/// a program can hand one of them a `:dyn CharInput` whose concrete type is
-/// the *user's* own struct, whose `read-char` is an ordinary interpreted
-/// method. The slot for it is 0, and the call site — which has already
-/// evaluated its arguments into a raw array — has nowhere to go.
-///
-/// So the branch lives where the answer is, which is the same shape
-/// [`rt_apply_any`] settled on for closures: compiled slot, call it;
-/// otherwise ask the interpreter for the closure that slot stands for and
-/// hand it to the same interpreted-apply hook. The two paths agree on the
-/// argument array because an interpreted closure carries its own parameter
-/// representations, which is exactly what that hook decodes by.
-///
-/// # Safety
-///
-/// `argc` must be 4; `args[2]` must be a valid pointer to at least `args[3]`
-/// `i64`s in the callee's own argument representations; a `Heap` must
-/// already be registered on this thread.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_dyn_call(args: *const i64, argc: u32) -> i64 {
-    if argc != 4 {
-        fatal("rt_dyn_call: expected 4 arguments (vtable id, slot, argument array, argument count)");
-    }
-    let id = *args as usize;
-    let slot = *args.add(1) as usize;
-    let callee_args = *args.add(2) as usize as *const i64;
-    let callee_argc = *args.add(3) as u32;
-
-    let (ptr, body_abi) = vtable_slot_addr(id, slot);
-    if ptr != 0 {
-        if body_abi == typelisp_abi::BODY_ABI_COROUTINE {
-            // Run to completion on a driver of its own, the boundary
-            // `rt_apply_any` already sits at: this call has to *return* a
-            // value to compiled code that is waiting on the machine stack.
-            // C5 replaces both with a `STATUS_CALL` the caller's own driver
-            // takes over.
-            let f: crate::coroutine::CoroutineFn = std::mem::transmute(ptr);
-            let words = collect_words(callee_args, i64::from(callee_argc));
-            return drive_to_completion(f, &words, &[], "rt_dyn_call");
-        }
-        // SAFETY: every address in a vtable comes from `CompiledFn::address`
-        // for a method compiled under the plain `compiled_fn_type` signature.
-        let f: unsafe extern "C" fn(*const i64, u32) -> i64 = std::mem::transmute(ptr);
-        return f(callee_args, callee_argc);
-    }
-
-    // Not compiled. In an AOT executable that cannot happen — everything the
-    // program can reach is compiled and no interpreter exists to ask — so a
-    // missing hook is an invariant break, exactly as in `rt_apply_any`.
-    let closure = match DYN_SLOT_CLOSURE.with(|cell| cell.get()) {
-        Some(hook) => hook(id as u32, slot as u32),
-        None => fatal("rt_dyn_call: vtable slot is empty and no interpreter is registered on this thread"),
-    };
-    match APPLY_INTERPRETED.with(|cell| cell.get()) {
-        Some(hook) => hook(closure, callee_args, callee_argc),
-        None => fatal("rt_dyn_call: the slot's method is interpreted and no interpreter is registered on this thread"),
     }
 }
 

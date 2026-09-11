@@ -393,7 +393,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// these (they are not in [`rt_builtin_symbol`]'s table) —
 /// `compiler.rs`'s `retain-bindings`/`release-bindings`/`bind-let-values`
 /// call them directly via `get-function`/`build-call`, the same way
-/// `build-make-closure`/`build-closure-apply` call `rt_closure_*` directly
+/// `build-make-closure` calls `rt_closure_*` directly
 /// rather than through the `(call name args)` tag. They still need
 /// the same forward-declaration/global-mapping treatment as every other
 /// `rt_*` shim, so they belong in this one shared list regardless.
@@ -433,7 +433,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 257] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 255] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -469,7 +469,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 257] {
         rt_stream_string_input, rt_stream_string_output, rt_stream_take_output_string, rt_stream_unread_char,
         rt_stream_write_byte, rt_stream_write_string,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
-        rt_apply_any, rt_cell_get, rt_cell_new, rt_cell_set, rt_char_alphap, rt_char_digitp, rt_char_downcase,
+        rt_cell_get, rt_cell_new, rt_cell_set, rt_char_alphap, rt_char_digitp, rt_char_downcase,
         rt_char_equalp, rt_char_upcase, rt_int_to_char, rt_closure_env_get, rt_closure_env_len,
         rt_closure_fnptr, rt_closure_new, rt_coroutine_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_narrow_new, rt_narrow_value, rt_float_to_bignum,
         rt_float_to_ratio, rt_f64_value, rt_f32_value, rt_global_get, rt_global_new, rt_global_set, rt_int_div, rt_int_mod,
@@ -487,7 +487,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 257] {
         rt_ffi_cstring_new, rt_ffi_cstring_free, rt_ffi_string_from_cstr,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_str_upcase, rt_str_downcase, rt_int_fits, rt_int_fits_char, rt_f64_fits_f32, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
-        rt_dyn_call, rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
+        rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
         rt_throw, rt_throw_matches, rt_throw_take_value,
         rt_go,
         rt_frame_new, rt_frame_data, rt_frame_mask_bit, rt_frame_pc, rt_frame_set_pc,
@@ -503,10 +503,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 257] {
         // `compile-file` output never emits a call to it — an unreferenced
         // declaration emits no symbol for the linker to miss).
         ("rt_llvm_call", crate::compile::llvm_builtins::rt_llvm_call as usize),
-        // Trait objects and vtables: `rt_dyn_new` boxes,
-        // `rt_dyn_vtable`/`rt_dyn_value` decode, and `rt_dyn_call` performs
-        // the dispatch itself (`compiler.rs`'s `compile-dyn-*`) — including
-        // the case where the slot's implementation is interpreted.
+        // Trait objects and vtables: `rt_dyn_new` boxes and
+        // `rt_dyn_vtable`/`rt_dyn_value` decode (`compiler.rs`'s
+        // `compile-dyn-*`). The dispatch itself is the *driver*'s since C5
+        // (`rt_frame_dyn_call` names the slot and it decides who runs it),
+        // because the slot's implementation need not be compiled at all.
         // `rt_dyn_upcast` swaps a box's table for a supertrait's when the two
         // layouts share no prefix.
         // `rt_vtable_set`/`rt_upcast_set` fill the two tables from AOT
@@ -517,7 +518,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 257] {
         ("rt_dyn_vtable", rt_dyn_vtable as usize),
         ("rt_dyn_value", rt_dyn_value as usize),
         ("rt_dyn_upcast", rt_dyn_upcast as usize),
-        ("rt_dyn_call", rt_dyn_call as usize),
         ("rt_vtable_set", rt_vtable_set as usize),
         ("rt_upcast_set", rt_upcast_set as usize),
         // The small system builtins (`typelisp_rt::sys_builtin`): parsing,
@@ -675,7 +675,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 257] {
         ("rt_closure_fnptr", rt_closure_fnptr as usize),
         ("rt_closure_env_len", rt_closure_env_len as usize),
         ("rt_closure_env_get", rt_closure_env_get as usize),
-        ("rt_apply_any", rt_apply_any as usize),
         ("rt_cell_new", rt_cell_new as usize),
         ("rt_cell_get", rt_cell_get as usize),
         ("rt_cell_set", rt_cell_set as usize),

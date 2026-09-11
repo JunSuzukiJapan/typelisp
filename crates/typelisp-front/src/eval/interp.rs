@@ -653,7 +653,7 @@ impl Interp {
     /// is compiled *later* than the function that boxes for it.
     ///
     /// A slot whose method has no compiled form yet is published as 0, which
-    /// `rt_dyn_call` reads as "this one is interpreted — ask the interpreter
+    /// the driver reads as "this one is interpreted — ask the interpreter
     /// for its closure". That is not an error: a trait object's concrete type
     /// can be a user `defstruct` whose methods nobody ever compiled, while the
     /// code dispatching on it (a prelude stream method, say) is native.
@@ -740,7 +740,7 @@ impl Interp {
         // precompiled prelude the targets may already have native bodies
         // while nothing in this session ever compiles anything, and then the
         // compiled tier would never learn the table exists. A slot whose
-        // method is *not* compiled publishes as 0, which `rt_dyn_call` reads
+        // method is *not* compiled publishes as 0, which the driver reads
         // as "ask the interpreter".
         self.publish_vtable(id);
         id
@@ -1039,8 +1039,9 @@ impl Interp {
     /// Encoding allocates nothing, so no rooting happens (or is needed) here.
     fn encode_crossing_value(&self, heap: &Heap, v: &Value, repr: &Repr) -> Result<i64, EvalError> {
         // A built-in used as a function value is a box like any other, so it
-        // would encode as an ordinary tagged word — and then `rt_apply_any`
-        // would find a callee whose arguments it has no way to decode: a
+        // would encode as an ordinary tagged word — and then the apply
+        // boundary would find a callee whose arguments it has no way to
+        // decode: a
         // built-in carries only its name, and the apply site does not carry
         // the representations at runtime (an interpreted closure does, which
         // is why *it* crosses fine). Rejected here, where it is still an
@@ -1251,10 +1252,10 @@ impl Interp {
             .collect();
         let fn_ptr = heap.compiled_closure_fnptr(id);
         if heap.compiled_closure_body_abi(id) == typelisp_abi::BODY_ABI_COROUTINE {
-            // The same boundary `rt_apply_any` draws, for the same reason:
-            // this caller is a Rust frame waiting for an answer, so the
-            // closure is driven to completion on a stack of its own rather
-            // than joining a chain that could be put down. See
+            // A Rust frame is waiting for an answer here, so the closure is
+            // driven to completion on a stack of its own rather than joining
+            // a chain that could be put down — with an interpreted `apply`
+            // underneath resolved on this frame (`run_to_end`). See
             // `Interp::call_coroutine`.
             // SAFETY: as below, but under `coroutine_fn_type` — which is what
             // `rt_coroutine_closure_new` having been the producer records.
@@ -1291,7 +1292,7 @@ impl Interp {
 
     /// Registers this thread's `Heap` and `Interp` for the compiled code
     /// about to run, and wires the interpreter re-entry hook
-    /// `typelisp_rt::rt_apply_any` calls when it finds an interpreted callee.
+    /// the apply boundary calls when it finds an interpreted callee.
     ///
     /// Called immediately before *every* crossing into compiled code rather
     /// than once per session: it is three pointer stores, and there is no
@@ -1303,7 +1304,7 @@ impl Interp {
     /// AOT has no counterpart: an AOT-compiled executable is its own process
     /// with no interpreter in it, so `rt_heap_init` registers the heap alone
     /// and an interpreted callee there is an invariant break (see
-    /// `rt_apply_any`).
+    /// `typelisp_rt::apply_on_this_frame`).
     fn enter_compiled(&self, heap: &mut Heap) {
         typelisp_rt::set_active_heap(heap as *mut Heap);
         self.install_print_hooks();
@@ -4544,9 +4545,15 @@ thread_local! {
     static ACTIVE_INTERP: std::cell::Cell<*const Interp> = const { std::cell::Cell::new(std::ptr::null()) };
 }
 
-/// `typelisp_rt::rt_apply_any`'s interpreter half: compiled code has reached
-/// an apply site whose callee is *not* a compiled closure, so the call has to
-/// finish in the tree-walking evaluator.
+/// The interpreter half of applying a function value from compiled code:
+/// the callee is *not* a compiled closure, so the call has to finish in the
+/// evaluator.
+///
+/// **The last resort, not the usual path.** A compiled `apply` names its
+/// callee to the caller's own driver, which hands an interpreted one to the
+/// task's continuation stack (`Paused::Applying`) — where it can suspend.
+/// This is what a driver standing on a *machine* frame does instead
+/// (`FrameStack::run_to_end`), because that frame is waiting for an answer.
 ///
 /// An error from the callee *unwinds* rather than returning: there is a
 /// compiled frame between here and any Rust caller that could handle a
@@ -4564,11 +4571,11 @@ thread_local! {
 /// ([`typelisp_rt::set_active_heap`]) and an `Interp`
 /// ([`Interp::enter_compiled`]) must be registered on this thread. Every
 /// frame between here and the catching boundary must tolerate being unwound
-/// through, which is why this and `rt_apply_any` are `extern "C-unwind"`.
+/// through, which is why this is `extern "C-unwind"`.
 unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64, argc: u32) -> i64 {
     let interp = ACTIVE_INTERP.with(|cell| cell.get());
     if interp.is_null() {
-        typelisp_rt::fatal("rt_apply_any: no interpreter is registered on this thread");
+        typelisp_rt::fatal("applying a function value from compiled code: no interpreter is registered on this thread");
     }
     let interp = &*interp;
     let heap = typelisp_rt::active_heap();
@@ -4609,11 +4616,12 @@ unsafe extern "C-unwind" fn rt_spawn_task(args: *const i64, argc: u32) -> i64 {
     }
 }
 
-/// `typelisp_rt::rt_dyn_call`'s interpreter half: a `:dyn` call site found
-/// its vtable slot empty, so the implementation behind it is an ordinary
-/// interpreted method. Hands back the closure that method reifies to, which
-/// the caller then applies through [`rt_apply_interpreted`] — the same path
-/// any other interpreted callee takes out of compiled code.
+/// The interpreter half of a `:dyn` call whose vtable slot is empty: the
+/// implementation behind it is an ordinary interpreted method. Hands back the
+/// closure that method reifies to, which then takes the same path any other
+/// interpreted callee takes out of compiled code — the driver's
+/// `Paused::Applying`, or [`rt_apply_interpreted`] when the driver is
+/// standing on a machine frame.
 ///
 /// Most failures here really are compiler bugs — a slot with no
 /// `(type, method)` behind it, or a method that no longer resolves — but
@@ -4629,7 +4637,7 @@ unsafe extern "C-unwind" fn rt_spawn_task(args: *const i64, argc: u32) -> i64 {
 unsafe extern "C-unwind" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
     let interp = ACTIVE_INTERP.with(|cell| cell.get());
     if interp.is_null() {
-        typelisp_rt::fatal("rt_dyn_call: no interpreter is registered on this thread");
+        typelisp_rt::fatal("a :dyn call with an interpreted implementation: no interpreter is registered on this thread");
     }
     let interp = &*interp;
     let heap = typelisp_rt::active_heap();

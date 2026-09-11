@@ -1352,7 +1352,7 @@ fn vtable_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, String)>, 
 /// by one. Taking the list directly removes the arithmetic instead of getting it
 /// right twice. (Getting it wrong here emitted an empty supertrait vtable, and
 /// the only symptom was an AOT executable aborting on the empty slot — the
-/// abort `rt_vtable_slot` used to raise, now `rt_dyn_call`'s no-interpreter
+/// abort `rt_vtable_slot` used to raise, now the driver's no-interpreter
 /// case.)
 fn vtable_of(heap: &Heap, list: Value) -> Result<Vec<(Path, String)>, Error> {
     let mut out = Vec::new();

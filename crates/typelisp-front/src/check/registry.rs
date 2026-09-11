@@ -2005,8 +2005,7 @@ pub fn llvm_builder_def() -> AdtDef {
     // `build-fadd`/..., these need the module to look the intrinsic
     // declaration up in (`eval_llvm_builtin_method`'s
     // `llvm_builder_build_float_unary_intrinsic`), so they take `llvm-module`
-    // as a second argument the same way `build-make-closure`/
-    // `build-closure-apply` do.
+    // as a second argument the same way `build-make-closure` does.
     for name in ["build-fsqrt", "build-ffloor", "build-fceil", "build-fround", "build-ftrunc", "build-fsin", "build-fcos", "build-fexp", "build-flog"] {
         assoc.insert(name.to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], llvm_value_ty(), true));
     }
@@ -2064,7 +2063,7 @@ pub fn llvm_builder_def() -> AdtDef {
             true,
         ),
     );
-    // `build-make-closure`/`build-closure-apply`: `BoxedObj::CompiledClosure`
+    // `build-make-closure`: `BoxedObj::CompiledClosure`
     // (`typelisp-mem`) — the GC-heap runtime representation of a `lambda`
     // value that *escapes* its defining function (rather than being called
     // directly while statically known, like every `apply`/`call` site
@@ -2078,8 +2077,8 @@ pub fn llvm_builder_def() -> AdtDef {
     //
     // `build-make-closure` takes the already-compiled `target` (declared
     // under `add-function-with-env`'s ABI — *every* closure-boxed function
-    // uses that ABI, capturing or not, so `build-closure-apply` never has to
-    // decide which ABI to call through), an env array built the same way a
+    // uses that ABI, capturing or not, so applying one never has to decide
+    // which ABI to call through), an env array built the same way a
     // direct capturing call already builds one (`alloca-args`/`store-arg`/
     // `compile-env-args`), and `sexpr_mask` (a bitmask, one bit per captured
     // slot, computed entirely at compile time by `compiler.rs`'s
@@ -2087,10 +2086,14 @@ pub fn llvm_builder_def() -> AdtDef {
     // values for the GC mark phase to trace — see
     // `interp::llvm_builder_build_make_closure`'s doc comment for how it
     // gets copied into the new box via `rt_closure_new`.
-    // `build-closure-apply` is `build-call-with-env`'s indirect counterpart:
-    // the callee isn't a statically-known `llvm-function` here, just a
-    // tagged closure reference, so it reads `fn_ptr`/`env_len`/each captured
-    // slot back out via `rt_closure_fnptr`/`rt_closure_env_len`/
+    // Applying such a box is `coroutine-apply`'s job since C5: the callee
+    // isn't a statically-known `llvm-function`, just a tagged closure
+    // reference, and reading `fn_ptr`/`env_len`/each captured slot back out
+    // is the *driver*'s (`typelisp_rt::resolve_closure`) — because only it
+    // can act on the answer. The builtin that used to do it here
+    // (`build-closure-apply`, a call to `rt_apply_any`) is gone; what
+    // follows describes the box it read.
+    // The reads are via `rt_closure_fnptr`/`rt_closure_env_len`/
     // `rt_closure_env_get` at runtime and calls through
     // `build_indirect_call` instead — see that builtin's own doc comment.
     // Neither builtin needs a retain/release counterpart anymore: the box's
@@ -2104,10 +2107,6 @@ pub fn llvm_builder_def() -> AdtDef {
             llvm_value_ty(),
             true,
         ),
-    );
-    assoc.insert(
-        "build-closure-apply".to_string(),
-        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
     );
     // The generic-pointer read counterpart of `store-arg` — see
     // `interp::llvm_builder_load_raw`'s doc comment.
@@ -2301,8 +2300,8 @@ pub fn llvm_builder_def() -> AdtDef {
     // "every compiled value is a plain i64" (`build-ret`/`store-arg`'s value
     // operand/`build-icmp-*`/...) and the pointer `load-raw`/`store-arg`'s
     // *array* operand already expects, exactly the conversion
-    // `build-make-closure`/`build-closure-apply` already do internally for
-    // `ClosureBox`, just exposed generically here.
+    // `build-make-closure` already does internally for `ClosureBox`, just
+    // exposed generically here.
     assoc.insert("build-malloc".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I32], llvm_value_ty(), true));
     assoc.insert("build-free".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
     assoc.insert("build-int-to-ptr".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));

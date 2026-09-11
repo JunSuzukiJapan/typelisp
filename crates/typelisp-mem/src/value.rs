@@ -381,7 +381,7 @@ pub(crate) enum BoxedObj {
     /// the other being its interpreted twin [`Closure`](BoxedObj::Closure) —
     /// which values of the same `Type::Fn` can equally be, so anything that
     /// applies a function value has to admit both. In compiled code that
-    /// dispatch is `typelisp_rt::rt_apply_any`'s.
+    /// dispatch is the driver's (`typelisp_rt::resolve_closure`).
     ///
     /// `fn_ptr` is the native entry point (the `compiled_fn_type_with_env`
     /// ABI: `(args_ptr, argc, env_ptr, env_len) -> i64`), opaque at this
@@ -457,8 +457,8 @@ pub(crate) enum BoxedObj {
     ///
     /// `params` is the core `((SYM REPR)...)` list and `ret` the return
     /// representation, so the box carries its own whole signature. The
-    /// interpreter needs neither — it binds and returns `Value`s — but
-    /// `typelisp_rt::rt_apply_any` does: when compiled code applies one of
+    /// interpreter needs neither — it binds and returns `Value`s — but the
+    /// compiled apply boundary does: when compiled code applies one of
     /// these, the argument words arriving from the compiled side and the
     /// word going back have to be decoded and encoded by *declared*
     /// representation, and the apply site does not carry one at runtime. A
@@ -485,7 +485,7 @@ pub(crate) enum BoxedObj {
     /// A built-in is *not* callable from compiled code: the `rt_closure_*`
     /// shims all test `is_compiled_closure` and refuse anything else, and the
     /// interpreter refuses to marshal one across the boundary, so this box
-    /// stays interpreter-side until `rt_apply_any` exists.
+    /// stays interpreter-side.
     /// `ret_key` is the runtime identity of what this builtin *returns*, for
     /// the container constructors whose result is a box with no field to read
     /// an instantiation off (`Vector::new`, `HashTable::keys`). Spelled by the

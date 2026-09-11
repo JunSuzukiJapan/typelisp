@@ -493,9 +493,11 @@ struct Task {
     /// **At most one, and empty whenever the task is doing interpreted work.**
     /// A chain is left only by returning or suspending, and while it stands the
     /// task is either driving it or blocked on it — so `step_cps` cannot run
-    /// and cannot start a second one. A compiled body that calls *back* into
-    /// the interpreter (`rt_apply_any`) runs a nested driver on the machine
-    /// stack instead, which is why that boundary still cannot suspend.
+    /// and cannot start a second one — but it can hold **more than one
+    /// segment**. A compiled frame that applies an interpreted closure (C5)
+    /// runs it on this task's continuation stack, and if that closure calls a
+    /// compiled function the chain grows a second run of frames above the
+    /// first. `DriveCtx::base` is what keeps the two apart.
     compiled: typelisp_rt::coroutine::FrameStack,
 }
 
@@ -1029,8 +1031,11 @@ impl Interp {
     /// catch-all, so a tag with no frame fails to build.
     pub(crate) fn eval_cps(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
         if self.scheduler.borrow().driving {
-            // Nested: a Rust frame is waiting on this call — compiled code that
-            // re-entered, or `Interp::apply`. This evaluation cannot be
+            // Nested: a Rust frame is waiting on this call. `Interp::apply`
+            // and the public API, the `eval` builtin, a `print-object`
+            // method, a reader macro — and a compiled callee reached through
+            // a driver that is itself standing on a machine frame
+            // (`FrameStack::run_to_end`). This evaluation cannot be
             // suspended, because there is no continuation stack under that
             // frame to come back to, so it runs straight through on the
             // caller's own root stack.
@@ -1065,9 +1070,15 @@ impl Interp {
                 // There is a Rust frame waiting on this evaluation, so there is
                 // nothing to switch *to*: suspending would strand it. Refused
                 // rather than deadlocked — see the plan's B6.
+                //
+                // **Not the compiled boundary any more.** C5 moved a compiled
+                // `apply` and `:dyn` call onto the task's own continuation
+                // stack, so what is left here is the callers that genuinely
+                // hold a Rust frame: `Interp::apply`, `eval`, a print method,
+                // a reader macro, and a driver that entered from one of those.
                 Progress::Blocked(w) => {
                     break Err(EvalError::Panic(format!(
-                        "{} cannot block: it was reached from compiled code, which has no continuation stack to suspend",
+                        "{} cannot block: it was reached from a Rust caller, which has no continuation stack to suspend",
                         match w {
                             Waiting::Task(_) => "`wait`",
                             Waiting::Yield => "`yield`",

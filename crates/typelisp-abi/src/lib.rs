@@ -119,7 +119,7 @@ pub struct CompiledPanic {
 
 /// The payload marking an unwind that carries an *interpreted* callee's
 /// error, raised when compiled code called into the interpreter and got an
-/// error back ([`rt_apply_any`]/[`rt_dyn_call`] reaching their interpreter
+/// error back (a compiled `apply` or `:dyn` call reaching its interpreter
 /// hooks).
 ///
 /// **Carries nothing.** The error is a `typelisp::EvalError`, which is
@@ -191,7 +191,7 @@ pub fn raise(msg: String) -> ! {
 ///
 /// The counterpart of [`rt_panic`] for the other direction of the boundary:
 /// compiled code called into the interpreter, and the interpreter failed.
-/// Before this existed, [`rt_apply_any`]'s and [`rt_dyn_call`]'s interpreter
+/// Before this existed, the compiled `apply` and `:dyn` boundaries' interpreter
 /// hooks had nowhere to report to and aborted the process — including for
 /// ordinary, recoverable failures like a `(panic ...)` in an interpreted
 /// callback.
@@ -310,9 +310,10 @@ pub mod call_state {
         ///
         /// **A stack, not a slot.** The driver takes the frame only once the
         /// entering call has *returned*, and a callee can start a driver of
-        /// its own before then: `rt_apply_any` and `rt_dyn_call` both run a
-        /// nested `FrameStack` on the machine stack (the boundaries C5
-        /// retires; C4 retired `rt_protected_drive`, which was a third).
+        /// its own before then: `rt_drive_body`, `rt_drive_entry` and the C
+        /// FFI thunk all run a nested `FrameStack` on the machine stack (C4
+        /// retired `rt_protected_drive` and C5 retired `rt_apply_any` and
+        /// `rt_dyn_call`, which were three more).
         /// Every one of those publishes and takes in balanced
         /// pairs within the outer callee's own activation, so LIFO hands each
         /// driver back exactly the frame its own entry made. A single slot
