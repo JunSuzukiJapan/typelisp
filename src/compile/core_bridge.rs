@@ -476,10 +476,18 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 
         // ---- assignment, loops and globals -------------------------------
         "set" => translate_set(heap, form, cx),
+        // `(loop REPR BODY...)` -> `(loop KIND BODY...)`. `KIND` is the
+        // *binding* kind, not `field_kind`: the island passes it straight to
+        // `binding-slot`, which asks only whether the collector may follow the
+        // word in the loop's merge slot. That slot is live exactly while an
+        // `unwind-protect` cleanup on the way out runs, and a cleanup can
+        // allocate.
         "loop" => {
+            let kind = repr_binding_kind(heap, form, 0)?;
             let body = core::fields(heap, form)?;
             let mut f = Items::new(heap);
-            for e in &body {
+            f.push(Value::Int(kind));
+            for e in body.iter().skip(1) {
                 // Untagged, unlike a call's arguments: these run for effect,
                 // and only whichever `break`/`return` leaves the loop carries
                 // a value out.
@@ -500,11 +508,16 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         "block" => {
             let name = block_name(heap, form)?;
             let body = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+            // Trailing, where `loop`'s leads: this node's arity is fixed, so
+            // the repr can sit where every other one in this vocabulary sits.
+            // Same meaning as `loop`'s — the merge slot a `return-from` writes.
+            let kind = repr_binding_kind(heap, form, 2)?;
             let mut f = Items::new(heap);
             let name_v = f.heap().alloc_string(name);
             f.push(name_v);
             let b = to_island(f.heap(), body, cx)?;
             f.push(b);
+            f.push(Value::Int(kind));
             f.finish("block")
         }
         "return-from" => {
@@ -565,17 +578,22 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             f.push(v);
             f.finish("throw")
         }
-        // Structurally unchanged: both halves are ordinary forms, and the
-        // cleanup's value is discarded on every path, so no representation is
-        // needed for either.
+        // `(unwind-protect PROTECTED CLEANUP REPR)` -> the same two halves and
+        // `KIND`. One repr, not two: the cleanup's value is discarded on every
+        // path. The protected value's is the reason the field exists at all —
+        // it waits in a slot *while the cleanup runs*, which is the one place
+        // in the compiled output where a value is put away specifically so
+        // that code which allocates can run.
         "unwind-protect" => {
             let protected = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let cleanup = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+            let kind = repr_binding_kind(heap, form, 2)?;
             let mut f = Items::new(heap);
             let p = to_island(f.heap(), protected, cx)?;
             f.push(p);
             let c = to_island(f.heap(), cleanup, cx)?;
             f.push(c);
+            f.push(Value::Int(kind));
             f.finish("unwind-protect")
         }
         "return" => {
@@ -2651,6 +2669,17 @@ fn repr_kind(heap: &Heap, form: Value, i: usize) -> Result<i64, Error> {
     Ok(repr.field_kind())
 }
 
+/// [`repr_kind`]'s counterpart for a *slot* rather than a boundary:
+/// [`Repr::binding_kind`]'s `0`/`2` — "may the collector follow this word" —
+/// rather than [`Repr::field_kind`]'s per-variant number, which answers how to
+/// tag and untag one. The island's `binding-slot` takes exactly this, and the
+/// three control forms that own a merge slot (`loop`, `block`,
+/// `unwind-protect`) are its callers.
+fn repr_binding_kind(heap: &Heap, form: Value, i: usize) -> Result<i64, Error> {
+    let repr = core::field(heap, form, i).and_then(|r| Repr::read(heap, r)).ok_or_else(|| malformed(heap, form))?;
+    Ok(repr.binding_kind())
+}
+
 /// One 32-bit half of a 64-bit literal, as the `Sexpr` `Int` that carries it
 /// across into the island.
 ///
@@ -3192,10 +3221,41 @@ mod tests {
     #[test]
     fn a_loop_keeps_its_body_untagged() {
         assert_eq!(
-            bridged("(loop (int-any-width 1) (break))"),
-            "(loop (int-any-width 0 1) (break))"
+            bridged("(loop unit (int-any-width 1) (break))"),
+            "(loop 0 (int-any-width 0 1) (break))"
         );
         assert_eq!(bridged("(break)"), "(break)");
+    }
+
+    /// The leading field is the loop's *binding* kind, so the island can ask
+    /// for a merge slot the collector traces. `2` and `0` are the whole of the
+    /// answer — "follow this word" or "never read it as a tag" — where a
+    /// boundary repr (`catch`'s) would be a per-variant number instead.
+    #[test]
+    fn a_loop_carries_its_own_binding_kind() {
+        assert_eq!(bridged("(loop sexpr (break))"), "(loop 2 (break))");
+        assert_eq!(bridged("(loop int-any-width (break))"), "(loop 0 (break))");
+    }
+
+    /// The same field on the two other forms that own a merge slot, trailing
+    /// where `loop`'s leads: their arity is fixed, so the repr sits where every
+    /// other one in this vocabulary sits.
+    #[test]
+    fn a_block_and_an_unwind_protect_carry_their_merge_slots_kind() {
+        assert_eq!(
+            bridged(r#"(block (str "b") (let () (int-any-width 1)) int-any-width)"#),
+            r#"(block "b" (let () (int-any-width 0 1)) 0)"#
+        );
+        // Hand-written core, so the repr is set independently of the forms:
+        // what is being pinned down is the field's position and its meaning.
+        assert_eq!(
+            bridged("(unwind-protect (int-any-width 2) (int-any-width 1) sexpr)"),
+            "(unwind-protect (int-any-width 0 2) (int-any-width 0 1) 2)"
+        );
+        assert_eq!(
+            bridged("(unwind-protect (int-any-width 2) (int-any-width 1) int-any-width)"),
+            "(unwind-protect (int-any-width 0 2) (int-any-width 0 1) 0)"
+        );
     }
 
     /// A value-less `return` becomes an explicit unit, so the island has one

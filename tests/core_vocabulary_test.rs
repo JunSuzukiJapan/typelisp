@@ -174,14 +174,19 @@ fn binding_and_control() {
         // progn
         "(let () (int-any-width 1) (int-any-width 2))",
         "(if (bool true) (int-any-width 1) (int-any-width 2))",
-        "(loop (break))",
+        // `loop` leads with its own `Repr` — the type a `break`/`return`
+        // carries out — where every other node in this vocabulary trails one.
+        // The body is variadic, so a trailing field could not be told from one
+        // more statement. `unit` here: the only exit is a value-less `break`.
+        "(loop unit (break))",
         "(break)",
         "(return)",
         "(return (int-any-width 3))",
         // The named escape. The name is a `(str ...)` node and the body is a
         // single form — the checker wraps its sequence in a binding-less
-        // `let` first, so nothing downstream re-implements sequencing.
-        r#"(block (str "b") (let () (int-any-width 1)))"#,
+        // `let` first, so nothing downstream re-implements sequencing. The
+        // trailing `Repr` is the block's own value, for `loop`'s reason.
+        r#"(block (str "b") (let () (int-any-width 1)) int-any-width)"#,
         r#"(return-from (str "b"))"#,
         r#"(return-from (str "b") (int-any-width 3))"#,
         r#"(panic (str "boom"))"#,

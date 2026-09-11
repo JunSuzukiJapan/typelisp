@@ -406,7 +406,7 @@ LLVM の `call` ではない。マシンスタックは `FrameStack::run` の深
 配るので、引数の数だけ連続して呼べば先頭ポインタから `store-arg` の GEP が
 そのまま効く。
 
-## C2d. 島がコルーチン ABI を出す（**進行中 — labels が壊れている**）
+## C2d. 島がコルーチン ABI を出す
 
 ### 到達した点
 
@@ -566,6 +566,20 @@ a coroutine function did not publish its frame on entry
 （`add-function` で本体を作る＝classic）が、島の出す ABI に引きずられて
 壊れたのがこれを暴いた。
 
+**最終的に 10 箇所**。`build-make-closure`、vtable のスロット、prelude
+ダンプの `body_abi`、宣言ループ 4 つ（bootstrap / prelude_bootstrap / aot /
+dump）、FFI thunk、そして `build_main_wrapper` の **2 つ**——
+`$global_init$N` をドライバに渡すかと、`tl_main` の入口 shim を
+`rt_run_entry_driven` にするか。後者 2 つは**全体スイートの `--lib` だけが
+見つけた**: `aot::tests` が手組みの classic な `tl_main` を建てるので、
+プロセス定数を読むとコルーチンのドライバが classic な本体に当たり、
+`a coroutine function did not publish its frame on entry` になる。
+個別に再実行した 8 ファイルにはこのユニットテストが入っていなかった。
+
+**正しい用法は 1 つだけ**——「これから自分が出す本体を*宣言する*」。
+`grep -rn EMITTED_BODY_ABI src/` して、**既にある関数について訊いている
+ものは全部バグ**。
+
 ### 検証器は「そのプログラムが通った経路」しか見ない
 
 島が自分をコンパイルして verify が通っても、**島が自分では通らない経路**の
@@ -669,7 +683,7 @@ prelude は自分ではコードを出さないので `emits_abi` は無意味�
    ——pc 分岐も再開ブロックも無い（再開するものが無い）
 6. **`ISLAND_DEFUNS` が 8 追加 1 削除ぶん古かった。**
 
-### 残っている不具合: 合流スロットが根でない
+### 合流スロットが根でない（**解決** →「合流スロットは3つ残っていた」）
 
 `catch_throw_test` の 2 本（どちらも gc_stress）:
 
@@ -692,6 +706,10 @@ masked にするのは不可——生の i64 の下位 3 bit が箱のタグに�
 コレクタが算術からヒープ参照を捏造する（`compile-construct-box` と同じ話）。
 チェッカーが `loop`/`block`/`unwind-protect` に結果の `Repr` を載せる作業が
 先に来る（`core_vocabulary_test` と `core_cps` の読み手も動く）。
+
+**やった。** 下の「合流スロットは3つ残っていた」を参照——この段落の見積もり
+（動く読み手が 2 つ）は足りず、実際には 6 つ（`core_freevars` の子の列挙、
+橋、島、評価器、語彙、手書きコア IR を持つテスト 3 ファイル）だった。
 
 ### 「本体を運ぶダンプは自分の ABI を名乗る」は 5 箇所あった
 
@@ -769,3 +787,98 @@ LLVM 型がコルーチンなら、4 命令の classic な関数を作って
 型を見て分岐するので、classic のままなら包みは出ない——`build-make-closure`
 と同じ判定を同じ理由で使っている。
 
+
+
+### 合流スロットは3つ残っていた（loop / block / unwind-protect）
+
+C1 が名前付き束縛と一時値をフレームへ移したとき、**制御形の合流スロットは
+`alloca` のまま残った**。`compile-if` のそれは安全（store と load の間に
+確保が無い）だが、3 つは違う:
+
+```lisp
+(loop (unwind-protect (return (append "sur" "vives")) (cons 3 (cons 4 ()))))
+```
+
+`return` は値をループの合流スロットに置き、**それから** cleanup へ飛ぶ。
+cleanup は確保する。`gc-stress` の下で、スロットは `alloca` なのでコレクタ
+から見えず、返る値が回収される。`catch_throw_test` の 2 本が
+（自分のコメントで「a plain `alloca`, not a GC root」と、捕まえたいものを
+名指しして）これを見張っていた。
+
+**島だけでは直せなかった。** マスクを立てるには値の kind が要り、
+`loop`/`block`/`unwind-protect` のノードは運んでいない。一律に masked に
+するのは不可——生の `i32` の下位 3 bit が箱のタグに見えたら、コレクタが
+算術からヒープ参照を捏造する。
+
+だからチェッカーに運ばせた。`catch`/`throw` が投げる値の repr を運ぶのと
+同じ形で、この 3 つは**自分の合流スロットの** repr を運ぶ:
+
+| ノード | 新しい形 | repr の意味 |
+|---|---|---|
+| `loop` | `(loop REPR BODY...)` | `break`/`return` が持ち出す型（腕の join） |
+| `block` | `(block NAME BODY REPR)` | `return-from` が持ち出す型 |
+| `unwind-protect` | `(unwind-protect P C REPR)` | 保護域の型。cleanup の分は要らない（捨てられる） |
+
+橋は `field_kind` でなく **`binding_kind`**（`repr_binding_kind`）を渡す:
+島の `binding-slot` が訊いているのは「この語を辿ってよいか」だけで、
+`catch` の kind のような「どう包み直すか」ではない。
+
+#### `loop` の repr だけが先頭にある
+
+他はすべて末尾なのに `loop` は先頭。本体が可変長なので、末尾の 1 つは
+「もう 1 つの文」と見分けがつかない。
+
+**この非対称が自己ホストの巡回を 1 回で済ませた。** 再生成の 1 巡目は
+*古い*島が新 SOURCE をコンパイルする。末尾に足したフィールドは、読まない
+古い読み手には見えない（C2d の `pat-bind` の kind がそうだった）——が、
+`loop` は全フィールドを本体として消費するので、**どの位置でも古い島には
+壊れて見える**。
+
+助かったのは別の理由だった: **島の SOURCE には `loop`/`block`/
+`unwind-protect`/`break`/`return` のフォームが 1 つも無い**（`(loop ...)`
+に見える 5 箇所は `compile-value` の `case` のキー）。島は再帰と `if` だけで
+書かれている。だから古い島はこれらのノードを一度も見ない。
+
+確かめずに「先頭に足す」と決めていたら、C2d と同じ定数 2 つ＋3 巡の
+段取りが必要だと思い込んでいた。**成果物の入力が何かは、数えれば分かる。**
+
+#### 直った跡
+
+`catch_throw_test` 36/36（gc_stress の 2 本を含む）。島の再生成は
+2 巡で不動点、prelude も再生成（prelude は `unwind-protect` を実際に使う
+——`with-open-file`）。
+
+`compile-catch` の合流スロットは `alloca` のまま**正しい**: 通常路も pad 路も
+「store → br merge → load」で、間に確保も呼び出しも無い。`compile-if` と
+`build-try-option` と bignum/vector の `try` 系も同じ理由で安全。
+機械的に数えた: store と load の両方に現れる `alloca-args builder 1` は
+8 つあり、3 つが上の表（直したもの）、残り 5 つが `compile-if`・
+`compile-catch`・`build-try-option`・bignum の `try-int`・vector の `pop`
+——どれも「store → br merge → load」で、間に何も起きない。
+
+#### 先頭の repr は省略できない（9 時間の教訓）
+
+`core_cps.rs` / `core_eval.rs` のテストは**手書きのコア IR** を書く。そこでは
+**末尾の repr は省いてよい**——評価器はフィールドを添字で読むので、
+`catch` のテストは実際に `(catch (quote done) (int-any-width 3))` と 2
+フィールドで書いている。`block` と `unwind-protect` も同じ理由で無変更。
+
+**`loop` だけは違う。** 先頭を省くと、最初の*文*が repr の位置に繰り上がって
+**黙って落ちる**:
+
+```
+(loop (if .. (break) ..) (set ..))   ; 抜ける if が消えて、出口の無いループに
+```
+
+症状は「100% CPU で 9 時間、何も印字されない」だった。悪化させた要因が 2 つ:
+
+- `scripts/test-serial.sh` に**ターゲットごとのタイムアウトが無い**
+- 出力を `grep` に通していたので**ブロック単位でバッファされ**、
+  どのファイルまで進んだかも見えなかった（`--line-buffered` か
+  `stdbuf -oL` が要る）
+
+だから `Op::Loop` は**先頭フィールドが repr として読めることを検査する**。
+この評価器が無視している他の repr フィールドと違う扱いにするのは、
+**先頭にあるものだけが「無いこと」を別の意味に化けさせる**から。
+ループの入場ごとに 1 回（`Frame::Loop` は本体から再開するのでノードを
+読み直さない）。

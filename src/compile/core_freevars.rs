@@ -264,7 +264,12 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
             v.extend(from(3));
             v
         }
-        wk::LOOP => from(0),
+        // `(loop REPR BODY...)` — everything past the repr. The repr leads
+        // here (the body is variadic, so it could not trail), and it is not a
+        // form: a parametric one is a list headed by a symbol, so walking it
+        // looks exactly like walking a node and fails with "the free-variable
+        // walk does not know the tag `vector`" — `field-get`'s trap below.
+        wk::LOOP => from(1),
         // `(go CALL)` — the call it wraps is an ordinary node, and every name
         // in it (callee and arguments alike) is read from the scope the `go`
         // is written in, because that is where they are evaluated.
@@ -277,12 +282,16 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // lets that refusal be the error a user sees.
         wk::STEP => from(0),
         wk::RETURN | wk::PANIC | wk::DYN_VALUE => from(0),
-        // `(block NAME BODY)` / `(return-from NAME [VALUE])` — everything past
-        // the name. The name is a `(str ...)` node and *not* a sub-form to
-        // walk: it is a compile-time label, resolved by the checker, so a
-        // variable can never hide in it. Walking it would be harmless here but
-        // would say the opposite about what a block name is.
-        wk::BLOCK | wk::RETURN_FROM => from(1),
+        // `(block NAME BODY REPR)` — the body only. The name is a `(str ...)`
+        // node and *not* a sub-form to walk: it is a compile-time label,
+        // resolved by the checker, so a variable can never hide in it. Walking
+        // it would be harmless here but would say the opposite about what a
+        // block name is. The trailing repr is not a form at all, for the reason
+        // `loop` above gives.
+        wk::BLOCK => parts.get(1).copied().into_iter().collect(),
+        // `(return-from NAME [VALUE])` — everything past the name, and there is
+        // no repr: the value's representation is the *block's*, read there.
+        wk::RETURN_FROM => from(1),
         // `(field-get OBJ IDX REPR)` — the object only. The index is an
         // integer and the representation is not a form at all: a parametric one
         // (`(vector int)`, `(hashtable str int)`) is a *list* whose head is a
@@ -297,9 +306,10 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // fail with "the free-variable walk does not know the tag `vector`" —
         // the same trap `field-get` documents.
         wk::CATCH | wk::THROW => parts.get(1).copied().into_iter().collect(),
-        // Both halves are ordinary forms: a cleanup refers to names from the
-        // scope it is written in, exactly as the protected form does.
-        wk::UNWIND_PROTECT => from(0),
+        // `(unwind-protect PROTECTED CLEANUP REPR)` — both halves are ordinary
+        // forms (a cleanup refers to names from the scope it is written in,
+        // exactly as the protected form does); the trailing repr is not one.
+        wk::UNWIND_PROTECT => parts.iter().take(2).copied().collect(),
         wk::FIELD_SET => {
             let mut v = vec![parts.first().copied().unwrap_or(Value::Empty)];
             v.extend(from(3));

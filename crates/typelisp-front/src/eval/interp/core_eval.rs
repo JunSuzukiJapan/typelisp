@@ -2874,12 +2874,12 @@ mod tests {
     #[test]
     fn break_leaves_a_loop_with_unit_and_return_with_a_value() {
         let mut h = stress_heap();
-        assert_eq!(eval_ok(&mut h, "(loop (break))"), Value::Empty);
-        assert_eq!(eval_ok(&mut h, "(loop (return (int-any-width 7)))"), Value::Int(7));
-        assert_eq!(eval_ok(&mut h, "(loop (return))"), Value::Empty);
+        assert_eq!(eval_ok(&mut h, "(loop unit (break))"), Value::Empty);
+        assert_eq!(eval_ok(&mut h, "(loop int-any-width (return (int-any-width 7)))"), Value::Int(7));
+        assert_eq!(eval_ok(&mut h, "(loop unit (return))"), Value::Empty);
         // Forms after the exit do not run.
         assert_eq!(
-            eval_ok(&mut h, r#"(loop (break) (panic (str "ran past the break")))"#),
+            eval_ok(&mut h, r#"(loop unit (break) (panic (str "ran past the break")))"#),
             Value::Empty
         );
     }
@@ -2897,7 +2897,7 @@ mod tests {
                                    (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 2)
                                      (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 3) (unit)))))
                        (last sexpr (unit)))
-                   (loop
+                   (loop unit
                      (if (call (sexpr-null) () sexpr-null (sexpr) (var xs)) (break) (unit))
                      (set last (call (sexpr-car) () sexpr-car (sexpr) (var xs)))
                      (set xs (call (sexpr-cdr) () sexpr-cdr (sexpr) (var xs))))
@@ -2916,8 +2916,8 @@ mod tests {
             eval_ok(
                 &mut h,
                 "(let ((n sexpr (unit)))
-                   (loop
-                     (loop (break))
+                   (loop unit
+                     (loop unit (break))
                      (set n (int-any-width 5))
                      (break))
                    (var n))",
@@ -2929,8 +2929,8 @@ mod tests {
             eval_ok(
                 &mut h,
                 "(let ((n sexpr (unit)))
-                   (loop
-                     (set n (loop (return (int-any-width 4))))
+                   (loop unit
+                     (set n (loop int-any-width (return (int-any-width 4))))
                      (break))
                    (var n))",
             ),
@@ -2950,7 +2950,7 @@ mod tests {
         let form = read1(
             &mut h,
             "(let ((xs sexpr (unit)) (n sexpr (unit)))
-               (loop
+               (loop unit
                  (if (call (sexpr-null) () sexpr-null (sexpr) (var n)) (unit) (break))
                  (set xs (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 1) (unit)))
                  (set n (call (sexpr-car) () sexpr-car (sexpr) (var xs)))))",

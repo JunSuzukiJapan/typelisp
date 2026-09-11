@@ -135,9 +135,26 @@ pub(super) fn erased_generic_form(heap: &mut Heap, what: &str) -> Result<Value, 
     panic_form(&mut s, msg)
 }
 
-/// `(loop BODY...)` — loop forever, exited by `break`/`return`.
-pub(super) fn loop_form(heap: &mut Heap, body: &[Value]) -> Result<Value, Error> {
-    core::tagged(heap, "loop", body)
+/// `(loop REPR BODY...)` — loop forever, exited by `break`/`return`.
+///
+/// `REPR` is the representation of the loop's *own* value — whatever a
+/// `break`/`return` carries out, which is this form's type. It leads rather
+/// than trails, the one node in this vocabulary where a repr does: the body is
+/// variadic, so a trailing field could not be told from one more statement.
+///
+/// It exists for the compiled side. The value waits in a merge slot between
+/// the escape site and the loop's exit, and an `unwind-protect` cleanup on the
+/// way out can allocate — so the slot has to be one the collector traces, and
+/// only the repr says whether the word in it may be followed at all
+/// ([`Repr::binding_kind`](crate::check::repr::Repr::binding_kind): a raw
+/// `i32` whose low bits happen to look like a box tag must never be). The
+/// interpreter ignores the field: its `break`/`return` values travel in a
+/// `State::Unwind`, which the collector walks as a root source.
+pub(super) fn loop_form(heap: &mut Heap, repr: Value, body: &[Value]) -> Result<Value, Error> {
+    let mut items = Vec::with_capacity(body.len() + 1);
+    items.push(repr);
+    items.extend_from_slice(body);
+    core::tagged(heap, "loop", &items)
 }
 
 /// `(break)` — leave the nearest enclosing loop with no value.
@@ -153,8 +170,12 @@ pub(super) fn return_form(heap: &mut Heap, value: Option<Value>) -> Result<Value
     }
 }
 
-/// `(block NAME BODY...)` — a named escape target, left by
+/// `(block NAME BODY REPR)` — a named escape target, left by
 /// `(return-from NAME v)`.
+///
+/// `REPR` is the block's own value, for the reason [`loop_form`]'s doc comment
+/// gives: a `return-from` leaves it in a merge slot, and a cleanup crossed on
+/// the way out can allocate while it sits there.
 ///
 /// The name is carried as a plain string field, not as a quoted symbol the way
 /// [`catch_form`] carries its tag. The difference is the one that separates the
@@ -164,7 +185,7 @@ pub(super) fn return_form(heap: &mut Heap, value: Option<Value>) -> Result<Value
 /// against live `catch` frames while unwinding, so it has to survive as a
 /// value. Written as a string for the same reason `lambda`'s parameter names
 /// are: the island reads it to label a basic block, and never as a datum.
-pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value) -> Result<Value, Error> {
+pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) -> Result<Value, Error> {
     // One body form, not a sequence: the checker wraps the body in a
     // binding-less `let` first, so every consumer — the evaluator, the bridge,
     // the island — has one form to run and none of them re-implements
@@ -177,8 +198,11 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value) -> Result<Val
     // describes, and this was the fifth leak to live in it: without the root,
     // `gc_stress` reports `push_root given freed cell` from inside `tagged`.
     let body = rooted(heap, body);
+    // And `repr` for the same reason and in the same window: it arrives built
+    // (a parametric one is a whole list) and `str_lit_form` allocates next.
+    let repr = rooted(heap, repr);
     let name = str_lit_form(heap, name)?;
-    core::tagged(heap, "block", &[name, body])
+    core::tagged(heap, "block", &[name, body, repr])
 }
 
 /// `(go CALL)` — run `CALL` in a new task.
@@ -236,10 +260,22 @@ pub(super) fn throw_form(heap: &mut Heap, tag: Value, value: Value, repr: Value)
     core::tagged(heap, "throw", &[tag, value, repr])
 }
 
-/// `(unwind-protect PROTECTED CLEANUP)` — run `PROTECTED`, then `CLEANUP`,
-/// whether `PROTECTED` finished normally or left by any non-local exit.
-pub(super) fn unwind_protect_form(heap: &mut Heap, protected: Value, cleanup: Value) -> Result<Value, Error> {
-    core::tagged(heap, "unwind-protect", &[protected, cleanup])
+/// `(unwind-protect PROTECTED CLEANUP REPR)` — run `PROTECTED`, then
+/// `CLEANUP`, whether `PROTECTED` finished normally or left by any non-local
+/// exit.
+///
+/// `REPR` is `PROTECTED`'s representation, which is also the form's. The
+/// cleanup's is not needed: its value is discarded on every path. This is the
+/// most direct instance of what [`loop_form`]'s comment describes — the
+/// protected value is put away *precisely so that* the cleanup can run, and
+/// the cleanup is the code that allocates.
+pub(super) fn unwind_protect_form(
+    heap: &mut Heap,
+    protected: Value,
+    cleanup: Value,
+    repr: Value,
+) -> Result<Value, Error> {
+    core::tagged(heap, "unwind-protect", &[protected, cleanup, repr])
 }
 
 /// `(dyn-upcast TRAIT FORM)`.

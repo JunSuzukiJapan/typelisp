@@ -10290,7 +10290,9 @@ impl Checker {
             let (body, _, used) = result?;
             let body = if used {
                 let seq = self.let_form(heap, &[], &body)?;
-                vec![forms::block_form(heap, &name, seq)?]
+                let seq = forms::rooted(heap, seq);
+                let repr = self.repr_form(heap, &ret)?;
+                vec![forms::block_form(heap, &name, seq, repr)?]
             } else {
                 body
             };
@@ -12849,7 +12851,14 @@ impl Checker {
             return self.check_loop_dsl(heap, interp, env, args, arg_locs, expected);
         }
         let (body, ty) = self.check_loop_body(heap, interp, env, args, arg_locs, Type::Never)?;
-        let form = forms::loop_form(heap, &body)?;
+        // The body forms are rooted across `repr_form`'s allocation: they
+        // arrive unrooted (`check_seq` built them under an `Items`, which
+        // released them) and a parametric repr is a whole list of cells.
+        // `forms::block_form`'s comment describes this window — this is the
+        // same one, once per body form.
+        let body: Vec<Value> = body.iter().map(|f| forms::rooted(heap, *f)).collect();
+        let repr = self.repr_form(heap, &ty)?;
+        let form = forms::loop_form(heap, repr, &body)?;
         Ok(Checked::new(form, ty))
     }
 
@@ -13133,7 +13142,12 @@ impl Checker {
         let protected = self.check_at(heap, interp, env, args[0], expected, nth_loc(arg_locs, 0))?;
         let cleanup = self.check_at(heap, interp, env, args[1], None, nth_loc(arg_locs, 1))?;
         let ty = protected.ty.clone();
-        let form = forms::unwind_protect_form(heap, protected.form, cleanup.form)?;
+        // Rooted across `repr_form` for `check_loop`'s reason, both halves:
+        // each arrives released from its own `check_at`.
+        let protected_form = forms::rooted(heap, protected.form);
+        let cleanup_form = forms::rooted(heap, cleanup.form);
+        let repr = self.repr_form(heap, &ty)?;
+        let form = forms::unwind_protect_form(heap, protected_form, cleanup_form, repr)?;
         Ok(Checked::new(form, ty))
     }
 
@@ -13217,7 +13231,9 @@ impl Checker {
             return Ok(Checked::new(form, ty));
         }
         let seq = self.let_form(heap, &[], &body)?;
-        let form = forms::block_form(heap, &name, seq)?;
+        let seq = forms::rooted(heap, seq);
+        let repr = self.repr_form(heap, &ty)?;
+        let form = forms::block_form(heap, &name, seq, repr)?;
         Ok(Checked::new(form, ty))
     }
 
@@ -13271,7 +13287,9 @@ impl Checker {
             self.check_block_body(heap, interp, env, body, body_locs, name, ret.clone(), Some(ret))?;
         if used {
             let seq = self.let_form(heap, &[], &body)?;
-            Ok(vec![forms::block_form(heap, name, seq)?])
+            let seq = forms::rooted(heap, seq);
+            let repr = self.repr_form(heap, ret)?;
+            Ok(vec![forms::block_form(heap, name, seq, repr)?])
         } else {
             Ok(body)
         }

@@ -1293,8 +1293,35 @@ impl Interp {
             }
 
             Op::Loop => {
-                let body = heap
+                // `(loop REPR BODY...)`: past the tag *and* past the repr, which
+                // is the compiled side's alone (`check::forms::loop_form`) — a
+                // `break`/`return` value travels in a `State::Unwind` here, and
+                // the collector walks that as a root source of its own.
+                let fields = heap
                     .cdr(form)
+                    .map_err(|e| EvalError::Internal(format!("eval: (loop ..): {}", e)))?;
+                // The repr is *checked* here, alone among the repr fields this
+                // evaluator ignores, because this is the only one that leads.
+                // A trailing repr left out of a hand-written form (`catch`'s
+                // tests do exactly that) still reads correctly; a leading one
+                // left out silently promotes the first *statement* into the
+                // repr's place and drops it. That is not a hypothetical: it
+                // turned `(loop (if .. (break) ..) (set ..))` into a loop with
+                // no exit, and the symptom was nine hours at 100% CPU with
+                // nothing printed. Once per loop entry, not per iteration —
+                // `Frame::Loop` restarts from the body without re-reading the
+                // node.
+                let repr = heap
+                    .car(fields)
+                    .map_err(|e| EvalError::Internal(format!("eval: (loop ..) has no representation: {}", e)))?;
+                if crate::check::repr::Repr::read(heap, repr).is_none() {
+                    return Err(EvalError::Internal(format!(
+                        "eval: (loop ..)'s first field is not a representation: {}",
+                        core::print(heap, form)
+                    )));
+                }
+                let body = heap
+                    .cdr(fields)
                     .map_err(|e| EvalError::Internal(format!("eval: (loop ..): {}", e)))?;
                 if matches!(body, Value::Empty) {
                     return Err(EvalError::Internal("eval: (loop ..) has no body".to_string()));
@@ -2781,7 +2808,8 @@ mod tests {
         let mut h = stress_heap();
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
-               (loop (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
+               (loop unit
+                     (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
                      (set seen (call (sexpr-car) () sexpr-car (sexpr) (var lst)))
                      (set lst (call (sexpr-cdr) () sexpr-cdr (sexpr) (var lst))))
                (var seen))",
@@ -2795,9 +2823,11 @@ mod tests {
     #[test]
     fn return_carries_a_value_out_of_the_loop() {
         let mut h = stress_heap();
-        assert_eq!(agrees(&mut h, "(loop (return (int-any-width 7)))"), Value::Int(7));
-        assert_eq!(agrees(&mut h, "(loop (break))"), Value::Empty);
-        assert_eq!(agrees(&mut h, "(loop (return))"), Value::Empty);
+        // `loop`'s leading field is its own `Repr` -- positional, so unlike
+        // `catch`'s trailing one it cannot be left out of a hand-written form.
+        assert_eq!(agrees(&mut h, "(loop int-any-width (return (int-any-width 7)))"), Value::Int(7));
+        assert_eq!(agrees(&mut h, "(loop unit (break))"), Value::Empty);
+        assert_eq!(agrees(&mut h, "(loop unit (return))"), Value::Empty);
     }
 
     /// The *nearest* loop claims the exit, so an inner `break` leaves the
@@ -2809,7 +2839,8 @@ mod tests {
         // the whole list.
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
-               (loop (loop (break))
+               (loop unit
+                     (loop unit (break))
                      (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
                      (set seen (call (sexpr-car) () sexpr-car (sexpr) (var lst)))
                      (set lst (call (sexpr-cdr) () sexpr-cdr (sexpr) (var lst))))
@@ -2826,7 +2857,8 @@ mod tests {
         let mut h = stress_heap();
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
-               (loop (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
+               (loop unit
+                     (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
                      (set seen (call (sexpr-car) () sexpr-car (sexpr) (var lst)))
                      (set lst (call (sexpr-cdr) () sexpr-cdr (sexpr) (var lst))))
                (var seen))",
@@ -2927,7 +2959,7 @@ mod tests {
     fn the_cleanup_runs_on_a_break_out_of_the_protected_form() {
         let mut h = stress_heap();
         let src = "(let ((n r (int-any-width 0)))
-                     (loop (unwind-protect (break) (set n (int-any-width 7))))
+                     (loop unit (unwind-protect (break) (set n (int-any-width 7))))
                      (var n))";
         assert_eq!(agrees(&mut h, src), Value::Int(7));
     }
@@ -3149,7 +3181,7 @@ mod tests {
         assert_eq!(eval_ok(&mut h, "(int-any-width 1)"), Value::Int(1));
         assert_eq!(eval_ok(&mut h, "(if (bool true) (int-any-width 1) (int-any-width 2))"), Value::Int(1));
         assert_eq!(eval_ok(&mut h, "(let ((x r (int-any-width 3))) (var x))"), Value::Int(3));
-        assert_eq!(eval_ok(&mut h, "(loop (return (int-any-width 4)))"), Value::Int(4));
+        assert_eq!(eval_ok(&mut h, "(loop int-any-width (return (int-any-width 4)))"), Value::Int(4));
         assert_eq!(eval_ok(&mut h, "(catch (quote t) (throw (quote t) (int-any-width 5)))"), Value::Int(5));
     }
 }

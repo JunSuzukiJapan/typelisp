@@ -6256,7 +6256,7 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
 fn the_island_runs_a_bridged_loop() {
     let body = bridge_to_island_text(
         "(let ((acc int-any-width (int-any-width 0)) (i int-any-width (int-any-width 0)))
-           (loop
+           (loop unit
              (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var i) (var b))
                  (unit)
                  (break))

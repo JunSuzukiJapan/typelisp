@@ -3814,10 +3814,19 @@ pub const SOURCE: &str = r#"
 ;; is what makes that unwind correct regardless of
 ;; nesting depth.
 (defun compile-loop ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((body-forms (sexpr-cdr e))
+    (let* ((kind (sexpr-i32 (sexpr-car (sexpr-cdr e))))
+           (body-forms (sexpr-cdr (sexpr-cdr e)))
            (loop-block (append-block cur-fn "loop-body"))
            (exit-block (append-block cur-fn "loop-exit"))
-           (slot (alloca-args builder 1)))
+           ;; A frame slot, not an `alloca`: the value a `break`/`return`
+           ;; leaves here waits while every `unwind-protect` cleanup between
+           ;; the escape site and this exit runs, and a cleanup can allocate.
+           ;; `kind` is the loop's own repr, and it is the whole of the
+           ;; decision -- masking unconditionally would be worse than not
+           ;; masking at all, because a raw `i32` whose low three bits happen
+           ;; to spell a box tag would have the collector invent a reference
+           ;; out of arithmetic.
+           (slot (binding-slot builder m kind)))
       (build-br builder loop-block)
       (position-at-end builder loop-block)
       (compile-loop-body m fn-name builder env fn-env captured cur-fn (Option::some exit-block) (Option::some slot) block-names block-exits block-slots protect (Option::none) body-forms)
@@ -3899,8 +3908,12 @@ pub const SOURCE: &str = r#"
 (defun compile-block ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((name (sexpr-str (sexpr-car (sexpr-cdr e))))
            (body (sexpr-car (sexpr-cdr (sexpr-cdr e))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
            (exit-block (append-block cur-fn "block-exit"))
-           (slot (alloca-args builder 1))
+           ;; `compile-loop`'s merge slot, for `return-from` instead of
+           ;; `break` -- and a `return-from` is the one that crosses cleanups
+           ;; by construction (`install-block-cleanups`).
+           (slot (binding-slot builder m kind))
            (pushed-exits (push-frame block-exits))
            (pushed-slots (push-frame block-slots))
            (bound-exit (set block-exits name exit-block))
@@ -5364,7 +5377,10 @@ pub const SOURCE: &str = r#"
 (defun compile-unwind-protect ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((protected-form (sexpr-car (sexpr-cdr e)))
            (cleanup-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
-           (slot (alloca-args builder 1))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+           ;; The most direct case of the three: this slot exists *so that*
+           ;; the cleanup can run, and the cleanup is the code that allocates.
+           (slot (binding-slot builder m kind))
            ;; Spilled, not kept in a register: the protected body is compiled
            ;; below and can call, which ends this activation -- and the pad
            ;; that reads this depth runs in a later one.
