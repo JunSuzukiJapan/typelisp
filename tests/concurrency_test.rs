@@ -866,10 +866,11 @@ fn a_compiled_loop_with_no_calls_still_yields_to_another_task() {
 /// closure value, the AOT entry point or a C callback into a failure — and
 /// the failure would name suspension, not loops.
 ///
-/// The closure value, rather than a `print-object` method or `format`'s
-/// `~/.../`: those reach `Interp::apply`, which runs `FnDef::body` and never
-/// looks at `FnDef::compiled`, so the body under them is interpreted however
-/// many times it has been `compile`d.
+/// The closure value is the shortest way to a driver of that kind. A
+/// `print-object` method reaches one too — but only since the printer's
+/// dispatch was routed through `Interp::enter`; while it called
+/// `Interp::apply` it ran the interpreted body however many times the method
+/// had been `compile`d, which is how this gap was found.
 #[test]
 fn a_compiled_loop_safepoint_under_a_machine_frame_driver_just_resumes() {
     assert_eq!(

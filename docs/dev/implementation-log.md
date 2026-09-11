@@ -11040,6 +11040,14 @@ i64 f(i64 frame)        // 返すのは状態語
 本体。C7 のテストを書く途中で、`rt_loop_safepoint` を `panic!` にしても鳴らないことから
 見つけた。
 
+**同日に直した。** `apply` を変えるのではなく、3 経路を `Interp::enter` へ合流させた——
+`enter` が compiled/interpreted を決める唯一の場所で、`apply` はその**インタプリタ側の
+半分**。マクロ展開は既に同じ理由で `enter` へ移されており、その呼び出し地点のコメントが
+議論ごと残っていた（「`apply` always tree-walks; `enter` takes the compiled body when
+there is one」）。副産物として `trace` が 3 経路に届く——`trace_test.rs` のモジュール doc が
+主張していた「名前付き関数へのあらゆる呼び出しが `enter` を通る」は、この 3 つについて
+偽だった。
+
 ### 手順の誤り 1 件
 
 C6 の検証バッチを流している最中に C7 の編集を始め、島の成果物が SOURCE に対して古く

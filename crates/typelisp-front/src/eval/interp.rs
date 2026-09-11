@@ -2255,7 +2255,13 @@ impl Interp {
             _ => return Ok(None),
         }
         self.printing.borrow_mut().push(v);
-        let result = self.apply(heap, &f, vec![v, Value::Bool(escape)]);
+        // `enter`, not `apply`: an `impl print-object` method is an ordinary
+        // function and is compiled like one when something has compiled it.
+        // `apply` always tree-walks, so `(compile point::print-object)`
+        // returned `true` and changed nothing about what the printer ran —
+        // and `trace` never saw the call either, since `apply` is below the
+        // watch. `enter` is where the compiled/interpreted choice is made.
+        let result = self.enter(heap, &f, vec![v, Value::Bool(escape)]);
         self.printing.borrow_mut().pop();
         match result.map_err(|e| e.to_string())? {
             Value::Str(id) => Ok(Some(heap.string(id).to_string())),
@@ -2360,7 +2366,8 @@ impl Interp {
             },
             _ => v,
         };
-        match self.apply(heap, &f, vec![receiver, Value::Bool(colon), Value::Bool(at)]).map_err(|e| e.to_string())? {
+        // `enter`, not `apply` — see `print_object_method`'s call for why.
+        match self.enter(heap, &f, vec![receiver, Value::Bool(colon), Value::Bool(at)]).map_err(|e| e.to_string())? {
             Value::Str(id) => Ok(heap.string(id).to_string()),
             other => Err(format!("format: ~/{}/ on `{}` returned {:?}, not a string", name, type_path, other)),
         }
@@ -2639,7 +2646,10 @@ impl Interp {
         heap.push_root(f);
         let text = heap.alloc_string(rest.to_string());
         heap.push_root(text);
-        let out = self.apply(heap, &def, vec![f, Value::Char(ch), text]);
+        // `enter`, not `apply` — see `print_object_method`'s call for why.
+        // The glue is prelude code and the prelude's dump generator compiles
+        // it, so here the difference is not hypothetical.
+        let out = self.enter(heap, &def, vec![f, Value::Char(ch), text]);
         while heap.root_count() > mark {
             heap.pop_root();
         }

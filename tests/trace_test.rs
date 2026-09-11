@@ -2,9 +2,15 @@
 //!
 //! The hook is one branch in `Interp::enter`, the single point every call to
 //! a *named* function goes through — an ordinary call, a method call, a
-//! `:dyn` dispatch and a macro expansion all arrive there, and they arrive
-//! before the compiled/interpreted split, which is why a definition with a
-//! compiled body is still traced when an interpreted caller reaches it.
+//! `:dyn` dispatch, a macro expansion, the printer's call to a `print-object`
+//! method and `format`'s `~/name/` all arrive there, and they arrive before
+//! the compiled/interpreted split, which is why a definition with a compiled
+//! body is still traced when an interpreted caller reaches it.
+//!
+//! The last two arrived below it until 2026-09-12: they called `Interp::apply`,
+//! which is the interpreted half of that split, so tracing them was inert and
+//! compiling them had no effect. The tests at the end of this file are what
+//! hold that.
 //!
 //! Trace output goes to `*trace-output*`, as CL specifies. That global holds
 //! a `standard-stream` — a struct around a native handle — so a test can
@@ -388,4 +394,66 @@ fn trace_rendering_holds_its_roots_under_gc_stress() {
     let plain = run(false);
     assert!(plain.contains("#<pt 1 2>"), "the unstressed transcript is wrong to begin with: {:?}", plain);
     assert_eq!(run(true), plain, "the collector is visible in what a trace reports");
+}
+
+// ---- the paths that used to arrive below the hook ------------------------
+
+/// **The printer's own call to a `print-object` method is reported.**
+///
+/// `print_object_method` used to call `Interp::apply` directly, which is
+/// *below* the hook — so `(trace pt::print-object)` was silently inert, and
+/// this module's own doc comment ("every call to a named function goes
+/// through `enter`") was not true of it. The same `apply` bypass meant
+/// `(compile pt::print-object)` returned `true` and changed nothing about
+/// what the printer ran: `enter` is where the compiled/interpreted choice is
+/// made, and `apply` is the interpreted half of it.
+#[test]
+fn a_print_object_method_is_reported_when_the_printer_calls_it() {
+    let out = traced(
+        "(defstruct pt (n i32))\n\
+         (impl print-object pt\n\
+           (print-object ((self Self) (escape bool)) string (format false \"<~d>\" self::n)))\n\
+         (trace pt::print-object)\n\
+         (format false \"~a\" (pt::new 7))",
+    );
+    assert!(out.contains("(pt::print-object"), "the printer's call was not reported: {:?}", out);
+    assert!(out.contains("pt::print-object returned"), "the return was not reported: {:?}", out);
+}
+
+/// The same for `format`'s `~/name/`, which reaches its method the same way.
+#[test]
+fn a_call_directives_method_is_reported() {
+    let out = traced(
+        "(defstruct money (yen i32))\n\
+         (defmethod jp ((self money) (colon bool) (at bool)) string\n\
+           (format false \"~d yen\" self::yen))\n\
+         (trace money::jp)\n\
+         (format false \"~/jp/\" (money::new 300))",
+    );
+    assert!(out.contains("(money::jp"), "the directive's call was not reported: {:?}", out);
+}
+
+/// **A compiled `print-object` body is the one the printer runs.**
+///
+/// `enter` has exactly one branch on `compiled` and no path that falls back
+/// to `apply` while it is `Some` — so a trace line from the printer's call,
+/// with the method compiled, says the compiled body is what ran. Before the
+/// fix there was no trace line at all, and the interpreted body ran however
+/// many times the method had been compiled.
+///
+/// **The assertion is on the call line, not on the name.** `(trace f)` on a
+/// definition that has a compiled body writes a note naming it, so a bare
+/// `contains("pt::print-object")` passed with the fix reverted — a test that
+/// could not fail.
+#[test]
+fn a_compiled_print_object_method_is_still_reported() {
+    let out = traced(
+        "(defstruct pt (n i32))\n\
+         (impl print-object pt\n\
+           (print-object ((self Self) (escape bool)) string (format false \"<~d>\" self::n)))\n\
+         (compile pt::print-object)\n\
+         (trace pt::print-object)\n\
+         (format false \"~a\" (pt::new 7))",
+    );
+    assert!(out.contains("(pt::print-object"), "the printer's call was not reported: {:?}", out);
 }

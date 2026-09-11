@@ -37,13 +37,6 @@ C3 が compiled からの中断を通したので `PRELUDE_COMPILE_UNSUPPORTED` 
 
 ## 見つかっている実装の穴
 
-**`Interp::apply` が `FnDef::compiled` を見ない。** `FnDef::body` を `eval_core` で走らせる
-だけなので、この経路に乗る 3 つ——`print-object` のディスパッチ、`format` の `~/.../`、
-リーダマクロ——は `(compile ...)` の効果を受けない。`(compile spinner::print-object)` は
-`true` を返し `disassemble` にもコンパイル済みの本体が出るのに、印字経路が呼ぶのは
-インタプリタ本体。2026-09-12 に C7 のテストを書く途中で見つけた（`rt_loop_safepoint` を
-`panic!` にしても鳴らないことから）。
-
 **並行機構のユーザ向けリファレンスが無い。** `go` / `Task<T>` / `wait` / `yield` と
 タスクを意識した `sleep` は実装済みだが、[functions.md](../functions.md) にも
 [syntax.md](../syntax.md) にも項目が無い。語彙が B3〜B5 で増えるので、そこまで
