@@ -211,8 +211,19 @@ fn call_coroutine(address: usize, args: &[i64]) -> i64 {
         unsafe { std::mem::transmute::<usize, typelisp_rt::coroutine::CoroutineFn>(address) };
     let heap = unsafe { typelisp_abi::active_heap() };
     let mut stack = typelisp_rt::coroutine::FrameStack::new();
-    match stack.run(heap, f, args) {
+    // `run_to_end`, not `run`: an `apply` of an interpreted function value
+    // underneath has to happen on *this* Rust frame, because this frame is
+    // what the caller is waiting on. See `FrameStack::run_to_end`.
+    let applied = |closure: i64, argv: &[i64]| unsafe {
+        typelisp_rt::apply_on_this_frame(closure, argv, "a compiled function reached from the interpreter")
+    };
+    match stack.run_to_end(heap, f, args, &[], applied) {
         Ok(word) => word,
+        // Resolved by `run_to_end` above, so reaching here is a protocol
+        // break rather than a limitation.
+        Err(typelisp_rt::coroutine::Paused::Applying { .. }) => typelisp_abi::raise(
+            "a compiled function applied an interpreted value that the drive did not resolve".to_string(),
+        ),
         Err(typelisp_rt::coroutine::Paused::Suspended) => {
             typelisp_abi::raise("a compiled function suspended underneath an interpreted caller, which has no way to resume it".to_string())
         }
@@ -1250,8 +1261,14 @@ impl Interp {
             let f: typelisp_rt::coroutine::CoroutineFn = unsafe { std::mem::transmute(fn_ptr) };
             let mut stack = typelisp_rt::coroutine::FrameStack::new();
             let heap_mut = unsafe { typelisp_abi::active_heap() };
-            return match stack.run_with_env(heap_mut, f, args, &env) {
+            let applied = |closure: i64, argv: &[i64]| unsafe {
+                typelisp_rt::apply_on_this_frame(closure, argv, "a compiled closure reached from the interpreter")
+            };
+            return match stack.run_to_end(heap_mut, f, args, &env, applied) {
                 Ok(v) => v,
+                Err(typelisp_rt::coroutine::Paused::Applying { .. }) => typelisp_abi::raise(
+                    "a compiled closure applied an interpreted value that the drive did not resolve".to_string(),
+                ),
                 Err(typelisp_rt::coroutine::Paused::Suspended) => typelisp_abi::raise(
                     "a compiled closure suspended underneath an interpreted caller, which has no way to resume it"
                         .to_string(),

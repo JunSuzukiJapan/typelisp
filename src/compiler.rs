@@ -2988,7 +2988,7 @@ pub const SOURCE: &str = r#"
 ;; only the runtime can see which case it is — see
 ;; that shim's doc comment. The argument array is
 ;; passed as a pointer-sized integer, the same way
-;; `build-closure-apply` hands `rt_apply_any` its own.
+;; `rt_apply_any` used to be handed its own.
 ;;
 ;; The callee is an ordinary compiled method and
 ;; expects the *concrete* receiver, so slot 0 of the
@@ -3295,10 +3295,16 @@ pub const SOURCE: &str = r#"
 ;; like any other value (it might be a `(var name is-fn)`,
 ;; another `(apply-indirect ...)`, a `(lambda ...)`,
 ;; ... — whatever produced the function value here) to
-;; get a `BoxedObj::CompiledClosure` reference, then
-;; called through `build-closure-apply` rather than
-;; `build-call`: nothing here can know ahead of time
-;; which compiled function it'll actually be. No
+;; get a function value, then handed to the driver
+;; through `coroutine-apply` rather than being the
+;; callee of a call: nothing here can know ahead of
+;; time *what* it will be, and since C5 that question
+;; is the driver's — a compiled body joins this chain,
+;; an interpreted one runs on the continuation stack.
+;; (It used to be `build-closure-apply`, a plain call
+;; to `rt_apply_any`, which had to come back with an
+;; answer and so put a machine frame under everything
+;; below it.) No
 ;; release follows the call now (the closure-
 ;; representation unification retired the `ClosureBox`
 ;; refcount scheme that used to need one for a *fresh*
@@ -3313,7 +3319,7 @@ pub const SOURCE: &str = r#"
            (argc (sexpr-list-length arg-forms))
            (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
-           (result (build-closure-apply builder m (load-raw builder closure-slot 0) args-ptr argc)))
+           (result (coroutine-apply builder m (load-raw builder closure-slot 0) args-ptr argc)))
       result))
 
 ;; `compile-if`'s one helper (if/let/comparisons,
@@ -3513,7 +3519,7 @@ pub const SOURCE: &str = r#"
 ;; (`add-function-with-env` — *every* closure-boxed
 ;; function uses that ABI regardless of whether
 ;; `lcaptured` here is empty, so
-;; `compile-apply-indirect`'s `build-closure-apply`
+;; `compile-apply-indirect`'s `coroutine-apply`
 ;; never has to branch on which kind of function it's
 ;; calling through), compiles its single-expression
 ;; body with a *fresh* env/fn-env (a `lambda` never

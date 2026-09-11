@@ -139,6 +139,29 @@ fn take_interpreted_error() -> Option<EvalError> {
     INTERPRETED_ERROR.with(|cell| cell.borrow_mut().take())
 }
 
+/// Parks an interpreted exit for a *standing compiled chain* to be asked
+/// about — [`unwind_interpreted_failure`] without the unwinding.
+///
+/// Since C5 an interpreted callee reached from compiled code runs on the
+/// task's continuation stack, so there are no machine frames between it and
+/// the compiled frame that applied it. Its exit therefore has nothing to
+/// unwind *through*: it travels up the continuation stack as an ordinary
+/// `State::Unwind` and is handed to the chain as a status
+/// (`FrameStack::raise`). What the chain finds is what an unwinding call left
+/// it, which is why the two channels are the same ones.
+pub fn park_for_compiled(error: EvalError) {
+    match error {
+        // SAFETY: the heap the value belongs to is the one registered for the
+        // crossing this exit is travelling out of, and it is still registered.
+        EvalError::Throw(tag, value) => unsafe { typelisp_rt::park_throw_for_chain(tag, *value) },
+        other => {
+            park_interpreted_error(other);
+            // SAFETY: as above.
+            unsafe { typelisp_rt::park_error_for_chain() };
+        }
+    }
+}
+
 /// Announces an interpreted callee's failure to the compiled frames that
 /// called it, by unwinding — the one way back out, since a compiled caller has
 /// no `Result` channel to return an `EvalError` through.

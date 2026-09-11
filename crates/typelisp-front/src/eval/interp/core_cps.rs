@@ -39,7 +39,7 @@ use crate::eval::value::EvalError;
 
 use super::core_eval::{
     bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, path_field,
-    repr_list, str_field, sym_field, tail_after, tail_after_value, Op, StepCmd,
+    param_reprs, repr_list, str_field, sym_field, tail_after, tail_after_value, Op, StepCmd,
 };
 use super::{FnDef, Interp};
 
@@ -79,6 +79,19 @@ enum State {
     /// returning callee leaves its answer, because from the resuming
     /// function's side those are the same thing.
     CompiledResume { drive: DriveCtx, wake: Option<(Value, Repr)> },
+    /// Hand an exit to a chain that is already standing, and keep driving.
+    ///
+    /// What an *interpreted* callee's non-local exit becomes when the call
+    /// came from compiled code. Since C5 that callee runs on this task's own
+    /// continuation stack, so its exit travels up as an ordinary
+    /// `State::Unwind` until it reaches the `Frame::DriveCompiled` that
+    /// stands for the compiled frame waiting underneath — and from there the
+    /// chain has to be asked, because a `catch` in it is entitled to claim
+    /// the throw and an `unwind-protect` in it has cleanups to run.
+    ///
+    /// The exit itself is already parked on the compiled side
+    /// (`crossing::park_for_compiled`), where the chain's pad looks for it.
+    CompiledRaise { drive: DriveCtx },
     /// A non-local exit is in flight. Discard frames until one claims it.
     ///
     /// This is where `break`/`return`/`return-from`/`throw` live. The value
@@ -912,6 +925,13 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
             heap.set_root(sbase, *argv);
             heap.set_root(sbase + 1, Value::Empty);
         }
+        // Nothing in the state slots: the exit is parked on the compiled
+        // side, and the value a throw carries is rooted there
+        // (`Heap::set_in_flight_throw`) for exactly this flight.
+        State::CompiledRaise { .. } => {
+            heap.set_root(sbase, Value::Empty);
+            heap.set_root(sbase + 1, Value::Empty);
+        }
         State::CompiledResume { wake, .. } => {
             heap.set_root(sbase, wake.as_ref().map(|(v, _)| *v).unwrap_or(Value::Empty));
             heap.set_root(sbase + 1, Value::Empty);
@@ -1212,6 +1232,13 @@ impl Interp {
                     }
                 }
             }
+            State::CompiledRaise { drive } => {
+                let outcome = {
+                    let stack = &mut task.compiled;
+                    crate::eval::crossing::catch_compiled_panic(|| stack.raise(heap))
+                };
+                self.after_drive(heap, task, outcome, drive)
+            }
             State::Unwind(e) => match task.stack.pop() {
                 None => return Progress::Done(Err(e)),
                 Some((frame, fbase, loc)) => {
@@ -1299,6 +1326,20 @@ impl Interp {
             // The driver already popped the chain and cut its roots back per
             // frame; the truncate here is for the crossing's own roots, which
             // the interpreter pushed before entering.
+            // A function value the chain applied turned out to be
+            // interpreted. It runs here, on this task's own continuation
+            // stack — which is the whole of C5: the call can suspend, because
+            // there is no machine frame under it waiting for an answer.
+            Ok(Err(typelisp_rt::coroutine::Paused::Applying { closure, args })) => {
+                let roots_on_entry = drive.roots_on_entry;
+                match self.begin_applying(heap, task, drive, closure, &args) {
+                    Ok(state) => state,
+                    Err(e) => {
+                        heap.truncate_roots(roots_on_entry);
+                        State::Unwind(e)
+                    }
+                }
+            }
             Ok(Err(typelisp_rt::coroutine::Paused::Unwinding)) => {
                 let e = crate::eval::crossing::carried_unwind_error();
                 heap.truncate_roots(drive.roots_on_entry);
@@ -1330,6 +1371,85 @@ impl Interp {
             heap.pop_root();
         }
         Ok(())
+    }
+
+    /// Turns a chain's `apply` of an *interpreted* function value into
+    /// continuation frames on this task's stack.
+    ///
+    /// The representations to decode and encode by come from the closure box
+    /// itself, because nothing else at this point has them: the apply site
+    /// knows the callee's `Fn` type statically but carries none of it into
+    /// the emitted call, and a machine word is exactly as ambiguous here as
+    /// anywhere else on this boundary. That is the same reading
+    /// `Interp::apply_interpreted` does — what differs is where the call then
+    /// happens.
+    ///
+    /// `Frame::DriveCompiled` is pushed *first*, so it sits below everything
+    /// the application builds and catches the answer when it comes back. It
+    /// is the same frame a suspension uses, with the callee's return
+    /// representation as the `wake`: from the chain's side, an answer from a
+    /// scheduler and an answer from an interpreted callee are the same thing.
+    fn begin_applying(
+        &self,
+        heap: &mut Heap,
+        task: &mut Task,
+        drive: DriveCtx,
+        closure: i64,
+        argv: &[i64],
+    ) -> Result<State, EvalError> {
+        let f = typelisp_rt::decode(closure);
+        let id = match f {
+            Value::Boxed(id) if heap.is_closure(id) => id,
+            Value::Boxed(id) if heap.is_builtin_fn(id) => {
+                return Err(EvalError::Internal(format!(
+                    "the built-in \"{}\" cannot be applied from compiled code: its argument representations are not carried at the apply site",
+                    heap.builtin_fn_name(id)
+                )))
+            }
+            other => {
+                return Err(EvalError::Internal(format!(
+                    "the applied callee is not an interpreted closure: {:?}",
+                    other
+                )))
+            }
+        };
+        let (params, _, _) = heap.closure_parts(id);
+        let reprs = param_reprs(heap, params)?;
+        let ret = Repr::read(heap, heap.closure_ret(id)).ok_or_else(|| {
+            EvalError::Internal("the applied closure has no declared return representation".to_string())
+        })?;
+        if argv.len() != reprs.len() {
+            return Err(EvalError::Internal(format!(
+                "arity mismatch: the applied closure takes {} argument(s), given {}",
+                reprs.len(),
+                argv.len()
+            )));
+        }
+
+        task.stack.push(heap, Frame::DriveCompiled { drive, wake: ret }, None);
+        // The box is reachable only from the caller's compiled frame, which
+        // the collector cannot see, and the *decoded* arguments are new
+        // objects reachable from nothing until the call environment binds
+        // them.
+        let base = heap.root_count();
+        heap.push_root(f);
+        let mut args = Vec::with_capacity(argv.len());
+        for (raw, r) in argv.iter().zip(&reprs) {
+            let v = self.decode_compiled_return(heap, *raw, r)?;
+            heap.push_root(v);
+            args.push(v);
+        }
+        let (call_env, body) = self.closure_frame(heap, id, args)?;
+        let body = core::list(heap, &body)
+            .map_err(|e| EvalError::Internal(format!("apply from compiled code: body: {}", e)))?;
+        heap.truncate_roots(base);
+        // Nothing allocates from here: `sequence_state` only walks conses,
+        // and a frame push only roots.
+        let (state, extra) = sequence_state(heap, body, call_env)?;
+        if let Some(frame) = extra {
+            task.stack.push(heap, frame, None);
+        }
+        Ok(state)
     }
 
     /// One step of evaluation: reduce `form` to a value, or to a
@@ -2520,15 +2640,20 @@ impl Interp {
                 Ok((State::Unwind(exit), None))
             }
 
-            // Unreachable by construction, said out loud: the only way out of
+            // An exit raised by an interpreted callee the chain applied
+            // (C5). The chain has to be asked: a `catch` in it may claim the
+            // throw, and an `unwind-protect` in it has cleanups to run. So
+            // the exit is parked where the compiled side looks for it and
+            // handed over as a status.
+            //
+            // A *suspension* cannot reach here — the only way out of
             // `Blocked` is the scheduler replacing the state with the value
-            // waited for, so nothing can be unwinding while this frame is on
-            // the stack. If it ever is, the compiled chain underneath has been
-            // abandoned with its frames still rooted, and saying so beats
-            // continuing quietly.
-            Frame::DriveCompiled { .. } => Err(EvalError::Internal(
-                "an exit reached a task that was waiting to resume a compiled chain".to_string(),
-            )),
+            // waited for — so this frame being on the stack always means an
+            // application, never a wait.
+            Frame::DriveCompiled { drive, .. } => {
+                crate::eval::crossing::park_for_compiled(exit);
+                Ok((State::CompiledRaise { drive }, None))
+            }
 
             // An unwind past a traced frame is exactly the moment a trace is
             // most worth having, so the exit is reported rather than silent.

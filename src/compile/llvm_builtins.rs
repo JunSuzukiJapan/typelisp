@@ -143,6 +143,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "frame-set-handler" => Some(llvm_builder_frame_set_handler(args)),
             "frame-clear-handler" => Some(llvm_builder_frame_clear_handler(args)),
             "coroutine-call-env" => Some(llvm_builder_coroutine_call_env(args)),
+            "coroutine-apply" => Some(llvm_builder_coroutine_apply(args)),
             "coroutine-end" => Some(llvm_builder_coroutine_end(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
@@ -1421,7 +1422,22 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
 /// frame slot of its own (`root-temporary`), which is the same reason they
 /// survived the callee's allocation under the original ABI.
 fn llvm_builder_coroutine_call(args: &[Value]) -> Result<Value, EvalError> {
-    coroutine_call_impl(args, None)
+    coroutine_call_impl(args, "rt_frame_call", None)
+}
+
+/// `(coroutine-apply builder m closure args-ptr argc)` — hand an `apply` to
+/// the driver and come back with its answer.
+///
+/// [`llvm_builder_coroutine_call`] with a function *value* in place of an
+/// address. The difference is entirely on the driver's side: it has to look
+/// at the value to know who can run it, and for an interpreted closure it
+/// hands the call to the continuation stack instead of running it on a frame
+/// of its own. From here the two are one instruction sequence — which is the
+/// point. An `apply` used to be a plain call to `rt_apply_any`, a C function
+/// that had to come back with an answer, so everything underneath it stood on
+/// a machine frame that could not be put down.
+fn llvm_builder_coroutine_apply(args: &[Value]) -> Result<Value, EvalError> {
+    coroutine_call_impl(args, "rt_frame_apply", None)
 }
 
 /// `(coroutine-suspend builder m)` — hand control back with `STATUS_SUSPEND`,
@@ -1584,11 +1600,12 @@ fn llvm_builder_coroutine_call_env(args: &[Value]) -> Result<Value, EvalError> {
             return Err(EvalError::Internal(format!("coroutine-call-env: {:?} is not a capture count", other)))
         }
     };
-    coroutine_call_impl(args, Some((env_ptr, env_len)))
+    coroutine_call_impl(args, "rt_frame_call_env", Some((env_ptr, env_len)))
 }
 
 fn coroutine_call_impl(
     args: &[Value],
+    shim: &str,
     env: Option<(PointerValue<'static>, u64)>,
 ) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
@@ -1621,8 +1638,7 @@ fn coroutine_call_impl(
     })?;
 
     let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
-    let frame_call =
-        ensure_declared(&module, if env.is_some() { "rt_frame_call_env" } else { "rt_frame_call" });
+    let frame_call = ensure_declared(&module, shim);
     let set_pc = ensure_declared(&module, "rt_frame_set_pc");
 
     let b = builder.borrow();

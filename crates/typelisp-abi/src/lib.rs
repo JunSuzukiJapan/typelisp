@@ -328,9 +328,9 @@ pub mod call_state {
         /// different lists, and concatenating them would make every prologue
         /// know how long the other list was.
         static PENDING_ENV: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
-        /// The callee, arguments and captures a frame is asking the driver to
-        /// call, set immediately before it returns `STATUS_CALL`.
-        static PENDING_CALL: RefCell<Option<(usize, Vec<i64>, Vec<i64>)>> = const { RefCell::new(None) };
+        /// What a frame is asking the driver to call, set immediately before
+        /// it returns `STATUS_CALL`.
+        static PENDING_CALL: RefCell<Option<Pending>> = const { RefCell::new(None) };
         /// What a frame is asking to wait for, set immediately before it
         /// returns `STATUS_SUSPEND`: a `SUSPEND_*` kind and one payload word.
         ///
@@ -434,11 +434,37 @@ pub mod call_state {
         });
     }
 
-    pub fn set_pending_call(target: usize, args: Vec<i64>, env: Vec<i64>) {
-        PENDING_CALL.with(|c| *c.borrow_mut() = Some((target, args, env)));
+    /// What one `STATUS_CALL` is asking for.
+    ///
+    /// Two shapes, because compiled code knows two different amounts about
+    /// its callee. A direct call knows the address — the checker resolved the
+    /// name. An `apply` knows only a *value*, and what that value turns out
+    /// to be (a compiled body under either ABI, or an interpreted closure)
+    /// decides who runs it. **That decision belongs to the driver**: it is
+    /// the only party that can push a frame onto the chain, and for an
+    /// interpreted callee it is the only party that can hand the call to the
+    /// continuation stack instead of running it on a machine frame.
+    #[derive(Debug)]
+    pub enum Pending {
+        /// A statically-known compiled callee: its address, its arguments,
+        /// and its captures.
+        Direct { target: usize, args: Vec<i64>, env: Vec<i64> },
+        /// A function *value*, tagged, with its arguments in its own
+        /// declared representations.
+        Apply { closure: i64, args: Vec<i64> },
     }
 
-    pub fn take_pending_call() -> Option<(usize, Vec<i64>, Vec<i64>)> {
+    pub fn set_pending_call(target: usize, args: Vec<i64>, env: Vec<i64>) {
+        PENDING_CALL.with(|c| *c.borrow_mut() = Some(Pending::Direct { target, args, env }));
+    }
+
+    /// [`set_pending_call`] for an `apply`: the callee is a value rather than
+    /// an address, so the driver resolves it.
+    pub fn set_pending_apply(closure: i64, args: Vec<i64>) {
+        PENDING_CALL.with(|c| *c.borrow_mut() = Some(Pending::Apply { closure, args }));
+    }
+
+    pub fn take_pending_call() -> Option<Pending> {
         PENDING_CALL.with(|c| c.borrow_mut().take())
     }
 }

@@ -2195,6 +2195,19 @@ pub fn llvm_builder_def() -> AdtDef {
             true,
         ),
     );
+    // `coroutine-apply`: `coroutine-call` with a function *value* in place of
+    // an address. Same instruction sequence here; the driver is where the
+    // difference is, because only it can look at the value and decide who can
+    // run it — a chain frame for a compiled body, the continuation stack for
+    // an interpreted one.
+    assoc.insert(
+        "coroutine-apply".to_string(),
+        assoc_fn(
+            vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32],
+            llvm_value_ty(),
+            true,
+        ),
+    );
     // `coroutine-suspend` is `coroutine-call` with the callee left out: set the
     // resume point, hand control back with `STATUS_SUSPEND`, and answer with
     // whatever the task was waiting for once it is resumed. The suspending

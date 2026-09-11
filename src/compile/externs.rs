@@ -433,7 +433,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 255] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 256] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -491,7 +491,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 255] {
         rt_throw, rt_throw_matches, rt_throw_take_value,
         rt_go,
         rt_frame_new, rt_frame_data, rt_frame_mask_bit, rt_frame_pc, rt_frame_set_pc,
-        rt_frame_entered, rt_frame_call, rt_frame_call_env, rt_pending_arg, rt_pending_argc,
+        rt_frame_entered, rt_frame_call, rt_frame_call_env, rt_frame_apply, rt_pending_arg, rt_pending_argc,
         rt_pending_env, rt_pending_envc,
     };
     [
@@ -606,6 +606,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 255] {
         ("rt_frame_set_pc", rt_frame_set_pc as usize),
         ("rt_frame_entered", rt_frame_entered as usize),
         ("rt_frame_call", rt_frame_call as usize),
+        ("rt_frame_apply", rt_frame_apply as usize),
         ("rt_frame_call_env", rt_frame_call_env as usize),
         ("rt_pending_arg", rt_pending_arg as usize),
         ("rt_pending_argc", rt_pending_argc as usize),

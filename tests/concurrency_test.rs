@@ -687,3 +687,93 @@ fn a_compiled_throw_after_a_suspension_is_still_caught() {
         41
     );
 }
+
+// ---- applying a function value from compiled code (C5) -------------------
+
+/// A compiled body applies a **compiled** function value whose body yields,
+/// and the task is put down mid-apply.
+///
+/// Before C5 an `apply` was a plain call to `rt_apply_any`, a C function that
+/// had to come back with an answer — so everything underneath it stood on a
+/// machine frame that could not be put down. The callee now joins the
+/// caller's own chain: the `apply` names its callee to the driver, and the
+/// driver is the one that looks at the value.
+#[test]
+fn a_compiled_apply_of_a_compiled_value_can_suspend() {
+    assert_eq!(
+        text_compiled(
+            r#"(defvar (trail string) "")
+               (defun tick ((name string) (n i32)) i32
+                 (progn (dotimes (i n) (setf trail (append trail name)) (yield)) 0))
+               (defun via-value ((name string)) i32
+                 (let ((f tick)) (f name 3)))
+               (compile via-value)
+               (let ((a (go (via-value "a"))) (b (go (via-value "b"))))
+                 (progn (wait a) (wait b)))
+               trail"#
+        ),
+        "ababab"
+    );
+}
+
+/// A compiled body applies an **interpreted** closure that yields.
+///
+/// This is the refusal C5 removes. The closure runs on the task's own
+/// continuation stack — not on a Rust frame inside the compiled activation —
+/// so it can block, and the compiled frame waiting for its answer is a heap
+/// object that goes down with the task.
+#[test]
+fn a_compiled_apply_of_an_interpreted_closure_can_suspend() {
+    assert_eq!(
+        text_compiled(
+            r#"(defvar (trail string) "")
+               (defun call-thrice ((f (fn () i32))) i32
+                 (progn (dotimes (i 3) (f)) 0))
+               (compile call-thrice)
+               (let ((a (lambda () i32 (progn (setf trail (append trail "a")) (yield) 0)))
+                     (b (lambda () i32 (progn (setf trail (append trail "b")) (yield) 0))))
+                 (let ((ta (go (call-thrice a))) (tb (go (call-thrice b))))
+                   (progn (wait ta) (wait tb))))
+               trail"#
+        ),
+        "ababab"
+    );
+}
+
+/// A `throw` raised by an interpreted closure that compiled code applied is
+/// claimed by a `catch` in the **compiled** frame that applied it.
+///
+/// The exit has no machine frames to unwind through any more, so it travels
+/// up the continuation stack and is handed to the chain as a status
+/// (`FrameStack::raise`) — landing in the same pad a compiled `throw` would.
+/// What the pad finds is what an unwinding call used to leave it, which is
+/// why `park_for_compiled` writes both channels.
+#[test]
+fn a_throw_from_an_applied_interpreted_closure_reaches_a_compiled_catch() {
+    assert_eq!(
+        int_compiled(
+            r#"(defun guarded ((f (fn () i32))) i32 (catch 'boom (f)))
+               (compile guarded)
+               (let ((f (lambda () i32 (throw 'boom 41)))) (guarded f))"#
+        ),
+        41
+    );
+}
+
+/// And an `unwind-protect` in the compiled frame runs its cleanup on the way
+/// past — the exit is walked through the chain rather than around it.
+#[test]
+fn an_applied_closure_s_throw_runs_a_compiled_cleanup() {
+    assert_eq!(
+        text_compiled(
+            r#"(defvar (trail string) "")
+               (defun guarded ((f (fn () i32))) i32
+                 (catch 'boom (unwind-protect (f) (setf trail (append trail "cleanup")))))
+               (compile guarded)
+               (let ((f (lambda () i32 (throw 'boom 1))))
+                 (progn (guarded f) (setf trail (append trail "!"))))
+               trail"#
+        ),
+        "cleanup!"
+    );
+}

@@ -1960,64 +1960,23 @@ pub unsafe extern "C-unwind" fn rt_apply_any(args: *const i64, argc: u32) -> i64
     let closure = *args;
     let callee_args = *args.add(1) as usize as *const i64;
     let callee_argc = *args.add(2) as u32;
-    let id = match decode(closure) {
-        Value::Boxed(id) => id,
-        other => fatal(&format!("rt_apply_any: callee is not a function value: {:?}", other)),
-    };
-    let heap = active_heap();
-    if !heap.is_compiled_closure(id) {
-        return match APPLY_INTERPRETED.with(|cell| cell.get()) {
-            Some(hook) => hook(closure, callee_args, callee_argc),
-            // AOT: there is no interpreter in the process at all. Nothing
-            // *should* produce an interpreted closure there either — an
-            // AOT-compiled program is compiled through — so this is an
-            // internal-invariant break rather than a limitation to work
-            // around.
-            None => fatal("rt_apply_any: the callee is not a compiled closure and no interpreter is registered on this thread"),
-        };
-    }
-    let env_len = heap.compiled_closure_env_len(id);
-    let mask = heap.compiled_closure_mask(id);
-    let env: Vec<i64> = (0..env_len)
-        .map(|i| {
-            let v = heap.compiled_closure_env_get(id, i);
-            if mask & (1 << i) != 0 {
-                encode(v)
-            } else {
-                match v {
-                    Value::Int(raw) => raw,
-                    other => fatal(&format!("rt_apply_any: unmasked closure slot {} holds a non-raw value {:?}", i, other)),
-                }
-            }
-        })
-        .collect();
-    let fn_ptr = heap.compiled_closure_fnptr(id);
-    if heap.compiled_closure_body_abi(id) == typelisp_abi::BODY_ABI_COROUTINE {
-        // A coroutine body cannot be called; it can only be *driven*. This
-        // caller is a C ABI function that has to come back with an answer, so
-        // it drives the callee to completion on a stack of its own.
+    let passed: Vec<i64> = (0..callee_argc as usize).map(|i| *callee_args.add(i)).collect();
+    match resolve_closure(closure) {
+        Callee::Interpreted => apply_on_this_frame(closure, &passed, "rt_apply_any"),
+        // A coroutine body cannot be called; it can only be *driven*, and
+        // this caller is a C ABI function that has to come back with an
+        // answer — so it drives on a stack of its own. A chain rooted here
+        // lives on the machine stack of whoever called in, so it cannot be
+        // put down and picked up later.
         //
-        // That is a boundary, not a shortcut: a chain rooted here lives on the
-        // machine stack of whoever called `rt_apply_any`, so it cannot be put
-        // down and picked up later. Phase C5 is where the outer driver takes
-        // this call over instead.
-        let passed: Vec<i64> = (0..callee_argc as usize).map(|i| *callee_args.add(i)).collect();
-        // SAFETY: `build-make-closure` only ever names a function it declared
-        // under `coroutine_fn_type`, which is what `rt_coroutine_closure_new`
-        // records by being the entry point that was called.
-        let f: crate::coroutine::CoroutineFn = std::mem::transmute(fn_ptr);
-        let mut stack = crate::coroutine::FrameStack::new();
-        return match stack.run_with_env(active_heap(), f, &passed, &env) {
-            Ok(v) => v,
-            Err(paused) => pause_on_a_machine_frame(paused, "rt_apply_any"),
-        };
+        // **Compiled code no longer emits this.** Since C5 an `apply` names
+        // its callee to the caller's own driver (`rt_frame_apply`), which can
+        // put the chain down. What is left reaching here is the boundaries
+        // that hold a machine frame by construction — `rt_dyn_call`'s
+        // interpreted leg and the C FFI thunk.
+        Callee::Coroutine { f, env } => drive_to_completion(f, &passed, &env, "rt_apply_any"),
+        Callee::Classic { f, env } => f(callee_args, callee_argc, env.as_ptr(), env.len() as u32),
     }
-    // SAFETY: `rt_closure_new` is the only producer of a classic-ABI
-    // `BoxedObj::CompiledClosure`, and `build-make-closure` only ever hands
-    // it an LLVM function compiled under `compiled_fn_type_with_env`'s exact
-    // signature.
-    let f: unsafe extern "C" fn(*const i64, u32, *const i64, u32) -> i64 = std::mem::transmute(fn_ptr);
-    f(callee_args, callee_argc, env.as_ptr(), env.len() as u32)
 }
 
 /// `(rt-cell-new v)` for compiled code — allocates a shared binding cell
@@ -2252,6 +2211,33 @@ pub unsafe extern "C" fn rt_frame_call(args: *const i64, argc: u32) -> i64 {
         passed.push(*args.add(i));
     }
     typelisp_abi::call_state::set_pending_call(target, passed, Vec::new());
+    0
+}
+
+/// `rt_frame_apply(closure, arg...)` — name a function *value* to the driver.
+///
+/// [`rt_frame_call`] for an `apply`, where the callee is not an address the
+/// checker resolved but a value whose nature decides who runs it. The driver
+/// resolves it ([`resolve_closure`]): a coroutine body joins this chain, a
+/// classic one runs to completion, and an interpreted one goes to whoever
+/// owns a continuation stack.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least `argc` valid
+/// `i64`s, the first a tagged function value and the rest its arguments in
+/// its own declared representations.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_apply(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_frame_apply: expected at least 1 argument (the callee)");
+    }
+    let closure = *args;
+    let mut passed = Vec::with_capacity(argc as usize - 1);
+    for i in 1..argc as usize {
+        passed.push(*args.add(i));
+    }
+    typelisp_abi::call_state::set_pending_apply(closure, passed);
     0
 }
 
@@ -3240,6 +3226,44 @@ pub unsafe fn clear_throw() {
     active_heap().set_in_flight_throw(None);
 }
 
+/// Parks an exit raised in *interpreted* code so a standing compiled chain
+/// can catch it — the same two channels an unwinding call uses, minus the
+/// unwinding.
+///
+/// Since C5 an interpreted callee reached from compiled code runs on the
+/// task's continuation stack rather than on a machine frame inside the
+/// compiled activation, so its non-local exit has no Rust frames to travel
+/// through. It is handed to the chain as a status instead
+/// (`coroutine::FrameStack::raise`), and this is what the chain's `catch`
+/// then finds: the tag and value where `rt_throw_matches` looks for them, and
+/// the payload kind where the driver's own catch leaves it.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread, and it must be the heap
+/// `value` belongs to.
+pub unsafe fn park_throw_for_chain(tag: String, value: Value) {
+    park_throw(tag, value);
+    CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = Some(Box::new(CompiledThrow)));
+}
+
+/// [`park_throw_for_chain`] for an exit that is not a throw — a `panic`, a
+/// runtime error, a `break` that escaped. The `EvalError` itself waits on the
+/// front end's side (`crossing::park_interpreted_error`); this is the marker
+/// that says which side to ask.
+///
+/// Clears any throw still parked, for `park_activation_unwind`'s reason:
+/// anything that is not a throw *replaces* what was in flight, and leaving
+/// the old tag parked would let a `catch` claim this as its own.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread.
+pub unsafe fn park_error_for_chain() {
+    clear_throw();
+    CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = Some(Box::new(InterpretedUnwind)));
+}
+
 /// Raises the unwind for a throw already parked by [`park_throw`].
 ///
 /// The counterpart of [`unwind_interpreted_error`] for the throw channel; the
@@ -3392,9 +3416,41 @@ unsafe fn collect_words(p: *const i64, n: i64) -> Vec<i64> {
 unsafe fn pause_on_a_machine_frame(paused: crate::coroutine::Paused, what: &str) -> ! {
     match paused {
         crate::coroutine::Paused::Unwinding => crate::coroutine::resume_unwinding(),
+        // Every driver standing on a machine frame goes through
+        // `FrameStack::run_to_end`, which resolves this itself. Reaching here
+        // means one of them was written to `run`/`resume` directly.
+        crate::coroutine::Paused::Applying { .. } => fatal(&format!(
+            "{}: a compiled frame applied an interpreted function value and the drive did not \
+             resolve it — a driver on a machine frame must use `run_to_end`",
+            what
+        )),
         crate::coroutine::Paused::Suspended => fatal(&format!(
             "{}: a compiled callee suspended under a call that has to return, and its chain is \
              rooted on a machine frame with nothing to pick it back up (Phase C5).",
+            what
+        )),
+    }
+}
+
+/// Applies an interpreted function value on *this* machine frame — what a
+/// driver with no continuation stack behind it does with
+/// [`coroutine::Paused::Applying`].
+///
+/// In an AOT executable there is no interpreter and nothing should produce an
+/// interpreted closure either, so a missing hook is an invariant break rather
+/// than a limitation to work around — the same call `rt_apply_any` makes.
+///
+/// # Safety
+///
+/// `closure` must be a tagged interpreted-closure box in the heap registered
+/// on this thread, and `args` its arguments in that closure's own declared
+/// representations.
+pub unsafe fn apply_on_this_frame(closure: i64, args: &[i64], what: &str) -> i64 {
+    match APPLY_INTERPRETED.with(|cell| cell.get()) {
+        Some(hook) => hook(closure, args.as_ptr(), args.len() as u32),
+        None => fatal(&format!(
+            "{}: a compiled frame applied an interpreted function value and no interpreter is \
+             registered on this thread",
             what
         )),
     }
@@ -3407,7 +3463,9 @@ unsafe fn drive_to_completion(
     what: &str,
 ) -> i64 {
     let mut stack = crate::coroutine::FrameStack::new();
-    match stack.run_with_env(active_heap(), f, args, env) {
+    match stack.run_to_end(active_heap(), f, args, env, |closure, argv| {
+        apply_on_this_frame(closure, argv, what)
+    }) {
         Ok(v) => v,
         Err(paused) => pause_on_a_machine_frame(paused, what),
     }
@@ -4850,6 +4908,72 @@ thread_local! {
 /// [`set_apply_interpreted`], for the same reason and at the same moment.
 pub fn set_dyn_slot_closure(f: Option<DynSlotClosureFn>) {
     DYN_SLOT_CLOSURE.with(|cell| cell.set(f));
+}
+
+/// What a function value turns out to be — the question `apply` asks and a
+/// direct call never has to.
+pub(crate) enum Callee {
+    /// A compiled body under the coroutine ABI, with its captures. It can
+    /// only be *driven*, so it joins a chain.
+    Coroutine { f: crate::coroutine::CoroutineFn, env: Vec<i64> },
+    /// A compiled body under the original ABI, with its captures. It runs to
+    /// completion by construction, so calling it is enough.
+    Classic { f: ClassicClosureFn, env: Vec<i64> },
+    /// Not compiled. Only an interpreter can run it, and only whoever owns a
+    /// continuation stack can let it suspend.
+    Interpreted,
+}
+
+/// A classic-ABI closure body: arguments and captures as two arrays.
+pub(crate) type ClassicClosureFn = unsafe extern "C-unwind" fn(*const i64, u32, *const i64, u32) -> i64;
+
+/// Reads a function value's captures and decides who can run its body.
+///
+/// The captures come out in the closure box's own mask: a masked slot is a
+/// tagged value and an unmasked one a raw word, the same distinction every
+/// compiled boundary makes and for the same reason — a machine word does not
+/// say which it is.
+///
+/// # Safety
+///
+/// `closure` must be a tagged compiled- or interpreted-closure box in the
+/// heap registered on this thread.
+pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
+    let id = match decode(closure) {
+        Value::Boxed(id) => id,
+        other => fatal(&format!("apply: callee is not a function value: {:?}", other)),
+    };
+    let heap = active_heap();
+    if !heap.is_compiled_closure(id) {
+        return Callee::Interpreted;
+    }
+    let env_len = heap.compiled_closure_env_len(id);
+    let mask = heap.compiled_closure_mask(id);
+    let env: Vec<i64> = (0..env_len)
+        .map(|i| {
+            let v = heap.compiled_closure_env_get(id, i);
+            if mask & (1 << i) != 0 {
+                encode(v)
+            } else {
+                match v {
+                    Value::Int(raw) => raw,
+                    other => fatal(&format!("apply: unmasked closure slot {} holds a non-raw value {:?}", i, other)),
+                }
+            }
+        })
+        .collect();
+    let fn_ptr = heap.compiled_closure_fnptr(id);
+    if heap.compiled_closure_body_abi(id) == typelisp_abi::BODY_ABI_COROUTINE {
+        // SAFETY: `build-make-closure` only ever names a function it declared
+        // under `coroutine_fn_type`, which is what `rt_coroutine_closure_new`
+        // records by being the entry point that was called.
+        Callee::Coroutine { f: std::mem::transmute(fn_ptr), env }
+    } else {
+        // SAFETY: `rt_closure_new` is the only producer of a classic-ABI
+        // `BoxedObj::CompiledClosure`, and `build-make-closure` only ever
+        // hands it a function compiled under `compiled_fn_type_with_env`.
+        Callee::Classic { f: std::mem::transmute(fn_ptr), env }
+    }
 }
 
 /// A `:dyn` method call: slot `args[1]` of vtable `args[0]`, applied to the

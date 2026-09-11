@@ -38,6 +38,7 @@
 //! was making.
 
 use typelisp_abi::call_state;
+use typelisp_abi::call_state::Pending;
 use typelisp_abi::{decode, STATUS_CALL, STATUS_RETURN, STATUS_SUSPEND, STATUS_UNWIND};
 use typelisp_mem::{BoxId, Heap, Value};
 
@@ -67,6 +68,16 @@ pub enum Paused {
     /// A frame suspended. It is still on the stack, and driving again resumes
     /// it — this is what a scheduler switches away on.
     Suspended,
+    /// A frame applied a function value that turned out to be
+    /// **interpreted**, so only whoever owns a continuation stack can run it.
+    ///
+    /// The chain stays standing, exactly as for a suspension: the answer goes
+    /// into the top frame's value slot ([`FrameStack::set_top_value`]) and
+    /// [`FrameStack::resume`] picks the chain back up. A driver whose caller
+    /// is a machine frame resolves it on that frame instead
+    /// ([`FrameStack::run_to_end`]), which is the one thing it can do — and
+    /// the reason such a call still cannot suspend.
+    Applying { closure: i64, args: Vec<i64> },
     /// An unwind passed the outermost frame this driver owned without
     /// finding a handler. The chain is gone — every frame of it has been
     /// popped and its roots cut back — and what is unwinding is parked for
@@ -185,6 +196,59 @@ impl FrameStack {
         set_frame_value(heap, frame, word);
     }
 
+    /// Hands `value` to the frame waiting for it and runs it again — what a
+    /// returning callee's answer does, for a callee that had no frame of its
+    /// own to pop.
+    fn hand_back(&mut self, heap: &mut Heap, value: i64) -> i64 {
+        let (body, frame) = {
+            let caller = self.frames.last().expect("a frame is waiting for the answer");
+            (caller.body, caller.frame)
+        };
+        set_frame_value(heap, frame, value);
+        unsafe { activation(body, typelisp_abi::encode(frame)) }
+    }
+
+    /// Raises the unwind already parked into this chain: the innermost frame
+    /// is asked for a handler, and the walk goes on from there.
+    ///
+    /// What an *interpreted* callee's non-local exit does when the call came
+    /// from compiled code. Until C5 that travelled as a Rust panic through
+    /// the machine frames in between; there are none left to travel through,
+    /// so the exit is handed to the chain as the status it would have become
+    /// anyway.
+    pub fn raise(&mut self, heap: &mut Heap) -> Result<i64, Paused> {
+        self.drive(heap, 0, STATUS_UNWIND)
+    }
+
+    /// [`Self::run_with_env`] for a caller that is a machine frame: an
+    /// interpreted `apply` underneath is run right here, on that frame.
+    ///
+    /// The one thing a driver with no continuation stack behind it can do
+    /// with [`Paused::Applying`]. It keeps the boundaries that still work
+    /// this way (`rt_drive_body`, `rt_dyn_call`, the C FFI thunk) behaving as
+    /// they did, at the cost the plan's B6 names: a call made through one of
+    /// them cannot suspend.
+    pub fn run_to_end(
+        &mut self,
+        heap: &mut Heap,
+        f: CoroutineFn,
+        args: &[i64],
+        env: &[i64],
+        apply: impl Fn(i64, &[i64]) -> i64,
+    ) -> Result<i64, Paused> {
+        let mut outcome = self.run_with_env(heap, f, args, env);
+        loop {
+            match outcome {
+                Err(Paused::Applying { closure, args }) => {
+                    let v = apply(closure, &args);
+                    self.set_top_value(heap, v);
+                    outcome = self.resume(heap);
+                }
+                other => return other,
+            }
+        }
+    }
+
     /// Pick a suspended chain back up: re-enter its innermost frame.
     ///
     /// The counterpart of [`Self::run`] for a stack that is already standing.
@@ -253,10 +317,38 @@ impl FrameStack {
                     set_frame_value(heap, caller_frame, value);
                     status = unsafe { activation(caller_body, typelisp_abi::encode(caller_frame)) };
                 }
-                STATUS_CALL => {
-                    let (callee, callee_args, callee_env) = take_pending_call();
-                    status = self.begin(heap, callee, &callee_args, &callee_env);
-                }
+                STATUS_CALL => match take_pending_call() {
+                    Pending::Direct { target, args, env } => {
+                        // SAFETY: the address came from `build-fn-address`
+                        // over a function declared under the coroutine ABI,
+                        // the provenance every indirect compiled call relies
+                        // on.
+                        let f: CoroutineFn = unsafe { std::mem::transmute::<usize, CoroutineFn>(target) };
+                        status = self.begin(heap, f, &args, &env);
+                    }
+                    // SAFETY: the word came from a compiled `apply` site,
+                    // whose callee the checker typed as an `Fn`.
+                    Pending::Apply { closure, args } => match unsafe { crate::resolve_closure(closure) } {
+                        crate::Callee::Coroutine { f, env } => status = self.begin(heap, f, &args, &env),
+                        // Runs to completion by construction, so there is no
+                        // frame to push — only an answer to hand back. The
+                        // catch is `activation`'s, for its reason: this is a
+                        // compiled activation too.
+                        crate::Callee::Classic { f, env } => {
+                            let call = std::panic::AssertUnwindSafe(|| unsafe {
+                                f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32)
+                            });
+                            status = match std::panic::catch_unwind(call) {
+                                Ok(v) => self.hand_back(heap, v),
+                                Err(payload) => {
+                                    unsafe { crate::park_activation_unwind(payload) };
+                                    STATUS_UNWIND
+                                }
+                            };
+                        }
+                        crate::Callee::Interpreted => return Err(Paused::Applying { closure, args }),
+                    },
+                },
                 STATUS_SUSPEND => return Err(Paused::Suspended),
                 _ => match self.unwind(heap, base) {
                     Some(resumed) => status = resumed,
@@ -365,14 +457,9 @@ fn take_current_frame() -> Value {
     decode(word)
 }
 
-fn take_pending_call() -> (CoroutineFn, Vec<i64>, Vec<i64>) {
-    let (target, args, env) = call_state::take_pending_call()
-        .unwrap_or_else(|| panic!("a frame returned STATUS_CALL without naming a callee"));
-    // SAFETY: the address came from `build-fn-address` over a function this
-    // module declared under the coroutine ABI, the same provenance every
-    // indirect compiled call already relies on.
-    let f: CoroutineFn = unsafe { std::mem::transmute::<usize, CoroutineFn>(target) };
-    (f, args, env)
+fn take_pending_call() -> Pending {
+    call_state::take_pending_call()
+        .unwrap_or_else(|| panic!("a frame returned STATUS_CALL without naming a callee"))
 }
 
 fn frame_id(f: Value) -> BoxId {
