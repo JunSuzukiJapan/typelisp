@@ -1007,3 +1007,105 @@ lowering される primitive メソッドと同じく target から外す。
 （`rt_apply_any`）で、その下にはマシンスタックのフレームが積まれている。
 中断すればそれを置き去りにする。プランが C5（境界の整理）に割り当てている
 `rt_apply_any` / `rt_dyn_call` の作業がここに来る。
+
+## C4. 巻き戻しをドライバの状態に
+
+`throw`/`panic` が Rust の panic であることは変えていない。**変えたのは誰が
+それを受け止めるか**——呼び出し地点の 9 つのトランポリンではなく、
+**ドライバがアクティベーションの境界で 1 箇所**。
+
+C2 が既に条件を作っていた: Lisp の呼び出しはドライバ往復であってマシンの
+`call` ではない。だから compiled フレームで上がった panic が travel できる
+マシンフレームは**そのフレーム 1 活性化分だけ**で、出口はドライバの
+`f(frame)` しかない。受け止める場所が 1 つに決まる。
+
+### 領域はフレームのスロットになった
+
+`FRAME_HANDLER_SLOT`（スロット 1）。値は「いま入っている
+`catch`/`unwind-protect` 領域の dispatch ブロックの `pc`」で、`0` は「この
+フレームは何も受けない」。`rt_frame_new` がゼロ埋めするので、領域を持たない
+関数はこのスロットに一度も触らない。
+
+**呼び出しは何も出さない。** `check-unwind` が消え、`rt_protected_*` が消え、
+`emit-direct-call` / `emit-lisp-call` / `emit-lisp-call-with-env` /
+`emit-closure-apply` / `emit-rt-call` の 5 つは「守られた枝」が無くなった時点で
+`build-call` / `coroutine-call` の別名になったので、呼び出し地点へ展開して
+消した（島の SOURCE が 110 行短くなった）。領域の中の呼び出しは、領域の外の
+呼び出しと 1 命令も違わない。
+
+静的な表（呼び出しの `pc` → ハンドラの `pc`）にしなかったのは、答えが
+**呼び出しについての事実ではない**から。それは「その呼び出しがどの領域に
+書かれているか」という事実で、島は自分が emit している地点でそれを常に
+知っている。スロットなら、島は知っていることを書くだけでよい。
+
+ハンドラに再開するのは、呼び出しの継続に再開するのと**同じ機構**——同じ
+`pc`、同じ dispatch チェーン。`frame-set-handler` が pad に resume id を
+配り、`coroutine-end` が普通のアームとして並べる。
+
+### 書く場所は 4 種類、規則は 1 つ
+
+**いま emit している地点の領域を書く。**
+
+| 場所 | 書く値 |
+|---|---|
+領域に入るところ | その pad |
+pad の先頭 | **外側**の領域 |
+領域を普通に出るところ | 外側の領域 |
+静的な脱出が着地するブロックの先頭 | そのブロックが書かれている領域 |
+
+pad が外側を書くのは、cleanup が自分の `unwind-protect` に守られない（CLHS）
+から——そして tag が合わなかった `catch` も、その時点で自分の領域からは
+出ている。だから `emit-unwind-onward` は何も復元しない。
+
+**4 番目だけが、コンパイル時だけの `protect` には無かった義務。**
+`(loop (catch 'a (break)))` の `break` はチェッカーが決めた `br` で、
+放っておけばスロットは「制御がもう出た pad」を指したままになる。後から
+throw が来ると、終わったはずの `catch` に着地して merge スロットに書き、
+その後ろをもう一度走る。だから `compile-loop` / `compile-block` の exit
+ブロックと、`emit-block-cleanups` の各コピーの先頭で書き直す。
+
+### 合流スロットが 4 つ目あった
+
+`compile-catch` の結果スロットは `alloca` のままだった。今まで無事だったのは
+**pad が同じ活性化からの `br` で到達されていた**から。C4 で pad は dispatch の
+宛先になる——prologue から、別の活性化で入る——ので `alloca` は pad を支配
+しないし、そのマシン記憶はもう存在しない。
+
+`(catch TAG KIND BODY BKIND)` の `BKIND` がそれ。**1 つの repr に 2 つの質問を
+しているだけ**で、チェッカーのノード（`(catch TAG BODY REPR)`）は変えていない
+——`KIND` は「投げられた語をどう untag するか」、`BKIND` は「そのスロットを
+コレクタが辿ってよいか」。`loop` / `block` / `unwind-protect` の 3 つに続く
+4 つ目で、見つけ方も同じだった（検証器が支配関係で言葉にする）。
+
+### 関数ポインタ型が嘘をついていた
+
+`CoroutineFn` は C2c から `extern "C"` だった。`rt_panic` は unwind するので、
+compiled な `(panic ...)` は**ずっとこのポインタを通って unwind していた**。
+`"C"` は「呼び先は unwind しない」という呼び出し側への約束で、LLVM は
+呼び出し地点を `nounwind` と扱ってよい。通っていたのは運で、そこに
+`catch_unwind` を置くなら運では済まない。`"C-unwind"` に直した——リポジトリの
+他の compiled 本体ポインタ型（`CompiledSignature` / `ApplyInterpretedFn` /
+`DynSlotClosureFn`）は最初から全部これで、**コルーチン ABI だけが外れていた**。
+
+### ルートの修復が呼び出しごとからフレームごとになった
+
+`protected` は呼び出しの前の深さを覚えて、caught のときにそこへ戻していた。
+いまは `FrameStack` の各エントリが**入場時のルート深さ**を持ち、unwind で
+フレームを pop するたびにそこへ切る。pad 自身の
+`rt_truncate_sexpr_roots(root-base)` は残る——そちらは「領域の入口の深さ」で、
+フレームの入場より深い。2 つは入れ子で、どちらも縮める方向にしか動かない。
+
+### C4 で消えなかったもの
+
+- **`crossing.rs` は大半が残る。** プランは「139 行の大半が消える」と書いて
+  いたが、そこは compiled↔interpreted の境界で、C4 が動かしたのは
+  compiled の*内側*。`catch_compiled_panic` はインタプリタが compiled を
+  呼ぶ入口として要り、`park_interpreted_error` / `unwind_interpreted_failure`
+  は compiled が interpreted を呼ぶ出口として要る。C4 が足したのは
+  `carried_unwind_error`（ドライバが運んできた payload を `EvalError` に
+  する口）で、payload → `EvalError` の変換は `error_from_payload` として
+  2 つの入口が共有する
+- **「同時に飛ぶ throw は高々 1 つ」はまだ死んでいない。** `IN_FLIGHT_TAG` と
+  `Heap::set_in_flight_throw` は 1 スロットのまま。ドライバは panic を
+  捕まえてから次の frame を探す間ずっとそれを持っている。タスクごとに
+  分けるのは B の側の作業

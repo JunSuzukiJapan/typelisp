@@ -216,9 +216,9 @@ fn call_coroutine(address: usize, args: &[i64]) -> i64 {
         Err(typelisp_rt::coroutine::Paused::Suspended) => {
             typelisp_abi::raise("a compiled function suspended underneath an interpreted caller, which has no way to resume it".to_string())
         }
-        Err(typelisp_rt::coroutine::Paused::Unwinding) => {
-            typelisp_abi::raise("a compiled function unwound out to an interpreted caller (Phase C4)".to_string())
-        }
+        // The unwind was travelling towards a `catch` that is not in this
+        // chain; re-raising puts it back on the path it was on.
+        Err(typelisp_rt::coroutine::Paused::Unwinding) => typelisp_rt::coroutine::resume_unwinding(),
     }
 }
 
@@ -1256,9 +1256,7 @@ impl Interp {
                     "a compiled closure suspended underneath an interpreted caller, which has no way to resume it"
                         .to_string(),
                 ),
-                Err(typelisp_rt::coroutine::Paused::Unwinding) => typelisp_abi::raise(
-                    "a compiled closure unwound out to an interpreted caller (Phase C4)".to_string(),
-                ),
+                Err(typelisp_rt::coroutine::Paused::Unwinding) => typelisp_rt::coroutine::resume_unwinding(),
             };
         }
         // SAFETY: every `BoxedObj::CompiledClosure` in the heap was built by

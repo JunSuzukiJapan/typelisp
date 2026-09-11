@@ -61,8 +61,20 @@ pub fn catch_compiled_panic<R>(call: impl FnOnce() -> R) -> Result<R, EvalError>
         Err(payload) => payload,
     };
     typelisp_abi::call_state::truncate_current_frames(frames);
+    Err(error_from_payload(payload))
+}
+
+/// The error one of the runtime's three deliberate unwind payloads means.
+///
+/// Shared by the two ways a compiled failure reaches the interpreter: caught
+/// off the machine stack ([`catch_compiled_panic`]) and carried out of a
+/// driver as `Paused::Unwinding` ([`carried_unwind_error`]). The payload says
+/// which channel the failure took, and each channel has its own parking slot
+/// because the two carry different things — a message, a tag and a value, or
+/// a whole `EvalError` that is not `Send`.
+fn error_from_payload(payload: Box<dyn std::any::Any + Send>) -> EvalError {
     let payload = match payload.downcast::<typelisp_rt::CompiledPanic>() {
-        Ok(p) => return Err(EvalError::Panic(p.message)),
+        Ok(p) => return EvalError::Panic(p.message),
         Err(other) => other,
     };
     let payload = match payload.downcast::<typelisp_rt::CompiledThrow>() {
@@ -70,17 +82,31 @@ pub fn catch_compiled_panic<R>(call: impl FnOnce() -> R) -> Result<R, EvalError>
         // for the call that just unwound, and it is still registered here —
         // this runs before the caller repairs anything.
         Ok(_) => match unsafe { typelisp_rt::take_throw() } {
-            Some((tag, value)) => return Err(EvalError::Throw(tag, Box::new(value))),
-            None => {
-                return Err(EvalError::Internal("a compiled throw arrived with nothing parked for it".to_string()))
-            }
+            Some((tag, value)) => return EvalError::Throw(tag, Box::new(value)),
+            None => return EvalError::Internal("a compiled throw arrived with nothing parked for it".to_string()),
         },
         Err(other) => other,
     };
     match payload.downcast::<typelisp_rt::InterpretedUnwind>() {
-        Ok(_) => Err(take_interpreted_error()
-            .unwrap_or_else(|| EvalError::Internal("an interpreted unwind arrived with no error parked for it".to_string()))),
+        Ok(_) => take_interpreted_error()
+            .unwrap_or_else(|| EvalError::Internal("an interpreted unwind arrived with no error parked for it".to_string())),
         Err(other) => std::panic::resume_unwind(other),
+    }
+}
+
+/// The error a driver's `Paused::Unwinding` means.
+///
+/// The driver caught the unwind at the activation that raised it and popped
+/// the chain; what is unwinding is parked, and this is where it stops being a
+/// payload and becomes an `EvalError` the interpreter's own `State::Unwind`
+/// can travel on. Nothing is re-raised: the continuation stack above is not
+/// on the machine stack, so there is no Rust frame left to unwind *to*.
+pub fn carried_unwind_error() -> EvalError {
+    match typelisp_rt::take_activation_unwind() {
+        Some(payload) => error_from_payload(payload),
+        None => EvalError::Internal(
+            "a compiled frame reported an unwind but nothing was parked for it".to_string(),
+        ),
     }
 }
 

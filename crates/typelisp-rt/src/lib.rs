@@ -2019,10 +2019,7 @@ pub unsafe extern "C-unwind" fn rt_apply_any(args: *const i64, argc: u32) -> i64
         let mut stack = crate::coroutine::FrameStack::new();
         return match stack.run_with_env(active_heap(), f, &passed, &env) {
             Ok(v) => v,
-            Err(paused) => fatal(&format!(
-                "rt_apply_any: a compiled closure {:?} under a call that has to return.                  Nothing in this phase produces that yet — compiled code cannot suspend until C3.",
-                paused
-            )),
+            Err(paused) => pause_on_a_machine_frame(paused, "rt_apply_any"),
         };
     }
     // SAFETY: `rt_closure_new` is the only producer of a classic-ABI
@@ -3075,11 +3072,7 @@ pub unsafe extern "C" fn rt_run_entry_driven(entry: i64) -> i64 {
         let mut stack = crate::coroutine::FrameStack::new();
         match stack.run(active_heap(), f, &[]) {
             Ok(v) => v,
-            Err(paused) => fatal(&format!(
-                "rt_run_entry_driven: the entry point {:?} with nobody to resume it. Nothing in \
-                 this phase produces that yet -- compiled code cannot suspend until C3.",
-                paused
-            )),
+            Err(paused) => pause_on_a_machine_frame(paused, "rt_run_entry_driven"),
         }
     });
     run_entry_payload(std::panic::catch_unwind(call))
@@ -3359,6 +3352,60 @@ pub unsafe extern "C-unwind" fn rt_resume_unwind(_args: *const i64, _argc: u32) 
     }
 }
 
+/// Classifies an unwind caught at a compiled activation's boundary
+/// (`coroutine::activation`) and parks it for the driver to carry on with.
+///
+/// Anything that is not one of the runtime's three deliberate payloads keeps
+/// unwinding: a genuine bug in the runtime or in generated code must not come
+/// back as a plausible-looking typelisp condition.
+///
+/// A throw keeps its parked tag and value — its flight is not over, it is
+/// being carried by the driver instead of by the unwinder. Anything else
+/// *replaces* what was in flight: a cleanup that panics while a throw travels
+/// wins, and CLHS says so. Leaving the old tag parked would let a `catch`
+/// further up claim this panic as if it were its own throw.
+///
+/// Unlike [`protected`] this repairs nothing. The GC root stack and the
+/// published-frame stack are cut back by the driver, which knows the depths
+/// per frame rather than per call.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread.
+pub(crate) unsafe fn park_activation_unwind(payload: Box<dyn std::any::Any + Send>) {
+    let ours = payload.is::<CompiledThrow>() || payload.is::<CompiledPanic>() || payload.is::<InterpretedUnwind>();
+    if !ours {
+        std::panic::resume_unwind(payload);
+    }
+    if !payload.is::<CompiledThrow>() {
+        clear_throw();
+    }
+    CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = Some(payload));
+}
+
+/// Takes what [`park_activation_unwind`] parked, for a caller that wants the
+/// payload itself rather than a re-raise — the interpreter's task driver,
+/// which turns it into an `EvalError` and unwinds its own continuation stack
+/// through it instead of the machine stack.
+pub fn take_activation_unwind() -> Option<Box<dyn std::any::Any + Send>> {
+    CAUGHT_UNWIND.with(|cell| cell.borrow_mut().take())
+}
+
+/// Re-raises what [`park_activation_unwind`] parked — what a driver whose
+/// caller is a machine frame does when the unwind passed its outermost frame.
+///
+/// # Safety
+///
+/// Nothing unsafe happens here; it is `fatal` rather than a panic when
+/// nothing is carried, because reaching it with an empty slot means the
+/// driver reported an unwind that never was.
+pub(crate) fn resume_activation_unwind() -> ! {
+    match take_activation_unwind() {
+        Some(payload) => std::panic::resume_unwind(payload),
+        None => fatal("resume_activation_unwind: the driver reported an unwind but none is being carried"),
+    }
+}
+
 /// The shared body of every `rt_protected_*` trampoline: run `call` with a
 /// catch around it, and report the outcome the way compiled code reads it.
 ///
@@ -3498,6 +3545,24 @@ unsafe fn collect_words(p: *const i64, n: i64) -> Vec<i64> {
     (0..n as usize).map(|i| *p.add(i)).collect()
 }
 
+/// What a driver whose caller is a machine frame does with a pause.
+///
+/// An unwind is re-raised, so it keeps travelling towards a `catch` above
+/// this boundary. A suspension cannot be honoured here at all: the chain is
+/// rooted on the machine stack of whoever called in, so there is nothing to
+/// put it down and pick it back up. Phase C5 is where the outer driver takes
+/// these calls over and the refusal goes away.
+unsafe fn pause_on_a_machine_frame(paused: crate::coroutine::Paused, what: &str) -> ! {
+    match paused {
+        crate::coroutine::Paused::Unwinding => crate::coroutine::resume_unwinding(),
+        crate::coroutine::Paused::Suspended => fatal(&format!(
+            "{}: a compiled callee suspended under a call that has to return, and its chain is \
+             rooted on a machine frame with nothing to pick it back up (Phase C5).",
+            what
+        )),
+    }
+}
+
 unsafe fn drive_to_completion(
     f: crate::coroutine::CoroutineFn,
     args: &[i64],
@@ -3507,11 +3572,7 @@ unsafe fn drive_to_completion(
     let mut stack = crate::coroutine::FrameStack::new();
     match stack.run_with_env(active_heap(), f, args, env) {
         Ok(v) => v,
-        Err(paused) => fatal(&format!(
-            "{}: the callee {:?} under a call that has to return. Nothing in this phase \
-             produces that yet — compiled code cannot suspend until C3.",
-            what, paused
-        )),
+        Err(paused) => pause_on_a_machine_frame(paused, what),
     }
 }
 

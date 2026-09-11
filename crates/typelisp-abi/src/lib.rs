@@ -252,8 +252,24 @@ pub const BODY_ABI_COROUTINE: u8 = 1;
 
 /// The frame slot the driver protocol reserves for the value in flight —
 /// a function's result, and the result of a call it is waiting on. The
-/// island's slot allocator hands out 1 upward.
+/// island's slot allocator hands out 2 upward.
 pub const FRAME_VALUE_SLOT: usize = 0;
+
+/// The frame slot that says where an unwind reaching this frame resumes: the
+/// `pc` of the enclosing `catch`/`unwind-protect` region's dispatch block, or
+/// `0` for "this frame catches nothing".
+///
+/// The driver reads it on [`STATUS_UNWIND`] to decide whether to re-enter the
+/// frame or pop it. A *slot* rather than a static table keyed by the call's
+/// `pc`, because the answer is not a fact about the call — it is a fact about
+/// the region the call is written in, and the island already knows which that
+/// is at every point it emits. Written on entering and leaving a region, and
+/// on entering any block that leaves one (a loop's exit, a named block's
+/// exit, a cleanup copy), which is the whole discipline: a frame with no
+/// region never touches it, and `rt_frame_new` zero-fills.
+///
+/// Never masked: a `pc` is a raw integer, not a tagged value.
+pub const FRAME_HANDLER_SLOT: usize = 1;
 
 /// The state one coroutine-ABI call is in flight through.
 ///

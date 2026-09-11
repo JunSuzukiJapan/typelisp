@@ -554,9 +554,31 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         // (`compile-tag-struct-field` on the way in, `compile-sexpr-field` on
         // the way out): the runtime sees one machine word and only the
         // representation says whether it is already tagged.
+        // `(catch TAG BODY REPR)` -> `(catch TAG KIND BODY BKIND)`. The one
+        // repr answers two questions: `KIND` is how to untag the thrown word,
+        // `BKIND` whether the merge slot holding the result may be followed
+        // by the collector.
+        //
+        // The slot became a *frame* slot in C4 for domination, not for
+        // rooting: the pad that writes it is a dispatch target now, reached
+        // from the prologue in a later activation, and an `alloca` emitted at
+        // the `catch` does not dominate that. Nothing allocates between the
+        // store and the `merge` block's load on either path, which is why the
+        // `alloca` was safe without a mask and why `BKIND` is not
+        // load-bearing. It is here because a frame slot's mask is a decision
+        // somebody has to make, and the honest answer is the repr's -- masking
+        // unconditionally would have the collector invent a reference out of a
+        // plain `i32` (see `loop`'s own note).
+        //
+        // When nothing throws `TAG` the repr is unpinned, so `KIND` and
+        // `BKIND` are both `0` and the slot is unmasked -- exactly what the
+        // `alloca` was. Otherwise the tag pins the thrown type globally and
+        // the catch's own type is the join of it and the body's, so one repr
+        // describes both things the slot can hold.
         "catch" => {
             let name = throw_tag_sym(heap, form)?;
             let kind = repr_kind(heap, form, 2)?;
+            let bkind = repr_binding_kind(heap, form, 2)?;
             let body = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
             let tag = sym_form(f.heap(), name)?;
@@ -564,6 +586,7 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             f.push(Value::Int(kind));
             let b = to_island(f.heap(), body, cx)?;
             f.push(b);
+            f.push(Value::Int(bkind));
             f.finish("catch")
         }
         "throw" => {

@@ -2205,6 +2205,28 @@ pub fn llvm_builder_def() -> AdtDef {
         "coroutine-suspend".to_string(),
         assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], llvm_value_ty(), true),
     );
+    // `frame-set-handler`/`frame-clear-handler`: write the frame's unwind
+    // handler slot (`typelisp_abi::FRAME_HANDLER_SLOT`) — the `pc` of a
+    // region's dispatch block, or `0` for none. The block is named rather
+    // than the id, because the id is the builtin's own bookkeeping: the same
+    // dispatch chain that resumes a call resumes a handler, and only the
+    // builder knows what ids it has handed out.
+    assoc.insert(
+        "frame-set-handler".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_basic_block_ty()], Type::Unit, true),
+    );
+    assoc.insert(
+        "frame-clear-handler".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], Type::Unit, true),
+    );
+    // `coroutine-unwind`: end the activation with `STATUS_UNWIND` — what a
+    // region that declines the unwind in flight does when no enclosing region
+    // is left in this function. The driver pops the frame and carries on
+    // looking, which is the dynamic half of `emit-unwind-onward`.
+    assoc.insert(
+        "coroutine-unwind".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], Type::Unit, true),
+    );
     assoc.insert(
         "coroutine-end".to_string(),
         assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], Type::Unit, true),

@@ -1261,8 +1261,9 @@ impl Interp {
     ///
     /// The four outcomes are the protocol's own, one level up: an answer ends
     /// the crossing, a suspension parks the task with its chain standing, an
-    /// unwind is Phase C4's, and a Rust panic is a compiled `(panic ...)` that
-    /// already crossed back through `catch_compiled_panic`.
+    /// unwind becomes this task's own `State::Unwind`, and a Rust panic is one
+    /// that got past the driver's catch — which now means only a payload that
+    /// is nobody's on this tier.
     fn after_drive(
         &self,
         heap: &mut Heap,
@@ -1295,9 +1296,14 @@ impl Interp {
                 }
                 Err(e) => State::Unwind(e),
             },
-            Ok(Err(typelisp_rt::coroutine::Paused::Unwinding)) => State::Unwind(EvalError::Internal(
-                "a compiled frame is unwinding through the driver, which Phase C4 has still to teach it".to_string(),
-            )),
+            // The driver already popped the chain and cut its roots back per
+            // frame; the truncate here is for the crossing's own roots, which
+            // the interpreter pushed before entering.
+            Ok(Err(typelisp_rt::coroutine::Paused::Unwinding)) => {
+                let e = crate::eval::crossing::carried_unwind_error();
+                heap.truncate_roots(drive.roots_on_entry);
+                State::Unwind(e)
+            }
             // A compiled `(panic ...)`/`throw` unwound out as a Rust panic and
             // `catch_compiled_panic` turned it back into an error. None of the
             // pops that balance the crossing ran, hence the truncate.

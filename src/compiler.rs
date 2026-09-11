@@ -661,20 +661,6 @@ pub const SOURCE: &str = r#"
 (defsignature compile-var
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> Option<Sexpr>)
   llvm-value)
-(defsignature emit-rt-call
-  (llvm-builder llvm-module llvm-function string string llvm-value i32 Option<llvm-basic-block>)
-  llvm-value)
-;;
-;; Not part of the ring — just written after its caller.
-(defsignature emit-direct-call
-  (llvm-builder llvm-module llvm-function llvm-function llvm-value i32 Option<llvm-basic-block>)
-  llvm-value)
-(defsignature emit-lisp-call
-  (llvm-builder llvm-module llvm-function llvm-function llvm-value i32 Option<llvm-basic-block>)
-  llvm-value)
-(defsignature emit-lisp-call-with-env
-  (llvm-builder llvm-module llvm-function llvm-function llvm-value i32 llvm-value i32 Option<llvm-basic-block>)
-  llvm-value)
 
 
 ;; `sexpr-str`/`sexpr-bool`/`sexpr-sym-name`/`sexpr-i32` — the island's typed
@@ -1622,7 +1608,7 @@ pub const SOURCE: &str = r#"
   (let ((args-ptr (alloca-args builder 2)))
     (store-arg builder args-ptr 0 x)
     (store-arg builder args-ptr 1 y)
-    (emit-direct-call builder m cur-fn (get-function m fname) args-ptr 2 protect)))
+    (build-call builder (get-function m fname) args-ptr 2)))
 
 ;; [`raising-binop-call`] with the integer shims' third `wsig` operand —
 ;; `rt_int_div`/`rt_int_mod`, the two that both raise *and* need to know the
@@ -1632,7 +1618,7 @@ pub const SOURCE: &str = r#"
     (store-arg builder args-ptr 0 x)
     (store-arg builder args-ptr 1 y)
     (store-arg builder args-ptr 2 (const-word builder wsig))
-    (emit-direct-call builder m cur-fn (get-function m fname) args-ptr 3 protect)))
+    (build-call builder (get-function m fname) args-ptr 3)))
 
 ;; Counts a plain `Sexpr` list's elements — used to size the `i64*` args
 ;; array a direct call needs (`compile-apply`'s `alloca-args`/`build-call`),
@@ -2496,7 +2482,7 @@ pub const SOURCE: &str = r#"
                       (store-arg builder args-ptr 0 a)
                       (store-arg builder args-ptr 1 b)
                       (store-arg builder args-ptr 2 c)
-                      (emit-direct-call builder m cur-fn (get-function m "rt_str_substring") args-ptr 3 protect)))
+                      (build-call builder (get-function m "rt_str_substring") args-ptr 3)))
                    (else (panic (append "compile-assoc: unsupported str method " method)))))))))
         ((if (int-receiver-type? type-name) (int-native-method? method) false)
          (let ((a (load-raw builder ops 0))
@@ -2527,7 +2513,7 @@ pub const SOURCE: &str = r#"
              ("int->char"
               (let ((args-ptr (alloca-args builder 1)))
                 (store-arg builder args-ptr 0 a)
-                (emit-direct-call builder m cur-fn (get-function m "rt_int_to_char") args-ptr 1 protect)))
+                (build-call builder (get-function m "rt_int_to_char") args-ptr 1)))
              ;; A width cast is the normalization on its own: cut the value to
              ;; the *target*'s width and re-extend. `int-wsig` reads the target
              ;; out of the method name, which is the only place it is written.
@@ -2907,7 +2893,7 @@ pub const SOURCE: &str = r#"
 ;; toplevel `defun`) because it closes over `m` and
 ;; mutually recurses with `compile-call-args`.
 (defun compile-assoc-user ((m llvm-module) (builder llvm-builder) (cur-fn llvm-function) (protect Option<llvm-basic-block>) (type-name string) (method string) (args-ptr llvm-value) (argc i32)) llvm-value
-    (emit-lisp-call builder m cur-fn (get-function m (append "tl_" (append type-name (append "::" method)))) args-ptr argc protect))
+    (coroutine-call builder m (build-fn-address builder (get-function m (append "tl_" (append type-name (append "::" method))))) args-ptr argc))
 
 ;; `(llvm-op opid (kind . arg)...)` — an `llvm-*`/
 ;; native-`Scope<V>` builtin method call
@@ -3028,7 +3014,7 @@ pub const SOURCE: &str = r#"
           (store-arg builder call-ptr 1 (const-word builder slot))
           (store-arg builder call-ptr 2 (build-ptr-to-int builder args-ptr))
           (store-arg builder call-ptr 3 (const-word builder argc))
-          (let ((result (emit-rt-call builder m cur-fn "rt_dyn_call" "rt_protected_dyn_call" call-ptr 4 protect)))
+          (let ((result (build-call builder (get-function m "rt_dyn_call") call-ptr 4)))
             result)))))
 
 ;; Fills a previously-`alloca-args`'d array, one
@@ -3055,45 +3041,59 @@ pub const SOURCE: &str = r#"
 ;; then every function below emits exactly what it always emitted — not one
 ;; extra instruction.
 ;;
-;; The unwind is caught in a *Rust* frame, at the call, rather than in an LLVM
-;; landing pad. It has to be: stopping a Rust panic means consuming its
-;; exception object, and only `std::panic::catch_unwind` can do that (see the
-;; catch/throw section of `typelisp-rt` for the full reasoning). So inside a
-;; region a call goes through one of the `rt_protected_*` trampolines, and what
-;; follows it is `check-unwind` — an ordinary conditional branch.
+;; **Calls emit nothing for it.** The frame says where its region lands, in
+;; `FRAME_HANDLER_SLOT` (`install-handler`), and the driver reads that slot
+;; when a frame unwinds: a handler is resumed exactly the way a call's
+;; continuation is resumed, through the same `pc` and the same dispatch chain.
+;; So a call inside a region is the same instruction sequence as a call
+;; outside one, and `throw`/`panic` are the same call to `rt_throw`/`rt_panic`
+;; they always were — what changed is who catches the Rust panic they raise
+;; (the driver, at the activation boundary, once) and how it finds the frame
+;; that wants it (the slot, not a trampoline's return flag).
 ;;
-;; **`break`/`return` never consult `protect`.** A static exit's destination is
-;; settled by the checker; it stays the `br` to the loop's exit block it has
-;; always been, and the body of a `catch` stays in this same function precisely
-;; so that it can.
+;; The slot is written at four kinds of place, and the rule for all four is
+;; the same — *the handler that is installed is the one for the region the
+;; builder is currently emitting into*:
+;;
+;;   - entering a region (`compile-catch`/`compile-unwind-protect`): its pad
+;;   - the top of a pad: the **enclosing** region, because a cleanup is not
+;;     protected by its own `unwind-protect` (CLHS) and a declining `catch`
+;;     has already left its own
+;;   - the ordinary path out of a region: the enclosing region
+;;   - the top of a block a *static* exit lands in (a loop's exit, a named
+;;     block's exit, each cleanup copy): the region that block is written in
+;;
+;; That last one is the only new obligation a runtime slot brings that a
+;; compile-time-only `protect` did not have. A `break` out of a `catch` body
+;; is a `br` the checker settled, and it would otherwise leave the slot
+;; naming a pad whose region control has already left — so a later throw
+;; would land in a `catch` that had already finished, store into its merge
+;; slot, and re-run everything after it.
 
-;; The check that follows every call emitted inside a protected region: ask
-;; whether that call ended in a caught unwind and, if so, branch to the
-;; region's dispatch block. Leaves the builder positioned on the continuation
-;; block, so the caller goes on emitting as if nothing had happened. A no-op
-;; outside a region.
-(defun check-unwind ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (protect Option<llvm-basic-block>)) ()
+
+;; Writes the frame's unwind handler slot: the region named by `protect`, or
+;; nothing when there is no enclosing region.
+;;
+;; One defun rather than the two builtins inline, because every caller has an
+;; `Option<llvm-basic-block>` in hand and none of them cares which of the two
+;; it turns into.
+(defun install-handler ((builder llvm-builder) (m llvm-module) (protect Option<llvm-basic-block>)) ()
     (match protect
-      ((Some pad)
-       (let* ((pending (build-call builder (get-function m "rt_unwind_pending") (alloca-args builder 0) 0))
-              (cont (append-block cur-fn "unwind-check")))
-         (build-cond-br builder pending pad cont)
-         (position-at-end builder cont)))
-      (None ())))
+      ((Some pad) (frame-set-handler builder m pad))
+      (None (frame-clear-handler builder m))))
 
-;; Where an unwind that this region does not stop goes next: the enclosing
-;; region's dispatch block, or — when this was the outermost region in the
-;; function — back to the unwinder, to keep travelling towards a `catch` in
-;; some caller (compiled or interpreted).
+;; Says where an unwind this frame declares a handler for goes when the
+;; handler declines it: to the enclosing region's dispatch block, which is a
+;; plain `br` because that block is in this same function — or, when this was
+;; the outermost region here, out of the frame entirely with `STATUS_UNWIND`,
+;; and the driver goes on looking below.
 ;;
-;; `rt_resume_unwind` never returns; the `build-ret` after it is unreachable
-;; and exists only because LLVM requires the block to end in a terminator.
+;; The handler slot is *already* the enclosing region's by the time control
+;; gets here: each pad installs it on entry. So there is nothing to restore.
 (defun emit-unwind-onward ((builder llvm-builder) (m llvm-module) (protect Option<llvm-basic-block>)) ()
     (match protect
       ((Some outer) (build-br builder outer))
-      (None
-       (let ((ignored (build-call builder (get-function m "rt_resume_unwind") (alloca-args builder 0) 0)))
-         (build-ret builder (const-word builder 0))))))
+      (None (coroutine-unwind builder m))))
 
 ;; Leaves an `unwind-protect`'s cleanup on the *static* exit path — the one a
 ;; `break`/`return` took — once that cleanup has run.
@@ -3116,94 +3116,10 @@ pub const SOURCE: &str = r#"
          ((Some eb) (build-br builder eb))
          (None (panic "emit-static-exit-onward: not inside a loop"))))))
 
-;; A direct call to a statically-known function.
-;;
-;; Inside a region the target is *handed to* `rt_protected_call` as a value
-;; (`build-fn-address`) instead of being the callee of the call instruction,
-;; because the frame that catches has to be the one making the call.
-(defun emit-direct-call ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (target llvm-function) (args-ptr llvm-value) (argc i32) (protect Option<llvm-basic-block>)) llvm-value
-    (match protect
-      ((Some pad)
-       (let ((shim (alloca-args builder 3)))
-         (store-arg builder shim 0 (build-fn-address builder target))
-         (store-arg builder shim 1 (build-ptr-to-int builder args-ptr))
-         (store-arg builder shim 2 (const-word builder argc))
-         (let ((result (build-call builder (get-function m "rt_protected_call") shim 3)))
-           (check-unwind builder m cur-fn protect)
-           result)))
-      (None (build-call builder target args-ptr argc))))
 
-;; A call to another compiled Lisp function.
-;;
-;; Not an LLVM `call`: the callee is *named to the driver* and this function
-;; hands control back, to be entered again when the answer is ready. That is
-;; what makes the depth of a Lisp recursion cost the heap rather than the
-;; machine stack, and what will let a call suspend (C3).
-;;
-;; The block is split underneath this. Everything after the call is emitted
-;; into a resume block that only the pc dispatch chain branches to, so **no
-;; LLVM register may cross it** -- which is why arguments live in frame slots
-;; (`frame-arg-slots`) and why anything else that outlives a call must too.
-;;
-;; Inside a `catch`/`unwind-protect` region the call is driven to completion on
-;; a stack of its own instead (`rt_protected_drive`). A region needs the frame
-;; that catches to be the one making the call, and under the driver the
-;; caller's frame is a heap object with no machine frame to unwind into. Phase
-;; C4 makes unwinding a driver status and this leg goes away.
-(defun emit-lisp-call ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (target llvm-function) (args-ptr llvm-value) (argc i32) (protect Option<llvm-basic-block>)) llvm-value
-    (match protect
-      ((Some pad)
-       (let ((shim (alloca-args builder 3)))
-         (store-arg builder shim 0 (build-fn-address builder target))
-         (store-arg builder shim 1 (build-ptr-to-int builder args-ptr))
-         (store-arg builder shim 2 (const-word builder argc))
-         (let ((result (build-call builder (get-function m "rt_protected_drive") shim 3)))
-           (check-unwind builder m cur-fn protect)
-           result)))
-      (None (coroutine-call builder m (build-fn-address builder target) args-ptr argc))))
 
-;; [`emit-lisp-call`] for a callee that also has captures -- a `lambda` body or
-;; a `labels` sibling reached under the captures-carrying convention.
-(defun emit-lisp-call-with-env ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (target llvm-function) (args-ptr llvm-value) (argc i32) (env-ptr llvm-value) (env-len i32) (protect Option<llvm-basic-block>)) llvm-value
-    (match protect
-      ((Some pad)
-       (let ((shim (alloca-args builder 5)))
-         (store-arg builder shim 0 (build-fn-address builder target))
-         (store-arg builder shim 1 (build-ptr-to-int builder args-ptr))
-         (store-arg builder shim 2 (const-word builder argc))
-         (store-arg builder shim 3 (build-ptr-to-int builder env-ptr))
-         (store-arg builder shim 4 (const-word builder env-len))
-         (let ((result (build-call builder (get-function m "rt_protected_drive_env") shim 5)))
-           (check-unwind builder m cur-fn protect)
-           result)))
-      (None (coroutine-call-env builder m (build-fn-address builder target) args-ptr argc env-ptr env-len))))
 
-;; Applying a function *value*. The protected branch builds `rt_apply_any`'s
-;; own three-slot argument array by hand — the same one `build-closure-apply`
-;; builds internally — so the call can go to the protected entry point
-;; instead. This is the case a throw raised by an *interpreted* callee comes
-;; back through.
-(defun emit-closure-apply ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (closure llvm-value) (args-ptr llvm-value) (argc i32) (protect Option<llvm-basic-block>)) llvm-value
-    (match protect
-      ((Some pad)
-       (let ((shim (alloca-args builder 3)))
-         (store-arg builder shim 0 closure)
-         (store-arg builder shim 1 (build-ptr-to-int builder args-ptr))
-         (store-arg builder shim 2 (const-word builder argc))
-         (let ((result (build-call builder (get-function m "rt_protected_apply_any") shim 3)))
-           (check-unwind builder m cur-fn protect)
-           result)))
-      (None (build-closure-apply builder m closure args-ptr argc))))
 
-;; A call to a runtime entry point that may unwind, where the protected form
-;; takes the very same arguments — `rt_dyn_call`, `rt_panic`, `rt_throw`.
-(defun emit-rt-call ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (plain string) (guarded string) (args-ptr llvm-value) (argc i32) (protect Option<llvm-basic-block>)) llvm-value
-    (match protect
-      ((Some pad)
-       (let ((result (build-call builder (get-function m guarded) args-ptr argc)))
-         (check-unwind builder m cur-fn protect)
-         result))
-      (None (build-call builder (get-function m plain) args-ptr argc))))
 
 ;; that reclaims it before the call ever happens) —
 ;; the call-argument counterpart of
@@ -3259,11 +3175,11 @@ pub const SOURCE: &str = r#"
         ((Some target)
          (let ((env-len (sexpr-list-length captured)))
            (if (eq env-len 0)
-               (let ((result (emit-lisp-call builder m cur-fn target args-ptr argc protect)))
+               (let ((result (coroutine-call builder m (build-fn-address builder target) args-ptr argc)))
                  result)
                (let ((env-ptr (alloca-args builder env-len)))
                  (compile-env-args m fn-name builder env fn-env captured env-ptr captured 0)
-                 (let ((result (emit-lisp-call-with-env builder m cur-fn target args-ptr argc env-ptr env-len protect)))
+                 (let ((result (coroutine-call-env builder m (build-fn-address builder target) args-ptr argc env-ptr env-len)))
                    result)))))
         (None (panic (append "compile-apply: no direct-callable function named " nm))))))
 
@@ -3313,26 +3229,22 @@ pub const SOURCE: &str = r#"
 ;; crossing hands one machine word through and only the representation says
 ;; what it is.
 ;;
-;; **Refused inside a `catch`/`unwind-protect` region.** In one, a call is
-;; driven to completion on a nested driver standing on the machine stack
-;; (`emit-lisp-call`'s `rt_protected_drive`), and a machine frame is exactly
-;; what cannot be put down. Saying so here makes it a compile error naming the
-;; form, rather than a driver refusing at run time somewhere below. Phase C4
-;; makes unwinding a driver status, and this leg goes with it.
+;; Nothing special inside a `catch`/`unwind-protect` region. This used to be
+;; refused there, because a call in a region was driven to completion on a
+;; nested driver standing on the machine stack — and a machine frame is
+;; exactly what cannot be put down. C4 took that nested driver away: a region
+;; is a slot on the frame now, so a call in one is an ordinary driver round
+;; trip and suspends like any other.
 (defun compile-suspend ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (match protect
-      ((Some pad)
-       (panic "compile: a suspending builtin inside a catch/unwind-protect region cannot be compiled yet -- the protected call is driven on the machine stack, which cannot be put down (Phase C4)"))
-      (None
-       (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
-              (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
-              (arg-forms (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))
-              (argc (sexpr-list-length arg-forms))
-              (args-ptr (frame-arg-slots builder m 0 arg-forms))
-              (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
-              (ignored (build-call builder (get-function m nm) args-ptr argc))
-              (raw (coroutine-suspend builder m)))
-         (if (eq kind 0) raw (compile-sexpr-field builder m raw kind 0))))))
+    (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
+           (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+           (arg-forms (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))
+           (argc (sexpr-list-length arg-forms))
+           (args-ptr (frame-arg-slots builder m 0 arg-forms))
+           (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
+           (ignored (build-call builder (get-function m nm) args-ptr argc))
+           (raw (coroutine-suspend builder m)))
+      (if (eq kind 0) raw (compile-sexpr-field builder m raw kind 0))))
 
 (defun has-prefix ((s string) (p string)) bool
     (if (< (length s) (length p)) false (equal (substring s 0 (length p)) p)))
@@ -3364,8 +3276,8 @@ pub const SOURCE: &str = r#"
            ;; because a suspension has a result representation to carry and a
            ;; call node has room only for its arguments'.
            (result (if (has-prefix nm "rt_")
-                       (emit-direct-call builder m cur-fn (get-function m nm) args-ptr argc protect)
-                       (emit-lisp-call builder m cur-fn (get-function m nm) args-ptr argc protect))))
+                       (build-call builder (get-function m nm) args-ptr argc)
+                       (coroutine-call builder m (build-fn-address builder (get-function m nm)) args-ptr argc))))
       result))
 
 
@@ -3399,7 +3311,7 @@ pub const SOURCE: &str = r#"
            (argc (sexpr-list-length arg-forms))
            (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
-           (result (emit-closure-apply builder m cur-fn (load-raw builder closure-slot 0) args-ptr argc protect)))
+           (result (build-closure-apply builder m (load-raw builder closure-slot 0) args-ptr argc)))
       result))
 
 ;; `compile-if`'s one helper (if/let/comparisons,
@@ -3887,6 +3799,10 @@ pub const SOURCE: &str = r#"
           ()
           (build-br builder loop-block))
       (position-at-end builder exit-block)
+      ;; A `break` out of a `catch`/`unwind-protect` inside the body is a `br`
+      ;; straight to here, leaving the handler slot naming a region control
+      ;; has left. This block is written in `protect`, so that is the answer.
+      (install-handler builder m protect)
       (load-raw builder slot 0)))
 
 ;; Compiles a `loop` body's statement sequence one
@@ -3979,6 +3895,8 @@ pub const SOURCE: &str = r#"
       (pop-frame block-exits)
       (pop-frame block-slots)
       (position-at-end builder exit-block)
+      ;; `compile-loop`'s reason, for `return-from` instead of `break`.
+      (install-handler builder m protect)
       (load-raw builder slot 0)))
 
 ;; `(return-from NAME is-fn VALUE)` — leave the enclosing `block` of that name.
@@ -4047,6 +3965,7 @@ pub const SOURCE: &str = r#"
             ((Some cx)
              (progn
                (position-at-end builder cx)
+               (install-handler builder m protect)
                (let ((targs (alloca-args builder 1)))
                  (store-arg builder targs 0 (load-raw builder root-base-slot 0))
                  (let ((truncated (build-call builder (get-function m "rt_truncate_sexpr_roots") targs 1))) ()))
@@ -5116,7 +5035,7 @@ pub const SOURCE: &str = r#"
                        (let ((args-ptr (alloca-args builder 2)))
                          (store-arg builder args-ptr 0 (load-raw builder v-slot 0))
                          (store-arg builder args-ptr 1 (load-raw builder idx-slot 0))
-                         (let ((raw (emit-direct-call builder m cur-fn (get-function m "rt_struct_field_get") args-ptr 2 protect)))
+                         (let ((raw (build-call builder (get-function m "rt_struct_field_get") args-ptr 2)))
                            (compile-sexpr-field builder m raw kind 0)))
                        (let* ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
                               (x (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup x-form))
@@ -5125,7 +5044,7 @@ pub const SOURCE: &str = r#"
                          (store-arg builder args-ptr 0 (load-raw builder v-slot 0))
                          (store-arg builder args-ptr 1 (load-raw builder idx-slot 0))
                          (store-arg builder args-ptr 2 tagged-x)
-                         (let ((ignored (emit-direct-call builder m cur-fn (get-function m "rt_struct_field_set") args-ptr 3 protect)))
+                         (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
                            (const-word builder 0)))))))))))
 
 ;; `(hashtable-op method key-kind val-kind ht-form
@@ -5337,11 +5256,19 @@ pub const SOURCE: &str = r#"
     (let* ((tag-form (sexpr-car (sexpr-cdr e)))
            (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (body (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
+           ;; The same repr as `kind`, asked the other question: `kind` says
+           ;; how to untag the thrown word, `bkind` whether the merge slot
+           ;; holding it may be followed by the collector.
+           (bkind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
            ;; Spilled for the same reason as `root-base-slot`: `catch-pad`
            ;; compares against this tag, and the body between here and there
            ;; can suspend.
            (tag-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup tag-form)))
-           (slot (alloca-args builder 1))
+           ;; A frame slot, not an `alloca`: the pad is a *dispatch target*
+           ;; now, reached from the prologue in a later activation, and an
+           ;; `alloca` emitted here does not dominate it -- nor would its
+           ;; machine storage still exist.
+           (slot (binding-slot builder m bkind))
            ;; Spilled, not kept in a register: the protected body is compiled
            ;; below and can call, which ends this activation -- and the pad
            ;; that reads this depth runs in a later one.
@@ -5350,12 +5277,22 @@ pub const SOURCE: &str = r#"
            (claim (append-block cur-fn "catch-claim"))
            (onward (append-block cur-fn "catch-onward"))
            (merge (append-block cur-fn "catch-merge"))
+           ;; From here to the end of the body, an unwind reaching this frame
+           ;; lands in `pad`. Installed after the tag is compiled: the tag
+           ;; form is evaluated before the region opens.
+           (installed (install-handler builder m (Option::some pad)))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots (Option::some pad) exit-cleanup body)))
       (if (block-terminated? builder)
           ()
-          (let ((ignored (store-arg builder slot 0 v)))
+          (let* ((restored (install-handler builder m protect))
+                 (ignored (store-arg builder slot 0 v)))
             (build-br builder merge)))
       (position-at-end builder pad)
+      ;; The region is over the moment its pad runs, whichever way the pad
+      ;; goes: a claimed throw rejoins ordinary flow and a declined one keeps
+      ;; travelling. Either way what protects this frame from here is whatever
+      ;; encloses this `catch`.
+      (install-handler builder m protect)
       (let ((truncate-args (alloca-args builder 1)))
         (store-arg builder truncate-args 0 (load-raw builder root-base-slot 0))
         (let ((ignored2 (build-call builder (get-function m "rt_truncate_sexpr_roots") truncate-args 1))) ()))
@@ -5403,7 +5340,7 @@ pub const SOURCE: &str = r#"
            (args-ptr (alloca-args builder 2)))
       (store-arg builder args-ptr 0 (load-raw builder tag-slot 0))
       (store-arg builder args-ptr 1 tagged)
-      (emit-rt-call builder m cur-fn "rt_throw" "rt_protected_throw" args-ptr 2 protect)))
+      (build-call builder (get-function m "rt_throw") args-ptr 2)))
 
 ;; `(unwind-protect protected cleanup)` — run `protected`, then `cleanup`,
 ;; whichever way `protected` left.
@@ -5448,6 +5385,8 @@ pub const SOURCE: &str = r#"
            (cleanups (the Scope<llvm-basic-block> (scope::new)))
            (pushed (push-frame block-exits))
            (rebound (install-block-cleanups cur-fn block-names block-exits cleanups))
+           ;; `compile-catch`'s install, for the protected body.
+           (installed (install-handler builder m (Option::some pad)))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots (Option::some pad) xexit protected-form))
            ;; Popped before either ordinary copy of the cleanup is compiled: a
            ;; cleanup is not protected by its own `unwind-protect` (CLHS), so a
@@ -5455,12 +5394,17 @@ pub const SOURCE: &str = r#"
            (popped (pop-frame block-exits)))
       (if (block-terminated? builder)
         ()
-        (let* ((ignored (store-arg builder slot 0 v))
+        (let* ((restored (install-handler builder m protect))
+               (ignored (store-arg builder slot 0 v))
                (ignored2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup cleanup-form)))
           (if (block-terminated? builder)
               ()
               (build-br builder merge))))
     (position-at-end builder pad)
+    ;; A cleanup is not protected by its own `unwind-protect` (CLHS), so what
+    ;; protects this frame while the cleanup runs is the enclosing region --
+    ;; and a throw raised in the cleanup replaces the exit already in flight.
+    (install-handler builder m protect)
     (let ((truncate-args (alloca-args builder 1)))
       (store-arg builder truncate-args 0 (load-raw builder root-base-slot 0))
       (let ((ignored3 (build-call builder (get-function m "rt_truncate_sexpr_roots") truncate-args 1))) ()))
@@ -5470,7 +5414,8 @@ pub const SOURCE: &str = r#"
           (emit-unwind-onward builder m protect)))
     (match xexit
       ((Some xe)
-       (let ((ignored5 (position-at-end builder xe)))
+       (let* ((ignored5 (position-at-end builder xe))
+              (restored2 (install-handler builder m protect)))
          (let ((xargs (alloca-args builder 1)))
            (store-arg builder xargs 0 (load-raw builder root-base-slot 0))
            (let ((ignored6 (build-call builder (get-function m "rt_truncate_sexpr_roots") xargs 1))) ()))
@@ -5510,7 +5455,7 @@ pub const SOURCE: &str = r#"
            (msg-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup msg-form))
            (args-ptr (alloca-args builder 1)))
       (store-arg builder args-ptr 0 msg-v)
-      (emit-rt-call builder m cur-fn "rt_panic" "rt_protected_panic" args-ptr 1 protect)))
+      (build-call builder (get-function m "rt_panic") args-ptr 1)))
 
 ;; `(go (2 . HEAD) (kind . E)...)` -- start a task.
 ;; Every operand is compiled here, in the running
@@ -5529,7 +5474,7 @@ pub const SOURCE: &str = r#"
            (argc (sexpr-list-length arg-forms))
            (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
-           (result (emit-rt-call builder m cur-fn "rt_go" "rt_protected_go" args-ptr argc protect)))
+           (result (build-call builder (get-function m "rt_go") args-ptr argc)))
       result))
 
 (defun compile-function ((m llvm-module) (name string) (param-names Option<Sexpr>) (body Option<Sexpr>)) llvm-module

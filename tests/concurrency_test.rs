@@ -65,14 +65,6 @@ fn compile_err_at_runtime(src: &str) -> String {
     }
 }
 
-/// What `(compile ...)` refuses with — an evaluation error, not a check error.
-fn compile_err(src: &str) -> String {
-    match run_compiled(src) {
-        Ok(_) => panic!("expected the compile to be refused"),
-        Err(e) => e.to_string(),
-    }
-}
-
 /// [`text`] for a source that compiles something.
 fn text_compiled(src: &str) -> String {
     let (h, v) = run_compiled(src).expect("eval failed");
@@ -615,4 +607,83 @@ fn a_compiled_sleep_refuses_a_negative_wait() {
            (nap)"#,
     );
     assert!(e.contains("not a non-negative number of seconds"), "got {}", e);
+}
+
+// ---- suspension inside a protected region (C4) ---------------------------
+
+/// A compiled `yield` **inside a `catch`** suspends.
+///
+/// Before C4 this was a compile error naming the form: a call written inside a
+/// region was driven to completion on a nested driver standing on the machine
+/// stack, and a machine frame is exactly what cannot be put down. C4 made the
+/// region a slot on the frame (`FRAME_HANDLER_SLOT`), so a call in one is an
+/// ordinary driver round trip and suspends like any other.
+///
+/// `ababab` is `a_compiled_yield_interleaves_two_tasks`'s assertion with the
+/// suspension one region deeper.
+#[test]
+fn a_compiled_yield_inside_a_catch_suspends() {
+    assert_eq!(
+        text_compiled(
+            r#"(defvar (trail string) "")
+               (defun tick ((name string) (n i32)) i32
+                 (catch 'unused
+                   (progn
+                     (dotimes (i n)
+                       (setf trail (append trail name))
+                       (yield))
+                     0)))
+               (compile tick)
+               (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
+                 (progn (wait a) (wait b)))
+               trail"#
+        ),
+        "ababab"
+    );
+}
+
+/// A compiled `sleep` inside an `unwind-protect` still runs the cleanup, and
+/// runs it when the task comes *back* rather than when it left.
+///
+/// The trail is what separates those two: `b` gets its whole turn while `a`
+/// sleeps, so `cleanup` landing after it means the cleanup ran on the resumed
+/// activation. A cleanup that ran at the suspension would read
+/// `a cleanup b`.
+#[test]
+fn a_compiled_sleep_inside_an_unwind_protect_runs_the_cleanup_after() {
+    assert_eq!(
+        text_compiled(
+            r#"(defvar (trail string) "")
+               (defun slow () i32
+                 (unwind-protect
+                   (progn (setf trail (append trail "a")) (sleep 0.02) 1)
+                   (setf trail (append trail " cleanup"))))
+               (defun quick () i32 (progn (setf trail (append trail " b")) 2))
+               (compile slow)
+               (let ((a (go (slow))) (b (go (quick))))
+                 (progn (wait a) (wait b)))
+               trail"#
+        ),
+        "a b cleanup"
+    );
+}
+
+/// A `throw` raised *after* a suspension is still caught by the `catch` the
+/// task suspended inside.
+///
+/// The handler is a frame slot and the frame outlives the activation, so this
+/// is the assertion that it does. A handler kept in a machine register, or a
+/// landing pad belonging to the activation that suspended, would both lose it
+/// here.
+#[test]
+fn a_compiled_throw_after_a_suspension_is_still_caught() {
+    assert_eq!(
+        int_compiled(
+            r#"(defun guarded () i32
+                 (catch 'done (progn (yield) (throw 'done 41))))
+               (compile guarded)
+               (wait (go (guarded)))"#
+        ),
+        41
+    );
 }

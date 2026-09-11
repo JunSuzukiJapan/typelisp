@@ -139,6 +139,9 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "coroutine-begin" => Some(llvm_builder_coroutine_begin(args)),
             "coroutine-call" => Some(llvm_builder_coroutine_call(args)),
             "coroutine-suspend" => Some(llvm_builder_coroutine_suspend(args)),
+            "coroutine-unwind" => Some(llvm_builder_coroutine_unwind(args)),
+            "frame-set-handler" => Some(llvm_builder_frame_set_handler(args)),
+            "frame-clear-handler" => Some(llvm_builder_frame_clear_handler(args)),
             "coroutine-call-env" => Some(llvm_builder_coroutine_call_env(args)),
             "coroutine-end" => Some(llvm_builder_coroutine_end(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
@@ -893,8 +896,13 @@ struct CoroCtx {
     /// whole chain.
     pc: IntValue<'static>,
     /// Every call site's id and the block it resumes into, in the order they
-    /// were claimed.
+    /// were claimed. A region's dispatch block is in here too: the driver
+    /// resumes a handler exactly the way it resumes a call.
     resumes: Vec<(u64, BasicBlock<'static>)>,
+    /// The id each region's dispatch block was given, so the many places that
+    /// install the same handler (its entry, its exits, each cleanup copy) all
+    /// name one id.
+    handlers: Vec<(BasicBlock<'static>, u64)>,
     /// The `br` ending `coro.fresh`, to insert once-per-activation setup
     /// before — a slot's mask bit is a fact about the frame, so it belongs on
     /// the path that makes the frame, not on every resume.
@@ -1372,14 +1380,16 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
                 data,
                 frame,
                 size_store,
-                // Slot 0 is the driver protocol's value slot, never a local.
-                next: 1,
+                // Slots 0 and 1 are the driver protocol's own — the value in
+                // flight and the unwind handler — and never locals.
+                next: 2,
                 coro: Some(CoroCtx {
                     function,
                     body,
                     dispatch,
                     pc,
                     resumes: Vec::new(),
+                    handlers: Vec::new(),
                     fresh_end,
                     fresh_frame: made,
                     prologue_end,
@@ -1471,6 +1481,91 @@ fn llvm_builder_coroutine_suspend(args: &[Value]) -> Result<Value, EvalError> {
         }
     });
     Ok(llvm_value_value(result))
+}
+
+/// `(coroutine-unwind builder m)` — end the activation with
+/// `STATUS_UNWIND`.
+///
+/// What a region that declines the unwind in flight does when there is no
+/// enclosing region left in this function: the driver pops this frame,
+/// cutting its roots back, and goes on looking below. The dynamic half of the
+/// island's `emit-unwind-onward` — the static half is still a `br` to the
+/// enclosing dispatch block, because that one is in this same function and
+/// needs no driver at all.
+///
+/// No `rt_pop_sexpr_root` to match the prologue's push, unlike
+/// [`llvm_builder_coroutine_end`]: the driver truncates the root stack to the
+/// depth this frame was entered at, which undoes that push and everything
+/// the frame pushed after it in one step.
+fn llvm_builder_coroutine_unwind(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    expect_llvm_module(&args[1])?;
+    let ctx = crate::compile::llvm_context();
+    let b = builder.borrow();
+    b.build_return(Some(&ctx.i64_type().const_int(typelisp_abi::STATUS_UNWIND as u64, false)))
+        .map_err(|e| EvalError::Internal(format!("coroutine-unwind: ret: {}", e)))?;
+    Ok(Value::Empty)
+}
+
+/// `(frame-set-handler builder m pad)` — say that an unwind reaching this
+/// frame resumes at `pad`.
+fn llvm_builder_frame_set_handler(args: &[Value]) -> Result<Value, EvalError> {
+    let pad = expect_llvm_basic_block(&args[2])?;
+    frame_handler(args, Some(pad), "frame-set-handler")
+}
+
+/// `(frame-clear-handler builder m)` — say that this frame catches nothing,
+/// which is what leaving a region means.
+fn llvm_builder_frame_clear_handler(args: &[Value]) -> Result<Value, EvalError> {
+    frame_handler(args, None, "frame-clear-handler")
+}
+
+/// Writes the frame's handler slot, giving `pad` a resume id the first time it
+/// is named.
+///
+/// The id goes in the same dispatch chain a call's resume point goes in, and
+/// the same `pc` field names it — a handler and a resume point are the same
+/// thing from the frame's side: a place to come back to that the frame's own
+/// machine activation will not be around for.
+fn frame_handler(args: &[Value], pad: Option<BasicBlock<'static>>, what: &str) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    expect_llvm_module(&args[1])?;
+    let ctx = crate::compile::llvm_context();
+    let i64t = ctx.i64_type();
+    let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
+    let key = builder_key(&builder);
+
+    let (data, id) = FRAME_CTXS.with(|c| {
+        let mut map = c.borrow_mut();
+        let f = map
+            .get_mut(&key)
+            .ok_or_else(|| EvalError::Internal(format!("{}: no frame is open on this builder", what)))?;
+        let coro = f
+            .coro
+            .as_mut()
+            .ok_or_else(|| EvalError::Internal(format!("{}: this function is not a coroutine", what)))?;
+        let id = match pad {
+            None => 0,
+            Some(block) => match coro.handlers.iter().find(|(b, _)| *b == block) {
+                Some((_, id)) => *id,
+                None => {
+                    let id = coro.resumes.len() as u64 + 1;
+                    coro.resumes.push((id, block));
+                    coro.handlers.push((block, id));
+                    id
+                }
+            },
+        };
+        Ok::<_, EvalError>((f.data, id))
+    })?;
+
+    let b = builder.borrow();
+    let slot = unsafe {
+        b.build_gep(i64t, data, &[i64t.const_int(typelisp_abi::FRAME_HANDLER_SLOT as u64, false)], "handler_slot")
+            .map_err(|e| err("gep", e.to_string()))?
+    };
+    b.build_store(slot, i64t.const_int(id, false)).map_err(|e| err("store", e.to_string()))?;
+    Ok(Value::Empty)
 }
 
 /// `(coroutine-call-env builder m target args-ptr argc env-ptr env-len)` —

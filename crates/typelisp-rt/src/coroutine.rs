@@ -38,7 +38,7 @@
 //! was making.
 
 use typelisp_abi::call_state;
-use typelisp_abi::{decode, STATUS_CALL, STATUS_RETURN, STATUS_SUSPEND};
+use typelisp_abi::{decode, STATUS_CALL, STATUS_RETURN, STATUS_SUSPEND, STATUS_UNWIND};
 use typelisp_mem::{BoxId, Heap, Value};
 
 // The value slot holds a **raw word**, and the driver never looks inside it.
@@ -50,7 +50,16 @@ use typelisp_mem::{BoxId, Heap, Value};
 
 /// A coroutine-ABI compiled function: takes a frame (or `0` on first entry),
 /// returns a status word.
-pub type CoroutineFn = unsafe extern "C" fn(i64) -> i64;
+///
+/// `"C-unwind"`, like every other compiled-body pointer type in the tree
+/// (`CompiledSignature`, `ApplyInterpretedFn`, `DynSlotClosureFn`): a body
+/// can reach `rt_panic`/`rt_throw`, which unwind, and a `"C"` pointer
+/// promises the caller they cannot. This said `"C"` from C2c until C4 and
+/// happened to work — the call site LLVM emits for a `nounwind` callee still
+/// has a walkable frame — but it was a promise the callee did not keep, and
+/// `catch_unwind` at the driver's boundary is only meaningful if the unwind
+/// is allowed to get there.
+pub type CoroutineFn = unsafe extern "C-unwind" fn(i64) -> i64;
 
 /// Why a drive stopped short of an answer.
 #[derive(Debug, PartialEq, Eq)]
@@ -58,8 +67,10 @@ pub enum Paused {
     /// A frame suspended. It is still on the stack, and driving again resumes
     /// it — this is what a scheduler switches away on.
     Suspended,
-    /// A frame is unwinding. Phase C4 gives this a payload; for now it only
-    /// says that no compiled function produces one yet.
+    /// An unwind passed the outermost frame this driver owned without
+    /// finding a handler. The chain is gone — every frame of it has been
+    /// popped and its roots cut back — and what is unwinding is parked for
+    /// whoever drove to carry on with ([`resume_unwinding`]).
     Unwinding,
 }
 
@@ -69,7 +80,24 @@ pub enum Paused {
 /// put down mid-call: everything the chain needs is a `Vec` of heap objects,
 /// and the collector already traces each of them.
 pub struct FrameStack {
-    frames: Vec<(CoroutineFn, Value)>,
+    frames: Vec<Entry>,
+}
+
+/// One frame of the chain, and what the driver has to know about it that the
+/// frame itself does not say.
+struct Entry {
+    /// The body to re-enter to run this frame on.
+    body: CoroutineFn,
+    /// The frame object.
+    frame: Value,
+    /// How deep the GC root stack was when this frame was entered.
+    ///
+    /// Read only on the unwinding path. A frame pushes roots as it runs — its
+    /// own frame object in the prologue, temporaries around calls — and an
+    /// unwind skips every matching pop, so popping the frame means cutting
+    /// the root stack back to here. On the ordinary path there is nothing to
+    /// repair: the single `return` pops what the prologue pushed.
+    roots: usize,
 }
 
 impl Default for FrameStack {
@@ -101,17 +129,35 @@ impl FrameStack {
     /// extra registered. This exists for a driver that has no task behind it
     /// to ask, which is what C5's boundaries will need.
     pub fn roots(&self) -> impl Iterator<Item = Value> + '_ {
-        self.frames.iter().map(|(_, f)| *f)
+        self.frames.iter().map(|e| e.frame)
     }
 
     /// Begin a call: the function is entered with no frame, so its prologue
-    /// makes one and copies `args` out of `typelisp_abi::call_state`.
-    fn enter(&mut self, f: CoroutineFn, args: &[i64], env: &[i64]) -> i64 {
+    /// makes one and copies `args` out of `typelisp_abi::call_state`, and
+    /// publishes it through `rt_frame_entered` — the only moment the driver
+    /// can learn of a frame that is made inside the callee.
+    ///
+    /// Pushes the frame it published, including when the entry ends in an
+    /// unwind: a function that raises inside its own `catch` published its
+    /// frame first, and that frame is the one that catches. Only an entry
+    /// that unwound *before* publishing leaves nothing to record.
+    fn begin(&mut self, heap: &mut Heap, f: CoroutineFn, args: &[i64], env: &[i64]) -> i64 {
+        let roots = heap.root_count();
+        let published = call_state::current_frame_depth();
         call_state::set_pending_args(args);
         call_state::set_pending_env(env);
         // Nothing may allocate between here and the prologue's copy — see
         // `call_state`'s doc comment.
-        unsafe { f(0) }
+        let status = unsafe { activation(f, 0) };
+        if call_state::current_frame_depth() > published {
+            self.frames.push(Entry { body: f, frame: take_current_frame(), roots });
+        } else if status & 0b11 != STATUS_UNWIND {
+            panic!("a coroutine function did not publish its frame on entry");
+        }
+        // An unwind travels between the publish and the take, so anything a
+        // nested entry left above this point is owned by nobody.
+        call_state::truncate_current_frames(published);
+        status
     }
 
     /// Run `f(args)` to an answer, or to the point where it stops being this
@@ -132,8 +178,8 @@ impl FrameStack {
     /// value slot on resuming, and it cannot tell — and must not be able to
     /// tell — whether the word came from a callee or from a scheduler.
     pub fn set_top_value(&self, heap: &mut Heap, word: i64) {
-        let (_, frame) = match self.frames.last() {
-            Some(top) => *top,
+        let frame = match self.frames.last() {
+            Some(top) => top.frame,
             None => panic!("set_top_value: there is no suspended chain to deliver to"),
         };
         set_frame_value(heap, frame, word);
@@ -156,11 +202,11 @@ impl FrameStack {
     /// its answer, because from the resuming function's side those are the
     /// same thing.
     pub fn resume(&mut self, heap: &mut Heap) -> Result<i64, Paused> {
-        let (f, frame) = match self.frames.last() {
-            Some(top) => *top,
+        let top = match self.frames.last() {
+            Some(top) => (top.body, top.frame),
             None => panic!("resume: there is no suspended chain to resume"),
         };
-        let status = unsafe { f(typelisp_abi::encode(frame)) };
+        let status = unsafe { activation(top.0, typelisp_abi::encode(top.1)) };
         self.drive(heap, 0, status)
     }
 
@@ -174,10 +220,7 @@ impl FrameStack {
         env: &[i64],
     ) -> Result<i64, Paused> {
         let base = self.frames.len();
-        let status = self.enter(f, args, env);
-        // The frame the entered function made for itself, so the driver can
-        // reach it on the way back.
-        self.frames.push((f, take_current_frame()));
+        let status = self.begin(heap, f, args, env);
         self.drive(heap, base, status)
     }
 
@@ -185,9 +228,10 @@ impl FrameStack {
     /// picking a chain back up ([`Self::resume`]).
     ///
     /// A `RETURN` pops and hands its value to the frame below (or out, if
-    /// there is none below `base`); a `CALL` pushes; a `SUSPEND` or `UNWIND`
-    /// leaves the chain standing and gets out of the way, because who runs
-    /// next is a scheduling question, not a calling one.
+    /// there is none below `base`); a `CALL` pushes; a `SUSPEND` leaves the
+    /// chain standing and gets out of the way, because who runs next is a
+    /// scheduling question, not a calling one; an `UNWIND` pops frames,
+    /// cutting the root stack back as it goes.
     ///
     /// `base` is how many frames belonged to somebody else when this drive
     /// began — nonzero only for a nested drive, whose caller is waiting on a
@@ -196,26 +240,121 @@ impl FrameStack {
         loop {
             match status & 0b11 {
                 STATUS_RETURN => {
-                    let (_, done) = self.frames.pop().expect("a returning frame is on the stack");
-                    let value = frame_value(heap, done);
+                    let done = self.frames.pop().expect("a returning frame is on the stack");
+                    let value = frame_value(heap, done.frame);
                     if self.frames.len() == base {
                         return Ok(value);
                     }
                     // Hand the answer to the waiting frame and resume it.
-                    let (caller_fn, caller_frame) = *self.frames.last().expect("a waiting frame");
+                    let (caller_body, caller_frame) = {
+                        let caller = self.frames.last().expect("a waiting frame");
+                        (caller.body, caller.frame)
+                    };
                     set_frame_value(heap, caller_frame, value);
-                    status = unsafe { caller_fn(typelisp_abi::encode(caller_frame)) };
+                    status = unsafe { activation(caller_body, typelisp_abi::encode(caller_frame)) };
                 }
                 STATUS_CALL => {
                     let (callee, callee_args, callee_env) = take_pending_call();
-                    status = self.enter(callee, &callee_args, &callee_env);
-                    self.frames.push((callee, take_current_frame()));
+                    status = self.begin(heap, callee, &callee_args, &callee_env);
                 }
                 STATUS_SUSPEND => return Err(Paused::Suspended),
-                _ => return Err(Paused::Unwinding),
+                _ => match self.unwind(heap, base) {
+                    Some(resumed) => status = resumed,
+                    None => return Err(Paused::Unwinding),
+                },
             }
         }
     }
+}
+
+impl FrameStack {
+    /// Walks the chain for a frame that wants the unwind in flight, and
+    /// resumes it there.
+    ///
+    /// `Some(status)` means a frame's handler was entered and the protocol
+    /// goes on from that status; `None` means the unwind passed every frame
+    /// this drive owned, and the chain above `base` is gone.
+    ///
+    /// A frame either declares a handler in its
+    /// [`FRAME_HANDLER_SLOT`](typelisp_abi::FRAME_HANDLER_SLOT) — the `pc` of
+    /// the `catch`/`unwind-protect` region it is currently inside — or it does
+    /// not, and then it leaves: nothing in it wants to run on the way out, so
+    /// there is nothing to enter it for. Each pop cuts the GC root stack back
+    /// to that frame's entry depth, which is the repair the `rt_protected_*`
+    /// trampolines used to make at every protected call, made once per frame
+    /// instead.
+    ///
+    /// The handler is **not** cleared here. What protects the frame from the
+    /// handler onwards is whatever encloses that region, and only the emitted
+    /// code knows what that is — so the pad installs it (the island's
+    /// `install-handler`), exactly as it does on the ordinary way out.
+    fn unwind(&mut self, heap: &mut Heap, base: usize) -> Option<i64> {
+        loop {
+            let (body, frame) = {
+                let top = self.frames.last().expect("an unwinding frame is on the stack");
+                (top.body, top.frame)
+            };
+            let handler = frame_handler(heap, frame);
+            if handler != 0 {
+                heap.set_frame_pc(frame_id(frame), handler as u32);
+                return Some(unsafe { activation(body, typelisp_abi::encode(frame)) });
+            }
+            let leaving = self.frames.pop().expect("a frame above the base");
+            heap.truncate_roots(leaving.roots);
+            if self.frames.len() == base {
+                return None;
+            }
+        }
+    }
+}
+
+/// Where an unwind reaching this frame resumes, or `0` for nowhere.
+fn frame_handler(heap: &Heap, f: Value) -> i64 {
+    let id = frame_id(f);
+    if heap.frame_len(id) <= typelisp_abi::FRAME_HANDLER_SLOT {
+        panic!(
+            "a compiled frame has {} slot(s) and so no handler slot: it was built before the slot \
+             was reserved, which means an artifact (the island dump or the prelude bitcode) needs \
+             regenerating",
+            heap.frame_len(id)
+        );
+    }
+    heap.frame_word(id, typelisp_abi::FRAME_HANDLER_SLOT)
+}
+
+/// Runs one compiled activation with the driver's catch around it.
+///
+/// This is where raising an unwind meets the driver protocol. Compiled code
+/// raises the way it always did — `rt_throw`/`rt_panic` unwind, and so does a
+/// runtime error or an interpreted callee reached through `rt_apply_any` —
+/// but the unwind now travels no further than the one activation that raised
+/// it, because Lisp calls are driver round trips and not machine calls. The
+/// driver catches it here and turns it into a status, so the *travelling*
+/// part of an unwind is frame bookkeeping rather than a Rust panic crossing
+/// frames it knows nothing about.
+///
+/// A payload that is none of the runtime's three deliberate kinds keeps
+/// unwinding untouched (`park_activation_unwind`): a genuine bug in the
+/// runtime or in generated code must not come back as a plausible-looking
+/// typelisp condition.
+unsafe fn activation(f: CoroutineFn, arg: i64) -> i64 {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(arg))) {
+        Ok(status) => status,
+        Err(payload) => {
+            crate::park_activation_unwind(payload);
+            STATUS_UNWIND
+        }
+    }
+}
+
+/// Re-raises the unwind a drive carried out as [`Paused::Unwinding`].
+///
+/// Every driver whose caller is a machine frame ends up here: the unwind was
+/// travelling towards a `catch` that is not in this chain, and the boundary
+/// above — `catch_compiled_panic`, another `activation`, the interpreter's
+/// own hook — is the one that knows where it goes next.
+pub fn resume_unwinding() -> ! {
+    crate::resume_activation_unwind()
 }
 
 /// The frame a just-entered function allocated for itself, as the prologue
