@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-09-06 / ブランチ: `main`
+最終更新: 2026-09-12 / ブランチ: `feature/compiled-cps`
 
 このドキュメントは**現在残っている作業のみ**を記録する。終わった作業は
 [completed-work.md](completed-work.md)（何がどこまで進んだかの横断的な要約）と
@@ -8,9 +8,24 @@
 
 ## 残っている作業
 
-いまは無い。直近に入ったのは C FFI（`defffi` / `unsafe`、2026-09-06）で、これも残作業を
-1 つも足していない。それ以前の分も含め、片付いたものの一覧は
-[completed-work.md](completed-work.md)。
+**軽量スレッド（goroutine 相当）の Phase B、残り 3 段。** プランは
+`~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）と
+Phase C（コンパイル出力の一様コルーチン化、C0〜C7）は完了し、B も B1/B2
+（スケジューラ・`go`/`Task<T>`/`wait`/`yield`/`sleep`）は入っている。
+
+| 段 | 中身 |
+|---|---|
+| **B3** | `Chan<T>`（`send`/`recv`/`close`/`len`/`cap`）と `(impl Iter Chan<T>)`。`doiter` がそのまま回る |
+| **B4** | `select`（多重待ち、`else` 省略時はブロック、同時可能なら一様ランダム） |
+| **B5** | `WaitGroup` / `Mutex<T>` / `with-lock` |
+
+**プランが B3 の宿題に挙げていた衝突は Phase C で消えている。** 「`after` は prelude で
+`sleep` と `send` を使うが、どちらもタスクを中断するので compile できない」という問題で、
+C3 が compiled からの中断を通したので `PRELUDE_COMPILE_UNSUPPORTED` を空のまま書ける。
+
+**`Chan<T>` の未使用型引数も確認済み**（プランの検証節）。`(defstruct chan<T> (h i32))` は
+定義でき、`the` で型が決まり、`Vector<chan<i32>>` にも入る。ファントムフィールドは要らない。
+ただし**効くのはメソッド形式だけ**——自由関数の戻り型からは型引数が推論されない。
 
 作業を始めるときはここに項目を足し、終わったら（経緯・設計判断を
 [implementation-log.md](implementation-log.md) へ書いたうえで）ここから消す。
@@ -22,9 +37,17 @@
 
 ## 見つかっている実装の穴
 
-いまは無い。直近まであった「関連型が総称名の内側にあると `impl` の置換が届かない」は
-2026-09-05 に解消（経緯は [implementation-log.md](implementation-log.md) の
-「関連型が総称名の内側にある場合」）。
+**`Interp::apply` が `FnDef::compiled` を見ない。** `FnDef::body` を `eval_core` で走らせる
+だけなので、この経路に乗る 3 つ——`print-object` のディスパッチ、`format` の `~/.../`、
+リーダマクロ——は `(compile ...)` の効果を受けない。`(compile spinner::print-object)` は
+`true` を返し `disassemble` にもコンパイル済みの本体が出るのに、印字経路が呼ぶのは
+インタプリタ本体。2026-09-12 に C7 のテストを書く途中で見つけた（`rt_loop_safepoint` を
+`panic!` にしても鳴らないことから）。
+
+**並行機構のユーザ向けリファレンスが無い。** `go` / `Task<T>` / `wait` / `yield` と
+タスクを意識した `sleep` は実装済みだが、[functions.md](../functions.md) にも
+[syntax.md](../syntax.md) にも項目が無い。語彙が B3〜B5 で増えるので、そこまで
+入れてからまとめて書くほうが自然。
 
 ## 関連ドキュメント
 
@@ -33,6 +56,8 @@
 | 片付いた作業の一覧・横断的な教訓 | [completed-work.md](completed-work.md) |
 | 完了した実装の経緯・設計判断 | [implementation-log.md](implementation-log.md) |
 | 言語仕様の確定事項・非採用と決めた機能 | [language-design.md](language-design.md)（非採用リストは §9） |
+| 評価器を CPS 化した設計（Phase A） | [cps-evaluator-design.md](cps-evaluator-design.md) |
+| コンパイル出力のコルーチン ABI（Phase C、C0〜C7） | [compiled-cps-design.md](compiled-cps-design.md) |
 | Common Lisp と比べてまだ無いクラス・メソッド | [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) |
 | それを埋める実行計画（Phase / 対象外の理由 / 完了判定） | [cl-parity-plan.md](cl-parity-plan.md) |
 | ビルド・テストの実行方法 | [development.md](development.md) |
