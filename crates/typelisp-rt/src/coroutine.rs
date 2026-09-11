@@ -274,3 +274,42 @@ pub unsafe extern "C" fn rt_suspend_yield(_args: *const i64, _argc: u32) -> i64 
     call_state::set_pending_suspend(call_state::SUSPEND_YIELD, 0);
     0
 }
+
+/// `(sleep secs)` for compiled code: `args[0]` is an `f64`'s raw bit pattern.
+///
+/// The bits travel as the payload untouched — this shim does not sleep, and
+/// must not: with tasks, `sleep` stops **the task**, and only the scheduler
+/// knows whether there is anything else to run while it does. `rt_sleep`, the
+/// thread-sleeping shim this replaces, was the reason `sleep` could not be
+/// compiled: the same source meant two different things on the two sides.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_sleep(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        crate::fatal("rt_suspend_sleep: expected 1 argument");
+    }
+    call_state::set_pending_suspend(call_state::SUSPEND_SLEEP, *args);
+    0
+}
+
+/// `(wait t)` for compiled code: `args[0]` is the `Task<T>` handle.
+///
+/// The handle goes through as the payload **still tagged**. Reading the
+/// scheduler id out of it is the front end's job, not this crate's: the box is
+/// a `BoxedObj::Struct` whose one field is a `TaskId`, and `TaskId` belongs to
+/// the scheduler, which lives above here.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_wait(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        crate::fatal("rt_suspend_wait: expected 1 argument");
+    }
+    call_state::set_pending_suspend(call_state::SUSPEND_WAIT, *args);
+    0
+}

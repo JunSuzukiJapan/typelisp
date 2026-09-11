@@ -840,14 +840,42 @@ fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
 /// because the crate it publishes from sits below the one that owns `Waiting`
 /// — a `TaskId` and an `Instant` are the scheduler's types. This is the one
 /// place that turns them back.
-fn pending_wait() -> Result<(Waiting, Repr), EvalError> {
-    let (kind, payload) = typelisp_abi::call_state::take_pending_suspend().ok_or_else(|| {
+fn pending_wait(heap: &Heap) -> Result<(Waiting, Repr), EvalError> {
+    use typelisp_abi::call_state as cs;
+    let (kind, payload) = cs::take_pending_suspend().ok_or_else(|| {
         EvalError::Internal(
             "a compiled frame suspended without recording what it was waiting for".to_string(),
         )
     })?;
     match kind {
-        typelisp_abi::call_state::SUSPEND_YIELD => Ok((Waiting::Yield, Repr::Unit)),
+        // Nothing comes back: the wake value is unit, and the resume block
+        // does not read the frame's value slot at all (`(suspend ...)` carries
+        // kind `0` for these).
+        cs::SUSPEND_YIELD => Ok((Waiting::Yield, Repr::Unit)),
+        cs::SUSPEND_SLEEP => {
+            // The same refusals `Interp::sleep_until` makes, in the same
+            // words: this is the same `sleep`, and a program must not be able
+            // to tell which side it ran on.
+            let secs = f64::from_bits(payload as u64);
+            if !(secs >= 0.0) {
+                return Err(EvalError::Panic(format!(
+                    "sleep: {} is not a non-negative number of seconds",
+                    secs
+                )));
+            }
+            let d = std::time::Duration::try_from_secs_f64(secs)
+                .map_err(|_| EvalError::Panic(format!("sleep: {} is longer than this can wait", secs)))?;
+            Ok((Waiting::Until(std::time::Instant::now() + d), Repr::Unit))
+        }
+        // The payload is the `Task<T>` handle, still tagged — reading the id
+        // out of the box is this side's job, because `TaskId` is the
+        // scheduler's type. The answer comes back as a tagged `Sexpr` whatever
+        // `T` is, and the resume block decodes it with the kind the bridge
+        // baked in: the same division `catch`/`throw` make for a thrown value.
+        cs::SUSPEND_WAIT => {
+            let handle = typelisp_abi::decode(payload);
+            Ok((Waiting::Task(task_id_of(heap, Some(handle))?), Repr::Sexpr))
+        }
         other => Err(EvalError::Internal(format!(
             "a compiled frame asked to wait on kind {} (payload {}), which this build does not lower",
             other, payload
@@ -1260,7 +1288,7 @@ impl Interp {
             // The chain stays exactly as it is, rooted by the prologues that
             // built it. The frame pushed here is what catches the value the
             // scheduler eventually wakes this task with.
-            Ok(Err(typelisp_rt::coroutine::Paused::Suspended)) => match pending_wait() {
+            Ok(Err(typelisp_rt::coroutine::Paused::Suspended)) => match pending_wait(heap) {
                 Ok((w, wake)) => {
                     task.stack.push(heap, Frame::DriveCompiled { drive, wake }, None);
                     State::Blocked(w)

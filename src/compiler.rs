@@ -337,6 +337,12 @@ pub const SOURCE: &str = r#"
    string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block>
    Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
+(defsignature compile-suspend
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
+   Option<llvm-basic-block> Option<llvm-value>
+   string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Option<Sexpr>)
+  llvm-value)
 (defsignature compile-call
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value>
@@ -1930,6 +1936,7 @@ pub const SOURCE: &str = r#"
       (var (compile-var m fn-name builder env fn-env captured e))
       (cellvar (compile-cellvar m fn-name builder env fn-env captured e))
       (llvm-op (compile-llvm-op m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
+      (suspend (compile-suspend m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (assoc (compile-assoc m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (apply (compile-apply m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (labels (compile-labels m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
@@ -3290,13 +3297,21 @@ pub const SOURCE: &str = r#"
 ;; `nm` is `name` itself, already declared by
 ;; `compile-function`'s own first step (`add-function`,
 ;; above) before this body was ever reached.
-;; A call to a builtin that **puts the task down** (`yield`, and C3c's `sleep`
-;; and `task::wait`).
+;; `(suspend NAME KIND (kind . arg)...)` — a builtin that **puts the task
+;; down** (`yield`, `sleep`, `task::wait`).
 ;;
-;; Two halves, and neither is a blocking call: the shim writes what is being
-;; waited for into `typelisp_abi::call_state`, and `coroutine-suspend` ends the
-;; activation with `STATUS_SUSPEND`. The driver on the other side decides when
-;; to come back, and the answer arrives in the frame's value slot.
+;; Two halves, and neither is a blocking call: `NAME` is a shim that writes
+;; what is being waited for into `typelisp_abi::call_state`, and
+;; `coroutine-suspend` then ends the activation with `STATUS_SUSPEND`. The
+;; driver on the other side decides when to come back.
+;;
+;; `KIND` is how to read the answer out of the frame's value slot on the way
+;; back, and `0` means there is nothing to read (`yield`/`sleep` answer with
+;; unit) — the same convention `compile-catch` uses for a tag nothing throws.
+;; A `wait` answers with a tagged `Sexpr` whatever its type, exactly as a
+;; thrown value does, so this is the same decode for the same reason: the
+;; crossing hands one machine word through and only the representation says
+;; what it is.
 ;;
 ;; **Refused inside a `catch`/`unwind-protect` region.** In one, a call is
 ;; driven to completion on a nested driver standing on the machine stack
@@ -3304,13 +3319,20 @@ pub const SOURCE: &str = r#"
 ;; what cannot be put down. Saying so here makes it a compile error naming the
 ;; form, rather than a driver refusing at run time somewhere below. Phase C4
 ;; makes unwinding a driver status, and this leg goes with it.
-(defun compile-suspending-call ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (nm string) (args-ptr llvm-value) (argc i32) (protect Option<llvm-basic-block>)) llvm-value
+(defun compile-suspend ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (match protect
       ((Some pad)
        (panic "compile: a suspending builtin inside a catch/unwind-protect region cannot be compiled yet -- the protected call is driven on the machine stack, which cannot be put down (Phase C4)"))
       (None
-       (let ((ignored (build-call builder (get-function m nm) args-ptr argc)))
-         (coroutine-suspend builder m)))))
+       (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
+              (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+              (arg-forms (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))
+              (argc (sexpr-list-length arg-forms))
+              (args-ptr (frame-arg-slots builder m 0 arg-forms))
+              (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
+              (ignored (build-call builder (get-function m nm) args-ptr argc))
+              (raw (coroutine-suspend builder m)))
+         (if (eq kind 0) raw (compile-sexpr-field builder m raw kind 0))))))
 
 (defun has-prefix ((s string) (p string)) bool
     (if (< (length s) (length p)) false (equal (substring s 0 (length p)) p)))
@@ -3337,17 +3359,13 @@ pub const SOURCE: &str = r#"
            ;; driver enter it as a coroutine -- `f(0)` -- and its argument
            ;; pointer arrives null.
            ;;
-           ;; `rt_suspend_` is a third answer, and it is a longer prefix of the
-           ;; second rather than a separate list: these shims *are* Rust and
-           ;; are called, but the call is only the first half. The shim records
-           ;; what the task waits for; `coroutine-suspend` then sets the resume
-           ;; point and hands control back with `STATUS_SUSPEND`. Reading the
-           ;; name is what keeps `externs.rs`'s table the only place that
-           ;; decides which builtins suspend.
-           (result (cond
-                     ((has-prefix nm "rt_suspend_") (compile-suspending-call builder m cur-fn nm args-ptr argc protect))
-                     ((has-prefix nm "rt_") (emit-direct-call builder m cur-fn (get-function m nm) args-ptr argc protect))
-                     (else (emit-lisp-call builder m cur-fn (get-function m nm) args-ptr argc protect)))))
+           ;; A *suspending* builtin never arrives here: `core_bridge` reads the
+           ;; `rt_suspend_` prefix and emits a `(suspend ...)` node instead,
+           ;; because a suspension has a result representation to carry and a
+           ;; call node has room only for its arguments'.
+           (result (if (has-prefix nm "rt_")
+                       (emit-direct-call builder m cur-fn (get-function m nm) args-ptr argc protect)
+                       (emit-lisp-call builder m cur-fn (get-function m nm) args-ptr argc protect))))
       result))
 
 

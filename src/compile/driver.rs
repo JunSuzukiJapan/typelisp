@@ -645,23 +645,6 @@ pub(crate) fn precheck_compilable(interp: &Interp, heap: &Heap, name: &str) -> R
 /// the graph [`crate::eval::interp::Interp::compute_sccs`] walks. Shared by that graph walk and
 /// [`crate::eval::interp::Interp::compile_scc`] (which needs the same edges again, in typed
 /// form, to know what to forward-declare/wire as `externals`).
-/// The free functions that **suspend the running task** and do not lower yet
-/// — see the refusal in [`call_graph_edges`].
-///
-/// `yield` came off this list in Phase C3: a compiled frame can now say
-/// `STATUS_SUSPEND` and the task it belongs to keeps the chain, so the same
-/// source means the same thing on both sides. `sleep` and `task::wait` are
-/// next (C3c) — each needs one more thing than `yield` did, a payload and a
-/// wake value respectively.
-///
-/// `sleep` is *here* rather than left to lower as the thread-sleeping shim it
-/// has always had, because with tasks it stops **the task**, not the thread
-/// (`core_cps`'s `Waiting::Until`). Lowering it to `rt_sleep` would make the
-/// same source mean two different things depending on whether it had been
-/// through `(compile ...)`, silently. `task::wait` is the method-shaped member
-/// of the same set and is matched separately.
-const SUSPENDING_CALLS: &[&str] = &["sleep"];
-
 pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Result<Vec<CallEdge>, EvalError> {
     let path = fn_path_from_node_name(name);
     let method_key = interp.method_key(name);
@@ -671,37 +654,6 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
         Err(e) => return Err(EvalError::Panic(e.to_string())),
     };
     let mut edges = Vec::new();
-
-    // The suspending operations that do not lower **yet**. A deliberate
-    // refusal carrying the reason, rather than the "no such function"/"no
-    // compiled implementation" a missing lowering gives — these exist.
-    //
-    // This used to say a compiled body *cannot* suspend, full stop (the plan's
-    // B6). That stopped being true in C3: the frames are in the task, so
-    // `yield` compiles and is gone from the list. What remains is the two that
-    // need something `yield` did not.
-    //
-    // `go` is deliberately absent from this: starting a task suspends nothing,
-    // and `compile-go` lowers it.
-    let suspends = targets
-        .calls
-        .iter()
-        .find(|p| SUSPENDING_CALLS.iter().any(|n| **p == Path::root(n)))
-        .map(|p| p.to_string())
-        .or_else(|| {
-            targets
-                .methods
-                .iter()
-                .find(|(t, m)| *t == Path::root("task") && m == "wait")
-                .map(|(t, m)| format!("{}::{}", t, m))
-        });
-    if let Some(target) = suspends {
-        return Err(EvalError::Panic(format!(
-            "compile: \"{}\" calls \"{}\", which suspends the running task and does not lower yet. \
-             Leave the `{}` in an interpreted caller; `yield` and `go` both compile.",
-            name, target, target
-        )));
-    }
 
     edges.extend(
         targets
@@ -761,6 +713,15 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
             // `rt_llvm_call` abort under the AOT-native island
             // (interp-closure removal Stage 8a). `is_native_lowered_primitive_method`
             // is the Rust twin of the island's `*-native-method?` list.
+            // A method that **suspends** is lowered too, and not as a call at
+            // all: `core_bridge` turns it into a `(suspend ...)` node. So it is
+            // not a target, for the same reason a natively lowered primitive
+            // method is not — there is no function for the graph to reach.
+            if key.0.is_simple()
+                && crate::compile::externs::rt_suspend_method_symbol(key.0.last_segment(), &key.1).is_some()
+            {
+                return false;
+            }
             interp.root.borrow().has_method(&key.0, &key.1)
                 || !path_is_builtin_any(&key.0, &NATIVE_LOWERED_PRIMITIVES)
                 || !is_native_lowered_primitive_method(key.0.last_segment(), &key.1)

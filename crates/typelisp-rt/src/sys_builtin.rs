@@ -639,22 +639,6 @@ pub unsafe extern "C" fn rt_getenv(args: *const i64, argc: u32) -> i64 {
     encode(getenv(active_heap(), &name))
 }
 
-/// `(sleep secs)` for compiled code: `args[0]` is an `f64`'s raw bit pattern.
-///
-/// # Safety
-///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
-#[no_mangle]
-pub unsafe extern "C" fn rt_sleep(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        crate::fatal("rt_sleep: expected 1 argument");
-    }
-    match sleep(f64::from_bits(*args as u64)) {
-        Ok(()) => 0,
-        Err(e) => crate::fatal(&e),
-    }
-}
-
 /// `(home-directory)` for compiled code.
 ///
 /// # Safety

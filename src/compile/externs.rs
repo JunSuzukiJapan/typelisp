@@ -168,13 +168,15 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "get-macro-character" => "rt_get_macro_character",
         "set-dispatch-macro-character" => "rt_set_dispatch_macro_character",
         "get-dispatch-macro-character" => "rt_get_dispatch_macro_character",
-        "sleep" => "rt_sleep",
-        // **The `rt_suspend_` prefix is load-bearing.** `compile-call` reads it
-        // to emit the suspension protocol (set the resume point, return
-        // `STATUS_SUSPEND`) instead of an ordinary call — the same structural
-        // test the `rt_` prefix already is for "this is Rust, call it". One
-        // list, read by the island, rather than a second list of names that
-        // would have to agree with this one.
+        // **The `rt_suspend_` prefix is load-bearing**, and this table is the
+        // only place that decides which builtins suspend: `core_bridge` reads
+        // the prefix and emits a `(suspend ...)` node instead of a `(call
+        // ...)`, so the island needs no list of its own.
+        //
+        // `sleep` used to lower to `rt_sleep`, which stops the *thread*. That
+        // was the reason it could not be compiled at all: with tasks the same
+        // source would mean two different things on the two sides, silently.
+        "sleep" => "rt_suspend_sleep",
         "yield" => "rt_suspend_yield",
         // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
         // `disassemble` have no row and never will — those are
@@ -208,6 +210,24 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
 /// Whether [`rt_builtin_symbol`] names a shim for `name` — the "this is not a
 /// call target to compile" question, asked where the shim's own name is not
 /// needed.
+/// The shim for a **method** that suspends the running task, or `None`.
+///
+/// A second table because the free-function one is keyed by bare name and a
+/// method needs its receiver type too. One row, and it is here rather than
+/// spelled in `core_bridge` so that "which builtins suspend" stays a question
+/// this module answers — the free functions are already decided by the
+/// `rt_suspend_` prefix in [`rt_builtin_symbol`].
+pub(crate) fn rt_suspend_method_symbol(type_local: &str, method: &str) -> Option<&'static str> {
+    match (type_local, method) {
+        ("task", "wait") => Some("rt_suspend_wait"),
+        _ => None,
+    }
+}
+
+/// The prefix every suspending shim's name carries, and the whole of how the
+/// bridge tells one from an ordinary runtime entry point.
+pub(crate) const RT_SUSPEND_PREFIX: &str = "rt_suspend_";
+
 pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
     rt_builtin_symbol(name).is_some()
 }
@@ -413,7 +433,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 265] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 266] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -425,13 +445,13 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 265] {
     use typelisp_print::aot::{rt_format_call_method, rt_print_enum_variant, rt_print_object_method};
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
-    use typelisp_rt::coroutine::rt_suspend_yield;
+    use typelisp_rt::coroutine::{rt_suspend_sleep, rt_suspend_wait, rt_suspend_yield};
     use typelisp_rt::sys_builtin::{
         rt_command_line_args, rt_dribble_start, rt_dribble_stop, rt_ed_open, rt_exit,
         rt_get_internal_real_time, rt_get_internal_run_time,
         rt_get_universal_time, rt_getenv, rt_heap_info, rt_home_directory, rt_lisp_implementation_version,
         rt_machine_instance, rt_machine_type, rt_machine_version, rt_parse_float, rt_parse_int,
-        rt_sleep, rt_software_type, rt_software_version, rt_timezone_daylight_p,
+        rt_software_type, rt_software_version, rt_timezone_daylight_p,
         rt_timezone_offset_seconds,
     };
     use typelisp_rt::{
@@ -726,7 +746,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 265] {
         ("rt_stream_read_byte", rt_stream_read_byte as usize),
         ("rt_stream_write_byte", rt_stream_write_byte as usize),
         ("rt_stream_unread_char", rt_stream_unread_char as usize),
-        ("rt_sleep", rt_sleep as usize),
+        ("rt_suspend_sleep", rt_suspend_sleep as usize),
+        ("rt_suspend_wait", rt_suspend_wait as usize),
         ("rt_suspend_yield", rt_suspend_yield as usize),
         ("rt_stream_listen", rt_stream_listen as usize),
         ("rt_stream_position", rt_stream_position as usize),

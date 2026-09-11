@@ -56,6 +56,15 @@ fn int(src: &str) -> i64 {
     }
 }
 
+/// What a *running* compiled program fails with, as distinct from what
+/// `(compile ...)` refuses with.
+fn compile_err_at_runtime(src: &str) -> String {
+    match run_compiled(src) {
+        Ok(_) => panic!("expected the program to fail"),
+        Err(e) => e.to_string(),
+    }
+}
+
 /// What `(compile ...)` refuses with — an evaluation error, not a check error.
 fn compile_err(src: &str) -> String {
     match run_compiled(src) {
@@ -434,19 +443,41 @@ fn a_compiled_body_can_spawn_a_function_value() {
     );
 }
 
-/// `wait` refuses to compile, and says why.
+/// A compiled `wait` **gets the awaited task's value back** (Phase C3c).
 ///
-/// It used to come out as the generic "a builtin method with no compiled
-/// implementation", which describes the table rather than the reason.
+/// The one of the three whose answer is typed: `Task<T>` -> `T`. It comes
+/// across as a tagged `Sexpr` whatever `T` is and the resume block decodes it
+/// with the kind the bridge baked in, exactly as a thrown value does — which
+/// is why suspension is a node carrying a result representation rather than a
+/// name the island recognises.
 #[test]
-fn wait_refuses_to_compile_and_says_why() {
-    let e = compile_err(
-        r#"(defun work ((n i32)) i32 n)
-           (defun waiter ((n i32)) i32 (let ((t (go (work n)))) (wait t)))
-           (compile waiter)"#,
+fn a_compiled_wait_answers_with_the_awaited_value() {
+    assert_eq!(
+        int_compiled(
+            r#"(defun work ((n i32)) i32 (* n 10))
+               (defun waiter ((n i32)) i32 (let ((h (go (work n)))) (+ (wait h) 1)))
+               (compile waiter)
+               (waiter 4)"#
+        ),
+        41
     );
-    assert!(e.contains("suspends the running task"), "got {}", e);
-    assert!(e.contains("task::wait"), "got {}", e);
+}
+
+/// The same for a heap-backed `T`, which is the half a raw-word answer would
+/// pass by accident: a `string` crosses as a tagged pointer and the decode has
+/// to leave it tagged, where an `i32` has to be untagged.
+#[test]
+fn a_compiled_wait_answers_with_a_heap_value() {
+    assert_eq!(
+        text_compiled(
+            r#"(defun greet ((name string)) string (append "hi " name))
+               (defun waiter ((name string)) string
+                 (let ((h (go (greet name)))) (append (wait h) "!")))
+               (compile waiter)
+               (waiter "ada")"#
+        ),
+        "hi ada!"
+    );
 }
 
 /// `yield` **compiles** (Phase C3), and a compiled task really is put down.
@@ -548,17 +579,40 @@ fn a_lone_sleeper_still_waits_and_comes_back() {
     assert_eq!(int("(progn (sleep 0.01) 7)"), 7);
 }
 
-/// `sleep` refuses to compile, for the reason `wait` and `yield` do.
+/// A compiled `sleep` stops **the task**, not the thread (Phase C3c).
 ///
-/// It is the one of the three that *could* have been left alone — compiled
-/// code has always had `rt_sleep`. That is exactly the problem: the same
-/// source would stop one task interpreted and the whole program compiled.
+/// `sleep_suspends_only_the_calling_task`'s program with `slow` compiled, and
+/// the same discriminator: `a` is spawned first and waited on first but sleeps
+/// four times as long, so a `sleep` that held the thread would give `"ab"`.
+///
+/// This is the one of the three that *could* have been left alone — compiled
+/// code has always had a thread-sleeping `rt_sleep`. That was exactly the
+/// problem, and why the shim is gone rather than kept beside the new one: the
+/// same source would stop one task interpreted and the whole program compiled,
+/// silently.
 #[test]
-fn sleep_refuses_to_compile_and_says_why() {
-    let e = compile_err(
-        r#"(defun nap () () (sleep 0.01))
-           (compile nap)"#,
+fn a_compiled_sleep_suspends_only_the_calling_task() {
+    assert_eq!(
+        text_compiled(
+            r#"(defvar (trail string) "")
+               (defun slow ((name string) (sec f64)) ()
+                 (progn (sleep sec)
+                        (when true (setf trail (append trail name)))))
+               (compile slow)
+               (let ((a (go (slow "a" 0.20))) (b (go (slow "b" 0.05))))
+                 (progn (wait a) (wait b) trail))"#
+        ),
+        "ba"
     );
-    assert!(e.contains("suspends the running task"), "got {}", e);
-    assert!(e.contains("`sleep`"), "got {}", e);
+}
+
+/// A negative wait is an error on both sides, in the same words.
+#[test]
+fn a_compiled_sleep_refuses_a_negative_wait() {
+    let e = compile_err_at_runtime(
+        r#"(defun nap () () (sleep -1.0))
+           (compile nap)
+           (nap)"#,
+    );
+    assert!(e.contains("not a non-negative number of seconds"), "got {}", e);
 }

@@ -884,7 +884,7 @@ cleanup は確保する。`gc-stress` の下で、スロットは `alloca` な�
 読み直さない）。
 
 
-## C3. 中断（`yield` まで）
+## C3. 中断
 
 コンパイル済みのフレームが `STATUS_SUSPEND` を言えるようになった。
 `concurrency_test` の
@@ -967,9 +967,43 @@ frame の root は `FrameStack::roots()` へ移る」と書いていた。**移�
 予告を残すのは実装より長生きするコメントの典型なので、両方「なぜ成り立った
 か」に書き換えた。
 
-### 残り（C3c）
+### C3c: `sleep` と `task::wait`、そして名前の接頭辞では足りなかった
 
-`sleep` と `task::wait`。`yield` より 1 つずつ多く要る——前者は payload
-（秒）、後者は**起床値とその repr**。`yield` の起床値は unit なので、
-`Frame::DriveCompiled` が運ぶ `Repr` はまだ `Unit` しか取らない。
-`SUSPENDING_CALLS` は `["sleep"]` だけになった。
+`yield` だけなら島が**名前の接頭辞**（`rt_suspend_`）を読めば済んだ。
+`wait` で足りなくなった——**答えが型付き**（`Task<T>` → `T`）なのに、
+`call` ノードには引数の repr を置く場所しかなく、結果の repr は無い。
+
+だから中断を 1 つのノードにした:
+
+```
+(suspend NAME KIND (kind . arg)...)
+```
+
+`NAME` は先に呼ぶ shim（何を待つかを `call_state` に書く）、`KIND` は
+再開時に値スロットから答えをどう読むか。`0` は「読むものが無い」
+（`yield`/`sleep` は unit）——`compile-catch` が、何も投げないタグに使っている
+のと同じ約束。`wait` の答えは **`T` が何であっても tagged `Sexpr`** で渡り、
+再開ブロックが `compile-sexpr-field` で戻す。投げられた値とまったく同じ分業で、
+理由も同じ: 境界は 1 語しか渡さず、それが何かは表現にしか書いていない。
+
+`externs.rs` が「どの組み込みが中断するか」を決める側であり続ける。自由関数は
+`rt_suspend_` 接頭辞（`rt_builtin_symbol`）、メソッドは
+`rt_suspend_method_symbol`（1 行）。島は自分のリストを持たない。
+
+**`rt_sleep` は残さずに消した。** compiled にはずっとスレッドを止める
+`rt_sleep` があり、それがまさに `sleep` をコンパイルできなかった理由だった
+——残しておけば、同じソースが interp では 1 つのタスクを、compiled では
+プログラム全体を、黙って止め続ける。
+
+**拒否は 2 段あった。** `SUSPENDING_CALLS` を消しても `wait` は
+`Uncompilable { target: "task::wait" }` で落ちた——グラフ構築側の「実装の無い
+メソッド target」チェック。中断するメソッドは*呼び出しではない*ので、native
+lowering される primitive メソッドと同じく target から外す。
+
+### C3 で消えなかったもの
+
+プランは `run_to_completion` の「compiled から来たので中断できない」も消すと
+書いていたが、**消せない**。これは compiled がインタプリタへ戻った先
+（`rt_apply_any`）で、その下にはマシンスタックのフレームが積まれている。
+中断すればそれを置き去りにする。プランが C5（境界の整理）に割り当てている
+`rt_apply_any` / `rt_dyn_call` の作業がここに来る。

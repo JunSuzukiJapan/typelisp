@@ -854,12 +854,46 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
     let args = parts[4..].to_vec();
 
     let name = callee_symbol_name(&path);
+    // A builtin that **puts the task down** is not a call, and the island must
+    // not emit one: the shim only records what is being waited for, and the
+    // activation has to end with `STATUS_SUSPEND` so the driver can come back
+    // to it. `0` is the result kind — `yield` and `sleep` answer with unit, so
+    // there is nothing in the frame's value slot to decode on the way back
+    // (`compile-catch`'s own `kind = 0` means the same thing).
+    if name.starts_with(crate::compile::externs::RT_SUSPEND_PREFIX) {
+        return suspend_node(heap, &name, 0, &reprs, &args, cx);
+    }
     let name_v = heap.alloc_string(name);
 
     let mut f = Items::new(heap);
     f.push(name_v);
     arg_pairs(&mut f, &reprs, &args, cx)?;
     f.finish("call")
+}
+
+/// `(suspend NAME KIND (KIND . ARG)...)` — the island's node for a suspending
+/// builtin.
+///
+/// `NAME` is the shim to call first (it records *what* is being waited for);
+/// `KIND` is how to read the answer back out of the frame's value slot once
+/// the task is resumed, `0` for "nothing to read". The answer arrives as a
+/// tagged `Sexpr` whatever its type, exactly as a thrown value does, so this
+/// is the same decode `catch` performs and for the same reason: the crossing
+/// hands one machine word through and only the representation says what it is.
+fn suspend_node(
+    heap: &mut Heap,
+    name: &str,
+    kind: i64,
+    reprs: &[Repr],
+    args: &[Value],
+    cx: Ctx,
+) -> Result<Value, Error> {
+    let name_v = heap.alloc_string(name.to_string());
+    let mut f = Items::new(heap);
+    f.push(name_v);
+    f.push(Value::Int(kind));
+    arg_pairs(&mut f, reprs, args, cx)?;
+    f.finish("suspend")
 }
 
 /// `(assoc PATH SYM INSTANCE HOME RET-R (R...) E...)` -> one of four nodes.
@@ -898,6 +932,15 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     }
     if path_is_builtin(&type_name, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
         return translate_hashtable_op(heap, &method, &self_repr, &ret_key, &args, cx);
+    }
+    // `(wait t)` — the method-shaped member of the suspending set. Its answer
+    // is *typed* (`Task<T>` -> `T`), which is the whole reason suspension is a
+    // node carrying a kind rather than a name the island sniffs: a `call` node
+    // has room for its arguments' representations and not for its result's.
+    if let Some(shim) = crate::compile::externs::rt_suspend_method_symbol(type_name.last_segment(), &method) {
+        if type_name.is_simple() {
+            return suspend_node(heap, shim, ret.field_kind(), &reprs, &args, cx);
+        }
     }
     if let Some(key) = llvm_op_key(&type_name, &self_repr) {
         let opid = Value::Int(llvm_op_id(key, &method));
