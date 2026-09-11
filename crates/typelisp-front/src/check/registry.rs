@@ -2208,6 +2208,18 @@ pub fn llvm_builder_def() -> AdtDef {
             true,
         ),
     );
+    // `coroutine-dyn-call`: `coroutine-apply` for a callee named by a vtable
+    // slot. The slot can hold a compiled body under either ABI, or nothing at
+    // all when the concrete type's method is interpreted — which is why the
+    // dispatch is the driver's and not the call site's.
+    assoc.insert(
+        "coroutine-dyn-call".to_string(),
+        assoc_fn(
+            vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32],
+            llvm_value_ty(),
+            true,
+        ),
+    );
     // `coroutine-suspend` is `coroutine-call` with the callee left out: set the
     // resume point, hand control back with `STATUS_SUSPEND`, and answer with
     // whatever the task was waiting for once it is resumed. The suspending

@@ -777,3 +777,34 @@ fn an_applied_closure_s_throw_runs_a_compiled_cleanup() {
         "cleanup!"
     );
 }
+
+/// A compiled body calls a `:dyn` method whose implementation is **ordinary
+/// interpreted code**, and it yields.
+///
+/// The slot behind a trait object need not hold a compiled address at all:
+/// the concrete type can be the user's own struct whose method nothing ever
+/// compiled. That is `rt_dyn_call`'s whole reason for existing at the
+/// runtime — and since C5 the same reason puts the decision in the driver,
+/// which can hand the call to the continuation stack instead of running it on
+/// a machine frame.
+#[test]
+fn a_compiled_dyn_call_of_an_interpreted_method_can_suspend() {
+    assert_eq!(
+        text_compiled(
+            r#"(defvar (trail string) "")
+               (deftrait Ticker ()
+                 (tick ((self Self) (n i32)) i32))
+               (defstruct marker (name string))
+               (impl Ticker marker
+                 (tick ((self Self) (n i32)) i32
+                   (progn (dotimes (i n) (setf trail (append trail self::name)) (yield)) 0)))
+               (defun drive-it ((t :dyn Ticker)) i32 (tick t 3))
+               (compile drive-it)
+               (let ((a (go (drive-it (marker::new "a"))))
+                     (b (go (drive-it (marker::new "b")))))
+                 (progn (wait a) (wait b)))
+               trail"#
+        ),
+        "ababab"
+    );
+}

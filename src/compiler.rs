@@ -2976,19 +2976,21 @@ pub const SOURCE: &str = r#"
 ;; The slot is a translate-time constant, so this is
 ;; three steps and no search: read the receiver's
 ;; vtable id (`rt_dyn_vtable`), unwrap the concrete
-;; receiver (`rt_dyn_value`), and hand both the slot
-;; and the argument array to `rt_dyn_call`.
+;; receiver (`rt_dyn_value`), and name both the slot
+;; and the arguments to the driver (`coroutine-dyn-call`).
 ;;
-;; `rt_dyn_call` rather than the `rt_vtable_slot` +
-;; `build-dyn-call` pair this used to emit (both since
-;; deleted): the implementation behind a slot
-;; is not necessarily compiled (a compiled prelude
-;; stream method dispatching on a `:dyn CharInput`
-;; whose concrete type is the user's own struct), and
-;; only the runtime can see which case it is — see
-;; that shim's doc comment. The argument array is
-;; passed as a pointer-sized integer, the same way
-;; `rt_apply_any` used to be handed its own.
+;; **Who runs it is the driver's question.** The
+;; implementation behind a slot is not necessarily
+;; compiled — a compiled prelude stream method
+;; dispatching on a `:dyn CharInput` whose concrete
+;; type is the user's own struct — and it can be
+;; interpreted code that suspends. That is why this
+;; was never a `build-dyn-call` through a read slot
+;; (the `rt_vtable_slot` + `build-dyn-call` pair this
+;; used to emit, both since deleted), and since C5 it
+;; is not a call to `rt_dyn_call` either: a C function
+;; that has to come back with an answer puts a machine
+;; frame under everything below it.
 ;;
 ;; The callee is an ordinary compiled method and
 ;; expects the *concrete* receiver, so slot 0 of the
@@ -3011,13 +3013,7 @@ pub const SOURCE: &str = r#"
       (let* ((vtable-id (build-call builder (get-function m "rt_dyn_vtable") vt-ptr 1))
              (inner (build-call builder (get-function m "rt_dyn_value") vt-ptr 1)))
         (store-arg builder args-ptr 0 inner)
-        (let ((call-ptr (alloca-args builder 4)))
-          (store-arg builder call-ptr 0 vtable-id)
-          (store-arg builder call-ptr 1 (const-word builder slot))
-          (store-arg builder call-ptr 2 (build-ptr-to-int builder args-ptr))
-          (store-arg builder call-ptr 3 (const-word builder argc))
-          (let ((result (build-call builder (get-function m "rt_dyn_call") call-ptr 4)))
-            result)))))
+        (coroutine-dyn-call builder m vtable-id (const-word builder slot) args-ptr argc))))
 
 ;; Fills a previously-`alloca-args`'d array, one
 ;; compiled argument per slot, exactly as before —

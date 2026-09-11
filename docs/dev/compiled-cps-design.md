@@ -1204,3 +1204,31 @@ panic では運べない。継続スタックを普通に上がってきて `Fra
 **`pause_on_a_machine_frame` の `Applying` アームは `fatal`。** `run_to_end` を
 使わずに `run`/`resume` を直接書いたドライバがあれば、それは規約違反であって
 制限ではない。
+
+### C5b: `:dyn` も同じ形
+
+`compile-dyn-call` は受け手の vtable id を読み、概念的な受け手を取り出し、
+**スロットと引数をドライバに名指しする**（`coroutine-dyn-call`）。ドライバの
+分岐は `apply` と同じ 3 通りで、1 つ増える: **スロットが空**のとき——具体型が
+ユーザ自身の構造体でそのメソッドを誰もコンパイルしていない場合——インタプリタに
+そのスロットが立つクロージャを reify してもらい、そこからは普通の apply。
+
+これが `rt_dyn_call` が「呼び出し地点でなくランタイムに」存在した理由そのもの
+で、同じ理由で判断がドライバに移った。
+
+### タスクは複数の鎖の区間を持てる
+
+`stream_test` の 1 本が `debug_assert_eq!(task.compiled.depth(), 0,
+"a task drives one compiled chain at a time")` で落ちた。**C5 が壊した不変条件を
+その assertion が名指しした。**
+
+C5 より前、compiled から届いたインタプリタの呼び先は*マシン*フレームの上で
+走っていた。C5 がそれを継続スタックに載せたので、その呼び先が compiled 関数を
+呼ぶと、**1 つの `FrameStack` の中に compiled フレームの連なりが 2 区間でき、
+間にインタプリタのフレームが挟まる**。各区間は自分の base まで駆動する
+（`DriveCtx::base`）。
+
+`resume` が base 0 を固定していたのは「入れ子のドライバは中断できないので、
+他人のスタックの途中を再開するということ自体が無い」というコメント付きだった
+——C5 がその予告を偽にした。[[feedback-comments-outliving-implementations]] の
+3 度目。**assertion は同じ失敗の裏返しで、こちらは自分が壊れたことを言う。**

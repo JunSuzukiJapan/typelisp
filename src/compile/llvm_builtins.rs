@@ -144,6 +144,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "frame-clear-handler" => Some(llvm_builder_frame_clear_handler(args)),
             "coroutine-call-env" => Some(llvm_builder_coroutine_call_env(args)),
             "coroutine-apply" => Some(llvm_builder_coroutine_apply(args)),
+            "coroutine-dyn-call" => Some(llvm_builder_coroutine_dyn_call(args)),
             "coroutine-end" => Some(llvm_builder_coroutine_end(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
@@ -1422,7 +1423,7 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
 /// frame slot of its own (`root-temporary`), which is the same reason they
 /// survived the callee's allocation under the original ABI.
 fn llvm_builder_coroutine_call(args: &[Value]) -> Result<Value, EvalError> {
-    coroutine_call_impl(args, "rt_frame_call", None)
+    coroutine_call_impl(args, "rt_frame_call", "coroutine-call", 1, None)
 }
 
 /// `(coroutine-apply builder m closure args-ptr argc)` — hand an `apply` to
@@ -1437,7 +1438,7 @@ fn llvm_builder_coroutine_call(args: &[Value]) -> Result<Value, EvalError> {
 /// that had to come back with an answer, so everything underneath it stood on
 /// a machine frame that could not be put down.
 fn llvm_builder_coroutine_apply(args: &[Value]) -> Result<Value, EvalError> {
-    coroutine_call_impl(args, "rt_frame_apply", None)
+    coroutine_call_impl(args, "rt_frame_apply", "coroutine-apply", 1, None)
 }
 
 /// `(coroutine-suspend builder m)` — hand control back with `STATUS_SUSPEND`,
@@ -1584,6 +1585,21 @@ fn frame_handler(args: &[Value], pad: Option<BasicBlock<'static>>, what: &str) -
     Ok(Value::Empty)
 }
 
+/// `(coroutine-dyn-call builder m vtable slot args-ptr argc)` — hand a `:dyn`
+/// method call to the driver and come back with its answer.
+///
+/// [`llvm_builder_coroutine_apply`] for a callee named by a vtable slot
+/// instead of by a value. The slot's *implementation* is the thing that can
+/// be anything: a compiled method under either ABI, or — when the concrete
+/// type behind the trait object is the user's own and its method is ordinary
+/// interpreted code — no address at all, in which case the slot stands for a
+/// closure the interpreter has to reify. That was `rt_dyn_call`'s whole
+/// reason for existing at the runtime rather than at the call site, and it is
+/// the same reason the decision now belongs to the driver.
+fn llvm_builder_coroutine_dyn_call(args: &[Value]) -> Result<Value, EvalError> {
+    coroutine_call_impl(args, "rt_frame_dyn_call", "coroutine-dyn-call", 2, None)
+}
+
 /// `(coroutine-call-env builder m target args-ptr argc env-ptr env-len)` —
 /// [`llvm_builder_coroutine_call`] for a callee that also has captures.
 ///
@@ -1600,25 +1616,32 @@ fn llvm_builder_coroutine_call_env(args: &[Value]) -> Result<Value, EvalError> {
             return Err(EvalError::Internal(format!("coroutine-call-env: {:?} is not a capture count", other)))
         }
     };
-    coroutine_call_impl(args, "rt_frame_call_env", Some((env_ptr, env_len)))
+    coroutine_call_impl(args, "rt_frame_call_env", "coroutine-call-env", 1, Some((env_ptr, env_len)))
 }
 
+/// `head_len` is how many of `args[2..]` are the shim's own leading words —
+/// one for a callee (an address or a function value), two for a `:dyn` call's
+/// vtable and slot. The argument array and its count follow.
 fn coroutine_call_impl(
     args: &[Value],
     shim: &str,
+    what: &str,
+    head_len: usize,
     env: Option<(PointerValue<'static>, u64)>,
 ) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
-    let target = expect_llvm_value(&args[2])?;
-    let args_ptr = expect_llvm_value(&args[3])?.into_pointer_value();
-    let argc = match &args[4] {
+    let mut head: Vec<BasicValueEnum<'static>> = Vec::with_capacity(head_len + 2);
+    for a in &args[2..2 + head_len] {
+        head.push(expect_llvm_value(a)?);
+    }
+    let args_ptr = expect_llvm_value(&args[2 + head_len])?.into_pointer_value();
+    let argc = match &args[3 + head_len] {
         Value::Int(n) if *n >= 0 => *n as u64,
-        other => return Err(EvalError::Internal(format!("coroutine-call: {:?} is not an argument count", other))),
+        other => return Err(EvalError::Internal(format!("{}: {:?} is not an argument count", what, other))),
     };
     let ctx = crate::compile::llvm_context();
     let i64t = ctx.i64_type();
-    let what = "coroutine-call";
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
     let key = builder_key(&builder);
 
@@ -1644,8 +1667,8 @@ fn coroutine_call_impl(
     let b = builder.borrow();
     // rt_frame_call(callee, arg...) — one array, the callee first; the
     // captures-carrying form puts the env between them.
-    let mut call_args: Vec<BasicValueEnum<'static>> = Vec::with_capacity(argc as usize + 3);
-    call_args.push(target);
+    let mut call_args: Vec<BasicValueEnum<'static>> = Vec::with_capacity(argc as usize + head_len + 2);
+    call_args.extend(head);
     if let Some((env_ptr, env_len)) = env {
         call_args.push(
             b.build_ptr_to_int(env_ptr, i64t, "coro_env_word").map_err(|e| err("ptrtoint", e.to_string()))?.into(),

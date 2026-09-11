@@ -2241,6 +2241,33 @@ pub unsafe extern "C" fn rt_frame_apply(args: *const i64, argc: u32) -> i64 {
     0
 }
 
+/// `rt_frame_dyn_call(vtable, slot, arg...)` — name a `:dyn` method to the
+/// driver.
+///
+/// [`rt_frame_apply`] for a callee the vtable names. The arguments start with
+/// the *concrete* receiver: the call site unwrapped the trait object before
+/// storing it (`compile-dyn-call`), because the method behind the slot
+/// expects its own type and knows nothing about the box.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least `argc` valid
+/// `i64`s: a vtable id, a slot index, and the method's arguments.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_dyn_call(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_frame_dyn_call: expected at least 2 arguments (vtable id, slot)");
+    }
+    let vtable = *args as u32;
+    let slot = *args.add(1) as u32;
+    let mut passed = Vec::with_capacity(argc as usize - 2);
+    for i in 2..argc as usize {
+        passed.push(*args.add(i));
+    }
+    typelisp_abi::call_state::set_pending_dyn(vtable, slot, passed);
+    0
+}
+
 /// `(rt-frame-call-env target env-ptr env-len arg...)` — [`rt_frame_call`] for
 /// a callee that also has captures: a `lambda` body, or a `labels` sibling
 /// reached under the captures-carrying calling convention.
@@ -4885,13 +4912,29 @@ pub unsafe extern "C" fn rt_dyn_value(args: *const i64, argc: u32) -> i64 {
     }
 }
 
-fn vtable_slot_addr(id: usize, slot: usize) -> (usize, u8) {
+pub(crate) fn vtable_slot_addr(id: usize, slot: usize) -> (usize, u8) {
     VTABLES.with(|t| {
         t.borrow()
             .get(id)
             .and_then(|s| s.get(slot).copied())
             .unwrap_or((0, typelisp_abi::BODY_ABI_CLASSIC))
     })
+}
+
+/// Asks the interpreter for the closure an unfilled vtable slot stands for.
+///
+/// In an AOT executable every method the program can reach is compiled and no
+/// interpreter exists to ask, so a missing hook is an invariant break rather
+/// than a limitation — the same reading `rt_apply_any` makes of a missing
+/// apply hook.
+pub(crate) unsafe fn reify_dyn_slot(vtable: u32, slot: u32, what: &str) -> i64 {
+    match DYN_SLOT_CLOSURE.with(|cell| cell.get()) {
+        Some(hook) => hook(vtable, slot),
+        None => fatal(&format!(
+            "{}: vtable slot {}/{} is empty and no interpreter is registered on this thread",
+            what, vtable, slot
+        )),
+    }
 }
 
 /// How [`rt_dyn_call`] asks the interpreter for the closure standing behind
@@ -4926,6 +4969,11 @@ pub(crate) enum Callee {
 
 /// A classic-ABI closure body: arguments and captures as two arrays.
 pub(crate) type ClassicClosureFn = unsafe extern "C-unwind" fn(*const i64, u32, *const i64, u32) -> i64;
+
+/// A classic-ABI method body: one argument array. Every address in a vtable
+/// comes from `CompiledFn::address` for a method compiled under the plain
+/// `compiled_fn_type` signature.
+pub(crate) type ClassicMethodFn = unsafe extern "C-unwind" fn(*const i64, u32) -> i64;
 
 /// Reads a function value's captures and decides who can run its body.
 ///

@@ -216,8 +216,8 @@ impl FrameStack {
     /// the machine frames in between; there are none left to travel through,
     /// so the exit is handed to the chain as the status it would have become
     /// anyway.
-    pub fn raise(&mut self, heap: &mut Heap) -> Result<i64, Paused> {
-        self.drive(heap, 0, STATUS_UNWIND)
+    pub fn raise(&mut self, heap: &mut Heap, base: usize) -> Result<i64, Paused> {
+        self.drive(heap, base, STATUS_UNWIND)
     }
 
     /// [`Self::run_with_env`] for a caller that is a machine frame: an
@@ -236,13 +236,14 @@ impl FrameStack {
         env: &[i64],
         apply: impl Fn(i64, &[i64]) -> i64,
     ) -> Result<i64, Paused> {
+        let base = self.frames.len();
         let mut outcome = self.run_with_env(heap, f, args, env);
         loop {
             match outcome {
                 Err(Paused::Applying { closure, args }) => {
                     let v = apply(closure, &args);
                     self.set_top_value(heap, v);
-                    outcome = self.resume(heap);
+                    outcome = self.resume(heap, base);
                 }
                 other => return other,
             }
@@ -256,22 +257,24 @@ impl FrameStack {
     /// call as entering it the first time — which is the whole reason the ABI
     /// has exactly one parameter.
     ///
-    /// **The chain is this driver's alone**, so the loop runs down to zero
-    /// frames rather than to some base: a nested drive (`rt_apply_any`,
-    /// `rt_dyn_call`, `rt_drive_body`) cannot suspend, so there is no such
-    /// thing as resuming into the middle of somebody else's stack.
+    /// `base` is how many frames below this segment belong to somebody else.
+    /// It is zero for all but one case, and that case is C5's: a compiled
+    /// frame applies an interpreted closure, the closure calls a compiled
+    /// function, and the task now has two runs of compiled frames in one
+    /// stack with interpreted frames between them. Each is resumed down to
+    /// its own base.
     ///
     /// Whatever the resumed frame was waiting for must already be in its value
     /// slot ([`set_frame_value`]) — the same place a returning callee leaves
     /// its answer, because from the resuming function's side those are the
     /// same thing.
-    pub fn resume(&mut self, heap: &mut Heap) -> Result<i64, Paused> {
+    pub fn resume(&mut self, heap: &mut Heap, base: usize) -> Result<i64, Paused> {
         let top = match self.frames.last() {
             Some(top) => (top.body, top.frame),
             None => panic!("resume: there is no suspended chain to resume"),
         };
         let status = unsafe { activation(top.0, typelisp_abi::encode(top.1)) };
-        self.drive(heap, 0, status)
+        self.drive(heap, base, status)
     }
 
     /// [`run`](Self::run) for a callee that also has captures — a closure
@@ -348,6 +351,39 @@ impl FrameStack {
                         }
                         crate::Callee::Interpreted => return Err(Paused::Applying { closure, args }),
                     },
+                    Pending::Dyn { vtable, slot, args } => {
+                        let (ptr, abi) = crate::vtable_slot_addr(vtable as usize, slot as usize);
+                        if ptr == 0 {
+                            // Nothing compiled behind the slot: the concrete
+                            // type's method is ordinary interpreted code. Ask
+                            // the interpreter for the closure it stands for,
+                            // and from here it is an ordinary apply.
+                            let closure = unsafe { crate::reify_dyn_slot(vtable, slot, "a :dyn call") };
+                            return Err(Paused::Applying { closure, args });
+                        }
+                        if abi == typelisp_abi::BODY_ABI_COROUTINE {
+                            // SAFETY: a coroutine-ABI vtable entry is the
+                            // address of a body declared under
+                            // `coroutine_fn_type`, which is what the slot's
+                            // recorded ABI says.
+                            let f: CoroutineFn = unsafe { std::mem::transmute::<usize, CoroutineFn>(ptr) };
+                            status = self.begin(heap, f, &args, &[]);
+                        } else {
+                            // SAFETY: as above, under the plain
+                            // `compiled_fn_type` signature.
+                            let f: crate::ClassicMethodFn = unsafe { std::mem::transmute(ptr) };
+                            let call = std::panic::AssertUnwindSafe(|| unsafe {
+                                f(args.as_ptr(), args.len() as u32)
+                            });
+                            status = match std::panic::catch_unwind(call) {
+                                Ok(v) => self.hand_back(heap, v),
+                                Err(payload) => {
+                                    unsafe { crate::park_activation_unwind(payload) };
+                                    STATUS_UNWIND
+                                }
+                            };
+                        }
+                    }
                 },
                 STATUS_SUSPEND => return Err(Paused::Suspended),
                 _ => match self.unwind(heap, base) {

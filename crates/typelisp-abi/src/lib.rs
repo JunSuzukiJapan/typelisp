@@ -452,6 +452,12 @@ pub mod call_state {
         /// A function *value*, tagged, with its arguments in its own
         /// declared representations.
         Apply { closure: i64, args: Vec<i64> },
+        /// A `:dyn` method: the vtable the trait object dispatches through,
+        /// the slot the checker picked, and the arguments with the *concrete*
+        /// receiver first. What the slot holds decides who runs it, exactly
+        /// as for [`Pending::Apply`] — and it can hold nothing at all, when
+        /// the concrete type's method is interpreted.
+        Dyn { vtable: u32, slot: u32, args: Vec<i64> },
     }
 
     pub fn set_pending_call(target: usize, args: Vec<i64>, env: Vec<i64>) {
@@ -462,6 +468,11 @@ pub mod call_state {
     /// an address, so the driver resolves it.
     pub fn set_pending_apply(closure: i64, args: Vec<i64>) {
         PENDING_CALL.with(|c| *c.borrow_mut() = Some(Pending::Apply { closure, args }));
+    }
+
+    /// [`set_pending_call`] for a `:dyn` method call.
+    pub fn set_pending_dyn(vtable: u32, slot: u32, args: Vec<i64>) {
+        PENDING_CALL.with(|c| *c.borrow_mut() = Some(Pending::Dyn { vtable, slot, args }));
     }
 
     pub fn take_pending_call() -> Option<Pending> {

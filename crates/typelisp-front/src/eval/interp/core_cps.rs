@@ -127,6 +127,18 @@ struct DriveCtx {
     roots_on_entry: usize,
     /// How many roots marshaling pushed, for the ordinary path.
     crossing_roots: usize,
+    /// How deep `Task::compiled` was when this crossing began.
+    ///
+    /// **A task can have more than one chain segment standing** since C5: a
+    /// compiled frame applies an interpreted closure, that closure calls a
+    /// compiled function, and now there are two runs of compiled frames in
+    /// one `FrameStack` with interpreted frames between them. Each segment
+    /// drives down to its own base, and the frames below it belong to
+    /// somebody else.
+    ///
+    /// Zero for the outermost segment, which is every crossing before C5 and
+    /// still nearly all of them.
+    base: usize,
 }
 
 /// What is known about a compiled crossing *before* its arguments are
@@ -1190,9 +1202,10 @@ impl Interp {
                 match heap.list_to_vec(argv).map_err(heap_err).and_then(|argv| {
                     let (args, crossing_roots, roots_on_entry) =
                         self.begin_compiled(heap, &argv, &start.params)?;
-                    Ok((args, DriveCtx { start, roots_on_entry, crossing_roots }))
+                    Ok((args, roots_on_entry, crossing_roots, start))
                 }) {
-                    Ok((args, drive)) => {
+                    Ok((args, roots_on_entry, crossing_roots, start)) => {
+                        let drive = DriveCtx { start, roots_on_entry, crossing_roots, base: task.compiled.depth() };
                         // SAFETY: the address is a symbol the backend resolved
                         // out of a module that defines it, declared under
                         // `coroutine_fn_type` — the same provenance every
@@ -1203,7 +1216,6 @@ impl Interp {
                                 drive.start.body.address(),
                             )
                         };
-                        debug_assert_eq!(task.compiled.depth(), 0, "a task drives one compiled chain at a time");
                         let outcome = {
                             let stack = &mut task.compiled;
                             crate::eval::crossing::catch_compiled_panic(|| stack.run(heap, f, &args))
@@ -1220,9 +1232,10 @@ impl Interp {
                 };
                 match delivered {
                     Ok(()) => {
+                        let base = drive.base;
                         let outcome = {
                             let stack = &mut task.compiled;
-                            crate::eval::crossing::catch_compiled_panic(|| stack.resume(heap))
+                            crate::eval::crossing::catch_compiled_panic(|| stack.resume(heap, base))
                         };
                         self.after_drive(heap, task, outcome, drive)
                     }
@@ -1233,9 +1246,10 @@ impl Interp {
                 }
             }
             State::CompiledRaise { drive } => {
+                let base = drive.base;
                 let outcome = {
                     let stack = &mut task.compiled;
-                    crate::eval::crossing::catch_compiled_panic(|| stack.raise(heap))
+                    crate::eval::crossing::catch_compiled_panic(|| stack.raise(heap, base))
                 };
                 self.after_drive(heap, task, outcome, drive)
             }
