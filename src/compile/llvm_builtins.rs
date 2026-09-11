@@ -1380,9 +1380,9 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
                 data,
                 frame,
                 size_store,
-                // Slots 0 and 1 are the driver protocol's own — the value in
-                // flight and the unwind handler — and never locals.
-                next: 2,
+                // The driver protocol's own slots — the value in flight and
+                // the unwind handler — are never handed out as locals.
+                next: typelisp_abi::FRAME_RESERVED_SLOTS as u64,
                 coro: Some(CoroCtx {
                     function,
                     body,

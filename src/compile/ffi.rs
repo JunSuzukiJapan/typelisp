@@ -322,8 +322,19 @@ fn emit_coroutine_entry(
         .map_err(|e| format!("ffi: failed to reserve the entry scratch slot: {}", e))?;
     let one = ctx.i32_type().const_int(1, false);
 
-    // One slot, so the frame has somewhere to put the answer.
-    let frame = call_shim(&builder, shim("rt_frame_new"), scratch, one, i64_ty.const_int(1, false), "ffi_frame")?;
+    // The driver protocol's own slots, and nothing else: this entry has no
+    // locals, but a frame the driver cannot read the handler slot of is a
+    // frame it cannot ask about an unwind. It asked with one slot here until
+    // C4 reserved the second, and the two FFI tests that *raise* are what
+    // said so.
+    let frame = call_shim(
+        &builder,
+        shim("rt_frame_new"),
+        scratch,
+        one,
+        i64_ty.const_int(typelisp_abi::FRAME_RESERVED_SLOTS as u64, false),
+        "ffi_frame",
+    )?;
     call_shim(&builder, shim("rt_frame_entered"), scratch, one, frame, "ffi_entered")?;
 
     let args = builder

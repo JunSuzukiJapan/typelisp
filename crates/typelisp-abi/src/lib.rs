@@ -271,6 +271,17 @@ pub const FRAME_VALUE_SLOT: usize = 0;
 /// Never masked: a `pc` is a raw integer, not a tagged value.
 pub const FRAME_HANDLER_SLOT: usize = 1;
 
+/// How many slots at the bottom of a frame the driver protocol owns:
+/// [`FRAME_VALUE_SLOT`] and [`FRAME_HANDLER_SLOT`].
+///
+/// **Every frame a driver drives must have at least this many**, whoever
+/// built it — the island's prologue hands locals out from here upward, and a
+/// hand-written entry shim has to reserve them even when it uses neither.
+/// `FrameStack::unwind` reads the handler slot of every frame it walks, so a
+/// frame one word short is a frame the driver cannot ask; it says so rather
+/// than reading past the end.
+pub const FRAME_RESERVED_SLOTS: usize = 2;
+
 /// The state one coroutine-ABI call is in flight through.
 ///
 /// Three thread-locals, for the same reason [`ACTIVE_HEAP`](set_active_heap)
