@@ -661,13 +661,23 @@ pub struct UnitState {
     pub globals: Vec<(String, usize)>,
 }
 
-/// Writes down what a unit added.
+/// Writes down what a unit added, for a unit that **carries no bodies**.
 ///
 /// `checker` comes from [`crate::Checker::capture_delta`], taken against a
 /// signature from before the unit loaded — and taken *before any later unit
 /// loads*, since the checker they all share cannot say afterwards which of
 /// them added what. `forms` are the unit's checked top-level forms in
 /// declaration order, and must still be rooted: this reads them out of `heap`.
+///
+/// **It takes no `items` on purpose.** The ABI fields it fills in are
+/// meaningless for a unit with no bitcode, so it fills them in classic and
+/// says nothing — and a caller that *did* have bodies would get that silence
+/// recorded as a convention. That mistake was made twice (the session dump
+/// and the prelude, both noted at their call sites) and neither announced
+/// itself: the label is only read when something *calls* one of those bodies,
+/// and then it is a wrong convention rather than an error. A unit with
+/// bodies has to use [`capture_types_with_abi`], which cannot be called
+/// without answering.
 pub fn capture_types(
     heap: &crate::Heap,
     checker: CheckerDelta,
@@ -675,7 +685,6 @@ pub fn capture_types(
     source_digest: Option<u64>,
     forms_digest: Option<u64>,
     forms: &[crate::Value],
-    items: Vec<UnitItem>,
     globals: Vec<(String, usize)>,
 ) -> Result<UnitState, String> {
     capture_types_with_abi(
@@ -685,7 +694,7 @@ pub fn capture_types(
         source_digest,
         forms_digest,
         forms,
-        items,
+        Vec::new(),
         globals,
         typelisp_abi::BODY_ABI_CLASSIC,
         typelisp_abi::BODY_ABI_CLASSIC,

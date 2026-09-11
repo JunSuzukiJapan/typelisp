@@ -168,11 +168,14 @@ pub trait CompiledBody {
     /// **Not inferable from the address.** Calling one as the other is not a
     /// type error anywhere — it is a wrong answer or a crash — so the artifact
     /// that carried the body has to say, and this is where that answer arrives.
-    /// Defaults to classic, which is what every producer says until the island
-    /// itself changes over.
-    fn body_abi(&self) -> u8 {
-        typelisp_abi::BODY_ABI_CLASSIC
-    }
+    ///
+    /// Required, with no default. It defaulted to classic while that was
+    /// "what every producer says until the island itself changes over"; the
+    /// island changed over in C2d, and a default that no implementor uses is
+    /// a wrong answer waiting for the next one. Both implementors already
+    /// override it, so nothing is lost by making the question unanswerable
+    /// by omission.
+    fn body_abi(&self) -> u8;
 
     /// Calls it with `args` already in the compiled representation.
     ///

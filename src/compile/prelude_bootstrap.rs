@@ -548,8 +548,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         items.iter().map(unit_item).collect(),
         globals,
         // These bodies were emitted by whichever island this process is
-        // running, so that is the ABI they answer to. The prelude emits no
-        // code of its own, so `emits_abi` says nothing and stays classic.
+        // running, so that is the ABI they answer to.
         //
         // `capture_types`' classic default was right only while the island
         // was classic too: the moment the island flipped, a regenerated
@@ -557,8 +556,14 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         // caller entered it as `f(args, argc)` -- the argument pointer
         // arriving where the frame belongs, decoded as a fixnum by
         // `rt_frame_data` ("... is not a frame").
+        //
+        // The prelude emits no code of its own, so `emits_abi` has nothing to
+        // say -- and `UnitState`'s doc comment spells out what a unit with
+        // nothing to say writes: the same value as `body_abi`. It said classic
+        // instead until C6, which is a real ABI value standing in for "no
+        // answer" in the one field a future changeover would read.
         crate::compile::EMITTED_BODY_ABI,
-        typelisp_abi::BODY_ABI_CLASSIC,
+        crate::compile::EMITTED_BODY_ABI,
     )?;
     let types = typelisp_front::dump::write_state(&state)?;
     Ok(typelisp_front::dump::write(&[(types, bitcode)]))

@@ -187,7 +187,7 @@ pub fn capture_program_dump(
     }
 
     let delta = chk.capture_delta(heap, &before)?;
-    let state = typelisp_front::dump::capture_types(heap, delta, typelisp_front::dump::PROGRAM_LABEL, None, None, &forms, Vec::new(), globals.to_vec())?;
+    let state = typelisp_front::dump::capture_types(heap, delta, typelisp_front::dump::PROGRAM_LABEL, None, None, &forms, globals.to_vec())?;
     while heap.root_count() > mark {
         heap.pop_root();
     }
@@ -265,12 +265,17 @@ pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), St
         globals,
         // This unit carries bodies, so it has to say which ABI they answer to
         // -- `capture_types`' classic default is only right for a unit with
-        // no bitcode at all (the program-forms unit above). The prelude made
-        // the same mistake, and it does not announce itself: the label is only
-        // read when something *calls* one of these bodies, and then it is a
-        // wrong convention rather than an error.
+        // no bitcode at all (the program-forms unit above), which is why that
+        // one no longer accepts items.
+        //
+        // `emits_abi` is meaningless here: these bodies are a session's
+        // definitions, not a compiler, so they emit nothing. `UnitState`'s own
+        // doc comment says that case is written *equal to* `body_abi` -- which
+        // it was not, until C6. A bare classic there is a real ABI value being
+        // used as "no answer", and the next reader of this field cannot tell
+        // the two apart.
         crate::compile::EMITTED_BODY_ABI,
-        typelisp_abi::BODY_ABI_CLASSIC,
+        crate::compile::EMITTED_BODY_ABI,
     )?;
 
     let mut units: Vec<(Vec<u8>, Vec<u8>)> = interp.with_dump_sources(|sources| {

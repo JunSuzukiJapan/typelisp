@@ -324,7 +324,19 @@ impl CompiledFn {
     /// every call before Stage 3. Must be called with [`COMPILE_LOCK`]
     /// held — which is also what makes this the place to destroy whatever
     /// [`retire_llvm`] has been handed since the last compile.
-    pub fn new(module: &Module<'static>, fn_name: &str, externals: &[(String, usize)]) -> Result<CompiledFn, String> {
+    ///
+    /// `body_abi` is asked for rather than assumed, the same way
+    /// [`Self::new_multi`] asks. It used to be hardcoded classic, which was
+    /// right only for this function's hand-built callers and silently wrong
+    /// for anything coming out of the island — and [`EMITTED_BODY_ABI`]'s own
+    /// doc comment already claimed to be "the ABI recorded on every
+    /// JIT-compiled function" while this one ignored it.
+    pub fn new(
+        module: &Module<'static>,
+        fn_name: &str,
+        externals: &[(String, usize)],
+        body_abi: u8,
+    ) -> Result<CompiledFn, String> {
         destroy_retired_llvm();
         let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
         for (name, addr) in externals {
@@ -334,7 +346,7 @@ impl CompiledFn {
             engine.add_global_mapping(&decl, *addr);
         }
         let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
-        Ok(CompiledFn { engine: Some(engine), addr, body_abi: typelisp_abi::BODY_ABI_CLASSIC })
+        Ok(CompiledFn { engine: Some(engine), addr, body_abi })
     }
 
     /// Like [`Self::new`], but resolves every name in `fn_names` out of one
@@ -455,7 +467,8 @@ mod tests {
         module.verify().expect("module failed verification");
 
         let externals = vec![("rt_ping".to_string(), rt_ping as usize)];
-        let compiled = CompiledFn::new(&module, "jit_ping_test", &externals).expect("CompiledFn::new failed");
+        let compiled = CompiledFn::new(&module, "jit_ping_test", &externals, typelisp_abi::BODY_ABI_CLASSIC)
+            .expect("CompiledFn::new failed");
         assert_eq!(compiled.call(&[]), 42);
     }
 
@@ -500,7 +513,8 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let externals = vec![("rt_heap_live_count".to_string(), rt_heap_live_count as usize)];
-        let compiled = CompiledFn::new(&module, "jit_heap_test", &externals).expect("CompiledFn::new failed");
+        let compiled = CompiledFn::new(&module, "jit_heap_test", &externals, typelisp_abi::BODY_ABI_CLASSIC)
+            .expect("CompiledFn::new failed");
         assert_eq!(compiled.call(&[]), 2);
     }
 
@@ -581,7 +595,8 @@ mod tests {
             ("rt_car".to_string(), rt_car as usize),
             ("rt_cdr".to_string(), rt_cdr as usize),
         ];
-        let compiled = CompiledFn::new(&module, "jit_cons_test", &externals).expect("CompiledFn::new failed");
+        let compiled = CompiledFn::new(&module, "jit_cons_test", &externals, typelisp_abi::BODY_ABI_CLASSIC)
+            .expect("CompiledFn::new failed");
         assert_eq!(compiled.call(&[]), 1002);
         // The real `Heap` (not just the tagged `i64`s) actually grew by one
         // cons cell — proof `rt_cons` went through `Heap::cons`, not some

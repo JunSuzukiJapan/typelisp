@@ -1260,6 +1260,28 @@ C5 より前、compiled から届いたインタプリタの呼び先は*マシ�
 **C4 と同じ手順が 2 度目に効いた。** 消した機構の名前で grep するのが最後の
 一歩で、型検査もテストも何も言わない。
 
+### grep は足りていなかった —— 組み込みの名前は文字列
+
+全体スイートが `compile_test` で 1 本見つけた。
+`a_closure_made_from_a_capturing_function_can_be_called_indirectly` が
+`build-closure-apply` と `rt_apply_any` を **Lisp のソース文字列の中から**
+呼んでいた。組み込みは `llvm_builtins.rs` の文字列 match でディスパッチされる
+ので、**消した builder を呼ぶコードは `cargo check --workspace --all-targets`
+の警告 0 をそのまま通る**。45 箇所の grep で名前は出ていたのに、コメントだと
+思って読み飛ばしたのが取りこぼしの原因。
+
+書き直し方は「呼び出し側をコルーチンにし、callee は classic のまま
+`coroutine-apply` に載せる」。callee を classic に残したのは意図的で、
+`resolve_closure` の `Callee::Classic`（ドライバが自分で呼び、unwind を捕まえ、
+答えをフレームの値スロットに書いて渡す腕）には C5a 以降テストが 1 本も
+無かった。
+
+同じ grep で**宣言だけの死んだ記号**が 3 行出た。`rt_apply_any` を明示宣言して
+いた `compile-function` テスト 2 本と、そのうち 1 本の `rt_push_sexpr_root`
+（C1 以降 `bind-captures` は `binding-slot` を配るだけで root しない）。
+使われない `add-function` 宣言は LLVM が解決しようとしないので、**消えた記号を
+宣言していても誰も何も言わない**。3 行消して 3 本とも緑。
+
 ### `run_to_completion` の拒否は残るが、理由が入れ替わった
 
 プランは C5 で消えると書いていたが、消えない——**指している相手が変わった**。
@@ -1267,3 +1289,82 @@ C5 より前、compiled から届いたインタプリタの呼び先は*マシ�
 本当に握っているのは `Interp::apply` と公開 API、`eval` 組み込み、
 `print-object` メソッド、リーダマクロ、そしてそれらから入ったドライバ。
 文面をそう直した。
+
+## C6. ABI を暗黙にしない
+
+プランは C6 を「ブートストラップと再生成」と書き、`FORMAT_VERSION` を上げて
+ロード側が本体の ABI を見て呼び分ける段を作れ、不動点に達したら旧経路を消せと
+していた。**調べたらその大半は既に済んでいた**:
+
+- ダンプは `body_abi` と `emits_abi` をユニットごとに記録し、`CompiledLibrary`
+  がそれを呼び出しまで運んでいる（C2d で入った）
+- 不動点も成立している。`ISLAND_DUMP_BODY_ABI` と `ISLAND_DUMP_EMITS_ABI` は
+  どちらも `BODY_ABI_COROUTINE`
+- classic ABI の本体を今も作るのは C FFI の thunk の**内側**だけ
+
+残っていたのは削除ではなく、**答えを言わずに済む場所**だった。
+
+### 既定値が 4 つあり、正しかったのは 1 つだけ
+
+| 場所 | 状態 |
+|---|---|
+`aot.rs` | `target.get_type() == coroutine_fn_type()` で導出。**唯一の正直な場所** |
+`CompiledBody::body_abi` | 既定値 classic。**両方の実装が上書きしているので誰も使っていない** |
+`CompiledFn::new` | classic 決め打ち。`new_multi` は引数で受けるのに |
+`capture_types` | `body_abi`/`emits_abi` とも classic。本体を持つユニットが使うと黙って嘘になる |
+
+`CompiledBody::body_abi` の doc は理由まで書いてあった——「**島自身が
+切り替わるまでは全ての生産者がこう言う**」。島は C2d で切り替わっている。
+[[typelisp-c2d-island-coroutine-abi]] の「成果物の既定値は理由が消えても黙る」
+がそのまま当たっていた。
+
+`EMITTED_BODY_ABI` の doc も「JIT コンパイルされた**すべての**関数に記録される
+ABI」と主張していたが、`CompiledFn::new` はそれを無視して classic と書いて
+いた。書いた値が読まれていなかったから誰も気づかない。
+
+### 直し方は「省略で答えられなくする」
+
+- `CompiledBody::body_abi` を**必須メソッド**に（既定値を削除）
+- `CompiledFn::new` が `body_abi` を受ける。`new_multi` と対称になり、4 つの
+  呼び手が自分で答える
+- `capture_types` から `items` を外した。**本体を持つユニットは ABI を言わない
+  構築子を構造的に使えない。** この関数のコメント 2 箇所（session ダンプと
+  prelude）が「同じ間違いを 2 度した」ことを既に記録していて、どちらも
+  「呼ばれたときに初めて誤った規約になる」と書いてある——それを型で防いだ
+
+C FFI の thunk は 1 つ得をした。`CompiledFn::new` に classic と書かれた値は
+**読まれない場所に置かれていた**（`_code` フィールド）一方、`FfiThunk` は
+`body_abi()` を COROUTINE で上書きしていた——Lisp 名の下にあるのはコルーチン
+入口だから。いまは `CompiledFn` に COROUTINE と言わせ、`FfiThunk` はそれを
+読み返す。答えは記号を引いた場所に 1 つ。
+
+### `emits_abi` の「何も言わない」を実在の値で綴っていた
+
+`UnitState` の doc は「島でないものについては*意味が無く、`body_abi` と等しい*」
+と定義している。ところが session ダンプと prelude の呼び出し地点は
+`BODY_ABI_CLASSIC` を渡していた——**実在の ABI 値を「答えなし」として**。
+次の切り替えで `emits_abi` を読む者は、その 0 が「classic を出す」なのか
+「何も出さない」なのか区別できない。doc の規約どおり `body_abi` と同じ値に直した。
+
+### SOURCE を触らずに prelude が変わり、ハッシュは黙っていた
+
+`emits_abi` を 1 バイト変えただけで prelude の記録が変わる。結果:
+
+- `prelude_artifacts_are_fresh`（**ハッシュ判定**）は **ok**
+- `the_committed_prelude_matches_a_fresh_build`（**バイト比較**）は **FAILED**
+
+[[typelisp-island-hash-reads-forms]] の「入力は 3 つだがハッシュは 1 つしか
+見ていない」の 3 度目。**2 つの粒度で番人を置いてあるのはこのため**で、
+`island_artifacts_test` のモジュール doc がまさにそう書いている。島は
+再生成不要だった（`bootstrap.rs` は最初から実値を渡していた）。
+
+### 番人を 1 本足した
+
+`the_committed_prelude_records_the_abi_its_bodies_answer_to`。prelude の
+`body_abi` が `EMITTED_BODY_ABI` と一致し、`emits_abi` がそれを繰り返している
+ことを検査する。**修正前の成果物に当てて、`emits_abi` の側で鳴ることを確かめた**
+——バイト比較は「違う」しか言わないが、これはどのフィールドがなぜ違うかを言う。
+
+コメントが記録していたバグ（「coroutine なのに classic と書かれた prelude を
+インタプリタが `f(args, argc)` で呼び、フレームの位置に引数ポインタが届いた」）
+を、いまは誰も検査していなかった。

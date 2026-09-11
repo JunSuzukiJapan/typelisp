@@ -75,6 +75,41 @@ fn the_committed_prelude_matches_a_fresh_build() {
     assert!(committed == fresh, "the prelude dump differs from a fresh build — {}", REGEN);
 }
 
+/// **The committed prelude says which ABI its bodies answer to, and says
+/// nothing about what they emit.**
+///
+/// The prelude's bodies are whatever the island that compiled them emits
+/// (`compile::EMITTED_BODY_ABI`), and the prelude is not a compiler, so
+/// `emits_abi` has nothing of its own to say — which `UnitState`'s doc comment
+/// defines as writing the same value as `body_abi`.
+///
+/// Both halves have been wrong in this file before, and neither announced it:
+/// a regenerated prelude was coroutine code labelled classic, and an
+/// interpreted caller entered it as `f(args, argc)` — the argument pointer
+/// arriving where the frame belongs. **The freshness digest cannot catch
+/// this**: it hashes `prelude.rs`'s `SOURCE`, and both fields are decided by
+/// Rust. The byte-equality test above does catch it, but only says "differs";
+/// this one names which field and why.
+#[test]
+fn the_committed_prelude_records_the_abi_its_bodies_answer_to() {
+    let bytes = committed();
+    let units = parse(&bytes, "prelude").unwrap_or_else(|e| panic!("{} — {}", e, REGEN));
+    let unit = units.first().unwrap_or_else(|| panic!("the prelude dump holds no units — {}", REGEN));
+    let state = read_state(unit.types, "prelude").unwrap_or_else(|e| panic!("{} — {}", e, REGEN));
+    assert_eq!(
+        state.body_abi,
+        typelisp::compile::EMITTED_BODY_ABI,
+        "the committed prelude's bodies claim an ABI this build's island does not emit — {}",
+        REGEN
+    );
+    assert_eq!(
+        state.emits_abi, state.body_abi,
+        "the prelude emits no code of its own, so `emits_abi` must repeat `body_abi` rather than \
+         stand in for \"no answer\" with a real ABI value — {}",
+        REGEN
+    );
+}
+
 /// The bitcode section carries the same load-bearing trailing NUL, for the
 /// same reason — see `the_committed_island_keeps_its_trailing_nul` in
 /// `island_artifacts_test.rs` for the writer/reader pairing and why the length

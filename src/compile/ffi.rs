@@ -593,10 +593,11 @@ fn library_candidates(name: &str) -> Vec<String> {
 
 /// A thunk, and the engine holding the code it lives in.
 struct FfiThunk {
-    /// Held for its lifetime, never called through — dropping it would free
-    /// the code at `addr`. `CompiledFn` holds an `ExecutionEngine` share for
-    /// exactly this reason; see its doc comment.
-    _code: CompiledFn,
+    /// Held for its lifetime — dropping it would free the code at `addr`.
+    /// `CompiledFn` holds an `ExecutionEngine` share for exactly this reason;
+    /// see its doc comment. Also the one place that says which ABI the
+    /// resolved entry answers to, which [`FfiThunk::body_abi`] reads back.
+    code: CompiledFn,
     addr: usize,
 }
 
@@ -611,8 +612,11 @@ impl CompiledBody for FfiThunk {
     /// made `CompiledBody::call` hand it `(args, argc)`, which the entry
     /// answers by reading arguments that were never put in `call_state`
     /// ("rt_pending_arg: argument 0 was not passed").
+    ///
+    /// Deferred to the `CompiledFn` that resolved that entry, so the answer
+    /// is stated once, where the symbol was looked up.
     fn body_abi(&self) -> u8 {
-        typelisp_abi::BODY_ABI_COROUTINE
+        self.code.body_abi()
     }
 }
 
@@ -661,8 +665,11 @@ pub fn define_ffi(_interp: &Interp, decl: &FfiDecl) -> Result<Rc<dyn CompiledBod
             .filter(|(n, _)| module.get_function(n).is_some())
             .map(|(n, a)| (n.to_string(), *a)),
     );
-    let code = CompiledFn::new(&module, &name, &externals)
+    // `name` is the coroutine entry `emit_thunk` put under the Lisp name, not
+    // the classic marshalling body behind it — so that is the ABI recorded
+    // here, and `FfiThunk` reads it back rather than restating it.
+    let code = CompiledFn::new(&module, &name, &externals, typelisp_abi::BODY_ABI_COROUTINE)
         .map_err(|e| format!("ffi: failed to JIT the thunk for `{}`: {}", decl.c_symbol, e))?;
     let addr = code.address();
-    Ok(Rc::new(FfiThunk { _code: code, addr }))
+    Ok(Rc::new(FfiThunk { code, addr }))
 }

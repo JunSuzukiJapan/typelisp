@@ -43,7 +43,7 @@ fn a_restored_prelude_unit_holds_everything_the_source_defined() {
     let before = chk.signature(&heap).expect("signature of a fresh checker");
     let forms = load_recording(&mut heap, &mut chk, &mut interp);
     let delta = chk.capture_delta(&heap, &before).expect("capturing the delta");
-    let unit = dump::capture_types(&heap, delta, "prelude", None, None, &forms, Vec::new(), Vec::new())
+    let unit = dump::capture_types(&heap, delta, "prelude", None, None, &forms, Vec::new())
         .expect("capturing the prelude unit");
     let expected = chk.signature(&heap).expect("signature after the slow load");
 
@@ -64,7 +64,7 @@ fn a_restored_prelude_unit_can_check_and_run_a_program() {
     let before = chk.signature(&heap).expect("signature of a fresh checker");
     let forms = load_recording(&mut heap, &mut chk, &mut interp);
     let delta = chk.capture_delta(&heap, &before).expect("capturing the delta");
-    let unit = dump::capture_types(&heap, delta, "prelude", None, None, &forms, Vec::new(), Vec::new())
+    let unit = dump::capture_types(&heap, delta, "prelude", None, None, &forms, Vec::new())
         .expect("capturing the prelude unit");
 
     let mut heap = Heap::with_capacity(1 << 18);
@@ -95,7 +95,7 @@ fn a_prelude_macro_survives_the_round_trip() {
     let before = chk.signature(&heap).expect("signature of a fresh checker");
     let forms = load_recording(&mut heap, &mut chk, &mut interp);
     let delta = chk.capture_delta(&heap, &before).expect("capturing the delta");
-    let unit = dump::capture_types(&heap, delta, "prelude", None, None, &forms, Vec::new(), Vec::new())
+    let unit = dump::capture_types(&heap, delta, "prelude", None, None, &forms, Vec::new())
         .expect("capturing the prelude unit");
 
     let mut heap = Heap::with_capacity(1 << 18);
