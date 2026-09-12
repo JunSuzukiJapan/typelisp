@@ -946,10 +946,7 @@ impl Scheduler {
     /// whole of the dispatch, and the value is the receive's `Option<T>` (or
     /// unit for a send or an `else`).
     fn select_answer(&self, heap: &mut Heap, arm: usize, payload: Value) -> Result<Value, EvalError> {
-        heap.push_root(payload);
-        let out = heap.cons(Value::Int(arm as i64), payload).map_err(heap_err);
-        heap.pop_root();
-        out
+        core::pair(heap, Value::Int(arm as i64), payload).map_err(heap_err)
     }
 
     /// A number in `0..n`.
@@ -1124,23 +1121,20 @@ impl Scheduler {
     /// in whichever shape it was waiting in.
     fn wake_receiver(&mut self, heap: &mut Heap, i: usize, arm: Option<usize>, key: &str, v: Option<Value>) {
         let payload = option_value(heap, key, v);
-        let answer = match arm {
-            Some(a) => match self.select_answer(heap, a, payload) {
-                Ok(v) => v,
-                Err(_) => payload,
-            },
-            None => payload,
+        let state = match arm {
+            Some(a) => answer_state(self.select_answer(heap, a, payload)),
+            None => State::Apply(payload),
         };
-        self.wake(heap, i, State::Apply(answer));
+        self.wake(heap, i, state);
     }
 
     /// Wakes a sender whose value has been taken.
     fn wake_sender(&mut self, heap: &mut Heap, i: usize, arm: Option<usize>) {
-        let answer = match arm {
-            Some(a) => self.select_answer(heap, a, Value::Empty).unwrap_or(Value::Empty),
-            None => Value::Empty,
+        let state = match arm {
+            Some(a) => answer_state(self.select_answer(heap, a, Value::Empty)),
+            None => State::Apply(Value::Empty),
         };
-        self.wake(heap, i, State::Apply(answer));
+        self.wake(heap, i, state);
     }
 
     /// `(send ch v)`. `None` means the sender has to wait for room.
