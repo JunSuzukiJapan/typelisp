@@ -1654,7 +1654,7 @@ impl Interp {
     /// Bind a macro call's raw (unevaluated) argument forms to its parameters,
     /// producing one value per parameter in `f.params` order —
     /// required, then `&optional`, then `&rest`, then `&key` — ready for
-    /// [`Self::apply`]. Omitted `&optional`/`&key` arguments evaluate their
+    /// [`Self::enter`]. Omitted `&optional`/`&key` arguments evaluate their
     /// default-value body (in an environment holding the params already bound,
     /// CL-style); an empty body binds `nil` (`Sexpr::Nil`).
     ///
@@ -2624,7 +2624,7 @@ impl Interp {
     /// characters of `rest` went into it.
     ///
     /// The call goes through the prelude's `call-reader-macro`, not straight
-    /// through [`Self::apply`]. A reader macro takes a *stream*, and making
+    /// through [`Self::enter`]. A reader macro takes a *stream*, and making
     /// one out of `rest` — a `string-input-stream` upcast to
     /// `:dyn PeekInput` — is work with a type on it, which is to say the
     /// checker's; doing it from Rust would mean assembling a trait object by

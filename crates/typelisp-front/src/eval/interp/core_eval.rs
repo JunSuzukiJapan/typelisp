@@ -715,11 +715,18 @@ impl Interp {
     /// Call `f` with already-evaluated `argv`: through its compiled body if it
     /// has one, otherwise by tree-walking.
     ///
+    /// **The one way to call a registered function.** Everything that decides
+    /// between the two halves lives here and only here: the compiled body, the
+    /// `trace`/`step` hook, the interpreted fallback. `Self::apply` is the
+    /// interpreted half, deliberately module-private — reaching past this and
+    /// calling it directly is how three call sites silently ignored `(compile
+    /// f)` until 2026-09-12.
+    ///
     /// The compiled check comes first so a later recompile would naturally take
     /// precedence. `compile_function` never populates `compiled` without going
     /// through `compiled_fn_body`, which requires `sig` — so the `expect` is an
     /// internal invariant, not a user-reachable error.
-    pub(crate) fn enter(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<Value, EvalError> {
+    pub fn enter(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<Value, EvalError> {
         // Two `Cell` loads on the path every call takes. Anything more — a
         // `RefCell` borrow, a hash lookup — belongs behind them, which is why
         // the set membership is tested only once one of the two is armed.
@@ -1898,10 +1905,16 @@ impl Interp {
     /// Apply a registered function/method body: bind its parameters to `args`
     /// and run its core forms.
     ///
+    /// **The interpreted half of [`Self::enter`], and private so that it can
+    /// only ever be reached through it.** This never looks at `def.compiled`;
+    /// calling it on a function that has a compiled body runs the tree-walker
+    /// anyway, which is a bug wherever it happens. Its only caller is
+    /// `enter_plain`, four lines above.
+    ///
     /// The environment is a heap chain (`extend_env`), the same one a `lambda`'s
     /// captured environment is, so a nested closure in the body captures the
     /// parameters by the ordinary mechanism rather than a second one.
-    pub fn apply(&self, heap: &mut Heap, def: &FnDef, args: Vec<Value>) -> Result<Value, EvalError> {
+    fn apply(&self, heap: &mut Heap, def: &FnDef, args: Vec<Value>) -> Result<Value, EvalError> {
         if def.params.len() != args.len() {
             return Err(EvalError::Internal(format!(
                 "apply: the body takes {} argument(s), given {}",

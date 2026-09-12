@@ -318,7 +318,7 @@ pub fn run_compile_function(
         r?;
         return Ok(());
     }
-    interp.apply(heap, &compiler_def, argv)?;
+    interp.enter(heap, &compiler_def, argv)?;
     Ok(())
 }
 
