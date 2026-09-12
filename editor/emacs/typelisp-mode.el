@@ -149,6 +149,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; sequences and are listed with those)
     "wait" "yield"
     "send" "recv" "cap" "after"
+    ;; the `sync' layer: a wait group's three, and a mutex's two plus the
+    ;; macro that pairs them (`add'/`make' are shared with other types)
+    "done" "lock" "unlock" "with-lock"
     ;; the readtable (syntax.md §11)
     "get-dispatch-macro-character" "get-macro-character"
     "set-dispatch-macro-character" "set-macro-character"
@@ -383,8 +386,9 @@ stream (CLHS 12.1.6).
     "pathname" "pathish"
     ;; builtin generic/abstract types
     "Option" "Result" "Sexpr" "HashTable" "Vector" "Self"
-    ;; the handle `go' hands back, and the channel tasks talk over
-    "Task" "Chan"
+    ;; the handle `go' hands back, the channel tasks talk over, and the two
+    ;; `sync' types built on channels
+    "Task" "Chan" "WaitGroup" "Mutex"
     ;; builtin concrete error types, one per fallible builtin (§7.1).  `Error'
     ;; itself is *not* a type -- it is the prelude trait these implement, used
     ;; as `:dyn Error'.

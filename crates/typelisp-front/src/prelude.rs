@@ -5787,6 +5787,113 @@ user-visible capacity."
     ch))
 
 
+;; ---- WaitGroup ----------------------------------------------------------
+
+;; Go's `sync.WaitGroup`: wait for N things to finish without holding a handle
+;; on each of them.
+;;
+;; `Task<T>` covers most of what Go needs this for — `(doiter (t tasks) (wait
+;; t))` waits for a vector of them — so this is the tool for work that is
+;; created dynamically, or where the handles are not worth keeping.
+;;
+;; The gate is an unbuffered channel nobody ever sends on: waiting is
+;; `(recv gate)`, which parks, and reaching zero is `(close gate)`, which
+;; releases *everyone* parked on it at once. A `wait` after the group has
+;; already finished receives `none` from the closed channel and returns, which
+;; is why the counter is tested first rather than the channel.
+;;
+;; `WaitGroup::make` and not `WaitGroup::new`: a `defstruct`'s `new` takes its
+;; fields, and this one takes none. `Array<T>::make`/`BitVector::make` are the
+;; same shape for the same reason.
+(pub defstruct WaitGroup (count i32) (gate Chan<()>))
+
+(pub defmethod make (WaitGroup) WaitGroup
+  "A wait group with nothing outstanding."
+  (WaitGroup::new 0 (the Chan<()> (Chan::new 0))))
+
+(pub defmethod add ((self WaitGroup) (n i32)) ()
+  "Add `n` to the counter, before starting the work it counts."
+  (setf self::count (+ self::count n))
+  (if (< self::count 0)
+      (panic "add: a wait group's counter went below zero")
+      ()))
+
+(pub defmethod done ((self WaitGroup)) ()
+  "One of the counted things finished. At zero, every waiter is released."
+  (setf self::count (- self::count 1))
+  (if (< self::count 0)
+      (panic "done: a wait group's counter went below zero")
+      (if (eq self::count 0) (close self::gate) ())))
+
+(pub defmethod wait ((self WaitGroup)) ()
+  "Wait until the counter reaches zero. Any number of tasks may."
+  (if (eq self::count 0)
+      ()
+      (progn (recv self::gate) ())))
+
+
+;; ---- Mutex --------------------------------------------------------------
+
+;; Go's `sync.Mutex`, holding the thing it protects.
+;;
+;; The lock is a capacity-1 channel with one token in it: taking the token is
+;; locking, putting it back is unlocking, and a second locker parks in `recv`
+;; until it comes back. Nothing else is needed — a channel already is a
+;; queue of waiters.
+;;
+;; **Re-entering deadlocks; it does not panic.** The plan asked for a panic on
+;; the grounds that a deadlock is worse for being silent, and here it is not
+;; silent: a task parked on its own lock is a task the scheduler eventually
+;; finds nothing can wake, and it says so. Telling *which* kind of deadlock it
+;; is would need a task to be able to name itself, and a goroutine id is a
+;; thing Go withholds on purpose.
+;;
+;; `v` is `pub`, so the value can be read without the lock. That is Go's
+;; position too (a `sync.Mutex` guards by convention), and there is no static
+;; guarantee to be had in a language with neither ownership nor borrowing.
+;; Reading it outside `with-lock` is undefined in the sense that matters:
+;; another task may be halfway through changing it.
+(pub defstruct Mutex<T> (pub v T) (gate Chan<()>))
+
+(pub defmethod make (Mutex<T> (v T)) Mutex<T>
+  "A mutex holding `v`, unlocked."
+  (let ((g (the Chan<()> (Chan::new 1))))
+    (send g ())
+    (Mutex::new v g)))
+
+(pub defmethod lock ((self Mutex<T>)) ()
+  "Take the lock, waiting for it."
+  (progn (recv self::gate) ()))
+
+(pub defmethod unlock ((self Mutex<T>)) ()
+  "Give the lock back. Unlocking one that is not locked is a panic."
+  (if (eq (len self::gate) 1)
+      (panic "unlock: the mutex is not locked")
+      (send self::gate ())))
+
+;; `(with-lock (x m) body...)` — lock `m`, run `body` with `x` naming what it
+;; holds, and release however the body is left.
+;;
+;; `x` is a `symbol-macrolet` alias for the *place*, not a copy, so
+;; `(setf x 42)` replaces the value inside the mutex — which is the reason CL
+;; has symbol macros at all. Building `g::v` for a `gensym`-fresh `g` is what
+;; `Sexpr::path` is for here: a `,g::v` inside the template would read as a
+;; path whose first segment is the literal name `g`.
+(pub defmacro with-lock (spec &rest body)
+  "`(with-lock (x m) body...)` -- lock `m`, bind `x` to what it holds, and
+   unlock however the body is left. `x` is a place: `(setf x v)` writes
+   through to the mutex."
+  (let* ((var (sexpr-car spec))
+         (m (sexpr-car (sexpr-cdr spec)))
+         (g (gensym))
+         (place (Sexpr::path (sexpr-cons g (sexpr-cons (Sexpr::sym (string->symbol "v")) ())))))
+    `(let ((,g ,m))
+       (lock ,g)
+       (unwind-protect
+           (symbol-macrolet ((,var ,place)) (progn ,@body))
+         (unlock ,g)))))
+
+
 "##;
 
 /// Read, check, and `exec` [`SOURCE`] against `heap`/`chk`/`interp`,
