@@ -2075,3 +2075,143 @@ CL がパス名指定子（文字列 or パス名）を受ける場所で、こ�
 - **`pathname` 関数は `to-pathname`**。型とトレイト・関数が同じ名前空間を共有するため。
 - **ワイルドカードによる照合は無い**ので、`directory` は「そのディレクトリの中身を並べる」だけの
   関数になっている（§18.4）。CL の `directory` はパス名のパターンと照合する。
+
+
+## 20. タスクとチャネル
+
+軽量スレッド（Go の goroutine 相当）の語彙。起動の `go` と多重待ちの `select` は特殊形で、
+[syntax.md §12](syntax.md#12-並行機構タスク) にある。ここはそれ以外——型とメソッドと関数。
+
+**協調的・シングルスレッド**で、切り替わるのは書いた場所だけ。どこで切り替わるかと
+Go との違いは syntax.md §12.4 / §12.6。
+
+### 20.1 `Task<T>` — タスクのハンドル
+
+| 名前 | 使い方 | 型 | 意味 |
+|---|---|---|---|
+| `wait` | `(wait t)` | `(Task<T>)→T` | 完了を待ち、その値を返す |
+
+```lisp
+(let ((t1 (go (work 7))))
+  (wait t1))
+```
+
+- **何度 `wait` してもよい**（値をキャッシュする）。Rust の `JoinHandle::join` と違い
+  ハンドルを消費しないので、複数箇所から待てる。
+- **`wait` しなくてもタスクは走る**（detach）。ハンドルを捨てても止まらない。
+- ふつうの値なので `Vector<Task<()>>` にも入る。
+- **メインタスクが終わればプロセスが終わる**（Go と同じ）。走っている他のタスクは中断され、
+  `unwind-protect` の cleanup は走らない——スタックの巻き戻しではなくプロセス終了だから。
+
+### 20.2 `Chan<T>` — チャネル
+
+| 名前 | 使い方 | 型 | 意味 |
+|---|---|---|---|
+| `Chan::new` | `(the Chan<i32> (Chan::new 0))` | `(i32)→Chan<T>` | 容量 `n` のチャネル。`0` はランデブー（バッファ無し） |
+| `send` | `(send ch v)` | `(Chan<T>,T)→()` | 空きが出るまで待って渡す |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | 値が来るまで待つ。閉じて空なら `none` |
+| `close` | `(close ch)` | `(Chan<T>)→()` | 閉じる |
+| `len` | `(len ch)` | `(Chan<T>)→i32` | いまバッファにある個数 |
+| `cap` | `(cap ch)` | `(Chan<T>)→i32` | 容量 |
+
+**型引数は `the` で決める**（`(the Vector<i32> (Vector::new))` と同じ慣用句）。容量は
+**必ず書く**——Go が `make(chan int)` と `make(chan int, 16)` を書き分けるのと同じ 2 つを、
+`(Chan::new 0)` と `(Chan::new 16)` で書く。
+
+```lisp
+(defun produce ((ch Chan<i32>) (n i32)) ()
+  (dotimes (i n) (send ch (* i 2)))
+  (close ch))
+
+(let ((ch (the Chan<i32> (Chan::new 2))))
+  (go (produce ch 5))
+  (doiter (v ch) (println "~a" v)))       ; Go の for v := range ch
+```
+
+- **`Chan<T>` は自分自身のイテレータ**（`impl Iter Chan<T>`）。`recv` が `Option<T>` を返す
+  ので `Iter::next` と同型で、`doiter` も `map`/`filter`/`foldl` もそのまま効く。
+- **閉じたチャネルへの `send` は panic**、**2 度目の `close` も panic**（どちらも Go と同じ。
+  プログラムのバグであって回復可能な失敗ではないので `Result` にしない）。
+- **`send` で待っているタスクがいるチャネルを `close` すると、そのタスクが panic する**
+  （Go の規則）。
+- 閉じたチャネルからの `recv` は、バッファに残っていればそれを返し、空になったら `none` を
+  返し続ける。
+- `close` は**レシーバ型で解決される**ので `Stream` トレイトの `close` とは別物。`Chan<T>` に
+  `Stream` は実装しない。
+- **負の容量は panic**（黙って 0 に丸めない）。
+
+### 20.3 `yield` / `sleep` — 譲る
+
+| 名前 | 使い方 | 型 | 意味 |
+|---|---|---|---|
+| `yield` | `(yield)` | `()→()` | 残りの番を手放す（Go の `runtime.Gosched`） |
+| `sleep` | `(sleep 0.5)` | `(f64)→()` | **そのタスクだけ**止める。他は走り続ける |
+
+`sleep` はスレッドではなくタスクを止める。走れるタスクが 1 つも無くなったときだけ、
+最も近い期限まで OS の `sleep` に入る。`(sleep 0.0)` は CL 流の「譲る 0 秒」。
+
+### 20.4 `WaitGroup` — N 個の完了待ち
+
+| 名前 | 使い方 | 型 | 意味 |
+|---|---|---|---|
+| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | 何も未完了でない群 |
+| `add` | `(add wg 1)` | `(WaitGroup,i32)→()` | カウンタに足す。仕事を始める前に |
+| `done` | `(done wg)` | `(WaitGroup)→()` | 1 つ終わった。0 で全待機者が解放される |
+| `wait` | `(wait wg)` | `(WaitGroup)→()` | 0 になるまで待つ。何タスクからでも |
+
+`(wait wg)` と `(wait task)` はレシーバ型で解決されるので同名で共存する。
+カウンタが 0 を下回ると panic する（`done` の呼びすぎ・負の `add`）。
+
+**`Task<T>` がある以上 Go ほどは要らない**——`(doiter (t tasks) (wait t))` で足りる場面が
+多い。動的に増える仕事や、ハンドルを持ちたくない場合のための道具。
+
+```lisp
+;; fan-in: 入力ごとに 1 タスク立てて合流する（この言語に nil チャネルは無い）
+(defvar (left i32) 0)
+(defun drain ((in Chan<i32>) (out Chan<i32>)) ()
+  (doiter (v in) (send out v))
+  (setf left (- left 1))
+  (if (eq left 0) (close out) ()))
+```
+
+### 20.5 `after` — 時間で届くチャネル
+
+| 名前 | 使い方 | 型 | 意味 |
+|---|---|---|---|
+| `after` | `(recv (after 0.5))` | `(f64)→Chan<()>` | `sec` 秒後に 1 つ届くチャネル |
+
+Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
+（[syntax.md §12.2](syntax.md#122-select--複数のチャネル操作を同時に待つ)）。容量 1 なので、
+誰も受け取らなくても送信側のタスクは終われる。
+
+### 20.6 `Mutex<T>` — 共有データの排他
+
+| 名前 | 使い方 | 型 | 意味 |
+|---|---|---|---|
+| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | `v` を持つ、ロックされていないミューテックス |
+| `lock` | `(lock m)` | `(Mutex<T>)→()` | ロックを取る（待つ） |
+| `unlock` | `(unlock m)` | `(Mutex<T>)→()` | 返す。ロックされていなければ panic |
+| `with-lock` | `(with-lock (x m) body...)` | マクロ | ロックし、`x` に中身を束ねて `body` を走らせ、**必ず**解放 |
+
+```lisp
+(let ((counter (the Mutex<i32> (Mutex::make 0))))
+  (with-lock (n counter) (setf n (+ n 1)))
+  (with-lock (n counter) n))                     ; => 1
+```
+
+- **`x` は値のコピーではなく「場所」**（`symbol-macrolet`）。`(setf x 42)` がミューテックスの
+  中身を書き換える。CL に symbol macro がある理由がまさにこれ。
+- `with-lock` は `unwind-protect` で解放するので、正常終了・`throw`・`panic`・
+  `break`/`return`/`return-from` のどれで抜けても解放される。
+- **再入するとデッドロックする**（panic ではない）。自分のロックで止まったタスクは、
+  スケジューラが「どれも進めない」と報告する。どちらの種類のデッドロックかまで言うには
+  タスクが自分を名乗れる必要があり、goroutine id は Go が意図的に隠しているもの。
+- **`m::v` でロックの外から中身に触れる**が、別のタスクが書き換えの途中かもしれない
+  という意味で未定義。Go の `sync.Mutex` と同じ立場で、所有権も借用検査も無い言語に
+  `MutexGuard` のような静的保証は作れない。
+
+### 20.7 無いもの
+
+- **`Atomic`**。`Mutex` で足りる。
+- **タスクローカル変数**（Go にも無い）。
+- **nil チャネル**。理由と代わりの書き方は syntax.md §12.6。

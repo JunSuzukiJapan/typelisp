@@ -15,16 +15,22 @@
 ---
 
 **軽量スレッド（Go の goroutine 相当）を入れた**（2026-09-08〜09-12、プランは
-`~/.claude/plans/go-gorutine-adaptive-raccoon.md`）。3 つの Phase のうち A と C が完了し、
-B は 5 段のうち B1/B2 が入って **B3〜B5 が残っている**（[TODO.md](TODO.md)）。
+`~/.claude/plans/go-gorutine-adaptive-raccoon.md`）。**3 つの Phase すべて完了**。
+ユーザ向けリファレンスは [syntax.md §12](../syntax.md)（`go`/`select`）と
+[functions.md §20](../functions.md)（型・メソッド）。
 
 - **Phase A**: 評価器の CPS 化。実行状態を Rust のスタックからヒープへ。副産物として
   深い再帰が書けるようになり、`RUST_MIN_STACK=32MB` と bootstrap の 64MB スタックが
   どちらも不要になった
-- **Phase B1/B2**: スケジューラと `go` / `Task<T>` / `wait` / `yield` / `sleep`
+- **Phase B**: スケジューラと `go` / `Task<T>` / `wait` / `yield` / `sleep`（B1/B2）、
+  `Chan<T>` と `impl Iter Chan<T>` と `after`（B3）、`select`（B4）、
+  `WaitGroup` / `Mutex<T>` / `with-lock`（B5）
 - **Phase C**: コンパイル出力を一様にコルーチン化（`i64 f(i64 frame)` ＋状態語）。
   C0〜C7。経緯は [implementation-log.md](implementation-log.md)、設計は
   [compiled-cps-design.md](compiled-cps-design.md)
+
+残る制限は 2 つで、どちらも v1 の範囲として意図的に受け入れたもの：**マルチコア並列が
+無い**（`Heap` が `!Send`）と、**C の FFI コールバックの中では中断できない**。
 
 **この作業が教えたことのうち、並行と無関係に効くもの**:
 
@@ -39,6 +45,16 @@ B は 5 段のうち B1/B2 が入って **B3〜B5 が残っている**（[TODO.m
 4. **文字列でディスパッチされる組み込みは型検査に見えない。** 消した builder を呼ぶ
    Lisp のソース文字列は警告 0 を通る。消したあとは名前で grep するしかなく、それでも
    取りこぼした
+5. **「表をどこに置くか」は、待つかどうかではなく寿命が決める。** チャネルの 6 操作は
+   4 つが即答するのに全部スケジューラ行きになった——バッファの値は `Heap` のルート
+   スタックにしか置けず、`Heap` より長生きする場所に表を置くと前のセッションの `Heap` を
+   指したまま次が走るから
+6. **部分式を「評価済みにしてから渡す」と、下流の機構が丸ごと要らなくなる。** `select` の
+   operand をチェッカーが `let` に括り出した結果、評価器にも島にも「部分式の途中で
+   中断する」経路が生まれず、停止中の `select` が握る値のルートも不要になった
+   （全部 `let` の束縛だから）
+7. **「選ぶ」と「実行する」を分けると、協調スケジューラの上でもレースになる。** 間に何も
+   走らないのは*たまたま*であって、言語機能が約束してよい性質ではない
 
 ---
 
