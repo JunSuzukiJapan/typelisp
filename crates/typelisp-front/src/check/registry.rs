@@ -1550,7 +1550,7 @@ fn hashtable_ty() -> Type {
     Type::Named(Path::root("hashtable"), vec![tvar("k"), tvar("v")])
 }
 
-fn option_of(t: Type) -> Type {
+pub(super) fn option_of(t: Type) -> Type {
     Type::Named(Path::root("option"), vec![t])
 }
 

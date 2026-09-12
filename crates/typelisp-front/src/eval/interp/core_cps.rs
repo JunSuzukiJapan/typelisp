@@ -305,6 +305,13 @@ enum Frame {
     /// behalf of the compiled world. `wake` is the representation to encode it
     /// back through, which the suspension site knows and nothing else does.
     DriveCompiled { drive: DriveCtx, wake: Repr },
+    /// Waiting for a `select` to be decided, holding the arms and the
+    /// environment to run the winner in.
+    ///
+    /// Also what keeps a parked `select`'s operands alive: they are bindings
+    /// of the `let` wrapped around the node, so rooting `env` roots every
+    /// channel it is waiting on and every value it is offering to send.
+    SelectArm { form: Value, env: Value },
     /// `(dyn-new STR PATH ((PATH SYM)...) (...) R E)` — waiting on the value
     /// to box.
     DynNew { form: Value },
@@ -404,7 +411,10 @@ impl CpsStack {
                     heap.push_root(*v);
                 }
             }
-            Frame::ApplyCallee { form, env, .. } | Frame::MatchArms { form, env } | Frame::FieldSetObj { form, env } => {
+            Frame::ApplyCallee { form, env, .. }
+            | Frame::MatchArms { form, env }
+            | Frame::SelectArm { form, env }
+            | Frame::FieldSetObj { form, env } => {
                 heap.push_root(*form);
                 heap.push_root(*env);
             }
@@ -539,6 +549,23 @@ pub(super) enum Waiting {
     Until(std::time::Instant),
     /// A `Chan<T>` operation.
     Chan(ChanOp),
+    /// `select` — any one of several channel operations, whichever can go
+    /// first. `has_else` means the task does not wait: with nothing ready it
+    /// is answered with the `else` arm instead.
+    Select { ops: Vec<SelectOp>, has_else: bool },
+}
+
+/// One arm of a `select`, in the order the arms are written — the index *is*
+/// the arm, which is what the answer names.
+///
+/// The values a `Send` arm offers need no root of their own, unlike a plain
+/// [`ChanOp::Send`]'s: the checker hoisted every operand into a `let` around
+/// the `select`, so each is a live binding in the environment the task's
+/// `Frame::SelectArm` is holding.
+#[derive(Clone, PartialEq, Debug)]
+pub(super) enum SelectOp {
+    Recv(ChanId, String),
+    Send(ChanId, Value),
 }
 
 /// One channel operation, as the task asked for it.
@@ -664,6 +691,7 @@ fn waiting_name(w: &Waiting) -> &'static str {
         Waiting::Task(_) => "`wait`",
         Waiting::Yield => "`yield`",
         Waiting::Until(_) => "`sleep`",
+        Waiting::Select { .. } => "`select`",
         Waiting::Chan(ChanOp::Send(..)) => "`send`",
         Waiting::Chan(ChanOp::Recv(..)) => "`recv`",
         // The other three answer at once, so they never reach a message that
@@ -744,6 +772,9 @@ pub(crate) struct Scheduler {
     /// rather than one each, because a root stack is a `Heap`'s and a channel
     /// is not worth one.
     chan_roots: Option<RootStackId>,
+    /// `select`'s choice among the arms that are ready. See
+    /// [`Scheduler::next_random`].
+    rng: u64,
     /// Whether to look at another task after **every single step**, rather
     /// than letting the running one keep going until it yields, waits or
     /// finishes.
@@ -856,7 +887,90 @@ impl Scheduler {
                 }
             },
             Waiting::Chan(op) => self.try_chan(heap, op),
+            Waiting::Select { ops, has_else } => self.try_select(heap, ops, *has_else),
         }
+    }
+
+    /// [`Self::try_now`] for `select`: the arms that can go right now, one of
+    /// them chosen, and that one **performed**.
+    ///
+    /// Choosing and performing are one step on purpose. Splitting them —
+    /// asking which arm is ready and then doing it — would be a race even
+    /// here, where nothing runs in between: the reason nothing runs in between
+    /// is that this scheduler is cooperative, and a language feature must not
+    /// be correct only because of that.
+    fn try_select(
+        &mut self,
+        heap: &mut Heap,
+        ops: &[SelectOp],
+        has_else: bool,
+    ) -> Option<Result<Value, EvalError>> {
+        let ready: Vec<usize> =
+            (0..ops.len()).filter(|i| self.select_arm_is_ready(&ops[*i])).collect();
+        if ready.is_empty() {
+            // `else` is the arm after the last channel arm — which is what
+            // makes the checker's "`else` must be last" rule worth having.
+            return has_else.then(|| self.select_answer(heap, ops.len(), Value::Empty));
+        }
+        let pick = ready[self.next_random(ready.len())];
+        let answer = match &ops[pick] {
+            SelectOp::Recv(c, key) => self.chan_recv(heap, *c, key),
+            SelectOp::Send(c, v) => self.chan_send(heap, *c, *v),
+        };
+        match answer {
+            Some(Ok(v)) => Some(self.select_answer(heap, pick, v)),
+            // A send arm on a closed channel counts as ready and then panics,
+            // which is what a plain `(send ch v)` on one does.
+            Some(Err(e)) => Some(Err(e)),
+            None => Some(Err(EvalError::Internal(
+                "select: an arm reported ready and then could not go".to_string(),
+            ))),
+        }
+    }
+
+    /// Whether one arm could go without waiting.
+    fn select_arm_is_ready(&self, op: &SelectOp) -> bool {
+        match op {
+            SelectOp::Recv(c, _) => {
+                let ch = &self.chans[c.0];
+                ch.len > 0 || ch.closed || self.waiting_sender(*c).is_some()
+            }
+            SelectOp::Send(c, _) => {
+                let ch = &self.chans[c.0];
+                ch.closed || ch.len < ch.cap || self.waiting_receiver(*c).is_some()
+            }
+        }
+    }
+
+    /// `(ARM . VALUE)` — what a `select` answers with. The arm index is the
+    /// whole of the dispatch, and the value is the receive's `Option<T>` (or
+    /// unit for a send or an `else`).
+    fn select_answer(&self, heap: &mut Heap, arm: usize, payload: Value) -> Result<Value, EvalError> {
+        heap.push_root(payload);
+        let out = heap.cons(Value::Int(arm as i64), payload).map_err(heap_err);
+        heap.pop_root();
+        out
+    }
+
+    /// A number in `0..n`.
+    ///
+    /// Its own xorshift rather than the language's `*random-state*`: the
+    /// scheduler sits below that, and what `select` needs from randomness is
+    /// only that a program cannot depend on which of several ready arms wins
+    /// (Go's reason — taking them in written order starves the later ones).
+    /// The seed is fixed, so a run is reproducible, which is worth more here
+    /// than being unpredictable.
+    fn next_random(&mut self, n: usize) -> usize {
+        if self.rng == 0 {
+            // `Scheduler` is `Default`, and xorshift stays at zero forever.
+            self.rng = 0x2545_F491_4F6C_DD1D;
+        }
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng = x;
+        (x % n as u64) as usize
     }
 
     /// [`Self::try_now`] for the channel operations.
@@ -903,7 +1017,7 @@ impl Scheduler {
                         self.sleeping += 1;
                         self.slots[id.0] = Slot::Blocked(slot, w);
                     }
-                    Waiting::Task(_) | Waiting::Chan(_) => {
+                    Waiting::Task(_) | Waiting::Chan(_) | Waiting::Select { .. } => {
                         self.slots[id.0] = Slot::Blocked(slot, w);
                     }
                 }
@@ -958,23 +1072,40 @@ impl Scheduler {
         Some(v)
     }
 
-    /// The first task parked in `send` on `c`, and the value it is offering.
+    /// A task parked in a way that can take a value from `c`: which slot it
+    /// is in, which `select` arm to report (`None` for a plain `recv`), and
+    /// the key its answer is built with.
     ///
     /// Slot order, not arrival order. Go's channels hand out in arrival order;
     /// nothing in this scheduler records arrival, and the alternative is a
     /// second queue per channel that has to agree with `slots` about who is
     /// parked — the disagreement that `finish`/`wake_due` avoid by walking.
-    fn parked_sender(&self, c: ChanId) -> Option<(usize, Value)> {
+    fn waiting_receiver(&self, c: ChanId) -> Option<(usize, Option<usize>, String)> {
         self.slots.iter().enumerate().find_map(|(i, s)| match s {
-            Slot::Blocked(_, Waiting::Chan(ChanOp::Send(on, v))) if *on == c => Some((i, *v)),
+            Slot::Blocked(_, Waiting::Chan(ChanOp::Recv(on, key))) if *on == c => {
+                Some((i, None, key.clone()))
+            }
+            Slot::Blocked(_, Waiting::Select { ops, .. }) => {
+                ops.iter().enumerate().find_map(|(a, op)| match op {
+                    SelectOp::Recv(on, key) if *on == c => Some((i, Some(a), key.clone())),
+                    _ => None,
+                })
+            }
             _ => None,
         })
     }
 
-    /// The first task parked in `recv` on `c`, and the key its answer needs.
-    fn parked_receiver(&self, c: ChanId) -> Option<(usize, String)> {
+    /// The same for a task that can hand a value *to* `c`, and the value it is
+    /// offering.
+    fn waiting_sender(&self, c: ChanId) -> Option<(usize, Option<usize>, Value)> {
         self.slots.iter().enumerate().find_map(|(i, s)| match s {
-            Slot::Blocked(_, Waiting::Chan(ChanOp::Recv(on, key))) if *on == c => Some((i, key.clone())),
+            Slot::Blocked(_, Waiting::Chan(ChanOp::Send(on, v))) if *on == c => Some((i, None, *v)),
+            Slot::Blocked(_, Waiting::Select { ops, .. }) => {
+                ops.iter().enumerate().find_map(|(a, op)| match op {
+                    SelectOp::Send(on, v) if *on == c => Some((i, Some(a), *v)),
+                    _ => None,
+                })
+            }
             _ => None,
         })
     }
@@ -989,6 +1120,29 @@ impl Scheduler {
         self.ready.push_back(TaskId(i));
     }
 
+    /// Wakes a receiver with `v` (or the end of a closed channel), answering
+    /// in whichever shape it was waiting in.
+    fn wake_receiver(&mut self, heap: &mut Heap, i: usize, arm: Option<usize>, key: &str, v: Option<Value>) {
+        let payload = option_value(heap, key, v);
+        let answer = match arm {
+            Some(a) => match self.select_answer(heap, a, payload) {
+                Ok(v) => v,
+                Err(_) => payload,
+            },
+            None => payload,
+        };
+        self.wake(heap, i, State::Apply(answer));
+    }
+
+    /// Wakes a sender whose value has been taken.
+    fn wake_sender(&mut self, heap: &mut Heap, i: usize, arm: Option<usize>) {
+        let answer = match arm {
+            Some(a) => self.select_answer(heap, a, Value::Empty).unwrap_or(Value::Empty),
+            None => Value::Empty,
+        };
+        self.wake(heap, i, State::Apply(answer));
+    }
+
     /// `(send ch v)`. `None` means the sender has to wait for room.
     fn chan_send(&mut self, heap: &mut Heap, c: ChanId, v: Value) -> Option<Result<Value, EvalError>> {
         if self.chans[c.0].closed {
@@ -997,9 +1151,8 @@ impl Scheduler {
         // A waiting receiver takes it directly, buffer or no buffer. That is
         // the whole of a rendezvous, and for a buffered channel it cannot be
         // wrong: nobody waits to receive from a channel with anything in it.
-        if let Some((i, key)) = self.parked_receiver(c) {
-            let answer = option_value(heap, &key, Some(v));
-            self.wake(heap, i, State::Apply(answer));
+        if let Some((i, arm, key)) = self.waiting_receiver(c) {
+            self.wake_receiver(heap, i, arm, &key, Some(v));
             return Some(Ok(Value::Empty));
         }
         if self.chans[c.0].len < self.chans[c.0].cap {
@@ -1014,16 +1167,16 @@ impl Scheduler {
         if let Some(v) = self.chan_pop(heap, c) {
             // Taking one out made room, so a sender that was waiting for room
             // can put its value in and go.
-            if let Some((i, offered)) = self.parked_sender(c) {
+            if let Some((i, arm, offered)) = self.waiting_sender(c) {
                 self.chan_push(heap, c, offered);
-                self.wake(heap, i, State::Apply(Value::Empty));
+                self.wake_sender(heap, i, arm);
             }
             return Some(Ok(option_value(heap, key, Some(v))));
         }
         // Nothing buffered — which for an unbuffered channel is always, so
         // this is the rendezvous seen from the receiving side.
-        if let Some((i, offered)) = self.parked_sender(c) {
-            self.wake(heap, i, State::Apply(Value::Empty));
+        if let Some((i, arm, offered)) = self.waiting_sender(c) {
+            self.wake_sender(heap, i, arm);
             return Some(Ok(option_value(heap, key, Some(offered))));
         }
         if self.chans[c.0].closed {
@@ -1040,13 +1193,12 @@ impl Scheduler {
         self.chans[c.0].closed = true;
         // Receivers get `none`: a receiver only parks with the buffer empty
         // and no sender waiting, so there is nothing left for them.
-        while let Some((i, key)) = self.parked_receiver(c) {
-            let answer = option_value(heap, &key, None);
-            self.wake(heap, i, State::Apply(answer));
+        while let Some((i, arm, key)) = self.waiting_receiver(c) {
+            self.wake_receiver(heap, i, arm, &key, None);
         }
         // Senders panic, which is Go's rule. The value each was offering is
         // dropped with the task's state, and its root goes with it.
-        while let Some((i, _)) = self.parked_sender(c) {
+        while let Some((i, _, _)) = self.waiting_sender(c) {
             self.wake(
                 heap,
                 i,
@@ -1259,6 +1411,45 @@ fn pending_wait(heap: &Heap) -> Result<(Waiting, Repr), EvalError> {
             };
             Ok((Waiting::Chan(ChanOp::Recv(c, key)), Repr::Sexpr))
         }
+        // The arms travel in their own slot, and every word in them is
+        // tagged — the descriptor was built in a compiled frame's slots, and
+        // the collector walks those.
+        cs::SUSPEND_CHAN_SELECT => {
+            let words = cs::take_pending_select();
+            let untag = |w: i64| w >> 3;
+            if words.len() < 2 {
+                return Err(EvalError::Internal("a compiled `select` carried no arms".to_string()));
+            }
+            let n = untag(words[0]).max(0) as usize;
+            let has_else = untag(words[1]) != 0;
+            if words.len() < 2 + 3 * n {
+                return Err(EvalError::Internal(format!(
+                    "a compiled `select` said it had {} arms and carried {} words",
+                    n,
+                    words.len()
+                )));
+            }
+            let mut ops = Vec::with_capacity(n);
+            for i in 0..n {
+                let base = 2 + 3 * i;
+                let c = chan_id_of(heap, Some(typelisp_abi::decode(words[base + 1])))?;
+                let extra = typelisp_abi::decode(words[base + 2]);
+                ops.push(if untag(words[base]) == 0 {
+                    match extra {
+                        Value::Str(id) => SelectOp::Recv(c, heap.string(id).to_string()),
+                        other => {
+                            return Err(EvalError::Internal(format!(
+                                "a compiled `select` receive arm carried {:?} where its key should be",
+                                other
+                            )))
+                        }
+                    }
+                } else {
+                    SelectOp::Send(c, extra)
+                });
+            }
+            Ok((Waiting::Select { ops, has_else }, Repr::Sexpr))
+        }
         other => Err(EvalError::Internal(format!(
             "a compiled frame asked to wait on kind {} (payload {}), which this build does not lower",
             other, payload
@@ -1286,6 +1477,11 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         // A blocked task carries nothing in the state slots, with one
         // exception: a parked `send` is holding the value it is offering, and
         // nothing else points at it.
+        //
+        // A parked `select` is **not** a second exception, even though its
+        // send arms hold values too: every operand of a `select` is a binding
+        // of the `let` the checker wrapped around it, so the environment the
+        // task's `Frame::SelectArm` roots already holds them all.
         State::Blocked(Waiting::Chan(ChanOp::Send(_, v))) => {
             heap.set_root(sbase, *v);
             heap.set_root(sbase + 1, Value::Empty);
@@ -1686,7 +1882,7 @@ impl Interp {
         // a cooperative scheduler's promise is that a task switches where it
         // says so — a program that never blocks should not be interleaved by
         // asking a channel how full it is.
-        if let State::Blocked(w @ Waiting::Chan(_)) = &next {
+        if let State::Blocked(w @ (Waiting::Chan(_) | Waiting::Select { .. })) = &next {
             // Rooted *first*: a parked `send`'s value lives in the state slot
             // and nowhere else, and answering the operation allocates (the
             // `some` box a waiting receiver gets).
@@ -1918,6 +2114,53 @@ impl Interp {
             // this task, and only then handed over. `arg_forms` reads them out
             // of the inner node, so the collection is the ordinary one; `spawn`
             // is the single bit that changes what happens once they are in.
+            // Every operand is already a value: the checker bound each
+            // channel expression and each value to send in a `let` around
+            // this node, so all that is left is to read them and hand the
+            // whole set to the scheduler.
+            Op::Select => {
+                let arms = core::fields(heap, form)
+                    .map_err(|e| EvalError::Internal(format!("eval: (select ..): {}", e)))?;
+                let mut ops: Vec<SelectOp> = Vec::with_capacity(arms.len());
+                let mut has_else = false;
+                for arm in &arms {
+                    let parts = heap.list_to_vec(*arm).map_err(heap_err)?;
+                    let tag = match parts.first() {
+                        Some(Value::Str(id)) => heap.string(*id).to_string(),
+                        other => {
+                            return Err(EvalError::Internal(format!(
+                                "eval: (select ..) arm tag is {:?}",
+                                other
+                            )))
+                        }
+                    };
+                    match tag.as_str() {
+                        "recv" => {
+                            let Some(Value::Str(kid)) = parts.get(2) else {
+                                return Err(EvalError::Internal("eval: (select ..) recv arm has no key".into()));
+                            };
+                            let key = heap.string(*kid).to_string();
+                            let chan = self.eval_leaf(heap, parts[3], env)?;
+                            ops.push(SelectOp::Recv(chan_id_of(heap, Some(chan))?, key));
+                        }
+                        "send" => {
+                            let chan = self.eval_leaf(heap, parts[2], env)?;
+                            let value = self.eval_leaf(heap, parts[3], env)?;
+                            ops.push(SelectOp::Send(chan_id_of(heap, Some(chan))?, value));
+                        }
+                        // Last, and carrying no operand — which is why the
+                        // arm indices `ops` uses and the node's own agree up
+                        // to this point, and why `ops.len()` names this one.
+                        "else" => has_else = true,
+                        other => {
+                            return Err(EvalError::Internal(format!("eval: (select ..) arm tag `{}`", other)))
+                        }
+                    }
+                }
+                stack.push(heap, Frame::SelectArm { form, env }, loc.clone());
+                Ok(State::Blocked(Waiting::Select { ops, has_else }))
+            }
+
             Op::Go => {
                 let call = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (go ..) has no call".to_string()))?;
@@ -2913,6 +3156,63 @@ impl Interp {
             // compiled chain rather than up the continuation stack, and
             // `CompiledResume` is where the encoding happens — this frame is
             // only what catches the scheduler's `Apply`.
+            // `v` is `(ARM . VALUE)`: which arm won, and what it answered
+            // with. The index is the whole of the dispatch — the checker put
+            // the `else` arm last precisely so its index is the one past the
+            // channel arms.
+            Frame::SelectArm { form, env } => {
+                let arm_index = match heap.car(v) {
+                    Ok(Value::Int(n)) if n >= 0 => n as usize,
+                    other => {
+                        return Err(EvalError::Internal(format!(
+                            "eval: (select ..) was answered with {:?}",
+                            other
+                        )))
+                    }
+                };
+                let payload = heap.cdr(v).map_err(heap_err)?;
+                let arm = core::field(heap, form, arm_index).ok_or_else(|| {
+                    EvalError::Internal(format!("eval: (select ..) has no arm {}", arm_index))
+                })?;
+                let parts = heap.list_to_vec(arm).map_err(heap_err)?;
+                let tag = match parts.first() {
+                    Some(Value::Str(id)) => heap.string(*id).to_string(),
+                    other => {
+                        return Err(EvalError::Internal(format!(
+                            "eval: (select ..) arm tag is {:?}",
+                            other
+                        )))
+                    }
+                };
+                match tag.as_str() {
+                    // The bound name sees the whole `Option<T>`: a closed
+                    // channel is an answer, not a skipped arm.
+                    "recv" => {
+                        let Some(Value::Symbol(sym)) = parts.get(1).copied() else {
+                            return Err(EvalError::Internal("eval: (select ..) recv arm has no name".into()));
+                        };
+                        let body = *parts.get(4).ok_or_else(|| {
+                            EvalError::Internal("eval: (select ..) recv arm has no body".to_string())
+                        })?;
+                        let inner = extend_env(heap, &[(sym, payload)], env)?;
+                        Ok((State::Eval(body, inner), None))
+                    }
+                    "send" => {
+                        let body = *parts.get(4).ok_or_else(|| {
+                            EvalError::Internal("eval: (select ..) send arm has no body".to_string())
+                        })?;
+                        Ok((State::Eval(body, env), None))
+                    }
+                    "else" => {
+                        let body = *parts.get(1).ok_or_else(|| {
+                            EvalError::Internal("eval: (select ..) else arm has no body".to_string())
+                        })?;
+                        Ok((State::Eval(body, env), None))
+                    }
+                    other => Err(EvalError::Internal(format!("eval: (select ..) arm tag `{}`", other))),
+                }
+            }
+
             Frame::DriveCompiled { drive, wake } => {
                 Ok((State::CompiledResume { drive, wake: Some((v, wake)) }, None))
             }
@@ -3174,6 +3474,7 @@ impl Interp {
             | Frame::ApplyCallee { .. }
             | Frame::ApplyArgs { .. }
             | Frame::MatchArms { .. }
+            | Frame::SelectArm { .. }
             | Frame::FieldSetObj { .. }
             | Frame::FieldSetVal { .. }
             | Frame::SetGlobal { .. }

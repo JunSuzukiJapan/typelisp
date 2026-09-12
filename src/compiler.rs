@@ -562,6 +562,12 @@ pub const SOURCE: &str = r#"
    string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block>
    Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
+(defsignature compile-select
+  (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
+   Option<llvm-basic-block> Option<llvm-value>
+   string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block>
+   Option<llvm-basic-block> Option<Sexpr>)
+  llvm-value)
 (defsignature compile-pattern-test
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value>
@@ -1949,6 +1955,7 @@ pub const SOURCE: &str = r#"
       (global-init (compile-global-init m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (panic (compile-panic m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (go (compile-go m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
+      (select (compile-select m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (catch (compile-catch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (throw (compile-throw m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (unwind-protect (compile-unwind-protect m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
@@ -5539,6 +5546,134 @@ pub const SOURCE: &str = r#"
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
            (result (build-call builder (get-function m "rt_go") args-ptr argc)))
       result))
+
+;; `(select ARM...)` — wait until one of several channel operations can go,
+;; and run that arm's body.
+;;
+;; ARM is `("recv" VAR KEY-FORM CHAN-FORM BODY)`, `("send" VALUE-KIND
+;; CHAN-FORM VALUE-FORM BODY)` or `("else" BODY)`, and `else` is last.
+;;
+;; **Nothing here evaluates a channel expression.** The checker bound every
+;; operand in a `let` around this node, so `CHAN-FORM`/`VALUE-FORM` are
+;; `(var ...)` nodes: a load, which cannot suspend. That is what lets the
+;; whole descriptor be built in one straight line before the suspension.
+;;
+;; The descriptor is `[n, has-else, kind, chan, extra]...` in a rooted frame
+;; slot array, **every word tagged** — the collector walks those slots, so a
+;; raw integer in one would be read as a pointer. `extra` is the receive arm's
+;; `Option<T>` key or the send arm's value.
+;;
+;; The answer is a tagged `(ARM . VALUE)` cons: which arm won, and what it
+;; answered with. The index is the whole of the dispatch, which is why `else`
+;; being last matters — its index is the one past the channel arms.
+(defun select-arm-count ((arms Option<Sexpr>)) i32
+    (if (sexpr-consp arms)
+        (+ (if (equal (sexpr-str (sexpr-car (sexpr-car arms))) "else") 0 1)
+           (select-arm-count (sexpr-cdr arms)))
+        0))
+
+(defun select-has-else ((arms Option<Sexpr>)) bool
+    (if (sexpr-consp arms)
+        (if (equal (sexpr-str (sexpr-car (sexpr-car arms))) "else")
+            true
+            (select-has-else (sexpr-cdr arms)))
+        false))
+
+;; Writes three words per channel arm, in arm order. The `else` arm carries no
+;; operand and so takes no slots — which is exactly why the arm indices the
+;; driver answers with and the node's own agree.
+(defun fill-select-ops ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (idx i32) (arms Option<Sexpr>)) ()
+    (if (sexpr-consp arms)
+        (let* ((arm (sexpr-car arms))
+               (tag (sexpr-str (sexpr-car arm)))
+               (rest (sexpr-cdr arms)))
+          (cond
+            ((equal tag "else")
+             (fill-select-ops m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr idx rest))
+            ((equal tag "recv")
+             (let* ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr arm))))
+                    (chan-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr arm))))))
+               (store-arg builder args-ptr idx (const-word builder 0))
+               (store-arg builder args-ptr (+ idx 1)
+                          (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup chan-form))
+               (store-arg builder args-ptr (+ idx 2)
+                          (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup key-form))
+               (fill-select-ops m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr (+ idx 3) rest)))
+            (else
+             (let* ((vkind (sexpr-i32 (sexpr-car (sexpr-cdr arm))))
+                    (chan-form (sexpr-car (sexpr-cdr (sexpr-cdr arm))))
+                    (val-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr arm))))))
+               (store-arg builder args-ptr idx (const-word builder 8))
+               (store-arg builder args-ptr (+ idx 1)
+                          (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup chan-form))
+               ;; Tagged here for `send`'s own reason: the driver gets one
+               ;; word and a word does not say whether it is a number or a
+               ;; pointer. The slot is collectable, so the box a float makes
+               ;; is rooted the moment it is stored.
+               (store-arg builder args-ptr (+ idx 2)
+                          (compile-tag-struct-field builder m
+                            (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup val-form)
+                            vkind))
+               (fill-select-ops m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr (+ idx 3) rest)))))
+        ()))
+
+;; One block per arm, tested against the index the driver answered with, each
+;; storing its body's value into the shared merge slot — `compile-match-arms`'
+;; shape, with an equality test instead of a pattern.
+(defun compile-select-arms ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (idx-v llvm-value) (val-v llvm-value) (slot llvm-value) (merge-block llvm-basic-block) (i i32) (arms Option<Sexpr>)) ()
+    (if (sexpr-consp arms)
+        (let* ((arm (sexpr-car arms))
+               (tag (sexpr-str (sexpr-car arm)))
+               (rest (sexpr-cdr arms))
+               (this-block (append-block cur-fn "select-arm"))
+               (next-block (append-block cur-fn "select-next")))
+          (build-cond-br builder (build-icmp-eq builder idx-v (const-word builder i)) this-block next-block)
+          (position-at-end builder this-block)
+          (push-frame env)
+          ;; The receive arm sees the whole `Option<T>`, in a rooted slot: its
+          ;; body allocates, and the box came out of the answer cons.
+          (if (equal tag "recv")
+              (set env (sexpr-sym-name (sexpr-car (sexpr-cdr arm))) (spill builder m 2 val-v))
+              ())
+          (let* ((body-form (if (equal tag "else")
+                                (sexpr-car (sexpr-cdr arm))
+                                (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr arm))))))) 
+                 (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup body-form)))
+            (pop-frame env)
+            (if (block-terminated? builder)
+                ()
+                (progn
+                  (store-arg builder slot 0 v)
+                  (build-br builder merge-block))))
+          (position-at-end builder next-block)
+          (compile-select-arms m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup idx-v val-v slot merge-block (+ i 1) rest))
+        ;; Past the last arm. The driver only ever names an arm that exists,
+        ;; so nothing reaches here — but a block still has to end.
+        (progn
+          (store-arg builder slot 0 (const-word builder 0))
+          (build-br builder merge-block))))
+
+(defun compile-select ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
+    (let* ((arms (sexpr-cdr e))
+           (n (select-arm-count arms))
+           (argc (+ 2 (* 3 n)))
+           (args-ptr (frame-slots builder m 2 argc)))
+      (store-arg builder args-ptr 0 (const-word builder (* n 8)))
+      (store-arg builder args-ptr 1 (const-word builder (if (select-has-else arms) 8 0)))
+      (fill-select-ops m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr 2 arms)
+      (let* ((ignored (build-call builder (get-function m "rt_suspend_chan_select") args-ptr argc))
+             (raw (coroutine-suspend builder m))
+             (car-ptr (alloca-args builder 1)))
+        (store-arg builder car-ptr 0 raw)
+        (let* ((idx-v (build-ashr builder (build-call builder (get-function m "rt_car") car-ptr 1) (const-word builder 3)))
+               (cdr-ptr (alloca-args builder 1)))
+          (store-arg builder cdr-ptr 0 raw)
+          (let* ((val-v (build-call builder (get-function m "rt_cdr") cdr-ptr 1))
+                 (merge-block (append-block cur-fn "select-merge"))
+                 (slot (alloca-args builder 1)))
+            (compile-select-arms m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup idx-v val-v slot merge-block 0 arms)
+            (position-at-end builder merge-block)
+            (load-raw builder slot 0))))))
 
 (defun compile-function ((m llvm-module) (name string) (param-names Option<Sexpr>) (body Option<Sexpr>)) llvm-module
     (let* ((f (add-coroutine-function m name))

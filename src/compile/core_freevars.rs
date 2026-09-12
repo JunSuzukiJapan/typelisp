@@ -236,6 +236,45 @@ fn walk(
             Ok(())
         }
 
+        // `(select ARM...)`. The operands are `(var ...)` nodes naming the
+        // `let` the checker wrapped around this one, so they are read from
+        // the surrounding scope like any other name; a receive arm's own
+        // binding is not.
+        wk::SELECT => {
+            for arm in core::fields(heap, form)? {
+                let items = heap.list_to_vec(arm)?;
+                let Some(Value::Str(tag_id)) = items.first() else { continue };
+                match heap.string(*tag_id) {
+                    "recv" => {
+                        if items.len() != 5 {
+                            continue;
+                        }
+                        walk(heap, items[3], bound, siblings, seen, order)?;
+                        let mut inner = bound.clone();
+                        if let Value::Symbol(sym) = items[1] {
+                            inner.insert(sym);
+                        }
+                        walk(heap, items[4], &inner, siblings, seen, order)?;
+                    }
+                    "send" => {
+                        if items.len() != 5 {
+                            continue;
+                        }
+                        walk(heap, items[2], bound, siblings, seen, order)?;
+                        walk(heap, items[3], bound, siblings, seen, order)?;
+                        walk(heap, items[4], bound, siblings, seen, order)?;
+                    }
+                    "else" => {
+                        if items.len() == 2 {
+                            walk(heap, items[1], bound, siblings, seen, order)?;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(())
+        }
+
         // The rest differ only in where their sub-forms start.
         _ => {
             let forms = plain_sub_forms(heap, form, tag)?;
@@ -482,6 +521,16 @@ fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymRef>) -> Result<()
         wk::IF => {
             for f in core::fields(heap, form)? {
                 walk_nested(heap, f, out)?;
+            }
+            Ok(())
+        }
+        // `(select ARM...)`. Each arm is a list, not a node, so the default
+        // arm's `plain_sub_forms` cannot reach into one.
+        wk::SELECT => {
+            for arm in core::fields(heap, form)? {
+                for f in heap.list_to_vec(arm)?.iter().skip(1) {
+                    walk_nested(heap, *f, out)?;
+                }
             }
             Ok(())
         }

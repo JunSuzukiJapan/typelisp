@@ -3001,7 +3001,7 @@ impl Checker {
             "if" | "let" | "let*" | "progn" | "unsafe" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
-                | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "go"
+                | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "go" | "select"
                 | "quote" | "quasiquote" | "format" | "print" | "println" | "source-file"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block"
@@ -9865,6 +9865,7 @@ impl Checker {
             "panic" => return self.check_panic(heap, interp, env, args, arg_locs),
             "the" => return self.check_the(heap, interp, env, args, arg_locs),
             "go" => return self.check_go(heap, interp, env, args, arg_locs),
+            "select" => return self.check_select(heap, interp, env, args, arg_locs, expected),
             "as" => return self.check_as(heap, interp, env, args, arg_locs, false),
             "try-as" => return self.check_as(heap, interp, env, args, arg_locs, true),
             "compile" => return self.check_compile(heap, args),
@@ -11139,6 +11140,176 @@ impl Checker {
         }
         let form = forms::go_form(heap, inner.form)?;
         Ok(Checked::new(form, super::registry::task_of(inner.ty)))
+    }
+
+    /// `(select ((v (recv ch)) body...) ((send ch x) body...) (else body...))`
+    /// — wait until one of several channel operations can go, and run that
+    /// arm.
+    ///
+    /// Three things make this a form rather than a macro over a function.
+    /// A receive arm **binds a name** whose type (`Option<T>`) comes from the
+    /// channel's; the arms' bodies are subforms whose types have to be
+    /// *joined*, which is the checker's word; and the operation that wins has
+    /// to be performed by whatever chose it, in one step. Spelling the third
+    /// as "ask which arm is ready, then do it" would be a race even here: the
+    /// asking task loses nothing in between only because the scheduler is
+    /// cooperative, and building that into the language is not a promise worth
+    /// making.
+    ///
+    /// **Every operand is hoisted into a `let` around the node.** Each channel
+    /// expression and each value to send is evaluated exactly once, left to
+    /// right, whichever arm ends up running — the rule `case` follows for its
+    /// key. Hoisting is also what keeps operand evaluation (which can call a
+    /// function, which can suspend) out of the select node itself.
+    fn check_select(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        const SHAPE: &str = "`select` takes arms: (select ((v (recv ch)) body...) ((send ch x) body...) (else body...))";
+        if args.is_empty() {
+            return Err(Error::TypeError(format!(
+                "`select` with no arms would wait forever. {}",
+                SHAPE
+            )));
+        }
+        // Operands, in the order written, for the `let` this becomes the body
+        // of. The name is unwritable on purpose — a space is not an identifier
+        // character — so it can never shadow or be shadowed.
+        let mut binds: Vec<(String, Type, Value)> = Vec::new();
+        let mut arms: Vec<Value> = Vec::new();
+        let mut ty: Option<Type> = None;
+        let mut saw_else = false;
+        let mut channel_arms = 0usize;
+
+        for (i, arm) in args.iter().enumerate() {
+            let loc = nth_loc(arg_locs, i);
+            let parts = heap.list_to_vec(*arm)?;
+            let Some((head, rest)) = parts.split_first() else {
+                return Err(Error::TypeError(format!("`select`: an arm cannot be empty. {}", SHAPE)));
+            };
+            if saw_else {
+                return Err(Error::TypeError(
+                    "`select`: `else` must be the last arm — every arm after it is unreachable".into(),
+                ));
+            }
+            // `(else body...)`
+            if matches!(head, Value::Symbol(id) if heap.symbol_name(*id) == "else") {
+                saw_else = true;
+                let (body, body_ty) = self.check_seq(heap, interp, env, rest, &vec![None; rest.len()], expected)?;
+                ty = Some(match ty {
+                    Some(t) => join_types(&t, &body_ty)?,
+                    None => body_ty,
+                });
+                let body = self.let_form(heap, &[], &body)?;
+                let body = forms::rooted(heap, body);
+                arms.push(forms::select_else_arm(heap, body)?);
+                continue;
+            }
+            // Otherwise the head is the operation, and the rest is the body.
+            let op = heap.list_to_vec(*head).map_err(|_| Error::TypeError(SHAPE.to_string()))?;
+            let op_head = op.first().copied().unwrap_or(Value::Empty);
+            let op_name = match op_head {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                // `(v (recv ch))` — the head is the bound name, not a symbol
+                // naming an operation.
+                _ => String::new(),
+            };
+            channel_arms += 1;
+            let arm_form = if op_name == "send" {
+                // `((send ch x) body...)`
+                if op.len() != 3 {
+                    return Err(Error::TypeError(format!("`select`: a send arm is (send ch value). {}", SHAPE)));
+                }
+                let chan = self.check_at(heap, interp, env, op[1], None, loc.clone())?;
+                let elem = self.chan_element(&chan.ty, "send")?;
+                let value = self.check_at(heap, interp, env, op[2], Some(&elem), loc.clone())?;
+                // `check_at` was given the element type as its expectation,
+                // so a literal is already coerced; this catches what it lets
+                // through. `Never` is a value that never arrives.
+                if value.ty != elem && value.ty != Type::Never {
+                    return Err(Error::TypeError(format!(
+                        "select: this channel carries {:?}, and the value sent is {:?}",
+                        elem, value.ty
+                    )));
+                }
+                let kind = self.repr(&elem).field_kind();
+                let chan_name = format!("select operand {}", binds.len());
+                binds.push((chan_name.clone(), chan.ty.clone(), chan.form));
+                let value_name = format!("select operand {}", binds.len());
+                binds.push((value_name.clone(), value.ty.clone(), value.form));
+                let (body, body_ty) = self.check_seq(heap, interp, env, rest, &vec![None; rest.len()], expected)?;
+                ty = Some(match ty {
+                    Some(t) => join_types(&t, &body_ty)?,
+                    None => body_ty,
+                });
+                let body = self.let_form(heap, &[], &body)?;
+                let body = forms::rooted(heap, body);
+                let chan_ref = forms::var_form(heap, &chan_name)?;
+                let value_ref = forms::var_form(heap, &value_name)?;
+                forms::select_send_arm(heap, kind, chan_ref, value_ref, body)?
+            } else {
+                // `((v (recv ch)) body...)`
+                let Value::Symbol(vid) = op_head else {
+                    return Err(Error::TypeError(format!(
+                        "`select`: an arm is either (v (recv ch)) or (send ch value). {}",
+                        SHAPE
+                    )));
+                };
+                let var = heap.symbol_name(vid).to_string();
+                if op.len() != 2 {
+                    return Err(Error::TypeError(format!("`select`: a receive arm is (v (recv ch)). {}", SHAPE)));
+                }
+                let inner = heap.list_to_vec(op[1]).map_err(|_| Error::TypeError(SHAPE.to_string()))?;
+                let is_recv = matches!(inner.first(), Some(Value::Symbol(id)) if heap.symbol_name(*id) == "recv");
+                if !is_recv || inner.len() != 2 {
+                    return Err(Error::TypeError(format!("`select`: a receive arm is (v (recv ch)). {}", SHAPE)));
+                }
+                let chan = self.check_at(heap, interp, env, inner[1], None, loc.clone())?;
+                let elem = self.chan_element(&chan.ty, "recv")?;
+                // The arm sees `Option<T>`, not `T`: a closed channel is an
+                // answer, and hiding it would leave an arm that can only be
+                // written by testing the channel some other way.
+                let bound = super::registry::option_of(elem);
+                let key = crate::type_key::type_key_of_type(&bound);
+                let chan_name = format!("select operand {}", binds.len());
+                binds.push((chan_name.clone(), chan.ty.clone(), chan.form));
+                let child = env.extended_with_locs(vec![(var.clone(), bound, loc.clone())])?;
+                let (body, body_ty) = self.check_seq(heap, interp, &child, rest, &vec![None; rest.len()], expected)?;
+                ty = Some(match ty {
+                    Some(t) => join_types(&t, &body_ty)?,
+                    None => body_ty,
+                });
+                let body = self.let_form(heap, &[], &body)?;
+                let body = forms::rooted(heap, body);
+                let chan_ref = forms::var_form(heap, &chan_name)?;
+                forms::select_recv_arm(heap, &var, &key, chan_ref, body)?
+            };
+            arms.push(arm_form);
+        }
+        if channel_arms == 0 {
+            return Err(Error::TypeError(
+                "`select` needs at least one channel arm — one with only `else` is just its body".into(),
+            ));
+        }
+        let node = forms::select_form(heap, &arms)?;
+        let form = self.let_form(heap, &binds, &[node])?;
+        Ok(Checked::new(form, ty.expect("at least one arm was checked")))
+    }
+
+    /// `T` of a `Chan<T>`, or a type error naming the operation.
+    fn chan_element(&self, ty: &Type, what: &str) -> Result<Type, Error> {
+        match ty {
+            Type::Named(p, args) if *p == Path::root("chan") && args.len() == 1 => Ok(args[0].clone()),
+            other => Err(Error::TypeError(format!(
+                "select: `{}` needs a Chan<T>, and this is {:?}",
+                what, other
+            ))),
+        }
     }
 
     fn check_the(

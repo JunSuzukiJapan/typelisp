@@ -242,6 +242,14 @@ fn calls() {
         // The callee can be a value, in which case the wrapped node is an
         // `apply` and its callee is a form like any argument.
         "(go (apply (var g) int-any-width (int-any-width) (int-any-width 1)))",
+        // `(select ARM...)`. Each arm is a plain list rather than a node —
+        // `("recv" VAR KEY CHAN BODY)`, `("send" KIND CHAN VALUE BODY)`,
+        // `("else" BODY)` — because the fields are metadata (a tag, a bound
+        // name, a type key, a field kind) with one form each. The channel
+        // expressions are `var`s: the checker bound every operand in a `let`
+        // around this node, so nothing here evaluates anything that can stop.
+        "(select (\"recv\" v \"option<i32>\" (var c) (var v)) (\"else\" (int-any-width 0)))",
+        "(select (\"send\" 1 (var c) (var x) (int-any-width 0)))",
     ]);
     // `compile-fn`'s two payload shapes, standalone for the same reason the
     // pattern tags are.
@@ -454,7 +462,7 @@ const SHARED_WITH_ISLAND: &[&str] = &[
     "int-any-width", "float-any-width", "bignum", "ratio", "char", "bool", "str", "unit", "var", "set", "global",
     "set-global", "let", "lambda", "labels", "call", "assoc", "apply", "if", "loop", "break",
     "return", "block", "return-from", "panic", "match", "construct", "field-get", "field-set",
-    "dyn-new", "dyn-upcast", "dyn-call", "dyn-value", "go",
+    "dyn-new", "dyn-upcast", "dyn-call", "dyn-value", "go", "select",
 ];
 
 /// Core tags with no island counterpart: the bridge turns each into something

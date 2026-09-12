@@ -443,7 +443,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 262] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 263] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -457,7 +457,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 262] {
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
     use typelisp_rt::coroutine::{
         rt_loop_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
-        rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_send, rt_suspend_sleep,
+        rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_select, rt_suspend_chan_send,
+        rt_suspend_sleep,
         rt_suspend_wait, rt_suspend_yield,
     };
     use typelisp_rt::sys_builtin::{
@@ -757,6 +758,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 262] {
         ("rt_suspend_chan_close", rt_suspend_chan_close as usize),
         ("rt_suspend_chan_send", rt_suspend_chan_send as usize),
         ("rt_suspend_chan_recv", rt_suspend_chan_recv as usize),
+        ("rt_suspend_chan_select", rt_suspend_chan_select as usize),
         ("rt_loop_safepoint", rt_loop_safepoint as usize),
         ("rt_stream_listen", rt_stream_listen as usize),
         ("rt_stream_position", rt_stream_position as usize),

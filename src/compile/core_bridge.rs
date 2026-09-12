@@ -710,9 +710,75 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         "field-get" => translate_field(heap, form, "field-get", cx),
         "field-set" => translate_field(heap, form, "field-set", cx),
         "match" => translate_match(heap, form, cx),
+        "select" => translate_select(heap, form, cx),
 
         other => Err(untranslated(other)),
     }
+}
+
+/// `(select ARM...)` -> the same, with the forms inside each arm translated.
+///
+/// Two of the arm's fields change shape on the way. The receive arm's
+/// `Option<T>` key is plain data in the core node — both readers want the
+/// string — but the island needs it as a **value at run time**, so it becomes
+/// a `(str ...)` node to compile, exactly as `vector-op`'s `pop` carries one.
+/// The bound name stays plain: the island binds it at compile time, into its
+/// own scope, and never needs it as a value.
+fn translate_select(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let arms = core::fields(heap, form)?;
+    let mut f = Items::new(heap);
+    for arm in &arms {
+        let parts = f.heap().list_to_vec(*arm)?;
+        let Some(Value::Str(tag_id)) = parts.first() else { return Err(malformed(f.heap(), form)) };
+        let tag = f.heap().string(*tag_id).to_string();
+        let mut a = Items::new(f.heap());
+        match tag.as_str() {
+            "recv" => {
+                if parts.len() != 5 {
+                    return Err(Error::TypeError("compile: malformed select receive arm".into()));
+                }
+                let Value::Str(key_id) = parts[2] else {
+                    return Err(Error::TypeError("compile: a select receive arm has no key".into()));
+                };
+                let key = a.heap().string(key_id).to_string();
+                a.push(parts[0]);
+                a.push(parts[1]);
+                let key_form = str_form(a.heap(), &key)?;
+                a.push(key_form);
+                let chan = to_island(a.heap(), parts[3], cx)?;
+                a.push(chan);
+                let body = to_island(a.heap(), parts[4], cx)?;
+                a.push(body);
+            }
+            "send" => {
+                if parts.len() != 5 {
+                    return Err(Error::TypeError("compile: malformed select send arm".into()));
+                }
+                a.push(parts[0]);
+                a.push(parts[1]);
+                let chan = to_island(a.heap(), parts[2], cx)?;
+                a.push(chan);
+                let value = to_island(a.heap(), parts[3], cx)?;
+                a.push(value);
+                let body = to_island(a.heap(), parts[4], cx)?;
+                a.push(body);
+            }
+            "else" => {
+                if parts.len() != 2 {
+                    return Err(Error::TypeError("compile: malformed select else arm".into()));
+                }
+                a.push(parts[0]);
+                let body = to_island(a.heap(), parts[1], cx)?;
+                a.push(body);
+            }
+            other => {
+                return Err(Error::TypeError(format!("compile: select arm tag `{}`", other)));
+            }
+        }
+        let arm = a.finish_list()?;
+        f.push(arm);
+    }
+    f.finish("select")
 }
 
 /// `(let ((SYM R E) ...) BODY...)` -> `(let (((SYM . kind) . form)...) body...)`.

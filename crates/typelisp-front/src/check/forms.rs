@@ -225,6 +225,103 @@ pub(super) fn go_form(heap: &mut Heap, call: Value) -> Result<Value, Error> {
     Ok(rooted(heap, form))
 }
 
+/// `(select ARM...)` — wait on several channels at once, and run the arm that
+/// wins.
+///
+/// **Nothing here evaluates anything that can stop.** Every channel expression
+/// and every value to send has already been evaluated by a `let` the checker
+/// wrapped around this node, and each arm names its operands by the variable
+/// that `let` bound. That is what keeps this node out of the business of
+/// evaluating subforms: a channel expression can call a function, and that
+/// function can suspend, and `let` already knows how to be in the middle of
+/// that.
+///
+/// The arms carry plain data — a `Value::Str` tag, the bound name, the
+/// `Option<T>` key, a field kind — rather than lowered literal nodes, the same
+/// way `assoc` carries its result key. Both readers want the string itself.
+pub(super) fn select_form(heap: &mut Heap, arms: &[Value]) -> Result<Value, Error> {
+    let form = core::tagged(heap, "select", arms)?;
+    Ok(rooted(heap, form))
+}
+
+/// `("recv" VAR OPT-KEY CHAN BODY)` — one receive arm.
+///
+/// `VAR` is bound to the `Option<T>` the receive answers with, so an arm sees
+/// the end of a closed channel rather than being skipped. `OPT-KEY` is that
+/// `Option<T>`'s runtime identity, which the scheduler builds the answer with.
+///
+/// The name is a **symbol**, as every other binding name in the core IR is —
+/// a `let`'s are. That is not only tidiness: the free-variable walk holds
+/// `SymRef`s and runs on a `&Heap`, so a name it had to intern would need a
+/// mutable one.
+pub(super) fn select_recv_arm(
+    heap: &mut Heap,
+    var: &str,
+    opt_key: &str,
+    chan: Value,
+    body: Value,
+) -> Result<Value, Error> {
+    // Rooted before the strings below allocate: a `Value` in a Rust argument
+    // is invisible to the collector, and this is the window four leaks in this
+    // file have lived in.
+    let chan = rooted(heap, chan);
+    let body = rooted(heap, body);
+    let arm_heap = &mut *heap;
+    let mut f = Items::new(arm_heap);
+    let tag = f.heap().alloc_string("recv".to_string());
+    f.push(tag);
+    let v = f.heap().intern_symbol(var);
+    f.push(v);
+    let k = f.heap().alloc_string(opt_key.to_string());
+    f.push(k);
+    f.push(chan);
+    f.push(body);
+    let arm = f.finish_list()?;
+    Ok(rooted(arm_heap, arm))
+}
+
+/// `("send" VALUE-KIND CHAN VALUE BODY)` — one send arm.
+///
+/// `VALUE-KIND` is the element's [`Repr::field_kind`](crate::check::repr::Repr::field_kind),
+/// for the compiled side: a value reaches the driver as one machine word and a
+/// word does not say whether it is a number or a pointer. The interpreter
+/// ignores it, as it ignores every other repr field.
+pub(super) fn select_send_arm(
+    heap: &mut Heap,
+    value_kind: i64,
+    chan: Value,
+    value: Value,
+    body: Value,
+) -> Result<Value, Error> {
+    let chan = rooted(heap, chan);
+    let value = rooted(heap, value);
+    let body = rooted(heap, body);
+    let arm_heap = &mut *heap;
+    let mut f = Items::new(arm_heap);
+    let tag = f.heap().alloc_string("send".to_string());
+    f.push(tag);
+    f.push(Value::Int(value_kind));
+    f.push(chan);
+    f.push(value);
+    f.push(body);
+    let arm = f.finish_list()?;
+    Ok(rooted(arm_heap, arm))
+}
+
+/// `("else" BODY)` — the arm that runs when nothing else is ready.
+///
+/// Always last, which is what lets its index be the number of channel arms.
+pub(super) fn select_else_arm(heap: &mut Heap, body: Value) -> Result<Value, Error> {
+    let body = rooted(heap, body);
+    let arm_heap = &mut *heap;
+    let mut f = Items::new(arm_heap);
+    let tag = f.heap().alloc_string("else".to_string());
+    f.push(tag);
+    f.push(body);
+    let arm = f.finish_list()?;
+    Ok(rooted(arm_heap, arm))
+}
+
 /// `(return-from NAME)` / `(return-from NAME FORM)` — leave the enclosing
 /// [`block_form`] of that name.
 pub(super) fn return_from_form(heap: &mut Heap, name: &str, value: Option<Value>) -> Result<Value, Error> {

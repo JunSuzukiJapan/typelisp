@@ -731,6 +731,29 @@ pub unsafe extern "C" fn rt_suspend_chan_send(args: *const i64, argc: u32) -> i6
     0
 }
 
+/// `(select ...)` for compiled code: the whole descriptor, copied out.
+///
+/// `args` is `[n, has-else, kind, chan, extra]...`, every word tagged — the
+/// array is a compiled frame's slots and the collector walks those, so a raw
+/// integer in one would be read as a pointer. The driver untags.
+///
+/// Copied rather than pointed at because the frame those slots live in is put
+/// down the moment this returns.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to `argc` valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_chan_select(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        crate::fatal("rt_suspend_chan_select: expected at least 2 words");
+    }
+    let words = std::slice::from_raw_parts(args, argc as usize);
+    call_state::set_pending_select(words);
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_SELECT, 0);
+    0
+}
+
 /// `(recv ch)` for compiled code. See [`rt_suspend_chan_new`].
 ///
 /// `args[1]` is the `Option<T>` type key the answer is built with — a string

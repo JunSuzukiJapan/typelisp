@@ -343,6 +343,10 @@ pub mod call_state {
         /// which is the same division `PENDING_CALL` makes between an address
         /// and a `CoroutineFn`.
         static PENDING_SUSPEND: RefCell<Option<(i64, i64, i64)>> = const { RefCell::new(None) };
+        /// The arms a `select` is waiting on, when the kind is
+        /// [`SUSPEND_CHAN_SELECT`]. Its own slot because the number of them
+        /// is the program's, and the pair above has room for two words.
+        static PENDING_SELECT: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
     }
 
     /// `(yield)` — nothing to wait for; the task gives up the rest of its
@@ -390,6 +394,27 @@ pub mod call_state {
     /// `(recv ch)` — take a value, waiting for one. Payloads: the handle and
     /// the `Option<T>` type key the answer is built with.
     pub const SUSPEND_CHAN_RECV: i64 = 9;
+    /// `(select ...)` — any one of several channel operations. The arms
+    /// travel in [`take_pending_select`] rather than in the payload words:
+    /// how many there are is the program's business.
+    pub const SUSPEND_CHAN_SELECT: i64 = 10;
+
+    /// Records the arms of a `select`, as `[n, has-else, kind, chan, extra]...`
+    /// with every word **tagged** — the array is a compiled frame's slots,
+    /// which the collector walks, so a raw integer in one would be read as a
+    /// pointer.
+    pub fn set_pending_select(words: &[i64]) {
+        PENDING_SELECT.with(|p| {
+            let mut v = p.borrow_mut();
+            v.clear();
+            v.extend_from_slice(words);
+        });
+    }
+
+    /// Takes them back out.
+    pub fn take_pending_select() -> Vec<i64> {
+        PENDING_SELECT.with(|p| std::mem::take(&mut *p.borrow_mut()))
+    }
 
     /// Records what the frame about to return `STATUS_SUSPEND` is waiting for.
     pub fn set_pending_suspend(kind: i64, payload: i64) {

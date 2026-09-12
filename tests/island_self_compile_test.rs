@@ -195,6 +195,11 @@ const ISLAND_DEFUNS: &[&str] = &[
     "compile-unwind-protect",
     "compile-panic",
     "compile-go",
+    "select-arm-count",
+    "select-has-else",
+    "fill-select-ops",
+    "compile-select-arms",
+    "compile-select",
     "compile-function",
 ];
 
