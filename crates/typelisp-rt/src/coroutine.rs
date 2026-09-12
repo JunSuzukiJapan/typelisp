@@ -252,15 +252,15 @@ impl FrameStack {
                 // set because a resume block reads it like any other, and
                 // the island discards this one.
                 Err(Paused::Suspended) => match call_state::take_pending_suspend() {
-                    Some((call_state::SUSPEND_SAFEPOINT, _)) => {
+                    Some((call_state::SUSPEND_SAFEPOINT, _, _)) => {
                         self.set_top_value(heap, 0);
                         outcome = self.resume(heap, base);
                     }
                     // A real wait, which this driver cannot honour. Put it
                     // back so the caller's error can still say what it was.
                     other => {
-                        if let Some((kind, payload)) = other {
-                            call_state::set_pending_suspend(kind, payload);
+                        if let Some((kind, first, second)) = other {
+                            call_state::set_pending_suspend_2(kind, first, second);
                         }
                         return Err(Paused::Suspended);
                     }
@@ -644,5 +644,108 @@ pub unsafe extern "C" fn rt_suspend_wait(args: *const i64, argc: u32) -> i64 {
         crate::fatal("rt_suspend_wait: expected 1 argument");
     }
     call_state::set_pending_suspend(call_state::SUSPEND_WAIT, *args);
+    0
+}
+
+/// The channel operations for compiled code.
+///
+/// All six are suspensions, and only two of them can really wait. The table
+/// of channels belongs to the scheduler — see
+/// [`typelisp_abi::call_state::SUSPEND_CHAN_NEW`] for why it cannot live down
+/// here — so every one of them is a question for the driver, answered on the
+/// way back through the frame's value slot.
+///
+/// Each shim only *records*; none of them touches a channel, and none of them
+/// blocks. That is the same division the other `rt_suspend_*` shims draw.
+///
+/// # Safety
+///
+/// `argc` must be at least as large as the number of words each reads, and
+/// `args` must point to that many valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_chan_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        crate::fatal("rt_suspend_chan_new: expected 1 argument");
+    }
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_NEW, *args);
+    0
+}
+
+/// `(len ch)` for compiled code. See [`rt_suspend_chan_new`].
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_chan_len(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        crate::fatal("rt_suspend_chan_len: expected 1 argument");
+    }
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_LEN, *args);
+    0
+}
+
+/// `(cap ch)` for compiled code. See [`rt_suspend_chan_new`].
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_chan_cap(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        crate::fatal("rt_suspend_chan_cap: expected 1 argument");
+    }
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_CAP, *args);
+    0
+}
+
+/// `(close ch)` for compiled code. See [`rt_suspend_chan_new`].
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_chan_close(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        crate::fatal("rt_suspend_chan_close: expected 1 argument");
+    }
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_CLOSE, *args);
+    0
+}
+
+/// `(send ch v)` for compiled code. See [`rt_suspend_chan_new`].
+///
+/// `args[1]` arrives **already tagged**: the suspension site tagged it with
+/// the element's own `Repr::field_kind`, because a raw machine word does not
+/// say whether it is an integer or a pointer and the driver has only the word.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_chan_send(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        crate::fatal("rt_suspend_chan_send: expected 2 arguments");
+    }
+    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_SEND, *args, *args.add(1));
+    0
+}
+
+/// `(recv ch)` for compiled code. See [`rt_suspend_chan_new`].
+///
+/// `args[1]` is the `Option<T>` type key the answer is built with — a string
+/// the bridge appended at the call site, the same way `vector-op`'s `pop`
+/// carries one. Nothing here can derive it: a channel's buffer holds tagged
+/// words and a word does not name its type.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_chan_recv(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        crate::fatal("rt_suspend_chan_recv: expected 2 arguments");
+    }
+    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_RECV, *args, *args.add(1));
     0
 }

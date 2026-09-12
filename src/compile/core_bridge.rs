@@ -884,7 +884,7 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
     // there is nothing in the frame's value slot to decode on the way back
     // (`compile-catch`'s own `kind = 0` means the same thing).
     if name.starts_with(crate::compile::externs::RT_SUSPEND_PREFIX) {
-        return suspend_node(heap, &name, 0, &reprs, &args, cx);
+        return suspend_node(heap, &name, 0, None, &reprs, &args, cx, None);
     }
     let name_v = heap.alloc_string(name);
 
@@ -894,8 +894,8 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
     f.finish("call")
 }
 
-/// `(suspend NAME KIND (KIND . ARG)...)` — the island's node for a suspending
-/// builtin.
+/// `(suspend NAME KIND TAG-AT TAG-KIND (KIND . ARG)...)` — the island's node
+/// for a suspending builtin.
 ///
 /// `NAME` is the shim to call first (it records *what* is being waited for);
 /// `KIND` is how to read the answer back out of the frame's value slot once
@@ -903,19 +903,40 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
 /// tagged `Sexpr` whatever its type, exactly as a thrown value does, so this
 /// is the same decode `catch` performs and for the same reason: the crossing
 /// hands one machine word through and only the representation says what it is.
+///
+/// `tag` names the one argument that has to travel **tagged** as well, as
+/// `(index, field kind)`; `TAG-AT` is `-1` when there is none. Arguments are
+/// otherwise passed exactly as compiled — raw, in whatever representation
+/// their type has — which is all `sleep` and `wait` ever needed. `(send ch v)`
+/// is the case that broke it: the driver receives one machine word for `v`
+/// and a word does not say whether it is a number or a pointer, so the site
+/// that *does* know tags it, per `Repr::field_kind`, exactly as a value going
+/// into a struct field is tagged.
+///
+/// `trailing` is an argument that is **already an island form** — `recv`'s
+/// `Option<T>` key, which nothing in the core IR names and which therefore has
+/// no core form to translate. It is appended as one more ordinary argument.
 fn suspend_node(
     heap: &mut Heap,
     name: &str,
     kind: i64,
+    tag: Option<(usize, i64)>,
     reprs: &[Repr],
     args: &[Value],
     cx: Ctx,
+    trailing: Option<Value>,
 ) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     let mut f = Items::new(heap);
     f.push(name_v);
     f.push(Value::Int(kind));
+    f.push(Value::Int(tag.map(|(at, _)| at as i64).unwrap_or(-1)));
+    f.push(Value::Int(tag.map(|(_, k)| k).unwrap_or(0)));
     arg_pairs(&mut f, reprs, args, cx)?;
+    if let Some(island_form) = trailing {
+        let pair = core::pair(f.heap(), Value::Int(Repr::Str.binding_kind()), island_form)?;
+        f.push(pair);
+    }
     f.finish("suspend")
 }
 
@@ -962,7 +983,23 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // has room for its arguments' representations and not for its result's.
     if let Some(shim) = crate::compile::externs::rt_suspend_method_symbol(type_name.last_segment(), &method) {
         if type_name.is_simple() {
-            return suspend_node(heap, shim, ret.field_kind(), &reprs, &args, cx);
+            // `(send ch v)`: the value is the one argument whose meaning the
+            // driver cannot recover from its word, so it crosses tagged.
+            if method == "send" {
+                let elem = reprs.get(1).cloned().unwrap_or(Repr::Sexpr);
+                let tag = Some((1usize, elem.field_kind()));
+                return suspend_node(heap, shim, ret.field_kind(), tag, &reprs, &args, cx, None);
+            }
+            // `(recv ch)`: the answer is an `Option<T>`, and the key that
+            // spells it is appended as a second argument — nothing on the
+            // other side could derive it, since a buffer holds tagged words
+            // and a word does not name its type. `vector-op`'s `pop` carries
+            // the same string for the same reason.
+            if method == "recv" {
+                let key = str_form(heap, &ret_key)?;
+                return suspend_node(heap, shim, ret.field_kind(), None, &reprs, &args, cx, Some(key));
+            }
+            return suspend_node(heap, shim, ret.field_kind(), None, &reprs, &args, cx, None);
         }
     }
     if let Some(key) = llvm_op_key(&type_name, &self_repr) {

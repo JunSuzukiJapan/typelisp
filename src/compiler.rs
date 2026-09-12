@@ -3211,8 +3211,22 @@ pub const SOURCE: &str = r#"
 ;; `nm` is `name` itself, already declared by
 ;; `compile-function`'s own first step (`add-function`,
 ;; above) before this body was ever reached.
-;; `(suspend NAME KIND (kind . arg)...)` — a builtin that **puts the task
-;; down** (`yield`, `sleep`, `task::wait`).
+;; Replaces one already-compiled argument of a `(suspend ...)` with its tagged
+;; form, so the driver can read it.
+;;
+;; The tagged word goes through a `spill` — a *rooted* frame slot — on its way
+;; back into the argument array. Tagging an `f64` allocates, and the argument
+;; array's own slot is marked for whatever the untagged value was, which for
+;; a scalar is "not a root": without the spill the box would exist for a
+;; moment that the collector cannot see it in.
+(defun tag-suspend-arg ((builder llvm-builder) (m llvm-module) (args-ptr llvm-value) (idx i32) (kind i32)) ()
+    (let* ((raw (load-raw builder args-ptr idx))
+           (slot (spill builder m 2 (compile-tag-struct-field builder m raw kind))))
+      (store-arg builder args-ptr idx (load-raw builder slot 0))))
+
+;; `(suspend NAME KIND TAG-AT TAG-KIND (kind . arg)...)` — a builtin that
+;; **puts the task down** (`yield`, `sleep`, `task::wait`, every `Chan<T>`
+;; operation).
 ;;
 ;; Two halves, and neither is a blocking call: `NAME` is a shim that writes
 ;; what is being waited for into `typelisp_abi::call_state`, and
@@ -3233,13 +3247,22 @@ pub const SOURCE: &str = r#"
 ;; exactly what cannot be put down. C4 took that nested driver away: a region
 ;; is a slot on the frame now, so a call in one is an ordinary driver round
 ;; trip and suspends like any other.
+;;
+;; `TAG-AT`/`TAG-KIND` name the one argument that has to reach the driver
+;; **tagged**, or `-1` for none. Every other argument goes as compiled, raw,
+;; which is what `sleep` and `wait` always wanted; `(send ch v)` is the one
+;; that cannot, because the driver gets one word for `v` and a word does not
+;; say whether it is a number or a pointer.
 (defun compile-suspend ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((nm (sexpr-str (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
-           (arg-forms (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))
+           (tag-at (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+           (tag-kind (sexpr-i32 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+           (arg-forms (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
            (argc (sexpr-list-length arg-forms))
            (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
+           (ignored-tag (if (< tag-at 0) () (tag-suspend-arg builder m args-ptr tag-at tag-kind)))
            (ignored (build-call builder (get-function m nm) args-ptr argc))
            (raw (coroutine-suspend builder m)))
       (if (eq kind 0) raw (compile-sexpr-field builder m raw kind 0))))

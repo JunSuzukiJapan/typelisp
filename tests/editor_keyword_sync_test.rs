@@ -160,8 +160,11 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 22] = [
+    const PRELUDE_PRIVATE: [&str; 23] = [
         "unwrap-io",
+        // `after`'s body, split out only because `go` takes a call form and
+        // not a thunk. A user writes `after`.
+        "sleep-then-send",
         // The bridge the *reader* calls a macro character's function
         // through (Stage 8c): it wraps the unread text in a stream, calls
         // the function, and reports how much of it was consumed. Reached

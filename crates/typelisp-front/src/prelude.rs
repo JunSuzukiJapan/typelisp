@@ -5757,6 +5757,36 @@ user-visible capacity."
      ,@body))
 
 
+;; ---- Channels -----------------------------------------------------------
+
+;; `Chan<T>` is its own iterator, which makes `(doiter (v ch) ...)` Go's
+;; `for v := range ch`: receive until the channel is closed *and* drained.
+;;
+;; One line rather than a cursor struct because `recv` already answers
+;; `Option<T>`, which is `next`'s type exactly — the shape was chosen for
+;; this. Unlike `Vector<T>`, a channel really is its own cursor: receiving
+;; consumes, so there is no second cursor to keep.
+(impl Iter Chan<T>
+  (type Item T)
+  (next ((self Self)) Option<T> (recv self)))
+
+;; The body of `after`, split out because `go` takes a call form.
+(defun sleep-then-send ((sec f64) (ch Chan<()>)) ()
+  (sleep sec)
+  (send ch ()))
+
+;; `(recv (after 0.5))` is Go's `<-time.After(d)`: a channel that receives one
+;; value `sec` seconds from now, and nothing after that. What makes a timeout
+;; writable as one more arm of a `select`.
+;;
+;; Capacity 1 so the sending task can finish even if nobody ever receives —
+;; the reason Go's own `time.After` buffers one.
+(pub defun after ((sec f64)) Chan<()>
+  (let ((ch (the Chan<()> (Chan::new 1))))
+    (go (sleep-then-send sec ch))
+    ch))
+
+
 "##;
 
 /// Read, check, and `exec` [`SOURCE`] against `heap`/`chk`/`interp`,

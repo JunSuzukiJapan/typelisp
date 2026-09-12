@@ -41,7 +41,7 @@ use super::core_eval::{
     bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, path_field,
     param_reprs, repr_list, str_field, sym_field, tail_after, tail_after_value, Op, StepCmd,
 };
-use super::{FnDef, Interp};
+use super::{option_value, FnDef, Interp};
 
 use std::rc::Rc;
 
@@ -513,8 +513,19 @@ enum Progress {
     Done(Result<Value, EvalError>),
 }
 
-/// What a suspended task is waiting for.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// What a task needs from the scheduler before it can go on.
+///
+/// Not always a *wait*: [`Scheduler::try_now`] answers several of these
+/// immediately and the task never leaves the queue. The variants are here
+/// rather than being four separate mechanisms because the scheduler is the
+/// only thing that can answer any of them, and one shape means the
+/// interpreted and the compiled path reach the same implementation — the
+/// channel semantics are written once.
+///
+/// **Not `Copy`**: `Recv` carries the type key its answer is built with.
+/// **Not `Eq`**: `Send` carries a `Value`, which is a heap index and has no
+/// equality worth deriving.
+#[derive(Clone, PartialEq, Debug)]
 pub(super) enum Waiting {
     /// Another task's result — `(wait t)`.
     Task(TaskId),
@@ -524,8 +535,65 @@ pub(super) enum Waiting {
     /// The clock — `(sleep secs)`. **This stops the task, not the thread**:
     /// everything else keeps running, and the program only reaches the OS's
     /// `sleep` when nothing at all is ready, for as long as the nearest
-    /// deadline. `after` will ride on the same mechanism.
+    /// deadline. `after` rides on the same mechanism.
     Until(std::time::Instant),
+    /// A `Chan<T>` operation.
+    Chan(ChanOp),
+}
+
+/// One channel operation, as the task asked for it.
+///
+/// Four of the six never park — they only need the scheduler's table, which
+/// nothing below the front end can hold (`typelisp_abi::call_state::
+/// SUSPEND_CHAN_NEW` records why). `Send` and `Recv` are the two that can.
+#[derive(Clone, PartialEq, Debug)]
+pub(super) enum ChanOp {
+    /// `(Chan::new cap)` — answers with the handle.
+    New(i64),
+    /// `(len ch)` — how many values are buffered.
+    Len(ChanId),
+    /// `(cap ch)` — how many fit.
+    Cap(ChanId),
+    /// `(close ch)` — closing a closed channel is a panic, as in Go.
+    Close(ChanId),
+    /// `(send ch v)` — parks while the buffer is full and no receiver waits.
+    ///
+    /// The value is rooted through the task's own state slot (`set_state`),
+    /// which is what lets a parked sender hold it with nothing else pointing
+    /// at it: a `Value` inside a Rust enum is invisible to the collector.
+    Send(ChanId, Value),
+    /// `(recv ch)` — parks while the buffer is empty, no sender waits and the
+    /// channel is open.
+    ///
+    /// The `String` is the `Option<T>` type key the answer is built with. It
+    /// has to travel with the operation because a channel's buffer holds
+    /// tagged words and a word does not name its type — the same reason
+    /// `vector-op`'s `pop` carries one.
+    Recv(ChanId, String),
+}
+
+/// Names a channel the scheduler is holding.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct ChanId(usize);
+
+/// One channel: a ring of buffered values and whether it is closed.
+///
+/// The values live in the scheduler's own root stack, `[base, base + cap)`,
+/// claimed once at creation and never given back. A channel is therefore as
+/// permanent as a finished task's result (`Slot::Done`), and for the same
+/// reason: telling the scheduler that the last handle died needs the
+/// collector to say so.
+///
+/// Nothing here records who is waiting. Blocked senders and receivers are
+/// found by walking `Scheduler::slots`, which is where `finish` and
+/// `wake_due` already look — one place that knows what a parked task is
+/// parked on, rather than two that have to agree.
+struct Chan {
+    cap: usize,
+    base: usize,
+    head: usize,
+    len: usize,
+    closed: bool,
 }
 
 impl Task {
@@ -569,6 +637,65 @@ fn task_handle(heap: &mut Heap, id: TaskId) -> Value {
     crate::type_key::alloc_typed_struct(heap, &crate::Path::root("task"), vec![Value::Int(id.0 as i64)])
 }
 
+/// The runtime value of a `Chan<T>`: a boxed struct holding the scheduler's id.
+///
+/// Carries no type argument, for [`task_handle`]'s reason: `Chan<i32>` and
+/// `Chan<string>` are the same thing at run time, and the element type is
+/// spelled at every site that puts one in or takes one out.
+fn chan_handle(heap: &mut Heap, id: ChanId) -> Value {
+    // type-identity-ok: the built-in `Chan`, a root name spelled in full
+    crate::type_key::alloc_typed_struct(heap, &crate::Path::root("chan"), vec![Value::Int(id.0 as i64)])
+}
+
+/// The scheduler id inside a `Chan<T>` handle — [`task_id_of`] for channels.
+fn chan_id_of(heap: &Heap, v: Option<Value>) -> Result<ChanId, EvalError> {
+    match v {
+        Some(Value::Boxed(id)) if heap.struct_field_count(id) == 1 => match heap.struct_field(id, 0) {
+            Value::Int(n) if n >= 0 => Ok(ChanId(n as usize)),
+            other => Err(EvalError::Internal(format!("a channel handle holds {:?}", other))),
+        },
+        other => Err(EvalError::Internal(format!("{:?} is not a channel handle", other))),
+    }
+}
+
+/// What to call a `Waiting` in an error addressed to a programmer.
+fn waiting_name(w: &Waiting) -> &'static str {
+    match w {
+        Waiting::Task(_) => "`wait`",
+        Waiting::Yield => "`yield`",
+        Waiting::Until(_) => "`sleep`",
+        Waiting::Chan(ChanOp::Send(..)) => "`send`",
+        Waiting::Chan(ChanOp::Recv(..)) => "`recv`",
+        // The other three answer at once, so they never reach a message that
+        // says something could not block.
+        Waiting::Chan(_) => "a channel operation",
+    }
+}
+
+/// The state a task resumes into, given what the scheduler answered it with.
+fn answer_state(answer: Result<Value, EvalError>) -> State {
+    match answer {
+        Ok(v) => State::Apply(v),
+        Err(e) => State::Unwind(e),
+    }
+}
+
+/// Gives a parked task the state it will resume into, **rooting what that
+/// state carries in the task's own stack**.
+///
+/// The root is the point. A value handed to a woken task — a `some` box built
+/// by `recv`, say — exists only inside a Rust enum until this runs, and the
+/// task is not stepped again until some other task has had its turn and
+/// allocated. `Scheduler::finish` does not need this only because a finished
+/// task's result is rooted in the scheduler's own stack instead.
+fn resume_with(heap: &mut Heap, slot: &mut TaskSlot, state: State) {
+    let home = heap.current_root_stack();
+    heap.switch_to_root_stack(slot.roots);
+    set_state(heap, slot.task.sbase, &state);
+    heap.switch_to_root_stack(home);
+    slot.task.state = state;
+}
+
 /// A task the scheduler owns, and the root stack that belongs to it.
 struct TaskSlot {
     task: Task,
@@ -609,6 +736,14 @@ pub(crate) struct Scheduler {
     /// nobody sleeping — costs one comparison per task switch instead of a
     /// walk over every slot.
     sleeping: usize,
+    /// Every channel that has been made, by [`ChanId`]. See [`Chan`] for why
+    /// none is ever removed.
+    chans: Vec<Chan>,
+    /// Where buffered values are rooted: each channel owns the contiguous
+    /// run `[Chan::base, Chan::base + Chan::cap)`. One stack for all of them
+    /// rather than one each, because a root stack is a `Heap`'s and a channel
+    /// is not worth one.
+    chan_roots: Option<RootStackId>,
     /// Whether to look at another task after **every single step**, rather
     /// than letting the running one keep going until it yields, waits or
     /// finishes.
@@ -691,53 +826,234 @@ impl Scheduler {
         self.slots[id.0] = Slot::Empty;
     }
 
-    /// Suspends `id` until `w` is satisfied — or puts it straight back on the
-    /// queue if it already is.
-    fn block(&mut self, id: TaskId, mut slot: TaskSlot, w: Waiting) -> Result<(), EvalError> {
-        let on = match w {
-            // Nothing to wait for: straight back onto the queue, behind
-            // everything already on it. That is the whole of `yield`.
-            Waiting::Yield => {
-                slot.task.state = State::Apply(Value::Empty);
-                self.slots[id.0] = Slot::Parked(slot);
-                self.ready.push_back(id);
-                return Ok(());
-            }
+    /// Answers `w` if it can be answered right now, without parking anybody.
+    ///
+    /// `None` means the asking task has to wait. This is the **whole** of what
+    /// each operation means: `Scheduler::block` and the nested-evaluation path
+    /// both go through it, so an interpreted `(recv ch)` and a compiled one
+    /// are the same code, and so is the one inside a print method.
+    ///
+    /// Waking *other* tasks happens here too (a receiver taking a parked
+    /// sender's value, `close` releasing everyone). That is not a side effect
+    /// on the way to an answer: for a rendezvous it *is* the answer.
+    fn try_now(&mut self, heap: &mut Heap, w: &Waiting) -> Option<Result<Value, EvalError>> {
+        match w {
+            // Nothing to wait for, but the task still goes to the back of the
+            // queue — answering here would let it run on. That is the whole
+            // of `yield`, and `block` is where it happens.
+            Waiting::Yield => None,
             // A deadline that has already passed is not a wait at all — which
             // is what makes `(sleep 0.0)` CL's yield-ish zero, with no special
             // case for it anywhere.
-            Waiting::Until(t) => {
-                if t <= std::time::Instant::now() {
-                    slot.task.state = State::Apply(Value::Empty);
-                    self.slots[id.0] = Slot::Parked(slot);
-                    self.ready.push_back(id);
-                } else {
-                    self.sleeping += 1;
-                    self.slots[id.0] = Slot::Blocked(slot, w);
+            Waiting::Until(t) => (*t <= std::time::Instant::now()).then_some(Ok(Value::Empty)),
+            Waiting::Task(on) => match self.slots.get(on.0) {
+                Some(Slot::Done(v)) => Some(Ok(*v)),
+                Some(Slot::Parked(_)) | Some(Slot::Running) | Some(Slot::Blocked(..)) => None,
+                // The handle named a position nothing lives at. Only the main
+                // task's position is ever freed, and no `Task<T>` names it.
+                Some(Slot::Empty) | None => {
+                    Some(Err(EvalError::Internal(format!("wait: {:?} is not a live task", on))))
                 }
-                return Ok(());
+            },
+            Waiting::Chan(op) => self.try_chan(heap, op),
+        }
+    }
+
+    /// [`Self::try_now`] for the channel operations.
+    fn try_chan(&mut self, heap: &mut Heap, op: &ChanOp) -> Option<Result<Value, EvalError>> {
+        match op {
+            ChanOp::New(cap) => {
+                if *cap < 0 {
+                    return Some(Err(EvalError::Panic(format!(
+                        "Chan::new: {} is not a capacity a channel can have",
+                        cap
+                    ))));
+                }
+                let id = self.chan_new(heap, *cap as usize);
+                Some(Ok(chan_handle(heap, id)))
             }
-            Waiting::Task(on) => on,
-        };
-        match self.slots.get(on.0) {
-            // Already finished: nothing to wait for.
-            Some(Slot::Done(v)) => {
-                slot.task.state = State::Apply(*v);
+            ChanOp::Len(c) => Some(Ok(Value::Int(self.chans[c.0].len as i64))),
+            ChanOp::Cap(c) => Some(Ok(Value::Int(self.chans[c.0].cap as i64))),
+            ChanOp::Close(c) => Some(self.chan_close(heap, *c).map(|()| Value::Empty)),
+            ChanOp::Send(c, v) => self.chan_send(heap, *c, *v),
+            ChanOp::Recv(c, key) => self.chan_recv(heap, *c, key),
+        }
+    }
+
+    /// Suspends `id` until `w` is satisfied — or puts it straight back on the
+    /// queue if it already is.
+    fn block(&mut self, heap: &mut Heap, id: TaskId, mut slot: TaskSlot, w: Waiting) -> Result<(), EvalError> {
+        match self.try_now(heap, &w) {
+            Some(answer) => {
+                resume_with(heap, &mut slot, answer_state(answer));
                 self.slots[id.0] = Slot::Parked(slot);
                 self.ready.push_back(id);
                 Ok(())
             }
-            Some(Slot::Parked(_)) | Some(Slot::Running) | Some(Slot::Blocked(..)) => {
-                self.slots[id.0] = Slot::Blocked(slot, w);
+            None => {
+                match w {
+                    // Straight back onto the queue, behind everything already
+                    // on it.
+                    Waiting::Yield => {
+                        resume_with(heap, &mut slot, State::Apply(Value::Empty));
+                        self.slots[id.0] = Slot::Parked(slot);
+                        self.ready.push_back(id);
+                    }
+                    Waiting::Until(_) => {
+                        self.sleeping += 1;
+                        self.slots[id.0] = Slot::Blocked(slot, w);
+                    }
+                    Waiting::Task(_) | Waiting::Chan(_) => {
+                        self.slots[id.0] = Slot::Blocked(slot, w);
+                    }
+                }
                 Ok(())
             }
-            // The handle named a position nothing lives at. Only the main
-            // task's position is ever freed, and no `Task<T>` names it.
-            Some(Slot::Empty) | None => Err(EvalError::Internal(format!(
-                "wait: {:?} is not a live task",
-                on
-            ))),
         }
+    }
+
+    /// Makes a channel with room for `cap` values, claiming its root slots.
+    fn chan_new(&mut self, heap: &mut Heap, cap: usize) -> ChanId {
+        let stack = *self.chan_roots.get_or_insert_with(|| heap.new_root_stack());
+        let home = heap.current_root_stack();
+        heap.switch_to_root_stack(stack);
+        let base = heap.root_count();
+        for _ in 0..cap {
+            heap.push_root(Value::Empty);
+        }
+        heap.switch_to_root_stack(home);
+        self.chans.push(Chan { cap, base, head: 0, len: 0, closed: false });
+        ChanId(self.chans.len() - 1)
+    }
+
+    /// Appends to a channel's ring. The caller has checked there is room.
+    fn chan_push(&mut self, heap: &mut Heap, c: ChanId, v: Value) {
+        let ch = &mut self.chans[c.0];
+        let idx = ch.base + (ch.head + ch.len) % ch.cap;
+        ch.len += 1;
+        let stack = self.chan_roots.expect("a channel exists, so its root stack does");
+        let home = heap.current_root_stack();
+        heap.switch_to_root_stack(stack);
+        heap.set_root(idx, v);
+        heap.switch_to_root_stack(home);
+    }
+
+    /// Takes the oldest value out of a channel's ring, or `None` if empty.
+    fn chan_pop(&mut self, heap: &mut Heap, c: ChanId) -> Option<Value> {
+        let ch = &mut self.chans[c.0];
+        if ch.len == 0 {
+            return None;
+        }
+        let idx = ch.base + ch.head;
+        ch.head = (ch.head + 1) % ch.cap;
+        ch.len -= 1;
+        let stack = self.chan_roots.expect("a channel exists, so its root stack does");
+        let home = heap.current_root_stack();
+        heap.switch_to_root_stack(stack);
+        let v = heap.root(idx);
+        // The ring slot is a root: leaving the value in it would keep the
+        // whole graph under it alive for as long as the channel exists.
+        heap.set_root(idx, Value::Empty);
+        heap.switch_to_root_stack(home);
+        Some(v)
+    }
+
+    /// The first task parked in `send` on `c`, and the value it is offering.
+    ///
+    /// Slot order, not arrival order. Go's channels hand out in arrival order;
+    /// nothing in this scheduler records arrival, and the alternative is a
+    /// second queue per channel that has to agree with `slots` about who is
+    /// parked — the disagreement that `finish`/`wake_due` avoid by walking.
+    fn parked_sender(&self, c: ChanId) -> Option<(usize, Value)> {
+        self.slots.iter().enumerate().find_map(|(i, s)| match s {
+            Slot::Blocked(_, Waiting::Chan(ChanOp::Send(on, v))) if *on == c => Some((i, *v)),
+            _ => None,
+        })
+    }
+
+    /// The first task parked in `recv` on `c`, and the key its answer needs.
+    fn parked_receiver(&self, c: ChanId) -> Option<(usize, String)> {
+        self.slots.iter().enumerate().find_map(|(i, s)| match s {
+            Slot::Blocked(_, Waiting::Chan(ChanOp::Recv(on, key))) if *on == c => Some((i, key.clone())),
+            _ => None,
+        })
+    }
+
+    /// Puts a parked task back on the queue with the state it resumes into.
+    fn wake(&mut self, heap: &mut Heap, i: usize, state: State) {
+        let Slot::Blocked(mut slot, _) = std::mem::replace(&mut self.slots[i], Slot::Running) else {
+            unreachable!("only a blocked task is woken");
+        };
+        resume_with(heap, &mut slot, state);
+        self.slots[i] = Slot::Parked(slot);
+        self.ready.push_back(TaskId(i));
+    }
+
+    /// `(send ch v)`. `None` means the sender has to wait for room.
+    fn chan_send(&mut self, heap: &mut Heap, c: ChanId, v: Value) -> Option<Result<Value, EvalError>> {
+        if self.chans[c.0].closed {
+            return Some(Err(EvalError::Panic("send: the channel is closed".to_string())));
+        }
+        // A waiting receiver takes it directly, buffer or no buffer. That is
+        // the whole of a rendezvous, and for a buffered channel it cannot be
+        // wrong: nobody waits to receive from a channel with anything in it.
+        if let Some((i, key)) = self.parked_receiver(c) {
+            let answer = option_value(heap, &key, Some(v));
+            self.wake(heap, i, State::Apply(answer));
+            return Some(Ok(Value::Empty));
+        }
+        if self.chans[c.0].len < self.chans[c.0].cap {
+            self.chan_push(heap, c, v);
+            return Some(Ok(Value::Empty));
+        }
+        None
+    }
+
+    /// `(recv ch)`. `None` means the receiver has to wait for a value.
+    fn chan_recv(&mut self, heap: &mut Heap, c: ChanId, key: &str) -> Option<Result<Value, EvalError>> {
+        if let Some(v) = self.chan_pop(heap, c) {
+            // Taking one out made room, so a sender that was waiting for room
+            // can put its value in and go.
+            if let Some((i, offered)) = self.parked_sender(c) {
+                self.chan_push(heap, c, offered);
+                self.wake(heap, i, State::Apply(Value::Empty));
+            }
+            return Some(Ok(option_value(heap, key, Some(v))));
+        }
+        // Nothing buffered — which for an unbuffered channel is always, so
+        // this is the rendezvous seen from the receiving side.
+        if let Some((i, offered)) = self.parked_sender(c) {
+            self.wake(heap, i, State::Apply(Value::Empty));
+            return Some(Ok(option_value(heap, key, Some(offered))));
+        }
+        if self.chans[c.0].closed {
+            return Some(Ok(option_value(heap, key, None)));
+        }
+        None
+    }
+
+    /// `(close ch)`. Everyone parked on it is released.
+    fn chan_close(&mut self, heap: &mut Heap, c: ChanId) -> Result<(), EvalError> {
+        if self.chans[c.0].closed {
+            return Err(EvalError::Panic("close: the channel is already closed".to_string()));
+        }
+        self.chans[c.0].closed = true;
+        // Receivers get `none`: a receiver only parks with the buffer empty
+        // and no sender waiting, so there is nothing left for them.
+        while let Some((i, key)) = self.parked_receiver(c) {
+            let answer = option_value(heap, &key, None);
+            self.wake(heap, i, State::Apply(answer));
+        }
+        // Senders panic, which is Go's rule. The value each was offering is
+        // dropped with the task's state, and its root goes with it.
+        while let Some((i, _)) = self.parked_sender(c) {
+            self.wake(
+                heap,
+                i,
+                State::Unwind(EvalError::Panic("send: the channel was closed while waiting".to_string())),
+            );
+        }
+        Ok(())
     }
 
     /// Records `id`'s result and wakes everything that was waiting for it.
@@ -869,7 +1185,7 @@ fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
 /// place that turns them back.
 fn pending_wait(heap: &Heap) -> Result<(Waiting, Repr), EvalError> {
     use typelisp_abi::call_state as cs;
-    let (kind, payload) = cs::take_pending_suspend().ok_or_else(|| {
+    let (kind, payload, second) = cs::take_pending_suspend().ok_or_else(|| {
         EvalError::Internal(
             "a compiled frame suspended without recording what it was waiting for".to_string(),
         )
@@ -908,6 +1224,41 @@ fn pending_wait(heap: &Heap) -> Result<(Waiting, Repr), EvalError> {
             let handle = typelisp_abi::decode(payload);
             Ok((Waiting::Task(task_id_of(heap, Some(handle))?), Repr::Sexpr))
         }
+        // The channel operations. The handle is tagged, like `wait`'s; so is
+        // `send`'s value, which the suspension site tagged per the element's
+        // own `Repr::field_kind` because the driver has only a word.
+        // The capacity is an ordinary `i32` argument, so it crosses raw — the
+        // suspension site tags only what the driver could not otherwise read.
+        cs::SUSPEND_CHAN_NEW => Ok((Waiting::Chan(ChanOp::New(payload)), Repr::Sexpr)),
+        // `Repr::Sexpr` and not `Repr::Int`: a wake value always crosses back
+        // **tagged**, whatever its type, and the resume block decodes it with
+        // the kind the bridge baked in — the same division `wait` makes.
+        cs::SUSPEND_CHAN_LEN => {
+            Ok((Waiting::Chan(ChanOp::Len(chan_id_of(heap, Some(typelisp_abi::decode(payload)))?)), Repr::Sexpr))
+        }
+        cs::SUSPEND_CHAN_CAP => {
+            Ok((Waiting::Chan(ChanOp::Cap(chan_id_of(heap, Some(typelisp_abi::decode(payload)))?)), Repr::Sexpr))
+        }
+        cs::SUSPEND_CHAN_CLOSE => {
+            Ok((Waiting::Chan(ChanOp::Close(chan_id_of(heap, Some(typelisp_abi::decode(payload)))?)), Repr::Unit))
+        }
+        cs::SUSPEND_CHAN_SEND => {
+            let c = chan_id_of(heap, Some(typelisp_abi::decode(payload)))?;
+            Ok((Waiting::Chan(ChanOp::Send(c, typelisp_abi::decode(second))), Repr::Unit))
+        }
+        cs::SUSPEND_CHAN_RECV => {
+            let c = chan_id_of(heap, Some(typelisp_abi::decode(payload)))?;
+            let key = match typelisp_abi::decode(second) {
+                Value::Str(id) => heap.string(id).to_string(),
+                other => {
+                    return Err(EvalError::Internal(format!(
+                        "a compiled `recv` carried {:?} where its `Option<T>` key should be",
+                        other
+                    )))
+                }
+            };
+            Ok((Waiting::Chan(ChanOp::Recv(c, key)), Repr::Sexpr))
+        }
         other => Err(EvalError::Internal(format!(
             "a compiled frame asked to wait on kind {} (payload {}), which this build does not lower",
             other, payload
@@ -932,6 +1283,13 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         // A compiled drive is the same answer for the same reason, with one
         // addition: the wake value on its way *into* the chain does need a
         // root, because it is a Rust local until the frame slot is written.
+        // A blocked task carries nothing in the state slots, with one
+        // exception: a parked `send` is holding the value it is offering, and
+        // nothing else points at it.
+        State::Blocked(Waiting::Chan(ChanOp::Send(_, v))) => {
+            heap.set_root(sbase, *v);
+            heap.set_root(sbase + 1, Value::Empty);
+        }
         State::Blocked(_) => {
             heap.set_root(sbase, Value::Empty);
             heap.set_root(sbase + 1, Value::Empty);
@@ -1081,15 +1439,28 @@ impl Interp {
                 // stack, so what is left here is the callers that genuinely
                 // hold a Rust frame: `Interp::apply`, `eval`, a print method,
                 // a reader macro, and a driver that entered from one of those.
+                //
+                // Asking first is not a softening of that: several of these
+                // are not waits at all (`(recv ch)` with something buffered,
+                // `(wait t)` on a task that has finished), and refusing them
+                // here would mean a channel could not be read from a print
+                // method even when reading it stops for nothing.
                 Progress::Blocked(w) => {
-                    break Err(EvalError::Panic(format!(
-                        "{} cannot block: it was reached from a Rust caller, which has no continuation stack to suspend",
-                        match w {
-                            Waiting::Task(_) => "`wait`",
-                            Waiting::Yield => "`yield`",
-                            Waiting::Until(_) => "`sleep`",
+                    let answered = self.scheduler.borrow_mut().try_now(heap, &w);
+                    match answered {
+                        Some(answer) => {
+                            let next = answer_state(answer);
+                            set_state(heap, task.sbase, &next);
+                            task.state = next;
                         }
-                    )))
+                        None => {
+                            break Err(EvalError::Panic(format!(
+                                "{} cannot block: it was reached from a Rust caller, which has no \
+                                 continuation stack to suspend",
+                                waiting_name(&w)
+                            )))
+                        }
+                    }
                 }
             }
         };
@@ -1144,7 +1515,7 @@ impl Interp {
                 }
                 Progress::Blocked(w) => {
                     heap.switch_to_root_stack(home);
-                    self.scheduler.borrow_mut().block(id, slot, w)?;
+                    self.scheduler.borrow_mut().block(heap, id, slot, w)?;
                 }
                 Progress::Done(r) => {
                     heap.truncate_roots(slot.task.sbase);
@@ -1207,7 +1578,7 @@ impl Interp {
             // Only the scheduler moves a task out of this, by replacing the
             // state with the value it was waiting for.
             State::Blocked(w) => {
-                task.state = State::Blocked(w);
+                task.state = State::Blocked(w.clone());
                 return Progress::Blocked(w);
             }
             State::CompiledEnter { argv, start } => {
@@ -1305,8 +1676,32 @@ impl Interp {
                 }
             },
         };
+        // A channel operation the scheduler can answer on the spot does not
+        // cost the task its turn.
+        //
+        // Only channel operations. `yield` is a turn given up by definition;
+        // `sleep` gives one up even when the deadline has passed, which is
+        // what makes `(sleep 0.0)` CL's yield-ish zero; `wait` on a finished
+        // task keeps the shape those two have. But `(len ch)` is a read, and
+        // a cooperative scheduler's promise is that a task switches where it
+        // says so — a program that never blocks should not be interleaved by
+        // asking a channel how full it is.
+        if let State::Blocked(w @ Waiting::Chan(_)) = &next {
+            // Rooted *first*: a parked `send`'s value lives in the state slot
+            // and nowhere else, and answering the operation allocates (the
+            // `some` box a waiting receiver gets).
+            set_state(heap, task.sbase, &next);
+            let answered = self.scheduler.borrow_mut().try_now(heap, w);
+            if let Some(answer) = answered {
+                let next = answer_state(answer);
+                set_state(heap, task.sbase, &next);
+                task.state = next;
+                return Progress::Running;
+            }
+        }
         set_state(heap, task.sbase, &next);
-        if let State::Blocked(w) = next {
+        if let State::Blocked(w) = &next {
+            let w = w.clone();
             task.state = next;
             return Progress::Blocked(w);
         }
@@ -2316,7 +2711,65 @@ impl Interp {
             let on = task_id_of(heap, argv.first().copied())?;
             return Ok((State::Blocked(Waiting::Task(on)), None));
         }
+        // Every `Chan<T>` operation, for the same reason and two more: the
+        // table of channels is the scheduler's (nothing lower can hold values
+        // across a `Heap`'s lifetime), and `send`/`recv` really can have to
+        // wait. Naming the operation and letting `Scheduler::try_now` decide
+        // is what makes this path and the compiled one the same code.
+        // Only the six built-in operations: a *user* method on `Chan<T>` (the
+        // prelude's own `Iter::next`, and any `impl` a program writes) has to
+        // fall through to ordinary resolution, and a monomorphized one
+        // arrives under a mangled name that matches none of these.
+        if type_name == crate::Path::root("chan") {
+            let op = match method.as_str() {
+                "new" => match argv.first() {
+                    Some(Value::Int(n)) => ChanOp::New(*n),
+                    other => {
+                        return Err(EvalError::Internal(format!(
+                            "Chan::new: {:?} is not a capacity",
+                            other
+                        )))
+                    }
+                },
+                "len" => ChanOp::Len(chan_id_of(heap, argv.first().copied())?),
+                "cap" => ChanOp::Cap(chan_id_of(heap, argv.first().copied())?),
+                "close" => ChanOp::Close(chan_id_of(heap, argv.first().copied())?),
+                "send" => {
+                    let c = chan_id_of(heap, argv.first().copied())?;
+                    let v = argv.get(1).copied().ok_or_else(|| {
+                        EvalError::Internal("send: no value to send".to_string())
+                    })?;
+                    ChanOp::Send(c, v)
+                }
+                // `ret_key` *is* the `Option<T>` this answer is built with —
+                // the assoc node's result identity, the same slot
+                // `Vector<T>::pop` reads.
+                "recv" => ChanOp::Recv(chan_id_of(heap, argv.first().copied())?, ret_key.clone()),
+                _ => return self.finish_assoc_resolved(heap, form, argv, type_name, method, home, ret_key),
+            };
+            return Ok((State::Blocked(Waiting::Chan(op)), None));
+        }
 
+        self.finish_assoc_resolved(heap, form, argv, type_name, method, home, ret_key)
+    }
+
+    /// [`Self::finish_assoc`] past the interceptions: an ordinary method, a
+    /// user `impl`'s, or a built-in one.
+    ///
+    /// Its own function so the channel interception can *decline* — a method
+    /// on `Chan<T>` that is not one of the six (`Iter::next`, or anything a
+    /// program writes) has to reach exactly this.
+    #[allow(clippy::too_many_arguments)]
+    fn finish_assoc_resolved(
+        &self,
+        heap: &mut Heap,
+        _form: Value,
+        argv: Vec<Value>,
+        type_name: crate::Path,
+        method: String,
+        home: Vec<String>,
+        ret_key: String,
+    ) -> Result<(State, Option<Frame>), EvalError> {
         let f = self.root.borrow().resolve_method(&home, &type_name, &method);
         match f {
             Some(f) => self.enter_fn(heap, &f, argv),

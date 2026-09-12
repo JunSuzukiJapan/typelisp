@@ -461,6 +461,14 @@ impl Heap {
         self.roots_mut()[idx] = v;
     }
 
+    /// Reads the root at absolute stack position `idx` back out — the getter
+    /// [`set_root`](Self::set_root) is the setter for, for a caller holding a
+    /// slot it filled earlier (a channel's ring buffer is the one that needs
+    /// it). Panics on an out-of-bounds `idx`, as `set_root` does.
+    pub fn root(&self, idx: usize) -> Value {
+        self.roots()[idx]
+    }
+
     // ---- root stacks, one per task ----------------------------------------
 
     /// Adds an empty root stack for a new task, and returns its id. It is *not*

@@ -342,7 +342,7 @@ pub mod call_state {
         /// over anyway. The front end turns the pair back into a `Waiting`,
         /// which is the same division `PENDING_CALL` makes between an address
         /// and a `CoroutineFn`.
-        static PENDING_SUSPEND: RefCell<Option<(i64, i64)>> = const { RefCell::new(None) };
+        static PENDING_SUSPEND: RefCell<Option<(i64, i64, i64)>> = const { RefCell::new(None) };
     }
 
     /// `(yield)` — nothing to wait for; the task gives up the rest of its
@@ -363,15 +363,53 @@ pub mod call_state {
     /// which is a different promise from the one `(yield)` makes.
     pub const SUSPEND_SAFEPOINT: i64 = 3;
 
+    /// `(Chan::new cap)` — make a channel. Payload: the capacity.
+    ///
+    /// The five channel operations are suspensions for a reason that has
+    /// nothing to do with waiting: the table of channels belongs to the
+    /// **scheduler**, which lives in the front end and is created per
+    /// session, and only the driver can reach it. A table in this crate or in
+    /// `typelisp-rt` would outlive the `Heap` whose root stack holds the
+    /// buffered values — the dangling-`ACTIVE_HEAP` bug, with values in it.
+    ///
+    /// So three of these six always resume at once (`new`/`len`/`cap`, and
+    /// `close` unless it is a second one), exactly as
+    /// [`SUSPEND_SAFEPOINT`] does. Only `send` and `recv` can really park.
+    pub const SUSPEND_CHAN_NEW: i64 = 4;
+    /// `(len ch)` — how many values are buffered. Payload: the handle.
+    pub const SUSPEND_CHAN_LEN: i64 = 5;
+    /// `(cap ch)` — the channel's capacity. Payload: the handle.
+    pub const SUSPEND_CHAN_CAP: i64 = 6;
+    /// `(close ch)` — close it. Payload: the handle.
+    pub const SUSPEND_CHAN_CLOSE: i64 = 7;
+    /// `(send ch v)` — hand a value over, waiting for room. Payloads: the
+    /// handle and the value, **both tagged** (the value by the suspension
+    /// site, per its own `Repr::field_kind`, because a raw word does not say
+    /// what it is).
+    pub const SUSPEND_CHAN_SEND: i64 = 8;
+    /// `(recv ch)` — take a value, waiting for one. Payloads: the handle and
+    /// the `Option<T>` type key the answer is built with.
+    pub const SUSPEND_CHAN_RECV: i64 = 9;
+
     /// Records what the frame about to return `STATUS_SUSPEND` is waiting for.
     pub fn set_pending_suspend(kind: i64, payload: i64) {
-        PENDING_SUSPEND.with(|p| *p.borrow_mut() = Some((kind, payload)));
+        PENDING_SUSPEND.with(|p| *p.borrow_mut() = Some((kind, payload, 0)));
+    }
+
+    /// [`set_pending_suspend`] for the kinds that need two words.
+    ///
+    /// Two and not a slice: the pair is what a channel operation needs (a
+    /// handle and one other word), and a `Vec` here would allocate on a path
+    /// that must not — the shim runs with a compiled frame's arguments in
+    /// slots the collector is not looking at.
+    pub fn set_pending_suspend_2(kind: i64, first: i64, second: i64) {
+        PENDING_SUSPEND.with(|p| *p.borrow_mut() = Some((kind, first, second)));
     }
 
     /// Takes it back out. `None` means a frame returned `STATUS_SUSPEND`
     /// without saying what it was waiting for, which is a broken convention
     /// rather than "waiting for nothing" — the caller says so and stops.
-    pub fn take_pending_suspend() -> Option<(i64, i64)> {
+    pub fn take_pending_suspend() -> Option<(i64, i64, i64)> {
         PENDING_SUSPEND.with(|p| p.borrow_mut().take())
     }
 

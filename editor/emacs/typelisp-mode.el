@@ -144,8 +144,11 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "make-two-way-stream"
     "open-binary" "open-binary-input" "open-binary-output"
     "destructuring-bind" "sleep"
-    ;; concurrency: the task handle's own method, and the voluntary switch
+    ;; concurrency: the task handle's own method, the voluntary switch, and
+    ;; the channel operations (`close'/`len' are shared with streams and
+    ;; sequences and are listed with those)
     "wait" "yield"
+    "send" "recv" "cap" "after"
     ;; the readtable (syntax.md §11)
     "get-dispatch-macro-character" "get-macro-character"
     "set-dispatch-macro-character" "set-macro-character"
@@ -380,8 +383,8 @@ stream (CLHS 12.1.6).
     "pathname" "pathish"
     ;; builtin generic/abstract types
     "Option" "Result" "Sexpr" "HashTable" "Vector" "Self"
-    ;; the handle `go' hands back
-    "Task"
+    ;; the handle `go' hands back, and the channel tasks talk over
+    "Task" "Chan"
     ;; builtin concrete error types, one per fallible builtin (§7.1).  `Error'
     ;; itself is *not* a type -- it is the prelude trait these implement, used
     ;; as `:dyn Error'.

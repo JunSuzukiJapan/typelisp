@@ -597,6 +597,7 @@ impl Registry {
         root.add_type(hashtable_def());
         root.add_type(vector_def());
         root.add_type(task_def());
+        root.add_type(chan_def());
         root.add_type(scope_def());
         // The (typelisp-hosted) `compile`/`compile-file` compiler's view of
         // LLVM: four more builtin types, metadata-only like `hashtable_def`
@@ -1778,6 +1779,99 @@ fn task_def() -> AdtDef {
     );
     AdtDef {
         name: Path::root("task"),
+        params: vec!["t".to_string()],
+        variants: vec![],
+        assoc,
+        public: true,
+        builtin: true,
+        kind: AdtKind::Struct,
+        field_names: Vec::new(),
+        impls: Vec::new(),
+        trait_assoc: BTreeMap::new(),
+    }
+}
+
+/// `Chan<T>`, the channel type.
+///
+/// Spelled once, here, for the same reason [`task_of`] is: a type's identity
+/// is its whole path.
+pub(super) fn chan_of(t: Type) -> Type {
+    Type::Named(Path::root("chan"), vec![t])
+}
+
+/// `Chan<T>`: a channel between tasks — Go's `chan T`.
+///
+/// Builtin rather than a `defstruct` for the reason [`task_def`] is: the
+/// checker builds this type where it checks `select`, so it has to exist in
+/// contexts the prelude was never loaded into.
+///
+/// The runtime value is a boxed struct holding the scheduler's id for the
+/// channel and **no readable fields** — `file-stream`'s opaque handle again.
+/// The type argument appears in no field, which is exactly the case the plan
+/// flagged as untried and which turned out to need no phantom field.
+///
+/// Every one of the six is intercepted by the evaluator before
+/// `eval_builtin_method`, and lowered as a *suspension* in compiled code,
+/// because all six need the scheduler: four of them only to read its table,
+/// and `send`/`recv` to park the task as well.
+fn chan_def() -> AdtDef {
+    let mut assoc = BTreeMap::new();
+    let chan = chan_of(tvar("t"));
+    let sig = |params: Vec<Type>, ret: Type| FnSig {
+        ffi: false,
+        type_params: vec![],
+        rest: None,
+        params,
+        ret,
+        public: true,
+        builtin: true,
+        bounds: BTreeMap::new(),
+        optionals: Vec::new(),
+        keys: Vec::new(),
+    };
+    // `(the Chan<i32> (Chan::new 0))` — unbuffered; `(Chan::new 16)` buffers
+    // 16. The capacity is **required**, where the plan wrote `&optional`: an
+    // omitted `&optional` with no default is an `Option<i32>` the callee has
+    // to take apart, and no builtin in this language has ever had one. Go
+    // spells the same two cases `make(chan int)` and `make(chan int, 16)`;
+    // here the second number is always written.
+    assoc.insert(
+        "new".to_string(),
+        AssocFn { sig: sig(vec![Type::I32], chan.clone()), instance: false, builtin: true },
+    );
+    // Waits for room. A closed channel is a panic, not a `Result`: sending on
+    // one is a program bug, which is the line `docs/dev/language-design.md`
+    // §7.1 draws (and Go's own).
+    assoc.insert(
+        "send".to_string(),
+        AssocFn { sig: sig(vec![chan.clone(), tvar("t")], Type::Unit), instance: true, builtin: true },
+    );
+    // `none` once the channel is closed **and** drained — which is what makes
+    // this the same shape as `Iter::next`, and so what lets `doiter` run a
+    // channel with no new machinery (`impl Iter Chan<T>` in the prelude).
+    assoc.insert(
+        "recv".to_string(),
+        AssocFn { sig: sig(vec![chan.clone()], option_of(tvar("t"))), instance: true, builtin: true },
+    );
+    // Closing twice is a panic, again Go's rule and for the same reason.
+    // Resolved by receiver type, so it does not collide with the `Stream`
+    // trait's `close` — `Chan<T>` deliberately does not implement `Stream`.
+    assoc.insert(
+        "close".to_string(),
+        AssocFn { sig: sig(vec![chan.clone()], Type::Unit), instance: true, builtin: true },
+    );
+    // CL's and Go's `len`/`cap`: how many values are buffered right now, and
+    // how many fit.
+    assoc.insert(
+        "len".to_string(),
+        AssocFn { sig: sig(vec![chan.clone()], Type::I32), instance: true, builtin: true },
+    );
+    assoc.insert(
+        "cap".to_string(),
+        AssocFn { sig: sig(vec![chan], Type::I32), instance: true, builtin: true },
+    );
+    AdtDef {
+        name: Path::root("chan"),
         params: vec!["t".to_string()],
         variants: vec![],
         assoc,

@@ -138,6 +138,7 @@ const ISLAND_DEFUNS: &[&str] = &[
     "emit-static-exit-onward",
     "compile-call-args",
     "compile-apply",
+    "tag-suspend-arg",
     "compile-suspend",
     "has-prefix",
     "compile-call",

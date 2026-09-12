@@ -220,6 +220,16 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
 pub(crate) fn rt_suspend_method_symbol(type_local: &str, method: &str) -> Option<&'static str> {
     match (type_local, method) {
         ("task", "wait") => Some("rt_suspend_wait"),
+        // Every channel operation, including the four that never wait: the
+        // table of channels is the scheduler's, and the driver is the only
+        // way to it (`typelisp_abi::call_state::SUSPEND_CHAN_NEW` says why
+        // it cannot live anywhere lower).
+        ("chan", "new") => Some("rt_suspend_chan_new"),
+        ("chan", "len") => Some("rt_suspend_chan_len"),
+        ("chan", "cap") => Some("rt_suspend_chan_cap"),
+        ("chan", "close") => Some("rt_suspend_chan_close"),
+        ("chan", "send") => Some("rt_suspend_chan_send"),
+        ("chan", "recv") => Some("rt_suspend_chan_recv"),
         _ => None,
     }
 }
@@ -433,7 +443,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 256] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 262] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -445,7 +455,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 256] {
     use typelisp_print::aot::{rt_format_call_method, rt_print_enum_variant, rt_print_object_method};
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
-    use typelisp_rt::coroutine::{rt_loop_safepoint, rt_suspend_sleep, rt_suspend_wait, rt_suspend_yield};
+    use typelisp_rt::coroutine::{
+        rt_loop_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
+        rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_send, rt_suspend_sleep,
+        rt_suspend_wait, rt_suspend_yield,
+    };
     use typelisp_rt::sys_builtin::{
         rt_command_line_args, rt_dribble_start, rt_dribble_stop, rt_ed_open, rt_exit,
         rt_get_internal_real_time, rt_get_internal_run_time,
@@ -737,6 +751,12 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 256] {
         ("rt_suspend_sleep", rt_suspend_sleep as usize),
         ("rt_suspend_wait", rt_suspend_wait as usize),
         ("rt_suspend_yield", rt_suspend_yield as usize),
+        ("rt_suspend_chan_new", rt_suspend_chan_new as usize),
+        ("rt_suspend_chan_len", rt_suspend_chan_len as usize),
+        ("rt_suspend_chan_cap", rt_suspend_chan_cap as usize),
+        ("rt_suspend_chan_close", rt_suspend_chan_close as usize),
+        ("rt_suspend_chan_send", rt_suspend_chan_send as usize),
+        ("rt_suspend_chan_recv", rt_suspend_chan_recv as usize),
         ("rt_loop_safepoint", rt_loop_safepoint as usize),
         ("rt_stream_listen", rt_stream_listen as usize),
         ("rt_stream_position", rt_stream_position as usize),
