@@ -25,6 +25,7 @@ use std::rc::Rc;
 
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::Module;
+use inkwell::AddressSpace;
 
 use typelisp_mem::{Heap, RootScope, Value};
 
@@ -36,7 +37,7 @@ use crate::eval::interp::{
 use crate::compile::externs::{
     is_native_lowered_primitive_method, is_rt_builtin_name, rt_extern_functions,
 };
-use crate::compile::symbols::HASHTABLE_BUILTIN_METHODS;
+use crate::compile::symbols::{CompiledItem, HASHTABLE_BUILTIN_METHODS};
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES, NATIVE_LOWERED_PRIMITIVES};
 use crate::CompileTarget;
 
@@ -125,6 +126,49 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
         *def.compiled.borrow_mut() = Some(Rc::new(cf));
     }
     Ok(())
+}
+
+/// A fresh module named `name`, holding a declaration for every `rt_*` shim
+/// and for every symbol in `items` — the shape both bootstrap generators
+/// (`compile::bootstrap` for the island, `compile::prelude_bootstrap` for the
+/// prelude) need before they compile a single body into it.
+///
+/// **Every** item is forward-declared, rather than each one as it is reached:
+/// the island's `compile-call` resolves a call target with `(get-function m
+/// "tl_<callee>")` and fails outright if the callee has no declaration yet, so
+/// compiling one at a time would only work while the call graph happened to be
+/// a DAG in declaration order. Neither of these is. `add-function` reuses an
+/// existing declaration rather than adding a second one
+/// (`llvm_module_add_function`), so a body compiled later fills in the shell
+/// declared here — the same shape `Interp::compile_scc` uses for a JIT'd cycle.
+///
+/// The declarations must carry the ABI the bodies will be emitted under: a
+/// forward declaration is matched to its definition by name, so declaring
+/// these under the wrong one is not a second declaration — it is the
+/// declaration the island then tries to give a coroutine body to.
+pub(crate) fn fresh_module_with_declarations(name: &str, items: &[CompiledItem]) -> Rc<RefCell<Module<'static>>> {
+    let ctx = crate::compile::llvm_context();
+    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    let module = ctx.create_module(name);
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+    for (name, _) in rt_extern_functions() {
+        module.add_function(name, fn_ty, None);
+    }
+    // Under the coroutine ABI (Phase C2) a compiled Lisp function is
+    // `i64 f(i64 frame)`, not `i64 f(i64*, i32)`.
+    let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
+        ctx.i64_type().fn_type(&[ctx.i64_type().into()], false)
+    } else {
+        fn_ty
+    };
+    for item in items {
+        let sym = item.symbol_name();
+        if module.get_function(&sym).is_none() {
+            module.add_function(&sym, lisp_fn_ty, None);
+        }
+    }
+    Rc::new(RefCell::new(module))
 }
 
 /// Compiles the `defun` named `name` (looked up in the scope tree) into one

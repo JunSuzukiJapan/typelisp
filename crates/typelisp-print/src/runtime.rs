@@ -212,7 +212,7 @@ pub fn emit(heap: &Heap, mut out: Out, newline: bool, opts: &Opts) -> Result<(),
 /// forced on: an explicit `pprint-logical-block` is a request to
 /// pretty-print, whatever `*print-pretty*` says.
 pub fn block_start(heap: &mut Heap, obj: Value, prefix: &str, per_line: bool, suffix: &str, opts: &Opts) {
-    let opts = Opts { pretty: true, ..opts.clone() };
+    let opts = Opts { pretty: true, ..*opts };
     let cell = heap.alloc_cell(obj);
     SESSION.with(|s| {
         let mut session = s.borrow_mut();
@@ -311,90 +311,6 @@ fn write_stdout(text: &str) -> Result<(), String> {
         .map_err(|e| format!("print: {}", e))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The hook path — what a shim will use — renders through the same
-    /// [`typelisp_print`] the interpreter does, and answers the two program
-    /// questions from whatever environment is installed.
-    #[test]
-    fn installed_hooks_supply_enum_names_and_print_object() {
-        let mut heap = Heap::with_capacity(1 << 12);
-
-        set_print_hooks(Some(PrintHooks {
-            enum_variant_name: |key, variant| match (key, variant) {
-                ("option", 0) => Some("some".to_string()),
-                _ => None,
-            },
-            print_object: |_, _, _| Ok(None),
-            ..BARE_HOOKS
-        }));
-
-        let boxed = heap.alloc_enum(typelisp_mem::TypeKeyId::OPTION, 0, vec![Value::Int(7)]);
-        let args = heap.cons(boxed, Value::Empty).expect("heap has room");
-        let out = build_format(&mut heap, "~a", args).expect("format should succeed");
-        assert_eq!(format::finish(out, &Opts::default()), "(some 7)");
-
-        set_print_hooks(None);
-    }
-
-    /// With no environment installed the renderer still runs — it just cannot
-    /// name the variant. Loud rather than silent, on purpose: a
-    /// `<unknown-variant>` in real output means a registration bug.
-    #[test]
-    fn bare_hooks_render_an_unnamed_variant() {
-        let mut heap = Heap::with_capacity(1 << 12);
-        set_print_hooks(None);
-
-        let boxed = heap.alloc_enum(typelisp_mem::TypeKeyId::OPTION, 0, vec![Value::Int(7)]);
-        let args = heap.cons(boxed, Value::Empty).expect("heap has room");
-        let out = build_format(&mut heap, "~a", args).expect("format should succeed");
-        assert_eq!(format::finish(out, &Opts::default()), "(<unknown-variant> 7)");
-    }
-
-    /// A `print-object` hook wins over the built-in representation, and sees
-    /// the `escape` flag `~s` sets and `~a` clears.
-    #[test]
-    fn a_print_object_hook_replaces_the_builtin_rendering() {
-        let mut heap = Heap::with_capacity(1 << 12);
-
-        set_print_hooks(Some(PrintHooks {
-            print_object: |_, _, escape| Ok(Some(if escape { "#<S>" } else { "#<A>" }.to_string())),
-            ..BARE_HOOKS
-        }));
-
-        let pt = heap.intern_type_key("pt");
-        let boxed = heap.alloc_struct(pt, vec![Value::Int(1)]);
-        // `(v v)` — the two arguments `~a ~s` consumes.
-        let tail = heap.cons(boxed, Value::Empty).expect("heap has room");
-        let args = heap.cons(boxed, tail).expect("heap has room");
-        let out = build_format(&mut heap, "~a ~s", args).expect("format should succeed");
-        assert_eq!(format::finish(out, &Opts::default()), "#<A> #<S>");
-
-        set_print_hooks(None);
-    }
-
-    /// `pprint`'s leading newline (CLHS) and the session's merge-then-flush
-    /// behaviour: nothing reaches stdout until the outermost block closes.
-    #[test]
-    fn a_logical_block_buffers_until_its_outermost_close() {
-        let mut heap = Heap::with_capacity(1 << 12);
-        set_print_hooks(None);
-
-        assert!(!session_open());
-        block_start(&mut heap, Value::Empty, "(", false, ")", &Opts::default());
-        assert!(session_open());
-        // Emitting into an open session buffers rather than writing.
-        let mut out = Out::new();
-        out.push('x');
-        emit(&heap, out, false, &Opts::default()).expect("emit into a session");
-        assert!(session_open());
-        block_end().expect("close");
-        assert!(!session_open());
-    }
-}
-
 // ---- the printing builtins as *values* ---------------------------------
 //
 // One implementation, called from both sides of the compile boundary — the
@@ -471,7 +387,7 @@ fn arg_keyword<'a>(heap: &'a Heap, args: &[Value], i: usize, who: &str) -> Resul
 /// `pprint` and `pprint-logical-block` are special forms, and what survives
 /// checking is a call to one of the names below.
 pub fn print_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, PrintError>> {
-    Some(print_builtin_inner(heap, name, args)?)
+    print_builtin_inner(heap, name, args)
 }
 
 fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, PrintError>> {
@@ -580,4 +496,88 @@ fn printing_opts(heap: &Heap) -> Opts {
     let mut opts = current_opts(heap);
     opts.pretty |= session_open();
     opts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The hook path — what a shim will use — renders through the same
+    /// [`typelisp_print`] the interpreter does, and answers the two program
+    /// questions from whatever environment is installed.
+    #[test]
+    fn installed_hooks_supply_enum_names_and_print_object() {
+        let mut heap = Heap::with_capacity(1 << 12);
+
+        set_print_hooks(Some(PrintHooks {
+            enum_variant_name: |key, variant| match (key, variant) {
+                ("option", 0) => Some("some".to_string()),
+                _ => None,
+            },
+            print_object: |_, _, _| Ok(None),
+            ..BARE_HOOKS
+        }));
+
+        let boxed = heap.alloc_enum(typelisp_mem::TypeKeyId::OPTION, 0, vec![Value::Int(7)]);
+        let args = heap.cons(boxed, Value::Empty).expect("heap has room");
+        let out = build_format(&mut heap, "~a", args).expect("format should succeed");
+        assert_eq!(format::finish(out, &Opts::default()), "(some 7)");
+
+        set_print_hooks(None);
+    }
+
+    /// With no environment installed the renderer still runs — it just cannot
+    /// name the variant. Loud rather than silent, on purpose: a
+    /// `<unknown-variant>` in real output means a registration bug.
+    #[test]
+    fn bare_hooks_render_an_unnamed_variant() {
+        let mut heap = Heap::with_capacity(1 << 12);
+        set_print_hooks(None);
+
+        let boxed = heap.alloc_enum(typelisp_mem::TypeKeyId::OPTION, 0, vec![Value::Int(7)]);
+        let args = heap.cons(boxed, Value::Empty).expect("heap has room");
+        let out = build_format(&mut heap, "~a", args).expect("format should succeed");
+        assert_eq!(format::finish(out, &Opts::default()), "(<unknown-variant> 7)");
+    }
+
+    /// A `print-object` hook wins over the built-in representation, and sees
+    /// the `escape` flag `~s` sets and `~a` clears.
+    #[test]
+    fn a_print_object_hook_replaces_the_builtin_rendering() {
+        let mut heap = Heap::with_capacity(1 << 12);
+
+        set_print_hooks(Some(PrintHooks {
+            print_object: |_, _, escape| Ok(Some(if escape { "#<S>" } else { "#<A>" }.to_string())),
+            ..BARE_HOOKS
+        }));
+
+        let pt = heap.intern_type_key("pt");
+        let boxed = heap.alloc_struct(pt, vec![Value::Int(1)]);
+        // `(v v)` — the two arguments `~a ~s` consumes.
+        let tail = heap.cons(boxed, Value::Empty).expect("heap has room");
+        let args = heap.cons(boxed, tail).expect("heap has room");
+        let out = build_format(&mut heap, "~a ~s", args).expect("format should succeed");
+        assert_eq!(format::finish(out, &Opts::default()), "#<A> #<S>");
+
+        set_print_hooks(None);
+    }
+
+    /// `pprint`'s leading newline (CLHS) and the session's merge-then-flush
+    /// behaviour: nothing reaches stdout until the outermost block closes.
+    #[test]
+    fn a_logical_block_buffers_until_its_outermost_close() {
+        let mut heap = Heap::with_capacity(1 << 12);
+        set_print_hooks(None);
+
+        assert!(!session_open());
+        block_start(&mut heap, Value::Empty, "(", false, ")", &Opts::default());
+        assert!(session_open());
+        // Emitting into an open session buffers rather than writing.
+        let mut out = Out::new();
+        out.push('x');
+        emit(&heap, out, false, &Opts::default()).expect("emit into a session");
+        assert!(session_open());
+        block_end().expect("close");
+        assert!(!session_open());
+    }
 }

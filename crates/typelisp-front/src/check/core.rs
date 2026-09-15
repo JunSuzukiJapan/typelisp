@@ -215,7 +215,7 @@ pub fn op_is(heap: &Heap, form: Value, konst: u32) -> bool {
 
 /// A node's tag *spelled out*, or `None` if `form` is not a tagged list — for
 /// error messages and diagnostics. To recognize a tag use [`op_sym`].
-pub fn op<'h>(heap: &'h Heap, form: Value) -> Option<&'h str> {
+pub fn op(heap: &Heap, form: Value) -> Option<&str> {
     match heap.car(form).ok()? {
         Value::Symbol(id) => Some(heap.symbol_name(id)),
         _ => None,
@@ -276,6 +276,20 @@ pub fn path_field(heap: &Heap, form: Value, i: usize) -> Option<crate::Path> {
     match field(heap, form, i)? {
         Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
         Value::Symbol(id) => Some(crate::Path::root(heap.symbol_name(id))),
+        _ => None,
+    }
+}
+
+/// A node's `i`th field read as a symbol's name, or `None` if it is not a
+/// symbol.
+///
+/// The `Option`-returning counterpart of the evaluator's own `sym_field`, which
+/// reports the mismatch as an internal error instead: a walk over checked forms
+/// looking for what they mention has nowhere to report to, and every field it
+/// does not recognize is simply not the one it was after.
+pub fn sym_name_field(heap: &Heap, form: Value, i: usize) -> Option<String> {
+    match field(heap, form, i)? {
+        Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
         _ => None,
     }
 }

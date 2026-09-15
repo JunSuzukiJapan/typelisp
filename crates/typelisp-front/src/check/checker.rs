@@ -695,6 +695,17 @@ fn is_retired_nil(adt: &Path, variant: usize) -> bool {
 /// legitimate chains are one or two links.
 const BLANKET_BOUND_DEPTH: usize = 16;
 
+/// One `labels` definition on its way into a node: its name, its parameters
+/// (name and declared type), its return type, and its already-checked body
+/// forms.
+type LabelsDef = (String, Vec<(String, Type)>, Type, Vec<Value>);
+
+/// What a `defmacro` lambda list parses into: the required parameter names,
+/// the `&optional` parameters (each with its default form, if it declared
+/// one), the `&rest` name, and the `&key` parameters in the same shape as the
+/// optionals.
+type MacroLambdaList = (Vec<String>, Vec<(String, Option<Value>)>, Option<String>, Vec<(String, Option<Value>)>);
+
 /// Opaque saved namespace context — see [`Checker::suspend_ns_context`].
 pub struct NsContext {
     ns: Vec<String>,
@@ -1707,13 +1718,8 @@ impl Checker {
 
     /// `(labels ((SYM ((SYM REPR)...) RET-REPR BODY...)...) BODY...)` —
     /// mutually recursive local functions, each of the same shape a `lambda`
-    /// has plus a name.
-    fn labels_form(
-        &self,
-        heap: &mut Heap,
-        defs: &[(String, Vec<(String, Type)>, Type, Vec<Value>)],
-        body: &[Value],
-    ) -> Result<Value, Error> {
+    /// has plus a name. See [`LabelsDef`] for one definition's four parts.
+    fn labels_form(&self, heap: &mut Heap, defs: &[LabelsDef], body: &[Value]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let mut ds = Items::new(f.heap());
         for (name, params, ret, def_body) in defs {
@@ -4151,7 +4157,7 @@ impl Checker {
                     name, pname, decl_ty
                 )));
             }
-            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, default_raw.clone())?;
+            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, *default_raw)?;
             optionals.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
         }
         let mut keys = Vec::with_capacity(keys_raw.len());
@@ -4163,7 +4169,7 @@ impl Checker {
                     name, pname, decl_ty
                 )));
             }
-            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, default_raw.clone())?;
+            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, *default_raw)?;
             keys.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
         }
 
@@ -4698,12 +4704,12 @@ impl Checker {
 
         let mut optionals = Vec::with_capacity(optionals_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &optionals_raw {
-            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, default_raw.clone())?;
+            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, *default_raw)?;
             optionals.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
         }
         let mut keys = Vec::with_capacity(keys_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &keys_raw {
-            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, default_raw.clone())?;
+            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, *default_raw)?;
             keys.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
         }
 
@@ -6408,9 +6414,7 @@ impl Checker {
     /// Returns the trait path; the caller reads the signature template off it
     /// and requests materialization.
     fn blanket_method_owner(&self, ty: &Type, type_fq: &Path, method: &str) -> Option<Path> {
-        if self.reg.type_def(type_fq).is_none() {
-            return None; // a bare type variable — the bounds branch handles it
-        }
+        self.reg.type_def(type_fq)?;
         fn walk(ns: &Namespace, out: &mut Vec<Path>) {
             out.extend(ns.blanket_impls.iter().map(|b| b.trait_path.clone()));
             for c in ns.modules.values() {
@@ -10933,7 +10937,7 @@ impl Checker {
             // `&key`: the trailing arguments are `:name value` pairs matched
             // by label. `&key` never coexists with `&optional`/`&rest`
             // (`Self::parse_params_full` rejects the combination).
-            if tail.len() % 2 != 0 {
+            if !tail.len().is_multiple_of(2) {
                 return Err(Error::TypeError(format!(
                     "{}: keyword arguments must be given as `:name value` pairs",
                     who
@@ -13979,6 +13983,79 @@ impl Checker {
     /// afterwards and reports a pin mismatch with a precise message, so a
     /// `unify` that cannot make two pins agree here should leave the
     /// diagnosis to it rather than raising a vaguer error first.
+    /// Closes a call's type substitution and decides what the call names.
+    ///
+    /// The four steps both [`Self::check_call`] and `check_call_opt_key` take
+    /// once they have checked the arguments: infer whatever associated types
+    /// the signature's bounds pin, require every type parameter to have been
+    /// resolved, validate the call site against the callee's `where` clause,
+    /// and — when every type argument came out concrete — ask for the
+    /// specialization to call in place of the generic template.
+    ///
+    /// Returns the path to call and whether it is a specialization. A
+    /// specialization has no "as written" source form of its own (see
+    /// [`Self::fn_ref_node`]'s identical case), so the caller resolves it by
+    /// its own mangled identity rather than re-searching for the generic
+    /// template under the original name.
+    ///
+    /// # Call-site `where`-bound validation
+    ///
+    /// For each of `name`'s own type parameters that carries trait bounds, the
+    /// concrete type `subst` resolved it to must implement every required
+    /// trait — and, if the bound pins an associated type, the concrete type's
+    /// *own* binding for it must match what the `where` clause declared.
+    /// Skipped when the resolved type is itself still a **bare** unresolved
+    /// type variable: this call is nested inside another generic function and
+    /// the type only becomes concrete further up the call chain. Propagating
+    /// the *caller's own* bounds through to verify an equivalent bound is
+    /// already declared on the outer function is real but currently
+    /// unexercised by any code in this repo (no `where`-bounded function
+    /// forwards its own type parameter into another `where`-bounded call).
+    /// The skip only catches a bare type variable (`T` itself) — one *wrapped*
+    /// in a concrete type (`Vector<U>` for an outer `U`) is still validated
+    /// strictly, which is correct for plain trait-membership checks
+    /// (`Vector<U>` never implements `Iter` regardless of `U`) but could in
+    /// principle reject an associated-type pin that would hold once `U`
+    /// resolves further up the chain — also unexercised today.
+    ///
+    /// # Monomorphization
+    ///
+    /// A call that instantiates a generic function at fully concrete types is
+    /// rewritten to reference the specialized definition (generated by
+    /// `check_form`'s drain). If any type argument is still open we are inside
+    /// another generic function's diagnostic body-check — the original
+    /// (never-executed) call is kept, and the enclosing function's own
+    /// specialization re-checks this very call with the types concrete.
+    /// Builtin generic free functions (no template) keep their
+    /// runtime-dispatched call as-is.
+    fn resolve_call_target(
+        &self,
+        env: &Env,
+        name: &Path,
+        sig: &FnSig,
+        params: &HashSet<String>,
+        subst: &mut BTreeMap<String, Type>,
+    ) -> Result<(Path, bool), Error> {
+        self.infer_pinned_assoc_types(env, sig, params, subst);
+        for p in &sig.type_params {
+            if !subst.contains_key(p) {
+                return Err(Error::TypeError(format!("cannot infer type parameter `{}` for `{}`", p, name)));
+            }
+        }
+        self.validate_where_bounds(&name.to_string(), &sig.bounds, subst, &env.bounds)?;
+
+        let mut call_path = name.clone();
+        let mut specialized = false;
+        if !sig.type_params.is_empty() && self.generic_fn_templates.contains_key(name) {
+            let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
+            if !targs.iter().any(|t| self.type_is_open(t)) {
+                call_path = self.request_fn_specialization(name, targs);
+                specialized = true;
+            }
+        }
+        Ok((call_path, specialized))
+    }
+
     fn infer_pinned_assoc_types(
         &self,
         env: &Env,
@@ -14013,7 +14090,7 @@ impl Checker {
                             };
                             for (assoc_name, declared_ty) in &tb.assoc {
                                 if let Some(caller_ty) = caller_tb.assoc.get(assoc_name) {
-                                    let _ = unify(&params, declared_ty, caller_ty, subst);
+                                    let _ = unify(params, declared_ty, caller_ty, subst);
                                 }
                             }
                         }
@@ -14037,7 +14114,7 @@ impl Checker {
                     if let Some(actual) =
                         resolve_trait_assoc_type(def, &tb.trait_path, assoc_name, concrete_args)
                     {
-                        let _ = unify(&params, declared_ty, &actual, subst);
+                        let _ = unify(params, declared_ty, &actual, subst);
                     }
                 }
             }
@@ -14121,60 +14198,7 @@ impl Checker {
             let resolved = subst_apply(elem_ty, &subst);
             typed.push(self.cons_rest_list(heap, &resolved, rest_typed)?);
         }
-        self.infer_pinned_assoc_types(env, &sig, &params, &mut subst);
-        for p in &sig.type_params {
-            if !subst.contains_key(p) {
-                return Err(Error::TypeError(format!(
-                    "cannot infer type parameter `{}` for `{}`",
-                    p, name
-                )));
-            }
-        }
-        // Call-site `where`-bound validation: for each of `name`'s own type
-        // parameters that carries trait bounds, check the concrete type
-        // `subst` resolved it to actually implements every required trait
-        // (and, if the bound pins an associated type, that the concrete
-        // type's *own* binding for that associated type matches what the
-        // `where` clause declared). Skipped when the resolved type is
-        // itself still a *bare* unresolved type variable (this call is
-        // nested inside another generic function and the type only becomes
-        // concrete further up the call chain) — propagating the *caller's
-        // own* bounds through to verify an equivalent bound is already
-        // declared on the outer function is real but currently unexercised
-        // by any code in this repo (no `where`-bounded function forwards its
-        // own type parameter into another `where`-bounded call), so it's
-        // left to the unreachable-`panic` node, same as
-        // before this validation existed. Note the skip only catches a bare
-        // type variable (`T` itself) — a type variable *wrapped* in a
-        // concrete type (e.g. `Vector<U>` for an outer `U`) is still
-        // validated strictly below, which is correct for plain
-        // trait-membership checks (`Vector<U>` never implements `Iter`
-        // regardless of `U`) but could in principle reject an associated-type
-        // pin that would actually hold once `U` resolves further up the call
-        // chain — also unexercised today.
-        self.validate_where_bounds(&name.to_string(), &sig.bounds, &subst, &env.bounds)?;
-        // Monomorphization: a call that instantiates a generic function at
-        // fully concrete types is rewritten to reference the specialized
-        // definition (generated by `check_form`'s drain). If any type
-        // argument is still open we are inside another generic function's
-        // diagnostic body-check — keep the original (never-executed) call;
-        // the enclosing function's own specialization will re-check this
-        // very call with the types concrete. Builtin generic free functions
-        // (no template) keep their runtime-dispatched call as-is.
-        let mut call_path = name.clone();
-        let mut specialized = false;
-        if !sig.type_params.is_empty() && self.generic_fn_templates.contains_key(name) {
-            let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
-            if !targs.iter().any(|t| self.type_is_open(t)) {
-                call_path = self.request_fn_specialization(name, targs);
-                specialized = true;
-            }
-        }
-        // A monomorphized specialization has no "as written" source form of
-        // its own (see `Self::fn_ref_node`'s identical case) — resolve it by
-        // its own mangled identity directly rather than re-searching for the
-        // unspecialized generic template under the original bare/qualified
-        // name.
+        let (call_path, specialized) = self.resolve_call_target(env, name, &sig, &params, &mut subst)?;
         let r = if specialized {
             Ref::synthetic(call_path)
         } else {
@@ -14260,7 +14284,7 @@ impl Checker {
             // matched by label — `Self::check_defun_opt_key`/
             // `Self::parse_defun_params_full` guarantee `sig.rest` is `None`
             // and `sig.optionals` is empty whenever `sig.keys` isn't.
-            if tail.len() % 2 != 0 {
+            if !tail.len().is_multiple_of(2) {
                 return Err(Error::TypeError(format!(
                     "{}: keyword arguments must be given as `:name value` pairs",
                     name
@@ -14334,27 +14358,7 @@ impl Checker {
             }
         }
 
-        self.infer_pinned_assoc_types(env, sig, &params, &mut subst);
-        for p in &sig.type_params {
-            if !subst.contains_key(p) {
-                return Err(Error::TypeError(format!(
-                    "cannot infer type parameter `{}` for `{}`",
-                    p, name
-                )));
-            }
-        }
-        self.validate_where_bounds(&name.to_string(), &sig.bounds, &subst, &env.bounds)?;
-
-        // Monomorphization — same as `Self::check_call`'s identical block.
-        let mut call_path = name.clone();
-        let mut specialized = false;
-        if !sig.type_params.is_empty() && self.generic_fn_templates.contains_key(name) {
-            let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
-            if !targs.iter().any(|t| self.type_is_open(t)) {
-                call_path = self.request_fn_specialization(name, targs);
-                specialized = true;
-            }
-        }
+        let (call_path, specialized) = self.resolve_call_target(env, name, sig, &params, &mut subst)?;
 
         // Pass 2: fill in whatever pass 1 left out, now that `subst` is
         // final — a default expression's `.ty` is already concrete (`Self::
@@ -16034,7 +16038,7 @@ fn int_lit_range_error(n: &str, ty: &Type, castable: bool) -> Error {
     let advice = if castable {
         format!(" `(as {} {})` asks for the cut-back explicitly.", name, n)
     } else {
-        format!(" It is past `i32`, so it read as a `bignum`, and no fixed-width type here holds it.")
+        " It is past `i32`, so it read as a `bignum`, and no fixed-width type here holds it.".to_string()
     };
     Error::TypeError(format!(
         "integer literal {} is out of range for {} ({}) — a value always holds the number its \
@@ -16327,54 +16331,6 @@ fn unify(
     }
 }
 
-#[cfg(test)]
-mod header_tests {
-    use super::{parse_generic_name_header, CL_COMPARISON_OPERATORS};
-
-    #[test]
-    fn a_plain_name_has_no_type_parameters() {
-        assert_eq!(parse_generic_name_header("identity").unwrap(), ("identity".to_string(), vec![]));
-        // Hyphens are ordinary name characters, not token boundaries.
-        assert_eq!(parse_generic_name_header("cons-cell").unwrap(), ("cons-cell".to_string(), vec![]));
-    }
-
-    #[test]
-    fn an_angle_bracket_header_splits_into_name_and_params() {
-        assert_eq!(parse_generic_name_header("pair<a,b>").unwrap(), ("pair".to_string(), vec!["a".to_string(), "b".to_string()]));
-        assert_eq!(parse_generic_name_header("identity<t>").unwrap(), ("identity".to_string(), vec!["t".to_string()]));
-    }
-
-    #[test]
-    fn every_cl_comparison_operator_is_a_verbatim_name() {
-        // `char<`/`string<=`/... must not be mistaken for a generic header —
-        // the whole point of the whitelist. `<`/`<=`/... are already safe
-        // (punctuation-led) but round-trip here too.
-        for op in CL_COMPARISON_OPERATORS {
-            assert_eq!(
-                parse_generic_name_header(op).unwrap(),
-                (op.to_string(), vec![]),
-                "operator {:?} should be a verbatim name with no type parameters",
-                op
-            );
-        }
-    }
-
-    #[test]
-    fn a_non_comparison_operator_name_is_still_verbatim() {
-        // Other punctuation-led / arrow-like names stay verbatim too.
-        assert_eq!(parse_generic_name_header("->").unwrap(), ("->".to_string(), vec![]));
-        assert_eq!(parse_generic_name_header("+").unwrap(), ("+".to_string(), vec![]));
-    }
-
-    #[test]
-    fn a_malformed_generic_header_is_rejected() {
-        // Starts `ident<` but isn't a known operator and doesn't close: an error,
-        // not a silent verbatim name (catches genuine typos like `pair<a`).
-        assert!(parse_generic_name_header("pair<a").is_err());
-        assert!(parse_generic_name_header("pair<a,>").is_err());
-    }
-}
-
 /// A name that reads as *program structure* rather than as an expression —
 /// `(compile foo)`, `(documentation point::x)`, `(trace m::f)`, `(ed foo)`.
 ///
@@ -16497,10 +16453,7 @@ fn take_leading_docstring(heap: &Heap, parts: &[Value], at: usize) -> Option<Str
     }
 }
 
-fn parse_macro_lambda_list(
-    heap: &Heap,
-    param_vals: &[Value],
-) -> Result<(Vec<String>, Vec<(String, Option<Value>)>, Option<String>, Vec<(String, Option<Value>)>), Error> {
+fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Result<MacroLambdaList, Error> {
     // Section rank: required=0, &optional=1, &rest=2, &key=3. A marker may
     // only advance the rank forward, so each appears at most once and in
     // order.
@@ -16614,4 +16567,52 @@ fn loop_thereis_error(ty: &Type) -> Error {
          non-nil value, and `Option` is what that is here (a `bool` test is `:always`/`:never`)",
         mangle_type(ty)
     ))
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::{parse_generic_name_header, CL_COMPARISON_OPERATORS};
+
+    #[test]
+    fn a_plain_name_has_no_type_parameters() {
+        assert_eq!(parse_generic_name_header("identity").unwrap(), ("identity".to_string(), vec![]));
+        // Hyphens are ordinary name characters, not token boundaries.
+        assert_eq!(parse_generic_name_header("cons-cell").unwrap(), ("cons-cell".to_string(), vec![]));
+    }
+
+    #[test]
+    fn an_angle_bracket_header_splits_into_name_and_params() {
+        assert_eq!(parse_generic_name_header("pair<a,b>").unwrap(), ("pair".to_string(), vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(parse_generic_name_header("identity<t>").unwrap(), ("identity".to_string(), vec!["t".to_string()]));
+    }
+
+    #[test]
+    fn every_cl_comparison_operator_is_a_verbatim_name() {
+        // `char<`/`string<=`/... must not be mistaken for a generic header —
+        // the whole point of the whitelist. `<`/`<=`/... are already safe
+        // (punctuation-led) but round-trip here too.
+        for op in CL_COMPARISON_OPERATORS {
+            assert_eq!(
+                parse_generic_name_header(op).unwrap(),
+                (op.to_string(), vec![]),
+                "operator {:?} should be a verbatim name with no type parameters",
+                op
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_comparison_operator_name_is_still_verbatim() {
+        // Other punctuation-led / arrow-like names stay verbatim too.
+        assert_eq!(parse_generic_name_header("->").unwrap(), ("->".to_string(), vec![]));
+        assert_eq!(parse_generic_name_header("+").unwrap(), ("+".to_string(), vec![]));
+    }
+
+    #[test]
+    fn a_malformed_generic_header_is_rejected() {
+        // Starts `ident<` but isn't a known operator and doesn't close: an error,
+        // not a silent verbatim name (catches genuine typos like `pair<a`).
+        assert!(parse_generic_name_header("pair<a").is_err());
+        assert!(parse_generic_name_header("pair<a,>").is_err());
+    }
 }

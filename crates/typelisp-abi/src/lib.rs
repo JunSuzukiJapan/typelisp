@@ -205,13 +205,6 @@ pub fn unwind_interpreted_error() -> ! {
 }
 
 
-/// The tagged-`i64` representation compiled code uses for a `Value`.
-///
-/// **Defined in `typelisp-mem`** ([`typelisp_mem::tagged`]) and re-exported
-/// here, where every caller has always named it. It moved down for the
-/// compiled-CPS work: a compiled frame holds tagged *words* rather than
-/// `Value`s, so the collector — which lives in `typelisp-mem`, below this
-/// crate — has to be able to decode them.
 // ---- the driver protocol (Phase C2) -------------------------------------
 //
 // A compiled function under the coroutine ABI is `i64 f(i64 frame)`, and what
@@ -554,6 +547,13 @@ pub mod call_state {
     }
 }
 
+/// The tagged-`i64` representation compiled code uses for a `Value`.
+///
+/// **Defined in `typelisp-mem`** ([`typelisp_mem::tagged`]) and re-exported
+/// here, where every caller has always named it. It moved down for the
+/// compiled-CPS work: a compiled frame holds tagged *words* rather than
+/// `Value`s, so the collector — which lives in `typelisp-mem`, below this
+/// crate — has to be able to decode them.
 pub use typelisp_mem::tagged::{decode, encode};
 
 /// Decodes one tagged argument.

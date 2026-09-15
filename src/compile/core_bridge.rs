@@ -1356,20 +1356,20 @@ fn collect_into(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Error> 
         // first three fields are the same triple — the bridge turns a `fnref`
         // into a forwarding call, so its target needs the same treatment.
         "call" | "fnref" => {
-            if let Some(p) = path_at(heap, form, 2) {
+            if let Some(p) = core::path_field(heap, form, 2) {
                 push_unique(&mut t.calls, p);
             }
         }
         // `(assoc PATH SYM ...)` / `(methodref PATH SYM ...)`.
         "assoc" | "methodref" => {
-            if let (Some(p), Some(m)) = (path_at(heap, form, 0), sym_at(heap, form, 1)) {
+            if let (Some(p), Some(m)) = (core::path_field(heap, form, 0), core::sym_name_field(heap, form, 1)) {
                 push_unique(&mut t.methods, (p, m));
             }
         }
         // `(global (WRITTEN...) (HOME...) PATH REPR)` and `set-global`'s same
         // leading triple.
         "global" | "set-global" => {
-            if let Some(p) = path_at(heap, form, 2) {
+            if let Some(p) = core::path_field(heap, form, 2) {
                 push_unique(&mut t.globals, p);
             }
         }
@@ -1381,7 +1381,7 @@ fn collect_into(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Error> 
                 Some(Value::Str(id)) => heap.string(id).to_string(),
                 _ => return Ok(()),
             };
-            let Some(trait_path) = path_at(heap, form, 1) else { return Ok(()) };
+            let Some(trait_path) = core::path_field(heap, form, 1) else { return Ok(()) };
             let slots = vtable_at(heap, form, 2)?;
             let supers = supers_at(heap, form, 3)?;
             for key in &slots {
@@ -1395,7 +1395,7 @@ fn collect_into(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Error> 
         // *boxing* site already registered. Only the target trait's id has to
         // be interned before translation.
         "dyn-upcast" => {
-            if let Some(p) = path_at(heap, form, 0) {
+            if let Some(p) = core::path_field(heap, form, 0) {
                 push_unique(&mut t.dyn_upcasts, p);
             }
         }
@@ -1403,7 +1403,7 @@ fn collect_into(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Error> 
         // static target, but every implementation it could dispatch to must
         // exist natively before this body can run natively.
         "dyn-call" => {
-            if let Some(p) = path_at(heap, form, 0) {
+            if let Some(p) = core::path_field(heap, form, 0) {
                 push_unique(&mut t.dyn_traits, p);
             }
             for key in vtable_at(heap, form, 3)? {
@@ -1421,24 +1421,6 @@ fn collect_into(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Error> 
 fn push_unique<T: PartialEq>(out: &mut Vec<T>, v: T) {
     if !out.contains(&v) {
         out.push(v);
-    }
-}
-
-/// Field `i` as a path, or `None` if it is not one. A single-segment path reads
-/// back as a bare `Value::Symbol` (the reader only builds `Value::Path` when it
-/// sees `::`), so both spellings mean the same one-segment path.
-fn path_at(heap: &Heap, form: Value, i: usize) -> Option<Path> {
-    match core::field(heap, form, i)? {
-        Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
-        Value::Symbol(id) => Some(Path::root(heap.symbol_name(id))),
-        _ => None,
-    }
-}
-
-fn sym_at(heap: &Heap, form: Value, i: usize) -> Option<String> {
-    match core::field(heap, form, i)? {
-        Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
-        _ => None,
     }
 }
 
@@ -3753,13 +3735,12 @@ mod tests {
     /// a body being compiled can reach either.
     #[test]
     fn a_type_inside_a_module_is_recorded_too() {
-        assert_eq!(
+        assert!(
             bridged_with(
                 &["(module m (defstruct m::point (int-any-width sexpr)))"],
                 "(construct m::point \"m::point\" 0 true (int-any-width sexpr) (int-any-width 1) (quote ()))"
             )
-            .contains("(1 int-any-width 0 1)"),
-            true
+            .contains("(1 int-any-width 0 1)")
         );
     }
 

@@ -111,11 +111,11 @@ mod num_str {
     use std::fmt::Display;
     use std::str::FromStr;
 
-    pub fn serialize<T: Display, S: serde::Serializer>(v: &T, s: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<T: Display, S: serde::Serializer>(v: &T, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&v.to_string())
     }
 
-    pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
+    pub(crate) fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
     where
         T: FromStr,
         T::Err: Display,
@@ -141,20 +141,20 @@ mod loc_serde {
         end_col: u32,
     }
 
-    pub mod opt {
+    pub(crate) mod opt {
         use super::{Loc, LocDef};
 
         #[derive(serde::Serialize, serde::Deserialize)]
         struct Wrap(#[serde(with = "LocDef")] Loc);
 
-        pub fn serialize<S: serde::Serializer>(v: &Option<Loc>, s: S) -> Result<S::Ok, S::Error> {
+        pub(crate) fn serialize<S: serde::Serializer>(v: &Option<Loc>, s: S) -> Result<S::Ok, S::Error> {
             // `Wrap` is a newtype, so this costs one clone of an `Rc` and five
             // `u32`s — not the string.
             let w = v.clone().map(Wrap);
             serde::Serialize::serialize(&w, s)
         }
 
-        pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Loc>, D::Error> {
+        pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Loc>, D::Error> {
             let w: Option<Wrap> = serde::Deserialize::deserialize(d)?;
             Ok(w.map(|Wrap(l)| l))
         }

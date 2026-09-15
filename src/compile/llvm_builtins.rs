@@ -930,6 +930,34 @@ fn builder_key(b: &Rc<RefCell<Builder<'static>>>) -> usize {
     Rc::as_ptr(b) as usize
 }
 
+/// The open coroutine frame on `builder`, plus the id the resume point about
+/// to be emitted claims: `(frame, data, function, id)`.
+///
+/// Resume ids start at 1 — 0 is "start at the top", which is what an untouched
+/// `pc` already says. Claiming one is a read, not a write: the caller appends
+/// its block and registers it, which is what makes the *next* id one higher.
+///
+/// `what` names the builtin, for the two failures reported here: no frame open
+/// on this builder, and a frame that is not a coroutine's.
+fn open_coroutine_frame(
+    builder: &Rc<RefCell<Builder<'static>>>,
+    what: &str,
+) -> Result<(BasicValueEnum<'static>, PointerValue<'static>, FunctionValue<'static>, u64), EvalError> {
+    let key = builder_key(builder);
+    FRAME_CTXS.with(|c| {
+        let mut map = c.borrow_mut();
+        let f = map
+            .get_mut(&key)
+            .ok_or_else(|| EvalError::Internal(format!("{}: no frame is open on this builder", what)))?;
+        let coro = f
+            .coro
+            .as_mut()
+            .ok_or_else(|| EvalError::Internal(format!("{}: this function is not a coroutine", what)))?;
+        let id = coro.resumes.len() as u64 + 1;
+        Ok((f.frame, f.data, coro.function, id))
+    })
+}
+
 /// Get-or-create a bodyless `rt_*` declaration, for the same reason
 /// [`llvm_module_add_function`] is get-or-create: LLVM's `LLVMAddFunction`
 /// does not merge a colliding name, it uniquifies it to `name.1` — and a
@@ -1212,12 +1240,12 @@ fn llvm_builder_frame_end(args: &[Value]) -> Result<Value, EvalError> {
 /// `alloca` filled by hand — the same three lines repeated at a dozen sites
 /// above, factored out here because the coroutine prologue makes eight such
 /// calls.
-fn emit_rt_call<'a>(
+fn emit_rt_call(
     b: &Builder<'static>,
     f: FunctionValue<'static>,
     vals: &[BasicValueEnum<'static>],
     name: &str,
-    what: &'a str,
+    what: &str,
 ) -> Result<Option<BasicValueEnum<'static>>, EvalError> {
     let ctx = crate::compile::llvm_context();
     let i64t = ctx.i64_type();
@@ -1461,19 +1489,7 @@ fn llvm_builder_coroutine_suspend(args: &[Value]) -> Result<Value, EvalError> {
     let what = "coroutine-suspend";
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
     let key = builder_key(&builder);
-
-    let (frame, data, function, id) = FRAME_CTXS.with(|c| {
-        let mut map = c.borrow_mut();
-        let f = map
-            .get_mut(&key)
-            .ok_or_else(|| EvalError::Internal(format!("{}: no frame is open on this builder", what)))?;
-        let coro = f
-            .coro
-            .as_mut()
-            .ok_or_else(|| EvalError::Internal(format!("{}: this function is not a coroutine", what)))?;
-        let id = coro.resumes.len() as u64 + 1;
-        Ok::<_, EvalError>((f.frame, f.data, coro.function, id))
-    })?;
+    let (frame, data, function, id) = open_coroutine_frame(&builder, what)?;
 
     let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
     let set_pc = ensure_declared(&module, "rt_frame_set_pc");
@@ -1642,21 +1658,7 @@ fn coroutine_call_impl(
     let i64t = ctx.i64_type();
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
     let key = builder_key(&builder);
-
-    let (frame, data, function, id) = FRAME_CTXS.with(|c| {
-        let mut map = c.borrow_mut();
-        let f = map
-            .get_mut(&key)
-            .ok_or_else(|| EvalError::Internal(format!("{}: no frame is open on this builder", what)))?;
-        let coro = f
-            .coro
-            .as_mut()
-            .ok_or_else(|| EvalError::Internal(format!("{}: this function is not a coroutine", what)))?;
-        // Resume ids start at 1: 0 is "start at the top", which is what an
-        // untouched `pc` already says.
-        let id = coro.resumes.len() as u64 + 1;
-        Ok::<_, EvalError>((f.frame, f.data, coro.function, id))
-    })?;
+    let (frame, data, function, id) = open_coroutine_frame(&builder, what)?;
 
     let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
     let frame_call = ensure_declared(&module, shim);

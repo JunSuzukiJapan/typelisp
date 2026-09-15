@@ -460,7 +460,7 @@ fn tab_target(col: usize, origin: usize, colnum: i64, colinc: i64, relative: boo
     if relative {
         let mut target = col + colnum;
         if colinc > 1 {
-            while target.saturating_sub(origin) % colinc != 0 {
+            while !target.saturating_sub(origin).is_multiple_of(colinc) {
                 target += 1;
             }
         }

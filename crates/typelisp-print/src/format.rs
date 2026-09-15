@@ -852,7 +852,7 @@ impl State<'_> {
             return Err("format: ~{~} with an empty body is unsupported".to_string());
         }
         if elems.is_empty() && close_colon {
-            let saved = std::mem::replace(&mut self.args, Vec::new());
+            let saved = std::mem::take(&mut self.args);
             let saved_pos = std::mem::replace(&mut self.pos, 0);
             let _ = self.interp_seq(body, out);
             self.args = saved;
@@ -1192,7 +1192,7 @@ impl State<'_> {
             let w = w as usize;
             if s.chars().count() > w {
                 if let Some(oc) = overflow {
-                    s = std::iter::repeat(oc).take(w).collect();
+                    s = std::iter::repeat_n(oc, w).collect();
                 }
             }
             s = left_pad(&s, w, padchar);
@@ -1232,7 +1232,7 @@ impl State<'_> {
         let peeked = self.peek_arg();
         let use_e = matches!(peeked, Some(v) if float_of(self.heap, v).map(|f| {
             let a = f.abs();
-            a != 0.0 && (a < 1e-3 || a >= 1e7)
+            a != 0.0 && !(1e-3..1e7).contains(&a)
         }).unwrap_or(false));
         if use_e {
             self.emit_e(head, out)
@@ -1295,7 +1295,7 @@ impl State<'_> {
         if head.colon || head.at {
             // Relative tab: at least `col` spaces, then round up to `inc`.
             let mut pad = col;
-            while (cur + pad) % inc != 0 {
+            while !(cur + pad).is_multiple_of(inc) {
                 pad += 1;
             }
             for _ in 0..pad {
@@ -1417,7 +1417,7 @@ fn left_pad(s: &str, width: usize, padchar: char) -> String {
     if len >= width {
         return s.to_string();
     }
-    let mut out: String = std::iter::repeat(padchar).take(width - len).collect();
+    let mut out: String = std::iter::repeat_n(padchar, width - len).collect();
     out.push_str(s);
     out
 }
@@ -1426,14 +1426,14 @@ fn left_pad(s: &str, width: usize, padchar: char) -> String {
 /// field is grown to `mincol` in `colinc` steps. `at` right-justifies (pad on
 /// the left) instead of the default left-justify.
 fn pad(s: &str, mincol: usize, colinc: usize, minpad: usize, padchar: char, at: bool) -> String {
-    let base: String = std::iter::repeat(padchar).take(minpad).collect();
+    let base: String = std::iter::repeat_n(padchar, minpad).collect();
     let mut content_len = s.chars().count() + minpad;
     let mut extra = 0;
     while content_len < mincol {
         extra += colinc;
         content_len += colinc;
     }
-    let fill: String = std::iter::repeat(padchar).take(extra).collect();
+    let fill: String = std::iter::repeat_n(padchar, extra).collect();
     if at {
         format!("{}{}{}", fill, base, s)
     } else {
@@ -1479,7 +1479,7 @@ fn justify(
     let extra = pad_total % gaps;
     let gap_str = |i: usize| -> String {
         let n = base + if i < extra { 1 } else { 0 };
-        std::iter::repeat(padchar).take(n).collect()
+        std::iter::repeat_n(padchar, n).collect()
     };
     let mut out = Out::new();
     let mut gap_idx = 0;
@@ -1620,7 +1620,7 @@ fn group_digits(digits: &str, commachar: char, interval: usize) -> String {
     let chars: Vec<char> = digits.chars().collect();
     let mut out = Vec::new();
     for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (chars.len() - i) % interval == 0 {
+        if i > 0 && (chars.len() - i).is_multiple_of(interval) {
             out.push(commachar);
         }
         out.push(*c);
@@ -1710,7 +1710,7 @@ fn three_digits(g: u32) -> String {
             out.push_str(ONES[rest as usize]);
         } else {
             out.push_str(TENS[(rest / 10) as usize]);
-            if rest % 10 > 0 {
+            if !rest.is_multiple_of(10) {
                 out.push('-');
                 out.push_str(ONES[(rest % 10) as usize]);
             }
@@ -1722,7 +1722,7 @@ fn three_digits(g: u32) -> String {
 fn english_ordinal(n: i64) -> String {
     let card = english_cardinal(n);
     // Transform the final word into its ordinal form.
-    let (prefix, last) = match card.rfind(|c| c == ' ' || c == '-') {
+    let (prefix, last) = match card.rfind([' ', '-']) {
         Some(i) => (&card[..=i], &card[i + 1..]),
         None => ("", card.as_str()),
     };

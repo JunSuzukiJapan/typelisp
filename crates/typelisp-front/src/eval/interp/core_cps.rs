@@ -39,7 +39,7 @@ use crate::eval::value::EvalError;
 
 use super::core_eval::{
     bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, path_field,
-    param_reprs, repr_list, str_field, sym_field, tail_after, tail_after_value, Op, StepCmd,
+    param_reprs, repr_list, str_field, sym_field, tail_after, tail_after_value, Op,
 };
 use super::{option_value, FnDef, Interp};
 
@@ -794,8 +794,10 @@ pub(crate) struct Scheduler {
 /// being stepped. Without it, `admit` reuses the position of whichever task is
 /// currently running — which is exactly what a `go` inside the main task does,
 /// and the new task then inherits main's id and is retired along with it.
+#[derive(Default)]
 enum Slot {
     /// No task here. `admit` may reuse this position.
+    #[default]
     Empty,
     /// A task that exists and is not running.
     Parked(TaskSlot),
@@ -814,11 +816,6 @@ enum Slot {
     Done(Value),
 }
 
-impl Default for Slot {
-    fn default() -> Slot {
-        Slot::Empty
-    }
-}
 
 impl Scheduler {
     /// Adds a task and makes it ready to run.
@@ -1917,12 +1914,7 @@ impl Interp {
             Ok(Ok(word)) => match self.finish_compiled(heap, word, &drive.start.ret, drive.crossing_roots) {
                 Ok(v) => {
                     if let Some((name, depth)) = &drive.start.watch {
-                        self.trace_depth.set(*depth);
-                        if self.step_quiet_depth.get() == *depth {
-                            self.step_quiet_depth.set(usize::MAX);
-                        }
-                        let text = self.trace_render(heap, v);
-                        self.trace_line(heap, *depth, &format!("{} returned {}", name, text));
+                        self.trace_call_exit(heap, name, *depth, Ok(v));
                     }
                     State::Apply(v)
                 }
@@ -2658,28 +2650,7 @@ impl Interp {
         let stepping = self.stepping.get() && self.trace_depth.get() <= self.step_quiet_depth.get();
         let watched = stepping || (self.trace_armed.get() && self.traced.borrow().contains(&f.name));
         let watch = if watched {
-            let depth = self.trace_depth.get();
-            let call = {
-                let rendered: Vec<String> = argv.iter().map(|a| self.trace_render(heap, *a)).collect();
-                if rendered.is_empty() {
-                    format!("({})", f.name)
-                } else {
-                    format!("({} {})", f.name, rendered.join(" "))
-                }
-            };
-            self.trace_line(heap, depth, &call);
-            if stepping {
-                match self.step_prompt(heap) {
-                    StepCmd::Into => {}
-                    // Quiet *below* this frame: the command is "run this
-                    // call", and the frame it was given at is the one to ask
-                    // at again.
-                    StepCmd::Over => self.step_quiet_depth.set(depth),
-                    StepCmd::Continue => self.stepping.set(false),
-                    StepCmd::Quit => return Err(EvalError::Panic("step: aborted".to_string())),
-                }
-            }
-            self.trace_depth.set(depth + 1);
+            let depth = self.trace_call_entry(heap, f, &argv, stepping)?;
             Some(Frame::TracedCall { name: f.name.clone(), depth })
         } else {
             None
@@ -2718,12 +2689,7 @@ impl Interp {
             // The call is over already, so a watch frame would have nothing to
             // wait for: report the return here instead.
             if let Some(Frame::TracedCall { name, depth }) = watch {
-                self.trace_depth.set(depth);
-                if self.step_quiet_depth.get() == depth {
-                    self.step_quiet_depth.set(usize::MAX);
-                }
-                let text = self.trace_render(heap, v);
-                self.trace_line(heap, depth, &format!("{} returned {}", name, text));
+                self.trace_call_exit(heap, &name, depth, Ok(v));
             }
             return Ok((State::Apply(v), None));
         }
@@ -3211,15 +3177,8 @@ impl Interp {
                 Ok((State::CompiledResume { drive, wake: Some((v, wake)) }, None))
             }
 
-            // The depth is restored *before* the return is reported, so the
-            // two lines of one call line up.
             Frame::TracedCall { name, depth } => {
-                self.trace_depth.set(depth);
-                if self.step_quiet_depth.get() == depth {
-                    self.step_quiet_depth.set(usize::MAX);
-                }
-                let text = self.trace_render(heap, v);
-                self.trace_line(heap, depth, &format!("{} returned {}", name, text));
+                self.trace_call_exit(heap, &name, depth, Ok(v));
                 Ok((State::Apply(v), None))
             }
 
@@ -3319,7 +3278,7 @@ impl Interp {
                 }
                 match self.resolve_global_named(&home, &written, &path) {
                     Some(slot) => {
-                        slot.set(heap, v)?;
+                        slot.set(heap, v);
                         Ok((State::Apply(Value::Empty), None))
                     }
                     None => Err(EvalError::Unbound(path.to_string())),
@@ -3432,14 +3391,8 @@ impl Interp {
                 Ok((State::CompiledRaise { drive }, None))
             }
 
-            // An unwind past a traced frame is exactly the moment a trace is
-            // most worth having, so the exit is reported rather than silent.
             Frame::TracedCall { name, depth } => {
-                self.trace_depth.set(depth);
-                if self.step_quiet_depth.get() == depth {
-                    self.step_quiet_depth.set(usize::MAX);
-                }
-                self.trace_line(heap, depth, &format!("{} exited non-locally: {}", name, exit));
+                self.trace_call_exit(heap, &name, depth, Err(&exit));
                 Ok((State::Unwind(exit), None))
             }
 
@@ -3878,16 +3831,14 @@ mod tests {
         const DEPTH: i64 = 20_000;
         let mut h = Heap::with_capacity(1 << 20);
 
-        let src = format!(
-            "(labels ((build ((n int-any-width)) sexpr
+        let src = "(labels ((build ((n int-any-width)) sexpr
                         (if (call (sexpr-null) () sexpr-null (sexpr) (var n))
                             (unit)
                             (call (sexpr-cons) () sexpr-cons (sexpr sexpr)
                               (int-any-width 1)
                               (apply (var build) sexpr (sexpr)
                                 (call (sexpr-cdr) () sexpr-cdr (sexpr) (var n)))))))
-               (apply (var build) sexpr (sexpr) (var xs)))"
-        );
+               (apply (var build) sexpr (sexpr) (var xs)))".to_string();
 
         // `xs` is a list of DEPTH elements, built on the Rust side so the
         // source stays small.

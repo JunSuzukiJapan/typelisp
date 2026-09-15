@@ -766,14 +766,34 @@ impl Interp {
         argv: Vec<Value>,
         stepping: bool,
     ) -> Result<Value, EvalError> {
+        let depth = self.trace_call_entry(heap, f, &argv, stepping)?;
+        let result = self.enter_plain(heap, f, argv);
+        self.trace_call_exit(heap, &f.name, depth, result.as_ref().copied());
+        result
+    }
+
+    /// Reports a watched call *going in* — `  0: (fact 3)` — asks the step
+    /// prompt when `stepping`, and bumps the depth for the callee. Returns the
+    /// depth the call was reported at: its return line is written at the same
+    /// one, and it is what [`Self::trace_call_exit`] restores.
+    ///
+    /// Shared by the two ways into a body — [`Self::enter_watched`]'s Rust
+    /// frame and the continuation machine's `enter_fn`
+    /// ([`core_cps`](super::core_cps)) — so `trace` and `step` say the same
+    /// thing whichever one a call arrives through.
+    pub(super) fn trace_call_entry(
+        &self,
+        heap: &mut Heap,
+        f: &Rc<FnDef>,
+        argv: &[Value],
+        stepping: bool,
+    ) -> Result<usize, EvalError> {
         let depth = self.trace_depth.get();
-        let call = {
-            let rendered: Vec<String> = argv.iter().map(|a| self.trace_render(heap, *a)).collect();
-            if rendered.is_empty() {
-                format!("({})", f.name)
-            } else {
-                format!("({} {})", f.name, rendered.join(" "))
-            }
+        let rendered: Vec<String> = argv.iter().map(|a| self.trace_render(heap, *a)).collect();
+        let call = if rendered.is_empty() {
+            format!("({})", f.name)
+        } else {
+            format!("({} {})", f.name, rendered.join(" "))
         };
         self.trace_line(heap, depth, &call);
         if stepping {
@@ -787,20 +807,28 @@ impl Interp {
             }
         }
         self.trace_depth.set(depth + 1);
-        let result = self.enter_plain(heap, f, argv);
+        Ok(depth)
+    }
+
+    /// Reports a watched call *coming out* — `  0: fact returned 6`, or the
+    /// exit that unwound past it — and puts back what
+    /// [`Self::trace_call_entry`] moved.
+    ///
+    /// The depth is restored *before* the return is reported, so the two lines
+    /// of one call line up. An unwind is reported rather than silent: it is
+    /// exactly the moment a trace is most worth having.
+    pub(super) fn trace_call_exit(&self, heap: &mut Heap, name: &str, depth: usize, outcome: Result<Value, &EvalError>) {
         self.trace_depth.set(depth);
         if self.step_quiet_depth.get() == depth {
             self.step_quiet_depth.set(usize::MAX);
         }
-        match &result {
+        match outcome {
             Ok(v) => {
-                let v = *v;
                 let text = self.trace_render(heap, v);
-                self.trace_line(heap, depth, &format!("{} returned {}", f.name, text));
+                self.trace_line(heap, depth, &format!("{} returned {}", name, text));
             }
-            Err(e) => self.trace_line(heap, depth, &format!("{} exited non-locally: {}", f.name, e)),
+            Err(e) => self.trace_line(heap, depth, &format!("{} exited non-locally: {}", name, e)),
         }
-        result
     }
 
     /// Asks what to do at a stepped call, and reads the answer from standard
@@ -1473,8 +1501,12 @@ fn method_entry(heap: &Heap, entry: Value) -> Result<(crate::Path, String), Eval
     Ok((ty, heap.symbol_name(name).to_string()))
 }
 
+/// One supertrait's dispatch table: the trait it is for, and that trait's
+/// method slots as `(implementing type, method name)`.
+pub(super) type SuperTable = (crate::Path, Vec<(crate::Path, String)>);
+
 /// The supertrait tables field: `((PATH ((PATH SYM)...))...)`.
-pub(super) fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<(crate::Path, Vec<(crate::Path, String)>)>, EvalError> {
+pub(super) fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<SuperTable>, EvalError> {
     let field = core::field(heap, form, i)
         .ok_or_else(|| EvalError::Internal(format!("eval: (dyn-new ..) has no field {}", i)))?;
     let entries = heap

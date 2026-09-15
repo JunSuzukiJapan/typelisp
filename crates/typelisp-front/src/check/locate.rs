@@ -31,7 +31,7 @@
 use typelisp_mem::{wk, Heap, Value};
 
 use crate::check::core;
-use crate::{DefLocs, Docs, Loc, Path, Registry, SymRef, TopLevelForm};
+use crate::{DefLocs, Docs, Loc, Registry, SymRef, TopLevelForm};
 
 /// Tags whose fields are *not* sub-expressions, so a walk must not descend
 /// into them.
@@ -116,7 +116,7 @@ fn visit(heap: &Heap, form: Value, file: &str, cursor: (u32, u32), depth: usize,
         }
     }
     match core::op_sym(heap, form) {
-        Some(tag) if is_opaque(tag) => return,
+        Some(tag) if is_opaque(tag) => (),
         Some(_) => {
             let Ok(fields) = core::fields(heap, form) else { return };
             for f in fields {
@@ -151,19 +151,19 @@ pub fn definition_target(heap: &Heap, node: Value, def_locs: &DefLocs) -> Option
     match core::op_sym(heap, node)?.well_known() {
         // `(global (WRITTEN...) (HOME...) PATH REPR)` and `set-global`'s same
         // leading triple.
-        wk::GLOBAL | wk::SET_GLOBAL => def_locs.vars.get(&path_at(heap, node, 2)?).cloned(),
+        wk::GLOBAL | wk::SET_GLOBAL => def_locs.vars.get(&core::path_field(heap, node, 2)?).cloned(),
         // `(call (WRITTEN...) (HOME...) PATH ...)`, `fnref`'s same triple.
-        wk::CALL | wk::FNREF => def_locs.fns.get(&path_at(heap, node, 2)?).cloned(),
+        wk::CALL | wk::FNREF => def_locs.fns.get(&core::path_field(heap, node, 2)?).cloned(),
         // `(assoc PATH SYM ...)`, `(methodref PATH SYM ...)`.
         wk::ASSOC | wk::METHODREF => {
-            def_locs.methods.get(&(path_at(heap, node, 0)?, sym_at(heap, node, 1)?)).cloned()
+            def_locs.methods.get(&(core::path_field(heap, node, 0)?, core::sym_name_field(heap, node, 1)?)).cloned()
         }
-        wk::CONSTRUCT => def_locs.types.get(&path_at(heap, node, 0)?).cloned(),
+        wk::CONSTRUCT => def_locs.types.get(&core::path_field(heap, node, 0)?).cloned(),
         // `(compile-fn ...)` names either a function or a method; which one is
         // told by whether a method name follows the path.
-        wk::COMPILE_FN => match sym_at(heap, node, 1) {
-            Some(m) => def_locs.methods.get(&(path_at(heap, node, 0)?, m)).cloned(),
-            None => def_locs.fns.get(&path_at(heap, node, 0)?).cloned(),
+        wk::COMPILE_FN => match core::sym_name_field(heap, node, 1) {
+            Some(m) => def_locs.methods.get(&(core::path_field(heap, node, 0)?, m)).cloned(),
+            None => def_locs.fns.get(&core::path_field(heap, node, 0)?).cloned(),
         },
         wk::VAR => {
             let l = heap.cons_loc(node)?;
@@ -179,13 +179,13 @@ pub fn definition_target(heap: &Heap, node: Value, def_locs: &DefLocs) -> Option
 /// unlike `definition_target` there's no `local_refs` analog to fall back to).
 pub fn doc_for<'a>(heap: &Heap, node: Value, docs: &'a Docs) -> Option<&'a str> {
     let found = match core::op_sym(heap, node)?.well_known() {
-        wk::GLOBAL | wk::SET_GLOBAL => docs.vars.get(&path_at(heap, node, 2)?),
-        wk::CALL | wk::FNREF => docs.fns.get(&path_at(heap, node, 2)?),
-        wk::ASSOC | wk::METHODREF => docs.methods.get(&(path_at(heap, node, 0)?, sym_at(heap, node, 1)?)),
-        wk::CONSTRUCT => docs.types.get(&path_at(heap, node, 0)?),
-        wk::COMPILE_FN => match sym_at(heap, node, 1) {
-            Some(m) => docs.methods.get(&(path_at(heap, node, 0)?, m)),
-            None => docs.fns.get(&path_at(heap, node, 0)?),
+        wk::GLOBAL | wk::SET_GLOBAL => docs.vars.get(&core::path_field(heap, node, 2)?),
+        wk::CALL | wk::FNREF => docs.fns.get(&core::path_field(heap, node, 2)?),
+        wk::ASSOC | wk::METHODREF => docs.methods.get(&(core::path_field(heap, node, 0)?, core::sym_name_field(heap, node, 1)?)),
+        wk::CONSTRUCT => docs.types.get(&core::path_field(heap, node, 0)?),
+        wk::COMPILE_FN => match core::sym_name_field(heap, node, 1) {
+            Some(m) => docs.methods.get(&(core::path_field(heap, node, 0)?, m)),
+            None => docs.fns.get(&core::path_field(heap, node, 0)?),
         },
         _ => None,
     };
@@ -395,7 +395,7 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
 fn pattern_bind_names(heap: &Heap, pat: Value, scope: &mut Vec<String>) {
     match core::op_sym(heap, pat).map(|s| s.well_known()) {
         Some(wk::PAT_BIND) => {
-            if let Some(n) = sym_at(heap, pat, 0) {
+            if let Some(n) = core::sym_name_field(heap, pat, 0) {
                 scope.push(n);
             }
         }
@@ -441,25 +441,6 @@ fn sym_list_at(heap: &Heap, form: Value, i: usize) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-/// Field `i` as a path. A single-segment path reads back as a bare symbol (the
-/// reader only builds `Value::Path` when it sees `::`).
-fn path_at(heap: &Heap, form: Value, i: usize) -> Option<Path> {
-    match core::field(heap, form, i)? {
-        Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
-        Value::Symbol(id) => Some(Path::root(heap.symbol_name(id))),
-        _ => None,
-    }
-}
-
-/// Field `i` of a *node* as a symbol name — `core::field`'s numbering, which
-/// counts past the tag.
-fn sym_at(heap: &Heap, form: Value, i: usize) -> Option<String> {
-    match core::field(heap, form, i)? {
-        Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
-        _ => None,
-    }
 }
 
 /// The first element of a *bare list* as a symbol name.

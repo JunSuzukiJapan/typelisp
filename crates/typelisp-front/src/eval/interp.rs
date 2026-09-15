@@ -576,11 +576,6 @@ impl Interp {
             Some(Recording { baseline, forms: Vec::new(), globals_before: self.compiled_globals.borrow().len() });
     }
 
-    /// Whether [`Self::start_recording`] has been called.
-    pub fn is_recording(&self) -> bool {
-        self.recording.borrow().is_some()
-    }
-
     /// Runs `f` over this session's recording, or fails if there is none.
     pub fn with_recording<R>(
         &self,
@@ -1513,7 +1508,7 @@ impl Interp {
         self.resolve_fn_def(name).map(|f| f.ffi).unwrap_or(false)
     }
 
-    pub fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Repr)>, Vec<Value>), EvalError> {
+    pub fn compiled_fn_body(&self, name: &str) -> Result<FnBody, EvalError> {
         let f = self.resolve_fn_def(name)?;
         let sig = f
             .sig
@@ -1688,7 +1683,7 @@ impl Interp {
         // masse during checking — allocation-free, exactly as before this
         // feature.
         if n_opt == 0 && lambda.keys.is_empty() {
-            let mut argv: Vec<Value> = raw_args[..n_req].iter().map(|v| *v).collect();
+            let mut argv: Vec<Value> = raw_args[..n_req].to_vec();
             if f.rest {
                 let list = self.build_sexpr_list(heap, &raw_args[n_req..])?;
                 argv.push(list);
@@ -1824,7 +1819,7 @@ impl Interp {
         tail: &[Value],
         keys: &[(String, Vec<Value>)],
     ) -> Result<HashMap<String, Value>, EvalError> {
-        if tail.len() % 2 != 0 {
+        if !tail.len().is_multiple_of(2) {
             return Err(EvalError::Panic("odd number of &key arguments (each key needs a value)".into()));
         }
         let mut map: HashMap<String, Value> = HashMap::new();
@@ -2158,19 +2153,19 @@ impl Interp {
             "sexpr-f64" => match args.first() {
                 // The node *is* the float box since the scalar
                 // unification, so reading the payload out is the identity.
-                Some(v @ Value::Boxed(id)) if heap.is_f64(*id) => Some(Ok(v.clone())),
+                Some(v @ Value::Boxed(id)) if heap.is_f64(*id) => Some(Ok(*v)),
                 Some(_) => Some(Err(EvalError::Panic("sexpr-f64: expected an f64 Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-f64: expected a Sexpr argument".into()))),
             },
             "sexpr-f32" => match args.first() {
-                Some(v @ Value::Boxed(id)) if heap.is_f32(*id) => Some(Ok(v.clone())),
+                Some(v @ Value::Boxed(id)) if heap.is_f32(*id) => Some(Ok(*v)),
                 Some(_) => Some(Err(EvalError::Panic("sexpr-f32: expected an f32 Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-f32: expected a Sexpr argument".into()))),
             },
             "sexpr-str" => match args.first() {
                 // The node *is* the heap string since the scalar
                 // unification, so reading the payload out is the identity.
-                Some(v @ Value::Str(_)) => Some(Ok(v.clone())),
+                Some(v @ Value::Str(_)) => Some(Ok(*v)),
                 Some(_) => Some(Err(EvalError::Panic("sexpr-str: expected a Str Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-str: expected a Sexpr argument".into()))),
             },
@@ -3293,20 +3288,6 @@ pub fn str_rt(heap: &mut Heap, s: impl Into<String>) -> Value {
     heap.alloc_string(s.into())
 }
 
-/// An `f64` value: `f` boxed onto the GC heap — the [`bignum_rt`] counterpart
-/// for floats, and the one constructor.
-///
-/// A float was the last type with *two* runtime shapes: a Rust-side
-/// `RtValue::Float(f64)` while the interpreter held it, and a
-/// `BoxedObj::Float` once it reached a struct field, a `Sexpr`, or compiled
-/// code — with a conversion at each crossing and a standing risk that a
-/// reader of one shape met the other. There is only the box now.
-///
-/// This does *not* make float arithmetic allocate where it did not before:
-/// the compiled tier keeps floats in native registers (`binding_kind`'s float
-/// kind), and the interpreter was already boxing at every boundary. It is the
-/// interpreter's own locals that move onto the heap.
-
 /// Evaluate a built-in `bignum` arithmetic/comparison instance method
 /// (`registry::bignum_assoc`). Core integer operations: `+ - * /` (`/`
 /// truncates toward zero) and `mod` (floored, CL — sign of the divisor), each
@@ -3943,9 +3924,9 @@ fn eval_builtin_method(
             "float->f64" => Some(float_to_width(heap, args, false)),
             "try-float->f32" => Some(try_float_to_f32(heap, args, ret_key)),
             // Always `some`: widening is exact.
-            "try-float->f64" => Some(float_to_width(heap, args, false).and_then(|v| {
+            "try-float->f64" => Some(float_to_width(heap, args, false).map(|v| {
                 let some = Some(v);
-                Ok(option_value(heap, ret_key, some))
+                option_value(heap, ret_key, some)
             })),
             "expt" => Some(float_expt(heap, args, single)),
             "sqrt" => Some(float_unary(heap, args, f64::sqrt, single)),
@@ -4096,20 +4077,36 @@ pub struct FfiDecl {
 /// [`typelisp_print::runtime::PrintHooks`] uses them: these are only ever
 /// called Rust-side, never emitted as a call by the compiler, so there is no
 /// ABI to pin down and `Result`/`String` cross directly.
+/// What a function hands the compiler: its parameters, each with the
+/// representation its declared type lowers to, and its body forms.
+pub type FnBody = (Vec<(String, Repr)>, Vec<Value>);
+
+/// One `llvm-*`/native-scope builtin, as the island calls it.
+pub type LlvmBuiltinFn = fn(&mut Heap, &Path, &str, &[Value]) -> Option<Result<Value, EvalError>>;
+
+/// `(compile name)`.
+pub type CompileFn = fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>;
+
+/// `(disassemble name [llvm])`.
+pub type DisassembleFn = fn(&Interp, &mut Heap, &crate::CompileTarget, bool) -> Result<String, EvalError>;
+
+/// `(defffi ...)`.
+pub type DefineFfiFn = fn(&Interp, &FfiDecl) -> Result<Rc<dyn CompiledBody>, String>;
+
 #[derive(Clone, Copy)]
 pub struct Backend {
     /// The `llvm-*`/native-scope builtins the compiler island calls to emit
     /// IR. `None` means "not one of mine".
-    pub llvm_builtin: fn(&mut Heap, &Path, &str, &[Value]) -> Option<Result<Value, EvalError>>,
+    pub llvm_builtin: LlvmBuiltinFn,
     /// Whether `handle` is a live entry in the backend's handle registry —
     /// the one question [`Interp::decode_compiled_return`] asks about a
     /// `Repr::Handle` result it is otherwise passing straight through.
     pub handle_is_live: fn(i64) -> bool,
     /// `(compile name)`.
-    pub compile_function: fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>,
+    pub compile_function: CompileFn,
     /// `(disassemble name [llvm])` — the text, for the caller to print. The
     /// `bool` asks for LLVM IR instead of host assembly.
-    pub disassemble_function: fn(&Interp, &mut Heap, &crate::CompileTarget, bool) -> Result<String, EvalError>,
+    pub disassemble_function: DisassembleFn,
     /// `(compile-file source output)`.
     pub compile_file: fn(&str, &str) -> Result<(), String>,
     /// `(dump path)`.
@@ -4120,7 +4117,7 @@ pub struct Backend {
     /// Returns the body rather than installing it, so the one place that
     /// decides where a `FnDef` lives stays the one place that puts anything
     /// into it (`Interp::exec`).
-    pub define_ffi: fn(&Interp, &FfiDecl) -> Result<Rc<dyn CompiledBody>, String>,
+    pub define_ffi: DefineFfiFn,
 }
 
 thread_local! {
@@ -4151,22 +4148,19 @@ fn backend(who: &str) -> Result<Backend, EvalError> {
 
 /// The registered backend's `(compile name)`, for the evaluator's own
 /// `compile` special form.
-pub(crate) fn backend_compile_function(
-) -> Result<fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>, EvalError> {
+pub(crate) fn backend_compile_function() -> Result<CompileFn, EvalError> {
     Ok(backend("compile")?.compile_function)
 }
 
 /// The registered backend's `(defffi ...)`, for the evaluator's own
 /// declaration handling.
-pub(crate) fn backend_define_ffi(
-) -> Result<fn(&Interp, &FfiDecl) -> Result<Rc<dyn CompiledBody>, String>, EvalError> {
+pub(crate) fn backend_define_ffi() -> Result<DefineFfiFn, EvalError> {
     Ok(backend("defffi")?.define_ffi)
 }
 
 /// The registered backend's `(disassemble name)`, for the evaluator's own
 /// `disassemble` special form.
-pub(crate) fn backend_disassemble_function(
-) -> Result<fn(&Interp, &mut Heap, &crate::CompileTarget, bool) -> Result<String, EvalError>, EvalError> {
+pub(crate) fn backend_disassemble_function() -> Result<DisassembleFn, EvalError> {
     Ok(backend("disassemble")?.disassemble_function)
 }
 

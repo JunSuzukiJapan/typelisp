@@ -1399,7 +1399,7 @@ impl Heap {
     /// Like [`alloc_cell`](Self::alloc_cell), never itself triggers a
     /// collection.
     pub fn alloc_frame(&mut self, nslots: usize) -> Value {
-        let words = (nslots + 63) / 64;
+        let words = nslots.div_ceil(64);
         self.alloc_boxed(BoxedObj::Frame { words: vec![0; nslots], mask: vec![0; words], pc: 0 })
     }
 
@@ -1542,11 +1542,11 @@ impl Heap {
         }
     }
 
-    /// An interpreted closure is immutable, deliberately: `labels` needs a
-    /// group of siblings that can all see each other, and it gets that by
-    /// putting empty *cells* in a frame first and filling them in after each
-    /// closure is built. The closures capture the finished environment from
-    /// the start, so there is nothing to tie back — and so no setter here.
+    // An interpreted closure is immutable, deliberately: `labels` needs a
+    // group of siblings that can all see each other, and it gets that by
+    // putting empty *cells* in a frame first and filling them in after each
+    // closure is built. The closures capture the finished environment from
+    // the start, so there is nothing to tie back — and so no setter here.
 
     /// Store a built-in used as a function value, returning its
     /// `Value::Boxed` — `recv_type` is the receiver type for a built-in

@@ -678,11 +678,6 @@ pub fn import(into: NsId, sym: SymRef) {
     table().nodes[into.0 as usize].syms.insert(sym.name().into(), sym);
 }
 
-/// The symbol `name` names in `ns`, without creating one.
-pub fn lookup_in(ns: NsId, name: &str) -> Option<SymRef> {
-    table().lookup(ns, &name.to_lowercase())
-}
-
 /// The module reached from `parent` by `segment`, creating it if new.
 pub fn child_ns(parent: NsId, segment: &str) -> NsId {
     table().child(parent, &segment.to_lowercase())

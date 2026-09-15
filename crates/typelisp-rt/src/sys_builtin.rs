@@ -106,17 +106,6 @@ pub fn parse_float(heap: &mut Heap, s: &str) -> Value {
 /// [`universal_time_value`]'s two fields.
 const SECS_PER_DAY: i64 = 86_400;
 
-/// The type key of the `universal-time` struct (a prelude `defstruct`, and
-/// `get-universal-time`/`file-modified-date`'s registry return type). Spelled
-/// here rather than derived because this crate sits below the checker — the
-/// same reason `stream_builtin::RESULT_KEYS` spells its keys, and
-/// `tests/type_identity_guard_test.rs` checks both against the registry.
-pub const UNIVERSAL_TIME_KEY: &str = "universal-time";
-
-/// [`UNIVERSAL_TIME_KEY`]'s monotonic counterpart: the `internal-time` struct
-/// `get-internal-real-time` returns.
-pub const INTERNAL_TIME_KEY: &str = "internal-time";
-
 /// A universal time (seconds since 1900-01-01 UTC) as the `universal-time`
 /// struct: whole days, and seconds within that day.
 ///

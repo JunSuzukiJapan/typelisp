@@ -32,11 +32,7 @@
 //! `compiler_island.bc`, and `compiler_island.bc` needs only an interpreted
 //! prelude — instead of the two artifacts each requiring the other.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
-
-use inkwell::AddressSpace;
 
 use crate::check::core;
 use crate::compile::symbols::CompiledItem;
@@ -274,7 +270,7 @@ impl PreludePlan {
     pub fn compilable(&self, heap: &Heap, interp: &Interp) -> Vec<CompiledItem> {
         self.items
             .iter()
-            .filter(|item| crate::compile::driver::precheck_compilable(&interp, heap, &item.node_name()).is_ok())
+            .filter(|item| crate::compile::driver::precheck_compilable(interp, heap, &item.node_name()).is_ok())
             .cloned()
             .collect()
     }
@@ -381,7 +377,7 @@ fn reconcile_unsupported(heap: &Heap, interp: &Interp, plan: &PreludePlan) -> Re
     let mut broken: Vec<(String, EvalError)> = Vec::new();
     for item in &plan.items {
         let node = item.node_name();
-        match crate::compile::driver::precheck_compilable(&interp, heap, &node) {
+        match crate::compile::driver::precheck_compilable(interp, heap, &node) {
             Ok(()) => {}
             Err(Uncompilable::MissingTarget(target)) => blockers.entry(target).or_default().push(node),
             Err(Uncompilable::Other(e)) => broken.push((node, e)),
@@ -454,33 +450,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
     reconcile_unsupported(&heap, &interp, &plan)?;
     let items = plan.compilable(&heap, &interp);
 
-    let ctx = crate::compile::llvm_context();
-    let module = {
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let module = ctx.create_module("prelude_compiled");
-        let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        for (name, _) in crate::compile::externs::rt_extern_functions() {
-            module.add_function(name, fn_ty, None);
-        }
-        // Under the coroutine ABI (Phase C2) a compiled Lisp function is
-        // `i64 f(i64 frame)`, not `i64 f(i64*, i32)`. A forward declaration is
-        // matched to its definition by name, so declaring these under the
-        // wrong one is not a second declaration — it is the declaration the
-        // island then tries to give a coroutine body to.
-        let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
-            ctx.i64_type().fn_type(&[ctx.i64_type().into()], false)
-        } else {
-            fn_ty
-        };
-        for item in &items {
-            let sym = item.symbol_name();
-            if module.get_function(&sym).is_none() {
-                module.add_function(&sym, lisp_fn_ty, None);
-            }
-        }
-        Rc::new(RefCell::new(module))
-    };
+    let module = crate::compile::driver::fresh_module_with_declarations("prelude_compiled", &items);
 
     // `add_compiled_function` locks `COMPILE_LOCK` per LLVM builtin call (via
     // `eval_llvm_builtin_method`) and `Mutex` isn't reentrant, so it must run

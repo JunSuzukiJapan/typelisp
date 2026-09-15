@@ -30,22 +30,21 @@ use crate::{BoxId, Heap, Loc, Value};
 /// (`PartialEq`/`Debug` exist only for derives elsewhere; slots compare by
 /// cell identity.)
 #[derive(Clone, Debug, PartialEq)]
-pub struct Slot(Rc<BoxId>);
+pub(crate) struct Slot(Rc<BoxId>);
 
 impl Slot {
-    pub fn new(id: Rc<BoxId>) -> Slot {
+    pub(crate) fn new(id: Rc<BoxId>) -> Slot {
         Slot(id)
     }
 
     /// The binding's current value.
-    pub fn get(&self, heap: &Heap) -> Value {
+    pub(crate) fn get(&self, heap: &Heap) -> Value {
         heap.cell_get(*self.0)
     }
 
     /// Overwrites the binding (`setf`).
-    pub fn set(&self, heap: &mut Heap, v: Value) -> Result<(), EvalError> {
+    pub(crate) fn set(&self, heap: &mut Heap, v: Value) {
         heap.cell_set(*self.0, v);
-        Ok(())
     }
 }
 

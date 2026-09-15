@@ -313,13 +313,18 @@ fn key_of(ns: &[String], name: &str) -> String {
 /// away, [`delta`] does the reverse. Writing it once is the point — a table
 /// that only one of them knew about would produce a delta that silently drops
 /// definitions.
+/// What [`walk`] hands every registry entry to: which table it came out of
+/// ([`cat`]), the namespace path it sits in, its own name, the serialized
+/// value, and that value's hash.
+type Visit<'a> = dyn FnMut(u8, &[String], &str, Vec<u8>, u64) -> Result<(), String> + 'a;
+
 fn walk(
     root: &Namespace,
     docs: &Docs,
     struct_defaults: &BTreeMap<Path, Vec<Option<OwnedForm>>>,
     throw_tags: &BTreeMap<String, Type>,
     predeclared: &[String],
-    visit: &mut dyn FnMut(u8, &[String], &str, Vec<u8>, u64) -> Result<(), String>,
+    visit: &mut Visit<'_>,
 ) -> Result<(), String> {
     walk_ns(root, &mut Vec::new(), visit)?;
 
@@ -362,7 +367,7 @@ fn walk(
 fn walk_ns(
     ns: &Namespace,
     path: &mut Vec<String>,
-    visit: &mut dyn FnMut(u8, &[String], &str, Vec<u8>, u64) -> Result<(), String>,
+    visit: &mut Visit<'_>,
 ) -> Result<(), String> {
     // Sorted, not in iteration order: the namespace's own tables are
     // `HashMap`s, so walking them as they come would put a unit's entries in a

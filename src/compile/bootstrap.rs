@@ -51,11 +51,6 @@
 //! existed); every one since is recompiled by its predecessor. See
 //! [`build_island_bitcode`]'s own `install_island_bitcode(..., false)` call.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use inkwell::AddressSpace;
-
 use crate::check::core;
 use crate::compile::symbols::CompiledItem;
 use crate::{Checker, Heap, Interp, Reader, Value};
@@ -133,46 +128,11 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         })
         .map_err(|e| format!("island bootstrap install of the committed .bc failed: {}", e))?;
 
-    let ctx = crate::compile::llvm_context();
-    let module = {
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let module = ctx.create_module("compiler_island");
-        let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        for (name, _) in crate::compile::externs::rt_extern_functions() {
-            module.add_function(name, fn_ty, None);
-        }
-        // Forward-declare *every* island function before compiling any body.
-        // The island's own `compile-call` resolves a call target with
-        // `(get-function m "tl_<callee>")`, which fails outright if the callee
-        // has no declaration yet — so compiling one at a time only works while
-        // the island's call graph happens to be a DAG in declaration order.
-        // It is not: the island announces its ring with `defsignature` and is
-        // written as ~60 mutually recursive top-level functions rather than
-        // one `labels` block, and
-        // `compile-value` calls helpers declared below it. `add-function`
-        // reuses an existing declaration rather than adding a second one
-        // (`llvm_module_add_function`), so a body compiled later simply fills
-        // in the shell declared here. This is the same shape `Interp::
-        // compile_scc` already uses for a JIT'd cycle.
-        // Under the coroutine ABI (Phase C2) a compiled Lisp function is
-        // `i64 f(i64 frame)`, not `i64 f(i64*, i32)`. A forward declaration is
-        // matched to its definition by name, so declaring these under the
-        // wrong one is not a second declaration — it is the declaration the
-        // island then tries to give a coroutine body to.
-        let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
-            ctx.i64_type().fn_type(&[ctx.i64_type().into()], false)
-        } else {
-            fn_ty
-        };
-        for item in &items {
-            let sym = item.symbol_name();
-            if module.get_function(&sym).is_none() {
-                module.add_function(&sym, lisp_fn_ty, None);
-            }
-        }
-        Rc::new(RefCell::new(module))
-    };
+    // The island announces its ring with `defsignature` and is written as ~60
+    // mutually recursive top-level functions rather than one `labels` block,
+    // so nothing can be compiled until everything is declared — see
+    // `fresh_module_with_declarations`.
+    let module = crate::compile::driver::fresh_module_with_declarations("compiler_island", &items);
     // `add_compiled_function` locks `COMPILE_LOCK` per LLVM builtin call
     // (`eval_llvm_builtin_method`) and `Mutex` isn't reentrant, so it must
     // run without the lock held — same constraint `aot::compile_file`

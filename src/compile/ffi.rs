@@ -442,7 +442,7 @@ fn word_to_c(
             .build_int_to_ptr(word, ctx.ptr_type(inkwell::AddressSpace::default()), "arg_ptr")
             .map_err(|e| format!("ffi: failed to make a pointer argument: {}", e))?
             .into(),
-        CType::Int { bits, .. } if bits == 64 => word.into(),
+        CType::Int { bits: 64, .. } => word.into(),
         CType::Int { bits, .. } => builder
             .build_int_truncate(word, CType::int_type(bits), "arg_narrow")
             .map_err(|e| format!("ffi: failed to narrow an integer argument: {}", e))?

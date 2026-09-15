@@ -492,6 +492,11 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
 /// supertrait conversion table `rt_dyn_upcast` reads: pure integers, so the
 /// startup sequence is three constants per entry and no symbol resolution
 /// at all.
+///
+/// `eval_env` is `Some` only for a program that calls `eval`: the
+/// environment, already built and serialized (`typelisp_front::dump`), for
+/// the startup to read back into [`EVAL_HEAP_CAPACITY`] cells before `main`
+/// proper begins.
 fn build_main_wrapper(
     ctx: &'static Context,
     module: &Module<'static>,
@@ -779,10 +784,6 @@ fn build_main_wrapper(
     builder.build_return(Some(&exit_code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
     Ok(())
 }
-
-/// What `compile-file` hands `build_main_wrapper` for a program that calls
-/// `eval`: the environment, already built and serialized
-/// (`typelisp_front::dump`).
 
 /// The cons-cell arena an `eval`-carrying executable asks `rt_heap_init` for.
 /// Its startup reads, checks and runs the whole prelude plus the program's own
