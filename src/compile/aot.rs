@@ -149,6 +149,7 @@ fn collect_aot_item(
 /// Reads `source_path`, compiles every `defun` in it, and links a native
 /// executable at `output_path`. See the module doc comment for scope.
 pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> {
+    crate::compile::driver::emitted_layout_is_runnable()?;
     let source =
         fs::read_to_string(source_path).map_err(|e| format!("failed to read \"{}\": {}", source_path, e))?;
 

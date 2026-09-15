@@ -72,6 +72,10 @@ pub struct CompiledLibrary<'a> {
     /// calling a body under the wrong ABI is a wrong answer rather than an
     /// error anyone would see — so this rides along from the file to the call.
     pub body_abi: u8,
+    /// Which tag layout those bodies were emitted under
+    /// (`typelisp_mem::tagged::LAYOUT_*`), off the same dump. Must equal the
+    /// runtime's `LAYOUT`; the install refuses otherwise.
+    pub body_layout: u8,
 }
 
 /// The shared Rust-only runtime library (`typelisp-rt`, a separate crate —
@@ -90,6 +94,18 @@ pub struct CompiledLibrary<'a> {
 /// constructor `build-make-closure` names, and the ABI recorded on every
 /// JIT-compiled function.
 pub const EMITTED_BODY_ABI: u8 = crate::compiler::ISLAND_DUMP_EMITS_ABI;
+
+/// Which tag layout the code this process compiles comes out under — the
+/// committed island's answer, tracking
+/// [`crate::compiler::ISLAND_DUMP_EMITS_LAYOUT`] exactly as
+/// [`EMITTED_BODY_ABI`] tracks the ABI.
+///
+/// When this differs from `typelisp_mem::tagged::LAYOUT` the process is the
+/// middle of a layout changeover: what it emits cannot run here. Only the
+/// island bootstrap may run in that state (it emits without running), and
+/// `driver::compile_scc` / `aot::compile_file` refuse rather than JIT or link
+/// a body the runtime cannot decode.
+pub const EMITTED_LAYOUT: u8 = crate::compiler::ISLAND_DUMP_EMITS_LAYOUT;
 
 pub use typelisp_rt as runtime;
 

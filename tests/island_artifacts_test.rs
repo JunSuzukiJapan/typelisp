@@ -168,6 +168,34 @@ fn the_committed_islands_recorded_abi_matches_the_constant() {
     );
 }
 
+/// The tag layout's copy of the test above, for the same reason: the two
+/// `*_LAYOUT` constants are hand-written facts about the committed bytes,
+/// and a stale `ISLAND_DUMP_BODY_LAYOUT` would let `load_aot` install bodies
+/// whose inline tag tests disagree with the runtime's `tagged::LAYOUT`.
+#[test]
+fn the_committed_islands_recorded_layout_matches_the_constant() {
+    let units = parse(compiler::ISLAND_DUMP, "compiler island").expect("the committed island dump parses");
+    let unit = units.first().expect("the committed dump holds a unit");
+    let state = read_state(unit.types, "compiler island").expect("its state reads");
+    assert_eq!(
+        state.body_layout,
+        compiler::ISLAND_DUMP_BODY_LAYOUT,
+        "src/compiler.rs's ISLAND_DUMP_BODY_LAYOUT disagrees with what src/compiler_island.typld records"
+    );
+    assert_eq!(
+        state.emits_layout,
+        compiler::ISLAND_DUMP_EMITS_LAYOUT,
+        "src/compiler.rs's ISLAND_DUMP_EMITS_LAYOUT disagrees with what src/compiler_island.typld records. \
+         This is the constant everything this process compiles is laid out under (compile::EMITTED_LAYOUT)."
+    );
+    assert_eq!(
+        state.body_layout,
+        typelisp_mem::tagged::LAYOUT,
+        "the committed island's bodies are under a tag layout this runtime does not decode — \
+         a layout changeover was left half done (see bootstrap.rs's module doc)"
+    );
+}
+
 #[test]
 fn the_committed_island_keeps_its_trailing_nul() {
     let bytes = committed();

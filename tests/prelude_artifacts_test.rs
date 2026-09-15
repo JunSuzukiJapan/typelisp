@@ -110,6 +110,35 @@ fn the_committed_prelude_records_the_abi_its_bodies_answer_to() {
     );
 }
 
+/// The tag layout's copy of the test above: the prelude's bodies are laid
+/// out however the island that compiled them emits, and a prelude regenerated
+/// mid-changeover would be new-layout code that `load_prelude` JIT-installs
+/// into an old-layout runtime.
+#[test]
+fn the_committed_prelude_records_the_layout_its_bodies_are_under() {
+    let bytes = committed();
+    let units = parse(&bytes, "prelude").unwrap_or_else(|e| panic!("{} — {}", e, REGEN));
+    let unit = units.first().unwrap_or_else(|| panic!("the prelude dump holds no units — {}", REGEN));
+    let state = read_state(unit.types, "prelude").unwrap_or_else(|e| panic!("{} — {}", e, REGEN));
+    assert_eq!(
+        state.body_layout,
+        typelisp::compile::EMITTED_LAYOUT,
+        "the committed prelude's bodies claim a tag layout this build's island does not emit — {}",
+        REGEN
+    );
+    assert_eq!(
+        state.body_layout,
+        typelisp_mem::tagged::LAYOUT,
+        "the committed prelude's bodies are under a tag layout this runtime does not decode — {}",
+        REGEN
+    );
+    assert_eq!(
+        state.emits_layout, state.body_layout,
+        "the prelude emits no code of its own, so `emits_layout` must repeat `body_layout` — {}",
+        REGEN
+    );
+}
+
 /// The bitcode section carries the same load-bearing trailing NUL, for the
 /// same reason — see `the_committed_island_keeps_its_trailing_nul` in
 /// `island_artifacts_test.rs` for the writer/reader pairing and why the length

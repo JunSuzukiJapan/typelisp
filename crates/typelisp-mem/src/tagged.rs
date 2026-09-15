@@ -17,6 +17,23 @@
 use crate::value::{BoxId, PathId, StrId, Value};
 use crate::{ConsRef, SymRef};
 
+/// Which tag layout this runtime encodes and decodes. Recorded in every dump
+/// beside the body ABI (`UnitState::body_layout` / `emits_layout`), for the
+/// same reason the ABI is: a compiled body has the layout baked into its
+/// inline tag tests and shifts, the bitcode does not say which, and running
+/// a body under the wrong layout is a wrong answer, not an error.
+///
+/// Changing the layout is a generation-shifted changeover across the
+/// self-hosting chain, exactly like an ABI change (see
+/// `crate::compiler::ISLAND_DUMP_BODY_LAYOUT` and its two siblings): the
+/// committed island's bodies are under the old layout while the SOURCE it
+/// compiles emits the new one, and only the bootstrap binary may run in
+/// that state.
+pub const LAYOUT: u8 = LAYOUT_THREE_BIT;
+
+/// Every word carries a 3-bit tag in its low bits; a fixnum keeps 61 bits.
+pub const LAYOUT_THREE_BIT: u8 = 0;
+
 pub const TAG_BITS: i64 = 3;
 pub const TAG_MASK: i64 = 0b111;
 

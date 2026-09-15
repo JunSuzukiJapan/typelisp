@@ -5740,6 +5740,27 @@ pub const ISLAND_DUMP_EMITS_ABI: u8 = typelisp_abi::BODY_ABI_COROUTINE;
 /// the generation after that will have bodies under it.
 pub const SOURCE_EMITS_ABI: u8 = typelisp_abi::BODY_ABI_COROUTINE;
 
+/// Which tag layout the bodies inside [`ISLAND_DUMP`] were emitted under
+/// (`typelisp_mem::tagged::LAYOUT_*`) — the ABI trio's twin, for the same
+/// reason and with the same changeover shape. Hand-written for the reason
+/// [`ISLAND_DUMP_BODY_ABI`] gives, kept honest by the same test, moved in the
+/// same commit as the artifact.
+///
+/// Unlike an ABI, a layout mismatch is not survivable even for one call:
+/// the runtime's `rt_*` shims encode and decode under
+/// `typelisp_mem::tagged::LAYOUT`, so a body under any other layout is
+/// refused at install (`compile::driver::install_compiled_library`).
+pub const ISLAND_DUMP_BODY_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_THREE_BIT;
+
+/// Which tag layout the bodies inside [`ISLAND_DUMP`] *emit*. Differs from
+/// [`ISLAND_DUMP_BODY_LAYOUT`] for exactly the middle generation of a layout
+/// changeover: old bodies, run on the old runtime by the bootstrap binary
+/// alone, emitting the new layout.
+pub const ISLAND_DUMP_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_THREE_BIT;
+
+/// Which tag layout [`SOURCE`] as it stands **now** emits.
+pub const SOURCE_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_THREE_BIT;
+
 /// Loads the compiler island as **native code** (interp-closure removal
 /// Stage 4): the committed dump's checked state and definitions — which
 /// registers each island `defun`'s `FnDef` and checker entry but allocates no

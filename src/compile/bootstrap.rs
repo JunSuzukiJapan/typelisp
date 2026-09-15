@@ -124,6 +124,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
                 .ok_or_else(|| "island: the committed dump holds no units".to_string())?
                 .bitcode,
             body_abi: crate::compiler::ISLAND_DUMP_BODY_ABI,
+            body_layout: crate::compiler::ISLAND_DUMP_BODY_LAYOUT,
             items: &items,
         })
         .map_err(|e| format!("island bootstrap install of the committed .bc failed: {}", e))?;
@@ -191,6 +192,8 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         // answers for one generation.
         crate::compile::EMITTED_BODY_ABI,
         crate::compiler::SOURCE_EMITS_ABI,
+        crate::compile::EMITTED_LAYOUT,
+        crate::compiler::SOURCE_EMITS_LAYOUT,
     )?;
     let types = typelisp_front::dump::write_state(&state)?;
     Ok(typelisp_front::dump::write(&[(types, bitcode)]))

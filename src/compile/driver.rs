@@ -41,6 +41,26 @@ use crate::compile::symbols::{CompiledItem, HASHTABLE_BUILTIN_METHODS};
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES, NATIVE_LOWERED_PRIMITIVES};
 use crate::CompileTarget;
 
+/// Whether what the island in this process emits can also run in it.
+///
+/// False only in the middle of a tag-layout changeover (`EMITTED_LAYOUT`
+/// tracks the committed island, `tagged::LAYOUT` the runtime it was built
+/// into), when the only legitimate thing to do with emitted code is write
+/// it to an artifact. JIT-ing it (`compile_scc`) or linking it into an
+/// executable (`aot::compile_file`) would hand the runtime words it cannot
+/// decode, so both ask this first.
+pub fn emitted_layout_is_runnable() -> Result<(), String> {
+    if crate::compile::EMITTED_LAYOUT != typelisp_mem::tagged::LAYOUT {
+        return Err(format!(
+            "the loaded compiler island emits tag layout {} but this runtime is layout {} — \
+             a layout changeover in progress; only the island bootstrap may run in this state",
+            crate::compile::EMITTED_LAYOUT,
+            typelisp_mem::tagged::LAYOUT
+        ));
+    }
+    Ok(())
+}
+
 /// Installs a precompiled library — a committed bitcode artifact holding
 /// the native bodies of definitions this `Interp` has already registered
 /// interpreted — into [`FnDef::compiled`], so calls to them dispatch to
@@ -67,6 +87,22 @@ use crate::CompileTarget;
 /// installed is whatever of that the artifact has a body for. See the
 /// filter below for why that is the artifact's call and not the caller's.
 pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLibrary) -> Result<(), String> {
+    // A body under another tag layout has that layout inlined into every tag
+    // test and shift, and the `rt_*` shims it calls decode under this
+    // runtime's. Unlike an ABI, nothing bridges that — the first Sexpr it
+    // touches is misread. Refused here rather than discovered as a crash,
+    // and by name: this is the state a half-done layout changeover leaves
+    // the tree in (bootstrap.rs's module doc), and the message should say so.
+    if lib.body_layout != typelisp_mem::tagged::LAYOUT {
+        return Err(format!(
+            "{}: its bodies were compiled under tag layout {} but this runtime is layout {} — \
+             a layout changeover in progress; regenerate the artifact (see compiler.rs's \
+             ISLAND_DUMP_BODY_LAYOUT)",
+            lib.label,
+            lib.body_layout,
+            typelisp_mem::tagged::LAYOUT
+        ));
+    }
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let buffer = MemoryBuffer::create_from_memory_range_copy(lib.bitcode, lib.label);
     let module = Module::parse_bitcode_from_buffer(&buffer, crate::compile::llvm_context())
@@ -893,6 +929,7 @@ pub(crate) fn scc_strongconnect(
 /// need no `add_global_mapping` entry at all — LLVM resolves them
 /// directly against the sibling's own definition in this same module).
 pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[String]) -> Result<(), EvalError> {
+    emitted_layout_is_runnable().map_err(EvalError::Internal)?;
     let member_set: HashSet<&str> = members.iter().map(|s| s.as_str()).collect();
 
     let mut call_targets: Vec<Path> = Vec::new();

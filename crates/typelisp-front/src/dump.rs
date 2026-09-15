@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 9;
+pub const FORMAT_VERSION: u32 = 10;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -658,6 +658,20 @@ pub struct UnitState {
     /// what they emit is new. Meaningless, and equal to `body_abi`, for
     /// everything that is not the island.
     pub emits_abi: u8,
+    /// Which tag layout the bodies in this unit's bitcode were emitted under
+    /// (`typelisp_mem::tagged::LAYOUT_*`).
+    ///
+    /// The layout is the ABI's twin in every respect that made
+    /// [`body_abi`](Self::body_abi) necessary: baked into the bodies as inline
+    /// tag tests and shifts, invisible in the bitcode, and a wrong answer
+    /// rather than an error when mismatched. A body under another layout
+    /// cannot run on this runtime at all, so the loader refuses it outright.
+    pub body_layout: u8,
+    /// For the island: which layout the code its bodies **emit** uses. The
+    /// middle generation of a layout changeover has old bodies emitting new
+    /// code, the same shape as [`emits_abi`](Self::emits_abi). Equal to
+    /// `body_layout` for everything that is not the island.
+    pub emits_layout: u8,
     /// `(global path, compiled slot id)`. Written as the pairs that were
     /// actually assigned rather than as an order to re-derive: `promote_global`
     /// is called both eagerly in declaration order *and* lazily by the compile
@@ -703,6 +717,8 @@ pub fn capture_types(
         globals,
         typelisp_abi::BODY_ABI_CLASSIC,
         typelisp_abi::BODY_ABI_CLASSIC,
+        typelisp_mem::tagged::LAYOUT,
+        typelisp_mem::tagged::LAYOUT,
     )
 }
 
@@ -720,6 +736,8 @@ pub fn capture_types_with_abi(
     globals: Vec<(String, usize)>,
     body_abi: u8,
     emits_abi: u8,
+    body_layout: u8,
+    emits_layout: u8,
 ) -> Result<UnitState, String> {
     Ok(UnitState {
         version: FORMAT_VERSION,
@@ -728,6 +746,8 @@ pub fn capture_types_with_abi(
         forms_digest,
         body_abi,
         emits_abi,
+        body_layout,
+        emits_layout,
         checker,
         forms: forms
             .iter()

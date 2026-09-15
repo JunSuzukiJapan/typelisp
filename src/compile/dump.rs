@@ -67,6 +67,7 @@ fn load_unit_with(
     // Read before `apply_types` consumes `state`: the dump is the only thing
     // that knows what ABI its bodies answer to.
     let body_abi = state.body_abi;
+    let body_layout = state.body_layout;
     let items: Vec<CompiledItem> = state
         .items
         .iter()
@@ -112,6 +113,7 @@ fn load_unit_with(
             bitcode,
             items: &items,
             body_abi,
+            body_layout,
         },
     )
 }
@@ -276,6 +278,8 @@ pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), St
         // the two apart.
         crate::compile::EMITTED_BODY_ABI,
         crate::compile::EMITTED_BODY_ABI,
+        crate::compile::EMITTED_LAYOUT,
+        crate::compile::EMITTED_LAYOUT,
     )?;
 
     let mut units: Vec<(Vec<u8>, Vec<u8>)> = interp.with_dump_sources(|sources| {
