@@ -669,7 +669,7 @@ const OPTION_NONE: usize = 1;
 /// `compile::core_bridge`'s copy, and `Repr::field_kind`, which borrows the
 /// same numbers), and `bignum`/`ratio` were appended rather than inserted
 /// precisely so those constants would stay valid. Removing the entry would
-/// renumber all ten.
+/// renumber all sixteen.
 ///
 /// What is gone is its *surface*: `(nil)` can no longer be written as a
 /// constructor or a pattern, because a writable empty-list `Sexpr` would
@@ -14712,7 +14712,7 @@ impl Checker {
         // language rather than a second one just for `:dyn`. Correctly
         // non-exhaustive, too: the set of implementing types is open, so a
         // catch-all arm is required — which falls out of `Sexpr`'s own
-        // eleven-variant exhaustiveness rule with nothing added.
+        // sixteen-variant exhaustiveness rule with nothing added.
         if let Type::Dyn(..) = scrut.ty {
             let form = forms::dyn_value_form(heap, scrut.form)?;
             scrut = Checked::new(forms::rooted(heap, form), sexpr_ty());
@@ -14731,7 +14731,7 @@ impl Checker {
         // navigated only through the `sexpr-*` accessor island), but that
         // stance was reversed in preparation for a user-facing `(read)`:
         // read data's type is only known at runtime, and `match` — with type
-        // refinement and exhaustiveness over the eleven `Sexpr` variants — is
+        // refinement and exhaustiveness over the sixteen `Sexpr` variants — is
         // the language's natural eliminator for it. The runtime machinery
         // (`match_sexpr_ctor` in the interpreter, `compile-sexpr-tag-test`/
         // `compile-sexpr-field` in `compiler.rs`) predates the fence and
@@ -14749,12 +14749,12 @@ impl Checker {
         // A `match` whose scrutinee is `Option<Sexpr>` writes the `Sexpr`
         // shapes and `none` in one flat arm list (the niche's match sugar,
         // `check_ctor_pattern`), so its coverage universe is neither
-        // `option`'s two variants nor `sexpr`'s ten but their union.
+        // `option`'s two variants nor `sexpr`'s sixteen but their union.
         //
         // The two index without colliding because `Sexpr`'s variant 0 is the
         // slot the empty list vacated (`SEXPR_RESERVED_VARIANT`) and `none`
-        // is precisely what moved out of it: `none` takes 0, the ten writable
-        // shapes keep 1..=10, and the count is `sexpr`'s own `variants.len()`
+        // is precisely what moved out of it: `none` takes 0, the sixteen writable
+        // shapes keep 1..=16, and the count is `sexpr`'s own `variants.len()`
         // with nothing subtracted.
         let sexpr_sugar = is_option_of_sexpr(&scrut.ty);
         let sexpr_variants =
@@ -14853,7 +14853,7 @@ impl Checker {
                     covered.insert(SEXPR_RESERVED_VARIANT);
                 }
                 // `(some x)` under the sugar means "any non-empty shape",
-                // which is all ten of them at once.
+                // which is all sixteen of them at once.
                 Pattern::NonEmpty(sub)
                     if sexpr_sugar && matches!(**sub, Pattern::Wildcard | Pattern::Bind(..)) =>
                 {
@@ -14888,7 +14888,7 @@ impl Checker {
                 }
                 // Only when the scrutinee *is* `bool`: a `Sexpr` scrutinee
                 // also admits `true`/`false` literal patterns, and those cover
-                // one of eleven shapes rather than one of two values.
+                // one of sixteen shapes rather than one of two values.
                 Pattern::Bool(b) if scrut.ty == Type::Bool => {
                     bools_covered.insert(*b);
                 }

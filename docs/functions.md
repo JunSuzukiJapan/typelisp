@@ -576,7 +576,7 @@ Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用�
 - `Sexpr` は `Option<Sexpr>` が期待される位置へ暗黙に広がる（実行時の変換は無い）。
   逆向き——`Option<Sexpr>` を `Sexpr` として使う——は「空リストではない」の主張なので、
   `match` か `unwrap` で明示的に示す必要がある
-- `match` では `Sexpr` の 10 変種と `none` を**同じ腕の並びに平らに**書ける
+- `match` では `Sexpr` の 16 変種と `none` を**同じ腕の並びに平らに**書ける
   （[syntax.md](syntax.md) の `match` 参照）
 
 | 名前 | 形式 | 型 | 説明 |
