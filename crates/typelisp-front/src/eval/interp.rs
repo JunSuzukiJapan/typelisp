@@ -1056,9 +1056,18 @@ impl Interp {
         match repr {
             // Raw machine words, by the encodings compiled code uses
             // internally.
-            Repr::Int => match v {
+            Repr::Narrow => match v {
                 Value::Int(n) => Ok(*n),
                 other => Err(EvalError::Internal(format!("compiled call: expected an integer argument, got {:?}", other))),
+            },
+            // An `int` crosses as the tagged word it is — the catch-all's
+            // `encode` — but only the two shapes it can have are let through:
+            // `encode` would abort on a `Value::Int` past the fixnum range
+            // and happily tag any other box, and neither is an `int`.
+            Repr::Int => match v {
+                Value::Int(n) if typelisp_mem::fixnum_fits(*n) => Ok(typelisp_rt::encode(*v)),
+                Value::Boxed(id) if heap.is_bignum(*id) => Ok(typelisp_rt::encode(*v)),
+                other => Err(EvalError::Internal(format!("compiled call: expected an int argument (fixnum or bignum), got {:?}", other))),
             },
             Repr::Bool => match v {
                 Value::Bool(b) => Ok(i64::from(*b)),
@@ -1141,7 +1150,7 @@ impl Interp {
                 }
             },
             // Raw machine words on the way out, mirroring the argument encode.
-            Repr::Int => Value::Int(raw),
+            Repr::Narrow => Value::Int(raw),
             // Also raw, and — unlike `Handle` above — with no registry to
             // check it against. Whatever C answered is the answer; the FFI
             // declaration is what claimed it would be a pointer.
@@ -1191,6 +1200,24 @@ impl Interp {
             Repr::Bignum | Repr::Ratio => match typelisp_rt::decode(raw) {
                 v @ Value::Boxed(id) if heap.is_bignum(id) || heap.is_ratio(id) => v,
                 other => return Err(crossing_mismatch("a bignum/ratio", other)),
+            },
+            // An `int` is its tagged word: a fixnum, or a bignum box for the
+            // values a fixnum cannot hold — and never a box for one it can
+            // (`Heap::canonical_int`'s invariant, checked here so that a
+            // compiled body that boxed a small value is caught at the
+            // boundary rather than the next `eq`).
+            Repr::Int => match typelisp_rt::decode(raw) {
+                v @ Value::Int(_) => v,
+                v @ Value::Boxed(id) if heap.is_bignum(id) => {
+                    if heap.bignum_fits_fixnum(id) {
+                        return Err(EvalError::Internal(format!(
+                            "compiled call returned an `int` boxed as a bignum that fits a fixnum ({}) — not canonical",
+                            heap.bignum_value(id)
+                        )));
+                    }
+                    v
+                }
+                other => return Err(crossing_mismatch("an int (fixnum or bignum)", other)),
             },
             Repr::RandomState => match typelisp_rt::decode(raw) {
                 v @ Value::Boxed(id) if heap.is_random_state(id) => v,
@@ -2337,7 +2364,7 @@ impl Interp {
             Some((params, ret))
                 if params.len() == 3 && params[1] == Repr::Bool && params[2] == Repr::Bool && *ret == Repr::Str =>
             {
-                params[0] == Repr::Int
+                params[0] == Repr::Narrow
             }
             _ => {
                 return Err(format!(
@@ -3344,6 +3371,267 @@ fn eval_bignum_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
     Some(Ok(v))
 }
 
+// ---- `int`: fixnum ∪ bignum ------------------------------------------------
+
+/// An `int` operand as the interpreter reads it: a fixnum straight out of
+/// its `Value::Int`, or the `BigInt` cloned out of its box (owned, for the
+/// reason [`expect_bignum`] gives — every caller goes on to allocate).
+enum IntArg {
+    Fix(i64),
+    Big(BigInt),
+}
+
+impl IntArg {
+    fn into_big(self) -> BigInt {
+        match self {
+            IntArg::Fix(n) => BigInt::from(n),
+            IntArg::Big(n) => n,
+        }
+    }
+}
+
+/// The `int` behind a value, in either of its two shapes — and nothing else:
+/// a `Value::Int` past the fixnum range or a bignum box holding one inside it
+/// is a producer that skipped `Heap::canonical_int`, reported as the internal
+/// error it is rather than computed with.
+fn expect_int(heap: &Heap, v: &Value) -> Result<IntArg, EvalError> {
+    match v {
+        Value::Int(n) if typelisp_mem::fixnum_fits(*n) => Ok(IntArg::Fix(*n)),
+        Value::Int(n) => Err(EvalError::Internal(format!("an int fixnum out of range: {}", n))),
+        Value::Boxed(id) if heap.is_bignum(*id) => {
+            if heap.bignum_fits_fixnum(*id) {
+                return Err(EvalError::Internal(format!("an int boxed as a bignum that fits a fixnum: {}", heap.bignum_value(*id))));
+            }
+            Ok(IntArg::Big(heap.bignum_value(*id).clone()))
+        }
+        other => Err(EvalError::Internal(format!("expected an int, got {:?}", other))),
+    }
+}
+
+/// An `int` result: `Heap::int_from_bigint`, the one constructor, so a result
+/// that fits a fixnum is one.
+fn int_rt(heap: &mut Heap, n: BigInt) -> Value {
+    heap.int_from_bigint(n)
+}
+
+/// Evaluate a built-in `int` arithmetic/comparison instance method
+/// (`registry::integer_assoc`). CL's `integer`: `+ - *` never wrap — two
+/// fixnums compute in `i128` and the result is boxed only if it outgrew
+/// 63 bits (`Heap::canonical_int`); anything involving a bignum computes as
+/// one and demotes when it fits. `/` truncates toward zero and `mod` floors,
+/// both panicking on a zero divisor like every other numeric type here; the
+/// fixed-width types' `MIN / -1` overflow simply promotes.
+fn eval_integer_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+    use num_integer::Integer;
+    if name == "ash" || name == "logbitp" {
+        return Some(eval_integer_shift(heap, name, args));
+    }
+    let (a, b) = match (args.first(), args.get(1)) {
+        (Some(a), Some(b)) => match (expect_int(heap, a), expect_int(heap, b)) {
+            (Ok(a), Ok(b)) => (a, b),
+            (Err(e), _) | (_, Err(e)) => return Some(Err(e)),
+        },
+        _ => return Some(Err(EvalError::Internal(format!("{}: expected two ints", name)))),
+    };
+    if let (IntArg::Fix(x), IntArg::Fix(y)) = (&a, &b) {
+        let (x, y) = (*x, *y);
+        let wide = |heap: &mut Heap, n: i128| heap.canonical_int(n);
+        let v = match name {
+            "+" => wide(heap, i128::from(x) + i128::from(y)),
+            "-" => wide(heap, i128::from(x) - i128::from(y)),
+            "*" => wide(heap, i128::from(x) * i128::from(y)),
+            "/" => {
+                if y == 0 {
+                    return Some(Err(EvalError::Panic("divide by zero".into())));
+                }
+                wide(heap, i128::from(x) / i128::from(y))
+            }
+            "mod" => {
+                if y == 0 {
+                    return Some(Err(EvalError::Panic("mod by zero".into())));
+                }
+                // Floored (CL `mod`, the sign of the divisor), in `i128` so
+                // that `MIN % -1` is an ordinary `0` rather than an overflow.
+                let (x, y) = (i128::from(x), i128::from(y));
+                let r = x % y;
+                wide(heap, if r != 0 && ((r < 0) != (y < 0)) { r + y } else { r })
+            }
+            "<" => Value::Bool(x < y),
+            "<=" => Value::Bool(x <= y),
+            ">" => Value::Bool(x > y),
+            ">=" => Value::Bool(x >= y),
+            "=" => Value::Bool(x == y),
+            "/=" => Value::Bool(x != y),
+            "max" => Value::Int(x.max(y)),
+            "min" => Value::Int(x.min(y)),
+            "logand" => Value::Int(x & y),
+            "logior" => Value::Int(x | y),
+            "logxor" => Value::Int(x ^ y),
+            "logtest" => Value::Bool(x & y != 0),
+            _ => unreachable!("eval_integer_builtin: {}", name),
+        };
+        return Some(Ok(v));
+    }
+    let (a, b) = (a.into_big(), b.into_big());
+    let v = match name {
+        "+" => int_rt(heap, &a + &b),
+        "-" => int_rt(heap, &a - &b),
+        "*" => int_rt(heap, &a * &b),
+        "/" => {
+            if b.is_zero() {
+                return Some(Err(EvalError::Panic("divide by zero".into())));
+            }
+            int_rt(heap, &a / &b)
+        }
+        "mod" => {
+            if b.is_zero() {
+                return Some(Err(EvalError::Panic("mod by zero".into())));
+            }
+            int_rt(heap, a.mod_floor(&b))
+        }
+        "<" => Value::Bool(a < b),
+        "<=" => Value::Bool(a <= b),
+        ">" => Value::Bool(a > b),
+        ">=" => Value::Bool(a >= b),
+        "=" => Value::Bool(a == b),
+        "/=" => Value::Bool(a != b),
+        "max" => int_rt(heap, if a >= b { a } else { b }),
+        "min" => int_rt(heap, if a <= b { a } else { b }),
+        "logand" => int_rt(heap, &a & &b),
+        "logior" => int_rt(heap, &a | &b),
+        "logxor" => int_rt(heap, &a ^ &b),
+        "logtest" => Value::Bool(!(&a & &b).is_zero()),
+        _ => unreachable!("eval_integer_builtin: {}", name),
+    };
+    Some(Ok(v))
+}
+
+/// `int`'s `ash`/`logbitp` — [`eval_bignum_shift`] over either shape, with
+/// the result demoted when it fits.
+fn eval_integer_shift(heap: &mut Heap, name: &str, args: &[Value]) -> Result<Value, EvalError> {
+    let n = match args.first() {
+        Some(v) => expect_int(heap, v)?.into_big(),
+        None => return Err(EvalError::Internal(format!("{}: expected an int receiver", name))),
+    };
+    let count = match args.get(1) {
+        Some(v) => rt_i64(v)?,
+        None => return Err(EvalError::Internal(format!("{}: expected a bit count", name))),
+    };
+    Ok(match name {
+        "ash" => {
+            if count >= 0 {
+                int_rt(heap, n << (count as u64))
+            } else {
+                int_rt(heap, n >> ((-count) as u64))
+            }
+        }
+        "logbitp" => Value::Bool(if count < 0 {
+            n.sign() == num_bigint::Sign::Minus
+        } else {
+            ((n >> (count as u64)) & BigInt::from(1)) == BigInt::from(1)
+        }),
+        _ => unreachable!("eval_integer_shift: {}", name),
+    })
+}
+
+/// Unary `int` builtins (`lognot`/`logcount`/`integer-length`) — the
+/// "infinite two's complement" reading [`bignum_unary`] gives, on either
+/// shape.
+fn integer_unary(heap: &mut Heap, args: &[Value], name: &str) -> Result<Value, EvalError> {
+    let a = expect_int(heap, &args[0])?.into_big();
+    let v = match name {
+        "lognot" => int_rt(heap, !&a),
+        "logcount" => {
+            let n = if a.sign() == num_bigint::Sign::Minus { !&a } else { a.clone() };
+            let count: u64 = n.magnitude().to_u32_digits().iter().map(|d| d.count_ones() as u64).sum();
+            int_rt(heap, BigInt::from(count))
+        }
+        "integer-length" => {
+            let bits = if a.sign() == num_bigint::Sign::Minus { (-(&a) - 1u32).magnitude().bits() } else { a.magnitude().bits() };
+            int_rt(heap, BigInt::from(bits))
+        }
+        _ => unreachable!("integer_unary: {}", name),
+    };
+    Ok(v)
+}
+
+/// The low 64 bits of an `int`, two's complement — what a width cast out of
+/// it starts from. A fixnum is already that; a bignum is cut, which is what
+/// `int->W` means (`registry::int_assoc`'s "truncates").
+fn int_low_word(a: IntArg) -> i64 {
+    match a {
+        IntArg::Fix(n) => n,
+        IntArg::Big(n) => (n & BigInt::from(u64::MAX)).to_u64().expect("masked to 64 bits") as i64,
+    }
+}
+
+/// `int->W`/`try-int->W` on an `int` receiver: the cast truncates to the
+/// target (`int_to_width`'s meaning), and the question is answered exactly —
+/// a bignum fits a 64-bit C word when it is in that word's range, and never
+/// fits anything narrower.
+fn integer_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, try_variant: bool, ret_key: &str) -> Result<Value, EvalError> {
+    let a = expect_int(heap, &args[0])?;
+    if !try_variant {
+        return Ok(Value::Int(crate::types::normalize_int(int_low_word(a), width, signed)));
+    }
+    let fits = match &a {
+        IntArg::Fix(n) => crate::types::normalize_int(*n, width, signed) == *n,
+        IntArg::Big(n) => width == 64 && if signed { n.to_i64().is_some() } else { n.to_u64().is_some() },
+    };
+    let word = int_low_word(a);
+    Ok(option_value(heap, ret_key, fits.then_some(Value::Int(word))))
+}
+
+/// `int->int` on a fixed-width receiver (`(as int x)`): exact widening.
+/// `c-ulong` is the one receiver whose 64 bits are unsigned, so its word is
+/// read as such; every narrower unsigned type is already non-negative in the
+/// register.
+fn width_to_int(heap: &mut Heap, args: &[Value], width: u32, signed: bool) -> Result<Value, EvalError> {
+    let word = rt_i64(&args[0])?;
+    let n = if !signed && width == 64 { i128::from(word as u64) } else { i128::from(word) };
+    Ok(heap.canonical_int(n))
+}
+
+/// `int->float`/`int->ratio`/`int->char`/`try-int->char`/`int->bignum` on
+/// an `int` receiver.
+fn integer_conversion(heap: &mut Heap, method: &str, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+    let a = expect_int(heap, &args[0])?;
+    match method {
+        "int->float" => {
+            let f = match &a {
+                IntArg::Fix(n) => *n as f64,
+                IntArg::Big(n) => n.to_f64().unwrap_or(f64::INFINITY.copysign(if n.sign() == num_bigint::Sign::Minus { -1.0 } else { 1.0 })),
+            };
+            Ok(heap.alloc_f64(f))
+        }
+        "int->ratio" => Ok(ratio_rt(heap, BigRational::from_integer(a.into_big()))),
+        "int->char" | "try-int->char" => {
+            let c = match &a {
+                IntArg::Fix(n) if *n >= 0 && *n <= i64::from(u32::MAX) => char::from_u32(*n as u32),
+                _ => None,
+            };
+            if method == "int->char" {
+                c.map(Value::Char).ok_or_else(|| EvalError::Panic(format!("int->char: {} is not a valid Unicode scalar value", a.into_big())))
+            } else {
+                Ok(option_value(heap, ret_key, c.map(Value::Char)))
+            }
+        }
+        // While `bignum` is still a type of its own: a fixnum is boxed for
+        // it, and a bignum box already is one.
+        "int->bignum" => Ok(match a {
+            IntArg::Fix(n) => bignum_rt(heap, BigInt::from(n)),
+            IntArg::Big(_) => args[0],
+        }),
+        "int->int" => Ok(args[0]),
+        _ => Err(EvalError::Internal(format!("integer_conversion: {}", method))),
+    }
+}
+
+/// An `int` as text, for `print`/`println`.
+fn int_to_string(heap: &Heap, v: &Value) -> Result<String, EvalError> {
+    Ok(expect_int(heap, v)?.into_big().to_string())
+}
+
 /// `bignum`'s `ash`/`logbitp` — the two whose second operand counts bits
 /// rather than being another bignum.
 ///
@@ -3897,6 +4185,7 @@ fn eval_builtin_method(
             "int->char" => Some(int_to_char(args)),
             "try-int->char" => Some(try_int_to_char(heap, args, ret_key)),
             "int->bignum" => Some(int_to_bignum(heap, args, width, signed)),
+            "int->int" => Some(width_to_int(heap, args, width, signed)),
             "int->ratio" => Some(int_to_ratio(heap, args)),
             _ if width_cast_target(method, "int->").is_some() => {
                 let (w, sg) = width_cast_target(method, "int->").expect("just matched");
@@ -3953,6 +4242,28 @@ fn eval_builtin_method(
             "float->ratio" => Some(float_to_ratio(heap, args)),
             "print" => Some(rt_f64(heap, &args[0]).and_then(|f| write_stdout(&format_float_for_print(f), false))),
             "println" => Some(rt_f64(heap, &args[0]).and_then(|f| write_stdout(&format_float_for_print(f), true))),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("int") {
+        return match method {
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
+            | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_integer_builtin(heap, method, args),
+            "lognot" | "logcount" | "integer-length" => Some(integer_unary(heap, args, method)),
+            "eq" | "eql" | "equal" | "equalp" => eval_integer_builtin(heap, "=", args),
+            "int->float" | "int->ratio" | "int->char" | "try-int->char" | "int->bignum" | "int->int" => {
+                Some(integer_conversion(heap, method, args, ret_key))
+            }
+            _ if width_cast_target(method, "int->").is_some() => {
+                let (w, sg) = width_cast_target(method, "int->").expect("just matched");
+                Some(integer_to_width(heap, args, w, sg, false, ret_key))
+            }
+            _ if width_cast_target(method, "try-int->").is_some() => {
+                let (w, sg) = width_cast_target(method, "try-int->").expect("just matched");
+                Some(integer_to_width(heap, args, w, sg, true, ret_key))
+            }
+            "print" => Some(int_to_string(heap, &args[0]).and_then(|s| write_stdout(&s, false))),
+            "println" => Some(int_to_string(heap, &args[0]).and_then(|s| write_stdout(&s, true))),
             _ => None,
         };
     }

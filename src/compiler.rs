@@ -663,6 +663,7 @@ pub const SOURCE: &str = r#"
 (defsignature compile-float-any-width (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
 (defsignature compile-global (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
 (defsignature compile-int-any-width (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
+(defsignature compile-int-literal (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
 (defsignature compile-unit (llvm-module string llvm-builder) llvm-value)
 (defsignature compile-var
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> Option<Sexpr>)
@@ -1336,7 +1337,7 @@ pub const SOURCE: &str = r#"
     ;; checked before `b2` the same way `float-native-method?`'s own unary
     ;; conversions are. `int->float` is the third of them and a single
     ;; `sitofp`, the inverse of `float->int`'s `fptosi`.
-    (("int->bignum" "int->ratio" "int->float") true)
+    (("int->bignum" "int->int" "int->ratio" "int->float") true)
     ;; `int->char`: the identity on the word, plus the Unicode-scalar-value
     ;; check that makes it a `char`. The check is the whole reason it is a
     ;; shim (`rt_int_to_char`) while its inverse `char->int` is nothing at
@@ -1578,6 +1579,21 @@ pub const SOURCE: &str = r#"
     (("logbitp" "logtest" "logcount" "integer-length") true)
     (else false)))
 
+;; `int` (`registry::integer_assoc`)'s natively-compilable methods: all of
+;; them. An `int` receiver is its tagged word — a fixnum or a bignum box —
+;; so `+`/`-`/`*` and the comparisons get a fast path on two fixnum words
+;; (`integer-arith`/`integer-compare` below) and fall to an `rt_integer_*`
+;; shim otherwise; everything else is one shim call.
+(defun integer-native-method? ((method string)) bool
+  (case method
+    (("+" "-" "*" "/" "mod" "<" "<=" ">" ">=" "=" "/=" "eq" "eql" "equal" "equalp") true)
+    (("max" "min" "logand" "logior" "logxor" "logtest" "lognot" "logcount" "integer-length") true)
+    (("ash" "logbitp") true)
+    (("int->float" "int->ratio" "int->bignum" "int->int" "int->char" "try-int->char") true)
+    (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong") true)
+    (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32" "try-int->c-long" "try-int->c-ulong") true)
+    (else false)))
+
 ;; `ratio` (`registry::ratio_assoc`)'s natively-compilable methods — the
 ;; `ratio` counterpart of [`bignum-native-method?`] (no `mod`, CL doesn't
 ;; define a rational remainder), plus `ratio->bignum`/`ratio->float`/
@@ -1661,6 +1677,103 @@ pub const SOURCE: &str = r#"
     (store-arg builder args-ptr 1 y)
     (store-arg builder args-ptr 2 (const-word builder wsig))
     (build-call builder (get-function m fname) args-ptr 3)))
+
+;; Whether both `a` and `b` are fixnums: `(a | b) & 1 == 0` — one test for
+;; the two, which is what makes the fast paths below one branch each.
+(defun both-fixnum-test ((builder llvm-builder) (a llvm-value) (b llvm-value)) llvm-value
+  (build-icmp-eq builder (build-and builder (build-or builder a b) (const-word builder 1)) (const-word builder 0)))
+
+;; One-operand `rt_integer_*` call.
+(defun integer-unary-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 1)))
+    (store-arg builder args-ptr 0 x)
+    (build-call builder (get-function m fname) args-ptr 1)))
+
+;; `rt_integer_*` call with a raw second operand — a `wsig`, a bit count.
+(defun integer-word-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value) (w i32)) llvm-value
+  (let ((args-ptr (alloca-args builder 2)))
+    (store-arg builder args-ptr 0 x)
+    (store-arg builder args-ptr 1 (const-word builder w))
+    (build-call builder (get-function m fname) args-ptr 2)))
+
+;; `int`'s `+`/`-`/`*` (`op` 0/1/2): two fixnums compute as one
+;; overflow-checked instruction on the tagged words themselves — `n << 1`
+;; plus `m << 1` is `(n + m) << 1`, and it overflows the `i64` exactly when
+;; `n + m` leaves the fixnum range; a product untags one operand first
+;; (`(n << 1) * m`). On overflow, or when either operand is a box, the
+;; `rt_integer_*` shim computes the whole thing in `i128`/`BigInt` and hands
+;; back the canonical word (`Heap::canonical_int`). The merge is a slot, the
+;; shape `build-try-option` uses.
+(defun integer-arith ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (fname string) (op i32) (a llvm-value) (b llvm-value)) llvm-value
+  (let* ((fast-block (append-block cur-fn "int-fast"))
+         (slow-block (append-block cur-fn "int-slow"))
+         (merge-block (append-block cur-fn "int-merge"))
+         (slot (alloca-args builder 1))
+         (flag-slot (alloca-args builder 1)))
+    (build-cond-br builder (both-fixnum-test builder a b) fast-block slow-block)
+    (position-at-end builder fast-block)
+    (let ((r (case op
+               (0 (build-sadd-overflow builder m a b flag-slot))
+               (1 (build-ssub-overflow builder m a b flag-slot))
+               (else (build-smul-overflow builder m a (untag-fixnum builder b) flag-slot)))))
+      (store-arg builder slot 0 r)
+      (build-cond-br builder (load-raw builder flag-slot 0) slow-block merge-block))
+    (position-at-end builder slow-block)
+    (let ((args-ptr (alloca-args builder 2)))
+      (store-arg builder args-ptr 0 a)
+      (store-arg builder args-ptr 1 b)
+      (store-arg builder slot 0 (build-call builder (get-function m fname) args-ptr 2)))
+    (build-br builder merge-block)
+    (position-at-end builder merge-block)
+    (load-raw builder slot 0)))
+
+;; `int`'s three-way comparison as a word: `-1`/`0`/`1`. Two fixnums compare
+;; as the tagged words (the tag is a shift, order-preserving); otherwise
+;; `rt_integer_cmp`. Every comparison operator and `max`/`min` derive from it
+;; with one `icmp` against `0`, `bignum-cmp-call`'s shape.
+(defun integer-cmp ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (a llvm-value) (b llvm-value)) llvm-value
+  (let* ((fast-block (append-block cur-fn "cmp-fast"))
+         (slow-block (append-block cur-fn "cmp-slow"))
+         (merge-block (append-block cur-fn "cmp-merge"))
+         (slot (alloca-args builder 1)))
+    (build-cond-br builder (both-fixnum-test builder a b) fast-block slow-block)
+    (position-at-end builder fast-block)
+    (store-arg builder slot 0
+      (build-sub builder (build-icmp-gt builder a b) (build-icmp-lt builder a b)))
+    (build-br builder merge-block)
+    (position-at-end builder slow-block)
+    (let ((args-ptr (alloca-args builder 2)))
+      (store-arg builder args-ptr 0 a)
+      (store-arg builder args-ptr 1 b)
+      (store-arg builder slot 0 (build-call builder (get-function m "rt_integer_cmp") args-ptr 2)))
+    (build-br builder merge-block)
+    (position-at-end builder merge-block)
+    (load-raw builder slot 0)))
+
+;; `int`'s `logand`/`logior`/`logxor`: on two fixnums the bare instruction on
+;; the tagged words is the tagged answer (bit 0 is `0` in both, and stays
+;; `0` under all three); otherwise the shim.
+(defun integer-bitop ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (fname string) (op i32) (a llvm-value) (b llvm-value)) llvm-value
+  (let* ((fast-block (append-block cur-fn "bit-fast"))
+         (slow-block (append-block cur-fn "bit-slow"))
+         (merge-block (append-block cur-fn "bit-merge"))
+         (slot (alloca-args builder 1)))
+    (build-cond-br builder (both-fixnum-test builder a b) fast-block slow-block)
+    (position-at-end builder fast-block)
+    (store-arg builder slot 0
+      (case op
+        (0 (build-and builder a b))
+        (1 (build-or builder a b))
+        (else (build-xor builder a b))))
+    (build-br builder merge-block)
+    (position-at-end builder slow-block)
+    (let ((args-ptr (alloca-args builder 2)))
+      (store-arg builder args-ptr 0 a)
+      (store-arg builder args-ptr 1 b)
+      (store-arg builder slot 0 (build-call builder (get-function m fname) args-ptr 2)))
+    (build-br builder merge-block)
+    (position-at-end builder merge-block)
+    (load-raw builder slot 0)))
 
 ;; Counts a plain `Sexpr` list's elements — used to size the `i64*` args
 ;; array a direct call needs (`compile-apply`'s `alloca-args`/`build-call`),
@@ -1956,6 +2069,7 @@ pub const SOURCE: &str = r#"
     ;; frames.)
     (case (sexpr-car e)
       (int-any-width (compile-int-any-width m fn-name builder e))
+      (int (compile-int-literal m fn-name builder e))
       (char (compile-char m fn-name builder e))
       (bool (compile-bool m fn-name builder e))
       (float-any-width (compile-float-any-width m fn-name builder e))
@@ -2049,6 +2163,14 @@ pub const SOURCE: &str = r#"
                 (build-shl builder (const-word builder hi) (const-word builder 32))
                 (low-half-word builder lo))))
 
+;; `(int HI LO)` -- an `int` literal that fits a fixnum: the same two halves
+;; as `compile-int-any-width`, tagged on the way out, because an `int` is its
+;; tagged word in a register (`Repr::Int`) where a fixed-width integer is the
+;; raw one. A literal past the fixnum range never arrives here — the checker
+;; emits the `(bignum ..)` box for it, which is already an `int`'s
+;; representation.
+(defun compile-int-literal ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
+    (tag-fixnum builder (compile-int-any-width m fn-name builder e)))
 
 ;; `(char c)` -- a bare `char` literal. Compiled the same
 ;; way `compile-int-any-width` is (a plain, untagged `i64` scalar --
@@ -2549,6 +2671,13 @@ pub const SOURCE: &str = r#"
                 (build-call builder
                   (get-function m (if (= wsig 128) "rt_uint_to_bignum" "rt_int_to_bignum"))
                   args-ptr 1)))
+             ;; `int->int`: the exact widening into the arbitrary-precision
+             ;; type, `(as int x)`. The word is read at the receiver's own
+             ;; width and sign (`wsig`), which is how `c-ulong`'s top bit
+             ;; stays a value bit — the same reason `int->bignum` above
+             ;; picks between two entry points.
+             ("int->int"
+              (integer-word-call builder m "rt_integer_from_word" a wsig))
              ("int->ratio"
               (let ((args-ptr (alloca-args builder 1)))
                 (store-arg builder args-ptr 0 a)
@@ -2791,6 +2920,53 @@ pub const SOURCE: &str = r#"
                         ("min"
                          (build-fminnum builder m a b2))
                         (else (build-fcmp-eq builder a b2)))))))))
+        ((if (equal type-name "int") (integer-native-method? method) false)
+         (let ((a (load-raw builder ops 0)))
+           (case method
+             ("int->float" (integer-unary-call builder m "rt_integer_to_float" a))
+             ("int->ratio" (integer-unary-call builder m "rt_integer_to_ratio" a))
+             ("int->bignum" (integer-unary-call builder m "rt_integer_to_bignum" a))
+             ("int->int" a)
+             ("int->char" (integer-unary-call builder m "rt_integer_to_char" a))
+             ;; A fixnum that is a scalar value *is* the char's payload once
+             ;; untagged, so the `some` needs no second call.
+             ("try-int->char"
+              (build-try-option builder m cur-fn
+                (integer-unary-call builder m "rt_integer_fits_char" a) (untag-fixnum builder a) 3))
+             (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong")
+              (integer-word-call builder m "rt_integer_narrow" a (int-wsig (substring method 5 (length method)))))
+             (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32" "try-int->c-long" "try-int->c-ulong")
+              (let ((wsig (int-wsig (substring method 9 (length method)))))
+                (build-try-option builder m cur-fn
+                  (integer-word-call builder m "rt_integer_fits" a wsig)
+                  (integer-word-call builder m "rt_integer_narrow" a wsig) 1)))
+             ("lognot" (integer-unary-call builder m "rt_integer_lognot" a))
+             ("logcount" (integer-unary-call builder m "rt_integer_logcount" a))
+             ("integer-length" (integer-unary-call builder m "rt_integer_integer_length" a))
+             (else (let ((b2 (load-raw builder ops 1)))
+                     (case method
+                       ("+" (integer-arith builder m cur-fn "rt_integer_add" 0 a b2))
+                       ("-" (integer-arith builder m cur-fn "rt_integer_sub" 1 a b2))
+                       ("*" (integer-arith builder m cur-fn "rt_integer_mul" 2 a b2))
+                       ("/" (raising-binop-call builder m "rt_integer_div" a b2))
+                       ("mod" (raising-binop-call builder m "rt_integer_mod" a b2))
+                       ("<" (build-icmp-lt builder (integer-cmp builder m cur-fn a b2) (const-word builder 0)))
+                       ("<=" (build-icmp-le builder (integer-cmp builder m cur-fn a b2) (const-word builder 0)))
+                       (">" (build-icmp-gt builder (integer-cmp builder m cur-fn a b2) (const-word builder 0)))
+                       (">=" (build-icmp-ge builder (integer-cmp builder m cur-fn a b2) (const-word builder 0)))
+                       (("=" "eq" "eql" "equal" "equalp")
+                        (build-icmp-eq builder (integer-cmp builder m cur-fn a b2) (const-word builder 0)))
+                       ("/=" (build-icmp-ne builder (integer-cmp builder m cur-fn a b2) (const-word builder 0)))
+                       ("max" (build-select builder (build-icmp-gt builder (integer-cmp builder m cur-fn a b2) (const-word builder 0)) a b2))
+                       ("min" (build-select builder (build-icmp-lt builder (integer-cmp builder m cur-fn a b2) (const-word builder 0)) a b2))
+                       ("logand" (integer-bitop builder m cur-fn "rt_integer_logand" 0 a b2))
+                       ("logior" (integer-bitop builder m cur-fn "rt_integer_logior" 1 a b2))
+                       ("logxor" (integer-bitop builder m cur-fn "rt_integer_logxor" 2 a b2))
+                       ("logtest" (raising-binop-call builder m "rt_integer_logtest" a b2))
+                       ;; The count/position operand is a raw `i32` word.
+                       ("ash" (raising-binop-call builder m "rt_integer_ash" a b2))
+                       ("logbitp" (raising-binop-call builder m "rt_integer_logbitp" a b2))
+                       (else (panic (append "compile-assoc: unsupported int method " method)))))))))
         ((if (equal type-name "bignum") (bignum-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            (case method

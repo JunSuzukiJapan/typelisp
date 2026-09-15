@@ -122,6 +122,9 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "build-fptosi" => Some(llvm_builder_build_fptosi(args)),
             "build-sitofp" => Some(llvm_builder_build_sitofp(args)),
             "build-fround32" => Some(llvm_builder_build_fround32(args)),
+            "build-sadd-overflow" => Some(llvm_builder_build_int_overflow(args, "sadd", "llvm.sadd.with.overflow")),
+            "build-ssub-overflow" => Some(llvm_builder_build_int_overflow(args, "ssub", "llvm.ssub.with.overflow")),
+            "build-smul-overflow" => Some(llvm_builder_build_int_overflow(args, "smul", "llvm.smul.with.overflow")),
             "alloca-args" => Some(llvm_builder_alloca_args(args)),
             "store-arg" => Some(llvm_builder_store_arg(args)),
             "build-call" => Some(llvm_builder_build_call(args)),
@@ -719,6 +722,50 @@ fn llvm_builder_build_fround32(args: &[Value]) -> Result<Value, EvalError> {
     let wide = bld.build_float_ext(narrow, ctx.f64_type(), "x_f64").map_err(|e| err(e.to_string()))?;
     let bits = bld.build_bit_cast(wide, ctx.i64_type(), "x_bits").map_err(|e| err(e.to_string()))?;
     Ok(llvm_value_value(bits.into_int_value().into()))
+}
+
+/// `(build-sadd-overflow builder module a b flag-slot)` and its `ssub`/`smul`
+/// siblings: the `llvm.*.with.overflow.i64` intrinsic on two `i64` words,
+/// answering the (wrapped) result and storing the overflow flag, widened to
+/// an `i64` `0`/`1`, into slot 0 of `flag-slot` (an `alloca-args` pointer).
+///
+/// This is `int`'s fast path (`compile-assoc`'s `int` branch): two tagged
+/// fixnums are `n << 1`, so the tagged words add and subtract directly and
+/// overflow the `i64` exactly when the 63-bit payload sum leaves the fixnum
+/// range; for a product one operand is untagged first. A checked instruction
+/// rather than the sign-comparison identity because `mul` has no cheap one,
+/// and one shape for all three reads better than two.
+///
+/// Two results and one return value: the flag travels through memory. A
+/// builder answering a struct would need the island to extract from it,
+/// which no other builtin does, and a slot is what the island already uses
+/// to merge values across blocks (`build-try-option`).
+fn llvm_builder_build_int_overflow(args: &[Value], name: &str, intrinsic_name: &str) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let a = expect_llvm_value(&args[2])?.into_int_value();
+    let b = expect_llvm_value(&args[3])?.into_int_value();
+    let flag_slot = expect_llvm_value(&args[4])?.into_pointer_value();
+    let bld = builder.borrow();
+    let ctx = crate::compile::llvm_context();
+    let i64_ty = ctx.i64_type();
+    let err = |e: String| EvalError::Internal(format!("build-{}-overflow: {}", name, e));
+    let intrinsic = inkwell::intrinsics::Intrinsic::find(intrinsic_name).ok_or_else(|| err(format!("no such LLVM intrinsic {}", intrinsic_name)))?;
+    let decl = intrinsic
+        .get_declaration(&module.borrow(), &[i64_ty.into()])
+        .ok_or_else(|| err(format!("failed to declare {}", intrinsic_name)))?;
+    let call = bld.build_call(decl, &[a.into(), b.into()], name).map_err(|e| err(e.to_string()))?;
+    let pair = match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => v.into_struct_value(),
+        inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
+    };
+    let result = bld.build_extract_value(pair, 0, "ov_result").map_err(|e| err(e.to_string()))?.into_int_value();
+    let flag = bld.build_extract_value(pair, 1, "ov_flag").map_err(|e| err(e.to_string()))?.into_int_value();
+    let flag_wide = bld.build_int_z_extend(flag, i64_ty, "ov_flag_i64").map_err(|e| err(e.to_string()))?;
+    let zero = i64_ty.const_zero();
+    let slot0 = unsafe { bld.build_gep(i64_ty, flag_slot, &[zero], "ov_flag_ptr").map_err(|e| err(e.to_string()))? };
+    bld.build_store(slot0, flag_wide).map_err(|e| err(e.to_string()))?;
+    Ok(llvm_value_value(result.into()))
 }
 
 /// Stack-allocates a `[count x i64]` array and returns its base pointer, to

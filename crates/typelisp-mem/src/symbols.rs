@@ -150,11 +150,15 @@ well_known_symbols! {
     // changes what an already-compiled index resolves to. Replacements go at
     // the *end* of the table (see the last section).
     //
-    // `int`/`float` were the core-IR tags before the width work; they are
+    // `int`/`float` were the core-IR tags before the width work; they were
     // retired rather than deleted, because deleting them would renumber
-    // everything after and invalidate every committed artifact. Nothing reads
-    // them now — the live spellings are `INT_ANY_WIDTH`/`FLOAT_ANY_WIDTH`.
-    RETIRED_INT => "int"
+    // everything after and invalidate every committed artifact. `float` still
+    // is (the live spelling is `FLOAT_ANY_WIDTH`). `int` came back into
+    // service, same slot and same name, when `int` became the
+    // arbitrary-precision type: it is that type's name, its `Repr` tag, and
+    // the core-IR tag of its literal `(int N)` — none of which an artifact
+    // compiled while the slot was retired could have carried.
+    INT => "int"
     RETIRED_FLOAT => "float"
     BIGNUM => "bignum"
     RATIO => "ratio"

@@ -985,6 +985,41 @@ impl Heap {
         self.alloc_boxed(BoxedObj::Bignum(n))
     }
 
+    /// An `int` from a machine-wide result: a fixnum when the value fits
+    /// 63 bits, a bignum box otherwise. **The one place that decides**, so
+    /// that "a box exists only when the value does not fit a fixnum" is an
+    /// invariant every consumer can lean on (`eq`, `eql`, hashing, the
+    /// compiled fast paths' one-bit test) rather than a convention each
+    /// producer may or may not have followed.
+    ///
+    /// `i128` because that is what a 63-bit `+`/`-`/`*` can produce before
+    /// anyone has decided whether it fits.
+    pub fn canonical_int(&mut self, n: i128) -> Value {
+        if n >= i128::from(crate::tagged::FIXNUM_MIN) && n <= i128::from(crate::tagged::FIXNUM_MAX) {
+            Value::Int(n as i64)
+        } else {
+            self.alloc_boxed(BoxedObj::Bignum(num_bigint::BigInt::from(n)))
+        }
+    }
+
+    /// [`canonical_int`](Self::canonical_int) for a result that is already a
+    /// `BigInt` — the arbitrary-precision arithmetic's own output, demoted
+    /// to a fixnum whenever it fits.
+    pub fn int_from_bigint(&mut self, n: num_bigint::BigInt) -> Value {
+        match i64::try_from(&n) {
+            Ok(v) if crate::tagged::fixnum_fits(v) => Value::Int(v),
+            _ => self.alloc_boxed(BoxedObj::Bignum(n)),
+        }
+    }
+
+    /// Whether the bignum in `id` holds a value a fixnum could — which an
+    /// `int` never does (`canonical_int`), and which the boundaries check
+    /// so that a non-canonical box is reported where it was made rather
+    /// than where `eq` first disagrees.
+    pub fn bignum_fits_fixnum(&self, id: BoxId) -> bool {
+        matches!(i64::try_from(self.bignum_value(id)), Ok(v) if crate::tagged::fixnum_fits(v))
+    }
+
     /// The `BigInt` behind a boxed bignum. Panics if `id` doesn't hold a
     /// `BoxedObj::Bignum` — same internal-invariant-trap convention as
     /// [`f64_value`](Self::f64_value).

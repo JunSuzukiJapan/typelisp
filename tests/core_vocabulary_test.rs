@@ -120,6 +120,10 @@ fn literals() {
     all_round_trip(&[
         "(int-any-width 42)",
         "(int-any-width -7)",
+        // An `int` literal: the same number under the tag that says "tagged
+        // word", which the island cannot read off the number.
+        "(int 42)",
+        "(int -4611686018427387904)",
         "(float-any-width 1.5)",
         // Keeps its point, so it is not the same form as `(int-any-width 1)`.
         "(float-any-width 1.0)",
@@ -459,7 +463,7 @@ fn top_level() {
 /// unchanged, an `EXPR_ONLY` tag has to be translated into something the island
 /// knows, and a `TOP_LEVEL` tag never reaches the island at all.
 const SHARED_WITH_ISLAND: &[&str] = &[
-    "int-any-width", "float-any-width", "bignum", "ratio", "char", "bool", "str", "unit", "var", "set", "global",
+    "int-any-width", "int", "float-any-width", "bignum", "ratio", "char", "bool", "str", "unit", "var", "set", "global",
     "set-global", "let", "lambda", "labels", "call", "assoc", "apply", "if", "loop", "break",
     "return", "block", "return-from", "panic", "match", "construct", "field-get", "field-set",
     "dyn-new", "dyn-upcast", "dyn-call", "dyn-value", "go", "select",

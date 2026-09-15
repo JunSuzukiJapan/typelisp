@@ -47,6 +47,7 @@ pub use typelisp_read;
 pub mod coroutine;
 
 pub mod equality;
+pub mod integer;
 pub mod os;
 pub mod readtable;
 pub mod stream;
@@ -3657,7 +3658,7 @@ pub unsafe extern "C" fn rt_wk_symbol(args: *const i64, argc: u32) -> i64 {
 /// operation and are told apart by this one number rather than by six copies
 /// of each. The island builds it as a constant at the call site — the
 /// receiver's type name is right there in `compile-assoc`.
-fn wsig(code: i64) -> (u32, bool) {
+pub(crate) fn wsig(code: i64) -> (u32, bool) {
     ((code >> 1) as u32, code & 1 == 1)
 }
 

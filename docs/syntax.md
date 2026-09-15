@@ -60,6 +60,8 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
 - **プリミティブ型**: `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `bool` `char` `string`
   （64bit 幅の整数型は無い——[functions.md](functions.md) §1 参照）
+- **任意精度整数**: `int`（CL の integer。63bit 即値と多倍長のあいだを自動で行き来する。
+  [functions.md](functions.md) §2.4）
 - **多倍長数値型**: `bignum`（任意精度整数）、`ratio`（既約な有理数）。CL 準拠でヒープ確保され、
   `i32`/`f64` 等との暗黙変換はない（`as`/`try-as` または変換メソッドで明示。functions.md 参照）。
 - **C 境界の生の語**: `ptr`（不透明ポインタ）、`c-long` / `c-ulong`。FFI 専用で、値にするには

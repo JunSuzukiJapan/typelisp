@@ -201,7 +201,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; all a `c-long' / `c-ulong' carries, since they have no arithmetic
     "int->c-long" "int->c-ulong" "try-int->c-long" "try-int->c-ulong"
     "float->f32" "float->f64" "try-float->f32" "try-float->f64"
-    "int->bignum" "bignum->int" "try-bignum->int" "bignum->float"
+    "int->bignum" "int->int" "bignum->int" "try-bignum->int" "bignum->float"
     "float->bignum" "bignum->ratio" "ratio->bignum" "int->ratio"
     "float->ratio" "ratio->float" "numerator" "denominator"
     ;; the prelude helper `expt' recurses through for a `ratio' base -- an
@@ -364,7 +364,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
 
 (defconst typelisp-primitive-types
   '("i8" "i16" "i32" "u8" "u16" "u32"
-    "f32" "f64" "bignum" "ratio" "random-state" "bool" "char" "string" "symbol"
+    "int" "f32" "f64" "bignum" "ratio" "random-state" "bool" "char" "string" "symbol"
     "ptr" "c-long" "c-ulong")
   "Primitive/scalar type names.
 Includes the heap-boxed arbitrary-precision `bignum' / `ratio', which are

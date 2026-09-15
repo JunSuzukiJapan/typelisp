@@ -287,7 +287,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // them, so the arithmetic listed here can never be asked for.
         "i32" | "i8" | "i16" | "u8" | "u16" | "u32" | "c-long" | "c-ulong" => &[
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
-            "int->bignum", "int->ratio", "int->float", "int->char",
+            "int->bignum", "int->int", "int->ratio", "int->float", "int->char",
             "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
             "int->c-long", "int->c-ulong",
             // The `Option`-returning halves. No prelude definition reaches
@@ -336,6 +336,20 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
             "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
             "max", "min", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh",
             "asinh", "acosh", "atanh", "exp", "log",
+        ],
+        // `int` (fixnum ∪ bignum): everything `integer_assoc` registers is
+        // lowered — the arithmetic and comparisons as an overflow-checked
+        // fast path over two fixnum words with an `rt_integer_*` slow path,
+        // the rest as one `rt_integer_*` call each.
+        "int" => &[
+            "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
+            "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
+            "ash", "logbitp",
+            "int->float", "int->ratio", "int->bignum", "int->int", "int->char", "try-int->char",
+            "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
+            "int->c-long", "int->c-ulong",
+            "try-int->i8", "try-int->i16", "try-int->i32", "try-int->u8", "try-int->u16", "try-int->u32",
+            "try-int->c-long", "try-int->c-ulong",
         ],
         "bignum" => &[
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
@@ -443,7 +457,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 263] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 286] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -468,6 +482,13 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 263] {
         rt_machine_instance, rt_machine_type, rt_machine_version, rt_parse_float, rt_parse_int,
         rt_software_type, rt_software_version, rt_timezone_daylight_p,
         rt_timezone_offset_seconds,
+    };
+    use typelisp_rt::integer::{
+        rt_integer_add, rt_integer_ash, rt_integer_cmp, rt_integer_div, rt_integer_fits, rt_integer_fits_char,
+        rt_integer_from_word, rt_integer_integer_length, rt_integer_logand, rt_integer_logbitp, rt_integer_logcount,
+        rt_integer_logior, rt_integer_lognot, rt_integer_logtest, rt_integer_logxor, rt_integer_mod, rt_integer_mul,
+        rt_integer_narrow, rt_integer_sub, rt_integer_to_bignum, rt_integer_to_char, rt_integer_to_float,
+        rt_integer_to_ratio,
     };
     use typelisp_rt::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
@@ -717,6 +738,29 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 263] {
         ("rt_global_set", rt_global_set as usize),
         ("rt_bignum_new", rt_bignum_new as usize),
         ("rt_ratio_from_bignums", rt_ratio_from_bignums as usize),
+        ("rt_integer_add", rt_integer_add as usize),
+        ("rt_integer_sub", rt_integer_sub as usize),
+        ("rt_integer_mul", rt_integer_mul as usize),
+        ("rt_integer_div", rt_integer_div as usize),
+        ("rt_integer_mod", rt_integer_mod as usize),
+        ("rt_integer_cmp", rt_integer_cmp as usize),
+        ("rt_integer_logand", rt_integer_logand as usize),
+        ("rt_integer_logior", rt_integer_logior as usize),
+        ("rt_integer_logxor", rt_integer_logxor as usize),
+        ("rt_integer_logtest", rt_integer_logtest as usize),
+        ("rt_integer_ash", rt_integer_ash as usize),
+        ("rt_integer_logbitp", rt_integer_logbitp as usize),
+        ("rt_integer_lognot", rt_integer_lognot as usize),
+        ("rt_integer_logcount", rt_integer_logcount as usize),
+        ("rt_integer_integer_length", rt_integer_integer_length as usize),
+        ("rt_integer_to_float", rt_integer_to_float as usize),
+        ("rt_integer_to_ratio", rt_integer_to_ratio as usize),
+        ("rt_integer_to_bignum", rt_integer_to_bignum as usize),
+        ("rt_integer_to_char", rt_integer_to_char as usize),
+        ("rt_integer_fits_char", rt_integer_fits_char as usize),
+        ("rt_integer_narrow", rt_integer_narrow as usize),
+        ("rt_integer_fits", rt_integer_fits as usize),
+        ("rt_integer_from_word", rt_integer_from_word as usize),
         ("rt_bignum_add", rt_bignum_add as usize),
         ("rt_bignum_sub", rt_bignum_sub as usize),
         ("rt_bignum_mul", rt_bignum_mul as usize),
@@ -898,7 +942,7 @@ mod scc_tests {
                     body: vec![call],
                     rest: false,
                     lambda: None,
-                    sig: Some((vec![], Repr::Int)),
+                    sig: Some((vec![], Repr::Narrow)),
                     public: true,
                     compiled: RefCell::new(None),
                 }),
@@ -920,6 +964,7 @@ mod native_method_list_tests {
     /// the island predicate that decides for it.
     const PRIMITIVES: &[(&str, &[&str])] = &[
         ("int", &["i32", "i8", "i16", "u8", "u16", "u32", "c-long", "c-ulong"]),
+        ("integer", &["int"]),
         ("string", &["string"]),
         ("char", &["char"]),
         ("float", &["f64", "f32"]),

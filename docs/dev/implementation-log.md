@@ -11225,3 +11225,49 @@ Rust 側で配置を知っていたのは `tagged.rs` と `core_cps.rs:1410` の
 2 段判定、63bit 超の拒否。`compile_test`: 全 Sexpr 変種の tag test を compiled と interp で
 突き合わせる（島の 8 defun と `tagged.rs` の表を縛る唯一のテスト）。
 `island_artifacts_test`/`prelude_artifacts_test`: 記録された配置 == 定数 == ランタイム。
+
+## `int` —— fixnum ∪ bignum、自動昇格（段階 2、2026-09-16）
+
+`int` を**明示したときだけの型**として足した。既定リテラルの切替と `bignum` の統合は次の
+段階で、この段階は「型・演算・変換・両階層の lowering」だけ。
+
+### 表現
+
+`Repr::Int` はタグ付き語そのもの（fixnum か bignum 箱）。数値の表現で唯一「レジスタの中で
+タグ付き」なのは、`add` の途中で fixnum の境界を跨ぐ値が自分で「箱だ」と言えなければ
+ならないから。従来の `Repr::Int`（生レジスタの固定幅）は `Repr::Narrow` に改名し、core IR
+のタグは `int-any-width` のまま。リテラルは `(int N)`（`INT` の退役スロットを復活、
+Repr タグと型名と兼用）で、島の `compile-int-literal` が `tag-fixnum` する——`int-any-width`
+は生語を作るので、種類は数からは読めずノードが運ぶ。
+
+**正準形**: `Heap::canonical_int(i128)` / `int_from_bigint` が唯一の決定点。箱は 63bit に
+入らないときだけ。越境（`encode_crossing_args` / `decode_compiled_return`）と `rt_integer_*` の
+`integer_arg` と解釈器の `expect_int` が、fixnum に入る箱を見たら内部エラー/fatal にする。
+
+### コンパイルの高速路
+
+`+`/`-`: 両方 fixnum なら `llvm.sadd.with.overflow.i64` をタグ付き語にそのまま当てる
+（`n<<1 + m<<1` の i64 溢れ ⇔ `n+m` の 63bit 溢れ）。`*` は片方を untag。溢れたら／箱なら
+`rt_integer_*`（i128 か BigInt で計算して正準形で返す）。比較は両 fixnum なら語の `icmp`、
+`logand/logior/logxor` は語のまま（bit0 は両方 0 のまま）。新ビルダ
+`build-sadd-overflow`/`ssub`/`smul` は結果を返し、フラグは `alloca-args` のスロットに書く——
+2 値を返すビルダは島に前例が無く、スロットは `build-try-option` が既に使う合流の形。
+
+### 手順で踏んだもの
+
+- `Type` に変種を挿入すると bincode の判別子がずれて committed dump が読めない
+  （"reading a function signature: io error"）→ FORMAT_VERSION 10→11、島→prelude の順に regen。
+- 島に defun を足したら `defsignature`（前方参照は無い）と `ISLAND_DEFUNS`。
+- externs の native 表に `int->int` を足して島の `int-native-method?` に足し忘れ →
+  `get-function: no function named "tl_i32::int->int"` で abort。Rust 側が「lower する」と
+  言い、島が lower しない、の食い違いは `the_rust_and_island_native_method_lists_agree` が
+  番人（今回は先に compile テストで踏んだ）。
+- テストの defun を `add`/`sub`/`mul` と名付けると prelude の `Add`/`Sub`/`Mul` トレイトの
+  メソッドに解決される（レシーバ型で解決するので `(add (big) 1)` の `(big)` が i32 を
+  期待される）。`iadd` 等に改名。
+- `(- 0 (big))` は受け手 `0` が i32。int を期待させるには `(sub 0 (big))` か `(the int 0)`。
+
+### まだ無いもの（段階 3 で）
+
+`int` は `Sexpr` に入らない（`~a` で印字できない）、`bignum` と `int` が並存、リテラルの
+既定は i32 のまま、`float->int` は i32 返し、ダンプ中の非正準 bignum の拒否。

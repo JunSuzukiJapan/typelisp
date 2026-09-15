@@ -168,8 +168,8 @@ pub const LLVM_METHOD_RECEIVER_TYPES: [&str; 4] =
 /// LLVM instructions or `rt_*` calls rather than function calls
 /// (`Interp::is_native_lowered_primitive_method` says *which* methods; this
 /// says which receivers can have them).
-pub const NATIVE_LOWERED_PRIMITIVES: [&str; 17] = [
-    "i32", "i8", "i16", "u8", "u16", "u32",
+pub const NATIVE_LOWERED_PRIMITIVES: [&str; 18] = [
+    "i32", "i8", "i16", "u8", "u16", "u32", "int",
     "char", "string", "f64", "f32", "bignum", "ratio", "sexpr", "bool", "symbol",
     // The two C-boundary words are integer receivers to `compile-assoc`
     // (`int-receiver-type?`), so their conversions are lowered the same way.
@@ -191,11 +191,21 @@ pub enum Type {
     U32,
     F32,
     F64,
-    /// The `bignum` type: an arbitrary-precision integer (CL's bignum). A
-    /// separate static type from the fixed-width integers — this language is
-    /// statically typed, so CL's transparent fixnum->bignum overflow
-    /// promotion doesn't apply; conversions are explicit (`int->bignum`/
-    /// `bignum->int`/...).
+    /// The `int` type: CL's `integer` — an arbitrary-precision integer whose
+    /// arithmetic promotes from the 63-bit fixnum to a heap bignum when a
+    /// result outgrows it, and demotes back when it fits. Unlike the six
+    /// fixed widths above it never wraps and never normalizes; unlike
+    /// [`Type::Bignum`] a value of it is a box only when it has to be
+    /// (`Heap::canonical_int`).
+    ///
+    /// Its runtime carrier is the tagged word itself (`Repr::Int`), so a
+    /// fixnum and a bignum of this type are told apart by the word's tag
+    /// and nothing else.
+    Int,
+    /// The `bignum` type: an arbitrary-precision integer that is *always* a
+    /// heap box, with explicit conversions (`int->bignum`/`bignum->int`/...).
+    /// Being folded into [`Type::Int`], which is the same numbers with the
+    /// boxing decided by size instead of by type.
     Bignum,
     /// The `ratio` type: an exact rational (CL's ratio), kept reduced with a
     /// positive denominator. Like `Bignum`, its own static type with
@@ -295,8 +305,19 @@ impl Type {
         matches!(self, Type::CLong | Type::CULong)
     }
 
+    /// The six fixed-width integer types — the ones with a width to
+    /// normalize to. `int` is deliberately not one of them: it has no width,
+    /// and everything this predicate gates (range checks, `normalize_int`,
+    /// the `wsig` operand) is about a width.
     pub fn is_integer(&self) -> bool {
         matches!(self, Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32)
+    }
+
+    /// The fixed widths and `int` together — every type whose values are
+    /// integers of this language (the C words are still not: they carry no
+    /// arithmetic).
+    pub fn is_int_family(&self) -> bool {
+        self.is_integer() || matches!(self, Type::Int)
     }
 
     /// The two built-in floating-point types (`f32`/`f64`) — the float
@@ -374,6 +395,7 @@ pub fn primitive_types() -> Vec<Type> {
     vec![
         Type::I8, Type::I16, Type::I32,
         Type::U8, Type::U16, Type::U32,
+        Type::Int,
         Type::F32, Type::F64, Type::Bignum, Type::Ratio, Type::RandomState,
         Type::Bool, Type::Char, Type::Str, Type::Symbol,
         // Registered so their conversions have somewhere to live. What they
@@ -403,6 +425,7 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
         Type::U32 => "u32",
         Type::F32 => "f32",
         Type::F64 => "f64",
+        Type::Int => "int",
         Type::Bignum => "bignum",
         Type::Ratio => "ratio",
         Type::RandomState => "random-state",
@@ -846,6 +869,7 @@ pub fn primitive_by_name(name: &str) -> Option<Type> {
         "u32" => Type::U32,
         "f32" => Type::F32,
         "f64" => Type::F64,
+        "int" => Type::Int,
         "bignum" => Type::Bignum,
         "ratio" => Type::Ratio,
         "random-state" => Type::RandomState,

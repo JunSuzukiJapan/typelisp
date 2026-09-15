@@ -53,7 +53,7 @@ use crate::compile::{llvm_context, CompiledFn, COMPILE_LOCK};
 
 /// A type as the C side of the boundary sees it.
 ///
-/// A second vocabulary beside `Repr`, and the reason is [`Repr::Int`]: it
+/// A second vocabulary beside `Repr`, and the reason is [`Repr::Narrow`]: it
 /// folds all six integer widths into one, because how a value crosses the
 /// compiled boundary is the same for all of them (a sign-extended machine
 /// word). The thunk needs the other answer — `i8` really is one byte to the C

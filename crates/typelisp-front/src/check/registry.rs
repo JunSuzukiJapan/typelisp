@@ -654,6 +654,7 @@ impl Registry {
             let assoc = match ty {
                 Type::Str => string_assoc(),
                 Type::Char => char_assoc(),
+                Type::Int => integer_assoc(),
                 Type::Bignum => bignum_assoc(),
                 Type::Ratio => ratio_assoc(),
                 Type::Bool => bool_assoc(),
@@ -2061,6 +2062,15 @@ pub fn llvm_builder_def() -> AdtDef {
     // no module lookup — `fptrunc` then `fpext`, which is exactly "the
     // nearest binary32 value" written in IR.
     assoc.insert("build-fround32".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    // `int`'s overflow-checked `+`/`-`/`*` on two fixnum words: the result,
+    // with the overflow flag stored into an `alloca-args` slot — see
+    // `llvm_builder_build_int_overflow`.
+    for name in ["build-sadd-overflow", "build-ssub-overflow", "build-smul-overflow"] {
+        assoc.insert(
+            name.to_string(),
+            assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true),
+        );
+    }
     // `alloca-args`/`store-arg`/`build-call`: building a direct call to an
     // already-declared function (`get-function`'s result). `alloca-args`
     // stack-allocates a fresh `[count x i64]` array (mirroring the fixed-ABI
@@ -2542,6 +2552,12 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // unlike `bignum->int`/`ratio->int`'s narrowing counterparts.
     m.insert("int->bignum".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Bignum), instance: true, builtin: true });
     m.insert("int->ratio".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Ratio), instance: true, builtin: true });
+    // `int->int`: the exact widening into the arbitrary-precision `int` —
+    // what `(as int x)` calls. Named by the family-prefix rule every other
+    // conversion here follows (`int->float` is "an integer receiver, to
+    // float"), which reads oddly for this one target and is kept anyway: a
+    // second naming scheme for one method would be the odder thing.
+    m.insert("int->int".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Int), instance: true, builtin: true });
     // `int->i8`/`int->u32`/... and their `try-` counterparts: a cast between
     // two integer *widths*, which is a real conversion now that a type name
     // means its width and its signedness (`types::int_width_signed`) rather
@@ -2600,6 +2616,7 @@ fn c_word_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // Always exact, which is what makes it the honest way to read a `size_t`
     // that does not fit in an `i32`.
     m.insert("int->bignum".to_string(), conv(Type::Bignum));
+    m.insert("int->int".to_string(), conv(Type::Int));
     m.insert("print".to_string(), conv(Type::Unit));
     m.insert("println".to_string(), conv(Type::Unit));
     m
@@ -2675,6 +2692,54 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     );
     m.insert("print".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Unit), instance: true, builtin: true });
     m.insert("println".to_string(), AssocFn { sig: FnSig::builtin(vec![ty], Type::Unit), instance: true, builtin: true });
+    m
+}
+
+/// Built-in instance methods for `int` (CL's `integer`): the fixed-width
+/// catalog's operations without a width — `+ - *` promote instead of
+/// wrapping, `/`/`mod` panic only on a zero divisor — plus the bitwise
+/// catalog `bignum` has (`ash`/`logbitp` still count bits in an `i32`, for
+/// `bignum_assoc`'s reason), the comparisons, and every conversion out:
+/// `int->float`/`int->ratio`/`int->char` (`try-` for the partial one),
+/// `int->W`/`try-int->W` for the six widths and the two C words (a cast out
+/// of an `int` truncates, as every width cast does; the question form says
+/// whether it would), and `int->int` as the identity so that `(as int x)`
+/// is one method name on every integer receiver.
+fn integer_assoc() -> BTreeMap<String, AssocFn> {
+    let ty = Type::Int;
+    let binop = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], ty.clone()), instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Bool), instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig::builtin(vec![ty.clone()], ty.clone()), instance: true, builtin: true };
+    let conv = |ret: Type| AssocFn { sig: FnSig::builtin(vec![ty.clone()], ret), instance: true, builtin: true };
+    let mut m = BTreeMap::new();
+    for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor"] {
+        m.insert(op.to_string(), binop());
+    }
+    m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::I32], ty.clone()), instance: true, builtin: true });
+    m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::I32], Type::Bool), instance: true, builtin: true });
+    for op in ["<", "<=", ">", ">=", "=", "/="] {
+        m.insert(op.to_string(), cmp());
+    }
+    m.insert("logtest".to_string(), cmp());
+    for op in ["lognot", "logcount", "integer-length"] {
+        m.insert(op.to_string(), unary());
+    }
+    for name in ["eq", "eql", "equal", "equalp"] {
+        m.insert(name.to_string(), cmp());
+    }
+    m.insert("int->float".to_string(), conv(Type::F64));
+    m.insert("int->ratio".to_string(), conv(Type::Ratio));
+    m.insert("int->bignum".to_string(), conv(Type::Bignum));
+    m.insert("int->int".to_string(), conv(Type::Int));
+    m.insert("int->char".to_string(), conv(Type::Char));
+    m.insert("try-int->char".to_string(), conv(option_of(Type::Char)));
+    for target in crate::types::INT_TYPE_NAMES.iter().chain(crate::types::C_WORD_TYPE_NAMES.iter()) {
+        let to = crate::types::primitive_by_name(target).expect("the width names are primitive types");
+        m.insert(format!("int->{}", target), conv(to.clone()));
+        m.insert(format!("try-int->{}", target), conv(option_of(to)));
+    }
+    m.insert("print".to_string(), conv(Type::Unit));
+    m.insert("println".to_string(), conv(Type::Unit));
     m
 }
 

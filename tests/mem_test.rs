@@ -2227,3 +2227,33 @@ fn encoding_an_int_past_63_bits_is_refused() {
     assert_eq!(try_encode(Value::Int(i64::MAX)), Err(i64::MAX));
     assert_eq!(try_encode(Value::Int(i64::MIN)), Err(i64::MIN));
 }
+
+// ---- `int`'s canonical form ---------------------------------------------
+
+/// `Heap::canonical_int`/`int_from_bigint` are the one place that decides
+/// between a fixnum and a bignum box, and they decide by size alone: a box
+/// exists exactly for the values a fixnum cannot hold, so that `eq` on a
+/// fixnum-range `int` is never a box identity and the compiled fast path's
+/// one-bit test sees every small value.
+#[test]
+fn canonical_int_never_boxes_a_fixnum_range_value() {
+    use typelisp::{FIXNUM_MAX, FIXNUM_MIN};
+    let mut h = Heap::with_capacity(64);
+    for n in [0i128, 1, -1, i128::from(i32::MAX) + 1, i128::from(FIXNUM_MAX), i128::from(FIXNUM_MIN)] {
+        assert_eq!(h.canonical_int(n), Value::Int(n as i64), "{}", n);
+        let big = num_bigint::BigInt::from(n);
+        assert_eq!(h.int_from_bigint(big), Value::Int(n as i64), "from BigInt {}", n);
+    }
+    assert_eq!(h.box_count(), 0, "nothing above was boxed");
+    for n in [i128::from(FIXNUM_MAX) + 1, i128::from(FIXNUM_MIN) - 1, i128::from(i64::MAX), i128::from(u64::MAX)] {
+        let Value::Boxed(id) = h.canonical_int(n) else { panic!("{} must be boxed", n) };
+        assert!(h.is_bignum(id));
+        assert!(!h.bignum_fits_fixnum(id), "{} is out of the fixnum range", n);
+        assert_eq!(h.bignum_value(id), &num_bigint::BigInt::from(n));
+    }
+    // The check the boundaries use: a bignum box that *does* fit a fixnum is
+    // the non-canonical shape nothing may produce.
+    let small = h.alloc_bignum(num_bigint::BigInt::from(5));
+    let Value::Boxed(id) = small else { panic!("boxed") };
+    assert!(h.bignum_fits_fixnum(id));
+}

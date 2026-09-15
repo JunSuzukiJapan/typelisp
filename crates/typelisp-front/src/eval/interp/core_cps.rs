@@ -1373,7 +1373,7 @@ fn pending_wait(heap: &Heap) -> Result<(Waiting, Repr), EvalError> {
         // The capacity is an ordinary `i32` argument, so it crosses raw — the
         // suspension site tags only what the driver could not otherwise read.
         cs::SUSPEND_CHAN_NEW => Ok((Waiting::Chan(ChanOp::New(payload)), Repr::Sexpr)),
-        // `Repr::Sexpr` and not `Repr::Int`: a wake value always crosses back
+        // `Repr::Sexpr` and not `Repr::Narrow`: a wake value always crosses back
         // **tagged**, whatever its type, and the resume block decodes it with
         // the kind the bridge baked in — the same division `wait` makes.
         cs::SUSPEND_CHAN_LEN => {
@@ -2077,6 +2077,7 @@ impl Interp {
             // without recursion even in the old evaluator, so they run
             // through its implementation unchanged.
             Op::Int
+            | Op::Integer
             | Op::Float
             | Op::Bignum
             | Op::Ratio

@@ -1861,7 +1861,7 @@ impl Checker {
     ///
     /// The last two fields spell the C types, and are *deliberately* redundant
     /// with the `REPR`s beside them. A `Repr` folds all six integer widths into
-    /// `Repr::Int` (see its doc comment), which is the right answer for the
+    /// `Repr::Narrow` (see its doc comment), which is the right answer for the
     /// question a `Repr` exists to answer — how a value crosses the compiled
     /// boundary — and the wrong one for the thunk, which has to emit
     /// `trunc i64 to i8`. Two questions about one type, the way `field_kind`
@@ -9471,7 +9471,12 @@ impl Checker {
                 if !int_lit_in_range(n, &ty) {
                     return Err(int_lit_range_error(&n.to_string(), &ty, true));
                 }
-                Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(n)])?, ty)
+                // An `int` literal is its own node: `(int-any-width N)`
+                // compiles to a raw word, and an `int` is a *tagged* one
+                // (`Repr::Int`). The kind is the node's, not something the
+                // island could read off the number.
+                let tag = if ty == Type::Int { "int" } else { "int-any-width" };
+                Checked::new(core::tagged(heap, tag, &[Value::Int(n)])?, ty)
             }
             // A `Value::Boxed` read-literal is `Sexpr::f64`, `bignum` (an
             // integer literal past `i32`'s range), or `ratio` (`n/d` syntax)
@@ -9493,6 +9498,21 @@ impl Checker {
             // all — `4294967295` and `#xFFFFFFFF` both arrive as `bignum`s,
             // and `i32` is no longer the widest fixed-width type.
             Value::Boxed(id) if heap.is_bignum(id) => match expected {
+                // In an `int` position the literal is an `int`, whatever its
+                // size: a fixnum node when it fits one (the reader boxes
+                // everything past `i32`, which is far short of the fixnum
+                // range), and the box itself — already an `int`'s
+                // representation — when it does not. Splitting here is what
+                // keeps `Heap::canonical_int`'s invariant at the literal:
+                // a `(bignum ..)` node re-boxes on every evaluation, and a
+                // box holding a fixnum-range value must never exist.
+                Some(Type::Int) => {
+                    let fitted = i64::try_from(heap.bignum_value(id)).ok().filter(|v| typelisp_mem::fixnum_fits(*v));
+                    match fitted {
+                        Some(v) => Checked::new(core::tagged(heap, "int", &[Value::Int(v)])?, Type::Int),
+                        None => Checked::new(core::tagged(heap, "bignum", &[Value::Boxed(id)])?, Type::Int),
+                    }
+                }
                 Some(t) if t.is_integer() => {
                     let (fitted, text) = {
                         let big = heap.bignum_value(id);
@@ -11376,7 +11396,10 @@ impl Checker {
         // A C word counts as a width on both sides: `(as c-ulong 16)` makes
         // one to pass, `(as i32 n)` reads one that came back. It is the only
         // way to do either, since these types carry no arithmetic of their own.
-        let int_like = |t: &Type| t.is_integer() || t.is_c_word();
+        // `int` is in the integer family here too: `(as int x)` on a fixed
+        // width is the exact widening `int->int`, and `(as i32 n)` on an `int`
+        // the truncating `int->i32` — the same two method shapes.
+        let int_like = |t: &Type| t.is_int_family() || t.is_c_word();
         if (int_like(&src.ty) && int_like(&target)) || (src.ty.is_float() && target.is_float()) {
             return self.width_cast(heap, interp, env, src, &target, try_variant);
         }
@@ -11466,7 +11489,7 @@ impl Checker {
         // A C word is in the integer family here: the method that performs the
         // cast is `int->W`, and `W` being a C word does not change which
         // family asked for it.
-        let family = if target.is_integer() || target.is_c_word() { "int" } else { "float" };
+        let family = if target.is_int_family() || target.is_c_word() { "int" } else { "float" };
         let name = crate::type_key::type_key_of_type(target);
         let method = if try_variant { format!("try-{}->{}", family, name) } else { format!("{}->{}", family, name) };
         let owner = prim_type_path(&src.ty).expect("a width cast's source is a primitive type");
@@ -15720,7 +15743,7 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
             Bignum => Some(("int->bignum", None)),
             _ => None,
         },
-        _ if from.is_integer() => match &to_key {
+        _ if from.is_int_family() => match &to_key {
             F64 => Some(("int->float", None)),
             Bignum => Some(("int->bignum", None)),
             Ratio => Some(("int->ratio", None)),
@@ -15992,6 +16015,7 @@ fn trait_operator_method(op: &str) -> Option<&'static str> {
 
 fn int_lit_ty(expected: Option<&Type>) -> Type {
     match expected {
+        Some(Type::Int) => Type::Int,
         // A C word too, so `(c-malloc 16)` reads the way it should. Nothing is
         // loosened by it: the literal's type is then `c-ulong`, which
         // `check_at`'s rule B still refuses outside `(unsafe ...)`, and

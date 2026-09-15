@@ -72,6 +72,10 @@ use super::{EnumDef, FnDef, Interp};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Op {
     Int,
+    /// `(int N)` — an `int` literal that fits a fixnum. Evaluates exactly
+    /// like `Int`; a separate tag because the island compiles the two to
+    /// different words (raw vs tagged).
+    Integer,
     Float,
     Bignum,
     Ratio,
@@ -135,6 +139,7 @@ impl Op {
     pub(super) fn from_sym(tag: SymRef) -> Option<Op> {
         Some(match tag.well_known() {
             wk::INT_ANY_WIDTH => Op::Int,
+            wk::INT => Op::Integer,
             wk::FLOAT_ANY_WIDTH => Op::Float,
             wk::BIGNUM => Op::Bignum,
             wk::RATIO => Op::Ratio,
@@ -248,7 +253,7 @@ impl Interp {
             // literal have always produced distinct values (see `str_rt`), and
             // returning the checker's single stored box would silently make
             // them `eq`.
-            Op::Int | Op::Char | Op::Bool | Op::Sym => self.literal_field(heap, form),
+            Op::Int | Op::Integer | Op::Char | Op::Bool | Op::Sym => self.literal_field(heap, form),
             Op::Unit => Ok(Value::Empty),
             // A float literal is re-boxed rather than handed straight back,
             // so two literals of the same number are not `eq`. Each width

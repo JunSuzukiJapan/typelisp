@@ -370,6 +370,14 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             Some(Value::Int(n)) => int_node(heap, n),
             _ => Err(malformed(heap, form)),
         },
+        // An `int` literal: the same two halves under its own tag, which is
+        // what tells `compile-int-literal` to hand back a *tagged* fixnum
+        // rather than the raw word `compile-int-any-width` produces. The
+        // island cannot tell the two apart from the number.
+        "int" => match core::field(heap, form, 0) {
+            Some(Value::Int(n)) => core::tagged(heap, "int", &[half((n as u64) >> 32), half(n as u64)]),
+            _ => Err(malformed(heap, form)),
+        },
         "unit" => core::tagged(heap, "unit", &[]),
         // The literal's payload is the *already rounded* number — an `f32`
         // literal arrives as the binary32 value widened into binary64 — so

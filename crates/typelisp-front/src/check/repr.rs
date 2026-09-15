@@ -82,13 +82,30 @@ pub fn is_enum_ty_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> b
 /// representation has to be written down here or it is gone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Repr {
-    /// Every integer width — a raw machine word.
+    /// Every fixed integer width — a raw machine word.
     ///
     /// Named `int-any-width` in the core IR: one representation really does
     /// serve all six, because the word already holds the number the type
     /// names (sign- or zero-extended, `types::normalize_int`). What a width
     /// still decides is how the value is *boxed*, and that is
     /// [`Repr::field_kind`]'s business, not this tag's.
+    ///
+    /// `Narrow` and not `Int`, since `int` became a type of its own: the
+    /// six widths are the ones narrower than a word, and [`Repr::Int`] is
+    /// the one that is not a raw word at all.
+    Narrow,
+    /// `int` — the arbitrary-precision integer, as the tagged word it
+    /// already is: a fixnum (bit 0 clear, 63-bit payload) or a
+    /// `BoxedObj::Bignum` reference, whichever the value's size demands
+    /// (`Heap::canonical_int` is the one place that decides, and a box
+    /// holding a fixnum-range value is a corruption).
+    ///
+    /// Tagged in a register, unlike every other numeric representation: the
+    /// word has to be able to say "I am a box" on its own, because a value
+    /// crosses the fixnum boundary in the middle of an `add`. That is also
+    /// why it is collectable — the collector has to find the box through a
+    /// frame slot — and why an `int` in a struct field or a `Sexpr` is the
+    /// same bits as in a register (passthrough, `field_kind` 6).
     Int,
     /// `f64` — raw `f64::to_bits` in an `i64`.
     F64,
@@ -205,7 +222,8 @@ impl Repr {
             // the `Handle` arm is early: falling through to the tagged
             // catch-all would shift a pointer left by three.
             Type::Ptr | Type::CLong | Type::CULong => Repr::RawWord,
-            _ if ty.is_integer() => Repr::Int,
+            Type::Int => Repr::Int,
+            _ if ty.is_integer() => Repr::Narrow,
             _ if is_llvm_handle_ty(ty) => Repr::Handle,
             Type::F32 => Repr::F32,
             _ if ty.is_float() => Repr::F64,
@@ -277,7 +295,8 @@ impl Repr {
     /// the head of the list for a parametric one.
     pub fn tag(&self) -> &'static str {
         match self {
-            Repr::Int => "int-any-width",
+            Repr::Narrow => "int-any-width",
+            Repr::Int => "int",
             Repr::F64 => "f64",
             Repr::F32 => "f32",
             Repr::Char => "char",
@@ -304,7 +323,8 @@ impl Repr {
 
     /// Every simple representation, for [`Repr::read`] and for a test that
     /// wants to enumerate the vocabulary.
-    pub const SIMPLE: [Repr; 19] = [
+    pub const SIMPLE: [Repr; 20] = [
+        Repr::Narrow,
         Repr::Int,
         Repr::RawWord,
         Repr::F64,
@@ -402,7 +422,7 @@ impl Repr {
             // A handle joins the integer class: its representation *is* a plain
             // untraced `i64`, so the int tag/detag bit ops are exactly right
             // and no GC root is ever wanted.
-            Repr::Int | Repr::Handle => Class::Int,
+            Repr::Narrow | Repr::Handle => Class::Int,
             // *Not* `Class::Int`, which a handle is: an integer field is
             // stored tagged, and this word has no room for a tag.
             Repr::RawWord => Class::RawWord,
@@ -422,6 +442,7 @@ impl Repr {
             // statement about the sets it happened to be handed, not about the
             // value.
             Repr::Str
+            | Repr::Int
             | Repr::Bignum
             | Repr::Ratio
             | Repr::RandomState
@@ -535,7 +556,7 @@ impl Repr {
             // A raw word has no encoding here on purpose. `1` (a plain word)
             // is what it looks like it should be and is exactly wrong: a
             // struct field is *tagged* on the way in, and shifting a pointer
-            // left by three drops its top three bits. That is the bug that
+            // left by one drops its top bit. That is the bug that
             // removing the 64-bit integer type was meant to make unwritable,
             // and giving this a number would write it again. `Checker` refuses
             // the declarations that would reach here, so this is the second
@@ -601,7 +622,7 @@ mod tests {
         h.set_gc_stress(true);
         let mut all: Vec<Repr> = Repr::SIMPLE.to_vec();
         all.push(Repr::Scope(Box::new(Repr::Handle)));
-        all.push(Repr::Vector(Box::new(Repr::Int)));
+        all.push(Repr::Vector(Box::new(Repr::Narrow)));
         all.push(Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr)));
         // Nested, so `read` is not merely accepting a one-level list.
         all.push(Repr::Vector(Box::new(Repr::Vector(Box::new(Repr::Enum)))));
@@ -619,9 +640,9 @@ mod tests {
             let v = r.write(h).expect("write failed");
             crate::check::core::print(h, v)
         };
-        assert_eq!(printed(&mut h, Repr::Int), "int-any-width");
+        assert_eq!(printed(&mut h, Repr::Narrow), "int-any-width");
         assert_eq!(printed(&mut h, Repr::Scope(Box::new(Repr::Handle))), "(scope handle)");
-        assert_eq!(printed(&mut h, Repr::Vector(Box::new(Repr::Int))), "(vector int-any-width)");
+        assert_eq!(printed(&mut h, Repr::Vector(Box::new(Repr::Narrow))), "(vector int-any-width)");
         assert_eq!(
             printed(&mut h, Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr))),
             "(hashtable str sexpr)"
@@ -653,8 +674,8 @@ mod tests {
     fn scalars_and_adts_classify_by_their_declared_type() {
         let (structs, enums) = sets();
         let of = |t: Type| Repr::of(&t, &structs, &enums);
-        assert_eq!(of(Type::I32), Repr::Int);
-        assert_eq!(of(Type::U32), Repr::Int);
+        assert_eq!(of(Type::I32), Repr::Narrow);
+        assert_eq!(of(Type::U32), Repr::Narrow);
         assert_eq!(of(Type::F64), Repr::F64);
         assert_eq!(of(Type::F32), Repr::F32);
         assert_eq!(of(Type::Char), Repr::Char);
@@ -671,7 +692,7 @@ mod tests {
         // reason they have variants of their own.
         assert_eq!(
             of(Type::Named(Path::root("vector"), vec![Type::U32])),
-            Repr::Vector(Box::new(Repr::Int))
+            Repr::Vector(Box::new(Repr::Narrow))
         );
         assert_eq!(
             of(Type::Named(Path::root("hashtable"), vec![Type::Str, Type::Bool])),
@@ -711,7 +732,7 @@ mod tests {
             Repr::Ratio,
             Repr::Sexpr,
             Repr::Struct,
-            Repr::Vector(Box::new(Repr::Int)),
+            Repr::Vector(Box::new(Repr::Narrow)),
             Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr)),
             Repr::Enum,
             Repr::Dyn,
@@ -745,7 +766,7 @@ mod tests {
     /// `compile_reads_a_hashtable_field_out_of_a_struct`).
     #[test]
     fn only_a_generic_type_variable_is_not_representable() {
-        for r in [Repr::Int, Repr::Handle, Repr::F64, Repr::F32, Repr::Char, Repr::Bool, Repr::Unit] {
+        for r in [Repr::Narrow, Repr::Handle, Repr::F64, Repr::F32, Repr::Char, Repr::Bool, Repr::Unit] {
             assert_eq!(r.binding_kind(), 0, "{:?} is a scalar and needs no root", r);
             assert_ne!(r.field_kind(), 0, "{:?} is representable in a field", r);
         }

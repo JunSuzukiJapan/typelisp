@@ -128,6 +128,36 @@ CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と §4 の
 > 並ぶ方が悪い）。直すなら `round` 本体を CL 準拠にするのが筋で、`round` は島が lowering
 > している組み込みなので島側も同時に変わる。
 
+## 2.4 任意精度整数 `int`
+
+CL の `integer`。値は 63bit の即値（fixnum）に入るあいだは即値で、演算の結果が入らなくなれば
+自動的に多倍長（bignum 箱）へ昇格し、収まればまた即値へ戻る。**箱が存在するのは値が 63bit に
+入らないときだけ**なので、`eq` は fixnum の範囲で常に値の同一性、`eql`/`=` は範囲を問わず数値の
+同一性になる。固定幅の整数型（§1）とは別の型で、暗黙変換はない——`(as int x)` が固定幅からの
+正確な拡大、`(as i32 n)` / `(try-as i32 n)` が `int` からの切り詰め / 判定（§1 の `int->W` /
+`try-int->W` と同じ意味）。
+
+（移行中: `bignum` は `int` に統合される予定で、未注釈の整数リテラルの既定型も `int` になる。
+現時点では `int` は明示したときだけの型で、`Sexpr` に入れられない——`(println "~a" n)` は
+まだ書けず、`int::println` か `=` での比較を使う。）
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `+` `-` `*` | `(op a b)` | `(int,int)→int` | 溢れない（昇格する） |
+| `/` | `(/ a b)` | `(int,int)→int` | ゼロ方向切り捨て。ゼロ除算で panic。`MIN / -1` も昇格する |
+| `mod` | `(mod a b)` | `(int,int)→int` | 床除算の剰余（符号は除数側） |
+| `max` `min` | `(op a b)` | `(int,int)→int` | |
+| `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
+| `eq` `eql` `equal` `equalp` | `(op a b)` | `(int,int)→bool` | すべて `=` |
+| `logand` `logior` `logxor` `lognot` `logtest` `logcount` `integer-length` `logbitp` `ash` | | | `bignum` と同じ（無限桁の 2 の補数） |
+| `int->float` `int->ratio` `int->char` `try-int->char` | | | §1 と同じ |
+| `int->W` `try-int->W` | `(int->W x)` | `int→W` | 切り詰め / 判定。`W` は 6 幅と `c-long`/`c-ulong` |
+| `int->int` | | `T→int` | 固定幅・C 語からの正確な拡大。`(as int x)` の実体 |
+
+コンパイルでは `+`/`-`/`*` と比較は「両方 fixnum なら語のまま溢れ検査付き命令、それ以外は
+ランタイム」の2経路になる。fixnum のタグは 0 なので、タグ付き語をそのまま足した結果が
+タグ付きの和になる。
+
 ## 2.5 多倍長数値（`bignum` / `ratio`）
 
 CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常に既約・正の分母で保たれる有理数。
