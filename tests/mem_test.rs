@@ -1964,7 +1964,7 @@ fn a_frame_slot_roots_what_it_holds() {
 
 /// **An unmasked slot is arithmetic, not a reference.**
 ///
-/// The word here has `0b111` in its low three bits — `TAG_BOXED`'s pattern —
+/// The word here has `0b101` in its low three bits — `TAG_BOXED`'s pattern —
 /// and names a box id far past anything allocated. Reading it as a tag would
 /// either retain something at random or index off the end of the box table.
 /// The mask is what stops that, so this is the test that says the mask is
@@ -1975,13 +1975,13 @@ fn an_unmasked_frame_slot_is_never_read_as_a_reference() {
     let f = h.alloc_frame(2);
     h.push_root(f);
     let Value::Boxed(fid) = f else { panic!("expected a boxed frame") };
-    h.set_frame_word(fid, 0, ((9_999_i64) << 3) | 0b111);
+    h.set_frame_word(fid, 0, ((9_999_i64) << 3) | 0b101);
     h.set_frame_word(fid, 1, i64::MIN);
 
     h.gc();
 
     assert!(h.is_frame(fid));
-    assert_eq!(h.frame_word(fid, 0), ((9_999_i64) << 3) | 0b111, "the raw word is untouched");
+    assert_eq!(h.frame_word(fid, 0), ((9_999_i64) << 3) | 0b101, "the raw word is untouched");
     assert_eq!(h.box_count(), 1, "only the frame");
     assert_accounting(&h);
 }
@@ -2094,8 +2094,8 @@ fn a_frame_can_hold_more_than_sixty_four_slots() {
     }
     // And the slots those would alias to if the word index were dropped hold
     // raw words that must never be traced.
-    h.set_frame_word(fid, 0, ((7_777_i64) << 3) | 0b111);
-    h.set_frame_word(fid, 36, ((8_888_i64) << 3) | 0b111);
+    h.set_frame_word(fid, 0, ((7_777_i64) << 3) | 0b101);
+    h.set_frame_word(fid, 36, ((8_888_i64) << 3) | 0b101);
     assert!(!h.frame_mask_bit(fid, 0), "slot 0 stayed unmasked");
     assert!(!h.frame_mask_bit(fid, 36), "slot 36 stayed unmasked");
     assert!(h.frame_mask_bit(fid, 64) && h.frame_mask_bit(fid, 100));
@@ -2112,7 +2112,7 @@ fn a_frame_can_hold_more_than_sixty_four_slots() {
         };
         assert_eq!(h.struct_field(sid, 0), Value::Int(i as i64));
     }
-    assert_eq!(h.frame_word(fid, 0), ((7_777_i64) << 3) | 0b111, "the raw word is untouched");
+    assert_eq!(h.frame_word(fid, 0), ((7_777_i64) << 3) | 0b101, "the raw word is untouched");
     assert_accounting(&h);
 }
 
@@ -2142,4 +2142,88 @@ fn frames_hold_their_slots_under_gc_stress() {
         assert_eq!(h.struct_field(sid, 0), Value::Int(i), "slot {} lost its value", i);
     }
     assert_accounting(&h);
+}
+
+// ---- the tag layout -------------------------------------------------------
+
+/// Every class of word survives `encode`/`decode` under the variable-length
+/// layout (`typelisp_mem::tagged`'s module doc): a fixnum on one tag bit at
+/// both ends of its 63-bit range, the three pointer classes on three bits,
+/// and the four small classes on six.
+#[test]
+fn every_tag_class_round_trips_under_the_variable_length_layout() {
+    use typelisp::{decode, encode, FIXNUM_MAX, FIXNUM_MIN, NIL_WORD};
+    let mut h = Heap::with_capacity(64);
+    for n in [0i64, 1, -1, 42, -42, FIXNUM_MIN, FIXNUM_MAX] {
+        let w = encode(Value::Int(n));
+        assert_eq!(w & 1, 0, "a fixnum's bit 0 is clear ({})", n);
+        assert_eq!(decode(w), Value::Int(n));
+    }
+    assert_eq!(encode(Value::Empty), NIL_WORD);
+    assert_eq!(NIL_WORD, 7, "`()` is the single word 7 — the island writes the same constant");
+    assert_eq!(encode(Value::Bool(false)), 71);
+    assert_eq!(encode(Value::Bool(true)), 135);
+    for v in [Value::Empty, Value::Bool(false), Value::Bool(true)] {
+        assert_eq!(decode(encode(v)), v);
+    }
+    for c in ['a', 'Z', '\u{10FFFF}', '\0'] {
+        let w = encode(Value::Char(c));
+        assert_eq!(w & 0b111_111, 15, "a char's low six bits");
+        assert_eq!(decode(w), Value::Char(c));
+    }
+    let s = h.alloc_string("round trip".to_string());
+    assert_eq!(encode(s) & 0b111_111, 23, "a str's low six bits");
+    assert_eq!(decode(encode(s)), s);
+    let sym = h.intern_symbol("round-trip");
+    assert_eq!(encode(sym) & 0b111, 3, "a symbol's low three bits");
+    assert_eq!(decode(encode(sym)), sym);
+    let Value::Symbol(seg) = sym else { panic!("expected a symbol") };
+    let path = h.intern_path(&[seg, seg]);
+    assert_eq!(encode(path) & 0b111_111, 31, "a path's low six bits");
+    assert_eq!(decode(encode(path)), path);
+    let f = h.alloc_f64(2.5);
+    assert_eq!(encode(f) & 0b111, 5, "a box's low three bits");
+    assert_eq!(decode(encode(f)), f);
+    let cell = h.cons(Value::Int(1), Value::Empty).expect("cons");
+    assert_eq!(encode(cell) & 0b111, 1, "a cons's low three bits");
+    assert_eq!(decode(encode(cell)), cell);
+}
+
+/// The collector's per-slot question is answered at the width each class
+/// needs: one bit for a fixnum, three for the pointer classes, and only the
+/// small class has to look at its sub-tag — a `str`/`path` is interned in
+/// the heap and swept, a char or an immediate references nothing.
+#[test]
+fn references_heap_is_two_level_for_the_small_class() {
+    use typelisp::{encode, references_heap, FIXNUM_MAX, FIXNUM_MIN};
+    let mut h = Heap::with_capacity(64);
+    for n in [0i64, -1, FIXNUM_MIN, FIXNUM_MAX] {
+        assert!(!references_heap(encode(Value::Int(n))), "fixnum {}", n);
+    }
+    for v in [Value::Empty, Value::Bool(false), Value::Bool(true), Value::Char('x')] {
+        assert!(!references_heap(encode(v)), "{:?}", v);
+    }
+    let s = h.alloc_string("owned".to_string());
+    assert!(references_heap(encode(s)), "a str is interned in the heap");
+    let sym = h.intern_symbol("owned");
+    assert!(references_heap(encode(sym)));
+    let Value::Symbol(seg) = sym else { panic!("expected a symbol") };
+    assert!(references_heap(encode(h.intern_path(&[seg]))));
+    assert!(references_heap(encode(h.alloc_f64(1.0))));
+    let cell = h.cons(Value::Empty, Value::Empty).expect("cons");
+    assert!(references_heap(encode(cell)));
+}
+
+/// A `Value::Int` past the fixnum range has no encoding. `encode` aborts on
+/// one (a runtime-corruption condition — the producers are required to have
+/// boxed it as a bignum); `try_encode` is the same decision as a question.
+#[test]
+fn encoding_an_int_past_63_bits_is_refused() {
+    use typelisp::{try_encode, FIXNUM_MAX, FIXNUM_MIN};
+    assert_eq!(try_encode(Value::Int(FIXNUM_MAX)), Ok(FIXNUM_MAX << 1));
+    assert_eq!(try_encode(Value::Int(FIXNUM_MIN)), Ok(FIXNUM_MIN << 1));
+    assert_eq!(try_encode(Value::Int(FIXNUM_MAX + 1)), Err(FIXNUM_MAX + 1));
+    assert_eq!(try_encode(Value::Int(FIXNUM_MIN - 1)), Err(FIXNUM_MIN - 1));
+    assert_eq!(try_encode(Value::Int(i64::MAX)), Err(i64::MAX));
+    assert_eq!(try_encode(Value::Int(i64::MIN)), Err(i64::MIN));
 }

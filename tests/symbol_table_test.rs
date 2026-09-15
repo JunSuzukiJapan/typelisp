@@ -124,7 +124,7 @@ fn a_symbols_address_leaves_the_low_three_bits_free() {
         assert_eq!(
             s.addr() & 0b111,
             0,
-            "`{}`'s header is not 8-byte aligned — the 3-bit tag would collide with it",
+            "`{}`'s header is not 8-byte aligned — the low-bit tag would collide with it",
             name
         );
     }

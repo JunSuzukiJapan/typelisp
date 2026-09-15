@@ -18,7 +18,7 @@ pub mod value;
 pub use errors::{Error, Loc};
 pub use heap::{base_type_key, inner_type_key, Heap, RootScope, RootStackId};
 pub use symbols::{wk, NsId, SymRef, Symbol, BUILTIN_SYMBOLS, NOT_WELL_KNOWN};
-pub use tagged::{decode, encode, references_heap};
+pub use tagged::{decode, encode, fixnum_fits, references_heap, try_encode, FIXNUM_MAX, FIXNUM_MIN, NIL_WORD};
 pub use value::{BoxId, ConsRef, FloatBox, NarrowInt, PathId, StrId, TypeKeyId, Value, BUILTIN_TYPE_KEYS};
 
 /// `v` cut back to `width` bits and re-extended into the 64-bit word both

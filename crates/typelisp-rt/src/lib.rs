@@ -5284,7 +5284,7 @@ mod tests {
 
     #[test]
     fn encode_decode_round_trips_every_immediate_variant() {
-        for n in [0i64, 1, -1, 42, -42, i64::MIN >> 3, i64::MAX >> 3] {
+        for n in [0i64, 1, -1, 42, -42, i64::MIN >> 1, i64::MAX >> 1] {
             assert_eq!(decode(encode(Value::Int(n))), Value::Int(n), "Int({})", n);
         }
         for c in ['a', 'Z', '0', '\u{10FFFF}', '\0'] {

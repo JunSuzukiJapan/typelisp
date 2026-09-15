@@ -1407,7 +1407,7 @@ fn pending_wait(heap: &Heap) -> Result<(Waiting, Repr), EvalError> {
         // the collector walks those.
         cs::SUSPEND_CHAN_SELECT => {
             let words = cs::take_pending_select();
-            let untag = |w: i64| w >> 3;
+            let untag = |w: i64| w >> typelisp_mem::tagged::FIXNUM_SHIFT;
             if words.len() < 2 {
                 return Err(EvalError::Internal("a compiled `select` carried no arms".to_string()));
             }

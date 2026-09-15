@@ -44,6 +44,14 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
 /// desync this test. Island `defmacro`s go in [`ISLAND_MACROS`] instead —
 /// see its doc comment for why the two must not be merged.
 const ISLAND_DEFUNS: &[&str] = &[
+    "tag-fixnum",
+    "untag-fixnum",
+    "tag-small",
+    "untag-small",
+    "nil-word",
+    "fixnum-test",
+    "low-tag-test",
+    "small-tag-test",
     "narrow-wsig",
     "compile-sexpr-field",
     "compile-tag-struct-field",
@@ -98,7 +106,6 @@ const ISLAND_DEFUNS: &[&str] = &[
     "raising-int-binop-call",
     "sexpr-list-length",
     "bind-let-values",
-    "compile-tag-bits-test",
     "compile-box-kind-test",
     "compile-sexpr-tag-test",
     "compile-pattern-guard",

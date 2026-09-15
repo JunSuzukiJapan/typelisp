@@ -11163,3 +11163,65 @@ Mutex はトークンを 1 つ入れた容量 1 のチャネル。**チャネル
 島の `tag-suspend-arg` を `compile-suspend` の**後ろ**に定義して再生成が落ちた。島に
 前方参照は無い（`defsignature` を書くか、定義順を直す）。1 回目の再生成が丸ごと無駄に
 なった。
+
+## タグ配置を fixnum 1bit（63bit）へ（2026-09-15）
+
+`int`（fixnum ∪ bignum、自動昇格）と `Option<T>` ニッチの4段階計画の段階 0〜1。
+計画本体はセッション外（`~/.claude/plans/cons-sorted-kazoo.md`）にあり、決定事項は
+型名 `int`、`bignum` は `int` に統合、未注釈リテラルの既定は `int`、i32 を返す組み込みは
+全部 `int` へ、拡大変換は `(as int x)`、fixnum は最初から 63bit。
+
+### 配置
+
+`typelisp-mem/src/tagged.rs` の module doc が表。fixnum は `n << 1`（bit0 = 0）、他は奇数で
+下位 3bit が cons(1)/symbol(3)/boxed(5)/small(7)、small は bits3-5 で immediate/char/str/path
+を選び payload は bit6 から。`()` は語 7、`false` 71、`true` 135。SBCL の
+`fixnum-tag-bits = 1` と同じ形で、理由も同じ: fixnum だけが全ビットを欲しがり、fixnum だけが
+算術に直接触れられる（タグ 0 なら `a + b` がそのままタグ付きの和）。
+
+### 切替は ABI 切替と同型——ダンプに配置番号を書く（段階 0）
+
+`ISLAND_DUMP_BODY_ABI` / `EMITS_ABI` / `SOURCE_EMITS_ABI` の三つ組をそのまま `*_LAYOUT` に
+写した。`UnitState::body_layout`/`emits_layout`（FORMAT_VERSION 9→10）、`tagged::LAYOUT`、
+`compile::EMITTED_LAYOUT`。据え付け（`install_compiled_library`）は本体の配置がランタイムと
+違えば拒否、JIT/AOT（`compile_scc`/`aot::compile_file`）は放出配置がランタイムと違えば
+「切替中」と拒否。ABI と違って配置の不一致は 1 呼び出しも生き残れない（`rt_*` シムが
+`decode` した瞬間に別物になる）ので、拒否は据え付け時。
+
+### 一世代ずらしの手順（段階 1、実際に踏んだ順）
+
+1. ランタイムは旧配置のまま、島 SOURCE をコメントまで含めて新配置に書き換え、
+   `SOURCE_EMITS_LAYOUT = 1`。
+2. regen → G1（本体 = 旧、放出 = 新）。`ISLAND_DUMP_EMITS_LAYOUT = 1`。
+3. regen → G2（本体 = 新、放出 = 新）。G1 の旧配置本体が旧ランタイムで走り、新配置の IR を
+   吐く。`ISLAND_DUMP_BODY_LAYOUT = 1`。**ここで prelude を regen してはいけない**——新配置の
+   prelude を旧ランタイムに `load_prelude` が据え付けて全テストが落ちる。
+4. `tagged.rs` と `core_cps.rs` の `select` 記述子の untag（`>> 3` → `FIXNUM_SHIFT`）を切替、
+   `LAYOUT = 1`。G2 が走るようになったので prelude regen。
+5. 確認 regen → G3 == G2（バイト一致、1 パスで不動点）。
+
+Rust 側で配置を知っていたのは `tagged.rs` と `core_cps.rs:1410` の 2 箇所だけで、
+`typelisp-rt` は 0 箇所（全部 `encode`/`decode` 経由）。島は 18 箇所あったが、新配置では
+`tag-fixnum`/`untag-fixnum`/`tag-small`/`untag-small`/`nil-word`/`fixnum-test`/
+`low-tag-test`/`small-tag-test` の 8 つの defun に集めたので、次に配置を触るときは島側も
+1 箇所になる。
+
+### 半語分割は残る
+
+`(int-any-width HI LO)` の 32bit 半語分割は「61bit しか越境できない」が理由だったが、
+63bit になっても i64 リテラルは入らないので機構はそのまま。コメントの数字だけ直した。
+`llvm_op_id` の 61bit 畳みも値を変えていない（変えると全 op-id が変わる）。
+
+### `encode` は切り詰めない
+
+旧 `encode` は `n << 3` で上位 3bit を黙って落としていた。新しい `encode` は fixnum に
+入らない `Value::Int` で `corrupt()`（abort）し、`try_encode` が同じ判断を `Result` で返す。
+`Value::Int` は c-long 等の生語の運び手でもあるが、それらは `Repr::RawWord` として
+`encode` を通らずに越境する（`encode_crossing_args`）ので衝突しない。
+
+### 番人
+
+`mem_test`: 全クラスの往復（各クラスの下位ビットの値まで固定）、`references_heap` の
+2 段判定、63bit 超の拒否。`compile_test`: 全 Sexpr 変種の tag test を compiled と interp で
+突き合わせる（島の 8 defun と `tagged.rs` の表を縛る唯一のテスト）。
+`island_artifacts_test`/`prelude_artifacts_test`: 記録された配置 == 定数 == ランタイム。

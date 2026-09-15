@@ -3833,6 +3833,35 @@ fn compile_extracts_a_narrow_integer_payload_at_its_own_width() {
     assert_eq!(v, Value::Int(1200));
 }
 
+/// Every `Sexpr` variant's tag test agrees between the island and the
+/// interpreter — the test that pins the island's copy of the tag layout
+/// (`tag-fixnum` .. `small-tag-test` in `compiler.rs`) to `typelisp_mem::tagged`'s.
+///
+/// One digit per shape, so a wrong arm shows up as a wrong digit. The
+/// scrutinees cover every class the layout has: a fixnum (one tag bit), the
+/// two pointer classes (three bits), the four small classes (six bits) and
+/// a box. `()` and `false`/`true` are the same immediate sub-class told apart
+/// by payload, so both are here.
+#[test]
+fn compiled_sexpr_tag_tests_agree_with_the_interpreter_for_every_variant() {
+    let program = r#"
+        (defun tag ((s Option<Sexpr>)) i32
+          (match s
+            ((none) 1) ((i32 _) 2) ((f64 _) 3) ((char _) 4) ((bool _) 5)
+            ((sym _) 6) ((str _) 7) ((cons _ _) 8) ((path _) 9)
+            (_ 0)))
+        (defun total () i32
+          (+ (+ (+ (+ (tag ()) (* 10 (tag (i32 -5)))) (+ (* 100 (tag (f64 2.5))) (* 1000 (tag (char #\A)))))
+                (+ (* 10000 (tag (bool false))) (* 100000 (tag 'a-symbol))))
+             (+ (+ (* 1000000 (tag (str "s"))) (* 10000000 (tag (list 1 2))))
+                (* 100000000 (tag 'a::b)))))
+    "#;
+    let interpreted = eval_ok(&format!("{}\n(total)", program));
+    let compiled = eval_ok_with_compiler(&format!("{}\n(compile tag)\n(compile total)\n(total)", program));
+    assert_eq!(interpreted, Value::Int(987_654_321));
+    assert_eq!(compiled, interpreted);
+}
+
 /// A compiled `match` on an `f32` node takes the `f32` arm and not the `f64`
 /// one.
 ///

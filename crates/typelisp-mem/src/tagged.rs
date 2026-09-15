@@ -9,10 +9,46 @@
 //! to be able to say which of those words reference the heap. `typelisp-abi`
 //! depends on *this* crate, so the decoder could not have been read from
 //! there. Re-deriving the scheme here instead would be two tables that must
-//! agree about all eight tags.
+//! agree about every class.
 //!
 //! `typelisp-abi` re-exports [`encode`] and [`decode`], so every existing
 //! caller still names them where it always did.
+//!
+//! # The layout
+//!
+//! A variable-length low tag, SBCL's shape (its `fixnum-tag-bits` is 1 and
+//! its `lowtag` is wider): a fixnum spends **one** bit, everything else
+//! pays more, because the fixnum is the one class whose payload wants every
+//! bit it can get and the one class arithmetic touches directly.
+//!
+//! ```text
+//! ....0      fixnum      n << 1, 63-bit signed
+//! ..001      cons        address | 1     (a `Cell` is 8-byte aligned)
+//! ..011      symbol      address | 3     (a `Symbol` header is 8-byte aligned)
+//! ..101      boxed       (BoxId << 3) | 5
+//! ..111      small       bits 3-5 pick the class, the payload sits above bit 6:
+//!    000 immediate   0 = `()`, 1 = false, 2 = true   → the words 7, 71, 135
+//!    001 char        scalar << 6 | 15
+//!    010 str         StrId  << 6 | 23
+//!    011 path        PathId << 6 | 31
+//!    1xx reserved    `decode` aborts
+//! ```
+//!
+//! Why the low bits and not the high ones: the low three bits of an aligned
+//! address are the allocator's to give away, while the high bits belong to
+//! the architecture (48/57-bit virtual addresses, arm64's top-byte and
+//! pointer-authentication schemes). And with the fixnum tag being zero,
+//! `a + b` on two tagged fixnums is the tagged sum, comparison is comparison
+//! of the words, and the collector's question "does this slot reference the
+//! heap?" is answered for a fixnum by one bit.
+//!
+//! Why a fixnum is 63 bits and not 64: some bit has to say "not a pointer".
+//! The language has no 64-bit integer type for exactly this reason
+//! (`docs/functions.md` §1); the arbitrary-precision `int` promotes to a
+//! bignum box above this range instead of dropping bits, and [`encode`]
+//! aborts rather than truncate if handed a wider `Value::Int` — a `Value::Int`
+//! is also how raw C words travel through the *interpreter*, and those must
+//! never reach a tagged word.
 
 use crate::value::{BoxId, PathId, StrId, Value};
 use crate::{ConsRef, SymRef};
@@ -29,38 +65,54 @@ use crate::{ConsRef, SymRef};
 /// committed island's bodies are under the old layout while the SOURCE it
 /// compiles emits the new one, and only the bootstrap binary may run in
 /// that state.
-pub const LAYOUT: u8 = LAYOUT_THREE_BIT;
+pub const LAYOUT: u8 = LAYOUT_FIXNUM_ONE_BIT;
 
-/// Every word carries a 3-bit tag in its low bits; a fixnum keeps 61 bits.
+/// Every word carried a 3-bit tag in its low bits; a fixnum kept 61 bits.
+/// Retired 2026-09-15; the number stays taken so a dump that records it is
+/// refused by name rather than misread.
 pub const LAYOUT_THREE_BIT: u8 = 0;
+/// The layout above: a fixnum spends one bit, every other class three or six.
+pub const LAYOUT_FIXNUM_ONE_BIT: u8 = 1;
 
-pub const TAG_BITS: i64 = 3;
-pub const TAG_MASK: i64 = 0b111;
+/// A fixnum is `n << FIXNUM_SHIFT` with the low bit clear.
+pub const FIXNUM_SHIFT: i64 = 1;
+pub const FIXNUM_MIN: i64 = -(1 << 62);
+pub const FIXNUM_MAX: i64 = (1 << 62) - 1;
 
-// Stage 2's tag table (`docs/dev/implementation-log.md, "Sexpr表現 +
-// Match/Construct/共有Rustライブラリ 実装計画"`): 8 tags in the low 3 bits.
-// `Nil`/`Bool` share one "immediate constant" tag (`TAG_IMMEDIATE`) since
-// `Value` has 9 variants but only 8 tag slots — see that doc for the full
-// rationale (why this needs no more than 3 bits, the alignment argument for
-// `Cons` pointers, etc.). `TAG_BOXED` (formerly `TAG_FLOAT`, reclaimed by the
-// `Sexpr`/`RtValue` unification plan — see `BoxedObj`'s doc comment):
-// `Value::Float` used to claim this tag directly and was never actually
-// representable in compiled code (`encode`/`decode` both failed on it); an
-// `f64` doesn't fit losslessly in the remaining bits alongside a tag anyway,
-// so this tag now means "payload is a `BoxId` into the heap's boxed-object
-// store" instead of trying to pack an immediate float.
-pub const TAG_FIXNUM: i64 = 0b000;
+/// The three-bit classes. A fixnum is any word with bit 0 clear, so it has
+/// no entry here: `FIXNUM_MASK`/`FIXNUM_TAG` are its test.
+pub const FIXNUM_MASK: i64 = 0b1;
+pub const FIXNUM_TAG: i64 = 0b0;
+pub const LOW_MASK: i64 = 0b111;
 pub const TAG_CONS: i64 = 0b001;
-pub const TAG_SYMBOL: i64 = 0b010;
-pub const TAG_STR: i64 = 0b011;
-pub const TAG_CHAR: i64 = 0b100;
-pub const TAG_PATH: i64 = 0b101;
-pub const TAG_IMMEDIATE: i64 = 0b110;
-pub const TAG_BOXED: i64 = 0b111;
+pub const TAG_SYMBOL: i64 = 0b011;
+pub const TAG_BOXED: i64 = 0b101;
+pub const TAG_SMALL: i64 = 0b111;
+
+/// The small classes: `LOW_MASK` bits are `TAG_SMALL`, bits 3-5 are one of
+/// these, and the payload starts at `SMALL_SHIFT`.
+pub const SMALL_MASK: i64 = 0b111_111;
+pub const SMALL_SHIFT: i64 = 6;
+pub const TAG_IMMEDIATE: i64 = (0 << 3) | TAG_SMALL;
+pub const TAG_CHAR: i64 = (1 << 3) | TAG_SMALL;
+pub const TAG_STR: i64 = (2 << 3) | TAG_SMALL;
+pub const TAG_PATH: i64 = (3 << 3) | TAG_SMALL;
+
+/// `BoxId` sits above the three-bit class.
+pub const BOXED_SHIFT: i64 = 3;
 
 pub const IMMEDIATE_NIL: i64 = 0;
 pub const IMMEDIATE_FALSE: i64 = 1;
 pub const IMMEDIATE_TRUE: i64 = 2;
+
+/// The empty list as a word — `Value::Empty`'s encoding, and `Option<T>`'s
+/// `none` under the niche. The island writes the same constant.
+pub const NIL_WORD: i64 = (IMMEDIATE_NIL << SMALL_SHIFT) | TAG_IMMEDIATE;
+
+/// Whether `n` survives `encode` as a fixnum.
+pub fn fixnum_fits(n: i64) -> bool {
+    (FIXNUM_MIN..=FIXNUM_MAX).contains(&n)
+}
 
 /// Prints `msg` to stderr and aborts — a corrupt tagged word means the
 /// *runtime* is broken, not the program, so there is nothing to unwind to.
@@ -75,58 +127,93 @@ fn corrupt(msg: &str) -> ! {
 }
 
 /// Encodes a `Value` into the tagged `i64` representation compiled code
-/// uses for a `Sexpr`. `Value::Boxed` needs no allocation here — unlike a
-/// hypothetical unboxed `Float` payload, a `BoxId` is already just a small
-/// integer index, exactly like `Symbol`/`Str`/`Path`; the caller must have
-/// already allocated the box (via e.g. `Heap::alloc_f64`) the same way a
-/// `Value::Cons` must already be a live heap cell before reaching this
-/// function.
+/// uses for a `Sexpr`. `Value::Boxed` needs no allocation here — a `BoxId`
+/// is already just a small integer index, exactly like `Str`/`Path`; the
+/// caller must have already allocated the box (via e.g. `Heap::alloc_f64`)
+/// the same way a `Value::Cons` must already be a live heap cell before
+/// reaching this function.
+///
+/// Aborts on a `Value::Int` outside the fixnum range: that word has no
+/// encoding, and the producers that can make one (the reader, `int`
+/// arithmetic) are required to have boxed it as a bignum already
+/// (`Heap::canonical_int`). Truncating here would be the silent loss of
+/// bits the 63-bit layout exists to make impossible.
 pub fn encode(v: Value) -> i64 {
-    match v {
-        Value::Int(n) => (n << TAG_BITS) | TAG_FIXNUM,
+    match try_encode(v) {
+        Ok(w) => w,
+        Err(n) => corrupt(&format!("encode: {} does not fit a 63-bit fixnum and was not boxed", n)),
+    }
+}
+
+/// [`encode`] as a question: `Err(n)` for the one value with no encoding, a
+/// `Value::Int` outside the fixnum range. For the producers that have to
+/// decide between a fixnum and a bignum box before a word exists, and for
+/// tests — `encode` itself aborts, as a runtime-corruption condition must.
+pub fn try_encode(v: Value) -> Result<i64, i64> {
+    Ok(match v {
+        Value::Int(n) => {
+            if !fixnum_fits(n) {
+                return Err(n);
+            }
+            n << FIXNUM_SHIFT
+        }
         Value::Cons(c) => (c.addr() as i64) | TAG_CONS,
         // The address itself, `Cons`-style: a `Symbol` header is 8-byte
         // aligned, so the low 3 bits are the tag's to use.
         Value::Symbol(s) => (s.addr() as i64) | TAG_SYMBOL,
-        Value::Str(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_STR,
-        Value::Char(c) => ((c as i64) << TAG_BITS) | TAG_CHAR,
-        Value::Path(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_PATH,
-        Value::Empty => (IMMEDIATE_NIL << TAG_BITS) | TAG_IMMEDIATE,
-        Value::Bool(false) => (IMMEDIATE_FALSE << TAG_BITS) | TAG_IMMEDIATE,
-        Value::Bool(true) => (IMMEDIATE_TRUE << TAG_BITS) | TAG_IMMEDIATE,
-        Value::Boxed(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_BOXED,
-    }
+        Value::Str(id) => ((id.as_u32() as i64) << SMALL_SHIFT) | TAG_STR,
+        Value::Char(c) => ((c as i64) << SMALL_SHIFT) | TAG_CHAR,
+        Value::Path(id) => ((id.as_u32() as i64) << SMALL_SHIFT) | TAG_PATH,
+        Value::Empty => NIL_WORD,
+        Value::Bool(false) => (IMMEDIATE_FALSE << SMALL_SHIFT) | TAG_IMMEDIATE,
+        Value::Bool(true) => (IMMEDIATE_TRUE << SMALL_SHIFT) | TAG_IMMEDIATE,
+        Value::Boxed(id) => ((id.as_u32() as i64) << BOXED_SHIFT) | TAG_BOXED,
+    })
 }
 
 /// The inverse of [`encode`].
 pub fn decode(tagged: i64) -> Value {
-    match tagged & TAG_MASK {
-        TAG_FIXNUM => Value::Int(tagged >> TAG_BITS),
-        TAG_CONS => Value::Cons(unsafe { ConsRef::from_addr((tagged & !TAG_MASK) as usize) }),
-        TAG_SYMBOL => Value::Symbol(unsafe { SymRef::from_addr((tagged & !TAG_MASK) as usize) }),
-        TAG_STR => Value::Str(StrId::from_u32((tagged >> TAG_BITS) as u32)),
-        TAG_CHAR => {
-            let scalar = (tagged >> TAG_BITS) as u32;
-            Value::Char(char::from_u32(scalar).unwrap_or_else(|| corrupt("decode: invalid char scalar value")))
-        }
-        TAG_PATH => Value::Path(PathId::from_u32((tagged >> TAG_BITS) as u32)),
-        TAG_IMMEDIATE => match tagged >> TAG_BITS {
-            IMMEDIATE_NIL => Value::Empty,
-            IMMEDIATE_FALSE => Value::Bool(false),
-            IMMEDIATE_TRUE => Value::Bool(true),
-            other => corrupt(&format!("decode: unknown immediate tag payload {}", other)),
+    if tagged & FIXNUM_MASK == FIXNUM_TAG {
+        return Value::Int(tagged >> FIXNUM_SHIFT);
+    }
+    match tagged & LOW_MASK {
+        TAG_CONS => Value::Cons(unsafe { ConsRef::from_addr((tagged & !LOW_MASK) as usize) }),
+        TAG_SYMBOL => Value::Symbol(unsafe { SymRef::from_addr((tagged & !LOW_MASK) as usize) }),
+        TAG_BOXED => Value::Boxed(BoxId::from_u32((tagged >> BOXED_SHIFT) as u32)),
+        TAG_SMALL => match tagged & SMALL_MASK {
+            TAG_IMMEDIATE => match tagged >> SMALL_SHIFT {
+                IMMEDIATE_NIL => Value::Empty,
+                IMMEDIATE_FALSE => Value::Bool(false),
+                IMMEDIATE_TRUE => Value::Bool(true),
+                other => corrupt(&format!("decode: unknown immediate tag payload {}", other)),
+            },
+            TAG_CHAR => {
+                let scalar = (tagged >> SMALL_SHIFT) as u32;
+                Value::Char(char::from_u32(scalar).unwrap_or_else(|| corrupt("decode: invalid char scalar value")))
+            }
+            TAG_STR => Value::Str(StrId::from_u32((tagged >> SMALL_SHIFT) as u32)),
+            TAG_PATH => Value::Path(PathId::from_u32((tagged >> SMALL_SHIFT) as u32)),
+            other => corrupt(&format!("decode: reserved small tag {:#b}", other)),
         },
-        TAG_BOXED => Value::Boxed(BoxId::from_u32((tagged >> TAG_BITS) as u32)),
-        _ => unreachable!("a 3-bit mask is always one of the 8 arms above"),
+        _ => unreachable!("an odd word's low three bits are one of the four odd classes above"),
     }
 }
 
 /// Whether a tagged word points at something the collector owns.
 ///
 /// The mark phase's question about a compiled frame slot, asked without
-/// building a `Value` first: a fixnum, a char and the three immediates
-/// reference nothing, so a frame full of raw `i32` locals costs the collector
-/// one mask test and one tag test per slot and no more.
+/// building a `Value` first. Two levels, because the layout is: a fixnum
+/// answers on bit 0 alone, a pointer class on the low three bits, and only
+/// the small class has to look at its sub-tag (a `Str` and a `Path` are
+/// interned in the heap and swept; a char and the immediates reference
+/// nothing).
 pub fn references_heap(tagged: i64) -> bool {
-    matches!(tagged & TAG_MASK, TAG_CONS | TAG_SYMBOL | TAG_STR | TAG_PATH | TAG_BOXED)
+    if tagged & FIXNUM_MASK == FIXNUM_TAG {
+        return false;
+    }
+    match tagged & LOW_MASK {
+        TAG_CONS | TAG_SYMBOL | TAG_BOXED => true,
+        TAG_SMALL => matches!(tagged & SMALL_MASK, TAG_STR | TAG_PATH),
+        _ => unreachable!("an odd word's low three bits are one of the four odd classes above"),
+    }
 }

@@ -686,7 +686,7 @@ pub const SOURCE: &str = r#"
 ;; that needs a real heap read rather than pure bit manipulation), and (Stage
 ;; 7) `str`'s `Str` field. `str` is deliberately the *odd one out* among
 ;; these: unlike `i32`/`char`/`bool`, extraction here does *not* strip the
-;; 3-bit tag -- it returns `v` unchanged. That's not an oversight: a bare
+;; tag -- it returns `v` unchanged. That's not an oversight: a bare
 ;; `Type::Str` value's compiled representation is *defined* to be the exact
 ;; same tagged immediate a `Sexpr::Str` already is (`typelisp-rt`'s
 ;; `rt_str_new` returns it pre-tagged for the same reason), specifically so
@@ -718,6 +718,40 @@ pub const SOURCE: &str = r#"
 ;; this same source string (see this module's doc comment's "Helpers that
 ;; only ever call *out* of the ring" paragraph for the general shape of this
 ;; constraint). Purely a textual move; neither function's own body changed.
+;; The tag layout, as `typelisp-mem`'s `tagged.rs` lays it out (its module
+;; doc is the table; these are the island's copy of the same numbers, and
+;; `tests/compile_test.rs`'s per-variant round trip is what keeps the two
+;; agreeing). A fixnum spends one bit: `n << 1`, bit 0 clear. Every other
+;; word is odd; its low three bits pick cons (1), symbol (3), boxed (5) or
+;; the "small" class (7), whose bits 3-5 pick immediate (0), char (1), str
+;; (2) or path (3) and whose payload sits above bit 6. So `()` is the word 7,
+;; `false` 71, `true` 135, a char `(c << 6) | 15`.
+;;
+;; Everything below that tags or untags a word goes through these eight,
+;; so the layout is written in one place in this island too.
+(defun tag-fixnum ((builder llvm-builder) (v llvm-value)) llvm-value
+  (build-shl builder v (const-word builder 1)))
+(defun untag-fixnum ((builder llvm-builder) (v llvm-value)) llvm-value
+  (build-ashr builder v (const-word builder 1)))
+;; `subtag` is the small class's 3-bit selector (0 immediate, 1 char, 2 str,
+;; 3 path); the word is `(payload << 6) | (subtag << 3) | 7`.
+(defun tag-small ((builder llvm-builder) (v llvm-value) (subtag i32)) llvm-value
+  (build-or builder (build-shl builder v (const-word builder 6)) (const-word builder (+ (* subtag 8) 7))))
+(defun untag-small ((builder llvm-builder) (v llvm-value)) llvm-value
+  (build-lshr builder v (const-word builder 6)))
+(defun nil-word ((builder llvm-builder)) llvm-value
+  (const-word builder 7))
+;; Whether `v` is a fixnum: bit 0 clear.
+(defun fixnum-test ((builder llvm-builder) (v llvm-value)) llvm-value
+  (build-icmp-eq builder (build-and builder v (const-word builder 1)) (const-word builder 0)))
+;; Whether `v`'s low three bits are `tag` — cons/symbol/boxed, or the whole
+;; small class at once.
+(defun low-tag-test ((builder llvm-builder) (v llvm-value) (tag i32)) llvm-value
+  (build-icmp-eq builder (build-and builder v (const-word builder 7)) (const-word builder tag)))
+;; Whether `v` is a small word of sub-class `subtag`: low six bits.
+(defun small-tag-test ((builder llvm-builder) (v llvm-value) (subtag i32)) llvm-value
+  (build-icmp-eq builder (build-and builder v (const-word builder 63)) (const-word builder (+ (* subtag 8) 7))))
+
 ;; The `wsig` code (`width * 2 + signed`, `typelisp-rt`'s `wsig`) the five
 ;; narrow-integer `Sexpr` variants name: 12=i8 13=i16 14=u8 15=u16 16=u32.
 ;; A constant emitted from the *variant*, never read off the value — the
@@ -729,8 +763,8 @@ pub const SOURCE: &str = r#"
 
 (defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i32) (idx i32)) llvm-value
   (case variant
-    ;; `i32`(1): the signed value sits above the 3 tag bits.
-    (1 (build-ashr builder v (const-word builder 3)))
+    ;; `i32`(1): the signed value sits above the fixnum's one tag bit.
+    (1 (untag-fixnum builder v))
     ;; `f64`(2)/`f32`(11): the payload is inside the box, and which box it is
     ;; is what the two numbers say. `rt_f32_value` widens back into the `f64`
     ;; bit pattern a compiled float register holds -- the carrier is wider
@@ -742,8 +776,8 @@ pub const SOURCE: &str = r#"
           (store-arg builder args-ptr 0 v)
           (build-call builder (get-function m "rt_f32_value") args-ptr 1)))
     ;; `char`(3) is unsigned; `bool`(4) undoes `compile-bool`'s `1`/`2`.
-    (3 (build-lshr builder v (const-word builder 3)))
-    (4 (build-sub builder (build-lshr builder v (const-word builder 3)) (const-word builder 1)))
+    (3 (untag-small builder v))
+    (4 (build-sub builder (untag-small builder v) (const-word builder 1)))
     ;; `sym`(5)/`str`(6)/`bignum`(8)/`ratio`(9): the payload *is* the
     ;; already-tagged word — `Repr::field_kind`'s `6` passthrough — so there
     ;; is no bit manipulation and no box to open. (`5` reaches here from
@@ -804,8 +838,8 @@ pub const SOURCE: &str = r#"
 ;; what it is.
 (defun compile-tag-struct-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind i32)) llvm-value
   (case kind
-    ;; `i32`(1): the value moves above the 3 tag bits.
-    (1 (build-shl builder v (const-word builder 3)))
+    ;; `i32`(1): the value moves above the fixnum's one tag bit.
+    (1 (tag-fixnum builder v))
     ;; `f64`(2)/`f32`(11): the two kinds that allocate, and they allocate
     ;; *different boxes*. Which one is not a detail the value can be asked
     ;; for at run time — the word is the same bit pattern either way — so it
@@ -816,19 +850,19 @@ pub const SOURCE: &str = r#"
     (11 (let ((args-ptr (alloca-args builder 1)))
           (store-arg builder args-ptr 0 v)
           (build-call builder (get-function m "rt_f32_new") args-ptr 1)))
-    (3 (build-or builder (build-shl builder v (const-word builder 3)) (const-word builder 4)))
-    (4 (build-or builder (build-shl builder (build-add builder v (const-word builder 1)) (const-word builder 3)) (const-word builder 6)))
+    (3 (tag-small builder v 1))
+    (4 (tag-small builder (build-add builder v (const-word builder 1)) 0))
     ;; `6` is every already-tagged word: both directions leave it alone.
     (6 v)
-    ;; `unit`(100): the slot holds a tagged `Value::Empty` -- `(IMMEDIATE_NIL
-    ;; << 3) | TAG_IMMEDIATE`, i.e. the constant `6` (`typelisp-rt`'s
-    ;; `encode`), the same word an interpreted writer puts in a `()` field,
+    ;; `unit`(100): the slot holds a tagged `Value::Empty` -- `NIL_WORD`,
+    ;; the constant `7` (`typelisp-mem`'s `tagged.rs`), the same word an
+    ;; interpreted writer puts in a `()` field,
     ;; so the two produce identical boxes. `v` (the plain `0` `compile-unit`
     ;; produced) is deliberately discarded: a unit type has one value, so the
     ;; slot carries no information and only has to hold a word the GC can
     ;; `decode` safely -- an immediate nil references nothing.
     ;; `compile-sexpr-field` above is the inverse.
-    (100 (const-word builder 6))
+    (100 (nil-word builder))
     (else (panic "compile-tag-struct-field: field type is not representable in compiled code yet"))))
 
 ;; `names` is now a list of `(name . kind)` pairs (`core_bridge::name_kind_list`
@@ -1707,21 +1741,19 @@ pub const SOURCE: &str = r#"
 ;; (`registry::sexpr_def`'s variant order: 0=nil 1=i32 2=f64 3=char
 ;; 4=bool 5=sym 6=str 7=cons 8=bignum 9=ratio 10=path 11=f32 12=i8 13=i16
 ;; 14=u8 15=u16 16=u32) -- `nil`/`bool` both compile
-;; to the same 3-bit tag (`typelisp-rt`'s `TAG_IMMEDIATE`, 6) and are told
-;; apart by `v`'s payload bits instead (`0` vs non-zero, see that crate's
-;; `encode`/`decode`). The two float widths, the five narrow integer widths,
-;; `bignum` and `ratio` all share `TAG_BOXED` (7)
+;; to the same immediate sub-class (`typelisp-mem`'s `TAG_IMMEDIATE`) and are
+;; told apart by `v`'s payload bits instead (`0` vs non-zero, see that
+;; crate's `encode`/`decode`). The two float widths, the five narrow integer
+;; widths, `bignum` and `ratio` all share `TAG_BOXED` (5)
 ;; with every other heap-boxed object, so the tag alone can't tell them
 ;; apart -- they go through `rt_box_kind` (a match already
 ;; implies the tag is `TAG_BOXED`, so no separate tag check is emitted).
 ;; Only `i32` reads its value straight out of the tagged word: that is the
 ;; width a bare `Sexpr` integer means, and the other five say which they are
 ;; from inside their box.
-;; Every remaining variant has its own dedicated tag.
-;; Whether `v`'s low three bits are `tag` — the shared half of every
-;; non-boxed `Sexpr` tag test below.
-(defun compile-tag-bits-test ((builder llvm-builder) (v llvm-value) (tag i32)) llvm-value
-  (build-icmp-eq builder (build-and builder v (const-word builder 7)) (const-word builder tag)))
+;; Every remaining variant has its own dedicated tag, at one of the three
+;; widths the layout has: `fixnum-test` (one bit), `low-tag-test` (three) and
+;; `small-tag-test` (six) above.
 
 ;; Whether `v` is a heap box of kind `kind` (`rt_box_kind`'s numbering:
 ;; 1 = f64, 2 = bignum, 3 = ratio, 4 = f32, 5/6/7/8/9 = i8/i16/u8/u16/u32) —
@@ -1748,19 +1780,23 @@ pub const SOURCE: &str = r#"
     (14 (compile-box-kind-test builder m v 7))
     (15 (compile-box-kind-test builder m v 8))
     (16 (compile-box-kind-test builder m v 9))
-    ;; `nil`(0) and `bool`(4) share the immediate tag `6` and differ only in
-    ;; the payload: nil's is zero, a bool's never is.
-    (0 (build-and builder
-                  (compile-tag-bits-test builder v 6)
-                  (build-icmp-eq builder (build-lshr builder v (const-word builder 3)) (const-word builder 0))))
+    ;; `nil`(0) and `bool`(4) share the immediate sub-class and differ only
+    ;; in the payload: nil's is zero, a bool's never is. `nil` is the single
+    ;; word 7, so its test is one comparison.
+    (0 (build-icmp-eq builder v (nil-word builder)))
     (4 (build-and builder
-                  (compile-tag-bits-test builder v 6)
-                  (build-icmp-ne builder (build-lshr builder v (const-word builder 3)) (const-word builder 0))))
-    ;; Everything else is one comparison against `typelisp-abi`'s tag table.
-    (else (compile-tag-bits-test builder v
-                                 (case variant
-                                   (1 0) (3 4) (5 2) (6 3) (7 1) (10 5)
-                                   (else (panic "compile-sexpr-tag-test: unknown Sexpr variant")))))))
+                  (small-tag-test builder v 0)
+                  (build-icmp-ne builder v (nil-word builder))))
+    ;; `i32`(1): bit 0 clear.
+    (1 (fixnum-test builder v))
+    ;; `sym`(5)/`cons`(7): the three-bit pointer classes.
+    (5 (low-tag-test builder v 3))
+    (7 (low-tag-test builder v 1))
+    ;; `char`(3)/`str`(6)/`path`(10): the small class's sub-classes.
+    (3 (small-tag-test builder v 1))
+    (6 (small-tag-test builder v 2))
+    (10 (small-tag-test builder v 3))
+    (else (panic "compile-sexpr-tag-test: unknown Sexpr variant"))))
 
 ;; Shared by every atomic pattern test (`pat-lit`'s literal-equality
 ;; check, a Ctor pattern's tag test): appends a fresh "this test passed"
@@ -1991,9 +2027,9 @@ pub const SOURCE: &str = r#"
 
 ;; `(int HI LO)` -- two 32-bit halves, not one word, for
 ;; the same reason `compile-float-any-width` takes two: this island
-;; reads a `Sexpr` int back through its 3-bit tag, so only
-;; 61 bits survive the crossing and a wider literal arrived
-;; sign-extended from bit 60. Reassembled here in LLVM,
+;; reads a `Sexpr` int back through its fixnum tag, so only
+;; 63 bits survive the crossing and a wider literal arrived
+;; sign-extended from bit 62. Reassembled here in LLVM,
 ;; where a full 64-bit word is ordinary -- doing it in the
 ;; island's own arithmetic would overflow the same way.
 ;;
@@ -2057,8 +2093,8 @@ pub const SOURCE: &str = r#"
 ;; `bits` arrives as two 32-bit halves `(float-any-width hi lo)`
 ;; (`core_bridge`'s `float-any-width` node, interp-closure removal
 ;; Stage 8a): a single tagged `Sexpr` `i32` would lose
-;; the top 3 bits of a full-width `f64` pattern when
-;; read back here (`sexpr-i32` = `>> 3`), decoding e.g.
+;; the top bit of a full-width `f64` pattern when
+;; read back here (`sexpr-i32` = `>> 1`), decoding e.g.
 ;; `2.0` to `0.0`. Reassemble with `(hi << 32) | lo` —
 ;; LLVM constant-folds it back to the exact 64-bit
 ;; pattern. `low-half-word` clears the low half's sign
@@ -4260,15 +4296,13 @@ pub const SOURCE: &str = r#"
       ;; the unwrapped value the same word, so this rejects the empty list
       ;; and then applies `P` to that same `v`.
       ;;
-      ;; One comparison, not the negation of `compile-sexpr-tag-test`'s
-      ;; two-part nil test: the empty list is a single word. `Value::Empty`
-      ;; encodes as `(IMMEDIATE_NIL << TAG_BITS) | TAG_IMMEDIATE` =
-      ;; `(0 << 3) | 6` = 6 (`typelisp-abi`), so "tag is 6 and payload is 0"
-      ;; and "the word is 6" are the same test, and this is its opposite.
+      ;; One comparison: the empty list is a single word (`NIL_WORD`, 7 —
+      ;; `typelisp-mem`'s `tagged.rs`), and this is the opposite of the nil
+      ;; test `compile-sexpr-tag-test` emits for variant 0.
       (pat-nonempty
        (progn
          (compile-pattern-guard builder cur-fn
-           (build-icmp-ne builder v (const-word builder 6)) fail-block)
+           (build-icmp-ne builder v (nil-word builder)) fail-block)
          (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v (sexpr-car (sexpr-cdr pat)) fail-block)))
       ;; `(pat-bind NAME KIND)` -- binds into a fresh slot in this arm's own
       ;; frame. A *frame* slot, not an `alloca`: the name stays in scope for
@@ -4286,7 +4320,7 @@ pub const SOURCE: &str = r#"
          (set env nm bslot)))
       ;; `(pat-lit HI LO)` -- two 32-bit halves, like `(int HI LO)` and
       ;; `(float HI LO)`. A pattern's integer is matched against an `Sexpr`,
-      ;; so it already fits in the 61 bits a tagged int carries; the shape is
+      ;; so it already fits in the 63 bits a tagged int carries; the shape is
       ;; uniform so that "an integer crosses as two halves" has no exceptions.
       (pat-lit
        (compile-pattern-guard builder cur-fn
@@ -4836,7 +4870,7 @@ pub const SOURCE: &str = r#"
 ;; fields (Sexpr/RtValue unification, Stage 0) are
 ;; boxed via `rt_f64_new`/`rt_f32_new` (`typelisp-rt`'s
 ;; `TAG_BOXED`) rather than any bit manipulation here
-;; — `f64` doesn't fit alongside a 3-bit tag the way
+;; — `f64` doesn't fit alongside a tag the way
 ;; `int`/`char`/`bool` do. The field's own compiled
 ;; value is already the raw `f64` bit pattern
 ;; (`f64::to_bits`), the convention `rt_f64_new`
@@ -4852,16 +4886,14 @@ pub const SOURCE: &str = r#"
     ;; has no argument at all, and a hoisted `compile-value` would emit that
     ;; argument's IR even for the variants that never use it.
     (case variant
-      (0 (const-word builder 6))
-      (1 (build-shl builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)) (const-word builder 3)))
+      (0 (nil-word builder))
+      (1 (tag-fixnum builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms))))
       (2 (let ((args-ptr (alloca-args builder 1)))
            (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
            (build-call builder (get-function m "rt_f64_new") args-ptr 1)))
-      (3 (build-or builder
-                   (build-shl builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)) (const-word builder 3))
-                   (const-word builder 4)))
+      (3 (tag-small builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)) 1))
       (4 (let ((b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms))))
-           (build-or builder (build-shl builder (build-add builder b (const-word builder 1)) (const-word builder 3)) (const-word builder 6))))
+           (tag-small builder (build-add builder b (const-word builder 1)) 0)))
       ;; `sym`(5)/`str`(6)/`bignum`(8)/`ratio`(9): the compiled argument is
       ;; already the fully tagged word this variant carries — a `Symbol`
       ;; immediate, a `Value::Str`, or `compile-bignum-literal`/
@@ -5181,7 +5213,7 @@ pub const SOURCE: &str = r#"
                  (compile-sexpr-field builder m raw (if (equal method "bucket-key") key-kind val-kind) 0))))
             ;; The key and the value are spilled *tagged*, so the slot's mask
             ;; needs no per-kind decision: `compile-tag-struct-field` always
-            ;; produces a tagged `Sexpr`, and a scalar's tag is `TAG_FIXNUM`,
+            ;; produces a tagged `Sexpr`, and a scalar's is a fixnum,
             ;; which the collector follows nowhere.
             ("bucket-put"
              (let* ((h-slot (spill builder m 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))
@@ -5658,14 +5690,14 @@ pub const SOURCE: &str = r#"
            (n (select-arm-count arms))
            (argc (+ 2 (* 3 n)))
            (args-ptr (frame-slots builder m 2 argc)))
-      (store-arg builder args-ptr 0 (const-word builder (* n 8)))
-      (store-arg builder args-ptr 1 (const-word builder (if (select-has-else arms) 8 0)))
+      (store-arg builder args-ptr 0 (const-word builder (* n 2)))
+      (store-arg builder args-ptr 1 (const-word builder (if (select-has-else arms) 2 0)))
       (fill-select-ops m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr 2 arms)
       (let* ((ignored (build-call builder (get-function m "rt_suspend_chan_select") args-ptr argc))
              (raw (coroutine-suspend builder m))
              (car-ptr (alloca-args builder 1)))
         (store-arg builder car-ptr 0 raw)
-        (let* ((idx-v (build-ashr builder (build-call builder (get-function m "rt_car") car-ptr 1) (const-word builder 3)))
+        (let* ((idx-v (untag-fixnum builder (build-call builder (get-function m "rt_car") car-ptr 1)))
                (cdr-ptr (alloca-args builder 1)))
           (store-arg builder cdr-ptr 0 raw)
           (let* ((val-v (build-call builder (get-function m "rt_cdr") cdr-ptr 1))
@@ -5750,16 +5782,16 @@ pub const SOURCE_EMITS_ABI: u8 = typelisp_abi::BODY_ABI_COROUTINE;
 /// the runtime's `rt_*` shims encode and decode under
 /// `typelisp_mem::tagged::LAYOUT`, so a body under any other layout is
 /// refused at install (`compile::driver::install_compiled_library`).
-pub const ISLAND_DUMP_BODY_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_THREE_BIT;
+pub const ISLAND_DUMP_BODY_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_FIXNUM_ONE_BIT;
 
 /// Which tag layout the bodies inside [`ISLAND_DUMP`] *emit*. Differs from
 /// [`ISLAND_DUMP_BODY_LAYOUT`] for exactly the middle generation of a layout
 /// changeover: old bodies, run on the old runtime by the bootstrap binary
 /// alone, emitting the new layout.
-pub const ISLAND_DUMP_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_THREE_BIT;
+pub const ISLAND_DUMP_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_FIXNUM_ONE_BIT;
 
 /// Which tag layout [`SOURCE`] as it stands **now** emits.
-pub const SOURCE_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_THREE_BIT;
+pub const SOURCE_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_FIXNUM_ONE_BIT;
 
 /// Loads the compiler island as **native code** (interp-closure removal
 /// Stage 4): the committed dump's checked state and definitions — which
