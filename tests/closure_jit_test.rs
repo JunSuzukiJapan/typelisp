@@ -20,35 +20,10 @@
 //! two permanently-allowed exceptions.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
-/// The compiler body must be loaded (`Interp::jit_define_closure` looks up
-/// `compile-function` in `self.fns`) even though nothing here ever calls
-/// `(compile ...)` — a definition-time JIT attempt drives the exact same
-/// self-hosted `compile-function` entry point `(compile fn)` does, just for
-/// a synthetic constructor rather than a user-named `defun`. The prelude is
-/// loaded too since some of these programs use `dotimes`/`while`.
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok(last)
-}
-
-fn eval_ok(src: &str) -> Value {
-    run(src).expect("eval failed")
-}
+mod common;
+use common::eval_ok_compiled as eval_ok;
+use typelisp::Value;
 
 #[test]
 fn fnref_of_a_plain_function_is_callable() {

@@ -10,40 +10,10 @@
 //! is not a byte stream — the two questions this file is mostly about.
 
 extern crate typelisp;
-use std::path::PathBuf;
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok(last)
-}
-
-fn eval_ok(src: &str) -> Value {
-    run(src).expect("eval failed")
-}
-
-fn eval_err(src: &str) -> String {
-    match run(src) {
-        Err(e) => format!("{:?}", e),
-        Ok(v) => panic!("expected a runtime error, got {:?}", v),
-    }
-}
-
-fn is_true(src: &str) {
-    assert_eq!(eval_ok(src), Value::Bool(true), "{}", src);
-}
+mod common;
+use common::{eval_err, is_true};
+use typelisp::{load_prelude, Checker, Heap, Interp, Reader};
 
 fn check_err(src: &str) -> String {
     let mut h = Heap::with_capacity(1 << 16);
@@ -63,7 +33,7 @@ fn check_err(src: &str) -> String {
 /// A path in the OS temp directory, unique per test so the suite can run
 /// them in any order.
 fn tmp(name: &str) -> String {
-    let mut p = PathBuf::from(std::env::temp_dir());
+    let mut p = std::env::temp_dir();
     p.push(format!("typelisp-byte-io-{}-{}.bin", std::process::id(), name));
     let _ = std::fs::remove_file(&p);
     p.to_string_lossy().to_string()

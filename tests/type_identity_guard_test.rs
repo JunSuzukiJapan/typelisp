@@ -36,11 +36,9 @@
 //! `// type-identity-ok: <reason>` comment on the offending line or the line
 //! before it. The reason is the point — it is what a later reader checks.
 
+mod common;
+use common::{repo_root};
 use std::path::{Path as FsPath, PathBuf};
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
 
 /// Every `.rs` file the invariant can be broken in, recursively: the backend
 /// (`src/`) and the front end (`crates/typelisp-front/src/`).

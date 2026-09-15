@@ -209,14 +209,13 @@ fn a_second_dribble_closes_the_first() {
 /// not exist should be able to carry on.
 #[test]
 fn an_unopenable_dribble_path_is_an_error_value() {
-    assert_eq!(
+    assert!(
         eval_string(
             "(match (dribble \"/no/such/directory/session.log\")\n\
                ((ok _) \"unexpectedly opened\")\n\
                ((err e) (message e)))"
         )
-        .starts_with("dribble: /no/such/directory/session.log:"),
-        true
+        .starts_with("dribble: /no/such/directory/session.log:")
     );
 }
 

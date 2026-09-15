@@ -30,11 +30,9 @@
 //! Modelled on `tests/type_identity_guard_test.rs`, which polices the other
 //! invariant that the type system cannot.
 
+mod common;
+use common::{repo_root};
 use std::path::PathBuf;
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
 
 /// The opt-out marker, honoured on the offending line or the block above it.
 const MARKER: &str = "core-build-ok:";

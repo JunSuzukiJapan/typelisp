@@ -377,7 +377,5 @@ fn heap_scope_sexpr_values_survive_gc_pressure() {
                    (match (get s \"keep\") ((Some v) v) ((None) (quote boom)))))
                (f)";
     let (v, h) = run_with_prelude_under_gc_stress(src).expect("eval failed");
-    match v {
-        sv => assert_eq!(sexpr_to_string(&h, sv), "(a b c d e)"),
-    }
+    assert_eq!(sexpr_to_string(&h, v), "(a b c d e)");
 }

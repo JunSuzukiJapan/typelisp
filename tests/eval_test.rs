@@ -1,63 +1,10 @@
 //! Tests for the tree-walking interpreter over the typed AST (step 4a).
 
 extern crate typelisp;
+
+mod common;
+use common::{eval_ok_compiled as eval_ok, eval_string_compiled as eval_string, run_compiled as run};
 use typelisp::{load_prelude, load_compiler, Checker, EvalError, Heap, Interp, Reader, Value};
-
-/// Read, type-check, and evaluate a program; return the last expression's value.
-///
-/// Loads the prelude and the native compiler island first: a
-/// `lambda`/`labels`/`FnRef` value JIT-compiles through the island when the
-/// island is there, which is the configuration the many closure tests here
-/// are meant to exercise, so `eval_ok` loads it. Loading before
-/// the read also keeps the program's GC roots off the stack while the island
-/// loads; the heap is sized for prelude + island accordingly.
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok(last)
-}
-
-fn eval_ok(src: &str) -> Value {
-    run(src).expect("eval failed")
-}
-
-/// The text of a `string` result.
-///
-/// A `string` is a heap `Value::Str` since the scalar unification, so reading
-/// one needs the heap it lives in — and `run` above drops its heap on return.
-/// Hence this parallel runner, which reads the text out first.
-fn eval_string(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
-            last = val;
-        }
-    }
-    match last {
-        typelisp::Value::Str(id) => h.string(id).to_string(),
-        other => panic!("expected a string, got {:?}", other),
-    }
-}
 
 /// Like [`run`], but with the prelude loaded first — needed for `while`/
 /// `dotimes`/`dolist`/`when`/`unless`/`and`/`or`/`cond`/`if-let`, which are
@@ -442,9 +389,7 @@ fn eval_sexpr(src: &str) -> (Heap, Value) {
             last = val;
         }
     }
-    match last {
-        v => (h, v),
-    }
+    (h, last)
 }
 
 /// Structural equality for `Sexpr` values: `Value::Cons`'s derived

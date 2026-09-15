@@ -3,24 +3,13 @@
 //! `get-universal-time`/`get-internal-real-time`).
 
 extern crate typelisp;
+
+mod common;
+use common::{Load, Session};
 use typelisp::{load_prelude, load_compiler, Checker, EvalError, Heap, Interp, Reader, Value};
 
 fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(v) = interp.exec(&mut h, tl)? {
-            last = v;
-        }
-    }
-    Ok(last)
+    Session::new(Load::Compiler).eval(src)
 }
 
 fn eval_ok(src: &str) -> Value {

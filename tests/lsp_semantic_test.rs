@@ -17,15 +17,14 @@
 
 extern crate typelisp;
 
+mod common;
+use common::{repo_root};
+
 use std::path::{Path as FsPath, PathBuf};
 
 use typelisp::check::semantic::{encode, file_type_tokens, TypeKind, TypeToken, TypeUse};
 use typelisp::project::{find_src_root, Loader};
 use typelisp::{Checker, Heap, Interp, Reader};
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
 
 /// Check the source `text` as the content of `path` the way the language
 /// server does, and return what it recorded and would highlight.

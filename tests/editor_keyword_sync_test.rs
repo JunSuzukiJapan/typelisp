@@ -23,15 +23,14 @@
 
 extern crate typelisp;
 
+mod common;
+use common::{repo_root};
+
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path as FsPath, PathBuf};
 
 use typelisp::check::registry::Namespace;
 use typelisp::{load_prelude, Checker, Heap, Interp};
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
 
 // ---------------------------------------------------------------- the truth
 

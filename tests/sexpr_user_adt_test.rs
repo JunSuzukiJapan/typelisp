@@ -67,24 +67,20 @@ fn list_of_a_struct_instance_and_an_int_type_checks_as_an_option_sexpr() {
 fn list_mixes_a_struct_instance_with_a_scalar() {
     let (h, v) = run_with_heap("(defstruct point (x i32) (y i32)) (list (point::new 1 2) 42)")
         .expect("eval failed");
-    match v {
-        car_cell => {
-            let car = h.car(car_cell).expect("cons");
-            match car {
-                Value::Boxed(id) => {
-                    assert_eq!(h.struct_type_name(id), "point");
-                    assert_eq!(h.struct_field(id, 0), Value::Int(1));
-                    assert_eq!(h.struct_field(id, 1), Value::Int(2));
-                }
-                other => panic!("expected boxed struct in car, got {:?}", other),
-            }
-            let cdr = h.cdr(car_cell).expect("cons");
-            let cadr = h.car(cdr).expect("cons");
-            // The scalar `42` went through the auto-wrap (real `int` ctor,
-            // not a retype), so it decodes as a `Sexpr::i32` payload.
-            assert_eq!(cadr, Value::Int(42));
+    let car = h.car(v).expect("cons");
+    match car {
+        Value::Boxed(id) => {
+            assert_eq!(h.struct_type_name(id), "point");
+            assert_eq!(h.struct_field(id, 0), Value::Int(1));
+            assert_eq!(h.struct_field(id, 1), Value::Int(2));
         }
+        other => panic!("expected boxed struct in car, got {:?}", other),
     }
+    let cdr = h.cdr(v).expect("cons");
+    let cadr = h.car(cdr).expect("cons");
+    // The scalar `42` went through the auto-wrap (real `int` ctor,
+    // not a retype), so it decodes as a `Sexpr::i32` payload.
+    assert_eq!(cadr, Value::Int(42));
 }
 
 #[test]
@@ -93,17 +89,13 @@ fn list_holds_an_enum_variant() {
         "(defenum color (red) (green) (blue)) (list (color::red) (color::blue))",
     )
     .expect("eval failed");
-    match v {
-        car_cell => {
-            let car = h.car(car_cell).expect("cons");
-            match car {
-                Value::Boxed(id) => {
-                    assert_eq!(h.enum_type_name(id), "color");
-                    assert_eq!(h.enum_variant(id), 0);
-                }
-                other => panic!("expected boxed enum in car, got {:?}", other),
-            }
+    let car = h.car(v).expect("cons");
+    match car {
+        Value::Boxed(id) => {
+            assert_eq!(h.enum_type_name(id), "color");
+            assert_eq!(h.enum_variant(id), 0);
         }
+        other => panic!("expected boxed enum in car, got {:?}", other),
     }
 }
 

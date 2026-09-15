@@ -6,35 +6,10 @@
 //! phantom bits behind and two bit vectors of equal length stop agreeing.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok(last)
-}
-
-fn eval_ok(src: &str) -> Value {
-    run(src).expect("eval failed")
-}
-
-fn eval_err(src: &str) -> String {
-    match run(src) {
-        Err(e) => format!("{:?}", e),
-        Ok(v) => panic!("expected a runtime error, got {:?}", v),
-    }
-}
+mod common;
+use common::{eval_err, eval_ok};
+use typelisp::Value;
 
 /// `(bits "1011")` builds a bit vector from a written bit pattern, and
 /// `(show v)` reads one back — CL would write both as `#*1011`.

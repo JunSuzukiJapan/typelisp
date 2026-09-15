@@ -8,35 +8,15 @@
 //! round-trip — the boundary the island's own AOT compilation (later
 //! stages) rests on.
 
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
-
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok(last)
-}
-
-fn eval_ok(src: &str) -> Value {
-    run(src).expect("eval failed")
-}
+mod common;
+use common::eval_ok_compiled as eval_ok;
+use typelisp::Value;
 
 /// The `i64` constant an `llvm-value` handle holds, for asserting a
 /// compiled `b::const-word` round-tripped through the handle registry.
 fn const_int_of(v: &Value) -> i64 {
     match v {
-        ref v if typelisp::llvm_value_of(v).is_some() => typelisp::llvm_value_of(v).unwrap()
+        v if typelisp::llvm_value_of(v).is_some() => typelisp::llvm_value_of(v).unwrap()
             .into_int_value()
             .get_sign_extended_constant()
             .expect("expected a constant llvm-value"),

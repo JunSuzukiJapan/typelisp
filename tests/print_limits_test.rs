@@ -13,32 +13,9 @@
 //! because `pprint` writes to stdout by definition.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
 
-/// The text of a `string` result.
-///
-/// A `string` is a heap `Value::Str` since the scalar unification, so reading
-/// one needs the heap it lives in — and `run` above drops its heap on return.
-/// Hence this parallel runner, which reads the text out first.
-fn eval_string(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
-            last = val;
-        }
-    }
-    match last {
-        typelisp::Value::Str(id) => h.string(id).to_string(),
-        other => panic!("expected a string, got {:?}", other),
-    }
-}
+mod common;
+use common::{eval_string};
 
 /// The string the last form produced, panicking on any check/eval error.
 fn fmt(src: &str) -> String {

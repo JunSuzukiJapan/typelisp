@@ -9,59 +9,10 @@
 //! returning a `Result` or ending the program.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok(last)
-}
-
-fn eval_ok(src: &str) -> Value {
-    run(src).expect("eval failed")
-}
-
-fn eval_err(src: &str) -> String {
-    match run(src) {
-        Err(e) => format!("{:?}", e),
-        Ok(v) => panic!("expected a runtime error, got {:?}", v),
-    }
-}
-
-fn check_err(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut result = Ok(());
-    for v in vs {
-        if let Err(e) = chk.check_form(&mut h, &interp, v) {
-            result = Err(e);
-            break;
-        }
-    }
-    match result.map_err(Error::into_kind) {
-        Err(Error::TypeError(msg)) => msg,
-        other => panic!("expected a TypeError, got {:?}", other),
-    }
-}
-
-fn is_true(src: &str) {
-    assert_eq!(eval_ok(src), Value::Bool(true), "{}", src);
-}
+mod common;
+use common::{check_err, eval_err, eval_ok, is_true};
+use typelisp::Value;
 
 // ---- SimpleError ------------------------------------------------------------
 

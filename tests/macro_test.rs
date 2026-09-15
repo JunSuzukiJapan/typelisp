@@ -128,9 +128,7 @@ fn sexpr_to_string(heap: &Heap, v: Value) -> String {
 }
 
 fn as_sexpr_string(v: Value, h: &Heap) -> String {
-    match v {
-        sv => sexpr_to_string(h, sv),
-    }
+    sexpr_to_string(h, v)
 }
 
 // ---- Phase A: quote ---------------------------------------------------------
@@ -235,13 +233,9 @@ fn gensym_returns_a_symbol() {
 #[test]
 fn gensym_is_fresh_each_call() {
     let (v, h) = eval_ok_with_prelude("(let ((a (gensym)) (b (gensym))) (list a b))");
-    match v {
-        sv => {
-            let a = h.car(sv).unwrap();
-            let b = h.car(h.cdr(sv).unwrap()).unwrap();
-            assert_ne!(a, b, "two `gensym` calls produced the same symbol");
-        }
-    }
+    let a = h.car(v).unwrap();
+    let b = h.car(h.cdr(v).unwrap()).unwrap();
+    assert_ne!(a, b, "two `gensym` calls produced the same symbol");
 }
 
 #[test]

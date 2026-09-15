@@ -10,7 +10,10 @@
 //! check time.
 
 extern crate typelisp;
-use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
+
+mod common;
+use common::{eval_string_compiled as eval_string, Load, Session};
+use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, TopLevelForm, Value};
 
 fn check(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -28,52 +31,13 @@ fn check(src: &str) -> Result<TopLevelForm, Error> {
 }
 
 fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(v) = interp.exec(&mut h, tl)? {
-            last = v;
-        }
-    }
-    Ok(last)
+    Session::new(Load::Compiler).eval(src)
 }
 
 fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
-/// The text of a `string` result.
-///
-/// A `string` is a heap `Value::Str` since the scalar unification, so reading
-/// one needs the heap it lives in — and `run` above drops its heap on return.
-/// Hence this parallel runner, which reads the text out first.
-fn eval_string(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
-            last = val;
-        }
-    }
-    match last {
-        typelisp::Value::Str(id) => h.string(id).to_string(),
-        other => panic!("expected a string, got {:?}", other),
-    }
-}
 
 /// A `(1 2 3)`-valued `Vector<i32>` builder (no variadic `vector-of` builder
 /// exists — the language has no value-level `&rest`).
