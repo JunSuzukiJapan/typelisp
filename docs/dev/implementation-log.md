@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-09-05 / ブランチ: `main`
+最終更新: 2026-09-16 / ブランチ: `main`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -11410,3 +11410,38 @@ fixnum として読んで exit code にする（`main` の宣言戻り型が `in
   統一し、`macroexpand-1` の `none` は `(ok ())` と出る。
 - LSP の補完はパターン束縛を `pat-ctor`/`pat-typetest` からしか拾っていなかった
   （`pat-nonempty` は元から漏れていた）。`pat-some` を足した。
+
+## 定数の畳み込み（2026-09-16）
+
+### 何が変わったか
+
+lowering の段階で、**スカラ組み込みメソッドの全引数がリテラル節点**なら呼び出しを
+その値のリテラル節点に置き換える（`crates/typelisp-front/src/check/fold.rs`）。
+`(+ 1 2)` は `(int 3)` に、`(+ (the u8 200) 100)` は `(int-any-width 44)` に、
+`(* 4611686018427387904 2)` は `(bignum 9223372036854775808)` に、`(< 1 2)` は `(bool true)` に
+下がる。条件がリテラル `bool` の `if` は選ばれた側の形になる（`and`/`or` は prelude マクロで
+`if` になるので、リテラル連鎖はそのまま潰れる）。畳み込みは check が下から上に進む性質で
+連鎖する: `(+ 1 2 3)` は 2 項呼び出しの入れ子で、内側が先に畳まれて外側も畳まれる。
+
+- 置き場所は島でなくチェッカー。lowering は解釈器・bridge→島・fasl の全経路が共有する唯一の
+  段で、ここで畳めば全部に効く。LLVM の builder は生語の算術（`add i64 1, 2`）を自分で畳むが、
+  タグ付き `int` の経路（オーバーフロー検査でランタイム呼び出し）は畳めない。
+- 値を計算するのは **解釈器の `eval_builtin_method` そのもの**（`pub(crate)` に開けた）。
+  `u8` の wrap、`int` の bignum 昇格・fixnum 降格、`f32` の binary32 丸め——「`+` が何を
+  意味するか」の表を 2 つ持たない。
+- 受け手は固定幅整数 6 種・`int`・`f32`/`f64`・`ratio`・`char`・`bool`、結果型も同じ集合に限る。
+  `print`（Unit と副作用）、`try-int->char`（Option にはリテラル節点が無い）、
+  `char->string`（`eq` が同一性を見るヒープ文字列）は結果型で除外。
+- 組み込みが `Panic` を返す呼び出し（`(/ 1 0)`）は畳まない。check 時エラーにすると失敗の
+  **時点**が変わる。`Internal` や「組み込みなのに評価器に腕が無い」は `unreachable!`——
+  `tests/constant_fold_test.rs` の `every_scalar_builtin_with_a_literal_result_folds` が
+  対象受け手の全組み込み（200 超）を合成リテラルで通して、その `unreachable!` を裏付ける。
+- 畳まないもの: リテラルに束縛されたローカル（`(let ((x 5)) (+ x 1))`）。それは定数伝播で、
+  別の仕事。`(- 5)` は `%place-tmp` を介した `(- (- t t) t)` に下がるので現状畳まれない。
+
+### 成果物
+
+島の成果物は md5 が変わらなかった（SOURCE にリテラル同士の算術が無い）。prelude は変わった
+ので `scripts/regen-prelude-bitcode.sh` で再生成。`check_test` の
+`a_checked_form_is_a_core_expression_with_a_type` は `(if true 1 2)` を見ていたので、変数条件に
+書き換えた。

@@ -3927,7 +3927,7 @@ fn is_float_receiver(type_name: &Path) -> bool {
 /// one value world left, that decode is the identity — a stored field *is* the
 /// value — so `decode_field_typed`/`option_payload_ty`/`scope_elem_ty` are gone
 /// and nothing here needs to know `V`.
-fn eval_builtin_method(
+pub(crate) fn eval_builtin_method(
     heap: &mut Heap,
     type_name: &Path,
     method: &str,

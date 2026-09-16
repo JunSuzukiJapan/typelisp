@@ -792,8 +792,10 @@ fn nested_loop_break_targets_innermost() {
 
 #[test]
 fn a_checked_form_is_a_core_expression_with_a_type() {
-    let c = form("(if true 1 2)").unwrap();
-    assert_eq!(c.printed, "(expr (if (bool true) (int 1) (int 2)))");
+    // A variable condition: a literal one would be folded to its branch
+    // (`tests/constant_fold_test.rs`).
+    let c = form("(let ((b true)) (if b 1 2))").unwrap();
+    assert_eq!(c.printed, "(expr (let ((b bool (bool true))) (if (var b) (int 1) (int 2))))");
     assert_eq!(c.ty, Some(Type::Int));
 }
 

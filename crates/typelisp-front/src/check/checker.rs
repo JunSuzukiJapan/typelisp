@@ -18,6 +18,7 @@ use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern, Ref};
 use super::core::{self, Checked, Items};
+use super::fold;
 use super::forms;
 use super::repr::Repr;
 use crate::dump::{CheckerDelta, RegistrySignature};
@@ -11107,6 +11108,14 @@ impl Checker {
             }
         }
         let ty = subst_apply(&af.sig.ret, &subst);
+        // A scalar builtin over literal arguments has one possible value, so
+        // the call lowers to that value's literal node (`fold`'s module doc
+        // says why here, and why the evaluator's own arithmetic computes it).
+        if af.builtin {
+            if let Some(folded) = fold::fold_builtin_method(heap, type_fq, &method_name, &typed, &ty)? {
+                return Ok(Checked::new(folded, ty));
+            }
+        }
         let home = self.ns.clone();
         let form = self.assoc_form(heap, type_fq, &method_name, instance, &home, &ty, &typed)?;
         Ok(Checked::new(form, ty))
@@ -11289,7 +11298,14 @@ impl Checker {
         let else_expected = non_never(&then.ty).or(expected);
         let els = self.check_at(heap, interp, env, args[2], else_expected, nth_loc(arg_locs, 2))?;
         let ty = join_types(&then.ty, &els.ty)?;
-        let form = forms::if_form(heap, cond.form, then.form, els.form)?;
+        // A literal condition picks its branch now. Both branches were still
+        // checked above: a branch that can never run is still a program that
+        // has to be well-typed, and `ty` is still the join of the two.
+        let form = match fold::literal_bool(heap, cond.form) {
+            Some(true) => then.form,
+            Some(false) => els.form,
+            None => forms::if_form(heap, cond.form, then.form, els.form)?,
+        };
         Ok(Checked::new(form, ty))
     }
 
