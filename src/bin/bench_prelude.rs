@@ -45,12 +45,12 @@ const WORKLOADS: &[(&str, &str)] = &[
         "#,
     ),
     (
-        "bignum abs/+",
+        "int abs/+",
         r#"
-        (defun bench ((n i32)) bignum
-          (let ((acc (as bignum 0)))
+        (defun bench ((n int)) int
+          (let ((acc 0))
             (dotimes (i n)
-              (setf acc (+ acc (abs (as bignum (- (as i64 i) 500))))))
+              (setf acc (+ acc (abs (- i 500)))))
             acc))
         (bench 20000)
         "#,

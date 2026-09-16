@@ -46,7 +46,7 @@ fn eval_ok(src: &str) -> Value {
 #[test]
 fn remove_resolves_to_hashtable_instance_method_for_a_hashtable_receiver() {
     let src = r#"
-        (defun make-h () HashTable<i32,i32> (HashTable::new))
+        (defun make-h () HashTable<int,int> (HashTable::new))
         (let ((h (make-h)))
           (set h 1 9)
           (unwrap (remove h 1)))
@@ -57,7 +57,7 @@ fn remove_resolves_to_hashtable_instance_method_for_a_hashtable_receiver() {
 #[test]
 fn count_resolves_to_hashtable_instance_method_for_a_hashtable_receiver() {
     let src = r#"
-        (defun make-h () HashTable<i32,i32> (HashTable::new))
+        (defun make-h () HashTable<int,int> (HashTable::new))
         (let ((h (make-h)))
           (set h 1 9)
           (count h))
@@ -71,9 +71,9 @@ fn count_if_resolves_to_the_free_generic_combinator_over_an_iterator() {
     // free generic `Iter` combinator `(count-if it pred)`. A two-argument call
     // whose first argument is an iterator (not a `HashTable`) has no matching
     // instance method, so it resolves to the free generic function.
-    let src = "(defun mkv () Vector<i32> \
-                 (let ((v (the Vector<i32> (Vector::new)))) (push v 1) (push v 2) (push v 1) v)) \
-               (count-if (iter (mkv)) (lambda ((n i32)) bool (= n 1)))";
+    let src = "(defun mkv () Vector<int> \
+                 (let ((v (the Vector<int> (Vector::new)))) (push v 1) (push v 2) (push v 1) v)) \
+               (count-if (iter (mkv)) (lambda ((n int)) bool (= n 1)))";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
@@ -81,10 +81,10 @@ fn count_if_resolves_to_the_free_generic_combinator_over_an_iterator() {
 fn integer_literal_still_gets_the_free_functions_exact_parameter_width() {
     // `try_instance_method` peeks at the first argument with `expected: None`
     // before falling back to the free function. If that peek's default type
-    // (`i32`) leaked into the free-function call instead of being re-checked
+    // (`int`) leaked into the free-function call instead of being re-checked
     // against the real parameter type, this would fail to type-check at all
-    // (a function expecting `u16` would see an `i32` literal).
-    let src = "(defun takes-i32 ((x i32)) i32 x) (takes-i32 42)";
+    // (a function expecting `u16` would see an `int` literal).
+    let src = "(defun takes-i32 ((x int)) int x) (takes-i32 42)";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 

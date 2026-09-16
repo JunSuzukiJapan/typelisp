@@ -67,7 +67,7 @@ fn compiling_the_islands_scope_constructors_survives_constant_collection() {
 /// was a missing GC root in `ast_bridge::tagged_sym_list` — see that function.
 fn compiling_a_nested_binding_function_survives_constant_collection() {
     let (mut h, mut chk, mut interp) = stressed();
-    let src = "(defun deep ((a i32) (b i32)) i32
+    let src = "(defun deep ((a int) (b int)) int
                  (let ((x (+ a b)))
                    (let ((y (* x 2)))
                      (let ((z (- y a)))
@@ -88,8 +88,8 @@ fn compiling_a_nested_binding_function_survives_constant_collection() {
 /// was a missing GC root in `ast_bridge::tagged_sym_list` — see that function.
 fn compiling_labels_survives_constant_collection() {
     let (mut h, mut chk, mut interp) = stressed();
-    let src = "(defun sum-to ((n i32)) i32
-                 (labels ((rec ((i i32) (acc i32)) i32
+    let src = "(defun sum-to ((n int)) int
+                 (labels ((rec ((i int) (acc int)) int
                             (if (> i n) acc (rec (+ i 1) (+ acc i)))))
                    (rec 1 0)))
                (compile sum-to)
@@ -102,7 +102,7 @@ fn compiling_labels_survives_constant_collection() {
 /// allocation during its compilation collected.
 #[test]
 fn a_function_compiled_under_stress_agrees_with_the_interpreter() {
-    let src = "(defun f ((n i32)) i32
+    let src = "(defun f ((n int)) int
                  (let ((a (* n n)))
                    (if (> a 10) (- a 10) (+ a 1))))";
 
@@ -127,14 +127,14 @@ fn a_function_compiled_under_stress_agrees_with_the_interpreter() {
 fn interpreted_scopes_survive_constant_collection() {
     let (mut h, mut chk, mut interp) = stressed();
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun f () i32
+               (defun f () int
                  (let ((s (make-s)))
                    (set s \"a\" (quote 42))
                    (push-frame s)
                    (set s \"b\" (quote 7))
                    (pop-frame s)
                    (match (get s \"a\")
-                     ((Some v) (sexpr-i32 v))
+                     ((Some v) (sexpr-int v))
                      ((None) -1))))
                (f)";
     let got = eval_in(&mut h, &mut chk, &mut interp, src).expect("interpreted scope failed under gc stress");

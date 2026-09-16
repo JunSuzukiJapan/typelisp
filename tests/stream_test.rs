@@ -242,7 +242,7 @@ fn a_user_defined_type_can_be_a_stream() {
     // The other half of the trait claim: nothing about being a stream is
     // reserved to the built-in types.
     let v = eval_string(
-        r#"(defstruct counter (n i32))
+        r#"(defstruct counter (n int))
            (impl Stream counter
              (open-stream-p ((self Self)) bool true)
              (close ((self Self)) () ()))
@@ -261,7 +261,7 @@ fn a_user_defined_type_can_be_a_stream() {
 #[test]
 fn a_user_stream_can_go_into_a_broadcast_alongside_a_builtin_one() {
     let v = eval_string(
-        r#"(defstruct counter (n i32))
+        r#"(defstruct counter (n int))
            (impl Stream counter
              (open-stream-p ((self Self)) bool true)
              (close ((self Self)) () ()))
@@ -728,7 +728,7 @@ fn a_stream_without_pushback_gets_it_by_wrapping() {
 #[test]
 fn a_user_defined_input_stream_can_be_read_from() {
     let v = eval_string(
-        r#"(defstruct fixed (text string) (at i32))
+        r#"(defstruct fixed (text string) (at int))
            (impl Stream fixed
              (open-stream-p ((self Self)) bool true)
              (close ((self Self)) () ()))

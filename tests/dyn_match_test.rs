@@ -36,8 +36,8 @@ fn eval_ok(src: &str) -> Value {
 
 const SHAPES: &str = r#"
 (deftrait Drawable () (draw ((self Self)) string))
-(defstruct circle (r i32))
-(defstruct square (side i32))
+(defstruct circle (r int))
+(defstruct square (side int))
 (impl Drawable circle (draw ((self Self)) string "circle"))
 (impl Drawable square (draw ((self Self)) string "square"))
 "#;
@@ -48,7 +48,7 @@ const SHAPES: &str = r#"
 fn matching_a_trait_object_recovers_the_concrete_type_by_name() {
     let src = format!(
         "{SHAPES}
-         (defun area ((d :dyn Drawable)) i32
+         (defun area ((d :dyn Drawable)) int
            (match d
              ((circle r) (* 3 (* r r)))
              ((square s) (* s s))
@@ -62,7 +62,7 @@ fn matching_a_trait_object_recovers_the_concrete_type_by_name() {
 fn a_the_pattern_binds_the_whole_concrete_value() {
     let src = format!(
         "{SHAPES}
-         (defun side-of ((d :dyn Drawable)) i32
+         (defun side-of ((d :dyn Drawable)) int
            (match d
              ((the square s) s::side)
              (_ 0)))
@@ -77,7 +77,7 @@ fn an_unmatched_concrete_type_falls_through_to_the_catchall() {
     // is non-exhaustive by nature — the catch-all is doing real work here.
     let src = format!(
         "{SHAPES}
-         (defun area ((d :dyn Drawable)) i32
+         (defun area ((d :dyn Drawable)) int
            (match d ((circle r) r) (_ -1)))
          (area (square::new 5))"
     );

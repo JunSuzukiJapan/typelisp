@@ -655,7 +655,6 @@ impl Registry {
                 Type::Str => string_assoc(),
                 Type::Char => char_assoc(),
                 Type::Int => integer_assoc(),
-                Type::Bignum => bignum_assoc(),
                 Type::Ratio => ratio_assoc(),
                 Type::Bool => bool_assoc(),
                 Type::Symbol => symbol_assoc(),
@@ -697,7 +696,7 @@ impl Registry {
         // for a `defun`'s own `FnSig`, not an ad hoc native one.
         root.fns.insert("make-random-state-fresh".to_string(), FnSig::builtin(vec![], Type::RandomState));
         root.fns.insert("random-state-copy".to_string(), FnSig::builtin(vec![Type::RandomState], Type::RandomState));
-        root.fns.insert("random-state-next".to_string(), FnSig::builtin(vec![Type::RandomState, Type::I32], Type::I32));
+        root.fns.insert("random-state-next".to_string(), FnSig::builtin(vec![Type::RandomState, Type::Int], Type::Int));
         // `seed-random-state` (SBCL's `sb-ext:seed-random-state`, not in the
         // standard): the stream a given integer names, for a caller who wants
         // a run to be reproducible. CL itself has no portable way to seed —
@@ -706,7 +705,7 @@ impl Registry {
         // non-standard operation. The integer-to-state map lives in
         // `typelisp_rt::seeded_random_state`, which is where the reason it
         // isn't the identity is written down.
-        root.fns.insert("seed-random-state".to_string(), FnSig::builtin(vec![Type::I32], Type::RandomState));
+        root.fns.insert("seed-random-state".to_string(), FnSig::builtin(vec![Type::Int], Type::RandomState));
         // `get-universal-time`/`get-internal-real-time` (CLHS 25.1): wall-clock
         // and monotonic-ish timers, respectively. `get-universal-time` counts
         // seconds since 1900-01-01 UTC (CL's epoch, 2208988800s before the
@@ -737,7 +736,7 @@ impl Registry {
         // `Result`, not a panic, since the input is runtime text the caller
         // doesn't control (unlike a source literal, which the reader/checker
         // already validate before this code ever runs).
-        root.fns.insert("parse-int".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::I32, error_ty(PARSE_INT_ERROR))));
+        root.fns.insert("parse-int".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::Int, error_ty(PARSE_INT_ERROR))));
         root.fns.insert("parse-float".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR))));
         // `read`: parses one `Sexpr` form out of a string with the same
         // reader `typl`/the REPL use for source text
@@ -755,7 +754,7 @@ impl Registry {
         // name of its own because the CL one is the prelude's.
         root.fns.insert(
             "read-datum-at".to_string(),
-            FnSig::builtin(vec![Type::Str, Type::I32, Type::Bool], result_of( Type::Named(Path::root("cons-cell"), vec![option_of(sexpr()), Type::I32]), error_ty(READ_ERROR), )),
+            FnSig::builtin(vec![Type::Str, Type::Int, Type::Bool], result_of( Type::Named(Path::root("cons-cell"), vec![option_of(sexpr()), Type::Int]), error_ty(READ_ERROR), )),
         );
         // `eval`: type-checks and runs a runtime `Sexpr` against the current
         // global environment, CL-style (`Interp::eval_form`). Sees all globals
@@ -787,8 +786,8 @@ impl Registry {
         // `pprint-list-exhausted` is the predicate to test first (the prelude
         // macro `pprint-exit-if-list-exhausted` is the CL-spelled wrapper).
         root.fns.insert("pprint-newline".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Unit));
-        root.fns.insert("pprint-indent".to_string(), FnSig::builtin(vec![Type::Symbol, Type::I32], Type::Unit));
-        root.fns.insert("pprint-tab".to_string(), FnSig::builtin(vec![Type::Symbol, Type::I32, Type::I32], Type::Unit));
+        root.fns.insert("pprint-indent".to_string(), FnSig::builtin(vec![Type::Symbol, Type::Int], Type::Unit));
+        root.fns.insert("pprint-tab".to_string(), FnSig::builtin(vec![Type::Symbol, Type::Int, Type::Int], Type::Unit));
         root.fns.insert("pprint-pop".to_string(), FnSig::builtin(vec![], option_of(sexpr())));
         root.fns.insert("pprint-list-exhausted".to_string(), FnSig::builtin(vec![], Type::Bool));
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
@@ -828,7 +827,7 @@ impl Registry {
         // predicate its non-panic-fallback caller (`form-is-borrowed?`) needs
         // to branch on a `Sym` node — a peer of
         // `sexpr-consp`/`sexpr-null`/`sexpr-atom`.
-        root.fns.insert("sexpr-i32".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::I32));
+        root.fns.insert("sexpr-int".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Int));
         root.fns.insert("sexpr-f64".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::F64));
         root.fns.insert("sexpr-f32".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::F32));
         // One extractor per integer type, not one per machine word: the five
@@ -840,6 +839,7 @@ impl Registry {
             ("sexpr-u8", Type::U8),
             ("sexpr-u16", Type::U16),
             ("sexpr-u32", Type::U32),
+            ("sexpr-i32", Type::I32),
         ] {
             root.fns.insert(name.to_string(), FnSig::builtin(vec![option_of(sexpr())], ty));
         }
@@ -897,7 +897,7 @@ impl Registry {
         // (`std::process::exit`, in `Interp::eval_builtin`'s `"exit"` arm), so
         // it stays an ordinary `Rust` builtin rather than a `defmacro`. `Never`
         // return type, same as `panic`, so it satisfies any expected type.
-        root.fns.insert("exit".to_string(), FnSig::builtin(vec![Type::I32], Type::Never));
+        root.fns.insert("exit".to_string(), FnSig::builtin(vec![Type::Int], Type::Never));
         // `compile` is a genuine special form (`Checker::check_compile`,
         // dispatched by name in `Checker::check_list` alongside `quote`/
         // `panic`/etc. — never an ordinary call), so unlike `compile-file`
@@ -1116,7 +1116,9 @@ fn register_stream_builtins(root: &mut Namespace) {
     native("stream-string-input", vec![Type::Str], h.clone());
     native("stream-string-output", vec![], h.clone());
     // mode: 0 input, 1 output (truncate), 2 output (append).
-    native("stream-open-file", vec![Type::Str, h.clone()], result_of(h.clone(), file_err.clone()));
+    // The direction is a code (`direction-input`/`-output`/`-append`), an
+    // ordinary `int`; only the handle stays an `i32`.
+    native("stream-open-file", vec![Type::Str, Type::Int], result_of(h.clone(), file_err.clone()));
 
     // Lifetime and interrogation.
     native("stream-close", vec![h.clone()], unit_or_err.clone());
@@ -1137,14 +1139,14 @@ fn register_stream_builtins(root: &mut Namespace) {
     // stream is a sequence of characters, and CL calls `read-byte` on a
     // character stream an error rather than handing back a UTF-8 encoding
     // nobody wrote.
-    native("stream-read-byte", vec![h.clone()], result_of(option_of(Type::I32), file_err.clone()));
-    native("stream-write-byte", vec![h.clone(), Type::I32], unit_or_err.clone());
+    native("stream-read-byte", vec![h.clone()], result_of(option_of(Type::Int), file_err.clone()));
+    native("stream-write-byte", vec![h.clone(), Type::Int], unit_or_err.clone());
     native("stream-listen", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
     // How many characters have been read out of a *string* input stream.
     // Narrow on purpose: this is what tells a reader macro's caller how much
     // of the text the macro consumed, and no other backend has a position in
     // the same unit. Not CL's `file-position` — that one also seeks.
-    native("stream-position", vec![h.clone()], result_of(Type::I32, file_err.clone()));
+    native("stream-position", vec![h.clone()], result_of(Type::Int, file_err.clone()));
 
     // Output. Only whole strings cross this boundary — a per-character
     // built-in call would dominate the cost of writing anything.
@@ -1237,8 +1239,8 @@ fn register_system_builtins(root: &mut Namespace) {
     // does not fit an `i32`, and reported in *seconds* west because the
     // offset is not always a whole number of hours (India is +5:30).
     // `none` when the C library cannot represent that instant.
-    native("timezone-offset-seconds", vec![Type::I32, Type::I32], option_of(Type::I32));
-    native("timezone-daylight-p", vec![Type::I32, Type::I32], option_of(Type::Bool));
+    native("timezone-offset-seconds", vec![Type::Int, Type::Int], option_of(Type::Int));
+    native("timezone-daylight-p", vec![Type::Int, Type::Int], option_of(Type::Bool));
 
     // The REPL tool layer's runtime half (CLHS 25.2 / 25.1). The other four
     // tools — `trace`/`untrace`/`step`/`disassemble` — have no entry here and
@@ -1258,7 +1260,7 @@ fn register_system_builtins(root: &mut Namespace) {
     native("dribble-stop", vec![], result_of(Type::Unit, file_err.clone()));
     // The runtime half of the `ed` special form, which resolved the name at
     // check time and reduced to this. Line 0 means "no line".
-    native("ed-open", vec![Type::Str, Type::I32], result_of(Type::Unit, file_err));
+    native("ed-open", vec![Type::Str, Type::Int], result_of(Type::Unit, file_err));
 }
 
 /// The type of a reader macro: what `set-macro-character` stores and what the
@@ -1381,17 +1383,23 @@ fn sexpr_def() -> AdtDef {
             // Index 0, and never constructible — see this function's doc
             // comment. `Checker` rejects it by name.
             Variant { name: "nil".to_string(), fields: vec![] },
-            Variant { name: "i32".to_string(), fields: vec![Type::I32] },
+            // Index 1: `int`, the language's integer — a fixnum or a bignum
+            // box, the value's own word, so construction and extraction are
+            // both the identity. This slot was `i32` while that was the
+            // default integer; the number is burned into the island's IR,
+            // the name is what changed, and `i32` went to the end.
+            Variant { name: "int".to_string(), fields: vec![Type::Int] },
             Variant { name: "f64".to_string(), fields: vec![Type::F64] },
             Variant { name: "char".to_string(), fields: vec![Type::Char] },
             Variant { name: "bool".to_string(), fields: vec![Type::Bool] },
             Variant { name: "sym".to_string(), fields: vec![Type::Symbol] },
             Variant { name: "str".to_string(), fields: vec![Type::Str] },
             Variant { name: "cons".to_string(), fields: vec![option_of(sexpr()), option_of(sexpr())] },
-            // Appended after `cons` (not inserted alongside `int`/`float`)
-            // so the existing `SEXPR_*` variant-index constants
-            // (`crate::eval::interp`) stay valid.
-            Variant { name: "bignum".to_string(), fields: vec![Type::Bignum] },
+            // Index 8, retired with the `bignum` type: a bignum box is an
+            // `int` (index 1). Never constructible and never matchable —
+            // `Checker` refuses it by name, as it does `nil` — and kept only
+            // so nothing after it renumbers.
+            Variant { name: "bignum".to_string(), fields: vec![Type::Int] },
             Variant { name: "ratio".to_string(), fields: vec![Type::Ratio] },
             // A `::`-qualified path (e.g. `dep::head`), the reader's
             // `Value::Path` (`crate::mem::Value`) made matchable. Its single
@@ -1427,6 +1435,9 @@ fn sexpr_def() -> AdtDef {
             Variant { name: "u8".to_string(), fields: vec![Type::U8] },
             Variant { name: "u16".to_string(), fields: vec![Type::U16] },
             Variant { name: "u32".to_string(), fields: vec![Type::U32] },
+            // Index 17: `i32`, boxed like the five above it, since `int`
+            // took the bare fixnum word. Appended for the usual reason.
+            Variant { name: "i32".to_string(), fields: vec![Type::I32] },
         ],
         assoc: sexpr_assoc(),
         public: true,
@@ -1571,17 +1582,17 @@ fn hashtable_def() -> AdtDef {
         instance: true,
         builtin: true,
     };
-    assoc.insert("bucket-count".to_string(), bucket(vec![hashtable_ty(), Type::I32], Type::I32));
-    assoc.insert("bucket-key".to_string(), bucket(vec![hashtable_ty(), Type::I32, Type::I32], tvar("k")));
-    assoc.insert("bucket-value".to_string(), bucket(vec![hashtable_ty(), Type::I32, Type::I32], tvar("v")));
+    assoc.insert("bucket-count".to_string(), bucket(vec![hashtable_ty(), Type::Int], Type::Int));
+    assoc.insert("bucket-key".to_string(), bucket(vec![hashtable_ty(), Type::Int, Type::Int], tvar("k")));
+    assoc.insert("bucket-value".to_string(), bucket(vec![hashtable_ty(), Type::Int, Type::Int], tvar("v")));
     assoc.insert(
         "bucket-put".to_string(),
-        bucket(vec![hashtable_ty(), Type::I32, Type::I32, tvar("k"), tvar("v")], Type::Unit),
+        bucket(vec![hashtable_ty(), Type::Int, Type::Int, tvar("k"), tvar("v")], Type::Unit),
     );
-    assoc.insert("bucket-delete".to_string(), bucket(vec![hashtable_ty(), Type::I32, Type::I32], Type::Unit));
+    assoc.insert("bucket-delete".to_string(), bucket(vec![hashtable_ty(), Type::Int, Type::Int], Type::Unit));
     assoc.insert(
         "count".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::I32), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Int), instance: true, builtin: true },
     );
     assoc.insert(
         "clear".to_string(),
@@ -1655,7 +1666,7 @@ fn vector_def() -> AdtDef {
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![vector_ty(), Type::I32], tvar("t")),
+            sig: FnSig::builtin(vec![vector_ty(), Type::Int], tvar("t")),
             instance: true,
             builtin: true,
         },
@@ -1663,14 +1674,14 @@ fn vector_def() -> AdtDef {
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![vector_ty(), Type::I32, tvar("t")], Type::Unit),
+            sig: FnSig::builtin(vec![vector_ty(), Type::Int, tvar("t")], Type::Unit),
             instance: true,
             builtin: true,
         },
     );
     assoc.insert(
         "len".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![vector_ty()], Type::I32), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![vector_ty()], Type::Int), instance: true, builtin: true },
     );
     assoc.insert(
         "pop".to_string(),
@@ -1774,7 +1785,7 @@ fn chan_def() -> AdtDef {
     // here the second number is always written.
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: sig(vec![Type::I32], chan.clone()), instance: false, builtin: true },
+        AssocFn { sig: sig(vec![Type::Int], chan.clone()), instance: false, builtin: true },
     );
     // Waits for room. A closed channel is a panic, not a `Result`: sending on
     // one is a program bug, which is the line `docs/dev/language-design.md`
@@ -1801,11 +1812,11 @@ fn chan_def() -> AdtDef {
     // how many fit.
     assoc.insert(
         "len".to_string(),
-        AssocFn { sig: sig(vec![chan.clone()], Type::I32), instance: true, builtin: true },
+        AssocFn { sig: sig(vec![chan.clone()], Type::Int), instance: true, builtin: true },
     );
     assoc.insert(
         "cap".to_string(),
-        AssocFn { sig: sig(vec![chan], Type::I32), instance: true, builtin: true },
+        AssocFn { sig: sig(vec![chan], Type::Int), instance: true, builtin: true },
     );
     AdtDef {
         name: Path::root("chan"),
@@ -1954,7 +1965,7 @@ pub fn llvm_function_def() -> AdtDef {
     // A function's raw LLVM parameter — distinct from `load-arg`, which reads a
     // *logical* argument out of the `i64*` array the old ABI passes. Under the
     // coroutine ABI the frame is a real parameter, so there is no array.
-    assoc.insert("function-param".to_string(), assoc_fn(vec![llvm_function_ty(), Type::I32], llvm_value_ty(), true));
+    assoc.insert("function-param".to_string(), assoc_fn(vec![llvm_function_ty(), Type::Int], llvm_value_ty(), true));
     AdtDef { name: Path::root("llvm-function"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
 }
 
@@ -1981,9 +1992,9 @@ pub fn llvm_builder_def() -> AdtDef {
     // passes something small — a tag mask, a slot index, `0`/`1`/`-1`; the two
     // places that need a full-width constant (`compile-int`/`compile-float`)
     // assemble it from two 32-bit halves in LLVM instead.
-    assoc.insert("const-word".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I32], llvm_value_ty(), true));
+    assoc.insert("const-word".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::Int], llvm_value_ty(), true));
     assoc.insert("build-ret".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
-    assoc.insert("load-arg".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty(), true));
+    assoc.insert("load-arg".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), Type::Int], llvm_value_ty(), true));
     assoc.insert("build-add".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-sub".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-mul".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
@@ -2082,9 +2093,9 @@ pub fn llvm_builder_def() -> AdtDef {
     // `CompiledSignature`'s `i64 fn(i64* args, i32 argc)` shape — so calling
     // a compiled function looks the same whether the call originates from
     // Rust (`compile::CompiledFn::call`) or from another compiled function.
-    assoc.insert("alloca-args".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I32], llvm_value_ty(), true));
-    assoc.insert("store-arg".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32, llvm_value_ty()], Type::Unit, true));
-    assoc.insert("build-call".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true));
+    assoc.insert("alloca-args".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::Int], llvm_value_ty(), true));
+    assoc.insert("store-arg".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::Int, llvm_value_ty()], Type::Unit, true));
+    assoc.insert("build-call".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::Int], llvm_value_ty(), true));
     // `load-env`/`build-call-with-env`: the captures counterpart of
     // `load-arg`/`build-call`, for functions declared via
     // `add-function-with-env`. `load-env` reads logical captured slot
@@ -2094,11 +2105,11 @@ pub fn llvm_builder_def() -> AdtDef {
     // (as `build-call` already does) and an env array built the same way
     // (`alloca-args`/`store-arg`, just filled with captured values instead
     // of call arguments).
-    assoc.insert("load-env".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty(), true));
+    assoc.insert("load-env".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), Type::Int], llvm_value_ty(), true));
     assoc.insert(
         "build-call-with-env".to_string(),
         assoc_fn(
-            vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32, llvm_value_ty(), Type::I32],
+            vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::Int, llvm_value_ty(), Type::Int],
             llvm_value_ty(),
             true,
         ),
@@ -2143,7 +2154,7 @@ pub fn llvm_builder_def() -> AdtDef {
     assoc.insert(
         "build-make-closure".to_string(),
         assoc_fn(
-            vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32, Type::I32, Type::I32],
+            vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty(), Type::Int, Type::Int, Type::Int],
             llvm_value_ty(),
             true,
         ),
@@ -2152,7 +2163,7 @@ pub fn llvm_builder_def() -> AdtDef {
     // `interp::llvm_builder_load_raw`'s doc comment.
     assoc.insert(
         "load-raw".to_string(),
-        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
+        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::Int], llvm_value_ty(), true),
     );
     // `build-slot-ptr`: `load-raw`'s GEP without the load — the *address* of
     // one word in an `i64` array. What makes a compiled frame usable as the
@@ -2163,7 +2174,7 @@ pub fn llvm_builder_def() -> AdtDef {
     // change — everything downstream already speaks pointers.
     assoc.insert(
         "build-slot-ptr".to_string(),
-        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
+        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::Int], llvm_value_ty(), true),
     );
     // The frame under construction (Phase C1). A function's locals live in a
     // `BoxedObj::Frame`, and two things about it cannot be held in the island:
@@ -2213,7 +2224,7 @@ pub fn llvm_builder_def() -> AdtDef {
     assoc.insert(
         "coroutine-call".to_string(),
         assoc_fn(
-            vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32],
+            vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), Type::Int],
             llvm_value_ty(),
             true,
         ),
@@ -2226,9 +2237,9 @@ pub fn llvm_builder_def() -> AdtDef {
                 llvm_module_ty(),
                 llvm_value_ty(),
                 llvm_value_ty(),
-                Type::I32,
+                Type::Int,
                 llvm_value_ty(),
-                Type::I32,
+                Type::Int,
             ],
             llvm_value_ty(),
             true,
@@ -2242,7 +2253,7 @@ pub fn llvm_builder_def() -> AdtDef {
     assoc.insert(
         "coroutine-apply".to_string(),
         assoc_fn(
-            vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32],
+            vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), Type::Int],
             llvm_value_ty(),
             true,
         ),
@@ -2254,7 +2265,7 @@ pub fn llvm_builder_def() -> AdtDef {
     assoc.insert(
         "coroutine-dyn-call".to_string(),
         assoc_fn(
-            vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32],
+            vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), llvm_value_ty(), Type::Int],
             llvm_value_ty(),
             true,
         ),
@@ -2342,7 +2353,7 @@ pub fn llvm_builder_def() -> AdtDef {
     // *array* operand already expects, exactly the conversion
     // `build-make-closure` already does internally for `ClosureBox`, just
     // exposed generically here.
-    assoc.insert("build-malloc".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I32], llvm_value_ty(), true));
+    assoc.insert("build-malloc".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::Int], llvm_value_ty(), true));
     assoc.insert("build-free".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
     assoc.insert("build-int-to-ptr".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-ptr-to-int".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
@@ -2385,9 +2396,9 @@ fn string_assoc() -> BTreeMap<String, AssocFn> {
     let mut m = BTreeMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Str], Type::Str));
     m.insert("downcase".to_string(), method(vec![Type::Str], Type::Str));
-    m.insert("length".to_string(), method(vec![Type::Str], Type::I32));
-    m.insert("ref".to_string(), method(vec![Type::Str, Type::I32], Type::Char));
-    m.insert("substring".to_string(), method(vec![Type::Str, Type::I32, Type::I32], Type::Str));
+    m.insert("length".to_string(), method(vec![Type::Str], Type::Int));
+    m.insert("ref".to_string(), method(vec![Type::Str, Type::Int], Type::Char));
+    m.insert("substring".to_string(), method(vec![Type::Str, Type::Int, Type::Int], Type::Str));
     m.insert("append".to_string(), method(vec![Type::Str, Type::Str], Type::Str));
     m.insert("lt".to_string(), method(vec![Type::Str, Type::Str], Type::Bool));
     // Lexicographic comparison operators, overloaded on `string` the same way
@@ -2445,7 +2456,7 @@ fn char_assoc() -> BTreeMap<String, AssocFn> {
     // `string`, which is a designator-taking function this language has no
     // room for; the explicit name says which direction the conversion goes.
     m.insert("char->string".to_string(), method(vec![Type::Char], Type::Str));
-    m.insert("char->int".to_string(), method(vec![Type::Char], Type::I32));
+    m.insert("char->int".to_string(), method(vec![Type::Char], Type::Int));
     m.insert("print".to_string(), method(vec![Type::Char], Type::Unit));
     m.insert("println".to_string(), method(vec![Type::Char], Type::Unit));
     m
@@ -2487,7 +2498,7 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // it. Nothing below the checker changes — the compiled tier passes the
     // distance as a raw word and `rt_int_ash` already read it as a signed
     // count, as did `eval_int_builtin`.
-    m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::I32], ty.clone()), instance: true, builtin: true });
+    m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], ty.clone()), instance: true, builtin: true });
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
@@ -2505,7 +2516,7 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // operation this file registers (`(logand a b)`, `(ash x count)`,
     // `(lognot x)`); `ldb` and its family moved the same way and for the same
     // reason (`prelude.rs`'s byte-specifier section).
-    m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::I32], Type::Bool), instance: true, builtin: true });
+    m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], Type::Bool), instance: true, builtin: true });
     // `lognot` (bitwise complement), `logcount` (population count of a
     // nonnegative integer, or of the zero bits of a negative one — CL
     // §12.10's "infinite precision" reading), `integer-length` (bits needed,
@@ -2546,11 +2557,8 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
         "try-int->char".to_string(),
         AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(Type::Char)), instance: true, builtin: true },
     );
-    // `int->bignum`/`int->ratio`: widening conversions into the two
-    // arbitrary-precision types (`docs/cl-equivalence-catalog.md`'s planned
-    // conversion catalog, extended for `bignum`/`ratio`) — always exact,
-    // unlike `bignum->int`/`ratio->int`'s narrowing counterparts.
-    m.insert("int->bignum".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Bignum), instance: true, builtin: true });
+    // `int->ratio`: the exact widening into the rational type
+    // (`docs/cl-equivalence-catalog.md`'s conversion catalog).
     m.insert("int->ratio".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Ratio), instance: true, builtin: true });
     // `int->int`: the exact widening into the arbitrary-precision `int` —
     // what `(as int x)` calls. Named by the family-prefix rule every other
@@ -2615,7 +2623,6 @@ fn c_word_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     }
     // Always exact, which is what makes it the honest way to read a `size_t`
     // that does not fit in an `i32`.
-    m.insert("int->bignum".to_string(), conv(Type::Bignum));
     m.insert("int->int".to_string(), conv(Type::Int));
     m.insert("print".to_string(), conv(Type::Unit));
     m.insert("println".to_string(), conv(Type::Unit));
@@ -2656,18 +2663,15 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), cmp());
     }
-    // `float->int`: narrowing numeric conversion, truncating toward zero and
-    // saturating (Rust's `as i32`) — the other half of `int_assoc`'s
-    // `int->float`. Returns `i32`, this language's widest fixed-width integer
-    // and `Checker::int_lit_ty`'s fallback; a narrower target is reached by
-    // chaining `int->W` (`Checker::check_as`).
-    m.insert("float->int".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::I32), instance: true, builtin: true });
-    // `float->bignum`: narrowing, truncating toward zero (`f64 as i64`'s
-    // multi-precision analogue — see `crate::eval::interp::float_to_bignum`).
+    // `float->int`: truncating toward zero into the arbitrary-precision
+    // `int` — exact for every finite float, whatever its magnitude (CL's
+    // `truncate`); a non-finite float panics, having no integer to truncate
+    // to. A fixed-width target is reached by chaining `int->W`
+    // (`Checker::check_as`).
     // `float->ratio`: widening and *exact* — every finite `f64` is itself an
     // exact dyadic rational (CL's `rational`, not the lossy-round-trip
     // `rationalize`), via `num_rational::BigRational::from_float`.
-    m.insert("float->bignum".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Bignum), instance: true, builtin: true });
+    m.insert("float->int".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Int), instance: true, builtin: true });
     m.insert("float->ratio".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Ratio), instance: true, builtin: true });
     // `float->f32`/`float->f64` and `try-float->f32`: a cast between the two
     // float *widths*, a real conversion now that `f32` is binary32 rather
@@ -2715,8 +2719,8 @@ fn integer_assoc() -> BTreeMap<String, AssocFn> {
     for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor"] {
         m.insert(op.to_string(), binop());
     }
-    m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::I32], ty.clone()), instance: true, builtin: true });
-    m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::I32], Type::Bool), instance: true, builtin: true });
+    m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], ty.clone()), instance: true, builtin: true });
+    m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], Type::Bool), instance: true, builtin: true });
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
@@ -2729,7 +2733,6 @@ fn integer_assoc() -> BTreeMap<String, AssocFn> {
     }
     m.insert("int->float".to_string(), conv(Type::F64));
     m.insert("int->ratio".to_string(), conv(Type::Ratio));
-    m.insert("int->bignum".to_string(), conv(Type::Bignum));
     m.insert("int->int".to_string(), conv(Type::Int));
     m.insert("int->char".to_string(), conv(Type::Char));
     m.insert("try-int->char".to_string(), conv(option_of(Type::Char)));
@@ -2740,60 +2743,6 @@ fn integer_assoc() -> BTreeMap<String, AssocFn> {
     }
     m.insert("print".to_string(), conv(Type::Unit));
     m.insert("println".to_string(), conv(Type::Unit));
-    m
-}
-
-/// Built-in arithmetic/comparison instance methods for `bignum` (CL's
-/// bignum: an arbitrary-precision integer). Core operation set: `+ - * /`
-/// (`/` truncates toward zero) and `mod` (floored, CL — sign of the divisor),
-/// all panicking on a zero divisor, plus conversions to/from `i32`
-/// (narrowing; panics if the value doesn't fit — same precedent as
-/// `int_assoc`'s `int->char`), `f64` (both directions), and `ratio`
-/// (widening, exact). The rest of CL's integer catalog
-/// (`rem`/`abs`/`signum`/`gcd`/`lcm`/`expt`) is defined in `prelude.rs` as
-/// typelisp methods (built from these primitives), so it compiles normally.
-fn bignum_assoc() -> BTreeMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig::builtin(vec![Type::Bignum, Type::Bignum], Type::Bignum), instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig::builtin(vec![Type::Bignum, Type::Bignum], Type::Bool), instance: true, builtin: true };
-    let unary = || AssocFn { sig: FnSig::builtin(vec![Type::Bignum], Type::Bignum), instance: true, builtin: true };
-    let mut m = BTreeMap::new();
-    for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor"] {
-        m.insert(op.to_string(), binop());
-    }
-    // `ash`'s distance and `logbitp`'s index are `i32` here for exactly the
-    // reasons `int_assoc` gives, and one more that is specific to `bignum`:
-    // a shift distance that could itself be arbitrary precision is not a
-    // quantity anyone can use. `(ash big huge)` names a result with `huge`
-    // more bits than `big` — no machine finishes that, so the wider type
-    // buys nothing and only makes the ordinary call awkward to write.
-    m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Bignum, Type::I32], Type::Bignum), instance: true, builtin: true });
-    m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Bignum, Type::I32], Type::Bool), instance: true, builtin: true });
-    for op in ["<", "<=", ">", ">=", "=", "/="] {
-        m.insert(op.to_string(), cmp());
-    }
-    m.insert("logtest".to_string(), cmp());
-    for op in ["lognot", "logcount", "integer-length"] {
-        m.insert(op.to_string(), unary());
-    }
-    // See `int_assoc`'s eq/eql/equal/equalp comment — same alias-for-`=`
-    // rationale (both operands are always `bignum` here, so `equalp`'s
-    // cross-type case can't be reached through this table; it's handled at
-    // the `Sexpr`/dynamic layer instead — see `docs/cl-equivalence-catalog.md`).
-    for name in ["eq", "eql", "equal", "equalp"] {
-        m.insert(name.to_string(), cmp());
-    }
-    m.insert("bignum->int".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Bignum], Type::I32), instance: true, builtin: true });
-    // `try-bignum->int`: the `Option`-returning counterpart of `bignum->int`,
-    // for `(try-as i32 n)`/`(try-as i64 n)` (`Checker::check_as`) — same
-    // "fits in an `i64`" check, `None` instead of a panic on overflow.
-    m.insert(
-        "try-bignum->int".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![Type::Bignum], option_of(Type::I32)), instance: true, builtin: true },
-    );
-    m.insert("bignum->float".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Bignum], Type::F64), instance: true, builtin: true });
-    m.insert("bignum->ratio".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Bignum], Type::Ratio), instance: true, builtin: true });
-    m.insert("print".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Bignum], Type::Unit), instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Bignum], Type::Unit), instance: true, builtin: true });
     m
 }
 
@@ -2818,10 +2767,10 @@ fn ratio_assoc() -> BTreeMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), cmp());
     }
-    m.insert("ratio->bignum".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Bignum), instance: true, builtin: true });
+    m.insert("ratio->int".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true });
     m.insert("ratio->float".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::F64), instance: true, builtin: true });
-    m.insert("numerator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Bignum), instance: true, builtin: true });
-    m.insert("denominator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Bignum), instance: true, builtin: true });
+    m.insert("numerator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true });
+    m.insert("denominator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true });
     m.insert("print".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Unit), instance: true, builtin: true });
     m.insert("println".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Unit), instance: true, builtin: true });
     m

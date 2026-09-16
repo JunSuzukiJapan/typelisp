@@ -105,7 +105,7 @@ fn defenum_constructs_a_later_variant() {
 
 #[test]
 fn defenum_constructs_a_variant_with_a_payload() {
-    let (variant, fields) = eval_enum("(defenum Shape (Circle i32) (Nothing)) (Shape::Circle 7)");
+    let (variant, fields) = eval_enum("(defenum Shape (Circle int) (Nothing)) (Shape::Circle 7)");
     assert_eq!(variant, 0);
     assert_eq!(fields, vec![typelisp::Value::Int(7)]);
 }
@@ -113,7 +113,7 @@ fn defenum_constructs_a_variant_with_a_payload() {
 #[test]
 fn a_bare_symbol_nullary_variant_is_accepted() {
     // `A` (no parens) is a nullary variant, equivalent to `(A)`.
-    let (variant, fields) = eval_enum("(defenum E A (B i32)) (E::A)");
+    let (variant, fields) = eval_enum("(defenum E A (B int)) (E::A)");
     assert_eq!(variant, 0);
     assert!(fields.is_empty());
 }
@@ -133,14 +133,14 @@ fn match_selects_the_nullary_arm() {
     // pin it via a return-type-annotated helper — this is a property of the
     // shared inference, not of `defenum`.
     let src = "(defenum Maybe<T> (Just T) (Nothing)) \
-               (defun mk () Maybe<i32> (Maybe::Nothing)) \
+               (defun mk () Maybe<int> (Maybe::Nothing)) \
                (match (mk) ((Just v) v) ((Nothing) 99))";
     assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
 fn a_generic_enum_infers_its_type_argument() {
-    // The nullary `Nothing` learns T=i32 from the arm result type unification.
+    // The nullary `Nothing` learns T=int from the arm result type unification.
     let src = "(defenum Maybe<T> (Just T) (Nothing)) \
                (match (Maybe::Just 42) ((Just v) v) ((Nothing) 0))";
     assert_eq!(eval_ok(src), Value::Int(42));
@@ -172,7 +172,7 @@ fn if_let_binds_a_matching_variant() {
 #[test]
 fn if_let_takes_the_else_branch_on_a_mismatch() {
     let src = "(defenum Maybe<T> (Just T) (Nothing)) \
-               (defun mk () Maybe<i32> (Maybe::Nothing)) \
+               (defun mk () Maybe<int> (Maybe::Nothing)) \
                (if-let ((Just v) (mk)) v 0)";
     assert_eq!(eval_ok(src), Value::Int(0));
 }
@@ -206,7 +206,7 @@ fn an_enum_with_no_variants_is_rejected() {
 
 #[test]
 fn a_constructor_arity_mismatch_is_rejected() {
-    assert_check_err("(defenum Shape (Circle i32) (Nothing)) (Shape::Circle 1 2)", "");
+    assert_check_err("(defenum Shape (Circle int) (Nothing)) (Shape::Circle 1 2)", "");
 }
 
 // ---- header syntax: `Name<T>` only, list form rejected ----------------------

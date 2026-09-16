@@ -27,7 +27,7 @@ fn fmt(src: &str) -> String {
 /// sources that need one.
 const CYCLE_DEFS: &str = r#"
     (defenum link (no-link) (to node))
-    (defstruct node (val i32) (next link))
+    (defstruct node (val int) (next link))
     (defun cycle () node
       (let ((a (node::new 1 (link::no-link))))
         (setf a::next (link::to a))
@@ -96,7 +96,7 @@ fn print_level_leaves_atoms_alone() {
 #[test]
 fn print_level_applies_to_struct_and_enum_values() {
     let src = r#"
-        (defstruct pt (x i32) (y i32))
+        (defstruct pt (x int) (y int))
         (defstruct pair (a pt) (b pt))
         (setf *print-level* 1)
         (format false "~a" (pair::new (pt::new 1 2) (pt::new 3 4)))
@@ -156,7 +156,7 @@ fn a_list_shorter_than_the_limit_is_untouched() {
 #[test]
 fn print_length_truncates_struct_fields() {
     let src = r#"
-        (defstruct quad (a i32) (b i32) (c i32) (d i32))
+        (defstruct quad (a int) (b int) (c int) (d int))
         (setf *print-length* 2)
         (format false "~a" (quad::new 1 2 3 4))
     "#;
@@ -166,7 +166,7 @@ fn print_length_truncates_struct_fields() {
 #[test]
 fn print_length_truncates_enum_fields() {
     let src = r#"
-        (defenum shape (tri i32 i32 i32))
+        (defenum shape (tri int int int))
         (setf *print-length* 2)
         (format false "~a" (shape::tri 3 4 5))
     "#;

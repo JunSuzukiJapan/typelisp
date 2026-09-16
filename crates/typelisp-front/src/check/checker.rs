@@ -679,6 +679,15 @@ const OPTION_NONE: usize = 1;
 /// sexpr 0 ..)`, which the checker emits itself.
 const SEXPR_RESERVED_VARIANT: usize = 0;
 
+/// `Sexpr`'s variant 8 — the old `bignum`, retired with the type: a bignum
+/// box is an `int` (variant 1) now. Same treatment as [`SEXPR_RESERVED_VARIANT`]:
+/// the slot stays so nothing renumbers, and its surface is refused.
+const SEXPR_RETIRED_BIGNUM: usize = 8;
+
+/// Message for a `(bignum ..)` constructor or pattern.
+const BIGNUM_IS_GONE: &str = "`bignum` is no longer a `Sexpr` constructor: the `bignum` type was folded \
+     into `int`, so a big integer is `(int n)` like any other.";
+
 /// Message for a `(nil)` that survived in source somewhere.
 const NIL_IS_GONE: &str = "`nil` is no longer a `Sexpr` constructor: the empty list is \
      `Option<Sexpr>`'s `none`. Write `()` where an `Option<Sexpr>` is expected, or \
@@ -687,6 +696,61 @@ const NIL_IS_GONE: &str = "`nil` is no longer a `Sexpr` constructor: the empty l
 /// Is `(adt, variant)` the retired `Sexpr::nil`?
 fn is_retired_nil(adt: &Path, variant: usize) -> bool {
     variant == SEXPR_RESERVED_VARIANT && crate::types::path_is_builtin(adt, "sexpr")
+}
+
+/// Is `(adt, variant)` the retired `Sexpr::bignum`?
+fn is_retired_bignum(adt: &Path, variant: usize) -> bool {
+    variant == SEXPR_RETIRED_BIGNUM && crate::types::path_is_builtin(adt, "sexpr")
+}
+
+/// Whether a Rust-implemented builtin method's `int`-typed parameters and
+/// result cross the compiled boundary as **raw machine words**.
+///
+/// An `int` is a tagged word in a register (`Repr::Int`), and the `rt_*`
+/// shims that implement the builtin catalog — `rt_str_substring`,
+/// `rt_hashtable_bucket_*`, the LLVM builders' `rt_llvm_call` — read and
+/// answer plain `i64`s, as they did when these parameters were `i32`. So the
+/// call site does the conversion: an `int` argument goes through
+/// `(untag-int E)` (a fixnum's payload; a bignum is a language error — an
+/// index or a count that size is a program's mistake) and an `int` result
+/// through `(tag-int E)`. The interpreter's `untag-int` is the same check
+/// with no shift, so both tiers refuse the same programs.
+///
+/// The exceptions are the builtins whose native lowering already speaks
+/// tagged ints, because their answer can be a bignum: every method of `int`
+/// itself, the conversions *into* `int` (`float->int`, `ratio->int`,
+/// `numerator`, `denominator`, `int->int`), and `Chan`'s `len`/`cap`, whose
+/// answers arrive through the suspension driver tagged like every wake value.
+/// `ash`/`logbitp` on the fixed widths are exceptions too, the other way
+/// round: their count is an `int` the island untags itself (`untag-int-value`),
+/// the same way it does for `int`'s own. This list and the island's lowering
+/// are one decision written twice; `tests/int_default_test.rs` runs each of
+/// them in both tiers.
+fn int_boundary_raw(type_name: &Path, method: &str) -> bool {
+    use crate::types::path_is_builtin;
+    if path_is_builtin(type_name, "int") {
+        return false;
+    }
+    if path_is_builtin(type_name, "chan") && matches!(method, "len" | "cap") {
+        return false;
+    }
+    !matches!(method, "float->int" | "ratio->int" | "numerator" | "denominator" | "int->int" | "ash" | "logbitp")
+}
+
+/// [`int_boundary_raw`] for a free builtin: `sexpr-int` answers the tagged
+/// word an `int` node already is.
+fn int_boundary_native_fn(name: &str) -> bool {
+    name == "sexpr-int"
+}
+
+/// `(untag-int E)` — see [`int_boundary_raw`].
+fn untag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
+    core::tagged(heap, "untag-int", &[e])
+}
+
+/// `(tag-int E)` — see [`int_boundary_raw`].
+fn tag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
+    core::tagged(heap, "tag-int", &[e])
 }
 
 /// How deep a blanket impl's own bounds may be chased before the search is
@@ -1305,6 +1369,13 @@ impl Checker {
     /// same order: the island reads them to decide the GC-root bookkeeping
     /// around each argument as it crosses into a compiled frame.
     fn call_form(&self, heap: &mut Heap, r: &Ref, args: &[Checked]) -> Result<Value, Error> {
+        // A Rust-implemented builtin's `int`-typed parameters cross the
+        // compiled boundary as raw machine words — see `int_boundary_raw`.
+        let boundary = self
+            .reg
+            .fn_sig(&r.resolved)
+            .filter(|sig| sig.builtin && !sig.ffi && !int_boundary_native_fn(r.resolved.last_segment()))
+            .map(|sig| (sig.params.clone(), sig.ret.clone()));
         let mut f = Items::new(heap);
         let written = forms::sym_list(f.heap(), &r.written)?;
         f.push(written);
@@ -1312,10 +1383,24 @@ impl Checker {
         f.push(home);
         let path = forms::path_form(f.heap(), &r.resolved);
         f.push(path);
-        let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
+        // An untagged argument is a raw word from here on, and its
+        // representation has to say so: a rooted slot holding a raw word
+        // would be read by the collector as a reference.
+        let declared_int = |i: usize| boundary.as_ref().and_then(|(ps, _)| ps.get(i)).is_some_and(|t| *t == Type::Int);
+        let reprs = self.repr_forms(
+            f.heap(),
+            args.iter().enumerate().map(|(i, a)| if declared_int(i) { Type::I32 } else { a.ty.clone() }),
+        )?;
         f.push(reprs);
-        f.extend(args.iter().map(|a| a.form));
-        f.finish("call")
+        for (i, a) in args.iter().enumerate() {
+            let form = if declared_int(i) { untag_int_form(f.heap(), a.form)? } else { a.form };
+            f.push(form);
+        }
+        let call = f.finish("call")?;
+        match boundary {
+            Some((_, ret)) if ret == Type::Int => tag_int_form(heap, call),
+            _ => Ok(call),
+        }
     }
 
     /// `(assoc PATH SYM INSTANCE (HOME...) RET-REPR (REPR...) ARG...)` — an
@@ -1345,7 +1430,24 @@ impl Checker {
         f.push(home);
         let ret_repr = self.repr_form(f.heap(), ret)?;
         f.push(ret_repr);
-        let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
+        // A Rust-implemented builtin's `int`-typed parameters and result cross
+        // the compiled boundary as raw machine words — see `int_boundary_raw`.
+        // Decided on the *declared* signature, not the instantiated one: a
+        // `Vector<int>`'s `get` takes an `int` index and returns a `T` that
+        // happens to be `int`, and only the index is a machine word.
+        let boundary = self
+            .reg
+            .type_def(type_name)
+            .and_then(|d| d.assoc.get(method))
+            .filter(|af| af.builtin && int_boundary_raw(type_name, method))
+            .map(|af| (af.sig.params.clone(), af.sig.ret.clone()));
+        let declared_int = |i: usize| boundary.as_ref().and_then(|(ps, _)| ps.get(i)).is_some_and(|t| *t == Type::Int);
+        // An untagged argument is a raw word from here on, and its
+        // representation has to say so (`call_form` makes the same point).
+        let reprs = self.repr_forms(
+            f.heap(),
+            args.iter().enumerate().map(|(i, a)| if declared_int(i) { Type::I32 } else { a.ty.clone() }),
+        )?;
         f.push(reprs);
         // The *result's* runtime identity. A built-in container method builds
         // its box in Rust (`Vector::new`, `HashTable::keys`), below the
@@ -1356,12 +1458,19 @@ impl Checker {
         let key = crate::type_key::type_key_of_type(ret);
         let key = f.heap().alloc_string(key);
         f.push(key);
-        f.extend(args.iter().map(|a| a.form));
+        for (i, a) in args.iter().enumerate() {
+            let form = if declared_int(i) { untag_int_form(f.heap(), a.form)? } else { a.form };
+            f.push(form);
+        }
         // A built-in that hands back a generic box (`Vector::new`,
         // `HashTable::keys`) is a construction site with no `construct` node,
         // so the printer's specialization has to be asked for here too.
         self.request_print_object(ret);
-        f.finish("assoc")
+        let assoc = f.finish("assoc")?;
+        match boundary {
+            Some((_, ret)) if ret == Type::Int => tag_int_form(heap, assoc),
+            _ => Ok(assoc),
+        }
     }
 
     /// `(fnref (WRITTEN...) (HOME...) PATH (PARAM-REPR...))` — a named free
@@ -4770,7 +4879,9 @@ impl Checker {
             // with no `Type::Named` spelling — see `Interp::is_heap_repr_ty`'s
             // matching arm for why routing these to a heap slot is a
             // correctness requirement rather than a choice.
-            Type::RandomState | Type::Bignum | Type::Ratio | Type::F64 | Type::Str => true,
+            // `int` too: its word is a `Sexpr` `int`'s word already, fixnum
+            // or bignum box, so it shares the shortcut `string`/`ratio` take.
+            Type::RandomState | Type::Int | Type::Ratio | Type::F64 | Type::Str => true,
             _ => false,
         }
     }
@@ -9523,7 +9634,9 @@ impl Checker {
                         None => return Err(int_lit_range_error(&text, t, false)),
                     }
                 }
-                _ => Checked::new(core::tagged(heap, "bignum", &[Value::Boxed(id)])?, Type::Bignum),
+                // No expectation, or one this is not: the literal is an
+                // `int`, the type every unannotated integer literal has.
+                _ => Checked::new(core::tagged(heap, "bignum", &[Value::Boxed(id)])?, Type::Int),
             },
             Value::Boxed(id) if heap.is_ratio(id) => {
                 Checked::new(core::tagged(heap, "ratio", &[Value::Boxed(id)])?, Type::Ratio)
@@ -11418,7 +11531,6 @@ impl Checker {
             return self.coerce_to_dyn(heap, env, src, trait_path, pins);
         }
 
-        let src_ty = src.ty.clone();
         let (panic_method, try_method) = as_conversion(&src.ty, &target).ok_or_else(|| {
             Error::TypeError(format!(
                 "{}: no conversion from {:?} to {:?} (as/try-as cover only the numeric/char catalog: int/f64/bignum/ratio/char)",
@@ -11436,7 +11548,7 @@ impl Checker {
             &[],
         )?;
 
-        // `float->int`/`bignum->int`/`char->int` land on `i32`, and
+        // `float->int`/`ratio->int`/`char->int` land on `int`, and
         // `int->float` on `f64`, whichever width the caller asked for — see
         // `as_conversion`'s doc comment. A narrower target is reached by
         // *chaining* the same-family width cast onto that result, which is a
@@ -11444,14 +11556,9 @@ impl Checker {
         let narrower = target != called_width(&target);
         if try_variant {
             match try_method {
-                // A partial conversion whose result then has to be narrowed
-                // would be partial twice over, and there is one `Option` to
-                // say so with. Rather than pick which failure the `none`
-                // reports, say so: the two questions are asked separately.
-                Some(_) if narrower => Err(Error::TypeError(format!(
-                    "try-as: no direct {:?} -> {:?} — that would be two questions in one `option` (does the value convert, and does it then fit {:?}). Ask them apart: `(try-as {} x)`, then `(try-as {} n)` on the result.",
-                    src_ty, target, target, crate::type_key::type_key_of_type(&called_width(&target)), crate::type_key::type_key_of_type(&target)
-                ))),
+                // The one partial conversion left (`int->char`) has no
+                // narrower target to chain onto, so a partial conversion is
+                // always the whole answer.
                 Some(_) => Ok(called),
                 None => {
                     let called = if narrower {
@@ -11892,7 +11999,7 @@ impl Checker {
             .map(|sig| sig.ret.clone())
             .ok_or_else(|| Error::TypeError("ed: the `ed-open` builtin is not registered".into()))?;
         let file = Checked::new(forms::str_lit_form(heap, &file)?, Type::Str);
-        let line = Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(line)])?, Type::I32);
+        let line = Checked::new(core::tagged(heap, "int", &[Value::Int(line)])?, Type::Int);
         let r = Ref::synthetic(Path::root("ed-open"));
         let node = self.call_form(heap, &r, &[file, line])?;
         Ok(Checked::new(node, ret))
@@ -12644,7 +12751,7 @@ impl Checker {
     ) -> Result<Value, Error> {
         let a = heap.intern_symbol(&self.gensym_place());
         let idx = heap.intern_symbol(&self.gensym_place());
-        let empty = self.the_form(heap, "Vector", &Type::I32, "Vector::new")?;
+        let empty = self.the_form(heap, "Vector", &Type::Int, "Vector::new")?;
         let empty = forms::rooted(heap, empty);
         let push = heap.intern_symbol("push");
         let progn = heap.intern_symbol("progn");
@@ -14615,6 +14722,9 @@ impl Checker {
         if is_retired_nil(adt_name, variant) {
             return Err(Error::TypeError(NIL_IS_GONE.to_string()));
         }
+        if is_retired_bignum(adt_name, variant) {
+            return Err(Error::TypeError(BIGNUM_IS_GONE.to_string()));
+        }
         let def = self.reg.type_def(adt_name).expect("indexed adt exists").clone();
         let fields = &def.variants[variant].fields;
         if args.len() != fields.len() {
@@ -14782,12 +14892,15 @@ impl Checker {
         let sexpr_sugar = is_option_of_sexpr(&scrut.ty);
         let sexpr_variants =
             || self.reg.type_def(&Path::root("sexpr")).expect("sexpr is always registered").variants.len();
+        // The retired `bignum` slot (`SEXPR_RETIRED_BIGNUM`) is neither writable
+        // nor matchable, so it too is off the universe — one less than the
+        // table says, in both the flat and the plain form.
         let total_variants = if sexpr_sugar {
-            sexpr_variants()
+            sexpr_variants() - 1
         } else {
             adt_name.as_ref().map_or(0, |n| {
                 let all = self.reg.type_def(n).expect("adt exists").variants.len();
-                if crate::types::path_is_builtin(n, "sexpr") { all - 1 } else { all }
+                if crate::types::path_is_builtin(n, "sexpr") { all - 2 } else { all }
             })
         };
 
@@ -14876,11 +14989,12 @@ impl Checker {
                     covered.insert(SEXPR_RESERVED_VARIANT);
                 }
                 // `(some x)` under the sugar means "any non-empty shape",
-                // which is all sixteen of them at once.
+                // which is all sixteen of them at once — the retired
+                // `bignum` slot excepted, since it is not a shape.
                 Pattern::NonEmpty(sub)
                     if sexpr_sugar && matches!(**sub, Pattern::Wildcard | Pattern::Bind(..)) =>
                 {
-                    covered.extend(1..sexpr_variants());
+                    covered.extend((1..sexpr_variants()).filter(|v| *v != SEXPR_RETIRED_BIGNUM));
                 }
                 // A Sexpr-downcast `Ctor` pattern's `type_name` names the
                 // *downcast target* (a user struct/enum), not the
@@ -15415,7 +15529,7 @@ impl Checker {
         // pattern against `Sexpr` produces the right code as it stands.
         if is_option_of_sexpr(expected) {
             const BUILTIN_SEXPR_CTORS: &[&str] = &[
-                "nil", "i8", "i16", "i32", "u8", "u16", "u32", "f64", "f32", "char", "bool", "sym",
+                "nil", "int", "i8", "i16", "i32", "u8", "u16", "u32", "f64", "f32", "char", "bool", "sym",
                 "str", "cons", "bignum", "ratio", "path",
             ];
             if BUILTIN_SEXPR_CTORS.contains(&ctor.as_str()) {
@@ -15556,6 +15670,9 @@ impl Checker {
         if is_retired_nil(&adt_name, variant) {
             return Err(Error::TypeError(NIL_IS_GONE.to_string()));
         }
+        if is_retired_bignum(&adt_name, variant) {
+            return Err(Error::TypeError(BIGNUM_IS_GONE.to_string()));
+        }
         let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
         let subst: BTreeMap<String, Type> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
 
@@ -15691,7 +15808,7 @@ fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
         Value::Str(_) => "str",
         Value::Boxed(id) if heap.is_f64(id) => "f64",
         Value::Boxed(id) if heap.is_f32(id) => "f32",
-        Value::Boxed(id) if heap.is_bignum(id) => "bignum",
+        Value::Boxed(id) if heap.is_bignum(id) => "int",
         Value::Boxed(id) if heap.is_ratio(id) => "ratio",
         _ => "the sexpr",
     }
@@ -15740,28 +15857,23 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
         // (`registry::c_word_assoc`). Ahead of the integer arm, which these
         // deliberately fail.
         _ if from.is_c_word() => match &to_key {
-            Bignum => Some(("int->bignum", None)),
+            Int => Some(("int->int", None)),
             _ => None,
         },
         _ if from.is_int_family() => match &to_key {
             F64 => Some(("int->float", None)),
-            Bignum => Some(("int->bignum", None)),
             Ratio => Some(("int->ratio", None)),
             Char => Some(("int->char", Some("try-int->char"))),
             _ => None,
         },
         _ if from.is_float() => match &to_key {
-            I32 => Some(("float->int", None)),
-            Bignum => Some(("float->bignum", None)),
+            Int => Some(("float->int", None)),
             Ratio => Some(("float->ratio", None)),
             _ => None,
         },
-        (Char, I32) => Some(("char->int", None)),
-        (Bignum, Ratio) => Some(("bignum->ratio", None)),
-        (Bignum, F64) => Some(("bignum->float", None)),
-        (Bignum, I32) => Some(("bignum->int", Some("try-bignum->int"))),
+        (Char, Int) => Some(("char->int", None)),
         (Ratio, F64) => Some(("ratio->float", None)),
-        (Ratio, Bignum) => Some(("ratio->bignum", None)),
+        (Ratio, Int) => Some(("ratio->int", None)),
         _ => None,
     }
 }
@@ -15771,7 +15883,7 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
 /// everything else. See [`as_conversion`].
 fn called_width(ty: &Type) -> Type {
     if ty.is_integer() {
-        Type::I32
+        Type::Int
     } else if ty.is_float() {
         Type::F64
     } else {
@@ -15971,7 +16083,7 @@ fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
         Type::U32 => Some("u32"),
         Type::F32 => Some("f32"),
         Type::F64 => Some("f64"),
-        Type::Bignum => Some("bignum"),
+        Type::Int => Some("int"),
         Type::Ratio => Some("ratio"),
         Type::Char => Some("char"),
         Type::Bool => Some("bool"),
@@ -16015,14 +16127,16 @@ fn trait_operator_method(op: &str) -> Option<&'static str> {
 
 fn int_lit_ty(expected: Option<&Type>) -> Type {
     match expected {
-        Some(Type::Int) => Type::Int,
         // A C word too, so `(c-malloc 16)` reads the way it should. Nothing is
         // loosened by it: the literal's type is then `c-ulong`, which
         // `check_at`'s rule B still refuses outside `(unsafe ...)`, and
         // `int_lit_in_range` still checks 16 against a 64-bit unsigned width
         // — `int_width_signed` answers for these two.
         Some(t) if t.is_integer() || t.is_c_word() => t.clone(),
-        _ => Type::I32,
+        // No expectation, or one that is not an integer type: `int`, the
+        // language's integer (CL's `integer`), which no literal can fail to
+        // fit.
+        _ => Type::Int,
     }
 }
 

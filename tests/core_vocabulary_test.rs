@@ -222,9 +222,9 @@ fn calls() {
     all_round_trip(&[
         "(call (f) () f (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))",
         "(call (helper) (m) m::helper ())",
-        // An instance method on `i32`, `true` meaning it takes a receiver,
+        // An instance method on `int`, `true` meaning it takes a receiver,
         // returning an int, over two int arguments.
-        "(assoc i32 + true () int-any-width (int-any-width int-any-width) (var a) (var b))",
+        "(assoc int + true () int-any-width (int-any-width int-any-width) (var a) (var b))",
         // A static associated function: no receiver.
         "(assoc point new false () struct (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))",
         // A builtin whose result is what identifies it: an empty vector of
@@ -252,7 +252,7 @@ fn calls() {
         // name, a type key, a field kind) with one form each. The channel
         // expressions are `var`s: the checker bound every operand in a `let`
         // around this node, so nothing here evaluates anything that can stop.
-        "(select (\"recv\" v \"option<i32>\" (var c) (var v)) (\"else\" (int-any-width 0)))",
+        "(select (\"recv\" v \"option<int>\" (var c) (var v)) (\"else\" (int-any-width 0)))",
         "(select (\"send\" 1 (var c) (var x) (int-any-width 0)))",
     ]);
     // `compile-fn`'s two payload shapes, standalone for the same reason the
@@ -302,7 +302,7 @@ fn repl_tools() {
 /// definition has no answer: `Option`'s `Some` field is declared `T`, and a
 /// type variable has no representation. The instantiation is known only at the
 /// site — and a definition-keyed table could not be made to hold it either,
-/// since monomorphization erases and `Maybe<i32>`/`Maybe<string>` share the one
+/// since monomorphization erases and `Maybe<int>`/`Maybe<string>` share the one
 /// path `Maybe`. The reprs are the *declared* field types with this site's type
 /// arguments substituted in, never the argument expressions' own types, which
 /// can be narrower.
@@ -429,7 +429,7 @@ fn trait_objects() {
 #[test]
 fn top_level() {
     all_round_trip(&[
-        "(defun m::add ((a int-any-width) (b int-any-width)) int-any-width true (assoc i32 + true () int-any-width (int-any-width int-any-width) (var a) (var b)))",
+        "(defun m::add ((a int-any-width) (b int-any-width)) int-any-width true (assoc int + true () int-any-width (int-any-width int-any-width) (var a) (var b)))",
         "(defun m::nothing () unit false (unit))",
         "(defmethod point area false ((self struct)) int-any-width true (field-get (var self) 0 int-any-width))",
         // params, then whether it takes `&rest`, then the `&optional`/`&key`

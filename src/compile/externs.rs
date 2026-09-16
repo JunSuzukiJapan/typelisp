@@ -49,6 +49,7 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "sexpr-null" => "rt_null",
         "sexpr-atom" => "rt_atom",
         "sexpr-symp" => "rt_symp",
+        "sexpr-int" => "rt_sexpr_int",
         "sexpr-i32" => "rt_sexpr_i32",
         "sexpr-bool" => "rt_sexpr_bool",
         "sexpr-char" => "rt_sexpr_char",
@@ -287,7 +288,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // them, so the arithmetic listed here can never be asked for.
         "i32" | "i8" | "i16" | "u8" | "u16" | "u32" | "c-long" | "c-ulong" => &[
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
-            "int->bignum", "int->int", "int->ratio", "int->float", "int->char",
+            "int->int", "int->ratio", "int->float", "int->char",
             "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
             "int->c-long", "int->c-ulong",
             // The `Option`-returning halves. No prelude definition reaches
@@ -329,7 +330,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         ],
         "f64" | "f32" => &[
             "+", "-", "*", "/", "expt", "sqrt", "floor", "ceiling", "round", "truncate",
-            "float->int", "float->bignum", "float->ratio", "float->f32", "float->f64",
+            "float->int", "float->ratio", "float->f32", "float->f64",
             // Same reason as the integer `try-*` group above: no prelude
             // caller, lowered so a user's `(try-as f32 x)` can compile.
             "try-float->f32", "try-float->f64",
@@ -345,36 +346,15 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
             "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
             "ash", "logbitp",
-            "int->float", "int->ratio", "int->bignum", "int->int", "int->char", "try-int->char",
+            "int->float", "int->ratio", "int->int", "int->char", "try-int->char",
             "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
             "int->c-long", "int->c-ulong",
             "try-int->i8", "try-int->i16", "try-int->i32", "try-int->u8", "try-int->u16", "try-int->u32",
             "try-int->c-long", "try-int->c-ulong",
         ],
-        "bignum" => &[
-            "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
-            "bignum->int", "try-bignum->int", "bignum->float", "bignum->ratio", "max", "min",
-            // The bitwise primitives the prelude's derived bignum operators
-            // (`logeqv`/`lognand`/`lognor`/`logandc1`/`logandc2`/`logorc1`/
-            // `logorc2`) are written in terms of, plus `ash`, which `Bits`'s
-            // `shift` impl for `bignum` reaches. The rest of
-            // `bignum_assoc`'s bitwise catalog (`logbitp`/`logtest`/
-            // `logcount`/`integer-length`) stays interpreted: no prelude
-            // definition reaches it, so lowering it would be code nothing
-            // exercises. `logxor` is here because `logeqv` is `lognot` of it
-            // — a blocker that only became visible once `lognot` had a
-            // lowering, which is the reconcile check in `prelude_bootstrap`
-            // doing its job, and `ash` arrived the same way.
-            "logand", "logior", "logxor", "lognot", "ash",
-            // `logbitp`/`logtest`/`logcount`/`integer-length` have no prelude
-            // caller either; they are lowered so that a *user's* `defun`
-            // naming one can be compiled at all, which is what
-            // `docs/syntax.md` §10's list is about.
-            "logbitp", "logtest", "logcount", "integer-length",
-        ],
         "ratio" => &[
             "+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
-            "ratio->bignum", "ratio->float", "numerator", "denominator", "max", "min",
+            "ratio->int", "ratio->float", "numerator", "denominator", "max", "min",
         ],
         // `Sexpr` values are raw tagged `i64` handles in compiled code, and
         // interned symbols/`nil`/small atoms are handle-identical, so `eq`
@@ -457,7 +437,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 286] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 265] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -487,12 +467,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 286] {
         rt_integer_add, rt_integer_ash, rt_integer_cmp, rt_integer_div, rt_integer_fits, rt_integer_fits_char,
         rt_integer_from_word, rt_integer_integer_length, rt_integer_logand, rt_integer_logbitp, rt_integer_logcount,
         rt_integer_logior, rt_integer_lognot, rt_integer_logtest, rt_integer_logxor, rt_integer_mod, rt_integer_mul,
-        rt_integer_narrow, rt_integer_sub, rt_integer_to_bignum, rt_integer_to_char, rt_integer_to_float,
-        rt_integer_to_ratio,
+        rt_integer_narrow, rt_integer_sub, rt_integer_to_char, rt_integer_to_float,
+        rt_integer_to_ratio, rt_int_not_fixnum,
     };
     use typelisp_rt::{
-        rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
-        rt_bignum_ash, rt_bignum_integer_length, rt_bignum_logand, rt_bignum_logbitp, rt_bignum_logcount, rt_bignum_logtest, rt_bignum_logior, rt_bignum_lognot, rt_bignum_logxor,
+        rt_atom, rt_bignum_new,
         rt_make_random_state_fresh, rt_random_state_copy, rt_random_state_next, rt_seed_random_state,
 
         rt_file_create_directories, rt_file_delete, rt_file_directory_p, rt_file_exists_p,
@@ -504,10 +483,10 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 286] {
         rt_set_macro_character, rt_get_macro_character, rt_set_dispatch_macro_character, rt_get_dispatch_macro_character,
         rt_stream_string_input, rt_stream_string_output, rt_stream_take_output_string, rt_stream_unread_char,
         rt_stream_write_byte, rt_stream_write_string,
-        rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
+        rt_box_kind, rt_car, rt_cdr,
         rt_cell_get, rt_cell_new, rt_cell_set, rt_char_alphap, rt_char_digitp, rt_char_downcase,
         rt_char_equalp, rt_char_upcase, rt_int_to_char, rt_closure_env_get, rt_closure_env_len,
-        rt_closure_fnptr, rt_closure_new, rt_coroutine_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_narrow_new, rt_narrow_value, rt_float_to_bignum,
+        rt_closure_fnptr, rt_closure_new, rt_coroutine_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_narrow_new, rt_narrow_value, rt_float_to_int,
         rt_float_to_ratio, rt_f64_value, rt_f32_value, rt_global_get, rt_global_new, rt_global_set, rt_int_div, rt_int_mod,
         rt_int_ash, rt_int_logbitp, rt_int_logcount, rt_int_integer_length,
         rt_f64_tan, rt_f64_asin, rt_f64_acos, rt_f64_atan, rt_f64_sinh, rt_f64_cosh, rt_f64_tanh, rt_f64_asinh, rt_f64_acosh,
@@ -515,11 +494,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 286] {
         rt_hashtable_bucket_count, rt_hashtable_bucket_delete, rt_hashtable_bucket_key, rt_hashtable_bucket_put,
         rt_hashtable_bucket_value,
         rt_hashtable_clear, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys,
-        rt_hashtable_new, rt_hashtable_values, rt_int_to_bignum, rt_uint_to_bignum, rt_int_to_ratio,
+        rt_hashtable_new, rt_hashtable_values, rt_int_to_ratio,
         rt_intern_path, rt_intern_symbol, rt_wk_symbol, rt_list_to_path, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
-        rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
-        rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_i32, rt_sexpr_i8, rt_sexpr_i16, rt_sexpr_u8, rt_sexpr_u16, rt_sexpr_u32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
+        rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_int, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
+        rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_int, rt_sexpr_i32, rt_sexpr_i8, rt_sexpr_i16, rt_sexpr_u8, rt_sexpr_u16, rt_sexpr_u32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
         rt_ffi_cstring_new, rt_ffi_cstring_free, rt_ffi_string_from_cstr,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_str_upcase, rt_str_downcase, rt_int_fits, rt_int_fits_char, rt_f64_fits_f32, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
@@ -620,6 +599,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 286] {
         ("rt_null", rt_null as usize),
         ("rt_atom", rt_atom as usize),
         ("rt_symp", rt_symp as usize),
+        ("rt_sexpr_int", rt_sexpr_int as usize),
         ("rt_sexpr_i32", rt_sexpr_i32 as usize),
         ("rt_sexpr_i8", rt_sexpr_i8 as usize),
         ("rt_sexpr_i16", rt_sexpr_i16 as usize),
@@ -755,26 +735,12 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 286] {
         ("rt_integer_integer_length", rt_integer_integer_length as usize),
         ("rt_integer_to_float", rt_integer_to_float as usize),
         ("rt_integer_to_ratio", rt_integer_to_ratio as usize),
-        ("rt_integer_to_bignum", rt_integer_to_bignum as usize),
         ("rt_integer_to_char", rt_integer_to_char as usize),
         ("rt_integer_fits_char", rt_integer_fits_char as usize),
         ("rt_integer_narrow", rt_integer_narrow as usize),
         ("rt_integer_fits", rt_integer_fits as usize),
         ("rt_integer_from_word", rt_integer_from_word as usize),
-        ("rt_bignum_add", rt_bignum_add as usize),
-        ("rt_bignum_sub", rt_bignum_sub as usize),
-        ("rt_bignum_mul", rt_bignum_mul as usize),
-        ("rt_bignum_div", rt_bignum_div as usize),
-        ("rt_bignum_mod", rt_bignum_mod as usize),
-        ("rt_bignum_ash", rt_bignum_ash as usize),
-        ("rt_bignum_logbitp", rt_bignum_logbitp as usize),
-        ("rt_bignum_logtest", rt_bignum_logtest as usize),
-        ("rt_bignum_logcount", rt_bignum_logcount as usize),
-        ("rt_bignum_integer_length", rt_bignum_integer_length as usize),
-        ("rt_bignum_logand", rt_bignum_logand as usize),
-        ("rt_bignum_logior", rt_bignum_logior as usize),
-        ("rt_bignum_logxor", rt_bignum_logxor as usize),
-        ("rt_bignum_lognot", rt_bignum_lognot as usize),
+        ("rt_int_not_fixnum", rt_int_not_fixnum as usize),
         ("rt_random_state_next", rt_random_state_next as usize),
         ("rt_random_state_copy", rt_random_state_copy as usize),
         ("rt_make_random_state_fresh", rt_make_random_state_fresh as usize),
@@ -839,23 +805,15 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 286] {
         ("rt_dribble_start", rt_dribble_start as usize),
         ("rt_dribble_stop", rt_dribble_stop as usize),
         ("rt_ed_open", rt_ed_open as usize),
-        ("rt_bignum_cmp", rt_bignum_cmp as usize),
-        ("rt_bignum_to_int", rt_bignum_to_int as usize),
-        ("rt_bignum_fits_i32", rt_bignum_fits_i32 as usize),
-        ("rt_bignum_to_int_raw", rt_bignum_to_int_raw as usize),
-        ("rt_bignum_to_float", rt_bignum_to_float as usize),
-        ("rt_bignum_to_ratio", rt_bignum_to_ratio as usize),
-        ("rt_int_to_bignum", rt_int_to_bignum as usize),
-        ("rt_uint_to_bignum", rt_uint_to_bignum as usize),
         ("rt_int_to_ratio", rt_int_to_ratio as usize),
-        ("rt_float_to_bignum", rt_float_to_bignum as usize),
+        ("rt_float_to_int", rt_float_to_int as usize),
         ("rt_float_to_ratio", rt_float_to_ratio as usize),
         ("rt_ratio_add", rt_ratio_add as usize),
         ("rt_ratio_sub", rt_ratio_sub as usize),
         ("rt_ratio_mul", rt_ratio_mul as usize),
         ("rt_ratio_div", rt_ratio_div as usize),
         ("rt_ratio_cmp", rt_ratio_cmp as usize),
-        ("rt_ratio_to_bignum", rt_ratio_to_bignum as usize),
+        ("rt_ratio_to_int", rt_ratio_to_int as usize),
         ("rt_ratio_to_float", rt_ratio_to_float as usize),
         ("rt_ratio_numerator", rt_ratio_numerator as usize),
         ("rt_ratio_denominator", rt_ratio_denominator as usize),
@@ -968,7 +926,6 @@ mod native_method_list_tests {
         ("string", &["string"]),
         ("char", &["char"]),
         ("float", &["f64", "f32"]),
-        ("bignum", &["bignum"]),
         ("ratio", &["ratio"]),
         ("bool", &["bool"]),
         ("symbol", &["symbol"]),

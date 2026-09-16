@@ -1118,11 +1118,11 @@ fn as_boxed(v: Value) -> BoxId {
 /// An empty table, with a type key.
 ///
 /// `Heap::alloc_hashtable` takes the value's runtime identity because
-/// `HashTable<string,i32>` and `HashTable<string,string>` are different types
+/// `HashTable<string,int>` and `HashTable<string,string>` are different types
 /// and an empty table says nothing about which it is. At *this* layer the key
 /// is only a string nobody reads back, so one spelling serves every test here.
 fn new_hashtable(h: &mut Heap) -> Value {
-    let key = h.intern_type_key("hashtable<i32,i32>");
+    let key = h.intern_type_key("hashtable<int,int>");
     h.alloc_hashtable(key)
 }
 
@@ -2253,7 +2253,25 @@ fn canonical_int_never_boxes_a_fixnum_range_value() {
     }
     // The check the boundaries use: a bignum box that *does* fit a fixnum is
     // the non-canonical shape nothing may produce.
-    let small = h.alloc_bignum(num_bigint::BigInt::from(5));
+    let small = h.alloc_bignum_unchecked(num_bigint::BigInt::from(5));
     let Value::Boxed(id) = small else { panic!("boxed") };
     assert!(h.bignum_fits_fixnum(id));
+}
+
+/// A dump that records an `int` as a bignum box holding a fixnum-range value
+/// is refused on load, not re-canonicalized: no producer makes that shape,
+/// so it can only be a corrupt or foreign dump, and a loader that quietly
+/// fixed it would hide which. A box past the range loads as the same box.
+#[test]
+fn a_non_canonical_bignum_in_a_dump_is_refused() {
+    use typelisp::owned_form::{owned_to_value, OwnedForm};
+    let mut h = Heap::with_capacity(64);
+    let e = owned_to_value(&mut h, &OwnedForm::Bignum(num_bigint::BigInt::from(5)))
+        .expect_err("a fixnum-range bignum box is not canonical");
+    assert!(format!("{e:?}").contains("not a canonical `int`"), "{e:?}");
+    let big: num_bigint::BigInt = "123456789012345678901234567890".parse().unwrap();
+    let Value::Boxed(id) = owned_to_value(&mut h, &OwnedForm::Bignum(big.clone())).expect("a real bignum loads") else {
+        panic!("boxed")
+    };
+    assert_eq!(h.bignum_value(id), &big);
 }

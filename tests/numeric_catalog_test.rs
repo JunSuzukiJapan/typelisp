@@ -95,14 +95,14 @@ fn the_float_accessors_report_the_binary64_representation() {
 /// pair carries the other two.
 #[test]
 fn decode_float_normalizes_into_a_half_open_significand() {
-    assert_eq!(show("(decode-float 8.0)"), "#<cons-cell<f64,i32> 0.5 4>");
-    assert_eq!(show("(decode-float 0.75)"), "#<cons-cell<f64,i32> 0.75 0>");
-    assert_eq!(show("(decode-float 0.0)"), "#<cons-cell<f64,i32> 0.0 0>");
+    assert_eq!(show("(decode-float 8.0)"), "#<cons-cell<f64,int> 0.5 4>");
+    assert_eq!(show("(decode-float 0.75)"), "#<cons-cell<f64,int> 0.75 0>");
+    assert_eq!(show("(decode-float 0.0)"), "#<cons-cell<f64,int> 0.0 0>");
     // The significand is unsigned, as CL specifies.
-    assert_eq!(show("(decode-float -8.0)"), "#<cons-cell<f64,i32> 0.5 4>");
+    assert_eq!(show("(decode-float -8.0)"), "#<cons-cell<f64,int> 0.5 4>");
     // `integer-decode-float` gives the same split with an exact 53-bit
     // significand: 2^52 * 2^-49 = 8.
-    assert_eq!(show("(integer-decode-float 8.0)"), "#<cons-cell<bignum,i32> 4503599627370496 -49>");
+    assert_eq!(show("(integer-decode-float 8.0)"), "#<cons-cell<int,int> 4503599627370496 -49>");
 }
 
 /// CL's `rationalize` is the *simplest* rational reading back as the float;
@@ -120,11 +120,12 @@ fn rationalize_finds_the_simplest_rational_not_the_exact_one() {
 
 #[test]
 fn the_limit_constants_hold_their_defining_properties() {
-    // A fixnum is an `i32` since the 64-bit-wide integer types were
-    // removed (2026-09-01): an immediate loses three bits to the tag, so a
-    // 64-bit-wide integer type cannot be represented at all.
-    assert_eq!(show("most-positive-fixnum"), "2147483647");
-    assert_eq!(show("most-negative-fixnum"), "-2147483648");
+    // A fixnum is an `int` that fits its 63-bit immediate word (one bit
+    // goes to the tag); past these an `int` is a bignum box, and the
+    // arithmetic goes on.
+    assert_eq!(show("most-positive-fixnum"), "4611686018427387903");
+    assert_eq!(show("most-negative-fixnum"), "-4611686018427387904");
+    assert_eq!(show("(+ most-positive-fixnum 1)"), "4611686018427387904");
     // CL defines the epsilons by these predicates, and they are the reason
     // `double-float-epsilon` is one ULP above 2^-53 rather than 2^-53 itself.
     assert_eq!(show("(/= (+ 1.0 double-float-epsilon) 1.0)"), "true");
@@ -175,7 +176,7 @@ fn the_byte_specifier_family_works_at_every_width() {
     // i8: every bit of -1 is a one, so any field of it is all ones.
     assert_eq!(show("(ldb (the i8 -1) (byte 3 0))"), "7");
     // bignum: bits 4..11 of 0xFFFFF.
-    assert_eq!(show("(ldb (as bignum 1048575) (byte 8 4))"), "255");
+    assert_eq!(show("(ldb (as int 1048575) (byte 8 4))"), "255");
     // The rest of the family, on the width they were written for.
     assert_eq!(show("(ldb-test 62848 (byte 8 0))"), "true");
     assert_eq!(show("(ldb-test 62720 (byte 8 0))"), "false");
@@ -204,8 +205,8 @@ fn logbitp_takes_the_integer_first_at_every_width() {
     assert_eq!(show("(logbitp (the i8 -1) 40)"), "true");
     assert_eq!(show("(logbitp (the u8 255) 40)"), "false");
     // bignum has no width to run past.
-    assert_eq!(show("(logbitp (as bignum 1048575) 19)"), "true");
-    assert_eq!(show("(logbitp (as bignum 1048575) 20)"), "false");
+    assert_eq!(show("(logbitp (as int 1048575) 19)"), "true");
+    assert_eq!(show("(logbitp (as int 1048575) 20)"), "false");
 }
 
 /// `boole`'s sixteen op codes, at a width the old `i32`-only definition could
@@ -236,10 +237,10 @@ fn boole_selects_all_sixteen_operations_generically() {
 /// `big`, which no machine finishes — so the wider type only made the
 /// ordinary call awkward to write.
 #[test]
-fn a_bignum_shifts_by_a_bit_count() {
-    assert_eq!(show("(ash (as bignum 1) 100)"), "1267650600228229401496703205376");
-    assert_eq!(show("(ash (as bignum 1267650600228229401496703205376) -100)"), "1");
+fn an_int_shifts_by_a_bit_count() {
+    assert_eq!(show("(ash (as int 1) 100)"), "1267650600228229401496703205376");
+    assert_eq!(show("(ash (as int 1267650600228229401496703205376) -100)"), "1");
     // Right past every bit: the sign, as CL's infinite two's complement says.
-    assert_eq!(show("(ash (as bignum 255) -1000)"), "0");
-    assert_eq!(show("(ash (as bignum -255) -1000)"), "-1");
+    assert_eq!(show("(ash (as int 255) -1000)"), "0");
+    assert_eq!(show("(ash (as int -255) -1000)"), "-1");
 }

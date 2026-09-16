@@ -151,32 +151,47 @@ fn match_selects_the_none_arm_for_the_empty_list() {
 }
 
 #[test]
-fn match_dispatches_bignum_and_ratio_arms() {
+fn match_dispatches_int_and_ratio_arms() {
+    // An `int` node is a fixnum or a bignum box; one arm catches both, and
+    // the payload is the number whichever shape it had.
+    assert_eq!(eval_ok("(match (int 99999999999999999999999999) ((int _) 1) (_ 0))"), Value::Int(1));
+    assert_eq!(eval_ok("(match (int 7) ((int _) 1) (_ 0))"), Value::Int(1));
     assert_eq!(
-        eval_ok("(match (Bignum 99999999999999999999999999) ((bignum _) 1) (_ 0))"),
-        Value::Int(1)
+        eval_ok("(match (int 99999999999999999999999999) ((int n) (= n (- 100000000000000000000000000 1))) (_ false))"),
+        Value::Bool(true)
     );
     assert_eq!(eval_ok("(match (Ratio 2/3) ((ratio _) 1) (_ 0))"), Value::Int(1));
+}
+
+/// `bignum` is no longer a `Sexpr` shape: writing it is refused with a
+/// message that says where the number went.
+#[test]
+fn the_bignum_variant_is_unconstructible() {
+    for src in ["(match (int 5) ((bignum _) 1) (_ 0))", "(bignum 5)"] {
+        let msg = format!("{:?}", check(src).expect_err("bignum is retired"));
+        assert!(msg.contains("folded into `int`"), "{}", msg);
+    }
 }
 
 #[test]
 fn match_dispatches_a_runtime_chosen_variant() {
     let src = r#"
-        (defun tag ((s Option<Sexpr>)) i32
+        (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((none) 0) ((i32 _) 1) ((f64 _) 2) ((char _) 3) ((bool _) 4)
-            ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((bignum _) 8) ((ratio _) 9)
+            ((none) 0) ((int _) 1) ((f64 _) 2) ((char _) 3) ((bool _) 4)
+            ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((ratio _) 9)
             ((path _) 10) ((f32 _) 11)
-            ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16)))
-        (+ (+ (tag (i32 1)) (* 10 (tag (Str "s")))) (* 100 (tag (sexpr-cons () ()))))
+            ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16) ((i32 _) 17)))
+        (+ (+ (tag (int 1)) (* 10 (tag (Str "s")))) (* 100 (tag (sexpr-cons () ()))))
     "#;
-    // 1 + 60 + 700: i32=1, str=6, cons=7 — and the seventeen-armed match
+    // 1 + 60 + 700: int=1, str=6, cons=7 — and the seventeen-armed match
     // above is exhaustive without a wildcard, exercising full variant
     // coverage: the sixteen `Sexpr` variants plus `none`, written in one flat
     // arm list (the `Option<Sexpr>` match sugar) rather than nested two deep.
-    // Six of those arms are integer widths, which is what a `Sexpr` costs in
-    // a language whose integers have widths — the alternative was one `int`
-    // arm that could not say which type it had caught.
+    // Seven of those arms are integers: `int` (the language's, a fixnum or a
+    // bignum) and the six fixed widths, which is what a `Sexpr` costs in a
+    // language whose integers have widths — the alternative was one arm that
+    // could not say which type it had caught.
     assert_eq!(eval_ok(src), Value::Int(761));
 }
 
@@ -251,9 +266,9 @@ fn match_walks_a_quoted_list() {
     // `quote` and macro arguments are the pre-`read` producers of compound
     // Sexpr data; summing a quoted list exercises match-driven recursion.
     let src = r#"
-        (defun sum ((s Option<Sexpr>)) i32
+        (defun sum ((s Option<Sexpr>)) int
           (match s
-            ((cons (i32 n) rest) (+ n (sum rest)))
+            ((cons (int n) rest) (+ n (sum rest)))
             (_ 0)))
         (sum (quote (1 2 3 4)))
     "#;
@@ -328,10 +343,10 @@ fn a_flat_match_on_an_option_sexpr_must_still_cover_none() {
     let err = check(
         "(defun tag ((s Option<Sexpr>)) i32
            (match s
-             ((i32 _) 1) ((f64 _) 2) ((char _) 3) ((bool _) 4)
-             ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((bignum _) 8) ((ratio _) 9)
+             ((int _) 1) ((f64 _) 2) ((char _) 3) ((bool _) 4)
+             ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((ratio _) 9)
              ((path _) 10) ((f32 _) 11)
-             ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16)))",
+             ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16) ((i32 _) 17)))",
     )
     .expect_err("should be non-exhaustive without a `none` arm");
     let msg = format!("{:?}", err);
@@ -352,7 +367,7 @@ fn a_flat_match_on_an_option_sexpr_must_still_cover_none() {
 #[test]
 fn each_integer_width_matches_only_its_own_arm() {
     let src = r#"
-        (defun tag ((s Option<Sexpr>)) i32
+        (defun tag ((s Option<Sexpr>)) int
           (match s
             ((i8 _) 1) ((i16 _) 2) ((i32 _) 3)
             ((u8 _) 4) ((u16 _) 5) ((u32 _) 6)

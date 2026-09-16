@@ -5,7 +5,7 @@
 //! which makes the element type a property of the *call*. Here it is a
 //! property of the type: `binary-file-stream` implements `ByteInput`/
 //! `ByteOutput`, which pin `InputStream`/`OutputStream`'s open `Item` to
-//! `i32` the way `CharInput`/`CharOutput` pin it to `char`. So there is no
+//! `int` the way `CharInput`/`CharOutput` pin it to `char`. So there is no
 //! `:element-type` to get wrong, and no way to read bytes from something that
 //! is not a byte stream — the two questions this file is mostly about.
 
@@ -45,13 +45,13 @@ fn tmp(name: &str) -> String {
 fn bytes_written_come_back_in_order() {
     let path = tmp("order");
     is_true(&format!(
-        r#"(defun byte-or ((d i32) (o Option<i32>)) i32 (match o ((some b) b) ((none) d)))
+        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 1) (write-byte s 2) (write-byte s 3) (close s)))
                ((err e) (panic (message e))))
              (match (open-binary-input "{p}")
-               ((ok s) (let ((out (the Vector<i32> (Vector::new))))
+               ((ok s) (let ((out (the Vector<int> (Vector::new))))
                          (progn (loop (match (read-byte s)
                                         ((none) (break))
                                         ((some b) (push out b))))
@@ -69,7 +69,7 @@ fn bytes_written_come_back_in_order() {
 fn read_byte_is_none_at_end_of_file() {
     let path = tmp("eof");
     is_true(&format!(
-        r#"(defun byte-or ((d i32) (o Option<i32>)) i32 (match o ((some b) b) ((none) d)))
+        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 9) (close s)))
@@ -88,7 +88,7 @@ fn every_byte_value_survives_the_round_trip() {
     // a multi-byte character if anything were decoding it.
     let path = tmp("range");
     is_true(&format!(
-        r#"(defun byte-or ((d i32) (o Option<i32>)) i32 (match o ((some b) b) ((none) d)))
+        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 0) (write-byte s 128) (write-byte s 255) (close s)))
@@ -108,7 +108,7 @@ fn bytes_and_characters_agree_on_the_same_file() {
     // bytes that are ASCII — the two views are of one file, not two encodings.
     let path = tmp("ascii");
     is_true(&format!(
-        r#"(defun byte-or ((d i32) (o Option<i32>)) i32 (match o ((some b) b) ((none) d)))
+        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 72) (write-byte s 105) (close s)))
@@ -125,7 +125,7 @@ fn bytes_and_characters_agree_on_the_same_file() {
 fn appending_adds_to_what_is_there() {
     let path = tmp("append");
     is_true(&format!(
-        r#"(defun byte-or ((d i32) (o Option<i32>)) i32 (match o ((some b) b) ((none) d)))
+        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 1) (close s)))
@@ -218,7 +218,7 @@ fn a_byte_stream_is_a_stream() {
 fn read_item_is_the_same_operation_as_read_byte() {
     let path = tmp("readitem");
     is_true(&format!(
-        r#"(defun byte-or ((d i32) (o Option<i32>)) i32 (match o ((some b) b) ((none) d)))
+        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 5) (close s)))
@@ -236,8 +236,8 @@ fn a_generic_function_over_byteinput_accepts_a_binary_file_stream() {
     // The point of the trait layer: a caller writes the bound, not the type.
     let path = tmp("generic");
     is_true(&format!(
-        r#"(defun total<S> ((s S)) i32 (where (ByteInput S))
-             (let ((n (the i32 0)))
+        r#"(defun total<S> ((s S)) int (where (ByteInput S))
+             (let ((n (the int 0)))
                (progn (loop (match (read-byte s) ((none) (break)) ((some b) (setf n (+ n b))))) n)))
            (progn
              (match (open-binary-output "{p}")

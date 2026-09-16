@@ -54,7 +54,7 @@ fn run_expecting_failure(dir: &Path, args: &[&str]) -> String {
 #[test]
 fn a_function_defined_in_one_session_is_callable_from_the_image() {
     let dir = scratch("callable");
-    write(&dir, "mk.typl", "(pub defun triple ((n i32)) i32 (* n 3))\n(dump \"session.typld\")\n");
+    write(&dir, "mk.typl", "(pub defun triple ((n int)) int (* n 3))\n(dump \"session.typld\")\n");
     write(&dir, "use.typl", "(println \"~a\" (mk::triple 9))\n");
     run(&dir, &["mk.typl"]);
     assert_eq!(run(&dir, &["--image", "session.typld", "use.typl"]).trim(), "27");
@@ -73,7 +73,7 @@ fn a_compiled_function_is_written_down_as_bitcode() {
     write(
         &dir,
         "mk.typl",
-        "(pub defun triple ((n i32)) i32 (* n 3))\n(compile triple)\n(dump \"session.typld\")\n",
+        "(pub defun triple ((n int)) int (* n 3))\n(compile triple)\n(dump \"session.typld\")\n",
     );
     run(&dir, &["mk.typl"]);
     let bytes = std::fs::read(dir.join("session.typld")).expect("reading the dump");
@@ -97,7 +97,7 @@ fn a_compiled_function_is_written_down_as_bitcode() {
 #[test]
 fn a_session_that_compiled_nothing_still_dumps_and_loads() {
     let dir = scratch("nothing");
-    write(&dir, "mk.typl", "(pub defun twice ((n i32)) i32 (+ n n))\n(dump \"session.typld\")\n");
+    write(&dir, "mk.typl", "(pub defun twice ((n int)) int (+ n n))\n(dump \"session.typld\")\n");
     write(&dir, "use.typl", "(println \"~a\" (mk::twice 21))\n");
     run(&dir, &["mk.typl"]);
     let bytes = std::fs::read(dir.join("session.typld")).expect("reading the dump");
@@ -115,7 +115,7 @@ fn a_global_comes_back_at_its_initializer_not_its_last_value() {
     write(
         &dir,
         "mk.typl",
-        "(pub defvar (counter i32) 1)\n\
+        "(pub defvar (counter int) 1)\n\
          (setf counter 99)\n\
          (println \"before: ~a\" counter)\n\
          (dump \"session.typld\")\n",
@@ -133,7 +133,7 @@ fn a_sessions_top_level_expressions_do_not_run_again() {
     write(
         &dir,
         "mk.typl",
-        "(pub defun noisy () i32 7)\n(println \"this runs once\")\n(dump \"session.typld\")\n",
+        "(pub defun noisy () int 7)\n(println \"this runs once\")\n(dump \"session.typld\")\n",
     );
     write(&dir, "use.typl", "(println \"~a\" (mk::noisy))\n");
     assert_eq!(run(&dir, &["mk.typl"]).trim(), "this runs once");
@@ -164,7 +164,7 @@ fn a_macro_defined_in_the_session_expands_from_the_image() {
 #[test]
 fn an_image_built_from_a_different_prelude_is_refused() {
     let dir = scratch("stale");
-    write(&dir, "mk.typl", "(pub defun one () i32 1)\n(dump \"session.typld\")\n");
+    write(&dir, "mk.typl", "(pub defun one () int 1)\n(dump \"session.typld\")\n");
     run(&dir, &["mk.typl"]);
 
     let path = dir.join("session.typld");
@@ -195,9 +195,9 @@ fn a_type_alias_survives_the_image() {
     write(
         &dir,
         "mk.typl",
-        "(pub deftype meters i32)\n(pub defun mk () meters 12)\n(dump \"session.typld\")\n",
+        "(pub deftype meters int)\n(pub defun mk () meters 12)\n(dump \"session.typld\")\n",
     );
-    write(&dir, "use.typl", "(defun show ((m mk::meters)) i32 m)\n(println \"~a\" (show (mk::mk)))\n");
+    write(&dir, "use.typl", "(defun show ((m mk::meters)) int m)\n(println \"~a\" (show (mk::mk)))\n");
     run(&dir, &["mk.typl"]);
     assert_eq!(run(&dir, &["--image", "session.typld", "use.typl"]).trim(), "12");
 }
@@ -210,12 +210,12 @@ fn a_structs_slot_defaults_survive_the_image() {
     write(
         &dir,
         "mk.typl",
-        "(pub defstruct (base (:constructor mk-base)) (pub id i32 7))\n(dump \"session.typld\")\n",
+        "(pub defstruct (base (:constructor mk-base)) (pub id int 7))\n(dump \"session.typld\")\n",
     );
     write(
         &dir,
         "use.typl",
-        "(defstruct (derived (:include mk::base) (:constructor mk (extra))) (extra i32))\n\
+        "(defstruct (derived (:include mk::base) (:constructor mk (extra))) (extra int))\n\
          (println \"~a\" (id (derived::mk 1)))\n",
     );
     run(&dir, &["mk.typl"]);

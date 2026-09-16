@@ -181,10 +181,10 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; transcendental functions (f64 only)
     "sin" "cos" "tan" "asin" "acos" "atan" "sinh" "cosh" "tanh"
     "asinh" "acosh" "atanh" "exp" "log"
-    ;; bitwise operators (fixed-width integers, plus bignum for the first nine)
+    ;; bitwise operators (`int' and the fixed-width integers)
     "logand" "logior" "logxor" "lognot" "ash" "logbitp" "logcount" "logtest"
     "integer-length"
-    ;; the rest of the bitwise catalog (fixed-width integers and bignum, built from the above)
+    ;; the rest of the bitwise catalog (`int' and the fixed-width integers, built from the above)
     "logeqv" "lognand" "lognor" "logandc1" "logandc2" "logorc1" "logorc2"
     ;; byte-specifier mini-API (i32 only)
     "byte" "byte-size" "byte-position" "ldb" "ldb-test" "dpb" "mask-field"
@@ -201,8 +201,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; all a `c-long' / `c-ulong' carries, since they have no arithmetic
     "int->c-long" "int->c-ulong" "try-int->c-long" "try-int->c-ulong"
     "float->f32" "float->f64" "try-float->f32" "try-float->f64"
-    "int->bignum" "int->int" "bignum->int" "try-bignum->int" "bignum->float"
-    "float->bignum" "bignum->ratio" "ratio->bignum" "int->ratio"
+    "int->int" "ratio->int" "int->ratio"
     "float->ratio" "ratio->float" "numerator" "denominator"
     ;; the prelude helper `expt' recurses through for a `ratio' base -- an
     ;; ordinary root-namespace function, so it is callable and highlighted
@@ -214,7 +213,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; Sexpr accessors/constructors used by macro bodies (§5)
     "sexpr-car" "sexpr-cdr" "sexpr-cons" "sexpr-consp" "sexpr-null"
     "sexpr-atom" "sexpr-symp" "sexpr-sym-name"
-    "sexpr-i8" "sexpr-i16" "sexpr-i32" "sexpr-u8" "sexpr-u16" "sexpr-u32"
+    "sexpr-int" "sexpr-i8" "sexpr-i16" "sexpr-i32" "sexpr-u8" "sexpr-u16" "sexpr-u32"
     "sexpr-f32" "sexpr-f64"
     "sexpr-char" "sexpr-bool" "sexpr-str" "sexpr-append" "sexpr-map"
     ;; equality
@@ -364,13 +363,14 @@ function types; `&optional' and `&key' are `defmacro'-only.")
 
 (defconst typelisp-primitive-types
   '("i8" "i16" "i32" "u8" "u16" "u32"
-    "int" "f32" "f64" "bignum" "ratio" "random-state" "bool" "char" "string" "symbol"
+    "int" "f32" "f64" "ratio" "random-state" "bool" "char" "string" "symbol"
     "ptr" "c-long" "c-ulong")
   "Primitive/scalar type names.
-Includes the heap-boxed arbitrary-precision `bignum' / `ratio', which are
-their own static types with no implicit conversion to or from the fixed-width
-numerics (docs/syntax.md §2), and the opaque mutable `random-state' PRNG
-stream (CLHS 12.1.6).
+Includes the arbitrary-precision `int' (a fixnum that becomes a bignum box
+past 63 bits) and the heap-boxed `ratio', which are their own static types
+with no implicit conversion to or from the fixed-width numerics
+(docs/syntax.md §2), and the opaque mutable `random-state' PRNG stream
+(CLHS 12.1.6).
 
 `ptr' / `c-long' / `c-ulong' are the C-boundary words: only writable inside
 `unsafe', and only as an argument, a return type or a local (docs/syntax.md
@@ -449,7 +449,7 @@ and the form's own head (docs/syntax.md §3).")
           "\\|[0-9]+/[0-9]+"            ; ratio: 1/3 (always reduced by the reader)
           "\\|[0-9]+\\.[0-9]+\\(?:[eE][-+]?[0-9]+\\)?" ; float: 1.5, 3.0e10
           "\\|[0-9]+[eE][-+]?[0-9]+"    ; float in exponent-only form: 1e5
-          "\\|[0-9]+"                   ; decimal integer (bignum if too wide)
+          "\\|[0-9]+"                   ; decimal integer (an `int', any width)
           "\\)\\_>")
   "Regexp matching a numeric literal (docs/syntax.md §1).")
 
@@ -490,7 +490,7 @@ when the buffer defines no types.")
   "Characters that must not precede a type name for it to be one.
 `<' and `,' are absent on purpose: a type does appear directly after them, as
 the argument of a generic (`Vector<lexpr>', `HashTable<i32,todo-item>'). `>' is
-present, which is what stops the `bignum' in `int->bignum' reading as a type.")
+present, which is what stops the `ratio' in `int->ratio' reading as a type.")
 
 (defun typelisp--scan-local-types ()
   "Regexp matching the types defined in this buffer, or nil if there are none."

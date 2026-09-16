@@ -108,24 +108,24 @@ struct Case {
 /// run-time one on both sides.
 const CASES: &[Case] = &[
     Case {
-        what: "i32 division by zero",
-        defs: "(defun f ((a i32) (b i32)) i32 (/ a b))",
+        what: "int division by zero",
+        defs: "(defun f ((a int) (b int)) int (/ a b))",
         call: "(f 5 0)",
         message: "divide by zero",
     },
     Case {
-        what: "i32 mod by zero",
-        defs: "(defun f ((a i32) (b i32)) i32 (mod a b))",
+        what: "int mod by zero",
+        defs: "(defun f ((a int) (b int)) int (mod a b))",
         call: "(f 5 0)",
         message: "mod by zero",
     },
     Case {
         // The other case integer division has no answer for: the most
         // negative value over `-1`, whose quotient is one past the type's
-        // maximum. CL would widen to a bignum, but the expression's declared
-        // type is a fixed width, so it fails instead. Written as a literal
-        // directly — `i32::MIN` is a number an `i32` holds, so the reader and
-        // the literal range check both accept it.
+        // maximum. An `int` would widen to a bignum, but the expression's
+        // declared type is a fixed width, so it fails instead. Written as a
+        // literal directly — `i32::MIN` is a number an `i32` holds, so the
+        // reader and the literal range check both accept it.
         what: "i32 division overflowing",
         defs: "(defun f ((a i32) (b i32)) i32 (/ a b))",
         call: "(f -2147483648 -1)",
@@ -134,21 +134,21 @@ const CASES: &[Case] = &[
     Case {
         // `rem` is a prelude method built out of `/`, so this is the
         // divide-by-zero above reached through a compiled prelude body.
-        what: "i32 rem by zero",
-        defs: "(defun f ((a i32) (b i32)) i32 (rem a b))",
+        what: "int rem by zero",
+        defs: "(defun f ((a int) (b int)) int (rem a b))",
         call: "(f 5 0)",
         message: "divide by zero",
     },
     Case {
         what: "bignum division by zero",
-        defs: "(defun f ((a bignum) (b bignum)) bignum (/ a b))",
-        call: "(f 100000000000000000000 (int->bignum 0))",
+        defs: "(defun f ((a int) (b int)) int (/ a b))",
+        call: "(f 100000000000000000000 0)",
         message: "divide by zero",
     },
     Case {
         what: "bignum mod by zero",
-        defs: "(defun f ((a bignum) (b bignum)) bignum (mod a b))",
-        call: "(f 100000000000000000000 (int->bignum 0))",
+        defs: "(defun f ((a int) (b int)) int (mod a b))",
+        call: "(f 100000000000000000000 0)",
         message: "mod by zero",
     },
     Case {
@@ -159,46 +159,46 @@ const CASES: &[Case] = &[
     },
     Case {
         what: "string index past the end",
-        defs: r#"(defun f ((s string) (i i32)) char (ref s i))"#,
+        defs: r#"(defun f ((s string) (i int)) char (ref s i))"#,
         call: r#"(f "hi" 5)"#,
         message: "ref: index 5 out of range (length 2)",
     },
     Case {
         what: "negative string index",
-        defs: r#"(defun f ((s string) (i i32)) char (ref s i))"#,
+        defs: r#"(defun f ((s string) (i int)) char (ref s i))"#,
         call: r#"(f "hi" -1)"#,
         message: "ref: index -1 out of range (length 2)",
     },
     Case {
         what: "substring range past the end",
-        defs: r#"(defun f ((s string) (a i32) (b i32)) string (substring s a b))"#,
+        defs: r#"(defun f ((s string) (a int) (b int)) string (substring s a b))"#,
         call: r#"(f "hi" 0 5)"#,
         message: "substring: invalid range 0..5 (length 2)",
     },
     Case {
         what: "substring with start after end",
-        defs: r#"(defun f ((s string) (a i32) (b i32)) string (substring s a b))"#,
+        defs: r#"(defun f ((s string) (a int) (b int)) string (substring s a b))"#,
         call: r#"(f "hello" 4 1)"#,
         message: "substring: invalid range 4..1 (length 5)",
     },
     Case {
         what: "vector index past the end",
-        defs: "(defun make-v () Vector<i32> (Vector::new))
-               (defun f ((i i32)) i32 (let ((v (make-v))) (push v 1) (get v i)))",
+        defs: "(defun make-v () Vector<int> (Vector::new))
+               (defun f ((i int)) int (let ((v (make-v))) (push v 1) (get v i)))",
         call: "(f 5)",
         message: "Vector: index 5 out of bounds",
     },
     Case {
         what: "negative vector index",
-        defs: "(defun make-v () Vector<i32> (Vector::new))
-               (defun f ((i i32)) i32 (let ((v (make-v))) (push v 1) (get v i)))",
+        defs: "(defun make-v () Vector<int> (Vector::new))
+               (defun f ((i int)) int (let ((v (make-v))) (push v 1) (get v i)))",
         call: "(f -1)",
         message: "Vector: index -1 out of bounds",
     },
     Case {
         what: "vector index past the end, on a store",
-        defs: "(defun make-v () Vector<i32> (Vector::new))
-               (defun f ((i i32)) i32 (let ((v (make-v))) (push v 1) (set v i 9) 0))",
+        defs: "(defun make-v () Vector<int> (Vector::new))
+               (defun f ((i int)) int (let ((v (make-v))) (push v 1) (set v i 9) 0))",
         call: "(f 5)",
         message: "Vector: index 5 out of bounds",
     },
@@ -207,13 +207,13 @@ const CASES: &[Case] = &[
         // prelude's `random` reaches on both paths — the interpreted run of
         // `f` still calls a *compiled* prelude body.
         what: "a non-positive random bound",
-        defs: "(defun f ((n i32)) i32 (random n))",
+        defs: "(defun f ((n int)) int (random n))",
         call: "(f 0)",
         message: "random: bound must be positive, got 0",
     },
     Case {
         what: "a negative random bound",
-        defs: "(defun f ((n i32)) i32 (random n))",
+        defs: "(defun f ((n int)) int (random n))",
         call: "(f -5)",
         message: "random: bound must be positive, got -5",
     },
@@ -258,8 +258,8 @@ fn every_runtime_failure_reports_the_same_message_compiled() {
 fn a_compiled_cleanup_runs_when_a_zero_divisor_unwinds_through_it() {
     let mut s = Session::new();
     s.ok(r#"
-        (defvar (ran i32) 0)
-        (defun f ((b i32)) i32 (unwind-protect (/ 5 b) (setf ran 1)))
+        (defvar (ran int) 0)
+        (defun f ((b int)) int (unwind-protect (/ 5 b) (setf ran 1)))
         (compile f)
         "#);
     assert_eq!(s.panics("(f 0)"), "divide by zero");
@@ -275,9 +275,9 @@ fn a_compiled_cleanup_runs_when_a_zero_divisor_unwinds_through_it() {
 fn compiled_cleanups_run_in_order_when_a_bad_index_unwinds_through_them() {
     let mut s = Session::new();
     s.ok(r#"
-        (defvar (trace i32) 0)
-        (defun make-v () Vector<i32> (Vector::new))
-        (defun f ((i i32)) i32
+        (defvar (trace int) 0)
+        (defun make-v () Vector<int> (Vector::new))
+        (defun f ((i int)) int
           (unwind-protect
             (unwind-protect (get (make-v) i) (setf trace (+ (* trace 10) 1)))
             (setf trace (+ (* trace 10) 2))))
@@ -294,8 +294,8 @@ fn compiled_cleanups_run_in_order_when_a_bad_index_unwinds_through_them() {
 fn a_compiled_catch_does_not_swallow_a_runtime_failure() {
     let mut s = Session::new();
     s.ok(r#"
-        (defvar (ran i32) 0)
-        (defun f ((b i32)) i32
+        (defvar (ran int) 0)
+        (defun f ((b int)) int
           (catch 'done (unwind-protect (/ 5 b) (setf ran 1))))
         (compile f)
         "#);
@@ -308,9 +308,9 @@ fn a_compiled_catch_does_not_swallow_a_runtime_failure() {
 #[test]
 fn a_runtime_failure_unwinds_through_intermediate_compiled_frames() {
     let src = r#"
-        (defun deep ((b i32)) i32 (/ 5 b))
-        (defun middle ((b i32)) i32 (+ 1 (deep b)))
-        (defun f ((b i32)) i32 (middle b))
+        (defun deep ((b int)) int (/ 5 b))
+        (defun middle ((b int)) int (+ 1 (deep b)))
+        (defun f ((b int)) int (middle b))
         (compile f)
         (f 0)
         "#;
@@ -325,7 +325,7 @@ fn a_runtime_failure_unwinds_through_intermediate_compiled_frames() {
 #[test]
 fn a_session_survives_a_compiled_runtime_failure_and_keeps_evaluating() {
     let mut s = Session::new();
-    s.ok("(defun f ((a i32) (b i32)) i32 (/ a b)) (compile f)");
+    s.ok("(defun f ((a int) (b int)) int (/ a b)) (compile f)");
     assert_eq!(s.panics("(f 5 0)"), "divide by zero");
     // The same compiled function, this time with a divisor it can use.
     assert_eq!(s.ok("(f 10 2)"), Value::Int(5), "the session did not survive");

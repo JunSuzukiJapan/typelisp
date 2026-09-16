@@ -262,7 +262,7 @@ fn protected_probe() -> UnwindingProbe {
         let callee = module.add_function("typelisp_test_maybe_panic", i64_t.fn_type(&[i64_t.into()], false), Some(Linkage::External));
         let cleanup_fn =
             module.add_function("typelisp_test_cleanup_ran", ctx.void_type().fn_type(&[], false), Some(Linkage::External));
-        // `i32 (...)` — the personality's signature is never actually called
+        // `int (...)` — the personality's signature is never actually called
         // by generated code, only recorded on the function.
         let personality = module.add_function("rust_eh_personality", i32_t.fn_type(&[], true), Some(Linkage::External));
 

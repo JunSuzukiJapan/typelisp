@@ -328,20 +328,6 @@ pub unsafe extern "C" fn rt_integer_to_ratio(args: *const i64, argc: u32) -> i64
     encode(active_heap().alloc_ratio(BigRational::from_integer(n)))
 }
 
-/// `int->bignum` — while `bignum` is still a type of its own: a fixnum is
-/// boxed for it, and a bignum box already is one.
-///
-/// # Safety
-///
-/// Same as [`integer_single`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_integer_to_bignum(args: *const i64, argc: u32) -> i64 {
-    match integer_single(args, argc, "rt_integer_to_bignum") {
-        IntArg::Fix(n) => encode(active_heap().alloc_bignum(BigInt::from(n))),
-        IntArg::Big(_) => *args,
-    }
-}
-
 /// `int->char` — the raw scalar value, or a [`raise`] for a value that is
 /// not one (`rt_int_to_char`'s wording).
 ///
@@ -438,4 +424,18 @@ pub unsafe extern "C" fn rt_integer_from_word(args: *const i64, argc: u32) -> i6
     let word = *args;
     let (width, signed) = crate::wsig(*args.add(1));
     wide_result(if !signed && width == 64 { i128::from(word as u64) } else { i128::from(word) })
+}
+
+/// `(untag-int E)`'s refusal: an `int` in a machine-word position (an index,
+/// a count) that is a bignum. [`raise`]s the same language error the
+/// interpreter's `untag-int` does; the island calls this only off the
+/// fixnum fast path, so the argument is never a fixnum here.
+///
+/// # Safety
+///
+/// Same as [`integer_single`].
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_int_not_fixnum(args: *const i64, argc: u32) -> i64 {
+    let a = integer_single(args, argc, "rt_int_not_fixnum");
+    raise(format!("an integer argument does not fit a fixnum: {}", a.into_big()))
 }

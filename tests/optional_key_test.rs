@@ -51,21 +51,21 @@ fn check_err(src: &str) -> String {
 
 #[test]
 fn optional_default_is_used_when_the_argument_is_omitted() {
-    let src = "(defun f ((a i32) &optional (b i32 10)) i32 (+ a b)) (f 1)";
+    let src = "(defun f ((a int) &optional (b int 10)) int (+ a b)) (f 1)";
     assert_eq!(eval_ok(src), Value::Int(11));
 }
 
 #[test]
 fn optional_supplied_value_overrides_the_default() {
-    let src = "(defun f ((a i32) &optional (b i32 10)) i32 (+ a b)) (f 1 5)";
+    let src = "(defun f ((a int) &optional (b int 10)) int (+ a b)) (f 1 5)";
     assert_eq!(eval_ok(src), Value::Int(6));
 }
 
 #[test]
 fn optional_default_and_supplied_agree_between_interp_and_compile() {
-    let def = "(defun f ((a i32) &optional (b i32 10)) i32 (+ a b)) %COMPILE% (f 1)";
+    let def = "(defun f ((a int) &optional (b int 10)) int (+ a b)) %COMPILE% (f 1)";
     assert_eq!(eval_ok_compiled(def, "f"), Value::Int(11));
-    let def2 = "(defun f ((a i32) &optional (b i32 10)) i32 (+ a b)) %COMPILE% (f 1 5)";
+    let def2 = "(defun f ((a int) &optional (b int 10)) int (+ a b)) %COMPILE% (f 1 5)";
     assert_eq!(eval_ok_compiled(def2, "f"), Value::Int(6));
 }
 
@@ -73,13 +73,13 @@ fn optional_default_and_supplied_agree_between_interp_and_compile() {
 
 #[test]
 fn optional_without_default_binds_option_none_when_omitted() {
-    let src = "(defun f (&optional (b i32)) i32 (unwrap-or b 99)) (f)";
+    let src = "(defun f (&optional (b int)) int (unwrap-or b 99)) (f)";
     assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
 fn optional_without_default_auto_wraps_a_supplied_value_into_some() {
-    let src = "(defun f (&optional (b i32)) i32 (unwrap-or b 99)) (f 5)";
+    let src = "(defun f (&optional (b int)) int (unwrap-or b 99)) (f 5)";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
 
@@ -87,21 +87,21 @@ fn optional_without_default_auto_wraps_a_supplied_value_into_some() {
 
 #[test]
 fn key_default_is_used_when_omitted() {
-    let src = "(defun make-point (&key (x i32 0) (y i32 0)) i32 (+ x y)) (make-point)";
+    let src = "(defun make-point (&key (x int 0) (y int 0)) int (+ x y)) (make-point)";
     assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 #[test]
 fn key_arguments_are_matched_by_label_not_position() {
-    let src = "(defun make-point (&key (x i32 0) (y i32 0)) i32 (+ x (* 10 y))) (make-point :y 4 :x 3)";
+    let src = "(defun make-point (&key (x int 0) (y int 0)) int (+ x (* 10 y))) (make-point :y 4 :x 3)";
     assert_eq!(eval_ok(src), Value::Int(43));
 }
 
 #[test]
 fn key_default_and_supplied_agree_between_interp_and_compile() {
-    let def = "(defun make-point (&key (x i32 0) (y i32 0)) i32 (+ x (* 10 y))) %COMPILE% (make-point :y 4 :x 3)";
+    let def = "(defun make-point (&key (x int 0) (y int 0)) int (+ x (* 10 y))) %COMPILE% (make-point :y 4 :x 3)";
     assert_eq!(eval_ok_compiled(def, "make-point"), Value::Int(43));
-    let def2 = "(defun make-point (&key (x i32 0) (y i32 0)) i32 (+ x (* 10 y))) %COMPILE% (make-point)";
+    let def2 = "(defun make-point (&key (x int 0) (y int 0)) int (+ x (* 10 y))) %COMPILE% (make-point)";
     assert_eq!(eval_ok_compiled(def2, "make-point"), Value::Int(0));
 }
 
@@ -123,19 +123,19 @@ fn key_without_default_is_none_when_omitted_and_some_when_supplied() {
 
 #[test]
 fn key_call_with_an_unknown_keyword_is_a_type_error() {
-    let msg = check_err("(defun f (&key (x i32 0)) i32 x) (f :y 1)");
+    let msg = check_err("(defun f (&key (x int 0)) int x) (f :y 1)");
     assert!(msg.contains("unknown keyword"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn key_call_with_an_odd_number_of_trailing_arguments_is_a_type_error() {
-    let msg = check_err("(defun f (&key (x i32 0)) i32 x) (f :x)");
+    let msg = check_err("(defun f (&key (x int 0)) int x) (f :x)");
     assert!(msg.contains(":name value"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn key_call_with_a_duplicate_keyword_is_a_type_error() {
-    let msg = check_err("(defun f (&key (x i32 0)) i32 x) (f :x 1 :x 2)");
+    let msg = check_err("(defun f (&key (x int 0)) int x) (f :x 1 :x 2)");
     assert!(msg.contains("duplicate"), "unexpected message: {}", msg);
 }
 
@@ -143,7 +143,7 @@ fn key_call_with_a_duplicate_keyword_is_a_type_error() {
 
 #[test]
 fn optional_combines_with_a_trailing_rest() {
-    let src = "(defun f ((a i32) &optional (b i32 10) &rest (xs i32)) i32 (+ a b)) (f 1 2 3 4 5)";
+    let src = "(defun f ((a int) &optional (b int 10) &rest (xs int)) int (+ a b)) (f 1 2 3 4 5)";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
 
@@ -151,13 +151,13 @@ fn optional_combines_with_a_trailing_rest() {
 
 #[test]
 fn key_cannot_combine_with_optional_in_the_same_parameter_list() {
-    let msg = check_err("(defun f (&optional (a i32 1) &key (b i32 2)) i32 (+ a b))");
+    let msg = check_err("(defun f (&optional (a int 1) &key (b int 2)) int (+ a b))");
     assert!(msg.contains("&key cannot be combined"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn optional_is_rejected_on_lambda() {
-    let msg = check_err("(defun caller () i32 (let ((g (lambda (&optional (a i32 1)) i32 a))) 0))");
+    let msg = check_err("(defun caller () int (let ((g (lambda (&optional (a int 1)) int a))) 0))");
     assert!(msg.contains("lambda"), "unexpected message: {}", msg);
 }
 
@@ -177,7 +177,7 @@ fn optional_is_rejected_on_lambda() {
 fn generic_key_infers_type_param_from_required_arg() {
     // `T` appears only on the required parameter `x`; the omitted `&key`
     // `y` (no default, so effectively `Option<T>`) must still resolve to
-    // `Option<i32>` from that inference, not stay abstract.
+    // `Option<int>` from that inference, not stay abstract.
     let src = "(defun f<T> ((x T) &key (y T)) T (unwrap-or y x)) (f 5)";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
@@ -185,8 +185,8 @@ fn generic_key_infers_type_param_from_required_arg() {
 #[test]
 fn generic_key_infers_type_param_from_supplied_key_arg() {
     // `T` appears *only* on the `&key` parameter `y` here — inference can
-    // only come from actually supplying it, not from `n` (plain `i32`).
-    let src = "(defun f<T> ((n i32) &key (y T)) i32 (+ n (if (is-some y) 1 0))) (f 10 :y 42)";
+    // only come from actually supplying it, not from `n` (plain `int`).
+    let src = "(defun f<T> ((n int) &key (y T)) int (+ n (if (is-some y) 1 0))) (f 10 :y 42)";
     assert_eq!(eval_ok(src), Value::Int(11));
 }
 
@@ -195,7 +195,7 @@ fn generic_key_uninferrable_type_param_is_a_type_error() {
     // `T` appears only on the `&key` parameter `y` (unused in the body,
     // which is allowed — a type parameter need not be referenced); the call
     // omits `:y` entirely, so `T` cannot be inferred from anywhere.
-    let msg = check_err("(defun f<T> ((n i32) &key (y T)) i32 n) (f 10)");
+    let msg = check_err("(defun f<T> ((n int) &key (y T)) int n) (f 10)");
     assert!(msg.contains("cannot infer type parameter"), "unexpected message: {}", msg);
 }
 
@@ -203,8 +203,8 @@ fn generic_key_uninferrable_type_param_is_a_type_error() {
 fn generic_optional_where_bound_is_validated() {
     let prog = "
         (deftrait eq2 () (same ((self Self) (other Self)) bool))
-        (impl eq2 i32 (same ((self Self) (other Self)) bool (= self other)))
-        (defstruct no-eq (n i32))
+        (impl eq2 int (same ((self Self) (other Self)) bool (= self other)))
+        (defstruct no-eq (n int))
         (defun check-eq<T> ((a T) (b T) &optional (verbose bool false)) bool (where (eq2 T)) (same a b))
     ";
     assert_eq!(eval_ok(&format!("{} (check-eq 1 1)", prog)), Value::Bool(true));
@@ -243,7 +243,7 @@ fn generic_key_specialization_agrees_between_interp_and_compile() {
     // depend on `T`.
     let prog_i32 = "
         (defun pick<T> ((a T) (b T) &key (use-a bool true)) T (if use-a a b))
-        (defun run-i32 () i32 (pick 1 2))
+        (defun run-i32 () int (pick 1 2))
         %COMPILE%
         (run-i32)
     ";
@@ -265,7 +265,7 @@ fn generic_optional_self_recursive() {
     // the template must already be registered when the body is checked so
     // the self-recursive call resolves instead of hitting `check_redef` or
     // an unregistered-function error.
-    let src = "(defun rep<T> ((x T) &optional (n i32 3)) T (if (= n 0) x (rep x (- n 1)))) (rep 5)";
+    let src = "(defun rep<T> ((x T) &optional (n int 3)) T (if (= n 0) x (rep x (- n 1)))) (rep 5)";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
 
@@ -281,8 +281,8 @@ fn generic_optional_self_recursive() {
 #[test]
 fn method_optional_default_is_used_when_the_argument_is_omitted() {
     let src = "
-        (defstruct counter (n i32))
-        (defmethod bump ((self counter) &optional (by i32 1)) i32 (+ self::n by))
+        (defstruct counter (n int))
+        (defmethod bump ((self counter) &optional (by int 1)) int (+ self::n by))
         (bump (counter::new 10))
     ";
     assert_eq!(eval_ok(src), Value::Int(11));
@@ -291,8 +291,8 @@ fn method_optional_default_is_used_when_the_argument_is_omitted() {
 #[test]
 fn method_optional_supplied_value_overrides_the_default() {
     let src = "
-        (defstruct counter (n i32))
-        (defmethod bump ((self counter) &optional (by i32 1)) i32 (+ self::n by))
+        (defstruct counter (n int))
+        (defmethod bump ((self counter) &optional (by int 1)) int (+ self::n by))
         (bump (counter::new 10) 5)
     ";
     assert_eq!(eval_ok(src), Value::Int(15));
@@ -301,8 +301,8 @@ fn method_optional_supplied_value_overrides_the_default() {
 #[test]
 fn method_defaultless_optional_arrives_as_an_option() {
     let src = "
-        (defstruct counter (n i32))
-        (defmethod bump ((self counter) &optional (by i32)) i32
+        (defstruct counter (n int))
+        (defmethod bump ((self counter) &optional (by int)) int
           (match by ((some k) (+ self::n k)) ((none) self::n)))
         (+ (bump (counter::new 10)) (bump (counter::new 10) 5))
     ";
@@ -312,8 +312,8 @@ fn method_defaultless_optional_arrives_as_an_option() {
 #[test]
 fn method_keyword_arguments_match_by_label() {
     let src = "
-        (defstruct box (w i32) (h i32))
-        (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32
+        (defstruct box (w int) (h int))
+        (defmethod grow ((self box) &key (dw int 0) (dh int 0)) int
           (+ (+ self::w dw) (+ self::h dh)))
         (grow (box::new 1 2) :dh 10)
     ";
@@ -323,9 +323,9 @@ fn method_keyword_arguments_match_by_label() {
 #[test]
 fn method_rest_collects_the_trailing_arguments() {
     let src = "
-        (defun len ((s Option<Sexpr>)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
-        (defstruct acc (base i32))
-        (defmethod total ((self acc) &rest (xs i32)) i32 (+ self::base (len xs)))
+        (defun len ((s Option<Sexpr>)) int (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
+        (defstruct acc (base int))
+        (defmethod total ((self acc) &rest (xs int)) int (+ self::base (len xs)))
         (total (acc::new 100) 1 2 3)
     ";
     assert_eq!(eval_ok(src), Value::Int(103));
@@ -334,8 +334,8 @@ fn method_rest_collects_the_trailing_arguments() {
 #[test]
 fn static_method_takes_keyword_arguments() {
     let src = "
-        (defstruct point (x i32) (y i32))
-        (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))
+        (defstruct point (x int) (y int))
+        (defmethod origin (point &key (x int 0) (y int 0)) point (point::new x y))
         (x (point::origin :y 7))
     ";
     assert_eq!(eval_ok(src), Value::Int(0));
@@ -348,7 +348,7 @@ fn method_on_a_generic_owner_takes_an_optional() {
     // the definition-side restriction below does not bite.
     let src = "
         (defstruct cell<T> (v T))
-        (defmethod shown ((self cell<i32>) &optional (extra i32 100)) i32 (+ self::v extra))
+        (defmethod shown ((self cell<int>) &optional (extra int 100)) int (+ self::v extra))
         (shown (cell::new 1))
     ";
     assert_eq!(eval_ok(src), Value::Int(101));
@@ -357,10 +357,10 @@ fn method_on_a_generic_owner_takes_an_optional() {
 #[test]
 fn method_keyword_and_optional_agree_between_interp_and_compile() {
     let src = "
-        (defstruct box (w i32) (h i32))
-        (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32
+        (defstruct box (w int) (h int))
+        (defmethod grow ((self box) &key (dw int 0) (dh int 0)) int
           (+ (+ self::w dw) (+ self::h dh)))
-        (defun run () i32 (+ (grow (box::new 1 2)) (grow (box::new 1 2) :dw 10)))
+        (defun run () int (+ (grow (box::new 1 2)) (grow (box::new 1 2) :dw 10)))
         %COMPILE%
         (run)
     ";
@@ -370,8 +370,8 @@ fn method_keyword_and_optional_agree_between_interp_and_compile() {
 #[test]
 fn method_unknown_keyword_is_rejected() {
     let src = "
-        (defstruct box (w i32))
-        (defmethod grow ((self box) &key (dw i32 0)) i32 (+ self::w dw))
+        (defstruct box (w int))
+        (defmethod grow ((self box) &key (dw int 0)) int (+ self::w dw))
         (grow (box::new 1) :nope 2)
     ";
     assert!(check_err(src).contains("unknown keyword argument :nope"), "{}", check_err(src));
@@ -380,8 +380,8 @@ fn method_unknown_keyword_is_rejected() {
 #[test]
 fn method_too_many_positional_arguments_are_rejected() {
     let src = "
-        (defstruct box (w i32))
-        (defmethod grow ((self box) &optional (dw i32 0)) i32 (+ self::w dw))
+        (defstruct box (w int))
+        (defmethod grow ((self box) &optional (dw int 0)) int (+ self::w dw))
         (grow (box::new 1) 2 3)
     ";
     assert!(check_err(src).contains("expected at most"), "{}", check_err(src));
@@ -408,13 +408,13 @@ fn a_defaulted_method_parameter_may_not_mention_the_owners_type_parameter() {
 
 #[test]
 fn lambda_rejects_optional_with_the_reason() {
-    let msg = check_err("(lambda ((a i32) &optional (b i32 1)) i32 (+ a b))");
+    let msg = check_err("(lambda ((a int) &optional (b int 1)) int (+ a b))");
     assert!(msg.contains("need a named callee"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn labels_rejects_key_with_the_reason() {
-    let msg = check_err("(labels ((f ((a i32) &key (b i32 1)) i32 (+ a b))) (f 1))");
+    let msg = check_err("(labels ((f ((a int) &key (b int 1)) int (+ a b))) (f 1))");
     assert!(msg.contains("need a named callee"), "unexpected message: {}", msg);
 }
 
@@ -422,8 +422,8 @@ fn labels_rejects_key_with_the_reason() {
 fn lambda_still_takes_a_rest_parameter() {
     // `&rest` is purely a matter of types, and `Type::Fn` has a slot for it.
     let src = "
-        (defun len ((s Option<Sexpr>)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
-        ((lambda ((a i32) &rest (xs i32)) i32 (+ a (len xs))) 1 2 3)
+        (defun len ((s Option<Sexpr>)) int (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
+        ((lambda ((a int) &rest (xs int)) int (+ a (len xs))) 1 2 3)
     ";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
@@ -434,10 +434,10 @@ fn a_trait_impl_method_may_not_declare_lambda_list_sections() {
     // site fills its arguments from the trait's declaration, a concrete one
     // from the impl's, and the two have to be the same call.
     let src = "
-        (deftrait greet () (hello ((self Self)) i32))
-        (defstruct thing (n i32))
+        (deftrait greet () (hello ((self Self)) int))
+        (defstruct thing (n int))
         (impl greet thing
-          (hello ((self Self) &key (extra i32 0)) i32 (+ self::n extra)))
+          (hello ((self Self) &key (extra int 0)) int (+ self::n extra)))
     ";
     let msg = check_err(src);
     assert!(msg.contains("arity is fixed by its vtable slot"), "unexpected message: {}", msg);
@@ -449,9 +449,9 @@ fn an_inherent_method_with_sections_cannot_be_adopted_as_a_trait_method() {
     // outside the `impl` block, so `subst_method_item` never sees it and the
     // conformance check is what refuses it.
     let src = "
-        (deftrait greet () (hello ((self Self)) i32))
-        (defstruct thing (n i32))
-        (defmethod hello ((self thing) &key (extra i32 0)) i32 (+ self::n extra))
+        (deftrait greet () (hello ((self Self)) int))
+        (defstruct thing (n int))
+        (defmethod hello ((self thing) &key (extra int 0)) int (+ self::n extra))
         (impl greet thing)
     ";
     let msg = check_err(src);
@@ -490,9 +490,9 @@ fn a_function_value_at_the_required_arity_alone_is_a_type_error() {
 fn a_defaultless_optional_is_an_option_in_the_function_value_too() {
     // Inside the body such a parameter is `Option<T>`; a function value's
     // caller sees the same type, since it is the same parameter.
-    let src = "(defun tag ((n i32) &optional (extra i32)) i32
+    let src = "(defun tag ((n int) &optional (extra int)) int
                  (match extra ((some e) (+ n e)) ((none) n)))
-               (defun call2 ((f (fn (i32 Option<i32>) i32))) i32 (f 10 (Option::some 5)))
+               (defun call2 ((f (fn (int Option<int>) int))) int (f 10 (Option::some 5)))
                (call2 tag)";
     assert_eq!(eval_ok(src), Value::Int(15));
 }
@@ -501,8 +501,8 @@ fn a_defaultless_optional_is_an_option_in_the_function_value_too() {
 fn a_key_parameter_shows_up_in_the_function_value_positionally() {
     // Labels are a *call-site* notation; a function value has no call site to
     // read them at, so the parameter takes its place in declared order.
-    let src = "(defun mk (&key (a i32 1) (b i32 2)) i32 (+ (* 10 a) b))
-               (defun call2 ((f (fn (i32 i32) i32))) i32 (f 7 8))
+    let src = "(defun mk (&key (a int 1) (b int 2)) int (+ (* 10 a) b))
+               (defun call2 ((f (fn (int int) int))) int (f 7 8))
                (call2 mk)";
     assert_eq!(eval_ok(src), Value::Int(78));
 }

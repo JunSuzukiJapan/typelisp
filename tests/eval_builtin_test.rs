@@ -38,7 +38,7 @@ fn evaluates_an_expression_and_returns_its_value_as_a_sexpr() {
 
 #[test]
 fn sees_a_global_variable_defined_earlier() {
-    let out = repl_stdout("(defvar (x i32) 10)\n(eval (unwrap (read \"(+ x 5)\")))\n:quit\n");
+    let out = repl_stdout("(defvar (x int) 10)\n(eval (unwrap (read \"(+ x 5)\")))\n:quit\n");
     assert!(out.contains("(ok 15)"), "stdout was:\n{}", out);
 }
 
@@ -48,7 +48,7 @@ fn a_definition_is_visible_to_a_direct_call_on_a_later_repl_line() {
     // At the REPL, later lines are checked after it runs, so the direct call
     // `(sq 9)` type-checks and returns 81.
     let out = repl_stdout(
-        "(eval (unwrap (read \"(defun sq ((n i32)) i32 (* n n))\")))\n(sq 9)\n:quit\n",
+        "(eval (unwrap (read \"(defun sq ((n int)) int (* n n))\")))\n(sq 9)\n:quit\n",
     );
     // The define returns the name symbol; the REPL prints `(ok sq)`.
     assert!(out.contains("(ok sq)"), "stdout was:\n{}", out);
@@ -61,7 +61,7 @@ fn a_definition_is_visible_to_a_subsequent_eval() {
     // definition landed in the shared environment the next `eval` checks
     // against, not just the REPL's own registry.
     let out = repl_stdout(
-        "(eval (unwrap (read \"(defun cube ((n i32)) i32 (* n (* n n)))\")))\n(eval (unwrap (read \"(cube 3)\")))\n:quit\n",
+        "(eval (unwrap (read \"(defun cube ((n int)) int (* n (* n n)))\")))\n(eval (unwrap (read \"(cube 3)\")))\n:quit\n",
     );
     assert!(out.contains("(ok 27)"), "stdout was:\n{}", out);
 }
@@ -93,7 +93,7 @@ fn a_global_shadowed_by_a_local_is_still_seen_by_its_global_value() {
     // `eval` sees — it uses the global. Global `g` = 7; a local `g` = 99 does
     // not leak into the evaluated form.
     let out = repl_stdout(
-        "(defvar (g i32) 7)\n(let ((g 99)) (eval (unwrap (read \"g\"))))\n:quit\n",
+        "(defvar (g int) 7)\n(let ((g 99)) (eval (unwrap (read \"g\"))))\n:quit\n",
     );
     assert!(out.contains("(ok 7)"), "stdout was:\n{}", out);
 }
@@ -113,7 +113,7 @@ fn a_global_shadowed_by_a_local_is_still_seen_by_its_global_value() {
 #[test]
 fn a_compiled_function_can_call_eval() {
     let out = repl_stdout(
-        "(defun ev () i32 (match (eval (quote (+ 40 2))) ((ok v) (sexpr-i32 v)) ((err _) -1)))\n\
+        "(defun ev () int (match (eval (quote (+ 40 2))) ((ok v) (sexpr-int v)) ((err _) -1)))\n\
          (ev)\n(compile ev)\n(ev)\n:quit\n",
     );
     assert_eq!(out.matches("42").count(), 2, "stdout was:\n{}", out);
@@ -124,8 +124,8 @@ fn a_compiled_function_can_call_eval() {
 #[test]
 fn a_compiled_function_evaluating_a_form_sees_the_programs_globals() {
     let out = repl_stdout(
-        "(defvar (g i32) 7)\n\
-         (defun ev () i32 (match (eval (quote g)) ((ok v) (sexpr-i32 v)) ((err _) -1)))\n\
+        "(defvar (g int) 7)\n\
+         (defun ev () int (match (eval (quote g)) ((ok v) (sexpr-int v)) ((err _) -1)))\n\
          (compile ev)\n(ev)\n:quit\n",
     );
     assert!(out.contains('7'), "stdout was:\n{}", out);
@@ -137,7 +137,7 @@ fn a_compiled_function_evaluating_a_form_sees_the_programs_globals() {
 fn a_definition_made_by_a_compiled_functions_eval_survives_the_call() {
     let out = repl_stdout(
         "(defun define-it () Option<Sexpr> \
-           (match (eval (quote (defun sq ((n i32)) i32 (* n n)))) ((ok v) v) ((err _) ())))\n\
+           (match (eval (quote (defun sq ((n int)) int (* n n)))) ((ok v) v) ((err _) ())))\n\
          (compile define-it)\n(define-it)\n(sq 7)\n:quit\n",
     );
     assert!(out.contains("49"), "stdout was:\n{}", out);

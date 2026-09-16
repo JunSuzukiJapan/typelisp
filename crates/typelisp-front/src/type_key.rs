@@ -236,7 +236,6 @@ pub fn type_key_of_type(t: &Type) -> String {
         Type::F32 => "f32".into(),
         Type::F64 => "f64".into(),
         Type::Int => "int".into(),
-        Type::Bignum => "bignum".into(),
         Type::Ratio => "ratio".into(),
         Type::RandomState => "random-state".into(),
         Type::Bool => "bool".into(),

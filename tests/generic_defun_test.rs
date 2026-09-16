@@ -100,10 +100,10 @@ fn generic_defun_with_two_type_params() {
 #[test]
 fn recursive_generic_defun() {
     // Self-recursive generic call: each recursive call re-resolves T against
-    // the same concrete type (i32 here), exercising that the signature
+    // the same concrete type (int here), exercising that the signature
     // registered before body-checking carries `type_params` through.
     let src = r#"
-        (defun last-of<T> ((n i32) (x T)) T
+        (defun last-of<T> ((n int) (x T)) T
           (if (= n 0) x (last-of (- n 1) x)))
         (last-of 3 99)
     "#;
@@ -149,7 +149,7 @@ fn unused_type_param_is_uninferable() {
 fn mismatched_concrete_argument_types_still_rejected() {
     // Calling with concrete types that don't match the (non-generic) param
     // type is still a plain type error.
-    assert_type_error("(defun add1 ((x i32)) i32 (+ x 1)) (add1 true)");
+    assert_type_error("(defun add1 ((x int)) int (+ x 1)) (add1 true)");
 }
 
 // ---- non-generic defun is unaffected -----------------------------------------
@@ -157,7 +157,7 @@ fn mismatched_concrete_argument_types_still_rejected() {
 #[test]
 fn ordinary_defun_without_type_params_still_works() {
     assert_eq!(
-        eval_ok("(defun add1 ((x i32)) i32 (+ x 1)) (add1 41)"),
+        eval_ok("(defun add1 ((x int)) int (+ x 1)) (add1 41)"),
         Value::Int(42)
     );
 }
@@ -177,11 +177,11 @@ fn ordinary_defun_without_type_params_still_works() {
 fn a_bounded_generic_can_delegate_when_the_item_variable_is_named_differently() {
     assert_eq!(
         eval_ok_with_prelude(
-            "(defun mylen<I,B> ((it I)) i32 (where (Iter I (Item B)))
+            "(defun mylen<I,B> ((it I)) int (where (Iter I (Item B)))
                (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
-             (defun mylen2<J,C> ((it J)) i32 (where (Iter J (Item C)))
+             (defun mylen2<J,C> ((it J)) int (where (Iter J (Item C)))
                (mylen it))
-             (let ((v (the Vector<i32> (Vector::new))))
+             (let ((v (the Vector<int> (Vector::new))))
                (push v 1) (push v 2)
                (mylen2 (iter v)))"
         ),
@@ -198,7 +198,7 @@ fn a_bounded_generic_can_delegate_with_a_structured_associated_type_pin() {
                (match (find-if it (lambda ((p cons-cell<K,V>)) bool true))
                  ((some p) (option::some (car p)))
                  ((none) (option::none))))
-             (let ((al (the Vector<cons-cell<i32,i32>> (Vector::new))))
+             (let ((al (the Vector<cons-cell<int,int>> (Vector::new))))
                (push al (cons 7 8))
                (unwrap (firstkey (iter al))))"
         ),
@@ -221,9 +221,9 @@ fn a_generic_defmethod_may_name_the_receivers_type_parameter_freely() {
         eval_ok_with_prelude(
             "(defmethod keepif ((self Vector<A>) (pred (fn (A) bool))) Vector<A>
                (filter (iter self) pred))
-             (let ((v (the Vector<i32> (Vector::new))))
+             (let ((v (the Vector<int> (Vector::new))))
                (push v 1) (push v 5)
-               (len (keepif v (lambda ((x i32)) bool (> x 2)))))"
+               (len (keepif v (lambda ((x int)) bool (> x 2)))))"
         ),
         Value::Int(1)
     );
@@ -236,7 +236,7 @@ fn a_generic_defmethod_on_a_user_struct_may_rename_its_type_parameter() {
         eval_ok_with_prelude(
             "(defstruct box<T> (v T))
              (defmethod apply-to ((self box<A>) (f (fn (A) A))) A (f self::v))
-             (apply-to (box::new 4) (lambda ((x i32)) i32 (* x 2)))"
+             (apply-to (box::new 4) (lambda ((x int)) int (* x 2)))"
         ),
         Value::Int(8)
     );

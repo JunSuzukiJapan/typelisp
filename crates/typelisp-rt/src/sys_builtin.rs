@@ -30,7 +30,7 @@ use typelisp_mem::{Heap, TypeKeyId, Value};
 /// `Path` to derive one from), checked against the registry by the same
 /// guard test.
 pub const RESULT_KEYS: &[(&str, &str)] = &[
-    ("parse-int", "result<i32,parseinterror>"),
+    ("parse-int", "result<int,parseinterror>"),
     ("parse-float", "result<f64,parsefloaterror>"),
     ("command-line-args", "vector<string>"),
     ("getenv", "option<string>"),
@@ -38,7 +38,7 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("machine-instance", "option<string>"),
     ("machine-version", "option<string>"),
     ("software-version", "option<string>"),
-    ("timezone-offset-seconds", "option<i32>"),
+    ("timezone-offset-seconds", "option<int>"),
     ("timezone-daylight-p", "option<bool>"),
     ("dribble-start", "result<(),fileerror>"),
     ("dribble-stop", "result<(),fileerror>"),
@@ -68,13 +68,16 @@ fn result_err(heap: &mut Heap, name: &str, err_type_key: TypeKeyId, msg: String)
     heap.alloc_enum(key, 1, vec![err_val])
 }
 
-/// `(parse-int s)`: a decimal `i32` via `str::parse`, `Err` on anything else.
-/// The `Ok` payload is an `i32`-typed `Value::Int` — the checker's return
-/// type is `Result<i32, ParseIntError>`, so the value must fit `i32` even
-/// though the runtime carrier is a 64-bit word.
+/// `(parse-int s)`: a decimal `int` via `BigInt`'s parser, `Err` on anything
+/// else. The `Ok` payload is an `int` — CL's `parse-integer` answers a
+/// bignum for a long enough string, and so does this, through the canonical
+/// constructor.
 pub fn parse_int(heap: &mut Heap, s: &str) -> Value {
-    match s.parse::<i32>() {
-        Ok(n) => result_ok(heap, "parse-int", Value::Int(n as i64)),
+    match s.parse::<num_bigint::BigInt>() {
+        Ok(n) => {
+            let v = heap.int_from_bigint(n);
+            result_ok(heap, "parse-int", v)
+        }
         Err(_) => result_err(
             heap,
             "parse-int",
@@ -354,14 +357,11 @@ fn local_zone(day: i64, second: i64) -> Option<(i32, bool)> {
 /// `heap-info` struct — the numbers CL's `room` prints, in a form a program
 /// can also read.
 ///
-/// The counts are `i32` and the collection counter is a `bignum`, and the
-/// difference is not stylistic. Every count here is bounded by the arena, and
-/// an arena `i32` cannot count is one this machine cannot hold (2^31 cells is
-/// ~51 GB) — `typl`'s `--heap-cells` refuses such a request outright rather
-/// than letting this truncate one. A *collection* counter has no such bound:
-/// it only goes up, and a long-running process really can pass 2^31. Rounding
-/// it would be a lie of exactly the kind this language keeps refusing to tell,
-/// so it gets the type that never has to.
+/// Every figure is an `int`. The counts are bounded by the arena (an arena a
+/// fixnum cannot count is one this machine cannot hold), so they are written
+/// as fixnums directly; the *collection* counter has no such bound — it only
+/// goes up — so it goes through `canonical_int`, which boxes it once it
+/// outgrows a fixnum rather than wrapping it.
 ///
 /// `growable` rather than the growth ceiling in cells: the ceiling is the one
 /// figure here that is not bounded by the arena (it is a multiple of it), and
@@ -374,7 +374,7 @@ pub fn heap_info(heap: &mut Heap) -> Value {
     let strings = heap.string_count();
     let boxes = heap.box_count();
     let growable = heap.growth_limit() > capacity;
-    let gc_count = heap.alloc_bignum(num_bigint::BigInt::from(heap.gc_count()));
+    let gc_count = heap.canonical_int(i128::from(heap.gc_count()));
     heap.alloc_struct(
         TypeKeyId::HEAP_INFO,
         vec![

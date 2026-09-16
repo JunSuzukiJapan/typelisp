@@ -39,15 +39,15 @@ fn eval_ok(src: &str) -> Value {
 }
 
 
-/// A `(1 2 3)`-valued `Vector<i32>` builder (no variadic `vector-of` builder
+/// A `(1 2 3)`-valued `Vector<int>` builder (no variadic `vector-of` builder
 /// exists — the language has no value-level `&rest`).
-const V123: &str = "(defun make-v () Vector<i32> (Vector::new))
-                    (defvar (v Vector<i32>) (make-v))
+const V123: &str = "(defun make-v () Vector<int> (Vector::new))
+                    (defvar (v Vector<int>) (make-v))
                     (push v 1) (push v 2) (push v 3)";
 
-/// An empty `Vector<i32>`.
-const VEMPTY: &str = "(defun make-v () Vector<i32> (Vector::new))
-                      (defvar (v Vector<i32>) (make-v))";
+/// An empty `Vector<int>`.
+const VEMPTY: &str = "(defun make-v () Vector<int> (Vector::new))
+                      (defvar (v Vector<int>) (make-v))";
 
 // ---- length -----------------------------------------------------------------
 
@@ -76,7 +76,7 @@ fn length_on_a_string_still_resolves_to_the_builtin_method() {
 
 #[test]
 fn append_rejects_mismatched_element_types() {
-    let src = "(defun make-i () Vector<i32> (Vector::new))
+    let src = "(defun make-i () Vector<int> (Vector::new))
                (defun make-s () Vector<string> (Vector::new))
                (append (iter (make-i)) (iter (make-s)))";
     assert!(check(src).is_err());
@@ -167,7 +167,7 @@ fn butlast_of_empty_and_singleton_is_empty() {
     let src = format!(
         "{VEMPTY} (push v 7)
          (+ (len (butlast (iter v)))
-            (len (butlast (iter (the Vector<i32> (Vector::new))))))"
+            (len (butlast (iter (the Vector<int> (Vector::new))))))"
     );
     assert_eq!(eval_ok(&src), Value::Int(0));
 }
@@ -194,7 +194,7 @@ fn member_on_strings_compares_content_not_identity() {
 
 #[test]
 fn member_over_an_element_type_without_eq_is_a_type_error() {
-    let src = "(defstruct point (x i32))
+    let src = "(defstruct point (x int))
                (defun make-v () Vector<point> (Vector::new))
                (member (point::new 1) (iter (make-v)))";
     assert!(check(src).is_err());
@@ -206,8 +206,8 @@ fn member_over_an_element_type_without_eq_is_a_type_error() {
 fn every_is_true_on_empty_and_any_is_false_on_empty() {
     let src = format!(
         "{VEMPTY}
-         (if (every (iter v) (lambda ((x i32)) bool false))
-             (if (any (iter v) (lambda ((x i32)) bool true)) 0 1)
+         (if (every (iter v) (lambda ((x int)) bool false))
+             (if (any (iter v) (lambda ((x int)) bool true)) 0 1)
              0)"
     );
     assert_eq!(eval_ok(&src), Value::Int(1));
@@ -217,10 +217,10 @@ fn every_is_true_on_empty_and_any_is_false_on_empty() {
 fn every_and_any_report_over_real_elements() {
     let src = format!(
         "{V123}
-         (+ (if (every (iter v) (lambda ((x i32)) bool (> x 0))) 10 0)
-            (+ (if (every (iter v) (lambda ((x i32)) bool (> x 1))) 100 0)
-               (+ (if (any (iter v) (lambda ((x i32)) bool (= x 3))) 1000 0)
-                  (if (any (iter v) (lambda ((x i32)) bool (= x 9))) 10000 0))))"
+         (+ (if (every (iter v) (lambda ((x int)) bool (> x 0))) 10 0)
+            (+ (if (every (iter v) (lambda ((x int)) bool (> x 1))) 100 0)
+               (+ (if (any (iter v) (lambda ((x int)) bool (= x 3))) 1000 0)
+                  (if (any (iter v) (lambda ((x int)) bool (= x 9))) 10000 0))))"
     );
     assert_eq!(eval_ok(&src), Value::Int(1010));
 }
@@ -229,10 +229,10 @@ fn every_and_any_report_over_real_elements() {
 
 #[test]
 fn sort_orders_i32_ascending_without_mutating_the_input() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 3) (push v 1) (push v 2)
-                 (let ((out (sort (iter v) (lambda ((a i32) (b i32)) bool (< a b)))))
+                 (let ((out (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))))
                    (+ (* (get v 0) 1000)
                       (+ (* (get out 0) 100) (+ (* (get out 1) 10) (get out 2))))))";
     // input head still 3 -> 3000; sorted (1 2 3) -> 123
@@ -241,10 +241,10 @@ fn sort_orders_i32_ascending_without_mutating_the_input() {
 
 #[test]
 fn sort_orders_i32_descending_given_a_flipped_comparator() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 3) (push v 1) (push v 2)
-                 (let ((out (sort (iter v) (lambda ((a i32) (b i32)) bool (> a b)))))
+                 (let ((out (sort (iter v) (lambda ((a int) (b int)) bool (> a b)))))
                    (+ (* (get out 0) 100) (+ (* (get out 1) 10) (get out 2)))))";
     // descending (3 2 1) -> 321
     assert_eq!(eval_ok(src), Value::Int(321));
@@ -261,7 +261,7 @@ fn sort_orders_strings_lexicographically() {
 
 #[test]
 fn sort_of_an_empty_iterator_is_empty() {
-    let src = format!("{VEMPTY} (len (sort (iter v) (lambda ((a i32) (b i32)) bool (< a b))))");
+    let src = format!("{VEMPTY} (len (sort (iter v) (lambda ((a int) (b int)) bool (< a b))))");
     assert_eq!(eval_ok(&src), Value::Int(0));
 }
 
@@ -282,7 +282,7 @@ fn sort_is_stable_for_equal_keys() {
     // `rec`s ordered by `k` only; the two `k`=1 records must keep their input
     // order (`tag` 10 before 20) because the insertion shift uses a strict
     // comparator.
-    let src = "(defstruct rec (k i32) (tag i32))
+    let src = "(defstruct rec (k int) (tag int))
                (defun make-v () Vector<rec> (Vector::new))
                (let ((v (make-v)))
                  (push v (rec::new 2 99))
@@ -298,7 +298,7 @@ fn sort_is_stable_for_equal_keys() {
 
 #[test]
 fn member_works_over_a_user_type_with_an_eq_impl() {
-    let src = "(defstruct point (x i32) (y i32))
+    let src = "(defstruct point (x int) (y int))
                (impl Eq point
                  (equals ((self Self) (other Self)) bool
                    (if (= self::x other::x) (= self::y other::y) false)))
@@ -316,7 +316,7 @@ fn member_works_over_a_user_type_with_an_eq_impl() {
 
 #[test]
 fn assoc_finds_the_pair_in_an_alist_and_projects_with_cdr() {
-    let src = "(defun make-alist () Vector<cons-cell<string,i32>> (Vector::new))
+    let src = "(defun make-alist () Vector<cons-cell<string,int>> (Vector::new))
                (let ((al (make-alist)))
                  (push al (cons \"one\" 1))
                  (push al (cons \"two\" 2))
@@ -326,7 +326,7 @@ fn assoc_finds_the_pair_in_an_alist_and_projects_with_cdr() {
 
 #[test]
 fn assoc_misses_with_none() {
-    let src = "(defun make-alist () Vector<cons-cell<string,i32>> (Vector::new))
+    let src = "(defun make-alist () Vector<cons-cell<string,int>> (Vector::new))
                (let ((al (make-alist)))
                  (push al (cons \"one\" 1))
                  (is-none (assoc \"nope\" (iter al))))";
@@ -338,7 +338,7 @@ fn assoc_works_over_a_hashtable_iterator() {
     // `HashTable<K,V>`'s iterator `Item` is exactly `cons-cell<K,V>`, so the
     // same `assoc` serves it — the composite associated-type pin
     // `(Item cons-cell<K,V>)` in action.
-    let src = "(defun make-h () HashTable<string,i32> (HashTable::new))
+    let src = "(defun make-h () HashTable<string,int> (HashTable::new))
                (let ((h (make-h)))
                  (set h \"a\" 10)
                  (set h \"b\" 20)
@@ -382,12 +382,12 @@ fn pairs_order_lexicographically_with_less() {
 
 #[test]
 fn member_and_sort_work_over_a_vector_of_pairs() {
-    let src = "(defun make-v () Vector<cons-cell<i32,i32>> (Vector::new))
+    let src = "(defun make-v () Vector<cons-cell<int,int>> (Vector::new))
                (let ((v (make-v)))
                  (push v (cons 2 0))
                  (push v (cons 1 5))
                  (push v (cons 1 3))
-                 (let ((sorted (sort (iter v) (lambda ((a cons-cell<i32,i32>) (b cons-cell<i32,i32>)) bool (less a b)))))
+                 (let ((sorted (sort (iter v) (lambda ((a cons-cell<int,int>) (b cons-cell<int,int>)) bool (less a b)))))
                    (let ((first (get sorted 0)))
                      (+ (if (member (cons 1 5) (iter v)) 1000 0)
                         (+ (if (member (cons 9 9) (iter v)) 100 0)
@@ -398,9 +398,9 @@ fn member_and_sort_work_over_a_vector_of_pairs() {
 
 #[test]
 fn pair_equals_rejects_an_element_type_without_eq() {
-    // `point` has no `Eq` impl, so `cons-cell<point,i32>`'s bounded `equals`
+    // `point` has no `Eq` impl, so `cons-cell<point,int>`'s bounded `equals`
     // must fail at the call site with a real trait error.
-    let src = "(defstruct point (x i32))
+    let src = "(defstruct point (x int))
                (equals (cons (point::new 1) 2) (cons (point::new 1) 2))";
     let err = check(src).expect_err("must fail to check");
     let msg = format!("{:?}", err);
@@ -415,7 +415,7 @@ fn pair_equals_rejects_an_element_type_without_eq() {
 
 #[test]
 fn member_specializes_at_two_element_types_in_one_program() {
-    let src = "(defun make-i () Vector<i32> (Vector::new))
+    let src = "(defun make-i () Vector<int> (Vector::new))
                (defun make-s () Vector<string> (Vector::new))
                (let ((vi (make-i)) (vs (make-s)))
                  (push vi 7)

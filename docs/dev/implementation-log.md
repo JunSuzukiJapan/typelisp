@@ -11271,3 +11271,81 @@ Repr タグと型名と兼用）で、島の `compile-int-literal` が `tag-fixn
 
 `int` は `Sexpr` に入らない（`~a` で印字できない）、`bignum` と `int` が並存、リテラルの
 既定は i32 のまま、`float->int` は i32 返し、ダンプ中の非正準 bignum の拒否。
+
+## `int` を既定に、`bignum` を統合（段階 3、2026-09-16）
+
+### 何が変わったか
+
+- 未注釈の整数リテラルは `int`。リーダは 63bit で fixnum/bignum を切り替える（`int_from_bigint`）。
+  期待型が固定幅ならその型（従来どおり）。
+- `bignum` 型は消え、`int` に統合。`Type::Bignum`/`Repr::Bignum`/`bignum_assoc`/`rt_bignum_*`/
+  島の `bignum-*` は削除、`rt_bignum_new`（リテラル）と `rt_ratio_from_bignums` だけ残した
+  （どちらも正準形で答える）。`float->int`/`ratio->int`/`numerator`/`denominator` は `int` 返し。
+- `Sexpr` の変種: 1 を `int`（fixnum ∨ bignum 箱、抽出は恒等）、8 `bignum` は退役
+  （構築もマッチも拒否、網羅性の宇宙からも外す）、17 に `i32`（narrow 箱、`rt_box_kind` 10）を追加。
+  アクセサは `sexpr-int` が新設、`sexpr-i32` は箱を読む。
+- `i32` を返していた組み込み（`length`/`char->int`/`parse-int`/添字・個数の引数/…）は `int`。
+  ストリームのハンドル（`h`）だけ `i32` のまま（不透明ハンドルで表に出ない）。
+- `ash`/`logbitp` の桁数は全レシーバで `int`（`Bits::shift` も）。
+- 数値限界定数 `most-positive-fixnum` = 2^62-1、`most-negative-fixnum` = -2^62。
+
+### 境界: 宣言型駆動、チェッカーが `untag-int`/`tag-int` を挟む
+
+Rust 実装の組み込み（`builtin: true`）の `int` 引数・戻りは**生の語**で越境する
+（`rt_str_substring` や `rt_llvm_call` は i32 時代のまま）。チェッカーが `call_form`/`assoc_form` で
+宣言シグネチャを見て、`int` と宣言された引数を `(untag-int E)`（fixnum の payload、bignum は
+言語エラー "an integer argument does not fit a fixnum"）、`int` と宣言された戻りを `(tag-int E)`
+で包む。解釈器は同じ検査だけして値はそのまま。例外は `int` 自身のメソッド、`float->int`/
+`ratio->int`/`numerator`/`denominator`/`int->int`、`Chan` の `len`/`cap`、固定幅の `ash`/`logbitp`
+（島が自分で untag）——`Checker::int_boundary_raw` が表。
+
+**宣言型で決める理由**: `Vector<int>::get` の添字は宣言 `int` だが要素 `T` も `int` に実体化
+される。Repr だけ見ると両方 `Int` で区別がつかない。宣言シグネチャの `Type::Int` リテラルだけが
+「機械語の位置」を言える。untag した引数の Repr は `I32`（生語）として記録する——ルートされる
+スロットに生語を置くと GC がポインタと読む。
+
+このやり方だと `rt_llvm_call` のマーシャリングも生語のまま（旧島は raw で呼び、新島は
+`untag-int` 済みの raw を渡す）で、一世代キーの分岐が要らなかった。
+
+### 自己ホストの袋小路と、解釈島でのブートストラップ
+
+チェッカーが全 `int` 引数を `untag-int` で包むので、島 SOURCE 自身のコンパイルにも
+`untag-int` ノードが現れる。**旧島（committed）はこのノードを知らない**ので新 SOURCE を
+コンパイルできず、「能力パス」で教える SOURCE も書けない（書けばそれ自体が包まれる）。
+出口は `TYPELISP_BOOTSTRAP_INTERPRETED=1`: committed の bitcode を据えず、SOURCE を
+**解釈**して自分をコンパイルする（最初の `.bc` の作り方）。解釈島は CPS 評価器で `labels`/
+`lambda` を走らせられる。数分で完走し、その G1 で native regen した G2 はバイト一致した。
+
+もう1つ、旧島の本体が名前で呼ぶシムの意味を変えてはいけない: `sexpr-i32` の実体を「箱を読む」に
+変えたら旧島の `rt_sexpr_i32` 呼び出し（IR の数を fixnum として読む）が落ちた。切替中は新実体を
+`rt_sexpr_i32_box` の名で足し、旧名は旧島のために残した。regen が済んで旧島が消えた後に
+旧名の実体を退役させ、箱読みを `rt_sexpr_i32` に戻している。
+
+### 移行の量
+
+prelude 210 箇所、島 105 箇所、テスト 99 ファイルは `i32`→`int` の機械置換（コメント外、
+`->i32`/`sexpr-i32` 除外）。**機械置換が壊したもの**: prelude の数値カタログは型ごとの
+`defmethod` なので、i32 版と bignum 版が両方 `int` になって重複した。i32 版を復元し、
+`isqrt`/`floor-div` 系/`to-string`/`Hash` には i32 版を足した。テスト側は `Add`/`Sub` トレイトの
+メソッド名 `add`/`sub` と衝突する defun 名、`(- 0 x)` の受け手が int になる件など。
+
+### AOT の `main`
+
+`(defun main () int ...)` の答えはタグ付き語なので、exit code に使うには fixnum の payload を
+外す必要がある。最初は AOT 側が IR で `rt_fixnum_payload` を呼ぶ形にしたが、`add_function` の
+二重宣言（`rt_fixnum_payload.22`）と、panic 経路で「答え」が int でない語になる件が出た。
+復号はランタイムの中で行う——entry シムを `rt_run_entry_driven_int` にして、ドライバの答えを
+fixnum として読んで exit code にする（`main` の宣言戻り型が `int` のときだけ選ぶ。
+`aot::compile_file` が `chk.registry().fn_sig(main)` で判定）。
+
+### 全体テストで出た取りこぼし
+
+- `format` の `~/name/` は値の型で dispatch する。裸の `Value::Int` を `i32` に写していた表を
+  `int` に（`i32` は narrow 箱で自分の名を持つ）。
+- `:dyn` の箱入れ: `int` は `is_heap_repr`（語が fixnum か bignum 箱）なので `string` と同じく
+  箱に入れられる。「プリミティブは箱に入らない」のテストは `i32` に差し替え。
+- 手書きの core IR（`(assoc i32 + ...)` を `int-any-width` で綴るもの）は機械置換の対象外——
+  `int` の受け手なら Repr は `int` でなければならない。
+- `ash`/`logbitp` の桁数が `int` になったので、`(n i32)` と書いていたテスト/docs の表を直した。
+- `(defvar (*cap* int) (stream-string-output))`: ストリームのハンドルは `i32` のまま。
+- ISLAND_DEFUNS に `untag-int-value` を追加（`island_defun_list_is_exhaustive` が番人）。

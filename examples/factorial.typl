@@ -1,8 +1,8 @@
-;; 階乗。固定幅の整数ではすぐ桁あふれするので、正確な任意精度演算には bignum を使う。
-(defun factorial ((n i32)) bignum
-  (let ((acc (int->bignum 1)))
+;; 階乗。`int` は 63bit を超えると自動的に多倍長になるので、桁あふれを気にせず掛けていける。
+(defun factorial ((n int)) int
+  (let ((acc 1))
     (dotimes (i n)
-      (setf acc (* acc (int->bignum (+ i 1)))))
+      (setf acc (* acc (+ i 1))))
     acc))
 
 (dotimes (i 15)

@@ -4,7 +4,7 @@
 //! (`registry::int_assoc`/`float_assoc`), `f64`'s `expt`/`sqrt`/`floor`/
 //! `ceiling`/`round`/`truncate`, and the free function `random`.
 //!
-//! `i32`'s arithmetic moved from free functions to an instance method too
+//! `int`'s arithmetic moved from free functions to an instance method too
 //! (so the same `+`/`<`/etc. symbol can dispatch per receiver type — see
 //! `Checker::check_instance_method`); its own regression coverage already
 //! lives in `tests/eval_test.rs` (`arithmetic`, `comparison`,
@@ -85,7 +85,7 @@ fn assert_close(actual: Value, expected: f64) {
     assert!((f - expected).abs() < 1e-9, "{} != {}", f, expected);
 }
 
-// The block that used to sit here re-ran every `i32` test above under `i64`,
+// The block that used to sit here re-ran every `int` test above under `i64`,
 // a second width with the same catalog. There is no 64-bit-wide integer type
 // any more (`types::Type::is_integer`), and the widths that remain are
 // covered — as *widths*, with their own wrapping — by
@@ -93,16 +93,16 @@ fn assert_close(actual: Value, expected: f64) {
 
 #[test]
 fn int_literal_adopts_the_dispatched_operands_expected_type() {
-    // A bare literal's default type is `i32`, but `+`'s `u16` instance method
+    // A bare literal's default type is `int`, but `+`'s `u16` instance method
     // expects `u16` for its second operand too — the literal `1` adopts that
-    // expected type rather than forcing dispatch back to `i32`.
+    // expected type rather than forcing dispatch back to `int`.
     let src = "(defun f ((a u16)) u16 (+ a 1)) (f 1)";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
 fn a_value_of_one_width_cannot_be_passed_where_another_is_expected() {
-    let src = "(defun mk () i32 5) (defun f ((a u16)) u16 (+ a 1)) (f (mk))";
+    let src = "(defun mk () int 5) (defun f ((a u16)) u16 (+ a 1)) (f (mk))";
     type_error(src);
 }
 
@@ -261,7 +261,7 @@ fn f64_signum() {
 
 #[test]
 fn f64_operator_as_a_value() {
-    // Mirrors `tests/eval_test.rs`'s `builtin_as_value` (which covers `i32`'s
+    // Mirrors `tests/eval_test.rs`'s `builtin_as_value` (which covers `int`'s
     // `+`) — confirms `Checker::method_value`/`Expr::MethodRef` generalizes
     // to other receiver types, not just the one the regression surfaced on.
     let src = "(defun apply2 ((f (fn (f64 f64) f64)) (a f64) (b f64)) f64 (f a b)) \
@@ -273,7 +273,7 @@ fn f64_operator_as_a_value() {
 
 #[test]
 fn random_is_within_bounds() {
-    let src = "(defun f () i32 (random 10)) (f)";
+    let src = "(defun f () int (random 10)) (f)";
     for _ in 0..50 {
         match eval_ok(src) {
             Value::Int(n) => assert!((0..10).contains(&n), "{} out of range", n),
@@ -286,7 +286,7 @@ fn random_is_within_bounds() {
 fn random_varies_across_calls() {
     // Not a statistical test — just confirms successive calls aren't frozen
     // at the same value (the seed/state advances).
-    let src = "(defun f () i32 (random 1000000)) (f)";
+    let src = "(defun f () int (random 1000000)) (f)";
     let mut seen = std::collections::HashSet::new();
     for _ in 0..20 {
         if let Value::Int(n) = eval_ok(src) {
@@ -306,12 +306,12 @@ fn random_varies_across_calls() {
 /// gone; `tests/runtime_error_parity_test.rs` asserts the wording matches.
 #[test]
 fn random_with_zero_bound_panics() {
-    let src = "(defun f () i32 (random 0)) (f)";
+    let src = "(defun f () int (random 0)) (f)";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn random_with_negative_bound_panics() {
-    let src = "(defun f () i32 (random -5)) (f)";
+    let src = "(defun f () int (random -5)) (f)";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }

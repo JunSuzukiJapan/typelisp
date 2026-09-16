@@ -33,7 +33,7 @@ fn eval_ok(src: &str) -> Value {
 
 #[test]
 fn doiter_sums_a_vector() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)) (acc 0))
                  (push v 1)
                  (push v 2)
@@ -45,7 +45,7 @@ fn doiter_sums_a_vector() {
 
 #[test]
 fn doiter_over_an_empty_vector_runs_zero_times() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)) (acc 0))
                  (doiter (x (iter v)) (setf acc (+ acc 1)))
                  acc)";
@@ -54,7 +54,7 @@ fn doiter_over_an_empty_vector_runs_zero_times() {
 
 #[test]
 fn break_exits_a_doiter_early() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)) (acc 0))
                  (push v 1)
                  (push v 2)
@@ -74,7 +74,7 @@ fn return_with_no_value_exits_the_doiter_loop_itself() {
     // the same way `while`/`dolist` fix it (`Checker::check_doiter` seeds
     // `check_loop_body` with `Type::Unit`), so only a value-less `(return)`
     // type-checks here, not `(return some-i32-value)`.
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)) (acc 0))
                  (push v 1)
                  (push v 2)
@@ -88,7 +88,7 @@ fn return_with_no_value_exits_the_doiter_loop_itself() {
 
 #[test]
 fn doiter_on_a_type_with_no_iter_impl_is_a_type_error() {
-    let src = "(defstruct box (n i32)) (doiter (x (box::new 1)) ())";
+    let src = "(defstruct box (n int)) (doiter (x (box::new 1)) ())";
     assert!(check(src).is_err());
 }
 
@@ -105,9 +105,9 @@ fn doiter_works_inside_a_where_bounded_generic_function() {
     // *un-pinned* `(where (Iter T))` form as a regression check — see
     // `doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item`
     // for the pinned/`sum` sibling.
-    let src = "(defun count-iter<T> ((it T)) i32 (where (Iter T))
+    let src = "(defun count-iter<T> ((it T)) int (where (Iter T))
                  (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
-               (defun make-v () Vector<i32> (Vector::new))
+               (defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (count-iter (iter v)))";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
@@ -115,12 +115,12 @@ fn doiter_works_inside_a_where_bounded_generic_function() {
 #[test]
 fn doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item() {
     // Sibling of `doiter_works_inside_a_where_bounded_generic_function`, now
-    // pinning `Item` to `i32` via `(where (Iter T (Item i32)))` — `x`'s type
-    // resolves to a concrete `i32` (not an opaque type variable), so
+    // pinning `Item` to `int` via `(where (Iter T (Item int)))` — `x`'s type
+    // resolves to a concrete `int` (not an opaque type variable), so
     // arithmetic (`+`) on it type-checks and runs.
-    let src = "(defun sum-iter<T> ((it T)) i32 (where (Iter T (Item i32)))
+    let src = "(defun sum-iter<T> ((it T)) int (where (Iter T (Item int)))
                  (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))
-               (defun make-v () Vector<i32> (Vector::new))
+               (defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (sum-iter (iter v)))";
     assert_eq!(eval_ok(src), Value::Int(30));
 }
@@ -128,9 +128,9 @@ fn doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item() {
 #[test]
 fn call_site_rejects_a_pinned_item_that_does_not_match_the_real_associated_type() {
     // `vector-iter<bool>`'s real `Item` is `bool`, but `sum-iter`'s `where`
-    // clause pins `Item` to `i32` — the call site must reject this, not
+    // clause pins `Item` to `int` — the call site must reject this, not
     // type-check the body's `(+ n x)` against a wrong assumption.
-    let src = "(defun sum-iter<T> ((it T)) i32 (where (Iter T (Item i32)))
+    let src = "(defun sum-iter<T> ((it T)) int (where (Iter T (Item int)))
                  (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))
                (defun make-bv () Vector<bool> (Vector::new))
                (let ((v (make-bv))) (push v true) (sum-iter (iter v)))";
@@ -143,7 +143,7 @@ fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
     // type parameters, pinned via `(where (Iter I (Item A)))` and appearing in
     // *no* ordinary argument — so it can only be inferred by resolving the
     // concrete iterator's real `Item`. `Checker::check_call`'s pin-inference
-    // pass binds `A = i32` from `vector-iter<i32>`, letting `(the Vector<A> …)`
+    // pass binds `A = int` from `vector-iter<int>`, letting `(the Vector<A> …)`
     // and the returned element type resolve. `last-of` returns the final
     // element, exercising exactly this "element type known only through the
     // iterator" path.
@@ -151,7 +151,7 @@ fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
                  (let ((r (the Option<A> (Option::none))))
                    (doiter (x it) (setf r (Option::some x)))
                    r))
-               (defun make-v () Vector<i32> (Vector::new))
+               (defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (push v 30)
                  (unwrap-or (last-of (iter v)) -1))";
     assert_eq!(eval_ok(src), Value::Int(30));
@@ -162,10 +162,10 @@ fn generic_iter_combinators_work_over_a_hashtable() {
     // The prelude's generic `count-if`/`map`/`foldl`/… take an *iterator*, so
     // a single definition serves any `Iter` type — here `HashTable<K,V>`'s
     // `hashtable-iter<K,V>` (Item = `cons-cell<K,V>`), not just `Vector<T>`.
-    let src = "(defun make-h () HashTable<i32,i32> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,int> (HashTable::new))
                (let ((h (make-h)))
                  (set h 1 10) (set h 2 20) (set h 3 30)
-                 (count-if (iter h) (lambda ((p cons-cell<i32,i32>)) bool (> p::cdr 15))))";
+                 (count-if (iter h) (lambda ((p cons-cell<int,int>)) bool (> p::cdr 15))))";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
@@ -179,7 +179,7 @@ fn generic_iter_combinators_work_over_a_hashtable() {
 
 #[test]
 fn doiter_sums_hashtable_values() {
-    let src = "(defun make-h () HashTable<i32,i32> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,int> (HashTable::new))
                (let ((h (make-h)) (acc 0))
                  (set h 1 10)
                  (set h 2 20)
@@ -191,7 +191,7 @@ fn doiter_sums_hashtable_values() {
 
 #[test]
 fn doiter_over_an_empty_hashtable_runs_zero_times() {
-    let src = "(defun make-h () HashTable<i32,i32> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,int> (HashTable::new))
                (let ((h (make-h)) (acc 0))
                  (doiter (p (iter h)) (setf acc (+ acc 1)))
                  acc)";
@@ -200,7 +200,7 @@ fn doiter_over_an_empty_hashtable_runs_zero_times() {
 
 #[test]
 fn nested_doiter_loops_do_not_interfere() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((a (make-v)) (b (make-v)) (acc 0))
                  (push a 1) (push a 2)
                  (push b 10) (push b 20)

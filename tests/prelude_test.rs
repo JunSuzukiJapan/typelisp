@@ -2,7 +2,7 @@
 //! ([cl-equivalence-catalog.md](../docs/dev/cl-equivalence-catalog.md) §2.1,
 //! roadmap step 7a): `not`/`consp`/`null`/`atom`/`equal` (`src/prelude.rs`),
 //! plus a Rust-side foundation added alongside them — the `eq` coverage
-//! gaps it closes (`sexpr`/`bool`/`i32`/`i64`/`f64`). `not` itself moved
+//! gaps it closes (`sexpr`/`bool`/`int`/`i64`/`f64`). `not` itself moved
 //! from a Rust builtin to a plain `defun` here later (`loop`/`break`/
 //! `return`/`setf` stage — see `src/prelude.rs`'s own comment on it).
 
@@ -148,7 +148,7 @@ fn eq_on_i32() {
 
 #[test]
 fn eq_on_i64() {
-    let src = "(defun f ((a i32) (b i32)) bool (eq a b)) (f 1 1)";
+    let src = "(defun f ((a int) (b int)) bool (eq a b)) (f 1 1)";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
@@ -324,7 +324,7 @@ fn equal_rejects_mismatched_types() {
     // Each type's `equal` still requires both operands to be that same
     // type — there is no cross-type overload (that's `equalp`'s job, and
     // even `equalp` only crosses `Sexpr`'s own dynamic tags, not bare
-    // statically-typed `i32`/`Str`).
+    // statically-typed `int`/`Str`).
     type_error(r#"(equal 1 "a")"#);
 }
 
@@ -383,7 +383,7 @@ fn int_to_float_converts_i32() {
 
 #[test]
 fn int_to_float_converts_i64() {
-    assert_eq!(eval_f64("(int->float (the i32 3))"), 3.0);
+    assert_eq!(eval_f64("(int->float (the int 3))"), 3.0);
 }
 
 #[test]
@@ -457,7 +457,7 @@ fn cons_builds_a_pair_and_car_cdr_project_it() {
 
 #[test]
 fn cons_pair_elements_can_have_different_types() {
-    // `car` is an `i32`, `cdr` is a `string` — a genuinely heterogeneous pair,
+    // `car` is an `int`, `cdr` is a `string` — a genuinely heterogeneous pair,
     // unlike a homogeneous `Vector<T>`.
     assert_eq!(eval_ok(r#"(car (cons 7 "x"))"#), Value::Int(7));
     assert_eq!(eval_string(r#"(cdr (cons 7 "x"))"#), "x");
@@ -472,7 +472,7 @@ fn cons_pair_car_is_mutable_via_setf() {
 #[test]
 fn car_of_a_non_pair_is_a_type_error() {
     // `car` is `cons-cell`'s field accessor now, not a `Sexpr` operation, so an
-    // `i32` receiver has no such method.
+    // `int` receiver has no such method.
     type_error("(car 1)");
 }
 
@@ -487,7 +487,7 @@ fn unwrap_returns_the_some_payload() {
 
 #[test]
 fn unwrap_panics_on_none() {
-    let src = "(defun get-opt () Option<i32> (option::none)) (unwrap (get-opt))";
+    let src = "(defun get-opt () Option<int> (option::none)) (unwrap (get-opt))";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
@@ -498,46 +498,46 @@ fn unwrap_or_returns_the_payload_when_some() {
 
 #[test]
 fn unwrap_or_returns_the_default_when_none() {
-    let src = "(defun get-opt () Option<i32> (option::none)) (unwrap-or (get-opt) 9)";
+    let src = "(defun get-opt () Option<int> (option::none)) (unwrap-or (get-opt) 9)";
     assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
 fn is_some_distinguishes_some_from_none() {
     eval_true("(is-some (option::some 1))");
-    let src = "(defun get-opt () Option<i32> (option::none)) (is-some (get-opt))";
+    let src = "(defun get-opt () Option<int> (option::none)) (is-some (get-opt))";
     assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
 fn is_none_distinguishes_none_from_some() {
-    let src = "(defun get-opt () Option<i32> (option::none)) (is-none (get-opt))";
+    let src = "(defun get-opt () Option<int> (option::none)) (is-none (get-opt))";
     eval_true(src);
     assert_eq!(eval_ok("(is-none (option::some 1))"), Value::Bool(false));
 }
 
 #[test]
 fn result_unwrap_returns_the_ok_payload() {
-    let src = "(defun get-r () Result<i32,ParseIntError> (result::ok 7)) (unwrap (get-r))";
+    let src = "(defun get-r () Result<int,ParseIntError> (result::ok 7)) (unwrap (get-r))";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn result_unwrap_panics_on_err() {
-    let src = r#"(defun get-r () Result<i32,ParseIntError> (result::err (ParseIntError::ParseIntError "boom"))) (unwrap (get-r))"#;
+    let src = r#"(defun get-r () Result<int,ParseIntError> (result::err (ParseIntError::ParseIntError "boom"))) (unwrap (get-r))"#;
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn result_unwrap_or_returns_the_default_on_err() {
-    let src = r#"(defun get-r () Result<i32,ParseIntError> (result::err (ParseIntError::ParseIntError "boom"))) (unwrap-or (get-r) 99)"#;
+    let src = r#"(defun get-r () Result<int,ParseIntError> (result::err (ParseIntError::ParseIntError "boom"))) (unwrap-or (get-r) 99)"#;
     assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
 fn result_is_ok_and_is_err() {
-    let ok_src = "(defun get-r () Result<i32,ParseIntError> (result::ok 7)) (is-ok (get-r))";
-    let err_src = r#"(defun get-r () Result<i32,ParseIntError> (result::err (ParseIntError::ParseIntError "x"))) (is-err (get-r))"#;
+    let ok_src = "(defun get-r () Result<int,ParseIntError> (result::ok 7)) (is-ok (get-r))";
+    let err_src = r#"(defun get-r () Result<int,ParseIntError> (result::err (ParseIntError::ParseIntError "x"))) (is-err (get-r))"#;
     eval_true(ok_src);
     eval_true(err_src);
 }
@@ -548,7 +548,7 @@ fn unwrap_resolves_to_the_correct_method_per_receiver_type() {
     // disambiguated by `Checker::check_instance_method` from each call's
     // receiver type, like any other type's instance methods.
     let src = r#"
-        (defun get-r () Result<i32,ParseIntError> (result::ok 3))
+        (defun get-r () Result<int,ParseIntError> (result::ok 3))
         (+ (unwrap (option::some 4)) (unwrap (get-r)))
     "#;
     assert_eq!(eval_ok(src), Value::Int(7));
@@ -570,8 +570,8 @@ fn const_ignores_its_second_argument() {
 #[test]
 fn compose_applies_g_then_f() {
     let src = r#"
-        (defun add1 ((n i32)) i32 (+ n 1))
-        (defun double ((n i32)) i32 (* n 2))
+        (defun add1 ((n int)) int (+ n 1))
+        (defun double ((n int)) int (* n 2))
         ((compose double add1) 5)
     "#;
     assert_eq!(eval_ok(src), Value::Int(12)); // double(add1(5)) = double(6) = 12
@@ -580,7 +580,7 @@ fn compose_applies_g_then_f() {
 #[test]
 fn flip_swaps_the_argument_order() {
     let src = r#"
-        (defun sub ((a i32) (b i32)) i32 (- a b))
+        (defun sub ((a int) (b int)) int (- a b))
         ((flip sub) 3 10)
     "#;
     assert_eq!(eval_ok(src), Value::Int(7)); // sub(10, 3) = 7
@@ -648,7 +648,7 @@ fn until_does_not_run_the_body_when_the_test_is_already_true() {
 #[test]
 fn while_let_drains_an_option_producing_call_until_none() {
     let src = r#"
-        (defun next ((n i32)) Option<i32> (if (> n 0) (option::some n) (option::none)))
+        (defun next ((n int)) Option<int> (if (> n 0) (option::some n) (option::none)))
         (let ((i 5) (sum 0))
           (while-let ((some x) (next i))
             (setf sum (+ sum x))
@@ -662,7 +662,7 @@ fn while_let_drains_an_option_producing_call_until_none() {
 #[test]
 fn while_let_does_not_run_the_body_when_the_pattern_never_matches() {
     let src = r#"
-        (defun get-opt () Option<i32> (option::none))
+        (defun get-opt () Option<int> (option::none))
         (let ((ran false))
           (while-let ((some x) (get-opt)) (setf ran true))
           ran)
@@ -726,8 +726,8 @@ fn case_matches_string_keys_by_content() {
 #[test]
 fn case_evaluates_its_expr_exactly_once() {
     let src = r#"
-        (defvar (calls i32) 0)
-        (defun next-call () i32 (progn (setf calls (+ calls 1)) calls))
+        (defvar (calls int) 0)
+        (defun next-call () int (progn (setf calls (+ calls 1)) calls))
         (progn (case (next-call) (1 100) (else 0)) calls)
     "#;
     assert_eq!(eval_ok(src), Value::Int(1));

@@ -75,13 +75,13 @@ fn panic_message_must_be_string() {
 #[test]
 fn if_branch_may_panic() {
     // The else branch diverges; the if still has the then branch's type.
-    assert_eq!(ty("(if true 1 (panic \"x\"))"), Type::I32);
-    assert_eq!(ty("(if true (panic \"x\") 2)"), Type::I32);
+    assert_eq!(ty("(if true 1 (panic \"x\"))"), Type::Int);
+    assert_eq!(ty("(if true (panic \"x\") 2)"), Type::Int);
 }
 
 #[test]
 fn defun_branch_may_panic() {
-    let src = "(defun f ((b bool) (x i32)) i32 (if b (panic \"neg\") x))";
+    let src = "(defun f ((b bool) (x int)) int (if b (panic \"neg\") x))";
     assert_eq!(program(src).expect("check failed").0, "defun");
 }
 
@@ -96,33 +96,33 @@ fn parses_never_type_annotation() {
 
 #[test]
 fn result_ok_infers_from_return_type() {
-    let src = "(defun mk () Result<i32,ParseIntError> (result::ok 1))";
-    assert_eq!(ret_of(src, "mk"), Type::Named(Path::root("result"), vec![Type::I32, error_ty()]));
+    let src = "(defun mk () Result<int,ParseIntError> (result::ok 1))";
+    assert_eq!(ret_of(src, "mk"), Type::Named(Path::root("result"), vec![Type::Int, error_ty()]));
 }
 
 #[test]
 fn result_err_takes_error_value() {
-    let src = "(defun bad () Result<i32,ParseIntError> (result::err (ParseIntError::ParseIntError \"boom\")))";
+    let src = "(defun bad () Result<int,ParseIntError> (result::err (ParseIntError::ParseIntError \"boom\")))";
     assert_eq!(program(src).expect("check failed").0, "defun");
 }
 
 #[test]
 fn match_result_exhaustive_with_panic_arm() {
-    // Unwrapping a Result: the Err arm diverges, so the match has type i32.
-    let src = "(defun unwrap-i ((r Result<i32,ParseIntError>)) i32 \
+    // Unwrapping a Result: the Err arm diverges, so the match has type int.
+    let src = "(defun unwrap-i ((r Result<int,ParseIntError>)) int \
                  (match r ((Ok v) v) ((Err e) (panic \"unwrap on Err\"))))";
-    assert_eq!(ret_of(src, "unwrap-i"), Type::I32);
+    assert_eq!(ret_of(src, "unwrap-i"), Type::Int);
 }
 
 #[test]
 fn match_result_non_exhaustive_rejected() {
-    let src = "(defun f ((r Result<i32,ParseIntError>)) i32 (match r ((Ok v) v)))";
+    let src = "(defun f ((r Result<int,ParseIntError>)) int (match r ((Ok v) v)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
 #[test]
 fn match_result_arms_must_agree() {
-    let src = "(defun f ((r Result<i32,ParseIntError>)) i32 \
+    let src = "(defun f ((r Result<int,ParseIntError>)) int \
                  (match r ((Ok v) v) ((Err e) true)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
@@ -201,7 +201,7 @@ fn builtin_errors_implement_the_error_trait() {
     // Each fallible builtin returns its *own* concrete error type, and each
     // one implements `Error` — so the message is read the same way for all.
     let src = r#"
-        (defun int-msg ((r Result<i32,ParseIntError>)) string
+        (defun int-msg ((r Result<int,ParseIntError>)) string
           (match r ((ok _) "?") ((err e) (message e))))
         (defun read-msg ((r Result<Option<Sexpr>,ReadError>)) string
           (match r ((ok _) "?") ((err e) (message e))))
@@ -237,7 +237,7 @@ fn a_defstruct_error_type_rides_in_result() {
     // own generic parameter — no `Error` impl required for this much.
     let src = r#"
         (defstruct IoErr (path string))
-        (defun open-it ((p string)) Result<i32,IoErr>
+        (defun open-it ((p string)) Result<int,IoErr>
           (if (equal p "") (result::err (IoErr::new "<empty>")) (result::ok 3)))
         (match (open-it "") ((ok _) "?") ((err e) e::path))
     "#;
@@ -283,14 +283,14 @@ fn source_returns_the_wrapped_error() {
 fn as_dyn_error_unifies_builtin_and_user_error_types() {
     // The prelude's `as-dyn-error` widens any `Result<T,E>` whose `E`
     // implements `Error` — the point being that both results below end up in
-    // the *same* `Result<i32, :dyn Error>` type.
+    // the *same* `Result<int, :dyn Error>` type.
     let src = r#"
         (defstruct AppErr (why string))
         (impl Error AppErr
           (message ((self Self)) string self::why)
           (source ((self Self)) Option<:dyn Error> (option::none)))
-        (defun fail-app () Result<i32,AppErr> (result::err (AppErr::new "app said no")))
-        (defun describe ((r Result<i32, :dyn Error>)) string
+        (defun fail-app () Result<int,AppErr> (result::err (AppErr::new "app said no")))
+        (defun describe ((r Result<int, :dyn Error>)) string
           (match r ((ok _) "?") ((err e) (message e))))
         (append (describe (as-dyn-error (fail-app)))
                 (if (is-err (as-dyn-error (parse-int "zz"))) " / builtin too" ""))
@@ -302,8 +302,8 @@ fn as_dyn_error_unifies_builtin_and_user_error_types() {
 fn a_trait_written_in_type_position_is_rejected() {
     // `Error` is a trait, never a type: the old `Result<T, Error>` spelling
     // must say so rather than silently passing as an unresolved name.
-    assert_prelude_type_error("(defun f () Result<i32,Error> (result::ok 1))");
-    assert_prelude_type_error("(defun g ((e Error)) i32 1)");
+    assert_prelude_type_error("(defun f () Result<int,Error> (result::ok 1))");
+    assert_prelude_type_error("(defun g ((e Error)) int 1)");
 }
 
 #[test]
@@ -318,15 +318,15 @@ fn a_type_may_not_take_a_traits_name() {
 fn a_trait_may_not_take_a_types_name() {
     // The other direction, on a bare checker so the names are free to start
     // with: whichever is defined second is the one rejected.
-    assert_type_error("(defstruct Thing (x i32)) (deftrait Thing () (m ((self Self)) i32))");
-    assert_type_error("(deftrait Gadget () (m ((self Self)) i32)) (defstruct Gadget (x i32))");
-    assert_type_error("(deftrait Widget () (m ((self Self)) i32)) (defenum Widget (a))");
+    assert_type_error("(defstruct Thing (x int)) (deftrait Thing () (m ((self Self)) int))");
+    assert_type_error("(deftrait Gadget () (m ((self Self)) int)) (defstruct Gadget (x int))");
+    assert_type_error("(deftrait Widget () (m ((self Self)) int)) (defenum Widget (a))");
 }
 
 #[test]
 fn a_type_and_a_trait_of_the_same_name_may_live_in_different_modules() {
     // The rule is per-namespace, like every other name in this language.
-    let src = "(module a (deftrait Same () (m ((self Self)) i32))) \
-               (module b (defstruct Same (x i32)))";
+    let src = "(module a (deftrait Same () (m ((self Self)) int))) \
+               (module b (defstruct Same (x int)))";
     assert!(program(src).is_ok());
 }

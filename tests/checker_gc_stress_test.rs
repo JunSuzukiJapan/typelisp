@@ -55,21 +55,21 @@ fn assert_stress_agrees(src: &str) {
 /// per cell (`check::forms::list_from_vec_locs`).
 #[test]
 fn variadic_arithmetic_folds_survive_collection() {
-    assert_stress_agrees("(defun f () i32 (+ 1 2 3 4 5 6 7 8))");
-    assert_stress_agrees("(defun f () i32 (* (+ 1 2 3) (- 10 4 3)))");
+    assert_stress_agrees("(defun f () int (+ 1 2 3 4 5 6 7 8))");
+    assert_stress_agrees("(defun f () int (* (+ 1 2 3) (- 10 4 3)))");
 }
 
 #[test]
 fn setf_and_incf_desugaring_survives_collection() {
     assert_stress_agrees(
-        "(defstruct p (x i32))
-         (defun f ((q p)) i32 (setf q::x 5) (incf q::x 2) (decf q::x) q::x)",
+        "(defstruct p (x int))
+         (defun f ((q p)) int (setf q::x 5) (incf q::x 2) (decf q::x) q::x)",
     );
 }
 
 #[test]
 fn let_star_desugaring_survives_collection() {
-    assert_stress_agrees("(defun f () i32 (let* ((a 1) (b (+ a 1)) (c (+ b 1))) c))");
+    assert_stress_agrees("(defun f () int (let* ((a 1) (b (+ a 1)) (c (+ b 1))) c))");
 }
 
 /// `impl` substitutes `Self` by rewriting the read syntax tree
@@ -78,10 +78,10 @@ fn let_star_desugaring_survives_collection() {
 fn impl_self_substitution_survives_collection() {
     assert_stress_agrees(
         "(deftrait Counted ()
-           (count ((self Self)) i32))
-         (defstruct box (n i32))
+           (count ((self Self)) int))
+         (defstruct box (n int))
          (impl Counted box
-           (count ((self Self)) i32 self::n))",
+           (count ((self Self)) int self::n))",
     );
 }
 
@@ -89,7 +89,7 @@ fn impl_self_substitution_survives_collection() {
 fn quasiquote_expansion_survives_collection() {
     assert_stress_agrees(
         "(defmacro m (a b) `(+ ,a (* ,b 2)))
-         (defun f () i32 (m 1 2))",
+         (defun f () int (m 1 2))",
     );
 }
 
@@ -139,13 +139,13 @@ fn assert_stress_agrees_with_prelude(src: &str) {
 fn splicing_in_the_middle_of_a_template_survives_collection() {
     assert_stress_agrees_with_prelude(
         "(defmacro m (&rest body) `(progn ,@body 7))
-         (defun f () i32 (m 1 2))",
+         (defun f () int (m 1 2))",
     );
     // Two splices, so the first one's node also has to survive the second's
     // whole subtree being checked.
     assert_stress_agrees_with_prelude(
         "(defmacro m2 (&rest body) `(progn ,@body ,@body 7))
-         (defun g () i32 (m2 1 2))",
+         (defun g () int (m2 1 2))",
     );
 }
 
@@ -153,11 +153,11 @@ fn splicing_in_the_middle_of_a_template_survives_collection() {
 #[test]
 fn a_mixed_program_survives_collection() {
     assert_stress_agrees(
-        "(defstruct pt (x i32) (y i32))
-         (defun norm1 ((p pt)) i32
+        "(defstruct pt (x int) (y int))
+         (defun norm1 ((p pt)) int
            (let* ((a p::x) (b p::y))
              (+ (if (< a 0) (- 0 a) a) (if (< b 0) (- 0 b) b))))
-         (defun f () i32
+         (defun f () int
            (let ((p (pt::new 3 -4)))
              (setf p::x 10)
              (incf p::y 1)

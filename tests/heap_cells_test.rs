@@ -74,7 +74,7 @@ fn run_typl_stderr(flags: &[&str], input: &str) -> (i32, String) {
 /// ceiling is rather than just that the number is wrong.
 ///
 /// The ceiling is not arbitrary: `room` answers with a `heap-info` whose cell
-/// counts are `i32` (`gc-count` alone is a `bignum`, being the one field an
+/// counts are `int` (`gc-count` alone is a `bignum`, being the one field an
 /// arena size does not bound). A capacity the report could not *name* would
 /// have to be truncated there, and a truncated count is a lie told at the far
 /// end from where it could still be explained. Refusing at the flag says it

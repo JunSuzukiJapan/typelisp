@@ -42,15 +42,15 @@ fn eval_err(src: &str) -> String {
 const SHAPES: &str = r#"
 (deftrait Drawable ()
   (draw ((self Self)) string)
-  (sides ((self Self)) i32))
-(defstruct circle (r i32))
-(defstruct square (side i32))
+  (sides ((self Self)) int))
+(defstruct circle (r int))
+(defstruct square (side int))
 (impl Drawable circle
   (draw ((self Self)) string "circle")
-  (sides ((self Self)) i32 0))
+  (sides ((self Self)) int 0))
 (impl Drawable square
   (draw ((self Self)) string "square")
-  (sides ((self Self)) i32 4))
+  (sides ((self Self)) int 4))
 "#;
 
 // ---- dispatch -----------------------------------------------------------
@@ -82,7 +82,7 @@ fn a_second_slot_dispatches_independently_of_the_first() {
     // confused with `draw`.
     let src = format!(
         "{SHAPES}
-         (defun count-sides ((d :dyn Drawable)) i32 (sides d))
+         (defun count-sides ((d :dyn Drawable)) int (sides d))
          (+ (count-sides (circle::new 3)) (count-sides (square::new 2)))"
     );
     assert_eq!(eval_ok(&src), Value::Int(4));
@@ -91,10 +91,10 @@ fn a_second_slot_dispatches_independently_of_the_first() {
 #[test]
 fn a_method_argument_and_return_value_cross_the_vtable() {
     let src = r#"
-        (deftrait Scaler () (scale ((self Self) (k i32)) i32))
-        (defstruct fixed (n i32))
-        (impl Scaler fixed (scale ((self Self) (k i32)) i32 (* self::n k)))
-        (defun apply-scale ((s :dyn Scaler) (k i32)) i32 (scale s k))
+        (deftrait Scaler () (scale ((self Self) (k int)) int))
+        (defstruct fixed (n int))
+        (impl Scaler fixed (scale ((self Self) (k int)) int (* self::n k)))
+        (defun apply-scale ((s :dyn Scaler) (k int)) int (scale s k))
         (apply-scale (fixed::new 6) 7)"#;
     assert_eq!(eval_ok(src), Value::Int(42));
 }
@@ -140,17 +140,17 @@ fn a_vector_of_trait_objects_holds_different_concrete_types() {
 
 #[test]
 fn an_associated_type_is_pinned_positionally() {
-    // `:dyn Iter<i32>` is prelude's `Iter` with `Item = i32`, so `next`
-    // returns `Option<i32>` and the arithmetic below type-checks.
+    // `:dyn Iter<int>` is prelude's `Iter` with `Item = int`, so `next`
+    // returns `Option<int>` and the arithmetic below type-checks.
     let src = r#"
-        (defun total ((it :dyn Iter<i32>)) i32
+        (defun total ((it :dyn Iter<int>)) int
           (let ((n 0))
             (loop
               (match (next it)
                 ((Some x) (setf n (+ n x)))
                 (_ (break))))
             n))
-        (defun make-v () Vector<i32> (Vector::new))
+        (defun make-v () Vector<int> (Vector::new))
         (let ((v (make-v)))
           (push v 10)
           (push v 32)
@@ -161,8 +161,8 @@ fn an_associated_type_is_pinned_positionally() {
 #[test]
 fn a_mismatched_associated_type_pin_is_rejected() {
     let src = r#"
-        (defun total ((it :dyn Iter<string>)) i32 0)
-        (defun make-v () Vector<i32> (Vector::new))
+        (defun total ((it :dyn Iter<string>)) int 0)
+        (defun make-v () Vector<int> (Vector::new))
         (let ((v (make-v)))
           (push v 10)
           (total (iter v)))"#;
@@ -172,7 +172,7 @@ fn a_mismatched_associated_type_pin_is_rejected() {
 
 #[test]
 fn the_wrong_number_of_associated_type_pins_is_rejected() {
-    let src = "(defun total ((it :dyn Iter)) i32 0) (total 1)";
+    let src = "(defun total ((it :dyn Iter)) int 0) (total 1)";
     let m = eval_err(src);
     assert!(m.contains("associated-type argument"), "{}", m);
 }
@@ -183,7 +183,7 @@ fn the_wrong_number_of_associated_type_pins_is_rejected() {
 fn a_type_that_does_not_implement_the_trait_cannot_be_boxed() {
     let src = format!(
         "{SHAPES}
-         (defstruct dot (x i32))
+         (defstruct dot (x int))
          (defun render ((d :dyn Drawable)) string (draw d))
          (render (dot::new 1))"
     );
@@ -192,15 +192,17 @@ fn a_type_that_does_not_implement_the_trait_cannot_be_boxed() {
 
 #[test]
 fn a_primitive_cannot_be_boxed_even_when_it_implements_the_trait() {
-    // A fat box holds one heap value, so a primitive can't go in one even
-    // with a perfectly object-safe `impl` — a per-*type* rejection, not a
-    // per-trait one, which is what lets `:dyn Speak` still work for a
-    // `defstruct` that implements the same trait.
+    // A fat box holds one heap value, so a raw-register primitive can't go
+    // in one even with a perfectly object-safe `impl` — a per-*type*
+    // rejection, not a per-trait one, which is what lets `:dyn Speak` still
+    // work for a `defstruct` that implements the same trait. (`int` is not
+    // such a primitive: its word is a fixnum or a bignum box, a heap
+    // representation already, so it boxes like `string` does.)
     let src = r#"
         (deftrait Speak () (say ((self Self)) string))
-        (impl Speak i32 (say ((self Self)) string "int"))
+        (impl Speak i32 (say ((self Self)) string "i32"))
         (defun hear ((s :dyn Speak)) string (say s))
-        (hear 1)"#;
+        (hear (the i32 1))"#;
     let m = eval_err(src);
     assert!(m.contains("no heap representation"), "{}", m);
 }
@@ -209,7 +211,7 @@ fn a_primitive_cannot_be_boxed_even_when_it_implements_the_trait() {
 fn a_method_the_trait_does_not_declare_cannot_be_called_on_a_trait_object() {
     let src = format!(
         "{SHAPES}
-         (defun radius ((d :dyn Drawable)) i32 (r d))
+         (defun radius ((d :dyn Drawable)) int (r d))
          (radius (circle::new 3))"
     );
     let m = eval_err(&src);
@@ -219,8 +221,8 @@ fn a_method_the_trait_does_not_declare_cannot_be_called_on_a_trait_object() {
 #[test]
 fn a_trait_with_a_static_method_is_not_object_safe() {
     let src = r#"
-        (deftrait Zeroed () (zero ((n i32)) i32))
-        (defun f ((z :dyn Zeroed)) i32 0)
+        (deftrait Zeroed () (zero ((n int)) int))
+        (defun f ((z :dyn Zeroed)) int 0)
         (f 1)"#;
     let m = eval_err(src);
     assert!(m.contains("no `self` receiver"), "{}", m);
@@ -230,9 +232,9 @@ fn a_trait_with_a_static_method_is_not_object_safe() {
 fn a_method_returning_self_makes_a_trait_not_object_safe() {
     let src = r#"
         (deftrait Cloneable () (dup ((self Self)) Self))
-        (defstruct cell (n i32))
+        (defstruct cell (n int))
         (impl Cloneable cell (dup ((self Self)) Self (cell::new self::n)))
-        (defun f ((c :dyn Cloneable)) i32 0)
+        (defun f ((c :dyn Cloneable)) int 0)
         (f (cell::new 1))"#;
     let m = eval_err(src);
     assert!(m.contains("mentions `Self` outside the receiver position"), "{}", m);
@@ -240,7 +242,7 @@ fn a_method_returning_self_makes_a_trait_not_object_safe() {
 
 #[test]
 fn an_unknown_trait_name_is_reported_as_such() {
-    let m = eval_err("(defun f ((x :dyn Nope)) i32 0) (f 1)");
+    let m = eval_err("(defun f ((x :dyn Nope)) int 0) (f 1)");
     assert!(m.contains("unknown trait"), "{}", m);
 }
 
@@ -262,7 +264,7 @@ fn upcasting_to_a_non_supertrait_is_rejected() {
 
 #[test]
 fn dyn_in_a_value_position_is_a_type_error() {
-    let m = eval_err("(defun f () i32 (:dyn Drawable))");
+    let m = eval_err("(defun f () int (:dyn Drawable))");
     assert!(m.contains("may only appear in a type position"), "{}", m);
 }
 
@@ -275,8 +277,8 @@ const CHAIN: &str = r#"
   (name ((self Self)) string))
 (deftrait Greeter (Named)
   (greeting ((self Self)) string))
-(defstruct dog (n i32))
-(defstruct cat (n i32))
+(defstruct dog (n int))
+(defstruct cat (n int))
 (impl Named dog (name ((self Self)) string "dog"))
 (impl Greeter dog (greeting ((self Self)) string "woof"))
 (impl Named cat (name ((self Self)) string "cat"))
@@ -395,25 +397,25 @@ fn downcasting_to_a_subtrait_is_rejected() {
 /// proves the swap happened: reusing `D`'s table would have called `b-tag`,
 /// which occupies slot 0 there.
 const DIAMOND: &str = r#"
-(deftrait B () (b-tag ((self Self)) i32))
-(deftrait C () (c-tag ((self Self)) i32))
-(deftrait D (B C) (d-tag ((self Self)) i32))
-(defstruct cell (n i32))
-(defstruct pair (n i32))
-(impl B cell (b-tag ((self Self)) i32 1))
-(impl C cell (c-tag ((self Self)) i32 2))
-(impl D cell (d-tag ((self Self)) i32 3))
-(impl B pair (b-tag ((self Self)) i32 4))
-(impl C pair (c-tag ((self Self)) i32 5))
-(impl D pair (d-tag ((self Self)) i32 6))
+(deftrait B () (b-tag ((self Self)) int))
+(deftrait C () (c-tag ((self Self)) int))
+(deftrait D (B C) (d-tag ((self Self)) int))
+(defstruct cell (n int))
+(defstruct pair (n int))
+(impl B cell (b-tag ((self Self)) int 1))
+(impl C cell (c-tag ((self Self)) int 2))
+(impl D cell (d-tag ((self Self)) int 3))
+(impl B pair (b-tag ((self Self)) int 4))
+(impl C pair (c-tag ((self Self)) int 5))
+(impl D pair (d-tag ((self Self)) int 6))
 "#;
 
 #[test]
 fn upcasting_to_a_non_first_supertrait_switches_to_that_supertraits_vtable() {
     let src = format!(
         "{DIAMOND}
-         (defun only-c ((c :dyn C)) i32 (c-tag c))
-         (defun via ((d :dyn D)) i32 (only-c d))
+         (defun only-c ((c :dyn C)) int (c-tag c))
+         (defun via ((d :dyn D)) int (only-c d))
          (via (cell::new 0))"
     );
     assert_eq!(eval_ok(&src), Value::Int(2));
@@ -425,8 +427,8 @@ fn a_non_first_supertrait_upcast_still_dispatches_per_concrete_type() {
     // implementations must stay distinguishable after the conversion.
     let src = format!(
         "{DIAMOND}
-         (defun only-c ((c :dyn C)) i32 (c-tag c))
-         (defun via ((d :dyn D)) i32 (only-c d))
+         (defun only-c ((c :dyn C)) int (c-tag c))
+         (defun via ((d :dyn D)) int (only-c d))
          (+ (* 10 (via (cell::new 0))) (via (pair::new 0)))"
     );
     assert_eq!(eval_ok(&src), Value::Int(25));
@@ -436,8 +438,8 @@ fn a_non_first_supertrait_upcast_still_dispatches_per_concrete_type() {
 fn an_explicit_as_upcasts_to_a_non_first_supertrait() {
     let src = format!(
         "{DIAMOND}
-         (defun only-c ((c :dyn C)) i32 (c-tag c))
-         (defun via ((d :dyn D)) i32 (only-c (as :dyn C d)))
+         (defun only-c ((c :dyn C)) int (c-tag c))
+         (defun via ((d :dyn D)) int (only-c (as :dyn C d)))
          (via (cell::new 0))"
     );
     assert_eq!(eval_ok(&src), Value::Int(2));
@@ -450,20 +452,20 @@ fn upcasting_twice_reaches_a_supertrait_of_the_supertrait() {
     // the second conversion has to find a table registered for a box the
     // *first* conversion produced.
     let src = r#"
-        (deftrait A () (a-tag ((self Self)) i32))
-        (deftrait X () (x-tag ((self Self)) i32))
-        (deftrait B () (b-tag ((self Self)) i32))
-        (deftrait C (X A) (c-tag ((self Self)) i32))
-        (deftrait D (B C) (d-tag ((self Self)) i32))
-        (defstruct cell (n i32))
-        (impl A cell (a-tag ((self Self)) i32 1))
-        (impl X cell (x-tag ((self Self)) i32 2))
-        (impl B cell (b-tag ((self Self)) i32 3))
-        (impl C cell (c-tag ((self Self)) i32 4))
-        (impl D cell (d-tag ((self Self)) i32 5))
-        (defun only-a ((a :dyn A)) i32 (a-tag a))
-        (defun only-c ((c :dyn C)) i32 (only-a c))
-        (defun via ((d :dyn D)) i32 (only-c d))
+        (deftrait A () (a-tag ((self Self)) int))
+        (deftrait X () (x-tag ((self Self)) int))
+        (deftrait B () (b-tag ((self Self)) int))
+        (deftrait C (X A) (c-tag ((self Self)) int))
+        (deftrait D (B C) (d-tag ((self Self)) int))
+        (defstruct cell (n int))
+        (impl A cell (a-tag ((self Self)) int 1))
+        (impl X cell (x-tag ((self Self)) int 2))
+        (impl B cell (b-tag ((self Self)) int 3))
+        (impl C cell (c-tag ((self Self)) int 4))
+        (impl D cell (d-tag ((self Self)) int 5))
+        (defun only-a ((a :dyn A)) int (a-tag a))
+        (defun only-c ((c :dyn C)) int (only-a c))
+        (defun via ((d :dyn D)) int (only-c d))
         (via (cell::new 0))"#;
     assert_eq!(eval_ok(src), Value::Int(1));
 }
@@ -478,20 +480,20 @@ fn upcasting_reaches_a_trait_that_is_a_prefix_of_the_source_but_not_of_the_step(
     // conversion asking for a table `D`'s own prefix test would have
     // considered unnecessary.
     let src = r#"
-        (deftrait A () (a-tag ((self Self)) i32))
-        (deftrait X () (x-tag ((self Self)) i32))
-        (deftrait B (A) (b-tag ((self Self)) i32))
-        (deftrait C (X A) (c-tag ((self Self)) i32))
-        (deftrait D (B C) (d-tag ((self Self)) i32))
-        (defstruct cell (n i32))
-        (impl A cell (a-tag ((self Self)) i32 1))
-        (impl X cell (x-tag ((self Self)) i32 2))
-        (impl B cell (b-tag ((self Self)) i32 3))
-        (impl C cell (c-tag ((self Self)) i32 4))
-        (impl D cell (d-tag ((self Self)) i32 5))
-        (defun only-a ((a :dyn A)) i32 (a-tag a))
-        (defun only-c ((c :dyn C)) i32 (only-a c))
-        (defun via ((d :dyn D)) i32 (only-c d))
+        (deftrait A () (a-tag ((self Self)) int))
+        (deftrait X () (x-tag ((self Self)) int))
+        (deftrait B (A) (b-tag ((self Self)) int))
+        (deftrait C (X A) (c-tag ((self Self)) int))
+        (deftrait D (B C) (d-tag ((self Self)) int))
+        (defstruct cell (n int))
+        (impl A cell (a-tag ((self Self)) int 1))
+        (impl X cell (x-tag ((self Self)) int 2))
+        (impl B cell (b-tag ((self Self)) int 3))
+        (impl C cell (c-tag ((self Self)) int 4))
+        (impl D cell (d-tag ((self Self)) int 5))
+        (defun only-a ((a :dyn A)) int (a-tag a))
+        (defun only-c ((c :dyn C)) int (only-a c))
+        (defun via ((d :dyn D)) int (only-c d))
         (via (cell::new 0))"#;
     assert_eq!(eval_ok(src), Value::Int(1));
 }
@@ -502,9 +504,9 @@ fn an_upcast_box_is_still_a_trait_object_for_match() {
     // same concrete value, so `match` still downcasts to it.
     let src = format!(
         "{DIAMOND}
-         (defun name-of ((c :dyn C)) i32
+         (defun name-of ((c :dyn C)) int
            (match c ((cell _) 10) ((pair _) 20) (_ 0)))
-         (defun via ((d :dyn D)) i32 (name-of d))
+         (defun via ((d :dyn D)) int (name-of d))
          (+ (via (cell::new 0)) (via (pair::new 0)))"
     );
     assert_eq!(eval_ok(&src), Value::Int(30));
@@ -513,15 +515,15 @@ fn an_upcast_box_is_still_a_trait_object_for_match() {
 #[test]
 fn upcasting_to_the_first_supertrait_of_a_multi_supertrait_chain_works() {
     let src = r#"
-        (deftrait B () (b-tag ((self Self)) i32))
-        (deftrait C () (c-tag ((self Self)) i32))
-        (deftrait D (B C) (d-tag ((self Self)) i32))
-        (defstruct cell (n i32))
-        (impl B cell (b-tag ((self Self)) i32 1))
-        (impl C cell (c-tag ((self Self)) i32 2))
-        (impl D cell (d-tag ((self Self)) i32 3))
-        (defun only-b ((b :dyn B)) i32 (b-tag b))
-        (defun via ((d :dyn D)) i32 (only-b d))
+        (deftrait B () (b-tag ((self Self)) int))
+        (deftrait C () (c-tag ((self Self)) int))
+        (deftrait D (B C) (d-tag ((self Self)) int))
+        (defstruct cell (n int))
+        (impl B cell (b-tag ((self Self)) int 1))
+        (impl C cell (c-tag ((self Self)) int 2))
+        (impl D cell (d-tag ((self Self)) int 3))
+        (defun only-b ((b :dyn B)) int (b-tag b))
+        (defun via ((d :dyn D)) int (only-b d))
         (via (cell::new 0))"#;
     assert_eq!(eval_ok(src), Value::Int(1));
 }

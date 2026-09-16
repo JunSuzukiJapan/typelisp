@@ -6,7 +6,7 @@
 //! expected-type fallback and `Checker::wrap_rest_elem` now widen any
 //! `is_heap_repr` ADT into `Sexpr` as a cost-free retype (its runtime
 //! representation is already `RtValue::Sexpr(Value::Boxed(_))`), and wrap a
-//! scalar (`i32`/`f64`/.../`Str`) into its `Sexpr` constructor exactly as
+//! scalar (`int`/`f64`/.../`Str`) into its `Sexpr` constructor exactly as
 //! `&rest`/`format` args already did.
 
 extern crate typelisp;
@@ -53,7 +53,7 @@ fn eval_ok(src: &str) -> Value {
 fn list_of_a_struct_instance_and_an_int_type_checks_as_an_option_sexpr() {
     // `(list ...)` is S-expression data, and that type is `Option<Sexpr>`
     // since the empty list moved there — `(list)` has to be spellable.
-    let src = "(defstruct point (x i32) (y i32)) (list (point::new 1 2) 42)";
+    let src = "(defstruct point (x int) (y int)) (list (point::new 1 2) 42)";
     assert_eq!(
         check(src).expect("check failed"),
         Some(Type::Named(
@@ -65,7 +65,7 @@ fn list_of_a_struct_instance_and_an_int_type_checks_as_an_option_sexpr() {
 
 #[test]
 fn list_mixes_a_struct_instance_with_a_scalar() {
-    let (h, v) = run_with_heap("(defstruct point (x i32) (y i32)) (list (point::new 1 2) 42)")
+    let (h, v) = run_with_heap("(defstruct point (x int) (y int)) (list (point::new 1 2) 42)")
         .expect("eval failed");
     let car = h.car(v).expect("cons");
     match car {
@@ -105,7 +105,7 @@ fn setf_on_a_struct_shared_via_a_list_is_visible_through_the_list() {
     // `Sexpr` list is the exact same heap box the outer `p` binding refers
     // to, so mutating one is visible through the other.
     let (h, v) = run_with_heap(
-        "(defstruct point (x i32) (y i32))
+        "(defstruct point (x int) (y int))
          (let ((p (point::new 1 2)))
            (let ((l (list p 42)))
              (setf p::x 99)
@@ -123,7 +123,7 @@ fn println_format_accepts_a_struct_argument_via_a_tilde_a_directive() {
     // `wrap_rest_elem`'s heap-repr retype: `println`'s `&rest` args go
     // through the same path `&rest`/`format` args always did, now widened to
     // accept a heap-repr ADT with no `sexpr_ctor_for` wrap.
-    eval_ok("(defstruct point (x i32) (y i32)) (println \"~a\" (point::new 1 2))");
+    eval_ok("(defstruct point (x int) (y int)) (println \"~a\" (point::new 1 2))");
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn a_struct_instance_flows_through_a_compiled_function_still_shared() {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
-    let src = "(defstruct point (x i32) (y i32))
+    let src = "(defstruct point (x int) (y int))
          (defun wrap ((p point)) Option<Sexpr> (list p 42))
          (compile wrap)
          (let ((p (point::new 1 2)))
@@ -170,7 +170,7 @@ fn a_struct_instance_flows_through_a_compiled_function_still_shared() {
 #[test]
 fn match_destructures_a_struct_downcast_pattern() {
     let v = eval_ok(
-        "(defstruct point (x i32) (y i32))
+        "(defstruct point (x int) (y int))
          (match (sexpr-car (list (point::new 1 2)))
            ((point a b) (+ a b))
            (_ 0))",
@@ -212,7 +212,7 @@ fn the_pattern_binds_the_whole_value_preserving_struct_identity() {
     // `setf_on_a_struct_shared_via_a_list_is_visible_through_the_list`
     // exercises for plain retype, now through a match extraction.
     let (h, v) = run_with_heap(
-        "(defstruct point (x i32) (y i32))
+        "(defstruct point (x int) (y int))
          (let ((l (list (point::new 1 2))))
            (match (sexpr-car l)
              ((the point p) (setf p::x 42))
@@ -233,7 +233,7 @@ fn a_struct_downcast_pattern_does_not_false_match_nil() {
     // variant index (`SEXPR_NIL = 0`) — a downcast `(point x y)` pattern
     // must never spuriously match `nil`.
     let v = eval_ok(
-        "(defstruct point (x i32) (y i32))
+        "(defstruct point (x int) (y int))
          (match (sexpr-car (list ()))
            ((point a b) (+ a b))
            (_ -1))",
@@ -247,8 +247,8 @@ fn a_struct_downcast_pattern_does_not_false_match_a_different_same_shape_struct(
     // `type_name` guard (design plan §2), `(point x y)` could spuriously
     // match a boxed `pair` value purely by field count.
     let v = eval_ok(
-        "(defstruct point (x i32) (y i32))
-         (defstruct pair (a i32) (b i32))
+        "(defstruct point (x int) (y int))
+         (defstruct pair (a int) (b int))
          (match (sexpr-car (list (pair::new 9 9)))
            ((point x y) (+ x y))
            (_ -1))",
@@ -262,7 +262,7 @@ fn equalp_recursively_compares_two_distinct_struct_instances() {
     // (design plan §3), unlike `equal`'s identity — two separately
     // allocated but same-shaped `point`s must compare equal under `equalp`.
     let v = eval_ok(
-        "(defstruct point (x i32) (y i32))
+        "(defstruct point (x int) (y int))
          (equalp (point::new 1 2) (point::new 1 2))",
     );
     assert_eq!(v, Value::Bool(true));
@@ -279,8 +279,8 @@ fn equalp_recursively_compares_two_distinct_struct_instances() {
 #[test]
 fn equalp_between_two_struct_types_is_a_type_error() {
     let err = check(
-        "(defstruct point (x i32) (y i32))
-         (defstruct pair (a i32) (b i32))
+        "(defstruct point (x int) (y int))
+         (defstruct pair (a int) (b int))
          (equalp (point::new 1 2) (pair::new 1 2))",
     )
     .expect_err("comparing two struct types should not check");
@@ -293,8 +293,8 @@ fn equalp_between_two_struct_types_is_a_type_error() {
 /// sides really do have one type.
 #[test]
 fn equalp_distinguishes_structs_by_type_name_inside_sexpr_data() {
-    let src = "(defstruct point (x i32) (y i32))
-               (defstruct pair (a i32) (b i32))";
+    let src = "(defstruct point (x int) (y int))
+               (defstruct pair (a int) (b int))";
     assert_eq!(
         eval_ok(&format!("{src}\n(equalp (list (point::new 1 2)) (list (pair::new 1 2)))")),
         Value::Bool(false)
@@ -309,7 +309,7 @@ fn equalp_distinguishes_structs_by_type_name_inside_sexpr_data() {
 #[test]
 fn a_generic_downcast_pattern_head_is_a_type_error() {
     let src = "(defstruct box<T> (v T))
-         (defun f ((s sexpr)) i32
+         (defun f ((s sexpr)) int
            (match s ((box v) 0) (_ 1)))";
     let err = check(src).unwrap_err();
     let msg = format!("{:?}", err);

@@ -91,7 +91,7 @@ fn macro_generated_use_loads_the_dependency() {
     let result = run_project(
         "macro-use-basic",
         &[
-            ("dep.typl", "(pub defun head () i32 9)"),
+            ("dep.typl", "(pub defun head () int 9)"),
             (
                 "main.typl",
                 "(defmacro import-dep () '(use dep))\n(import-dep)\n(dep::head)",
@@ -109,7 +109,7 @@ fn macro_chain_ending_in_use() {
     let result = run_project(
         "macro-use-chain",
         &[
-            ("dep.typl", "(pub defun head () i32 13)"),
+            ("dep.typl", "(pub defun head () int 13)"),
             (
                 "main.typl",
                 "(defmacro import-dep () '(use dep))\n\
@@ -135,7 +135,7 @@ fn macro_generated_module_containing_use() {
     let result = run_project(
         "macro-use-module",
         &[
-            ("dep.typl", "(pub defun head () i32 21)"),
+            ("dep.typl", "(pub defun head () int 21)"),
             (
                 "main.typl",
                 "(defmacro make-inner () '(module inner (use dep)))\n\
@@ -157,12 +157,12 @@ fn macro_generated_use_resolves_a_sibling_file() {
     let result = run_project(
         "macro-use-sibling",
         &[
-            ("geo/vector.typl", "(pub defun unit-x () i32 8)"),
+            ("geo/vector.typl", "(pub defun unit-x () int 8)"),
             (
                 "geo/point.typl",
                 "(defmacro import-vec () '(use vector))\n\
                  (import-vec)\n\
-                 (pub defun call-it () i32 (vector::unit-x))",
+                 (pub defun call-it () int (vector::unit-x))",
             ),
             ("main.typl", "(use geo::point)\n(point::call-it)"),
         ],
@@ -191,7 +191,7 @@ fn failing_macro_expansion_reports_at_check_time() {
     let result = run_project(
         "macro-use-arity",
         &[
-            ("dep.typl", "(pub defun head () i32 9)"),
+            ("dep.typl", "(pub defun head () int 9)"),
             ("main.typl", "(defmacro imp () '(use dep))\n(imp 1)"),
         ],
         "main.typl",
@@ -206,7 +206,7 @@ fn failing_macro_expansion_reports_at_check_time() {
 fn use_in_expression_position_is_a_clear_error() {
     let result = run_project(
         "macro-use-expr-pos",
-        &[("main.typl", "(defun f () i32 (use dep))")],
+        &[("main.typl", "(defun f () int (use dep))")],
         "main.typl",
     );
     let err = result.unwrap_err();
@@ -219,7 +219,7 @@ fn use_in_expression_position_is_a_clear_error() {
 #[test]
 fn macro_generated_defun_defines_a_callable_function() {
     let result = run_forms(
-        "(defmacro make-forty () '(defun forty () i32 40))\n(make-forty)\n(forty)",
+        "(defmacro make-forty () '(defun forty () int 40))\n(make-forty)\n(forty)",
     );
     assert_eq!(result, Ok(Value::Int(40)));
 }
@@ -251,7 +251,7 @@ fn cross_module_macro_call_at_top_level() {
     let result = run_project(
         "macro-cross-module-toplevel",
         &[
-            ("lib.typl", "(pub defmacro make-fifty () '(defun fifty () i32 50))"),
+            ("lib.typl", "(pub defmacro make-fifty () '(defun fifty () int 50))"),
             ("main.typl", "(use lib)\n(lib::make-fifty)\n(fifty)"),
         ],
         "main.typl",
@@ -285,7 +285,7 @@ fn quoted_path_inside_a_macro_body_resolves_when_expanded() {
     let result = run_project(
         "macro-quoted-path",
         &[
-            ("dep.typl", "(pub defun answer () i32 55)"),
+            ("dep.typl", "(pub defun answer () int 55)"),
             (
                 "main.typl",
                 "(use dep)\n(defmacro call-dep () '(dep::answer))\n(call-dep)",
@@ -312,7 +312,7 @@ fn cross_module_macro_generating_a_quoted_path_to_a_third_module() {
     let result = run_project(
         "macro-cross-module-quoted-path",
         &[
-            ("dep.typl", "(pub defun answer () i32 77)"),
+            ("dep.typl", "(pub defun answer () int 77)"),
             ("lib.typl", "(use dep)\n(pub defmacro get-answer () '(dep::answer))"),
             ("main.typl", "(use lib)\n(lib::get-answer)"),
         ],

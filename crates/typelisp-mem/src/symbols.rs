@@ -396,6 +396,14 @@ well_known_symbols! {
      evaluation — including a suspension in the middle of it — is the `let`'s
      job, and nothing here evaluates anything that can stop."
     SELECT => "select"
+
+    "Appended for the `int` boundary (2026-09-16). A Rust-implemented builtin's
+     `int`-typed parameters and result cross into compiled code as raw machine
+     words (`Checker::int_boundary_raw`): `(untag-int E)` is a fixnum's payload
+     and a language error for a bignum, `(tag-int E)` the tagged word of a raw
+     one. The interpreter runs both as the identity, keeping only the check."
+    UNTAG_INT => "untag-int"
+    TAG_INT => "tag-int"
 }
 
 

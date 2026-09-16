@@ -682,6 +682,16 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             f.push(pair);
             f.finish("dyn-value")
         }
+        // The `int` boundary's two sides (`Checker::int_boundary_raw`): the
+        // operand translated like any other, the tag kept, and the island
+        // does the shift.
+        "untag-int" | "tag-int" => {
+            let inner = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
+            let mut f = Items::new(heap);
+            let v = to_island(f.heap(), inner, cx)?;
+            f.push(v);
+            f.finish(&tag)
+        }
 
         // Reflection: the REPL tool layer acts on the *running* interpreter's
         // own heap and scope tree, which has no meaning inside code being
@@ -1588,7 +1598,8 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
 /// (`registry::sexpr_def`), so `compile-construct-sexpr` builds each one the
 /// same way it would from written source.
 const SEXPR_NIL: i64 = 0;
-const SEXPR_I32: i64 = 1;
+/// `int` — a fixnum or a bignum box, passed through as the tagged word it is.
+const SEXPR_INT: i64 = 1;
 const SEXPR_F64: i64 = 2;
 /// Appended past `path`, so the numbers above keep the values burned into the
 /// island's IR — see `registry::sexpr_def`.
@@ -1597,7 +1608,6 @@ const SEXPR_CHAR: i64 = 3;
 const SEXPR_BOOL: i64 = 4;
 const SEXPR_STR: i64 = 6;
 const SEXPR_CONS: i64 = 7;
-const SEXPR_BIGNUM: i64 = 8;
 const SEXPR_RATIO: i64 = 9;
 /// Past the variant numbering: a symbol and a path are not `sexpr` variants
 /// with a stored payload but names to be *interned* at run time, so
@@ -1673,7 +1683,10 @@ fn sym_form(heap: &mut Heap, sym: SymRef) -> Result<Value, Error> {
 fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
     match datum {
         Value::Empty => sexpr_construct(heap, SEXPR_NIL, &[]),
-        Value::Int(n) => sexpr_leaf(heap, SEXPR_I32, |h| int_node(h, n)),
+        // An `int` node's payload is the *tagged* word: the `(int HI LO)`
+        // literal (a fixnum, `compile-int-literal`), never the raw
+        // `int-any-width` one — variant 1 passes its argument through.
+        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| core::tagged(h, "int", &[half((n as u64) >> 32), half(n as u64)])),
         Value::Bool(b) => sexpr_leaf(heap, SEXPR_BOOL, |h| core::tagged(h, "bool", &[Value::Bool(b)])),
         Value::Char(c) => sexpr_leaf(heap, SEXPR_CHAR, |h| core::tagged(h, "char", &[Value::Char(c)])),
         Value::Str(id) => {
@@ -1712,7 +1725,8 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         }
         Value::Boxed(id) if heap.is_bignum(id) => {
             let n = heap.bignum_value(id).clone();
-            sexpr_leaf(heap, SEXPR_BIGNUM, move |h| bignum_form(h, &n))
+            // A bignum box is an `int` too — the same variant, already tagged.
+            sexpr_leaf(heap, SEXPR_INT, move |h| bignum_form(h, &n))
         }
         Value::Boxed(id) if heap.is_ratio(id) => {
             let r = heap.ratio_value(id).clone();
@@ -3569,7 +3583,7 @@ mod tests {
     #[test]
     fn a_quoted_datum_becomes_the_nodes_that_rebuild_it() {
         assert_eq!(bridged("(quote ())"), "(construct true false () 0)");
-        assert_eq!(bridged("(quote 7)"), "(construct true false () 1 (int-any-width 0 7))");
+        assert_eq!(bridged("(quote 7)"), "(construct true false () 1 (int 0 7))");
         assert_eq!(bridged("(quote true)"), "(construct true false () 4 (bool true))");
         assert_eq!(bridged(r"(quote #\a)"), r"(construct true false () 3 (char #\a))");
         assert_eq!(
@@ -3593,8 +3607,8 @@ mod tests {
     fn a_quoted_list_is_built_cons_by_cons() {
         assert_eq!(
             bridged("(quote (1 2))"),
-            "(construct true false () 7 (construct true false () 1 (int-any-width 0 1)) \
-(construct true false () 7 (construct true false () 1 (int-any-width 0 2)) (construct true false () 0)))"
+            "(construct true false () 7 (construct true false () 1 (int 0 1)) \
+(construct true false () 7 (construct true false () 1 (int 0 2)) (construct true false () 0)))"
         );
     }
 

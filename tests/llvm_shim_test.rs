@@ -63,7 +63,7 @@ fn a_compiled_function_drives_a_native_scope_and_matches_its_option() {
 
 #[test]
 fn a_compiled_function_sees_none_for_a_missing_scope_name() {
-    let src = "(defun probe ((s Scope<llvm-value>)) i32 \
+    let src = "(defun probe ((s Scope<llvm-value>)) int \
                  (match (get s \"absent\") \
                    ((Some w) 1) \
                    (None 0))) \

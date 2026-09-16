@@ -903,20 +903,21 @@ impl Heap {
         }
     }
 
-    /// Store an `i8`/`i16`/`u8`/`u16`/`u32`, returning its `Value::Boxed` —
-    /// the runtime representation of those five `Sexpr` variants.
+    /// Store an `i8`/`i16`/`i32`/`u8`/`u16`/`u32`, returning its
+    /// `Value::Boxed` — the runtime representation of those six `Sexpr`
+    /// variants.
     ///
     /// `value` is normalized on the way in rather than trusted, so the box's
     /// contents satisfy [`NarrowInt`]'s invariant no matter what the caller
-    /// had in its register. `i32` has no box: a bare `Value::Int` already
-    /// means exactly that width.
+    /// had in its register. `i32` boxes like the rest since `int` took the
+    /// bare fixnum word: inside a `Sexpr` the word alone no longer says
+    /// which of the two it is.
     ///
-    /// Panics on a width this can't be (`32` signed, or anything not in
-    /// `{8, 16, 32}`) — an internal-invariant trap like
-    /// [`f64_value`](Self::f64_value)'s, since the caller reaches here from a
-    /// declared type.
+    /// Panics on a width not in `{8, 16, 32}` — an internal-invariant trap
+    /// like [`f64_value`](Self::f64_value)'s, since the caller reaches here
+    /// from a declared type.
     pub fn alloc_narrow(&mut self, width: u8, signed: bool, value: i64) -> Value {
-        if !matches!((width, signed), (8, _) | (16, _) | (32, false)) {
+        if !matches!(width, 8 | 16 | 32) {
             panic!("alloc_narrow: {}{} is not a boxed integer type", if signed { "i" } else { "u" }, width);
         }
         let value = crate::normalize_int(value, u32::from(width), signed);
@@ -968,20 +969,26 @@ impl Heap {
                 (16, true) => "i16",
                 (8, false) => "u8",
                 (16, false) => "u16",
-                _ => "u32",
+                (32, false) => "u32",
+                (32, true) => "i32",
+                (w, s) => panic!("primitive_box_type_name: a narrow box of an unknown width {}{}", if s { "i" } else { "u" }, w),
             }),
-            Some(BoxedObj::Bignum(_)) => Some("bignum"),
+            // A bignum box is an `int`: the `bignum` type was folded into it.
+            Some(BoxedObj::Bignum(_)) => Some("int"),
             Some(BoxedObj::Ratio(_)) => Some("ratio"),
             Some(BoxedObj::RandomState(_)) => Some("random-state"),
             _ => None,
         }
     }
 
-    /// Store a `bignum` (arbitrary-precision integer), returning its
-    /// `Value::Boxed` — heap-boxed like [`alloc_f64`](Self::alloc_f64),
-    /// and for the same reason (the payload can't ride alongside a tag in
-    /// one 64-bit word).
-    pub fn alloc_bignum(&mut self, n: num_bigint::BigInt) -> Value {
+    /// Store a bignum box **whatever its value** — the raw allocation
+    /// [`int_from_bigint`](Self::int_from_bigint) performs once it has
+    /// decided the value does not fit a fixnum. Not a producer of `int`s:
+    /// an `int` is canonical (a box exists only past the fixnum range), and
+    /// every producer goes through `canonical_int`/`int_from_bigint`. This
+    /// exists for the tests of that invariant, which need the one shape
+    /// nothing else may make.
+    pub fn alloc_bignum_unchecked(&mut self, n: num_bigint::BigInt) -> Value {
         self.alloc_boxed(BoxedObj::Bignum(n))
     }
 
@@ -1038,7 +1045,7 @@ impl Heap {
     }
 
     /// Store a `ratio` (exact rational), returning its `Value::Boxed` — the
-    /// `ratio` counterpart of [`alloc_bignum`](Self::alloc_bignum). The
+    /// boxed counterpart of an `int`'s bignum box. The
     /// caller passes any `BigRational`; the crate keeps it reduced with a
     /// positive denominator.
     pub fn alloc_ratio(&mut self, r: num_rational::BigRational) -> Value {

@@ -64,9 +64,9 @@ fn defvar_leaves_an_already_bound_global_alone() {
     let (mut heap, reader, mut checker, mut interp) = session();
     let run = |h: &mut Heap, c: &mut Checker, i: &mut Interp, s: &str| eval_in(h, &reader, c, i, s);
 
-    run(&mut heap, &mut checker, &mut interp, "(defvar (x i32) 1)").expect("first defvar");
+    run(&mut heap, &mut checker, &mut interp, "(defvar (x int) 1)").expect("first defvar");
     run(&mut heap, &mut checker, &mut interp, "(setf x 99)").expect("assignment");
-    run(&mut heap, &mut checker, &mut interp, "(defvar (x i32) 1)").expect("second defvar");
+    run(&mut heap, &mut checker, &mut interp, "(defvar (x int) 1)").expect("second defvar");
     assert_eq!(run(&mut heap, &mut checker, &mut interp, "x"), Ok(Some(Value::Int(99))));
 }
 
@@ -75,9 +75,9 @@ fn defparameter_assigns_every_time() {
     let (mut heap, reader, mut checker, mut interp) = session();
     let run = |h: &mut Heap, c: &mut Checker, i: &mut Interp, s: &str| eval_in(h, &reader, c, i, s);
 
-    run(&mut heap, &mut checker, &mut interp, "(defparameter (x i32) 1)").expect("first");
+    run(&mut heap, &mut checker, &mut interp, "(defparameter (x int) 1)").expect("first");
     run(&mut heap, &mut checker, &mut interp, "(setf x 99)").expect("assignment");
-    run(&mut heap, &mut checker, &mut interp, "(defparameter (x i32) 1)").expect("second");
+    run(&mut heap, &mut checker, &mut interp, "(defparameter (x int) 1)").expect("second");
     assert_eq!(run(&mut heap, &mut checker, &mut interp, "x"), Ok(Some(Value::Int(1))));
 }
 
@@ -89,11 +89,11 @@ fn a_second_defvar_does_not_even_evaluate_its_initializer() {
     let (mut heap, reader, mut checker, mut interp) = session();
     let run = |h: &mut Heap, c: &mut Checker, i: &mut Interp, s: &str| eval_in(h, &reader, c, i, s);
 
-    run(&mut heap, &mut checker, &mut interp, "(defvar (calls i32) 0)").expect("counter");
-    run(&mut heap, &mut checker, &mut interp, "(defun bump () i32 (progn (setf calls (+ calls 1)) 7))")
+    run(&mut heap, &mut checker, &mut interp, "(defvar (calls int) 0)").expect("counter");
+    run(&mut heap, &mut checker, &mut interp, "(defun bump () int (progn (setf calls (+ calls 1)) 7))")
         .expect("bump");
-    run(&mut heap, &mut checker, &mut interp, "(defvar (v i32) (bump))").expect("first");
-    run(&mut heap, &mut checker, &mut interp, "(defvar (v i32) (bump))").expect("second");
+    run(&mut heap, &mut checker, &mut interp, "(defvar (v int) (bump))").expect("first");
+    run(&mut heap, &mut checker, &mut interp, "(defvar (v int) (bump))").expect("second");
     assert_eq!(run(&mut heap, &mut checker, &mut interp, "calls"), Ok(Some(Value::Int(1))));
 }
 
@@ -102,11 +102,11 @@ fn a_second_defparameter_does_evaluate_its_initializer() {
     let (mut heap, reader, mut checker, mut interp) = session();
     let run = |h: &mut Heap, c: &mut Checker, i: &mut Interp, s: &str| eval_in(h, &reader, c, i, s);
 
-    run(&mut heap, &mut checker, &mut interp, "(defvar (calls i32) 0)").expect("counter");
-    run(&mut heap, &mut checker, &mut interp, "(defun bump () i32 (progn (setf calls (+ calls 1)) 7))")
+    run(&mut heap, &mut checker, &mut interp, "(defvar (calls int) 0)").expect("counter");
+    run(&mut heap, &mut checker, &mut interp, "(defun bump () int (progn (setf calls (+ calls 1)) 7))")
         .expect("bump");
-    run(&mut heap, &mut checker, &mut interp, "(defparameter (v i32) (bump))").expect("first");
-    run(&mut heap, &mut checker, &mut interp, "(defparameter (v i32) (bump))").expect("second");
+    run(&mut heap, &mut checker, &mut interp, "(defparameter (v int) (bump))").expect("first");
+    run(&mut heap, &mut checker, &mut interp, "(defparameter (v int) (bump))").expect("second");
     assert_eq!(run(&mut heap, &mut checker, &mut interp, "calls"), Ok(Some(Value::Int(2))));
 }
 
@@ -141,7 +141,7 @@ fn loading_the_same_file_twice_keeps_what_the_session_stored() {
 fn defparameter_can_be_public() {
     let (mut heap, reader, mut checker, mut interp) = session();
     assert_eq!(
-        eval_in(&mut heap, &reader, &mut checker, &mut interp, "(pub defparameter (n i32) 5)\nn"),
+        eval_in(&mut heap, &reader, &mut checker, &mut interp, "(pub defparameter (n int) 5)\nn"),
         Ok(Some(Value::Int(5)))
     );
 }
@@ -149,7 +149,7 @@ fn defparameter_can_be_public() {
 #[test]
 fn defconstant_still_refuses_assignment() {
     let (mut heap, reader, mut checker, mut interp) = session();
-    eval_in(&mut heap, &reader, &mut checker, &mut interp, "(defconstant (k i32) 5)").expect("defconstant");
+    eval_in(&mut heap, &reader, &mut checker, &mut interp, "(defconstant (k int) 5)").expect("defconstant");
     let err = eval_in(&mut heap, &reader, &mut checker, &mut interp, "(setf k 6)")
         .expect_err("a constant cannot be assigned");
     assert!(!err.is_empty(), "expected a message");
@@ -191,7 +191,7 @@ fn source_file_composes_with_the_pathname_functions() {
 fn source_file_is_a_string_at_check_time() {
     // It is folded to a literal, so it can be used where a literal is
     // required — `println`'s control string is the strictest such place.
-    let dir = fixture("source_literal", &[("where.typl", "(defvar (n i32) (length (source-file)))\n")]);
+    let dir = fixture("source_literal", &[("where.typl", "(defvar (n int) (length (source-file)))\n")]);
     let (mut heap, reader, mut checker, mut interp) = session();
     load_file_flat(&mut heap, &reader, &mut checker, &mut interp, &dir, "where.typl").expect("load");
     let v = eval_in(&mut heap, &reader, &mut checker, &mut interp, "n").expect("read it back");

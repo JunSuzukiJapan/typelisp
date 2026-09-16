@@ -117,7 +117,24 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
     // own `labels`/`lambda`s. (The very first `.bc`, before this chain existed,
     // was built by the interpreted island; every one since is built by its
     // predecessor.)
-    crate::compile::driver::install_compiled_library(&interp, crate::compile::CompiledLibrary {
+    //
+    // **Except when the committed island cannot compile the new `SOURCE` at
+    // all** — when the checker has started emitting a core-IR node the
+    // committed bodies' `compile-value` does not know, in every body
+    // including the island's own (the `int` boundary's `untag-int` was this:
+    // the checker wraps every `int` argument to a builtin, so no `SOURCE`
+    // without the node could be written to teach the island the node). Then
+    // the previous generation is no help, and the only island that knows the
+    // new vocabulary is this `SOURCE` *interpreted* — which is how the very
+    // first `.bc` was built. `TYPELISP_BOOTSTRAP_INTERPRETED=1` asks for
+    // that: nothing is installed, and the compile loop below drives the
+    // interpreter's `compile-function`. Slow, and used for exactly one
+    // generation; the result is an ordinary artifact the next regeneration
+    // drives natively as always.
+    if std::env::var_os("TYPELISP_BOOTSTRAP_INTERPRETED").is_some() {
+        eprintln!("island bootstrap: driving the INTERPRETED island (TYPELISP_BOOTSTRAP_INTERPRETED is set)");
+    } else {
+        crate::compile::driver::install_compiled_library(&interp, crate::compile::CompiledLibrary {
             label: "compiler island",
             bitcode: typelisp_front::dump::parse(crate::compiler::ISLAND_DUMP, "compiler island")?
                 .first()
@@ -128,6 +145,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
             items: &items,
         })
         .map_err(|e| format!("island bootstrap install of the committed .bc failed: {}", e))?;
+    }
 
     // The island announces its ring with `defsignature` and is written as ~60
     // mutually recursive top-level functions rather than one `labels` block,

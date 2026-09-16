@@ -168,15 +168,15 @@ pub const LLVM_METHOD_RECEIVER_TYPES: [&str; 4] =
 /// LLVM instructions or `rt_*` calls rather than function calls
 /// (`Interp::is_native_lowered_primitive_method` says *which* methods; this
 /// says which receivers can have them).
-pub const NATIVE_LOWERED_PRIMITIVES: [&str; 18] = [
+pub const NATIVE_LOWERED_PRIMITIVES: [&str; 17] = [
     "i32", "i8", "i16", "u8", "u16", "u32", "int",
-    "char", "string", "f64", "f32", "bignum", "ratio", "sexpr", "bool", "symbol",
+    "char", "string", "f64", "f32", "ratio", "sexpr", "bool", "symbol",
     // The two C-boundary words are integer receivers to `compile-assoc`
     // (`int-receiver-type?`), so their conversions are lowered the same way.
     // Listing the *methods* is not enough: a receiver missing from here makes
     // every one of its calls a real graph edge, and a builtin with no user
     // body then fails the `has_method` check with "no compiled
-    // implementation" — which is exactly what a compiled `(as bignum ...)` on
+    // implementation" — which is exactly what a compiled `(as int ...)` on
     // a `c-ulong` did.
     "c-long", "c-ulong",
 ];
@@ -194,19 +194,14 @@ pub enum Type {
     /// The `int` type: CL's `integer` — an arbitrary-precision integer whose
     /// arithmetic promotes from the 63-bit fixnum to a heap bignum when a
     /// result outgrows it, and demotes back when it fits. Unlike the six
-    /// fixed widths above it never wraps and never normalizes; unlike
-    /// [`Type::Bignum`] a value of it is a box only when it has to be
-    /// (`Heap::canonical_int`).
+    /// fixed widths above it never wraps and never normalizes. A value of it
+    /// is a box only when it has to be (`Heap::canonical_int`) — the old
+    /// `bignum` type, always boxed, was folded into this one.
     ///
     /// Its runtime carrier is the tagged word itself (`Repr::Int`), so a
     /// fixnum and a bignum of this type are told apart by the word's tag
     /// and nothing else.
     Int,
-    /// The `bignum` type: an arbitrary-precision integer that is *always* a
-    /// heap box, with explicit conversions (`int->bignum`/`bignum->int`/...).
-    /// Being folded into [`Type::Int`], which is the same numbers with the
-    /// boxing decided by size instead of by type.
-    Bignum,
     /// The `ratio` type: an exact rational (CL's ratio), kept reduced with a
     /// positive denominator. Like `Bignum`, its own static type with
     /// explicit conversions (`int->ratio`/`ratio->float`/...).
@@ -396,7 +391,7 @@ pub fn primitive_types() -> Vec<Type> {
         Type::I8, Type::I16, Type::I32,
         Type::U8, Type::U16, Type::U32,
         Type::Int,
-        Type::F32, Type::F64, Type::Bignum, Type::Ratio, Type::RandomState,
+        Type::F32, Type::F64, Type::Ratio, Type::RandomState,
         Type::Bool, Type::Char, Type::Str, Type::Symbol,
         // Registered so their conversions have somewhere to live. What they
         // get is `c_word_assoc`, not `int_assoc` — see that function.
@@ -426,7 +421,6 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
         Type::F32 => "f32",
         Type::F64 => "f64",
         Type::Int => "int",
-        Type::Bignum => "bignum",
         Type::Ratio => "ratio",
         Type::RandomState => "random-state",
         Type::Bool => "bool",
@@ -870,7 +864,6 @@ pub fn primitive_by_name(name: &str) -> Option<Type> {
         "f32" => Type::F32,
         "f64" => Type::F64,
         "int" => Type::Int,
-        "bignum" => Type::Bignum,
         "ratio" => Type::Ratio,
         "random-state" => Type::RandomState,
         "bool" => Type::Bool,

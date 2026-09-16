@@ -92,7 +92,7 @@ fn repl_stdout(input: &str) -> String {
 
 #[test]
 fn a_read_time_form_is_replaced_by_its_value() {
-    let dir = fixture("basic", &[("main.typl", "(defvar (n i32) #.(+ 1 2))\nn\n")]);
+    let dir = fixture("basic", &[("main.typl", "(defvar (n int) #.(+ 1 2))\nn\n")]);
     assert_eq!(run_project(&dir, "main.typl"), Ok(Some(Value::Int(3))));
 }
 
@@ -106,19 +106,19 @@ fn it_runs_while_reading_not_where_it_appears() {
 
 #[test]
 fn it_nests_inside_a_larger_form() {
-    let dir = fixture("nested", &[("main.typl", "(defvar (n i32) (+ 10 #.(* 2 5)))\nn\n")]);
+    let dir = fixture("nested", &[("main.typl", "(defvar (n int) (+ 10 #.(* 2 5)))\nn\n")]);
     assert_eq!(run_project(&dir, "main.typl"), Ok(Some(Value::Int(20))));
 }
 
 #[test]
 fn it_can_call_the_prelude() {
-    let dir = fixture("prelude_call", &[("main.typl", "(defvar (n i32) #.(abs -7))\nn\n")]);
+    let dir = fixture("prelude_call", &[("main.typl", "(defvar (n int) #.(abs -7))\nn\n")]);
     assert_eq!(run_project(&dir, "main.typl"), Ok(Some(Value::Int(7))));
 }
 
 #[test]
 fn a_form_that_does_not_check_is_a_read_error_with_a_position() {
-    let dir = fixture("bad_form", &[("main.typl", "(defvar (n i32) #.(+ 1 \"two\"))\nn\n")]);
+    let dir = fixture("bad_form", &[("main.typl", "(defvar (n int) #.(+ 1 \"two\"))\nn\n")]);
     let err = run_project(&dir, "main.typl").expect_err("the form does not type-check");
     assert!(err.contains("read error"), "expected a read error, got {}", err);
     assert!(err.contains("main.typl:1:"), "expected the position, got {}", err);
@@ -133,7 +133,7 @@ fn on_the_load_path_it_reaches_a_definition_from_earlier_in_the_file() {
     // `(load ...)` runs each form as it reads it — CL's `load`.
     let dir = fixture(
         "load_path",
-        &[("f.typl", "(defun triple ((n i32)) i32 (* n 3))\n(defvar (baked i32) #.(triple 5))\n")],
+        &[("f.typl", "(defun triple ((n int)) int (* n 3))\n(defvar (baked int) #.(triple 5))\n")],
     );
     let (mut heap, reader, mut checker, mut interp) = session();
     load_file_flat(&mut heap, &reader, &mut checker, &mut interp, &dir, "f.typl").expect("load failed");
@@ -147,7 +147,7 @@ fn in_a_module_file_it_does_not_reach_that_file_s_own_definitions() {
     // same call needs an `eval-when` around the definition.
     let dir = fixture(
         "module_path",
-        &[("main.typl", "(defun triple ((n i32)) i32 (* n 3))\n(defvar (baked i32) #.(triple 5))\nbaked\n")],
+        &[("main.typl", "(defun triple ((n int)) int (* n 3))\n(defvar (baked int) #.(triple 5))\nbaked\n")],
     );
     let err = run_project(&dir, "main.typl").expect_err("the definition has not run yet");
     assert!(err.contains("no such function"), "unexpected error: {}", err);
@@ -167,8 +167,8 @@ fn in_a_module_file_it_does_not_reach_a_used_module_either() {
     let dir = fixture(
         "used_module",
         &[
-            ("helper.typl", "(pub defun triple ((n i32)) i32 (* n 3))\n"),
-            ("main.typl", "(use helper)\n(defvar (baked i32) #.(helper::triple 5))\nbaked\n"),
+            ("helper.typl", "(pub defun triple ((n int)) int (* n 3))\n"),
+            ("main.typl", "(use helper)\n(defvar (baked int) #.(helper::triple 5))\nbaked\n"),
         ],
     );
     let err = run_project(&dir, "main.typl").expect_err("the dependency has not run yet");
@@ -179,7 +179,7 @@ fn in_a_module_file_it_does_not_reach_a_used_module_either() {
 fn the_repl_reaches_a_used_module() {
     // Here it does: the REPL runs each queued module as the form that `use`d
     // it is processed, so the next line's `#.` finds it.
-    let dir = fixture("repl_use", &[("helper.typl", "(pub defun triple ((n i32)) i32 (* n 3))\n")]);
+    let dir = fixture("repl_use", &[("helper.typl", "(pub defun triple ((n int)) int (* n 3))\n")]);
     let mut child = Command::new(env!("CARGO_BIN_EXE_typl"))
         .current_dir(&dir)
         .stdin(Stdio::piped())
@@ -200,7 +200,7 @@ fn the_repl_reaches_a_used_module() {
 
 #[test]
 fn the_repl_reaches_what_earlier_lines_defined() {
-    let out = repl_stdout("(defun quad ((n i32)) i32 (* n 4))\n#.(quad 5)\n");
+    let out = repl_stdout("(defun quad ((n int)) int (* n 4))\n#.(quad 5)\n");
     assert!(out.contains("20"), "expected the read-time call's value, got {:?}", out);
 }
 

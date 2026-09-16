@@ -440,6 +440,14 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         None
     };
 
+    // What `main` answers with decides how the exit code is read off it: an
+    // `int` is a tagged word (a fixnum's payload is the code; a bignum has
+    // none), a fixed-width integer the raw word.
+    let main_returns_int = chk
+        .registry()
+        .fn_sig(&Path::root("main"))
+        .is_some_and(|sig| sig.ret == crate::Type::Int);
+
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let result = {
         let m = module.borrow();
@@ -453,6 +461,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &print_objects,
             &format_calls,
             eval_env.as_deref(),
+            main_returns_int,
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
             .and_then(|()| write_executable(&m, output_path, &link_libraries))
@@ -508,6 +517,7 @@ fn build_main_wrapper(
     print_objects: &[(String, String)],
     format_calls: &[(String, String, String)],
     eval_env: Option<&[u8]>,
+    main_returns_int: bool,
 ) -> Result<(), String> {
     let tl_main = module
         .get_function(ENTRY_POINT_INTERNAL_NAME)
@@ -767,7 +777,15 @@ fn build_main_wrapper(
     // point, and letting an unwind run off the end of it is undefined.
     // Which of the two, decided by `tl_main`'s own type: the driven one puts
     // a `FrameStack` in front of the same panic handling.
-    let entry_shim = if tl_main.get_type() == coroutine_fn_ty { "rt_run_entry_driven" } else { "rt_run_entry" };
+    // An `int`-returning `main` answers a tagged word; the `_int` shim reads
+    // the exit code out of it (and out of a panic's raw code, which arrives
+    // through the same call).
+    let entry_shim = match (tl_main.get_type() == coroutine_fn_ty, main_returns_int) {
+        (true, true) => "rt_run_entry_driven_int",
+        (true, false) => "rt_run_entry_driven",
+        (false, true) => return Err("an `int`-returning main under the classic ABI is not supported".to_string()),
+        (false, false) => "rt_run_entry",
+    };
     let rt_run_entry = module.add_function(entry_shim, ctx.i64_type().fn_type(&[ctx.i64_type().into()], false), None);
     let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(ctx.i64_type());
     let call: CallSiteValue = builder
@@ -1143,7 +1161,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], None).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1182,7 +1200,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], None).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

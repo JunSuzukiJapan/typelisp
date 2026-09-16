@@ -109,6 +109,12 @@ pub(super) enum Op {
     DynNew,
     DynUpcast,
     DynValue,
+    /// `(untag-int E)` — the `int` boundary's raw side: `E` must be a fixnum
+    /// (a bignum is a language error, an index or count that size). The
+    /// interpreter keeps the value; only compiled code shifts the tag off.
+    UntagInt,
+    /// `(tag-int E)` — the boundary's other side; the identity here.
+    TagInt,
     Global,
     SetGlobal,
     Assoc,
@@ -173,6 +179,8 @@ impl Op {
             wk::DYN_NEW => Op::DynNew,
             wk::DYN_UPCAST => Op::DynUpcast,
             wk::DYN_VALUE => Op::DynValue,
+            wk::UNTAG_INT => Op::UntagInt,
+            wk::TAG_INT => Op::TagInt,
             wk::GLOBAL => Op::Global,
             wk::SET_GLOBAL => Op::SetGlobal,
             wk::ASSOC => Op::Assoc,
@@ -273,12 +281,15 @@ impl Interp {
                 };
                 Ok(v)
             }
+            // An `int` literal past the fixnum range. Re-boxed through the
+            // canonical constructor, so the node cannot mint a box for a
+            // value that fits a fixnum whatever it was handed.
             Op::Bignum => {
                 let n = match self.literal_field(heap, form)? {
                     Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).clone(),
                     other => return Err(EvalError::Internal(format!("eval: (bignum ..) holds {:?}", other))),
                 };
-                Ok(heap.alloc_bignum(n))
+                Ok(heap.int_from_bigint(n))
             }
             Op::Ratio => {
                 let r = match self.literal_field(heap, form)? {
@@ -1305,8 +1316,11 @@ fn match_sexpr_core(
     subs: &[Value],
     v: Value,
 ) -> Result<Option<Vec<(SymRef, Value)>>, EvalError> {
-    use super::{narrow_variant, SEXPR_BIGNUM, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_I32, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_STR, SEXPR_SYM};
+    use super::{narrow_variant, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_RETIRED_BIGNUM, SEXPR_STR, SEXPR_SYM};
 
+    if variant == SEXPR_RETIRED_BIGNUM {
+        return Err(EvalError::Internal("eval: Sexpr variant 8 (bignum) is retired — a bignum box is an `int`".to_string()));
+    }
     // Each of these binds the scrutinee (or a piece of it) straight through:
     // a float/bignum/ratio/string box *is* its value, so there is nothing to
     // unwrap and re-wrap.
@@ -1333,7 +1347,10 @@ fn match_sexpr_core(
 
     match (variant, v) {
         (SEXPR_NIL, Value::Empty) => Ok(Some(Vec::new())),
-        (SEXPR_I32, Value::Int(_)) => one(heap, v),
+        // An `int` is a fixnum or a bignum box — either way the value is
+        // its own binding.
+        (SEXPR_INT, Value::Int(_)) => one(heap, v),
+        (SEXPR_INT, Value::Boxed(id)) if heap.is_bignum(id) => one(heap, v),
         (SEXPR_CHAR, Value::Char(_)) => one(heap, v),
         (SEXPR_BOOL, Value::Bool(_)) => one(heap, v),
         (SEXPR_SYM, Value::Symbol(_)) => one(heap, v),
@@ -1343,7 +1360,6 @@ fn match_sexpr_core(
         // type the value does not have.
         (SEXPR_F64, Value::Boxed(id)) if heap.is_f64(id) => one(heap, v),
         (SEXPR_F32, Value::Boxed(id)) if heap.is_f32(id) => one(heap, v),
-        (SEXPR_BIGNUM, Value::Boxed(id)) if heap.is_bignum(id) => one(heap, v),
         (SEXPR_RATIO, Value::Boxed(id)) if heap.is_ratio(id) => one(heap, v),
         (SEXPR_CONS, Value::Cons(_)) => {
             let car = heap.car(v).map_err(heap_err)?;
@@ -1392,8 +1408,11 @@ fn match_sexpr_core(
 
 /// `(construct sexpr N E...)` — build a `Sexpr` datum from evaluated fields.
 pub(super) fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Value]) -> Result<Value, EvalError> {
-    use super::{narrow_variant, SEXPR_BIGNUM, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_I32, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_STR, SEXPR_SYM};
+    use super::{narrow_variant, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_RETIRED_BIGNUM, SEXPR_STR, SEXPR_SYM};
 
+    if variant == SEXPR_RETIRED_BIGNUM {
+        return Err(EvalError::Internal("eval: Sexpr variant 8 (bignum) is retired — a bignum box is an `int`".to_string()));
+    }
     let arg = |i: usize| -> Result<Value, EvalError> {
         argv.get(i)
             .copied()
@@ -1412,7 +1431,13 @@ pub(super) fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Valu
         // Each of these validates the argument and then passes the value
         // itself through: the box *is* the datum, so `(eq s (sexpr-str (Str
         // s)))` holds, as CL requires.
-        SEXPR_I32 => Ok(Value::Int(super::rt_i64(&arg(0)?)?)),
+        // An `int` is already its own datum (a fixnum or a bignum box); the
+        // check is that it is one, and canonical.
+        SEXPR_INT => {
+            let v = arg(0)?;
+            super::expect_int(heap, &v)?;
+            Ok(v)
+        }
         SEXPR_CHAR => Ok(Value::Char(super::rt_char(&arg(0)?)?)),
         SEXPR_BOOL => Ok(Value::Bool(super::rt_bool(&arg(0)?)?)),
         SEXPR_SYM => arg(0),
@@ -1433,13 +1458,9 @@ pub(super) fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Valu
             super::rt_str(heap, &v)?;
             Ok(v)
         }
-        // `bignum`/`ratio` are the two that really do re-box: the argument is
-        // read back out as a Rust value and a fresh box allocated, matching
-        // the old evaluator exactly.
-        SEXPR_BIGNUM => {
-            let n = super::rt_bignum(heap, &arg(0)?)?;
-            Ok(heap.alloc_bignum(n))
-        }
+        // `ratio` really does re-box: the argument is read back out as a
+        // Rust value and a fresh box allocated, matching the old evaluator
+        // exactly.
         SEXPR_RATIO => {
             let r = super::rt_ratio(heap, &arg(0)?)?;
             Ok(heap.alloc_ratio(r))

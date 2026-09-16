@@ -5,9 +5,9 @@
 //!
 //! Two representations back the one method surface (unification Stage 8),
 //! dispatched statically on the element type `V` (`Interp::scope_is_heap`):
-//! the `Scope<i32>` tests below run the Rust-native `RtValue::Scope` path
+//! the `Scope<int>` tests below run the Rust-native `RtValue::Scope` path
 //! (the same one `compiler.rs`'s `Scope<llvm-value>`/`Scope<llvm-function>`
-//! use), the `Scope<Option<Sexpr>>`/`Scope<Vector<i32>>` tests the GC-heap
+//! use), the `Scope<Option<Sexpr>>`/`Scope<Vector<int>>` tests the GC-heap
 //! `StructPayload::Frames` path. Both families assert the same observable
 //! semantics — that equivalence is the point.
 
@@ -91,8 +91,8 @@ fn sexpr_to_string(heap: &Heap, v: Value) -> String {
 
 #[test]
 fn new_scope_supports_set_then_get() {
-    let src = "(defun make-s () Scope<i32> (Scope::new))
-               (defun f () i32
+    let src = "(defun make-s () Scope<int> (Scope::new))
+               (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 42)
                    (match (get s \"x\") ((Some v) v) ((None) 0))))
@@ -102,8 +102,8 @@ fn new_scope_supports_set_then_get() {
 
 #[test]
 fn get_missing_key_returns_none() {
-    let src = "(defun make-s () Scope<i32> (Scope::new))
-               (defun f () i32
+    let src = "(defun make-s () Scope<int> (Scope::new))
+               (defun f () int
                  (let ((s (make-s)))
                    (match (get s \"missing\") ((Some v) v) ((None) -1))))
                (f)";
@@ -112,8 +112,8 @@ fn get_missing_key_returns_none() {
 
 #[test]
 fn push_frame_shadows_the_same_name_in_the_new_top_frame() {
-    let src = "(defun make-s () Scope<i32> (Scope::new))
-               (defun f () i32
+    let src = "(defun make-s () Scope<int> (Scope::new))
+               (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 1)
                    (push-frame s)
@@ -125,8 +125,8 @@ fn push_frame_shadows_the_same_name_in_the_new_top_frame() {
 
 #[test]
 fn pop_frame_reveals_the_shadowed_outer_binding_again() {
-    let src = "(defun make-s () Scope<i32> (Scope::new))
-               (defun f () i32
+    let src = "(defun make-s () Scope<int> (Scope::new))
+               (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 1)
                    (push-frame s)
@@ -139,8 +139,8 @@ fn pop_frame_reveals_the_shadowed_outer_binding_again() {
 
 #[test]
 fn pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
-    let src = "(defun make-s () Scope<i32> (Scope::new))
-               (defun f () i32
+    let src = "(defun make-s () Scope<int> (Scope::new))
+               (defun f () int
                  (let ((s (make-s)))
                    (push-frame s)
                    (set s \"y\" 9)
@@ -154,8 +154,8 @@ fn pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
 fn set_always_writes_into_the_most_recently_pushed_frame() {
     // Two names set in two different frames must both stay visible — `set`
     // never overwrites an outer frame's own slot for a *different* name.
-    let src = "(defun make-s () Scope<i32> (Scope::new))
-               (defun f () i32
+    let src = "(defun make-s () Scope<int> (Scope::new))
+               (defun f () int
                  (let ((s (make-s)))
                    (set s \"a\" 1)
                    (push-frame s)
@@ -171,8 +171,8 @@ fn clone_frames_shares_existing_frames_without_copying_their_entries() {
     // A name set *before* `clone-frames` is visible through the clone too —
     // proving the clone shares the original's frames (by reference) rather
     // than starting empty.
-    let src = "(defun make-s () Scope<i32> (Scope::new))
-               (defun f () i32
+    let src = "(defun make-s () Scope<int> (Scope::new))
+               (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 7)
                    (let ((s2 (clone-frames s)))
@@ -186,8 +186,8 @@ fn clone_frames_mutation_through_the_shared_frame_is_visible_in_both() {
     // Since `clone-frames` shares (not copies) the underlying frame, a
     // mutation made through the clone — to a name that already lived in a
     // *shared* frame — is visible back through the original too.
-    let src = "(defun make-s () Scope<i32> (Scope::new))
-               (defun f () i32
+    let src = "(defun make-s () Scope<int> (Scope::new))
+               (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 1)
                    (let ((s2 (clone-frames s)))
@@ -203,8 +203,8 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
     // become visible through the original `Scope` — `clone-frames` makes an
     // independent *list* of frames, even though the frames it starts with
     // are shared.
-    let src = "(defun make-s () Scope<i32> (Scope::new))
-               (defun f () i32
+    let src = "(defun make-s () Scope<int> (Scope::new))
+               (defun f () int
                  (let ((s (make-s)))
                    (let ((s2 (clone-frames s)))
                      (push-frame s2)
@@ -218,18 +218,18 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
 //
 // The same method surface as above, backed by the GC-heap representation
 // (unification Stage 8). Each test mirrors a native-path sibling; the
-// returned `i64` is extracted from the stored `Sexpr` with `sexpr-i32` (`match`
+// returned `i64` is extracted from the stored `Sexpr` with `sexpr-int` (`match`
 // on a `Sexpr` is fenced off — Symbol/Sexpr redesign Phase 5), so a corrupted
 // round-trip fails loudly rather than comparing equal by accident.
 
 #[test]
 fn heap_scope_set_then_get_roundtrips() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun f () i32
+               (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" (quote 42))
                    (match (get s \"x\")
-                     ((Some v) (sexpr-i32 v))
+                     ((Some v) (sexpr-int v))
                      ((None) -1))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(42));
@@ -238,7 +238,7 @@ fn heap_scope_set_then_get_roundtrips() {
 #[test]
 fn heap_scope_get_missing_key_returns_none() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun f () i32
+               (defun f () int
                  (let ((s (make-s)))
                    (match (get s \"missing\") ((Some v) 0) ((None) -1))))
                (f)";
@@ -248,9 +248,9 @@ fn heap_scope_get_missing_key_returns_none() {
 #[test]
 fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun as-int ((o Option<Option<Sexpr>>)) i32
+               (defun as-int ((o Option<Option<Sexpr>>)) int
                  (match o
-                   ((Some v) (sexpr-i32 v))
+                   ((Some v) (sexpr-int v))
                    ((None) -1)))
                (defun f () bool
                  (let ((s (make-s)))
@@ -268,7 +268,7 @@ fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
 #[test]
 fn heap_scope_pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun f () i32
+               (defun f () int
                  (let ((s (make-s)))
                    (push-frame s)
                    (set s \"y\" (quote 9))
@@ -281,12 +281,12 @@ fn heap_scope_pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
 #[test]
 fn heap_scope_clone_frames_shares_existing_frames() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun f () i32
+               (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" (quote 7))
                    (let ((s2 (clone-frames s)))
                      (match (get s2 \"x\")
-                       ((Some v) (sexpr-i32 v))
+                       ((Some v) (sexpr-int v))
                        ((None) -1)))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(7));
@@ -295,13 +295,13 @@ fn heap_scope_clone_frames_shares_existing_frames() {
 #[test]
 fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun f () i32
+               (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" (quote 1))
                    (let ((s2 (clone-frames s)))
                      (set s2 \"x\" (quote 2))
                      (match (get s \"x\")
-                       ((Some v) (sexpr-i32 v))
+                       ((Some v) (sexpr-int v))
                        ((None) -1)))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(2));
@@ -310,7 +310,7 @@ fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both(
 #[test]
 fn heap_scope_pushing_a_frame_on_the_clone_does_not_affect_the_original() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
-               (defun f () i32
+               (defun f () int
                  (let ((s (make-s)))
                    (let ((s2 (clone-frames s)))
                      (push-frame s2)
@@ -338,15 +338,15 @@ fn heap_scope_set_with_every_frame_popped_is_a_catchable_error_not_a_panic() {
     }
 }
 
-/// A boxed-struct element (`Vector<i32>`, heap-repr via `struct_types`)
+/// A boxed-struct element (`Vector<int>`, heap-repr via `struct_types`)
 /// keeps its reference semantics through the scope: what `get` hands back
 /// is the *same* vector box that `set` stored, so a `push` through the
 /// retrieved handle is visible through the original one.
 #[test]
 fn heap_scope_stores_a_boxed_struct_element_by_reference() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
-               (defun make-s () Scope<Vector<i32>> (Scope::new))
-               (defun f () i32
+    let src = "(defun make-v () Vector<int> (Vector::new))
+               (defun make-s () Scope<Vector<int>> (Scope::new))
+               (defun f () int
                  (let ((s (make-s)))
                    (let ((v (make-v)))
                      (push v 10)

@@ -1197,9 +1197,9 @@ impl Interp {
                 v @ Value::Symbol(_) => v,
                 other => return Err(crossing_mismatch("a Symbol", other)),
             },
-            Repr::Bignum | Repr::Ratio => match typelisp_rt::decode(raw) {
-                v @ Value::Boxed(id) if heap.is_bignum(id) || heap.is_ratio(id) => v,
-                other => return Err(crossing_mismatch("a bignum/ratio", other)),
+            Repr::Ratio => match typelisp_rt::decode(raw) {
+                v @ Value::Boxed(id) if heap.is_ratio(id) => v,
+                other => return Err(crossing_mismatch("a ratio", other)),
             },
             // An `int` is its tagged word: a fixnum, or a bignum box for the
             // values a fixnum cannot hold — and never a box for one it can
@@ -2125,25 +2125,31 @@ impl Interp {
             // `match_sexpr_ctor`'s corresponding arm binds — panicking (not
             // `None`-matching) on a tag mismatch, the same contract the old
             // `(_ (panic ...))` catch-all arms had.
-            "sexpr-i32" => match args.first() {
-                Some(Value::Int(n)) => Some(Ok(Value::Int(*n))),
-                Some(_) => Some(Err(EvalError::Panic("sexpr-i32: expected an i32 Sexpr node".into()))),
-                _ => Some(Err(EvalError::Internal("sexpr-i32: expected a Sexpr argument".into()))),
+            // `sexpr-int`: an `int` node is its own value — a fixnum or a
+            // bignum box — so the read is the identity, after the check that
+            // it is one (and canonical).
+            "sexpr-int" => match args.first() {
+                Some(v @ Value::Int(_)) | Some(v @ Value::Boxed(_)) => Some(expect_int(heap, v).map(|_| *v).map_err(|_| {
+                    EvalError::Panic("sexpr-int: expected an int Sexpr node".into())
+                })),
+                Some(_) => Some(Err(EvalError::Panic("sexpr-int: expected an int Sexpr node".into()))),
+                _ => Some(Err(EvalError::Internal("sexpr-int: expected a Sexpr argument".into()))),
             },
-            // `sexpr-i8`/`sexpr-i16`/`sexpr-u8`/`sexpr-u16`/`sexpr-u32`: the
-            // narrow widths' peers of `sexpr-i32`. Each accepts only its own
+            // `sexpr-i8`/`sexpr-i16`/`sexpr-u8`/`sexpr-u16`/`sexpr-u32`/
+            // `sexpr-i32`: the fixed widths' readers. Each accepts only its own
             // box, for exactly the reason `sexpr-f64` refuses an `f32` one —
             // answering with a width the caller did not ask for is the loss
             // these variants exist to prevent. The result is the plain
             // normalized word, because that is what a statically typed `u8`
             // is everywhere outside a `Sexpr`.
-            name @ ("sexpr-i8" | "sexpr-i16" | "sexpr-u8" | "sexpr-u16" | "sexpr-u32") => {
+            name @ ("sexpr-i8" | "sexpr-i16" | "sexpr-u8" | "sexpr-u16" | "sexpr-u32" | "sexpr-i32") => {
                 let (width, signed) = match name {
                     "sexpr-i8" => (8u8, true),
                     "sexpr-i16" => (16, true),
                     "sexpr-u8" => (8, false),
                     "sexpr-u16" => (16, false),
-                    _ => (32, false),
+                    "sexpr-u32" => (32, false),
+                    _ => (32, true),
                 };
                 match args.first() {
                     Some(Value::Boxed(id)) if heap.is_narrow(*id, width, signed) => {
@@ -2320,8 +2326,8 @@ impl Interp {
         // *is* a `string`, so a method registered on `string` receives what
         // it declared.
         //
-        // One type, not a list of candidates. `Value::Int` is an `i32` and
-        // nothing else, because the five narrow integer types reach the
+        // One type, not a list of candidates. `Value::Int` is an `int` and
+        // nothing else, because the six narrow integer types reach the
         // printer as boxes that name themselves (`BoxedObj::Narrow`). This
         // used to offer all six integer types and call it an error when more
         // than one defined the name — a guess dressed as a diagnostic, forced
@@ -2342,7 +2348,7 @@ impl Interp {
             Value::Char(_) => Path::root("char"),
             Value::Symbol(_) => Path::root("symbol"),
             Value::Empty | Value::Cons(_) | Value::Path(_) => Path::root("sexpr"),
-            Value::Int(_) => Path::root("i32"),
+            Value::Int(_) => Path::root("int"),
         };
         // A generic receiver's method is registered per instantiation, so the
         // name to look up comes off the value's own key — see
@@ -2855,6 +2861,11 @@ fn is_sexpr_type(type_name: &Path) -> bool {
 pub(crate) fn rt_i64(v: &Value) -> Result<i64, EvalError> {
     match v {
         Value::Int(n) => Ok(*n),
+        // An `int` argument in a machine-word position (an index, a count, a
+        // shift distance): the type admits a bignum, the operation does not.
+        // A language-level error, not an internal one — `(substring s 0
+        // (expt 2 70))` is a program's mistake, reachable from source.
+        Value::Boxed(_) => Err(EvalError::Panic("an integer argument does not fit a fixnum".into())),
         _ => Err(EvalError::Internal("sexpr: expected an i64 field".into())),
     }
 }
@@ -2897,13 +2908,6 @@ fn rt_str(heap: &Heap, v: &Value) -> Result<String, EvalError> {
     }
 }
 
-fn rt_bignum(heap: &Heap, v: &Value) -> Result<BigInt, EvalError> {
-    match v {
-        Value::Boxed(id) if heap.is_bignum(*id) => Ok(heap.bignum_value(*id).clone()),
-        _ => Err(EvalError::Internal("sexpr: expected a bignum field".into())),
-    }
-}
-
 fn rt_ratio(heap: &Heap, v: &Value) -> Result<BigRational, EvalError> {
     match v {
         Value::Boxed(id) if heap.is_ratio(*id) => Ok(heap.ratio_value(*id).clone()),
@@ -2936,14 +2940,20 @@ fn sexpr_list_to_symbols(heap: &Heap, mut v: Value) -> Result<Vec<SymRef>, EvalE
 
 /// Variant indices of `Sexpr`'s constructors (see `check::registry::sexpr_def`).
 const SEXPR_NIL: usize = 0;
-const SEXPR_I32: usize = 1;
+/// `int` — a fixnum or a bignum box, the value's own word. This slot was
+/// `i32` (the fixnum word) until `int` became the language's integer; the
+/// number stays because it is burned into the island's IR.
+const SEXPR_INT: usize = 1;
 const SEXPR_F64: usize = 2;
 const SEXPR_CHAR: usize = 3;
 const SEXPR_BOOL: usize = 4;
 const SEXPR_SYM: usize = 5;
 const SEXPR_STR: usize = 6;
 const SEXPR_CONS: usize = 7;
-const SEXPR_BIGNUM: usize = 8;
+/// Retired with the `bignum` type: a bignum box is an `int` (variant 1)
+/// now. Kept as a number so nothing after it renumbers; never constructed
+/// and never matched (`match_sexpr_core`/`construct_sexpr_core` refuse it).
+const SEXPR_RETIRED_BIGNUM: usize = 8;
 const SEXPR_RATIO: usize = 9;
 const SEXPR_PATH: usize = 10;
 /// Appended after `path`, so the numbers above keep the values burned into
@@ -2958,6 +2968,10 @@ const SEXPR_I16: usize = 13;
 const SEXPR_U8: usize = 14;
 const SEXPR_U16: usize = 15;
 const SEXPR_U32: usize = 16;
+/// `i32` joined the narrow widths when `int` took the fixnum word: inside a
+/// `Sexpr` it is a `NarrowInt` box like the other five, because the word
+/// alone can no longer say "this is an `i32` and not an `int`".
+const SEXPR_I32: usize = 17;
 
 /// The `(width, signed)` pair each narrow-integer `Sexpr` variant names, or
 /// `None` for every other variant — the one table mapping between the two,
@@ -2969,6 +2983,7 @@ pub(crate) fn narrow_variant(variant: usize) -> Option<(u8, bool)> {
         SEXPR_U8 => (8, false),
         SEXPR_U16 => (16, false),
         SEXPR_U32 => (32, false),
+        SEXPR_I32 => (32, true),
         _ => return None,
     })
 }
@@ -3124,23 +3139,6 @@ fn int_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     }
 }
 
-/// `float->int` (`registry::float_assoc`): narrow a float to an `i32`,
-/// truncating toward zero (Rust's `as i32`, same rounding direction as CL's
-/// `truncate`, and the same saturating behaviour on NaN and out-of-range
-/// magnitudes the island's `llvm.fptosi.sat` gives).
-fn float_to_int(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
-    match args.first() {
-        // Either width truncates the same way — the operand's number is what
-        // `fptosi` sees — so the width is read out and then used, not assumed.
-        Some(Value::Boxed(id)) => match heap.float_box(*id) {
-            Some(typelisp_mem::FloatBox::F32(f)) => Ok(Value::Int(i64::from(f as i32))),
-            Some(typelisp_mem::FloatBox::F64(f)) => Ok(Value::Int(i64::from(f as i32))),
-            None => Err(EvalError::Internal(format!("float->int: expected a float, got {:?}", args.first()))),
-        },
-        other => Err(EvalError::Internal(format!("float->int: expected a float, got {:?}", other))),
-    }
-}
-
 /// `int->char` (`registry::int_assoc`): a Unicode scalar value back to
 /// `char`. Panics (same precedent as `car`/`cdr` on a non-`Cons` `Sexpr`) if
 /// the value is outside the valid range — a surrogate code point or past
@@ -3268,19 +3266,6 @@ fn width_cast_target(method: &str, prefix: &str) -> Option<(u32, bool)> {
     method.strip_prefix(prefix).and_then(crate::types::int_width_signed)
 }
 
-/// The `BigInt` behind a `bignum` value, cloned out of its heap box.
-///
-/// Owned rather than borrowed because every caller goes on to *allocate* the
-/// result — `&mut Heap` for the allocation cannot coexist with a `&BigInt`
-/// borrowed from the same heap. The clone is bounded by the operand's limb
-/// count, and every caller is already doing multi-precision arithmetic on it.
-fn expect_bignum(heap: &Heap, v: &Value) -> Result<BigInt, EvalError> {
-    match v {
-        Value::Boxed(id) if heap.is_bignum(*id) => Ok(heap.bignum_value(*id).clone()),
-        other => Err(EvalError::Internal(format!("expected a bignum, got {:?}", other))),
-    }
-}
-
 /// The `BigRational` behind a `ratio` value — see [`expect_bignum`] for why
 /// this is owned rather than borrowed.
 fn expect_ratio(heap: &Heap, v: &Value) -> Result<BigRational, EvalError> {
@@ -3288,15 +3273,6 @@ fn expect_ratio(heap: &Heap, v: &Value) -> Result<BigRational, EvalError> {
         Value::Boxed(id) if heap.is_ratio(*id) => Ok(heap.ratio_value(*id).clone()),
         other => Err(EvalError::Internal(format!("expected a ratio, got {:?}", other))),
     }
-}
-
-/// A `bignum` value: `n` boxed onto the GC heap. The one constructor, so
-/// there is exactly one runtime shape for a `bignum` — this used to be a
-/// Rust-side `RtValue::Bignum(Rc<BigInt>)` that had to be copied onto the heap
-/// at every boundary (a struct field, a compiled call) and copied back off on
-/// the way home.
-fn bignum_rt(heap: &mut Heap, n: BigInt) -> Value {
-    heap.alloc_bignum(n)
 }
 
 /// A `ratio` value — the [`bignum_rt`] counterpart.
@@ -3315,68 +3291,12 @@ pub fn str_rt(heap: &mut Heap, s: impl Into<String>) -> Value {
     heap.alloc_string(s.into())
 }
 
-/// Evaluate a built-in `bignum` arithmetic/comparison instance method
-/// (`registry::bignum_assoc`). Core integer operations: `+ - * /` (`/`
-/// truncates toward zero) and `mod` (floored, CL — sign of the divisor), each
-/// panicking on a zero divisor (the type system can't express "nonzero", the
-/// same precedent as `car`/`cdr` on a non-`Cons` `Sexpr`). The rest of the CL
-/// integer catalog (`rem`/`abs`/`signum`/`gcd`/`lcm`/`expt`) lives in
-/// `prelude.rs` as typelisp methods built from these.
-fn eval_bignum_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
-    use num_integer::Integer;
-    // `ash` and `logbitp` take a bit count as their second operand, not
-    // another bignum (`registry::bignum_assoc`), so they cannot go through
-    // the two-bignum decode below.
-    if name == "ash" || name == "logbitp" {
-        return Some(eval_bignum_shift(heap, name, args));
-    }
-    let (a, b) = match (args.first(), args.get(1)) {
-        (Some(a), Some(b)) => match (expect_bignum(heap, a), expect_bignum(heap, b)) {
-            (Ok(a), Ok(b)) => (a, b),
-            (Err(e), _) | (_, Err(e)) => return Some(Err(e)),
-        },
-        _ => return Some(Err(EvalError::Internal(format!("{}: expected two bignums", name)))),
-    };
-    let v = match name {
-        "+" => bignum_rt(heap, &a + &b),
-        "-" => bignum_rt(heap, &a - &b),
-        "*" => bignum_rt(heap, &a * &b),
-        "/" => {
-            if b.is_zero() {
-                return Some(Err(EvalError::Panic("divide by zero".into())));
-            }
-            bignum_rt(heap, &a / &b)
-        }
-        "mod" => {
-            if b.is_zero() {
-                return Some(Err(EvalError::Panic("mod by zero".into())));
-            }
-            // CL `mod`: floored remainder (sign of the divisor).
-            bignum_rt(heap, a.mod_floor(&b))
-        }
-        "<" => Value::Bool(a < b),
-        "<=" => Value::Bool(a <= b),
-        ">" => Value::Bool(a > b),
-        ">=" => Value::Bool(a >= b),
-        "=" => Value::Bool(a == b),
-        "/=" => Value::Bool(a != b),
-        "max" => bignum_rt(heap, if a >= b { a } else { b }),
-        "min" => bignum_rt(heap, if a <= b { a } else { b }),
-        "logand" => bignum_rt(heap, &a & &b),
-        "logior" => bignum_rt(heap, &a | &b),
-        "logxor" => bignum_rt(heap, &a ^ &b),
-        "logtest" => Value::Bool(!(&a & &b).is_zero()),
-        _ => unreachable!(),
-    };
-    Some(Ok(v))
-}
-
 // ---- `int`: fixnum ∪ bignum ------------------------------------------------
 
 /// An `int` operand as the interpreter reads it: a fixnum straight out of
 /// its `Value::Int`, or the `BigInt` cloned out of its box (owned, for the
 /// reason [`expect_bignum`] gives — every caller goes on to allocate).
-enum IntArg {
+pub(super) enum IntArg {
     Fix(i64),
     Big(BigInt),
 }
@@ -3394,7 +3314,7 @@ impl IntArg {
 /// a `Value::Int` past the fixnum range or a bignum box holding one inside it
 /// is a producer that skipped `Heap::canonical_int`, reported as the internal
 /// error it is rather than computed with.
-fn expect_int(heap: &Heap, v: &Value) -> Result<IntArg, EvalError> {
+pub(super) fn expect_int(heap: &Heap, v: &Value) -> Result<IntArg, EvalError> {
     match v {
         Value::Int(n) if typelisp_mem::fixnum_fits(*n) => Ok(IntArg::Fix(*n)),
         Value::Int(n) => Err(EvalError::Internal(format!("an int fixnum out of range: {}", n))),
@@ -3592,8 +3512,8 @@ fn width_to_int(heap: &mut Heap, args: &[Value], width: u32, signed: bool) -> Re
     Ok(heap.canonical_int(n))
 }
 
-/// `int->float`/`int->ratio`/`int->char`/`try-int->char`/`int->bignum` on
-/// an `int` receiver.
+/// `int->float`/`int->ratio`/`int->char`/`try-int->char` on an `int`
+/// receiver.
 fn integer_conversion(heap: &mut Heap, method: &str, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let a = expect_int(heap, &args[0])?;
     match method {
@@ -3616,12 +3536,6 @@ fn integer_conversion(heap: &mut Heap, method: &str, args: &[Value], ret_key: &s
                 Ok(option_value(heap, ret_key, c.map(Value::Char)))
             }
         }
-        // While `bignum` is still a type of its own: a fixnum is boxed for
-        // it, and a bignum box already is one.
-        "int->bignum" => Ok(match a {
-            IntArg::Fix(n) => bignum_rt(heap, BigInt::from(n)),
-            IntArg::Big(_) => args[0],
-        }),
         "int->int" => Ok(args[0]),
         _ => Err(EvalError::Internal(format!("integer_conversion: {}", method))),
     }
@@ -3630,75 +3544,6 @@ fn integer_conversion(heap: &mut Heap, method: &str, args: &[Value], ret_key: &s
 /// An `int` as text, for `print`/`println`.
 fn int_to_string(heap: &Heap, v: &Value) -> Result<String, EvalError> {
     Ok(expect_int(heap, v)?.into_big().to_string())
-}
-
-/// `bignum`'s `ash`/`logbitp` — the two whose second operand counts bits
-/// rather than being another bignum.
-///
-/// A bit count is an `i32` here for the reason `registry::bignum_assoc`
-/// gives: `(ash big huge)` with an arbitrary-precision `huge` names a result
-/// nothing can build, so the wider type describes no usable call. Both
-/// operations are therefore shaped exactly like their fixed-width
-/// counterparts in `eval_int_builtin`, minus the width to clamp against —
-/// `BigInt`'s own `Shr` is floor-based (arithmetic, sign-extending) like
-/// `i64`'s, so a right shift past every bit lands on `-1` or `0` by itself.
-fn eval_bignum_shift(heap: &mut Heap, name: &str, args: &[Value]) -> Result<Value, EvalError> {
-    let n = match args.first() {
-        Some(v) => expect_bignum(heap, v)?,
-        None => return Err(EvalError::Internal(format!("{}: expected a bignum receiver", name))),
-    };
-    let count = match args.get(1) {
-        Some(v) => rt_i64(v)?,
-        None => return Err(EvalError::Internal(format!("{}: expected a bit count", name))),
-    };
-    Ok(match name {
-        "ash" => {
-            if count >= 0 {
-                bignum_rt(heap, n << (count as u64))
-            } else {
-                bignum_rt(heap, n >> ((-count) as u64))
-            }
-        }
-        // A negative position has no bit to read; CL leaves it undefined, and
-        // the fixed-width `logbitp` never sees one because it compares
-        // against the width first. Reading the sign is the answer that agrees
-        // with "infinite two's complement" for every position at or past the
-        // value's own length.
-        "logbitp" => Value::Bool(if count < 0 {
-            n.sign() == num_bigint::Sign::Minus
-        } else {
-            ((n >> (count as u64)) & BigInt::from(1)) == BigInt::from(1)
-        }),
-        _ => unreachable!("eval_bignum_shift: {}", name),
-    })
-}
-
-/// Unary `bignum` builtins (`lognot`/`logcount`/`integer-length`,
-/// `registry::bignum_assoc`) — CL §12.10's "infinite two's complement"
-/// reading, the arbitrary-precision counterpart of [`int_unary`].
-fn bignum_unary(heap: &mut Heap, args: &[Value], name: &str) -> Result<Value, EvalError> {
-    let a = expect_bignum(heap, &args[0])?;
-    let v = match name {
-        "lognot" => bignum_rt(heap, !&a),
-        // A negative bignum's 1-bits are infinite (the sign extension), so
-        // CL counts its *0*-bits instead — the same identity
-        // `eval_int_builtin`'s `logcount` uses: `popcount(n) = popcount(!n)`
-        // for `n < 0`, and `!n` is nonnegative whenever `n` is negative.
-        "logcount" => {
-            let n = if a.sign() == num_bigint::Sign::Minus { !&a } else { a.clone() };
-            let count: u64 = n.magnitude().to_u32_digits().iter().map(|d| d.count_ones() as u64).sum();
-            bignum_rt(heap, BigInt::from(count))
-        }
-        // Bits needed excluding sign: `n`'s own magnitude bit-length when
-        // nonnegative, else `(-n-1)`'s (CL's own negative-integer-length
-        // identity — the same one `eval_int_builtin`'s `integer-length` uses).
-        "integer-length" => {
-            let bits = if a.sign() == num_bigint::Sign::Minus { (-(&a) - 1u32).magnitude().bits() } else { a.magnitude().bits() };
-            bignum_rt(heap, BigInt::from(bits))
-        }
-        _ => unreachable!(),
-    };
-    Ok(v)
 }
 
 /// Evaluate a built-in `ratio` arithmetic/comparison instance method
@@ -3737,80 +3582,28 @@ fn eval_ratio_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
     Some(Ok(v))
 }
 
-/// `int->bignum` (`registry::int_assoc`, `registry::c_word_assoc`):
-/// always-exact widening.
-///
-/// "Always exact" is a claim about the *receiver's* type, so the receiver's
-/// width and signedness decide how the word reads. Every integer type narrower
-/// than the register is already the number it names — the normalization
-/// invariant sign- or zero-extends it into the 64-bit word — so for those the
-/// word's own sign is the right one. The single width where the two disagree
-/// is 64: `c-ulong`'s word with its top bit set is a number above `i64::MAX`,
-/// not a negative one. Reading it as `i64` would make the one conversion that
-/// promises to lose nothing lose the most.
-fn int_to_bignum(heap: &mut Heap, args: &[Value], width: u32, signed: bool) -> Result<Value, EvalError> {
-    let word = rt_i64(&args[0])?;
-    let n = if !signed && width == 64 { BigInt::from(word as u64) } else { BigInt::from(word) };
-    Ok(bignum_rt(heap, n))
-}
-
 /// `int->ratio` (`registry::int_assoc`): always-exact widening.
 fn int_to_ratio(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     Ok(ratio_rt(heap, BigRational::from_integer(BigInt::from(rt_i64(&args[0])?))))
 }
 
-/// `bignum->int` (`registry::bignum_assoc`): narrowing, panics if the value
-/// doesn't fit in an `i64` — the type system can't express "in range", same
-/// precedent as `int->char`'s Unicode-scalar-value check.
-fn bignum_to_int(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let n = expect_bignum(heap, &args[0])?;
-    n.to_i32()
-        .map(|v| Value::Int(i64::from(v)))
-        .ok_or_else(|| EvalError::Panic(format!("bignum->int: {} does not fit in an i32", n)))
-}
-
-/// `try-bignum->int` (`registry::bignum_assoc`): the `Option`-returning
-/// counterpart of [`bignum_to_int`], for `Checker::check_as`'s `try-as` —
-/// same "fits in an `i32`" check, `None` instead of a panic on overflow.
-fn try_bignum_to_int(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
-    let n = expect_bignum(heap, &args[0])?;
-    let int = n.to_i32().map(|v| Value::Int(i64::from(v)));
-    Ok(option_value(heap, ret_key, int))
-}
-
-/// `bignum->float` (`registry::bignum_assoc`): widening, possibly lossy for
-/// a magnitude beyond `f64`'s 53-bit mantissa (IEEE-754 rounds to the
-/// nearest representable value, same as any other narrowing-precision
-/// numeric conversion).
-fn bignum_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let n = expect_bignum(heap, &args[0])?;
-    let f = n.to_f64().unwrap_or(f64::INFINITY.copysign(if n.sign() == num_bigint::Sign::Minus { -1.0 } else { 1.0 }));
-    Ok(heap.alloc_f64(f))
-}
-
-/// `bignum->ratio` (`registry::bignum_assoc`): always-exact widening.
-fn bignum_to_ratio(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let n = expect_bignum(heap, &args[0])?;
-    Ok(ratio_rt(heap, BigRational::from_integer(n)))
-}
-
-/// `float->bignum` (`registry::float_assoc`): narrowing, truncating toward
-/// zero (`f64 as i64`'s multi-precision analogue). Panics on a non-finite
-/// float (`NaN`/`inf`) — there is no bignum value to truncate to, the same
-/// "value outside the representable range" panic precedent as
-/// `int->char`/`bignum->int`.
-fn float_to_bignum(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+/// `float->int` (`registry::float_assoc`): truncating toward zero into the
+/// arbitrary-precision `int` — exact for every finite float, whatever its
+/// magnitude (CL's `truncate`). Panics on a non-finite float (`NaN`/`inf`):
+/// there is no integer to truncate to, the same "value outside the
+/// representable range" panic precedent as `int->char`.
+fn float_to_int(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let f = expect_float(heap, &args[0])?;
     if !f.is_finite() {
-        return Err(EvalError::Panic(format!("float->bignum: {} is not finite", f)));
+        return Err(EvalError::Panic(format!("float->int: {} is not finite", f)));
     }
-    Ok(bignum_rt(heap, BigInt::from_f64(f.trunc()).expect("a finite float truncates to a representable BigInt")))
+    Ok(heap.int_from_bigint(BigInt::from_f64(f.trunc()).expect("a finite float truncates to a representable BigInt")))
 }
 
 /// `float->ratio` (`registry::float_assoc`): widening and *exact* — every
 /// finite `f64` is itself an exact dyadic rational (CL's `rational`, not the
 /// lossy-round-trip-through-decimal `rationalize`). Panics on a non-finite
-/// float, same precedent as [`float_to_bignum`].
+/// float, same precedent as [`float_to_int`].
 fn float_to_ratio(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let f = expect_float(heap, &args[0])?;
     BigRational::from_float(f)
@@ -3818,11 +3611,11 @@ fn float_to_ratio(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
         .ok_or_else(|| EvalError::Panic(format!("float->ratio: {} is not finite", f)))
 }
 
-/// `ratio->bignum` (`registry::ratio_assoc`): narrowing, truncating toward
+/// `ratio->int` (`registry::ratio_assoc`): narrowing, truncating toward
 /// zero (CL's `truncate`) — `Ratio::to_integer` already does exactly this.
-fn ratio_to_bignum(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
+fn ratio_to_int(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
     let r = expect_ratio(heap, &args[0])?;
-    Ok(bignum_rt(heap, r.to_integer()))
+    Ok(heap.int_from_bigint(r.to_integer()))
 }
 
 /// `ratio->float` (`registry::ratio_assoc`): widening, possibly lossy
@@ -3835,14 +3628,16 @@ fn ratio_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
 
 /// `numerator`/`denominator` (`registry::ratio_assoc`): the reduced
 /// components of a `ratio` — CL's own accessors of the same names — as
-/// `bignum`. The denominator of a normalized `ratio` is always positive (see
+/// `int`. The denominator of a normalized `ratio` is always positive (see
 /// `BoxedObj::Ratio`'s doc comment), matching CL's guarantee.
 fn ratio_numerator(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    Ok(bignum_rt(heap, expect_ratio(heap, &args[0])?.numer().clone()))
+    let n = expect_ratio(heap, &args[0])?.numer().clone();
+    Ok(heap.int_from_bigint(n))
 }
 
 fn ratio_denominator(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    Ok(bignum_rt(heap, expect_ratio(heap, &args[0])?.denom().clone()))
+    let n = expect_ratio(heap, &args[0])?.denom().clone();
+    Ok(heap.int_from_bigint(n))
 }
 
 /// One step of a 64-bit xorshift generator — the bit-twiddling behind every
@@ -4184,7 +3979,6 @@ fn eval_builtin_method(
             "int->float" => Some(int_to_float(heap, args)),
             "int->char" => Some(int_to_char(args)),
             "try-int->char" => Some(try_int_to_char(heap, args, ret_key)),
-            "int->bignum" => Some(int_to_bignum(heap, args, width, signed)),
             "int->int" => Some(width_to_int(heap, args, width, signed)),
             "int->ratio" => Some(int_to_ratio(heap, args)),
             _ if width_cast_target(method, "int->").is_some() => {
@@ -4238,7 +4032,6 @@ fn eval_builtin_method(
             "exp" => Some(float_unary(heap, args, f64::exp, single)),
             "log" => Some(float_unary(heap, args, f64::ln, single)),
             "float->int" => Some(float_to_int(heap, args)),
-            "float->bignum" => Some(float_to_bignum(heap, args)),
             "float->ratio" => Some(float_to_ratio(heap, args)),
             "print" => Some(rt_f64(heap, &args[0]).and_then(|f| write_stdout(&format_float_for_print(f), false))),
             "println" => Some(rt_f64(heap, &args[0]).and_then(|f| write_stdout(&format_float_for_print(f), true))),
@@ -4251,7 +4044,7 @@ fn eval_builtin_method(
             | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_integer_builtin(heap, method, args),
             "lognot" | "logcount" | "integer-length" => Some(integer_unary(heap, args, method)),
             "eq" | "eql" | "equal" | "equalp" => eval_integer_builtin(heap, "=", args),
-            "int->float" | "int->ratio" | "int->char" | "try-int->char" | "int->bignum" | "int->int" => {
+            "int->float" | "int->ratio" | "int->char" | "try-int->char" | "int->int" => {
                 Some(integer_conversion(heap, method, args, ret_key))
             }
             _ if width_cast_target(method, "int->").is_some() => {
@@ -4267,28 +4060,13 @@ fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::root("bignum") {
-        return match method {
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
-            | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_bignum_builtin(heap, method, args),
-            "lognot" | "logcount" | "integer-length" => Some(bignum_unary(heap, args, method)),
-            "eq" | "eql" | "equal" | "equalp" => eval_bignum_builtin(heap, "=", args),
-            "bignum->int" => Some(bignum_to_int(heap, args)),
-            "try-bignum->int" => Some(try_bignum_to_int(heap, args, ret_key)),
-            "bignum->float" => Some(bignum_to_float(heap, args)),
-            "bignum->ratio" => Some(bignum_to_ratio(heap, args)),
-            "print" => Some(expect_bignum(heap, &args[0]).and_then(|n| write_stdout(&n.to_string(), false))),
-            "println" => Some(expect_bignum(heap, &args[0]).and_then(|n| write_stdout(&n.to_string(), true))),
-            _ => None,
-        };
-    }
     if *type_name == Path::root("ratio") {
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_ratio_builtin(heap, method, args)
             }
             "eq" | "eql" | "equal" | "equalp" => eval_ratio_builtin(heap, "=", args),
-            "ratio->bignum" => Some(ratio_to_bignum(heap, args)),
+            "ratio->int" => Some(ratio_to_int(heap, args)),
             "ratio->float" => Some(ratio_to_float(heap, args)),
             "numerator" => Some(ratio_numerator(heap, args)),
             "denominator" => Some(ratio_denominator(heap, args)),
@@ -4741,6 +4519,7 @@ fn expect_int_index(v: &Value) -> Result<usize, EvalError> {
     match v {
         Value::Int(n) if *n >= 0 => Ok(*n as usize),
         Value::Int(n) => Err(EvalError::Panic(format!("Vector: index {} out of bounds", n))),
+        Value::Boxed(_) => Err(EvalError::Panic("Vector: index does not fit a fixnum".into())),
         other => Err(EvalError::Internal(format!("Vector: index is not an integer: {:?}", other))),
     }
 }

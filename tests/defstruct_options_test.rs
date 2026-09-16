@@ -39,7 +39,7 @@ fn check_err(src: &str) -> String {
 #[test]
 fn an_option_list_with_no_options_behaves_like_a_bare_name() {
     let src = "
-        (defstruct (point) (x i32) (y i32))
+        (defstruct (point) (x int) (y int))
         (x (point::new 3 4))
     ";
     assert_eq!(eval_ok(src), Value::Int(3));
@@ -48,7 +48,7 @@ fn an_option_list_with_no_options_behaves_like_a_bare_name() {
 #[test]
 fn a_docstring_still_follows_the_option_list() {
     let src = "
-        (defstruct (point) \"a place\" (x i32) (y i32))
+        (defstruct (point) \"a place\" (x int) (y int))
         (match (documentation point) ((some s) (length s)) ((none) 0))
     ";
     assert_eq!(eval_ok(src), Value::Int(7));
@@ -60,8 +60,8 @@ fn a_docstring_still_follows_the_option_list() {
 fn a_keyword_constructor_fills_omitted_slots_from_their_defaults() {
     let src = "
         (defstruct (point (:constructor make-point))
-          (x i32 0)
-          (y i32 0))
+          (x int 0)
+          (y int 0))
         (+ (x (point::make-point :y 7)) (y (point::make-point :y 7)))
     ";
     assert_eq!(eval_ok(src), Value::Int(7));
@@ -71,8 +71,8 @@ fn a_keyword_constructor_fills_omitted_slots_from_their_defaults() {
 fn a_keyword_constructor_takes_every_slot_by_label() {
     let src = "
         (defstruct (point (:constructor make-point))
-          (x i32 0)
-          (y i32 0))
+          (x int 0)
+          (y int 0))
         (+ (x (point::make-point :x 2 :y 3)) (y (point::make-point :x 2 :y 3)))
     ";
     assert_eq!(eval_ok(src), Value::Int(5));
@@ -80,7 +80,7 @@ fn a_keyword_constructor_takes_every_slot_by_label() {
 
 #[test]
 fn a_keyword_constructor_needs_a_default_on_every_slot() {
-    let msg = check_err("(defstruct (point (:constructor make-point)) (x i32) (y i32 0))");
+    let msg = check_err("(defstruct (point (:constructor make-point)) (x int) (y int 0))");
     assert!(msg.contains("needs a default"), "unexpected message: {}", msg);
 }
 
@@ -90,8 +90,8 @@ fn a_keyword_constructor_needs_a_default_on_every_slot() {
 fn a_boa_constructor_takes_the_slots_it_names_positionally() {
     let src = "
         (defstruct (point (:constructor of-x (x)))
-          (x i32)
-          (y i32 100))
+          (x int)
+          (y int 100))
         (+ (x (point::of-x 5)) (y (point::of-x 5)))
     ";
     assert_eq!(eval_ok(src), Value::Int(105));
@@ -101,8 +101,8 @@ fn a_boa_constructor_takes_the_slots_it_names_positionally() {
 fn a_boa_constructor_may_reorder_the_slots() {
     let src = "
         (defstruct (point (:constructor yx (y x)))
-          (x i32)
-          (y i32))
+          (x int)
+          (y int))
         (- (x (point::yx 1 9)) (y (point::yx 1 9)))
     ";
     assert_eq!(eval_ok(src), Value::Int(8));
@@ -112,8 +112,8 @@ fn a_boa_constructor_may_reorder_the_slots() {
 fn a_boa_constructor_takes_an_optional_slot() {
     let src = "
         (defstruct (point (:constructor at (x &optional y)))
-          (x i32)
-          (y i32 50))
+          (x int)
+          (y int 50))
         (+ (y (point::at 1)) (y (point::at 1 2)))
     ";
     assert_eq!(eval_ok(src), Value::Int(52));
@@ -123,8 +123,8 @@ fn a_boa_constructor_takes_an_optional_slot() {
 fn several_constructors_may_be_declared() {
     let src = "
         (defstruct (point (:constructor origin) (:constructor of-x (x)))
-          (x i32 0)
-          (y i32 0))
+          (x int 0)
+          (y int 0))
         (+ (x (point::origin)) (x (point::of-x 4)))
     ";
     assert_eq!(eval_ok(src), Value::Int(4));
@@ -132,19 +132,19 @@ fn several_constructors_may_be_declared() {
 
 #[test]
 fn a_boa_constructor_may_not_name_a_non_slot() {
-    let msg = check_err("(defstruct (point (:constructor f (z))) (x i32))");
+    let msg = check_err("(defstruct (point (:constructor f (z))) (x int))");
     assert!(msg.contains("not a slot"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn a_boa_constructor_must_be_able_to_fill_every_slot() {
-    let msg = check_err("(defstruct (point (:constructor f (x))) (x i32) (y i32))");
+    let msg = check_err("(defstruct (point (:constructor f (x))) (x int) (y int))");
     assert!(msg.contains("could not fill"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn an_optional_boa_slot_needs_a_default() {
-    let msg = check_err("(defstruct (point (:constructor f (x &optional y))) (x i32) (y i32))");
+    let msg = check_err("(defstruct (point (:constructor f (x &optional y))) (x int) (y int))");
     assert!(msg.contains("needs a default"), "unexpected message: {}", msg);
 }
 
@@ -153,7 +153,7 @@ fn an_optional_boa_slot_needs_a_default() {
 #[test]
 fn a_copier_returns_an_independent_value() {
     let src = "
-        (defstruct (point (:copier copy-point)) (x i32) (y i32))
+        (defstruct (point (:copier copy-point)) (x int) (y int))
         (let ((a (point::new 1 2)))
           (let ((b (copy-point a)))
             (progn (set-x b 9) (+ (x a) (x b)))))
@@ -166,8 +166,8 @@ fn a_copier_returns_an_independent_value() {
 #[test]
 fn include_prepends_the_parents_slots() {
     let src = "
-        (defstruct base (id i32))
-        (defstruct (derived (:include base)) (extra i32))
+        (defstruct base (id int))
+        (defstruct (derived (:include base)) (extra int))
         (+ (id (derived::new 1 2)) (extra (derived::new 1 2)))
     ";
     assert_eq!(eval_ok(src), Value::Int(3));
@@ -176,8 +176,8 @@ fn include_prepends_the_parents_slots() {
 #[test]
 fn include_carries_the_parents_slot_defaults() {
     let src = "
-        (defstruct (base (:constructor mk-base)) (id i32 7))
-        (defstruct (derived (:include base) (:constructor mk (extra))) (extra i32))
+        (defstruct (base (:constructor mk-base)) (id int 7))
+        (defstruct (derived (:include base) (:constructor mk (extra))) (extra int))
         (id (derived::mk 1))
     ";
     assert_eq!(eval_ok(src), Value::Int(7));
@@ -186,15 +186,15 @@ fn include_carries_the_parents_slot_defaults() {
 #[test]
 fn include_rejects_a_duplicated_slot_name() {
     let src = "
-        (defstruct base (id i32))
-        (defstruct (derived (:include base)) (id i32))
+        (defstruct base (id int))
+        (defstruct (derived (:include base)) (id int))
     ";
     assert!(check_err(src).contains("duplicate field"), "{}", check_err(src));
 }
 
 #[test]
 fn include_rejects_a_non_struct() {
-    let msg = check_err("(defenum e (a) (b)) (defstruct (d (:include e)) (x i32))");
+    let msg = check_err("(defenum e (a) (b)) (defstruct (d (:include e)) (x int))");
     assert!(msg.contains("only a `defstruct` has slots"), "unexpected message: {}", msg);
 }
 
@@ -203,9 +203,9 @@ fn a_child_is_not_a_subtype_of_its_parent() {
     // `:include` copies the slot list and nothing else — there is no
     // subtyping in this language, so a `derived` is not a `base`.
     let src = "
-        (defstruct base (id i32))
-        (defstruct (derived (:include base)) (extra i32))
-        (defun takes-base ((b base)) i32 (id b))
+        (defstruct base (id int))
+        (defstruct (derived (:include base)) (extra int))
+        (defun takes-base ((b base)) int (id b))
         (takes-base (derived::new 1 2))
     ";
     let msg = check_err(src);
@@ -236,33 +236,33 @@ fn a_generic_structs_copier_works() {
 
 #[test]
 fn conc_name_is_refused_with_its_reason() {
-    let msg = check_err("(defstruct (point (:conc-name p-)) (x i32))");
+    let msg = check_err("(defstruct (point (:conc-name p-)) (x int))");
     assert!(msg.contains("nothing to do here"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn predicate_is_refused_with_its_reason() {
-    let msg = check_err("(defstruct (point (:predicate pointp)) (x i32))");
+    let msg = check_err("(defstruct (point (:predicate pointp)) (x int))");
     assert!(msg.contains("nothing to answer"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn type_and_friends_are_refused_with_their_reason() {
     for opt in ["(:type list)", "(:initial-offset 1)", "(:named)"] {
-        let msg = check_err(&format!("(defstruct (point {}) (x i32))", opt));
+        let msg = check_err(&format!("(defstruct (point {}) (x int))", opt));
         assert!(msg.contains("belongs to the compiler"), "unexpected message for {}: {}", opt, msg);
     }
 }
 
 #[test]
 fn an_unknown_option_names_the_known_ones() {
-    let msg = check_err("(defstruct (point (:nope 1)) (x i32))");
+    let msg = check_err("(defstruct (point (:nope 1)) (x int))");
     assert!(msg.contains(":constructor, :copier, :include"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn a_slot_default_without_a_constructor_is_refused() {
-    let msg = check_err("(defstruct point (x i32 0))");
+    let msg = check_err("(defstruct point (x int 0))");
     assert!(msg.contains("nothing would use it"), "unexpected message: {}", msg);
 }
 
@@ -271,8 +271,8 @@ fn a_slot_default_without_a_constructor_is_refused() {
 #[test]
 fn a_generated_constructor_compiles() {
     let src = "
-        (defstruct (point (:constructor make-point)) (x i32 1) (y i32 2))
-        (defun run () i32 (+ (x (point::make-point :y 5)) (y (point::make-point :y 5))))
+        (defstruct (point (:constructor make-point)) (x int 1) (y int 2))
+        (defun run () int (+ (x (point::make-point :y 5)) (y (point::make-point :y 5))))
         (compile run)
         (run)
     ";

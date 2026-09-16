@@ -161,7 +161,7 @@ fn assert_type_error_with_prelude(src: &str) {
 
 #[test]
 fn literal_types() {
-    assert_eq!(ty("42"), Type::I32); // integer literals default to i32
+    assert_eq!(ty("42"), Type::Int); // integer literals default to int
     assert_eq!(ty("3.14"), Type::F64);
     assert_eq!(ty("true"), Type::Bool);
     assert_eq!(ty("#\\a"), Type::Char);
@@ -196,7 +196,7 @@ fn symbol_is_accepted_where_sexpr_expected() {
 
 #[test]
 fn if_expression() {
-    assert_eq!(ty("(if true 1 2)"), Type::I32);
+    assert_eq!(ty("(if true 1 2)"), Type::Int);
 }
 
 #[test]
@@ -213,8 +213,8 @@ fn if_branches_must_agree() {
 
 #[test]
 fn let_binding_infers_and_uses() {
-    assert_eq!(ty("(let ((x 1)) x)"), Type::I32);
-    assert_eq!(ty("(let ((x true) (y 2)) y)"), Type::I32);
+    assert_eq!(ty("(let ((x 1)) x)"), Type::Int);
+    assert_eq!(ty("(let ((x true) (y 2)) y)"), Type::Int);
 }
 
 #[test]
@@ -226,28 +226,28 @@ fn unbound_variable_errors() {
 
 #[test]
 fn defun_registers_and_checks_body() {
-    let c = program("(defun id ((x i32)) i32 x)").unwrap();
+    let c = program("(defun id ((x int)) int x)").unwrap();
     assert_eq!(c.tag, "defun");
-    assert_eq!(ret_of("(defun id ((x i32)) i32 x)", "id"), Type::I32);
+    assert_eq!(ret_of("(defun id ((x int)) int x)", "id"), Type::Int);
 }
 
 #[test]
 fn defun_body_must_match_return_type() {
     assert!(matches!(
-        program("(defun bad ((x i32)) bool x)"),
+        program("(defun bad ((x int)) bool x)"),
         Err(Error::TypeError(_))
     ));
 }
 
 #[test]
 fn call_checks_argument_and_result_types() {
-    assert_eq!(ty_program("(defun id ((x i32)) i32 x) (id 7)"), Type::I32);
+    assert_eq!(ty_program("(defun id ((x int)) int x) (id 7)"), Type::Int);
 }
 
 #[test]
 fn call_rejects_wrong_argument_type() {
     assert!(matches!(
-        program("(defun id ((x i32)) i32 x) (id true)"),
+        program("(defun id ((x int)) int x) (id true)"),
         Err(Error::TypeError(_))
     ));
 }
@@ -262,16 +262,16 @@ fn ty_program(src: &str) -> Type {
 
 #[test]
 fn construct_some_infers_type_argument() {
-    assert_eq!(ty("(option::some 1)"), Type::Named(Path::root("option"), vec![Type::I32]));
+    assert_eq!(ty("(option::some 1)"), Type::Named(Path::root("option"), vec![Type::Int]));
 }
 
 #[test]
 fn sexpr_cons_yields_an_option_sexpr() {
-    // `(sexpr-cons (i32 1) ())`: both slots are `Option<Sexpr>`, and `()`
+    // `(sexpr-cons (int 1) ())`: both slots are `Option<Sexpr>`, and `()`
     // adopts `none` there. (The free `cons`/`Cons` name is the generic
     // `cons<T,U>` pair now — the Sexpr cons cell is built through the
     // `sexpr-*` layer — Phase 4b.)
-    assert_eq!(ty("(sexpr-cons (i32 1) ())"), opt_sexpr());
+    assert_eq!(ty("(sexpr-cons (int 1) ())"), opt_sexpr());
 }
 
 #[test]
@@ -303,16 +303,16 @@ fn nil_is_no_longer_a_sexpr_constructor() {
 #[test]
 fn an_option_sexpr_does_not_narrow_to_a_bare_sexpr() {
     // Widening: fine, and free.
-    assert!(program("(defun f ((s Option<Sexpr>)) i32 1) (f (i32 1))").is_ok());
+    assert!(program("(defun f ((s Option<Sexpr>)) int 1) (f (int 1))").is_ok());
     // Narrowing: rejected.
-    let err = program("(defun f ((s Sexpr)) i32 1) (f (the Option<Sexpr> ()))")
+    let err = program("(defun f ((s Sexpr)) int 1) (f (the Option<Sexpr> ()))")
         .expect_err("narrowing should be rejected");
     let msg = format!("{:?}", err);
     assert!(msg.contains("type mismatch"), "unexpected error: {}", msg);
     // A user ADT still widens into an S-expression slot — the rule this
     // exclusion is carved out of must stay intact.
     assert!(program(
-        "(defstruct point (x i32)) (defun f ((s Option<Sexpr>)) i32 1) (f (point::new 1))"
+        "(defstruct point (x int)) (defun f ((s Option<Sexpr>)) int 1) (f (point::new 1))"
     )
     .is_ok());
 }
@@ -328,48 +328,48 @@ fn the_empty_list_is_an_option_sexpr_none() {
 
 #[test]
 fn construct_int_field_adopts_the_declared_width() {
-    // The `i32` variant's field is an `i32`; the literal must adopt that type.
-    assert_eq!(ty("(i32 5)"), Type::Named(Path::root("sexpr"), vec![]));
+    // The `int` variant's field is an `int`; the literal must adopt that type.
+    assert_eq!(ty("(int 5)"), Type::Named(Path::root("sexpr"), vec![]));
 }
 
 // ---- match ------------------------------------------------------------------
 
 #[test]
 fn match_option_exhaustive_unwrap_or() {
-    // The canonical minimal goal: unwrap-or over Option<i32> type-checks.
-    let src = "(defun unwrap-or ((opt Option<i32>) (default i32)) i32 \
+    // The canonical minimal goal: unwrap-or over Option<int> type-checks.
+    let src = "(defun unwrap-or ((opt Option<int>) (default int)) int \
                  (match opt \
                    ((Some v) v) \
                    ((None) default)))";
     assert_eq!(program(src).unwrap().tag, "defun");
-    assert_eq!(ret_of(src, "unwrap-or"), Type::I32);
+    assert_eq!(ret_of(src, "unwrap-or"), Type::Int);
 }
 
 #[test]
 fn match_non_exhaustive_is_rejected() {
-    let src = "(defun f ((opt Option<i32>)) i32 \
+    let src = "(defun f ((opt Option<int>)) int \
                  (match opt ((Some v) v)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
 #[test]
 fn match_wildcard_makes_exhaustive() {
-    let src = "(defun f ((opt Option<i32>)) i32 \
+    let src = "(defun f ((opt Option<int>)) int \
                  (match opt ((Some v) v) (_ 0)))";
     assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
 #[test]
 fn match_arms_must_share_result_type() {
-    let src = "(defun f ((opt Option<i32>)) i32 \
+    let src = "(defun f ((opt Option<int>)) int \
                  (match opt ((Some v) v) ((None) true)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
 #[test]
 fn match_binds_constructor_fields() {
-    // `v` is bound at i32 inside the Some arm, so returning it as i32 is fine.
-    let src = "(defun f ((opt Option<i32>)) i32 \
+    // `v` is bound at int inside the Some arm, so returning it as int is fine.
+    let src = "(defun f ((opt Option<int>)) int \
                  (match opt ((Some v) v) ((None) 0)))";
     assert_eq!(program(src).expect("check failed").tag, "defun");
 }
@@ -382,7 +382,7 @@ fn match_binds_constructor_fields() {
 /// which is also why a string literal had no legal pattern position.
 #[test]
 fn match_on_a_type_with_no_variants_needs_a_catch_all() {
-    assert_eq!(ty("(match 1 (_ 0))"), Type::I32);
+    assert_eq!(ty("(match 1 (_ 0))"), Type::Int);
     assert_type_error("(match 1 (1 10))");
 }
 
@@ -395,7 +395,7 @@ fn match_on_a_type_with_no_variants_needs_a_catch_all() {
 
 #[test]
 fn match_arms_pool_a_results_two_type_arguments() {
-    let src = "(defun f ((r Result<i32, string>)) i32 \
+    let src = "(defun f ((r Result<int, string>)) int \
                  (let ((out (match r \
                               ((ok v) (result::ok v)) \
                               ((err e) (result::err e))))) \
@@ -407,7 +407,7 @@ fn match_arms_pool_a_results_two_type_arguments() {
 fn a_lone_unpinnable_arm_is_still_rejected() {
     // Nothing here determines `E`: the other arm diverges, so the pool the
     // second pass draws on is empty and the original error stands.
-    let src = "(defun f ((opt Option<i32>)) i32 \
+    let src = "(defun f ((opt Option<int>)) int \
                  (let ((out (match opt \
                               ((Some v) (result::ok v)) \
                               ((None) (panic \"no\"))))) \
@@ -426,7 +426,7 @@ fn an_unpinnable_constructor_outside_a_match_is_still_rejected() {
 fn a_probed_arm_takes_its_type_from_a_concrete_sibling() {
     // The `err` arm needs nothing inferred, so the `ok` arm's missing `E`
     // comes from an arm that is not itself a bare constructor.
-    let src = "(defun f ((r Result<i32, string>) (d Result<i32, string>)) i32 \
+    let src = "(defun f ((r Result<int, string>) (d Result<int, string>)) int \
                  (let ((out (match r \
                               ((ok v) (result::ok v)) \
                               ((err e) d)))) \
@@ -439,7 +439,7 @@ fn arms_of_different_shapes_are_still_rejected() {
     // A hole is filled only by the *same* type constructor: `Option` and
     // `Result` never merge, so neither arm ends up with an expectation and
     // both report what they could not infer.
-    let src = "(defun f ((r Result<i32, string>)) i32 \
+    let src = "(defun f ((r Result<int, string>)) int \
                  (let ((out (match r \
                               ((ok v) (result::ok v)) \
                               ((err e) (option::none))))) \
@@ -452,14 +452,14 @@ fn arms_of_different_shapes_are_still_rejected() {
 #[test]
 fn if_let_binds_in_then_branch() {
     // if-let binding is `(pattern value)`: here pattern `(Some v)`, value `opt`.
-    let src = "(defun f ((opt Option<i32>)) i32 \
+    let src = "(defun f ((opt Option<int>)) int \
                  (if-let ((Some v) opt) v 0))";
     assert_eq!(program_with_prelude(src).expect("check failed").tag, "defun");
 }
 
 #[test]
 fn if_let_branches_must_agree() {
-    let src = "(defun f ((opt Option<i32>)) i32 \
+    let src = "(defun f ((opt Option<int>)) int \
                  (if-let ((Some v) opt) v true))";
     assert!(matches!(program_with_prelude(src), Err(Error::TypeError(_))));
 }
@@ -468,7 +468,7 @@ fn if_let_branches_must_agree() {
 
 #[test]
 fn setf_checks_against_variable_type() {
-    assert_eq!(ty("(let ((x 0)) (setf x 9))"), Type::I32);
+    assert_eq!(ty("(let ((x 0)) (setf x 9))"), Type::Int);
     assert_type_error("(let ((x 0)) (setf x true))");
 }
 
@@ -481,7 +481,7 @@ fn setf_unbound_variable_errors() {
 fn cannot_assign_to_constant() {
     let mut h = typelisp::Heap::with_capacity(1024);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, "(defconstant (k i32) 5) (setf k 6)").unwrap();
+    let vs = r.read_all(&mut h, "(defconstant (k int) 5) (setf k 6)").unwrap();
     let mut chk = Checker::new();
     let interp = typelisp::Interp::new();
     let mut result = Ok(());
@@ -504,8 +504,8 @@ fn while_condition_must_be_bool_and_is_unit() {
 #[test]
 fn lambda_has_function_type() {
     assert_eq!(
-        ty("(lambda ((x i32)) i32 x)"),
-        Type::Fn(vec![Type::I32], None, Box::new(Type::I32))
+        ty("(lambda ((x int)) int x)"),
+        Type::Fn(vec![Type::Int], None, Box::new(Type::Int))
     );
 }
 
@@ -516,14 +516,14 @@ fn calling_a_non_function_errors() {
 
 #[test]
 fn apply_checks_argument_types() {
-    assert_type_error("((lambda ((x i32)) i32 x) true)");
+    assert_type_error("((lambda ((x int)) int x) true)");
 }
 
 #[test]
 fn named_function_has_function_type() {
     assert_eq!(
-        ty_program("(defun inc ((x i32)) i32 (+ x 1)) inc"),
-        Type::Fn(vec![Type::I32], None, Box::new(Type::I32))
+        ty_program("(defun inc ((x int)) int (+ x 1)) inc"),
+        Type::Fn(vec![Type::Int], None, Box::new(Type::Int))
     );
 }
 
@@ -540,14 +540,14 @@ fn labels_function_has_function_type_in_its_own_body() {
     // visible (with a function type) inside its own body — the gap a bare
     // `lambda` can't close.
     assert_eq!(
-        ty("(labels ((fact ((n i32)) i32 (if (= n 0) 1 (* n (fact (- n 1)))))) fact)"),
-        Type::Fn(vec![Type::I32], None, Box::new(Type::I32))
+        ty("(labels ((fact ((n int)) int (if (= n 0) 1 (* n (fact (- n 1)))))) fact)"),
+        Type::Fn(vec![Type::Int], None, Box::new(Type::Int))
     );
 }
 
 #[test]
 fn labels_rejects_a_call_with_the_wrong_argument_type() {
-    assert_type_error("(labels ((f ((n i32)) i32 n)) (f true))");
+    assert_type_error("(labels ((f ((n int)) int n)) (f true))");
 }
 
 #[test]
@@ -560,24 +560,24 @@ fn break_does_not_cross_labels_boundary() {
 #[test]
 fn defun_rest_has_a_variadic_function_type() {
     assert_eq!(
-        ty_program("(defun f ((a i32) &rest (xs i32)) i32 a) f"),
-        Type::Fn(vec![Type::I32], Some(Box::new(Type::I32)), Box::new(Type::I32))
+        ty_program("(defun f ((a int) &rest (xs int)) int a) f"),
+        Type::Fn(vec![Type::Int], Some(Box::new(Type::Int)), Box::new(Type::Int))
     );
 }
 
 #[test]
 fn defun_rest_with_no_fixed_params_has_a_variadic_function_type() {
     assert_eq!(
-        ty_program("(defun f (&rest (xs i32)) i32 0) f"),
-        Type::Fn(vec![], Some(Box::new(Type::I32)), Box::new(Type::I32))
+        ty_program("(defun f (&rest (xs int)) int 0) f"),
+        Type::Fn(vec![], Some(Box::new(Type::Int)), Box::new(Type::Int))
     );
 }
 
 #[test]
 fn lambda_rest_has_a_variadic_function_type() {
     assert_eq!(
-        ty("(lambda ((a i32) &rest (xs i32)) i32 a)"),
-        Type::Fn(vec![Type::I32], Some(Box::new(Type::I32)), Box::new(Type::I32))
+        ty("(lambda ((a int) &rest (xs int)) int a)"),
+        Type::Fn(vec![Type::Int], Some(Box::new(Type::Int)), Box::new(Type::Int))
     );
 }
 
@@ -589,7 +589,7 @@ fn rest_param_is_seen_as_a_sexpr_list_inside_the_body() {
     // a `&rest` that collected nothing *is* the empty list, which bare
     // `Sexpr` cannot spell.
     assert_eq!(
-        form("(defun f ((a i32) &rest (xs i32)) Option<Sexpr> (sexpr-car xs))")
+        form("(defun f ((a int) &rest (xs int)) Option<Sexpr> (sexpr-car xs))")
             .expect("check failed")
             .tag,
         "defun"
@@ -597,25 +597,25 @@ fn rest_param_is_seen_as_a_sexpr_list_inside_the_body() {
     // `lambda`'s `&rest` binds the same type as `defun`'s — they drifted
     // apart once during the migration, which no test then caught.
     assert_eq!(
-        ty("((lambda ((a i32) &rest (xs i32)) Option<Sexpr> (sexpr-car xs)) 1 2)"),
+        ty("((lambda ((a int) &rest (xs int)) Option<Sexpr> (sexpr-car xs)) 1 2)"),
         opt_sexpr()
     );
 }
 
 #[test]
 fn calling_a_rest_function_with_only_the_fixed_arguments_is_fine() {
-    assert!(program("(defun f ((a i32) &rest (xs i32)) i32 a) (f 1)").is_ok());
+    assert!(program("(defun f ((a int) &rest (xs int)) int a) (f 1)").is_ok());
 }
 
 #[test]
 fn calling_a_rest_function_with_extra_arguments_is_fine() {
-    assert!(program("(defun f ((a i32) &rest (xs i32)) i32 a) (f 1 2 3)").is_ok());
+    assert!(program("(defun f ((a int) &rest (xs int)) int a) (f 1 2 3)").is_ok());
 }
 
 #[test]
 fn calling_a_rest_function_with_too_few_fixed_arguments_is_a_type_error() {
     assert!(matches!(
-        program("(defun f ((a i32) &rest (xs i32)) i32 a) (f)"),
+        program("(defun f ((a int) &rest (xs int)) int a) (f)"),
         Err(Error::TypeError(_))
     ));
 }
@@ -623,7 +623,7 @@ fn calling_a_rest_function_with_too_few_fixed_arguments_is_a_type_error() {
 #[test]
 fn calling_a_rest_function_with_a_wrong_typed_extra_argument_is_a_type_error() {
     assert!(matches!(
-        program("(defun f ((a i32) &rest (xs i32)) i32 a) (f 1 true)"),
+        program("(defun f ((a int) &rest (xs int)) int a) (f 1 true)"),
         Err(Error::TypeError(_))
     ));
 }
@@ -631,27 +631,27 @@ fn calling_a_rest_function_with_a_wrong_typed_extra_argument_is_a_type_error() {
 #[test]
 fn rest_must_be_followed_by_exactly_one_parameter_in_a_defun() {
     assert!(matches!(
-        program("(defun f (&rest (xs i32) (y i32)) i32 0)"),
+        program("(defun f (&rest (xs int) (y int)) int 0)"),
         Err(Error::TypeError(_))
     ));
 }
 
 #[test]
 fn generic_rest_function_infers_the_element_type() {
-    assert_eq!(ty_program("(defun firstn<T> ((a T) &rest (xs T)) T a) (firstn 1 2 3)"), Type::I32);
+    assert_eq!(ty_program("(defun firstn<T> ((a T) &rest (xs T)) T a) (firstn 1 2 3)"), Type::Int);
 }
 
 #[test]
 fn apply_calls_a_variadic_function_with_a_runtime_sexpr_list() {
-    let src = "(defun f ((a i32) &rest (xs i32)) i32 a) \
+    let src = "(defun f ((a int) &rest (xs int)) int a) \
                (apply f 1 (quote (2 3)))";
-    assert_eq!(ty_program(src), Type::I32);
+    assert_eq!(ty_program(src), Type::Int);
 }
 
 #[test]
 fn apply_on_a_non_variadic_function_is_a_type_error() {
     assert!(matches!(
-        program("(apply (lambda ((a i32)) i32 a) 1)"),
+        program("(apply (lambda ((a int)) int a) 1)"),
         Err(Error::TypeError(_))
     ));
 }
@@ -661,7 +661,7 @@ fn apply_with_the_wrong_number_of_fixed_arguments_is_a_type_error() {
     // The lambda needs exactly one fixed argument (`a`) before the rest
     // list; this supplies zero.
     assert!(matches!(
-        program("(apply (lambda ((a i32) &rest (xs i32)) i32 a) (quote ()))"),
+        program("(apply (lambda ((a int) &rest (xs int)) int a) (quote ()))"),
         Err(Error::TypeError(_))
     ));
 }
@@ -678,15 +678,15 @@ fn apply_auto_wraps_a_scalar_rest_list_argument_into_sexpr() {
     // (A non-list shape there — as here — is still rejected, just at
     // *runtime*, the same way CL's own `apply` signals a runtime condition
     // for a malformed trailing list rather than a compile-time error.)
-    assert_eq!(ty("(apply (lambda ((a i32) &rest (xs i32)) i32 a) 1 2)"), Type::I32);
+    assert_eq!(ty("(apply (lambda ((a int) &rest (xs int)) int a) 1 2)"), Type::Int);
 }
 
 // ---- cons / car / cdr / list / dolist ----------------------------------------
 
 #[test]
 fn sexpr_car_and_cdr_yield_an_option_sexpr() {
-    assert_eq!(ty("(sexpr-car (sexpr-cons (i32 1) ()))"), opt_sexpr());
-    assert_eq!(ty("(sexpr-cdr (sexpr-cons (i32 1) ()))"), opt_sexpr());
+    assert_eq!(ty("(sexpr-car (sexpr-cons (int 1) ()))"), opt_sexpr());
+    assert_eq!(ty("(sexpr-cdr (sexpr-cons (int 1) ()))"), opt_sexpr());
 }
 
 #[test]
@@ -704,13 +704,13 @@ fn sexpr_car_auto_wraps_a_scalar_argument_into_sexpr() {
 fn sexpr_cons_usable_as_function_value() {
     let src = "(defun apply2 ((f (fn (Option<Sexpr> Option<Sexpr>) Option<Sexpr>)) \
                               (a Option<Sexpr>) (b Option<Sexpr>)) Option<Sexpr> (f a b)) \
-               (apply2 sexpr-cons (i32 1) ())";
+               (apply2 sexpr-cons (int 1) ())";
     assert_eq!(ty_program(src), opt_sexpr());
 }
 
 #[test]
 fn list_builds_sexpr_cons_chain() {
-    assert_eq!(ty("(list (i32 1) (i32 2))"), opt_sexpr());
+    assert_eq!(ty("(list (int 1) (int 2))"), opt_sexpr());
     // `(list)` is the empty list, so its type has to be the one that can
     // hold it.
     assert_eq!(ty("(list)"), opt_sexpr());
@@ -722,7 +722,7 @@ fn list_elements_are_auto_wrapped_into_sexpr() {
     // (`~/.claude/plans/async-conjuring-hanrahan.md`, `tests/
     // sexpr_user_adt_test.rs` has the fuller coverage): `check_list_lit`
     // checks each element against `expected = Sexpr`, and a scalar with a
-    // `Sexpr` encoding (`i32`/`f64`/.../`Str`) now auto-wraps through
+    // `Sexpr` encoding (`int`/`f64`/.../`Str`) now auto-wraps through
     // its constructor there — `(list 1 2)` mirrors CL's `(list 1 2)`
     // instead of demanding the caller pre-wrap every element by hand.
     assert_eq!(ty("(list 1 2)"), opt_sexpr());
@@ -740,7 +740,7 @@ fn loop_with_only_break_is_unit() {
 
 #[test]
 fn loop_with_return_value_takes_that_type() {
-    assert_eq!(ty("(loop (return 5))"), Type::I32);
+    assert_eq!(ty("(loop (return 5))"), Type::Int);
 }
 
 #[test]
@@ -784,8 +784,8 @@ fn nested_loop_break_targets_innermost() {
     // The inner loop's `break` exits the inner loop only; it must not
     // contribute to the outer loop's exit type (which here comes solely from
     // the outer `return`). If it leaked, this would be a type error (Unit vs
-    // i32).
-    assert_eq!(ty("(loop (loop (break)) (return 5))"), Type::I32);
+    // int).
+    assert_eq!(ty("(loop (loop (break)) (return 5))"), Type::Int);
 }
 
 // ---- core form shape --------------------------------------------------------
@@ -793,8 +793,8 @@ fn nested_loop_break_targets_innermost() {
 #[test]
 fn a_checked_form_is_a_core_expression_with_a_type() {
     let c = form("(if true 1 2)").unwrap();
-    assert_eq!(c.printed, "(expr (if (bool true) (int-any-width 1) (int-any-width 2)))");
-    assert_eq!(c.ty, Some(Type::I32));
+    assert_eq!(c.printed, "(expr (if (bool true) (int 1) (int 2)))");
+    assert_eq!(c.ty, Some(Type::Int));
 }
 
 // ---- the (type annotation) ---------------------------------------------------
@@ -807,11 +807,11 @@ fn the_overrides_an_integer_literals_default_type() {
 
 #[test]
 fn the_produces_the_same_expr_as_its_inner_form() {
-    // `the` contributes no node of its own — checking `(the i32 5)` yields
-    // exactly the same `(int-any-width 5)` the bare literal would.
-    let c = form("(the i32 5)").unwrap();
-    assert_eq!(c.printed, "(expr (int-any-width 5))");
-    assert_eq!(c.ty, Some(Type::I32));
+    // `the` contributes no node of its own — checking `(the int 5)` yields
+    // exactly the same `(int 5)` the bare literal would.
+    let c = form("(the int 5)").unwrap();
+    assert_eq!(c.printed, "(expr (int 5))");
+    assert_eq!(c.ty, Some(Type::Int));
 }
 
 #[test]
@@ -821,8 +821,8 @@ fn the_mismatch_is_a_type_error() {
 
 #[test]
 fn the_rejects_wrong_arity() {
-    assert_type_error("(the i32)");
-    assert_type_error("(the i32 5 6)");
+    assert_type_error("(the int)");
+    assert_type_error("(the int 5 6)");
 }
 
 #[test]
@@ -840,7 +840,7 @@ fn exit_type_checks_as_never() {
     // `exit`'s actual process termination can only be observed
     // out-of-process — see `tests/exit_test.rs`. This only checks the type
     // level: `Never` satisfies any expected type, like `panic`.
-    assert_eq!(ret_of("(defun f () i32 (if true 1 (exit 1)))", "f"), Type::I32);
+    assert_eq!(ret_of("(defun f () int (if true 1 (exit 1)))", "f"), Type::Int);
 }
 
 #[test]
@@ -853,8 +853,8 @@ fn exit_rejects_wrong_arity() {
 
 #[test]
 fn unreachable_and_todo_type_check_as_never() {
-    assert_eq!(ret_of("(defun f () i32 (if true 1 (unreachable)))", "f"), Type::I32);
-    assert_eq!(ret_of("(defun g () i32 (if true 1 (todo)))", "g"), Type::I32);
+    assert_eq!(ret_of("(defun f () int (if true 1 (unreachable)))", "f"), Type::Int);
+    assert_eq!(ret_of("(defun g () int (if true 1 (todo)))", "g"), Type::Int);
 }
 
 /// A type error carries the source location of the offending sub-form (down to
@@ -866,7 +866,7 @@ fn type_error_carries_source_location() {
     // The `(+ x "oops")` form is on line 2; the whole thing is checked with a
     // filename so the location names it.
     let vs = r
-        .read_all_in(&mut h, "prog.typl", "(defun f ((x i32)) i32\n  (+ x \"oops\"))")
+        .read_all_in(&mut h, "prog.typl", "(defun f ((x int)) int\n  (+ x \"oops\"))")
         .expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
@@ -890,8 +890,8 @@ fn type_error_carries_source_location() {
 /// `equal`/`equalp` compare two values *of the same type*, and nothing else.
 ///
 /// The language already enforced this for every type that carries its own
-/// `equal` method: `(equalp 1 "a")` is a type error because `i32`'s method
-/// demands two `i32`s. But those two were free builtins typed
+/// `equal` method: `(equalp 1 "a")` is a type error because `int`'s method
+/// demands two `int`s. But those two were free builtins typed
 /// `(Sexpr, Sexpr) -> bool`, so for a type with *no* such method — `Option<T>`,
 /// `Result<T,E>`, a user `defstruct` — both arguments widened into
 /// S-expression data independently and any two values of any two types
@@ -909,9 +909,9 @@ fn type_error_carries_source_location() {
 fn equality_requires_its_two_arguments_to_have_one_type() {
     for src in [
         // Two unrelated user structs — the case that used to answer `false`.
-        "(defstruct pa (x i32)) (defstruct pb (y string)) (equalp (pa::new 1) (pb::new \"z\"))",
+        "(defstruct pa (x int)) (defstruct pb (y string)) (equalp (pa::new 1) (pb::new \"z\"))",
         // Two different instantiations of the same generic.
-        "(equalp (the Option<char> (option::none)) (the Option<i32> (option::none)))",
+        "(equalp (the Option<char> (option::none)) (the Option<int> (option::none)))",
         // And the case that was already an error, still is.
         "(equalp 1 \"a\")",
     ] {
@@ -929,7 +929,7 @@ fn equality_still_compares_every_same_typed_pair() {
     for src in [
         "(equal (quote (1 2 3)) (quote (1 2 3)))",
         "(equalp (option::some #\\x) (option::some #\\x))",
-        "(defstruct pt (x i32)) (equalp (pt::new 1) (pt::new 1))",
+        "(defstruct pt (x int)) (equalp (pt::new 1) (pt::new 1))",
     ] {
         assert!(program(src).is_ok(), "should check: {}", src);
     }

@@ -115,10 +115,10 @@ fn psetq_and_psetf_assign_in_parallel() {
 fn pushnew_adds_only_what_is_not_already_there() {
     assert_eq!(
         show(
-            "(let ((v (the Vector<i32> (Vector::new))))
+            "(let ((v (the Vector<int> (Vector::new))))
                (push v 1) (push v 2) (pushnew v 2) (pushnew v 3) v)"
         ),
-        "#<vector<i32> 1 2 3>"
+        "#<vector<int> 1 2 3>"
     );
 }
 
@@ -167,7 +167,7 @@ fn every_variable_it_binds_is_an_option_sexpr() {
     assert_eq!(
         show(
             "(destructuring-bind (a b) (quote (1 2)) \
-               (+ (match a ((i32 n) n) (_ 0)) (match b ((i32 n) n) (_ 0))))"
+               (+ (match a ((int n) n) (_ 0)) (match b ((int n) n) (_ 0))))"
         ),
         "3"
     );

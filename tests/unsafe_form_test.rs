@@ -154,7 +154,7 @@ fn return_from_escapes_through_it() {
     assert_eq!(
         int(
             r#"
-            (defun f () i32 (unsafe (return-from f 8)) 1)
+            (defun f () int (unsafe (return-from f 8)) 1)
             (f)
             "#
         ),
@@ -170,8 +170,8 @@ fn a_lambda_written_inside_one_still_checks() {
     assert_eq!(
         int(
             r#"
-            (defun run-it ((f (fn () i32))) i32 (f))
-            (run-it (unsafe (lambda () i32 11)))
+            (defun run-it ((f (fn () int))) int (f))
+            (run-it (unsafe (lambda () int 11)))
             "#
         ),
         11
@@ -188,7 +188,7 @@ fn survives_compilation() {
     assert_eq!(
         int_compiled(
             r#"
-            (defun f ((n i32)) i32 (unsafe (* n 3)))
+            (defun f ((n int)) int (unsafe (* n 3)))
             (compile f)
             (f 14)
             "#
@@ -202,7 +202,7 @@ fn survives_compilation_with_a_loop_escaping_through_it() {
     assert_eq!(
         int_compiled(
             r#"
-            (defun f ((n i32)) i32
+            (defun f ((n int)) int
               (loop (unsafe (return (+ n 1)))))
             (compile f)
             (f 5)
@@ -225,5 +225,5 @@ fn its_body_is_still_type_checked() {
 #[test]
 fn its_type_is_its_last_form_s_type() {
     let e = check_err("(defun f () string (unsafe 1))");
-    assert!(e.contains("Str") && e.contains("I32"), "unexpected error: {}", e);
+    assert!(e.contains("Str") && e.contains("Int"), "unexpected error: {}", e);
 }

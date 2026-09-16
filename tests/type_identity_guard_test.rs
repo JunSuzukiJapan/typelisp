@@ -219,7 +219,7 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
         (TypeKeyId::PARSE_FLOAT_ERROR, typelisp::check::registry::PARSE_FLOAT_ERROR),
         // `file-list-directory` builds a `Vector<string>` box directly, and
         // `read-datum-at` pairs its datum with its end index in a
-        // `cons-cell<Sexpr, i32>` box (CL's second return value, which this
+        // `cons-cell<Sexpr, int>` box (CL's second return value, which this
         // language has no multiple values to carry) — both on the runtime's
         // own side of the boundary, so both need the identity too.
         (TypeKeyId::VECTOR, "vector"),

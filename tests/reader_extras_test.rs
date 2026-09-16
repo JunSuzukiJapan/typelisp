@@ -49,12 +49,12 @@ fn the_returned_index_is_where_the_next_read_begins() {
     // The reason the second value exists: reading a string datum by datum is
     // a loop over the index, not a re-scan.
     is_true(
-        r#"(let ((s "1 2 3") (i (the i32 0)) (n (the i32 0)) (going true))
+        r#"(let ((s "1 2 3") (i (the int 0)) (n (the int 0)) (going true))
              (progn
                (while going
                  (match (read-from-string s i)
                    ((ok p) (progn (setf n (+ n 1)) (setf i (cdr p))
-                                  (if (>= i (as i32 (length s))) (progn (setf going false) ()) ()) ()))
+                                  (if (>= i (as int (length s))) (progn (setf going false) ()) ()) ()))
                    ((err e) (progn (setf going false) ()))))
                (= n 3)))"#,
     );

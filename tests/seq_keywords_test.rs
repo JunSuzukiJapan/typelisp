@@ -30,14 +30,14 @@ fn show(expr: &str) -> String {
     }
 }
 
-/// `expr` with `a` = `#<vector<i32> 1 2 2 3>`, `b` = `#<vector<i32> 2 3 4>`,
-/// `neg` = `#<vector<i32> -1 -2 -3>` and `al` = an alist of `1->"one"`, `2->"two"`.
+/// `expr` with `a` = `#<vector<int> 1 2 2 3>`, `b` = `#<vector<int> 2 3 4>`,
+/// `neg` = `#<vector<int> -1 -2 -3>` and `al` = an alist of `1->"one"`, `2->"two"`.
 fn with_fixtures(expr: &str) -> String {
     show(&format!(
-        "(let ((a (the Vector<i32> (Vector::new)))
-               (b (the Vector<i32> (Vector::new)))
-               (neg (the Vector<i32> (Vector::new)))
-               (al (the Vector<cons-cell<i32,string>> (Vector::new))))
+        "(let ((a (the Vector<int> (Vector::new)))
+               (b (the Vector<int> (Vector::new)))
+               (neg (the Vector<int> (Vector::new)))
+               (al (the Vector<cons-cell<int,string>> (Vector::new))))
            (progn
              (push a 1) (push a 2) (push a 2) (push a 3)
              (push b 2) (push b 3) (push b 4)
@@ -48,8 +48,8 @@ fn with_fixtures(expr: &str) -> String {
     ))
 }
 
-/// `(lambda ((x i32)) i32 (abs x))` — the `:key` used throughout.
-const ABS: &str = "(lambda ((x i32)) i32 (abs x))";
+/// `(lambda ((x int)) int (abs x))` — the `:key` used throughout.
+const ABS: &str = "(lambda ((x int)) int (abs x))";
 
 // ------------------------------------------------------------------ `:key`
 
@@ -68,7 +68,7 @@ fn key_projects_the_element_and_the_element_still_comes_back() {
 fn key_reaches_the_predicate_variants_and_the_alist_searches() {
     assert_eq!(
         with_fixtures(&format!(
-            "(find-if (iter neg) (lambda ((x i32)) bool (> x 2)) :key {})",
+            "(find-if (iter neg) (lambda ((x int)) bool (> x 2)) :key {})",
             ABS
         )),
         "(some -3)"
@@ -77,12 +77,12 @@ fn key_reaches_the_predicate_variants_and_the_alist_searches() {
     // Looking for 1 among cars projected by `(- k 1)` finds the pair whose
     // car is 2 — and the whole pair comes back, not the projection.
     assert_eq!(
-        with_fixtures("(assoc 1 (iter al) :key (lambda ((k i32)) i32 (- k 1)))"),
-        "(some #<cons-cell<i32,string> 2 two>)"
+        with_fixtures("(assoc 1 (iter al) :key (lambda ((k int)) int (- k 1)))"),
+        "(some #<cons-cell<int,string> 2 two>)"
     );
     assert_eq!(
         with_fixtures("(rassoc \"ONE\" (iter al) :key (lambda ((s string)) string (upcase s)))"),
-        "(some #<cons-cell<i32,string> 1 one>)"
+        "(some #<cons-cell<int,string> 1 one>)"
     );
 }
 
@@ -90,17 +90,17 @@ fn key_reaches_the_predicate_variants_and_the_alist_searches() {
 fn sort_and_merge_compare_the_projections() {
     assert_eq!(
         with_fixtures(&format!(
-            "(sort (iter neg) (lambda ((p i32) (q i32)) bool (< p q)) :key {})",
+            "(sort (iter neg) (lambda ((p int) (q int)) bool (< p q)) :key {})",
             ABS
         )),
-        "#<vector<i32> -1 -2 -3>"
+        "#<vector<int> -1 -2 -3>"
     );
     assert_eq!(
         with_fixtures(&format!(
-            "(merge (iter neg) (iter a) (lambda ((p i32) (q i32)) bool (< p q)) :key {})",
+            "(merge (iter neg) (iter a) (lambda ((p int) (q int)) bool (< p q)) :key {})",
             ABS
         )),
-        "#<vector<i32> -1 1 -2 2 2 -3 3>"
+        "#<vector<int> -1 1 -2 2 2 -3 3>"
     );
 }
 
@@ -110,11 +110,11 @@ fn sort_and_merge_compare_the_projections() {
 fn test_replaces_the_eq_bounds_equals() {
     // `(< item element)` — the item is the first argument, as in CL.
     assert_eq!(
-        with_fixtures("(find 2 (iter a) :test (lambda ((p i32) (q i32)) bool (< p q)))"),
+        with_fixtures("(find 2 (iter a) :test (lambda ((p int) (q int)) bool (< p q)))"),
         "(some 3)"
     );
     assert_eq!(
-        with_fixtures("(count 1 (iter a) :test (lambda ((p i32) (q i32)) bool (< p q)))"),
+        with_fixtures("(count 1 (iter a) :test (lambda ((p int) (q int)) bool (< p q)))"),
         "3"
     );
 }
@@ -122,12 +122,12 @@ fn test_replaces_the_eq_bounds_equals() {
 #[test]
 fn test_not_is_the_negation_of_test() {
     assert_eq!(
-        with_fixtures("(find 2 (iter a) :test-not (lambda ((p i32) (q i32)) bool (< p q)))"),
+        with_fixtures("(find 2 (iter a) :test-not (lambda ((p int) (q int)) bool (< p q)))"),
         "(some 1)"
     );
     assert_eq!(
-        with_fixtures("(remove 2 (iter a) :test-not (lambda ((p i32) (q i32)) bool (= p q)))"),
-        "#<vector<i32> 2 2>"
+        with_fixtures("(remove 2 (iter a) :test-not (lambda ((p int) (q int)) bool (= p q)))"),
+        "#<vector<int> 2 2>"
     );
 }
 
@@ -137,16 +137,16 @@ fn the_set_operations_project_both_sides() {
     // both are sequence elements, unlike the item searches.
     assert_eq!(
         with_fixtures(&format!("(intersection (iter neg) (iter a) :key {})", ABS)),
-        "#<vector<i32> -1 -2 -3>"
+        "#<vector<int> -1 -2 -3>"
     );
     assert_eq!(
         with_fixtures(&format!("(set-difference (iter neg) (iter b) :key {})", ABS)),
-        "#<vector<i32> -1>"
+        "#<vector<int> -1>"
     );
     assert_eq!(with_fixtures(&format!("(subsetp (iter neg) (iter a) :key {})", ABS)), "true");
     assert_eq!(
         with_fixtures(&format!("(adjoin -2 (iter a) :key {})", ABS)),
-        "#<vector<i32> 1 2 2 3>"
+        "#<vector<int> 1 2 2 3>"
     );
 }
 
@@ -170,8 +170,8 @@ fn a_position_is_an_index_into_the_whole_sequence_not_the_window() {
 fn an_element_outside_the_window_is_kept_rather_than_examined() {
     // The modify family's rule, and the reason this is not a filter over the
     // window: `remove` still returns everything the window did not reach.
-    assert_eq!(with_fixtures("(remove 2 (iter a) :start 2)"), "#<vector<i32> 1 2 3>");
-    assert_eq!(with_fixtures("(substitute 9 2 (iter a) :end 2)"), "#<vector<i32> 1 9 2 3>");
+    assert_eq!(with_fixtures("(remove 2 (iter a) :start 2)"), "#<vector<int> 1 2 3>");
+    assert_eq!(with_fixtures("(substitute 9 2 (iter a) :end 2)"), "#<vector<int> 1 9 2 3>");
 }
 
 // --------------------------------------------------------------- `:from-end`
@@ -186,12 +186,12 @@ fn from_end_makes_a_search_answer_with_the_last_match() {
 
 #[test]
 fn count_limits_how_many_matches_are_affected_and_from_end_picks_which() {
-    assert_eq!(with_fixtures("(remove 2 (iter a) :count 1)"), "#<vector<i32> 1 2 3>");
-    assert_eq!(with_fixtures("(substitute 9 2 (iter a) :count 1)"), "#<vector<i32> 1 9 2 3>");
+    assert_eq!(with_fixtures("(remove 2 (iter a) :count 1)"), "#<vector<int> 1 2 3>");
+    assert_eq!(with_fixtures("(substitute 9 2 (iter a) :count 1)"), "#<vector<int> 1 9 2 3>");
     // The same limit, taken from the other end.
     assert_eq!(
         with_fixtures("(substitute 9 2 (iter a) :count 1 :from-end true)"),
-        "#<vector<i32> 1 2 9 3>"
+        "#<vector<int> 1 2 9 3>"
     );
 }
 
@@ -202,14 +202,14 @@ fn remove_duplicates_keeps_the_last_of_each_group_as_cl_does() {
     // This is a *behaviour change*: before Phase 3e this function
     // unconditionally kept the first occurrence. CL keeps the last unless
     // `:from-end` says otherwise.
-    assert_eq!(with_fixtures("(remove-duplicates (iter a))"), "#<vector<i32> 1 2 3>");
-    assert_eq!(with_fixtures("(remove-duplicates (iter b))"), "#<vector<i32> 2 3 4>");
-    let mixed = "(let ((v (the Vector<i32> (Vector::new))))
+    assert_eq!(with_fixtures("(remove-duplicates (iter a))"), "#<vector<int> 1 2 3>");
+    assert_eq!(with_fixtures("(remove-duplicates (iter b))"), "#<vector<int> 2 3 4>");
+    let mixed = "(let ((v (the Vector<int> (Vector::new))))
                    (progn (push v 1) (push v 2) (push v 1) (push v 3) {}))";
-    assert_eq!(show(&mixed.replace("{}", "(remove-duplicates (iter v))")), "#<vector<i32> 2 1 3>");
+    assert_eq!(show(&mixed.replace("{}", "(remove-duplicates (iter v))")), "#<vector<int> 2 1 3>");
     assert_eq!(
         show(&mixed.replace("{}", "(remove-duplicates (iter v) :from-end true)")),
-        "#<vector<i32> 1 2 3>"
+        "#<vector<int> 1 2 3>"
     );
 }
 
@@ -224,13 +224,13 @@ fn every_function_still_answers_with_no_keywords_at_all() {
     assert_eq!(with_fixtures("(position 2 (iter a))"), "(some 1)");
     assert_eq!(with_fixtures("(count 2 (iter a))"), "2");
     assert_eq!(with_fixtures("(member 4 (iter a))"), "false");
-    assert_eq!(with_fixtures("(remove 2 (iter a))"), "#<vector<i32> 1 3>");
-    assert_eq!(with_fixtures("(substitute 9 2 (iter a))"), "#<vector<i32> 1 9 9 3>");
-    assert_eq!(with_fixtures("(union (iter a) (iter b))"), "#<vector<i32> 1 2 3 4>");
-    assert_eq!(with_fixtures("(assoc 2 (iter al))"), "(some #<cons-cell<i32,string> 2 two>)");
+    assert_eq!(with_fixtures("(remove 2 (iter a))"), "#<vector<int> 1 3>");
+    assert_eq!(with_fixtures("(substitute 9 2 (iter a))"), "#<vector<int> 1 9 9 3>");
+    assert_eq!(with_fixtures("(union (iter a) (iter b))"), "#<vector<int> 1 2 3 4>");
+    assert_eq!(with_fixtures("(assoc 2 (iter al))"), "(some #<cons-cell<int,string> 2 two>)");
     assert_eq!(
-        with_fixtures("(sort (iter b) (lambda ((p i32) (q i32)) bool (> p q)))"),
-        "#<vector<i32> 4 3 2>"
+        with_fixtures("(sort (iter b) (lambda ((p int) (q int)) bool (> p q)))"),
+        "#<vector<int> 4 3 2>"
     );
 }
 
@@ -239,7 +239,7 @@ fn position_if_not_exists_now_completing_the_if_pairs() {
     // The one gap Phase 3b left in "the `-if`/`-if-not` pairs CL has for
     // every search".
     assert_eq!(
-        with_fixtures("(position-if-not (iter a) (lambda ((x i32)) bool (< x 2)))"),
+        with_fixtures("(position-if-not (iter a) (lambda ((x int)) bool (< x 2)))"),
         "(some 1)"
     );
 }
@@ -258,10 +258,10 @@ fn position_if_not_exists_now_completing_the_if_pairs() {
 // tests are therefore against the *pairs* — a destructive call must answer
 // what its non-destructive twin answers, and mutate the receiver to match.
 
-/// A fresh `#<vector<i32> 1 2 2 3>` per expression, since these mutate it.
+/// A fresh `#<vector<int> 1 2 2 3>` per expression, since these mutate it.
 fn with_vec(expr: &str) -> String {
     show(&format!(
-        "(let ((v (the Vector<i32> (Vector::new))))
+        "(let ((v (the Vector<int> (Vector::new))))
            (progn (push v 1) (push v 2) (push v 2) (push v 3) {}))",
         expr
     ))
@@ -269,18 +269,18 @@ fn with_vec(expr: &str) -> String {
 
 #[test]
 fn delete_takes_removes_whole_keyword_set() {
-    assert_eq!(with_vec("(delete v 2)"), "#<vector<i32> 1 3>");
-    assert_eq!(with_vec("(delete v 2 :count 1)"), "#<vector<i32> 1 2 3>");
-    assert_eq!(with_vec("(delete v 2 :count 1 :from-end true)"), "#<vector<i32> 1 2 3>");
-    assert_eq!(with_vec("(delete v 2 :start 2)"), "#<vector<i32> 1 2 3>");
-    assert_eq!(with_vec("(delete v 2 :end 2)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(with_vec("(delete v 2)"), "#<vector<int> 1 3>");
+    assert_eq!(with_vec("(delete v 2 :count 1)"), "#<vector<int> 1 2 3>");
+    assert_eq!(with_vec("(delete v 2 :count 1 :from-end true)"), "#<vector<int> 1 2 3>");
+    assert_eq!(with_vec("(delete v 2 :start 2)"), "#<vector<int> 1 2 3>");
+    assert_eq!(with_vec("(delete v 2 :end 2)"), "#<vector<int> 1 2 3>");
     assert_eq!(
-        with_vec("(delete v 2 :test (lambda ((p i32) (q i32)) bool (/= p q)))"),
-        "#<vector<i32> 2 2>"
+        with_vec("(delete v 2 :test (lambda ((p int) (q int)) bool (/= p q)))"),
+        "#<vector<int> 2 2>"
     );
     assert_eq!(
-        with_vec("(delete v 4 :key (lambda ((x i32)) i32 (* x 2)))"),
-        "#<vector<i32> 1 3>"
+        with_vec("(delete v 4 :key (lambda ((x int)) int (* x 2)))"),
+        "#<vector<int> 1 3>"
     );
 }
 
@@ -290,31 +290,31 @@ fn delete_takes_removes_whole_keyword_set() {
 fn a_destructive_call_leaves_the_answer_in_the_receiver() {
     assert_eq!(
         with_vec("(progn (delete v 2 :count 1) (format false \"~a\" v))"),
-        "#<vector<i32> 1 2 3>"
+        "#<vector<int> 1 2 3>"
     );
     assert_eq!(
         with_vec("(progn (fill v 7 :start 1 :end 3) (format false \"~a\" v))"),
-        "#<vector<i32> 1 7 7 3>"
+        "#<vector<int> 1 7 7 3>"
     );
 }
 
 #[test]
 fn the_predicate_and_substitute_forms_take_theirs() {
-    let gt1 = "(lambda ((x i32)) bool (> x 1))";
-    assert_eq!(with_vec(&format!("(delete-if v {})", gt1)), "#<vector<i32> 1>");
-    assert_eq!(with_vec(&format!("(delete-if v {} :count 1)", gt1)), "#<vector<i32> 1 2 3>");
-    assert_eq!(with_vec(&format!("(delete-if-not v {})", gt1)), "#<vector<i32> 2 2 3>");
-    assert_eq!(with_vec(&format!("(delete-if-not v {} :count 1)", gt1)), "#<vector<i32> 2 2 3>");
-    assert_eq!(with_vec("(nsubstitute v 9 2)"), "#<vector<i32> 1 9 9 3>");
-    assert_eq!(with_vec("(nsubstitute v 9 2 :count 1)"), "#<vector<i32> 1 9 2 3>");
+    let gt1 = "(lambda ((x int)) bool (> x 1))";
+    assert_eq!(with_vec(&format!("(delete-if v {})", gt1)), "#<vector<int> 1>");
+    assert_eq!(with_vec(&format!("(delete-if v {} :count 1)", gt1)), "#<vector<int> 1 2 3>");
+    assert_eq!(with_vec(&format!("(delete-if-not v {})", gt1)), "#<vector<int> 2 2 3>");
+    assert_eq!(with_vec(&format!("(delete-if-not v {} :count 1)", gt1)), "#<vector<int> 2 2 3>");
+    assert_eq!(with_vec("(nsubstitute v 9 2)"), "#<vector<int> 1 9 9 3>");
+    assert_eq!(with_vec("(nsubstitute v 9 2 :count 1)"), "#<vector<int> 1 9 2 3>");
     assert_eq!(
         with_vec("(nsubstitute v 9 2 :count 1 :from-end true)"),
-        "#<vector<i32> 1 2 9 3>"
+        "#<vector<int> 1 2 9 3>"
     );
-    assert_eq!(with_vec(&format!("(nsubstitute-if v 0 {})", gt1)), "#<vector<i32> 1 0 0 0>");
+    assert_eq!(with_vec(&format!("(nsubstitute-if v 0 {})", gt1)), "#<vector<int> 1 0 0 0>");
     assert_eq!(
         with_vec(&format!("(nsubstitute-if v 0 {} :start 2)", gt1)),
-        "#<vector<i32> 1 2 0 0>"
+        "#<vector<int> 1 2 0 0>"
     );
 }
 
@@ -322,15 +322,15 @@ fn the_predicate_and_substitute_forms_take_theirs() {
 /// `:from-end` keeps the first, exactly as `remove-duplicates` does.
 #[test]
 fn delete_duplicates_follows_remove_duplicates() {
-    assert_eq!(with_vec("(delete-duplicates v)"), "#<vector<i32> 1 2 3>");
-    assert_eq!(with_vec("(delete-duplicates v :from-end true)"), "#<vector<i32> 1 2 3>");
+    assert_eq!(with_vec("(delete-duplicates v)"), "#<vector<int> 1 2 3>");
+    assert_eq!(with_vec("(delete-duplicates v :from-end true)"), "#<vector<int> 1 2 3>");
     assert_eq!(
-        with_vec("(delete-duplicates v :key (lambda ((x i32)) i32 (mod x 2)))"),
-        "#<vector<i32> 2 3>"
+        with_vec("(delete-duplicates v :key (lambda ((x int)) int (mod x 2)))"),
+        "#<vector<int> 2 3>"
     );
     assert_eq!(
-        with_vec("(delete-duplicates v :key (lambda ((x i32)) i32 (mod x 2)) :from-end true)"),
-        "#<vector<i32> 1 2>"
+        with_vec("(delete-duplicates v :key (lambda ((x int)) int (mod x 2)) :from-end true)"),
+        "#<vector<int> 1 2>"
     );
 }
 
@@ -338,22 +338,22 @@ fn delete_duplicates_follows_remove_duplicates() {
 /// `sequence-1` — the one place in this rewrite where they line up.
 #[test]
 fn replace_takes_cls_four_windows() {
-    let src = "(let ((s (the Vector<i32> (Vector::new)))) (progn (push s 8) (push s 9) (push s 10) s))";
+    let src = "(let ((s (the Vector<int> (Vector::new)))) (progn (push s 8) (push s 9) (push s 10) s))";
     assert_eq!(
         with_vec(&format!("(replace v {})", src)),
-        "#<vector<i32> 8 9 10 3>"
+        "#<vector<int> 8 9 10 3>"
     );
     assert_eq!(
         with_vec(&format!("(replace v {} :start1 2 :start2 1)", src)),
-        "#<vector<i32> 1 2 9 10>"
+        "#<vector<int> 1 2 9 10>"
     );
     assert_eq!(
         with_vec(&format!("(replace v {} :end1 1)", src)),
-        "#<vector<i32> 8 2 2 3>"
+        "#<vector<int> 8 2 2 3>"
     );
     assert_eq!(
         with_vec(&format!("(replace v {} :start2 2 :end2 3)", src)),
-        "#<vector<i32> 10 2 2 3>"
+        "#<vector<int> 10 2 2 3>"
     );
 }
 

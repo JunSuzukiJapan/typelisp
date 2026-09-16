@@ -49,14 +49,14 @@ fn eval_ok(src: &str) -> Value {
 
 #[test]
 fn next_on_an_empty_vector_returns_none() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (is-none (next (iter (make-v))))";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
 fn next_yields_elements_in_order_then_none() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 10)
                  (push v 20)
@@ -70,7 +70,7 @@ fn next_yields_elements_in_order_then_none() {
 
 #[test]
 fn iterator_state_is_independent_per_iter_call() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 1)
                  (push v 2)
@@ -86,7 +86,7 @@ fn pushing_after_creating_an_iterator_is_visible_through_it() {
     // `VectorIter<T>` shares the same underlying `RtValue::Struct` as the
     // `Vector<T>` it was made from (see `vector-iter`'s doc comment in
     // `prelude.rs`), so a `push` after `(iter v)` is visible to `next`.
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 1)
                  (let ((it (iter v)))
@@ -98,6 +98,6 @@ fn pushing_after_creating_an_iterator_is_visible_through_it() {
 
 #[test]
 fn next_on_a_type_with_no_iter_impl_is_a_type_error() {
-    let src = "(defstruct box (n i32)) (next (box::new 1))";
+    let src = "(defstruct box (n int)) (next (box::new 1))";
     assert!(check(src).is_err());
 }

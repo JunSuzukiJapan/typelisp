@@ -67,8 +67,8 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
 #[test]
 fn a_compiled_struct_local_survives_collection() {
     let (mut h, mut chk, mut interp) = stressed();
-    let src = r#"(defstruct named (tag string) (n i32))
-                 (defun probe ((n i32)) string
+    let src = r#"(defstruct named (tag string) (n int))
+                 (defun probe ((n int)) string
                    (let ((p (named::new "keepme" n)))
                      (let ((a (sexpr-cons (quote x) (quote ()))))
                        (let ((b (sexpr-cons (quote y) a)))
@@ -131,8 +131,8 @@ fn a_compiled_struct_local_is_not_clobbered_by_a_later_box_allocation() {
 #[test]
 fn a_compiled_vector_local_survives_collection() {
     let (mut h, mut chk, mut interp) = stressed();
-    let src = r#"(defun probe ((n i32)) i32
-                   (let ((v (the Vector<i32> (Vector::new))))
+    let src = r#"(defun probe ((n int)) int
+                   (let ((v (the Vector<int> (Vector::new))))
                      (push v n)
                      (push v 20)
                      (let ((a (sexpr-cons (quote x) (quote ()))))

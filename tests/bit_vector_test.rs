@@ -1,6 +1,6 @@
 //! Tests for `BitVector` — cl-parity-plan.md Phase 6c.
 //!
-//! A prelude `defstruct` over a `Vector<i32>` of packed words plus a length.
+//! A prelude `defstruct` over a `Vector<int>` of packed words plus a length.
 //! What the tests here are mostly watching is the seam between those two: the
 //! bits past the length in the final word must stay clear, or `lognot` leaves
 //! phantom bits behind and two bit vectors of equal length stop agreeing.

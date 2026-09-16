@@ -166,9 +166,10 @@ fn try_as_int_f64_round_trip_always_succeeds() {
 // ---- total conversions: int/bignum/ratio widening -----------------------------
 
 #[test]
-fn as_widens_int_to_bignum_and_ratio() {
-    assert_bignum("(as bignum 42)", "42");
-    assert_bignum("(as bignum (the u8 42))", "42");
+fn as_widens_a_fixed_width_to_int_and_int_to_ratio() {
+    assert_eq!(eval_ok("(as int 42)"), Value::Int(42));
+    assert_eq!(eval_ok("(as int (the u8 42))"), Value::Int(42));
+    assert_eq!(eval_ok("(as int (the u32 4000000000))"), Value::Int(4_000_000_000));
     assert_ratio("(as ratio 42)", "42", "1");
 }
 
@@ -186,20 +187,21 @@ fn as_widens_ratio_to_f64() {
 }
 
 #[test]
-fn as_converts_f64_to_bignum_and_ratio() {
-    // `float->bignum` truncates toward zero (like `float->int`); `float->ratio`
-    // is exact. Both methods already existed — `as` now reaches them.
-    assert_bignum("(as bignum 3.9)", "3");
-    assert_bignum("(as bignum (- 0.0 3.9))", "-3");
+fn as_converts_f64_to_int_and_ratio() {
+    // `float->int` truncates toward zero into the arbitrary-precision `int`;
+    // `float->ratio` is exact.
+    assert_eq!(eval_ok("(as int 3.9)"), Value::Int(3));
+    assert_eq!(eval_ok("(as int (- 0.0 3.9))"), Value::Int(-3));
+    assert_bignum("(as int 1.0e30)", "1000000000000000019884624838656");
     assert_ratio("(as ratio 0.5)", "1", "2");
 }
 
 #[test]
-fn as_narrows_ratio_to_bignum_by_truncating() {
-    // `ratio->bignum` truncates toward zero, consistent with `float->int`.
-    assert_bignum("(as bignum 2/3)", "0");
-    assert_bignum("(as bignum 7/2)", "3");
-    assert_bignum("(as bignum -7/2)", "-3");
+fn as_narrows_ratio_to_int_by_truncating() {
+    // `ratio->int` truncates toward zero, consistent with `float->int`.
+    assert_eq!(eval_ok("(as int 2/3)"), Value::Int(0));
+    assert_eq!(eval_ok("(as int 7/2)"), Value::Int(3));
+    assert_eq!(eval_ok("(as int -7/2)"), Value::Int(-3));
 }
 
 // ---- total conversion: char <-> int -------------------------------------------
@@ -237,44 +239,41 @@ fn try_as_returns_some_or_none_converting_int_to_char() {
     assert_eq!(eval_ok("(is-none (try-as char (the i16 -1)))"), Value::Bool(true));
 }
 
-// ---- partial conversion: bignum -> int ----------------------------------------
+// ---- int -> a fixed width: a width cast like any other ------------------------
 
 #[test]
-fn as_narrows_an_in_range_bignum_to_int() {
+fn as_narrows_an_in_range_int_to_i32() {
     assert_eq!(eval_ok("(as i32 42)"), Value::Int(42));
 }
 
 #[test]
-fn as_panics_narrowing_an_out_of_range_bignum_to_int() {
-    let msg = eval_panics("(as i32 99999999999999999999999999999)");
-    assert!(msg.contains("bignum->int"), "unexpected message: {}", msg);
-    // A narrower target fails in the same place: `bignum->int` runs first,
-    // and the width cast is only chained onto a result it produced.
-    let msg8 = eval_panics("(as u8 99999999999999999999999999999)");
-    assert!(msg8.contains("bignum->int"), "unexpected message: {}", msg8);
+fn as_narrowing_an_int_past_the_width_truncates() {
+    // A width cast truncates — Rust's `as`, the same rule as between two
+    // fixed widths — whether the `int` was a fixnum or a bignum. The question
+    // form is `try-as`.
+    assert_eq!(eval_ok("(as i32 4294967297)"), Value::Int(1));
+    assert_eq!(eval_ok("(as u8 99999999999999999999999999999)"), Value::Int(255));
 }
 
 #[test]
-fn try_as_returns_none_narrowing_an_out_of_range_bignum_to_int() {
+fn try_as_returns_none_narrowing_an_out_of_range_int() {
     assert_eq!(eval_ok("(is-none (try-as i32 99999999999999999999999999999))"), Value::Bool(true));
+    assert_eq!(eval_ok("(is-none (try-as u8 300))"), Value::Bool(true));
 }
 
 #[test]
-fn try_as_returns_some_narrowing_an_in_range_bignum_to_int() {
-    // `(as bignum 42)` widens a plain int literal into a genuine `bignum`
-    // value that comfortably fits back in an `i32`.
-    assert_eq!(eval_ok("(unwrap (try-as i32 (as bignum 42)))"), Value::Int(42));
+fn try_as_returns_some_narrowing_an_in_range_int() {
+    assert_eq!(eval_ok("(unwrap (try-as i32 (as int 42)))"), Value::Int(42));
 }
 
 // ---- excluded pairs and out-of-domain types (check-time errors) --------------
 
 #[test]
-fn ratio_to_int_is_not_covered_by_as() {
-    // `ratio->bignum`/`ratio->float` exist (and `as` reaches them), but there
-    // is no direct `ratio->int` method, so `(as i32 2/3)` stays excluded —
-    // route through `bignum` (`(as i32 (as bignum 2/3))`) instead.
-    let err = check("(as i32 2/3)").expect_err("ratio->int should be excluded");
-    assert!(format!("{:?}", err).contains("no conversion"), "unexpected error: {:?}", err);
+fn ratio_narrows_to_a_fixed_width_through_int() {
+    // `ratio->int` lands on `int`; the fixed width is one more width cast
+    // chained onto it, which `as` does itself.
+    assert_eq!(eval_ok("(as i32 7/2)"), Value::Int(3));
+    assert_eq!(eval_ok("(as u8 -7/2)"), Value::Int(253));
 }
 
 #[test]
@@ -287,18 +286,6 @@ fn as_rejects_a_type_outside_the_numeric_char_catalog() {
 fn try_as_rejects_a_type_outside_the_numeric_char_catalog() {
     let err = check("(try-as string 5)").expect_err("str is out of try-as's domain");
     assert!(format!("{:?}", err).contains("no conversion"), "unexpected error: {:?}", err);
-}
-
-/// A `try-as` that would have to cross families *and* narrow is refused
-/// rather than answered: `(try-as u8 some-bignum)` would pack "did it
-/// convert" and "does it then fit `u8`" into one `option`, and the `none`
-/// could not say which. The message spells out the two-step form.
-#[test]
-fn try_as_refuses_to_cross_a_family_and_narrow_in_one_question() {
-    let err = check("(try-as u8 99999999999999999999999999999)")
-        .expect_err("bignum -> u8 in one `try-as` should be refused");
-    let msg = format!("{:?}", err);
-    assert!(msg.contains("two questions"), "unexpected error: {}", msg);
 }
 
 // ---- between the two float widths ---------------------------------------------

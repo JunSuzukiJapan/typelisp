@@ -94,7 +94,7 @@ fn a_type_imported_from_another_file_is_highlighted() {
         "unexpected names highlighted: {:?}",
         found
     );
-    // At minimum the `HashTable<i32,todo-item>` global and the
+    // At minimum the `HashTable<int,todo-item>` global and the
     // `Option<todo-item>` return type -- both inside generic arguments of a
     // single source token, which is where the in-token span arithmetic earns
     // its keep.
@@ -103,7 +103,7 @@ fn a_type_imported_from_another_file_is_highlighted() {
 
 #[test]
 fn a_type_named_only_in_a_comment_is_not_highlighted() {
-    // `store.typl` opens with a comment mentioning `HashTable<i32,todo-item>`.
+    // `store.typl` opens with a comment mentioning `HashTable<int,todo-item>`.
     // A recorded span can only come from a position the checker parsed as a
     // type, so nothing in a comment can ever be one — asserted anyway, since a
     // reader who sees prose coloured as code learns to distrust the colouring.
@@ -178,10 +178,10 @@ fn a_function_sharing_a_types_name_is_not_highlighted_at_its_call_sites() {
     // false positive this redesign exists to remove. Resolution-driven
     // recording only marks the two genuine type positions.
     let src = "\
-(defstruct pad (n i32))
-(defun pad ((x i32)) i32 x)
-(defun use-fn () i32 (pad 3))
-(defun use-ty ((p pad)) i32 p::n)
+(defstruct pad (n int))
+(defun pad ((x int)) int x)
+(defun use-fn () int (pad 3))
+(defun use-ty ((p pad)) int p::n)
 ";
     // A path under a directory with no `typelisp.toml` above it, so the loader
     // treats it as a standalone entry (text is passed directly; the file need
@@ -208,9 +208,9 @@ fn a_document_with_a_type_error_keeps_its_highlighting() {
     // error (which is most of the time while typing) would be worse than the
     // problem this feature solves.
     let src = "\
-(defstruct rect (w i32))
-(defun bad ((r rect)) i32 \"not an int\")
-(defun good ((r rect)) i32 r::w)
+(defstruct rect (w int))
+(defun bad ((r rect)) int \"not an int\")
+(defun good ((r rect)) int r::w)
 ";
     let path = PathBuf::from("/tmp/typelisp-semantic-recover-test/f.typl");
     let (_, tokens) = analyze_src(&path, src);
@@ -230,7 +230,7 @@ fn a_static_method_call_still_names_the_type() {
     // `(rect::new 1)` — the type sits in the token's second-to-last segment;
     // exactly the `rect` part must be highlighted, not `::new`.
     let src = "\
-(defstruct rect (w i32))
+(defstruct rect (w int))
 (defun make () rect (rect::new 5))
 ";
     let path = PathBuf::from("/tmp/typelisp-semantic-assoc-test/f.typl");

@@ -213,7 +213,7 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
 
 /// Rebuilds an [`OwnedForm`] as a live `Value` in `heap` — the load-time
 /// half, allocating **through the heap's own APIs** (`intern_symbol`/
-/// `alloc_string`/`intern_path`/`alloc_f32`/`alloc_f64`/`alloc_bignum`/`alloc_ratio`/
+/// `alloc_string`/`intern_path`/`alloc_f32`/`alloc_f64`/`int_from_bigint`/`alloc_ratio`/
 /// `cons`), never copying raw memory.
 ///
 /// The returned value is *unrooted* — like a reader result, the caller must
@@ -244,7 +244,18 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
         }
         OwnedForm::F32(x) => heap.alloc_f32(*x),
         OwnedForm::F64(x) => heap.alloc_f64(*x),
-        OwnedForm::Bignum(n) => heap.alloc_bignum(n.clone()),
+        // A dump records an `int`'s bignum box only when the value did not
+        // fit a fixnum; one that does is a corrupt or foreign dump, refused
+        // rather than quietly re-canonicalized.
+        OwnedForm::Bignum(n) => match i64::try_from(n) {
+            Ok(v) if typelisp_mem::fixnum_fits(v) => {
+                return Err(Error::TypeError(format!(
+                    "fasl: a bignum box holding {} (a fixnum-range value) is not a canonical `int`",
+                    n
+                )))
+            }
+            _ => heap.int_from_bigint(n.clone()),
+        },
         OwnedForm::Ratio(r) => heap.alloc_ratio(r.clone()),
         OwnedForm::Cons { cells, tail } => {
             // Back to front, so each `cons` already has its cdr in hand — which

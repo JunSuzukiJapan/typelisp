@@ -111,11 +111,11 @@ fn decf_with_explicit_delta() {
 
 #[test]
 fn incf_on_a_hashtable_value_type_mismatch_is_rejected() {
-    // `(get h k)` reads `Option<i32>`, not `i32` — `(+ (get h k) delta)`
+    // `(get h k)` reads `Option<int>`, not `int` — `(+ (get h k) delta)`
     // is a genuine type error, not a bug: this project's `get`/`set`
     // convention has an asymmetric read/write type (unlike CL's untyped
     // `gethash`), so `incf` can never paper over a missing entry.
-    let src = "(defun make-h () HashTable<string,i32> (HashTable::new))
+    let src = "(defun make-h () HashTable<string,int> (HashTable::new))
                (let ((h (make-h))) (set h \"a\" 1) (incf (get h \"a\")))";
     assert!(matches!(check_with_prelude(src), Err(Error::TypeError(_))));
 }
@@ -177,7 +177,7 @@ fn rotatef_call_form_places_dedup_shared_subexpressions() {
     // Both places share the same receiver `t` and only differ by index —
     // exercises `Checker::place_dedup` binding `t` once per place rather
     // than re-evaluating the receiver expression for the read and the write.
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 10)
                  (push v 20)
@@ -190,7 +190,7 @@ fn rotatef_call_form_places_dedup_shared_subexpressions() {
 
 #[test]
 fn setf_get_writes_through_a_hashtable_entry() {
-    let src = "(defun make-h () HashTable<string,i32> (HashTable::new))
+    let src = "(defun make-h () HashTable<string,int> (HashTable::new))
                (let ((h (make-h)))
                  (set h \"a\" 1)
                  (setf (get h \"a\") 41)
@@ -204,7 +204,7 @@ fn setf_rejects_a_call_form_place_with_no_matching_setter() {
     // corresponding setter — the receiver's *type* genuinely lacks one,
     // unlike `setf_rejects_a_place_that_is_neither_variable_field_nor_call_form`
     // below, which is about the place's *shape*.
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v 1) (setf (len v) 2))";
     assert!(matches!(check(src), Err(Error::TypeError(_))));
 }
@@ -222,11 +222,11 @@ fn setf_on_a_user_defined_accessor_uses_the_set_prefix_convention() {
     // just checks whether `cells`'s (statically known) type has an instance
     // method literally named `set-at`, exactly the same `X`/`set-X`
     // convention `defstruct` already uses for field accessors.
-    let src = "(defstruct cells (data Vector<i32>))
-               (defmethod at ((self cells) (i i32)) i32 (get self::data i))
-               (defmethod set-at ((self cells) (i i32) (v i32)) () (setf (get self::data i) v))
+    let src = "(defstruct cells (data Vector<int>))
+               (defmethod at ((self cells) (i int)) int (get self::data i))
+               (defmethod set-at ((self cells) (i int) (v int)) () (setf (get self::data i) v))
                (defun make-c () cells
-                 (let ((d (the Vector<i32> (Vector::new))))
+                 (let ((d (the Vector<int> (Vector::new))))
                    (push d 1)
                    (push d 2)
                    (cells::new d)))
@@ -238,9 +238,9 @@ fn setf_on_a_user_defined_accessor_uses_the_set_prefix_convention() {
 
 #[test]
 fn setf_on_a_user_defined_accessor_with_no_setter_is_rejected() {
-    let src = "(defstruct cells (data Vector<i32>))
-               (defmethod at ((self cells) (i i32)) i32 (get self::data i))
-               (defun make-c () cells (cells::new (the Vector<i32> (Vector::new))))
+    let src = "(defstruct cells (data Vector<int>))
+               (defmethod at ((self cells) (i int)) int (get self::data i))
+               (defun make-c () cells (cells::new (the Vector<int> (Vector::new))))
                (let ((c (make-c))) (setf (at c 0) 99))";
     assert!(matches!(check(src), Err(Error::TypeError(_))));
 }

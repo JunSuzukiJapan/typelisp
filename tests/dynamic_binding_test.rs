@@ -15,8 +15,8 @@ use typelisp::Value;
 
 /// A global to rebind, plus a reader that sees it through a function call —
 /// so the tests observe the *global*, not a lexical name in scope.
-const G: &str = "(defvar (*depth* i32) 0)
-                 (defun peek () i32 *depth*)";
+const G: &str = "(defvar (*depth* int) 0)
+                 (defun peek () int *depth*)";
 
 fn with_g(src: &str) -> String {
     format!("{}\n{}", G, src)
@@ -55,16 +55,16 @@ fn a_multi_form_body_runs_in_order() {
 
 #[test]
 fn several_globals_rebind_at_once() {
-    let src = "(defvar (*width* i32) 1)
-               (defun peek2 () i32 (+ (* 10 *depth*) *width*))
+    let src = "(defvar (*width* int) 1)
+               (defun peek2 () int (+ (* 10 *depth*) *width*))
                (progn (dlet ((*depth* 3) (*width* 4)) (peek2)))";
     assert_eq!(eval_ok(&with_g(src)), Value::Int(34));
 }
 
 #[test]
 fn several_globals_all_come_back() {
-    let src = "(defvar (*width* i32) 1)
-               (defun peek2 () i32 (+ (* 10 *depth*) *width*))
+    let src = "(defvar (*width* int) 1)
+               (defun peek2 () int (+ (* 10 *depth*) *width*))
                (progn (dlet ((*depth* 3) (*width* 4)) (peek2)) (peek2))";
     assert_eq!(eval_ok(&with_g(src)), Value::Int(1));
 }
@@ -80,7 +80,7 @@ fn nesting_restores_the_enclosing_value_not_the_original() {
 fn the_new_value_is_visible_through_a_call_made_by_the_body() {
     // The whole point of a dynamic binding: a function the body calls sees it
     // without being passed anything.
-    let src = "(defun deeper () i32 (peek))
+    let src = "(defun deeper () int (peek))
                (dlet ((*depth* 7)) (deeper))";
     assert_eq!(eval_ok(&with_g(src)), Value::Int(7));
 }
@@ -113,7 +113,7 @@ fn a_break_out_of_a_loop_around_the_body_still_restores() {
 fn a_return_out_of_the_body_still_restores() {
     // `return` leaves the nearest enclosing loop (syntax.md §5), so the loop
     // is what the body is inside of here.
-    let src = "(defun f () i32 (loop (dlet ((*depth* 3)) (return (peek)))))
+    let src = "(defun f () int (loop (dlet ((*depth* 3)) (return (peek)))))
                (+ (* 10 (f)) (peek))";
     assert_eq!(eval_ok(&with_g(src)), Value::Int(30));
 }
@@ -143,7 +143,7 @@ fn the_saved_value_does_not_capture_a_body_name() {
 #[test]
 fn the_new_value_expression_is_evaluated_once() {
     let src = "(let ((n 0))
-                 (labels ((bump () i32 (progn (setf n (+ n 1)) n)))
+                 (labels ((bump () int (progn (setf n (+ n 1)) n)))
                    (progn (dlet ((*depth* (bump))) (peek)) n)))";
     assert_eq!(eval_ok(&with_g(src)), Value::Int(1));
 }
@@ -184,8 +184,8 @@ fn print_base_changes_the_radix_integers_print_in() {
 #[test]
 fn print_base_reaches_bignums_too() {
     shows(
-        r#"(dlet ((*print-base* 16)) (format false "~a" (int->bignum 255)))"#,
-        "ff",
+        r#"(dlet ((*print-base* 16)) (format false "~a" 100000000000000000000))"#,
+        "56bc75e2d63100000",
     );
 }
 
@@ -342,7 +342,7 @@ fn the_radix_macros_read_the_numbers_print_radix_writes() {
         ("#5r11", 6),
         ("#x-ff", -255),
     ] {
-        let src = format!("(match (unwrap (read \"{}\")) ((i32 n) n) (_ -1))", text);
+        let src = format!("(match (unwrap (read \"{}\")) ((int n) n) (_ -1))", text);
         assert_eq!(eval_ok(&src), Value::Int(n), "{}", text);
     }
 }
@@ -351,13 +351,13 @@ fn the_radix_macros_read_the_numbers_print_radix_writes() {
 fn a_radix_macro_round_trips_what_print_radix_produced() {
     let src = "(match (unwrap (read (dlet ((*print-base* 16) (*print-radix* true))
                                      (format false \"~a\" 48879))))
-                 ((i32 n) n) (_ -1))";
+                 ((int n) n) (_ -1))";
     assert_eq!(eval_ok(src), Value::Int(48879));
 }
 
 #[test]
-fn a_radix_macro_past_i32_reads_as_a_bignum() {
-    let src = "(match (unwrap (read \"#xffffffffffffffffff\")) ((Bignum _) true) (_ false))";
+fn a_radix_macro_past_63_bits_reads_as_an_int() {
+    let src = "(match (unwrap (read \"#xffffffffffffffffff\")) ((int n) (= n 4722366482869645213695)) (_ false))";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
 

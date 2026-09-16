@@ -155,7 +155,7 @@ fn read_all_returns_exactly_what_the_stream_does() {
     // two cannot drift.
     let mut heap = Heap::with_capacity(1 << 12);
     let reader = Reader::new();
-    let src = "(defun f () i32 1) 2 \"three\"";
+    let src = "(defun f () int 1) 2 \"three\"";
 
     let all: Vec<Value> = reader.read_all(&mut heap, src).expect("read failed");
     let mut forms = reader.forms(src);
@@ -177,7 +177,7 @@ fn read_all_returns_exactly_what_the_stream_does() {
 fn a_loaded_file_runs_the_forms_before_a_syntax_error() {
     let dir = fixture(
         "flat_syntax_error",
-        &[("broken.typl", "(defvar (probe i32) 0)\n(setf probe 42)\n(this-form-never-closes\n")],
+        &[("broken.typl", "(defvar (probe int) 0)\n(setf probe 42)\n(this-form-never-closes\n")],
     );
     let (mut heap, reader, mut checker, mut interp) = session();
 
@@ -194,7 +194,7 @@ fn a_loaded_file_runs_the_forms_before_a_syntax_error() {
 fn a_loaded_file_runs_the_forms_before_a_type_error() {
     let dir = fixture(
         "flat_type_error",
-        &[("broken.typl", "(defvar (probe i32) 0)\n(setf probe 7)\n(+ 1 \"not a number\")\n")],
+        &[("broken.typl", "(defvar (probe int) 0)\n(setf probe 7)\n(+ 1 \"not a number\")\n")],
     );
     let (mut heap, reader, mut checker, mut interp) = session();
 
@@ -205,7 +205,7 @@ fn a_loaded_file_runs_the_forms_before_a_type_error() {
 
 #[test]
 fn a_loaded_file_still_runs_every_form_when_nothing_is_broken() {
-    let dir = fixture("flat_ok", &[("fine.typl", "(defvar (probe i32) 0)\n(setf probe 1)\n(setf probe 2)\n")]);
+    let dir = fixture("flat_ok", &[("fine.typl", "(defvar (probe int) 0)\n(setf probe 1)\n(setf probe 2)\n")]);
     let (mut heap, reader, mut checker, mut interp) = session();
 
     load_file_flat(&mut heap, &reader, &mut checker, &mut interp, &dir, "fine.typl").expect("load failed");
@@ -244,7 +244,7 @@ fn a_use_above_the_reference_resolves() {
     let dir = fixture(
         "use_above",
         &[
-            ("helper.typl", "(pub defun twice ((n i32)) i32 (* n 2))\n"),
+            ("helper.typl", "(pub defun twice ((n int)) int (* n 2))\n"),
             ("main.typl", "(use helper)\n(helper::twice 21)\n"),
         ],
     );
@@ -259,8 +259,8 @@ fn a_use_below_the_reference_no_longer_reaches_back() {
     let dir = fixture(
         "use_below",
         &[
-            ("helper.typl", "(pub defun twice ((n i32)) i32 (* n 2))\n"),
-            ("main.typl", "(defun main () i32 (helper::twice 21))\n(use helper)\n"),
+            ("helper.typl", "(pub defun twice ((n int)) int (* n 2))\n"),
+            ("main.typl", "(defun main () int (helper::twice 21))\n(use helper)\n"),
         ],
     );
     let err = run_project(&dir, "main.typl").expect_err("the reference precedes its `use`");
@@ -274,10 +274,10 @@ fn a_macro_defined_earlier_in_the_file_is_expanded_when_a_later_form_is_scanned(
     let dir = fixture(
         "macro_then_use",
         &[
-            ("helper.typl", "(pub defun twice ((n i32)) i32 (* n 2))\n"),
+            ("helper.typl", "(pub defun twice ((n int)) int (* n 2))\n"),
             (
                 "main.typl",
-                "(defmacro bring () `(use helper))\n(bring)\n(defun main () i32 (helper::twice 4))\n(main)\n",
+                "(defmacro bring () `(use helper))\n(bring)\n(defun main () int (helper::twice 4))\n(main)\n",
             ),
         ],
     );

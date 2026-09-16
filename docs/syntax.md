@@ -20,15 +20,15 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - **整数**: 10進（`42`, `-7`）。符号 `+`/`-` を前置可能。10進以外は CL の radix マクロ
   `#b`/`#o`/`#x`/`#NNr` で書く（符号は印の後ろ、`#x-ff`）。`0x` 接頭辞は CL に無いので
   採らない——`0xff` はシンボルとして読まれる。
-  型注釈のない整数リテラルは既定で `i32`。**期待される型が整数型ならその型になり、
-  その型が持てる値かどうかが検査される**——`(the u8 300)` は型エラー（切り詰めが欲しければ
-  `(as u8 300)` と書く）。`(the u32 4294967295)` や `(the u32 #xFFFFFFFF)` はこの規則で書ける。
-  型を名指す文脈が無いとき、`i32` の範囲を超える整数リテラルは（基数を問わず）`bignum` になる
-  （CL 同様、固定長か多倍長かは値の大きさで決まり、専用構文はない）。
+  型注釈のない整数リテラルは既定で `int`（任意精度、[functions.md](functions.md) §2.4）——大きさに
+  上限は無い。**期待される型が固定幅の整数型ならその型になり、その型が持てる値かどうかが
+  検査される**——`(the u8 300)` は型エラー（切り詰めが欲しければ `(as u8 300)` と書く）。
+  `(the u32 4294967295)` や `(the u32 #xFFFFFFFF)` はこの規則で書ける。`int` の値が 63bit の
+  即値に入るか多倍長になるかは値の大きさで決まり、専用構文はない（CL と同じ）。
 - **浮動小数点数**: 小数点または指数表記（`e`/`E`）を含むもの（`1.5`, `3.0e10`）。
   既定で `f64`（期待される型が `f32` ならその型になる）。
 - **比 (ratio)**: `分子/分母`（10進のみ、例 `1/3`）。読み取り時に CL 仕様どおり既約化される
-  （`2/4` は `1/2`）。整数値になるもの（`4/2` など）は `ratio` ではなく `Int`/`bignum` として
+  （`2/4` は `1/2`）。整数値になるもの（`4/2` など）は `ratio` ではなく `int` として
   読まれる。分母が `0`（`1/0`）は読み取りエラー。
 - **文字**: `#\` に続けて1文字、または名前付き文字。例: `#\a` `#\Space` `#\Newline`
   `#\Tab` `#\Return` `#\Page` `#\Nul`（`#\Null` も可）`#\Backspace`。名前は大文字小文字を区別しない。
@@ -58,12 +58,12 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
 型はソース上では通常のシンボルまたはリストとして書く。
 
-- **プリミティブ型**: `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `bool` `char` `string`
+- **プリミティブ型**: `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `bool` `char` `string`。
+  `int` が整数（CL の integer——63bit 即値と多倍長のあいだを自動で行き来する、
+  [functions.md](functions.md) §2.4）、6 つの固定幅は幅と符号を名乗る型
   （64bit 幅の整数型は無い——[functions.md](functions.md) §1 参照）
-- **任意精度整数**: `int`（CL の integer。63bit 即値と多倍長のあいだを自動で行き来する。
-  [functions.md](functions.md) §2.4）
-- **多倍長数値型**: `bignum`（任意精度整数）、`ratio`（既約な有理数）。CL 準拠でヒープ確保され、
-  `i32`/`f64` 等との暗黙変換はない（`as`/`try-as` または変換メソッドで明示。functions.md 参照）。
+- **有理数型**: `ratio`（既約な有理数）。CL 準拠でヒープ確保され、`int`/`f64` 等との暗黙変換は
+  ない（`as`/`try-as` または変換メソッドで明示。functions.md 参照）。
 - **C 境界の生の語**: `ptr`（不透明ポインタ）、`c-long` / `c-ulong`。FFI 専用で、値にするには
   `(unsafe ...)` が要り、置ける場所も限られる（[§3 defffi](#ptr--c-long--c-ulong--生の機械語)）。
   64bit 整数が欲しい場面でこれを使ってはいけない——算術は付いていない。
@@ -306,7 +306,7 @@ C の識別子は含めないため。C 名を省くと名前がそのまま C �
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; 返ってきたものを読む
-(as bignum (unsafe (c-strlen s)))            ; i32 に入らない値はこちら
+(as int (unsafe (c-strlen s)))               ; 正確に読むならこちら（int は 64bit を落とさない）
 (try-as i32 (unsafe (c-strlen s)))           ; 入るかどうかを問う
 (as c-ulong n)                               ; 他の整数から作る
 ```
@@ -850,7 +850,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 - 裸の変種名 — 引数を取らない変種にマッチ（`(match c (red 1) (blue 2))`）。フィールドを持つ変種を
   裸名で書くとアリティエラーになるので、`(circle r)` のように括弧で書く
 - **即値リテラル**: 整数 / `true`/`false` / 文字 — 語の比較
-- **値リテラル**: 文字列 / 浮動小数点 / シンボル（`'foo`）/ bignum / ratio — その型の
+- **値リテラル**: 文字列 / 浮動小数点 / シンボル（`'foo`）/ 多倍長の整数 / ratio — その型の
   `Eq::equals`（§2 のトレイト）による値比較。文字列は内容比較であって同一性比較ではない
 - `(= expr)` — 任意の式を評価し、`Eq::equals` で比較する。リテラル構文を持たない型
   （`defstruct` インスタンス、グローバル、計算結果）を比較する唯一の書き方であり、
@@ -868,7 +868,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (match s ('add 1) (42 2) (#\a 3) (_ 0))
 ```
 
-即値でないリテラル（文字列 / 浮動小数点 / bignum / ratio）は `Sexpr` に対して**書けない**。
+即値でないリテラル（文字列 / 浮動小数点 / 多倍長の整数 / ratio）は `Sexpr` に対して**書けない**。
 それらの `eq` は `Str`・箱・cons セルの同一性なので「型は通るが決してマッチしない腕」になるため、
 変種パターンを名指すエラーにしてある——`(str "hi")` と書けば `string` に分解されて内容比較になる。
 `(= expr)` は明示的に `equals` を求めているので、この制限は掛からない。
@@ -1124,7 +1124,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
                                      ; 戻り値は旧 place1 の値
 (list e1 e2 ... en)                 ; (cons e1 (cons e2 (... ()))) への展開。0引数なら ()
                                      ; 各要素は Sexpr へ暗黙変換される（CL のcons同様、任意の値を
-                                     ; 保持できる）: スカラ(i32/f64/bignum/ratio/char/bool/string/
+                                     ; 保持できる）: スカラ(int/i32/f64/ratio/char/bool/string/
                                      ; symbol)は対応する Sexpr コンストラクタでラップ、defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> 等ヒープ表現ADTは無変換の
                                      ; まま retype（実行時コストなし）。&rest/format引数も同様。
@@ -1155,13 +1155,13 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 各自の型のまま `Sexpr` へ包まれて渡る——`(println "~a" my-struct)` がそのまま動くのはこのため。
 書式ディレクティブと pretty printer の詳細は [functions.md](functions.md) §15 / §15.1。
 
-`as`/`try-as` が扱えるのは数値・文字カタログのみ（整数型・`f32`/`f64`/`bignum`/`ratio`/`char` 間）。
-同一型は無変換。**整数の幅どうし・`f32`↔`f64` は本物の変換**——`as` は切り詰め／丸め、`try-as` は
-その幅（精度）に入るかどうかを答える。`i32`→`char` と `bignum`→`i32` も範囲外で失敗しうるので
-`as` は panic・`try-as` は `None`。それ以外（拡大変換や `float->int` 等の切り捨て）は常に成功する。
-他の族から狭い整数への `try-as`（例 `(try-as u8 some-bignum)`）は拒否される——1つの `Option` に
-「変換できたか」と「その幅に入るか」の2つの問いを詰め込むことになるため、分けて書く。
-内部的には対応する変換メソッド（functions.md の `int->char`/`int->bignum`/`bignum->int` 等）へ
+`as`/`try-as` が扱えるのは数値・文字カタログのみ（`int`・固定幅整数型・`f32`/`f64`/`ratio`/`char`
+間）。同一型は無変換。**整数の幅どうし（`int` を含む）・`f32`↔`f64` は本物の変換**——`as` は
+切り詰め／丸め、`try-as` はその幅（精度）に入るかどうかを答える。`(as int x)` は固定幅からの正確な
+拡大、`(as i32 n)` は `int` からの切り詰め。整数→`char` は範囲外で失敗しうるので `as` は panic・
+`try-as` は `None`。それ以外（拡大変換や `float->int`/`ratio->int` の切り捨て）は常に成功する。
+`float->int`/`ratio->int`/`char->int` は `int` に着地し、より狭い幅を頼まれれば `int->W` を
+続けて呼ぶ。内部的には対応する変換メソッド（functions.md の `int->char`/`int->int`/`int->W` 等）へ
 展開される糖衣構文。
 
 `documentation` は `quote`/`compile` と同様、`name` を評価せず未評価の裸シンボル/`::`パスとして
@@ -1188,7 +1188,7 @@ docstring を返す（`(documentation Type::method)` はメソッド専用）。
 (defun find-first ((xs Sexpr)) i32
   (catch 'found
     (dolist (x xs)
-      (match x ((i32 n) (if (> n 10) (throw 'found n) ())) (_ ())))
+      (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
     -1))                            ; 見つからなければ通常どおり末尾の値
 ```
 
@@ -1251,7 +1251,7 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 `string::upcase`/`downcase`（`rt_str_upcase`/`rt_str_downcase`）、`Option` を返す変換
 （`try-int->char`・`try-int->W`・`try-float->f32|f64`——判定だけを行う
 `rt_int_fits`/`rt_int_fits_char`/`rt_f64_fits_f32` と、島の `build-try-option` が
-`some`/`none` の箱を組む）、`bignum` の `ash`/`logbitp`/`logtest`/`logcount`/
+`some`/`none` の箱を組む）、多倍長整数の `ash`/`logbitp`/`logtest`/`logcount`/
 `integer-length`。
 
 どれも prelude からは到達しないので `PRELUDE_COMPILE_UNSUPPORTED` には現れなかった

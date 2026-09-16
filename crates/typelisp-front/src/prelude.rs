@@ -221,7 +221,7 @@ pub const SOURCE: &str = r##"
 ;; CL. Uninterned symbols would buy nothing — every place a symbol acts as a
 ;; binder is keyed by name (`Env::vars`), so two same-named uninterned symbols
 ;; would collide exactly where it matters most.
-(pub defvar (*gensym-counter* i32) 0)
+(pub defvar (*gensym-counter* int) 0)
 
 (pub defun gensym (&optional (prefix string "g")) Symbol
   "A fresh symbol, named from `prefix` and `*gensym-counter*`. CL's `gensym`."
@@ -407,29 +407,29 @@ pub const SOURCE: &str = r##"
 (defmethod mod ((self f64) (b f64)) f64 (- self (* b (floor (/ self b)))))
 (defmethod rem ((self f64) (b f64)) f64 (- self (* b (truncate (/ self b)))))
 
-;; --- bignum --- (negation is `(- (int->bignum 0) self)`: the first operand is
+;; --- int --- (negation is `(- (int->bignum 0) self)`: the first operand is
 ;; a typed `bignum`, so it dispatches correctly, unlike a bare `0`. `expt` is
 ;; non-negative-exponent only — a negative one would be a `ratio`, which a
 ;; `bignum`-returning method can't hold)
-(defmethod abs ((self bignum)) bignum
-  (if (< self (int->bignum 0)) (- (int->bignum 0) self) self))
-(defmethod signum ((self bignum)) bignum
-  (if (= self (int->bignum 0)) self (/ self (abs self))))
-(defmethod rem ((self bignum) (b bignum)) bignum (- self (* b (/ self b))))
-(defmethod gcd ((self bignum) (b bignum)) bignum
-  (if (= b (int->bignum 0)) (abs self) (gcd b (mod self b))))
-(defmethod lcm ((self bignum) (b bignum)) bignum
-  (if (or (= self (int->bignum 0)) (= b (int->bignum 0))) (int->bignum 0)
+(defmethod abs ((self int)) int
+  (if (< self 0) (- 0 self) self))
+(defmethod signum ((self int)) int
+  (if (= self 0) self (/ self (abs self))))
+(defmethod rem ((self int) (b int)) int (- self (* b (/ self b))))
+(defmethod gcd ((self int) (b int)) int
+  (if (= b 0) (abs self) (gcd b (mod self b))))
+(defmethod lcm ((self int) (b int)) int
+  (if (or (= self 0) (= b 0)) 0
       (/ (abs (* self b)) (gcd self b))))
 ;; Exponentiation by squaring (log-depth recursion — a linear `e`-deep
 ;; recursion overflows the interpreter's tree-walking stack for large `e`).
-(defmethod expt ((self bignum) (e bignum)) bignum
-  (if (< e (int->bignum 0))
-      (panic "expt: negative exponent has no bignum result (it would be a ratio)")
-      (if (= e (int->bignum 0)) (int->bignum 1)
-          (if (= (mod e (int->bignum 2)) (int->bignum 0))
-              (let ((h (expt self (/ e (int->bignum 2))))) (* h h))
-              (* self (expt self (- e (int->bignum 1))))))))
+(defmethod expt ((self int) (e int)) int
+  (if (< e 0)
+      (panic "expt: negative exponent has no int result (it would be a ratio)")
+      (if (= e 0) 1
+          (if (= (mod e 2) 0)
+              (let ((h (expt self (/ e 2)))) (* h h))
+              (* self (expt self (- e 1)))))))
 
 ;; --- ratio --- (`ratio->bignum` truncates toward zero, so `(bignum->ratio
 ;; (ratio->bignum q))` is `truncate(q)`; `rem` uses it directly, `mod` adjusts
@@ -439,21 +439,21 @@ pub const SOURCE: &str = r##"
 (defmethod signum ((self ratio)) ratio
   (if (= self (int->ratio 0)) self (/ self (abs self))))
 (defmethod rem ((self ratio) (b ratio)) ratio
-  (- self (* b (bignum->ratio (ratio->bignum (/ self b))))))
+  (- self (* b (int->ratio (ratio->int (/ self b))))))
 (defmethod mod ((self ratio) (b ratio)) ratio
   (let ((r (rem self b)))
     (if (or (and (< r (int->ratio 0)) (> b (int->ratio 0)))
             (and (> r (int->ratio 0)) (< b (int->ratio 0))))
         (+ r b)
         r)))
-(defun ratio-expt-int ((base ratio) (n bignum)) ratio
-  (if (< n (int->bignum 0))
-      (ratio-expt-int (/ (int->ratio 1) base) (- (int->bignum 0) n))
-      (if (= n (int->bignum 0)) (int->ratio 1)
-          (* base (ratio-expt-int base (- n (int->bignum 1)))))))
+(defun ratio-expt-int ((base ratio) (n int)) ratio
+  (if (< n 0)
+      (ratio-expt-int (/ (int->ratio 1) base) (- 0 n))
+      (if (= n 0) (int->ratio 1)
+          (* base (ratio-expt-int base (- n 1))))))
 (defmethod expt ((self ratio) (e ratio)) ratio
-  (if (= e (bignum->ratio (ratio->bignum e)))
-      (ratio-expt-int self (ratio->bignum e))
+  (if (= e (int->ratio (ratio->int e)))
+      (ratio-expt-int self (ratio->int e))
       (panic "expt: ratio exponent must be integer-valued")))
 
 ;; CL's numeric predicates (`zerop`/`plusp`/`minusp`/`evenp`/`oddp`) and
@@ -480,14 +480,14 @@ pub const SOURCE: &str = r##"
 (defmethod minusp ((self f64)) bool (< self 0.0))
 (defmethod 1+ ((self f64)) f64 (+ self 1.0))
 (defmethod 1- ((self f64)) f64 (- self 1.0))
-;; --- bignum ---
-(defmethod zerop ((self bignum)) bool (= self (int->bignum 0)))
-(defmethod plusp ((self bignum)) bool (> self (int->bignum 0)))
-(defmethod minusp ((self bignum)) bool (< self (int->bignum 0)))
-(defmethod evenp ((self bignum)) bool (= (mod self (int->bignum 2)) (int->bignum 0)))
-(defmethod oddp ((self bignum)) bool (/= (mod self (int->bignum 2)) (int->bignum 0)))
-(defmethod 1+ ((self bignum)) bignum (+ self (int->bignum 1)))
-(defmethod 1- ((self bignum)) bignum (- self (int->bignum 1)))
+;; --- int ---
+(defmethod zerop ((self int)) bool (= self 0))
+(defmethod plusp ((self int)) bool (> self 0))
+(defmethod minusp ((self int)) bool (< self 0))
+(defmethod evenp ((self int)) bool (= (mod self 2) 0))
+(defmethod oddp ((self int)) bool (/= (mod self 2) 0))
+(defmethod 1+ ((self int)) int (+ self 1))
+(defmethod 1- ((self int)) int (- self 1))
 ;; --- ratio --- (no evenp/oddp: CL requires an integer argument)
 (defmethod zerop ((self ratio)) bool (= self (int->ratio 0)))
 (defmethod plusp ((self ratio)) bool (> self (int->ratio 0)))
@@ -511,14 +511,14 @@ pub const SOURCE: &str = r##"
 (defmethod logandc2 ((self i32) (b i32)) i32 (logand self (lognot b)))
 (defmethod logorc1 ((self i32) (b i32)) i32 (logior (lognot self) b))
 (defmethod logorc2 ((self i32) (b i32)) i32 (logior self (lognot b)))
-;; --- bignum ---
-(defmethod logeqv ((self bignum) (b bignum)) bignum (lognot (logxor self b)))
-(defmethod lognand ((self bignum) (b bignum)) bignum (lognot (logand self b)))
-(defmethod lognor ((self bignum) (b bignum)) bignum (lognot (logior self b)))
-(defmethod logandc1 ((self bignum) (b bignum)) bignum (logand (lognot self) b))
-(defmethod logandc2 ((self bignum) (b bignum)) bignum (logand self (lognot b)))
-(defmethod logorc1 ((self bignum) (b bignum)) bignum (logior (lognot self) b))
-(defmethod logorc2 ((self bignum) (b bignum)) bignum (logior self (lognot b)))
+;; --- int ---
+(defmethod logeqv ((self int) (b int)) int (lognot (logxor self b)))
+(defmethod lognand ((self int) (b int)) int (lognot (logand self b)))
+(defmethod lognor ((self int) (b int)) int (lognot (logior self b)))
+(defmethod logandc1 ((self int) (b int)) int (logand (lognot self) b))
+(defmethod logandc2 ((self int) (b int)) int (logand self (lognot b)))
+(defmethod logorc1 ((self int) (b int)) int (logior (lognot self) b))
+(defmethod logorc2 ((self int) (b int)) int (logior self (lognot b)))
 
 ;; CL's character catalog beyond the primitives in `registry::char_assoc`
 ;; (`upcase`/`downcase`/`<`/`alphap`/`digitp`/`char->int`/`equalp`).
@@ -545,13 +545,13 @@ pub const SOURCE: &str = r##"
 ;;
 ;; ASCII-only, like `char_assoc`'s own `upcase`/`alphap`: classifying a
 ;; non-ASCII code point needs Unicode tables the runtime does not carry.
-(defun ascii-alpha-code ((n i32)) bool
+(defun ascii-alpha-code ((n int)) bool
   (or (and (>= n 65) (<= n 90)) (and (>= n 97) (<= n 122))))
-(defun ascii-digit-code ((n i32)) bool (and (>= n 48) (<= n 57)))
+(defun ascii-digit-code ((n int)) bool (and (>= n 48) (<= n 57)))
 ;; Case-folds an upper-case ASCII letter down, leaving everything else alone —
 ;; the code-point-level half of `char`'s `equalp`, reused by the four
 ;; case-insensitive order comparisons below.
-(defun ascii-downcase-code ((n i32)) i32
+(defun ascii-downcase-code ((n int)) int
   (if (and (>= n 65) (<= n 90)) (+ n 32) n))
 
 ;; `char/=`: CL's inequality. `char` had `equal` but no `/=`, so the checker's
@@ -599,7 +599,7 @@ pub const SOURCE: &str = r##"
 ;; these were written. Phase 5b lifted that restriction and they stayed
 ;; `defun`s — nothing at a call site tells the two apart for a `char`
 ;; receiver, so moving them would be churn.
-(defun digit-weight ((c char) &optional (radix i32 10)) Option<i32>
+(defun digit-weight ((c char) &optional (radix int 10)) Option<int>
   (let* ((n (char->int c))
          ;; `-1` means "not a digit character at all", which the range test
          ;; below rejects along with a weight too large for `radix`.
@@ -613,7 +613,7 @@ pub const SOURCE: &str = r##"
 ;; the rest upper-case letters, as CL specifies (so `radix` tops out at 36).
 ;; Indexing a literal with `string`'s `ref` rather than computing a code point
 ;; keeps this off `int->char`, per this section's header.
-(defun digit->char ((weight i32) &optional (radix i32 10)) Option<char>
+(defun digit->char ((weight int) &optional (radix int 10)) Option<char>
   (if (or (< weight 0) (>= weight radix))
       (option::none)
       (option::some (ref "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" weight))))
@@ -666,7 +666,7 @@ pub const SOURCE: &str = r##"
 ;; `string-lessp` and friends: CL's case-insensitive order comparisons.
 ;; Lexicographic on case-folded code points, with the shorter string first on
 ;; a common prefix — the same order `<` gives, folded.
-(defun string-fold-compare ((a string) (b string)) i32
+(defun string-fold-compare ((a string) (b string)) int
   "-1/0/1 for a < b / a = b / a > b, comparing case-folded code points."
   (let ((i 0) (n (min (length a) (length b))) (r 0))
     (progn
@@ -684,7 +684,7 @@ pub const SOURCE: &str = r##"
 ;; `make-string`: `n` copies of `c`. A static method, so it reads like every
 ;; other constructor in this language (`Vector::new`, `HashTable::new`) rather
 ;; than as a `make-*` free function — cl-parity-plan.md §1.1.
-(defmethod filled (string (n i32) (c char)) string
+(defmethod filled (string (n int) (c char)) string
   (let ((out "") (i 0))
     (progn
       (while (< i n) (progn (setf out (append out (char->string c))) (setf i (+ i 1))))
@@ -700,7 +700,7 @@ pub const SOURCE: &str = r##"
 ;; mention the function's own type parameters (`Checker::check_defun_opt_key`),
 ;; and `:key`/`:test` are function types over the element type. A defaultless
 ;; parameter arrives as `Option<...>`, so the default lives in the body.
-(defun seq-in-bounds ((i i32) (start Option<i32>) (end Option<i32>)) bool
+(defun seq-in-bounds ((i int) (start Option<int>) (end Option<int>)) bool
   "Whether index `i` lies in the `:start`/`:end` window `[start, end)`."
   (if (match start ((some s) (< i s)) ((none) false))
       false
@@ -710,7 +710,7 @@ pub const SOURCE: &str = r##"
   "A boolean keyword (`:from-end`); false when the caller omitted it."
   (match b ((some v) v) ((none) false)))
 
-(defun seq-limit ((n Option<i32>)) i32
+(defun seq-limit ((n Option<int>)) int
   "`:count` as a plain limit; -1 (no limit) when the caller omitted it."
   (match n ((some v) v) ((none) -1)))
 
@@ -718,11 +718,11 @@ pub const SOURCE: &str = r##"
 ;; walks the whole sequence anyway. The two below are for the other shape —
 ;; a loop that *starts* at the window and stops at its end (`replace`'s two
 ;; cursors), where the bound has to be a number before the loop begins.
-(defun seq-window-start ((s Option<i32>)) i32
+(defun seq-window-start ((s Option<int>)) int
   "`:start` as an index; 0 when the caller omitted it."
   (match s ((some v) v) ((none) 0)))
 
-(defun seq-window-end ((e Option<i32>) (n i32)) i32
+(defun seq-window-end ((e Option<int>) (n int)) int
   "`:end` as an index; the sequence's length `n` when the caller omitted it."
   (match e ((some v) v) ((none) n)))
 
@@ -730,7 +730,7 @@ pub const SOURCE: &str = r##"
 ;; `same`, which is called with `b`'s character first — CL's rule for `:test`
 ;; in this family is that the *first* sequence's element goes first, and `b`
 ;; is the pattern at both call sites below.
-(defun string-window-equal ((a string) (ai i32) (b string) (bi i32) (n i32)
+(defun string-window-equal ((a string) (ai int) (b string) (bi int) (n int)
                             (same (fn (char char) bool)))
     bool
   (let ((k 0) (ok true))
@@ -758,8 +758,8 @@ pub const SOURCE: &str = r##"
 (defmethod search ((self string) (sub string)
                    &key (key (fn (char) char)) (test (fn (char char) bool))
                         (test-not (fn (char char) bool)) (from-end bool)
-                        (start i32) (end i32) (sub-start i32) (sub-end i32))
-    Option<i32>
+                        (start int) (end int) (sub-start int) (sub-end int))
+    Option<int>
   (let ((proj (match key ((some f) f) ((none) (lambda ((c char)) char c)))))
     (let ((same (lambda ((p char) (q char)) bool
                   (match test
@@ -770,7 +770,7 @@ pub const SOURCE: &str = r##"
       (let ((e (seq-window-end end (length self)))
             (ps (seq-window-start sub-start))
             (last (seq-flag from-end))
-            (found (the Option<i32> (option::none)))
+            (found (the Option<int> (option::none)))
             (i (seq-window-start start)))
         (let ((m (- (seq-window-end sub-end (length sub)) ps)))
           (progn
@@ -792,8 +792,8 @@ pub const SOURCE: &str = r##"
 (defmethod mismatch ((self string) (b string)
                      &key (key (fn (char) char)) (test (fn (char char) bool))
                           (test-not (fn (char char) bool)) (from-end bool)
-                          (start1 i32) (end1 i32) (start2 i32) (end2 i32))
-    Option<i32>
+                          (start1 int) (end1 int) (start2 int) (end2 int))
+    Option<int>
   (let ((proj (match key ((some f) f) ((none) (lambda ((c char)) char c)))))
     (let ((same (lambda ((p char) (q char)) bool
                   (match test
@@ -804,7 +804,7 @@ pub const SOURCE: &str = r##"
       (let ((s1 (seq-window-start start1)) (e1 (seq-window-end end1 (length self)))
             (s2 (seq-window-start start2)) (e2 (seq-window-end end2 (length b))))
         (let ((n (min (- e1 s1) (- e2 s2)))
-              (found (the Option<i32> (option::none)))
+              (found (the Option<int> (option::none)))
               (k 0))
           (if (seq-flag from-end)
               (progn
@@ -889,6 +889,7 @@ pub const SOURCE: &str = r##"
 ;; form, per scalar type rather than as one generic `defun` because `format`'s
 ;; `&rest` demands a concretely Sexpr-encodable element type and rejects a
 ;; type variable outright.
+(defmethod to-string ((self int)) string (format false "~a" self))
 (defmethod to-string ((self i32)) string (format false "~a" self))
 (defmethod to-string ((self f64)) string (format false "~a" self))
 (defmethod to-string ((self bool)) string (format false "~a" self))
@@ -1222,7 +1223,7 @@ pub const SOURCE: &str = r##"
 ;; have to choose between starting over and corrupting external iteration
 ;; state — `vector-iter<T>` is the conventional fix: a separate, independent
 ;; cursor per `(v::iter)` call).
-(defstruct vector-iter<T> (vec Vector<T>) (pos i32))
+(defstruct vector-iter<T> (vec Vector<T>) (pos int))
 (impl Iter vector-iter<T>
   (type Item T)
   (next ((self Self)) Option<T>
@@ -1307,7 +1308,7 @@ pub const SOURCE: &str = r##"
 ;; second pass it simply stops breaking, so the final match wins — which is
 ;; what "from the end" means for a one-shot forward cursor, and costs nothing
 ;; when it is off.
-(defun seq-find-core<I,A> ((it I) (hit (fn (i32 A) bool)) (last bool)) Option<A>
+(defun seq-find-core<I,A> ((it I) (hit (fn (int A) bool)) (last bool)) Option<A>
   (where (Iter I (Item A)))
   (let ((result (the Option<A> (Option::none))) (i 0) (found false))
     (doiter (x it)
@@ -1317,11 +1318,11 @@ pub const SOURCE: &str = r##"
         (if (if found (not last) false) (break) ())))
     result))
 
-(defun seq-position-core<I,A> ((it I) (hit (fn (i32 A) bool)) (last bool)) Option<i32>
+(defun seq-position-core<I,A> ((it I) (hit (fn (int A) bool)) (last bool)) Option<int>
   (where (Iter I (Item A)))
   "[`seq-find-core`] reporting the index instead of the element. The index is
    into the whole sequence, not into the `:start`/`:end` window — CL's rule."
-  (let ((result (the Option<i32> (Option::none))) (i 0) (found false))
+  (let ((result (the Option<int> (Option::none))) (i 0) (found false))
     (doiter (x it)
       (progn
         (when (hit i x) (progn (setf result (Option::some i)) (setf found true) ()))
@@ -1329,7 +1330,7 @@ pub const SOURCE: &str = r##"
         (if (if found (not last) false) (break) ())))
     result))
 
-(defun seq-count-core<I,A> ((it I) (hit (fn (i32 A) bool))) i32
+(defun seq-count-core<I,A> ((it I) (hit (fn (int A) bool))) int
   (where (Iter I (Item A)))
   (let ((n 0) (i 0))
     (doiter (x it)
@@ -1351,8 +1352,8 @@ pub const SOURCE: &str = r##"
 ;; delegated to `copy-seq`
 ;; because `copy-seq` is defined further down this file, and a top-level
 ;; `defun` may only call a name already seen.
-(defun seq-edit-core<I,A> ((it I) (hit (fn (i32 A) bool)) (act (fn (A) Option<A>))
-                           (limit i32) (last bool)) Vector<A>
+(defun seq-edit-core<I,A> ((it I) (hit (fn (int A) bool)) (act (fn (A) Option<A>))
+                           (limit int) (last bool)) Vector<A>
   (where (Iter I (Item A)))
   (let ((buf (the Vector<A> (Vector::new))) (out (the Vector<A> (Vector::new)))
         (total 0) (seen 0) (i 0))
@@ -1394,7 +1395,7 @@ pub const SOURCE: &str = r##"
 ;; off (CL's default) keeps the last, on keeps the first. An element outside
 ;; the `[start, end)` window is neither dropped nor compared against.
 (defun seq-dedup-core<I,A> ((it I) (same (fn (A A) bool))
-                            (start Option<i32>) (end Option<i32>) (last bool))
+                            (start Option<int>) (end Option<int>) (last bool))
     Vector<A>
   (where (Iter I (Item A)))
   (let ((buf (the Vector<A> (Vector::new))) (out (the Vector<A> (Vector::new))) (i 0))
@@ -1436,47 +1437,47 @@ pub const SOURCE: &str = r##"
     out))
 
 (defun find-if<I,A> ((it I) (pred (fn (A) bool))
-                     &key (key (fn (A) A)) (start i32) (end i32) (from-end bool))
+                     &key (key (fn (A) A)) (start int) (end int) (from-end bool))
     Option<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (seq-find-core it
-      (lambda ((i i32) (y A)) bool
+      (lambda ((i int) (y A)) bool
         (if (seq-in-bounds i start end) (pred (proj y)) false))
       (seq-flag from-end))))
 (defun position-if<I,A> ((it I) (pred (fn (A) bool))
-                         &key (key (fn (A) A)) (start i32) (end i32) (from-end bool))
-    Option<i32>
+                         &key (key (fn (A) A)) (start int) (end int) (from-end bool))
+    Option<int>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (seq-position-core it
-      (lambda ((i i32) (y A)) bool
+      (lambda ((i int) (y A)) bool
         (if (seq-in-bounds i start end) (pred (proj y)) false))
       (seq-flag from-end))))
 (defun position-if-not<I,A> ((it I) (pred (fn (A) bool))
-                             &key (key (fn (A) A)) (start i32) (end i32) (from-end bool))
-    Option<i32>
+                             &key (key (fn (A) A)) (start int) (end int) (from-end bool))
+    Option<int>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (seq-position-core it
-      (lambda ((i i32) (y A)) bool
+      (lambda ((i int) (y A)) bool
         (if (seq-in-bounds i start end) (not (pred (proj y))) false))
       (seq-flag from-end))))
 (defun count-if<I,A> ((it I) (pred (fn (A) bool))
-                      &key (key (fn (A) A)) (start i32) (end i32))
-    i32
+                      &key (key (fn (A) A)) (start int) (end int))
+    int
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (seq-count-core it
-      (lambda ((i i32) (y A)) bool
+      (lambda ((i int) (y A)) bool
         (if (seq-in-bounds i start end) (pred (proj y)) false)))))
 (defun remove-if<I,A> ((it I) (pred (fn (A) bool))
-                       &key (key (fn (A) A)) (start i32) (end i32) (from-end bool) (count i32))
+                       &key (key (fn (A) A)) (start int) (end int) (from-end bool) (count int))
     Vector<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (seq-edit-core it
-      (lambda ((i i32) (y A)) bool
+      (lambda ((i int) (y A)) bool
         (if (seq-in-bounds i start end) (pred (proj y)) false))
       (lambda ((y A)) Option<A> (Option::none))
       (seq-limit count) (seq-flag from-end))))
@@ -1528,6 +1529,24 @@ pub const SOURCE: &str = r##"
 ;; and isn't relied on here); `truncate-div` doesn't share `floor-div`'s
 ;; helper since it needs the opposite (truncated) remainder, already
 ;; available as `rem`.
+;; --- int ---
+(defmethod floor-div ((self int) (b int)) cons-cell<int,int>
+  (let ((r (mod self b))) (cons (/ (- self r) b) r)))
+(defmethod truncate-div ((self int) (b int)) cons-cell<int,int>
+  (cons (/ self b) (rem self b)))
+(defmethod ceiling-div ((self int) (b int)) cons-cell<int,int>
+  (let ((fd (floor-div self b)))
+    (if (= (cdr fd) 0) fd
+        (let ((q (+ (car fd) 1))) (cons q (- self (* q b)))))))
+(defmethod round-div ((self int) (b int)) cons-cell<int,int>
+  (let ((fd (floor-div self b)))
+    (let ((fq (car fd)) (fr (cdr fd)))
+      (let ((afr2 (abs (* fr 2))) (ab (abs b)))
+        (if (< afr2 ab) fd
+            (if (> afr2 ab) (let ((q (+ fq 1))) (cons q (- self (* q b))))
+                (if (= (mod fq 2) 0) fd
+                    (let ((q (+ fq 1))) (cons q (- self (* q b)))))))))))
+
 ;; --- i32 ---
 (defmethod floor-div ((self i32) (b i32)) cons-cell<i32,i32>
   (let ((r (mod self b))) (cons (/ (- self r) b) r)))
@@ -1588,7 +1607,7 @@ pub const SOURCE: &str = r##"
 ;; observed, unlike `vector-iter<T>`'s shared reference). `hashtable-iter<K,V>`
 ;; reuses `vector-iter<T>`'s exact cursor logic over that snapshot rather
 ;; than duplicating it.
-(defstruct hashtable-iter<K,V> (snapshot Vector<cons-cell<K,V>>) (pos i32))
+(defstruct hashtable-iter<K,V> (snapshot Vector<cons-cell<K,V>>) (pos int))
 (impl Iter hashtable-iter<K,V>
   (type Item cons-cell<K,V>)
   (next ((self Self)) Option<cons-cell<K,V>>
@@ -1611,7 +1630,7 @@ pub const SOURCE: &str = r##"
   "Call `f` on every key/value pair, in no particular order. CL's `maphash`."
   (doiter (e (iter self)) (f (car e) (cdr e))))
 
-(pub defmethod size ((self HashTable<K,V>)) i32
+(pub defmethod size ((self HashTable<K,V>)) int
   "How many entries the table holds. CL's `hash-table-size`, which this
 language reports as the occupancy — a Rust `HashMap` has no separate
 user-visible capacity."
@@ -1664,7 +1683,7 @@ user-visible capacity."
 ;; gave every width the same built-in catalog `i32` had.
 (impl Eq i32    (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq f64    (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq bignum (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq int (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq ratio  (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq bool   (equals ((self Self) (other Self)) bool (equal self other)))
 (impl Eq char   (equals ((self Self) (other Self)) bool (equal self other)))
@@ -1701,7 +1720,7 @@ user-visible capacity."
 ;; `Ord` inherits `Eq`.
 (impl Ord i32    (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord f64    (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord bignum (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord int (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord ratio  (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord char   (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord string (less ((self Self) (other Self)) bool (< self other)))
@@ -1742,10 +1761,10 @@ user-visible capacity."
 ;; docstring (`take_leading_docstring`'s rule), and this method has no
 ;; default body. Its contract is the paragraph above.
 (deftrait Hash (Eq)
-  (sxhash ((self Self)) i32))
+  (sxhash ((self Self)) int))
 
 ;; The mask that keeps a hash non-negative and fixnum-sized: 2^30-1.
-(pub defconstant (*sxhash-mask* i32) 1073741823)
+(pub defconstant (*sxhash-mask* int) 1073741823)
 
 ;; FNV-1a over a string's code points, written in typelisp rather than Rust:
 ;; it is pure arithmetic on values the language already has, which is the
@@ -1758,10 +1777,10 @@ user-visible capacity."
 ;; reading of its 32-bit pattern (`0x811C9DC5`, whose top bit is set) for the
 ;; same reason. The final `*sxhash-mask*` is what makes the result the
 ;; non-negative 30-bit fixnum `Hash`'s contract promises.
-(pub defconstant (*fnv-offset-basis* i32) -2128831035)
-(pub defconstant (*fnv-prime* i32) 16777619)
+(pub defconstant (*fnv-offset-basis* int) -2128831035)
+(pub defconstant (*fnv-prime* int) 16777619)
 
-(pub defun sxhash-string ((s string)) i32
+(pub defun sxhash-string ((s string)) int
   "FNV-1a over `s`'s code points — the hash `string`'s `Hash` impl uses."
   (let ((h *fnv-offset-basis*) (i 0) (n (length s)))
     (progn
@@ -1771,16 +1790,17 @@ user-visible capacity."
           (setf i (+ i 1))))
       (logand h *sxhash-mask*))))
 
-(impl Hash i32    (sxhash ((self Self)) i32 (logand self *sxhash-mask*)))
-(impl Hash i8     (sxhash ((self Self)) i32 (logand (as i32 self) *sxhash-mask*)))
-(impl Hash i16    (sxhash ((self Self)) i32 (logand (as i32 self) *sxhash-mask*)))
-(impl Hash u8     (sxhash ((self Self)) i32 (logand (as i32 self) *sxhash-mask*)))
-(impl Hash u16    (sxhash ((self Self)) i32 (logand (as i32 self) *sxhash-mask*)))
-(impl Hash u32    (sxhash ((self Self)) i32 (logand (as i32 self) *sxhash-mask*)))
-(impl Hash bool   (sxhash ((self Self)) i32 (if self 1231 1237)))
-(impl Hash char   (sxhash ((self Self)) i32 (char->int self)))
-(impl Hash string (sxhash ((self Self)) i32 (sxhash-string self)))
-(impl Hash symbol (sxhash ((self Self)) i32 (sxhash-string (symbol->string self))))
+(impl Hash int    (sxhash ((self Self)) int (logand self *sxhash-mask*)))
+(impl Hash i32    (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
+(impl Hash i8     (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
+(impl Hash i16    (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
+(impl Hash u8     (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
+(impl Hash u16    (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
+(impl Hash u32    (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
+(impl Hash bool   (sxhash ((self Self)) int (if self 1231 1237)))
+(impl Hash char   (sxhash ((self Self)) int (char->int self)))
+(impl Hash string (sxhash ((self Self)) int (sxhash-string self)))
+(impl Hash symbol (sxhash ((self Self)) int (sxhash-string (symbol->string self))))
 
 ;; ---------------------------------------------------------------------------
 ;; `HashTable<K,V>`'s lookup, insert and delete — cl-parity-plan.md Phase 6a.
@@ -1799,7 +1819,7 @@ user-visible capacity."
 ;; (`registry::hashtable_def`). `Hash`'s contract — `(equals x y)` implies
 ;; `(= (sxhash x) (sxhash y))` — is exactly what makes one bucket the right
 ;; and only place to look.
-(defun hashtable-bucket-index<K,V> ((self HashTable<K,V>) (h i32) (k K)) i32
+(defun hashtable-bucket-index<K,V> ((self HashTable<K,V>) (h int) (k K)) int
   (where (Hash K))
   "Where `k` sits in `h`'s bucket, or -1 when it is not there."
   (let ((n (bucket-count self h)) (i 0) (found -1))
@@ -1883,7 +1903,7 @@ user-visible capacity."
   ;; second parameter an `i32`). It could not have been written before that
   ;; change — an impl for `u8` would have had no way to say "shift right".
   ;; Positive is left, negative is right, exactly like `ash`.
-  (shift ((self Self) (count i32)) Self))
+  (shift ((self Self) (count int)) Self))
 ;; What "a number" means as a bound: arithmetic and an ordering, with no
 ;; methods of its own — a name for the conjunction, so `(where (Number T))`
 ;; says in one bound what six would.
@@ -1910,7 +1930,7 @@ user-visible capacity."
 (impl Add u32    (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add f64    (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add f32    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add bignum (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add int (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add ratio  (add ((self Self) (other Self)) Self (+ self other)))
 
 (impl Sub i32    (sub ((self Self) (other Self)) Self (- self other)))
@@ -1921,7 +1941,7 @@ user-visible capacity."
 (impl Sub u32    (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub f64    (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub f32    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub bignum (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub int (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub ratio  (sub ((self Self) (other Self)) Self (- self other)))
 
 (impl Mul i32    (mul ((self Self) (other Self)) Self (* self other)))
@@ -1932,7 +1952,7 @@ user-visible capacity."
 (impl Mul u32    (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul f64    (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul f32    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul bignum (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul int (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul ratio  (mul ((self Self) (other Self)) Self (* self other)))
 
 (impl Div i32    (div ((self Self) (other Self)) Self (/ self other)))
@@ -1943,7 +1963,7 @@ user-visible capacity."
 (impl Div u32    (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div f64    (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div f32    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div bignum (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div int (div ((self Self) (other Self)) Self (/ self other)))
 (impl Div ratio  (div ((self Self) (other Self)) Self (/ self other)))
 
 (impl Rem i32    (remainder ((self Self) (other Self)) Self (rem self other)))
@@ -1954,7 +1974,7 @@ user-visible capacity."
 (impl Rem u32    (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem f64    (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem f32    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem bignum (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem int (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem ratio  (remainder ((self Self) (other Self)) Self (rem self other)))
 
 (impl Bits i32
@@ -1962,43 +1982,43 @@ user-visible capacity."
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
   (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count i32)) Self (ash self count)))
+  (shift ((self Self) (count int)) Self (ash self count)))
 (impl Bits i8
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
   (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count i32)) Self (ash self count)))
+  (shift ((self Self) (count int)) Self (ash self count)))
 (impl Bits i16
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
   (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count i32)) Self (ash self count)))
+  (shift ((self Self) (count int)) Self (ash self count)))
 (impl Bits u8
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
   (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count i32)) Self (ash self count)))
+  (shift ((self Self) (count int)) Self (ash self count)))
 (impl Bits u16
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
   (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count i32)) Self (ash self count)))
+  (shift ((self Self) (count int)) Self (ash self count)))
 (impl Bits u32
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
   (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count i32)) Self (ash self count)))
-(impl Bits bignum
+  (shift ((self Self) (count int)) Self (ash self count)))
+(impl Bits int
   (bit-and ((self Self) (other Self)) Self (logand self other))
   (bit-or ((self Self) (other Self)) Self (logior self other))
   (bit-xor ((self Self) (other Self)) Self (logxor self other))
   (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count i32)) Self (ash self count)))
+  (shift ((self Self) (count int)) Self (ash self count)))
 
 ;; `Number` has no methods, so its impls are the bare conjunction: this
 ;; type has all six.
@@ -2010,7 +2030,7 @@ user-visible capacity."
 (impl Number u32)
 (impl Number f64)
 (impl Number f32)
-(impl Number bignum)
+(impl Number int)
 (impl Number ratio)
 
 ;; CL's byte-specifier mini-API (CLHS 22.1.3): `(byte size position)` builds
@@ -2034,9 +2054,9 @@ user-visible capacity."
 ;; These are generic free functions rather than one `defmethod` per width:
 ;; the bodies below are identical text at every width, so eight copies of
 ;; each of five definitions would be forty definitions saying one thing.
-(defmethod byte-size ((self cons-cell<i32,i32>)) i32 (car self))
-(defmethod byte-position ((self cons-cell<i32,i32>)) i32 (cdr self))
-(defun byte ((size i32) (position i32)) cons-cell<i32,i32> (cons size position))
+(defmethod byte-size ((self cons-cell<int,int>)) int (car self))
+(defmethod byte-position ((self cons-cell<int,int>)) int (cdr self))
+(defun byte ((size int) (position int)) cons-cell<int,int> (cons size position))
 
 ;; The low `size` bits set, in `sample`'s own type.
 ;;
@@ -2047,27 +2067,27 @@ user-visible capacity."
 ;; exactly the low `size` bits. At a width where `size` reaches the width
 ;; itself the shift is `0` (`ash` past the width) and the complement is the
 ;; whole word, which is the right answer there too.
-(defun bits-mask<T> ((sample T) (size i32)) T
+(defun bits-mask<T> ((sample T) (size int)) T
   (where (Bits T))
   (bit-not (shift (bit-not (bit-xor sample sample)) size)))
 
 ;; `(ldb integer bytespec)`: extract the `size`-bit field starting at
 ;; `position`, right-justified.
-(pub defun ldb<T> ((n T) (spec cons-cell<i32,i32>)) T
+(pub defun ldb<T> ((n T) (spec cons-cell<int,int>)) T
   (where (Bits T))
   (bit-and (shift n (* -1 (byte-position spec))) (bits-mask n (byte-size spec))))
 ;; `(ldb-test integer bytespec)`: does that field have any 1 bits?
-(pub defun ldb-test<T> ((n T) (spec cons-cell<i32,i32>)) bool
+(pub defun ldb-test<T> ((n T) (spec cons-cell<int,int>)) bool
   (where (Bits T) (Eq T))
   (not-equals (ldb n spec) (bit-xor n n)))
 ;; `(mask-field integer bytespec)`: like `ldb`, but left in place rather than
 ;; right-justified.
-(pub defun mask-field<T> ((n T) (spec cons-cell<i32,i32>)) T
+(pub defun mask-field<T> ((n T) (spec cons-cell<int,int>)) T
   (where (Bits T))
   (bit-and n (shift (bits-mask n (byte-size spec)) (byte-position spec))))
 ;; `(dpb integer newbyte bytespec)`: deposit `newbyte`'s low `size` bits into
 ;; that field of `integer`, leaving every other bit of `integer` untouched.
-(pub defun dpb<T> ((n T) (newbyte T) (spec cons-cell<i32,i32>)) T
+(pub defun dpb<T> ((n T) (newbyte T) (spec cons-cell<int,int>)) T
   (where (Bits T))
   (let ((mask (shift (bits-mask n (byte-size spec)) (byte-position spec))))
     (bit-or (bit-and n (bit-not mask))
@@ -2075,7 +2095,7 @@ user-visible capacity."
 ;; `(deposit-field integer newbyte bytespec)`: like `dpb`, but `newbyte` is
 ;; already positioned (only its bits inside the field matter) rather than
 ;; right-justified.
-(pub defun deposit-field<T> ((n T) (newbyte T) (spec cons-cell<i32,i32>)) T
+(pub defun deposit-field<T> ((n T) (newbyte T) (spec cons-cell<int,int>)) T
   (where (Bits T))
   (let ((mask (shift (bits-mask n (byte-size spec)) (byte-position spec))))
     (bit-or (bit-and n (bit-not mask)) (bit-and newbyte mask))))
@@ -2086,29 +2106,29 @@ user-visible capacity."
 ;; `op` stays first, unlike the byte-specifier family above: a free function
 ;; dispatches on nothing, so there is no receiver slot to compete for and
 ;; CL's own order costs nothing to keep.
-(pub defconstant (boole-clr i32) 0 "boole: always 0.")
-(pub defconstant (boole-set i32) 1 "boole: always -1 (all bits set).")
-(pub defconstant (boole-1 i32) 2 "boole: a, unchanged.")
-(pub defconstant (boole-2 i32) 3 "boole: b, unchanged.")
-(pub defconstant (boole-c1 i32) 4 "boole: (lognot a).")
-(pub defconstant (boole-c2 i32) 5 "boole: (lognot b).")
-(pub defconstant (boole-and i32) 6 "boole: (logand a b).")
-(pub defconstant (boole-ior i32) 7 "boole: (logior a b).")
-(pub defconstant (boole-xor i32) 8 "boole: (logxor a b).")
-(pub defconstant (boole-eqv i32) 9 "boole: (logeqv a b).")
-(pub defconstant (boole-nand i32) 10 "boole: (lognand a b).")
-(pub defconstant (boole-nor i32) 11 "boole: (lognor a b).")
-(pub defconstant (boole-andc1 i32) 12 "boole: (logandc1 a b).")
-(pub defconstant (boole-andc2 i32) 13 "boole: (logandc2 a b).")
-(pub defconstant (boole-orc1 i32) 14 "boole: (logorc1 a b).")
-(pub defconstant (boole-orc2 i32) 15 "boole: (logorc2 a b).")
+(pub defconstant (boole-clr int) 0 "boole: always 0.")
+(pub defconstant (boole-set int) 1 "boole: always -1 (all bits set).")
+(pub defconstant (boole-1 int) 2 "boole: a, unchanged.")
+(pub defconstant (boole-2 int) 3 "boole: b, unchanged.")
+(pub defconstant (boole-c1 int) 4 "boole: (lognot a).")
+(pub defconstant (boole-c2 int) 5 "boole: (lognot b).")
+(pub defconstant (boole-and int) 6 "boole: (logand a b).")
+(pub defconstant (boole-ior int) 7 "boole: (logior a b).")
+(pub defconstant (boole-xor int) 8 "boole: (logxor a b).")
+(pub defconstant (boole-eqv int) 9 "boole: (logeqv a b).")
+(pub defconstant (boole-nand int) 10 "boole: (lognand a b).")
+(pub defconstant (boole-nor int) 11 "boole: (lognor a b).")
+(pub defconstant (boole-andc1 int) 12 "boole: (logandc1 a b).")
+(pub defconstant (boole-andc2 int) 13 "boole: (logandc2 a b).")
+(pub defconstant (boole-orc1 int) 14 "boole: (logorc1 a b).")
+(pub defconstant (boole-orc2 int) 15 "boole: (logorc2 a b).")
 ;; The sixteen are written in `Bits` operations rather than in the derived
 ;; `logeqv`/`lognand`/... methods: those are defined per type earlier in this
 ;; file and only for `i32`/`bignum`, so reaching for them would have pinned
 ;; `boole` to the same two types the byte-specifier family just escaped.
 ;; `boole-clr`/`boole-set` need `T`'s zero and all-ones, which come from the
 ;; operand the same way `bits-mask` gets them.
-(pub defun boole<T> ((op i32) (a T) (b T)) T
+(pub defun boole<T> ((op int) (a T) (b T)) T
   (where (Bits T))
   (if (= op boole-clr) (bit-xor a a)
   (if (= op boole-set) (bit-not (bit-xor a a))
@@ -2236,7 +2256,7 @@ user-visible capacity."
 ;; say `A` and worked; the same shape spelled `B` did not, and a structured
 ;; pin (`(Item cons-cell<K,V>)`) never matched at all. The callee's side is
 ;; now resolved through the call's own substitution first.
-(defun length<I,A> ((it I)) i32 (where (Iter I (Item A)))
+(defun length<I,A> ((it I)) int (where (Iter I (Item A)))
   (let ((n 0))
     (doiter (x it) (setf n (+ n 1)))
     n))
@@ -2248,20 +2268,20 @@ user-visible capacity."
     (doiter (x a) (push out x))
     (doiter (x b) (push out x))
     out))
-(defun nth<I,A> ((n i32) (it I)) Option<A> (where (Iter I (Item A)))
+(defun nth<I,A> ((n int) (it I)) Option<A> (where (Iter I (Item A)))
   (let ((i 0) (result (the Option<A> (Option::none))))
     (doiter (x it)
       (if (= i n)
           (progn (setf result (Option::some x)) (break))
           (progn (setf i (+ i 1)) ())))
     result))
-(defun elt<I,A> ((it I) (n i32)) Option<A> (where (Iter I (Item A)))
+(defun elt<I,A> ((it I) (n int)) Option<A> (where (Iter I (Item A)))
   (nth n it))
-(defun take<I,A> ((it I) (n i32)) Vector<A> (where (Iter I (Item A)))
+(defun take<I,A> ((it I) (n int)) Vector<A> (where (Iter I (Item A)))
   (let ((out (the Vector<A> (Vector::new))))
     (doiter (x it) (if (< (len out) n) (push out x) (break)))
     out))
-(defun subseq<I,A> ((it I) (start i32) (end i32)) Vector<A> (where (Iter I (Item A)))
+(defun subseq<I,A> ((it I) (start int) (end int)) Vector<A> (where (Iter I (Item A)))
   (let ((i 0) (out (the Vector<A> (Vector::new))))
     (doiter (x it)
       (if (>= i end)
@@ -2300,10 +2320,10 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (is-some (seq-find-core it (lambda ((i i32) (y A)) bool (same x y)) false)))))
+      (is-some (seq-find-core it (lambda ((i int) (y A)) bool (same x y)) false)))))
 (defun find<I,A> ((x A) (it I)
                   &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
-                       (start i32) (end i32) (from-end bool))
+                       (start int) (end int) (from-end bool))
     Option<A>
   (where (Iter I (Item A)) (Eq A))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
@@ -2314,13 +2334,13 @@ user-visible capacity."
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
       (seq-find-core it
-        (lambda ((i i32) (y A)) bool
+        (lambda ((i int) (y A)) bool
           (if (seq-in-bounds i start end) (same x y) false))
         (seq-flag from-end)))))
 (defun position<I,A> ((x A) (it I)
                       &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
-                           (start i32) (end i32) (from-end bool))
-    Option<i32>
+                           (start int) (end int) (from-end bool))
+    Option<int>
   (where (Iter I (Item A)) (Eq A))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
@@ -2330,13 +2350,13 @@ user-visible capacity."
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
       (seq-position-core it
-        (lambda ((i i32) (y A)) bool
+        (lambda ((i int) (y A)) bool
           (if (seq-in-bounds i start end) (same x y) false))
         (seq-flag from-end)))))
 (defun count<I,A> ((x A) (it I)
                    &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
-                        (start i32) (end i32))
-    i32
+                        (start int) (end int))
+    int
   (where (Iter I (Item A)) (Eq A))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
@@ -2346,7 +2366,7 @@ user-visible capacity."
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
       (seq-count-core it
-        (lambda ((i i32) (y A)) bool
+        (lambda ((i int) (y A)) bool
           (if (seq-in-bounds i start end) (same x y) false))))))
 (defun every<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (let ((result true))
@@ -2377,7 +2397,7 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (seq-find-core it (lambda ((i i32) (p cons-cell<K,V>)) bool (same k (car p))) false))))
+      (seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (same k (car p))) false))))
 ;; ---------------------------------------------------------------------------
 ;; The rest of CL's list/sequence catalog — cl-parity-plan.md Phase 3a/3b/3c.
 ;;
@@ -2427,7 +2447,7 @@ user-visible capacity."
 ;; CL's `make-list`/`make-sequence`: `n` copies of `x`. A static method, so it
 ;; reads like `Vector::new` — and, like `Vector::new`, its type argument comes
 ;; from the surrounding expected type, so a bare `let` binding needs `the`.
-(defmethod filled (Vector<T> (n i32) (x T)) Vector<T>
+(defmethod filled (Vector<T> (n int) (x T)) Vector<T>
   (let ((out (the Vector<T> (Vector::new))) (i 0))
     (progn (while (< i n) (progn (push out x) (setf i (+ i 1)))) out)))
 
@@ -2475,45 +2495,45 @@ user-visible capacity."
 (defun member-if<I,A> ((it I) (pred (fn (A) bool)) &key (key (fn (A) A))) bool
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (is-some (seq-find-core it (lambda ((i i32) (y A)) bool (pred (proj y))) false))))
+    (is-some (seq-find-core it (lambda ((i int) (y A)) bool (pred (proj y))) false))))
 (defun member-if-not<I,A> ((it I) (pred (fn (A) bool)) &key (key (fn (A) A))) bool
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (is-some (seq-find-core it (lambda ((i i32) (y A)) bool (not (pred (proj y)))) false))))
+    (is-some (seq-find-core it (lambda ((i int) (y A)) bool (not (pred (proj y)))) false))))
 (defun notany<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (not (any it pred)))
 (defun notevery<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (not (every it pred)))
 (defun find-if-not<I,A> ((it I) (pred (fn (A) bool))
-                         &key (key (fn (A) A)) (start i32) (end i32) (from-end bool))
+                         &key (key (fn (A) A)) (start int) (end int) (from-end bool))
     Option<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (seq-find-core it
-      (lambda ((i i32) (y A)) bool
+      (lambda ((i int) (y A)) bool
         (if (seq-in-bounds i start end) (not (pred (proj y))) false))
       (seq-flag from-end))))
 (defun count-if-not<I,A> ((it I) (pred (fn (A) bool))
-                          &key (key (fn (A) A)) (start i32) (end i32))
-    i32
+                          &key (key (fn (A) A)) (start int) (end int))
+    int
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (seq-count-core it
-      (lambda ((i i32) (y A)) bool
+      (lambda ((i int) (y A)) bool
         (if (seq-in-bounds i start end) (not (pred (proj y))) false)))))
 (defun remove-if-not<I,A> ((it I) (pred (fn (A) bool))
-                           &key (key (fn (A) A)) (start i32) (end i32) (from-end bool) (count i32))
+                           &key (key (fn (A) A)) (start int) (end int) (from-end bool) (count int))
     Vector<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (seq-edit-core it
-      (lambda ((i i32) (y A)) bool
+      (lambda ((i int) (y A)) bool
         (if (seq-in-bounds i start end) (not (pred (proj y))) false))
       (lambda ((y A)) Option<A> (Option::none))
       (seq-limit count) (seq-flag from-end))))
 (defun remove<I,A> ((x A) (it I)
                     &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
-                         (start i32) (end i32) (from-end bool) (count i32))
+                         (start int) (end int) (from-end bool) (count int))
     Vector<A>
   (where (Iter I (Item A)) (Eq A))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
@@ -2524,7 +2544,7 @@ user-visible capacity."
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
       (seq-edit-core it
-        (lambda ((i i32) (y A)) bool
+        (lambda ((i int) (y A)) bool
           (if (seq-in-bounds i start end) (same x y) false))
         (lambda ((y A)) Option<A> (Option::none))
         (seq-limit count) (seq-flag from-end)))))
@@ -2536,7 +2556,7 @@ user-visible capacity."
 (defun remove-duplicates<I,A> ((it I)
                                &key (key (fn (A) A)) (test (fn (A A) bool))
                                     (test-not (fn (A A) bool))
-                                    (start i32) (end i32) (from-end bool))
+                                    (start int) (end int) (from-end bool))
     Vector<A>
   (where (Iter I (Item A)) (Eq A))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
@@ -2549,7 +2569,7 @@ user-visible capacity."
       (seq-dedup-core it same start end (seq-flag from-end)))))
 (defun substitute<I,A> ((new A) (old A) (it I)
                         &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
-                             (start i32) (end i32) (from-end bool) (count i32))
+                             (start int) (end int) (from-end bool) (count int))
     Vector<A>
   (where (Iter I (Item A)) (Eq A))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
@@ -2560,17 +2580,17 @@ user-visible capacity."
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
       (seq-edit-core it
-        (lambda ((i i32) (y A)) bool
+        (lambda ((i int) (y A)) bool
           (if (seq-in-bounds i start end) (same old y) false))
         (lambda ((y A)) Option<A> (Option::some new))
         (seq-limit count) (seq-flag from-end)))))
 (defun substitute-if<I,A> ((new A) (pred (fn (A) bool)) (it I)
-                           &key (key (fn (A) A)) (start i32) (end i32) (from-end bool) (count i32))
+                           &key (key (fn (A) A)) (start int) (end int) (from-end bool) (count int))
     Vector<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (seq-edit-core it
-      (lambda ((i i32) (y A)) bool
+      (lambda ((i int) (y A)) bool
         (if (seq-in-bounds i start end) (pred (proj y)) false))
       (lambda ((y A)) Option<A> (Option::some new))
       (seq-limit count) (seq-flag from-end))))
@@ -2579,7 +2599,7 @@ user-visible capacity."
     Option<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y K)) K y)))))
-    (seq-find-core it (lambda ((i i32) (p cons-cell<K,V>)) bool (pred (proj (car p)))) false)))
+    (seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (pred (proj (car p)))) false)))
 (defun rassoc<I,K,V> ((v V) (it I)
                       &key (key (fn (V) V)) (test (fn (V V) bool)) (test-not (fn (V V) bool)))
     Option<cons-cell<K,V>>
@@ -2591,12 +2611,12 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (seq-find-core it (lambda ((i i32) (p cons-cell<K,V>)) bool (same v (cdr p))) false))))
+      (seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (same v (cdr p))) false))))
 (defun rassoc-if<I,K,V> ((it I) (pred (fn (V) bool)) &key (key (fn (V) V)))
     Option<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y V)) V y)))))
-    (seq-find-core it (lambda ((i i32) (p cons-cell<K,V>)) bool (pred (proj (cdr p)))) false)))
+    (seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (pred (proj (cdr p)))) false)))
 (defun acons<I,K,V> ((k K) (v V) (it I)) Vector<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)))
   (let ((out (the Vector<cons-cell<K,V>> (Vector::new))))
@@ -2840,7 +2860,7 @@ user-visible capacity."
 ;; closures; only the two `let` lines that resolve them repeat.
 (defmethod delete ((self Vector<T>) (x T)
                    &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
-                        (start i32) (end i32) (from-end bool) (count i32))
+                        (start int) (end int) (from-end bool) (count int))
     Vector<T>
   (where (Eq T))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
@@ -2852,34 +2872,34 @@ user-visible capacity."
                               ((none) (equals p (proj q)))))))))
       (set-contents self
         (seq-edit-core (iter self)
-          (lambda ((i i32) (y T)) bool
+          (lambda ((i int) (y T)) bool
             (if (seq-in-bounds i start end) (same x y) false))
           (lambda ((y T)) Option<T> (Option::none))
           (seq-limit count) (seq-flag from-end))))))
 (defmethod delete-if ((self Vector<T>) (pred (fn (T) bool))
-                      &key (key (fn (T) T)) (start i32) (end i32) (from-end bool) (count i32))
+                      &key (key (fn (T) T)) (start int) (end int) (from-end bool) (count int))
     Vector<T>
   (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
     (set-contents self
       (seq-edit-core (iter self)
-        (lambda ((i i32) (y T)) bool
+        (lambda ((i int) (y T)) bool
           (if (seq-in-bounds i start end) (pred (proj y)) false))
         (lambda ((y T)) Option<T> (Option::none))
         (seq-limit count) (seq-flag from-end)))))
 (defmethod delete-if-not ((self Vector<T>) (pred (fn (T) bool))
-                          &key (key (fn (T) T)) (start i32) (end i32) (from-end bool) (count i32))
+                          &key (key (fn (T) T)) (start int) (end int) (from-end bool) (count int))
     Vector<T>
   (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
     (set-contents self
       (seq-edit-core (iter self)
-        (lambda ((i i32) (y T)) bool
+        (lambda ((i int) (y T)) bool
           (if (seq-in-bounds i start end) (not (pred (proj y))) false))
         (lambda ((y T)) Option<T> (Option::none))
         (seq-limit count) (seq-flag from-end)))))
 (defmethod delete-duplicates ((self Vector<T>)
                               &key (key (fn (T) T)) (test (fn (T T) bool))
                                    (test-not (fn (T T) bool))
-                                   (start i32) (end i32) (from-end bool))
+                                   (start int) (end int) (from-end bool))
     Vector<T>
   (where (Eq T))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
@@ -2893,7 +2913,7 @@ user-visible capacity."
         (seq-dedup-core (iter self) same start end (seq-flag from-end))))))
 (defmethod nsubstitute ((self Vector<T>) (new T) (old T)
                         &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
-                             (start i32) (end i32) (from-end bool) (count i32))
+                             (start int) (end int) (from-end bool) (count int))
     Vector<T>
   (where (Eq T))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
@@ -2905,18 +2925,18 @@ user-visible capacity."
                               ((none) (equals p (proj q)))))))))
       (set-contents self
         (seq-edit-core (iter self)
-          (lambda ((i i32) (y T)) bool
+          (lambda ((i int) (y T)) bool
             (if (seq-in-bounds i start end) (same old y) false))
           (lambda ((y T)) Option<T> (Option::some new))
           (seq-limit count) (seq-flag from-end))))))
 (defmethod nsubstitute-if ((self Vector<T>) (new T) (pred (fn (T) bool))
-                           &key (key (fn (T) T)) (start i32) (end i32)
-                                (from-end bool) (count i32))
+                           &key (key (fn (T) T)) (start int) (end int)
+                                (from-end bool) (count int))
     Vector<T>
   (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
     (set-contents self
       (seq-edit-core (iter self)
-        (lambda ((i i32) (y T)) bool
+        (lambda ((i int) (y T)) bool
           (if (seq-in-bounds i start end) (pred (proj y)) false))
         (lambda ((y T)) Option<T> (Option::some new))
         (seq-limit count) (seq-flag from-end)))))
@@ -2927,14 +2947,14 @@ user-visible capacity."
 ;; `fill` takes CL's `:start`/`:end`, and `replace` CL's four-window set —
 ;; whose numbering means here exactly what it means in CL, since the receiver
 ;; is CL's own `sequence-1`.
-(defmethod fill ((self Vector<T>) (x T) &key (start i32) (end i32)) Vector<T>
+(defmethod fill ((self Vector<T>) (x T) &key (start int) (end int)) Vector<T>
   (let ((i 0))
     (progn
       (while (< i (len self))
         (progn (when (seq-in-bounds i start end) (set self i x)) (setf i (+ i 1))))
       self)))
 (defmethod replace ((self Vector<T>) (src Vector<T>)
-                    &key (start1 i32) (end1 i32) (start2 i32) (end2 i32))
+                    &key (start1 int) (end1 int) (start2 int) (end2 int))
     Vector<T>
   (let ((i (seq-window-start start1)) (j (seq-window-start start2))
         (stop1 (seq-window-end end1 (len self))) (stop2 (seq-window-end end2 (len src))))
@@ -2984,6 +3004,15 @@ user-visible capacity."
 ;; Integer Newton, keeping the *previous* estimate and stopping when the next
 ;; one stops decreasing — testing "unchanged" instead loops forever on the
 ;; inputs where the iteration oscillates between two neighbouring values.
+(defmethod isqrt ((self int)) int
+  (if (< self 0)
+      (panic "isqrt: negative argument")
+      (if (< self 2)
+          self
+          (let ((g self) (k (/ (+ self 1) 2)))
+            (progn
+              (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
+              g)))))
 (defmethod isqrt ((self i32)) i32
   (if (< self 0)
       (panic "isqrt: negative argument")
@@ -2994,10 +3023,10 @@ user-visible capacity."
               (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
               g)))))
 
-;; CL's integer `expt`, by squaring. CL answers a *ratio* for a negative
-;; exponent; an `i32` result cannot hold one, so that case is a panic
-;; rather than a silent truncation — convert to `ratio` first if you want it
-;; (`bignum`/`ratio` already have their own `expt` above).
+;; CL's integer `expt` at the fixed width, by squaring. CL answers a *ratio*
+;; for a negative exponent; an `i32` result cannot hold one, so that case is
+;; a panic rather than a silent truncation — convert to `ratio` first if you
+;; want it (`int`/`ratio` already have their own `expt` above).
 (defmethod expt ((self i32) (e i32)) i32
   (if (< e 0)
       (panic "expt: a negative exponent on an integer is not an integer")
@@ -3011,16 +3040,16 @@ user-visible capacity."
 ;; `float-precision` are the constants 2/53/53 rather than queries — CL allows
 ;; an implementation to fix them, and a denormal is the only case where
 ;; `float-precision` would differ, which this does not track.
-(defmethod float-radix ((self f64)) i32 2)
-(defmethod float-digits ((self f64)) i32 53)
-(defmethod float-precision ((self f64)) i32 (if (= self 0.0) 0 53))
+(defmethod float-radix ((self f64)) int 2)
+(defmethod float-digits ((self f64)) int 53)
+(defmethod float-precision ((self f64)) int (if (= self 0.0) 0 53))
 (defmethod float-sign ((self f64)) f64 (if (< self 0.0) -1.0 1.0))
 ;; `(scale-float x n)` = `x * 2^n`. Halving/doubling in a loop rather than
 ;; `(* self (expt 2.0 (int->float n)))`: `int->float` is one of the builtins
 ;; the island has no lowering for, and reaching it would make this whole
 ;; section interpreted-only (the same constraint the character section above
 ;; works under). Every step here is exact in binary floating point.
-(defmethod scale-float ((self f64) (n i32)) f64
+(defmethod scale-float ((self f64) (n int)) f64
   (let ((r self) (k (abs n)))
     (progn
       (if (>= n 0)
@@ -3032,7 +3061,7 @@ user-visible capacity."
 ;; sign); multiple values are not taken (language-design.md §0), so the sign
 ;; is `float-sign` and this pair carries the other two. The significand is
 ;; unsigned, as CL specifies.
-(defmethod decode-float ((self f64)) cons-cell<f64,i32>
+(defmethod decode-float ((self f64)) cons-cell<f64,int>
   (if (= self 0.0)
       (cons 0.0 0)
       (let ((m (abs self)) (e 0))
@@ -3043,9 +3072,9 @@ user-visible capacity."
 ;; `integer-decode-float`: the same split with the significand as an exact
 ;; integer of `float-digits` bits, so `significand * 2^exponent` is the value
 ;; exactly. A `bignum`, since 53 bits do not fit an `i32`.
-(defmethod integer-decode-float ((self f64)) cons-cell<bignum,i32>
+(defmethod integer-decode-float ((self f64)) cons-cell<int,int>
   (let ((d (decode-float self)))
-    (cons (float->bignum (scale-float (car d) 53)) (- (cdr d) 53))))
+    (cons (float->int (scale-float (car d) 53)) (- (cdr d) 53))))
 
 ;; CL's `rationalize`: the *simplest* rational that reads back as exactly this
 ;; float — as against `float->ratio` (CL's `rational`), which is the exact
@@ -3078,14 +3107,12 @@ user-visible capacity."
                   (progn (setf b (/ 1.0 (- b a))) ()))))))
       out)))
 
-;; CL's numeric limit constants (CLHS 12.1.4.2 / 12.1.3). "fixnum" is `i32`
-;; here: it is the only fixed-width integer type left (`types::Type::
-;; is_integer`), so the widest integer that is not a `bignum` is an `i32`,
-;; and these are its bounds. `(- (* most-positive-fixnum -1) 1)` rather than
-;; the literal: `-2147483648` reads as the *bignum* 2147483648 negated, since
-;; the magnitude alone is past `i32`.
-(pub defconstant (most-positive-fixnum i32) 2147483647)
-(pub defconstant (most-negative-fixnum i32) (- (* most-positive-fixnum -1) 1))
+;; CL's numeric limit constants (CLHS 12.1.4.2 / 12.1.3). A fixnum is an
+;; `int` that fits its 63-bit immediate word; past these bounds an `int` is
+;; a bignum box (`typelisp-mem`'s `FIXNUM_MAX`/`FIXNUM_MIN`), and the
+;; arithmetic goes on unchanged.
+(pub defconstant (most-positive-fixnum int) 4611686018427387903)
+(pub defconstant (most-negative-fixnum int) -4611686018427387904)
 (pub defconstant (most-positive-double-float f64) 1.7976931348623157e308)
 (pub defconstant (most-negative-double-float f64) -1.7976931348623157e308)
 (pub defconstant (least-positive-double-float f64) 5.0e-324)
@@ -3260,7 +3287,7 @@ user-visible capacity."
 (impl print-object u32     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object f32     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object f64     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object bignum  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object int  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object ratio   (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object bool    (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object char    (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
@@ -3280,8 +3307,8 @@ user-visible capacity."
 (pub defmacro pprint-exit-if-list-exhausted ()
   `(if (pprint-list-exhausted) (break) ()))
 (pub defvar (*print-pretty* bool) false)
-(pub defvar (*print-right-margin* i32) 80)
-(pub defvar (*print-miser-width* i32) 0)
+(pub defvar (*print-right-margin* int) 80)
+(pub defvar (*print-miser-width* int) 0)
 
 ;; The "what to print" controls (CLHS 22.1.1), read by `Interp::print_vars`
 ;; on every printing operation just like the three above.
@@ -3307,8 +3334,8 @@ user-visible capacity."
 ;;     (setf *print-circle* true)
 ;;     (println "~a" a))            ; => #1=#<node 1 (some #1#)>
 (pub defvar (*print-circle* bool) false)
-(pub defvar (*print-level* i32) 0)
-(pub defvar (*print-length* i32) 0)
+(pub defvar (*print-level* int) 0)
+(pub defvar (*print-length* int) 0)
 
 ;; The rest of CLHS 22.1.1's "what to print" controls (cl-parity-plan.md
 ;; Phase 7b). Rebind them for one printing operation with `dlet`, which is
@@ -3319,7 +3346,7 @@ user-visible capacity."
 ;; the marker that makes the result read back as the same number whatever
 ;; `*read-base*` is: `#b`/`#o`/`#x` or `#NNr` before the sign, and a trailing
 ;; `.` in base 10.
-(pub defvar (*print-base* i32) 10)
+(pub defvar (*print-base* int) 10)
 (pub defvar (*print-radix* bool) false)
 
 ;; `*print-case*` takes CL's own spelling: the keywords `:upcase`,
@@ -3341,7 +3368,7 @@ user-visible capacity."
 ;; marking the cut with CL's `..`. A layout control like
 ;; `*print-right-margin*`, so it only bites while `*print-pretty*` is on; 0 or
 ;; less is CL's `nil` (no limit).
-(pub defvar (*print-lines* i32) 0)
+(pub defvar (*print-lines* int) 0)
 
 ;; `*print-array*` chooses whether an `Array<T>` shows its contents. True
 ;; (CL's default) prints CL's own array syntax -- `#(1 2 3)` for a rank-1
@@ -3386,7 +3413,7 @@ user-visible capacity."
 ;; CL's `random`: `(random limit &optional random-state)`. Omitting the state
 ;; draws from (and advances) `*random-state*`; passing one draws from (and
 ;; advances) that instead.
-(pub defun random ((n i32) &optional (state random-state)) i32
+(pub defun random ((n int) &optional (state random-state)) int
   (match state
     ((some s) (random-state-next s n))
     ((none) (random-state-next *random-state* n))))
@@ -3414,7 +3441,7 @@ user-visible capacity."
 ;; implementation's choice (microseconds), not something CL fixes, matching
 ;; every real CL implementation's own "implementation-defined granularity"
 ;; latitude.
-(pub defvar (internal-time-units-per-second i32) 1000000)
+(pub defvar (internal-time-units-per-second int) 1000000)
 
 ;; The two clock readings, as structs rather than numbers.
 ;;
@@ -3433,12 +3460,12 @@ user-visible capacity."
 (pub defstruct universal-time
   "A CL universal time: whole days since 1900-01-01 UTC, and the second
    within that day (0..86399)."
-  (pub day i32) (pub second i32))
+  (pub day int) (pub second int))
 
 (pub defstruct internal-time
   "A `get-internal-real-time` reading: whole seconds since the process's
    reference point, and the microsecond within that second (0..999999)."
-  (pub second i32) (pub microsecond i32))
+  (pub second int) (pub microsecond int))
 
 (pub defun internal-time-seconds ((it internal-time)) f64
   "`it` as a number of seconds — what a difference of two readings is
@@ -3632,7 +3659,7 @@ user-visible capacity."
       (push out cur)
       out)))
 
-(defun name-type-dot ((file string)) i32
+(defun name-type-dot ((file string)) int
   "Where the `.` separating name from type is, or -1. The *last* dot, and
    never the first character: `archive.tar.gz` is `archive.tar` of type `gz`,
    while `.gitignore` is all name, as in CL."
@@ -3845,7 +3872,7 @@ user-visible capacity."
     "The next character, but only if it is already there: `none` rather than
      a wait. Answers `none` for a stream whose `listen` is the default."
     (if (listen self) (read-char self) (option::none)))
-  (read-sequence ((self Self) (into Vector<char>) (n i32)) i32
+  (read-sequence ((self Self) (into Vector<char>) (n int)) int
     "Read up to `n` characters, pushing each onto `into`; the count actually
      read, which is short of `n` only at end of input. CL's `read-sequence`
      fills an existing sequence between `:start` and `:end` and answers the
@@ -3945,12 +3972,12 @@ user-visible capacity."
 ;;
 ;; `Item` is `i32` rather than a byte type this language does not have. The
 ;; value is always 0..255 -- `write-byte` refuses anything else, as CL's does.
-(deftrait ByteInput ((InputStream (Item i32)))
+(deftrait ByteInput ((InputStream (Item int)))
   "A byte input stream. Every method has a default body."
-  (read-byte ((self Self)) Option<i32>
+  (read-byte ((self Self)) Option<int>
     "The next byte, or `none` at end of input."
     (read-item self))
-  (read-sequence ((self Self) (into Vector<i32>) (n i32)) i32
+  (read-sequence ((self Self) (into Vector<int>) (n int)) int
     "`CharInput`'s, over bytes."
     (let ((got 0) (going true))
       (while going
@@ -3961,12 +3988,12 @@ user-visible capacity."
               ((none) (progn (setf going false) ())))))
       got)))
 
-(deftrait ByteOutput ((OutputStream (Item i32)))
+(deftrait ByteOutput ((OutputStream (Item int)))
   "A byte output stream. Every method has a default body."
-  (write-byte ((self Self) (b i32)) ()
+  (write-byte ((self Self) (b int)) ()
     "Write one byte. `b` outside 0..255 is an error."
     (write-item self b))
-  (write-sequence ((self Self) (from Vector<i32>)) ()
+  (write-sequence ((self Self) (from Vector<int>)) ()
     "Every byte of `from`, in order."
     (doiter (b (iter from)) (write-byte self b)))
   (finish-output ((self Self)) ()
@@ -4022,12 +4049,12 @@ user-visible capacity."
   (open-stream-p ((self Self)) bool (stream-open-p self::h))
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 (impl InputStream binary-file-stream
-  (type Item i32)
-  (read-item ((self Self)) Option<i32> (unwrap-io (stream-read-byte self::h)))
+  (type Item int)
+  (read-item ((self Self)) Option<int> (unwrap-io (stream-read-byte self::h)))
   (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
 (impl OutputStream binary-file-stream
-  (type Item i32)
-  (write-item ((self Self) (b i32)) () (unwrap-io (stream-write-byte self::h b))))
+  (type Item int)
+  (write-item ((self Self) (b int)) () (unwrap-io (stream-write-byte self::h b))))
 (impl ByteInput binary-file-stream)
 (impl ByteOutput binary-file-stream
   (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
@@ -4173,7 +4200,7 @@ user-visible capacity."
 
 ;; Reads through the components in order; each one's end of input advances to
 ;; the next rather than ending the stream.
-(pub defstruct concatenated-stream (parts Vector<:dyn CharInput>) (at i32))
+(pub defstruct concatenated-stream (parts Vector<:dyn CharInput>) (at int))
 (impl Stream concatenated-stream
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () (doiter (p (iter self::parts)) (close p))))
@@ -4258,11 +4285,11 @@ user-visible capacity."
 ;; least as well as `:direction :output` when there is nothing to default.
 ;; (`&key` does exist -- `make-pathname` uses it, where most components are
 ;; genuinely optional.)
-(pub defconstant (direction-input i32) 0)
-(pub defconstant (direction-output i32) 1)
-(pub defconstant (direction-append i32) 2)
+(pub defconstant (direction-input int) 0)
+(pub defconstant (direction-output int) 1)
+(pub defconstant (direction-append int) 2)
 
-(pub defun open-file<P> ((name P) (direction i32)) Result<file-stream, FileError> (where (Pathish P))
+(pub defun open-file<P> ((name P) (direction int)) Result<file-stream, FileError> (where (Pathish P))
   "Open `name` -- a string or a `pathname` -- in one of `direction-input` /
    `direction-output` / `direction-append`. `Err` if the file cannot be
    opened: a missing file is an ordinary outcome, not a panic."
@@ -4276,7 +4303,7 @@ user-visible capacity."
 ;; The byte-stream openers. CL writes these as `open` with
 ;; `:element-type '(unsigned-byte 8)`; the difference here is the *type* of
 ;; what comes back, so it is the opener that differs.
-(pub defun open-binary<P> ((name P) (direction i32)) Result<binary-file-stream, FileError> (where (Pathish P))
+(pub defun open-binary<P> ((name P) (direction int)) Result<binary-file-stream, FileError> (where (Pathish P))
   "Open `name` for byte I/O in one of `direction-input` / `direction-output` /
    `direction-append`."
   (match (stream-open-file (namestring name) direction)
@@ -4674,14 +4701,14 @@ user-visible capacity."
 ;;
 ;; `read` (the builtin) is the same read without the index: CL's
 ;; `read-from-string` used for its first value only, which is the common case.
-(pub defun read-from-string ((s string) &optional (start i32 0)) Result<cons-cell<Option<Sexpr>, i32>, ReadError>
+(pub defun read-from-string ((s string) &optional (start int 0)) Result<cons-cell<Option<Sexpr>, int>, ReadError>
   "One datum from `s` beginning at character index `start`, paired with the
    index reading stopped at. Consumes the whitespace character that ended the
    datum, as CL's `read-from-string` does."
   (read-datum-at s start false))
 
-(pub defun read-from-string-preserving-whitespace ((s string) &optional (start i32 0))
-    Result<cons-cell<Option<Sexpr>, i32>, ReadError>
+(pub defun read-from-string-preserving-whitespace ((s string) &optional (start int 0))
+    Result<cons-cell<Option<Sexpr>, int>, ReadError>
   "`read-from-string` without consuming the whitespace that ended the datum --
    CL's `read-from-string` with `:preserve-whitespace t`. The difference shows
    in the returned index, and so in what the next read sees."
@@ -4702,7 +4729,7 @@ user-visible capacity."
 ;; shape, and for the same reason, as `read-from-string`'s.
 
 (defun call-reader-macro ((f (fn (string-input-stream char) Option<Sexpr>)) (c char) (rest string))
-    cons-cell<Option<Sexpr>, i32>
+    cons-cell<Option<Sexpr>, int>
   "Run the reader macro `f` on the character `c` that triggered it and the
    text after it, answering what it read and how much of `rest` it consumed."
   (let ((in (make-string-input-stream rest)))
@@ -4922,18 +4949,17 @@ user-visible capacity."
    divided into at this instant, and they always sum to it. `symbols`,
    `strings` and `boxes` count the other three things the heap holds.
 
-   `gc-count` is a `bignum` and the rest are `i32` on purpose. Every count
-   here is bounded by the arena, and an arena an `i32` could not count is one
-   this machine could not hold -- but a collection counter only ever goes up,
-   and a process that runs for weeks really does pass 2^31. Rounding it would
-   be a lie, so it gets the type that never has to tell one.
+   Every count is an `int`. The cell counts are bounded by the arena; the
+   collection counter only ever goes up, and a process that runs for weeks
+   really does pass 2^31 -- which is why it must not be a fixed width, and
+   an `int` that outgrows a fixnum simply becomes a bignum.
 
    `growable` is whether the arena may still be extended. The ceiling itself
    is not reported: it is a multiple of the capacity and so the one figure
    here with no bound, and what a reader wants from it is the yes or no."
-  (pub capacity i32) (pub live i32) (pub free i32)
-  (pub symbols i32) (pub strings i32) (pub boxes i32)
-  (pub gc-count bignum) (pub growable bool))
+  (pub capacity int) (pub live int) (pub free int)
+  (pub symbols int) (pub strings int) (pub boxes int)
+  (pub gc-count int) (pub growable bool))
 
 (pub defun room (&optional (verbose bool)) ()
   "Print what the heap looks like right now (CL's `room`), to
@@ -4996,8 +5022,8 @@ user-visible capacity."
 ;; `nil` default, and the static-type shape of CL's supplied-p variable.
 
 (pub defstruct decoded-time
-  (pub second i32) (pub minute i32) (pub hour i32)
-  (pub date i32) (pub month i32) (pub year i32) (pub day-of-week i32)
+  (pub second int) (pub minute int) (pub hour int)
+  (pub date int) (pub month int) (pub year int) (pub day-of-week int)
   (pub daylight-p bool) (pub zone f64))
 
 ;; The civil-calendar conversions are Howard Hinnant's `civil_from_days` /
@@ -5008,7 +5034,7 @@ user-visible capacity."
 ;; `days-from-civil` counts days from 1900-01-01, which is why the constant
 ;; 25567 (the days between the CL and Unix epochs) appears in both.
 
-(defun days-from-civil ((year i32) (month i32) (day i32)) i32
+(defun days-from-civil ((year int) (month int) (day int)) int
   "Days from 1900-01-01 to this proleptic-Gregorian date. Years before 0 are
    out of range -- a universal time cannot name one."
   (let ((y (if (<= month 2) (- year 1) year))
@@ -5022,7 +5048,7 @@ user-visible capacity."
       ;; CL's, which is 25567 days earlier.
       (+ (- (+ (* era 146097) doe) 719468) 25567))))
 
-(defun ut-shift ((day i32) (second i32) (by i32)) universal-time
+(defun ut-shift ((day int) (second int) (by int)) universal-time
   "`(day, second)` moved `by` seconds, renormalised so the second is back
    inside one day.
 
@@ -5035,7 +5061,7 @@ user-visible capacity."
     (let ((sec (mod s 86400)))
       (universal-time::new (+ day (/ (- s sec) 86400)) sec))))
 
-(defun local-zone-west ((day i32) (second i32)) i32
+(defun local-zone-west ((day int) (second int)) int
   "Seconds west of Greenwich in the local zone, at that universal time.
 
    The offset is a property of the *instant*, not of the machine: the same
@@ -5046,7 +5072,7 @@ user-visible capacity."
     ((some w) w)
     ((none) (panic "the local time zone at this universal time is unknown"))))
 
-(defun local-zone-daylight ((day i32) (second i32)) bool
+(defun local-zone-daylight ((day int) (second int)) bool
   "Whether daylight saving time was in force locally at that universal
    time -- CL's eighth returned value. Panics on the same unknown instant
    `local-zone-west` does."
@@ -5054,9 +5080,9 @@ user-visible capacity."
     ((some d) d)
     ((none) (panic "the local time zone at this universal time is unknown"))))
 
-(pub defun encode-universal-time ((second i32) (minute i32) (hour i32)
-                                  (date i32) (month i32) (year i32)
-                                  &optional (zone i32)) universal-time
+(pub defun encode-universal-time ((second int) (minute int) (hour int)
+                                  (date int) (month int) (year int)
+                                  &optional (zone int)) universal-time
   "The universal time for this date and time. `zone` is an offset in hours
    west of Greenwich, as CL's is; omitting it means the arguments are in
    *local* time, which is CL's default too."
@@ -5079,7 +5105,7 @@ user-visible capacity."
              (let ((west1 (local-zone-west guess::day guess::second)))
                (ut-shift guess::day guess::second (- west1 west0))))))))))
 
-(defun decode-at-west ((ut universal-time) (west i32) (daylight bool)) decoded-time
+(defun decode-at-west ((ut universal-time) (west int) (daylight bool)) decoded-time
   "`ut` broken into calendar components `west` seconds west of Greenwich.
    The shared body of both of `decode-universal-time`'s arms; the reported
    `zone` is `west` back in CL's hours, where a half-hour offset survives as
@@ -5112,7 +5138,7 @@ user-visible capacity."
                              daylight
                              (/ (int->float west) (int->float 3600)))))))
 
-(pub defun decode-universal-time ((ut universal-time) &optional (zone i32)) decoded-time
+(pub defun decode-universal-time ((ut universal-time) &optional (zone int)) decoded-time
   "`ut` broken into its calendar components. `zone` is an offset in hours west
    of Greenwich, as CL's is; omitting it decodes into *local* time, which is
    CL's default.
@@ -5212,14 +5238,14 @@ user-visible capacity."
 
 (pub defstruct Array<T>
   "A multi-dimensional array of `T`, stored in row-major order."
-  (dims Vector<i32>)
+  (dims Vector<int>)
   (data Vector<T>)
-  (pub fill-pointer Option<i32>))
+  (pub fill-pointer Option<int>))
 
 ;; CL's `make-array`. `dims` is copied, so a later `push` to the caller's own
 ;; vector cannot change the array's shape behind its back.
-(pub defmethod make (Array<T> (dims Vector<i32>) (init T) &key (fill-pointer i32)) Array<T>
-  (let ((d (the Vector<i32> (Vector::new))) (n 1))
+(pub defmethod make (Array<T> (dims Vector<int>) (init T) &key (fill-pointer int)) Array<T>
+  (let ((d (the Vector<int> (Vector::new))) (n 1))
     (progn
       (doiter (x (iter dims))
         (progn
@@ -5243,19 +5269,19 @@ user-visible capacity."
 ;; CL's `array-rank` / `array-dimension` / `array-dimensions` /
 ;; `array-total-size`. The type name is not repeated in the method name:
 ;; the receiver already says which type is being asked.
-(pub defmethod rank ((self Array<T>)) i32 (len self::dims))
-(pub defmethod dimension ((self Array<T>) (n i32)) i32 (get self::dims n))
-(pub defmethod total-size ((self Array<T>)) i32 (len self::data))
+(pub defmethod rank ((self Array<T>)) int (len self::dims))
+(pub defmethod dimension ((self Array<T>) (n int)) int (get self::dims n))
+(pub defmethod total-size ((self Array<T>)) int (len self::data))
 ;; A fresh vector, like CL's `array-dimensions` returns a fresh list — the
 ;; array's own is its representation and handing it out would let a caller
 ;; reshape the array by mutating what it got back.
-(pub defmethod dimensions ((self Array<T>)) Vector<i32>
-  (let ((out (the Vector<i32> (Vector::new))))
+(pub defmethod dimensions ((self Array<T>)) Vector<int>
+  (let ((out (the Vector<int> (Vector::new))))
     (progn (doiter (x (iter self::dims)) (push out x)) out)))
 
 ;; CL's `array-in-bounds-p`: false for the wrong number of subscripts too,
 ;; which is what CL says (it is not an error to ask).
-(pub defmethod in-bounds ((self Array<T>) (idx Vector<i32>)) bool
+(pub defmethod in-bounds ((self Array<T>) (idx Vector<int>)) bool
   (if (/= (len idx) (len self::dims))
       false
       (let ((i 0) (ok true) (n (len idx)))
@@ -5271,7 +5297,7 @@ user-visible capacity."
 ;; fold that row-major order *is*. Out-of-range subscripts are an error here
 ;; rather than a wrong-but-in-range offset — without the check `(aref a 0 5)`
 ;; on a 3x3 would quietly read row 1 rather than say anything.
-(pub defmethod row-major-index ((self Array<T>) (idx Vector<i32>)) i32
+(pub defmethod row-major-index ((self Array<T>) (idx Vector<int>)) int
   (if (in-bounds self idx)
       (let ((acc 0) (i 0) (r (len self::dims)))
         (progn
@@ -5284,24 +5310,24 @@ user-visible capacity."
 
 ;; `aref` / `(setf (aref ...))`, spelled the way every other indexed container
 ;; in this language spells them. `(aref a i j)` is checker sugar for these.
-(pub defmethod get ((self Array<T>) (idx Vector<i32>)) T
+(pub defmethod get ((self Array<T>) (idx Vector<int>)) T
   (get self::data (row-major-index self idx)))
-(pub defmethod set ((self Array<T>) (idx Vector<i32>) (x T)) ()
+(pub defmethod set ((self Array<T>) (idx Vector<int>) (x T)) ()
   (set self::data (row-major-index self idx) x))
 
 ;; CL's `row-major-aref` and its `setf`: the flat offset directly.
-(pub defmethod row-major-get ((self Array<T>) (i i32)) T (get self::data i))
-(pub defmethod row-major-set ((self Array<T>) (i i32) (x T)) () (set self::data i x))
+(pub defmethod row-major-get ((self Array<T>) (i int)) T (get self::data i))
+(pub defmethod row-major-set ((self Array<T>) (i int) (x T)) () (set self::data i x))
 
 ;; CL's `length` on an array: the fill pointer when there is one, and the
 ;; whole array when there is not.
-(pub defmethod len ((self Array<T>)) i32
+(pub defmethod len ((self Array<T>)) int
   (match self::fill-pointer ((some n) n) ((none) (len self::data))))
 
 ;; `array-iter<T>` is to `Array<T>` what `vector-iter<T>` is to `Vector<T>`:
 ;; a separate cursor per `(iter a)` call, walking row-major order and stopping
 ;; at the fill pointer if there is one.
-(defstruct array-iter<T> (arr Array<T>) (pos i32))
+(defstruct array-iter<T> (arr Array<T>) (pos int))
 (impl Iter array-iter<T>
   (type Item T)
   (next ((self Self)) Option<T>
@@ -5340,7 +5366,7 @@ user-visible capacity."
 ;; Decode a row-major offset back into subscripts, into `out` (which must
 ;; already have one slot per dimension). The inverse of `row-major-index`'s
 ;; fold, so it runs the dimensions backwards: the last one varies fastest.
-(defun array-decode ((dims Vector<i32>) (flat i32) (out Vector<i32>)) ()
+(defun array-decode ((dims Vector<int>) (flat int) (out Vector<int>)) ()
   (let ((k (- (len dims) 1)) (rest flat))
     (while (>= k 0)
       (progn
@@ -5350,7 +5376,7 @@ user-visible capacity."
             (setf rest (/ rest d))))
         (setf k (- k 1))))))
 
-(defun array-subs-in-bounds ((sub Vector<i32>) (dims Vector<i32>)) bool
+(defun array-subs-in-bounds ((sub Vector<int>) (dims Vector<int>)) bool
   (let ((i 0) (ok true) (n (len sub)))
     (progn
       (while (< i n)
@@ -5367,8 +5393,8 @@ user-visible capacity."
 ;; Mutates and returns `()`, where CL returns the array; CL has to, because a
 ;; non-adjustable CL array may come back as a *different* array. Every array
 ;; here is adjustable, so there is never a second one to return.
-(pub defmethod adjust ((self Array<T>) (newdims Vector<i32>) (init T)) ()
-  (let ((nd (the Vector<i32> (Vector::new))) (n 1))
+(pub defmethod adjust ((self Array<T>) (newdims Vector<int>) (init T)) ()
+  (let ((nd (the Vector<int> (Vector::new))) (n 1))
     (progn
       (if (/= (len newdims) (len self::dims))
           (panic (format false "adjust: expected ~a dimension(s), got ~a"
@@ -5420,7 +5446,7 @@ user-visible capacity."
 
 ;; How far apart two neighbours along dimension `d` are in row-major storage:
 ;; the product of every dimension after it.
-(defun array-print-stride<T> ((a Array<T>) (d i32)) i32
+(defun array-print-stride<T> ((a Array<T>) (d int)) int
   (let ((s 1) (i (+ d 1)) (r (len a::dims)))
     (progn
       (while (< i r)
@@ -5431,7 +5457,7 @@ user-visible capacity."
 ;; The sub-array rooted at depth `d`, whose first element is at flat index
 ;; `off`. At `d` = the rank there is no dimension left to walk and the flat
 ;; index names an element, which is where the recursion bottoms out.
-(defun array-print-sub<T> ((a Array<T>) (d i32) (off i32) (escape bool)) string
+(defun array-print-sub<T> ((a Array<T>) (d int) (off int) (escape bool)) string
   (where (print-object T))
   (if (>= d (len a::dims))
       (print-object (row-major-get a off) escape)
@@ -5497,42 +5523,42 @@ user-visible capacity."
 ;; `bit-vector-p` does not exist — the static type has already answered it.
 
 (pub defstruct BitVector
-  "A fixed-length sequence of bits, packed 31 to an `i32` word."
-  (words Vector<i32>)
-  (nbits i32))
+  "A fixed-length sequence of bits, packed 31 to an `int` word."
+  (words Vector<int>)
+  (nbits int))
 
 ;; CL's `(make-array n :element-type 'bit)`. Every bit starts at 0, which is
 ;; what CL's `:initial-element` defaults to for a bit array.
-(pub defmethod make (BitVector (n i32)) BitVector
+(pub defmethod make (BitVector (n int)) BitVector
   (if (< n 0)
       (panic (format false "BitVector::make: length ~a is negative" n))
-      (BitVector::new (Vector::filled (/ (+ n 30) 31) (the i32 0)) n)))
+      (BitVector::new (Vector::filled (/ (+ n 30) 31) (the int 0)) n)))
 
-(pub defmethod len ((self BitVector)) i32 self::nbits)
+(pub defmethod len ((self BitVector)) int self::nbits)
 
 ;; CL's `bit` / `sbit` and their `setf`s are `get`/`set` here, the way every
 ;; other indexed container in this language spells them; the CL names are
 ;; kept as aliases below.
-(pub defmethod get ((self BitVector) (i i32)) bool
+(pub defmethod get ((self BitVector) (i int)) bool
   (if (or (< i 0) (>= i self::nbits))
       (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
       (logbitp (get self::words (/ i 31)) (mod i 31))))
 
-(pub defmethod set ((self BitVector) (i i32) (b bool)) ()
+(pub defmethod set ((self BitVector) (i int) (b bool)) ()
   (if (or (< i 0) (>= i self::nbits))
       (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
-      (let ((w (/ i 31)) (mask (ash (the i32 1) (mod i 31))))
+      (let ((w (/ i 31)) (mask (ash (the int 1) (mod i 31))))
         (set self::words w
              (if b
                  (logior (get self::words w) mask)
                  (logand (get self::words w) (lognot mask)))))))
 
-(pub defmethod bit ((self BitVector) (i i32)) bool (get self i))
-(pub defmethod set-bit ((self BitVector) (i i32) (b bool)) () (set self i b))
+(pub defmethod bit ((self BitVector) (i int)) bool (get self i))
+(pub defmethod set-bit ((self BitVector) (i int) (b bool)) () (set self i b))
 ;; CL's `sbit` differs from `bit` only in requiring a *simple* bit vector,
 ;; a distinction this language's single bit-vector type does not have.
-(pub defmethod sbit ((self BitVector) (i i32)) bool (get self i))
-(pub defmethod set-sbit ((self BitVector) (i i32) (b bool)) () (set self i b))
+(pub defmethod sbit ((self BitVector) (i int)) bool (get self i))
+(pub defmethod set-sbit ((self BitVector) (i int) (b bool)) () (set self i b))
 
 ;; Put the words back in canonical form. Two things can put them out of it,
 ;; and both have to be undone or two bit vectors holding the same bits stop
@@ -5543,7 +5569,7 @@ user-visible capacity."
 ;; 2. The last word reaches past the length.
 ;;
 ;; Every operation that can do either ends here.
-(defconstant (*bitvector-word-mask* i32) 2147483647)
+(defconstant (*bitvector-word-mask* int) 2147483647)
 (defun bitvector-trim ((v BitVector)) ()
   (let ((n (len v::words)) (i 0))
     (progn
@@ -5556,14 +5582,14 @@ user-visible capacity."
             ()
             (set v::words (- n 1)
                  (logand (get v::words (- n 1))
-                         (- (ash (the i32 1) used) (the i32 1)))))))))
+                         (- (ash (the int 1) used) (the int 1)))))))))
 
 ;; The shared body of CL's `bit-and` family: same length in, a fresh bit
 ;; vector out, one word at a time. `who` is only for the length-mismatch
 ;; message. CL's optional third argument (write into an existing vector, or
 ;; into the first one when it is `t`) is not offered — the caller writes
 ;; `(setf a (bit-and a b))`, and the aliasing question never comes up.
-(defun bitvector-zip ((a BitVector) (b BitVector) (who string) (f (fn (i32 i32) i32))) BitVector
+(defun bitvector-zip ((a BitVector) (b BitVector) (who string) (f (fn (int int) int))) BitVector
   (if (/= a::nbits b::nbits)
       (panic (format false "~a: bit vectors differ in length (~a and ~a)" who a::nbits b::nbits))
       (let ((out (BitVector::make a::nbits)) (i 0) (n (len a::words)))
@@ -5576,27 +5602,27 @@ user-visible capacity."
           out))))
 
 (pub defmethod bit-and ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-and" (lambda ((x i32) (y i32)) i32 (logand x y))))
+  (bitvector-zip self other "bit-and" (lambda ((x int) (y int)) int (logand x y))))
 (pub defmethod bit-ior ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-ior" (lambda ((x i32) (y i32)) i32 (logior x y))))
+  (bitvector-zip self other "bit-ior" (lambda ((x int) (y int)) int (logior x y))))
 (pub defmethod bit-xor ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-xor" (lambda ((x i32) (y i32)) i32 (logxor x y))))
+  (bitvector-zip self other "bit-xor" (lambda ((x int) (y int)) int (logxor x y))))
 ;; The rest of CL's family. Nothing new is needed for any of them: each is
 ;; the same word-wise walk over the integer operation of the same name.
 (pub defmethod bit-eqv ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-eqv" (lambda ((x i32) (y i32)) i32 (logeqv x y))))
+  (bitvector-zip self other "bit-eqv" (lambda ((x int) (y int)) int (logeqv x y))))
 (pub defmethod bit-nand ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-nand" (lambda ((x i32) (y i32)) i32 (lognand x y))))
+  (bitvector-zip self other "bit-nand" (lambda ((x int) (y int)) int (lognand x y))))
 (pub defmethod bit-nor ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-nor" (lambda ((x i32) (y i32)) i32 (lognor x y))))
+  (bitvector-zip self other "bit-nor" (lambda ((x int) (y int)) int (lognor x y))))
 (pub defmethod bit-andc1 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-andc1" (lambda ((x i32) (y i32)) i32 (logandc1 x y))))
+  (bitvector-zip self other "bit-andc1" (lambda ((x int) (y int)) int (logandc1 x y))))
 (pub defmethod bit-andc2 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-andc2" (lambda ((x i32) (y i32)) i32 (logandc2 x y))))
+  (bitvector-zip self other "bit-andc2" (lambda ((x int) (y int)) int (logandc2 x y))))
 (pub defmethod bit-orc1 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-orc1" (lambda ((x i32) (y i32)) i32 (logorc1 x y))))
+  (bitvector-zip self other "bit-orc1" (lambda ((x int) (y int)) int (logorc1 x y))))
 (pub defmethod bit-orc2 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-orc2" (lambda ((x i32) (y i32)) i32 (logorc2 x y))))
+  (bitvector-zip self other "bit-orc2" (lambda ((x int) (y int)) int (logorc2 x y))))
 
 (pub defmethod bit-not ((self BitVector)) BitVector
   (let ((out (BitVector::make self::nbits)) (i 0) (n (len self::words)))
@@ -5805,13 +5831,13 @@ user-visible capacity."
 ;; `WaitGroup::make` and not `WaitGroup::new`: a `defstruct`'s `new` takes its
 ;; fields, and this one takes none. `Array<T>::make`/`BitVector::make` are the
 ;; same shape for the same reason.
-(pub defstruct WaitGroup (count i32) (gate Chan<()>))
+(pub defstruct WaitGroup (count int) (gate Chan<()>))
 
 (pub defmethod make (WaitGroup) WaitGroup
   "A wait group with nothing outstanding."
   (WaitGroup::new 0 (the Chan<()> (Chan::new 0))))
 
-(pub defmethod add ((self WaitGroup) (n i32)) ()
+(pub defmethod add ((self WaitGroup) (n int)) ()
   "Add `n` to the counter, before starting the work it counts."
   (setf self::count (+ self::count n))
   (if (< self::count 0)

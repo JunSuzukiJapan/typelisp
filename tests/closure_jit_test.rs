@@ -27,31 +27,31 @@ use typelisp::Value;
 
 #[test]
 fn fnref_of_a_plain_function_is_callable() {
-    let src = "(defun inc ((x i32)) i32 (+ x 1)) \
-               (defun call2 ((f (fn (i32) i32))) i32 (f (f 0))) \
+    let src = "(defun inc ((x int)) int (+ x 1)) \
+               (defun call2 ((f (fn (int) int))) int (f (f 0))) \
                (call2 inc)";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
 fn methodref_of_a_defstruct_field_accessor_is_callable() {
-    let src = "(defstruct point (x i32) (y i32)) \
-               (defun make-point ((a i32) (b i32)) point (point::new a b)) \
-               (defun call-getter ((f (fn (point) i32)) (p point)) i32 (f p)) \
+    let src = "(defstruct point (x int) (y int)) \
+               (defun make-point ((a int) (b int)) point (point::new a b)) \
+               (defun call-getter ((f (fn (point) int)) (p point)) int (f p)) \
                (call-getter x (make-point 7 1))";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn lambda_with_no_captures_is_callable() {
-    let src = "(defun apply-twice ((f (fn (i32) i32)) (x i32)) i32 (f (f x))) \
-               (apply-twice (lambda ((n i32)) i32 (+ n 1)) 5)";
+    let src = "(defun apply-twice ((f (fn (int) int)) (x int)) int (f (f x))) \
+               (apply-twice (lambda ((n int)) int (+ n 1)) 5)";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn lambda_captures_an_outer_variable() {
-    let src = "(defun adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n))) \
+    let src = "(defun adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n))) \
                (let ((add5 (adder 5))) (add5 10))";
     assert_eq!(eval_ok(src), Value::Int(15));
 }
@@ -63,8 +63,8 @@ fn lambda_captures_an_outer_variable() {
 /// explicit `(compile ...)` call.
 #[test]
 fn make_counter_shares_a_mutable_capture_across_calls() {
-    let src = "(defun make-counter () (fn () i32) \
-                 (let ((c 0)) (lambda () i32 (setf c (+ c 1))))) \
+    let src = "(defun make-counter () (fn () int) \
+                 (let ((c 0)) (lambda () int (setf c (+ c 1))))) \
                (let ((next (make-counter))) (next) (next))";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
@@ -73,8 +73,8 @@ fn make_counter_shares_a_mutable_capture_across_calls() {
 /// cell — each `(let ((c 0)) ...)` binds its own.
 #[test]
 fn two_counters_from_the_same_maker_have_independent_cells() {
-    let src = "(defun make-counter () (fn () i32) \
-                 (let ((c 0)) (lambda () i32 (setf c (+ c 1))))) \
+    let src = "(defun make-counter () (fn () int) \
+                 (let ((c 0)) (lambda () int (setf c (+ c 1))))) \
                (let ((a (make-counter)) (b (make-counter))) \
                  (a) (a) (b) \
                  (+ (a) (b)))";
@@ -88,8 +88,8 @@ fn two_counters_from_the_same_maker_have_independent_cells() {
 /// `compile-labels-bodies` does.
 #[test]
 fn labels_mutual_recursion_via_independent_sibling_jit() {
-    let src = "(labels ((is-even ((n i32)) bool (if (= n 0) true (is-odd (- n 1))))
-                        (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1)))))
+    let src = "(labels ((is-even ((n int)) bool (if (= n 0) true (is-odd (- n 1))))
+                        (is-odd ((n int)) bool (if (= n 0) false (is-even (- n 1)))))
                  (is-even 10))";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
@@ -99,9 +99,9 @@ fn labels_mutual_recursion_via_independent_sibling_jit() {
 /// `read-it` (which never itself writes) observes the mutation.
 #[test]
 fn setf_through_one_labels_sibling_is_visible_through_another_sharing_the_same_capture() {
-    let src = "(defun make-pair ((start i32)) i32
-                 (labels ((bump () i32 (setf start (+ start 1)))
-                          (read-it () i32 start))
+    let src = "(defun make-pair ((start int)) int
+                 (labels ((bump () int (setf start (+ start 1)))
+                          (read-it () int start))
                    (let ((ignored1 (bump)))
                      (let ((ignored2 (bump)))
                        (read-it)))))
@@ -120,9 +120,9 @@ fn setf_through_one_labels_sibling_is_visible_through_another_sharing_the_same_c
 /// sibling's `env`; the fix binds captures first so parameters shadow them.
 #[test]
 fn a_labels_param_shadows_a_captured_name_of_the_same_spelling() {
-    let src = "(defun outer ((n i32)) i32
-                 (labels ((use-cap ((x i32)) i32 (+ x n))
-                          (shadow-it ((n i32)) i32 n))
+    let src = "(defun outer ((n int)) int
+                 (labels ((use-cap ((x int)) int (+ x n))
+                          (shadow-it ((n int)) int n))
                    (+ (use-cap 1) (shadow-it 100))))
                (outer 5)";
     // use-cap: 1 + captured n(5) = 6; shadow-it: param n(100) = 100; sum 106.
@@ -153,9 +153,9 @@ fn a_unit_returning_closure_performs_its_effect_and_returns_unit() {
 /// closure sees a fixed 2-argument call.
 #[test]
 fn a_variadic_lambda_jits_and_collects_its_rest_list() {
-    let src = "(defun sexpr-len ((s Option<Sexpr>)) i32 \
-                 (if (sexpr-consp s) (+ (the i32 1) (sexpr-len (sexpr-cdr s))) (the i32 0))) \
-               ((lambda ((a i32) &rest (xs i32)) i32 (+ a (sexpr-len xs))) 1 2 3)";
+    let src = "(defun sexpr-len ((s Option<Sexpr>)) int \
+                 (if (sexpr-consp s) (+ (the int 1) (sexpr-len (sexpr-cdr s))) (the int 0))) \
+               ((lambda ((a int) &rest (xs int)) int (+ a (sexpr-len xs))) 1 2 3)";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
 
@@ -165,10 +165,10 @@ fn a_variadic_lambda_jits_and_collects_its_rest_list() {
 /// fix), now reached through definition-time JIT instead of `(compile ...)`.
 #[test]
 fn fnref_of_a_variadic_function_jits_and_forwards_the_rest_list() {
-    let src = "(defun sexpr-len ((s Option<Sexpr>)) i32 \
-                 (if (sexpr-consp s) (+ (the i32 1) (sexpr-len (sexpr-cdr s))) (the i32 0))) \
-               (defun count-extra ((base i32) &rest (xs i32)) i32 (+ base (sexpr-len xs))) \
-               (defun use-it ((f (fn (i32 &rest i32) i32))) i32 (f 10 1 2 3)) \
+    let src = "(defun sexpr-len ((s Option<Sexpr>)) int \
+                 (if (sexpr-consp s) (+ (the int 1) (sexpr-len (sexpr-cdr s))) (the int 0))) \
+               (defun count-extra ((base int) &rest (xs int)) int (+ base (sexpr-len xs))) \
+               (defun use-it ((f (fn (int &rest int) int))) int (f 10 1 2 3)) \
                (use-it count-extra)";
     assert_eq!(eval_ok(src), Value::Int(13));
 }
@@ -182,8 +182,8 @@ fn fnref_of_a_variadic_function_jits_and_forwards_the_rest_list() {
 /// suppressed check-time JIT attempt into a spurious one.
 #[test]
 fn a_macro_expansion_and_a_real_closure_coexist() {
-    let src = "(defun make-counter () (fn () i32) \
-                 (let ((c 0)) (lambda () i32 (setf c (+ c 1))))) \
+    let src = "(defun make-counter () (fn () int) \
+                 (let ((c 0)) (lambda () int (setf c (+ c 1))))) \
                (let ((next (make-counter)) (total 0)) \
                  (dotimes (i 3) (setf total (+ total (next)))) \
                  total)";

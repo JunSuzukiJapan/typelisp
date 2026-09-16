@@ -276,7 +276,7 @@ fn print_reads_the_numeric_boxes_a_literal_carries() {
     h.push_root(node);
     assert_eq!(core::print(&h, node), "(float-any-width 1.0)");
 
-    let b = h.alloc_bignum("123456789012345678901234567890".parse().unwrap());
+    let b = h.int_from_bigint("123456789012345678901234567890".parse().unwrap());
     h.push_root(b);
     let node = core::tagged(&mut h, "bignum", &[b]).unwrap();
     h.push_root(node);

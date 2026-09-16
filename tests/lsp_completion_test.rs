@@ -72,14 +72,14 @@ fn has(kind: CompletionKind, candidates: &[CompletionCandidate], name: &str) -> 
 
 #[test]
 fn lists_a_top_level_defun() {
-    let chk = check("(defun add ((x i32) (y i32)) i32 (+ x y))\n");
+    let chk = check("(defun add ((x int) (y int)) int (+ x y))\n");
     let candidates = completion_candidates(chk.registry(), &[]);
     assert!(has(CompletionKind::Function, &candidates, "add"));
 }
 
 #[test]
 fn lists_a_top_level_defvar_and_defstruct() {
-    let chk = check("(defvar (count i32) 0)\n(defstruct point (x i32) (y i32))\n");
+    let chk = check("(defvar (count int) 0)\n(defstruct point (x int) (y int))\n");
     let candidates = completion_candidates(chk.registry(), &[]);
     assert!(has(CompletionKind::Variable, &candidates, "count"));
     assert!(has(CompletionKind::Type, &candidates, "point"));
@@ -87,7 +87,7 @@ fn lists_a_top_level_defvar_and_defstruct() {
 
 #[test]
 fn a_submodules_own_definition_is_visible_from_inside_it_but_not_from_root() {
-    let chk = check("(module m (defun helper () i32 1))\n");
+    let chk = check("(module m (defun helper () int 1))\n");
     let inside = completion_candidates(chk.registry(), &["m".to_string()]);
     assert!(has(CompletionKind::Function, &inside, "helper"));
     let at_root = completion_candidates(chk.registry(), &[]);
@@ -96,7 +96,7 @@ fn a_submodules_own_definition_is_visible_from_inside_it_but_not_from_root() {
 
 #[test]
 fn a_public_root_function_is_visible_from_inside_a_submodule() {
-    let chk = check("(pub defun helper () i32 1)\n(module m (defun main () i32 (helper)))\n");
+    let chk = check("(pub defun helper () int 1)\n(module m (defun main () int (helper)))\n");
     let inside = completion_candidates(chk.registry(), &["m".to_string()]);
     assert!(has(CompletionKind::Function, &inside, "helper"));
     assert!(has(CompletionKind::Function, &inside, "main"));
@@ -107,7 +107,7 @@ fn a_private_root_function_is_visible_from_inside_a_submodule() {
     // Root is always an ancestor of every submodule (Rust-style module
     // privacy — see `Checker::ns_ancestors`/`in_scope`), so a non-`pub`
     // root-level function is offered inside `m` too, not just `pub` ones.
-    let chk = check("(defun helper () i32 1)\n(module m (defun main () i32 1))\n");
+    let chk = check("(defun helper () int 1)\n(module m (defun main () int 1))\n");
     let inside = completion_candidates(chk.registry(), &["m".to_string()]);
     assert!(has(CompletionKind::Function, &inside, "helper"));
     assert!(has(CompletionKind::Function, &inside, "main"));
@@ -115,7 +115,7 @@ fn a_private_root_function_is_visible_from_inside_a_submodule() {
 
 #[test]
 fn completion_locals_offers_a_defun_parameter_and_a_let_binding() {
-    let (h, body) = program("(defun f ((x i32)) i32 (let ((n 1)) n))\n");
+    let (h, body) = program("(defun f ((x int)) int (let ((n 1)) n))\n");
     // Column 37 is `n`'s reference inside the `let` body.
     let locals = completion_locals(&h, &body, FILE, 1, 37);
     assert!(locals.contains(&"x".to_string()));
@@ -124,7 +124,7 @@ fn completion_locals_offers_a_defun_parameter_and_a_let_binding() {
 
 #[test]
 fn completion_locals_does_not_leak_a_sibling_lets_binding() {
-    let (h, body) = program("(defun f () i32 (progn (let ((a 1)) a) (let ((b 2)) b)))\n");
+    let (h, body) = program("(defun f () int (progn (let ((a 1)) a) (let ((b 2)) b)))\n");
     // Column 37 is `a`'s reference inside the first `let`; column 53 is `b`'s
     // inside the second — each must see only its own binding, not the
     // sibling's (`scope_typed`'s truncate-on-scope-exit).
@@ -138,7 +138,7 @@ fn completion_locals_does_not_leak_a_sibling_lets_binding() {
 
 #[test]
 fn completion_locals_offers_a_match_pattern_binding_in_its_own_arm() {
-    let (h, body) = program("(defun f ((o Option<i32>)) i32 (match o ((Some x) x) (_ 0)))\n");
+    let (h, body) = program("(defun f ((o Option<int>)) int (match o ((Some x) x) (_ 0)))\n");
     // Column 51 is the `(Some x)` arm's body (`x` reference) — see
     // `lsp_locate_test.rs`'s goto-definition test at the same position.
     let locals = completion_locals(&h, &body, FILE, 1, 51);
@@ -148,7 +148,7 @@ fn completion_locals_offers_a_match_pattern_binding_in_its_own_arm() {
 
 #[test]
 fn completion_locals_does_not_leak_a_match_pattern_binding_into_a_sibling_arm() {
-    let (h, body) = program("(defun f ((o Option<i32>)) i32 (match o ((Some x) x) (_ 0)))\n");
+    let (h, body) = program("(defun f ((o Option<int>)) int (match o ((Some x) x) (_ 0)))\n");
     // Column 57 is the `_` arm's body (the literal `0`) — `x` belongs to the
     // sibling `(Some x)` arm only (`scope_typed`'s per-arm truncate).
     let locals = completion_locals(&h, &body, FILE, 1, 57);
@@ -163,7 +163,7 @@ fn completion_locals_sees_a_let_binding_from_the_placeholder_as_the_first_body_f
     // `(panic "")` at exactly the cursor's position (column 37, the `(`).
     // The placeholder node itself is the cursor's located node, inside the
     // `let`'s scope — so `n` (and the parameter `x`) must be offered.
-    let (h, body) = program("(defun f ((x i32)) i32 (let ((n 1)) (panic \"\")))\n");
+    let (h, body) = program("(defun f ((x int)) int (let ((n 1)) (panic \"\")))\n");
     let locals = completion_locals(&h, &body, FILE, 1, 37);
     assert!(locals.contains(&"x".to_string()));
     assert!(locals.contains(&"n".to_string()));
@@ -177,7 +177,7 @@ fn completion_locals_sees_a_let_binding_from_an_empty_list_as_the_first_body_for
     // position (column 36), so the cursor one column later — where the
     // in-progress callee identifier starts in the real flow — still
     // resolves inside the `let`'s scope.
-    let (h, body) = program("(defun f ((x i32)) () (let ((n 1)) ()))\n");
+    let (h, body) = program("(defun f ((x int)) () (let ((n 1)) ()))\n");
     let locals = completion_locals(&h, &body, FILE, 1, 37);
     assert!(locals.contains(&"x".to_string()));
     assert!(locals.contains(&"n".to_string()));
@@ -192,17 +192,17 @@ fn completion_locals_sees_a_let_binding_from_an_empty_list_as_the_first_body_for
 
 #[test]
 fn recover_mode_records_multiple_form_errors_and_keeps_checking_the_rest() {
-    // Two ill-typed `defvar`s (a bool value where `i32` is declared) sandwich a
+    // Two ill-typed `defvar`s (a bool value where `int` is declared) sandwich a
     // well-typed `defun`. Strict checking would abort at the first; recover
     // mode records both errors and still checks — and keeps — the `defun`.
     let (h, body, errors) = program_recover(
-        "(defvar (x i32) true)\n(defun good ((p i32)) i32 p)\n(defvar (y i32) false)\n",
+        "(defvar (x int) true)\n(defun good ((p int)) int p)\n(defvar (y int) false)\n",
     );
     assert_eq!(errors.len(), 2, "both bad defvars recorded, not just the first");
     // All three forms are still present (the bad ones as recovered holes).
     assert_eq!(body.len(), 3);
     // `good`'s body is intact: its parameter is offered to completion. Column
-    // 27 is the `p` reference in `(defun good ((p i32)) i32 p)` on line 2.
+    // 27 is the `p` reference in `(defun good ((p int)) int p)` on line 2.
     let locals = completion_locals(&h, &body, FILE, 2, 27);
     assert!(locals.contains(&"p".to_string()));
 }
@@ -217,7 +217,7 @@ fn recover_mode_offers_locals_inside_a_non_catchall_match_arm() {
     // arm's binding `x` and the parameter `o` are offered. This is the exact
     // patched shape (placeholder `(panic "")` where the identifier was typed).
     let (h, body, errors) =
-        program_recover("(defun f ((o Option<i32>)) i32 (match o ((Some x) (panic \"\"))))\n");
+        program_recover("(defun f ((o Option<int>)) int (match o ((Some x) (panic \"\"))))\n");
     assert_eq!(errors.len(), 1, "exactly the non-exhaustive-match error");
     // Column 51 is the placeholder inside the `(Some x)` arm body.
     let locals = completion_locals(&h, &body, FILE, 1, 51);
@@ -231,7 +231,7 @@ fn recover_mode_skips_a_bad_arm_but_keeps_the_good_arms_bindings() {
     // the surviving `(Some x)` arm's binding is still reachable, and the skip
     // suppresses the exhaustiveness check so no spurious cascade is added.
     let (h, body, errors) = program_recover(
-        "(defun f ((o Option<i32>)) i32 (match o ((Some x) x) ((Bogus y) 0) (_ 0)))\n",
+        "(defun f ((o Option<int>)) int (match o ((Some x) x) ((Bogus y) 0) (_ 0)))\n",
     );
     assert!(!errors.is_empty(), "the unknown-constructor arm is recorded");
     // Column 51 is the `(Some x)` arm body (`x` reference).
@@ -244,7 +244,7 @@ fn recover_mode_holes_one_bad_body_form_and_keeps_the_siblings() {
     // A bad first body form (`undefined`) becomes a hole (B3); the following
     // `let` still checks, so its binding `n` and the parameter `x` are offered.
     let (h, body, errors) =
-        program_recover("(defun f ((x i32)) i32 (progn undefined (let ((n 1)) n)))\n");
+        program_recover("(defun f ((x int)) int (progn undefined (let ((n 1)) n)))\n");
     assert_eq!(errors.len(), 1, "just the unknown-variable error");
     // Column 54 is the `n` reference inside the `let` body.
     let locals = completion_locals(&h, &body, FILE, 1, 54);
@@ -258,7 +258,7 @@ fn recover_mode_keeps_a_let_binding_whose_init_failed() {
     // the binding still enters scope (as `Never`), so `n` is offered in the
     // body alongside the parameter `x`.
     let (h, body, errors) =
-        program_recover("(defun f ((x i32)) i32 (let ((n bad_init)) n))\n");
+        program_recover("(defun f ((x int)) int (let ((n bad_init)) n))\n");
     assert_eq!(errors.len(), 1, "just the unknown-variable error in the init");
     // Column 44 is the `n` reference inside the `let` body.
     let locals = completion_locals(&h, &body, FILE, 1, 44);
@@ -271,7 +271,7 @@ fn recover_mode_records_each_independent_error_with_its_own_location() {
     // Three independent unknown variables in one body: each is recorded
     // separately (holes don't cascade because `Never` unifies everywhere), and
     // each error carries a distinct source location.
-    let (_h, _body, errors) = program_recover("(defun f () i32 (progn err_a err_b err_c))\n");
+    let (_h, _body, errors) = program_recover("(defun f () int (progn err_a err_b err_c))\n");
     assert_eq!(errors.len(), 3);
     let cols: Vec<Option<u32>> = errors
         .iter()

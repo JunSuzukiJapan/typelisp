@@ -61,7 +61,7 @@ fn aesthetic_and_standard_recurse_through_lists() {
 
 #[test]
 fn decimal_accepts_bignum() {
-    assert_eq!(fmt(r#"(format false "~d" (int->bignum 42))"#), "42");
+    assert_eq!(fmt(r#"(format false "~d" 100000000000000000000)"#), "100000000000000000000");
 }
 
 #[test]
@@ -258,9 +258,9 @@ fn built_in_enum_values_print_their_variant_names() {
     // same `registry::builtin_sum_defs` the checker registers from, so the
     // renderer's lookup finds them without a second table to fall back to.
     assert_eq!(fmt(r#"(format false "~a" (option::some 1))"#), "(some 1)");
-    assert_eq!(fmt(r#"(defun no-int () Option<i32> (option::none)) (format false "~a" (no-int))"#), "none");
+    assert_eq!(fmt(r#"(defun no-int () Option<int> (option::none)) (format false "~a" (no-int))"#), "none");
     assert_eq!(
-        fmt(r#"(defun okv () Result<i32,ParseIntError> (result::ok 7)) (format false "~a" (okv))"#),
+        fmt(r#"(defun okv () Result<int,ParseIntError> (result::ok 7)) (format false "~a" (okv))"#),
         "(ok 7)"
     );
 }
@@ -274,12 +274,12 @@ fn a_built_in_error_value_prints_its_type_name() {
 
 #[test]
 fn variant_names_resolve_inside_a_nested_structure() {
-    // `Option<i32>` is an ordinary boxed enum inside the list, so it prints
+    // `Option<int>` is an ordinary boxed enum inside the list, so it prints
     // with its variant name. It has to be spelled out: a bare
     // `(option::some 1)` in an element position would take the element's own
     // `Option<Sexpr>` expectation instead, and *that* is the niche.
     assert_eq!(
-        fmt(r#"(format false "~a" (list (the Option<i32> (option::some 1)) 2))"#),
+        fmt(r#"(format false "~a" (list (the Option<int> (option::some 1)) 2))"#),
         "((some 1) 2)"
     );
     // The niche prints transparently: `Option<Sexpr>` *is* the S-expression,

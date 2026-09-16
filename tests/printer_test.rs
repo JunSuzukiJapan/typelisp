@@ -155,7 +155,7 @@ fn with_standard_io_syntax_restores_the_escape_flag() {
 // ---- ~/name/ ----------------------------------------------------------------
 
 const POINT: &str = r#"
-(defstruct point (x i32) (y i32))
+(defstruct point (x int) (y int))
 (defmethod brief ((self point) (colon bool) (at bool)) string
   (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
 "#;
@@ -212,7 +212,7 @@ fn a_string_argument_dispatches_on_string() {
 #[test]
 fn an_integer_argument_dispatches_when_only_one_width_defines_the_name() {
     is_true(
-        r#"(defmethod twice ((self i32) (colon bool) (at bool)) string (format false "~a ~a" self self))
+        r#"(defmethod twice ((self int) (colon bool) (at bool)) string (format false "~a ~a" self self))
            (equal (format false "~/twice/" 7) "7 7")"#,
     );
 }
@@ -221,13 +221,13 @@ fn an_integer_argument_dispatches_when_only_one_width_defines_the_name() {
 /// which type it is, so each reaches its own method.
 ///
 /// This used to be an *error* — "could be any width" — because a normalized
-/// `u8` and a normalized `i32` were the same `Value::Int` when they held the
+/// `u8` and a normalized `int` were the same `Value::Int` when they held the
 /// same small number, and the runtime offered all six integer types as
 /// candidates rather than guess. Giving the narrow widths a box that names
-/// them settled it: `7` is an `i32` and `(the u8 7)` is a `u8`.
+/// them settled it: `7` is an `int` and `(the u8 7)` is a `u8`.
 #[test]
 fn each_integer_width_dispatches_to_its_own_method() {
-    const DEFS: &str = r#"(defmethod both ((self i32) (colon bool) (at bool)) string "32")
+    const DEFS: &str = r#"(defmethod both ((self int) (colon bool) (at bool)) string "32")
            (defmethod both ((self u8) (colon bool) (at bool)) string "8")"#;
     is_true(&format!(r#"{DEFS}
            (equal (format false "~/both/" 7) "32")"#));
@@ -237,7 +237,7 @@ fn each_integer_width_dispatches_to_its_own_method() {
 
 /// A method on a width other than the argument's own is *not* reached — the
 /// argument's type is the whole of the dispatch, and a bare literal is an
-/// `i32`.
+/// `int`.
 #[test]
 fn an_integer_argument_reaches_only_its_own_widths_method() {
     const DEF: &str = r#"(defmethod thrice ((self u8) (colon bool) (at bool)) string (format false "~a ~a ~a" self self self))"#;
@@ -303,11 +303,11 @@ fn a_call_directive_works_through_a_stream_destination() {
 // ---- print-object on a generic type ----------------------------------------
 
 /// The printer looks a method up by the key the value carries, and that key
-/// includes the instantiation now (`gen<i32>`), so the body monomorphization
-/// registered for it (`print-object <i32>`) is findable.
+/// includes the instantiation now (`gen<int>`), so the body monomorphization
+/// registered for it (`print-object <int>`) is findable.
 ///
 /// This test used to assert the opposite, pinning a known gap: the key was
-/// `gen`, the registration was `print-object <i32>`, and the impl silently
+/// `gen`, the registration was `print-object <int>`, and the impl silently
 /// never applied — while still type-checking and still working when called by
 /// name, which is what made it a trap rather than a missing feature.
 #[test]
@@ -331,7 +331,7 @@ fn print_object_reaches_a_generic_type() {
 #[test]
 fn each_instantiation_reaches_its_own_print_object() {
     is_true(
-        r#"(defstruct wi (n i32))
+        r#"(defstruct wi (n int))
            (impl print-object wi (print-object ((self Self) (escape bool)) string "INT"))
            (defstruct ws (s string))
            (impl print-object ws (print-object ((self Self) (escape bool)) string "STR"))
@@ -352,7 +352,7 @@ fn each_instantiation_reaches_its_own_print_object() {
 #[test]
 fn print_object_reaches_a_builtin_generic_type() {
     is_true(
-        r#"(defstruct point (x i32) (y i32))
+        r#"(defstruct point (x int) (y int))
            (impl print-object point (print-object ((self Self) (escape bool)) string "P"))
            (impl print-object Vector<T> (where (print-object T))
              (print-object ((self Self) (escape bool)) string "V"))
@@ -364,7 +364,7 @@ fn print_object_reaches_a_builtin_generic_type() {
 /// instantiation.
 ///
 /// Variant names are registered per enum *type* (`option`), while the key a
-/// value carries names an instantiation (`option<i32>`). Looking one up
+/// value carries names an instantiation (`option<int>`). Looking one up
 /// without splitting the base off printed every `Option` as
 /// `(<unknown-variant> 1)` — 28 tests across nine suites, and none of them was
 /// about printing an `Option`, which is why the whole class only showed up in
@@ -372,7 +372,7 @@ fn print_object_reaches_a_builtin_generic_type() {
 #[test]
 fn an_enum_variant_name_survives_an_instantiated_key() {
     is_true(r#"(equal (format false "~a" (option::some 1)) "(some 1)")"#);
-    is_true(r#"(equal (format false "~a" (the Option<i32> (option::none))) "none")"#);
+    is_true(r#"(equal (format false "~a" (the Option<int> (option::none))) "none")"#);
     is_true(
         r#"(defenum box<T> (full T) (empty))
            (equal (format false "~a" (the box<string> (box::full "x"))) "(full x)")"#,
@@ -393,19 +393,19 @@ fn an_enum_variant_name_survives_an_instantiated_key() {
 #[test]
 fn an_array_prints_in_cl_syntax() {
     is_true(
-        r##"(let ((d (the Vector<i32> (Vector::new))))
+        r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2) (push d 3)
                (let ((a (Array::make d 0)))
                  (progn (setf (aref a 0 0) 7)
                         (equal (format false "~a" a) "#2A((7 0 0) (0 0 0))")))))"##,
     );
     is_true(
-        r##"(let ((d (the Vector<i32> (Vector::new))))
+        r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 3)
                (equal (format false "~a" (Array::make d 1)) "#(1 1 1)")))"##,
     );
     is_true(
-        r##"(let ((d (the Vector<i32> (Vector::new))))
+        r##"(let ((d (the Vector<int> (Vector::new))))
              (equal (format false "~a" (Array::make d 5)) "#0A5"))"##,
     );
 }
@@ -415,7 +415,7 @@ fn an_array_prints_in_cl_syntax() {
 #[test]
 fn an_arrays_elements_follow_the_escape_choice() {
     is_true(
-        r##"(let ((d (the Vector<i32> (Vector::new))))
+        r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2)
                (let ((a (Array::make d "q")))
                  (and (equal (format false "~s" a) "#(\"q\" \"q\")")
@@ -428,7 +428,7 @@ fn an_arrays_elements_follow_the_escape_choice() {
 #[test]
 fn a_fill_pointer_cuts_what_prints() {
     is_true(
-        r##"(let ((d (the Vector<i32> (Vector::new))))
+        r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 4)
                (equal (format false "~a" (Array::make d 0 :fill-pointer 2)) "#(0 0)")))"##,
     );
@@ -440,7 +440,7 @@ fn a_fill_pointer_cuts_what_prints() {
 #[test]
 fn print_array_false_shows_only_the_shape() {
     is_true(
-        r##"(let ((d (the Vector<i32> (Vector::new))))
+        r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2) (push d 3)
                (let ((a (Array::make d 0)))
                  (dlet ((*print-array* false))
@@ -458,12 +458,12 @@ fn print_array_false_shows_only_the_shape() {
 #[test]
 fn an_array_of_a_type_with_no_print_object_still_builds() {
     is_true(
-        r##"(defstruct plain (n i32))
-           (let ((d (the Vector<i32> (Vector::new))))
+        r##"(defstruct plain (n int))
+           (let ((d (the Vector<int> (Vector::new))))
              (progn (push d 1)
                (let ((a (Array::make d (plain::new 1))))
                  (equal (format false "~a" a)
-                        "#<array<plain> #<vector<i32> 1> #<vector<plain> #<plain 1>> none>"))))"##,
+                        "#<array<plain> #<vector<int> 1> #<vector<plain> #<plain 1>> none>"))))"##,
     );
 }
 
@@ -473,7 +473,7 @@ fn an_array_of_a_type_with_no_print_object_still_builds() {
 #[test]
 fn arrays_nest_through_the_bound() {
     is_true(
-        r##"(let ((d (the Vector<i32> (Vector::new))))
+        r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2)
                (let ((inner (Array::make d 1)))
                  (equal (format false "~a" (Array::make d inner)) "#(#(1 1) #(1 1))"))))"##,

@@ -19,7 +19,7 @@ use typelisp::Value;
 #[test]
 fn an_alias_stands_for_its_body() {
     let src = "
-        (deftype meters i32)
+        (deftype meters int)
         (defun double ((m meters)) meters (* m 2))
         (double 21)
     ";
@@ -28,12 +28,12 @@ fn an_alias_stands_for_its_body() {
 
 #[test]
 fn an_alias_is_the_same_type_as_its_body() {
-    // Not a new type — that is what `defstruct` is for. An `i32` flows into
+    // Not a new type — that is what `defstruct` is for. An `int` flows into
     // a `meters` parameter and back out with nothing to catch it.
     let src = "
-        (deftype meters i32)
-        (defun as-meters ((n i32)) meters n)
-        (defun as-plain ((m meters)) i32 m)
+        (deftype meters int)
+        (defun as-meters ((n int)) meters n)
+        (defun as-plain ((m meters)) int m)
         (as-plain (as-meters 7))
     ";
     assert_eq!(eval_ok(src), Value::Int(7));
@@ -42,7 +42,7 @@ fn an_alias_is_the_same_type_as_its_body() {
 #[test]
 fn an_alias_abbreviates_a_compound_type() {
     let src = "
-        (deftype answer Result<i32,string>)
+        (deftype answer Result<int,string>)
         (defun ok-42 () answer (result::ok 42))
         (match (ok-42) ((ok n) n) ((err _) 0))
     ";
@@ -52,9 +52,9 @@ fn an_alias_abbreviates_a_compound_type() {
 #[test]
 fn an_alias_abbreviates_a_function_type() {
     let src = "
-        (deftype pred (fn (i32) bool))
+        (deftype pred (fn (int) bool))
         (defun apply-to-3 ((p pred)) bool (p 3))
-        (apply-to-3 (lambda ((n i32)) bool (> n 2)))
+        (apply-to-3 (lambda ((n int)) bool (> n 2)))
     ";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
@@ -75,7 +75,7 @@ fn a_generic_alias_substitutes_its_argument() {
 fn a_generic_alias_takes_several_parameters() {
     let src = "
         (deftype swapped<A,B> Result<B,A>)
-        (defun f () swapped<string,i32> (result::ok 5))
+        (defun f () swapped<string,int> (result::ok 5))
         (match (f) ((ok n) n) ((err _) 0))
     ";
     assert_eq!(eval_ok(src), Value::Int(5));
@@ -84,7 +84,7 @@ fn a_generic_alias_takes_several_parameters() {
 #[test]
 fn an_alias_may_stand_for_another_alias() {
     let src = "
-        (deftype meters i32)
+        (deftype meters int)
         (deftype distance meters)
         (defun d () distance 9)
         (d)
@@ -96,7 +96,7 @@ fn an_alias_may_stand_for_another_alias() {
 fn a_generic_alias_may_be_used_inside_another_alias() {
     let src = "
         (deftype fallible<T> Result<T,string>)
-        (deftype counter fallible<i32>)
+        (deftype counter fallible<int>)
         (defun c () counter (result::ok 3))
         (match (c) ((ok n) n) ((err _) 0))
     ";
@@ -106,7 +106,7 @@ fn a_generic_alias_may_be_used_inside_another_alias() {
 #[test]
 fn an_alias_works_in_a_defstruct_field() {
     let src = "
-        (deftype meters i32)
+        (deftype meters int)
         (defstruct segment (len meters))
         (len (segment::new 12))
     ";
@@ -116,7 +116,7 @@ fn an_alias_works_in_a_defstruct_field() {
 #[test]
 fn an_alias_works_in_the_and_as_positions() {
     let src = "
-        (deftype small i32)
+        (deftype small int)
         (the small 4)
     ";
     assert_eq!(eval_ok(src), Value::Int(4));
@@ -130,12 +130,12 @@ fn a_mismatch_reports_the_expansion_not_the_alias() {
     // disagree the alias is gone. Saying so out loud here: this is the
     // deliberate trade, not an oversight.
     let src = "
-        (deftype meters i32)
+        (deftype meters int)
         (defun f ((m meters)) meters m)
         (f \"x\")
     ";
     let msg = check_err(src);
-    assert!(msg.contains("I32"), "unexpected message: {}", msg);
+    assert!(msg.contains("Int"), "unexpected message: {}", msg);
     assert!(!msg.contains("meters"), "the alias should be gone by now: {}", msg);
 }
 
@@ -153,25 +153,25 @@ fn a_generic_alias_rejects_the_wrong_argument_count() {
 
 #[test]
 fn an_alias_and_a_type_may_not_share_a_name() {
-    let msg = check_err("(deftype thing i32) (defstruct thing (n i32))");
+    let msg = check_err("(deftype thing int) (defstruct thing (n int))");
     assert!(msg.contains("alias of that name already exists"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn a_type_and_an_alias_may_not_share_a_name() {
-    let msg = check_err("(defstruct thing (n i32)) (deftype thing i32)");
+    let msg = check_err("(defstruct thing (n int)) (deftype thing int)");
     assert!(msg.contains("already"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn an_alias_and_a_trait_may_not_share_a_name() {
-    let msg = check_err("(deftrait shown () (show ((self Self)) string)) (deftype shown i32)");
+    let msg = check_err("(deftrait shown () (show ((self Self)) string)) (deftype shown int)");
     assert!(msg.contains("share one name space"), "unexpected message: {}", msg);
 }
 
 #[test]
 fn deftype_needs_exactly_one_type_after_the_name() {
-    let msg = check_err("(deftype pairish i32 string)");
+    let msg = check_err("(deftype pairish int string)");
     assert!(msg.contains("exactly one type"), "unexpected message: {}", msg);
 }
 
@@ -180,8 +180,8 @@ fn deftype_needs_exactly_one_type_after_the_name() {
 #[test]
 fn a_public_alias_is_reachable_from_another_module() {
     let src = "
-        (module m (pub deftype meters i32) (pub defun mk () meters 6))
-        (defun use-it ((n m::meters)) i32 n)
+        (module m (pub deftype meters int) (pub defun mk () meters 6))
+        (defun use-it ((n m::meters)) int n)
         (use-it (m::mk))
     ";
     assert_eq!(eval_ok(src), Value::Int(6));
@@ -190,8 +190,8 @@ fn a_public_alias_is_reachable_from_another_module() {
 #[test]
 fn a_private_alias_is_not_reachable_from_another_module() {
     let src = "
-        (module m (deftype meters i32) (pub defun mk () meters 6))
-        (defun use-it ((n m::meters)) i32 n)
+        (module m (deftype meters int) (pub defun mk () meters 6))
+        (defun use-it ((n m::meters)) int n)
         (use-it (m::mk))
     ";
     // Not resolvable as an alias, and not a type either: the name is simply
@@ -203,9 +203,9 @@ fn a_private_alias_is_not_reachable_from_another_module() {
 #[test]
 fn an_alias_is_reachable_through_use() {
     let src = "
-        (module m (pub deftype meters i32) (pub defun mk () meters 6))
+        (module m (pub deftype meters int) (pub defun mk () meters 6))
         (use m::meters)
-        (defun use-it ((n meters)) i32 n)
+        (defun use-it ((n meters)) int n)
         (use-it (m::mk))
     ";
     assert_eq!(eval_ok(src), Value::Int(6));

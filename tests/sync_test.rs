@@ -73,12 +73,12 @@ fn err(src: &str) -> String {
 fn a_wait_group_waits_for_every_counted_task() {
     assert_eq!(
         int(
-            r#"(defvar (done-count i32) 0)
+            r#"(defvar (done-count int) 0)
                (defun work ((wg WaitGroup)) ()
                  (yield)
                  (setf done-count (+ done-count 1))
                  (done wg))
-               (defun main () i32
+               (defun main () int
                  (let ((wg (the WaitGroup (WaitGroup::make))))
                    (add wg 3)
                    (dotimes (i 3) (go (work wg)))
@@ -96,7 +96,7 @@ fn a_wait_group_waits_for_every_counted_task() {
 fn waiting_on_a_finished_group_returns_at_once() {
     assert_eq!(
         int(
-            r#"(defun main () i32
+            r#"(defun main () int
                  (let ((wg (the WaitGroup (WaitGroup::make))))
                    (add wg 1)
                    (done wg)
@@ -114,12 +114,12 @@ fn waiting_on_a_finished_group_returns_at_once() {
 fn several_tasks_can_wait_on_one_group() {
     assert_eq!(
         int(
-            r#"(defvar (woke i32) 0)
+            r#"(defvar (woke int) 0)
                (defun watcher ((wg WaitGroup)) ()
                  (wait wg)
                  (setf woke (+ woke 1))
                  ())
-               (defun main () i32
+               (defun main () int
                  (let ((wg (the WaitGroup (WaitGroup::make))))
                    (add wg 1)
                    (go (watcher wg))
@@ -166,8 +166,8 @@ fn a_negative_add_panics() {
 fn wait_is_shared_with_the_task_handle() {
     assert_eq!(
         int(
-            r#"(defun answer () i32 42)
-               (defun main () i32
+            r#"(defun answer () int 42)
+               (defun main () int
                  (let ((wg (the WaitGroup (WaitGroup::make)))
                        (t1 (go (answer))))
                    (wait wg)
@@ -186,14 +186,14 @@ fn wait_is_shared_with_the_task_handle() {
 fn a_mutex_keeps_a_read_modify_write_whole() {
     assert_eq!(
         int(
-            r#"(defun bump ((m Mutex<i32>) (wg WaitGroup)) ()
+            r#"(defun bump ((m Mutex<int>) (wg WaitGroup)) ()
                  (with-lock (n m)
                    (let ((seen n))
                      (yield)
                      (setf n (+ seen 1))))
                  (done wg))
-               (defun main () i32
-                 (let ((m (the Mutex<i32> (Mutex::make 0)))
+               (defun main () int
+                 (let ((m (the Mutex<int> (Mutex::make 0)))
                        (wg (the WaitGroup (WaitGroup::make))))
                    (add wg 4)
                    (dotimes (i 4) (go (bump m wg)))
@@ -211,8 +211,8 @@ fn a_mutex_keeps_a_read_modify_write_whole() {
 fn the_alias_is_a_place() {
     assert_eq!(
         int(
-            r#"(defun main () i32
-                 (let ((m (the Mutex<i32> (Mutex::make 5))))
+            r#"(defun main () int
+                 (let ((m (the Mutex<int> (Mutex::make 5))))
                    (with-lock (n m) (setf n (* n 3)))
                    (with-lock (n m) n)))
                (main)"#
@@ -227,8 +227,8 @@ fn the_alias_is_a_place() {
 fn the_lock_is_released_when_the_body_throws() {
     assert_eq!(
         int(
-            r#"(defun main () i32
-                 (let ((m (the Mutex<i32> (Mutex::make 1))))
+            r#"(defun main () int
+                 (let ((m (the Mutex<int> (Mutex::make 1))))
                    (catch 'out (with-lock (n m) (throw 'out 9)))
                    ;; Still lockable: the cleanup put the token back.
                    (with-lock (n m) (+ n 1))))
@@ -243,11 +243,11 @@ fn the_lock_is_released_when_the_body_throws() {
 fn the_lock_is_released_on_a_static_exit() {
     assert_eq!(
         int(
-            r#"(defun leave ((m Mutex<i32>)) i32
+            r#"(defun leave ((m Mutex<int>)) int
                  (with-lock (n m) (return-from leave 3))
                  0)
-               (defun main () i32
-                 (let ((m (the Mutex<i32> (Mutex::make 1))))
+               (defun main () int
+                 (let ((m (the Mutex<int> (Mutex::make 1))))
                    (leave m)
                    (with-lock (n m) (+ n 10))))
                (main)"#
@@ -261,7 +261,7 @@ fn the_lock_is_released_on_a_static_exit() {
 fn unlocking_an_unlocked_mutex_panics() {
     let e = err(
         r#"(defun main () ()
-             (let ((m (the Mutex<i32> (Mutex::make 1))))
+             (let ((m (the Mutex<int> (Mutex::make 1))))
                (unlock m)))
            (main)"#,
     );
@@ -275,8 +275,8 @@ fn unlocking_an_unlocked_mutex_panics() {
 fn the_expansion_does_not_capture_the_bodys_names() {
     assert_eq!(
         int(
-            r#"(defun main () i32
-                 (let ((m (the Mutex<i32> (Mutex::make 4)))
+            r#"(defun main () int
+                 (let ((m (the Mutex<int> (Mutex::make 4)))
                        (g 100)
                        (tmp 20))
                    (with-lock (n m) (+ n (+ g tmp)))))
@@ -292,12 +292,12 @@ fn the_expansion_does_not_capture_the_bodys_names() {
 fn the_mutex_expression_is_evaluated_once() {
     assert_eq!(
         int(
-            r#"(defvar (calls i32) 0)
-               (defun the-mutex ((m Mutex<i32>)) Mutex<i32>
+            r#"(defvar (calls int) 0)
+               (defun the-mutex ((m Mutex<int>)) Mutex<int>
                  (setf calls (+ calls 1))
                  m)
-               (defun main () i32
-                 (let ((m (the Mutex<i32> (Mutex::make 0))))
+               (defun main () int
+                 (let ((m (the Mutex<int> (Mutex::make 0))))
                    (with-lock (n (the-mutex m)) (setf n (+ n 1)) (setf n (+ n 1)))
                    calls))
                (main)"#
@@ -329,14 +329,14 @@ fn a_mutex_can_hold_a_heap_value() {
 /// compiled code too.
 #[test]
 fn compiled_bodies_agree_with_the_interpreter() {
-    let src = r#"(defun bump ((m Mutex<i32>) (wg WaitGroup)) ()
+    let src = r#"(defun bump ((m Mutex<int>) (wg WaitGroup)) ()
                    (with-lock (n m)
                      (let ((seen n))
                        (yield)
                        (setf n (+ seen 1))))
                    (done wg))
-                 (defun main () i32
-                   (let ((m (the Mutex<i32> (Mutex::make 0)))
+                 (defun main () int
+                   (let ((m (the Mutex<int> (Mutex::make 0)))
                          (wg (the WaitGroup (WaitGroup::make))))
                      (add wg 4)
                      (dotimes (i 4) (go (bump m wg)))
@@ -357,7 +357,7 @@ fn the_sync_types_survive_gc_stress() {
             r#"(defun bump ((m Mutex<string>) (wg WaitGroup)) ()
                  (with-lock (s m) (setf s (append s "x")))
                  (done wg))
-               (defun main () i32
+               (defun main () int
                  (let ((m (the Mutex<string> (Mutex::make "")))
                        (wg (the WaitGroup (WaitGroup::make))))
                    (add wg 5)

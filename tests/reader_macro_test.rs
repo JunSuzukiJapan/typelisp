@@ -98,14 +98,14 @@ fn the_reader_resumes_exactly_where_the_macro_stopped() {
     // character short would make the `if` malformed instead.
     let dir = fixture(
         "resume",
-        &[("main.typl", &format!("{}\n(defvar (n i32) (if !(equal 1 2) 7 8))\nn\n", BANG))],
+        &[("main.typl", &format!("{}\n(defvar (n int) (if !(equal 1 2) 7 8))\nn\n", BANG))],
     );
     assert_eq!(run_project(&dir, "main.typl"), Ok(Some(Value::Int(7))));
 }
 
 #[test]
 fn a_macro_character_reached_twice_reads_twice() {
-    let dir = fixture("twice", &[("main.typl", &format!("{}\n(defvar (n i32) (if !false (if !true 1 2) 3))\nn\n", BANG))]);
+    let dir = fixture("twice", &[("main.typl", &format!("{}\n(defvar (n int) (if !false (if !true 1 2) 3))\nn\n", BANG))]);
     assert_eq!(run_project(&dir, "main.typl"), Ok(Some(Value::Int(2))));
 }
 
@@ -124,7 +124,7 @@ fn a_macro_character_wins_over_the_built_in_syntax() {
     let src = r#"(set-macro-character #\'
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s) ((ok o) 99) ((err e) 0))))
-(defvar (n i32) 'whatever)
+(defvar (n int) 'whatever)
 n
 "#;
     let dir = fixture("override", &[("main.typl", src)]);
@@ -135,7 +135,7 @@ n
 fn a_macro_that_reads_nothing_leaves_the_cursor_where_it_was() {
     let src = r#"(set-macro-character #\@
   (lambda ((s string-input-stream) (c char)) Option<Sexpr> 7))
-(defvar (n i32) (+ @ 1))
+(defvar (n int) (+ @ 1))
 n
 "#;
     let dir = fixture("consumes_nothing", &[("main.typl", src)]);
@@ -167,7 +167,7 @@ fn a_dispatch_macro_extends_the_hash_syntax() {
     (match (read-delimited-list #\} s)
       ((ok l) (sexpr-cons (quote +) l))
       ((err e) (quote ())))))
-(defvar (n i32) #{1 2 3})
+(defvar (n int) #{1 2 3})
 n
 "#;
     let dir = fixture("hash_brace", &[("main.typl", src)]);
@@ -179,7 +179,7 @@ n
 fn the_built_in_hash_syntax_still_works_alongside_one() {
     let src = r#"(set-dispatch-macro-character #\# #\{
   (lambda ((s string-input-stream) (c char)) Option<Sexpr> 1))
-(defvar (n i32) #xff)
+(defvar (n int) #xff)
 n
 "#;
     let dir = fixture("hash_coexist", &[("main.typl", src)]);
@@ -193,7 +193,7 @@ fn registering_makes_the_character_dispatching() {
     // separate step would have done.
     let src = r#"(set-dispatch-macro-character #\$ #\s
   (lambda ((s string-input-stream) (c char)) Option<Sexpr> 5))
-(defvar (n i32) $s)
+(defvar (n int) $s)
 n
 "#;
     let dir = fixture("own_dispatch", &[("main.typl", src)]);
@@ -204,7 +204,7 @@ n
 fn an_unregistered_sub_character_is_a_read_error() {
     let src = r#"(set-dispatch-macro-character #\$ #\s
   (lambda ((s string-input-stream) (c char)) Option<Sexpr> 5))
-(defvar (n i32) $t)
+(defvar (n int) $t)
 n
 "#;
     let dir = fixture("bad_sub", &[("main.typl", src)]);
@@ -255,7 +255,7 @@ fn a_second_registration_replaces_the_first() {
   (lambda ((s string-input-stream) (c char)) Option<Sexpr> 1))
 (set-macro-character #\@
   (lambda ((s string-input-stream) (c char)) Option<Sexpr> 2))
-(defvar (n i32) @)
+(defvar (n int) @)
 n
 "#;
     let dir = fixture("replace", &[("main.typl", src)]);
@@ -296,7 +296,7 @@ fn a_defun_in_the_same_file_is_not_available_yet() {
     // the registration itself runs early.
     let src = r#"(defun bang ((s string-input-stream) (c char)) Option<Sexpr> 1)
 (set-macro-character #\! bang)
-(defvar (n i32) !x)
+(defvar (n int) !x)
 n
 "#;
     let dir = fixture("defun_too_late", &[("main.typl", src)]);
@@ -325,7 +325,7 @@ fn the_repl_reaches_a_function_defined_a_form_earlier() {
 fn an_error_inside_a_reader_macro_surfaces_as_a_read_error() {
     let src = r#"(set-macro-character #\@
   (lambda ((s string-input-stream) (c char)) Option<Sexpr> (panic "boom")))
-(defvar (n i32) @)
+(defvar (n int) @)
 n
 "#;
     let dir = fixture("macro_panics", &[("main.typl", src)]);
@@ -363,7 +363,7 @@ fn the_readtable_builtins_work_in_a_compiled_executable() {
               ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
               ((eof) (quote ()))))
     ((err e) (quote ()))))
-(defun main () i32
+(defun main () int
   (progn
     (set-macro-character #\! bang)
     (if (match (get-macro-character #\!) ((some f) false) ((none) true)) 2

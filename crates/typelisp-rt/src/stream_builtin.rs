@@ -61,11 +61,11 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("stream-input-p", "result<bool,fileerror>"),
     ("stream-output-p", "result<bool,fileerror>"),
     ("stream-listen", "result<bool,fileerror>"),
-    ("stream-position", "result<i32,fileerror>"),
+    ("stream-position", "result<int,fileerror>"),
     ("stream-at-line-start", "result<bool,fileerror>"),
     ("stream-read-char", "result<option<char>,fileerror>"),
     ("stream-unread-char", "result<(),fileerror>"),
-    ("stream-read-byte", "result<option<i32>,fileerror>"),
+    ("stream-read-byte", "result<option<int>,fileerror>"),
     ("stream-write-byte", "result<(),fileerror>"),
     ("stream-write-string", "result<(),fileerror>"),
     ("stream-finish-output", "result<(),fileerror>"),
@@ -83,7 +83,7 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
 /// the three builtins whose payload is itself a box.
 pub const INNER_KEYS: &[(&str, &str)] = &[
     ("stream-read-char", "option<char>"),
-    ("stream-read-byte", "option<i32>"),
+    ("stream-read-byte", "option<int>"),
     ("file-list-directory", "vector<string>"),
     ("file-owner-name", "option<string>"),
 ];

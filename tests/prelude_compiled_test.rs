@@ -47,7 +47,7 @@ fn eval(heap: &mut Heap, chk: &mut Checker, interp: &Interp, src: &str) -> Value
 #[test]
 fn loading_the_prelude_installs_native_bodies() {
     let (_heap, _chk, interp) = env(true);
-    for name in ["not", "sexpr-map", "i32::gcd", "i32::abs", "bignum::signum", "f64::rem", "i32::equals"] {
+    for name in ["not", "sexpr-map", "i32::gcd", "i32::abs", "int::signum", "f64::rem", "i32::equals"] {
         assert!(interp.is_compiled(name), "`{}` should have a compiled body after load_prelude", name);
     }
 }
@@ -125,7 +125,8 @@ fn a_compiled_prelude_computes_what_the_interpreted_one_does() {
         "(signum -3)",
         "(rem 17 5)",
         "(mod -7 3)",
-        "(gcd (as bignum 462) (as bignum 1071))",
+        "(gcd (the int 462) (the int 1071))",
+        "(gcd 462000000000000000000 1071000000000000000000)",
         "(abs -3.5)",
         "(not false)",
         "(sexpr-map (lambda ((x Option<Sexpr>)) Option<Sexpr> (sexpr-cons x x)) (list 1 2 3))",
@@ -139,8 +140,8 @@ fn a_compiled_prelude_computes_what_the_interpreted_one_does() {
         "(substring \"hello world\" 6 11)",
         r#"(with-output-to-string (o) (write-string o "hi") (terpri o))"#,
         r#"(let ((s (make-string-input-stream "ab"))) (format false "~a~a" (read-char s) (read-char s)))"#,
-        "(logeqv (as bignum 12) (as bignum 10))",
-        "(logandc1 (as bignum 12) (as bignum 10))",
+        "(logeqv (the int 12) (the int 10))",
+        "(logandc1 (the int 12) (the int 10))",
         "(keywordp :k)",
     ];
     for src in cases {

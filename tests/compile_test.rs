@@ -304,7 +304,7 @@ fn expect_bool(v: Value) -> bool {
 }
 
 /// The Phase 0 vertical slice: build an `i64`-returning LLVM function (under
-/// the fixed `i64 name(i64* args, i32 argc)` ABI every compiled function
+/// the fixed `i64 name(i64* args, int argc)` ABI every compiled function
 /// uses, see `registry::llvm_module_def`'s doc comment) by calling the raw
 /// LLVM builtins directly from typelisp source (no AST bridge yet — that's
 /// a later phase), and check the resulting IR.
@@ -499,7 +499,7 @@ fn the_built_module_actually_jit_executes_to_42() {
 }
 
 /// Exercises the fixed-ABI parameter convention (`registry::llvm_module_def`'s
-/// doc comment: every compiled function is `i64 name(i64* args, i32 argc)`)
+/// doc comment: every compiled function is `i64 name(i64* args, int argc)`)
 /// end to end: `load-arg` pulls two logical parameters out of that array,
 /// `build-add` combines them, and the JIT-executed result is checked against
 /// the same convention `CompiledFn`/`compile::CompiledFn::call` will use —
@@ -684,7 +684,7 @@ fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
 fn compile_dispatches_a_defun_call_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun add2 ((a i32) (b i32)) i32 (+ a b))
+        (defun add2 ((a int) (b int)) int (+ a b))
         (compile add2)
         (add2 10 32)
         "#,
@@ -739,7 +739,7 @@ fn a_compiled_quoted_system_symbol_is_the_same_symbol() {
 
 #[test]
 fn compile_returns_true_on_success() {
-    let v = eval_ok_with_compiler(r#"(defun answer () i32 42) (compile answer)"#);
+    let v = eval_ok_with_compiler(r#"(defun answer () int 42) (compile answer)"#);
     assert!(expect_bool(v));
 }
 
@@ -754,7 +754,7 @@ fn compile_returns_true_on_success() {
 fn a_variadic_function_compiles_and_dispatches_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun first-of-rest ((a i32) &rest (xs i32)) i32
+        (defun first-of-rest ((a int) &rest (xs int)) int
           a)
         (compile first-of-rest)
         (first-of-rest 1 10 20)
@@ -784,13 +784,13 @@ fn a_variadic_function_compiles_and_dispatches_to_native_code() {
 fn fnref_of_a_variadic_function_forwards_the_rest_list() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun target ((a i32) &rest (xs i32)) i32
+        (defun target ((a int) &rest (xs int)) int
           (match (sexpr-car xs)
-            ((i32 n) n)
+            ((int n) n)
             (_ -1)))
-        (defun run-it () i32
+        (defun run-it () int
           (let ((f target))
-            (apply f 1 (sexpr-cons (i32 10) (i32 20)))))
+            (apply f 1 (sexpr-cons (int 10) (int 20)))))
         (compile target)
         (compile run-it)
         (run-it)
@@ -803,7 +803,7 @@ fn fnref_of_a_variadic_function_forwards_the_rest_list() {
 fn an_uncompiled_function_still_tree_walks_normally() {
     // Sanity check that `compiled`-table dispatch doesn't break the
     // ordinary path for a function nobody asked to `compile`.
-    let v = eval_ok_with_compiler(r#"(defun answer () i32 42) (answer)"#);
+    let v = eval_ok_with_compiler(r#"(defun answer () int 42) (answer)"#);
     match v {
         Value::Int(n) => assert_eq!(n, 42),
         other => panic!("expected an Int, got {:?}", other),
@@ -834,9 +834,9 @@ fn two_modules_built_back_to_back_do_not_interfere() {
 fn compile_dispatches_a_defun_with_a_labels_body_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun sum-of-squares ((a i32) (b i32)) i32
-          (labels ((square ((x i32)) i32 (* x x))
-                   (sum-helper ((x i32) (y i32)) i32 (+ (square x) (square y))))
+        (defun sum-of-squares ((a int) (b int)) int
+          (labels ((square ((x int)) int (* x x))
+                   (sum-helper ((x int) (y int)) int (+ (square x) (square y))))
             (sum-helper a b)))
         (compile sum-of-squares)
         (sum-of-squares 3 4)
@@ -858,8 +858,8 @@ fn compile_dispatches_a_defun_with_a_labels_body_to_native_code() {
 fn compile_dispatches_a_defun_with_a_capturing_labels_body_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun add-offset ((offset i32) (n i32)) i32
-          (labels ((rec ((k i32)) i32 (+ k offset)))
+        (defun add-offset ((offset int) (n int)) int
+          (labels ((rec ((k int)) int (+ k offset)))
             (rec n)))
         (compile add-offset)
         (add-offset 10 5)
@@ -884,9 +884,9 @@ fn compile_dispatches_a_defun_with_a_capturing_labels_body_to_native_code() {
 fn a_sibling_that_never_references_a_capture_still_forwards_it_to_another_sibling() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun choose ((offset i32) (n i32)) i32
-          (labels ((helper ((k i32)) i32 (rec k))
-                   (rec ((k i32)) i32 (+ k offset)))
+        (defun choose ((offset int) (n int)) int
+          (labels ((helper ((k int)) int (rec k))
+                   (rec ((k int)) int (+ k offset)))
             (helper n)))
         (compile choose)
         (choose 10 5)
@@ -963,8 +963,8 @@ fn the_compiler_body_compiles_a_self_referencing_call() {
 fn compile_dispatches_a_defun_that_calls_another_compiled_function() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun square ((x i32)) i32 (* x x))
-        (defun sum-of-squares ((a i32) (b i32)) i32 (+ (square a) (square b)))
+        (defun square ((x int)) int (* x x))
+        (defun sum-of-squares ((a int) (b int)) int (+ (square a) (square b)))
         (compile square)
         (compile sum-of-squares)
         (sum-of-squares 3 4)
@@ -987,8 +987,8 @@ fn compile_dispatches_a_defun_that_calls_another_compiled_function() {
 fn compile_transitively_compiles_a_called_function() {
     let v = run_with_compiler(
         r#"
-        (defun square ((x i32)) i32 (* x x))
-        (defun sum-of-squares ((a i32) (b i32)) i32 (+ (square a) (square b)))
+        (defun square ((x int)) int (* x x))
+        (defun sum-of-squares ((a int) (b int)) int (+ (square a) (square b)))
         (compile sum-of-squares)
         (sum-of-squares 3 4)
         "#,
@@ -1008,7 +1008,7 @@ fn compile_transitively_compiles_a_called_function() {
 fn compile_succeeds_for_a_self_recursive_defun_without_being_run() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun loop-forever ((n i32)) i32 (loop-forever n))
+        (defun loop-forever ((n int)) int (loop-forever n))
         (compile loop-forever)
         "#,
     );
@@ -1031,8 +1031,8 @@ fn compile_succeeds_for_a_self_recursive_defun_without_being_run() {
 fn compile_dispatches_a_defun_with_a_two_statement_body_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defvar (counter i32) 0)
-        (defun bump ((x i32)) i32
+        (defvar (counter int) 0)
+        (defun bump ((x int)) int
           (setf counter (+ counter 1))
           (+ x 100))
         (compile bump)
@@ -1051,12 +1051,12 @@ fn compile_dispatches_a_defun_with_a_two_statement_body_to_native_code() {
 fn compile_dispatches_an_escaping_lambda_with_a_two_statement_body_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defvar (calls i32) 0)
-        (defun make-adder ((n i32)) (fn (i32) i32)
-          (lambda ((x i32)) i32
+        (defvar (calls int) 0)
+        (defun make-adder ((n int)) (fn (int) int)
+          (lambda ((x int)) int
             (setf calls (+ calls 1))
             (+ x n)))
-        (defun apply-fn ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun apply-fn ((f (fn (int) int)) (n int)) int (f n))
         (compile make-adder)
         (compile apply-fn)
         (+ (apply-fn (make-adder 5) 10) (* calls 1000))
@@ -1073,12 +1073,12 @@ fn compile_dispatches_an_escaping_lambda_with_a_two_statement_body_to_native_cod
 fn compile_dispatches_a_labels_sibling_with_a_two_statement_body_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defvar (calls i32) 0)
-        (defun sum-of-squares ((a i32) (b i32)) i32
-          (labels ((square ((x i32)) i32
+        (defvar (calls int) 0)
+        (defun sum-of-squares ((a int) (b int)) int
+          (labels ((square ((x int)) int
                      (setf calls (+ calls 1))
                      (* x x))
-                   (sum-helper ((x i32) (y i32)) i32 (+ (square x) (square y))))
+                   (sum-helper ((x int) (y int)) int (+ (square x) (square y))))
             (sum-helper a b)))
         (compile sum-of-squares)
         (+ (sum-of-squares 3 4) (* calls 1000))
@@ -1095,10 +1095,10 @@ fn compile_dispatches_a_labels_sibling_with_a_two_statement_body_to_native_code(
 fn compile_dispatches_a_labels_trailing_body_with_two_statements_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defvar (calls i32) 0)
-        (defun sum-of-squares ((a i32) (b i32)) i32
-          (labels ((square ((x i32)) i32 (* x x))
-                   (sum-helper ((x i32) (y i32)) i32 (+ (square x) (square y))))
+        (defvar (calls int) 0)
+        (defun sum-of-squares ((a int) (b int)) int
+          (labels ((square ((x int)) int (* x x))
+                   (sum-helper ((x int) (y int)) int (+ (square x) (square y))))
             (setf calls (+ calls 1))
             (sum-helper a b)))
         (compile sum-of-squares)
@@ -1115,9 +1115,9 @@ fn compile_dispatches_a_labels_trailing_body_with_two_statements_to_native_code(
 fn compile_matches_with_a_two_statement_arm_body_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defvar (calls i32) 0)
+        (defvar (calls int) 0)
         (defenum Maybe<T> (Just T) (Nothing))
-        (defun m ((x i32)) i32
+        (defun m ((x int)) int
           (match (Maybe::Just x)
             ((Just v) (setf calls (+ calls 1)) v)
             ((Nothing) x)))
@@ -1137,7 +1137,7 @@ fn compile_matches_with_a_two_statement_arm_body_to_native_code() {
 fn compile_dispatches_a_defun_with_an_immediately_invoked_lambda_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun calls-immediately ((n i32)) i32 ((lambda ((x i32)) i32 (+ x 1)) n))
+        (defun calls-immediately ((n int)) int ((lambda ((x int)) int (+ x 1)) n))
         (compile calls-immediately)
         (calls-immediately 9)
         "#,
@@ -1156,7 +1156,7 @@ fn compile_dispatches_a_defun_with_an_immediately_invoked_lambda_to_native_code(
 fn compile_dispatches_a_defun_with_a_capturing_immediately_invoked_lambda_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun adds-offset ((offset i32) (n i32)) i32 ((lambda ((y i32)) i32 (+ y offset)) n))
+        (defun adds-offset ((offset int) (n int)) int ((lambda ((y int)) int (+ y offset)) n))
         (compile adds-offset)
         (adds-offset 100 5)
         "#,
@@ -1183,8 +1183,8 @@ fn compile_dispatches_a_defun_with_a_capturing_immediately_invoked_lambda_to_nat
 fn compile_dispatches_an_escaping_capturing_lambda_called_through_another_compiled_function() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
-        (defun apply-fn ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n)))
+        (defun apply-fn ((f (fn (int) int)) (n int)) int (f n))
         (compile adder)
         (compile apply-fn)
         (apply-fn (adder 5) 10)
@@ -1210,11 +1210,11 @@ fn compile_dispatches_an_escaping_capturing_lambda_called_through_another_compil
 fn compile_dispatches_a_lambda_that_captures_a_match_arm_binding() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun mk ((o Option<i32>)) (fn (i32) bool)
+        (defun mk ((o Option<int>)) (fn (int) bool)
           (match o
-            ((some g) (lambda ((a i32)) bool (< a g)))
-            ((none) (lambda ((a i32)) bool false))))
-        (defun try-it ((o Option<i32>) (a i32)) i32 (if ((mk o) a) 1 0))
+            ((some g) (lambda ((a int)) bool (< a g)))
+            ((none) (lambda ((a int)) bool false))))
+        (defun try-it ((o Option<int>) (a int)) int (if ((mk o) a) 1 0))
         (compile mk)
         (compile try-it)
         (+ (* 100 (try-it (option::some 5) 3))
@@ -1234,10 +1234,10 @@ fn compile_dispatches_a_lambda_that_captures_a_match_arm_binding() {
 fn compile_dispatches_a_lambda_that_captures_two_struct_pattern_bindings() {
     let v = eval_ok_with_compiler(
         r#"
-        (defstruct bx (v i32) (w i32))
-        (defun mk2 ((b bx)) (fn (i32) i32)
-          (match b ((new v w) (lambda ((a i32)) i32 (+ a (+ v w))))))
-        (defun use2 ((b bx) (a i32)) i32 ((mk2 b) a))
+        (defstruct bx (v int) (w int))
+        (defun mk2 ((b bx)) (fn (int) int)
+          (match b ((new v w) (lambda ((a int)) int (+ a (+ v w))))))
+        (defun use2 ((b bx) (a int)) int ((mk2 b) a))
         (compile mk2)
         (compile use2)
         (use2 (bx::new 3 4) 10)
@@ -1258,11 +1258,11 @@ fn compile_dispatches_a_lambda_that_captures_two_struct_pattern_bindings() {
 fn a_captured_match_arm_binding_is_shared_not_copied() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun counter ((o Option<i32>)) (fn () i32)
+        (defun counter ((o Option<int>)) (fn () int)
           (match o
-            ((some n) (lambda () i32 (progn (setf n (+ n 1)) n)))
-            ((none) (lambda () i32 0))))
-        (defun run-three ((o Option<i32>)) i32
+            ((some n) (lambda () int (progn (setf n (+ n 1)) n)))
+            ((none) (lambda () int 0))))
+        (defun run-three ((o Option<int>)) int
           (let ((f (counter o))) (+ (f) (+ (f) (f)))))
         (compile counter)
         (compile run-three)
@@ -1279,7 +1279,7 @@ fn a_captured_match_arm_binding_is_shared_not_copied() {
 /// `Option<Sexpr>` — the one type whose `(some P)` is niched into a
 /// `pat-nonempty` node instead of a `pat-ctor`. `core_freevars` did not count
 /// that node's bindings, so `g` looked free in the lambda's body and the
-/// closure captured a name bound inside itself. The `Option<i32>` spelling of
+/// closure captured a name bound inside itself. The `Option<int>` spelling of
 /// the same program never showed it: only `Option<Sexpr>` is niched.
 #[test]
 fn a_niched_option_sexpr_pattern_binds_inside_an_enclosing_closure() {
@@ -1287,7 +1287,7 @@ fn a_niched_option_sexpr_pattern_binds_inside_an_enclosing_closure() {
         r#"
         (defun pick ((o Option<Sexpr>)) (fn () Sexpr)
           (lambda () Sexpr (match o ((some g) g) ((none) (quote nothing)))))
-        (defun hit ((o Option<Sexpr>)) i32 (if (equal ((pick o)) (quote hi)) 1 0))
+        (defun hit ((o Option<Sexpr>)) int (if (equal ((pick o)) (quote hi)) 1 0))
         (compile pick)
         (compile hit)
         (+ (* 10 (hit (option::some (quote hi)))) (hit (option::none)))
@@ -1315,8 +1315,8 @@ fn a_niched_option_sexpr_pattern_binds_inside_an_enclosing_closure() {
 fn compile_applies_an_interpreted_closure_handed_to_a_compiled_function() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
-        (defun apply-fn ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n)))
+        (defun apply-fn ((f (fn (int) int)) (n int)) int (f n))
         (compile apply-fn)
         (apply-fn (adder 5) 10)
         "#,
@@ -1344,7 +1344,7 @@ fn an_interpreted_closure_called_from_compiled_code_crosses_tagged_values() {
           (lambda ((x Option<Sexpr>)) Option<Sexpr> (sexpr-cons x tail)))
         (defun apply-fn ((f (fn (Option<Sexpr>) Option<Sexpr>)) (v Option<Sexpr>)) Option<Sexpr> (f v))
         (compile apply-fn)
-        (sexpr-i32 (sexpr-car (apply-fn (consr (i32 2)) (i32 1))))
+        (sexpr-int (sexpr-car (apply-fn (consr (int 2)) (int 1))))
         "#,
     );
     assert_eq!(v, Value::Int(1));
@@ -1375,11 +1375,11 @@ fn an_interpreted_closure_called_from_compiled_code_crosses_floats() {
 fn an_interpreted_closure_held_by_compiled_code_survives_gc_pressure() {
     let v = run_with_compiler_and_capacity(
         r#"
-        (defun adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
-        (defun outer ((f (fn (i32) i32)) (x i32)) i32
+        (defun adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n)))
+        (defun outer ((f (fn (int) int)) (x int)) int
           (let ((ignored (loop
                            (if (eq x 0) (break) ())
-                           (sexpr-cons (i32 0) (i32 0))
+                           (sexpr-cons (int 0) (int 0))
                            (setf x (- x 1)))))
             (f 5)))
         (compile outer)
@@ -1409,9 +1409,9 @@ fn an_interpreted_closure_held_by_compiled_code_survives_gc_pressure() {
 fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun square ((x i32)) i32 (* x x))
-        (defun apply-fn ((f (fn (i32) i32)) (n i32)) i32 (f n))
-        (defun run-it () i32 (apply-fn square 5))
+        (defun square ((x int)) int (* x x))
+        (defun apply-fn ((f (fn (int) int)) (n int)) int (f n))
+        (defun run-it () int (apply-fn square 5))
         (compile square)
         (compile apply-fn)
         (compile run-it)
@@ -1439,7 +1439,7 @@ fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
 fn compile_interp_applies_a_closure_returned_by_compiled_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun make-adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
+        (defun make-adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n)))
         (compile make-adder)
         (let ((adder (make-adder 3))) (adder 5))
         "#,
@@ -1461,8 +1461,8 @@ fn compile_interp_applies_a_closure_returned_by_compiled_code() {
 fn compile_a_compiled_produced_closure_survives_interp_apply_then_crosses_into_another_compiled_call() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun make-adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
-        (defun apply-fn ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun make-adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n)))
+        (defun apply-fn ((f (fn (int) int)) (n int)) int (f n))
         (compile make-adder)
         (compile apply-fn)
         (let ((adder (make-adder 3)))
@@ -1486,13 +1486,13 @@ fn compile_a_compiled_produced_closure_survives_interp_apply_then_crosses_into_a
 fn compile_dispatches_a_defstruct_field_of_fn_type_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct holder (f (fn (i32) i32)))
-        (defun make-adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
-        (defun make-holder ((n i32)) holder (holder::new (make-adder n)))
+        (defstruct holder (f (fn (int) int)))
+        (defun make-adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n)))
+        (defun make-holder ((n int)) holder (holder::new (make-adder n)))
         (compile make-adder)
         (compile make-holder)
         (compile holder::f)
-        (defun call-held ((h holder) (x i32)) i32 (let ((f h::f)) (f x)))
+        (defun call-held ((h holder) (x int)) int (let ((f h::f)) (f x)))
         (compile call-held)
         (call-held (make-holder 3) 5)
         "#,
@@ -1604,10 +1604,10 @@ fn the_compiler_body_boxes_a_labels_sibling_that_bare_references_itself() {
 fn compile_dispatches_an_escaping_labels_sibling_returned_bare() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun make-adder ((n i32)) (fn (i32) i32)
-          (labels ((adder ((x i32)) i32 (+ x n)))
+        (defun make-adder ((n int)) (fn (int) int)
+          (labels ((adder ((x int)) int (+ x n)))
             adder))
-        (defun apply-fn ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun apply-fn ((f (fn (int) int)) (n int)) int (f n))
         (compile make-adder)
         (compile apply-fn)
         (apply-fn (make-adder 5) 10)
@@ -1631,11 +1631,11 @@ fn compile_dispatches_an_escaping_labels_sibling_returned_bare() {
 fn compile_dispatches_an_escaping_labels_sibling_chosen_correctly_among_several() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun make-pair ((n i32)) (fn (i32) i32)
-          (labels ((f ((x i32)) i32 (+ x n))
-                   (g ((x i32)) i32 (+ x (f x))))
+        (defun make-pair ((n int)) (fn (int) int)
+          (labels ((f ((x int)) int (+ x n))
+                   (g ((x int)) int (+ x (f x))))
             f))
-        (defun apply-fn ((h (fn (i32) i32)) (n i32)) i32 (h n))
+        (defun apply-fn ((h (fn (int) int)) (n int)) int (h n))
         (compile make-pair)
         (compile apply-fn)
         (apply-fn (make-pair 5) 10)
@@ -1662,10 +1662,10 @@ fn compile_dispatches_an_escaping_labels_sibling_chosen_correctly_among_several(
 fn compile_dispatches_an_escaping_lambda_that_indirectly_captures_a_labels_sibling() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun make-caller ((n i32)) (fn () i32)
-          (labels ((double ((x i32)) i32 (* x 2)))
-            (lambda () i32 (double n))))
-        (defun apply-fn0 ((f (fn () i32))) i32 (f))
+        (defun make-caller ((n int)) (fn () int)
+          (labels ((double ((x int)) int (* x 2)))
+            (lambda () int (double n))))
+        (defun apply-fn0 ((f (fn () int))) int (f))
         (compile make-caller)
         (compile apply-fn0)
         (apply-fn0 (make-caller 21))
@@ -1695,13 +1695,13 @@ fn compile_dispatches_an_escaping_lambda_that_indirectly_captures_a_labels_sibli
 fn repeated_calls_through_a_captured_closure_survive_gc_pressure() {
     let v = run_with_compiler_and_capacity(
         r#"
-        (defun make-adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
-        (defun outer ((n i32) (x i32)) i32
+        (defun make-adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n)))
+        (defun outer ((n int) (x int)) int
           (let ((cb (make-adder n)))
-            (labels ((rec ((y i32)) i32 (cb y)))
+            (labels ((rec ((y int)) int (cb y)))
               (let ((ignored (loop
                                (if (eq x 0) (break) ())
-                               (sexpr-cons (i32 0) (i32 0))
+                               (sexpr-cons (int 0) (int 0))
                                (setf x (- x 1)))))
                 (rec 5)))))
         (compile make-adder)
@@ -1728,15 +1728,15 @@ fn repeated_calls_through_a_captured_closure_survive_gc_pressure() {
 fn an_escaping_lambdas_captured_closure_survives_gc_pressure() {
     let v = run_with_compiler_and_capacity(
         r#"
-        (defun make-adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n)))
-        (defun make-wrapper ((n i32)) (fn (i32) i32)
+        (defun make-adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n)))
+        (defun make-wrapper ((n int)) (fn (int) int)
           (let ((inner (make-adder n)))
-            (lambda ((x i32)) i32 (inner x))))
-        (defun call-through-wrapper ((n i32) (count i32)) i32
+            (lambda ((x int)) int (inner x))))
+        (defun call-through-wrapper ((n int) (count int)) int
           (let ((wrapper (make-wrapper n)))
             (let ((ignored (loop
                              (if (eq count 0) (break) ())
-                             (sexpr-cons (i32 0) (i32 0))
+                             (sexpr-cons (int 0) (int 0))
                              (setf count (- count 1)))))
               (wrapper 7))))
         (compile make-adder)
@@ -1763,9 +1763,9 @@ fn an_escaping_lambdas_captured_closure_survives_gc_pressure() {
 fn compile_a_setf_on_a_captured_name_is_visible_on_the_next_call_through_the_same_closure() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun make-counter ((start i32)) (fn () i32)
-          (lambda () i32 (setf start (+ start 1))))
-        (defun call-twice ((c (fn () i32))) i32
+        (defun make-counter ((start int)) (fn () int)
+          (lambda () int (setf start (+ start 1))))
+        (defun call-twice ((c (fn () int))) int
           (let ((a (c))) (let ((b (c))) (+ a (* b 100)))))
         (compile make-counter)
         (compile call-twice)
@@ -1791,9 +1791,9 @@ fn compile_a_setf_on_a_captured_name_is_visible_on_the_next_call_through_the_sam
 fn compile_a_setf_through_one_labels_sibling_is_visible_through_another_sharing_the_same_capture() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun make-pair ((start i32)) i32
-          (labels ((bump () i32 (setf start (+ start 1)))
-                   (read-it () i32 start))
+        (defun make-pair ((start int)) int
+          (labels ((bump () int (setf start (+ start 1)))
+                   (read-it () int start))
             (let ((ignored1 (bump)))
               (let ((ignored2 (bump)))
                 (read-it)))))
@@ -1821,15 +1821,15 @@ fn compile_a_setf_through_one_labels_sibling_is_visible_through_another_sharing_
 fn compile_a_captured_cell_survives_gc_pressure_across_many_calls() {
     let v = run_with_compiler_and_capacity(
         r#"
-        (defun make-counter ((start i32)) (fn () i32)
-          (lambda () i32 (setf start (+ start 1))))
-        (defun pump ((c (fn () i32)) (n i32)) i32
+        (defun make-counter ((start int)) (fn () int)
+          (lambda () int (setf start (+ start 1))))
+        (defun pump ((c (fn () int)) (n int)) int
           (let ((ignored (loop
                            (if (eq n 0) (break) ())
-                           (sexpr-cons (i32 0) (i32 0))
+                           (sexpr-cons (int 0) (int 0))
                            (setf n (- n 1)))))
             (c)))
-        (defun run-it ((start i32) (n i32)) i32
+        (defun run-it ((start int) (n int)) int
           (pump (make-counter start) n))
         (compile make-counter)
         (compile pump)
@@ -1956,7 +1956,7 @@ fn let_shadowing_is_correctly_restored_after_the_let_ends() {
 fn compile_dispatches_a_self_recursive_function_with_a_base_case_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun fact ((n i32)) i32 (if (<= n 1) 1 (* n (fact (- n 1)))))
+        (defun fact ((n int)) int (if (<= n 1) 1 (* n (fact (- n 1)))))
         (compile fact)
         (fact 10)
         "#,
@@ -1970,7 +1970,7 @@ fn compile_dispatches_a_self_recursive_function_with_a_base_case_to_native_code(
 /// `loop`/`break`/`return`/`setf`: a `setf` on a `let`-bound local, compiled
 /// through the full pipeline. Exercises the new alloca-backed `env`
 /// representation (`bind-params`/`bind-captures`/`bind-let-values`).
-/// `i32`: a bare integer literal defaults to `i32`
+/// `int`: a bare integer literal defaults to `int`
 /// (`Checker::check_let` always checks a binding's value with `expected:
 /// None`), and nothing here forces otherwise. The `setf`/read-back happen
 /// inside a `loop` (whose body, unlike `let`'s, may have any number of
@@ -1983,7 +1983,7 @@ fn compile_dispatches_a_self_recursive_function_with_a_base_case_to_native_code(
 fn compile_dispatches_a_setf_on_a_let_bound_local_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun setf-test () i32 (let ((x 1)) (loop (setf x 5) (return x))))
+        (defun setf-test () int (let ((x 1)) (loop (setf x 5) (return x))))
         (compile setf-test)
         (setf-test)
         "#,
@@ -1996,16 +1996,16 @@ fn compile_dispatches_a_setf_on_a_let_bound_local_to_native_code() {
 
 /// A bare `(return value)` inside a `loop` exits immediately with that
 /// value — the simplest possible `loop`/`return` round trip, no `break`/
-/// `setf` involved. `i32`: `(loop ...)` is seeded `Never` and refined purely
+/// `setf` involved. `int`: `(loop ...)` is seeded `Never` and refined purely
 /// from the `return`s found inside it (`Checker::check_loop`/`check_return`)
 /// — a `defun`'s own declared return type never propagates down into that
-/// seed, so the bare literal `42` still defaults to `i32` regardless of
+/// seed, so the bare literal `42` still defaults to `int` regardless of
 /// what `loop-return-test` itself declares.
 #[test]
 fn compile_dispatches_a_bare_return_inside_a_loop_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun loop-return-test () i32 (loop (return 42)))
+        (defun loop-return-test () int (loop (return 42)))
         (compile loop-return-test)
         (loop-return-test)
         "#,
@@ -2042,15 +2042,15 @@ fn compile_dispatches_a_value_less_return_from_a_loop_to_native_code() {
 /// The realistic shape `while`/`dotimes`/`dolist` all reduce to: a `loop`
 /// whose body conditionally exits via `return` (delivering the
 /// accumulator) and otherwise mutates loop-carried locals via `setf` —
-/// computes `0+1+...+n` without recursion. `i`/`acc` default to `i32`
+/// computes `0+1+...+n` without recursion. `i`/`acc` default to `int`
 /// (bare integer literals with no `expected` type — `Checker::check_let`
-/// always checks a binding's value with `expected: None`), so `n` is `i32`
+/// always checks a binding's value with `expected: None`), so `n` is `int`
 /// too, to keep every arithmetic operand the same type.
 #[test]
 fn compile_dispatches_a_counting_loop_with_setf_and_conditional_return_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun sum-to ((n i32)) i32
+        (defun sum-to ((n int)) int
           (let ((i 0) (acc 0))
             (loop
               (if (> i n) (return acc) ())
@@ -2108,7 +2108,7 @@ fn compile_dispatches_a_loop_exited_via_a_bare_break_to_native_code() {
 fn compile_dispatches_nested_loops_where_an_inner_break_only_exits_the_inner_loop() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun nested-loop-test () i32
+        (defun nested-loop-test () int
           (let ((outer 0) (total 0))
             (loop
               (if (eq outer 3) (return total) ())
@@ -2145,7 +2145,7 @@ fn compile_dispatches_nested_loops_where_an_inner_break_only_exits_the_inner_loo
 fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun count-via-dotimes ((n i32)) ()
+        (defun count-via-dotimes ((n int)) ()
           (dotimes (i n) ()))
         (compile not)
         (compile count-via-dotimes)
@@ -2165,7 +2165,7 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
 /// and `sexpr-consp`/`sexpr-car`/`sexpr-cdr` walking — all already compilable
 /// (`Sexpr` `match` support, plus the `sexpr-*` `rt_*` shims
 /// `is_rt_builtin_name` recognizes). So a `dolist`-using function compiles with
-/// no `dolist`-specific machinery: this sums the `(i32 n)` elements of a
+/// no `dolist`-specific machinery: this sums the `(int n)` elements of a
 /// `Sexpr` list argument entirely in native code (the quoted list is built by
 /// the tree-walking interpreter and handed to the compiled function), asserting
 /// the real total — not just that compilation succeeded — so a "compiles but
@@ -2176,10 +2176,10 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
 fn compile_dispatches_a_dolist_summing_a_sexpr_list() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun sum-list-ints ((lst Option<Sexpr>)) i32
-          (let ((acc (the i32 0)))
+        (defun sum-list-ints ((lst Option<Sexpr>)) int
+          (let ((acc (the int 0)))
             (dolist (x lst acc)
-              (match x ((i32 n) (setf acc (+ acc n)) ()) (_ ())))))
+              (match x ((int n) (setf acc (+ acc n)) ()) (_ ())))))
         (compile not)
         (compile sum-list-ints)
         (sum-list-ints (quote (1 2 3 4 5)))
@@ -2279,7 +2279,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
 
 // ---- Stage 6 of the Sexpr-representation plan: Construct/FieldGet/FieldSet --
 
-/// `Expr::Construct` over `Sexpr` itself: `(i32 n)`/`(Bool b)`/`()` all
+/// `Expr::Construct` over `Sexpr` itself: `(int n)`/`(Bool b)`/`()` all
 /// compile to `compile-construct-sexpr`'s pure bit-tagging path (no heap
 /// allocation at all), round-tripping through `Expr::Call`'s existing
 /// `Sexpr` decode step (Stage 5) with no further bridging needed. Every
@@ -2298,7 +2298,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
 fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun make-int ((n i32)) Sexpr (i32 n))
+        (defun make-int ((n int)) Sexpr (int n))
         (compile make-int)
         (make-int 42)
         "#,
@@ -2339,7 +2339,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
 fn compile_dispatches_a_function_that_appends_strings_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun str-append-len () i32
+        (defun str-append-len () int
           (length (append "foo" "bar")))
         (compile str-append-len)
         (str-append-len)
@@ -2363,11 +2363,11 @@ fn compile_dispatches_a_function_that_appends_strings_to_native_code() {
 fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_many_allocations() {
     let v = run_with_compiler_and_capacity(
         r#"
-        (defun str-survives-gc ((n i32)) i32
+        (defun str-survives-gc ((n int)) int
           (let ((s (append "hello" " world")))
             (let ((ignored (loop
                              (if (eq n 0) (break) ())
-                             (sexpr-cons (i32 0) (i32 0))
+                             (sexpr-cons (int 0) (int 0))
                              (setf n (- n 1)))))
               (length s))))
         (compile str-survives-gc)
@@ -2386,11 +2386,11 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_
     assert_eq!(v, Value::Int(11), "\"hello world\" has 11 characters, even after many unrelated conses force a gc()");
 }
 
-/// A general ADT (`Option<i32>`'s `Some`, `AdtKind::Sum`) constructs via
+/// A general ADT (`Option<int>`'s `Some`, `AdtKind::Sum`) constructs via
 /// `compile-construct-box`'s `rt_data_new` path (the enum-representation
 /// unification's compiler flip) into a real `BoxedObj::Enum` — and
 /// `Interp::call_compiled`'s `is_boxed_sexpr_type` extension decodes the
-/// compiled function's `Option<i32>` return value as the proper
+/// compiled function's `Option<int>` return value as the proper
 /// `RtValue::Sexpr` rather than the raw, undecoded box address this test
 /// used to read directly out of process memory (a documented, now-closed
 /// gap). An ordinary *interpreted* `match` over that returned value proves
@@ -2400,7 +2400,7 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_
 fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun make-some ((n i32)) Option<i32> (Option::some n))
+        (defun make-some ((n int)) Option<int> (Option::some n))
         (compile make-some)
         (match (make-some 42) ((Some x) x) ((None) -1))
         "#,
@@ -2432,7 +2432,7 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
 fn compile_dispatches_a_function_taking_an_enum_typed_argument_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun unwrap-or-zero ((o Option<i32>)) i32 (match o ((Some x) x) ((None) 0)))
+        (defun unwrap-or-zero ((o Option<int>)) int (match o ((Some x) x) ((None) 0)))
         (compile unwrap-or-zero)
         (unwrap-or-zero (Option::some 99))
         "#,
@@ -2475,16 +2475,16 @@ fn a_nested_option_over_sexpr_keeps_its_two_nones_apart() {
     assert_eq!(v, "outer-none inner-none inner-some");
 }
 
-/// A nested enum (`Option<Option<i32>>`): `struct_field_kind`'s recursive
+/// A nested enum (`Option<Option<int>>`): `struct_field_kind`'s recursive
 /// classification (an `Option<T>` field is kind `6` regardless of what `T`
-/// is) means the inner `Option<i32>` crosses the outer box's field boundary
+/// is) means the inner `Option<int>` crosses the outer box's field boundary
 /// as an ordinary tagged `Sexpr`, no different from a `Str` or boxed struct
 /// field.
 #[test]
 fn compile_dispatches_a_function_constructing_a_nested_option_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun wrap ((n i32)) Option<Option<i32>> (Option::some (Option::some n)))
+        (defun wrap ((n int)) Option<Option<int>> (Option::some (Option::some n)))
         (compile wrap)
         (match (wrap 7)
           ((Some inner) (match inner ((Some x) x) ((None) -1)))
@@ -2502,8 +2502,8 @@ fn compile_dispatches_a_function_constructing_a_nested_option_to_native_code() {
 fn compile_dispatches_a_function_constructing_a_user_defenum_with_an_option_field_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defenum wrapper (w Option<i32>))
-        (defun mk ((n i32)) wrapper (wrapper::w (Option::some n)))
+        (defenum wrapper (w Option<int>))
+        (defun mk ((n int)) wrapper (wrapper::w (Option::some n)))
         (compile mk)
         (match (mk 5) ((w o) (match o ((Some x) x) ((None) -1))))
         "#,
@@ -2512,7 +2512,7 @@ fn compile_dispatches_a_function_constructing_a_user_defenum_with_an_option_fiel
     assert_eq!(v, Value::Int(5));
 }
 
-/// `Vector<Option<i32>>::push`/`get` — the element `kind`
+/// `Vector<Option<int>>::push`/`get` — the element `kind`
 /// (`vector_element_kind`/`struct_field_kind`) is now `6` for an `Option<T>`
 /// element (previously `0`/unsupported), so a compiled `Vector` can hold
 /// enum values at all.
@@ -2520,8 +2520,8 @@ fn compile_dispatches_a_function_constructing_a_user_defenum_with_an_option_fiel
 fn compile_dispatches_vector_push_and_get_of_an_option_element_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun f () i32
-          (let ((v (the Vector<Option<i32>> (Vector::new))))
+        (defun f () int
+          (let ((v (the Vector<Option<int>> (Vector::new))))
             (push v (Option::some 3))
             (push v (Option::none))
             (match (get v 0) ((Some x) x) ((None) -1))))
@@ -2533,17 +2533,17 @@ fn compile_dispatches_vector_push_and_get_of_an_option_element_to_native_code() 
     assert_eq!(v, Value::Int(3));
 }
 
-/// `HashTable<i32, Option<i32>>::get` returns `Option<Option<i32>>` — the
+/// `HashTable<int, Option<int>>::get` returns `Option<Option<int>>` — the
 /// map's own `get`/`remove` (`compile-hashtable-op`'s `rt_data_new` path)
-/// nests with a user-stored `Option<i32>` value (an ordinary `Expr::Construct`
+/// nests with a user-stored `Option<int>` value (an ordinary `Expr::Construct`
 /// through the generic `val-kind` tagging), exercising both enum-construction
 /// paths together.
 #[test]
 fn compile_dispatches_hashtable_get_of_an_option_typed_value_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun run () i32
-          (let ((ht (the HashTable<i32,Option<i32>> (HashTable::new))))
+        (defun run () int
+          (let ((ht (the HashTable<int,Option<int>> (HashTable::new))))
             (set ht 1 (Option::some 42))
             (match (get ht 1)
               ((Some inner) (match inner ((Some x) x) ((None) -1)))
@@ -2563,8 +2563,8 @@ fn compile_dispatches_hashtable_get_of_an_option_typed_value_to_native_code() {
 fn compile_dispatches_a_defstruct_field_of_option_type_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct holder (val Option<i32>))
-        (defun mk ((n i32)) holder (holder::new (Option::some n)))
+        (defstruct holder (val Option<int>))
+        (defun mk ((n int)) holder (holder::new (Option::some n)))
         (compile mk)
         (match (val (mk 8)) ((Some x) x) ((None) -1))
         "#,
@@ -2583,13 +2583,13 @@ fn compile_dispatches_a_defstruct_field_of_option_type_to_native_code() {
 fn compile_dispatches_a_function_that_keeps_an_enum_scrutinee_rooted_across_many_allocations() {
     let v = run_with_compiler_and_prelude_and_capacity(
         r#"
-        (defun sum-after-gc ((n i32)) i32
-          (let ((scratch (the Vector<i32> (Vector::new))))
+        (defun sum-after-gc ((n int)) int
+          (let ((scratch (the Vector<int> (Vector::new))))
             (loop
               (if (eq n 0) (break) ())
               (push scratch n)
               (setf n (- n 1)))
-            (match (Option::some (the i32 123)) ((Some x) x) ((None) -1))))
+            (match (Option::some (the int 123)) ((Some x) x) ((None) -1))))
         (compile sum-after-gc)
         (sum-after-gc 5000)
         "#,
@@ -2637,8 +2637,8 @@ fn compile_dispatches_a_function_that_keeps_an_enum_scrutinee_rooted_across_many
 fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct point (x i32) (y i32))
-        (defun make-point ((a i32) (b i32)) point (point::new a b))
+        (defstruct point (x int) (y int))
+        (defun make-point ((a int) (b int)) point (point::new a b))
         (compile make-point)
         (make-point 3 4)
         "#,
@@ -2669,8 +2669,8 @@ fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_
 fn compile_dispatches_a_defstruct_field_accessor_method_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct point (x i32) (y i32))
-        (defun make-point ((a i32) (b i32)) point (point::new a b))
+        (defstruct point (x int) (y int))
+        (defun make-point ((a int) (b int)) point (point::new a b))
         (compile make-point)
         (compile point::x)
         (let ((p (make-point 3 4))) p::x)
@@ -2690,8 +2690,8 @@ fn compile_dispatches_a_defstruct_field_accessor_method_to_native_code() {
 fn compile_dispatches_a_defstruct_field_setter_method_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct point (x i32) (y i32))
-        (defun make-point ((a i32) (b i32)) point (point::new a b))
+        (defstruct point (x int) (y int))
+        (defun make-point ((a int) (b int)) point (point::new a b))
         (compile make-point)
         (compile point::x)
         (compile point::set-x)
@@ -2717,12 +2717,12 @@ fn compile_dispatches_a_defstruct_field_setter_method_to_native_code() {
 fn compile_dispatches_a_function_that_calls_a_compiled_method_in_its_own_body() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct point (x i32) (y i32))
-        (defun make-point ((a i32) (b i32)) point (point::new a b))
+        (defstruct point (x int) (y int))
+        (defun make-point ((a int) (b int)) point (point::new a b))
         (compile make-point)
         (compile point::x)
         (compile point::y)
-        (defun sum-coords ((p point)) i32 (+ p::x p::y))
+        (defun sum-coords ((p point)) int (+ p::x p::y))
         (compile sum-coords)
         (sum-coords (make-point 3 4))
         "#,
@@ -2752,12 +2752,12 @@ fn compile_dispatches_a_function_that_calls_a_compiled_method_in_its_own_body() 
 fn compile_dispatches_a_self_recursive_method_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct counter (n i32))
-        (defun make-counter ((a i32)) counter (counter::new a))
+        (defstruct counter (n int))
+        (defun make-counter ((a int)) counter (counter::new a))
         (compile make-counter)
         (compile counter::n)
         (compile counter::set-n)
-        (defmethod countdown ((self counter)) i32
+        (defmethod countdown ((self counter)) int
           (if (<= self::n 0)
               0
               (let ((ignored (setf self::n (- self::n 1))))
@@ -2779,8 +2779,8 @@ fn compile_dispatches_a_self_recursive_method_to_native_code() {
 fn compile_transitively_compiles_a_called_user_method() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct point (x i32) (y i32))
-        (defun sum-coords ((p point)) i32 (+ p::x p::y))
+        (defstruct point (x int) (y int))
+        (defun sum-coords ((p point)) int (+ p::x p::y))
         (compile sum-coords)
         (sum-coords (point::new 3 4))
         "#,
@@ -2792,7 +2792,7 @@ fn compile_transitively_compiles_a_called_user_method() {
 /// The compiled tier shifts by the same distance the interpreter does, at a
 /// width where the answer differs between a logical and an arithmetic shift.
 ///
-/// `ash`'s distance became an `i32` (from "another value of the receiver's
+/// `ash`'s distance became an `int` (from "another value of the receiver's
 /// type", which made right shift unwritable on unsigned widths). Nothing in
 /// the island changed — the distance was always passed as a raw word and
 /// `rt_int_ash` always read it as signed — and this test is what says so
@@ -2805,7 +2805,7 @@ fn a_negative_shift_distance_lowers_at_every_width() {
         (defun shr-i8 ((x i8)) i8 (ash x -2))
         (compile shr-u8)
         (compile shr-i8)
-        (+ (as i32 (shr-u8 200)) (as i32 (shr-i8 -16)))
+        (+ (as int (shr-u8 200)) (as int (shr-i8 -16)))
         "#,
     )
     .expect("a compiled right shift should run");
@@ -2825,10 +2825,10 @@ fn a_negative_shift_distance_lowers_at_every_width() {
 /// drift.
 #[test]
 fn a_seeded_stream_agrees_across_the_compile_boundary() {
-    let draws = "(defun draws ((s random-state)) i32
-                   (let ((acc (the i32 0)) (i 0))
+    let draws = "(defun draws ((s random-state)) int
+                   (let ((acc (the int 0)) (i 0))
                      (while (< i 9)
-                       (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                       (setf acc (+ (* acc 10) (as int (random 10 s))))
                        (setf i (+ i 1)))
                      acc))";
     let interpreted = run_with_compiler_and_prelude(&format!(
@@ -2860,7 +2860,7 @@ fn compile_of_an_unresolvable_name_is_a_check_time_error() {
     }
 
     // The type resolves; it just has no such member.
-    match check_error("(defstruct point (x i32) (y i32)) (compile point::bogus)") {
+    match check_error("(defstruct point (x int) (y int)) (compile point::bogus)") {
         Error::TypeError(m) => {
             assert!(m.contains("has no associated function or method `bogus`"), "message was: {}", m)
         }
@@ -2884,7 +2884,7 @@ fn compile_of_an_unresolvable_name_is_a_check_time_error() {
 /// `(compile ...)` is no exception now that it reports the failure itself.
 #[test]
 fn compile_of_a_private_name_from_outside_its_module_is_a_check_time_error() {
-    match check_error("(module m (defun hidden () i32 1)) (compile m::hidden)") {
+    match check_error("(module m (defun hidden () int 1)) (compile m::hidden)") {
         Error::TypeError(m) => assert!(m.contains("m::hidden"), "message was: {}", m),
         other => panic!("expected a TypeError, got {:?}", other),
     }
@@ -2903,7 +2903,7 @@ fn compile_resolves_a_bare_name_against_its_own_module_not_just_root() {
     let v = eval_ok_with_compiler(
         r#"
         (module m
-          (pub defun helper () i32 42)
+          (pub defun helper () int 42)
           (pub defun use-it () bool (compile helper)))
         (m::use-it)
         "#,
@@ -2925,9 +2925,9 @@ fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() 
     let v = eval_ok_with_compiler(
         r#"
         (module a
-          (defun tag () i32 1)
-          (pub defun get-it () i32 (compile tag) (tag)))
-        (module b (defun tag () i32 2))
+          (defun tag () int 1)
+          (pub defun get-it () int (compile tag) (tag)))
+        (module b (defun tag () int 2))
         (a::get-it)
         "#,
     );
@@ -2954,15 +2954,15 @@ fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() 
 fn compile_a_same_named_method_in_two_sibling_modules_does_not_alias_the_others_llvm_symbol() {
     let v = eval_ok_with_compiler(
         r#"
-        (module a (pub defstruct box (pub n i32)))
-        (module b (pub defstruct box (pub n i32)))
+        (module a (pub defstruct box (pub n int)))
+        (module b (pub defstruct box (pub n int)))
         (defun make-a () a::box (a::box::new 100))
         (defun make-b () b::box (b::box::new 200))
         (compile make-a)
         (compile make-b)
         (compile a::box::n)
         (compile b::box::n)
-        (defun sum-both ((x a::box) (y b::box)) i32 (+ x::n y::n))
+        (defun sum-both ((x a::box) (y b::box)) int (+ x::n y::n))
         (compile sum-both)
         (sum-both (make-a) (make-b))
         "#,
@@ -2978,8 +2978,8 @@ fn compile_a_same_named_method_in_two_sibling_modules_does_not_alias_the_others_
 #[test]
 fn compile_of_a_string_literal_is_a_type_error() {
     for src in [
-        r#"(defun add2 ((a i32) (b i32)) i32 (+ a b)) (compile "add2")"#,
-        r#"(defstruct point (x i32) (y i32)) (compile "point::x")"#,
+        r#"(defun add2 ((a int) (b int)) int (+ a b)) (compile "add2")"#,
+        r#"(defstruct point (x int) (y int)) (compile "point::x")"#,
     ] {
         match check_error(src) {
             Error::TypeError(_) => {}
@@ -3001,9 +3001,9 @@ fn compile_of_a_string_literal_is_a_type_error() {
 fn compile_dispatches_a_nested_labels_inner_sibling_calling_an_outer_sibling_directly() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun f () i32
-          (labels ((outer-fn ((a i32)) i32 (+ a 1)))
-            (labels ((inner-fn ((b i32)) i32 (outer-fn b)))
+        (defun f () int
+          (labels ((outer-fn ((a int)) int (+ a 1)))
+            (labels ((inner-fn ((b int)) int (outer-fn b)))
               (inner-fn 10))))
         (compile f)
         (f)
@@ -3028,9 +3028,9 @@ fn compile_dispatches_a_nested_labels_inner_sibling_calling_an_outer_sibling_dir
 fn compile_dispatches_a_nested_labels_inner_sibling_calling_a_capturing_outer_sibling() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun f ((z i32)) i32
-          (labels ((outer-fn ((a i32)) i32 (+ a z)))
-            (labels ((inner-fn ((b i32)) i32 (outer-fn b)))
+        (defun f ((z int)) int
+          (labels ((outer-fn ((a int)) int (+ a z)))
+            (labels ((inner-fn ((b int)) int (outer-fn b)))
               (inner-fn 10))))
         (compile f)
         (f 100)
@@ -3051,9 +3051,9 @@ fn compile_dispatches_a_nested_labels_inner_sibling_calling_a_capturing_outer_si
 fn compile_dispatches_a_nested_labels_trailing_body_calling_an_outer_sibling() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun f ((z i32)) i32
-          (labels ((outer-fn ((a i32)) i32 (+ a z)))
-            (labels ((dummy ((x i32)) i32 x))
+        (defun f ((z int)) int
+          (labels ((outer-fn ((a int)) int (+ a z)))
+            (labels ((dummy ((x int)) int x))
               (outer-fn 10))))
         (compile f)
         (f 100)
@@ -3080,9 +3080,9 @@ fn compile_dispatches_a_nested_labels_trailing_body_calling_an_outer_sibling() {
 fn compile_dispatches_a_nested_labels_inner_sibling_with_a_capture_of_its_own_beyond_the_outer_blocks() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun f ((z i32) (w i32)) i32
-          (labels ((outer-fn ((a i32)) i32 (+ a z)))
-            (labels ((inner-fn ((b i32)) i32 (+ (outer-fn b) w)))
+        (defun f ((z int) (w int)) int
+          (labels ((outer-fn ((a int)) int (+ a z)))
+            (labels ((inner-fn ((b int)) int (+ (outer-fn b) w)))
               (inner-fn 10))))
         (compile f)
         (f 100 1000)
@@ -3104,10 +3104,10 @@ fn compile_dispatches_a_nested_labels_inner_sibling_with_a_capture_of_its_own_be
 fn compile_dispatches_a_triple_nested_labels_call_skipping_the_middle_level() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun f ((z i32)) i32
-          (labels ((f1 ((a i32)) i32 (+ a z)))
-            (labels ((f2 ((a i32)) i32 (* a 2)))
-              (labels ((f3 ((a i32)) i32 (f1 a)))
+        (defun f ((z int)) int
+          (labels ((f1 ((a int)) int (+ a z)))
+            (labels ((f2 ((a int)) int (* a 2)))
+              (labels ((f3 ((a int)) int (f1 a)))
                 (f3 10)))))
         (compile f)
         (f 100)
@@ -3130,11 +3130,11 @@ fn compile_dispatches_a_triple_nested_labels_call_skipping_the_middle_level() {
 fn compile_dispatches_a_nested_labels_inner_sibling_that_boxes_an_outer_sibling_bare() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun make-it ((z i32)) (fn (i32) i32)
-          (labels ((outer-fn ((a i32)) i32 (+ a z)))
-            (labels ((grab () (fn (i32) i32) outer-fn))
+        (defun make-it ((z int)) (fn (int) int)
+          (labels ((outer-fn ((a int)) int (+ a z)))
+            (labels ((grab () (fn (int) int) outer-fn))
               (grab))))
-        (defun apply-fn ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun apply-fn ((f (fn (int) int)) (n int)) int (f n))
         (compile make-it)
         (compile apply-fn)
         (apply-fn (make-it 100) 10)
@@ -3169,11 +3169,11 @@ fn compile_dispatches_a_nested_labels_inner_sibling_that_boxes_an_outer_sibling_
 fn a_where_bounded_generic_specializes_and_dispatches_into_compiled_methods() {
     let v = run_with_compiler(
         r#"
-        (deftrait Counted () (count ((self Self)) i32))
-        (defstruct box-a (n i32))
-        (impl Counted box-a (count ((self Self)) i32 self::n))
-        (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
-        (defun make-box-a ((n i32)) box-a (box-a::new n))
+        (deftrait Counted () (count ((self Self)) int))
+        (defstruct box-a (n int))
+        (impl Counted box-a (count ((self Self)) int self::n))
+        (defun describe<T> ((it T)) int (where (Counted T)) (count it))
+        (defun make-box-a ((n int)) box-a (box-a::new n))
         (compile box-a::n)
         (compile box-a::count)
         (compile make-box-a)
@@ -3193,14 +3193,14 @@ fn a_where_bounded_generic_specializes_and_dispatches_into_compiled_methods() {
 fn a_where_bounded_generic_specializes_per_impl_and_dispatches_into_compiled_methods() {
     let v = run_with_compiler(
         r#"
-        (deftrait Counted () (count ((self Self)) i32))
-        (defstruct box-a (n i32))
-        (defstruct box-b (n i32))
-        (impl Counted box-a (count ((self Self)) i32 self::n))
-        (impl Counted box-b (count ((self Self)) i32 (* 2 self::n)))
-        (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
-        (defun make-box-a ((n i32)) box-a (box-a::new n))
-        (defun make-box-b ((n i32)) box-b (box-b::new n))
+        (deftrait Counted () (count ((self Self)) int))
+        (defstruct box-a (n int))
+        (defstruct box-b (n int))
+        (impl Counted box-a (count ((self Self)) int self::n))
+        (impl Counted box-b (count ((self Self)) int (* 2 self::n)))
+        (defun describe<T> ((it T)) int (where (Counted T)) (count it))
+        (defun make-box-a ((n int)) box-a (box-a::new n))
+        (defun make-box-b ((n int)) box-b (box-b::new n))
         (compile box-a::n)
         (compile box-b::n)
         (compile box-a::count)
@@ -3235,9 +3235,9 @@ fn a_where_bounded_generic_specializes_per_impl_and_dispatches_into_compiled_met
 fn compile_let_does_not_emit_instructions_after_an_early_return_from_its_body() {
     let v = run_with_compiler(
         r#"
-        (defun make-thing () i32
+        (defun make-thing () int
           (loop
-            (let ((s (sexpr-cons (i32 1) (i32 2))))
+            (let ((s (sexpr-cons (int 1) (int 2))))
               (return 42))))
         (compile make-thing)
         (make-thing)
@@ -3286,11 +3286,11 @@ fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_firs
     let r = Reader::new();
 
     let setup = r#"
-        (defun trivial () i32 7)
+        (defun trivial () int 7)
         (compile trivial)
-        (defun leaky-inner () i32
+        (defun leaky-inner () int
           (loop
-            (let ((s (sexpr-cons (i32 1) (i32 2))))
+            (let ((s (sexpr-cons (int 1) (int 2))))
               (return 7))))
         (compile leaky-inner)
         "#;
@@ -3348,13 +3348,13 @@ fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_firs
 fn compile_dispatches_a_function_that_constructs_a_nested_defstruct_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct inner (v i32))
+        (defstruct inner (v int))
         (defstruct outer (child inner))
-        (defun make-outer ((n i32)) outer (outer::new (inner::new n)))
+        (defun make-outer ((n int)) outer (outer::new (inner::new n)))
         (compile make-outer)
         (compile inner::v)
         (compile outer::child)
-        (defun read-nested ((o outer)) i32 (v o::child))
+        (defun read-nested ((o outer)) int (v o::child))
         (compile read-nested)
         (read-nested (make-outer 41))
         "#,
@@ -3374,9 +3374,9 @@ fn compile_dispatches_a_function_that_constructs_a_nested_defstruct_to_native_co
 fn compile_dispatches_a_nested_defstruct_field_setter_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct inner (v i32))
+        (defstruct inner (v int))
         (defstruct outer (child inner))
-        (defun make-outer ((n i32)) outer (outer::new (inner::new n)))
+        (defun make-outer ((n int)) outer (outer::new (inner::new n)))
         (compile make-outer)
         (compile inner::v)
         (compile outer::child)
@@ -3391,7 +3391,7 @@ fn compile_dispatches_a_nested_defstruct_field_setter_to_native_code() {
 }
 
 /// A user-defined method on a *primitive* receiver — the prelude's `impl Eq
-/// i32` registers `i32::equals` as an ordinary user method whose body
+/// int` registers `i32::equals` as an ordinary user method whose body
 /// `(= self other)` lowers natively. Two former gates blocked this path:
 /// `Interp::compile_function` excluded every integer/`string` assoc
 /// target from forward-declaration wholesale, and `compile-assoc`'s int
@@ -3403,7 +3403,7 @@ fn compile_dispatches_a_user_method_on_a_primitive_receiver() {
     let v = run_with_compiler_and_prelude(
         r#"
         (compile i32::equals)
-        (defun both-equal ((a i32) (b i32) (c i32)) bool
+        (defun both-equal ((a int) (b int) (c int)) bool
           (if (equals a b) (equals b c) false))
         (compile both-equal)
         (if (both-equal 3 3 3) (if (both-equal 3 3 4) false true) false)
@@ -3421,7 +3421,7 @@ fn compile_dispatches_less_on_a_primitive_receiver() {
     let v = run_with_compiler_and_prelude(
         r#"
         (compile i32::less)
-        (defun strictly-between ((lo i32) (x i32) (hi i32)) bool
+        (defun strictly-between ((lo int) (x int) (hi int)) bool
           (if (less lo x) (less x hi) false))
         (compile strictly-between)
         (if (strictly-between 1 5 9) (if (strictly-between 1 9 5) false true) false)
@@ -3431,7 +3431,7 @@ fn compile_dispatches_less_on_a_primitive_receiver() {
     assert_eq!(v, Value::Bool(true));
 }
 
-/// A user method on a *primitive* receiver (the prelude's `impl Eq i32` ->
+/// A user method on a *primitive* receiver (the prelude's `impl Eq int` ->
 /// `i32::equals`) is transitively compiled too (Stage B): `(compile run)`
 /// pulls in `i32::equals` on demand. `i32::equals`'s own body delegates to
 /// the native `=` (lowered in-place by `compile-assoc`, no further call), so
@@ -3442,8 +3442,8 @@ fn compile_dispatches_less_on_a_primitive_receiver() {
 fn compile_transitively_compiles_a_called_primitive_receiver_method() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun eq2 ((a i32) (b i32)) bool (equals a b))
-        (defun run () i32 (if (eq2 5 5) (if (eq2 5 6) 0 1) 0))
+        (defun eq2 ((a int) (b int)) bool (equals a b))
+        (defun run () int (if (eq2 5 5) (if (eq2 5 6) 0 1) 0))
         (compile run)
         (run)
         "#,
@@ -3463,7 +3463,7 @@ fn compile_dispatches_string_equals_and_less() {
         r#"
         (compile string::equals)
         (compile string::less)
-        (defun str-cmp ((a string) (b string)) i32
+        (defun str-cmp ((a string) (b string)) int
           (if (equals a b) 0 (if (less a b) -1 1)))
         (compile str-cmp)
         (+ (str-cmp (append "ab" "c") "abc")
@@ -3486,7 +3486,7 @@ fn compile_dispatches_char_equals_and_less() {
         r#"
         (compile char::equals)
         (compile char::less)
-        (defun char-cmp ((a char) (b char)) i32
+        (defun char-cmp ((a char) (b char)) int
           (if (equals a b) 0 (if (less a b) -1 1)))
         (compile char-cmp)
         (+ (char-cmp (ref "xa" 1) (ref "ya" 1))
@@ -3510,7 +3510,7 @@ fn compile_dispatches_char_equals_and_less() {
 fn compile_dispatches_char_comparison_operators() {
     let v = run_with_compiler(
         r#"
-        (defun ccmp ((a char) (b char)) i32
+        (defun ccmp ((a char) (b char)) int
           (if (< a b) 1 (if (<= a b) 2 (if (> a b) 3 4))))
         (compile ccmp)
         (+ (ccmp (ref "ab" 0) (ref "ab" 1))
@@ -3527,7 +3527,7 @@ fn compile_dispatches_char_comparison_operators() {
 fn compile_dispatches_string_comparison_operators() {
     let v = run_with_compiler(
         r#"
-        (defun scmp ((a string) (b string)) i32
+        (defun scmp ((a string) (b string)) int
           (if (< a b) 1 (if (<= a b) 2 (if (> a b) 3 4))))
         (compile scmp)
         (+ (scmp "a" "b")
@@ -3545,8 +3545,8 @@ fn compile_string_ge_and_le_derive_from_rt_str_lt() {
     // Exercises `>=`/`<=` specifically (the `not rt_str_lt(...)` derivations).
     let v = run_with_compiler(
         r#"
-        (defun sle ((a string) (b string)) i32 (if (<= a b) 1 0))
-        (defun sge ((a string) (b string)) i32 (if (>= a b) 1 0))
+        (defun sle ((a string) (b string)) int (if (<= a b) 1 0))
+        (defun sge ((a string) (b string)) int (if (>= a b) 1 0))
         (compile sle)
         (compile sge)
         (+ (sle "a" "a")
@@ -3578,7 +3578,7 @@ fn compile_matches_a_payload_variant_and_extracts_its_field() {
     let v = eval_ok_with_compiler(
         r#"
         (defenum Maybe<T> (Just T) (Nothing))
-        (defun m ((x i32)) i32 (match (Maybe::Just x) ((Just v) v) ((Nothing) x)))
+        (defun m ((x int)) int (match (Maybe::Just x) ((Just v) v) ((Nothing) x)))
         (compile m)
         (m 7)
         "#,
@@ -3593,7 +3593,7 @@ fn compile_matches_discriminates_among_nullary_variants() {
     let v = eval_ok_with_compiler(
         r#"
         (defenum Sign (Neg) (Zero) (Pos))
-        (defun classify () i32 (match (Sign::Pos) ((Neg) 10) ((Zero) 20) ((Pos) 30)))
+        (defun classify () int (match (Sign::Pos) ((Neg) 10) ((Zero) 20) ((Pos) 30)))
         (compile classify)
         (classify)
         "#,
@@ -3611,7 +3611,7 @@ fn compile_matches_a_runtime_chosen_variant() {
     // an inference ordering property, the same in the interpreter).
     let src = r#"
         (defenum Maybe<T> (Just T) (Nothing))
-        (defun pick ((n i32)) i32
+        (defun pick ((n int)) int
           (match (if (eq n 0) (Maybe::Just n) (Maybe::Nothing))
             ((Just v) v)
             ((Nothing) 99)))
@@ -3628,7 +3628,7 @@ fn compile_matches_a_runtime_chosen_variant() {
 fn compile_and_interpret_agree_on_a_defenum_match() {
     let prog = r#"
         (defenum Maybe<T> (Just T) (Nothing))
-        (defun m ((x i32)) i32 (match (Maybe::Just x) ((Just v) (+ v 1)) ((Nothing) x)))
+        (defun m ((x int)) int (match (Maybe::Just x) ((Just v) (+ v 1)) ((Nothing) x)))
     "#;
     let compiled = eval_ok_with_compiler(&format!("{}\n(compile m)\n(m 41)", prog));
     let interpreted = eval_ok(&format!("{}\n(m 41)", prog));
@@ -3645,7 +3645,7 @@ fn compile_and_interpret_agree_on_a_defenum_match() {
 fn compile_matches_a_builtin_option() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun u ((n i32)) i32 (match (option::some n) ((Some v) v) ((None) n)))
+        (defun u ((n int)) int (match (option::some n) ((Some v) v) ((None) n)))
         (compile u)
         (u 5)
         "#,
@@ -3671,8 +3671,8 @@ fn compile_matches_a_builtin_option() {
 fn compile_matches_and_destructures_a_defstruct_instance() {
     let v = eval_ok_with_compiler(
         r#"
-        (defstruct point (x i32) (y i32))
-        (defun sum ((p point)) i32 (match p ((new a b) (+ a b))))
+        (defstruct point (x int) (y int))
+        (defun sum ((p point)) int (match p ((new a b) (+ a b))))
         (compile sum)
         (sum (point::new 3 4))
         "#,
@@ -3687,8 +3687,8 @@ fn compile_matches_and_destructures_a_defstruct_instance() {
 fn compile_match_on_a_defstruct_binds_fields_by_position_and_skips_wildcards() {
     let v = eval_ok_with_compiler(
         r#"
-        (defstruct point (x i32) (y i32) (z i32))
-        (defun diff ((p point)) i32 (match p ((new a _ c) (- a c))))
+        (defstruct point (x int) (y int) (z int))
+        (defun diff ((p point)) int (match p ((new a _ c) (- a c))))
         (compile diff)
         (diff (point::new 9 100 3))
         "#,
@@ -3701,8 +3701,8 @@ fn compile_match_on_a_defstruct_binds_fields_by_position_and_skips_wildcards() {
 #[test]
 fn compile_and_interpret_agree_on_a_defstruct_match() {
     let prog = r#"
-        (defstruct point (x i32) (y i32))
-        (defun sum ((p point)) i32 (match p ((new a b) (+ a b))))
+        (defstruct point (x int) (y int))
+        (defun sum ((p point)) int (match p ((new a b) (+ a b))))
     "#;
     let compiled = eval_ok_with_compiler(&format!("{}\n(compile sum)\n(sum (point::new 5 6))", prog));
     let interpreted = eval_ok(&format!("{}\n(sum (point::new 5 6))", prog));
@@ -3725,13 +3725,13 @@ fn compile_and_interpret_agree_on_a_defstruct_match() {
 fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun f ((s Option<Sexpr>)) i32
+        (defun f ((s Option<Sexpr>)) int
           (match s
-            ((i32 n) n)
-            ((cons (i32 a) _) a)
+            ((int n) n)
+            ((cons (int a) _) a)
             (_ 0)))
         (compile f)
-        (+ (f (i32 40)) (f (sexpr-cons (i32 2) (Str "tail"))))
+        (+ (f (int 40)) (f (sexpr-cons (int 2) (Str "tail"))))
         "#,
     );
     assert_eq!(v, Value::Int(42));
@@ -3747,11 +3747,11 @@ fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
 fn compile_of_a_user_function_literally_named_rt_cons_does_not_collide_with_the_rt_cons_shim() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun rt_cons ((a i32) (b i32)) i32 (+ a b))
+        (defun rt_cons ((a int) (b int)) int (+ a b))
         (compile rt_cons)
-        (defun cons-and-extract () i32
-          (match (sexpr-cons (i32 5) (i32 9))
-            ((cons (i32 x) (i32 y)) (+ x y))
+        (defun cons-and-extract () int
+          (match (sexpr-cons (int 5) (int 9))
+            ((cons (int x) (int y)) (+ x y))
             (_ 0)))
         (compile cons-and-extract)
         (+ (rt_cons 3 4) (cons-and-extract))
@@ -3764,22 +3764,23 @@ fn compile_of_a_user_function_literally_named_rt_cons_does_not_collide_with_the_
 }
 
 /// The three numeric boxed variants share `TAG_BOXED`, so their arms dispatch
-/// through `rt_box_kind` — a bignum/ratio scrutinee must *not* take a
-/// preceding `(f64 _)` arm even though it carries the same 3-bit tag.
+/// through `rt_box_kind` — an `int` past the fixnum range (a bignum box) or
+/// a ratio scrutinee must *not* take a preceding `(f64 _)` arm even though
+/// it carries the same 3-bit tag.
 #[test]
 fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun which ((s Sexpr)) i32
+        (defun which ((s Sexpr)) int
           (match s
             ((f64 _) 1)
-            ((bignum _) 2)
+            ((int _) 2)
             ((ratio _) 3)
             (_ 0)))
         (compile which)
         (+ (+ (which (f64 1.5))
-              (* (the i32 10) (which (Bignum 99999999999999999999999999))))
-           (* (the i32 100) (which (Ratio 2/3))))
+              (* (the int 10) (which (int 99999999999999999999999999))))
+           (* (the int 100) (which (ratio 2/3))))
         "#,
     );
     assert_eq!(v, Value::Int(321));
@@ -3797,14 +3798,14 @@ fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
 fn compile_match_distinguishes_every_integer_width_in_a_sexpr() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun tag ((s Option<Sexpr>)) i32
+        (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((i8 _) 1) ((i16 _) 2) ((i32 _) 3)
+            ((i8 _) 1) ((i16 _) 2) ((int _) 3)
             ((u8 _) 4) ((u16 _) 5) ((u32 _) 6)
             (_ 0)))
         (compile tag)
         (+ (+ (+ (tag (i8 100)) (* 10 (tag (i16 100))))
-              (+ (* 100 (tag (i32 100))) (* 1000 (tag (u8 100)))))
+              (+ (* 100 (tag (int 100))) (* 1000 (tag (u8 100)))))
            (+ (* 10000 (tag (u16 100))) (* 100000 (tag (u32 100)))))
         "#,
     );
@@ -3814,19 +3815,19 @@ fn compile_match_distinguishes_every_integer_width_in_a_sexpr() {
 }
 
 /// The payload comes back out of a compiled narrow-integer arm, at its own
-/// width — including a `u32` past `i32`'s range, which is the value the old
+/// width — including a `u32` past `int`'s range, which is the value the old
 /// single `int` variant genuinely corrupted rather than merely mislabelled.
 #[test]
 fn compile_extracts_a_narrow_integer_payload_at_its_own_width() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun small ((s Option<Sexpr>)) i32
-          (match s ((u8 n) (as i32 n)) (_ -1)))
+        (defun small ((s Option<Sexpr>)) int
+          (match s ((u8 n) (as int n)) (_ -1)))
         (defun big ((s Option<Sexpr>)) u32
           (match s ((u32 n) n) (_ 0)))
         (compile small)
         (compile big)
-        (+ (small (u8 200)) (as i32 (- (big (u32 4000000000)) (the u32 3999999000))))
+        (+ (small (u8 200)) (as int (- (big (u32 4000000000)) (the u32 3999999000))))
         "#,
     );
     // 200 + (4000000000 - 3999999000) = 200 + 1000.
@@ -3845,13 +3846,13 @@ fn compile_extracts_a_narrow_integer_payload_at_its_own_width() {
 #[test]
 fn compiled_sexpr_tag_tests_agree_with_the_interpreter_for_every_variant() {
     let program = r#"
-        (defun tag ((s Option<Sexpr>)) i32
+        (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((none) 1) ((i32 _) 2) ((f64 _) 3) ((char _) 4) ((bool _) 5)
+            ((none) 1) ((int _) 2) ((f64 _) 3) ((char _) 4) ((bool _) 5)
             ((sym _) 6) ((str _) 7) ((cons _ _) 8) ((path _) 9)
             (_ 0)))
-        (defun total () i32
-          (+ (+ (+ (+ (tag ()) (* 10 (tag (i32 -5)))) (+ (* 100 (tag (f64 2.5))) (* 1000 (tag (char #\A)))))
+        (defun total () int
+          (+ (+ (+ (+ (tag ()) (* 10 (tag (int -5)))) (+ (* 100 (tag (f64 2.5))) (* 1000 (tag (char #\A)))))
                 (+ (* 10000 (tag (bool false))) (* 100000 (tag 'a-symbol))))
              (+ (+ (* 1000000 (tag (str "s"))) (* 10000000 (tag (list 1 2))))
                 (* 100000000 (tag 'a::b)))))
@@ -3873,7 +3874,7 @@ fn compiled_sexpr_tag_tests_agree_with_the_interpreter_for_every_variant() {
 fn compile_match_distinguishes_the_two_float_widths() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun which ((s Option<Sexpr>)) i32
+        (defun which ((s Option<Sexpr>)) int
           (match s ((f32 _) 1) ((f64 _) 2) (_ 0)))
         (compile which)
         (+ (which (f32 1.5)) (* 10 (which (f64 1.5))))
@@ -3887,13 +3888,13 @@ fn compile_match_distinguishes_the_two_float_widths() {
 fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun tag ((s Option<Sexpr>)) i32
+        (defun tag ((s Option<Sexpr>)) int
           (match s
             ((none) 1) ((sym _) 2) ((str _) 3) ((bool _) 4)
             (_ 0)))
         (compile tag)
-        (+ (+ (tag ()) (* (the i32 10) (tag (quote foo))))
-           (+ (* (the i32 100) (tag (Str "s"))) (* (the i32 1000) (tag (Bool false)))))
+        (+ (+ (tag ()) (* (the int 10) (tag (quote foo))))
+           (+ (* (the int 100) (tag (Str "s"))) (* (the int 1000) (tag (Bool false)))))
         "#,
     );
     assert_eq!(v, Value::Int(4321));
@@ -3967,9 +3968,9 @@ fn compile_and_interpret_agree_on_a_sexpr_match() {
     let src = |call: &str| {
         format!(
             r#"
-            (defun sum ((s Option<Sexpr>)) i32
+            (defun sum ((s Option<Sexpr>)) int
               (match s
-                ((cons (i32 n) rest) (+ n (sum rest)))
+                ((cons (int n) rest) (+ n (sum rest)))
                 (_ 0)))
             {}
             (sum (quote (1 2 3 4)))
@@ -3990,8 +3991,8 @@ fn compile_and_interpret_agree_on_a_sexpr_match() {
 fn compile_dispatches_a_function_that_reads_a_global_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defvar (counter i32) 41)
-        (defun read-counter () i32 counter)
+        (defvar (counter int) 41)
+        (defun read-counter () int counter)
         (compile read-counter)
         (read-counter)
         "#,
@@ -4011,8 +4012,8 @@ fn compile_dispatches_a_function_that_reads_a_global_to_native_code() {
 fn compile_dispatches_a_function_that_writes_a_global_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defvar (counter i32) 0)
-        (defun bump-counter () i32 (setf counter (+ counter 1)))
+        (defvar (counter int) 0)
+        (defun bump-counter () int (setf counter (+ counter 1)))
         (compile bump-counter)
         (bump-counter)
         (bump-counter)
@@ -4031,8 +4032,8 @@ fn compile_dispatches_a_function_that_writes_a_global_to_native_code() {
 fn compile_of_a_function_referencing_an_option_typed_global_round_trips() {
     let v = run_with_compiler(
         r#"
-        (defvar (maybe Option<i32>) (Option::some 42))
-        (defun read-maybe () i32 (match maybe ((Some x) x) ((None) 0)))
+        (defvar (maybe Option<int>) (Option::some 42))
+        (defun read-maybe () int (match maybe ((Some x) x) ((None) 0)))
         (compile read-maybe)
         (read-maybe)
         "#,
@@ -4050,8 +4051,8 @@ fn compile_of_a_function_referencing_an_option_typed_global_round_trips() {
 fn compile_of_a_function_referencing_a_none_typed_global_round_trips() {
     let v = run_with_compiler(
         r#"
-        (defvar (maybe Option<i32>) (Option::none))
-        (defun read-maybe () i32 (match maybe ((Some x) x) ((None) -1)))
+        (defvar (maybe Option<int>) (Option::none))
+        (defun read-maybe () int (match maybe ((Some x) x) ((None) -1)))
         (compile read-maybe)
         (read-maybe)
         "#,
@@ -4072,8 +4073,8 @@ fn compile_of_a_function_referencing_a_none_typed_global_round_trips() {
 fn compile_can_set_an_option_typed_global_and_the_interpreter_sees_the_write() {
     let v = run_with_compiler(
         r#"
-        (defvar (maybe Option<i32>) (Option::none))
-        (defun set-maybe () i32 (progn (setf maybe (Option::some 7)) 0))
+        (defvar (maybe Option<int>) (Option::none))
+        (defun set-maybe () int (progn (setf maybe (Option::some 7)) 0))
         (compile set-maybe)
         (set-maybe)
         (match maybe ((Some x) x) ((None) -1))
@@ -4098,7 +4099,7 @@ fn compile_of_a_function_referencing_a_user_defenum_global_round_trips() {
         r#"
         (defenum color (red) (green) (blue))
         (defvar (c color) (color::green))
-        (defun read-c () i32 (match c ((red) 1) ((green) 2) ((blue) 3)))
+        (defun read-c () int (match c ((red) 1) ((green) 2) ((blue) 3)))
         (compile read-c)
         (read-c)
         "#,
@@ -4118,9 +4119,9 @@ fn compile_of_a_function_referencing_a_user_defenum_global_round_trips() {
 fn compile_of_a_function_referencing_a_payload_defenum_global_round_trips() {
     let v = run_with_compiler(
         r#"
-        (defenum shape (Circle i32) (Rect i32 i32))
+        (defenum shape (Circle int) (Rect int int))
         (defvar (s shape) (shape::Rect 3 4))
-        (defun area () i32 (match s ((Circle r) (* r r)) ((Rect w h) (* w h))))
+        (defun area () int (match s ((Circle r) (* r r)) ((Rect w h) (* w h))))
         (compile area)
         (area)
         "#,
@@ -4141,9 +4142,9 @@ fn compile_of_a_function_referencing_a_payload_defenum_global_round_trips() {
 fn compile_can_set_a_defenum_global_and_the_interpreter_sees_the_write() {
     let v = run_with_compiler(
         r#"
-        (defenum shape (Circle i32) (Rect i32 i32))
+        (defenum shape (Circle int) (Rect int int))
         (defvar (s shape) (shape::Circle 1))
-        (defun set-s () i32 (progn (setf s (shape::Circle 7)) 0))
+        (defun set-s () int (progn (setf s (shape::Circle 7)) 0))
         (compile set-s)
         (set-s)
         (match s ((Circle r) r) ((Rect w h) (+ w h)))
@@ -4158,7 +4159,7 @@ fn compile_can_set_a_defenum_global_and_the_interpreter_sees_the_write() {
 
 /// A *generic* `defenum` global: the variant's declared field type is the
 /// type parameter `T`, so decoding must substitute the global's concrete
-/// argument (`Maybe<i32>` -> `T = i32`) into it — `data_variant_field_types`'
+/// argument (`Maybe<int>` -> `T = int`) into it — `data_variant_field_types`'
 /// `subst_apply` path, which `Option`/`Result` (whose field types *are* the
 /// args) never exercise.
 #[test]
@@ -4166,8 +4167,8 @@ fn compile_of_a_function_referencing_a_generic_defenum_global_round_trips() {
     let v = run_with_compiler(
         r#"
         (defenum Maybe<T> (Just T) (Nothing))
-        (defvar (m Maybe<i32>) (Maybe::Just 42))
-        (defun read-m () i32 (match m ((Just x) x) ((Nothing) -1)))
+        (defvar (m Maybe<int>) (Maybe::Just 42))
+        (defun read-m () int (match m ((Just x) x) ((Nothing) -1)))
         (compile read-m)
         (read-m)
         "#,
@@ -4201,8 +4202,8 @@ fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
         (defvar (maybe Option<string>) (Option::some "hello"))
         (defun touch-maybe () string (match maybe ((Some s) s) ((None) "")))
         (compile touch-maybe)
-        (defvar (scratch Vector<i32>) (Vector::new))
-        (defvar (n i32) 20000)
+        (defvar (scratch Vector<int>) (Vector::new))
+        (defvar (n int) 20000)
         (loop
           (if (eq n 0)
               (break)
@@ -4226,8 +4227,8 @@ fn compile_of_a_function_referencing_a_str_defenum_global_survives_gc() {
         (defvar (who named) (named::N "hello"))
         (defun touch-who () string (match who ((N s) s) ((Anon) "")))
         (compile touch-who)
-        (defvar (scratch Vector<i32>) (Vector::new))
-        (defvar (n i32) 20000)
+        (defvar (scratch Vector<int>) (Vector::new))
+        (defvar (n int) 20000)
         (loop
           (if (eq n 0)
               (break)
@@ -4253,7 +4254,7 @@ fn compile_of_a_function_referencing_a_str_defenum_global_survives_gc() {
 fn compile_dispatches_a_function_with_an_untaken_panic_branch_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun safe-add ((a i32) (b i32)) i32 (if (eq b 0) (panic "b is zero") (+ a b)))
+        (defun safe-add ((a int) (b int)) int (if (eq b 0) (panic "b is zero") (+ a b)))
         (compile safe-add)
         (safe-add 10 2)
         "#,
@@ -4328,9 +4329,9 @@ fn compile_returns_a_selected_char_literal_across_the_jit_boundary() {
 fn compile_dispatches_a_builtin_operator_reified_as_a_value_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun apply2 ((f (fn (i32 i32) i32)) (a i32) (b i32)) i32 (f a b))
+        (defun apply2 ((f (fn (int int) int)) (a int) (b int)) int (f a b))
         (compile apply2)
-        (defun use-plus ((a i32) (b i32)) i32 (apply2 + a b))
+        (defun use-plus ((a int) (b int)) int (apply2 + a b))
         (compile use-plus)
         (use-plus 3 4)
         "#,
@@ -4346,13 +4347,13 @@ fn compile_dispatches_a_builtin_operator_reified_as_a_value_to_native_code() {
 fn compile_dispatches_a_user_defined_method_reified_as_a_value_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
-        (defstruct point (x i32))
-        (defmethod double ((self point)) i32 (* self::x 2))
+        (defstruct point (x int))
+        (defmethod double ((self point)) int (* self::x 2))
         (compile point::x)
         (compile point::double)
-        (defun apply1 ((f (fn (point) i32)) (p point)) i32 (f p))
+        (defun apply1 ((f (fn (point) int)) (p point)) int (f p))
         (compile apply1)
-        (defun use-double ((p point)) i32 (apply1 double p))
+        (defun use-double ((p point)) int (apply1 double p))
         (compile use-double)
         (use-double (point::new 21))
         "#,
@@ -4361,7 +4362,7 @@ fn compile_dispatches_a_user_defined_method_reified_as_a_value_to_native_code() 
 }
 
 /// `(quote (1 2 3))` compiles to the same `compile-construct-sexpr`
-/// machinery an ordinary `(Cons (i32 1) ...)` construction already uses
+/// machinery an ordinary `(Cons (int 1) ...)` construction already uses
 /// (`ast_bridge::translate_quote`) — a compiled function can build a quoted
 /// literal, and an ordinary compiled `match`-based `sum` (already proven
 /// correct against `Sexpr` scrutinees elsewhere in this file) can consume it.
@@ -4370,7 +4371,7 @@ fn compile_dispatches_a_function_that_constructs_a_quoted_list_to_native_code() 
     let v = eval_ok_with_compiler(
         r#"
         (defun make-quoted () Option<Sexpr> (quote (1 2 3)))
-        (defun sum ((s Option<Sexpr>)) i32 (match s ((cons (i32 n) rest) (+ n (sum rest))) (_ 0)))
+        (defun sum ((s Option<Sexpr>)) int (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
         (compile make-quoted)
         (compile sum)
         (sum (make-quoted))
@@ -4385,7 +4386,7 @@ fn compile_dispatches_a_function_that_constructs_a_quoted_list_to_native_code() 
 fn compile_and_interpret_agree_on_a_quoted_list() {
     let prog = r#"
         (defun make-quoted () Option<Sexpr> (quote (1 2 3)))
-        (defun sum ((s Option<Sexpr>)) i32 (match s ((cons (i32 n) rest) (+ n (sum rest))) (_ 0)))
+        (defun sum ((s Option<Sexpr>)) int (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
     "#;
     let compiled = eval_ok_with_compiler(&format!("{}\n(compile make-quoted)\n(compile sum)\n(sum (make-quoted))", prog));
     let interpreted = eval_ok(&format!("{}\n(sum (make-quoted))", prog));
@@ -4454,7 +4455,7 @@ fn compile_of_a_function_quoting_a_path_round_trips() {
 fn compile_of_a_function_matching_a_quoted_symbol_dispatches_by_tag() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun q () i32 (match (the Option<Sexpr> (quote foo)) ((sym _) 1) (_ 0)))
+        (defun q () int (match (the Option<Sexpr> (quote foo)) ((sym _) 1) (_ 0)))
         (compile q)
         (q)
         "#,
@@ -4475,15 +4476,15 @@ fn compile_of_a_function_matching_a_quoted_symbol_dispatches_by_tag() {
 // with a *runtime* index. These are the primitive layer every `Iter`
 // combinator over a `Vector` bottoms out in.
 
-/// `push` (grow) then `get` (read back) an `i32` element — kind `1`, so the
+/// `push` (grow) then `get` (read back) an `int` element — kind `1`, so the
 /// element is `shl 3`-tagged on the way in and `ashr 3`-untagged on the way
 /// out.
 #[test]
 fn compile_dispatches_vector_push_and_get_of_an_int_element_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun f () i32
-          (let ((v (the Vector<i32> (Vector::new))))
+        (defun f () int
+          (let ((v (the Vector<int> (Vector::new))))
             (push v 10)
             (push v 20)
             (push v 30)
@@ -4502,8 +4503,8 @@ fn compile_dispatches_vector_push_and_get_of_an_int_element_to_native_code() {
 fn compile_dispatches_vector_set_in_place_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun f () i32
-          (let ((v (the Vector<i32> (Vector::new))))
+        (defun f () int
+          (let ((v (the Vector<int> (Vector::new))))
             (push v 10)
             (push v 20)
             (set v 0 99)
@@ -4522,12 +4523,12 @@ fn compile_dispatches_vector_set_in_place_to_native_code() {
 fn compile_dispatches_vector_len_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun f () i32
-          (let ((v (the Vector<i32> (Vector::new))))
+        (defun f () int
+          (let ((v (the Vector<int> (Vector::new))))
             (push v 10)
             (push v 20)
             (push v 30)
-            (as i32 (len v))))
+            (as int (len v))))
         (compile f)
         (f)
         "#,
@@ -4544,8 +4545,8 @@ fn compile_dispatches_vector_len_to_native_code() {
 fn compile_dispatches_vector_pop_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun f () i32
-          (let ((v (the Vector<i32> (Vector::new))))
+        (defun f () int
+          (let ((v (the Vector<int> (Vector::new))))
             (push v 10)
             (push v 20)
             (push v 30)
@@ -4564,12 +4565,12 @@ fn compile_dispatches_vector_pop_to_native_code() {
 fn compile_dispatches_vector_pop_shrinks_len_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun f () i32
-          (let ((v (the Vector<i32> (Vector::new))))
+        (defun f () int
+          (let ((v (the Vector<int> (Vector::new))))
             (push v 10)
             (push v 20)
             (match (pop v) ((Some x) x) ((None) -1))
-            (as i32 (len v))))
+            (as int (len v))))
         (compile f)
         (f)
         "#,
@@ -4585,8 +4586,8 @@ fn compile_dispatches_vector_pop_shrinks_len_to_native_code() {
 fn compile_dispatches_vector_pop_of_an_empty_vector_returns_none() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun f () i32
-          (let ((v (the Vector<i32> (Vector::new))))
+        (defun f () int
+          (let ((v (the Vector<int> (Vector::new))))
             (match (pop v) ((Some x) x) ((None) -1))))
         (compile f)
         (f)
@@ -4605,11 +4606,11 @@ fn compile_dispatches_vector_pop_of_an_empty_vector_returns_none() {
 fn compile_dispatches_vector_get_of_a_passthrough_string_element_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun f () i32
+        (defun f () int
           (let ((v (the Vector<string> (Vector::new))))
             (push v "hi")
             (push v "world")
-            (as i32 (length (get v 1)))))
+            (as int (length (get v 1)))))
         (compile f)
         (f)
         "#,
@@ -4618,14 +4619,14 @@ fn compile_dispatches_vector_get_of_a_passthrough_string_element_to_native_code(
     assert_eq!(v, Value::Int(5), "\"world\" has 5 characters");
 }
 
-/// The JIT result of a function summing a `Vector<i32>` by index must match
+/// The JIT result of a function summing a `Vector<int>` by index must match
 /// the interpreter's result for the same source — the end-to-end agreement
 /// check every other compile test pairs with its representation proof.
 #[test]
 fn compile_of_a_vector_summing_function_agrees_with_the_interpreter() {
     let src = r#"
-        (defun build-and-sum () i32
-          (let ((v (the Vector<i32> (Vector::new))))
+        (defun build-and-sum () int
+          (let ((v (the Vector<int> (Vector::new))))
             (push v 3)
             (push v 4)
             (push v 5)
@@ -4652,18 +4653,18 @@ fn compile_of_a_vector_summing_function_agrees_with_the_interpreter() {
 // all composed together.
 
 /// The minimal `Iter` end-to-end case: a `doiter` loop (expands to
-/// `while-let` + `next` on a `vector-iter<i32>`) summing a `Vector<i32>`,
+/// `while-let` + `next` on a `vector-iter<int>`) summing a `Vector<int>`,
 /// compiled and run natively — its result must match the interpreter's.
 #[test]
 fn compile_transitively_compiles_a_doiter_loop_over_a_vector() {
     let src = r#"
-        (defun sum-vec ((v Vector<i32>)) i32
-          (let ((total (the i32 0)))
+        (defun sum-vec ((v Vector<int>)) int
+          (let ((total (the int 0)))
             (doiter (x (iter v))
               (setf total (+ total x)))
             total))
-        (defun run () i32
-          (let ((v (the Vector<i32> (Vector::new))))
+        (defun run () int
+          (let ((v (the Vector<int> (Vector::new))))
             (push v 3) (push v 4) (push v 5)
             (sum-vec v)))
     "#;
@@ -4674,18 +4675,18 @@ fn compile_transitively_compiles_a_doiter_loop_over_a_vector() {
 }
 
 /// The `member` combinator (`where (Iter I (Item A)) (Eq A)`) over a
-/// `Vector<i32>`: transitively compiling it drags in `vector-iter::next`
+/// `Vector<int>`: transitively compiling it drags in `vector-iter::next`
 /// *and* the element type's `Eq` instance (`i32::equals`). Returns the
 /// membership result via an `if` so the JIT boundary sees a plain `i64`.
 #[test]
 fn compile_transitively_compiles_the_member_combinator_over_a_vector() {
     let src = r#"
-        (defun has-it ((v Vector<i32>) (needle i32)) i32
+        (defun has-it ((v Vector<int>) (needle int)) int
           (if (member needle (iter v)) 1 0))
-        (defun run () i32
-          (let ((v (the Vector<i32> (Vector::new))))
+        (defun run () int
+          (let ((v (the Vector<int> (Vector::new))))
             (push v 10) (push v 20) (push v 30)
-            (+ (* (the i32 10) (has-it v 20)) (has-it v 99))))
+            (+ (* (the int 10) (has-it v 20)) (has-it v 99))))
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(run)")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile has-it)\n(compile run)\n(run)")).expect("compiled failed");
@@ -4700,11 +4701,11 @@ fn compile_transitively_compiles_the_member_combinator_over_a_vector() {
 #[test]
 fn compile_transitively_compiles_the_map_combinator_over_a_vector() {
     let src = r#"
-        (defun double-all ((v Vector<i32>)) i32
-          (let ((out (map (iter v) (lambda ((x i32)) i32 (* x 2)))))
+        (defun double-all ((v Vector<int>)) int
+          (let ((out (map (iter v) (lambda ((x int)) int (* x 2)))))
             (+ (get out 0) (get out 2))))
-        (defun run () i32
-          (let ((v (the Vector<i32> (Vector::new))))
+        (defun run () int
+          (let ((v (the Vector<int> (Vector::new))))
             (push v 1) (push v 2) (push v 3)
             (double-all v)))
     "#;
@@ -4731,13 +4732,13 @@ fn compile_transitively_compiles_the_map_combinator_over_a_vector() {
 #[test]
 fn compile_transitively_compiles_iteration_over_a_hashtable() {
     let src = r#"
-        (defun sum-values ((ht HashTable<i32,i32>)) i32
-          (let ((total (the i32 0)))
+        (defun sum-values ((ht HashTable<int,int>)) int
+          (let ((total (the int 0)))
             (doiter (e (iter ht))
               (setf total (+ total (cdr e))))
             total))
-        (defun run () i32
-          (let ((ht (the HashTable<i32,i32> (HashTable::new))))
+        (defun run () int
+          (let ((ht (the HashTable<int,int> (HashTable::new))))
             (set ht 1 10)
             (set ht 2 20)
             (set ht 3 30)
@@ -4756,11 +4757,11 @@ fn compile_transitively_compiles_iteration_over_a_hashtable() {
 fn compile_dispatches_hashtable_count_and_keys_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun run () i32
-          (let ((ht (the HashTable<i32,i32> (HashTable::new))))
+        (defun run () int
+          (let ((ht (the HashTable<int,int> (HashTable::new))))
             (set ht 1 10)
             (set ht 2 20)
-            (+ (* (the i32 100) (as i32 (count ht))) (as i32 (len (keys ht))))))
+            (+ (* (the int 100) (as int (count ht))) (as int (len (keys ht))))))
         (compile run)
         (run)
         "#,
@@ -4786,8 +4787,8 @@ fn compile_dispatches_hashtable_count_and_keys_to_native_code() {
 fn compile_dispatches_hashtable_get_of_a_present_key_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun run () i32
-          (let ((ht (the HashTable<i32,i32> (HashTable::new))))
+        (defun run () int
+          (let ((ht (the HashTable<int,int> (HashTable::new))))
             (set ht 1 100)
             (unwrap-or (get ht 1) 0)))
         (compile run)
@@ -4806,10 +4807,10 @@ fn compile_dispatches_hashtable_get_of_a_present_key_to_native_code() {
 fn compile_dispatches_hashtable_get_of_an_absent_key_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun run () i32
-          (let ((ht (the HashTable<i32,i32> (HashTable::new))))
+        (defun run () int
+          (let ((ht (the HashTable<int,int> (HashTable::new))))
             (set ht 1 100)
-            (unwrap-or (get ht (the i32 99)) -1)))
+            (unwrap-or (get ht (the int 99)) -1)))
         (compile run)
         (run)
         "#,
@@ -4824,11 +4825,11 @@ fn compile_dispatches_hashtable_get_of_an_absent_key_to_native_code() {
 fn compile_dispatches_hashtable_remove_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun run () i32
-          (let ((ht (the HashTable<i32,i32> (HashTable::new))))
+        (defun run () int
+          (let ((ht (the HashTable<int,int> (HashTable::new))))
             (set ht 1 100)
             (let ((removed (unwrap-or (remove ht 1) 0)))
-              (+ (* (the i32 1000) removed) (unwrap-or (get ht 1) 0)))))
+              (+ (* (the int 1000) removed) (unwrap-or (get ht 1) 0)))))
         (compile run)
         (run)
         "#,
@@ -4845,10 +4846,10 @@ fn compile_dispatches_hashtable_remove_to_native_code() {
 fn compile_dispatches_hashtable_get_of_a_passthrough_string_value_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun run () i32
-          (let ((ht (the HashTable<i32,string> (HashTable::new))))
+        (defun run () int
+          (let ((ht (the HashTable<int,string> (HashTable::new))))
             (set ht 1 "hello")
-            (as i32 (length (unwrap-or (get ht 1) "")))))
+            (as int (length (unwrap-or (get ht 1) "")))))
         (compile run)
         (run)
         "#,
@@ -4870,7 +4871,7 @@ fn compile_dispatches_hashtable_get_of_a_passthrough_string_value_to_native_code
 fn compile_dispatches_char_equalp() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun same-letter ((a char) (b char)) i32
+        (defun same-letter ((a char) (b char)) int
           (if (equalp a b) (if (equal a b) 2 1) 0))
         (compile same-letter)
         (+ (* 100 (same-letter #\A #\a))
@@ -4889,7 +4890,7 @@ fn compile_dispatches_char_equalp() {
 fn compile_dispatches_string_equalp() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun same-word ((a string) (b string)) i32
+        (defun same-word ((a string) (b string)) int
           (if (equalp a b) (if (equal a b) 2 1) 0))
         (compile same-word)
         (+ (* 100 (same-word "ABC" "abc"))
@@ -4933,13 +4934,13 @@ fn compile_dispatches_f64_arithmetic() {
     assert!((v - 8.0).abs() < 1e-9, "expected 8.0, got {}", v);
 }
 
-/// `mod` on `i64`/`i32` is floored (CL, sign of the divisor) in both the
+/// `mod` on `i64`/`int` is floored (CL, sign of the divisor) in both the
 /// interpreter (`eval_int_builtin`) and compiled code (`rt_int_mod`) — this
 /// locks the two paths together for a negative dividend, where floored and
 /// truncated diverge (`-7 mod 3 = 2`, not `-1`).
 #[test]
 fn compile_dispatches_i32_floored_mod_and_agrees_with_the_interpreter() {
-    let src = "(defun m ((a i32) (b i32)) i32 (mod a b))";
+    let src = "(defun m ((a int) (b int)) int (mod a b))";
     let call = "(m -7 3)";
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile m)\n{call}")).expect("compiled failed");
@@ -4974,13 +4975,13 @@ fn compile_dispatches_f64_mod_and_rem_floored_vs_truncated() {
 #[test]
 fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
     let cases = [
-        ("(defun f ((x i32)) i32 (abs x))", "(f -7)"),
-        ("(defun f ((a i32) (b i32)) i32 (gcd a b))", "(f -12 18)"),
-        ("(defun f ((a i32) (b i32)) i32 (lcm a b))", "(f 4 6)"),
-        ("(defun f ((a i32) (b i32)) i32 (rem a b))", "(f -7 3)"),
-        ("(defun f ((x i32)) i32 (signum x))", "(f -123456789)"),
-        ("(defun f ((a bignum) (b bignum)) bignum (gcd a b))", "(f (int->bignum 48) (int->bignum 36))"),
-        ("(defun f ((a bignum) (b bignum)) bignum (expt a b))", "(f (int->bignum 2) (int->bignum 64))"),
+        ("(defun f ((x int)) int (abs x))", "(f -7)"),
+        ("(defun f ((a int) (b int)) int (gcd a b))", "(f -12 18)"),
+        ("(defun f ((a int) (b int)) int (lcm a b))", "(f 4 6)"),
+        ("(defun f ((a int) (b int)) int (rem a b))", "(f -7 3)"),
+        ("(defun f ((x int)) int (signum x))", "(f -123456789)"),
+        ("(defun f ((a int) (b int)) int (gcd a b))", "(f 480000000000000000000 36)"),
+        ("(defun f ((a int) (b int)) int (expt a b))", "(f 2 64)"),
         ("(defun f ((a ratio) (b ratio)) ratio (mod a b))", "(f -7/2 3/2)"),
         ("(defun f ((a ratio) (b ratio)) ratio (expt a b))", "(f 2/3 (int->ratio 3))"),
     ];
@@ -5004,7 +5005,7 @@ fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
 fn compile_of_a_user_function_named_like_a_libm_symbol_does_not_collide() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun pow ((a i32) (b i32)) i32 (+ a b))
+        (defun pow ((a int) (b int)) int (+ a b))
         (defun fexpt ((a f64) (b f64)) f64 (expt a b))
         (compile pow)
         (compile fexpt)
@@ -5023,7 +5024,7 @@ fn compile_of_a_user_function_named_like_a_libm_symbol_does_not_collide() {
 #[test]
 fn compile_dispatches_f64_comparisons_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun classify ((a f64) (b f64)) i32
+        (defun classify ((a f64) (b f64)) int
           (if (< a b) 1
           (if (= a b) 2
           (if (> a b) 3 4))))
@@ -5077,25 +5078,26 @@ fn compile_dispatches_f64_transcendental_functions_and_agrees_with_the_interpret
 }
 
 /// `max`/`min` (`icmp`+`select`, branch-free) for every numeric type:
-/// `i32`/`i64` (bare `icmp`), `f64` (`llvm.maxnum.f64`/`llvm.minnum.f64`),
-/// and `bignum`/`ratio` (their three-way `rt_*_cmp` plus `select`).
+/// `i32` (bare `icmp`), `f64` (`llvm.maxnum.f64`/`llvm.minnum.f64`), `int`
+/// (the fixnum fast path, else `rt_integer_cmp`) and `ratio` (its three-way
+/// `rt_ratio_cmp` plus `select`).
 #[test]
 fn compile_dispatches_max_min_across_every_numeric_type_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun combine ((a i32) (b i32) (x f64) (y f64) (n bignum) (o bignum) (p ratio) (q ratio)) i32
-          (+ (max a b) (+ (min a b)
+        (defun combine ((a i32) (b i32) (x f64) (y f64) (n int) (o int) (p ratio) (q ratio)) int
+          (+ (as int (max a b)) (+ (as int (min a b))
              (+ (float->int (max x y)) (+ (float->int (min x y))
-                (+ (bignum->int (max n o)) (+ (bignum->int (min n o))
-                   (+ (bignum->int (ratio->bignum (max p q))) (bignum->int (ratio->bignum (min p q)))))))))))
+                (+ (max n o) (+ (min n o)
+                   (+ (ratio->int (max p q)) (ratio->int (min p q))))))))))
     "#;
-    let args = "3 7 1.0 5.0 (int->bignum 20) (int->bignum 9) (int->ratio 30) (int->ratio 11)";
+    let args = "3 7 1.0 5.0 20 9 (int->ratio 30) (int->ratio 11)";
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine {args})")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine {args})")).expect("compiled failed");
     assert_eq!(compiled, interpreted, "compiled max/min agree with the interpreter across every numeric type");
 }
 
 /// The bitwise catalog (`logand`/`logior`/`logxor`/`lognot`/`ash`/`logbitp`/
-/// `logcount`/`logtest`/`integer-length`) on `i32`: `logand`/`logior`/
+/// `logcount`/`logtest`/`integer-length`) on `int`: `logand`/`logior`/
 /// `logxor`/`lognot` are bare LLVM instructions, `ash`/`logbitp`/`logcount`/
 /// `integer-length` lower to `rt_int_*` shims (a variable shift/count past
 /// the operand's bit width being undefined behavior in LLVM, unlike this
@@ -5104,14 +5106,14 @@ fn compile_dispatches_max_min_across_every_numeric_type_and_agrees_with_the_inte
 #[test]
 fn compile_dispatches_i32_bitwise_operators_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun combine ((a i32) (b i32)) i32
+        (defun combine ((a int) (b int)) int
           (+ (logand a b) (+ (logior a b) (+ (logxor a b) (+ (lognot a)
              (+ (ash a 2) (+ (logcount a) (+ (integer-length a)
                 (+ (if (logbitp a 1) 1 0) (if (logtest a b) 1 0))))))))))
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine 12 10)")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine 12 10)")).expect("compiled failed");
-    assert_eq!(compiled, interpreted, "compiled i32 bitwise operators agree with the interpreter");
+    assert_eq!(compiled, interpreted, "compiled int bitwise operators agree with the interpreter");
 }
 
 /// The builtins that had no compiled lowering, now that they do.
@@ -5121,7 +5123,7 @@ fn compile_dispatches_i32_bitwise_operators_and_agrees_with_the_interpreter() {
 /// become uncompilable. It had three rows, and this covers all three:
 /// `string::upcase`/`downcase` (`rt_str_upcase`/`rt_str_downcase`), the
 /// `Option`-returning conversions (`rt_int_fits`/`rt_int_fits_char`/
-/// `rt_f64_fits_f32` plus the island's `build-try-option`), and `bignum`'s
+/// `rt_f64_fits_f32` plus the island's `build-try-option`), and `int`'s
 /// remaining bitwise catalog.
 ///
 /// None of these has a prelude caller, which is why none of them shows up in
@@ -5131,16 +5133,16 @@ fn compile_dispatches_i32_bitwise_operators_and_agrees_with_the_interpreter() {
 fn the_builtins_that_used_to_block_compilation_now_lower() {
     let src = r#"
         (defun su ((s string)) string (append (upcase s) (downcase s)))
-        (defun bb ((b bignum)) bignum (+ (logcount b) (integer-length b)))
-        (defun bp ((b bignum)) bool (if (logbitp b 3) (logtest b (as bignum 7)) false))
-        (defun tc ((n i32)) i32 (match (try-as char n) ((some c) (as i32 (char->int c))) ((none) -1)))
-        (defun tu ((n i32)) i32 (match (try-as u8 n) ((some v) (as i32 v)) ((none) -1)))
-        (defun tf ((x f64)) i32 (match (try-as f32 x) ((some v) 1) ((none) 0)))
-        (defun tw ((x f32)) i32 (match (try-as f64 x) ((some v) 1) ((none) 0)))
-        (defun all () i32
+        (defun bb ((b int)) int (+ (logcount b) (integer-length b)))
+        (defun bp ((b int)) bool (if (logbitp b 3) (logtest b 7) false))
+        (defun tc ((n int)) int (match (try-as char n) ((some c) (as int (char->int c))) ((none) -1)))
+        (defun tu ((n int)) int (match (try-as u8 n) ((some v) (as int v)) ((none) -1)))
+        (defun tf ((x f64)) int (match (try-as f32 x) ((some v) 1) ((none) 0)))
+        (defun tw ((x f32)) int (match (try-as f64 x) ((some v) 1) ((none) 0)))
+        (defun all () int
           (+ (length (su "Ab"))
-             (+ (as i32 (bignum->int (bb (as bignum 255))))
-                (+ (if (bp (as bignum 255)) 1 0)
+             (+ (bb 255)
+                (+ (if (bp 255) 1 0)
                    (+ (tc 65) (+ (tc 55296) (+ (tu 200) (+ (tu 300)
                       (+ (tf 0.5) (+ (tf 0.1) (tw (as f32 0.5)))))))))))) 
     "#;
@@ -5164,29 +5166,29 @@ fn the_builtins_that_used_to_block_compilation_now_lower() {
     assert_eq!(compiled, Value::Int(286));
 }
 
-/// The byte-specifier family compiles at a width that is not `i32`, and at
-/// `bignum`.
+/// The byte-specifier family compiles at a width that is not `int`, and at
+/// `int` past the fixnum range.
 ///
 /// These are generic functions bounded by `Bits`, so each call site
 /// monomorphizes to its own specialization — the ordinary path, but one that
-/// only opened when the integer moved into the first argument. The `bignum`
-/// half also pulled `bignum::ash` into the island's lowering: it had been
+/// only opened when the integer moved into the first argument. The `int`
+/// half also pulled `int::ash` into the island's lowering: it had been
 /// left out on the grounds that no prelude definition reached it, and
 /// `Bits`'s `shift` impl reaches it.
 #[test]
 fn the_byte_specifier_family_compiles_at_every_width() {
     let src = r#"
         (defun nibble ((x u8)) u8 (ldb x (byte 4 4)))
-        (defun put ((x i32)) i32 (dpb x 255 (byte 8 0)))
+        (defun put ((x int)) int (dpb x 255 (byte 8 0)))
         (defun high ((x u8)) bool (logbitp x 7))
-        (defun wide ((x bignum)) bignum (ash x 100))
+        (defun wide ((x int)) int (ash x 100))
         (defun nand8 ((x u8) (y u8)) u8 (boole boole-nand x y))
-        (defun all () i32
-          (+ (as i32 (nibble (the u8 165)))
+        (defun all () int
+          (+ (as int (nibble (the u8 165)))
              (+ (put 62848)
                 (+ (if (high (the u8 128)) 1 0)
-                   (+ (as i32 (bignum->int (ash (wide (as bignum 1)) -100)))
-                      (as i32 (nand8 (the u8 240) (the u8 60))))))))
+                   (+ (ash (wide 1) -100)
+                      (as int (nand8 (the u8 240) (the u8 60))))))))
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}
 (all)")).expect("interpreted failed");
@@ -5213,7 +5215,7 @@ fn the_byte_specifier_family_compiles_at_every_width() {
 #[test]
 fn compile_dispatches_variadic_arithmetic_and_comparison_sugar() {
     let src = r#"
-        (defun combine ((a i32) (b i32) (c i32)) bool
+        (defun combine ((a int) (b int) (c int)) bool
           (if (< a b c) (= 6 (+ a b c)) false))
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine 1 2 3)")).expect("interpreted failed");
@@ -5239,7 +5241,7 @@ fn compile_dispatches_f64_expt_and_agrees_with_the_interpreter() {
 #[test]
 fn compile_dispatches_float_to_int_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun truncate-it ((x f64)) i32 (float->int x))
+        (defun truncate-it ((x f64)) int (float->int x))
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(truncate-it 7.9)")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile truncate-it)\n(truncate-it 7.9)")).expect("compiled failed");
@@ -5247,66 +5249,72 @@ fn compile_dispatches_float_to_int_and_agrees_with_the_interpreter() {
     assert_eq!(compiled, interpreted, "compiled float->int agrees with the interpreter");
 }
 
-/// `llvm.fptosi.sat` clamps exactly like Rust's `as i32` cast (the
-/// interpreter's own `float_to_int`, `i64::from(*f as i32)`) — unlike a plain
+/// `llvm.fptosi.sat` clamps exactly like Rust's `as int` cast (the
+/// interpreter's own `float_to_int`, `i64::from(*f as int)`) — unlike a plain
 /// `fptosi` instruction, which is a poison value on NaN/out-of-range input.
-/// The saturation point is `i32`'s, not the carrier's: `float->int` returns
+/// The saturation point is `int`'s, not the carrier's: `float->int` returns
 /// the widest fixed-width integer the language has, and since 2026-09-01 that
-/// is `i32`. Covers every edge case that distinction matters for: NaN -> `0`,
-/// `+inf`/an overflowing magnitude -> `i32::MAX`, `-inf`/an underflowing
-/// magnitude -> `i32::MIN`, and one ordinary finite value as a sanity check
-/// that the intrinsic swap didn't change everyday behavior.
+/// is `int`, arbitrary precision: an overflowing magnitude is a bignum, not
+/// a saturated word, and a non-finite float raises in both tiers (there is
+/// no integer to truncate to). One ordinary finite value is the sanity check
+/// that everyday behavior is unchanged.
 #[test]
 fn compile_dispatches_float_to_int_on_nan_and_out_of_range_inputs_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun to-int ((x f64)) i32 (float->int x))
+        (defun to-int ((x f64)) int (float->int x))
     "#;
-    let cases: &[(&str, i64)] = &[
-        ("(/ 0.0 0.0)", 0),                       // NaN -> 0
-        ("(/ 1.0 0.0)", i32::MAX as i64),         // +inf -> i32::MAX
-        ("(/ -1.0 0.0)", i32::MIN as i64),        // -inf -> i32::MIN
-        ("1e300", i32::MAX as i64),               // overflowing magnitude -> i32::MAX
-        ("-1e300", i32::MIN as i64),              // underflowing magnitude -> i32::MIN
-        ("7.9", 7),                               // ordinary finite value, unaffected
+    let cases: &[(&str, Readback)] = &[
+        ("7.9", Readback::Scalar(Value::Int(7))),
+        ("-7.9", Readback::Scalar(Value::Int(-7))),
+        ("1e30", Readback::Bignum("1000000000000000019884624838656".to_string())),
+        ("-1e30", Readback::Bignum("-1000000000000000019884624838656".to_string())),
     ];
     for (expr, expected) in cases {
-        let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(to-int {expr})"))
+        let interpreted = run_readback(&format!("{src}\n(to-int {expr})"))
             .unwrap_or_else(|e| panic!("interpreted failed for {}: {}", expr, e));
-        let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile to-int)\n(to-int {expr})"))
+        let compiled = run_readback(&format!("{src}\n(compile to-int)\n(to-int {expr})"))
             .unwrap_or_else(|e| panic!("compiled failed for {}: {}", expr, e));
-        assert_eq!(interpreted, Value::Int(*expected), "interpreted float->int of {expr}");
+        assert_eq!(interpreted, *expected, "interpreted float->int of {expr}");
         assert_eq!(compiled, interpreted, "compiled float->int of {expr} agrees with the interpreter");
+    }
+    for expr in ["(/ 0.0 0.0)", "(/ 1.0 0.0)", "(/ -1.0 0.0)"] {
+        let interpreted = run_readback(&format!("{src}\n(to-int {expr})"))
+            .expect_err("a non-finite float has no integer to truncate to");
+        let compiled = run_readback(&format!("{src}\n(compile to-int)\n(to-int {expr})"))
+            .expect_err("a non-finite float has no integer to truncate to");
+        let (i, c) = (format!("{interpreted:?}"), format!("{compiled:?}"));
+        assert!(i.contains("is not finite"), "interpreted {expr}: {i}");
+        assert!(c.contains("is not finite"), "compiled {expr}: {c}");
     }
 }
 
-// ---- bignum/ratio compiled representation -------------------------------
+// ---- int (bignum range) / ratio compiled representation -----------------
 //
-// `bignum`/`ratio` are always a tagged `TAG_BOXED` pointer (no native
-// register form the way `f64` has — see `crates/typelisp-rt/src/lib.rs`'s
-// "bignum/ratio compiled representation" section), so a `bignum`/`ratio`
-// literal, arithmetic/comparison, and every conversion method now has a real
-// compiled form (`rt_bignum_*`/`rt_ratio_*`). Each test mirrors an existing
-// interpreter-only case from `tests/bignum_ratio_test.rs`, comparing the
-// compiled result against the interpreted one.
+// An `int` past the fixnum range is a bignum box and a `ratio` is always a
+// box, both a tagged `TAG_BOXED` pointer, so a literal, arithmetic/comparison
+// and every conversion method has a compiled form that goes through the
+// `rt_integer_*`/`rt_ratio_*` shims rather than the fixnum fast path. Each
+// test mirrors an interpreter-only case from `tests/int_ratio_test.rs`,
+// comparing the compiled result against the interpreted one.
 
-/// A `bignum` literal too large for `i64` — `compile-bignum-literal`'s
+/// An `int` literal too large for a fixnum — `compile-bignum-literal`'s
 /// `rt_bignum_new` construction from the literal's embedded sign+digits.
 #[test]
 fn compile_constructs_a_bignum_literal_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun big () bignum 123456789012345678901234567890)
+        (defun big () int 123456789012345678901234567890)
     "#;
     let interpreted = run_readback(&format!("{src}\n(big)")).expect("interpreted failed");
     let compiled = run_readback(&format!("{src}\n(compile big)\n(big)")).expect("compiled failed");
     assert_eq!(compiled, interpreted, "compiled bignum literal agrees with the interpreter");
 }
 
-/// `bignum` arithmetic (`+`/`-`/`*`/`/`/`mod`), each a single `rt_bignum_*`
-/// call.
+/// `int` arithmetic (`+`/`-`/`*`/`/`/`mod`) on bignum-range operands, each
+/// leaving the fixnum fast path for its `rt_integer_*` call.
 #[test]
 fn compile_dispatches_bignum_arithmetic_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun combine ((a bignum) (b bignum)) bignum
+        (defun combine ((a int) (b int)) int
           (+ (* a b) (mod (- a b) b)))
     "#;
     let call = "(combine 123456789012345678901234567890 98765432109876543210)";
@@ -5315,29 +5323,26 @@ fn compile_dispatches_bignum_arithmetic_and_agrees_with_the_interpreter() {
     assert_eq!(compiled, interpreted, "compiled bignum arithmetic agrees with the interpreter");
 }
 
-/// `bignum` division by zero is a fatal, explicitly-checked runtime error
-/// (`rt_bignum_div`'s zero-divisor guard, `fatal`) rather than an unwinding
-/// Rust `panic!` crossing the `extern "C"` boundary — this only exercises
-/// the ordinary non-zero path (a deliberate process abort isn't something
-/// this test suite's harness verifies, matching how `rt_hashtable_get_raw`'s
-/// own "caller already checked" contract isn't abort-tested either).
+/// `int` division with a bignum-range dividend. Division by zero is covered
+/// by `runtime_error_parity_test`; this is the ordinary path.
 #[test]
 fn compile_dispatches_bignum_division_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun quotient ((a bignum) (b bignum)) bignum (/ a b))
+        (defun quotient ((a int) (b int)) int (/ a b))
     "#;
-    let call = "(quotient 100000000000000000000 (int->bignum 3))";
+    let call = "(quotient 100000000000000000000 3)";
     let interpreted = run_readback(&format!("{src}\n{call}")).expect("interpreted failed");
     let compiled = run_readback(&format!("{src}\n(compile quotient)\n{call}")).expect("compiled failed");
     assert_eq!(compiled, interpreted, "compiled bignum division agrees with the interpreter");
 }
 
-/// The six `bignum` comparisons (`<`/`<=`/`>`/`>=`/`=`/`/=`) all derive from
-/// `rt_bignum_cmp`'s three-way result — this exercises each direction.
+/// The six `int` comparisons (`<`/`<=`/`>`/`>=`/`=`/`/=`) on bignum-range
+/// operands all derive from `rt_integer_cmp`'s three-way result — this
+/// exercises each direction.
 #[test]
 fn compile_dispatches_bignum_comparisons_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun compare ((a bignum) (b bignum)) i32
+        (defun compare ((a int) (b int)) int
           (if (< a b) 1
           (if (<= a b) 2
           (if (> a b) 3
@@ -5356,17 +5361,20 @@ fn compile_dispatches_bignum_comparisons_and_agrees_with_the_interpreter() {
     }
 }
 
-/// `int->bignum`/`bignum->int`/`bignum->float`/`float->bignum`/
-/// `bignum->ratio` each lower to a single `rt_bignum_*`/`rt_int_to_bignum`/
-/// `rt_float_to_bignum` call.
+/// The `int` conversions — widening from a narrow width (`int->int`),
+/// narrowing (`int->i32`), `int->float`, `float->int` and `int->ratio` —
+/// each lower to a single `rt_integer_*`/`rt_float_to_int` call, and the
+/// same call handles a fixnum and a bignum-range operand.
 #[test]
 fn compile_dispatches_bignum_conversions_and_agrees_with_the_interpreter() {
     let cases = [
-        ("(defun f ((a i32)) bignum (int->bignum a))", "(f 42)"),
-        ("(defun f ((a bignum)) i32 (bignum->int a))", "(f (int->bignum 42))"),
-        ("(defun f ((a bignum)) f64 (bignum->float a))", "(f (int->bignum 2))"),
-        ("(defun f ((a f64)) bignum (float->bignum a))", "(f 2.0)"),
-        ("(defun f ((a bignum)) ratio (bignum->ratio a))", "(f (int->bignum 5))"),
+        ("(defun f ((a i32)) int (as int a))", "(f 42)"),
+        ("(defun f ((a int)) i32 (as i32 a))", "(f 42)"),
+        ("(defun f ((a int)) f64 (as f64 a))", "(f 2)"),
+        ("(defun f ((a int)) f64 (as f64 a))", "(f 100000000000000000000)"),
+        ("(defun f ((a f64)) int (as int a))", "(f 2.0)"),
+        ("(defun f ((a int)) ratio (as ratio a))", "(f 5)"),
+        ("(defun f ((a int)) ratio (as ratio a))", "(f 100000000000000000000)"),
     ];
     for (def, call) in cases {
         let interpreted = run_readback(&format!("{def}\n{call}")).expect("interpreted failed");
@@ -5375,17 +5383,17 @@ fn compile_dispatches_bignum_conversions_and_agrees_with_the_interpreter() {
     }
 }
 
-/// `try-bignum->int` (`(try-as i32 n)`) — the `Option<i32>`-returning
-/// counterpart of `bignum->int`, compiled as a two-call
-/// `rt_bignum_fits_i32`/`rt_bignum_to_int_raw` sequence (the same
+/// `try-int->i32` (`(try-as i32 n)`) — the `Option<i32>`-returning
+/// counterpart of `int->i32`, compiled as a two-call
+/// `rt_integer_fits`/`rt_integer_narrow` sequence (the same
 /// alloca+branch+merge shape `compile-hashtable-op`'s `get`/`remove` already
 /// use) building a real `Some`/`None` box — exercises both outcomes.
 #[test]
 fn compile_dispatches_try_bignum_to_int_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun try-it ((n bignum)) bool (is-some (try-as i32 n)))
+        (defun try-it ((n int)) bool (is-some (try-as i32 n)))
     "#;
-    for call in ["(try-it (int->bignum 42))", "(try-it 123456789012345678901234567890)"] {
+    for call in ["(try-it 42)", "(try-it 123456789012345678901234567890)"] {
         let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
         let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile try-it)\n{call}")).expect("compiled failed");
         assert_eq!(compiled, interpreted, "compiled try-bignum->int ({call}) agrees with the interpreter");
@@ -5422,7 +5430,7 @@ fn compile_dispatches_ratio_arithmetic_and_agrees_with_the_interpreter() {
 #[test]
 fn compile_dispatches_ratio_comparisons_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun compare ((a ratio) (b ratio)) i32
+        (defun compare ((a ratio) (b ratio)) int
           (if (< a b) 1
           (if (<= a b) 2
           (if (> a b) 3
@@ -5437,17 +5445,17 @@ fn compile_dispatches_ratio_comparisons_and_agrees_with_the_interpreter() {
     }
 }
 
-/// `int->ratio`/`ratio->bignum`/`ratio->float`/`float->ratio`/`numerator`/
-/// `denominator`, each a single `rt_ratio_*`/`rt_int_to_ratio` call.
+/// `int->ratio`/`ratio->int`/`ratio->float`/`float->ratio`/`numerator`/
+/// `denominator`, each a single `rt_ratio_*`/`rt_integer_to_ratio` call.
 #[test]
 fn compile_dispatches_ratio_conversions_and_agrees_with_the_interpreter() {
     let cases = [
-        ("(defun f ((a i32)) ratio (int->ratio a))", "(f 7)"),
-        ("(defun f ((r ratio)) bignum (ratio->bignum r))", "(f 7/2)"),
+        ("(defun f ((a int)) ratio (int->ratio a))", "(f 7)"),
+        ("(defun f ((r ratio)) int (ratio->int r))", "(f 7/2)"),
         ("(defun f ((r ratio)) f64 (ratio->float r))", "(f 1/2)"),
         ("(defun f ((a f64)) ratio (float->ratio a))", "(f 0.5)"),
-        ("(defun f ((r ratio)) bignum (numerator r))", "(f 4/6)"),
-        ("(defun f ((r ratio)) bignum (denominator r))", "(f 4/6)"),
+        ("(defun f ((r ratio)) int (numerator r))", "(f 4/6)"),
+        ("(defun f ((r ratio)) int (denominator r))", "(f 4/6)"),
     ];
     for (def, call) in cases {
         let interpreted = run_readback(&format!("{def}\n{call}")).expect("interpreted failed");
@@ -5468,7 +5476,7 @@ fn compile_dispatches_sexpr_accessors_and_agrees_with_the_interpreter() {
     let cases = [
         // Recursive list walk: `sexpr-consp` steering, `sexpr-cdr` descent.
         (
-            "(defun f ((s Option<Sexpr>)) i32 (if (sexpr-consp s) (+ (the i32 1) (f (sexpr-cdr s))) (the i32 0)))",
+            "(defun f ((s Option<Sexpr>)) int (if (sexpr-consp s) (+ (the int 1) (f (sexpr-cdr s))) (the int 0)))",
             "(f '(10 20 30))",
         ),
         // `sexpr-null`/`sexpr-atom` predicates surface as bools.
@@ -5476,7 +5484,7 @@ fn compile_dispatches_sexpr_accessors_and_agrees_with_the_interpreter() {
         ("(defun f ((s Option<Sexpr>)) bool (sexpr-atom s))", "(f '(1 2))"),
         ("(defun f ((s Option<Sexpr>)) bool (sexpr-symp s))", "(f 'hello)"),
         // Typed payload extractors.
-        ("(defun f ((s Option<Sexpr>)) i32 (sexpr-i32 (sexpr-car s)))", "(f '(42 43))"),
+        ("(defun f ((s Option<Sexpr>)) int (sexpr-int (sexpr-car s)))", "(f '(42 43))"),
         ("(defun f ((s Option<Sexpr>)) bool (sexpr-bool (sexpr-car s)))", "(f '(true))"),
         ("(defun f ((s Option<Sexpr>)) char (sexpr-char (sexpr-car s)))", r#"(f '(#\A #\B))"#),
         ("(defun f ((s Option<Sexpr>)) f64 (sexpr-f64 (sexpr-car s)))", "(f '(2.5))"),
@@ -5502,13 +5510,13 @@ fn compile_dispatches_sexpr_accessors_and_agrees_with_the_interpreter() {
 fn compile_dispatches_a_trait_object_call_through_its_vtable() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Drawable () (draw ((self Self)) i32))
-        (defstruct circle (r i32))
-        (defstruct square (side i32))
-        (impl Drawable circle (draw ((self Self)) i32 1))
-        (impl Drawable square (draw ((self Self)) i32 2))
-        (defun render ((d :dyn Drawable)) i32 (draw d))
-        (defun both () i32 (+ (* 10 (render (circle::new 3))) (render (square::new 4))))
+        (deftrait Drawable () (draw ((self Self)) int))
+        (defstruct circle (r int))
+        (defstruct square (side int))
+        (impl Drawable circle (draw ((self Self)) int 1))
+        (impl Drawable square (draw ((self Self)) int 2))
+        (defun render ((d :dyn Drawable)) int (draw d))
+        (defun both () int (+ (* 10 (render (circle::new 3))) (render (square::new 4))))
         (compile both)
         (both)
         "#,
@@ -5525,15 +5533,15 @@ fn compile_indexes_the_right_vtable_slot_for_each_method() {
     let v = run_with_compiler_and_prelude(
         r#"
         (deftrait Shape ()
-          (draw ((self Self)) i32)
-          (sides ((self Self)) i32))
-        (defstruct tri (n i32))
+          (draw ((self Self)) int)
+          (sides ((self Self)) int))
+        (defstruct tri (n int))
         (impl Shape tri
-          (draw ((self Self)) i32 7)
-          (sides ((self Self)) i32 3))
-        (defun outline ((s :dyn Shape)) i32 (sides s))
-        (defun paint ((s :dyn Shape)) i32 (draw s))
-        (defun both () i32 (+ (* 10 (paint (tri::new 1))) (outline (tri::new 1))))
+          (draw ((self Self)) int 7)
+          (sides ((self Self)) int 3))
+        (defun outline ((s :dyn Shape)) int (sides s))
+        (defun paint ((s :dyn Shape)) int (draw s))
+        (defun both () int (+ (* 10 (paint (tri::new 1))) (outline (tri::new 1))))
         (compile both)
         (both)
         "#,
@@ -5550,20 +5558,20 @@ fn compile_indexes_inherited_vtable_slots_before_the_subtraits_own() {
     let v = run_with_compiler_and_prelude(
         r#"
         (deftrait Base ()
-          (base-a ((self Self)) i32)
-          (base-b ((self Self)) i32))
+          (base-a ((self Self)) int)
+          (base-b ((self Self)) int))
         (deftrait Sub (Base)
-          (sub-c ((self Self)) i32))
-        (defstruct tri (n i32))
+          (sub-c ((self Self)) int))
+        (defstruct tri (n int))
         (impl Base tri
-          (base-a ((self Self)) i32 1)
-          (base-b ((self Self)) i32 2))
+          (base-a ((self Self)) int 1)
+          (base-b ((self Self)) int 2))
         (impl Sub tri
-          (sub-c ((self Self)) i32 3))
-        (defun pa ((s :dyn Sub)) i32 (base-a s))
-        (defun pb ((s :dyn Sub)) i32 (base-b s))
-        (defun pc ((s :dyn Sub)) i32 (sub-c s))
-        (defun all () i32
+          (sub-c ((self Self)) int 3))
+        (defun pa ((s :dyn Sub)) int (base-a s))
+        (defun pb ((s :dyn Sub)) int (base-b s))
+        (defun pc ((s :dyn Sub)) int (sub-c s))
+        (defun all () int
           (+ (* 100 (pa (tri::new 0))) (+ (* 10 (pb (tri::new 0))) (pc (tri::new 0)))))
         (compile all)
         (all)
@@ -5582,20 +5590,20 @@ fn compile_indexes_inherited_vtable_slots_before_the_subtraits_own() {
 fn compile_upcasts_to_a_non_first_supertrait_through_the_conversion_table() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait B () (b-tag ((self Self)) i32))
-        (deftrait C () (c-tag ((self Self)) i32))
-        (deftrait D (B C) (d-tag ((self Self)) i32))
-        (defstruct cell (n i32))
-        (defstruct pair (n i32))
-        (impl B cell (b-tag ((self Self)) i32 1))
-        (impl C cell (c-tag ((self Self)) i32 2))
-        (impl D cell (d-tag ((self Self)) i32 3))
-        (impl B pair (b-tag ((self Self)) i32 4))
-        (impl C pair (c-tag ((self Self)) i32 5))
-        (impl D pair (d-tag ((self Self)) i32 6))
-        (defun only-c ((c :dyn C)) i32 (c-tag c))
-        (defun via ((d :dyn D)) i32 (only-c d))
-        (defun both () i32 (+ (* 10 (via (cell::new 0))) (via (pair::new 0))))
+        (deftrait B () (b-tag ((self Self)) int))
+        (deftrait C () (c-tag ((self Self)) int))
+        (deftrait D (B C) (d-tag ((self Self)) int))
+        (defstruct cell (n int))
+        (defstruct pair (n int))
+        (impl B cell (b-tag ((self Self)) int 1))
+        (impl C cell (c-tag ((self Self)) int 2))
+        (impl D cell (d-tag ((self Self)) int 3))
+        (impl B pair (b-tag ((self Self)) int 4))
+        (impl C pair (c-tag ((self Self)) int 5))
+        (impl D pair (d-tag ((self Self)) int 6))
+        (defun only-c ((c :dyn C)) int (c-tag c))
+        (defun via ((d :dyn D)) int (only-c d))
+        (defun both () int (+ (* 10 (via (cell::new 0))) (via (pair::new 0))))
         (compile both)
         (both)
         "#,
@@ -5611,15 +5619,15 @@ fn compile_upcasts_to_a_non_first_supertrait_through_the_conversion_table() {
 fn compile_upcasts_a_trait_object_boxed_by_interpreted_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait B () (b-tag ((self Self)) i32))
-        (deftrait C () (c-tag ((self Self)) i32))
-        (deftrait D (B C) (d-tag ((self Self)) i32))
-        (defstruct cell (n i32))
-        (impl B cell (b-tag ((self Self)) i32 1))
-        (impl C cell (c-tag ((self Self)) i32 2))
-        (impl D cell (d-tag ((self Self)) i32 3))
-        (defun only-c ((c :dyn C)) i32 (c-tag c))
-        (defun via ((d :dyn D)) i32 (only-c d))
+        (deftrait B () (b-tag ((self Self)) int))
+        (deftrait C () (c-tag ((self Self)) int))
+        (deftrait D (B C) (d-tag ((self Self)) int))
+        (defstruct cell (n int))
+        (impl B cell (b-tag ((self Self)) int 1))
+        (impl C cell (c-tag ((self Self)) int 2))
+        (impl D cell (d-tag ((self Self)) int 3))
+        (defun only-c ((c :dyn C)) int (c-tag c))
+        (defun via ((d :dyn D)) int (only-c d))
         (compile via)
         (via (cell::new 0))
         "#,
@@ -5634,11 +5642,11 @@ fn compile_upcasts_a_trait_object_boxed_by_interpreted_code() {
 fn compile_passes_arguments_through_a_trait_object_call() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Scaler () (scale ((self Self) (k i32)) i32))
-        (defstruct fixed (n i32))
-        (impl Scaler fixed (scale ((self Self) (k i32)) i32 (* self::n k)))
-        (defun apply-scale ((s :dyn Scaler) (k i32)) i32 (scale s k))
-        (defun rec () i32 (apply-scale (fixed::new 6) 7))
+        (deftrait Scaler () (scale ((self Self) (k int)) int))
+        (defstruct fixed (n int))
+        (impl Scaler fixed (scale ((self Self) (k int)) int (* self::n k)))
+        (defun apply-scale ((s :dyn Scaler) (k int)) int (scale s k))
+        (defun rec () int (apply-scale (fixed::new 6) 7))
         (compile rec)
         (rec)
         "#,
@@ -5652,17 +5660,17 @@ fn compile_passes_arguments_through_a_trait_object_call() {
 #[test]
 fn compile_and_interpret_agree_on_a_trait_object_match() {
     let src = r#"
-        (deftrait Drawable () (draw ((self Self)) i32))
-        (defstruct circle (r i32))
-        (defstruct square (side i32))
-        (impl Drawable circle (draw ((self Self)) i32 1))
-        (impl Drawable square (draw ((self Self)) i32 2))
-        (defun area ((d :dyn Drawable)) i32
+        (deftrait Drawable () (draw ((self Self)) int))
+        (defstruct circle (r int))
+        (defstruct square (side int))
+        (impl Drawable circle (draw ((self Self)) int 1))
+        (impl Drawable square (draw ((self Self)) int 2))
+        (defun area ((d :dyn Drawable)) int
           (match d
             ((circle r) (* 100 r))
             ((the square s) s::side)
             (_ 0)))
-        (defun rec () i32 (+ (area (circle::new 3)) (area (square::new 4))))
+        (defun rec () int (+ (area (circle::new 3)) (area (square::new 4))))
         "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src} (rec)")).expect("eval failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src} (compile rec) (rec)")).expect("eval failed");
@@ -5724,12 +5732,12 @@ fn a_macro_expander_can_be_compiled() {
 fn compile_dispatches_when_only_the_dispatching_function_is_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Drawable () (draw ((self Self)) i32))
-        (defstruct circle (r i32))
-        (defstruct square (side i32))
-        (impl Drawable circle (draw ((self Self)) i32 1))
-        (impl Drawable square (draw ((self Self)) i32 2))
-        (defun render ((d :dyn Drawable)) i32 (draw d))
+        (deftrait Drawable () (draw ((self Self)) int))
+        (defstruct circle (r int))
+        (defstruct square (side int))
+        (impl Drawable circle (draw ((self Self)) int 1))
+        (impl Drawable square (draw ((self Self)) int 2))
+        (defun render ((d :dyn Drawable)) int (draw d))
         (compile render)
         (+ (* 10 (render (circle::new 3))) (render (square::new 4)))
         "#,
@@ -5745,13 +5753,13 @@ fn compile_dispatches_when_only_the_dispatching_function_is_compiled() {
 fn compile_dispatches_to_an_impl_added_after_the_call_site_was_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Drawable () (draw ((self Self)) i32))
-        (defstruct circle (r i32))
-        (impl Drawable circle (draw ((self Self)) i32 1))
-        (defun render ((d :dyn Drawable)) i32 (draw d))
+        (deftrait Drawable () (draw ((self Self)) int))
+        (defstruct circle (r int))
+        (impl Drawable circle (draw ((self Self)) int 1))
+        (defun render ((d :dyn Drawable)) int (draw d))
         (compile render)
-        (defstruct square (side i32))
-        (impl Drawable square (draw ((self Self)) i32 2))
+        (defstruct square (side int))
+        (impl Drawable square (draw ((self Self)) int 2))
         (+ (* 10 (render (circle::new 3))) (render (square::new 4)))
         "#,
     )
@@ -5768,14 +5776,14 @@ fn compile_dispatches_to_an_impl_added_after_the_call_site_was_compiled() {
 fn compile_dispatches_a_trait_object_whose_impl_owner_is_generic() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun total ((it :dyn Iter<i32>)) i32
+        (defun total ((it :dyn Iter<int>)) int
           (let ((n 0))
             (loop
               (match (next it)
                 ((Some x) (setf n (+ n x)))
                 (_ (break))))
             n))
-        (defun make-v () Vector<i32> (Vector::new))
+        (defun make-v () Vector<int> (Vector::new))
         (compile total)
         (let ((v (make-v)))
           (push v 10)
@@ -5796,10 +5804,10 @@ fn compile_dispatches_a_trait_object_whose_impl_owner_is_generic() {
 fn compile_dispatches_a_result_carrying_a_user_error_type() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct io-err (code i32))
-        (defun open-it ((ok bool)) Result<i32,io-err>
+        (defstruct io-err (code int))
+        (defun open-it ((ok bool)) Result<int,io-err>
           (if ok (result::ok 7) (result::err (io-err::new 42))))
-        (defun code ((ok bool)) i32
+        (defun code ((ok bool)) int
           (match (open-it ok) ((Ok v) v) ((Err e) e::code)))
         (compile code)
         (+ (* 100 (code true)) (code false))
@@ -5818,7 +5826,7 @@ fn compile_dispatches_a_result_carrying_a_user_error_type() {
 fn compile_dispatches_a_match_on_a_builtin_error_type() {
     let v = run_readback(
         r#"
-        (defun classify ((r Result<i32,ParseIntError>)) string
+        (defun classify ((r Result<int,ParseIntError>)) string
           (match r ((Ok _) "ok") ((Err e) (message e))))
         (compile classify)
         (append (classify (parse-int "12")) (classify (parse-int "xy")))
@@ -5866,9 +5874,9 @@ fn compile_dispatches_message_on_a_dyn_error() {
 fn compile_round_trips_a_unit_typed_struct_field() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct holder (u ()) (k i32))
-        (defun make ((n i32)) holder (holder::new () n))
-        (defun read-k ((h holder)) i32 h::k)
+        (defstruct holder (u ()) (k int))
+        (defun make ((n int)) holder (holder::new () n))
+        (defun read-k ((h holder)) int h::k)
         (compile make)
         (compile read-k)
         (read-k (make 7))
@@ -5885,8 +5893,8 @@ fn a_struct_built_by_compiled_code_reads_back_in_the_interpreter() {
     // writers picked the same word for the `()` slot.
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct holder (u ()) (k i32))
-        (defun make ((n i32)) holder (holder::new () n))
+        (defstruct holder (u ()) (k int))
+        (defun make ((n int)) holder (holder::new () n))
         (compile make)
         (match (make 4) ((new u n) n))
         "#,
@@ -5901,9 +5909,9 @@ fn compile_handles_a_result_with_a_unit_ok_payload() {
     // the prelude's file-writing functions wanted and couldn't have.
     let v = run_readback(
         r#"
-        (defun check ((n i32)) Result<(), string>
+        (defun check ((n int)) Result<(), string>
           (if (> n 0) (result::ok ()) (result::err "negative")))
-        (defun describe ((n i32)) string
+        (defun describe ((n int)) string
           (match (check n) ((ok _) "ok") ((err e) e)))
         (compile check)
         (compile describe)
@@ -5921,7 +5929,7 @@ fn compile_accepts_a_unit_typed_parameter() {
     // plain `0` `encode_crossing_args` sends.
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun takes-unit ((u ()) (n i32)) i32 (progn u n))
+        (defun takes-unit ((u ()) (n int)) int (progn u n))
         (compile takes-unit)
         (takes-unit () 9)
         "#,
@@ -5936,7 +5944,7 @@ fn compile_round_trips_a_vector_of_units() {
     // (`ast_bridge::vector_elem_kind`), not just `defstruct` fields.
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun two-units () i32
+        (defun two-units () int
           (let ((v (the Vector<()> (vector::new))))
             (push v ())
             (push v ())
@@ -5963,9 +5971,9 @@ fn a_module_type_named_vector_keeps_its_own_methods_when_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
-          (pub defstruct vector (a i32))
-          (pub defmethod len ((self vector)) i32 (* 100 self::a))
-          (pub defun call-len ((v vector)) i32 (len v)))
+          (pub defstruct vector (a int))
+          (pub defmethod len ((self vector)) int (* 100 self::a))
+          (pub defun call-len ((v vector)) int (len v)))
         (compile m::call-len)
         (m::call-len (m::vector::new 3))
         "#,
@@ -5981,9 +5989,9 @@ fn a_module_type_named_hashtable_keeps_its_own_methods_when_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
-          (pub defstruct hashtable (a i32) (b i32))
-          (pub defmethod count ((self hashtable)) i32 (+ self::a self::b))
-          (pub defun call-count ((h hashtable)) i32 (count h)))
+          (pub defstruct hashtable (a int) (b int))
+          (pub defmethod count ((self hashtable)) int (+ self::a self::b))
+          (pub defun call-count ((h hashtable)) int (count h)))
         (compile m::call-count)
         (m::call-count (m::hashtable::new 20 22))
         "#,
@@ -5999,12 +6007,12 @@ fn the_real_builtin_vector_still_lowers_from_inside_a_module() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
-          (pub defun total ((v Vector<i32>)) i32
+          (pub defun total ((v Vector<int>)) int
             (let ((sum 0) (i 0))
               (while (< i (len v)) (setf sum (+ sum (get v i))) (setf i (+ i 1)))
               sum)))
         (compile m::total)
-        (let ((v (the Vector<i32> (vector::new))))
+        (let ((v (the Vector<int> (vector::new))))
           (push v 10)
           (push v 32)
           (m::total v))
@@ -6035,30 +6043,30 @@ fn the_real_builtin_vector_still_lowers_from_inside_a_module() {
 /// functions whose name ends in `-c`, so a call names its own side.
 const CONFORMANCE_MODULE: &str = r#"
 (module m
-  (pub defenum expr (num i32) (add expr expr))
+  (pub defenum expr (num int) (add expr expr))
   (use expr)
-  (pub defstruct pt (x i32) (y i32))
+  (pub defstruct pt (x int) (y int))
 
   ;; builders — `-i` stays interpreted, `-c` gets compiled below
-  (pub defun enum-i ((n i32)) expr (num n))
-  (pub defun enum-c ((n i32)) expr (num n))
-  (pub defun struct-i ((n i32)) pt (pt::new n 0))
-  (pub defun struct-c ((n i32)) pt (pt::new n 0))
+  (pub defun enum-i ((n int)) expr (num n))
+  (pub defun enum-c ((n int)) expr (num n))
+  (pub defun struct-i ((n int)) pt (pt::new n 0))
+  (pub defun struct-c ((n int)) pt (pt::new n 0))
   ;; a nested function is always compiled, whether or not anything asks
-  (pub defun enum-nested ((n i32)) expr (labels ((f ((k i32)) expr (num k))) (f n)))
+  (pub defun enum-nested ((n int)) expr (labels ((f ((k int)) expr (num k))) (f n)))
 
   ;; consumers
-  (pub defun take-enum-i ((e expr)) i32 (match e ((num v) v) ((add a b) -1)))
-  (pub defun take-enum-c ((e expr)) i32 (match e ((num v) v) ((add a b) -1)))
-  (pub defun downcast-c ((s Sexpr)) i32 (match s ((the pt p) p::x) (_ -1)))
-  (pub defun downcast-i ((s Sexpr)) i32 (match s ((the pt p) p::x) (_ -1))))
+  (pub defun take-enum-i ((e expr)) int (match e ((num v) v) ((add a b) -1)))
+  (pub defun take-enum-c ((e expr)) int (match e ((num v) v) ((add a b) -1)))
+  (pub defun downcast-c ((s Sexpr)) int (match s ((the pt p) p::x) (_ -1)))
+  (pub defun downcast-i ((s Sexpr)) int (match s ((the pt p) p::x) (_ -1))))
 (compile m::enum-c)
 (compile m::struct-c)
 (compile m::take-enum-c)
 (compile m::downcast-c)
 "#;
 
-/// Runs `expr` with [`CONFORMANCE_MODULE`] in scope, expecting an `i32`.
+/// Runs `expr` with [`CONFORMANCE_MODULE`] in scope, expecting an `int`.
 fn conformance_int(expr: &str) -> i64 {
     match run_with_compiler_and_prelude(&format!("{CONFORMANCE_MODULE}\n{expr}"))
         .expect("eval failed")
@@ -6500,9 +6508,9 @@ fn the_island_runs_a_whole_bridged_defun() {
 fn compile_reads_a_hashtable_field_out_of_a_struct() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defstruct cache (table HashTable<i32,i32>))
-        (defun probe () i32
-          (let ((c (cache::new (the HashTable<i32,i32> (HashTable::new)))))
+        (defstruct cache (table HashTable<int,int>))
+        (defun probe () int
+          (let ((c (cache::new (the HashTable<int,int> (HashTable::new)))))
             (let ((t c::table))
               (set t 1 41)
               (match (get t 1) ((Some n) (+ n 1)) (None 0)))))
@@ -6525,10 +6533,10 @@ fn compile_reads_a_hashtable_field_out_of_a_struct() {
 fn compile_captures_a_hashtable_in_a_closure() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun probe () i32
-          (let ((t (the HashTable<i32,i32> (HashTable::new))))
+        (defun probe () int
+          (let ((t (the HashTable<int,int> (HashTable::new))))
             (set t 1 41)
-            (let ((f (lambda () i32 (match (get t 1) ((Some n) (+ n 1)) (None 0)))))
+            (let ((f (lambda () int (match (get t 1) ((Some n) (+ n 1)) (None 0)))))
               (f))))
         (compile probe)
         (probe)
@@ -6552,8 +6560,8 @@ fn compile_captures_a_hashtable_in_a_closure() {
 #[test]
 fn a_panic_in_an_interpreted_callee_of_compiled_code_is_recoverable() {
     let src = r#"
-        (defun boom ((n i32)) i32 (panic "interpreted boom"))
-        (defun apply-it ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun boom ((n int)) int (panic "interpreted boom"))
+        (defun apply-it ((f (fn (int) int)) (n int)) int (f n))
         (compile apply-it)
         (apply-it boom 1)
     "#;
@@ -6568,8 +6576,8 @@ fn a_panic_in_an_interpreted_callee_of_compiled_code_is_recoverable() {
 #[test]
 fn an_interpreted_callee_of_compiled_code_still_returns_normally() {
     let src = r#"
-        (defun triple ((n i32)) i32 (* n 3))
-        (defun apply-it ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun triple ((n int)) int (* n 3))
+        (defun apply-it ((f (fn (int) int)) (n int)) int (f n))
         (compile apply-it)
         (apply-it triple 7)
     "#;
@@ -6588,7 +6596,7 @@ fn an_interpreted_callee_of_compiled_code_still_returns_normally() {
 /// of the number. The interpreted run got it right, which is what made the
 /// divergence worth pinning here rather than in `format_test`.
 ///
-/// `i32` alongside it: the same lowering for a type that never took the
+/// `int` alongside it: the same lowering for a type that never took the
 /// shortcut, so a regression that broke the constructor path generally would
 /// not hide behind the float case.
 #[test]
@@ -6597,7 +6605,7 @@ fn compiled_format_renders_a_float_parameter_as_a_number() {
         run_and_read(
             r#"
             (defun show ((x f64)) string (format false "~a" x))
-            (defun showi ((n i32)) string (format false "~a" n))
+            (defun showi ((n int)) string (format false "~a" n))
             (compile show)
             (compile showi)
             (append (append (show 2.25) "|") (showi 7))
@@ -6632,7 +6640,7 @@ fn run_compiled(src: &str) -> Value {
 // `the_extreme_i64_literals_...` — that compiled literals like `2^62 - 1` and
 // `i64::MAX` and checked they came back whole. Both were about `i64`, and the
 // case they covered cannot arise since it was removed (2026-09-01): the
-// widest fixed-width integer is now `i32`, so every literal of one fits the
+// widest fixed-width integer is now `int`, so every literal of one fits the
 // `Sexpr` tag's 61 bits with room to spare. The remaining literal that does
 // not fit a machine word is a `bignum`, which is a heap box rather than an
 // immediate, and `compile_constructs_a_bignum_literal_and_agrees_with_the_
@@ -6650,8 +6658,8 @@ fn run_compiled(src: &str) -> Value {
 #[test]
 fn a_compiled_function_reads_and_writes_an_array_through_aref() {
     let src = "
-        (defun cell () i32
-          (let ((d (the Vector<i32> (Vector::new))))
+        (defun cell () int
+          (let ((d (the Vector<int> (Vector::new))))
             (progn
               (push d 2) (push d 3)
               (let ((a (Array::make d 0)))
@@ -6665,8 +6673,8 @@ fn a_compiled_function_reads_and_writes_an_array_through_aref() {
 #[test]
 fn a_compiled_function_walks_an_array_in_row_major_order() {
     let src = "
-        (defun digits () i32
-          (let ((d (the Vector<i32> (Vector::new))))
+        (defun digits () int
+          (let ((d (the Vector<int> (Vector::new))))
             (progn
               (push d 2) (push d 2)
               (let ((a (Array::make d 0)) (acc 0))
@@ -6684,8 +6692,8 @@ fn a_compiled_function_walks_an_array_in_row_major_order() {
 #[test]
 fn a_compiled_functions_fill_pointer_grows_the_same_way() {
     let src = "
-        (defun grown () i32
-          (let ((d (the Vector<i32> (Vector::new))))
+        (defun grown () int
+          (let ((d (the Vector<int> (Vector::new))))
             (progn
               (push d 1)
               (let ((a (Array::make d 0 :fill-pointer 0)))
@@ -6702,7 +6710,7 @@ fn a_compiled_functions_fill_pointer_grows_the_same_way() {
 #[test]
 fn a_compiled_function_sets_and_reads_bits_across_word_boundaries() {
     let src = "
-        (defun edges () i32
+        (defun edges () int
           (let ((v (BitVector::make 70)))
             (progn
               (set v 31 true) (set v 32 true) (set v 69 true)
@@ -6717,7 +6725,7 @@ fn a_compiled_function_sets_and_reads_bits_across_word_boundaries() {
 #[test]
 fn a_compiled_bit_wise_operation_leaves_no_bits_past_the_length() {
     let src = "
-        (defun ones () i32
+        (defun ones () int
           (let ((v (bit-not (BitVector::make 35))) (n 0) (i 0))
             (progn
               (while (< i 35) (progn (setf n (+ n (if (get v i) 1 0))) (setf i (+ i 1))))
@@ -6743,7 +6751,7 @@ fn a_compiled_function_builds_and_reads_an_error_chain() {
 
 #[test]
 fn a_compiled_assert_passes_and_fails_the_same_way() {
-    let ok = "(defun fine () i32 (progn (assert (= 1 1)) 7)) (compile fine) (fine)";
+    let ok = "(defun fine () int (progn (assert (= 1 1)) 7)) (compile fine) (fine)";
     assert_eq!(run_compiled(ok), Value::Int(7));
 }
 
@@ -6765,11 +6773,11 @@ fn compile_and_interpret_agree_on_the_char_methods() {
         (defun cd ((c char)) char (downcase c))
         (defun ca ((c char)) bool (alphap c))
         (defun cg ((c char)) bool (digitp c))
-        (defun ic ((n i32)) char (int->char n))
+        (defun ic ((n int)) char (int->char n))
         ;; 42 only if every one of the seven answers is right, so one
         ;; number carries the whole comparison across two heaps (a `Str`
         ;; would come back as two unequal `StrId`s).
-        (defun probe () i32
+        (defun probe () int
           (if (equal (upcase #\a) #\A)
             (if (equal (downcase #\Z) #\z)
               (if (alphap #\q)
@@ -6796,7 +6804,7 @@ fn compile_and_interpret_agree_on_the_char_methods() {
 #[test]
 fn a_compiled_int_to_char_raises_on_a_bad_code_point() {
     let err = run_with_compiler(
-        r#"(defun ic ((n i32)) char (int->char n))
+        r#"(defun ic ((n int)) char (int->char n))
            (compile ic)
            (ic -1)"#,
     )
@@ -6818,14 +6826,14 @@ fn a_compiled_int_to_char_raises_on_a_bad_code_point() {
 #[test]
 fn compile_and_interpret_agree_on_a_hashtable_with_a_user_key() {
     let prog = r#"
-        (defstruct pt (x i32) (y i32))
+        (defstruct pt (x int) (y int))
         (impl Eq pt
           (equals ((self Self) (other Self)) bool
             (if (= self::x other::x) (= self::y other::y) false)))
         (impl Hash pt
-          (sxhash ((self Self)) i32 (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
-        (defun probe ((a i32) (b i32)) i32
-          (let ((h (the HashTable<pt,i32> (HashTable::new))))
+          (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+        (defun probe ((a int) (b int)) int
+          (let ((h (the HashTable<pt,int> (HashTable::new))))
             (progn
               (set h (pt::new a b) 7)
               (set h (pt::new b a) 9)
@@ -6845,16 +6853,16 @@ fn compile_and_interpret_agree_on_a_hashtable_with_a_user_key() {
 
 /// A module-qualified type argument in a specialization's name. The name a
 /// specialization is registered under embeds its type arguments — `hashtable::get
-/// <m::pt,i32>` — and the split that finds the method in it used to take the
+/// <m::pt,int>` — and the split that finds the method in it used to take the
 /// *last* `::` in the string, which lands inside the type argument. Nothing at
 /// the top level could show it, because a type there has one segment.
 #[test]
 fn a_specialization_at_a_module_qualified_type_resolves() {
     let src = r#"
         (module m
-          (pub defstruct pt (x i32))
-          (pub defun probe ((n i32)) i32
-            (let ((d (the Vector<i32> (Vector::new))))
+          (pub defstruct pt (x int))
+          (pub defun probe ((n int)) int
+            (let ((d (the Vector<int> (Vector::new))))
               (progn (push d 1)
                 (let ((a (Array::make d (pt::new n))))
                   (x (get a (Vector::filled 1 0))))))))

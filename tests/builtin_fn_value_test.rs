@@ -16,8 +16,8 @@
 //! what was impossible before.
 //!
 //! The enum here is a `defenum` rather than an `Option<...>`: a generic
-//! argument is parsed out of a *symbol* (`Option<i32>` is one token), so a
-//! function type — which is a list, `(fn (i32) i32)` — cannot be written as
+//! argument is parsed out of a *symbol* (`Option<int>` is one token), so a
+//! function type — which is a list, `(fn (int) int)` — cannot be written as
 //! one. A `defenum` variant's field is an ordinary type expression, so it can.
 
 use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
@@ -53,8 +53,8 @@ fn eval_ok(src: &str) -> Value {
 /// matches it back out and applies it. Both the built-in *method* case
 /// (`recv_type: Some`) and the free-built-in case (`recv_type: None`) have a
 /// variant here.
-const OP_ENUM: &str = "(defenum op (binary (fn (i32 i32) i32)) (naming (fn (string) Symbol)) (none)) \
-                       (defun run-binary ((o op) (a i32) (b i32)) i32 \
+const OP_ENUM: &str = "(defenum op (binary (fn (int int) int)) (naming (fn (string) Symbol)) (none)) \
+                       (defun run-binary ((o op) (a int) (b int)) int \
                          (match o ((binary f) (f a b)) ((naming _) 0) ((none) -1))) \
                        (defun run-naming ((o op) (s string)) Symbol \
                          (match o ((naming g) (g s)) ((binary _) (string->symbol s)) ((none) (string->symbol s))))";
@@ -63,7 +63,7 @@ const OP_ENUM: &str = "(defenum op (binary (fn (i32 i32) i32)) (naming (fn (stri
 
 #[test]
 fn a_builtin_method_passed_as_an_argument_is_applied() {
-    let src = "(defun call2 ((f (fn (i32 i32) i32)) (a i32) (b i32)) i32 (f a b)) \
+    let src = "(defun call2 ((f (fn (int int) int)) (a int) (b int)) int (f a b)) \
                (call2 + 3 4)";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
@@ -73,7 +73,7 @@ fn a_builtin_method_passed_as_an_argument_is_applied() {
 /// per-value to get wrong, and this pins that.
 #[test]
 fn two_reifications_of_one_builtin_both_apply() {
-    let src = "(defun call2 ((f (fn (i32 i32) i32)) (a i32) (b i32)) i32 (f a b)) \
+    let src = "(defun call2 ((f (fn (int int) int)) (a int) (b int)) int (f a b)) \
                (+ (call2 + 1 2) (call2 + 10 20))";
     assert_eq!(eval_ok(src), Value::Int(33));
 }
@@ -122,7 +122,7 @@ fn a_free_builtin_stored_in_an_enum_field_is_recovered_and_applied() {
 #[test]
 fn a_closure_and_a_builtin_share_the_same_enum_field() {
     let src = format!(
-        "{} (+ (run-binary (op::binary +) 1 2) (run-binary (op::binary (lambda ((x i32) (y i32)) i32 (* x y))) 3 4))",
+        "{} (+ (run-binary (op::binary +) 1 2) (run-binary (op::binary (lambda ((x int) (y int)) int (* x y))) 3 4))",
         OP_ENUM
     );
     assert_eq!(eval_ok(&src), Value::Int(15));

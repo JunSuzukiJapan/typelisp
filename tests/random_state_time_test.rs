@@ -42,10 +42,10 @@ fn make_random_state_fresh_states_are_independent_objects() {
     // Two independently-seeded states drawing the same, sufficiently long
     // sequence should disagree somewhere — this would only spuriously fail
     // with astronomically low probability.
-    let src = "(defun draws ((s random-state)) i32
-                 (let ((acc (the i32 0)) (i 0))
+    let src = "(defun draws ((s random-state)) int
+                 (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
-                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf acc (+ (* acc 10) (as int (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
                (let ((a (make-random-state)) (b (make-random-state)))
@@ -57,10 +57,10 @@ fn make_random_state_fresh_states_are_independent_objects() {
 fn random_state_copy_replays_the_same_sequence() {
     // A copy starts at the same point as the original, so drawing the same
     // number of values from each must agree exactly.
-    let src = "(defun draws ((s random-state)) i32
-                 (let ((acc (the i32 0)) (i 0))
+    let src = "(defun draws ((s random-state)) int
+                 (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
-                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf acc (+ (* acc 10) (as int (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
                (let ((a (make-random-state)))
@@ -74,10 +74,10 @@ fn random_state_copy_replays_the_same_sequence() {
 /// this, which is why a separate entry point exists at all.
 #[test]
 fn the_same_seed_replays_the_same_sequence() {
-    let src = "(defun draws ((s random-state)) i32
-                 (let ((acc (the i32 0)) (i 0))
+    let src = "(defun draws ((s random-state)) int
+                 (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
-                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf acc (+ (* acc 10) (as int (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
                (= (draws (seed-random-state 12345)) (draws (seed-random-state 12345)))";
@@ -90,10 +90,10 @@ fn the_same_seed_replays_the_same_sequence() {
 /// `typelisp_rt::seeded_random_state` for why the map is a bijection instead.
 #[test]
 fn neighbouring_seeds_name_different_streams() {
-    let src = "(defun draws ((s random-state)) i32
-                 (let ((acc (the i32 0)) (i 0))
+    let src = "(defun draws ((s random-state)) int
+                 (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
-                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf acc (+ (* acc 10) (as int (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
                (= (draws (seed-random-state 0)) (draws (seed-random-state 1)))";
@@ -120,10 +120,10 @@ fn seed_zero_is_not_a_degenerate_stream() {
 /// language hands the shim a sign-extended integer and it is reinterpreted.
 #[test]
 fn a_negative_seed_differs_from_its_absolute_value() {
-    let src = "(defun draws ((s random-state)) i32
-                 (let ((acc (the i32 0)) (i 0))
+    let src = "(defun draws ((s random-state)) int
+                 (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
-                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf acc (+ (* acc 10) (as int (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
                (= (draws (seed-random-state -7)) (draws (seed-random-state 7)))";
@@ -134,10 +134,10 @@ fn a_negative_seed_differs_from_its_absolute_value() {
 /// replays, like any other.
 #[test]
 fn a_seeded_state_copies_like_any_other() {
-    let src = "(defun draws ((s random-state)) i32
-                 (let ((acc (the i32 0)) (i 0))
+    let src = "(defun draws ((s random-state)) int
+                 (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
-                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf acc (+ (* acc 10) (as int (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
                (let ((a (seed-random-state 99)))
@@ -154,10 +154,10 @@ fn a_seeded_state_copies_like_any_other() {
 /// would also pass for an implementation that copied on every read.
 #[test]
 fn two_draws_from_one_state_advance_the_same_stream() {
-    let src = "(defun draws ((s random-state)) i32
-                 (let ((acc (the i32 0)) (i 0))
+    let src = "(defun draws ((s random-state)) int
+                 (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
-                     (setf acc (+ (* acc 10) (as i32 (random 10 s))))
+                     (setf acc (+ (* acc 10) (as int (random 10 s))))
                      (setf i (+ i 1)))
                    acc))
                (let ((a (make-random-state)))
@@ -258,8 +258,8 @@ fn time_returns_the_forms_own_value_unchanged() {
 
 #[test]
 fn time_evaluates_the_form_exactly_once() {
-    let src = "(defvar (calls i32) 0)
-               (defun bump () i32 (setf calls (+ calls 1)) calls)
+    let src = "(defvar (calls int) 0)
+               (defun bump () int (setf calls (+ calls 1)) calls)
                (time (bump))
                calls";
     assert_eq!(eval_ok(src), Value::Int(1));

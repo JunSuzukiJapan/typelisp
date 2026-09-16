@@ -269,6 +269,8 @@ enum Frame {
     FieldGet { idx: usize },
     /// `(dyn-value INNER)` — waiting on the trait object.
     DynValue,
+    /// `(untag-int E)`: check that the value is a fixnum, keep it.
+    UntagInt,
     /// `(set SYM VALUE)` — waiting on the value. The frame carries the *name*
     /// rather than the cell: the lookup happens on resume, once the value is
     /// in hand.
@@ -471,7 +473,7 @@ impl CpsStack {
             // Nothing to root: these carry only a plain integer, or nothing
             // at all. The value they are waiting on is rooted by the state
             // slots, and the object they act on is reachable from it.
-            Frame::Panic | Frame::FieldGet { .. } | Frame::DynValue => {}
+            Frame::Panic | Frame::FieldGet { .. } | Frame::DynValue | Frame::UntagInt => {}
         }
         self.frames.push((frame, base, loc));
     }
@@ -2197,6 +2199,19 @@ impl Interp {
                 stack.push(heap, Frame::DynValue, loc.clone());
                 Ok(State::Eval(inner, env))
             }
+            Op::UntagInt => {
+                let inner = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (untag-int ..) has no operand".to_string()))?;
+                stack.push(heap, Frame::UntagInt, loc.clone());
+                Ok(State::Eval(inner, env))
+            }
+            // The identity: an `int` value is what it is on this side; the
+            // tag is compiled code's concern.
+            Op::TagInt => {
+                let inner = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (tag-int ..) has no operand".to_string()))?;
+                Ok(State::Eval(inner, env))
+            }
 
             Op::Set => {
                 let sym = self.sym_field(heap, form, 0, "set")?;
@@ -3071,6 +3086,16 @@ impl Interp {
                     other
                 ))),
             },
+            // The same refusal compiled code makes at `compile-untag-int`,
+            // with the same wording, so a program is told the same thing in
+            // both tiers.
+            Frame::UntagInt => match v {
+                Value::Int(_) => Ok((State::Apply(v), None)),
+                Value::Boxed(id) if heap.is_bignum(id) => {
+                    Err(EvalError::Panic("an integer argument does not fit a fixnum".to_string()))
+                }
+                other => Err(EvalError::Internal(format!("eval: (untag-int ..): not an int: {:?}", other))),
+            },
 
             // Written through the cell rather than rebuilding the frame,
             // which is what makes the assignment visible through every other
@@ -3413,6 +3438,7 @@ impl Interp {
             | Frame::Panic
             | Frame::FieldGet { .. }
             | Frame::DynValue
+            | Frame::UntagInt
             | Frame::Set { .. }
             | Frame::Seq { .. }
             | Frame::Return

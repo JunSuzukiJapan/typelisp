@@ -129,16 +129,15 @@ fn room_prints_a_report_and_returns_nothing() {
     drop(h);
 }
 
-/// `gc-count` is a `bignum` and the cell counts are `i32` — the counts are
-/// bounded by the arena, a collection counter is not.
+/// `gc-count` is an `int` like the cell counts — a collection counter is
+/// not bounded by the arena, and an `int` past the fixnum range is a bignum
+/// rather than a wrapped word.
 #[test]
-fn the_collection_counter_is_a_bignum() {
-    // `(as bignum ..)` would be needed if it were an integer; that it can be
-    // added to another `bignum` without one is the assertion.
+fn the_collection_counter_is_an_int() {
     assert_eq!(
         eval_string(
             "(let ((i (heap-info)))\n\
-               (format false \"~a\" (>= (+ i::gc-count (as bignum 0)) (as bignum 0))))"
+               (format false \"~a\" (>= (+ i::gc-count (the int 0)) (the int 0))))"
         ),
         "true"
     );
@@ -147,7 +146,7 @@ fn the_collection_counter_is_a_bignum() {
 /// `room` is an ordinary function, so a `defun` that calls it compiles.
 #[test]
 fn room_compiles() {
-    let (h, v) = eval("(defun live-cells () i32 (let ((i (heap-info))) i::live))\n(compile live-cells)");
+    let (h, v) = eval("(defun live-cells () int (let ((i (heap-info))) i::live))\n(compile live-cells)");
     assert!(matches!(v, Value::Bool(true)), "expected the compile to succeed, got {:?}", v);
     drop(h);
 }
@@ -257,8 +256,8 @@ fn ed_opens_a_definition_at_its_own_line() {
     std::env::set_var("EDITOR", &editor);
     std::env::remove_var("VISUAL");
     let (h, _) = eval(
-        "(defun first-one () i32 1)\n\
-         (defun second-one () i32 2)\n\
+        "(defun first-one () int 1)\n\
+         (defun second-one () int 2)\n\
          (match (ed second-one) ((ok _) ()) ((err e) (println \"ed failed: ~a\" (message e))))",
     );
     drop(h);
@@ -280,7 +279,7 @@ fn ed_without_an_editor_variable_is_an_error() {
     std::env::remove_var("VISUAL");
     assert_eq!(
         eval_string(
-            "(defun anything () i32 1)\n\
+            "(defun anything () int 1)\n\
              (match (ed anything) ((ok _) \"unexpectedly ran\") ((err e) (message e)))"
         ),
         "ed: neither $VISUAL nor $EDITOR is set"
@@ -320,7 +319,7 @@ fn ed_takes_a_path_as_well_as_a_name() {
 #[test]
 fn ed_compiles() {
     let (h, v) = eval(
-        "(defun edit-me () i32 1)\n\
+        "(defun edit-me () int 1)\n\
          (defun open-it () Result<(), FileError> (ed edit-me))\n\
          (compile open-it)",
     );
@@ -334,7 +333,7 @@ fn ed_compiles() {
 /// instructions this machine will actually run.
 #[test]
 fn disassemble_prints_host_assembly() {
-    let out = stdout_of("(defun fact ((n i32)) i32 (if (< n 2) 1 (* n (fact (- n 1)))))\n(disassemble fact)");
+    let out = stdout_of("(defun fact ((n int)) int (if (< n 2) 1 (* n (fact (- n 1)))))\n(disassemble fact)");
     assert!(out.contains("fact"), "the function's own symbol is missing: {:?}", out);
     // Assembler directives, not IR: every target's assembly has sections.
     assert!(out.contains(".section") || out.contains(".text"), "this does not look like assembly: {:?}", out);
@@ -345,7 +344,7 @@ fn disassemble_prints_host_assembly() {
 /// earlier, for when the question is about this compiler rather than the chip.
 #[test]
 fn disassemble_can_print_llvm_ir_instead() {
-    let out = stdout_of("(defun fact ((n i32)) i32 (if (< n 2) 1 (* n (fact (- n 1)))))\n(disassemble fact true)");
+    let out = stdout_of("(defun fact ((n int)) int (if (< n 2) 1 (* n (fact (- n 1)))))\n(disassemble fact true)");
     assert!(out.contains("define i64"), "this does not look like LLVM IR: {:?}", out);
     assert!(out.contains("fact"), "the function's own symbol is missing: {:?}", out);
 }
@@ -361,7 +360,7 @@ fn disassemble_leaves_the_definition_interpreted() {
     let after_disassemble = eval_string(
         "(defvar (*cap* i32) (stream-string-output))\n\
          (setf *trace-output* (standard-stream::new *cap*))\n\
-         (defun f ((n i32)) i32 (+ n 1))\n\
+         (defun f ((n int)) int (+ n 1))\n\
          (defun quiet () () ())\n\
          (setf *standard-output* (standard-stream::new (stream-string-output)))\n\
          (disassemble f)\n\
@@ -380,8 +379,8 @@ fn disassemble_leaves_the_definition_interpreted() {
 #[test]
 fn a_method_can_be_disassembled() {
     let out = stdout_of(
-        "(defstruct pt (pub x i32) (pub y i32))\n\
-         (defmethod total ((self pt)) i32 (+ self::x self::y))\n\
+        "(defstruct pt (pub x int) (pub y int))\n\
+         (defmethod total ((self pt)) int (+ self::x self::y))\n\
          (disassemble pt::total true)",
     );
     assert!(out.contains("pt::total"), "the method's link name is missing: {:?}", out);
@@ -399,7 +398,7 @@ fn a_generic_function_cannot_be_disassembled() {
 /// expression.
 #[test]
 fn the_llvm_flag_must_be_a_literal() {
-    assert!(check_error("(defun f () i32 1)\n(disassemble f (= 1 1))")
+    assert!(check_error("(defun f () int 1)\n(disassemble f (= 1 1))")
         .starts_with("disassemble: the second argument selects LLVM IR"));
     assert_eq!(
         check_error("(disassemble)"),
@@ -423,8 +422,8 @@ fn the_interpreter_only_forms_refuse_to_be_compiled() {
         ("(step (target))", "step: `(step ...)` is an interpreter-only action"),
     ] {
         let src = format!(
-            "(defun target () i32 1)\n\
-             (defun uses-it () i32 (progn {} 0))\n\
+            "(defun target () int 1)\n\
+             (defun uses-it () int (progn {} 0))\n\
              (compile uses-it)",
             form
         );

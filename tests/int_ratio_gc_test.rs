@@ -59,7 +59,7 @@ const BIG: &str = "99999999999999999999999999999";
 #[test]
 fn a_bignum_global_survives_constant_collection() {
     let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, &format!("(defvar (*b* bignum) {})", BIG))
+    eval_in(&mut h, &mut chk, &mut interp, &format!("(defvar (*b* int) {})", BIG))
         .expect("definition failed");
     h.set_gc_stress(true);
     for _ in 0..3 {
@@ -86,7 +86,7 @@ fn a_ratio_global_survives_constant_collection() {
 }
 
 /// A local binding held across *collections*, which takes deliberate effort to
-/// arrange: `Heap::alloc_bignum` allocates a box slot, and only `Heap::cons`
+/// arrange: `Heap::int_from_bigint` allocates a box slot, and only `Heap::cons`
 /// ever triggers a collection — so bignum arithmetic on its own, however much
 /// of it, never collects even under `gc_stress`. The loop below conses on every
 /// iteration so that it does.
@@ -97,7 +97,7 @@ fn a_bignum_local_survives_collection_across_arithmetic() {
         &mut h,
         &mut chk,
         &mut interp,
-        "(defun sum-up ((n bignum)) bignum \
+        "(defun sum-up ((n int)) int \
            (let ((acc n) (i 0)) \
              (while (< i 20) \
                (let ((junk (cons (quote a) (quote ())))) (setf acc (+ acc n))) \
@@ -118,13 +118,13 @@ fn a_bignum_local_survives_collection_across_arithmetic() {
 #[test]
 fn a_bignum_global_survives_collection_mid_form() {
     let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, &format!("(defvar (*b* bignum) {})", BIG))
+    eval_in(&mut h, &mut chk, &mut interp, &format!("(defvar (*b* int) {})", BIG))
         .expect("definition failed");
     eval_in(
         &mut h,
         &mut chk,
         &mut interp,
-        "(defun churn () bignum \
+        "(defun churn () int \
            (let ((i 0)) \
              (while (< i 20) \
                (let ((junk (cons (quote a) (quote ())))) (setf i (+ i 1)))) \

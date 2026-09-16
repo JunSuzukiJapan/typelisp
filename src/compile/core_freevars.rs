@@ -320,7 +320,7 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // are refused a lowering by the bridge; walking them correctly is what
         // lets that refusal be the error a user sees.
         wk::STEP => from(0),
-        wk::RETURN | wk::PANIC | wk::DYN_VALUE => from(0),
+        wk::RETURN | wk::PANIC | wk::DYN_VALUE | wk::UNTAG_INT | wk::TAG_INT => from(0),
         // `(block NAME BODY REPR)` — the body only. The name is a `(str ...)`
         // node and *not* a sub-form to walk: it is a compile-time label,
         // resolved by the checker, so a variable can never hide in it. Walking

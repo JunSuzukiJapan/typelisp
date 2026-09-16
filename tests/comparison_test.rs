@@ -107,7 +107,7 @@ fn expanded_ord_methods_on_scalars() {
 fn a_generic_function_uses_the_expanded_ord_methods() {
     // `in-order` is generic over any `Ord` type and calls the new `less-equal`
     // — exercising the trait method (not the builtin operator) generically,
-    // then monomorphized to i32/char/string.
+    // then monomorphized to int/char/string.
     let prog = "(defun in-order<T> ((a T) (b T)) bool (where (Ord T)) (less-equal a b))";
     assert!(b(&format!("{} (in-order 1 2)", prog)));
     assert!(!b(&format!("{} (in-order 2 1)", prog)));

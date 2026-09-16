@@ -329,8 +329,35 @@ pub unsafe extern "C" fn rt_symp(args: *const i64, argc: u32) -> i64 {
     i64::from(matches!(decode(*args), Value::Symbol(_)))
 }
 
-/// `(sexpr-i32 x)`: the raw `i64` payload of an `i32` node. Fatal on any
-/// other tag — the same panic contract the interpreter's `sexpr-i32` has.
+/// `(sexpr-int x)`: an `int` node's value — the tagged word itself, a
+/// fixnum or a bignum box, once it has been checked to be one (and
+/// canonical). Fatal on any other shape — the same panic contract the
+/// interpreter's `sexpr-int` has.
+///
+/// # Safety
+///
+/// Same as [`rt_consp`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_int: expected 1 argument");
+    }
+    let w = *args;
+    match decode(w) {
+        Value::Int(_) => w,
+        Value::Boxed(id) if active_heap().is_bignum(id) => {
+            if active_heap().bignum_fits_fixnum(id) {
+                fatal("sexpr-int: an int boxed as a bignum that fits a fixnum — not canonical");
+            }
+            w
+        }
+        _ => fatal("sexpr-int: expected an int Sexpr node"),
+    }
+}
+
+/// `(sexpr-i32 x)`: the raw normalized word inside an `i32` node — a
+/// `NarrowInt` box like the five narrower widths' since `int` took the bare
+/// fixnum word.
 ///
 /// # Safety
 ///
@@ -340,10 +367,7 @@ pub unsafe extern "C" fn rt_sexpr_i32(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_i32: expected 1 argument");
     }
-    match decode(*args) {
-        Value::Int(n) => n,
-        _ => fatal("sexpr-i32: expected an i32 Sexpr node"),
-    }
+    narrow_value_of(*args, 32, true, "rt_sexpr_i32")
 }
 
 /// `(sexpr-bool x)`: the `Bool` node's payload as compiled `0`/`1`.
@@ -696,7 +720,9 @@ pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
                     (16, true) => 6,
                     (8, false) => 7,
                     (16, false) => 8,
-                    _ => 9,
+                    (32, false) => 9,
+                    (32, true) => 10,
+                    (w, s) => fatal(&format!("rt_box_kind: a narrow box of an unknown width {}{}", if s { "i" } else { "u" }, w)),
                 }
             } else {
                 0
@@ -733,7 +759,6 @@ pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
 // by zero, which traps at the machine level instead.
 
 use num_bigint::{BigInt, BigUint, Sign};
-use num_integer::Integer;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive};
 
@@ -748,8 +773,11 @@ use num_traits::{FromPrimitive, ToPrimitive};
 /// on this thread.
 unsafe fn bignum_arg(args: *const i64, idx: isize, who: &str) -> BigInt {
     match decode(*args.offset(idx)) {
+        // An `int` in either shape: `rt_bignum_new` answers a fixnum for a
+        // literal that fits one (a ratio literal's numerator, say).
+        Value::Int(n) => BigInt::from(n),
         Value::Boxed(id) => active_heap().bignum_value(id).clone(),
-        _ => fatal(&format!("{who}: argument is not a boxed bignum")),
+        _ => fatal(&format!("{who}: argument is not an int")),
     }
 }
 
@@ -819,7 +847,10 @@ pub unsafe extern "C" fn rt_bignum_new(args: *const i64, argc: u32) -> i64 {
         digits.push(*args.offset(i) as u32);
     }
     let n = BigInt::from_biguint(sign, BigUint::new(digits));
-    encode(active_heap().alloc_bignum(n))
+    // Canonical: a literal the checker spelled as `(bignum ..)` is past the
+    // fixnum range, but a ratio literal's parts arrive here too and may not
+    // be.
+    encode(active_heap().int_from_bigint(n))
 }
 
 /// Builds a boxed ratio from two already-boxed bignums (`args[0]`=numerator,
@@ -848,383 +879,6 @@ pub unsafe extern "C" fn rt_ratio_from_bignums(args: *const i64, argc: u32) -> i
     encode(active_heap().alloc_ratio(BigRational::new(numer, denom)))
 }
 
-/// `bignum::+` for compiled code.
-///
-/// # Safety
-///
-/// Same as [`bignum_pair`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_add(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = bignum_pair(args, argc, "rt_bignum_add");
-    encode(active_heap().alloc_bignum(a + b))
-}
-
-/// `bignum::-` for compiled code.
-///
-/// # Safety
-///
-/// Same as [`bignum_pair`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_sub(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = bignum_pair(args, argc, "rt_bignum_sub");
-    encode(active_heap().alloc_bignum(a - b))
-}
-
-/// `bignum::*` for compiled code.
-///
-/// # Safety
-///
-/// Same as [`bignum_pair`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_mul(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = bignum_pair(args, argc, "rt_bignum_mul");
-    encode(active_heap().alloc_bignum(a * b))
-}
-
-/// `bignum::/` for compiled code — truncates toward zero (CL `truncate`),
-/// like `int_assoc`'s own `/`. A zero divisor [`raise`]s the same
-/// `"divide by zero"` `eval_bignum_builtin` gives the interpreted path,
-/// exactly as [`rt_int_div`] does for fixnums.
-///
-/// # Safety
-///
-/// Same as [`bignum_pair`].
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_bignum_div(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = bignum_pair(args, argc, "rt_bignum_div");
-    if b.sign() == Sign::NoSign {
-        raise("divide by zero".to_string());
-    }
-    encode(active_heap().alloc_bignum(a / b))
-}
-
-/// `bignum::mod` for compiled code — floored remainder (CL `mod`; result
-/// takes the sign of the divisor), matching the interpreter's
-/// `eval_bignum_builtin` and `int_assoc`'s own floored `mod`. A zero divisor
-/// [`raise`]s `"mod by zero"`, that same interpreted path's wording.
-///
-/// # Safety
-///
-/// Same as [`bignum_pair`].
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_bignum_mod(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = bignum_pair(args, argc, "rt_bignum_mod");
-    if b.sign() == Sign::NoSign {
-        raise("mod by zero".to_string());
-    }
-    encode(active_heap().alloc_bignum(a.mod_floor(&b)))
-}
-
-/// `bignum::logand` for compiled code — CL §12.10's "infinite two's
-/// complement" bitwise `and`, which `BigInt`'s own operator already
-/// implements (the interpreter's `eval_bignum_builtin` uses the very same
-/// one). Unlike `i64::logand`, this cannot be a bare LLVM instruction: the
-/// operands are boxed arbitrary-precision values, so the result is a fresh
-/// allocation like every other `rt_bignum_*` binop's.
-///
-/// # Safety
-///
-/// Same as [`bignum_pair`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_logand(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = bignum_pair(args, argc, "rt_bignum_logand");
-    encode(active_heap().alloc_bignum(a & b))
-}
-
-/// `bignum::ash` for compiled code — `args[0]` shifted by the **raw** count
-/// in `args[1]` (positive left, negative right), mirroring
-/// `interp::eval_bignum_shift`.
-///
-/// The odd one out among the `rt_bignum_*` binops: its second operand is a
-/// bit count rather than a second boxed bignum, so it cannot use
-/// [`bignum_pair`]. That is also why it is lowered at all now — the whole
-/// `ash`/`logbitp` group used to be left uncompiled on the grounds that no
-/// prelude definition reached it, and `Bits`'s `shift` impl for `bignum`
-/// reaches it.
-///
-/// # Safety
-///
-/// `argc` must be `>= 2`, `args[0]` must decode to a boxed bignum, and a
-/// `Heap` must already be registered on this thread.
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_ash(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_bignum_ash: expected 2 arguments");
-    }
-    let n = bignum_arg(args, 0, "rt_bignum_ash");
-    let count = *args.add(1);
-    let r = if count >= 0 { n << (count as u64) } else { n >> ((-count) as u64) };
-    encode(active_heap().alloc_bignum(r))
-}
-
-/// `bignum::logior` for compiled code — the `or` counterpart of
-/// [`rt_bignum_logand`].
-///
-/// # Safety
-///
-/// Same as [`bignum_pair`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_logior(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = bignum_pair(args, argc, "rt_bignum_logior");
-    encode(active_heap().alloc_bignum(a | b))
-}
-
-/// `bignum::logxor` for compiled code — the `xor` counterpart of
-/// [`rt_bignum_logand`]. Needed by `bignum::logeqv` (`lognot` of it), which
-/// is what made this the last bitwise hole left once `lognot` had one.
-///
-/// # Safety
-///
-/// Same as [`bignum_pair`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_logxor(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = bignum_pair(args, argc, "rt_bignum_logxor");
-    encode(active_heap().alloc_bignum(a ^ b))
-}
-
-/// `bignum::lognot` for compiled code — `-(n+1)`, the two's-complement
-/// negation `BigInt`'s `Not` gives, matching the interpreter's `bignum_unary`.
-/// Unary, so it takes the `bignum`-argument preamble directly rather than
-/// [`bignum_pair`].
-///
-/// # Safety
-///
-/// `argc` must be `>= 1` and `args[0]` must decode to a boxed bignum; a
-/// `Heap` must already be registered on this thread.
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_lognot(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_bignum_lognot: expected 1 argument");
-    }
-    let a = bignum_arg(args, 0, "rt_bignum_lognot");
-    encode(active_heap().alloc_bignum(!a))
-}
-
-/// `bignum::logcount` for compiled code — the number of 1-bits of a
-/// nonnegative value, of 0-bits of a negative one (CL §12.10's infinite
-/// two's complement reading), mirroring `interp::bignum_unary`. Result is a
-/// fresh `bignum`, like the interpreter's.
-///
-/// # Safety
-///
-/// Same as [`bignum_arg`], for `args[0]`.
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_logcount(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_bignum_logcount: expected 1 argument");
-    }
-    let a = bignum_arg(args, 0, "rt_bignum_logcount");
-    let n = if a.sign() == num_bigint::Sign::Minus { !&a } else { a.clone() };
-    let count: u64 = n.magnitude().to_u32_digits().iter().map(|d| d.count_ones() as u64).sum();
-    encode(active_heap().alloc_bignum(BigInt::from(count)))
-}
-
-/// `bignum::integer-length` for compiled code — bits needed excluding the
-/// sign, mirroring `interp::bignum_unary`.
-///
-/// # Safety
-///
-/// Same as [`bignum_arg`], for `args[0]`.
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_integer_length(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_bignum_integer_length: expected 1 argument");
-    }
-    let a = bignum_arg(args, 0, "rt_bignum_integer_length");
-    let bits =
-        if a.sign() == num_bigint::Sign::Minus { (-(&a) - 1u32).magnitude().bits() } else { a.magnitude().bits() };
-    encode(active_heap().alloc_bignum(BigInt::from(bits)))
-}
-
-/// `bignum::logbitp` for compiled code — is bit `args[1]` of `args[0]` set?
-///
-/// The second operand is a **raw** bit position, like [`rt_bignum_ash`]'s
-/// count and for the same reason. Returns a bare `0`/`1`, the compiled
-/// representation of a `bool`.
-///
-/// # Safety
-///
-/// `argc` must be `>= 2`, `args[0]` must decode to a boxed bignum, and a
-/// `Heap` must already be registered on this thread.
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_logbitp(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_bignum_logbitp: expected 2 arguments");
-    }
-    let n = bignum_arg(args, 0, "rt_bignum_logbitp");
-    let index = *args.add(1);
-    let set = if index < 0 {
-        n.sign() == num_bigint::Sign::Minus
-    } else {
-        ((n >> (index as u64)) & BigInt::from(1)) == BigInt::from(1)
-    };
-    set as i64
-}
-
-/// `bignum::logtest` for compiled code — do the two share a 1-bit?
-///
-/// # Safety
-///
-/// Same as [`bignum_pair`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_logtest(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = bignum_pair(args, argc, "rt_bignum_logtest");
-    ((a & b) != BigInt::from(0)) as i64
-}
-
-/// Three-way comparison (`-1`/`0`/`1`) for compiled code — the single
-/// primitive `compiler.rs`'s `compile-assoc` derives all six bignum
-/// comparison operators from (`<`/`<=`/`>`/`>=`/`=`/`/=`, plus the
-/// `eq`/`eql`/`equal`/`equalp` aliases for `=`), the same "one primitive,
-/// several derived comparisons" shape [`rt_str_lt`] establishes for strings.
-///
-/// # Safety
-///
-/// Same as [`bignum_pair`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_cmp(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = bignum_pair(args, argc, "rt_bignum_cmp");
-    match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
-}
-
-/// `bignum->int` for compiled code — narrowing to `i32`, fatal if the value
-/// doesn't fit (same precedent as `int_assoc`'s `int->char`).
-///
-/// # Safety
-///
-/// `argc` must be `>= 1`, `args[0]` a boxed bignum; a `Heap` must be
-/// registered.
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_to_int(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_bignum_to_int: expected 1 argument");
-    }
-    let n = bignum_arg(args, 0, "rt_bignum_to_int");
-    match n.to_i32() {
-        Some(v) => v as i64,
-        None => fatal("rt_bignum_to_int: value does not fit in i32"),
-    }
-}
-
-/// `(rt-bignum-fits-i32 n)` — raw `0`/`1`: does `n` fit in an `i32`?
-/// `try-bignum->int`'s (`Option<i32>`) first half — `compiler.rs`'s
-/// `compile-assoc` only calls [`rt_bignum_to_int_raw`] after this confirms
-/// `1`, the same two-call `Option`-building shape `rt_struct_field_count`/
-/// `_get_raw` already establish.
-///
-/// # Safety
-///
-/// Same as [`rt_bignum_to_int`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_fits_i32(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_bignum_fits_i32: expected 1 argument");
-    }
-    let n = bignum_arg(args, 0, "rt_bignum_fits_i32");
-    i64::from(n.to_i32().is_some())
-}
-
-/// `try-bignum->int`'s second half — only ever called after
-/// [`rt_bignum_fits_i32`] confirmed `1`; fatal if it turns out not to fit
-/// (an internal-invariant trap, the same convention
-/// [`rt_struct_pop_field`] uses for its own "caller already checked" case).
-///
-/// # Safety
-///
-/// Same as [`rt_bignum_to_int`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_to_int_raw(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_bignum_to_int_raw: expected 1 argument");
-    }
-    let n = bignum_arg(args, 0, "rt_bignum_to_int_raw");
-    match n.to_i32() {
-        Some(v) => v as i64,
-        None => fatal("rt_bignum_to_int_raw: called without a prior rt_bignum_fits_i32 check"),
-    }
-}
-
-/// `bignum->float` for compiled code — widening, rounded (`BigInt::to_f64`
-/// saturates to +/-infinity rather than failing, so this is total).
-///
-/// # Safety
-///
-/// Same as [`rt_bignum_to_int`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_to_float(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_bignum_to_float: expected 1 argument");
-    }
-    let n = bignum_arg(args, 0, "rt_bignum_to_float");
-    let f = match n.to_f64() {
-        Some(f) => f,
-        None => fatal("rt_bignum_to_float: conversion failed"),
-    };
-    f.to_bits() as i64
-}
-
-/// `bignum->ratio` for compiled code — widening and always exact
-/// (`BigRational::from_integer`, denominator `1`).
-///
-/// # Safety
-///
-/// Same as [`rt_bignum_to_int`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_bignum_to_ratio(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_bignum_to_ratio: expected 1 argument");
-    }
-    let n = bignum_arg(args, 0, "rt_bignum_to_ratio");
-    encode(active_heap().alloc_ratio(BigRational::from_integer(n)))
-}
-
-/// `int->bignum` for compiled code — always exact widening. `args[0]` is
-/// already a plain (untagged) `i64`, the native fixed-width integer's own
-/// compiled representation (whatever its original width, already widened to
-/// `i64` by the same native int-widening every other cross-width int
-/// operation here uses).
-///
-/// # Safety
-///
-/// `argc` must be `>= 1`; a `Heap` must be registered.
-#[no_mangle]
-pub unsafe extern "C" fn rt_int_to_bignum(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_int_to_bignum: expected 1 argument");
-    }
-    encode(active_heap().alloc_bignum(BigInt::from(*args)))
-}
-
-/// [`rt_int_to_bignum`] for a receiver whose 64 bits are *unsigned* — `c-ulong`
-/// and nothing else.
-///
-/// Every other unsigned type is narrower than the register, so the
-/// normalization invariant has already zero-extended it and its word is
-/// non-negative; `rt_int_to_bignum` reads those correctly. At 64 bits there is
-/// no room left to zero-extend into, so the word's top bit is the value's own
-/// and reading it as `i64` would turn `2^64 - 1` into `-1`. The island picks
-/// between the two by the receiver's `int-wsig` (128 is unsigned-64).
-///
-/// A separate entry point rather than a width operand on the existing one:
-/// changing a shim's arity makes the previous generation of the self-hosted
-/// island unable to compile the new source, which costs a temporary shim and
-/// an extra regeneration pass. A new name costs neither.
-///
-/// # Safety
-///
-/// `argc` must be `>= 1`; a `Heap` must be registered.
-#[no_mangle]
-pub unsafe extern "C" fn rt_uint_to_bignum(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_uint_to_bignum: expected 1 argument");
-    }
-    encode(active_heap().alloc_bignum(BigInt::from(*args as u64)))
-}
-
 /// `int->ratio` for compiled code — always exact widening, denominator `1`.
 /// A direct primitive rather than routing through [`rt_int_to_bignum`] +
 /// [`rt_ratio_from_bignums`], since a native-int receiver's compiled
@@ -1242,25 +896,25 @@ pub unsafe extern "C" fn rt_int_to_ratio(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_ratio(BigRational::from_integer(BigInt::from(*args))))
 }
 
-/// `float->bignum` for compiled code — truncating toward zero
-/// (`BigInt::from_f64`, the multi-precision analogue of `f64 as i64`, exact
-/// for any finite value unlike a saturating native cast). Fatal on a
-/// non-finite input (NaN/infinity), matching the interpreter's own
-/// `float_to_bignum`.
+/// `float->int` for compiled code — truncating toward zero into the
+/// arbitrary-precision `int` (`BigInt::from_f64`, exact for any finite
+/// value, then `Heap::int_from_bigint` for the canonical word). A
+/// non-finite input [`raise`]s: there is no integer to truncate to, and the
+/// interpreter's `float_to_int` panics the same way.
 ///
 /// # Safety
 ///
 /// `argc` must be `>= 1`, `args[0]` an `f64`'s raw bit pattern; a `Heap` must
 /// be registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_float_to_bignum(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_float_to_int(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
-        fatal("rt_float_to_bignum: expected 1 argument");
+        fatal("rt_float_to_int: expected 1 argument");
     }
     let f = f64::from_bits(*args as u64);
     match BigInt::from_f64(f) {
-        Some(n) => encode(active_heap().alloc_bignum(n)),
-        None => fatal("rt_float_to_bignum: value is not finite"),
+        Some(n) => encode(active_heap().int_from_bigint(n)),
+        None => raise(format!("float->int: {} is not finite", f)),
     }
 }
 
@@ -1271,7 +925,7 @@ pub unsafe extern "C" fn rt_float_to_bignum(args: *const i64, argc: u32) -> i64 
 ///
 /// # Safety
 ///
-/// Same as [`rt_float_to_bignum`].
+/// Same as [`rt_float_to_int`].
 #[no_mangle]
 pub unsafe extern "C" fn rt_float_to_ratio(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
@@ -1351,7 +1005,7 @@ pub unsafe extern "C" fn rt_ratio_cmp(args: *const i64, argc: u32) -> i64 {
     }
 }
 
-/// `ratio->bignum` for compiled code — truncates toward zero
+/// `ratio->int` for compiled code — truncates toward zero
 /// (`Ratio::to_integer`).
 ///
 /// # Safety
@@ -1359,19 +1013,19 @@ pub unsafe extern "C" fn rt_ratio_cmp(args: *const i64, argc: u32) -> i64 {
 /// `argc` must be `>= 1`, `args[0]` a boxed ratio; a `Heap` must be
 /// registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_to_bignum(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_ratio_to_int(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
-        fatal("rt_ratio_to_bignum: expected 1 argument");
+        fatal("rt_ratio_to_int: expected 1 argument");
     }
-    let r = ratio_arg(args, 0, "rt_ratio_to_bignum");
-    encode(active_heap().alloc_bignum(r.to_integer()))
+    let r = ratio_arg(args, 0, "rt_ratio_to_int");
+    encode(active_heap().int_from_bigint(r.to_integer()))
 }
 
 /// `ratio->float` for compiled code — widening, rounded.
 ///
 /// # Safety
 ///
-/// Same as [`rt_ratio_to_bignum`].
+/// Same as [`rt_ratio_to_int`].
 #[no_mangle]
 pub unsafe extern "C" fn rt_ratio_to_float(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
@@ -1385,33 +1039,33 @@ pub unsafe extern "C" fn rt_ratio_to_float(args: *const i64, argc: u32) -> i64 {
     f.to_bits() as i64
 }
 
-/// `numerator` for compiled code — a fresh boxed bignum copy of the
-/// (already-reduced) numerator; `ratio` itself is never mutated.
+/// `numerator` for compiled code — the (already-reduced) numerator as an
+/// `int`; `ratio` itself is never mutated.
 ///
 /// # Safety
 ///
-/// Same as [`rt_ratio_to_bignum`].
+/// Same as [`rt_ratio_to_int`].
 #[no_mangle]
 pub unsafe extern "C" fn rt_ratio_numerator(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_ratio_numerator: expected 1 argument");
     }
     let r = ratio_arg(args, 0, "rt_ratio_numerator");
-    encode(active_heap().alloc_bignum(r.numer().clone()))
+    encode(active_heap().int_from_bigint(r.numer().clone()))
 }
 
 /// `denominator` for compiled code — the `numerator` counterpart.
 ///
 /// # Safety
 ///
-/// Same as [`rt_ratio_to_bignum`].
+/// Same as [`rt_ratio_to_int`].
 #[no_mangle]
 pub unsafe extern "C" fn rt_ratio_denominator(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_ratio_denominator: expected 1 argument");
     }
     let r = ratio_arg(args, 0, "rt_ratio_denominator");
-    encode(active_heap().alloc_bignum(r.denom().clone()))
+    encode(active_heap().int_from_bigint(r.denom().clone()))
 }
 
 // ---- Sexpr/RtValue unification, Stage 1: boxed objects (Struct) --------
@@ -3016,6 +2670,37 @@ pub unsafe extern "C" fn rt_run_entry_driven(entry: i64) -> i64 {
         match stack.run(active_heap(), f, &[]) {
             Ok(v) => v,
             Err(paused) => pause_on_a_machine_frame(paused, "rt_run_entry_driven"),
+        }
+    });
+    run_entry_payload(std::panic::catch_unwind(call))
+}
+
+/// [`rt_run_entry_driven`] for a `main` declared to return `int`: the
+/// answer is a tagged word, and the exit code is the fixnum's payload.
+///
+/// Decoded *here* rather than by the generated `main`, because a panic's
+/// exit code comes out of the same call raw (`EXIT_CODE_PANIC`), and only
+/// this side knows which of the two it is handing back. A bignum has no
+/// exit code and is fatal.
+///
+/// # Safety
+///
+/// [`rt_run_entry_driven`]'s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_run_entry_driven_int(entry: i64) -> i64 {
+    let f: crate::coroutine::CoroutineFn = std::mem::transmute(entry as usize);
+    let call = std::panic::AssertUnwindSafe(|| {
+        let mut stack = crate::coroutine::FrameStack::new();
+        let word = match stack.run(active_heap(), f, &[]) {
+            Ok(v) => v,
+            Err(paused) => pause_on_a_machine_frame(paused, "rt_run_entry_driven_int"),
+        };
+        match decode(word) {
+            Value::Int(n) => n,
+            Value::Boxed(id) if active_heap().is_bignum(id) => {
+                fatal(&format!("main returned {}, which is not a process exit code", active_heap().bignum_value(id)))
+            }
+            other => fatal(&format!("main declared to return int answered {:?}", other)),
         }
     });
     run_entry_payload(std::panic::catch_unwind(call))

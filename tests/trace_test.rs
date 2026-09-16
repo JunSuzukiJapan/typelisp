@@ -115,7 +115,7 @@ fn check_error(src: &str) -> String {
 #[test]
 fn a_recursive_call_is_reported_at_every_depth() {
     let out = traced(
-        "(defun fact ((n i32)) i32 (if (< n 2) 1 (* n (fact (- n 1)))))\n\
+        "(defun fact ((n int)) int (if (< n 2) 1 (* n (fact (- n 1)))))\n\
          (trace fact)\n\
          (fact 3)",
     );
@@ -136,8 +136,8 @@ fn a_recursive_call_is_reported_at_every_depth() {
 #[test]
 fn values_are_printed_the_way_the_program_prints_them() {
     let out = traced(
-        "(defstruct pt (pub x i32) (pub y i32))\n\
-         (defmethod total ((self pt)) i32 (+ self::x self::y))\n\
+        "(defstruct pt (pub x int) (pub y int))\n\
+         (defmethod total ((self pt)) int (+ self::x self::y))\n\
          (trace pt::total)\n\
          (total (pt::new 3 4))",
     );
@@ -150,7 +150,7 @@ fn values_are_printed_the_way_the_program_prints_them() {
 #[test]
 fn a_non_local_exit_out_of_a_traced_frame_is_reported() {
     let out = traced(
-        "(defun boom ((n i32)) i32 (throw 'tag n))\n\
+        "(defun boom ((n int)) int (throw 'tag n))\n\
          (trace boom)\n\
          (catch 'tag (boom 7))",
     );
@@ -167,8 +167,8 @@ fn both_forms_answer_with_the_current_set() {
     // Sorted, so the answer does not depend on a hash table's iteration order.
     assert_eq!(
         eval_string(
-            "(defun f ((n i32)) i32 n)\n\
-             (defun g ((n i32)) i32 n)\n\
+            "(defun f ((n int)) int n)\n\
+             (defun g ((n int)) int n)\n\
              (trace g f)\n\
              (format false \"~s\" (trace))"
         ),
@@ -176,8 +176,8 @@ fn both_forms_answer_with_the_current_set() {
     );
     assert_eq!(
         eval_string(
-            "(defun f ((n i32)) i32 n)\n\
-             (defun g ((n i32)) i32 n)\n\
+            "(defun f ((n int)) int n)\n\
+             (defun g ((n int)) int n)\n\
              (trace f g)\n\
              (untrace g)\n\
              (format false \"~s\" (trace))"
@@ -186,7 +186,7 @@ fn both_forms_answer_with_the_current_set() {
     );
     assert_eq!(
         eval_string(
-            "(defun f ((n i32)) i32 n)\n\
+            "(defun f ((n int)) int n)\n\
              (trace f)\n\
              (format false \"~s\" (untrace))"
         ),
@@ -198,7 +198,7 @@ fn both_forms_answer_with_the_current_set() {
 #[test]
 fn untrace_stops_the_reporting() {
     let out = traced(
-        "(defun f ((n i32)) i32 n)\n\
+        "(defun f ((n int)) int n)\n\
          (trace f)\n\
          (f 1)\n\
          (untrace f)\n\
@@ -213,10 +213,10 @@ fn untrace_stops_the_reporting() {
 #[test]
 fn tracing_survives_redefinition() {
     let out = traced(
-        "(defun g ((n i32)) i32 (* n 2))\n\
+        "(defun g ((n int)) int (* n 2))\n\
          (trace g)\n\
          (g 5)\n\
-         (defun g ((n i32)) i32 (* n 3))\n\
+         (defun g ((n int)) int (* n 3))\n\
          (g 5)",
     );
     assert_eq!(
@@ -234,7 +234,7 @@ fn tracing_survives_redefinition() {
 #[test]
 fn a_module_qualified_name_is_traced_under_its_full_path() {
     let out = traced(
-        "(module m (pub defun inc ((n i32)) i32 (+ n 1)))\n\
+        "(module m (pub defun inc ((n int)) int (+ n 1)))\n\
          (use m)\n\
          (trace m::inc)\n\
          (m::inc 1)",
@@ -273,7 +273,7 @@ fn a_string_is_not_a_name() {
 #[test]
 fn tracing_a_compiled_body_warns_and_still_reports_interpreted_calls() {
     let out = traced(
-        "(defun h ((n i32)) i32 (+ n 1))\n\
+        "(defun h ((n int)) int (+ n 1))\n\
          (compile h)\n\
          (trace h)\n\
          (h 1)",
@@ -297,7 +297,7 @@ fn tracing_a_compiled_body_warns_and_still_reports_interpreted_calls() {
 /// is what that treatment does.
 #[test]
 fn the_form_head_is_reserved_against_a_local_binding() {
-    let msg = check_error("(let ((trace (lambda ((n i32)) i32 (* n 2)))) (trace 21))");
+    let msg = check_error("(let ((trace (lambda ((n int)) int (* n 2)))) (trace 21))");
     assert!(msg.starts_with("trace: expected symbols or `::`-paths"), "{}", msg);
 }
 
@@ -322,14 +322,14 @@ fn step_has_the_type_of_the_form_it_wraps() {
 #[test]
 fn without_a_terminal_step_just_evaluates() {
     let stepped = traced(
-        "(defun note ((n i32)) i32 (progn (println \"call ~d\" n) n))\n\
-         (defun both () i32 (+ (note 1) (note 2)))\n\
+        "(defun note ((n int)) int (progn (println \"call ~d\" n) n))\n\
+         (defun both () int (+ (note 1) (note 2)))\n\
          (trace note)\n\
          (step (both))",
     );
     let plain = traced(
-        "(defun note ((n i32)) i32 (progn (println \"call ~d\" n) n))\n\
-         (defun both () i32 (+ (note 1) (note 2)))\n\
+        "(defun note ((n int)) int (progn (println \"call ~d\" n) n))\n\
+         (defun both () int (+ (note 1) (note 2)))\n\
          (trace note)\n\
          (both)",
     );
@@ -358,8 +358,8 @@ fn step_takes_exactly_one_form() {
 #[test]
 fn trace_rendering_holds_its_roots_under_gc_stress() {
     fn run(stress: bool) -> String {
-        let src = "(defstruct pt (pub x i32) (pub y i32))\n\
-                   (defun shift ((p pt) (d i32) (s string)) i32 (+ p::x d))\n\
+        let src = "(defstruct pt (pub x int) (pub y int))\n\
+                   (defun shift ((p pt) (d int) (s string)) int (+ p::x d))\n\
                    (defvar (*cap* i32) (stream-string-output))\n\
                    (setf *trace-output* (standard-stream::new *cap*))\n\
                    (trace shift)\n\
@@ -410,7 +410,7 @@ fn trace_rendering_holds_its_roots_under_gc_stress() {
 #[test]
 fn a_print_object_method_is_reported_when_the_printer_calls_it() {
     let out = traced(
-        "(defstruct pt (n i32))\n\
+        "(defstruct pt (n int))\n\
          (impl print-object pt\n\
            (print-object ((self Self) (escape bool)) string (format false \"<~d>\" self::n)))\n\
          (trace pt::print-object)\n\
@@ -424,7 +424,7 @@ fn a_print_object_method_is_reported_when_the_printer_calls_it() {
 #[test]
 fn a_call_directives_method_is_reported() {
     let out = traced(
-        "(defstruct money (yen i32))\n\
+        "(defstruct money (yen int))\n\
          (defmethod jp ((self money) (colon bool) (at bool)) string\n\
            (format false \"~d yen\" self::yen))\n\
          (trace money::jp)\n\
@@ -448,7 +448,7 @@ fn a_call_directives_method_is_reported() {
 #[test]
 fn a_compiled_print_object_method_is_still_reported() {
     let out = traced(
-        "(defstruct pt (n i32))\n\
+        "(defstruct pt (n int))\n\
          (impl print-object pt\n\
            (print-object ((self Self) (escape bool)) string (format false \"<~d>\" self::n)))\n\
          (compile pt::print-object)\n\

@@ -33,20 +33,20 @@ fn program(src: &str) -> (Heap, Vec<TopLevelForm>, DefLocs, Docs) {
 
 #[test]
 fn locates_the_smallest_enclosing_call() {
-    let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n(defun main () i32 (add 1 2))\n";
+    let src = "(defun add ((x int) (y int)) int (+ x y))\n(defun main () int (add 1 2))\n";
     let (h, body, def_locs, docs) = program(src);
-    // Line 2: `(defun main () i32 (add 1 2))` — the `(add 1 2)` call form
+    // Line 2: `(defun main () int (add 1 2))` — the `(add 1 2)` call form
     // starts at column 20; a cursor anywhere from there up to just before
     // its closing paren should resolve to that `Call` node, since its
     // integer-literal arguments carry no location of their own (see
     // `check::locate`'s module doc comment).
     let node = locate_node(&h, &body, FILE, 2, 22).expect("expected a located node");
-    assert_eq!(hover_text(&h, node, &def_locs, &docs), format!("{:?}", Type::I32));
+    assert_eq!(hover_text(&h, node, &def_locs, &docs), format!("{:?}", Type::Int));
 }
 
 #[test]
 fn goto_definition_resolves_a_call_to_its_defun() {
-    let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n(defun main () i32 (add 1 2))\n";
+    let src = "(defun add ((x int) (y int)) int (+ x y))\n(defun main () int (add 1 2))\n";
     let (h, body, def_locs, _docs) = program(src);
     let node = locate_node(&h, &body, FILE, 2, 22).expect("expected a located node");
     let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
@@ -59,12 +59,12 @@ fn goto_definition_resolves_a_call_to_its_defun() {
 #[test]
 fn goto_definition_on_a_parameter_reference_resolves_to_the_parameter() {
     // `x` at column 37 is the reference inside `(+ x y)`; its parameter
-    // declaration `(x i32)` is at column 14 on the same line (the `defun`'s
+    // declaration `(x int)` is at column 14 on the same line (the `defun`'s
     // parameter list). `DefLocs::local_refs` resolves the former to the
     // latter without any scope search at query time — see `check_at`'s doc
     // comment on where that resolution actually happens (once, at check
     // time).
-    let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n";
+    let src = "(defun add ((x int) (y int)) int (+ x y))\n";
     let (h, body, def_locs, _docs) = program(src);
     let node = locate_node(&h, &body, FILE, 1, 37).expect("expected a located node");
     let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
@@ -75,7 +75,7 @@ fn goto_definition_on_a_parameter_reference_resolves_to_the_parameter() {
 
 #[test]
 fn goto_definition_on_a_let_bound_reference_resolves_to_the_binding() {
-    let src = "(defun f () i32 (let ((n 1)) n))\n";
+    let src = "(defun f () int (let ((n 1)) n))\n";
     let (h, body, def_locs, _docs) = program(src);
     // `(let ((n 1)) n))` — `n`'s binding name is at column 24, its trailing
     // reference (the `let`'s body) at column 30.
@@ -87,10 +87,10 @@ fn goto_definition_on_a_let_bound_reference_resolves_to_the_binding() {
 
 #[test]
 fn goto_definition_on_a_lambda_parameter_reference_resolves_to_the_parameter() {
-    let src = "(defun f () i32 ((lambda ((y i32)) i32 y) 1))\n";
+    let src = "(defun f () int ((lambda ((y int)) int y) 1))\n";
     let (h, body, def_locs, _docs) = program(src);
     // Column 40 is `y`'s reference in the lambda body; its parameter
-    // declaration `(y i32)` is at column 28.
+    // declaration `(y int)` is at column 28.
     let node = locate_node(&h, &body, FILE, 1, 40).expect("expected a located node");
     let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
     assert_eq!(target.line, 1);
@@ -99,7 +99,7 @@ fn goto_definition_on_a_lambda_parameter_reference_resolves_to_the_parameter() {
 
 #[test]
 fn goto_definition_on_a_labels_function_and_parameter_resolves_to_their_bindings() {
-    let src = "(defun f () i32 (labels ((g ((z i32)) i32 z)) (g 1)))\n";
+    let src = "(defun f () int (labels ((g ((z int)) int z)) (g 1)))\n";
     let (h, body, def_locs, _docs) = program(src);
     // `z`'s reference inside `g`'s own body (column 43) resolves to its
     // parameter declaration (column 31).
@@ -117,7 +117,7 @@ fn goto_definition_on_a_labels_function_and_parameter_resolves_to_their_bindings
 
 #[test]
 fn goto_definition_on_a_match_pattern_bound_reference_resolves_to_the_pattern() {
-    let src = "(defun f ((o Option<i32>)) i32 (match o ((Some x) x) (_ 0)))\n";
+    let src = "(defun f ((o Option<int>)) int (match o ((Some x) x) (_ 0)))\n";
     let (h, body, def_locs, _docs) = program(src);
     // Column 51 is the arm body's `x` reference; its pattern binding — the
     // `x` inside `(Some x)` — is at column 48 (`check_ctor_pattern`'s
@@ -131,7 +131,7 @@ fn goto_definition_on_a_match_pattern_bound_reference_resolves_to_the_pattern() 
 
 #[test]
 fn goto_definition_on_a_whole_arm_bind_pattern_reference_resolves_to_the_pattern() {
-    let src = "(defun g ((o Option<i32>)) Option<i32> (match o (v v)))\n";
+    let src = "(defun g ((o Option<int>)) Option<int> (match o (v v)))\n";
     let (h, body, def_locs, _docs) = program(src);
     // Column 52 is the arm body's `v` reference; the whole-arm variable
     // pattern `v` (the arm's own first element) is at column 50.
@@ -144,14 +144,14 @@ fn goto_definition_on_a_whole_arm_bind_pattern_reference_resolves_to_the_pattern
 #[test]
 fn hover_on_a_local_variable_reference_finds_the_variable_not_its_enclosing_call() {
     // `x` (a `bool` parameter) sits inside the `if`'s condition position;
-    // the enclosing `if` expression's own type is `i32` (its branches), a
+    // the enclosing `if` expression's own type is `int` (its branches), a
     // different type from `x`'s own (`bool`) — so if hover resolved to the
     // wrong (enclosing) node, this assertion would catch it. Before atom
     // source locations were tracked (`Heap::elem_locs`), a bare `Var`
     // reference had no `Loc` of its own and a cursor here would have
     // resolved to the smallest node that *did* have one instead (the whole
     // `if` form).
-    let src = "(defun f ((x bool)) i32 (if x 1 2))\n";
+    let src = "(defun f ((x bool)) int (if x 1 2))\n";
     let (h, body, def_locs, docs) = program(src);
     // Column 29 is `x` itself in `(if x 1 2)`.
     let node = locate_node(&h, &body, FILE, 1, 29).expect("expected a located node");
@@ -161,9 +161,9 @@ fn hover_on_a_local_variable_reference_finds_the_variable_not_its_enclosing_call
 #[test]
 fn hover_on_a_let_bound_local_finds_its_own_type() {
     // `n` is bound to a `bool` value; the `let`'s own body/result type is
-    // `i32` (the trailing `1`) — a mismatch that would surface if hover
+    // `int` (the trailing `1`) — a mismatch that would surface if hover
     // resolved to the enclosing `let` instead of the `n` reference itself.
-    let src = "(defun f () i32 (let ((n true)) (if n 1 1)))\n";
+    let src = "(defun f () int (let ((n true)) (if n 1 1)))\n";
     let (h, body, def_locs, docs) = program(src);
     // `(let ((n true)) (if n 1 1))` — `n` inside the `if` condition is at
     // column 37 exactly. (Column 38 — the space after it — used to resolve
@@ -203,7 +203,7 @@ fn locate_prefers_true_containment_over_a_closer_preceding_start() {
     // cursor than the first sibling's. The pre-span point search resolved
     // this to the first sibling (`add`, line 1); containment resolves it
     // to the enclosing call (`wrap`, line 2).
-    let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n(defun wrap ((a i32) (b i32)) i32 (+ a b))\n(defun main () i32 (wrap (add 1 2)  (add 3 4)))\n";
+    let src = "(defun add ((x int) (y int)) int (+ x y))\n(defun wrap ((a int) (b int)) int (+ a b))\n(defun main () int (wrap (add 1 2)  (add 3 4)))\n";
     let (h, body, def_locs, _docs) = program(src);
     // Line 3: `(wrap (add 1 2)  (add 3 4))` — the gap between siblings
     // (the second of the two spaces) is column 36.
@@ -214,7 +214,7 @@ fn locate_prefers_true_containment_over_a_closer_preceding_start() {
 
 #[test]
 fn locate_inside_a_sibling_still_finds_it() {
-    let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n(defun main () i32 (+ (add 1 2)  (add 3 4)))\n";
+    let src = "(defun add ((x int) (y int)) int (+ x y))\n(defun main () int (+ (add 1 2)  (add 3 4)))\n";
     let (h, body, def_locs, _docs) = program(src);
     // Column 35 is inside the second `(add 3 4)` call.
     let node = locate_node(&h, &body, FILE, 2, 35).expect("expected a located node");
@@ -228,7 +228,7 @@ fn locate_past_every_span_falls_back_to_the_closest_preceding_node() {
     // fallback (pre-span behavior) still resolves to the closest preceding
     // node rather than returning nothing — completion_locals depends on
     // locate_node finding *something* here.
-    let src = "(defun main () i32 (+ 1 2))\n";
+    let src = "(defun main () int (+ 1 2))\n";
     let (h, body, _, _) = program(src);
     assert!(locate_node(&h, &body, FILE, 3, 1).is_some());
 }

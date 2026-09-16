@@ -118,7 +118,7 @@ fn a_keyword_may_not_contain_further_colons() {
 fn a_leading_double_colon_is_still_the_absolute_path_syntax() {
     // `::foo` must not be mistaken for a malformed keyword — it reads as a
     // `Value::Path` whose first segment is empty ("from root").
-    let out = eval_ok("(defun f () i32 7) (module m (pub defun g () i32 (::f))) (m::g)");
+    let out = eval_ok("(defun f () int 7) (module m (pub defun g () int (::f))) (m::g)");
     assert_eq!(out, Value::Int(7));
 }
 

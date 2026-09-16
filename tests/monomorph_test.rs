@@ -123,7 +123,7 @@ fn an_instantiating_call_comes_back_bundled_with_its_specialization() {
 fn two_calls_at_the_same_type_in_one_form_share_one_specialization() {
     let (h, tls) = check_all(
         "(defun identity<T> ((x T)) T x) \
-         (defun use2 () i32 (+ (identity 1) (identity 2)))",
+         (defun use2 () int (+ (identity 1) (identity 2)))",
     )
     .unwrap();
     assert_eq!(bundled_specs(&h, tls[1]).len(), 1);
@@ -133,7 +133,7 @@ fn two_calls_at_the_same_type_in_one_form_share_one_specialization() {
 fn calls_at_different_types_get_independent_specializations() {
     let (h, tls) = check_all(
         "(defun identity<T> ((x T)) T x) \
-         (defun use2 () i32 (if (identity true) (identity 1) 0))",
+         (defun use2 () int (if (identity true) (identity 1) 0))",
     )
     .unwrap();
     assert_eq!(bundled_specs(&h, tls[1]).len(), 2);
@@ -141,7 +141,7 @@ fn calls_at_different_types_get_independent_specializations() {
 
 #[test]
 fn a_non_generic_call_is_not_bundled() {
-    let (h, tls) = check_all("(defun id ((x i32)) i32 x) (id 7)").unwrap();
+    let (h, tls) = check_all("(defun id ((x int)) int x) (id 7)").unwrap();
     assert_eq!(core::op(&h, tls[1]), Some("expr"));
 }
 
@@ -156,7 +156,7 @@ fn a_generic_call_evaluates_through_its_specialization() {
 #[test]
 fn self_recursion_reuses_the_same_specialization() {
     let src = r#"
-        (defun last-of<T> ((n i32) (x T)) T
+        (defun last-of<T> ((n int) (x T)) T
           (if (= n 0) x (last-of (- n 1) x)))
         (last-of 3 99)
     "#;
@@ -166,16 +166,16 @@ fn self_recursion_reuses_the_same_specialization() {
 #[test]
 fn mutually_recursive_generics_converge_on_the_worklist() {
     // `ping` and `pong` call each other at the same T: specializing
-    // `ping <i32>` requests `pong <i32>` whose body's `ping` call hits the
+    // `ping <int>` requests `pong <int>` whose body's `ping` call hits the
     // memo instead of diverging. (`pong` is defined first — this language
     // has no forward references — so `ping`'s body can name it; `pong`'s
     // own body can name `ping` because a generic body is only *diagnostic*-
     // checked at definition time... except forward references still fail
     // there, hence `pong` recursing through itself and `ping` through both.)
     let src = r#"
-        (defun pong<T> ((n i32) (x T)) T
+        (defun pong<T> ((n int) (x T)) T
           (if (= n 0) x (pong (- n 1) x)))
-        (defun ping<T> ((n i32) (x T)) T
+        (defun ping<T> ((n int) (x T)) T
           (if (= n 0) x (pong n x)))
         (ping 2 7)
     "#;
@@ -196,7 +196,7 @@ fn generic_body_calling_another_generic_specializes_transitively() {
 fn a_generic_instantiated_from_a_defvar_initializer_works() {
     let src = r#"
         (defun identity<T> ((x T)) T x)
-        (defvar (g i32) (identity 11))
+        (defvar (g int) (identity 11))
         g
     "#;
     assert_eq!(eval_ok(src), Value::Int(11));
@@ -207,7 +207,7 @@ fn a_generic_instantiated_inside_a_module_works() {
     let src = r#"
         (module m
           (pub defun identity<T> ((x T)) T x)
-          (pub defun use-it () i32 (identity 3)))
+          (pub defun use-it () int (identity 3)))
         (m::use-it)
     "#;
     assert_eq!(eval_ok(src), Value::Int(3));
@@ -241,7 +241,7 @@ fn a_type_parameter_shadows_a_user_type_of_the_same_name() {
     // a user type spelled like the type parameter cannot capture the
     // template's annotations during specialization.
     let src = r#"
-        (defstruct t (v i32))
+        (defstruct t (v int))
         (defun identity<T> ((x T)) T x)
         (identity 42)
     "#;
@@ -290,7 +290,7 @@ fn a_generic_method_with_a_match_body_specializes() {
 fn generic_defstruct_field_read_and_setf_work_through_specialized_accessors() {
     let src = r#"
         (defstruct box<T> (v T))
-        (defvar (b box<i32>) (box::new 1))
+        (defvar (b box<int>) (box::new 1))
         (setf b::v 5)
         b::v
     "#;
@@ -353,7 +353,7 @@ fn a_vector_of_sexpr_element_returns_the_datum() {
 fn a_generic_function_passed_as_an_argument_specializes_from_the_parameter_type() {
     let src = r#"
         (defun identity<T> ((x T)) T x)
-        (defun call-it ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (defun call-it ((f (fn (int) int)) (n int)) int (f n))
         (call-it identity 41)
     "#;
     assert_eq!(eval_ok(src), Value::Int(41));
@@ -374,7 +374,7 @@ fn a_generic_method_passed_as_an_argument_specializes() {
     let src = r#"
         (defstruct box<T> (v T))
         (defmethod get-v ((self box<T>)) T self::v)
-        (defun call-it ((f (fn (box<i32>) i32)) (b box<i32>)) i32 (f b))
+        (defun call-it ((f (fn (box<int>) int)) (b box<int>)) int (f b))
         (call-it get-v (box::new 7))
     "#;
     assert_eq!(eval_ok(src), Value::Int(7));
@@ -396,11 +396,11 @@ fn a_generic_function_value_without_type_context_is_a_check_error() {
 #[test]
 fn a_generic_function_value_in_a_typed_defvar_specializes() {
     // `defvar`'s mandatory type annotation is exactly the context a generic
-    // function value needs: `f`'s declared `(fn (i32) i32)` resolves T=i32
+    // function value needs: `f`'s declared `(fn (int) int)` resolves T=int
     // and the global ends up holding the specialization.
     let src = r#"
         (defun identity<T> ((x T)) T x)
-        (defvar (f (fn (i32) i32)) identity)
+        (defvar (f (fn (int) int)) identity)
         (f 41)
     "#;
     assert_eq!(eval_ok(src), Value::Int(41));
@@ -450,7 +450,7 @@ fn polymorphic_recursion_is_a_type_error_not_a_hang() {
     // `f` calls itself at `Option<T>` — every instantiation requests a new
     // one, so the drain budget must cut it off with a TypeError.
     let src = r#"
-        (defun f<T> ((n i32) (x T)) i32
+        (defun f<T> ((n int) (x T)) int
           (if (= n 0) n (f (- n 1) (option::some x))))
         (f 3 1)
     "#;

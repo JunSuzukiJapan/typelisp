@@ -39,7 +39,7 @@ fn check_err(src: &str) -> String {
 #[test]
 fn defun_docstring_is_returned_by_documentation() {
     let src = r#"
-        (defun add ((x i32) (y i32)) i32
+        (defun add ((x int) (y int)) int
           "Adds two integers."
           (+ x y))
         (unwrap-or (documentation add) "none")
@@ -50,7 +50,7 @@ fn defun_docstring_is_returned_by_documentation() {
 #[test]
 fn defun_without_docstring_has_no_documentation() {
     let src = r#"
-        (defun add ((x i32) (y i32)) i32 (+ x y))
+        (defun add ((x int) (y int)) int (+ x y))
         (is-none (documentation add))
     "#;
     assert_eq!(eval_ok(src), Value::Bool(true));
@@ -98,7 +98,7 @@ fn defmacro_docstring_is_returned_by_documentation() {
 #[test]
 fn defvar_trailing_docstring_is_returned_by_documentation() {
     let src = r#"
-        (defvar (limit i32) 100 "The maximum allowed count.")
+        (defvar (limit int) 100 "The maximum allowed count.")
         (unwrap-or (documentation limit) "none")
     "#;
     assert_eq!(eval_string(src), "The maximum allowed count.");
@@ -116,7 +116,7 @@ fn defconstant_trailing_docstring_is_returned_by_documentation() {
 #[test]
 fn defvar_without_docstring_still_checks_normally() {
     let src = r#"
-        (defvar (limit i32) 100)
+        (defvar (limit int) 100)
         limit
     "#;
     assert_eq!(eval_ok(src), Value::Int(100));
@@ -124,7 +124,7 @@ fn defvar_without_docstring_still_checks_normally() {
 
 #[test]
 fn defvar_third_argument_must_be_a_string() {
-    let msg = check_err("(defvar (limit i32) 100 42)");
+    let msg = check_err("(defvar (limit int) 100 42)");
     assert!(msg.contains("docstring"), "unexpected message: {}", msg);
 }
 
@@ -135,8 +135,8 @@ fn defstruct_docstring_is_returned_by_documentation() {
     let src = r#"
         (defstruct point
           "A 2D point."
-          (x i32)
-          (y i32))
+          (x int)
+          (y int))
         (unwrap-or (documentation point) "none")
     "#;
     assert_eq!(eval_string(src), "A 2D point.");
@@ -158,7 +158,7 @@ fn defenum_docstring_is_returned_by_documentation() {
 #[test]
 fn defstruct_without_docstring_has_no_documentation() {
     let src = r#"
-        (defstruct point (x i32) (y i32))
+        (defstruct point (x int) (y int))
         (is-none (documentation point))
     "#;
     assert_eq!(eval_ok(src), Value::Bool(true));
@@ -180,7 +180,7 @@ fn deftrait_docstring_is_returned_by_documentation() {
 #[test]
 fn defmethod_docstring_via_impl_is_returned_by_documentation() {
     let src = r#"
-        (defstruct point (x i32) (y i32))
+        (defstruct point (x int) (y int))
         (deftrait describable ()
           (describe ((self Self)) string))
         (impl describable point
@@ -195,8 +195,8 @@ fn defmethod_docstring_via_impl_is_returned_by_documentation() {
 #[test]
 fn defmethod_docstring_direct_is_returned_by_documentation() {
     let src = r#"
-        (defstruct point (x i32) (y i32))
-        (defmethod magnitude (point) i32
+        (defstruct point (x int) (y int))
+        (defmethod magnitude (point) int
           "Returns a magnitude-ish value."
           0)
         (unwrap-or (documentation point::magnitude) "none")

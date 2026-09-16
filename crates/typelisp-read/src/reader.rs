@@ -18,7 +18,6 @@
 //! comments (`;` line, `#| ... |#` nested block).
 
 use std::collections::HashSet;
-use std::convert::TryFrom;
 use std::rc::Rc;
 
 use num_bigint::BigInt;
@@ -1090,20 +1089,16 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
     }
 }
 
-/// An integer literal as the narrowest value that holds it: a `Value::Int`
-/// when it fits `i32` — the one fixed-width integer type an integer literal
-/// can have — and a heap `bignum` otherwise.
+/// An integer literal as an `int`: a fixnum when it fits 63 bits, a bignum
+/// box otherwise — `Heap::int_from_bigint`, the one place that decides, so
+/// the datum the reader makes is the same canonical shape arithmetic makes.
 ///
-/// The cut is at `i32`, not at the 61 bits a tagged immediate could carry,
-/// because `i32` is the widest fixed-width integer type the language has
-/// (`types::Type::is_integer`): a literal that does not fit it has no
-/// fixed-width type to be, so it is a `bignum` the way CL's reader makes any
-/// too-large literal one.
+/// The literal's *type* is the checker's business (a literal in an `i32`
+/// position is an `i32` when it fits, and a range error when it does not);
+/// what the reader decides is only the datum's shape, and that is decided by
+/// size alone.
 fn int_or_bignum(heap: &mut Heap, n: BigInt) -> Value {
-    match i32::try_from(&n) {
-        Ok(v) => Value::Int(v as i64),
-        Err(_) => heap.alloc_bignum(n),
-    }
+    heap.int_from_bigint(n)
 }
 
 /// The integer after a radix macro (`#x-1f`, `#b101`, `#36rZZ`). The sign
@@ -1334,7 +1329,7 @@ fn split_path_top_level(tok: &str) -> Option<Vec<&str>> {
 
 /// Interpret a token as a number, or `Ok(None)` if it is a symbol. Takes
 /// `heap` (unlike an otherwise-pure parser) because a float/bignum/ratio
-/// literal must be heap-boxed (`Heap::alloc_f64`/`alloc_bignum`/
+/// literal must be heap-boxed (`Heap::alloc_f64`/`int_from_bigint`/
 /// `alloc_ratio`, see `BoxedObj`'s doc comment) — those payloads don't fit
 /// alongside `Value`'s tag the way an int/char does. The only `Err` is a
 /// ratio literal with a zero denominator (`1/0`), which CL's reader also

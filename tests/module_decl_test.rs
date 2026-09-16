@@ -70,7 +70,7 @@ fn in_module_puts_the_rest_of_the_file_in_a_nested_module() {
     assert_eq!(
         run_one(
             "in_module_basic",
-            "(in-module geometry)\n(defun area ((w i32) (h i32)) i32 (* w h))\n(area 3 4)\n",
+            "(in-module geometry)\n(defun area ((w int) (h int)) int (* w h))\n(area 3 4)\n",
         ),
         Ok(Some(Value::Int(12)))
     );
@@ -84,7 +84,7 @@ fn what_in_module_entered_is_reachable_by_its_full_path() {
     assert_eq!(
         run_one(
             "in_module_path",
-            "(in-module geometry)\n(pub defun area ((w i32) (h i32)) i32 (* w h))\n(main::geometry::area 5 6)\n",
+            "(in-module geometry)\n(pub defun area ((w int) (h int)) int (* w h))\n(main::geometry::area 5 6)\n",
         ),
         Ok(Some(Value::Int(30)))
     );
@@ -95,7 +95,7 @@ fn a_second_in_module_nests_inside_the_first() {
     assert_eq!(
         run_one(
             "in_module_nested",
-            "(in-module a)\n(in-module b)\n(pub defun here () i32 7)\n(main::a::b::here)\n",
+            "(in-module a)\n(in-module b)\n(pub defun here () int 7)\n(main::a::b::here)\n",
         ),
         Ok(Some(Value::Int(7)))
     );
@@ -106,8 +106,8 @@ fn in_module_does_not_leak_out_of_its_file() {
     // `dep.typl` enters a module of its own; `main.typl` must still be in
     // `main`, or its own `(pub defun ...)` would land somewhere else.
     let files = [
-        ("dep.typl", "(in-module inner)\n(pub defun hidden () i32 1)\n"),
-        ("main.typl", "(use dep)\n(pub defun top () i32 2)\n(main::top)\n"),
+        ("dep.typl", "(in-module inner)\n(pub defun hidden () int 1)\n"),
+        ("main.typl", "(use dep)\n(pub defun top () int 2)\n(main::top)\n"),
     ];
     let (v, warnings) = run("in_module_scope", &files, "main.typl").expect("load failed");
     assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
@@ -119,8 +119,8 @@ fn in_module_inside_a_written_module_ends_with_that_body() {
     assert_eq!(
         run_one(
             "in_module_in_module",
-            "(module outer (in-module inner) (pub defun deep () i32 3))\n\
-             (pub defun shallow () i32 4)\n\
+            "(module outer (in-module inner) (pub defun deep () int 3))\n\
+             (pub defun shallow () int 4)\n\
              (+ (main::outer::inner::deep) (main::shallow))\n",
         ),
         Ok(Some(Value::Int(7)))
@@ -129,7 +129,7 @@ fn in_module_inside_a_written_module_ends_with_that_body() {
 
 #[test]
 fn in_module_is_a_top_level_form_only() {
-    let err = run_one("in_module_expr", "(defun f () i32 (progn (in-module x) 1))\n(f)\n")
+    let err = run_one("in_module_expr", "(defun f () int (progn (in-module x) 1))\n(f)\n")
         .expect_err("in-module in expression position");
     assert!(err.contains("only allowed at top level"), "unexpected error: {}", err);
 }
@@ -145,8 +145,8 @@ fn in_module_takes_exactly_one_path() {
 // ----------------------------------------------------------------------
 
 const TWO_HELPERS: [(&str, &str); 2] = [
-    ("one.typl", "(pub defun twice ((n i32)) i32 (* n 2))\n"),
-    ("two.typl", "(pub defun quad ((n i32)) i32 (* n 4))\n"),
+    ("one.typl", "(pub defun twice ((n int)) int (* n 2))\n"),
+    ("two.typl", "(pub defun quad ((n int)) int (* n 4))\n"),
 ];
 
 #[test]
@@ -190,7 +190,7 @@ fn an_import_shadowed_by_a_local_definition_is_reported() {
     let mut files = TWO_HELPERS.to_vec();
     files.push((
         "main.typl",
-        "(defun twice ((n i32)) i32 (+ n 1000))\n(use one::twice)\n(twice 21)\n",
+        "(defun twice ((n int)) int (+ n 1000))\n(use one::twice)\n(twice 21)\n",
     ));
     let (v, warnings) = run("clash_local", &files, "main.typl").expect("load failed");
     assert_eq!(v, Some(Value::Int(1021)), "the local definition still wins");
@@ -204,7 +204,7 @@ fn the_order_of_the_two_does_not_change_who_wins() {
     let mut files = TWO_HELPERS.to_vec();
     files.push((
         "main.typl",
-        "(use one::twice)\n(defun twice ((n i32)) i32 (+ n 1000))\n(twice 21)\n",
+        "(use one::twice)\n(defun twice ((n int)) int (+ n 1000))\n(twice 21)\n",
     ));
     let (v, _) = run("clash_local_reversed", &files, "main.typl").expect("load failed");
     assert_eq!(v, Some(Value::Int(1021)));
@@ -215,7 +215,7 @@ fn shadowing_import_says_the_collision_is_meant() {
     let mut files = TWO_HELPERS.to_vec();
     files.push((
         "main.typl",
-        "(defun twice ((n i32)) i32 (+ n 1000))\n(shadowing-import one::twice)\n(twice 21)\n",
+        "(defun twice ((n int)) int (+ n 1000))\n(shadowing-import one::twice)\n(twice 21)\n",
     ));
     let (v, warnings) = run("clash_shadowing", &files, "main.typl").expect("load failed");
     assert!(warnings.is_empty(), "shadowing-import must be quiet: {:?}", warnings);
@@ -227,8 +227,8 @@ fn shadowing_import_says_the_collision_is_meant() {
 #[test]
 fn an_import_replacing_an_earlier_import_is_reported_too() {
     let files = [
-        ("one.typl", "(pub defun same ((n i32)) i32 (* n 2))\n"),
-        ("two.typl", "(pub defun same ((n i32)) i32 (* n 4))\n"),
+        ("one.typl", "(pub defun same ((n int)) int (* n 2))\n"),
+        ("two.typl", "(pub defun same ((n int)) int (* n 4))\n"),
         ("main.typl", "(use one::same)\n(use two::same)\n(same 10)\n"),
     ];
     let (v, warnings) = run("clash_import", &files, "main.typl").expect("load failed");

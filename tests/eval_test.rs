@@ -54,14 +54,14 @@ fn if_and_let() {
 
 #[test]
 fn defun_and_call() {
-    assert_eq!(eval_ok("(defun id ((x i32)) i32 x) (id 7)"), Value::Int(7));
+    assert_eq!(eval_ok("(defun id ((x int)) int x) (id 7)"), Value::Int(7));
 }
 
 // ---- constructors / match ---------------------------------------------------
 
 #[test]
 fn unwrap_or_some() {
-    let src = "(defun unwrap-or ((o Option<i32>) (d i32)) i32 \
+    let src = "(defun unwrap-or ((o Option<int>) (d int)) int \
                  (match o ((Some v) v) ((None) d))) \
                (unwrap-or (option::some 5) 0)";
     assert_eq!(eval_ok(src), Value::Int(5));
@@ -69,7 +69,7 @@ fn unwrap_or_some() {
 
 #[test]
 fn unwrap_or_none() {
-    let src = "(defun unwrap-or ((o Option<i32>) (d i32)) i32 \
+    let src = "(defun unwrap-or ((o Option<int>) (d int)) int \
                  (match o ((Some v) v) ((None) d))) \
                (unwrap-or (option::none) 9)";
     assert_eq!(eval_ok(src), Value::Int(9));
@@ -77,7 +77,7 @@ fn unwrap_or_none() {
 
 #[test]
 fn result_match() {
-    let prog = "(defun unwrap-i ((r Result<i32,ParseIntError>)) i32 \
+    let prog = "(defun unwrap-i ((r Result<int,ParseIntError>)) int \
                   (match r ((Ok v) v) ((Err e) (panic \"err\")))) ";
     assert_eq!(eval_ok(&format!("{} (unwrap-i (result::ok 9))", prog)), Value::Int(9));
     assert_eq!(
@@ -90,17 +90,17 @@ fn result_match() {
 
 #[test]
 fn panic_propagates() {
-    let src = "(defun boom () i32 (panic \"kaboom\")) (boom)";
+    let src = "(defun boom () int (panic \"kaboom\")) (boom)";
     assert_eq!(run(src), Err(EvalError::Panic("kaboom".into())));
 }
 
 #[test]
 fn module_function_runs() {
-    let src = "(module m (pub defun id ((x i32)) i32 x)) (m::id 42)";
+    let src = "(module m (pub defun id ((x int)) int x)) (m::id 42)";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 
-// ---- builtin arithmetic / comparison (i32) ---------------------------------
+// ---- builtin arithmetic / comparison (int) ---------------------------------
 
 #[test]
 fn arithmetic() {
@@ -133,13 +133,13 @@ fn comparison() {
 
 #[test]
 fn recursive_factorial() {
-    let src = "(defun fact ((n i32)) i32 (if (<= n 1) 1 (* n (fact (- n 1))))) (fact 5)";
+    let src = "(defun fact ((n int)) int (if (<= n 1) 1 (* n (fact (- n 1))))) (fact 5)";
     assert_eq!(eval_ok(src), Value::Int(120));
 }
 
 #[test]
 fn recursive_fibonacci() {
-    let src = "(defun fib ((n i32)) i32 \
+    let src = "(defun fib ((n int)) int \
                  (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))) \
                (fib 10)";
     assert_eq!(eval_ok(src), Value::Int(55));
@@ -147,7 +147,7 @@ fn recursive_fibonacci() {
 
 #[test]
 fn divide_by_zero_panics() {
-    let src = "(defun d ((a i32) (b i32)) i32 (/ a b)) (d 6 0)";
+    let src = "(defun d ((a int) (b int)) int (/ a b)) (d 6 0)";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
@@ -193,7 +193,7 @@ fn let_star_binds_sequentially() {
 
 #[test]
 fn while_loop_with_setf() {
-    let src = "(defun sum-to ((n i32)) i32 \
+    let src = "(defun sum-to ((n int)) int \
                  (let ((sum 0) (i 0)) \
                    (while (< i n) (setf sum (+ sum i)) (setf i (+ i 1))) \
                    sum)) \
@@ -213,7 +213,7 @@ fn while_is_unit() {
 
 #[test]
 fn factorial_via_loop() {
-    let src = "(defun fact ((n i32)) i32 \
+    let src = "(defun fact ((n int)) int \
                  (let ((acc 1) (i 1)) \
                    (while (<= i n) (setf acc (* acc i)) (setf i (+ i 1))) \
                    acc)) \
@@ -225,27 +225,27 @@ fn factorial_via_loop() {
 
 #[test]
 fn lambda_called_immediately() {
-    assert_eq!(eval_ok("((lambda ((x i32)) i32 (+ x 1)) 10)"), Value::Int(11));
+    assert_eq!(eval_ok("((lambda ((x int)) int (+ x 1)) 10)"), Value::Int(11));
 }
 
 #[test]
 fn lambda_bound_in_let() {
     assert_eq!(
-        eval_ok("(let ((f (lambda ((x i32)) i32 (* x x)))) (f 5))"),
+        eval_ok("(let ((f (lambda ((x int)) int (* x x)))) (f 5))"),
         Value::Int(25)
     );
 }
 
 #[test]
 fn higher_order_function() {
-    let src = "(defun apply-twice ((f (fn (i32) i32)) (x i32)) i32 (f (f x))) \
-               (apply-twice (lambda ((n i32)) i32 (+ n 1)) 5)";
+    let src = "(defun apply-twice ((f (fn (int) int)) (x int)) int (f (f x))) \
+               (apply-twice (lambda ((n int)) int (+ n 1)) 5)";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn closure_captures_variable() {
-    let src = "(defun adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n))) \
+    let src = "(defun adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n))) \
                (let ((add5 (adder 5))) (add5 10))";
     assert_eq!(eval_ok(src), Value::Int(15));
 }
@@ -253,8 +253,8 @@ fn closure_captures_variable() {
 #[test]
 fn closure_captures_mutable_state() {
     // The returned closure shares the captured `c` slot across calls.
-    let src = "(defun make-counter () (fn () i32) \
-                 (let ((c 0)) (lambda () i32 (setf c (+ c 1))))) \
+    let src = "(defun make-counter () (fn () int) \
+                 (let ((c 0)) (lambda () int (setf c (+ c 1))))) \
                (let ((next (make-counter))) (next) (next))";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
@@ -263,23 +263,23 @@ fn closure_captures_mutable_state() {
 
 #[test]
 fn named_function_as_value() {
-    let src = "(defun inc ((x i32)) i32 (+ x 1)) \
-               (defun call2 ((f (fn (i32) i32))) i32 (f (f 0))) \
+    let src = "(defun inc ((x int)) int (+ x 1)) \
+               (defun call2 ((f (fn (int) int))) int (f (f 0))) \
                (call2 inc)";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
 fn builtin_as_value() {
-    let src = "(defun apply2 ((f (fn (i32 i32) i32)) (a i32) (b i32)) i32 (f a b)) \
+    let src = "(defun apply2 ((f (fn (int int) int)) (a int) (b int)) int (f a b)) \
                (apply2 + 3 4)";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn module_function_as_value() {
-    let src = "(module m (pub defun inc ((x i32)) i32 (+ x 1))) \
-               (defun c ((f (fn (i32) i32))) i32 (f 9)) \
+    let src = "(module m (pub defun inc ((x int)) int (+ x 1))) \
+               (defun c ((f (fn (int) int))) int (f 9)) \
                (c m::inc)";
     assert_eq!(eval_ok(src), Value::Int(10));
 }
@@ -296,7 +296,7 @@ fn dotimes_accumulates() {
 
 #[test]
 fn dotimes_factorial() {
-    let src = "(defun fact ((n i32)) i32 \
+    let src = "(defun fact ((n int)) int \
                  (let ((acc 1)) (dotimes (i n) (setf acc (* acc (+ i 1)))) acc)) \
                (fact 5)";
     assert_eq!(eval_ok_with_prelude(src), Value::Int(120));
@@ -362,7 +362,7 @@ fn break_in_inner_loop_does_not_exit_outer() {
 
 #[test]
 fn nested_loop_factorial_via_return() {
-    let src = "(defun fact ((n i32)) i32 \
+    let src = "(defun fact ((n int)) int \
                  (let ((acc 1) (i 1)) \
                    (loop (if (> i n) (return acc) ()) \
                          (setf acc (* acc i)) \
@@ -458,17 +458,17 @@ fn sexpr_cons_car_cdr_mirror_the_user_facing_ops() {
     // `sexpr-cons`/`sexpr-car`/`sexpr-cdr` are the island's `Sexpr` cons/nil
     // operations — the free `cons`/`car`/`cdr` names are the generic `cons<T,U>`
     // pair now (Phase 4b), so a `Sexpr` list is built and walked here.
-    assert_sexpr_eq("(sexpr-cons (i32 1) ())", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
-    assert_sexpr_eq("(sexpr-car (sexpr-cons (i32 1) ()))", |_| Value::Int(1));
-    assert_sexpr_eq("(sexpr-cdr (sexpr-cons (i32 1) ()))", |_| Value::Empty);
+    assert_sexpr_eq("(sexpr-cons (int 1) ())", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
+    assert_sexpr_eq("(sexpr-car (sexpr-cons (int 1) ()))", |_| Value::Int(1));
+    assert_sexpr_eq("(sexpr-cdr (sexpr-cons (int 1) ()))", |_| Value::Empty);
 }
 
 #[test]
 fn sexpr_car_and_cdr_of_a_non_cons_atom_panic() {
     // An *atom* is a type confusion, so it still panics — CL rejects
     // `(car 5)` too.
-    assert_eq!(run("(sexpr-car (i32 5))"), Err(EvalError::Panic("sexpr-car: not a cons".into())));
-    assert_eq!(run("(sexpr-cdr (i32 5))"), Err(EvalError::Panic("sexpr-cdr: not a cons".into())));
+    assert_eq!(run("(sexpr-car (int 5))"), Err(EvalError::Panic("sexpr-car: not a cons".into())));
+    assert_eq!(run("(sexpr-cdr (int 5))"), Err(EvalError::Panic("sexpr-cdr: not a cons".into())));
     // The empty list is not a confusion, it is the end of a list — and both
     // tiers answer with the empty list rather than panicking (CL's
     // `(car nil) => nil`). `tests/match_sexpr_test.rs` asserts the value; the
@@ -481,22 +481,22 @@ fn sexpr_car_and_cdr_of_a_non_cons_atom_panic() {
 fn sexpr_tag_predicates_read_the_runtime_tag() {
     // The `sexpr-consp`/`sexpr-null`/`sexpr-atom` predicates inspect the runtime
     // tag directly (no `match`), so they survive Phase 5's `match`-to-enum fence.
-    assert_eq!(eval_ok("(sexpr-consp (sexpr-cons (i32 1) ()))"), Value::Bool(true));
+    assert_eq!(eval_ok("(sexpr-consp (sexpr-cons (int 1) ()))"), Value::Bool(true));
     assert_eq!(eval_ok("(sexpr-consp ())"), Value::Bool(false));
-    assert_eq!(eval_ok("(sexpr-consp (i32 3))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-consp (int 3))"), Value::Bool(false));
 
     assert_eq!(eval_ok("(sexpr-null ())"), Value::Bool(true));
-    assert_eq!(eval_ok("(sexpr-null (sexpr-cons (i32 1) ()))"), Value::Bool(false));
-    assert_eq!(eval_ok("(sexpr-null (i32 3))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-null (sexpr-cons (int 1) ()))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-null (int 3))"), Value::Bool(false));
 
     assert_eq!(eval_ok("(sexpr-atom ())"), Value::Bool(true));
-    assert_eq!(eval_ok("(sexpr-atom (i32 3))"), Value::Bool(true));
-    assert_eq!(eval_ok("(sexpr-atom (sexpr-cons (i32 1) ()))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-atom (int 3))"), Value::Bool(true));
+    assert_eq!(eval_ok("(sexpr-atom (sexpr-cons (int 1) ()))"), Value::Bool(false));
 }
 
 #[test]
 fn list_builds_cons_chain() {
-    assert_sexpr_eq("(list (i32 1) (i32 2))", |h| {
+    assert_sexpr_eq("(list (int 1) (int 2))", |h| {
         let tail = h.cons(Value::Int(2), Value::Empty).unwrap();
         h.cons(Value::Int(1), tail).unwrap()
     });
@@ -512,7 +512,7 @@ fn sexpr_cons_as_value() {
     // the generic `cons<T,U>` pair now — Symbol/Sexpr redesign Phase 4b).
     let src = "(defun apply2 ((f (fn (Option<Sexpr> Option<Sexpr>) Option<Sexpr>)) \
                               (a Option<Sexpr>) (b Option<Sexpr>)) Option<Sexpr> (f a b)) \
-               (apply2 sexpr-cons (i32 1) ())";
+               (apply2 sexpr-cons (int 1) ())";
     assert_sexpr_eq(src, |h| h.cons(Value::Int(1), Value::Empty).unwrap());
 }
 
@@ -527,8 +527,8 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
     // instead of the loop's garbage.
     let mut src_heap = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let src = "(let ((kept (cons (i32 1) (the Option<Sexpr> ())))) \
-                 (dotimes (i 50) (cons (i32 2) (the Option<Sexpr> ()))) \
+    let src = "(let ((kept (cons (int 1) (the Option<Sexpr> ())))) \
+                 (dotimes (i 50) (cons (int 2) (the Option<Sexpr> ()))) \
                  (car kept))";
     let vs = r.read_all(&mut src_heap, src).expect("read failed");
     let mut chk = Checker::new();
@@ -572,40 +572,40 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
 
 #[test]
 fn defvar_global_read() {
-    assert_eq!(eval_ok("(defvar (g i32) 42) g"), Value::Int(42));
+    assert_eq!(eval_ok("(defvar (g int) 42) g"), Value::Int(42));
 }
 
 #[test]
 fn defvar_visible_in_function() {
-    assert_eq!(eval_ok("(defvar (g i32) 10) (defun f () i32 g) (f)"), Value::Int(10));
+    assert_eq!(eval_ok("(defvar (g int) 10) (defun f () int g) (f)"), Value::Int(10));
 }
 
 #[test]
 fn defvar_is_mutable() {
-    let src = "(defvar (c i32) 0) \
-               (defun bump () i32 (setf c (+ c 1))) \
+    let src = "(defvar (c int) 0) \
+               (defun bump () int (setf c (+ c 1))) \
                (bump) (bump) c";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
 fn defconstant_read() {
-    assert_eq!(eval_ok("(defconstant (k i32) 5) k"), Value::Int(5));
+    assert_eq!(eval_ok("(defconstant (k int) 5) k"), Value::Int(5));
 }
 
 #[test]
 fn typed_defvar() {
-    assert_eq!(eval_ok("(defvar (g i32) 7) g"), Value::Int(7));
+    assert_eq!(eval_ok("(defvar (g int) 7) g"), Value::Int(7));
 }
 
 #[test]
 fn module_global_via_path() {
-    assert_eq!(eval_ok("(module m (pub defvar (g i32) 7)) m::g"), Value::Int(7));
+    assert_eq!(eval_ok("(module m (pub defvar (g int) 7)) m::g"), Value::Int(7));
 }
 
 #[test]
 fn cond_with_classify() {
-    let src = "(defun classify ((n i32)) i32 \
+    let src = "(defun classify ((n int)) int \
                  (cond ((< n 0) (- 0 1)) ((= n 0) 0) (else 1))) \
                (classify 7)";
     assert_eq!(eval_ok_with_prelude(src), Value::Int(1));
@@ -615,28 +615,28 @@ fn cond_with_classify() {
 
 #[test]
 fn labels_self_recursion() {
-    let src = "(labels ((fact ((n i32)) i32 (if (= n 0) 1 (* n (fact (- n 1)))))) (fact 5))";
+    let src = "(labels ((fact ((n int)) int (if (= n 0) 1 (* n (fact (- n 1)))))) (fact 5))";
     assert_eq!(eval_ok(src), Value::Int(120));
 }
 
 #[test]
 fn labels_mutual_recursion() {
-    let src = "(labels ((is-even ((n i32)) bool (if (= n 0) true (is-odd (- n 1))))
-                        (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1)))))
+    let src = "(labels ((is-even ((n int)) bool (if (= n 0) true (is-odd (- n 1))))
+                        (is-odd ((n int)) bool (if (= n 0) false (is-even (- n 1)))))
                  (is-even 10))";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
 fn labels_trailing_body_can_call_multiple_functions() {
-    let src = "(labels ((double ((n i32)) i32 (* n 2))) (+ (double 3) (double 4)))";
+    let src = "(labels ((double ((n int)) int (* n 2))) (+ (double 3) (double 4)))";
     assert_eq!(eval_ok(src), Value::Int(14));
 }
 
 #[test]
 fn labels_nested_inside_a_defun_still_self_recurses() {
-    let src = "(defun run-it () i32
-                  (labels ((sum-to ((n i32)) i32 (if (= n 0) 0 (+ n (sum-to (- n 1))))))
+    let src = "(defun run-it () int
+                  (labels ((sum-to ((n int)) int (if (= n 0) 0 (+ n (sum-to (- n 1))))))
                     (sum-to 4)))
                 (run-it)";
     assert_eq!(eval_ok(src), Value::Int(10));
@@ -644,7 +644,7 @@ fn labels_nested_inside_a_defun_still_self_recurses() {
 
 #[test]
 fn labels_function_can_be_bound_to_a_variable_like_any_other() {
-    let src = "(labels ((add1 ((n i32)) i32 (+ n 1)))
+    let src = "(labels ((add1 ((n int)) int (+ n 1)))
                   (let ((f add1)) (f 10)))";
     assert_eq!(eval_ok(src), Value::Int(11));
 }
@@ -661,13 +661,13 @@ fn labels_function_can_be_bound_to_a_variable_like_any_other() {
 // redesign Phase 5 — and `car`/`cdr` are repurposed to a `cons<T,U>` pair).
 
 const LEN_HELPER: &str =
-    "(defun len ((s Option<Sexpr>)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))";
+    "(defun len ((s Option<Sexpr>)) int (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))";
 
 #[test]
 fn defun_rest_collects_extra_arguments_into_a_list() {
     let src = format!(
         "{}
-         (defun count-extra ((a i32) &rest (xs i32)) i32 (len xs))
+         (defun count-extra ((a int) &rest (xs int)) int (len xs))
          (count-extra 1 2 3 4)",
         LEN_HELPER
     );
@@ -678,7 +678,7 @@ fn defun_rest_collects_extra_arguments_into_a_list() {
 fn defun_rest_with_no_extra_arguments_is_an_empty_list() {
     let src = format!(
         "{}
-         (defun count-extra ((a i32) &rest (xs i32)) i32 (len xs))
+         (defun count-extra ((a int) &rest (xs int)) int (len xs))
          (count-extra 1)",
         LEN_HELPER
     );
@@ -689,7 +689,7 @@ fn defun_rest_with_no_extra_arguments_is_an_empty_list() {
 fn defun_rest_with_no_fixed_params_collects_every_argument() {
     let src = format!(
         "{}
-         (defun count-all (&rest (xs i32)) i32 (len xs)) (count-all 1 2 3)",
+         (defun count-all (&rest (xs int)) int (len xs)) (count-all 1 2 3)",
         LEN_HELPER
     );
     assert_eq!(eval_ok(&src), Value::Int(3));
@@ -697,12 +697,12 @@ fn defun_rest_with_no_fixed_params_collects_every_argument() {
 
 #[test]
 fn defun_rest_elements_keep_their_order_and_values() {
-    // `Sexpr`'s own `Int` constructor holds an `i32` whatever integer width
+    // `Sexpr`'s own `Int` constructor holds an `int` whatever integer width
     // the `&rest` element type was declared as — every width wraps into the
     // same `Sexpr` variant (see `sexpr_ctor_for`), so extracting one back out
-    // via `sexpr-i32` yields `i32`.
-    let src = "(defun second-extra ((a i32) &rest (xs i32)) i32
-                 (sexpr-i32 (sexpr-car (sexpr-cdr xs))))
+    // via `sexpr-int` yields `int`.
+    let src = "(defun second-extra ((a int) &rest (xs int)) int
+                 (sexpr-int (sexpr-car (sexpr-cdr xs))))
                (second-extra 1 10 20 30)";
     assert_eq!(eval_ok(src), Value::Int(20));
 }
@@ -711,7 +711,7 @@ fn defun_rest_elements_keep_their_order_and_values() {
 fn lambda_rest_collects_extra_arguments_into_a_list() {
     let src = format!(
         "{}
-         ((lambda ((a i32) &rest (xs i32)) i32 (len xs)) 1 2 3)",
+         ((lambda ((a int) &rest (xs int)) int (len xs)) 1 2 3)",
         LEN_HELPER
     );
     assert_eq!(eval_ok(&src), Value::Int(2));
@@ -726,8 +726,8 @@ fn generic_rest_function_works_at_different_element_types() {
 
 #[test]
 fn apply_calls_a_named_variadic_function_with_a_runtime_list() {
-    let src = "(defun first-extra ((a i32) &rest (xs i32)) i32
-                 (sexpr-i32 (sexpr-car xs)))
+    let src = "(defun first-extra ((a int) &rest (xs int)) int
+                 (sexpr-int (sexpr-car xs)))
                (apply first-extra 1 (quote (10 20)))";
     assert_eq!(eval_ok(src), Value::Int(10));
 }
@@ -736,7 +736,7 @@ fn apply_calls_a_named_variadic_function_with_a_runtime_list() {
 fn apply_calls_a_variadic_lambda_value() {
     let src = format!(
         "{}
-         (let ((f (lambda ((a i32) &rest (xs i32)) i32 (+ a (len xs)))))
+         (let ((f (lambda ((a int) &rest (xs int)) int (+ a (len xs)))))
            (apply f 10 (quote (1 2))))",
         LEN_HELPER
     );
@@ -747,7 +747,7 @@ fn apply_calls_a_variadic_lambda_value() {
 fn apply_with_no_fixed_arguments_passes_the_whole_list_as_rest() {
     let src = format!(
         "{}
-         (defun count-all (&rest (xs i32)) i32 (len xs))
+         (defun count-all (&rest (xs int)) int (len xs))
          (apply count-all (quote (1 2 3)))",
         LEN_HELPER
     );
@@ -758,20 +758,20 @@ fn apply_with_no_fixed_arguments_passes_the_whole_list_as_rest() {
 
 #[test]
 fn the_is_transparent_at_runtime() {
-    assert_eq!(eval_ok("(the i32 5)"), Value::Int(5));
+    assert_eq!(eval_ok("(the int 5)"), Value::Int(5));
 }
 
 // ---- unreachable / todo -------------------------------------------------------
 
 #[test]
 fn unreachable_panics() {
-    let src = "(defun boom () i32 (unreachable)) (boom)";
+    let src = "(defun boom () int (unreachable)) (boom)";
     assert_eq!(run_with_prelude(src), Err(EvalError::Panic("unreachable".into())));
 }
 
 #[test]
 fn todo_panics() {
-    let src = "(defun boom () i32 (todo)) (boom)";
+    let src = "(defun boom () int (todo)) (boom)";
     assert_eq!(run_with_prelude(src), Err(EvalError::Panic("todo".into())));
 }
 
@@ -818,9 +818,9 @@ fn setf_on_a_sexpr_binding_survives_gc_and_releases_the_old_value() {
     // `s` is rebound mid-loop; the *new* cons must survive every later
     // collection and the old one must be reclaimable (with only 3 cells,
     // the loop can't run at all unless the old value's cell is freed).
-    let src = "(let ((s (cons (i32 1) (the Option<Sexpr> ())))) \
-                 (setf s (cons (i32 5) (the Option<Sexpr> ()))) \
-                 (dotimes (i 40) (cons (i32 2) (the Option<Sexpr> ()))) \
+    let src = "(let ((s (cons (int 1) (the Option<Sexpr> ())))) \
+                 (setf s (cons (int 5) (the Option<Sexpr> ()))) \
+                 (dotimes (i 40) (cons (int 2) (the Option<Sexpr> ()))) \
                  (car s))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(5));
 }
@@ -830,16 +830,16 @@ fn a_sexpr_car_bound_sexpr_survives_gc_pressure() {
     // `match` on a `Sexpr` is fenced off (Symbol/Sexpr redesign Phase 5); the
     // extracted `car` is now bound with `sexpr-car` instead, exercising the
     // same "a let-bound `Sexpr` local stays rooted across GC" path.
-    let src = "(let ((s (sexpr-cons (i32 8) ()))) \
+    let src = "(let ((s (sexpr-cons (int 8) ()))) \
                  (let ((h (sexpr-car s))) \
-                   (dotimes (i 40) (sexpr-cons (i32 2) ())) h))";
+                   (dotimes (i 40) (sexpr-cons (int 2) ())) h))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(8));
 }
 
 #[test]
 fn a_defvar_sexpr_global_survives_gc_pressure_across_forms() {
-    let src = "(defvar (g Option<Sexpr>) (sexpr-cons (i32 3) ())) \
-               (dotimes (i 40) (sexpr-cons (i32 2) ())) \
+    let src = "(defvar (g Option<Sexpr>) (sexpr-cons (int 3) ())) \
+               (dotimes (i 40) (sexpr-cons (int 2) ())) \
                (sexpr-car g)";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(3));
 }
@@ -852,9 +852,9 @@ fn a_lambda_captured_sexpr_binding_survives_gc_pressure() {
     // margin; the churn count (200, far over the heap size) is what now forces
     // the repeated collections the captured `s` must survive, so the test still
     // fails if the capture isn't rooted through GC.
-    let src = "(let ((s (cons (i32 6) (the Option<Sexpr> ())))) \
+    let src = "(let ((s (cons (int 6) (the Option<Sexpr> ())))) \
                  (let ((f (lambda () Sexpr (car s)))) \
-                   (dotimes (i 200) (cons (i32 2) (the Option<Sexpr> ()))) \
+                   (dotimes (i 200) (cons (int 2) (the Option<Sexpr> ()))) \
                    (f)))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(6));
 }
@@ -869,10 +869,10 @@ fn an_unnamed_callee_survives_argument_evaluation_under_gc_pressure() {
     // cells clears the definition-time JIT floor (interp-closure removal — the
     // old 6-cell heap can't hold the compiled closures' AST); the 200-iteration
     // churn, far over the heap size, is what forces the collections now.
-    let src = "(let ((mk (lambda ((s Option<Sexpr>)) (fn (i32) Option<Sexpr>) \
-                          (lambda ((n i32)) Option<Sexpr> (sexpr-car s))))) \
-                 (let ((f (mk (sexpr-cons (i32 4) ())))) \
-                   (dotimes (i 200) (sexpr-cons (i32 2) ())) \
+    let src = "(let ((mk (lambda ((s Option<Sexpr>)) (fn (int) Option<Sexpr>) \
+                          (lambda ((n int)) Option<Sexpr> (sexpr-car s))))) \
+                 (let ((f (mk (sexpr-cons (int 4) ())))) \
+                   (dotimes (i 200) (sexpr-cons (int 2) ())) \
                    (f 0)))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(4));
 }
@@ -885,10 +885,10 @@ fn labels_siblings_mutually_recurse_under_gc_pressure() {
     // live at once, measured floor ~51); the 200-iteration churn, far over
     // the heap size, forces the collections the mutually-recursive closures
     // must survive.
-    let src = "(labels ((is-even ((n i32)) bool (if (= n 0) true (is-odd (- n 1)))) \
-                        (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1))))) \
-                 (dotimes (i 200) (cons (i32 2) (the Option<Sexpr> ()))) \
-                 (if (is-even 10) (i32 1) (i32 0)))";
+    let src = "(labels ((is-even ((n int)) bool (if (= n 0) true (is-odd (- n 1)))) \
+                        (is-odd ((n int)) bool (if (= n 0) false (is-even (- n 1))))) \
+                 (dotimes (i 200) (cons (int 2) (the Option<Sexpr> ()))) \
+                 (if (is-even 10) (int 1) (int 0)))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(1));
 }
 
@@ -897,8 +897,8 @@ fn setf_through_a_shared_capture_is_visible_to_the_sibling_closure() {
     // Two closures capture the same `Sexpr` binding; a write through one is
     // observed by the other — the shared-mutable-cell semantics the heap
     // cell representation must preserve.
-    let src = "(let ((s (cons (i32 1) (the Option<Sexpr> ())))) \
-                 (let ((write (lambda () () (setf s (cons (i32 9) (the Option<Sexpr> ()))) ())) \
+    let src = "(let ((s (cons (int 1) (the Option<Sexpr> ())))) \
+                 (let ((write (lambda () () (setf s (cons (int 9) (the Option<Sexpr> ()))) ())) \
                        (read (lambda () Sexpr (car s)))) \
                    (write) \
                    (read)))";
@@ -922,7 +922,7 @@ fn runtime_error_carries_source_location() {
     let r = Reader::new();
     // The `(panic ...)` is on line 2; calling `risky` on line 3 must still
     // report line 2 (where the error actually arose), not the call site.
-    let src = "(defun risky ((n i32)) i32\n  (panic \"boom\"))\n(risky 5)";
+    let src = "(defun risky ((n int)) int\n  (panic \"boom\"))\n(risky 5)";
     let vs = r.read_all_in(&mut h, "prog.typl", src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();

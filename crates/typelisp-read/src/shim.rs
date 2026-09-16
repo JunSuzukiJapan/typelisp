@@ -33,8 +33,8 @@ use crate::reader::Reader;
 /// `Option<Sexpr>` inside them is niche-represented — `some v` *is* `v` — so
 /// it builds no box and needs no key of its own.
 pub const READ_RESULT_KEY: &str = "result<option<sexpr>,readerror>";
-pub const READ_DATUM_RESULT_KEY: &str = "result<cons-cell<option<sexpr>,i32>,readerror>";
-pub const READ_DATUM_PAIR_KEY: &str = "cons-cell<option<sexpr>,i32>";
+pub const READ_DATUM_RESULT_KEY: &str = "result<cons-cell<option<sexpr>,int>,readerror>";
+pub const READ_DATUM_PAIR_KEY: &str = "cons-cell<option<sexpr>,int>";
 
 /// The evaluator these two builtins read *with*, so `#.` and macro characters
 /// work the same way in a program's own `read` as they do in the loader's —

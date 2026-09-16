@@ -35,5 +35,5 @@ fn exit_code_is_truncated_to_a_byte_on_posix() {
 
 #[test]
 fn exit_runs_from_inside_an_ordinary_function_body() {
-    assert_eq!(run_typl("(defun boom () i32 (exit 42)) (boom)\n"), 42);
+    assert_eq!(run_typl("(defun boom () int (exit 42)) (boom)\n"), 42);
 }

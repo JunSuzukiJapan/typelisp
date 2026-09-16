@@ -1,5 +1,5 @@
 //! Tests for `bignum` (arbitrary-precision integer) and `ratio` (exact
-//! rational), added following Common Lisp's bignum/ratio semantics: reader
+//! rational), added following Common Lisp's int/ratio semantics: reader
 //! literals (an integer past `i32`'s range, and CL's `n/d` ratio syntax,
 //! both normalizing the same way CL's reader does), arithmetic/comparison
 //! instance methods (`registry::bignum_assoc`/`ratio_assoc`), and mutual
@@ -58,12 +58,21 @@ fn with_heap<R>(f: impl FnOnce(&Heap) -> R) -> R {
     })
 }
 
-fn assert_bignum(actual: Value, expected: &str) {
+/// An `int` result, in either of its shapes: a fixnum when the number fits
+/// 63 bits, a int box otherwise — and only then (`Heap::canonical_int`),
+/// which this asserts along with the value.
+fn assert_int(actual: Value, expected: &str) {
+    let want = bignum(expected);
     with_heap(|h| match actual {
-        typelisp::Value::Boxed(id) if h.is_bignum(id) => {
-            assert_eq!(*h.bignum_value(id), bignum(expected))
+        Value::Int(n) => {
+            assert_eq!(num_bigint::BigInt::from(n), want);
+            assert!(typelisp::fixnum_fits(n));
         }
-        other => panic!("expected a bignum, got {:?}", other),
+        Value::Boxed(id) if h.is_bignum(id) => {
+            assert_eq!(*h.bignum_value(id), want);
+            assert!(!h.bignum_fits_fixnum(id), "{} came back boxed but fits a fixnum", expected);
+        }
+        other => panic!("expected an int, got {:?}", other),
     })
 }
 
@@ -91,14 +100,14 @@ fn assert_ratio(actual: Value, numer: &str, denom: &str) {
 
 #[test]
 fn an_integer_literal_past_i32_range_reads_as_a_bignum() {
-    let src = "(defun f () bignum 99999999999999999999999999999) (f)";
-    assert_bignum(eval_ok(src), "99999999999999999999999999999");
+    let src = "(defun f () int 99999999999999999999999999999) (f)";
+    assert_int(eval_ok(src), "99999999999999999999999999999");
 }
 
 #[test]
 fn a_negative_bignum_literal_reads_correctly() {
-    let src = "(defun f () bignum -99999999999999999999999999999) (f)";
-    assert_bignum(eval_ok(src), "-99999999999999999999999999999");
+    let src = "(defun f () int -99999999999999999999999999999) (f)";
+    assert_int(eval_ok(src), "-99999999999999999999999999999");
 }
 
 #[test]
@@ -121,23 +130,22 @@ fn a_negative_ratio_literal_normalizes_the_sign_onto_the_numerator() {
     assert_ratio(eval_ok(src), "-3", "4");
 }
 
-// ---- bignum arithmetic/comparison -------------------------------------------
+// ---- int arithmetic/comparison -------------------------------------------
 
 #[test]
 fn bignum_addition() {
-    // A plain `i32` literal never implicitly widens to `bignum` (no implicit
-    // numeric coercions anywhere in this language — same as between two integer widths);
-    // `int->bignum` makes the small operand's type explicit.
-    let src = "(defun f ((a bignum) (b bignum)) bignum (+ a b)) \
-               (f 99999999999999999999 (int->bignum 1))";
-    assert_bignum(eval_ok(src), "100000000000000000000");
+    // The small operand is an `int` too (an unannotated literal is an `int`);
+    // the sum promotes past the fixnum range.
+    let src = "(defun f ((a int) (b int)) int (+ a b)) \
+               (f 99999999999999999999 (the int 1))";
+    assert_int(eval_ok(src), "100000000000000000000");
 }
 
 #[test]
 fn bignum_subtraction_and_multiplication() {
-    let src = "(defun f ((a bignum) (b bignum)) bignum (* (- a b) b)) \
-               (f 100000000000000000000 (int->bignum 1))";
-    assert_bignum(eval_ok(src), "99999999999999999999");
+    let src = "(defun f ((a int) (b int)) int (* (- a b) b)) \
+               (f 100000000000000000000 (the int 1))";
+    assert_int(eval_ok(src), "99999999999999999999");
 }
 
 #[test]
@@ -145,21 +153,21 @@ fn bignum_truncating_division_and_mod_on_positive_operands() {
     // `/` truncates toward zero; `mod`/`rem` agree for positive operands (the
     // sign-sensitive floored-vs-truncated distinction is exercised separately
     // in `bignum_mod_is_floored_and_rem_is_truncated`).
-    let d = "(defun d ((a bignum) (b bignum)) bignum (/ a b)) (d 100000000000000000007 100000000000000000000)";
-    let m = "(defun m ((a bignum) (b bignum)) bignum (mod a b)) (m 100000000000000000007 100000000000000000000)";
-    assert_bignum(eval_ok(d), "1");
-    assert_bignum(eval_ok(m), "7");
+    let d = "(defun d ((a int) (b int)) int (/ a b)) (d 100000000000000000007 100000000000000000000)";
+    let m = "(defun m ((a int) (b int)) int (mod a b)) (m 100000000000000000007 100000000000000000000)";
+    assert_int(eval_ok(d), "1");
+    assert_int(eval_ok(m), "7");
 }
 
 #[test]
 fn bignum_divide_by_zero_panics() {
-    let src = "(defun f ((a bignum) (b bignum)) bignum (/ a b)) (f 100000000000000000000 (int->bignum 0))";
+    let src = "(defun f ((a int) (b int)) int (/ a b)) (f 100000000000000000000 (the int 0))";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn bignum_comparison() {
-    let src = "(defun f ((a bignum) (b bignum)) bool (< a b)) \
+    let src = "(defun f ((a int) (b int)) bool (< a b)) \
                (f 99999999999999999999 100000000000000000000)";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
@@ -168,28 +176,28 @@ fn bignum_comparison() {
 fn bignum_mod_is_floored_and_rem_is_truncated() {
     // CL: `mod` takes the sign of the divisor, `rem` the sign of the dividend.
     // `(mod -7 3) = 2`, `(rem -7 3) = -1`; `(mod 7 -3) = -2`, `(rem 7 -3) = 1`.
-    let m = |a: i32, b: i32| format!("(defun f ((a bignum) (b bignum)) bignum (mod a b)) (f (int->bignum {a}) (int->bignum {b}))");
-    let r = |a: i32, b: i32| format!("(defun f ((a bignum) (b bignum)) bignum (rem a b)) (f (int->bignum {a}) (int->bignum {b}))");
-    assert_bignum(eval_ok(&m(-7, 3)), "2");
-    assert_bignum(eval_ok(&r(-7, 3)), "-1");
-    assert_bignum(eval_ok(&m(7, -3)), "-2");
-    assert_bignum(eval_ok(&r(7, -3)), "1");
+    let m = |a: i32, b: i32| format!("(defun f ((a int) (b int)) int (mod a b)) (f (the int {a}) (the int {b}))");
+    let r = |a: i32, b: i32| format!("(defun f ((a int) (b int)) int (rem a b)) (f (the int {a}) (the int {b}))");
+    assert_int(eval_ok(&m(-7, 3)), "2");
+    assert_int(eval_ok(&r(-7, 3)), "-1");
+    assert_int(eval_ok(&m(7, -3)), "-2");
+    assert_int(eval_ok(&r(7, -3)), "1");
 }
 
 #[test]
 fn bignum_abs_and_signum() {
-    let a = "(defun f ((x bignum)) bignum (abs x)) (f -99999999999999999999)";
-    let s = "(defun f ((x bignum)) bignum (signum x)) (f -99999999999999999999)";
-    assert_bignum(eval_ok(a), "99999999999999999999");
-    assert_bignum(eval_ok(s), "-1");
+    let a = "(defun f ((x int)) int (abs x)) (f -99999999999999999999)";
+    let s = "(defun f ((x int)) int (signum x)) (f -99999999999999999999)";
+    assert_int(eval_ok(a), "99999999999999999999");
+    assert_int(eval_ok(s), "-1");
 }
 
 #[test]
 fn bignum_gcd_and_lcm() {
-    let g = "(defun f ((a bignum) (b bignum)) bignum (gcd a b)) (f (int->bignum 12) (int->bignum 18))";
-    let l = "(defun f ((a bignum) (b bignum)) bignum (lcm a b)) (f (int->bignum 4) (int->bignum 6))";
-    assert_bignum(eval_ok(g), "6");
-    assert_bignum(eval_ok(l), "12");
+    let g = "(defun f ((a int) (b int)) int (gcd a b)) (f (the int 12) (the int 18))";
+    let l = "(defun f ((a int) (b int)) int (lcm a b)) (f (the int 4) (the int 6))";
+    assert_int(eval_ok(g), "6");
+    assert_int(eval_ok(l), "12");
 }
 
 #[test]
@@ -197,24 +205,24 @@ fn bignum_lcm_with_a_zero_operand_is_zero() {
     // `num_integer::lcm` would divide by `gcd(0,5) = 5`... but `lcm(0,0)`'s
     // `gcd` is 0, so the zero guard (matching CL and the `i32` prelude `lcm`)
     // returns 0 whenever either operand is 0.
-    let l = "(defun f ((a bignum) (b bignum)) bignum (lcm a b)) (f (int->bignum 0) (int->bignum 0))";
-    assert_bignum(eval_ok(l), "0");
+    let l = "(defun f ((a int) (b int)) int (lcm a b)) (f (the int 0) (the int 0))";
+    assert_int(eval_ok(l), "0");
 }
 
 #[test]
 fn bignum_expt_produces_a_large_exact_result() {
-    let e = "(defun f ((a bignum) (b bignum)) bignum (expt a b)) (f (int->bignum 2) (int->bignum 100))";
-    assert_bignum(eval_ok(e), "1267650600228229401496703205376");
+    let e = "(defun f ((a int) (b int)) int (expt a b)) (f (the int 2) (the int 100))";
+    assert_int(eval_ok(e), "1267650600228229401496703205376");
 }
 
 /// Asserted against the ordinary (precompiled) prelude, which is the whole
-/// point: `bignum::expt`'s guard is a `panic` inside a prelude body, so it
+/// point: `int::expt`'s guard is a `panic` inside a prelude body, so it
 /// runs as native code — and it now unwinds back out as a catchable
 /// `EvalError::Panic` instead of aborting the process. These two used to need
 /// a one-off *interpreted* prelude to have anything to assert at all.
 #[test]
 fn bignum_expt_with_a_negative_exponent_panics() {
-    let e = "(defun f ((a bignum) (b bignum)) bignum (expt a b)) (f (int->bignum 2) (int->bignum -1))";
+    let e = "(defun f ((a int) (b int)) int (expt a b)) (f (the int 2) (the int -1))";
     assert!(matches!(run(e), Err(EvalError::Panic(_))));
 }
 
@@ -249,10 +257,10 @@ fn ratio_comparison() {
 
 #[test]
 fn ratio_numerator_and_denominator() {
-    let src = "(defun f ((r ratio)) bignum (numerator r)) (f 4/6)";
-    assert_bignum(eval_ok(src), "2");
-    let src = "(defun f ((r ratio)) bignum (denominator r)) (f 4/6)";
-    assert_bignum(eval_ok(src), "3");
+    let src = "(defun f ((r ratio)) int (numerator r)) (f 4/6)";
+    assert_int(eval_ok(src), "2");
+    let src = "(defun f ((r ratio)) int (denominator r)) (f 4/6)";
+    assert_int(eval_ok(src), "3");
 }
 
 #[test]
@@ -278,32 +286,40 @@ fn ratio_expt_with_a_non_integer_exponent_panics() {
 // ---- conversions --------------------------------------------------------------
 
 #[test]
-fn int_to_bignum_and_back() {
-    let src = "(defun f ((a i32)) bignum (int->bignum a)) (f 42)";
-    assert_bignum(eval_ok(src), "42");
-    let src = "(defun f ((a bignum)) i32 (bignum->int a)) (f (int->bignum 42))";
+fn i32_widens_to_int_and_narrows_back() {
+    let src = "(defun f ((a i32)) int (as int a)) (f 42)";
+    assert_int(eval_ok(src), "42");
+    let src = "(defun f ((a int)) i32 (as i32 a)) (f 42)";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
-fn bignum_to_int_out_of_range_panics() {
-    let src = "(defun f ((a bignum)) i32 (bignum->int a)) \
+fn narrowing_an_int_past_the_width_truncates_and_try_as_says_none() {
+    // A width cast truncates, as every width cast does; the question form is
+    // how a program asks first.
+    let src = "(defun f ((a int)) i32 (as i32 a)) (f 4294967297)";
+    assert_eq!(eval_ok(src), Value::Int(1));
+    let src = "(defun f ((a int)) bool (match (try-as i32 a) ((some _) true) ((none) false))) \
                (f 999999999999999999999999999999)";
-    assert!(matches!(run(src), Err(EvalError::Panic(_))));
+    assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
-fn bignum_to_float_and_back() {
-    let src = "(defun f ((a bignum)) f64 (bignum->float a)) (f (int->bignum 2))";
+fn int_to_float_and_back() {
+    let src = "(defun f ((a int)) f64 (as f64 a)) (f 2)";
     assert_float(eval_ok(src), 2.0);
-    let src = "(defun f ((a f64)) bignum (float->bignum a)) (f 2.0)";
-    assert_bignum(eval_ok(src), "2");
+    let src = "(defun f ((a f64)) int (as int a)) (f 2.0)";
+    assert_int(eval_ok(src), "2");
+    // Past the fixnum range the truncation is still exact: `float->int` is
+    // the arbitrary-precision `int`, not a saturating machine cast.
+    let src = "(defun f ((a f64)) int (as int a)) (f 1.0e30)";
+    assert_int(eval_ok(src), "1000000000000000019884624838656");
 }
 
 #[test]
-fn bignum_to_ratio_is_exact() {
-    let src = "(defun f ((a bignum)) ratio (bignum->ratio a)) (f (int->bignum 5))";
-    assert_ratio(eval_ok(src), "5", "1");
+fn int_to_ratio_is_exact_for_a_bignum() {
+    let src = "(defun f ((a int)) ratio (as ratio a)) (f 100000000000000000000)";
+    assert_ratio(eval_ok(src), "100000000000000000000", "1");
 }
 
 #[test]
@@ -313,11 +329,11 @@ fn int_to_ratio_is_exact() {
 }
 
 #[test]
-fn ratio_to_bignum_truncates_toward_zero() {
-    let src = "(defun f ((r ratio)) bignum (ratio->bignum r)) (f 7/2)";
-    assert_bignum(eval_ok(src), "3");
-    let src = "(defun f ((r ratio)) bignum (ratio->bignum r)) (f -7/2)";
-    assert_bignum(eval_ok(src), "-3");
+fn ratio_to_int_truncates_toward_zero() {
+    let src = "(defun f ((r ratio)) int (ratio->int r)) (f 7/2)";
+    assert_int(eval_ok(src), "3");
+    let src = "(defun f ((r ratio)) int (ratio->int r)) (f -7/2)";
+    assert_int(eval_ok(src), "-3");
 }
 
 #[test]
@@ -336,7 +352,7 @@ fn float_to_ratio_is_exact() {
 
 #[test]
 fn bignum_equal_family_is_value_comparison() {
-    let src = "(defun f ((a bignum) (b bignum)) bool (equal a b)) \
+    let src = "(defun f ((a int) (b int)) bool (equal a b)) \
                (f 100000000000000000000 100000000000000000000)";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }

@@ -183,8 +183,8 @@ fn flat_list() {
 #[test]
 fn nested_list() {
     roundtrip(
-        "(defun factorial ((n i32)) i32 (if (<= n 1) 1 (* n (factorial (- n 1)))))",
-        "(defun factorial ((n i32)) i32 (if (<= n 1) 1 (* n (factorial (- n 1)))))",
+        "(defun factorial ((n int)) int (if (<= n 1) 1 (* n (factorial (- n 1)))))",
+        "(defun factorial ((n int)) int (if (<= n 1) 1 (* n (factorial (- n 1)))))",
     );
 }
 
@@ -439,7 +439,7 @@ fn unquote_splicing_spans_both_prefix_chars() {
 fn a_generic_type_token_may_contain_a_spaced_dyn_argument() {
     roundtrip("vector<:dyn drawable>", "vector<:dyn drawable>");
     roundtrip("hashtable<string, :dyn drawable>", "hashtable<string, :dyn drawable>");
-    roundtrip("vector<:dyn iter<i32>>", "vector<:dyn iter<i32>>");
+    roundtrip("vector<:dyn iter<int>>", "vector<:dyn iter<int>>");
 }
 
 #[test]
@@ -465,7 +465,7 @@ fn an_unbalanced_angle_bracket_rewinds_rather_than_swallowing_the_input() {
     // No closing `>` before end of input / a newline: the token ends at the
     // whitespace, exactly as before.
     roundtrip("(f vector<a)", "(f vector<a)");
-    roundtrip("(f vector<\n i32>)", "(f vector< i32>)");
+    roundtrip("(f vector<\n int>)", "(f vector< int>)");
 }
 
 #[test]
@@ -494,7 +494,7 @@ fn dyn_and_the_following_datum_read_as_one_two_element_list() {
     // `(x :dyn drawable)` is still a 2-element parameter pair.
     roundtrip(":dyn drawable", "(:dyn drawable)");
     roundtrip("(x :dyn drawable)", "(x (:dyn drawable))");
-    roundtrip(":dyn iter<i32>", "(:dyn iter<i32>)");
+    roundtrip(":dyn iter<int>", "(:dyn iter<int>)");
 }
 
 #[test]

@@ -35,13 +35,13 @@ fn show(expr: &str) -> String {
     }
 }
 
-/// `expr` evaluated with `a` = `#<vector<i32> 1 2 2 3>` and `b` = `#<vector<i32> 2 3 4>`
+/// `expr` evaluated with `a` = `#<vector<int> 1 2 2 3>` and `b` = `#<vector<int> 2 3 4>`
 /// in scope, plus `al` = an alist of `1->"one"`, `2->"two"`.
 fn with_fixtures(expr: &str) -> String {
     show(&format!(
-        "(let ((a (the Vector<i32> (Vector::new)))
-               (b (the Vector<i32> (Vector::new)))
-               (al (the Vector<cons-cell<i32,string>> (Vector::new))))
+        "(let ((a (the Vector<int> (Vector::new)))
+               (b (the Vector<int> (Vector::new)))
+               (al (the Vector<cons-cell<int,string>> (Vector::new))))
            (progn
              (push a 1) (push a 2) (push a 2) (push a 3)
              (push b 2) (push b 3) (push b 4)
@@ -64,21 +64,21 @@ fn the_named_positional_accessors_delegate_to_nth() {
 
 #[test]
 fn rest_and_copy_seq_materialize_fresh_vectors() {
-    assert_eq!(with_fixtures("(rest (iter a))"), "#<vector<i32> 2 2 3>");
-    assert_eq!(with_fixtures("(copy-seq (iter a))"), "#<vector<i32> 1 2 2 3>");
+    assert_eq!(with_fixtures("(rest (iter a))"), "#<vector<int> 2 2 3>");
+    assert_eq!(with_fixtures("(copy-seq (iter a))"), "#<vector<int> 1 2 2 3>");
     // `rest` of a one-element sequence, and of an empty one.
-    assert_eq!(show("(rest (iter (the Vector<i32> (Vector::filled 1 7))))"), "#<vector<i32>>");
+    assert_eq!(show("(rest (iter (the Vector<int> (Vector::filled 1 7))))"), "#<vector<int>>");
 }
 
 #[test]
 fn revappend_reverses_the_first_argument_only() {
-    assert_eq!(with_fixtures("(revappend (iter b) (iter b))"), "#<vector<i32> 4 3 2 2 3 4>");
+    assert_eq!(with_fixtures("(revappend (iter b) (iter b))"), "#<vector<int> 4 3 2 2 3 4>");
 }
 
 #[test]
 fn vector_filled_builds_n_copies() {
-    assert_eq!(show("(the Vector<i32> (Vector::filled 3 7))"), "#<vector<i32> 7 7 7>");
-    assert_eq!(show("(the Vector<i32> (Vector::filled 0 7))"), "#<vector<i32>>");
+    assert_eq!(show("(the Vector<int> (Vector::filled 3 7))"), "#<vector<int> 7 7 7>");
+    assert_eq!(show("(the Vector<int> (Vector::filled 0 7))"), "#<vector<int>>");
 }
 
 /// The `c*r` family over nested pairs. `cadr` wants `cons-cell<A,cons-cell<B,C>>`,
@@ -98,82 +98,82 @@ fn the_cxr_family_walks_nested_pairs() {
 
 #[test]
 fn the_negated_search_variants_mirror_their_positives() {
-    assert_eq!(with_fixtures("(notany (iter a) (lambda ((x i32)) bool (> x 9)))"), "true");
-    assert_eq!(with_fixtures("(notevery (iter a) (lambda ((x i32)) bool (> x 1)))"), "true");
-    assert_eq!(with_fixtures("(find-if-not (iter a) (lambda ((x i32)) bool (< x 2)))"), "(some 2)");
-    assert_eq!(with_fixtures("(count-if-not (iter a) (lambda ((x i32)) bool (< x 2)))"), "3");
+    assert_eq!(with_fixtures("(notany (iter a) (lambda ((x int)) bool (> x 9)))"), "true");
+    assert_eq!(with_fixtures("(notevery (iter a) (lambda ((x int)) bool (> x 1)))"), "true");
+    assert_eq!(with_fixtures("(find-if-not (iter a) (lambda ((x int)) bool (< x 2)))"), "(some 2)");
+    assert_eq!(with_fixtures("(count-if-not (iter a) (lambda ((x int)) bool (< x 2)))"), "3");
     assert_eq!(
-        with_fixtures("(remove-if-not (iter a) (lambda ((x i32)) bool (> x 1)))"),
-        "#<vector<i32> 2 2 3>"
+        with_fixtures("(remove-if-not (iter a) (lambda ((x int)) bool (> x 1)))"),
+        "#<vector<int> 2 2 3>"
     );
     // `member-if` reports `bool`, the same departure `member` already makes.
-    assert_eq!(with_fixtures("(member-if (iter a) (lambda ((x i32)) bool (> x 2)))"), "true");
-    assert_eq!(with_fixtures("(member-if-not (iter a) (lambda ((x i32)) bool (> x 0)))"), "false");
+    assert_eq!(with_fixtures("(member-if (iter a) (lambda ((x int)) bool (> x 2)))"), "true");
+    assert_eq!(with_fixtures("(member-if-not (iter a) (lambda ((x int)) bool (> x 0)))"), "false");
 }
 
 #[test]
 fn remove_takes_out_every_match_and_dedup_keeps_appearance_order() {
-    assert_eq!(with_fixtures("(remove 2 (iter a))"), "#<vector<i32> 1 3>");
+    assert_eq!(with_fixtures("(remove 2 (iter a))"), "#<vector<int> 1 3>");
     // Which occurrence of a duplicate group survives is Phase 3e's
     // `:from-end` question (`seq_keywords_test`); `a`'s duplicates are
     // adjacent, so the order is the same either way.
-    assert_eq!(with_fixtures("(remove-duplicates (iter a))"), "#<vector<i32> 1 2 3>");
+    assert_eq!(with_fixtures("(remove-duplicates (iter a))"), "#<vector<int> 1 2 3>");
 }
 
 #[test]
 fn substitute_replaces_by_value_and_by_predicate() {
-    assert_eq!(with_fixtures("(substitute 9 2 (iter a))"), "#<vector<i32> 1 9 9 3>");
+    assert_eq!(with_fixtures("(substitute 9 2 (iter a))"), "#<vector<int> 1 9 9 3>");
     assert_eq!(
-        with_fixtures("(substitute-if 0 (lambda ((x i32)) bool (> x 2)) (iter a))"),
-        "#<vector<i32> 1 2 2 0>"
+        with_fixtures("(substitute-if 0 (lambda ((x int)) bool (> x 2)) (iter a))"),
+        "#<vector<int> 1 2 2 0>"
     );
 }
 
 #[test]
 fn the_alist_catalog_searches_by_key_value_and_predicate() {
     assert_eq!(
-        with_fixtures("(assoc-if (iter al) (lambda ((k i32)) bool (= k 2)))"),
-        "(some #<cons-cell<i32,string> 2 two>)"
+        with_fixtures("(assoc-if (iter al) (lambda ((k int)) bool (= k 2)))"),
+        "(some #<cons-cell<int,string> 2 two>)"
     );
-    assert_eq!(with_fixtures("(rassoc \"two\" (iter al))"), "(some #<cons-cell<i32,string> 2 two>)");
+    assert_eq!(with_fixtures("(rassoc \"two\" (iter al))"), "(some #<cons-cell<int,string> 2 two>)");
     assert_eq!(
         with_fixtures("(rassoc-if (iter al) (lambda ((s string)) bool (equal s \"one\")))"),
-        "(some #<cons-cell<i32,string> 1 one>)"
+        "(some #<cons-cell<int,string> 1 one>)"
     );
     // `acons` puts the new pair in front, as CL's cons does.
     assert_eq!(
         with_fixtures("(acons 3 \"three\" (iter al))"),
-        "#<vector<cons-cell<i32,string>> #<cons-cell<i32,string> 3 three> #<cons-cell<i32,string> 1 one> #<cons-cell<i32,string> 2 two>>"
+        "#<vector<cons-cell<int,string>> #<cons-cell<int,string> 3 three> #<cons-cell<int,string> 1 one> #<cons-cell<int,string> 2 two>>"
     );
     // `pairlis` stops at the shorter of the two.
     assert_eq!(
         with_fixtures("(pairlis (iter a) (iter b))"),
-        "#<vector<cons-cell<i32,i32>> #<cons-cell<i32,i32> 1 2> #<cons-cell<i32,i32> 2 3> #<cons-cell<i32,i32> 2 4>>"
+        "#<vector<cons-cell<int,int>> #<cons-cell<int,int> 1 2> #<cons-cell<int,int> 2 3> #<cons-cell<int,int> 2 4>>"
     );
 }
 
 #[test]
 fn the_mapping_variants_cover_two_sequences_effects_and_tails() {
     assert_eq!(
-        with_fixtures("(map2 (iter a) (iter b) (lambda ((x i32) (y i32)) i32 (+ x y)))"),
-        "#<vector<i32> 3 5 6>"
+        with_fixtures("(map2 (iter a) (iter b) (lambda ((x int) (y int)) int (+ x y)))"),
+        "#<vector<int> 3 5 6>"
     );
     assert_eq!(
-        with_fixtures("(mapcan (iter b) (lambda ((x i32)) Vector<i32> (Vector::filled 2 x)))"),
-        "#<vector<i32> 2 2 3 3 4 4>"
+        with_fixtures("(mapcan (iter b) (lambda ((x int)) Vector<int> (Vector::filled 2 x)))"),
+        "#<vector<int> 2 2 3 3 4 4>"
     );
     // `maplist` walks successive tails, so the lengths count down.
     assert_eq!(
-        with_fixtures("(maplist (iter b) (lambda ((t Vector<i32>)) i32 (len t)))"),
-        "#<vector<i32> 3 2 1>"
+        with_fixtures("(maplist (iter b) (lambda ((t Vector<int>)) int (len t)))"),
+        "#<vector<int> 3 2 1>"
     );
 }
 
 #[test]
 fn merge_orders_the_concatenation() {
     assert_eq!(
-        with_fixtures("(merge (iter b) (iter a) (lambda ((x i32) (y i32)) bool (< x y)))"),
-        "#<vector<i32> 1 2 2 2 3 3 4>"
+        with_fixtures("(merge (iter b) (iter a) (lambda ((x int) (y int)) bool (< x y)))"),
+        "#<vector<int> 1 2 2 2 3 3 4>"
     );
 }
 
@@ -182,12 +182,12 @@ fn merge_orders_the_concatenation() {
 #[test]
 fn the_set_operations_answer_in_first_appearance_order() {
     // `adjoin` puts the new element in front and is a no-op when present.
-    assert_eq!(with_fixtures("(adjoin 9 (iter a))"), "#<vector<i32> 9 1 2 2 3>");
-    assert_eq!(with_fixtures("(adjoin 2 (iter a))"), "#<vector<i32> 1 2 2 3>");
-    assert_eq!(with_fixtures("(union (iter a) (iter b))"), "#<vector<i32> 1 2 3 4>");
-    assert_eq!(with_fixtures("(intersection (iter a) (iter b))"), "#<vector<i32> 2 3>");
-    assert_eq!(with_fixtures("(set-difference (iter a) (iter b))"), "#<vector<i32> 1>");
-    assert_eq!(with_fixtures("(set-exclusive-or (iter a) (iter b))"), "#<vector<i32> 1 4>");
+    assert_eq!(with_fixtures("(adjoin 9 (iter a))"), "#<vector<int> 9 1 2 2 3>");
+    assert_eq!(with_fixtures("(adjoin 2 (iter a))"), "#<vector<int> 1 2 2 3>");
+    assert_eq!(with_fixtures("(union (iter a) (iter b))"), "#<vector<int> 1 2 3 4>");
+    assert_eq!(with_fixtures("(intersection (iter a) (iter b))"), "#<vector<int> 2 3>");
+    assert_eq!(with_fixtures("(set-difference (iter a) (iter b))"), "#<vector<int> 1>");
+    assert_eq!(with_fixtures("(set-exclusive-or (iter a) (iter b))"), "#<vector<int> 1 4>");
     assert_eq!(with_fixtures("(subsetp (iter a) (iter b))"), "false");
     assert_eq!(with_fixtures("(subsetp (iter b) (iter b))"), "true");
 }
@@ -198,9 +198,9 @@ fn the_set_operations_answer_in_first_appearance_order() {
 fn tailp_and_ldiff_work_on_value_suffixes() {
     assert_eq!(with_fixtures("(tailp (iter (subseq (iter a) 2 4)) (iter a))"), "true");
     assert_eq!(with_fixtures("(tailp (iter b) (iter a))"), "false");
-    assert_eq!(with_fixtures("(ldiff (iter a) (iter (subseq (iter a) 2 4)))"), "#<vector<i32> 1 2>");
+    assert_eq!(with_fixtures("(ldiff (iter a) (iter (subseq (iter a) 2 4)))"), "#<vector<int> 1 2>");
     // Not a suffix: CL returns a copy of the whole list.
-    assert_eq!(with_fixtures("(ldiff (iter a) (iter b))"), "#<vector<i32> 1 2 2 3>");
+    assert_eq!(with_fixtures("(ldiff (iter a) (iter b))"), "#<vector<int> 1 2 2 3>");
 }
 
 // ---------------------------------------------------------------- Phase 3d
@@ -212,10 +212,10 @@ fn tailp_and_ldiff_work_on_value_suffixes() {
 fn nreverse_mutates_the_receiver_in_place() {
     assert_eq!(
         show(
-            "(let ((v (the Vector<i32> (Vector::new))))
+            "(let ((v (the Vector<int> (Vector::new))))
                (progn (push v 1) (push v 2) (push v 3) (nreverse v) v))"
         ),
-        "#<vector<i32> 3 2 1>"
+        "#<vector<int> 3 2 1>"
     );
 }
 
@@ -223,18 +223,18 @@ fn nreverse_mutates_the_receiver_in_place() {
 fn the_delete_family_shortens_the_receiver_in_place() {
     let mk = |call: &str| {
         show(&format!(
-            "(let ((v (the Vector<i32> (Vector::new))))
+            "(let ((v (the Vector<int> (Vector::new))))
                (progn (push v 1) (push v 2) (push v 2) (push v 3) {} v))",
             call
         ))
     };
-    assert_eq!(mk("(delete v 2)"), "#<vector<i32> 1 3>");
-    assert_eq!(mk("(delete-if v (lambda ((x i32)) bool (> x 1)))"), "#<vector<i32> 1>");
-    assert_eq!(mk("(delete-if-not v (lambda ((x i32)) bool (> x 1)))"), "#<vector<i32> 2 2 3>");
-    assert_eq!(mk("(delete-duplicates v)"), "#<vector<i32> 1 2 3>");
-    assert_eq!(mk("(nsubstitute v 9 2)"), "#<vector<i32> 1 9 9 3>");
-    assert_eq!(mk("(nsubstitute-if v 0 (lambda ((x i32)) bool (evenp x)))"), "#<vector<i32> 1 0 0 3>");
-    assert_eq!(mk("(nbutlast v)"), "#<vector<i32> 1 2 2>");
+    assert_eq!(mk("(delete v 2)"), "#<vector<int> 1 3>");
+    assert_eq!(mk("(delete-if v (lambda ((x int)) bool (> x 1)))"), "#<vector<int> 1>");
+    assert_eq!(mk("(delete-if-not v (lambda ((x int)) bool (> x 1)))"), "#<vector<int> 2 2 3>");
+    assert_eq!(mk("(delete-duplicates v)"), "#<vector<int> 1 2 3>");
+    assert_eq!(mk("(nsubstitute v 9 2)"), "#<vector<int> 1 9 9 3>");
+    assert_eq!(mk("(nsubstitute-if v 0 (lambda ((x int)) bool (evenp x)))"), "#<vector<int> 1 0 0 3>");
+    assert_eq!(mk("(nbutlast v)"), "#<vector<int> 1 2 2>");
 }
 
 /// `fill`/`replace`/`map-into` write into the receiver without changing its
@@ -243,32 +243,32 @@ fn the_delete_family_shortens_the_receiver_in_place() {
 fn the_in_place_writers_leave_the_length_alone() {
     let mk = |call: &str| {
         show(&format!(
-            "(let ((v (the Vector<i32> (Vector::new))) (w (the Vector<i32> (Vector::new))))
+            "(let ((v (the Vector<int> (Vector::new))) (w (the Vector<int> (Vector::new))))
                (progn (push v 1) (push v 2) (push v 3) (push w 7) (push w 8) {} v))",
             call
         ))
     };
-    assert_eq!(mk("(fill v 5)"), "#<vector<i32> 5 5 5>");
+    assert_eq!(mk("(fill v 5)"), "#<vector<int> 5 5 5>");
     // `w` is shorter, so only the first two positions are written.
-    assert_eq!(mk("(replace v w)"), "#<vector<i32> 7 8 3>");
-    assert_eq!(mk("(map-into v w (lambda ((x i32)) i32 (* x 10)))"), "#<vector<i32> 70 80 3>");
+    assert_eq!(mk("(replace v w)"), "#<vector<int> 7 8 3>");
+    assert_eq!(mk("(map-into v w (lambda ((x int)) int (* x 10)))"), "#<vector<int> 70 80 3>");
 }
 
 #[test]
 fn nconc_appends_into_the_receiver_and_nreconc_reverses_first() {
     assert_eq!(
         show(
-            "(let ((v (the Vector<i32> (Vector::new))) (w (the Vector<i32> (Vector::new))))
+            "(let ((v (the Vector<int> (Vector::new))) (w (the Vector<int> (Vector::new))))
                (progn (push v 1) (push v 2) (push w 3) (nconc v w) v))"
         ),
-        "#<vector<i32> 1 2 3>"
+        "#<vector<int> 1 2 3>"
     );
     assert_eq!(
         show(
-            "(let ((v (the Vector<i32> (Vector::new))) (w (the Vector<i32> (Vector::new))))
+            "(let ((v (the Vector<int> (Vector::new))) (w (the Vector<int> (Vector::new))))
                (progn (push v 1) (push v 2) (push w 3) (nreconc v w)))"
         ),
-        "#<vector<i32> 2 1 3>"
+        "#<vector<int> 2 1 3>"
     );
 }
 
@@ -276,6 +276,6 @@ fn nconc_appends_into_the_receiver_and_nreconc_reverses_first() {
 /// `cons-cell`'s own `set-car`/`set-cdr` return `()`.
 #[test]
 fn rplaca_and_rplacd_return_the_mutated_cell() {
-    assert_eq!(show("(rplaca (cons 1 2) 9)"), "#<cons-cell<i32,i32> 9 2>");
-    assert_eq!(show("(rplacd (rplaca (cons 1 2) 9) 8)"), "#<cons-cell<i32,i32> 9 8>");
+    assert_eq!(show("(rplaca (cons 1 2) 9)"), "#<cons-cell<int,int> 9 2>");
+    assert_eq!(show("(rplacd (rplaca (cons 1 2) 9) 8)"), "#<cons-cell<int,int> 9 8>");
 }

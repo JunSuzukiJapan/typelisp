@@ -130,10 +130,10 @@ fn a_macro_still_gets_fresh_names_from_the_prelude_gensym() {
 #[test]
 fn complement_answers_the_opposite_of_its_predicate() {
     assert_eq!(
-        show("(let ((v (the Vector<i32> (Vector::new))))
+        show("(let ((v (the Vector<int> (Vector::new))))
                 (progn (push v 1) (push v 2) (push v 3)
-                  (filter (iter v) (complement (lambda ((n i32)) bool (> n 1))))))"),
-        "#<vector<i32> 1>"
+                  (filter (iter v) (complement (lambda ((n int)) bool (> n 1))))))"),
+        "#<vector<int> 1>"
     );
 }
 
@@ -206,7 +206,7 @@ fn a_local_macro_takes_the_full_lambda_list() {
 #[test]
 fn symbol_macrolet_makes_a_name_stand_for_a_form() {
     assert_eq!(
-        show("(let ((v (the Vector<i32> (Vector::new))))
+        show("(let ((v (the Vector<int> (Vector::new))))
                 (progn (push v 7)
                   (symbol-macrolet ((head (get v 0))) head)))"),
         "7"
@@ -218,7 +218,7 @@ fn symbol_macrolet_makes_a_name_stand_for_a_form() {
 #[test]
 fn setf_through_a_symbol_macro_assigns_to_the_form() {
     assert_eq!(
-        show("(let ((v (the Vector<i32> (Vector::new))))
+        show("(let ((v (the Vector<int> (Vector::new))))
                 (progn (push v 7)
                   (symbol-macrolet ((head (get v 0)))
                     (progn (setf head 42) head))))"),

@@ -141,7 +141,7 @@ fn new_infers_type_args_from_return_type() {
     // `HashTable::new` has no argument to infer `K`/`V` from — it must come
     // from the call site's expected type (here, `make_h`'s declared return
     // type), the same way a field-less `None` learns its type argument.
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
                (count (make-h))";
     assert_eq!(eval_ok(src), Value::Int(0));
 }
@@ -150,7 +150,7 @@ fn new_infers_type_args_from_return_type() {
 
 #[test]
 fn set_then_get_returns_some() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
                (defun f () string
                  (let ((h (make-h)))
                    (set h 1 \"a\")
@@ -161,7 +161,7 @@ fn set_then_get_returns_some() {
 
 #[test]
 fn get_missing_key_returns_none() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
                (defun f () string
                  (let ((h (make-h)))
                    (match (get h 1) ((Some v) v) ((None) \"missing\"))))
@@ -171,7 +171,7 @@ fn get_missing_key_returns_none() {
 
 #[test]
 fn set_overwrites_existing_key() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
                (defun f () string
                  (let ((h (make-h)))
                    (set h 1 \"a\")
@@ -183,8 +183,8 @@ fn set_overwrites_existing_key() {
 
 #[test]
 fn count_tracks_distinct_keys() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
-               (defun f () i32
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
+               (defun f () int
                  (let ((h (make-h)))
                    (set h 1 \"a\")
                    (set h 2 \"b\")
@@ -196,7 +196,7 @@ fn count_tracks_distinct_keys() {
 
 #[test]
 fn remove_returns_removed_value_and_drops_key() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
                (defun f () string
                  (let ((h (make-h)))
                    (set h 1 \"a\")
@@ -213,7 +213,7 @@ fn remove_returns_removed_value_and_drops_key() {
 
 #[test]
 fn remove_missing_key_returns_none() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
                (defun f () string
                  (let ((h (make-h)))
                    (match (remove h 1) ((Some v) v) ((None) \"missing\"))))
@@ -223,8 +223,8 @@ fn remove_missing_key_returns_none() {
 
 #[test]
 fn clear_empties_the_table() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
-               (defun f () i32
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
+               (defun f () int
                  (let ((h (make-h)))
                    (set h 1 \"a\")
                    (set h 2 \"b\")
@@ -238,8 +238,8 @@ fn clear_empties_the_table() {
 
 #[test]
 fn string_keys_work() {
-    let src = "(defun make-h () HashTable<string,i32> (HashTable::new))
-               (defun f () i32
+    let src = "(defun make-h () HashTable<string,int> (HashTable::new))
+               (defun f () int
                  (let ((h (make-h)))
                    (set h \"x\" 42)
                    (match (get h \"x\") ((Some v) v) ((None) 0))))
@@ -251,7 +251,7 @@ fn string_keys_work() {
 
 #[test]
 fn wrong_key_type_is_a_type_error() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
                (defun f () string
                  (let ((h (make-h)))
                    (set h true \"a\")
@@ -264,9 +264,9 @@ fn instance_method_dispatch_substitutes_k_and_v_independently() {
     // Two differently-instantiated HashTables must not cross-contaminate each
     // other's inferred `K`/`V` (regression for `check_assoc_call`'s `subst`
     // being built fresh per call, from the receiver's own concrete type args).
-    let src = "(defun make-ints () HashTable<i32,i32> (HashTable::new))
+    let src = "(defun make-ints () HashTable<int,int> (HashTable::new))
                (defun make-strs () HashTable<string,string> (HashTable::new))
-               (defun f () i32
+               (defun f () int
                  (let ((a (make-ints)) (b (make-strs)))
                    (set a 1 100)
                    (set b \"k\" \"v\")
@@ -279,8 +279,8 @@ fn instance_method_dispatch_substitutes_k_and_v_independently() {
 
 #[test]
 fn keys_returns_a_vector_with_one_entry_per_distinct_key() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
-               (defun f () i32
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
+               (defun f () int
                  (let ((h (make-h)))
                    (set h 1 \"a\")
                    (set h 2 \"b\")
@@ -291,8 +291,8 @@ fn keys_returns_a_vector_with_one_entry_per_distinct_key() {
 
 #[test]
 fn values_returns_a_vector_with_one_entry_per_distinct_key() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
-               (defun f () i32
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
+               (defun f () int
                  (let ((h (make-h)))
                    (set h 1 \"a\")
                    (set h 2 \"b\")
@@ -303,8 +303,8 @@ fn values_returns_a_vector_with_one_entry_per_distinct_key() {
 
 #[test]
 fn entries_returns_a_vector_with_one_entry_per_distinct_key() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
-               (defun f () i32
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
+               (defun f () int
                  (let ((h (make-h)))
                    (set h 1 \"a\")
                    (set h 2 \"b\")
@@ -316,8 +316,8 @@ fn entries_returns_a_vector_with_one_entry_per_distinct_key() {
 
 #[test]
 fn keys_values_entries_on_an_empty_table_are_empty() {
-    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
-               (defun f () i32
+    let src = "(defun make-h () HashTable<int,string> (HashTable::new))
+               (defun f () int
                  (let ((h (make-h)))
                    (+ (len (keys h)) (+ (len (values h)) (len (entries h))))))
                (f)";
@@ -328,7 +328,7 @@ fn keys_values_entries_on_an_empty_table_are_empty() {
 
 #[test]
 fn sexpr_values_survive_gc_pressure() {
-    // A `HashTable<i32,Sexpr>` holds `RtValue::Sexpr` values — these are
+    // A `HashTable<int,Sexpr>` holds `RtValue::Sexpr` values — these are
     // cons-heap pointers that must stay rooted via `collect_sexpr_roots`'s new
     // `RtValue::HashTable` case (see `Interp::sync_roots`), or a GC triggered
     // while building a later quoted list (via `Heap::cons`, the same allocator
@@ -343,7 +343,7 @@ fn sexpr_values_survive_gc_pressure() {
     // list's niche has to keep distinct, reached here for real rather than
     // constructed for a test (`tests/compile_test.rs`'s
     // `a_nested_option_over_sexpr_keeps_its_two_nones_apart`).
-    let src = "(defun make-h () HashTable<i32,Option<Sexpr>> (HashTable::new))
+    let src = "(defun make-h () HashTable<int,Option<Sexpr>> (HashTable::new))
                (defun f () Option<Sexpr>
                  (let ((h (make-h)))
                    (set h 0 (quote (a b c d e)))

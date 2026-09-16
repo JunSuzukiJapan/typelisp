@@ -215,7 +215,7 @@ fn a_64_bit_result_keeps_its_top_bits() {
 }
 
 #[test]
-fn a_c_word_is_read_as_a_bignum_by_the_declaration_s_signedness() {
+fn a_c_word_is_read_as_an_int_by_the_declaration_s_signedness() {
     // `atol("-1")` puts all ones in the register. What that word *means* is
     // whatever the declaration claimed, and `bignum` is the only target that
     // can hold either reading — `as i32` truncates and `try-as i32` answers
@@ -228,7 +228,7 @@ fn a_c_word_is_read_as_a_bignum_by_the_declaration_s_signedness() {
         text(
             r#"
             (defffi (c-atol "atol") (string) c-long)
-            (format false "~a" (as bignum (unsafe (c-atol "-1"))))
+            (format false "~a" (as int (unsafe (c-atol "-1"))))
             "#
         ),
         "-1"
@@ -237,7 +237,7 @@ fn a_c_word_is_read_as_a_bignum_by_the_declaration_s_signedness() {
         text(
             r#"
             (defffi (c-atol "atol") (string) c-ulong)
-            (format false "~a" (as bignum (unsafe (c-atol "-1"))))
+            (format false "~a" (as int (unsafe (c-atol "-1"))))
             "#
         ),
         "18446744073709551615"
@@ -253,7 +253,7 @@ fn a_compiled_body_reads_a_c_word_the_same_way() {
         text(
             r#"
             (defffi (c-atol "atol") (string) c-ulong)
-            (defun f () bignum (as bignum (unsafe (c-atol "-1"))))
+            (defun f () int (as int (unsafe (c-atol "-1"))))
             (compile f)
             (format false "~a" (f))
             "#
@@ -263,7 +263,7 @@ fn a_compiled_body_reads_a_c_word_the_same_way() {
 }
 
 #[test]
-fn a_c_word_converts_to_nothing_but_a_bignum_and_the_widths() {
+fn a_c_word_converts_to_nothing_but_an_int_and_the_widths() {
     // `f64` would round and `ratio`/`char` are not what a machine word means,
     // so the message is the plain "no conversion" one rather than a special
     // case. The width casts and `bignum` are the whole catalog.

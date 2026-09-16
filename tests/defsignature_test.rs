@@ -107,7 +107,7 @@ fn warnings_of(src: &str) -> Vec<String> {
 
 #[test]
 fn a_declared_defun_can_be_called_before_it_is_defined() {
-    let src = "(defsignature b () i32) (defun a () i32 (b)) (defun b () i32 7) (a)";
+    let src = "(defsignature b () int) (defun a () int (b)) (defun b () int 7) (a)";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
 
@@ -118,9 +118,9 @@ fn two_top_level_defuns_can_be_mutually_recursive() {
     // `scc_tests` in `eval/interp.rs`): surface syntax can express it, once
     // the ring is announced.
     let src = "
-        (defsignature odd2? (i32) bool)
-        (defun even2? ((n i32)) bool (if (= n 0) true  (odd2? (- n 1))))
-        (defun odd2?  ((n i32)) bool (if (= n 0) false (even2? (- n 1))))
+        (defsignature odd2? (int) bool)
+        (defun even2? ((n int)) bool (if (= n 0) true  (odd2? (- n 1))))
+        (defun odd2?  ((n int)) bool (if (= n 0) false (even2? (- n 1))))
         (even2? 10)";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
@@ -130,9 +130,9 @@ fn mutual_recursion_still_holds_after_compiling_one_of_the_pair() {
     // Exercises the JIT's transitive/SCC path over a genuine cycle that came
     // from source rather than from a hand-built `FnDef`.
     let src = "
-        (defsignature odd2? (i32) bool)
-        (defun even2? ((n i32)) bool (if (= n 0) true  (odd2? (- n 1))))
-        (defun odd2?  ((n i32)) bool (if (= n 0) false (even2? (- n 1))))
+        (defsignature odd2? (int) bool)
+        (defun even2? ((n int)) bool (if (= n 0) true  (odd2? (- n 1))))
+        (defun odd2?  ((n int)) bool (if (= n 0) false (even2? (- n 1))))
         (compile even2?)
         (even2? 11)";
     assert_eq!(eval_ok_with_island(src), Value::Bool(false));
@@ -149,9 +149,9 @@ fn a_forward_call_takes_its_type_from_the_declaration() {
 #[test]
 fn a_declared_rest_argument_is_collected_at_the_call() {
     let src = "
-        (defsignature total (&rest i32) i32)
-        (defun a () i32 (total 1 2 3))
-        (defun total (&rest (xs i32)) i32 (sexpr-list-length xs))
+        (defsignature total (&rest int) int)
+        (defun a () int (total 1 2 3))
+        (defun total (&rest (xs int)) int (sexpr-list-length xs))
         (a)";
     assert_eq!(eval_ok_with_island(src), Value::Int(3));
 }
@@ -160,7 +160,7 @@ fn a_declared_rest_argument_is_collected_at_the_call() {
 fn a_wrong_argument_type_to_a_forward_call_is_a_type_error() {
     // The declaration must be the real signature, not a permissive
     // placeholder — otherwise forward calls would silently skip checking.
-    let msg = expect_err("(defsignature b (i32) i32) (defun a () i32 (b \"nope\")) (defun b ((n i32)) i32 n) (a)");
+    let msg = expect_err("(defsignature b (int) int) (defun a () int (b \"nope\")) (defun b ((n int)) int n) (a)");
     assert!(msg.contains("type"), "expected a type error, got: {}", msg);
 }
 
@@ -168,9 +168,9 @@ fn a_wrong_argument_type_to_a_forward_call_is_a_type_error() {
 fn declarations_work_inside_a_nested_module() {
     let src = "
         (module m
-          (pub defsignature b () i32)
-          (pub defun a () i32 (b))
-          (pub defun b () i32 42))
+          (pub defsignature b () int)
+          (pub defun a () int (b))
+          (pub defun b () int 42))
         (m::a)";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
@@ -178,9 +178,9 @@ fn declarations_work_inside_a_nested_module() {
 #[test]
 fn a_lambda_body_can_call_a_declared_defun() {
     let src = "
-        (defsignature b () i32)
-        (defun a () i32 (let ((f (lambda () i32 (b)))) (f)))
-        (defun b () i32 5)
+        (defsignature b () int)
+        (defun a () int (let ((f (lambda () int (b)))) (f)))
+        (defun b () int 5)
         (a)";
     assert_eq!(eval_ok_with_island(src), Value::Int(5));
 }
@@ -190,9 +190,9 @@ fn a_declaration_can_carry_a_generic_type_as_a_parameter() {
     // The *function* may not be generic; naming an instantiated generic type
     // in its signature is ordinary.
     let src = "
-        (defsignature first-of (Vector<i32>) i32)
-        (defun a () i32 (first-of (the Vector<i32> (Vector::new))))
-        (defun first-of ((v Vector<i32>)) i32 (if (= (len v) 0) 0 (get v 0)))
+        (defsignature first-of (Vector<int>) int)
+        (defun a () int (first-of (the Vector<int> (Vector::new))))
+        (defun first-of ((v Vector<int>)) int (if (= (len v) 0) 0 (get v 0)))
         (a)";
     assert_eq!(eval_ok(src), Value::Int(0));
 }
@@ -202,15 +202,15 @@ fn a_declaration_can_carry_a_generic_type_as_a_parameter() {
 #[test]
 fn an_undeclared_forward_call_is_an_error() {
     // The whole point of the change: nothing looks ahead any more.
-    let msg = expect_err("(defun a () i32 (b)) (defun b () i32 7) (a)");
+    let msg = expect_err("(defun a () int (b)) (defun b () int 7) (a)");
     assert!(msg.contains("b"), "error should name the missing function: {}", msg);
 }
 
 #[test]
 fn undeclared_mutual_recursion_is_an_error() {
     let src = "
-        (defun even2? ((n i32)) bool (if (= n 0) true  (odd2? (- n 1))))
-        (defun odd2?  ((n i32)) bool (if (= n 0) false (even2? (- n 1))))
+        (defun even2? ((n int)) bool (if (= n 0) true  (odd2? (- n 1))))
+        (defun odd2?  ((n int)) bool (if (= n 0) false (even2? (- n 1))))
         (even2? 10)";
     let msg = expect_err(src);
     assert!(msg.contains("odd2?"), "error should name the missing function: {}", msg);
@@ -218,25 +218,25 @@ fn undeclared_mutual_recursion_is_an_error() {
 
 #[test]
 fn a_declaration_with_no_definition_is_an_error() {
-    let msg = expect_err("(defsignature b () i32) (defun a () i32 1) (a)");
+    let msg = expect_err("(defsignature b () int) (defun a () int 1) (a)");
     assert!(msg.contains("b") && msg.contains("no definition"), "unexpected error: {}", msg);
 }
 
 #[test]
 fn a_definition_that_disagrees_on_a_parameter_type_is_an_error() {
-    let msg = expect_err("(defsignature b (i32) i32) (defun b ((n string)) i32 1) (b 1)");
+    let msg = expect_err("(defsignature b (int) int) (defun b ((n string)) int 1) (b 1)");
     assert!(msg.contains("defsignature") && msg.contains("parameter 1"), "unexpected error: {}", msg);
 }
 
 #[test]
 fn a_definition_that_disagrees_on_the_return_type_is_an_error() {
-    let msg = expect_err("(defsignature b () i32) (defun b () string \"x\") (b)");
+    let msg = expect_err("(defsignature b () int) (defun b () string \"x\") (b)");
     assert!(msg.contains("defsignature") && msg.contains("return type"), "unexpected error: {}", msg);
 }
 
 #[test]
 fn a_definition_that_disagrees_on_arity_is_an_error() {
-    let msg = expect_err("(defsignature b (i32) i32) (defun b () i32 1) (b)");
+    let msg = expect_err("(defsignature b (int) int) (defun b () int 1) (b)");
     assert!(msg.contains("defsignature") && msg.contains("parameter count"), "unexpected error: {}", msg);
 }
 
@@ -244,8 +244,8 @@ fn a_definition_that_disagrees_on_arity_is_an_error() {
 fn a_definition_that_disagrees_on_visibility_is_an_error() {
     let src = "
         (module m
-          (defsignature b () i32)
-          (pub defun b () i32 1))
+          (defsignature b () int)
+          (pub defun b () int 1))
         1";
     let msg = expect_err(src);
     assert!(msg.contains("visibility"), "unexpected error: {}", msg);
@@ -260,13 +260,13 @@ fn a_generic_function_cannot_be_declared() {
 
 #[test]
 fn an_optional_or_key_parameter_cannot_be_declared() {
-    let msg = expect_err("(defsignature f (i32 &optional i32) i32) (defun f ((a i32)) i32 a) (f 1)");
+    let msg = expect_err("(defsignature f (int &optional int) int) (defun f ((a int)) int a) (f 1)");
     assert!(msg.contains("&optional"), "unexpected error: {}", msg);
 }
 
 #[test]
 fn declaring_the_same_name_twice_is_an_error() {
-    let msg = expect_err("(defsignature b () i32) (defsignature b () i32) (defun b () i32 1) (b)");
+    let msg = expect_err("(defsignature b () int) (defsignature b () int) (defun b () int 1) (b)");
     assert!(msg.contains("already declared"), "unexpected error: {}", msg);
 }
 
@@ -275,7 +275,7 @@ fn declaring_a_name_that_is_already_defined_is_an_error() {
     // Not a redefinition warning and not a dangling declaration: a
     // declaration placed after its definition can never do anything, and the
     // message says exactly that.
-    let msg = expect_err("(defun b () i32 1) (defsignature b () i32) (b)");
+    let msg = expect_err("(defun b () int 1) (defsignature b () int) (b)");
     assert!(msg.contains("already defined"), "unexpected error: {}", msg);
 }
 
@@ -283,26 +283,26 @@ fn declaring_a_name_that_is_already_defined_is_an_error() {
 
 #[test]
 fn a_genuine_redefinition_is_still_reported() {
-    let w = warnings_of("(defun dup () i32 1) (defun dup () i32 2)");
+    let w = warnings_of("(defun dup () int 1) (defun dup () int 2)");
     assert_eq!(w.len(), 1, "expected exactly one redefinition warning, got {:?}", w);
     assert!(w[0].contains("dup"), "warning should name the function: {}", w[0]);
 }
 
 #[test]
 fn a_single_definition_produces_no_redefinition_warning() {
-    assert!(warnings_of("(defun once () i32 1) (once)").is_empty());
+    assert!(warnings_of("(defun once () int 1) (once)").is_empty());
 }
 
 #[test]
 fn a_declaration_and_its_definition_produce_no_redefinition_warning() {
-    assert!(warnings_of("(defsignature once () i32) (defun once () i32 1) (once)").is_empty());
+    assert!(warnings_of("(defsignature once () int) (defun once () int 1) (once)").is_empty());
 }
 
 #[test]
 fn a_macro_must_still_be_defined_before_use() {
     // Macros cannot be declared: expanding one needs its body to have been
     // `exec`'d, which a signature registration cannot arrange.
-    let msg = expect_err("(defun a () i32 (twice 5)) (defmacro twice (x) `(* 2 ,x)) (a)");
+    let msg = expect_err("(defun a () int (twice 5)) (defmacro twice (x) `(* 2 ,x)) (a)");
     assert!(msg.contains("twice"), "error should name the macro: {}", msg);
 }
 
@@ -314,7 +314,7 @@ fn a_type_still_has_to_be_defined_before_it_is_named() {
     let src = "
         (defsignature make-it () pt)
         (defun make-it () pt (pt::new 1))
-        (defstruct pt (x i32))
+        (defstruct pt (x int))
         (make-it)";
     let msg = expect_err(src);
     assert!(msg.contains("pt"), "unexpected error: {}", msg);
@@ -322,6 +322,6 @@ fn a_type_still_has_to_be_defined_before_it_is_named() {
 
 #[test]
 fn an_undefined_function_is_still_an_error() {
-    let msg = expect_err("(defun a () i32 (nope)) (a)");
+    let msg = expect_err("(defun a () int (nope)) (a)");
     assert!(msg.contains("nope"), "error should name the missing function: {}", msg);
 }

@@ -100,8 +100,8 @@ fn a_ready_receive_arm_wins() {
     assert_eq!(
         text(
             r#"(defun main () string
-                 (let ((a (the Chan<i32> (Chan::new 1)))
-                       (b (the Chan<i32> (Chan::new 0))))
+                 (let ((a (the Chan<int> (Chan::new 1)))
+                       (b (the Chan<int> (Chan::new 0))))
                    (send a 7)
                    (select
                      ((v (recv a)) (format false "a=~a" v))
@@ -118,7 +118,7 @@ fn a_ready_send_arm_wins() {
     assert_eq!(
         text(
             r#"(defun main () string
-                 (let ((a (the Chan<i32> (Chan::new 0)))
+                 (let ((a (the Chan<int> (Chan::new 0)))
                        (b (the Chan<string> (Chan::new 1))))
                    (let ((r (select
                               ((v (recv a)) "received")
@@ -136,8 +136,8 @@ fn else_runs_when_nothing_is_ready() {
     assert_eq!(
         text(
             r#"(defun main () string
-                 (let ((a (the Chan<i32> (Chan::new 0)))
-                       (b (the Chan<i32> (Chan::new 0))))
+                 (let ((a (the Chan<int> (Chan::new 0)))
+                       (b (the Chan<int> (Chan::new 0))))
                    (select
                      ((v (recv a)) "a")
                      ((send b 1) "b")
@@ -153,10 +153,10 @@ fn else_runs_when_nothing_is_ready() {
 fn without_else_it_waits() {
     assert_eq!(
         int(
-            r#"(defun feed ((ch Chan<i32>)) () (send ch 42) ())
-               (defun main () i32
-                 (let ((a (the Chan<i32> (Chan::new 0)))
-                       (b (the Chan<i32> (Chan::new 0))))
+            r#"(defun feed ((ch Chan<int>)) () (send ch 42) ())
+               (defun main () int
+                 (let ((a (the Chan<int> (Chan::new 0)))
+                       (b (the Chan<int> (Chan::new 0))))
                    (go (feed a))
                    (select
                      ((v (recv a)) (unwrap v))
@@ -194,12 +194,12 @@ fn a_parked_send_arm_is_taken_by_a_receiver() {
     assert_eq!(
         text(
             r#"(defvar (trail string) "")
-               (defun taker ((ch Chan<i32>)) ()
+               (defun taker ((ch Chan<int>)) ()
                  (setf trail (append trail (to-string (unwrap (recv ch)))))
                  ())
                (defun main () string
-                 (let ((a (the Chan<i32> (Chan::new 0)))
-                       (b (the Chan<i32> (Chan::new 0))))
+                 (let ((a (the Chan<int> (Chan::new 0)))
+                       (b (the Chan<int> (Chan::new 0))))
                    (go (taker b))
                    (let ((r (select
                               ((v (recv a)) "recv")
@@ -219,8 +219,8 @@ fn a_closed_channel_makes_its_receive_arm_ready() {
     assert_eq!(
         text(
             r#"(defun main () string
-                 (let ((a (the Chan<i32> (Chan::new 0)))
-                       (b (the Chan<i32> (Chan::new 0))))
+                 (let ((a (the Chan<int> (Chan::new 0)))
+                       (b (the Chan<int> (Chan::new 0))))
                    (close a)
                    (select
                      ((v (recv a)) (format false "a=~a" v))
@@ -241,15 +241,15 @@ fn every_operand_is_evaluated_once_in_order() {
     assert_eq!(
         text(
             r#"(defvar (trail string) "")
-               (defun note ((tag string) (n i32)) i32
+               (defun note ((tag string) (n int)) int
                  (setf trail (append trail tag))
                  n)
-               (defun chan-of ((tag string) (ch Chan<i32>)) Chan<i32>
+               (defun chan-of ((tag string) (ch Chan<int>)) Chan<int>
                  (setf trail (append trail tag))
                  ch)
                (defun main () string
-                 (let ((a (the Chan<i32> (Chan::new 1)))
-                       (b (the Chan<i32> (Chan::new 1))))
+                 (let ((a (the Chan<int> (Chan::new 1)))
+                       (b (the Chan<int> (Chan::new 1))))
                    (send a 1)
                    (select
                      ((v (recv (chan-of "A" a))) ())
@@ -274,7 +274,7 @@ fn a_select_with_no_arms_is_refused() {
 /// `else` alone is just its body written the long way.
 #[test]
 fn else_alone_is_refused() {
-    let e = check_err(r#"(defun main () i32 (select (else 1)))"#);
+    let e = check_err(r#"(defun main () int (select (else 1)))"#);
     assert!(e.contains("at least one channel arm"), "got: {}", e);
 }
 
@@ -282,8 +282,8 @@ fn else_alone_is_refused() {
 #[test]
 fn else_must_be_last() {
     let e = check_err(
-        r#"(defun main () i32
-             (let ((a (the Chan<i32> (Chan::new 0))))
+        r#"(defun main () int
+             (let ((a (the Chan<int> (Chan::new 0))))
                (select (else 1) ((v (recv a)) 2))))"#,
     );
     assert!(e.contains("last arm"), "got: {}", e);
@@ -293,9 +293,9 @@ fn else_must_be_last() {
 #[test]
 fn the_arms_types_are_joined() {
     let e = check_err(
-        r#"(defun main () i32
-             (let ((a (the Chan<i32> (Chan::new 0)))
-                   (b (the Chan<i32> (Chan::new 0))))
+        r#"(defun main () int
+             (let ((a (the Chan<int> (Chan::new 0)))
+                   (b (the Chan<int> (Chan::new 0))))
                (select ((v (recv a)) 1) ((v (recv b)) "two"))))"#,
     );
     assert!(e.contains("I32") || e.contains("Str"), "got: {}", e);
@@ -305,7 +305,7 @@ fn the_arms_types_are_joined() {
 /// whatever `recv` would have complained about.
 #[test]
 fn a_non_channel_is_refused_by_name() {
-    let e = check_err(r#"(defun main () i32 (select ((v (recv 1)) 2)))"#);
+    let e = check_err(r#"(defun main () int (select ((v (recv 1)) 2)))"#);
     assert!(e.contains("needs a Chan<T>"), "got: {}", e);
 }
 
@@ -313,8 +313,8 @@ fn a_non_channel_is_refused_by_name() {
 #[test]
 fn a_send_arms_value_is_checked() {
     let e = check_err(
-        r#"(defun main () i32
-             (let ((a (the Chan<i32> (Chan::new 1))))
+        r#"(defun main () int
+             (let ((a (the Chan<int> (Chan::new 1))))
                (select ((send a "x") 1))))"#,
     );
     assert!(e.contains("I32") || e.contains("Str"), "got: {}", e);
@@ -329,7 +329,7 @@ fn a_timeout_arm_wins_when_nothing_else_comes() {
     assert_eq!(
         text(
             r#"(defun main () string
-                 (let ((a (the Chan<i32> (Chan::new 0))))
+                 (let ((a (the Chan<int> (Chan::new 0))))
                    (select
                      ((v (recv a)) "data")
                      ((z (recv (after 0.01))) "timeout"))))
@@ -346,27 +346,27 @@ fn a_timeout_arm_wins_when_nothing_else_comes() {
 /// can stop — and the answer comes back as one `(ARM . VALUE)` cons.
 #[test]
 fn compiled_select_agrees_with_the_interpreter() {
-    let src = r#"(defun feed ((ch Chan<i32>) (n i32)) () (send ch n) ())
-                 (defun pick ((a Chan<i32>) (b Chan<string>)) string
+    let src = r#"(defun feed ((ch Chan<int>) (n int)) () (send ch n) ())
+                 (defun pick ((a Chan<int>) (b Chan<string>)) string
                    (select
                      ((v (recv a)) (format false "a=~a" v))
                      ((send b "x") "sent")
                      (else "nothing")))
-                 (defun waited ((a Chan<i32>)) i32
+                 (defun waited ((a Chan<int>)) int
                    (select ((v (recv a)) (unwrap v))))
                  (defun main () string
                    (let ((out ""))
-                     (let ((a (the Chan<i32> (Chan::new 0)))
+                     (let ((a (the Chan<int> (Chan::new 0)))
                            (b (the Chan<string> (Chan::new 1))))
                        (setf out (append out (pick a b))))
-                     (let ((a (the Chan<i32> (Chan::new 1)))
+                     (let ((a (the Chan<int> (Chan::new 1)))
                            (b (the Chan<string> (Chan::new 0))))
                        (send a 7)
                        (setf out (append out (append "|" (pick a b)))))
-                     (let ((a (the Chan<i32> (Chan::new 0)))
+                     (let ((a (the Chan<int> (Chan::new 0)))
                            (b (the Chan<string> (Chan::new 0))))
                        (setf out (append out (append "|" (pick a b)))))
-                     (let ((a (the Chan<i32> (Chan::new 0))))
+                     (let ((a (the Chan<int> (Chan::new 0))))
                        (go (feed a 42))
                        (append out (append "|" (to-string (waited a)))))))"#;
     let plain = text(&format!("{}\n(main)", src));
@@ -393,12 +393,12 @@ fn a_compiled_send_arm_carries_a_float() {
 /// across it.
 #[test]
 fn a_compiled_arm_body_may_suspend() {
-    let src = r#"(defun feed ((ch Chan<i32>) (n i32)) () (send ch n) ())
-                 (defun relay ((a Chan<i32>) (out Chan<i32>)) i32
+    let src = r#"(defun feed ((ch Chan<int>) (n int)) () (send ch n) ())
+                 (defun relay ((a Chan<int>) (out Chan<int>)) int
                    (select ((v (recv a)) (send out (* (unwrap v) 2)) (unwrap v))))
-                 (defun main () i32
-                   (let ((a (the Chan<i32> (Chan::new 1)))
-                         (out (the Chan<i32> (Chan::new 0))))
+                 (defun main () int
+                   (let ((a (the Chan<int> (Chan::new 1)))
+                         (out (the Chan<int> (Chan::new 0))))
                      (send a 5)
                      (go (relay a out))
                      (unwrap (recv out))))"#;
@@ -414,7 +414,7 @@ fn a_compiled_arm_body_may_suspend() {
 fn a_parked_select_holds_its_operands_through_gc_stress() {
     assert_eq!(
         text_stressed(
-            r#"(defun feed ((ch Chan<string>) (n i32)) ()
+            r#"(defun feed ((ch Chan<string>) (n int)) ()
                  (dotimes (i n) (send ch (append "v" (to-string i))))
                  (close ch)
                  ())

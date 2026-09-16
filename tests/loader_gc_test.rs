@@ -63,7 +63,7 @@ fn a_files_earlier_forms_survive_the_checking_of_its_later_ones() {
     let mut src = String::from("(defun to-s ((b bool)) string (if b \"T\" \"F\"))\n");
     for i in 0..12 {
         src.push_str(&format!(
-            "(defun f{i} ((a i32) (b i32)) string\n  \
+            "(defun f{i} ((a int) (b int)) string\n  \
                (append (append (append (to-s (eq a b)) (to-s (eql a b))) \
                                (to-s (equal a b))) (to-s (equalp a b))))\n"
         ));
@@ -83,7 +83,7 @@ fn the_same_file_loads_on_a_default_sized_heap() {
     let mut src = String::from("(defun to-s ((b bool)) string (if b \"T\" \"F\"))\n");
     for i in 0..12 {
         src.push_str(&format!(
-            "(defun g{i} ((a i32) (b i32)) string\n  \
+            "(defun g{i} ((a int) (b int)) string\n  \
                (append (append (append (to-s (eq a b)) (to-s (eql a b))) \
                                (to-s (equal a b))) (to-s (equalp a b))))\n"
         ));

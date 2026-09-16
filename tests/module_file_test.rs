@@ -106,14 +106,14 @@ fn a_second_load_session_sees_an_edited_dependency() {
     let dir = write_project(
         "reload-edited-dep",
         &[
-            ("geo/point.typl", "(pub defun origin-x () i32 42)"),
+            ("geo/point.typl", "(pub defun origin-x () int 42)"),
             ("main.typl", "(use geo::point)\n(point::origin-x)"),
         ],
     );
 
     assert_eq!(run_project_in_dir(&dir, "main.typl"), Ok(Some(Value::Int(42))));
 
-    std::fs::write(dir.join("geo/point.typl"), "(pub defun origin-x () i32 99)").unwrap();
+    std::fs::write(dir.join("geo/point.typl"), "(pub defun origin-x () int 99)").unwrap();
 
     assert_eq!(
         run_project_in_dir(&dir, "main.typl"),
@@ -131,8 +131,8 @@ fn a_dependency_with_a_nested_load_works_in_every_session() {
     let dir = write_project(
         "nested-load-dep",
         &[
-            ("loaded.typl", "(pub defun helper () i32 7)"),
-            ("geo/point.typl", "(load \"../loaded\")\n(pub defun origin-x () i32 (helper))"),
+            ("loaded.typl", "(pub defun helper () int 7)"),
+            ("geo/point.typl", "(load \"../loaded\")\n(pub defun origin-x () int (helper))"),
             ("main.typl", "(use geo::point)\n(point::origin-x)"),
         ],
     );
@@ -149,15 +149,15 @@ fn a_later_session_sees_a_changed_transitive_dependency() {
     let dir = write_project(
         "reload-transitive-dep",
         &[
-            ("leaf.typl", "(pub defun leaf-value () i32 1)"),
-            ("mid.typl", "(use leaf)\n(pub defun call-it () i32 (leaf::leaf-value))"),
+            ("leaf.typl", "(pub defun leaf-value () int 1)"),
+            ("mid.typl", "(use leaf)\n(pub defun call-it () int (leaf::leaf-value))"),
             ("main.typl", "(use mid)\n(mid::call-it)"),
         ],
     );
 
     assert_eq!(run_project_in_dir(&dir, "main.typl"), Ok(Some(Value::Int(1))));
 
-    std::fs::write(dir.join("leaf.typl"), "(pub defun leaf-value () i32 2)").unwrap();
+    std::fs::write(dir.join("leaf.typl"), "(pub defun leaf-value () int 2)").unwrap();
 
     assert_eq!(
         run_project_in_dir(&dir, "main.typl"),
@@ -171,7 +171,7 @@ fn use_loads_a_sibling_file_and_calls_into_it() {
     let result = run_project(
         "basic",
         &[
-            ("geo/point.typl", "(pub defun origin-x () i32 42)"),
+            ("geo/point.typl", "(pub defun origin-x () int 42)"),
             ("main.typl", "(use geo::point)\n(point::origin-x)"),
         ],
         "main.typl",
@@ -184,7 +184,7 @@ fn nested_directories_become_nested_path_segments() {
     let result = run_project(
         "nested-dirs",
         &[
-            ("a/b/c.typl", "(pub defun f () i32 7)"),
+            ("a/b/c.typl", "(pub defun f () int 7)"),
             ("main.typl", "(use a::b::c)\n(c::f)"),
         ],
         "main.typl",
@@ -199,7 +199,7 @@ fn explicit_module_nests_inside_the_derived_file_module() {
     let result = run_project(
         "nested-module",
         &[
-            ("util.typl", "(module inner (pub defun g () i32 11))"),
+            ("util.typl", "(module inner (pub defun g () int 11))"),
             ("main.typl", "(use util::inner)\n(inner::g)"),
         ],
         "main.typl",
@@ -215,7 +215,7 @@ fn item_level_use_finds_the_file_by_longest_prefix() {
     let result = run_project(
         "item-use",
         &[
-            ("geo/point.typl", "(pub defun origin-x () i32 5)"),
+            ("geo/point.typl", "(pub defun origin-x () int 5)"),
             ("main.typl", "(use geo::point::origin-x)\n(origin-x)"),
         ],
         "main.typl",
@@ -228,8 +228,8 @@ fn circular_dependency_is_a_hard_error_with_the_chain() {
     let result = run_project(
         "cycle",
         &[
-            ("a.typl", "(use b)\n(pub defun fa () i32 1)"),
-            ("b.typl", "(use a)\n(pub defun fb () i32 2)"),
+            ("a.typl", "(use b)\n(pub defun fa () int 1)"),
+            ("b.typl", "(use a)\n(pub defun fb () int 2)"),
             ("main.typl", "(use a)\n(a::fa)"),
         ],
         "main.typl",
@@ -255,7 +255,7 @@ fn defvar_initializers_run_deferred_but_before_the_dependent() {
         &[
             (
                 "dep.typl",
-                "(pub defvar (xs Option<Sexpr>) '(1 2 3))\n(pub defun head () i32 (sexpr-i32 (sexpr-car xs)))",
+                "(pub defvar (xs Option<Sexpr>) '(1 2 3))\n(pub defun head () int (sexpr-int (sexpr-car xs)))",
             ),
             ("main.typl", "(use dep)\n(dep::head)"),
         ],
@@ -272,7 +272,7 @@ fn manifest_src_key_moves_the_source_root() {
         "manifest-src",
         &[
             ("typelisp.toml", "src = \"src\"\n"),
-            ("src/lib.typl", "(pub defun answer () i32 40)"),
+            ("src/lib.typl", "(pub defun answer () int 40)"),
             ("src/main.typl", "(use lib)\n(+ (lib::answer) 2)"),
         ],
         "src/main.typl",
@@ -285,7 +285,7 @@ fn without_a_manifest_the_entry_directory_is_the_root() {
     let result = run_project(
         "no-manifest",
         &[
-            ("helper.typl", "(pub defun three () i32 3)"),
+            ("helper.typl", "(pub defun three () int 3)"),
             ("main.typl", "(use helper)\n(helper::three)"),
         ],
         "main.typl",
@@ -302,8 +302,8 @@ fn use_resolves_a_sibling_file_by_its_bare_name() {
     let result = run_project(
         "sibling-bare-name",
         &[
-            ("geo/vector.typl", "(pub defun unit-x () i32 1)"),
-            ("geo/point.typl", "(use vector)\n(pub defun call-it () i32 (vector::unit-x))"),
+            ("geo/vector.typl", "(pub defun unit-x () int 1)"),
+            ("geo/point.typl", "(use vector)\n(pub defun call-it () int (vector::unit-x))"),
             ("main.typl", "(use geo::point)\n(point::call-it)"),
         ],
         "main.typl",
@@ -320,9 +320,9 @@ fn use_prefers_a_root_relative_module_over_a_same_named_sibling() {
     let result = run_project(
         "sibling-vs-root",
         &[
-            ("helper.typl", "(pub defun which () i32 100)"), // root-relative
-            ("geo/helper.typl", "(pub defun which () i32 200)"), // same-named sibling
-            ("geo/point.typl", "(use helper)\n(pub defun call-it () i32 (helper::which))"),
+            ("helper.typl", "(pub defun which () int 100)"), // root-relative
+            ("geo/helper.typl", "(pub defun which () int 200)"), // same-named sibling
+            ("geo/point.typl", "(use helper)\n(pub defun call-it () int (helper::which))"),
             ("main.typl", "(use geo::point)\n(point::call-it)"),
         ],
         "main.typl",
@@ -339,8 +339,8 @@ fn use_inside_a_nested_module_still_resolves_against_the_files_directory() {
     let result = run_project(
         "sibling-nested-module",
         &[
-            ("geo/vector.typl", "(pub defun unit-x () i32 5)"),
-            ("geo/point.typl", "(module inner (use vector)\n(pub defun call-it () i32 (vector::unit-x)))"),
+            ("geo/vector.typl", "(pub defun unit-x () int 5)"),
+            ("geo/point.typl", "(module inner (use vector)\n(pub defun call-it () int (vector::unit-x)))"),
             ("main.typl", "(use geo::point::inner)\n(inner::call-it)"),
         ],
         "main.typl",
@@ -396,8 +396,8 @@ fn a_grandchild_module_sees_a_non_pub_ancestors_definitions() {
         &[(
             "main.typl",
             "(module a \
-               (defun helper () i32 42) \
-               (module b (pub defun call-it () i32 (helper)))) \
+               (defun helper () int 42) \
+               (module b (pub defun call-it () int (helper)))) \
              (a::b::call-it)",
         )],
         "main.typl",
@@ -414,8 +414,8 @@ fn sibling_modules_still_cannot_see_each_others_private_items() {
         "sibling-privacy-regression",
         &[(
             "main.typl",
-            "(module a (defun hidden () i32 1)) \
-             (module b (pub defun call-it () i32 (a::hidden))) \
+            "(module a (defun hidden () int 1)) \
+             (module b (pub defun call-it () int (a::hidden))) \
              (b::call-it)",
         )],
         "main.typl",

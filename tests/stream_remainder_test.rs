@@ -85,7 +85,7 @@ fn a_user_stream_that_says_nothing_reports_nothing_ready() {
     // stream that does not override it never reports anything ready.
     assert_eq!(
         eval_string(
-            r#"(defstruct fixed (text string) (at i32))
+            r#"(defstruct fixed (text string) (at int))
                (impl Stream fixed
                  (open-stream-p ((self Self)) bool true)
                  (close ((self Self)) () ()))
@@ -109,7 +109,7 @@ fn a_user_stream_that_says_nothing_reports_nothing_ready() {
 fn a_user_stream_that_answers_is_believed() {
     assert_eq!(
         eval_string(
-            r#"(defstruct always (n i32))
+            r#"(defstruct always (n int))
                (impl Stream always
                  (open-stream-p ((self Self)) bool true)
                  (close ((self Self)) () ()))
@@ -192,21 +192,21 @@ fn read_sequence_into_an_empty_vector_of_nothing_reads_nothing() {
 #[test]
 fn the_byte_layer_has_the_same_pair() {
     // `ByteInput`/`ByteOutput` get their own copies rather than inheriting
-    // one: the item type is what the signature names, and theirs is `i32`.
+    // one: the item type is what the signature names, and theirs is `int`.
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("stream-remainder-tmp");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("bytes.bin");
     let path_str = path.to_string_lossy().replace('\\', "/");
     let src = format!(
         r#"(match (open-binary-output "{p}")
-             ((ok o) (let ((v (the Vector<i32> (Vector::new))))
+             ((ok o) (let ((v (the Vector<int> (Vector::new))))
                        (push v 65)
                        (push v 66)
                        (write-sequence o v)
                        (close o)))
              ((err e) (panic (message e))))
            (match (open-binary-input "{p}")
-             ((ok i) (let ((w (the Vector<i32> (Vector::new))))
+             ((ok i) (let ((w (the Vector<int> (Vector::new))))
                        (let ((got (read-sequence i w 8)))
                          (close i)
                          (format false "~a ~a ~a" got (get w 0) (get w 1)))))

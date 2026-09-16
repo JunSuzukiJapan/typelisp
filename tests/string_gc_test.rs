@@ -109,7 +109,7 @@ fn a_string_local_survives_collection_across_appends() {
 #[test]
 fn a_string_struct_field_survives_collection() {
     let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, "(defstruct named (n string) (k i32))").expect("definition failed");
+    eval_in(&mut h, &mut chk, &mut interp, "(defstruct named (n string) (k int))").expect("definition failed");
     eval_in(
         &mut h,
         &mut chk,

@@ -86,7 +86,7 @@ const fn digits(a: i64, b: i64, c: i64) -> i64 {
 #[test]
 fn a_string_literal_pattern_compares_content() {
     both(
-        r#"(defun f ((s string)) i32 (match s ("a" 1) ("bb" 2) (_ 0)))"#,
+        r#"(defun f ((s string)) int (match s ("a" 1) ("bb" 2) (_ 0)))"#,
         r#"(+ (* 100 (f "a")) (+ (* 10 (f "bb")) (f "zz")))"#,
         digits(1, 2, 0),
     );
@@ -97,7 +97,7 @@ fn a_string_literal_pattern_compares_content() {
 #[test]
 fn a_string_pattern_matches_a_separately_built_string() {
     both(
-        r#"(defun f ((s string)) i32 (match s ("ab" 1) (_ 0)))"#,
+        r#"(defun f ((s string)) int (match s ("ab" 1) (_ 0)))"#,
         r#"(f (append "a" "b"))"#,
         1,
     );
@@ -113,7 +113,7 @@ fn a_string_pattern_matches_a_separately_built_string() {
 #[test]
 fn a_symbol_literal_pattern_compares_the_interned_symbol() {
     both(
-        "(defun f ((s symbol)) i32 (match s ('foo 1) ('bar 2) (_ 0)))",
+        "(defun f ((s symbol)) int (match s ('foo 1) ('bar 2) (_ 0)))",
         r#"(+ (* 100 (f (string->symbol "foo")))
               (+ (* 10 (f (string->symbol "bar"))) (f (string->symbol "zz"))))"#,
         digits(1, 2, 0),
@@ -125,7 +125,7 @@ fn a_symbol_literal_pattern_compares_the_interned_symbol() {
 #[test]
 fn a_symbol_literal_pattern_works_inside_a_sexpr_pattern() {
     both(
-        r#"(defun f ((s Option<Sexpr>)) i32 (match s ((sym 'foo) 1) ((str "hi") 2) ((i32 42) 3) (_ 0)))"#,
+        r#"(defun f ((s Option<Sexpr>)) int (match s ((sym 'foo) 1) ((str "hi") 2) ((int 42) 3) (_ 0)))"#,
         r#"(+ (* 100 (f 'foo)) (+ (* 10 (f "hi")) (f 'zz)))"#,
         digits(1, 2, 0),
     );
@@ -139,7 +139,7 @@ fn a_symbol_literal_pattern_works_inside_a_sexpr_pattern() {
 #[test]
 fn immediate_literals_match_a_sexpr_scrutinee_directly() {
     both(
-        r#"(defun f ((s Option<Sexpr>)) i32
+        r#"(defun f ((s Option<Sexpr>)) int
              (match s ('foo 1) (42 2) (#\a 3) (true 4) (_ 0)))"#,
         r#"(+ (* 1000 (f 'foo)) (+ (* 100 (f 42)) (+ (* 10 (f #\a)) (f true))))"#,
         1234,
@@ -155,13 +155,13 @@ fn immediate_literals_match_a_sexpr_scrutinee_directly() {
 /// *that* by value.
 #[test]
 fn a_by_identity_literal_against_a_sexpr_scrutinee_is_refused() {
-    let e = err(r#"(defun f ((s Sexpr)) i32 (match s ("hi" 1) (_ 0)))
+    let e = err(r#"(defun f ((s Sexpr)) int (match s ("hi" 1) (_ 0)))
                    (f "hi")"#);
     assert!(e.contains("compare by identity"), "{}", e);
     assert!(e.contains(r#"(str "hi")"#), "{}", e);
     // And the named spelling does match, by content.
     both(
-        r#"(defun f ((s Sexpr)) i32 (match s ((str "hi") 1) (_ 0)))"#,
+        r#"(defun f ((s Sexpr)) int (match s ((str "hi") 1) (_ 0)))"#,
         r#"(+ (* 10 (f "hi")) (f "no"))"#,
         10,
     );
@@ -174,7 +174,7 @@ fn a_by_identity_literal_against_a_sexpr_scrutinee_is_refused() {
 fn an_equals_pattern_against_a_sexpr_scrutinee_is_allowed() {
     both(
         "(defvar (target Sexpr) 42)\
-         \n(defun f ((s Sexpr)) i32 (match s ((= target) 1) (_ 0)))",
+         \n(defun f ((s Sexpr)) int (match s ((= target) 1) (_ 0)))",
         "(+ (* 10 (f 42)) (f 1))",
         10,
     );
@@ -185,19 +185,19 @@ fn an_equals_pattern_against_a_sexpr_scrutinee_is_allowed() {
 #[test]
 fn a_float_literal_pattern_compares_by_value() {
     both(
-        "(defun f ((x f64)) i32 (match x (1.5 1) (2.5 2) (_ 0)))",
+        "(defun f ((x f64)) int (match x (1.5 1) (2.5 2) (_ 0)))",
         "(+ (* 100 (f 1.5)) (+ (* 10 (f 2.5)) (f 9.0)))",
         digits(1, 2, 0),
     );
 }
 
-/// A `bignum` and a `ratio` are boxed like an `f64`, and equally not
-/// comparable by their word.
+/// An `int` past the fixnum range and a `ratio` are boxed like an `f64`,
+/// and equally not comparable by their word.
 #[test]
 fn bignum_and_ratio_literal_patterns_compare_by_value() {
     both(
-        "(defun f ((x bignum)) i32 (match x (123456789012345678901234567890 1) (_ 0)))\
-         \n(defun g ((x ratio)) i32 (match x (1/3 1) (_ 0)))",
+        "(defun f ((x int)) int (match x (123456789012345678901234567890 1) (_ 0)))\
+         \n(defun g ((x ratio)) int (match x (1/3 1) (_ 0)))",
         "(+ (* 100 (f 123456789012345678901234567890)) (+ (* 10 (g 1/3)) (g 1/2)))",
         digits(1, 1, 0),
     );
@@ -212,11 +212,11 @@ fn bignum_and_ratio_literal_patterns_compare_by_value() {
 #[test]
 fn an_equals_pattern_compares_a_user_type_through_its_own_eq_impl() {
     both(
-        "(defstruct point (x i32) (y i32))\
+        "(defstruct point (x int) (y int))\
          \n(impl Eq point (equals ((self Self) (other Self)) bool\
          \n  (and (= self::x other::x) (= self::y other::y))))\
          \n(defvar (origin point) (point::new 0 0))\
-         \n(defun f ((p point)) i32\
+         \n(defun f ((p point)) int\
          \n  (match p ((= origin) 1) ((= (point::new 1 2)) 2) (_ 0)))",
         "(+ (* 100 (f (point::new 0 0))) (+ (* 10 (f (point::new 1 2))) (f (point::new 9 9))))",
         digits(1, 2, 0),
@@ -233,9 +233,9 @@ fn an_equals_pattern_compares_a_user_type_through_its_own_eq_impl() {
 #[test]
 fn a_value_pattern_works_in_a_generic_body_under_an_eq_bound() {
     both(
-        "(defun same<A> ((x A) (y A)) i32 (where (Eq A))\
+        "(defun same<A> ((x A) (y A)) int (where (Eq A))\
          \n  (match x ((= y) 1) (_ 0)))\
-         \n(defun f ((a string) (b string)) i32 (same a b))",
+         \n(defun f ((a string) (b string)) int (same a b))",
         r#"(+ (* 10 (f "a" "a")) (f "a" "b"))"#,
         10,
     );
@@ -246,9 +246,9 @@ fn a_value_pattern_works_in_a_generic_body_under_an_eq_bound() {
 #[test]
 fn a_type_without_eq_is_refused_at_the_pattern() {
     let e = err(
-        "(defstruct opaque (x i32))\
+        "(defstruct opaque (x int))\
          \n(defvar (o opaque) (opaque::new 1))\
-         \n(defun f ((p opaque)) i32 (match p ((= o) 1) (_ 0)))\
+         \n(defun f ((p opaque)) int (match p ((= o) 1) (_ 0)))\
          \n(f o)",
     );
     assert!(e.contains("does not implement `Eq`"), "{}", e);
@@ -267,7 +267,7 @@ fn a_bare_variant_name_is_that_variant() {
     both(
         "(defenum color (red) (blue))\
          \n(use color)\
-         \n(defun f ((c color)) i32 (match c (red 1) (blue 2)))",
+         \n(defun f ((c color)) int (match c (red 1) (blue 2)))",
         "(+ (* 10 (f (red))) (f (blue)))",
         12,
     );
@@ -280,7 +280,7 @@ fn bare_variant_names_count_toward_exhaustiveness() {
     let e = err(
         "(defenum color (red) (blue))\
          \n(use color)\
-         \n(defun f ((c color)) i32 (match c (red 1)))\
+         \n(defun f ((c color)) int (match c (red 1)))\
          \n(f (red))",
     );
     assert!(e.contains("non-exhaustive"), "{}", e);
@@ -291,9 +291,9 @@ fn bare_variant_names_count_toward_exhaustiveness() {
 #[test]
 fn a_bare_name_for_a_variant_with_fields_is_an_arity_error() {
     let e = err(
-        "(defenum shape (dot) (circle i32))\
+        "(defenum shape (dot) (circle int))\
          \n(use shape)\
-         \n(defun f ((s shape)) i32 (match s (dot 0) (circle 1)))\
+         \n(defun f ((s shape)) int (match s (dot 0) (circle 1)))\
          \n(f (dot))",
     );
     assert!(e.contains("field"), "{}", e);
@@ -306,7 +306,7 @@ fn a_bare_name_that_names_no_variant_still_binds() {
     both(
         "(defenum color (red) (blue))\
          \n(use color)\
-         \n(defun f ((n i32)) i32 (match n (blues (+ blues 1))))",
+         \n(defun f ((n int)) int (match n (blues (+ blues 1))))",
         "(f 41)",
         42,
     );
@@ -319,7 +319,7 @@ fn a_bare_name_that_names_no_variant_still_binds() {
 /// enumeration, so it needs a catch-all.
 #[test]
 fn a_scrutinee_with_no_variants_needs_a_catch_all() {
-    let e = err(r#"(defun f ((s string)) i32 (match s ("a" 1)))"#);
+    let e = err(r#"(defun f ((s string)) int (match s ("a" 1)))"#);
     assert!(e.contains("non-exhaustive"), "{}", e);
 }
 
@@ -329,16 +329,16 @@ fn a_scrutinee_with_no_variants_needs_a_catch_all() {
 /// nothing falling through to a default.
 #[test]
 fn both_bool_arms_are_exhaustive_without_a_catch_all() {
-    both("(defun f ((x bool)) i32 (match x (true 1) (false 0)))", "(+ (* 10 (f true)) (f false))", 10);
+    both("(defun f ((x bool)) int (match x (true 1) (false 0)))", "(+ (* 10 (f true)) (f false))", 10);
 }
 
 /// One arm is still not exhaustive, and the message names the value that is
 /// missing rather than demanding a `_` arm that is not required.
 #[test]
 fn one_bool_arm_names_the_value_that_is_missing() {
-    let e = err("(defun f ((x bool)) i32 (match x (true 1)))");
+    let e = err("(defun f ((x bool)) int (match x (true 1)))");
     assert!(e.contains("`false` is not covered"), "{}", e);
-    let e = err("(defun f ((x bool)) i32 (match x (false 0)))");
+    let e = err("(defun f ((x bool)) int (match x (false 0)))");
     assert!(e.contains("`true` is not covered"), "{}", e);
 }
 
@@ -347,15 +347,15 @@ fn one_bool_arm_names_the_value_that_is_missing() {
 /// them the same way would close a match over `Sexpr` after two arms.
 #[test]
 fn bool_literals_against_a_sexpr_scrutinee_do_not_close_the_match() {
-    let e = err("(defun f ((s Sexpr)) i32 (match s (true 1) (false 0)))");
+    let e = err("(defun f ((s Sexpr)) int (match s (true 1) (false 0)))");
     assert!(e.contains("non-exhaustive"), "{}", e);
 }
 
-/// An `i32` scrutinee: no heap value anywhere, which is what makes it the
+/// An `int` scrutinee: no heap value anywhere, which is what makes it the
 /// case the compiled side had to stop rooting unconditionally.
 #[test]
 fn a_scalar_scrutinee_matches_by_literal() {
-    both("(defun f ((n i32)) i32 (match n (1 10) (2 20) (_ 0)))", "(+ (f 1) (+ (f 2) (f 3)))", 30);
+    both("(defun f ((n int)) int (match n (1 10) (2 20) (_ 0)))", "(+ (f 1) (+ (f 2) (f 3)))", 30);
 }
 
 /// Two guards in one pattern: each reads the value *it* was handed, not the
@@ -365,7 +365,7 @@ fn a_scalar_scrutinee_matches_by_literal() {
 fn two_value_patterns_in_one_pattern_do_not_read_each_others_value() {
     both(
         r#"(defstruct pair (a string) (b string))
-           (defun f ((p pair)) i32 (match p ((new "x" "y") 1) ((new "x" _) 2) (_ 0)))"#,
+           (defun f ((p pair)) int (match p ((new "x" "y") 1) ((new "x" _) 2) (_ 0)))"#,
         r#"(+ (* 100 (f (pair::new "x" "y"))) (+ (* 10 (f (pair::new "x" "z"))) (f (pair::new "q" "y"))))"#,
         digits(1, 2, 0),
     );
@@ -376,7 +376,7 @@ fn two_value_patterns_in_one_pattern_do_not_read_each_others_value() {
 #[test]
 fn a_value_pattern_can_read_the_enclosing_scope() {
     both(
-        "(defun f ((s string) (want string)) i32 (match s ((= want) 1) (_ 0)))",
+        "(defun f ((s string) (want string)) int (match s ((= want) 1) (_ 0)))",
         r#"(+ (* 10 (f "a" "a")) (f "a" "b"))"#,
         10,
     );

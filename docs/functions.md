@@ -10,11 +10,12 @@
 
 ## 1. 算術・比較（整数）
 
-整数型は `i8` `i16` `i32` `u8` `u16` `u32` の6つ。第一引数の型でどれ用に解決されるかが決まる
+整数型は 7 つ。**`int`**（CL の `integer`——任意精度、未注釈の整数リテラルの既定型。§2.4）と、
+固定幅の `i8` `i16` `i32` `u8` `u16` `u32`。第一引数の型でどれ用に解決されるかが決まる
 （互いに独立で、暗黙変換はない）。**64bit 幅の整数型は無い**——実行時の値は下位ビットがタグの
 1語なので即値の整数には63bitしか残らず（fixnum のタグは1bit）、64bitを名乗る型はどこかで最上位
-ビットを落とすことになる。
-`i32` より大きい数は `bignum` を使う。
+ビットを落とすことになる。`int` はその 63bit を超えたら多倍長になるので、幅を気にしないなら
+`int` を使う。以下の表は固定幅の 6 つのもの（`int` の表は §2.4）。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
@@ -31,7 +32,7 @@
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(T,T)→bool` | 比較 |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(T,T)→bool` | いずれも `=` と同じ（同型の数値に差はない） |
 | `int->float` | `(int->float x)` | `T→f64` | `f64` への拡大変換 |
-| `int->bignum` | `(int->bignum x)` | `T→bignum` | `bignum` への拡大変換（常に正確） |
+| `int->int` | `(int->int x)` | `T→int` | `int` への拡大変換（常に正確）。`(as int x)` の実体 |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio` への拡大変換（常に正確） |
 | `int->char` | `(int->char x)` | `T→char` | Unicode スカラ値として解釈。不正な値は panic |
 | `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` の失敗を `None` で返す版 |
@@ -58,7 +59,7 @@
 *名指す*ためで、計算する型としてではない」と書いてあった。2026-09-01 に撤回した。）
 
 CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と §4 の述語）は
-`i32`/`f64`/`bignum`/`ratio` のまま。他の幅で必要なら `(as i32 x)` で移る
+`int`/`i32`/`f64`/`ratio` にある。他の幅で必要なら `(as int x)` / `(as i32 x)` で移る
 （§1b の変換は全ペアにある）。
 
 ## 1.1 C 境界の生の語（`ptr` / `c-long` / `c-ulong`）
@@ -77,14 +78,14 @@ CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と §4 の
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 同じ変換を問いとして |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | 生の語どうし、および §1 の整数型から作る入口 |
 | `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | 同上 |
-| `int->bignum` | `(int->bignum x)` | `T→bignum` | **常に正確**。`i32` に入らない `size_t` を読む正直な方法 |
+| `int->int` | `(int->int x)` | `T→int` | **常に正確**。`i32` に入らない `size_t` を読む正直な方法 |
 
-`(as i32 x)` / `(try-as i32 x)` / `(as bignum x)` / `(as c-ulong n)` がこれらの実体で、変換は
+`(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` がこれらの実体で、変換は
 §1 の整数型との全ペアにある。`ptr` にはこの表も付かない——ポインタを数として読む道は用意して
 いない。渡す・受け取る・別の C 関数へ渡し直すだけの値。
 
 **印字もできない。** `(println "~a" x)` は生の語を受けない（`Sexpr` 表現を持たないため）ので、
-`(println "~a" (as bignum n))` のように幅のある型へ移してから渡す。これは制限ではなく同じ規則の
+`(println "~a" (as int n))` のように幅のある型へ移してから渡す。これは制限ではなく同じ規則の
 現れで、`Sexpr` のスロットも中身にタグを付ける側だから。
 
 §1 冒頭の「64bit 幅の整数型は無い」はこの3つでも破られていない。**保存できないから**成り立つ:
@@ -111,14 +112,14 @@ CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と §4 の
 | `log`（2引数） | `(log x base)` | `(f64,f64)→f64` | 底を指定した対数。チェッカーが `(/ (log x) (log base))` へ展開する糖衣（§4） |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL の2引数版（`(floor 7.0 2.0)`→商2・剰余1）に相当。§1 の同名メソッドと同じ設計（`car`=商、`cdr`=剰余） |
 | `float->int` | `(float->int x)` | `f64→i32` | ゼロ方向への切り捨てで `i32` へ変換 |
-| `float->bignum` | `(float->bignum x)` | `f64→bignum` | ゼロ方向への切り捨てで `bignum` へ変換 |
+| `float->int` | `(float->int x)` | `f64→int` | ゼロ方向への切り捨てで `int` へ変換 |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 正確な二進有理数として `ratio` へ変換（CL の `rational`） |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | CL の同名関数。上の `floor`/`ceiling`/`round`/`truncate` の別名——CL では無印の方が整数を返すので、`f` 付きの方がこの言語の挙動に一致する |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→i32` | それぞれ 2 / 53 / 53（`0.0` の precision だけ 0）。`f64` は常に IEEE-754 binary64 なので定数 |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` か `-1.0` |
 | `scale-float` | `(scale-float x n)` | `(f64,i32)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,i32>` | 仮数（`[1/2,1)`、符号なし）と指数。CL は3値返しだが多値は非採用なので、符号は `float-sign` が担う |
-| `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<bignum,i32>` | 同じ分解を厳密な 53 ビット整数の仮数で。`仮数 * 2^指数` がちょうど元の値 |
+| `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | 同じ分解を厳密な 53 ビット整数の仮数で。`仮数 * 2^指数` がちょうど元の値 |
 | `rationalize` | `(rationalize x)` | `f64→ratio` | **その float に読み戻る最も簡単な**有理数（`(rationalize 0.1)` は `1/10`）。厳密な二進値が要るなら `float->ratio` |
 
 > **CL との差: `round` の丸め方**。`round`（したがって `fround`/`round-div`）は
@@ -130,16 +131,19 @@ CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と §4 の
 
 ## 2.4 任意精度整数 `int`
 
-CL の `integer`。値は 63bit の即値（fixnum）に入るあいだは即値で、演算の結果が入らなくなれば
-自動的に多倍長（bignum 箱）へ昇格し、収まればまた即値へ戻る。**箱が存在するのは値が 63bit に
-入らないときだけ**なので、`eq` は fixnum の範囲で常に値の同一性、`eql`/`=` は範囲を問わず数値の
-同一性になる。固定幅の整数型（§1）とは別の型で、暗黙変換はない——`(as int x)` が固定幅からの
-正確な拡大、`(as i32 n)` / `(try-as i32 n)` が `int` からの切り詰め / 判定（§1 の `int->W` /
-`try-int->W` と同じ意味）。
+CL の `integer`、そしてこの言語の**整数**——未注釈の整数リテラルはこの型で、`length` や
+`char->int` のように数を返す組み込みもこの型を返す。値は 63bit の即値（fixnum）に入るあいだは
+即値で、演算の結果が入らなくなれば自動的に多倍長（bignum 箱）へ昇格し、収まればまた即値へ戻る。
+**箱が存在するのは値が 63bit に入らないときだけ**なので、`eq` は fixnum の範囲で常に値の
+同一性、`eql`/`=` は範囲を問わず数値の同一性になる。固定幅の整数型（§1）とは別の型で、暗黙変換は
+ない——`(as int x)` が固定幅からの正確な拡大、`(as i32 n)` / `(try-as i32 n)` が `int` からの
+切り詰め / 判定（§1 の `int->W` / `try-int->W` と同じ意味）。
 
-（移行中: `bignum` は `int` に統合される予定で、未注釈の整数リテラルの既定型も `int` になる。
-現時点では `int` は明示したときだけの型で、`Sexpr` に入れられない——`(println "~a" n)` は
-まだ書けず、`int::println` か `=` での比較を使う。）
+かつての `int` 型はこの型に統合された。`Sexpr` の変種も `int` 1 つ（`(int n)` は fixnum も
+多倍長も受ける）で、`(int n)` は書けない。
+
+添字や個数を取る組み込み（`substring`、`Vector` の `get`、`ash` の桁数など）は `int` を受けるが、
+fixnum に入らない値を渡すと実行時エラー（「an integer argument does not fit a fixnum」）になる。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
@@ -149,47 +153,21 @@ CL の `integer`。値は 63bit の即値（fixnum）に入るあいだは即値
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(int,int)→bool` | すべて `=` |
-| `logand` `logior` `logxor` `lognot` `logtest` `logcount` `integer-length` `logbitp` `ash` | | | `bignum` と同じ（無限桁の 2 の補数） |
+| `logand` `logior` `logxor` `lognot` `logtest` `logcount` `integer-length` `logbitp` `ash` | | | `int` と同じ（無限桁の 2 の補数） |
 | `int->float` `int->ratio` `int->char` `try-int->char` | | | §1 と同じ |
 | `int->W` `try-int->W` | `(int->W x)` | `int→W` | 切り詰め / 判定。`W` は 6 幅と `c-long`/`c-ulong` |
-| `int->int` | | `T→int` | 固定幅・C 語からの正確な拡大。`(as int x)` の実体 |
+| `int->int` | | `int→int` | 恒等（固定幅・C 語の側の `int->int` が拡大。§1） |
+| `abs` `signum` `rem` `gcd` `lcm` `expt` `1+` `1-` | | | §1 と同じ形（`prelude.rs` のメソッド）。`expt` は非負の指数のみ |
 
 コンパイルでは `+`/`-`/`*` と比較は「両方 fixnum なら語のまま溢れ検査付き命令、それ以外は
 ランタイム」の2経路になる。fixnum のタグは 0 なので、タグ付き語をそのまま足した結果が
 タグ付きの和になる。
 
-## 2.5 多倍長数値（`bignum` / `ratio`）
+## 2.5 有理数 `ratio`
 
-CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常に既約・正の分母で保たれる有理数。
-どちらもヒープ確保され、固定幅の整数型や `f64` との暗黙変換はない（明示的な変換メソッドまたは
-`as`/`try-as` を使う）。整数/比リテラル構文は [syntax.md](syntax.md) を参照。
-
-**`bignum`**（CL の整数と同じ演算集合。`/` はゼロ方向切り捨て、除算・剰余系はゼロ除算で panic）:
-
-| 名前 | 形式 | 型 | 説明 |
-|---|---|---|---|
-| `+` `-` `*` `/` | `(op a b)` | `(bignum,bignum)→bignum` | 四則（`/` は切り捨て） |
-| `mod` | `(mod a b)` | `(bignum,bignum)→bignum` | 床除算の剰余（符号は除数側。§1 の `mod` と同じ） |
-| `rem` | `(rem a b)` | `(bignum,bignum)→bignum` | 切り捨て除算の剰余（符号は被除数側。§1 の `rem` と同じ） |
-| `abs` | `(abs x)` | `bignum→bignum` | 絶対値 |
-| `signum` | `(signum x)` | `bignum→bignum` | 符号（`1`/`-1`/`0`） |
-| `gcd` | `(gcd a b)` | `(bignum,bignum)→bignum` | 最大公約数 |
-| `lcm` | `(lcm a b)` | `(bignum,bignum)→bignum` | 最小公倍数（どちらかが0なら0） |
-| `expt` | `(expt a b)` | `(bignum,bignum)→bignum` | 冪乗。指数が負なら panic（結果が `ratio` になり `bignum` で表せないため） |
-| `max` `min` | `(op a b)` | `(bignum,bignum)→bignum` | 大きい方／小さい方 |
-| `1+` `1-` | `(op x)` | `bignum→bignum` | `x±1` |
-| `logand` `logior` `logxor` | `(op a b)` | `(bignum,bignum)→bignum` | ビット演算（無限精度2の補数、§4） |
-| `ash` | `(ash x count)` | `(bignum,i32)→bignum` | 算術シフト。`count` はビット数なので `i32`（§4.4） |
-| `lognot` `logcount` `integer-length` | `(op x)` | `bignum→bignum` | 同上（単項） |
-| `logtest` | `(logtest a b)` | `(bignum,bignum)→bool` | `(/= (logand a b) 0)` |
-| `logbitp` | `(logbitp x index)` | `(bignum,i32)→bool` | `index` ビット目（**CL と引数順が逆**、§4.4） |
-| `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(bignum,bignum)→bool` | 比較 |
-| `eq` `eql` `equal` `equalp` | `(op a b)` | `(bignum,bignum)→bool` | いずれも `=` と同じ |
-| `bignum->int` | `(bignum->int x)` | `bignum→i32` | 縮小変換。`i32` に収まらなければ panic |
-| `try-bignum->int` | `(try-bignum->int x)` | `bignum→Option<i32>` | 収まらなければ `None` |
-| `bignum->float` | `(bignum->float x)` | `bignum→f64` | `f64` へ変換 |
-| `bignum->ratio` | `(bignum->ratio x)` | `bignum→ratio` | `ratio` への拡大変換（正確） |
-| `print` `println` | `(op x)` | `bignum→Unit` | 標準出力へ書く（§15） |
+CL 準拠の任意精度有理数。常に既約・正の分母で保たれ、ヒープ確保される。整数型や `f64` との
+暗黙変換はない（明示的な変換メソッドまたは `as`/`try-as` を使う）。比リテラル構文は
+[syntax.md](syntax.md) を参照。（多倍長整数は §2.4 の `int` に統合された。）
 
 **`ratio`**（`/` はゼロ除算で panic）:
 
@@ -205,24 +183,24 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`。`ratio` にビット演算は無い（CL も整数専用） |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | 比較 |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(ratio,ratio)→bool` | いずれも `=` と同じ |
-| `numerator` | `(numerator x)` | `ratio→bignum` | 既約分子（CL と同名） |
-| `denominator` | `(denominator x)` | `ratio→bignum` | 既約分母（常に正） |
-| `ratio->bignum` | `(ratio->bignum x)` | `ratio→bignum` | 整数部（ゼロ方向切り捨て） |
+| `numerator` | `(numerator x)` | `ratio→int` | 既約分子（CL と同名） |
+| `denominator` | `(denominator x)` | `ratio→int` | 既約分母（常に正） |
+| `ratio->int` | `(ratio->int x)` | `ratio→int` | 整数部（ゼロ方向切り捨て） |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | `f64` へ変換 |
 | `print` `println` | `(op x)` | `ratio→Unit` | 標準出力へ書く（§15） |
 
-固定幅整数・`f64` からの入口は `int->bignum`/`int->ratio`（§1）と `float->bignum`/`float->ratio`
-（§2）。`bignum`/`ratio` は `i32` 等とは独立した別型で、混在した算術には明示変換が必要。
+固定幅整数・`f64` からの入口は `int->int`/`int->ratio`（§1）と `float->int`/`float->ratio`
+（§2）。`int`/`ratio` は `i32` 等とは独立した別型で、混在した算術には明示変換が必要。
 
 > **実装と compile 対応**: `abs`/`signum`/`rem`/`gcd`/`lcm`/`expt`（および `f64`/`ratio` の
 > `mod`）は Rust ビルトインではなく `prelude.rs` の**typelisp メソッド**として各型のプリミティブ演算
-> （`/`・`mod`・`floor`/`truncate`・`ratio->bignum` 等）から組み立てられている。したがって JIT/AOT
+> （`/`・`mod`・`floor`/`truncate`・`ratio->int` 等）から組み立てられている。したがって JIT/AOT
 > でも通常の関数として**コンパイル可能**で、インタプリタと結果が一致する（専用の `rt_*` シムや
 > compiler.rs 分岐は不要）。整数 `mod` と各型の四則・比較・変換はネイティブ命令へ直接ローワリングされる。
 
 ## 2.6 複素数（`complex`）
 
-**組み込み型ではなく prelude の `defstruct`。** `bignum`/`ratio` が Rust 実装なのは
+**組み込み型ではなく prelude の `defstruct`。** `int`/`ratio` が Rust 実装なのは
 `BigInt`/`BigRational` の演算がこの言語で書けないからで、`f64` 2 つの複素数はそれに当たらない
 （新しい `Repr` も `rt_*` シムも島の lowering も要らず、書いた日から JIT/AOT で動く）。
 
@@ -265,10 +243,10 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 ## 4. 数値ヘルパー
 
 `abs`/`signum`（全数値型）・`gcd`/`lcm`（整数型のみ）・`rem`（`f64` 含む全実数型）・`expt`
-（`bignum`/`f64`/`ratio`）は、各数値型のメソッドとして `prelude.rs` に typelisp で定義されている
+（`int`/`f64`/`ratio`）は、各数値型のメソッドとして `prelude.rs` に typelisp で定義されている
 （レシーバ型で解決。`(abs x)` は `x` の型に応じたメソッド）。詳細と型は各型の節（§1・§2・§2.5）を
-参照。整数の `expt` は無い（`bignum` 昇格が無くオーバーフローするため、`(int->bignum x)` 経由で
-`bignum` の `expt` を使う）。
+参照。固定幅整数の `expt` は無い（昇格が無くオーバーフローするため、`(as int x)` で `int` に
+移してその `expt` を使う）。
 
 （`ratio-expt-int` も `prelude.rs` に `defun` として存在するが、これは `ratio` の `expt` が整数乗を
 計算するための内部ヘルパーであり、通常は `(expt r n)` を使う。）
@@ -307,8 +285,8 @@ CL の算術・比較は可変長だが、`defmethod` はレシーバ型でし�
 
 | 名前 | 形式 | 型 | 対応する型 |
 |---|---|---|---|
-| `zerop` `plusp` `minusp` | `(op x)` | `T→bool` | `i32` `f64` `bignum` `ratio` |
-| `evenp` `oddp` | `(op x)` | `T→bool` | `i32` `bignum`（CL 同様、整数型のみ） |
+| `zerop` `plusp` `minusp` | `(op x)` | `T→bool` | `int` `i32` `f64` `ratio` |
+| `evenp` `oddp` | `(op x)` | `T→bool` | `int` `i32`（CL 同様、整数型のみ） |
 
 CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型付けなので実行時に型を問う場面が
 無い（[language-design.md](dev/language-design.md) §0）。
@@ -324,7 +302,7 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 
 | 名前 | 型 | 説明 |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `i32` | ここでの fixnum は「多倍長でない整数」＝固定幅整数型のうち最も広い `i32` |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63bit 即値の上限／下限（2^62-1 / -2^62）。これを超えた `int` は多倍長になる |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | 有限で最大／最小 |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | 非正規化数を含む、0 でない最小の絶対値 |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | 正規化数に限った同じもの |
@@ -332,33 +310,33 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 
 ### 4.4 ビット演算
 
-無限精度の2の補数として定義される（CL §12.10）。固定幅整数型と `bignum` に実装があり、`ratio` には
+無限精度の2の補数として定義される（CL §12.10）。固定幅整数型と `int` に実装があり、`ratio` には
 無い（CL 自体もビット演算は整数専用）。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `logand` `logior` `logxor` | `(op a b)` | `(T,T)→T` | 論理積・論理和・排他的論理和（可変長・0引数版は §4.1） |
 | `lognot` | `(lognot x)` | `T→T` | ビット反転 |
-| `ash` | `(ash x count)` | `(T,i32)→T` | 算術シフト。`count` が正なら左、負なら右 |
-| `logbitp` | `(logbitp x index)` | `(T,i32)→bool` | `index` ビット目が立っているか（**CL と引数順が逆**、§4.4） |
+| `ash` | `(ash x count)` | `(T,int)→T` | 算術シフト。`count` が正なら左、負なら右 |
+| `logbitp` | `(logbitp x index)` | `(T,int)→bool` | `index` ビット目が立っているか（**CL と引数順が逆**、§4.4） |
 | `logtest` | `(logtest a b)` | `(T,T)→bool` | `(/= (logand a b) 0)` |
 | `logcount` | `(logcount x)` | `T→T` | 立っているビット数（負数なら 0 ビットの数） |
 | `integer-length` | `(integer-length x)` | `T→T` | 符号を除いて表現に要するビット数 |
 | `logeqv` `lognand` `lognor` `logandc1` `logandc2` `logorc1` `logorc2` | `(op a b)` | `(T,T)→T` | 上記から合成した残り7種（`prelude.rs`） |
 
-**`ash` の第 2 引数だけが `T` でなく `i32`。** これはビット単位の**距離**であって受け手の型の
+**`ash` の第 2 引数だけが `T` でなく `int`。** これはビット単位の**距離**であって受け手の型の
 値ではないので、受け手の幅と符号は距離について何も言わない（CL の `(ash integer count)` の
 `count` が任意の整数なのと同じ理由）。以前は `T` だったため、符号なし幅では右シフトが
 **書けなかった**——`(ash (the u8 x) -3)` は「`-3` は `u8` の範囲外」で撥ねられ、他に
 「右シフト」の綴りが無かった。符号なしの右シフトは論理シフト（`(ash (the u8 200) -3)` = `25`）、
 符号付きは算術シフトで負の無限大方向へ丸まる（`(ash (the i32 -100) -4)` = `-7`）。
 
-`logbitp` の `index` も同じ理由で `i32`。ただしこちらは受け手が `index` のほうだったため、
+`logbitp` の `index` も同じ理由で `int`。ただしこちらは受け手が `index` のほうだったため、
 型を変えるだけでは済まなかった——メソッドのキーは `(受け手の型, メソッド名)` なので、
 `i32` の `logbitp` に幅ごとのシグネチャを持たせることはできず、整数側も `i32` に固定されていた。
 `ldb` 系と同じく整数を第 1 引数へ移してある。
 
-`bignum` の `ash`/`logbitp` も第 2 引数は `i32`（§3）。任意精度のシフト量は使える呼び出しを
+`int` の `ash`/`logbitp` も第 2 引数は `int`（§2.4）。任意精度のシフト量は使える呼び出しを
 何も表さない——`(ash big huge)` は `big` より `huge` ビット多い結果を名指すので、どんな機械も
 終わらない。
 
@@ -388,7 +366,7 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 | `deposit-field` | `(deposit-field x newbyte b)` | `(T,T,cons-cell<i32,i32>)→T` | `dpb` の「位置を保ったまま」版 |
 | `boole` | `(boole op a b)` | `(i32,T,T)→T` | `op`（§4.3 の `boole-*` 定数）で選んだ 16 種の2項論理演算 |
 
-`T` は `Bits` を実装する型、つまり `i8`/`i16`/`i32`/`u8`/`u16`/`u32`/`bignum`。`boole` だけ
+`T` は `Bits` を実装する型、つまり `i8`/`i16`/`i32`/`u8`/`u16`/`u32`/`int`。`boole` だけ
 `op` が先頭のまま——自由関数は何もディスパッチしないので整数が受け手の位置を争う必要が無く、
 CL の並びを保つ費用がゼロだから。
 
@@ -543,10 +521,10 @@ CL が認める答えで、SBCL も同じものを返す。`machine-type` と `m
 |---|---|---|
 | `capacity` / `live` / `free` | `i32` | cons アリーナ全体と、その内訳。3 つは必ず `live + free = capacity` |
 | `symbols` / `strings` / `boxes` | `i32` | ヒープが持つ他の 3 種の現在数 |
-| `gc-count` | `bignum` | この処理系が始めてからの収集回数 |
+| `gc-count` | `int` | この処理系が始めてからの収集回数 |
 | `growable` | `bool` | アリーナがまだ伸びうるか |
 
-**`gc-count` だけ `bignum`** なのは、ここで唯一「アリーナで頭打ちにならない数」だから。
+**`gc-count` だけ `int`** なのは、ここで唯一「アリーナで頭打ちにならない数」だから。
 数え上げは全部アリーナの大きさに縛られ、`i32` で数えられないアリーナはこの機械が
 持てないアリーナ（2^31 セル ≒ 51GB）——だから `typl --heap-cells` は
 `i32` を超える要求をその場で断る。収集回数だけは上がり続けるので、丸めない型を与えてある。
@@ -619,6 +597,7 @@ Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用�
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | 空リストかどうか |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | `Cons` でないか |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | `Sym`（シンボル）かどうか |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `int` 変種の中身（fixnum でも多倍長でも）。型違いは panic |
 | `sexpr-i8` | `(sexpr-i8 s)` | `Option<Sexpr>→i8` | `i8` 変種の中身。型違いは panic |
 | `sexpr-i16` | `(sexpr-i16 s)` | `Option<Sexpr>→i16` | `i16` 変種の中身。型違いは panic |
 | `sexpr-i32` | `(sexpr-i32 s)` | `Option<Sexpr>→i32` | `i32` 変種の中身。型違いは panic |
@@ -633,9 +612,10 @@ Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用�
 | `sexpr-sym-name` | `(sexpr-sym-name s)` | `Option<Sexpr>→string` | `Sym` の名前。型違いは panic |
 | `eq` `eql` | `(op a b)` | `(Option<Sexpr>,Option<Sexpr>)→bool` | 同一性比較（`Cons`/`Str` はポインタ、それ以外は値） |
 
-数値のアクセサが幅ごとに 8 本あるのは、`Sexpr` が「値の型がほかのどこにも書かれていない
+数値のアクセサが型ごとに 9 本あるのは、`Sexpr` が「値の型がほかのどこにも書かれていない
 唯一の場所」だから。`Sexpr` に入れた `u8` は `u8` の変種として入り、`(sexpr-u8 s)` でしか
-出てこない。`(sexpr-i32 s)` に渡せば panic する——黙って幅を広げて答えることはしない。
+出てこない。`(sexpr-int s)` に渡せば panic する——黙って幅を広げて答えることはしない。
+読んだデータ（`'(1 2 3)`、マクロの引数）の整数は `int` 変種で、`(sexpr-int s)` で読む。
 
 上の `sexpr-*` アクセサは Rust 組み込み。これらの上に、`Sexpr` リスト全体を扱う次の2つが
 `prelude.rs` に typelisp の `defun` として定義されている（`defmacro` の本体で引数の `Sexpr`
@@ -1174,7 +1154,7 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` 実装済み: 全数値型（`i8`〜`u32` / `f32` / `f64` / `bignum` / `ratio`）と `bool` `char`
+`Eq` 実装済み: 全数値型（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）と `bool` `char`
 `string` `symbol`、および `cons-cell<A,B>`（要素が `Eq` なら再帰的に）。`Ord` 実装済み:
 全数値型と `char` `string`、および `cons-cell<A,B>`（辞書順、要素が `Ord` なら）。メソッド名が組み込み演算子
 （`= /= < <= > >=`）・`eq`/`lt` と重複
@@ -1213,7 +1193,7 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 拒むため（`cannot redefine built-in method`）。`Neg` は無い——`(- x)` は
 `(- (- x x) x)` へ脱糖されるので `Sub` だけで足りる。
 
-実装済み: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` は全数値型、`Bits` は全整数型と `bignum`。
+実装済み: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` は全数値型、`Bits` は全整数型と `int`。
 
 ## 13. 高階関数
 
@@ -1301,7 +1281,7 @@ CL にあってここに無いもの（cl-parity-plan.md Phase 4c に理由を�
 `~/name/` が動く（下記）。文字列を組み立てて出したいときは `(format false ...)` で作って
 `(println "~a" s)` と印字する。
 `(list ...)` と同じく、可変長引数は各自の型のまま `Sexpr` へ包まれてから渡る——`i32`/`f64`/
-`bignum`/`ratio`/`char`/`bool`/`string`/`Sexpr` はスカラ用の `Sexpr` コンストラクタでラップされ、
+`int`/`ratio`/`char`/`bool`/`string`/`Sexpr` はスカラ用の `Sexpr` コンストラクタでラップされ、
 ユーザ定義 `defstruct`/`defenum`/`Vector<T>`/`HashTable<K,V>` 等ヒープ表現の ADT インスタンスは
 無変換のまま `Sexpr` へ retype される（`(println "~a" my-struct)` はそのまま動く）。ネイティブ表現の
 ジェネリック実体化（`Option<llvm-value>` 等）だけは `Sexpr` の表現を持たないため型エラーのまま。
@@ -1682,7 +1662,7 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 
 | 変数 | 型 | 既定 | 意味 |
 |---|---|---|---|
-| `*print-base*` | `i32` | `10` | 整数（固定幅と `bignum`）を印字する基数。2〜36 の外は**印字エラー**（CL も範囲を規定している） |
+| `*print-base*` | `i32` | `10` | 整数（固定幅と `int`）を印字する基数。2〜36 の外は**印字エラー**（CL も範囲を規定している） |
 | `*print-radix*` | `bool` | `false` | 真なら基数の印を付ける。`#b`/`#o`/`#x`、それ以外は `#NNr`、基数 10 は末尾の `.`。印は符号の**前**（`#x-ff`） |
 | `*print-case*` | `symbol` | `:downcase` | シンボル名の大小。`:upcase` / `:downcase` / `:capitalize`（CL と同じ綴り。この言語のキーワードは自己評価する `symbol`） |
 | `*print-readably*` | `bool` | `false` | 真なら読み戻せる形で印字する。エスケープを強制し、`*print-level*`/`*print-length*` の打ち切りを無効化する |
@@ -1757,7 +1737,7 @@ preserving 版は 2 を返す。
 リーダが読む数値表記は10進のほか、CL の **radix マクロ** `#b`（2進）・`#o`（8進）・
 `#x`（16進）・`#NNr`（基数 NN、2〜36）。`0x` 接頭辞は無い——CL に無い C 由来の構文だったので
 2026-09-01 に廃止した。`0xff` は数値ではなくシンボルとして読まれる（CL と同じ）。符号は印の**後ろ**（`#x-ff`）で、`i32` に収まらなければ
-`bignum` になる。`*print-radix*`（§15.3）が印字するのはこの表記なので、印字したものはそのまま
+`int` になる。`*print-radix*`（§15.3）が印字するのはこの表記なので、印字したものはそのまま
 読み戻せる。CL の `*read-base*` は無い——理由は cl-parity-plan.md Stage 7b の表に記録した。
 
 ### `eval` の意味論（Common Lisp 準拠）

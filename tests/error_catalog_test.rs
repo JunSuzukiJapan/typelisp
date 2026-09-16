@@ -29,8 +29,8 @@ fn a_simple_error_is_the_root_of_its_chain() {
 
 #[test]
 fn a_simple_error_travels_as_a_dyn_error() {
-    let src = r#"(defun f () Result<i32, :dyn Error>
-                   (as-dyn-error (the Result<i32,SimpleError> (result::err (simple-error "no")))))
+    let src = r#"(defun f () Result<int, :dyn Error>
+                   (as-dyn-error (the Result<int,SimpleError> (result::err (simple-error "no")))))
                  (equal (match (f) ((ok _) "?") ((err e) (message e))) "no")"#;
     is_true(src);
 }
@@ -130,7 +130,7 @@ fn assert_evaluates_its_test_exactly_once() {
 #[test]
 fn warn_evaluates_its_arguments() {
     let src = "(let ((n 0))
-                 (labels ((bump () i32 (progn (setf n (+ n 1)) n)))
+                 (labels ((bump () int (progn (setf n (+ n 1)) n)))
                    (progn (warn \"~a\" (bump)) n)))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }

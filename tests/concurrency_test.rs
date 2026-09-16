@@ -114,8 +114,8 @@ fn check_err(src: &str) -> String {
 #[test]
 fn a_spawned_call_runs() {
     assert_eq!(
-        int(r#"(defvar (counter i32) 0)
-               (defun work ((n i32)) i32 (setf counter n))
+        int(r#"(defvar (counter int) 0)
+               (defun work ((n int)) int (setf counter n))
                (go (work 7))
                counter"#),
         7
@@ -126,10 +126,10 @@ fn a_spawned_call_runs() {
 #[test]
 fn two_spawned_calls_both_run() {
     assert_eq!(
-        int(r#"(defvar (a i32) 0)
-               (defvar (b i32) 0)
-               (defun set-a ((n i32)) i32 (setf a n))
-               (defun set-b ((n i32)) i32 (setf b n))
+        int(r#"(defvar (a int) 0)
+               (defvar (b int) 0)
+               (defun set-a ((n int)) int (setf a n))
+               (defun set-b ((n int)) int (setf b n))
                (go (set-a 3))
                (go (set-b 4))
                (+ a b)"#),
@@ -144,8 +144,8 @@ fn two_spawned_calls_both_run() {
 #[test]
 fn arguments_are_evaluated_at_the_spawn() {
     assert_eq!(
-        int(r#"(defvar (total i32) 0)
-               (defun bump ((n i32)) i32 (setf total (+ total n)))
+        int(r#"(defvar (total int) 0)
+               (defun bump ((n int)) int (setf total (+ total n)))
                (dotimes (i 4) (go (bump i)))
                total"#),
         6
@@ -156,9 +156,9 @@ fn arguments_are_evaluated_at_the_spawn() {
 #[test]
 fn a_method_call_can_be_spawned() {
     assert_eq!(
-        int(r#"(defvar (seen i32) 0)
-               (defstruct crate (v i32))
-               (defmethod stash ((self crate)) i32 (setf seen self::v))
+        int(r#"(defvar (seen int) 0)
+               (defstruct crate (v int))
+               (defmethod stash ((self crate)) int (setf seen self::v))
                (go (stash (crate::new 9)))
                seen"#),
         9
@@ -186,7 +186,7 @@ fn go_refuses_a_non_call() {
 /// One argument, not two.
 #[test]
 fn go_refuses_extra_arguments() {
-    let e = check_err("(defun f () i32 1) (go (f) (f))");
+    let e = check_err("(defun f () int 1) (go (f) (f))");
     assert!(e.contains("go"), "got: {}", e);
 }
 
@@ -196,7 +196,7 @@ fn go_refuses_extra_arguments() {
 /// mismatched annotation is a type error naming both.
 #[test]
 fn a_spawn_is_a_task_of_the_call_s_return_type() {
-    let e = check_err(r#"(defun f () i32 1)
+    let e = check_err(r#"(defun f () int 1)
                          (let ((t (the Task<string> (go (f))))) ())"#);
     assert!(e.contains("mismatch"), "got: {}", e);
 }
@@ -207,9 +207,9 @@ fn a_spawn_is_a_task_of_the_call_s_return_type() {
 #[test]
 fn a_task_can_be_annotated_with_its_own_type() {
     assert_eq!(
-        int(r#"(defvar (hit i32) 0)
-               (defun f () i32 (setf hit 5))
-               (let ((t (the Task<i32> (go (f))))) 0)
+        int(r#"(defvar (hit int) 0)
+               (defun f () int (setf hit 5))
+               (let ((t (the Task<int> (go (f))))) 0)
                hit"#),
         5
     );
@@ -220,7 +220,7 @@ fn a_task_can_be_annotated_with_its_own_type() {
 /// `(wait t)` is the task's result.
 #[test]
 fn wait_answers_with_the_task_s_value() {
-    assert_eq!(int("(defun double ((n i32)) i32 (* n 2)) (wait (go (double 21)))"), 42);
+    assert_eq!(int("(defun double ((n int)) int (* n 2)) (wait (go (double 21)))"), 42);
 }
 
 /// Waiting does not consume the handle: a `Task<T>` is an ordinary value, and
@@ -232,7 +232,7 @@ fn wait_answers_with_the_task_s_value() {
 #[test]
 fn a_task_can_be_waited_on_more_than_once() {
     assert_eq!(
-        int(r#"(defun five () i32 5)
+        int(r#"(defun five () int 5)
                (let ((t (go (five)))) (+ (wait t) (wait t)))"#),
         10
     );
@@ -243,8 +243,8 @@ fn a_task_can_be_waited_on_more_than_once() {
 #[test]
 fn a_task_can_wait_on_another_task() {
     assert_eq!(
-        int(r#"(defun double ((n i32)) i32 (* n 2))
-               (defun relay ((t Task<i32>)) i32 (+ (wait t) 1))
+        int(r#"(defun double ((n int)) int (* n 2))
+               (defun relay ((t Task<int>)) int (+ (wait t) 1))
                (let ((inner (go (double 20))))
                  (wait (go (relay inner))))"#),
         41
@@ -255,7 +255,7 @@ fn a_task_can_wait_on_another_task() {
 #[test]
 fn several_tasks_are_waited_on_in_turn() {
     assert_eq!(
-        int(r#"(defun idn ((n i32)) i32 n)
+        int(r#"(defun idn ((n int)) int n)
                (let ((a (go (idn 1))) (b (go (idn 2))) (c (go (idn 4))))
                  (+ (wait a) (+ (wait b) (wait c))))"#),
         7
@@ -266,7 +266,7 @@ fn several_tasks_are_waited_on_in_turn() {
 /// `catch` to reach, since tags do not cross a task boundary.
 #[test]
 fn a_throw_that_leaves_a_task_stops_the_program() {
-    let msg = match run(r#"(defun bad () i32 (throw 'oops 1))
+    let msg = match run(r#"(defun bad () int (throw 'oops 1))
                            (let ((t (go (bad)))) 0)
                            1"#)
     {
@@ -295,7 +295,7 @@ fn text(src: &str) -> String {
 fn yield_interleaves_two_tasks() {
     assert_eq!(
         text(r#"(defvar (trail string) "")
-                (defun tick ((name string) (n i32)) ()
+                (defun tick ((name string) (n int)) ()
                   (dotimes (i n)
                     (setf trail (append trail name))
                     (yield)))
@@ -312,7 +312,7 @@ fn yield_interleaves_two_tasks() {
 fn without_yield_each_task_runs_to_its_end() {
     assert_eq!(
         text(r#"(defvar (trail string) "")
-                (defun tick ((name string) (n i32)) ()
+                (defun tick ((name string) (n int)) ()
                   (dotimes (i n) (setf trail (append trail name))))
                 (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
                   (progn (wait a) (wait b)))
@@ -338,7 +338,7 @@ fn yield_with_nothing_else_ready_is_a_no_op() {
 #[test]
 fn go_starts_a_task_from_a_function_value() {
     assert_eq!(
-        int(r#"(defun twice ((n i32)) i32 (* n 2))
+        int(r#"(defun twice ((n int)) int (* n 2))
                (let ((f twice))
                  (let ((t (go (f 21))))
                    (wait t)))"#),
@@ -401,17 +401,17 @@ fn a_compiled_body_can_start_tasks() {
 }
 
 /// The arguments cross as machine words in their declared representations —
-/// a raw `i32`, a boxed `f64`, a tagged string — and are decoded back on the
+/// a raw `int`, a boxed `f64`, a tagged string — and are decoded back on the
 /// interpreter's side by those same representations. A word alone cannot say
 /// which it is.
 #[test]
 fn a_compiled_spawn_carries_arguments_of_every_representation() {
     assert_eq!(
         text_compiled(r#"(defvar (trail string) "")
-                (defun mixed ((n i32) (x f64) (s string)) ()
+                (defun mixed ((n int) (x f64) (s string)) ()
                   (when true
                     (setf trail (append (append (append trail (to-string n)) (to-string x)) s))))
-                (defun spawn-mixed ((n i32)) Task<()>
+                (defun spawn-mixed ((n int)) Task<()>
                   (go (mixed n 2.5 "hi")))
                 (compile spawn-mixed)
                 (let ((t (spawn-mixed 7)))
@@ -426,8 +426,8 @@ fn a_compiled_spawn_carries_arguments_of_every_representation() {
 #[test]
 fn a_compiled_body_can_spawn_a_function_value() {
     assert_eq!(
-        int_compiled(r#"(defun twice ((n i32)) i32 (* n 2))
-               (defun spawn-value ((n i32)) Task<i32>
+        int_compiled(r#"(defun twice ((n int)) int (* n 2))
+               (defun spawn-value ((n int)) Task<int>
                  (let ((f twice)) (go (f n))))
                (compile spawn-value)
                (let ((t (spawn-value 21))) (wait t))"#),
@@ -446,8 +446,8 @@ fn a_compiled_body_can_spawn_a_function_value() {
 fn a_compiled_wait_answers_with_the_awaited_value() {
     assert_eq!(
         int_compiled(
-            r#"(defun work ((n i32)) i32 (* n 10))
-               (defun waiter ((n i32)) i32 (let ((h (go (work n)))) (+ (wait h) 1)))
+            r#"(defun work ((n int)) int (* n 10))
+               (defun waiter ((n int)) int (let ((h (go (work n)))) (+ (wait h) 1)))
                (compile waiter)
                (waiter 4)"#
         ),
@@ -457,7 +457,7 @@ fn a_compiled_wait_answers_with_the_awaited_value() {
 
 /// The same for a heap-backed `T`, which is the half a raw-word answer would
 /// pass by accident: a `string` crosses as a tagged pointer and the decode has
-/// to leave it tagged, where an `i32` has to be untagged.
+/// to leave it tagged, where an `int` has to be untagged.
 #[test]
 fn a_compiled_wait_answers_with_a_heap_value() {
     assert_eq!(
@@ -488,7 +488,7 @@ fn a_compiled_yield_interleaves_two_tasks() {
     assert_eq!(
         text_compiled(
             r#"(defvar (trail string) "")
-               (defun tick ((name string) (n i32)) ()
+               (defun tick ((name string) (n int)) ()
                  (dotimes (i n)
                    (setf trail (append trail name))
                    (yield)))
@@ -511,7 +511,7 @@ fn a_compiled_yield_interleaves_two_tasks() {
 fn a_compiled_yield_resumes_where_it_left_off() {
     assert_eq!(
         int_compiled(
-            r#"(defun counted ((n i32)) i32
+            r#"(defun counted ((n int)) int
                  (let ((acc 0))
                    (dotimes (i n)
                      (yield)
@@ -553,7 +553,7 @@ fn sleep_suspends_only_the_calling_task() {
 fn sleep_zero_is_a_yield() {
     assert_eq!(
         text(r#"(defvar (trail string) "")
-                (defun tick ((name string) (n i32)) ()
+                (defun tick ((name string) (n int)) ()
                   (dotimes (i n)
                     (setf trail (append trail name))
                     (sleep 0.0)))
@@ -626,7 +626,7 @@ fn a_compiled_yield_inside_a_catch_suspends() {
     assert_eq!(
         text_compiled(
             r#"(defvar (trail string) "")
-               (defun tick ((name string) (n i32)) i32
+               (defun tick ((name string) (n int)) int
                  (catch 'unused
                    (progn
                      (dotimes (i n)
@@ -654,11 +654,11 @@ fn a_compiled_sleep_inside_an_unwind_protect_runs_the_cleanup_after() {
     assert_eq!(
         text_compiled(
             r#"(defvar (trail string) "")
-               (defun slow () i32
+               (defun slow () int
                  (unwind-protect
                    (progn (setf trail (append trail "a")) (sleep 0.02) 1)
                    (setf trail (append trail " cleanup"))))
-               (defun quick () i32 (progn (setf trail (append trail " b")) 2))
+               (defun quick () int (progn (setf trail (append trail " b")) 2))
                (compile slow)
                (let ((a (go (slow))) (b (go (quick))))
                  (progn (wait a) (wait b)))
@@ -679,7 +679,7 @@ fn a_compiled_sleep_inside_an_unwind_protect_runs_the_cleanup_after() {
 fn a_compiled_throw_after_a_suspension_is_still_caught() {
     assert_eq!(
         int_compiled(
-            r#"(defun guarded () i32
+            r#"(defun guarded () int
                  (catch 'done (progn (yield) (throw 'done 41))))
                (compile guarded)
                (wait (go (guarded)))"#
@@ -703,9 +703,9 @@ fn a_compiled_apply_of_a_compiled_value_can_suspend() {
     assert_eq!(
         text_compiled(
             r#"(defvar (trail string) "")
-               (defun tick ((name string) (n i32)) i32
+               (defun tick ((name string) (n int)) int
                  (progn (dotimes (i n) (setf trail (append trail name)) (yield)) 0))
-               (defun via-value ((name string)) i32
+               (defun via-value ((name string)) int
                  (let ((f tick)) (f name 3)))
                (compile via-value)
                (let ((a (go (via-value "a"))) (b (go (via-value "b"))))
@@ -727,11 +727,11 @@ fn a_compiled_apply_of_an_interpreted_closure_can_suspend() {
     assert_eq!(
         text_compiled(
             r#"(defvar (trail string) "")
-               (defun call-thrice ((f (fn () i32))) i32
+               (defun call-thrice ((f (fn () int))) int
                  (progn (dotimes (i 3) (f)) 0))
                (compile call-thrice)
-               (let ((a (lambda () i32 (progn (setf trail (append trail "a")) (yield) 0)))
-                     (b (lambda () i32 (progn (setf trail (append trail "b")) (yield) 0))))
+               (let ((a (lambda () int (progn (setf trail (append trail "a")) (yield) 0)))
+                     (b (lambda () int (progn (setf trail (append trail "b")) (yield) 0))))
                  (let ((ta (go (call-thrice a))) (tb (go (call-thrice b))))
                    (progn (wait ta) (wait tb))))
                trail"#
@@ -752,9 +752,9 @@ fn a_compiled_apply_of_an_interpreted_closure_can_suspend() {
 fn a_throw_from_an_applied_interpreted_closure_reaches_a_compiled_catch() {
     assert_eq!(
         int_compiled(
-            r#"(defun guarded ((f (fn () i32))) i32 (catch 'boom (f)))
+            r#"(defun guarded ((f (fn () int))) int (catch 'boom (f)))
                (compile guarded)
-               (let ((f (lambda () i32 (throw 'boom 41)))) (guarded f))"#
+               (let ((f (lambda () int (throw 'boom 41)))) (guarded f))"#
         ),
         41
     );
@@ -767,10 +767,10 @@ fn an_applied_closure_s_throw_runs_a_compiled_cleanup() {
     assert_eq!(
         text_compiled(
             r#"(defvar (trail string) "")
-               (defun guarded ((f (fn () i32))) i32
+               (defun guarded ((f (fn () int))) int
                  (catch 'boom (unwind-protect (f) (setf trail (append trail "cleanup")))))
                (compile guarded)
-               (let ((f (lambda () i32 (throw 'boom 1))))
+               (let ((f (lambda () int (throw 'boom 1))))
                  (progn (guarded f) (setf trail (append trail "!"))))
                trail"#
         ),
@@ -794,12 +794,12 @@ fn a_compiled_dyn_call_of_an_interpreted_method_can_suspend() {
         text_compiled(
             r#"(defvar (trail string) "")
                (deftrait Ticker ()
-                 (tick ((self Self) (n i32)) i32))
+                 (tick ((self Self) (n int)) int))
                (defstruct marker (name string))
                (impl Ticker marker
-                 (tick ((self Self) (n i32)) i32
+                 (tick ((self Self) (n int)) int
                    (progn (dotimes (i n) (setf trail (append trail self::name)) (yield)) 0)))
-               (defun drive-it ((t :dyn Ticker)) i32 (tick t 3))
+               (defun drive-it ((t :dyn Ticker)) int (tick t 3))
                (compile drive-it)
                (let ((a (go (drive-it (marker::new "a"))))
                      (b (go (drive-it (marker::new "b")))))
@@ -836,12 +836,12 @@ fn a_compiled_loop_with_no_calls_still_yields_to_another_task() {
     assert_eq!(
         text_compiled(
             r#"(defvar (trail string) "")
-               (defun spin-then-mark ((n i32)) i32
+               (defun spin-then-mark ((n int)) int
                  (let ((i 0))
                    (loop (if (>= i n) (break) ()) (setf i (+ i 1)))
                    (setf trail (append trail "a"))
                    0))
-               (defun mark () i32 (progn (setf trail (append trail "b")) 0))
+               (defun mark () int (progn (setf trail (append trail "b")) 0))
                (compile spin-then-mark)
                (compile mark)
                (let ((a (go (spin-then-mark 1000))) (b (go (mark))))
@@ -875,8 +875,8 @@ fn a_compiled_loop_with_no_calls_still_yields_to_another_task() {
 fn a_compiled_loop_safepoint_under_a_machine_frame_driver_just_resumes() {
     assert_eq!(
         int_compiled(
-            r#"(defun make-spin () (fn (i32) i32)
-                 (lambda ((n i32)) i32
+            r#"(defun make-spin () (fn (int) int)
+                 (lambda ((n int)) int
                    (let ((i 0))
                      (loop (if (>= i n) (break) ()) (setf i (+ i 1)))
                      i)))

@@ -57,11 +57,11 @@ fn a_chars_hash_is_its_code_point() {
 #[test]
 fn a_user_type_can_implement_hash() {
     let src = "
-        (defstruct point (x i32) (y i32))
+        (defstruct point (x int) (y int))
         (impl Eq point (equals ((self Self) (other Self)) bool
           (and (= self::x other::x) (= self::y other::y))))
-        (impl Hash point (sxhash ((self Self)) i32
-          (logand (+ (* (as i32 self::x) 31) (as i32 self::y)) *sxhash-mask*)))
+        (impl Hash point (sxhash ((self Self)) int
+          (logand (+ (* (as int self::x) 31) (as int self::y)) *sxhash-mask*)))
         (sxhash (point::new 1 2))
     ";
     assert_eq!(eval_ok(src), Value::Int(33));
@@ -70,7 +70,7 @@ fn a_user_type_can_implement_hash() {
 #[test]
 fn a_generic_function_can_require_hash() {
     let src = "
-        (defun both<T> ((a T) (b T)) i32 (where (Hash T)) (+ (sxhash a) (sxhash b)))
+        (defun both<T> ((a T) (b T)) int (where (Hash T)) (+ (sxhash a) (sxhash b)))
         (both 3 4)
     ";
     assert_eq!(eval_ok(src), Value::Int(7));
@@ -92,7 +92,7 @@ fn hash_inherits_eq() {
 #[test]
 fn a_scalar_key_is_accepted() {
     let src = "
-        (defvar (h HashTable<string,i32>) (HashTable::new))
+        (defvar (h HashTable<string,int>) (HashTable::new))
         (progn (set h \"a\" 1) (match (get h \"a\") ((some v) v) ((none) 0)))
     ";
     assert_eq!(eval_ok(src), Value::Int(1));
@@ -105,8 +105,8 @@ fn a_key_type_the_table_cannot_hold_is_a_type_error() {
     // express a hashable bound. It can, and this is the result — and `point`
     // *can* be a key, once it implements `Hash` (see the tests at the end).
     let src = "
-        (defstruct point (x i32) (y i32))
-        (defvar (h HashTable<point,i32>) (HashTable::new))
+        (defstruct point (x int) (y int))
+        (defvar (h HashTable<point,int>) (HashTable::new))
         (set h (point::new 1 2) 3)
     ";
     let msg = check_err(src);
@@ -118,7 +118,7 @@ fn f64_is_not_a_key_type() {
     // `f64` has `Eq`, but no `Hash`: `NaN` makes it unusable as a key, which
     // is exactly what the missing impl says.
     let src = "
-        (defvar (h HashTable<f64,i32>) (HashTable::new))
+        (defvar (h HashTable<f64,int>) (HashTable::new))
         (set h 1.0 3)
     ";
     let msg = check_err(src);
@@ -130,12 +130,12 @@ fn f64_is_not_a_key_type() {
 #[test]
 fn maphash_visits_every_pair() {
     let src = "
-        (defvar (h HashTable<string,i32>) (HashTable::new))
-        (defvar (total i32) 0)
+        (defvar (h HashTable<string,int>) (HashTable::new))
+        (defvar (total int) 0)
         (progn
           (set h \"a\" 1)
           (set h \"b\" 2)
-          (maphash h (lambda ((k string) (v i32)) () (progn (setf total (+ total v)) ())))
+          (maphash h (lambda ((k string) (v int)) () (progn (setf total (+ total v)) ())))
           total)
     ";
     assert_eq!(eval_ok(src), Value::Int(3));
@@ -144,7 +144,7 @@ fn maphash_visits_every_pair() {
 #[test]
 fn size_reports_the_occupancy() {
     let src = "
-        (defvar (h HashTable<string,i32>) (HashTable::new))
+        (defvar (h HashTable<string,int>) (HashTable::new))
         (progn (set h \"a\" 1) (set h \"b\" 2) (size h))
     ";
     assert_eq!(eval_ok(src), Value::Int(2));
@@ -162,12 +162,12 @@ fn size_reports_the_occupancy() {
 /// The `point` from `a_key_type_the_table_cannot_hold_is_a_type_error`, with
 /// the two impls that make it a key.
 const POINT: &str = r#"
-    (defstruct point (x i32) (y i32))
+    (defstruct point (x int) (y int))
     (impl Eq point
       (equals ((self Self) (other Self)) bool
         (if (= self::x other::x) (= self::y other::y) false)))
     (impl Hash point
-      (sxhash ((self Self)) i32 (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+      (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 "#;
 
 #[test]
@@ -190,7 +190,7 @@ fn a_user_type_that_implements_hash_is_a_key() {
     // type's own methods rather than by identity.
     let src = format!(
         "{}
-         (defvar (h HashTable<point,i32>) (HashTable::new))
+         (defvar (h HashTable<point,int>) (HashTable::new))
          (progn (set h (point::new 1 2) 7)
                 (match (get h (point::new 1 2)) ((some v) v) ((none) -1)))",
         POINT
@@ -202,7 +202,7 @@ fn a_user_type_that_implements_hash_is_a_key() {
 fn a_user_key_overwrites_removes_and_counts_like_a_scalar_one() {
     let src = format!(
         "{}
-         (defvar (h HashTable<point,i32>) (HashTable::new))
+         (defvar (h HashTable<point,int>) (HashTable::new))
          (progn
            (set h (point::new 1 2) 1)
            (set h (point::new 3 4) 2)
@@ -224,11 +224,11 @@ fn a_user_key_overwrites_removes_and_counts_like_a_scalar_one() {
 #[test]
 fn colliding_keys_stay_separate_entries() {
     let src = r#"
-        (defstruct k (n i32))
+        (defstruct k (n int))
         (impl Eq k (equals ((self Self) (other Self)) bool (= self::n other::n)))
         ;; Every key hashes to 0.
-        (impl Hash k (sxhash ((self Self)) i32 0))
-        (defvar (h HashTable<k,i32>) (HashTable::new))
+        (impl Hash k (sxhash ((self Self)) int 0))
+        (defvar (h HashTable<k,int>) (HashTable::new))
         (progn
           (set h (k::new 1) 10)
           (set h (k::new 2) 20)
@@ -246,7 +246,7 @@ fn colliding_keys_stay_separate_entries() {
 #[test]
 fn a_symbol_key_works() {
     let src = "
-        (defvar (h HashTable<symbol,i32>) (HashTable::new))
+        (defvar (h HashTable<symbol,int>) (HashTable::new))
         (progn (set h 'a 1) (set h 'b 2)
                (+ (match (get h 'a) ((some v) v) ((none) 0))
                   (match (get h 'b) ((some v) v) ((none) 0))))
@@ -260,10 +260,10 @@ fn a_symbol_key_works() {
 fn keys_and_entries_see_user_keys() {
     let src = format!(
         "{}
-         (defvar (h HashTable<point,i32>) (HashTable::new))
+         (defvar (h HashTable<point,int>) (HashTable::new))
          (progn (set h (point::new 1 2) 5) (set h (point::new 3 4) 6)
                 (+ (* 10 (len (keys h)))
-                   (foldl (iter (values h)) (lambda ((a i32) (b i32)) i32 (+ a b)) 0)))",
+                   (foldl (iter (values h)) (lambda ((a int) (b int)) int (+ a b)) 0)))",
         POINT
     );
     assert_eq!(eval_ok(&src), Value::Int(31));

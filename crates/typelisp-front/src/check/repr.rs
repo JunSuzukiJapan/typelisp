@@ -128,9 +128,8 @@ pub enum Repr {
     Handle,
     Str,
     Sym,
-    Bignum,
     Ratio,
-    /// `random-state` — a boxed seed cell, tagged like [`Repr::Bignum`] and
+    /// `random-state` — a boxed seed cell, tagged like [`Repr::Int`] and
     /// [`Repr::Ratio`] and collectable like both. It has no `Type::Named`
     /// spelling, which is why it needs a variant of its own rather than
     /// falling into the struct arm; without one it landed on [`Repr::None`]
@@ -232,7 +231,6 @@ impl Repr {
             Type::Unit => Repr::Unit,
             Type::Str => Repr::Str,
             Type::Symbol => Repr::Sym,
-            Type::Bignum => Repr::Bignum,
             Type::Ratio => Repr::Ratio,
             Type::RandomState => Repr::RandomState,
             Type::Named(p, _) if *p == Path::root("sexpr") => Repr::Sexpr,
@@ -306,7 +304,6 @@ impl Repr {
             Repr::RawWord => "raw-word",
             Repr::Str => "str",
             Repr::Sym => "sym",
-            Repr::Bignum => "bignum",
             Repr::Ratio => "ratio",
             Repr::RandomState => "random-state",
             Repr::Sexpr => "sexpr",
@@ -323,7 +320,7 @@ impl Repr {
 
     /// Every simple representation, for [`Repr::read`] and for a test that
     /// wants to enumerate the vocabulary.
-    pub const SIMPLE: [Repr; 20] = [
+    pub const SIMPLE: [Repr; 19] = [
         Repr::Narrow,
         Repr::Int,
         Repr::RawWord,
@@ -335,7 +332,6 @@ impl Repr {
         Repr::Handle,
         Repr::Str,
         Repr::Sym,
-        Repr::Bignum,
         Repr::Ratio,
         Repr::RandomState,
         Repr::Sexpr,
@@ -443,7 +439,6 @@ impl Repr {
             // value.
             Repr::Str
             | Repr::Int
-            | Repr::Bignum
             | Repr::Ratio
             | Repr::RandomState
             | Repr::Sexpr
@@ -508,8 +503,8 @@ impl Repr {
     /// `compile-tag-struct-field` (encode) and `compile-sexpr-field` (decode).
     ///
     /// Derived from [`Repr::class`]. The numbers are `Sexpr`'s own variant
-    /// numbering (`registry::sexpr_def`: `1`=i32 `2`=f64 `3`=char `4`=bool
-    /// `6`=str `11`=f32 `12`..`16`=i8/i16/u8/u16/u32) rather than a parallel
+    /// numbering (`registry::sexpr_def`: `1`=int `2`=f64 `3`=char `4`=bool
+    /// `6`=str `11`=f32 `12`..`16`=i8/i16/u8/u16/u32 `17`=i32) rather than a parallel
     /// scheme, so those two island functions
     /// reuse the same per-variant bit manipulation instead of duplicating it.
     /// `Unit` is not a `Sexpr` variant and so has no number to borrow; it sits
@@ -519,11 +514,12 @@ impl Repr {
     /// twelfth variant.) `0` is taken by the "not representable" case.
     ///
     /// **This numbering space has a second producer.** `compile-sexpr-field`
-    /// also decodes `5` (sym), `7` (cons), `8` (bignum), `9` (ratio), `10`
-    /// (path) and `12`..`16` (the narrow integer widths), which come from
-    /// `Sexpr` *construction* (`compile-construct-sexpr` / `match_sexpr_ctor`'s
-    /// `SEXPR_*`), not from here — this function folds sym/bignum/ratio into
-    /// the `6` passthrough.
+    /// also decodes `5` (sym), `7` (cons), `9` (ratio), `10` (path) and
+    /// `12`..`17` (the narrow integer widths), which come from `Sexpr`
+    /// *construction* (`compile-construct-sexpr` / `match_sexpr_ctor`'s
+    /// `SEXPR_*`), not from here — this function folds sym/int/ratio into the
+    /// `6` passthrough. (`8`, the retired `bignum` variant, is decoded by
+    /// neither: an `int`'s bignum box is variant `1`.)
     /// Anything renumbering these must account for both producers.
     ///
     /// The narrow integers are the clearest case of the two producers meaning
@@ -683,7 +679,6 @@ mod tests {
         assert_eq!(of(Type::Unit), Repr::Unit);
         assert_eq!(of(Type::Str), Repr::Str);
         assert_eq!(of(Type::Symbol), Repr::Sym);
-        assert_eq!(of(Type::Bignum), Repr::Bignum);
         assert_eq!(of(Type::Ratio), Repr::Ratio);
         assert_eq!(of(Type::Named(Path::root("sexpr"), vec![])), Repr::Sexpr);
         assert_eq!(of(Type::Named(Path::root("point"), vec![])), Repr::Struct);
@@ -728,7 +723,6 @@ mod tests {
     fn every_reclaimable_representation_is_both_passthrough_and_rooted() {
         let reclaimable = [
             Repr::Str,
-            Repr::Bignum,
             Repr::Ratio,
             Repr::Sexpr,
             Repr::Struct,

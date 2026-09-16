@@ -17,6 +17,7 @@ fn parse_result(src: &str) -> Result<Type, typelisp::Error> {
 #[test]
 fn primitives() {
     assert_eq!(parse("i32"), Type::I32);
+    assert_eq!(parse("int"), Type::Int);
     assert_eq!(parse("i16"), Type::I16);
     assert_eq!(parse("u8"), Type::U8);
     assert_eq!(parse("u32"), Type::U32);
@@ -81,15 +82,15 @@ fn a_malformed_generic_is_an_error_not_a_panic() {
 
 #[test]
 fn generic_option_and_vec() {
-    assert_eq!(parse("Option<i32>"), Type::Named(Path::root("option"), vec![Type::I32]));
+    assert_eq!(parse("Option<int>"), Type::Named(Path::root("option"), vec![Type::Int]));
     assert_eq!(parse("Vec<String>"), Type::Named(Path::root("vec"), vec![Type::Str]));
 }
 
 #[test]
 fn nested_generics() {
     assert_eq!(
-        parse("Vec<Option<i32>>"),
-        Type::Named(Path::root("vec"), vec![Type::Named(Path::root("option"), vec![Type::I32])])
+        parse("Vec<Option<int>>"),
+        Type::Named(Path::root("vec"), vec![Type::Named(Path::root("option"), vec![Type::Int])])
     );
 }
 
@@ -129,21 +130,21 @@ fn qualified_path_types() {
 #[test]
 fn function_types() {
     assert_eq!(
-        parse("(fn (i32 i32) i32)"),
-        Type::Fn(vec![Type::I32, Type::I32], None, Box::new(Type::I32))
+        parse("(fn (int int) int)"),
+        Type::Fn(vec![Type::Int, Type::Int], None, Box::new(Type::Int))
     );
     assert_eq!(parse("(fn () bool)"), Type::Fn(vec![], None, Box::new(Type::Bool)));
     assert_eq!(
-        parse("(fn (Option<i32>) i32)"),
-        Type::Fn(vec![Type::Named(Path::root("option"), vec![Type::I32])], None, Box::new(Type::I32))
+        parse("(fn (Option<int>) int)"),
+        Type::Fn(vec![Type::Named(Path::root("option"), vec![Type::Int])], None, Box::new(Type::Int))
     );
 }
 
 #[test]
 fn variadic_function_types() {
     assert_eq!(
-        parse("(fn (i32 &rest i32) i32)"),
-        Type::Fn(vec![Type::I32], Some(Box::new(Type::I32)), Box::new(Type::I32))
+        parse("(fn (int &rest int) int)"),
+        Type::Fn(vec![Type::Int], Some(Box::new(Type::Int)), Box::new(Type::Int))
     );
     // `&rest` with no fixed parameters before it.
     assert_eq!(
@@ -156,7 +157,7 @@ fn variadic_function_types() {
 fn rest_not_last_in_a_function_type_is_an_error() {
     let mut h = Heap::with_capacity(256);
     let r = Reader::new();
-    let v = r.read(&mut h, "(fn (&rest i32 i32) i32)").expect("read failed");
+    let v = r.read(&mut h, "(fn (&rest int int) int)").expect("read failed");
     assert!(parse_type(&h, v).is_err());
 }
 
@@ -164,7 +165,7 @@ fn rest_not_last_in_a_function_type_is_an_error() {
 fn rest_with_no_element_type_in_a_function_type_is_an_error() {
     let mut h = Heap::with_capacity(256);
     let r = Reader::new();
-    let v = r.read(&mut h, "(fn (&rest) i32)").expect("read failed");
+    let v = r.read(&mut h, "(fn (&rest) int)").expect("read failed");
     assert!(parse_type(&h, v).is_err());
 }
 
@@ -183,10 +184,10 @@ fn dyn_parses_into_a_trait_object_type() {
 /// written with the generic-argument syntax on the trait name.
 #[test]
 fn dyn_pins_associated_types_positionally() {
-    assert_eq!(parse(":dyn iter<i32>"), Type::Dyn(Path::root("iter"), vec![Type::I32]));
+    assert_eq!(parse(":dyn iter<int>"), Type::Dyn(Path::root("iter"), vec![Type::Int]));
     assert_eq!(
-        parse(":dyn pairwise<i32,string>"),
-        Type::Dyn(Path::root("pairwise"), vec![Type::I32, Type::Str])
+        parse(":dyn pairwise<int,string>"),
+        Type::Dyn(Path::root("pairwise"), vec![Type::Int, Type::Str])
     );
 }
 
@@ -207,8 +208,8 @@ fn dyn_can_appear_as_a_generic_argument() {
         )
     );
     assert_eq!(
-        parse("Vector<:dyn iter<i32>>"),
-        Type::Named(Path::root("vector"), vec![Type::Dyn(Path::root("iter"), vec![Type::I32])])
+        parse("Vector<:dyn iter<int>>"),
+        Type::Named(Path::root("vector"), vec![Type::Dyn(Path::root("iter"), vec![Type::Int])])
     );
 }
 
@@ -226,7 +227,7 @@ fn dyn_must_be_followed_by_a_trait_name() {
     let r = Reader::new();
     // A primitive is not a trait name.
     let v = r.read(&mut h, ":dyn i32").expect("read failed");
-    assert!(parse_type(&h, v).is_err(), "`:dyn i32` must not parse as a trait object");
+    assert!(parse_type(&h, v).is_err(), "`:dyn int` must not parse as a trait object");
 }
 
 // ---- recorded name spans (semantic highlighting) ------------------------
@@ -267,7 +268,7 @@ fn a_primitive_records_no_name() {
     // Primitives are not nominal types; both editors' grammars already colour
     // them, so recording them would override a scope that was already right.
     assert!(spans("i32").is_empty());
-    assert!(spans("(fn (i32) bool)").is_empty());
+    assert!(spans("(fn (int) bool)").is_empty());
 }
 
 #[test]
@@ -280,9 +281,9 @@ fn a_qualified_name_is_located_at_its_last_segment() {
 #[test]
 fn a_generic_argument_is_located_inside_the_token() {
     // One symbol token, two names: the head at column 1 and the argument at
-    // column 12, past `hashtable<i32,`.
+    // column 12, past `hashtable<int,`.
     assert_eq!(
-        spans("hashtable<i32,todo-item>"),
+        spans("hashtable<int,todo-item>"),
         vec![("hashtable".to_string(), 1), ("todo-item".to_string(), 15)]
     );
 }
@@ -360,12 +361,12 @@ fn a_generic_can_be_written_applied() {
         )
     );
     assert_eq!(
-        parse("(geo::pair i32 char)"),
-        Type::Named(Path::from_segments(vec!["geo".into(), "pair".into()]), vec![Type::I32, Type::Char])
+        parse("(geo::pair int char)"),
+        Type::Named(Path::from_segments(vec!["geo".into(), "pair".into()]), vec![Type::Int, Type::Char])
     );
 }
 
-/// What the applied form is for: `Vector<(fn (i32) i32)>` cannot be written
+/// What the applied form is for: `Vector<(fn (int) int)>` cannot be written
 /// as a name, because a `(fn ...)` type is a list and the name grammar has no
 /// token for it. Substituting a trait's associated type into a signature has
 /// to be able to produce it anyway (`Checker::subst_inside_name`), so the
@@ -373,21 +374,21 @@ fn a_generic_can_be_written_applied() {
 #[test]
 fn an_applied_generic_carries_an_argument_no_name_can_spell() {
     assert_eq!(
-        parse("(vector (fn (i32) i32))"),
+        parse("(vector (fn (int) int))"),
         Type::Named(
             Path::root("vector"),
-            vec![Type::Fn(vec![Type::I32], None, Box::new(Type::I32))]
+            vec![Type::Fn(vec![Type::Int], None, Box::new(Type::Int))]
         )
     );
-    assert!(parse_result("Vector<(fn (i32) i32)>").is_err());
+    assert!(parse_result("Vector<(fn (int) int)>").is_err());
 }
 
 #[test]
 fn an_applied_generic_is_rejected_without_arguments_or_with_an_applied_head() {
     // `(vector)` supplies no arguments, so it says nothing `vector` doesn't.
     assert!(parse_result("(vector)").is_err());
-    // `(vector<char> i32)` gives `vector` two argument lists.
-    assert!(parse_result("(vector<char> i32)").is_err());
+    // `(vector<char> int)` gives `vector` two argument lists.
+    assert!(parse_result("(vector<char> int)").is_err());
 }
 
 /// [`parse_type_name`] answers "is this *name* a type?" for symbols that may

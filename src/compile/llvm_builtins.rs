@@ -2402,7 +2402,10 @@ struct LlvmOp {
 fn llvm_arg_kind(ty: &Type) -> LlvmArgK {
     if crate::check::repr::is_llvm_handle_ty(ty) {
         LlvmArgK::Handle
-    } else if ty.is_integer() {
+    } else if ty.is_int_family() {
+        // An `int` parameter arrives raw too: the bridge untags it at the
+        // call site (`core_bridge::native_arg`), a bignum having been
+        // refused there, so this side never sees a tagged word for one.
         LlvmArgK::Int
     } else {
         match ty {

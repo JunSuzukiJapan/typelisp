@@ -115,8 +115,8 @@ fn a_throw_replaces_the_rest_of_the_body() {
 fn a_throw_crosses_function_boundaries() {
     assert_eq!(
         int(r#"
-        (defun deep ((n i32)) i32 (throw 'done (* n 2)))
-        (defun middle ((n i32)) i32 (+ 1 (deep n)))
+        (defun deep ((n int)) int (throw 'done (* n 2)))
+        (defun middle ((n int)) int (+ 1 (deep n)))
         (catch 'done (middle 21))
         "#),
         42
@@ -146,12 +146,12 @@ fn an_uncaught_throw_is_an_error() {
 #[test]
 fn one_tag_cannot_carry_two_types() {
     let err = check_err(r#"
-        (defun a () i32 (throw 'both 1))
+        (defun a () int (throw 'both 1))
         (defun b () bool (throw 'both true))
         "#);
     // The second use is checked *against* what the first established, so the
     // mismatch is reported at the offending value rather than after the fact.
-    assert!(err.contains("expected I32, found Bool"), "unexpected error: {}", err);
+    assert!(err.contains("expected Int, found Bool"), "unexpected error: {}", err);
 }
 
 /// `unwind-protect` on the ordinary path: the cleanup runs after the protected
@@ -160,7 +160,7 @@ fn one_tag_cannot_carry_two_types() {
 fn a_cleanup_runs_on_the_normal_path() {
     assert_eq!(
         int(r#"
-        (defvar (ran i32) 0)
+        (defvar (ran int) 0)
         (let ((v (unwind-protect 7 (setf ran 1))))
           (+ v ran))
         "#),
@@ -174,7 +174,7 @@ fn a_cleanup_runs_on_the_normal_path() {
 fn a_cleanup_runs_while_a_throw_passes_through() {
     assert_eq!(
         int(r#"
-        (defvar (ran i32) 0)
+        (defvar (ran int) 0)
         (let ((v (catch 'done (unwind-protect (throw 'done 40) (setf ran 2)))))
           (+ v ran))
         "#),
@@ -186,7 +186,7 @@ fn a_cleanup_runs_while_a_throw_passes_through() {
 #[test]
 fn a_cleanup_runs_while_a_panic_passes_through() {
     match run(r#"
-        (defvar (ran i32) 0)
+        (defvar (ran int) 0)
         (unwind-protect (panic "boom") (setf ran 1))
         "#) {
         Err(EvalError::Panic(msg)) => assert_eq!(msg, "boom"),
@@ -199,7 +199,7 @@ fn a_cleanup_runs_while_a_panic_passes_through() {
 fn nested_cleanups_all_run() {
     assert_eq!(
         int(r#"
-        (defvar (trace i32) 0)
+        (defvar (trace int) 0)
         (let ((v (catch 'done
                    (unwind-protect
                      (unwind-protect (throw 'done 0) (setf trace (+ (* trace 10) 1)))
@@ -218,7 +218,7 @@ fn nested_cleanups_all_run() {
 fn a_break_leaves_a_catch_body_for_its_loop() {
     assert_eq!(
         int(r#"
-        (defvar (n i32) 0)
+        (defvar (n int) 0)
         (loop
           (setf n (+ n 1))
           (catch 'done (if (> n 3) (break) ()))
@@ -241,7 +241,7 @@ fn a_return_leaves_a_catch_body_with_its_value() {
 fn a_cleanup_runs_when_a_return_leaves_the_loop() {
     assert_eq!(
         int(r#"
-        (defvar (ran i32) 0)
+        (defvar (ran int) 0)
         (let ((v (loop (unwind-protect (return 40) (setf ran 2)))))
           (+ v ran))
         "#),
@@ -263,7 +263,7 @@ fn compiled_catch_claims_a_throw_in_its_own_body() {
     assert_eq!(
         int_compiled(
             r#"
-        (defun f () i32 (catch 'done (+ 1 (throw 'done 41))))
+        (defun f () int (catch 'done (+ 1 (throw 'done 41))))
         (compile f)
         (f)
         "#
@@ -280,9 +280,9 @@ fn a_throw_crosses_compiled_frames() {
     assert_eq!(
         int_compiled(
             r#"
-        (defun deep ((n i32)) i32 (throw 'done (* n 2)))
-        (defun middle ((n i32)) i32 (+ 1 (deep n)))
-        (defun outer ((n i32)) i32 (catch 'done (middle n)))
+        (defun deep ((n int)) int (throw 'done (* n 2)))
+        (defun middle ((n int)) int (+ 1 (deep n)))
+        (defun outer ((n int)) int (catch 'done (middle n)))
         (compile outer)
         (outer 21)
         "#
@@ -299,7 +299,7 @@ fn compiled_nested_catches_chain_their_dispatch() {
     assert_eq!(
         int_compiled(
             r#"
-        (defun f () i32 (catch 'outer (catch 'inner (throw 'outer 7))))
+        (defun f () int (catch 'outer (catch 'inner (throw 'outer 7))))
         (compile f)
         (f)
         "#
@@ -316,7 +316,7 @@ fn a_compiled_throw_reaches_an_interpreted_catch() {
     assert_eq!(
         match run_compiled(
             r#"
-        (defun thrower ((n i32)) i32 (throw 'done (* n 2)))
+        (defun thrower ((n int)) int (throw 'done (* n 2)))
         (compile thrower)
         (catch 'done (thrower 21))
         "#
@@ -336,7 +336,7 @@ fn a_compiled_throw_reaches_an_interpreted_catch() {
 fn an_uncaught_compiled_throw_is_an_error() {
     match run_compiled(
         r#"
-        (defun thrower () i32 (throw 'nobody 1))
+        (defun thrower () int (throw 'nobody 1))
         (compile thrower)
         (thrower)
         "#,
@@ -353,8 +353,8 @@ fn a_compiled_cleanup_runs_while_a_throw_passes_through() {
     assert_eq!(
         int_compiled(
             r#"
-        (defvar (ran i32) 0)
-        (defun f () i32 (catch 'done (unwind-protect (throw 'done 40) (setf ran 2))))
+        (defvar (ran int) 0)
+        (defun f () int (catch 'done (unwind-protect (throw 'done 40) (setf ran 2))))
         (compile f)
         (+ (f) ran)
         "#
@@ -369,8 +369,8 @@ fn a_compiled_cleanup_runs_on_the_normal_path() {
     assert_eq!(
         int_compiled(
             r#"
-        (defvar (ran i32) 0)
-        (defun f () i32 (unwind-protect 7 (setf ran 1)))
+        (defvar (ran int) 0)
+        (defun f () int (unwind-protect 7 (setf ran 1)))
         (compile f)
         (+ (f) ran)
         "#
@@ -388,7 +388,7 @@ fn a_break_leaves_a_compiled_catch_body_for_its_loop() {
     assert_eq!(
         int_compiled(
             r#"
-        (defun f () i32
+        (defun f () int
           (let ((n 0))
             (loop
               (setf n (+ n 1))
@@ -409,7 +409,7 @@ fn a_return_leaves_a_compiled_catch_body_with_its_value() {
     assert_eq!(
         int_compiled(
             r#"
-        (defun f () i32 (loop (catch 'done (return 5))))
+        (defun f () int (loop (catch 'done (return 5))))
         (compile f)
         (f)
         "#
@@ -515,9 +515,9 @@ fn read_interpreted(src: &str) -> String {
 }
 
 const RETURN_THROUGH_CLEANUP: &str = r#"
-    (defvar (ran i32) 0)
-    (defun body () i32 (loop (unwind-protect (return 40) (setf ran 2))))
-    (defun f () i32 (+ (body) ran))
+    (defvar (ran int) 0)
+    (defun body () int (loop (unwind-protect (return 40) (setf ran 2))))
+    (defun f () int (+ (body) ran))
     "#;
 
 /// A `return` leaving a protected form runs the cleanup on its way out.
@@ -532,9 +532,9 @@ fn a_return_runs_an_enclosing_compiled_cleanup() {
 }
 
 const BREAK_THROUGH_CLEANUP: &str = r#"
-    (defvar (ran i32) 0)
-    (defun body () i32 (progn (loop (unwind-protect (break) (setf ran 2))) ran))
-    (defun f () i32 (body))
+    (defvar (ran int) 0)
+    (defun body () int (progn (loop (unwind-protect (break) (setf ran 2))) ran))
+    (defun f () int (body))
     "#;
 
 /// Likewise for `break`, whose own value is `Unit` — the cleanup still runs.
@@ -550,7 +550,7 @@ fn a_break_runs_an_enclosing_compiled_cleanup() {
 
 const NESTED_CLEANUPS_ON_RETURN: &str = r#"
     (defvar (log string) "")
-    (defun body () i32
+    (defun body () int
       (loop (unwind-protect
               (unwind-protect (return 7) (setf log (append log "in")))
               (setf log (append log "out")))))
@@ -611,13 +611,13 @@ fn a_protected_form_s_value_survives_a_compiled_cleanup_that_allocates() {
 
 const INNER_LOOP_BREAK: &str = r#"
     (defvar (log string) "")
-    (defun body () i32
+    (defun body () int
       (loop
         (unwind-protect
           (progn (loop (break)) (setf log (append log "after")))
           (setf log (append log "|c")))
         (return 5)))
-    (defun f () i32 (body))
+    (defun f () int (body))
     "#;
 
 /// A `break` bound to a loop *inside* the protected form is none of the
@@ -645,10 +645,10 @@ fn an_inner_loops_break_does_not_run_an_enclosing_compiled_cleanup() {
 }
 
 const BREAK_THROUGH_CATCH_AND_CLEANUP: &str = r#"
-    (defvar (ran i32) 0)
-    (defun body () i32
+    (defvar (ran int) 0)
+    (defun body () int
       (progn (loop (catch 'tag (unwind-protect (break) (setf ran 2)))) ran))
-    (defun f () i32 (body))
+    (defun f () int (body))
     "#;
 
 /// A `catch` sitting between the `break` and its loop contributes nothing —

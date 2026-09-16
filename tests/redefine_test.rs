@@ -46,7 +46,7 @@ fn redefining_a_builtin_function_is_always_an_error() {
 
 #[test]
 fn redefining_a_builtin_instance_method_is_always_an_error() {
-    let src = "(defmethod + ((a i32) (b i32)) i32 a)";
+    let src = "(defmethod + ((a int) (b int)) int a)";
     for policy in [RedefPolicy::Warn, RedefPolicy::Error, RedefPolicy::Silent] {
         let (_, result) = run(src, policy);
         assert!(result.is_err(), "policy {:?} should still reject redefining a builtin method", policy);
@@ -57,7 +57,7 @@ fn redefining_a_builtin_instance_method_is_always_an_error() {
 
 #[test]
 fn redefining_a_user_function_warns_by_default() {
-    let src = "(defun add1 ((x i32)) i32 (+ x 1)) (defun add1 ((x i32)) i32 (+ x 2))";
+    let src = "(defun add1 ((x int)) int (+ x 1)) (defun add1 ((x int)) int (+ x 2))";
     let (warnings, result) = run(src, RedefPolicy::Warn);
     assert!(result.is_ok());
     assert_eq!(warnings.len(), 1);
@@ -66,14 +66,14 @@ fn redefining_a_user_function_warns_by_default() {
 
 #[test]
 fn redefining_a_user_function_with_error_policy_fails() {
-    let src = "(defun add1 ((x i32)) i32 (+ x 1)) (defun add1 ((x i32)) i32 (+ x 2))";
+    let src = "(defun add1 ((x int)) int (+ x 1)) (defun add1 ((x int)) int (+ x 2))";
     let (_, result) = run(src, RedefPolicy::Error);
     assert!(result.is_err());
 }
 
 #[test]
 fn redefining_a_user_function_with_silent_policy_has_no_warning() {
-    let src = "(defun add1 ((x i32)) i32 (+ x 1)) (defun add1 ((x i32)) i32 (+ x 2))";
+    let src = "(defun add1 ((x int)) int (+ x 1)) (defun add1 ((x int)) int (+ x 2))";
     let (warnings, result) = run(src, RedefPolicy::Silent);
     assert!(result.is_ok());
     assert!(warnings.is_empty());
@@ -90,7 +90,7 @@ fn redefining_a_user_macro_warns_by_default() {
 
 #[test]
 fn redefining_a_user_var_warns_by_default() {
-    let src = "(defvar (x i32) 1) (defvar (x i32) 2)";
+    let src = "(defvar (x int) 1) (defvar (x int) 2)";
     let (warnings, result) = run(src, RedefPolicy::Warn);
     assert!(result.is_ok());
     assert_eq!(warnings.len(), 1);
@@ -99,8 +99,8 @@ fn redefining_a_user_var_warns_by_default() {
 
 #[test]
 fn redefining_a_user_method_warns_by_default() {
-    let src = "(defmethod double ((self i32)) i32 (* self 2)) \
-               (defmethod double ((self i32)) i32 (+ self self))";
+    let src = "(defmethod double ((self int)) int (* self 2)) \
+               (defmethod double ((self int)) int (+ self self))";
     let (warnings, result) = run(src, RedefPolicy::Warn);
     assert!(result.is_ok());
     assert_eq!(warnings.len(), 1);
@@ -111,8 +111,8 @@ fn redefining_a_user_method_warns_by_default() {
 
 #[test]
 fn same_name_in_a_child_module_is_not_a_redefinition() {
-    let src = "(defun helper ((x i32)) i32 x) \
-               (module m (defun helper ((x i32)) i32 (+ x 1)))";
+    let src = "(defun helper ((x int)) int x) \
+               (module m (defun helper ((x int)) int (+ x 1)))";
     let (warnings, result) = run(src, RedefPolicy::Warn);
     assert!(result.is_ok());
     assert!(warnings.is_empty(), "{:?}", warnings);

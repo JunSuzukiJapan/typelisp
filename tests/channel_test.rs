@@ -110,12 +110,12 @@ fn a_buffered_send_with_room_does_not_wait() {
     assert_eq!(
         text(
             r#"(defvar (trail string) "")
-               (defun fill ((ch Chan<i32>)) ()
+               (defun fill ((ch Chan<int>)) ()
                  (send ch 1) (setf trail (append trail "a"))
                  (send ch 2) (setf trail (append trail "b"))
                  ())
                (defun main () string
-                 (let ((ch (the Chan<i32> (Chan::new 2))))
+                 (let ((ch (the Chan<int> (Chan::new 2))))
                    (fill ch)
                    (append trail "|")))
                (main)"#
@@ -135,11 +135,11 @@ fn an_unbuffered_send_waits_for_a_receiver() {
     assert_eq!(
         text(
             r#"(defvar (trail string) "")
-               (defun fill ((ch Chan<i32>)) ()
+               (defun fill ((ch Chan<int>)) ()
                  (send ch 1) (setf trail (append trail "sent"))
                  ())
                (defun main () string
-                 (let ((ch (the Chan<i32> (Chan::new 0))))
+                 (let ((ch (the Chan<int> (Chan::new 0))))
                    (go (fill ch))
                    (yield)
                    (setf trail (append trail "before"))
@@ -157,14 +157,14 @@ fn an_unbuffered_send_waits_for_a_receiver() {
 fn a_full_buffer_stops_the_sender_until_room_appears() {
     assert_eq!(
         int(
-            r#"(defvar (sent i32) 0)
-               (defun fill ((ch Chan<i32>)) ()
+            r#"(defvar (sent int) 0)
+               (defun fill ((ch Chan<int>)) ()
                  (send ch 1) (setf sent (+ sent 1))
                  (send ch 2) (setf sent (+ sent 1))
                  (send ch 3) (setf sent (+ sent 1))
                  ())
-               (defun main () i32
-                 (let ((ch (the Chan<i32> (Chan::new 1))))
+               (defun main () int
+                 (let ((ch (the Chan<int> (Chan::new 1))))
                    (go (fill ch))
                    (yield)
                    ;; The first send had room and ran straight on; the second
@@ -188,7 +188,7 @@ fn a_receive_on_a_closed_and_drained_channel_is_none() {
     assert_eq!(
         text(
             r#"(defun main () string
-                 (let ((ch (the Chan<i32> (Chan::new 1))))
+                 (let ((ch (the Chan<int> (Chan::new 1))))
                    (close ch)
                    (format false "~a ~a" (recv ch) (recv ch))))
                (main)"#
@@ -204,7 +204,7 @@ fn closing_does_not_discard_what_is_buffered() {
     assert_eq!(
         text(
             r#"(defun main () string
-                 (let ((ch (the Chan<i32> (Chan::new 2))))
+                 (let ((ch (the Chan<int> (Chan::new 2))))
                    (send ch 1)
                    (send ch 2)
                    (close ch)
@@ -221,7 +221,7 @@ fn closing_does_not_discard_what_is_buffered() {
 fn sending_on_a_closed_channel_panics() {
     let e = err(
         r#"(defun main () ()
-             (let ((ch (the Chan<i32> (Chan::new 1))))
+             (let ((ch (the Chan<int> (Chan::new 1))))
                (close ch)
                (send ch 1)))
            (main)"#,
@@ -234,7 +234,7 @@ fn sending_on_a_closed_channel_panics() {
 fn closing_twice_panics() {
     let e = err(
         r#"(defun main () ()
-             (let ((ch (the Chan<i32> (Chan::new 1))))
+             (let ((ch (the Chan<int> (Chan::new 1))))
                (close ch)
                (close ch)))
            (main)"#,
@@ -248,9 +248,9 @@ fn closing_twice_panics() {
 #[test]
 fn closing_while_a_sender_waits_panics_that_sender() {
     let e = err(
-        r#"(defun fill ((ch Chan<i32>)) () (send ch 1))
+        r#"(defun fill ((ch Chan<int>)) () (send ch 1))
            (defun main () ()
-             (let ((ch (the Chan<i32> (Chan::new 0))))
+             (let ((ch (the Chan<int> (Chan::new 0))))
                (go (fill ch))
                (yield)
                (close ch)
@@ -268,7 +268,7 @@ fn len_reports_the_buffer_and_cap_the_room() {
     assert_eq!(
         text(
             r#"(defun main () string
-                 (let ((ch (the Chan<i32> (Chan::new 3))))
+                 (let ((ch (the Chan<int> (Chan::new 3))))
                    (send ch 1)
                    (send ch 2)
                    (let ((a (format false "~d/~d" (len ch) (cap ch))))
@@ -283,7 +283,7 @@ fn len_reports_the_buffer_and_cap_the_room() {
 /// A capacity a channel cannot have is a panic, not a silently clamped zero.
 #[test]
 fn a_negative_capacity_panics() {
-    let e = err(r#"(defun main () () (let ((ch (the Chan<i32> (Chan::new -1)))) ())) (main)"#);
+    let e = err(r#"(defun main () () (let ((ch (the Chan<int> (Chan::new -1)))) ())) (main)"#);
     assert!(e.contains("not a capacity"), "got: {}", e);
 }
 
@@ -296,11 +296,11 @@ fn a_negative_capacity_panics() {
 fn a_channel_is_its_own_iterator() {
     assert_eq!(
         int(
-            r#"(defun produce ((ch Chan<i32>) (n i32)) ()
+            r#"(defun produce ((ch Chan<int>) (n int)) ()
                  (dotimes (i n) (send ch (* i 2)))
                  (close ch))
-               (defun main () i32
-                 (let ((ch (the Chan<i32> (Chan::new 2))) (acc 0))
+               (defun main () int
+                 (let ((ch (the Chan<int> (Chan::new 2))) (acc 0))
                    (go (produce ch 5))
                    (doiter (v ch) (setf acc (+ acc v)))
                    acc))
@@ -317,11 +317,11 @@ fn a_channel_is_its_own_iterator() {
 fn a_worker_pool_runs() {
     assert_eq!(
         int(
-            r#"(defun worker ((jobs Chan<i32>) (out Chan<i32>)) ()
+            r#"(defun worker ((jobs Chan<int>) (out Chan<int>)) ()
                  (doiter (j jobs) (send out (* j j))))
-               (defun main () i32
-                 (let ((jobs (the Chan<i32> (Chan::new 4)))
-                       (out (the Chan<i32> (Chan::new 4)))
+               (defun main () int
+                 (let ((jobs (the Chan<int> (Chan::new 4)))
+                       (out (the Chan<int> (Chan::new 4)))
                        (acc 0))
                    (dotimes (w 3) (go (worker jobs out)))
                    (dotimes (j 4) (send jobs (+ j 1)))
@@ -339,15 +339,15 @@ fn a_worker_pool_runs() {
 fn a_pipeline_runs() {
     assert_eq!(
         int(
-            r#"(defun gen ((out Chan<i32>) (n i32)) ()
+            r#"(defun gen ((out Chan<int>) (n int)) ()
                  (dotimes (i n) (send out (+ i 1)))
                  (close out))
-               (defun square ((in Chan<i32>) (out Chan<i32>)) ()
+               (defun square ((in Chan<int>) (out Chan<int>)) ()
                  (doiter (v in) (send out (* v v)))
                  (close out))
-               (defun main () i32
-                 (let ((a (the Chan<i32> (Chan::new 0)))
-                       (b (the Chan<i32> (Chan::new 0)))
+               (defun main () int
+                 (let ((a (the Chan<int> (Chan::new 0)))
+                       (b (the Chan<int> (Chan::new 0)))
                        (acc 0))
                    (go (gen a 4))
                    (go (square a b))
@@ -371,18 +371,18 @@ fn a_pipeline_runs() {
 fn fan_in_runs_with_a_task_per_input() {
     assert_eq!(
         int(
-            r#"(defvar (left i32) 0)
-               (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
+            r#"(defvar (left int) 0)
+               (defun drain ((in Chan<int>) (out Chan<int>)) ()
                  (doiter (v in) (send out v))
                  (setf left (- left 1))
                  (if (eq left 0) (close out) ()))
-               (defun feed ((ch Chan<i32>) (from i32) (n i32)) ()
+               (defun feed ((ch Chan<int>) (from int) (n int)) ()
                  (dotimes (i n) (send ch (+ from i)))
                  (close ch))
-               (defun main () i32
-                 (let ((a (the Chan<i32> (Chan::new 2)))
-                       (b (the Chan<i32> (Chan::new 2)))
-                       (out (the Chan<i32> (Chan::new 2)))
+               (defun main () int
+                 (let ((a (the Chan<int> (Chan::new 2)))
+                       (b (the Chan<int> (Chan::new 2)))
+                       (out (the Chan<int> (Chan::new 2)))
                        (acc 0))
                    (setf left 2)
                    (go (feed a 1 3))
@@ -417,28 +417,28 @@ fn after_delivers_one_value() {
 #[test]
 fn the_element_type_is_checked() {
     let e = check_err(
-        r#"(defun main () () (let ((ch (the Chan<i32> (Chan::new 1)))) (send ch "x")))"#,
+        r#"(defun main () () (let ((ch (the Chan<int> (Chan::new 1)))) (send ch "x")))"#,
     );
-    assert!(e.contains("I32") && e.contains("Str"), "got: {}", e);
+    assert!(e.contains("Int") && e.contains("Str"), "got: {}", e);
 }
 
-/// `Chan<i32>` and `Chan<string>` are different types, even though the
+/// `Chan<int>` and `Chan<string>` are different types, even though the
 /// element type appears in no field of the runtime value.
 #[test]
 fn two_instantiations_are_different_types() {
     let e = check_err(
-        r#"(defun take ((ch Chan<i32>)) () ())
+        r#"(defun take ((ch Chan<int>)) () ())
            (defun main () () (take (the Chan<string> (Chan::new 1))))"#,
     );
     assert!(e.contains("chan"), "got: {}", e);
 }
 
 /// The capacity is written, always. The plan wrote it `&optional`; an omitted
-/// one with no default is an `Option<i32>` the callee would have to take
+/// one with no default is an `Option<int>` the callee would have to take
 /// apart, and no builtin in this language has ever had one.
 #[test]
 fn the_capacity_is_required() {
-    let e = check_err(r#"(defun main () () (let ((ch (the Chan<i32> (Chan::new)))) ()))"#);
+    let e = check_err(r#"(defun main () () (let ((ch (the Chan<int> (Chan::new)))) ()))"#);
     assert!(e.contains("argument"), "got: {}", e);
 }
 
@@ -449,15 +449,15 @@ fn the_capacity_is_required() {
 /// through the frame's value slot.
 #[test]
 fn a_compiled_send_and_receive_agree_with_the_interpreter() {
-    let src = r#"(defun produce ((ch Chan<i32>) (n i32)) ()
+    let src = r#"(defun produce ((ch Chan<int>) (n int)) ()
                    (dotimes (i n) (send ch (* i 2)))
                    (close ch))
-                 (defun consume ((ch Chan<i32>)) i32
+                 (defun consume ((ch Chan<int>)) int
                    (let ((acc 0))
                      (doiter (v ch) (setf acc (+ acc v)))
                      acc))
-                 (defun main () i32
-                   (let ((ch (the Chan<i32> (Chan::new 0))))
+                 (defun main () int
+                   (let ((ch (the Chan<int> (Chan::new 0))))
                      (go (produce ch 5))
                      (consume ch)))"#;
     let plain = int(&format!("{}\n(main)", src));
@@ -471,12 +471,12 @@ fn a_compiled_send_and_receive_agree_with_the_interpreter() {
 /// paths: an immediate, a heap pointer, and a box that has to be *allocated*.
 #[test]
 fn a_compiled_send_carries_every_element_representation() {
-    let src = r#"(defun ints ((ch Chan<i32>)) () (send ch 7) (close ch))
+    let src = r#"(defun ints ((ch Chan<int>)) () (send ch 7) (close ch))
                  (defun strs ((ch Chan<string>)) () (send ch "hi") (close ch))
                  (defun floats ((ch Chan<f64>)) () (send ch 1.5) (close ch))
                  (defun chars ((ch Chan<char>)) () (send ch #\z) (close ch))
                  (defun main () string
-                   (let ((a (the Chan<i32> (Chan::new 1)))
+                   (let ((a (the Chan<int> (Chan::new 1)))
                          (b (the Chan<string> (Chan::new 1)))
                          (c (the Chan<f64> (Chan::new 1)))
                          (d (the Chan<char> (Chan::new 1))))
@@ -499,7 +499,7 @@ fn a_compiled_send_carries_every_element_representation() {
 #[test]
 fn the_four_operations_that_never_wait_still_compile() {
     let src = r#"(defun probe () string
-                   (let ((ch (the Chan<i32> (Chan::new 2))))
+                   (let ((ch (the Chan<int> (Chan::new 2))))
                      (send ch 1)
                      (let ((a (format false "~d/~d" (len ch) (cap ch))))
                        (close ch)
@@ -522,7 +522,7 @@ fn the_four_operations_that_never_wait_still_compile() {
 fn a_channel_holds_its_values_through_gc_stress() {
     assert_eq!(
         text_stressed(
-            r#"(defun fill ((ch Chan<string>) (n i32)) ()
+            r#"(defun fill ((ch Chan<string>) (n int)) ()
                  (dotimes (i n) (send ch (append "v" (to-string i))))
                  (close ch))
                (defun main () string
@@ -546,12 +546,12 @@ fn a_channel_holds_its_values_through_gc_stress() {
 fn a_receive_that_needs_no_waiting_works_under_a_rust_caller() {
     assert_eq!(
         text(
-            r#"(defstruct probe (ch Chan<i32>))
+            r#"(defstruct probe (ch Chan<int>))
                (impl print-object probe
                  (print-object ((self Self) (escape bool)) string
                    (format false "<~a>" (recv self::ch))))
                (defun main () string
-                 (let ((ch (the Chan<i32> (Chan::new 1))))
+                 (let ((ch (the Chan<int> (Chan::new 1))))
                    (send ch 3)
                    (format false "~a" (probe::new ch))))
                (main)"#
@@ -565,12 +565,12 @@ fn a_receive_that_needs_no_waiting_works_under_a_rust_caller() {
 #[test]
 fn a_receive_that_would_wait_under_a_rust_caller_is_refused() {
     let e = err(
-        r#"(defstruct probe (ch Chan<i32>))
+        r#"(defstruct probe (ch Chan<int>))
            (impl print-object probe
              (print-object ((self Self) (escape bool)) string
                (format false "<~a>" (recv self::ch))))
            (defun main () string
-             (let ((ch (the Chan<i32> (Chan::new 1))))
+             (let ((ch (the Chan<int> (Chan::new 1))))
                (format false "~a" (probe::new ch))))
            (main)"#,
     );

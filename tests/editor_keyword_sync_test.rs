@@ -151,7 +151,7 @@ fn is_excluded(name: &str) -> bool {
     // a user writes `destructuring-bind` and never one of these.
     let dbind_helper = name.starts_with("dbind-");
     // The native stream layer (`check::registry::register_stream_builtins`).
-    // These take an opaque `i32` handle and exist only for the prelude's
+    // These take an opaque `int` handle and exist only for the prelude's
     // trait implementations to call; a user writes `read-char`/`write-string`
     // on a stream value and never names one of these.
     let native_stream = name.starts_with("stream-") || name.starts_with("file-");
@@ -230,7 +230,7 @@ fn is_excluded(name: &str) -> bool {
     // loads with the prelude, but a user writes `case`.
     let case_expander = name == "case-key-test" || name == "case-key-atom-test";
     // `HashTable<K,V>`'s bucket layer (Phase 6a). The five `bucket-*` are
-    // registry builtins over the raw `i32`-keyed storage and know nothing
+    // registry builtins over the raw `int`-keyed storage and know nothing
     // about hashing or key equality; `hashtable-bucket-index` is the
     // prelude-private linear scan that supplies both. Together they are what
     // `get`/`set`/`remove` are written in terms of, which is what a user

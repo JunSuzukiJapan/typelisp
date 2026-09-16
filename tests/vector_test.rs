@@ -65,14 +65,14 @@ fn eval_string(src: &str) -> String {
 
 #[test]
 fn new_makes_an_empty_vector_with_len_zero() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (len (make-v))";
     assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 #[test]
 fn push_then_get_round_trips() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 1)
                  (push v 2)
@@ -83,7 +83,7 @@ fn push_then_get_round_trips() {
 
 #[test]
 fn push_increments_len() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 10)
                  (push v 20)
@@ -93,7 +93,7 @@ fn push_increments_len() {
 
 #[test]
 fn set_overwrites_an_existing_element() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 1)
                  (push v 2)
@@ -104,22 +104,22 @@ fn set_overwrites_an_existing_element() {
 
 #[test]
 fn get_out_of_bounds_panics() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v 1) (get v 5))";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn set_out_of_bounds_panics() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (set v 0 1))";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn pop_removes_and_returns_some_of_the_last_element() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
-               (defun f () i32
+    let src = "(defun make-v () Vector<int> (Vector::new))
+               (defun f () int
                  (let ((v (make-v)))
                    (push v 1)
                    (push v 2)
@@ -131,7 +131,7 @@ fn pop_removes_and_returns_some_of_the_last_element() {
 
 #[test]
 fn pop_shrinks_len_by_one() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 1)
                  (push v 2)
@@ -142,8 +142,8 @@ fn pop_shrinks_len_by_one() {
 
 #[test]
 fn pop_on_an_empty_vector_returns_none() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
-               (defun f () i32
+    let src = "(defun make-v () Vector<int> (Vector::new))
+               (defun f () int
                  (let ((v (make-v)))
                    (match (pop v) ((Some x) x) ((None) -1))))
                (f)";
@@ -152,7 +152,7 @@ fn pop_on_an_empty_vector_returns_none() {
 
 #[test]
 fn pushing_a_mismatched_element_type_is_a_type_error() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v \"oops\"))";
     assert!(check(src).is_err());
 }
@@ -169,7 +169,7 @@ fn vector_holds_strings_too() {
 
 #[test]
 fn two_vectors_with_different_element_types_coexist() {
-    let src = "(defun make-i () Vector<i32> (Vector::new))
+    let src = "(defun make-i () Vector<int> (Vector::new))
                (defun make-s () Vector<string> (Vector::new))
                (let ((vi (make-i)) (vs (make-s)))
                  (push vi 1)
@@ -184,14 +184,14 @@ fn vector_of_sexpr_gets_elements_back_as_sexprs() {
     // (`Vector<Option<Sexpr>>`'s instantiated element type), which must win over
     // `decode_struct_field`'s shape heuristic — a stored quoted `42` is a
     // `Value::Int` in the slot, shape-identical to a `Vector<i64>` element.
-    // Read back with `sexpr-i32` (`match` on a `Sexpr` is fenced off —
+    // Read back with `sexpr-int` (`match` on a `Sexpr` is fenced off —
     // Symbol/Sexpr redesign Phase 5); it still panics if the element decoded
     // to a bare scalar rather than a genuine `Sexpr` node.
     let src = "(defun make-v () Vector<Option<Sexpr>> (Vector::new))
                (let ((v (make-v)))
                  (push v '41)
                  (push v '42)
-                 (sexpr-i32 (get v 1)))";
+                 (sexpr-int (get v 1)))";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 
@@ -202,7 +202,7 @@ fn push_accepts_cl_argument_order_too() {
     // `(push item place)`, CL's own argument order, resolves via
     // `Checker::try_instance_method_swapped` once the receiver-first
     // `(push vec item)` convention fails to match.
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push 1 v)
                  (push v 2)
@@ -213,7 +213,7 @@ fn push_accepts_cl_argument_order_too() {
 
 #[test]
 fn setf_get_writes_through_a_vector_element() {
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
                  (push v 1)
                  (push v 2)
@@ -228,7 +228,7 @@ fn incf_on_a_call_form_place_evaluates_the_index_exactly_once() {
     // index subform twice, the read and the write would land on different
     // indices (0 then 1) and `v[0]` would stay `10` — the double-eval bug
     // `Checker::place_dedup` exists to prevent.
-    let src = "(defun make-v () Vector<i32> (Vector::new))
+    let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)) (idx -1))
                  (push v 10)
                  (push v 20)

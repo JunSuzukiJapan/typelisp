@@ -227,7 +227,7 @@ fn a_definition_inside_a_module_is_still_a_definition() {
     // system vocabulary when it was created; without that import this would
     // read as a call to an unbound `m::defun` instead — silently, and for
     // every definition in every module.
-    check_all("(module m (defun f ((x i32)) i32 x))").expect("a defun inside a module still checks");
+    check_all("(module m (defun f ((x int)) int x))").expect("a defun inside a module still checks");
 }
 
 #[test]

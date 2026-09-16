@@ -5,7 +5,7 @@
 //! flat row-major storage) rather than a built-in type, so most of what is
 //! exercised here is ordinary typelisp. The one piece that is not is
 //! `(aref a i j)`: variadic bare subscripts, which a `defmethod` cannot
-//! express, so the checker rewrites them into the `Vector<i32>`-subscript
+//! express, so the checker rewrites them into the `Vector<int>`-subscript
 //! `get`/`set` these tests also call directly.
 
 extern crate typelisp;
@@ -14,14 +14,14 @@ mod common;
 use common::{check_err, eval_err, eval_ok};
 use typelisp::Value;
 
-/// `(dims a b ...)` — a `Vector<i32>` written inline, since a subscript or a
+/// `(dims a b ...)` — a `Vector<int>` written inline, since a subscript or a
 /// dimension list is one and there is no vector literal.
 const DIMS: &str = r#"
-(defun dims2 ((a i32) (b i32)) Vector<i32>
-  (let ((v (the Vector<i32> (Vector::new))))
+(defun dims2 ((a int) (b int)) Vector<int>
+  (let ((v (the Vector<int> (Vector::new))))
     (progn (push v a) (push v b) v)))
-(defun dims1 ((a i32)) Vector<i32>
-  (let ((v (the Vector<i32> (Vector::new))))
+(defun dims1 ((a int)) Vector<int>
+  (let ((v (the Vector<int> (Vector::new))))
     (progn (push v a) v)))
 "#;
 
@@ -41,7 +41,7 @@ fn make_builds_an_array_of_the_requested_shape() {
 #[test]
 fn every_cell_starts_at_the_initial_element() {
     assert_eq!(
-        eval_ok(&with_dims("(foldl (iter (Array::make (dims2 2 3) 7)) (lambda ((a i32) (b i32)) i32 (+ a b)) 0)")),
+        eval_ok(&with_dims("(foldl (iter (Array::make (dims2 2 3) 7)) (lambda ((a int) (b int)) int (+ a b)) 0)")),
         Value::Int(42)
     );
 }
@@ -73,7 +73,7 @@ fn make_copies_the_dimension_vector_it_was_given() {
 fn a_zero_dimensional_array_holds_exactly_one_cell() {
     // CL's rank-0 array: no subscripts, one element, total size 1.
     assert_eq!(
-        eval_ok("(total-size (Array::make (the Vector<i32> (Vector::new)) 5))"),
+        eval_ok("(total-size (Array::make (the Vector<int> (Vector::new)) 5))"),
         Value::Int(1)
     );
 }
@@ -108,12 +108,12 @@ fn row_major_set_is_visible_through_subscripts() {
 
 #[test]
 fn iteration_walks_row_major_order() {
-    let src = "(let ((a (Array::make (dims2 2 2) 0)) (out (the Vector<i32> (Vector::new))))
+    let src = "(let ((a (Array::make (dims2 2 2) 0)) (out (the Vector<int> (Vector::new))))
                  (progn
                    (set a (dims2 0 0) 1) (set a (dims2 0 1) 2)
                    (set a (dims2 1 0) 3) (set a (dims2 1 1) 4)
                    (doiter (x (iter a)) (push out x))
-                   (foldl (iter out) (lambda ((acc i32) (x i32)) i32 (+ (* acc 10) x)) 0)))";
+                   (foldl (iter out) (lambda ((acc int) (x int)) int (+ (* acc 10) x)) 0)))";
     assert_eq!(eval_ok(&with_dims(src)), Value::Int(1234));
 }
 
@@ -303,7 +303,7 @@ fn aref_rejects_the_wrong_number_of_subscripts() {
 fn aref_works_at_every_rank_including_zero() {
     let one = "(let ((a (Array::make (dims1 3) 0))) (progn (setf (aref a 2) 7) (aref a 2)))";
     assert_eq!(eval_ok(&with_dims(one)), Value::Int(7));
-    let none = "(let ((a (Array::make (the Vector<i32> (Vector::new)) 0)))
+    let none = "(let ((a (Array::make (the Vector<int> (Vector::new)) 0)))
                   (progn (setf (aref a) 7) (aref a)))";
     assert_eq!(eval_ok(&with_dims(none)), Value::Int(7));
 }
@@ -312,18 +312,18 @@ fn aref_works_at_every_rank_including_zero() {
 fn aref_evaluates_the_array_before_its_subscripts() {
     // The rewrite reads the array last (at the `get`), so it must be bound
     // first for `(aref (f) (g))` to run `f` before `g` as written.
-    let src = "(let ((log (the Vector<i32> (Vector::new))))
-                 (labels ((arr () array<i32> (progn (push log 1) (Array::make (dims1 2) 0)))
-                          (sub () i32 (progn (push log 2) 0)))
+    let src = "(let ((log (the Vector<int> (Vector::new))))
+                 (labels ((arr () array<int> (progn (push log 1) (Array::make (dims1 2) 0)))
+                          (sub () int (progn (push log 2) 0)))
                    (progn (aref (arr) (sub))
-                          (foldl (iter log) (lambda ((acc i32) (x i32)) i32 (+ (* acc 10) x)) 0))))";
+                          (foldl (iter log) (lambda ((acc int) (x int)) int (+ (* acc 10) x)) 0))))";
     assert_eq!(eval_ok(&with_dims(src)), Value::Int(12));
 }
 
 #[test]
 fn aref_evaluates_each_subscript_exactly_once() {
     let src = "(let ((n 0) (a (Array::make (dims2 2 2) 0)))
-                 (labels ((bump () i32 (progn (setf n (+ n 1)) 0)))
+                 (labels ((bump () int (progn (setf n (+ n 1)) 0)))
                    (progn (aref a (bump) (bump)) n)))";
     assert_eq!(eval_ok(&with_dims(src)), Value::Int(2));
 }
@@ -342,10 +342,10 @@ fn nested_aref_forms_do_not_share_an_index_vector() {
 #[test]
 fn aref_on_a_vector_is_a_type_error_rather_than_a_second_meaning() {
     // A `Vector<T>` is indexed with `get`/`set`; `aref` always builds the
-    // `Vector<i32>` subscript an `Array<T>` takes.
-    let msg = check_err("(let ((v (the Vector<i32> (Vector::new)))) (aref v 0))");
+    // `Vector<int>` subscript an `Array<T>` takes.
+    let msg = check_err("(let ((v (the Vector<int> (Vector::new)))) (aref v 0))");
     assert!(msg.contains("is not an `Array<T>`"), "{}", msg);
-    assert!(msg.contains("vector<i32>"), "{}", msg);
+    assert!(msg.contains("vector<int>"), "{}", msg);
 }
 
 // ---- integration with the rest of the language ------------------------------
@@ -370,7 +370,7 @@ fn the_iter_combinators_work_on_an_array() {
     // `Iter` is the whole integration surface: implementing it once gives
     // `map`/`filter`/`foldl` and every other combinator in §6.
     let src = "(let ((a (Array::make (dims2 2 2) 3)))
-                 (foldl (iter (map (iter a) (lambda ((x i32)) i32 (* x x))))
-                        (lambda ((acc i32) (x i32)) i32 (+ acc x)) 0))";
+                 (foldl (iter (map (iter a) (lambda ((x int)) int (* x x))))
+                        (lambda ((acc int) (x int)) int (+ acc x)) 0))";
     assert_eq!(eval_ok(&with_dims(src)), Value::Int(36));
 }
