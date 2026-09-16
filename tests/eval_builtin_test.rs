@@ -30,8 +30,9 @@ fn repl_stdout(input: &str) -> String {
 
 #[test]
 fn evaluates_an_expression_and_returns_its_value_as_a_sexpr() {
-    // `(eval (read "(+ 40 2)"))` => `Ok(42)`; the REPL prints it in reader
-    // syntax as `(ok 42)`.
+    // `(eval (read "(+ 40 2)"))` => `Ok(Some(42))`; the REPL prints it in
+    // reader syntax as `(ok 42)` — an `Option<Sexpr>` is the S-expression
+    // itself and prints as such, inside a `Result` as anywhere else.
     let out = repl_stdout("(eval (unwrap (read \"(+ 40 2)\")))\n:quit\n");
     assert!(out.contains("(ok 42)"), "stdout was:\n{}", out);
 }

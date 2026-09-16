@@ -458,6 +458,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &interp.vtable_descriptors(),
             &interp.upcast_descriptors(),
             &interp.enum_variant_descriptors(),
+            &interp.field_template_descriptors(),
             &print_objects,
             &format_calls,
             eval_env.as_deref(),
@@ -514,6 +515,7 @@ fn build_main_wrapper(
     vtables: &[(u32, Vec<(Path, String)>)],
     upcasts: &[(u32, u32, u32)],
     enum_variants: &[(String, usize, String)],
+    field_templates: &[(String, i64, i64, String)],
     print_objects: &[(String, String)],
     format_calls: &[(String, String, String)],
     eval_env: Option<&[u8]>,
@@ -670,6 +672,15 @@ fn build_main_wrapper(
                 &builder,
                 "rt_print_enum_variant",
                 &[key_ptr, key_len, i64_ty.const_int(*variant as u64, false), name_ptr, name_len],
+            )?;
+        }
+        for (key, variant, index, template) in field_templates {
+            let (key_ptr, key_len) = literal(&builder, key)?;
+            let (t_ptr, t_len) = literal(&builder, template)?;
+            call(
+                &builder,
+                "rt_print_field_template",
+                &[key_ptr, key_len, i64_ty.const_int(*variant as u64, true), i64_ty.const_int(*index as u64, true), t_ptr, t_len],
             )?;
         }
         for (key, symbol) in print_objects {
@@ -1161,7 +1172,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1200,7 +1211,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

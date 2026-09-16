@@ -11349,3 +11349,64 @@ fixnum として読んで exit code にする（`main` の宣言戻り型が `in
 - `ash`/`logbitp` の桁数が `int` になったので、`(n i32)` と書いていたテスト/docs の表を直した。
 - `(defvar (*cap* int) (stream-string-output))`: ストリームのハンドルは `i32` のまま。
 - ISLAND_DEFUNS に `untag-int-value` を追加（`island_defun_list_is_exhaustive` が番人）。
+
+## `Option<T>` のニッチ表現（段階 4、2026-09-17）
+
+### 何が変わったか
+
+`Option<T>` は、`T` の値が空リストの語（`NIL_WORD` = 7、`Value::Empty`）になり得ないかぎり
+箱を作らない。`some v` は `v` の**フィールド表現**（固定幅整数は fixnum 語、浮動小数は箱、
+それ以外は既にタグ付きの語）、`none` は空リストの即値。`Option<Sexpr>` だけに掛かっていた
+特例（空リストが `none`）を Rust のニッチ規則に一般化した。箱に残るのは入れ子の `Option`、
+`()`、生の C 語（`ptr`/`c-long`/`c-ulong`）だけ。
+
+- `Repr::Niche(Box<Repr>)`（IR 綴り `(niche R)`）。`Repr::of_by` が `Option<T>` を `Niche(repr(T))`
+  か `Enum` に分類する（`Repr::niches`）。class は Tagged、collectable は payload が
+  Float か collectable なら真。`field_kind` は **101**——語としては 6 と同じ素通しだが、
+  島が「この kind の値の周りに Option を作るとき箱が要る」と見分けるための番号
+  （`Vector<Option<T>>::pop` が `Option<Option<T>>` を作る）。
+- core IR: `(some-of REPR E)`（構築、解釈器では恒等、島は `compile-tag-struct-field`）、
+  `(pat-some REPR P)`（`pat-nonempty` を退役、島は空語検査のあと `compile-sexpr-field` で
+  payload を戻して `P` を当てる）、`(box-option KEY E)`（`Sexpr` 境界で箱に入れ直す）。
+  `none` は従来どおり `sexpr` の変種 0 の construct。
+- 型キー側の双子: `typelisp_mem::option`（`option_payload_niches`/`is_niched_option_key`）と
+  `Heap::alloc_option(key, Option<Value>)`。Rust 側の Option 生産者（`try-as`、`read-byte`、
+  `getenv`、`macroexpand`、`Vector::pop`、`native-scope::get`、reader macro 表、`recv`/`select`）は
+  全部これを通る。`Repr::of_by` との一致は `tests/option_niche_test.rs` が型の行列で固定。
+- 配置バージョン `LAYOUT_OPTION_NICHE = 2`。ダンプの三つ組と `tagged::LAYOUT` を同時に上げ、
+  再生成は `TYPELISP_BOOTSTRAP_INTERPRETED=1`（段階 3 の出口）で 1 回、native で不動点を確認。
+
+### 印字は型駆動になる
+
+ニッチ表現の値は自分が `Option` だと言えない。値を型なしで見る場所を全部数えて塞いだ:
+
+- `Sexpr` が期待される位置（`format` の引数、`list` の要素、`check_inner` の retype）は
+  チェッカーが `box-option` を挟む。だから `(format false "~a" opt)` は `(some 1)` のまま。
+- 構造体/列挙/`Vector` のフィールド: `defstruct`/`defenum` の core 形が各フィールドの型を
+  **キー雛形**（`type_key::field_key_template`、型引数は `$0`/`$1`…）で運び、実行時の
+  `TypeEntry` に保存。印字器は箱のキーの型引数で雛形を実体化し `is_niched_option_key` に訊く
+  （`PrintEnv::field_is_niched_option`）。`Vector<T>` は一様雛形 `$0`。AOT 実行ファイルは起動時に
+  `rt_print_field_template` で同じ表を登録する。
+- REPL のエコーは `Checker::expr_type()` で、`trace` の行は `FnDef::sig` の Repr で包む。
+- 制約 2 つ: ニッチ `Option` は `:dyn` に入れられない（fat box に型キーを載せる箱が無い）、
+  `Sexpr` からの `(the Option<T> ..)` は構成子を名指す（`check_type_test_pattern` が
+  `check_ctor_pattern_fields(downcast=true)` で箱を読む）。
+
+### 落とし穴
+
+- 型キーの `inner_type_key` は `<>` しか数えていなかったので `(fn (int,string) int)` の
+  カンマで割れて「入れ子」と誤読した。括弧も深さに数える。
+- `Option<Option<Option<T>>>`: Repr 側は payload（箱の Enum）が niches() なので Niche と答え、
+  キー側は `option<` で始まるので箱と答えた。規則は「payload が Option なら箱」で型の上に置く。
+- テストの機械置換: `(some x)` はパターンでは裸、構築では `option::some`。正規表現で
+  一括変換すると `(the Option<int> (some n))` のパターンまで `option::some` になる。
+- 最初の全体 suite で `array_test` など 40 件が落ちた: 省略された `&optional`/`&key` 引数の
+  `Option` は**呼び出し側**が作る（`wrap_some`/`option_none`）が、それが `construct_form` を直接
+  呼んでいて箱を作り、呼び先の `pat-some` と食い違った。チェッカー側の Option 生産者を
+  `Checker::option_form` 1 本に集約。prelude は再生成が要った（`&optional` 84 箇所）。
+- `Option<Sexpr>` の印字はフィールドでも透過（`typelisp_mem::option_prints_wrapped`）。
+  以前は `eval` の結果が REPL で `(ok 42)`、`macroexpand-1` が `format` で `(ok (some ..))` と、
+  値の形の違い（片方だけ箱を作っていた）で 2 通りに出ていた。docs の一般則に合わせて透過に
+  統一し、`macroexpand-1` の `none` は `(ok ())` と出る。
+- LSP の補完はパターン束縛を `pat-ctor`/`pat-typetest` からしか拾っていなかった
+  （`pat-nonempty` は元から漏れていた）。`pat-some` を足した。

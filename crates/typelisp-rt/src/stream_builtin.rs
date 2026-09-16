@@ -115,15 +115,11 @@ fn result_err(heap: &mut Heap, name: &str, msg: String) -> Value {
     heap.alloc_enum(key, 1, vec![err_val])
 }
 
-/// `Some(v)`/`None`, matching `option_def`'s variant order (`some` = 0,
-/// `none` = 1).
+/// `Some(v)`/`None` under the instantiation the inner key spells — the
+/// niche when the payload allows one, else a box in `option_def`'s variant
+/// order (`Heap::alloc_option` decides).
 fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
-    let (variant, fields) = match v {
-        Some(x) => (0, vec![x]),
-        None => (1, vec![]),
-    };
-    let key = heap.intern_type_key(lookup(INNER_KEYS, name, "inner"));
-    heap.alloc_enum(key, variant, fields)
+    heap.alloc_option(lookup(INNER_KEYS, name, "inner"), v)
 }
 
 /// An argument that isn't the shape its signature promises. Unreachable

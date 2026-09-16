@@ -1988,6 +1988,39 @@ impl Renderer {
     }
 
     /// Renders `v` at nesting `depth` the flat (non-pretty) way.
+    /// One field of a struct or enum box: rendered as the value it is —
+    /// unless the program's definition says the field is a niche-represented
+    /// `Option` (`PrintEnv::field_is_niched_option`), in which case the word
+    /// is that `Option`, and prints as `none` or `(some ...)` around the
+    /// payload exactly as a boxed one would. The box is the only place a
+    /// niched `Option` can sit with nothing static to say what it is, so
+    /// this is the only place the question is asked.
+    #[allow(clippy::too_many_arguments)]
+    fn render_field(
+        &mut self,
+        heap: &mut Heap,
+        ctx: RenderCtx<'_>,
+        type_key: &str,
+        variant: Option<usize>,
+        index: usize,
+        f: Value,
+        standard: bool,
+        depth: usize,
+        out: &mut String,
+    ) -> Result<(), String> {
+        if !ctx.env.field_is_niched_option(type_key, variant, index) {
+            return self.render(heap, ctx, f, standard, depth, out);
+        }
+        if f == Value::Empty {
+            out.push_str("none");
+            return Ok(());
+        }
+        out.push_str("(some ");
+        self.render(heap, ctx, f, standard, depth + 1, out)?;
+        out.push(')');
+        Ok(())
+    }
+
     pub(crate) fn render(
         &mut self,
         heap: &mut Heap,
@@ -2108,7 +2141,7 @@ impl Renderer {
                     // `&mut` here (the `print-object` dispatch needs it), so the
                     // read cannot stay borrowed across it.
                     let f = heap.struct_field(id, i);
-                    self.render(heap, ctx, f, standard, depth + 1, out)?;
+                    self.render_field(heap, ctx, &key, None, i, f, standard, depth + 1, out)?;
                 }
                 out.push('>');
             }
@@ -2142,7 +2175,7 @@ impl Renderer {
                         }
                         out.push(' ');
                         let f = heap.enum_field(id, i);
-                        self.render(heap, ctx, f, standard, depth + 1, out)?;
+                        self.render_field(heap, ctx, &type_key, Some(variant), i, f, standard, depth + 1, out)?;
                     }
                     out.push(')');
                 }

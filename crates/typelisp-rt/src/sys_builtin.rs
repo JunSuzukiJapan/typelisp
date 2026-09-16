@@ -236,17 +236,13 @@ pub fn home_directory(heap: &mut Heap) -> Value {
     option_value(heap, "home-directory", v)
 }
 
-/// `Some(v)`/`None` under `option_def`'s variant order (`some` = 0,
-/// `none` = 1) — the same shape [`crate::stream_builtin`] builds, spelled
-/// again here rather than shared so neither module has to be linked for the
+/// `Some(v)`/`None` under the instantiation `name`'s key spells — the
+/// niche when the payload allows one, else a box (`Heap::alloc_option`
+/// decides). Spelled again here rather than shared with
+/// [`crate::stream_builtin`] so neither module has to be linked for the
 /// other's sake (see this module's note on archive-member granularity).
 fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
-    let (variant, fields) = match v {
-        Some(x) => (0, vec![x]),
-        None => (1, vec![]),
-    };
-    let key = heap.intern_type_key(key_of(name));
-    heap.alloc_enum(key, variant, fields)
+    heap.alloc_option(key_of(name), v)
 }
 
 /// `(lisp-implementation-version)` (CLHS 25.1): this build's version, taken

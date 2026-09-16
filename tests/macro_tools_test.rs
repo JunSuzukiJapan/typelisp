@@ -70,13 +70,17 @@ fn with_twice(expr: &str) -> String {
 
 #[test]
 fn macroexpand_1_expands_one_step_and_says_none_for_a_non_macro() {
-    assert_eq!(with_twice("(macroexpand-1 '(twice 5))"), "(ok (some (+ 5 5)))");
+    assert_eq!(with_twice("(macroexpand-1 '(twice 5))"), "(ok (+ 5 5))");
     // CL's second return value, carried in the `Option` instead — and the
     // `none` says "not a macro call" without a boolean the caller could
-    // confuse with a macro that expands to its own call form.
-    assert_eq!(with_twice("(macroexpand-1 '(+ 1 2))"), "(ok none)");
-    assert_eq!(with_twice("(macroexpand-1 'foo)"), "(ok none)");
-    assert_eq!(with_twice("(macroexpand-1 '())"), "(ok none)");
+    // confuse with a macro that expands to its own call form. It prints as
+    // `()`: an `Option<Sexpr>` is S-expression data and prints as the datum
+    // it is, the empty list included (functions.md §15) — this used to print
+    // `none` only because the interpreter built a box the type did not ask
+    // for.
+    assert_eq!(with_twice("(macroexpand-1 '(+ 1 2))"), "(ok ())");
+    assert_eq!(with_twice("(macroexpand-1 'foo)"), "(ok ())");
+    assert_eq!(with_twice("(macroexpand-1 '())"), "(ok ())");
 }
 
 #[test]

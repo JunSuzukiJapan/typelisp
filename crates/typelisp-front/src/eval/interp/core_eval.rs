@@ -115,6 +115,13 @@ pub(super) enum Op {
     UntagInt,
     /// `(tag-int E)` — the boundary's other side; the identity here.
     TagInt,
+    /// `(some-of REPR E)` — a niched `Option`'s `some`: `E`'s value, which
+    /// already is the word the `Option` is represented by. The identity
+    /// here; compiled code tags by `REPR`.
+    SomeOf,
+    /// `(box-option KEY E)` — a niched `Option` value put into the box a
+    /// `Sexpr` slot holds it as: `Heap::alloc_option` under `KEY`.
+    BoxOption,
     Global,
     SetGlobal,
     Assoc,
@@ -181,6 +188,8 @@ impl Op {
             wk::DYN_VALUE => Op::DynValue,
             wk::UNTAG_INT => Op::UntagInt,
             wk::TAG_INT => Op::TagInt,
+            wk::SOME_OF => Op::SomeOf,
+            wk::BOX_OPTION => Op::BoxOption,
             wk::GLOBAL => Op::Global,
             wk::SET_GLOBAL => Op::SetGlobal,
             wk::ASSOC => Op::Assoc,
@@ -784,7 +793,7 @@ impl Interp {
     ) -> Result<Value, EvalError> {
         let depth = self.trace_call_entry(heap, f, &argv, stepping)?;
         let result = self.enter_plain(heap, f, argv);
-        self.trace_call_exit(heap, &f.name, depth, result.as_ref().copied());
+        self.trace_call_exit(heap, &f.name, depth, f.sig.as_ref().map(|s| &s.1), result.as_ref().copied());
         result
     }
 
@@ -805,7 +814,14 @@ impl Interp {
         stepping: bool,
     ) -> Result<usize, EvalError> {
         let depth = self.trace_depth.get();
-        let rendered: Vec<String> = argv.iter().map(|a| self.trace_render(heap, *a)).collect();
+        // Each argument rendered by its declared representation: the value
+        // alone cannot say it is a niched `Option`.
+        let reprs = f.sig.as_ref().map(|s| &s.0);
+        let rendered: Vec<String> = argv
+            .iter()
+            .enumerate()
+            .map(|(i, a)| self.trace_render(heap, *a, reprs.and_then(|r| r.get(i))))
+            .collect();
         let call = if rendered.is_empty() {
             format!("({})", f.name)
         } else {
@@ -833,14 +849,14 @@ impl Interp {
     /// The depth is restored *before* the return is reported, so the two lines
     /// of one call line up. An unwind is reported rather than silent: it is
     /// exactly the moment a trace is most worth having.
-    pub(super) fn trace_call_exit(&self, heap: &mut Heap, name: &str, depth: usize, outcome: Result<Value, &EvalError>) {
+    pub(super) fn trace_call_exit(&self, heap: &mut Heap, name: &str, depth: usize, ret: Option<&Repr>, outcome: Result<Value, &EvalError>) {
         self.trace_depth.set(depth);
         if self.step_quiet_depth.get() == depth {
             self.step_quiet_depth.set(usize::MAX);
         }
         match outcome {
             Ok(v) => {
-                let text = self.trace_render(heap, v);
+                let text = self.trace_render(heap, v, ret);
                 self.trace_line(heap, depth, &format!("{} returned {}", name, text));
             }
             Err(e) => self.trace_line(heap, depth, &format!("{} exited non-locally: {}", name, e)),
@@ -979,7 +995,20 @@ impl Interp {
     /// open `pprint-logical-block` session, and a trace line that arrives in
     /// the middle of a program's own pretty-printed document belongs to
     /// neither.
-    pub(super) fn trace_render(&self, heap: &mut Heap, v: Value) -> String {
+    ///
+    /// `repr` is the value's declared representation where the caller has
+    /// one: a niched `Option` (`Repr::Niche`) is a bare word the renderer
+    /// cannot recognize, so it is written as `none`/`(some ...)` here, around
+    /// the payload's own rendering. Everything else renders as itself —
+    /// `Option<Sexpr>` included, which prints as the S-expression it is
+    /// (functions.md §15).
+    pub(super) fn trace_render(&self, heap: &mut Heap, v: Value, repr: Option<&Repr>) -> String {
+        if matches!(repr, Some(Repr::Niche(p)) if **p != Repr::Sexpr) {
+            if v == Value::Empty {
+                return "none".to_string();
+            }
+            return format!("(some {})", self.trace_render(heap, v, None));
+        }
         self.install_print_hooks();
         // `core::list` roots `v` across the one `cons` it takes to wrap it, and
         // rooting the finished list keeps `v` reachable through the format run,
@@ -1193,15 +1222,16 @@ pub(super) fn match_core_pattern(
         // `(pat-ctor sexpr 0 ..)` because the empty list outlives `Sexpr`'s
         // `nil` variant; see `Checker::pattern_form`.
         "pat-empty" => Ok(if v.is_empty() { Some(Vec::new()) } else { None }),
-        // `(pat-nonempty P)` — `Option<Sexpr>`'s `(some P)`. Under the niche
-        // the unwrapped value is the same word, so this rejects the empty
-        // list and then matches `P` against the value itself.
-        "pat-nonempty" => {
+        // `(pat-some REPR P)` — a niched `Option`'s `(some P)`. Under the
+        // niche the payload is the same `Value`, so this rejects the empty
+        // list and then matches `P` against the value itself; `REPR` is for
+        // compiled code, which has a tag to take off.
+        "pat-some" => {
             if v.is_empty() {
                 return Ok(None);
             }
-            let inner = core::field(heap, pat, 0)
-                .ok_or_else(|| EvalError::Internal("eval: (pat-nonempty ..) has no sub-pattern".to_string()))?;
+            let inner = core::field(heap, pat, 1)
+                .ok_or_else(|| EvalError::Internal("eval: (pat-some ..) has no sub-pattern".to_string()))?;
             match_core_pattern(it, heap, env, inner, v)
         }
         "pat-ctor" => {
@@ -1836,11 +1866,20 @@ impl Interp {
                 let fields = core::field(heap, tl, 1)
                     .ok_or_else(|| EvalError::Internal("exec: (defstruct ..) has no field list".to_string()))?;
                 let fields = repr_list(heap, fields, "defstruct")?;
-                self.root
-                    .borrow_mut()
-                    .get_or_create(name.parent())
-                    .types
-                    .insert(name.last_segment().to_string(), scope::TypeEntry::Struct(fields));
+                let templates = core::field(heap, tl, 2)
+                    .ok_or_else(|| EvalError::Internal("exec: (defstruct ..) has no field template list".to_string()))?;
+                let templates = str_list(heap, templates, "defstruct")?;
+                if templates.len() != fields.len() {
+                    return Err(EvalError::Internal(format!(
+                        "exec: (defstruct ..) has {} field(s) but {} template(s)",
+                        fields.len(),
+                        templates.len()
+                    )));
+                }
+                self.root.borrow_mut().get_or_create(name.parent()).types.insert(
+                    name.last_segment().to_string(),
+                    scope::TypeEntry::Struct { reprs: fields, templates: scope::FieldTemplates::Positional(templates) },
+                );
                 Ok(None)
             }
             // `(defenum PATH (SYM...) ((REPR...)...))` — unlike `defstruct`
@@ -1863,11 +1902,25 @@ impl Interp {
                         lists.len()
                     )));
                 }
-                let mut variants = Vec::with_capacity(names.len());
-                for (n, fields) in names.into_iter().zip(lists) {
-                    variants.push((n, repr_list(heap, fields, "defenum")?));
+                let per_variant_templates = core::field(heap, tl, 3)
+                    .ok_or_else(|| EvalError::Internal("exec: (defenum ..) has no variant templates".to_string()))?;
+                let template_lists = heap
+                    .list_to_vec(per_variant_templates)
+                    .map_err(|e| EvalError::Internal(format!("exec: (defenum ..) variant templates: {}", e)))?;
+                if template_lists.len() != names.len() {
+                    return Err(EvalError::Internal(format!(
+                        "exec: (defenum ..) has {} variant name(s) but {} template list(s)",
+                        names.len(),
+                        template_lists.len()
+                    )));
                 }
-                self.root.borrow_mut().register_enum(&name, EnumDef { variants });
+                let mut variants = Vec::with_capacity(names.len());
+                let mut templates = Vec::with_capacity(names.len());
+                for ((n, fields), ts) in names.into_iter().zip(lists).zip(template_lists) {
+                    variants.push((n, repr_list(heap, fields, "defenum")?));
+                    templates.push(str_list(heap, ts, "defenum")?);
+                }
+                self.root.borrow_mut().register_enum(&name, EnumDef { variants, templates });
                 Ok(None)
             }
             // `(module PATH BODY...)` — ensures the tree node exists (a
@@ -2065,6 +2118,20 @@ pub(super) fn repr_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<Repr
             Repr::read(heap, v).ok_or_else(|| {
                 EvalError::Internal(format!("exec: ({} ..) not a representation: {}", what, core::print(heap, v)))
             })
+        })
+        .collect()
+}
+
+/// A list of string literals — a `defstruct`/`defenum` form's field key
+/// templates.
+fn str_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<String>, EvalError> {
+    let vs = heap
+        .list_to_vec(list)
+        .map_err(|e| EvalError::Internal(format!("exec: ({} ..) template list: {}", what, e)))?;
+    vs.into_iter()
+        .map(|v| match v {
+            Value::Str(id) => Ok(heap.string(id).to_string()),
+            other => Err(EvalError::Internal(format!("exec: ({} ..) not a template string: {:?}", what, other))),
         })
         .collect()
 }

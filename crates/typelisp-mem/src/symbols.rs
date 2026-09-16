@@ -200,7 +200,7 @@ well_known_symbols! {
     METHOD => "method"
     PAT_WILD => "pat-wild"
     PAT_EMPTY => "pat-empty"
-    PAT_NONEMPTY => "pat-nonempty"
+    RETIRED_PAT_NONEMPTY => "pat-nonempty"
     PAT_BIND => "pat-bind"
     PAT_LIT => "pat-lit"
     PAT_GUARD => "pat-guard"
@@ -404,6 +404,16 @@ well_known_symbols! {
      one. The interpreter runs both as the identity, keeping only the check."
     UNTAG_INT => "untag-int"
     TAG_INT => "tag-int"
+
+    "Appended for the `Option<T>` niche (2026-09-17). `(some-of REPR E)` is
+     `E`'s value as a tagged field word (`none` stays `sexpr`'s empty-list
+     construct); `(pat-some REPR P)` rejects the empty-list word and applies
+     `P` to the payload it untags by `REPR`; `(box-option KEY E)` puts a
+     niched value into the `BoxedObj::Enum` box a `Sexpr` slot needs. The
+     `Option<Sexpr>`-only `pat-nonempty` retired into `pat-some`."
+    SOME_OF => "some-of"
+    PAT_SOME => "pat-some"
+    BOX_OPTION => "box-option"
 }
 
 

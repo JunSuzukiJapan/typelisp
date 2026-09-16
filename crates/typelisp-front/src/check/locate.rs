@@ -59,6 +59,8 @@ fn is_opaque(tag: SymRef) -> bool {
             | wk::PAT_GUARD
             | wk::PAT_CTOR
             | wk::PAT_TYPETEST
+            | wk::PAT_EMPTY
+            | wk::PAT_SOME
     )
 }
 
@@ -408,6 +410,12 @@ fn pattern_bind_names(heap: &Heap, pat: Value, scope: &mut Vec<String>) {
         // `(pat-typetest PATH KEY SUB)`.
         Some(wk::PAT_TYPETEST) => {
             if let Some(sub) = core::field(heap, pat, 2) {
+                pattern_bind_names(heap, sub, scope);
+            }
+        }
+        // `(pat-some REPR SUB)` — a niched `Option`'s `(some SUB)`.
+        Some(wk::PAT_SOME) => {
+            if let Some(sub) = core::field(heap, pat, 1) {
                 pattern_bind_names(heap, sub, scope);
             }
         }

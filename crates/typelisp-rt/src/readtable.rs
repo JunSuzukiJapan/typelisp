@@ -27,19 +27,10 @@ fn character(args: &[Value], i: usize, who: &str) -> Result<char, ArgError> {
     }
 }
 
-/// `Some(f)`/`None` under [`READER_MACRO_OPTION_KEY`], matching `option`'s
-/// variant order (`some` = 0, `none` = 1).
+/// `Some(f)`/`None` under [`READER_MACRO_OPTION_KEY`] — a niche, since a
+/// function value is never the empty list (`Heap::alloc_option`).
 fn found(heap: &mut Heap, f: Option<Value>) -> Value {
-    let key = heap.intern_type_key(READER_MACRO_OPTION_KEY);
-    match f {
-        Some(v) => {
-            heap.push_root(v);
-            let out = heap.alloc_enum(key, 0, vec![v]);
-            heap.pop_root();
-            out
-        }
-        None => heap.alloc_enum(key, 1, vec![]),
-    }
+    heap.alloc_option(READER_MACRO_OPTION_KEY, f)
 }
 
 /// Every readtable builtin, or `None` if `name` isn't one.

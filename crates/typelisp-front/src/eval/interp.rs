@@ -253,8 +253,14 @@ pub struct EnumDef {
     /// order — everything the two consumers need: the printer wants the name
     /// (`eval::format`), and the compiled-global boundary wants each field's
     /// representation to decode a box back into an enum value. The core
-    /// `(defenum PATH (SYM...) ((REPR...)...))` form carries exactly this.
+    /// `(defenum PATH (SYM...) ((REPR...)...) ((TEMPLATE...)...))` form
+    /// carries exactly this, plus the templates below.
     pub(crate) variants: Vec<(String, Vec<Repr>)>,
+    /// Each variant's fields' types as key templates
+    /// (`type_key::field_key_template`), parallel to `variants` — what the
+    /// printer instantiates to learn that a field holds a niche-represented
+    /// `Option` (`scope::FieldTemplates`).
+    pub(crate) templates: Vec<Vec<String>>,
 }
 
 /// The interpreter state: a runtime mirror of the checker's module tree
@@ -499,7 +505,15 @@ impl Interp {
         // (`rt_struct_*`), it has no constructor-pattern shape, and nothing
         // ever names one of its fields — so there is nothing for a `construct`
         // or a pattern to read here.
-        root.types.insert("vector".to_string(), scope::TypeEntry::Struct(Vec::new()));
+        // Its elements do print, though, and they are all of the one type
+        // argument: a uniform template says so.
+        root.types.insert(
+            "vector".to_string(),
+            scope::TypeEntry::Struct {
+                reprs: Vec::new(),
+                templates: scope::FieldTemplates::Uniform("$0".to_string()),
+            },
+        );
         // `Option`/`Result`/the four concrete error types are `AdtKind::Sum`
         // registrations in `Registry::with_builtins`
         // (`registry::builtin_sum_defs`, the single source both sides read)
@@ -516,6 +530,11 @@ impl Interp {
             // do — `Repr::of_by` with no ADT lookup, since none of these
             // mention a user type (`Option<T>`/`Result<T,E>`'s fields are type
             // variables, an error type's are scalars).
+            let templates = def
+                .variants
+                .iter()
+                .map(|v| v.fields.iter().map(|t| crate::type_key::field_key_template(&def.params, t)).collect())
+                .collect();
             let variants = def
                 .variants
                 .into_iter()
@@ -524,7 +543,7 @@ impl Interp {
                     (v.name, reprs)
                 })
                 .collect();
-            root.register_enum(&name, EnumDef { variants });
+            root.register_enum(&name, EnumDef { variants, templates });
         }
         Interp {
             root: RefCell::new(root),
@@ -706,6 +725,30 @@ impl Interp {
         // `collect_struct_and_enum_types` returns a `HashMap`, so sort for a
         // deterministic startup sequence — two runs of `compile-file` on the
         // same source must produce the same executable.
+        out.sort();
+        out
+    }
+
+    /// Every type's field key templates, spelled for
+    /// `typelisp_print::aot::rt_print_field_template`: `(base type key,
+    /// variant or NO_VARIANT, index or EVERY_FIELD, template)` — the
+    /// executable's copy of what [`Self::field_is_niched_option`] reads
+    /// from the scope tree here. Sorted, for the same reason
+    /// [`Self::enum_variant_descriptors`] is.
+    pub fn field_template_descriptors(&self) -> Vec<(String, i64, i64, String)> {
+        let mut raw = Vec::new();
+        self.root.borrow().collect_field_templates(&[], &mut raw);
+        let mut out: Vec<(String, i64, i64, String)> = raw
+            .into_iter()
+            .map(|(path, variant, index, t)| {
+                (
+                    crate::type_key::type_key_of(&path).into_owned(),
+                    variant.map_or(typelisp_print::aot::NO_VARIANT, |v| v as i64),
+                    index.map_or(typelisp_print::aot::EVERY_FIELD, |i| i as i64),
+                    t,
+                )
+            })
+            .collect();
         out.sort();
         out
     }
@@ -1120,6 +1163,10 @@ impl Interp {
             // `bignum`/`ratio`, structs, enums, closures, trait objects, and a
             // `Scope<V>` (one heap object since Phase 1a) — is already a heap
             // `Value`, and crosses as the tagged `i64` the `rt_*` shims read.
+            // A niched `Option<T>` too: its `some` is the `Value` of a `T`
+            // as a field holds it (`Value::Int` for a narrow payload, which
+            // `encode` tags as a fixnum — the field encoding), its `none`
+            // the empty list.
             _ => Ok(typelisp_rt::encode(*v)),
         }
     }
@@ -1224,8 +1271,13 @@ impl Interp {
                 other => return Err(crossing_mismatch("a random-state", other)),
             },
             // Every remaining representation is a heap value crossing as the
-            // tagged `i64` the `rt_*` shims read.
+            // tagged `i64` the `rt_*` shims read. A niched `Option<T>` is one
+            // too: the empty-list immediate for `none`, and `T`'s *field*
+            // encoding for `some` — a fixnum for a narrow payload, a float
+            // box for a float one — which is exactly what `decode` reads back
+            // as the `Value` the interpreter represents that `Option` by.
             Repr::Sexpr
+            | Repr::Niche(_)
             | Repr::Struct
             | Repr::Enum
             | Repr::Dyn
@@ -2430,6 +2482,18 @@ impl Interp {
         let base = crate::type_key::split_key(type_key).0;
         let path = Path::from_segments(base.split("::").map(str::to_string).collect());
         self.root.borrow().enum_variant_name(&path, variant)
+    }
+
+    /// The registered definition's field template, instantiated by the
+    /// key's own arguments — `gen<option<int>>`'s field `$0` is
+    /// `option<int>`, a niche. See [`typelisp_print::PrintEnv`].
+    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> bool {
+        let base = crate::type_key::split_key(type_key).0;
+        let path = Path::from_segments(base.split("::").map(str::to_string).collect());
+        let root = self.root.borrow();
+        let Some(template) = root.field_template(&path, variant, index) else { return false };
+        let args = typelisp_mem::type_key_args(type_key);
+        typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(template, &args))
     }
 
     pub(crate) fn print_vars(&self, heap: &Heap) -> crate::eval::format::PrintVars {
@@ -4357,14 +4421,11 @@ const MACROEXPAND_OPTION_KEY: &str = "option<sexpr>";
 /// fixed signature (`registry`'s `eval`: `Result<Option<Sexpr>, EvalError>`).
 const EVAL_RESULT_KEY: &str = "result<option<sexpr>,evalerror>";
 
-/// `Some(v)`/`None`, matching `option_def`'s variant order (`some` = 0,
-/// `none` = 1).
+/// `Some(v)`/`None` under the instantiation `key` spells — the niche when
+/// the payload allows one, else a box in `option_def`'s variant order
+/// (`some` = 0, `none` = 1). `Heap::alloc_option` decides which.
 fn option_value(heap: &mut Heap, key: &str, v: Option<Value>) -> Value {
-    let (variant, fields) = match v {
-        Some(x) => (0, vec![x]),
-        None => (1, vec![]),
-    };
-    crate::type_key::alloc_enum_keyed(heap, key, variant, fields)
+    heap.alloc_option(key, v)
 }
 
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
@@ -4582,6 +4643,9 @@ fn vector_pop(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, E
 /// the slot pointing at a finished one otherwise.
 const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::runtime::PrintHooks {
     enum_variant_name: |type_key, variant| with_active_interp(|i| i.enum_variant_name(type_key, variant))?,
+    field_is_niched_option: |type_key, variant, index| {
+        with_active_interp(|i| i.field_is_niched_option(type_key, variant, index)).unwrap_or(false)
+    },
     print_object: |heap, v, escape| match with_active_interp(|i| i.print_object(heap, v, escape)) {
         Some(r) => r,
         // No interpreter registered: the printer is running under a bare

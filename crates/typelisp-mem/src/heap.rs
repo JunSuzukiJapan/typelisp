@@ -2568,11 +2568,13 @@ pub fn base_type_key(key: &str) -> &str {
 pub fn inner_type_key(key: &str) -> Option<&str> {
     let open = key.find('<')?;
     let inner = key[open + 1..].strip_suffix('>')?;
+    // Parentheses nest too: a function type's parameter list is spelled
+    // `(fn (int,string) int)`, and its commas are its own.
     let mut depth = 0i32;
     for c in inner.chars() {
         match c {
-            '<' => depth += 1,
-            '>' => depth -= 1,
+            '<' | '(' => depth += 1,
+            '>' | ')' => depth -= 1,
             ',' if depth == 0 => return None,
             _ => {}
         }

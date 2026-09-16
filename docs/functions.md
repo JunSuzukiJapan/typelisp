@@ -863,6 +863,35 @@ CL の「fill pointer を持つベクタ」と「simple なベクタ」の区別
 構成子は `Option::some`/`Option::none`/`Result::ok`/`Result::err`（または `(use option)`/
 `(use result)` で裸名 `some`/`none`/`ok`/`err` も使用可能）。
 
+### 7.0 `Option<T>` の実行時表現（ニッチ）
+
+Rust と同じく、**`Option<T>` は `T` の値が空リストの語 `()` になり得ないかぎり箱を作らない**。
+`some v` は `v` そのもの（`T` のフィールド表現——固定幅整数なら fixnum、浮動小数なら箱、
+それ以外は既にタグ付きの語）、`none` は空リストの即値で、確保も間接参照も無い。
+`Option<Sexpr>`（空リストが `none`）はこの規則の最初の一例にすぎず、`Option<int>`、
+`Option<string>`、`Option<my-struct>`、`Option<f64>`、`Option<(fn ...)>` もすべて同じ。
+
+箱に入るのは、`T` の値が空リストの語であり得る場合だけ:
+
+| `T` | 表現 | 理由 |
+|---|---|---|
+| `Option<U>`（入れ子） | 箱 | 内側の `none` が外側の `none` と同じ語になる |
+| `()` | 箱 | `()` の値が空リストの語そのもの |
+| `ptr` / `c-long` / `c-ulong` | 箱 | 64bit 全部が値で、タグの置き場が無い |
+| それ以外 | ニッチ（箱なし） | — |
+
+表現は型だけで決まり、値からは読めない。そのため型の無い場所——`Sexpr` のスロット、
+構造体フィールドの印字、REPL のエコー、`trace` の行——では静的な型から `(some ...)`/`none` を
+復元して見せる（§15 の印字の項）。`Sexpr` が期待される位置にニッチ表現の `Option` を渡すと
+チェッカーが箱に入れ直す（`box-option`）ので、`(format false "~a" opt)` は従来どおり
+`(some 1)` と出る。制約が 2 つある:
+
+- **`:dyn Trait` には入れられない**（`(impl Speak Option<int> ...)` した値を `:dyn Speak` に
+  渡すのはエラー）。fat box は中の値の型キーで自分を名乗るが、ニッチ表現には型キーを載せる箱が無い。
+- `Sexpr` からの `(the Option<T> ...)` ダウンキャストは**構成子を名指す**——
+  `(the Option<int> (some x))` / `(the Option<int> (none))`。`(the Option<int> o)` と全体を束縛する
+  形は「箱をニッチ型の名前に束縛する」ことになるのでエラー。
+
 ### 7.1 エラー型と `Error` トレイト
 
 Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイト**。エラーを表す具象型は
@@ -1228,8 +1257,8 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (some (+ 5 5)))
-(macroexpand-1 '(+ 1 2))     ; => (ok none)
+(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none は空リストとして出る（Option<Sexpr> は透過）
 (macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
 ```
 
@@ -1304,12 +1333,19 @@ CL にあってここに無いもの（cl-parity-plan.md Phase 4c に理由を�
 **`Option<Sexpr>` は透過的に印字される。** S 式データの型が `Option<Sexpr>` になったため、
 `(some x)` の包みは印字に現れず、中身がそのまま出る。空リストは `()` と出る。
 これは `Option<Sexpr>` の実行時表現が `Sexpr` そのもの（空リストが `none`）だからで、
-他の `Option<T>` は従来どおり `(some ...)` / `(none)` と印字する。
+他の `Option<T>` は従来どおり `(some ...)` / `none` と印字する——実行時表現がニッチ（§7.0）でも
+同じ。`format` の引数は `Sexpr` へ渡る境界で箱に入れ直され、構造体・列挙・`Vector` の中の
+`Option<T>` フィールドは定義の型（インスタンス化済み）を見て `(some ...)`/`none` に復元される。
+`Option<Sexpr>` の透過はフィールドでも変わらない: `(eval ...)` の `Result<Option<Sexpr>,…>` は
+`(ok 42)`、`none` なら `(ok ())` と出る。
 
 ```lisp
 (println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(defstruct p (x Option<int>))
+(println "~a" (p::new (Option::some 1)))               ; => #<p (some 1)>
+(println "~a" (p::new (Option::none)))                 ; => #<p none>
 ```
 
 **1 引数プリンタ**（CLHS 22.1.3）は書式展開ではなく、値ひとつをそのまま印字する。

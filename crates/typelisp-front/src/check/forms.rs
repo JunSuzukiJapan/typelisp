@@ -25,6 +25,7 @@ use typelisp_mem::{Error, Heap, Loc, RootScope, Value};
 
 use crate::check::checker::MacroLambda;
 use crate::check::core::{self, Checked, Items};
+use crate::check::repr::Repr;
 use crate::check::resolved::CompileTarget;
 use crate::types::{Path, Type};
 
@@ -382,6 +383,29 @@ pub(super) fn dyn_upcast_form(heap: &mut Heap, to_trait: &Path, value: Value) ->
     f.push(tp);
     f.push(value);
     f.finish("dyn-upcast")
+}
+
+/// `(some-of REPR FORM)` — a niched `Option<T>`'s `some`: `FORM`'s value as
+/// the tagged word a field of type `T` holds (`Repr::Niche`, `check/repr.rs`).
+/// `REPR` is `T`'s representation, which is what the island tags by; the
+/// interpreter's `Value` already is that word.
+pub(super) fn some_of_form(heap: &mut Heap, payload: &Repr, value: Value) -> Result<Value, Error> {
+    let repr = payload.write(heap)?;
+    let mut s = RootScope::new(heap);
+    s.push_root(repr);
+    core::tagged(&mut s, "some-of", &[repr, value])
+}
+
+/// `(box-option KEY FORM)` — a niched `Option` put into the `BoxedObj::Enum`
+/// box a `Sexpr` slot holds it as (`some` = variant 0 around the same word,
+/// `none` = variant 1), under the identity `KEY` spells. The printer, `eq`
+/// and every other consumer of a `Sexpr` datum see the same box a boxed
+/// `Option` is; the niche is a statement about typed positions only.
+pub(super) fn box_option_form(heap: &mut Heap, key: &str, value: Value) -> Result<Value, Error> {
+    let key = heap.alloc_string(key.to_string());
+    let mut s = RootScope::new(heap);
+    s.push_root(key);
+    core::tagged(&mut s, "box-option", &[key, value])
 }
 
 /// `(dyn-value FORM)` — the concrete value inside a trait object, typed as

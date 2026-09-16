@@ -437,7 +437,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 265] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 266] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -446,7 +446,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 265] {
         rt_format, rt_pprint, rt_pprint_block_end, rt_pprint_block_start, rt_pprint_indent,
         rt_pprint_list_exhausted, rt_pprint_newline, rt_pprint_pop, rt_pprint_tab, rt_print, rt_println,
     };
-    use typelisp_print::aot::{rt_format_call_method, rt_print_enum_variant, rt_print_object_method};
+    use typelisp_print::aot::{rt_format_call_method, rt_print_enum_variant, rt_print_field_template, rt_print_object_method};
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
     use typelisp_rt::coroutine::{
@@ -585,6 +585,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 265] {
         // installs `INTERP_PRINT_HOOKS` instead, so nothing emits a call to
         // either there.
         ("rt_print_enum_variant", rt_print_enum_variant as usize),
+        ("rt_print_field_template", rt_print_field_template as usize),
         ("rt_print_object_method", rt_print_object_method as usize),
         // The `~/name/` directive's own table: one entry per `(type, method)`
         // the checker found by scanning this program's literal control

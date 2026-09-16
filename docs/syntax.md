@@ -97,7 +97,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   位置にもそのまま渡せる（アップキャスト）。継承関係の無いトレイトへは渡せない — 制限は §5.2。
   `:dyn` を型位置以外に書くとエラー。詳細は [dev/language-design.md](dev/language-design.md) §5.2。
 - 組み込みジェネリック型: `Option<T>`（`Some(T)` / `None`）、`Result<T,E>`（`Ok(T)` / `Err(E)`）、
-  `Sexpr`、`HashTable<K,V>`、`Vector<T>`。組み込みの具象エラー型は `ParseIntError` /
+  `Sexpr`、`HashTable<K,V>`、`Vector<T>`。`Option<T>` は Rust と同じくニッチ表現——`T` の値が
+  空リストの語になり得ないかぎり箱を作らず、`some v` は `v` そのもの、`none` は空リストの即値
+  （入れ子の `Option`、`()`、生の C 語だけが箱に入る）。詳細は functions.md §7.0。組み込みの具象エラー型は `ParseIntError` /
   `ParseFloatError` / `ReadError` / `EvalError` / `FileError`（`Error` は型ではなく prelude のトレイト
   ——`:dyn Error` として使う）。詳細は functions.md を参照。
 - **型とトレイトは同じ名前空間**（Rust と同じ）: 同一モジュール内で型（`defstruct`/`defenum`）と

@@ -65,14 +65,22 @@ use crate::{ConsRef, SymRef};
 /// committed island's bodies are under the old layout while the SOURCE it
 /// compiles emits the new one, and only the bootstrap binary may run in
 /// that state.
-pub const LAYOUT: u8 = LAYOUT_FIXNUM_ONE_BIT;
+pub const LAYOUT: u8 = LAYOUT_OPTION_NICHE;
 
 /// Every word carried a 3-bit tag in its low bits; a fixnum kept 61 bits.
 /// Retired 2026-09-15; the number stays taken so a dump that records it is
 /// refused by name rather than misread.
 pub const LAYOUT_THREE_BIT: u8 = 0;
 /// The layout above: a fixnum spends one bit, every other class three or six.
+/// Retired 2026-09-17 with the `Option<T>` niche; the number stays taken.
 pub const LAYOUT_FIXNUM_ONE_BIT: u8 = 1;
+/// [`LAYOUT_FIXNUM_ONE_BIT`]'s words, plus the `Option<T>` niche: an
+/// `Option` whose payload can be told from the empty-list immediate is
+/// *that payload's tagged word* for `some` and [`NIL_WORD`] for `none`,
+/// with no box (`crate::option`). A body compiled under the previous
+/// layout builds and expects boxes for those same types, so it cannot run
+/// under this one.
+pub const LAYOUT_OPTION_NICHE: u8 = 2;
 
 /// A fixnum is `n << FIXNUM_SHIFT` with the low bit clear.
 pub const FIXNUM_SHIFT: i64 = 1;

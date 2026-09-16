@@ -692,6 +692,34 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             f.push(v);
             f.finish(&tag)
         }
+        // A niched `Option`'s `some`: `(some-of REPR E)` -> `(some-of KIND E)`.
+        // The island tags `E`'s register value into its field word by
+        // `KIND`, the same number a struct field of that type is tagged by.
+        "some-of" => {
+            let repr = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
+            let repr = Repr::read(heap, repr).ok_or_else(|| malformed(heap, form))?;
+            let inner = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+            let mut f = Items::new(heap);
+            f.push(Value::Int(repr.field_kind()));
+            let v = to_island(f.heap(), inner, cx)?;
+            f.push(v);
+            f.finish("some-of")
+        }
+        // `(box-option KEY E)` -> `(box-option (str ...) E)`: the key crosses
+        // as the island's string literal, the way every type identity does.
+        "box-option" => {
+            let key = match core::field(heap, form, 0) {
+                Some(Value::Str(id)) => heap.string(id).to_string(),
+                _ => return Err(malformed(heap, form)),
+            };
+            let inner = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+            let mut f = Items::new(heap);
+            let key = str_form(f.heap(), &key)?;
+            f.push(key);
+            let v = to_island(f.heap(), inner, cx)?;
+            f.push(v);
+            f.finish("box-option")
+        }
 
         // Reflection: the REPL tool layer acts on the *running* interpreter's
         // own heap and scope tree, which has no meaning inside code being
@@ -2504,11 +2532,13 @@ fn pattern_bindings(
         // that test runs, and at the same representation as the value under
         // test — the arm body cannot name it.
         "pat-guard" => out.push((symbol_field_sym(heap, pat, 0)?, value.clone())),
-        // The niche: `(some P)` over an `Option<Sexpr>` applies `P` to the
-        // very same word, so `P` binds at the same representation.
-        "pat-nonempty" => {
-            let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
-            pattern_bindings(heap, sub, value, cx, out)?;
+        // The niche: `(some P)` over a niched `Option<T>` applies `P` to the
+        // payload read back at `T`'s representation — which the node carries.
+        "pat-some" => {
+            let repr = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
+            let payload = Repr::read(heap, repr).ok_or_else(|| malformed(heap, pat))?;
+            let sub = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
+            pattern_bindings(heap, sub, &payload, cx, out)?;
         }
         "pat-ctor" => {
             let parts = core::fields(heap, pat)?;
@@ -2564,14 +2594,20 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
         "pat-wild" => core::tagged(heap, "pat-wild", &[]),
         // Nothing to carry: the node *is* the test.
         "pat-empty" => core::tagged(heap, "pat-empty", &[]),
-        // `(pat-nonempty P)` — the sub-pattern is translated like any other;
-        // the island applies it to the same value after the emptiness test.
-        "pat-nonempty" => {
-            let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
+        // `(pat-some REPR P)` -> `(pat-some KIND P)`: after the emptiness
+        // test the island reads the payload back through `KIND` (a fixnum
+        // untagged, a float box opened, a tagged word passed through) and
+        // applies `P` to that — so `P` is translated at the payload's
+        // representation, not the `Option`'s.
+        "pat-some" => {
+            let repr = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
+            let payload = Repr::read(heap, repr).ok_or_else(|| malformed(heap, pat))?;
+            let sub = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
             let mut f = Items::new(heap);
-            let sub = translate_pattern(f.heap(), sub, value, cx)?;
+            f.push(Value::Int(payload.field_kind()));
+            let sub = translate_pattern(f.heap(), sub, &payload, cx)?;
             f.push(sub);
-            f.finish("pat-nonempty")
+            f.finish("pat-some")
         }
         // `(pat-bind SYM)` -> `(pat-bind "SYM" KIND)`. The name crosses as a
         // string because the island's `env` is keyed by one; the kind is

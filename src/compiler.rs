@@ -665,6 +665,7 @@ pub const SOURCE: &str = r#"
 (defsignature compile-int-any-width (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
 (defsignature compile-int-literal (llvm-module string llvm-builder Option<Sexpr>) llvm-value)
 (defsignature compile-untag-int (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function Option<llvm-basic-block> Option<llvm-value> string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block> Option<llvm-basic-block> Option<Sexpr>) llvm-value)
+(defsignature compile-box-option (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function Option<llvm-basic-block> Option<llvm-value> string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block> Option<llvm-basic-block> Option<Sexpr>) llvm-value)
 (defsignature compile-unit (llvm-module string llvm-builder) llvm-value)
 (defsignature compile-var
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> Option<Sexpr>)
@@ -797,7 +798,10 @@ pub const SOURCE: &str = r#"
     ;; is no bit manipulation and no box to open. (`5` reaches here from
     ;; `Sexpr` construction rather than from `field_kind`; see that
     ;; function's doc comment on the two producers of these numbers.)
-    ((5 6 8 9) v)
+    ;; A niched `Option`(101) is a tagged word too — its payload's field
+    ;; word, or the empty-list immediate — and passes through the same way;
+    ;; its own number exists for `niche-kind?`, not for here.
+    ((5 6 8 9 101) v)
     ;; `cons`(7): the only variant with two fields.
     (7 (let ((args-ptr (alloca-args builder 1)))
          (store-arg builder args-ptr 0 v)
@@ -867,8 +871,9 @@ pub const SOURCE: &str = r#"
           (build-call builder (get-function m "rt_f32_new") args-ptr 1)))
     (3 (tag-small builder v 1))
     (4 (tag-small builder (build-add builder v (const-word builder 1)) 0))
-    ;; `6` is every already-tagged word: both directions leave it alone.
-    (6 v)
+    ;; `6` is every already-tagged word: both directions leave it alone. So
+    ;; is a niched `Option`(101), which is one by construction.
+    ((6 101) v)
     ;; `unit`(100): the slot holds a tagged `Value::Empty` -- `NIL_WORD`,
     ;; the constant `7` (`typelisp-mem`'s `tagged.rs`), the same word an
     ;; interpreted writer puts in a `()` field,
@@ -1920,44 +1925,31 @@ pub const SOURCE: &str = r#"
     (let ((raw (build-call builder (get-function m "rt_struct_field_get") args-ptr 2)))
       (compile-sexpr-field builder m raw kind 0))))
 
-;; The literal tagged `Sexpr::Str` "option", built directly from raw
-;; Unicode scalar constants (`rt_str_new`'s own "raw char scalars"
-;; contract — no `core_bridge::str_form` AST node needed) — for a
-;; natively-compiled builtin that must synthesize a real `Option<T>` value
-;; with no corresponding source-level `Option::some`/`none` call site to
-;; derive a type-name form from (`try-bignum->int`'s `rt_data_new` calls
-;; below being the one case today).
-(defun compile-option-type-name ((builder llvm-builder) (m llvm-module)) llvm-value
-  (let ((args-ptr (alloca-args builder 6)))
-    (store-arg builder args-ptr 0 (const-word builder 111))
-    (store-arg builder args-ptr 1 (const-word builder 112))
-    (store-arg builder args-ptr 2 (const-word builder 116))
-    (store-arg builder args-ptr 3 (const-word builder 105))
-    (store-arg builder args-ptr 4 (const-word builder 111))
-    (store-arg builder args-ptr 5 (const-word builder 110))
-    (build-call builder (get-function m "rt_str_new") args-ptr 6)))
+;; Whether an `Option` around a value of field kind `kind` is a niche
+;; (`Repr::Niche`, `check/repr.rs`): `some` is the value's own field word
+;; and `none` the empty-list immediate, with no box. True for every kind
+;; whose field word is never that immediate — a fixnum, a float box, a
+;; char, a bool, an already-tagged word. False for a unit (100: its field
+;; word *is* the immediate), a niched `Option` (101: its `none` is), and
+;; the unrepresentable (0). The island's twin of `Repr::niches`; a builder
+;; that has only a kind (`vector-op`'s `pop`) asks this, one that has the
+;; checker's answer (`some-of`, `pat-some`) does not need to.
+(defun niche-kind? ((kind int)) bool
+  (or (eq kind 1) (eq kind 2) (eq kind 3) (eq kind 4) (eq kind 6) (eq kind 11)))
 
-;; The `(some raw)` an always-succeeding conversion returns. `kind` is the
-;; field's `Repr::field_kind` — the payload has to be tagged the way every
-;; other struct/enum field is, `rt_data_new`'s contract being the same
-;; tagged-field one `rt_struct_new` has.
+;; The `(some raw)` an always-succeeding conversion returns: the niche —
+;; `raw` tagged the way a field of its kind is (`compile-tag-struct-field`),
+;; which is the whole value. Every conversion that reaches here yields a
+;; scalar, so the niche always applies; a caller with a kind that does not
+;; niche has an `Option` to box and must not come here.
 (defun build-some-of ((builder llvm-builder) (m llvm-module) (raw llvm-value) (kind int)) llvm-value
-  (let ((some-args (alloca-args builder 3)))
-    (store-arg builder some-args 0 (compile-option-type-name builder m))
-    (store-arg builder some-args 1 (const-word builder 0))
-    (store-arg builder some-args 2 (compile-tag-struct-field builder m raw kind))
-    (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
-      (push-permanent-sexpr-root builder m some-box)
-      some-box)))
+  (if (niche-kind? kind)
+      (compile-tag-struct-field builder m raw kind)
+      (panic "build-some-of: the payload kind does not niche, so this Option must be boxed by its caller")))
 
-;; The `(none)` of the same `Option`.
+;; The `(none)` of a niched `Option`: the empty-list immediate.
 (defun build-none-of ((builder llvm-builder) (m llvm-module)) llvm-value
-  (let ((none-args (alloca-args builder 2)))
-    (store-arg builder none-args 0 (compile-option-type-name builder m))
-    (store-arg builder none-args 1 (const-word builder 1))
-    (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
-      (push-permanent-sexpr-root builder m none-box)
-      none-box)))
+  (nil-word builder))
 
 ;; The `Option` a `try-*` conversion returns: `(some raw)` when `fits` is
 ;; nonzero, `(none)` otherwise.
@@ -2029,6 +2021,14 @@ pub const SOURCE: &str = r#"
       (int (compile-int-literal m fn-name builder e))
       (untag-int (compile-untag-int m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (tag-int (tag-fixnum builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr e)))))
+      ;; `(some-of KIND E)` -- a niched `Option`'s `some`: `E`'s register
+      ;; value tagged into its field word by `KIND`, and that word is the
+      ;; whole value (`none` is the empty-list construct, `pat-some` the
+      ;; reader). The kind is the payload's, which is what has to be tagged.
+      (some-of (compile-tag-struct-field builder m
+                 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr e))))
+                 (sexpr-int (sexpr-car (sexpr-cdr e)))))
+      (box-option (compile-box-option m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (char (compile-char m fn-name builder e))
       (bool (compile-bool m fn-name builder e))
       (float-any-width (compile-float-any-width m fn-name builder e))
@@ -2162,6 +2162,41 @@ pub const SOURCE: &str = r#"
 
 (defun compile-untag-int ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (untag-int-value builder m cur-fn (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr e)))))
+
+;; `(box-option (str ...) E)` -- a niched `Option` value put into the
+;; `BoxedObj::Enum` box a `Sexpr` slot holds it as, under the instantiation's
+;; own name: `none` (the empty-list word) becomes variant 1 with no field,
+;; anything else variant 0 around that same word (already a tagged field
+;; word, which is `rt_data_new`'s contract). The value is spilled to a rooted
+;; slot first: the name literal allocates, and a payload box must survive it.
+(defun compile-box-option ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
+    (let* ((v-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+           (name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr e))))
+           (v (load-raw builder v-slot 0))
+           (none-block (append-block cur-fn "box-none"))
+           (some-block (append-block cur-fn "box-some"))
+           (merge-block (append-block cur-fn "box-merge"))
+           (slot (alloca-args builder 1)))
+      (build-cond-br builder (build-icmp-eq builder v (nil-word builder)) none-block some-block)
+      (position-at-end builder none-block)
+      (let ((none-args (alloca-args builder 2)))
+        (store-arg builder none-args 0 name-v)
+        (store-arg builder none-args 1 (const-word builder 1))
+        (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
+          (push-permanent-sexpr-root builder m none-box)
+          (store-arg builder slot 0 none-box)))
+      (build-br builder merge-block)
+      (position-at-end builder some-block)
+      (let ((some-args (alloca-args builder 3)))
+        (store-arg builder some-args 0 name-v)
+        (store-arg builder some-args 1 (const-word builder 0))
+        (store-arg builder some-args 2 v)
+        (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
+          (push-permanent-sexpr-root builder m some-box)
+          (store-arg builder slot 0 some-box)))
+      (build-br builder merge-block)
+      (position-at-end builder merge-block)
+      (load-raw builder slot 0)))
 
 ;; `(char c)` -- a bare `char` literal. Compiled the same
 ;; way `compile-int-any-width` is (a plain, untagged `i64` scalar --
@@ -4352,18 +4387,22 @@ pub const SOURCE: &str = r#"
       ;; name a variant: the empty list outlives `Sexpr`'s `nil`.
       (pat-empty
        (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v 0) fail-block))
-      ;; `(pat-nonempty P)` -- `Option<Sexpr>`'s `(some P)`. The niche makes
-      ;; the unwrapped value the same word, so this rejects the empty list
-      ;; and then applies `P` to that same `v`.
+      ;; `(pat-some KIND P)` -- a niched `Option`'s `(some P)`. The niche
+      ;; makes the payload the same word, read back through its field kind
+      ;; (`compile-sexpr-field`: a fixnum untagged, a float box opened, a
+      ;; tagged word as is), so this rejects the empty list and then applies
+      ;; `P` to that payload.
       ;;
       ;; One comparison: the empty list is a single word (`NIL_WORD`, 7 —
       ;; `typelisp-mem`'s `tagged.rs`), and this is the opposite of the nil
       ;; test `compile-sexpr-tag-test` emits for variant 0.
-      (pat-nonempty
+      (pat-some
        (progn
          (compile-pattern-guard builder cur-fn
            (build-icmp-ne builder v (nil-word builder)) fail-block)
-         (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v (sexpr-car (sexpr-cdr pat)) fail-block)))
+         (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup
+           (compile-sexpr-field builder m v (sexpr-int (sexpr-car (sexpr-cdr pat))) 0)
+           (sexpr-car (sexpr-cdr (sexpr-cdr pat))) fail-block)))
       ;; `(pat-bind NAME KIND)` -- binds into a fresh slot in this arm's own
       ;; frame. A *frame* slot, not an `alloca`: the name stays in scope for
       ;; the whole arm body, which can suspend, and the machine frame an
@@ -5158,23 +5197,34 @@ pub const SOURCE: &str = r#"
                     (slot (alloca-args builder 1)))
                (build-cond-br builder empty then-block else-block)
                (position-at-end builder then-block)
-               (let ((none-args (alloca-args builder 2)))
-                 (store-arg builder none-args 0 option-name-v)
-                 (store-arg builder none-args 1 (const-word builder 1))
-                 (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
-                   (push-permanent-sexpr-root builder m none-box)
-                   (let ((ignored (store-arg builder slot 0 none-box)))
-                     (build-br builder merge-block))))
+               ;; The `Option<T>` is a niche when `T`'s kind allows one
+               ;; (`niche-kind?`): `none` is then the empty-list immediate
+               ;; and `some` the popped field word itself. Otherwise (a
+               ;; `Vector<Option<T>>`, say) it is the box `rt_data_new`
+               ;; builds under the instantiation's own name.
+               (let ((ignored (store-arg builder slot 0
+                                (if (niche-kind? kind)
+                                    (nil-word builder)
+                                    (let ((none-args (alloca-args builder 2)))
+                                      (store-arg builder none-args 0 option-name-v)
+                                      (store-arg builder none-args 1 (const-word builder 1))
+                                      (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
+                                        (push-permanent-sexpr-root builder m none-box)
+                                        none-box))))))
+                 (build-br builder merge-block))
                (position-at-end builder else-block)
                (let* ((raw (build-call builder (get-function m "rt_struct_pop_field") args-ptr 1))
-                      (some-args (alloca-args builder 3)))
-                 (store-arg builder some-args 0 option-name-v)
-                 (store-arg builder some-args 1 (const-word builder 0))
-                 (store-arg builder some-args 2 raw)
-                 (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
-                   (push-permanent-sexpr-root builder m some-box)
-                   (let ((ignored (store-arg builder slot 0 some-box)))
-                     (build-br builder merge-block))))
+                      (ignored (store-arg builder slot 0
+                                 (if (niche-kind? kind)
+                                     raw
+                                     (let ((some-args (alloca-args builder 3)))
+                                       (store-arg builder some-args 0 option-name-v)
+                                       (store-arg builder some-args 1 (const-word builder 0))
+                                       (store-arg builder some-args 2 raw)
+                                       (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
+                                         (push-permanent-sexpr-root builder m some-box)
+                                         some-box))))))
+                 (build-br builder merge-block))
                (position-at-end builder merge-block)
                (load-raw builder slot 0))))
           ("push"
@@ -5844,16 +5894,16 @@ pub const SOURCE_EMITS_ABI: u8 = typelisp_abi::BODY_ABI_COROUTINE;
 /// the runtime's `rt_*` shims encode and decode under
 /// `typelisp_mem::tagged::LAYOUT`, so a body under any other layout is
 /// refused at install (`compile::driver::install_compiled_library`).
-pub const ISLAND_DUMP_BODY_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_FIXNUM_ONE_BIT;
+pub const ISLAND_DUMP_BODY_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_OPTION_NICHE;
 
 /// Which tag layout the bodies inside [`ISLAND_DUMP`] *emit*. Differs from
 /// [`ISLAND_DUMP_BODY_LAYOUT`] for exactly the middle generation of a layout
 /// changeover: old bodies, run on the old runtime by the bootstrap binary
 /// alone, emitting the new layout.
-pub const ISLAND_DUMP_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_FIXNUM_ONE_BIT;
+pub const ISLAND_DUMP_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_OPTION_NICHE;
 
 /// Which tag layout [`SOURCE`] as it stands **now** emits.
-pub const SOURCE_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_FIXNUM_ONE_BIT;
+pub const SOURCE_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_OPTION_NICHE;
 
 /// Loads the compiler island as **native code** (interp-closure removal
 /// Stage 4): the committed dump's checked state and definitions — which

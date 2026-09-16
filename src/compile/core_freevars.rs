@@ -321,6 +321,10 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // lets that refusal be the error a user sees.
         wk::STEP => from(0),
         wk::RETURN | wk::PANIC | wk::DYN_VALUE | wk::UNTAG_INT | wk::TAG_INT => from(0),
+        // `(some-of REPR E)` / `(box-option KEY E)` — the operand only; the
+        // representation is not a form (a parametric one is a list headed by
+        // a symbol, `field-get`'s trap below) and the key is a `(str ...)`.
+        wk::SOME_OF | wk::BOX_OPTION => from(1),
         // `(block NAME BODY REPR)` — the body only. The name is a `(str ...)`
         // node and *not* a sub-form to walk: it is a compile-time label,
         // resolved by the checker, so a variable can never hide in it. Walking
@@ -388,14 +392,14 @@ fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymRef>) -> Resul
                 pattern_bindings(heap, inner, out)?;
             }
         }
-        // `(some P)` over an `Option<Sexpr>`, which the niche turns into this
+        // `(some P)` over a niched `Option`, which the niche turns into this
         // node rather than a `pat-ctor` (`Checker::pattern_form`). Missing it
         // made `P`'s names look *free* in the arm body, so a closure around
         // the whole `match` captured a name bound inside it — and then had no
-        // binder to read a representation from. The `Option<i32>` spelling of
-        // the same pattern never showed it: only `Option<Sexpr>` is niched.
-        wk::PAT_NONEMPTY => {
-            if let Some(inner) = core::field(heap, pat, 0) {
+        // binder to read a representation from. Field 0 is the payload
+        // representation, not a pattern.
+        wk::PAT_SOME => {
+            if let Some(inner) = core::field(heap, pat, 1) {
                 pattern_bindings(heap, inner, out)?;
             }
         }
@@ -429,6 +433,11 @@ fn pattern_guard_tests(
             }
         }
         wk::PAT_TYPETEST => {
+            if let Some(inner) = core::field(heap, pat, 1) {
+                pattern_guard_tests(heap, inner, f)?;
+            }
+        }
+        wk::PAT_SOME => {
             if let Some(inner) = core::field(heap, pat, 1) {
                 pattern_guard_tests(heap, inner, f)?;
             }

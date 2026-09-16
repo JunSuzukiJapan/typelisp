@@ -14,6 +14,7 @@
 
 use typelisp_mem::Value;
 
+use crate::check::repr::Repr;
 use crate::{Path, Type};
 /// A reference to a free function or global variable — everything both
 /// `Interp` and the compile pipeline need to resolve one, kept as two
@@ -161,20 +162,25 @@ pub enum Pattern {
         /// `Sexpr`-declared field is itself downcast-matched).
         downcast: bool,
     },
-    /// The empty list, as `Option<Sexpr>`'s `none`.
+    /// The empty-list word, as a niched `Option<T>`'s `none`
+    /// (`Repr::Niche`, `check/repr.rs`).
     ///
     /// Its own variant rather than a `Ctor { type_name: option, variant: 1 }`
     /// because a nullary ctor pattern carries no `field_types`, so nothing
-    /// downstream could tell `Option<Sexpr>`'s `none` — which is the
-    /// empty-list *immediate* under the niche (`check/repr.rs`) — from
-    /// `Option<i32>`'s, which is a real box. The scrutinee's type arguments
-    /// are known in `check_ctor_pattern_fields` and nowhere later, so the
-    /// decision is made there and recorded as a shape, the same reasoning
+    /// downstream could tell a niched `Option`'s `none` — the empty-list
+    /// *immediate* — from a boxed one's (`Option<Option<T>>`), which is a
+    /// real box. The scrutinee's type arguments are known in
+    /// `check_ctor_pattern_fields` and nowhere later, so the decision is
+    /// made there and recorded as a shape, the same reasoning
     /// `Ctor::field_types` records for the fields it can carry.
     Empty,
-    /// A non-empty S-expression: `Option<Sexpr>`'s `(some P)`, with `P`
-    /// matched against the unwrapped value (which *is* the same word).
-    NonEmpty(Box<Pattern>),
+    /// A niched `Option<T>`'s `(some P)`: any word but the empty list, with
+    /// `P` matched against the payload — the same word, read back through
+    /// `T`'s representation (a fixnum untagged to a narrow integer, a float
+    /// box opened, a tagged word passed through). The representation is
+    /// recorded here because the pattern is the only place downstream that
+    /// has to untag, and the only place that knows `T`.
+    Some(Repr, Box<Pattern>),
     /// `(the Type pattern)` against a `Sexpr` scrutinee — a whole-value
     /// downcast extraction (`Checker::check_ctor_pattern`'s Sexpr-downcast
     /// branch), the only way to pull a `Vector<T>`/`HashTable<K,V>` back out

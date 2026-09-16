@@ -53,6 +53,19 @@ pub trait PrintEnv {
     /// feature, so it is deliberately loud.
     fn enum_variant_name(&self, type_key: &str, variant: usize) -> Option<String>;
 
+    /// Whether field `index` of the struct (`variant` `None`) or enum
+    /// variant (`variant` `Some`) whose type key is `type_key` is a
+    /// niche-represented `Option` that prints with its wrapper — a field
+    /// whose word is the payload itself or the empty list, with no box to
+    /// say which `Option` it is (`typelisp_mem::option_prints_wrapped`;
+    /// `Option<sexpr>` prints as the datum it is). The renderer cannot read
+    /// that off the word, so it asks the program's definition: the field's
+    /// declared type, instantiated by the key the value carries. `false`
+    /// for a type or field this environment has never heard of, which then
+    /// prints the word as it is — and, for an enum, `<unknown-variant>`
+    /// beside it.
+    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> bool;
+
     /// `v`'s own `print-object` rendering, or `None` when its type has no
     /// such method (the overwhelmingly common case — the caller then falls
     /// back to the built-in representation).
@@ -97,6 +110,10 @@ pub struct BarePrintEnv;
 impl PrintEnv for BarePrintEnv {
     fn enum_variant_name(&self, _type_key: &str, _variant: usize) -> Option<String> {
         None
+    }
+
+    fn field_is_niched_option(&self, _type_key: &str, _variant: Option<usize>, _index: usize) -> bool {
+        false
     }
 
     fn print_object(&self, _heap: &mut Heap, _v: Value, _escape: bool) -> Result<Option<String>, String> {

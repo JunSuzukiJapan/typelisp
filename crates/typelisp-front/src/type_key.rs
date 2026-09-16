@@ -222,6 +222,24 @@ pub fn heap_type_path(heap: &Heap, id: BoxId) -> Option<Path> {
 ///
 /// For a type with no arguments this is [`type_key_of`] of its path, character
 /// for character — so the keys of every non-generic type are unchanged.
+/// A field's type as a *key template*: `type_key_of_type` of `field` with
+/// each of the owning type's parameters (`params`, in declaration order)
+/// written as `$N`, its index — `Option<T>` in a `gen<T>` is `option<$0>`.
+/// `typelisp_mem::instantiate_key_template` turns one back into the key a
+/// particular instantiation's field has, from the value's own key; that is
+/// how the printer, which sees a struct only through its box, learns that a
+/// field is a niche-represented `Option` it must render as one.
+///
+/// `$` never occurs in a key, so the placeholder cannot collide with a name.
+pub fn field_key_template(params: &[String], field: &Type) -> String {
+    let subst: std::collections::BTreeMap<String, Type> = params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.clone(), Type::Named(Path::root(&format!("${}", i)), Vec::new())))
+        .collect();
+    type_key_of_type(&crate::check::checker::subst_apply(field, &subst))
+}
+
 pub fn type_key_of_type(t: &Type) -> String {
     match t {
         Type::Ptr => "ptr".into(),

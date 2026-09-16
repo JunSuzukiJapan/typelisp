@@ -164,7 +164,7 @@ struct DriveStart {
     /// means. Nothing else can say: the driver hands raw bits through.
     ret: Repr,
     /// The trace line owed on the way back, if `trace` is on for this callee.
-    watch: Option<(String, usize)>,
+    watch: Option<(String, usize, Option<Repr>)>,
 }
 
 /// The `ArgsKind` of an already-checked call node — what `(go CALL)` wraps.
@@ -271,6 +271,9 @@ enum Frame {
     DynValue,
     /// `(untag-int E)`: check that the value is a fixnum, keep it.
     UntagInt,
+    /// `(box-option KEY E)` — waiting on the value; `key` is the `Option`
+    /// instantiation's identity, as the form's own string.
+    BoxOption { key: Value },
     /// `(set SYM VALUE)` — waiting on the value. The frame carries the *name*
     /// rather than the cell: the lookup happens on resume, once the value is
     /// in hand.
@@ -296,7 +299,10 @@ enum Frame {
     /// tail jump, which leaves nothing to report a return from. Tracing needs
     /// the frame, so it costs the tail position — as it does in the recursive
     /// evaluator, where a traced call is a real Rust frame too.
-    TracedCall { name: String, depth: usize },
+    /// A traced call's exit line: the name, the depth to restore, and the
+    /// declared return representation the value is rendered by (a niched
+    /// `Option` prints as one only if the renderer is told).
+    TracedCall { name: String, depth: usize, ret: Option<Repr> },
     /// A compiled chain is standing and this task was put down waiting for
     /// something. When the value arrives, put it in the chain's value slot and
     /// keep driving.
@@ -474,6 +480,7 @@ impl CpsStack {
             // at all. The value they are waiting on is rooted by the state
             // slots, and the object they act on is reachable from it.
             Frame::Panic | Frame::FieldGet { .. } | Frame::DynValue | Frame::UntagInt => {}
+            Frame::BoxOption { key } => heap.push_root(*key),
         }
         self.frames.push((frame, base, loc));
     }
@@ -1915,8 +1922,8 @@ impl Interp {
         match outcome {
             Ok(Ok(word)) => match self.finish_compiled(heap, word, &drive.start.ret, drive.crossing_roots) {
                 Ok(v) => {
-                    if let Some((name, depth)) = &drive.start.watch {
-                        self.trace_call_exit(heap, name, *depth, Ok(v));
+                    if let Some((name, depth, ret)) = &drive.start.watch {
+                        self.trace_call_exit(heap, name, *depth, ret.as_ref(), Ok(v));
                     }
                     State::Apply(v)
                 }
@@ -2210,6 +2217,22 @@ impl Interp {
             Op::TagInt => {
                 let inner = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (tag-int ..) has no operand".to_string()))?;
+                Ok(State::Eval(inner, env))
+            }
+            // The identity too: a niched `Option`'s `some v` is the `Value`
+            // of `v`. Field 0 is the payload representation, compiled
+            // code's business.
+            Op::SomeOf => {
+                let inner = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (some-of ..) has no operand".to_string()))?;
+                Ok(State::Eval(inner, env))
+            }
+            Op::BoxOption => {
+                let key = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (box-option ..) has no key".to_string()))?;
+                let inner = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (box-option ..) has no operand".to_string()))?;
+                stack.push(heap, Frame::BoxOption { key }, loc.clone());
                 Ok(State::Eval(inner, env))
             }
 
@@ -2667,7 +2690,7 @@ impl Interp {
         let watched = stepping || (self.trace_armed.get() && self.traced.borrow().contains(&f.name));
         let watch = if watched {
             let depth = self.trace_call_entry(heap, f, &argv, stepping)?;
-            Some(Frame::TracedCall { name: f.name.clone(), depth })
+            Some(Frame::TracedCall { name: f.name.clone(), depth, ret: f.sig.as_ref().map(|s| s.1.clone()) })
         } else {
             None
         };
@@ -2682,7 +2705,7 @@ impl Interp {
             // however many times the body stops (`Interp::begin_compiled`).
             if compiled.body_abi() == typelisp_abi::BODY_ABI_COROUTINE {
                 let watch = match &watch {
-                    Some(Frame::TracedCall { name, depth }) => Some((name.clone(), *depth)),
+                    Some(Frame::TracedCall { name, depth, ret }) => Some((name.clone(), *depth, ret.clone())),
                     _ => None,
                 };
                 let start = DriveStart {
@@ -2704,8 +2727,8 @@ impl Interp {
             let v = self.call_compiled(heap, compiled.as_ref(), &argv, &sig.0, &sig.1)?;
             // The call is over already, so a watch frame would have nothing to
             // wait for: report the return here instead.
-            if let Some(Frame::TracedCall { name, depth }) = watch {
-                self.trace_call_exit(heap, &name, depth, Ok(v));
+            if let Some(Frame::TracedCall { name, depth, ret }) = watch {
+                self.trace_call_exit(heap, &name, depth, ret.as_ref(), Ok(v));
             }
             return Ok((State::Apply(v), None));
         }
@@ -3096,6 +3119,17 @@ impl Interp {
                 }
                 other => Err(EvalError::Internal(format!("eval: (untag-int ..): not an int: {:?}", other))),
             },
+            // The box the checker asked for is built whether or not the key
+            // would niche: this node exists precisely because the slot the
+            // value is going into needs the box.
+            Frame::BoxOption { key } => {
+                let key = match key {
+                    Value::Str(id) => heap.string(id).to_string(),
+                    other => return Err(EvalError::Internal(format!("eval: (box-option ..): key is {:?}", other))),
+                };
+                let (variant, fields) = if v.is_empty() { (1, vec![]) } else { (0, vec![v]) };
+                Ok((State::Apply(crate::type_key::alloc_enum_keyed(heap, &key, variant, fields)), None))
+            }
 
             // Written through the cell rather than rebuilding the frame,
             // which is what makes the assignment visible through every other
@@ -3203,8 +3237,8 @@ impl Interp {
                 Ok((State::CompiledResume { drive, wake: Some((v, wake)) }, None))
             }
 
-            Frame::TracedCall { name, depth } => {
-                self.trace_call_exit(heap, &name, depth, Ok(v));
+            Frame::TracedCall { name, depth, ret } => {
+                self.trace_call_exit(heap, &name, depth, ret.as_ref(), Ok(v));
                 Ok((State::Apply(v), None))
             }
 
@@ -3417,8 +3451,8 @@ impl Interp {
                 Ok((State::CompiledRaise { drive }, None))
             }
 
-            Frame::TracedCall { name, depth } => {
-                self.trace_call_exit(heap, &name, depth, Err(&exit));
+            Frame::TracedCall { name, depth, ret } => {
+                self.trace_call_exit(heap, &name, depth, ret.as_ref(), Err(&exit));
                 Ok((State::Unwind(exit), None))
             }
 
@@ -3439,6 +3473,7 @@ impl Interp {
             | Frame::FieldGet { .. }
             | Frame::DynValue
             | Frame::UntagInt
+            | Frame::BoxOption { .. }
             | Frame::Set { .. }
             | Frame::Seq { .. }
             | Frame::Return

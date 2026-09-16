@@ -459,7 +459,8 @@ fn try_run_pending(
             match interp.exec(heap, tl) {
                 // The REPL's other half of `dribble`: the value echoed back.
                 Ok(Some(v)) => {
-                    let text = format_value(heap, checker.borrow().registry(), &v);
+                    let chk = checker.borrow();
+                    let text = format_value(heap, chk.registry(), chk.expr_type(), &v);
                     typelisp_abi::dribble::note(&text);
                     typelisp_abi::dribble::note("\n");
                     println!("{}", text);
@@ -509,7 +510,23 @@ fn is_incomplete(e: &Error) -> bool {
 
 /// Format a value for REPL output, in the reader's own syntax where
 /// possible (so the printed form can be pasted back in).
-fn format_value(heap: &Heap, reg: &Registry, v: &Value) -> String {
+///
+/// `ty` is the form's checked type, when the checker has one: a
+/// niche-represented `Option<T>` (`check::repr::Repr::Niche`) is a bare
+/// word the value alone cannot be recognized by, and prints as `none` /
+/// `(some ...)` only because the type says so. `Option<Sexpr>` is the
+/// documented exception (functions.md §15): S-expression data prints as
+/// the S-expression, the empty list as `()`.
+fn format_value(heap: &Heap, reg: &Registry, ty: Option<&Type>, v: &Value) -> String {
+    if let Some(ty) = ty {
+        let repr = check::repr::Repr::of_by(ty, &|p| reg.type_def(p).map(|d| d.kind));
+        if repr.niche_payload().is_some_and(|p| *p != check::repr::Repr::Sexpr) {
+            return match v {
+                Value::Empty => "none".to_string(),
+                _ => format!("(some {})", format_value(heap, reg, None, v)),
+            };
+        }
+    }
     match v {
         Value::Int(i) => i.to_string(),
         Value::Bool(b) => b.to_string(),
@@ -533,8 +550,10 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
         // positionally (no field names at runtime), recursing through this
         // same function for each field.
         Value::Boxed(id) if heap.is_struct(id) => {
-            let parts: Vec<String> =
-                (0..heap.struct_field_count(id)).map(|i| format_sexpr(heap, reg, heap.struct_field(id, i))).collect();
+            let key = type_key::heap_type_key(heap, id).expect("a struct box has a type name").to_string();
+            let parts: Vec<String> = (0..heap.struct_field_count(id))
+                .map(|i| format_field(heap, reg, &key, None, i, heap.struct_field(id, i)))
+                .collect();
             format!("#<{} {}>", type_key::heap_type_path(heap, id).expect("a struct box has a type name"), parts.join(" "))
         }
         // An enum value prints as its variant name applied to its fields —
@@ -553,8 +572,10 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
             if heap.enum_field_count(id) == 0 {
                 name
             } else {
-                let parts: Vec<String> =
-                    (0..heap.enum_field_count(id)).map(|i| format_sexpr(heap, reg, heap.enum_field(id, i))).collect();
+                let key = type_key::heap_type_key(heap, id).expect("an enum box has a type name").to_string();
+                let parts: Vec<String> = (0..heap.enum_field_count(id))
+                    .map(|i| format_field(heap, reg, &key, Some(variant), i, heap.enum_field(id, i)))
+                    .collect();
                 format!("({} {})", name, parts.join(" "))
             }
         }
@@ -610,6 +631,40 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
             .collect::<Vec<_>>()
             .join("::"),
         Value::Cons(_) => format_list(heap, reg, v),
+    }
+}
+
+/// One field of a struct or enum box — as the value it is, unless the
+/// registry says the field's type (the definition's, instantiated by the
+/// box's own key) is a niche-represented `Option`, which the word cannot
+/// say for itself. The same question `typelisp_print` asks its
+/// `PrintEnv`, answered here from the checker's registry directly.
+fn format_field(heap: &Heap, reg: &Registry, key: &str, variant: Option<usize>, index: usize, f: Value) -> String {
+    let (base, _) = type_key::split_key(key);
+    let path = Path::from_segments(base.split("::").map(str::to_string).collect());
+    let args = typelisp_mem::type_key_args(key);
+    // A `Vector<T>`'s fields are its elements, every one a `T` — the
+    // registry records no fields for it, so the template is spelled here.
+    let niched = if types::path_is_builtin(&path, "vector") {
+        typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template("$0", &args))
+    } else {
+        reg.type_def(&path).is_some_and(|def| {
+            let fields = match variant {
+                Some(v) => def.variants.get(v).map(|v| &v.fields),
+                None => def.variants.first().map(|v| &v.fields),
+            };
+            fields.and_then(|fs| fs.get(index)).is_some_and(|field_ty| {
+                let template = type_key::field_key_template(&def.params, field_ty);
+                typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(&template, &args))
+            })
+        })
+    };
+    if !niched {
+        return format_sexpr(heap, reg, f);
+    }
+    match f {
+        Value::Empty => "none".to_string(),
+        _ => format!("(some {})", format_sexpr(heap, reg, f)),
     }
 }
 

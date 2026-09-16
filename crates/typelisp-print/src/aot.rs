@@ -40,6 +40,11 @@ thread_local! {
     /// `(type key, variant index) -> variant name`, filled by
     /// [`rt_print_enum_variant`].
     static ENUM_NAMES: RefCell<HashMap<(String, usize), String>> = RefCell::new(HashMap::new());
+    /// `(base type key, variant index or NO_VARIANT, field index or
+    /// EVERY_FIELD) -> the field's type key template`, filled by
+    /// [`rt_print_field_template`] — what says a struct or enum field holds
+    /// a niche-represented `Option` (`PrintEnv::field_is_niched_option`).
+    static FIELD_TEMPLATES: RefCell<HashMap<(String, i64, i64), String>> = RefCell::new(HashMap::new());
     /// `type key -> the address of that type's compiled `print-object``,
     /// filled by [`rt_print_object_method`].
     static PRINT_OBJECT: RefCell<HashMap<String, usize>> = RefCell::new(HashMap::new());
@@ -66,6 +71,24 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
     enum_variant_name: |key, variant| {
         let base = typelisp_mem::base_type_key(key);
         ENUM_NAMES.with(|t| t.borrow().get(&(base.to_string(), variant)).cloned())
+    },
+    // The template registered for the field, or the one registered for
+    // every field of the type (`Vector<T>`'s elements), instantiated by the
+    // arguments the value's own key carries.
+    field_is_niched_option: |key, variant, index| {
+        let base = typelisp_mem::base_type_key(key).to_string();
+        let variant = variant.map_or(NO_VARIANT, |v| v as i64);
+        let template = FIELD_TEMPLATES.with(|t| {
+            let t = t.borrow();
+            t.get(&(base.clone(), variant, index as i64)).or_else(|| t.get(&(base, variant, EVERY_FIELD))).cloned()
+        });
+        match template {
+            Some(template) => {
+                let args = typelisp_mem::type_key_args(key);
+                typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(&template, &args))
+            }
+            None => false,
+        }
     },
     print_object: aot_print_object,
     format_call: aot_format_call,
@@ -211,6 +234,35 @@ pub unsafe extern "C" fn rt_print_enum_variant(args: *const i64, argc: u32) -> i
     let name = static_str(args, 3, "rt_print_enum_variant");
     install();
     ENUM_NAMES.with(|t| t.borrow_mut().insert((key.to_string(), variant), name.to_string()));
+    0
+}
+
+/// The `variant` word of [`rt_print_field_template`] for a struct, which has
+/// no variants.
+pub const NO_VARIANT: i64 = -1;
+/// The `index` word of [`rt_print_field_template`] for a template that
+/// applies to every field of the type — a `Vector<T>`'s elements.
+pub const EVERY_FIELD: i64 = -1;
+
+/// Registers one field's type key template: `args` is `[key_ptr, key_len,
+/// variant, index, template_ptr, template_len]`, with `variant`
+/// [`NO_VARIANT`] for a struct and `index` [`EVERY_FIELD`] for a uniform
+/// template. See `Interp::field_template_descriptors`.
+///
+/// # Safety
+///
+/// `args` must point to 6 valid `i64`s in those representations.
+#[no_mangle]
+pub unsafe extern "C" fn rt_print_field_template(args: *const i64, argc: u32) -> i64 {
+    if argc < 6 {
+        fatal("rt_print_field_template: expected 6 arguments");
+    }
+    let key = static_str(args, 0, "rt_print_field_template");
+    let variant = *args.add(2);
+    let index = *args.add(3);
+    let template = static_str(args, 4, "rt_print_field_template");
+    install();
+    FIELD_TEMPLATES.with(|t| t.borrow_mut().insert((key.to_string(), variant, index), template.to_string()));
     0
 }
 

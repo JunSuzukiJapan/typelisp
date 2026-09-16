@@ -744,6 +744,18 @@ fn int_boundary_native_fn(name: &str) -> bool {
 }
 
 /// `(untag-int E)` — see [`int_boundary_raw`].
+/// The `(TEMPLATE...)` list a `defstruct`/`defenum` form carries: one
+/// string per field, `type_key::field_key_template` of it.
+fn field_template_list(heap: &mut Heap, params: &[String], fields: &[Type]) -> Result<Value, Error> {
+    let mut items = Items::new(heap);
+    for field in fields {
+        let t = crate::type_key::field_key_template(params, field);
+        let s = items.heap().alloc_string(t);
+        items.push(s);
+    }
+    items.finish_list()
+}
+
 fn untag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
     core::tagged(heap, "untag-int", &[e])
 }
@@ -1718,17 +1730,20 @@ impl Checker {
                 let sym = heap.intern_symbol(name);
                 core::tagged(heap, "pat-guard", &[sym, *form])?
             }
-            // `Option<Sexpr>`'s two shapes (`check_ctor_pattern_fields`).
-            // `some` needs no test of its own: under the niche the unwrapped
-            // value *is* the same word, and every `Sexpr` variant test
-            // already excludes the empty-list immediate — so a `(some (int
-            // n))` arm is the `int` test alone. `pat-nonempty` exists for the
-            // case where the sub-pattern tests nothing (`(some x)`), which
-            // must still reject the empty list.
+            // A niched `Option<T>`'s two shapes (`check_ctor_pattern_fields`).
+            // `none` is the empty-list word; `(some P)` is any other word,
+            // with `P` applied to the payload read back through `T`'s
+            // representation — which the node carries, since the island has
+            // to untag a narrow payload and open a float box before `P` can
+            // compare or bind it.
             Pattern::Empty => core::tagged(heap, "pat-empty", &[])?,
-            Pattern::NonEmpty(sub) => {
-                let inner = self.pattern_form(heap, sub)?;
-                core::tagged(heap, "pat-nonempty", &[inner])?
+            Pattern::Some(payload, sub) => {
+                let repr = payload.write(heap)?;
+                let mut s = RootScope::new(heap);
+                s.push_root(repr);
+                let inner = self.pattern_form(&mut s, sub)?;
+                s.push_root(inner);
+                core::tagged(&mut s, "pat-some", &[repr, inner])?
             }
             // The empty list is its own pattern node, not `Sexpr`'s variant 0.
             // Today the two are the same test; they stop being the same when
@@ -2139,21 +2154,26 @@ impl Checker {
         f.finish("defvar")
     }
 
-    /// `(defstruct PATH (REPR...))` — the type's field representations, which
-    /// is where the bridge reads a `construct`'s and a pattern's field kinds
-    /// from.
-    fn defstruct_form(&self, heap: &mut Heap, name: &Path, fields: &[Type]) -> Result<Value, Error> {
+    /// `(defstruct PATH (REPR...) (TEMPLATE...))` — the type's field
+    /// representations, which is where the bridge reads a `construct`'s and
+    /// a pattern's field kinds from, then each field's type as a key
+    /// template (`type_key::field_key_template`), which is how the printer
+    /// tells a niche-represented `Option` field from the bare word it holds.
+    fn defstruct_form(&self, heap: &mut Heap, name: &Path, params: &[String], fields: &[Type]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let path = forms::path_form(f.heap(), name);
         f.push(path);
         let reprs = self.repr_forms(f.heap(), fields.to_vec())?;
         f.push(reprs);
+        let templates = field_template_list(f.heap(), params, fields)?;
+        f.push(templates);
         f.finish("defstruct")
     }
 
-    /// `(defenum PATH (SYM...) ((REPR...)...))` — the variant names, then each
-    /// variant's field representations.
-    fn defenum_form(&self, heap: &mut Heap, name: &Path, variants: &[Variant]) -> Result<Value, Error> {
+    /// `(defenum PATH (SYM...) ((REPR...)...) ((TEMPLATE...)...))` — the
+    /// variant names, then each variant's field representations, then each
+    /// variant's field key templates (see [`Self::defstruct_form`]).
+    fn defenum_form(&self, heap: &mut Heap, name: &Path, params: &[String], variants: &[Variant]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let path = forms::path_form(f.heap(), name);
         f.push(path);
@@ -2167,6 +2187,13 @@ impl Checker {
         }
         let per_variant = vs.finish_list()?;
         f.push(per_variant);
+        let mut ts = Items::new(f.heap());
+        for v in variants {
+            let templates = field_template_list(ts.heap(), params, &v.fields)?;
+            ts.push(templates);
+        }
+        let per_variant_templates = ts.finish_list()?;
+        f.push(per_variant_templates);
         f.finish("defenum")
     }
 
@@ -3298,8 +3325,14 @@ impl Checker {
         // representation, two static widths — so the exclusion is by family,
         // not by naming `f64`.
         if self.is_heap_repr(elem_ty) && !elem_ty.is_float() {
-            // A retype, not a node: the form is unchanged and only the
-            // checker's own view of its type widens.
+            // A niched `Option` has no box to hand the printer, so one is
+            // built here — the one place a typed value becomes an untyped
+            // datum. Every other heap-repr type is a retype, not a node: the
+            // form is unchanged and only the checker's own view of its type
+            // widens.
+            if let Some(form) = self.box_niched_option(heap, elem_ty, e.form)? {
+                return Ok(Checked::new(form, sexpr_ty()));
+            }
             return Ok(Checked::new(e.form, sexpr_ty()));
         }
         let ctor = sexpr_ctor_for(elem_ty).ok_or_else(|| {
@@ -4857,6 +4890,48 @@ impl Checker {
     /// fallbacks are gone (Phase 1a for `Scope<V>`, `RtValue::Data`'s deletion
     /// for enums), so both recursions are too.
     ///
+    /// **The one producer of an `Option` value's form.** `ty` is the
+    /// `Option<T>` itself; `payload` is `some`'s already-checked field form,
+    /// or `None` for `none`. A niched instantiation (`Repr::Niche`) gets
+    /// `(some-of REPR FORM)` — the field word, no box — or the empty-list
+    /// construct (`sexpr`'s variant 0, which the core IR still spells that
+    /// way; see the null-elimination plan's "変種番号は詰めない"); a boxed one
+    /// gets the ordinary `construct`. Every site that builds an `Option`
+    /// (`(some x)`, an omitted `&optional`/`&key`, `try-as`, `(as :dyn ..)`'s
+    /// `source`) comes here, so the pattern side's `Pattern::Some`/`Empty`
+    /// and this can never disagree on a type.
+    fn option_form(&self, heap: &mut Heap, ty: &Type, payload: Option<Value>) -> Result<Value, Error> {
+        let Type::Named(name, targs) = ty else {
+            return Err(Error::TypeError(format!("option_form: `{}` is not an Option type", mangle_type(ty))));
+        };
+        if !crate::types::path_is_builtin(name, "option") || targs.len() != 1 {
+            return Err(Error::TypeError(format!("option_form: `{}` is not an Option type", mangle_type(ty))));
+        }
+        if let Some(repr) = self.repr(ty).niche_payload() {
+            return match payload {
+                Some(form) => forms::some_of_form(heap, repr, form),
+                None => self.construct_form(heap, &Path::root("sexpr"), &[], 0, false, &[], &[]),
+            };
+        }
+        match payload {
+            Some(form) => self.construct_form(heap, name, targs, OPTION_SOME, false, &[targs[0].clone()], &[form]),
+            None => self.construct_form(heap, name, targs, OPTION_NONE, false, &[], &[]),
+        }
+    }
+
+    /// `(box-option KEY FORM)` around `form` when `ty` is a niche-represented
+    /// `Option` (`Repr::Niche`), `None` when it is not — the boundary where a
+    /// typed value becomes a `Sexpr` datum, which has to hold the box the
+    /// niche does not build. `KEY` is the instantiation's own identity, so
+    /// the box prints and downcasts as any boxed `Option` does.
+    fn box_niched_option(&self, heap: &mut Heap, ty: &Type, form: Value) -> Result<Option<Value>, Error> {
+        if self.repr(ty).niche_payload().is_none() {
+            return Ok(None);
+        }
+        let key = crate::type_key::type_key_of_type(ty);
+        Ok(Some(forms::box_option_form(heap, &key, form)?))
+    }
+
     /// The checker-side twin of `Interp::is_heap_repr_ty`, used to bake
     /// binding-slot routing into `Pattern::Bind` (the one binding site whose
     /// type the evaluator can't read off its own AST node).
@@ -7672,6 +7747,19 @@ impl Checker {
                 trait_path
             )));
         }
+        // A niched `Option` is heap-repr by the reckoning above (an `option`
+        // is a `Sum` with variants) but has no box of its own: the fat box
+        // would hold a bare word that carries no type key, and everything
+        // that reads a trait object back out — printing, `(the T ..)`
+        // downcasts — reads the key off the value inside. Refused, like a
+        // primitive, rather than boxed into a value nothing can identify.
+        if self.repr(concrete).niche_payload().is_some() {
+            return Err(Error::TypeError(format!(
+                "`{}` is a niche-represented Option with no box to carry a type key, so it cannot be boxed as `:dyn {}`",
+                mangle_type(concrete),
+                trait_path
+            )));
+        }
         // What this `impl` actually binds each associated type to, with the
         // owner's own type parameters resolved for *this* instantiation.
         for (name, pin) in tdef.assoc_types.iter().zip(pins.iter()) {
@@ -8493,7 +8581,7 @@ impl Checker {
         // `(defstruct ...)` node goes first because the type has to exist
         // before its methods.
         let mut members = Items::new(heap);
-        let def_node = self.defstruct_form(members.heap(), &type_fq, &field_types)?;
+        let def_node = self.defstruct_form(members.heap(), &type_fq, &type_params, &field_types)?;
         members.push(def_node);
         for (i, field) in fields.iter().enumerate() {
             let (field_name, field_ty) = (&field.name, &field.ty);
@@ -9155,7 +9243,7 @@ impl Checker {
             parts_locs.first().and_then(|l| l.as_ref()),
             name.chars().count(),
         );
-        self.defenum_form(heap, &type_fq, &variants)
+        self.defenum_form(heap, &type_fq, &type_params, &variants)
     }
 
     /// `(load "path")` — records the flat-load request for the driver (see
@@ -9836,6 +9924,12 @@ impl Checker {
                 // not one of `Sexpr`'s shapes. Narrowing is what `match`
                 // and `unwrap` are for.
                 if is_sexpr_expectation(e) && self.is_heap_repr(&typed.ty) && !is_option_of_sexpr(&typed.ty) {
+                    // A niched `Option` (`Option<int>`, say) has no box for
+                    // the slot to hold; `box-option` builds the one a boxed
+                    // `Option` would have been. See `wrap_rest_elem`.
+                    if let Some(form) = self.box_niched_option(heap, &typed.ty, typed.form)? {
+                        return Ok(Checked::new(form, e.clone()));
+                    }
                     return Ok(Checked::new(typed.form, e.clone()));
                 }
                 // A scalar (`i32`/`f64`/`bignum`/`ratio`/`char`/`bool`/`Str`)
@@ -14789,27 +14883,20 @@ impl Checker {
         // later field's `unify` can be what determines an earlier one's type
         // parameter, so only the finished `subst` is complete.
         let field_tys: Vec<Type> = fields.iter().map(|f| subst_apply(f, &subst)).collect();
-        // `Option<Sexpr>` is niche-represented (`check/repr.rs`), so neither
-        // of its constructors builds a box: `some v` *is* `v`, and `none` is
-        // the empty-list immediate. The pattern side reads the same encoding
-        // (`Pattern::Empty`/`Pattern::NonEmpty`), and the two must agree —
-        // a boxed `none` would sail past `pat-empty`'s word comparison and
-        // be taken for a `some`.
+        // A niched `Option<T>` (`Repr::Niche`, `check/repr.rs`) builds no
+        // box: `some v` is `v` as a tagged field word (`some-of`, which
+        // tags by `T`'s representation), and `none` is the empty-list
+        // immediate. The pattern side reads the same encoding
+        // (`Pattern::Empty`/`Pattern::Some`), and the two must agree — a
+        // boxed `none` would sail past `pat-empty`'s word comparison and be
+        // taken for a `some`.
         //
         // Here is where the instantiation is known, the same reason
         // `field_tys` is computed here rather than at the definition.
-        if crate::types::path_is_builtin(adt_name, "option")
-            && matches!(result_args.first(), Some(Type::Named(a, _)) if *a == Path::root("sexpr"))
-        {
-            let form = match variant {
-                // `(some v)` lowers to `v`'s own already-checked form.
-                OPTION_SOME => arg_forms[0],
-                // `(none)` is the empty list, which the core IR still spells
-                // as `sexpr`'s variant 0 — see the null-elimination plan's
-                // "変種番号は詰めない".
-                _ => self.construct_form(heap, &Path::root("sexpr"), &[], 0, false, &[], &[])?,
-            };
-            return Ok(Checked::new(forms::rooted(heap, form), Type::Named(adt_name.clone(), result_args)));
+        let result_ty = Type::Named(adt_name.clone(), result_args.clone());
+        if crate::types::path_is_builtin(adt_name, "option") {
+            let form = self.option_form(heap, &result_ty, (variant == OPTION_SOME).then(|| arg_forms[0]))?;
+            return Ok(Checked::new(forms::rooted(heap, form), result_ty));
         }
         // A generic type whose `print-object` the *printer* will look up needs
         // that specialization to exist, and nothing else asks for one: the
@@ -14991,7 +15078,7 @@ impl Checker {
                 // `(some x)` under the sugar means "any non-empty shape",
                 // which is all sixteen of them at once — the retired
                 // `bignum` slot excepted, since it is not a shape.
-                Pattern::NonEmpty(sub)
+                Pattern::Some(_, sub)
                     if sexpr_sugar && matches!(**sub, Pattern::Wildcard | Pattern::Bind(..)) =>
                 {
                     covered.extend((1..sexpr_variants()).filter(|v| *v != SEXPR_RETIRED_BIGNUM));
@@ -15006,7 +15093,7 @@ impl Checker {
                 Pattern::Ctor { type_name, variant, .. } if Some(type_name) == adt_name.as_ref() => {
                     covered.insert(*variant);
                 }
-                // `Option<Sexpr>`'s two niche shapes, which
+                // A niched `Option`'s two shapes, which
                 // `check_ctor_pattern_fields` produced in place of an
                 // `option` ctor pattern. They cover `option`'s own variants,
                 // so exhaustiveness counts them as such — otherwise a
@@ -15017,7 +15104,7 @@ impl Checker {
                 // `(some P)` covers `some` only when `P` itself matches
                 // anything; `(some (int n))` leaves other `Sexpr` shapes
                 // uncovered, exactly as a nested ctor pattern would.
-                Pattern::NonEmpty(sub)
+                Pattern::Some(_, sub)
                     if matches!(**sub, Pattern::Wildcard | Pattern::Bind(..))
                         && adt_name.as_ref().map(|p| crate::types::path_is_builtin(p, "option")) == Some(true) =>
                 {
@@ -15647,6 +15734,35 @@ impl Checker {
                 ty
             )));
         }
+        // A niched `Option` sits in a `Sexpr` slot as the box `box-option`
+        // built, so the sub-pattern reads that box the way a downcast ctor
+        // pattern does (`check_ctor_pattern_fields` with `downcast`, which
+        // is what keeps it from becoming the niche shape). A sub-pattern
+        // that bound the whole value would bind the *box* to a name whose
+        // type says "niche" — the same word meaning two things — so the
+        // downcast has to name a constructor.
+        if self.repr(&ty).niche_payload().is_some() {
+            let must_name = || {
+                Error::TypeError(format!(
+                    "pattern: `(the {} ..)` on a niche-represented Option must name a constructor — `(the {} (some x))` or `(the {} (none))` — since the Sexpr holds it boxed",
+                    mangle_type(&ty),
+                    mangle_type(&ty),
+                    mangle_type(&ty)
+                ))
+            };
+            let sub_locs = heap.list_to_vec_locs(parts[2]).map_err(|_| must_name())?;
+            let sub: Vec<Value> = sub_locs.iter().map(|(v, _)| *v).collect();
+            let ctor = match sub.first() {
+                Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                _ => return Err(must_name()),
+            };
+            let (adt_name, targs) = self.expect_adt(&ty)?;
+            let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
+            let variant = def.variants.iter().position(|vr| vr.name == ctor).ok_or_else(must_name)?;
+            let (pat, binds) =
+                self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &sub, &sub_locs, true)?;
+            return Ok((Pattern::TypeTest(ty, Box::new(pat)), binds));
+        }
         let (pat, binds) = self.check_pattern(heap, interp, env, &ty, parts[2], parts_locs[2].1.clone())?;
         Ok((Pattern::TypeTest(ty, Box::new(pat)), binds))
     }
@@ -15698,22 +15814,23 @@ impl Checker {
             sub_pats.push(p);
             binds.extend(b);
         }
-        // `Option<Sexpr>` is niche-represented (`check/repr.rs`): `none` is
-        // the empty-list immediate and `some v` is `v` itself. Here — and
-        // only here — both the ADT and its type arguments are known, so this
-        // is where that instantiation becomes a pattern shape of its own
-        // rather than a ctor pattern nothing downstream could classify.
+        // A niched `Option<T>` (`Repr::Niche`, `check/repr.rs`): `none` is
+        // the empty-list immediate and `some v` is `v`'s tagged word. Here —
+        // and only here — both the ADT and its type arguments are known, so
+        // this is where that instantiation becomes a pattern shape of its
+        // own rather than a ctor pattern nothing downstream could classify.
+        // Not under a downcast: `(the Option<T> (some x))` reads a *boxed*
+        // `Option` back out of a `Sexpr` slot (`box-option` put it there),
+        // and a ctor pattern over that box is the right shape for it.
         if !downcast && crate::types::path_is_builtin(&adt_name, "option") && targs.len() == 1 {
-            if let Type::Named(a, _) = &targs[0] {
-                if *a == Path::root("sexpr") {
-                    return Ok((
-                        match variant {
-                            OPTION_SOME => Pattern::NonEmpty(Box::new(sub_pats.remove(0))),
-                            _ => Pattern::Empty,
-                        },
-                        binds,
-                    ));
-                }
+            if let Some(payload) = self.repr(&Type::Named(adt_name.clone(), targs.clone())).niche_payload() {
+                return Ok((
+                    match variant {
+                        OPTION_SOME => Pattern::Some(payload.clone(), Box::new(sub_pats.remove(0))),
+                        _ => Pattern::Empty,
+                    },
+                    binds,
+                ));
             }
         }
         Ok((Pattern::Ctor { type_name: adt_name, targs, variant, args: sub_pats, field_types, downcast }, binds))
@@ -15911,7 +16028,7 @@ fn vtable_form(heap: &mut Heap, slots: &[(Path, String)]) -> Result<Value, Error
 /// total conversion's already-computed result.
 fn wrap_some(heap: &mut Heap, checker: &Checker, inner: Checked, target: Type) -> Result<Checked, Error> {
     let ty = Type::Named(Path::root("option"), vec![target.clone()]);
-    let form = checker.construct_form(heap, &Path::root("option"), &[target.clone()], 0, false, &[target], &[inner.form])?;
+    let form = checker.option_form(heap, &ty, Some(inner.form))?;
     Ok(Checked::new(forms::rooted(heap, form), ty))
 }
 
@@ -15924,11 +16041,7 @@ fn option_none(heap: &mut Heap, checker: &Checker, ty: Type) -> Result<Checked, 
     // `none` carries no field, but the *value* is still an `Option<T>` and its
     // runtime identity says which `T` — so the instantiation comes off `ty`,
     // the only place it is written here.
-    let targs = match &ty {
-        Type::Named(_, args) => args.clone(),
-        _ => Vec::new(),
-    };
-    let form = checker.construct_form(heap, &Path::root("option"), &targs, 1, false, &[], &[])?;
+    let form = checker.option_form(heap, &ty, None)?;
     Ok(Checked::new(forms::rooted(heap, form), ty))
 }
 

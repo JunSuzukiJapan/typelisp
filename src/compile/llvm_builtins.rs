@@ -2564,11 +2564,12 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
             crate::Path::root("option"),
             vec![crate::types::Type::Named(crate::Path::root("llvm-value"), vec![])],
         ));
-        let boxed = match found {
-            Some(v) => typelisp_front::type_key::alloc_enum_keyed(heap, &key, 0, vec![v]),
-            None => typelisp_front::type_key::alloc_enum_keyed(heap, &key, 1, vec![]),
-        };
-        return crate::compile::runtime::encode(boxed);
+        // A niche (`Repr::Niche`): the handle's fixnum word for `some`, the
+        // empty-list immediate for `none` — what `encode` makes of the
+        // `Value` `alloc_option` answers, and what the island's `pat-some`
+        // reads back.
+        let option = heap.alloc_option(&key, found);
+        return crate::compile::runtime::encode(option);
     }
     let result: Result<Value, EvalError> = if op.type_key == "native-scope" {
         match op.method.as_str() {

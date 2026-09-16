@@ -49,14 +49,34 @@ use super::value::Slot;
 /// does.
 pub(crate) enum TypeEntry {
     /// A `defstruct`, with its fields' representations — what
-    /// `(defstruct PATH (REPR...))` publishes, and what the compile bridge
-    /// reads a `construct`'s and a pattern's field kinds from. A built-in that
-    /// reuses the struct representation but whose fields are internal
-    /// (`Vector<T>`) records an empty list: nothing ever names those fields.
-    Struct(Vec<crate::check::repr::Repr>),
+    /// `(defstruct PATH (REPR...) (TEMPLATE...))` publishes, and what the
+    /// compile bridge reads a `construct`'s and a pattern's field kinds from
+    /// — and its fields' key templates, the printer's question. A built-in
+    /// that reuses the struct representation but whose fields are internal
+    /// (`Vector<T>`) records no representations: nothing ever names those
+    /// fields. Its *elements* still print, so it records a uniform template.
+    Struct { reprs: Vec<crate::check::repr::Repr>, templates: FieldTemplates },
     /// A `defenum` — carries the same per-variant field-type data
     /// `enum_defs` used to.
     Enum(EnumDef),
+}
+
+/// A struct's fields' types as key templates (`type_key::field_key_template`):
+/// one per declared field, or one for every element of a type whose fields
+/// are its elements (`Vector<T>`, whose count only the value knows).
+#[derive(Clone)]
+pub(crate) enum FieldTemplates {
+    Positional(Vec<String>),
+    Uniform(String),
+}
+
+impl FieldTemplates {
+    pub(crate) fn get(&self, index: usize) -> Option<&str> {
+        match self {
+            FieldTemplates::Positional(v) => v.get(index).map(String::as_str),
+            FieldTemplates::Uniform(t) => Some(t),
+        }
+    }
 }
 
 /// A registered `defvar`/`defconstant`'s slot plus its own `pub` bit — the
@@ -153,7 +173,24 @@ impl ModuleScope {
         }
         match ns.types.get(name.last_segment())? {
             TypeEntry::Enum(def) => def.variants.get(variant).map(|(n, _)| n.clone()),
-            TypeEntry::Struct(_) => None,
+            TypeEntry::Struct { .. } => None,
+        }
+    }
+
+    /// The key template of field `index` of the type registered at `name` —
+    /// of `variant` for an enum, of the struct otherwise — or `None` when no
+    /// such type, variant or field is registered. The printer's other
+    /// question ([`typelisp_print::PrintEnv::field_is_niched_option`]),
+    /// walked the same way as [`Self::enum_variant_name`].
+    pub(crate) fn field_template(&self, name: &Path, variant: Option<usize>, index: usize) -> Option<&str> {
+        let mut ns = self;
+        for seg in name.parent() {
+            ns = ns.children.get(seg)?;
+        }
+        match (ns.types.get(name.last_segment())?, variant) {
+            (TypeEntry::Enum(def), Some(v)) => def.templates.get(v)?.get(index).map(String::as_str),
+            (TypeEntry::Struct { templates, .. }, None) => templates.get(index),
+            _ => None,
         }
     }
 
@@ -321,6 +358,40 @@ impl ModuleScope {
         (structs, enums)
     }
 
+    /// Every registered type's field key templates, for an AOT executable's
+    /// startup registration (`typelisp_print::aot::rt_print_field_template`):
+    /// `(path, variant or None, field index or None for every field,
+    /// template)`, in tree order.
+    pub(crate) fn collect_field_templates(&self, prefix: &[String], out: &mut Vec<(Path, Option<usize>, Option<usize>, String)>) {
+        for (name, entry) in &self.types {
+            let mut segs = prefix.to_vec();
+            segs.push(name.clone());
+            let path = Path::from_segments(segs);
+            match entry {
+                TypeEntry::Struct { templates: FieldTemplates::Positional(ts), .. } => {
+                    for (i, t) in ts.iter().enumerate() {
+                        out.push((path.clone(), None, Some(i), t.clone()));
+                    }
+                }
+                TypeEntry::Struct { templates: FieldTemplates::Uniform(t), .. } => {
+                    out.push((path.clone(), None, None, t.clone()));
+                }
+                TypeEntry::Enum(def) => {
+                    for (v, ts) in def.templates.iter().enumerate() {
+                        for (i, t) in ts.iter().enumerate() {
+                            out.push((path.clone(), Some(v), Some(i), t.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        for (name, child) in &self.children {
+            let mut segs = prefix.to_vec();
+            segs.push(name.clone());
+            child.collect_field_templates(&segs, out);
+        }
+    }
+
     fn collect_types_into(
         &self,
         prefix: &[String],
@@ -332,8 +403,8 @@ impl ModuleScope {
             segs.push(name.clone());
             let path = Path::from_segments(segs);
             match entry {
-                TypeEntry::Struct(fields) => {
-                    structs.insert(path, fields.clone());
+                TypeEntry::Struct { reprs, .. } => {
+                    structs.insert(path, reprs.clone());
                 }
                 TypeEntry::Enum(def) => {
                     enums.insert(path, def.clone());

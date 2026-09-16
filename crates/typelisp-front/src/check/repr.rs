@@ -155,6 +155,26 @@ pub enum Repr {
     Vector(Box<Repr>),
     /// `HashTable<K,V>` over `K`'s and `V`'s representations.
     HashTable(Box<Repr>, Box<Repr>),
+    /// `Option<T>` with no box: `some v` is `v`'s **field** encoding — the
+    /// tagged word a `defstruct` field of type `T` holds (a fixnum for a
+    /// narrow integer, a float box, the tagged word itself for anything
+    /// already tagged) — and `none` is the empty-list immediate
+    /// (`Value::Empty`, `NIL_WORD`). The element is `T`'s own
+    /// representation, which is what the constructing and matching nodes
+    /// (`some-of`/`pat-some`) tag and untag by.
+    ///
+    /// Sound exactly when no `T` value can be the empty-list word, which
+    /// [`Repr::niches`] decides — and decides the same way
+    /// `typelisp_mem::option_payload_niches` does from a type *key*, for
+    /// the runtime producers that only have one (a test pins the two
+    /// together). `Option<sexpr>` is the founding case: the empty list left
+    /// `Sexpr` precisely so it could be this `Option`'s `none`.
+    ///
+    /// Every consumer that only asks "tagged or not" sees a tagged word
+    /// (`field_kind` `101`, a passthrough like `6` that the island can still
+    /// tell apart — see [`Repr::field_kind`]); the printer, which cannot
+    /// see the box that is not there, is told by the static type instead.
+    Niche(Box<Repr>),
     /// A function value: a `BoxedObj::CompiledClosure` reference.
     Fn,
     /// A raw 64-bit machine word: the FFI's `ptr`/`c-long`/`c-ulong`.
@@ -234,31 +254,30 @@ impl Repr {
             Type::Ratio => Repr::Ratio,
             Type::RandomState => Repr::RandomState,
             Type::Named(p, _) if *p == Path::root("sexpr") => Repr::Sexpr,
-            // `Option<Sexpr>` is represented *exactly* like a `Sexpr`: `none`
-            // is the empty-list immediate (`Value::Empty`), `some v` is `v`
-            // itself. That is the niche the empty list vacates when `nil`
-            // leaves `Sexpr` (docs/dev/null-elimination-plan.md §3.1), and
-            // saying it here — rather than inventing a variant — is what
-            // keeps every consumer unchanged: `field_kind` 6 and
-            // `binding_kind` 2 are `Repr::Sexpr`'s own numbers, and the
-            // crossing decode already handles `Sexpr` and `Enum` in one arm.
-            //
-            // **Exactly `Option<sexpr>`, never a payload that merely
-            // *represents* like one.** Were this written as "the payload's
-            // repr is `Sexpr`", `Option<Option<Sexpr>>` would niche at the
-            // outer level too and its two `none`s would collide on the same
-            // `Value::Empty`. Requiring the argument to be the `sexpr` type
-            // itself drops the outer one through to `Repr::Enum` (a real
-            // box), which is the same rule Rust's niche optimization uses.
-            // `Option<Option<i32>>` is an existing, tested shape
-            // (`tests/compile_test.rs`) and `HashTable<K,Option<V>>::get`
-            // produces one, so this is reachable, not hypothetical.
-            Type::Named(p, args)
-                if path_is_builtin(p, "option")
-                    && args.len() == 1
-                    && matches!(&args[0], Type::Named(a, _) if *a == Path::root("sexpr")) =>
-            {
-                Repr::Sexpr
+            // `Option<T>` is a niche whenever `T`'s values can be told from
+            // the empty-list immediate: `none` is that immediate, `some v`
+            // is `v`'s tagged word, and no box is built. Decided from the
+            // *payload's representation* rather than by naming types, so
+            // that the same rule — Rust's own niche rule — covers every `T`
+            // at once; `Repr::niches` lists the exclusions, and a nested
+            // `Option<Option<T>>` is the one that matters most: its inner
+            // `none` is the very word the outer would use, so the outer one
+            // drops through to `Repr::Enum` (a real box). `Option<Option<i32>>`
+            // is an existing, tested shape (`tests/compile_test.rs`) and
+            // `HashTable<K,Option<V>>::get` produces one, so this is
+            // reachable, not hypothetical.
+            Type::Named(p, args) if path_is_builtin(p, "option") && args.len() == 1 => {
+                // Any `Option` payload boxes the outer one, a niched *or a
+                // boxed* one alike: the rule is stated on the payload's type
+                // so the key-side twin can state it the same way, and
+                // `Option<Option<Option<T>>>` is not worth a third case.
+                let nested = matches!(&args[0], Type::Named(a, aa) if path_is_builtin(a, "option") && aa.len() == 1);
+                let payload = Repr::of_by(&args[0], kind_of);
+                if !nested && payload.niches() {
+                    Repr::Niche(Box::new(payload))
+                } else {
+                    Repr::Enum
+                }
             }
             // The three parametric builtins, ahead of the struct/enum arms
             // that would otherwise swallow them. Each classifies to the same
@@ -313,6 +332,7 @@ impl Repr {
             Repr::Scope(_) => "scope",
             Repr::Vector(_) => "vector",
             Repr::HashTable(..) => "hashtable",
+            Repr::Niche(_) => "niche",
             Repr::Fn => "fn",
             Repr::None => "none",
         }
@@ -350,6 +370,7 @@ impl Repr {
             Repr::Scope(v) => self.write_parametric(heap, &[v]),
             Repr::Vector(t) => self.write_parametric(heap, &[t]),
             Repr::HashTable(k, v) => self.write_parametric(heap, &[k, v]),
+            Repr::Niche(t) => self.write_parametric(heap, &[t]),
             simple => Ok(simple.write_head(heap)),
         }
     }
@@ -368,6 +389,28 @@ impl Repr {
             items.push(v);
         }
         crate::check::core::list(&mut scope, &items)
+    }
+
+    /// Whether an `Option` over this representation is a [`Repr::Niche`]:
+    /// whether no value of it can be the empty-list word. The `Option`
+    /// itself is excluded (its `none` *is* that word); so are `Unit` (one
+    /// value, and it is the empty list), a raw C word (no tag to keep it
+    /// apart), and the unrepresentable. Everything else is a tagged word or
+    /// a raw scalar that tags into one — including `Sexpr`, whose empty
+    /// list left it for exactly this purpose.
+    ///
+    /// The `Type`-side twin of `typelisp_mem::option_payload_niches`; the
+    /// two are pinned together by `tests/option_niche_test.rs`.
+    pub fn niches(&self) -> bool {
+        !matches!(self, Repr::Niche(_) | Repr::Unit | Repr::RawWord | Repr::None)
+    }
+
+    /// The payload representation when this is a [`Repr::Niche`].
+    pub fn niche_payload(&self) -> Option<&Repr> {
+        match self {
+            Repr::Niche(t) => Some(t),
+            _ => None,
+        }
     }
 
     /// The inverse of [`Repr::write`]. `None` for anything that is not a
@@ -390,6 +433,7 @@ impl Repr {
                     ("scope", 2) => Some(Repr::Scope(arg(1)?)),
                     ("vector", 2) => Some(Repr::Vector(arg(1)?)),
                     ("hashtable", 3) => Some(Repr::HashTable(arg(1)?, arg(2)?)),
+                    ("niche", 2) => Some(Repr::Niche(arg(1)?)),
                     _ => None,
                 }
             }
@@ -449,6 +493,14 @@ impl Repr {
             | Repr::Dyn
             | Repr::Scope(_)
             | Repr::Fn => Class::Tagged { collectable: true },
+            // The niche is a tagged word by construction — the payload's
+            // field encoding, or the empty-list immediate. Whether the
+            // collector has anything to reclaim through it is the payload's
+            // question: a float payload becomes a box here even though it is
+            // a raw register elsewhere, so `Class::Float` counts.
+            Repr::Niche(t) => Class::Tagged {
+                collectable: matches!(t.class(), Class::Float | Class::Tagged { collectable: true }),
+            },
             // A tagged word the collector never reclaims. The mark phase
             // (`Heap::gc`) walks `Cons`/`Str`/`Boxed` and lets every other
             // `Value` fall through, so an interned `Value::Symbol` is immortal
@@ -538,6 +590,14 @@ impl Repr {
         if matches!(self, Repr::F32) {
             return 11;
         }
+        // A niche is a tagged word both ways, like `6` — but the island has
+        // to tell the two apart where it *builds* an `Option` around a
+        // value of this kind (`build-some-of`, `vector-op`'s `pop`): an
+        // `Option<Option<T>>` must be boxed, and `6` would say "niche it".
+        // Its own number, clear of the `Sexpr` variants like `Unit`'s.
+        if matches!(self, Repr::Niche(_)) {
+            return 101;
+        }
         match self.class() {
             Class::Int => 1,
             Class::Float => 2,
@@ -622,6 +682,8 @@ mod tests {
         all.push(Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr)));
         // Nested, so `read` is not merely accepting a one-level list.
         all.push(Repr::Vector(Box::new(Repr::Vector(Box::new(Repr::Enum)))));
+        all.push(Repr::Niche(Box::new(Repr::Narrow)));
+        all.push(Repr::Vector(Box::new(Repr::Niche(Box::new(Repr::F64)))));
         for r in all {
             let v = r.write(&mut h).expect("write failed");
             assert_eq!(Repr::read(&h, v).as_ref(), Some(&r), "did not read back: {:?}", r);
@@ -639,6 +701,7 @@ mod tests {
         assert_eq!(printed(&mut h, Repr::Narrow), "int-any-width");
         assert_eq!(printed(&mut h, Repr::Scope(Box::new(Repr::Handle))), "(scope handle)");
         assert_eq!(printed(&mut h, Repr::Vector(Box::new(Repr::Narrow))), "(vector int-any-width)");
+        assert_eq!(printed(&mut h, Repr::Niche(Box::new(Repr::Handle))), "(niche handle)");
         assert_eq!(
             printed(&mut h, Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr))),
             "(hashtable str sexpr)"
@@ -698,8 +761,17 @@ mod tests {
         let none: HashSet<Path> = HashSet::new();
         assert_eq!(
             Repr::of(&Type::Named(Path::root("option"), vec![Type::I32]), &none, &none),
-            Repr::Enum
+            Repr::Niche(Box::new(Repr::Narrow))
         );
+        // The niche stops where the payload could be the empty word.
+        let option = |t: Type| Type::Named(Path::root("option"), vec![t]);
+        assert_eq!(of(option(option(Type::I32))), Repr::Enum);
+        assert_eq!(of(option(Type::Unit)), Repr::Enum);
+        assert_eq!(of(option(Type::Ptr)), Repr::Enum);
+        assert_eq!(of(option(Type::Named(Path::root("T"), vec![]))), Repr::Enum);
+        assert_eq!(of(option(Type::Named(Path::root("sexpr"), vec![]))), Repr::Niche(Box::new(Repr::Sexpr)));
+        assert_eq!(of(option(Type::Named(Path::root("point"), vec![]))), Repr::Niche(Box::new(Repr::Struct)));
+        assert_eq!(of(option(Type::F64)), Repr::Niche(Box::new(Repr::F64)));
         assert_eq!(
             Repr::of(&Type::Named(Path::root("result"), vec![Type::I32, Type::Str]), &none, &none),
             Repr::Enum
@@ -749,6 +821,28 @@ mod tests {
     fn a_symbol_is_passthrough_but_needs_no_root() {
         assert_eq!(Repr::Sym.field_kind(), 6);
         assert_eq!(Repr::Sym.binding_kind(), 0);
+    }
+
+    /// A niche is a tagged word with a number of its own at a field boundary
+    /// (so the island can refuse to niche an `Option` *around* it), and is
+    /// rooted exactly when its payload would be — counting a float, which
+    /// becomes a box inside the niche.
+    #[test]
+    fn a_niche_is_tagged_and_rooted_by_its_payload() {
+        let niche = |r: Repr| Repr::Niche(Box::new(r));
+        for r in [Repr::Narrow, Repr::Handle, Repr::Char, Repr::Bool, Repr::Sym] {
+            assert_eq!(niche(r.clone()).field_kind(), 101, "{:?}", r);
+            assert_eq!(niche(r.clone()).binding_kind(), 0, "{:?} points at nothing reclaimable", r);
+        }
+        for r in [Repr::F64, Repr::F32, Repr::Str, Repr::Struct, Repr::Sexpr, Repr::Enum, Repr::Fn] {
+            assert_eq!(niche(r.clone()).field_kind(), 101, "{:?}", r);
+            assert_eq!(niche(r.clone()).binding_kind(), 2, "{:?} is reclaimable through the niche", r);
+        }
+        // A niche never niches: `Option<Option<T>>` boxes.
+        assert!(!niche(Repr::Narrow).niches());
+        for r in [Repr::Unit, Repr::RawWord, Repr::None] {
+            assert!(!r.niches(), "{:?}", r);
+        }
     }
 
     /// A scalar needs no root, and `Repr::None` — a still-generic type

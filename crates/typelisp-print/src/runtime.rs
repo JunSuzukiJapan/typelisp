@@ -38,6 +38,9 @@ use crate::PrintEnv;
 pub struct PrintHooks {
     /// `(type_key, variant) -> name`. See [`PrintEnv::enum_variant_name`].
     pub enum_variant_name: fn(&str, usize) -> Option<String>,
+    /// `(type_key, variant, index) -> is a niched Option`. See
+    /// [`PrintEnv::field_is_niched_option`].
+    pub field_is_niched_option: fn(&str, Option<usize>, usize) -> bool,
     /// `(heap, value, escape) -> rendering`. See [`PrintEnv::print_object`].
     pub print_object: fn(&mut Heap, Value, bool) -> Result<Option<String>, String>,
     /// `(heap, name, value, colon, at) -> rendering`, for `~/name/`. See
@@ -63,6 +66,7 @@ pub struct PrintHooks {
 /// standing a program up.
 pub const BARE_HOOKS: PrintHooks = PrintHooks {
     enum_variant_name: |_, _| None,
+    field_is_niched_option: |_, _, _| false,
     print_object: |_, _, _| Ok(None),
     format_call: |_, name, _, _, _| Err(format!("format: ~/{}/ needs a program to look the method up in", name)),
     opts: |_| Opts::default(),
@@ -93,6 +97,10 @@ struct RtPrintEnv {
 impl PrintEnv for RtPrintEnv {
     fn enum_variant_name(&self, type_key: &str, variant: usize) -> Option<String> {
         (self.hooks.enum_variant_name)(type_key, variant)
+    }
+
+    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> bool {
+        (self.hooks.field_is_niched_option)(type_key, variant, index)
     }
 
     fn print_object(&self, heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {
