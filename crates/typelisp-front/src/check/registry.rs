@@ -1221,8 +1221,39 @@ fn register_net_builtins(root: &mut Namespace) {
     // back with the connect in flight), wait for writable, finish (did it
     // succeed). A single blocking `connect` would stop every task for as
     // long as an unreachable host takes to time out.
-    native("net-connect-begin", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
+    // Name resolution first, on a thread the task waits for through a pipe
+    // (`Ok(none)` from `finish`: not yet), then the connect proper on the
+    // `ip:port` it answered with.
+    native("net-resolve-begin", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
+    native(
+        "net-resolve-finish",
+        vec![h.clone()],
+        result_of(option_of(Type::Named(Path::root("vector"), vec![Type::Str])), net_err.clone()),
+    );
+    native("net-connect-begin", vec![Type::Str], result_of(h.clone(), net_err.clone()));
     native("net-connect-finish", vec![h.clone()], unit_or_err.clone());
+    // TLS on a connected socket: `start` names the server the certificate
+    // must be for; `handshake` is one non-blocking step, answering `none`
+    // when done and `some interest` when the socket must become ready
+    // before the next.
+    native("net-tls-start", vec![h.clone(), Type::Str], unit_or_err.clone());
+    native("net-tls-handshake", vec![h.clone()], result_of(option_of(Type::Int), net_err.clone()));
+    // UDP: whole datagrams. `send-to` answers `false` when the send buffer
+    // is full (wait for writable); `recv` answers `none` when nothing has
+    // arrived (wait for readable), and `last-sender` says who sent what
+    // `recv` last returned.
+    native("net-udp-bind", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
+    native(
+        "net-udp-send-to",
+        vec![h.clone(), Type::Str, Type::Named(Path::root("vector"), vec![Type::Int])],
+        result_of(Type::Bool, net_err.clone()),
+    );
+    native(
+        "net-udp-recv",
+        vec![h.clone()],
+        result_of(option_of(Type::Named(Path::root("vector"), vec![Type::Int])), net_err.clone()),
+    );
+    native("net-udp-last-sender", vec![h.clone()], result_of(Type::Str, net_err.clone()));
     native("net-listen", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
     // `Ok(none)`: nobody is waiting to be accepted — wait for readable.
     native("net-accept", vec![h.clone()], result_of(option_of(h.clone()), net_err.clone()));
@@ -1249,7 +1280,10 @@ fn register_net_builtins(root: &mut Namespace) {
 
     // The wait itself. Not a `Result`: a closed handle here is a program
     // error (the stream was closed and then waited on), which is a panic.
-    native("net-wait", vec![h, Type::Int], Type::Unit);
+    native("net-wait", vec![h.clone(), Type::Int], Type::Unit);
+    // The same wait with a clock: `true` when the socket became ready,
+    // `false` when `secs` ran out first. Seconds as `f64`, `sleep`'s unit.
+    native("net-wait-for", vec![h, Type::Int, Type::F64], Type::Bool);
 }
 
 /// The environment the program is running in (CLHS 25.1) — plus the two

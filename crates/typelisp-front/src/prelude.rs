@@ -4225,19 +4225,95 @@ user-visible capacity."
   (open-stream-p ((self Self)) bool (stream-open-p self::h))
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 
-(pub defun tcp-connect ((host string) (port int)) Result<tcp-stream, NetError>
-  "Connect to `host` (a name or an address) on `port`. `Err` if the name does
-   not resolve or the connection is refused -- ordinary outcomes, not panics.
-   The task waits for the handshake; other tasks keep running."
-  (match (net-connect-begin host port)
+;; Waiting with a clock. `net-wait-for` answers `false` when `secs` ran out
+;; first; the operations that take a timeout turn that into a `NetError`, so
+;; a caller sees one kind of failure whether the name did not resolve, the
+;; host refused, or nobody answered in time.
+(defun tcp-wait-within ((h i32) (interest int) (timeout Option<f64>) (what string)) Result<(), NetError>
+  (match timeout
+    ((none) (progn (net-wait h interest) (result::ok ())))
+    ((some secs)
+     (if (net-wait-for h interest secs)
+         (result::ok ())
+         (result::err (NetError::NetError (append what ": timed out")))))))
+
+;; The two steps every connect starts with: resolve the name on its thread,
+;; then wait for the answer -- every address the name has, in the resolver's
+;; order. A resolution handle is used once and closes itself when read.
+(defun tcp-resolve ((host string) (port int) (timeout Option<f64>)) Result<Vector<string>, NetError>
+  (match (net-resolve-begin host port)
+    ((err e) (result::err e))
+    ((ok r)
+     (loop
+       (match (tcp-wait-within r net-readable timeout "resolve")
+         ;; `the` on the first `return` the checker meets: a loop's type is
+         ;; the join of its returns, and this one would fix `T` as `!`.
+         ((err e) (progn (unwrap-io (stream-close r)) (return (the Result<Vector<string>, NetError> (result::err e)))))
+         ((ok _)
+          (match (net-resolve-finish r)
+            ((ok (some addrs)) (return (result::ok addrs)))
+            ((ok (none)) ())
+            ((err e) (return (result::err e))))))))))
+
+(defun tcp-connect-one ((addr string) (timeout Option<f64>)) Result<i32, NetError>
+  (match (net-connect-begin addr)
     ((err e) (result::err e))
     ((ok h)
-     (net-wait h net-writable)
-     (match (net-connect-finish h)
-       ((ok _) (result::ok (tcp-stream::new h)))
-       ((err e)
-        (unwrap-io (stream-close h))
-        (result::err e))))))
+     (match (tcp-wait-within h net-writable timeout "tcp-connect")
+       ((err e) (progn (unwrap-io (stream-close h)) (result::err e)))
+       ((ok _)
+        (match (net-connect-finish h)
+          ((ok _) (result::ok h))
+          ((err e)
+           (unwrap-io (stream-close h))
+           (result::err e))))))))
+
+;; Each address in turn until one answers -- `localhost` is `::1` before
+;; `127.0.0.1` on most machines, and a server listening on only one of them
+;; is not a failure to connect. The error reported is the last one.
+(defun tcp-connect-addr ((addrs Vector<string>) (timeout Option<f64>)) Result<i32, NetError>
+  (let ((i 0) (n (len addrs)))
+    (loop
+      (match (tcp-connect-one (get addrs i) timeout)
+        ((ok h) (return (the Result<i32, NetError> (result::ok h))))
+        ((err e)
+         (setf i (+ i 1))
+         (when (>= i n) (return (result::err e))))))))
+
+(pub defun tcp-connect ((host string) (port int) &optional (timeout f64)) Result<tcp-stream, NetError>
+  "Connect to `host` (a name or an address) on `port`. `Err` if the name does
+   not resolve, the connection is refused, or -- with `timeout` seconds
+   given -- nobody answers in time: ordinary outcomes, not panics. The task
+   waits for the name and the handshake; other tasks keep running."
+  (match (tcp-resolve host port timeout)
+    ((err e) (result::err e))
+    ((ok addrs)
+     (match (tcp-connect-addr addrs timeout)
+       ((ok h) (result::ok (tcp-stream::new h)))
+       ((err e) (result::err e))))))
+
+(pub defun tls-connect ((host string) (port int) &optional (timeout f64)) Result<tcp-stream, NetError>
+  "`tcp-connect`, then TLS on the connection with `host` as the name the
+   server's certificate must be for (checked against Mozilla's root store).
+   The result is an ordinary `tcp-stream`; what crosses the socket is
+   ciphertext. Client side only -- there is no `tls-listen`."
+  (match (tcp-resolve host port timeout)
+    ((err e) (result::err e))
+    ((ok addrs)
+     (match (tcp-connect-addr addrs timeout)
+       ((err e) (result::err e))
+       ((ok h)
+        (match (net-tls-start h host)
+          ((err e) (progn (unwrap-io (stream-close h)) (result::err e)))
+          ((ok _)
+           (loop
+             (match (net-tls-handshake h)
+               ((ok (none)) (return (the Result<tcp-stream, NetError> (result::ok (tcp-stream::new h)))))
+               ((ok (some interest))
+                (match (tcp-wait-within h interest timeout "tls-connect")
+                  ((ok _) ())
+                  ((err e) (progn (unwrap-io (stream-close h)) (return (result::err e))))))
+               ((err e) (progn (unwrap-io (stream-close h)) (return (result::err e)))))))))))))
 
 (pub defun tcp-listen ((host string) (port int)) Result<tcp-listener, NetError>
   "Listen on `host`:`port` -- 127.0.0.1 for this machine only, 0.0.0.0 for
@@ -4247,8 +4323,9 @@ user-visible capacity."
     ((ok h) (result::ok (tcp-listener::new h)))
     ((err e) (result::err e))))
 
-(pub defmethod accept ((self tcp-listener)) Result<tcp-stream, NetError>
-  "The next connection, waiting for one. The usual shape of a server is
+(pub defmethod accept ((self tcp-listener) &optional (timeout f64)) Result<tcp-stream, NetError>
+  "The next connection, waiting for one -- at most `timeout` seconds if
+   given, after which the `Err` says so. The usual shape of a server is
    `(loop (match (accept l) ((ok c) (go (serve c))) ((err e) ...)))`: one task
    per connection, each free to wait on its own socket."
   (loop
@@ -4256,8 +4333,26 @@ user-visible capacity."
       ;; `the`: a loop's type is the join of its `return`s, and this one is
       ;; seen first with its `E` still a hole.
       ((ok (some h)) (return (the Result<tcp-stream, NetError> (result::ok (tcp-stream::new h)))))
-      ((ok (none)) (net-wait self::h net-readable))
+      ((ok (none))
+       (match (tcp-wait-within self::h net-readable timeout "accept")
+         ((ok _) ())
+         ((err e) (return (result::err e)))))
       ((err e) (return (result::err e))))))
+
+(pub defmethod wait-readable ((self tcp-stream) (secs f64)) bool
+  "Wait until something can be read without waiting, or `secs` run out:
+   `true` if the former. Something buffered counts. The way to put a clock
+   on a read: `(if (wait-readable c 5.0) (read-line c) ...)`. What it
+   promises is that the *next* read will not park; a `read-line` may still
+   wait for the rest of its line."
+  (if (unwrap-net (net-buffered-p self::h))
+      true
+      (net-wait-for self::h net-readable secs)))
+
+(pub defmethod wait-writable ((self tcp-stream) (secs f64)) bool
+  "Wait until the socket will take output, or `secs` run out: `true` if the
+   former."
+  (net-wait-for self::h net-writable secs))
 
 (pub defun byte-stream-of ((s tcp-stream)) tcp-byte-stream
   "The same connection as a byte stream. Both views share one buffer, so a
@@ -4301,6 +4396,113 @@ user-visible capacity."
           (let ((,result (progn ,@body)))
             (progn (close ,var) (result::ok ,result)))))
        ((err ,e) (result::err ,e)))))
+
+;; ---- UDP -------------------------------------------------------------------
+;;
+;; Datagrams are not a stream: a message arrives whole, from somebody, or
+;; not at all. So `udp-socket` implements none of the stream traits, and its
+;; two operations move a `datagram` -- the bytes and who sent them -- at a
+;; time. Bytes rather than text, since a datagram may carry anything;
+;; `string->utf8`/`utf8->string` below convert.
+
+(pub defstruct udp-socket (h i32))
+(pub defstruct datagram (pub bytes Vector<int>) (pub from string))
+
+(pub defun udp-bind ((host string) (port int)) Result<udp-socket, NetError>
+  "A UDP socket on `host`:`port` (`0`: any free port; `local-address` says
+   which). Sending needs one too -- bind to port `0`."
+  (match (net-udp-bind host port)
+    ((ok h) (result::ok (udp-socket::new h)))
+    ((err e) (result::err e))))
+
+(impl Stream udp-socket
+  (open-stream-p ((self Self)) bool (stream-open-p self::h))
+  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+
+(pub defmethod local-address ((self udp-socket)) string
+  "This socket's address as `host:port`."
+  (unwrap-net (net-local-address self::h)))
+
+(pub defmethod send-to ((self udp-socket) (host string) (port int) (bytes Vector<int>)) Result<(), NetError>
+  "Send `bytes` as one datagram to `host`:`port`. Resolves the name (waiting
+   for it), then sends -- waiting only if the socket's own buffer is full.
+   Delivery is not confirmed; that is UDP."
+  (match (tcp-resolve host port (option::none))
+    ((err e) (result::err e))
+    ((ok addrs)
+     (loop
+       (match (net-udp-send-to self::h (get addrs 0) bytes)
+         ((ok sent) (if sent (return (the Result<(), NetError> (result::ok ()))) (net-wait self::h net-writable)))
+         ((err e) (return (result::err e))))))))
+
+(pub defmethod recv-from ((self udp-socket) &optional (timeout f64)) Result<datagram, NetError>
+  "The next datagram, waiting for one -- at most `timeout` seconds if given.
+   `from` is the sender as `ip:port`, which `send-to` accepts back."
+  (loop
+    (match (net-udp-recv self::h)
+      ((ok (some bytes))
+       (return (the Result<datagram, NetError>
+                    (result::ok (datagram::new bytes (unwrap-net (net-udp-last-sender self::h)))))))
+      ((ok (none))
+       (match (tcp-wait-within self::h net-readable timeout "recv-from")
+         ((ok _) ())
+         ((err e) (return (result::err e)))))
+      ((err e) (return (result::err e))))))
+
+;; ---- Bytes and text ----------------------------------------------------------
+
+(pub defun string->utf8 ((s string)) Vector<int>
+  "The UTF-8 encoding of `s`, one byte (0..255) per element."
+  (let ((out (the Vector<int> (Vector::new))) (i 0) (n-chars (length s)))
+    (while (< i n-chars)
+      (let ((n (char->int (ref s i))))
+        (setf i (+ i 1))
+        (cond
+          ((< n 128) (push out n))
+          ((< n 2048)
+           (push out (+ 192 (ash n -6)))
+           (push out (+ 128 (logand n 63))))
+          ((< n 65536)
+           (push out (+ 224 (ash n -12)))
+           (push out (+ 128 (logand (ash n -6) 63)))
+           (push out (+ 128 (logand n 63))))
+          (else
+           (push out (+ 240 (ash n -18)))
+           (push out (+ 128 (logand (ash n -12) 63)))
+           (push out (+ 128 (logand (ash n -6) 63)))
+           (push out (+ 128 (logand n 63)))))))
+    out))
+
+(pub defun utf8->string ((bytes Vector<int>)) Option<string>
+  "The text `bytes` encode, or `none` if they are not well-formed UTF-8."
+  (let ((out "") (i 0) (n (len bytes)) (bad false))
+    (while (and (< i n) (not bad))
+      (let ((b (get bytes i)))
+        (let ((width (cond ((< b 128) 1)
+                           ((and (>= b 194) (< b 224)) 2)
+                           ((and (>= b 224) (< b 240)) 3)
+                           ((and (>= b 240) (< b 245)) 4)
+                           (else 0))))
+          (if (or (eq width 0) (> (+ i width) n))
+              (progn (setf bad true) ())
+              (let ((code (cond ((eq width 1) b)
+                                ((eq width 2) (logand b 31))
+                                ((eq width 3) (logand b 15))
+                                (else (logand b 7))))
+                    (k 1))
+                (while (and (< k width) (not bad))
+                  (let ((cont (get bytes (+ i k))))
+                    (if (and (>= cont 128) (< cont 192))
+                        (progn (setf code (+ (ash code 6) (logand cont 63))) ())
+                        (progn (setf bad true) ())))
+                  (setf k (+ k 1)))
+                (unless bad
+                  (match (try-int->char code)
+                    ((some c) (progn (setf out (append out (char->string c))) ()))
+                    ((none) (progn (setf bad true) ()))))
+                (setf i (+ i width))
+                ())))))
+    (if bad (option::none) (option::some out))))
 
 ;; CL's standard streams. Ordinary assignable globals rather than dynamically
 ;; bound specials — `(setf *standard-output* s)` does globally what CL's

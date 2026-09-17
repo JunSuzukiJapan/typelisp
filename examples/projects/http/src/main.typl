@@ -1,0 +1,64 @@
+;; An HTTP/1.1 server and client over the `http` module.
+;;
+;;   typl examples/projects/http/src/main.typl serve [port]      ; default 8080
+;;   typl examples/projects/http/src/main.typl get <url>         ; http:// or https://
+;;
+;; The server answers `/` with a greeting, `/time` with the clock, and
+;; anything else with 404 -- one task per connection, so a slow client never
+;; delays another. Try it:
+;;
+;;   curl -i http://127.0.0.1:8080/time
+;;   typl .../main.typl get http://127.0.0.1:8080/
+;;   typl .../main.typl get https://example.com/
+
+(use http::read-request)
+(use http::write-response)
+(use http::text-response)
+(use http::http-get)
+(use http::header-value)
+
+(defun route ((r http::request)) http::response
+  (cond
+    ((equal (target r) "/") (text-response 200 "OK" "hello from typelisp\n"))
+    ((equal (target r) "/time")
+     (text-response 200 "OK" (format false "~a\n" (get-universal-time))))
+    (else (text-response 404 "Not Found" (format false "no route for ~a\n" (target r))))))
+
+(defun serve-connection ((c tcp-stream)) ()
+  (match (read-request c)
+    ((some r)
+     (println "~a ~a ~a" (peer-address c) (method r) (target r))
+     (write-response c (route r)))
+    ((none) ()))
+  (close c))
+
+(defun serve ((port int)) ()
+  (match (tcp-listen "0.0.0.0" port)
+    ((err e) (println "cannot listen: ~a" (message e)))
+    ((ok l)
+     (println "http server on ~a" (local-address l))
+     (loop
+       (match (accept l)
+         ((ok c) (progn (go (serve-connection c)) ()))
+         ((err e) (println "accept failed: ~a" (message e))))))))
+
+(defun fetch ((address string)) ()
+  (match (http-get address)
+    ((err e) (println "error: ~a" (message e)))
+    ((ok r)
+     (println "~a ~a" (status r) (reason r))
+     (doiter (h (iter (headers r)))
+       (println "~a: ~a" (name h) (value h)))
+     (println "")
+     (print "~a" (body r)))))
+
+(defun main () ()
+  (let ((args (command-line-args)))
+    (cond
+      ((and (> (len args) 1) (equal (get args 1) "serve"))
+       (serve (if (> (len args) 2) (unwrap-or (parse-int (get args 2)) 8080) 8080)))
+      ((and (> (len args) 2) (equal (get args 1) "get"))
+       (fetch (get args 2)))
+      (else (println "usage: main.typl serve [port] | get <url>")))))
+
+(main)

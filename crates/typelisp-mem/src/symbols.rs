@@ -414,6 +414,18 @@ well_known_symbols! {
     SOME_OF => "some-of"
     PAT_SOME => "pat-some"
     BOX_OPTION => "box-option"
+
+    "Appended for `cond`/`case` in file modules (2026-09-17). The core macros
+     recognise their fallthrough clause with `(eq (car clause) (quote else))`,
+     and `eq` on symbols is address equality: the `else` a user writes has
+     to *be* the one the macro quoted. It was, as long as everything was read
+     at the root. A script run as `typl file.typl` reads in its own file
+     module, whose `else` was a different symbol — and every `(cond ... (else
+     ...))` in a script failed with `unbound variable: else` while the same
+     form worked at the REPL. In the vocabulary, the name is imported into
+     every module from the system one, and there is one `else` again.
+     `select`'s arm compares by name in the checker and never noticed."
+    ELSE => "else"
 }
 
 

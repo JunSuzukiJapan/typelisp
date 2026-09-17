@@ -31,3 +31,13 @@ num-integer = "0.1"
 # (`getrusage`), the host's name and OS release (`uname`), a file's owner
 # (`getpwuid_r`) and the local time zone (`localtime_r`).
 libc = "0.2"
+# TLS for `tls-connect`. A TLS implementation is the one thing in the network
+# layer that cannot be written in typelisp (the language has no ciphers) and
+# should not be written here either. `rustls` is sans-IO — it never touches
+# the socket, it only encrypts and decrypts buffers — which is exactly what a
+# non-blocking backend needs: the same `net-fill`/`net-flush` loops drive it,
+# and the scheduler's `poll` is still the only place a task waits. `ring` is
+# the crypto provider that builds without cmake or nasm; `webpki-roots` is
+# Mozilla's root store, bundled, so no OS keychain library is linked.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"

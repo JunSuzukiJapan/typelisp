@@ -317,3 +317,161 @@ fn several_clients_are_served_at_once() {
     assert_eq!(text(&src), "abc");
     assert_eq!(text_compiled(&format!("{src}").replace("(go (echo-serve l 3))", "(compile echo-conn) (go (echo-serve l 3))")), "abc");
 }
+
+// ---- timeouts, names, UDP, TLS ---------------------------------------------
+
+#[test]
+fn accept_with_a_timeout_gives_up() {
+    let src = r#"
+(let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
+  (match (accept l 0.05)
+    ((ok c) (progn (close c) "accepted?!"))
+    ((err e) (message e))))"#;
+    assert_eq!(text(src), "accept: timed out");
+}
+
+#[test]
+fn a_timed_wait_answers_true_when_data_arrives_first() {
+    let src = format!(
+        "{LISTEN}
+(defun send-late ((l tcp-listener)) ()
+  (match (accept l)
+    ((ok c) (sleep 0.02) (write-line c \"late\") (close c))
+    ((err e) (panic (message e)))))
+(let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
+  (go (send-late l))
+  (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
+    (let ((first (wait-readable c 0.005))
+          (second (wait-readable c 2.0)))
+      (let ((line (unwrap (read-line c))))
+        (close c)
+        (close l)
+        (format false \"~a ~a ~a\" first second line)))))"
+    );
+    assert_eq!(text(&src), "false true late");
+}
+
+#[test]
+fn a_compiled_timed_wait_answers_the_same() {
+    let src = format!(
+        "{LISTEN}
+(defun send-late ((l tcp-listener)) ()
+  (match (accept l)
+    ((ok c) (sleep 0.02) (write-line c \"late\") (close c))
+    ((err e) (panic (message e)))))
+(defun client ((port int)) string
+  (let ((c (unwrap (tcp-connect \"127.0.0.1\" port))))
+    (let ((first (wait-readable c 0.005))
+          (second (wait-readable c 2.0)))
+      (let ((line (unwrap (read-line c))))
+        (close c)
+        (format false \"~a ~a ~a\" first second line)))))
+(compile client)
+(let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
+  (go (send-late l))
+  (let ((r (client (port-of l))))
+    (close l)
+    r))"
+    );
+    assert_eq!(text_compiled(&src), "false true late");
+}
+
+#[test]
+fn a_timed_wait_does_not_stop_other_tasks() {
+    let src = r#"
+(defvar (ticks int) 0)
+(defun tick ((n int)) () (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
+(let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
+  (go (tick 5))
+  (match (accept l 0.1)
+    ((ok c) (progn (close c) "accepted?!"))
+    ((err e) (format false "~a ~a" (message e) (>= ticks 5)))))"#;
+    assert_eq!(text(src), "accept: timed out true");
+}
+
+#[test]
+fn connecting_by_name_resolves_on_a_thread() {
+    let src = format!(
+        "{LISTEN}{ECHO}
+(let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
+  (go (echo-serve l 1))
+  (let ((c (unwrap (tcp-connect \"localhost\" (port-of l)))))
+    (write-line c \"by name\")
+    (let ((reply (unwrap (read-line c))))
+      (close c)
+      (close l)
+      reply)))"
+    );
+    assert_eq!(text(&src), "by name");
+}
+
+#[test]
+fn an_unresolvable_name_is_an_error_value_and_others_keep_running() {
+    let src = r#"
+(defvar (ticks int) 0)
+(defun tick ((n int)) () (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
+(go (tick 3))
+(match (tcp-connect "no-such-host.invalid" 80)
+  ((ok c) (progn (close c) "connected?!"))
+  ((err e) (if (> (length (message e)) 0) "resolve failed" "")))"#;
+    assert_eq!(text(src), "resolve failed");
+}
+
+#[test]
+fn a_datagram_goes_from_one_socket_to_another() {
+    let src = r#"
+(let ((a (unwrap (udp-bind "127.0.0.1" 0)))
+      (b (unwrap (udp-bind "127.0.0.1" 0))))
+  (let ((b-port (unwrap (parse-int (substring (local-address b) (+ 1 (unwrap (search (local-address b) ":"))) (length (local-address b)))))))
+    (unwrap (send-to a "127.0.0.1" b-port (string->utf8 "ping é")))
+    (let ((d (unwrap (recv-from b 2.0))))
+      (let ((back (unwrap (utf8->string (bytes d))))
+            (same (equal (from d) (local-address a))))
+        (close a)
+        (close b)
+        (format false "~a ~a" back same)))))"#;
+    assert_eq!(text(src), "ping é true");
+    assert_eq!(text_stressed(src), "ping é true");
+}
+
+#[test]
+fn recv_from_with_a_timeout_gives_up() {
+    let src = r#"
+(let ((s (unwrap (udp-bind "127.0.0.1" 0))))
+  (match (recv-from s 0.05)
+    ((ok d) "a datagram?!")
+    ((err e) (message e))))"#;
+    assert_eq!(text(src), "recv-from: timed out");
+}
+
+#[test]
+fn utf8_round_trips_and_rejects_garbage() {
+    let src = r#"
+(let ((bytes (string->utf8 "aé€😀")))
+  (format false "~a ~a ~a"
+    (len bytes)
+    (unwrap (utf8->string bytes))
+    (is-none (utf8->string (string->utf8-broken)))))
+"#;
+    let src = src.replace("(string->utf8-broken)", "(let ((v (the Vector<int> (Vector::new)))) (push v 255) v)");
+    assert_eq!(text(&src), "10 aé€😀 true");
+}
+
+#[test]
+fn tls_against_a_plain_peer_fails_cleanly() {
+    // A listener that never speaks TLS: the handshake must come back as an
+    // `Err`, with every other task still running, not hang the program.
+    let src = format!(
+        "{LISTEN}
+(defun sink ((l tcp-listener)) ()
+  (match (accept l)
+    ((ok c) (write-line c \"not tls\") (close c))
+    ((err e) (panic (message e)))))
+(let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
+  (go (sink l))
+  (match (tls-connect \"localhost\" (port-of l) 5.0)
+    ((ok c) (progn (close c) \"handshake succeeded?!\"))
+    ((err e) (if (> (length (message e)) 0) \"tls failed\" \"\"))))"
+    );
+    assert_eq!(text(&src), "tls failed");
+}

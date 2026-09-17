@@ -60,7 +60,7 @@ use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, UdpSocket};
 
 thread_local! {
     /// This thread's open streams. See the module docs for why it is here.
@@ -93,11 +93,22 @@ pub(crate) enum Backend {
     /// happens in typelisp. A blocking `read` here would stop every task.
     ///
     /// `rbuf` holds what has been received and not yet consumed; `wbuf`
-    /// what has been written and not yet sent.
-    Tcp { sock: TcpStream, rbuf: VecDeque<u8>, wbuf: VecDeque<u8> },
+    /// what has been written and not yet sent. With `tls` present the two
+    /// buffers hold *plaintext* and the connection object between them and
+    /// the socket does the ciphering (`crate::net`'s TLS section).
+    Tcp { sock: TcpStream, tls: Option<Box<rustls::ClientConnection>>, rbuf: VecDeque<u8>, wbuf: VecDeque<u8> },
     /// A listening TCP socket, non-blocking for the same reason. Neither an
     /// input nor an output stream: it yields connections, not items.
     Listener(TcpListener),
+    /// A UDP socket, non-blocking. Datagrams, not a stream: it is neither an
+    /// input nor an output stream, and `crate::net` speaks to it in whole
+    /// messages. `last_from` is who sent the datagram most recently received.
+    Udp { sock: UdpSocket, last_from: Option<std::net::SocketAddr> },
+    /// A name resolution in flight on a helper thread. What the table holds
+    /// is the read end of a pipe the thread writes one byte to when it is
+    /// done — a descriptor `poll` can wait on like any socket's — and the
+    /// slot the thread leaves its answer in.
+    Resolver { pipe: std::io::PipeReader, answer: ResolverAnswer },
     /// Indexed by *character*, not byte, so reading is O(1) per character and
     /// can never split a multi-byte one.
     StringIn { chars: Vec<char>, pos: usize },
@@ -109,6 +120,10 @@ pub(crate) enum Backend {
     /// file reporting itself as an input stream would be a plain lie.
     Closed,
 }
+
+/// Where a resolver thread leaves what it found: every address the name
+/// has, or why there is none. Shared with the thread, hence the lock.
+pub(crate) type ResolverAnswer = std::sync::Arc<std::sync::Mutex<Option<Result<Vec<std::net::SocketAddr>, String>>>>;
 
 pub(crate) struct StreamObj {
     pub(crate) backend: Backend,
@@ -242,11 +257,18 @@ impl StreamTable {
         // Waiting for the rest is not this layer's to do: the prelude's
         // `close` calls `finish-output` first, which parks the task until
         // the buffer is empty, so this attempt is normally a no-op.
-        if let Backend::Tcp { sock, wbuf, .. } = &mut s.backend {
+        if let Backend::Tcp { sock, tls: None, wbuf, .. } = &mut s.backend {
             let (front, _) = wbuf.as_slices();
             if !front.is_empty() {
                 let _ = sock.write(front);
             }
+        }
+        // A TLS connection tells the peer it is closing (`close_notify`),
+        // best effort and without waiting, so the peer can tell a clean end
+        // from a cut connection.
+        if let Backend::Tcp { sock, tls: Some(conn), .. } = &mut s.backend {
+            conn.send_close_notify();
+            let _ = conn.write_tls(sock);
         }
         // A string output stream keeps its text: CL allows
         // `get-output-stream-string` after `close`.
@@ -266,6 +288,8 @@ impl StreamTable {
         match &self.get(h)?.backend {
             Backend::Tcp { sock, .. } => Ok(sock.as_raw_fd()),
             Backend::Listener(l) => Ok(l.as_raw_fd()),
+            Backend::Udp { sock, .. } => Ok(sock.as_raw_fd()),
+            Backend::Resolver { pipe, .. } => Ok(pipe.as_raw_fd()),
             Backend::Closed => Err("the stream is closed".to_string()),
             _ => Err("net-wait: only a socket can be waited on".to_string()),
         }

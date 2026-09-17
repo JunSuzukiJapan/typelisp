@@ -397,6 +397,10 @@ pub mod call_state {
     /// resolves the handle to a descriptor, exactly as it does for the
     /// interpreted call.
     pub const SUSPEND_IO: i64 = 11;
+    /// `(net-wait-for h interest secs)` — a socket becoming ready **or** the
+    /// clock running out. Payloads: `(handle << 1) | interest` and the
+    /// seconds as `f64::to_bits`. Answers with a tagged `bool`.
+    pub const SUSPEND_IO_FOR: i64 = 12;
 
     /// Records the arms of a `select`, as `[n, has-else, kind, chan, extra]...`
     /// with every word **tagged** — the array is a compiled frame's slots,

@@ -567,11 +567,27 @@ pub(super) enum Waiting {
     /// cue to retry the non-blocking operation that said "not yet".
     ///
     /// The descriptor, not the handle: it is resolved when the wait is
-    /// asked for (`Interp::io_wait`), so a handle that is not a socket or is
+    /// asked for (`io_wait`), so a handle that is not a socket or is
     /// already closed is refused there, and the scheduler hands `poll`
     /// plain integers. Like `Until`, this holds no `Value` and needs no
     /// root.
-    Io { fd: i32, interest: typelisp_rt::os::Interest },
+    ///
+    /// With a `deadline` — `(net-wait-for h interest secs)` — the wait is
+    /// also a sleep, and answers with a `bool`: `true` when the socket
+    /// became ready, `false` when the clock ran out first. Without one the
+    /// answer is unit, as `sleep`'s is.
+    Io { fd: i32, interest: typelisp_rt::os::Interest, deadline: Option<std::time::Instant> },
+}
+
+/// What an `Io` wait answers with once the socket is ready: unit for a
+/// plain `net-wait`, `true` for a `net-wait-for` (whose other answer,
+/// `false`, is the clock's).
+fn io_ready_answer(deadline: Option<std::time::Instant>) -> Value {
+    if deadline.is_some() {
+        Value::Bool(true)
+    } else {
+        Value::Empty
+    }
 }
 
 /// One arm of a `select`, in the order the arms are written — the index *is*
@@ -912,11 +928,14 @@ impl Scheduler {
             // fails (a descriptor closed under the task) is reported as
             // ready, for the reason `poll_ready` gives — the retry will fail
             // with a message where a park would hang.
-            Waiting::Io { fd, interest } => {
+            Waiting::Io { fd, interest, deadline } => {
                 match typelisp_rt::os::poll_ready(&[(*fd, *interest)], Some(std::time::Duration::ZERO)) {
-                    Ok(ready) if ready.iter().any(|(_, r)| *r) => Some(Ok(Value::Empty)),
-                    Ok(_) => None,
-                    Err(_) => Some(Ok(Value::Empty)),
+                    Ok(ready) if ready.iter().any(|(_, r)| *r) => Some(Ok(io_ready_answer(*deadline))),
+                    Ok(_) => match deadline {
+                        Some(t) if *t <= std::time::Instant::now() => Some(Ok(Value::Bool(false))),
+                        _ => None,
+                    },
+                    Err(_) => Some(Ok(io_ready_answer(*deadline))),
                 }
             }
         }
@@ -1271,19 +1290,27 @@ impl Scheduler {
     /// a task that asked for 10ms while another runs for a second should be
     /// runnable again after 10ms, not after the second.
     fn wake_due(&mut self) {
-        if self.sleeping == 0 {
+        if self.sleeping == 0 && self.io_waiting == 0 {
             return;
         }
         let now = std::time::Instant::now();
         for i in 0..self.slots.len() {
-            if !matches!(&self.slots[i], Slot::Blocked(_, Waiting::Until(t)) if *t <= now) {
-                continue;
-            }
+            // A socket wait with a deadline is also a sleep: when the clock
+            // runs out first, the answer is `false`.
+            let (answer, was_io) = match &self.slots[i] {
+                Slot::Blocked(_, Waiting::Until(t)) if *t <= now => (Value::Empty, false),
+                Slot::Blocked(_, Waiting::Io { deadline: Some(t), .. }) if *t <= now => (Value::Bool(false), true),
+                _ => continue,
+            };
             if let Slot::Blocked(mut slot, _) = std::mem::replace(&mut self.slots[i], Slot::Running) {
-                slot.task.state = State::Apply(Value::Empty);
+                slot.task.state = State::Apply(answer);
                 self.slots[i] = Slot::Parked(slot);
                 self.ready.push_back(TaskId(i));
-                self.sleeping -= 1;
+                if was_io {
+                    self.io_waiting -= 1;
+                } else {
+                    self.sleeping -= 1;
+                }
             }
         }
     }
@@ -1308,7 +1335,7 @@ impl Scheduler {
             .slots
             .iter()
             .filter_map(|s| match s {
-                Slot::Blocked(_, Waiting::Io { fd, interest }) => Some((*fd, *interest)),
+                Slot::Blocked(_, Waiting::Io { fd, interest, .. }) => Some((*fd, *interest)),
                 _ => None,
             })
             .collect();
@@ -1326,8 +1353,8 @@ impl Scheduler {
             if !woken {
                 continue;
             }
-            if let Slot::Blocked(mut slot, _) = std::mem::replace(&mut self.slots[i], Slot::Running) {
-                slot.task.state = State::Apply(Value::Empty);
+            if let Slot::Blocked(mut slot, Waiting::Io { deadline, .. }) = std::mem::replace(&mut self.slots[i], Slot::Running) {
+                slot.task.state = State::Apply(io_ready_answer(deadline));
                 self.slots[i] = Slot::Parked(slot);
                 self.ready.push_back(TaskId(i));
                 self.io_waiting -= 1;
@@ -1340,13 +1367,14 @@ impl Scheduler {
     /// `None` means nobody is: with nothing ready either, every remaining task
     /// is waiting on something that will never happen.
     fn earliest_deadline(&self) -> Option<std::time::Instant> {
-        if self.sleeping == 0 {
+        if self.sleeping == 0 && self.io_waiting == 0 {
             return None;
         }
         self.slots
             .iter()
             .filter_map(|s| match s {
                 Slot::Blocked(_, Waiting::Until(t)) => Some(*t),
+                Slot::Blocked(_, Waiting::Io { deadline: Some(t), .. }) => Some(*t),
                 _ => None,
             })
             .min()
@@ -1409,7 +1437,7 @@ fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
 /// two refuse the same handles in the same words. A closed or non-socket
 /// handle is a program error — the stream was closed and then waited on —
 /// and panics rather than parking a task nothing will ever wake.
-fn io_wait(argv: &[Value]) -> Result<Waiting, EvalError> {
+fn io_wait(argv: &[Value], deadline: Option<std::time::Instant>) -> Result<Waiting, EvalError> {
     let handle = match argv.first() {
         Some(Value::Int(h)) => *h,
         other => return Err(EvalError::Internal(format!("net-wait: {:?} is not a stream handle", other))),
@@ -1420,7 +1448,18 @@ fn io_wait(argv: &[Value]) -> Result<Waiting, EvalError> {
         other => return Err(EvalError::Internal(format!("net-wait: {:?} is not an interest", other))),
     };
     let fd = typelisp_rt::stream::with_streams(|t| t.raw_fd(handle)).map_err(EvalError::Panic)?;
-    Ok(Waiting::Io { fd, interest })
+    Ok(Waiting::Io { fd, interest, deadline })
+}
+
+/// `secs` from now, with `sleep`'s refusals: negative or NaN is not a
+/// duration, and neither is one the clock cannot hold.
+fn io_deadline(secs: f64) -> Result<std::time::Instant, EvalError> {
+    if !(secs >= 0.0) {
+        return Err(EvalError::Panic(format!("net-wait-for: {} is not a non-negative number of seconds", secs)));
+    }
+    let d = std::time::Duration::try_from_secs_f64(secs)
+        .map_err(|_| EvalError::Panic(format!("net-wait-for: {} is longer than this can wait", secs)))?;
+    Ok(std::time::Instant::now() + d)
 }
 
 /// What a compiled frame that just returned `STATUS_SUSPEND` is waiting for,
@@ -1475,8 +1514,17 @@ fn pending_wait(heap: &Heap) -> Result<(Waiting, Repr), EvalError> {
         // integers in compiled code (`sleep`'s bits cross the same way), and
         // this is the same resolution the interpreted `net-wait` makes.
         cs::SUSPEND_IO => {
-            let w = io_wait(&[Value::Int(payload), Value::Int(second)])?;
+            let w = io_wait(&[Value::Int(payload), Value::Int(second)], None)?;
             Ok((w, Repr::Unit))
+        }
+        // The handle and the interest share the first word (`rt_suspend_io_for`
+        // packs them: handle above, interest in the low bit) so the seconds'
+        // bits can have the second. The answer is a `bool`, tagged like
+        // every typed wake value.
+        cs::SUSPEND_IO_FOR => {
+            let d = io_deadline(f64::from_bits(second as u64))?;
+            let w = io_wait(&[Value::Int(payload >> 1), Value::Int(payload & 1)], Some(d))?;
+            Ok((w, Repr::Sexpr))
         }
         // The channel operations. The handle is tagged, like `wait`'s; so is
         // `send`'s value, which the suspension site tagged per the element's
@@ -2916,7 +2964,12 @@ impl Interp {
         // `(net-wait h interest)` — "not before this socket is ready" — is
         // the third shape of the same thing.
         if path == crate::Path::root("net-wait") {
-            return io_wait(&argv).map(|w| (State::Blocked(w), None));
+            return io_wait(&argv, None).map(|w| (State::Blocked(w), None));
+        }
+        if path == crate::Path::root("net-wait-for") {
+            let secs = argv.get(2).copied().ok_or_else(|| EvalError::Internal("net-wait-for: no timeout".to_string()))?;
+            let d = io_deadline(super::rt_f64(heap, &secs)?)?;
+            return io_wait(&argv, Some(d)).map(|w| (State::Blocked(w), None));
         }
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
             return self.enter_fn(heap, &f, argv);

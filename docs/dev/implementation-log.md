@@ -11501,3 +11501,48 @@ prelude は `scripts/regen-prelude-bitcode.sh`、AOT は `test-serial.sh` が st
 
 後続: タイムアウト（`Waiting::Io` に `deadline` を足せば Go の `SetDeadline`）、UDP、
 HTTP/1.1 の最小実装を typelisp で、TLS、非同期 DNS。
+
+## ネットワーク層の後続 5 件——タイムアウト・非同期 DNS・UDP・TLS・HTTP（2026-09-17）
+
+前項の「後続」を全部。どれも同じ骨格に乗る——Rust は「今できること」だけ、待ちは prelude の
+ループが `net-wait` で。
+
+- **タイムアウト**は `Waiting::Io` に `deadline: Option<Instant>` を足しただけ。`wake_due` と
+  `earliest_deadline` が `Io` の期限も見る。答えは期限付きなら `bool`（ready=true、時計=false）、
+  無しなら unit——`net-wait-for` は compiled では `rt_suspend_io_for` で、ハンドルと interest を
+  1 語に詰め（上位ビット＋最下位 1 bit）秒の bits にもう 1 語。**自由組み込みの中断で答えが型付き
+  なのはこれが初**で、`(call …)` ノードは戻り repr を運ばないから bridge が名前で `kind=4`（bool）
+  を焼く（`externs::RT_SUSPEND_BOOL_ANSWER`）。
+  **API は Go の SetDeadline 型にしなかった**: `InputStream::read-item` は `Option<Item>` で
+  エラーの口が無く、`catch/throw` は catch の型が body と合流するので固定タグでは書けない。
+  時計が要る 3 箇所（`tcp-connect`/`accept` の `&optional timeout`、`wait-readable`）に引数を置いた。
+- **非同期 DNS**: `getaddrinfo` に non-blocking 版は無い。補助スレッド + `std::io::pipe`
+  （1.87 で安定化）。スレッドは答えを `Arc<Mutex<Option<…>>>` に置いてパイプに 1 バイト書くだけで
+  ヒープに触らない。パイプの読み口を `Backend::Resolver` としてストリーム表に入れれば、タスクは
+  他のソケットと同じ `Waiting::Io` で待てる——**poller に「fd の種類」を教える必要が無い**。
+  `localhost` は `::1` が先に来て 127.0.0.1 の listener に拒否されたので、resolver は**全アドレス**を
+  返し `tcp-connect` が順に試す（Go の dialer と同じ）。
+- **UDP**: `Backend::Udp`、`send-to`/`recv-from` は `Vector<int>` のデータグラム。`string->utf8`／
+  `utf8->string` は prelude の typelisp で書いた（Rust に置く理由が無い）。`(if c (setf …) (setf …))`
+  で型が食い違う罠（setf は値を返す）を 4 回踏んだ——`progn … ()` で包む。
+- **TLS**: `rustls`（`ring`、`webpki-roots`）を typelisp-rt に追加。sans-IO なので `Backend::Tcp`
+  に `tls: Option<Box<ClientConnection>>` を足すだけで、`net-fill`/`net-flush` が暗号化層を挟んで
+  同じ 2 本のまま。握手は `net-tls-handshake` が 1 歩ずつ（`Ok(some interest)` で「次はこちらを
+  待て」）。`tls-connect` の結果は普通の `tcp-stream`。サーバ側は無し。example.com の 200 を
+  chunked ごと読めた。
+- **HTTP/1.1** は `examples/projects/http/`（`http.typl` にパーサ/クライアント、`main.typl` に
+  サーバと `get`）。Content-Length / chunked / 接続終端の 3 通りの本体。
+
+### 副産物: `cond`/`case` の `else` がスクリプトで壊れていた
+
+`typl file.typl` で `(cond … (else …))` が `unbound variable: else`。REPL では動く。原因は
+シンボルの同一性: core macro の `(eq (car clause) (quote else))` はルートの `else` を指し、
+ファイルモジュールで読まれた `else` は別のシンボル。`&rest`/`&key` が動くのは
+`BUILTIN_SYMBOLS`（システム語彙、全モジュールが import）に居るからで、`else` は居なかった。
+`select` の腕はチェッカーが名前比較で拾っていたので気づかれなかった。語彙に `ELSE => "else"` を
+追加、`tests/module_file_test.rs` に番人。examples/projects の `else` を使う 2 本は
+テストハーネス（ルート）でしか回っていなかった。
+
+配線の表（前項に加えて）: `SUSPEND_IO_FOR = 12`、`rt_suspend_io_for`、`rt_net_*` +9、externs
+290 個、registry の `register_net_builtins`、`stream_shim!` に `tagged` 引数形（`Vector<int>` を
+渡す）。prelude 再生成、AOT の staticlib は `test-serial.sh` で。

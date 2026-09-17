@@ -996,7 +996,10 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
     // there is nothing in the frame's value slot to decode on the way back
     // (`compile-catch`'s own `kind = 0` means the same thing).
     if name.starts_with(crate::compile::externs::RT_SUSPEND_PREFIX) {
-        return suspend_node(heap, &name, 0, None, &reprs, &args, cx, None);
+        // A `call` node carries its arguments' representations and not its
+        // result's, so the one free suspension with a typed answer is named.
+        let kind = if name == crate::compile::externs::RT_SUSPEND_BOOL_ANSWER { Repr::Bool.field_kind() } else { 0 };
+        return suspend_node(heap, &name, kind, None, &reprs, &args, cx, None);
     }
     let name_v = heap.alloc_string(name);
 

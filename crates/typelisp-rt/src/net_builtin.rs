@@ -26,6 +26,8 @@ use crate::stream_builtin::{int, lookup, text, ArgError};
 /// stream_builtin::RESULT_KEYS`]'s companion, checked against the registry
 /// by the same guard test and for the same reason.
 pub const RESULT_KEYS: &[(&str, &str)] = &[
+    ("net-resolve-begin", "result<i32,neterror>"),
+    ("net-resolve-finish", "result<option<vector<string>>,neterror>"),
     ("net-connect-begin", "result<i32,neterror>"),
     ("net-connect-finish", "result<(),neterror>"),
     ("net-listen", "result<i32,neterror>"),
@@ -40,11 +42,20 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("net-shutdown-write", "result<(),neterror>"),
     ("net-local-address", "result<string,neterror>"),
     ("net-peer-address", "result<string,neterror>"),
+    ("net-tls-start", "result<(),neterror>"),
+    ("net-tls-handshake", "result<option<int>,neterror>"),
+    ("net-udp-bind", "result<i32,neterror>"),
+    ("net-udp-send-to", "result<bool,neterror>"),
+    ("net-udp-recv", "result<option<vector<int>>,neterror>"),
+    ("net-udp-last-sender", "result<string,neterror>"),
 ];
 
 /// The key of the value inside the `Result`, for the builtins whose payload
 /// is itself a box.
 pub const INNER_KEYS: &[(&str, &str)] = &[
+    ("net-resolve-finish", "option<vector<string>>"),
+    ("net-tls-handshake", "option<int>"),
+    ("net-udp-recv", "option<vector<int>>"),
     ("net-accept", "option<i32>"),
     ("net-fill", "option<int>"),
     ("net-pop-byte", "option<int>"),
@@ -67,6 +78,29 @@ fn result_err(heap: &mut Heap, name: &str, msg: String) -> Value {
 
 fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
     heap.alloc_option(lookup(INNER_KEYS, name, "inner"), v)
+}
+
+/// The elements of a `Vector<int>` argument, as bytes. A `Vector<T>`'s box
+/// is a struct whose fields are its elements (`value.rs`'s `BoxedObj`), so
+/// this is a walk over the fields; an element outside `0..255` is the
+/// caller's error, reported by name.
+fn bytes(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<Result<Vec<u8>, String>, ArgError> {
+    let id = match args.get(i) {
+        Some(Value::Boxed(id)) => *id,
+        other => return Err(format!("{}: argument {} is not a vector, got {:?}", who, i, other)),
+    };
+    let n = heap.struct_field_count(id);
+    let mut out = Vec::with_capacity(n);
+    for k in 0..n {
+        match heap.struct_field(id, k) {
+            Value::Int(b) => match u8::try_from(b) {
+                Ok(b) => out.push(b),
+                Err(_) => return Ok(Err(format!("{}: {} is not a byte (0..255)", who, b))),
+            },
+            other => return Err(format!("{}: element {} is not an integer, got {:?}", who, k, other)),
+        }
+    }
+    Ok(Ok(out))
 }
 
 /// Every `net-*` builtin that answers with a value, or `None` if `name`
@@ -103,9 +137,82 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
     }
 
     Some(match name {
-        "net-connect-begin" => {
+        "net-resolve-begin" => {
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
-            wrap!(with_streams(|t| t.net_connect_begin(&host, port)), |v: i64| Value::Int(v))
+            wrap!(with_streams(|t| t.net_resolve_begin(&host, port)), |v: i64| Value::Int(v))
+        }
+        // The addresses as a `Vector<string>` box — `file-list-directory`'s
+        // shape, safe for its reason: nothing between the element
+        // allocations and the box can collect.
+        "net-resolve-finish" => {
+            let h = arg!(int(args, 0, name));
+            match with_streams(|t| t.net_resolve_finish(h)) {
+                Ok(Some(all)) => {
+                    let elems: Vec<Value> = all.into_iter().map(|a| heap.alloc_string(a)).collect();
+                    let key = heap.intern_type_key("vector<string>");
+                    let vec_val = heap.alloc_struct(key, elems);
+                    let ov = option_value(heap, name, Some(vec_val));
+                    Ok(result_ok(heap, name, ov))
+                }
+                Ok(None) => {
+                    let ov = option_value(heap, name, None);
+                    Ok(result_ok(heap, name, ov))
+                }
+                Err(m) => Ok(result_err(heap, name, m)),
+            }
+        }
+        "net-connect-begin" => {
+            let addr = arg!(text(heap, args, 0, name));
+            wrap!(with_streams(|t| t.net_connect_begin(&addr)), |v: i64| Value::Int(v))
+        }
+        "net-tls-start" => {
+            let (h, host) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
+            wrap!(with_streams(|t| t.net_tls_start(h, &host)), |_v: ()| Value::Empty)
+        }
+        "net-tls-handshake" => {
+            let h = arg!(int(args, 0, name));
+            wrap_option!(with_streams(|t| t.net_tls_handshake(h)), Value::Int)
+        }
+        "net-udp-bind" => {
+            let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
+            wrap!(with_streams(|t| t.net_udp_bind(&host, port)), |v: i64| Value::Int(v))
+        }
+        "net-udp-send-to" => {
+            let (h, addr) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
+            match arg!(bytes(heap, args, 2, name)) {
+                Ok(data) => wrap!(with_streams(|t| t.net_udp_send_to(h, &addr, &data)), |v: bool| Value::Bool(v)),
+                Err(m) => Ok(result_err(heap, name, m)),
+            }
+        }
+        // The datagram as a `Vector<int>` box. Allocating every element
+        // before the box is safe for `file-list-directory`'s reason:
+        // `Value::Int` allocates nothing and `alloc_struct` never collects.
+        "net-udp-recv" => {
+            let h = arg!(int(args, 0, name));
+            match with_streams(|t| t.net_udp_recv(h)) {
+                Ok(Some(data)) => {
+                    let elems: Vec<Value> = data.into_iter().map(|b| Value::Int(b as i64)).collect();
+                    let key = heap.intern_type_key("vector<int>");
+                    let vec_val = heap.alloc_struct(key, elems);
+                    let ov = option_value(heap, name, Some(vec_val));
+                    Ok(result_ok(heap, name, ov))
+                }
+                Ok(None) => {
+                    let ov = option_value(heap, name, None);
+                    Ok(result_ok(heap, name, ov))
+                }
+                Err(m) => Ok(result_err(heap, name, m)),
+            }
+        }
+        "net-udp-last-sender" => {
+            let h = arg!(int(args, 0, name));
+            match with_streams(|t| t.net_udp_last_sender(h)) {
+                Ok(s) => {
+                    let sv = heap.alloc_string(s);
+                    Ok(result_ok(heap, name, sv))
+                }
+                Err(m) => Ok(result_err(heap, name, m)),
+            }
         }
         "net-connect-finish" => {
             let h = arg!(int(args, 0, name));

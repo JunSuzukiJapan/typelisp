@@ -4805,6 +4805,8 @@ macro_rules! stream_shim {
     // A stream handle and an `open` mode are both bare `i64`s.
     (@arg int, $args:expr, $i:expr) => { Value::Int(*$args.add($i)) };
     (@arg str, $args:expr, $i:expr) => { tagged_arg($args, $i) };
+    // Any other heap value — a `Vector<int>` datagram — crosses the same way.
+    (@arg tagged, $args:expr, $i:expr) => { tagged_arg($args, $i) };
     (@arg char, $args:expr, $i:expr) => {
         match char::from_u32(*$args.add($i) as u32) {
             Some(c) => Value::Char(c),
@@ -4912,7 +4914,15 @@ stream_shim!(rt_file_create_directories, "file-create-directories", [str], tagge
 // The sockets: `crate::net_builtin::net_builtin` is the implementation both
 // these and the interpreter call. `net-wait` has no shim here — it suspends,
 // and `crate::coroutine::rt_suspend_io` is its compiled form.
-stream_shim!(rt_net_connect_begin, "net-connect-begin", [str, int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_resolve_begin, "net-resolve-begin", [str, int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_resolve_finish, "net-resolve-finish", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_connect_begin, "net-connect-begin", [str], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_tls_start, "net-tls-start", [int, str], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_tls_handshake, "net-tls-handshake", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_udp_bind, "net-udp-bind", [str, int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_udp_send_to, "net-udp-send-to", [int, str, tagged], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_udp_recv, "net-udp-recv", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_udp_last_sender, "net-udp-last-sender", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_connect_finish, "net-connect-finish", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_listen, "net-listen", [str, int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_accept, "net-accept", [int], tagged, via crate::net_builtin::net_builtin);

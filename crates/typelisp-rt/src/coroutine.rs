@@ -645,6 +645,23 @@ pub unsafe extern "C" fn rt_suspend_io(args: *const i64, argc: u32) -> i64 {
     0
 }
 
+/// `(net-wait-for h interest secs)` for compiled code: the handle and the
+/// interest packed into one word (handle above, interest in the low bit)
+/// because the seconds' bits need a whole word of their own.
+///
+/// # Safety
+///
+/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_io_for(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        crate::fatal("rt_suspend_io_for: expected 3 arguments");
+    }
+    let packed = (*args << 1) | (*args.add(1) & 1);
+    call_state::set_pending_suspend_2(call_state::SUSPEND_IO_FOR, packed, *args.add(2));
+    0
+}
+
 /// `(wait t)` for compiled code: `args[0]` is the `Task<T>` handle.
 ///
 /// The handle goes through as the payload **still tagged**. Reading the

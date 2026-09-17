@@ -1,0 +1,198 @@
+;; A minimal HTTP/1.1, written entirely in typelisp on top of `tcp-stream`:
+;; requests and responses as structs, a parser for each direction, and a
+;; client (`http-get`) that speaks plain HTTP or TLS depending on the URL.
+;;
+;; What it covers: the request line and status line, headers, a body sized
+;; by `Content-Length` or sent with `Transfer-Encoding: chunked`, and a body
+;; that runs to the end of the connection. What it does not: keep-alive
+;; (every exchange closes), redirects, compression, anything HTTP/2.
+
+;; ---- Messages -----------------------------------------------------------
+
+(pub defstruct header (pub name string) (pub value string))
+
+(pub defstruct request
+  (pub method string)
+  (pub target string)
+  (pub headers Vector<header>)
+  (pub body string))
+
+(pub defstruct response
+  (pub status int)
+  (pub reason string)
+  (pub headers Vector<header>)
+  (pub body string))
+
+;; Header names are case-insensitive (RFC 9110 §5.1).
+(pub defun header-value ((headers Vector<header>) (wanted string)) Option<string>
+  (let ((found (the Option<string> (option::none))))
+    (doiter (h (iter headers))
+      (when (equalp (name h) wanted) (setf found (option::some (value h)))))
+    found))
+
+(defun parse-header-line ((line string)) Option<header>
+  (match (search line ":")
+    ((none) (option::none))
+    ((some i)
+     (option::some (header::new (trim (substring line 0 i))
+                                (trim (substring line (+ i 1) (length line))))))))
+
+;; A line without its trailing CR (lines end in CRLF; `read-line` stops at LF).
+(defun read-crlf-line ((c tcp-stream)) Option<string>
+  (match (read-line c)
+    ((none) (option::none))
+    ((some line)
+     (let ((n (length line)))
+       (option::some (if (and (> n 0) (equal (ref line (- n 1)) #\Return))
+                         (substring line 0 (- n 1))
+                         line))))))
+
+;; Headers up to and including the empty line that ends them.
+(defun read-headers ((c tcp-stream)) Vector<header>
+  (let ((headers (the Vector<header> (Vector::new))))
+    (loop
+      (match (read-crlf-line c)
+        ((none) (break))
+        ((some line)
+         (if (equal line "")
+             (break)
+             (match (parse-header-line line)
+               ((some h) (push headers h))
+               ((none) ()))))))
+    headers))
+
+;; ---- Bodies ---------------------------------------------------------------
+
+(defun read-exactly ((c tcp-stream) (n int)) string
+  (let ((out "") (left n))
+    (while (> left 0)
+      (match (read-char c)
+        ((none) (progn (setf left 0) ()))
+        ((some ch)
+         (setf out (append out (char->string ch)))
+         (setf left (- left 1))
+         ())))
+    out))
+
+(defun parse-hex ((s string)) int
+  (let ((n 0) (i 0) (len (length s)) (going true))
+    (while (and going (< i len))
+      (match (digit-weight (ref s i) 16)
+        ((some w) (progn (setf n (+ (* n 16) w)) ()))
+        ((none) (progn (setf going false) ())))
+      (setf i (+ i 1)))
+    n))
+
+;; `Transfer-Encoding: chunked`: each chunk is a hex size line, the bytes,
+;; and a CRLF; a size of zero ends the body (trailers, if any, are skipped).
+(defun read-chunked ((c tcp-stream)) string
+  (let ((out ""))
+    (loop
+      (match (read-crlf-line c)
+        ((none) (break))
+        ((some size-line)
+         (let ((size (parse-hex size-line)))
+           (if (eq size 0)
+               (progn (read-headers c) (break))
+               (progn
+                 (setf out (append out (read-exactly c size)))
+                 (read-crlf-line c)
+                 ()))))))
+    out))
+
+(defun read-body ((c tcp-stream) (headers Vector<header>) (to-end bool)) string
+  (match (header-value headers "Transfer-Encoding")
+    ((some te)
+     (if (equalp (trim te) "chunked") (read-chunked c) (read-all c)))
+    ((none)
+     (match (header-value headers "Content-Length")
+       ((some n) (read-exactly c (unwrap-or (parse-int (trim n)) 0)))
+       ((none) (if to-end (read-all c) ""))))))
+
+;; ---- Server side ----------------------------------------------------------
+
+(pub defun read-request ((c tcp-stream)) Option<request>
+  "One request from a connection, or `none` if the client sent nothing."
+  (match (read-crlf-line c)
+    ((none) (option::none))
+    ((some line)
+     (let ((parts (split line " ")))
+       (if (< (len parts) 2)
+           (option::none)
+           (let ((headers (read-headers c)))
+             (option::some (request::new (get parts 0) (get parts 1) headers
+                                         (read-body c headers false)))))))))
+
+(pub defun write-response ((c tcp-stream) (r response)) ()
+  "Send `r`, with `Content-Length` and `Connection: close` added."
+  (write-string c (format false "HTTP/1.1 ~a ~a\r\n" (status r) (reason r)))
+  (doiter (h (iter (headers r)))
+    (write-string c (format false "~a: ~a\r\n" (name h) (value h))))
+  (write-string c (format false "Content-Length: ~a\r\nConnection: close\r\n\r\n"
+                          (len (string->utf8 (body r)))))
+  (write-string c (body r)))
+
+(pub defun text-response ((status int) (reason string) (body string)) response
+  (let ((headers (the Vector<header> (Vector::new))))
+    (push headers (header::new "Content-Type" "text/plain; charset=utf-8"))
+    (response::new status reason headers body)))
+
+;; ---- Client side ----------------------------------------------------------
+
+(pub defstruct url (pub tls bool) (pub host string) (pub port int) (pub target string))
+
+(pub defun parse-url ((s string)) Result<url, SimpleError>
+  "`http://host[:port]/path` or `https://...`."
+  (let ((tls false) (rest ""))
+    (cond
+      ((and (>= (length s) 8) (equal (substring s 0 8) "https://"))
+       (setf tls true)
+       (setf rest (substring s 8 (length s)))
+       ())
+      ((and (>= (length s) 7) (equal (substring s 0 7) "http://"))
+       (setf rest (substring s 7 (length s)))
+       ())
+      (else ()))
+    (if (equal rest "")
+        (result::err (simple-error (append "not an http(s) URL: " s)))
+        (let ((slash (unwrap-or (search rest "/") (length rest))))
+          (let ((authority (substring rest 0 slash))
+                (target (if (eq slash (length rest)) "/" (substring rest slash (length rest)))))
+            (match (search authority ":")
+              ((some i)
+               (match (parse-int (substring authority (+ i 1) (length authority)))
+                 ((ok port) (result::ok (url::new tls (substring authority 0 i) port target)))
+                 ((err e) (result::err (simple-error (append "bad port in " s))))))
+              ((none)
+               (result::ok (url::new tls authority (if tls 443 80) target)))))))))
+
+(pub defun read-response ((c tcp-stream)) Option<response>
+  (match (read-crlf-line c)
+    ((none) (option::none))
+    ((some line)
+     (let ((parts (split line " ")))
+       (if (< (len parts) 2)
+           (option::none)
+           (let ((status (unwrap-or (parse-int (get parts 1)) 0))
+                 (reason (if (> (len parts) 2)
+                             (substring line (+ (length (get parts 0)) (length (get parts 1)) 2) (length line))
+                             ""))
+                 (headers (read-headers c)))
+             (option::some (response::new status reason headers (read-body c headers true)))))))))
+
+(pub defun http-get ((address string)) Result<response, :dyn Error>
+  "GET `address`. Plain HTTP or TLS by the scheme; the connection is closed
+   after one exchange."
+  (match (parse-url address)
+    ((err e) (result::err (as :dyn Error e)))
+    ((ok u)
+     (match (if (tls u) (tls-connect (host u) (port u) 30.0) (tcp-connect (host u) (port u) 30.0))
+       ((err e) (result::err (as :dyn Error e)))
+       ((ok c)
+        (write-string c (format false "GET ~a HTTP/1.1\r\nHost: ~a\r\nUser-Agent: typelisp-http\r\nConnection: close\r\n\r\n"
+                                (target u) (host u)))
+        (let ((r (read-response c)))
+          (close c)
+          (match r
+            ((some resp) (result::ok resp))
+            ((none) (result::err (as :dyn Error (simple-error "empty response")))))))))))

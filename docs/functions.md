@@ -975,8 +975,8 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | `sep` で分割。CL に対応物は無い。連続する区切りは空要素を生む。`sep` が空なら panic |
 | `to-string` | `(to-string x)` | `T→string` | `~a` 相当の文字列化。`i32`/`f64`/`bool`/`char`/`string` に実装（CL `princ-to-string`） |
 
-`trim` 系と `digit-weight`/`digit->char`（§9）だけ `defmethod` でなく `defun` なのは、
-`defmethod` が `&optional`/`&key` を受け付けないため（`parse_defmethod_sig_inner`）。
+`trim` 系と `digit-weight`/`digit->char`（§9）は `defmethod` でなく `defun`。かつて
+`defmethod` が `&optional` を受け付けなかった名残で、今は受け付ける（§21 の `accept`）。
 
 ## 9. 文字 (`char`)
 
@@ -2263,24 +2263,27 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
 - **タスクローカル変数**（Go にも無い）。
 - **nil チャネル**。理由と代わりの書き方は syntax.md §12.6。
 
-## 21. ネットワーク（TCP）
+## 21. ネットワーク（TCP / TLS / UDP）
 
 ソケットは §18 のストリームの一員。接続は `tcp-stream`（文字）／`tcp-byte-stream`（バイト）
 という **同じハンドルの 2 つの見え方** で、`read-line`/`write-line`/`read-byte`/`format` が
-そのまま効く。待ち受けは `tcp-listener`。
+そのまま効く。待ち受けは `tcp-listener`。TLS の接続も同じ `tcp-stream`（`tls-connect`）。
+UDP はストリームでなくデータグラム（`udp-socket`）。
 
 **待つのはタスクであってスレッドではない。** `accept`・`read-line`・`write-string`・
-`tcp-connect` のどれも、ソケットが用意できていなければ *そのタスク* を止め（`sleep`/`recv`
-と同じ）、他のタスクは走り続ける。だから Go と同じ形——接続ごとに `(go (serve c))`——で
-サーバが書ける。仕組みは syntax.md §12.4。
+`tcp-connect`（名前解決を含む）・`recv-from` のどれも、用意できていなければ *そのタスク* を
+止め（`sleep`/`recv` と同じ）、他のタスクは走り続ける。だから Go と同じ形——接続ごとに
+`(go (serve c))`——でサーバが書ける。仕組みは syntax.md §12.4。
 
 ### 21.1 型
 
 | 型 | 実装するトレイト | 得る方法 |
 |---|---|---|
-| `tcp-stream` | `CharInput` `PeekInput` `CharOutput` | `tcp-connect` / `accept` / `char-stream-of` |
+| `tcp-stream` | `CharInput` `PeekInput` `CharOutput` | `tcp-connect` / `tls-connect` / `accept` / `char-stream-of` |
 | `tcp-byte-stream` | `ByteInput` `ByteOutput` | `byte-stream-of` |
 | `tcp-listener` | `Stream`（`close` / `open-stream-p`） | `tcp-listen` |
+| `udp-socket` | `Stream` | `udp-bind` |
+| `datagram` | ——（`bytes`: `Vector<int>`、`from`: `string`） | `recv-from` |
 | `NetError` | `Error` | 上の関数の `Err` |
 
 `InputStream` の `Item` は型ごとに 1 つなので（`file-stream`/`binary-file-stream` と同じ理由）
@@ -2288,16 +2291,19 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
 受信バッファも共有する——HTTP のようにヘッダを文字で・本体をバイトで読む用途はこれで書く。
 文字を `unread-char` した直後のバイト読みはエラー（ファイルと同じ規則）。
 
-### 21.2 関数・メソッド
+### 21.2 TCP
 
 | 名前 | 使い方 | 型 | 意味 |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port)` | `(string,int)→Result<tcp-stream,NetError>` | 接続する。`host` は名前でもアドレスでも。名前解決失敗・接続拒否は `Err` |
+| `tcp-connect` | `(tcp-connect host port [timeout])` | `(string,int,f64?)→Result<tcp-stream,NetError>` | 接続する。`host` は名前でもアドレスでも。名前が複数のアドレスを持てば順に試す（`localhost` は `::1` と `127.0.0.1`）。名前解決失敗・接続拒否・`timeout` 秒の超過は `Err` |
+| `tls-connect` | `(tls-connect host port [timeout])` | 同上 | `tcp-connect` の後に TLS。証明書は `host` 名に対して Mozilla のルート証明書で検証。結果は普通の `tcp-stream`。**クライアント側のみ**（`tls-listen` は無い） |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<tcp-listener,NetError>` | 待ち受ける。`"127.0.0.1"` はこの機械だけ、`"0.0.0.0"` は全インタフェース。`port` に `0` を渡すと OS が選ぶ |
-| `accept` | `(accept l)` | `(tcp-listener)→Result<tcp-stream,NetError>` | 次の接続。来るまでタスクを止める |
-| `local-address` | `(local-address s)` | `(tcp-stream \| tcp-listener)→string` | こちら側の `host:port`。`(tcp-listen h 0)` の後で選ばれたポートを知る手段 |
+| `accept` | `(accept l [timeout])` | `(tcp-listener,f64?)→Result<tcp-stream,NetError>` | 次の接続。来るまでタスクを止める。`timeout` 秒で諦めると `Err` |
+| `wait-readable` | `(wait-readable s secs)` | `(tcp-stream,f64)→bool` | 待たずに読めるようになるまで、または `secs` 秒。`true` なら前者（バッファ済みも含む）。読みに時計を付ける手段：`(if (wait-readable c 5.0) (read-line c) ...)`。約束するのは**次の読みが止まらない**ことで、`read-line` は行の残りを待ちうる |
+| `wait-writable` | `(wait-writable s secs)` | `(tcp-stream,f64)→bool` | 書けるようになるまで、または `secs` 秒 |
+| `local-address` | `(local-address s)` | `(tcp-stream \| tcp-listener \| udp-socket)→string` | こちら側の `host:port`。`(tcp-listen h 0)` の後で選ばれたポートを知る手段 |
 | `peer-address` | `(peer-address s)` | `(tcp-stream)→string` | 相手側の `host:port` |
-| `shutdown-output` | `(shutdown-output s)` | `(tcp-stream)→()` | 送信側だけ閉じる（半クローズ）。相手は EOF を読み、こちらはまだ読める。「要求は全部送った」の合図 |
+| `shutdown-output` | `(shutdown-output s)` | `(tcp-stream)→()` | 送信側だけ閉じる（半クローズ）。相手は EOF を読み、こちらはまだ読める。「要求は全部送った」の合図。TLS なら `close_notify` も送る |
 | `byte-stream-of` | `(byte-stream-of s)` | `(tcp-stream)→tcp-byte-stream` | 同じ接続のバイト版 |
 | `char-stream-of` | `(char-stream-of b)` | `(tcp-byte-stream)→tcp-stream` | 同じ接続の文字版 |
 | `close` | `(close s)` | `Stream` | バッファを送り切ってから閉じる。GC では閉じない（§18） |
@@ -2306,6 +2312,11 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
 `write-string`/`write-line` は**書き切ってから返る**（Go の `net.Conn.Write` と同じ）。
 細かい書き込みを束ねたければ `string-output-stream` に溜めてから 1 回で書く。
 `listen` は受信バッファに何かあるときだけ `true`——`read-char-no-hang` が名前どおりに動く。
+
+**タイムアウトは明示の引数か `wait-readable`。** Go の `SetReadDeadline` のように「ストリームに
+期限を持たせて `read-line` が失敗する」形は無い——`InputStream` の `read-item` は
+`Option<Item>` で、エラーを返す口が無いから（ファイルの失敗も panic である §18 と同じ
+立場）。時計が要るのは接続・受理・「次の読み」の 3 箇所で、それぞれに引数がある。
 
 ```lisp
 ;; サーバ: 接続ごとに 1 タスク
@@ -2326,24 +2337,52 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
          (unwrap (read-line c)))
   ((ok reply) (println "~a" reply))
   ((err e) (println "~a" (message e))))
+
+;; HTTPS
+(let ((c (unwrap (tls-connect "example.com" 443 10.0))))
+  (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+  (println "~a" (unwrap (read-line c)))       ; HTTP/1.1 200 OK
+  (close c))
 ```
 
-動く例は `examples/projects/echo-server/`（サーバとクライアントの 2 本）。
+動く例は `examples/projects/echo-server/`（サーバとクライアント）と
+`examples/projects/http/`（HTTP/1.1 の最小サーバ／クライアント、`http-get` は `https://` も）。
 
-### 21.3 下の層（`net-*` 組み込み）
+### 21.3 UDP
+
+| 名前 | 使い方 | 型 | 意味 |
+|---|---|---|---|
+| `udp-bind` | `(udp-bind host port)` | `(string,int)→Result<udp-socket,NetError>` | ソケットを作る。送るだけでも要る（`port` は `0`） |
+| `send-to` | `(send-to s host port bytes)` | `(udp-socket,string,int,Vector<int>)→Result<(),NetError>` | 1 データグラムを送る。名前は解決する。届いたかは分からない（UDP） |
+| `recv-from` | `(recv-from s [timeout])` | `(udp-socket,f64?)→Result<datagram,NetError>` | 次のデータグラム。`from` は `ip:port` で、そのまま `send-to` の `host` に渡せる |
+| `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | UTF-8 に符号化（各要素 0..255） |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | 復号。正しい UTF-8 でなければ `none` |
+
+```lisp
+(let ((s (unwrap (udp-bind "127.0.0.1" 0))))
+  (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
+  (match (recv-from s 1.0)
+    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((err e) (println "~a" (message e)))))
+```
+
+### 21.4 下の層（`net-*` 組み込み）
 
 上の関数は全部 prelude の typelisp で、ハンドル `i32` に対する `net-*` 組み込みの上に書かれている。
 組み込みはどれも **今できることしかしない**（ソケットは non-blocking）。「まだ」は値で返る——
-`net-fill`/`net-accept` の `none`、`net-flush` の `false`——ので、prelude のループがそれを見て
-`(net-wait h interest)` を呼び、タスクを止める。`net-wait` は `sleep` と同じ「中断する組み込み」
-（interest: `net-readable` = 0 / `net-writable` = 1）。ふつうのプログラムが `net-*` を直接呼ぶ
-理由は無い。
+`net-fill`/`net-accept`/`net-udp-recv` の `none`、`net-flush`/`net-udp-send-to` の `false`——ので、
+prelude のループがそれを見て `(net-wait h interest)` を呼び、タスクを止める。`net-wait` は
+`sleep` と同じ「中断する組み込み」（interest: `net-readable` = 0 / `net-writable` = 1）、
+`(net-wait-for h interest secs)` は時計付きで `bool` を返す。名前解決（`net-resolve-begin`／
+`net-resolve-finish`）だけは `getaddrinfo` に non-blocking 版が無いので補助スレッドで走り、
+終わったらパイプに 1 バイト書く——タスクはそのパイプを他のソケットと同じ `poll` で待つ。
+TLS は `rustls`（sans-IO）で、暗号化と復号だけを担い、ソケットに触るのは相変わらず
+`net-fill`/`net-flush`。ふつうのプログラムが `net-*` を直接呼ぶ理由は無い。
 
-### 21.4 無いもの
+### 21.5 無いもの
 
-- **タイムアウト**。`select` + `after` はソケット操作には使えない（`select` の腕はチャネル操作だけ）。
-- **UDP**、**Unix ドメインソケット**、**TLS**。
-- **非同期の名前解決**。`tcp-connect` の名前解決だけは `getaddrinfo` でスレッドを止める
-  （Go の cgo リゾルバも同じで、あちらはスレッドを手放す。M:N 化のときに）。
+- **TLS サーバ**（証明書と鍵の読み込みが要る）。**クライアント証明書**。
+- **Unix ドメインソケット**、**HTTP/2**。
+- **ストリームに持たせる期限**（上記の理由で、時計は引数）。
 - **AOT 実行ファイル内のソケット待ち**。AOT の `main` にはスケジューラが無いので、待つことに
   なった操作は `sleep`/`recv` と同様にエラーになる（`typl file.typl` は JIT で、こちらは動く）。
