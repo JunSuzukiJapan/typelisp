@@ -186,7 +186,7 @@
   (match (parse-url address)
     ((err e) (result::err (as :dyn Error e)))
     ((ok u)
-     (match (if (tls u) (tls-connect (host u) (port u) 30.0) (tcp-connect (host u) (port u) 30.0))
+     (match (if (tls u) (tls-connect (host u) (port u) :timeout 30.0) (tcp-connect (host u) (port u) :timeout 30.0))
        ((err e) (result::err (as :dyn Error e)))
        ((ok c)
         (write-string c (format false "GET ~a HTTP/1.1\r\nHost: ~a\r\nUser-Agent: typelisp-http\r\nConnection: close\r\n\r\n"

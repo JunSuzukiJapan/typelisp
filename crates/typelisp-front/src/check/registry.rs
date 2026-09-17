@@ -1242,13 +1242,23 @@ fn register_net_builtins(root: &mut Namespace) {
     // must be for; `handshake` is one non-blocking step, answering `none`
     // when done and `some interest` when the socket must become ready
     // before the next.
-    native("net-tls-start", vec![h.clone(), Type::Str], unit_or_err.clone());
-    native("net-tls-start-with-ca", vec![h.clone(), Type::Str, Type::Str], unit_or_err.clone());
+    // `start`'s options: a CA file to trust instead of the public roots, and
+    // a client certificate and key to present (both or neither).
+    native(
+        "net-tls-start",
+        vec![h.clone(), Type::Str, option_of(Type::Str), option_of(Type::Str), option_of(Type::Str)],
+        unit_or_err.clone(),
+    );
     native("net-tls-handshake", vec![h.clone()], result_of(option_of(Type::Int), net_err.clone()));
     // A listener whose accepted connections speak TLS with the certificate
-    // and key in the two PEM files; the handshake is the connection's
-    // first read or write, not `accept`'s.
-    native("net-tls-listen", vec![Type::Str, Type::Int, Type::Str, Type::Str], result_of(h.clone(), net_err.clone()));
+    // and key in the two PEM files, requiring a client certificate issued
+    // by the optional CA file; the handshake is the connection's first read
+    // or write, not `accept`'s.
+    native(
+        "net-tls-listen",
+        vec![Type::Str, Type::Int, Type::Str, Type::Str, option_of(Type::Str)],
+        result_of(h.clone(), net_err.clone()),
+    );
     // UDP: whole datagrams. `send-to` answers `false` when the send buffer
     // is full (wait for writable); `recv` answers `none` when nothing has
     // arrived (wait for readable), and `last-sender` says who sent what

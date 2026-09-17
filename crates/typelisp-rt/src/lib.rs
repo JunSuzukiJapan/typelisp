@@ -4917,9 +4917,10 @@ stream_shim!(rt_file_create_directories, "file-create-directories", [str], tagge
 stream_shim!(rt_net_resolve_begin, "net-resolve-begin", [str, int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_resolve_finish, "net-resolve-finish", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_connect_begin, "net-connect-begin", [str], tagged, via crate::net_builtin::net_builtin);
-stream_shim!(rt_net_tls_start, "net-tls-start", [int, str], tagged, via crate::net_builtin::net_builtin);
-stream_shim!(rt_net_tls_start_with_ca, "net-tls-start-with-ca", [int, str, str], tagged, via crate::net_builtin::net_builtin);
-stream_shim!(rt_net_tls_listen, "net-tls-listen", [str, int, str, str], tagged, via crate::net_builtin::net_builtin);
+// The `Option<string>` arguments niche (`typelisp_mem::option`): `none` is
+// the empty word and `some` the string, so they cross as any tagged word.
+stream_shim!(rt_net_tls_start, "net-tls-start", [int, str, tagged, tagged, tagged], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_tls_listen, "net-tls-listen", [str, int, str, str, tagged], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_socket_error, "net-socket-error", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_tls_handshake, "net-tls-handshake", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_udp_bind, "net-udp-bind", [str, int], tagged, via crate::net_builtin::net_builtin);

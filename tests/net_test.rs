@@ -324,7 +324,7 @@ fn several_clients_are_served_at_once() {
 fn accept_with_a_timeout_gives_up() {
     let src = r#"
 (let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
-  (match (accept l 0.05)
+  (match (accept l :timeout 0.05)
     ((ok c) (progn (close c) "accepted?!"))
     ((err e) (message e))))"#;
     assert_eq!(text(src), "accept: timed out");
@@ -383,7 +383,7 @@ fn a_timed_wait_does_not_stop_other_tasks() {
 (defun tick ((n int)) () (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
 (let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
   (go (tick 5))
-  (match (accept l 0.1)
+  (match (accept l :timeout 0.1)
     ((ok c) (progn (close c) "accepted?!"))
     ((err e) (format false "~a ~a" (message e) (>= ticks 5)))))"#;
     assert_eq!(text(src), "accept: timed out true");
@@ -424,7 +424,7 @@ fn a_datagram_goes_from_one_socket_to_another() {
       (b (unwrap (udp-bind "127.0.0.1" 0))))
   (let ((b-port (unwrap (parse-int (substring (local-address b) (+ 1 (unwrap (search (local-address b) ":"))) (length (local-address b)))))))
     (unwrap (send-to a "127.0.0.1" b-port (string->utf8 "ping é")))
-    (let ((d (unwrap (recv-from b 2.0))))
+    (let ((d (unwrap (recv-from b :timeout 2.0))))
       (let ((back (unwrap (utf8->string (bytes d))))
             (same (equal (from d) (local-address a))))
         (close a)
@@ -438,7 +438,7 @@ fn a_datagram_goes_from_one_socket_to_another() {
 fn recv_from_with_a_timeout_gives_up() {
     let src = r#"
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
-  (match (recv-from s 0.05)
+  (match (recv-from s :timeout 0.05)
     ((ok d) "a datagram?!")
     ((err e) (message e))))"#;
     assert_eq!(text(src), "recv-from: timed out");
@@ -469,7 +469,7 @@ fn tls_against_a_plain_peer_fails_cleanly() {
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (go (sink l))
-  (match (tls-connect \"localhost\" (port-of l) 5.0)
+  (match (tls-connect \"localhost\" (port-of l) :timeout 5.0)
     ((ok c) (progn (close c) \"handshake succeeded?!\"))
     ((err e) (if (> (length (message e)) 0) \"tls failed\" \"\"))))"
     );
@@ -512,17 +512,47 @@ fn connecting_to_a_missing_unix_socket_is_an_error_value() {
 
 // ---- TLS server ------------------------------------------------------------
 
-/// A certificate for `localhost` and its key, as PEM files: what a
-/// `tls-listen` names, and what the client's `ca-file` names to trust it.
-fn localhost_cert() -> (String, String) {
+/// A small PKI in PEM files: a CA, a server certificate for `localhost` it
+/// issued, and a client certificate it issued -- what `tls-listen` names,
+/// what the client's `:ca-file` names to trust it, and what mutual TLS
+/// presents.
+struct Pki {
+    ca: String,
+    cert: String,
+    key: String,
+    client_cert: String,
+    client_key: String,
+}
+
+fn test_pki() -> Pki {
+    use rcgen::{BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, KeyPair};
     let dir = std::env::temp_dir().join(format!("typelisp-net-tls-{}-{:?}", std::process::id(), std::thread::current().id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let ck = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
-    let cert = dir.join("cert.pem");
-    let key = dir.join("key.pem");
-    std::fs::write(&cert, ck.cert.pem()).unwrap();
-    std::fs::write(&key, ck.signing_key.serialize_pem()).unwrap();
-    (cert.to_string_lossy().into_owned(), key.to_string_lossy().into_owned())
+    let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let ca_key = KeyPair::generate().unwrap();
+    let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+    let issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
+    let mut server = CertificateParams::new(vec!["localhost".to_string()]).unwrap();
+    server.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    let server_key = KeyPair::generate().unwrap();
+    let server_cert = server.signed_by(&server_key, &issuer).unwrap();
+    let mut client = CertificateParams::new(vec!["client".to_string()]).unwrap();
+    client.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    let client_key = KeyPair::generate().unwrap();
+    let client_cert = client.signed_by(&client_key, &issuer).unwrap();
+    let write = |name: &str, text: String| {
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap();
+        path.to_string_lossy().into_owned()
+    };
+    Pki {
+        ca: write("ca.pem", ca_cert.pem()),
+        cert: write("cert.pem", server_cert.pem()),
+        key: write("key.pem", server_key.serialize_pem()),
+        client_cert: write("client.pem", client_cert.pem()),
+        client_key: write("client-key.pem", client_key.serialize_pem()),
+    }
 }
 
 #[test]
@@ -530,12 +560,12 @@ fn a_line_is_echoed_over_tls() {
     // The server task's first `read-line` completes the handshake; the
     // client trusts the certificate through `ca-file`. Interpreted and
     // compiled turns of the drain loop must see the same `some interest`.
-    let (cert, key) = localhost_cert();
+    let Pki { ca, cert, key, .. } = test_pki();
     let src = format!(
         "{LISTEN}{ECHO}
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
   (go (echo-serve l 1))
-  (let ((c (unwrap (tls-connect \"localhost\" (port-of l) 5.0 \"{cert}\"))))
+  (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\"))))
     (write-line c \"hello, tls\")
     (let ((reply (unwrap (read-line c))))
       (close c)
@@ -551,7 +581,7 @@ fn a_server_that_writes_first_shakes_hands_in_its_write() {
     // A greeting before any read: the drain loop must wait for *readable*
     // while the handshake needs the client's next message, and the
     // greeting must arrive once it is done.
-    let (cert, key) = localhost_cert();
+    let Pki { ca, cert, key, .. } = test_pki();
     let src = format!(
         "{LISTEN}
 (defun greet ((l socket-listener)) ()
@@ -560,7 +590,7 @@ fn a_server_that_writes_first_shakes_hands_in_its_write() {
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
   (go (greet l))
-  (let ((c (unwrap (tls-connect \"localhost\" (port-of l) 5.0 \"{cert}\"))))
+  (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\"))))
     (let ((reply (unwrap (read-line c))))
       (close c)
       (close l)
@@ -575,7 +605,7 @@ fn an_untrusted_certificate_is_the_clients_error_and_the_servers_socket_error() 
     // `tls-connect` is an `Err`. The server task sees end of input, not a
     // panic, and `socket-error` names the alert -- the server is still
     // there to serve the next client.
-    let (cert, key) = localhost_cert();
+    let Pki { cert, key, .. } = test_pki();
     let src = format!(
         "{LISTEN}
 (defvar (server-saw string) \"\")
@@ -590,7 +620,7 @@ fn an_untrusted_certificate_is_the_clients_error_and_the_servers_socket_error() 
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
   (go (serve-one l))
-  (let ((outcome (match (tls-connect \"localhost\" (port-of l) 5.0)
+  (let ((outcome (match (tls-connect \"localhost\" (port-of l) :timeout 5.0)
                    ((ok c) (progn (close c) \"trusted?!\"))
                    ((err e) \"rejected\"))))
     (sleep 0.2)
@@ -650,11 +680,60 @@ fn a_peer_that_goes_away_does_not_panic_the_server() {
 
 #[test]
 fn tls_listen_with_bad_files_is_an_error_value() {
-    let (cert, key) = localhost_cert();
+    let Pki { cert, key, .. } = test_pki();
     let src = format!(
         "(match (tls-listen \"127.0.0.1\" 0 \"{key}\" \"{cert}\")
   ((ok l) (progn (close l) \"listening?!\"))
   ((err e) (if (> (length (message e)) 0) \"refused\" \"\")))"
     );
     assert_eq!(text(&src), "refused");
+}
+
+#[test]
+fn mutual_tls_admits_a_client_with_a_certificate_and_refuses_one_without() {
+    // `:client-ca` on the listener: a client presenting a certificate the
+    // CA issued is echoed; one presenting none is refused -- and since in
+    // TLS 1.3 the client's side of the handshake completes before the
+    // server has judged its certificate, the refusal reaches that client
+    // not as `tls-connect`'s `Err` but as its first read's end of input,
+    // with `socket-error` saying why.
+    let Pki { ca, cert, key, client_cert, client_key } = test_pki();
+    let src = format!(
+        "{LISTEN}{ECHO}
+(let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\" :client-ca \"{ca}\"))))
+  (go (echo-serve l 2))
+  (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\"
+                                :cert-file \"{client_cert}\" :key-file \"{client_key}\"))))
+    (write-line c \"with a certificate\")
+    (let ((admitted (unwrap (read-line c))))
+      (close c)
+      (let ((refused (match (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\")
+                       ((err e) \"refused in the handshake\")
+                       ((ok c2)
+                        (write-line c2 \"without one\")
+                        (let ((line (read-line c2)))
+                          (let ((r (format false \"~a/~a\" (is-none line) (is-some (socket-error c2)))))
+                            (close c2)
+                            r))))))
+        (close l)
+        (format false \"~a ~a\" admitted refused)))))"
+    );
+    assert_eq!(text(&src), "with a certificate true/true");
+}
+
+#[test]
+fn a_client_certificate_needs_its_key() {
+    // `:cert-file` without `:key-file`: an error value from `tls-connect`,
+    // before anything is sent.
+    let Pki { ca, client_cert, .. } = test_pki();
+    let src = format!(
+        "{LISTEN}
+(let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
+  (let ((r (match (tls-connect \"localhost\" (port-of l) :ca-file \"{ca}\" :cert-file \"{client_cert}\")
+             ((ok c) (progn (close c) \"connected?!\"))
+             ((err e) (message e)))))
+    (close l)
+    r))"
+    );
+    assert!(text(&src).contains("both cert-file and key-file"), "{}", text(&src));
 }

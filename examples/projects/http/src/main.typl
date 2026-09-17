@@ -20,7 +20,8 @@
 ;;
 ;; A client that rejects the certificate (`curl` without `--cacert`) ends
 ;; the task serving it -- `read-request` sees end of input -- and nothing
-;; else: the server keeps serving.
+;; else: the server keeps serving. To require client certificates instead,
+;; give `tls-listen` a `:client-ca` (see `serve-tls` below).
 
 (use http::read-request)
 (use http::write-response)
@@ -57,7 +58,8 @@
   (serve-on (tcp-listen "0.0.0.0" port) "http"))
 
 ;; The same server over TLS: the listener differs, the connections do not.
-;; Each connection's handshake happens in `read-request`'s first read.
+;; Each connection's handshake happens in `read-request`'s first read. For
+;; mutual TLS, add `:client-ca "ca.pem"` to the `tls-listen` here.
 (defun serve-tls ((cert string) (key string) (port int)) ()
   (serve-on (tls-listen "0.0.0.0" port cert key) "https"))
 

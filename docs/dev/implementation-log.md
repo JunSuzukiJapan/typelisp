@@ -11591,3 +11591,23 @@ TLS サーバでは証明書を拒むクライアントは日常（スキャナ�
 テストの証明書は `rcgen`（dev-dependency、`ring`）で毎回作る——fixture は期限が切れ、`openssl`
 は環境に依る。配線: `rt_net_tls_listen`/`rt_net_tls_start_with_ca`/`rt_net_socket_error`、
 externs 295 個、`RESULT_KEYS` の `net-flush` を `result<option<int>,neterror>` に。
+
+## 相互 TLS + ソケット API の省略引数を `&key` に（2026-09-17）
+
+`tls-listen ... :client-ca ca.pem`（rustls の `WebPkiClientVerifier`、証明書必須）と
+`tls-connect ... :cert-file :key-file`（`with_client_auth_cert`）、ついでに `:server-name`（繋ぐ先と
+検証名の分離）。組み込みは `net-tls-start (h name ca? cert? key?)`／`net-tls-listen (... client-ca?)`
+の 1 本ずつ——**`Option<string>` はニッチ表現なので組み込みの引数に取れる**（`none` は空語、
+`some` は文字列そのもの。shim は `tagged` で受けて `opt_text` が `Value::Empty` を見る）。前日の
+`net-tls-start-with-ca` は消した（選択肢が 3 つになれば 2 本立ては破綻する）。
+
+`tls-connect` の省略引数が 5 つになった時点で位置引数（`&optional`）は無理なので `&key` に。
+1 つだけの `tcp-connect`/`accept`/`recv-from` の `timeout` も揃えて `:timeout`——片方だけ
+キーワードだと呼び手が覚える規則が 2 つになる。`&key` は `&optional` と混ぜられない言語規則も
+この選択を後押しする。呼び出し箇所は tests/docs/http 例の 10 箇所。
+
+**TLS 1.3 では証明書を出さないクライアントの `tls-connect` は `Ok` で返る**——クライアント側の
+握手はサーバが証明書を判定する前に完了する。拒否は最初の読みの `none` + `socket-error` として
+届く。単体テストで最初に踏んだのは駆動順の罠: クライアントの握手が終わった後にサーバ側を
+1 度 `net_fill` しないと、サーバは最後のフライトを読まずアラートも出さない（テストが 25 分
+ハングした。`grep` にパイプすると出力が無いので気づきにくい）。

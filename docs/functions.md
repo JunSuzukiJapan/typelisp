@@ -2296,13 +2296,13 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 
 | 名前 | 使い方 | 型 | 意味 |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port [timeout])` | `(string,int,f64?)→Result<socket-stream,NetError>` | 接続する。`host` は名前でもアドレスでも。名前が複数のアドレスを持てば順に試す（`localhost` は `::1` と `127.0.0.1`）。名前解決失敗・接続拒否・`timeout` 秒の超過は `Err` |
-| `tls-connect` | `(tls-connect host port [timeout [ca-file]])` | `(string,int,f64?,string?)→Result<socket-stream,NetError>` | `tcp-connect` の後に TLS。証明書は `host` 名に対して Mozilla のルート証明書で検証——`ca-file`（PEM）を渡せば**その中の証明書だけ**を信頼する（私設 CA、または自分の `tls-listen` が出す証明書そのもの）。握手はここで済ませるので、証明書が通らなければこの呼び出しの `Err`。結果は普通の `socket-stream` |
+| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | 接続する。`host` は名前でもアドレスでも。名前が複数のアドレスを持てば順に試す（`localhost` は `::1` と `127.0.0.1`）。名前解決失敗・接続拒否・`:timeout` 秒の超過は `Err` |
+| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | `tcp-connect` の後に TLS。証明書は `host` 名（繋ぐ先と検証する名前が違うなら `:server-name`）に対して Mozilla のルート証明書で検証——`:ca-file`（PEM）を渡せば**その中の証明書だけ**を信頼する（私設 CA、または自分の `tls-listen` が出す証明書そのもの）。`:cert-file`/`:key-file`（両方か無しか）はサーバに求められたとき出すこちらの証明書（相互 TLS）。握手はここで済ませるので、サーバの証明書が通らなければこの呼び出しの `Err`。結果は普通の `socket-stream` |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | Unix ドメインソケット `path` に接続。ローカルなので握手待ちは無く、タイムアウトも無い |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | 待ち受ける。`"127.0.0.1"` はこの機械だけ、`"0.0.0.0"` は全インタフェース。`port` に `0` を渡すと OS が選ぶ |
-| `tls-listen` | `(tls-listen host port cert-file key-file)` | `(string,int,string,string)→Result<socket-listener,NetError>` | `tcp-listen` の TLS 版。`cert-file` は証明書チェーン（PEM、自分のものが先頭）、`key-file` は秘密鍵。両方ここで読んで検査するので、鍵が合わなければ最初のクライアントでなくこの呼び出しの `Err`。`accept` は**握手の前に**返り、接続を担当するタスクの最初の読み書きが握手を済ませる（Go の `tls.Conn` と同じ）——握手の遅いクライアントが他の `accept` を止めない。クライアント証明書は求めない |
+| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | `tcp-listen` の TLS 版。`cert-file` は証明書チェーン（PEM、自分のものが先頭）、`key-file` は秘密鍵。両方ここで読んで検査するので、鍵が合わなければ最初のクライアントでなくこの呼び出しの `Err`。`accept` は**握手の前に**返り、接続を担当するタスクの最初の読み書きが握手を済ませる（Go の `tls.Conn` と同じ）——握手の遅いクライアントが他の `accept` を止めない。`:client-ca`（PEM）を渡すと、その中の CA が発行した証明書を**全クライアントに要求**する（相互 TLS）。無ければ求めない |
 | `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | `path` で待ち受ける。**ファイルが既にあれば `Err`**（走っている別プロセスのものかもしれないので黙って置き換えない）。`close` がファイルを消す |
-| `accept` | `(accept l [timeout])` | `(socket-listener,f64?)→Result<socket-stream,NetError>` | 次の接続。来るまでタスクを止める。`timeout` 秒で諦めると `Err` |
+| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | 次の接続。来るまでタスクを止める。`:timeout` 秒で諦めると `Err` |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | 待たずに読めるようになるまで、または `secs` 秒。`true` なら前者（バッファ済みも含む）。読みに時計を付ける手段：`(if (wait-readable c 5.0) (read-line c) ...)`。約束するのは**次の読みが止まらない**ことで、`read-line` は行の残りを待ちうる |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | 書けるようになるまで、または `secs` 秒 |
 | `socket-error` | `(socket-error s)` | `(socket-stream \| socket-byte-stream)→Option<NetError>` | **相手が**この接続を壊していればその最初の失敗（リセット、TLS のアラート、書き込み中の切断）。健全なら `none`——相手がきれいに閉じた EOF は失敗ではない。下記「相手の失敗」 |
@@ -2351,7 +2351,7 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
   ((err e) (println "~a" (message e))))
 
 ;; HTTPS
-(let ((c (unwrap (tls-connect "example.com" 443 10.0))))
+(let ((c (unwrap (tls-connect "example.com" 443 :timeout 10.0))))
   (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
   (println "~a" (unwrap (read-line c)))       ; HTTP/1.1 200 OK
   (close c))
@@ -2364,8 +2364,16 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
           ((ok c) (progn (go (serve c)) ()))          ; 上の serve のまま。最初の read-line が握手
           ((err e) (println "accept: ~a" (message e))))))
 ;; そのクライアント: 自分の証明書を信頼して繋ぐ
-(unwrap (tls-connect "localhost" 8443 5.0 "cert.pem"))
+(unwrap (tls-connect "localhost" 8443 :timeout 5.0 :ca-file "cert.pem"))
+
+;; 相互 TLS: サーバは ca.pem が発行したクライアント証明書を要求し、クライアントはそれを出す
+(tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem" :client-ca "ca.pem")
+(tls-connect "localhost" 8443 :ca-file "ca.pem" :cert-file "client.pem" :key-file "client-key.pem")
 ```
+
+相互 TLS で証明書を出さない（または通らない）クライアントは、TLS 1.3 ではクライアント側の握手が
+サーバの判定より先に終わるため、`tls-connect` は `Ok` で返り**最初の読みが `none`**（`socket-error`
+にアラートが載る）。サーバ側の同じ接続も最初の読みが `none`。どちらの側も panic しない。
 
 動く例は `examples/projects/echo-server/`（サーバとクライアント）と
 `examples/projects/http/`（HTTP/1.1 の最小サーバ／クライアント、`http-get` は `https://` も）。
@@ -2376,14 +2384,14 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 |---|---|---|---|
 | `udp-bind` | `(udp-bind host port)` | `(string,int)→Result<udp-socket,NetError>` | ソケットを作る。送るだけでも要る（`port` は `0`） |
 | `send-to` | `(send-to s host port bytes)` | `(udp-socket,string,int,Vector<int>)→Result<(),NetError>` | 1 データグラムを送る。名前は解決する。届いたかは分からない（UDP） |
-| `recv-from` | `(recv-from s [timeout])` | `(udp-socket,f64?)→Result<datagram,NetError>` | 次のデータグラム。`from` は `ip:port` で、そのまま `send-to` の `host` に渡せる |
+| `recv-from` | `(recv-from s &key timeout)` | `(udp-socket,&key f64)→Result<datagram,NetError>` | 次のデータグラム。`from` は `ip:port` で、そのまま `send-to` の `host` に渡せる |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | UTF-8 に符号化（各要素 0..255） |
 | `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | 復号。正しい UTF-8 でなければ `none` |
 
 ```lisp
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
-  (match (recv-from s 1.0)
+  (match (recv-from s :timeout 1.0)
     ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
     ((err e) (println "~a" (message e)))))
 ```
@@ -2407,7 +2415,7 @@ TLS は `rustls`（sans-IO）で、暗号化と復号だけを担い、ソケッ
 
 ### 21.5 無いもの
 
-- **クライアント証明書**（TLS の相互認証）。**SNI で証明書を選ぶ** TLS サーバ（1 つの証明書だけ）。
+- **SNI で証明書を選ぶ** TLS サーバ（1 つの証明書だけ）。相手の証明書の**中身を読む**手段（誰が繋いだかは `:client-ca` が保証する「発行者」までで、subject は取れない）。
 - **HTTP/2**。Unix ドメインの**データグラム**（`SOCK_DGRAM`）。
 - **ストリームに持たせる期限**（上記の理由で、時計は引数）。
 - **AOT 実行ファイル内のソケット待ち**。AOT の `main` にはスケジューラが無いので、待つことに

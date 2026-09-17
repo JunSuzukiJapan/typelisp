@@ -47,7 +47,6 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("net-local-address", "result<string,neterror>"),
     ("net-peer-address", "result<string,neterror>"),
     ("net-tls-start", "result<(),neterror>"),
-    ("net-tls-start-with-ca", "result<(),neterror>"),
     ("net-tls-handshake", "result<option<int>,neterror>"),
     ("net-udp-bind", "result<i32,neterror>"),
     ("net-udp-send-to", "result<bool,neterror>"),
@@ -68,6 +67,15 @@ pub const INNER_KEYS: &[(&str, &str)] = &[
     ("net-pop-byte", "option<int>"),
     ("net-pop-char", "option<char>"),
 ];
+
+/// An `Option<string>` argument. The type niches (`option.rs`): `none` is
+/// the empty word, `some` the string itself.
+fn opt_text(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<Option<String>, ArgError> {
+    match args.get(i) {
+        Some(Value::Empty) => Ok(None),
+        _ => text(heap, args, i, who).map(Some),
+    }
+}
 
 fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
     let key = heap.intern_type_key(lookup(RESULT_KEYS, name, "result"));
@@ -174,16 +182,18 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         }
         "net-tls-start" => {
             let (h, host) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
-            wrap!(with_streams(|t| t.net_tls_start(h, &host)), |_v: ()| Value::Empty)
-        }
-        "net-tls-start-with-ca" => {
-            let (h, host, ca) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)), arg!(text(heap, args, 2, name)));
-            wrap!(with_streams(|t| t.net_tls_start_with_ca(h, &host, &ca)), |_v: ()| Value::Empty)
+            let ca = arg!(opt_text(heap, args, 2, name));
+            let (cert, key) = (arg!(opt_text(heap, args, 3, name)), arg!(opt_text(heap, args, 4, name)));
+            wrap!(
+                with_streams(|t| t.net_tls_start(h, &host, ca.as_deref(), cert.as_deref(), key.as_deref())),
+                |_v: ()| Value::Empty
+            )
         }
         "net-tls-listen" => {
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
             let (cert, key) = (arg!(text(heap, args, 2, name)), arg!(text(heap, args, 3, name)));
-            wrap!(with_streams(|t| t.net_tls_listen(&host, port, &cert, &key)), |v: i64| Value::Int(v))
+            let client_ca = arg!(opt_text(heap, args, 4, name));
+            wrap!(with_streams(|t| t.net_tls_listen(&host, port, &cert, &key, client_ca.as_deref())), |v: i64| Value::Int(v))
         }
         // The message as a string box inside the `Option`: allocated first,
         // then boxed, with nothing that can collect in between.

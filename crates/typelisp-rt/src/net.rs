@@ -246,10 +246,19 @@ impl StreamTable {
     /// the certificate chain in `cert_file` and the private key in
     /// `key_file` (both PEM; the chain leaf first). The files are read and
     /// checked here, once — a key that does not match, or a file that is
-    /// not PEM, is this call's `Err`, not the first client's. Which client
-    /// is allowed is not checked (no client certificates).
-    pub fn net_tls_listen(&mut self, host: &str, port: i64, cert_file: &str, key_file: &str) -> StreamResult<Handle> {
-        let config = tls_server_config(cert_file, key_file).map_err(|e| format!("tls-listen: {}", e))?;
+    /// not PEM, is this call's `Err`, not the first client's. With
+    /// `client_ca` (PEM), every client must present a certificate issued by
+    /// one in that file (mutual TLS); without it, clients are not asked for
+    /// one.
+    pub fn net_tls_listen(
+        &mut self,
+        host: &str,
+        port: i64,
+        cert_file: &str,
+        key_file: &str,
+        client_ca: Option<&str>,
+    ) -> StreamResult<Handle> {
+        let config = tls_server_config(cert_file, key_file, client_ca).map_err(|e| format!("tls-listen: {}", e))?;
         self.listen_with(host, port, Some(config), "tls-listen")
     }
 
@@ -379,22 +388,27 @@ impl StreamTable {
     }
 
     /// Puts a TLS client connection on a connected socket, for `server_name`
-    /// (the name the certificate must be for), trusting Mozilla's root
-    /// store. Nothing is sent yet: the handshake is
-    /// [`Self::net_tls_handshake`]'s, one step per call.
-    pub fn net_tls_start(&mut self, h: Handle, server_name: &str) -> StreamResult<()> {
-        self.tls_start_with(h, server_name, tls_client_config())
-    }
-
-    /// [`Self::net_tls_start`] trusting only the certificates in `ca_file`
-    /// (PEM) — a private CA, or the test's self-signed one — instead of the
-    /// public roots.
-    pub fn net_tls_start_with_ca(&mut self, h: Handle, server_name: &str, ca_file: &str) -> StreamResult<()> {
-        let config = tls_client_config_trusting(ca_file).map_err(|e| format!("tls-connect: {}", e))?;
-        self.tls_start_with(h, server_name, config)
-    }
-
-    fn tls_start_with(&mut self, h: Handle, server_name: &str, config: Arc<rustls::ClientConfig>) -> StreamResult<()> {
+    /// (the name the certificate must be for). Trusts Mozilla's root store,
+    /// or only the certificates in `ca_file` (PEM) when one is given — a
+    /// private CA, or the test's self-signed one. With `cert_file` and
+    /// `key_file` (PEM, both or neither) the client presents that
+    /// certificate when the server asks for one (mutual TLS). Nothing is
+    /// sent yet: the handshake is [`Self::net_tls_handshake`]'s, one step
+    /// per call.
+    pub fn net_tls_start(
+        &mut self,
+        h: Handle,
+        server_name: &str,
+        ca_file: Option<&str>,
+        cert_file: Option<&str>,
+        key_file: Option<&str>,
+    ) -> StreamResult<()> {
+        let identity = match (cert_file, key_file) {
+            (None, None) => None,
+            (Some(c), Some(k)) => Some((c, k)),
+            _ => return Err("tls-connect: a client certificate needs both cert-file and key-file".to_string()),
+        };
+        let config = tls_client_config(ca_file, identity).map_err(|e| format!("tls-connect: {}", e))?;
         let TcpParts { tls, rbuf, wbuf, .. } = self.tcp(h, "tls-connect")?;
         if tls.is_some() {
             return Err("tls-connect: the connection already speaks TLS".to_string());
@@ -720,51 +734,81 @@ fn tls_handshake_step(conn: &mut rustls::Connection, sock: &mut Sock) -> Result<
     }
 }
 
-/// The one client configuration every `tls-connect` shares: Mozilla's root
-/// store (bundled by `webpki-roots`), no client certificate. Built once.
-fn tls_client_config() -> Arc<rustls::ClientConfig> {
-    static CONFIG: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
-    Arc::clone(CONFIG.get_or_init(|| {
-        let mut roots = rustls::RootCertStore::empty();
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        Arc::new(rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth())
-    }))
+/// The certificates in a PEM file — at least one, or an error naming the
+/// file.
+fn pem_certificates(file: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>, String> {
+    use rustls::pki_types::pem::PemObject;
+    let certs = rustls::pki_types::CertificateDer::pem_file_iter(file)
+        .map_err(|e| format!("{}: {}", file, e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("{}: {}", file, e))?;
+    if certs.is_empty() {
+        return Err(format!("{}: no certificate in the file", file));
+    }
+    Ok(certs)
 }
 
-/// A client configuration trusting only the certificates in `ca_file`.
-/// Built per connect: a private CA is rare, and the file may change.
-fn tls_client_config_trusting(ca_file: &str) -> Result<Arc<rustls::ClientConfig>, String> {
-    use rustls::pki_types::pem::PemObject;
+/// A root store of the certificates in a PEM file.
+fn pem_roots(file: &str) -> Result<rustls::RootCertStore, String> {
     let mut roots = rustls::RootCertStore::empty();
-    let certs = rustls::pki_types::CertificateDer::pem_file_iter(ca_file)
-        .map_err(|e| format!("{}: {}", ca_file, e))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("{}: {}", ca_file, e))?;
-    if certs.is_empty() {
-        return Err(format!("{}: no certificate in the file", ca_file));
-    }
-    let (added, _) = roots.add_parsable_certificates(certs);
+    let (added, _) = roots.add_parsable_certificates(pem_certificates(file)?);
     if added == 0 {
-        return Err(format!("{}: no usable certificate in the file", ca_file));
+        return Err(format!("{}: no usable certificate in the file", file));
     }
-    Ok(Arc::new(rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth()))
+    Ok(roots)
 }
 
-/// A server configuration: the chain in `cert_file`, the key in `key_file`.
-fn tls_server_config(cert_file: &str, key_file: &str) -> Result<Arc<rustls::ServerConfig>, String> {
-    use rustls::pki_types::pem::PemObject;
-    let certs = rustls::pki_types::CertificateDer::pem_file_iter(cert_file)
-        .map_err(|e| format!("{}: {}", cert_file, e))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("{}: {}", cert_file, e))?;
-    if certs.is_empty() {
-        return Err(format!("{}: no certificate in the file", cert_file));
+/// A client configuration. The one every plain `tls-connect` shares —
+/// Mozilla's root store (bundled by `webpki-roots`), no client
+/// certificate — is built once; anything with a private CA or an identity
+/// is built per connect, since those are rare and their files may change.
+fn tls_client_config(ca_file: Option<&str>, identity: Option<(&str, &str)>) -> Result<Arc<rustls::ClientConfig>, String> {
+    static DEFAULT: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
+    if ca_file.is_none() && identity.is_none() {
+        return Ok(Arc::clone(DEFAULT.get_or_init(|| {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            Arc::new(rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth())
+        })));
     }
+    let roots = match ca_file {
+        Some(file) => pem_roots(file)?,
+        None => {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            roots
+        }
+    };
+    let builder = rustls::ClientConfig::builder().with_root_certificates(roots);
+    let config = match identity {
+        None => builder.with_no_client_auth(),
+        Some((cert_file, key_file)) => {
+            use rustls::pki_types::pem::PemObject;
+            let certs = pem_certificates(cert_file)?;
+            let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key_file).map_err(|e| format!("{}: {}", key_file, e))?;
+            builder.with_client_auth_cert(certs, key).map_err(|e| format!("{}: {}", cert_file, e))?
+        }
+    };
+    Ok(Arc::new(config))
+}
+
+/// A server configuration: the chain in `cert_file`, the key in `key_file`,
+/// and with `client_ca` a verifier that requires every client to present a
+/// certificate issued by one in that file.
+fn tls_server_config(cert_file: &str, key_file: &str, client_ca: Option<&str>) -> Result<Arc<rustls::ServerConfig>, String> {
+    use rustls::pki_types::pem::PemObject;
+    let certs = pem_certificates(cert_file)?;
     let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key_file).map_err(|e| format!("{}: {}", key_file, e))?;
-    let config = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .map_err(|e| format!("{}: {}", cert_file, e))?;
+    let builder = match client_ca {
+        None => rustls::ServerConfig::builder().with_no_client_auth(),
+        Some(file) => {
+            let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(pem_roots(file)?))
+                .build()
+                .map_err(|e| format!("{}: {}", file, e))?;
+            rustls::ServerConfig::builder().with_client_cert_verifier(verifier)
+        }
+    };
+    let config = builder.with_single_cert(certs, key).map_err(|e| format!("{}: {}", cert_file, e))?;
     Ok(Arc::new(config))
 }
 
@@ -943,33 +987,67 @@ mod tests {
         assert!(t.net_unix_connect(&path).is_err());
     }
 
-    /// A certificate for `localhost` and its key, written to PEM files the
-    /// listener and the client can name.
-    fn localhost_cert() -> (std::path::PathBuf, std::path::PathBuf) {
+    /// A small PKI in PEM files: a CA, a server certificate for `localhost`
+    /// it issued, and a client certificate it issued. The paths, as strings
+    /// the builtins take.
+    struct Pki {
+        ca: String,
+        cert: String,
+        key: String,
+        client_cert: String,
+        client_key: String,
+    }
+
+    fn test_pki() -> Pki {
+        use rcgen::{BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, KeyPair};
         let dir = std::env::temp_dir().join(format!("typelisp-tls-{}-{:?}", std::process::id(), std::thread::current().id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let ck = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
-        let cert = dir.join("cert.pem");
-        let key = dir.join("key.pem");
-        std::fs::write(&cert, ck.cert.pem()).unwrap();
-        std::fs::write(&key, ck.signing_key.serialize_pem()).unwrap();
-        (cert, key)
+        let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca_key = KeyPair::generate().unwrap();
+        let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+        let issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
+        let mut server = CertificateParams::new(vec!["localhost".to_string()]).unwrap();
+        server.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        let server_key = KeyPair::generate().unwrap();
+        let server_cert = server.signed_by(&server_key, &issuer).unwrap();
+        let mut client = CertificateParams::new(vec!["client".to_string()]).unwrap();
+        client.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        let client_key = KeyPair::generate().unwrap();
+        let client_cert = client.signed_by(&client_key, &issuer).unwrap();
+        let write = |name: &str, text: String| {
+            let path = dir.join(name);
+            std::fs::write(&path, text).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        Pki {
+            ca: write("ca.pem", ca_cert.pem()),
+            cert: write("cert.pem", server_cert.pem()),
+            key: write("key.pem", server_key.serialize_pem()),
+            client_cert: write("client.pem", client_cert.pem()),
+            client_key: write("client-key.pem", client_key.serialize_pem()),
+        }
     }
 
     /// Runs both sides of a TLS handshake over the loopback: the client
     /// steps `net_tls_handshake`, the server's side is driven by nothing
-    /// but `net_fill` — as a real server task's first read would.
-    fn tls_pair(t: &mut StreamTable, cert: &std::path::Path, key: &std::path::Path, trust: Option<&std::path::Path>) -> (Result<Handle, String>, Handle) {
-        let l = t.net_tls_listen("127.0.0.1", 0, cert.to_str().unwrap(), key.to_str().unwrap()).unwrap();
+    /// but `net_fill` — as a real server task's first read would. `trust`
+    /// is the client's CA file (none: the public roots), `identity` its
+    /// certificate and key, `client_ca` what the server requires.
+    fn tls_pair(
+        t: &mut StreamTable,
+        pki: &Pki,
+        trust: Option<&str>,
+        identity: Option<(&str, &str)>,
+        client_ca: Option<&str>,
+    ) -> (Result<Handle, String>, Handle) {
+        let l = t.net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, client_ca).unwrap();
         let addr = t.net_local_address(l).unwrap();
         let c = t.net_connect_begin(&addr).unwrap();
         let cfd = t.raw_fd(c).unwrap();
         crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
         t.net_connect_finish(c).unwrap();
-        match trust {
-            Some(ca) => t.net_tls_start_with_ca(c, "localhost", ca.to_str().unwrap()).unwrap(),
-            None => t.net_tls_start(c, "localhost").unwrap(),
-        }
+        t.net_tls_start(c, "localhost", trust, identity.map(|i| i.0), identity.map(|i| i.1)).unwrap();
         let lfd = t.raw_fd(l).unwrap();
         crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
         let s = t.net_accept(l).unwrap().expect("a connection was waiting");
@@ -994,9 +1072,9 @@ mod tests {
     #[test]
     fn a_line_crosses_a_tls_connection_both_ways() {
         let mut t = StreamTable::default();
-        let (cert, key) = localhost_cert();
-        let (c, s) = tls_pair(&mut t, &cert, &key, Some(&cert));
-        let c = c.expect("the client trusts the certificate it was given");
+        let pki = test_pki();
+        let (c, s) = tls_pair(&mut t, &pki, Some(&pki.ca), None, None);
+        let c = c.expect("the client trusts the CA it was given");
         t.net_push_string(c, "over tls\n").unwrap();
         assert_eq!(t.net_flush(c).unwrap(), None);
         assert!(fill_until_some(&mut t, s) > 0);
@@ -1025,14 +1103,14 @@ mod tests {
         // must step the handshake, asking for *readable* while it waits on
         // the client, and send the greeting once it is done.
         let mut t = StreamTable::default();
-        let (cert, key) = localhost_cert();
-        let l = t.net_tls_listen("127.0.0.1", 0, cert.to_str().unwrap(), key.to_str().unwrap()).unwrap();
+        let pki = test_pki();
+        let l = t.net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, None).unwrap();
         let addr = t.net_local_address(l).unwrap();
         let c = t.net_connect_begin(&addr).unwrap();
         let cfd = t.raw_fd(c).unwrap();
         crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
         t.net_connect_finish(c).unwrap();
-        t.net_tls_start_with_ca(c, "localhost", cert.to_str().unwrap()).unwrap();
+        t.net_tls_start(c, "localhost", Some(&pki.ca), None, None).unwrap();
         let lfd = t.raw_fd(l).unwrap();
         crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
         let s = t.net_accept(l).unwrap().unwrap();
@@ -1074,9 +1152,9 @@ mod tests {
     #[test]
     fn an_untrusted_certificate_fails_the_client_and_only_marks_the_server() {
         let mut t = StreamTable::default();
-        let (cert, key) = localhost_cert();
+        let pki = test_pki();
         // The client trusts the public roots, which did not sign this one.
-        let (c, s) = tls_pair(&mut t, &cert, &key, None);
+        let (c, s) = tls_pair(&mut t, &pki, None, None, None);
         let err = c.expect_err("a self-signed certificate was accepted against the public roots");
         assert!(err.starts_with("tls-connect:"), "{}", err);
         // The server side: its reads say end of input, its writes go
@@ -1118,13 +1196,46 @@ mod tests {
     }
 
     #[test]
+    fn a_client_certificate_is_required_when_the_listener_names_a_ca() {
+        let mut t = StreamTable::default();
+        let pki = test_pki();
+        // With one: the handshake completes and a line crosses.
+        let (c, s) = tls_pair(&mut t, &pki, Some(&pki.ca), Some((&pki.client_cert, &pki.client_key)), Some(&pki.ca));
+        let c = c.expect("a client certificate the CA issued was refused");
+        t.net_push_string(c, "authenticated\n").unwrap();
+        assert_eq!(t.net_flush(c).unwrap(), None);
+        assert!(fill_until_some(&mut t, s) > 0);
+        assert_eq!(t.net_socket_error(s).unwrap(), None);
+        // Without one: the server ends the handshake; the client sees it
+        // as an error of `tls-connect`, the server as a marked socket.
+        let (c, s) = tls_pair(&mut t, &pki, Some(&pki.ca), None, Some(&pki.ca));
+        // In TLS 1.3 the client's side of the handshake completes before
+        // the server has seen its (empty) certificate, so the refusal is
+        // not `tls-connect`'s to see: the server's first read is what
+        // processes the client's last flight and answers with the alert.
+        assert_eq!(fill_until_some(&mut t, s), 0);
+        assert!(t.net_socket_error(s).unwrap().is_some(), "the server accepted a client without a certificate");
+        let refused = match c {
+            Err(_) => true,
+            Ok(c) => fill_until_some(&mut t, c) == 0 && t.net_socket_error(c).unwrap().is_some(),
+        };
+        assert!(refused, "a client without a certificate got through");
+    }
+
+    #[test]
     fn tls_listen_checks_its_files_up_front() {
         let mut t = StreamTable::default();
-        let (cert, key) = localhost_cert();
-        let err = t.net_tls_listen("127.0.0.1", 0, key.to_str().unwrap(), cert.to_str().unwrap()).unwrap_err();
+        let pki = test_pki();
+        let err = t.net_tls_listen("127.0.0.1", 0, &pki.key, &pki.cert, None).unwrap_err();
         assert!(err.starts_with("tls-listen:"), "{}", err);
-        let err = t.net_tls_listen("127.0.0.1", 0, "/no/such/cert.pem", key.to_str().unwrap()).unwrap_err();
+        let err = t.net_tls_listen("127.0.0.1", 0, "/no/such/cert.pem", &pki.key, None).unwrap_err();
         assert!(err.contains("/no/such/cert.pem"), "{}", err);
+        let err = t.net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, Some("/no/such/ca.pem")).unwrap_err();
+        assert!(err.contains("/no/such/ca.pem"), "{}", err);
+        let (c, s) = connected_pair(&mut t);
+        let _ = s;
+        let err = t.net_tls_start(c, "localhost", None, Some(&pki.client_cert), None).unwrap_err();
+        assert!(err.contains("both"), "{}", err);
     }
 
     #[test]
@@ -1133,7 +1244,7 @@ mod tests {
         // handshake must fail with an error, not hang or succeed.
         let mut t = StreamTable::default();
         let (c, s) = connected_pair(&mut t);
-        t.net_tls_start(c, "localhost").unwrap();
+        t.net_tls_start(c, "localhost", None, None, None).unwrap();
         let cfd = t.raw_fd(c).unwrap();
         let sfd = t.raw_fd(s).unwrap();
         let outcome = loop {

@@ -4293,9 +4293,9 @@ user-visible capacity."
          (setf i (+ i 1))
          (when (>= i n) (return (result::err e))))))))
 
-(pub defun tcp-connect ((host string) (port int) &optional (timeout f64)) Result<socket-stream, NetError>
+(pub defun tcp-connect ((host string) (port int) &key (timeout f64)) Result<socket-stream, NetError>
   "Connect to `host` (a name or an address) on `port`. `Err` if the name does
-   not resolve, the connection is refused, or -- with `timeout` seconds
+   not resolve, the connection is refused, or -- with `:timeout` seconds
    given -- nobody answers in time: ordinary outcomes, not panics. The task
    waits for the name and the handshake; other tasks keep running."
   (match (tcp-resolve host port timeout)
@@ -4305,23 +4305,25 @@ user-visible capacity."
        ((ok h) (result::ok (socket-stream::new h)))
        ((err e) (result::err e))))))
 
-(pub defun tls-connect ((host string) (port int) &optional (timeout f64) (ca-file string)) Result<socket-stream, NetError>
-  "`tcp-connect`, then TLS on the connection with `host` as the name the
-   server's certificate must be for -- checked against Mozilla's root store,
-   or against only the certificates in `ca-file` (PEM) when one is given: a
+(pub defun tls-connect ((host string) (port int)
+                        &key (timeout f64) (ca-file string) (cert-file string) (key-file string) (server-name string))
+    Result<socket-stream, NetError>
+  "`tcp-connect`, then TLS on the connection. The server's certificate must
+   be for `host` -- or for `:server-name`, when the address to dial and the
+   name to check differ -- and is checked against Mozilla's root store, or
+   against only the certificates in `:ca-file` (PEM) when one is given: a
    private CA, or the very certificate a `tls-listen` of your own presents.
-   The result is an ordinary `socket-stream`; what crosses the socket is
-   ciphertext. The handshake is done here, so a certificate that does not
-   check out is this call's `Err`."
+   `:cert-file` and `:key-file` (both or neither) are the certificate this
+   side presents when the server asks for one. The result is an ordinary
+   `socket-stream`; what crosses the socket is ciphertext. The handshake is
+   done here, so a certificate that does not check out is this call's `Err`."
   (match (tcp-resolve host port timeout)
     ((err e) (result::err e))
     ((ok addrs)
      (match (tcp-connect-addr addrs timeout)
        ((err e) (result::err e))
        ((ok h)
-        (match (match ca-file
-                 ((none) (net-tls-start h host))
-                 ((some ca) (net-tls-start-with-ca h host ca)))
+        (match (net-tls-start h (match server-name ((some n) n) ((none) host)) ca-file cert-file key-file)
           ((err e) (progn (unwrap-io (stream-close h)) (result::err e)))
           ((ok _)
            (loop
@@ -4355,7 +4357,8 @@ user-visible capacity."
     ((ok h) (result::ok (socket-listener::new h)))
     ((err e) (result::err e))))
 
-(pub defun tls-listen ((host string) (port int) (cert-file string) (key-file string)) Result<socket-listener, NetError>
+(pub defun tls-listen ((host string) (port int) (cert-file string) (key-file string) &key (client-ca string))
+    Result<socket-listener, NetError>
   "`tcp-listen`, with every accepted connection speaking TLS: `cert-file`
    holds the certificate chain (PEM, the server's own first) and `key-file`
    its private key. Both are read and checked here, so a key that does not
@@ -4364,13 +4367,15 @@ user-visible capacity."
    that in its first read or write, so a client slow to shake hands delays
    nobody else; and a client that fails it (rejecting the certificate, or
    speaking no TLS) is seen by that task alone, as end of input with
-   `socket-error` saying why. Clients are not asked for a certificate."
-  (match (net-tls-listen host port cert-file key-file)
+   `socket-error` saying why. With `:client-ca` (PEM) every client must
+   present a certificate issued by one in that file, and one that does not
+   fails the same way; without it, clients are not asked for one."
+  (match (net-tls-listen host port cert-file key-file client-ca)
     ((ok h) (result::ok (socket-listener::new h)))
     ((err e) (result::err e))))
 
-(pub defmethod accept ((self socket-listener) &optional (timeout f64)) Result<socket-stream, NetError>
-  "The next connection, waiting for one -- at most `timeout` seconds if
+(pub defmethod accept ((self socket-listener) &key (timeout f64)) Result<socket-stream, NetError>
+  "The next connection, waiting for one -- at most `:timeout` seconds if
    given, after which the `Err` says so. The usual shape of a server is
    `(loop (match (accept l) ((ok c) (go (serve c))) ((err e) ...)))`: one task
    per connection, each free to wait on its own socket."
@@ -4498,8 +4503,8 @@ user-visible capacity."
          ((ok sent) (if sent (return (the Result<(), NetError> (result::ok ()))) (net-wait self::h net-writable)))
          ((err e) (return (result::err e))))))))
 
-(pub defmethod recv-from ((self udp-socket) &optional (timeout f64)) Result<datagram, NetError>
-  "The next datagram, waiting for one -- at most `timeout` seconds if given.
+(pub defmethod recv-from ((self udp-socket) &key (timeout f64)) Result<datagram, NetError>
+  "The next datagram, waiting for one -- at most `:timeout` seconds if given.
    `from` is the sender as `ip:port`, which `send-to` accepts back."
   (loop
     (match (net-udp-recv self::h)
