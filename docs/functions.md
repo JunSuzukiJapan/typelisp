@@ -2282,7 +2282,7 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 |---|---|---|
 | `socket-stream` | `CharInput` `PeekInput` `CharOutput` | `tcp-connect` / `tls-connect` / `unix-connect` / `accept` / `char-stream-of` |
 | `socket-byte-stream` | `ByteInput` `ByteOutput` | `byte-stream-of` |
-| `socket-listener` | `Stream`（`close` / `open-stream-p`） | `tcp-listen` / `unix-listen` |
+| `socket-listener` | `Stream`（`close` / `open-stream-p`） | `tcp-listen` / `tls-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | ——（`bytes`: `Vector<int>`、`from`: `string`） | `recv-from` |
 | `NetError` | `Error` | 上の関数の `Err` |
@@ -2297,13 +2297,15 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 | 名前 | 使い方 | 型 | 意味 |
 |---|---|---|---|
 | `tcp-connect` | `(tcp-connect host port [timeout])` | `(string,int,f64?)→Result<socket-stream,NetError>` | 接続する。`host` は名前でもアドレスでも。名前が複数のアドレスを持てば順に試す（`localhost` は `::1` と `127.0.0.1`）。名前解決失敗・接続拒否・`timeout` 秒の超過は `Err` |
-| `tls-connect` | `(tls-connect host port [timeout])` | 同上 | `tcp-connect` の後に TLS。証明書は `host` 名に対して Mozilla のルート証明書で検証。結果は普通の `socket-stream`。**クライアント側のみ**（`tls-listen` は無い） |
+| `tls-connect` | `(tls-connect host port [timeout [ca-file]])` | `(string,int,f64?,string?)→Result<socket-stream,NetError>` | `tcp-connect` の後に TLS。証明書は `host` 名に対して Mozilla のルート証明書で検証——`ca-file`（PEM）を渡せば**その中の証明書だけ**を信頼する（私設 CA、または自分の `tls-listen` が出す証明書そのもの）。握手はここで済ませるので、証明書が通らなければこの呼び出しの `Err`。結果は普通の `socket-stream` |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | Unix ドメインソケット `path` に接続。ローカルなので握手待ちは無く、タイムアウトも無い |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | 待ち受ける。`"127.0.0.1"` はこの機械だけ、`"0.0.0.0"` は全インタフェース。`port` に `0` を渡すと OS が選ぶ |
+| `tls-listen` | `(tls-listen host port cert-file key-file)` | `(string,int,string,string)→Result<socket-listener,NetError>` | `tcp-listen` の TLS 版。`cert-file` は証明書チェーン（PEM、自分のものが先頭）、`key-file` は秘密鍵。両方ここで読んで検査するので、鍵が合わなければ最初のクライアントでなくこの呼び出しの `Err`。`accept` は**握手の前に**返り、接続を担当するタスクの最初の読み書きが握手を済ませる（Go の `tls.Conn` と同じ）——握手の遅いクライアントが他の `accept` を止めない。クライアント証明書は求めない |
 | `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | `path` で待ち受ける。**ファイルが既にあれば `Err`**（走っている別プロセスのものかもしれないので黙って置き換えない）。`close` がファイルを消す |
 | `accept` | `(accept l [timeout])` | `(socket-listener,f64?)→Result<socket-stream,NetError>` | 次の接続。来るまでタスクを止める。`timeout` 秒で諦めると `Err` |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | 待たずに読めるようになるまで、または `secs` 秒。`true` なら前者（バッファ済みも含む）。読みに時計を付ける手段：`(if (wait-readable c 5.0) (read-line c) ...)`。約束するのは**次の読みが止まらない**ことで、`read-line` は行の残りを待ちうる |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | 書けるようになるまで、または `secs` 秒 |
+| `socket-error` | `(socket-error s)` | `(socket-stream \| socket-byte-stream)→Option<NetError>` | **相手が**この接続を壊していればその最初の失敗（リセット、TLS のアラート、書き込み中の切断）。健全なら `none`——相手がきれいに閉じた EOF は失敗ではない。下記「相手の失敗」 |
 | `local-address` | `(local-address s)` | `(socket-stream \| socket-listener \| udp-socket)→string` | こちら側の `host:port`。`(tcp-listen h 0)` の後で選ばれたポートを知る手段。Unix ならパス（接続した側の端は `(unnamed)`） |
 | `peer-address` | `(peer-address s)` | `(socket-stream)→string` | 相手側の `host:port`、Unix ならパス |
 | `shutdown-output` | `(shutdown-output s)` | `(socket-stream)→()` | 送信側だけ閉じる（半クローズ）。相手は EOF を読み、こちらはまだ読める。「要求は全部送った」の合図。TLS なら `close_notify` も送る |
@@ -2315,6 +2317,13 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 `write-string`/`write-line` は**書き切ってから返る**（Go の `net.Conn.Write` と同じ）。
 細かい書き込みを束ねたければ `string-output-stream` に溜めてから 1 回で書く。
 `listen` は受信バッファに何かあるときだけ `true`——`read-char-no-hang` が名前どおりに動く。
+
+**相手の失敗は panic にならない。** 接続の向こうがリセットしても、TLS の握手を拒んでも、
+書いている最中に切っても、それはこのプログラムの誤りではないので、サーバが他のクライアント
+ごと死ぬことはない。下の層が最初の失敗を接続に記録し、以後の読みは `none`（EOF と同じ顔）、
+書きはどこにも届かず黙って戻る。区別したければ `socket-error`——Go の `bufio.Scanner.Err`
+と同じ形（`read-item` が `Option` で、他に言う口が無い）。panic するのはプログラム自身の
+誤り（閉じたハンドル、`unread-char` 直後のバイト読み）だけ。
 
 **タイムアウトは明示の引数か `wait-readable`。** Go の `SetReadDeadline` のように「ストリームに
 期限を持たせて `read-line` が失敗する」形は無い——`InputStream` の `read-item` は
@@ -2346,6 +2355,16 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
   (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
   (println "~a" (unwrap (read-line c)))       ; HTTP/1.1 200 OK
   (close c))
+
+;; TLS サーバ（証明書は例えば
+;;   openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=localhost \
+;;           -addext subjectAltName=DNS:localhost -keyout key.pem -out cert.pem）
+(let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
+  (loop (match (accept l)
+          ((ok c) (progn (go (serve c)) ()))          ; 上の serve のまま。最初の read-line が握手
+          ((err e) (println "accept: ~a" (message e))))))
+;; そのクライアント: 自分の証明書を信頼して繋ぐ
+(unwrap (tls-connect "localhost" 8443 5.0 "cert.pem"))
 ```
 
 動く例は `examples/projects/echo-server/`（サーバとクライアント）と
@@ -2373,18 +2392,22 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 
 上の関数は全部 prelude の typelisp で、ハンドル `i32` に対する `net-*` 組み込みの上に書かれている。
 組み込みはどれも **今できることしかしない**（ソケットは non-blocking）。「まだ」は値で返る——
-`net-fill`/`net-accept`/`net-udp-recv` の `none`、`net-flush`/`net-udp-send-to` の `false`——ので、
+`net-fill`/`net-accept`/`net-udp-recv` の `none`、`net-flush` の `some interest`、
+`net-udp-send-to` の `false`——ので、
 prelude のループがそれを見て `(net-wait h interest)` を呼び、タスクを止める。`net-wait` は
 `sleep` と同じ「中断する組み込み」（interest: `net-readable` = 0 / `net-writable` = 1）、
 `(net-wait-for h interest secs)` は時計付きで `bool` を返す。名前解決（`net-resolve-begin`／
 `net-resolve-finish`）だけは `getaddrinfo` に non-blocking 版が無いので補助スレッドで走り、
 終わったらパイプに 1 バイト書く——タスクはそのパイプを他のソケットと同じ `poll` で待つ。
 TLS は `rustls`（sans-IO）で、暗号化と復号だけを担い、ソケットに触るのは相変わらず
-`net-fill`/`net-flush`。ふつうのプログラムが `net-*` を直接呼ぶ理由は無い。
+`net-fill`/`net-flush`——握手もこの 2 つが 1 歩ずつ進める（サーバ側はそれだけ。クライアント側は
+`tls-connect` が結果を値で返すために `net-tls-handshake` で先に済ませる）。相手の失敗は
+`net-fill` が `some 0`・`net-flush` が `none` として飲み込み、`net-socket-error` が返す。
+ふつうのプログラムが `net-*` を直接呼ぶ理由は無い。
 
 ### 21.5 無いもの
 
-- **TLS サーバ**（証明書と鍵の読み込みが要る）。**クライアント証明書**。
+- **クライアント証明書**（TLS の相互認証）。**SNI で証明書を選ぶ** TLS サーバ（1 つの証明書だけ）。
 - **HTTP/2**。Unix ドメインの**データグラム**（`SOCK_DGRAM`）。
 - **ストリームに持たせる期限**（上記の理由で、時計は引数）。
 - **AOT 実行ファイル内のソケット待ち**。AOT の `main` にはスケジューラが無いので、待つことに

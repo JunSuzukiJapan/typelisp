@@ -509,3 +509,152 @@ fn connecting_to_a_missing_unix_socket_is_an_error_value() {
   ((err e) (if (> (length (message e)) 0) "refused" "")))"#;
     assert_eq!(text(src), "refused");
 }
+
+// ---- TLS server ------------------------------------------------------------
+
+/// A certificate for `localhost` and its key, as PEM files: what a
+/// `tls-listen` names, and what the client's `ca-file` names to trust it.
+fn localhost_cert() -> (String, String) {
+    let dir = std::env::temp_dir().join(format!("typelisp-net-tls-{}-{:?}", std::process::id(), std::thread::current().id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ck = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+    let cert = dir.join("cert.pem");
+    let key = dir.join("key.pem");
+    std::fs::write(&cert, ck.cert.pem()).unwrap();
+    std::fs::write(&key, ck.signing_key.serialize_pem()).unwrap();
+    (cert.to_string_lossy().into_owned(), key.to_string_lossy().into_owned())
+}
+
+#[test]
+fn a_line_is_echoed_over_tls() {
+    // The server task's first `read-line` completes the handshake; the
+    // client trusts the certificate through `ca-file`. Interpreted and
+    // compiled turns of the drain loop must see the same `some interest`.
+    let (cert, key) = localhost_cert();
+    let src = format!(
+        "{LISTEN}{ECHO}
+(let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
+  (go (echo-serve l 1))
+  (let ((c (unwrap (tls-connect \"localhost\" (port-of l) 5.0 \"{cert}\"))))
+    (write-line c \"hello, tls\")
+    (let ((reply (unwrap (read-line c))))
+      (close c)
+      (close l)
+      reply)))"
+    );
+    assert_eq!(text(&src), "hello, tls");
+    assert_eq!(text_compiled(&src.replace("(go (echo-serve l 1))", "(compile echo-conn) (go (echo-serve l 1))")), "hello, tls");
+}
+
+#[test]
+fn a_server_that_writes_first_shakes_hands_in_its_write() {
+    // A greeting before any read: the drain loop must wait for *readable*
+    // while the handshake needs the client's next message, and the
+    // greeting must arrive once it is done.
+    let (cert, key) = localhost_cert();
+    let src = format!(
+        "{LISTEN}
+(defun greet ((l socket-listener)) ()
+  (match (accept l)
+    ((ok c) (write-line c \"220 ready\") (close c))
+    ((err e) (panic (message e)))))
+(let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
+  (go (greet l))
+  (let ((c (unwrap (tls-connect \"localhost\" (port-of l) 5.0 \"{cert}\"))))
+    (let ((reply (unwrap (read-line c))))
+      (close c)
+      (close l)
+      reply)))"
+    );
+    assert_eq!(text(&src), "220 ready");
+}
+
+#[test]
+fn an_untrusted_certificate_is_the_clients_error_and_the_servers_socket_error() {
+    // The client, trusting only the public roots, rejects the certificate:
+    // `tls-connect` is an `Err`. The server task sees end of input, not a
+    // panic, and `socket-error` names the alert -- the server is still
+    // there to serve the next client.
+    let (cert, key) = localhost_cert();
+    let src = format!(
+        "{LISTEN}
+(defvar (server-saw string) \"\")
+(defun serve-one ((l socket-listener)) ()
+  (match (accept l)
+    ((ok c)
+     (let ((line (read-line c)))
+       (setf server-saw
+             (format false \"~a/~a\" (is-none line)
+                     (match (socket-error c) ((some e) (if (> (length (message e)) 0) \"failed\" \"\")) ((none) \"sound\"))))
+       (close c)))
+    ((err e) (panic (message e)))))
+(let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
+  (go (serve-one l))
+  (let ((outcome (match (tls-connect \"localhost\" (port-of l) 5.0)
+                   ((ok c) (progn (close c) \"trusted?!\"))
+                   ((err e) \"rejected\"))))
+    (sleep 0.2)
+    (close l)
+    (format false \"~a ~a\" outcome server-saw)))"
+    );
+    assert_eq!(text(&src), "rejected true/failed");
+}
+
+#[test]
+fn a_peer_that_goes_away_does_not_panic_the_server() {
+    // Plain TCP: the client closes without reading; the server's writes
+    // after that go nowhere and `socket-error` says so, while a clean end
+    // of input on a sound connection reports `none`.
+    let src = format!(
+        "{LISTEN}
+(defvar (seen string) \"\")
+(defun talk ((l socket-listener)) ()
+  (match (accept l)
+    ((ok c)
+     (read-line c)
+     (let ((i 0))
+       (loop
+         (write-line c \"chatter chatter chatter chatter chatter chatter chatter chatter\")
+         (setf i (+ i 1))
+         (when (or (is-some (socket-error c)) (> i 2000)) (return))))
+     (setf seen (match (socket-error c) ((some e) \"broken\") ((none) \"sound\")))
+     (close c))
+    ((err e) (panic (message e)))))
+(let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
+  (go (talk l))
+  (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
+    (write-line c \"go\")
+    (close c)
+    (sleep 0.5)
+    (close l)
+    seen))"
+    );
+    assert_eq!(text(&src), "broken");
+    assert_eq!(text(&format!(
+        "{LISTEN}
+(defun serve-one ((l socket-listener)) ()
+  (match (accept l)
+    ((ok c) (read-line c) (close c))
+    ((err e) (panic (message e)))))
+(let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
+  (go (serve-one l))
+  (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
+    (write-line c \"bye\")
+    (let ((after (read-line c)))
+      (let ((r (format false \"~a ~a\" (is-none after) (is-none (socket-error c)))))
+        (close c)
+        (close l)
+        r))))"
+    )), "true true");
+}
+
+#[test]
+fn tls_listen_with_bad_files_is_an_error_value() {
+    let (cert, key) = localhost_cert();
+    let src = format!(
+        "(match (tls-listen \"127.0.0.1\" 0 \"{key}\" \"{cert}\")
+  ((ok l) (progn (close l) \"listening?!\"))
+  ((err e) (if (> (length (message e)) 0) \"refused\" \"\")))"
+    );
+    assert_eq!(text(&src), "refused");
+}

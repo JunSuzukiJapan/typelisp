@@ -1198,9 +1198,15 @@ fn register_stream_builtins(root: &mut Namespace) {
 /// operation on it in its **non-blocking** form. The prelude's `socket-stream`,
 /// `socket-byte-stream` and `socket-listener` are written on top of these, and the
 /// waiting is written there too: each "not yet" answer below (`none` from
-/// `net-fill`/`net-accept`, `false` from `net-flush`) is followed by a
-/// `(net-wait h interest)`, which parks the task until `poll` says the socket
-/// is ready.
+/// `net-fill`/`net-accept`, `some interest` from `net-flush`) is followed by
+/// a `(net-wait h interest)`, which parks the task until `poll` says the
+/// socket is ready.
+///
+/// A failure the *peer* causes (a reset, a TLS alert) is not an `Err` of any
+/// of these: it is recorded on the socket, after which `net-fill` says end
+/// of input and `net-flush` says done, and `net-socket-error` reports it.
+/// The `Err`s are the program's own mistakes and the outcomes of the calls
+/// that make a connection.
 ///
 /// `net-wait` is the one entry here that answers with nothing: like `sleep`
 /// and `yield` it is registered as an ordinary builtin and intercepted by the
@@ -1237,7 +1243,12 @@ fn register_net_builtins(root: &mut Namespace) {
     // when done and `some interest` when the socket must become ready
     // before the next.
     native("net-tls-start", vec![h.clone(), Type::Str], unit_or_err.clone());
+    native("net-tls-start-with-ca", vec![h.clone(), Type::Str, Type::Str], unit_or_err.clone());
     native("net-tls-handshake", vec![h.clone()], result_of(option_of(Type::Int), net_err.clone()));
+    // A listener whose accepted connections speak TLS with the certificate
+    // and key in the two PEM files; the handshake is the connection's
+    // first read or write, not `accept`'s.
+    native("net-tls-listen", vec![Type::Str, Type::Int, Type::Str, Type::Str], result_of(h.clone(), net_err.clone()));
     // UDP: whole datagrams. `send-to` answers `false` when the send buffer
     // is full (wait for writable); `recv` answers `none` when nothing has
     // arrived (wait for readable), and `last-sender` says who sent what
@@ -1273,11 +1284,12 @@ fn register_net_builtins(root: &mut Namespace) {
     native("net-buffered-p", vec![h.clone()], result_of(Type::Bool, net_err.clone()));
 
     // Output is the mirror: push into a buffer, then flush. `net-flush`
-    // answers `Ok(false)` when the OS took only part of it — wait for
-    // writable and flush again.
+    // answers `some interest` when the OS took only part of it (or a TLS
+    // handshake is waiting on the peer) — wait for that and flush again.
     native("net-push-string", vec![h.clone(), Type::Str], unit_or_err.clone());
     native("net-push-byte", vec![h.clone(), Type::Int], unit_or_err.clone());
-    native("net-flush", vec![h.clone()], result_of(Type::Bool, net_err.clone()));
+    native("net-flush", vec![h.clone()], result_of(option_of(Type::Int), net_err.clone()));
+    native("net-socket-error", vec![h.clone()], result_of(option_of(Type::Str), net_err.clone()));
     native("net-shutdown-write", vec![h.clone()], unit_or_err.clone());
     native("net-local-address", vec![h.clone()], result_of(Type::Str, net_err.clone()));
     native("net-peer-address", vec![h.clone()], result_of(Type::Str, net_err.clone()));

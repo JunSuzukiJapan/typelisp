@@ -31,6 +31,7 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("net-connect-begin", "result<i32,neterror>"),
     ("net-connect-finish", "result<(),neterror>"),
     ("net-listen", "result<i32,neterror>"),
+    ("net-tls-listen", "result<i32,neterror>"),
     ("net-unix-connect", "result<i32,neterror>"),
     ("net-unix-listen", "result<i32,neterror>"),
     ("net-accept", "result<option<i32>,neterror>"),
@@ -40,11 +41,13 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("net-buffered-p", "result<bool,neterror>"),
     ("net-push-string", "result<(),neterror>"),
     ("net-push-byte", "result<(),neterror>"),
-    ("net-flush", "result<bool,neterror>"),
+    ("net-flush", "result<option<int>,neterror>"),
+    ("net-socket-error", "result<option<string>,neterror>"),
     ("net-shutdown-write", "result<(),neterror>"),
     ("net-local-address", "result<string,neterror>"),
     ("net-peer-address", "result<string,neterror>"),
     ("net-tls-start", "result<(),neterror>"),
+    ("net-tls-start-with-ca", "result<(),neterror>"),
     ("net-tls-handshake", "result<option<int>,neterror>"),
     ("net-udp-bind", "result<i32,neterror>"),
     ("net-udp-send-to", "result<bool,neterror>"),
@@ -60,6 +63,8 @@ pub const INNER_KEYS: &[(&str, &str)] = &[
     ("net-udp-recv", "option<vector<int>>"),
     ("net-accept", "option<i32>"),
     ("net-fill", "option<int>"),
+    ("net-flush", "option<int>"),
+    ("net-socket-error", "option<string>"),
     ("net-pop-byte", "option<int>"),
     ("net-pop-char", "option<char>"),
 ];
@@ -171,6 +176,28 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
             let (h, host) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
             wrap!(with_streams(|t| t.net_tls_start(h, &host)), |_v: ()| Value::Empty)
         }
+        "net-tls-start-with-ca" => {
+            let (h, host, ca) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)), arg!(text(heap, args, 2, name)));
+            wrap!(with_streams(|t| t.net_tls_start_with_ca(h, &host, &ca)), |_v: ()| Value::Empty)
+        }
+        "net-tls-listen" => {
+            let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
+            let (cert, key) = (arg!(text(heap, args, 2, name)), arg!(text(heap, args, 3, name)));
+            wrap!(with_streams(|t| t.net_tls_listen(&host, port, &cert, &key)), |v: i64| Value::Int(v))
+        }
+        // The message as a string box inside the `Option`: allocated first,
+        // then boxed, with nothing that can collect in between.
+        "net-socket-error" => {
+            let h = arg!(int(args, 0, name));
+            match with_streams(|t| t.net_socket_error(h)) {
+                Ok(what) => {
+                    let inner = what.map(|m| heap.alloc_string(m));
+                    let ov = option_value(heap, name, inner);
+                    Ok(result_ok(heap, name, ov))
+                }
+                Err(m) => Ok(result_err(heap, name, m)),
+            }
+        }
         "net-tls-handshake" => {
             let h = arg!(int(args, 0, name));
             wrap_option!(with_streams(|t| t.net_tls_handshake(h)), Value::Int)
@@ -265,7 +292,7 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         }
         "net-flush" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.net_flush(h)), |v: bool| Value::Bool(v))
+            wrap_option!(with_streams(|t| t.net_flush(h)), Value::Int)
         }
         "net-shutdown-write" => {
             let h = arg!(int(args, 0, name));

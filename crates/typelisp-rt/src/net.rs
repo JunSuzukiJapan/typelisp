@@ -18,12 +18,19 @@
 //! over a `VecDeque` because the queue can come up *short* — which the
 //! blocking version never has to say.
 //!
-//! Three more things follow the same rule. **TLS** (`tls-connect`) is the
-//! same `Tcp` entry with a `rustls::ClientConnection` between the buffers
-//! and the socket: `rustls` is sans-IO, so [`StreamTable::net_fill`] and
-//! [`StreamTable::net_flush`] are still the only places bytes move, and the
-//! handshake is driven by [`StreamTable::net_tls_handshake`] one non-blocking
-//! step at a time. **UDP** is whole datagrams — `None` when none has arrived.
+//! Three more things follow the same rule. **TLS** (`tls-connect`,
+//! `tls-listen`) is the same `Tcp` entry with a `rustls::Connection` between
+//! the buffers and the socket: `rustls` is sans-IO, so [`StreamTable::
+//! net_fill`] and [`StreamTable::net_flush`] are still the only places bytes
+//! move, and they drive the handshake too, one non-blocking step at a time,
+//! the way Go's `tls.Conn` shakes hands on its first `Read` or `Write`. A
+//! client wants to know the handshake's outcome before it uses the
+//! connection (an untrusted certificate is `tls-connect`'s `Err`), so
+//! [`StreamTable::net_tls_handshake`] also steps it on its own; a server
+//! does not step it at all — `accept` returns at once, and the task serving
+//! the connection completes the handshake in its first read, so a client
+//! that is slow to finish its handshake delays nobody but itself.
+//! **UDP** is whole datagrams — `None` when none has arrived.
 //! **Name resolution** ([`StreamTable::net_resolve_begin`]) is the one thing
 //! that has no non-blocking form in the C library, so it runs on a helper
 //! thread that writes a byte into a pipe when it is done; the pipe's read end
@@ -36,6 +43,15 @@
 //! the one rule `read_byte` already has: a pushed-back character and a byte
 //! read disagree about where the stream is, so the byte read is refused
 //! while pushback is pending.
+//!
+//! Two kinds of failure, told apart by who caused them. The program's own —
+//! a closed handle, a byte read behind a pushed-back character — are `Err`
+//! and the prelude panics on them. The **peer's** — a reset connection, a
+//! TLS alert, a socket closed under a write — are not the program's fault
+//! and must not end a server that has other clients; they are recorded on
+//! the entry ([`Backend::Tcp`]'s `failed`), after which a read says end of
+//! input and a write is a no-op, and [`StreamTable::net_socket_error`] says
+//! what happened. Go's `bufio.Writer` keeps its first error the same way.
 
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
@@ -54,11 +70,17 @@ const FILL_CHUNK: usize = 16 * 1024;
 /// backend keeps (`unread-char`'s pushback, `fresh-line`'s last character).
 struct TcpParts<'a> {
     sock: &'a mut Sock,
-    tls: &'a mut Option<Box<rustls::ClientConnection>>,
+    tls: &'a mut Option<Box<rustls::Connection>>,
     rbuf: &'a mut VecDeque<u8>,
     wbuf: &'a mut VecDeque<u8>,
+    failed: &'a mut Option<String>,
     pushback: &'a mut Vec<char>,
     last_written: &'a mut Option<char>,
+}
+
+/// A fresh entry for a connected socket, before anything has crossed it.
+fn tcp_entry(sock: Sock, tls: Option<Box<rustls::Connection>>) -> Backend {
+    Backend::Tcp { sock, tls, rbuf: VecDeque::new(), wbuf: VecDeque::new(), failed: None }
 }
 
 impl StreamTable {
@@ -67,17 +89,23 @@ impl StreamTable {
     fn tcp(&mut self, h: Handle, who: &str) -> StreamResult<TcpParts<'_>> {
         let s = self.get(h)?;
         match &mut s.backend {
-            Backend::Tcp { sock, tls, rbuf, wbuf } => {
-                Ok(TcpParts { sock, tls, rbuf, wbuf, pushback: &mut s.pushback, last_written: &mut s.last_written })
-            }
+            Backend::Tcp { sock, tls, rbuf, wbuf, failed } => Ok(TcpParts {
+                sock,
+                tls,
+                rbuf,
+                wbuf,
+                failed,
+                pushback: &mut s.pushback,
+                last_written: &mut s.last_written,
+            }),
             Backend::Closed => Err(format!("{}: the stream is closed", who)),
             _ => Err(format!("{}: not a TCP stream", who)),
         }
     }
 
-    fn listener(&mut self, h: Handle, who: &str) -> StreamResult<&mut Listen> {
+    fn listener(&mut self, h: Handle, who: &str) -> StreamResult<(&mut Listen, &Option<Arc<rustls::ServerConfig>>)> {
         match &mut self.get(h)?.backend {
-            Backend::Listener(l) => Ok(l),
+            Backend::Listener { listen, tls } => Ok((listen, tls)),
             Backend::Closed => Err(format!("{}: the listener is closed", who)),
             _ => Err(format!("{}: not a TCP listener", who)),
         }
@@ -94,11 +122,7 @@ impl StreamTable {
     pub fn net_connect_begin(&mut self, addr: &str) -> StreamResult<Handle> {
         let addr: SocketAddr = addr.parse().map_err(|_| format!("tcp-connect: {} is not an ip:port address", addr))?;
         let sock = crate::os::tcp_connect_begin(addr).map_err(|e| format!("tcp-connect: {}: {}", addr, e))?;
-        Ok(self.insert(StreamObj::new(
-            Backend::Tcp { sock: Sock::Tcp(sock), tls: None, rbuf: VecDeque::new(), wbuf: VecDeque::new() },
-            true,
-            true,
-        )))
+        Ok(self.insert(StreamObj::new(tcp_entry(Sock::Tcp(sock), None), true, true)))
     }
 
     /// Connects to the Unix-domain socket at `path`. Complete on return:
@@ -111,11 +135,7 @@ impl StreamTable {
     pub fn net_unix_connect(&mut self, path: &str) -> StreamResult<Handle> {
         let sock = std::os::unix::net::UnixStream::connect(path).map_err(|e| format!("unix-connect: {}: {}", path, e))?;
         sock.set_nonblocking(true).map_err(|e| format!("unix-connect: {}", e))?;
-        Ok(self.insert(StreamObj::new(
-            Backend::Tcp { sock: Sock::Unix(sock), tls: None, rbuf: VecDeque::new(), wbuf: VecDeque::new() },
-            true,
-            true,
-        )))
+        Ok(self.insert(StreamObj::new(tcp_entry(Sock::Unix(sock), None), true, true)))
     }
 
     /// A listening Unix-domain socket at `path`. The file must not exist:
@@ -126,7 +146,8 @@ impl StreamTable {
         let l = std::os::unix::net::UnixListener::bind(path).map_err(|e| format!("unix-listen: {}: {}", path, e))?;
         l.set_nonblocking(true).map_err(|e| format!("unix-listen: {}", e))?;
         let path = std::path::PathBuf::from(path);
-        Ok(self.insert(StreamObj::new(Backend::Listener(Listen::Unix { listener: l, path }), false, false)))
+        let listen = Listen::Unix { listener: l, path };
+        Ok(self.insert(StreamObj::new(Backend::Listener { listen, tls: None }, false, false)))
     }
 
     /// Starts resolving `host:port` on a helper thread and returns a handle
@@ -218,16 +239,41 @@ impl StreamTable {
     /// A listening socket on `host:port`. Port `0` asks the OS for a free
     /// one — [`Self::net_local_address`] says which.
     pub fn net_listen(&mut self, host: &str, port: i64) -> StreamResult<Handle> {
-        let port = u16::try_from(port).map_err(|_| format!("tcp-listen: {} is not a port number (0..65535)", port))?;
-        let l = TcpListener::bind((host, port)).map_err(|e| format!("tcp-listen: {}:{}: {}", host, port, e))?;
-        l.set_nonblocking(true).map_err(|e| format!("tcp-listen: {}", e))?;
-        Ok(self.insert(StreamObj::new(Backend::Listener(Listen::Tcp(l)), false, false)))
+        self.listen_with(host, port, None, "tcp-listen")
+    }
+
+    /// A listening socket whose every accepted connection speaks TLS with
+    /// the certificate chain in `cert_file` and the private key in
+    /// `key_file` (both PEM; the chain leaf first). The files are read and
+    /// checked here, once — a key that does not match, or a file that is
+    /// not PEM, is this call's `Err`, not the first client's. Which client
+    /// is allowed is not checked (no client certificates).
+    pub fn net_tls_listen(&mut self, host: &str, port: i64, cert_file: &str, key_file: &str) -> StreamResult<Handle> {
+        let config = tls_server_config(cert_file, key_file).map_err(|e| format!("tls-listen: {}", e))?;
+        self.listen_with(host, port, Some(config), "tls-listen")
+    }
+
+    fn listen_with(
+        &mut self,
+        host: &str,
+        port: i64,
+        tls: Option<Arc<rustls::ServerConfig>>,
+        who: &str,
+    ) -> StreamResult<Handle> {
+        let port = u16::try_from(port).map_err(|_| format!("{}: {} is not a port number (0..65535)", who, port))?;
+        let l = TcpListener::bind((host, port)).map_err(|e| format!("{}: {}:{}: {}", who, host, port, e))?;
+        l.set_nonblocking(true).map_err(|e| format!("{}: {}", who, e))?;
+        Ok(self.insert(StreamObj::new(Backend::Listener { listen: Listen::Tcp(l), tls }, false, false)))
     }
 
     /// The next connection waiting on listener `h`, or `None` if nobody is
-    /// — the caller then waits for the listener to become **readable**.
+    /// — the caller then waits for the listener to become **readable**. On
+    /// a `tls-listen` listener the connection gets its server-side TLS
+    /// state here, but nothing is exchanged yet: the handshake happens in
+    /// the connection's first read or write, so this never waits on the
+    /// client and the next `accept` is not behind a slow handshake.
     pub fn net_accept(&mut self, h: Handle) -> StreamResult<Option<Handle>> {
-        let l = self.listener(h, "accept")?;
+        let (l, tls) = self.listener(h, "accept")?;
         let accepted = match l {
             Listen::Tcp(l) => l.accept().map(|(s, _)| Sock::Tcp(s)),
             Listen::Unix { listener, .. } => listener.accept().map(|(s, _)| Sock::Unix(s)),
@@ -238,18 +284,25 @@ impl StreamTable {
             Err(e) => return Err(format!("accept: {}", e)),
         };
         sock.set_nonblocking(true).map_err(|e| format!("accept: {}", e))?;
-        Ok(Some(self.insert(StreamObj::new(
-            Backend::Tcp { sock, tls: None, rbuf: VecDeque::new(), wbuf: VecDeque::new() },
-            true,
-            true,
-        ))))
+        let conn = match tls {
+            None => None,
+            Some(config) => {
+                let server = rustls::ServerConnection::new(Arc::clone(config)).map_err(|e| format!("accept: tls: {}", e))?;
+                Some(Box::new(rustls::Connection::Server(server)))
+            }
+        };
+        Ok(Some(self.insert(StreamObj::new(tcp_entry(sock, conn), true, true))))
     }
 
     /// Receives what the OS has into the read buffer: `Some(n)` bytes were
-    /// added, `Some(0)` is end of input (the peer closed its side), `None`
-    /// is "nothing yet" — the caller then waits for **readable**.
+    /// added, `Some(0)` is end of input (the peer closed its side, or broke
+    /// the connection — `net_socket_error` tells which), `None` is "nothing
+    /// yet" — the caller then waits for **readable**.
     pub fn net_fill(&mut self, h: Handle) -> StreamResult<Option<usize>> {
-        let TcpParts { sock, tls, rbuf, .. } = self.tcp(h, "read")?;
+        let TcpParts { sock, tls, rbuf, failed, .. } = self.tcp(h, "read")?;
+        if failed.is_some() {
+            return Ok(Some(0));
+        }
         let Some(conn) = tls else {
             let mut chunk = [0u8; FILL_CHUNK];
             return match sock.read(&mut chunk) {
@@ -259,14 +312,16 @@ impl StreamTable {
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => Ok(None),
                 Err(e) if e.kind() == ErrorKind::Interrupted => Ok(None),
-                Err(e) => Err(format!("read: {}", e)),
+                Err(e) => Ok(Some(peer_failed(failed, format!("read: {}", e)))),
             };
         };
         // TLS: anything the connection wants to send first (a handshake
         // message, an alert) goes out, best effort — a handshake's writes
         // are small and fit the socket buffer, so this does not wait for
         // writable. Then one read of ciphertext, decrypted into `rbuf`.
-        tls_write_out(conn, sock, "read")?;
+        if let Err(e) = tls_write_out(conn, sock) {
+            return Ok(Some(peer_failed(failed, format!("read: {}", e))));
+        }
         match conn.read_tls(sock) {
             Ok(0) => {
                 // The peer closed the socket. Whether cleanly (`close_notify`
@@ -276,9 +331,18 @@ impl StreamTable {
             Ok(_) => {}
             Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(None),
             Err(e) if e.kind() == ErrorKind::Interrupted => return Ok(None),
-            Err(e) => return Err(format!("read: {}", e)),
+            Err(e) => return Ok(Some(peer_failed(failed, format!("read: {}", e)))),
         }
-        let state = conn.process_new_packets().map_err(|e| format!("tls: {}", e))?;
+        // A bad record or an alert from the peer (a client that rejected
+        // our certificate says so with one) ends the connection: the alert
+        // rustls queues in answer goes out with the same best effort.
+        let state = match conn.process_new_packets() {
+            Ok(state) => state,
+            Err(e) => {
+                let _ = tls_write_out(conn, sock);
+                return Ok(Some(peer_failed(failed, format!("tls: {}", e))));
+            }
+        };
         let plain = state.plaintext_bytes_to_read();
         if plain > 0 {
             let mut chunk = vec![0u8; plain];
@@ -294,7 +358,9 @@ impl StreamTable {
         // of zero would read as end of input, so the honest answer is "read
         // again", which `None` means without a wait since the socket may
         // already hold more.
-        tls_write_out(conn, sock, "read")?;
+        if let Err(e) = tls_write_out(conn, sock) {
+            return Ok(Some(peer_failed(failed, format!("read: {}", e))));
+        }
         Ok(None)
     }
 
@@ -302,44 +368,33 @@ impl StreamTable {
     /// [`Self::net_tls_start`]: `Ok(None)` when it is complete, `Ok(Some(i))`
     /// when the socket has to become ready for `i` (`0` readable, `1`
     /// writable) before the next step. A certificate the root store does not
-    /// trust, or a peer that speaks no TLS, is the `Err`.
+    /// trust, or a peer that speaks no TLS, is the `Err` — an error *value*
+    /// here, unlike in a read, because this is `tls-connect`'s to report.
     pub fn net_tls_handshake(&mut self, h: Handle) -> StreamResult<Option<i64>> {
         let TcpParts { sock, tls, .. } = self.tcp(h, "tls-connect")?;
         let Some(conn) = tls else {
             return Err("tls-connect: not a TLS connection".to_string());
         };
-        if !conn.is_handshaking() {
-            return Ok(None);
-        }
-        if conn.wants_write() {
-            match conn.write_tls(sock) {
-                Ok(_) => {}
-                Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(Some(1)),
-                Err(e) => return Err(format!("tls-connect: {}", e)),
-            }
-        }
-        if conn.wants_read() {
-            match conn.read_tls(sock) {
-                Ok(0) => return Err("tls-connect: the connection closed during the handshake".to_string()),
-                Ok(_) => {}
-                Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(Some(0)),
-                Err(e) => return Err(format!("tls-connect: {}", e)),
-            }
-            conn.process_new_packets().map_err(|e| format!("tls-connect: {}", e))?;
-        }
-        if conn.is_handshaking() {
-            // More to do, and the socket may already be ready for it: say
-            // which side, and let the caller's wait answer at once if so.
-            Ok(Some(if conn.wants_write() { 1 } else { 0 }))
-        } else {
-            Ok(None)
-        }
+        tls_handshake_step(conn, sock).map_err(|e| format!("tls-connect: {}", e))
     }
 
     /// Puts a TLS client connection on a connected socket, for `server_name`
-    /// (the name the certificate must be for). Nothing is sent yet: the
-    /// handshake is [`Self::net_tls_handshake`]'s, one step per call.
+    /// (the name the certificate must be for), trusting Mozilla's root
+    /// store. Nothing is sent yet: the handshake is
+    /// [`Self::net_tls_handshake`]'s, one step per call.
     pub fn net_tls_start(&mut self, h: Handle, server_name: &str) -> StreamResult<()> {
+        self.tls_start_with(h, server_name, tls_client_config())
+    }
+
+    /// [`Self::net_tls_start`] trusting only the certificates in `ca_file`
+    /// (PEM) — a private CA, or the test's self-signed one — instead of the
+    /// public roots.
+    pub fn net_tls_start_with_ca(&mut self, h: Handle, server_name: &str, ca_file: &str) -> StreamResult<()> {
+        let config = tls_client_config_trusting(ca_file).map_err(|e| format!("tls-connect: {}", e))?;
+        self.tls_start_with(h, server_name, config)
+    }
+
+    fn tls_start_with(&mut self, h: Handle, server_name: &str, config: Arc<rustls::ClientConfig>) -> StreamResult<()> {
         let TcpParts { tls, rbuf, wbuf, .. } = self.tcp(h, "tls-connect")?;
         if tls.is_some() {
             return Err("tls-connect: the connection already speaks TLS".to_string());
@@ -349,9 +404,18 @@ impl StreamTable {
         }
         let name = rustls::pki_types::ServerName::try_from(server_name.to_string())
             .map_err(|_| format!("tls-connect: {} is not a valid server name", server_name))?;
-        let conn = rustls::ClientConnection::new(tls_client_config(), name).map_err(|e| format!("tls-connect: {}", e))?;
-        *tls = Some(Box::new(conn));
+        let conn = rustls::ClientConnection::new(config, name).map_err(|e| format!("tls-connect: {}", e))?;
+        *tls = Some(Box::new(rustls::Connection::Client(conn)));
         Ok(())
+    }
+
+    /// Why the peer's side of the connection is gone, if it is: the first
+    /// failure the peer caused (a reset, a TLS alert, a close under a
+    /// write). `None` while the connection is sound — including after a
+    /// clean end of input, which is not a failure.
+    pub fn net_socket_error(&mut self, h: Handle) -> StreamResult<Option<String>> {
+        let TcpParts { failed, .. } = self.tcp(h, "socket-error")?;
+        Ok(failed.clone())
     }
 
     /// The next buffered byte, or `None` if the buffer is empty (the caller
@@ -415,12 +479,32 @@ impl StreamTable {
         Ok(())
     }
 
-    /// Sends as much of the write buffer as the OS will take now: `true`
-    /// when it is empty, `false` when some remains — the caller then waits
-    /// for **writable** and flushes again.
-    pub fn net_flush(&mut self, h: Handle) -> StreamResult<bool> {
-        let TcpParts { sock, tls, wbuf, .. } = self.tcp(h, "finish-output")?;
+    /// Sends as much of the write buffer as the OS will take now: `None`
+    /// when it is empty, `Some(i)` when some remains and the socket has to
+    /// become ready for `i` (`0` readable, `1` writable) first — the caller
+    /// waits for that and flushes again. Writable is the usual answer;
+    /// readable is a TLS connection whose handshake is not done and is
+    /// waiting on the peer's next message, since nothing can be encrypted
+    /// before it. A connection the peer has broken drops what was buffered
+    /// and answers `None`: there is nothing more that can be sent.
+    pub fn net_flush(&mut self, h: Handle) -> StreamResult<Option<i64>> {
+        let TcpParts { sock, tls, wbuf, failed, .. } = self.tcp(h, "finish-output")?;
+        if failed.is_some() {
+            wbuf.clear();
+            return Ok(None);
+        }
         if let Some(conn) = tls {
+            if conn.is_handshaking() {
+                match tls_handshake_step(conn, sock) {
+                    Ok(None) => {}
+                    Ok(Some(interest)) => return Ok(Some(interest)),
+                    Err(e) => {
+                        wbuf.clear();
+                        peer_failed(failed, format!("write: {}", e));
+                        return Ok(None);
+                    }
+                }
+            }
             // Plaintext into the connection (it buffers without limit), then
             // ciphertext out to the socket for as long as the socket takes it.
             while !wbuf.is_empty() {
@@ -430,28 +514,34 @@ impl StreamTable {
             }
             while conn.wants_write() {
                 match conn.write_tls(sock) {
-                    Ok(0) => return Err("write: the connection is closed".to_string()),
+                    Ok(0) => return Ok(sent_nothing_more(failed, "write: the connection is closed".to_string())),
                     Ok(_) => {}
-                    Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(false),
-                    Err(e) if e.kind() == ErrorKind::Interrupted => return Ok(false),
-                    Err(e) => return Err(format!("write: {}", e)),
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(Some(1)),
+                    Err(e) if e.kind() == ErrorKind::Interrupted => return Ok(Some(1)),
+                    Err(e) => return Ok(sent_nothing_more(failed, format!("write: {}", e))),
                 }
             }
-            return Ok(true);
+            return Ok(None);
         }
         while !wbuf.is_empty() {
             let (front, _) = wbuf.as_slices();
             match sock.write(front) {
-                Ok(0) => return Err("write: the connection is closed".to_string()),
+                Ok(0) => {
+                    wbuf.clear();
+                    return Ok(sent_nothing_more(failed, "write: the connection is closed".to_string()));
+                }
                 Ok(n) => {
                     wbuf.drain(..n);
                 }
-                Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(false),
-                Err(e) if e.kind() == ErrorKind::Interrupted => return Ok(false),
-                Err(e) => return Err(format!("write: {}", e)),
+                Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(Some(1)),
+                Err(e) if e.kind() == ErrorKind::Interrupted => return Ok(Some(1)),
+                Err(e) => {
+                    wbuf.clear();
+                    return Ok(sent_nothing_more(failed, format!("write: {}", e)));
+                }
             }
         }
-        Ok(true)
+        Ok(None)
     }
 
     /// Closes the sending side only: the peer reads end of input, and this
@@ -459,14 +549,23 @@ impl StreamTable {
     /// "that was the whole request". Anything still buffered is lost, so the
     /// prelude flushes first.
     pub fn net_shutdown_write(&mut self, h: Handle) -> StreamResult<()> {
-        let TcpParts { sock, tls, .. } = self.tcp(h, "shutdown-output")?;
+        let TcpParts { sock, tls, failed, .. } = self.tcp(h, "shutdown-output")?;
+        if failed.is_some() {
+            return Ok(());
+        }
         if let Some(conn) = tls {
             // TLS has its own end-of-stream message, and the peer needs it to
             // tell a finished request from a truncated one.
             conn.send_close_notify();
-            tls_write_out(conn, sock, "shutdown-output")?;
+            if let Err(e) = tls_write_out(conn, sock) {
+                peer_failed(failed, format!("shutdown-output: {}", e));
+                return Ok(());
+            }
         }
-        sock.shutdown(std::net::Shutdown::Write).map_err(|e| format!("shutdown-output: {}", e))
+        if let Err(e) = sock.shutdown(std::net::Shutdown::Write) {
+            peer_failed(failed, format!("shutdown-output: {}", e));
+        }
+        Ok(())
     }
 
     // ---- UDP ----------------------------------------------------------------
@@ -532,7 +631,7 @@ impl StreamTable {
     pub fn net_local_address(&mut self, h: Handle) -> StreamResult<String> {
         let addr = match &self.get(h)?.backend {
             Backend::Tcp { sock, .. } => sock.local_address(),
-            Backend::Listener(l) => l.local_address(),
+            Backend::Listener { listen, .. } => listen.local_address(),
             Backend::Udp { sock, .. } => sock.local_addr().map(|a| a.to_string()),
             Backend::Closed => return Err("local-address: the stream is closed".to_string()),
             _ => return Err("local-address: not a socket".to_string()),
@@ -547,19 +646,78 @@ impl StreamTable {
     }
 }
 
+/// Records the peer's failure — the first one only, since it is the cause
+/// and what follows is consequence — and answers as a read does from then
+/// on: end of input.
+fn peer_failed(failed: &mut Option<String>, what: String) -> usize {
+    if failed.is_none() {
+        *failed = Some(what);
+    }
+    0
+}
+
+/// [`peer_failed`] for a write: nothing more can be sent, so the flush is
+/// done.
+fn sent_nothing_more(failed: &mut Option<String>, what: String) -> Option<i64> {
+    peer_failed(failed, what);
+    None
+}
+
 /// Sends whatever ciphertext the connection has queued, without waiting: a
 /// socket buffer that is full stops the attempt and leaves the rest queued
 /// for the next one. Only a real failure is an error.
-fn tls_write_out(conn: &mut rustls::ClientConnection, sock: &mut Sock, who: &str) -> StreamResult<()> {
+fn tls_write_out(conn: &mut rustls::Connection, sock: &mut Sock) -> Result<(), std::io::Error> {
     while conn.wants_write() {
         match conn.write_tls(sock) {
             Ok(_) => {}
             Err(e) if e.kind() == ErrorKind::WouldBlock => break,
             Err(e) if e.kind() == ErrorKind::Interrupted => break,
-            Err(e) => return Err(format!("{}: {}", who, e)),
+            Err(e) => return Err(e),
         }
     }
     Ok(())
+}
+
+/// One non-blocking step of the handshake, for either side: `Ok(None)` when
+/// it is complete, `Ok(Some(i))` when the socket has to become ready for
+/// `i` (`0` readable, `1` writable) first. What the two callers do with an
+/// `Err` differs — `tls-connect` reports it, a flush records it.
+fn tls_handshake_step(conn: &mut rustls::Connection, sock: &mut Sock) -> Result<Option<i64>, String> {
+    if conn.is_handshaking() {
+        if conn.wants_write() {
+            match conn.write_tls(sock) {
+                Ok(_) => {}
+                Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(Some(1)),
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        if conn.wants_read() {
+            match conn.read_tls(sock) {
+                Ok(0) => return Err("the connection closed during the handshake".to_string()),
+                Ok(_) => {}
+                Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(Some(0)),
+                Err(e) => return Err(e.to_string()),
+            }
+            if let Err(e) = conn.process_new_packets() {
+                // The alert that names the problem goes to the peer, best effort.
+                let _ = tls_write_out(conn, sock);
+                return Err(e.to_string());
+            }
+        }
+    }
+    if conn.is_handshaking() {
+        // More to do, and the socket may already be ready for it: say
+        // which side, and let the caller's wait answer at once if so.
+        Ok(Some(if conn.wants_write() { 1 } else { 0 }))
+    } else {
+        // The message that completes a side's handshake (the client's
+        // `Finished`) is queued by the step that processed the peer's last
+        // one, so it is still to send: out it goes, best effort — it is
+        // small, and a socket that cannot take it now takes it with the
+        // first flush or fill.
+        tls_write_out(conn, sock).map_err(|e| e.to_string())?;
+        Ok(None)
+    }
 }
 
 /// The one client configuration every `tls-connect` shares: Mozilla's root
@@ -571,6 +729,43 @@ fn tls_client_config() -> Arc<rustls::ClientConfig> {
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         Arc::new(rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth())
     }))
+}
+
+/// A client configuration trusting only the certificates in `ca_file`.
+/// Built per connect: a private CA is rare, and the file may change.
+fn tls_client_config_trusting(ca_file: &str) -> Result<Arc<rustls::ClientConfig>, String> {
+    use rustls::pki_types::pem::PemObject;
+    let mut roots = rustls::RootCertStore::empty();
+    let certs = rustls::pki_types::CertificateDer::pem_file_iter(ca_file)
+        .map_err(|e| format!("{}: {}", ca_file, e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("{}: {}", ca_file, e))?;
+    if certs.is_empty() {
+        return Err(format!("{}: no certificate in the file", ca_file));
+    }
+    let (added, _) = roots.add_parsable_certificates(certs);
+    if added == 0 {
+        return Err(format!("{}: no usable certificate in the file", ca_file));
+    }
+    Ok(Arc::new(rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth()))
+}
+
+/// A server configuration: the chain in `cert_file`, the key in `key_file`.
+fn tls_server_config(cert_file: &str, key_file: &str) -> Result<Arc<rustls::ServerConfig>, String> {
+    use rustls::pki_types::pem::PemObject;
+    let certs = rustls::pki_types::CertificateDer::pem_file_iter(cert_file)
+        .map_err(|e| format!("{}: {}", cert_file, e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("{}: {}", cert_file, e))?;
+    if certs.is_empty() {
+        return Err(format!("{}: no certificate in the file", cert_file));
+    }
+    let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key_file).map_err(|e| format!("{}: {}", key_file, e))?;
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| format!("{}: {}", cert_file, e))?;
+    Ok(Arc::new(config))
 }
 
 /// How many bytes the UTF-8 character starting with `first` occupies, or
@@ -619,7 +814,7 @@ mod tests {
         let mut t = StreamTable::default();
         let (c, s) = connected_pair(&mut t);
         t.net_push_string(c, "héllo\n").unwrap();
-        assert!(t.net_flush(c).unwrap());
+        assert_eq!(t.net_flush(c).unwrap(), None);
         assert!(fill_until_some(&mut t, s) > 0);
         let mut got = String::new();
         while let Some(ch) = t.net_pop_char(s).unwrap() {
@@ -634,11 +829,11 @@ mod tests {
         let (c, s) = connected_pair(&mut t);
         // "é" is C3 A9. Send only the first byte.
         t.net_push_byte(c, 0xC3).unwrap();
-        assert!(t.net_flush(c).unwrap());
+        assert_eq!(t.net_flush(c).unwrap(), None);
         fill_until_some(&mut t, s);
         assert_eq!(t.net_pop_char(s).unwrap(), None);
         t.net_push_byte(c, 0xA9).unwrap();
-        assert!(t.net_flush(c).unwrap());
+        assert_eq!(t.net_flush(c).unwrap(), None);
         fill_until_some(&mut t, s);
         assert_eq!(t.net_pop_char(s).unwrap(), Some('é'));
     }
@@ -736,7 +931,7 @@ mod tests {
         let s = t.net_accept(l).unwrap().expect("a connection was waiting");
         assert_eq!(t.net_peer_address(s).unwrap(), "(unnamed)");
         t.net_push_string(c, "over unix\n").unwrap();
-        assert!(t.net_flush(c).unwrap());
+        assert_eq!(t.net_flush(c).unwrap(), None);
         assert!(fill_until_some(&mut t, s) > 0);
         let mut got = String::new();
         while let Some(ch) = t.net_pop_char(s).unwrap() {
@@ -746,6 +941,190 @@ mod tests {
         t.close(l).unwrap();
         assert!(!dir.exists(), "closing the listener left the socket file behind");
         assert!(t.net_unix_connect(&path).is_err());
+    }
+
+    /// A certificate for `localhost` and its key, written to PEM files the
+    /// listener and the client can name.
+    fn localhost_cert() -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("typelisp-tls-{}-{:?}", std::process::id(), std::thread::current().id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ck = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let cert = dir.join("cert.pem");
+        let key = dir.join("key.pem");
+        std::fs::write(&cert, ck.cert.pem()).unwrap();
+        std::fs::write(&key, ck.signing_key.serialize_pem()).unwrap();
+        (cert, key)
+    }
+
+    /// Runs both sides of a TLS handshake over the loopback: the client
+    /// steps `net_tls_handshake`, the server's side is driven by nothing
+    /// but `net_fill` — as a real server task's first read would.
+    fn tls_pair(t: &mut StreamTable, cert: &std::path::Path, key: &std::path::Path, trust: Option<&std::path::Path>) -> (Result<Handle, String>, Handle) {
+        let l = t.net_tls_listen("127.0.0.1", 0, cert.to_str().unwrap(), key.to_str().unwrap()).unwrap();
+        let addr = t.net_local_address(l).unwrap();
+        let c = t.net_connect_begin(&addr).unwrap();
+        let cfd = t.raw_fd(c).unwrap();
+        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        t.net_connect_finish(c).unwrap();
+        match trust {
+            Some(ca) => t.net_tls_start_with_ca(c, "localhost", ca.to_str().unwrap()).unwrap(),
+            None => t.net_tls_start(c, "localhost").unwrap(),
+        }
+        let lfd = t.raw_fd(l).unwrap();
+        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        let s = t.net_accept(l).unwrap().expect("a connection was waiting");
+        let sfd = t.raw_fd(s).unwrap();
+        let client = loop {
+            match t.net_tls_handshake(c) {
+                Ok(None) => break Ok(c),
+                Err(e) => break Err(e),
+                Ok(Some(i)) => {
+                    let interest = if i == 1 { crate::os::Interest::Writable } else { crate::os::Interest::Readable };
+                    crate::os::poll_ready(&[(cfd, interest)], Some(std::time::Duration::from_millis(200))).unwrap();
+                }
+            }
+            // The server's turn, the way its task would take it: a read
+            // that finds a handshake record answers "again", not data.
+            crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_millis(200))).unwrap();
+            let _ = t.net_fill(s).unwrap();
+        };
+        (client, s)
+    }
+
+    #[test]
+    fn a_line_crosses_a_tls_connection_both_ways() {
+        let mut t = StreamTable::default();
+        let (cert, key) = localhost_cert();
+        let (c, s) = tls_pair(&mut t, &cert, &key, Some(&cert));
+        let c = c.expect("the client trusts the certificate it was given");
+        t.net_push_string(c, "over tls\n").unwrap();
+        assert_eq!(t.net_flush(c).unwrap(), None);
+        assert!(fill_until_some(&mut t, s) > 0);
+        let mut got = String::new();
+        while let Some(ch) = t.net_pop_char(s).unwrap() {
+            got.push(ch);
+        }
+        assert_eq!(got, "over tls\n");
+        // And back: the server writes after its handshake completed in
+        // the reads above.
+        t.net_push_string(s, "and back\n").unwrap();
+        assert_eq!(t.net_flush(s).unwrap(), None);
+        assert!(fill_until_some(&mut t, c) > 0);
+        let mut got = String::new();
+        while let Some(ch) = t.net_pop_char(c).unwrap() {
+            got.push(ch);
+        }
+        assert_eq!(got, "and back\n");
+        assert_eq!(t.net_socket_error(s).unwrap(), None);
+        assert_eq!(t.net_socket_error(c).unwrap(), None);
+    }
+
+    #[test]
+    fn a_server_writing_first_completes_the_handshake_in_its_flush() {
+        // The server's first operation is a write (a greeting): the flush
+        // must step the handshake, asking for *readable* while it waits on
+        // the client, and send the greeting once it is done.
+        let mut t = StreamTable::default();
+        let (cert, key) = localhost_cert();
+        let l = t.net_tls_listen("127.0.0.1", 0, cert.to_str().unwrap(), key.to_str().unwrap()).unwrap();
+        let addr = t.net_local_address(l).unwrap();
+        let c = t.net_connect_begin(&addr).unwrap();
+        let cfd = t.raw_fd(c).unwrap();
+        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        t.net_connect_finish(c).unwrap();
+        t.net_tls_start_with_ca(c, "localhost", cert.to_str().unwrap()).unwrap();
+        let lfd = t.raw_fd(l).unwrap();
+        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        let s = t.net_accept(l).unwrap().unwrap();
+        let sfd = t.raw_fd(s).unwrap();
+        t.net_push_string(s, "220 hello\n").unwrap();
+        let mut asked_readable = false;
+        let mut client_done = false;
+        for _ in 0..50 {
+            match t.net_flush(s).unwrap() {
+                None => break,
+                Some(0) => {
+                    asked_readable = true;
+                    crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_millis(200))).unwrap();
+                }
+                Some(_) => {
+                    crate::os::poll_ready(&[(sfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_millis(200))).unwrap();
+                }
+            }
+            if !client_done {
+                match t.net_tls_handshake(c).unwrap() {
+                    None => client_done = true,
+                    Some(i) => {
+                        let interest = if i == 1 { crate::os::Interest::Writable } else { crate::os::Interest::Readable };
+                        crate::os::poll_ready(&[(cfd, interest)], Some(std::time::Duration::from_millis(200))).unwrap();
+                    }
+                }
+            }
+        }
+        assert!(asked_readable, "the flush never had to wait for the client's handshake message");
+        assert_eq!(t.net_flush(s).unwrap(), None);
+        assert!(fill_until_some(&mut t, c) > 0);
+        let mut got = String::new();
+        while let Some(ch) = t.net_pop_char(c).unwrap() {
+            got.push(ch);
+        }
+        assert_eq!(got, "220 hello\n");
+    }
+
+    #[test]
+    fn an_untrusted_certificate_fails_the_client_and_only_marks_the_server() {
+        let mut t = StreamTable::default();
+        let (cert, key) = localhost_cert();
+        // The client trusts the public roots, which did not sign this one.
+        let (c, s) = tls_pair(&mut t, &cert, &key, None);
+        let err = c.expect_err("a self-signed certificate was accepted against the public roots");
+        assert!(err.starts_with("tls-connect:"), "{}", err);
+        // The server side: its reads say end of input, its writes go
+        // nowhere, and neither is an error — a task serving this connection
+        // ends normally, and `socket-error` says why.
+        assert_eq!(fill_until_some(&mut t, s), 0);
+        t.net_push_string(s, "unheard\n").unwrap();
+        assert_eq!(t.net_flush(s).unwrap(), None);
+        let why = t.net_socket_error(s).unwrap().expect("the server did not record the client's alert");
+        assert!(why.contains("tls") || why.contains("read"), "{}", why);
+    }
+
+    #[test]
+    fn a_peer_that_resets_marks_the_socket_instead_of_failing() {
+        // The client goes away; the server's write cannot be delivered.
+        // What the server sees is recorded, not raised.
+        let mut t = StreamTable::default();
+        let (c, s) = connected_pair(&mut t);
+        t.close(c).unwrap();
+        assert_eq!(fill_until_some(&mut t, s), 0);
+        let sfd = t.raw_fd(s).unwrap();
+        // The first write may still succeed (the kernel accepts it and
+        // learns of the reset afterwards); one of a few will not.
+        let mut failed = None;
+        for _ in 0..10 {
+            t.net_push_string(s, "into the void\n").unwrap();
+            let _ = t.net_flush(s).unwrap();
+            if let Some(why) = t.net_socket_error(s).unwrap() {
+                failed = Some(why);
+                break;
+            }
+            crate::os::poll_ready(&[(sfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_millis(50))).unwrap();
+        }
+        let why = failed.expect("writing to a closed peer was never noticed");
+        assert!(why.starts_with("write:"), "{}", why);
+        assert_eq!(t.net_flush(s).unwrap(), None);
+        assert_eq!(t.net_fill(s).unwrap(), Some(0));
+        t.net_shutdown_write(s).unwrap();
+    }
+
+    #[test]
+    fn tls_listen_checks_its_files_up_front() {
+        let mut t = StreamTable::default();
+        let (cert, key) = localhost_cert();
+        let err = t.net_tls_listen("127.0.0.1", 0, key.to_str().unwrap(), cert.to_str().unwrap()).unwrap_err();
+        assert!(err.starts_with("tls-listen:"), "{}", err);
+        let err = t.net_tls_listen("127.0.0.1", 0, "/no/such/cert.pem", key.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("/no/such/cert.pem"), "{}", err);
     }
 
     #[test]

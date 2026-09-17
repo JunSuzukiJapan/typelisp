@@ -4111,18 +4111,25 @@ user-visible capacity."
 ;; (`socket-listener`). One type for TCP, TLS-over-TCP and Unix-domain alike,
 ;; the way Go has one `net.Conn`: once connected they read and write the same
 ;; way, and only the way they are made differs (`tcp-connect`/`tls-connect`/
-;; `unix-connect`, `tcp-listen`/`unix-listen`).
+;; `unix-connect`, `tcp-listen`/`tls-listen`/`unix-listen`).
 ;;
 ;; Every native `net-*` call below does only what can be done right now: the
 ;; socket is non-blocking, and "nothing yet" comes back as an answer
-;; (`none` from `net-fill`/`net-accept`, `false` from `net-flush`). The
-;; waiting is written *here*, as a loop that calls `(net-wait h interest)`
+;; (`none` from `net-fill`/`net-accept`, `some interest` from `net-flush`).
+;; The waiting is written *here*, as a loop that calls `(net-wait h interest)`
 ;; when it gets that answer. `net-wait` parks the **task** -- like `sleep`
 ;; and `recv` -- until the scheduler's `poll` says the socket is ready, and
 ;; every other task keeps running meanwhile. Nothing in a socket operation can
 ;; stop the thread, which is what lets a server `go` one task per connection.
 ;;
 ;; `net-wait`'s interest: 0 readable, 1 writable.
+;;
+;; What the peer does to a connection is not this program's error. A reset,
+;; a TLS alert, a socket closed under a write: none of these panics. The
+;; native layer records the first of them, reading then says end of input
+;; and writing goes nowhere, and `socket-error` says what happened -- the
+;; shape of Go's `bufio.Scanner.Err`, since `read-item` is an `Option` and
+;; has no other way to say it. A server keeps serving its other clients.
 
 (pub defconstant (net-readable int) 0)
 (pub defconstant (net-writable int) 1)
@@ -4145,12 +4152,14 @@ user-visible capacity."
 ;; The three loops every socket operation is made of. Each takes the handle,
 ;; so the character and byte views share them.
 
-;; Send everything buffered, waiting for the socket whenever it is full.
+;; Send everything buffered, waiting for the socket whenever it is full --
+;; or, on a TLS connection whose handshake is not done, for the peer's next
+;; handshake message (readable), since nothing can be encrypted before it.
 (defun tcp-drain ((h i32)) ()
   (loop
-    (if (unwrap-net (net-flush h))
-        (return)
-        (net-wait h net-writable))))
+    (match (unwrap-net (net-flush h))
+      ((none) (return))
+      ((some interest) (net-wait h interest)))))
 
 ;; The next character, or `none` at end of input. `net-pop-char` says `none`
 ;; when the buffer holds no whole character; `net-fill` then either adds bytes
@@ -4296,18 +4305,23 @@ user-visible capacity."
        ((ok h) (result::ok (socket-stream::new h)))
        ((err e) (result::err e))))))
 
-(pub defun tls-connect ((host string) (port int) &optional (timeout f64)) Result<socket-stream, NetError>
+(pub defun tls-connect ((host string) (port int) &optional (timeout f64) (ca-file string)) Result<socket-stream, NetError>
   "`tcp-connect`, then TLS on the connection with `host` as the name the
-   server's certificate must be for (checked against Mozilla's root store).
+   server's certificate must be for -- checked against Mozilla's root store,
+   or against only the certificates in `ca-file` (PEM) when one is given: a
+   private CA, or the very certificate a `tls-listen` of your own presents.
    The result is an ordinary `socket-stream`; what crosses the socket is
-   ciphertext. Client side only -- there is no `tls-listen`."
+   ciphertext. The handshake is done here, so a certificate that does not
+   check out is this call's `Err`."
   (match (tcp-resolve host port timeout)
     ((err e) (result::err e))
     ((ok addrs)
      (match (tcp-connect-addr addrs timeout)
        ((err e) (result::err e))
        ((ok h)
-        (match (net-tls-start h host)
+        (match (match ca-file
+                 ((none) (net-tls-start h host))
+                 ((some ca) (net-tls-start-with-ca h host ca)))
           ((err e) (progn (unwrap-io (stream-close h)) (result::err e)))
           ((ok _)
            (loop
@@ -4341,6 +4355,20 @@ user-visible capacity."
     ((ok h) (result::ok (socket-listener::new h)))
     ((err e) (result::err e))))
 
+(pub defun tls-listen ((host string) (port int) (cert-file string) (key-file string)) Result<socket-listener, NetError>
+  "`tcp-listen`, with every accepted connection speaking TLS: `cert-file`
+   holds the certificate chain (PEM, the server's own first) and `key-file`
+   its private key. Both are read and checked here, so a key that does not
+   match is this call's `Err` and not the first client's. `accept` returns
+   each connection before its handshake -- the task serving it completes
+   that in its first read or write, so a client slow to shake hands delays
+   nobody else; and a client that fails it (rejecting the certificate, or
+   speaking no TLS) is seen by that task alone, as end of input with
+   `socket-error` saying why. Clients are not asked for a certificate."
+  (match (net-tls-listen host port cert-file key-file)
+    ((ok h) (result::ok (socket-listener::new h)))
+    ((err e) (result::err e))))
+
 (pub defmethod accept ((self socket-listener) &optional (timeout f64)) Result<socket-stream, NetError>
   "The next connection, waiting for one -- at most `timeout` seconds if
    given, after which the `Err` says so. The usual shape of a server is
@@ -4371,6 +4399,23 @@ user-visible capacity."
   "Wait until the socket will take output, or `secs` run out: `true` if the
    former."
   (net-wait-for self::h net-writable secs))
+
+(pub defmethod socket-error ((self socket-stream)) Option<NetError>
+  "Why the peer's side of this connection is gone, if it is: the first
+   failure the peer caused (a reset, a TLS alert, a close under a write).
+   `none` while the connection is sound -- including after a clean end of
+   input, which is not a failure. Reads on a failed connection say `none`
+   and writes go nowhere, so this is how to tell a client that finished
+   from one that broke off, the way Go's `bufio.Scanner.Err` is."
+  (match (unwrap-net (net-socket-error self::h))
+    ((some m) (option::some (NetError::NetError m)))
+    ((none) (option::none))))
+
+(pub defmethod socket-error ((self socket-byte-stream)) Option<NetError>
+  "`socket-error` of the same connection, seen as bytes."
+  (match (unwrap-net (net-socket-error self::h))
+    ((some m) (option::some (NetError::NetError m)))
+    ((none) (option::none))))
 
 (pub defun byte-stream-of ((s socket-stream)) socket-byte-stream
   "The same connection as a byte stream. Both views share one buffer, so a

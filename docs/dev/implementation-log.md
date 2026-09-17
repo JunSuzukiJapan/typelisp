@@ -11560,3 +11560,34 @@ HTTP/1.1 の最小実装を typelisp で、TLS、非同期 DNS。
 `socket-listener`。TLS と Unix が同じ struct に乗る以上 `tcp-` は嘘で、同日に入れたばかりで使い手が
 無い今が一番安い。関数名（`tcp-connect`/`tls-connect`/`unix-connect`/`tcp-listen`/`unix-listen`）は
 作り方の違いなので残す。
+
+## TLS サーバ + 相手の失敗を panic にしない（2026-09-17）
+
+`tls-listen host port cert-file key-file`。`Backend::Listener` に `Arc<ServerConfig>` を持たせ、
+`net-accept` が受けたソケットに `ServerConnection` を被せるだけ。`Backend::Tcp.tls` は
+`Option<Box<rustls::Connection>>`（Client/Server の enum、API は共通）に広げ、PEM は
+`rustls::pki_types::pem::PemObject`（`std` feature に含まれていたので依存追加なし）。
+
+**握手は `accept` でしない。** Go の `tls.Conn` と同じく最初の `Read`/`Write` が済ませる。
+`accept` の中で握手すると、握手の遅い（または握手を投げ出す）クライアント 1 つが次の `accept`
+を止める——accept ループを直列化してしまう。読みの側は既に `net-fill` が握手レコードを飲んで
+`none`（もう一度）を返していたので無変更。書きの側は `net-flush` の答えを `bool` から
+`Option<int>`（`none`=送り切った、`some interest`=これを待ってもう一度）に変えた——握手途中の
+サーバが先に書く（SMTP の greeting）と、待つべきは *readable* で、`bool` では言えない。
+prelude で変わったのは `tcp-drain` の 1 ループだけ。
+握手を完了させた歩（相手の最後のメッセージを処理した歩）は自分の `Finished` をキューに積んだ
+まま返るので、`tls_handshake_step` は完了時に best effort で吐く——テストで初めて出た。
+
+**相手の失敗は接続に記録する（`failed: Option<String>`）。** それまでは `net-fill`/`net-flush` の
+`Err` を `unwrap-net` が panic にしていて、クライアントがリセットしただけでサーバが死んだ。
+TLS サーバでは証明書を拒むクライアントは日常（スキャナ、`curl` の `--cacert` 無し）なので
+見過ごせない。`read-item` は `Option<Item>` でエラーの口が無いから、bufio.Scanner/Writer の
+形——最初の失敗を持ち、以後の読みは EOF、書きは捨てる、`socket-error` が返す。`Err` のまま
+なのはプログラム自身の誤り（閉じたハンドル、pushback 中のバイト読み）と、接続を作る呼び出し
+（`tcp-connect`/`tls-connect`/`accept`/`tls-listen`）の結果だけ。`tls-connect` が握手を先に
+済ませるのはこのため——証明書の不一致を値で返せる場所がそこしか無い。
+
+`tls-connect` に `&optional ... (ca-file string)` を足した（私設 CA／自分の `tls-listen` の証明書）。
+テストの証明書は `rcgen`（dev-dependency、`ring`）で毎回作る——fixture は期限が切れ、`openssl`
+は環境に依る。配線: `rt_net_tls_listen`/`rt_net_tls_start_with_ca`/`rt_net_socket_error`、
+externs 295 個、`RESULT_KEYS` の `net-flush` を `result<option<int>,neterror>` に。

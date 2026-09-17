@@ -1,7 +1,8 @@
 ;; An HTTP/1.1 server and client over the `http` module.
 ;;
-;;   typl examples/projects/http/src/main.typl serve [port]      ; default 8080
-;;   typl examples/projects/http/src/main.typl get <url>         ; http:// or https://
+;;   typl examples/projects/http/src/main.typl serve [port]                 ; default 8080
+;;   typl examples/projects/http/src/main.typl serve-tls cert.pem key.pem [port]  ; default 8443
+;;   typl examples/projects/http/src/main.typl get <url>                    ; http:// or https://
 ;;
 ;; The server answers `/` with a greeting, `/time` with the clock, and
 ;; anything else with 404 -- one task per connection, so a slow client never
@@ -10,6 +11,16 @@
 ;;   curl -i http://127.0.0.1:8080/time
 ;;   typl .../main.typl get http://127.0.0.1:8080/
 ;;   typl .../main.typl get https://example.com/
+;;
+;; For `serve-tls`, a self-signed certificate for localhost will do:
+;;
+;;   openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=localhost \
+;;           -addext subjectAltName=DNS:localhost -keyout key.pem -out cert.pem
+;;   curl -i --cacert cert.pem https://localhost:8443/
+;;
+;; A client that rejects the certificate (`curl` without `--cacert`) ends
+;; the task serving it -- `read-request` sees end of input -- and nothing
+;; else: the server keeps serving.
 
 (use http::read-request)
 (use http::write-response)
@@ -32,15 +43,23 @@
     ((none) ()))
   (close c))
 
-(defun serve ((port int)) ()
-  (match (tcp-listen "0.0.0.0" port)
+(defun serve-on ((listening Result<socket-listener, NetError>) (scheme string)) ()
+  (match listening
     ((err e) (println "cannot listen: ~a" (message e)))
     ((ok l)
-     (println "http server on ~a" (local-address l))
+     (println "~a server on ~a" scheme (local-address l))
      (loop
        (match (accept l)
          ((ok c) (progn (go (serve-connection c)) ()))
          ((err e) (println "accept failed: ~a" (message e))))))))
+
+(defun serve ((port int)) ()
+  (serve-on (tcp-listen "0.0.0.0" port) "http"))
+
+;; The same server over TLS: the listener differs, the connections do not.
+;; Each connection's handshake happens in `read-request`'s first read.
+(defun serve-tls ((cert string) (key string) (port int)) ()
+  (serve-on (tls-listen "0.0.0.0" port cert key) "https"))
 
 (defun fetch ((address string)) ()
   (match (http-get address)
@@ -57,8 +76,11 @@
     (cond
       ((and (> (len args) 1) (equal (get args 1) "serve"))
        (serve (if (> (len args) 2) (unwrap-or (parse-int (get args 2)) 8080) 8080)))
+      ((and (> (len args) 3) (equal (get args 1) "serve-tls"))
+       (serve-tls (get args 2) (get args 3)
+                  (if (> (len args) 4) (unwrap-or (parse-int (get args 4)) 8443) 8443)))
       ((and (> (len args) 2) (equal (get args 1) "get"))
        (fetch (get args 2)))
-      (else (println "usage: main.typl serve [port] | get <url>")))))
+      (else (println "usage: main.typl serve [port] | serve-tls <cert.pem> <key.pem> [port] | get <url>")))))
 
 (main)

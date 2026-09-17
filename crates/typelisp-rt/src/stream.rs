@@ -96,11 +96,31 @@ pub(crate) enum Backend {
     /// `rbuf` holds what has been received and not yet consumed; `wbuf`
     /// what has been written and not yet sent. With `tls` present the two
     /// buffers hold *plaintext* and the connection object between them and
-    /// the socket does the ciphering (`crate::net`'s TLS section).
-    Tcp { sock: Sock, tls: Option<Box<rustls::ClientConnection>>, rbuf: VecDeque<u8>, wbuf: VecDeque<u8> },
+    /// the socket does the ciphering (`crate::net`'s TLS section) — a client
+    /// connection made by `tls-connect`, or a server one that a `tls-listen`
+    /// listener put on the socket it accepted.
+    ///
+    /// `failed` is set once the *peer* has broken the connection — reset it,
+    /// sent a TLS alert, closed it under a write — and from then on reading
+    /// says end of input and writing is a no-op, the way Go's `bufio.Writer`
+    /// keeps its first error and refuses further writes. The stream traits
+    /// have no error channel (`read-item` is an `Option`), and a peer's
+    /// failure is not the program's, so it must not be a panic: a server
+    /// would die with its first misbehaving client. `net-socket-error`
+    /// reads it back.
+    Tcp {
+        sock: Sock,
+        tls: Option<Box<rustls::Connection>>,
+        rbuf: VecDeque<u8>,
+        wbuf: VecDeque<u8>,
+        failed: Option<String>,
+    },
     /// A listening socket, non-blocking for the same reason. Neither an
-    /// input nor an output stream: it yields connections, not items.
-    Listener(Listen),
+    /// input nor an output stream: it yields connections, not items. With
+    /// `tls` present (`tls-listen`), every connection it accepts gets a
+    /// server-side TLS connection over it, sharing this configuration —
+    /// the certificate and key loaded once when the listener was made.
+    Listener { listen: Listen, tls: Option<std::sync::Arc<rustls::ServerConfig>> },
     /// A UDP socket, non-blocking. Datagrams, not a stream: it is neither an
     /// input nor an output stream, and `crate::net` speaks to it in whole
     /// messages. `last_from` is who sent the datagram most recently received.
@@ -384,7 +404,7 @@ impl StreamTable {
             let _ = conn.write_tls(sock);
         }
         // The socket file is the listener's address: gone with the listener.
-        if let Backend::Listener(Listen::Unix { path, .. }) = &s.backend {
+        if let Backend::Listener { listen: Listen::Unix { path, .. }, .. } = &s.backend {
             let _ = std::fs::remove_file(path);
         }
         // A string output stream keeps its text: CL allows
@@ -404,7 +424,7 @@ impl StreamTable {
         use std::os::unix::io::AsRawFd;
         match &self.get(h)?.backend {
             Backend::Tcp { sock, .. } => Ok(sock.raw_fd()),
-            Backend::Listener(l) => Ok(l.raw_fd()),
+            Backend::Listener { listen, .. } => Ok(listen.raw_fd()),
             Backend::Udp { sock, .. } => Ok(sock.as_raw_fd()),
             Backend::Resolver { pipe, .. } => Ok(pipe.as_raw_fd()),
             Backend::Closed => Err("the stream is closed".to_string()),

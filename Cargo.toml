@@ -88,3 +88,8 @@ opt-level = 2
 [profile.dev.package.typelisp-read]
 opt-level = 2
 
+# `tests/net_test.rs` makes the certificate its TLS server presents; see
+# crates/typelisp-rt/Cargo.toml for why it is generated and not a fixture.
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
+

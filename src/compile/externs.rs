@@ -212,6 +212,9 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "net-resolve-begin" => "rt_net_resolve_begin",
         "net-resolve-finish" => "rt_net_resolve_finish",
         "net-tls-start" => "rt_net_tls_start",
+        "net-tls-start-with-ca" => "rt_net_tls_start_with_ca",
+        "net-tls-listen" => "rt_net_tls_listen",
+        "net-socket-error" => "rt_net_socket_error",
         "net-tls-handshake" => "rt_net_tls_handshake",
         "net-udp-bind" => "rt_net_udp_bind",
         "net-udp-send-to" => "rt_net_udp_send_to",
@@ -472,7 +475,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 292] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 295] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -516,6 +519,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 292] {
         rt_net_listen, rt_net_local_address, rt_net_peer_address, rt_net_pop_byte, rt_net_pop_char,
         rt_net_push_byte, rt_net_push_string, rt_net_shutdown_write,
         rt_net_resolve_begin, rt_net_resolve_finish, rt_net_tls_handshake, rt_net_tls_start,
+        rt_net_tls_start_with_ca, rt_net_tls_listen, rt_net_socket_error,
         rt_net_udp_bind, rt_net_udp_last_sender, rt_net_udp_recv, rt_net_udp_send_to,
         rt_net_unix_connect, rt_net_unix_listen,
         rt_stream_at_line_start, rt_stream_close,
@@ -807,6 +811,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 292] {
         ("rt_net_resolve_begin", rt_net_resolve_begin as usize),
         ("rt_net_resolve_finish", rt_net_resolve_finish as usize),
         ("rt_net_tls_start", rt_net_tls_start as usize),
+        ("rt_net_tls_start_with_ca", rt_net_tls_start_with_ca as usize),
+        ("rt_net_tls_listen", rt_net_tls_listen as usize),
+        ("rt_net_socket_error", rt_net_socket_error as usize),
         ("rt_net_tls_handshake", rt_net_tls_handshake as usize),
         ("rt_net_udp_bind", rt_net_udp_bind as usize),
         ("rt_net_udp_send_to", rt_net_udp_send_to as usize),

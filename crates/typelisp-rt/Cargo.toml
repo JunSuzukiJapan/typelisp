@@ -41,3 +41,9 @@ libc = "0.2"
 # Mozilla's root store, bundled, so no OS keychain library is linked.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
+
+# The tests need a certificate a TLS client will trust; `rcgen` makes one
+# in memory (a CA and a leaf for `localhost`), so no fixture file can expire
+# and no `openssl` binary is needed. Test-only: the runtime never signs.
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
