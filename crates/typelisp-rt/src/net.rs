@@ -5,7 +5,7 @@
 //! socket is not ready say so *as an answer* — `None` from [`StreamTable::
 //! net_fill`], `None` from [`StreamTable::net_accept`], `false` from
 //! [`StreamTable::net_flush`]. The waiting is done in typelisp: the prelude's
-//! `tcp-stream` methods loop, and when the answer is "not yet" they call
+//! `socket-stream` methods loop, and when the answer is "not yet" they call
 //! `(net-wait h interest)`, which parks the **task** (the scheduler's
 //! `Waiting::Io`) until `poll` says the descriptor is ready. Nothing in this
 //! module can stop the thread, which is what keeps every other task running
@@ -29,8 +29,8 @@
 //! thread that writes a byte into a pipe when it is done; the pipe's read end
 //! is what the task waits on, and the thread never touches the heap.
 //!
-//! One socket, two views: the prelude's `tcp-stream` (characters) and
-//! `tcp-byte-stream` (bytes) are two structs over the **same handle**, so the
+//! One socket, two views: the prelude's `socket-stream` (characters) and
+//! `socket-byte-stream` (bytes) are two structs over the **same handle**, so the
 //! byte and character operations here share one `rbuf`. Mixing them is
 //! legal — an HTTP client reads headers as text and the body as bytes — with
 //! the one rule `read_byte` already has: a pushed-back character and a byte
@@ -39,10 +39,10 @@
 
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
+use std::net::{SocketAddr, TcpListener, ToSocketAddrs, UdpSocket};
 use std::sync::{Arc, Mutex};
 
-use crate::stream::{Backend, Handle, ResolverAnswer, StreamObj, StreamResult, StreamTable};
+use crate::stream::{Backend, Handle, Listen, ResolverAnswer, Sock, StreamObj, StreamResult, StreamTable};
 
 /// How much one `net_fill` asks the OS for. Big enough that a line of text
 /// arrives in one read; small enough that a slow reader does not pin
@@ -53,7 +53,7 @@ const FILL_CHUNK: usize = 16 * 1024;
 /// socket, its read and write buffers, and the two per-stream facts every
 /// backend keeps (`unread-char`'s pushback, `fresh-line`'s last character).
 struct TcpParts<'a> {
-    sock: &'a mut TcpStream,
+    sock: &'a mut Sock,
     tls: &'a mut Option<Box<rustls::ClientConnection>>,
     rbuf: &'a mut VecDeque<u8>,
     wbuf: &'a mut VecDeque<u8>,
@@ -75,7 +75,7 @@ impl StreamTable {
         }
     }
 
-    fn listener(&mut self, h: Handle, who: &str) -> StreamResult<&mut TcpListener> {
+    fn listener(&mut self, h: Handle, who: &str) -> StreamResult<&mut Listen> {
         match &mut self.get(h)?.backend {
             Backend::Listener(l) => Ok(l),
             Backend::Closed => Err(format!("{}: the listener is closed", who)),
@@ -95,10 +95,38 @@ impl StreamTable {
         let addr: SocketAddr = addr.parse().map_err(|_| format!("tcp-connect: {} is not an ip:port address", addr))?;
         let sock = crate::os::tcp_connect_begin(addr).map_err(|e| format!("tcp-connect: {}: {}", addr, e))?;
         Ok(self.insert(StreamObj::new(
-            Backend::Tcp { sock, tls: None, rbuf: VecDeque::new(), wbuf: VecDeque::new() },
+            Backend::Tcp { sock: Sock::Tcp(sock), tls: None, rbuf: VecDeque::new(), wbuf: VecDeque::new() },
             true,
             true,
         )))
+    }
+
+    /// Connects to the Unix-domain socket at `path`. Complete on return:
+    /// there is no handshake to wait for on a local socket — `connect`
+    /// either succeeds, is refused (nobody listening, or no such file), or
+    /// fails with `EAGAIN` when the listener's backlog is full, which is
+    /// reported rather than retried since it names a listener that is not
+    /// keeping up. The socket is then put into non-blocking mode like every
+    /// other, and the same buffers and wait loops serve it.
+    pub fn net_unix_connect(&mut self, path: &str) -> StreamResult<Handle> {
+        let sock = std::os::unix::net::UnixStream::connect(path).map_err(|e| format!("unix-connect: {}: {}", path, e))?;
+        sock.set_nonblocking(true).map_err(|e| format!("unix-connect: {}", e))?;
+        Ok(self.insert(StreamObj::new(
+            Backend::Tcp { sock: Sock::Unix(sock), tls: None, rbuf: VecDeque::new(), wbuf: VecDeque::new() },
+            true,
+            true,
+        )))
+    }
+
+    /// A listening Unix-domain socket at `path`. The file must not exist:
+    /// a leftover from a listener that was not closed is refused rather
+    /// than silently replaced, since it may belong to a process that is
+    /// still running. Closing the listener removes the file.
+    pub fn net_unix_listen(&mut self, path: &str) -> StreamResult<Handle> {
+        let l = std::os::unix::net::UnixListener::bind(path).map_err(|e| format!("unix-listen: {}: {}", path, e))?;
+        l.set_nonblocking(true).map_err(|e| format!("unix-listen: {}", e))?;
+        let path = std::path::PathBuf::from(path);
+        Ok(self.insert(StreamObj::new(Backend::Listener(Listen::Unix { listener: l, path }), false, false)))
     }
 
     /// Starts resolving `host:port` on a helper thread and returns a handle
@@ -193,15 +221,19 @@ impl StreamTable {
         let port = u16::try_from(port).map_err(|_| format!("tcp-listen: {} is not a port number (0..65535)", port))?;
         let l = TcpListener::bind((host, port)).map_err(|e| format!("tcp-listen: {}:{}: {}", host, port, e))?;
         l.set_nonblocking(true).map_err(|e| format!("tcp-listen: {}", e))?;
-        Ok(self.insert(StreamObj::new(Backend::Listener(l), false, false)))
+        Ok(self.insert(StreamObj::new(Backend::Listener(Listen::Tcp(l)), false, false)))
     }
 
     /// The next connection waiting on listener `h`, or `None` if nobody is
     /// — the caller then waits for the listener to become **readable**.
     pub fn net_accept(&mut self, h: Handle) -> StreamResult<Option<Handle>> {
         let l = self.listener(h, "accept")?;
-        let sock = match l.accept() {
-            Ok((sock, _)) => sock,
+        let accepted = match l {
+            Listen::Tcp(l) => l.accept().map(|(s, _)| Sock::Tcp(s)),
+            Listen::Unix { listener, .. } => listener.accept().map(|(s, _)| Sock::Unix(s)),
+        };
+        let sock = match accepted {
+            Ok(sock) => sock,
             Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(None),
             Err(e) => return Err(format!("accept: {}", e)),
         };
@@ -499,26 +531,26 @@ impl StreamTable {
     /// a listener bound to port 0 this is how the chosen port is learned.
     pub fn net_local_address(&mut self, h: Handle) -> StreamResult<String> {
         let addr = match &self.get(h)?.backend {
-            Backend::Tcp { sock, .. } => sock.local_addr(),
-            Backend::Listener(l) => l.local_addr(),
-            Backend::Udp { sock, .. } => sock.local_addr(),
+            Backend::Tcp { sock, .. } => sock.local_address(),
+            Backend::Listener(l) => l.local_address(),
+            Backend::Udp { sock, .. } => sock.local_addr().map(|a| a.to_string()),
             Backend::Closed => return Err("local-address: the stream is closed".to_string()),
             _ => return Err("local-address: not a socket".to_string()),
         };
-        addr.map(|a| a.to_string()).map_err(|e| format!("local-address: {}", e))
+        addr.map_err(|e| format!("local-address: {}", e))
     }
 
     /// The peer's address as `host:port`.
     pub fn net_peer_address(&mut self, h: Handle) -> StreamResult<String> {
         let TcpParts { sock, .. } = self.tcp(h, "peer-address")?;
-        sock.peer_addr().map(|a| a.to_string()).map_err(|e| format!("peer-address: {}", e))
+        sock.peer_address().map_err(|e| format!("peer-address: {}", e))
     }
 }
 
 /// Sends whatever ciphertext the connection has queued, without waiting: a
 /// socket buffer that is full stops the attempt and leaves the rest queued
 /// for the next one. Only a real failure is an error.
-fn tls_write_out(conn: &mut rustls::ClientConnection, sock: &mut TcpStream, who: &str) -> StreamResult<()> {
+fn tls_write_out(conn: &mut rustls::ClientConnection, sock: &mut Sock, who: &str) -> StreamResult<()> {
     while conn.wants_write() {
         match conn.write_tls(sock) {
             Ok(_) => {}
@@ -687,6 +719,33 @@ mod tests {
         assert_eq!(t.net_udp_recv(b).unwrap(), Some(b"ping".to_vec()));
         assert_eq!(t.net_udp_last_sender(b).unwrap(), t.net_local_address(a).unwrap());
         assert_eq!(t.net_udp_recv(b).unwrap(), None);
+    }
+
+    #[test]
+    fn a_line_crosses_a_unix_socket_and_closing_removes_the_file() {
+        let mut t = StreamTable::default();
+        let dir = std::env::temp_dir().join(format!("typelisp-unix-{}", std::process::id()));
+        let _ = std::fs::remove_file(&dir);
+        let path = dir.to_string_lossy().into_owned();
+        let l = t.net_unix_listen(&path).unwrap();
+        assert_eq!(t.net_local_address(l).unwrap(), path);
+        assert!(t.net_unix_listen(&path).is_err(), "a second bind on a live socket file succeeded");
+        let c = t.net_unix_connect(&path).unwrap();
+        let lfd = t.raw_fd(l).unwrap();
+        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        let s = t.net_accept(l).unwrap().expect("a connection was waiting");
+        assert_eq!(t.net_peer_address(s).unwrap(), "(unnamed)");
+        t.net_push_string(c, "over unix\n").unwrap();
+        assert!(t.net_flush(c).unwrap());
+        assert!(fill_until_some(&mut t, s) > 0);
+        let mut got = String::new();
+        while let Some(ch) = t.net_pop_char(s).unwrap() {
+            got.push(ch);
+        }
+        assert_eq!(got, "over unix\n");
+        t.close(l).unwrap();
+        assert!(!dir.exists(), "closing the listener left the socket file behind");
+        assert!(t.net_unix_connect(&path).is_err());
     }
 
     #[test]

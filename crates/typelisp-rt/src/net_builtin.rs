@@ -31,6 +31,8 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("net-connect-begin", "result<i32,neterror>"),
     ("net-connect-finish", "result<(),neterror>"),
     ("net-listen", "result<i32,neterror>"),
+    ("net-unix-connect", "result<i32,neterror>"),
+    ("net-unix-listen", "result<i32,neterror>"),
     ("net-accept", "result<option<i32>,neterror>"),
     ("net-fill", "result<option<int>,neterror>"),
     ("net-pop-byte", "result<option<int>,neterror>"),
@@ -221,6 +223,14 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         "net-listen" => {
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
             wrap!(with_streams(|t| t.net_listen(&host, port)), |v: i64| Value::Int(v))
+        }
+        "net-unix-connect" => {
+            let path = arg!(text(heap, args, 0, name));
+            wrap!(with_streams(|t| t.net_unix_connect(&path)), |v: i64| Value::Int(v))
+        }
+        "net-unix-listen" => {
+            let path = arg!(text(heap, args, 0, name));
+            wrap!(with_streams(|t| t.net_unix_listen(&path)), |v: i64| Value::Int(v))
         }
         "net-accept" => {
             let h = arg!(int(args, 0, name));

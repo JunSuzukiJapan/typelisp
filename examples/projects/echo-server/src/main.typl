@@ -10,7 +10,7 @@
 ;; clients and while clients sit idle, and several clients are served at
 ;; once by tasks that each wait on their own socket.
 
-(defun serve ((c tcp-stream)) ()
+(defun serve ((c socket-stream)) ()
   (println "~a connected" (peer-address c))
   (loop
     (match (read-line c)
@@ -22,7 +22,7 @@
   (println "~a left" (peer-address c))
   (close c))
 
-(defun accept-loop ((l tcp-listener)) ()
+(defun accept-loop ((l socket-listener)) ()
   (loop
     (match (accept l)
       ((ok c) (progn (go (serve c)) ()))

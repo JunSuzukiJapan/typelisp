@@ -4925,6 +4925,8 @@ stream_shim!(rt_net_udp_recv, "net-udp-recv", [int], tagged, via crate::net_buil
 stream_shim!(rt_net_udp_last_sender, "net-udp-last-sender", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_connect_finish, "net-connect-finish", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_listen, "net-listen", [str, int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_unix_connect, "net-unix-connect", [str], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_unix_listen, "net-unix-listen", [str], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_accept, "net-accept", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_fill, "net-fill", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_pop_byte, "net-pop-byte", [int], tagged, via crate::net_builtin::net_builtin);

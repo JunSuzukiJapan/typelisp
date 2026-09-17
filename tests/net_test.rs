@@ -64,7 +64,7 @@ fn err(src: &str) -> String {
 
 /// A listener on a free loopback port, and its port number.
 const LISTEN: &str = r#"
-(defun port-of ((l tcp-listener)) int
+(defun port-of ((l socket-listener)) int
   (let ((addr (local-address l)))
     (unwrap (parse-int (substring addr (+ 1 (unwrap (search addr ":"))) (length addr))))))
 "#;
@@ -72,14 +72,14 @@ const LISTEN: &str = r#"
 /// An echo server: one task per connection, each echoing lines until the
 /// client closes.
 const ECHO: &str = r#"
-(defun echo-conn ((c tcp-stream)) ()
+(defun echo-conn ((c socket-stream)) ()
   (loop
     (match (read-line c)
       ((some line) (write-line c line))
       ((none) (break))))
   (close c))
 
-(defun echo-serve ((l tcp-listener) (n int)) ()
+(defun echo-serve ((l socket-listener) (n int)) ()
   (dotimes (i n)
     (match (accept l)
       ((ok c) (go (echo-conn c)))
@@ -166,7 +166,7 @@ fn a_refused_connection_is_an_error_value() {
 #[test]
 fn a_net_error_is_an_error_trait_object() {
     let src = r#"
-(defun try-it () Result<tcp-stream, :dyn Error>
+(defun try-it () Result<socket-stream, :dyn Error>
   (as-dyn-error (tcp-connect "127.0.0.1" 1)))
 (match (try-it)
   ((ok _) "no error")
@@ -181,12 +181,12 @@ fn end_of_input_when_the_peer_closes_and_half_close() {
     // read after `shutdown-output`.
     let src = format!(
         "{LISTEN}
-(defun count-lines ((c tcp-stream)) ()
+(defun count-lines ((c socket-stream)) ()
   (let ((n 0))
     (loop (match (read-line c) ((some _) (setf n (+ n 1))) ((none) (break))))
     (write-line c (format false \"~a lines\" n))
     (close c)))
-(defun serve-one ((l tcp-listener)) ()
+(defun serve-one ((l socket-listener)) ()
   (match (accept l) ((ok c) (count-lines c)) ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (go (serve-one l))
@@ -207,7 +207,7 @@ fn end_of_input_when_the_peer_closes_and_half_close() {
 fn the_byte_view_shares_the_connection() {
     let src = format!(
         "{LISTEN}
-(defun send-bytes ((l tcp-listener)) ()
+(defun send-bytes ((l socket-listener)) ()
   (match (accept l)
     ((ok c)
      (write-line c \"header\")
@@ -233,7 +233,7 @@ fn the_byte_view_shares_the_connection() {
 fn a_pushed_back_character_refuses_a_byte_read() {
     let src = format!(
         "{LISTEN}
-(defun send-text ((l tcp-listener)) ()
+(defun send-text ((l socket-listener)) ()
   (match (accept l)
     ((ok c) (write-string c \"ab\") (close c))
     ((err e) (panic (message e)))))
@@ -255,7 +255,7 @@ fn waiting_on_a_socket_from_a_print_method_is_refused() {
     // rule `sleep` and `recv` follow.
     let src = format!(
         "{LISTEN}
-(defstruct peeker (l tcp-listener))
+(defstruct peeker (l socket-listener))
 (impl print-object peeker
   (print-object ((self Self) (escape bool)) string
     (match (accept self::l)
@@ -334,7 +334,7 @@ fn accept_with_a_timeout_gives_up() {
 fn a_timed_wait_answers_true_when_data_arrives_first() {
     let src = format!(
         "{LISTEN}
-(defun send-late ((l tcp-listener)) ()
+(defun send-late ((l socket-listener)) ()
   (match (accept l)
     ((ok c) (sleep 0.02) (write-line c \"late\") (close c))
     ((err e) (panic (message e)))))
@@ -355,7 +355,7 @@ fn a_timed_wait_answers_true_when_data_arrives_first() {
 fn a_compiled_timed_wait_answers_the_same() {
     let src = format!(
         "{LISTEN}
-(defun send-late ((l tcp-listener)) ()
+(defun send-late ((l socket-listener)) ()
   (match (accept l)
     ((ok c) (sleep 0.02) (write-line c \"late\") (close c))
     ((err e) (panic (message e)))))
@@ -463,7 +463,7 @@ fn tls_against_a_plain_peer_fails_cleanly() {
     // `Err`, with every other task still running, not hang the program.
     let src = format!(
         "{LISTEN}
-(defun sink ((l tcp-listener)) ()
+(defun sink ((l socket-listener)) ()
   (match (accept l)
     ((ok c) (write-line c \"not tls\") (close c))
     ((err e) (panic (message e)))))
@@ -474,4 +474,38 @@ fn tls_against_a_plain_peer_fails_cleanly() {
     ((err e) (if (> (length (message e)) 0) \"tls failed\" \"\"))))"
     );
     assert_eq!(text(&src), "tls failed");
+}
+
+#[test]
+fn a_unix_domain_socket_is_the_same_stream() {
+    // The same echo server, on a path instead of a port: `accept` gives a
+    // `socket-stream` and everything after it is family-blind. Closing the
+    // listener removes the file.
+    let path = std::env::temp_dir().join(format!("typelisp-net-test-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let src = format!(
+        "{ECHO}
+(let ((l (unwrap (unix-listen \"{p}\"))))
+  (go (echo-serve l 1))
+  (let ((c (unwrap (unix-connect \"{p}\"))))
+    (write-line c \"over unix\")
+    (let ((reply (unwrap (read-line c)))
+          (who (peer-address c)))
+      (close c)
+      (close l)
+      (format false \"~a / ~a / ~a\" reply who (probe-file \"{p}\")))))",
+        p = path.display()
+    );
+    assert_eq!(text(&src), format!("over unix / {} / false", path.display()));
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(text_compiled(&src.replace("(go (echo-serve l 1))", "(compile echo-conn) (go (echo-serve l 1))")), format!("over unix / {} / false", path.display()));
+}
+
+#[test]
+fn connecting_to_a_missing_unix_socket_is_an_error_value() {
+    let src = r#"
+(match (unix-connect "/nonexistent/typelisp.sock")
+  ((ok c) (progn (close c) "connected?!"))
+  ((err e) (if (> (length (message e)) 0) "refused" "")))"#;
+    assert_eq!(text(src), "refused");
 }

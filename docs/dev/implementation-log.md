@@ -11546,3 +11546,17 @@ HTTP/1.1 の最小実装を typelisp で、TLS、非同期 DNS。
 配線の表（前項に加えて）: `SUSPEND_IO_FOR = 12`、`rt_suspend_io_for`、`rt_net_*` +9、externs
 290 個、registry の `register_net_builtins`、`stream_shim!` に `tagged` 引数形（`Vector<int>` を
 渡す）。prelude 再生成、AOT の staticlib は `test-serial.sh` で。
+
+## Unix ドメインソケット + ソケット型の改名（2026-09-17）
+
+`unix-connect`／`unix-listen`。Rust 側は `Backend::Tcp` の `sock` を `Sock { Tcp, Unix }` に、
+`Listener` を `Listen { Tcp, Unix { path } }` にしただけ——バッファ・TLS 層・prelude の待ちループは
+1 行も変わらない（`Read`/`Write`/`set_nonblocking`/`take_error`/`shutdown`/`raw_fd` を enum で
+振り分ける）。Unix の `connect` は握手が無く即座に成功か拒否か `EAGAIN`（backlog 満杯）なので
+`std` の blocking な `connect` をそのまま使い、非同期版は作らない。listener の `close` がソケット
+ファイルを消す（Go と同じ）。既存ファイルへの bind は拒否。
+
+改名: `tcp-stream`→`socket-stream`、`tcp-byte-stream`→`socket-byte-stream`、`tcp-listener`→
+`socket-listener`。TLS と Unix が同じ struct に乗る以上 `tcp-` は嘘で、同日に入れたばかりで使い手が
+無い今が一番安い。関数名（`tcp-connect`/`tls-connect`/`unix-connect`/`tcp-listen`/`unix-listen`）は
+作り方の違いなので残す。

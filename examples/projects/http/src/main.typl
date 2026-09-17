@@ -24,7 +24,7 @@
      (text-response 200 "OK" (format false "~a\n" (get-universal-time))))
     (else (text-response 404 "Not Found" (format false "no route for ~a\n" (target r))))))
 
-(defun serve-connection ((c tcp-stream)) ()
+(defun serve-connection ((c socket-stream)) ()
   (match (read-request c)
     ((some r)
      (println "~a ~a ~a" (peer-address c) (method r) (target r))

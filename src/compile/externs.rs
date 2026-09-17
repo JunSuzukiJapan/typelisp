@@ -181,7 +181,7 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "yield" => "rt_suspend_yield",
         // `(net-wait h interest)` parks the task on a socket: the third of
         // the free builtins that suspend, and the reason the prelude's
-        // `tcp-stream` methods can wait without any of them blocking.
+        // `socket-stream` methods can wait without any of them blocking.
         "net-wait" => "rt_suspend_io",
         "net-wait-for" => "rt_suspend_io_for",
         // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
@@ -220,6 +220,8 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "net-connect-begin" => "rt_net_connect_begin",
         "net-connect-finish" => "rt_net_connect_finish",
         "net-listen" => "rt_net_listen",
+        "net-unix-connect" => "rt_net_unix_connect",
+        "net-unix-listen" => "rt_net_unix_listen",
         "net-accept" => "rt_net_accept",
         "net-fill" => "rt_net_fill",
         "net-pop-byte" => "rt_net_pop_byte",
@@ -470,7 +472,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 290] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 292] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -515,6 +517,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 290] {
         rt_net_push_byte, rt_net_push_string, rt_net_shutdown_write,
         rt_net_resolve_begin, rt_net_resolve_finish, rt_net_tls_handshake, rt_net_tls_start,
         rt_net_udp_bind, rt_net_udp_last_sender, rt_net_udp_recv, rt_net_udp_send_to,
+        rt_net_unix_connect, rt_net_unix_listen,
         rt_stream_at_line_start, rt_stream_close,
         rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p,
         rt_stream_output_p, rt_stream_position, rt_stream_read_byte, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
@@ -812,6 +815,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 290] {
         ("rt_net_connect_begin", rt_net_connect_begin as usize),
         ("rt_net_connect_finish", rt_net_connect_finish as usize),
         ("rt_net_listen", rt_net_listen as usize),
+        ("rt_net_unix_connect", rt_net_unix_connect as usize),
+        ("rt_net_unix_listen", rt_net_unix_listen as usize),
         ("rt_net_accept", rt_net_accept as usize),
         ("rt_net_fill", rt_net_fill as usize),
         ("rt_net_pop_byte", rt_net_pop_byte as usize),

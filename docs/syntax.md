@@ -1507,7 +1507,7 @@ readtable が**値でない**ため——値なら「リーダに手渡せるも
 協調的スケジューリングなので、**切り替わるのは書いた場所だけ**：`(yield)`、`(sleep ...)`、
 `(wait ...)`、**待つことになったチャネル操作**（`send`/`recv`/`select`）、そして
 **待つことになったソケット操作**（`accept`／`tcp-connect`（名前解決を含む）／ソケットへの
-読み書き／`recv-from`、[functions.md §21](functions.md#21-ネットワークtcp--tls--udp)）。ソケットは全部 non-blocking で、
+読み書き／`recv-from`、[functions.md §21](functions.md#21-ネットワークtcp--tls--unix-ドメイン--udp)）。ソケットは全部 non-blocking で、
 用意できていなければ prelude のループが `(net-wait h interest)` でタスクを止め、スケジューラが
 `poll` の答えで起こす——Go の netpoller と同じ形。スケジューラが OS を待つ場所は 1 つで、
 走れるタスクが無いときに「最寄りの `sleep` 期限まで `poll`」する。

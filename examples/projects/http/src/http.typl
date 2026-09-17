@@ -1,4 +1,4 @@
-;; A minimal HTTP/1.1, written entirely in typelisp on top of `tcp-stream`:
+;; A minimal HTTP/1.1, written entirely in typelisp on top of `socket-stream`:
 ;; requests and responses as structs, a parser for each direction, and a
 ;; client (`http-get`) that speaks plain HTTP or TLS depending on the URL.
 ;;
@@ -38,7 +38,7 @@
                                 (trim (substring line (+ i 1) (length line))))))))
 
 ;; A line without its trailing CR (lines end in CRLF; `read-line` stops at LF).
-(defun read-crlf-line ((c tcp-stream)) Option<string>
+(defun read-crlf-line ((c socket-stream)) Option<string>
   (match (read-line c)
     ((none) (option::none))
     ((some line)
@@ -48,7 +48,7 @@
                          line))))))
 
 ;; Headers up to and including the empty line that ends them.
-(defun read-headers ((c tcp-stream)) Vector<header>
+(defun read-headers ((c socket-stream)) Vector<header>
   (let ((headers (the Vector<header> (Vector::new))))
     (loop
       (match (read-crlf-line c)
@@ -63,7 +63,7 @@
 
 ;; ---- Bodies ---------------------------------------------------------------
 
-(defun read-exactly ((c tcp-stream) (n int)) string
+(defun read-exactly ((c socket-stream) (n int)) string
   (let ((out "") (left n))
     (while (> left 0)
       (match (read-char c)
@@ -85,7 +85,7 @@
 
 ;; `Transfer-Encoding: chunked`: each chunk is a hex size line, the bytes,
 ;; and a CRLF; a size of zero ends the body (trailers, if any, are skipped).
-(defun read-chunked ((c tcp-stream)) string
+(defun read-chunked ((c socket-stream)) string
   (let ((out ""))
     (loop
       (match (read-crlf-line c)
@@ -100,7 +100,7 @@
                  ()))))))
     out))
 
-(defun read-body ((c tcp-stream) (headers Vector<header>) (to-end bool)) string
+(defun read-body ((c socket-stream) (headers Vector<header>) (to-end bool)) string
   (match (header-value headers "Transfer-Encoding")
     ((some te)
      (if (equalp (trim te) "chunked") (read-chunked c) (read-all c)))
@@ -111,7 +111,7 @@
 
 ;; ---- Server side ----------------------------------------------------------
 
-(pub defun read-request ((c tcp-stream)) Option<request>
+(pub defun read-request ((c socket-stream)) Option<request>
   "One request from a connection, or `none` if the client sent nothing."
   (match (read-crlf-line c)
     ((none) (option::none))
@@ -123,7 +123,7 @@
              (option::some (request::new (get parts 0) (get parts 1) headers
                                          (read-body c headers false)))))))))
 
-(pub defun write-response ((c tcp-stream) (r response)) ()
+(pub defun write-response ((c socket-stream) (r response)) ()
   "Send `r`, with `Content-Length` and `Connection: close` added."
   (write-string c (format false "HTTP/1.1 ~a ~a\r\n" (status r) (reason r)))
   (doiter (h (iter (headers r)))
@@ -166,7 +166,7 @@
               ((none)
                (result::ok (url::new tls authority (if tls 443 80) target)))))))))
 
-(pub defun read-response ((c tcp-stream)) Option<response>
+(pub defun read-response ((c socket-stream)) Option<response>
   (match (read-crlf-line c)
     ((none) (option::none))
     ((some line)

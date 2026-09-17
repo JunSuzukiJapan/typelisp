@@ -2263,11 +2263,12 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
 - **タスクローカル変数**（Go にも無い）。
 - **nil チャネル**。理由と代わりの書き方は syntax.md §12.6。
 
-## 21. ネットワーク（TCP / TLS / UDP）
+## 21. ネットワーク（TCP / TLS / Unix ドメイン / UDP）
 
-ソケットは §18 のストリームの一員。接続は `tcp-stream`（文字）／`tcp-byte-stream`（バイト）
+ソケットは §18 のストリームの一員。接続は `socket-stream`（文字）／`socket-byte-stream`（バイト）
 という **同じハンドルの 2 つの見え方** で、`read-line`/`write-line`/`read-byte`/`format` が
-そのまま効く。待ち受けは `tcp-listener`。TLS の接続も同じ `tcp-stream`（`tls-connect`）。
+そのまま効く。待ち受けは `socket-listener`。**TCP・TLS・Unix ドメインソケットで型は 1 つ**
+（Go の `net.Conn` と同じ）——繋がった後の読み書きは同じで、違うのは作り方だけ。
 UDP はストリームでなくデータグラム（`udp-socket`）。
 
 **待つのはタスクであってスレッドではない。** `accept`・`read-line`・`write-string`・
@@ -2279,9 +2280,9 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 
 | 型 | 実装するトレイト | 得る方法 |
 |---|---|---|
-| `tcp-stream` | `CharInput` `PeekInput` `CharOutput` | `tcp-connect` / `tls-connect` / `accept` / `char-stream-of` |
-| `tcp-byte-stream` | `ByteInput` `ByteOutput` | `byte-stream-of` |
-| `tcp-listener` | `Stream`（`close` / `open-stream-p`） | `tcp-listen` |
+| `socket-stream` | `CharInput` `PeekInput` `CharOutput` | `tcp-connect` / `tls-connect` / `unix-connect` / `accept` / `char-stream-of` |
+| `socket-byte-stream` | `ByteInput` `ByteOutput` | `byte-stream-of` |
+| `socket-listener` | `Stream`（`close` / `open-stream-p`） | `tcp-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | ——（`bytes`: `Vector<int>`、`from`: `string`） | `recv-from` |
 | `NetError` | `Error` | 上の関数の `Err` |
@@ -2291,21 +2292,23 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 受信バッファも共有する——HTTP のようにヘッダを文字で・本体をバイトで読む用途はこれで書く。
 文字を `unread-char` した直後のバイト読みはエラー（ファイルと同じ規則）。
 
-### 21.2 TCP
+### 21.2 TCP / TLS / Unix ドメイン
 
 | 名前 | 使い方 | 型 | 意味 |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port [timeout])` | `(string,int,f64?)→Result<tcp-stream,NetError>` | 接続する。`host` は名前でもアドレスでも。名前が複数のアドレスを持てば順に試す（`localhost` は `::1` と `127.0.0.1`）。名前解決失敗・接続拒否・`timeout` 秒の超過は `Err` |
-| `tls-connect` | `(tls-connect host port [timeout])` | 同上 | `tcp-connect` の後に TLS。証明書は `host` 名に対して Mozilla のルート証明書で検証。結果は普通の `tcp-stream`。**クライアント側のみ**（`tls-listen` は無い） |
-| `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<tcp-listener,NetError>` | 待ち受ける。`"127.0.0.1"` はこの機械だけ、`"0.0.0.0"` は全インタフェース。`port` に `0` を渡すと OS が選ぶ |
-| `accept` | `(accept l [timeout])` | `(tcp-listener,f64?)→Result<tcp-stream,NetError>` | 次の接続。来るまでタスクを止める。`timeout` 秒で諦めると `Err` |
-| `wait-readable` | `(wait-readable s secs)` | `(tcp-stream,f64)→bool` | 待たずに読めるようになるまで、または `secs` 秒。`true` なら前者（バッファ済みも含む）。読みに時計を付ける手段：`(if (wait-readable c 5.0) (read-line c) ...)`。約束するのは**次の読みが止まらない**ことで、`read-line` は行の残りを待ちうる |
-| `wait-writable` | `(wait-writable s secs)` | `(tcp-stream,f64)→bool` | 書けるようになるまで、または `secs` 秒 |
-| `local-address` | `(local-address s)` | `(tcp-stream \| tcp-listener \| udp-socket)→string` | こちら側の `host:port`。`(tcp-listen h 0)` の後で選ばれたポートを知る手段 |
-| `peer-address` | `(peer-address s)` | `(tcp-stream)→string` | 相手側の `host:port` |
-| `shutdown-output` | `(shutdown-output s)` | `(tcp-stream)→()` | 送信側だけ閉じる（半クローズ）。相手は EOF を読み、こちらはまだ読める。「要求は全部送った」の合図。TLS なら `close_notify` も送る |
-| `byte-stream-of` | `(byte-stream-of s)` | `(tcp-stream)→tcp-byte-stream` | 同じ接続のバイト版 |
-| `char-stream-of` | `(char-stream-of b)` | `(tcp-byte-stream)→tcp-stream` | 同じ接続の文字版 |
+| `tcp-connect` | `(tcp-connect host port [timeout])` | `(string,int,f64?)→Result<socket-stream,NetError>` | 接続する。`host` は名前でもアドレスでも。名前が複数のアドレスを持てば順に試す（`localhost` は `::1` と `127.0.0.1`）。名前解決失敗・接続拒否・`timeout` 秒の超過は `Err` |
+| `tls-connect` | `(tls-connect host port [timeout])` | 同上 | `tcp-connect` の後に TLS。証明書は `host` 名に対して Mozilla のルート証明書で検証。結果は普通の `socket-stream`。**クライアント側のみ**（`tls-listen` は無い） |
+| `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | Unix ドメインソケット `path` に接続。ローカルなので握手待ちは無く、タイムアウトも無い |
+| `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | 待ち受ける。`"127.0.0.1"` はこの機械だけ、`"0.0.0.0"` は全インタフェース。`port` に `0` を渡すと OS が選ぶ |
+| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | `path` で待ち受ける。**ファイルが既にあれば `Err`**（走っている別プロセスのものかもしれないので黙って置き換えない）。`close` がファイルを消す |
+| `accept` | `(accept l [timeout])` | `(socket-listener,f64?)→Result<socket-stream,NetError>` | 次の接続。来るまでタスクを止める。`timeout` 秒で諦めると `Err` |
+| `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | 待たずに読めるようになるまで、または `secs` 秒。`true` なら前者（バッファ済みも含む）。読みに時計を付ける手段：`(if (wait-readable c 5.0) (read-line c) ...)`。約束するのは**次の読みが止まらない**ことで、`read-line` は行の残りを待ちうる |
+| `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | 書けるようになるまで、または `secs` 秒 |
+| `local-address` | `(local-address s)` | `(socket-stream \| socket-listener \| udp-socket)→string` | こちら側の `host:port`。`(tcp-listen h 0)` の後で選ばれたポートを知る手段。Unix ならパス（接続した側の端は `(unnamed)`） |
+| `peer-address` | `(peer-address s)` | `(socket-stream)→string` | 相手側の `host:port`、Unix ならパス |
+| `shutdown-output` | `(shutdown-output s)` | `(socket-stream)→()` | 送信側だけ閉じる（半クローズ）。相手は EOF を読み、こちらはまだ読める。「要求は全部送った」の合図。TLS なら `close_notify` も送る |
+| `byte-stream-of` | `(byte-stream-of s)` | `(socket-stream)→socket-byte-stream` | 同じ接続のバイト版 |
+| `char-stream-of` | `(char-stream-of b)` | `(socket-byte-stream)→socket-stream` | 同じ接続の文字版 |
 | `close` | `(close s)` | `Stream` | バッファを送り切ってから閉じる。GC では閉じない（§18） |
 | `with-connection` | `(with-connection (var host port) body...)` | マクロ | 接続→本体→閉じる。`Result<本体の値, NetError>`（`with-open-file` と同形） |
 
@@ -2320,7 +2323,7 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 
 ```lisp
 ;; サーバ: 接続ごとに 1 タスク
-(defun serve ((c tcp-stream)) ()
+(defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c line))
           ((none) (break))))
@@ -2382,7 +2385,7 @@ TLS は `rustls`（sans-IO）で、暗号化と復号だけを担い、ソケッ
 ### 21.5 無いもの
 
 - **TLS サーバ**（証明書と鍵の読み込みが要る）。**クライアント証明書**。
-- **Unix ドメインソケット**、**HTTP/2**。
+- **HTTP/2**。Unix ドメインの**データグラム**（`SOCK_DGRAM`）。
 - **ストリームに持たせる期限**（上記の理由で、時計は引数）。
 - **AOT 実行ファイル内のソケット待ち**。AOT の `main` にはスケジューラが無いので、待つことに
   なった操作は `sleep`/`recv` と同様にエラーになる（`typl file.typl` は JIT で、こちらは動く）。

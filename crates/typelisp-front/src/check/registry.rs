@@ -1195,8 +1195,8 @@ fn register_stream_builtins(root: &mut Namespace) {
 
 /// The `net-*` primitives (`typelisp_rt::net_builtin`): a TCP socket as an
 /// opaque `i32` handle in the same table the streams live in, and every
-/// operation on it in its **non-blocking** form. The prelude's `tcp-stream`,
-/// `tcp-byte-stream` and `tcp-listener` are written on top of these, and the
+/// operation on it in its **non-blocking** form. The prelude's `socket-stream`,
+/// `socket-byte-stream` and `socket-listener` are written on top of these, and the
 /// waiting is written there too: each "not yet" answer below (`none` from
 /// `net-fill`/`net-accept`, `false` from `net-flush`) is followed by a
 /// `(net-wait h interest)`, which parks the task until `poll` says the socket
@@ -1255,6 +1255,10 @@ fn register_net_builtins(root: &mut Namespace) {
     );
     native("net-udp-last-sender", vec![h.clone()], result_of(Type::Str, net_err.clone()));
     native("net-listen", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
+    // Unix-domain sockets: the same connected-socket handle, made from a
+    // path. A local connect has no handshake to wait for, so it is one step.
+    native("net-unix-connect", vec![Type::Str], result_of(h.clone(), net_err.clone()));
+    native("net-unix-listen", vec![Type::Str], result_of(h.clone(), net_err.clone()));
     // `Ok(none)`: nobody is waiting to be accepted — wait for readable.
     native("net-accept", vec![h.clone()], result_of(option_of(h.clone()), net_err.clone()));
 

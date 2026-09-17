@@ -60,7 +60,7 @@ use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
-use std::net::{TcpListener, TcpStream, UdpSocket};
+use std::net::UdpSocket;
 
 thread_local! {
     /// This thread's open streams. See the module docs for why it is here.
@@ -85,7 +85,8 @@ pub(crate) enum Backend {
     Stderr,
     FileIn(BufReader<File>),
     FileOut(BufWriter<File>),
-    /// A connected TCP socket, **non-blocking**, with its own buffers on
+    /// A connected stream socket — TCP or Unix-domain, see [`Sock`] —
+    /// **non-blocking**, with its own buffers on
     /// both sides. The character/byte operations above never touch it: a
     /// socket is read and written through `crate::net`'s `net-*` builtins,
     /// each of which does only what can be done *now* and reports "not yet"
@@ -96,10 +97,10 @@ pub(crate) enum Backend {
     /// what has been written and not yet sent. With `tls` present the two
     /// buffers hold *plaintext* and the connection object between them and
     /// the socket does the ciphering (`crate::net`'s TLS section).
-    Tcp { sock: TcpStream, tls: Option<Box<rustls::ClientConnection>>, rbuf: VecDeque<u8>, wbuf: VecDeque<u8> },
-    /// A listening TCP socket, non-blocking for the same reason. Neither an
+    Tcp { sock: Sock, tls: Option<Box<rustls::ClientConnection>>, rbuf: VecDeque<u8>, wbuf: VecDeque<u8> },
+    /// A listening socket, non-blocking for the same reason. Neither an
     /// input nor an output stream: it yields connections, not items.
-    Listener(TcpListener),
+    Listener(Listen),
     /// A UDP socket, non-blocking. Datagrams, not a stream: it is neither an
     /// input nor an output stream, and `crate::net` speaks to it in whole
     /// messages. `last_from` is who sent the datagram most recently received.
@@ -119,6 +120,118 @@ pub(crate) enum Backend {
     /// not say those become meaningless after `close`, and a closed output
     /// file reporting itself as an input stream would be a plain lie.
     Closed,
+}
+
+/// A connected stream socket, whichever family. Everything above the
+/// descriptor is the same for the two — the buffers, the TLS layer, the
+/// wait loops in the prelude — which is why they share one `Backend` arm
+/// and one prelude type (`socket-stream`) rather than two of each. What
+/// differs is only how one is made and what its address looks like.
+pub(crate) enum Sock {
+    Tcp(std::net::TcpStream),
+    Unix(std::os::unix::net::UnixStream),
+}
+
+impl Read for Sock {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Sock::Tcp(s) => s.read(buf),
+            Sock::Unix(s) => s.read(buf),
+        }
+    }
+}
+
+impl Write for Sock {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Sock::Tcp(s) => s.write(buf),
+            Sock::Unix(s) => s.write(buf),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Sock::Tcp(s) => s.flush(),
+            Sock::Unix(s) => s.flush(),
+        }
+    }
+}
+
+impl Sock {
+    pub(crate) fn set_nonblocking(&self, on: bool) -> std::io::Result<()> {
+        match self {
+            Sock::Tcp(s) => s.set_nonblocking(on),
+            Sock::Unix(s) => s.set_nonblocking(on),
+        }
+    }
+    pub(crate) fn take_error(&self) -> std::io::Result<Option<std::io::Error>> {
+        match self {
+            Sock::Tcp(s) => s.take_error(),
+            Sock::Unix(s) => s.take_error(),
+        }
+    }
+    pub(crate) fn shutdown(&self, how: std::net::Shutdown) -> std::io::Result<()> {
+        match self {
+            Sock::Tcp(s) => s.shutdown(how),
+            Sock::Unix(s) => s.shutdown(how),
+        }
+    }
+    /// This side's address: `ip:port`, or a Unix socket's path (an unbound
+    /// client end has none and says so).
+    pub(crate) fn local_address(&self) -> std::io::Result<String> {
+        match self {
+            Sock::Tcp(s) => s.local_addr().map(|a| a.to_string()),
+            Sock::Unix(s) => s.local_addr().map(|a| unix_addr_string(&a)),
+        }
+    }
+    pub(crate) fn peer_address(&self) -> std::io::Result<String> {
+        match self {
+            Sock::Tcp(s) => s.peer_addr().map(|a| a.to_string()),
+            Sock::Unix(s) => s.peer_addr().map(|a| unix_addr_string(&a)),
+        }
+    }
+    #[cfg(unix)]
+    pub(crate) fn raw_fd(&self) -> i32 {
+        use std::os::unix::io::AsRawFd;
+        match self {
+            Sock::Tcp(s) => s.as_raw_fd(),
+            Sock::Unix(s) => s.as_raw_fd(),
+        }
+    }
+}
+
+/// A Unix socket address as text: its path, or `(unnamed)` for the client
+/// end of a connection, which has no path of its own.
+pub(crate) fn unix_addr_string(a: &std::os::unix::net::SocketAddr) -> String {
+    match a.as_pathname() {
+        Some(p) => p.to_string_lossy().into_owned(),
+        None => "(unnamed)".to_string(),
+    }
+}
+
+/// A listening socket, whichever family. A Unix listener remembers its path
+/// so that closing it can remove the socket file — the file is the address,
+/// and a stale one would refuse the next `bind` (Go's listener does the
+/// same on `Close`).
+pub(crate) enum Listen {
+    Tcp(std::net::TcpListener),
+    Unix { listener: std::os::unix::net::UnixListener, path: std::path::PathBuf },
+}
+
+impl Listen {
+    #[cfg(unix)]
+    pub(crate) fn raw_fd(&self) -> i32 {
+        use std::os::unix::io::AsRawFd;
+        match self {
+            Listen::Tcp(l) => l.as_raw_fd(),
+            Listen::Unix { listener, .. } => listener.as_raw_fd(),
+        }
+    }
+    pub(crate) fn local_address(&self) -> std::io::Result<String> {
+        match self {
+            Listen::Tcp(l) => l.local_addr().map(|a| a.to_string()),
+            Listen::Unix { listener, .. } => listener.local_addr().map(|a| unix_addr_string(&a)),
+        }
+    }
 }
 
 /// Where a resolver thread leaves what it found: every address the name
@@ -270,6 +383,10 @@ impl StreamTable {
             conn.send_close_notify();
             let _ = conn.write_tls(sock);
         }
+        // The socket file is the listener's address: gone with the listener.
+        if let Backend::Listener(Listen::Unix { path, .. }) = &s.backend {
+            let _ = std::fs::remove_file(path);
+        }
         // A string output stream keeps its text: CL allows
         // `get-output-stream-string` after `close`.
         if !matches!(s.backend, Backend::StringOut(_)) {
@@ -286,8 +403,8 @@ impl StreamTable {
     pub fn raw_fd(&mut self, h: Handle) -> StreamResult<i32> {
         use std::os::unix::io::AsRawFd;
         match &self.get(h)?.backend {
-            Backend::Tcp { sock, .. } => Ok(sock.as_raw_fd()),
-            Backend::Listener(l) => Ok(l.as_raw_fd()),
+            Backend::Tcp { sock, .. } => Ok(sock.raw_fd()),
+            Backend::Listener(l) => Ok(l.raw_fd()),
             Backend::Udp { sock, .. } => Ok(sock.as_raw_fd()),
             Backend::Resolver { pipe, .. } => Ok(pipe.as_raw_fd()),
             Backend::Closed => Err("the stream is closed".to_string()),

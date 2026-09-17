@@ -4104,10 +4104,14 @@ user-visible capacity."
   (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
 
 ;; ---------------------------------------------------------------------------
-;; TCP. Three structs over one more kind of handle in the same native table:
-;; a connected socket, seen as characters (`tcp-stream`) or as bytes
-;; (`tcp-byte-stream`) -- two views of the *same* handle, since `InputStream`
-;; pins `Item` per type -- and a listening socket (`tcp-listener`).
+;; Sockets. Three structs over one more kind of handle in the same native
+;; table: a connected stream socket, seen as characters (`socket-stream`) or
+;; as bytes (`socket-byte-stream`) -- two views of the *same* handle, since
+;; `InputStream` pins `Item` per type -- and a listening socket
+;; (`socket-listener`). One type for TCP, TLS-over-TCP and Unix-domain alike,
+;; the way Go has one `net.Conn`: once connected they read and write the same
+;; way, and only the way they are made differs (`tcp-connect`/`tls-connect`/
+;; `unix-connect`, `tcp-listen`/`unix-listen`).
 ;;
 ;; Every native `net-*` call below does only what can be done right now: the
 ;; socket is non-blocking, and "nothing yet" comes back as an answer
@@ -4123,9 +4127,9 @@ user-visible capacity."
 (pub defconstant (net-readable int) 0)
 (pub defconstant (net-writable int) 1)
 
-(pub defstruct tcp-stream (h i32))
-(pub defstruct tcp-byte-stream (h i32))
-(pub defstruct tcp-listener (h i32))
+(pub defstruct socket-stream (h i32))
+(pub defstruct socket-byte-stream (h i32))
+(pub defstruct socket-listener (h i32))
 
 (impl Error NetError
   (message ((self Self)) string (match self ((NetError m) m))))
@@ -4178,24 +4182,24 @@ user-visible capacity."
   (when (stream-open-p h) (tcp-drain h))
   (unwrap-io (stream-close h)))
 
-(impl Stream tcp-stream
+(impl Stream socket-stream
   (open-stream-p ((self Self)) bool (stream-open-p self::h))
   (close ((self Self)) () (tcp-close self::h)))
-(impl InputStream tcp-stream
+(impl InputStream socket-stream
   (type Item char)
   (read-item ((self Self)) Option<char> (tcp-read-char self::h))
   ;; True when something is already buffered: the one honest `true` a socket
   ;; can give, and what makes `read-char-no-hang` on it mean what it says.
   (listen ((self Self)) bool (unwrap-net (net-buffered-p self::h))))
-(impl OutputStream tcp-stream
+(impl OutputStream socket-stream
   (type Item char)
   (write-item ((self Self) (c char)) ()
     (unwrap-net (net-push-string self::h (char->string c)))
     (tcp-drain self::h)))
-(impl CharInput tcp-stream)
-(impl PeekInput tcp-stream
+(impl CharInput socket-stream)
+(impl PeekInput socket-stream
   (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
-(impl CharOutput tcp-stream
+(impl CharOutput socket-stream
   ;; Write-through: each `write-string` reaches the peer before it returns,
   ;; as Go's `net.Conn.Write` does. A caller sending many small pieces can
   ;; batch them in a `string-output-stream` first.
@@ -4205,23 +4209,23 @@ user-visible capacity."
   (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h)))
   (finish-output ((self Self)) () (tcp-drain self::h)))
 
-(impl Stream tcp-byte-stream
+(impl Stream socket-byte-stream
   (open-stream-p ((self Self)) bool (stream-open-p self::h))
   (close ((self Self)) () (tcp-close self::h)))
-(impl InputStream tcp-byte-stream
+(impl InputStream socket-byte-stream
   (type Item int)
   (read-item ((self Self)) Option<int> (tcp-read-byte self::h))
   (listen ((self Self)) bool (unwrap-net (net-buffered-p self::h))))
-(impl OutputStream tcp-byte-stream
+(impl OutputStream socket-byte-stream
   (type Item int)
   (write-item ((self Self) (b int)) ()
     (unwrap-net (net-push-byte self::h b))
     (tcp-drain self::h)))
-(impl ByteInput tcp-byte-stream)
-(impl ByteOutput tcp-byte-stream
+(impl ByteInput socket-byte-stream)
+(impl ByteOutput socket-byte-stream
   (finish-output ((self Self)) () (tcp-drain self::h)))
 
-(impl Stream tcp-listener
+(impl Stream socket-listener
   (open-stream-p ((self Self)) bool (stream-open-p self::h))
   (close ((self Self)) () (unwrap-io (stream-close self::h))))
 
@@ -4280,7 +4284,7 @@ user-visible capacity."
          (setf i (+ i 1))
          (when (>= i n) (return (result::err e))))))))
 
-(pub defun tcp-connect ((host string) (port int) &optional (timeout f64)) Result<tcp-stream, NetError>
+(pub defun tcp-connect ((host string) (port int) &optional (timeout f64)) Result<socket-stream, NetError>
   "Connect to `host` (a name or an address) on `port`. `Err` if the name does
    not resolve, the connection is refused, or -- with `timeout` seconds
    given -- nobody answers in time: ordinary outcomes, not panics. The task
@@ -4289,13 +4293,13 @@ user-visible capacity."
     ((err e) (result::err e))
     ((ok addrs)
      (match (tcp-connect-addr addrs timeout)
-       ((ok h) (result::ok (tcp-stream::new h)))
+       ((ok h) (result::ok (socket-stream::new h)))
        ((err e) (result::err e))))))
 
-(pub defun tls-connect ((host string) (port int) &optional (timeout f64)) Result<tcp-stream, NetError>
+(pub defun tls-connect ((host string) (port int) &optional (timeout f64)) Result<socket-stream, NetError>
   "`tcp-connect`, then TLS on the connection with `host` as the name the
    server's certificate must be for (checked against Mozilla's root store).
-   The result is an ordinary `tcp-stream`; what crosses the socket is
+   The result is an ordinary `socket-stream`; what crosses the socket is
    ciphertext. Client side only -- there is no `tls-listen`."
   (match (tcp-resolve host port timeout)
     ((err e) (result::err e))
@@ -4308,22 +4312,36 @@ user-visible capacity."
           ((ok _)
            (loop
              (match (net-tls-handshake h)
-               ((ok (none)) (return (the Result<tcp-stream, NetError> (result::ok (tcp-stream::new h)))))
+               ((ok (none)) (return (the Result<socket-stream, NetError> (result::ok (socket-stream::new h)))))
                ((ok (some interest))
                 (match (tcp-wait-within h interest timeout "tls-connect")
                   ((ok _) ())
                   ((err e) (progn (unwrap-io (stream-close h)) (return (result::err e))))))
                ((err e) (progn (unwrap-io (stream-close h)) (return (result::err e)))))))))))))
 
-(pub defun tcp-listen ((host string) (port int)) Result<tcp-listener, NetError>
+(pub defun unix-connect ((path string)) Result<socket-stream, NetError>
+  "Connect to the Unix-domain socket at `path`. A local connect completes
+   at once or is refused -- there is nothing to wait for -- so no timeout."
+  (match (net-unix-connect path)
+    ((ok h) (result::ok (socket-stream::new h)))
+    ((err e) (result::err e))))
+
+(pub defun unix-listen ((path string)) Result<socket-listener, NetError>
+  "Listen on a Unix-domain socket at `path`, which must not exist yet; a
+   leftover file is refused rather than replaced. `close` removes the file."
+  (match (net-unix-listen path)
+    ((ok h) (result::ok (socket-listener::new h)))
+    ((err e) (result::err e))))
+
+(pub defun tcp-listen ((host string) (port int)) Result<socket-listener, NetError>
   "Listen on `host`:`port` -- 127.0.0.1 for this machine only, 0.0.0.0 for
    every interface. Port `0` lets the OS pick a free one; `local-address`
    says which."
   (match (net-listen host port)
-    ((ok h) (result::ok (tcp-listener::new h)))
+    ((ok h) (result::ok (socket-listener::new h)))
     ((err e) (result::err e))))
 
-(pub defmethod accept ((self tcp-listener) &optional (timeout f64)) Result<tcp-stream, NetError>
+(pub defmethod accept ((self socket-listener) &optional (timeout f64)) Result<socket-stream, NetError>
   "The next connection, waiting for one -- at most `timeout` seconds if
    given, after which the `Err` says so. The usual shape of a server is
    `(loop (match (accept l) ((ok c) (go (serve c))) ((err e) ...)))`: one task
@@ -4332,14 +4350,14 @@ user-visible capacity."
     (match (net-accept self::h)
       ;; `the`: a loop's type is the join of its `return`s, and this one is
       ;; seen first with its `E` still a hole.
-      ((ok (some h)) (return (the Result<tcp-stream, NetError> (result::ok (tcp-stream::new h)))))
+      ((ok (some h)) (return (the Result<socket-stream, NetError> (result::ok (socket-stream::new h)))))
       ((ok (none))
        (match (tcp-wait-within self::h net-readable timeout "accept")
          ((ok _) ())
          ((err e) (return (result::err e)))))
       ((err e) (return (result::err e))))))
 
-(pub defmethod wait-readable ((self tcp-stream) (secs f64)) bool
+(pub defmethod wait-readable ((self socket-stream) (secs f64)) bool
   "Wait until something can be read without waiting, or `secs` run out:
    `true` if the former. Something buffered counts. The way to put a clock
    on a read: `(if (wait-readable c 5.0) (read-line c) ...)`. What it
@@ -4349,35 +4367,35 @@ user-visible capacity."
       true
       (net-wait-for self::h net-readable secs)))
 
-(pub defmethod wait-writable ((self tcp-stream) (secs f64)) bool
+(pub defmethod wait-writable ((self socket-stream) (secs f64)) bool
   "Wait until the socket will take output, or `secs` run out: `true` if the
    former."
   (net-wait-for self::h net-writable secs))
 
-(pub defun byte-stream-of ((s tcp-stream)) tcp-byte-stream
+(pub defun byte-stream-of ((s socket-stream)) socket-byte-stream
   "The same connection as a byte stream. Both views share one buffer, so a
    protocol can read its header as text and its body as bytes."
-  (tcp-byte-stream::new s::h))
+  (socket-byte-stream::new s::h))
 
-(pub defun char-stream-of ((s tcp-byte-stream)) tcp-stream
+(pub defun char-stream-of ((s socket-byte-stream)) socket-stream
   "The same connection as a character stream."
-  (tcp-stream::new s::h))
+  (socket-stream::new s::h))
 
-(pub defmethod shutdown-output ((self tcp-stream)) ()
+(pub defmethod shutdown-output ((self socket-stream)) ()
   "Send what is buffered and close the sending side only: the peer reads end
    of input, and this side can still read the reply. What a request/response
    exchange says with -- the whole request has been sent."
   (tcp-drain self::h)
   (unwrap-net (net-shutdown-write self::h)))
 
-(pub defmethod local-address ((self tcp-stream)) string
+(pub defmethod local-address ((self socket-stream)) string
   "This side's address as `host:port`."
   (unwrap-net (net-local-address self::h)))
-(pub defmethod local-address ((self tcp-listener)) string
+(pub defmethod local-address ((self socket-listener)) string
   "The address being listened on, as `host:port`. After `(tcp-listen host 0)`
    this is how the chosen port is learned."
   (unwrap-net (net-local-address self::h)))
-(pub defmethod peer-address ((self tcp-stream)) string
+(pub defmethod peer-address ((self socket-stream)) string
   "The other side's address as `host:port`."
   (unwrap-net (net-peer-address self::h)))
 
