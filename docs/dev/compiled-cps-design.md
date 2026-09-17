@@ -157,6 +157,17 @@ safepoint がどこにも無く、結局 codegen にポーリングを差し込�
 でなければならない（`typelisp-abi` が理由を書いている）。ヒープを共有可能にする作業は
 Phase C より先に来るし、たぶん一番大きい。Phase C はその**障害物を減らす**だけ。
 
+2026-09-17（AOT スケジューラ）で減った障害物: スケジューラは `typelisp-rt::sched` の
+`Scheduler<B: TaskBody>` になり、タスク本体は「インタプリタの継続スタック」（front の
+`Task`、`Cx = Interp`）と「compiled 鎖だけ」（`CompiledTask`、`Cx = ()`）の 2 種類。
+M:N でスレッド間を動かすのは後者で、前者は main スレッドに pin する、という線引きが
+型で言えるようになった。`CompiledTask` が `!Send` なのは `Value`（ヒープへの生ポインタ）
+だけが理由で、`assert_send::<CompiledTask>()` はちょうど `*mut Cell` で落ちる——壁が
+ヒープにあってスケジューラに無いことの実証。スケジューラは Heap の持ち主が所有する値
+（`Interp` のフィールド／`rt_run_entry_driven` のフレーム）で、global にも thread_local
+にも置かない。`go` が hook（`SPAWN_TASK`）でなく suspend 種別になったので thread_local
+は 1 本減った。OS を待つ場所は `wake_io` の 1 つのまま。
+
 残る穴が 1 つ: **呼び出しの無いタイトループには driver 往復が来ない**ので safepoint が
 無い。`compile-loop` の後退辺に 1 箇所ポーリングを入れれば埋まる（C7、Phase C の完了
 条件ではない）。
@@ -740,6 +751,14 @@ ABI の札は「誰かがその本体を呼ぶとき」にしか読まれない�
   classic 呼びもそうだった）
 - `tl_main` → `rt_run_entry_driven`（`rt_run_entry` と同じ panic 処理の前に
   `FrameStack` を置いただけ）
+
+**2026-09-17 の続き: `rt_run_entry_driven` は `FrameStack` でなくスケジューラを
+置く。** `FrameStack::run` 1 回では最初の中断で abort だった——`sleep` も
+`net-wait` も、そして C7 の safepoint も（`run_to_end` の腕は `rt_drive_entry`
+にしか無く、10 万回のループが abort した）。スケジューラの核は
+`typelisp-rt::sched`（`Scheduler<B: TaskBody>`）へ下ろし、AOT の `main` は
+`Scheduler<CompiledTask>` の main タスク。`rt_drive_entry`（`defvar` 初期化子）と
+`rt_drive_body`（printer の door）は `run_to_end` のまま。
 
 **`rt_*` を足したら staticlib を作り直す。** AOT テストは `cargo test` が
 作らない `typelisp-front` の staticlib にリンクしているので、新しい shim は

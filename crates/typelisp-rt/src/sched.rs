@@ -1266,3 +1266,258 @@ pub fn pending_wait(heap: &Heap) -> Result<(Waiting, Wake), SchedError> {
         ))),
     }
 }
+
+// ---- a task that is a compiled chain and nothing else -------------------------
+
+/// How a compiled-only task fails — the answer a program's own failure gets
+/// in an executable, split the way the interpreter's `EvalError` splits it so
+/// the two front ends say the same things about the same program.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaskFailure {
+    /// A `(panic ...)`, a runtime error, or a scheduler refusal: `panic: msg`.
+    Panic(String),
+    /// A `throw` no `catch` in the task claimed. Carries the tag.
+    Throw(String),
+    /// The runtime disagreeing with itself — every task blocked, a handle of
+    /// the wrong shape.
+    Internal(String),
+}
+
+impl From<SchedError> for TaskFailure {
+    fn from(e: SchedError) -> TaskFailure {
+        match e {
+            SchedError::Panic(m) => TaskFailure::Panic(m),
+            SchedError::Internal(m) => TaskFailure::Internal(m),
+        }
+    }
+}
+
+impl std::fmt::Display for TaskFailure {
+    /// The line an executable prints on the way out — the same wording
+    /// `EvalError`'s `Display` uses for the same failures.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskFailure::Panic(m) => write!(f, "panic: {}", m),
+            TaskFailure::Throw(tag) => write!(f, "throw: no enclosing (catch '{}) for this throw", tag),
+            TaskFailure::Internal(m) => write!(f, "error: {}", m),
+        }
+    }
+}
+
+/// A task that is a compiled chain and nothing else — every task an
+/// ahead-of-time compiled executable has, since there is no interpreter in it
+/// to have a continuation stack.
+///
+/// Where the interpreter's task keeps a continuation stack *and* a chain,
+/// this keeps the chain alone: the executable's `main` enters a body, a task
+/// `go` started applies a closure, and from then on every step is a drive of
+/// the standing chain. What it needs from the heap is two state slots at
+/// `sbase`, for the same reason the interpreter's task has them — a value
+/// on its way in (a wake value, the closure to apply, a parked `send`'s
+/// offer) is a Rust local until the chain takes it, and nothing else roots
+/// it.
+///
+/// **Every answer is a tagged word.** The closure a `go` site builds tags
+/// its result before returning (`core_bridge::translate_go`), and an
+/// executable's `main` answers an `int` (tagged) or unit (the word `0`, a
+/// fixnum). So the task's result is `decode(word)` with no representation
+/// to consult — which is what lets this crate hold the scheduler at all.
+///
+/// **Not `Send`, and only because a `Value` is not**: `Value::Cons` is a raw
+/// pointer into the `Heap`, and the heap is `!Send`. Nothing else here is
+/// tied to a thread — no `Rc`, no thread-local handle, no machine frame — so
+/// a scheduler that spreads tasks over OS threads will find its wall in the
+/// heap and not in the task. (An `assert_send::<CompiledTask>()` was tried
+/// and fails on exactly `*mut Cell`; it is not asserted with an `unsafe
+/// impl`, because that would be a lie about the heap, not a fact about the
+/// task.)
+pub struct CompiledTask {
+    chain: crate::coroutine::FrameStack,
+    state: CompiledState,
+    sbase: usize,
+    /// How the chain reads what it was waiting for out of its value slot,
+    /// recorded when it suspended.
+    wake: Wake,
+}
+
+enum CompiledState {
+    /// Enter this body with no arguments — the executable's `main`.
+    Entry(crate::coroutine::CoroutineFn),
+    /// Apply this closure to no arguments — a task `go` started. Rooted in
+    /// the first state slot.
+    Start(Value),
+    /// Re-enter the standing chain with this word in its value slot.
+    Resume(i64),
+    /// Hand the standing chain the unwind parked for it (`deliver` of an
+    /// error) and keep driving.
+    Raise,
+    /// Waiting. The scheduler moves it out of this with `deliver`.
+    Blocked(Waiting),
+}
+
+impl CompiledTask {
+    /// A task that enters `f` with no arguments — what the executable's
+    /// `main` is to the scheduler. Built on the task's own root stack.
+    pub fn entry(heap: &mut Heap, f: crate::coroutine::CoroutineFn) -> CompiledTask {
+        let sbase = heap.root_count();
+        heap.push_root(Value::Empty);
+        heap.push_root(Value::Empty);
+        CompiledTask { chain: crate::coroutine::FrameStack::new(), state: CompiledState::Entry(f), sbase, wake: Wake::Unit }
+    }
+
+    /// Writes what the next state carries into the state slots.
+    fn set_slots(&self, heap: &mut Heap) {
+        let held = match &self.state {
+            CompiledState::Start(closure) => *closure,
+            CompiledState::Blocked(Waiting::Chan(ChanOp::Send(_, v))) | CompiledState::Blocked(Waiting::Spawn(v)) => *v,
+            _ => Value::Empty,
+        };
+        heap.set_root(self.sbase, held);
+        heap.set_root(self.sbase + 1, Value::Empty);
+    }
+
+    /// What a drive that stopped means for the task.
+    fn after_drive(&mut self, heap: &mut Heap, outcome: Result<i64, crate::coroutine::Paused>) -> Progress<TaskFailure> {
+        match outcome {
+            Ok(word) => Progress::Done(Ok(typelisp_abi::decode(word))),
+            // The chain stays exactly as it is, rooted by the prologues that
+            // built it; only the answer's shape has to be remembered.
+            Err(crate::coroutine::Paused::Suspended) => match pending_wait(heap) {
+                Ok((w, wake)) => {
+                    self.wake = wake;
+                    self.state = CompiledState::Blocked(w.clone());
+                    self.set_slots(heap);
+                    Progress::Blocked(w)
+                }
+                Err(e) => Progress::Done(Err(e.into())),
+            },
+            // A compiled frame applied an interpreted function value. Only an
+            // interpreter can run it, and the one an `eval`-carrying
+            // executable has runs it on this machine frame — which cannot
+            // suspend, the rule `Interp::apply` has always had. An executable
+            // with no interpreter has nothing to run it with, and says so.
+            Err(crate::coroutine::Paused::Applying { closure, args }) => {
+                // SAFETY: the closure and its arguments came from a compiled
+                // `apply` site in the heap registered on this thread.
+                let v = unsafe { crate::apply_on_this_frame(closure, &args, "a task") };
+                self.state = CompiledState::Resume(v);
+                self.set_slots(heap);
+                Progress::Running
+            }
+            // The chain is gone — every frame popped, its roots cut back —
+            // and what was unwinding is parked. A program's own failure is
+            // this task's failure; anything else is a bug in the runtime and
+            // keeps unwinding untouched.
+            Err(crate::coroutine::Paused::Unwinding) => {
+                let payload = crate::take_activation_unwind()
+                    .unwrap_or_else(|| typelisp_abi::fatal("a task's chain reported an unwind but none is being carried"));
+                // SAFETY: a `Heap` is registered on this thread — the chain
+                // just ran on it.
+                Progress::Done(Err(unsafe { unwind_failure(payload) }))
+            }
+        }
+    }
+}
+
+/// The program-level failure a parked unwind payload stands for, or the
+/// payload back if it is nobody's — a real bug, which must keep unwinding
+/// rather than come back as a plausible-looking typelisp error.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread (a throw's value lives there).
+unsafe fn unwind_failure(payload: Box<dyn std::any::Any + Send>) -> TaskFailure {
+    let payload = match payload.downcast::<typelisp_abi::CompiledPanic>() {
+        Ok(p) => return TaskFailure::Panic(p.message),
+        Err(other) => other,
+    };
+    match payload.downcast::<typelisp_abi::CompiledThrow>() {
+        Ok(_) => {
+            let tag = crate::take_throw().map(|(t, _)| t).unwrap_or_default();
+            TaskFailure::Throw(tag)
+        }
+        Err(other) => std::panic::resume_unwind(other),
+    }
+}
+
+impl TaskBody for CompiledTask {
+    type Cx = ();
+    type Error = TaskFailure;
+
+    fn start_closure(heap: &mut Heap, closure: Value) -> CompiledTask {
+        let sbase = heap.root_count();
+        heap.push_root(closure);
+        heap.push_root(Value::Empty);
+        CompiledTask { chain: crate::coroutine::FrameStack::new(), state: CompiledState::Start(closure), sbase, wake: Wake::Unit }
+    }
+
+    fn sbase(&self) -> usize {
+        self.sbase
+    }
+
+    fn step(&mut self, heap: &mut Heap, _cx: &()) -> Progress<TaskFailure> {
+        // Taken out to be consumed; every path below either puts the next
+        // state back or reports `Done`, after which nothing reads it.
+        let state = std::mem::replace(&mut self.state, CompiledState::Resume(0));
+        let outcome = match state {
+            CompiledState::Entry(f) => self.chain.run(heap, f, &[]),
+            CompiledState::Start(closure) => self.chain.run_closure(heap, typelisp_abi::encode(closure)),
+            CompiledState::Resume(word) => {
+                self.chain.set_top_value(heap, word);
+                self.chain.resume(heap, 0)
+            }
+            CompiledState::Raise => self.chain.raise(heap, 0),
+            // Only the scheduler moves a task out of this, by delivering what
+            // it was waiting for.
+            CompiledState::Blocked(w) => {
+                self.state = CompiledState::Blocked(w.clone());
+                return Progress::Blocked(w);
+            }
+        };
+        self.after_drive(heap, outcome)
+    }
+
+    fn deliver(&mut self, heap: &mut Heap, answer: Result<Value, SchedError>) {
+        match answer {
+            // Encoded through the shape the suspension recorded, for the
+            // reason every crossing obeys: the word's meaning is in the type,
+            // and the value cannot say. A unit wake is a word the collector
+            // never follows; a typed one crosses tagged.
+            Ok(v) => {
+                let word = match self.wake {
+                    Wake::Unit => 0,
+                    Wake::Tagged => typelisp_abi::encode(v),
+                };
+                // The word is a Rust local until the chain's value slot takes
+                // it on the next step, and other tasks allocate in between.
+                heap.set_root(self.sbase, v);
+                heap.set_root(self.sbase + 1, Value::Empty);
+                self.state = CompiledState::Resume(word);
+            }
+            // The chain is asked for a handler the way a compiled `panic`
+            // asks: the payload is parked where the pad looks, and the next
+            // step raises it into the innermost frame.
+            Err(e) => {
+                let message = match e {
+                    SchedError::Panic(m) | SchedError::Internal(m) => m,
+                };
+                // SAFETY: a `Heap` is registered on this thread — this task's
+                // chain runs on it.
+                unsafe { crate::park_activation_unwind(Box::new(typelisp_abi::CompiledPanic { message })) };
+                self.state = CompiledState::Raise;
+                self.set_slots(heap);
+            }
+        }
+    }
+
+    /// A `throw` that leaves a task has no catch to reach — a tag does not
+    /// cross a task boundary — and a panic is not recoverable by definition.
+    /// Either way the program stops, which is Go's rule for an unrecovered
+    /// panic in a goroutine.
+    fn failure_left_task(e: TaskFailure) -> TaskFailure {
+        match e {
+            TaskFailure::Throw(tag) => TaskFailure::Panic(format!("`throw` of `{}` left its task", tag)),
+            other => other,
+        }
+    }
+}

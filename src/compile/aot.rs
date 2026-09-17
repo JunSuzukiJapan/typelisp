@@ -128,6 +128,12 @@ fn collect_aot_item(
             ffi_decls.push(typelisp_front::eval::interp::read_ffi_decl(heap, tl).map_err(|e| e.to_string())?);
             None
         }
+        // A bare `(main)` at top level is the line that starts the program
+        // under `typl file.typl`; the executable calls `main` on its own, so
+        // here it is read and dropped — which is what lets one source file
+        // be run either way. No other expression is: there is nothing to run
+        // it in.
+        "expr" if is_entry_call(heap, tl) => return Ok(()),
         other => {
             return Err(format!(
                 "compile-file only supports top-level `defun`/`defmethod`/`defvar`/`defconstant`/`defstruct`/`defenum`/`defffi`/`module`/`impl`, found `{}`",
@@ -144,6 +150,19 @@ fn collect_aot_item(
         defvar_inits.push((name, form));
     }
     Ok(())
+}
+
+/// Whether a top-level `(expr ...)` is `(main)` — a call of the entry point
+/// with no arguments, which is the one expression an AOT source may carry.
+fn is_entry_call(heap: &Heap, tl: Value) -> bool {
+    let Some(form) = core::field(heap, tl, 0) else { return false };
+    if core::op(heap, form) != Some("call") {
+        return false;
+    }
+    // `(call WRITTEN HOME PATH (R...) ARG...)`: the resolved path, and no
+    // arguments past the representation list.
+    let is_main = core::path_field(heap, form, 2).is_some_and(|p| p == Path::root(ENTRY_POINT_NAME));
+    is_main && core::fields(heap, form).map(|f| f.len() == 4).unwrap_or(false)
 }
 
 /// Reads `source_path`, compiles every `defun` in it, and links a native

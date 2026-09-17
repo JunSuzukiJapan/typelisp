@@ -562,9 +562,10 @@ pub fn set_frame_value(heap: &mut Heap, f: Value, w: i64) {
 // compiled code then sets its resume point and returns `STATUS_SUSPEND` —
 // which is the `coroutine-call` shape with the callee left out.
 //
-// So these shims never block, and there is nothing here for an AOT executable
-// with no scheduler to get wrong: the driver on the other side decides whether
-// a suspension is something it can honour.
+// So these shims never block, and nothing here knows who is driving: the
+// driver on the other side — the interpreter's task, an executable's
+// `sched::CompiledTask`, or a machine-frame driver that can honour only a
+// safepoint — decides what to do with the suspension.
 
 /// `(go ...)` for compiled code: hand the scheduler a closure to run as a
 /// new task. `args[0]` is the closure, tagged — a heap box, rooted by the

@@ -466,15 +466,18 @@ const SHARED_WITH_ISLAND: &[&str] = &[
     "int-any-width", "int", "float-any-width", "bignum", "ratio", "char", "bool", "str", "unit", "var", "set", "global",
     "set-global", "let", "lambda", "labels", "call", "assoc", "apply", "if", "loop", "break",
     "return", "block", "return-from", "panic", "match", "construct", "field-get", "field-set",
-    "dyn-new", "dyn-upcast", "dyn-call", "dyn-value", "go", "select",
+    "dyn-new", "dyn-upcast", "dyn-call", "dyn-value", "select",
 ];
 
 /// Core tags with no island counterpart: the bridge turns each into something
 /// else. A symbol becomes an interned id, quoted data is inlined, a function
-/// reference becomes a closure construction, and the pattern tags are consumed
-/// by `compile-match` rather than by `compile-value`.
+/// reference becomes a closure construction, `go` becomes a `let` of its
+/// operands around a `spawn` of a thunk (the island only ever sees the
+/// `suspend` the thunk is handed to), and the pattern tags are consumed by
+/// `compile-match` rather than by `compile-value`.
 const EXPR_ONLY: &[&str] = &[
     "sym",
+    "go",
     "quote",
     "fnref",
     "methodref",

@@ -339,6 +339,22 @@ fn errors_on_a_non_defun_top_level_form() {
     assert!(err.contains("defun"), "error was: {}", err);
 }
 
+/// A trailing `(main)` — the line that starts the program under `typl
+/// file.typl` — is accepted and dropped, so one source file runs either way.
+/// Only that: `(main 1)` and any other expression are still refused.
+#[test]
+fn a_top_level_entry_call_is_the_one_expression_allowed() {
+    assert_eq!(compile_and_run("entry_call_ok", "(defun main () int 7)\n(main)"), 7);
+
+    let dir = tmp_dir();
+    let src_path = dir.join("entry_call_with_args.typl");
+    let out_path = dir.join("entry_call_with_args");
+    std::fs::write(&src_path, "(defun main () int 7)\n(defun f ((n int)) int n)\n(f 1)").unwrap();
+    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect_err("expected an unsupported-top-level-form error");
+    assert!(err.contains("defun"), "error was: {}", err);
+}
+
 /// The Phase 2 core claim: the same typelisp source, compiled through the
 /// JIT path (`compile`) and the AOT path (`compile-file`), agrees — proving
 /// the per-function compile step (`Interp::add_compiled_function`) really

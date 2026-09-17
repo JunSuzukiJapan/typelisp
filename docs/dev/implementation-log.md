@@ -11637,3 +11637,72 @@ externs 295 個、`RESULT_KEYS` の `net-flush` を `result<option<int>,neterror
 
 rcgen の既定 DN は `CN=rcgen self signed cert`——テストで CN を見るなら `distinguished_name` を
 自分で置く。extern +6（300 個）、島再生成。
+
+## AOT 実行ファイルにスケジューラを載せる（2026-09-17）
+
+`typl file.typl` では動く echo サーバが `compile-file` した実行ファイルでは動かなかった。
+AOT の `main` は `rt_run_entry_driven` が `FrameStack::run` を 1 回呼ぶだけで、
+`STATUS_SUSPEND` が返ると `pause_on_a_machine_frame` で abort——`sleep`・`wait`・
+チャネル・`net-wait` すべて同じ穴。`go` は `SPAWN_TASK` hook 未設定で「インタプリタが
+要る」と raise。そして **C7 の loop safepoint も同じ穴に落ちていた**（`run_to_end` の
+腕は `rt_drive_entry` にしか無く、タスクを 1 つも作らない 10 万回のループが abort した。
+AOT テストは n=5 のループしか回していなかった）。
+
+将来の M:N（OS スレッド）と衝突しない形、を条件に 3 段で直した。
+
+**Phase 1: スケジューラの核を rt へ。** `Scheduler`/`Waiting`/`ChanOp`/`SelectOp`/
+`try_now`/`pending_wait`/`drive` を `core_cps.rs` から `crates/typelisp-rt/src/sched.rs`
+へ移し、`Scheduler<B: TaskBody>` にジェネリック化。`TaskBody` は `step`/`deliver` の
+2 メソッド（+ `start_closure`/`sbase`/`failure_left_task`）。front の `Task` が
+`Cx = Interp` で実装し、`State` への直接書き込みは全部 `deliver` に。`EvalError` は
+rt の `SchedError { Panic, Internal }`。`Task<T>`/`Chan<T>` の型キーは
+`typelisp-mem` の事前 intern 表（`TypeKeyId::TASK`/`CHAN`）——rt は `Path` を
+持たないので、`neterror` と同じ扱い。振る舞い不変で、既存の並行テストが全部緑。
+
+踏んだ: `core::pair` は cons の前後で両半を root する `RootScope` だった。移植で
+生の `heap.cons` にしたら `a_parked_select_holds_its_operands_through_gc_stress` が
+dangling StrId で捕まえた。
+
+**Phase 2: compiled な `go` を「クロージャを新タスクで apply する suspend」に。**
+`rt_go` は呼び出しノードの頭を quoted data で渡し、interp が名前解決していた。
+新設計は bridge の `translate_go` が `(go RET-R CALL)` を
+`(let ((g R E)...) (spawn RET-R (lambda () RET-R (tag RET-R CALL'))))` に書き換える。
+引数は go を書いた場所で評価され（Go の規則）、それらを by-value で捕捉するクロージャが
+呼び出しを行い、結果を `tag`（`compile-tag-struct-field`）してから返す。`spawn` は
+島の既存 `(suspend "rt_suspend_go" 6 ...)` ノード。スケジューラは `Waiting::Spawn` を
+`try_now` で即答（`Chan::new` と同じ「番を消費しない suspend」）。front は
+`State::CompiledApply { closure }` → `FrameStack::run_closure` → 既存 `after_drive`
+（`ret = Repr::Sexpr`）。**rt はタグ付きの語しか見ない**——表現に依る判断は全部
+compiled 側に残り、rt に `Repr::field_kind` の分岐を複製しない。`rt_go`/`SPAWN_TASK`/
+`rt_spawn_task`/`spawn_from_compiled` は削除、thread_local が 1 本減った。
+
+踏んだ 2 つ: (1) `translate_lambda` は捕捉する名前を既定で全部 cell にするが、外側の
+`let` は cell と知らない——`Ctx::by_value` で hoist した名前だけ cell から外す。
+(2) `tag`/`spawn` を語彙（`symbols.rs`）に入れないと free-variable walk が prelude の
+`after`（`go` を使う）で落ちる。成果物は島（語彙・extern 表）と prelude の両方を regen。
+
+**Phase 3: `CompiledTask` と AOT 入口。** rt に `CompiledTask: TaskBody<Cx = ()>`
+（`FrameStack` + 状態 Entry/Start/Resume/Raise/Blocked + 状態スロット 2 本）。答えは
+全部タグ付き語（thunk が tag する、`main` は int か unit）なので `decode(word)` で
+`Value` に。`Paused::Applying` は `apply_on_this_frame`（`eval` 無し AOT では今までと
+同じ fatal）、`Paused::Unwinding` は parked payload を `TaskFailure::Panic/Throw` に。
+`rt_run_entry_driven[_int]` は自分のフレームに `Scheduler<CompiledTask>` を作り
+`tl_main` を main として `sched::drive`。非 main タスクの失敗は `panic: ...` +
+exit 1、全員 blocked は `error: scheduler: every task is blocked ...`。
+`rt_drive_entry`（`defvar` 初期化子）と `rt_drive_body`（printer の door）は
+`run_to_end` のまま。`compile-file` は末尾の `(main)`（引数なしのエントリ呼び出し）だけ
+読み飛ばすので、`examples/projects/echo-server` がそのまま AOT で動く（`nc` で echo、
+`[still here]` の heartbeat で `sleep` がタスクだけを止めていることを確認）。
+
+**M:N との線引き（これで型に言える）**: タスク本体は「インタプリタの継続スタック」と
+「compiled 鎖だけ」の 2 種類で、スレッド間を動かすのは後者。`CompiledTask` が
+`!Send` なのは `Value`（ヒープへの生ポインタ）だけが理由——`assert_send` は
+ちょうど `*mut Cell` で落ち、`unsafe impl Send` はヒープについての嘘になるので書かない。
+壁はヒープにあってスケジューラに無い。スケジューラは Heap の持ち主が所有する値で
+global/thread_local に置かない。OS を待つ場所は `wake_io` 1 つのまま。
+
+残る制限: `eval` 入り AOT 実行ファイルでは AOT のスケジューラと `Interp` のものが 2 つ
+並ぶ（eval 内の `go` は次の `rt_eval` まで走らない、今までどおり）。AOT の printer door
+の中では即答できる `go`/チャネル操作も fatal（door にスケジューラを渡す手段が無い）。
+インタプリタが compiled クロージャを `funcall` すると中断できない（`call_closure_box`、
+`State::CompiledApply` で閉じられるが今回は `go` 経路だけ）。
