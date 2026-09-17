@@ -11611,3 +11611,29 @@ externs 295 個、`RESULT_KEYS` の `net-flush` を `result<option<int>,neterror
 届く。単体テストで最初に踏んだのは駆動順の罠: クライアントの握手が終わった後にサーバ側を
 1 度 `net_fill` しないと、サーバは最後のフライトを読まずアラートも出さない（テストが 25 分
 ハングした。`grep` にパイプすると出力が無いので気づきにくい）。
+
+## ソケット層の小さい穴 5 つ（2026-09-17）
+
+「要望が出たときで十分」と言った 5 つを、ユーザーの「小さい穴ならさっさと」で同日に。
+
+- **`set-nodelay`／`set-keepalive`／`set-keepalive-period`**。keepalive は `std` が setter を捨てたので
+  `os.rs` に `setsockopt`（`SO_KEEPALIVE`、周期は macOS `TCP_KEEPALIVE`／Linux `TCP_KEEPIDLE` +
+  `TCP_KEEPINTVL`、他 OS は `unimplemented!()`）。周期は**整数秒**——OS の単位がそれで、`f64` を
+  組み込みの引数に通すには箱の割り付けが要る。Unix ドメインは nodelay=成功（性質が既に成り立つ）、
+  keepalive=エラー（消える相手が無い。黙って成功は誤解を放置する）。
+- **`peer-subject`**: rustls は DER しか出さず、x509-parser は依存を 10 個連れてくる。subject
+  1 つのために `crates/typelisp-rt/src/x509.rs`（~200 行の DER 歩き: Certificate → TBS → version?
+  → serial → sigAlg → issuer → validity → subject）。RFC 4514 形式（逆順、`CN=…,O=…`、エスケープ、
+  非文字列は `#hex`——RFC 自身の綴りなので「検証器が通した証明書に描けないものは無い」）。
+  文字列型は DirectoryString 全部 + IA5（Teletex は Latin-1）。**相手の証明書で panic してはならない**
+  （相手の失敗を panic にしない規則の延長）ので、未知の型は `#hex` で描く。
+- **`requested-server-name`**（SNI で求められた名前）と **`tls-add-certificate`**（listener に名前付き
+  証明書を追加）。resolver は自前の `SniCerts`（既定 + `Mutex<HashMap>`）で、rustls の
+  `ResolvesServerCertUsingSni` は名前が無いと握手を落とすので使わない——名前無し／未登録は
+  `tls-listen` の証明書に落ちる。追加時に `verify_server_name` で「その名前用か」を検査。
+  `Backend::Listener.tls` は `Arc<ServerConfig>` から `TlsServer { config, certs }` へ。
+- **`select` にソケット腕**: やらない。`select` は channel 専用で（interp・compiled の word 列・
+  checker の構文）、Go にも無い。読むタスク + channel が設計。
+
+rcgen の既定 DN は `CN=rcgen self signed cert`——テストで CN を見るなら `distinguished_name` を
+自分で置く。extern +6（300 個）、島再生成。

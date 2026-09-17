@@ -53,10 +53,41 @@
 //! input and a write is a no-op, and [`StreamTable::net_socket_error`] says
 //! what happened. Go's `bufio.Writer` keeps its first error the same way.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, ToSocketAddrs, UdpSocket};
 use std::sync::{Arc, Mutex};
+
+/// What a `tls-listen` listener holds: the configuration every accepted
+/// connection shares, and the certificates it chooses among — kept apart
+/// from the configuration so that `tls-add-certificate` can add one
+/// without rebuilding it.
+pub(crate) struct TlsServer {
+    config: Arc<rustls::ServerConfig>,
+    certs: Arc<SniCerts>,
+}
+
+/// The server's certificates, chosen by the name the client asked for
+/// (SNI): the one `tls-listen` was given serves any name not listed, so a
+/// client that sends no name — or one nobody added — still gets a
+/// certificate and can decide for itself whether it is for the host it
+/// meant. Names are added under a lock because the resolver is shared with
+/// every connection's handshake.
+#[derive(Debug)]
+struct SniCerts {
+    default: Arc<rustls::sign::CertifiedKey>,
+    by_name: Mutex<HashMap<String, Arc<rustls::sign::CertifiedKey>>>,
+}
+
+impl rustls::server::ResolvesServerCert for SniCerts {
+    fn resolve(&self, hello: rustls::server::ClientHello<'_>) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        let named = hello.server_name().and_then(|name| match self.by_name.lock() {
+            Ok(table) => table.get(name).cloned(),
+            Err(_) => None,
+        });
+        Some(named.unwrap_or_else(|| Arc::clone(&self.default)))
+    }
+}
 
 use crate::stream::{Backend, Handle, Listen, ResolverAnswer, Sock, StreamObj, StreamResult, StreamTable};
 
@@ -103,7 +134,7 @@ impl StreamTable {
         }
     }
 
-    fn listener(&mut self, h: Handle, who: &str) -> StreamResult<(&mut Listen, &Option<Arc<rustls::ServerConfig>>)> {
+    fn listener(&mut self, h: Handle, who: &str) -> StreamResult<(&mut Listen, &Option<TlsServer>)> {
         match &mut self.get(h)?.backend {
             Backend::Listener { listen, tls } => Ok((listen, tls)),
             Backend::Closed => Err(format!("{}: the listener is closed", who)),
@@ -258,17 +289,35 @@ impl StreamTable {
         key_file: &str,
         client_ca: Option<&str>,
     ) -> StreamResult<Handle> {
-        let config = tls_server_config(cert_file, key_file, client_ca).map_err(|e| format!("tls-listen: {}", e))?;
-        self.listen_with(host, port, Some(config), "tls-listen")
+        let server = tls_server_config(cert_file, key_file, client_ca).map_err(|e| format!("tls-listen: {}", e))?;
+        self.listen_with(host, port, Some(server), "tls-listen")
     }
 
-    fn listen_with(
-        &mut self,
-        host: &str,
-        port: i64,
-        tls: Option<Arc<rustls::ServerConfig>>,
-        who: &str,
-    ) -> StreamResult<Handle> {
+    /// One more certificate for the `tls-listen` listener `h`, presented to
+    /// clients that ask for `name` (SNI). The chain is checked to be for
+    /// that name here, so a mismatch is this call's `Err` and not a
+    /// client's failed handshake. Takes effect for the next handshake.
+    pub fn net_tls_add_certificate(&mut self, h: Handle, name: &str, cert_file: &str, key_file: &str) -> StreamResult<()> {
+        let (_, tls) = self.listener(h, "tls-add-certificate")?;
+        let Some(server) = tls else {
+            return Err("tls-add-certificate: the listener does not speak TLS (made by tcp-listen)".to_string());
+        };
+        let ck = certified_key(cert_file, key_file).map_err(|e| format!("tls-add-certificate: {}", e))?;
+        let server_name = rustls::pki_types::ServerName::try_from(name.to_string())
+            .map_err(|_| format!("tls-add-certificate: {} is not a valid server name", name))?;
+        let rustls::pki_types::ServerName::DnsName(dns) = &server_name else {
+            return Err(format!("tls-add-certificate: {} is an address, and SNI carries names only", name));
+        };
+        let end_entity = ck.end_entity_cert().map_err(|e| format!("tls-add-certificate: {}: {}", cert_file, e))?;
+        rustls::server::ParsedCertificate::try_from(end_entity)
+            .and_then(|cert| rustls::client::verify_server_name(&cert, &server_name))
+            .map_err(|e| format!("tls-add-certificate: {} is not for {}: {}", cert_file, name, e))?;
+        let mut table = server.certs.by_name.lock().map_err(|_| "tls-add-certificate: the certificate table is poisoned".to_string())?;
+        table.insert(dns.as_ref().to_ascii_lowercase(), Arc::new(ck));
+        Ok(())
+    }
+
+    fn listen_with(&mut self, host: &str, port: i64, tls: Option<TlsServer>, who: &str) -> StreamResult<Handle> {
         let port = u16::try_from(port).map_err(|_| format!("{}: {} is not a port number (0..65535)", who, port))?;
         let l = TcpListener::bind((host, port)).map_err(|e| format!("{}: {}:{}: {}", who, host, port, e))?;
         l.set_nonblocking(true).map_err(|e| format!("{}: {}", who, e))?;
@@ -295,7 +344,7 @@ impl StreamTable {
         sock.set_nonblocking(true).map_err(|e| format!("accept: {}", e))?;
         let conn = match tls {
             None => None,
-            Some(config) => {
+            Some(TlsServer { config, .. }) => {
                 let server = rustls::ServerConnection::new(Arc::clone(config)).map_err(|e| format!("accept: tls: {}", e))?;
                 Some(Box::new(rustls::Connection::Server(server)))
             }
@@ -421,6 +470,79 @@ impl StreamTable {
         let conn = rustls::ClientConnection::new(config, name).map_err(|e| format!("tls-connect: {}", e))?;
         *tls = Some(Box::new(rustls::Connection::Client(conn)));
         Ok(())
+    }
+
+    /// The subject of the certificate the peer presented, in RFC 4514 form
+    /// (`CN=client,O=Example,C=JP`) — who a mutual-TLS client is, or what
+    /// name a server's certificate was issued to. `None` on a plain
+    /// connection, before the handshake, or when the peer sent none (a
+    /// server that did not ask for one). The DER walk is `crate::x509`'s;
+    /// a certificate the verifier accepted is one it can read.
+    pub fn net_peer_subject(&mut self, h: Handle) -> StreamResult<Option<String>> {
+        let TcpParts { tls, .. } = self.tcp(h, "peer-subject")?;
+        let Some(conn) = tls else {
+            return Ok(None);
+        };
+        match conn.peer_certificates().and_then(|chain| chain.first()) {
+            None => Ok(None),
+            Some(cert) => crate::x509::subject(cert.as_ref()).map(Some).map_err(|e| format!("peer-subject: {}", e)),
+        }
+    }
+
+    /// The name the client asked for (SNI) on a server-side TLS connection,
+    /// once its handshake has read the ClientHello: what a server holding
+    /// several certificates uses to know which site it is serving. `None`
+    /// on a plain or client-side connection, before the handshake, or when
+    /// the client sent no name (it connected by address).
+    pub fn net_server_name(&mut self, h: Handle) -> StreamResult<Option<String>> {
+        let TcpParts { tls, .. } = self.tcp(h, "requested-server-name")?;
+        Ok(match tls.as_deref() {
+            Some(rustls::Connection::Server(server)) => server.server_name().map(str::to_string),
+            _ => None,
+        })
+    }
+
+    /// Whether small writes go out at once (`TCP_NODELAY`, Nagle's
+    /// algorithm off). Every `write-string` here already reaches the socket
+    /// before it returns, so with Nagle on, a reply sent as two writes — a
+    /// header, then a body — can sit until the peer's delayed ACK releases
+    /// the second; a request/response protocol wants this on. A Unix-domain
+    /// socket has no Nagle, so the property already holds and there is
+    /// nothing to set.
+    pub fn net_set_nodelay(&mut self, h: Handle, on: bool) -> StreamResult<()> {
+        let TcpParts { sock, .. } = self.tcp(h, "set-nodelay")?;
+        match sock {
+            Sock::Tcp(s) => s.set_nodelay(on).map_err(|e| format!("set-nodelay: {}", e)),
+            Sock::Unix(_) => Ok(()),
+        }
+    }
+
+    /// Whether the OS probes an idle connection to find out that its peer
+    /// is gone (`SO_KEEPALIVE`); see `crate::os::set_keepalive`. Refused on
+    /// a Unix-domain socket, which has no peer that can vanish behind a
+    /// network — asking is a misunderstanding, not a no-op.
+    pub fn net_set_keepalive(&mut self, h: Handle, on: bool) -> StreamResult<()> {
+        let TcpParts { sock, .. } = self.tcp(h, "set-keepalive")?;
+        match sock {
+            Sock::Tcp(_) => crate::os::set_keepalive(sock.raw_fd(), on).map_err(|e| format!("set-keepalive: {}", e)),
+            Sock::Unix(_) => Err("set-keepalive: a Unix-domain socket has no keepalive".to_string()),
+        }
+    }
+
+    /// The idle time before the first keepalive probe and the interval
+    /// between probes, both `secs` (whole seconds — the OS's unit — at
+    /// least one); see `crate::os::set_keepalive_period`.
+    pub fn net_set_keepalive_period(&mut self, h: Handle, secs: i64) -> StreamResult<()> {
+        let TcpParts { sock, .. } = self.tcp(h, "set-keepalive-period")?;
+        let secs = match u32::try_from(secs) {
+            Ok(s) if s >= 1 => s,
+            _ => return Err(format!("set-keepalive-period: {} is not a period in whole seconds of at least 1", secs)),
+        };
+        match sock {
+            Sock::Tcp(_) => crate::os::set_keepalive_period(sock.raw_fd(), secs)
+                .map_err(|e| format!("set-keepalive-period: {}", e)),
+            Sock::Unix(_) => Err("set-keepalive-period: a Unix-domain socket has no keepalive".to_string()),
+        }
     }
 
     /// Why the peer's side of the connection is gone, if it is: the first
@@ -792,13 +914,22 @@ fn tls_client_config(ca_file: Option<&str>, identity: Option<(&str, &str)>) -> R
     Ok(Arc::new(config))
 }
 
-/// A server configuration: the chain in `cert_file`, the key in `key_file`,
-/// and with `client_ca` a verifier that requires every client to present a
-/// certificate issued by one in that file.
-fn tls_server_config(cert_file: &str, key_file: &str, client_ca: Option<&str>) -> Result<Arc<rustls::ServerConfig>, String> {
+/// The chain in `cert_file` with the key in `key_file`, checked to match.
+fn certified_key(cert_file: &str, key_file: &str) -> Result<rustls::sign::CertifiedKey, String> {
     use rustls::pki_types::pem::PemObject;
+    static PROVIDER: std::sync::OnceLock<rustls::crypto::CryptoProvider> = std::sync::OnceLock::new();
+    let provider = PROVIDER.get_or_init(rustls::crypto::ring::default_provider);
     let certs = pem_certificates(cert_file)?;
     let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key_file).map_err(|e| format!("{}: {}", key_file, e))?;
+    rustls::sign::CertifiedKey::from_der(certs, key, provider).map_err(|e| format!("{}: {}", cert_file, e))
+}
+
+/// A server configuration: the chain in `cert_file`, the key in `key_file`
+/// (the default certificate of a resolver more can be added to), and with
+/// `client_ca` a verifier that requires every client to present a
+/// certificate issued by one in that file.
+fn tls_server_config(cert_file: &str, key_file: &str, client_ca: Option<&str>) -> Result<TlsServer, String> {
+    let certs = Arc::new(SniCerts { default: Arc::new(certified_key(cert_file, key_file)?), by_name: Mutex::new(HashMap::new()) });
     let builder = match client_ca {
         None => rustls::ServerConfig::builder().with_no_client_auth(),
         Some(file) => {
@@ -808,8 +939,8 @@ fn tls_server_config(cert_file: &str, key_file: &str, client_ca: Option<&str>) -
             rustls::ServerConfig::builder().with_client_cert_verifier(verifier)
         }
     };
-    let config = builder.with_single_cert(certs, key).map_err(|e| format!("{}: {}", cert_file, e))?;
-    Ok(Arc::new(config))
+    let config = Arc::new(builder.with_cert_resolver(Arc::clone(&certs) as Arc<dyn rustls::server::ResolvesServerCert>));
+    Ok(TlsServer { config, certs })
 }
 
 /// How many bytes the UTF-8 character starting with `first` occupies, or
@@ -996,6 +1127,8 @@ mod tests {
         key: String,
         client_cert: String,
         client_key: String,
+        alt_cert: String,
+        alt_key: String,
     }
 
     fn test_pki() -> Pki {
@@ -1009,12 +1142,24 @@ mod tests {
         let issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
         let mut server = CertificateParams::new(vec!["localhost".to_string()]).unwrap();
         server.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        server.distinguished_name = rcgen::DistinguishedName::new();
+        server.distinguished_name.push(rcgen::DnType::CommonName, "localhost");
         let server_key = KeyPair::generate().unwrap();
         let server_cert = server.signed_by(&server_key, &issuer).unwrap();
         let mut client = CertificateParams::new(vec!["client".to_string()]).unwrap();
         client.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        client.distinguished_name = rcgen::DistinguishedName::new();
+        client.distinguished_name.push(rcgen::DnType::OrganizationName, "Example");
+        client.distinguished_name.push(rcgen::DnType::CommonName, "client");
         let client_key = KeyPair::generate().unwrap();
         let client_cert = client.signed_by(&client_key, &issuer).unwrap();
+        // A second server certificate, for another name (SNI).
+        let mut alt = CertificateParams::new(vec!["alt.test".to_string()]).unwrap();
+        alt.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        alt.distinguished_name = rcgen::DistinguishedName::new();
+        alt.distinguished_name.push(rcgen::DnType::CommonName, "alt.test");
+        let alt_key = KeyPair::generate().unwrap();
+        let alt_cert = alt.signed_by(&alt_key, &issuer).unwrap();
         let write = |name: &str, text: String| {
             let path = dir.join(name);
             std::fs::write(&path, text).unwrap();
@@ -1026,6 +1171,8 @@ mod tests {
             key: write("key.pem", server_key.serialize_pem()),
             client_cert: write("client.pem", client_cert.pem()),
             client_key: write("client-key.pem", client_key.serialize_pem()),
+            alt_cert: write("alt.pem", alt_cert.pem()),
+            alt_key: write("alt-key.pem", alt_key.serialize_pem()),
         }
     }
 
@@ -1042,12 +1189,23 @@ mod tests {
         client_ca: Option<&str>,
     ) -> (Result<Handle, String>, Handle) {
         let l = t.net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, client_ca).unwrap();
+        tls_pair_on(t, l, pki, "localhost", trust, identity)
+    }
+
+    fn tls_pair_on(
+        t: &mut StreamTable,
+        l: Handle,
+        _pki: &Pki,
+        server_name: &str,
+        trust: Option<&str>,
+        identity: Option<(&str, &str)>,
+    ) -> (Result<Handle, String>, Handle) {
         let addr = t.net_local_address(l).unwrap();
         let c = t.net_connect_begin(&addr).unwrap();
         let cfd = t.raw_fd(c).unwrap();
         crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
         t.net_connect_finish(c).unwrap();
-        t.net_tls_start(c, "localhost", trust, identity.map(|i| i.0), identity.map(|i| i.1)).unwrap();
+        t.net_tls_start(c, server_name, trust, identity.map(|i| i.0), identity.map(|i| i.1)).unwrap();
         let lfd = t.raw_fd(l).unwrap();
         crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
         let s = t.net_accept(l).unwrap().expect("a connection was waiting");
@@ -1220,6 +1378,67 @@ mod tests {
             Ok(c) => fill_until_some(&mut t, c) == 0 && t.net_socket_error(c).unwrap().is_some(),
         };
         assert!(refused, "a client without a certificate got through");
+    }
+
+    #[test]
+    fn the_peer_subject_is_the_certificates_name() {
+        let mut t = StreamTable::default();
+        let pki = test_pki();
+        let (c, s) = tls_pair(&mut t, &pki, Some(&pki.ca), Some((&pki.client_cert, &pki.client_key)), Some(&pki.ca));
+        let c = c.unwrap();
+        // The client sees the server's certificate after its handshake; the
+        // server sees the client's once its first read has processed it.
+        assert_eq!(t.net_peer_subject(c).unwrap().as_deref(), Some("CN=localhost"));
+        t.net_push_string(c, "hi\n").unwrap();
+        assert_eq!(t.net_flush(c).unwrap(), None);
+        assert!(fill_until_some(&mut t, s) > 0);
+        assert_eq!(t.net_peer_subject(s).unwrap().as_deref(), Some("CN=client,O=Example"));
+        assert_eq!(t.net_server_name(s).unwrap().as_deref(), Some("localhost"));
+        assert_eq!(t.net_server_name(c).unwrap(), None);
+        // A plain connection has neither.
+        let (p, _) = connected_pair(&mut t);
+        assert_eq!(t.net_peer_subject(p).unwrap(), None);
+        assert_eq!(t.net_server_name(p).unwrap(), None);
+    }
+
+    #[test]
+    fn a_listener_serves_a_second_name_with_its_own_certificate() {
+        let mut t = StreamTable::default();
+        let pki = test_pki();
+        let l = t.net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, None).unwrap();
+        // The wrong file for the name is refused up front.
+        let err = t.net_tls_add_certificate(l, "alt.test", &pki.cert, &pki.key).unwrap_err();
+        assert!(err.contains("not for alt.test"), "{}", err);
+        t.net_tls_add_certificate(l, "alt.test", &pki.alt_cert, &pki.alt_key).unwrap();
+        // Asking for alt.test gets alt's certificate...
+        let (c, s) = tls_pair_on(&mut t, l, &pki, "alt.test", Some(&pki.ca), None);
+        let c = c.expect("the certificate added for alt.test was not presented");
+        assert_eq!(t.net_peer_subject(c).unwrap().as_deref(), Some("CN=alt.test"));
+        let _ = s;
+        // ...and localhost still gets the listener's own.
+        let (c, _) = tls_pair_on(&mut t, l, &pki, "localhost", Some(&pki.ca), None);
+        assert_eq!(t.net_peer_subject(c.unwrap()).unwrap().as_deref(), Some("CN=localhost"));
+        // A plain listener has nothing to add to.
+        let plain = t.net_listen("127.0.0.1", 0).unwrap();
+        assert!(t.net_tls_add_certificate(plain, "alt.test", &pki.alt_cert, &pki.alt_key).is_err());
+    }
+
+    #[test]
+    fn socket_options_are_set_on_tcp_and_refused_where_meaningless() {
+        let mut t = StreamTable::default();
+        let (c, _) = connected_pair(&mut t);
+        t.net_set_nodelay(c, true).unwrap();
+        t.net_set_keepalive(c, true).unwrap();
+        t.net_set_keepalive_period(c, 15).unwrap();
+        assert!(t.net_set_keepalive_period(c, 0).is_err());
+        let dir = std::env::temp_dir().join(format!("typelisp-unix-opts-{}", std::process::id()));
+        let _ = std::fs::remove_file(&dir);
+        let path = dir.to_string_lossy().into_owned();
+        let l = t.net_unix_listen(&path).unwrap();
+        let u = t.net_unix_connect(&path).unwrap();
+        t.net_set_nodelay(u, true).unwrap();
+        assert!(t.net_set_keepalive(u, true).is_err());
+        t.close(l).unwrap();
     }
 
     #[test]

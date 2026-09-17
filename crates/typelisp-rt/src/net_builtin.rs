@@ -43,6 +43,12 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("net-push-byte", "result<(),neterror>"),
     ("net-flush", "result<option<int>,neterror>"),
     ("net-socket-error", "result<option<string>,neterror>"),
+    ("net-peer-subject", "result<option<string>,neterror>"),
+    ("net-server-name", "result<option<string>,neterror>"),
+    ("net-set-nodelay", "result<(),neterror>"),
+    ("net-set-keepalive", "result<(),neterror>"),
+    ("net-set-keepalive-period", "result<(),neterror>"),
+    ("net-tls-add-certificate", "result<(),neterror>"),
     ("net-shutdown-write", "result<(),neterror>"),
     ("net-local-address", "result<string,neterror>"),
     ("net-peer-address", "result<string,neterror>"),
@@ -64,9 +70,19 @@ pub const INNER_KEYS: &[(&str, &str)] = &[
     ("net-fill", "option<int>"),
     ("net-flush", "option<int>"),
     ("net-socket-error", "option<string>"),
+    ("net-peer-subject", "option<string>"),
+    ("net-server-name", "option<string>"),
     ("net-pop-byte", "option<int>"),
     ("net-pop-char", "option<char>"),
 ];
+
+/// A `bool` argument.
+fn flag(args: &[Value], i: usize, who: &str) -> Result<bool, ArgError> {
+    match args.get(i) {
+        Some(Value::Bool(b)) => Ok(*b),
+        other => Err(format!("{}: argument {} is not a bool, got {:?}", who, i, other)),
+    }
+}
 
 /// An `Option<string>` argument. The type niches (`option.rs`): `none` is
 /// the empty word, `some` the string itself.
@@ -195,11 +211,16 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
             let client_ca = arg!(opt_text(heap, args, 4, name));
             wrap!(with_streams(|t| t.net_tls_listen(&host, port, &cert, &key, client_ca.as_deref())), |v: i64| Value::Int(v))
         }
-        // The message as a string box inside the `Option`: allocated first,
+        // The text as a string box inside the `Option`: allocated first,
         // then boxed, with nothing that can collect in between.
-        "net-socket-error" => {
+        "net-socket-error" | "net-peer-subject" | "net-server-name" => {
             let h = arg!(int(args, 0, name));
-            match with_streams(|t| t.net_socket_error(h)) {
+            let answer = with_streams(|t| match name {
+                "net-socket-error" => t.net_socket_error(h),
+                "net-peer-subject" => t.net_peer_subject(h),
+                _ => t.net_server_name(h),
+            });
+            match answer {
                 Ok(what) => {
                     let inner = what.map(|m| heap.alloc_string(m));
                     let ov = option_value(heap, name, inner);
@@ -207,6 +228,23 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
                 }
                 Err(m) => Ok(result_err(heap, name, m)),
             }
+        }
+        "net-set-nodelay" => {
+            let (h, on) = (arg!(int(args, 0, name)), arg!(flag(args, 1, name)));
+            wrap!(with_streams(|t| t.net_set_nodelay(h, on)), |_v: ()| Value::Empty)
+        }
+        "net-set-keepalive" => {
+            let (h, on) = (arg!(int(args, 0, name)), arg!(flag(args, 1, name)));
+            wrap!(with_streams(|t| t.net_set_keepalive(h, on)), |_v: ()| Value::Empty)
+        }
+        "net-set-keepalive-period" => {
+            let (h, secs) = (arg!(int(args, 0, name)), arg!(int(args, 1, name)));
+            wrap!(with_streams(|t| t.net_set_keepalive_period(h, secs)), |_v: ()| Value::Empty)
+        }
+        "net-tls-add-certificate" => {
+            let (h, host) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
+            let (cert, key) = (arg!(text(heap, args, 2, name)), arg!(text(heap, args, 3, name)));
+            wrap!(with_streams(|t| t.net_tls_add_certificate(h, &host, &cert, &key)), |_v: ()| Value::Empty)
         }
         "net-tls-handshake" => {
             let h = arg!(int(args, 0, name));

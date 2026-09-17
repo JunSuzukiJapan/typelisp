@@ -119,8 +119,9 @@ pub(crate) enum Backend {
     /// input nor an output stream: it yields connections, not items. With
     /// `tls` present (`tls-listen`), every connection it accepts gets a
     /// server-side TLS connection over it, sharing this configuration —
-    /// the certificate and key loaded once when the listener was made.
-    Listener { listen: Listen, tls: Option<std::sync::Arc<rustls::ServerConfig>> },
+    /// the certificate and key loaded once when the listener was made,
+    /// plus any added since for other names (`crate::net::TlsServer`).
+    Listener { listen: Listen, tls: Option<crate::net::TlsServer> },
     /// A UDP socket, non-blocking. Datagrams, not a stream: it is neither an
     /// input nor an output stream, and `crate::net` speaks to it in whole
     /// messages. `last_from` is who sent the datagram most recently received.

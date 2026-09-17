@@ -1300,6 +1300,17 @@ fn register_net_builtins(root: &mut Namespace) {
     native("net-push-byte", vec![h.clone(), Type::Int], unit_or_err.clone());
     native("net-flush", vec![h.clone()], result_of(option_of(Type::Int), net_err.clone()));
     native("net-socket-error", vec![h.clone()], result_of(option_of(Type::Str), net_err.clone()));
+    // Who the peer is (its certificate's subject) and which name the client
+    // asked for (SNI): `none` where there is no TLS or no such thing.
+    native("net-peer-subject", vec![h.clone()], result_of(option_of(Type::Str), net_err.clone()));
+    native("net-server-name", vec![h.clone()], result_of(option_of(Type::Str), net_err.clone()));
+    // Socket options: Nagle off, keepalive on/off and its period in seconds.
+    native("net-set-nodelay", vec![h.clone(), Type::Bool], unit_or_err.clone());
+    native("net-set-keepalive", vec![h.clone(), Type::Bool], unit_or_err.clone());
+    native("net-set-keepalive-period", vec![h.clone(), Type::Int], unit_or_err.clone());
+    // One more certificate on a `tls-listen` listener, for clients asking
+    // for that name.
+    native("net-tls-add-certificate", vec![h.clone(), Type::Str, Type::Str, Type::Str], unit_or_err.clone());
     native("net-shutdown-write", vec![h.clone()], unit_or_err.clone());
     native("net-local-address", vec![h.clone()], result_of(Type::Str, net_err.clone()));
     native("net-peer-address", vec![h.clone()], result_of(Type::Str, net_err.clone()));

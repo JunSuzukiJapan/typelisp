@@ -520,6 +520,64 @@ pub fn tcp_connect_begin(addr: std::net::SocketAddr) -> std::io::Result<std::net
     }
 }
 
+/// Turns TCP keepalive probes on or off for a connected socket
+/// (`SO_KEEPALIVE`). With them on, an idle connection whose peer has
+/// silently gone (a pulled cable, a crashed host) is noticed and reset,
+/// where without them it stays open forever; `std` dropped its setter for
+/// this, so the call is made here.
+#[cfg(unix)]
+pub fn set_keepalive(fd: i32, on: bool) -> std::io::Result<()> {
+    setsockopt_int(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE, i32::from(on))
+}
+
+/// How long a connection must be idle before the first keepalive probe,
+/// and then how long between probes — both `secs`, since one number is
+/// what a program has in mind ("notice a dead peer within about a
+/// minute") and Go's `SetKeepAlivePeriod` sets the two together the same
+/// way. The names of the options differ per platform (`TCP_KEEPALIVE` on
+/// macOS is Linux's `TCP_KEEPIDLE`); the meaning is the same.
+#[cfg(target_os = "macos")]
+pub fn set_keepalive_period(fd: i32, secs: u32) -> std::io::Result<()> {
+    setsockopt_int(fd, libc::IPPROTO_TCP, libc::TCP_KEEPALIVE, secs as i32)?;
+    setsockopt_int(fd, libc::IPPROTO_TCP, libc::TCP_KEEPINTVL, secs as i32)
+}
+
+#[cfg(target_os = "linux")]
+pub fn set_keepalive_period(fd: i32, secs: u32) -> std::io::Result<()> {
+    setsockopt_int(fd, libc::IPPROTO_TCP, libc::TCP_KEEPIDLE, secs as i32)?;
+    setsockopt_int(fd, libc::IPPROTO_TCP, libc::TCP_KEEPINTVL, secs as i32)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn set_keepalive_period(_fd: i32, _secs: u32) -> std::io::Result<()> {
+    unimplemented!("keepalive period: only macOS and Linux name the socket options")
+}
+
+#[cfg(unix)]
+fn setsockopt_int(fd: i32, level: i32, name: i32, value: i32) -> std::io::Result<()> {
+    // SAFETY: `fd` is an open socket the caller owns; the option value is an
+    // `int` the kernel copies from `value`'s address, with the length given.
+    let rc = unsafe {
+        libc::setsockopt(
+            fd,
+            level,
+            name,
+            &value as *const i32 as *const libc::c_void,
+            std::mem::size_of::<i32>() as libc::socklen_t,
+        )
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(unix))]
+pub fn set_keepalive(_fd: i32, _on: bool) -> std::io::Result<()> {
+    unimplemented!("keepalive: only implemented on Unix")
+}
+
 #[cfg(not(unix))]
 pub fn tcp_connect_begin(_addr: std::net::SocketAddr) -> std::io::Result<std::net::TcpStream> {
     unimplemented!("a non-blocking connect needs socket/fcntl/connect, which are POSIX")

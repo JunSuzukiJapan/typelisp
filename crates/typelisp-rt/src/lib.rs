@@ -50,6 +50,7 @@ pub mod equality;
 pub mod integer;
 pub mod net;
 pub mod net_builtin;
+pub mod x509;
 pub mod os;
 pub mod readtable;
 pub mod stream;
@@ -4807,6 +4808,8 @@ macro_rules! stream_shim {
     (@arg str, $args:expr, $i:expr) => { tagged_arg($args, $i) };
     // Any other heap value — a `Vector<int>` datagram — crosses the same way.
     (@arg tagged, $args:expr, $i:expr) => { tagged_arg($args, $i) };
+    // A `bool` is a bare 0/1 word, as `@ret bool` writes it.
+    (@arg bool, $args:expr, $i:expr) => { Value::Bool(*$args.add($i) != 0) };
     (@arg char, $args:expr, $i:expr) => {
         match char::from_u32(*$args.add($i) as u32) {
             Some(c) => Value::Char(c),
@@ -4922,6 +4925,12 @@ stream_shim!(rt_net_connect_begin, "net-connect-begin", [str], tagged, via crate
 stream_shim!(rt_net_tls_start, "net-tls-start", [int, str, tagged, tagged, tagged], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_tls_listen, "net-tls-listen", [str, int, str, str, tagged], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_socket_error, "net-socket-error", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_peer_subject, "net-peer-subject", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_server_name, "net-server-name", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_set_nodelay, "net-set-nodelay", [int, bool], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_set_keepalive, "net-set-keepalive", [int, bool], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_set_keepalive_period, "net-set-keepalive-period", [int, int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_tls_add_certificate, "net-tls-add-certificate", [int, str, str, str], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_tls_handshake, "net-tls-handshake", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_udp_bind, "net-udp-bind", [str, int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_udp_send_to, "net-udp-send-to", [int, str, tagged], tagged, via crate::net_builtin::net_builtin);

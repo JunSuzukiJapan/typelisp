@@ -522,6 +522,8 @@ struct Pki {
     key: String,
     client_cert: String,
     client_key: String,
+    alt_cert: String,
+    alt_key: String,
 }
 
 fn test_pki() -> Pki {
@@ -533,14 +535,27 @@ fn test_pki() -> Pki {
     let ca_key = KeyPair::generate().unwrap();
     let ca_cert = ca_params.self_signed(&ca_key).unwrap();
     let issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
+    let named = |name: &str| {
+        let mut dn = rcgen::DistinguishedName::new();
+        dn.push(rcgen::DnType::OrganizationName, "Example");
+        dn.push(rcgen::DnType::CommonName, name);
+        dn
+    };
     let mut server = CertificateParams::new(vec!["localhost".to_string()]).unwrap();
     server.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    server.distinguished_name = named("localhost");
     let server_key = KeyPair::generate().unwrap();
     let server_cert = server.signed_by(&server_key, &issuer).unwrap();
     let mut client = CertificateParams::new(vec!["client".to_string()]).unwrap();
     client.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    client.distinguished_name = named("client");
     let client_key = KeyPair::generate().unwrap();
     let client_cert = client.signed_by(&client_key, &issuer).unwrap();
+    let mut alt = CertificateParams::new(vec!["alt.test".to_string()]).unwrap();
+    alt.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    alt.distinguished_name = named("alt.test");
+    let alt_key = KeyPair::generate().unwrap();
+    let alt_cert = alt.signed_by(&alt_key, &issuer).unwrap();
     let write = |name: &str, text: String| {
         let path = dir.join(name);
         std::fs::write(&path, text).unwrap();
@@ -552,6 +567,8 @@ fn test_pki() -> Pki {
         key: write("key.pem", server_key.serialize_pem()),
         client_cert: write("client.pem", client_cert.pem()),
         client_key: write("client-key.pem", client_key.serialize_pem()),
+        alt_cert: write("alt.pem", alt_cert.pem()),
+        alt_key: write("alt-key.pem", alt_key.serialize_pem()),
     }
 }
 
@@ -697,7 +714,7 @@ fn mutual_tls_admits_a_client_with_a_certificate_and_refuses_one_without() {
     // server has judged its certificate, the refusal reaches that client
     // not as `tls-connect`'s `Err` but as its first read's end of input,
     // with `socket-error` saying why.
-    let Pki { ca, cert, key, client_cert, client_key } = test_pki();
+    let Pki { ca, cert, key, client_cert, client_key, .. } = test_pki();
     let src = format!(
         "{LISTEN}{ECHO}
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\" :client-ca \"{ca}\"))))
@@ -736,4 +753,86 @@ fn a_client_certificate_needs_its_key() {
     r))"
     );
     assert!(text(&src).contains("both cert-file and key-file"), "{}", text(&src));
+}
+
+#[test]
+fn the_peer_subject_names_both_sides_and_sni_picks_the_certificate() {
+    // Mutual TLS: the server learns who the client is from its certificate
+    // (after the first read, which completes the handshake), the client
+    // learns which name the server's certificate is for. Then a second
+    // certificate added for `alt.test` is the one a client asking for that
+    // name gets, and the server can tell which name was asked for.
+    let Pki { ca, cert, key, client_cert, client_key, alt_cert, alt_key } = test_pki();
+    let src = format!(
+        "{LISTEN}
+(defvar (seen string) \"\")
+(defun identify ((l socket-listener) (n int)) ()
+  (dotimes (i n)
+    (match (accept l)
+      ((ok c)
+       (read-line c)
+       (setf seen (format false \"~a[~a asked ~a]\" seen
+                          (unwrap-or (peer-subject c) \"nobody\")
+                          (unwrap-or (requested-server-name c) \"no name\")))
+       (write-line c \"ok\")
+       (close c))
+      ((err e) (panic (message e))))))
+(let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\" :client-ca \"{ca}\"))))
+  (unwrap (tls-add-certificate l \"alt.test\" \"{alt_cert}\" \"{alt_key}\"))
+  (go (identify l 2))
+  (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :ca-file \"{ca}\"
+                                :cert-file \"{client_cert}\" :key-file \"{client_key}\"))))
+    (write-line c \"hello\")
+    (read-line c)
+    (let ((server-is (unwrap-or (peer-subject c) \"?\")))
+      (close c)
+      (let ((c2 (unwrap (tls-connect \"127.0.0.1\" (port-of l) :server-name \"alt.test\" :ca-file \"{ca}\"
+                                     :cert-file \"{client_cert}\" :key-file \"{client_key}\"))))
+        (write-line c2 \"hello\")
+        (read-line c2)
+        (let ((alt-is (unwrap-or (peer-subject c2) \"?\")))
+          (close c2)
+          (close l)
+          (format false \"~a | ~a | ~a\" server-is alt-is seen))))))"
+    );
+    assert_eq!(
+        text(&src),
+        "CN=localhost,O=Example | CN=alt.test,O=Example | [CN=client,O=Example asked localhost][CN=client,O=Example asked alt.test]"
+    );
+}
+
+#[test]
+fn adding_a_certificate_for_the_wrong_name_is_an_error_value() {
+    let Pki { cert, key, .. } = test_pki();
+    let src = format!(
+        "(let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
+  (let ((r (match (tls-add-certificate l \"alt.test\" \"{cert}\" \"{key}\")
+             ((ok _) \"added?!\")
+             ((err e) (message e)))))
+    (close l)
+    r))"
+    );
+    assert!(text(&src).contains("not for alt.test"), "{}", text(&src));
+}
+
+#[test]
+fn socket_options_apply_and_plain_connections_have_no_peer_subject() {
+    let src = format!(
+        "{LISTEN}
+(defun serve-one ((l socket-listener)) ()
+  (match (accept l) ((ok c) (read-line c) (close c)) ((err e) (panic (message e)))))
+(let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
+  (go (serve-one l))
+  (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
+    (set-nodelay c true)
+    (set-keepalive c true)
+    (set-keepalive-period c 30)
+    (write-line c \"bye\")
+    (let ((r (format false \"~a ~a\" (is-none (peer-subject c)) (is-none (requested-server-name c)))))
+      (close c)
+      (close l)
+      r)))"
+    );
+    assert_eq!(text(&src), "true true");
+    assert_eq!(text_compiled(&src.replace("(go (serve-one l))", "(compile serve-one) (go (serve-one l))")), "true true");
 }

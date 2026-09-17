@@ -4374,6 +4374,16 @@ user-visible capacity."
     ((ok h) (result::ok (socket-listener::new h)))
     ((err e) (result::err e))))
 
+(pub defmethod tls-add-certificate ((self socket-listener) (name string) (cert-file string) (key-file string)) Result<(), NetError>
+  "One more certificate for a `tls-listen` listener, presented to clients
+   that ask for `name` (SNI) -- one listener serving several sites, each
+   with its own certificate. The chain is checked to be for `name` here, so
+   a mismatch is this call's `Err` and not some client's failed handshake.
+   Clients asking for a name nobody added, or sending none, get the
+   certificate `tls-listen` was given. Takes effect for the next handshake;
+   `requested-server-name` on a connection says which name it asked for."
+  (net-tls-add-certificate self::h name cert-file key-file))
+
 (pub defmethod accept ((self socket-listener) &key (timeout f64)) Result<socket-stream, NetError>
   "The next connection, waiting for one -- at most `:timeout` seconds if
    given, after which the `Err` says so. The usual shape of a server is
@@ -4421,6 +4431,48 @@ user-visible capacity."
   (match (unwrap-net (net-socket-error self::h))
     ((some m) (option::some (NetError::NetError m)))
     ((none) (option::none))))
+
+(pub defmethod peer-subject ((self socket-stream)) Option<string>
+  "Who the peer is, by the certificate it presented: the subject in the
+   form `CN=client,O=Example,C=JP` (RFC 4514, most specific first). What a
+   mutual-TLS server asks after the first read has completed the handshake;
+   on the client it is the name the server's certificate was issued to.
+   `none` on a plain connection, before the handshake, or when the peer sent
+   no certificate (a server that did not ask for one)."
+  (unwrap-net (net-peer-subject self::h)))
+
+(pub defmethod requested-server-name ((self socket-stream)) Option<string>
+  "On a server-side TLS connection, the name the client asked for (SNI),
+   once the handshake has read it: how a server holding certificates for
+   several names -- `tls-add-certificate` -- knows which site this is.
+   `none` on a plain or client-side connection, or when the client sent no
+   name (it connected by address)."
+  (unwrap-net (net-server-name self::h)))
+
+(pub defmethod set-nodelay ((self socket-stream) (on bool)) ()
+  "Whether small writes go out at once (Nagle's algorithm off). Each
+   `write-string` reaches the socket before it returns, so with Nagle on a
+   reply sent as two writes -- a header, then a body -- can wait for the
+   peer's delayed ACK before the second leaves; a request/response protocol
+   wants this `true`. A Unix-domain socket has no Nagle and accepts this as
+   already so."
+  (unwrap-net (net-set-nodelay self::h on)))
+
+(pub defmethod set-keepalive ((self socket-stream) (on bool)) ()
+  "Whether the OS probes this connection while it is idle, so that a peer
+   that vanished without closing -- a pulled cable, a crashed host -- is
+   noticed and the connection reset, instead of staying open forever. The
+   OS default period is long (two hours on most systems);
+   `set-keepalive-period` shortens it. A Unix-domain socket has no
+   keepalive; asking is an error."
+  (unwrap-net (net-set-keepalive self::h on)))
+
+(pub defmethod set-keepalive-period ((self socket-stream) (secs int)) ()
+  "How long the connection must be idle before the first keepalive probe,
+   and then how long between probes -- whole seconds, at least 1, the way
+   Go's `SetKeepAlivePeriod` sets both. Takes effect with `set-keepalive`
+   on."
+  (unwrap-net (net-set-keepalive-period self::h secs)))
 
 (pub defun byte-stream-of ((s socket-stream)) socket-byte-stream
   "The same connection as a byte stream. Both views share one buffer, so a

@@ -2305,6 +2305,12 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 | `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | 次の接続。来るまでタスクを止める。`:timeout` 秒で諦めると `Err` |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | 待たずに読めるようになるまで、または `secs` 秒。`true` なら前者（バッファ済みも含む）。読みに時計を付ける手段：`(if (wait-readable c 5.0) (read-line c) ...)`。約束するのは**次の読みが止まらない**ことで、`read-line` は行の残りを待ちうる |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | 書けるようになるまで、または `secs` 秒 |
+| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | `tls-listen` の listener にもう 1 枚、`name` を求めた（SNI）クライアントに出す証明書を足す——1 つの listener で複数サイト。チェーンが `name` 用かはここで検査し、違えばこの呼び出しの `Err`。誰も足していない名前・名前無しのクライアントには `tls-listen` の証明書を出す |
+| `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | 相手の証明書の subject（`CN=client,O=Example,C=JP`、RFC 4514 形式・具体的なものが先）。相互 TLS のサーバが「誰が繋いだか」を知る手段（握手を済ませる最初の読みの後）。クライアント側ならサーバ証明書の名前。平文・握手前・相手が証明書を出していなければ `none` |
+| `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | サーバ側 TLS 接続で、クライアントが求めた名前（SNI）。`tls-add-certificate` で複数サイトを持つサーバが「どのサイトか」を知る。平文・クライアント側・名前無し（アドレスで繋いだ）なら `none` |
+| `set-nodelay` | `(set-nodelay s on)` | `(socket-stream,bool)→()` | Nagle を切る（`TCP_NODELAY`）。`write-string` は毎回ソケットまで届くので、Nagle が効いているとヘッダと本体を 2 回に分けて書いた応答が相手の遅延 ACK を待つ——要求/応答型のプロトコルは `true` に。Unix ドメインには Nagle が無く、そのまま成功 |
+| `set-keepalive` | `(set-keepalive s on)` | `(socket-stream,bool)→()` | アイドル中に相手を探る（`SO_KEEPALIVE`）。閉じずに消えた相手（ケーブル抜け、ホスト死亡）を検出して接続をリセットする。OS 既定の周期は長い（多くは 2 時間）ので下の `set-keepalive-period` と組で。Unix ドメインには無いので panic |
+| `set-keepalive-period` | `(set-keepalive-period s secs)` | `(socket-stream,int)→()` | 最初の探りまでのアイドル秒数と探りの間隔（整数秒、1 以上）。Go の `SetKeepAlivePeriod` と同じく両方を同じ値に |
 | `socket-error` | `(socket-error s)` | `(socket-stream \| socket-byte-stream)→Option<NetError>` | **相手が**この接続を壊していればその最初の失敗（リセット、TLS のアラート、書き込み中の切断）。健全なら `none`——相手がきれいに閉じた EOF は失敗ではない。下記「相手の失敗」 |
 | `local-address` | `(local-address s)` | `(socket-stream \| socket-listener \| udp-socket)→string` | こちら側の `host:port`。`(tcp-listen h 0)` の後で選ばれたポートを知る手段。Unix ならパス（接続した側の端は `(unnamed)`） |
 | `peer-address` | `(peer-address s)` | `(socket-stream)→string` | 相手側の `host:port`、Unix ならパス |
@@ -2369,6 +2375,13 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 ;; 相互 TLS: サーバは ca.pem が発行したクライアント証明書を要求し、クライアントはそれを出す
 (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem" :client-ca "ca.pem")
 (tls-connect "localhost" 8443 :ca-file "ca.pem" :cert-file "client.pem" :key-file "client-key.pem")
+;; サーバ側、最初の read-line の後: 誰が繋いだか
+(println "~a" (unwrap-or (peer-subject c) "anonymous"))    ; CN=client,O=Example
+
+;; 1 つの listener で 2 つのサイト（SNI）
+(let ((l (unwrap (tls-listen "0.0.0.0" 443 "a.example.pem" "a.key"))))
+  (unwrap (tls-add-certificate l "b.example" "b.example.pem" "b.key"))
+  ...)                                        ; 接続側で (requested-server-name c) がどちらか言う
 ```
 
 相互 TLS で証明書を出さない（または通らない）クライアントは、TLS 1.3 ではクライアント側の握手が
@@ -2415,7 +2428,8 @@ TLS は `rustls`（sans-IO）で、暗号化と復号だけを担い、ソケッ
 
 ### 21.5 無いもの
 
-- **SNI で証明書を選ぶ** TLS サーバ（1 つの証明書だけ）。相手の証明書の**中身を読む**手段（誰が繋いだかは `:client-ca` が保証する「発行者」までで、subject は取れない）。
+- 相手の証明書のうち **subject 以外**（SAN、有効期限、発行者）を読む手段。`peer-subject` の DER 走査は subject までしか歩かない（X.509 パーサを依存に入れない判断）。
+- **`select` でソケットと channel を同時に待つ**形。Go と同じく「読むタスクを立てて channel に流す」で書く。
 - **HTTP/2**。Unix ドメインの**データグラム**（`SOCK_DGRAM`）。
 - **ストリームに持たせる期限**（上記の理由で、時計は引数）。
 - **AOT 実行ファイル内のソケット待ち**。AOT の `main` にはスケジューラが無いので、待つことに
