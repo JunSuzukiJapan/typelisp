@@ -401,6 +401,15 @@ pub mod call_state {
     /// clock running out. Payloads: `(handle << 1) | interest` and the
     /// seconds as `f64::to_bits`. Answers with a tagged `bool`.
     pub const SUSPEND_IO_FOR: i64 = 12;
+    /// `(go (f a b))` — start a task. Payload: a **tagged** compiled closure
+    /// that makes the call and answers with the result tagged, built by the
+    /// site that wrote the `go` (`core_bridge::translate_go`).
+    ///
+    /// A suspension rather than a call for the reason the channel operations
+    /// are: the table of tasks belongs to the scheduler, and only the driver
+    /// can reach it. It always resumes at once, like `SUSPEND_CHAN_NEW`, and
+    /// the answer is the `Task<T>` handle.
+    pub const SUSPEND_GO: i64 = 13;
 
     /// Records the arms of a `select`, as `[n, has-else, kind, chan, extra]...`
     /// with every word **tagged** — the array is a compiled frame's slots,

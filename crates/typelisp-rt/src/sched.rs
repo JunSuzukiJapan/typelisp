@@ -97,6 +97,12 @@ pub trait TaskBody: Sized {
     /// The body's own error type, which the scheduler's errors fold into.
     type Error: From<SchedError>;
 
+    /// A task that applies `closure` — a compiled closure the `go` site built
+    /// to make the call and answer with the result tagged — to no arguments.
+    /// Built on the task's own root stack (`Scheduler::admit`), with
+    /// `closure` rooted by the caller until then.
+    fn start_closure(heap: &mut Heap, closure: Value) -> Self;
+
     /// Where this task's roots begin. The two state slots are `sbase` and
     /// `sbase + 1`; frames root above them. **Whoever finishes the task
     /// truncates to here.**
@@ -148,6 +154,14 @@ pub enum Waiting {
     Until(std::time::Instant),
     /// A `Chan<T>` operation.
     Chan(ChanOp),
+    /// `(go ...)` — start a task that applies this closure, and answer with
+    /// its handle. Never a wait: answered on the spot like `Chan::new`, and
+    /// through the scheduler for the same reason — the table of tasks is
+    /// the scheduler's, and only the driver can reach it.
+    ///
+    /// The closure is rooted through the asking task's state slot while the
+    /// operation is in flight, as a parked `send`'s value is.
+    Spawn(Value),
     /// `select` — any one of several channel operations, whichever can go
     /// first. `has_else` means the task does not wait: with nothing ready it
     /// is answered with the `else` arm instead.
@@ -317,8 +331,9 @@ pub fn waiting_name(w: &Waiting) -> &'static str {
         Waiting::Chan(ChanOp::Send(..)) => "`send`",
         Waiting::Chan(ChanOp::Recv(..)) => "`recv`",
         // The other three answer at once, so they never reach a message that
-        // says something could not block.
+        // says something could not block. Neither does a spawn.
         Waiting::Chan(_) => "a channel operation",
+        Waiting::Spawn(_) => "`go`",
         Waiting::Io { .. } => "a socket operation",
     }
 }
@@ -531,6 +546,14 @@ impl<B: TaskBody> Scheduler<B> {
             },
             Waiting::Chan(op) => self.try_chan(heap, op),
             Waiting::Select { ops, has_else } => self.try_select(heap, ops, *has_else),
+            // Admitted and nothing is run: the starting task keeps its turn,
+            // and the new one is picked up when some task yields, waits or
+            // finishes — which is what `go` promises.
+            Waiting::Spawn(closure) => {
+                let closure = *closure;
+                let id = self.admit(heap, |heap| B::start_closure(heap, closure));
+                Some(Ok(task_handle(heap, id)))
+            }
             // One descriptor, zero timeout: ready now or not. A `poll` that
             // fails (a descriptor closed under the task) is reported as
             // ready, for the reason `poll_ready` gives — the retry will fail
@@ -656,7 +679,7 @@ impl<B: TaskBody> Scheduler<B> {
                         self.io_waiting += 1;
                         self.slots[id.0] = Slot::Blocked(slot, w);
                     }
-                    Waiting::Task(_) | Waiting::Chan(_) | Waiting::Select { .. } => {
+                    Waiting::Task(_) | Waiting::Chan(_) | Waiting::Select { .. } | Waiting::Spawn(_) => {
                         self.slots[id.0] = Slot::Blocked(slot, w);
                     }
                 }
@@ -1166,6 +1189,9 @@ pub fn pending_wait(heap: &Heap) -> Result<(Waiting, Wake), SchedError> {
         // The capacity is an ordinary `i32` argument, so it crosses raw — the
         // suspension site tags only what the driver could not otherwise read.
         cs::SUSPEND_CHAN_NEW => Ok((Waiting::Chan(ChanOp::New(payload)), Wake::Tagged)),
+        // The closure is tagged, and the answer — the handle — comes back
+        // tagged like every other typed wake value.
+        cs::SUSPEND_GO => Ok((Waiting::Spawn(typelisp_abi::decode(payload)), Wake::Tagged)),
         // `Wake::Tagged` for every typed answer: a wake value always crosses
         // back **tagged**, whatever its type, and the resume block decodes it
         // with the kind the bridge baked in — the same division `wait` makes.

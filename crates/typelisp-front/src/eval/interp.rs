@@ -1388,7 +1388,6 @@ impl Interp {
         self.install_print_hooks();
         typelisp_rt::set_apply_interpreted(Some(rt_apply_interpreted));
         typelisp_rt::set_dyn_slot_closure(Some(rt_dyn_slot_closure));
-        typelisp_rt::set_spawn_task(Some(rt_spawn_task));
     }
 
     /// Registers this `Interp` as the environment the printer asks its two
@@ -4751,36 +4750,6 @@ unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64,
     let heap = typelisp_rt::active_heap();
     let argv = std::slice::from_raw_parts(args, argc as usize);
     match interp.apply_interpreted(heap, closure, argv) {
-        Ok(w) => w,
-        Err(e) => crate::eval::crossing::unwind_interpreted_failure(e),
-    }
-}
-
-/// `typelisp_rt::rt_go`'s interpreter half: compiled code has reached a `(go
-/// ...)`, whose call belongs to a *task* — and a task is a continuation stack,
-/// which only the interpreter has.
-///
-/// Nothing runs here. The task is admitted and the compiled caller carries on:
-/// a compiled body cannot suspend, so the earliest the new task can be stepped
-/// is when some interpreted task yields, waits or finishes.
-///
-/// Errors unwind rather than return, for [`rt_apply_interpreted`]'s reason —
-/// there is a compiled frame in between with no way to carry a `Result`. A
-/// *missing interpreter* cannot reach here at all: `rt_go` refuses before
-/// calling the hook when none is installed.
-///
-/// # Safety
-///
-/// [`typelisp_rt::rt_go`]'s, unchanged.
-unsafe extern "C-unwind" fn rt_spawn_task(args: *const i64, argc: u32) -> i64 {
-    let interp = ACTIVE_INTERP.with(|cell| cell.get());
-    if interp.is_null() {
-        typelisp_rt::fatal("rt_go: no interpreter is registered on this thread");
-    }
-    let interp = &*interp;
-    let heap = typelisp_rt::active_heap();
-    let args = std::slice::from_raw_parts(args, argc as usize);
-    match interp.spawn_from_compiled(heap, args) {
         Ok(w) => w,
         Err(e) => crate::eval::crossing::unwind_interpreted_failure(e),
     }

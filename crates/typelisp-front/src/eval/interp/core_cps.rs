@@ -31,7 +31,7 @@
 //! drops a frame's values) and the `set_state` that re-roots what the next
 //! state carries. Nothing in between touches the heap.
 
-use typelisp_mem::{Heap, RootScope, SymRef, Value};
+use typelisp_mem::{Heap, SymRef, Value};
 use typelisp_rt::sched::{self, chan_id_of, io_deadline, io_wait, task_id_of, ChanOp, Progress, SchedError, SelectOp, Waiting, Wake};
 
 use crate::check::core;
@@ -72,6 +72,16 @@ enum State {
     /// *classic* body still goes through `Interp::call_compiled` and is as
     /// atomic as it always was: it has nowhere to keep its state.
     CompiledEnter { argv: Value, start: DriveStart },
+    /// Apply a compiled closure to no arguments, as this task's whole job —
+    /// what a compiled `(go ...)` hands over.
+    ///
+    /// The closure is the one the `go` site built (`core_bridge::translate_go`):
+    /// it makes the call and answers with the result **tagged**, so this
+    /// crossing has no representations to marshal by — the answer is a
+    /// tagged `Sexpr` whatever the call's type, exactly as a `wait`'s is.
+    /// Everything after the first drive is `CompiledResume`/`CompiledRaise`,
+    /// the same as for a named body.
+    CompiledApply { closure: Value },
     /// Keep driving a chain that is already standing — after a suspension, or
     /// after a call it made was answered.
     ///
@@ -157,7 +167,12 @@ struct DriveCtx {
 struct DriveStart {
     /// Held for as long as the drive lasts, so the machine code cannot be
     /// dropped underneath a suspended chain by a redefinition.
-    body: std::rc::Rc<dyn super::CompiledBody>,
+    ///
+    /// `None` for a closure a task applies (`State::CompiledApply`): the
+    /// body is reached through the closure box, and the module it lives in
+    /// is the one that built the box, which is never retired while a value
+    /// of it can still be applied.
+    body: Option<std::rc::Rc<dyn super::CompiledBody>>,
     /// The callee's declared parameter representations — what the words the
     /// arguments encode to mean.
     params: Vec<Repr>,
@@ -226,22 +241,6 @@ impl ArgsKind {
             ArgsKind::Assoc => 7,
             ArgsKind::DynCall => 5,
             ArgsKind::Apply => 3,
-        }
-    }
-
-    /// Which leading field holds the arguments' representations.
-    ///
-    /// The interpreter reads them for one thing only: decoding arguments that
-    /// arrive from compiled code, where the word alone cannot say whether it
-    /// is a raw `f64` bit pattern or a tagged pointer. `core_bridge`'s
-    /// `call_node_shape` is the same table on the compiling side.
-    fn repr_at(self) -> usize {
-        match self {
-            ArgsKind::Call => 3,
-            ArgsKind::Construct => 4,
-            ArgsKind::Assoc => 5,
-            ArgsKind::DynCall => 4,
-            ArgsKind::Apply => 2,
         }
     }
 
@@ -530,6 +529,18 @@ impl sched::TaskBody for Task {
     type Cx = Interp;
     type Error = EvalError;
 
+    fn start_closure(heap: &mut Heap, closure: Value) -> Task {
+        let sbase = heap.root_count();
+        heap.push_root(closure);
+        heap.push_root(Value::Empty);
+        Task {
+            sbase,
+            stack: CpsStack::new(),
+            state: State::CompiledApply { closure },
+            compiled: typelisp_rt::coroutine::FrameStack::new(),
+        }
+    }
+
     fn sbase(&self) -> usize {
         self.sbase
     }
@@ -653,7 +664,7 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         // send arms hold values too: every operand of a `select` is a binding
         // of the `let` the checker wrapped around it, so the environment the
         // task's `Frame::SelectArm` roots already holds them all.
-        State::Blocked(Waiting::Chan(ChanOp::Send(_, v))) => {
+        State::Blocked(Waiting::Chan(ChanOp::Send(_, v))) | State::Blocked(Waiting::Spawn(v)) => {
             heap.set_root(sbase, *v);
             heap.set_root(sbase + 1, Value::Empty);
         }
@@ -667,6 +678,12 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         // is invisible to the collector.
         State::CompiledEnter { argv, .. } => {
             heap.set_root(sbase, *argv);
+            heap.set_root(sbase + 1, Value::Empty);
+        }
+        // The closure is a heap box, and until the chain's prologue copies its
+        // captures into a frame nothing else points at it.
+        State::CompiledApply { closure } => {
+            heap.set_root(sbase, *closure);
             heap.set_root(sbase + 1, Value::Empty);
         }
         // Nothing in the state slots: the exit is parked on the compiled
@@ -894,10 +911,14 @@ impl Interp {
                         // `coroutine_fn_type` — the same provenance every
                         // indirect compiled call relies on, and `body_abi` is
                         // what said it was this one.
+                        let Some(address) = drive.start.body.as_ref().map(|b| b.address()) else {
+                            heap.truncate_roots(roots_on_entry);
+                            return Progress::Done(Err(EvalError::Internal(
+                                "eval: a compiled entry names no body".to_string(),
+                            )));
+                        };
                         let f: typelisp_rt::coroutine::CoroutineFn = unsafe {
-                            std::mem::transmute::<usize, typelisp_rt::coroutine::CoroutineFn>(
-                                drive.start.body.address(),
-                            )
+                            std::mem::transmute::<usize, typelisp_rt::coroutine::CoroutineFn>(address)
                         };
                         let outcome = {
                             let stack = &mut task.compiled;
@@ -907,6 +928,25 @@ impl Interp {
                     }
                     Err(e) => State::Unwind(e),
                 }
+            }
+            State::CompiledApply { closure } => {
+                // No arguments to marshal, and the answer decodes as a tagged
+                // `Sexpr` (`Repr::Sexpr`): the closure tags it before
+                // returning. The crossing's own roots are therefore none.
+                let roots_on_entry = heap.root_count();
+                let drive = DriveCtx {
+                    start: DriveStart { body: None, params: Vec::new(), ret: Repr::Sexpr, watch: None },
+                    roots_on_entry,
+                    crossing_roots: 0,
+                    base: task.compiled.depth(),
+                };
+                self.enter_compiled(heap);
+                let word = typelisp_rt::encode(closure);
+                let outcome = {
+                    let stack = &mut task.compiled;
+                    crate::eval::crossing::catch_compiled_panic(|| stack.run_closure(heap, word))
+                };
+                self.after_drive(heap, task, outcome, drive)
             }
             State::CompiledResume { drive, wake } => {
                 let delivered = match wake {
@@ -982,7 +1022,7 @@ impl Interp {
         // a cooperative scheduler's promise is that a task switches where it
         // says so — a program that never blocks should not be interleaved by
         // asking a channel how full it is.
-        if let State::Blocked(w @ (Waiting::Chan(_) | Waiting::Select { .. })) = &next {
+        if let State::Blocked(w @ (Waiting::Chan(_) | Waiting::Select { .. } | Waiting::Spawn(_))) = &next {
             // Rooted *first*: a parked `send`'s value lives in the state slot
             // and nowhere else, and answering the operation allocates (the
             // `some` box a waiting receiver gets).
@@ -1258,7 +1298,9 @@ impl Interp {
             }
 
             Op::Go => {
-                let call = core::field(heap, form, 0)
+                // Field 0 is the result representation, read by the bridge and
+                // by nothing here.
+                let call = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (go ..) has no call".to_string()))?;
                 match call_kind(heap, call)? {
                     // `(go (f x))` where `f` is a *value*: the callee is a form
@@ -1669,64 +1711,6 @@ impl Interp {
         self.finish_args(heap, form, argv, ArgsKind::Apply, spawn)
     }
 
-    /// `(go ...)` reached from **compiled** code: the parts arrive as machine
-    /// words, and a task is started from them.
-    ///
-    /// The node itself is `args[0]` — rebuilt by the compiled code that is
-    /// starting the task, because an ahead-of-time compiled program shares no
-    /// object table with the heap that compiled it (`core_bridge`'s
-    /// `translate_go`). Everything after it is an argument, in the callee's
-    /// **declared representation**, so the words are decoded by the same rule
-    /// that decodes a compiled call's result — a word is a raw `f64` bit
-    /// pattern or a tagged pointer, and only the declared type says which.
-    ///
-    /// The task is admitted and nothing is run: compiled code cannot suspend,
-    /// so the caller keeps going and the scheduler picks the new task up at the
-    /// next point some *interpreted* task yields, waits or finishes.
-    pub(super) fn spawn_from_compiled(&self, heap: &mut Heap, args: &[i64]) -> Result<i64, EvalError> {
-        let form = typelisp_rt::decode(args[0]);
-        let kind = call_kind(heap, form)?;
-        let reprs = {
-            let field = core::field(heap, form, kind.repr_at()).ok_or_else(|| {
-                EvalError::Internal(format!("go: ({} ..) has no representation list", kind.what()))
-            })?;
-            repr_list(heap, field, kind.what())?
-        };
-
-        let mut s = RootScope::new(heap);
-        s.push_root(form);
-        let mut argv = Vec::with_capacity(args.len() - 1);
-        let mut raw = &args[1..];
-        // An `apply`'s callee travels at the head of the argument run — see
-        // `finish_apply_args`. It is a function value, so it is already tagged.
-        if kind == ArgsKind::Apply {
-            let (callee, rest) = raw.split_first().ok_or_else(|| {
-                EvalError::Internal("go: (apply ..) arrived without its callee".to_string())
-            })?;
-            let callee = typelisp_rt::decode(*callee);
-            s.push_root(callee);
-            argv.push(callee);
-            raw = rest;
-        }
-        if raw.len() != reprs.len() {
-            return Err(EvalError::Internal(format!(
-                "go: {} argument(s) for {} representation(s)",
-                raw.len(),
-                reprs.len()
-            )));
-        }
-        for (w, r) in raw.iter().zip(&reprs) {
-            // Decoding allocates (a float argument builds a box), so each one
-            // is rooted before the next is decoded.
-            let v = self.decode_compiled_return(&mut s, *w, r)?;
-            s.push_root(v);
-            argv.push(v);
-        }
-
-        let handle = self.spawn_task(&mut s, form, argv, kind)?;
-        Ok(typelisp_rt::encode(handle))
-    }
-
     /// `(sleep secs)` — suspend **this task** until `secs` from now.
     ///
     /// Zero is CL's yield-ish zero and falls out of the deadline already
@@ -1798,7 +1782,7 @@ impl Interp {
                     _ => None,
                 };
                 let start = DriveStart {
-                    body: compiled,
+                    body: Some(compiled),
                     params: sig.0.clone(),
                     ret: sig.1.clone(),
                     watch,

@@ -206,7 +206,7 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
     core::tagged(heap, "block", &[name, body, repr])
 }
 
-/// `(go CALL)` — run `CALL` in a new task.
+/// `(go RET-R CALL)` — run `CALL` in a new task.
 ///
 /// One field, and it is an already-checked call node (`call`/`assoc`/
 /// `dyn-call`/`apply`). The callee and the arguments inside it are evaluated by
@@ -220,9 +220,16 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
 /// between an unrooted node and the next allocation is where four leaks in this
 /// file have lived, and a root here costs one stack slot until the top-level
 /// form releases them all.
-pub(super) fn go_form(heap: &mut Heap, call: Value) -> Result<Value, Error> {
+///
+/// `ret` is the call's result representation — what the task's `Task<T>`
+/// will answer `wait` with. The evaluator has no use for it (the callee's
+/// own signature says), but compiled code does: the `go` site there builds
+/// a closure that makes the call and hands the result to the scheduler
+/// **tagged**, and only the representation says how to tag a raw word.
+pub(super) fn go_form(heap: &mut Heap, ret: Value, call: Value) -> Result<Value, Error> {
     let call = rooted(heap, call);
-    let form = core::tagged(heap, "go", &[call])?;
+    let ret = rooted(heap, ret);
+    let form = core::tagged(heap, "go", &[ret, call])?;
     Ok(rooted(heap, form))
 }
 

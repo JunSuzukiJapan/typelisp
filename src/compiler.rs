@@ -556,7 +556,7 @@ pub const SOURCE: &str = r#"
    string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block>
    Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
-(defsignature compile-go
+(defsignature compile-tag-node
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
    Option<llvm-basic-block> Option<llvm-value>
    string Scope<llvm-basic-block> Scope<llvm-value> Option<llvm-basic-block>
@@ -2063,7 +2063,7 @@ pub const SOURCE: &str = r#"
       (set-global (compile-set-global m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (global-init (compile-global-init m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (panic (compile-panic m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
-      (go (compile-go m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
+      (tag (compile-tag-node m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (select (compile-select m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (catch (compile-catch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (throw (compile-throw m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
@@ -5671,25 +5671,18 @@ pub const SOURCE: &str = r#"
       (store-arg builder args-ptr 0 msg-v)
       (build-call builder (get-function m "rt_panic") args-ptr 1)))
 
-;; `(go (2 . HEAD) (kind . E)...)` -- start a task.
-;; Every operand is compiled here, in the running
-;; task: the callee's identity (HEAD, a node rebuilt
-;; as data because an AOT program shares no object
-;; table with the heap that compiled it) and the
-;; already-evaluated arguments. `rt_go` admits the
-;; task and returns its handle; the call itself
-;; happens later, in the interpreter, because a task
-;; is a continuation stack and compiled code has none.
-;; Shaped exactly like `compile-apply-indirect`: one
-;; argument array, `compile-call-args` rooting the
-;; collectable operands for as long as they sit in it.
-(defun compile-go ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((arg-forms (sexpr-cdr e))
-           (argc (sexpr-list-length arg-forms))
-           (args-ptr (frame-arg-slots builder m 0 arg-forms))
-           (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0))
-           (result (build-call builder (get-function m "rt_go") args-ptr argc)))
-      result))
+;; `(tag KIND E)` -- `E`'s value in its tagged form,
+;; per `KIND` (`Repr::field_kind`): what a value takes
+;; on its way into a struct field, as an expression.
+;; The bridge emits it for the result of the closure a
+;; compiled `go` starts its task with, so the scheduler
+;; receives a tagged word and never has to know the
+;; call's representation. A `go` itself is an ordinary
+;; `(suspend "rt_suspend_go" ...)` node, like `wait`.
+(defun compile-tag-node ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
+    (let* ((kind (sexpr-int (sexpr-car (sexpr-cdr e))))
+           (raw (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+      (compile-tag-struct-field builder m raw kind)))
 
 ;; `(select ARM...)` — wait until one of several channel operations can go,
 ;; and run that arm's body.

@@ -297,6 +297,26 @@ impl FrameStack {
         self.drive(heap, base, status)
     }
 
+    /// [`run_with_env`](Self::run_with_env) for a compiled closure value,
+    /// applied to no arguments — what a task `go` started runs.
+    ///
+    /// The closure is the one `translate_go` built at the `go` site: a
+    /// coroutine body under this build's ABI, by construction. Anything else
+    /// here is the runtime disagreeing with itself, not a program error.
+    pub fn run_closure(&mut self, heap: &mut Heap, closure: i64) -> Result<i64, Paused> {
+        // SAFETY: the word is a tagged closure box a compiled `go` site handed
+        // to `rt_suspend_go`, in the heap registered on this thread.
+        match unsafe { crate::resolve_closure(closure) } {
+            crate::Callee::Coroutine { f, env } => self.run_with_env(heap, f, &[], &env),
+            crate::Callee::Classic { .. } => {
+                typelisp_abi::fatal("go: the task's closure is a classic-ABI body, which cannot be driven")
+            }
+            crate::Callee::Interpreted => {
+                typelisp_abi::fatal("go: the task's closure is interpreted, which compiled code cannot build")
+            }
+        }
+    }
+
     /// [`run`](Self::run) for a callee that also has captures — a closure
     /// body, entered from outside the compiled world.
     pub fn run_with_env(
@@ -545,6 +565,23 @@ pub fn set_frame_value(heap: &mut Heap, f: Value, w: i64) {
 // So these shims never block, and there is nothing here for an AOT executable
 // with no scheduler to get wrong: the driver on the other side decides whether
 // a suspension is something it can honour.
+
+/// `(go ...)` for compiled code: hand the scheduler a closure to run as a
+/// new task. `args[0]` is the closure, tagged — a heap box, rooted by the
+/// frame slot it sits in. The answer is the `Task<T>` handle, and it arrives
+/// on the next activation like every other suspension's.
+///
+/// # Safety
+///
+/// `args` must point to `argc >= 1` valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_go(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        typelisp_abi::fatal("rt_suspend_go: expected the closure to start");
+    }
+    call_state::set_pending_suspend(call_state::SUSPEND_GO, *args);
+    0
+}
 
 /// `(yield)` for compiled code: give up the rest of this task's turn.
 ///

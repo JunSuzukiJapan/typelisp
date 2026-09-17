@@ -426,6 +426,18 @@ well_known_symbols! {
      every module from the system one, and there is one `else` again.
      `select`'s arm compares by name in the checker and never noticed."
     ELSE => "else"
+
+    "Appended for tasks in AOT executables (2026-09-17). Two nodes only the
+     compile bridge builds, out of a `(go RET-R CALL)`: `(spawn RET-R
+     LAMBDA)` hands the scheduler a closure to run as a task and wakes with
+     its handle, and `(tag R E)` is `E`'s value in its tagged form — what the
+     closure answers with, so a scheduler with no representations in hand
+     (an AOT executable's) still receives a word it can keep. The checker
+     never writes either; the free-variable walk has to know them because
+     the synthesized `let`/`lambda` around them go through the ordinary
+     translations."
+    SPAWN => "spawn"
+    TAG => "tag"
 }
 
 

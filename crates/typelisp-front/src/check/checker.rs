@@ -11385,7 +11385,8 @@ impl Checker {
         if !is_call {
             return Err(Error::TypeError(format!("`go` needs a call, and this is not one. {}", SHAPE)));
         }
-        let form = forms::go_form(heap, inner.form)?;
+        let ret = self.repr_form(heap, &inner.ty)?;
+        let form = forms::go_form(heap, ret, inner.form)?;
         Ok(Checked::new(form, super::registry::task_of(inner.ty)))
     }
 

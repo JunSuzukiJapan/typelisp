@@ -495,7 +495,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 300] {
     use typelisp_rt::coroutine::{
         rt_loop_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
         rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_select, rt_suspend_chan_send,
-        rt_suspend_io, rt_suspend_io_for, rt_suspend_sleep,
+        rt_suspend_go, rt_suspend_io, rt_suspend_io_for, rt_suspend_sleep,
         rt_suspend_wait, rt_suspend_yield,
     };
     use typelisp_rt::sys_builtin::{
@@ -555,7 +555,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 300] {
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
         rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
         rt_throw, rt_throw_matches, rt_throw_take_value,
-        rt_go,
         rt_frame_new, rt_frame_data, rt_frame_mask_bit, rt_frame_pc, rt_frame_set_pc,
         rt_frame_entered, rt_frame_call, rt_frame_call_env, rt_frame_apply, rt_frame_dyn_call, rt_pending_arg, rt_pending_argc,
         rt_pending_env, rt_pending_envc,
@@ -666,7 +665,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 300] {
         ("rt_set_cdr", rt_set_cdr as usize),
         ("rt_match_fail", rt_match_fail as usize),
         ("rt_panic", rt_panic as usize),
-        ("rt_go", rt_go as usize),
         ("rt_frame_new", rt_frame_new as usize),
         ("rt_frame_data", rt_frame_data as usize),
         ("rt_frame_mask_bit", rt_frame_mask_bit as usize),
@@ -848,6 +846,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 300] {
         ("rt_net_peer_address", rt_net_peer_address as usize),
         ("rt_suspend_wait", rt_suspend_wait as usize),
         ("rt_suspend_yield", rt_suspend_yield as usize),
+        ("rt_suspend_go", rt_suspend_go as usize),
         ("rt_suspend_chan_new", rt_suspend_chan_new as usize),
         ("rt_suspend_chan_len", rt_suspend_chan_len as usize),
         ("rt_suspend_chan_cap", rt_suspend_chan_cap as usize),

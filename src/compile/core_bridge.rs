@@ -202,6 +202,14 @@ pub struct Ctx<'a> {
     /// however deep it is found. A sibling can never be assigned to, so there
     /// is nothing for a cell to share.
     visible_siblings: &'a HashSet<SymRef>,
+    /// Names a nested `lambda` captures **by value**, never through a cell —
+    /// the arguments a compiled `go` hoisted into a `let` so that the closure
+    /// it starts the task with can carry them ([`translate_go`]). They are
+    /// bound once and never assigned, so there is nothing for a cell to
+    /// share, and the binder outside the lambda is an ordinary slot: putting
+    /// them in `cell_names` on the lambda's side alone would have the closure
+    /// dereference a cell its binder never made.
+    by_value: &'a HashSet<SymRef>,
     /// The trait-object id tables, interned before translation starts: both
     /// are baked into the emitted code as constants, so there is nothing to
     /// resolve mid-translation.
@@ -236,6 +244,7 @@ impl<'a> Ctx<'a> {
             direct: empty_names(),
             cell_names: empty_names(),
             visible_siblings: empty_names(),
+            by_value: empty_names(),
             outer_captured: &[],
         }
     }
@@ -479,6 +488,8 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 
         // ---- calls -------------------------------------------------------
         "go" => translate_go(heap, form, cx),
+        "spawn" => translate_spawn(heap, form, cx),
+        "tag" => translate_tag(heap, form, cx),
         "call" => translate_call(heap, form, cx),
         "assoc" => translate_assoc(heap, form, cx),
 
@@ -882,10 +893,9 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// The leading fields of each call node — how many there are, and where the
 /// argument representations sit among them.
 ///
-/// The *only* consumer is [`translate_go`], which has to hand the interpreter
-/// back a node it can finish the call from. Everything else about these nodes
-/// is decided here at compile time; these two numbers are the part that has to
-/// survive to run time.
+/// The *only* consumer is [`translate_go`], which takes the evaluated parts
+/// out of a call node and puts variables in their place. Everything else
+/// about these nodes is decided by their own translations.
 fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
     match tag {
         // `(call WRITTEN HOME PATH (R...) ARG...)`
@@ -900,28 +910,34 @@ fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
     }
 }
 
-/// `(go CALL)` -> `(go (2 . HEAD) (kind . E)...)`.
+/// `(go RET-R CALL)` -> `(let ((g R E)...) (spawn RET-R (lambda () RET-R
+/// (tag RET-R CALL'))))`, and from there to the island.
 ///
-/// **The call happens in a task, and a task is an interpreter continuation
-/// stack** — compiled code has no such thing (the plan's B6). So compiled
-/// `go` does what the interpreted one does *up to* the call: it evaluates
-/// every argument here, in the starting task, and then hands the parts over.
-/// `rt_go` admits the task; the interpreter makes the call later.
+/// **The call happens in a task, and what a task runs is a compiled
+/// closure.** So a compiled `go` does what the interpreted one does *up to*
+/// the call: every part of it — the arguments, and the callee itself for an
+/// `apply` — is evaluated here, in the starting task, and bound in a `let`.
+/// The closure captures those bindings and makes the call; `CALL'` is `CALL`
+/// with each evaluated part replaced by the variable holding it. That keeps
+/// Go's rule (`go f(x)` evaluates `x` now) without a thunk capturing the
+/// argument *expressions*.
 ///
-/// What has to cross is the node's *leading* fields — the names, path,
-/// representations and keys that say which function this is. They cross as
-/// **quoted data**, rebuilt at run time by the same nodes a `quote` uses, for
-/// the same reason: an AOT-compiled program shares no object table with the
-/// heap that compiled it, so a pointer to the checked node would name nothing
-/// there. The argument sub-forms are dropped — they have already been
-/// evaluated, and `finish_call` and friends never read them.
+/// The closure **tags its result** (`tag`, per `RET-R`) before returning it,
+/// because the scheduler that receives it has no representations: a task's
+/// answer is a tagged `Sexpr` whatever the call's type, exactly as a `wait`'s
+/// is. That is what lets an ahead-of-time executable, which has no
+/// interpreter, run the task — and it is why every representation-driven
+/// decision stays on this side of the boundary rather than being duplicated
+/// in the runtime.
 ///
-/// An `apply`'s callee is a form rather than a name, so it is evaluated here
-/// like an argument and travels at the head of the argument run — which is
-/// exactly where `ArgsKind::Apply` expects it. Its slot in the head is blanked
-/// so nothing rebuilds a form that has already been evaluated.
+/// The hoisted names are captured **by value** (`Ctx::by_value`): they are
+/// never assigned, and the binder outside the lambda is an ordinary slot.
+/// The `let` and `lambda` are ordinary core nodes translated by the ordinary
+/// paths ([`translate_let`], [`translate_lambda`]), so captures, kinds and
+/// rooting are decided the way they are for a lambda a program wrote.
 fn translate_go(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
-    let call = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
+    let ret_repr = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
+    let call = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
     let tag = core::op(heap, call).ok_or_else(|| malformed(heap, form))?.to_string();
     let (skip, repr_at) = call_node_shape(&tag).ok_or_else(|| {
         Error::TypeError(format!("compile: `go` wraps a `{}`, which is not a call (internal error)", tag))
@@ -930,44 +946,114 @@ fn translate_go(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     if parts.len() < skip {
         return Err(malformed(heap, call));
     }
-
-    let mut head_fields = parts[..skip].to_vec();
-    if tag == "apply" {
-        head_fields[0] = Value::Empty;
-    }
     let reprs = repr_list(heap, parts[repr_at])?;
-    let args = parts[skip..].to_vec();
-
-    // Built before the node's own `Items`, the way `dyn_operand` builds its
-    // pair: every intermediate is rooted while the next one allocates.
-    let head_pair = {
-        let mut s = RootScope::new(heap);
-        let head = core::tagged(&mut s, &tag, &head_fields)?;
-        s.push_root(head);
-        let head_form = quoted_form(&mut s, head)?;
-        s.push_root(head_form);
-        // Kind 2: a rebuilt node is a heap structure, so the island roots it
-        // for as long as it sits in the argument array.
-        core::pair(&mut s, Value::Int(2), head_form)?
-    };
-
-    let mut f = Items::new(heap);
-    f.push(head_pair);
-    if tag == "apply" {
-        // Rooted before the pair is built, for `dyn_operand`'s reason: pairing
-        // allocates, and a `Vec`/local holding the callee is invisible to the
-        // collector.
-        let pair = {
-            let mut s = RootScope::new(f.heap());
-            let callee = to_island(&mut s, parts[0], cx)?;
-            s.push_root(callee);
-            // A function value is a heap box, so it is rooted like the head.
-            core::pair(&mut s, Value::Int(2), callee)?
-        };
-        f.push(pair);
+    let args = &parts[skip..];
+    if args.len() != reprs.len() {
+        return Err(malformed(heap, call));
     }
-    arg_pairs(&mut f, &reprs, &args, cx)?;
-    f.finish("go")
+
+    // Every evaluated part with the representation it is bound at: an
+    // `apply`'s callee first (a function value), then the arguments.
+    let mut hoisted: Vec<(Repr, Value)> = Vec::with_capacity(args.len() + 1);
+    if tag == "apply" {
+        hoisted.push((Repr::Fn, parts[0]));
+    }
+    hoisted.extend(reprs.iter().cloned().zip(args.iter().copied()));
+
+    let mut s = RootScope::new(heap);
+    // The names are unwritable on purpose — a space is not an identifier
+    // character — so they can never shadow or be shadowed.
+    let mut names: Vec<SymRef> = Vec::with_capacity(hoisted.len());
+    for i in 0..hoisted.len() {
+        match s.intern_symbol(&format!("go part {}", i)) {
+            Value::Symbol(sym) => names.push(sym),
+            other => return Err(Error::TypeError(format!("compile: interning a name produced {:?}", other))),
+        }
+    }
+
+    // `(SYM R E)` per hoisted part, rooted as they are built: `Repr::write`
+    // and `list` allocate.
+    let mut binds = Vec::with_capacity(hoisted.len());
+    for (name, (repr, expr)) in names.iter().zip(&hoisted) {
+        let r = repr.write(&mut s)?;
+        s.push_root(r);
+        let b = core::list(&mut s, &[Value::Symbol(*name), r, *expr])?;
+        s.push_root(b);
+        binds.push(b);
+    }
+    let binds_list = core::list(&mut s, &binds)?;
+    s.push_root(binds_list);
+
+    // `CALL'`: the leading fields as they were, each evaluated part a `(var
+    // g)`. An `apply`'s callee sits in field 0 of the head.
+    let mut vars = Vec::with_capacity(names.len());
+    for name in &names {
+        let v = core::tagged(&mut s, "var", &[Value::Symbol(*name)])?;
+        s.push_root(v);
+        vars.push(v);
+    }
+    let mut call_fields: Vec<Value> = parts[..skip].to_vec();
+    let mut vars_iter = vars.iter().copied();
+    if tag == "apply" {
+        call_fields[0] = vars_iter.next().ok_or_else(|| malformed(&s, call))?;
+    }
+    call_fields.extend(vars_iter);
+    let call2 = core::tagged(&mut s, &tag, &call_fields)?;
+    s.push_root(call2);
+
+    let tagged = core::tagged(&mut s, "tag", &[ret_repr, call2])?;
+    s.push_root(tagged);
+    let no_params = core::list(&mut s, &[])?;
+    s.push_root(no_params);
+    let lambda = core::tagged(&mut s, "lambda", &[no_params, ret_repr, tagged])?;
+    s.push_root(lambda);
+    let spawn = core::tagged(&mut s, "spawn", &[ret_repr, lambda])?;
+    s.push_root(spawn);
+    let let_form = core::tagged(&mut s, "let", &[binds_list, spawn])?;
+    s.push_root(let_form);
+
+    let by_value: HashSet<SymRef> = cx.by_value.iter().copied().chain(names.iter().copied()).collect();
+    let inner = Ctx { by_value: &by_value, ..cx };
+    translate_let(&mut s, let_form, inner)
+}
+
+/// `(spawn RET-R LAMBDA)` -> `(suspend "rt_suspend_go" KIND -1 0 (2 .
+/// LAMBDA'))`: build the closure, hand it to the scheduler, and wake with the
+/// task's handle.
+///
+/// The island's ordinary suspension node, so the site is a `(suspend ...)`
+/// like `wait`'s: the shim records the closure, the activation ends with
+/// `STATUS_SUSPEND`, and the driver — whichever scheduler it stands on —
+/// admits the task and resumes this frame at once with the handle. `KIND` is
+/// the handle's: a tagged box, read back unchanged.
+///
+/// Only [`translate_go`] builds this node; the checker never does.
+fn translate_spawn(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let lambda = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+    let kind = Repr::Struct.field_kind();
+    suspend_node(heap, "rt_suspend_go", kind, None, &[Repr::Fn], &[lambda], cx, None)
+}
+
+/// `(tag R E)` -> `(tag KIND E')`: `E`'s value in its tagged form, per its
+/// representation — what a value takes on its way into a struct field, made
+/// available as an expression. Only [`translate_go`] builds this node, for
+/// the closure's result.
+fn translate_tag(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, form)?;
+    let [repr, expr] = parts[..] else { return Err(malformed(heap, form)) };
+    let repr = Repr::read(heap, repr).ok_or_else(|| malformed(heap, form))?;
+    let kind = repr.field_kind();
+    if kind == 0 {
+        return Err(Error::TypeError(format!(
+            "compile: a task cannot answer with a `{}`: a raw C word has no tagged form",
+            repr.tag()
+        )));
+    }
+    let mut f = Items::new(heap);
+    f.push(Value::Int(kind));
+    let e = to_island(f.heap(), expr, cx)?;
+    f.push(e);
+    f.finish("tag")
 }
 
 /// `(call WRITTEN HOME PATH (R...) E...)` -> `(call "name" (kind . form)...)`.
@@ -1957,7 +2043,7 @@ fn translate_lambda(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     // nothing for a cell to share.
     let mut cells = names_captured_by_nested(heap, &body)?;
     for (n, _) in &captured {
-        if !cx.visible_siblings.contains(n) {
+        if !cx.visible_siblings.contains(n) && !cx.by_value.contains(n) {
             cells.insert(*n);
         }
     }
