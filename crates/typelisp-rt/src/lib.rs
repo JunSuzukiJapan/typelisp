@@ -48,6 +48,8 @@ pub mod coroutine;
 
 pub mod equality;
 pub mod integer;
+pub mod net;
+pub mod net_builtin;
 pub mod os;
 pub mod readtable;
 pub mod stream;
@@ -4764,7 +4766,13 @@ pub unsafe extern "C" fn rt_vtable_set(args: *const i64, argc: u32) -> i64 {
 /// the result leaves (`tagged` for a heap value, `raw` for a bare `i64`,
 /// `bool` for a bare `0`/`1`).
 macro_rules! stream_shim {
+    // The short form: a `stream-*`/`file-*` builtin. The `net-*` family
+    // names its own dispatcher with `via` below — same conversions, a
+    // different table.
     ($shim:ident, $name:literal, [$($arg:ident),*], $ret:ident) => {
+        stream_shim!($shim, $name, [$($arg),*], $ret, via crate::stream_builtin::stream_builtin);
+    };
+    ($shim:ident, $name:literal, [$($arg:ident),*], $ret:ident, via $dispatch:path) => {
         /// A `stream-*`/`file-*` builtin for compiled code — see
         /// [`crate::stream_builtin::stream_builtin`], which is also what the
         /// interpreter calls.
@@ -4787,10 +4795,10 @@ macro_rules! stream_shim {
                 }
                 decoded.push(stream_shim!(@arg $arg, args, i));
             )*
-            match crate::stream_builtin::stream_builtin(active_heap(), $name, &decoded) {
+            match $dispatch(active_heap(), $name, &decoded) {
                 Some(Ok(v)) => stream_shim!(@ret $ret, v),
                 Some(Err(e)) => fatal(&e),
-                None => fatal(concat!(stringify!($shim), ": ", $name, " is not a stream builtin")),
+                None => fatal(concat!(stringify!($shim), ": ", $name, " is not a builtin of its dispatcher")),
             }
         }
     };
@@ -4900,6 +4908,24 @@ stream_shim!(rt_file_owner_name, "file-owner-name", [str], tagged);
 stream_shim!(rt_file_directory_p, "file-directory-p", [str], bool);
 stream_shim!(rt_file_list_directory, "file-list-directory", [str], tagged);
 stream_shim!(rt_file_create_directories, "file-create-directories", [str], tagged);
+
+// The sockets: `crate::net_builtin::net_builtin` is the implementation both
+// these and the interpreter call. `net-wait` has no shim here — it suspends,
+// and `crate::coroutine::rt_suspend_io` is its compiled form.
+stream_shim!(rt_net_connect_begin, "net-connect-begin", [str, int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_connect_finish, "net-connect-finish", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_listen, "net-listen", [str, int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_accept, "net-accept", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_fill, "net-fill", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_pop_byte, "net-pop-byte", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_pop_char, "net-pop-char", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_buffered_p, "net-buffered-p", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_push_string, "net-push-string", [int, str], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_push_byte, "net-push-byte", [int, int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_flush, "net-flush", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_shutdown_write, "net-shutdown-write", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_local_address, "net-local-address", [int], tagged, via crate::net_builtin::net_builtin);
+stream_shim!(rt_net_peer_address, "net-peer-address", [int], tagged, via crate::net_builtin::net_builtin);
 
 
 #[cfg(test)]

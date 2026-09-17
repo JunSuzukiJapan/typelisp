@@ -562,6 +562,16 @@ pub(super) enum Waiting {
     /// first. `has_else` means the task does not wait: with nothing ready it
     /// is answered with the `else` arm instead.
     Select { ops: Vec<SelectOp>, has_else: bool },
+    /// A socket — `(net-wait h interest)`. The task is parked until `poll`
+    /// reports the descriptor readable or writable, which is the prelude's
+    /// cue to retry the non-blocking operation that said "not yet".
+    ///
+    /// The descriptor, not the handle: it is resolved when the wait is
+    /// asked for (`Interp::io_wait`), so a handle that is not a socket or is
+    /// already closed is refused there, and the scheduler hands `poll`
+    /// plain integers. Like `Until`, this holds no `Value` and needs no
+    /// root.
+    Io { fd: i32, interest: typelisp_rt::os::Interest },
 }
 
 /// One arm of a `select`, in the order the arms are written — the index *is*
@@ -706,6 +716,7 @@ fn waiting_name(w: &Waiting) -> &'static str {
         // The other three answer at once, so they never reach a message that
         // says something could not block.
         Waiting::Chan(_) => "a channel operation",
+        Waiting::Io { .. } => "a socket operation",
     }
 }
 
@@ -773,6 +784,9 @@ pub(crate) struct Scheduler {
     /// nobody sleeping — costs one comparison per task switch instead of a
     /// walk over every slot.
     sleeping: usize,
+    /// How many tasks are `Waiting::Io` — `sleeping`'s twin, so that a
+    /// program with no sockets never builds a `poll` set.
+    io_waiting: usize,
     /// Every channel that has been made, by [`ChanId`]. See [`Chan`] for why
     /// none is ever removed.
     chans: Vec<Chan>,
@@ -894,6 +908,17 @@ impl Scheduler {
             },
             Waiting::Chan(op) => self.try_chan(heap, op),
             Waiting::Select { ops, has_else } => self.try_select(heap, ops, *has_else),
+            // One descriptor, zero timeout: ready now or not. A `poll` that
+            // fails (a descriptor closed under the task) is reported as
+            // ready, for the reason `poll_ready` gives — the retry will fail
+            // with a message where a park would hang.
+            Waiting::Io { fd, interest } => {
+                match typelisp_rt::os::poll_ready(&[(*fd, *interest)], Some(std::time::Duration::ZERO)) {
+                    Ok(ready) if ready.iter().any(|(_, r)| *r) => Some(Ok(Value::Empty)),
+                    Ok(_) => None,
+                    Err(_) => Some(Ok(Value::Empty)),
+                }
+            }
         }
     }
 
@@ -1018,6 +1043,10 @@ impl Scheduler {
                     }
                     Waiting::Until(_) => {
                         self.sleeping += 1;
+                        self.slots[id.0] = Slot::Blocked(slot, w);
+                    }
+                    Waiting::Io { .. } => {
+                        self.io_waiting += 1;
                         self.slots[id.0] = Slot::Blocked(slot, w);
                     }
                     Waiting::Task(_) | Waiting::Chan(_) | Waiting::Select { .. } => {
@@ -1259,6 +1288,53 @@ impl Scheduler {
         }
     }
 
+    /// Puts every task whose socket is ready back on the queue, waiting at
+    /// most `timeout` for one to become so — **the one place the program
+    /// waits on the network**, by way of `typelisp_rt::os::poll_ready`.
+    ///
+    /// Called with a zero timeout before each task switch (`wake_due`'s
+    /// reason: a socket that became readable while another task ran for a
+    /// second should not wait for that second to end), and with the nearest
+    /// sleeper's deadline — or no limit — when nothing at all is ready.
+    ///
+    /// A `poll` failure wakes everyone waiting: each task's retry then fails
+    /// with a message of its own, which beats parking forever on an error
+    /// the scheduler cannot attribute.
+    fn wake_io(&mut self, timeout: Option<std::time::Duration>) {
+        if self.io_waiting == 0 {
+            return;
+        }
+        let fds: Vec<(i32, typelisp_rt::os::Interest)> = self
+            .slots
+            .iter()
+            .filter_map(|s| match s {
+                Slot::Blocked(_, Waiting::Io { fd, interest }) => Some((*fd, *interest)),
+                _ => None,
+            })
+            .collect();
+        let ready: Vec<(i32, bool)> = match typelisp_rt::os::poll_ready(&fds, timeout) {
+            Ok(r) => r,
+            Err(_) => fds.iter().map(|(fd, _)| (*fd, true)).collect(),
+        };
+        // Same order as `fds`, which is slot order — so this is one walk.
+        let mut answers = ready.iter();
+        for i in 0..self.slots.len() {
+            if !matches!(&self.slots[i], Slot::Blocked(_, Waiting::Io { .. })) {
+                continue;
+            }
+            let woken = answers.next().map(|(_, r)| *r).unwrap_or(true);
+            if !woken {
+                continue;
+            }
+            if let Slot::Blocked(mut slot, _) = std::mem::replace(&mut self.slots[i], Slot::Running) {
+                slot.task.state = State::Apply(Value::Empty);
+                self.slots[i] = Slot::Parked(slot);
+                self.ready.push_back(TaskId(i));
+                self.io_waiting -= 1;
+            }
+        }
+    }
+
     /// The nearest deadline any task is sleeping until.
     ///
     /// `None` means nobody is: with nothing ready either, every remaining task
@@ -1325,9 +1401,28 @@ fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
     }
 }
 
-/// Points the two state slots at whatever `state` carries.
+/// `(net-wait h interest)` — what to park **this task** on: the socket
+/// under handle `h`, for reading (`0`) or writing (`1`).
 ///
-/// Must not allocate: it runs in the window right after a `truncate_roots`.
+/// The handle is turned into a descriptor here, once, for both the
+/// interpreted call and the compiled suspension (`pending_wait`), so the
+/// two refuse the same handles in the same words. A closed or non-socket
+/// handle is a program error — the stream was closed and then waited on —
+/// and panics rather than parking a task nothing will ever wake.
+fn io_wait(argv: &[Value]) -> Result<Waiting, EvalError> {
+    let handle = match argv.first() {
+        Some(Value::Int(h)) => *h,
+        other => return Err(EvalError::Internal(format!("net-wait: {:?} is not a stream handle", other))),
+    };
+    let interest = match argv.get(1) {
+        Some(Value::Int(code)) => typelisp_rt::os::Interest::from_code(*code)
+            .ok_or_else(|| EvalError::Internal(format!("net-wait: {} is not an interest (0 readable, 1 writable)", code)))?,
+        other => return Err(EvalError::Internal(format!("net-wait: {:?} is not an interest", other))),
+    };
+    let fd = typelisp_rt::stream::with_streams(|t| t.raw_fd(handle)).map_err(EvalError::Panic)?;
+    Ok(Waiting::Io { fd, interest })
+}
+
 /// What a compiled frame that just returned `STATUS_SUSPEND` is waiting for,
 /// and the representation its answer will come back through.
 ///
@@ -1375,6 +1470,13 @@ fn pending_wait(heap: &Heap) -> Result<(Waiting, Repr), EvalError> {
         cs::SUSPEND_WAIT => {
             let handle = typelisp_abi::decode(payload);
             Ok((Waiting::Task(task_id_of(heap, Some(handle))?), Repr::Sexpr))
+        }
+        // Both words raw: a stream handle and an interest code are plain
+        // integers in compiled code (`sleep`'s bits cross the same way), and
+        // this is the same resolution the interpreted `net-wait` makes.
+        cs::SUSPEND_IO => {
+            let w = io_wait(&[Value::Int(payload), Value::Int(second)])?;
+            Ok((w, Repr::Unit))
         }
         // The channel operations. The handle is tagged, like `wait`'s; so is
         // `send`'s value, which the suspension site tagged per the element's
@@ -1673,26 +1775,33 @@ impl Interp {
         loop {
             let (id, mut slot) = loop {
                 self.scheduler.borrow_mut().wake_due();
+                self.scheduler.borrow_mut().wake_io(Some(std::time::Duration::ZERO));
                 let taken = self.scheduler.borrow_mut().next_ready();
                 if let Some(t) = taken {
                     break t;
                 }
-                // Nothing can run. If a task is sleeping, what it waits for is
-                // the clock — so **this** is the one place the program reaches
-                // the OS's `sleep`, and only for as long as the nearest
-                // deadline. That is the difference between stopping a task and
-                // stopping the thread.
-                let Some(deadline) = self.scheduler.borrow().earliest_deadline() else {
+                // Nothing can run. What the remaining tasks wait for is the
+                // clock or the network — so **this** is the one place the
+                // program stops the thread: on `poll` if any socket is
+                // waited on (for at most the nearest deadline), else on the
+                // OS's `sleep` until that deadline. That is the difference
+                // between stopping a task and stopping the thread.
+                let deadline = self.scheduler.borrow().earliest_deadline();
+                let io_waiting = self.scheduler.borrow().io_waiting > 0;
+                if deadline.is_none() && !io_waiting {
                     // `main` has not finished and nothing can run: every
                     // remaining task is waiting on something that will never
                     // happen.
                     return Err(EvalError::Internal(
                         "scheduler: every task is blocked and none can proceed".to_string(),
                     ));
-                };
+                }
                 let now = std::time::Instant::now();
-                if deadline > now {
-                    std::thread::sleep(deadline - now);
+                let until = deadline.map(|d| d.saturating_duration_since(now));
+                if io_waiting {
+                    self.scheduler.borrow_mut().wake_io(until);
+                } else if let Some(d) = until {
+                    std::thread::sleep(d);
                 }
             };
             heap.switch_to_root_stack(slot.roots);
@@ -2803,6 +2912,11 @@ impl Interp {
         // thread — with tasks, that would stop every one of them.
         if path == crate::Path::root("sleep") {
             return self.sleep_until(heap, &argv);
+        }
+        // `(net-wait h interest)` — "not before this socket is ready" — is
+        // the third shape of the same thing.
+        if path == crate::Path::root("net-wait") {
+            return io_wait(&argv).map(|w| (State::Blocked(w), None));
         }
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
             return self.enter_fn(heap, &f, argv);

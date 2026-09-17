@@ -1,0 +1,21 @@
+;; A client for the echo server: sends three lines and prints what comes back.
+;;
+;;   typl examples/projects/echo-server/src/client.typl [port]
+
+(defun main () ()
+  (let ((args (command-line-args)))
+    (let ((port (if (> (len args) 1) (unwrap-or (parse-int (get args 1)) 7777) 7777)))
+      (match (with-connection (c "127.0.0.1" port)
+               (dolist (x '("one" "two" "three"))
+                 (match x
+                   ((str line)
+                    (write-line c line)
+                    (match (read-line c)
+                      ((some reply) (println "echo: ~a" reply))
+                      ((none) (println "server closed the connection"))))
+                   (_ ())))
+               (write-line c "quit"))
+        ((ok _) ())
+        ((err e) (println "could not connect: ~a" (message e)))))))
+
+(main)

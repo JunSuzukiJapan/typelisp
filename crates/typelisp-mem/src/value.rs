@@ -176,6 +176,7 @@ pub const BUILTIN_TYPE_KEYS: &[&str] = &[
     "universal-time",
     "internal-time",
     "heap-info",
+    "neterror",
 ];
 
 impl TypeKeyId {
@@ -195,6 +196,9 @@ impl TypeKeyId {
     /// `(heap-info)`'s result — `room`'s report, as a struct a program can
     /// also read the numbers out of (`crate::Heap`'s own statistics).
     pub const HEAP_INFO: TypeKeyId = TypeKeyId(13);
+    /// `NetError` — what every `net-*` builtin fails with. Appended after
+    /// the rest so no existing id moved.
+    pub const NET_ERROR: TypeKeyId = TypeKeyId(14);
 
     pub fn as_u32(&self) -> u32 {
         self.0

@@ -179,6 +179,10 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // source would mean two different things on the two sides, silently.
         "sleep" => "rt_suspend_sleep",
         "yield" => "rt_suspend_yield",
+        // `(net-wait h interest)` parks the task on a socket: the third of
+        // the free builtins that suspend, and the reason the prelude's
+        // `tcp-stream` methods can wait without any of them blocking.
+        "net-wait" => "rt_suspend_io",
         // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
         // `disassemble` have no row and never will — those are
         // interpreter-only forms, the same category `compile`/`compile-file`/
@@ -204,6 +208,20 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "file-list-directory" => "rt_file_list_directory",
         "file-create-directories" => "rt_file_create_directories",
         "file-rename" => "rt_file_rename",
+        "net-connect-begin" => "rt_net_connect_begin",
+        "net-connect-finish" => "rt_net_connect_finish",
+        "net-listen" => "rt_net_listen",
+        "net-accept" => "rt_net_accept",
+        "net-fill" => "rt_net_fill",
+        "net-pop-byte" => "rt_net_pop_byte",
+        "net-pop-char" => "rt_net_pop_char",
+        "net-buffered-p" => "rt_net_buffered_p",
+        "net-push-string" => "rt_net_push_string",
+        "net-push-byte" => "rt_net_push_byte",
+        "net-flush" => "rt_net_flush",
+        "net-shutdown-write" => "rt_net_shutdown_write",
+        "net-local-address" => "rt_net_local_address",
+        "net-peer-address" => "rt_net_peer_address",
         _ => return None,
     })
 }
@@ -437,7 +455,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 266] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 281] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -452,7 +470,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 266] {
     use typelisp_rt::coroutine::{
         rt_loop_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
         rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_select, rt_suspend_chan_send,
-        rt_suspend_sleep,
+        rt_suspend_io, rt_suspend_sleep,
         rt_suspend_wait, rt_suspend_yield,
     };
     use typelisp_rt::sys_builtin::{
@@ -477,6 +495,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 266] {
         rt_file_create_directories, rt_file_delete, rt_file_directory_p, rt_file_exists_p,
         rt_file_list_directory, rt_file_modified_date, rt_file_owner_name, rt_file_rename,
         rt_file_truename,
+        rt_net_accept, rt_net_buffered_p, rt_net_connect_begin, rt_net_connect_finish, rt_net_fill, rt_net_flush,
+        rt_net_listen, rt_net_local_address, rt_net_peer_address, rt_net_pop_byte, rt_net_pop_char,
+        rt_net_push_byte, rt_net_push_string, rt_net_shutdown_write,
         rt_stream_at_line_start, rt_stream_close,
         rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p,
         rt_stream_output_p, rt_stream_position, rt_stream_read_byte, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
@@ -761,6 +782,21 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 266] {
         ("rt_stream_write_byte", rt_stream_write_byte as usize),
         ("rt_stream_unread_char", rt_stream_unread_char as usize),
         ("rt_suspend_sleep", rt_suspend_sleep as usize),
+        ("rt_suspend_io", rt_suspend_io as usize),
+        ("rt_net_connect_begin", rt_net_connect_begin as usize),
+        ("rt_net_connect_finish", rt_net_connect_finish as usize),
+        ("rt_net_listen", rt_net_listen as usize),
+        ("rt_net_accept", rt_net_accept as usize),
+        ("rt_net_fill", rt_net_fill as usize),
+        ("rt_net_pop_byte", rt_net_pop_byte as usize),
+        ("rt_net_pop_char", rt_net_pop_char as usize),
+        ("rt_net_buffered_p", rt_net_buffered_p as usize),
+        ("rt_net_push_string", rt_net_push_string as usize),
+        ("rt_net_push_byte", rt_net_push_byte as usize),
+        ("rt_net_flush", rt_net_flush as usize),
+        ("rt_net_shutdown_write", rt_net_shutdown_write as usize),
+        ("rt_net_local_address", rt_net_local_address as usize),
+        ("rt_net_peer_address", rt_net_peer_address as usize),
         ("rt_suspend_wait", rt_suspend_wait as usize),
         ("rt_suspend_yield", rt_suspend_yield as usize),
         ("rt_suspend_chan_new", rt_suspend_chan_new as usize),

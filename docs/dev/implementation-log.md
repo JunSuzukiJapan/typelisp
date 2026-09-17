@@ -11445,3 +11445,59 @@ lowering の段階で、**スカラ組み込みメソッドの全引数がリテ
 ので `scripts/regen-prelude-bitcode.sh` で再生成。`check_test` の
 `a_checked_form_is_a_core_expression_with_a_type` は `(if true 1 2)` を見ていたので、変数条件に
 書き換えた。
+
+## TCP をストリームとして——スケジューラの I/O 待ち（2026-09-17）
+
+ネットワーク層の v1。`tcp-connect`／`tcp-listen`／`accept` と、接続の 2 つの見え方
+`tcp-stream`（文字）／`tcp-byte-stream`（バイト）、`NetError`、`with-connection`
+（docs/functions.md §21）。動く例は `examples/projects/echo-server/`。
+
+**先に決めたこと: OS スレッド化（M:N）より前にやる、ただし readiness ベースで。** ソケットは
+全部 non-blocking で、Rust の `net-*` 組み込み（`crates/typelisp-rt/src/net.rs` /
+`net_builtin.rs`）は「今できること」しかしない——「まだ」は `net-fill`/`net-accept` の
+`none`、`net-flush` の `false` として *値で* 返る。待ちは prelude のループが
+`(net-wait h interest)` を呼ぶことで表現し、これは `sleep` と同じ「中断する組み込み」
+（interp は `finish_call` で横取り → `Waiting::Io { fd, interest }`、compiled は
+`rt_suspend_io` → `SUSPEND_IO`）。これが Go の netpoller の形で、M:N 化のとき移るのは
+「誰が `poll` を呼ぶか」だけ。ブロッキング前提の API を先に配ると M:N 化で意味論が変わる。
+
+- **OS を待つ場所は 1 つのまま。** `drive()` の「何も走れない」腕が、`io_waiting > 0` なら
+  `wake_io(最寄りの sleep 期限)`、でなければ従来の `thread::sleep`。`wake_io` は
+  `os::poll_ready`（`libc::poll`、`os.rs` が libc を触る唯一の場所）に fd 集合を渡す純関数
+  呼び出しで、スケジューラは fd を集めて答えで起こすだけ。毎タスク切り替えでも timeout 0 で
+  呼ぶ（`wake_due` と同じ理由: 1 秒走るタスクの裏で届いたデータをその秒の終わりまで待たせない）。
+- **`POLLERR`/`POLLHUP`/`POLLNVAL` は ready 扱い。** 相手が閉じたソケットで待つタスクは起きて
+  EOF を読まねばならず、閉じられた fd で待つタスクは起きてメッセージ付きで失敗せねばならない。
+- **non-blocking connect は libc が要る。** `std` の `TcpStream::connect` は握手完了まで
+  ブロックし、到達不能ホストで 1 分近く全タスクが止まる。`socket`→`fcntl(O_NONBLOCK)`→
+  `connect`（`EINPROGRESS` が正常）を `os::tcp_connect_begin` に、完了確認は
+  `TcpStream::take_error()`（`SO_ERROR`）。名前解決だけは `getaddrinfo` で同期のまま。
+- **1 ハンドル 2 型。** `InputStream` の `Item` は型ごとに 1 つなので文字とバイトは別の
+  型だが、HTTP はヘッダを文字・本体をバイトで読む。`byte-stream-of`/`char-stream-of` は
+  同じハンドルを持つ別の struct を返し、受信バッファ（`rbuf`）を共有する。
+- **UTF-8 を跨いで読める。** `net-pop-char` はバッファに 1 文字分無ければ *消費せず* `none`
+  を返す（`stream.rs::read_one_char` の VecDeque 版。ブロッキング版が言わなくてよかった
+  「足りない」を言う）。単体テストで 2 バイト文字を 1 バイトずつ送って確かめた。
+- **ループの型は `return` の合流で、最初の `return` が `E` を穴のまま固定した。**
+  `(loop (match … ((ok (some h)) (return (result::ok …))) … ((err e) (return (result::err e)))))`
+  が「expected Never, found neterror」。match の腕どうしは `!` 穴で埋め合うが loop の
+  `return` どうしは埋め合わない。`(the Result<tcp-stream, NetError> …)` で固定。
+- **`typl` の起動は debug ビルドで約 2 秒。** サーバを背景で起こして 1.5 秒後に `nc` したら
+  connection refused で、`lsof -p` にも TCP fd が無く、1 時間近く「listener が消える」バグを
+  追った。0.5 秒刻みで採ると 2 秒過ぎに fd が現れる——起動中だっただけ。手動確認は 4 秒待つ。
+- **AOT 実行ファイルには効かない。** `rt_run_entry_driven` にスケジューラは無く、待つことに
+  なった `net-wait` は `sleep` と同じく fatal。既存の制約をそのまま継ぐ。
+- **`Rust caller` 経路は `sleep` と同じ扱い。** `try_now` の `Io` は fd 1 本を timeout 0 で
+  `poll` し、ready でなければ `None` → 「cannot block」。print-object の中で `accept` する
+  テストで確認。
+
+配線の場所（足すときの表）: `BUILTIN_TYPE_KEYS` 末尾 + `TypeKeyId::NET_ERROR`、
+`registry.rs` の `BUILTIN_ERROR_TYPES`（6 個）と `register_net_builtins`、`interp.rs` の
+`net-` 接頭辞ルーティング、`externs.rs` の **3 箇所**（`rt_builtin_symbol` の `net-wait =>
+rt_suspend_io` と `net-* => rt_net_*`、`use` 列、アドレス表 281 個）、`lib.rs` の
+`stream_shim!` に `via` 節（dispatcher を引数に）、`tests/type_identity_guard_test.rs` の
+`RESULT_KEYS`/`INNER_KEYS`/定数表。島は触っていない（`(suspend …)` は名前汎用）。
+prelude は `scripts/regen-prelude-bitcode.sh`、AOT は `test-serial.sh` が staticlib を作り直す。
+
+後続: タイムアウト（`Waiting::Io` に `deadline` を足せば Go の `SetDeadline`）、UDP、
+HTTP/1.1 の最小実装を typelisp で、TLS、非同期 DNS。

@@ -628,6 +628,23 @@ pub unsafe extern "C" fn rt_suspend_sleep(args: *const i64, argc: u32) -> i64 {
     0
 }
 
+/// `(net-wait h interest)` for compiled code: `args[0]` is the stream
+/// handle, `args[1]` the interest code — both plain integers, which is how
+/// they travel. Records the wait; the activation then returns
+/// `STATUS_SUSPEND` and the scheduler parks the task on the descriptor.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_io(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        crate::fatal("rt_suspend_io: expected 2 arguments");
+    }
+    call_state::set_pending_suspend_2(call_state::SUSPEND_IO, *args, *args.add(1));
+    0
+}
+
 /// `(wait t)` for compiled code: `args[0]` is the `Task<T>` handle.
 ///
 /// The handle goes through as the payload **still tagged**. Reading the

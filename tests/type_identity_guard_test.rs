@@ -236,6 +236,8 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
         (TypeKeyId::UNIVERSAL_TIME, "universal-time"),
         (TypeKeyId::INTERNAL_TIME, "internal-time"),
         (TypeKeyId::HEAP_INFO, "heap-info"),
+        // The socket layer's error type, built by `net_builtin`.
+        (TypeKeyId::NET_ERROR, "neterror"),
     ] {
         assert_eq!(
             BUILTIN_TYPE_KEYS[key.as_u32() as usize],
@@ -280,6 +282,9 @@ fn the_runtime_result_keys_match_the_registry() {
     for (name, key) in typelisp_rt::sys_builtin::RESULT_KEYS {
         assert_eq!(*key, expected(name), "`{}`'s result key", name);
     }
+    for (name, key) in typelisp_rt::net_builtin::RESULT_KEYS {
+        assert_eq!(*key, expected(name), "`{}`'s result key", name);
+    }
     assert_eq!(typelisp_read::shim::READ_RESULT_KEY, expected("read"), "`read`'s result key");
     assert_eq!(
         typelisp_rt::readtable::READER_MACRO_OPTION_KEY,
@@ -310,6 +315,9 @@ fn the_runtime_result_keys_match_the_registry() {
         }
     };
     for (name, inner) in typelisp_rt::stream_builtin::INNER_KEYS {
+        assert_eq!(*inner, ok_payload(name), "`{}`'s inner key", name);
+    }
+    for (name, inner) in typelisp_rt::net_builtin::INNER_KEYS {
         assert_eq!(*inner, ok_payload(name), "`{}`'s inner key", name);
     }
     assert_eq!(

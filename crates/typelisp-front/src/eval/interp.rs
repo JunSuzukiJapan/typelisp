@@ -2000,6 +2000,14 @@ impl Interp {
             name if name.starts_with("stream-") || name.starts_with("file-") => {
                 self.eval_stream_builtin(heap, name, args)
             }
+            // The sockets. `net-wait` never arrives here: `finish_call`
+            // intercepts it, as it does `sleep`, because it stops the task.
+            name if name.starts_with("net-") => {
+                Some(match typelisp_rt::net_builtin::net_builtin(heap, name, args)? {
+                    Ok(v) => Ok(v),
+                    Err(e) => Err(EvalError::Internal(e)),
+                })
+            }
             // The readtable (CLHS 23.1). Routed by name rather than by
             // prefix: `set-`/`get-` are far too common to claim, and there
             // are only four.

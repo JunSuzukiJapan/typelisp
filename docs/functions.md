@@ -2262,3 +2262,88 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
 - **`Atomic`**。`Mutex` で足りる。
 - **タスクローカル変数**（Go にも無い）。
 - **nil チャネル**。理由と代わりの書き方は syntax.md §12.6。
+
+## 21. ネットワーク（TCP）
+
+ソケットは §18 のストリームの一員。接続は `tcp-stream`（文字）／`tcp-byte-stream`（バイト）
+という **同じハンドルの 2 つの見え方** で、`read-line`/`write-line`/`read-byte`/`format` が
+そのまま効く。待ち受けは `tcp-listener`。
+
+**待つのはタスクであってスレッドではない。** `accept`・`read-line`・`write-string`・
+`tcp-connect` のどれも、ソケットが用意できていなければ *そのタスク* を止め（`sleep`/`recv`
+と同じ）、他のタスクは走り続ける。だから Go と同じ形——接続ごとに `(go (serve c))`——で
+サーバが書ける。仕組みは syntax.md §12.4。
+
+### 21.1 型
+
+| 型 | 実装するトレイト | 得る方法 |
+|---|---|---|
+| `tcp-stream` | `CharInput` `PeekInput` `CharOutput` | `tcp-connect` / `accept` / `char-stream-of` |
+| `tcp-byte-stream` | `ByteInput` `ByteOutput` | `byte-stream-of` |
+| `tcp-listener` | `Stream`（`close` / `open-stream-p`） | `tcp-listen` |
+| `NetError` | `Error` | 上の関数の `Err` |
+
+`InputStream` の `Item` は型ごとに 1 つなので（`file-stream`/`binary-file-stream` と同じ理由）
+文字とバイトは別の型。`byte-stream-of`/`char-stream-of` は**同じ接続**を指す値を返し、
+受信バッファも共有する——HTTP のようにヘッダを文字で・本体をバイトで読む用途はこれで書く。
+文字を `unread-char` した直後のバイト読みはエラー（ファイルと同じ規則）。
+
+### 21.2 関数・メソッド
+
+| 名前 | 使い方 | 型 | 意味 |
+|---|---|---|---|
+| `tcp-connect` | `(tcp-connect host port)` | `(string,int)→Result<tcp-stream,NetError>` | 接続する。`host` は名前でもアドレスでも。名前解決失敗・接続拒否は `Err` |
+| `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<tcp-listener,NetError>` | 待ち受ける。`"127.0.0.1"` はこの機械だけ、`"0.0.0.0"` は全インタフェース。`port` に `0` を渡すと OS が選ぶ |
+| `accept` | `(accept l)` | `(tcp-listener)→Result<tcp-stream,NetError>` | 次の接続。来るまでタスクを止める |
+| `local-address` | `(local-address s)` | `(tcp-stream \| tcp-listener)→string` | こちら側の `host:port`。`(tcp-listen h 0)` の後で選ばれたポートを知る手段 |
+| `peer-address` | `(peer-address s)` | `(tcp-stream)→string` | 相手側の `host:port` |
+| `shutdown-output` | `(shutdown-output s)` | `(tcp-stream)→()` | 送信側だけ閉じる（半クローズ）。相手は EOF を読み、こちらはまだ読める。「要求は全部送った」の合図 |
+| `byte-stream-of` | `(byte-stream-of s)` | `(tcp-stream)→tcp-byte-stream` | 同じ接続のバイト版 |
+| `char-stream-of` | `(char-stream-of b)` | `(tcp-byte-stream)→tcp-stream` | 同じ接続の文字版 |
+| `close` | `(close s)` | `Stream` | バッファを送り切ってから閉じる。GC では閉じない（§18） |
+| `with-connection` | `(with-connection (var host port) body...)` | マクロ | 接続→本体→閉じる。`Result<本体の値, NetError>`（`with-open-file` と同形） |
+
+`write-string`/`write-line` は**書き切ってから返る**（Go の `net.Conn.Write` と同じ）。
+細かい書き込みを束ねたければ `string-output-stream` に溜めてから 1 回で書く。
+`listen` は受信バッファに何かあるときだけ `true`——`read-char-no-hang` が名前どおりに動く。
+
+```lisp
+;; サーバ: 接続ごとに 1 タスク
+(defun serve ((c tcp-stream)) ()
+  (loop (match (read-line c)
+          ((some line) (write-line c line))
+          ((none) (break))))
+  (close c))
+
+(let ((l (unwrap (tcp-listen "0.0.0.0" 7777))))
+  (loop (match (accept l)
+          ((ok c) (progn (go (serve c)) ()))
+          ((err e) (println "accept: ~a" (message e))))))
+
+;; クライアント
+(match (with-connection (c "127.0.0.1" 7777)
+         (write-line c "hello")
+         (unwrap (read-line c)))
+  ((ok reply) (println "~a" reply))
+  ((err e) (println "~a" (message e))))
+```
+
+動く例は `examples/projects/echo-server/`（サーバとクライアントの 2 本）。
+
+### 21.3 下の層（`net-*` 組み込み）
+
+上の関数は全部 prelude の typelisp で、ハンドル `i32` に対する `net-*` 組み込みの上に書かれている。
+組み込みはどれも **今できることしかしない**（ソケットは non-blocking）。「まだ」は値で返る——
+`net-fill`/`net-accept` の `none`、`net-flush` の `false`——ので、prelude のループがそれを見て
+`(net-wait h interest)` を呼び、タスクを止める。`net-wait` は `sleep` と同じ「中断する組み込み」
+（interest: `net-readable` = 0 / `net-writable` = 1）。ふつうのプログラムが `net-*` を直接呼ぶ
+理由は無い。
+
+### 21.4 無いもの
+
+- **タイムアウト**。`select` + `after` はソケット操作には使えない（`select` の腕はチャネル操作だけ）。
+- **UDP**、**Unix ドメインソケット**、**TLS**。
+- **非同期の名前解決**。`tcp-connect` の名前解決だけは `getaddrinfo` でスレッドを止める
+  （Go の cgo リゾルバも同じで、あちらはスレッドを手放す。M:N 化のときに）。
+- **AOT 実行ファイル内のソケット待ち**。AOT の `main` にはスケジューラが無いので、待つことに
+  なった操作は `sleep`/`recv` と同様にエラーになる（`typl file.typl` は JIT で、こちらは動く）。

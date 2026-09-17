@@ -88,7 +88,7 @@ pub const INNER_KEYS: &[(&str, &str)] = &[
     ("file-owner-name", "option<string>"),
 ];
 
-fn lookup(table: &[(&str, &'static str)], name: &str, what: &str) -> &'static str {
+pub(crate) fn lookup(table: &[(&str, &'static str)], name: &str, what: &str) -> &'static str {
     match table.iter().find(|(n, _)| *n == name) {
         Some((_, key)) => key,
         // Not a recoverable condition: a builtin that builds a box without a
@@ -128,14 +128,14 @@ fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
 pub type ArgError = String;
 
 /// A stream handle, or `open`'s mode — both plain integers.
-fn int(args: &[Value], i: usize, who: &str) -> Result<i64, ArgError> {
+pub(crate) fn int(args: &[Value], i: usize, who: &str) -> Result<i64, ArgError> {
     match args.get(i) {
         Some(Value::Int(n)) => Ok(*n),
         other => Err(format!("{}: argument {} is not an integer, got {:?}", who, i, other)),
     }
 }
 
-fn text(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<String, ArgError> {
+pub(crate) fn text(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<String, ArgError> {
     match args.get(i) {
         Some(Value::Str(id)) => Ok(heap.string(*id).to_string()),
         other => Err(format!("{}: argument {} is not a string, got {:?}", who, i, other)),

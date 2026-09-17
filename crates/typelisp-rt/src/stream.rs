@@ -44,15 +44,23 @@
 //! ([`crate::active_heap`]) — the two are always used together, and the tests
 //! that run interpreters in parallel threads would otherwise share stdin.
 //!
+//! TCP sockets live in the same table (`Backend::Tcp`/`Backend::Listener`)
+//! but are never read or written through the operations here: they are
+//! non-blocking, and [`crate::net`] is the half that knows how to say "not
+//! yet". A socket handle reaching `read_char` or `write_str` is refused, not
+//! served with a blocking call that would stop every task.
+//!
 //! Slots are never reused (see [`StreamTable`]), so the table's one
 //! interpreter-visible behaviour change — it outlives any single `Interp`
 //! rather than being dropped with it — cannot make a stale handle name a
 //! different stream; it names a closed one forever.
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::net::{TcpListener, TcpStream};
 
 thread_local! {
     /// This thread's open streams. See the module docs for why it is here.
@@ -71,12 +79,25 @@ pub fn with_streams<T>(f: impl FnOnce(&mut StreamTable) -> T) -> T {
 
 /// What a stream is attached to. Only *leaf* backends live here; a composite
 /// stream is a typelisp struct holding other streams (see the module docs).
-enum Backend {
+pub(crate) enum Backend {
     Stdin,
     Stdout,
     Stderr,
     FileIn(BufReader<File>),
     FileOut(BufWriter<File>),
+    /// A connected TCP socket, **non-blocking**, with its own buffers on
+    /// both sides. The character/byte operations above never touch it: a
+    /// socket is read and written through `crate::net`'s `net-*` builtins,
+    /// each of which does only what can be done *now* and reports "not yet"
+    /// as an answer, so that the wait — the scheduler parking the task —
+    /// happens in typelisp. A blocking `read` here would stop every task.
+    ///
+    /// `rbuf` holds what has been received and not yet consumed; `wbuf`
+    /// what has been written and not yet sent.
+    Tcp { sock: TcpStream, rbuf: VecDeque<u8>, wbuf: VecDeque<u8> },
+    /// A listening TCP socket, non-blocking for the same reason. Neither an
+    /// input nor an output stream: it yields connections, not items.
+    Listener(TcpListener),
     /// Indexed by *character*, not byte, so reading is O(1) per character and
     /// can never split a multi-byte one.
     StringIn { chars: Vec<char>, pos: usize },
@@ -89,19 +110,19 @@ enum Backend {
     Closed,
 }
 
-struct StreamObj {
-    backend: Backend,
+pub(crate) struct StreamObj {
+    pub(crate) backend: Backend,
     /// Characters pushed back by `unread-char`, most recent last.
-    pushback: Vec<char>,
+    pub(crate) pushback: Vec<char>,
     input: bool,
     output: bool,
     /// The last character written, for `fresh-line`'s "only if not already at
     /// the start of a line" rule.
-    last_written: Option<char>,
+    pub(crate) last_written: Option<char>,
 }
 
 impl StreamObj {
-    fn new(backend: Backend, input: bool, output: bool) -> StreamObj {
+    pub(crate) fn new(backend: Backend, input: bool, output: bool) -> StreamObj {
         StreamObj { backend, pushback: Vec::new(), input, output, last_written: None }
     }
 }
@@ -126,12 +147,12 @@ pub struct StreamTable {
 }
 
 impl StreamTable {
-    fn insert(&mut self, s: StreamObj) -> Handle {
+    pub(crate) fn insert(&mut self, s: StreamObj) -> Handle {
         self.slots.push(Some(s));
         self.slots.len() as Handle
     }
 
-    fn get(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
+    pub(crate) fn get(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
         let i = usize::try_from(h - 1).map_err(|_| format!("invalid stream handle {}", h))?;
         match self.slots.get_mut(i) {
             Some(Some(s)) => Ok(s),
@@ -139,7 +160,7 @@ impl StreamTable {
         }
     }
 
-    fn readable(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
+    pub(crate) fn readable(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
         let s = self.get(h)?;
         if matches!(s.backend, Backend::Closed) {
             return Err("the stream is closed".to_string());
@@ -150,7 +171,7 @@ impl StreamTable {
         Ok(s)
     }
 
-    fn writable(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
+    pub(crate) fn writable(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
         let s = self.get(h)?;
         if matches!(s.backend, Backend::Closed) {
             return Err("the stream is closed".to_string());
@@ -217,6 +238,16 @@ impl StreamTable {
         if let Backend::FileOut(w) = &mut s.backend {
             w.flush().map_err(|e| format!("close: {}", e))?;
         }
+        // A socket gets one non-blocking attempt at what is still buffered.
+        // Waiting for the rest is not this layer's to do: the prelude's
+        // `close` calls `finish-output` first, which parks the task until
+        // the buffer is empty, so this attempt is normally a no-op.
+        if let Backend::Tcp { sock, wbuf, .. } = &mut s.backend {
+            let (front, _) = wbuf.as_slices();
+            if !front.is_empty() {
+                let _ = sock.write(front);
+            }
+        }
         // A string output stream keeps its text: CL allows
         // `get-output-stream-string` after `close`.
         if !matches!(s.backend, Backend::StringOut(_)) {
@@ -224,6 +255,25 @@ impl StreamTable {
         }
         s.pushback.clear();
         Ok(())
+    }
+
+    /// The OS descriptor under a socket stream — what the scheduler hands
+    /// to `poll`. Only a socket has one worth waiting on: a file is always
+    /// ready, and a string stream has no descriptor at all.
+    #[cfg(unix)]
+    pub fn raw_fd(&mut self, h: Handle) -> StreamResult<i32> {
+        use std::os::unix::io::AsRawFd;
+        match &self.get(h)?.backend {
+            Backend::Tcp { sock, .. } => Ok(sock.as_raw_fd()),
+            Backend::Listener(l) => Ok(l.as_raw_fd()),
+            Backend::Closed => Err("the stream is closed".to_string()),
+            _ => Err("net-wait: only a socket can be waited on".to_string()),
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub fn raw_fd(&mut self, _h: Handle) -> StreamResult<i32> {
+        unimplemented!("socket waits need a raw descriptor, which is POSIX")
     }
 
     pub fn is_open(&mut self, h: Handle) -> bool {
@@ -260,6 +310,9 @@ impl StreamTable {
                 let mut lock = stdin.lock();
                 read_one_char(&mut lock)
             }
+            // Not a fallback to a blocking read: a socket is read through
+            // `net-pop-char`/`net-fill`, which never wait.
+            Backend::Tcp { .. } => Err("read-char: a socket is read through net-pop-char".to_string()),
             _ => Err("the stream is not an input stream".to_string()),
         }
     }
@@ -288,6 +341,7 @@ impl StreamTable {
                 let mut lock = stdin.lock();
                 lock.read(&mut buf).map_err(|e| format!("read-byte: {}", e))?
             }
+            Backend::Tcp { .. } => return Err("read-byte: a socket is read through net-pop-byte".to_string()),
             _ => return Err("read-byte: the stream is not a byte input stream".to_string()),
         };
         Ok(if n == 0 { None } else { Some(buf[0]) })
@@ -305,6 +359,7 @@ impl StreamTable {
             Backend::FileOut(w) => w.write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
             Backend::Stdout => std::io::stdout().write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
             Backend::Stderr => std::io::stderr().write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
+            Backend::Tcp { .. } => Err("write-byte: a socket is written through net-push-byte".to_string()),
             _ => Err("write-byte: the stream is not a byte output stream".to_string()),
         }
     }
@@ -346,6 +401,8 @@ impl StreamTable {
         }
         Ok(match &s.backend {
             Backend::StringIn { chars, pos } => *pos < chars.len(),
+            // Already received and sitting in the buffer: no OS read needed.
+            Backend::Tcp { rbuf, .. } => !rbuf.is_empty(),
             _ => false,
         })
     }
@@ -373,6 +430,7 @@ impl StreamTable {
             Backend::Stderr => {
                 std::io::stderr().write_all(text.as_bytes()).map_err(|e| format!("write: {}", e))
             }
+            Backend::Tcp { .. } => Err("write: a socket is written through net-push-string".to_string()),
             _ => Err("the stream is not an output stream".to_string()),
         }
     }
@@ -389,6 +447,7 @@ impl StreamTable {
             Backend::FileOut(w) => w.flush().map_err(|e| format!("finish-output: {}", e)),
             Backend::Stdout => std::io::stdout().flush().map_err(|e| format!("finish-output: {}", e)),
             Backend::Stderr => std::io::stderr().flush().map_err(|e| format!("finish-output: {}", e)),
+            Backend::Tcp { .. } => Err("finish-output: a socket is flushed through net-flush".to_string()),
             _ => Ok(()),
         }
     }

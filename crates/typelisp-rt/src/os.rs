@@ -16,6 +16,10 @@
 //! which is how a `(defffi ...)` finds the function it names. Same rule as
 //! the rest — a safe signature over one C call, `unsafe` kept inside.
 //!
+//! Since TCP, two more: [`poll_ready`], the one place a socket is waited on
+//! (the scheduler's, not any stream's), and [`tcp_connect_begin`], a connect
+//! that returns before the handshake does — `std` offers neither.
+//!
 //! Every one of these returns `Option`, and the `None`s are real: CL says
 //! `machine-instance`, `machine-version`, `software-version` and
 //! `file-author` may all answer `NIL`. That is what makes reporting a failure
@@ -345,6 +349,180 @@ pub fn dl_open(_path: &str) -> Option<usize> {
 #[cfg(not(unix))]
 pub fn dl_sym(_handle: usize, _symbol: &str) -> Option<usize> {
     unimplemented!("the FFI needs dlsym, which is POSIX")
+}
+
+/// What a socket wait is for: the readiness `poll_ready` reports and the
+/// scheduler parks a task on.
+///
+/// Defined here, in the crate that makes the `poll` call, so that the front
+/// end (which owns the scheduler) and the builtins (which own the sockets)
+/// name the same two things without either depending on the other for it.
+/// The wire form is `net-wait`'s second argument: 0 readable, 1 writable.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Interest {
+    Readable,
+    Writable,
+}
+
+impl Interest {
+    /// The integer `net-wait` takes — `0` readable, `1` writable — or `None`
+    /// for anything else, which is the caller's error to report.
+    pub fn from_code(code: i64) -> Option<Interest> {
+        match code {
+            0 => Some(Interest::Readable),
+            1 => Some(Interest::Writable),
+            _ => None,
+        }
+    }
+}
+
+/// Which of `fds` are ready, waiting at most `timeout` (`None`: as long as
+/// it takes) — one `poll(2)` call over the whole set.
+///
+/// **The only place this program waits on a socket.** The scheduler calls
+/// it when nothing else can run, and with a zero timeout before each task
+/// switch; nothing else ever does. That is what makes every socket
+/// operation the language exposes non-blocking by construction rather than
+/// by discipline, and it is also the one piece that moves when tasks are
+/// spread over OS threads: the *set* and the *call* stay, only the caller
+/// changes.
+///
+/// The answer for each descriptor is a plain `bool`: readable or writable
+/// as asked, **or in error, hung up, or invalid**. Those three are reported
+/// as ready on purpose — a task waiting on a socket the peer has closed must
+/// wake so that its next `read` can see the end of input, and one waiting on
+/// a descriptor that has since been closed must wake so that its next
+/// operation can fail with a message instead of parking forever.
+///
+/// `EINTR` is retried with the remaining timeout: a signal is not an answer.
+#[cfg(unix)]
+pub fn poll_ready(fds: &[(i32, Interest)], timeout: Option<std::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
+    let mut polls: Vec<libc::pollfd> = fds
+        .iter()
+        .map(|(fd, interest)| libc::pollfd {
+            fd: *fd,
+            events: match interest {
+                Interest::Readable => libc::POLLIN,
+                Interest::Writable => libc::POLLOUT,
+            },
+            revents: 0,
+        })
+        .collect();
+    let deadline = timeout.map(|t| std::time::Instant::now() + t);
+    loop {
+        // Milliseconds, rounded *up*: rounding down would turn a 0.5ms wait
+        // into a busy loop. `-1` is "no timeout".
+        let ms: libc::c_int = match deadline {
+            None => -1,
+            Some(d) => {
+                let left = d.saturating_duration_since(std::time::Instant::now());
+                let ms = left.as_millis() + u128::from(left.subsec_nanos() % 1_000_000 != 0);
+                libc::c_int::try_from(ms).unwrap_or(libc::c_int::MAX)
+            }
+        };
+        // SAFETY: `polls` is a live, fully-initialised array of `pollfd`
+        // whose length is passed alongside it, and it outlives the call.
+        // `poll` writes only the `revents` fields and touches no global
+        // state.
+        let n = unsafe { libc::poll(polls.as_mut_ptr(), polls.len() as libc::nfds_t, ms) };
+        if n >= 0 {
+            break;
+        }
+        let err = std::io::Error::last_os_error();
+        if err.kind() != std::io::ErrorKind::Interrupted {
+            return Err(err);
+        }
+    }
+    const READY_ANYWAY: libc::c_short = libc::POLLERR | libc::POLLHUP | libc::POLLNVAL;
+    Ok(polls
+        .iter()
+        .map(|p| (p.fd, p.revents & (p.events | READY_ANYWAY) != 0))
+        .collect())
+}
+
+#[cfg(not(unix))]
+pub fn poll_ready(_fds: &[(i32, Interest)], _timeout: Option<std::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
+    unimplemented!("socket waits need poll, which is POSIX")
+}
+
+/// Starts a TCP connection to `addr` without waiting for it: the socket
+/// comes back non-blocking with the connect *in progress*. The caller waits
+/// for it to become writable ([`poll_ready`]) and then asks
+/// `TcpStream::take_error` whether the connect succeeded.
+///
+/// `std` has no way to say this — `TcpStream::connect` blocks until the
+/// handshake completes or times out, which for an unreachable host is
+/// the better part of a minute with every task stopped. So the three calls
+/// are made here: `socket`, `fcntl(O_NONBLOCK)`, `connect`, with
+/// `EINPROGRESS` being the expected answer rather than a failure. Anything
+/// else `connect` reports (a refused loopback connect can fail at once) is
+/// returned as the error it is.
+#[cfg(unix)]
+pub fn tcp_connect_begin(addr: std::net::SocketAddr) -> std::io::Result<std::net::TcpStream> {
+    use std::os::unix::io::FromRawFd;
+    let family = match addr {
+        std::net::SocketAddr::V4(_) => libc::AF_INET,
+        std::net::SocketAddr::V6(_) => libc::AF_INET6,
+    };
+    // SAFETY: `socket` takes three integers and returns a descriptor or -1.
+    let fd = unsafe { libc::socket(family, libc::SOCK_STREAM, 0) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // From here the descriptor is owned by `stream`, whose `Drop` closes it
+    // on every error path below.
+    // SAFETY: `fd` was just returned by `socket` and nothing else owns it.
+    let stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
+    stream.set_nonblocking(true)?;
+    // The address as the kernel wants it. `sockaddr_storage` is large enough
+    // for either family; only the family's own prefix is written.
+    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let len: libc::socklen_t = match addr {
+        std::net::SocketAddr::V4(a) => {
+            let sin = libc::sockaddr_in {
+                sin_family: libc::AF_INET as libc::sa_family_t,
+                sin_port: a.port().to_be(),
+                sin_addr: libc::in_addr { s_addr: u32::from_ne_bytes(a.ip().octets()) },
+                sin_zero: [0; 8],
+                #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
+                sin_len: std::mem::size_of::<libc::sockaddr_in>() as u8,
+            };
+            // SAFETY: `storage` is at least as large as `sockaddr_in`, and both
+            // are plain-old-data.
+            unsafe { std::ptr::write(&mut storage as *mut _ as *mut libc::sockaddr_in, sin) };
+            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
+        }
+        std::net::SocketAddr::V6(a) => {
+            let sin6 = libc::sockaddr_in6 {
+                sin6_family: libc::AF_INET6 as libc::sa_family_t,
+                sin6_port: a.port().to_be(),
+                sin6_flowinfo: a.flowinfo(),
+                sin6_addr: libc::in6_addr { s6_addr: a.ip().octets() },
+                sin6_scope_id: a.scope_id(),
+                #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
+                sin6_len: std::mem::size_of::<libc::sockaddr_in6>() as u8,
+            };
+            // SAFETY: as above, for `sockaddr_in6`.
+            unsafe { std::ptr::write(&mut storage as *mut _ as *mut libc::sockaddr_in6, sin6) };
+            std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t
+        }
+    };
+    // SAFETY: `fd` is the live descriptor `stream` owns, `storage` holds a
+    // fully-initialised address of `len` bytes and outlives the call.
+    let rc = unsafe { libc::connect(fd, &storage as *const _ as *const libc::sockaddr, len) };
+    if rc == 0 {
+        return Ok(stream);
+    }
+    let err = std::io::Error::last_os_error();
+    match err.raw_os_error() {
+        Some(libc::EINPROGRESS) => Ok(stream),
+        _ => Err(err),
+    }
+}
+
+#[cfg(not(unix))]
+pub fn tcp_connect_begin(_addr: std::net::SocketAddr) -> std::io::Result<std::net::TcpStream> {
+    unimplemented!("a non-blocking connect needs socket/fcntl/connect, which are POSIX")
 }
 
 #[cfg(test)]

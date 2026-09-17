@@ -391,6 +391,12 @@ pub mod call_state {
     /// travel in [`take_pending_select`] rather than in the payload words:
     /// how many there are is the program's business.
     pub const SUSPEND_CHAN_SELECT: i64 = 10;
+    /// `(net-wait h interest)` — a socket becoming ready. Payloads: the
+    /// stream handle and the interest code (`typelisp_rt::os::Interest`),
+    /// **both raw** — two plain integers, like `sleep`'s bits. The front end
+    /// resolves the handle to a descriptor, exactly as it does for the
+    /// interpreted call.
+    pub const SUSPEND_IO: i64 = 11;
 
     /// Records the arms of a `select`, as `[n, has-else, kind, chan, extra]...`
     /// with every word **tagged** — the array is a compiled frame's slots,

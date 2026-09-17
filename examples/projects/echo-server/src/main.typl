@@ -1,0 +1,46 @@
+;; Echo server: one task per connection.
+;;
+;;   typl examples/projects/echo-server/src/main.typl [port]
+;;
+;; Then, from another terminal:  nc 127.0.0.1 <port>   -- every line you type
+;; comes back. `quit` closes that connection; the server keeps serving.
+;;
+;; What it shows: `accept` and `read-line` on a socket park the *task*, not
+;; the thread. The heartbeat task keeps printing while the server waits for
+;; clients and while clients sit idle, and several clients are served at
+;; once by tasks that each wait on their own socket.
+
+(defun serve ((c tcp-stream)) ()
+  (println "~a connected" (peer-address c))
+  (loop
+    (match (read-line c)
+      ((none) (break))
+      ((some line)
+       (if (equal line "quit")
+           (break)
+           (write-line c line)))))
+  (println "~a left" (peer-address c))
+  (close c))
+
+(defun accept-loop ((l tcp-listener)) ()
+  (loop
+    (match (accept l)
+      ((ok c) (progn (go (serve c)) ()))
+      ((err e) (println "accept failed: ~a" (message e))))))
+
+(defun heartbeat () ()
+  (loop
+    (sleep 5.0)
+    (println "[still here]")))
+
+(defun main () ()
+  (let ((args (command-line-args)))
+    (let ((port (if (> (len args) 1) (unwrap-or (parse-int (get args 1)) 7777) 7777)))
+      (match (tcp-listen "0.0.0.0" port)
+        ((err e) (println "cannot listen: ~a" (message e)))
+        ((ok l)
+         (println "echo server on ~a" (local-address l))
+         (go (heartbeat))
+         (accept-loop l))))))
+
+(main)

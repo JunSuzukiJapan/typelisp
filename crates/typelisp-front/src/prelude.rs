@@ -4103,6 +4103,205 @@ user-visible capacity."
   (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h)))
   (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
 
+;; ---------------------------------------------------------------------------
+;; TCP. Three structs over one more kind of handle in the same native table:
+;; a connected socket, seen as characters (`tcp-stream`) or as bytes
+;; (`tcp-byte-stream`) -- two views of the *same* handle, since `InputStream`
+;; pins `Item` per type -- and a listening socket (`tcp-listener`).
+;;
+;; Every native `net-*` call below does only what can be done right now: the
+;; socket is non-blocking, and "nothing yet" comes back as an answer
+;; (`none` from `net-fill`/`net-accept`, `false` from `net-flush`). The
+;; waiting is written *here*, as a loop that calls `(net-wait h interest)`
+;; when it gets that answer. `net-wait` parks the **task** -- like `sleep`
+;; and `recv` -- until the scheduler's `poll` says the socket is ready, and
+;; every other task keeps running meanwhile. Nothing in a socket operation can
+;; stop the thread, which is what lets a server `go` one task per connection.
+;;
+;; `net-wait`'s interest: 0 readable, 1 writable.
+
+(pub defconstant (net-readable int) 0)
+(pub defconstant (net-writable int) 1)
+
+(pub defstruct tcp-stream (h i32))
+(pub defstruct tcp-byte-stream (h i32))
+(pub defstruct tcp-listener (h i32))
+
+(impl Error NetError
+  (message ((self Self)) string (match self ((NetError m) m))))
+
+;; `unwrap-io`'s twin: the socket operations whose failure means the program
+;; is already broken (a closed handle) panic; the ordinary failures -- a
+;; refused connect, a peer that went away mid-write -- come back as `Result`.
+(defun unwrap-net<T> ((r Result<T, NetError>)) T
+  (match r
+    ((ok v) v)
+    ((err e) (panic (message e)))))
+
+;; The three loops every socket operation is made of. Each takes the handle,
+;; so the character and byte views share them.
+
+;; Send everything buffered, waiting for the socket whenever it is full.
+(defun tcp-drain ((h i32)) ()
+  (loop
+    (if (unwrap-net (net-flush h))
+        (return)
+        (net-wait h net-writable))))
+
+;; The next character, or `none` at end of input. `net-pop-char` says `none`
+;; when the buffer holds no whole character; `net-fill` then either adds bytes
+;; (try again), reports end of input (`some 0`), or has nothing yet -- wait.
+(defun tcp-read-char ((h i32)) Option<char>
+  (loop
+    (match (unwrap-net (net-pop-char h))
+      ((some c) (return (option::some c)))
+      ((none)
+       (match (unwrap-net (net-fill h))
+         ((some n) (when (eq n 0) (return (option::none))))
+         ((none) (net-wait h net-readable)))))))
+
+(defun tcp-read-byte ((h i32)) Option<int>
+  (loop
+    (match (unwrap-net (net-pop-byte h))
+      ((some b) (return (option::some b)))
+      ((none)
+       (match (unwrap-net (net-fill h))
+         ((some n) (when (eq n 0) (return (option::none))))
+         ((none) (net-wait h net-readable)))))))
+
+;; Closing drains first: what was written must reach the peer before the
+;; socket goes. (`unwind-protect` is not needed here -- if the drain fails the
+;; connection is already gone and `stream-close` on it is the right thing
+;; to do next, which the panic from `unwrap-net` skips only by ending the
+;; program.)
+(defun tcp-close ((h i32)) ()
+  (when (stream-open-p h) (tcp-drain h))
+  (unwrap-io (stream-close h)))
+
+(impl Stream tcp-stream
+  (open-stream-p ((self Self)) bool (stream-open-p self::h))
+  (close ((self Self)) () (tcp-close self::h)))
+(impl InputStream tcp-stream
+  (type Item char)
+  (read-item ((self Self)) Option<char> (tcp-read-char self::h))
+  ;; True when something is already buffered: the one honest `true` a socket
+  ;; can give, and what makes `read-char-no-hang` on it mean what it says.
+  (listen ((self Self)) bool (unwrap-net (net-buffered-p self::h))))
+(impl OutputStream tcp-stream
+  (type Item char)
+  (write-item ((self Self) (c char)) ()
+    (unwrap-net (net-push-string self::h (char->string c)))
+    (tcp-drain self::h)))
+(impl CharInput tcp-stream)
+(impl PeekInput tcp-stream
+  (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
+(impl CharOutput tcp-stream
+  ;; Write-through: each `write-string` reaches the peer before it returns,
+  ;; as Go's `net.Conn.Write` does. A caller sending many small pieces can
+  ;; batch them in a `string-output-stream` first.
+  (write-string ((self Self) (s string)) ()
+    (unwrap-net (net-push-string self::h s))
+    (tcp-drain self::h))
+  (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h)))
+  (finish-output ((self Self)) () (tcp-drain self::h)))
+
+(impl Stream tcp-byte-stream
+  (open-stream-p ((self Self)) bool (stream-open-p self::h))
+  (close ((self Self)) () (tcp-close self::h)))
+(impl InputStream tcp-byte-stream
+  (type Item int)
+  (read-item ((self Self)) Option<int> (tcp-read-byte self::h))
+  (listen ((self Self)) bool (unwrap-net (net-buffered-p self::h))))
+(impl OutputStream tcp-byte-stream
+  (type Item int)
+  (write-item ((self Self) (b int)) ()
+    (unwrap-net (net-push-byte self::h b))
+    (tcp-drain self::h)))
+(impl ByteInput tcp-byte-stream)
+(impl ByteOutput tcp-byte-stream
+  (finish-output ((self Self)) () (tcp-drain self::h)))
+
+(impl Stream tcp-listener
+  (open-stream-p ((self Self)) bool (stream-open-p self::h))
+  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+
+(pub defun tcp-connect ((host string) (port int)) Result<tcp-stream, NetError>
+  "Connect to `host` (a name or an address) on `port`. `Err` if the name does
+   not resolve or the connection is refused -- ordinary outcomes, not panics.
+   The task waits for the handshake; other tasks keep running."
+  (match (net-connect-begin host port)
+    ((err e) (result::err e))
+    ((ok h)
+     (net-wait h net-writable)
+     (match (net-connect-finish h)
+       ((ok _) (result::ok (tcp-stream::new h)))
+       ((err e)
+        (unwrap-io (stream-close h))
+        (result::err e))))))
+
+(pub defun tcp-listen ((host string) (port int)) Result<tcp-listener, NetError>
+  "Listen on `host`:`port` -- 127.0.0.1 for this machine only, 0.0.0.0 for
+   every interface. Port `0` lets the OS pick a free one; `local-address`
+   says which."
+  (match (net-listen host port)
+    ((ok h) (result::ok (tcp-listener::new h)))
+    ((err e) (result::err e))))
+
+(pub defmethod accept ((self tcp-listener)) Result<tcp-stream, NetError>
+  "The next connection, waiting for one. The usual shape of a server is
+   `(loop (match (accept l) ((ok c) (go (serve c))) ((err e) ...)))`: one task
+   per connection, each free to wait on its own socket."
+  (loop
+    (match (net-accept self::h)
+      ;; `the`: a loop's type is the join of its `return`s, and this one is
+      ;; seen first with its `E` still a hole.
+      ((ok (some h)) (return (the Result<tcp-stream, NetError> (result::ok (tcp-stream::new h)))))
+      ((ok (none)) (net-wait self::h net-readable))
+      ((err e) (return (result::err e))))))
+
+(pub defun byte-stream-of ((s tcp-stream)) tcp-byte-stream
+  "The same connection as a byte stream. Both views share one buffer, so a
+   protocol can read its header as text and its body as bytes."
+  (tcp-byte-stream::new s::h))
+
+(pub defun char-stream-of ((s tcp-byte-stream)) tcp-stream
+  "The same connection as a character stream."
+  (tcp-stream::new s::h))
+
+(pub defmethod shutdown-output ((self tcp-stream)) ()
+  "Send what is buffered and close the sending side only: the peer reads end
+   of input, and this side can still read the reply. What a request/response
+   exchange says with -- the whole request has been sent."
+  (tcp-drain self::h)
+  (unwrap-net (net-shutdown-write self::h)))
+
+(pub defmethod local-address ((self tcp-stream)) string
+  "This side's address as `host:port`."
+  (unwrap-net (net-local-address self::h)))
+(pub defmethod local-address ((self tcp-listener)) string
+  "The address being listened on, as `host:port`. After `(tcp-listen host 0)`
+   this is how the chosen port is learned."
+  (unwrap-net (net-local-address self::h)))
+(pub defmethod peer-address ((self tcp-stream)) string
+  "The other side's address as `host:port`."
+  (unwrap-net (net-peer-address self::h)))
+
+(pub defmacro with-connection (spec &rest body)
+  "`(with-connection (var host port) body...)` -- connect, run the body,
+   close. Yields `Result<body-value, NetError>`, `with-open-file`'s shape."
+  (let ((var (sexpr-car spec))
+        (host (sexpr-car (sexpr-cdr spec)))
+        (port (sexpr-car (sexpr-cdr (sexpr-cdr spec))))
+        (s (gensym))
+        (e (gensym))
+        (result (gensym)))
+    `(match (tcp-connect ,host ,port)
+       ((ok ,s)
+        (let ((,var ,s))
+          (let ((,result (progn ,@body)))
+            (progn (close ,var) (result::ok ,result)))))
+       ((err ,e) (result::err ,e)))))
+
 ;; CL's standard streams. Ordinary assignable globals rather than dynamically
 ;; bound specials — `(setf *standard-output* s)` does globally what CL's
 ;; `(let ((*standard-output* s)) ...)` does locally, and `dlet` (Phase 7b) does

@@ -742,6 +742,7 @@ impl Registry {
         // reader `typl`/the REPL use for source text
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
         register_stream_builtins(&mut root);
+        register_net_builtins(&mut root);
         register_system_builtins(&mut root);
         register_readtable_builtins(&mut root);
         root.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(READ_ERROR))));
@@ -1085,8 +1086,14 @@ pub const EVAL_ERROR: &str = "evalerror";
 /// *class* would need a condition system, which this language deliberately
 /// does not have.
 pub const FILE_ERROR: &str = "fileerror";
-pub const BUILTIN_ERROR_TYPES: [&str; 5] =
-    [PARSE_INT_ERROR, PARSE_FLOAT_ERROR, READ_ERROR, EVAL_ERROR, FILE_ERROR];
+/// What every `net-*` builtin fails with: a refused connect, an unknown
+/// host, a reset connection. Its own type rather than `FileError` because a
+/// program handling both — a server that serves files — wants to tell a
+/// missing file from a dropped client, and the *type* is how it does that
+/// without parsing a message.
+pub const NET_ERROR: &str = "neterror";
+pub const BUILTIN_ERROR_TYPES: [&str; 6] =
+    [PARSE_INT_ERROR, PARSE_FLOAT_ERROR, READ_ERROR, EVAL_ERROR, FILE_ERROR, NET_ERROR];
 
 /// The `stream-*` / `file-*` primitives (`eval::interp::Interp::
 /// eval_stream_builtin`). Deliberately minimal and untyped-looking: a stream
@@ -1184,6 +1191,65 @@ fn register_stream_builtins(root: &mut Namespace) {
     // the `Result` because CL separates the two failures: the file not being
     // there is an error, an owner with no password-database entry is `NIL`.
     native("file-owner-name", vec![Type::Str], result_of(option_of(Type::Str), file_err.clone()));
+}
+
+/// The `net-*` primitives (`typelisp_rt::net_builtin`): a TCP socket as an
+/// opaque `i32` handle in the same table the streams live in, and every
+/// operation on it in its **non-blocking** form. The prelude's `tcp-stream`,
+/// `tcp-byte-stream` and `tcp-listener` are written on top of these, and the
+/// waiting is written there too: each "not yet" answer below (`none` from
+/// `net-fill`/`net-accept`, `false` from `net-flush`) is followed by a
+/// `(net-wait h interest)`, which parks the task until `poll` says the socket
+/// is ready.
+///
+/// `net-wait` is the one entry here that answers with nothing: like `sleep`
+/// and `yield` it is registered as an ordinary builtin and intercepted by the
+/// evaluator, because only a `State` can say "stop here". Its `interest` is
+/// `0` for readable and `1` for writable — `typelisp_rt::os::Interest`.
+fn register_net_builtins(root: &mut Namespace) {
+    let net_err = error_ty(NET_ERROR);
+    let mut native = |name: &str, params: Vec<Type>, ret: Type| {
+        root.fns.insert(
+            name.to_string(),
+            FnSig::builtin(params, ret),
+        );
+    };
+    let h = Type::I32;
+    let unit_or_err = result_of(Type::Unit, net_err.clone());
+
+    // Connecting is two steps with a wait between: begin (the handle comes
+    // back with the connect in flight), wait for writable, finish (did it
+    // succeed). A single blocking `connect` would stop every task for as
+    // long as an unreachable host takes to time out.
+    native("net-connect-begin", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
+    native("net-connect-finish", vec![h.clone()], unit_or_err.clone());
+    native("net-listen", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
+    // `Ok(none)`: nobody is waiting to be accepted — wait for readable.
+    native("net-accept", vec![h.clone()], result_of(option_of(h.clone()), net_err.clone()));
+
+    // Input is a buffer the OS fills and the program drains. `net-fill`
+    // answers `Ok(some 0)` at end of input and `Ok(none)` when nothing has
+    // arrived — wait for readable. The two `pop`s answer `none` when the
+    // buffer has no whole item (`net-pop-char` will not split a UTF-8
+    // character), which is the cue to fill.
+    native("net-fill", vec![h.clone()], result_of(option_of(Type::Int), net_err.clone()));
+    native("net-pop-byte", vec![h.clone()], result_of(option_of(Type::Int), net_err.clone()));
+    native("net-pop-char", vec![h.clone()], result_of(option_of(Type::Char), net_err.clone()));
+    native("net-buffered-p", vec![h.clone()], result_of(Type::Bool, net_err.clone()));
+
+    // Output is the mirror: push into a buffer, then flush. `net-flush`
+    // answers `Ok(false)` when the OS took only part of it — wait for
+    // writable and flush again.
+    native("net-push-string", vec![h.clone(), Type::Str], unit_or_err.clone());
+    native("net-push-byte", vec![h.clone(), Type::Int], unit_or_err.clone());
+    native("net-flush", vec![h.clone()], result_of(Type::Bool, net_err.clone()));
+    native("net-shutdown-write", vec![h.clone()], unit_or_err.clone());
+    native("net-local-address", vec![h.clone()], result_of(Type::Str, net_err.clone()));
+    native("net-peer-address", vec![h.clone()], result_of(Type::Str, net_err.clone()));
+
+    // The wait itself. Not a `Result`: a closed handle here is a program
+    // error (the stream was closed and then waited on), which is a panic.
+    native("net-wait", vec![h, Type::Int], Type::Unit);
 }
 
 /// The environment the program is running in (CLHS 25.1) — plus the two
