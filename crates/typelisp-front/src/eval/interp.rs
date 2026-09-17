@@ -280,11 +280,12 @@ pub struct Interp {
     /// (`resolve_fn`/`get_fn`/`find_type`/...) borrows shared; the handful of
     /// registration sites in [`Self::exec`] borrow mutably.
     pub root: RefCell<scope::ModuleScope>,
-    /// The tasks that exist and the order they run in — see
-    /// [`core_cps::Scheduler`]. Behind a `RefCell` for the same reason `root`
+    /// The tasks that exist and the order they run in — the runtime's
+    /// scheduler (`typelisp_rt::sched`), over this interpreter's task body
+    /// ([`core_cps::Task`]). Behind a `RefCell` for the same reason `root`
     /// is: the evaluation path holds `&self`, and a task is admitted from deep
     /// inside it. Every borrow is short — a task is taken *out* to be stepped.
-    pub(crate) scheduler: RefCell<core_cps::Scheduler>,
+    pub(crate) scheduler: RefCell<typelisp_rt::sched::Scheduler<core_cps::Task>>,
     /// A shared handle to the live `Checker`, set by [`Self::set_checker`] on
     /// the drivers that support runtime `eval` (the CLI's `run_file`/`repl`/
     /// `compile_module` and the LSP). `None` in throwaway/AOT/bootstrap/test
@@ -562,7 +563,7 @@ impl Interp {
             step_quiet_depth: Cell::new(usize::MAX),
             dump_sources: RefCell::new(Vec::new()),
             recording: RefCell::new(None),
-            scheduler: RefCell::new(core_cps::Scheduler::default()),
+            scheduler: RefCell::new(typelisp_rt::sched::Scheduler::new()),
         }
     }
 

@@ -31,7 +31,8 @@
 //! drops a frame's values) and the `set_state` that re-roots what the next
 //! state carries. Nothing in between touches the heap.
 
-use typelisp_mem::{Heap, RootScope, RootStackId, SymRef, Value};
+use typelisp_mem::{Heap, RootScope, SymRef, Value};
+use typelisp_rt::sched::{self, chan_id_of, io_deadline, io_wait, task_id_of, ChanOp, Progress, SchedError, SelectOp, Waiting, Wake};
 
 use crate::check::core;
 use crate::check::repr::Repr;
@@ -41,7 +42,7 @@ use super::core_eval::{
     bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, path_field,
     param_reprs, repr_list, str_field, sym_field, tail_after, tail_after_value, Op,
 };
-use super::{option_value, FnDef, Interp};
+use super::{FnDef, Interp};
 
 use std::rc::Rc;
 
@@ -500,7 +501,12 @@ impl CpsStack {
 /// (goroutine) is this same structure *kept across suspensions* instead — which
 /// is the whole reason the evaluator moved off the Rust stack, since a Rust
 /// recursion cannot be stopped between two steps and picked up later.
-struct Task {
+///
+/// This is the interpreter's [`sched::TaskBody`]: the scheduler in
+/// `typelisp_rt` owns the queue and the waits, and this owns how one step
+/// runs. The other body is `typelisp_rt::sched::CompiledTask`, a compiled
+/// chain and nothing else, which is what an AOT executable's tasks are.
+pub(crate) struct Task {
     /// Where this task's roots begin. The two state slots are `sbase` and
     /// `sbase + 1`; frames root above them. **The starter owns these**: whoever
     /// called [`Task::start`] must `truncate_roots(sbase)` once it is done.
@@ -520,142 +526,56 @@ struct Task {
     compiled: typelisp_rt::coroutine::FrameStack,
 }
 
-/// What one step of a task did.
-enum Progress {
-    /// Still running. Step it again.
-    Running,
-    /// Suspended. The task keeps its frames and its roots; the scheduler puts
-    /// it back on the queue when what it waits for has happened.
-    Blocked(Waiting),
-    /// Finished: the continuation stack ran out. The result is rooted in the
-    /// state slots until the caller truncates them.
-    Done(Result<Value, EvalError>),
-}
+impl sched::TaskBody for Task {
+    type Cx = Interp;
+    type Error = EvalError;
 
-/// What a task needs from the scheduler before it can go on.
-///
-/// Not always a *wait*: [`Scheduler::try_now`] answers several of these
-/// immediately and the task never leaves the queue. The variants are here
-/// rather than being four separate mechanisms because the scheduler is the
-/// only thing that can answer any of them, and one shape means the
-/// interpreted and the compiled path reach the same implementation — the
-/// channel semantics are written once.
-///
-/// **Not `Copy`**: `Recv` carries the type key its answer is built with.
-/// **Not `Eq`**: `Send` carries a `Value`, which is a heap index and has no
-/// equality worth deriving.
-#[derive(Clone, PartialEq, Debug)]
-pub(super) enum Waiting {
-    /// Another task's result — `(wait t)`.
-    Task(TaskId),
-    /// Nothing: the task gave up the rest of its turn — `(yield)`. It goes
-    /// straight back onto the queue, behind whatever is already waiting.
-    Yield,
-    /// The clock — `(sleep secs)`. **This stops the task, not the thread**:
-    /// everything else keeps running, and the program only reaches the OS's
-    /// `sleep` when nothing at all is ready, for as long as the nearest
-    /// deadline. `after` rides on the same mechanism.
-    Until(std::time::Instant),
-    /// A `Chan<T>` operation.
-    Chan(ChanOp),
-    /// `select` — any one of several channel operations, whichever can go
-    /// first. `has_else` means the task does not wait: with nothing ready it
-    /// is answered with the `else` arm instead.
-    Select { ops: Vec<SelectOp>, has_else: bool },
-    /// A socket — `(net-wait h interest)`. The task is parked until `poll`
-    /// reports the descriptor readable or writable, which is the prelude's
-    /// cue to retry the non-blocking operation that said "not yet".
-    ///
-    /// The descriptor, not the handle: it is resolved when the wait is
-    /// asked for (`io_wait`), so a handle that is not a socket or is
-    /// already closed is refused there, and the scheduler hands `poll`
-    /// plain integers. Like `Until`, this holds no `Value` and needs no
-    /// root.
-    ///
-    /// With a `deadline` — `(net-wait-for h interest secs)` — the wait is
-    /// also a sleep, and answers with a `bool`: `true` when the socket
-    /// became ready, `false` when the clock ran out first. Without one the
-    /// answer is unit, as `sleep`'s is.
-    Io { fd: i32, interest: typelisp_rt::os::Interest, deadline: Option<std::time::Instant> },
-}
+    fn sbase(&self) -> usize {
+        self.sbase
+    }
 
-/// What an `Io` wait answers with once the socket is ready: unit for a
-/// plain `net-wait`, `true` for a `net-wait-for` (whose other answer,
-/// `false`, is the clock's).
-fn io_ready_answer(deadline: Option<std::time::Instant>) -> Value {
-    if deadline.is_some() {
-        Value::Bool(true)
-    } else {
-        Value::Empty
+    fn step(&mut self, heap: &mut Heap, interp: &Interp) -> Progress<EvalError> {
+        interp.step_task(heap, self)
+    }
+
+    /// Gives this task the state it will resume into, rooting what that
+    /// state carries in the task's own stack (the caller made it current).
+    fn deliver(&mut self, heap: &mut Heap, answer: Result<Value, SchedError>) {
+        let state = answer_state(answer);
+        set_state(heap, self.sbase, &state);
+        self.state = state;
+    }
+
+    fn failure_left_task(e: EvalError) -> EvalError {
+        escaped_task_failure(e)
     }
 }
 
-/// One arm of a `select`, in the order the arms are written — the index *is*
-/// the arm, which is what the answer names.
-///
-/// The values a `Send` arm offers need no root of their own, unlike a plain
-/// [`ChanOp::Send`]'s: the checker hoisted every operand into a `let` around
-/// the `select`, so each is a live binding in the environment the task's
-/// `Frame::SelectArm` is holding.
-#[derive(Clone, PartialEq, Debug)]
-pub(super) enum SelectOp {
-    Recv(ChanId, String),
-    Send(ChanId, Value),
+impl From<SchedError> for EvalError {
+    fn from(e: SchedError) -> EvalError {
+        match e {
+            SchedError::Panic(m) => EvalError::Panic(m),
+            SchedError::Internal(m) => EvalError::Internal(m),
+        }
+    }
 }
 
-/// One channel operation, as the task asked for it.
-///
-/// Four of the six never park — they only need the scheduler's table, which
-/// nothing below the front end can hold (`typelisp_abi::call_state::
-/// SUSPEND_CHAN_NEW` records why). `Send` and `Recv` are the two that can.
-#[derive(Clone, PartialEq, Debug)]
-pub(super) enum ChanOp {
-    /// `(Chan::new cap)` — answers with the handle.
-    New(i64),
-    /// `(len ch)` — how many values are buffered.
-    Len(ChanId),
-    /// `(cap ch)` — how many fit.
-    Cap(ChanId),
-    /// `(close ch)` — closing a closed channel is a panic, as in Go.
-    Close(ChanId),
-    /// `(send ch v)` — parks while the buffer is full and no receiver waits.
-    ///
-    /// The value is rooted through the task's own state slot (`set_state`),
-    /// which is what lets a parked sender hold it with nothing else pointing
-    /// at it: a `Value` inside a Rust enum is invisible to the collector.
-    Send(ChanId, Value),
-    /// `(recv ch)` — parks while the buffer is empty, no sender waits and the
-    /// channel is open.
-    ///
-    /// The `String` is the `Option<T>` type key the answer is built with. It
-    /// has to travel with the operation because a channel's buffer holds
-    /// tagged words and a word does not name its type — the same reason
-    /// `vector-op`'s `pop` carries one.
-    Recv(ChanId, String),
+/// The state a task resumes into, given what the scheduler answered it with.
+fn answer_state(answer: Result<Value, SchedError>) -> State {
+    match answer {
+        Ok(v) => State::Apply(v),
+        Err(e) => State::Unwind(e.into()),
+    }
 }
 
-/// Names a channel the scheduler is holding.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) struct ChanId(usize);
-
-/// One channel: a ring of buffered values and whether it is closed.
-///
-/// The values live in the scheduler's own root stack, `[base, base + cap)`,
-/// claimed once at creation and never given back. A channel is therefore as
-/// permanent as a finished task's result (`Slot::Done`), and for the same
-/// reason: telling the scheduler that the last handle died needs the
-/// collector to say so.
-///
-/// Nothing here records who is waiting. Blocked senders and receivers are
-/// found by walking `Scheduler::slots`, which is where `finish` and
-/// `wake_due` already look — one place that knows what a parked task is
-/// parked on, rather than two that have to agree.
-struct Chan {
-    cap: usize,
-    base: usize,
-    head: usize,
-    len: usize,
-    closed: bool,
+/// How a compiled frame reads its wake value, as the representation the
+/// crossing code speaks: unit is a word the collector never follows, and a
+/// typed answer is a tagged `Sexpr` whatever its type.
+fn wake_repr(w: Wake) -> Repr {
+    match w {
+        Wake::Unit => Repr::Unit,
+        Wake::Tagged => Repr::Sexpr,
+    }
 }
 
 impl Task {
@@ -687,727 +607,6 @@ impl Task {
     }
 }
 
-/// The runtime value of a `Task<T>`: a boxed struct holding the scheduler's id.
-///
-/// The key carries no type argument. `Task<i32>` and `Task<string>` are the
-/// same thing at run time — no fields to read, and `wait`'s return type is
-/// spelled at the call site — so a type argument here would distinguish nothing.
-/// That is unlike `Vector<T>`, where the site has to carry its elements'
-/// representation because the definition cannot tell you.
-fn task_handle(heap: &mut Heap, id: TaskId) -> Value {
-    // type-identity-ok: the built-in `Task`, a root name spelled in full
-    crate::type_key::alloc_typed_struct(heap, &crate::Path::root("task"), vec![Value::Int(id.0 as i64)])
-}
-
-/// The runtime value of a `Chan<T>`: a boxed struct holding the scheduler's id.
-///
-/// Carries no type argument, for [`task_handle`]'s reason: `Chan<i32>` and
-/// `Chan<string>` are the same thing at run time, and the element type is
-/// spelled at every site that puts one in or takes one out.
-fn chan_handle(heap: &mut Heap, id: ChanId) -> Value {
-    // type-identity-ok: the built-in `Chan`, a root name spelled in full
-    crate::type_key::alloc_typed_struct(heap, &crate::Path::root("chan"), vec![Value::Int(id.0 as i64)])
-}
-
-/// The scheduler id inside a `Chan<T>` handle — [`task_id_of`] for channels.
-fn chan_id_of(heap: &Heap, v: Option<Value>) -> Result<ChanId, EvalError> {
-    match v {
-        Some(Value::Boxed(id)) if heap.struct_field_count(id) == 1 => match heap.struct_field(id, 0) {
-            Value::Int(n) if n >= 0 => Ok(ChanId(n as usize)),
-            other => Err(EvalError::Internal(format!("a channel handle holds {:?}", other))),
-        },
-        other => Err(EvalError::Internal(format!("{:?} is not a channel handle", other))),
-    }
-}
-
-/// What to call a `Waiting` in an error addressed to a programmer.
-fn waiting_name(w: &Waiting) -> &'static str {
-    match w {
-        Waiting::Task(_) => "`wait`",
-        Waiting::Yield => "`yield`",
-        Waiting::Until(_) => "`sleep`",
-        Waiting::Select { .. } => "`select`",
-        Waiting::Chan(ChanOp::Send(..)) => "`send`",
-        Waiting::Chan(ChanOp::Recv(..)) => "`recv`",
-        // The other three answer at once, so they never reach a message that
-        // says something could not block.
-        Waiting::Chan(_) => "a channel operation",
-        Waiting::Io { .. } => "a socket operation",
-    }
-}
-
-/// The state a task resumes into, given what the scheduler answered it with.
-fn answer_state(answer: Result<Value, EvalError>) -> State {
-    match answer {
-        Ok(v) => State::Apply(v),
-        Err(e) => State::Unwind(e),
-    }
-}
-
-/// Gives a parked task the state it will resume into, **rooting what that
-/// state carries in the task's own stack**.
-///
-/// The root is the point. A value handed to a woken task — a `some` box built
-/// by `recv`, say — exists only inside a Rust enum until this runs, and the
-/// task is not stepped again until some other task has had its turn and
-/// allocated. `Scheduler::finish` does not need this only because a finished
-/// task's result is rooted in the scheduler's own stack instead.
-fn resume_with(heap: &mut Heap, slot: &mut TaskSlot, state: State) {
-    let home = heap.current_root_stack();
-    heap.switch_to_root_stack(slot.roots);
-    set_state(heap, slot.task.sbase, &state);
-    heap.switch_to_root_stack(home);
-    slot.task.state = state;
-}
-
-/// A task the scheduler owns, and the root stack that belongs to it.
-struct TaskSlot {
-    task: Task,
-    roots: RootStackId,
-}
-
-/// Names a task the scheduler is holding.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) struct TaskId(usize);
-
-/// The tasks that exist and the order they run in.
-///
-/// Cooperative and single-threaded: nothing preempts a task, and one OS thread
-/// runs all of them. `ACTIVE_HEAP` has to be a single thread-local and `Heap`
-/// is `!Send`, so tasks cannot be spread across threads without making the heap
-/// shareable first — a bigger job than the concurrency itself.
-///
-/// Lives in `Interp` behind a `RefCell`, and **every borrow of it is short**: a
-/// task is taken *out* to be stepped, so stepping it — which re-enters the
-/// evaluator, and can run compiled code that calls back in — never holds the
-/// borrow.
-#[derive(Default)]
-pub(crate) struct Scheduler {
-    /// One entry per task position — see [`Slot`].
-    slots: Vec<Slot>,
-    /// Ids ready to run, oldest first.
-    ready: std::collections::VecDeque<TaskId>,
-    /// Where finished tasks' results are rooted: position `i` holds task `i`'s
-    /// value. Created on the first `finish`, and never truncated — see
-    /// [`Slot::Done`] for why a result outlives its task.
-    roots: Option<RootStackId>,
-    /// Whether a `drive` loop is on the Rust stack. A *nested* `eval_cps` — a
-    /// compiled callee re-entering, or `Interp::apply` — must not switch tasks:
-    /// there is a Rust frame waiting on its result, and no continuation stack
-    /// underneath it to come back to.
-    driving: bool,
-    /// How many tasks are `Waiting::Until`. Only a count, so the common case —
-    /// nobody sleeping — costs one comparison per task switch instead of a
-    /// walk over every slot.
-    sleeping: usize,
-    /// How many tasks are `Waiting::Io` — `sleeping`'s twin, so that a
-    /// program with no sockets never builds a `poll` set.
-    io_waiting: usize,
-    /// Every channel that has been made, by [`ChanId`]. See [`Chan`] for why
-    /// none is ever removed.
-    chans: Vec<Chan>,
-    /// Where buffered values are rooted: each channel owns the contiguous
-    /// run `[Chan::base, Chan::base + Chan::cap)`. One stack for all of them
-    /// rather than one each, because a root stack is a `Heap`'s and a channel
-    /// is not worth one.
-    chan_roots: Option<RootStackId>,
-    /// `select`'s choice among the arms that are ready. See
-    /// [`Scheduler::next_random`].
-    rng: u64,
-    /// Whether to look at another task after **every single step**, rather
-    /// than letting the running one keep going until it yields, waits or
-    /// finishes.
-    ///
-    /// Cooperative scheduling means `false`, and nothing in the language can
-    /// set it. The tests do: switching every step is the harshest check there
-    /// is that a suspended task's frames and roots survive whatever another
-    /// task does in between — the same role `gc_stress` plays for a single
-    /// task's allocations, and the reason this knob is on the real scheduler
-    /// rather than in a test harness of its own.
-    switch_every_step: bool,
-}
-
-/// One position in the scheduler's table.
-///
-/// `Running` exists so a position stays **reserved** while its task is out
-/// being stepped. Without it, `admit` reuses the position of whichever task is
-/// currently running — which is exactly what a `go` inside the main task does,
-/// and the new task then inherits main's id and is retired along with it.
-#[derive(Default)]
-enum Slot {
-    /// No task here. `admit` may reuse this position.
-    #[default]
-    Empty,
-    /// A task that exists and is not running.
-    Parked(TaskSlot),
-    /// A task that is taken out to be stepped.
-    Running,
-    /// A task that cannot run until `Waiting` is satisfied. It goes back to
-    /// `Parked` — and onto the queue — when that happens.
-    Blocked(TaskSlot, Waiting),
-    /// A task that finished, and the value it answered with.
-    ///
-    /// **Kept for the life of the program**, because `wait` may be asked again
-    /// at any time and has to give the same answer. A program that spawns
-    /// without bound therefore accumulates one of these per task — the v1
-    /// limit. Tying the result's lifetime to its handle's instead needs the
-    /// collector to tell the scheduler when a handle dies.
-    Done(Value),
-}
-
-
-impl Scheduler {
-    /// Adds a task and makes it ready to run.
-    fn admit(&mut self, slot: TaskSlot) -> TaskId {
-        let id = match self.slots.iter().position(|s| matches!(s, Slot::Empty)) {
-            Some(i) => TaskId(i),
-            None => {
-                self.slots.push(Slot::Empty);
-                TaskId(self.slots.len() - 1)
-            }
-        };
-        self.slots[id.0] = Slot::Parked(slot);
-        self.ready.push_back(id);
-        id
-    }
-
-    /// Takes the next ready task *out* to be stepped, reserving its position.
-    /// The caller puts it back (`put_back`) or retires it.
-    fn next_ready(&mut self) -> Option<(TaskId, TaskSlot)> {
-        let id = self.ready.pop_front()?;
-        match std::mem::replace(&mut self.slots[id.0], Slot::Running) {
-            Slot::Parked(slot) => Some((id, slot)),
-            _ => unreachable!("a queued task is parked in its slot"),
-        }
-    }
-
-    /// Returns a task that is still running to the back of the queue.
-    fn put_back(&mut self, id: TaskId, slot: TaskSlot) {
-        self.slots[id.0] = Slot::Parked(slot);
-        self.ready.push_back(id);
-    }
-
-    /// Frees a task's position entirely — for the main task, whose result goes
-    /// back to the caller rather than being kept for a `wait`.
-    fn retire(&mut self, id: TaskId) {
-        self.slots[id.0] = Slot::Empty;
-    }
-
-    /// Answers `w` if it can be answered right now, without parking anybody.
-    ///
-    /// `None` means the asking task has to wait. This is the **whole** of what
-    /// each operation means: `Scheduler::block` and the nested-evaluation path
-    /// both go through it, so an interpreted `(recv ch)` and a compiled one
-    /// are the same code, and so is the one inside a print method.
-    ///
-    /// Waking *other* tasks happens here too (a receiver taking a parked
-    /// sender's value, `close` releasing everyone). That is not a side effect
-    /// on the way to an answer: for a rendezvous it *is* the answer.
-    fn try_now(&mut self, heap: &mut Heap, w: &Waiting) -> Option<Result<Value, EvalError>> {
-        match w {
-            // Nothing to wait for, but the task still goes to the back of the
-            // queue — answering here would let it run on. That is the whole
-            // of `yield`, and `block` is where it happens.
-            Waiting::Yield => None,
-            // A deadline that has already passed is not a wait at all — which
-            // is what makes `(sleep 0.0)` CL's yield-ish zero, with no special
-            // case for it anywhere.
-            Waiting::Until(t) => (*t <= std::time::Instant::now()).then_some(Ok(Value::Empty)),
-            Waiting::Task(on) => match self.slots.get(on.0) {
-                Some(Slot::Done(v)) => Some(Ok(*v)),
-                Some(Slot::Parked(_)) | Some(Slot::Running) | Some(Slot::Blocked(..)) => None,
-                // The handle named a position nothing lives at. Only the main
-                // task's position is ever freed, and no `Task<T>` names it.
-                Some(Slot::Empty) | None => {
-                    Some(Err(EvalError::Internal(format!("wait: {:?} is not a live task", on))))
-                }
-            },
-            Waiting::Chan(op) => self.try_chan(heap, op),
-            Waiting::Select { ops, has_else } => self.try_select(heap, ops, *has_else),
-            // One descriptor, zero timeout: ready now or not. A `poll` that
-            // fails (a descriptor closed under the task) is reported as
-            // ready, for the reason `poll_ready` gives — the retry will fail
-            // with a message where a park would hang.
-            Waiting::Io { fd, interest, deadline } => {
-                match typelisp_rt::os::poll_ready(&[(*fd, *interest)], Some(std::time::Duration::ZERO)) {
-                    Ok(ready) if ready.iter().any(|(_, r)| *r) => Some(Ok(io_ready_answer(*deadline))),
-                    Ok(_) => match deadline {
-                        Some(t) if *t <= std::time::Instant::now() => Some(Ok(Value::Bool(false))),
-                        _ => None,
-                    },
-                    Err(_) => Some(Ok(io_ready_answer(*deadline))),
-                }
-            }
-        }
-    }
-
-    /// [`Self::try_now`] for `select`: the arms that can go right now, one of
-    /// them chosen, and that one **performed**.
-    ///
-    /// Choosing and performing are one step on purpose. Splitting them —
-    /// asking which arm is ready and then doing it — would be a race even
-    /// here, where nothing runs in between: the reason nothing runs in between
-    /// is that this scheduler is cooperative, and a language feature must not
-    /// be correct only because of that.
-    fn try_select(
-        &mut self,
-        heap: &mut Heap,
-        ops: &[SelectOp],
-        has_else: bool,
-    ) -> Option<Result<Value, EvalError>> {
-        let ready: Vec<usize> =
-            (0..ops.len()).filter(|i| self.select_arm_is_ready(&ops[*i])).collect();
-        if ready.is_empty() {
-            // `else` is the arm after the last channel arm — which is what
-            // makes the checker's "`else` must be last" rule worth having.
-            return has_else.then(|| self.select_answer(heap, ops.len(), Value::Empty));
-        }
-        let pick = ready[self.next_random(ready.len())];
-        let answer = match &ops[pick] {
-            SelectOp::Recv(c, key) => self.chan_recv(heap, *c, key),
-            SelectOp::Send(c, v) => self.chan_send(heap, *c, *v),
-        };
-        match answer {
-            Some(Ok(v)) => Some(self.select_answer(heap, pick, v)),
-            // A send arm on a closed channel counts as ready and then panics,
-            // which is what a plain `(send ch v)` on one does.
-            Some(Err(e)) => Some(Err(e)),
-            None => Some(Err(EvalError::Internal(
-                "select: an arm reported ready and then could not go".to_string(),
-            ))),
-        }
-    }
-
-    /// Whether one arm could go without waiting.
-    fn select_arm_is_ready(&self, op: &SelectOp) -> bool {
-        match op {
-            SelectOp::Recv(c, _) => {
-                let ch = &self.chans[c.0];
-                ch.len > 0 || ch.closed || self.waiting_sender(*c).is_some()
-            }
-            SelectOp::Send(c, _) => {
-                let ch = &self.chans[c.0];
-                ch.closed || ch.len < ch.cap || self.waiting_receiver(*c).is_some()
-            }
-        }
-    }
-
-    /// `(ARM . VALUE)` — what a `select` answers with. The arm index is the
-    /// whole of the dispatch, and the value is the receive's `Option<T>` (or
-    /// unit for a send or an `else`).
-    fn select_answer(&self, heap: &mut Heap, arm: usize, payload: Value) -> Result<Value, EvalError> {
-        core::pair(heap, Value::Int(arm as i64), payload).map_err(heap_err)
-    }
-
-    /// A number in `0..n`.
-    ///
-    /// Its own xorshift rather than the language's `*random-state*`: the
-    /// scheduler sits below that, and what `select` needs from randomness is
-    /// only that a program cannot depend on which of several ready arms wins
-    /// (Go's reason — taking them in written order starves the later ones).
-    /// The seed is fixed, so a run is reproducible, which is worth more here
-    /// than being unpredictable.
-    fn next_random(&mut self, n: usize) -> usize {
-        if self.rng == 0 {
-            // `Scheduler` is `Default`, and xorshift stays at zero forever.
-            self.rng = 0x2545_F491_4F6C_DD1D;
-        }
-        let mut x = self.rng;
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        self.rng = x;
-        (x % n as u64) as usize
-    }
-
-    /// [`Self::try_now`] for the channel operations.
-    fn try_chan(&mut self, heap: &mut Heap, op: &ChanOp) -> Option<Result<Value, EvalError>> {
-        match op {
-            ChanOp::New(cap) => {
-                if *cap < 0 {
-                    return Some(Err(EvalError::Panic(format!(
-                        "Chan::new: {} is not a capacity a channel can have",
-                        cap
-                    ))));
-                }
-                let id = self.chan_new(heap, *cap as usize);
-                Some(Ok(chan_handle(heap, id)))
-            }
-            ChanOp::Len(c) => Some(Ok(Value::Int(self.chans[c.0].len as i64))),
-            ChanOp::Cap(c) => Some(Ok(Value::Int(self.chans[c.0].cap as i64))),
-            ChanOp::Close(c) => Some(self.chan_close(heap, *c).map(|()| Value::Empty)),
-            ChanOp::Send(c, v) => self.chan_send(heap, *c, *v),
-            ChanOp::Recv(c, key) => self.chan_recv(heap, *c, key),
-        }
-    }
-
-    /// Suspends `id` until `w` is satisfied — or puts it straight back on the
-    /// queue if it already is.
-    fn block(&mut self, heap: &mut Heap, id: TaskId, mut slot: TaskSlot, w: Waiting) -> Result<(), EvalError> {
-        match self.try_now(heap, &w) {
-            Some(answer) => {
-                resume_with(heap, &mut slot, answer_state(answer));
-                self.slots[id.0] = Slot::Parked(slot);
-                self.ready.push_back(id);
-                Ok(())
-            }
-            None => {
-                match w {
-                    // Straight back onto the queue, behind everything already
-                    // on it.
-                    Waiting::Yield => {
-                        resume_with(heap, &mut slot, State::Apply(Value::Empty));
-                        self.slots[id.0] = Slot::Parked(slot);
-                        self.ready.push_back(id);
-                    }
-                    Waiting::Until(_) => {
-                        self.sleeping += 1;
-                        self.slots[id.0] = Slot::Blocked(slot, w);
-                    }
-                    Waiting::Io { .. } => {
-                        self.io_waiting += 1;
-                        self.slots[id.0] = Slot::Blocked(slot, w);
-                    }
-                    Waiting::Task(_) | Waiting::Chan(_) | Waiting::Select { .. } => {
-                        self.slots[id.0] = Slot::Blocked(slot, w);
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
-
-    /// Makes a channel with room for `cap` values, claiming its root slots.
-    fn chan_new(&mut self, heap: &mut Heap, cap: usize) -> ChanId {
-        let stack = *self.chan_roots.get_or_insert_with(|| heap.new_root_stack());
-        let home = heap.current_root_stack();
-        heap.switch_to_root_stack(stack);
-        let base = heap.root_count();
-        for _ in 0..cap {
-            heap.push_root(Value::Empty);
-        }
-        heap.switch_to_root_stack(home);
-        self.chans.push(Chan { cap, base, head: 0, len: 0, closed: false });
-        ChanId(self.chans.len() - 1)
-    }
-
-    /// Appends to a channel's ring. The caller has checked there is room.
-    fn chan_push(&mut self, heap: &mut Heap, c: ChanId, v: Value) {
-        let ch = &mut self.chans[c.0];
-        let idx = ch.base + (ch.head + ch.len) % ch.cap;
-        ch.len += 1;
-        let stack = self.chan_roots.expect("a channel exists, so its root stack does");
-        let home = heap.current_root_stack();
-        heap.switch_to_root_stack(stack);
-        heap.set_root(idx, v);
-        heap.switch_to_root_stack(home);
-    }
-
-    /// Takes the oldest value out of a channel's ring, or `None` if empty.
-    fn chan_pop(&mut self, heap: &mut Heap, c: ChanId) -> Option<Value> {
-        let ch = &mut self.chans[c.0];
-        if ch.len == 0 {
-            return None;
-        }
-        let idx = ch.base + ch.head;
-        ch.head = (ch.head + 1) % ch.cap;
-        ch.len -= 1;
-        let stack = self.chan_roots.expect("a channel exists, so its root stack does");
-        let home = heap.current_root_stack();
-        heap.switch_to_root_stack(stack);
-        let v = heap.root(idx);
-        // The ring slot is a root: leaving the value in it would keep the
-        // whole graph under it alive for as long as the channel exists.
-        heap.set_root(idx, Value::Empty);
-        heap.switch_to_root_stack(home);
-        Some(v)
-    }
-
-    /// A task parked in a way that can take a value from `c`: which slot it
-    /// is in, which `select` arm to report (`None` for a plain `recv`), and
-    /// the key its answer is built with.
-    ///
-    /// Slot order, not arrival order. Go's channels hand out in arrival order;
-    /// nothing in this scheduler records arrival, and the alternative is a
-    /// second queue per channel that has to agree with `slots` about who is
-    /// parked — the disagreement that `finish`/`wake_due` avoid by walking.
-    fn waiting_receiver(&self, c: ChanId) -> Option<(usize, Option<usize>, String)> {
-        self.slots.iter().enumerate().find_map(|(i, s)| match s {
-            Slot::Blocked(_, Waiting::Chan(ChanOp::Recv(on, key))) if *on == c => {
-                Some((i, None, key.clone()))
-            }
-            Slot::Blocked(_, Waiting::Select { ops, .. }) => {
-                ops.iter().enumerate().find_map(|(a, op)| match op {
-                    SelectOp::Recv(on, key) if *on == c => Some((i, Some(a), key.clone())),
-                    _ => None,
-                })
-            }
-            _ => None,
-        })
-    }
-
-    /// The same for a task that can hand a value *to* `c`, and the value it is
-    /// offering.
-    fn waiting_sender(&self, c: ChanId) -> Option<(usize, Option<usize>, Value)> {
-        self.slots.iter().enumerate().find_map(|(i, s)| match s {
-            Slot::Blocked(_, Waiting::Chan(ChanOp::Send(on, v))) if *on == c => Some((i, None, *v)),
-            Slot::Blocked(_, Waiting::Select { ops, .. }) => {
-                ops.iter().enumerate().find_map(|(a, op)| match op {
-                    SelectOp::Send(on, v) if *on == c => Some((i, Some(a), *v)),
-                    _ => None,
-                })
-            }
-            _ => None,
-        })
-    }
-
-    /// Puts a parked task back on the queue with the state it resumes into.
-    fn wake(&mut self, heap: &mut Heap, i: usize, state: State) {
-        let Slot::Blocked(mut slot, _) = std::mem::replace(&mut self.slots[i], Slot::Running) else {
-            unreachable!("only a blocked task is woken");
-        };
-        resume_with(heap, &mut slot, state);
-        self.slots[i] = Slot::Parked(slot);
-        self.ready.push_back(TaskId(i));
-    }
-
-    /// Wakes a receiver with `v` (or the end of a closed channel), answering
-    /// in whichever shape it was waiting in.
-    fn wake_receiver(&mut self, heap: &mut Heap, i: usize, arm: Option<usize>, key: &str, v: Option<Value>) {
-        let payload = option_value(heap, key, v);
-        let state = match arm {
-            Some(a) => answer_state(self.select_answer(heap, a, payload)),
-            None => State::Apply(payload),
-        };
-        self.wake(heap, i, state);
-    }
-
-    /// Wakes a sender whose value has been taken.
-    fn wake_sender(&mut self, heap: &mut Heap, i: usize, arm: Option<usize>) {
-        let state = match arm {
-            Some(a) => answer_state(self.select_answer(heap, a, Value::Empty)),
-            None => State::Apply(Value::Empty),
-        };
-        self.wake(heap, i, state);
-    }
-
-    /// `(send ch v)`. `None` means the sender has to wait for room.
-    fn chan_send(&mut self, heap: &mut Heap, c: ChanId, v: Value) -> Option<Result<Value, EvalError>> {
-        if self.chans[c.0].closed {
-            return Some(Err(EvalError::Panic("send: the channel is closed".to_string())));
-        }
-        // A waiting receiver takes it directly, buffer or no buffer. That is
-        // the whole of a rendezvous, and for a buffered channel it cannot be
-        // wrong: nobody waits to receive from a channel with anything in it.
-        if let Some((i, arm, key)) = self.waiting_receiver(c) {
-            self.wake_receiver(heap, i, arm, &key, Some(v));
-            return Some(Ok(Value::Empty));
-        }
-        if self.chans[c.0].len < self.chans[c.0].cap {
-            self.chan_push(heap, c, v);
-            return Some(Ok(Value::Empty));
-        }
-        None
-    }
-
-    /// `(recv ch)`. `None` means the receiver has to wait for a value.
-    fn chan_recv(&mut self, heap: &mut Heap, c: ChanId, key: &str) -> Option<Result<Value, EvalError>> {
-        if let Some(v) = self.chan_pop(heap, c) {
-            // Taking one out made room, so a sender that was waiting for room
-            // can put its value in and go.
-            if let Some((i, arm, offered)) = self.waiting_sender(c) {
-                self.chan_push(heap, c, offered);
-                self.wake_sender(heap, i, arm);
-            }
-            return Some(Ok(option_value(heap, key, Some(v))));
-        }
-        // Nothing buffered — which for an unbuffered channel is always, so
-        // this is the rendezvous seen from the receiving side.
-        if let Some((i, arm, offered)) = self.waiting_sender(c) {
-            self.wake_sender(heap, i, arm);
-            return Some(Ok(option_value(heap, key, Some(offered))));
-        }
-        if self.chans[c.0].closed {
-            return Some(Ok(option_value(heap, key, None)));
-        }
-        None
-    }
-
-    /// `(close ch)`. Everyone parked on it is released.
-    fn chan_close(&mut self, heap: &mut Heap, c: ChanId) -> Result<(), EvalError> {
-        if self.chans[c.0].closed {
-            return Err(EvalError::Panic("close: the channel is already closed".to_string()));
-        }
-        self.chans[c.0].closed = true;
-        // Receivers get `none`: a receiver only parks with the buffer empty
-        // and no sender waiting, so there is nothing left for them.
-        while let Some((i, arm, key)) = self.waiting_receiver(c) {
-            self.wake_receiver(heap, i, arm, &key, None);
-        }
-        // Senders panic, which is Go's rule. The value each was offering is
-        // dropped with the task's state, and its root goes with it.
-        while let Some((i, _, _)) = self.waiting_sender(c) {
-            self.wake(
-                heap,
-                i,
-                State::Unwind(EvalError::Panic("send: the channel was closed while waiting".to_string())),
-            );
-        }
-        Ok(())
-    }
-
-    /// Records `id`'s result and wakes everything that was waiting for it.
-    ///
-    /// The value is rooted in the scheduler's own stack first: it has outlived
-    /// the task's stack, and the tasks being woken will not touch it until they
-    /// are stepped.
-    fn finish(&mut self, heap: &mut Heap, id: TaskId, v: Value) {
-        let sched = *self.roots.get_or_insert_with(|| heap.new_root_stack());
-        let home = heap.current_root_stack();
-        heap.switch_to_root_stack(sched);
-        while heap.root_count() <= id.0 {
-            heap.push_root(Value::Empty);
-        }
-        heap.set_root(id.0, v);
-        heap.switch_to_root_stack(home);
-
-        self.slots[id.0] = Slot::Done(v);
-        for i in 0..self.slots.len() {
-            if !matches!(&self.slots[i], Slot::Blocked(_, Waiting::Task(on)) if *on == id) {
-                continue;
-            }
-            if let Slot::Blocked(mut slot, _) = std::mem::replace(&mut self.slots[i], Slot::Running) {
-                slot.task.state = State::Apply(v);
-                self.slots[i] = Slot::Parked(slot);
-                self.ready.push_back(TaskId(i));
-            }
-        }
-    }
-
-    /// Puts every sleeping task whose deadline has passed back on the queue.
-    ///
-    /// Called before each task switch rather than only when nothing is ready:
-    /// a task that asked for 10ms while another runs for a second should be
-    /// runnable again after 10ms, not after the second.
-    fn wake_due(&mut self) {
-        if self.sleeping == 0 && self.io_waiting == 0 {
-            return;
-        }
-        let now = std::time::Instant::now();
-        for i in 0..self.slots.len() {
-            // A socket wait with a deadline is also a sleep: when the clock
-            // runs out first, the answer is `false`.
-            let (answer, was_io) = match &self.slots[i] {
-                Slot::Blocked(_, Waiting::Until(t)) if *t <= now => (Value::Empty, false),
-                Slot::Blocked(_, Waiting::Io { deadline: Some(t), .. }) if *t <= now => (Value::Bool(false), true),
-                _ => continue,
-            };
-            if let Slot::Blocked(mut slot, _) = std::mem::replace(&mut self.slots[i], Slot::Running) {
-                slot.task.state = State::Apply(answer);
-                self.slots[i] = Slot::Parked(slot);
-                self.ready.push_back(TaskId(i));
-                if was_io {
-                    self.io_waiting -= 1;
-                } else {
-                    self.sleeping -= 1;
-                }
-            }
-        }
-    }
-
-    /// Puts every task whose socket is ready back on the queue, waiting at
-    /// most `timeout` for one to become so — **the one place the program
-    /// waits on the network**, by way of `typelisp_rt::os::poll_ready`.
-    ///
-    /// Called with a zero timeout before each task switch (`wake_due`'s
-    /// reason: a socket that became readable while another task ran for a
-    /// second should not wait for that second to end), and with the nearest
-    /// sleeper's deadline — or no limit — when nothing at all is ready.
-    ///
-    /// A `poll` failure wakes everyone waiting: each task's retry then fails
-    /// with a message of its own, which beats parking forever on an error
-    /// the scheduler cannot attribute.
-    fn wake_io(&mut self, timeout: Option<std::time::Duration>) {
-        if self.io_waiting == 0 {
-            return;
-        }
-        let fds: Vec<(i32, typelisp_rt::os::Interest)> = self
-            .slots
-            .iter()
-            .filter_map(|s| match s {
-                Slot::Blocked(_, Waiting::Io { fd, interest, .. }) => Some((*fd, *interest)),
-                _ => None,
-            })
-            .collect();
-        let ready: Vec<(i32, bool)> = match typelisp_rt::os::poll_ready(&fds, timeout) {
-            Ok(r) => r,
-            Err(_) => fds.iter().map(|(fd, _)| (*fd, true)).collect(),
-        };
-        // Same order as `fds`, which is slot order — so this is one walk.
-        let mut answers = ready.iter();
-        for i in 0..self.slots.len() {
-            if !matches!(&self.slots[i], Slot::Blocked(_, Waiting::Io { .. })) {
-                continue;
-            }
-            let woken = answers.next().map(|(_, r)| *r).unwrap_or(true);
-            if !woken {
-                continue;
-            }
-            if let Slot::Blocked(mut slot, Waiting::Io { deadline, .. }) = std::mem::replace(&mut self.slots[i], Slot::Running) {
-                slot.task.state = State::Apply(io_ready_answer(deadline));
-                self.slots[i] = Slot::Parked(slot);
-                self.ready.push_back(TaskId(i));
-                self.io_waiting -= 1;
-            }
-        }
-    }
-
-    /// The nearest deadline any task is sleeping until.
-    ///
-    /// `None` means nobody is: with nothing ready either, every remaining task
-    /// is waiting on something that will never happen.
-    fn earliest_deadline(&self) -> Option<std::time::Instant> {
-        if self.sleeping == 0 && self.io_waiting == 0 {
-            return None;
-        }
-        self.slots
-            .iter()
-            .filter_map(|s| match s {
-                Slot::Blocked(_, Waiting::Until(t)) => Some(*t),
-                Slot::Blocked(_, Waiting::Io { deadline: Some(t), .. }) => Some(*t),
-                _ => None,
-            })
-            .min()
-    }
-
-    /// The value a finished task answered with, for a caller that drove the
-    /// tasks itself rather than through `wait`.
-    #[cfg(test)]
-    fn done_value(&self, id: TaskId) -> Option<Value> {
-        match self.slots.get(id.0) {
-            Some(Slot::Done(v)) => Some(*v),
-            _ => None,
-        }
-    }
-}
-
-/// The scheduler id inside a `Task<T>` handle.
-///
-/// The handle is a boxed struct with the id in field 0 and nothing else — see
-/// `task_handle`. Nothing in the language can build one, so a value of the
-/// wrong shape here means the evaluator built it wrong.
-fn task_id_of(heap: &Heap, v: Option<Value>) -> Result<TaskId, EvalError> {
-    match v {
-        Some(Value::Boxed(id)) if heap.struct_field_count(id) == 1 => {
-            match heap.struct_field(id, 0) {
-                Value::Int(n) if n >= 0 => Ok(TaskId(n as usize)),
-                other => Err(EvalError::Internal(format!("wait: a task handle holds {:?}", other))),
-            }
-        }
-        other => Err(EvalError::Internal(format!("wait: {:?} is not a task handle", other))),
-    }
-}
-
 /// What a task's failure does to the program.
 ///
 /// A `throw` that leaves a task has no catch to reach — a tag does not cross a
@@ -1426,184 +625,6 @@ fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
     match loc {
         Some(l) => e.at(l),
         None => e,
-    }
-}
-
-/// `(net-wait h interest)` — what to park **this task** on: the socket
-/// under handle `h`, for reading (`0`) or writing (`1`).
-///
-/// The handle is turned into a descriptor here, once, for both the
-/// interpreted call and the compiled suspension (`pending_wait`), so the
-/// two refuse the same handles in the same words. A closed or non-socket
-/// handle is a program error — the stream was closed and then waited on —
-/// and panics rather than parking a task nothing will ever wake.
-fn io_wait(argv: &[Value], deadline: Option<std::time::Instant>) -> Result<Waiting, EvalError> {
-    let handle = match argv.first() {
-        Some(Value::Int(h)) => *h,
-        other => return Err(EvalError::Internal(format!("net-wait: {:?} is not a stream handle", other))),
-    };
-    let interest = match argv.get(1) {
-        Some(Value::Int(code)) => typelisp_rt::os::Interest::from_code(*code)
-            .ok_or_else(|| EvalError::Internal(format!("net-wait: {} is not an interest (0 readable, 1 writable)", code)))?,
-        other => return Err(EvalError::Internal(format!("net-wait: {:?} is not an interest", other))),
-    };
-    let fd = typelisp_rt::stream::with_streams(|t| t.raw_fd(handle)).map_err(EvalError::Panic)?;
-    Ok(Waiting::Io { fd, interest, deadline })
-}
-
-/// `secs` from now, with `sleep`'s refusals: negative or NaN is not a
-/// duration, and neither is one the clock cannot hold.
-fn io_deadline(secs: f64) -> Result<std::time::Instant, EvalError> {
-    if !(secs >= 0.0) {
-        return Err(EvalError::Panic(format!("net-wait-for: {} is not a non-negative number of seconds", secs)));
-    }
-    let d = std::time::Duration::try_from_secs_f64(secs)
-        .map_err(|_| EvalError::Panic(format!("net-wait-for: {} is longer than this can wait", secs)))?;
-    Ok(std::time::Instant::now() + d)
-}
-
-/// What a compiled frame that just returned `STATUS_SUSPEND` is waiting for,
-/// and the representation its answer will come back through.
-///
-/// The compiled side publishes two raw words (`typelisp_abi::call_state`),
-/// because the crate it publishes from sits below the one that owns `Waiting`
-/// — a `TaskId` and an `Instant` are the scheduler's types. This is the one
-/// place that turns them back.
-fn pending_wait(heap: &Heap) -> Result<(Waiting, Repr), EvalError> {
-    use typelisp_abi::call_state as cs;
-    let (kind, payload, second) = cs::take_pending_suspend().ok_or_else(|| {
-        EvalError::Internal(
-            "a compiled frame suspended without recording what it was waiting for".to_string(),
-        )
-    })?;
-    match kind {
-        // Nothing comes back: the wake value is unit, and the resume block
-        // does not read the frame's value slot at all (`(suspend ...)` carries
-        // kind `0` for these).
-        cs::SUSPEND_YIELD => Ok((Waiting::Yield, Repr::Unit)),
-        // A compiled loop's back edge offering a turn (C7). Indistinguishable
-        // from `(yield)` once a scheduler is the one answering — the two are
-        // separate kinds so that a driver *without* a scheduler can tell an
-        // offer from a request.
-        cs::SUSPEND_SAFEPOINT => Ok((Waiting::Yield, Repr::Unit)),
-        cs::SUSPEND_SLEEP => {
-            // The same refusals `Interp::sleep_until` makes, in the same
-            // words: this is the same `sleep`, and a program must not be able
-            // to tell which side it ran on.
-            let secs = f64::from_bits(payload as u64);
-            if !(secs >= 0.0) {
-                return Err(EvalError::Panic(format!(
-                    "sleep: {} is not a non-negative number of seconds",
-                    secs
-                )));
-            }
-            let d = std::time::Duration::try_from_secs_f64(secs)
-                .map_err(|_| EvalError::Panic(format!("sleep: {} is longer than this can wait", secs)))?;
-            Ok((Waiting::Until(std::time::Instant::now() + d), Repr::Unit))
-        }
-        // The payload is the `Task<T>` handle, still tagged — reading the id
-        // out of the box is this side's job, because `TaskId` is the
-        // scheduler's type. The answer comes back as a tagged `Sexpr` whatever
-        // `T` is, and the resume block decodes it with the kind the bridge
-        // baked in: the same division `catch`/`throw` make for a thrown value.
-        cs::SUSPEND_WAIT => {
-            let handle = typelisp_abi::decode(payload);
-            Ok((Waiting::Task(task_id_of(heap, Some(handle))?), Repr::Sexpr))
-        }
-        // Both words raw: a stream handle and an interest code are plain
-        // integers in compiled code (`sleep`'s bits cross the same way), and
-        // this is the same resolution the interpreted `net-wait` makes.
-        cs::SUSPEND_IO => {
-            let w = io_wait(&[Value::Int(payload), Value::Int(second)], None)?;
-            Ok((w, Repr::Unit))
-        }
-        // The handle and the interest share the first word (`rt_suspend_io_for`
-        // packs them: handle above, interest in the low bit) so the seconds'
-        // bits can have the second. The answer is a `bool`, tagged like
-        // every typed wake value.
-        cs::SUSPEND_IO_FOR => {
-            let d = io_deadline(f64::from_bits(second as u64))?;
-            let w = io_wait(&[Value::Int(payload >> 1), Value::Int(payload & 1)], Some(d))?;
-            Ok((w, Repr::Sexpr))
-        }
-        // The channel operations. The handle is tagged, like `wait`'s; so is
-        // `send`'s value, which the suspension site tagged per the element's
-        // own `Repr::field_kind` because the driver has only a word.
-        // The capacity is an ordinary `i32` argument, so it crosses raw — the
-        // suspension site tags only what the driver could not otherwise read.
-        cs::SUSPEND_CHAN_NEW => Ok((Waiting::Chan(ChanOp::New(payload)), Repr::Sexpr)),
-        // `Repr::Sexpr` and not `Repr::Narrow`: a wake value always crosses back
-        // **tagged**, whatever its type, and the resume block decodes it with
-        // the kind the bridge baked in — the same division `wait` makes.
-        cs::SUSPEND_CHAN_LEN => {
-            Ok((Waiting::Chan(ChanOp::Len(chan_id_of(heap, Some(typelisp_abi::decode(payload)))?)), Repr::Sexpr))
-        }
-        cs::SUSPEND_CHAN_CAP => {
-            Ok((Waiting::Chan(ChanOp::Cap(chan_id_of(heap, Some(typelisp_abi::decode(payload)))?)), Repr::Sexpr))
-        }
-        cs::SUSPEND_CHAN_CLOSE => {
-            Ok((Waiting::Chan(ChanOp::Close(chan_id_of(heap, Some(typelisp_abi::decode(payload)))?)), Repr::Unit))
-        }
-        cs::SUSPEND_CHAN_SEND => {
-            let c = chan_id_of(heap, Some(typelisp_abi::decode(payload)))?;
-            Ok((Waiting::Chan(ChanOp::Send(c, typelisp_abi::decode(second))), Repr::Unit))
-        }
-        cs::SUSPEND_CHAN_RECV => {
-            let c = chan_id_of(heap, Some(typelisp_abi::decode(payload)))?;
-            let key = match typelisp_abi::decode(second) {
-                Value::Str(id) => heap.string(id).to_string(),
-                other => {
-                    return Err(EvalError::Internal(format!(
-                        "a compiled `recv` carried {:?} where its `Option<T>` key should be",
-                        other
-                    )))
-                }
-            };
-            Ok((Waiting::Chan(ChanOp::Recv(c, key)), Repr::Sexpr))
-        }
-        // The arms travel in their own slot, and every word in them is
-        // tagged — the descriptor was built in a compiled frame's slots, and
-        // the collector walks those.
-        cs::SUSPEND_CHAN_SELECT => {
-            let words = cs::take_pending_select();
-            let untag = |w: i64| w >> typelisp_mem::tagged::FIXNUM_SHIFT;
-            if words.len() < 2 {
-                return Err(EvalError::Internal("a compiled `select` carried no arms".to_string()));
-            }
-            let n = untag(words[0]).max(0) as usize;
-            let has_else = untag(words[1]) != 0;
-            if words.len() < 2 + 3 * n {
-                return Err(EvalError::Internal(format!(
-                    "a compiled `select` said it had {} arms and carried {} words",
-                    n,
-                    words.len()
-                )));
-            }
-            let mut ops = Vec::with_capacity(n);
-            for i in 0..n {
-                let base = 2 + 3 * i;
-                let c = chan_id_of(heap, Some(typelisp_abi::decode(words[base + 1])))?;
-                let extra = typelisp_abi::decode(words[base + 2]);
-                ops.push(if untag(words[base]) == 0 {
-                    match extra {
-                        Value::Str(id) => SelectOp::Recv(c, heap.string(id).to_string()),
-                        other => {
-                            return Err(EvalError::Internal(format!(
-                                "a compiled `select` receive arm carried {:?} where its key should be",
-                                other
-                            )))
-                        }
-                    }
-                } else {
-                    SelectOp::Send(c, extra)
-                });
-            }
-            Ok((Waiting::Select { ops, has_else }, Repr::Sexpr))
-        }
-        other => Err(EvalError::Internal(format!(
-            "a compiled frame asked to wait on kind {} (payload {}), which this build does not lower",
-            other, payload
-        ))),
     }
 }
 
@@ -1739,7 +760,7 @@ impl Interp {
     /// Rust frames. Every `Op` is handled here — `step_cps` matches without a
     /// catch-all, so a tag with no frame fails to build.
     pub(crate) fn eval_cps(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        if self.scheduler.borrow().driving {
+        if self.scheduler.borrow().driving() {
             // Nested: a Rust frame is waiting on this call. `Interp::apply`
             // and the public API, the `eval` builtin, a `print-object`
             // method, a reader macro — and a compiled callee reached through
@@ -1752,19 +773,16 @@ impl Interp {
         }
 
         // The outermost evaluation is the *main task*. Tasks `go` starts
-        // outlive it: this returns as soon as main is done, and whatever is
-        // left keeps its state for the next time the scheduler runs — which is
-        // what makes `(go ...)` at a REPL prompt behave.
-        let home = heap.current_root_stack();
-        let roots = heap.new_root_stack();
-        heap.switch_to_root_stack(roots);
-        let task = Task::start(heap, form, env);
-        heap.switch_to_root_stack(home);
-        let main = self.scheduler.borrow_mut().admit(TaskSlot { task, roots });
+        // outlive it: `sched::drive` returns as soon as main is done, and
+        // whatever is left keeps its state for the next time the scheduler
+        // runs — which is what makes `(go ...)` at a REPL prompt behave.
+        // `form` and `env` are rooted by the caller, so they survive the
+        // switch to the task's own root stack that `admit` makes.
+        let main = self.scheduler.borrow_mut().admit(heap, |heap| Task::start(heap, form, env));
 
-        self.scheduler.borrow_mut().driving = true;
-        let out = self.drive(heap, main);
-        self.scheduler.borrow_mut().driving = false;
+        self.scheduler.borrow_mut().set_driving(true);
+        let out = sched::drive(&self.scheduler, heap, self, main);
+        self.scheduler.borrow_mut().set_driving(false);
         out
     }
 
@@ -1803,7 +821,7 @@ impl Interp {
                             break Err(EvalError::Panic(format!(
                                 "{} cannot block: it was reached from a Rust caller, which has no \
                                  continuation stack to suspend",
-                                waiting_name(&w)
+                                sched::waiting_name(&w)
                             )))
                         }
                     }
@@ -1814,81 +832,6 @@ impl Interp {
         out
     }
 
-    /// Runs ready tasks until `main` finishes, and returns its result.
-    ///
-    /// The result is *not* rooted here, exactly as an ordinary evaluation's is
-    /// not: the caller has it in hand and roots it if it keeps it.
-    fn drive(&self, heap: &mut Heap, main: TaskId) -> Result<Value, EvalError> {
-        let home = heap.current_root_stack();
-        loop {
-            let (id, mut slot) = loop {
-                self.scheduler.borrow_mut().wake_due();
-                self.scheduler.borrow_mut().wake_io(Some(std::time::Duration::ZERO));
-                let taken = self.scheduler.borrow_mut().next_ready();
-                if let Some(t) = taken {
-                    break t;
-                }
-                // Nothing can run. What the remaining tasks wait for is the
-                // clock or the network — so **this** is the one place the
-                // program stops the thread: on `poll` if any socket is
-                // waited on (for at most the nearest deadline), else on the
-                // OS's `sleep` until that deadline. That is the difference
-                // between stopping a task and stopping the thread.
-                let deadline = self.scheduler.borrow().earliest_deadline();
-                let io_waiting = self.scheduler.borrow().io_waiting > 0;
-                if deadline.is_none() && !io_waiting {
-                    // `main` has not finished and nothing can run: every
-                    // remaining task is waiting on something that will never
-                    // happen.
-                    return Err(EvalError::Internal(
-                        "scheduler: every task is blocked and none can proceed".to_string(),
-                    ));
-                }
-                let now = std::time::Instant::now();
-                let until = deadline.map(|d| d.saturating_duration_since(now));
-                if io_waiting {
-                    self.scheduler.borrow_mut().wake_io(until);
-                } else if let Some(d) = until {
-                    std::thread::sleep(d);
-                }
-            };
-            heap.switch_to_root_stack(slot.roots);
-            let every_step = self.scheduler.borrow().switch_every_step;
-            let outcome = loop {
-                match self.step_task(heap, &mut slot.task) {
-                    Progress::Running if every_step => break Progress::Running,
-                    Progress::Running => {}
-                    done => break done,
-                }
-            };
-            match outcome {
-                Progress::Running => {
-                    heap.switch_to_root_stack(home);
-                    self.scheduler.borrow_mut().put_back(id, slot);
-                }
-                Progress::Blocked(w) => {
-                    heap.switch_to_root_stack(home);
-                    self.scheduler.borrow_mut().block(heap, id, slot, w)?;
-                }
-                Progress::Done(r) => {
-                    heap.truncate_roots(slot.task.sbase);
-                    heap.switch_to_root_stack(home);
-                    heap.drop_root_stack(slot.roots);
-                    if id == main {
-                        // The caller takes this result, so nothing keeps it —
-                        // main's position is freed rather than kept for a
-                        // `wait`, and no `Task<T>` names it.
-                        self.scheduler.borrow_mut().retire(id);
-                        return r;
-                    }
-                    match r {
-                        Ok(v) => self.scheduler.borrow_mut().finish(heap, id, v),
-                        Err(e) => return Err(escaped_task_failure(e)),
-                    }
-                }
-            }
-        }
-    }
 
     /// Runs `task` one step.
     ///
@@ -1896,7 +839,7 @@ impl Interp {
     /// unwound through. Between two calls the task holds everything it needs to
     /// continue, so a scheduler may leave it alone and step a different one —
     /// that is what makes a task suspendable.
-    fn step_task(&self, heap: &mut Heap, task: &mut Task) -> Progress {
+    fn step_task(&self, heap: &mut Heap, task: &mut Task) -> Progress<EvalError> {
         // Taken out to be consumed; every path below either puts the next state
         // back or returns `Done`, in which case what is left here is never read.
         let state = std::mem::replace(&mut task.state, State::Apply(Value::Empty));
@@ -2089,12 +1032,12 @@ impl Interp {
             // The chain stays exactly as it is, rooted by the prologues that
             // built it. The frame pushed here is what catches the value the
             // scheduler eventually wakes this task with.
-            Ok(Err(typelisp_rt::coroutine::Paused::Suspended)) => match pending_wait(heap) {
+            Ok(Err(typelisp_rt::coroutine::Paused::Suspended)) => match sched::pending_wait(heap) {
                 Ok((w, wake)) => {
-                    task.stack.push(heap, Frame::DriveCompiled { drive, wake }, None);
+                    task.stack.push(heap, Frame::DriveCompiled { drive, wake: wake_repr(wake) }, None);
                     State::Blocked(w)
                 }
-                Err(e) => State::Unwind(e),
+                Err(e) => State::Unwind(e.into()),
             },
             // The driver already popped the chain and cut its roots back per
             // frame; the truncate here is for the crossing's own roots, which
@@ -2795,15 +1738,9 @@ impl Interp {
             .copied()
             .ok_or_else(|| EvalError::Internal("eval: (sleep) has no argument".to_string()))?;
         let secs = super::rt_f64(heap, &v)?;
-        // The same refusal `typelisp_rt::sys_builtin::sleep` makes, in the same
-        // words: CL calls a negative or NaN wait an error, and there is no
-        // duration to build from one.
-        if !(secs >= 0.0) {
-            return Err(EvalError::Panic(format!("sleep: {} is not a non-negative number of seconds", secs)));
-        }
-        let d = std::time::Duration::try_from_secs_f64(secs)
-            .map_err(|_| EvalError::Panic(format!("sleep: {} is longer than this can wait", secs)))?;
-        Ok((State::Blocked(Waiting::Until(std::time::Instant::now() + d)), None))
+        // The refusals are the scheduler's (`sched::sleep_wait`), so the
+        // compiled `sleep` makes the same ones in the same words.
+        Ok((State::Blocked(sched::sleep_wait(secs)?), None))
     }
 
     /// Hands a fully-evaluated call over to a new task, and returns its handle.
@@ -2814,18 +1751,13 @@ impl Interp {
         argv: Vec<Value>,
         kind: ArgsKind,
     ) -> Result<Value, EvalError> {
-        let home = heap.current_root_stack();
         let argv_list = core::list(heap, &argv).map_err(heap_err)?;
         heap.push_root(argv_list);
-        let roots = heap.new_root_stack();
-        // `form` and `argv_list` are rooted in `home`, which the collector
-        // still walks, so they survive this switch.
-        heap.switch_to_root_stack(roots);
-        let task = Task::start_call(heap, form, argv_list, kind);
-        heap.switch_to_root_stack(home);
+        // `form` and `argv_list` are rooted here, which the collector still
+        // walks, so they survive the switch to the task's own root stack.
+        let id = self.scheduler.borrow_mut().admit(heap, |heap| Task::start_call(heap, form, argv_list, kind));
         heap.pop_root();
-        let id = self.scheduler.borrow_mut().admit(TaskSlot { task, roots });
-        Ok(task_handle(heap, id))
+        Ok(sched::task_handle(heap, id))
     }
 
     /// Enters an interpreted or compiled function body with `argv` bound.
@@ -2964,12 +1896,12 @@ impl Interp {
         // `(net-wait h interest)` — "not before this socket is ready" — is
         // the third shape of the same thing.
         if path == crate::Path::root("net-wait") {
-            return io_wait(&argv, None).map(|w| (State::Blocked(w), None));
+            return Ok((State::Blocked(io_wait(&argv, None)?), None));
         }
         if path == crate::Path::root("net-wait-for") {
             let secs = argv.get(2).copied().ok_or_else(|| EvalError::Internal("net-wait-for: no timeout".to_string()))?;
             let d = io_deadline(super::rt_f64(heap, &secs)?)?;
-            return io_wait(&argv, Some(d)).map(|w| (State::Blocked(w), None));
+            return Ok((State::Blocked(io_wait(&argv, Some(d))?), None));
         }
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
             return self.enter_fn(heap, &f, argv);
@@ -4434,26 +3366,22 @@ mod tests {
     /// its own steps, and under `stress_heap` that includes a collection per
     /// `cons`. This is the harshest arrangement the scheduler will ever see.
     ///
-    /// `Interp::drive` is the driver here — the same one `eval_cps` uses — so
+    /// `sched::drive` is the driver here — the same one `eval_cps` uses — so
     /// what these tests exercise is the loop that ships. It returns when *its*
     /// task finishes, and the others keep running meanwhile, so a task named
     /// later may already be `Done` by the time its turn comes.
     fn run_interleaved(heap: &mut Heap, srcs: &[&str]) -> Vec<Result<Value, EvalError>> {
         let base = heap.root_count();
         let interp = Interp::new();
-        interp.scheduler.borrow_mut().switch_every_step = true;
+        interp.scheduler.borrow_mut().set_switch_every_step(true);
 
-        let home = heap.current_root_stack();
         let mut ids = Vec::new();
         for src in srcs {
             let form = read1(heap, src);
             heap.push_root(form);
-            let roots = heap.new_root_stack();
-            // `form` is rooted in `home`, which the collector still walks.
-            heap.switch_to_root_stack(roots);
-            let task = Task::start(heap, form, Value::Empty);
-            heap.switch_to_root_stack(home);
-            ids.push(interp.scheduler.borrow_mut().admit(TaskSlot { task, roots }));
+            // `form` is rooted here, which the collector still walks while
+            // `admit` builds the task on a stack of its own.
+            ids.push(interp.scheduler.borrow_mut().admit(heap, |heap| Task::start(heap, form, Value::Empty)));
         }
 
         let mut out = Vec::new();
@@ -4463,7 +3391,7 @@ mod tests {
                 // It finished while another task was being driven, and its
                 // value is rooted in the scheduler's own stack.
                 Some(v) => Ok(v),
-                None => interp.drive(heap, id),
+                None => sched::drive(&interp.scheduler, heap, &interp, id),
             };
             // `drive` hands its result back unrooted — its task's stack is
             // gone and nothing keeps it for a `wait` — so the starter roots it,

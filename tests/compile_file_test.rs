@@ -1283,19 +1283,192 @@ fn local_time_decoding_runs_in_an_executable() {
     assert_eq!(compile_and_run("localtime_aot", src), 0);
 }
 
-/// `(go ...)` in a standalone executable refuses, and says what is missing.
-///
-/// A task is an interpreter continuation stack, and an AOT-compiled program
-/// has no interpreter in it at all — so the task could never be run. `rt_go`
-/// says so rather than admitting one that would sit there forever, which is
-/// the difference between a limitation and a silently wrong answer.
+// ---- tasks in a standalone executable -------------------------------------
+//
+// An AOT executable used to have no scheduler: its `main` was one
+// `FrameStack::run`, so the first thing that put a task down — `sleep`,
+// `wait`, a channel, a socket that said "not yet" — was an abort, and `go`
+// refused outright ("needs an interpreter to run the task in"). The runtime
+// now carries the scheduler itself (`typelisp_rt::sched`), and these are the
+// same programs `tests/concurrency_test.rs` and friends run under the
+// interpreter, compiled to an executable and judged by their exit code.
+
+/// [`compile_and_capture`] for a program that may not exit normally, run
+/// with `args`: the exit code (`None` for a signal), stdout and stderr.
+fn compile_and_capture_with(name: &str, source: &str, args: &[&str]) -> (Option<i32>, String, String) {
+    let out_path = compile_only(name, source);
+    let out = Command::new(&out_path).args(args).output().expect("failed to run the compiled executable");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// Writes and compiles `source` under `name`, returning the executable's path.
+fn compile_only(name: &str, source: &str) -> PathBuf {
+    let dir = tmp_dir();
+    let src_path = dir.join(format!("{}.typl", name));
+    let out_path = dir.join(name);
+    std::fs::write(&src_path, source).expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect("compile_file failed");
+    out_path
+}
+
+/// `(go ...)` in a standalone executable starts a task, and `wait` gets its
+/// answer — for an `i32` and for a `string`, because the answer crosses as
+/// one word and a raw-word delivery would pass exactly one of the two.
 #[test]
-fn go_in_a_standalone_executable_says_there_is_no_interpreter() {
+fn go_and_wait_run_in_a_standalone_executable() {
     let (code, err) = compile_and_capture(
-        "go_no_interp",
+        "go_wait_aot",
         r#"(defun work ((n int)) int (* n 2))
-           (defun main () int (let ((t (go (work 21)))) 0))"#,
+           (defun greet ((name string)) string (append "hi " name))
+           (defun main () int
+             (let ((a (go (work 21))) (b (go (greet "ada"))))
+               (if (and (= (wait a) 42) (equal (wait b) "hi ada")) 0 1)))"#,
     );
-    assert_ne!(code, 0, "expected the program to stop");
-    assert!(err.contains("needs an interpreter to run the task in"), "stderr was: {}", err);
+    assert_eq!(code, 0, "stderr was: {}", err);
+}
+
+/// `sleep` stops the task, not the thread: `a` is spawned first and would
+/// finish first if the whole process slept, so `ba` is the whole assertion
+/// (the same proof `concurrency_test` makes under the interpreter).
+#[test]
+fn sleep_in_a_standalone_executable_stops_only_its_task() {
+    let (code, err) = compile_and_capture(
+        "sleep_aot",
+        r#"(defvar (trail string) "")
+           (defun slow () int (progn (sleep 0.08) (setf trail (append trail "a")) 0))
+           (defun fast () int (progn (sleep 0.02) (setf trail (append trail "b")) 0))
+           (defun main () int
+             (let ((a (go (slow))) (b (go (fast))))
+               (progn (wait a) (wait b) (if (equal trail "ba") 0 1))))"#,
+    );
+    assert_eq!(code, 0, "stderr was: {}", err);
+}
+
+/// A rendezvous on an unbuffered channel, a buffered send, and a `select`,
+/// all in an executable: one scheduler answers the compiled channel
+/// operations exactly as it answers the interpreted ones.
+#[test]
+fn channels_and_select_run_in_a_standalone_executable() {
+    let (code, err) = compile_and_capture(
+        "chan_aot",
+        r#"(defun producer ((ch Chan<int>)) ()
+             (send ch 1) (send ch 2) (close ch) ())
+           (defun drain ((ch Chan<int>)) int
+             (let ((acc 0))
+               (loop (match (recv ch)
+                       ((none) (return acc))
+                       ((some v) (setf acc (+ acc v)))))))
+           (defun main () int
+             (let ((r (the Chan<int> (Chan::new 0)))
+                   (b (the Chan<string> (Chan::new 1))))
+               (go (producer r))
+               (send b "x")
+               (let ((sum (drain r))
+                     (picked (select ((v (recv r)) "r") ((v (recv b)) (format false "b=~a" v)))))
+                 (if (and (= sum 3) (equal picked "b=(some x)")) 0 1))))"#,
+    );
+    assert_eq!(code, 0, "stderr was: {}", err);
+}
+
+/// A compiled loop's back edge polls a safepoint every 256 iterations
+/// (Phase C7), and the offer used to reach the AOT entry as a suspension it
+/// could not honour — `main` ran the chain with `FrameStack::run`, which has
+/// no arm for it — so any loop past that count aborted the process. The
+/// scheduler answers the offer like a `yield`.
+#[test]
+fn a_long_compiled_loop_runs_in_a_standalone_executable() {
+    let (code, err) = compile_and_capture(
+        "long_loop_aot",
+        r#"(defun loop-sum ((n int)) int
+             (let ((i 0) (acc 0))
+               (loop (if (>= i n) (break) ())
+                     (setf acc (+ acc i))
+                     (setf i (+ i 1)))
+               acc))
+           (defun main () int (if (= (loop-sum 100000) 4999950000) 0 1))"#,
+    );
+    assert_eq!(code, 0, "stderr was: {}", err);
+}
+
+/// Every task blocked on something that will never happen stops the
+/// program with the scheduler's own message, not a hang and not an abort.
+#[test]
+fn a_deadlocked_standalone_executable_says_so() {
+    let (code, _, err) = compile_and_capture_with(
+        "deadlock_aot",
+        r#"(defun main () int
+             (let ((ch (the Chan<int> (Chan::new 0))))
+               (progn (recv ch) 0)))"#,
+        &[],
+    );
+    assert!(code.is_some(), "the program was killed by a signal: {}", err);
+    assert_ne!(code, Some(0), "expected the program to stop");
+    assert!(err.contains("every task is blocked"), "stderr was: {}", err);
+}
+
+/// An echo server compiled to an executable: `accept` parks the main task on
+/// the listener, the connection is served by a task `go` started, and the
+/// socket reads inside it park that task — the shape `examples/projects/
+/// echo-server` has, judged from the outside with a real TCP client.
+#[test]
+fn an_echo_server_runs_in_a_standalone_executable() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::{TcpListener, TcpStream};
+
+    let exe = compile_only(
+        "echo_aot",
+        r#"(defun serve ((c socket-stream)) int
+             (loop
+               (match (read-line c)
+                 ((none) (break))
+                 ((some line) (write-line c line))))
+             (close c)
+             0)
+           (defun main () int
+             (let ((args (command-line-args)))
+               (let ((port (unwrap-or (parse-int (get args 1)) 0)))
+                 (match (tcp-listen "127.0.0.1" port)
+                   ((err e) 2)
+                   ((ok l)
+                    (match (accept l)
+                      ((err e) 3)
+                      ((ok c) (wait (go (serve c))))))))))"#,
+    );
+    // A free port, found the usual racy way: bind to 0, read it back, let go.
+    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let mut child = Command::new(&exe)
+        .arg(port.to_string())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to start the echo server");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let stream = loop {
+        match TcpStream::connect(("127.0.0.1", port)) {
+            Ok(s) => break s,
+            Err(_) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Err(e) => {
+                let _ = child.kill();
+                panic!("the server never listened: {}", e);
+            }
+        }
+    };
+    let mut writer = stream.try_clone().unwrap();
+    writer.write_all(b"hello
+").unwrap();
+    let mut line = String::new();
+    BufReader::new(&stream).read_line(&mut line).unwrap();
+    assert_eq!(line, "hello
+");
+    drop(writer);
+    drop(stream);
+
+    let out = child.wait_with_output().expect("the server did not exit");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "stderr was: {}", err);
 }

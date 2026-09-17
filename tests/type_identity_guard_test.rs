@@ -238,6 +238,11 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
         (TypeKeyId::HEAP_INFO, "heap-info"),
         // The socket layer's error type, built by `net_builtin`.
         (TypeKeyId::NET_ERROR, "neterror"),
+        // `Task<T>`/`Chan<T>` handles, built by the scheduler (`sched`) on
+        // both sides of the compile boundary — and in an AOT executable,
+        // where there is no `Path` at all.
+        (TypeKeyId::TASK, "task"),
+        (TypeKeyId::CHAN, "chan"),
     ] {
         assert_eq!(
             BUILTIN_TYPE_KEYS[key.as_u32() as usize],

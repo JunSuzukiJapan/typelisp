@@ -53,6 +53,7 @@ pub mod net_builtin;
 pub mod x509;
 pub mod os;
 pub mod readtable;
+pub mod sched;
 pub mod stream;
 pub mod stream_builtin;
 pub mod sys_builtin;
