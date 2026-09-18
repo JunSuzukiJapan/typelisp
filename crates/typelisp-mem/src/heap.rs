@@ -21,7 +21,11 @@
 //!   few and live for the heap's lifetime, like CL symbols in a package.
 //! * **Strings** live in a slot store and ARE collected: the mark phase marks
 //!   every reachable [`StrId`], the sweep frees unmarked slots (recycling
-//!   indices). So unreachable strings do not leak.
+//!   indices). So unreachable strings do not leak. Boxed objects (`BoxedObj`)
+//!   use the same growable-slot-store shape. Both stores are a [`Slab`], not
+//!   a plain `Vec<Option<_>>`: growth appends a chunk rather than
+//!   reallocating everything, so an already-issued slot's address never
+//!   moves — see `Slab`'s doc comment.
 //! * **Mark-sweep.** `gc()` marks everything reachable from the root set
 //!   (iteratively — no native recursion), then rebuilds the cons free list and
 //!   sweeps strings. Cycles are reclaimed (unlike reference counting).
@@ -69,6 +73,92 @@ struct Chunk {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct RootStackId(usize);
 
+/// One task's GC root stack, heap-allocated as its own object (`Box`) rather
+/// than stored inline in `root_stacks`'s `Vec`. The indirection is what lets
+/// [`Heap::current`] cache a raw pointer straight at the running stack: a
+/// `Box`'s target address is stable even while the outer `Vec<Option<Box<_>>>`
+/// grows and reallocates (only the pointers move, never what they point at),
+/// so `push_root`/`pop_root` — the hottest path in the whole heap — never
+/// have to re-index `root_stacks[current_stack]`. The same stability is what
+/// will later let a per-thread `Heap` *view* hold this pointer directly while
+/// the stack itself lives in `HeapShared`'s locked registry — see
+/// `docs/dev/os-threads-design.md` §3.
+#[derive(Default)]
+struct RootStack {
+    roots: Vec<Value>,
+}
+
+/// Entries per [`Slab`] chunk — a power of two so the chunk/offset split is a
+/// shift and a mask rather than a division.
+const SLAB_CHUNK_SHIFT: u32 = 10;
+const SLAB_CHUNK_LEN: usize = 1 << SLAB_CHUNK_SHIFT;
+const SLAB_CHUNK_MASK: usize = SLAB_CHUNK_LEN - 1;
+
+/// A growable slot store, indexed like `Vec<Option<T>>` (which this replaces
+/// as the type of `str_slots`/`box_slots`/`permanent_roots`) but never
+/// relocating an existing entry: storage is chunks of `SLAB_CHUNK_LEN` slots,
+/// appended as the slab grows, so a slot's address is fixed for the slab's
+/// whole life once written. A plain `Vec<Option<T>>` cannot promise that —
+/// every `push` past capacity moves every existing element to a new buffer.
+///
+/// That stability is scaffolding for `docs/dev/os-threads-design.md` §3: a
+/// `HeapShared` growing one of these under a lock will let readers on other
+/// threads dereference an already-issued index without taking that lock at
+/// all, because growth only ever appends a new chunk and never disturbs one
+/// already handed out. Nothing here is thread-safe yet — this type only
+/// gives the storage the *shape* that later phases make safe to share; nobody
+/// but the single owning `Heap` touches a `Slab` today.
+struct Slab<T> {
+    chunks: Vec<Box<[Option<T>]>>,
+    len: usize,
+}
+
+impl<T> Slab<T> {
+    fn new() -> Slab<T> {
+        Slab { chunks: Vec::new(), len: 0 }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Appends `v` as a new slot, growing by one chunk if the current one is
+    /// full, and returns the index it landed at.
+    fn push(&mut self, v: Option<T>) -> usize {
+        let i = self.len;
+        let chunk_idx = i >> SLAB_CHUNK_SHIFT;
+        if chunk_idx == self.chunks.len() {
+            let mut chunk = Vec::with_capacity(SLAB_CHUNK_LEN);
+            chunk.resize_with(SLAB_CHUNK_LEN, || None);
+            self.chunks.push(chunk.into_boxed_slice());
+        }
+        self.chunks[chunk_idx][i & SLAB_CHUNK_MASK] = v;
+        self.len += 1;
+        i
+    }
+
+    /// Every occupied slot's index and value, in ascending order — the sweep
+    /// and audit loops' iteration shape (`Vec<Option<T>>::iter().enumerate()`
+    /// used to give this directly; `Slab` doesn't implement `Iterator`
+    /// because a chunked store has no single contiguous slice to hand out).
+    fn iter(&self) -> impl Iterator<Item = &Option<T>> {
+        (0..self.len).map(move |i| &self[i])
+    }
+}
+
+impl<T> std::ops::Index<usize> for Slab<T> {
+    type Output = Option<T>;
+    fn index(&self, i: usize) -> &Option<T> {
+        &self.chunks[i >> SLAB_CHUNK_SHIFT][i & SLAB_CHUNK_MASK]
+    }
+}
+
+impl<T> std::ops::IndexMut<usize> for Slab<T> {
+    fn index_mut(&mut self, i: usize) -> &mut Option<T> {
+        &mut self.chunks[i >> SLAB_CHUNK_SHIFT][i & SLAB_CHUNK_MASK]
+    }
+}
+
 pub struct Heap {
     // The cons arena, as one or more chunks. Always at least one entry (a
     // zero-capacity heap holds a single zero-length chunk). Never reordered:
@@ -87,13 +177,25 @@ pub struct Heap {
     // How many collections have run, for tests that assert an allocation
     // pattern does not thrash — see `gc_count`.
     gc_count: u64,
-    // Every task's roots. `current_stack` names the one that is running; the
-    // rest belong to suspended tasks and are walked by the collector but by
-    // nothing else — a task that is not running pushes and pops nothing. See
-    // `new_root_stack`.
-    root_stacks: Vec<Option<Vec<Value>>>,
+    // Every task's roots. `current_stack` names the index that is running;
+    // the rest belong to suspended tasks and are walked by the collector but
+    // by nothing else — a task that is not running pushes and pops nothing.
+    // See `new_root_stack`.
+    root_stacks: Vec<Option<Box<RootStack>>>,
     current_stack: usize,
-    permanent_roots: Vec<Value>,
+    // A raw pointer at `*root_stacks[current_stack]`, kept in sync by every
+    // place that changes either — `with_capacity` and `switch_to_root_stack`
+    // — so `roots`/`roots_mut` can dereference it directly instead of
+    // indexing `root_stacks` on every push/pop. Never null: "the running
+    // root stack is always present" is the same invariant `roots()`'s
+    // `.expect` used to state. See `RootStack`'s doc comment for why the
+    // `Box` indirection keeps this valid across `root_stacks` reallocating.
+    current: *mut RootStack,
+    // Always `Some` once written — `Slab` rather than a plain `Vec<Value>`
+    // for the address stability described on `Slab`'s doc comment, not
+    // because any entry is ever removed (`push_permanent_root` never
+    // provides a way to).
+    permanent_roots: Slab<Value>,
     // Roots for the duration of a bracketed session — see `push_session_root`.
     session_roots: Vec<Value>,
     // The value of a `throw` currently travelling up the stack — see
@@ -128,7 +230,7 @@ pub struct Heap {
     path_ids: HashMap<Vec<SymRef>, u32>,
 
     // GC-managed string store
-    str_slots: Vec<Option<String>>,
+    str_slots: Slab<String>,
     str_free: Vec<u32>,
     str_marks: Vec<bool>,
 
@@ -142,7 +244,7 @@ pub struct Heap {
     // growable-slot-store shape as the string store above, generalized to
     // hold a payload that may itself reference nested `Value`s (so the mark
     // phase must trace into it, not just flag the slot).
-    box_slots: Vec<Option<BoxedObj>>,
+    box_slots: Slab<BoxedObj>,
     box_free: Vec<u32>,
     box_marks: Vec<bool>,
 
@@ -214,6 +316,8 @@ impl Heap {
     pub fn with_capacity(capacity: usize) -> Heap {
         let (chunk, free) = Self::alloc_chunk(capacity, ptr::null_mut());
 
+        let mut home = Box::new(RootStack::default());
+        let current: *mut RootStack = &mut *home;
         let mut heap = Heap {
             chunks: vec![chunk],
             cap: capacity,
@@ -222,9 +326,10 @@ impl Heap {
             free_count: capacity,
             gc_stress: false,
             gc_count: 0,
-            root_stacks: vec![Some(Vec::new())],
+            root_stacks: vec![Some(home)],
             current_stack: 0,
-            permanent_roots: Vec::new(),
+            current,
+            permanent_roots: Slab::new(),
             session_roots: Vec::new(),
             in_flight_throw: None,
             macro_chars: HashMap::new(),
@@ -233,11 +338,11 @@ impl Heap {
             type_key_ids: HashMap::new(),
             paths: Vec::new(),
             path_ids: HashMap::new(),
-            str_slots: Vec::new(),
+            str_slots: Slab::new(),
             str_free: Vec::new(),
             str_marks: Vec::new(),
             str_intern: HashMap::new(),
-            box_slots: Vec::new(),
+            box_slots: Slab::new(),
             box_free: Vec::new(),
             box_marks: Vec::new(),
             cell_registry: Vec::new(),
@@ -369,18 +474,18 @@ impl Heap {
 
     /// The running task's roots.
     ///
-    /// `current_stack` always names an occupied slot: `switch_to_root_stack`
-    /// refuses an empty one, and `drop_root_stack` refuses the running one.
+    /// Reads through the cached `current` pointer rather than indexing
+    /// `root_stacks[current_stack]` — see `current`'s doc comment. Safe
+    /// because `current` is kept in sync with `current_stack` by every
+    /// method that changes either, and always points at a live `RootStack`
+    /// owned by `root_stacks` (never dangling: `drop_root_stack` refuses to
+    /// drop the running stack).
     fn roots(&self) -> &[Value] {
-        self.root_stacks[self.current_stack]
-            .as_ref()
-            .expect("the running root stack is always present")
+        &unsafe { &*self.current }.roots
     }
 
     fn roots_mut(&mut self) -> &mut Vec<Value> {
-        self.root_stacks[self.current_stack]
-            .as_mut()
-            .expect("the running root stack is always present")
+        &mut unsafe { &mut *self.current }.roots
     }
 
     /// Register `v` as a GC root.
@@ -484,10 +589,10 @@ impl Heap {
         // Reuse a slot a finished task freed, so spawning many short-lived
         // tasks does not grow this vector without bound.
         if let Some(i) = self.root_stacks.iter().position(|s| s.is_none()) {
-            self.root_stacks[i] = Some(Vec::new());
+            self.root_stacks[i] = Some(Box::new(RootStack::default()));
             RootStackId(i)
         } else {
-            self.root_stacks.push(Some(Vec::new()));
+            self.root_stacks.push(Some(Box::new(RootStack::default())));
             RootStackId(self.root_stacks.len() - 1)
         }
     }
@@ -505,12 +610,11 @@ impl Heap {
     /// pointing into a different stack afterwards. In the evaluator that means
     /// a task-step boundary and nothing finer.
     pub fn switch_to_root_stack(&mut self, id: RootStackId) {
-        assert!(
-            self.root_stacks.get(id.0).is_some_and(|s| s.is_some()),
-            "switch_to_root_stack: {:?} is not a live stack",
-            id
-        );
+        let Some(stack) = self.root_stacks.get_mut(id.0).and_then(|s| s.as_mut()) else {
+            panic!("switch_to_root_stack: {:?} is not a live stack", id);
+        };
         self.current_stack = id.0;
+        self.current = &mut **stack;
     }
 
     /// Frees a finished task's stack.
@@ -522,7 +626,7 @@ impl Heap {
         assert_ne!(id.0, self.current_stack, "drop_root_stack: that stack is running");
         let stack = self.root_stacks[id.0].take();
         debug_assert!(
-            stack.map(|s| s.is_empty()).unwrap_or(true),
+            stack.map(|s| s.roots.is_empty()).unwrap_or(true),
             "drop_root_stack: {:?} still holds roots",
             id
         );
@@ -544,7 +648,7 @@ impl Heap {
     /// (never `build-free`'d) — see `compiler.rs`'s `compile-construct-box`
     /// doc comment.
     pub fn push_permanent_root(&mut self, v: Value) {
-        self.permanent_roots.push(v);
+        self.permanent_roots.push(Some(v));
     }
 
     /// Number of registered permanent roots — see
@@ -559,13 +663,13 @@ impl Heap {
     /// ([`Self::gc`](Heap::gc)'s root walk), so an entry can be overwritten
     /// in place ([`Self::set_permanent_root`]) with no change to that logic.
     pub fn permanent_root(&self, idx: usize) -> Value {
-        self.permanent_roots[idx]
+        self.permanent_roots[idx].expect("permanent_root: slot was never populated")
     }
 
     /// Overwrite permanent root `idx`'s value in place — `rt_global_set`'s
     /// storage half. See [`Self::permanent_root`].
     pub fn set_permanent_root(&mut self, idx: usize, v: Value) {
-        self.permanent_roots[idx] = v;
+        self.permanent_roots[idx] = Some(v);
     }
 
     // ---- session roots ----------------------------------------------------
@@ -825,7 +929,7 @@ impl Heap {
             _ => unreachable!("alloc_string always returns Value::Str"),
         };
         self.str_intern.insert(s.to_string(), id);
-        self.permanent_roots.push(v);
+        self.permanent_roots.push(Some(v));
         v
     }
 
@@ -2305,12 +2409,14 @@ impl Heap {
         for (s, stack) in self.root_stacks.iter().enumerate() {
             let Some(stack) = stack else { continue };
             let what = if s == self.current_stack { "roots".to_string() } else { format!("roots[task {}]", s) };
-            for (i, &v) in stack.iter().enumerate() {
+            for (i, &v) in stack.roots.iter().enumerate() {
                 check(&what, i, v);
             }
         }
-        for (i, &v) in self.permanent_roots.iter().enumerate() {
-            check("permanent_roots", i, v);
+        for (i, v) in self.permanent_roots.iter().enumerate() {
+            if let Some(v) = v {
+                check("permanent_roots", i, *v);
+            }
         }
         for (i, &v) in self.session_roots.iter().enumerate() {
             check("session_roots", i, v);
@@ -2351,12 +2457,14 @@ impl Heap {
         // Every task's roots, not just the running one: a suspended task will
         // resume into the frames these belong to.
         for roots in self.root_stacks.iter().flatten() {
-            for &v in roots {
+            for &v in &roots.roots {
                 stack.push(v);
             }
         }
         for i in 0..self.permanent_roots.len() {
-            stack.push(self.permanent_roots[i]);
+            if let Some(v) = self.permanent_roots[i] {
+                stack.push(v);
+            }
         }
         for i in 0..self.session_roots.len() {
             stack.push(self.session_roots[i]);
@@ -2580,4 +2688,83 @@ pub fn inner_type_key(key: &str) -> Option<&str> {
         }
     }
     Some(inner)
+}
+
+#[cfg(test)]
+mod slab_tests {
+    use super::Slab;
+
+    // `SLAB_CHUNK_LEN` is 1024 — these counts are chosen to cross a chunk
+    // boundary (so growth mid-slab is exercised, not just a single chunk).
+    const PAST_ONE_CHUNK: usize = super::SLAB_CHUNK_LEN + 5;
+
+    #[test]
+    fn push_returns_sequential_indices_and_index_reads_them_back() {
+        let mut s: Slab<i64> = Slab::new();
+        for i in 0..PAST_ONE_CHUNK {
+            let idx = s.push(Some(i as i64));
+            assert_eq!(idx, i);
+        }
+        assert_eq!(s.len(), PAST_ONE_CHUNK);
+        for i in 0..PAST_ONE_CHUNK {
+            assert_eq!(s[i], Some(i as i64));
+        }
+    }
+
+    #[test]
+    fn none_entries_round_trip_like_an_ordinary_option_vec() {
+        let mut s: Slab<i64> = Slab::new();
+        s.push(Some(1));
+        s.push(None);
+        s.push(Some(3));
+        assert_eq!(s[0], Some(1));
+        assert_eq!(s[1], None);
+        assert_eq!(s[2], Some(3));
+    }
+
+    #[test]
+    fn index_mut_overwrites_a_slot_in_place() {
+        let mut s: Slab<i64> = Slab::new();
+        s.push(Some(1));
+        s[0] = Some(2);
+        assert_eq!(s[0], Some(2));
+        s[0] = None;
+        assert_eq!(s[0], None);
+    }
+
+    #[test]
+    fn growth_past_a_chunk_boundary_does_not_move_earlier_entries() {
+        // The whole point of `Slab` over `Vec<Option<T>>`: an address taken
+        // before growth stays valid after it. Cons cells and `Box<RootStack>`
+        // get this from a raw pointer directly; a `Slab<i64>` slot has no
+        // address to hand out through the public API, so this test stands in
+        // for that guarantee by checking that entries written before the
+        // chunk boundary still read back correctly *after* pushing well past
+        // it (a `Vec<Option<T>>` would have reallocated and copied them, so
+        // this alone would not distinguish the two — the real proof is that
+        // `push` never invalidates any `&Option<T>` obtained via `index`
+        // before the growing call, which the borrow checker enforces at
+        // compile time: `Slab::push` takes `&mut self`, so no such borrow can
+        // be alive across it in safe code).
+        let mut s: Slab<i64> = Slab::new();
+        for i in 0..super::SLAB_CHUNK_LEN {
+            s.push(Some(i as i64));
+        }
+        for i in 0..10 {
+            s.push(Some(1000 + i));
+        }
+        for i in 0..super::SLAB_CHUNK_LEN {
+            assert_eq!(s[i], Some(i as i64));
+        }
+    }
+
+    #[test]
+    fn iter_visits_every_slot_in_order() {
+        let mut s: Slab<i64> = Slab::new();
+        s.push(Some(10));
+        s.push(None);
+        s.push(Some(30));
+        let collected: Vec<Option<i64>> = s.iter().copied().collect();
+        assert_eq!(collected, vec![Some(10), None, Some(30)]);
+    }
 }
