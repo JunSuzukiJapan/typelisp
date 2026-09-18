@@ -212,15 +212,38 @@ impl Drop for Arena {
 }
 
 /// State one `Heap` view shares with every other view attached to the same
-/// underlying heap (`docs/dev/os-threads-design.md` §3). Only the cons arena
-/// has moved here so far — see `Arena`'s doc comment for why that piece
-/// first and the rest later. `Heap::with_capacity` is still the only place
-/// that creates one, and always creates exactly one view for it, so nothing
-/// today actually exercises concurrent access; this exists to let that
-/// access be added incrementally, method by method, without a second
-/// large-scale field migration once it is.
+/// underlying heap (`docs/dev/os-threads-design.md` §3). The cons arena,
+/// every task's root stack, and `permanent_roots` have moved here so far.
+/// **Deliberately not yet moved**: `str_slots`/`box_slots`/the interning
+/// tables (`type_keys`/`paths`), because several public methods return a
+/// reference borrowed from them with `&self`'s lifetime
+/// (`Heap::string`/`Heap::bignum_value`/`Heap::type_key_name`/… — see the
+/// `grep` in the design doc's Phase 1c notes) — putting that storage behind
+/// a `Mutex`/`RwLock` cannot keep that shape, since nothing can return a
+/// reference into a lock without also handing back something that keeps the
+/// lock held, which `std::sync::{Mutex,RwLock}` has no stable way to do.
+/// That needs its own decision (a mapped-guard-capable lock like
+/// `parking_lot`'s, an owned/cloning return, or a closure-taking accessor)
+/// before it can move, so it stays on `Heap` for now. `Heap::with_capacity`
+/// is still the only place that creates a `HeapShared`, and always creates
+/// exactly one view for it, so nothing today actually exercises concurrent
+/// access; this exists to let that access be added incrementally, field by
+/// field, without a second large-scale migration once it is.
 pub struct HeapShared {
     arena: Mutex<Arena>,
+    // Every task's roots, keyed by `RootStackId`. Shared (not per-view)
+    // because a task's stack must stay walkable by whichever view ends up
+    // driving a collection, regardless of which view created the task — see
+    // `RootStack`'s doc comment. `current`, the *running* stack, is cached
+    // per-view below instead of read through this lock on every push/pop.
+    root_stacks: Mutex<Vec<Option<Box<RootStack>>>>,
+    // Always `Some` once written — `Slab` rather than a plain `Vec<Value>`
+    // for the address stability described on `Slab`'s doc comment, not
+    // because any entry is ever removed (`push_permanent_root` never
+    // provides a way to). Shared because a `defvar` global (what this
+    // backs — see `push_permanent_root`) must read the same way from every
+    // thread that names it.
+    permanent_roots: Mutex<Slab<Value>>,
 }
 
 pub struct Heap {
@@ -230,25 +253,18 @@ pub struct Heap {
     // How many collections have run, for tests that assert an allocation
     // pattern does not thrash — see `gc_count`.
     gc_count: u64,
-    // Every task's roots. `current_stack` names the index that is running;
-    // the rest belong to suspended tasks and are walked by the collector but
-    // by nothing else — a task that is not running pushes and pops nothing.
-    // See `new_root_stack`.
-    root_stacks: Vec<Option<Box<RootStack>>>,
+    // Which of `shared.root_stacks`' entries this view is currently running.
     current_stack: usize,
-    // A raw pointer at `*root_stacks[current_stack]`, kept in sync by every
-    // place that changes either — `with_capacity` and `switch_to_root_stack`
-    // — so `roots`/`roots_mut` can dereference it directly instead of
-    // indexing `root_stacks` on every push/pop. Never null: "the running
-    // root stack is always present" is the same invariant `roots()`'s
-    // `.expect` used to state. See `RootStack`'s doc comment for why the
-    // `Box` indirection keeps this valid across `root_stacks` reallocating.
+    // A raw pointer at `*shared.root_stacks[current_stack]`, kept in sync by
+    // every place that changes either — `with_capacity` and
+    // `switch_to_root_stack` — so `roots`/`roots_mut` can dereference it
+    // directly instead of taking `shared.root_stacks`'s lock on every
+    // push/pop. Never null: "the running root stack is always present" is
+    // the same invariant `roots()`'s `.expect` used to state. See
+    // `RootStack`'s doc comment for why the `Box` indirection inside
+    // `shared.root_stacks` keeps this valid across that `Vec` reallocating —
+    // the same reasoning applies whether the `Vec` sits behind a lock or not.
     current: *mut RootStack,
-    // Always `Some` once written — `Slab` rather than a plain `Vec<Value>`
-    // for the address stability described on `Slab`'s doc comment, not
-    // because any entry is ever removed (`push_permanent_root` never
-    // provides a way to).
-    permanent_roots: Slab<Value>,
     // Roots for the duration of a bracketed session — see `push_session_root`.
     session_roots: Vec<Value>,
     // The value of a `throw` currently travelling up the stack — see
@@ -369,18 +385,21 @@ impl Heap {
     pub fn with_capacity(capacity: usize) -> Heap {
         let (chunk, free) = Self::alloc_chunk(capacity, ptr::null_mut());
         let arena = Arena { chunks: vec![chunk], cap: capacity, growth_limit: capacity.saturating_mul(GROWTH_FACTOR), free, free_count: capacity };
-        let shared = Arc::new(HeapShared { arena: Mutex::new(arena) });
 
         let mut home = Box::new(RootStack::default());
         let current: *mut RootStack = &mut *home;
+        let shared = Arc::new(HeapShared {
+            arena: Mutex::new(arena),
+            root_stacks: Mutex::new(vec![Some(home)]),
+            permanent_roots: Mutex::new(Slab::new()),
+        });
+
         let mut heap = Heap {
             shared,
             gc_stress: false,
             gc_count: 0,
-            root_stacks: vec![Some(home)],
             current_stack: 0,
             current,
-            permanent_roots: Slab::new(),
             session_roots: Vec::new(),
             in_flight_throw: None,
             macro_chars: HashMap::new(),
@@ -638,14 +657,15 @@ impl Heap {
     /// a single stack could only be truncated in the order it was pushed, and
     /// tasks do not finish in that order.
     pub fn new_root_stack(&mut self) -> RootStackId {
+        let mut root_stacks = self.shared.root_stacks.lock().unwrap();
         // Reuse a slot a finished task freed, so spawning many short-lived
         // tasks does not grow this vector without bound.
-        if let Some(i) = self.root_stacks.iter().position(|s| s.is_none()) {
-            self.root_stacks[i] = Some(Box::new(RootStack::default()));
+        if let Some(i) = root_stacks.iter().position(|s| s.is_none()) {
+            root_stacks[i] = Some(Box::new(RootStack::default()));
             RootStackId(i)
         } else {
-            self.root_stacks.push(Some(Box::new(RootStack::default())));
-            RootStackId(self.root_stacks.len() - 1)
+            root_stacks.push(Some(Box::new(RootStack::default())));
+            RootStackId(root_stacks.len() - 1)
         }
     }
 
@@ -662,10 +682,14 @@ impl Heap {
     /// pointing into a different stack afterwards. In the evaluator that means
     /// a task-step boundary and nothing finer.
     pub fn switch_to_root_stack(&mut self, id: RootStackId) {
-        let Some(stack) = self.root_stacks.get_mut(id.0).and_then(|s| s.as_mut()) else {
+        let mut root_stacks = self.shared.root_stacks.lock().unwrap();
+        let Some(stack) = root_stacks.get_mut(id.0).and_then(|s| s.as_mut()) else {
             panic!("switch_to_root_stack: {:?} is not a live stack", id);
         };
         self.current_stack = id.0;
+        // Safe to keep past the lock guard's drop below: the pointer is at
+        // the `RootStack`'s own heap allocation (the `Box`'s target), not at
+        // anything inside the locked `Vec` — see `current`'s doc comment.
         self.current = &mut **stack;
     }
 
@@ -676,7 +700,7 @@ impl Heap {
     /// stop being reachable at exactly this point.
     pub fn drop_root_stack(&mut self, id: RootStackId) {
         assert_ne!(id.0, self.current_stack, "drop_root_stack: that stack is running");
-        let stack = self.root_stacks[id.0].take();
+        let stack = self.shared.root_stacks.lock().unwrap()[id.0].take();
         debug_assert!(
             stack.map(|s| s.roots.is_empty()).unwrap_or(true),
             "drop_root_stack: {:?} still holds roots",
@@ -700,13 +724,13 @@ impl Heap {
     /// (never `build-free`'d) — see `compiler.rs`'s `compile-construct-box`
     /// doc comment.
     pub fn push_permanent_root(&mut self, v: Value) {
-        self.permanent_roots.push(Some(v));
+        self.shared.permanent_roots.lock().unwrap().push(Some(v));
     }
 
     /// Number of registered permanent roots — see
     /// [`push_permanent_root`](Self::push_permanent_root).
     pub fn permanent_root_count(&self) -> usize {
-        self.permanent_roots.len()
+        self.shared.permanent_roots.lock().unwrap().len()
     }
 
     /// Read permanent root `idx`'s current value (a global variable's
@@ -715,13 +739,13 @@ impl Heap {
     /// ([`Self::gc`](Heap::gc)'s root walk), so an entry can be overwritten
     /// in place ([`Self::set_permanent_root`]) with no change to that logic.
     pub fn permanent_root(&self, idx: usize) -> Value {
-        self.permanent_roots[idx].expect("permanent_root: slot was never populated")
+        self.shared.permanent_roots.lock().unwrap()[idx].expect("permanent_root: slot was never populated")
     }
 
     /// Overwrite permanent root `idx`'s value in place — `rt_global_set`'s
     /// storage half. See [`Self::permanent_root`].
     pub fn set_permanent_root(&mut self, idx: usize, v: Value) {
-        self.permanent_roots[idx] = Some(v);
+        self.shared.permanent_roots.lock().unwrap()[idx] = Some(v);
     }
 
     // ---- session roots ----------------------------------------------------
@@ -981,7 +1005,7 @@ impl Heap {
             _ => unreachable!("alloc_string always returns Value::Str"),
         };
         self.str_intern.insert(s.to_string(), id);
-        self.permanent_roots.push(Some(v));
+        self.shared.permanent_roots.lock().unwrap().push(Some(v));
         v
     }
 
@@ -2481,14 +2505,14 @@ impl Heap {
                 }
             }
         };
-        for (s, stack) in self.root_stacks.iter().enumerate() {
+        for (s, stack) in self.shared.root_stacks.lock().unwrap().iter().enumerate() {
             let Some(stack) = stack else { continue };
             let what = if s == self.current_stack { "roots".to_string() } else { format!("roots[task {}]", s) };
             for (i, &v) in stack.roots.iter().enumerate() {
                 check(&what, i, v);
             }
         }
-        for (i, v) in self.permanent_roots.iter().enumerate() {
+        for (i, v) in self.shared.permanent_roots.lock().unwrap().iter().enumerate() {
             if let Some(v) = v {
                 check("permanent_roots", i, *v);
             }
@@ -2531,14 +2555,17 @@ impl Heap {
         let mut stack: Vec<Value> = Vec::new();
         // Every task's roots, not just the running one: a suspended task will
         // resume into the frames these belong to.
-        for roots in self.root_stacks.iter().flatten() {
+        for roots in self.shared.root_stacks.lock().unwrap().iter().flatten() {
             for &v in &roots.roots {
                 stack.push(v);
             }
         }
-        for i in 0..self.permanent_roots.len() {
-            if let Some(v) = self.permanent_roots[i] {
-                stack.push(v);
+        {
+            let permanent_roots = self.shared.permanent_roots.lock().unwrap();
+            for i in 0..permanent_roots.len() {
+                if let Some(v) = permanent_roots[i] {
+                    stack.push(v);
+                }
             }
         }
         for i in 0..self.session_roots.len() {
