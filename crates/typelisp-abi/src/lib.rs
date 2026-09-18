@@ -303,8 +303,9 @@ pub mod call_state {
         ///
         /// **A stack, not a slot.** The driver takes the frame only once the
         /// entering call has *returned*, and a callee can start a driver of
-        /// its own before then: `rt_drive_body`, `rt_drive_entry` and the C
-        /// FFI thunk all run a nested `FrameStack` on the machine stack (C4
+        /// its own before then: `rt_drive_body`, the C FFI thunk and a body
+        /// the interpreter calls from a Rust frame all run a nested
+        /// `FrameStack` on the machine stack (C4
         /// retired `rt_protected_drive` and C5 retired `rt_apply_any` and
         /// `rt_dyn_call`, which were three more).
         /// Every one of those publishes and takes in balanced

@@ -204,3 +204,101 @@ unsafe fn expand_shim(
         Err(e) => fatal(&format!("{}: {}", who, e)),
     }
 }
+
+
+/// [`typelisp_rt::rt_run_program`]/`rt_run_program_int` for an
+/// `eval`-carrying AOT executable: the same protocol — an initialiser
+/// array, its count, and the entry point, all coroutine-ABI addresses — but
+/// driven by *this thread's* `Interp` (`AOT_ENV`, built by [`rt_eval_init`])
+/// through its own scheduler (`Interp::run_compiled_program`) rather than a
+/// bare `Scheduler<CompiledTask>`.
+///
+/// The reason this exists at all rather than reusing `rt_run_program`: an
+/// executable that calls `eval` has an `Interp`, and `(go ...)` inside an
+/// eval'd form is admitted to *that* `Interp`'s scheduler
+/// (`Interp::eval_cps`) — a second, bare `Scheduler<CompiledTask>` running
+/// the program's own initialisers and `main` would be a scheduler the
+/// eval'd tasks are invisible to, and vice versa. `compile-file` decides
+/// which of the two shims the generated `main` calls by whether the program
+/// calls `eval` at all (`aot::EVAL_SHIMS`), the same generation-time
+/// decision every other ABI fork in the compiler makes.
+///
+/// # Safety
+///
+/// [`typelisp_rt::rt_run_program`]'s: `argc` must be 3, and `args` must
+/// describe a valid initialiser array, its count, and an entry address, all
+/// `coroutine_fn_type` — plus a completed [`rt_eval_init`] must already have
+/// run on this thread (`AOT_ENV` must be set; the generated `main` always
+/// calls it first when it emits a call to this shim at all).
+#[no_mangle]
+pub unsafe extern "C" fn rt_run_program_interp(args: *const i64, argc: u32) -> i64 {
+    run_program_interp(args, argc, false)
+}
+
+/// [`rt_run_program_interp`] for a `main` declared to return `int`: the
+/// answer is a tagged word, and the exit code is the fixnum's payload —
+/// [`typelisp_rt::rt_run_program_int`]'s own reasoning, here for the
+/// `eval`-carrying entry.
+///
+/// # Safety
+///
+/// [`rt_run_program_interp`]'s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_run_program_interp_int(args: *const i64, argc: u32) -> i64 {
+    run_program_interp(args, argc, true)
+}
+
+/// The half [`rt_run_program_interp`] and [`rt_run_program_interp_int`]
+/// share: read the program, find the environment, drive it, and turn the
+/// result into an exit code the same way the two entry points in
+/// `typelisp_rt` do for the interpreter-free case.
+///
+/// # Safety
+///
+/// [`rt_run_program_interp`]'s.
+unsafe fn run_program_interp(args: *const i64, argc: u32, main_returns_int: bool) -> i64 {
+    let program = typelisp_rt::read_program(args, argc, "rt_run_program_interp");
+    let interp = match AOT_ENV.with(|c| c.get()) {
+        p if !p.is_null() => &*p,
+        _ => fatal("rt_run_program_interp: no environment — rt_eval_init has not run on this thread"),
+    };
+    let heap = active_heap();
+    let inits: Vec<usize> = program.inits.iter().map(|f| *f as usize).collect();
+    let entry = program.entry as usize;
+    let ret = if main_returns_int { crate::check::repr::Repr::Int } else { crate::check::repr::Repr::Unit };
+    let call = std::panic::AssertUnwindSafe(|| match run_program_result(interp, heap, &inits, entry, ret, main_returns_int) {
+        Ok(v) => v,
+        Err(code) => code,
+    });
+    typelisp_rt::run_entry_payload(std::panic::catch_unwind(call))
+}
+
+/// [`run_program_interp`]'s inner call: `Interp::run_compiled_program`'s
+/// result read off as the same two shapes `typelisp_rt::rt_run_program`/
+/// `rt_run_program_int` read a `CompiledTask`'s off — an already-encoded
+/// word, or a fixnum's raw payload — and a failure printed and turned into
+/// [`typelisp_rt::EXIT_CODE_PANIC`], the same line a task's own failure
+/// prints on the interpreter-free side.
+unsafe fn run_program_result(
+    interp: &Interp,
+    heap: &mut typelisp_mem::Heap,
+    inits: &[usize],
+    entry: usize,
+    ret: crate::check::repr::Repr,
+    main_returns_int: bool,
+) -> Result<i64, i64> {
+    match interp.run_compiled_program(heap, inits, entry, ret) {
+        Ok(v) if main_returns_int => match v {
+            typelisp_mem::Value::Int(n) => Ok(n),
+            typelisp_mem::Value::Boxed(id) if heap.is_bignum(id) => {
+                fatal(&format!("main returned {}, which is not a process exit code", heap.bignum_value(id)))
+            }
+            other => fatal(&format!("main declared to return int answered {:?}", other)),
+        },
+        Ok(v) => Ok(encode(v)),
+        Err(e) => {
+            eprintln!("{}", e);
+            Err(typelisp_rt::EXIT_CODE_PANIC)
+        }
+    }
+}

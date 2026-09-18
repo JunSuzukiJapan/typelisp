@@ -760,6 +760,20 @@ ABI の札は「誰かがその本体を呼ぶとき」にしか読まれない�
 `Scheduler<CompiledTask>` の main タスク。`rt_drive_entry`（`defvar` 初期化子）と
 `rt_drive_body`（printer の door）は `run_to_end` のまま。
 
+**2026-09-18 の続き: `$global_init$N` も `main` と同じスケジューラの下へ。**
+`rt_drive_entry`/`rt_run_entry_driven[_int]` を消して `rt_run_program[_int]`
+1 本に統一——`args = [inits, n, entry]`（初期化子のアドレス配列・個数・
+エントリ）を渡し、初期化子 1 つにつき `admit`→`drive`、最後に `main` を
+`admit`→`drive`（REPL がフォームごとに drive するのと同じ形。前の drive が
+残したタスクは次の drive で走る）。これで `defvar` 初期化子がチャネルを作る・
+`go`/`wait` するといった「ふつうのプログラム」になり、`rt_drive_body`
+（printer の door）だけが `run_to_end` に残る。`eval` を呼ぶ実行ファイルは
+`rt_run_program_interp[_int]`（`typelisp_front::shim`）——front の `Task` で
+`main` と初期化子を回すので、`Interp::scheduler` が1つだけになり、eval の中の
+`(go ...)` が次の `rt_eval` を待たず動く。生成時（`eval_env.is_some()`）に
+どちらの shim を呼ぶか決める——実行時の hook では分岐しない
+（[[typelisp-c6-abi-never-implicit]]と同じ規律）。
+
 **`rt_*` を足したら staticlib を作り直す。** AOT テストは `cargo test` が
 作らない `typelisp-front` の staticlib にリンクしているので、新しい shim は
 `cargo build -p typelisp-front` まで存在しない——症状は
@@ -1224,6 +1238,22 @@ panic では運べない。継続スタックを普通に上がってきて `Fra
 使わずに `run`/`resume` を直接書いたドライバがあれば、それは規約違反であって
 制限ではない。
 
+**2026-09-18 の続き: `Paused::Suspended` もここで解決するようになった
+（`typelisp-machine-frame-answer-now` 計画）。** それまでは `Suspended` も
+`fatal`——`print-object` メソッドの中の `(recv ch)`、AOT の `defvar` 初期化子の
+中の `(Chan::new ...)` が、**待たずに答えが出る操作ですら** abort していた
+（インタプリタの `run_to_completion` は `try_now` で答えていたのに、compiled 側の
+`run_to_end` は safepoint しか飲まなかったという非対称）。直し方は `sched::drive`
+が自分の extent の間だけ `&RefCell<Scheduler<B>>` を thread-local
+（`sched::DRIVING`、借用のみ・所有は今までどおり）に publish し、`run_to_end` が
+`Paused::Suspended` を `sched::pending_wait` で `Waiting` にした上で
+`sched::answer_now` に尋ねる——`(yield)`/safepoint は無条件で続行、答えが出る操作は
+その語で `resume`、**本当に待つ操作は `sched::cannot_block_message` を
+`CompiledPanic` として鎖の中へ `raise`**（インタプリタの拒否と同じ文言、
+catchable）。これで `pause_on_a_machine_frame` の `Suspended` アームも `Applying`
+と同じ「規約違反」の `fatal` になった——両方とも `run_to_end` が解決してしまうので、
+ここに来ること自体が壊れている。
+
 ### C5b: `:dyn` も同じ形
 
 `compile-dyn-call` は受け手の vtable id を読み、概念的な受け手を取り出し、
@@ -1308,6 +1338,13 @@ C5 より前、compiled から届いたインタプリタの呼び先は*マシ�
 本当に握っているのは `Interp::apply` と公開 API、`eval` 組み込み、
 `print-object` メソッド、リーダマクロ、そしてそれらから入ったドライバ。
 文面をそう直した。
+
+**2026-09-18: `(yield)` は例外から外れた。** 譲る相手を探しているだけの
+`(yield)` を「待つことになった」と一緒に拒否するのは、譲る相手が無い場所で
+「譲らない」以上の意味を持たない拒否だった。ここでは無条件で続行、
+compiled 側の safepoint と同じ扱いにした。拒否の文言自体は
+`sched::cannot_block_message` に括り出して `FrameStack::run_to_end` と共有——
+2 つの前端が同じ理由で同じことを拒否している以上、言葉も 1 つでよい。
 
 ## C6. ABI を暗黙にしない
 

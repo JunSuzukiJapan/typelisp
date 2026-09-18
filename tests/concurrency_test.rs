@@ -852,25 +852,25 @@ fn a_compiled_loop_with_no_calls_still_yields_to_another_task() {
     );
 }
 
-/// **The same loop, under a driver that cannot put the chain down, runs to
-/// its answer.**
+/// **The same loop, applied as a closure value, still just runs.**
 ///
-/// An interpreted caller applying a *compiled closure value* is a Rust frame
-/// waiting for the word: the drive standing on it has nowhere to park a
-/// suspended chain, and says so for a real `sleep` or `wait`. A safepoint is
-/// not a real wait — nothing is being waited for — so `run_to_end` declines
-/// the offer and resumes.
+/// An interpreted caller applying a *compiled closure value* used to be a
+/// Rust frame waiting for the word with nowhere to park a suspended
+/// chain — this is now driven by the task instead
+/// (`State::CompiledEnter`/`DriveCallee::Closure`, closure unification
+/// Phase 2 of the AOT-scheduler work), so a real `sleep` or `wait` inside
+/// one now genuinely suspends (see
+/// `an_interpreted_caller_applying_a_compiled_closure_may_really_wait`
+/// below). A safepoint offer is not a real wait — nothing is being waited
+/// for — so it still resumes at once either way; this test is the
+/// computation-only case, kept for its own sake (a call-less loop's back
+/// edge polling something).
 ///
-/// **This is what makes C7 safe to insert at all.** Without that arm, a poll
-/// on every loop back edge would turn every compiled loop reached through a
-/// closure value, the AOT entry point or a C callback into a failure — and
-/// the failure would name suspension, not loops.
-///
-/// The closure value is the shortest way to a driver of that kind. A
-/// `print-object` method reaches one too — but only since the printer's
-/// dispatch was routed through `Interp::enter`; while it called
-/// `Interp::apply` it ran the interpreted body however many times the method
-/// had been `compile`d, which is how this gap was found.
+/// A driver that genuinely *cannot* park a chain still exists
+/// (`FrameStack::run_to_end`'s doc comment): the printer's door
+/// (`rt_drive_body`) and the C FFI thunk. There, a safepoint still just
+/// resumes and a real wait is answered on the spot or refused — never
+/// parked, because there is no task standing under either.
 #[test]
 fn a_compiled_loop_safepoint_under_a_machine_frame_driver_just_resumes() {
     assert_eq!(
@@ -884,5 +884,32 @@ fn a_compiled_loop_safepoint_under_a_machine_frame_driver_just_resumes() {
                (let ((f (make-spin))) (f 1000))"#
         ),
         1000
+    );
+}
+
+/// **An interpreted caller applying a compiled closure value may really
+/// wait** — the boundary the previous test's revised doc comment describes.
+/// `main` is the interpreter's own task: it starts `mark` under `go`, then
+/// calls the closure `f` directly (not through `go`) and the closure
+/// `sleep`s. If that call ran to completion atomically it would finish
+/// first regardless of how long it slept; `ba`, not `ab`, proves it
+/// genuinely parked the calling task and let `mark` run in the meantime —
+/// the same proof `a_compiled_loop_with_no_calls_still_yields_to_another_task`
+/// makes for a named compiled call.
+#[test]
+fn an_interpreted_caller_applying_a_compiled_closure_may_really_wait() {
+    assert_eq!(
+        text_compiled(
+            r#"(defvar (trail string) "")
+               (defun make-worker () (fn () int)
+                 (lambda () int (progn (sleep 0.05) (setf trail (append trail "a")) 0)))
+               (defun mark () int (progn (sleep 0.01) (setf trail (append trail "b")) 0))
+               (compile make-worker)
+               (compile mark)
+               (let ((f (make-worker)) (b (go (mark))))
+                 (progn (f) (wait b)))
+               trail"#
+        ),
+        "ba"
     );
 }

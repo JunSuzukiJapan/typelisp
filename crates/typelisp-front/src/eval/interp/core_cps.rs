@@ -72,16 +72,6 @@ enum State {
     /// *classic* body still goes through `Interp::call_compiled` and is as
     /// atomic as it always was: it has nowhere to keep its state.
     CompiledEnter { argv: Value, start: DriveStart },
-    /// Apply a compiled closure to no arguments, as this task's whole job —
-    /// what a compiled `(go ...)` hands over.
-    ///
-    /// The closure is the one the `go` site built (`core_bridge::translate_go`):
-    /// it makes the call and answers with the result **tagged**, so this
-    /// crossing has no representations to marshal by — the answer is a
-    /// tagged `Sexpr` whatever the call's type, exactly as a `wait`'s is.
-    /// Everything after the first drive is `CompiledResume`/`CompiledRaise`,
-    /// the same as for a named body.
-    CompiledApply { closure: Value },
     /// Keep driving a chain that is already standing — after a suspension, or
     /// after a call it made was answered.
     ///
@@ -165,14 +155,8 @@ struct DriveCtx {
 /// The synchronous `Interp::call_compiled` never had to think about this: it
 /// pushed and popped inside one Rust call, entirely before the truncate.
 struct DriveStart {
-    /// Held for as long as the drive lasts, so the machine code cannot be
-    /// dropped underneath a suspended chain by a redefinition.
-    ///
-    /// `None` for a closure a task applies (`State::CompiledApply`): the
-    /// body is reached through the closure box, and the module it lives in
-    /// is the one that built the box, which is never retired while a value
-    /// of it can still be applied.
-    body: Option<std::rc::Rc<dyn super::CompiledBody>>,
+    /// What the chain is entered with — see [`DriveCallee`].
+    callee: DriveCallee,
     /// The callee's declared parameter representations — what the words the
     /// arguments encode to mean.
     params: Vec<Repr>,
@@ -181,6 +165,34 @@ struct DriveStart {
     ret: Repr,
     /// The trace line owed on the way back, if `trace` is on for this callee.
     watch: Option<(String, usize, Option<Repr>)>,
+}
+
+/// What a [`State::CompiledEnter`] drive is entered with.
+///
+/// Both a named call and an `apply` of a compiled closure — including the
+/// closure a task `go` started, which used to be its own `State` — are one
+/// task-driven crossing now: the difference is only how the chain's entry
+/// point is found. Neither carries a `Value` here — `DriveCtx` holds none,
+/// on purpose (its own doc comment) — so a `Closure` rides at the head of
+/// `CompiledEnter`'s own `argv` list, tagged like any other argument, and is
+/// rooted exactly as its sibling arguments are (through the state slots,
+/// `set_state`'s `State::CompiledEnter` arm).
+enum DriveCallee {
+    /// A named top-level body — held for as long as the drive lasts, so the
+    /// machine code cannot be dropped underneath a suspended chain by a
+    /// redefinition.
+    Body(std::rc::Rc<dyn super::CompiledBody>),
+    /// A closure value: `params` is prefixed with [`Repr::Fn`] for it, and
+    /// its tagged word is `CompiledEnter`'s first argument.
+    Closure,
+    /// A raw coroutine-ABI entry address, taking no arguments — what an
+    /// `eval`-carrying AOT program's own initialisers and `main` are, once
+    /// its `Interp` drives them (`Interp::run_compiled_program`). Held as a
+    /// bare address rather than an `Rc<dyn CompiledBody>` because there is
+    /// no `FnDef`/JIT-owned body wrapping it: `AOT_ENV`'s `Interp` outlives
+    /// the process, the same immortality `rt_eval_init`'s leak gives the
+    /// dump it restores from, so nothing needs to keep this alive.
+    Address(usize),
 }
 
 /// The `ArgsKind` of an already-checked call node — what `(go CALL)` wraps.
@@ -531,12 +543,22 @@ impl sched::TaskBody for Task {
 
     fn start_closure(heap: &mut Heap, closure: Value) -> Task {
         let sbase = heap.root_count();
+        // A one-element argument list holding only the closure itself — the
+        // `go` site's thunk takes no arguments of its own and answers with
+        // its result already tagged (`core_bridge::translate_go`), so this
+        // crossing has no other representations to marshal by.
         heap.push_root(closure);
+        let argv = core::list(heap, &[closure]).unwrap_or_else(|e| {
+            typelisp_abi::fatal(&format!("go: building the closure's argument list failed: {}", e))
+        });
+        heap.pop_root();
+        heap.push_root(argv);
         heap.push_root(Value::Empty);
+        let start = DriveStart { callee: DriveCallee::Closure, params: vec![Repr::Fn], ret: Repr::Sexpr, watch: None };
         Task {
             sbase,
             stack: CpsStack::new(),
-            state: State::CompiledApply { closure },
+            state: State::CompiledEnter { argv, start },
             compiled: typelisp_rt::coroutine::FrameStack::new(),
         }
     }
@@ -616,6 +638,22 @@ impl Task {
             compiled: typelisp_rt::coroutine::FrameStack::new(),
         }
     }
+
+    /// Starts a task that enters a raw coroutine-ABI address with no
+    /// arguments — an `eval`-carrying AOT program's own initialiser or
+    /// entry point, driven by [`Interp::run_compiled_program`].
+    fn start_compiled_entry(heap: &mut Heap, address: usize, ret: Repr) -> Task {
+        let sbase = heap.root_count();
+        heap.push_root(Value::Empty);
+        heap.push_root(Value::Empty);
+        let start = DriveStart { callee: DriveCallee::Address(address), params: Vec::new(), ret, watch: None };
+        Task {
+            sbase,
+            stack: CpsStack::new(),
+            state: State::CompiledEnter { argv: Value::Empty, start },
+            compiled: typelisp_rt::coroutine::FrameStack::new(),
+        }
+    }
 }
 
 /// What a task's failure does to the program.
@@ -678,12 +716,6 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         // is invisible to the collector.
         State::CompiledEnter { argv, .. } => {
             heap.set_root(sbase, *argv);
-            heap.set_root(sbase + 1, Value::Empty);
-        }
-        // The closure is a heap box, and until the chain's prologue copies its
-        // captures into a frame nothing else points at it.
-        State::CompiledApply { closure } => {
-            heap.set_root(sbase, *closure);
             heap.set_root(sbase + 1, Value::Empty);
         }
         // Nothing in the state slots: the exit is parked on the compiled
@@ -803,6 +835,49 @@ impl Interp {
         out
     }
 
+    /// Runs an `eval`-carrying AOT program's own initialisers and entry
+    /// point, each as the main task of one drive of *this* `Interp`'s
+    /// scheduler — the shape `eval_cps` gives one evaluation, so a program
+    /// that calls `eval` and the tasks its own `(go ...)`s admit share one
+    /// scheduler, one queue, one clock, rather than the AOT scheduler and
+    /// the `Interp`'s running as two that never see each other.
+    ///
+    /// Unlike `eval_cps` this is only ever the outermost call — the
+    /// generated `main` of an `eval`-carrying executable calls
+    /// [`crate::shim::rt_run_program_interp`] once, from Rust, with nothing
+    /// else on this thread's stack — so `driving()` starts `false` and this
+    /// sets it for the whole run rather than checking it first.
+    ///
+    /// `inits` and `entry` are raw `coroutine_fn_type` addresses out of the
+    /// executable's own generated code (`compile::aot::build_main_wrapper`),
+    /// each entered with no arguments; `entry_ret` is `entry`'s declared
+    /// return representation (`Repr::Int` for an `int`-returning `main`,
+    /// `Repr::Unit` otherwise — `compile-file` already knows which). Each
+    /// initialiser's own answer is `rt_global_new`'s raw storage id, which
+    /// the body has already stored and nothing here reads back — decoded as
+    /// `Repr::Unit`, which reads no bits at all.
+    pub fn run_compiled_program(
+        &self,
+        heap: &mut Heap,
+        inits: &[usize],
+        entry: usize,
+        entry_ret: Repr,
+    ) -> Result<Value, EvalError> {
+        self.scheduler.borrow_mut().set_driving(true);
+        let mut run = |address: usize, ret: Repr| {
+            let id = self.scheduler.borrow_mut().admit(heap, |heap| Task::start_compiled_entry(heap, address, ret));
+            sched::drive(&self.scheduler, heap, self, id)
+        };
+        let result = (|| {
+            for &address in inits {
+                run(address, Repr::Unit)?;
+            }
+            run(entry, entry_ret)
+        })();
+        self.scheduler.borrow_mut().set_driving(false);
+        result
+    }
+
     /// Runs one evaluation to its end on the caller's root stack, with no
     /// scheduling. What a nested `eval_cps` does.
     fn run_to_completion(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
@@ -827,20 +902,23 @@ impl Interp {
                 // here would mean a channel could not be read from a print
                 // method even when reading it stops for nothing.
                 Progress::Blocked(w) => {
-                    let answered = self.scheduler.borrow_mut().try_now(heap, &w);
+                    // A `(yield)` has nobody to yield to here, and simply
+                    // goes on — the same answer a compiled safepoint gets on
+                    // a machine frame. Refusing it would make "give up the
+                    // rest of the turn" an error exactly where there is no
+                    // turn to give up.
+                    let answered = if matches!(w, Waiting::Yield) {
+                        Some(Ok(Value::Empty))
+                    } else {
+                        self.scheduler.borrow_mut().try_now(heap, &w)
+                    };
                     match answered {
                         Some(answer) => {
                             let next = answer_state(answer);
                             set_state(heap, task.sbase, &next);
                             task.state = next;
                         }
-                        None => {
-                            break Err(EvalError::Panic(format!(
-                                "{} cannot block: it was reached from a Rust caller, which has no \
-                                 continuation stack to suspend",
-                                sched::waiting_name(&w)
-                            )))
-                        }
+                        None => break Err(EvalError::Panic(sched::cannot_block_message(&w))),
                     }
                 }
             }
@@ -906,47 +984,51 @@ impl Interp {
                 }) {
                     Ok((args, roots_on_entry, crossing_roots, start)) => {
                         let drive = DriveCtx { start, roots_on_entry, crossing_roots, base: task.compiled.depth() };
-                        // SAFETY: the address is a symbol the backend resolved
-                        // out of a module that defines it, declared under
-                        // `coroutine_fn_type` — the same provenance every
-                        // indirect compiled call relies on, and `body_abi` is
-                        // what said it was this one.
-                        let Some(address) = drive.start.body.as_ref().map(|b| b.address()) else {
-                            heap.truncate_roots(roots_on_entry);
-                            return Progress::Done(Err(EvalError::Internal(
-                                "eval: a compiled entry names no body".to_string(),
-                            )));
-                        };
-                        let f: typelisp_rt::coroutine::CoroutineFn = unsafe {
-                            std::mem::transmute::<usize, typelisp_rt::coroutine::CoroutineFn>(address)
-                        };
-                        let outcome = {
-                            let stack = &mut task.compiled;
-                            crate::eval::crossing::catch_compiled_panic(|| stack.run(heap, f, &args))
+                        let outcome = match &drive.start.callee {
+                            // SAFETY: the address is a symbol the backend
+                            // resolved out of a module that defines it,
+                            // declared under `coroutine_fn_type` — the same
+                            // provenance every indirect compiled call relies
+                            // on, and `body_abi` is what said it was this one.
+                            DriveCallee::Body(body) => {
+                                let f: typelisp_rt::coroutine::CoroutineFn = unsafe {
+                                    std::mem::transmute::<usize, typelisp_rt::coroutine::CoroutineFn>(body.address())
+                                };
+                                let stack = &mut task.compiled;
+                                crate::eval::crossing::catch_compiled_panic(|| stack.run(heap, f, &args))
+                            }
+                            // SAFETY: `Address`'s only producer
+                            // (`Interp::run_compiled_program`) reads it out of
+                            // an AOT executable's own embedded initialiser
+                            // array and entry point, declared under
+                            // `coroutine_fn_type` by `compile-file`'s
+                            // generator — the same provenance `rt_run_program`
+                            // trusts on the AOT-only side of this boundary.
+                            DriveCallee::Address(addr) => {
+                                let f: typelisp_rt::coroutine::CoroutineFn =
+                                    unsafe { std::mem::transmute::<usize, typelisp_rt::coroutine::CoroutineFn>(*addr) };
+                                let stack = &mut task.compiled;
+                                crate::eval::crossing::catch_compiled_panic(|| stack.run(heap, f, &args))
+                            }
+                            // The closure rides at the head of `args`, tagged
+                            // like any other argument (`Repr::Fn` is first in
+                            // `start.params`); everything after it is the
+                            // call's own arguments.
+                            DriveCallee::Closure => {
+                                let Some((&closure, rest)) = args.split_first() else {
+                                    heap.truncate_roots(roots_on_entry);
+                                    return Progress::Done(Err(EvalError::Internal(
+                                        "eval: a compiled closure entry carries no closure".to_string(),
+                                    )));
+                                };
+                                let stack = &mut task.compiled;
+                                crate::eval::crossing::catch_compiled_panic(|| stack.run_closure(heap, closure, rest))
+                            }
                         };
                         self.after_drive(heap, task, outcome, drive)
                     }
                     Err(e) => State::Unwind(e),
                 }
-            }
-            State::CompiledApply { closure } => {
-                // No arguments to marshal, and the answer decodes as a tagged
-                // `Sexpr` (`Repr::Sexpr`): the closure tags it before
-                // returning. The crossing's own roots are therefore none.
-                let roots_on_entry = heap.root_count();
-                let drive = DriveCtx {
-                    start: DriveStart { body: None, params: Vec::new(), ret: Repr::Sexpr, watch: None },
-                    roots_on_entry,
-                    crossing_roots: 0,
-                    base: task.compiled.depth(),
-                };
-                self.enter_compiled(heap);
-                let word = typelisp_rt::encode(closure);
-                let outcome = {
-                    let stack = &mut task.compiled;
-                    crate::eval::crossing::catch_compiled_panic(|| stack.run_closure(heap, word))
-                };
-                self.after_drive(heap, task, outcome, drive)
             }
             State::CompiledResume { drive, wake } => {
                 let delivered = match wake {
@@ -1782,7 +1864,7 @@ impl Interp {
                     _ => None,
                 };
                 let start = DriveStart {
-                    body: Some(compiled),
+                    callee: DriveCallee::Body(compiled),
                     params: sig.0.clone(),
                     ret: sig.1.clone(),
                     watch,
@@ -1904,8 +1986,10 @@ impl Interp {
     ///
     /// Four kinds of callee: an interpreted closure (entered as a tail jump,
     /// so a self-call in tail position costs no stack), one that came *out* of
-    /// compiled code (crossed on the Rust stack — the boundary is one frame
-    /// and nothing suspends inside it), a built-in used as a function value,
+    /// compiled code — driven by this task under the coroutine ABI (so a
+    /// suspension inside it parks the task exactly as one inside a named
+    /// call does) and called on the Rust stack under the classic one (no
+    /// suspension, no state to keep) — a built-in used as a function value,
     /// or something the checker should have rejected.
     fn finish_apply(
         &self,
@@ -1930,6 +2014,29 @@ impl Interp {
                 let arg_reprs = repr_list(heap, arg_reprs_field, "apply")?;
                 let ret = Repr::read(heap, ret_repr_field)
                     .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no return representation".to_string()))?;
+                if heap.compiled_closure_body_abi(id) == typelisp_abi::BODY_ABI_COROUTINE {
+                    // Driven by this task rather than called: the frames it
+                    // builds live in `Task::compiled`, so it can stop in the
+                    // middle and the task can be put down with it — the same
+                    // reason a *named* coroutine-ABI body is driven rather
+                    // than called (`enter_fn`). The closure rides at the
+                    // head of `CompiledEnter`'s own argument list, tagged as
+                    // `Repr::Fn`, ahead of the call's own arguments — see
+                    // `DriveCallee::Closure`.
+                    let mut params = Vec::with_capacity(arg_reprs.len() + 1);
+                    params.push(Repr::Fn);
+                    params.extend(arg_reprs);
+                    let mut all_args = Vec::with_capacity(argv.len() + 1);
+                    all_args.push(f);
+                    all_args.extend(argv);
+                    let start = DriveStart { callee: DriveCallee::Closure, params, ret, watch: None };
+                    // A heap list, not the `Vec`: it has to stay reachable
+                    // across the truncate that releases this call's own
+                    // frame, and only the state slots can root it
+                    // (`set_state`).
+                    let argv_list = core::list(heap, &all_args).map_err(heap_err)?;
+                    return Ok((State::CompiledEnter { argv: argv_list, start }, None));
+                }
                 let (int_args, crossing_roots) = self.encode_crossing_args(heap, &argv, &arg_reprs, false)?;
                 self.enter_compiled(heap);
                 // An unwinding `(panic ...)` inside the closure runs none of

@@ -29,6 +29,16 @@
 //! threads later: whether one scheduler is shared under a lock or each thread
 //! has its own, the ownership is the same.
 //!
+//! What *is* published thread-locally is a **borrow**, for the extent of one
+//! [`drive`] and not a moment longer ([`answer_now`]): a driver standing on a
+//! machine frame — the printer's door into a compiled `print-object`, a
+//! `defvar` initialiser, a compiled body the interpreter called from Rust —
+//! has no continuation stack to park a task on, but it can still ask the
+//! scheduler whether the operation needs to wait at all. Most do not: a
+//! `(recv ch)` with something buffered, a `(go ...)`, a `Chan::new`. The
+//! borrow is registered and cleared by a guard on `drive`'s frame, exactly as
+//! `ACTIVE_HEAP` is registered per scope, so nothing outlives its owner.
+//!
 //! Cooperative and single-threaded today: nothing preempts a task, and one OS
 //! thread runs all of them. `ACTIVE_HEAP` has to be a single thread-local and
 //! `Heap` is `!Send`, so tasks cannot be spread across threads without making
@@ -336,6 +346,96 @@ pub fn waiting_name(w: &Waiting) -> &'static str {
         Waiting::Spawn(_) => "`go`",
         Waiting::Io { .. } => "a socket operation",
     }
+}
+
+/// The refusal a machine-frame driver makes when `w` would have to wait:
+/// there is a Rust frame waiting on the answer, so there is nothing to
+/// switch *to*. One wording for the interpreter's `run_to_completion` and the
+/// compiled `FrameStack::run_to_end`, because the two front ends are refusing
+/// the same thing for the same reason.
+pub fn cannot_block_message(w: &Waiting) -> String {
+    format!(
+        "{} cannot block: it was reached from a Rust caller, which has no continuation stack to suspend",
+        waiting_name(w)
+    )
+}
+
+/// The word a woken compiled frame reads out of its value slot, encoded
+/// through the shape the suspension recorded — for the reason every crossing
+/// obeys: the word's meaning is in the type, and the value cannot say. A unit
+/// wake is a word the collector never follows; a typed one crosses tagged.
+pub fn wake_word(wake: Wake, v: Value) -> i64 {
+    match wake {
+        Wake::Unit => 0,
+        Wake::Tagged => typelisp_abi::encode(v),
+    }
+}
+
+// ---- the scheduler a machine-frame driver can reach -------------------------------
+
+/// What a driver with no continuation stack may still ask of the scheduler
+/// that is running the task it was reached from: [`Scheduler::try_now`].
+///
+/// Object-safe on purpose — the two task bodies make two `Scheduler` types,
+/// and the driver asking does not know which one is driving.
+pub trait AnswerNow {
+    fn answer_now(&self, heap: &mut Heap, w: &Waiting) -> Option<Result<Value, SchedError>>;
+}
+
+impl<B: TaskBody> AnswerNow for RefCell<Scheduler<B>> {
+    /// A short borrow, like every borrow of a scheduler: [`drive`] holds none
+    /// while a task is stepped, which is what lets a nested driver ask.
+    fn answer_now(&self, heap: &mut Heap, w: &Waiting) -> Option<Result<Value, SchedError>> {
+        self.borrow_mut().try_now(heap, w)
+    }
+}
+
+thread_local! {
+    /// The scheduler whose [`drive`] is on this thread's stack, if any — a
+    /// borrow published for that drive's extent and cleared by its guard. See
+    /// the module comment's "Owned, not global".
+    static DRIVING: std::cell::Cell<Option<std::ptr::NonNull<dyn AnswerNow>>> = const { std::cell::Cell::new(None) };
+}
+
+/// Publishes `sched` as the driving scheduler for as long as the guard lives,
+/// and restores whatever was published before it — a nested drive (the REPL
+/// evaluating inside a `print-object`, an `eval`-carrying executable before
+/// its interpreter joined the one scheduler) must not leave the outer one
+/// unreachable when it returns.
+struct DrivingGuard {
+    previous: Option<std::ptr::NonNull<dyn AnswerNow>>,
+}
+
+impl DrivingGuard {
+    fn publish(sched: &dyn AnswerNow) -> DrivingGuard {
+        // The lifetime is erased here and re-established by the guard: the
+        // pointer is cleared on drop, and `drive` holds its `&RefCell` for
+        // the whole of the guard's life. Nothing reads it after that.
+        let ptr = std::ptr::NonNull::from(sched);
+        let ptr: std::ptr::NonNull<dyn AnswerNow + 'static> = unsafe { std::mem::transmute(ptr) };
+        let previous = DRIVING.with(|cell| cell.replace(Some(ptr)));
+        DrivingGuard { previous }
+    }
+}
+
+impl Drop for DrivingGuard {
+    fn drop(&mut self) {
+        DRIVING.with(|cell| cell.set(self.previous));
+    }
+}
+
+/// Asks the driving scheduler whether `w` can be answered without parking
+/// anybody — [`Scheduler::try_now`] reached from a machine frame.
+///
+/// `None` when the operation would have to wait, and also when no drive is
+/// on this thread at all (a compiled body run outside any scheduler): either
+/// way the caller has nothing to wait *with*, and refuses.
+pub fn answer_now(heap: &mut Heap, w: &Waiting) -> Option<Result<Value, SchedError>> {
+    let ptr = DRIVING.with(|cell| cell.get())?;
+    // SAFETY: the pointer was published by a `DrivingGuard` still alive on
+    // this thread's stack (its drop clears the slot), and the guard borrows
+    // the scheduler for its whole life.
+    unsafe { ptr.as_ref() }.answer_now(heap, w)
 }
 
 // ---- the table ---------------------------------------------------------------
@@ -1017,6 +1117,7 @@ pub fn drive<B: TaskBody>(
     cx: &B::Cx,
     main: TaskId,
 ) -> Result<Value, B::Error> {
+    let _driving = DrivingGuard::publish(sched);
     let home = heap.current_root_stack();
     loop {
         let (id, mut slot) = loop {
@@ -1338,6 +1439,11 @@ pub struct CompiledTask {
     /// How the chain reads what it was waiting for out of its value slot,
     /// recorded when it suspended.
     wake: Wake,
+    /// Whether the body's final word is *not* a tagged value — a global
+    /// initialiser answers with `rt_global_new`'s raw storage id, which the
+    /// body has already stored and nothing reads back. Decoding it would be
+    /// reading bits that were never a `Value`.
+    discard_answer: bool,
 }
 
 enum CompiledState {
@@ -1362,7 +1468,19 @@ impl CompiledTask {
         let sbase = heap.root_count();
         heap.push_root(Value::Empty);
         heap.push_root(Value::Empty);
-        CompiledTask { chain: crate::coroutine::FrameStack::new(), state: CompiledState::Entry(f), sbase, wake: Wake::Unit }
+        CompiledTask {
+            chain: crate::coroutine::FrameStack::new(),
+            state: CompiledState::Entry(f),
+            sbase,
+            wake: Wake::Unit,
+            discard_answer: false,
+        }
+    }
+
+    /// [`Self::entry`] for a body whose answer is nobody's — a `defvar`
+    /// initialiser (see `discard_answer`). The task finishes with unit.
+    pub fn initialiser(heap: &mut Heap, f: crate::coroutine::CoroutineFn) -> CompiledTask {
+        CompiledTask { discard_answer: true, ..Self::entry(heap, f) }
     }
 
     /// Writes what the next state carries into the state slots.
@@ -1379,6 +1497,7 @@ impl CompiledTask {
     /// What a drive that stopped means for the task.
     fn after_drive(&mut self, heap: &mut Heap, outcome: Result<i64, crate::coroutine::Paused>) -> Progress<TaskFailure> {
         match outcome {
+            Ok(_) if self.discard_answer => Progress::Done(Ok(Value::Empty)),
             Ok(word) => Progress::Done(Ok(typelisp_abi::decode(word))),
             // The chain stays exactly as it is, rooted by the prologues that
             // built it; only the answer's shape has to be remembered.
@@ -1448,7 +1567,13 @@ impl TaskBody for CompiledTask {
         let sbase = heap.root_count();
         heap.push_root(closure);
         heap.push_root(Value::Empty);
-        CompiledTask { chain: crate::coroutine::FrameStack::new(), state: CompiledState::Start(closure), sbase, wake: Wake::Unit }
+        CompiledTask {
+            chain: crate::coroutine::FrameStack::new(),
+            state: CompiledState::Start(closure),
+            sbase,
+            wake: Wake::Unit,
+            discard_answer: false,
+        }
     }
 
     fn sbase(&self) -> usize {
@@ -1461,7 +1586,7 @@ impl TaskBody for CompiledTask {
         let state = std::mem::replace(&mut self.state, CompiledState::Resume(0));
         let outcome = match state {
             CompiledState::Entry(f) => self.chain.run(heap, f, &[]),
-            CompiledState::Start(closure) => self.chain.run_closure(heap, typelisp_abi::encode(closure)),
+            CompiledState::Start(closure) => self.chain.run_closure(heap, typelisp_abi::encode(closure), &[]),
             CompiledState::Resume(word) => {
                 self.chain.set_top_value(heap, word);
                 self.chain.resume(heap, 0)
@@ -1484,10 +1609,7 @@ impl TaskBody for CompiledTask {
             // and the value cannot say. A unit wake is a word the collector
             // never follows; a typed one crosses tagged.
             Ok(v) => {
-                let word = match self.wake {
-                    Wake::Unit => 0,
-                    Wake::Tagged => typelisp_abi::encode(v),
-                };
+                let word = wake_word(self.wake, v);
                 // The word is a Rust local until the chain's value slot takes
                 // it on the next step, and other tasks allocate in between.
                 heap.set_root(self.sbase, v);

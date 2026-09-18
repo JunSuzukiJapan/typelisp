@@ -198,15 +198,14 @@ pub trait CompiledBody {
 
 /// Runs a coroutine-ABI body to completion on a driver of its own.
 ///
-/// This is the boundary an *interpreted* caller sits at, and it is exactly
-/// where suspension cannot cross: the interpreter is waiting on a Rust stack
-/// frame for an answer, so a task that suspends underneath has nobody to hand
-/// control back to. Saying so is the point — the alternative is a task that
-/// silently never runs again.
-///
-/// It goes away when the interpreter's own driver holds both kinds of frame
-/// (the plan's C2 end state); until then a compiled body reached from here is
-/// as atomic as it always was.
+/// This is the boundary an *interpreted* caller sits at: the interpreter is
+/// waiting on a Rust stack frame for an answer, so a task that would have to
+/// wait underneath has nobody to hand control back to. What the body
+/// suspends for is resolved by `run_to_end` itself — answered on the spot
+/// through the driving scheduler when it stops for nothing, refused into
+/// the chain as a panic when it would wait — so nothing about suspension
+/// comes out of here. The interpreter's own nested evaluation
+/// (`Interp::run_to_completion`) draws the same line for the same reason.
 fn call_coroutine(address: usize, args: &[i64]) -> i64 {
     // SAFETY: same provenance as the classic branch — a symbol resolved out of
     // a module that defines it, declared under `coroutine_fn_type`.
@@ -227,9 +226,10 @@ fn call_coroutine(address: usize, args: &[i64]) -> i64 {
         Err(typelisp_rt::coroutine::Paused::Applying { .. }) => typelisp_abi::raise(
             "a compiled function applied an interpreted value that the drive did not resolve".to_string(),
         ),
-        Err(typelisp_rt::coroutine::Paused::Suspended) => {
-            typelisp_abi::raise("a compiled function suspended underneath an interpreted caller, which has no way to resume it".to_string())
-        }
+        // Resolved by `run_to_end` too — answered or refused into the chain.
+        Err(typelisp_rt::coroutine::Paused::Suspended) => typelisp_abi::fatal(
+            "a compiled function suspended and the drive did not resolve it — a driver on a machine frame must use `run_to_end`",
+        ),
         // The unwind was travelling towards a `catch` that is not in this
         // chain; re-raising puts it back on the path it was on.
         Err(typelisp_rt::coroutine::Paused::Unwinding) => typelisp_rt::coroutine::resume_unwinding(),
@@ -1298,11 +1298,11 @@ impl Interp {
         })
     }
 
-    /// Invokes a `BoxedObj::CompiledClosure` directly from interp Rust code
-    /// — the `apply` counterpart of a top-level `(compile ...)`d
-    /// function call, for a callee produced by compiled code (returned
-    /// across the boundary, or built and threaded through a chain of
-    /// `apply`s the interpreter is itself driving). `args` are
+    /// Invokes a **classic-ABI** `BoxedObj::CompiledClosure` directly from
+    /// interp Rust code — the `apply` counterpart of a top-level
+    /// `(compile ...)`d function call, for a callee produced by compiled
+    /// code (returned across the boundary, or built and threaded through a
+    /// chain of `apply`s the interpreter is itself driving). `args` are
     /// already-encoded raw i64s ([`Self::encode_crossing_args`]'s output);
     /// the caller must already have called `compile::runtime::set_active_heap`
     /// (the closure's own body may call back into the `rt_*` runtime,
@@ -1312,7 +1312,17 @@ impl Interp {
     /// every closure-boxed compiled function shares — the exact inverse of
     /// `rt_closure_env_get`'s per-slot re-encode, done here in one pass
     /// since the whole env crosses at once rather than one slot per call.
+    ///
+    /// A **coroutine**-ABI closure never reaches here: `finish_apply` routes
+    /// it through `State::CompiledEnter`/`DriveCallee::Closure` instead, so
+    /// it is driven by the task and can suspend — the same reason a *named*
+    /// coroutine-ABI body is driven rather than called. This function's own
+    /// caller only ever names a classic one.
     fn call_closure_box(heap: &Heap, id: BoxId, args: &[i64]) -> i64 {
+        debug_assert!(
+            heap.compiled_closure_body_abi(id) != typelisp_abi::BODY_ABI_COROUTINE,
+            "call_closure_box: a coroutine-ABI closure must be driven through CompiledEnter, not called"
+        );
         let env_len = heap.compiled_closure_env_len(id);
         let mask = heap.compiled_closure_mask(id);
         let env: Vec<i64> = (0..env_len)
@@ -1329,32 +1339,6 @@ impl Interp {
             })
             .collect();
         let fn_ptr = heap.compiled_closure_fnptr(id);
-        if heap.compiled_closure_body_abi(id) == typelisp_abi::BODY_ABI_COROUTINE {
-            // A Rust frame is waiting for an answer here, so the closure is
-            // driven to completion on a stack of its own rather than joining
-            // a chain that could be put down — with an interpreted `apply`
-            // underneath resolved on this frame (`run_to_end`). See
-            // `Interp::call_coroutine`.
-            // SAFETY: as below, but under `coroutine_fn_type` — which is what
-            // `rt_coroutine_closure_new` having been the producer records.
-            let f: typelisp_rt::coroutine::CoroutineFn = unsafe { std::mem::transmute(fn_ptr) };
-            let mut stack = typelisp_rt::coroutine::FrameStack::new();
-            let heap_mut = unsafe { typelisp_abi::active_heap() };
-            let applied = |closure: i64, argv: &[i64]| unsafe {
-                typelisp_rt::apply_on_this_frame(closure, argv, "a compiled closure reached from the interpreter")
-            };
-            return match stack.run_to_end(heap_mut, f, args, &env, applied) {
-                Ok(v) => v,
-                Err(typelisp_rt::coroutine::Paused::Applying { .. }) => typelisp_abi::raise(
-                    "a compiled closure applied an interpreted value that the drive did not resolve".to_string(),
-                ),
-                Err(typelisp_rt::coroutine::Paused::Suspended) => typelisp_abi::raise(
-                    "a compiled closure suspended underneath an interpreted caller, which has no way to resume it"
-                        .to_string(),
-                ),
-                Err(typelisp_rt::coroutine::Paused::Unwinding) => typelisp_rt::coroutine::resume_unwinding(),
-            };
-        }
         // SAFETY: every `BoxedObj::CompiledClosure` in the heap was built by
         // `rt_closure_new` from a real LLVM function pointer compiled under
         // `compiled_fn_type_with_env`'s exact signature (`build-make-closure`

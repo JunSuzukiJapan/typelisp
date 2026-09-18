@@ -11706,3 +11706,100 @@ global/thread_local に置かない。OS を待つ場所は `wake_io` 1 つの�
 の中では即答できる `go`/チャネル操作も fatal（door にスケジューラを渡す手段が無い）。
 インタプリタが compiled クロージャを `funcall` すると中断できない（`call_closure_box`、
 `State::CompiledApply` で閉じられるが今回は `go` 経路だけ）。
+
+## AOT スケジューラが残した制限 4 つを塞ぐ（2026-09-18）
+
+前節が「触らない」と決めて残した 4 つの制限——(1) eval 入り AOT でスケジューラが 2 つ並ぶ、
+(2) printer door の中では即答できる `go`/チャネル操作も fatal、(3) インタプリタが
+compiled クロージャを `funcall` すると中断できない、(4) `compile-file` が `use` を受理
+しない——を塞いだ。プランは `~/.claude/plans/buzzing-sleeping-pelican.md`、ブランチ
+`feature/aot-scheduler-limits`。調べる過程で(2)と同じ機構の穴が 2 つ実測で見つかり
+（AOT の `defvar` 初期化子でチャネルを作ると abort、JIT でも **compiled な**
+`print-object` の中の即答操作が落ちる）、まとめて閉じた。
+
+**Phase 1: 機械フレームの上のドライバが「今答えられる中断」に答える。** 原因は 1 つ：
+`FrameStack::run_to_end`（`rt_drive_body`・C FFI thunk・インタプリタが compiled 本体を
+呼ぶ経路が立つ場所）が `Paused::Suspended` を safepoint 以外は必ず拒否していた——
+インタプリタの `run_to_completion` は `try_now` で即答できる操作に答えていたのに、
+compiled 側だけこの非対称があった。`sched::drive` が自分の extent の間だけ
+`&RefCell<Scheduler<B>>` を thread-local（`sched::DRIVING`、`NonNull<dyn AnswerNow>`）に
+publish するガード（`DrivingGuard`）を新設——**所有は今までどおり Heap の持ち主のまま、
+publish されるのは借用だけ**（`ACTIVE_HEAP` と同じ規律、[[typelisp-dangling-active-heap]]
+の教訓）。`run_to_end` は `Paused::Suspended` を `sched::pending_wait` で `Waiting` にし、
+`Waiting::Yield` は無条件続行、それ以外は `sched::answer_now`（=`try_now`）に尋ね、
+答えられれば `wake_word` でエンコードして `resume`、答えられなければ
+`sched::cannot_block_message`（インタプリタの拒否と文言を共有）を `CompiledPanic` として
+**鎖の中へ `raise`**（`unwind-protect` の cleanup が走り、鎖の `catch` が claim できる——
+`CompiledTask::deliver` の `Err` 腕と同じ経路）。これで `Paused::Suspended` は
+`run_to_end` から二度と出てこなくなり、`pause_on_a_machine_frame`/`call_coroutine` の
+`Suspended` 腕は `Applying` と同じ「規約違反」の `fatal` に格下げした。
+
+AOT の `defvar` 初期化子は `main` と同じスケジューラの下で走る形に：
+`rt_drive_entry`/`rt_run_entry_driven[_int]` を削除し `rt_run_program[_int]`
+（`args = [inits, n, entry]`）1 本に統一。初期化子 1 つにつき `admit`→`drive`
+（REPL がフォームごとに drive するのと同じ形）、最後に `main`。初期化子の答えは
+`rt_global_new` の生の記憶域 id で誰も読まないので、`CompiledTask::discard_answer`
+フラグで decode 自体をスキップ（`typelisp_abi::decode` に渡すと `reserved small tag`
+で落ちた——生ワードは `Value` になれない語もある）。`build_main_wrapper` は初期化子の
+アドレス配列を定数グローバルとして埋め込み、`tl_main`/初期化子が全部 coroutine ABI
+であることを生成時に検査（混在は `Err`、フォールバックしない）。
+
+**Phase 2: compiled クロージャの `apply` をタスクが駆動する。** `go` の thunk 専用
+だった `State::CompiledApply` を、名前付き呼び出しと同じ `State::CompiledEnter` の
+一形（`DriveCallee::Closure`）に統合——クロージャは `argv` リストの**先頭**に乗せて運ぶ
+（`DriveCtx` に `Value` を持たせない規律を守ったまま、`ArgsKind::Apply` が既にそうして
+いる形）。`finish_apply` の compiled-closure 分岐は `body_abi` が coroutine なら
+`CompiledEnter` へ（task が駆動、中断できる）、classic なら今までどおり
+`call_closure_box`（`call_closure_box` からは coroutine 分岐を削除、`debug_assert` で
+規約を書いた）。`FrameStack::run_closure` に `args: &[i64]` を追加。
+
+**Phase 3: eval 入り AOT を 1 スケジューラに。** front に
+`Interp::run_compiled_program`（`eval_cps` と同じ形——初期化子と `main` を
+`Task::start_compiled_entry`（新設、`DriveCallee::Address(usize)`）で
+`admit`→`sched::drive`、`driving` を最初から立てておく）、
+`typelisp_front::shim::rt_run_program_interp[_int]` を追加。`build_main_wrapper` は
+`eval_env.is_some()` で `rt_run_program[_int]` と `rt_run_program_interp[_int]` の
+どちらを呼ぶか**生成時に**決める——実行時の hook で分岐しない
+（[[typelisp-c6-abi-never-implicit]]の規律）。これで `main` と eval'd `(go ...)` が
+同じ `Interp::scheduler` に admit されるので、eval 内の `go` は次の `rt_eval` を
+待たず、`main` 自身の `sleep`/`wait` の間に動く。
+
+**Phase 4: `compile-file` が `use`/モジュールを受理する。** 2 つのバグを直した:
+1つは `collect_aot_item` の `defun` ノード名が `path.last_segment()` で
+モジュール接頭辞を落としていた（`(module m (defun f))` が `resolve_fn_def("f")` を
+ルート名前空間で探して "no such function: f"）——既存の `compile::symbols::CompiledItem`
+（`Fn(Path)`/`Method(Path, String)`、bootstrap/prelude_bootstrap/driver/dump が既に
+使っている型）に統一してフルパスにした。もう1つは `use` そのものを未対応の
+トップレベルとして拒否していたこと。`compile-file` は `typl file.typl` と同じ
+`project::Loader` で `use` を解決するが、**エントリファイル自身は typl と違いルート
+名前空間に留める**（`typl` の `Loader::load_entry` はエントリも `<stem>` モジュールに
+包むが、それをやると `ENTRY_POINT_INTERNAL_NAME`/`is_entry_call` を含む既存 AOT の
+全既存動作が変わるので、範囲を絞った——エントリの読み込みは元の 1 フォームずつの
+ループのまま、各フォームを `chk.check_form_at` する前に
+`loader.load_uses_in(heap, &reader, &mut chk, &mut interp, &[v])` を挟んで `use` だけ
+先に解決する。依存ファイルは `loader.take_pending()` から `collect_aot_item` の既存の
+`module` 再帰に流れ込む。`cur_segs` を渡さないので兄弟ファイル相対解決は効かない
+（`Loader::load_uses_in` 自身の制限、`examples/projects/http` の `src/` 直下フラット
+構成では届かなくても支障は無い）。`eval` 環境の構築（`dump::capture_program_dump`）も
+**同じソースをもう一度読む独立した経路**なので、そこにも `Loader` を足さないと
+`use`+`eval` の組み合わせだけ dump 構築が失敗する——`src_root` を引数に追加し、同じ
+`load_uses_in` パターンを埋めた。依存の束（`(module PATH body...)`）は
+`Interp::exec` がそのまま扱えるので、`forms: Vec<Value>` に平らにする必要は無い。
+
+**踏んだ落とし穴**: `run_to_end`/`answer_now` の設計は最初 rt はテスト全体では
+検証していない状態で概念だけ組んだが、`typelisp_abi::decode` に初期化子の生ワードを
+渡すと `reserved small tag` で落ちる実測を先にした——`Repr::Unit`/`discard_answer`の
+どちらでも「decode しない」が正しい答え。`(module m (defun f))` に `pub` を付け忘れて
+自分のテストが visibility エラーで落ちた（module 境界を跨ぐ呼び出しは `pub` が要る、
+[[typelisp-visibility-pub]]）。
+
+**検証**: `scripts/test-serial.sh` で `compile_file_test`（73 件、新規 8 件含む）・
+`channel_test`（28 件、新規 6 件）・`concurrency_test`（新規 1 件含む）・
+`select_test`・`closure_jit_test`・`compiled_unwind_test`・`compile_test`・
+`net_test`・`trace_test` 全緑。`examples/projects/http` を実際に AOT 化して `curl` で
+`/` `/time` を確認（module + `use` + prelude + print-object の組み合わせ）。
+`cargo check --workspace --all-targets` 警告 0。
+
+関連 [[typelisp-aot-scheduler]] [[typelisp-c5-boundaries-to-the-driver]]
+[[typelisp-c3-compiled-suspension]] [[typelisp-dangling-active-heap]]
+[[typelisp-c6-abi-never-implicit]] [[typelisp-visibility-pub]]

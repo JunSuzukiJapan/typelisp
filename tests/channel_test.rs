@@ -82,6 +82,14 @@ fn err(src: &str) -> String {
     }
 }
 
+/// [`err`] for a source that compiles something first.
+fn err_compiled(src: &str) -> String {
+    match run_with(src, true, false) {
+        Ok(_) => panic!("expected the program to fail"),
+        Err(e) => e.to_string(),
+    }
+}
+
 /// The checker's complaint about `src`.
 fn check_err(src: &str) -> String {
     let mut h = Heap::with_capacity(1 << 18);
@@ -575,4 +583,86 @@ fn a_receive_that_would_wait_under_a_rust_caller_is_refused() {
            (main)"#,
     );
     assert!(e.contains("`recv` cannot block"), "got: {}", e);
+}
+
+/// [`a_receive_that_needs_no_waiting_works_under_a_rust_caller`] for a
+/// *compiled* `print-object` — the same boundary
+/// (`FrameStack::run_to_end`), reached with a machine frame under it
+/// instead of the interpreter's own nested evaluation. One implementation
+/// answers both, so a buffered `recv` still goes through.
+#[test]
+fn a_compiled_receive_that_needs_no_waiting_works_under_a_rust_caller() {
+    assert_eq!(
+        text_compiled(
+            r#"(defstruct probe (ch Chan<int>))
+               (impl print-object probe
+                 (print-object ((self Self) (escape bool)) string
+                   (format false "<~a>" (recv self::ch))))
+               (defun main () string
+                 (let ((ch (the Chan<int> (Chan::new 1))))
+                   (send ch 3)
+                   (format false "~a" (probe::new ch))))
+               (compile probe::print-object)
+               (compile main)
+               (main)"#
+        ),
+        "<(some 3)>"
+    );
+}
+
+/// [`a_receive_that_would_wait_under_a_rust_caller_is_refused`] for a
+/// *compiled* `print-object`: the operation would genuinely have to wait, so
+/// it is refused with the same wording, not an abort.
+#[test]
+fn a_compiled_receive_that_would_wait_under_a_rust_caller_is_refused() {
+    let e = err_compiled(
+        r#"(defstruct probe (ch Chan<int>))
+           (impl print-object probe
+             (print-object ((self Self) (escape bool)) string
+               (format false "<~a>" (recv self::ch))))
+           (defun main () string
+             (let ((ch (the Chan<int> (Chan::new 1))))
+               (format false "~a" (probe::new ch))))
+           (compile probe::print-object)
+           (compile main)
+           (main)"#,
+    );
+    assert!(e.contains("`recv` cannot block"), "got: {}", e);
+}
+
+/// `(yield)` reached from a Rust caller has nobody to yield to — there is no
+/// other task this evaluation could switch to — so it simply goes on rather
+/// than being refused the way a genuine wait is. True under the interpreter
+/// and under a compiled body reached the same way.
+#[test]
+fn a_yield_under_a_rust_caller_is_a_no_op() {
+    assert_eq!(
+        text(
+            r#"(defstruct probe (tag int))
+               (impl print-object probe
+                 (print-object ((self Self) (escape bool)) string
+                   (progn (yield) "<ok>")))
+               (defun main () string (format false "~a" (probe::new 0)))
+               (main)"#
+        ),
+        "<ok>"
+    );
+}
+
+/// [`a_yield_under_a_rust_caller_is_a_no_op`] for a *compiled* `print-object`.
+#[test]
+fn a_compiled_yield_under_a_rust_caller_is_a_no_op() {
+    assert_eq!(
+        text_compiled(
+            r#"(defstruct probe (tag int))
+               (impl print-object probe
+                 (print-object ((self Self) (escape bool)) string
+                   (progn (yield) "<ok>")))
+               (defun main () string (format false "~a" (probe::new 0)))
+               (compile probe::print-object)
+               (compile main)
+               (main)"#
+        ),
+        "<ok>"
+    );
 }

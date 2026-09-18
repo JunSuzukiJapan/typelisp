@@ -1124,6 +1124,172 @@ fn an_aot_executable_keeps_definitions_made_by_an_evaluated_form() {
     );
 }
 
+/// `(go ...)` inside an eval'd form is admitted to the *same* scheduler
+/// `main` runs under — one `Interp`, not two schedulers that never see each
+/// other. `main` asks `eval` to spawn `mark` and then `sleep`s; if the
+/// program still ran two schedulers, the task `go` admitted would sit in the
+/// `Interp`'s own queue until some *later* `rt_eval` call serviced it (the
+/// AOT-scheduler work's stated limitation), so `trail` would still be empty
+/// when `main` wakes. It is not: `main`'s own `sleep` blocks its task on the
+/// one shared scheduler, which is exactly the opportunity `mark` needs to
+/// run.
+#[test]
+fn an_evaluated_go_runs_while_the_program_waits() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_go_runs_concurrently",
+            r#"
+            (defvar (trail string) "")
+            (defun mark () int (progn (setf trail (append trail "e")) 0))
+            (defun main () int
+              (progn
+                (match (eval (quote (go (mark))))
+                  ((ok _) ())
+                  ((err _) ()))
+                (sleep 0.05)
+                (if (equal trail "e") 0 1)))
+            "#
+        ),
+        0
+    );
+}
+
+// ---- modules and `use` -----------------------------------------------------
+//
+// `compile-file` used to reject `use` outright and mangle a `defun` inside a
+// `(module ...)` to its bare last segment (`m::f` compiled to a symbol
+// `resolve_fn_def` could only find by looking up `f` at the root — "no such
+// function: f"). It now reads through the same `Loader` `typl file.typl`
+// does for its dependencies (the entry file's own items stay at the root
+// namespace, unlike `typl`'s), so a module-qualified name compiles to its
+// full path and a `use`d file is pulled in and compiled alongside.
+
+/// A `defun` inside a `(module ...)` block, called through its full path —
+/// the module needs no separate file, just the checker's own handling of a
+/// literal `(module ...)` form.
+#[test]
+fn a_module_qualified_function_runs_in_a_standalone_executable() {
+    assert_eq!(
+        compile_and_run(
+            "module_qualified_fn_aot",
+            r#"
+            (module m (pub defun f ((x int)) int (* x 2)))
+            (defun main () int (m::f 21))
+            "#
+        ),
+        42
+    );
+}
+
+/// A `(use ...)` naming a *sibling file* under the same source root: the
+/// dependency is loaded, checked and compiled into the same executable, and
+/// a call through its module-qualified name resolves and runs.
+#[test]
+fn a_used_sibling_file_is_compiled_into_the_executable() {
+    let dir = tmp_dir();
+    let lib_path = dir.join("used_sibling_lib.typl");
+    std::fs::write(
+        &lib_path,
+        r#"(pub defun helper ((x int)) int (+ x 100))"#,
+    )
+    .expect("failed to write the dependency source file");
+    let out_path = dir.join("used_sibling_aot");
+    let src_path = dir.join("used_sibling_aot.typl");
+    std::fs::write(
+        &src_path,
+        r#"
+        (use used_sibling_lib)
+        (defun main () int (used_sibling_lib::helper 5))
+        "#,
+    )
+    .expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect("compile_file failed");
+    let out = Command::new(&out_path).output().expect("failed to run the compiled executable");
+    assert_eq!(out.status.code(), Some(105), "stderr was: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// The combination Phase 3 and Phase 4 of the AOT-scheduler work land
+/// together for: an `eval`'d form referring to a `use`d dependency's
+/// function. The eval environment is captured at compile time by an
+/// independent second read of the same source (`compile::dump::
+/// capture_program_dump`) — proving that read also resolves `use` against
+/// the same source root, not just the one `compile_file`'s own checker did.
+#[test]
+fn an_evaluated_form_resolves_a_used_module() {
+    let dir = tmp_dir();
+    let lib_path = dir.join("eval_used_lib.typl");
+    std::fs::write(&lib_path, r#"(pub defun helper ((x int)) int (+ x 100))"#)
+        .expect("failed to write the dependency source file");
+    let out_path = dir.join("eval_used_aot");
+    let src_path = dir.join("eval_used_aot.typl");
+    std::fs::write(
+        &src_path,
+        r#"
+        (use eval_used_lib)
+        (defun main () int
+          (match (eval (quote (eval_used_lib::helper 5)))
+            ((ok v) (as int (sexpr-int v)))
+            ((err _) -1)))
+        "#,
+    )
+    .expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect("compile_file failed");
+    let out = Command::new(&out_path).output().expect("failed to run the compiled executable");
+    assert_eq!(out.status.code(), Some(105), "stderr was: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// `examples/projects/http`, AOT-compiled — the example limitation #4 named
+/// directly: two files (`main.typl` `use`s `http.typl`), judged from the
+/// outside with a real HTTP client, the same shape
+/// `an_echo_server_runs_in_a_standalone_executable` uses for the socket
+/// layer.
+#[test]
+fn the_http_example_project_compiles_and_serves_requests() {
+    use std::io::Read;
+    use std::net::TcpStream;
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let src_path = manifest_dir.join("examples/projects/http/src/main.typl");
+    let out_path = tmp_dir().join("http_example_aot");
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect("compile_file failed");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to reserve a port");
+    let port = listener.local_addr().expect("failed to read the reserved port").port();
+    drop(listener);
+
+    let mut child = Command::new(&out_path)
+        .args(["serve", &port.to_string()])
+        .spawn()
+        .expect("failed to start the compiled executable");
+
+    let mut response = String::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let stream = loop {
+        match TcpStream::connect(("127.0.0.1", port)) {
+            Ok(s) => break s,
+            Err(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                panic!("could not connect to the compiled http server: {}", e);
+            }
+        }
+    };
+    let mut stream = stream;
+    use std::io::Write;
+    stream.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").expect("failed to send the request");
+    stream.read_to_string(&mut response).expect("failed to read the response");
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(response.starts_with("HTTP/1.1 200"), "response was: {}", response);
+    assert!(response.contains("hello from typelisp"), "response was: {}", response);
+}
+
 /// A program that never calls `eval` must not pay for it. The checker and the
 /// interpreter reach an executable only by being referenced, so the guard is
 /// the absence of any `typelisp_front` symbol — the same measurement the
@@ -1409,6 +1575,80 @@ fn a_long_compiled_loop_runs_in_a_standalone_executable() {
            (defun main () int (if (= (loop-sum 100000) 4999950000) 0 1))"#,
     );
     assert_eq!(code, 0, "stderr was: {}", err);
+}
+
+/// A `defvar` initialiser is an ordinary task under the program's
+/// scheduler now, not a call on a machine frame with nowhere to put a
+/// suspension down — so it may make a channel, `go`, or `wait` exactly like
+/// any other code. Used to abort with "a compiled callee suspended under a
+/// call that has to return" the moment any initialiser did.
+#[test]
+fn a_defvar_initialiser_may_make_a_channel_in_a_standalone_executable() {
+    let (code, err) = compile_and_capture(
+        "defvar_chan_aot",
+        r#"(defvar (ch Chan<int>) (Chan::new 2))
+           (defun main () int
+             (progn (send ch 5)
+                    (match (recv ch)
+                      ((some v) (if (= v 5) 0 1))
+                      ((none) 2))))"#,
+    );
+    assert_eq!(code, 0, "stderr was: {}", err);
+}
+
+/// The same, for an initialiser that actually waits — `go` then `wait`,
+/// which parks the initialiser's task until the one it started finishes.
+#[test]
+fn a_defvar_initialiser_may_wait_in_a_standalone_executable() {
+    let (code, err) = compile_and_capture(
+        "defvar_wait_aot",
+        r#"(defun answer () int 42)
+           (defvar (x int) (wait (go (answer))))
+           (defun main () int (if (= x 42) 0 1))"#,
+    );
+    assert_eq!(code, 0, "stderr was: {}", err);
+}
+
+/// `print-object`, reached from Rust (the printer's door,
+/// `typelisp_print::aot::aot_print_object`) rather than from another
+/// compiled or interpreted call, may still use a channel operation that
+/// needs no waiting — `send`/`recv` on a channel it just made and filled
+/// itself. Used to abort with "a compiled callee suspended under a call
+/// that has to return".
+#[test]
+fn a_print_object_method_may_use_a_channel_in_a_standalone_executable() {
+    let (code, out, err) = compile_and_capture_with(
+        "po_chan_aot",
+        r##"(defstruct point (x int) (y int))
+           (defmethod print-object ((self point) (escape bool)) string
+             (let ((ch (the Chan<int> (Chan::new 1))))
+               (send ch 7)
+               (format false "#<p ~a ~a>" self::x (recv ch))))
+           (defun main () int (progn (println "~a" (point::new 1 2)) 0))"##,
+        &[],
+    );
+    assert_eq!(code, Some(0), "stderr was: {}", err);
+    assert_eq!(out.trim(), "#<p 1 (some 7)>");
+}
+
+/// The same door, but the operation genuinely would have to wait (an empty,
+/// unfilled channel): refused as a language-level panic with the same
+/// wording the interpreter's `run_to_completion` uses — not the process
+/// abort the machine-frame driver used to answer with.
+#[test]
+fn a_print_object_method_that_would_block_is_refused_not_aborted() {
+    let (code, _, err) = compile_and_capture_with(
+        "po_chan_block_aot",
+        r#"(defstruct probe (ch Chan<int>))
+           (defmethod print-object ((self probe) (escape bool)) string
+             (format false "<~a>" (recv self::ch)))
+           (defun main () int
+             (let ((ch (the Chan<int> (Chan::new 1))))
+               (progn (println "~a" (probe::new ch)) 0)))"#,
+        &[],
+    );
+    assert_eq!(code, Some(1), "stderr was: {}", err);
+    assert!(err.contains("`recv` cannot block"), "stderr was: {}", err);
 }
 
 /// Every task blocked on something that will never happen stops the

@@ -2572,7 +2572,11 @@ pub unsafe extern "C-unwind" fn rt_panic(args: *const i64, argc: u32) -> i64 {
 /// The exit code an AOT executable ends with when a `(panic ...)` reaches its
 /// entry point uncaught — the same code `typl <file>` exits with when an
 /// interpreted run ends in an error, so the two front ends agree.
-const EXIT_CODE_PANIC: i64 = 1;
+///
+/// `pub` for `typelisp_front::shim::rt_run_program_interp[_int]`, an
+/// `eval`-carrying AOT executable's own entry, which answers with the same
+/// code for the same reason — see [`run_entry_payload`].
+pub const EXIT_CODE_PANIC: i64 = 1;
 
 /// Runs an AOT executable's compiled entry point (`tl_main`) with a catch
 /// around it, returning its exit code — or, if a `(panic ...)` unwound out of
@@ -2603,37 +2607,48 @@ pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
     run_entry_payload(std::panic::catch_unwind(call))
 }
 
-/// [`rt_run_entry`] for an entry point built under the coroutine ABI: the
-/// same panic handling with a **scheduler** in front of it.
+/// [`rt_run_entry`] for a program built under the coroutine ABI: the same
+/// panic handling with a **scheduler** in front of it, and the program's
+/// global initialisers run under that same scheduler ahead of `main`.
 ///
-/// A generated `main` cannot drive one itself — the protocol is a loop over
-/// status words, and `main` is a handful of constant stores. Which of the two
-/// this executable's `main` calls is decided when it is generated, by the ABI
-/// that build emitted.
+/// `args` is `[inits, n, entry]`: the address of an array of `n`
+/// `coroutine_fn_type` addresses — one zero-argument initialiser per
+/// `defvar`, in declaration order — and the entry point's own address. A
+/// generated `main` cannot drive any of them itself: the protocol is a loop
+/// over status words, and `main` is a handful of constant stores. Which of
+/// the two entry shims this executable's `main` calls is decided when it is
+/// generated, by the ABI that build emitted.
 ///
-/// `main` is the main task of a scheduler that lives on this frame for as
-/// long as the program does (`sched::Scheduler` over `sched::CompiledTask`),
-/// so the tasks `go` starts run, and a `sleep`, a `wait`, a channel or a
-/// socket that says "not yet" parks a task instead of aborting the process.
-/// When `main` returns the program ends and every other task is cut off —
-/// Go's rule, and `typl`'s. A task's own uncaught failure stops the program
-/// with the same line the interpreter prints for it.
+/// The scheduler lives on this frame for as long as the program does
+/// (`sched::Scheduler` over `sched::CompiledTask`). Each initialiser is run
+/// as the main task of one drive and `main` as the main task of the last —
+/// the shape the REPL gives its top-level forms — so an initialiser that
+/// makes a channel, starts a task or waits on one is an ordinary program and
+/// not a startup special case, and a task an initialiser started is still
+/// there when `main` runs. When `main` returns the program ends and every
+/// other task is cut off — Go's rule, and `typl`'s. A task's own uncaught
+/// failure stops the program with the same line the interpreter prints for
+/// it, an initialiser's included.
 ///
 /// # Safety
 ///
-/// [`rt_run_entry`]'s, for a `coroutine_fn_type` address.
+/// `argc` must be 3; `args[0]` must point to `args[1]` valid
+/// `coroutine_fn_type` addresses of zero-argument bodies, and `args[2]` must
+/// be one such address that tolerates being entered with no arguments; a
+/// `Heap` must already be registered on this thread (`rt_heap_init` runs
+/// first).
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_entry_driven(entry: i64) -> i64 {
-    let f: crate::coroutine::CoroutineFn = std::mem::transmute(entry as usize);
-    let call = std::panic::AssertUnwindSafe(|| match run_main_task(f) {
+pub unsafe extern "C" fn rt_run_program(args: *const i64, argc: u32) -> i64 {
+    let program = read_program(args, argc, "rt_run_program");
+    let call = std::panic::AssertUnwindSafe(|| match run_program(&program) {
         Ok(v) => encode(v),
         Err(code) => code,
     });
     run_entry_payload(std::panic::catch_unwind(call))
 }
 
-/// [`rt_run_entry_driven`] for a `main` declared to return `int`: the
-/// answer is a tagged word, and the exit code is the fixnum's payload.
+/// [`rt_run_program`] for a `main` declared to return `int`: the answer is
+/// a tagged word, and the exit code is the fixnum's payload.
 ///
 /// Decoded *here* rather than by the generated `main`, because a panic's
 /// exit code comes out of the same call raw (`EXIT_CODE_PANIC`), and only
@@ -2642,11 +2657,11 @@ pub unsafe extern "C" fn rt_run_entry_driven(entry: i64) -> i64 {
 ///
 /// # Safety
 ///
-/// [`rt_run_entry_driven`]'s.
+/// [`rt_run_program`]'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_entry_driven_int(entry: i64) -> i64 {
-    let f: crate::coroutine::CoroutineFn = std::mem::transmute(entry as usize);
-    let call = std::panic::AssertUnwindSafe(|| match run_main_task(f) {
+pub unsafe extern "C" fn rt_run_program_int(args: *const i64, argc: u32) -> i64 {
+    let program = read_program(args, argc, "rt_run_program_int");
+    let call = std::panic::AssertUnwindSafe(|| match run_program(&program) {
         Ok(Value::Int(n)) => n,
         Ok(Value::Boxed(id)) if active_heap().is_bignum(id) => {
             fatal(&format!("main returned {}, which is not a process exit code", active_heap().bignum_value(id)))
@@ -2657,8 +2672,32 @@ pub unsafe extern "C" fn rt_run_entry_driven_int(entry: i64) -> i64 {
     run_entry_payload(std::panic::catch_unwind(call))
 }
 
-/// Runs `f` as the main task of a fresh scheduler and answers with its
-/// value, or with the exit code of a failure that has already been reported.
+/// What a generated `main` hands the program entry: the initialisers and
+/// the entry point, as coroutine-ABI addresses.
+pub struct Program {
+    pub inits: Vec<crate::coroutine::CoroutineFn>,
+    pub entry: crate::coroutine::CoroutineFn,
+}
+
+/// Reads `[inits, n, entry]` off the standard shim argument array.
+///
+/// # Safety
+///
+/// [`rt_run_program`]'s.
+pub unsafe fn read_program(args: *const i64, argc: u32, what: &str) -> Program {
+    if argc < 3 {
+        fatal(&format!("{}: expected 3 arguments (the initialiser array, its count and the entry point)", what));
+    }
+    let words = collect_words(*args as usize as *const i64, *args.add(1));
+    let inits = words.into_iter().map(|w| std::mem::transmute::<usize, crate::coroutine::CoroutineFn>(w as usize)).collect();
+    let entry: crate::coroutine::CoroutineFn = std::mem::transmute(*args.add(2) as usize);
+    Program { inits, entry }
+}
+
+/// Runs the program's initialisers and then its `main`, each as the main
+/// task of one drive of a scheduler that lives on this frame, and answers
+/// with `main`'s value — or with the exit code of a failure that has
+/// already been reported.
 ///
 /// The scheduler is a local of this frame and nothing else: it is owned by
 /// the frame that owns the program's run, exactly as the interpreter's is a
@@ -2667,20 +2706,37 @@ pub unsafe extern "C" fn rt_run_entry_driven_int(entry: i64) -> i64 {
 ///
 /// # Safety
 ///
-/// [`rt_run_entry_driven`]'s.
-unsafe fn run_main_task(f: crate::coroutine::CoroutineFn) -> Result<Value, i64> {
+/// [`rt_run_program`]'s.
+unsafe fn run_program(program: &Program) -> Result<Value, i64> {
     let heap = active_heap();
     let sched = std::cell::RefCell::new(crate::sched::Scheduler::<crate::sched::CompiledTask>::new());
-    let main = sched.borrow_mut().admit(heap, |heap| crate::sched::CompiledTask::entry(heap, f));
-    match crate::sched::drive(&sched, heap, &(), main) {
-        Ok(v) => Ok(v),
-        // The same line `run_entry_payload` prints for a panic that reached
-        // the entry as a Rust unwind — a task's failure is the program's.
-        Err(failure) => {
-            eprintln!("{}", failure);
-            Err(EXIT_CODE_PANIC)
+    // Built inside `admit`, on the task's own root stack — `entry` pushes
+    // the task's state slots, and they belong there and not on this frame's.
+    let mut run = |f: crate::coroutine::CoroutineFn, initialiser: bool| {
+        let main = sched.borrow_mut().admit(heap, |heap| {
+            if initialiser {
+                crate::sched::CompiledTask::initialiser(heap, f)
+            } else {
+                crate::sched::CompiledTask::entry(heap, f)
+            }
+        });
+        match crate::sched::drive(&sched, heap, &(), main) {
+            Ok(v) => Ok(v),
+            // The same line `run_entry_payload` prints for a panic that
+            // reached the entry as a Rust unwind — a task's failure is the
+            // program's.
+            Err(failure) => {
+                eprintln!("{}", failure);
+                Err(EXIT_CODE_PANIC)
+            }
         }
+    };
+    for init in &program.inits {
+        // An initialiser's value is the global's storage id, already stored
+        // by the body itself (`compile-global-init`); nothing here reads it.
+        run(*init, true)?;
     }
+    run(program.entry, false)
 }
 
 /// A classic-signature door onto a coroutine body: `args` is
@@ -2711,28 +2767,18 @@ pub unsafe extern "C-unwind" fn rt_drive_body(args: *const i64, argc: u32) -> i6
     drive_to_completion(f, &words, &[], "rt_drive_body")
 }
 
-/// Runs a coroutine-ABI, zero-argument function to completion and answers
-/// with its value.
+/// Turns whichever entry point ran into an exit code: a typelisp-level
+/// `panic` or an uncaught `throw` that reached it as a Rust unwind is
+/// reported and becomes [`EXIT_CODE_PANIC`]; anything else keeps unwinding.
 ///
-/// The startup counterpart of [`rt_run_entry_driven`] for the steps that are
-/// *not* the entry point — a generated `main` runs one global initialiser per
-/// `defvar`, and each is an ordinary compiled body that now has to be driven
-/// like any other. No panic handling: the classic call this replaces let an
-/// unwind through, and an initialiser that panics is a program that never
-/// starts.
+/// `pub` for the interpreter's own program entry (`typelisp_front::shim`),
+/// which puts the same catch around the same kind of run.
 ///
 /// # Safety
 ///
-/// `entry` must be the address of a `coroutine_fn_type` function that takes
-/// no arguments; a `Heap` must already be registered on this thread.
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_drive_entry(entry: i64) -> i64 {
-    let f: crate::coroutine::CoroutineFn = std::mem::transmute(entry as usize);
-    drive_to_completion(f, &[], &[], "rt_drive_entry")
-}
-
-/// Turns whichever of the two entry points ran into an exit code.
-unsafe fn run_entry_payload(outcome: std::thread::Result<i64>) -> i64 {
+/// A `Heap` must be registered on this thread (an uncaught throw's tag is
+/// read out of it).
+pub unsafe fn run_entry_payload(outcome: std::thread::Result<i64>) -> i64 {
     let call = std::panic::AssertUnwindSafe(|| match outcome {
         Ok(v) => v,
         Err(payload) => std::panic::resume_unwind(payload),
@@ -3039,26 +3085,26 @@ unsafe fn collect_words(p: *const i64, n: i64) -> Vec<i64> {
 /// What a driver whose caller is a machine frame does with a pause.
 ///
 /// An unwind is re-raised, so it keeps travelling towards a `catch` above
-/// this boundary. A suspension cannot be honoured here at all: the chain is
-/// rooted on the machine stack of whoever called in, so there is nothing to
-/// put it down and pick it back up. What is left standing on a machine frame
-/// is `rt_drive_entry` (a `defvar` initialiser) and `rt_drive_body` (the
-/// printer's door); the executable's `main` runs under a scheduler now
-/// (`run_main_task`).
+/// this boundary. Nothing else can come out: every driver standing on a
+/// machine frame goes through `FrameStack::run_to_end`, which runs an
+/// interpreted `apply` on that frame and resolves a suspension through the
+/// driving scheduler (answering it, or refusing it into the chain as a
+/// panic). What still stands on a machine frame is `rt_drive_body` (the
+/// printer's door); the executable's initialisers and `main` run under a
+/// scheduler (`run_program`).
 unsafe fn pause_on_a_machine_frame(paused: crate::coroutine::Paused, what: &str) -> ! {
     match paused {
         crate::coroutine::Paused::Unwinding => crate::coroutine::resume_unwinding(),
-        // Every driver standing on a machine frame goes through
-        // `FrameStack::run_to_end`, which resolves this itself. Reaching here
-        // means one of them was written to `run`/`resume` directly.
+        // Reaching either means a driver was written to `run`/`resume`
+        // directly — a protocol break, not a limitation.
         crate::coroutine::Paused::Applying { .. } => fatal(&format!(
             "{}: a compiled frame applied an interpreted function value and the drive did not \
              resolve it — a driver on a machine frame must use `run_to_end`",
             what
         )),
         crate::coroutine::Paused::Suspended => fatal(&format!(
-            "{}: a compiled callee suspended under a call that has to return, and its chain is \
-             rooted on a machine frame with nothing to pick it back up (Phase C5).",
+            "{}: a compiled frame suspended and the drive did not resolve it — a driver on a \
+             machine frame must use `run_to_end`",
             what
         )),
     }

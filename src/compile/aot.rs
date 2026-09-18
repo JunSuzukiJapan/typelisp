@@ -53,21 +53,29 @@ use inkwell::AddressSpace;
 use inkwell::OptimizationLevel;
 
 use crate::check::core;
+use crate::compile::symbols::CompiledItem;
 use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 
 const ENTRY_POINT_NAME: &str = "main";
 const ENTRY_POINT_INTERNAL_NAME: &str = "tl_main";
 
 /// Registers one checked top-level form with `interp` and records what
-/// [`compile_file`] must do with it: a compiled body to emit (`node_names`),
-/// a global to re-initialize at startup (`defvar_inits`), or nothing.
+/// [`compile_file`] must do with it: a compiled body to emit (`items`), a
+/// global to re-initialize at startup (`defvar_inits`), or nothing.
 ///
-/// Recurses into a `(module ...)`, which covers three shapes at once — the
+/// Recurses into a `(module ...)`, which covers four shapes at once — the
 /// monomorphization bundle a generic instantiation comes wrapped in, the
-/// `(module ...)` a user writes, and the per-target-type grouping
-/// `Checker::check_impl` returns for an `impl` block. All three are just
+/// `(module ...)` a user writes, the per-target-type grouping
+/// `Checker::check_impl` returns for an `impl` block, and the whole-file
+/// wrapper the project [`Loader`](crate::project::Loader) puts around every
+/// loaded file (the entry file included, since [`compile_file`] reads
+/// through the same `Loader` `typl file.typl` does). All four are just
 /// containers of the same items; the enclosing module is already baked into
-/// each item's own fully-qualified `Path`, so flattening loses nothing.
+/// each item's own fully-qualified `Path`, so flattening loses nothing —
+/// each `defun`/`defmethod` becomes a [`CompiledItem`] by that full path,
+/// never by its last segment alone, which is what lets a module-qualified
+/// name and a same-named one in another module compile to different LLVM
+/// symbols.
 ///
 /// A generic template needs no special case any more: the checker emits an
 /// empty `(module PATH)` for one, which flattens to nothing here exactly as it
@@ -76,35 +84,32 @@ fn collect_aot_item(
     heap: &mut Heap,
     interp: &mut Interp,
     tl: TopLevelForm,
-    node_names: &mut Vec<(String, String)>,
+    items: &mut Vec<CompiledItem>,
     defvar_inits: &mut Vec<(Path, Value)>,
     ffi_decls: &mut Vec<typelisp_front::eval::interp::FfiDecl>,
+    entry_path: &Path,
 ) -> Result<(), String> {
     let tag = core::op(heap, tl).map(str::to_string).unwrap_or_default();
     if tag == "module" {
         let body = core::fields(heap, tl).map_err(|e| e.to_string())?;
         for item in body.into_iter().skip(1) {
-            collect_aot_item(heap, interp, item, node_names, defvar_inits, ffi_decls)?;
+            collect_aot_item(heap, interp, item, items, defvar_inits, ffi_decls, entry_path)?;
         }
         return Ok(());
     }
     let defvar_meta = match tag.as_str() {
         "defun" => {
             let path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defun without a name".to_string())?;
-            let node = path.last_segment().to_string();
-            let symbol = crate::compile::symbols::user_symbol_name(&node);
-            node_names.push((node, symbol));
+            items.push(CompiledItem::Fn(path));
             None
         }
         "defmethod" => {
-            let type_name = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defmethod without a type".to_string())?;
+            let type_path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
                 Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
                 _ => return Err("compile-file: defmethod without a name".to_string()),
             };
-            let node = format!("{}::{}", type_name, method);
-            let symbol = crate::compile::symbols::user_method_symbol_name(&type_name, &method);
-            node_names.push((node, symbol));
+            items.push(CompiledItem::Method(type_path, method));
             None
         }
         // The whole form travels, not just the initializer: the global's
@@ -128,15 +133,24 @@ fn collect_aot_item(
             ffi_decls.push(typelisp_front::eval::interp::read_ffi_decl(heap, tl).map_err(|e| e.to_string())?);
             None
         }
+        // `use`/`import`/`shadowing-import` (the checker lowers every
+        // spelling to this one tag, `Checker::check_use_forms`): no codegen,
+        // and the interpreted `exec` below is what makes the used names
+        // resolve — a compiled call site never mentions a `use`, only the
+        // fully-qualified path it resolved to. The dependency file itself
+        // was already loaded and its own items collected by the `Loader`
+        // pass in `compile_file`, before this form is ever reached; this
+        // form is only the using file's own record of having asked for it.
+        "use" => None,
         // A bare `(main)` at top level is the line that starts the program
         // under `typl file.typl`; the executable calls `main` on its own, so
         // here it is read and dropped — which is what lets one source file
         // be run either way. No other expression is: there is nothing to run
         // it in.
-        "expr" if is_entry_call(heap, tl) => return Ok(()),
+        "expr" if is_entry_call(heap, tl, entry_path) => return Ok(()),
         other => {
             return Err(format!(
-                "compile-file only supports top-level `defun`/`defmethod`/`defvar`/`defconstant`/`defstruct`/`defenum`/`defffi`/`module`/`impl`, found `{}`",
+                "compile-file only supports top-level `defun`/`defmethod`/`defvar`/`defconstant`/`defstruct`/`defenum`/`defffi`/`use`/`module`/`impl`, found `{}`",
                 other
             ))
         }
@@ -152,21 +166,28 @@ fn collect_aot_item(
     Ok(())
 }
 
-/// Whether a top-level `(expr ...)` is `(main)` — a call of the entry point
-/// with no arguments, which is the one expression an AOT source may carry.
-fn is_entry_call(heap: &Heap, tl: Value) -> bool {
+/// Whether a top-level `(expr ...)` is `(main)` — a call of the entry
+/// point, resolved to `entry_path`, with no arguments — the one expression
+/// an AOT source may carry. `entry_path` is the entry *file's* own module
+/// path with `main` appended (`<stem>::main`, or bare `main` for a file at
+/// its project's source root), never just `Path::root("main")`: the entry
+/// file is loaded as a module like any other (`compile_file`'s own `Loader`
+/// pass), so a bare `(main)` written in it resolves the same way any other
+/// bare name in the file would.
+fn is_entry_call(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
     let Some(form) = core::field(heap, tl, 0) else { return false };
     if core::op(heap, form) != Some("call") {
         return false;
     }
     // `(call WRITTEN HOME PATH (R...) ARG...)`: the resolved path, and no
     // arguments past the representation list.
-    let is_main = core::path_field(heap, form, 2).is_some_and(|p| p == Path::root(ENTRY_POINT_NAME));
+    let is_main = core::path_field(heap, form, 2).is_some_and(|p| &p == entry_path);
     is_main && core::fields(heap, form).map(|f| f.len() == 4).unwrap_or(false)
 }
 
-/// Reads `source_path`, compiles every `defun` in it, and links a native
-/// executable at `output_path`. See the module doc comment for scope.
+/// Reads `source_path`, compiles every `defun` in it (and every file it
+/// `use`s), and links a native executable at `output_path`. See the module
+/// doc comment for scope.
 pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> {
     crate::compile::driver::emitted_layout_is_runnable()?;
     let source =
@@ -190,6 +211,24 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let prelude = crate::compile::prelude_bootstrap::load_for_aot(&mut heap, &mut chk, &mut interp)?;
     crate::load_compiler(&mut heap, &mut chk, &mut interp);
 
+    let entry_path_on_disk = std::path::Path::new(source_path);
+    let entry_dir = entry_path_on_disk
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let src_root = crate::project::find_src_root(&entry_dir).unwrap_or(entry_dir);
+    // The entry *file's own* items stay at the root namespace, exactly as
+    // before `use` was supported — only a *dependency* a `use` names is
+    // loaded as a module of its own, under its file-derived path. This is
+    // narrower than `typl file.typl`'s own `Loader::load_entry` (which
+    // wraps the entry file too, in `<stem>`), and deliberately so: keeping
+    // the entry file at root is what lets every existing AOT source — and
+    // `ENTRY_POINT_INTERNAL_NAME`/`is_entry_call`'s bare `main` — go on
+    // meaning exactly what it always has, while a `(use ...)` in it still
+    // resolves like any other `use`.
+    let mut loader = crate::project::Loader::new(src_root.clone());
+
     let reader = Reader::new();
     // One form at a time, like every other loader (`Reader::forms_in`): the
     // file an AOT build reads is the same file the interpreter reads, so it
@@ -200,34 +239,58 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // compiled body or none at all: `defun`/`defmethod` (bodies),
     // `defvar`/`defconstant` (a global plus an initializer),
     // `defstruct`/`defenum` (type definitions with no codegen of their own),
-    // or a `module`/`impl` grouping any of those. Collected in declaration
-    // order: `node_names` so later steps know exactly which of `interp`'s
-    // registered bodies are this file's (as opposed to `load_compiler`'s own
-    // helper `defun`s sharing the same tables), and `defvar_inits` (path,
-    // initializer expression) so the standalone executable can re-establish
-    // each global's storage at its own startup (see the loop below that
-    // generates one `add_compiled_global_init` step per entry, and
-    // `Interp::promote_global`'s doc comment for why this must promote
-    // eagerly, in this same file-declaration order, rather than waiting for
-    // some `defun` body to reference a global the way JIT does).
-    //
-    // A node name is what `Interp::resolve_fn_def` accepts: a bare `defun`
-    // name, or `type::method` for a `defmethod` — the same naming
-    // `Interp::compile_scc` uses for the JIT's call graph.
-    let mut node_names: Vec<(String, String)> = Vec::new(); // (node name, LLVM symbol)
+    // `use` (a dependency, loaded by `loader` below before the form that
+    // names it is checked), or a `module`/`impl` grouping any of those.
+    // Collected in declaration order: `items` so later steps know exactly
+    // which of `interp`'s registered bodies are this file's (as opposed to
+    // `load_compiler`'s own helper `defun`s sharing the same tables), and
+    // `defvar_inits` (path, initializer expression) so the standalone
+    // executable can re-establish each global's storage at its own startup
+    // (see the loop below that generates one `add_compiled_global_init` step
+    // per entry, and `Interp::promote_global`'s doc comment for why this
+    // must promote eagerly, in this same declaration order, rather than
+    // waiting for some `defun` body to reference a global the way JIT does).
+    let mut items: Vec<CompiledItem> = Vec::new();
     let mut defvar_inits: Vec<(Path, Value)> = Vec::new();
     let mut ffi_decls: Vec<typelisp_front::eval::interp::FfiDecl> = Vec::new();
+    let entry_path = Path::root(ENTRY_POINT_NAME);
+    let mut entry_forms: Vec<TopLevelForm> = Vec::new();
     loop {
         let next = {
             let hook = typelisp_front::read::DriverReadEval::new(&mut chk, &interp);
             forms.next_form_with(&mut heap, Some(&hook)).map_err(|e| e.to_string())?
         };
         let Some((v, loc)) = next else { break };
+        // A `(use ...)` among `v`'s top level (or nested in a `(module ...)`
+        // it opens) loads the file it names — checked and queued into
+        // `loader`'s own pending list, under its own file-derived module
+        // path — *before* `v` itself is checked, so a later reference to
+        // what it named resolves. No `cur_segs`: this file is never treated
+        // as anything's *sibling* by the search (`Loader::load_uses_in`'s
+        // own doc comment), so a `use` here only ever resolves against the
+        // project's source root directly — the shape `examples/projects/
+        // http`'s flat `src/` is in, and every other AOT source so far.
+        loader.load_uses_in(&mut heap, &reader, &mut chk, &mut interp, std::slice::from_ref(&v)).map_err(|e| e.to_string())?;
         let tl = chk.check_form_at(&mut heap, &interp, v, Some(loc)).map_err(|e| e.to_string())?;
-        collect_aot_item(&mut heap, &mut interp, tl, &mut node_names, &mut defvar_inits, &mut ffi_decls)?;
+        entry_forms.push(tl);
+    }
+    for w in chk.take_warnings() {
+        eprintln!("{}", w);
+    }
+    // Dependencies first (a `use`d file's own items, one `(module PATH
+    // body...)` bundle per file — `collect_aot_item`'s existing recursion
+    // into `module` flattens it), then the entry file's own forms in
+    // declaration order. Execution order between the two never matters for
+    // correctness (`collect_aot_item`'s doc comment), only that every item
+    // is `exec`'d exactly once before the compile pass below.
+    for tl in loader.take_pending() {
+        collect_aot_item(&mut heap, &mut interp, tl, &mut items, &mut defvar_inits, &mut ffi_decls, &entry_path)?;
+    }
+    for tl in entry_forms {
+        collect_aot_item(&mut heap, &mut interp, tl, &mut items, &mut defvar_inits, &mut ffi_decls, &entry_path)?;
     }
 
-    if !node_names.iter().any(|(n, _)| n == ENTRY_POINT_NAME) {
+    if !items.iter().any(|i| matches!(i, CompiledItem::Fn(p) if p == &entry_path)) {
         return Err(format!(
             "no zero-argument `{}` defun found (required as the entry point)",
             ENTRY_POINT_NAME
@@ -316,9 +379,10 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             let ptr_ty = ctx.ptr_type(AddressSpace::default());
             ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
         };
-        for (_, symbol) in &node_names {
-            if m.get_function(symbol).is_none() {
-                m.add_function(symbol, lisp_fn_ty, None);
+        for item in &items {
+            let symbol = item.symbol_name();
+            if m.get_function(&symbol).is_none() {
+                m.add_function(&symbol, lisp_fn_ty, None);
             }
         }
     }
@@ -331,14 +395,14 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // already held — unlike the rest of this function from here on, which
     // touches the LLVM Context family of APIs directly with no calls back
     // into `Interp`/the typelisp compiler body.
-    for (name, internal_name) in &node_names {
+    for item in &items {
         // Every user body's own LLVM symbol name gets the `tl_` prefix
         // (`crate::compile::USER_SYMBOL_PREFIX`) — `main` is no longer a
         // special case: `user_symbol_name("main")` already produces
         // `ENTRY_POINT_INTERNAL_NAME` ("tl_main"). A `defmethod`'s symbol is
         // `user_method_symbol_name`'s `tl_type::method`, exactly what a
         // compiled call site emits.
-        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), name, internal_name).map_err(|e| e.to_string())?;
+        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), &item.node_name(), &item.symbol_name()).map_err(|e| e.to_string())?;
     }
 
     // One `add_compiled_global_init` per `defvar`, in the order
@@ -362,13 +426,15 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     }
 
     // Which types have a compiled `print-object`, for the printer's AOT
-    // startup registration. Read off `node_names` rather than off the method
+    // startup registration. Read off `items` rather than off the method
     // tables because the address has to name a function *this file* compiled:
     // `compile-file` compiles every top-level body in the file, so an `impl
     // print-object` in it is here whether or not anything calls it.
-    let print_objects: Vec<(String, String)> = node_names
+    let print_objects: Vec<(String, String)> = items
         .iter()
-        .filter_map(|(node, symbol)| {
+        .filter_map(|item| {
+            let node = item.node_name();
+            let symbol = item.symbol_name();
             // Two shapes, because a generic type's `print-object` is
             // monomorphized: `point::print-object` for a plain type, and
             // `gen::print-object <i32>` for one instantiation of a generic —
@@ -389,7 +455,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
                 Some(args) => format!("{}<{}>", base, args),
                 None => base,
             };
-            Some((key, symbol.clone()))
+            Some((key, symbol))
         })
         .collect();
 
@@ -404,10 +470,10 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         .into_iter()
         .map(|(path, method)| {
             let node = format!("{}::{}", path, method);
-            let symbol = node_names
+            let symbol = items
                 .iter()
-                .find(|(n, _)| *n == node)
-                .map(|(_, sym)| sym.clone())
+                .find(|item| item.node_name() == node)
+                .map(|item| item.symbol_name())
                 .ok_or_else(|| format!(
                     "compile-file: `~/{}/` names `{}`, which was not compiled into this file",
                     method, node
@@ -454,7 +520,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // at the top for its own `interp`.
     let eval_env: Option<Vec<u8>> = if calls_eval {
         let mut env_heap = Heap::with_capacity(EVAL_HEAP_CAPACITY);
-        Some(crate::compile::dump::capture_program_dump(&mut env_heap, &source, &eval_globals)?)
+        Some(crate::compile::dump::capture_program_dump(&mut env_heap, &source, &src_root, &eval_globals)?)
     } else {
         None
     };
@@ -503,12 +569,13 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
 ///
 /// `global_init_names` (one `add_compiled_global_init`-produced zero-arg
 /// function per `defvar`, in file-declaration order — see
-/// `compile_file`'s own doc comments at its two call sites) are each
-/// called, in that same order, between `rt_heap_init` and `tl_main`: the
-/// heap needs to exist first (`rt_global_new`, which every one of these
-/// eventually calls, roots into it), and every one of them needs to run
-/// before `tl_main`'s own body — or anything it calls — could read a
-/// global that doesn't have a slot yet.
+/// `compile_file`'s own doc comments at its two call sites) are handed to
+/// `rt_run_program`, which runs each, in that same order, after
+/// `rt_heap_init` and before `tl_main`, every one as a task under the
+/// program's scheduler: the heap needs to exist first (`rt_global_new`,
+/// which every one of these eventually calls, roots into it), and every one
+/// of them needs to run before `tl_main`'s own body — or anything it calls
+/// — could read a global that doesn't have a slot yet.
 ///
 /// `vtables` (one entry per trait object the file boxes, from
 /// `Interp::vtable_descriptors`) are filled in first of all, before even the
@@ -766,61 +833,100 @@ fn build_main_wrapper(
     if eval_env.is_some() {
         call_shim(ctx, module, &builder, "rt_eval_init", &[])?;
     }
-    // A global initialiser is an ordinary compiled body, so under the
-    // coroutine ABI it answers with a status word and its value is in a
-    // frame -- calling it as `f(args, argc)` is not even the right arity.
-    // `rt_drive_entry` is the driver that turns it back into a call.
+    // The program proper: its global initialisers and then `tl_main`.
     //
-    // Asked of each function's own LLVM type, the way the `rt_vtable_set`
-    // block above asks it and for the same reason: the ABI belongs to the
-    // function, not to the process. `EMITTED_BODY_ABI` says what *this build*
-    // emits, and a module holds bodies this build did not emit -- the
-    // prelude's frozen bitcode, and (`aot::tests`) a hand-built `tl_main`.
-    // Reading the process constant there hands a classic body to the driver,
-    // whose first act is to ask for the frame the prologue never published.
+    // Under the coroutine ABI a body answers with a status word and its
+    // value is in a frame -- calling it as `f(args, argc)` is not even the
+    // right arity, and a generated `main` cannot drive one itself. The
+    // runtime's `rt_run_program` does: it puts a scheduler on its frame and
+    // runs each initialiser, then `main`, as a task under it -- so an
+    // initialiser that makes a channel or waits on a task is an ordinary
+    // program rather than a startup special case. `main` hands it the
+    // initialisers as a constant array of addresses (declaration order, which
+    // is the order `Interp::promote_global` numbered their slots in) and the
+    // entry point. Through the runtime rather than calling `tl_main` directly
+    // also for the reason `rt_run_entry` gives: a `(panic ...)` that unwinds
+    // out of the program needs a Rust frame to be caught in, and `main` is
+    // the C entry point.
+    //
+    // Which shim, decided by `tl_main`'s own LLVM type -- the way the
+    // `rt_vtable_set` block above asks it and for the same reason: the ABI
+    // belongs to the function, not to the process. `EMITTED_BODY_ABI` says
+    // what *this build* emits, and a module holds bodies this build did not
+    // emit (`aot::tests` hand-builds a classic `tl_main`). An `int`-returning
+    // `main` answers a tagged word; the `_int` shim reads the exit code out
+    // of it (and out of a panic's raw code, which arrives through the same
+    // call). Every initialiser must be a coroutine body too: the scheduler
+    // has no way to drive a classic one, and a classic entry has no
+    // scheduler to run one under -- either mix is refused here rather than
+    // handed to a driver whose first act would be to ask for a frame the
+    // prologue never published.
+    //
+    // A program that calls `eval` runs its scheduler through its `Interp`
+    // instead (`rt_run_program_interp[_int]`, `typelisp_front::shim`) --
+    // decided here, at generation time, by the same fact that decided
+    // whether `rt_eval_init` runs at all (`eval_env.is_some()`), rather than
+    // by a hook the two shims would otherwise have to agree on at runtime.
+    // Without this an `eval`-carrying executable would run *two* schedulers
+    // that never see each other: the bare one under `rt_run_program` for the
+    // program's own tasks, and the `Interp`'s own for whatever an eval'd
+    // `(go ...)` admits -- which is the AOT-scheduler work's remaining
+    // limit this closes.
     let coroutine_fn_ty = crate::compile::llvm_builtins::coroutine_fn_type();
-    let drive_entry = |module: &Module<'static>| -> inkwell::values::FunctionValue<'static> {
-        match module.get_function("rt_drive_entry") {
-            Some(f) => f,
-            None => module.add_function("rt_drive_entry", ctx.i64_type().fn_type(&[ctx.i64_type().into()], false), None),
-        }
-    };
+    let i64_ty = ctx.i64_type();
+    let mut init_addrs: Vec<inkwell::values::IntValue<'static>> = Vec::with_capacity(global_init_names.len());
     for name in global_init_names {
         let f = module
             .get_function(name)
             .ok_or_else(|| format!("internal error: global-init function \"{}\" not found in module", name))?;
-        if f.get_type() == coroutine_fn_ty {
-            let drive = drive_entry(module);
-            let addr = f.as_global_value().as_pointer_value().const_to_int(ctx.i64_type());
-            builder
-                .build_call(drive, &[addr.into()], "global_init_result")
-                .map_err(|e| format!("failed to build global-init call: {}", e))?;
-        } else {
-            builder
-                .build_call(f, &[null_args.into(), argc_zero.into()], "global_init_result")
-                .map_err(|e| format!("failed to build global-init call: {}", e))?;
+        if f.get_type() != coroutine_fn_ty {
+            return Err(format!(
+                "internal error: global initialiser \"{}\" is not a coroutine-ABI body, and only those run under the scheduler",
+                name
+            ));
         }
+        init_addrs.push(f.as_global_value().as_pointer_value().const_to_int(i64_ty));
     }
-    // Through `rt_run_entry` rather than calling `tl_main` directly, so a
-    // `(panic ...)` that unwinds out of the program has a Rust frame to be
-    // caught in — see that function's doc comment. `main` is the C entry
-    // point, and letting an unwind run off the end of it is undefined.
-    // Which of the two, decided by `tl_main`'s own type: the driven one puts
-    // a `FrameStack` in front of the same panic handling.
-    // An `int`-returning `main` answers a tagged word; the `_int` shim reads
-    // the exit code out of it (and out of a panic's raw code, which arrives
-    // through the same call).
-    let entry_shim = match (tl_main.get_type() == coroutine_fn_ty, main_returns_int) {
-        (true, true) => "rt_run_entry_driven_int",
-        (true, false) => "rt_run_entry_driven",
-        (false, true) => return Err("an `int`-returning main under the classic ABI is not supported".to_string()),
-        (false, false) => "rt_run_entry",
+    let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(i64_ty);
+    let call: CallSiteValue = if tl_main.get_type() == coroutine_fn_ty {
+        let entry_shim = match (eval_env.is_some(), main_returns_int) {
+            (true, true) => "rt_run_program_interp_int",
+            (true, false) => "rt_run_program_interp",
+            (false, true) => "rt_run_program_int",
+            (false, false) => "rt_run_program",
+        };
+        let rt_run_program = module.add_function(entry_shim, fn_ty, None);
+        let inits = module.add_global(i64_ty.array_type(init_addrs.len() as u32), None, "tl_global_inits");
+        inits.set_initializer(&i64_ty.const_array(&init_addrs));
+        inits.set_constant(true);
+        let inits_addr = inits.as_pointer_value().const_to_int(i64_ty);
+        let words = [inits_addr, i64_ty.const_int(init_addrs.len() as u64, false), entry_addr];
+        let args_ptr = builder
+            .build_alloca(i64_ty.array_type(words.len() as u32), "program_args")
+            .map_err(|e| format!("failed to alloca the program arguments: {}", e))?;
+        for (i, w) in words.iter().enumerate() {
+            let slot = unsafe {
+                builder
+                    .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "program_arg_ptr")
+                    .map_err(|e| format!("failed to build the program argument gep: {}", e))?
+            };
+            builder.build_store(slot, *w).map_err(|e| format!("failed to store a program argument: {}", e))?;
+        }
+        builder
+            .build_call(rt_run_program, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u64, false).into()], "tl_main_result")
+            .map_err(|e| format!("failed to build entry-point call: {}", e))?
+    } else {
+        if main_returns_int {
+            return Err("an `int`-returning main under the classic ABI is not supported".to_string());
+        }
+        if !init_addrs.is_empty() {
+            return Err("internal error: a classic-ABI entry point cannot run global initialisers (no scheduler)".to_string());
+        }
+        let rt_run_entry = module.add_function("rt_run_entry", i64_ty.fn_type(&[i64_ty.into()], false), None);
+        builder
+            .build_call(rt_run_entry, &[entry_addr.into()], "tl_main_result")
+            .map_err(|e| format!("failed to build entry-point call: {}", e))?
     };
-    let rt_run_entry = module.add_function(entry_shim, ctx.i64_type().fn_type(&[ctx.i64_type().into()], false), None);
-    let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(ctx.i64_type());
-    let call: CallSiteValue = builder
-        .build_call(rt_run_entry, &[entry_addr.into()], "tl_main_result")
-        .map_err(|e| format!("failed to build entry-point call: {}", e))?;
     let result = match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
         inkwell::values::ValueKind::Instruction(_) => {

@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-09-18 / ブランチ: `feature/aot-scheduler`
+最終更新: 2026-09-18 / ブランチ: `feature/aot-scheduler-limits`
 
 このドキュメントは**現在残っている作業のみ**を記録する。終わった作業は
 [completed-work.md](completed-work.md)（何がどこまで進んだかの横断的な要約）と
@@ -19,14 +19,19 @@ B1/B2（スケジューラ・`go`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
 （コンパイル出力の一様コルーチン化）がすべて入っている。経緯は
 [implementation-log.md](implementation-log.md) の 3 つの節。
 
-**AOT 実行ファイルにもスケジューラが載った（2026-09-17）。** プランは
-`~/.claude/plans/aot-os-quizzical-graham.md`。スケジューラの核は
-`typelisp-rt::sched` の `Scheduler<B: TaskBody>` で、`compile-file` した実行ファイルの
-`go`・`sleep`・`wait`・`Chan`・`select`・ソケット待ちが `typl` と同じ意味で動く。
-その作業が「触らない」と決めて残した制限（`eval` 入り AOT でスケジューラが 2 つ並ぶ、
-printer の door 内では `go`/チャネル操作が fatal、インタプリタが compiled クロージャを
-`funcall` すると中断できない、`compile-file` が `use` を受理しない）は
-[implementation-log.md](implementation-log.md) の同節の末尾にある。
+**AOT 実行ファイルにもスケジューラが載った（2026-09-17）、残した制限 4 つも
+塞いだ（2026-09-18）。** プランは `~/.claude/plans/aot-os-quizzical-graham.md`
+（2026-09-17 分）と `~/.claude/plans/buzzing-sleeping-pelican.md`（2026-09-18 分）。
+スケジューラの核は `typelisp-rt::sched` の `Scheduler<B: TaskBody>` で、
+`compile-file` した実行ファイルの `go`・`sleep`・`wait`・`Chan`・`select`・
+ソケット待ちが `typl` と同じ意味で動く。`eval` 入り AOT でスケジューラが 2 つ並ぶ
+（`eval` 内の `go` が次の `rt_eval` まで走らない）・printer の door 内で `go`/
+チャネル操作が fatal・インタプリタが compiled クロージャを `funcall` すると
+中断できない・`compile-file` が `use` を受理しない、の 4 つは 2026-09-18 に解消——
+機械フレームの上のドライバ（`FrameStack::run_to_end`）が駆動中のスケジューラに
+「今答えられる中断か」を尋ねられるようになったのが核（`sched::answer_now`）。
+経緯は [implementation-log.md](implementation-log.md) の 2 つの節
+（2026-09-17 分と 2026-09-18 分）。
 
 プランが残した制限で**まだ残っているもの**は 2 つあり、どちらも v1 の範囲として
 意図的に受け入れたもの：

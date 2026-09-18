@@ -221,13 +221,28 @@ impl FrameStack {
     }
 
     /// [`Self::run_with_env`] for a caller that is a machine frame: an
-    /// interpreted `apply` underneath is run right here, on that frame.
+    /// interpreted `apply` underneath is run right here, on that frame, and
+    /// a suspension is **resolved** here too — so neither ever comes out.
     ///
-    /// The one thing a driver with no continuation stack behind it can do
-    /// with [`Paused::Applying`]. It keeps the boundaries that still work
-    /// this way (`rt_drive_body`, `rt_drive_entry`, the C FFI thunk) behaving as
-    /// they did, at the cost the plan's B6 names: a call made through one of
-    /// them cannot suspend.
+    /// A driver with no continuation stack behind it cannot put the chain
+    /// down, but most of what a compiled body suspends for is not a wait at
+    /// all: a `(go ...)`, a `Chan::new`, a `(recv ch)` with something
+    /// buffered, a `(wait t)` on a task that has finished. The scheduler
+    /// running the task this driver was reached from answers those on the
+    /// spot ([`crate::sched::answer_now`]), exactly as the interpreter's own
+    /// nested evaluation asks it (`Interp::run_to_completion`). A `(yield)`
+    /// has nobody to yield to and simply goes on, like a safepoint. What is
+    /// left — an operation that would genuinely have to wait — is refused as
+    /// a language-level panic raised *into the chain*, so an `unwind-protect`
+    /// in it runs its cleanups and a `catch` in it may claim the refusal,
+    /// the same path a scheduler's own error takes into a parked task
+    /// (`CompiledTask::deliver`).
+    ///
+    /// This is the boundary the plan's B6 names (`rt_drive_body`, the C FFI
+    /// thunk, a compiled body the interpreter called from a Rust frame), and
+    /// it is exactly as wide now as the interpreter's: reached from a Rust
+    /// caller, an operation that stops for nothing goes through, and one that
+    /// would wait is refused rather than deadlocked.
     pub fn run_to_end(
         &mut self,
         heap: &mut Heap,
@@ -245,29 +260,50 @@ impl FrameStack {
                     self.set_top_value(heap, v);
                     outcome = self.resume(heap, base);
                 }
-                // A loop's back edge offered a turn (C7). This driver has
-                // nowhere to put the chain down, but it does not have to:
-                // nothing is being waited for, so declining the offer and
-                // resuming is the whole of honouring it. The value slot is
-                // set because a resume block reads it like any other, and
-                // the island discards this one.
-                Err(Paused::Suspended) => match call_state::take_pending_suspend() {
-                    Some((call_state::SUSPEND_SAFEPOINT, _, _)) => {
-                        self.set_top_value(heap, 0);
-                        outcome = self.resume(heap, base);
-                    }
-                    // A real wait, which this driver cannot honour. Put it
-                    // back so the caller's error can still say what it was.
-                    other => {
-                        if let Some((kind, first, second)) = other {
-                            call_state::set_pending_suspend_2(kind, first, second);
+                Err(Paused::Suspended) => {
+                    outcome = match crate::sched::pending_wait(heap) {
+                        // Nothing to wait for and nobody to switch to: a loop's
+                        // back edge offering a turn (C7), or a `(yield)`.
+                        // Declining and resuming is the whole of honouring
+                        // either. The value slot is set because a resume block
+                        // reads it like any other, and the island discards
+                        // this one.
+                        Ok((crate::sched::Waiting::Yield, _)) => {
+                            self.set_top_value(heap, 0);
+                            self.resume(heap, base)
                         }
-                        return Err(Paused::Suspended);
-                    }
-                },
+                        Ok((w, wake)) => {
+                            let answer = crate::sched::answer_now(heap, &w)
+                                .unwrap_or_else(|| Err(crate::sched::SchedError::Panic(crate::sched::cannot_block_message(&w))));
+                            match answer {
+                                Ok(v) => {
+                                    // Written into the frame's slot at once —
+                                    // nothing allocates between the answer
+                                    // and the store, so no root is needed.
+                                    self.set_top_value(heap, crate::sched::wake_word(wake, v));
+                                    self.resume(heap, base)
+                                }
+                                Err(e) => self.raise_scheduler_error(heap, base, e),
+                            }
+                        }
+                        Err(e) => self.raise_scheduler_error(heap, base, e),
+                    };
+                }
                 other => return other,
             }
         }
+    }
+
+    /// Hands a scheduler's refusal to the standing chain as the panic it is:
+    /// the payload is parked where the pad looks, and the innermost frame is
+    /// asked for a handler.
+    fn raise_scheduler_error(&mut self, heap: &mut Heap, base: usize, e: crate::sched::SchedError) -> Result<i64, Paused> {
+        let message = match e {
+            crate::sched::SchedError::Panic(m) | crate::sched::SchedError::Internal(m) => m,
+        };
+        // SAFETY: a `Heap` is registered on this thread — the chain just ran on it.
+        unsafe { crate::park_activation_unwind(Box::new(typelisp_abi::CompiledPanic { message })) };
+        self.raise(heap, base)
     }
 
     /// Pick a suspended chain back up: re-enter its innermost frame.
@@ -297,22 +333,28 @@ impl FrameStack {
         self.drive(heap, base, status)
     }
 
-    /// [`run_with_env`](Self::run_with_env) for a compiled closure value,
-    /// applied to no arguments — what a task `go` started runs.
+    /// [`run_with_env`](Self::run_with_env) for a compiled closure value
+    /// applied to `args` — what a task `go` started runs (with no
+    /// arguments: the `go` site's own thunk takes none), and what an
+    /// `apply` of a coroutine-ABI closure is driven as (`State::CompiledEnter`
+    /// / `DriveCallee::Closure`) so it can suspend under the task exactly as
+    /// a named call does.
     ///
-    /// The closure is the one `translate_go` built at the `go` site: a
-    /// coroutine body under this build's ABI, by construction. Anything else
-    /// here is the runtime disagreeing with itself, not a program error.
-    pub fn run_closure(&mut self, heap: &mut Heap, closure: i64) -> Result<i64, Paused> {
-        // SAFETY: the word is a tagged closure box a compiled `go` site handed
-        // to `rt_suspend_go`, in the heap registered on this thread.
+    /// The closure must be a coroutine body under this build's ABI: the
+    /// `go` site (`translate_go`) only ever builds one, and the checker
+    /// only ever routes an `apply` here after `compiled_closure_body_abi`
+    /// said so. Anything else reaching here is the runtime disagreeing with
+    /// itself, not a program error.
+    pub fn run_closure(&mut self, heap: &mut Heap, closure: i64, args: &[i64]) -> Result<i64, Paused> {
+        // SAFETY: the word is a tagged coroutine-ABI closure box, in the
+        // heap registered on this thread.
         match unsafe { crate::resolve_closure(closure) } {
-            crate::Callee::Coroutine { f, env } => self.run_with_env(heap, f, &[], &env),
+            crate::Callee::Coroutine { f, env } => self.run_with_env(heap, f, args, &env),
             crate::Callee::Classic { .. } => {
-                typelisp_abi::fatal("go: the task's closure is a classic-ABI body, which cannot be driven")
+                typelisp_abi::fatal("a compiled closure driven as a task is a classic-ABI body, which cannot be driven")
             }
             crate::Callee::Interpreted => {
-                typelisp_abi::fatal("go: the task's closure is interpreted, which compiled code cannot build")
+                typelisp_abi::fatal("a compiled closure driven as a task is interpreted, which compiled code cannot build")
             }
         }
     }

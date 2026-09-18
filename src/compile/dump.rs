@@ -140,6 +140,7 @@ fn load_unit_with(
 pub fn capture_program_dump(
     heap: &mut Heap,
     source: &str,
+    src_root: &std::path::Path,
     globals: &[(String, usize)],
 ) -> Result<Vec<u8>, String> {
     let prelude = typelisp_front::dump::parse(typelisp_front::prelude::DUMP, "prelude")?;
@@ -167,6 +168,16 @@ pub fn capture_program_dump(
     let mark = heap.root_count();
     let mut forms: Vec<crate::Value> = Vec::new();
     let reader = crate::Reader::new();
+    // The same `use` resolution `compile_file`'s own read loop makes,
+    // against a fresh `Loader` of its own: this is a second, independent
+    // read of the same source (an `eval`-carrying program's compile-time
+    // environment is built once here, at compile time, rather than reusing
+    // `compile_file`'s own checker/interp — see this function's module doc
+    // comment), so a dependency this source `use`s has to be loaded again
+    // here too, under its own file-derived module, for the very same
+    // reason `compile_file` loads it: a later form referring to what it
+    // named has to resolve against something.
+    let mut loader = typelisp_front::project::Loader::new(src_root.to_path_buf());
     // Read, check and run one form before the next is read — the same order
     // the session being recorded ran them in (`Reader::forms_in`).
     let mut program = reader.forms_in(typelisp_front::dump::PROGRAM_LABEL, source);
@@ -176,6 +187,7 @@ pub fn capture_program_dump(
             program.next_form_with(heap, Some(&hook)).map_err(|e| e.to_string())?
         };
         let Some((v, _)) = next else { break };
+        loader.load_uses_in(heap, &reader, &mut chk, &mut interp, std::slice::from_ref(&v)).map_err(|e| e.to_string())?;
         let tl = chk.check_form(heap, &interp, v).map_err(|e| e.to_string())?;
         // The warnings were already reported by the caller's own check of this
         // same source; repeating them would double every one.
@@ -187,6 +199,21 @@ pub fn capture_program_dump(
         }
         interp.exec(heap, tl).map_err(|e| e.to_string())?;
     }
+    // Every dependency's own bundle (`Loader::pending`, one `(module PATH
+    // body...)` wrapper per file — `Interp::exec` already knows how to run
+    // one of those directly, the same way `compile_file`'s flattening
+    // recursion does at one level lower), ahead of the entry's own forms in
+    // `forms` so a restored dump replays a name's definition before
+    // anything that could reference it, exactly as `compile_file`'s own
+    // compile order does.
+    let mut dep_forms: Vec<crate::Value> = Vec::new();
+    for tl in loader.take_pending() {
+        heap.push_root(tl);
+        dep_forms.push(tl);
+        interp.exec(heap, tl).map_err(|e| e.to_string())?;
+    }
+    dep_forms.extend(forms);
+    let forms = dep_forms;
 
     let delta = chk.capture_delta(heap, &before)?;
     let state = typelisp_front::dump::capture_types(heap, delta, typelisp_front::dump::PROGRAM_LABEL, None, None, &forms, globals.to_vec())?;
