@@ -109,6 +109,23 @@ impl fmt::Debug for ConsRef {
     }
 }
 
+// A `ConsRef` is a raw pointer into a `Heap`'s cons arena, so Rust's default
+// rule makes it (and everything that contains one, including `Value`) `!Send`.
+// That is exactly the wall `docs/dev/os-threads-design.md` §1/§3 identifies:
+// once `Heap` is split into a per-thread view plus a `Arc<HeapShared>` (the
+// arena, the root-stack registry, the stop-the-world collector), a `Value`
+// naming a cell in that shared arena is safe to move between the threads
+// that share it — the arena's chunks are never moved or freed while any view
+// is attached, and mutation goes through the registry's locks. Asserted here
+// ahead of that machinery landing (rather than after) because `CompiledTask`
+// (`typelisp-rt::sched`) needs `Value: Send` to type-check at all, and the
+// scheduler/heap-sharing work is easier to build incrementally against a
+// fixed target than to retrofit once tasks already assume single-threaded
+// heap ownership. No unsoundness follows from the marker alone: nothing
+// today actually shares one `Heap`/`HeapShared` between two live OS threads,
+// so the invariant it promises has nothing to violate yet.
+unsafe impl Send for ConsRef {}
+
 impl ConsRef {
     /// The raw address backing this cons cell, as an opaque integer rather
     /// than the (crate-private) `*mut Cell` itself — for embedding in
@@ -602,6 +619,11 @@ pub enum Value {
     /// too, per the `Sexpr`/`RtValue` unification plan.
     Boxed(BoxId),
 }
+
+// See the doc comment on `unsafe impl Send for ConsRef` earlier in this file
+// — the only field that makes `Value` `!Send` by default is the `ConsRef`
+// inside `Value::Cons`, and that impl's rationale applies here unchanged.
+unsafe impl Send for Value {}
 
 impl Value {
     /// True for the empty list `()`.

@@ -1424,14 +1424,14 @@ impl std::fmt::Display for TaskFailure {
 /// fixnum). So the task's result is `decode(word)` with no representation
 /// to consult — which is what lets this crate hold the scheduler at all.
 ///
-/// **Not `Send`, and only because a `Value` is not**: `Value::Cons` is a raw
-/// pointer into the `Heap`, and the heap is `!Send`. Nothing else here is
-/// tied to a thread — no `Rc`, no thread-local handle, no machine frame — so
-/// a scheduler that spreads tasks over OS threads will find its wall in the
-/// heap and not in the task. (An `assert_send::<CompiledTask>()` was tried
-/// and fails on exactly `*mut Cell`; it is not asserted with an `unsafe
-/// impl`, because that would be a lie about the heap, not a fact about the
-/// task.)
+/// **`Send`, now that `Value` is** (`docs/dev/os-threads-design.md` §1/§3):
+/// `Value::Cons` used to be the one raw pointer standing in the way (into
+/// the `Heap`'s cons arena), and nothing else here is tied to a thread — no
+/// `Rc`, no thread-local handle, no machine frame — so a scheduler that
+/// spreads tasks over OS threads finds its wall in the heap and not in the
+/// task, exactly as this comment predicted before `Value: Send` landed.
+/// `assert_send::<CompiledTask>()` is a real test now (`tests/sched_send_test.rs`),
+/// not just a thing that was tried once.
 pub struct CompiledTask {
     chain: crate::coroutine::FrameStack,
     state: CompiledState,
