@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-09-12 / ブランチ: `feature/channels-select-sync`
+最終更新: 2026-09-18 / ブランチ: `feature/aot-scheduler`
 
 このドキュメントは**現在残っている作業のみ**を記録する。終わった作業は
 [completed-work.md](completed-work.md)（何がどこまで進んだかの横断的な要約）と
@@ -8,7 +8,9 @@
 
 ## 残っている作業
 
-**いまのところ無い。**
+| 作業 | 中身 |
+|---|---|
+| エディタのキーワード表にソケット層の名前を足す | `tests/editor_keyword_sync_test.rs` の `vscode_grammar_knows_every_registry_name` / `emacs_mode_knows_every_registry_name` が赤（2026-09-18 時点で 78 名が未登録）。`editor/vscode/syntaxes/typelisp.tmLanguage.json` と `editor/emacs/typelisp-mode.el` はネットワーク層（TCP/TLS/Unix/UDP/DNS）より前から無変更。テストが未登録の名前を列挙する。ユーザ向けの名前（`tcp-connect`・`tls-listen`・`with-connection` など）は 2 ファイルに足し、ユーザ向けでない名前（prelude の糊が呼ぶ `net-*` の内部ビルトインなど）は同テストの `is_excluded` に分類で足す |
 
 **軽量スレッド（goroutine 相当）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
@@ -16,6 +18,15 @@ B1/B2（スケジューラ・`go`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
 （`Chan<T>`・`select`・`WaitGroup`/`Mutex<T>`/`with-lock`）、C0〜C7
 （コンパイル出力の一様コルーチン化）がすべて入っている。経緯は
 [implementation-log.md](implementation-log.md) の 3 つの節。
+
+**AOT 実行ファイルにもスケジューラが載った（2026-09-17）。** プランは
+`~/.claude/plans/aot-os-quizzical-graham.md`。スケジューラの核は
+`typelisp-rt::sched` の `Scheduler<B: TaskBody>` で、`compile-file` した実行ファイルの
+`go`・`sleep`・`wait`・`Chan`・`select`・ソケット待ちが `typl` と同じ意味で動く。
+その作業が「触らない」と決めて残した制限（`eval` 入り AOT でスケジューラが 2 つ並ぶ、
+printer の door 内では `go`/チャネル操作が fatal、インタプリタが compiled クロージャを
+`funcall` すると中断できない、`compile-file` が `use` を受理しない）は
+[implementation-log.md](implementation-log.md) の同節の末尾にある。
 
 プランが残した制限で**まだ残っているもの**は 2 つあり、どちらも v1 の範囲として
 意図的に受け入れたもの：
