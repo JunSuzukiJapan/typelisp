@@ -45,6 +45,7 @@
 
 use std::collections::HashMap;
 use std::ptr;
+use std::sync::{Arc, Mutex};
 
 use crate::Error;
 use super::symbols::{self, SymRef};
@@ -159,11 +160,21 @@ impl<T> std::ops::IndexMut<usize> for Slab<T> {
     }
 }
 
-pub struct Heap {
-    // The cons arena, as one or more chunks. Always at least one entry (a
-    // zero-capacity heap holds a single zero-length chunk). Never reordered:
-    // `gc`'s sweep walks it back to front so the rebuilt free list keeps
-    // handing out low addresses first, exactly as the single-chunk version did.
+/// The cons arena, as one or more chunks. Always at least one entry (a
+/// zero-capacity heap holds a single zero-length chunk). Never reordered:
+/// `gc`'s sweep walks it back to front so the rebuilt free list keeps
+/// handing out low addresses first, exactly as the single-chunk version did.
+///
+/// Its own type, behind [`HeapShared`]'s `Mutex`, rather than fields inline
+/// on `Heap` — this is the first piece of `docs/dev/os-threads-design.md`
+/// §3's split to actually move: `cons` is the hottest allocation path in the
+/// heap, so it is where the "one `Arc<HeapShared>`, many per-thread views"
+/// shape has to prove itself first. Everything else `Heap` owns (the string
+/// and box slot stores, `root_stacks`, the interning tables) stays exactly
+/// where it was for now — this is a deliberately narrow slice of the split,
+/// not the whole thing; see the struct's own fields for what has *not* moved
+/// yet.
+struct Arena {
     chunks: Vec<Chunk>,
     cap: usize, // sum of every chunk's `len`
     // Ceiling on `cap` for growth, in cells. `0` (the default) means the arena
@@ -172,6 +183,48 @@ pub struct Heap {
     growth_limit: usize,
     free: *mut Cell, // head of the free list (null when empty)
     free_count: usize,
+}
+
+// `Chunk`/`*mut Cell` make `Arena` `!Send` by Rust's default auto-trait
+// derivation, the same as `ConsRef` before its own `unsafe impl Send`
+// (`crates/typelisp-mem/src/value.rs`) — a raw pointer into heap memory that
+// is safe to move between threads because every access to it goes through
+// `HeapShared::arena`'s `Mutex`, which is exactly what makes `Mutex<Arena>`
+// itself `Send + Sync` once `Arena: Send` (a `Mutex`'s own `Sync` impl needs
+// only its contents to be `Send`, not `Sync` — the lock supplies the
+// exclusion). Not `Sync` for `Arena` itself: nothing reads it without the
+// lock, so it does not need to be.
+unsafe impl Send for Arena {}
+
+impl Drop for Arena {
+    fn drop(&mut self) {
+        for chunk in self.chunks.drain(..) {
+            if chunk.base.is_null() {
+                continue;
+            }
+            // Reconstitute each chunk's owning Box and drop it, freeing it.
+            unsafe {
+                let raw = ptr::slice_from_raw_parts_mut(chunk.base, chunk.len);
+                drop(Box::from_raw(raw));
+            }
+        }
+    }
+}
+
+/// State one `Heap` view shares with every other view attached to the same
+/// underlying heap (`docs/dev/os-threads-design.md` §3). Only the cons arena
+/// has moved here so far — see `Arena`'s doc comment for why that piece
+/// first and the rest later. `Heap::with_capacity` is still the only place
+/// that creates one, and always creates exactly one view for it, so nothing
+/// today actually exercises concurrent access; this exists to let that
+/// access be added incrementally, method by method, without a second
+/// large-scale field migration once it is.
+pub struct HeapShared {
+    arena: Mutex<Arena>,
+}
+
+pub struct Heap {
+    shared: Arc<HeapShared>,
     // When set, every `cons` collects first — see `set_gc_stress`.
     gc_stress: bool,
     // How many collections have run, for tests that assert an allocation
@@ -315,15 +368,13 @@ impl Heap {
     /// deliberately tiny heap stays deliberately tiny.
     pub fn with_capacity(capacity: usize) -> Heap {
         let (chunk, free) = Self::alloc_chunk(capacity, ptr::null_mut());
+        let arena = Arena { chunks: vec![chunk], cap: capacity, growth_limit: capacity.saturating_mul(GROWTH_FACTOR), free, free_count: capacity };
+        let shared = Arc::new(HeapShared { arena: Mutex::new(arena) });
 
         let mut home = Box::new(RootStack::default());
         let current: *mut RootStack = &mut *home;
         let mut heap = Heap {
-            chunks: vec![chunk],
-            cap: capacity,
-            growth_limit: capacity.saturating_mul(GROWTH_FACTOR),
-            free,
-            free_count: capacity,
+            shared,
             gc_stress: false,
             gc_count: 0,
             root_stacks: vec![Some(home)],
@@ -434,17 +485,18 @@ impl Heap {
 
     /// Total number of cons cells in the arena.
     pub fn capacity(&self) -> usize {
-        self.cap
+        self.shared.arena.lock().unwrap().cap
     }
 
     /// Cons cells currently on the free list (available to allocate).
     pub fn free_count(&self) -> usize {
-        self.free_count
+        self.shared.arena.lock().unwrap().free_count
     }
 
     /// Cons cells currently in use (`capacity - free_count`).
     pub fn live_count(&self) -> usize {
-        self.cap - self.free_count
+        let arena = self.shared.arena.lock().unwrap();
+        arena.cap - arena.free_count
     }
 
     /// How many collections have run over this heap's lifetime. A ratio, not
@@ -2094,12 +2146,12 @@ impl Heap {
     /// the point: it is what still turns a runaway leak into a loud error
     /// rather than letting the process be OOM-killed.
     pub fn set_growth_limit(&mut self, max_cells: usize) {
-        self.growth_limit = max_cells;
+        self.shared.arena.lock().unwrap().growth_limit = max_cells;
     }
 
     /// The current growth ceiling in cells (`0` when the arena is fixed).
     pub fn growth_limit(&self) -> usize {
-        self.growth_limit
+        self.shared.arena.lock().unwrap().growth_limit
     }
 
     /// Collect before *every* cons allocation. Enormously slow — this is a
@@ -2124,30 +2176,48 @@ impl Heap {
     /// Append one chunk, doubling the arena but never passing `growth_limit`.
     /// Returns false when growth is disabled or the ceiling is already reached,
     /// which is what makes the caller report [`Error::HeapExhausted`].
+    ///
+    /// Takes the whole lock for its whole body — nothing it calls (only the
+    /// self-contained, `self`-free [`Heap::alloc_chunk`]) locks the arena
+    /// again, so this never nests a `Mutex::lock` inside another one on the
+    /// same mutex (which would deadlock: `std::sync::Mutex` is not
+    /// reentrant). [`Heap::cons`]'s doc comment explains why *its* locking is
+    /// split into several short critical sections instead of one like this.
     fn grow(&mut self) -> bool {
-        if self.growth_limit <= self.cap {
+        let mut arena = self.shared.arena.lock().unwrap();
+        if arena.growth_limit <= arena.cap {
             return false;
         }
         // Doubling keeps the amortized cost of growth constant. `MIN_CHUNK`
         // stops a heap created with a tiny (or zero) capacity from growing one
         // cell at a time.
         const MIN_CHUNK: usize = 1024;
-        let want = self.cap.max(MIN_CHUNK);
-        let len = want.min(self.growth_limit - self.cap);
+        let want = arena.cap.max(MIN_CHUNK);
+        let len = want.min(arena.growth_limit - arena.cap);
         if len == 0 {
             return false;
         }
-        let (chunk, free) = Self::alloc_chunk(len, self.free);
-        self.chunks.push(chunk);
-        self.cap += len;
-        self.free = free;
-        self.free_count += len;
+        let (chunk, free) = Self::alloc_chunk(len, arena.free);
+        arena.chunks.push(chunk);
+        arena.cap += len;
+        arena.free = free;
+        arena.free_count += len;
         true
     }
 
     /// Allocate a cons cell `(car . cdr)`. Runs a GC if the free list is empty,
     /// then grows the arena if [`Heap::set_growth_limit`] permits; returns
     /// [`Error::HeapExhausted`] if even then no cell is available.
+    ///
+    /// Locks the arena several times rather than once for the whole call:
+    /// this method calls [`Heap::gc`] and [`Heap::grow`], and each of those
+    /// takes the same lock itself (`gc`'s cons sweep; `grow`, above) — a
+    /// guard held here across either call would try to lock a `Mutex` this
+    /// same thread already holds, which deadlocks rather than reentering.
+    /// So every section below takes the lock, reads or writes what it needs,
+    /// and drops it before calling anything that might want it again. Cheap
+    /// when uncontended (today, always — nothing shares a `HeapShared` with
+    /// this view yet), and correct once something does.
     pub fn cons(&mut self, car: Value, cdr: Value) -> Result<Value, Error> {
         if self.gc_stress {
             // Deliberately collect before *every* allocation so a caller that
@@ -2157,7 +2227,7 @@ impl Heap {
             // `set_gc_stress`.
             self.gc();
         }
-        if self.free.is_null() {
+        if self.shared.arena.lock().unwrap().free.is_null() {
             self.gc();
             // A collection that hands back one cell is not a collection that
             // helped: with a live set just under capacity the *next* cons
@@ -2171,16 +2241,21 @@ impl Heap {
             // A fixed arena is unaffected: `grow` refuses immediately when no
             // ceiling was set, so `Error::HeapExhausted` still means exactly
             // "a collection freed nothing and growth is not permitted".
-            if self.free_count.saturating_mul(HEADROOM_DIVISOR) < self.cap {
+            let (free_count, cap) = {
+                let arena = self.shared.arena.lock().unwrap();
+                (arena.free_count, arena.cap)
+            };
+            if free_count.saturating_mul(HEADROOM_DIVISOR) < cap {
                 self.grow();
             }
-            if self.free.is_null() && !self.grow() {
+            if self.shared.arena.lock().unwrap().free.is_null() && !self.grow() {
                 return Err(Error::HeapExhausted);
             }
         }
-        let p = self.free;
+        let mut arena = self.shared.arena.lock().unwrap();
+        let p = arena.free;
         unsafe {
-            self.free = (*p).next_free;
+            arena.free = (*p).next_free;
             (*p).car = car;
             (*p).cdr = cdr;
             (*p).mark = false;
@@ -2192,7 +2267,7 @@ impl Heap {
             (*p).car_loc = LocId::NONE;
             (*p).self_loc = LocId::NONE;
         }
-        self.free_count -= 1;
+        arena.free_count -= 1;
         Ok(Value::Cons(ConsRef(p)))
     }
 
@@ -2394,7 +2469,7 @@ impl Heap {
     fn audit_roots_against_free_list(&self) {
         use std::collections::HashSet;
         let mut freed: HashSet<usize> = HashSet::new();
-        let mut p = self.free;
+        let mut p = self.shared.arena.lock().unwrap().free;
         while !p.is_null() {
             freed.insert(p as usize);
             p = unsafe { (*p).next_free };
@@ -2516,10 +2591,15 @@ impl Heap {
         // (and cells within a chunk) back to front leaves the rebuilt list
         // ordered lowest-address-first, the same allocation order the
         // single-chunk arena had.
-        let old_free = self.free_count;
+        //
+        // Locked for this section only — the mark phase above never touches
+        // the arena (it dereferences `*mut Cell`s directly, not through
+        // `chunks`), so there is nothing to hold the lock across.
+        let mut arena = self.shared.arena.lock().unwrap();
+        let old_free = arena.free_count;
         let mut new_free: *mut Cell = ptr::null_mut();
         let mut new_free_count = 0usize;
-        for chunk in self.chunks.iter().rev() {
+        for chunk in arena.chunks.iter().rev() {
             for i in (0..chunk.len).rev() {
                 unsafe {
                     let p = chunk.base.add(i);
@@ -2543,8 +2623,9 @@ impl Heap {
                 }
             }
         }
-        self.free = new_free;
-        self.free_count = new_free_count;
+        arena.free = new_free;
+        arena.free_count = new_free_count;
+        drop(arena);
 
         // SWEEP strings: free unmarked occupied slots, recycling indices.
         for i in 0..self.str_slots.len() {
@@ -2631,20 +2712,14 @@ impl Drop for RootScope<'_> {
     }
 }
 
-impl Drop for Heap {
-    fn drop(&mut self) {
-        for chunk in self.chunks.drain(..) {
-            if chunk.base.is_null() {
-                continue;
-            }
-            // Reconstitute each chunk's owning Box and drop it, freeing it.
-            unsafe {
-                let raw = ptr::slice_from_raw_parts_mut(chunk.base, chunk.len);
-                drop(Box::from_raw(raw));
-            }
-        }
-    }
-}
+// No `impl Drop for Heap`: freeing the arena's chunks is `Arena`'s own
+// `Drop` now (see its doc comment), which runs when the last `Heap` view
+// sharing this `Arc<HeapShared>` goes away and drops the `Arc` down to
+// nothing — not when any one view is dropped, since a view no longer owns
+// the arena outright. Everything else `Heap` still owns directly (the
+// `Slab`s, `root_stacks`, the interning tables) cleans up through its own
+// ordinary field-by-field `Drop`, same as before this struct had any
+// `Arc`-shared part.
 
 /// A type key's base name, without its instantiation: `option<char>` ->
 /// `option`, `point` -> `point`.
