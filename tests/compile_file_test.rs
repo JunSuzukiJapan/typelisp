@@ -1209,6 +1209,52 @@ fn a_used_sibling_file_is_compiled_into_the_executable() {
     assert_eq!(out.status.code(), Some(105), "stderr was: {}", String::from_utf8_lossy(&out.stderr));
 }
 
+/// A `defun main` nested in a `(module ...)` in the entry file can never be
+/// reached as the entry point — `compile_file`'s entry symbol is always the
+/// root `main` (see `compile::aot`'s module doc comment, "## use and
+/// modules") — so it is rejected at compile time rather than silently
+/// compiled as unreachable code under a confusing name.
+#[test]
+fn a_main_nested_in_a_module_in_the_entry_file_is_rejected() {
+    let dir = tmp_dir();
+    let src_path = dir.join("nested_main_in_entry_aot.typl");
+    std::fs::write(
+        &src_path,
+        r#"
+        (module m (defun main () int 0))
+        (defun main () int 0)
+        "#,
+    )
+    .expect("failed to write test source file");
+    let out_path = dir.join("nested_main_in_entry_aot");
+    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect_err("a nested `main` must be rejected");
+    assert!(err.contains("main"), "error was: {err}");
+}
+
+/// The same rejection reaches a `use`d dependency file's own `main` too —
+/// `collect_aot_item` runs the same check for a dependency's items as for
+/// the entry file's own, so there is no separate case to add for it.
+#[test]
+fn a_main_in_a_used_dependency_file_is_rejected() {
+    let dir = tmp_dir();
+    let lib_path = dir.join("dep_with_main_lib.typl");
+    std::fs::write(&lib_path, r#"(defun main () int 0)"#).expect("failed to write the dependency source file");
+    let src_path = dir.join("dep_with_main_aot.typl");
+    std::fs::write(
+        &src_path,
+        r#"
+        (use dep_with_main_lib)
+        (defun main () int 0)
+        "#,
+    )
+    .expect("failed to write test source file");
+    let out_path = dir.join("dep_with_main_aot");
+    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect_err("a used dependency's own `main` must be rejected");
+    assert!(err.contains("main"), "error was: {err}");
+}
+
 /// The combination Phase 3 and Phase 4 of the AOT-scheduler work land
 /// together for: an `eval`'d form referring to a `use`d dependency's
 /// function. The eval environment is captured at compile time by an

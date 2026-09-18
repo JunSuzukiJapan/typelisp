@@ -39,6 +39,22 @@
 //! [`build_main_wrapper`] adds a separate, hand-built LLVM function
 //! actually named `main` that just calls `tl_main` and truncates its `i64`
 //! result to the `i32` process exit code.
+//!
+//! ## `use` and modules
+//!
+//! A `(use ...)` in the entry file loads the dependency it names through
+//! the same [`crate::project::Loader`] `typl file.typl` uses, each under
+//! its own file-derived module path (`Loader::load_uses_in`). The entry
+//! file itself is the one exception: unlike `Loader::load_entry` (which
+//! wraps *every* file it loads, entry included, in `<stem>`), the entry
+//! file here stays at the root namespace — narrower than what `Loader`
+//! would do on its own, and deliberately so, since wrapping it would change
+//! `tl_main`/`ENTRY_POINT_INTERNAL_NAME` and everything downstream of it
+//! that assumes a bare root `main`. A `defun main` anywhere else — inside a
+//! `(module ...)` in the entry file, or anywhere in a `use`d file — can
+//! never be reached as an entry point, so [`collect_aot_item`] rejects it
+//! outright rather than silently compiling dead code under a confusing
+//! name.
 
 use std::cell::RefCell;
 use std::fs;
@@ -63,14 +79,15 @@ const ENTRY_POINT_INTERNAL_NAME: &str = "tl_main";
 /// [`compile_file`] must do with it: a compiled body to emit (`items`), a
 /// global to re-initialize at startup (`defvar_inits`), or nothing.
 ///
-/// Recurses into a `(module ...)`, which covers four shapes at once — the
+/// Recurses into a `(module ...)`, which covers three shapes at once — the
 /// monomorphization bundle a generic instantiation comes wrapped in, the
-/// `(module ...)` a user writes, the per-target-type grouping
-/// `Checker::check_impl` returns for an `impl` block, and the whole-file
-/// wrapper the project [`Loader`](crate::project::Loader) puts around every
-/// loaded file (the entry file included, since [`compile_file`] reads
-/// through the same `Loader` `typl file.typl` does). All four are just
-/// containers of the same items; the enclosing module is already baked into
+/// `(module ...)` a user writes, and the per-target-type grouping
+/// `Checker::check_impl` returns for an `impl` block. (The entry file itself
+/// is *not* one of these: unlike `typl file.typl`'s own `Loader::load_entry`,
+/// [`compile_file`] keeps the entry file at the root namespace and only
+/// wraps a `use`d dependency in its file-derived module — see the module doc
+/// comment.) These are just containers of the same items; the enclosing
+/// module is already baked into
 /// each item's own fully-qualified `Path`, so flattening loses nothing —
 /// each `defun`/`defmethod` becomes a [`CompiledItem`] by that full path,
 /// never by its last segment alone, which is what lets a module-qualified
@@ -100,6 +117,20 @@ fn collect_aot_item(
     let defvar_meta = match tag.as_str() {
         "defun" => {
             let path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defun without a name".to_string())?;
+            // A `defun main` anywhere but the program's root is never called
+            // — the entry point is always `entry_path` (`Path::root("main")`)
+            // — so it is almost certainly a mistake (entry code written
+            // inside a `module`, or a `use`d file's own unrelated `main`)
+            // rather than an intentional name. Reject it outright rather
+            // than silently compiling dead code under a confusing name.
+            if path.last_segment() == ENTRY_POINT_NAME && &path != entry_path {
+                return Err(format!(
+                    "compile-file: `{}` is named `{}`, but only the top-level `defun main` at \
+                     the program's root is the entry point — rename this one (a `defun main` \
+                     nested in a module, or in a `use`d file, is never called)",
+                    path, ENTRY_POINT_NAME
+                ));
+            }
             items.push(CompiledItem::Fn(path));
             None
         }
@@ -168,12 +199,9 @@ fn collect_aot_item(
 
 /// Whether a top-level `(expr ...)` is `(main)` — a call of the entry
 /// point, resolved to `entry_path`, with no arguments — the one expression
-/// an AOT source may carry. `entry_path` is the entry *file's* own module
-/// path with `main` appended (`<stem>::main`, or bare `main` for a file at
-/// its project's source root), never just `Path::root("main")`: the entry
-/// file is loaded as a module like any other (`compile_file`'s own `Loader`
-/// pass), so a bare `(main)` written in it resolves the same way any other
-/// bare name in the file would.
+/// an AOT source may carry. `entry_path` is always `Path::root(ENTRY_POINT_NAME)`:
+/// the entry file stays at the root namespace (see the module doc comment),
+/// so a bare `(main)` written in it resolves there too.
 fn is_entry_call(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
     let Some(form) = core::field(heap, tl, 0) else { return false };
     if core::op(heap, form) != Some("call") {
