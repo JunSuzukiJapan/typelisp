@@ -321,7 +321,7 @@ fn hash_form(
                 6u8.hash(hasher);
                 let segments = heap.path_segments(id);
                 segments.len().hash(hasher);
-                for seg in segments {
+                for seg in segments.iter() {
                     heap.symbol_name(*seg).hash(hasher);
                 }
             }

@@ -232,7 +232,7 @@ fn a_struct_reachable_only_through_a_cons_car_survives_gc() {
     h.gc();
     assert_eq!(h.box_count(), 1, "only the struct reachable through the rooted cons survives");
     let Value::Boxed(id) = h.car(list).unwrap() else { panic!("expected the struct back") };
-    assert_eq!(h.struct_type_name(id), "point");
+    assert_eq!(&*h.struct_type_name(id), "point");
     assert_eq!(h.struct_field(id, 0), Value::Int(1));
     assert_eq!(h.struct_field(id, 1), Value::Int(2));
     assert_accounting(&h);
@@ -946,7 +946,7 @@ fn structs_store_and_read_back_fields() {
     let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
     match s {
         Value::Boxed(id) => {
-            assert_eq!(h.struct_type_name(id), "point");
+            assert_eq!(&*h.struct_type_name(id), "point");
             assert_eq!(h.struct_field_count(id), 2);
             assert_eq!(h.struct_field(id, 0), Value::Int(1));
             assert_eq!(h.struct_field(id, 1), Value::Int(2));
@@ -1000,7 +1000,7 @@ fn struct_accessor_on_a_boxed_float_panics() {
         Value::Boxed(id) => id,
         other => panic!("expected a boxed float, got {:?}", other),
     };
-    h.struct_type_name(id);
+    let _ = h.struct_type_name(id);
 }
 
 #[test]
@@ -1022,7 +1022,7 @@ fn struct_reachable_via_rooted_cons_survives() {
     h.gc();
     assert_eq!(h.box_count(), 1); // only "keep" survives
     match h.car(cell).unwrap() {
-        Value::Boxed(id) => assert_eq!(h.struct_type_name(id), "keep"),
+        Value::Boxed(id) => assert_eq!(&*h.struct_type_name(id), "keep"),
         other => panic!("expected a boxed struct in car, got {:?}", other),
     }
 }
@@ -1760,7 +1760,7 @@ fn a_dyn_box_keeps_the_value_it_wraps_alive() {
     assert!(!h.is_struct(id), "boxing must not make the wrapper look like the struct inside");
     assert_eq!(h.dyn_vtable_id(id), 7);
     let Value::Boxed(inner) = h.dyn_value(id) else { panic!("expected the struct back") };
-    assert_eq!(h.struct_type_name(inner), "point");
+    assert_eq!(&*h.struct_type_name(inner), "point");
     assert_eq!(h.struct_field(inner, 1), Value::Int(2));
     assert_accounting(&h);
 }

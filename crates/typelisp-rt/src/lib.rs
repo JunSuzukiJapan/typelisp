@@ -5424,7 +5424,7 @@ mod tests {
         match decode(tagged) {
             Value::Boxed(id) => {
                 let h = unsafe { active_heap() };
-                assert_eq!(h.struct_type_name(id), "point");
+                assert_eq!(&*h.struct_type_name(id), "point");
                 assert_eq!(h.struct_field_count(id), 2);
             }
             other => panic!("expected a boxed struct, got {:?}", other),
@@ -5467,7 +5467,7 @@ mod tests {
                 let h = unsafe { active_heap() };
                 assert!(h.is_enum(id));
                 assert!(!h.is_struct(id), "an enum box must not read as a struct");
-                assert_eq!(h.enum_type_name(id), "option");
+                assert_eq!(&*h.enum_type_name(id), "option");
                 assert_eq!(h.enum_variant(id), 0);
                 assert_eq!(h.enum_field_count(id), 1);
             }

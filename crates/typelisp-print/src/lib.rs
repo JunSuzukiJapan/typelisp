@@ -132,11 +132,17 @@ impl PrintEnv for BarePrintEnv {
 /// *string* here on purpose: this crate has no `Path`, and every question the
 /// printer asks of a type identity — display it, look up a variant name,
 /// dispatch `print-object` — is answered by the key as written.
-pub(crate) fn stored_type_key(heap: &Heap, id: typelisp_mem::BoxId) -> Option<&str> {
+///
+/// Owned rather than borrowed: `Heap::struct_type_name`/`enum_type_name` hand
+/// back a read-locked guard (`docs/dev/os-threads-design.md` §3), and every
+/// caller here holds the result across other heap/table calls the guard's
+/// lock could not stay alive through anyway — a short clone of an interned
+/// type name is cheap next to that.
+pub(crate) fn stored_type_key(heap: &Heap, id: typelisp_mem::BoxId) -> Option<String> {
     if heap.is_struct(id) {
-        Some(heap.struct_type_name(id))
+        Some(heap.struct_type_name(id).to_string())
     } else if heap.is_enum(id) {
-        Some(heap.enum_type_name(id))
+        Some(heap.enum_type_name(id).to_string())
     } else {
         None
     }

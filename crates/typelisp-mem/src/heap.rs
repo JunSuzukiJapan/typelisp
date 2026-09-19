@@ -47,6 +47,8 @@ use std::collections::HashMap;
 use std::ptr;
 use std::sync::{Arc, Mutex};
 
+use parking_lot::RwLock;
+
 use crate::Error;
 use super::symbols::{self, SymRef};
 use super::value::{BoxId, BoxedObj, Cell, ConsRef, FloatBox, LocId, NarrowInt, PathId, StrId, StructPayload, TypeKeyId, Value};
@@ -211,20 +213,36 @@ impl Drop for Arena {
     }
 }
 
+/// Permanent, append-only identity tables — see `HeapShared::interning`.
+/// Grouped into one struct (rather than one lock per field) because
+/// `intern_type_key`/`intern_path` are the only writers and each only ever
+/// touches its own pair, so one `RwLock` covering both pairs costs nothing
+/// extra in contention while keeping `HeapShared` from growing a lock per
+/// table.
+#[derive(Default)]
+struct Interning {
+    // interned type identities (permanent) — see `TypeKeyId`. The first
+    // `BUILTIN_TYPE_KEYS.len()` entries are pre-interned by `Heap::with_capacity`, so their
+    // ids are the `TypeKeyId` associated constants.
+    type_keys: Vec<String>,
+    type_key_ids: HashMap<String, u32>,
+
+    // interned `::` paths (permanent; reference only permanent symbols)
+    paths: Vec<Vec<SymRef>>,
+    path_ids: HashMap<Vec<SymRef>, u32>,
+}
+
 /// State one `Heap` view shares with every other view attached to the same
 /// underlying heap (`docs/dev/os-threads-design.md` §3). The cons arena,
-/// every task's root stack, and `permanent_roots` have moved here so far.
-/// **Deliberately not yet moved**: `str_slots`/`box_slots`/the interning
-/// tables (`type_keys`/`paths`), because several public methods return a
-/// reference borrowed from them with `&self`'s lifetime
-/// (`Heap::string`/`Heap::bignum_value`/`Heap::type_key_name`/… — see the
-/// `grep` in the design doc's Phase 1c notes) — putting that storage behind
-/// a `Mutex`/`RwLock` cannot keep that shape, since nothing can return a
-/// reference into a lock without also handing back something that keeps the
-/// lock held, which `std::sync::{Mutex,RwLock}` has no stable way to do.
-/// That needs its own decision (a mapped-guard-capable lock like
-/// `parking_lot`'s, an owned/cloning return, or a closure-taking accessor)
-/// before it can move, so it stays on `Heap` for now. `Heap::with_capacity`
+/// every task's root stack, `permanent_roots`, and the interning tables
+/// (`type_keys`/`paths`) have moved here so far. **Deliberately not yet
+/// moved**: `str_slots`/`box_slots`, for the same reference-returning-method
+/// reason the interning tables used to be here (`Heap::string`/
+/// `bignum_value`/`struct_type_name`/… — see the `grep` in the design doc's
+/// Phase 1c notes), now resolved for `type_key_name`/`path_segments` by
+/// switching to `parking_lot`'s mapped read guards (`RwLockReadGuard::map`,
+/// which `std::sync::RwLock` has no stable way to do) — the same fix
+/// applies to the string/box stores in a later slice.  `Heap::with_capacity`
 /// is still the only place that creates a `HeapShared`, and always creates
 /// exactly one view for it, so nothing today actually exercises concurrent
 /// access; this exists to let that access be added incrementally, field by
@@ -244,6 +262,12 @@ pub struct HeapShared {
     // backs — see `push_permanent_root`) must read the same way from every
     // thread that names it.
     permanent_roots: Mutex<Slab<Value>>,
+    // `parking_lot::RwLock`, not `std::sync::RwLock`: `type_key_name`/
+    // `path_segments` return a reference borrowed from inside this lock, and
+    // only `parking_lot`'s guards can be `.map()`ped to shrink that
+    // reference down from "the whole table" to "the one entry" while still
+    // keeping the lock held for exactly the returned guard's lifetime.
+    interning: RwLock<Interning>,
 }
 
 pub struct Heap {
@@ -287,16 +311,9 @@ pub struct Heap {
     // table (`super::symbols`), so a symbol means the same thing in every
     // heap and compiled code can reach one without an active `Heap` at all.
 
-    // interned type identities (permanent) — see `TypeKeyId`. The first
-    // `BUILTIN_TYPE_KEYS.len()` entries are pre-interned by `Heap::with_capacity`, so their
-    // ids are the `TypeKeyId` associated constants.
-    type_keys: Vec<String>,
-    type_key_ids: HashMap<String, u32>,
-
-
-    // interned `::` paths (permanent; reference only permanent symbols)
-    paths: Vec<Vec<SymRef>>,
-    path_ids: HashMap<Vec<SymRef>, u32>,
+    // Type identities and `::` paths are *not* here either, as of this
+    // slice: both moved into `shared.interning` — see `HeapShared`'s doc
+    // comment.
 
     // GC-managed string store
     str_slots: Slab<String>,
@@ -392,6 +409,7 @@ impl Heap {
             arena: Mutex::new(arena),
             root_stacks: Mutex::new(vec![Some(home)]),
             permanent_roots: Mutex::new(Slab::new()),
+            interning: RwLock::new(Interning::default()),
         });
 
         let mut heap = Heap {
@@ -404,10 +422,6 @@ impl Heap {
             in_flight_throw: None,
             macro_chars: HashMap::new(),
             dispatch_chars: HashMap::new(),
-            type_keys: Vec::new(),
-            type_key_ids: HashMap::new(),
-            paths: Vec::new(),
-            path_ids: HashMap::new(),
             str_slots: Slab::new(),
             str_free: Vec::new(),
             str_marks: Vec::new(),
@@ -909,12 +923,13 @@ impl Heap {
     /// front end's job (`typelisp-front`'s `type_key` module); this layer only
     /// stores what it is given.
     pub fn intern_type_key(&mut self, name: &str) -> TypeKeyId {
-        if let Some(&id) = self.type_key_ids.get(name) {
+        let mut interning = self.shared.interning.write();
+        if let Some(&id) = interning.type_key_ids.get(name) {
             return TypeKeyId(id);
         }
-        let id = self.type_keys.len() as u32;
-        self.type_keys.push(name.to_string());
-        self.type_key_ids.insert(name.to_string(), id);
+        let id = interning.type_keys.len() as u32;
+        interning.type_keys.push(name.to_string());
+        interning.type_key_ids.insert(name.to_string(), id);
         TypeKeyId(id)
     }
 
@@ -925,13 +940,21 @@ impl Heap {
     /// no value has: `None` answers the question already (nothing can be an
     /// instance of a type never named here).
     pub fn type_key_id(&self, name: &str) -> Option<TypeKeyId> {
-        self.type_key_ids.get(name).map(|&id| TypeKeyId(id))
+        self.shared.interning.read().type_key_ids.get(name).map(|&id| TypeKeyId(id))
     }
 
     /// The name behind an interned type identity — for printing, `Debug`, and
     /// error messages. Not for comparison: compare the ids.
-    pub fn type_key_name(&self, key: TypeKeyId) -> &str {
-        &self.type_keys[key.0 as usize]
+    ///
+    /// Returns a mapped read guard rather than `&str`: `type_keys` lives
+    /// behind `shared.interning`'s lock, and `parking_lot::RwLockReadGuard`
+    /// is what lets this narrow "the whole table, read-locked" down to "this
+    /// one entry" while keeping the lock held for exactly the guard's
+    /// lifetime (see `HeapShared`'s doc comment). Every existing call site
+    /// only ever read the string through the old `&str` before dropping it,
+    /// so `Deref<Target = str>` keeps them unchanged.
+    pub fn type_key_name(&self, key: TypeKeyId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
+        parking_lot::RwLockReadGuard::map(self.shared.interning.read(), |i| i.type_keys[key.0 as usize].as_str())
     }
 
 
@@ -941,18 +964,20 @@ impl Heap {
     /// Paths are permanent (they reference only permanent symbols), and equal
     /// segment sequences share one [`PathId`].
     pub fn intern_path(&mut self, segs: &[SymRef]) -> Value {
-        if let Some(&id) = self.path_ids.get(segs) {
+        let mut interning = self.shared.interning.write();
+        if let Some(&id) = interning.path_ids.get(segs) {
             return Value::Path(PathId(id));
         }
-        let id = self.paths.len() as u32;
-        self.paths.push(segs.to_vec());
-        self.path_ids.insert(segs.to_vec(), id);
+        let id = interning.paths.len() as u32;
+        interning.paths.push(segs.to_vec());
+        interning.path_ids.insert(segs.to_vec(), id);
         Value::Path(PathId(id))
     }
 
-    /// The symbol segments of an interned path.
-    pub fn path_segments(&self, id: PathId) -> &[SymRef] {
-        &self.paths[id.0 as usize]
+    /// The symbol segments of an interned path. See `type_key_name`'s doc
+    /// comment for why this returns a mapped guard rather than `&[SymRef]`.
+    pub fn path_segments(&self, id: PathId) -> parking_lot::MappedRwLockReadGuard<'_, [SymRef]> {
+        parking_lot::RwLockReadGuard::map(self.shared.interning.read(), |i| i.paths[id.0 as usize].as_slice())
     }
 
     // ---- strings ----------------------------------------------------------
@@ -1272,7 +1297,8 @@ impl Heap {
 
     /// The *name* of a boxed struct's type, for printing and diagnostics.
     /// Comparisons use [`struct_type_key`](Self::struct_type_key) instead.
-    pub fn struct_type_name(&self, id: BoxId) -> &str {
+    /// See `type_key_name`'s doc comment for why this returns a mapped guard.
+    pub fn struct_type_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
         self.type_key_name(self.struct_type_key(id))
     }
 
@@ -1401,7 +1427,8 @@ impl Heap {
 
     /// The *name* of a boxed enum value's type, for printing and diagnostics.
     /// Comparisons use [`enum_type_key`](Self::enum_type_key) instead.
-    pub fn enum_type_name(&self, id: BoxId) -> &str {
+    /// See `type_key_name`'s doc comment for why this returns a mapped guard.
+    pub fn enum_type_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
         self.type_key_name(self.enum_type_key(id))
     }
 

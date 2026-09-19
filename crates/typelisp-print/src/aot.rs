@@ -109,7 +109,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     // call below.
     let Some(addr) = ({
         let Some(key) = stored_type_key(heap, id) else { return Ok(None) };
-        PRINT_OBJECT.with(|t| t.borrow().get(key).copied())
+        PRINT_OBJECT.with(|t| t.borrow().get(&key).copied())
     }) else {
         return Ok(None);
     };
@@ -130,7 +130,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
         other => {
             // Only the error path needs the name back, so it is read here
             // rather than kept borrowed across the compiled call above.
-            let key = stored_type_key(heap, id).unwrap_or("<untyped box>");
+            let key = stored_type_key(heap, id).unwrap_or_else(|| "<untyped box>".to_string());
             Err(format!("print-object on `{}` returned {:?}, not a string", key, other))
         }
     }
@@ -152,7 +152,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
 fn aot_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
     let keys: Vec<String> = match v {
         Value::Boxed(id) => {
-            match heap.primitive_box_type_name(id).map(str::to_string).or_else(|| stored_type_key(heap, id).map(str::to_string)) {
+            match heap.primitive_box_type_name(id).map(str::to_string).or_else(|| stored_type_key(heap, id)) {
                 Some(k) => vec![k],
                 None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
             }

@@ -352,7 +352,7 @@ fn the_builtin_type_key_constants_are_what_a_heap_interns() {
              `BUILTIN_TYPE_KEYS` have drifted apart",
             name
         );
-        assert_eq!(heap.type_key_name(id), *name);
+        assert_eq!(&*heap.type_key_name(id), *name);
     }
 }
 

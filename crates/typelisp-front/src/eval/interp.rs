@@ -2307,7 +2307,7 @@ impl Interp {
         // says which — the thing it did not carry until 2026-08-31, which is
         // why a generic type's `print-object` never fired.
         let method = match crate::type_key::heap_type_key(heap, id) {
-            Some(key) => crate::type_key::specialized_method_name(key, "print-object"),
+            Some(key) => crate::type_key::specialized_method_name(&key, "print-object"),
             None => "print-object".to_string(),
         };
         // A value already being printed by its own method is rendered the
@@ -2399,7 +2399,7 @@ impl Interp {
         // `Self::print_object`.
         let looked_up = match v {
             Value::Boxed(id) => match crate::type_key::heap_type_key(heap, id) {
-                Some(key) => crate::type_key::specialized_method_name(key, name),
+                Some(key) => crate::type_key::specialized_method_name(&key, name),
                 None => name.to_string(),
             },
             _ => name.to_string(),

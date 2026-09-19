@@ -70,7 +70,7 @@ fn list_mixes_a_struct_instance_with_a_scalar() {
     let car = h.car(v).expect("cons");
     match car {
         Value::Boxed(id) => {
-            assert_eq!(h.struct_type_name(id), "point");
+            assert_eq!(&*h.struct_type_name(id), "point");
             assert_eq!(h.struct_field(id, 0), Value::Int(1));
             assert_eq!(h.struct_field(id, 1), Value::Int(2));
         }
@@ -92,7 +92,7 @@ fn list_holds_an_enum_variant() {
     let car = h.car(v).expect("cons");
     match car {
         Value::Boxed(id) => {
-            assert_eq!(h.enum_type_name(id), "color");
+            assert_eq!(&*h.enum_type_name(id), "color");
             assert_eq!(h.enum_variant(id), 0);
         }
         other => panic!("expected boxed enum in car, got {:?}", other),

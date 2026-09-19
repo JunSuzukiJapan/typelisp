@@ -187,8 +187,15 @@ pub fn specialized_method_name(key: &str, method: &str) -> String {
 /// The raw key stored in boxed value `id` — the spelling, instantiation and
 /// all. [`heap_type_path`] is the same thing reduced to a [`Path`], for
 /// callers that want the *type* rather than the instantiation.
-pub fn heap_type_key(heap: &Heap, id: BoxId) -> Option<&str> {
-    stored_key(heap, id).map(|k| heap.type_key_name(k))
+///
+/// Owned rather than borrowed: `Heap::type_key_name` hands back a
+/// read-locked guard tied to its own lifetime, not `heap`'s
+/// (`docs/dev/os-threads-design.md` §3), and every caller here needs the
+/// spelling past that guard's scope (stashed in a `Path`, compared against
+/// another owned key, or just printed) — a clone of an interned type name is
+/// cheap next to that.
+pub fn heap_type_key(heap: &Heap, id: BoxId) -> Option<String> {
+    stored_key(heap, id).map(|k| heap.type_key_name(k).to_string())
     // type-identity-ok: reading the spelling back out is this function's job
 }
 
@@ -201,7 +208,7 @@ pub fn heap_type_path(heap: &Heap, id: BoxId) -> Option<Path> {
         // `Path` has no room for one. Callers that need the arguments ask
         // [`heap_type_key`]/[`split_key`] instead — the printer's dispatch is
         // the one that does.
-        Path::from_segments(split_key(k).0.split("::").map(str::to_string).collect())
+        Path::from_segments(split_key(&k).0.split("::").map(str::to_string).collect())
     })
 }
 

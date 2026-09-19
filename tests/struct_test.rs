@@ -108,7 +108,7 @@ fn struct_new_constructs_an_instance() {
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
         Value::Boxed(id) => {
-            assert_eq!(h.struct_type_name(id), "point");
+            assert_eq!(&*h.struct_type_name(id), "point");
             assert_eq!(h.struct_field_count(id), 2);
             assert_eq!(h.struct_field(id, 0), Value::Int(1));
             assert_eq!(h.struct_field(id, 1), Value::Int(2));
@@ -165,7 +165,7 @@ fn two_different_struct_types_do_not_collide() {
                (point::new 1 2)";
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
-        Value::Boxed(id) => assert_eq!(h.struct_type_name(id), "point"),
+        Value::Boxed(id) => assert_eq!(&*h.struct_type_name(id), "point"),
         other => panic!("expected a boxed Struct, got {:?}", other),
     }
 }
@@ -346,7 +346,7 @@ fn generic_defstruct_constructs_an_instance() {
             // it is, which is what lets a generic type's `print-object` be
             // found and what stops `(the pair<int,int> x)` from accepting this
             // one (docs/dev/type-identity-instantiation-plan.md).
-            assert_eq!(h.struct_type_name(id), "pair<int,bool>");
+            assert_eq!(&*h.struct_type_name(id), "pair<int,bool>");
             assert_eq!(h.struct_field(id, 0), Value::Int(1));
             assert_eq!(h.struct_field(id, 1), Value::Bool(true));
         }
