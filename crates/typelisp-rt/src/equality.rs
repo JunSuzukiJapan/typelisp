@@ -102,7 +102,7 @@ pub fn equal_val(heap: &Heap, a: Value, b: Value) -> bool {
             let (Ok(da), Ok(db)) = (heap.cdr(a), heap.cdr(b)) else { return false };
             equal_val(heap, ca, cb) && equal_val(heap, da, db)
         }
-        (Value::Str(i), Value::Str(j)) => heap.string(i) == heap.string(j),
+        (Value::Str(i), Value::Str(j)) => *heap.string(i) == *heap.string(j),
         (a, b) => eql_val(heap, a, b),
     }
 }
@@ -152,7 +152,7 @@ pub fn equalp_val(heap: &Heap, a: Value, b: Value) -> bool {
             let (Ok(da), Ok(db)) = (heap.cdr(a), heap.cdr(b)) else { return false };
             equalp_val(heap, ca, cb) && equalp_val(heap, da, db)
         }
-        (Value::Str(i), Value::Str(j)) => heap.string(i).eq_ignore_ascii_case(heap.string(j)),
+        (Value::Str(i), Value::Str(j)) => heap.string(i).eq_ignore_ascii_case(&heap.string(j)),
         (Value::Char(c), Value::Char(d)) => c.eq_ignore_ascii_case(&d),
         // CL's `equalp` on a structure: same type, and every slot `equalp`
         // (unlike `equal`, which is `eq` on structures — `eql_val`'s fallback

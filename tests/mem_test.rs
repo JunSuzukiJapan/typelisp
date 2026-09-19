@@ -879,7 +879,7 @@ fn strings_store_and_read_back() {
     let mut h = Heap::with_capacity(8);
     let s = h.alloc_string("hello".to_string());
     match s {
-        Value::Str(id) => assert_eq!(h.string(id), "hello"),
+        Value::Str(id) => assert_eq!(&*h.string(id), "hello"),
         _ => panic!("expected a string"),
     }
     assert_eq!(h.string_count(), 1);
@@ -906,7 +906,7 @@ fn string_reachable_via_rooted_cons_survives() {
     assert_eq!(h.string_count(), 1); // only "keep" survives
     // content still intact and reachable through the rooted cons
     match h.car(cell).unwrap() {
-        Value::Str(id) => assert_eq!(h.string(id), "keep"),
+        Value::Str(id) => assert_eq!(&*h.string(id), "keep"),
         _ => panic!("expected a string in car"),
     }
 }
@@ -1328,7 +1328,7 @@ fn gc_keeps_a_rooted_hashtables_string_keys_alive() {
     h.gc();
     // the key string must still read back with its content intact
     match h.hashtable_bucket_key(id, 1, 0) {
-        Value::Str(sid) => assert_eq!(h.string(sid), "k"),
+        Value::Str(sid) => assert_eq!(&*h.string(sid), "k"),
         other => panic!("expected the string key, got {:?}", other),
     }
     assert_eq!(h.hashtable_bucket_value(id, 1, 0), Value::Int(1));

@@ -409,7 +409,7 @@ fn a_return_from_carries_a_heap_value_past_an_allocating_cleanup() {
         }
     }
     match last {
-        Value::Str(id) => assert_eq!(h.string(id), "ab"),
+        Value::Str(id) => assert_eq!(&*h.string(id), "ab"),
         other => panic!("expected a string, got {:?}", other),
     }
 }

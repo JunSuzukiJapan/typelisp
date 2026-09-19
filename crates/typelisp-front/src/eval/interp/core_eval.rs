@@ -2347,7 +2347,7 @@ mod tests {
         }
         let v = eval_ok(&mut h, r#"(str "hi")"#);
         match v {
-            Value::Str(id) => assert_eq!(h.string(id), "hi"),
+            Value::Str(id) => assert_eq!(&*h.string(id), "hi"),
             other => panic!("expected a string, got {:?}", other),
         }
         // A `sym` literal is the interned symbol itself, which is what makes
@@ -2374,7 +2374,7 @@ mod tests {
         match (a, b) {
             (Value::Str(x), Value::Str(y)) => {
                 assert_ne!(x, y, "two evaluations of a string literal shared one string");
-                assert_eq!(h.string(x), h.string(y));
+                assert_eq!(&*h.string(x), &*h.string(y));
             }
             other => panic!("expected two strings, got {:?}", other),
         }

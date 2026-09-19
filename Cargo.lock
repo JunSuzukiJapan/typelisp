@@ -802,6 +802,7 @@ dependencies = [
  "num-integer",
  "num-rational",
  "num-traits",
+ "parking_lot",
  "serde",
  "typelisp-abi",
  "typelisp-mem",

@@ -77,7 +77,7 @@ fn a_compiled_struct_local_survives_collection() {
                  (compile probe)
                  (probe 7)"#;
     match eval_in(&mut h, &mut chk, &mut interp, src).expect("compile+run failed under gc stress") {
-        Value::Str(id) => assert_eq!(h.string(id), "keepme"),
+        Value::Str(id) => assert_eq!(&*h.string(id), "keepme"),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -117,7 +117,7 @@ fn a_compiled_struct_local_is_not_clobbered_by_a_later_box_allocation() {
                  (probe)"#;
     match eval_in(&mut h, &mut chk, &mut interp, src).expect("compile+run failed under gc stress") {
         Value::Str(id) => assert_eq!(
-            h.string(id),
+            &*h.string(id),
             "keepme",
             "the compiled local was reclaimed and its box slot handed to a later allocation"
         ),

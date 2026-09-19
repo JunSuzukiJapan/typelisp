@@ -244,7 +244,7 @@ fn walk(
             for arm in core::fields(heap, form)? {
                 let items = heap.list_to_vec(arm)?;
                 let Some(Value::Str(tag_id)) = items.first() else { continue };
-                match heap.string(*tag_id) {
+                match &*heap.string(*tag_id) {
                     "recv" => {
                         if items.len() != 5 {
                             continue;

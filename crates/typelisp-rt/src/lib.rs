@@ -1127,7 +1127,7 @@ unsafe fn existing_type_key_arg(raw: i64, who: &str) -> Option<TypeKeyId> {
         _ => fatal(&format!("{}: type name argument is not a Str", who)),
     };
     let heap = active_heap();
-    heap.type_key_id(heap.string(sid))
+    heap.type_key_id(&heap.string(sid))
 }
 
 /// `(rt-struct-new type-name field0 field1 ...)` for compiled code —
@@ -3864,7 +3864,7 @@ pub unsafe extern "C" fn rt_str_eq(args: *const i64, argc: u32) -> i64 {
         _ => fatal("rt_str_eq: second argument is not a Str"),
     };
     let heap = active_heap();
-    i64::from(heap.string(a) == heap.string(b))
+    i64::from(*heap.string(a) == *heap.string(b))
 }
 
 /// `str::lt` for compiled code — lexicographic (code-point order) content
@@ -3889,7 +3889,7 @@ pub unsafe extern "C" fn rt_str_lt(args: *const i64, argc: u32) -> i64 {
         _ => fatal("rt_str_lt: second argument is not a Str"),
     };
     let heap = active_heap();
-    i64::from(heap.string(a) < heap.string(b))
+    i64::from(*heap.string(a) < *heap.string(b))
 }
 
 /// `str::equalp` for compiled code — ASCII case-insensitive content equality
@@ -3916,7 +3916,7 @@ pub unsafe extern "C" fn rt_str_equalp(args: *const i64, argc: u32) -> i64 {
         _ => fatal("rt_str_equalp: second argument is not a Str"),
     };
     let heap = active_heap();
-    i64::from(heap.string(a).eq_ignore_ascii_case(heap.string(b)))
+    i64::from(heap.string(a).eq_ignore_ascii_case(&heap.string(b)))
 }
 
 /// `char::equalp` for compiled code — ASCII case-insensitive equality
@@ -5310,7 +5310,7 @@ mod tests {
 
         let tagged = make_str("hi");
         match decode(tagged) {
-            Value::Str(id) => assert_eq!(unsafe { active_heap() }.string(id), "hi"),
+            Value::Str(id) => assert_eq!(&*unsafe { active_heap() }.string(id), "hi"),
             other => panic!("expected a Str, got {:?}", other),
         }
     }
@@ -5322,7 +5322,7 @@ mod tests {
 
         let tagged = unsafe { rt_str_new(std::ptr::null(), 0) };
         match decode(tagged) {
-            Value::Str(id) => assert_eq!(unsafe { active_heap() }.string(id), ""),
+            Value::Str(id) => assert_eq!(&*unsafe { active_heap() }.string(id), ""),
             other => panic!("expected a Str, got {:?}", other),
         }
     }
@@ -5405,7 +5405,7 @@ mod tests {
         let b = make_str("bar");
         let tagged = unsafe { rt_str_append([a, b].as_ptr(), 2) };
         match decode(tagged) {
-            Value::Str(id) => assert_eq!(unsafe { active_heap() }.string(id), "foobar"),
+            Value::Str(id) => assert_eq!(&*unsafe { active_heap() }.string(id), "foobar"),
             other => panic!("expected a Str, got {:?}", other),
         }
     }

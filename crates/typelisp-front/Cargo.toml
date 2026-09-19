@@ -27,6 +27,9 @@ num-bigint = "0.4"
 num-rational = "0.4"
 num-traits = "0.2"
 num-integer = "0.1"
+# `expect_str` returns `typelisp_mem::Heap::string`'s mapped read-guard type
+# unchanged — see `typelisp-mem`'s own `parking_lot` dependency note.
+parking_lot = "0.12"
 # The AOT `eval` environment's checked-state snapshot (`snapshot.rs`): what
 # `compile-file` writes into the executable so its startup does not have to
 # re-read and re-check the prelude and the program's own source.

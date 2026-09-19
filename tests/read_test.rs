@@ -105,7 +105,7 @@ fn strings_with_escapes() {
     roundtrip("\"hello\"", "\"hello\"");
     let (h, v) = read1("\"a\\nb\\t\\\"c\"");
     match v {
-        Value::Str(id) => assert_eq!(h.string(id), "a\nb\t\"c"),
+        Value::Str(id) => assert_eq!(&*h.string(id), "a\nb\t\"c"),
         _ => panic!("expected string"),
     }
 }

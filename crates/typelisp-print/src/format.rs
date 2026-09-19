@@ -2102,7 +2102,7 @@ impl Renderer {
                 if standard {
                     out.push_str(&format!("{:?}", heap.string(id)));
                 } else {
-                    out.push_str(heap.string(id));
+                    out.push_str(&heap.string(id));
                 }
             }
             Value::Symbol(id) => {

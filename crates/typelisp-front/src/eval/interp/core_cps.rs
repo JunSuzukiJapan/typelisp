@@ -2880,7 +2880,7 @@ mod tests {
             .join(" ");
         let src = format!("(let ({}) (var x0))", binds);
         match eval_ok(&mut h, &src) {
-            Value::Str(id) => assert_eq!(h.string(id), "s0"),
+            Value::Str(id) => assert_eq!(&*h.string(id), "s0"),
             other => panic!("expected the first binding's string, got {:?}", other),
         }
     }
@@ -2945,7 +2945,7 @@ mod tests {
                      (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
         let v = agrees(&mut h, src);
         match h.car(v).unwrap() {
-            Value::Str(id) => assert_eq!(h.string(id), "first"),
+            Value::Str(id) => assert_eq!(&*h.string(id), "first"),
             other => panic!("the first argument did not survive the nested call: {:?}", other),
         }
     }
@@ -2966,7 +2966,7 @@ mod tests {
         let mut v = eval_ok(&mut h, &src);
         for i in 0..30 {
             match h.car(v).unwrap() {
-                Value::Str(id) => assert_eq!(h.string(id), format!("a{}", i)),
+                Value::Str(id) => assert_eq!(&*h.string(id), format!("a{}", i)),
                 other => panic!("element {} is {:?}", i, other),
             }
             v = h.cdr(v).unwrap();
@@ -3164,7 +3164,7 @@ mod tests {
         let mut h = stress_heap();
         let src = r#"(match (str "kept") string ((pat-bind x) (str "discarded") (var x)))"#;
         match eval_ok(&mut h, src) {
-            Value::Str(id) => assert_eq!(h.string(id), "kept"),
+            Value::Str(id) => assert_eq!(&*h.string(id), "kept"),
             other => panic!("expected the bound string, got {:?}", other),
         }
     }
@@ -3191,7 +3191,7 @@ mod tests {
                        (field-set (var p) 1 str (str "new"))
                        (field-get (var p) 1 str))"#;
         match eval_ok(&mut h, src) {
-            Value::Str(id) => assert_eq!(h.string(id), "new"),
+            Value::Str(id) => assert_eq!(&*h.string(id), "new"),
             other => panic!("expected the new string, got {:?}", other),
         }
     }
@@ -3366,7 +3366,7 @@ mod tests {
                          (throw (quote done) (str "carried"))
                          (str "the cleanup allocates")))"#;
         match eval_ok(&mut h, src) {
-            Value::Str(id) => assert_eq!(h.string(id), "carried"),
+            Value::Str(id) => assert_eq!(&*h.string(id), "carried"),
             other => panic!("the thrown value did not survive the cleanup: {:?}", other),
         }
     }
@@ -3404,7 +3404,7 @@ mod tests {
         let mut h = stress_heap();
         let src = r#"(unwind-protect (str "kept") (str "the cleanup allocates"))"#;
         match eval_ok(&mut h, src) {
-            Value::Str(id) => assert_eq!(h.string(id), "kept"),
+            Value::Str(id) => assert_eq!(&*h.string(id), "kept"),
             other => panic!("the protected value did not survive: {:?}", other),
         }
     }
@@ -3427,8 +3427,8 @@ mod tests {
         let second = h.car(h.cdr(v).unwrap()).unwrap();
         match (head, second) {
             (Value::Str(a), Value::Str(b)) => {
-                assert_eq!(h.string(a), "o", "the outer cleanup should have run last");
-                assert_eq!(h.string(b), "i", "the inner cleanup should have run first");
+                assert_eq!(&*h.string(a), "o", "the outer cleanup should have run last");
+                assert_eq!(&*h.string(b), "i", "the inner cleanup should have run first");
             }
             other => panic!("expected two strings, got {:?}", other),
         }

@@ -413,7 +413,7 @@ fn sexpr_eq(h: &Heap, a: Value, b: Value) -> bool {
         (Value::Char(x), Value::Char(y)) => x == y,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Symbol(x), Value::Symbol(y)) => h.symbol_name(x) == h.symbol_name(y),
-        (Value::Str(x), Value::Str(y)) => h.string(x) == h.string(y),
+        (Value::Str(x), Value::Str(y)) => *h.string(x) == *h.string(y),
         (Value::Cons(_), Value::Cons(_)) => {
             sexpr_eq(h, h.car(a).unwrap(), h.car(b).unwrap())
                 && sexpr_eq(h, h.cdr(a).unwrap(), h.cdr(b).unwrap())

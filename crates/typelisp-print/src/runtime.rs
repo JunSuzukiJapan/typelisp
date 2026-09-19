@@ -353,9 +353,13 @@ fn shape<T>(who: &str, i: usize, v: &Value) -> Result<T, PrintError> {
     Err(PrintError::Shape(format!("{}: argument {} has the wrong representation, got {:?}", who, i, v)))
 }
 
-fn arg_str<'a>(heap: &'a Heap, args: &[Value], i: usize, who: &str) -> Result<&'a str, PrintError> {
+/// Owned rather than `&'a str`: `Heap::string` hands back a read-locked
+/// guard now (`docs/dev/os-threads-design.md` §3), whose lifetime is its
+/// own, not `heap`'s — every caller here already cloned the result
+/// immediately with `.to_string()` anyway.
+fn arg_str(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<String, PrintError> {
     match args.get(i) {
-        Some(Value::Str(id)) => Ok(heap.string(*id)),
+        Some(Value::Str(id)) => Ok(heap.string(*id).to_string()),
         Some(v) => shape(who, i, v),
         None => Err(PrintError::Shape(format!("{}: expected at least {} arguments", who, i + 1))),
     }

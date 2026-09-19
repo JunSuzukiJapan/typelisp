@@ -3995,8 +3995,8 @@ pub(crate) fn eval_builtin_method(
             "eq" | "eql" => Some(string_identity_eq(args)),
             "equal" => Some(string_content_eq(heap, args)),
             "equalp" => Some(string_content_eqp(heap, args)),
-            "print" => Some(expect_str(heap, &args[0]).and_then(|s| write_stdout(s, false))),
-            "println" => Some(expect_str(heap, &args[0]).and_then(|s| write_stdout(s, true))),
+            "print" => Some(expect_str(heap, &args[0]).and_then(|s| write_stdout(&s, false))),
+            "println" => Some(expect_str(heap, &args[0]).and_then(|s| write_stdout(&s, true))),
             _ => None,
         };
     }
@@ -4800,8 +4800,15 @@ pub fn scope_pop_frame_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, Ev
 
 pub(crate) fn scope_get_heap(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
-    let name = expect_str(heap, &args[1])?;
-    let found = heap.scope_get(id, name);
+    // Scoped so the read-locked guard `expect_str` returns is dropped before
+    // `option_value` needs `heap` mutably below — unlike a plain `&str`,
+    // this guard's `Drop` impl keeps NLL from ending its borrow at its last
+    // use, so it has to be ended explicitly (`typelisp-mem`'s `Heap::string`
+    // doc comment, `docs/dev/os-threads-design.md` §3).
+    let found = {
+        let name = expect_str(heap, &args[1])?;
+        heap.scope_get(id, &name)
+    };
     Ok(option_value(heap, ret_key, found))
 }
 
@@ -4851,13 +4858,16 @@ fn checked_index(i: i64, len: usize) -> Option<usize> {
     if i >= 0 && (i as usize) < len { Some(i as usize) } else { None }
 }
 
-/// The `&str` behind a `string` value, borrowed from the heap it lives in.
+/// The string behind a `string` value, borrowed from the heap it lives in.
 ///
 /// Borrowed rather than owned (unlike [`expect_bignum`]) because most callers
 /// only read it; the ones that go on to build a new string end the borrow
 /// with an explicit `.to_string()` first, so the copy is visible at the site
-/// that needs it rather than paid by every caller.
-pub fn expect_str<'h>(heap: &'h Heap, v: &Value) -> Result<&'h str, EvalError> {
+/// that needs it rather than paid by every caller. A mapped read-locked
+/// guard rather than plain `&'h str` since `Heap::string` moved behind a
+/// lock (`docs/dev/os-threads-design.md` §3) — `Deref<Target = str>` keeps
+/// every read-only caller unchanged.
+pub fn expect_str<'h>(heap: &'h Heap, v: &Value) -> Result<parking_lot::MappedRwLockReadGuard<'h, str>, EvalError> {
     match v {
         Value::Str(id) => Ok(heap.string(*id)),
         other => Err(EvalError::Internal(format!("expected a Str, got {:?}", other))),
@@ -4934,16 +4944,16 @@ fn string_identity_eq(args: &[Value]) -> Result<Value, EvalError> {
 /// eq/eql/equal/equalp section). Named for what it computes, not for which
 /// builtin method currently calls it.
 fn string_content_eq(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
-    Ok(Value::Bool(expect_str(heap, &args[0])? == expect_str(heap, &args[1])?))
+    Ok(Value::Bool(*expect_str(heap, &args[0])? == *expect_str(heap, &args[1])?))
 }
 
 /// Content equality ignoring ASCII case — CL's `equalp` for strings.
 fn string_content_eqp(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
-    Ok(Value::Bool(expect_str(heap, &args[0])?.eq_ignore_ascii_case(expect_str(heap, &args[1])?)))
+    Ok(Value::Bool(expect_str(heap, &args[0])?.eq_ignore_ascii_case(&expect_str(heap, &args[1])?)))
 }
 
 fn string_lt(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
-    Ok(Value::Bool(expect_str(heap, &args[0])? < expect_str(heap, &args[1])?))
+    Ok(Value::Bool(*expect_str(heap, &args[0])? < *expect_str(heap, &args[1])?))
 }
 
 /// The `<`/`<=`/`>`/`>=` comparison operators on `string`, lexicographic (byte
@@ -4953,10 +4963,10 @@ fn string_compare(heap: &Heap, method: &str, args: &[Value]) -> Result<Value, Ev
     let a = expect_str(heap, &args[0])?;
     let b = expect_str(heap, &args[1])?;
     Ok(Value::Bool(match method {
-        "<" => a < b,
-        "<=" => a <= b,
-        ">" => a > b,
-        ">=" => a >= b,
+        "<" => *a < *b,
+        "<=" => *a <= *b,
+        ">" => *a > *b,
+        ">=" => *a >= *b,
         other => return Err(EvalError::Internal(format!("string_compare: not a comparison operator: {}", other))),
     }))
 }

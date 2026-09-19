@@ -43,7 +43,7 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
 
 fn assert_string(h: &Heap, v: &Value, expected: &str) {
     match v {
-        typelisp::Value::Str(id) => assert_eq!(h.string(*id), expected),
+        typelisp::Value::Str(id) => assert_eq!(&*h.string(*id), expected),
         other => panic!("expected the string {:?}, got {:?}", expected, other),
     }
 }

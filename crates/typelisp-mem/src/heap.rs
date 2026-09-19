@@ -116,6 +116,15 @@ struct Slab<T> {
     len: usize,
 }
 
+// Written by hand rather than `#[derive(Default)]`: the derive would require
+// `T: Default` even though an empty `Slab` never needs one (there is nothing
+// in either field to default-construct an element of).
+impl<T> Default for Slab<T> {
+    fn default() -> Slab<T> {
+        Slab::new()
+    }
+}
+
 impl<T> Slab<T> {
     fn new() -> Slab<T> {
         Slab { chunks: Vec::new(), len: 0 }
@@ -232,17 +241,29 @@ struct Interning {
     path_ids: HashMap<Vec<SymRef>, u32>,
 }
 
+/// The GC-collected string store: content, free list, mark bits, and the
+/// identity-preserving intern index for [`Heap::intern_string`]. Grouped
+/// under one lock rather than one apiece because `alloc_string`/`gc`'s
+/// sweep touch several of these together on every call — splitting them
+/// would only add lock traffic, not concurrency, since nothing needs one
+/// without the others.
+#[derive(Default)]
+struct StrStore {
+    slots: Slab<String>,
+    free: Vec<u32>,
+    marks: Vec<bool>,
+    intern: HashMap<String, StrId>,
+}
+
 /// State one `Heap` view shares with every other view attached to the same
 /// underlying heap (`docs/dev/os-threads-design.md` §3). The cons arena,
-/// every task's root stack, `permanent_roots`, and the interning tables
-/// (`type_keys`/`paths`) have moved here so far. **Deliberately not yet
-/// moved**: `str_slots`/`box_slots`, for the same reference-returning-method
-/// reason the interning tables used to be here (`Heap::string`/
-/// `bignum_value`/`struct_type_name`/… — see the `grep` in the design doc's
-/// Phase 1c notes), now resolved for `type_key_name`/`path_segments` by
-/// switching to `parking_lot`'s mapped read guards (`RwLockReadGuard::map`,
-/// which `std::sync::RwLock` has no stable way to do) — the same fix
-/// applies to the string/box stores in a later slice.  `Heap::with_capacity`
+/// every task's root stack, `permanent_roots`, the interning tables
+/// (`type_keys`/`paths`), and the string store have moved here so far.
+/// **Deliberately not yet moved**: `box_slots`, for the same
+/// reference-returning-method reason the interning tables and string store
+/// used to be here (`Heap::bignum_value`/`struct_type_name`/… — see the
+/// `grep` in the design doc's Phase 1c notes), resolved the same way
+/// (`parking_lot`'s mapped read guards) once it moves. `Heap::with_capacity`
 /// is still the only place that creates a `HeapShared`, and always creates
 /// exactly one view for it, so nothing today actually exercises concurrent
 /// access; this exists to let that access be added incrementally, field by
@@ -268,6 +289,9 @@ pub struct HeapShared {
     // reference down from "the whole table" to "the one entry" while still
     // keeping the lock held for exactly the returned guard's lifetime.
     interning: RwLock<Interning>,
+    // Same `parking_lot::RwLock`-for-mapped-guards reasoning as `interning`,
+    // for `Heap::string`'s return.
+    strings: RwLock<StrStore>,
 }
 
 pub struct Heap {
@@ -313,18 +337,8 @@ pub struct Heap {
 
     // Type identities and `::` paths are *not* here either, as of this
     // slice: both moved into `shared.interning` — see `HeapShared`'s doc
-    // comment.
-
-    // GC-managed string store
-    str_slots: Slab<String>,
-    str_free: Vec<u32>,
-    str_marks: Vec<bool>,
-
-    // content -> StrId for strings interned via `intern_string` (HashTable
-    // string keys) — a separate index from the ordinary string store above,
-    // which deliberately does *not* dedupe (see `alloc_string`'s doc
-    // comment on `Sexpr::Str`'s `eq`-by-identity semantics).
-    str_intern: HashMap<String, StrId>,
+    // comment. Nor is the GC-managed string store: it moved into
+    // `shared.strings`.
 
     // GC-managed general boxed-object store (see `BoxedObj`) — same
     // growable-slot-store shape as the string store above, generalized to
@@ -410,6 +424,7 @@ impl Heap {
             root_stacks: Mutex::new(vec![Some(home)]),
             permanent_roots: Mutex::new(Slab::new()),
             interning: RwLock::new(Interning::default()),
+            strings: RwLock::new(StrStore::default()),
         });
 
         let mut heap = Heap {
@@ -422,10 +437,6 @@ impl Heap {
             in_flight_throw: None,
             macro_chars: HashMap::new(),
             dispatch_chars: HashMap::new(),
-            str_slots: Slab::new(),
-            str_free: Vec::new(),
-            str_marks: Vec::new(),
-            str_intern: HashMap::new(),
             box_slots: Slab::new(),
             box_free: Vec::new(),
             box_marks: Vec::new(),
@@ -547,7 +558,7 @@ impl Heap {
 
     /// Strings currently allocated (occupied slots).
     pub fn string_count(&self) -> usize {
-        self.str_slots.iter().filter(|s| s.is_some()).count()
+        self.shared.strings.read().slots.iter().filter(|s| s.is_some()).count()
     }
 
     /// Boxed objects currently allocated (occupied slots) — see [`BoxedObj`].
@@ -984,21 +995,25 @@ impl Heap {
 
     /// Store a string, returning its `Value::Str`. Strings are GC-collected.
     pub fn alloc_string(&mut self, s: String) -> Value {
-        if let Some(idx) = self.str_free.pop() {
-            self.str_slots[idx as usize] = Some(s);
-            self.str_marks[idx as usize] = false;
+        let mut strings = self.shared.strings.write();
+        if let Some(idx) = strings.free.pop() {
+            strings.slots[idx as usize] = Some(s);
+            strings.marks[idx as usize] = false;
             Value::Str(StrId(idx))
         } else {
-            let idx = self.str_slots.len() as u32;
-            self.str_slots.push(Some(s));
-            self.str_marks.push(false);
+            let idx = strings.slots.len() as u32;
+            strings.slots.push(Some(s));
+            strings.marks.push(false);
             Value::Str(StrId(idx))
         }
     }
 
-    /// The contents of a stored string.
-    pub fn string(&self, id: StrId) -> &str {
-        self.str_slots[id.0 as usize].as_deref().expect("dangling StrId")
+    /// The contents of a stored string. See `type_key_name`'s doc comment
+    /// for why this returns a mapped guard rather than `&str`.
+    pub fn string(&self, id: StrId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
+        parking_lot::RwLockReadGuard::map(self.shared.strings.read(), |s| {
+            s.slots[id.0 as usize].as_deref().expect("dangling StrId")
+        })
     }
 
     /// Stores a string with content-based deduplication, returning its
@@ -1021,7 +1036,14 @@ impl Heap {
     /// low-cardinality, long-lived heap-external data (e.g. interned
     /// symbols, compiled code's box fields).
     pub fn intern_string(&mut self, s: &str) -> Value {
-        if let Some(&id) = self.str_intern.get(s) {
+        // Copied out of the guard (rather than matched on directly) so the
+        // read lock is not still held past this statement — `if let Some(&id)
+        // = self.shared.strings.read().intern.get(s)` would keep it alive for
+        // the whole `if`/`else` (temporary lifetime extension), including the
+        // `alloc_string` call below that needs the write half of this same
+        // lock.
+        let existing = self.shared.strings.read().intern.get(s).copied();
+        if let Some(id) = existing {
             return Value::Str(id);
         }
         let v = self.alloc_string(s.to_string());
@@ -1029,7 +1051,7 @@ impl Heap {
             Value::Str(id) => id,
             _ => unreachable!("alloc_string always returns Value::Str"),
         };
-        self.str_intern.insert(s.to_string(), id);
+        self.shared.strings.write().intern.insert(s.to_string(), id);
         self.shared.permanent_roots.lock().unwrap().push(Some(v));
         v
     }
@@ -1834,21 +1856,25 @@ impl Heap {
     }
 
     /// A built-in function value's name. Panics like
-    /// [`builtin_fn_recv`](Self::builtin_fn_recv).
-    pub fn builtin_fn_name(&self, id: BoxId) -> &str {
-        match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Builtin { name, .. }) => self.string(*name),
+    /// [`builtin_fn_recv`](Self::builtin_fn_recv). See `type_key_name`'s doc
+    /// comment for why this returns a mapped guard rather than `&str`.
+    pub fn builtin_fn_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
+        let name = match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Builtin { name, .. }) => *name,
             _ => panic!("BoxId does not hold a Builtin"),
-        }
+        };
+        self.string(name)
     }
 
     /// The runtime identity of what a built-in function value returns — see
-    /// [`BoxedObj::Builtin`]'s `ret_key`.
-    pub fn builtin_fn_ret_key(&self, id: BoxId) -> &str {
-        match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Builtin { ret_key, .. }) => self.string(*ret_key),
+    /// [`BoxedObj::Builtin`]'s `ret_key`. See `type_key_name`'s doc comment
+    /// for why this returns a mapped guard rather than `&str`.
+    pub fn builtin_fn_ret_key(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
+        let ret_key = match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Builtin { ret_key, .. }) => *ret_key,
             _ => panic!("BoxId does not hold a Builtin"),
-        }
+        };
+        self.string(ret_key)
     }
 
     // ---- random states ------------------------------------------------------
@@ -2564,8 +2590,15 @@ impl Heap {
         if false {
             self.audit_roots_against_free_list();
         }
-        // reset string/box marks
-        for m in self.str_marks.iter_mut() {
+        // reset string/box marks. `strings` is locked only for this
+        // statement (see the mark loop's `Value::Str` arm below for why it
+        // is not held across the rest of `gc`): this collector is still the
+        // only thread touching the heap, so nothing is actually contending
+        // for it yet, but never holding two of `HeapShared`'s locks at once
+        // is the discipline the design doc's lock-ordering rule depends on
+        // (`docs/dev/os-threads-design.md` §2) — easier to keep from the
+        // start than to retrofit once a second lock actually matters.
+        for m in self.shared.strings.write().marks.iter_mut() {
             *m = false;
         }
         for m in self.box_marks.iter_mut() {
@@ -2625,7 +2658,7 @@ impl Heap {
                     stack.push((*c.0).cdr);
                 },
                 Value::Str(s) => {
-                    self.str_marks[s.0 as usize] = true;
+                    self.shared.strings.write().marks[s.0 as usize] = true;
                 }
                 Value::Boxed(b) => {
                     let idx = b.0 as usize;
@@ -2682,12 +2715,14 @@ impl Heap {
         drop(arena);
 
         // SWEEP strings: free unmarked occupied slots, recycling indices.
-        for i in 0..self.str_slots.len() {
-            if self.str_slots[i].is_some() && !self.str_marks[i] {
-                self.str_slots[i] = None;
-                self.str_free.push(i as u32);
+        let mut strings = self.shared.strings.write();
+        for i in 0..strings.slots.len() {
+            if strings.slots[i].is_some() && !strings.marks[i] {
+                strings.slots[i] = None;
+                strings.free.push(i as u32);
             }
         }
+        drop(strings);
 
         // SWEEP boxed objects: same recycling scheme as strings.
         for i in 0..self.box_slots.len() {

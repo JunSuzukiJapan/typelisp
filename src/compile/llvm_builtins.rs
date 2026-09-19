@@ -210,7 +210,7 @@ fn expect_llvm_value(v: &Value) -> Result<BasicValueEnum<'static>, EvalError> {
 
 fn llvm_module_create(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let name = expect_str(heap, &args[0])?;
-    let module = crate::compile::llvm_context().create_module(name);
+    let module = crate::compile::llvm_context().create_module(&name);
     Ok(llvm_module_value(module))
 }
 
@@ -248,8 +248,8 @@ pub(crate) fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
 fn llvm_module_add_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(heap, &args[1])?;
-    let existing = module.borrow().get_function(name);
-    let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(name, compiled_fn_type(), None));
+    let existing = module.borrow().get_function(&name);
+    let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(&name, compiled_fn_type(), None));
     Ok(llvm_function_value(function))
 }
 
@@ -274,8 +274,8 @@ pub(crate) fn coroutine_fn_type() -> inkwell::types::FunctionType<'static> {
 fn llvm_module_add_coroutine_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(heap, &args[1])?;
-    let existing = module.borrow().get_function(name);
-    let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(name, coroutine_fn_type(), None));
+    let existing = module.borrow().get_function(&name);
+    let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(&name, coroutine_fn_type(), None));
     Ok(llvm_function_value(function))
 }
 
@@ -350,7 +350,7 @@ fn compiled_fn_type_with_env() -> inkwell::types::FunctionType<'static> {
 fn llvm_module_add_function_with_env(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(heap, &args[1])?;
-    let function = module.borrow_mut().add_function(name, compiled_fn_type_with_env(), None);
+    let function = module.borrow_mut().add_function(&name, compiled_fn_type_with_env(), None);
     Ok(llvm_function_value(function))
 }
 
@@ -373,7 +373,7 @@ fn llvm_module_to_string(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalE
 fn llvm_module_get_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(heap, &args[1])?;
-    let found = module.borrow().get_function(name);
+    let found = module.borrow().get_function(&name);
     found
         .map(llvm_function_value)
         .ok_or_else(|| EvalError::Panic(format!("get-function: no function named \"{}\" in this module", name)))
@@ -382,7 +382,7 @@ fn llvm_module_get_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalEr
 fn llvm_function_append_block(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let function = expect_llvm_function(&args[0])?;
     let name = expect_str(heap, &args[1])?;
-    let block = crate::compile::llvm_context().append_basic_block(function, name);
+    let block = crate::compile::llvm_context().append_basic_block(function, &name);
     Ok(llvm_block_value(block))
 }
 
@@ -2554,7 +2554,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
     // the option box the committed bitcode unwraps is bit-identical.
     if op.type_key == "native-scope" && op.method == "get" {
         let found = match (expect_struct_box(&vals[0]), expect_str(heap, &vals[1])) {
-            (Ok(id), Ok(name)) => heap.scope_get(id, name),
+            (Ok(id), Ok(name)) => heap.scope_get(id, &name),
             (Err(e), _) | (_, Err(e)) => rt_llvm_fatal(&format!("rt_llvm_call: native-scope::get: {:?}", e)),
         };
         // `Option<llvm-value>`, spelled through the one producer: a type's

@@ -30,7 +30,7 @@ fn run_with_capacity(src: &str, capacity: usize) -> Result<(Value, Heap), EvalEr
 /// the runner already hands back.
 fn assert_string((v, h): (Value, Heap), expected: &str) {
     match v {
-        Value::Str(id) => assert_eq!(h.string(id), expected),
+        Value::Str(id) => assert_eq!(&*h.string(id), expected),
         other => panic!("expected a string, got {:?}", other),
     }
 }

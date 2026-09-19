@@ -151,7 +151,7 @@ fn an_enum_holding_a_builtin_is_a_heap_box_not_native_data() {
             match h.enum_field(id, 0) {
                 typelisp::Value::Boxed(f) => {
                     assert!(h.is_builtin_fn(f), "the stored field is not a built-in box");
-                    assert_eq!(h.builtin_fn_name(f), "+");
+                    assert_eq!(&*h.builtin_fn_name(f), "+");
                     assert!(h.builtin_fn_recv(f).is_some(), "`+` is a method, so it has a receiver type");
                 }
                 other => panic!("expected the field to be a boxed built-in, got {:?}", other),
