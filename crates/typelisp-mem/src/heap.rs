@@ -457,6 +457,62 @@ impl Heap {
         heap
     }
 
+    /// A second (or third, ...) view onto the same underlying heap —
+    /// `docs/dev/os-threads-design.md` §1's "one `Arc<HeapShared>`, many
+    /// views" split. Gives the new view its own home root stack (registered
+    /// in `shared.root_stacks`, so `gc()` run from *any* view walks it) and
+    /// otherwise starts it exactly like [`with_capacity`](Self::with_capacity)
+    /// starts the first one — empty `session_roots`/`in_flight_throw`/reader
+    /// macro tables, no interned type keys to add (those are already in
+    /// `shared.interning`, done once by whichever view created the heap).
+    ///
+    /// **What is *not* yet safe to share across views**: source locations
+    /// (`locs`/`loc_ids` stay per-view, so a `LocId` a cell holds from one
+    /// view's `intern_loc` does not resolve on another) and reader macro
+    /// registrations (`macro_chars`/`dispatch_chars`, likewise per-view) —
+    /// neither has moved into `HeapShared` yet. And there is deliberately no
+    /// per-view allocation cache (`cons`, `alloc_string`, `alloc_boxed` all
+    /// still lock straight through to `shared` on every call): a cache would
+    /// let a `gc()` run from *this* view sweep cells another view's cache
+    /// still thinks are unissued, since sweep cannot see into a cache it
+    /// does not know exists, and that is a double-issue waiting to happen
+    /// (`docs/dev/os-threads-design.md` §2 assigns "empty every registered
+    /// view's cache" to the collector procedure — that only becomes
+    /// possible once `ThreadRegistry` exists to *reach* every view. Adding
+    /// the cache before that lands would mean either building an ad hoc
+    /// half of §2 just to keep a single extra view safe, or shipping a
+    /// heap-corruption bug for whenever two views' lifetimes overlap a
+    /// `gc()`). So: real second views, no speedup from having one yet — that
+    /// arrives with Phase 2's `ThreadRegistry`.
+    pub fn attach(shared: &Arc<HeapShared>) -> Heap {
+        let mut heap = Heap {
+            shared: Arc::clone(shared),
+            gc_stress: false,
+            gc_count: 0,
+            current_stack: 0,
+            current: ptr::null_mut(),
+            session_roots: Vec::new(),
+            in_flight_throw: None,
+            macro_chars: HashMap::new(),
+            dispatch_chars: HashMap::new(),
+            locs: Vec::new(),
+            loc_ids: HashMap::new(),
+        };
+        let home = heap.new_root_stack();
+        heap.switch_to_root_stack(home);
+        heap
+    }
+
+    /// A handle to this view's underlying shared heap, for
+    /// [`attach`](Self::attach)ing another view onto it — the shape a worker
+    /// thread's spawn closure needs: clone this *before* spawning (on the
+    /// spawning view), then call `attach` *inside* the new thread, since
+    /// `Heap` itself is not `Send` yet (only `HeapShared` is meant to cross
+    /// threads — see `docs/dev/os-threads-design.md` §1).
+    pub fn shared_handle(&self) -> Arc<HeapShared> {
+        Arc::clone(&self.shared)
+    }
+
     // -- Source locations (see `Cell`'s doc comment) -------------------------
 
     /// Intern `loc`, returning the id a cell stores.

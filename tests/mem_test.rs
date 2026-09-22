@@ -2275,3 +2275,66 @@ fn a_non_canonical_bignum_in_a_dump_is_refused() {
     };
     assert_eq!(*h.bignum_value(id), big);
 }
+
+// ---- `Heap::attach` (a second view onto the same `HeapShared`, os-threads
+// design doc §1) ------------------------------------------------------------
+
+/// A `gc()` run from a second, attached view must still see the first
+/// view's rooted structure — the whole point of moving `root_stacks` into
+/// `HeapShared` (every registered task's stack is walked no matter which
+/// view's collector is doing the walking). Both views also have to agree on
+/// the shared accounting (`capacity`/`free_count`/`live_count`), since both
+/// read the same `arena` behind the same lock.
+#[test]
+fn gc_from_a_second_view_preserves_the_first_views_roots() {
+    let mut h = Heap::with_capacity(64);
+    let list = list_of(&mut h, &[10, 20, 30]);
+    h.push_root(list);
+    for i in 0..20 {
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap();
+    }
+    let mut h2 = Heap::attach(&h.shared_handle());
+    h2.gc();
+    assert_eq!(h.live_count(), 3, "the garbage h2's gc() collected was h's, not its own");
+    assert_eq!(h2.live_count(), 3);
+    assert_eq!(to_vec(&h, list), vec![10, 20, 30], "h's own root stack, walked by h2's collector");
+    assert_eq!(h.capacity(), h2.capacity());
+    assert_eq!(h.free_count(), h2.free_count());
+}
+
+/// Interned strings, boxed objects, and permanent roots all moved into
+/// `HeapShared` in Phase 1c — a second view must read back exactly what the
+/// first one wrote, with no `attach`-time copy or resync step.
+#[test]
+fn a_second_view_reads_back_what_the_first_view_allocated() {
+    let mut h = Heap::with_capacity(16);
+    let s = h.intern_string("shared-across-views");
+    let obj = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
+    let Value::Boxed(id) = obj else { panic!("boxed") };
+    h.push_permanent_root(obj);
+
+    let h2 = Heap::attach(&h.shared_handle());
+    let Value::Str(sid) = s else { panic!("interned string") };
+    assert_eq!(&*h2.string(sid), "shared-across-views");
+    assert!(h2.is_struct(id));
+    assert_eq!(h2.struct_field(id, 0), Value::Int(1));
+    assert_eq!(h2.struct_field(id, 1), Value::Int(2));
+}
+
+/// The binding-cell liveness registry (`shared.cell_registry`, Phase 1c's
+/// last slice) is shared too: a cell allocated through one view stays a GC
+/// root — via the *other* view's collection — for as long as its `Arc`
+/// handle lives, exactly like within a single view.
+#[test]
+fn a_cell_allocated_through_one_view_survives_the_other_views_gc() {
+    let mut h = Heap::with_capacity(8);
+    let kept = h.cons(Value::Int(42), Value::Empty).unwrap();
+    let cell = h.alloc_cell(kept);
+
+    let mut h2 = Heap::attach(&h.shared_handle());
+    h2.gc();
+
+    let held = h.cell_get(*cell);
+    assert_eq!(h.car(held).unwrap(), Value::Int(42));
+    assert_eq!(h.live_count(), 1);
+}
