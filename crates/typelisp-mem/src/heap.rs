@@ -255,19 +255,26 @@ struct StrStore {
     intern: HashMap<String, StrId>,
 }
 
+/// The GC-collected general boxed-object store (see [`BoxedObj`]) — same
+/// growable-slot-store shape as [`StrStore`], grouped under one lock for the
+/// same reason: `alloc_boxed`/`gc`'s sweep touch `slots`/`free`/`marks`
+/// together on every call.
+#[derive(Default)]
+struct BoxStore {
+    slots: Slab<BoxedObj>,
+    free: Vec<u32>,
+    marks: Vec<bool>,
+}
+
 /// State one `Heap` view shares with every other view attached to the same
 /// underlying heap (`docs/dev/os-threads-design.md` §3). The cons arena,
 /// every task's root stack, `permanent_roots`, the interning tables
-/// (`type_keys`/`paths`), and the string store have moved here so far.
-/// **Deliberately not yet moved**: `box_slots`, for the same
-/// reference-returning-method reason the interning tables and string store
-/// used to be here (`Heap::bignum_value`/`struct_type_name`/… — see the
-/// `grep` in the design doc's Phase 1c notes), resolved the same way
-/// (`parking_lot`'s mapped read guards) once it moves. `Heap::with_capacity`
-/// is still the only place that creates a `HeapShared`, and always creates
-/// exactly one view for it, so nothing today actually exercises concurrent
-/// access; this exists to let that access be added incrementally, field by
-/// field, without a second large-scale migration once it is.
+/// (`type_keys`/`paths`), and the string and box stores have moved here so
+/// far. `Heap::with_capacity` is still the only place that creates a
+/// `HeapShared`, and always creates exactly one view for it, so nothing
+/// today actually exercises concurrent access; this exists to let that
+/// access be added incrementally, field by field, without a second
+/// large-scale migration once it is.
 pub struct HeapShared {
     arena: Mutex<Arena>,
     // Every task's roots, keyed by `RootStackId`. Shared (not per-view)
@@ -292,6 +299,9 @@ pub struct HeapShared {
     // Same `parking_lot::RwLock`-for-mapped-guards reasoning as `interning`,
     // for `Heap::string`'s return.
     strings: RwLock<StrStore>,
+    // Same reasoning again, for `Heap::bignum_value`/`ratio_value`'s return
+    // and `bucket`'s (`Heap::hashtable_bucket_count` and friends).
+    boxes: RwLock<BoxStore>,
 }
 
 pub struct Heap {
@@ -338,15 +348,8 @@ pub struct Heap {
     // Type identities and `::` paths are *not* here either, as of this
     // slice: both moved into `shared.interning` — see `HeapShared`'s doc
     // comment. Nor is the GC-managed string store: it moved into
-    // `shared.strings`.
-
-    // GC-managed general boxed-object store (see `BoxedObj`) — same
-    // growable-slot-store shape as the string store above, generalized to
-    // hold a payload that may itself reference nested `Value`s (so the mark
-    // phase must trace into it, not just flag the slot).
-    box_slots: Slab<BoxedObj>,
-    box_free: Vec<u32>,
-    box_marks: Vec<bool>,
+    // `shared.strings`. Nor is the GC-managed general boxed-object store
+    // (see `BoxedObj`): it moved into `shared.boxes`.
 
     // Liveness registry for `BoxedObj::Cell`s (see `alloc_cell`): a cell is
     // an *implicit* GC root for exactly as long as some binding holds the
@@ -425,6 +428,7 @@ impl Heap {
             permanent_roots: Mutex::new(Slab::new()),
             interning: RwLock::new(Interning::default()),
             strings: RwLock::new(StrStore::default()),
+            boxes: RwLock::new(BoxStore::default()),
         });
 
         let mut heap = Heap {
@@ -437,9 +441,6 @@ impl Heap {
             in_flight_throw: None,
             macro_chars: HashMap::new(),
             dispatch_chars: HashMap::new(),
-            box_slots: Slab::new(),
-            box_free: Vec::new(),
-            box_marks: Vec::new(),
             cell_registry: Vec::new(),
             locs: Vec::new(),
             loc_ids: HashMap::new(),
@@ -563,7 +564,7 @@ impl Heap {
 
     /// Boxed objects currently allocated (occupied slots) — see [`BoxedObj`].
     pub fn box_count(&self) -> usize {
-        self.box_slots.iter().filter(|b| b.is_some()).count()
+        self.shared.boxes.read().slots.iter().filter(|b| b.is_some()).count()
     }
 
     // ---- roots ------------------------------------------------------------
@@ -1064,14 +1065,15 @@ impl Heap {
     /// can trace into whatever `Value`s the payload itself holds (see
     /// [`gc`](Self::gc)).
     fn alloc_boxed(&mut self, obj: BoxedObj) -> Value {
-        if let Some(idx) = self.box_free.pop() {
-            self.box_slots[idx as usize] = Some(obj);
-            self.box_marks[idx as usize] = false;
+        let mut boxes = self.shared.boxes.write();
+        if let Some(idx) = boxes.free.pop() {
+            boxes.slots[idx as usize] = Some(obj);
+            boxes.marks[idx as usize] = false;
             Value::Boxed(BoxId(idx))
         } else {
-            let idx = self.box_slots.len() as u32;
-            self.box_slots.push(Some(obj));
-            self.box_marks.push(false);
+            let idx = boxes.slots.len() as u32;
+            boxes.slots.push(Some(obj));
+            boxes.marks.push(false);
             Value::Boxed(BoxId(idx))
         }
     }
@@ -1100,7 +1102,7 @@ impl Heap {
     /// Deliberately *not* widening an `f32` box: a caller that would accept
     /// either width has to say so, with [`float_box`](Self::float_box).
     pub fn f64_value(&self, id: BoxId) -> f64 {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Float64(f)) => *f,
             _ => panic!("BoxId does not hold an f64"),
         }
@@ -1109,7 +1111,7 @@ impl Heap {
     /// The `f32` behind a boxed `f32`. Panics like
     /// [`f64_value`](Self::f64_value), and for the same reason.
     pub fn f32_value(&self, id: BoxId) -> f32 {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Float32(f)) => *f,
             _ => panic!("BoxId does not hold an f32"),
         }
@@ -1123,7 +1125,7 @@ impl Heap {
     /// hiding it, so those call sites still have to decide what each width
     /// means instead of silently treating everything as `f64`.
     pub fn float_box(&self, id: BoxId) -> Option<FloatBox> {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Float32(f)) => Some(FloatBox::F32(*f)),
             Some(BoxedObj::Float64(f)) => Some(FloatBox::F64(*f)),
             _ => None,
@@ -1159,7 +1161,7 @@ impl Heap {
     /// word without its width, because that word alone is what the five
     /// types were being confused through in the first place.
     pub fn narrow_box(&self, id: BoxId) -> Option<NarrowInt> {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Narrow(n)) => Some(*n),
             _ => None,
         }
@@ -1171,7 +1173,7 @@ impl Heap {
     /// width-agnostic `is_narrow` for the same reason there is no
     /// `is_float`.
     pub fn is_narrow(&self, id: BoxId, width: u8, signed: bool) -> bool {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Narrow(n)) => n.width == width && n.signed == signed,
             _ => false,
         }
@@ -1188,7 +1190,7 @@ impl Heap {
     /// `200` is a `u8` or a `u16` only because it says so. Dispatchers that
     /// need the receiver's type name (`format`'s `~/name/`) ask here.
     pub fn primitive_box_type_name(&self, id: BoxId) -> Option<&'static str> {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Float32(_)) => Some("f32"),
             Some(BoxedObj::Float64(_)) => Some("f64"),
             Some(BoxedObj::Narrow(n)) => Some(match (n.width, n.signed) {
@@ -1251,24 +1253,26 @@ impl Heap {
     /// so that a non-canonical box is reported where it was made rather
     /// than where `eq` first disagrees.
     pub fn bignum_fits_fixnum(&self, id: BoxId) -> bool {
-        matches!(i64::try_from(self.bignum_value(id)), Ok(v) if crate::tagged::fixnum_fits(v))
+        matches!(i64::try_from(&*self.bignum_value(id)), Ok(v) if crate::tagged::fixnum_fits(v))
     }
 
     /// The `BigInt` behind a boxed bignum. Panics if `id` doesn't hold a
     /// `BoxedObj::Bignum` — same internal-invariant-trap convention as
     /// [`f64_value`](Self::f64_value).
-    pub fn bignum_value(&self, id: BoxId) -> &num_bigint::BigInt {
-        match &self.box_slots[id.0 as usize] {
+    /// See `type_key_name`'s doc comment for why this returns a mapped guard
+    /// rather than `&num_bigint::BigInt`.
+    pub fn bignum_value(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, num_bigint::BigInt> {
+        parking_lot::RwLockReadGuard::map(self.shared.boxes.read(), |b| match &b.slots[id.0 as usize] {
             Some(BoxedObj::Bignum(n)) => n,
             _ => panic!("BoxId does not hold a Bignum"),
-        }
+        })
     }
 
     /// True if `id` holds a `BoxedObj::Bignum` — the peer of
     /// [`is_f64`](Self::is_f64) for callers decoding an unknown
     /// `Value::Boxed`.
     pub fn is_bignum(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Bignum(_)))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Bignum(_)))
     }
 
     /// Store a `ratio` (exact rational), returning its `Value::Boxed` — the
@@ -1281,16 +1285,18 @@ impl Heap {
 
     /// The `BigRational` behind a boxed ratio. Panics if `id` doesn't hold a
     /// `BoxedObj::Ratio` — same convention as [`bignum_value`](Self::bignum_value).
-    pub fn ratio_value(&self, id: BoxId) -> &num_rational::BigRational {
-        match &self.box_slots[id.0 as usize] {
+    /// See `type_key_name`'s doc comment for why this returns a mapped guard
+    /// rather than `&num_rational::BigRational`.
+    pub fn ratio_value(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, num_rational::BigRational> {
+        parking_lot::RwLockReadGuard::map(self.shared.boxes.read(), |b| match &b.slots[id.0 as usize] {
             Some(BoxedObj::Ratio(r)) => r,
             _ => panic!("BoxId does not hold a Ratio"),
-        }
+        })
     }
 
     /// True if `id` holds a `BoxedObj::Ratio`.
     pub fn is_ratio(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Ratio(_)))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Ratio(_)))
     }
 
     /// Store a struct-shaped [`BoxedObj`] with fixed- or variable-length
@@ -1311,7 +1317,7 @@ impl Heap {
     /// compares. Panics if `id` doesn't hold a `BoxedObj::Struct` — same
     /// internal-invariant-trap convention as [`f64_value`](Self::f64_value).
     pub fn struct_type_key(&self, id: BoxId) -> TypeKeyId {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Struct { type_key, .. }) => *type_key,
             _ => panic!("BoxId does not hold a Struct"),
         }
@@ -1329,7 +1335,7 @@ impl Heap {
     /// (known statically, so callers with a static field index rarely need
     /// this). Panics if `id` doesn't hold a `BoxedObj::Struct`.
     pub fn struct_field_count(&self, id: BoxId) -> usize {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Struct { payload: StructPayload::Fields(fields), .. }) => fields.len(),
             _ => panic!("BoxId does not hold a Struct"),
         }
@@ -1342,7 +1348,7 @@ impl Heap {
     /// never happens, the same convention [`car`](Self::car)/[`cdr`](Self::cdr)
     /// use for a non-cons argument.
     pub fn struct_field(&self, id: BoxId, idx: usize) -> Value {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Struct { payload: StructPayload::Fields(fields), .. }) => {
                 *fields.get(idx).unwrap_or_else(|| panic!("struct field index {} out of range", idx))
             }
@@ -1356,7 +1362,7 @@ impl Heap {
     /// in-place mutation of a cons cell. Panics under the same conditions as
     /// [`struct_field`](Self::struct_field).
     pub fn struct_set_field(&mut self, id: BoxId, idx: usize, val: Value) {
-        match self.box_slots[id.0 as usize].as_mut() {
+        match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
             Some(BoxedObj::Struct { payload: StructPayload::Fields(fields), .. }) => {
                 if idx >= fields.len() {
                     panic!("struct field index {} out of range", idx);
@@ -1373,7 +1379,7 @@ impl Heap {
     /// returns, since only `Vector<T>`'s builtin methods ever call this).
     /// Panics if `id` doesn't hold a `BoxedObj::Struct`.
     pub fn struct_push_field(&mut self, id: BoxId, val: Value) {
-        match self.box_slots[id.0 as usize].as_mut() {
+        match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
             Some(BoxedObj::Struct { payload: StructPayload::Fields(fields), .. }) => fields.push(val),
             _ => panic!("BoxId does not hold a Struct"),
         }
@@ -1389,7 +1395,7 @@ impl Heap {
     /// `get`/`set`'s "out of range panics" convention. Panics only if `id`
     /// doesn't hold a `BoxedObj::Struct` at all.
     pub fn struct_pop_field(&mut self, id: BoxId) -> Option<Value> {
-        match self.box_slots[id.0 as usize].as_mut() {
+        match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
             Some(BoxedObj::Struct { payload: StructPayload::Fields(fields), .. }) => fields.pop(),
             _ => panic!("BoxId does not hold a Struct"),
         }
@@ -1405,7 +1411,7 @@ impl Heap {
     /// `HashTable` without risking [`f64_value`](Self::f64_value)'s or
     /// [`struct_field`](Self::struct_field)'s "wrong kind" panic.
     pub fn is_struct(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Fields(_), .. }))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Fields(_), .. }))
     }
 
     /// True if `id` holds a `BoxedObj::Struct` with a `StructPayload::Map`
@@ -1413,7 +1419,7 @@ impl Heap {
     /// [`is_struct`](Self::is_struct)'s doc comment for why this needs to be
     /// a separate predicate rather than folded into it.
     pub fn is_hashtable(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Map(_), .. }))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Map(_), .. }))
     }
 
     // ---- enums ----------------------------------------------------------------
@@ -1434,14 +1440,14 @@ impl Heap {
     /// [`is_struct`](Self::is_struct), for callers decoding an unknown
     /// `Value::Boxed`.
     pub fn is_enum(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Enum { .. }))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Enum { .. }))
     }
 
     /// The type identity of a boxed enum value — the enum peer of
     /// [`struct_type_key`](Self::struct_type_key). Panics if `id` doesn't hold
     /// a `BoxedObj::Enum`.
     pub fn enum_type_key(&self, id: BoxId) -> TypeKeyId {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Enum { type_key, .. }) => *type_key,
             _ => panic!("BoxId does not hold an Enum"),
         }
@@ -1457,7 +1463,7 @@ impl Heap {
     /// The variant index of a boxed enum value — what a `match` arm's tag
     /// test compares against. Panics if `id` doesn't hold a `BoxedObj::Enum`.
     pub fn enum_variant(&self, id: BoxId) -> usize {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Enum { variant, .. }) => *variant,
             _ => panic!("BoxId does not hold an Enum"),
         }
@@ -1468,7 +1474,7 @@ impl Heap {
     /// [`enum_variant`](Self::enum_variant). Panics if `id` doesn't hold a
     /// `BoxedObj::Enum`.
     pub fn enum_field_count(&self, id: BoxId) -> usize {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Enum { fields, .. }) => fields.len(),
             _ => panic!("BoxId does not hold an Enum"),
         }
@@ -1480,7 +1486,7 @@ impl Heap {
     /// convention as [`struct_field`](Self::struct_field). No `set`
     /// counterpart exists: enum values are immutable.
     pub fn enum_field(&self, id: BoxId, idx: usize) -> Value {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Enum { fields, .. }) => {
                 *fields.get(idx).unwrap_or_else(|| panic!("enum field index {} out of range", idx))
             }
@@ -1502,14 +1508,14 @@ impl Heap {
     /// `Value::Boxed` — note this is `false` for the *concrete* value inside,
     /// so `is_struct`/`is_enum` stay unaffected by boxing.
     pub fn is_dyn(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Dyn { .. }))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Dyn { .. }))
     }
 
     /// The vtable identifier of a trait object. Panics if `id` doesn't hold a
     /// `BoxedObj::Dyn` — same internal-invariant-trap convention as
     /// [`enum_variant`](Self::enum_variant).
     pub fn dyn_vtable_id(&self, id: BoxId) -> u32 {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Dyn { vtable_id, .. }) => *vtable_id,
             _ => panic!("BoxId does not hold a Dyn"),
         }
@@ -1518,7 +1524,7 @@ impl Heap {
     /// The concrete value inside a trait object. Panics if `id` doesn't hold
     /// a `BoxedObj::Dyn`.
     pub fn dyn_value(&self, id: BoxId) -> Value {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Dyn { value, .. }) => *value,
             _ => panic!("BoxId does not hold a Dyn"),
         }
@@ -1550,7 +1556,7 @@ impl Heap {
     /// `BoxedObj::Cell` — same internal-invariant-trap convention as
     /// [`f64_value`](Self::f64_value).
     pub fn cell_get(&self, id: BoxId) -> Value {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Cell(v)) => *v,
             _ => panic!("BoxId does not hold a Cell"),
         }
@@ -1560,7 +1566,7 @@ impl Heap {
     /// heap-cell-backed binding. Panics under the same conditions as
     /// [`cell_get`](Self::cell_get).
     pub fn cell_set(&mut self, id: BoxId, v: Value) {
-        match self.box_slots[id.0 as usize].as_mut() {
+        match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
             Some(BoxedObj::Cell(slot)) => *slot = v,
             _ => panic!("BoxId does not hold a Cell"),
         }
@@ -1570,7 +1576,7 @@ impl Heap {
     /// [`is_struct`](Self::is_struct)/[`is_hashtable`](Self::is_hashtable)
     /// for callers that decode a `Value::Boxed` without knowing its kind.
     pub fn is_cell(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Cell(_)))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Cell(_)))
     }
 
     /// [`alloc_cell`](Self::alloc_cell) without the owning-`Rc` liveness
@@ -1596,12 +1602,12 @@ impl Heap {
     /// accepts either width has to name both, or read the width out with
     /// [`float_box`](Self::float_box).
     pub fn is_f64(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Float64(_)))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Float64(_)))
     }
 
     /// True if `id` holds a `BoxedObj::Float32`. See [`is_f64`](Self::is_f64).
     pub fn is_f32(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Float32(_)))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Float32(_)))
     }
 
     // ---- compiled closures ------------------------------------------------------
@@ -1634,7 +1640,7 @@ impl Heap {
     ///
     /// Panics like [`compiled_closure_fnptr`](Self::compiled_closure_fnptr).
     pub fn compiled_closure_body_abi(&self, id: BoxId) -> u8 {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::CompiledClosure { body_abi, .. }) => *body_abi,
             _ => panic!("BoxId does not hold a CompiledClosure"),
         }
@@ -1645,7 +1651,7 @@ impl Heap {
     /// or a built-in ([`is_builtin_fn`](Self::is_builtin_fn)); the three
     /// together are every `Type::Fn` value.
     pub fn is_compiled_closure(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::CompiledClosure { .. }))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::CompiledClosure { .. }))
     }
 
     // ---- compiled frames --------------------------------------------------
@@ -1676,7 +1682,7 @@ impl Heap {
 
     /// True if `id` holds a [`BoxedObj::Frame`].
     pub fn is_frame(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Frame { .. }))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Frame { .. }))
     }
 
     /// The address of a frame's word array, for compiled code to load and
@@ -1685,16 +1691,16 @@ impl Heap {
     /// # Stability
     ///
     /// The address stays valid for as long as the frame is *live*. Growing
-    /// `box_slots` moves the `BoxedObj` but not the `Vec`'s buffer, and the
-    /// sweep writes `None` in place rather than compacting — so the only way
-    /// to invalidate this pointer is to let the frame be collected, which is
-    /// the caller's job to prevent by keeping it reachable (the task's stack
-    /// does).
+    /// `shared.boxes`'s `Slab` never moves an already-issued slot (see
+    /// `Slab`'s doc comment) and the sweep writes `None` in place rather
+    /// than compacting — so the only way to invalidate this pointer is to
+    /// let the frame be collected, which is the caller's job to prevent by
+    /// keeping it reachable (the task's stack does).
     ///
     /// Panics if `id` does not hold a frame — the compiler's own bookkeeping,
     /// so an internal invariant.
     pub fn frame_data_ptr(&mut self, id: BoxId) -> *mut i64 {
-        match &mut self.box_slots[id.0 as usize] {
+        match &mut self.shared.boxes.write().slots[id.0 as usize] {
             Some(BoxedObj::Frame { words, .. }) => words.as_mut_ptr(),
             _ => panic!("BoxId does not hold a Frame"),
         }
@@ -1702,7 +1708,7 @@ impl Heap {
 
     /// How many slots a frame holds. Panics like [`frame_data_ptr`](Self::frame_data_ptr).
     pub fn frame_len(&self, id: BoxId) -> usize {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Frame { words, .. }) => words.len(),
             _ => panic!("BoxId does not hold a Frame"),
         }
@@ -1712,7 +1718,7 @@ impl Heap {
     /// [`frame_data_ptr`](Self::frame_data_ptr), and on an out-of-range slot —
     /// the compiler's layout guarantee makes that an internal invariant too.
     pub fn frame_word(&self, id: BoxId, idx: usize) -> i64 {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Frame { words, .. }) => {
                 *words.get(idx).unwrap_or_else(|| panic!("frame slot {} out of range", idx))
             }
@@ -1722,7 +1728,7 @@ impl Heap {
 
     /// Writes one slot. Panics like [`frame_word`](Self::frame_word).
     pub fn set_frame_word(&mut self, id: BoxId, idx: usize, w: i64) {
-        match &mut self.box_slots[id.0 as usize] {
+        match &mut self.shared.boxes.write().slots[id.0 as usize] {
             Some(BoxedObj::Frame { words, .. }) => match words.get_mut(idx) {
                 Some(slot) => *slot = w,
                 None => panic!("frame slot {} out of range", idx),
@@ -1734,7 +1740,7 @@ impl Heap {
     /// Whether slot `idx` holds a tagged value the collector should trace.
     /// Panics like [`frame_word`](Self::frame_word).
     pub fn frame_mask_bit(&self, id: BoxId, idx: usize) -> bool {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Frame { words, mask, .. }) => {
                 assert!(idx < words.len(), "frame slot {} out of range", idx);
                 mask[idx / 64] & (1u64 << (idx % 64)) != 0
@@ -1754,7 +1760,7 @@ impl Heap {
     /// under it, and then neither setting nor clearing is safe at the right
     /// moment. Panics like [`frame_word`](Self::frame_word).
     pub fn set_frame_mask_bit(&mut self, id: BoxId, idx: usize) {
-        match &mut self.box_slots[id.0 as usize] {
+        match &mut self.shared.boxes.write().slots[id.0 as usize] {
             Some(BoxedObj::Frame { words, mask, .. }) => {
                 assert!(idx < words.len(), "frame slot {} out of range", idx);
                 mask[idx / 64] |= 1u64 << (idx % 64);
@@ -1766,7 +1772,7 @@ impl Heap {
     /// Where the function resumes: 0 on entry, a call site's id afterwards.
     /// Panics like [`frame_word`](Self::frame_word).
     pub fn frame_pc(&self, id: BoxId) -> u32 {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Frame { pc, .. }) => *pc,
             _ => panic!("BoxId does not hold a Frame"),
         }
@@ -1774,7 +1780,7 @@ impl Heap {
 
     /// Sets the resume point. Panics like [`frame_word`](Self::frame_word).
     pub fn set_frame_pc(&mut self, id: BoxId, pc: u32) {
-        match &mut self.box_slots[id.0 as usize] {
+        match &mut self.shared.boxes.write().slots[id.0 as usize] {
             Some(BoxedObj::Frame { pc: slot, .. }) => *slot = pc,
             _ => panic!("BoxId does not hold a Frame"),
         }
@@ -1789,14 +1795,14 @@ impl Heap {
 
     /// True if `id` holds a [`BoxedObj::Closure`].
     pub fn is_closure(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Closure { .. }))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Closure { .. }))
     }
 
     /// An interpreted closure's parts: `(params, body, env)`. Panics if `id`
     /// does not hold one — the same internal-invariant-trap convention as
     /// [`f64_value`](Self::f64_value).
     pub fn closure_parts(&self, id: BoxId) -> (Value, Value, Value) {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Closure { params, body, env, .. }) => (*params, *body, *env),
             _ => panic!("BoxId does not hold a Closure"),
         }
@@ -1807,7 +1813,7 @@ impl Heap {
     /// boundary crossing needs it; see [`BoxedObj::Closure`]. Panics like
     /// [`closure_parts`](Self::closure_parts).
     pub fn closure_ret(&self, id: BoxId) -> Value {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Closure { ret, .. }) => *ret,
             _ => panic!("BoxId does not hold a Closure"),
         }
@@ -1841,7 +1847,7 @@ impl Heap {
 
     /// True if `id` holds a `BoxedObj::Builtin`.
     pub fn is_builtin_fn(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Builtin { .. }))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Builtin { .. }))
     }
 
     /// A built-in function value's receiver type — `None` for a free
@@ -1849,7 +1855,7 @@ impl Heap {
     /// internal-invariant-trap convention as
     /// [`f64_value`](Self::f64_value).
     pub fn builtin_fn_recv(&self, id: BoxId) -> Option<PathId> {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Builtin { recv_type, .. }) => *recv_type,
             _ => panic!("BoxId does not hold a Builtin"),
         }
@@ -1859,7 +1865,7 @@ impl Heap {
     /// [`builtin_fn_recv`](Self::builtin_fn_recv). See `type_key_name`'s doc
     /// comment for why this returns a mapped guard rather than `&str`.
     pub fn builtin_fn_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
-        let name = match &self.box_slots[id.0 as usize] {
+        let name = match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Builtin { name, .. }) => *name,
             _ => panic!("BoxId does not hold a Builtin"),
         };
@@ -1870,7 +1876,7 @@ impl Heap {
     /// [`BoxedObj::Builtin`]'s `ret_key`. See `type_key_name`'s doc comment
     /// for why this returns a mapped guard rather than `&str`.
     pub fn builtin_fn_ret_key(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
-        let ret_key = match &self.box_slots[id.0 as usize] {
+        let ret_key = match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Builtin { ret_key, .. }) => *ret_key,
             _ => panic!("BoxId does not hold a Builtin"),
         };
@@ -1888,14 +1894,14 @@ impl Heap {
 
     /// True if `id` holds a `BoxedObj::RandomState`.
     pub fn is_random_state(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::RandomState(_)))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::RandomState(_)))
     }
 
     /// A `random-state`'s current seed. Panics if `id` doesn't hold a
     /// `BoxedObj::RandomState` — the same internal-invariant-trap convention as
     /// [`f64_value`](Self::f64_value).
     pub fn random_state_seed(&self, id: BoxId) -> u64 {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::RandomState(seed)) => *seed,
             _ => panic!("BoxId does not hold a RandomState"),
         }
@@ -1905,7 +1911,7 @@ impl Heap {
     /// observes the change, which is what makes it one shared stream. Panics
     /// like [`random_state_seed`](Self::random_state_seed).
     pub fn set_random_state_seed(&mut self, id: BoxId, seed: u64) {
-        match &mut self.box_slots[id.0 as usize] {
+        match &mut self.shared.boxes.write().slots[id.0 as usize] {
             Some(BoxedObj::RandomState(s)) => *s = seed,
             _ => panic!("BoxId does not hold a RandomState"),
         }
@@ -1915,7 +1921,7 @@ impl Heap {
     /// a `BoxedObj::CompiledClosure` — the same internal-invariant-trap
     /// convention as [`f64_value`](Self::f64_value).
     pub fn compiled_closure_fnptr(&self, id: BoxId) -> usize {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::CompiledClosure { fn_ptr, .. }) => *fn_ptr,
             _ => panic!("BoxId does not hold a CompiledClosure"),
         }
@@ -1925,7 +1931,7 @@ impl Heap {
     /// holds a real tagged value (see [`BoxedObj::CompiledClosure`]).
     /// Panics like [`compiled_closure_fnptr`](Self::compiled_closure_fnptr).
     pub fn compiled_closure_mask(&self, id: BoxId) -> u64 {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::CompiledClosure { sexpr_mask, .. }) => *sexpr_mask,
             _ => panic!("BoxId does not hold a CompiledClosure"),
         }
@@ -1934,7 +1940,7 @@ impl Heap {
     /// The number of captured slots a compiled closure carries. Panics like
     /// [`compiled_closure_fnptr`](Self::compiled_closure_fnptr).
     pub fn compiled_closure_env_len(&self, id: BoxId) -> usize {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::CompiledClosure { env, .. }) => env.len(),
             _ => panic!("BoxId does not hold a CompiledClosure"),
         }
@@ -1945,7 +1951,7 @@ impl Heap {
     /// range — the compiler's capture-layout guarantee makes that an
     /// internal invariant, same convention as [`enum_field`](Self::enum_field).
     pub fn compiled_closure_env_get(&self, id: BoxId, idx: usize) -> Value {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::CompiledClosure { env, .. }) => {
                 *env.get(idx).unwrap_or_else(|| panic!("compiled closure env index {} out of range", idx))
             }
@@ -1964,13 +1970,13 @@ impl Heap {
 
     /// The bucket at `hash`, or `&[]` when there is none. Every read below
     /// goes through here.
-    fn bucket(&self, id: BoxId, hash: i64) -> &[(Value, Value)] {
-        match &self.box_slots[id.0 as usize] {
+    fn bucket(&self, id: BoxId, hash: i64) -> parking_lot::MappedRwLockReadGuard<'_, [(Value, Value)]> {
+        parking_lot::RwLockReadGuard::map(self.shared.boxes.read(), |b| match &b.slots[id.0 as usize] {
             Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
                 map.get(&hash).map(Vec::as_slice).unwrap_or(&[])
             }
             _ => panic!("BoxId does not hold a HashTable"),
-        }
+        })
     }
 
     /// How many entries share `hash`. The caller walks them with
@@ -2005,7 +2011,7 @@ impl Heap {
     /// length. The caller decides which by looking first, which is the same
     /// call it had to make anyway to answer "was this key already present".
     pub fn hashtable_bucket_put(&mut self, id: BoxId, hash: i64, i: usize, key: Value, val: Value) {
-        match self.box_slots[id.0 as usize].as_mut() {
+        match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
             Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
                 let bucket = map.entry(hash).or_default();
                 if i < bucket.len() {
@@ -2022,7 +2028,7 @@ impl Heap {
 
     /// Removes the `i`th entry of `hash`'s bucket, keeping the rest in order.
     pub fn hashtable_bucket_delete(&mut self, id: BoxId, hash: i64, i: usize) {
-        match self.box_slots[id.0 as usize].as_mut() {
+        match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
             Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
                 let Some(bucket) = map.get_mut(&hash) else {
                     panic!("HashTable: no bucket at hash {}", hash);
@@ -2042,7 +2048,7 @@ impl Heap {
     /// The number of entries in a boxed hash map. Panics if `id` doesn't
     /// hold a `BoxedObj::Struct` with a `StructPayload::Map` payload.
     pub fn hashtable_count(&self, id: BoxId) -> usize {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
                 map.values().map(Vec::len).sum()
             }
@@ -2053,7 +2059,7 @@ impl Heap {
     /// Removes every entry in place. Panics if `id` doesn't hold a
     /// `BoxedObj::Struct` with a `StructPayload::Map` payload.
     pub fn hashtable_clear(&mut self, id: BoxId) {
-        match self.box_slots[id.0 as usize].as_mut() {
+        match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
             Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.clear(),
             _ => panic!("BoxId does not hold a HashTable"),
         }
@@ -2067,7 +2073,7 @@ impl Heap {
     /// `id` doesn't hold a `BoxedObj::Struct` with a `StructPayload::Map`
     /// payload.
     pub fn hashtable_pairs(&self, id: BoxId) -> Vec<(Value, Value)> {
-        match &self.box_slots[id.0 as usize] {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
             Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
                 map.values().flat_map(|b| b.iter().copied()).collect()
             }
@@ -2093,19 +2099,28 @@ impl Heap {
     /// `BoxedObj::Struct` with a `StructPayload::Frames` payload — same
     /// internal-invariant-trap convention as
     /// [`hashtable_bucket_key`](Self::hashtable_bucket_key)'s.
-    fn scope_frames(&self, id: BoxId) -> &Vec<BoxId> {
-        match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Struct { payload: StructPayload::Frames(frames), .. }) => frames,
+    /// Returns an owned copy (rather than a borrow) so callers — `scope_get`
+    /// chief among them — can look a name up in each frame's own bindings
+    /// (`frame_binding`, another `shared.boxes` reader) while iterating,
+    /// without holding two reads of the same `RwLock` open at once
+    /// (`parking_lot`'s recursive-read is only safe when no writer is ever
+    /// waiting, which will stop holding once real threads share this heap —
+    /// see `docs/dev/os-threads-design.md` §2). A scope's frame stack is a
+    /// handful of `BoxId`s, so the clone costs nothing worth avoiding.
+    fn scope_frames(&self, id: BoxId) -> Vec<BoxId> {
+        match &self.shared.boxes.read().slots[id.0 as usize] {
+            Some(BoxedObj::Struct { payload: StructPayload::Frames(frames), .. }) => frames.clone(),
             _ => panic!("BoxId does not hold a Scope"),
         }
     }
 
-    /// One frame's bindings, by the frame's own `BoxId`. Panics if `fid`
-    /// doesn't hold a `StructPayload::Frame` payload — every `BoxId` on a
-    /// scope's frame stack does, by construction.
-    fn frame_bindings(&self, fid: BoxId) -> &HashMap<String, Value> {
-        match &self.box_slots[fid.0 as usize] {
-            Some(BoxedObj::Struct { payload: StructPayload::Frame(map), .. }) => map,
+    /// A binding of `name` in one frame, by the frame's own `BoxId` —
+    /// `scope_get`'s per-frame lookup. Panics if `fid` doesn't hold a
+    /// `StructPayload::Frame` payload — every `BoxId` on a scope's frame
+    /// stack does, by construction.
+    fn frame_binding(&self, fid: BoxId, name: &str) -> Option<Value> {
+        match &self.shared.boxes.read().slots[fid.0 as usize] {
+            Some(BoxedObj::Struct { payload: StructPayload::Frame(map), .. }) => map.get(name).copied(),
             _ => panic!("BoxId does not hold a Scope frame"),
         }
     }
@@ -2130,7 +2145,7 @@ impl Heap {
     /// [`scope_pop_frame`](Self::scope_pop_frame) touch only the one scope
     /// they're called on). Panics like [`scope_get`](Self::scope_get).
     pub fn scope_clone_frames(&mut self, id: BoxId) -> Value {
-        let frames = self.scope_frames(id).clone();
+        let frames = self.scope_frames(id);
         self.alloc_boxed(BoxedObj::Struct { type_key: TypeKeyId::SCOPE, payload: StructPayload::Frames(frames) })
     }
 
@@ -2138,7 +2153,7 @@ impl Heap {
     /// [`scope_get`](Self::scope_get).
     pub fn scope_push_frame(&mut self, id: BoxId) {
         let frame = self.alloc_scope_frame();
-        match self.box_slots[id.0 as usize].as_mut() {
+        match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
             Some(BoxedObj::Struct { payload: StructPayload::Frames(frames), .. }) => frames.push(frame),
             _ => panic!("BoxId does not hold a Scope"),
         }
@@ -2149,7 +2164,7 @@ impl Heap {
     /// stack — the pre-unification `scope_pop_frame`'s `Vec::pop` behavior.
     /// Panics like [`scope_get`](Self::scope_get).
     pub fn scope_pop_frame(&mut self, id: BoxId) {
-        match self.box_slots[id.0 as usize].as_mut() {
+        match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
             Some(BoxedObj::Struct { payload: StructPayload::Frames(frames), .. }) => {
                 frames.pop();
             }
@@ -2164,9 +2179,9 @@ impl Heap {
     /// value entirely; see `compiler.rs`'s module doc comment). Panics if
     /// `id` doesn't hold a `StructPayload::Frames` payload.
     pub fn scope_get(&self, id: BoxId, name: &str) -> Option<Value> {
-        for fid in self.scope_frames(id).iter().rev() {
-            if let Some(v) = self.frame_bindings(*fid).get(name) {
-                return Some(*v);
+        for fid in self.scope_frames(id).into_iter().rev() {
+            if let Some(v) = self.frame_binding(fid, name) {
+                return Some(v);
             }
         }
         None
@@ -2183,7 +2198,7 @@ impl Heap {
     /// the hash-table key-shape panics.
     pub fn scope_set(&mut self, id: BoxId, name: &str, v: Value) {
         let top = *self.scope_frames(id).last().expect("Scope::set: no frame to write into");
-        match self.box_slots[top.0 as usize].as_mut() {
+        match self.shared.boxes.write().slots[top.0 as usize].as_mut() {
             Some(BoxedObj::Struct { payload: StructPayload::Frame(map), .. }) => {
                 map.insert(name.to_string(), v);
             }
@@ -2198,7 +2213,7 @@ impl Heap {
     /// (Frame boxes get no public predicate: they are internal constituents
     /// of some scope, never handed out as standalone values.)
     pub fn is_scope(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Frames(_), .. }))
+        matches!(self.shared.boxes.read().slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Frames(_), .. }))
     }
 
     /// The number of frames currently on a scope's stack — what the
@@ -2578,7 +2593,7 @@ impl Heap {
         }
         for w in &self.cell_registry {
             if let Some(id) = w.upgrade() {
-                if let Some(BoxedObj::Cell(v)) = &self.box_slots[id.0 as usize] {
+                if let Some(BoxedObj::Cell(v)) = &self.shared.boxes.read().slots[id.0 as usize] {
                     check("cell_registry", id.0 as usize, *v);
                 }
             }
@@ -2601,7 +2616,7 @@ impl Heap {
         for m in self.shared.strings.write().marks.iter_mut() {
             *m = false;
         }
-        for m in self.box_marks.iter_mut() {
+        for m in self.shared.boxes.write().marks.iter_mut() {
             *m = false;
         }
 
@@ -2662,11 +2677,12 @@ impl Heap {
                 }
                 Value::Boxed(b) => {
                     let idx = b.0 as usize;
-                    if self.box_marks[idx] {
+                    let mut boxes = self.shared.boxes.write();
+                    if boxes.marks[idx] {
                         continue;
                     }
-                    self.box_marks[idx] = true;
-                    if let Some(obj) = &self.box_slots[idx] {
+                    boxes.marks[idx] = true;
+                    if let Some(obj) = &boxes.slots[idx] {
                         Self::push_boxed_nested(obj, &mut stack);
                     }
                 }
@@ -2725,12 +2741,14 @@ impl Heap {
         drop(strings);
 
         // SWEEP boxed objects: same recycling scheme as strings.
-        for i in 0..self.box_slots.len() {
-            if self.box_slots[i].is_some() && !self.box_marks[i] {
-                self.box_slots[i] = None;
-                self.box_free.push(i as u32);
+        let mut boxes = self.shared.boxes.write();
+        for i in 0..boxes.slots.len() {
+            if boxes.slots[i].is_some() && !boxes.marks[i] {
+                boxes.slots[i] = None;
+                boxes.free.push(i as u32);
             }
         }
+        drop(boxes);
 
         new_free_count - old_free
     }

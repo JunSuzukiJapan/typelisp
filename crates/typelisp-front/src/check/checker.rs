@@ -9707,7 +9707,7 @@ impl Checker {
                 // a `(bignum ..)` node re-boxes on every evaluation, and a
                 // box holding a fixnum-range value must never exist.
                 Some(Type::Int) => {
-                    let fitted = i64::try_from(heap.bignum_value(id)).ok().filter(|v| typelisp_mem::fixnum_fits(*v));
+                    let fitted = i64::try_from(&*heap.bignum_value(id)).ok().filter(|v| typelisp_mem::fixnum_fits(*v));
                     match fitted {
                         Some(v) => Checked::new(core::tagged(heap, "int", &[Value::Int(v)])?, Type::Int),
                         None => Checked::new(core::tagged(heap, "bignum", &[Value::Boxed(id)])?, Type::Int),
@@ -9716,7 +9716,7 @@ impl Checker {
                 Some(t) if t.is_integer() => {
                     let (fitted, text) = {
                         let big = heap.bignum_value(id);
-                        (i64::try_from(big).ok().filter(|v| int_lit_in_range(*v, t)), big.to_string())
+                        (i64::try_from(&*big).ok().filter(|v| int_lit_in_range(*v, t)), big.to_string())
                     };
                     match fitted {
                         Some(v) => Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(v)])?, t.clone()),

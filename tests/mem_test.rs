@@ -2249,7 +2249,7 @@ fn canonical_int_never_boxes_a_fixnum_range_value() {
         let Value::Boxed(id) = h.canonical_int(n) else { panic!("{} must be boxed", n) };
         assert!(h.is_bignum(id));
         assert!(!h.bignum_fits_fixnum(id), "{} is out of the fixnum range", n);
-        assert_eq!(h.bignum_value(id), &num_bigint::BigInt::from(n));
+        assert_eq!(*h.bignum_value(id), num_bigint::BigInt::from(n));
     }
     // The check the boundaries use: a bignum box that *does* fit a fixnum is
     // the non-canonical shape nothing may produce.
@@ -2273,5 +2273,5 @@ fn a_non_canonical_bignum_in_a_dump_is_refused() {
     let Value::Boxed(id) = owned_to_value(&mut h, &OwnedForm::Bignum(big.clone())).expect("a real bignum loads") else {
         panic!("boxed")
     };
-    assert_eq!(h.bignum_value(id), &big);
+    assert_eq!(*h.bignum_value(id), big);
 }

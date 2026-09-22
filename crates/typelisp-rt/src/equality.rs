@@ -83,10 +83,10 @@ pub fn eql_val(heap: &Heap, a: Value, b: Value) -> bool {
         // Same rationale as the floats above: two separately-allocated but
         // equal-valued `bignum`/`ratio` boxes must still be `eql`.
         if heap.is_bignum(ia) && heap.is_bignum(ib) {
-            return heap.bignum_value(ia) == heap.bignum_value(ib);
+            return *heap.bignum_value(ia) == *heap.bignum_value(ib);
         }
         if heap.is_ratio(ia) && heap.is_ratio(ib) {
-            return heap.ratio_value(ia) == heap.ratio_value(ib);
+            return *heap.ratio_value(ia) == *heap.ratio_value(ib);
         }
     }
     a == b
