@@ -385,15 +385,14 @@ well_known_symbols! {
      not know what `(f a b)` returns; only the checker does."
     GO => "go"
 
-    "Appended for `select` (2026-09-12). Waiting on several channels at once,
-     and the reason it is a form rather than a macro over a function is the
-     same as `go`'s and then some: the arms' bodies are *its* subforms, a
-     receive arm binds a name whose type comes from the channel, and the whole
-     form's type is the join of the arms' — none of which a macro can spell.
-
-     The channel expressions and the values to send are **not** in this node.
-     The checker binds them in a `let` it wraps around this one, so operand
-     evaluation — including a suspension in the middle of it — is the `let`'s
+    "Appended for `select` (2026-09-12). Waiting on several channels at once, \
+     and the reason it is a form rather than a macro over a function is the \
+     same as `go`'s and then some: the arms' bodies are *its* subforms, a \
+     receive arm binds a name whose type comes from the channel, and the whole \
+     form's type is the join of the arms' — none of which a macro can spell.\n\n\
+     The channel expressions and the values to send are **not** in this node. \
+     The checker binds them in a `let` it wraps around this one, so operand \
+     evaluation — including a suspension in the middle of it — is the `let`'s \
      job, and nothing here evaluates anything that can stop."
     SELECT => "select"
 
