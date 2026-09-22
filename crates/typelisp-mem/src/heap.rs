@@ -302,6 +302,20 @@ pub struct HeapShared {
     // Same reasoning again, for `Heap::bignum_value`/`ratio_value`'s return
     // and `bucket`'s (`Heap::hashtable_bucket_count` and friends).
     boxes: RwLock<BoxStore>,
+    // Liveness registry for `BoxedObj::Cell`s (see `alloc_cell`): a cell is
+    // an *implicit* GC root for exactly as long as some binding holds the
+    // `Arc<BoxId>` handed out at allocation. Registered here (weakly) rather
+    // than through the caller-managed `roots`/`permanent_roots` stacks
+    // because a binding's lifetime follows Rust scopes, not this heap's
+    // strict LIFO root discipline — and, crucially, `gc()` reads this
+    // registry *itself*, so a collection triggered from anywhere (including
+    // compiled code, or a different thread's view once more than one
+    // exists) can never sweep a live binding cell. `std::sync::Mutex`
+    // rather than `parking_lot`'s: nothing here ever needs a borrowed
+    // return, only the plain `Vec` operations `alloc_cell`/`gc` already use
+    // (`retain`/`push`/iteration), the same reasoning as `root_stacks`/
+    // `permanent_roots`.
+    cell_registry: Mutex<Vec<std::sync::Weak<BoxId>>>,
 }
 
 pub struct Heap {
@@ -349,18 +363,10 @@ pub struct Heap {
     // slice: both moved into `shared.interning` — see `HeapShared`'s doc
     // comment. Nor is the GC-managed string store: it moved into
     // `shared.strings`. Nor is the GC-managed general boxed-object store
-    // (see `BoxedObj`): it moved into `shared.boxes`.
-
-    // Liveness registry for `BoxedObj::Cell`s (see `alloc_cell`): a cell is
-    // an *implicit* GC root for exactly as long as some binding holds the
-    // `Rc<BoxId>` handed out at allocation. Registered here (weakly) rather
-    // than through the caller-managed `roots`/`permanent_roots` stacks
-    // because a binding's lifetime follows Rust scopes, not this heap's
-    // strict LIFO root discipline — and, crucially, `gc()` reads this
-    // registry *itself*, so a collection triggered from anywhere (including
-    // compiled code, which knows nothing about the interpreter's
-    // root-resyncing) can never sweep a live binding cell.
-    cell_registry: Vec<std::rc::Weak<BoxId>>,
+    // (see `BoxedObj`): it moved into `shared.boxes`. Nor is the binding-cell
+    // liveness registry: it moved into `shared.cell_registry` (see that
+    // field's doc comment) — a cell handed to one thread must stay a root no
+    // matter which thread's `gc()` ends up running.
 
     // Every distinct source span any live cell refers to, indexed by
     // `LocId` — see `Cell`'s doc comment for why a cell holds an index rather
@@ -429,6 +435,7 @@ impl Heap {
             interning: RwLock::new(Interning::default()),
             strings: RwLock::new(StrStore::default()),
             boxes: RwLock::new(BoxStore::default()),
+            cell_registry: Mutex::new(Vec::new()),
         });
 
         let mut heap = Heap {
@@ -441,7 +448,6 @@ impl Heap {
             in_flight_throw: None,
             macro_chars: HashMap::new(),
             dispatch_chars: HashMap::new(),
-            cell_registry: Vec::new(),
             locs: Vec::new(),
             loc_ids: HashMap::new(),
         };
@@ -1533,22 +1539,26 @@ impl Heap {
     // ---- cells ----------------------------------------------------------------
 
     /// Store a mutable variable slot holding `v`, returning an owning
-    /// `Rc<BoxId>` handle — see [`BoxedObj::Cell`]. The cell (and thus its
+    /// `Arc<BoxId>` handle — see [`BoxedObj::Cell`]. The cell (and thus its
     /// current contents) stays live for exactly as long as any clone of the
     /// handle does: `gc()` treats every still-referenced cell as a root by
-    /// consulting the weak registry this populates (`cell_registry`), so no
-    /// caller-side root bookkeeping exists for cells at all — a collection
-    /// triggered from *anywhere* (interpreter or compiled code) sees them.
-    /// Unlike [`cons`](Self::cons), this can never itself trigger a
-    /// collection (the box store grows on demand, it is not a fixed arena),
-    /// so `v` may be un-rooted at the moment of the call.
-    pub fn alloc_cell(&mut self, v: Value) -> std::rc::Rc<BoxId> {
+    /// consulting the weak registry this populates (`shared.cell_registry`),
+    /// so no caller-side root bookkeeping exists for cells at all — a
+    /// collection triggered from *anywhere* (interpreter or compiled code)
+    /// sees them. Unlike [`cons`](Self::cons), this can never itself trigger
+    /// a collection (the box store grows on demand, it is not a fixed
+    /// arena), so `v` may be un-rooted at the moment of the call.
+    ///
+    /// `Arc`, not `Rc`: the handle must stay a valid liveness proof no
+    /// matter which thread ends up holding it or running `gc()` — see
+    /// `shared.cell_registry`'s doc comment.
+    pub fn alloc_cell(&mut self, v: Value) -> std::sync::Arc<BoxId> {
         let id = match self.alloc_boxed(BoxedObj::Cell(v)) {
             Value::Boxed(id) => id,
             _ => unreachable!("alloc_boxed always returns Value::Boxed"),
         };
-        let rc = std::rc::Rc::new(id);
-        self.cell_registry.push(std::rc::Rc::downgrade(&rc));
+        let rc = std::sync::Arc::new(id);
+        self.shared.cell_registry.lock().unwrap().push(std::sync::Arc::downgrade(&rc));
         rc
     }
 
@@ -2591,7 +2601,7 @@ impl Heap {
         if let Some(v) = self.in_flight_throw {
             check("in_flight_throw", 0, v);
         }
-        for w in &self.cell_registry {
+        for w in self.shared.cell_registry.lock().unwrap().iter() {
             if let Some(id) = w.upgrade() {
                 if let Some(BoxedObj::Cell(v)) = &self.shared.boxes.read().slots[id.0 as usize] {
                     check("cell_registry", id.0 as usize, *v);
@@ -2652,16 +2662,18 @@ impl Heap {
         if let Some(v) = self.in_flight_throw {
             stack.push(v);
         }
-        // Every binding cell still referenced by a live `Rc<BoxId>` handle
+        // Every binding cell still referenced by a live `Arc<BoxId>` handle
         // is a root of its own — see `alloc_cell`. Dead entries (the last
         // handle dropped) are pruned here; their cells become collectible
         // like any other unreachable box.
-        self.cell_registry.retain(|w| w.upgrade().is_some());
-        for w in &self.cell_registry {
+        let mut cell_registry = self.shared.cell_registry.lock().unwrap();
+        cell_registry.retain(|w| w.upgrade().is_some());
+        for w in cell_registry.iter() {
             if let Some(id) = w.upgrade() {
                 stack.push(Value::Boxed(*id));
             }
         }
+        drop(cell_registry);
         while let Some(v) = stack.pop() {
             match v {
                 Value::Cons(c) => unsafe {

@@ -1,6 +1,6 @@
 //! Runtime values and errors for the tree-walking interpreter.
 
-use std::rc::Rc;
+use std::sync::Arc;
 use std::{error, fmt};
 
 use crate::{BoxId, Heap, Loc, Value};
@@ -22,18 +22,19 @@ use crate::{BoxId, Heap, Loc, Value};
 ///
 /// That also removes `Interp::sync_roots`: the collector walks its own
 /// `cell_registry` on *every* collection, so a cell-backed binding is rooted
-/// without the interpreter pushing anything. The `Rc<BoxId>` wrapper is what
+/// without the interpreter pushing anything. The `Arc<BoxId>` wrapper is what
 /// makes cell liveness observable through that registry's `Weak` (a bare
 /// `BoxId` is `Copy`, and its drop invisible); the payload lives in the heap,
-/// not behind this `Rc`.
+/// not behind this `Arc`. `Arc`, not `Rc`, for the same reason
+/// `Heap::alloc_cell` hands one out — see its doc comment.
 ///
 /// (`PartialEq`/`Debug` exist only for derives elsewhere; slots compare by
 /// cell identity.)
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Slot(Rc<BoxId>);
+pub(crate) struct Slot(Arc<BoxId>);
 
 impl Slot {
-    pub(crate) fn new(id: Rc<BoxId>) -> Slot {
+    pub(crate) fn new(id: Arc<BoxId>) -> Slot {
         Slot(id)
     }
 

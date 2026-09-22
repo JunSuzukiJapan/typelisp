@@ -1447,7 +1447,7 @@ fn cell_round_trips_get_and_set() {
 #[test]
 fn a_live_cell_keeps_its_cons_contents_across_gc() {
     // The cell is never on the root stack at all — its liveness comes purely
-    // from the `Rc<BoxId>` handle (`Heap::alloc_cell`'s registry), which is
+    // from the `Arc<BoxId>` handle (`Heap::alloc_cell`'s registry), which is
     // exactly what protects a binding against a collection triggered from
     // anywhere (including compiled code that never re-syncs interp roots).
     let mut h = Heap::with_capacity(4);
