@@ -378,7 +378,7 @@ pub const SOURCE: &str = r##"
 ;; *methods* — not Rust builtins — so they compile through the normal function
 ;; path (`(compile f)` where `f` uses them) instead of needing a native-lowered
 ;; `rt_*` shim per operation. `defmethod` dispatches on the receiver type, so
-;; the same `abs`/`signum`/... name overloads across `i32`/`bignum`/`f64`/
+;; the same `abs`/`signum`/... name overloads across `i32`/`int`/`f64`/
 ;; `ratio`; each is built only from that type's primitives. `mod`/`rem` follow
 ;; CL: `mod` is floored (integer `mod` is a builtin; `f64`/`ratio` `mod` here
 ;; is `a - b*floor(a/b)`), `rem` truncated (`a - b*truncate(a/b)`, i.e.
@@ -386,9 +386,9 @@ pub const SOURCE: &str = r##"
 ;;
 ;; Two checker quirks shape how these are spelled: (1) a binary op dispatches on
 ;; its *first* argument's type, and a bare integer literal there defaults to
-;; `i32`, so integer negation must be `(* self -1)` (receiver-first), never
-;; `(- 0 self)`. (2) A bare literal in tail position doesn't adopt an
-;; `i32`/`bignum`/`ratio` result type, so `signum` uses CL's own
+;; `int`, so negating any other integer type must be `(* self -1)`
+;; (receiver-first), never `(- 0 self)`. (2) A bare literal in tail position
+;; doesn't adopt an `i32`/`ratio` result type, so `signum` uses CL's own
 ;; `(if (zerop x) x (/ x (abs x)))` (which also gives `f64` the CL result: the
 ;; zero itself for `0.0`, not Rust's `1.0`) and `lcm`'s zero case uses
 ;; `(- self self)` — both carry the receiver's type without a bare literal.
@@ -407,10 +407,10 @@ pub const SOURCE: &str = r##"
 (defmethod mod ((self f64) (b f64)) f64 (- self (* b (floor (/ self b)))))
 (defmethod rem ((self f64) (b f64)) f64 (- self (* b (truncate (/ self b)))))
 
-;; --- int --- (negation is `(- (int->bignum 0) self)`: the first operand is
-;; a typed `bignum`, so it dispatches correctly, unlike a bare `0`. `expt` is
-;; non-negative-exponent only — a negative one would be a `ratio`, which a
-;; `bignum`-returning method can't hold)
+;; --- int --- (negation is `(- 0 self)`: a bare integer literal is an
+;; `int`, the receiver's own type, so the first operand dispatches correctly
+;; with no conversion. `expt` is non-negative-exponent only — a negative one
+;; would be a `ratio`, which an `int`-returning method can't hold)
 (defmethod abs ((self int)) int
   (if (< self 0) (- 0 self) self))
 (defmethod signum ((self int)) int
@@ -431,8 +431,8 @@ pub const SOURCE: &str = r##"
               (let ((h (expt self (/ e 2)))) (* h h))
               (* self (expt self (- e 1)))))))
 
-;; --- ratio --- (`ratio->bignum` truncates toward zero, so `(bignum->ratio
-;; (ratio->bignum q))` is `truncate(q)`; `rem` uses it directly, `mod` adjusts
+;; --- ratio --- (`ratio->int` truncates toward zero, so `(int->ratio
+;; (ratio->int q))` is `truncate(q)`; `rem` uses it directly, `mod` adjusts
 ;; the remainder by `b` when their signs differ, i.e. floored)
 (defmethod abs ((self ratio)) ratio
   (if (< self (int->ratio 0)) (- (int->ratio 0) self) self))
@@ -462,10 +462,11 @@ pub const SOURCE: &str = r##"
 ;; than one generic definition, for the same reason (`defmethod` resolves by
 ;; the receiver's exact type, not by a trait bound). `evenp`/`oddp` are
 ;; integer-only (CL signals a type error on a non-integer; `i32`/
-;; `bignum` here). See the `--- bignum ---`/`--- ratio ---` sections above
-;; for why their `0`/`1` literals are spelled `(int->bignum 0)`/`(int->ratio
-;; 1)` rather than bare `0`/`1`: a literal argument doesn't pick up the
-;; receiver's type on its own.
+;; `int` here). See the `--- ratio ---` section above for why its `0`/`1`
+;; literals are spelled `(int->ratio 0)`/`(int->ratio 1)` rather than bare
+;; `0`/`1`: a literal argument doesn't pick up the receiver's type on its
+;; own (an `int` receiver needs no such spelling, since a bare literal
+;; already is one).
 ;; --- i32 ---
 (defmethod zerop ((self i32)) bool (= self 0))
 (defmethod plusp ((self i32)) bool (> self 0))
@@ -2124,7 +2125,7 @@ user-visible capacity."
 (pub defconstant (boole-orc2 int) 15 "boole: (logorc2 a b).")
 ;; The sixteen are written in `Bits` operations rather than in the derived
 ;; `logeqv`/`lognand`/... methods: those are defined per type earlier in this
-;; file and only for `i32`/`bignum`, so reaching for them would have pinned
+;; file and only for `i32`/`int`, so reaching for them would have pinned
 ;; `boole` to the same two types the byte-specifier family just escaped.
 ;; `boole-clr`/`boole-set` need `T`'s zero and all-ones, which come from the
 ;; operand the same way `bits-mask` gets them.
@@ -3071,7 +3072,7 @@ user-visible capacity."
           (cons m e)))))
 ;; `integer-decode-float`: the same split with the significand as an exact
 ;; integer of `float-digits` bits, so `significand * 2^exponent` is the value
-;; exactly. A `bignum`, since 53 bits do not fit an `i32`.
+;; exactly. An `int`, since 53 bits do not fit an `i32`.
 (defmethod integer-decode-float ((self f64)) cons-cell<int,int>
   (let ((d (decode-float self)))
     (cons (float->int (scale-float (car d) 53)) (- (cdr d) 53))))
@@ -3341,7 +3342,7 @@ user-visible capacity."
 ;; Phase 7b). Rebind them for one printing operation with `dlet`, which is
 ;; what CL's `let` on a special variable does.
 ;;
-;; `*print-base*` is the radix integers (`i32` and `bignum`) print in, 2..36;
+;; `*print-base*` is the radix integers (`i32` and `int`) print in, 2..36;
 ;; anything else is a printing error, as CL says it is. `*print-radix*` adds
 ;; the marker that makes the result read back as the same number whatever
 ;; `*read-base*` is: `#b`/`#o`/`#x` or `#NNr` before the sign, and a trailing
@@ -3517,9 +3518,9 @@ user-visible capacity."
 ;; Complex numbers (CL parity Phase 1d).
 ;;
 ;; **A prelude type, not a built-in one.** The plan called for the
-;; `bignum`/`ratio` treatment — a heap-boxed `TAG_BOXED` pointer with Rust
-;; arithmetic behind it — "following the precedent". The precedent does not
-;; reach here: `bignum` and `ratio` are in Rust because `BigInt`/`BigRational`
+;; treatment `int`'s bignum box and `ratio` get — a heap-boxed `TAG_BOXED`
+;; pointer with Rust arithmetic behind it — "following the precedent". The
+;; precedent does not reach here: those two are in Rust because `BigInt`/`BigRational`
 ;; arithmetic is not expressible in this language, and a complex over two
 ;; `f64`s is nothing but `f64` arithmetic. Written as a `defstruct` it needs no
 ;; new `Repr`, no `rt_*` shim, no island lowering and no artifact surgery, and
