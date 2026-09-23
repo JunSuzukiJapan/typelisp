@@ -964,6 +964,15 @@ has already claimed it for `font-lock-string-face'."
     ;; the rest is the body.
     ("catch"          . 1)
     ("unwind-protect" . 1)
+    ;; The prelude's `with-' macros: `(with-X (SPEC...) BODY...)' has one
+    ;; distinguished argument, like `dolist'; `with-standard-io-syntax' has
+    ;; none, like `progn'.
+    ("with-connection"         . 1)
+    ("with-open-file"          . 1)
+    ("with-input-from-string"  . 1)
+    ("with-output-to-string"   . 1)
+    ("with-lock"               . 1)
+    ("with-standard-io-syntax" . 0)
     ;; Pretty printer.
     ("pprint-logical-block" . 1))
   "Indent specs for typelisp forms, keyed by the form's head as written.

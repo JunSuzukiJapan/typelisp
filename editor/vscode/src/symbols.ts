@@ -324,7 +324,7 @@ export function findTypeReferences(text: string): TypeReference[] {
   // The neighbour rules match the Emacs mode's `typelisp--type-adjacent`:
   //   before -- `<` and `,` are allowed, because a type appears right after
   //     them as a generic argument (`Vector<lexpr>`, `HashTable<i32,token>`);
-  //     `>` is forbidden, which is what stops `bignum` in `int->bignum`.
+  //     `>` is forbidden, which is what stops `ratio` in `int->ratio`.
   //   after  -- `<` (its own generic arguments), `:` (`rect::new`) and `>`
   //     (closing an enclosing generic) are allowed; anything else that could
   //     continue a symbol is not, so `rect` does not match in `rectangle`.

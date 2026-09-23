@@ -10,7 +10,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import test from "node:test";
 
-import { BODY_INDENT, INDENT_SPECS, computeIndent, indentText, scan } from "../indent";
+import { BODY_INDENT, INDENT_SPECS, IndentSpec, computeIndent, indentText, scan } from "../indent";
 
 const EXT_ROOT = join(__dirname, "..", "..");
 const REPO_ROOT = join(EXT_ROOT, "..", "..");
@@ -63,19 +63,30 @@ test("every example is restored after its indentation is flattened", () => {
   // mode passes the same test on the same 22 files, which is what makes "the
   // two editors agree" a checked claim rather than an intention.
   //
-  // Flattening is safe on this corpus specifically: it contains no multi-line
-  // strings and no `;;;` comments, the two things whose indentation is content
-  // rather than layout.
+  // A line that starts inside a string literal (a multi-line docstring's
+  // continuation) keeps its leading whitespace: that whitespace is part of
+  // the string, and the indenter rightly leaves such lines alone, so erasing
+  // it would change the program rather than its layout. The corpus contains
+  // no `;;;` comments, the other thing whose indentation is content.
   const changed: string[] = [];
   for (const file of typlFiles(EXAMPLES)) {
     const original = readFileSync(file, "utf8");
-    const restored = indentText(original.replace(/^[ \t]+/gm, ""));
+    const restored = indentText(flatten(original));
     if (restored !== original) {
       changed.push(firstDifference(relative(REPO_ROOT, file), original, restored));
     }
   }
   assert.deepEqual(changed, [], `flattened files were not restored:\n${changed.join("\n")}`);
 });
+
+/** Strips every line's indentation except where the line starts inside a string. */
+function flatten(text: string): string {
+  const inString = scan(text).insideStringAtLineStart;
+  return text
+    .split("\n")
+    .map((line, i) => (inString[i] ? line : line.replace(/^[ \t]+/, "")))
+    .join("\n");
+}
 
 test("an already-correct file is not rewritten by a second pass", () => {
   for (const file of typlFiles(EXAMPLES)) {
@@ -218,20 +229,22 @@ function parseFixture(text: string): Array<{ name: string; input: string; expect
 }
 
 test("the spec table matches the Emacs mode's", () => {
-  // A guard on the port itself: these are the values `typelisp-indent-specs`
-  // holds, and the two must not drift apart.
+  // Read `typelisp-indent-specs` out of the Emacs mode itself and compare the
+  // whole table, so an entry added on one side only fails here rather than
+  // surfacing later as an example that re-indents differently per editor.
   assert.equal(BODY_INDENT, 2);
-  assert.equal(INDENT_SPECS.get("defun"), "defun");
-  assert.equal(INDENT_SPECS.get("pub"), "defun");
-  assert.equal(INDENT_SPECS.get("lambda"), "defun");
-  assert.equal(INDENT_SPECS.get("impl"), "defun");
-  assert.equal(INDENT_SPECS.get("if"), 3);
-  assert.equal(INDENT_SPECS.get("if-let"), 3);
-  assert.equal(INDENT_SPECS.get("cond"), 0);
-  assert.equal(INDENT_SPECS.get("loop"), 0);
-  assert.equal(INDENT_SPECS.get("match"), 1);
-  assert.equal(INDENT_SPECS.get("do"), 2);
-  assert.equal(INDENT_SPECS.get("pprint-logical-block"), 1);
+  const el = readFileSync(join(REPO_ROOT, "editor", "emacs", "typelisp-mode.el"), "utf8");
+  const start = el.indexOf("(defconst typelisp-indent-specs");
+  assert.ok(start >= 0, "typelisp-indent-specs not found in the Emacs mode");
+  const end = el.indexOf("\n  \"Indent specs", start);
+  assert.ok(end > start, "the end of typelisp-indent-specs not found");
+  const emacs = new Map<string, IndentSpec>();
+  for (const m of el.slice(start, end).matchAll(/^\s*\(+"([^"]+)"\s*\.\s*(defun|\d+)\)/gm)) {
+    emacs.set(m[1], m[2] === "defun" ? "defun" : Number(m[2]));
+  }
+  assert.ok(emacs.size >= 30, `parsed only ${emacs.size} Emacs specs`);
+  const sorted = (m: ReadonlyMap<string, IndentSpec>) => [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
+  assert.deepEqual(sorted(INDENT_SPECS), sorted(emacs));
   // Not a special form: an ordinary call aligns under its first argument.
   assert.equal(INDENT_SPECS.get("println"), undefined);
 });

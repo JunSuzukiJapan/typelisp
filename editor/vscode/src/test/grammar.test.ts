@@ -65,7 +65,7 @@ function scopeOf(source: string, text: string): string | undefined {
 
 test("definition forms name a function, a type, or a variable", () => {
   const src = [
-    "(defun factorial ((n i32)) bignum 1)",
+    "(defun factorial ((n i32)) int 1)",
     "(pub defun g ((x i32)) i32 x)",
     "(defstruct point<T> (x T))",
     "(deftrait Shape (label ((self Self)) string))",
@@ -97,9 +97,9 @@ test("impl names both the trait and the type, even lowercase ones", () => {
   assert.equal(method[1], "support.function.typelisp");
 });
 
-test("primitive and builtin types, including bignum/ratio and the error types", () => {
-  const src = "(defun f ((a bignum) (b ratio)) Result<i32,ParseIntError> (todo))";
-  assert.equal(scopeOf(src, "bignum"), "support.type.typelisp");
+test("primitive and builtin types, including int/ratio and the error types", () => {
+  const src = "(defun f ((a int) (b ratio)) Result<i32,ParseIntError> (todo))";
+  assert.equal(scopeOf(src, "int"), "support.type.typelisp");
   assert.equal(scopeOf(src, "ratio"), "support.type.typelisp");
   assert.equal(scopeOf(src, "Result"), "support.type.typelisp");
   assert.equal(scopeOf(src, "i32"), "support.type.typelisp");
@@ -107,10 +107,10 @@ test("primitive and builtin types, including bignum/ratio and the error types", 
 });
 
 test("a type name inside a longer function name is not highlighted as a type", () => {
-  // `int->bignum` is one builtin; the `bignum` inside it must not read as the
+  // `int->ratio` is one builtin; the `ratio` inside it must not read as the
   // type. This is what the type rule's leading-`>` exclusion is for.
-  const tokens = tokenize("(int->bignum 1)");
-  const whole = tokens.find(([t]) => t === "int->bignum");
+  const tokens = tokenize("(int->ratio 1)");
+  const whole = tokens.find(([t]) => t === "int->ratio");
   assert.ok(whole, `expected one token, got ${JSON.stringify(tokens)}`);
   assert.equal(whole[1], "support.function.typelisp");
 });

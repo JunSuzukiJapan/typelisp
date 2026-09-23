@@ -45,6 +45,7 @@ export const INDENT_SPECS: ReadonlyMap<string, IndentSpec> = new Map<string, Ind
   ["defstruct", "defun"],
   ["defenum", "defun"],
   ["deftrait", "defun"],
+  ["deftype", "defun"],
   ["defvar", "defun"],
   ["defconstant", "defun"],
   ["module", "defun"],
@@ -57,6 +58,8 @@ export const INDENT_SPECS: ReadonlyMap<string, IndentSpec> = new Map<string, Ind
   ["let", 1],
   ["let*", 1],
   ["labels", 1],
+  ["macrolet", 1],
+  ["symbol-macrolet", 1],
   ["if", 3],
   ["if-let", 3],
   ["when", 1],
@@ -78,6 +81,19 @@ export const INDENT_SPECS: ReadonlyMap<string, IndentSpec> = new Map<string, Ind
   ["dolist", 1],
   ["doiter", 1],
   ["do", 2],
+  // Non-local exit: the tag / the protected form is the distinguished head,
+  // the rest is the body.
+  ["catch", 1],
+  ["unwind-protect", 1],
+  // The prelude's `with-` macros: `(with-X (SPEC...) BODY...)` has one
+  // distinguished argument, like `dolist`; `with-standard-io-syntax` has
+  // none, like `progn`.
+  ["with-connection", 1],
+  ["with-open-file", 1],
+  ["with-input-from-string", 1],
+  ["with-output-to-string", 1],
+  ["with-lock", 1],
+  ["with-standard-io-syntax", 0],
   // Pretty printer.
   ["pprint-logical-block", 1],
 ]);
