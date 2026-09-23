@@ -262,9 +262,15 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
         }
     }
 
+    // Native for exactly the C call: everything it is given is a C value
+    // by now, and nothing it answers is a Lisp one yet — see
+    // `typelisp_rt::rt_ffi_enter_native`.
+    let zero = i64_ty.const_zero();
+    call_shim(&builder, shim("rt_ffi_enter_native"), scratch, one, zero, "native")?;
     let call = builder
         .build_call(c_fn, &call_args, "ffi_call")
         .map_err(|e| format!("ffi: failed to build the call to `{}`: {}", decl.c_symbol, e))?;
+    call_shim(&builder, shim("rt_ffi_leave_native"), scratch, one, zero, "running")?;
     let out = match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) if ret == CType::Str => {
             // Copied *before* the arguments are freed: a C function that

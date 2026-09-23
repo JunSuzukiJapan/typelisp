@@ -210,7 +210,8 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
         }
         "stream-read-char" => {
             let h = arg!(int(args, 0, name));
-            match with_streams(|t| t.read_char(h)) {
+            // Native: a read from stdin or a pipe waits for whoever writes it.
+            match heap.native(|| with_streams(|t| t.read_char(h))) {
                 Ok(c) => {
                     let inner = option_value(heap, name, c.map(Value::Char));
                     Ok(result_ok(heap, name, inner))
@@ -220,7 +221,7 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
         }
         "stream-read-byte" => {
             let h = arg!(int(args, 0, name));
-            match with_streams(|t| t.read_byte(h)) {
+            match heap.native(|| with_streams(|t| t.read_byte(h))) {
                 Ok(b) => {
                     let inner = option_value(heap, name, b.map(|b| Value::Int(b as i64)));
                     Ok(result_ok(heap, name, inner))

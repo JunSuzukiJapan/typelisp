@@ -453,7 +453,8 @@ pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
         }
         cmd.arg(path);
     }
-    match cmd.status() {
+    // Native for as long as the editor runs.
+    match heap.native(|| cmd.status()) {
         Ok(st) if st.success() => result_ok(heap, "ed-open", Value::Empty),
         Ok(st) => err(heap, format!("ed: {} exited with {}", program, st)),
         Err(e) => err(heap, format!("ed: cannot run {}: {}", program, e)),
@@ -605,11 +606,11 @@ pub unsafe extern "C" fn rt_command_line_args(_args: *const i64, _argc: u32) -> 
 /// A negative or NaN wait is an error in CL. Here it is nothing at all —
 /// there is no duration to construct from it, and `Duration::from_secs_f64`
 /// panics on one. Zero is a real answer (yield-ish) and goes through.
-pub fn sleep(secs: f64) -> Result<(), String> {
+pub fn sleep(heap: &mut Heap, secs: f64) -> Result<(), String> {
     if !(secs >= 0.0) {
         return Err(format!("sleep: {} is not a non-negative number of seconds", secs));
     }
-    std::thread::sleep(std::time::Duration::from_secs_f64(secs));
+    heap.native(|| std::thread::sleep(std::time::Duration::from_secs_f64(secs)));
     Ok(())
 }
 

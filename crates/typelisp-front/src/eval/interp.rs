@@ -2046,7 +2046,7 @@ impl Interp {
                 other => Err(EvalError::Panic(format!("ed: arguments are not a string and a line, got {:?}", other))),
             }),
             "sleep" => Some(match rt_f64(heap, &args[0]) {
-                Ok(secs) => typelisp_rt::sys_builtin::sleep(secs).map(|()| Value::Empty).map_err(EvalError::Panic),
+                Ok(secs) => typelisp_rt::sys_builtin::sleep(heap, secs).map(|()| Value::Empty).map_err(EvalError::Panic),
                 Err(e) => Err(e),
             }),
             "lisp-implementation-version" => Some(Ok(typelisp_rt::sys_builtin::lisp_implementation_version(heap))),

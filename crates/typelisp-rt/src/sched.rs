@@ -1033,7 +1033,13 @@ impl<B: TaskBody> Scheduler<B> {
                 _ => None,
             })
             .collect();
-        let ready: Vec<(i32, bool)> = match crate::os::poll_ready(&fds, timeout) {
+        // Native unless it cannot block: other threads may collect while
+        // this one waits on the network.
+        let polled = match timeout {
+            Some(t) if t.is_zero() => crate::os::poll_ready(&fds, timeout),
+            _ => heap.native(|| crate::os::poll_ready(&fds, timeout)),
+        };
+        let ready: Vec<(i32, bool)> = match polled {
             Ok(r) => r,
             Err(_) => fds.iter().map(|(fd, _)| (*fd, true)).collect(),
         };
@@ -1120,6 +1126,9 @@ pub fn drive<B: TaskBody>(
     let _driving = DrivingGuard::publish(sched);
     let home = heap.current_root_stack();
     loop {
+        // Between steps every task's state is in its frames and root stack,
+        // so another thread's collection may run here.
+        heap.safepoint();
         let (id, mut slot) = loop {
             sched.borrow_mut().wake_due(heap);
             sched.borrow_mut().wake_io(heap, Some(std::time::Duration::ZERO));
@@ -1146,7 +1155,7 @@ pub fn drive<B: TaskBody>(
             if io_waiting {
                 sched.borrow_mut().wake_io(heap, until);
             } else if let Some(d) = until {
-                std::thread::sleep(d);
+                heap.native(|| std::thread::sleep(d));
             }
         };
         heap.switch_to_root_stack(slot.roots);

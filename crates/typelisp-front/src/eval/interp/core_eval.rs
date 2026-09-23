@@ -878,7 +878,7 @@ impl Interp {
         self.trace_write(heap, "step [s]tep-into [n]ext [c]ontinue [q]uit> ");
         self.trace_flush(heap);
         let mut line = String::new();
-        match std::io::stdin().read_line(&mut line) {
+        match heap.native(|| std::io::stdin().read_line(&mut line)) {
             Ok(0) | Err(_) => return StepCmd::Continue,
             Ok(_) => {}
         }

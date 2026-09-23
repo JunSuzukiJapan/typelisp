@@ -670,11 +670,18 @@ const SAFEPOINT_PERIOD: u32 = 256;
 /// which is the same division `rt_suspend_*` already draws between *deciding*
 /// what a task waits for and *ending* the activation.
 ///
+/// It is also where such a loop stops for another thread's collection, on
+/// every back edge rather than every `SAFEPOINT_PERIOD`th: that costs one
+/// load, and a collector should not wait out 255 more iterations. Stopping
+/// here is safe for the same reason suspending here is — anything live
+/// across the back edge is already in the frame, not in a register.
+///
 /// # Safety
 ///
-/// `args`/`argc` are unused.
+/// `args`/`argc` are unused; a `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_loop_safepoint(_args: *const i64, _argc: u32) -> i64 {
+    typelisp_abi::active_heap().safepoint();
     SAFEPOINT_COUNTDOWN.with(|c| {
         let left = c.get().saturating_sub(1);
         if left == 0 {

@@ -3300,6 +3300,34 @@ pub unsafe extern "C-unwind" fn rt_ffi_cstring_new(args: *const i64, argc: u32) 
     }
 }
 
+/// Marks the start of a C call: from here until [`rt_ffi_leave_native`]
+/// another thread's collection need not wait for this one, however long the
+/// C function blocks. The FFI thunk emits the pair around the one call, after
+/// the arguments have become C values and before the answer becomes a Lisp
+/// one — the C function is handed no heap value, so it has none to touch.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread and be running (not already
+/// native).
+#[no_mangle]
+pub unsafe extern "C" fn rt_ffi_enter_native(_args: *const i64, _argc: u32) -> i64 {
+    active_heap().enter_native();
+    0
+}
+
+/// Ends what [`rt_ffi_enter_native`] began, waiting out a collection in
+/// progress first.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread, inside `rt_ffi_enter_native`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_ffi_leave_native(_args: *const i64, _argc: u32) -> i64 {
+    active_heap().leave_native();
+    0
+}
+
 /// Frees what [`rt_ffi_cstring_new`] returned.
 ///
 /// # Safety

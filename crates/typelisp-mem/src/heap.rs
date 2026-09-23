@@ -37,7 +37,8 @@
 //!   any single activation (e.g. a field inside a heap-external, never-freed
 //!   box) — appended to, never popped. `session_roots` holds values that must
 //!   survive a bracketed span of work but not outlive it, released in bulk at
-//!   the bracket's end (see [`Heap::push_session_root`]). The fourth is not a
+//!   the bracket's end (see [`Heap::push_session_root`]); one set per view,
+//!   kept where a collector on another view can reach it. The fourth is not a
 //!   stack of its own but one slot *inside each task's `RootStack`*: the value
 //!   a `throw` is carrying while the frames that held it are being discarded
 //!   (see [`Heap::set_in_flight_throw`]). It lives there rather than on `Heap`
@@ -47,11 +48,19 @@
 //!   tasks' `RootStack`s are different objects, so they cannot collide.
 //!   `gc()` marks from all four.
 //!
+//! * **Stop-the-world across threads.** Several OS threads can each hold a
+//!   view ([`Heap::attach`]) onto one shared heap. A collection, started from
+//!   any of them, first waits until every other thread is stopped — at a
+//!   safepoint ([`Heap::cons`], [`Heap::safepoint`]) or inside a native
+//!   section ([`Heap::native`]) — see [`Heap::gc`].
+//!
 //! All `unsafe` is confined here; the public API is safe.
 
+use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::ptr;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 
 use parking_lot::RwLock;
 
@@ -279,15 +288,104 @@ struct BoxStore {
     marks: Vec<bool>,
 }
 
+// ---- stop-the-world (`docs/dev/os-threads-design.md` §4) -------------------
+
+/// A view is running Lisp code and may touch the heap at any moment.
+const RUNNING: u8 = 0;
+/// A view is parked inside [`Heap::safepoint`] (or a demoted [`Heap::gc`])
+/// until the collection in progress ends.
+const AT_SAFEPOINT: u8 = 1;
+/// A view is between [`Heap::enter_native`] and [`Heap::leave_native`]: it
+/// promises not to touch the heap, so a collection may run without waiting
+/// for it.
+const NATIVE: u8 = 2;
+
+/// How long a collector waits for the other threads to stop before it
+/// names the ones that have not — see [`Heap::gc`]. Not a timeout: it keeps
+/// waiting afterwards. A thread that never stops is a thread that blocked
+/// without [`Heap::enter_native`], and the only useful thing to do about
+/// that is say which one it was.
+const WATCHDOG: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// One view's entry in [`ThreadRegistry`]: what a collector running on a
+/// *different* view has to know about it.
+struct ViewSlot {
+    /// `RUNNING` / `AT_SAFEPOINT` / `NATIVE`. Written only by the owning
+    /// view; read by collectors.
+    state: AtomicU8,
+    /// Which OS thread owns the view. A collector does not wait for views
+    /// on its own thread: they cannot be in the middle of anything while
+    /// this thread is collecting (the tests that attach a second view on
+    /// the same thread depend on that).
+    thread: std::thread::ThreadId,
+    /// For the watchdog's message.
+    name: String,
+    /// The view's session roots — see [`Heap::push_session_root`]. Here
+    /// rather than on `Heap` because a collector on another view has to
+    /// mark them.
+    session_roots: UnsafeCell<Vec<Value>>,
+}
+
+// `session_roots` is the only field that is not already `Sync`. It is
+// written only by the owning view, and read by a collector only while the
+// owner is stopped (`AT_SAFEPOINT`/`NATIVE`, i.e. not touching it) or is
+// the collector's own thread — the same exclusion every other heap
+// structure relies on during a stop-the-world collection.
+unsafe impl Sync for ViewSlot {}
+
+/// Every view attached to one [`HeapShared`], and the flag that stops them
+/// all. See [`Heap::gc`] for the protocol.
+///
+/// `views` is also the `Mutex` `changed` waits with. A collector holds it
+/// from the moment every other thread has stopped until the collection
+/// ends, which is what keeps a view from attaching, detaching or waking up
+/// half-way through one.
+struct ThreadRegistry {
+    gc_requested: AtomicBool,
+    views: Mutex<Vec<Arc<ViewSlot>>>,
+    changed: Condvar,
+}
+
+impl ThreadRegistry {
+    fn new() -> ThreadRegistry {
+        ThreadRegistry { gc_requested: AtomicBool::new(false), views: Mutex::new(Vec::new()), changed: Condvar::new() }
+    }
+
+    /// Adds a new, running view for the calling thread. Waits out a
+    /// collection in progress first — a view that appeared running in the
+    /// middle of one would be a thread the collector never stopped.
+    fn register(&self) -> Arc<ViewSlot> {
+        let current = std::thread::current();
+        let slot = Arc::new(ViewSlot {
+            state: AtomicU8::new(RUNNING),
+            thread: current.id(),
+            name: current.name().map(str::to_string).unwrap_or_else(|| format!("{:?}", current.id())),
+            session_roots: UnsafeCell::new(Vec::new()),
+        });
+        let mut views = self.views.lock().unwrap();
+        while self.gc_requested.load(Ordering::SeqCst) {
+            views = self.changed.wait(views).unwrap();
+        }
+        views.push(Arc::clone(&slot));
+        slot
+    }
+
+    /// Removes `slot`, and tells a collector waiting for it to stop that it
+    /// no longer has to.
+    fn unregister(&self, slot: &Arc<ViewSlot>) {
+        let mut views = self.views.lock().unwrap();
+        views.retain(|v| !Arc::ptr_eq(v, slot));
+        self.changed.notify_all();
+    }
+}
+
 /// State one `Heap` view shares with every other view attached to the same
-/// underlying heap (`docs/dev/os-threads-design.md` §3). The cons arena,
+/// underlying heap (`docs/dev/os-threads-design.md` §3): the cons arena,
 /// every task's root stack, `permanent_roots`, the interning tables
-/// (`type_keys`/`paths`), and the string and box stores have moved here so
-/// far. `Heap::with_capacity` is still the only place that creates a
-/// `HeapShared`, and always creates exactly one view for it, so nothing
-/// today actually exercises concurrent access; this exists to let that
-/// access be added incrementally, field by field, without a second
-/// large-scale migration once it is.
+/// (`type_keys`/`paths`), the string and box stores, and the registry of
+/// views a collection stops (`threads`, see [`Heap::gc`]).
+/// `Heap::with_capacity` creates it with the first view;
+/// [`Heap::attach`] adds more, one per thread that runs on it.
 pub struct HeapShared {
     arena: Mutex<Arena>,
     // Every task's roots, keyed by `RootStackId`. Shared (not per-view)
@@ -329,15 +427,38 @@ pub struct HeapShared {
     // (`retain`/`push`/iteration), the same reasoning as `root_stacks`/
     // `permanent_roots`.
     cell_registry: Mutex<Vec<std::sync::Weak<BoxId>>>,
+    // Every view, and the stop-the-world flag — see `Heap::gc`.
+    threads: ThreadRegistry,
+    // How many collections have run, for tests that assert an allocation
+    // pattern does not thrash — see `gc_count`. Shared, because a
+    // collection run from any view collects the whole heap.
+    gc_count: AtomicU64,
+    // When set, every `cons` collects first — see `set_gc_stress`. Shared
+    // so that a view attached after it was switched on is under stress too.
+    gc_stress: AtomicBool,
 }
+
+// Every field is behind a lock or an atomic, so the auto traits fail only
+// because what those locks guard contains `Value`s (`BoxedObj`'s fields,
+// `root_stacks`), and `Value` is `Send` but not `Sync`: a `ConsRef` is a raw
+// pointer into the arena. Sharing `&HeapShared` hands another thread no
+// more than the ability to take those locks. The cells a `Value` points at
+// are the part no lock covers, and they are covered instead by the two
+// rules of `docs/dev/os-threads-design.md`: a collection runs only with
+// every other thread stopped (`Heap::gc`), and two threads that race on the
+// same cell without a `Mutex<T>`/`Chan<T>` between them have written a
+// program with undefined behaviour — the Go position (§6).
+unsafe impl Send for HeapShared {}
+unsafe impl Sync for HeapShared {}
 
 pub struct Heap {
     shared: Arc<HeapShared>,
-    // When set, every `cons` collects first — see `set_gc_stress`.
-    gc_stress: bool,
-    // How many collections have run, for tests that assert an allocation
-    // pattern does not thrash — see `gc_count`.
-    gc_count: u64,
+    // This view's entry in `shared.threads` — its stop-the-world state and
+    // its session roots.
+    slot: Arc<ViewSlot>,
+    // The root stack this view was created with, freed when the view is
+    // dropped — see `Drop for Heap`.
+    home_stack: usize,
     // Which of `shared.root_stacks`' entries this view is currently running.
     current_stack: usize,
     // A raw pointer at `*shared.root_stacks[current_stack]`, kept in sync by
@@ -350,8 +471,6 @@ pub struct Heap {
     // `shared.root_stacks` keeps this valid across that `Vec` reallocating —
     // the same reasoning applies whether the `Vec` sits behind a lock or not.
     current: *mut RootStack,
-    // Roots for the duration of a bracketed session — see `push_session_root`.
-    session_roots: Vec<Value>,
     // Reader macros: the function each macro character dispatches to, and for
     // a dispatching character (`#`-like) the function each sub-character
     // dispatches to. See `set_macro_character`.
@@ -446,15 +565,18 @@ impl Heap {
             strings: RwLock::new(StrStore::default()),
             boxes: RwLock::new(BoxStore::default()),
             cell_registry: Mutex::new(Vec::new()),
+            threads: ThreadRegistry::new(),
+            gc_count: AtomicU64::new(0),
+            gc_stress: AtomicBool::new(false),
         });
 
+        let slot = shared.threads.register();
         let mut heap = Heap {
             shared,
-            gc_stress: false,
-            gc_count: 0,
+            slot,
+            home_stack: 0,
             current_stack: 0,
             current,
-            session_roots: Vec::new(),
             macro_chars: HashMap::new(),
             dispatch_chars: HashMap::new(),
             locs: Vec::new(),
@@ -477,38 +599,34 @@ impl Heap {
     /// (those are already in `shared.interning`, done once by whichever view
     /// created the heap).
     ///
-    /// **What is *not* yet safe to share across views**: source locations
+    /// The view is registered in `shared`'s thread registry for as long as
+    /// it lives, as running on the calling thread. From then on a collection
+    /// started from any *other* thread waits for this one to stop, so a
+    /// thread holding a view must keep reaching a stopping point: an
+    /// allocation ([`cons`](Self::cons)), a [`safepoint`](Self::safepoint),
+    /// or — around anything that blocks — [`native`](Self::native). See
+    /// [`gc`](Self::gc).
+    ///
+    /// **What is *not* yet shared across views**: source locations
     /// (`locs`/`loc_ids` stay per-view, so a `LocId` a cell holds from one
     /// view's `intern_loc` does not resolve on another) and reader macro
-    /// registrations (`macro_chars`/`dispatch_chars`, likewise per-view) —
-    /// neither has moved into `HeapShared` yet. And there is deliberately no
-    /// per-view allocation cache (`cons`, `alloc_string`, `alloc_boxed` all
-    /// still lock straight through to `shared` on every call): a cache would
-    /// let a `gc()` run from *this* view sweep cells another view's cache
-    /// still thinks are unissued, since sweep cannot see into a cache it
-    /// does not know exists, and that is a double-issue waiting to happen
-    /// (`docs/dev/os-threads-design.md` §2 assigns "empty every registered
-    /// view's cache" to the collector procedure — that only becomes
-    /// possible once `ThreadRegistry` exists to *reach* every view. Adding
-    /// the cache before that lands would mean either building an ad hoc
-    /// half of §2 just to keep a single extra view safe, or shipping a
-    /// heap-corruption bug for whenever two views' lifetimes overlap a
-    /// `gc()`). So: real second views, no speedup from having one yet — that
-    /// arrives with Phase 2's `ThreadRegistry`.
+    /// registrations (`macro_chars`/`dispatch_chars`, likewise per-view).
+    /// And there is no per-view allocation cache: `cons`, `alloc_string`
+    /// and `alloc_boxed` lock straight through to `shared` on every call.
     pub fn attach(shared: &Arc<HeapShared>) -> Heap {
         let mut heap = Heap {
             shared: Arc::clone(shared),
-            gc_stress: false,
-            gc_count: 0,
+            slot: shared.threads.register(),
+            home_stack: 0,
             current_stack: 0,
             current: ptr::null_mut(),
-            session_roots: Vec::new(),
             macro_chars: HashMap::new(),
             dispatch_chars: HashMap::new(),
             locs: Vec::new(),
             loc_ids: HashMap::new(),
         };
         let home = heap.new_root_stack();
+        heap.home_stack = home.0;
         heap.switch_to_root_stack(home);
         heap
     }
@@ -621,7 +739,7 @@ impl Heap {
     /// sits close to capacity collects a handful of times rather than once per
     /// allocation (see [`Heap::cons`]).
     pub fn gc_count(&self) -> u64 {
-        self.gc_count
+        self.shared.gc_count.load(Ordering::Relaxed)
     }
 
     /// Distinct interned symbols.
@@ -659,7 +777,8 @@ impl Heap {
 
     /// Register `v` as a GC root.
     pub fn push_root(&mut self, v: Value) {
-        if self.gc_stress {
+        self.debug_assert_not_native("push_root");
+        if self.gc_stress() {
             self.assert_not_freed("push_root", v);
         }
         self.roots_mut().push(v);
@@ -729,7 +848,7 @@ impl Heap {
     /// indexing a `Vec` directly — `idx` is always a value `root_count()`
     /// itself returned earlier in the same dynamic scope, never user input.
     pub fn set_root(&mut self, idx: usize, v: Value) {
-        if self.gc_stress {
+        if self.gc_stress() {
             self.assert_not_freed("set_root", v);
         }
         self.roots_mut()[idx] = v;
@@ -872,14 +991,14 @@ impl Heap {
     /// Rooting it at birth, for the compile session, restores exactly the
     /// lifetime the handle registry used to give it.
     pub fn push_session_root(&mut self, v: Value) {
-        self.session_roots.push(v);
+        self.session_roots_mut().push(v);
     }
 
     /// The current session-root count — pass to
     /// [`truncate_session_roots`](Self::truncate_session_roots) to release
     /// everything registered after this point.
     pub fn session_root_count(&self) -> usize {
-        self.session_roots.len()
+        self.session_roots().len()
     }
 
     /// Release every session root registered since `len` was observed. A no-op
@@ -888,7 +1007,19 @@ impl Heap {
     /// Brackets nest: an inner session releases only its own registrations, so
     /// a nested compile leaves the outer one's values rooted.
     pub fn truncate_session_roots(&mut self, len: usize) {
-        self.session_roots.truncate(len);
+        self.session_roots_mut().truncate(len);
+    }
+
+    /// This view's session roots. They live in the view's registry slot so
+    /// that a collector on another thread can mark them — see `ViewSlot`.
+    fn session_roots(&self) -> &Vec<Value> {
+        // Only the owning view writes them, and a collector reads them only
+        // while this view is stopped — see `ViewSlot`'s `Sync` impl.
+        unsafe { &*self.slot.session_roots.get() }
+    }
+
+    fn session_roots_mut(&mut self) -> &mut Vec<Value> {
+        unsafe { &mut *self.slot.session_roots.get() }
     }
 
     // ---- the in-flight throw ----------------------------------------------
@@ -1071,6 +1202,7 @@ impl Heap {
 
     /// Store a string, returning its `Value::Str`. Strings are GC-collected.
     pub fn alloc_string(&mut self, s: String) -> Value {
+        self.debug_assert_not_native("alloc_string");
         let mut strings = self.shared.strings.write();
         if let Some(idx) = strings.free.pop() {
             strings.slots[idx as usize] = Some(s);
@@ -1139,7 +1271,13 @@ impl Heap {
     /// [`alloc_string`](Self::alloc_string), generalized so `gc`'s mark phase
     /// can trace into whatever `Value`s the payload itself holds (see
     /// [`gc`](Self::gc)).
+    ///
+    /// Not a safepoint, and neither is [`alloc_string`](Self::alloc_string):
+    /// neither has ever collected, so callers hold unrooted values across
+    /// them (a struct's fields, on their way into `obj`), and letting
+    /// another thread's collection run here would sweep those.
     fn alloc_boxed(&mut self, obj: BoxedObj) -> Value {
+        self.debug_assert_not_native("alloc_boxed");
         let mut boxes = self.shared.boxes.write();
         if let Some(idx) = boxes.free.pop() {
             boxes.slots[idx as usize] = Some(obj);
@@ -2336,12 +2474,12 @@ impl Heap {
     /// `cons` after a value goes unrooted is the one that collects it — so a
     /// test that would fail once in a hundred runs fails every run.
     pub fn set_gc_stress(&mut self, on: bool) {
-        self.gc_stress = on;
+        self.shared.gc_stress.store(on, Ordering::Relaxed);
     }
 
     /// Whether [`Heap::set_gc_stress`] is currently on.
     pub fn gc_stress(&self) -> bool {
-        self.gc_stress
+        self.shared.gc_stress.load(Ordering::Relaxed)
     }
 
     /// Append one chunk, doubling the arena but never passing `growth_limit`.
@@ -2380,17 +2518,19 @@ impl Heap {
     /// then grows the arena if [`Heap::set_growth_limit`] permits; returns
     /// [`Error::HeapExhausted`] if even then no cell is available.
     ///
-    /// Locks the arena several times rather than once for the whole call:
-    /// this method calls [`Heap::gc`] and [`Heap::grow`], and each of those
-    /// takes the same lock itself (`gc`'s cons sweep; `grow`, above) — a
-    /// guard held here across either call would try to lock a `Mutex` this
-    /// same thread already holds, which deadlocks rather than reentering.
-    /// So every section below takes the lock, reads or writes what it needs,
-    /// and drops it before calling anything that might want it again. Cheap
-    /// when uncontended (today, always — nothing shares a `HeapShared` with
-    /// this view yet), and correct once something does.
+    /// Taking a cell is one critical section — look at the free list and
+    /// pop it under the same lock — because another thread's `cons` can
+    /// empty the list between two separate ones. Collecting and growing
+    /// happen outside it: [`Heap::gc`] and [`Heap::grow`] take the arena
+    /// lock themselves, and `std::sync::Mutex` does not reenter.
     pub fn cons(&mut self, car: Value, cdr: Value) -> Result<Value, Error> {
-        if self.gc_stress {
+        self.debug_assert_not_native("cons");
+        // Every cons is already a point where a collection may run (the
+        // free list may be empty), so every caller already has what it
+        // keeps rooted — which is exactly what makes it a safe place to let
+        // *another* thread's collection run too.
+        self.safepoint();
+        if self.gc_stress() {
             // Deliberately collect before *every* allocation so a caller that
             // failed to root an intermediate value is caught here, at the
             // allocation that invalidates it, instead of surfacing later as
@@ -2398,8 +2538,11 @@ impl Heap {
             // `set_gc_stress`.
             self.gc();
         }
-        if self.shared.arena.lock().unwrap().free.is_null() {
-            self.gc();
+        loop {
+            if let Some(v) = self.pop_free(car, cdr) {
+                return Ok(v);
+            }
+            let reclaimed = self.gc();
             // A collection that hands back one cell is not a collection that
             // helped: with a live set just under capacity the *next* cons
             // empties the free list again, so nearly every allocation pays for
@@ -2408,10 +2551,6 @@ impl Heap {
             // in a `1 << 18` one — the same work, ~90x the time.) So grow
             // whenever the collection failed to restore a working margin, not
             // only when it freed nothing at all.
-            //
-            // A fixed arena is unaffected: `grow` refuses immediately when no
-            // ceiling was set, so `Error::HeapExhausted` still means exactly
-            // "a collection freed nothing and growth is not permitted".
             let (free_count, cap) = {
                 let arena = self.shared.arena.lock().unwrap();
                 (arena.free_count, arena.cap)
@@ -2419,12 +2558,24 @@ impl Heap {
             if free_count.saturating_mul(HEADROOM_DIVISOR) < cap {
                 self.grow();
             }
-            if self.shared.arena.lock().unwrap().free.is_null() && !self.grow() {
+            // Exhausted means what it always has: a collection freed nothing
+            // and growth is not permitted. A collection that freed something
+            // is worth another try even if other threads took those cells
+            // first — they cannot keep doing so without garbage running out.
+            if reclaimed == 0 && self.shared.arena.lock().unwrap().free.is_null() && !self.grow() {
                 return Err(Error::HeapExhausted);
             }
         }
+    }
+
+    /// Take a cell off the free list and fill it, or `None` if the list is
+    /// empty — see [`Heap::cons`].
+    fn pop_free(&mut self, car: Value, cdr: Value) -> Option<Value> {
         let mut arena = self.shared.arena.lock().unwrap();
         let p = arena.free;
+        if p.is_null() {
+            return None;
+        }
         unsafe {
             arena.free = (*p).next_free;
             (*p).car = car;
@@ -2439,7 +2590,7 @@ impl Heap {
             (*p).self_loc = LocId::NONE;
         }
         arena.free_count -= 1;
-        Ok(Value::Cons(ConsRef(p)))
+        Some(Value::Cons(ConsRef(p)))
     }
 
     // ---- accessors --------------------------------------------------------
@@ -2631,13 +2782,113 @@ impl Heap {
         }
     }
 
+    // ---- stopping for another thread's collection --------------------------
+
+    /// Stop here if another thread wants to collect, until it has.
+    ///
+    /// A safepoint is a place where everything this thread still needs is
+    /// reachable from a root — the same condition a `cons` that collects
+    /// already requires, which is why `cons` calls this. The other callers
+    /// are the places a thread can run for a long time without consing: a
+    /// compiled loop's back edge and the scheduler's step boundary.
+    ///
+    /// One relaxed load when nobody is collecting.
+    pub fn safepoint(&mut self) {
+        if self.shared.threads.gc_requested.load(Ordering::Relaxed) {
+            self.park();
+        }
+    }
+
+    /// Wait at a safepoint until the collection in progress ends.
+    fn park(&self) {
+        let threads = &self.shared.threads;
+        let mut views = threads.views.lock().unwrap();
+        self.slot.state.store(AT_SAFEPOINT, Ordering::SeqCst);
+        threads.changed.notify_all();
+        while threads.gc_requested.load(Ordering::SeqCst) {
+            views = threads.changed.wait(views).unwrap();
+        }
+        self.slot.state.store(RUNNING, Ordering::SeqCst);
+    }
+
+    /// Declare that this thread will not touch the heap until
+    /// [`leave_native`](Self::leave_native), so another thread's collection
+    /// need not wait for it.
+    ///
+    /// **Every wait that can depend on another typelisp thread's progress
+    /// must be inside one** — a `sleep`, a `poll`, a read from a pipe, a
+    /// child process, a blocking C call, a lock another thread holds while
+    /// allocating. A thread blocked outside one is a thread the collector
+    /// waits for, and the other thread may be waiting for the collection.
+    ///
+    /// What it holds must be rooted, as at any other point that may
+    /// collect. Touching the heap before `leave_native` panics in debug
+    /// builds. Prefer [`native`](Self::native), which cannot forget to
+    /// leave.
+    pub fn enter_native(&mut self) {
+        let was = self.slot.state.swap(NATIVE, Ordering::SeqCst);
+        debug_assert_eq!(was, RUNNING, "enter_native: the view is already native");
+        let threads = &self.shared.threads;
+        // A collector may already be waiting for this thread to stop; the
+        // lock orders this notification after its check, so it cannot be
+        // lost between the check and the wait.
+        if threads.gc_requested.load(Ordering::SeqCst) {
+            let _views = threads.views.lock().unwrap();
+            threads.changed.notify_all();
+        }
+    }
+
+    /// Come back from [`enter_native`](Self::enter_native) — after waiting
+    /// out a collection in progress, if there is one.
+    pub fn leave_native(&mut self) {
+        let was = self.slot.state.swap(RUNNING, Ordering::SeqCst);
+        debug_assert_eq!(was, NATIVE, "leave_native: the view is not native");
+        // Running again before looking at the flag: a collector that raises
+        // it after this load sees `RUNNING` and waits; one that raised it
+        // before is found here, and this thread parks without having
+        // touched anything.
+        if self.shared.threads.gc_requested.load(Ordering::SeqCst) {
+            self.park();
+        }
+    }
+
+    /// Run `f` — which must not touch this heap — as native: another
+    /// thread's collection may run meanwhile. See
+    /// [`enter_native`](Self::enter_native).
+    ///
+    /// Leaves native again even if `f` panics, so that the unwind can go on
+    /// to use the heap (a `catch` further up) like any other.
+    pub fn native<R>(&mut self, f: impl FnOnce() -> R) -> R {
+        struct Leave<'h>(&'h mut Heap);
+        impl Drop for Leave<'_> {
+            fn drop(&mut self) {
+                self.0.leave_native();
+            }
+        }
+        self.enter_native();
+        let _leave = Leave(self);
+        f()
+    }
+
+    /// Whether this view is between `enter_native` and `leave_native`.
+    pub fn is_native(&self) -> bool {
+        self.slot.state.load(Ordering::Relaxed) == NATIVE
+    }
+
+    /// Debug builds: a thread that promised not to touch the heap did.
+    /// Checked at the entry points everything else funnels through
+    /// (allocation, rooting, collection) rather than at every accessor.
+    fn debug_assert_not_native(&self, what: &str) {
+        debug_assert!(!self.is_native(), "{}: the heap was touched inside a native section", what);
+    }
+
     /// Run a mark-sweep collection. Returns the number of cons cells reclaimed.
     /// Debug-only (runs under `gc_stress`): report any root that points at a
     /// cell already on the free list. Such a root makes the mark phase mark a
     /// cell the sweep then refuses to hand back, which is what drives `gc`'s
     /// reclaim count below zero. Panics naming the root set and index — the
     /// fact the underflow itself never reveals.
-    fn audit_roots_against_free_list(&self) {
+    fn audit_roots_against_free_list(&self, session_roots: &[Value]) {
         use std::collections::HashSet;
         let mut freed: HashSet<usize> = HashSet::new();
         let mut p = self.shared.arena.lock().unwrap().free;
@@ -2667,7 +2918,7 @@ impl Heap {
                 check("permanent_roots", i, *v);
             }
         }
-        for (i, &v) in self.session_roots.iter().enumerate() {
+        for (i, &v) in session_roots.iter().enumerate() {
             check("session_roots", i, v);
         }
         for w in self.shared.cell_registry.lock().unwrap().iter() {
@@ -2679,10 +2930,80 @@ impl Heap {
         }
     }
 
+    ///
+    /// **Stop-the-world.** Every other thread with a view onto this heap is
+    /// stopped for the duration (`docs/dev/os-threads-design.md` §4):
+    ///
+    /// 1. Raise `gc_requested`. If another thread already has, this one is
+    ///    not the collector: it parks like any thread at a safepoint until
+    ///    that collection ends, then starts its own — a caller of `gc()`
+    ///    is promised a collection that began after the call.
+    /// 2. Wait until every view on another thread is `AT_SAFEPOINT` (it
+    ///    polled the flag: [`safepoint`](Self::safepoint), which `cons`
+    ///    calls) or `NATIVE` (it promised not to touch the heap:
+    ///    [`native`](Self::native)). Views on this thread are not waited
+    ///    for — this thread is here, so they are not in the middle of
+    ///    anything.
+    /// 3. Mark and sweep, holding the registry lock so no view can attach,
+    ///    detach or wake meanwhile.
+    /// 4. Lower the flag and wake everyone.
+    ///
+    /// Only then are the heap's own locks taken — never while waiting in
+    /// step 2, so a thread that stops with none of them held (every
+    /// stopping point is outside them) can never be what the collector is
+    /// waiting on.
+    ///
+    /// Stopping points are only ever at the boundary of a heap operation,
+    /// never inside one, so the collector never reads a `Vec`/`HashMap` a
+    /// stopped thread was half-way through changing.
     pub fn gc(&mut self) -> usize {
-        self.gc_count += 1;
+        self.debug_assert_not_native("gc");
+        // A handle of its own so the registry lock can be held across the
+        // `&mut self` collection below.
+        let shared = Arc::clone(&self.shared);
+        let threads = &shared.threads;
+        while threads.gc_requested.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            self.park();
+        }
+        let mut views = threads.views.lock().unwrap();
+        let me = std::thread::current().id();
+        loop {
+            let running: Vec<&Arc<ViewSlot>> =
+                views.iter().filter(|v| v.thread != me && v.state.load(Ordering::SeqCst) == RUNNING).collect();
+            if running.is_empty() {
+                break;
+            }
+            let (guard, waited) = threads.changed.wait_timeout(views, WATCHDOG).unwrap();
+            views = guard;
+            if waited.timed_out() && cfg!(debug_assertions) {
+                let names: Vec<&str> = views
+                    .iter()
+                    .filter(|v| v.thread != me && v.state.load(Ordering::SeqCst) == RUNNING)
+                    .map(|v| v.name.as_str())
+                    .collect();
+                eprintln!(
+                    "gc: still waiting after {:?} for {} to stop — a thread blocked without `Heap::native`?",
+                    WATCHDOG,
+                    names.join(", ")
+                );
+            }
+        }
+        let session_roots: Vec<Value> =
+            views.iter().flat_map(|v| unsafe { &*v.session_roots.get() }.iter().copied()).collect();
+        let reclaimed = self.collect(&session_roots);
+        threads.gc_requested.store(false, Ordering::SeqCst);
+        threads.changed.notify_all();
+        drop(views);
+        reclaimed
+    }
+
+    /// The mark-sweep itself, with every other thread stopped — see
+    /// [`gc`](Self::gc). `session_roots` is every view's, gathered while
+    /// the registry was locked.
+    fn collect(&mut self, session_roots: &[Value]) -> usize {
+        self.shared.gc_count.fetch_add(1, Ordering::Relaxed);
         if false {
-            self.audit_roots_against_free_list();
+            self.audit_roots_against_free_list(session_roots);
         }
         // reset string/box marks. `strings` is locked only for this
         // statement (see the mark loop's `Value::Str` arm below for why it
@@ -2727,9 +3048,7 @@ impl Heap {
                 }
             }
         }
-        for i in 0..self.session_roots.len() {
-            stack.push(self.session_roots[i]);
-        }
+        stack.extend_from_slice(session_roots);
         // Every binding cell still referenced by a live `Arc<BoxId>` handle
         // is a root of its own — see `alloc_cell`. Dead entries (the last
         // handle dropped) are pruned here; their cells become collectible
@@ -2899,14 +3218,35 @@ impl Drop for RootScope<'_> {
     }
 }
 
-// No `impl Drop for Heap`: freeing the arena's chunks is `Arena`'s own
-// `Drop` now (see its doc comment), which runs when the last `Heap` view
-// sharing this `Arc<HeapShared>` goes away and drops the `Arc` down to
-// nothing — not when any one view is dropped, since a view no longer owns
-// the arena outright. Everything else `Heap` still owns directly (the
-// `Slab`s, `root_stacks`, the interning tables) cleans up through its own
-// ordinary field-by-field `Drop`, same as before this struct had any
-// `Arc`-shared part.
+/// Dropping a view frees its home root stack and takes it out of the
+/// thread registry — without the second, the next collection from another
+/// thread would wait forever for a view nobody will ever run again.
+///
+/// Freeing the arena's chunks is `Arena`'s own `Drop` (see its doc
+/// comment), which runs when the last view sharing this `Arc<HeapShared>`
+/// goes away — not when any one view is dropped, since a view does not own
+/// the arena outright.
+impl Drop for Heap {
+    fn drop(&mut self) {
+        // Before unregistering: until then this view counts as running, so
+        // no collection on another thread can be walking `root_stacks`
+        // while this edits it. The home stack is only ever pushed to by
+        // this view, so nothing else can still need what it holds.
+        if self.current_stack == self.home_stack {
+            // The view is going away; `current` must not point at a freed
+            // stack in the meantime, and nothing reads it after this.
+            self.current = ptr::null_mut();
+        }
+        if let Ok(mut root_stacks) = self.shared.root_stacks.lock() {
+            if let Some(s) = root_stacks.get_mut(self.home_stack) {
+                *s = None;
+            }
+        }
+        // A view dropped while native (a panic unwinding out of `native`'s
+        // closure) is not running either; unregistering is all it needs.
+        self.shared.threads.unregister(&self.slot);
+    }
+}
 
 /// A type key's base name, without its instantiation: `option<char>` ->
 /// `option`, `point` -> `point`.

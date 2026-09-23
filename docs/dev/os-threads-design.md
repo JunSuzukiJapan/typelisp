@@ -120,6 +120,49 @@ pub struct HeapShared {              // Send + Sync（unsafe impl、不変条件
 - debug 用 watchdog: フラグを立てて N 秒 parked にならないスレッドの名前と状態を stderr に
   出す（native 忘れの発見器）。
 
+### 実装（Phase 2）と上の案からの差分
+
+`crates/typelisp-mem/src/heap.rs` の `ThreadRegistry`/`ViewSlot`、`Heap::gc`/`safepoint`/
+`enter_native`/`leave_native`/`native`。テストは `crates/typelisp-mem/tests/shared_heap_threads.rs`。
+
+- **safepoint は `cons` だけで、`alloc_string`/`alloc_boxed` は safepoint にしない。** 上の (a)
+  「全確保の slow path」は成り立たなかった: 文字列・箱の確保は今まで一度も GC しなかったので、
+  呼び出し側は未ルートの値を抱えたまま呼んでいる（`alloc_struct` に渡す `fields` がその典型）。
+  そこで他スレッドの GC を走らせるとそれらが掃かれる。safepoint は「そこで GC が起きても
+  よいと呼び出し側がすでに約束している点」だけ——`cons`・`rt_loop_safepoint`（毎回。
+  256 回ごとの yield とは別）・`drive` の step 境界・`leave_native`。
+- **collector は自スレッドのビューを待たない**（`ViewSlot.thread`）。同じ OS スレッドに
+  2 本目のビューを作る既存テスト（`tests/mem_test.rs` の attach 系）がそうで、自スレッドが
+  collector である以上、他のビューは何かの途中ではありえない。
+- **2 本目の collector は降格したあと自分でも GC を走らせる。** `gc()` の呼び手には
+  「呼んだ後に始まった GC」を約束する（`cons` の再試行判定がそれに依る）。
+- **`cons` の「空か確認」と「取り出し」は 1 つの critical section**（`pop_free`）。
+  別々だと他スレッドが最後のセルを取った後に null を pop する（新テストで実際に踏んだ）。
+  `HeapExhausted` は「自分の GC が 0 個しか回収せず、それでも空で、伸長もできない」。
+- **`AllocCache` は入れていない。** 正しさには要らない最適化で、入れると「GC 時に全ビューの
+  cache を空にする」手順も要る。`cons` は毎回 arena の `Mutex` を取る。
+- collector は registry の `Mutex` を mark〜sweep の間ずっと持つ。その間 attach/detach/
+  起床はできない（`register` は GC 中なら終わるまで待ってから `RUNNING` で入る）。
+- ビューの `Drop` は home ルートスタックを解放してから registry から抜ける（抜けないと次の
+  GC が永遠に待つ）。
+- `session_roots` は `ViewSlot` へ（他スレッドの collector が mark する）。`gc_count`/
+  `gc_stress` は `HeapShared` の atomic（どのビューからの GC もヒープ全体の GC）。
+- `HeapShared` は `unsafe impl Send + Sync`（根拠はコメント: 全フィールドがロックか atomic の
+  裏、ロックが守らないセルは STW と §6 の規則が守る）。
+- watchdog は 5 秒、debug ビルドだけ。待ち続ける（タイムアウトではない）。
+- native に指定した箇所: `drive` の `sleep`、`wake_io` の `poll`（timeout 0 以外）、
+  `sys_builtin::sleep`（interpreted な `sleep`）、`ed-open` の子プロセス待ち、
+  `stream-read-char`/`stream-read-byte`（ストリーム表のロック取得ごと）、`step` のプロンプト読み、
+  REPL の `rl.readline`、FFI の C 呼び出し（thunk が `rt_ffi_enter_native`/
+  `rt_ffi_leave_native` で挟む。C 側に渡るのはスカラと C 文字列だけなので C はヒープ値を
+  持たない）。
+
+**Phase 3 に残したもの**: スケジューラロック待ちの native 化と `answer_now` の順序（ロックが
+まだ無い）。**ストリーム表のロック**: `stream-read-char` はロックを持ったまま native で
+stdin を待つので、他スレッドが同じロックを `RUNNING` のまま待つと、その間に要求された GC は
+読み込みが返るまで止まる。ワーカーを起動する前に、`with_streams` の取得を全部 native に
+するか、ブロックする読みをロックの外へ出す。
+
 ## 5. 飛行中の状態はタスクが持つ（`IN_FLIGHT_TAG` / `CAUGHT_UNWIND` / `in_flight_throw`）
 （Phase 1e で実装）
 

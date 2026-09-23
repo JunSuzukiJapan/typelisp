@@ -296,7 +296,9 @@ fn repl(heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> rus
     let mut pending = String::new();
     loop {
         let prompt = if pending.is_empty() { PROMPT_PRIMARY } else { PROMPT_CONTINUE };
-        match rl.readline(prompt) {
+        // Native: while this thread waits for a keystroke it holds nothing
+        // another thread's collection would have to wait for.
+        match heap.native(|| rl.readline(prompt)) {
             Ok(line) => {
                 let trimmed = line.trim();
                 if pending.is_empty() && (trimmed == ":quit" || trimmed == ":exit") {
