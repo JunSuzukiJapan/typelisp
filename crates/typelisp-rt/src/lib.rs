@@ -2844,16 +2844,78 @@ pub unsafe fn run_entry_payload(outcome: std::thread::Result<i64>) -> i64 {
 // per-call version of that, and C4 deleted them.
 
 thread_local! {
-    /// The tag of the throw currently in flight. Its *value* lives in
+    /// The tag of the throw currently in flight *for whichever task's `step`
+    /// is running on this thread right now*. Its *value* lives in
     /// `Heap::set_in_flight_throw` instead, where the collector can see it —
     /// see [`CompiledThrow`].
+    ///
+    /// **Not this thread's for the whole time a task is merely parked.** A
+    /// task whose `unwind-protect` cleanup suspends (`(sleep)`/`(recv)`/…)
+    /// leaves this set while it is `Blocked`, and cooperative scheduling can
+    /// run a *different* task's own throw on this same thread before it
+    /// resumes — so every `TaskBody::step` saves this thread-local into the
+    /// task itself before returning and restores it before running again
+    /// ([`take_parked_unwind`]/[`restore_parked_unwind`]), the same way a
+    /// task's continuation stack is put down and picked back up.
     static IN_FLIGHT_TAG: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The panic payload the driver caught and has not yet handed on: to a
     /// `catch` that claims it ([`rt_throw_take_value`], which drops it), to
     /// the interpreter as an `EvalError` ([`take_activation_unwind`]), or back
     /// to the unwinder ([`resume_activation_unwind`]) when the drive's caller
     /// is a machine frame.
+    ///
+    /// Saved and restored around each `step` exactly like `IN_FLIGHT_TAG`,
+    /// for the same reason.
     static CAUGHT_UNWIND: RefCell<Option<Box<dyn std::any::Any + Send>>> = const { RefCell::new(None) };
+}
+
+/// What [`IN_FLIGHT_TAG`]/[`CAUGHT_UNWIND`] hold for one task, moved off the
+/// live thread-locals between that task's steps — `docs/dev/os-threads-design.md`
+/// §3.
+///
+/// The throw's *value* is deliberately not here: it needs a GC root, and each
+/// task's own `RootStack` already gives it one that survives exactly as long
+/// as this does (`Heap::in_flight_throw`/`set_in_flight_throw`). Keeping the
+/// two halves in separate places is safe only because both are switched in
+/// lockstep — whoever installs a `ParkedUnwind` before running a task has
+/// also made that task's own root stack the current one first.
+#[derive(Default)]
+pub struct ParkedUnwind {
+    tag: Option<String>,
+    caught: Option<Box<dyn std::any::Any + Send>>,
+}
+
+impl ParkedUnwind {
+    /// A `ParkedUnwind` for a `panic` that arrived with no throw of its
+    /// own — what [`sched::CompiledTask::deliver`](crate::sched::CompiledTask)
+    /// parks for its own next `step` to install, instead of writing straight
+    /// to the live thread-locals the way [`park_activation_unwind`] does (see
+    /// that function's caller for why: `deliver` can run while a *different*
+    /// task's state is the one installed on this thread).
+    pub fn panic(message: String) -> ParkedUnwind {
+        ParkedUnwind { tag: None, caught: Some(Box::new(CompiledPanic { message })) }
+    }
+}
+
+/// Takes this thread's in-flight-unwind state, leaving both thread-locals
+/// empty — half of the pair a task's `step` calls around itself, the other
+/// half being [`restore_parked_unwind`]. Whether called at a `step`'s start
+/// (to make room for this task's own saved state) or its end (to save what
+/// it leaves behind), the shape is the same: nothing is left on the thread
+/// for a task that is not the one about to run, or that just stopped
+/// running, to see.
+pub fn take_parked_unwind() -> ParkedUnwind {
+    ParkedUnwind { tag: IN_FLIGHT_TAG.with(|c| c.borrow_mut().take()), caught: CAUGHT_UNWIND.with(|c| c.borrow_mut().take()) }
+}
+
+/// Installs a previously [`take_parked_unwind`]'s state onto this thread —
+/// what a task's `step` does before running, so code that reads
+/// `IN_FLIGHT_TAG`/`CAUGHT_UNWIND` (a `catch`'s dispatch, an
+/// `unwind-protect`'s resume) finds what *this* task itself last left there,
+/// not another task's leftovers or another task's clean slate.
+pub fn restore_parked_unwind(p: ParkedUnwind) {
+    IN_FLIGHT_TAG.with(|c| *c.borrow_mut() = p.tag);
+    CAUGHT_UNWIND.with(|c| *c.borrow_mut() = p.caught);
 }
 
 /// Parks a throw's tag and value for the unwind about to be raised for it,

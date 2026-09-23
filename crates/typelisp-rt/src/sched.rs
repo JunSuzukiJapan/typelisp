@@ -1444,6 +1444,12 @@ pub struct CompiledTask {
     /// body has already stored and nothing reads back. Decoding it would be
     /// reading bits that were never a `Value`.
     discard_answer: bool,
+    /// This task's own share of `typelisp_rt`'s in-flight-unwind
+    /// thread-locals (`IN_FLIGHT_TAG`/`CAUGHT_UNWIND`), installed by `step`
+    /// before it drives the chain and taken back once it stops — see
+    /// `docs/dev/os-threads-design.md` §3. Empty exactly when this task is
+    /// not in the middle of an unwind.
+    parked_unwind: crate::ParkedUnwind,
 }
 
 enum CompiledState {
@@ -1474,6 +1480,7 @@ impl CompiledTask {
             sbase,
             wake: Wake::Unit,
             discard_answer: false,
+            parked_unwind: crate::ParkedUnwind::default(),
         }
     }
 
@@ -1573,6 +1580,7 @@ impl TaskBody for CompiledTask {
             sbase,
             wake: Wake::Unit,
             discard_answer: false,
+            parked_unwind: crate::ParkedUnwind::default(),
         }
     }
 
@@ -1581,6 +1589,14 @@ impl TaskBody for CompiledTask {
     }
 
     fn step(&mut self, heap: &mut Heap, _cx: &()) -> Progress<TaskFailure> {
+        // Install what this task itself left in `IN_FLIGHT_TAG`/`CAUGHT_UNWIND`
+        // the last time it stopped — empty unless it is resuming into a
+        // `catch`'s dispatch or an `unwind-protect`'s cleanup mid-unwind. See
+        // `docs/dev/os-threads-design.md` §3: another task may have run its
+        // own throw through these same thread-locals since then, so nothing
+        // here may be assumed left over from last time except what this call
+        // installs.
+        crate::restore_parked_unwind(std::mem::take(&mut self.parked_unwind));
         // Taken out to be consumed; every path below either puts the next
         // state back or reports `Done`, after which nothing reads it.
         let state = std::mem::replace(&mut self.state, CompiledState::Resume(0));
@@ -1596,10 +1612,16 @@ impl TaskBody for CompiledTask {
             // it was waiting for.
             CompiledState::Blocked(w) => {
                 self.state = CompiledState::Blocked(w.clone());
+                self.parked_unwind = crate::take_parked_unwind();
                 return Progress::Blocked(w);
             }
         };
-        self.after_drive(heap, outcome)
+        let progress = self.after_drive(heap, outcome);
+        // Save whatever this call leaves in flight back onto the task, and
+        // clear the thread-locals so a different task stepped next sees a
+        // clean slate rather than this one's leftovers.
+        self.parked_unwind = crate::take_parked_unwind();
+        progress
     }
 
     fn deliver(&mut self, heap: &mut Heap, answer: Result<Value, SchedError>) {
@@ -1623,11 +1645,25 @@ impl TaskBody for CompiledTask {
                 let message = match e {
                     SchedError::Panic(m) | SchedError::Internal(m) => m,
                 };
-                // SAFETY: a `Heap` is registered on this thread — this task's
-                // chain runs on it.
-                unsafe { crate::park_activation_unwind(Box::new(typelisp_abi::CompiledPanic { message })) };
+                // Parked on the task directly rather than through
+                // `park_activation_unwind`'s live thread-locals: `deliver`
+                // runs between two tasks' steps (`sched::deliver_to`), with
+                // no guarantee that *this* task's saved state is what is
+                // currently installed on the thread — writing to the
+                // thread-locals here would hand the panic to whichever task
+                // steps next instead of to this one. `step` installs it when
+                // this task runs again, before raising it into the chain.
+                self.parked_unwind = crate::ParkedUnwind::panic(message);
                 self.state = CompiledState::Raise;
                 self.set_slots(heap);
+                // A newer exit replaces whatever throw this task's own
+                // cleanup might already have had in flight — CLHS's rule for
+                // an exit raised while another is still travelling. Safe to
+                // touch directly (not through the task's own saved state):
+                // `deliver_to` has already switched `heap`'s current root
+                // stack to this task's, so this clears only this task's own
+                // slot.
+                heap.set_in_flight_throw(None);
             }
         }
     }

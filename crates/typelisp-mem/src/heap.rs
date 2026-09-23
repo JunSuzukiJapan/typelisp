@@ -37,9 +37,15 @@
 //!   any single activation (e.g. a field inside a heap-external, never-freed
 //!   box) — appended to, never popped. `session_roots` holds values that must
 //!   survive a bracketed span of work but not outlive it, released in bulk at
-//!   the bracket's end (see [`Heap::push_session_root`]). `in_flight_throw` is
-//!   the one value a `throw` is carrying while the stack that held it is being
-//!   discarded (see [`Heap::set_in_flight_throw`]). `gc()` marks from all four.
+//!   the bracket's end (see [`Heap::push_session_root`]). The fourth is not a
+//!   stack of its own but one slot *inside each task's `RootStack`*: the value
+//!   a `throw` is carrying while the frames that held it are being discarded
+//!   (see [`Heap::set_in_flight_throw`]). It lives there rather than on `Heap`
+//!   itself so that a task whose `unwind-protect` cleanup suspends (a `sleep`,
+//!   a channel op) mid-flight keeps its own parked value untouched while a
+//!   *different* task's `throw` runs on the same thread in between — the two
+//!   tasks' `RootStack`s are different objects, so they cannot collide.
+//!   `gc()` marks from all four.
 //!
 //! All `unsafe` is confined here; the public API is safe.
 
@@ -89,6 +95,13 @@ pub struct RootStackId(usize);
 #[derive(Default)]
 struct RootStack {
     roots: Vec<Value>,
+    /// The value a `throw` currently travelling through *this task's* frames
+    /// is carrying — see [`Heap::set_in_flight_throw`]. Per stack rather than
+    /// a single field on `Heap`, so that a different task running on the same
+    /// thread while this one is suspended mid-unwind (a cleanup that
+    /// `sleep`s) cannot overwrite it: `Heap::current` points at whichever
+    /// stack is running, and each stack carries its own copy.
+    in_flight_throw: Option<Value>,
 }
 
 /// Entries per [`Slab`] chunk — a power of two so the chunk/offset split is a
@@ -339,9 +352,6 @@ pub struct Heap {
     current: *mut RootStack,
     // Roots for the duration of a bracketed session — see `push_session_root`.
     session_roots: Vec<Value>,
-    // The value of a `throw` currently travelling up the stack — see
-    // `set_in_flight_throw`.
-    in_flight_throw: Option<Value>,
     // Reader macros: the function each macro character dispatches to, and for
     // a dispatching character (`#`-like) the function each sub-character
     // dispatches to. See `set_macro_character`.
@@ -445,7 +455,6 @@ impl Heap {
             current_stack: 0,
             current,
             session_roots: Vec::new(),
-            in_flight_throw: None,
             macro_chars: HashMap::new(),
             dispatch_chars: HashMap::new(),
             locs: Vec::new(),
@@ -460,11 +469,13 @@ impl Heap {
     /// A second (or third, ...) view onto the same underlying heap —
     /// `docs/dev/os-threads-design.md` §1's "one `Arc<HeapShared>`, many
     /// views" split. Gives the new view its own home root stack (registered
-    /// in `shared.root_stacks`, so `gc()` run from *any* view walks it) and
-    /// otherwise starts it exactly like [`with_capacity`](Self::with_capacity)
-    /// starts the first one — empty `session_roots`/`in_flight_throw`/reader
-    /// macro tables, no interned type keys to add (those are already in
-    /// `shared.interning`, done once by whichever view created the heap).
+    /// in `shared.root_stacks`, so `gc()` run from *any* view walks it, and
+    /// starting with an empty `in_flight_throw` of its own like any other
+    /// fresh `RootStack`) and otherwise starts it exactly like
+    /// [`with_capacity`](Self::with_capacity) starts the first one — empty
+    /// `session_roots`/reader macro tables, no interned type keys to add
+    /// (those are already in `shared.interning`, done once by whichever view
+    /// created the heap).
     ///
     /// **What is *not* yet safe to share across views**: source locations
     /// (`locs`/`loc_ids` stay per-view, so a `LocId` a cell holds from one
@@ -492,7 +503,6 @@ impl Heap {
             current_stack: 0,
             current: ptr::null_mut(),
             session_roots: Vec::new(),
-            in_flight_throw: None,
             macro_chars: HashMap::new(),
             dispatch_chars: HashMap::new(),
             locs: Vec::new(),
@@ -883,25 +893,28 @@ impl Heap {
 
     // ---- the in-flight throw ----------------------------------------------
 
-    /// The value a `(throw ...)` currently travelling up the stack carries, or
-    /// `None` when no throw is in flight.
+    /// The value a `(throw ...)` currently travelling up **the running
+    /// task's** frames carries, or `None` when no throw is in flight in it.
     ///
-    /// A single slot rather than a stack, and none of the other three root
-    /// sets, because the lifetime it has to express is neither an activation's
-    /// nor a session's: the value is live from the `throw` that raised it
-    /// until the `catch` that consumes it, while the stack in between is being
-    /// *discarded*. `roots` is exactly what a non-local exit cuts back
-    /// (`truncate_roots`, from both the compiled and the interpreted side), so
-    /// a value parked there would be released by the very unwind that is
-    /// carrying it; `permanent_roots` never releases; `session_roots` is not
-    /// bracketed by a throw.
+    /// A single slot per task rather than a stack, and none of the other
+    /// three root sets, because the lifetime it has to express is neither an
+    /// activation's nor a session's: the value is live from the `throw` that
+    /// raised it until the `catch` that consumes it, while the stack in
+    /// between is being *discarded*. `roots` is exactly what a non-local exit
+    /// cuts back (`truncate_roots`, from both the compiled and the
+    /// interpreted side), so a value parked there would be released by the
+    /// very unwind that is carrying it; `permanent_roots` never releases;
+    /// `session_roots` is not bracketed by a throw.
     ///
-    /// One slot suffices because at most one throw is ever in flight: an exit
-    /// raised from an `unwind-protect` cleanup while another is travelling
-    /// *replaces* it (CLHS — the cleanup's own exit wins), which is what
-    /// overwriting this slot does.
+    /// One slot *per task* rather than one on `Heap` — see [`RootStack`]'s
+    /// `in_flight_throw` field for why a shared slot is not safe once a
+    /// cleanup can suspend. One slot per task suffices because at most one
+    /// throw is ever in flight *in that task*: an exit raised from an
+    /// `unwind-protect` cleanup while another is travelling *replaces* it
+    /// (CLHS — the cleanup's own exit wins), which is what overwriting this
+    /// slot does.
     pub fn in_flight_throw(&self) -> Option<Value> {
-        self.in_flight_throw
+        unsafe { &*self.current }.in_flight_throw
     }
 
     /// Register `f` as the reader macro for `ch` — the function the reader
@@ -951,10 +964,10 @@ impl Heap {
         ch != '#' && self.dispatch_chars.keys().any(|(d, _)| *d == ch)
     }
 
-    /// Park (or, with `None`, release) the in-flight throw's value — see
-    /// [`in_flight_throw`](Self::in_flight_throw).
+    /// Park (or, with `None`, release) **the running task's** in-flight
+    /// throw value — see [`in_flight_throw`](Self::in_flight_throw).
     pub fn set_in_flight_throw(&mut self, v: Option<Value>) {
-        self.in_flight_throw = v;
+        unsafe { &mut *self.current }.in_flight_throw = v;
     }
 
     // ---- symbols ----------------------------------------------------------
@@ -2645,6 +2658,9 @@ impl Heap {
             for (i, &v) in stack.roots.iter().enumerate() {
                 check(&what, i, v);
             }
+            if let Some(v) = stack.in_flight_throw {
+                check(&format!("{}.in_flight_throw", what), 0, v);
+            }
         }
         for (i, v) in self.shared.permanent_roots.lock().unwrap().iter().enumerate() {
             if let Some(v) = v {
@@ -2653,9 +2669,6 @@ impl Heap {
         }
         for (i, &v) in self.session_roots.iter().enumerate() {
             check("session_roots", i, v);
-        }
-        if let Some(v) = self.in_flight_throw {
-            check("in_flight_throw", 0, v);
         }
         for w in self.shared.cell_registry.lock().unwrap().iter() {
             if let Some(id) = w.upgrade() {
@@ -2695,9 +2708,14 @@ impl Heap {
         // the very same stack once traced — see `push_boxed_nested`.
         let mut stack: Vec<Value> = Vec::new();
         // Every task's roots, not just the running one: a suspended task will
-        // resume into the frames these belong to.
+        // resume into the frames these belong to. Each stack's own
+        // `in_flight_throw` rides along here too — see `RootStack`'s doc
+        // comment for why it is not the separate root set it used to be.
         for roots in self.shared.root_stacks.lock().unwrap().iter().flatten() {
             for &v in &roots.roots {
+                stack.push(v);
+            }
+            if let Some(v) = roots.in_flight_throw {
                 stack.push(v);
             }
         }
@@ -2711,12 +2729,6 @@ impl Heap {
         }
         for i in 0..self.session_roots.len() {
             stack.push(self.session_roots[i]);
-        }
-        // The value a throw is carrying past the frames being discarded — see
-        // `set_in_flight_throw` for why it cannot live in any of the three
-        // stacks above.
-        if let Some(v) = self.in_flight_throw {
-            stack.push(v);
         }
         // Every binding cell still referenced by a live `Arc<BoxId>` handle
         // is a root of its own — see `alloc_cell`. Dead entries (the last

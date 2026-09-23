@@ -103,8 +103,10 @@ enum State {
     /// `Heap::set_in_flight_throw` is still there for the *compiled* side: a
     /// compiled `throw` travels as a Rust panic, whose payload the collector
     /// cannot see, so `typelisp_rt::park_throw` parks the value in that slot.
-    /// The one-slot assumption survives there — something Phase B has to look
-    /// at, since two tasks can then be unwinding at once.
+    /// One slot per task, not one for the whole heap — see `RootStack`'s
+    /// `in_flight_throw` field — is what lets two tasks be unwinding on the
+    /// compiled side at once without one's parked value overwriting the
+    /// other's (`docs/dev/os-threads-design.md` §3).
     Unwind(EvalError),
 }
 
@@ -535,6 +537,15 @@ pub(crate) struct Task {
     /// compiled function the chain grows a second run of frames above the
     /// first. `DriveCtx::base` is what keeps the two apart.
     compiled: typelisp_rt::coroutine::FrameStack,
+    /// This task's own share of `typelisp_rt`'s in-flight-unwind
+    /// thread-locals, installed before this task's own step of
+    /// [`Interp::step_task`] runs and taken back once it stops — the
+    /// interpreted-side counterpart of `sched::CompiledTask`'s field of the
+    /// same name (`docs/dev/os-threads-design.md` §3). Needed here too:
+    /// `step_task` can enter a compiled chain (`State::CompiledEnter` and
+    /// friends), which parks a throw's tag/caught-unwind through the same
+    /// thread-locals a `CompiledTask` does.
+    parked_unwind: typelisp_rt::ParkedUnwind,
 }
 
 impl sched::TaskBody for Task {
@@ -560,6 +571,7 @@ impl sched::TaskBody for Task {
             stack: CpsStack::new(),
             state: State::CompiledEnter { argv, start },
             compiled: typelisp_rt::coroutine::FrameStack::new(),
+            parked_unwind: typelisp_rt::ParkedUnwind::default(),
         }
     }
 
@@ -568,7 +580,7 @@ impl sched::TaskBody for Task {
     }
 
     fn step(&mut self, heap: &mut Heap, interp: &Interp) -> Progress<EvalError> {
-        interp.step_task(heap, self)
+        interp.step_task_isolated(heap, self)
     }
 
     /// Gives this task the state it will resume into, rooting what that
@@ -622,6 +634,7 @@ impl Task {
             stack: CpsStack::new(),
             state: State::Eval(form, env),
             compiled: typelisp_rt::coroutine::FrameStack::new(),
+            parked_unwind: typelisp_rt::ParkedUnwind::default(),
         }
     }
 
@@ -636,6 +649,7 @@ impl Task {
             stack: CpsStack::new(),
             state: State::Enter { form, argv, kind },
             compiled: typelisp_rt::coroutine::FrameStack::new(),
+            parked_unwind: typelisp_rt::ParkedUnwind::default(),
         }
     }
 
@@ -652,6 +666,7 @@ impl Task {
             stack: CpsStack::new(),
             state: State::CompiledEnter { argv: Value::Empty, start },
             compiled: typelisp_rt::coroutine::FrameStack::new(),
+            parked_unwind: typelisp_rt::ParkedUnwind::default(),
         }
     }
 }
@@ -883,7 +898,7 @@ impl Interp {
     fn run_to_completion(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
         let mut task = Task::start(heap, form, env);
         let out = loop {
-            match self.step_task(heap, &mut task) {
+            match self.step_task_isolated(heap, &mut task) {
                 Progress::Running => {}
                 Progress::Done(r) => break r,
                 // There is a Rust frame waiting on this evaluation, so there is
@@ -927,6 +942,24 @@ impl Interp {
         out
     }
 
+    /// [`Self::step_task`], with `typelisp_rt`'s in-flight-unwind
+    /// thread-locals saved and restored around it so `task`'s own state
+    /// (`Task::parked_unwind`) is what a `catch`'s dispatch or an
+    /// `unwind-protect`'s resume sees, not whatever a *different* task last
+    /// left there — see `docs/dev/os-threads-design.md` §3.
+    ///
+    /// Both `TaskBody::step`'s call and `run_to_completion`'s nested one go
+    /// through this rather than `step_task` directly: the save/restore is
+    /// correct either way because it follows the Rust call stack — a nested
+    /// call installs its own task's (typically empty) state, runs, and
+    /// restores what the outer call had installed, exactly as if the two
+    /// were unrelated threads taking turns on the same thread-locals.
+    fn step_task_isolated(&self, heap: &mut Heap, task: &mut Task) -> Progress<EvalError> {
+        typelisp_rt::restore_parked_unwind(std::mem::take(&mut task.parked_unwind));
+        let progress = self.step_task(heap, task);
+        task.parked_unwind = typelisp_rt::take_parked_unwind();
+        progress
+    }
 
     /// Runs `task` one step.
     ///

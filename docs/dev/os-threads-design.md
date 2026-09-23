@@ -121,19 +121,47 @@ pub struct HeapShared {              // Send + Sync（unsafe impl、不変条件
   出す（native 忘れの発見器）。
 
 ## 5. 飛行中の状態はタスクが持つ（`IN_FLIGHT_TAG` / `CAUGHT_UNWIND` / `in_flight_throw`）
+（Phase 1e で実装）
 
 3 つとも「スレッドの」状態として TLS/`Heap` にあるが、`compile-unwind-protect` の cleanup
 pad（`src/compiler.rs:5614-5628`）は任意の式なので throw 飛行中に `(sleep)`/`(recv)` で
 中断でき、**既に単一スレッドでもタスク切替を跨ぐ**（別タスクの throw に上書きされうる
 潜在バグ）。真の並列ではさらに `deliver(Err)` がロック下で起こした側のスレッドの TLS に書く。
 
-- `CompiledTask` に `parked_unwind: Option<Box<dyn Any + Send>>` と
-  `parked_throw: Option<(String, Value)>` を足し、`step` の前後で TLS と save/restore。
-  値は状態スロットの 3 本目（`sbase+2`）で root（front の `Task` も同じ 3 本目を持つ）。
-- `deliver(Err)` は TLS に書かず `parked_unwind` に置く。次の `step` が TLS へ載せてから
-  `chain.raise`（`sched.rs:1594`）。
-- `Heap::in_flight_throw`/`set_in_flight_throw`（`heap.rs:635, 688`）は「今走っている
-  タスクのスロット」への薄い窓口にする。GC は各タスクの `sbase+2` を他のルートと同じく歩く。
+実装は2本立て——TLS の2つ（スカラ）と値（GC ルートが要る）で置き場所を分けた:
+
+- **`IN_FLIGHT_TAG`/`CAUGHT_UNWIND`（タグと捕捉済み unwind payload、どちらもスカラ）**:
+  `typelisp_rt::ParkedUnwind`（`tag: Option<String>` + `caught: Option<Box<dyn Any+Send>>`）
+  にまとめ、`take_parked_unwind`/`restore_parked_unwind` で save/restore する。
+  `CompiledTask`/front の `Task` それぞれに `parked_unwind: ParkedUnwind` フィールドを足し、
+  `step`（`CompiledTask::step` / `Interp::step_task_isolated`）が呼ばれるたびに
+  「自分の保存分を thread-local へ復元 → 本体を実行 → thread-local から取り出して自分に
+  保存」を行う。ネストする呼び出し（`run_to_completion` が別タスクを直接 step する経路）も
+  Rust の呼び出しスタックがそのまま save/restore のスタックになるので正しく動く。
+  `deliver(Err)`（`CompiledTask::deliver`、旧 `sched.rs:1622-1631`）はもう TLS に触らず
+  `self.parked_unwind = ParkedUnwind::panic(message)` を直接代入するだけ——`deliver` は
+  「起こした側」と「起こされる側」が別タスクになりうる場所（`deliver_to` は root stack だけ
+  切り替える）なので、TLS 越しに渡すと次に `step` した別タスクに渡ってしまう。
+- **`in_flight_throw`（値、GC ルートが要る）**: `Heap` 単体のフィールドではなく
+  **`RootStack` 1本ごとのフィールド**にした（`sbase+2` という追加スロットではなく、
+  `RootStack { roots, in_flight_throw }`）。`Heap::in_flight_throw`/`set_in_flight_throw`
+  は `unsafe { &*self.current }.in_flight_throw` への薄い窓口——「今 current な
+  RootStack」は必ず「今 step している task 自身の RootStack」なので、タスクごとに
+  別オブジェクトである時点で自動的に隔離される（`CompiledTask`/front `Task` 側に
+  3本目の状態スロットを足す必要がなかった）。GC の mark はタスクの `roots` を歩く
+  既存ループにこの1フィールドを混ぜるだけ（`heap.rs`の`gc()`、`root_stacks`ループ）。
+  `deliver`の Err 枝は `deliver_to` が root stack を切り替え済みなので
+  `heap.set_in_flight_throw(None)` を直接呼んでよい（このタスク自身のスロットだけ触る）。
+- `sbase+2`案を取らなかった理由: `tests/driver_unwind_test.rs` はスケジューラ/タスクを
+  一切経由せず `FrameStack::run` を裸で叩いて unwind プロトコルだけを検証しており、
+  状態スロットが3本存在する保証がない（`heap.set_root`は範囲外 index で panic する）。
+  `RootStack` 埋め込みならどんな `Heap`/`RootStack` でも常に有効なので、このテストを
+  タスクの体裁に合わせて書き換える必要がなかった。
+- 退行テスト: `tests/concurrency_test.rs`の
+  `a_task_switch_during_a_cleanup_does_not_corrupt_the_parked_throw` —
+  タスク`a`が`unwind-protect`のcleanupで`sleep`し、その間にタスク`b`が別のタグで
+  catch/throwを完走しても、`a`が再開したときの throw は`b`に汚染されず自分のタグ/値の
+  ままであることを検証する（この節が説明している潜在バグの再現）。
 
 ## 6. データ競合の意味論（Go の立場を採る）
 

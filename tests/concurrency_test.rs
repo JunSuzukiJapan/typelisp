@@ -668,6 +668,45 @@ fn a_compiled_sleep_inside_an_unwind_protect_runs_the_cleanup_after() {
     );
 }
 
+/// The bug `docs/dev/os-threads-design.md` §3 named: a compiled
+/// `unwind-protect` cleanup that suspends (here, `sleep`) leaves its throw's
+/// tag and caught-unwind payload parked *while it is carrying one* — the
+/// protected form throws, the driver catches it at the activation boundary,
+/// and only then does the cleanup pad run and put the task down. Before
+/// `IN_FLIGHT_TAG`/`CAUGHT_UNWIND` moved onto the task (and
+/// `Heap::in_flight_throw` onto each task's own `RootStack`), those were bare
+/// thread-locals/a single `Heap` field, so `b`'s own throw — running on the
+/// same OS thread while `a` is down — clobbered them, and `a`'s resumed
+/// unwind would have carried `b`'s tag and value instead of its own (or
+/// found nothing parked at all).
+///
+/// `b` sleeps for less than `a`'s cleanup does, so it is guaranteed to run
+/// its own catch/throw round trip while `a` is still parked mid-unwind.
+/// `a`'s own throw must still resolve to its own tag and value once its
+/// cleanup finishes, and the trail must show `b` finished its turn before
+/// `a`'s cleanup did — `a`'s throw truly waited out `b`'s.
+#[test]
+fn a_task_switch_during_a_cleanup_does_not_corrupt_the_parked_throw() {
+    let src = r#"(defvar (trail string) "")
+                 (defun a () int
+                   (catch 'a-tag
+                     (unwind-protect
+                       (progn (setf trail (append trail "a1")) (throw 'a-tag 111))
+                       (progn (sleep 0.05) (setf trail (append trail " a2"))))))
+                 (defun b () int
+                   (progn
+                     (sleep 0.01)
+                     (catch 'b-tag (throw 'b-tag 222))
+                     (setf trail (append trail " b"))
+                     0))
+                 (compile a)
+                 (compile b)
+                 (let ((ta (go (a))) (tb (go (b))))
+                   (+ (wait ta) (wait tb)))"#;
+    assert_eq!(int_compiled(src), 111, "a's own throw must survive b's throw running while a was parked");
+    assert_eq!(text_compiled(&format!("{} trail", src)), "a1 b a2", "b must finish its own throw before a's cleanup resumes");
+}
+
 /// A `throw` raised *after* a suspension is still caught by the `catch` the
 /// task suspended inside.
 ///
