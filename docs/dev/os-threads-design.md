@@ -157,11 +157,25 @@ pub struct HeapShared {              // Send + Sync（unsafe impl、不変条件
   `rt_ffi_leave_native` で挟む。C 側に渡るのはスカラと C 文字列だけなので C はヒープ値を
   持たない）。
 
-**Phase 3 に残したもの**: スケジューラロック待ちの native 化と `answer_now` の順序（ロックが
-まだ無い）。**ストリーム表のロック**: `stream-read-char` はロックを持ったまま native で
-stdin を待つので、他スレッドが同じロックを `RUNNING` のまま待つと、その間に要求された GC は
-読み込みが返るまで止まる。ワーカーを起動する前に、`with_streams` の取得を全部 native に
-するか、ブロックする読みをロックの外へ出す。
+**ストリーム表のロック（Phase 2 の後に修正）**: `stream::with_streams(heap, f)` は
+**ロック待ちも `f` も丸ごと native**。`f` はブロックしうる（stdin・パイプ）し、ロックは
+そういう読みをしているスレッドが持っているかもしれない。`StreamTable` は Rust の値しか
+持たず、`heap` を引数で借りているので `f` はヒープを捕まえられない（借用検査が保証）。
+同じ理由で stdout への書き込み（print クレートと front の `write_stdout`、`emit`/
+`block_end`/`flush` は `&mut Heap` を取るようになった）も native。
+
+**規則: ロックは native 区間の内側で取って内側で離す。** 外で取ったロックを持ったまま
+`leave_native` すると、GC 中なら park する——そのロックを native の外で待つスレッドが
+いれば collector はそれを待ち、ロックは返らない。遅延でなくデッドロックになる
+（`crates/typelisp-rt/tests/stream_lock_native_test.rs` を旧形に戻すとハングする）。
+
+native を増やすと GC 点が増える: native に入る前に抱えている値はルートが要る。
+`exec` の `(expr ..)` は評価結果を `flush_pretty` の間ルートし、`trace` の入口/出口は
+引数と戻り値を自分でルートするようにした。ワーカーには `shared::set_rt_shared` で main の
+`RtShared` を渡す（ストリーム表を共有する）。
+
+**Phase 3 に残したもの**: スケジューラロック待ちの native 化と `answer_now` の順序
+（上の規則そのもの。ロックがまだ無い）。
 
 ## 5. 飛行中の状態はタスクが持つ（`IN_FLIGHT_TAG` / `CAUGHT_UNWIND` / `in_flight_throw`）
 （Phase 1e で実装）

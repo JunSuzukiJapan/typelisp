@@ -190,7 +190,7 @@ pub fn build_pprint(heap: &mut Heap, which: &str, value: Value, colinc: i64) -> 
 /// are only consulted when this is the *outermost* write (no session open) —
 /// inside a session the buffer is merged un-laid-out and the block's own
 /// snapshot decides.
-pub fn emit(heap: &Heap, mut out: Out, newline: bool, opts: &Opts) -> Result<(), String> {
+pub fn emit(heap: &mut Heap, mut out: Out, newline: bool, opts: &Opts) -> Result<(), String> {
     if newline {
         out.push('\n');
     }
@@ -205,7 +205,7 @@ pub fn emit(heap: &Heap, mut out: Out, newline: bool, opts: &Opts) -> Result<(),
     });
     let _ = heap;
     match buffered {
-        Some(out) => write_stdout(&format::finish(out, opts)),
+        Some(out) => write_stdout(heap, &format::finish(out, opts)),
         None => Ok(()),
     }
 }
@@ -236,7 +236,7 @@ pub fn block_start(heap: &mut Heap, obj: Value, prefix: &str, per_line: bool, su
 
 /// Closes a logical block; closing the outermost one lays the whole session
 /// out and writes it to stdout.
-pub fn block_end() -> Result<(), String> {
+pub fn block_end(heap: &mut Heap) -> Result<(), String> {
     let finished = SESSION.with(|cell| {
         let mut session = cell.borrow_mut();
         let s = session.as_mut()?;
@@ -252,21 +252,21 @@ pub fn block_end() -> Result<(), String> {
         // `s.opts` was snapshotted with `pretty` forced on at block start: an
         // explicit `pprint-logical-block` is a request to pretty-print,
         // exactly as `pprint` is.
-        Some(s) => write_stdout(&format::finish(s.out, &s.opts)),
+        Some(s) => write_stdout(heap, &format::finish(s.out, &s.opts)),
         None => Ok(()),
     }
 }
 
 /// Closes and writes out a session left open by a non-local exit. A no-op in
 /// the normal case, where the matching block end already flushed it.
-pub fn flush() -> Result<(), String> {
+pub fn flush(heap: &mut Heap) -> Result<(), String> {
     let Some(s) = SESSION.with(|cell| cell.borrow_mut().take()) else {
         return Ok(());
     };
     let opts = Opts { pretty: true, ..s.opts };
     // `layout` closes whatever blocks are still open, emitting their suffixes,
     // so the partial output is still well-formed.
-    write_stdout(&format::finish(s.out, &opts))
+    write_stdout(heap, &format::finish(s.out, &opts))
 }
 
 /// Records a pretty-printer op on the open session. A no-op with no session
@@ -309,14 +309,18 @@ pub fn list_exhausted(heap: &Heap) -> bool {
 /// a terminal when piped, so it isn't line-buffered there, and a prompt
 /// printed without a newline must still be visible before the process blocks
 /// reading stdin.
-fn write_stdout(text: &str) -> Result<(), String> {
+///
+/// Native (`docs/dev/os-threads-design.md` §4): the write can wait on a full
+/// pipe, and on stdout's lock while another thread waits on one.
+fn write_stdout(heap: &mut Heap, text: &str) -> Result<(), String> {
     // One of the three doors a session's output leaves by; see
     // `typelisp_abi::dribble`'s module docs for the other two.
     typelisp_abi::dribble::note(text);
-    let mut out = std::io::stdout();
-    write!(out, "{}", text)
-        .and_then(|()| out.flush())
-        .map_err(|e| format!("print: {}", e))
+    heap.native(|| {
+        let mut out = std::io::stdout();
+        write!(out, "{}", text).and_then(|()| out.flush())
+    })
+    .map_err(|e| format!("print: {}", e))
 }
 
 // ---- the printing builtins as *values* ---------------------------------
@@ -449,7 +453,7 @@ fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
             block_start(heap, obj, &prefix, per_line, &suffix, &opts);
             Ok(Value::Empty)
         })(),
-        "pprint-block-end-rt" => block_end().map(|()| Value::Empty).map_err(PrintError::Raise),
+        "pprint-block-end-rt" => block_end(heap).map(|()| Value::Empty).map_err(PrintError::Raise),
         "pprint-newline" => (|| {
             let kind = match arg_keyword(heap, args, 0, "pprint-newline")? {
                 ":linear" => NewlineKind::Linear,
@@ -587,9 +591,9 @@ mod tests {
         // Emitting into an open session buffers rather than writing.
         let mut out = Out::new();
         out.push('x');
-        emit(&heap, out, false, &Opts::default()).expect("emit into a session");
+        emit(&mut heap, out, false, &Opts::default()).expect("emit into a session");
         assert!(session_open());
-        block_end().expect("close");
+        block_end(&mut heap).expect("close");
         assert!(!session_open());
     }
 }

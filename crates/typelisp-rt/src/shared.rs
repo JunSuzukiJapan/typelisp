@@ -67,3 +67,11 @@ thread_local! {
 pub fn rt_shared() -> Arc<RtShared> {
     RT_SHARED.with(|cell| cell.borrow_mut().get_or_insert_with(|| Arc::new(RtShared::default())).clone())
 }
+
+/// Makes this thread use `shared` — another thread's [`rt_shared`] — so the
+/// two see the same globals, vtables and open streams. What a thread that
+/// runs on a heap it did not create (`Heap::attach`) calls before it runs
+/// anything.
+pub fn set_rt_shared(shared: Arc<RtShared>) {
+    RT_SHARED.with(|cell| *cell.borrow_mut() = Some(shared));
+}

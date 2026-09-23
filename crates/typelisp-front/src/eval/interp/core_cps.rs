@@ -1995,12 +1995,12 @@ impl Interp {
         // `(net-wait h interest)` — "not before this socket is ready" — is
         // the third shape of the same thing.
         if path == crate::Path::root("net-wait") {
-            return Ok((State::Blocked(io_wait(&argv, None)?), None));
+            return Ok((State::Blocked(io_wait(heap, &argv, None)?), None));
         }
         if path == crate::Path::root("net-wait-for") {
             let secs = argv.get(2).copied().ok_or_else(|| EvalError::Internal("net-wait-for: no timeout".to_string()))?;
             let d = io_deadline(super::rt_f64(heap, &secs)?)?;
-            return Ok((State::Blocked(io_wait(&argv, Some(d))?), None));
+            return Ok((State::Blocked(io_wait(heap, &argv, Some(d))?), None));
         }
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
             return self.enter_fn(heap, &f, argv);

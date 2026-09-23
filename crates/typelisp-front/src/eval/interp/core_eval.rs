@@ -814,6 +814,22 @@ impl Interp {
         stepping: bool,
     ) -> Result<usize, EvalError> {
         let depth = self.trace_depth.get();
+        // Rooted here rather than trusted to the caller: rendering can run
+        // Lisp (`print-object`) and writing is native, and either is a point
+        // where a collection may run.
+        let base = heap.root_count();
+        for a in argv {
+            heap.push_root(*a);
+        }
+        let reported = self.trace_call_report(heap, f, argv, depth, stepping);
+        heap.truncate_roots(base);
+        reported?;
+        self.trace_depth.set(depth + 1);
+        Ok(depth)
+    }
+
+    /// The printing half of [`Self::trace_call_entry`], with `argv` rooted.
+    fn trace_call_report(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: &[Value], depth: usize, stepping: bool) -> Result<(), EvalError> {
         // Each argument rendered by its declared representation: the value
         // alone cannot say it is a niched `Option`.
         let reprs = f.sig.as_ref().map(|s| &s.0);
@@ -838,8 +854,7 @@ impl Interp {
                 StepCmd::Quit => return Err(EvalError::Panic("step: aborted".to_string())),
             }
         }
-        self.trace_depth.set(depth + 1);
-        Ok(depth)
+        Ok(())
     }
 
     /// Reports a watched call *coming out* — `  0: fact returned 6`, or the
@@ -856,8 +871,13 @@ impl Interp {
         }
         match outcome {
             Ok(v) => {
+                // The caller returns `v` after this, so it has to survive
+                // the rendering and the native write — see
+                // `trace_call_entry`.
+                heap.push_root(v);
                 let text = self.trace_render(heap, v, ret);
                 self.trace_line(heap, depth, &format!("{} returned {}", name, text));
+                heap.pop_root();
             }
             Err(e) => self.trace_line(heap, depth, &format!("{} exited non-locally: {}", name, e)),
         }
@@ -925,7 +945,7 @@ impl Interp {
     /// printer's `write_stdout`, which flushes for exactly this reason.
     fn trace_flush(&self, heap: &mut Heap) {
         if let Some(h) = self.stream_global(heap, "*trace-output*") {
-            let _ = typelisp_rt::stream::with_streams(|t| t.finish_output(h));
+            let _ = typelisp_rt::stream::with_streams(heap, |t| t.finish_output(h));
         }
     }
 
@@ -941,7 +961,7 @@ impl Interp {
     fn write_stream_global(&self, heap: &mut Heap, name: &str, text: &str) {
         match self.stream_global(heap, name) {
             Some(h) => {
-                let _ = typelisp_rt::stream::with_streams(|t| t.write_str(h, text));
+                let _ = typelisp_rt::stream::with_streams(heap, |t| t.write_str(h, text));
             }
             None => {
                 let opts = typelisp_print::runtime::current_opts(heap);
@@ -2001,7 +2021,17 @@ impl Interp {
                 // form is the widest a block can ever span, so closing any
                 // still-open one here is both the right boundary and a complete
                 // safety net.
-                self.flush_pretty()?;
+                // Flushing writes to stdout natively — a point where another
+                // thread's collection may run — so the result is rooted
+                // across it.
+                if let Ok(v) = &v {
+                    heap.push_root(*v);
+                }
+                let flushed = self.flush_pretty(heap);
+                if v.is_ok() {
+                    heap.pop_root();
+                }
+                flushed?;
                 Ok(Some(v?))
             }
             // `(load ...)` is resolved and applied by the *driver* at check

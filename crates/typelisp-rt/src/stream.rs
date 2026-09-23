@@ -70,16 +70,35 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::net::UdpSocket;
 
+use typelisp_mem::Heap;
+
 /// Runs `f` against this thread's [`StreamTable`].
 ///
 /// The only way to reach it: both the interpreter's `stream-*` builtins and
 /// the compiled `rt_stream_*` shims go through here, which is what makes
 /// "the same handle means the same stream in both" true by construction
 /// rather than by two tables staying in step.
-pub fn with_streams<T>(f: impl FnOnce(&mut StreamTable) -> T) -> T {
+///
+/// **The whole call is native** (`docs/dev/os-threads-design.md` §4): both
+/// the wait for the lock and `f`. Either can take as long as someone else
+/// decides — `f` may block reading stdin or a pipe, and the lock may be held
+/// by a thread doing exactly that — and a thread that waits while counted as
+/// running holds up every other thread's collection for as long as it
+/// waits. Native is sound here because nothing inside touches the heap:
+/// `StreamTable` holds only Rust data, and `heap` is borrowed for the whole
+/// call, so `f` cannot capture it.
+///
+/// The lock is taken *and released* inside the native section, not just
+/// used there. A guard still held on the way out would be held while
+/// `leave_native` parks for a collection in progress — and a thread waiting
+/// for that lock outside a native section is one the collection waits for:
+/// a deadlock, not just a delay.
+pub fn with_streams<T>(heap: &mut Heap, f: impl FnOnce(&mut StreamTable) -> T) -> T {
     let shared = crate::shared::rt_shared();
-    let mut streams = shared.streams.lock();
-    f(&mut streams)
+    heap.native(|| {
+        let mut streams = shared.streams.lock();
+        f(&mut streams)
+    })
 }
 
 /// What a stream is attached to. Only *leaf* backends live here; a composite

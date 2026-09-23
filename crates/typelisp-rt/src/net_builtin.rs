@@ -170,14 +170,14 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
     Some(match name {
         "net-resolve-begin" => {
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
-            wrap!(with_streams(|t| t.net_resolve_begin(&host, port)), |v: i64| Value::Int(v))
+            wrap!(with_streams(heap, |t| t.net_resolve_begin(&host, port)), |v: i64| Value::Int(v))
         }
         // The addresses as a `Vector<string>` box — `file-list-directory`'s
         // shape, safe for its reason: nothing between the element
         // allocations and the box can collect.
         "net-resolve-finish" => {
             let h = arg!(int(args, 0, name));
-            match with_streams(|t| t.net_resolve_finish(h)) {
+            match with_streams(heap, |t| t.net_resolve_finish(h)) {
                 Ok(Some(all)) => {
                     let elems: Vec<Value> = all.into_iter().map(|a| heap.alloc_string(a)).collect();
                     let key = heap.intern_type_key("vector<string>");
@@ -194,14 +194,14 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         }
         "net-connect-begin" => {
             let addr = arg!(text(heap, args, 0, name));
-            wrap!(with_streams(|t| t.net_connect_begin(&addr)), |v: i64| Value::Int(v))
+            wrap!(with_streams(heap, |t| t.net_connect_begin(&addr)), |v: i64| Value::Int(v))
         }
         "net-tls-start" => {
             let (h, host) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
             let ca = arg!(opt_text(heap, args, 2, name));
             let (cert, key) = (arg!(opt_text(heap, args, 3, name)), arg!(opt_text(heap, args, 4, name)));
             wrap!(
-                with_streams(|t| t.net_tls_start(h, &host, ca.as_deref(), cert.as_deref(), key.as_deref())),
+                with_streams(heap, |t| t.net_tls_start(h, &host, ca.as_deref(), cert.as_deref(), key.as_deref())),
                 |_v: ()| Value::Empty
             )
         }
@@ -209,13 +209,13 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
             let (cert, key) = (arg!(text(heap, args, 2, name)), arg!(text(heap, args, 3, name)));
             let client_ca = arg!(opt_text(heap, args, 4, name));
-            wrap!(with_streams(|t| t.net_tls_listen(&host, port, &cert, &key, client_ca.as_deref())), |v: i64| Value::Int(v))
+            wrap!(with_streams(heap, |t| t.net_tls_listen(&host, port, &cert, &key, client_ca.as_deref())), |v: i64| Value::Int(v))
         }
         // The text as a string box inside the `Option`: allocated first,
         // then boxed, with nothing that can collect in between.
         "net-socket-error" | "net-peer-subject" | "net-server-name" => {
             let h = arg!(int(args, 0, name));
-            let answer = with_streams(|t| match name {
+            let answer = with_streams(heap, |t| match name {
                 "net-socket-error" => t.net_socket_error(h),
                 "net-peer-subject" => t.net_peer_subject(h),
                 _ => t.net_server_name(h),
@@ -231,33 +231,33 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         }
         "net-set-nodelay" => {
             let (h, on) = (arg!(int(args, 0, name)), arg!(flag(args, 1, name)));
-            wrap!(with_streams(|t| t.net_set_nodelay(h, on)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.net_set_nodelay(h, on)), |_v: ()| Value::Empty)
         }
         "net-set-keepalive" => {
             let (h, on) = (arg!(int(args, 0, name)), arg!(flag(args, 1, name)));
-            wrap!(with_streams(|t| t.net_set_keepalive(h, on)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.net_set_keepalive(h, on)), |_v: ()| Value::Empty)
         }
         "net-set-keepalive-period" => {
             let (h, secs) = (arg!(int(args, 0, name)), arg!(int(args, 1, name)));
-            wrap!(with_streams(|t| t.net_set_keepalive_period(h, secs)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.net_set_keepalive_period(h, secs)), |_v: ()| Value::Empty)
         }
         "net-tls-add-certificate" => {
             let (h, host) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
             let (cert, key) = (arg!(text(heap, args, 2, name)), arg!(text(heap, args, 3, name)));
-            wrap!(with_streams(|t| t.net_tls_add_certificate(h, &host, &cert, &key)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.net_tls_add_certificate(h, &host, &cert, &key)), |_v: ()| Value::Empty)
         }
         "net-tls-handshake" => {
             let h = arg!(int(args, 0, name));
-            wrap_option!(with_streams(|t| t.net_tls_handshake(h)), Value::Int)
+            wrap_option!(with_streams(heap, |t| t.net_tls_handshake(h)), Value::Int)
         }
         "net-udp-bind" => {
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
-            wrap!(with_streams(|t| t.net_udp_bind(&host, port)), |v: i64| Value::Int(v))
+            wrap!(with_streams(heap, |t| t.net_udp_bind(&host, port)), |v: i64| Value::Int(v))
         }
         "net-udp-send-to" => {
             let (h, addr) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
             match arg!(bytes(heap, args, 2, name)) {
-                Ok(data) => wrap!(with_streams(|t| t.net_udp_send_to(h, &addr, &data)), |v: bool| Value::Bool(v)),
+                Ok(data) => wrap!(with_streams(heap, |t| t.net_udp_send_to(h, &addr, &data)), |v: bool| Value::Bool(v)),
                 Err(m) => Ok(result_err(heap, name, m)),
             }
         }
@@ -266,7 +266,7 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         // `Value::Int` allocates nothing and `alloc_struct` never collects.
         "net-udp-recv" => {
             let h = arg!(int(args, 0, name));
-            match with_streams(|t| t.net_udp_recv(h)) {
+            match with_streams(heap, |t| t.net_udp_recv(h)) {
                 Ok(Some(data)) => {
                     let elems: Vec<Value> = data.into_iter().map(|b| Value::Int(b as i64)).collect();
                     let key = heap.intern_type_key("vector<int>");
@@ -283,7 +283,7 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         }
         "net-udp-last-sender" => {
             let h = arg!(int(args, 0, name));
-            match with_streams(|t| t.net_udp_last_sender(h)) {
+            match with_streams(heap, |t| t.net_udp_last_sender(h)) {
                 Ok(s) => {
                     let sv = heap.alloc_string(s);
                     Ok(result_ok(heap, name, sv))
@@ -293,65 +293,65 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         }
         "net-connect-finish" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.net_connect_finish(h)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.net_connect_finish(h)), |_v: ()| Value::Empty)
         }
         "net-listen" => {
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
-            wrap!(with_streams(|t| t.net_listen(&host, port)), |v: i64| Value::Int(v))
+            wrap!(with_streams(heap, |t| t.net_listen(&host, port)), |v: i64| Value::Int(v))
         }
         "net-unix-connect" => {
             let path = arg!(text(heap, args, 0, name));
-            wrap!(with_streams(|t| t.net_unix_connect(&path)), |v: i64| Value::Int(v))
+            wrap!(with_streams(heap, |t| t.net_unix_connect(&path)), |v: i64| Value::Int(v))
         }
         "net-unix-listen" => {
             let path = arg!(text(heap, args, 0, name));
-            wrap!(with_streams(|t| t.net_unix_listen(&path)), |v: i64| Value::Int(v))
+            wrap!(with_streams(heap, |t| t.net_unix_listen(&path)), |v: i64| Value::Int(v))
         }
         "net-accept" => {
             let h = arg!(int(args, 0, name));
-            wrap_option!(with_streams(|t| t.net_accept(h)), Value::Int)
+            wrap_option!(with_streams(heap, |t| t.net_accept(h)), Value::Int)
         }
         "net-fill" => {
             let h = arg!(int(args, 0, name));
-            wrap_option!(with_streams(|t| t.net_fill(h)), |n: usize| Value::Int(n as i64))
+            wrap_option!(with_streams(heap, |t| t.net_fill(h)), |n: usize| Value::Int(n as i64))
         }
         "net-pop-byte" => {
             let h = arg!(int(args, 0, name));
-            wrap_option!(with_streams(|t| t.net_pop_byte(h)), |b: u8| Value::Int(b as i64))
+            wrap_option!(with_streams(heap, |t| t.net_pop_byte(h)), |b: u8| Value::Int(b as i64))
         }
         "net-pop-char" => {
             let h = arg!(int(args, 0, name));
-            wrap_option!(with_streams(|t| t.net_pop_char(h)), Value::Char)
+            wrap_option!(with_streams(heap, |t| t.net_pop_char(h)), Value::Char)
         }
         "net-buffered-p" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.net_buffered(h)), |v: bool| Value::Bool(v))
+            wrap!(with_streams(heap, |t| t.net_buffered(h)), |v: bool| Value::Bool(v))
         }
         "net-push-string" => {
             let (h, s) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
-            wrap!(with_streams(|t| t.net_push_string(h, &s)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.net_push_string(h, &s)), |_v: ()| Value::Empty)
         }
         "net-push-byte" => {
             let (h, b) = (arg!(int(args, 0, name)), arg!(int(args, 1, name)));
             match u8::try_from(b) {
-                Ok(b) => wrap!(with_streams(|t| t.net_push_byte(h, b)), |_v: ()| Value::Empty),
+                Ok(b) => wrap!(with_streams(heap, |t| t.net_push_byte(h, b)), |_v: ()| Value::Empty),
                 Err(_) => Ok(result_err(heap, name, format!("write-byte: {} is not a byte (0..255)", b))),
             }
         }
         "net-flush" => {
             let h = arg!(int(args, 0, name));
-            wrap_option!(with_streams(|t| t.net_flush(h)), Value::Int)
+            wrap_option!(with_streams(heap, |t| t.net_flush(h)), Value::Int)
         }
         "net-shutdown-write" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.net_shutdown_write(h)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.net_shutdown_write(h)), |_v: ()| Value::Empty)
         }
         "net-local-address" | "net-peer-address" => {
             let h = arg!(int(args, 0, name));
             let r = if name == "net-local-address" {
-                with_streams(|t| t.net_local_address(h))
+                with_streams(heap, |t| t.net_local_address(h))
             } else {
-                with_streams(|t| t.net_peer_address(h))
+                with_streams(heap, |t| t.net_peer_address(h))
             };
             match r {
                 Ok(s) => {

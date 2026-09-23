@@ -180,38 +180,37 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
     }
 
     Some(match name {
-        "stream-stdin" => Ok(Value::Int(with_streams(|t| t.stdin()))),
-        "stream-stdout" => Ok(Value::Int(with_streams(|t| t.stdout()))),
-        "stream-stderr" => Ok(Value::Int(with_streams(|t| t.stderr()))),
+        "stream-stdin" => Ok(Value::Int(with_streams(heap, |t| t.stdin()))),
+        "stream-stdout" => Ok(Value::Int(with_streams(heap, |t| t.stdout()))),
+        "stream-stderr" => Ok(Value::Int(with_streams(heap, |t| t.stderr()))),
         "stream-string-input" => {
             let s = arg!(text(heap, args, 0, name));
-            Ok(Value::Int(with_streams(|t| t.string_input(&s))))
+            Ok(Value::Int(with_streams(heap, |t| t.string_input(&s))))
         }
-        "stream-string-output" => Ok(Value::Int(with_streams(|t| t.string_output()))),
+        "stream-string-output" => Ok(Value::Int(with_streams(heap, |t| t.string_output()))),
         "stream-open-file" => {
             let (p, mode) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
-            wrap!(with_streams(|t| t.open_file(&p, mode)), |v: i64| Value::Int(v))
+            wrap!(with_streams(heap, |t| t.open_file(&p, mode)), |v: i64| Value::Int(v))
         }
         "stream-close" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.close(h)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.close(h)), |_v: ()| Value::Empty)
         }
         "stream-open-p" => {
             let h = arg!(int(args, 0, name));
-            Ok(Value::Bool(with_streams(|t| t.is_open(h))))
+            Ok(Value::Bool(with_streams(heap, |t| t.is_open(h))))
         }
         "stream-input-p" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.is_input(h)), |v: bool| Value::Bool(v))
+            wrap!(with_streams(heap, |t| t.is_input(h)), |v: bool| Value::Bool(v))
         }
         "stream-output-p" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.is_output(h)), |v: bool| Value::Bool(v))
+            wrap!(with_streams(heap, |t| t.is_output(h)), |v: bool| Value::Bool(v))
         }
         "stream-read-char" => {
             let h = arg!(int(args, 0, name));
-            // Native: a read from stdin or a pipe waits for whoever writes it.
-            match heap.native(|| with_streams(|t| t.read_char(h))) {
+            match with_streams(heap, |t| t.read_char(h)) {
                 Ok(c) => {
                     let inner = option_value(heap, name, c.map(Value::Char));
                     Ok(result_ok(heap, name, inner))
@@ -221,7 +220,7 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
         }
         "stream-read-byte" => {
             let h = arg!(int(args, 0, name));
-            match heap.native(|| with_streams(|t| t.read_byte(h))) {
+            match with_streams(heap, |t| t.read_byte(h)) {
                 Ok(b) => {
                     let inner = option_value(heap, name, b.map(|b| Value::Int(b as i64)));
                     Ok(result_ok(heap, name, inner))
@@ -232,37 +231,37 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
         "stream-write-byte" => {
             let (h, b) = (arg!(int(args, 0, name)), arg!(int(args, 1, name)));
             match u8::try_from(b) {
-                Ok(b) => wrap!(with_streams(|t| t.write_byte(h, b)), |_v: ()| Value::Empty),
+                Ok(b) => wrap!(with_streams(heap, |t| t.write_byte(h, b)), |_v: ()| Value::Empty),
                 Err(_) => Ok(result_err(heap, name, format!("write-byte: {} is not a byte (0..255)", b))),
             }
         }
         "stream-unread-char" => {
             let (h, c) = (arg!(int(args, 0, name)), arg!(character(args, 1, name)));
-            wrap!(with_streams(|t| t.unread_char(h, c)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.unread_char(h, c)), |_v: ()| Value::Empty)
         }
         "stream-listen" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.listen(h)), |v: bool| Value::Bool(v))
+            wrap!(with_streams(heap, |t| t.listen(h)), |v: bool| Value::Bool(v))
         }
         "stream-position" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.position(h)), |v: i64| Value::Int(v))
+            wrap!(with_streams(heap, |t| t.position(h)), |v: i64| Value::Int(v))
         }
         "stream-write-string" => {
             let (h, s) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
-            wrap!(with_streams(|t| t.write_str(h, &s)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.write_str(h, &s)), |_v: ()| Value::Empty)
         }
         "stream-at-line-start" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.at_line_start(h)), |v: bool| Value::Bool(v))
+            wrap!(with_streams(heap, |t| t.at_line_start(h)), |v: bool| Value::Bool(v))
         }
         "stream-finish-output" => {
             let h = arg!(int(args, 0, name));
-            wrap!(with_streams(|t| t.finish_output(h)), |_v: ()| Value::Empty)
+            wrap!(with_streams(heap, |t| t.finish_output(h)), |_v: ()| Value::Empty)
         }
         "stream-take-output-string" => {
             let h = arg!(int(args, 0, name));
-            match with_streams(|t| t.take_output_string(h)) {
+            match with_streams(heap, |t| t.take_output_string(h)) {
                 Ok(s) => {
                     let sv = heap.alloc_string(s);
                     Ok(result_ok(heap, name, sv))

@@ -1206,7 +1206,7 @@ pub fn drive<B: TaskBody>(
 /// two refuse the same handles in the same words. A closed or non-socket
 /// handle is a program error — the stream was closed and then waited on —
 /// and panics rather than parking a task nothing will ever wake.
-pub fn io_wait(argv: &[Value], deadline: Option<std::time::Instant>) -> Result<Waiting, SchedError> {
+pub fn io_wait(heap: &mut Heap, argv: &[Value], deadline: Option<std::time::Instant>) -> Result<Waiting, SchedError> {
     let handle = match argv.first() {
         Some(Value::Int(h)) => *h,
         other => return Err(SchedError::Internal(format!("net-wait: {:?} is not a stream handle", other))),
@@ -1217,7 +1217,7 @@ pub fn io_wait(argv: &[Value], deadline: Option<std::time::Instant>) -> Result<W
         })?,
         other => return Err(SchedError::Internal(format!("net-wait: {:?} is not an interest", other))),
     };
-    let fd = crate::stream::with_streams(|t| t.raw_fd(handle)).map_err(SchedError::Panic)?;
+    let fd = crate::stream::with_streams(heap, |t| t.raw_fd(handle)).map_err(SchedError::Panic)?;
     Ok(Waiting::Io { fd, interest, deadline })
 }
 
@@ -1252,7 +1252,7 @@ pub fn sleep_wait(secs: f64) -> Result<Waiting, SchedError> {
 /// because the crate it publishes from sits below this one — a `TaskId` and
 /// an `Instant` are the scheduler's types. This is the one place that turns
 /// them back.
-pub fn pending_wait(heap: &Heap) -> Result<(Waiting, Wake), SchedError> {
+pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
     use typelisp_abi::call_state as cs;
     let (kind, payload, second) = cs::take_pending_suspend().ok_or_else(|| {
         SchedError::Internal("a compiled frame suspended without recording what it was waiting for".to_string())
@@ -1281,7 +1281,7 @@ pub fn pending_wait(heap: &Heap) -> Result<(Waiting, Wake), SchedError> {
         // integers in compiled code (`sleep`'s bits cross the same way), and
         // this is the same resolution the interpreted `net-wait` makes.
         cs::SUSPEND_IO => {
-            let w = io_wait(&[Value::Int(payload), Value::Int(second)], None)?;
+            let w = io_wait(heap, &[Value::Int(payload), Value::Int(second)], None)?;
             Ok((w, Wake::Unit))
         }
         // The handle and the interest share the first word (`rt_suspend_io_for`
@@ -1290,7 +1290,7 @@ pub fn pending_wait(heap: &Heap) -> Result<(Waiting, Wake), SchedError> {
         // every typed wake value.
         cs::SUSPEND_IO_FOR => {
             let d = io_deadline(f64::from_bits(second as u64))?;
-            let w = io_wait(&[Value::Int(payload >> 1), Value::Int(payload & 1)], Some(d))?;
+            let w = io_wait(heap, &[Value::Int(payload >> 1), Value::Int(payload & 1)], Some(d))?;
             Ok((w, Wake::Tagged))
         }
         // The channel operations. The handle is tagged, like `wait`'s; so is
