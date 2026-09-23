@@ -825,6 +825,7 @@ name = "typelisp-print"
 version = "0.0.2"
 dependencies = [
  "num-traits",
+ "parking_lot",
  "typelisp-abi",
  "typelisp-mem",
 ]
@@ -848,6 +849,7 @@ dependencies = [
  "num-integer",
  "num-rational",
  "num-traits",
+ "parking_lot",
  "rcgen",
  "rustls",
  "typelisp-abi",

@@ -17,6 +17,9 @@ typelisp-abi = { path = "../typelisp-abi" }
 typelisp-mem = { path = "../typelisp-mem" }
 typelisp-print = { path = "../typelisp-print" }
 typelisp-read = { path = "../typelisp-read" }
+# `RtShared`'s locks (`docs/dev/os-threads-design.md` §5/Phase 1d) —
+# non-poisoning, same as `typelisp-mem`'s `HeapShared` already uses.
+parking_lot = "0.12"
 num-bigint = "0.4"
 num-rational = "0.4"
 num-traits = "0.2"

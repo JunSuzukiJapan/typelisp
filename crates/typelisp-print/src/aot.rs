@@ -36,10 +36,12 @@ use typelisp_mem::{Heap, Value};
 use crate::runtime::{set_print_hooks, PrintHooks, BARE_HOOKS};
 use crate::stored_type_key;
 
+// `(type key, variant index) -> variant name`, filled by
+// [`rt_print_enum_variant`] — now `shared::PrintShared::enum_names`
+// (`docs/dev/os-threads-design.md` §5/Phase 1d), reached through
+// `shared::print_shared()`.
+
 thread_local! {
-    /// `(type key, variant index) -> variant name`, filled by
-    /// [`rt_print_enum_variant`].
-    static ENUM_NAMES: RefCell<HashMap<(String, usize), String>> = RefCell::new(HashMap::new());
     /// `(base type key, variant index or NO_VARIANT, field index or
     /// EVERY_FIELD) -> the field's type key template`, filled by
     /// [`rt_print_field_template`] — what says a struct or enum field holds
@@ -70,7 +72,7 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
     // while the key a value carries names its instantiation (`option<char>`).
     enum_variant_name: |key, variant| {
         let base = typelisp_mem::base_type_key(key);
-        ENUM_NAMES.with(|t| t.borrow().get(&(base.to_string(), variant)).cloned())
+        crate::shared::print_shared().enum_names.read().get(&(base.to_string(), variant)).cloned()
     },
     // The template registered for the field, or the one registered for
     // every field of the type (`Vector<T>`'s elements), instantiated by the
@@ -233,7 +235,7 @@ pub unsafe extern "C" fn rt_print_enum_variant(args: *const i64, argc: u32) -> i
     let variant = *args.add(2) as usize;
     let name = static_str(args, 3, "rt_print_enum_variant");
     install();
-    ENUM_NAMES.with(|t| t.borrow_mut().insert((key.to_string(), variant), name.to_string()));
+    crate::shared::print_shared().enum_names.write().insert((key.to_string(), variant), name.to_string());
     0
 }
 

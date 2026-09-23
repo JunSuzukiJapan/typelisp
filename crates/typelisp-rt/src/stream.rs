@@ -37,12 +37,21 @@
 //! prelude — 65 definitions, by far the largest gap in what the precompiled
 //! prelude could cover — had to stay tree-walked.
 //!
-//! Moving the table into the runtime crate, behind one thread-local
+//! Moving the table into the runtime crate, behind one thread-local handle
 //! ([`with_streams`]), is what lets both sides address the same open streams:
 //! a handle a compiled `open` returns is the same handle interpreted code
 //! closes. Thread-local rather than global because a `Heap` is
 //! ([`crate::active_heap`]) — the two are always used together, and the tests
 //! that run interpreters in parallel threads would otherwise share stdin.
+//!
+//! Since `docs/dev/os-threads-design.md` §5/Phase 1d, the table itself lives
+//! in [`crate::shared::RtShared::streams`], behind the same `Arc` handle
+//! [`crate::global_new`]/[`crate::vtable_define`] now reach through
+//! ([`crate::shared::rt_shared`]) — deliberately **not** cleared by
+//! `Interp::new` the way `RtShared::globals`/`RtShared::vtables` are: the
+//! table's one interpreter-visible behaviour change described two
+//! paragraphs down (outliving any single `Interp`) would otherwise be lost
+//! the moment a fresh `Interp` reset it away.
 //!
 //! TCP sockets live in the same table (`Backend::Tcp`/`Backend::Listener`)
 //! but are never read or written through the operations here: they are
@@ -55,17 +64,11 @@
 //! rather than being dropped with it — cannot make a stale handle name a
 //! different stream; it names a closed one forever.
 
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::net::UdpSocket;
-
-thread_local! {
-    /// This thread's open streams. See the module docs for why it is here.
-    static STREAMS: RefCell<StreamTable> = RefCell::new(StreamTable::default());
-}
 
 /// Runs `f` against this thread's [`StreamTable`].
 ///
@@ -74,7 +77,9 @@ thread_local! {
 /// "the same handle means the same stream in both" true by construction
 /// rather than by two tables staying in step.
 pub fn with_streams<T>(f: impl FnOnce(&mut StreamTable) -> T) -> T {
-    STREAMS.with(|t| f(&mut t.borrow_mut()))
+    let shared = crate::shared::rt_shared();
+    let mut streams = shared.streams.lock();
+    f(&mut streams)
 }
 
 /// What a stream is attached to. Only *leaf* backends live here; a composite

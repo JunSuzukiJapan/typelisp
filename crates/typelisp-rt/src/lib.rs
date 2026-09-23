@@ -54,6 +54,7 @@ pub mod x509;
 pub mod os;
 pub mod readtable;
 pub mod sched;
+pub mod shared;
 pub mod stream;
 pub mod stream_builtin;
 pub mod sys_builtin;
@@ -78,7 +79,6 @@ pub unsafe extern "C" fn rt_ping(args: *const i64, argc: u32) -> i64 {
 // ---- Stage 1: the active `Heap` ---------------------------------------
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 
 use typelisp_mem::Heap;
 
@@ -4321,15 +4321,14 @@ pub unsafe extern "C" fn rt_random_state_copy(args: *const i64, argc: u32) -> i6
 // addresses it by) and its raw permanent-root position aren't the same
 // number in general.
 
-thread_local! {
-    /// Global id -> the `Heap::permanent_root` position it landed at, in
-    /// `rt_global_new` call order — see that function's doc comment.
-    /// `thread_local!` for the same cross-test-isolation reason
-    /// `ACTIVE_HEAP` is (module doc comment); unlike `ACTIVE_HEAP`, nothing
-    /// re-points this automatically on every call, so [`reset_global_table`]
-    /// must be called whenever a fresh `Heap` begins its lifetime.
-    static GLOBAL_INDEX: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
-}
+// Global id -> the `Heap::permanent_root` position it landed at, in
+// `rt_global_new` call order — see that function's doc comment — now
+// `shared::RtShared::globals` (`docs/dev/os-threads-design.md` §5/Phase
+// 1d), reached through `shared::rt_shared()`. Thread-local for the same
+// cross-test-isolation reason `ACTIVE_HEAP` is (module doc comment); unlike
+// `ACTIVE_HEAP`, nothing re-points this automatically on every call, so
+// [`reset_global_table`] must be called whenever a fresh `Heap` begins its
+// lifetime.
 
 /// Clears this thread's global-id table. Must be called whenever a fresh
 /// `Heap`/`Interp` pair begins its lifetime (`typelisp::eval::Interp::new`)
@@ -4340,7 +4339,7 @@ thread_local! {
 /// call this itself: [`rt_heap_init`] runs exactly once, before any
 /// `rt_global_new` call, in a process that only ever has the one `Heap`.
 pub fn reset_global_table() {
-    GLOBAL_INDEX.with(|t| t.borrow_mut().clear());
+    shared::rt_shared().globals.write().clear();
 }
 
 /// Allocates a new global-variable slot holding `v` and returns its id — a
@@ -4366,11 +4365,10 @@ pub fn reset_global_table() {
 pub fn global_new(heap: &mut Heap, v: Value) -> usize {
     let perm_idx = heap.permanent_root_count();
     heap.push_permanent_root(v);
-    GLOBAL_INDEX.with(|t| {
-        let mut t = t.borrow_mut();
-        t.push(perm_idx);
-        t.len() - 1
-    })
+    let shared = shared::rt_shared();
+    let mut globals = shared.globals.write();
+    globals.push(perm_idx);
+    globals.len() - 1
 }
 
 /// `args[0]` (its initial tagged value) — see [`global_new`] for the id this
@@ -4406,7 +4404,7 @@ pub unsafe extern "C" fn rt_global_new(args: *const i64, argc: u32) -> i64 {
 /// rather than let a panic try to unwind through compiled native code; a
 /// plain Rust-to-Rust caller may still choose to panic on it.
 pub fn global_perm_idx(id: usize) -> Option<usize> {
-    GLOBAL_INDEX.with(|t| t.borrow().get(id).copied())
+    shared::rt_shared().globals.read().get(id).copied()
 }
 
 /// Reads global `id`'s (an [`rt_global_new`] return value) current value.
@@ -4461,24 +4459,20 @@ pub unsafe extern "C" fn rt_global_set(args: *const i64, argc: u32) -> i64 {
 // (`Interp::vtable_id_for`), which keeps its own parallel table of
 // `(type, method)` identities for tree-walking calls.
 
-thread_local! {
-    /// vtable id -> slot -> native entry point (`compiled_fn_type`:
-    /// `i64 f(i64* args, i32 argc)`), or 0 for a slot never filled in.
-    /// `thread_local!` for the same cross-test-isolation reason
-    /// [`GLOBAL_INDEX`] is, and reset by the same `Interp::new` hook.
-    /// Each slot is `(entry address, the ABI that address answers to)`.
-    /// The pair travels together because an address alone does not say how to
-    /// call it, and calling one convention as the other is not a type error
-    /// anywhere -- it is a wrong answer or a crash.
-    static VTABLES: RefCell<Vec<Vec<(usize, u8)>>> = const { RefCell::new(Vec::new()) };
-
-    /// `(vtable id, trait id)` -> the vtable id of the *same concrete type*
-    /// for that trait — the supertrait upcast table ([`rt_dyn_upcast`]).
-    /// Filled in by the interpreter from `Expr::DynBox::supers`
-    /// ([`upcast_define`]) and by AOT startup ([`rt_upcast_set`]), and reset
-    /// alongside [`VTABLES`], whose id space it is keyed by.
-    static UPCASTS: RefCell<HashMap<(u32, u32), u32>> = RefCell::new(HashMap::new());
-}
+// vtable id -> slot -> native entry point (`compiled_fn_type`: `i64
+// f(i64* args, i32 argc)`), or 0 for a slot never filled in — now
+// `shared::RtShared::vtables` (`docs/dev/os-threads-design.md` §5/Phase
+// 1d). Each slot is `(entry address, the ABI that address answers to)`.
+// The pair travels together because an address alone does not say how to
+// call it, and calling one convention as the other is not a type error
+// anywhere -- it is a wrong answer or a crash.
+//
+// `(vtable id, trait id)` -> the vtable id of the *same concrete type* for
+// that trait — the supertrait upcast table ([`rt_dyn_upcast`]), now
+// `shared::RtShared::upcasts`. Filled in by the interpreter from
+// `Expr::DynBox::supers` ([`upcast_define`]) and by AOT startup
+// ([`rt_upcast_set`]), and reset alongside the vtables, whose id space it
+// is keyed by.
 
 /// Clears this thread's vtable and upcast tables — the trait-object
 /// counterpart of [`reset_global_table`], called from `Interp::new` for the
@@ -4486,8 +4480,9 @@ thread_local! {
 /// one on a reused `cargo test` worker thread would answer with function
 /// pointers into a JIT module that has since been dropped.
 pub fn reset_vtable_table() {
-    VTABLES.with(|t| t.borrow_mut().clear());
-    UPCASTS.with(|t| t.borrow_mut().clear());
+    let shared = shared::rt_shared();
+    shared.vtables.write().clear();
+    shared.upcasts.write().clear();
 }
 
 /// Records that a trait object dispatching through vtable `from` becomes one
@@ -4495,9 +4490,7 @@ pub fn reset_vtable_table() {
 /// `trait_id` — the compiled tier's copy of `Interp::dyn_upcasts`, published
 /// wherever the interpreter interns a boxing site's supertrait tables.
 pub fn upcast_define(from: u32, trait_id: u32, to: u32) {
-    UPCASTS.with(|t| {
-        t.borrow_mut().insert((from, trait_id), to);
-    });
+    shared::rt_shared().upcasts.write().insert((from, trait_id), to);
 }
 
 /// Installs (or replaces) vtable `id`'s slots. Called from the interpreter
@@ -4506,13 +4499,12 @@ pub fn upcast_define(from: u32, trait_id: u32, to: u32) {
 /// compiled", which the driver answers by asking the interpreter
 /// ([`reify_dyn_slot`]).
 pub fn vtable_define(id: u32, slots: Vec<(usize, u8)>) {
-    VTABLES.with(|t| {
-        let mut t = t.borrow_mut();
-        if t.len() <= id as usize {
-            t.resize(id as usize + 1, Vec::new());
-        }
-        t[id as usize] = slots;
-    });
+    let shared = shared::rt_shared();
+    let mut t = shared.vtables.write();
+    if t.len() <= id as usize {
+        t.resize(id as usize + 1, Vec::new());
+    }
+    t[id as usize] = slots;
 }
 
 /// Boxes `args[1]` (a tagged value) as a trait object dispatching through
@@ -4566,12 +4558,12 @@ pub unsafe extern "C" fn rt_dyn_value(args: *const i64, argc: u32) -> i64 {
 }
 
 pub(crate) fn vtable_slot_addr(id: usize, slot: usize) -> (usize, u8) {
-    VTABLES.with(|t| {
-        t.borrow()
-            .get(id)
-            .and_then(|s| s.get(slot).copied())
-            .unwrap_or((0, typelisp_abi::BODY_ABI_CLASSIC))
-    })
+    shared::rt_shared()
+        .vtables
+        .read()
+        .get(id)
+        .and_then(|s| s.get(slot).copied())
+        .unwrap_or((0, typelisp_abi::BODY_ABI_CLASSIC))
 }
 
 /// Asks the interpreter for the closure an unfilled vtable slot stands for.
@@ -4710,7 +4702,7 @@ pub unsafe extern "C" fn rt_dyn_upcast(args: *const i64, argc: u32) -> i64 {
         fatal("rt_dyn_upcast: not a trait object");
     }
     let from = active_heap().dyn_vtable_id(id);
-    let to = UPCASTS.with(|t| t.borrow().get(&(from, trait_id)).copied());
+    let to = shared::rt_shared().upcasts.read().get(&(from, trait_id)).copied();
     let Some(to) = to else {
         fatal("rt_dyn_upcast: no supertrait vtable registered for this trait object");
     };
@@ -4757,17 +4749,16 @@ pub unsafe extern "C" fn rt_vtable_set(args: *const i64, argc: u32) -> i64 {
     let slot = *args.add(1) as usize;
     let ptr = *args.add(2) as usize;
     let body_abi = *args.add(3) as u8;
-    VTABLES.with(|t| {
-        let mut t = t.borrow_mut();
-        if t.len() <= id {
-            t.resize(id + 1, Vec::new());
-        }
-        let slots = &mut t[id];
-        if slots.len() <= slot {
-            slots.resize(slot + 1, (0, typelisp_abi::BODY_ABI_CLASSIC));
-        }
-        slots[slot] = (ptr, body_abi);
-    });
+    let shared = shared::rt_shared();
+    let mut t = shared.vtables.write();
+    if t.len() <= id {
+        t.resize(id + 1, Vec::new());
+    }
+    let slots = &mut t[id];
+    if slots.len() <= slot {
+        slots.resize(slot + 1, (0, typelisp_abi::BODY_ABI_CLASSIC));
+    }
+    slots[slot] = (ptr, body_abi);
     0
 }
 

@@ -21,3 +21,6 @@ name = "typelisp_print"
 num-traits = "0.2"
 typelisp-abi = { path = "../typelisp-abi" }
 typelisp-mem = { path = "../typelisp-mem" }
+# `PrintShared`'s lock (`docs/dev/os-threads-design.md` §5/Phase 1d) —
+# non-poisoning, same as `typelisp-mem`'s `HeapShared` already uses.
+parking_lot = "0.12"

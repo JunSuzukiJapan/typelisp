@@ -29,6 +29,7 @@ pub mod aot;
 pub mod format;
 pub mod pprint;
 pub mod runtime;
+pub mod shared;
 pub mod shim;
 
 /// What the printer needs to know about the *program* whose values it is
