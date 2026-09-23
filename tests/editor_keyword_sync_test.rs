@@ -155,12 +155,33 @@ fn is_excluded(name: &str) -> bool {
     // trait implementations to call; a user writes `read-char`/`write-string`
     // on a stream value and never names one of these.
     let native_stream = name.starts_with("stream-") || name.starts_with("file-");
+    // The native network layer (`check::registry::register_net_builtins`),
+    // the same shape as the stream layer above: an opaque `i32` handle, a
+    // `none` that means "would block" for the prelude's loop to turn into a
+    // `net-wait`. A user writes `tcp-connect`/`accept`/`read-line` on a
+    // `socket-stream` and never one of these.
+    let native_net = name.starts_with("net-");
     // Prelude-private helpers with no `pub`: `unwrap-io` turns a native
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 23] = [
+    const PRELUDE_PRIVATE: [&str; 32] = [
         "unwrap-io",
+        // The network layer's prelude-private helpers, `unwrap-io`'s
+        // counterparts: `unwrap-net` panics on a native `NetError`, the
+        // `tcp-read-*`/`tcp-drain`/`tcp-close` family are the handle-level
+        // bodies of the `socket-stream` trait impls, and the rest are
+        // `tcp-connect`'s resolve-then-try-each-address machinery. A user
+        // writes `tcp-connect` and the stream traits.
+        "unwrap-net",
+        "tcp-read-char",
+        "tcp-read-byte",
+        "tcp-drain",
+        "tcp-close",
+        "tcp-wait-within",
+        "tcp-resolve",
+        "tcp-connect-one",
+        "tcp-connect-addr",
         // `after`'s body, split out only because `go` takes a call form and
         // not a thunk. A user writes `after`.
         "sleep-then-send",
@@ -242,6 +263,7 @@ fn is_excluded(name: &str) -> bool {
         || type_param
         || earmuffed
         || native_stream
+        || native_net
         || datum_scanner
         || case_expander
         || hashtable_bucket

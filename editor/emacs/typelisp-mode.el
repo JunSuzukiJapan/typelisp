@@ -170,6 +170,16 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "directory-namestring" "enough-namestring" "file-namestring" "make-pathname"
     "merge-pathnames" "namestring" "parse-namestring" "pathname-absolute-p"
     "pathname-directory" "pathname-name" "pathname-type" "to-pathname"
+    ;; the network layer: connecting and listening (TCP/TLS/Unix/UDP), the
+    ;; socket stream's methods, and the byte<->string codec a datagram needs.
+    ;; The `net-' primitives underneath are deliberately absent, like the
+    ;; `stream-'/`file-' ones: a user writes these, never the primitive.
+    "tcp-connect" "tcp-listen" "tls-connect" "tls-listen" "tls-add-certificate"
+    "unix-connect" "unix-listen" "udp-bind" "accept" "with-connection"
+    "byte-stream-of" "char-stream-of" "local-address" "peer-address"
+    "peer-subject" "requested-server-name" "set-keepalive" "set-keepalive-period"
+    "set-nodelay" "shutdown-output" "socket-error" "wait-readable" "wait-writable"
+    "send-to" "recv-from" "string->utf8" "utf8->string"
     ;; numeric helpers (§4)
     "abs" "gcd" "lcm" "signum" "random" "expt" "sqrt" "floor" "ceiling"
     "round" "truncate" "floor-div" "ceiling-div" "round-div" "truncate-div"
@@ -385,6 +395,9 @@ with no implicit conversion to or from the fixed-width numerics
     "string-output-stream" "two-way-stream"
     ;; pathnames (§19): the type and its designator trait
     "pathname" "pathish"
+    ;; the network layer: the socket types and their error type
+    "socket-stream" "socket-byte-stream" "socket-listener" "udp-socket"
+    "datagram" "NetError"
     ;; builtin generic/abstract types
     "Option" "Result" "Sexpr" "HashTable" "Vector" "Self"
     ;; the handle `go' hands back, the channel tasks talk over, and the two
