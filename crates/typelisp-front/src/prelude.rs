@@ -6344,40 +6344,65 @@ user-visible capacity."
 ;; t))` waits for a vector of them — so this is the tool for work that is
 ;; created dynamically, or where the handles are not worth keeping.
 ;;
+;; The counter is a capacity-1 channel holding one `int`: taking it out is
+;; the read, putting the new value back is the write, and a second changer
+;; parks in `recv` until it comes back. That is what keeps `add`/`done` a
+;; whole read-modify-write when tasks run on different OS threads — a plain
+;; `int` field would lose updates, the same way a program of the user's would.
+;;
 ;; The gate is an unbuffered channel nobody ever sends on: waiting is
 ;; `(recv gate)`, which parks, and reaching zero is `(close gate)`, which
 ;; releases *everyone* parked on it at once. A `wait` after the group has
 ;; already finished receives `none` from the closed channel and returns, which
 ;; is why the counter is tested first rather than the channel.
 ;;
+;; Leaving zero puts a fresh gate in place, so a group can be counted up again
+;; once it has finished, as Go's can. The gate is only ever read or replaced
+;; while the counter's token is held, so a waiter sees the gate belonging to
+;; the count it saw.
+;;
 ;; `WaitGroup::make` and not `WaitGroup::new`: a `defstruct`'s `new` takes its
 ;; fields, and this one takes none. `Array<T>::make`/`BitVector::make` are the
 ;; same shape for the same reason.
-(pub defstruct WaitGroup (count int) (gate Chan<()>))
+(pub defstruct WaitGroup (count Chan<int>) (gate Chan<()>))
 
 (pub defmethod make (WaitGroup) WaitGroup
   "A wait group with nothing outstanding."
-  (WaitGroup::new 0 (the Chan<()> (Chan::new 0))))
+  (let ((c (the Chan<int> (Chan::new 1))))
+    (send c 0)
+    (WaitGroup::new c (the Chan<()> (Chan::new 0)))))
+
+;; The body of `add` and `done`: move the counter by `n` while holding its
+;; token. Closing the gate before the token goes back means whoever next
+;; reads zero also finds the gate closed.
+(defun wait-group-shift ((wg WaitGroup) (n int) (below-zero string)) ()
+  (let* ((old (unwrap (recv wg::count)))
+         (new (+ old n)))
+    (if (< new 0)
+        (progn (send wg::count old) (panic below-zero))
+        (progn
+          (if (and (eq old 0) (> new 0))
+              (setf wg::gate (the Chan<()> (Chan::new 0)))
+              ())
+          (if (and (> old 0) (eq new 0)) (close wg::gate) ())
+          (send wg::count new)))))
 
 (pub defmethod add ((self WaitGroup) (n int)) ()
   "Add `n` to the counter, before starting the work it counts."
-  (setf self::count (+ self::count n))
-  (if (< self::count 0)
-      (panic "add: a wait group's counter went below zero")
-      ()))
+  (wait-group-shift self n "add: a wait group's counter went below zero"))
 
 (pub defmethod done ((self WaitGroup)) ()
   "One of the counted things finished. At zero, every waiter is released."
-  (setf self::count (- self::count 1))
-  (if (< self::count 0)
-      (panic "done: a wait group's counter went below zero")
-      (if (eq self::count 0) (close self::gate) ())))
+  (wait-group-shift self -1 "done: a wait group's counter went below zero"))
 
 (pub defmethod wait ((self WaitGroup)) ()
   "Wait until the counter reaches zero. Any number of tasks may."
-  (if (eq self::count 0)
-      ()
-      (progn (recv self::gate) ())))
+  (let* ((c (unwrap (recv self::count)))
+         (g self::gate))
+    (send self::count c)
+    (if (eq c 0)
+        ()
+        (progn (recv g) ()))))
 
 
 ;; ---- Mutex --------------------------------------------------------------
@@ -6395,6 +6420,10 @@ user-visible capacity."
 ;; finds nothing can wake, and it says so. Telling *which* kind of deadlock it
 ;; is would need a task to be able to name itself, and a goroutine id is a
 ;; thing Go withholds on purpose.
+;;
+;; `unlock` puts the token back with a `select` that has an `else`: if the
+;; channel is already full, nobody held the lock. Asking `(len gate)` first and
+;; sending second would be two steps another thread can come between.
 ;;
 ;; `v` is `pub`, so the value can be read without the lock. That is Go's
 ;; position too (a `sync.Mutex` guards by convention), and there is no static
@@ -6415,9 +6444,9 @@ user-visible capacity."
 
 (pub defmethod unlock ((self Mutex<T>)) ()
   "Give the lock back. Unlocking one that is not locked is a panic."
-  (if (eq (len self::gate) 1)
-      (panic "unlock: the mutex is not locked")
-      (send self::gate ())))
+  (select
+    ((send self::gate ()) ())
+    (else (panic "unlock: the mutex is not locked"))))
 
 ;; `(with-lock (x m) body...)` — lock `m`, run `body` with `x` naming what it
 ;; holds, and release however the body is left.

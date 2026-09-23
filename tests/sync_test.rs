@@ -109,6 +109,35 @@ fn waiting_on_a_finished_group_returns_at_once() {
     );
 }
 
+/// A group that has finished can be counted up again, as Go's can: leaving
+/// zero puts a fresh gate in place, so the second round's `done` does not
+/// close the first round's gate a second time, and the second `wait` really
+/// waits for the second round.
+#[test]
+fn a_finished_group_can_be_used_again() {
+    assert_eq!(
+        int(
+            r#"(defvar (finished int) 0)
+               (defun work ((wg WaitGroup)) ()
+                 (yield)
+                 (setf finished (+ finished 1))
+                 (done wg))
+               (defun main () int
+                 (let ((wg (the WaitGroup (WaitGroup::make))))
+                   (add wg 1)
+                   (go (work wg))
+                   (wait wg)
+                   (add wg 2)
+                   (go (work wg))
+                   (go (work wg))
+                   (wait wg)
+                   finished))
+               (main)"#
+        ),
+        3
+    );
+}
+
 /// Closing the gate releases everyone parked on it, not just the first.
 #[test]
 fn several_tasks_can_wait_on_one_group() {

@@ -165,7 +165,7 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 32] = [
+    const PRELUDE_PRIVATE: [&str; 33] = [
         "unwrap-io",
         // The network layer's prelude-private helpers, `unwrap-io`'s
         // counterparts: `unwrap-net` panics on a native `NetError`, the
@@ -185,6 +185,9 @@ fn is_excluded(name: &str) -> bool {
         // `after`'s body, split out only because `go` takes a call form and
         // not a thunk. A user writes `after`.
         "sleep-then-send",
+        // The shared body of `WaitGroup`'s `add` and `done`: move the
+        // counter while holding its token. A user writes `add`/`done`.
+        "wait-group-shift",
         // The bridge the *reader* calls a macro character's function
         // through (Stage 8c): it wraps the unread text in a stream, calls
         // the function, and reports how much of it was consumed. Reached
