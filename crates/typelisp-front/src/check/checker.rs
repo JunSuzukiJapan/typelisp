@@ -8,7 +8,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use std::rc::Rc;
 
 use crate::{wk, parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScope, Type, TypeNameSpan, Value};
 
@@ -4048,7 +4047,7 @@ impl Checker {
         }
         let col = base.col + off;
         let len = segs[idx].chars().count() as u32;
-        let loc = Loc::new(Rc::clone(&base.file), base.line, col).with_end(base.line, col + len);
+        let loc = Loc::new(std::sync::Arc::clone(&base.file), base.line, col).with_end(base.line, col + len);
         self.record_type_use(fq, loc);
     }
 
@@ -4064,7 +4063,7 @@ impl Checker {
         if name_len as u32 > base.end_col.saturating_sub(base.col) {
             return;
         }
-        let loc = Loc::new(Rc::clone(&base.file), base.line, base.col)
+        let loc = Loc::new(std::sync::Arc::clone(&base.file), base.line, base.col)
             .with_end(base.line, base.col + name_len as u32);
         self.type_uses.borrow_mut().push(TypeUse { path: fq.clone(), kind, loc });
     }

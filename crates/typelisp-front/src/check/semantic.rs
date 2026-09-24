@@ -110,10 +110,9 @@ pub fn encode(tokens: &[TypeToken], type_index: impl Fn(TypeKind) -> u32) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
 
     fn loc(file: &str, line: u32, col: u32, len: u32) -> Loc {
-        Loc::new(Rc::from(file), line, col).with_end(line, col + len)
+        Loc::new(std::sync::Arc::from(file), line, col).with_end(line, col + len)
     }
 
     fn use_at(file: &str, line: u32, col: u32, len: u32, kind: TypeKind) -> TypeUse {
@@ -157,7 +156,7 @@ mod tests {
     #[test]
     fn a_degenerate_loc_is_never_a_token() {
         let mut u = use_at("/a.typl", 1, 1, 0, TypeKind::Struct);
-        u.loc = Loc::new(Rc::from("/a.typl"), 1, 1);
+        u.loc = Loc::new(std::sync::Arc::from("/a.typl"), 1, 1);
         assert!(file_type_tokens(&[u], "/a.typl").is_empty());
     }
 

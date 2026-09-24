@@ -103,9 +103,18 @@ pub unsafe extern "C" fn rt_eval_init(_args: *const i64, _argc: u32) -> i64 {
     // this shim both dereference it, and a garbage `Interp` hangs or segfaults
     // rather than failing.
     interp.install_print_hooks();
+    interp.executable_printer.set(true);
     AOT_ENV.with(|c| c.set(interp as *const Interp));
     0
 }
+
+/// What a call that needs the interpreter says on a thread that has none — a
+/// worker's, reached through a machine frame (a compiled `print-object` the
+/// printer called), which cannot move to the interpreter's thread the way a
+/// task does before such a call (`call_state::SUSPEND_MAIN`). A panic the
+/// program can catch, not an abort: nothing about the runtime is broken.
+const NO_INTERPRETER_HERE: &str = "{}: the interpreter runs on the main thread, and this call was made on another \
+     inside a call that cannot move there (a print method, say)";
 
 /// `eval` for compiled code: `args[0]` is the form, tagged; the result is the
 /// tagged `Result<Sexpr, EvalError>`.
@@ -137,7 +146,7 @@ pub unsafe extern "C-unwind" fn rt_eval(args: *const i64, argc: u32) -> i64 {
         // frame this call sits in.
         match with_active_interp(|i| i.eval_form(heap, &form)) {
             Some(r) => r,
-            None => fatal("rt_eval: no environment — neither an active interpreter nor a completed rt_eval_init"),
+            None => typelisp_abi::raise(NO_INTERPRETER_HERE.replace("{}", "eval")),
         }
     } else {
         (*env).eval_form(heap, &form)
@@ -191,10 +200,7 @@ unsafe fn expand_shim(
     let result = if env.is_null() {
         match with_active_interp(|i| f(i, heap, form)) {
             Some(r) => r,
-            None => fatal(&format!(
-                "{}: no environment — neither an active interpreter nor a completed rt_eval_init",
-                who
-            )),
+            None => typelisp_abi::raise(NO_INTERPRETER_HERE.replace("{}", who)),
         }
     } else {
         f(&*env, heap, form)

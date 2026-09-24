@@ -2731,7 +2731,7 @@ unsafe fn run_program(program: &Program) -> Result<Value, i64> {
     let rt = crate::shared::rt_shared();
     let print = typelisp_print::shared::print_shared();
     let hooks = typelisp_print::runtime::print_hooks();
-    let started = crate::sched::start_workers(&sched, heap, threads - 1, move || {
+    let started = crate::sched::start_workers(&sched, heap, threads - 1, &(), move || {
         crate::shared::set_rt_shared(std::sync::Arc::clone(&rt));
         typelisp_print::shared::set_print_shared(std::sync::Arc::clone(&print));
         typelisp_print::runtime::set_print_hooks(Some(hooks));
@@ -3188,7 +3188,7 @@ unsafe fn pause_on_a_machine_frame(paused: crate::coroutine::Paused, what: &str)
         crate::coroutine::Paused::Unwinding => crate::coroutine::resume_unwinding(),
         // Reaching either means a driver was written to `run`/`resume`
         // directly — a protocol break, not a limitation.
-        crate::coroutine::Paused::Applying { .. } => fatal(&format!(
+        crate::coroutine::Paused::Applying { .. } | crate::coroutine::Paused::ApplyingDyn { .. } => fatal(&format!(
             "{}: a compiled frame applied an interpreted function value and the drive did not \
              resolve it — a driver on a machine frame must use `run_to_end`",
             what

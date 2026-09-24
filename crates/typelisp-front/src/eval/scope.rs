@@ -362,6 +362,22 @@ impl ModuleScope {
     /// startup registration (`typelisp_print::aot::rt_print_field_template`):
     /// `(path, variant or None, field index or None for every field,
     /// template)`, in tree order.
+    /// Every method registered anywhere under this node, as `(receiver type
+    /// path, method name, definition)` — what a worker thread's printer is
+    /// given a snapshot of (`worker_print`).
+    pub(crate) fn collect_methods(&self, prefix: &[String], out: &mut Vec<(Path, String, Rc<FnDef>)>) {
+        for ((type_name, method), f) in &self.methods {
+            let mut segs = prefix.to_vec();
+            segs.push(type_name.clone());
+            out.push((Path::from_segments(segs), method.clone(), Rc::clone(f)));
+        }
+        for (name, child) in &self.children {
+            let mut segs = prefix.to_vec();
+            segs.push(name.clone());
+            child.collect_methods(&segs, out);
+        }
+    }
+
     pub(crate) fn collect_field_templates(&self, prefix: &[String], out: &mut Vec<(Path, Option<usize>, Option<usize>, String)>) {
         for (name, entry) in &self.types {
             let mut segs = prefix.to_vec();

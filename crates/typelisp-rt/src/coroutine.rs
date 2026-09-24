@@ -78,6 +78,13 @@ pub enum Paused {
     /// ([`FrameStack::run_to_end`]), which is the one thing it can do — and
     /// the reason such a call still cannot suspend.
     Applying { closure: i64, args: Vec<i64> },
+    /// [`Paused::Applying`] through a `:dyn` call whose vtable slot is empty:
+    /// the concrete type's method is ordinary interpreted code, and the
+    /// closure it stands for has to be asked of the interpreter before it
+    /// can be applied (`reify_dyn_slot`). Left to the driver's owner rather
+    /// than asked here, because only the owner knows whether there is an
+    /// interpreter on this thread at all.
+    ApplyingDyn { vtable: u32, slot: u32, args: Vec<i64> },
     /// An unwind passed the outermost frame this driver owned without
     /// finding a handler. The chain is gone — every frame of it has been
     /// popped and its roots cut back — and what is unwinding is parked for
@@ -92,6 +99,34 @@ pub enum Paused {
 /// and the collector already traces each of them.
 pub struct FrameStack {
     frames: Vec<Entry>,
+    /// Whether this chain is counted in [`LIVE_CHAINS`] — kept in step with
+    /// "has frames" at the end of every drive ([`FrameStack::drive`]) and on
+    /// drop.
+    counted: bool,
+}
+
+/// How many chains in the process have frames standing: suspended with a
+/// task, or being driven right now.
+///
+/// What JIT code must outlive. A redefinition retires the old body's machine
+/// code for the next compilation to destroy, and a chain standing in it —
+/// a task parked mid-call, or a worker stepping one — would resume into
+/// freed memory. The compiler asks this ([`live_chains`]) and keeps what it
+/// retired while it is not zero. Counted per chain rather than per frame so
+/// that a call costs nothing: the count moves only when a drive ends.
+static LIVE_CHAINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// See [`LIVE_CHAINS`].
+pub fn live_chains() -> usize {
+    LIVE_CHAINS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+impl Drop for FrameStack {
+    fn drop(&mut self) {
+        if self.counted {
+            LIVE_CHAINS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
 }
 
 /// One frame of the chain, and what the driver has to know about it that the
@@ -119,7 +154,7 @@ impl Default for FrameStack {
 
 impl FrameStack {
     pub fn new() -> Self {
-        FrameStack { frames: Vec::new() }
+        FrameStack { frames: Vec::new(), counted: false }
     }
 
     /// How deep the chain is. Zero means finished or not yet started.
@@ -153,6 +188,9 @@ impl FrameStack {
     /// frame first, and that frame is the one that catches. Only an entry
     /// that unwound *before* publishing leaves nothing to record.
     fn begin(&mut self, heap: &mut Heap, f: CoroutineFn, args: &[i64], env: &[i64]) -> i64 {
+        // Counted before the entry runs: its code is in use from here, and a
+        // nested evaluation inside it may compile.
+        self.note_live(true);
         let roots = heap.root_count();
         let published = call_state::current_frame_depth();
         call_state::set_pending_args(args);
@@ -256,6 +294,14 @@ impl FrameStack {
         loop {
             match outcome {
                 Err(Paused::Applying { closure, args }) => {
+                    let v = apply(closure, &args);
+                    self.set_top_value(heap, v);
+                    outcome = self.resume(heap, base);
+                }
+                Err(Paused::ApplyingDyn { vtable, slot, args }) => {
+                    // SAFETY: the slot is one a compiled `:dyn` site named, in
+                    // a vtable this heap's program registered.
+                    let closure = unsafe { crate::reify_dyn_slot(vtable, slot, "a :dyn call") };
                     let v = apply(closure, &args);
                     self.set_top_value(heap, v);
                     outcome = self.resume(heap, base);
@@ -385,7 +431,29 @@ impl FrameStack {
     /// `base` is how many frames belonged to somebody else when this drive
     /// began — nonzero only for a nested drive, whose caller is waiting on a
     /// machine frame.
-    fn drive(&mut self, heap: &mut Heap, base: usize, mut status: i64) -> Result<i64, Paused> {
+    fn drive(&mut self, heap: &mut Heap, base: usize, status: i64) -> Result<i64, Paused> {
+        // A resumed chain's code is in use from here, as an entered one's is
+        // from `begin`.
+        self.note_live(true);
+        let outcome = self.drive_frames(heap, base, status);
+        self.note_live(!self.frames.is_empty());
+        outcome
+    }
+
+    /// Keeps [`LIVE_CHAINS`] in step with whether this chain stands.
+    fn note_live(&mut self, standing: bool) {
+        if standing != self.counted {
+            self.counted = standing;
+            if standing {
+                LIVE_CHAINS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            } else {
+                LIVE_CHAINS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+    }
+
+    /// [`Self::drive`]'s loop.
+    fn drive_frames(&mut self, heap: &mut Heap, base: usize, mut status: i64) -> Result<i64, Paused> {
         loop {
             match status & 0b11 {
                 STATUS_RETURN => {
@@ -437,11 +505,10 @@ impl FrameStack {
                         let (ptr, abi) = crate::vtable_slot_addr(vtable as usize, slot as usize);
                         if ptr == 0 {
                             // Nothing compiled behind the slot: the concrete
-                            // type's method is ordinary interpreted code. Ask
-                            // the interpreter for the closure it stands for,
-                            // and from here it is an ordinary apply.
-                            let closure = unsafe { crate::reify_dyn_slot(vtable, slot, "a :dyn call") };
-                            return Err(Paused::Applying { closure, args });
+                            // type's method is ordinary interpreted code, and
+                            // from the closure it stands for on, this is an
+                            // ordinary apply.
+                            return Err(Paused::ApplyingDyn { vtable, slot, args });
                         }
                         if abi == typelisp_abi::BODY_ABI_COROUTINE {
                             // SAFETY: a coroutine-ABI vtable entry is the
@@ -639,6 +706,21 @@ pub unsafe extern "C" fn rt_suspend_thread(args: *const i64, argc: u32) -> i64 {
         typelisp_abi::fatal("rt_suspend_thread: expected the closure to start");
     }
     call_state::set_pending_suspend(call_state::SUSPEND_THREAD, *args);
+    0
+}
+
+/// What the compile bridge puts in front of a call only the interpreter can
+/// answer — `eval`, `macroexpand`, a `read` that may meet a reader macro —
+/// so that a compiled task a worker thread is stepping moves to the
+/// interpreter's thread first (`call_state::SUSPEND_MAIN`). Resumes with
+/// unit.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the suspension takes nothing).
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_main(_args: *const i64, _argc: u32) -> i64 {
+    call_state::set_pending_suspend(call_state::SUSPEND_MAIN, 0);
     0
 }
 

@@ -11,7 +11,6 @@
 //! Symbols are case-folded by the reader, so all type names are lowercase here.
 
 use std::fmt;
-use std::rc::Rc;
 
 use typelisp_read::name_lexer::{NameLexer, NameTok};
 use crate::{wk, Error, Heap, Loc, PathId, SymRef, Value};
@@ -689,7 +688,7 @@ impl SpanRec<'_> {
         self.out.push(TypeNameSpan {
             path: Path::from_segments(segs.to_vec()),
             dyn_head,
-            loc: Loc::new(Rc::clone(&self.base.file), self.base.line, start)
+            loc: Loc::new(std::sync::Arc::clone(&self.base.file), self.base.line, start)
                 .with_end(self.base.line, start + len),
         });
     }

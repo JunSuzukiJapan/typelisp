@@ -2290,8 +2290,8 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
 
 - ブロックする C 関数（`defffi`）を呼んでも、止まるのはそのスレッドだけ。
 - `thread` の中の `go` は通常のタスクとして他のスレッドで走る。
-- **`typl` ではまだ使えない**（`thread` は catchable な panic）。`Thread::current-id` と
-  `Thread::available-parallelism` はどちらでも使える。
+- `typl` でも使える。interpreted な `(thread (f ...))` は `f` をその場でコンパイルしてから
+  専用スレッドで走らせる（[syntax.md §12.1.1](syntax.md#1211-thread--専用の-os-スレッドでタスクを起動する)）。
 
 ## 21. ネットワーク（TCP / TLS / Unix ドメイン / UDP）
 

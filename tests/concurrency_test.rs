@@ -28,6 +28,16 @@ fn run_compiled(src: &str) -> Result<(Heap, Value), EvalError> {
 }
 
 fn run_with(src: &str, with_compiler: bool) -> Result<(Heap, Value), EvalError> {
+    run_with_stress(src, with_compiler, false)
+}
+
+/// [`run_compiled`] with every `cons` collecting first (`Heap::set_gc_stress`)
+/// from the program's first form on — the environment is loaded unstressed.
+fn run_compiled_stressed(src: &str) -> Result<(Heap, Value), EvalError> {
+    run_with_stress(src, true, true)
+}
+
+fn run_with_stress(src: &str, with_compiler: bool, stress: bool) -> Result<(Heap, Value), EvalError> {
     let mut h = Heap::with_capacity(1 << 18);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -36,6 +46,7 @@ fn run_with(src: &str, with_compiler: bool) -> Result<(Heap, Value), EvalError> 
         typelisp::compile::install_llvm_backend();
         load_compiler(&mut h, &mut chk, &mut interp);
     }
+    h.set_gc_stress(stress);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
@@ -215,20 +226,28 @@ fn thread_cannot_be_bound() {
     assert!(e.contains("`thread` is a reserved word"), "got: {}", e);
 }
 
-/// The interpreter drives every task from one OS thread, so a `thread` it
-/// runs is a panic a program can catch — the same one whether the form was
-/// interpreted or reached from compiled code. An executable runs it
-/// (`tests/os_threads_test.rs`).
+/// `thread` runs in the interpreter, interpreted or compiled: the call moves
+/// to an OS thread of its own as compiled code — an interpreted `thread`
+/// compiles its callee first.
 #[test]
-fn thread_is_refused_by_the_interpreter_interpreted_or_compiled() {
-    const REFUSAL: &str = "cannot start another yet";
-    let e = match run("(defun f () int 1) (join (thread (f)))") {
-        Ok(_) => panic!("expected the program to fail"),
-        Err(e) => e.to_string(),
-    };
-    assert!(e.contains(REFUSAL), "interpreted: {}", e);
-    let e = compile_err_at_runtime("(defun f () int 1) (defun g () int (join (thread (f)))) (compile g) (g)");
-    assert!(e.contains(REFUSAL), "compiled: {}", e);
+fn thread_runs_in_the_interpreter_interpreted_or_compiled() {
+    match run_compiled("(defun f () int 1) (join (thread (f)))") {
+        Ok((_, v)) => assert_eq!(v, Value::Int(1)),
+        Err(e) => panic!("interpreted: {}", e),
+    }
+    match run_compiled("(defun f () int 1) (defun g () int (join (thread (f)))) (compile g) (g)") {
+        Ok((_, v)) => assert_eq!(v, Value::Int(1)),
+        Err(e) => panic!("compiled: {}", e),
+    }
+}
+
+/// What a thread's OS thread cannot run is refused before the thread starts,
+/// as a panic the program can catch: an interpreted function value, which
+/// cannot be compiled on its own.
+#[test]
+fn thread_of_an_interpreted_lambda_is_refused() {
+    let e = compile_err_at_runtime("(let ((f (lambda () int 1))) (join (thread (f))))");
+    assert!(e.contains("thread: the function value is not compiled code"), "got: {}", e);
 }
 
 /// The two static functions answer in the interpreter too — neither needs
@@ -1001,4 +1020,32 @@ fn an_interpreted_caller_applying_a_compiled_closure_may_really_wait() {
         ),
         "ba"
     );
+}
+
+/// (o) A compiled task that moves to the interpreter's thread in the middle
+/// of its chain (it applies an interpreted closure) keeps everything it had —
+/// the chain's frames, the closure and its arguments, the values it built
+/// before the move — through a collection on every `cons`, with the other
+/// tasks allocating on other threads meanwhile. A root lost across the move
+/// shows up here as a wrong total or a crash.
+#[test]
+fn a_task_that_moves_to_the_interpreter_s_thread_keeps_its_roots_under_gc_stress() {
+    let src = r#"(defun work ((cb (fn (int) int)) (n int)) int
+                   (let ((xs (list n (+ n 1) (+ n 2))))
+                     (+ (cb (sexpr-list-length xs)) (* 3 n) 3)))
+                 (defun start ((cb (fn (int) int)) (n int)) Task<int> (go (work cb n)))
+                 (compile start)
+                 (let ((cb (lambda ((k int)) int (sexpr-list-length (list k k k k))))
+                       (tasks (the Vector<Task<int>> (Vector::new)))
+                       (total 0))
+                   (dotimes (i 4) (push tasks (start cb (* i 10))))
+                   (doiter (t (iter tasks)) (setf total (+ total (wait t))))
+                   total)"#;
+    // Each task: 4 from the closure (whatever `k` is), plus 3n + 3, for
+    // n = 0, 10, 20, 30.
+    let expected: i64 = (0..4).map(|i| 4 + 3 * (i * 10) + 3).sum();
+    match run_compiled_stressed(src) {
+        Ok((_, v)) => assert_eq!(v, Value::Int(expected)),
+        Err(e) => panic!("{}", e),
+    }
 }

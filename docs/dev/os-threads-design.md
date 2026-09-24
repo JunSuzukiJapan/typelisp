@@ -389,6 +389,80 @@ Phase 4 に回したもの: 言語から「どのスレッドで走ったか」�
 - REPL の行読みを native に（§4）。`step_task`（`core_cps.rs:1112` の
   `scheduler.borrow_mut()`）を lock（native）に。
 
+### 実装（Phase 5）と上の案からの差分
+
+`crates/typelisp-front/src/eval/interp/task_body.rs`（`TyplBody`/`MainOnly`/`TyplCx`/
+`Interp::install_crew`）、`worker_print.rs`（ワーカーの印字）、`core_cps.rs` の
+`Task::adopt`/`State::Adopted`/`Interp::drive_one`/`spawn_thread`、`sched.rs` の
+`Progress::NeedsMain`/`TaskBody::runs_anywhere`/`TaskSlot::main_only`/`Taker`/`Crew`/
+`install_crew`/`CompiledTask::{start_closure_handing_off, hand_off, enter_with}`。
+テストは `tests/typl_threads_test.rs`（`typl` を `TYPELISP_THREADS=1` と `=4` で走らせる
+(j)〜(n) と interpreted な `thread`）と `tests/concurrency_test.rs` の (o)
+（`a_task_that_moves_to_the_interpreter_s_thread_keeps_its_roots_under_gc_stress`）。
+
+- **ワーカーは drive 1 回ぶんだけ生きる（`Crew`）。** 案では `typl` もワーカーを常駐させ、
+  REPL の行読みを native にする予定だった。常駐させると (1) REPL の入力待ち・次の形の検査
+  など drive の外でも main がセーフポイントに来なければならず、(2) `Interp` の `Drop` で
+  ワーカーを止めて join する必要がある（止める側はヒープのビューを持たないので native に
+  入れない）。そこで `install_crew` のワーカーは `drive_main` の中で、**ワーカーが取れる
+  タスクが ready になった時に**起こし、drive の終わり（`end_crew`）で止めて native で join
+  する。`thread` の OS スレッドも同じく止め、生きている pinned タスクは次の drive の最初に
+  スレッドを起こし直す（`Scheduler::restart_pinned`）。drive の外では他のスレッドは一切
+  タスクを進めない——`typl` の「残ったタスクは次の評価で続きから走る」という既存の意味と
+  一致する。AOT は従来どおり常駐（`start_workers`）。代償: drive の終わりは各スレッドが
+  **今の 1 歩**を終えるのを待つ。compiled なループは後退辺で番を渡す（C7）ので止まるが、
+  `thread` の中でブロックし続ける C 関数（`defffi`）があると、その呼び出しが返るまで
+  トップレベルの評価が終わらない。
+- **`Affinity` enum ではなく `TaskSlot::main_only`。** ready 列は 1 本のまま、ワーカーは
+  `Taker::Worker` で main 専用でない最古のものを取り、main は種類を問わず最古を取る。
+  `TYPELISP_THREADS=1` のときの実行順が以前と変わらない。
+- **`NeedsMain` の変換は本体がやる。** `CompiledTask`（`hands_off`）が interpreted な
+  apply／空の `:dyn` スロット／`Waiting::Main` で止まると、`TyplBody::step` がその場で
+  `Task::adopt(t.hand_off())` に組み替えて `NeedsMain` を返し、スケジューラは
+  `put_back_for_main`（`main_only = true`、`pinned = false`）するだけ。ヒープ確保は無い。
+  移送中のルートは**鎖のフレームスロット**が持つ（C2 以降、呼び出しの被演算子は呼び手の
+  フレームスロットにある）。pinned なタスクも移送され、その OS スレッドは終わる。
+- **`:dyn` の空スロットは `Paused::ApplyingDyn`。** ドライバが `reify_dyn_slot`
+  （インタプリタへの問い合わせ）を自分で呼ぶのをやめ、鎖の持ち主に返す。インタプリタの
+  タスクはその場で閉包を作って `begin_applying`、ワーカーのタスクは移送。
+- **`eval`/`macroexpand`/`read` は `SUSPEND_MAIN`。** 案の「compile/eval で NeedsMain」は、
+  これらが中断点でない普通の `rt_*` 呼び出しなので、そのままでは実現できない。`core_bridge`
+  がこれらの呼び出し（`externs::needs_interpreter`）の前に `(suspend "rt_suspend_main")` を
+  置く（`(let () SUSPEND CALL)`）。インタプリタのタスクと AOT のタスクはその場で続行し
+  （番も譲らない）、ワーカー上の `typl` のタスクだけが止まって移送される。機械フレームの
+  上（印字メソッドの中など）から呼ばれた場合はインタプリタの無いスレッドで catchable な
+  panic（`shim::NO_INTERPRETER_HERE`）。extern 表が増えたので島と prelude を再生成した。
+- **ワーカーの印字は `PrintShared` でなく `Interp` ごとのスナップショット**
+  （`worker_print::PrintSnapshot`）。列挙子名・フィールドの型鍵テンプレート・
+  印字メソッド（compiled ならアドレスと ABI、interpreted なら「走らせられない」印）・
+  印字変数の**置き場所**（値でなく。`setf` は次の印字で見える）。型・メソッド・
+  `defvar`・コンパイル・大域の昇格で `printer_tables_changed` が世代を進め、drive 中なら
+  即座に、そうでなければ次の drive の開始時に作り直す（prelude の読み込みで定義ごとに
+  作り直さないため）。スナップショットが指す compiled 本体の `Rc` は drive の間 `Interp` が
+  持ち続ける（ワーカーが呼んでいる最中に退役させない）。印字変数の名前は
+  `print_vars_from`/`pretty_opts_from` を記録用の閉包で呼んで**聞き出す**（一覧を二重に
+  持たない）。`eval` を持つ実行ファイルの `Interp` のワーカーは、実行ファイル自身の表
+  （`typelisp_print::aot`）で印字する——compiled な `print-object` はそちらにある。
+- **`Loc::file` を `Rc<str>` から `Arc<str>` に。** `EvalError` を共有スケジューラの
+  `failure` に置くには `Send` が要り、`Loc` がそれを妨げていた。調べると `HeapShared` の
+  位置表も `Rc<str>` 入りの `Loc` をスレッド間で共有していた（参照カウントの非原子的な
+  更新が別スレッドから起こりうる）ので、型の側で塞いだ。
+- **JIT 本体の破棄の延期は「立っている鎖」で数える**（`coroutine::live_chains`）。
+  「`Compiled` の非 Done スロット」でなく、フレームを持つ `FrameStack` の数。
+  interpreted なタスクが compiled な鎖の途中で止まっている場合と、機械フレームの上の
+  ドライバ（`run_to_end`）も含まれる。数は drive の境目でだけ動く（呼び出しごとには
+  動かない）。
+- **interpreted な `thread`** は引数を `go` と同じく評価し、呼び先（関数・メソッド）を
+  `(compile ...)` と同じ経路で推移的にコンパイルしてから、その coroutine 本体に引数付きで
+  入る pinned タスク（`CompiledTask::enter_with`）を起こす。答えは `thread` ノードの結果
+  表現で読む（`AnswerDecoder`、`decode_crossing_return`）。関数値は compiled な閉包だけ。
+  コンパイルできなければスレッドを起こす前に catchable な panic。案にあった「print-object
+  の impl も推移的コンパイルの対象に含める」はやっていない（interpreted な
+  `print-object` を専用スレッドで印字すると panic、`typl_threads_test` が固定）。
+- **JIT の `compile` の呼び出しグラフが `Thread::current-id` を拒否していた**（Phase 4 の
+  穴。AOT は `core_bridge` が `rt_*` に下ろすので通っていた）。suspend メソッドと同じく
+  静的 builtin メソッドも辺から外した（`driver.rs`）。
+
 ## 9. `Thread<T>` — 直接 OS スレッド
 
 `go` ↔ `Task<T>`/`wait` と対にする:

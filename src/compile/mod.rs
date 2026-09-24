@@ -206,20 +206,32 @@ static RETIRED_LLVM: Mutex<RetiredLlvm> = Mutex::new(RetiredLlvm { objects: Vec:
 /// that builds a module under the guard, for one), and `Mutex` is not
 /// reentrant, so that would trade a rare crash for a reliable hang.
 ///
-/// The cost is that a retired object lives until someone compiles again —
-/// bounded, since the list is drained at the head of every JIT construction,
-/// and nil in the shape that matters: a process that never compiles again is
-/// about to exit anyway.
+/// The cost is that a retired object lives until someone compiles again with
+/// no compiled chain standing ([`destroy_retired_llvm`]) — the list is
+/// drained at the head of every such JIT construction, and a process that
+/// never compiles again is about to exit anyway. A program that always has a
+/// task parked mid-call keeps every body it ever retired.
 pub(crate) fn retire_llvm<T: 'static>(obj: T) {
     RETIRED_LLVM.lock().unwrap_or_else(|e| e.into_inner()).objects.push(Box::new(obj));
 }
 
-/// Destroys everything [`retire_llvm`] has collected.
+/// Destroys everything [`retire_llvm`] has collected — unless a compiled
+/// chain is standing anywhere in the process, in which case everything waits
+/// for a later compilation.
+///
+/// A retired module may still hold code a chain is in the middle of: a task
+/// parked mid-call in a function since redefined, or one a worker thread is
+/// stepping right now. Which modules a chain's frames point into is not
+/// recorded, so while any chain stands (`typelisp_rt::coroutine::live_chains`)
+/// nothing retired is destroyed.
 ///
 /// The caller must hold [`COMPILE_LOCK`] — that is the entire point of the
 /// detour. The list is emptied first and dropped afterwards, so the inner
 /// `Mutex` is not held while destructors run.
 fn destroy_retired_llvm() {
+    if typelisp_rt::coroutine::live_chains() > 0 {
+        return;
+    }
     let objects = std::mem::take(&mut RETIRED_LLVM.lock().unwrap_or_else(|e| e.into_inner()).objects);
     drop(objects);
 }

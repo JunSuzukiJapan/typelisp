@@ -123,13 +123,10 @@ pub struct CompiledPanic {
 /// hooks).
 ///
 /// **Carries nothing.** The error is a `typelisp::EvalError`, which is
-/// neither nameable from this crate (it depends on `typelisp-mem` alone) nor
-/// `Send`, as a panic payload must be — it holds `Rc<str>` and raw heap
-/// pointers. So the `typelisp` crate parks the error in a thread-local and
-/// this type only says *which* thread-local to look in. That is not a
-/// workaround so much as the honest shape: the error never leaves the thread
-/// that raised it, and a payload asserting otherwise would be a lie held up
-/// by an `unsafe impl Send` over raw pointers.
+/// not nameable from this crate (it depends on `typelisp-mem` alone). So the
+/// `typelisp` crate parks the error in a thread-local and this type only says
+/// *which* thread-local to look in: the error never leaves the thread that
+/// raised it, which is the interpreter's.
 #[derive(Debug)]
 pub struct InterpretedUnwind;
 
@@ -416,6 +413,12 @@ pub mod call_state {
     /// where the scheduler runs it differs. Resumes at once with the
     /// `Thread<T>` handle.
     pub const SUSPEND_THREAD: i64 = 14;
+    /// Before a call only the interpreter can answer (`eval`, `read`, ...):
+    /// go on on the thread the interpreter runs on. Payload unused. Answered
+    /// at once — by the interpreter's own task, and by every driver that has
+    /// nowhere to move to — except in a compiled task a worker is stepping,
+    /// which stops there and moves (`sched::Progress::NeedsMain`).
+    pub const SUSPEND_MAIN: i64 = 15;
 
     /// Records the arms of a `select`, as `[n, has-else, kind, chan, extra]...`
     /// with every word **tagged** — the array is a compiled frame's slots,

@@ -1800,6 +1800,7 @@ impl Interp {
                     .get_or_create(type_name.parent())
                     .methods
                     .insert((type_name.last_segment().to_string(), method), Rc::new(def));
+                self.printer_tables_changed();
                 Ok(None)
             }
             // `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...)) PUBLIC BODY...)`
@@ -1878,6 +1879,8 @@ impl Interp {
                     .get_or_create(name.parent())
                     .globals
                     .insert(name.last_segment().to_string(), scope::GlobalDef { slot, public });
+                drop(s);
+                self.printer_tables_changed();
                 Ok(None)
             }
             // The type itself was registered in the checker's `Registry` at
@@ -1902,6 +1905,7 @@ impl Interp {
                     name.last_segment().to_string(),
                     scope::TypeEntry::Struct { reprs: fields, templates: scope::FieldTemplates::Positional(templates) },
                 );
+                self.printer_tables_changed();
                 Ok(None)
             }
             // `(defenum PATH (SYM...) ((REPR...)...))` — unlike `defstruct`
@@ -1943,6 +1947,7 @@ impl Interp {
                     templates.push(str_list(heap, ts, "defenum")?);
                 }
                 self.root.borrow_mut().register_enum(&name, EnumDef { variants, templates });
+                self.printer_tables_changed();
                 Ok(None)
             }
             // `(module PATH BODY...)` — ensures the tree node exists (a
@@ -2641,8 +2646,6 @@ mod tests {
     /// the reader uses for a list form's span.
     #[test]
     fn a_runtime_error_is_placed_at_the_node_that_raised_it() {
-        use std::rc::Rc;
-
         let mut h = stress_heap();
         let form = read1(&mut h, r#"(let () (panic (str "boom")))"#);
         h.push_root(form);
@@ -2650,7 +2653,7 @@ mod tests {
         // Place the inner `panic`, not the outer `let`, so the assertion shows
         // the *innermost* location wins rather than the one at the top.
         let inner = core::field(&h, form, 1).unwrap();
-        let loc = crate::Loc::new(Rc::from("f.typl"), 3, 9).with_end(3, 22);
+        let loc = crate::Loc::new(std::sync::Arc::from("f.typl"), 3, 9).with_end(3, 22);
         match inner {
             Value::Cons(cr) => h.set_cons_loc(cr, loc.clone()),
             other => panic!("expected a node, got {:?}", other),

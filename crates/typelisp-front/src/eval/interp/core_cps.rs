@@ -42,6 +42,7 @@ use super::core_eval::{
     bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, path_field,
     param_reprs, repr_list, str_field, sym_field, tail_after, tail_after_value, Op,
 };
+use super::task_body::{TyplBody, TyplCx};
 use super::{FnDef, Interp};
 
 use std::rc::Rc;
@@ -93,6 +94,12 @@ enum State {
     /// The exit itself is already parked on the compiled side
     /// (`crossing::park_for_compiled`), where the chain's pad looks for it.
     CompiledRaise { drive: DriveCtx },
+    /// Take over a chain that stopped on a worker at an interpreted callee —
+    /// `pending` is its `Paused::Applying`/`Paused::ApplyingDyn` — and run
+    /// the callee here, as if this task had been driving the chain all along.
+    /// What a compiled task becomes when it needs the interpreter
+    /// ([`Task::adopt`]); only ever the first state of such a task.
+    Adopted { drive: DriveCtx, pending: typelisp_rt::coroutine::Paused },
     /// A non-local exit is in flight. Discard frames until one claims it.
     ///
     /// This is where `break`/`return`/`return-from`/`throw` live. The value
@@ -195,6 +202,18 @@ enum DriveCallee {
     /// the process, the same immortality `rt_eval_init`'s leak gives the
     /// dump it restores from, so nothing needs to keep this alive.
     Address(usize),
+}
+
+/// What becomes of a call node once its parts are evaluated.
+enum Spawn {
+    /// It is made here.
+    No,
+    /// `(go CALL)`: it becomes a task of its own.
+    Go,
+    /// `(thread CALL)`: it becomes a task on an OS thread of its own, which
+    /// enters the compiled callee; the answer is read back by the node's
+    /// result representation.
+    Thread(Repr),
 }
 
 /// The `ArgsKind` of an already-checked call node — what `(go CALL)` wraps.
@@ -302,9 +321,10 @@ enum Frame {
     /// carries the rest. An argument evaluated three ago is as collectible as
     /// the one that just arrived, so all of them stay rooted until the call
     /// itself is made.
-    /// `spawn` marks the arguments of a `(go ...)`: when they are all in,
-    /// the call is handed to a new task instead of being made here.
-    Args { form: Value, done: Vec<Value>, env: Value, kind: ArgsKind, spawn: bool },
+    /// `spawn` marks the arguments of a `(go ...)` or `(thread ...)`: when
+    /// they are all in, the call is handed to a new task instead of being
+    /// made here.
+    Args { form: Value, done: Vec<Value>, env: Value, kind: ArgsKind, spawn: Spawn },
     /// `(step E)` — running `E` with stepping armed, holding what to restore.
     Step { was_stepping: bool, was_quiet: usize },
     /// A traced or stepped call, open around its callee's body.
@@ -340,9 +360,9 @@ enum Frame {
     /// `(dyn-upcast PATH E)` — waiting on the trait object to re-view.
     DynUpcast { form: Value },
     /// `(apply E RET-R (R...) E...)` — waiting on the callee.
-    ApplyCallee { form: Value, env: Value, spawn: bool },
+    ApplyCallee { form: Value, env: Value, spawn: Spawn },
     /// `(apply E RET-R (R...) E...)` — waiting on one argument, callee in hand.
-    ApplyArgs { form: Value, callee: Value, done: Vec<Value>, env: Value, spawn: bool },
+    ApplyArgs { form: Value, callee: Value, done: Vec<Value>, env: Value, spawn: Spawn },
     /// `(match E R (P E...) ...)` — waiting on the scrutinee. The first arm
     /// whose pattern matches wins.
     MatchArms { form: Value, env: Value },
@@ -548,50 +568,54 @@ pub(crate) struct Task {
     parked_unwind: typelisp_rt::ParkedUnwind,
 }
 
-impl sched::TaskBody for Task {
-    type Cx = Interp;
-    type Error = EvalError;
-
-    fn start_closure(heap: &mut Heap, closure: Value) -> Task {
-        let sbase = heap.root_count();
-        // A one-element argument list holding only the closure itself — the
-        // `go` site's thunk takes no arguments of its own and answers with
-        // its result already tagged (`core_bridge::translate_go`), so this
-        // crossing has no other representations to marshal by.
-        heap.push_root(closure);
-        let argv = core::list(heap, &[closure]).unwrap_or_else(|e| {
-            typelisp_abi::fatal(&format!("go: building the closure's argument list failed: {}", e))
-        });
-        heap.pop_root();
-        heap.push_root(argv);
-        heap.push_root(Value::Empty);
-        let start = DriveStart { callee: DriveCallee::Closure, params: vec![Repr::Fn], ret: Repr::Sexpr, watch: None };
-        Task {
-            sbase,
-            stack: CpsStack::new(),
-            state: State::CompiledEnter { argv, start },
-            compiled: typelisp_rt::coroutine::FrameStack::new(),
-            parked_unwind: typelisp_rt::ParkedUnwind::default(),
-        }
-    }
-
-    fn sbase(&self) -> usize {
+/// What the interpreter's task body ([`super::task_body::TyplBody`]) asks of
+/// a [`Task`] — the half of `sched::TaskBody` that is the interpreter's.
+impl Task {
+    /// Where this task's roots begin — see `sched::TaskBody::sbase`.
+    pub(crate) fn sbase(&self) -> usize {
         self.sbase
     }
 
-    fn step(&mut self, heap: &mut Heap, interp: &Interp) -> Progress<EvalError> {
+    /// Runs this task one step, on the thread that owns `interp`.
+    pub(crate) fn step(&mut self, heap: &mut Heap, interp: &Interp) -> Progress<EvalError> {
         interp.step_task_isolated(heap, self)
     }
 
     /// Gives this task the state it will resume into, rooting what that
     /// state carries in the task's own stack (the caller made it current).
-    fn deliver(&mut self, heap: &mut Heap, answer: Result<Value, SchedError>) {
+    pub(crate) fn deliver(&mut self, heap: &mut Heap, answer: Result<Value, SchedError>) {
         let state = answer_state(answer);
         set_state(heap, self.sbase, &state);
         self.state = state;
     }
 
-    fn failure_left_task(e: EvalError) -> EvalError {
+    /// The task a compiled one becomes when its chain stops on an
+    /// interpreted callee: the same chain, the same root stack and state
+    /// slots — a compiled task's are laid out as this one's are — and the
+    /// callee to run first.
+    ///
+    /// The crossing it stands for is the one `start_closure` used to make
+    /// for a compiled `go`'s thunk: a closure applied to nothing, answering
+    /// its result tagged (`core_bridge::translate_go`), with no roots of its
+    /// own to marshal by. Builds nothing on the heap: the closure and the
+    /// arguments are the chain's, in its frame slots, until the first step
+    /// reads them.
+    pub(crate) fn adopt(handed: sched::HandedOff) -> Task {
+        let sched::HandedOff { chain, sbase, parked_unwind, pending } = handed;
+        let start = DriveStart { callee: DriveCallee::Closure, params: vec![Repr::Fn], ret: Repr::Sexpr, watch: None };
+        let drive = DriveCtx { start, roots_on_entry: sbase + 2, crossing_roots: 0, base: 0 };
+        let state = match pending {
+            // It stopped to be here (`Waiting::Main`), and now it is.
+            typelisp_rt::coroutine::Paused::Suspended => {
+                State::CompiledResume { drive, wake: Some((Value::Empty, Repr::Unit)) }
+            }
+            pending => State::Adopted { drive, pending },
+        };
+        Task { sbase, stack: CpsStack::new(), state, compiled: chain, parked_unwind }
+    }
+
+    /// The failure `e` is once it has left the task it happened in.
+    pub(crate) fn failure_left_task(e: EvalError) -> EvalError {
         escaped_task_failure(e)
     }
 }
@@ -737,8 +761,9 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         }
         // Nothing in the state slots: the exit is parked on the compiled
         // side, and the value a throw carries is rooted there
-        // (`Heap::set_in_flight_throw`) for exactly this flight.
-        State::CompiledRaise { .. } => {
+        // (`Heap::set_in_flight_throw`) for exactly this flight. An adopted
+        // chain's callee and arguments are in its own frame slots.
+        State::CompiledRaise { .. } | State::Adopted { .. } => {
             heap.set_root(sbase, Value::Empty);
             heap.set_root(sbase + 1, Value::Empty);
         }
@@ -826,7 +851,7 @@ impl Interp {
     /// Rust frames. Every `Op` is handled here — `step_cps` matches without a
     /// catch-all, so a tag with no frame fails to build.
     pub(crate) fn eval_cps(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        if self.scheduler.borrow().driving() {
+        if self.driving.get() {
             // Nested: a Rust frame is waiting on this call. `Interp::apply`
             // and the public API, the `eval` builtin, a `print-object`
             // method, a reader macro — and a compiled callee reached through
@@ -839,16 +864,28 @@ impl Interp {
         }
 
         // The outermost evaluation is the *main task*. Tasks `go` starts
-        // outlive it: `sched::drive` returns as soon as main is done, and
-        // whatever is left keeps its state for the next time the scheduler
-        // runs — which is what makes `(go ...)` at a REPL prompt behave.
-        // `form` and `env` are rooted by the caller, so they survive the
-        // switch to the task's own root stack that `admit` makes.
-        let main = self.scheduler.borrow_mut().admit(heap, |heap| Task::start(heap, form, env));
+        // outlive it: `sched::drive_main` returns as soon as main is done,
+        // and whatever is left keeps its state for the next time the
+        // scheduler runs — which is what makes `(go ...)` at a REPL prompt
+        // behave. `form` and `env` are rooted by the caller, so they survive
+        // the switch to the task's own root stack that `admit` makes (and
+        // the lock, where another thread may collect).
+        self.drive_one(heap, |heap| Task::start(heap, form, env))
+    }
 
-        self.scheduler.borrow_mut().set_driving(true);
-        let out = sched::drive(&self.scheduler, heap, self, main);
-        self.scheduler.borrow_mut().set_driving(false);
+    /// Runs one drive of this interpreter's scheduler with the task `make`
+    /// builds as its main task, and returns that task's result.
+    ///
+    /// The one place a drive starts: the crew of worker threads is set up the
+    /// first time ([`Self::install_crew`]), and [`Self::driving`] is what
+    /// sends every evaluation nested in this one to `run_to_completion`.
+    fn drive_one(&self, heap: &mut Heap, make: impl FnOnce(&mut Heap) -> Task) -> Result<Value, EvalError> {
+        self.install_crew(heap)?;
+        self.refresh_print_snapshot();
+        let main = self.scheduler.lock(heap).admit(heap, |heap| TyplBody::interpreted(make(heap)));
+        self.driving.set(true);
+        let out = sched::drive_main(&self.scheduler, heap, &TyplCx::of(self), main);
+        self.driving.set(false);
         out
     }
 
@@ -862,8 +899,8 @@ impl Interp {
     /// Unlike `eval_cps` this is only ever the outermost call — the
     /// generated `main` of an `eval`-carrying executable calls
     /// [`crate::shim::rt_run_program_interp`] once, from Rust, with nothing
-    /// else on this thread's stack — so `driving()` starts `false` and this
-    /// sets it for the whole run rather than checking it first.
+    /// else on this thread's stack — so nothing is driving when it starts,
+    /// and each body is a drive of its own rather than a nested evaluation.
     ///
     /// `inits` and `entry` are raw `coroutine_fn_type` addresses out of the
     /// executable's own generated code (`compile::aot::build_main_wrapper`),
@@ -880,19 +917,10 @@ impl Interp {
         entry: usize,
         entry_ret: Repr,
     ) -> Result<Value, EvalError> {
-        self.scheduler.borrow_mut().set_driving(true);
-        let mut run = |address: usize, ret: Repr| {
-            let id = self.scheduler.borrow_mut().admit(heap, |heap| Task::start_compiled_entry(heap, address, ret));
-            sched::drive(&self.scheduler, heap, self, id)
-        };
-        let result = (|| {
-            for &address in inits {
-                run(address, Repr::Unit)?;
-            }
-            run(entry, entry_ret)
-        })();
-        self.scheduler.borrow_mut().set_driving(false);
-        result
+        for &address in inits {
+            self.drive_one(heap, |heap| Task::start_compiled_entry(heap, address, Repr::Unit))?;
+        }
+        self.drive_one(heap, |heap| Task::start_compiled_entry(heap, entry, entry_ret))
     }
 
     /// Runs one evaluation to its end on the caller's root stack, with no
@@ -903,6 +931,7 @@ impl Interp {
             match self.step_task_isolated(heap, &mut task) {
                 Progress::Running => {}
                 Progress::Done(r) => break r,
+                Progress::NeedsMain => unreachable!("an interpreted task is on the interpreter's thread already"),
                 // There is a Rust frame waiting on this evaluation, so there is
                 // nothing to switch *to*: suspending would strand it. Refused
                 // rather than deadlocked — see the plan's B6.
@@ -927,7 +956,7 @@ impl Interp {
                     let answered = if matches!(w, Waiting::Yield) {
                         Some(Ok(Value::Empty))
                     } else {
-                        self.scheduler.borrow_mut().try_now(heap, &w)
+                        self.scheduler.lock(heap).try_now(heap, &w)
                     };
                     match answered {
                         Some(answer) => {
@@ -990,7 +1019,7 @@ impl Interp {
             State::Enter { form, argv, kind } => {
                 let loc = heap.cons_loc(form);
                 match heap.list_to_vec(argv).map_err(heap_err).and_then(|argv| {
-                    self.finish_args(heap, form, argv, kind, false)
+                    self.finish_args(heap, form, argv, kind, Spawn::No)
                 }) {
                     Ok((next, pushed)) => {
                         if let Some(f) = pushed {
@@ -1085,6 +1114,7 @@ impl Interp {
                     }
                 }
             }
+            State::Adopted { drive, pending } => self.after_drive(heap, task, Ok(Err(pending)), drive),
             State::CompiledRaise { drive } => {
                 let base = drive.base;
                 let outcome = {
@@ -1147,7 +1177,7 @@ impl Interp {
             // and nowhere else, and answering the operation allocates (the
             // `some` box a waiting receiver gets).
             set_state(heap, task.sbase, &next);
-            let answered = self.scheduler.borrow_mut().try_now(heap, w);
+            let answered = self.scheduler.lock(heap).try_now(heap, w);
             if let Some(answer) = answered {
                 let next = answer_state(answer);
                 set_state(heap, task.sbase, &next);
@@ -1193,6 +1223,8 @@ impl Interp {
             // built it. The frame pushed here is what catches the value the
             // scheduler eventually wakes this task with.
             Ok(Err(typelisp_rt::coroutine::Paused::Suspended)) => match sched::pending_wait(heap) {
+                // The interpreter's thread is this one: go on at once.
+                Ok((Waiting::Main, _)) => State::CompiledResume { drive, wake: Some((Value::Empty, Repr::Unit)) },
                 Ok((w, wake)) => {
                     task.stack.push(heap, Frame::DriveCompiled { drive, wake: wake_repr(wake) }, None);
                     State::Blocked(w)
@@ -1206,6 +1238,19 @@ impl Interp {
             // interpreted. It runs here, on this task's own continuation
             // stack — which is the whole of C5: the call can suspend, because
             // there is no machine frame under it waiting for an answer.
+            Ok(Err(typelisp_rt::coroutine::Paused::ApplyingDyn { vtable, slot, args })) => {
+                let roots_on_entry = drive.roots_on_entry;
+                match self
+                    .dyn_slot_closure(heap, vtable, slot)
+                    .and_then(|closure| self.begin_applying(heap, task, drive, closure, &args))
+                {
+                    Ok(state) => state,
+                    Err(e) => {
+                        heap.truncate_roots(roots_on_entry);
+                        State::Unwind(e)
+                    }
+                }
+            }
             Ok(Err(typelisp_rt::coroutine::Paused::Applying { closure, args })) => {
                 let roots_on_entry = drive.roots_on_entry;
                 match self.begin_applying(heap, task, drive, closure, &args) {
@@ -1431,18 +1476,35 @@ impl Interp {
                         let callee = core::field(heap, call, 0).ok_or_else(|| {
                             EvalError::Internal("eval: (apply ..) has no callee".to_string())
                         })?;
-                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: true }, loc.clone());
+                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Go }, loc.clone());
                         Ok(State::Eval(callee, env))
                     }
-                    kind => self.start_args(heap, stack, call, env, kind, true, loc),
+                    kind => self.start_args(heap, stack, call, env, kind, Spawn::Go, loc),
                 }
             }
 
-            // `(thread (f x))`: the interpreter's scheduler drives every task
-            // from this one OS thread, so there is no thread to start the
-            // call on — refused before any part of it is evaluated, with the
-            // words a compiled `thread` reaching this scheduler gets.
-            Op::Thread => Err(sched::thread_refused().into()),
+            // `(thread (f x))`: the parts of the call are evaluated here, as
+            // `go`'s are, and the call itself moves to an OS thread of its
+            // own — as compiled code, which is all that thread can run
+            // (`Self::spawn_thread`). Field 0 is the result representation,
+            // which reads the compiled callee's answer back.
+            Op::Thread => {
+                let ret = core::field(heap, form, 0)
+                    .and_then(|r| Repr::read(heap, r))
+                    .ok_or_else(|| EvalError::Internal("eval: (thread ..) has no result representation".to_string()))?;
+                let call = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (thread ..) has no call".to_string()))?;
+                match call_kind(heap, call)? {
+                    ArgsKind::Apply => {
+                        let callee = core::field(heap, call, 0).ok_or_else(|| {
+                            EvalError::Internal("eval: (apply ..) has no callee".to_string())
+                        })?;
+                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Thread(ret) }, loc.clone());
+                        Ok(State::Eval(callee, env))
+                    }
+                    kind => self.start_args(heap, stack, call, env, kind, Spawn::Thread(ret), loc),
+                }
+            }
 
             Op::If => {
                 let cond = core::field(heap, form, 0)
@@ -1531,10 +1593,10 @@ impl Interp {
                 Ok(State::Eval(init, env))
             }
 
-            Op::Call => self.start_args(heap, stack, form, env, ArgsKind::Call, false, loc),
-            Op::Construct => self.start_args(heap, stack, form, env, ArgsKind::Construct, false, loc),
-            Op::Assoc => self.start_args(heap, stack, form, env, ArgsKind::Assoc, false, loc),
-            Op::DynCall => self.start_args(heap, stack, form, env, ArgsKind::DynCall, false, loc),
+            Op::Call => self.start_args(heap, stack, form, env, ArgsKind::Call, Spawn::No, loc),
+            Op::Construct => self.start_args(heap, stack, form, env, ArgsKind::Construct, Spawn::No, loc),
+            Op::Assoc => self.start_args(heap, stack, form, env, ArgsKind::Assoc, Spawn::No, loc),
+            Op::DynCall => self.start_args(heap, stack, form, env, ArgsKind::DynCall, Spawn::No, loc),
 
             // `labels` evaluates nothing of its own: the closures are built
             // and bound, and only the body runs. Two passes, because the
@@ -1579,7 +1641,7 @@ impl Interp {
             Op::Apply => {
                 let callee = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no callee".to_string()))?;
-                stack.push(heap, Frame::ApplyCallee { form, env, spawn: false }, loc.clone());
+                stack.push(heap, Frame::ApplyCallee { form, env, spawn: Spawn::No }, loc.clone());
                 Ok(State::Eval(callee, env))
             }
 
@@ -1765,7 +1827,7 @@ impl Interp {
         form: Value,
         env: Value,
         kind: ArgsKind,
-        spawn: bool,
+        spawn: Spawn,
         loc: Option<crate::Loc>,
     ) -> Result<State, EvalError> {
         let args = arg_forms(heap, form, kind)?;
@@ -1791,16 +1853,23 @@ impl Interp {
         form: Value,
         argv: Vec<Value>,
         kind: ArgsKind,
-        spawn: bool,
+        spawn: Spawn,
     ) -> Result<(State, Option<Frame>), EvalError> {
         // `go`: the call does not happen here. It becomes a task of its own,
         // and this form gets a handle on it instead of a result. Deciding it
         // *before* the call is what keeps `(go (f x))` concurrent even when `f`
         // is compiled — a compiled body runs to completion once entered, so
         // entering it here would make the `go` a plain call.
-        if spawn {
-            let handle = self.spawn_task(heap, form, argv, kind)?;
-            return Ok((State::Apply(handle), None));
+        match spawn {
+            Spawn::No => {}
+            Spawn::Go => {
+                let handle = self.spawn_task(heap, form, argv, kind)?;
+                return Ok((State::Apply(handle), None));
+            }
+            Spawn::Thread(ret) => {
+                let handle = self.spawn_thread(heap, form, argv, kind, ret)?;
+                return Ok((State::Apply(handle), None));
+            }
         }
         match kind {
             ArgsKind::Call => self.finish_call(heap, form, argv),
@@ -1829,7 +1898,7 @@ impl Interp {
         form: Value,
         callee: Value,
         args: Vec<Value>,
-        spawn: bool,
+        spawn: Spawn,
     ) -> Result<(State, Option<Frame>), EvalError> {
         let mut argv = Vec::with_capacity(args.len() + 1);
         argv.push(callee);
@@ -1865,9 +1934,144 @@ impl Interp {
         heap.push_root(argv_list);
         // `form` and `argv_list` are rooted here, which the collector still
         // walks, so they survive the switch to the task's own root stack.
-        let id = self.scheduler.borrow_mut().admit(heap, |heap| Task::start_call(heap, form, argv_list, kind));
+        let id = self
+            .scheduler
+            .lock(heap)
+            .admit(heap, |heap| TyplBody::interpreted(Task::start_call(heap, form, argv_list, kind)));
         heap.pop_root();
         Ok(sched::task_handle(heap, id))
+    }
+
+    /// Hands a fully-evaluated call to a task on an OS thread of its own —
+    /// an interpreted `(thread ...)` — and returns its `Thread<T>` handle.
+    ///
+    /// That thread has no interpreter, so what runs there is the callee
+    /// **compiled**: a named function or method is compiled here, with
+    /// everything it calls (the `(compile ...)` driver's transitive
+    /// compilation), and a function value has to be compiled code already.
+    /// What cannot be is refused as a panic, before any thread starts. The
+    /// task enters the compiled body with the arguments this task evaluated,
+    /// and its answer is read back by `ret`, the node's result
+    /// representation.
+    ///
+    /// Called with the frame that evaluated the arguments still rooting
+    /// them, so the compilation — which allocates — cannot take them.
+    fn spawn_thread(
+        &self,
+        heap: &mut Heap,
+        form: Value,
+        argv: Vec<Value>,
+        kind: ArgsKind,
+        ret: Repr,
+    ) -> Result<Value, EvalError> {
+        let not_compilable = |what: String, why: String| {
+            EvalError::Panic(format!("thread: {} {}; a thread runs only compiled code", what, why))
+        };
+        let (entry, params, args) = match kind {
+            ArgsKind::Call => {
+                let written = self.name_list(heap, form, 0, "call")?;
+                let home = self.name_list(heap, form, 1, "call")?;
+                let path = path_field(heap, form, 2, "call")?;
+                let Some(f) = self.resolve_fn_named(&home, &written, &path) else {
+                    return Err(not_compilable(format!("`{}`", path), "is a built-in with no body to compile".to_string()));
+                };
+                let target = crate::CompileTarget::Fn(crate::check::resolved::Ref { written, home, resolved: path.clone() });
+                let body = self.compiled_for_thread(heap, &f, &target, &path.to_string())?;
+                let params = f.sig.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+                (sched::Entry::Body(body), params, argv)
+            }
+            ArgsKind::Assoc => {
+                let type_name = path_field(heap, form, 0, "assoc")?;
+                let method = sym_field(heap, form, 1, "assoc")?;
+                let home = self.name_list(heap, form, 3, "assoc")?;
+                let name = format!("{}::{}", type_name, method);
+                let Some(f) = self.root.borrow().resolve_method(&home, &type_name, &method) else {
+                    return Err(not_compilable(format!("`{}`", name), "is a built-in with no body to compile".to_string()));
+                };
+                let target = crate::CompileTarget::Method { type_name, method, home };
+                let body = self.compiled_for_thread(heap, &f, &target, &name)?;
+                let params = f.sig.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+                (sched::Entry::Body(body), params, argv)
+            }
+            ArgsKind::Apply => {
+                let mut it = argv.into_iter();
+                let callee = it
+                    .next()
+                    .ok_or_else(|| EvalError::Internal("eval: (apply ..) lost its callee".to_string()))?;
+                match callee {
+                    Value::Boxed(id)
+                        if heap.is_compiled_closure(id)
+                            && heap.compiled_closure_body_abi(id) == typelisp_abi::BODY_ABI_COROUTINE => {}
+                    _ => {
+                        return Err(not_compilable(
+                            "the function value".to_string(),
+                            "is not compiled code (an interpreted `lambda` cannot be compiled on its own)".to_string(),
+                        ))
+                    }
+                }
+                let reprs = core::field(heap, form, 2)
+                    .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no argument representations".to_string()))?;
+                let params = repr_list(heap, reprs, "apply")?;
+                (sched::Entry::Closure(callee), params, it.collect())
+            }
+            ArgsKind::Construct | ArgsKind::DynCall => {
+                return Err(not_compilable(
+                    format!("a `{}`", kind.what()),
+                    "is not a call to a function".to_string(),
+                ))
+            }
+        };
+        if params.len() != args.len() {
+            return Err(EvalError::Internal(format!(
+                "thread: the callee takes {} argument(s), given {}",
+                params.len(),
+                args.len()
+            )));
+        }
+        let words = args
+            .iter()
+            .zip(&params)
+            .map(|(v, r)| super::encode_crossing_value(heap, v, r))
+            .collect::<Result<Vec<i64>, EvalError>>()?;
+        let held = core::list(heap, &args).map_err(heap_err)?;
+        heap.push_root(held);
+        let answer: sched::AnswerDecoder = Box::new(move |heap: &mut Heap, word: i64| {
+            super::decode_crossing_return(heap, word, &ret).map_err(|e| e.to_string())
+        });
+        let admitted = self.scheduler.lock(heap).admit_thread_with(heap, |heap| {
+            TyplBody::compiled(sched::CompiledTask::enter_with(heap, entry, words, held, answer))
+        });
+        heap.pop_root();
+        Ok(sched::thread_handle(heap, admitted?))
+    }
+
+    /// The coroutine-ABI entry of `f`, compiling it first — and everything it
+    /// reaches — if it is not compiled yet.
+    fn compiled_for_thread(
+        &self,
+        heap: &mut Heap,
+        f: &Rc<FnDef>,
+        target: &crate::CompileTarget,
+        name: &str,
+    ) -> Result<typelisp_rt::coroutine::CoroutineFn, EvalError> {
+        if f.compiled.borrow().is_none() {
+            (super::backend_compile_function()?)(self, heap, target).map_err(|e| {
+                EvalError::Panic(format!("thread: `{}` cannot be compiled ({}); a thread runs only compiled code", name, e))
+            })?;
+        }
+        let compiled = f.compiled.borrow().clone();
+        match compiled {
+            Some(body) if body.body_abi() == typelisp_abi::BODY_ABI_COROUTINE => {
+                // SAFETY: the address is a body the backend compiled under
+                // `coroutine_fn_type`, which is what `body_abi` says.
+                Ok(unsafe { std::mem::transmute::<usize, typelisp_rt::coroutine::CoroutineFn>(body.address()) })
+            }
+            Some(_) => Err(EvalError::Internal(format!(
+                "thread: `{}` is compiled under the classic ABI, which a task cannot drive",
+                name
+            ))),
+            None => Err(EvalError::Internal(format!("thread: compiling `{}` left it without a body", name))),
+        }
     }
 
     /// Enters an interpreted or compiled function body with `argv` bound.
@@ -3504,14 +3708,16 @@ mod tests {
     /// its own steps, and under `stress_heap` that includes a collection per
     /// `cons`. This is the harshest arrangement the scheduler will ever see.
     ///
-    /// `sched::drive` is the driver here — the same one `eval_cps` uses — so
-    /// what these tests exercise is the loop that ships. It returns when *its*
-    /// task finishes, and the others keep running meanwhile, so a task named
-    /// later may already be `Done` by the time its turn comes.
+    /// `sched::drive_main` is the driver here — the same one `eval_cps` uses —
+    /// so what these tests exercise is the loop that ships. It returns when
+    /// *its* task finishes, and the others keep running meanwhile, so a task
+    /// named later may already be `Done` by the time its turn comes (and
+    /// `drive_main` then hands back the value the scheduler kept for it).
     fn run_interleaved(heap: &mut Heap, srcs: &[&str]) -> Vec<Result<Value, EvalError>> {
         let base = heap.root_count();
         let interp = Interp::new();
-        interp.scheduler.borrow_mut().set_switch_every_step(true);
+        interp.scheduler.set_switch_every_step(true);
+        interp.install_crew(heap).expect("the crew is set up");
 
         let mut ids = Vec::new();
         for src in srcs {
@@ -3519,19 +3725,20 @@ mod tests {
             heap.push_root(form);
             // `form` is rooted here, which the collector still walks while
             // `admit` builds the task on a stack of its own.
-            ids.push(interp.scheduler.borrow_mut().admit(heap, |heap| Task::start(heap, form, Value::Empty)));
+            ids.push(
+                interp
+                    .scheduler
+                    .lock(heap)
+                    .admit(heap, |heap| TyplBody::interpreted(Task::start(heap, form, Value::Empty))),
+            );
         }
 
         let mut out = Vec::new();
         for id in ids {
-            let done = interp.scheduler.borrow().done_value(id);
-            let r = match done {
-                // It finished while another task was being driven, and its
-                // value is rooted in the scheduler's own stack.
-                Some(v) => Ok(v),
-                None => sched::drive(&interp.scheduler, heap, &interp, id),
-            };
-            // `drive` hands its result back unrooted — its task's stack is
+            interp.driving.set(true);
+            let r = sched::drive_main(&interp.scheduler, heap, &TyplCx::of(&interp), id);
+            interp.driving.set(false);
+            // `drive_main` hands its result back unrooted — its task's stack is
             // gone and nothing keeps it for a `wait` — so the starter roots it,
             // which is the convention every caller of an evaluation follows.
             // An *exit* carries a value the same way a normal return does.

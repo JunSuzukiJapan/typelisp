@@ -1,5 +1,5 @@
 use std::{fmt, error};
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// A source location: which file, and the 1-based line/column span within it.
 ///
@@ -12,12 +12,14 @@ use std::rc::Rc;
 ///
 /// Attached to an [`Error`] via [`Error::at`] / [`Error::At`] so every message
 /// can point at the exact spot in the user's `.typl` source where the problem
-/// occurred. `file` is shared (`Rc<str>`) because a single source string
+/// occurred. `file` is shared (`Arc<str>`) because a single source string
 /// produces many data (and thus potentially many located errors), all naming
-/// the same file.
+/// the same file — and an `Arc` because the heap's location table, which
+/// holds one per interned location, is shared by every thread stepping tasks
+/// on that heap (`docs/dev/os-threads-design.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Loc {
-    pub file: Rc<str>,
+    pub file: Arc<str>,
     pub line: u32,
     pub col: u32,
     pub end_line: u32,
@@ -27,7 +29,7 @@ pub struct Loc {
 impl Loc {
     /// A degenerate (point-only) location: the end is set equal to the start.
     /// Use [`Loc::with_end`] afterwards when the true extent is known.
-    pub fn new(file: Rc<str>, line: u32, col: u32) -> Loc {
+    pub fn new(file: Arc<str>, line: u32, col: u32) -> Loc {
         Loc { file, line, col, end_line: line, end_col: col }
     }
 

@@ -94,7 +94,7 @@ pub struct OwnedCell {
 /// crate, and only the ones that call `eval` should carry a serializer.
 ///
 /// `serde(remote)` is exactly this case — the shape is written down here, once,
-/// against a type this crate does not own. `Rc<str>` round-trips through
+/// against a type this crate does not own. `Arc<str>` round-trips through
 /// `serde`'s `rc` feature; the sharing is not preserved, which costs nothing:
 /// a restored form's cells all name the same file, and re-interning one string
 /// per cell is what the reader would have done anyway.
@@ -127,14 +127,14 @@ mod num_str {
 }
 
 mod loc_serde {
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     use super::Loc;
 
     #[derive(serde::Serialize, serde::Deserialize)]
     #[serde(remote = "Loc")]
     struct LocDef {
-        file: Rc<str>,
+        file: Arc<str>,
         line: u32,
         col: u32,
         end_line: u32,

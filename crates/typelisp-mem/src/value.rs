@@ -31,7 +31,7 @@ use num_rational::BigRational;
 /// location table, or [`LocId::NONE`].
 ///
 /// An index rather than the [`Loc`](crate::Loc) itself because a `Loc` owns an
-/// `Rc<str>` file name and is four `u32`s besides — 32 bytes and not `Copy`,
+/// `Arc<str>` file name and is four `u32`s besides — 32 bytes and not `Copy`,
 /// where the arena wants a cell to stay small and trivially copyable. The
 /// table interns, so the many cells read from one line share one entry.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

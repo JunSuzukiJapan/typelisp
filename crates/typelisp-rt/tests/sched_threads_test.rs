@@ -73,6 +73,10 @@ impl TaskBody for Probe {
         0
     }
 
+    fn failure_values(_e: &ProbeError) -> Vec<Value> {
+        Vec::new()
+    }
+
     fn step(&mut self, heap: &mut Heap, _cx: &()) -> Progress<ProbeError> {
         match self {
             Probe::Parent { children, spawned, handles, waited, sum } => {
@@ -143,7 +147,7 @@ fn run(threads: usize, children: i64, failing: bool, patience: Duration) -> (Res
     *OBSERVED.lock().unwrap() = Some(Arc::clone(&observed));
     let mut heap = Heap::with_capacity(1024);
     let shared = Arc::new(SchedShared::<Probe>::new().unwrap());
-    let workers = start_workers(&shared, &mut heap, threads - 1, || ()).unwrap();
+    let workers = start_workers(&shared, &mut heap, threads - 1, &(), || ()).unwrap();
     let main = shared.lock(&mut heap).admit(&mut heap, |heap| {
         heap.push_root(Value::Empty);
         heap.push_root(Value::Empty);

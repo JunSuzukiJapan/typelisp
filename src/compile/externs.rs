@@ -286,6 +286,20 @@ pub(crate) fn rt_static_method_symbol(type_local: &str, method: &str) -> Option<
     }
 }
 
+/// Whether the runtime entry point `name` needs the interpreter to answer:
+/// it evaluates (`eval`), expands macros, or reads with the readtable, whose
+/// `#.` and macro characters run program code. The bridge puts a
+/// [`RT_SUSPEND_MAIN`] in front of every call to one, so that a compiled task
+/// a worker thread is stepping moves to the interpreter's thread before it
+/// makes the call — and there is no other way into these from compiled code.
+pub(crate) fn needs_interpreter(name: &str) -> bool {
+    matches!(name, "rt_eval" | "rt_macroexpand" | "rt_macroexpand_1" | "rt_read" | "rt_read_datum_at")
+}
+
+/// The suspension [`needs_interpreter`]'s calls are preceded by —
+/// `call_state::SUSPEND_MAIN`.
+pub(crate) const RT_SUSPEND_MAIN: &str = "rt_suspend_main";
+
 /// The prefix every suspending shim's name carries, and the whole of how the
 /// bridge tells one from an ordinary runtime entry point.
 pub(crate) const RT_SUSPEND_PREFIX: &str = "rt_suspend_";
@@ -494,7 +508,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 305] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 306] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -509,7 +523,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 305] {
     use typelisp_rt::coroutine::{
         rt_loop_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
         rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_select, rt_suspend_chan_send,
-        rt_suspend_go, rt_suspend_io, rt_suspend_io_for, rt_suspend_sleep, rt_suspend_thread,
+        rt_suspend_go, rt_suspend_io, rt_suspend_io_for, rt_suspend_main, rt_suspend_sleep, rt_suspend_thread,
         rt_suspend_wait, rt_suspend_yield,
     };
     use typelisp_rt::sys_builtin::{
@@ -864,6 +878,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 305] {
         ("rt_suspend_yield", rt_suspend_yield as usize),
         ("rt_suspend_go", rt_suspend_go as usize),
         ("rt_suspend_thread", rt_suspend_thread as usize),
+        ("rt_suspend_main", rt_suspend_main as usize),
         ("rt_thread_current_id", rt_thread_current_id as usize),
         ("rt_thread_available_parallelism", rt_thread_available_parallelism as usize),
         ("rt_suspend_chan_new", rt_suspend_chan_new as usize),

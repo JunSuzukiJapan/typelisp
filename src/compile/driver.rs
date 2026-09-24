@@ -161,6 +161,7 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
         })?;
         *def.compiled.borrow_mut() = Some(Rc::new(cf));
     }
+    interp.printer_tables_changed();
     Ok(())
 }
 
@@ -797,8 +798,13 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
             // all: `core_bridge` turns it into a `(suspend ...)` node. So it is
             // not a target, for the same reason a natively lowered primitive
             // method is not — there is no function for the graph to reach.
+            //
+            // A builtin *static* method (`Thread::current-id`) is the same:
+            // `core_bridge` lowers it to a plain `rt_*` call, and there is no
+            // function for the graph to reach either.
             if key.0.is_simple()
-                && crate::compile::externs::rt_suspend_method_symbol(key.0.last_segment(), &key.1).is_some()
+                && (crate::compile::externs::rt_suspend_method_symbol(key.0.last_segment(), &key.1).is_some()
+                    || crate::compile::externs::rt_static_method_symbol(key.0.last_segment(), &key.1).is_some())
             {
                 return false;
             }
@@ -1016,6 +1022,8 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[String]) -> Resu
     // that lands in some vtable's slot may well be a member of *this*
     // SCC, so its entry point only exists as of the loop just above.
     interp.publish_vtables();
+    // A compiled `print-object` is one a worker thread can call now.
+    interp.printer_tables_changed();
     // Explicitly, while `_guard` is still held: `module` was declared
     // before the guard, so letting it fall out of scope would destroy it
     // *after* the guard released — and `~Module` unregisters every value

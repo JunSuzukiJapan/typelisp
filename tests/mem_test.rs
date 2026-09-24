@@ -675,7 +675,6 @@ fn root_scopes_nest() {
 /// gets a position — see `Cell`'s doc comment).
 #[test]
 fn a_cell_carries_its_own_and_its_car_s_span() {
-    use std::rc::Rc;
     use typelisp::Loc;
 
     let mut h = Heap::with_capacity(64);
@@ -685,8 +684,8 @@ fn a_cell_carries_its_own_and_its_car_s_span() {
         Value::Cons(cr) => cr,
         _ => unreachable!(),
     };
-    let form = Loc::new(Rc::from("f.typl"), 3, 5).with_end(3, 9);
-    let elem = Loc::new(Rc::from("f.typl"), 3, 6).with_end(3, 7);
+    let form = Loc::new(std::sync::Arc::from("f.typl"), 3, 5).with_end(3, 9);
+    let elem = Loc::new(std::sync::Arc::from("f.typl"), 3, 6).with_end(3, 7);
     h.set_cons_loc(cr, form.clone());
     h.set_elem_loc(cr, elem.clone());
 
@@ -705,7 +704,6 @@ fn a_cell_carries_its_own_and_its_car_s_span() {
 /// is the whole of it: there is no entry anywhere else to go stale.
 #[test]
 fn a_reclaimed_cell_does_not_hand_its_span_to_the_next_form() {
-    use std::rc::Rc;
     use typelisp::Loc;
 
     let mut h = Heap::with_capacity(64);
@@ -714,8 +712,8 @@ fn a_reclaimed_cell_does_not_hand_its_span_to_the_next_form() {
         Value::Cons(cr) => cr,
         _ => unreachable!(),
     };
-    h.set_cons_loc(cr, Loc::new(Rc::from("f.typl"), 1, 1).with_end(1, 2));
-    h.set_elem_loc(cr, Loc::new(Rc::from("f.typl"), 1, 2).with_end(1, 3));
+    h.set_cons_loc(cr, Loc::new(std::sync::Arc::from("f.typl"), 1, 1).with_end(1, 2));
+    h.set_elem_loc(cr, Loc::new(std::sync::Arc::from("f.typl"), 1, 2).with_end(1, 3));
 
     h.gc();
 
@@ -733,7 +731,6 @@ fn a_reclaimed_cell_does_not_hand_its_span_to_the_next_form() {
 
 #[test]
 fn a_live_cell_keeps_its_span_across_a_collection() {
-    use std::rc::Rc;
     use typelisp::Loc;
 
     let mut h = Heap::with_capacity(64);
@@ -743,7 +740,7 @@ fn a_live_cell_keeps_its_span_across_a_collection() {
         Value::Cons(cr) => cr,
         _ => unreachable!(),
     };
-    let loc = Loc::new(Rc::from("f.typl"), 7, 2).with_end(7, 8);
+    let loc = Loc::new(std::sync::Arc::from("f.typl"), 7, 2).with_end(7, 8);
     h.set_cons_loc(cr, loc.clone());
 
     let _ = h.cons(Value::Int(9), Value::Empty).unwrap(); // garbage to collect
@@ -755,12 +752,11 @@ fn a_live_cell_keeps_its_span_across_a_collection() {
 /// Spans are interned, so the many cells read from one line share one entry.
 #[test]
 fn identical_spans_intern_to_one_entry() {
-    use std::rc::Rc;
     use typelisp::Loc;
 
     let mut h = Heap::with_capacity(64);
-    let loc = Loc::new(Rc::from("f.typl"), 1, 1).with_end(1, 4);
-    let other = Loc::new(Rc::from("f.typl"), 2, 1).with_end(2, 4);
+    let loc = Loc::new(std::sync::Arc::from("f.typl"), 1, 1).with_end(1, 4);
+    let other = Loc::new(std::sync::Arc::from("f.typl"), 2, 1).with_end(2, 4);
     for i in 0..8 {
         let c = h.cons(Value::Int(i), Value::Empty).unwrap();
         h.push_root(c);

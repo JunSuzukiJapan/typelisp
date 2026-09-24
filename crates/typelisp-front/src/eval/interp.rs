@@ -51,6 +51,13 @@ mod core_eval;
 /// `Op` has moved — `docs/dev/cps-evaluator-design.md`.
 mod core_cps;
 
+/// The scheduler's task body over `core_cps`'s task and the compiled one,
+/// and the worker threads that step the compiled kind.
+mod task_body;
+
+/// What those worker threads print with.
+mod worker_print;
+
 pub use core_eval::read_ffi_decl;
 
 /// A registered function or method body with its parameter names. Lives at
@@ -184,20 +191,387 @@ pub trait CompiledBody {
     /// `(panic ...)` in a classic body unwinds out through here — see
     /// `crate::compile::CompiledSignature`.
     fn call(&self, args: &[i64]) -> i64 {
-        if self.body_abi() == typelisp_abi::BODY_ABI_COROUTINE {
-            return call_coroutine(self.address(), args);
-        }
-        // SAFETY: `address` comes from a symbol the backend resolved out of a
-        // module that defines it, so it points at a function built under the
-        // shared ABI. `CompiledFn::new`/`new_multi` are the only producers.
-        let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 =
-            unsafe { std::mem::transmute::<usize, unsafe extern "C-unwind" fn(*const i64, u32) -> i64>(self.address()) };
-        unsafe { f(args.as_ptr(), args.len() as u32) }
+        call_body(self.address(), self.body_abi(), args)
     }
 }
 
 /// Runs a coroutine-ABI body to completion on a driver of its own.
 ///
+/// `Interp::decode_compiled_return`, which this is, for a caller with no
+/// interpreter at hand — an interpreted `thread`'s task, reading its callee's
+/// answer on the thread it ran on. Nothing here needs one.
+pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> Result<Value, EvalError> {
+    Ok(match ret {
+        // A raw registry index, never a heap pointer. For an LLVM object
+        // that is already the interpreter's own representation, so it just
+        // *is* the result.
+        Repr::Handle => match backend("decoding an llvm-handle return")? {
+            b if (b.handle_is_live)(raw) => Value::Int(raw),
+            _ => {
+                return Err(EvalError::Internal(format!(
+                    "compiled call returned dangling llvm handle {}",
+                    raw
+                )))
+            }
+        },
+        // Raw machine words on the way out, mirroring the argument encode.
+        Repr::Narrow => Value::Int(raw),
+        // Also raw, and — unlike `Handle` above — with no registry to
+        // check it against. Whatever C answered is the answer; the FFI
+        // declaration is what claimed it would be a pointer.
+        Repr::RawWord => Value::Int(raw),
+        // A `Unit`-typed body compiles to a plain `0` (`compile-unit`) —
+        // decode it back to the real unit value rather than surfacing the
+        // raw word as a bogus `Int(0)`, so a `Unit`-returning compiled
+        // function interoperates with interpreted code exactly like an
+        // interpreted one.
+        Repr::Unit => Value::Empty,
+        // Compiled code represents a `bool` as a raw 0/1 `i64` (LLVM
+        // `icmp` results, zero-extended).
+        Repr::Bool => Value::Bool(raw != 0),
+        // A compiled `char` is a raw `i64` Unicode scalar value — the
+        // exact inverse of the `*c as i64` a `char` argument crosses as. A
+        // compiled `char` only ever holds a value that was a valid `char`
+        // on the way in, so a decode failure is an internal-invariant
+        // break, not a user-reachable error.
+        Repr::Char => match char::from_u32(raw as u32) {
+            Some(c) => Value::Char(c),
+            None => {
+                return Err(EvalError::Internal(format!(
+                    "compiled call returned {} for a `char` result, which is not a valid Unicode scalar value",
+                    raw
+                )))
+            }
+        },
+        // Raw `f64::to_bits` in the return register
+        // (`llvm_builder_build_float_op`'s final `bitcast`).
+        // The width the *declared return type* named decides the box, which
+        // is the whole reason the two are separate `Repr`s: the word coming
+        // back is the same bit pattern either way.
+        Repr::F64 => heap.alloc_f64(f64::from_bits(raw as u64)),
+        Repr::F32 => heap.alloc_f32(f64::from_bits(raw as u64) as f32),
+        // A tagged word whose decode must land on the shape the
+        // declaration promised — a mismatch here means the compiled side
+        // and this side disagree about the ABI, which is an internal
+        // error rather than anything a program can cause.
+        Repr::Str => match typelisp_rt::decode(raw) {
+            v @ Value::Str(_) => v,
+            other => return Err(crossing_mismatch("a string", other)),
+        },
+        Repr::Sym => match typelisp_rt::decode(raw) {
+            v @ Value::Symbol(_) => v,
+            other => return Err(crossing_mismatch("a Symbol", other)),
+        },
+        Repr::Ratio => match typelisp_rt::decode(raw) {
+            v @ Value::Boxed(id) if heap.is_ratio(id) => v,
+            other => return Err(crossing_mismatch("a ratio", other)),
+        },
+        // An `int` is its tagged word: a fixnum, or a bignum box for the
+        // values a fixnum cannot hold — and never a box for one it can
+        // (`Heap::canonical_int`'s invariant, checked here so that a
+        // compiled body that boxed a small value is caught at the
+        // boundary rather than the next `eq`).
+        Repr::Int => match typelisp_rt::decode(raw) {
+            v @ Value::Int(_) => v,
+            v @ Value::Boxed(id) if heap.is_bignum(id) => {
+                if heap.bignum_fits_fixnum(id) {
+                    return Err(EvalError::Internal(format!(
+                        "compiled call returned an `int` boxed as a bignum that fits a fixnum ({}) — not canonical",
+                        heap.bignum_value(id)
+                    )));
+                }
+                v
+            }
+            other => return Err(crossing_mismatch("an int (fixnum or bignum)", other)),
+        },
+        Repr::RandomState => match typelisp_rt::decode(raw) {
+            v @ Value::Boxed(id) if heap.is_random_state(id) => v,
+            other => return Err(crossing_mismatch("a random-state", other)),
+        },
+        // Every remaining representation is a heap value crossing as the
+        // tagged `i64` the `rt_*` shims read. A niched `Option<T>` is one
+        // too: the empty-list immediate for `none`, and `T`'s *field*
+        // encoding for `some` — a fixnum for a narrow payload, a float
+        // box for a float one — which is exactly what `decode` reads back
+        // as the `Value` the interpreter represents that `Option` by.
+        Repr::Sexpr
+        | Repr::Niche(_)
+        | Repr::Struct
+        | Repr::Enum
+        | Repr::Dyn
+        | Repr::Fn
+        | Repr::Scope(_)
+        | Repr::Vector(_)
+        | Repr::HashTable(..) => typelisp_rt::decode(raw),
+        // A still-generic type variable. Nothing compiled can return one:
+        // a generic body is monomorphized before it is compiled, so
+        // reaching here is a bug in whatever produced the signature.
+        Repr::None => {
+            return Err(EvalError::Internal(
+                "compiled call has no declared return representation — a generic body was compiled unmonomorphized"
+                    .to_string(),
+            ))
+        }
+    })
+}
+
+/// One value's worth of `Interp::encode_crossing_args` — see
+/// `Interp::encode_crossing_value`, which this is, for a caller with no
+/// interpreter (a worker thread's printer): nothing here needs one.
+pub(crate) fn encode_crossing_value(heap: &Heap, v: &Value, repr: &Repr) -> Result<i64, EvalError> {
+    // A built-in used as a function value is a box like any other, so it
+    // would encode as an ordinary tagged word — and then the apply
+    // boundary would find a callee whose arguments it has no way to
+    // decode: a
+    // built-in carries only its name, and the apply site does not carry
+    // the representations at runtime (an interpreted closure does, which
+    // is why *it* crosses fine). Rejected here, where it is still an
+    // ordinary catchable error rather than an abort from inside a
+    // compiled frame.
+    if let Value::Boxed(id) = v {
+        if heap.is_builtin_fn(*id) {
+            return Err(EvalError::Internal(format!(
+                "compiled call: the built-in \"{}\" cannot be passed as a function value to compiled code",
+                heap.builtin_fn_name(*id)
+            )));
+        }
+    }
+    match repr {
+        // Raw machine words, by the encodings compiled code uses
+        // internally.
+        Repr::Narrow => match v {
+            Value::Int(n) => Ok(*n),
+            other => Err(EvalError::Internal(format!("compiled call: expected an integer argument, got {:?}", other))),
+        },
+        // An `int` crosses as the tagged word it is — the catch-all's
+        // `encode` — but only the two shapes it can have are let through:
+        // `encode` would abort on a `Value::Int` past the fixnum range
+        // and happily tag any other box, and neither is an `int`.
+        Repr::Int => match v {
+            Value::Int(n) if typelisp_mem::fixnum_fits(*n) => Ok(typelisp_rt::encode(*v)),
+            Value::Boxed(id) if heap.is_bignum(*id) => Ok(typelisp_rt::encode(*v)),
+            other => Err(EvalError::Internal(format!("compiled call: expected an int argument (fixnum or bignum), got {:?}", other))),
+        },
+        Repr::Bool => match v {
+            Value::Bool(b) => Ok(i64::from(*b)),
+            other => Err(EvalError::Internal(format!("compiled call: expected a bool argument, got {:?}", other))),
+        },
+        Repr::Char => match v {
+            Value::Char(c) => Ok(*c as i64),
+            other => Err(EvalError::Internal(format!("compiled call: expected a char argument, got {:?}", other))),
+        },
+        // `()` crosses as the plain `0` `compile-unit` compiles a
+        // `Unit`-typed body tail to. A unit value carries no information,
+        // so the word is a placeholder the callee never reads; it just has
+        // to be the one both sides agree on.
+        Repr::Unit => Ok(0),
+        // A float is its raw `f64::to_bits` pattern in an `i64`
+        // (`compile-float`/`llvm_builder_build_float_op`), the inverse of
+        // `decode_compiled_return`'s float arms. An `f32` crosses as the
+        // binary32 value widened into that same pattern — the carrier is
+        // wider than the type, exactly as a `u8` rides in an `i64` word —
+        // so each width is read out of its own box and then widened here,
+        // rather than one arm accepting whichever box turns up.
+        Repr::F64 => match v {
+            Value::Boxed(id) if heap.is_f64(*id) => Ok(heap.f64_value(*id).to_bits() as i64),
+            other => Err(EvalError::Internal(format!("compiled call: expected an f64 argument, got {:?}", other))),
+        },
+        Repr::F32 => match v {
+            Value::Boxed(id) if heap.is_f32(*id) => Ok(f64::from(heap.f32_value(*id)).to_bits() as i64),
+            other => Err(EvalError::Internal(format!("compiled call: expected an f32 argument, got {:?}", other))),
+        },
+        // An LLVM handle crosses as the *raw* registry index — never
+        // tagged. Without its own arm it would fall into the tagged
+        // catch-all below and the callee would read `handle << 3` as a
+        // handle: passing the island its own module as handle 1 made it
+        // look up handle 8 and abort with "dangling llvm handle 8". Must
+        // stay ahead of the catch-all, exactly as the matching check in
+        // `decode_compiled_return` does.
+        Repr::Handle => match v {
+            Value::Int(h) => Ok(*h),
+            other => Err(EvalError::Internal(format!("compiled call: expected an llvm handle argument, got {:?}", other))),
+        },
+        // A `ptr`/`c-long`/`c-ulong` crosses raw, for the same reason a
+        // handle does and with more at stake: all 64 bits are meaningful,
+        // so the tagged catch-all would not merely misread it — it would
+        // discard the top three. Must stay ahead of that catch-all.
+        Repr::RawWord => match v {
+            Value::Int(n) => Ok(*n),
+            other => Err(EvalError::Internal(format!("compiled call: expected a raw word argument, got {:?}", other))),
+        },
+        // Every remaining representation — `Sexpr`, `string`,
+        // `bignum`/`ratio`, structs, enums, closures, trait objects, and a
+        // `Scope<V>` (one heap object since Phase 1a) — is already a heap
+        // `Value`, and crosses as the tagged `i64` the `rt_*` shims read.
+        // A niched `Option<T>` too: its `some` is the `Value` of a `T`
+        // as a field holds it (`Value::Int` for a narrow payload, which
+        // `encode` tags as a fixnum — the field encoding), its `none`
+        // the empty list.
+        _ => Ok(typelisp_rt::encode(*v)),
+    }
+}
+
+/// The printer control variables that say *what* to print —
+/// [`Interp::print_vars`], for whoever can read a global by name: the
+/// interpreter from its module tree, a worker thread from the snapshot it
+/// was given (`worker_print`).
+pub(crate) fn print_vars_from(global: &dyn Fn(&str) -> Option<Value>) -> crate::eval::format::PrintVars {
+    let read_limit = |name: &str| -> Option<usize> {
+        match global(name) {
+            Some(Value::Int(n)) if n > 0 => Some(n as usize),
+            _ => None,
+        }
+    };
+    let read_flag = |name: &str| -> bool { matches!(global(name), Some(Value::Bool(true))) };
+    let defaults = crate::eval::format::PrintVars::default();
+    crate::eval::format::PrintVars {
+        circle: read_flag("*print-circle*"),
+        level: read_limit("*print-level*"),
+        length: read_limit("*print-length*"),
+        // Left at the default when the global is missing (a bare `Interp`
+        // with no prelude) or holds something other than an integer —
+        // an out-of-range *value* is a printing error, but there being no
+        // variable at all is just "the prelude was never loaded".
+        base: match global("*print-base*") {
+            Some(Value::Int(n)) => n,
+            _ => defaults.base,
+        },
+        radix: read_flag("*print-radix*"),
+        case: match global("*print-case*") {
+            // The interned name keeps the leading colon — a keyword is an
+            // ordinary symbol whose name starts with one, not a separate
+            // type (`Checker::check_symbol`).
+            Some(Value::Symbol(id)) => match id.well_known() {
+                wk::UPCASE => crate::eval::format::PrintCase::Upcase,
+                wk::CAPITALIZE => crate::eval::format::PrintCase::Capitalize,
+                _ => crate::eval::format::PrintCase::Downcase,
+            },
+            _ => defaults.case,
+        },
+        readably: read_flag("*print-readably*"),
+    }
+}
+
+/// The printer control variables that say *how* to lay it out —
+/// [`Interp::pretty_opts`], for whoever can read a global by name (see
+/// [`print_vars_from`]).
+pub(crate) fn pretty_opts_from(global: &dyn Fn(&str) -> Option<Value>) -> crate::eval::pprint::Opts {
+    let read_int = |name: &str, default: i64| -> i64 {
+        match global(name) {
+            Some(Value::Int(n)) => n,
+            _ => default,
+        }
+    };
+    // Inside a `pprint-logical-block` the "stream" *is* a pretty stream,
+    // so everything printed into it pretty-prints regardless of the
+    // global — the same thing CL's stream-type dispatch achieves.
+    // Read whether or not a session is open, so that every global this
+    // reads is read on every call — what `worker_print` relies on to learn
+    // the names by asking.
+    let global_pretty = matches!(global("*print-pretty*"), Some(Value::Bool(true)));
+    let pretty = typelisp_print::runtime::session_open() || global_pretty;
+    let margin = read_int("*print-right-margin*", crate::eval::pprint::DEFAULT_MARGIN as i64);
+    let miser = read_int("*print-miser-width*", 0);
+    let lines = read_int("*print-lines*", 0);
+    crate::eval::pprint::Opts {
+        pretty,
+        margin: margin.max(0) as usize,
+        miser: (miser > 0).then_some(miser as usize),
+        lines: (lines > 0).then_some(lines as usize),
+    }
+}
+
+/// The method `print-object` dispatches `v` to: its type's path and the
+/// method's name there — the *specialization*'s name when `v` is a generic
+/// type's instantiation. Monomorphization registers one body per
+/// instantiation (`print-object <i32>`), and the value's key is what says
+/// which — the thing it did not carry until 2026-08-31, which is why a
+/// generic type's `print-object` never fired. `None` for a value no method
+/// can be for.
+pub(crate) fn print_object_target(heap: &Heap, v: Value) -> Option<(Path, String)> {
+    let Value::Boxed(id) = v else { return None };
+    let type_path = heap_type_path(heap, id)?;
+    let method = match crate::type_key::heap_type_key(heap, id) {
+        Some(key) => crate::type_key::specialized_method_name(&key, "print-object"),
+        None => "print-object".to_string(),
+    };
+    Some((type_path, method))
+}
+
+/// Whether `f` is a `print-object` implementation by its signature — the
+/// safety net that keeps an unrelated method that merely happens to be named
+/// `print-object` (a plain `defmethod`, no trait involved) from being
+/// mistaken for one.
+pub(crate) fn is_print_object_sig(f: &FnDef) -> bool {
+    matches!(f.sig.as_ref(), Some((params, ret)) if params.len() == 2 && params[1] == Repr::Bool && *ret == Repr::Str)
+}
+
+/// The method `~/name/` dispatches `v` to — see [`Interp::format_call`]:
+/// the type `v` is a value of, as a method-table key, and the name to look up
+/// there.
+pub(crate) fn format_call_target(heap: &Heap, name: &str, v: Value) -> Result<(Path, String), String> {
+    let type_path: Path = match v {
+        Value::Boxed(id) => match heap.primitive_box_type_name(id).map(Path::root).or_else(|| heap_type_path(heap, id)) {
+            Some(p) => p,
+            None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
+        },
+        Value::Str(_) => Path::root("string"),
+        Value::Bool(_) => Path::root("bool"),
+        Value::Char(_) => Path::root("char"),
+        Value::Symbol(_) => Path::root("symbol"),
+        Value::Empty | Value::Cons(_) | Value::Path(_) => Path::root("sexpr"),
+        Value::Int(_) => Path::root("int"),
+    };
+    // A generic receiver's method is registered per instantiation, so the
+    // name to look up comes off the value's own key — see
+    // `print_object_target`.
+    let looked_up = match v {
+        Value::Boxed(id) => match crate::type_key::heap_type_key(heap, id) {
+            Some(key) => crate::type_key::specialized_method_name(&key, name),
+            None => name.to_string(),
+        },
+        _ => name.to_string(),
+    };
+    Ok((type_path, looked_up))
+}
+
+/// Whether a `~/name/` method takes its receiver as a raw machine word, or
+/// `None` when `f` does not have a `~/name/` method's signature at all.
+pub(crate) fn format_call_receiver_is_word(f: &FnDef) -> Option<bool> {
+    match f.sig.as_ref() {
+        Some((params, ret))
+            if params.len() == 3 && params[1] == Repr::Bool && params[2] == Repr::Bool && *ret == Repr::Str =>
+        {
+            Some(params[0] == Repr::Narrow)
+        }
+        _ => None,
+    }
+}
+
+/// What `~/name/` says of a method it found that is not one.
+pub(crate) fn format_call_sig_error(name: &str, type_path: &Path) -> String {
+    format!(
+        "format: ~/{}/ — `{}`'s `{}` must be `((self Self) (colon bool) (at bool)) -> string`",
+        name, type_path, name
+    )
+}
+
+/// Calls the compiled body at `address`, built under `abi`, with `args`
+/// already in the compiled representation — [`CompiledBody::call`] for a
+/// caller that holds the two facts rather than the body (a worker thread's
+/// printer, which cannot hold the interpreter's `Rc`).
+pub(crate) fn call_body(address: usize, abi: u8, args: &[i64]) -> i64 {
+    if abi == typelisp_abi::BODY_ABI_COROUTINE {
+        return call_coroutine(address, args);
+    }
+    // SAFETY: `address` comes from a symbol the backend resolved out of a
+    // module that defines it, so it points at a function built under the
+    // shared ABI. `CompiledFn::new`/`new_multi` are the only producers.
+    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 =
+        unsafe { std::mem::transmute::<usize, unsafe extern "C-unwind" fn(*const i64, u32) -> i64>(address) };
+    unsafe { f(args.as_ptr(), args.len() as u32) }
+}
+
 /// This is the boundary an *interpreted* caller sits at: the interpreter is
 /// waiting on a Rust stack frame for an answer, so a task that would have to
 /// wait underneath has nobody to hand control back to. What the body
@@ -223,7 +597,7 @@ fn call_coroutine(address: usize, args: &[i64]) -> i64 {
         Ok(word) => word,
         // Resolved by `run_to_end` above, so reaching here is a protocol
         // break rather than a limitation.
-        Err(typelisp_rt::coroutine::Paused::Applying { .. }) => typelisp_abi::raise(
+        Err(typelisp_rt::coroutine::Paused::Applying { .. } | typelisp_rt::coroutine::Paused::ApplyingDyn { .. }) => typelisp_abi::raise(
             "a compiled function applied an interpreted value that the drive did not resolve".to_string(),
         ),
         // Resolved by `run_to_end` too — answered or refused into the chain.
@@ -282,10 +656,35 @@ pub struct Interp {
     pub root: RefCell<scope::ModuleScope>,
     /// The tasks that exist and the order they run in — the runtime's
     /// scheduler (`typelisp_rt::sched`), over this interpreter's task body
-    /// ([`core_cps::Task`]). Behind a `RefCell` for the same reason `root`
-    /// is: the evaluation path holds `&self`, and a task is admitted from deep
-    /// inside it. Every borrow is short — a task is taken *out* to be stepped.
-    pub(crate) scheduler: RefCell<typelisp_rt::sched::Scheduler<core_cps::Task>>,
+    /// ([`task_body::TyplBody`]). Shared with the worker threads that step
+    /// its compiled tasks, and locked for every question — each one short: a
+    /// task is taken *out* to be stepped.
+    pub(crate) scheduler: std::sync::Arc<typelisp_rt::sched::SchedShared<task_body::TyplBody>>,
+    /// Whether a drive of [`Self::scheduler`] is on this thread's stack. A
+    /// *nested* evaluation — a compiled callee re-entering the interpreter,
+    /// or `Interp::apply` — must not switch tasks: there is a Rust frame
+    /// waiting on its result, and no continuation stack underneath it to
+    /// come back to.
+    pub(crate) driving: std::cell::Cell<bool>,
+    /// Whether the scheduler has its crew of worker threads yet — see
+    /// `Interp::install_crew`.
+    pub(crate) crew_installed: std::cell::Cell<bool>,
+    /// What the crew's threads print with — see `worker_print`.
+    pub(crate) worker_print: worker_print::SharedSnapshot,
+    /// How many times what [`Self::worker_print`] copies has changed, and
+    /// which of those the published snapshot reflects — see
+    /// `Interp::printer_tables_changed`.
+    pub(crate) print_generation: std::cell::Cell<u64>,
+    pub(crate) published_generation: std::cell::Cell<u64>,
+    /// The compiled bodies the published snapshot names, kept alive while a
+    /// worker may be calling one — see `worker_print`.
+    pub(crate) printer_bodies: RefCell<Vec<Rc<dyn CompiledBody>>>,
+    /// Whether this is an `eval`-carrying executable's interpreter, whose
+    /// program prints through the executable's own registration tables
+    /// (`typelisp_print::aot`) — its compiled `print-object`s are there, not
+    /// in this interpreter's module tree — on a worker as on the main thread
+    /// before the interpreter joined. Set by `shim::rt_eval_init`.
+    pub(crate) executable_printer: std::cell::Cell<bool>,
     /// A shared handle to the live `Checker`, set by [`Self::set_checker`] on
     /// the drivers that support runtime `eval` (the CLI's `run_file`/`repl`/
     /// `compile_module` and the LSP). `None` in throwaway/AOT/bootstrap/test
@@ -563,7 +962,16 @@ impl Interp {
             step_quiet_depth: Cell::new(usize::MAX),
             dump_sources: RefCell::new(Vec::new()),
             recording: RefCell::new(None),
-            scheduler: RefCell::new(typelisp_rt::sched::Scheduler::new()),
+            scheduler: std::sync::Arc::new(typelisp_rt::sched::SchedShared::new().unwrap_or_else(|e| {
+                typelisp_rt::fatal(&format!("the scheduler could not be set up: {}", e))
+            })),
+            driving: std::cell::Cell::new(false),
+            crew_installed: std::cell::Cell::new(false),
+            worker_print: Default::default(),
+            print_generation: std::cell::Cell::new(1),
+            published_generation: std::cell::Cell::new(0),
+            printer_bodies: RefCell::new(Vec::new()),
+            executable_printer: std::cell::Cell::new(false),
         }
     }
 
@@ -1080,96 +1488,7 @@ impl Interp {
     ///
     /// Encoding allocates nothing, so no rooting happens (or is needed) here.
     fn encode_crossing_value(&self, heap: &Heap, v: &Value, repr: &Repr) -> Result<i64, EvalError> {
-        // A built-in used as a function value is a box like any other, so it
-        // would encode as an ordinary tagged word — and then the apply
-        // boundary would find a callee whose arguments it has no way to
-        // decode: a
-        // built-in carries only its name, and the apply site does not carry
-        // the representations at runtime (an interpreted closure does, which
-        // is why *it* crosses fine). Rejected here, where it is still an
-        // ordinary catchable error rather than an abort from inside a
-        // compiled frame.
-        if let Value::Boxed(id) = v {
-            if heap.is_builtin_fn(*id) {
-                return Err(EvalError::Internal(format!(
-                    "compiled call: the built-in \"{}\" cannot be passed as a function value to compiled code",
-                    heap.builtin_fn_name(*id)
-                )));
-            }
-        }
-        match repr {
-            // Raw machine words, by the encodings compiled code uses
-            // internally.
-            Repr::Narrow => match v {
-                Value::Int(n) => Ok(*n),
-                other => Err(EvalError::Internal(format!("compiled call: expected an integer argument, got {:?}", other))),
-            },
-            // An `int` crosses as the tagged word it is — the catch-all's
-            // `encode` — but only the two shapes it can have are let through:
-            // `encode` would abort on a `Value::Int` past the fixnum range
-            // and happily tag any other box, and neither is an `int`.
-            Repr::Int => match v {
-                Value::Int(n) if typelisp_mem::fixnum_fits(*n) => Ok(typelisp_rt::encode(*v)),
-                Value::Boxed(id) if heap.is_bignum(*id) => Ok(typelisp_rt::encode(*v)),
-                other => Err(EvalError::Internal(format!("compiled call: expected an int argument (fixnum or bignum), got {:?}", other))),
-            },
-            Repr::Bool => match v {
-                Value::Bool(b) => Ok(i64::from(*b)),
-                other => Err(EvalError::Internal(format!("compiled call: expected a bool argument, got {:?}", other))),
-            },
-            Repr::Char => match v {
-                Value::Char(c) => Ok(*c as i64),
-                other => Err(EvalError::Internal(format!("compiled call: expected a char argument, got {:?}", other))),
-            },
-            // `()` crosses as the plain `0` `compile-unit` compiles a
-            // `Unit`-typed body tail to. A unit value carries no information,
-            // so the word is a placeholder the callee never reads; it just has
-            // to be the one both sides agree on.
-            Repr::Unit => Ok(0),
-            // A float is its raw `f64::to_bits` pattern in an `i64`
-            // (`compile-float`/`llvm_builder_build_float_op`), the inverse of
-            // `decode_compiled_return`'s float arms. An `f32` crosses as the
-            // binary32 value widened into that same pattern — the carrier is
-            // wider than the type, exactly as a `u8` rides in an `i64` word —
-            // so each width is read out of its own box and then widened here,
-            // rather than one arm accepting whichever box turns up.
-            Repr::F64 => match v {
-                Value::Boxed(id) if heap.is_f64(*id) => Ok(heap.f64_value(*id).to_bits() as i64),
-                other => Err(EvalError::Internal(format!("compiled call: expected an f64 argument, got {:?}", other))),
-            },
-            Repr::F32 => match v {
-                Value::Boxed(id) if heap.is_f32(*id) => Ok(f64::from(heap.f32_value(*id)).to_bits() as i64),
-                other => Err(EvalError::Internal(format!("compiled call: expected an f32 argument, got {:?}", other))),
-            },
-            // An LLVM handle crosses as the *raw* registry index — never
-            // tagged. Without its own arm it would fall into the tagged
-            // catch-all below and the callee would read `handle << 3` as a
-            // handle: passing the island its own module as handle 1 made it
-            // look up handle 8 and abort with "dangling llvm handle 8". Must
-            // stay ahead of the catch-all, exactly as the matching check in
-            // `decode_compiled_return` does.
-            Repr::Handle => match v {
-                Value::Int(h) => Ok(*h),
-                other => Err(EvalError::Internal(format!("compiled call: expected an llvm handle argument, got {:?}", other))),
-            },
-            // A `ptr`/`c-long`/`c-ulong` crosses raw, for the same reason a
-            // handle does and with more at stake: all 64 bits are meaningful,
-            // so the tagged catch-all would not merely misread it — it would
-            // discard the top three. Must stay ahead of that catch-all.
-            Repr::RawWord => match v {
-                Value::Int(n) => Ok(*n),
-                other => Err(EvalError::Internal(format!("compiled call: expected a raw word argument, got {:?}", other))),
-            },
-            // Every remaining representation — `Sexpr`, `string`,
-            // `bignum`/`ratio`, structs, enums, closures, trait objects, and a
-            // `Scope<V>` (one heap object since Phase 1a) — is already a heap
-            // `Value`, and crosses as the tagged `i64` the `rt_*` shims read.
-            // A niched `Option<T>` too: its `some` is the `Value` of a `T`
-            // as a field holds it (`Value::Int` for a narrow payload, which
-            // `encode` tags as a fixnum — the field encoding), its `none`
-            // the empty list.
-            _ => Ok(typelisp_rt::encode(*v)),
-        }
+        encode_crossing_value(heap, v, repr)
     }
 
     /// [`Self::call_compiled`]'s return-value half, factored out for the same
@@ -1184,118 +1503,7 @@ impl Interp {
     /// `Scope<V>`, a trait object, a closure) was a rule spelled out at that
     /// predicate; a `Repr` already *is* that rule's answer.
     fn decode_compiled_return(&self, heap: &mut Heap, raw: i64, ret: &Repr) -> Result<Value, EvalError> {
-        Ok(match ret {
-            // A raw registry index, never a heap pointer. For an LLVM object
-            // that is already the interpreter's own representation, so it just
-            // *is* the result.
-            Repr::Handle => match backend("decoding an llvm-handle return")? {
-                b if (b.handle_is_live)(raw) => Value::Int(raw),
-                _ => {
-                    return Err(EvalError::Internal(format!(
-                        "compiled call returned dangling llvm handle {}",
-                        raw
-                    )))
-                }
-            },
-            // Raw machine words on the way out, mirroring the argument encode.
-            Repr::Narrow => Value::Int(raw),
-            // Also raw, and — unlike `Handle` above — with no registry to
-            // check it against. Whatever C answered is the answer; the FFI
-            // declaration is what claimed it would be a pointer.
-            Repr::RawWord => Value::Int(raw),
-            // A `Unit`-typed body compiles to a plain `0` (`compile-unit`) —
-            // decode it back to the real unit value rather than surfacing the
-            // raw word as a bogus `Int(0)`, so a `Unit`-returning compiled
-            // function interoperates with interpreted code exactly like an
-            // interpreted one.
-            Repr::Unit => Value::Empty,
-            // Compiled code represents a `bool` as a raw 0/1 `i64` (LLVM
-            // `icmp` results, zero-extended).
-            Repr::Bool => Value::Bool(raw != 0),
-            // A compiled `char` is a raw `i64` Unicode scalar value — the
-            // exact inverse of the `*c as i64` a `char` argument crosses as. A
-            // compiled `char` only ever holds a value that was a valid `char`
-            // on the way in, so a decode failure is an internal-invariant
-            // break, not a user-reachable error.
-            Repr::Char => match char::from_u32(raw as u32) {
-                Some(c) => Value::Char(c),
-                None => {
-                    return Err(EvalError::Internal(format!(
-                        "compiled call returned {} for a `char` result, which is not a valid Unicode scalar value",
-                        raw
-                    )))
-                }
-            },
-            // Raw `f64::to_bits` in the return register
-            // (`llvm_builder_build_float_op`'s final `bitcast`).
-            // The width the *declared return type* named decides the box, which
-            // is the whole reason the two are separate `Repr`s: the word coming
-            // back is the same bit pattern either way.
-            Repr::F64 => heap.alloc_f64(f64::from_bits(raw as u64)),
-            Repr::F32 => heap.alloc_f32(f64::from_bits(raw as u64) as f32),
-            // A tagged word whose decode must land on the shape the
-            // declaration promised — a mismatch here means the compiled side
-            // and this side disagree about the ABI, which is an internal
-            // error rather than anything a program can cause.
-            Repr::Str => match typelisp_rt::decode(raw) {
-                v @ Value::Str(_) => v,
-                other => return Err(crossing_mismatch("a string", other)),
-            },
-            Repr::Sym => match typelisp_rt::decode(raw) {
-                v @ Value::Symbol(_) => v,
-                other => return Err(crossing_mismatch("a Symbol", other)),
-            },
-            Repr::Ratio => match typelisp_rt::decode(raw) {
-                v @ Value::Boxed(id) if heap.is_ratio(id) => v,
-                other => return Err(crossing_mismatch("a ratio", other)),
-            },
-            // An `int` is its tagged word: a fixnum, or a bignum box for the
-            // values a fixnum cannot hold — and never a box for one it can
-            // (`Heap::canonical_int`'s invariant, checked here so that a
-            // compiled body that boxed a small value is caught at the
-            // boundary rather than the next `eq`).
-            Repr::Int => match typelisp_rt::decode(raw) {
-                v @ Value::Int(_) => v,
-                v @ Value::Boxed(id) if heap.is_bignum(id) => {
-                    if heap.bignum_fits_fixnum(id) {
-                        return Err(EvalError::Internal(format!(
-                            "compiled call returned an `int` boxed as a bignum that fits a fixnum ({}) — not canonical",
-                            heap.bignum_value(id)
-                        )));
-                    }
-                    v
-                }
-                other => return Err(crossing_mismatch("an int (fixnum or bignum)", other)),
-            },
-            Repr::RandomState => match typelisp_rt::decode(raw) {
-                v @ Value::Boxed(id) if heap.is_random_state(id) => v,
-                other => return Err(crossing_mismatch("a random-state", other)),
-            },
-            // Every remaining representation is a heap value crossing as the
-            // tagged `i64` the `rt_*` shims read. A niched `Option<T>` is one
-            // too: the empty-list immediate for `none`, and `T`'s *field*
-            // encoding for `some` — a fixnum for a narrow payload, a float
-            // box for a float one — which is exactly what `decode` reads back
-            // as the `Value` the interpreter represents that `Option` by.
-            Repr::Sexpr
-            | Repr::Niche(_)
-            | Repr::Struct
-            | Repr::Enum
-            | Repr::Dyn
-            | Repr::Fn
-            | Repr::Scope(_)
-            | Repr::Vector(_)
-            | Repr::HashTable(..) => typelisp_rt::decode(raw),
-            // A still-generic type variable. Nothing compiled can return one:
-            // a generic body is monomorphized before it is compiled, so
-            // reaching here is a bug in whatever produced the signature.
-            Repr::None => {
-                return Err(EvalError::Internal(
-                    "compiled call has no declared return representation — a generic body was compiled unmonomorphized"
-                        .to_string(),
-                ))
-            }
-        })
+        decode_crossing_return(heap, raw, ret)
     }
 
     /// Invokes a **classic-ABI** `BoxedObj::CompiledClosure` directly from
@@ -1654,6 +1862,7 @@ impl Interp {
     /// the module tree, so binding it is the whole of sharing the storage.
     pub fn bind_compiled_global(&self, path: Path, id: usize) {
         self.compiled_globals.borrow_mut().insert(path, id);
+        self.printer_tables_changed();
     }
 
     /// Whether `path` already has a compiled-global slot — "is this variable
@@ -1698,6 +1907,7 @@ impl Interp {
         let v = slot.get(heap);
         let id = typelisp_rt::global_new(heap, v);
         self.compiled_globals.borrow_mut().insert(path.clone(), id);
+        self.printer_tables_changed();
         Ok(id)
     }
 
@@ -2297,18 +2507,8 @@ impl Interp {
     /// every part of it, including the elements the renderers hold in
     /// intermediate `Vec<Value>`s.
     pub(crate) fn print_object(&self, heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {
-        let Value::Boxed(id) = v else { return Ok(None) };
-        let Some(type_path) = heap_type_path(heap, id) else {
+        let Some((type_path, method)) = print_object_target(heap, v) else {
             return Ok(None);
-        };
-        // The *specialization*'s name when this value is a generic type's
-        // instantiation. Monomorphization registers one body per
-        // instantiation (`print-object <i32>`), and the value's key is what
-        // says which — the thing it did not carry until 2026-08-31, which is
-        // why a generic type's `print-object` never fired.
-        let method = match crate::type_key::heap_type_key(heap, id) {
-            Some(key) => crate::type_key::specialized_method_name(&key, "print-object"),
-            None => "print-object".to_string(),
         };
         // A value already being printed by its own method is rendered the
         // built-in way instead, so `(impl print-object point (... (format
@@ -2321,10 +2521,8 @@ impl Interp {
         let Some(f) = self.root.borrow().get_method(&type_path, &method) else {
             return Ok(None);
         };
-        match f.sig.as_ref() {
-            Some((params, ret))
-                if params.len() == 2 && params[1] == Repr::Bool && *ret == Repr::Str => {}
-            _ => return Ok(None),
+        if !is_print_object_sig(&f) {
+            return Ok(None);
         }
         self.printing.borrow_mut().push(v);
         // `enter`, not `apply`: an `impl print-object` method is an ordinary
@@ -2378,51 +2576,15 @@ impl Interp {
         // by the value having no width to read. Deleting the 64-bit types did
         // *not* remove that ambiguity (it only narrowed the word); giving
         // narrow integers a box did.
-        let type_path: Path = match v {
-            Value::Boxed(id) => match heap
-                .primitive_box_type_name(id)
-                .map(Path::root)
-                .or_else(|| heap_type_path(heap, id))
-            {
-                Some(p) => p,
-                None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
-            },
-            Value::Str(_) => Path::root("string"),
-            Value::Bool(_) => Path::root("bool"),
-            Value::Char(_) => Path::root("char"),
-            Value::Symbol(_) => Path::root("symbol"),
-            Value::Empty | Value::Cons(_) | Value::Path(_) => Path::root("sexpr"),
-            Value::Int(_) => Path::root("int"),
-        };
-        // A generic receiver's method is registered per instantiation, so the
-        // name to look up comes off the value's own key — see
-        // `Self::print_object`.
-        let looked_up = match v {
-            Value::Boxed(id) => match crate::type_key::heap_type_key(heap, id) {
-                Some(key) => crate::type_key::specialized_method_name(&key, name),
-                None => name.to_string(),
-            },
-            _ => name.to_string(),
-        };
+        let (type_path, looked_up) = format_call_target(heap, name, v)?;
         let Some(f) = self.root.borrow().get_method(&type_path, &looked_up) else {
             return Err(format!("format: ~/{}/ — `{}` has no method `{}`", name, type_path, name));
         };
         // Whether the receiver's *declared* representation is a raw machine
         // word — which is the question that decides what to hand the method,
         // not the shape the printer happens to be holding.
-        let receiver_is_word = match f.sig.as_ref() {
-            Some((params, ret))
-                if params.len() == 3 && params[1] == Repr::Bool && params[2] == Repr::Bool && *ret == Repr::Str =>
-            {
-                params[0] == Repr::Narrow
-            }
-            _ => {
-                return Err(format!(
-                    "format: ~/{}/ — `{}`'s `{}` must be \
-                     `((self Self) (colon bool) (at bool)) -> string`",
-                    name, type_path, name
-                ))
-            }
+        let Some(receiver_is_word) = format_call_receiver_is_word(&f) else {
+            return Err(format_call_sig_error(name, &type_path));
         };
         // A narrow integer arrives here as a `BoxedObj::Narrow`, because a
         // `Sexpr` is the one place a value's width is written down. A `u8`
@@ -2489,42 +2651,7 @@ impl Interp {
     }
 
     pub(crate) fn print_vars(&self, heap: &Heap) -> crate::eval::format::PrintVars {
-        let read_limit = |name: &str| -> Option<usize> {
-            match self.global_value(heap, &crate::Path::root(name)) {
-                Some(Value::Int(n)) if n > 0 => Some(n as usize),
-                _ => None,
-            }
-        };
-        let read_flag = |name: &str| -> bool {
-            matches!(self.global_value(heap, &crate::Path::root(name)), Some(Value::Bool(true)))
-        };
-        let defaults = crate::eval::format::PrintVars::default();
-        crate::eval::format::PrintVars {
-            circle: read_flag("*print-circle*"),
-            level: read_limit("*print-level*"),
-            length: read_limit("*print-length*"),
-            // Left at the default when the global is missing (a bare `Interp`
-            // with no prelude) or holds something other than an integer —
-            // an out-of-range *value* is a printing error, but there being no
-            // variable at all is just "the prelude was never loaded".
-            base: match self.global_value(heap, &crate::Path::root("*print-base*")) {
-                Some(Value::Int(n)) => n,
-                _ => defaults.base,
-            },
-            radix: read_flag("*print-radix*"),
-            case: match self.global_value(heap, &crate::Path::root("*print-case*")) {
-                // The interned name keeps the leading colon — a keyword is an
-                // ordinary symbol whose name starts with one, not a separate
-                // type (`Checker::check_symbol`).
-                Some(Value::Symbol(id)) => match id.well_known() {
-                    wk::UPCASE => crate::eval::format::PrintCase::Upcase,
-                    wk::CAPITALIZE => crate::eval::format::PrintCase::Capitalize,
-                    _ => crate::eval::format::PrintCase::Downcase,
-                },
-                _ => defaults.case,
-            },
-            readably: read_flag("*print-readably*"),
-        }
+        print_vars_from(&|name| self.global_value(heap, &crate::Path::root(name)))
     }
 
     /// Closes and writes out a pretty-printing session left open by a
@@ -2549,29 +2676,7 @@ impl Interp {
     /// A missing global (the prelude was not loaded — some unit tests build a
     /// bare `Interp`) falls back to the defaults, i.e. pretty printing off.
     pub(crate) fn pretty_opts(&self, heap: &Heap) -> crate::eval::pprint::Opts {
-        let read_int = |name: &str, default: i64| -> i64 {
-            match self.global_value(heap, &crate::Path::root(name)) {
-                Some(Value::Int(n)) => n,
-                _ => default,
-            }
-        };
-        // Inside a `pprint-logical-block` the "stream" *is* a pretty stream,
-        // so everything printed into it pretty-prints regardless of the
-        // global — the same thing CL's stream-type dispatch achieves.
-        let pretty = typelisp_print::runtime::session_open()
-            || matches!(
-                self.global_value(heap, &crate::Path::root("*print-pretty*")),
-                Some(Value::Bool(true))
-            );
-        let margin = read_int("*print-right-margin*", crate::eval::pprint::DEFAULT_MARGIN as i64);
-        let miser = read_int("*print-miser-width*", 0);
-        let lines = read_int("*print-lines*", 0);
-        crate::eval::pprint::Opts {
-            pretty,
-            margin: margin.max(0) as usize,
-            miser: (miser > 0).then_some(miser as usize),
-            lines: (lines > 0).then_some(lines as usize),
-        }
+        pretty_opts_from(&|name| self.global_value(heap, &crate::Path::root(name)))
     }
 
     /// The `eval` builtin: type-check `arg` (a runtime `Sexpr`) against the

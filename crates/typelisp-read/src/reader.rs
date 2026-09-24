@@ -18,7 +18,7 @@
 //! comments (`;` line, `#| ... |#` nested block).
 
 use std::collections::HashSet;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -417,14 +417,14 @@ struct Cursor {
     /// 1-based line and column of the character at `pos` (the next one to be
     /// consumed), tracked incrementally in [`Cursor::next`]. Used to build a
     /// [`Loc`] for any read error via [`Cursor::loc`].
-    file: Rc<str>,
+    file: Arc<str>,
     line: u32,
     col: u32,
 }
 
 impl Cursor {
     fn new(file: &str, s: &str) -> Cursor {
-        Cursor { chars: s.chars().collect(), pos: 0, file: Rc::from(file), line: 1, col: 1 }
+        Cursor { chars: s.chars().collect(), pos: 0, file: Arc::from(file), line: 1, col: 1 }
     }
     fn peek(&self) -> Option<char> {
         self.chars.get(self.pos).copied()
@@ -470,7 +470,7 @@ impl Cursor {
     /// The current source position (where the next character would be read),
     /// which is where a read error is reported.
     fn loc(&self) -> Loc {
-        Loc::new(Rc::clone(&self.file), self.line, self.col)
+        Loc::new(Arc::clone(&self.file), self.line, self.col)
     }
     /// Snapshot the full cursor state, for a speculative scan that may need to
     /// be undone ([`read_atom`]'s angle-bracket extension). Line/column are

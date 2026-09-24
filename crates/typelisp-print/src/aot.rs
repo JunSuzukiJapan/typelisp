@@ -306,6 +306,10 @@ pub unsafe extern "C" fn rt_format_call_method(args: *const i64, argc: u32) -> i
 
 /// Installs [`AOT_HOOKS`] once. Idempotent, so each registration shim can
 /// call it without the startup sequence needing an ordering rule.
-fn install() {
+///
+/// Also what an interpreter's worker thread prints with: it has no
+/// interpreter to ask, and the tables these hooks read are the ones the
+/// interpreter fills for it ([`crate::shared::PrintShared`]).
+pub fn install() {
     set_print_hooks(Some(AOT_HOOKS));
 }

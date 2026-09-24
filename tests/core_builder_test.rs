@@ -172,10 +172,9 @@ fn items_unwinds_its_roots() {
 
 #[test]
 fn tagged_at_records_a_location_the_interpreter_can_read_back() {
-    use std::rc::Rc;
 
     let mut h = stress_heap();
-    let loc = Loc::new(Rc::from("f.typl"), 4, 7).with_end(4, 15);
+    let loc = Loc::new(std::sync::Arc::from("f.typl"), 4, 7).with_end(4, 15);
     let node = core::tagged_at(&mut h, "int-any-width", &[Value::Int(1)], Some(loc.clone())).unwrap();
     h.push_root(node);
 
@@ -198,10 +197,9 @@ fn tagged_at_records_a_location_the_interpreter_can_read_back() {
 /// allocation.
 #[test]
 fn a_lowered_location_survives_collections() {
-    use std::rc::Rc;
 
     let mut h = stress_heap();
-    let loc = Loc::new(Rc::from("f.typl"), 1, 1).with_end(1, 6);
+    let loc = Loc::new(std::sync::Arc::from("f.typl"), 1, 1).with_end(1, 6);
     let node = core::tagged_at(&mut h, "unit", &[], Some(loc.clone())).unwrap();
     h.push_root(node);
 

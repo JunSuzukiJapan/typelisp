@@ -1095,12 +1095,33 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         let kind = if name == crate::compile::externs::RT_SUSPEND_BOOL_ANSWER { Repr::Bool.field_kind() } else { 0 };
         return suspend_node(heap, &name, kind, None, &reprs, &args, cx, None);
     }
+    // A call only the interpreter can answer is made on the interpreter's
+    // thread: `(let () (suspend "rt_suspend_main" ..) (call ..))`. The
+    // arguments are evaluated after the move, which no program can tell from
+    // before — the move is not an effect of the program's.
+    let to_main = if crate::compile::externs::needs_interpreter(&name) {
+        let s = suspend_node(heap, crate::compile::externs::RT_SUSPEND_MAIN, 0, None, &[], &[], cx, None)?;
+        heap.push_root(s);
+        Some(s)
+    } else {
+        None
+    };
     let name_v = heap.alloc_string(name);
 
     let mut f = Items::new(heap);
     f.push(name_v);
     arg_pairs(&mut f, &reprs, &args, cx)?;
-    f.finish("call")
+    let call = f.finish("call")?;
+    let Some(to_main) = to_main else { return Ok(call) };
+    heap.push_root(call);
+    let mut seq = Items::new(heap);
+    seq.push(Value::Empty);
+    seq.push(to_main);
+    seq.push(call);
+    let node = seq.finish("let");
+    heap.pop_root();
+    heap.pop_root();
+    node
 }
 
 /// `(suspend NAME KIND TAG-AT TAG-KIND (KIND . ARG)...)` — the island's node
