@@ -300,6 +300,13 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // http`'s flat `src/` is in, and every other AOT source so far.
         loader.load_uses_in(&mut heap, &reader, &mut chk, &mut interp, std::slice::from_ref(&v)).map_err(|e| e.to_string())?;
         let tl = chk.check_form_at(&mut heap, &interp, v, Some(loc)).map_err(|e| e.to_string())?;
+        // Rooted for the rest of the build, like the read form under it
+        // (`next_form_with` roots each one and nothing here pops): `entry_forms`
+        // is a Rust `Vec` the collector cannot see, and checking the next
+        // form or running an initialiser below (`collect_aot_item`'s `exec`)
+        // can collect. `defvar_inits` keeps pointing into these forms until
+        // the compile pass, so they must outlive the loop too.
+        heap.push_root(tl);
         entry_forms.push(tl);
     }
     for w in chk.take_warnings() {

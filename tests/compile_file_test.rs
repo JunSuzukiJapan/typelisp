@@ -1774,3 +1774,20 @@ fn an_echo_server_runs_in_a_standalone_executable() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(0), "stderr was: {}", err);
 }
+
+/// An initialiser that allocates enough to collect at *build* time
+/// (`compile_file` runs each one in the interpreter) must not take the
+/// forms after it with it: they are checked and waiting in a Rust `Vec`
+/// until their own turn. The second `defvar` used to come back as garbage —
+/// "found ``" — because nothing rooted it.
+#[test]
+fn a_collecting_initialiser_leaves_the_later_forms_intact() {
+    let (code, err) = compile_and_capture(
+        "collecting_init",
+        r#"(defun f ((n int)) int (let ((acc 0)) (dotimes (i n) (setf acc (+ acc i))) acc))
+           (defvar (x int) (f 100000))
+           (defvar (y int) (f 3))
+           (defun main () int (if (and (= x 4999950000) (= y 3)) 0 1))"#,
+    );
+    assert_eq!(code, 0, "stderr was: {}", err);
+}
