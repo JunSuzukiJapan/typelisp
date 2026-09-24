@@ -131,7 +131,7 @@ fn probe() -> UnwindingProbe {
         module.verify().expect("probe module failed verification");
 
         let engine = module.create_jit_execution_engine(OptimizationLevel::None).expect("failed to create the JIT engine");
-        engine.add_global_mapping(&callee, typelisp_test_maybe_panic as usize);
+        engine.add_global_mapping(&callee, typelisp_test_maybe_panic as *const () as usize);
         let addr = engine.get_function_address("probe").expect("probe did not resolve");
         // Never dropped: see this static's doc comment.
         std::mem::forget(engine);
@@ -297,8 +297,8 @@ fn protected_probe() -> UnwindingProbe {
         module.verify().expect("protected module failed verification");
 
         let engine = module.create_jit_execution_engine(OptimizationLevel::None).expect("failed to create the JIT engine");
-        engine.add_global_mapping(&callee, typelisp_test_maybe_panic as usize);
-        engine.add_global_mapping(&cleanup_fn, typelisp_test_cleanup_ran as usize);
+        engine.add_global_mapping(&callee, typelisp_test_maybe_panic as *const () as usize);
+        engine.add_global_mapping(&cleanup_fn, typelisp_test_cleanup_ran as *const () as usize);
         let addr = engine.get_function_address("protected").expect("protected did not resolve");
         std::mem::forget(engine);
         addr as usize

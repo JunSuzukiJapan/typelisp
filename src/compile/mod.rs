@@ -494,7 +494,7 @@ mod tests {
         builder.build_return(Some(&result)).unwrap();
         module.verify().expect("module failed verification");
 
-        let externals = vec![("rt_ping".to_string(), rt_ping as usize)];
+        let externals = vec![("rt_ping".to_string(), rt_ping as *const () as usize)];
         let compiled = CompiledFn::new(&module, "jit_ping_test", &externals, typelisp_abi::BODY_ABI_CLASSIC)
             .expect("CompiledFn::new failed");
         assert_eq!(compiled.call(&[]), 42);
@@ -540,7 +540,7 @@ mod tests {
         heap.cons(Value::Int(2), Value::Empty).expect("cons failed");
         set_active_heap(&mut heap as *mut Heap);
 
-        let externals = vec![("rt_heap_live_count".to_string(), rt_heap_live_count as usize)];
+        let externals = vec![("rt_heap_live_count".to_string(), rt_heap_live_count as *const () as usize)];
         let compiled = CompiledFn::new(&module, "jit_heap_test", &externals, typelisp_abi::BODY_ABI_CLASSIC)
             .expect("CompiledFn::new failed");
         assert_eq!(compiled.call(&[]), 2);
@@ -619,9 +619,9 @@ mod tests {
         crate::compile::runtime::set_active_heap(&mut heap as *mut Heap);
 
         let externals = vec![
-            ("rt_cons".to_string(), rt_cons as usize),
-            ("rt_car".to_string(), rt_car as usize),
-            ("rt_cdr".to_string(), rt_cdr as usize),
+            ("rt_cons".to_string(), rt_cons as *const () as usize),
+            ("rt_car".to_string(), rt_car as *const () as usize),
+            ("rt_cdr".to_string(), rt_cdr as *const () as usize),
         ];
         let compiled = CompiledFn::new(&module, "jit_cons_test", &externals, typelisp_abi::BODY_ABI_CLASSIC)
             .expect("CompiledFn::new failed");

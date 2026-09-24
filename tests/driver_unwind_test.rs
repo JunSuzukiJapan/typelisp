@@ -114,7 +114,7 @@ unsafe extern "C-unwind" fn guarded(param: i64) -> i64 {
         set_slot(frame, 2, caught);
         // From here an unwind reaching this frame lands at `PAD_PC`.
         set_slot(frame, FRAME_HANDLER_SLOT, PAD_PC);
-        let call = [raiser as usize as i64, thrown];
+        let call = [raiser as *const () as usize as i64, thrown];
         typelisp_rt::rt_frame_call(call.as_ptr(), 2);
         let set_pc = [frame, AFTER_CALL_PC];
         typelisp_rt::rt_frame_set_pc(set_pc.as_ptr(), 2);
