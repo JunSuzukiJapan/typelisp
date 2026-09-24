@@ -20,6 +20,9 @@
 //! (the scheduler's, not any stream's), and [`tcp_connect_begin`], a connect
 //! that returns before the handshake does — `std` offers neither.
 //!
+//! Since tasks run on several OS threads, one more: [`SelfPipe`], which is
+//! how one thread interrupts another's `poll`.
+//!
 //! Every one of these returns `Option`, and the `None`s are real: CL says
 //! `machine-instance`, `machine-version`, `software-version` and
 //! `file-author` may all answer `NIL`. That is what makes reporting a failure
@@ -443,6 +446,102 @@ pub fn poll_ready(fds: &[(i32, Interest)], timeout: Option<std::time::Duration>)
 #[cfg(not(unix))]
 pub fn poll_ready(_fds: &[(i32, Interest)], _timeout: Option<std::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
     unimplemented!("socket waits need poll, which is POSIX")
+}
+
+/// A pipe a thread writes a byte into to wake another thread out of
+/// [`poll_ready`] — the scheduler's poller includes [`Self::read_fd`] in
+/// every set it polls, and whoever changes what the poller should be
+/// waiting for (a new socket wait, a nearer deadline, a task made ready)
+/// calls [`Self::kick`].
+///
+/// Both ends are non-blocking: a full pipe means a wake is already pending,
+/// so a `kick` that cannot write has nothing left to do, and [`Self::drain`]
+/// reads until there is nothing. Close-on-exec, so a `run-program` child
+/// does not inherit it.
+pub struct SelfPipe {
+    read: i32,
+    write: i32,
+}
+
+#[cfg(unix)]
+impl SelfPipe {
+    pub fn new() -> std::io::Result<SelfPipe> {
+        let mut fds = [0 as libc::c_int; 2];
+        // SAFETY: `fds` is a writable array of the two descriptors `pipe`
+        // fills.
+        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let pipe = SelfPipe { read: fds[0], write: fds[1] };
+        for fd in fds {
+            // SAFETY: `fd` was just returned by `pipe` and is owned by
+            // `pipe`, whose `Drop` closes it if this fails.
+            unsafe {
+                let fl = libc::fcntl(fd, libc::F_GETFL);
+                if fl < 0 || libc::fcntl(fd, libc::F_SETFL, fl | libc::O_NONBLOCK) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                let fd_fl = libc::fcntl(fd, libc::F_GETFD);
+                if fd_fl < 0 || libc::fcntl(fd, libc::F_SETFD, fd_fl | libc::FD_CLOEXEC) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
+        }
+        Ok(pipe)
+    }
+
+    /// The descriptor to poll for readability.
+    pub fn read_fd(&self) -> i32 {
+        self.read
+    }
+
+    /// Wakes the poller, if one is waiting — and makes the next poll return
+    /// at once if none is yet.
+    pub fn kick(&self) {
+        let byte = 1u8;
+        // SAFETY: one byte from a live local. The result is ignored on
+        // purpose: the only failure a non-blocking pipe write can have here
+        // is `EAGAIN`, a full pipe — a wake is already pending.
+        unsafe { libc::write(self.write, &byte as *const u8 as *const libc::c_void, 1) };
+    }
+
+    /// Empties the pipe after a poll that it woke.
+    pub fn drain(&self) {
+        let mut buf = [0u8; 64];
+        // SAFETY: reads into a live local buffer of the length passed.
+        while unsafe { libc::read(self.read, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) } > 0 {}
+    }
+}
+
+#[cfg(not(unix))]
+impl SelfPipe {
+    pub fn new() -> std::io::Result<SelfPipe> {
+        unimplemented!("the scheduler's poller wakes through a pipe, which is POSIX")
+    }
+
+    pub fn read_fd(&self) -> i32 {
+        unimplemented!("the scheduler's poller wakes through a pipe, which is POSIX")
+    }
+
+    pub fn kick(&self) {
+        unimplemented!("the scheduler's poller wakes through a pipe, which is POSIX")
+    }
+
+    pub fn drain(&self) {
+        unimplemented!("the scheduler's poller wakes through a pipe, which is POSIX")
+    }
+}
+
+impl Drop for SelfPipe {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        // SAFETY: both descriptors are this value's, and nothing uses them
+        // after it is dropped.
+        unsafe {
+            libc::close(self.read);
+            libc::close(self.write);
+        }
+    }
 }
 
 /// Starts a TCP connection to `addr` without waiting for it: the socket

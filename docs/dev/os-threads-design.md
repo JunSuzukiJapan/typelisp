@@ -287,6 +287,62 @@ enum Affinity { Any, Main, Dedicated(ThreadKey) }   // Slot ごと
 `Scheduler<CompiledTask>` を `Arc<SchedShared>` に、ワーカーを起動してから main タスクを
 `drive_main`。main が終わればプロセス終了（Go の規則、既存どおり）。
 
+### 実装（Phase 3）と上の案からの差分
+
+`crates/typelisp-rt/src/sched.rs` の「one scheduler, several threads」節
+（`SchedShared`/`Locked`/`next`/`run_one`/`drive_main`/`drive_worker`/`start_workers`/
+`thread_count`）、`os.rs` の `SelfPipe`、`lib.rs` の `run_program`。テストは
+`crates/typelisp-rt/tests/sched_threads_test.rs`（Rust の `TaskBody` で「本当に複数スレッドで
+同時に走る」を観測）と `tests/os_threads_test.rs`（AOT、全プログラムを
+`TYPELISP_THREADS=1` と `=4` で走らせて終了コードと出力が同じ）。
+
+- **`TYPELISP_THREADS` は main を含む総数**。未設定なら `available_parallelism()`。0・非整数は
+  起動前にエラー（黙って別の数にしない）。ワーカーは `n-1` 本、`run_program` の先頭で起動し
+  join しない（main が終わればプロセスごと終わる）。
+- **ロックは `parking_lot::Mutex`、待ちは必ず native**（`SchedShared::lock`）。§4 の規則
+  「ロックは native の内側で取って内側で離す」は、ここでは**待つ側を全員 native にする**形で
+  守る: ロックを持ったまま `select` の答えの `cons` で GC に park してよい（ロックを待つ者は
+  全員 native なので collector はそれを待たない）。ロック取得は GC 点になるので、
+  `run_one` は **タスクのルートを手放す前に**ロックを取る（`Done` の結果は `finish` が
+  スケジューラのルートに移すまでタスクのスタックにしか居ない）。`answer_now` は
+  `Waiting` が運ぶ値（`send` の値・`go` のクロージャ・`select` の送信腕）をロックの間
+  ルートする。
+- **起こす仕組みは `Scheduler::dirty` 1 本**。ready に積む・`finish`・新しい時計/ソケット
+  待ちで立ち、`Locked` を離すとき（と Condvar で待つ直前）に `notify_all`、poller が居れば
+  self-pipe を蹴る。操作ごとに「起こし忘れ」が起きない形。
+- **Affinity は入れていない**。AOT のタスクはどれもどのスレッドで走ってもよく、main タスクも
+  ワーカーが走らせてよい（結果は `finish` がルートし、`drive_main` が取り出す——
+  `take_main_result`）。`Dedicated` は Phase 4、`Main` は Phase 5 で要るようになった時に足す。
+- 「every task is blocked」は **main タスクを待っているスレッドだけ**が判定する
+  （`running == 0` かつ ready・時計・ソケット待ちが無い）。ワーカーが暇なのは drive と drive の
+  間でも起きるので、ワーカーには判定させない。
+- 失敗は `SharedState::failure`（最初の 1 つ）+ `stopped`（ワーカーは以後タスクを取らない）。
+  `drive_main` は失敗したのが main 自身なら `e`、他なら `failure_left_task(e)` を返す。
+- `wake_io` は `io_snapshot`/`apply_io` に分け、単一スレッドの `drive` もこれを使う。
+  `apply_io` は slot が**まだ同じ `Waiting::Io{fd, interest, deadline}` か**を確かめてから起こす。
+- `switch_every_step` は RefCell の `drive`（typl）だけが読む。
+- `drive`（`RefCell` 版）は typl が Phase 5 まで使う。AOT は `drive_main` だけ。
+
+Phase 3 で塞いだ、単一スレッドでは見えなかった穴:
+
+- **`chan_recv` の pop した値が無ルート**だった: リングから pop した直後に待っていた
+  `select` の送り手を起こすと、答えの `cons` が GC しうる。今は起こす間 push_root。
+- **`RwLock` の再帰 read でデッドロック**: `Heap::string` などは `&self` から read ガードを
+  返すので、1 スレッドが 2 つ同時に持てる（`rt_str_eq`）。parking_lot の `read` は待っている
+  writer の後ろに並ぶので、間に他スレッドの `alloc_string` が入ると互いに待つ。
+  `interning`/`strings`/`boxes` の read は全部 `read_recursive` にした（書き込みは `&mut self`
+  なので、1 スレッドが自分に対してできるのは再帰 read だけ）。`os_threads_test` の GC テストが
+  実際にハングして見つかった。
+- **ワーカーから見えない表が残っていた**: リーダマクロ表（`macro_chars`/`dispatch_chars`）と
+  ソース位置表（`locs`）はビューごとだった → `HeapShared::interning` へ。AOT の印字登録
+  （`FIELD_TEMPLATES`/`PRINT_OBJECT`/`FORMAT_CALL`）は thread_local だった →
+  `PrintShared` へ（Phase 5c でやる予定だったが、AOT のワーカーが enum の niche や
+  `print-object` を正しく印字するのに今要る）。ワーカーは `set_rt_shared`/
+  `set_print_shared`/`set_print_hooks` で main のものを受け取る。
+
+Phase 4 に回したもの: 言語から「どのスレッドで走ったか」を観測する `Thread::current-id`
+（計画の検証 (a)。Rust 側の `sched_threads_test` で代わりに観測している）。
+
 ### typl（AOT が完成してから）
 
 `Interp` は `Rc`/`RefCell`、front の `Task` は `Rc<dyn CompiledBody>` を含む。方針は

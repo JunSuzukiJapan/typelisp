@@ -2702,25 +2702,54 @@ pub unsafe fn read_program(args: *const i64, argc: u32, what: &str) -> Program {
 /// The scheduler is a local of this frame and nothing else: it is owned by
 /// the frame that owns the program's run, exactly as the interpreter's is a
 /// field of the interpreter — never a global, because its tables hold roots
-/// into the heap (`sched`'s module comment).
+/// into the heap (`sched`'s module comment). The worker threads share it
+/// through an `Arc`, and hold nothing else of this frame's.
+///
+/// `TYPELISP_THREADS` threads step tasks, this one included
+/// ([`sched::thread_count`](crate::sched::thread_count)). The workers are
+/// started before the first initialiser, share this thread's heap (a view
+/// each), its global/vtable/stream tables and its printer's registrations,
+/// and are never joined: when `main` returns the program ends, and every
+/// task still running with it — Go's rule.
 ///
 /// # Safety
 ///
 /// [`rt_run_program`]'s.
 unsafe fn run_program(program: &Program) -> Result<Value, i64> {
     let heap = active_heap();
-    let sched = std::cell::RefCell::new(crate::sched::Scheduler::<crate::sched::CompiledTask>::new());
+    let threads = match crate::sched::thread_count() {
+        Ok(n) => n,
+        Err(m) => {
+            eprintln!("error: {}", m);
+            return Err(EXIT_CODE_PANIC);
+        }
+    };
+    let sched = match crate::sched::SchedShared::<crate::sched::CompiledTask>::new() {
+        Ok(s) => std::sync::Arc::new(s),
+        Err(e) => fatal(&format!("the scheduler could not be set up: {}", e)),
+    };
+    let rt = crate::shared::rt_shared();
+    let print = typelisp_print::shared::print_shared();
+    let hooks = typelisp_print::runtime::print_hooks();
+    let started = crate::sched::start_workers(&sched, heap, threads - 1, move || {
+        crate::shared::set_rt_shared(std::sync::Arc::clone(&rt));
+        typelisp_print::shared::set_print_shared(std::sync::Arc::clone(&print));
+        typelisp_print::runtime::set_print_hooks(Some(hooks));
+    });
+    if let Err(e) = started {
+        fatal(&format!("a scheduler worker thread could not be started: {}", e));
+    }
     // Built inside `admit`, on the task's own root stack — `entry` pushes
     // the task's state slots, and they belong there and not on this frame's.
-    let mut run = |f: crate::coroutine::CoroutineFn, initialiser: bool| {
-        let main = sched.borrow_mut().admit(heap, |heap| {
+    let run = |heap: &mut Heap, f: crate::coroutine::CoroutineFn, initialiser: bool| {
+        let main = sched.lock(heap).admit(heap, |heap| {
             if initialiser {
                 crate::sched::CompiledTask::initialiser(heap, f)
             } else {
                 crate::sched::CompiledTask::entry(heap, f)
             }
         });
-        match crate::sched::drive(&sched, heap, &(), main) {
+        match crate::sched::drive_main(&sched, heap, &(), main) {
             Ok(v) => Ok(v),
             // The same line `run_entry_payload` prints for a panic that
             // reached the entry as a Rust unwind — a task's failure is the
@@ -2734,9 +2763,9 @@ unsafe fn run_program(program: &Program) -> Result<Value, i64> {
     for init in &program.inits {
         // An initialiser's value is the global's storage id, already stored
         // by the body itself (`compile-global-init`); nothing here reads it.
-        run(*init, true)?;
+        run(heap, *init, true)?;
     }
-    run(program.entry, false)
+    run(heap, program.entry, false)
 }
 
 /// A classic-signature door onto a coroutine body: `args` is

@@ -25,9 +25,9 @@
 //! interpreter, a local of the AOT entry point. Never a `static` or a
 //! `thread_local` — a channel's buffered values live in this heap's root
 //! stacks, and a table that outlived the heap would be the dangling
-//! `ACTIVE_HEAP` bug with values in it. It also keeps the door open for OS
-//! threads later: whether one scheduler is shared under a lock or each thread
-//! has its own, the ownership is the same.
+//! `ACTIVE_HEAP` bug with values in it. Several OS threads share one through
+//! an `Arc` ([`SchedShared`]) and the ownership is the same: the frame that
+//! owns the program's run owns it, and the workers hold only the `Arc`.
 //!
 //! What *is* published thread-locally is a **borrow**, for the extent of one
 //! [`drive`] and not a moment longer ([`answer_now`]): a driver standing on a
@@ -39,10 +39,12 @@
 //! borrow is registered and cleared by a guard on `drive`'s frame, exactly as
 //! `ACTIVE_HEAP` is registered per scope, so nothing outlives its owner.
 //!
-//! Cooperative and single-threaded today: nothing preempts a task, and one OS
-//! thread runs all of them. `ACTIVE_HEAP` has to be a single thread-local and
-//! `Heap` is `!Send`, so tasks cannot be spread across threads without making
-//! the heap shareable first — a bigger job than the concurrency itself.
+//! Cooperative, and — in an executable — on several OS threads: nothing
+//! preempts a task, but `TYPELISP_THREADS` threads step ready tasks at the
+//! same time, all on one heap ([`SchedShared`], [`drive_main`],
+//! [`drive_worker`]; `docs/dev/os-threads-design.md` §8). The interpreter
+//! still drives its scheduler from one thread through a `RefCell`
+//! ([`drive`]) — its tasks hold the interpreter's `Rc`s.
 
 use std::cell::RefCell;
 
@@ -391,9 +393,11 @@ impl<B: TaskBody> AnswerNow for RefCell<Scheduler<B>> {
 }
 
 thread_local! {
-    /// The scheduler whose [`drive`] is on this thread's stack, if any — a
-    /// borrow published for that drive's extent and cleared by its guard. See
-    /// the module comment's "Owned, not global".
+    /// The scheduler whose [`drive`] (or [`drive_main`]/[`drive_worker`]) is
+    /// on this thread's stack, if any — a borrow published for that drive's
+    /// extent and cleared by its guard. See the module comment's "Owned, not
+    /// global". Per thread: each worker publishes the shared scheduler for
+    /// its own loop.
     static DRIVING: std::cell::Cell<Option<std::ptr::NonNull<dyn AnswerNow>>> = const { std::cell::Cell::new(None) };
 }
 
@@ -519,8 +523,19 @@ pub struct Scheduler<B> {
     /// is that a suspended task's frames and roots survive whatever another
     /// task does in between — the same role `gc_stress` plays for a single
     /// task's allocations, and the reason this knob is on the real scheduler
-    /// rather than in a test harness of its own.
+    /// rather than in a test harness of its own. Only [`drive`] reads it:
+    /// with several threads stepping tasks ([`drive_main`]) there is no one
+    /// order to be harsh about.
     switch_every_step: bool,
+    /// How many tasks are out being stepped (`Slot::Running`) — what tells
+    /// "every task is blocked" apart from "every task this thread can see is
+    /// blocked" once other threads step tasks too.
+    running: usize,
+    /// Whether anything happened since the last time [`Locked`] looked that
+    /// an idle thread would want to know about: a task made ready, a task
+    /// finished, a new clock or socket wait. The lock's owner wakes the
+    /// others when it lets go ([`Locked::flush`]).
+    dirty: bool,
 }
 
 impl<B> Default for Scheduler<B> {
@@ -536,6 +551,8 @@ impl<B> Default for Scheduler<B> {
             chan_roots: None,
             rng: 0,
             switch_every_step: false,
+            running: 0,
+            dirty: false,
         }
     }
 }
@@ -581,6 +598,7 @@ impl<B: TaskBody> Scheduler<B> {
         };
         self.slots[id.0] = Slot::Parked(TaskSlot { task, roots });
         self.ready.push_back(id);
+        self.dirty = true;
         id
     }
 
@@ -589,21 +607,43 @@ impl<B: TaskBody> Scheduler<B> {
     fn next_ready(&mut self) -> Option<(TaskId, TaskSlot<B>)> {
         let id = self.ready.pop_front()?;
         match std::mem::replace(&mut self.slots[id.0], Slot::Running) {
-            Slot::Parked(slot) => Some((id, slot)),
+            Slot::Parked(slot) => {
+                self.running += 1;
+                Some((id, slot))
+            }
             _ => unreachable!("a queued task is parked in its slot"),
         }
     }
 
     /// Returns a task that is still running to the back of the queue.
     fn put_back(&mut self, id: TaskId, slot: TaskSlot<B>) {
+        self.running -= 1;
         self.slots[id.0] = Slot::Parked(slot);
         self.ready.push_back(id);
+        self.dirty = true;
     }
 
     /// Frees a task's position entirely — for the main task, whose result goes
     /// back to the caller rather than being kept for a `wait`.
     fn retire(&mut self, id: TaskId) {
+        self.running -= 1;
         self.slots[id.0] = Slot::Empty;
+    }
+
+    /// The main task's result, once it has one, taken back out of the
+    /// scheduler: the position is freed and the root let go of, because the
+    /// caller takes the value and no `Task<T>` names the main task —
+    /// [`Self::retire`] for a main task some other thread finished.
+    fn take_main_result(&mut self, heap: &mut Heap, id: TaskId) -> Option<Value> {
+        let Some(Slot::Done(v)) = self.slots.get(id.0) else { return None };
+        let v = *v;
+        self.slots[id.0] = Slot::Empty;
+        let stack = self.roots.expect("a finished task's result is rooted");
+        let home = heap.current_root_stack();
+        heap.switch_to_root_stack(stack);
+        heap.set_root(id.0, Value::Empty);
+        heap.switch_to_root_stack(home);
+        Some(v)
     }
 
     /// The value a finished task answered with, for a caller that drove the
@@ -756,6 +796,10 @@ impl<B: TaskBody> Scheduler<B> {
     /// Suspends `id` until `w` is satisfied — or puts it straight back on the
     /// queue if it already is.
     fn block(&mut self, heap: &mut Heap, id: TaskId, mut slot: TaskSlot<B>, w: Waiting) {
+        self.running -= 1;
+        // A new clock or socket wait changes what an idle thread should be
+        // waiting for; a ready task is something for it to run.
+        self.dirty = true;
         match self.try_now(heap, &w) {
             Some(answer) => {
                 deliver_to(heap, &mut slot, answer);
@@ -873,6 +917,7 @@ impl<B: TaskBody> Scheduler<B> {
         deliver_to(heap, &mut slot, answer);
         self.slots[i] = Slot::Parked(slot);
         self.ready.push_back(TaskId(i));
+        self.dirty = true;
     }
 
     /// Wakes a receiver with `v` (or the end of a closed channel), answering
@@ -918,10 +963,14 @@ impl<B: TaskBody> Scheduler<B> {
     fn chan_recv(&mut self, heap: &mut Heap, c: ChanId, key: &str) -> Option<Result<Value, SchedError>> {
         if let Some(v) = self.chan_pop(heap, c) {
             // Taking one out made room, so a sender that was waiting for room
-            // can put its value in and go.
+            // can put its value in and go. Waking a `select` builds its answer
+            // with a `cons`, which can collect — and `v` left its ring slot
+            // (its root) the moment it was popped.
             if let Some((i, arm, offered)) = self.waiting_sender(c) {
                 self.chan_push(heap, c, offered);
+                heap.push_root(v);
                 self.wake_sender(heap, i, arm);
+                heap.pop_root();
             }
             return Some(Ok(heap.alloc_option(key, Some(v))));
         }
@@ -962,6 +1011,8 @@ impl<B: TaskBody> Scheduler<B> {
     /// the task's stack, and the tasks being woken will not touch it until they
     /// are stepped.
     fn finish(&mut self, heap: &mut Heap, id: TaskId, v: Value) {
+        self.running -= 1;
+        self.dirty = true;
         let sched = *self.roots.get_or_insert_with(|| heap.new_root_stack());
         let home = heap.current_root_stack();
         heap.switch_to_root_stack(sched);
@@ -1007,54 +1058,74 @@ impl<B: TaskBody> Scheduler<B> {
     }
 
     /// Puts every task whose socket is ready back on the queue, waiting at
-    /// most `timeout` for one to become so — **the one place the program
-    /// waits on the network**, by way of [`crate::os::poll_ready`].
+    /// most `timeout` for one to become so — **the one place a single
+    /// thread waits on the network**, by way of [`crate::os::poll_ready`].
     ///
     /// Called with a zero timeout before each task switch (`wake_due`'s
     /// reason: a socket that became readable while another task ran for a
     /// second should not wait for that second to end), and with the nearest
     /// sleeper's deadline — or no limit — when nothing at all is ready.
-    ///
-    /// A `poll` failure wakes everyone waiting: each task's retry then fails
-    /// with a message of its own, which beats parking forever on an error
-    /// the scheduler cannot attribute.
-    ///
-    /// This is also the one piece that moves when tasks are spread over OS
-    /// threads: the set and the call stay, only the caller changes.
+    /// [`drive_main`]'s threads wait on the network the same way, in the
+    /// same three steps, except that the lock is let go of around the
+    /// middle one ([`Locked::poll`]).
     fn wake_io(&mut self, heap: &mut Heap, timeout: Option<std::time::Duration>) {
         if self.io_waiting == 0 {
             return;
         }
-        let fds: Vec<(i32, crate::os::Interest)> = self
-            .slots
-            .iter()
-            .filter_map(|s| match s {
-                Slot::Blocked(_, Waiting::Io { fd, interest, .. }) => Some((*fd, *interest)),
-                _ => None,
-            })
-            .collect();
+        let waits = self.io_snapshot();
+        let fds: Vec<(i32, crate::os::Interest)> = waits.iter().map(|w| (w.fd, w.interest)).collect();
         // Native unless it cannot block: other threads may collect while
         // this one waits on the network.
         let polled = match timeout {
             Some(t) if t.is_zero() => crate::os::poll_ready(&fds, timeout),
             _ => heap.native(|| crate::os::poll_ready(&fds, timeout)),
         };
-        let ready: Vec<(i32, bool)> = match polled {
-            Ok(r) => r,
-            Err(_) => fds.iter().map(|(fd, _)| (*fd, true)).collect(),
+        self.apply_io(heap, &waits, polled);
+    }
+
+    /// Every socket wait, and which slot it is in — what a `poll` is built
+    /// from.
+    fn io_snapshot(&self) -> Vec<IoWait> {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, s)| match s {
+                Slot::Blocked(_, Waiting::Io { fd, interest, deadline }) => {
+                    Some(IoWait { slot, fd: *fd, interest: *interest, deadline: *deadline })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Wakes the tasks `polled` says are ready — `polled` being the answer
+    /// for `waits` in the same order, perhaps with more after it (a
+    /// poller's self-pipe).
+    ///
+    /// A `poll` failure wakes everyone waiting: each task's retry then fails
+    /// with a message of its own, which beats parking forever on an error
+    /// the scheduler cannot attribute.
+    ///
+    /// **Each slot is checked again** before it is woken: when the lock was
+    /// let go of around the `poll`, the clock may have woken the task
+    /// (`net-wait-for`'s deadline) and the task may since be waiting on
+    /// something else — possibly another socket. Only a slot still waiting
+    /// on exactly what was polled for is the one the answer is about.
+    fn apply_io(&mut self, heap: &mut Heap, waits: &[IoWait], polled: std::io::Result<Vec<(i32, bool)>>) {
+        let ready: Vec<bool> = match polled {
+            Ok(r) => r.iter().take(waits.len()).map(|(_, r)| *r).collect(),
+            Err(_) => vec![true; waits.len()],
         };
-        // Same order as `fds`, which is slot order — so this is one walk.
-        let mut answers = ready.iter();
-        for i in 0..self.slots.len() {
-            let deadline = match &self.slots[i] {
-                Slot::Blocked(_, Waiting::Io { deadline, .. }) => *deadline,
-                _ => continue,
-            };
-            let woken = answers.next().map(|(_, r)| *r).unwrap_or(true);
-            if !woken {
+        for (w, ready) in waits.iter().zip(ready) {
+            let still = matches!(
+                &self.slots[w.slot],
+                Slot::Blocked(_, Waiting::Io { fd, interest, deadline })
+                    if *fd == w.fd && *interest == w.interest && *deadline == w.deadline
+            );
+            if !ready || !still {
                 continue;
             }
-            self.wake(heap, i, Ok(io_ready_answer(deadline)));
+            self.wake(heap, w.slot, Ok(io_ready_answer(w.deadline)));
             self.io_waiting -= 1;
         }
     }
@@ -1076,6 +1147,16 @@ impl<B: TaskBody> Scheduler<B> {
             })
             .min()
     }
+}
+
+/// One task's socket wait, as it stood when a `poll` was built — see
+/// [`Scheduler::apply_io`] for why the whole wait is kept and not just the
+/// descriptor.
+struct IoWait {
+    slot: usize,
+    fd: i32,
+    interest: crate::os::Interest,
+    deadline: Option<std::time::Instant>,
 }
 
 /// `(ARM . VALUE)` — what a `select` answers with. The arm index is the
@@ -1192,6 +1273,387 @@ pub fn drive<B: TaskBody>(
                     Err(e) => return Err(B::failure_left_task(e)),
                 }
             }
+        }
+    }
+}
+
+// ---- one scheduler, several threads -------------------------------------------
+
+/// A scheduler several OS threads step tasks from — `docs/dev/os-threads-design.md`
+/// §8. One thread calls [`drive_main`] and waits for the main task; the
+/// others ([`start_workers`]) run [`drive_worker`] until [`Self::shutdown`].
+///
+/// **Every wait for the lock is native** ([`Self::lock`]), and that is what
+/// lets the lock be held across a heap operation that can stop for a
+/// collection — a `select`'s answer is a `cons`: a thread parked for a
+/// collection while holding it is only in the way of threads that promised
+/// not to touch the heap while they wait. The other direction never
+/// happens: nothing holding one of the heap's own locks takes this one.
+///
+/// Stepping a task holds no lock, as [`drive`] holds no borrow: the step
+/// can ask the scheduler a question of its own ([`answer_now`]).
+pub struct SchedShared<B: TaskBody> {
+    state: parking_lot::Mutex<SharedState<B>>,
+    /// Where idle threads wait for [`Scheduler::dirty`].
+    changed: parking_lot::Condvar,
+    /// How an idle thread that is waiting on the network is woken instead —
+    /// see [`crate::os::SelfPipe`].
+    io_wake: crate::os::SelfPipe,
+}
+
+struct SharedState<B: TaskBody> {
+    sched: Scheduler<B>,
+    /// Whether some thread is in `poll` over the scheduler's socket waits
+    /// with the lock let go of. One at a time: the others wait on the
+    /// condition variable, and a change the poller should see kicks the
+    /// pipe.
+    polling: bool,
+    /// The first task failure the program has had, and which task it was.
+    /// [`drive_main`] reports it; a failure ends the program whichever task
+    /// it was in (Go's rule for an unrecovered panic).
+    failure: Option<(TaskId, B::Error)>,
+    /// Workers take no more tasks: the program failed, or [`SchedShared::shutdown`].
+    stopped: bool,
+}
+
+impl<B: TaskBody> SchedShared<B> {
+    /// Fails only if the operating system will not give this process a
+    /// pipe.
+    pub fn new() -> std::io::Result<SchedShared<B>> {
+        Ok(SchedShared {
+            state: parking_lot::Mutex::new(SharedState {
+                sched: Scheduler::new(),
+                polling: false,
+                failure: None,
+                stopped: false,
+            }),
+            changed: parking_lot::Condvar::new(),
+            io_wake: crate::os::SelfPipe::new()?,
+        })
+    }
+
+    /// Takes the lock — **as native**, because the thread holding it may be
+    /// parked for a collection that is waiting for this one.
+    ///
+    /// Taking it is therefore a point where another thread may collect:
+    /// what the caller still needs has to be rooted, as around a `cons`.
+    pub fn lock(&self, heap: &mut Heap) -> Locked<'_, B> {
+        let guard = heap.native(|| self.state.lock());
+        Locked { guard, shared: self }
+    }
+
+    /// Stops the workers: each one returns from [`drive_worker`] the next
+    /// time it looks for a task. A task one of them is stepping runs until
+    /// it next stops.
+    pub fn shutdown(&self, heap: &mut Heap) {
+        let mut s = self.lock(heap);
+        s.guard.stopped = true;
+        s.guard.sched.dirty = true;
+    }
+}
+
+impl<B: TaskBody> AnswerNow for SchedShared<B> {
+    /// Whatever `w` carries is rooted while the lock is taken — taking it can
+    /// let another thread collect, and a `send`'s value or a `go`'s closure
+    /// is in nothing but `w` on the way here from a machine frame.
+    fn answer_now(&self, heap: &mut Heap, w: &Waiting) -> Option<Result<Value, SchedError>> {
+        let carried = waiting_values(w);
+        for v in &carried {
+            heap.push_root(*v);
+        }
+        let answer = self.lock(heap).try_now(heap, w);
+        for _ in &carried {
+            heap.pop_root();
+        }
+        answer
+    }
+}
+
+/// The heap values a wait carries: a `send`'s value, a `go`'s closure, a
+/// `select`'s send arms.
+fn waiting_values(w: &Waiting) -> Vec<Value> {
+    match w {
+        Waiting::Chan(ChanOp::Send(_, v)) | Waiting::Spawn(v) => vec![*v],
+        Waiting::Select { ops, .. } => ops
+            .iter()
+            .filter_map(|op| match op {
+                SelectOp::Send(_, v) => Some(*v),
+                SelectOp::Recv(..) => None,
+            })
+            .collect(),
+        Waiting::Task(_) | Waiting::Yield | Waiting::Until(_) | Waiting::Chan(_) | Waiting::Io { .. } => Vec::new(),
+    }
+}
+
+/// The lock on a [`SchedShared`], dereferencing to its [`Scheduler`].
+///
+/// Letting go of it wakes the idle threads if anything they would want to
+/// know about happened meanwhile ([`Scheduler::dirty`]) — the one place that
+/// happens, so no operation has to remember to.
+pub struct Locked<'a, B: TaskBody> {
+    guard: parking_lot::MutexGuard<'a, SharedState<B>>,
+    shared: &'a SchedShared<B>,
+}
+
+impl<B: TaskBody> std::ops::Deref for Locked<'_, B> {
+    type Target = Scheduler<B>;
+    fn deref(&self) -> &Scheduler<B> {
+        &self.guard.sched
+    }
+}
+
+impl<B: TaskBody> std::ops::DerefMut for Locked<'_, B> {
+    fn deref_mut(&mut self) -> &mut Scheduler<B> {
+        &mut self.guard.sched
+    }
+}
+
+impl<B: TaskBody> Drop for Locked<'_, B> {
+    fn drop(&mut self) {
+        self.flush();
+    }
+}
+
+impl<'a, B: TaskBody> Locked<'a, B> {
+    /// Wakes every idle thread if something changed: the ones waiting on the
+    /// condition variable, and the poller through its pipe.
+    fn flush(&mut self) {
+        if std::mem::take(&mut self.guard.sched.dirty) {
+            self.shared.changed.notify_all();
+            if self.guard.polling {
+                self.shared.io_wake.kick();
+            }
+        }
+    }
+
+    /// Records a task's failure, and stops the workers — the program is
+    /// over. The first failure is the one reported.
+    fn fail(&mut self, id: TaskId, e: B::Error) {
+        self.guard.sched.running -= 1;
+        self.guard.sched.dirty = true;
+        self.guard.stopped = true;
+        if self.guard.failure.is_none() {
+            self.guard.failure = Some((id, e));
+        }
+    }
+
+    /// Waits — native — until something changes or `until` passes.
+    fn wait(mut self, heap: &mut Heap, until: Option<std::time::Duration>) -> Locked<'a, B> {
+        self.flush();
+        let changed = &self.shared.changed;
+        let guard = &mut self.guard;
+        heap.native(|| match until {
+            Some(d) => {
+                changed.wait_for(guard, d);
+            }
+            None => changed.wait(guard),
+        });
+        self
+    }
+
+    /// Waits on the scheduler's sockets — and the self-pipe, so that a change
+    /// wakes it — for at most `until`, with the lock let go of, and wakes the
+    /// tasks whose sockets are ready. The same three steps as
+    /// [`Scheduler::wake_io`].
+    fn poll(mut self, heap: &mut Heap, until: Option<std::time::Duration>) -> Locked<'a, B> {
+        let shared = self.shared;
+        self.guard.polling = true;
+        let waits = self.guard.sched.io_snapshot();
+        let mut fds: Vec<(i32, crate::os::Interest)> = waits.iter().map(|w| (w.fd, w.interest)).collect();
+        fds.push((shared.io_wake.read_fd(), crate::os::Interest::Readable));
+        drop(self);
+        let polled = heap.native(|| crate::os::poll_ready(&fds, until));
+        shared.io_wake.drain();
+        let mut s = shared.lock(heap);
+        s.guard.polling = false;
+        s.guard.sched.apply_io(heap, &waits, polled);
+        s
+    }
+}
+
+/// What a thread looking for work found.
+enum Next<B: TaskBody> {
+    /// A task to step.
+    Run(TaskId, TaskSlot<B>),
+    /// What the main task came to — only for the thread waiting on it.
+    Main(Result<Value, B::Error>),
+    /// The workers are stopped.
+    Stop,
+}
+
+/// Waits for something this thread can do: a ready task, or — for the
+/// thread waiting on `main` — the main task's end or the program's failure.
+///
+/// Idle, a thread waits on the clock and the condition variable, or — if
+/// sockets are waited on and nobody is polling them yet — on the network.
+/// "Every task is blocked" is decided only by the thread that has a main
+/// task to wait for: a worker idle between two drives is not a deadlock.
+fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, main: Option<TaskId>) -> Next<B> {
+    let mut s = shared.lock(heap);
+    loop {
+        match main {
+            Some(main) => {
+                if let Some((id, e)) = s.guard.failure.take() {
+                    return Next::Main(Err(if id == main { e } else { B::failure_left_task(e) }));
+                }
+                if let Some(v) = s.take_main_result(heap, main) {
+                    return Next::Main(Ok(v));
+                }
+            }
+            None if s.guard.stopped => return Next::Stop,
+            None => {}
+        }
+        s.wake_due(heap);
+        s.wake_io(heap, Some(std::time::Duration::ZERO));
+        if let Some((id, slot)) = s.next_ready() {
+            return Next::Run(id, slot);
+        }
+        let deadline = s.earliest_deadline();
+        let io_waiting = s.io_waiting > 0;
+        if main.is_some() && s.running == 0 && deadline.is_none() && !io_waiting {
+            // Nothing is out being stepped on any thread and nothing can
+            // become ready by itself: the main task is waiting on something
+            // that will never happen.
+            s.guard.stopped = true;
+            s.dirty = true;
+            return Next::Main(Err(
+                SchedError::Internal("scheduler: every task is blocked and none can proceed".to_string()).into()
+            ));
+        }
+        let until = deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
+        s = if io_waiting && !s.guard.polling { s.poll(heap, until) } else { s.wait(heap, until) };
+    }
+}
+
+/// Steps one task until it stops, and puts it wherever it goes next.
+///
+/// The lock is taken **before** the task's roots are given up: taking it can
+/// let another thread collect, and a finished task's result is rooted only
+/// in the task's own stack until `finish` roots it in the scheduler's.
+fn run_one<B: TaskBody>(
+    shared: &SchedShared<B>,
+    heap: &mut Heap,
+    cx: &B::Cx,
+    home: RootStackId,
+    id: TaskId,
+    mut slot: TaskSlot<B>,
+) {
+    heap.switch_to_root_stack(slot.roots);
+    let outcome = loop {
+        match slot.task.step(heap, cx) {
+            // Between steps the task's state is all in its frames and root
+            // stack, so another thread's collection may run here.
+            Progress::Running => heap.safepoint(),
+            done => break done,
+        }
+    };
+    let mut s = shared.lock(heap);
+    match outcome {
+        Progress::Running => unreachable!("a running task is stepped again"),
+        Progress::Blocked(w) => {
+            heap.switch_to_root_stack(home);
+            s.block(heap, id, slot, w);
+        }
+        Progress::Done(r) => {
+            heap.truncate_roots(slot.task.sbase());
+            heap.switch_to_root_stack(home);
+            heap.drop_root_stack(slot.roots);
+            match r {
+                Ok(v) => s.finish(heap, id, v),
+                Err(e) => s.fail(id, e),
+            }
+        }
+    }
+}
+
+/// [`drive`] for a [`SchedShared`]: runs tasks on this thread — alongside
+/// whatever workers run them on theirs — until `main` finishes, and returns
+/// its result.
+///
+/// The main task may be stepped by any thread. Its result is kept rooted by
+/// the scheduler until this thread takes it, and is *not* rooted once
+/// returned, exactly as [`drive`]'s is not: this thread reaches no point
+/// where another could collect before the caller has it in hand.
+///
+/// Tasks outlive the main task as they do under [`drive`], and the workers
+/// go on running them.
+pub fn drive_main<B: TaskBody>(
+    shared: &SchedShared<B>,
+    heap: &mut Heap,
+    cx: &B::Cx,
+    main: TaskId,
+) -> Result<Value, B::Error> {
+    let _driving = DrivingGuard::publish(shared);
+    let home = heap.current_root_stack();
+    loop {
+        match next(shared, heap, Some(main)) {
+            Next::Run(id, slot) => run_one(shared, heap, cx, home, id, slot),
+            Next::Main(r) => return r,
+            Next::Stop => unreachable!("the thread waiting on the main task is not a worker"),
+        }
+    }
+}
+
+/// A worker thread's loop: steps whatever task is ready, until
+/// [`SchedShared::shutdown`] or a failure stops the workers.
+pub fn drive_worker<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, cx: &B::Cx) {
+    let _driving = DrivingGuard::publish(shared);
+    let home = heap.current_root_stack();
+    loop {
+        match next(shared, heap, None) {
+            Next::Run(id, slot) => run_one(shared, heap, cx, home, id, slot),
+            Next::Stop => return,
+            Next::Main(_) => unreachable!("a worker waits on no main task"),
+        }
+    }
+}
+
+/// Starts `n` worker threads on `shared`. Each attaches a view of its own
+/// onto `heap`'s shared heap, registers it as its active heap, runs `setup`
+/// — which is where it takes on whatever else the thread that started it
+/// has per thread (the runtime's and the printer's shared tables) — and
+/// then runs [`drive_worker`] until the workers are stopped.
+pub fn start_workers<B>(
+    shared: &std::sync::Arc<SchedShared<B>>,
+    heap: &Heap,
+    n: usize,
+    setup: impl Fn() + Send + Sync + 'static,
+) -> std::io::Result<Vec<std::thread::JoinHandle<()>>>
+where
+    B: TaskBody<Cx = ()> + Send + 'static,
+    B::Error: Send,
+{
+    let setup = std::sync::Arc::new(setup);
+    (0..n)
+        .map(|i| {
+            let shared = std::sync::Arc::clone(shared);
+            let heap_shared = heap.shared_handle();
+            let setup = std::sync::Arc::clone(&setup);
+            std::thread::Builder::new().name(format!("typelisp-worker-{}", i)).spawn(move || {
+                let mut view = Heap::attach(&heap_shared);
+                typelisp_abi::set_active_heap(&mut view);
+                setup();
+                drive_worker(&shared, &mut view, &());
+                typelisp_abi::set_active_heap(std::ptr::null_mut());
+            })
+        })
+        .collect()
+}
+
+/// How many OS threads run tasks, the one that waits on the main task
+/// included: `TYPELISP_THREADS` when it is set, and the machine's
+/// parallelism when it is not.
+pub fn thread_count() -> Result<usize, String> {
+    match std::env::var("TYPELISP_THREADS") {
+        Ok(v) => match v.trim().parse::<usize>() {
+            Ok(n) if n >= 1 => Ok(n),
+            _ => Err(format!("TYPELISP_THREADS={:?} is not a number of threads (a whole number, 1 or more)", v)),
+        },
+        Err(std::env::VarError::NotPresent) => std::thread::available_parallelism()
+            .map(|n| n.get())
+            .map_err(|e| format!("cannot tell how many threads to run tasks on ({}); set TYPELISP_THREADS", e)),
+        Err(std::env::VarError::NotUnicode(v)) => {
+            Err(format!("TYPELISP_THREADS={:?} is not a number of threads (a whole number, 1 or more)", v))
         }
     }
 }

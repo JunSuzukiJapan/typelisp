@@ -84,7 +84,10 @@ pub fn set_print_hooks(hooks: Option<PrintHooks>) {
     HOOKS.with(|cell| *cell.borrow_mut() = hooks.unwrap_or(BARE_HOOKS));
 }
 
-fn hooks() -> PrintHooks {
+/// This thread's [`PrintHooks`] — for a thread that starts another one to
+/// run on the same program (a scheduler worker) and hands it the same
+/// hooks with [`set_print_hooks`].
+pub fn print_hooks() -> PrintHooks {
     HOOKS.with(|cell| *cell.borrow())
 }
 
@@ -134,12 +137,12 @@ pub fn session_open() -> bool {
 
 /// The three layout control variables, as of right now.
 pub fn current_opts(heap: &Heap) -> Opts {
-    (hooks().opts)(heap)
+    (print_hooks().opts)(heap)
 }
 
 /// The three "what to print" control variables, as of right now.
 pub fn current_print_vars(heap: &Heap) -> PrintVars {
-    (hooks().print_vars)(heap)
+    (print_hooks().print_vars)(heap)
 }
 
 /// Builds `control`'s output without committing it — the shared half of
@@ -150,7 +153,7 @@ pub fn current_print_vars(heap: &Heap) -> PrintVars {
 /// laying it out early would freeze line breaks chosen against the wrong
 /// starting column and without the enclosing block's indentation.
 pub fn build_format(heap: &mut Heap, control: &str, args: Value) -> Result<Out, String> {
-    let env = RtPrintEnv { hooks: hooks() };
+    let env = RtPrintEnv { hooks: print_hooks() };
     let opts = current_opts(heap);
     let ctx = RenderCtx { env: &env, print_vars: current_print_vars(heap) };
     format::build(heap, ctx, control, args, &opts)
@@ -171,7 +174,7 @@ pub fn build_pprint(heap: &mut Heap, which: &str, value: Value, colinc: i64) -> 
         "pprint-tabular" => Style::Tabular(if colinc <= 0 { 16 } else { colinc }),
         _ => Style::Default,
     };
-    let env = RtPrintEnv { hooks: hooks() };
+    let env = RtPrintEnv { hooks: print_hooks() };
     let ctx = RenderCtx { env: &env, print_vars: current_print_vars(heap) };
     let mut out = Out::new();
     if which == "pprint" {

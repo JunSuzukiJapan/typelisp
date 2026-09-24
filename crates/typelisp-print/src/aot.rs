@@ -28,7 +28,6 @@
 //! module actually calls a printing shim.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use typelisp_abi::{decode, encode, fatal};
 use typelisp_mem::{Heap, Value};
@@ -41,21 +40,11 @@ use crate::stored_type_key;
 // (`docs/dev/os-threads-design.md` §5/Phase 1d), reached through
 // `shared::print_shared()`.
 
+// `FIELD_TEMPLATES`/`PRINT_OBJECT`/`FORMAT_CALL` are
+// `shared::PrintShared`'s too, for the same reason: a worker thread
+// dispatches through the tables main's startup sequence filled.
+
 thread_local! {
-    /// `(base type key, variant index or NO_VARIANT, field index or
-    /// EVERY_FIELD) -> the field's type key template`, filled by
-    /// [`rt_print_field_template`] — what says a struct or enum field holds
-    /// a niche-represented `Option` (`PrintEnv::field_is_niched_option`).
-    static FIELD_TEMPLATES: RefCell<HashMap<(String, i64, i64), String>> = RefCell::new(HashMap::new());
-    /// `type key -> the address of that type's compiled `print-object``,
-    /// filled by [`rt_print_object_method`].
-    static PRINT_OBJECT: RefCell<HashMap<String, usize>> = RefCell::new(HashMap::new());
-    /// `(type key, method name) -> the address of that method's compiled
-    /// body`, filled by [`rt_format_call_method`] — what `~/name/` dispatches
-    /// through. Registered per *directive site*, not per type: the checker
-    /// scans each literal control string and names only the methods a `~/ /`
-    /// in this program can actually reach.
-    static FORMAT_CALL: RefCell<HashMap<(String, String), usize>> = RefCell::new(HashMap::new());
     /// The values whose own `print-object` is running right now, innermost
     /// last — the re-entry guard, so `(impl print-object point (… (format
     /// false "~a" self)))` degrades to the built-in `#<point 1 2>` rather
@@ -80,10 +69,11 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
     field_is_niched_option: |key, variant, index| {
         let base = typelisp_mem::base_type_key(key).to_string();
         let variant = variant.map_or(NO_VARIANT, |v| v as i64);
-        let template = FIELD_TEMPLATES.with(|t| {
-            let t = t.borrow();
+        let template = {
+            let shared = crate::shared::print_shared();
+            let t = shared.field_templates.read();
             t.get(&(base.clone(), variant, index as i64)).or_else(|| t.get(&(base, variant, EVERY_FIELD))).cloned()
-        });
+        };
         match template {
             Some(template) => {
                 let args = typelisp_mem::type_key_args(key);
@@ -111,7 +101,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     // call below.
     let Some(addr) = ({
         let Some(key) = stored_type_key(heap, id) else { return Ok(None) };
-        PRINT_OBJECT.with(|t| t.borrow().get(&key).copied())
+        crate::shared::print_shared().print_object.read().get(&key).copied()
     }) else {
         return Ok(None);
     };
@@ -138,7 +128,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     }
 }
 
-/// `~/name/` in an AOT executable, dispatched through [`FORMAT_CALL`].
+/// `~/name/` in an AOT executable, dispatched through `PrintShared::format_call`.
 ///
 /// The table is filled at startup with the methods the checker found by
 /// scanning this program's literal control strings, so a name that reaches
@@ -166,8 +156,11 @@ fn aot_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool)
         Value::Empty | Value::Cons(_) | Value::Path(_) => vec!["sexpr".to_string()],
         Value::Int(_) => vec!["i32".to_string()],
     };
-    let found: Vec<usize> = FORMAT_CALL
-        .with(|t| keys.iter().filter_map(|k| t.borrow().get(&(k.clone(), name.to_string())).copied()).collect());
+    let found: Vec<usize> = {
+        let shared = crate::shared::print_shared();
+        let t = shared.format_call.read();
+        keys.iter().filter_map(|k| t.get(&(k.clone(), name.to_string())).copied()).collect()
+    };
     let addr = match found.len() {
         1 => found[0],
         0 => {
@@ -264,7 +257,7 @@ pub unsafe extern "C" fn rt_print_field_template(args: *const i64, argc: u32) ->
     let index = *args.add(3);
     let template = static_str(args, 4, "rt_print_field_template");
     install();
-    FIELD_TEMPLATES.with(|t| t.borrow_mut().insert((key.to_string(), variant, index), template.to_string()));
+    crate::shared::print_shared().field_templates.write().insert((key.to_string(), variant, index), template.to_string());
     0
 }
 
@@ -283,7 +276,7 @@ pub unsafe extern "C" fn rt_print_object_method(args: *const i64, argc: u32) -> 
     let key = static_str(args, 0, "rt_print_object_method");
     let addr = *args.add(2) as usize;
     install();
-    PRINT_OBJECT.with(|t| t.borrow_mut().insert(key.to_string(), addr));
+    crate::shared::print_shared().print_object.write().insert(key.to_string(), addr);
     0
 }
 
@@ -307,7 +300,7 @@ pub unsafe extern "C" fn rt_format_call_method(args: *const i64, argc: u32) -> i
     let name = static_str(args, 2, "rt_format_call_method");
     let addr = *args.add(4) as usize;
     install();
-    FORMAT_CALL.with(|t| t.borrow_mut().insert((key.to_string(), name.to_string()), addr));
+    crate::shared::print_shared().format_call.write().insert((key.to_string(), name.to_string()), addr);
     0
 }
 
