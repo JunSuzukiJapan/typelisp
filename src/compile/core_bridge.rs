@@ -487,8 +487,10 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         }
 
         // ---- calls -------------------------------------------------------
-        "go" => translate_go(heap, form, cx),
-        "spawn" => translate_spawn(heap, form, cx),
+        "go" => translate_go(heap, form, "spawn", cx),
+        "thread" => translate_go(heap, form, "spawn-thread", cx),
+        "spawn" => translate_spawn(heap, form, "rt_suspend_go", cx),
+        "spawn-thread" => translate_spawn(heap, form, "rt_suspend_thread", cx),
         "tag" => translate_tag(heap, form, cx),
         "call" => translate_call(heap, form, cx),
         "assoc" => translate_assoc(heap, form, cx),
@@ -935,7 +937,10 @@ fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
 /// The `let` and `lambda` are ordinary core nodes translated by the ordinary
 /// paths ([`translate_let`], [`translate_lambda`]), so captures, kinds and
 /// rooting are decided the way they are for a lambda a program wrote.
-fn translate_go(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+///
+/// `(thread RET-R CALL)` is the same rewriting with `spawn-thread` for
+/// `spawn` — `spawn` names which.
+fn translate_go(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> Result<Value, Error> {
     let ret_repr = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
     let call = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
     let tag = core::op(heap, call).ok_or_else(|| malformed(heap, form))?.to_string();
@@ -1007,7 +1012,7 @@ fn translate_go(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     s.push_root(no_params);
     let lambda = core::tagged(&mut s, "lambda", &[no_params, ret_repr, tagged])?;
     s.push_root(lambda);
-    let spawn = core::tagged(&mut s, "spawn", &[ret_repr, lambda])?;
+    let spawn = core::tagged(&mut s, spawn, &[ret_repr, lambda])?;
     s.push_root(spawn);
     let let_form = core::tagged(&mut s, "let", &[binds_list, spawn])?;
     s.push_root(let_form);
@@ -1028,10 +1033,13 @@ fn translate_go(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
 /// the handle's: a tagged box, read back unchanged.
 ///
 /// Only [`translate_go`] builds this node; the checker never does.
-fn translate_spawn(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+///
+/// `(spawn-thread RET-R LAMBDA)` is the same with `rt_suspend_thread`, and
+/// wakes with a `Thread<T>` handle — `shim` names which.
+fn translate_spawn(heap: &mut Heap, form: Value, shim: &str, cx: Ctx) -> Result<Value, Error> {
     let lambda = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
     let kind = Repr::Struct.field_kind();
-    suspend_node(heap, "rt_suspend_go", kind, None, &[Repr::Fn], &[lambda], cx, None)
+    suspend_node(heap, shim, kind, None, &[Repr::Fn], &[lambda], cx, None)
 }
 
 /// `(tag R E)` -> `(tag KIND E')`: `E`'s value in its tagged form, per its
@@ -1201,6 +1209,18 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
                 return suspend_node(heap, shim, ret.field_kind(), None, &reprs, &args, cx, Some(key));
             }
             return suspend_node(heap, shim, ret.field_kind(), None, &reprs, &args, cx, None);
+        }
+    }
+    // A builtin static method with a shim of its own (`Thread::current-id`)
+    // is an ordinary call of that shim: nothing is waited for, and there is
+    // no compiled body to call.
+    if let Some(shim) = crate::compile::externs::rt_static_method_symbol(type_name.last_segment(), &method) {
+        if type_name.is_simple() && !instance {
+            let name_v = heap.alloc_string(shim.to_string());
+            let mut f = Items::new(heap);
+            f.push(name_v);
+            arg_pairs(&mut f, &reprs, &args, cx)?;
+            return f.finish("call");
         }
     }
     if let Some(key) = llvm_op_key(&type_name, &self_repr) {

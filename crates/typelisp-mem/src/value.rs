@@ -196,6 +196,7 @@ pub const BUILTIN_TYPE_KEYS: &[&str] = &[
     "neterror",
     "task",
     "chan",
+    "thread",
 ];
 
 impl TypeKeyId {
@@ -224,6 +225,9 @@ impl TypeKeyId {
     /// thing at run time whatever `T` is.
     pub const TASK: TypeKeyId = TypeKeyId(15);
     pub const CHAN: TypeKeyId = TypeKeyId(16);
+    /// `Thread<T>` — the same box a `Task<T>` is (the scheduler's id), under
+    /// its own key so that a thread prints as one.
+    pub const THREAD: TypeKeyId = TypeKeyId(17);
 
     pub fn as_u32(&self) -> u32 {
         self.0

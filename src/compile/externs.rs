@@ -258,6 +258,8 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
 pub(crate) fn rt_suspend_method_symbol(type_local: &str, method: &str) -> Option<&'static str> {
     match (type_local, method) {
         ("task", "wait") => Some("rt_suspend_wait"),
+        // A thread is a task to the scheduler, and `join` is `wait`.
+        ("thread", "join") => Some("rt_suspend_wait"),
         // Every channel operation, including the four that never wait: the
         // table of channels is the scheduler's, and the driver is the only
         // way to it (`typelisp_abi::call_state::SUSPEND_CHAN_NEW` says why
@@ -268,6 +270,18 @@ pub(crate) fn rt_suspend_method_symbol(type_local: &str, method: &str) -> Option
         ("chan", "close") => Some("rt_suspend_chan_close"),
         ("chan", "send") => Some("rt_suspend_chan_send"),
         ("chan", "recv") => Some("rt_suspend_chan_recv"),
+        _ => None,
+    }
+}
+
+/// The shim a builtin **static** method that does not suspend lowers to, or
+/// `None`. The free-function table is keyed by bare name, and these need
+/// their owner type too — the same reason [`rt_suspend_method_symbol`] is a
+/// table of its own.
+pub(crate) fn rt_static_method_symbol(type_local: &str, method: &str) -> Option<&'static str> {
+    match (type_local, method) {
+        ("thread", "current-id") => Some("rt_thread_current_id"),
+        ("thread", "available-parallelism") => Some("rt_thread_available_parallelism"),
         _ => None,
     }
 }
@@ -480,7 +494,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 302] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 305] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -495,7 +509,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 302] {
     use typelisp_rt::coroutine::{
         rt_loop_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
         rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_select, rt_suspend_chan_send,
-        rt_suspend_go, rt_suspend_io, rt_suspend_io_for, rt_suspend_sleep,
+        rt_suspend_go, rt_suspend_io, rt_suspend_io_for, rt_suspend_sleep, rt_suspend_thread,
         rt_suspend_wait, rt_suspend_yield,
     };
     use typelisp_rt::sys_builtin::{
@@ -503,8 +517,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 302] {
         rt_get_internal_real_time, rt_get_internal_run_time,
         rt_get_universal_time, rt_getenv, rt_heap_info, rt_home_directory, rt_lisp_implementation_version,
         rt_machine_instance, rt_machine_type, rt_machine_version, rt_parse_float, rt_parse_int,
-        rt_software_type, rt_software_version, rt_timezone_daylight_p,
-        rt_timezone_offset_seconds,
+        rt_software_type, rt_software_version, rt_thread_available_parallelism, rt_thread_current_id,
+        rt_timezone_daylight_p, rt_timezone_offset_seconds,
     };
     use typelisp_rt::integer::{
         rt_integer_add, rt_integer_ash, rt_integer_cmp, rt_integer_div, rt_integer_fits, rt_integer_fits_char,
@@ -849,6 +863,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 302] {
         ("rt_suspend_wait", rt_suspend_wait as usize),
         ("rt_suspend_yield", rt_suspend_yield as usize),
         ("rt_suspend_go", rt_suspend_go as usize),
+        ("rt_suspend_thread", rt_suspend_thread as usize),
+        ("rt_thread_current_id", rt_thread_current_id as usize),
+        ("rt_thread_available_parallelism", rt_thread_available_parallelism as usize),
         ("rt_suspend_chan_new", rt_suspend_chan_new as usize),
         ("rt_suspend_chan_len", rt_suspend_chan_len as usize),
         ("rt_suspend_chan_cap", rt_suspend_chan_cap as usize),

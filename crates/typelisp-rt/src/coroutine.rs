@@ -626,6 +626,22 @@ pub unsafe extern "C" fn rt_suspend_go(args: *const i64, argc: u32) -> i64 {
     0
 }
 
+/// `(thread ...)` for compiled code: [`rt_suspend_go`]'s closure, for a task
+/// the scheduler runs on an OS thread of its own. The answer is the
+/// `Thread<T>` handle.
+///
+/// # Safety
+///
+/// `args` must point to `argc >= 1` valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_suspend_thread(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        typelisp_abi::fatal("rt_suspend_thread: expected the closure to start");
+    }
+    call_state::set_pending_suspend(call_state::SUSPEND_THREAD, *args);
+    0
+}
+
 /// `(yield)` for compiled code: give up the rest of this task's turn.
 ///
 /// # Safety

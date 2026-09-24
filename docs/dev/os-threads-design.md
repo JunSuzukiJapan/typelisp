@@ -417,6 +417,43 @@ Phase 4 に回したもの: 言語から「どのスレッドで走ったか」�
 - 専用スレッドの中の `go` は共有キューへ（typl では系譜規則で `Any`）。専用スレッド上のタスク
   panic の規則は goroutine と同じ（`failure_left_task`）。main 終了でプロセス終了（他スレッドも）。
 
+### 実装（Phase 4）と上の案からの差分
+
+`sched.rs` の `TaskSlot::pinned`/`Scheduler::pinned_ready`/`admit_thread`/`drive_pinned`/
+`ThreadStarter`、`coroutine.rs` の `rt_suspend_thread`（`SUSPEND_THREAD = 14`）、
+`sys_builtin.rs` の `thread_current_id`/`thread_available_parallelism`。テストは
+`tests/os_threads_test.rs` の (a)(f)〜(i) と thread の panic、`tests/concurrency_test.rs` の
+`thread_*`（typl 側の拒否と静的関数）。
+
+- **Affinity は enum にせず `TaskSlot::pinned: bool` + 専用の ready 列 `pinned_ready`**。
+  pinned なタスクを取れるのはそのタスク自身の id を渡したスレッドだけ（`next_ready(Some(own))`）、
+  main とワーカーは `next_ready(None)` で共有キューだけを見る。スレッドのキー＝タスクの id。
+  `Main` affinity は Phase 5 で要るようになった時に足す。
+- **スレッドを起こすのは `try_now` の中、スケジューラのロック下**。起こし方
+  （`Heap::attach` + `setup` + `drive_pinned`）は `start_workers` が `ThreadStarter` として
+  スケジューラに渡す（ワーカー 0 本でも渡す）。起こされたスレッドはロックを取るまで待つだけなので
+  ロック下で spawn してよい。起こせなければ asking タスクの panic で、admit したスロットは
+  取り消す。starter の中は `Weak` の upgrade（ロックを持つスレッドが呼ぶので失敗しない）、
+  起きたスレッドは強参照を持って走る。
+- **`drive_pinned` は `next` を共用**（`Who::{Main, Worker, Pinned}`）。自分のタスクが
+  `Done` になった（`finish` がルートした）か `stopped` なら抜け、ビューは `Drop` で登録を外す。
+  「every task is blocked」の判定に **`pinned_ready` が空であること**を足した（専用スレッドが
+  まだ取っていないだけの ready タスクを見落とすとデッドロックと誤判定する）。
+- **`Thread<T>` の型キーは `task` と別の `thread`（`TypeKeyId::THREAD`）**。箱の中身は同じで
+  `join` は `task_id_of` で読む。印字が `Thread` を名乗るため。
+- **`Thread::current-id`/`available-parallelism` は `Thread<T>` の builtin 静的メソッド**。
+  `T` がどこにも現れないので、チェッカーの「型引数を推論できない」規則に
+  「**builtin で、シグネチャが所有者の型引数に触れないなら `()` で埋める**」を足した
+  （本体を持つメソッドは本体が `T` を綴りうるので従来どおり拒否）。compiled 側は
+  `externs::rt_static_method_symbol` の表から `rt_thread_*` への普通の `call`。
+  `int` の境界は他の builtin と同じく宣言型で raw。
+- **`Thread::spawn` は prelude の `defmethod`**（`(fn () T)` の引数から `T` が推論できることを
+  着手時に確かめた）。
+- **typl の `thread` は catchable な panic**（`sched::thread_refused`）。interpreted な
+  `Op::Thread` は評価前に拒否、JIT 済みコードの `rt_suspend_thread` は starter の無い
+  `RefCell` スケジューラの `admit_thread` が同じ文言で拒否する。Phase 5d で置き換える。
+- `thread` は `go` と同じく予約語（束縛不可）。
+
 ## 10. 既知のリスク
 
 1. **`Slab` 化のコスト**: `box_slots[id]` の index 計算が (chunk, offset) になる。

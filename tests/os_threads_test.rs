@@ -7,9 +7,13 @@
 //! the same exit code and print the same thing. What they print is chosen to
 //! be the same whatever order the tasks ran in: totals, not traces.
 //!
-//! That tasks really do run on several threads at once is checked below the
-//! language, in `crates/typelisp-rt/tests/sched_threads_test.rs`; a program
-//! cannot name its thread until `Thread::current-id` exists (Phase 4).
+//! That tasks really do run on several threads at once is checked twice: below
+//! the language, in `crates/typelisp-rt/tests/sched_threads_test.rs`, and here
+//! with `Thread::current-id` — the one test whose answer depends on the thread
+//! count, and says so.
+//!
+//! `thread` (Phase 4) starts a task on an OS thread of its own, whatever the
+//! count: the tests for it give the same answers on one thread and on four.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -20,25 +24,42 @@ fn tmp_dir() -> PathBuf {
     dir
 }
 
-/// Compiles `source` as `<scratch>/<name>` and runs it with 1 and with 4
-/// threads, asserting each run exits with `code` and prints `stdout`. Returns
-/// the 4-thread run's stderr.
-fn same_on_one_and_four_threads(name: &str, source: &str, code: i32, stdout: &str) -> String {
+/// Compiles `source` as `<scratch>/<name>` and answers with the executable's
+/// path.
+fn compile(name: &str, source: &str) -> PathBuf {
     let dir = tmp_dir();
     let src_path = dir.join(format!("{}.typl", name));
     let out_path = dir.join(name);
     std::fs::write(&src_path, source).expect("failed to write test source file");
     typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
         .expect("compile_file failed");
+    out_path
+}
+
+/// Runs `exe` with `TYPELISP_THREADS=threads`: exit code, stdout, stderr.
+fn run_on(exe: &PathBuf, threads: &str) -> (Option<i32>, String, String) {
+    let out = Command::new(exe)
+        .env("TYPELISP_THREADS", threads)
+        .output()
+        .expect("failed to run the compiled executable");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// Compiles `source` as `<scratch>/<name>` and runs it with 1 and with 4
+/// threads, asserting each run exits with `code` and prints `stdout`. Returns
+/// the 4-thread run's stderr.
+fn same_on_one_and_four_threads(name: &str, source: &str, code: i32, stdout: &str) -> String {
+    let exe = compile(name, source);
     let mut stderr = String::new();
     for threads in ["1", "4"] {
-        let out = Command::new(&out_path)
-            .env("TYPELISP_THREADS", threads)
-            .output()
-            .expect("failed to run the compiled executable");
-        stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-        assert_eq!(out.status.code(), Some(code), "TYPELISP_THREADS={}: stderr was: {}", threads, stderr);
-        assert_eq!(String::from_utf8_lossy(&out.stdout), stdout, "TYPELISP_THREADS={}: stderr was: {}", threads, stderr);
+        let (got_code, got_stdout, got_stderr) = run_on(&exe, threads);
+        stderr = got_stderr;
+        assert_eq!(got_code, Some(code), "TYPELISP_THREADS={}: stderr was: {}", threads, stderr);
+        assert_eq!(got_stdout, stdout, "TYPELISP_THREADS={}: stderr was: {}", threads, stderr);
     }
     stderr
 }
@@ -259,4 +280,159 @@ fn a_thread_count_that_is_not_one_is_refused() {
         assert_eq!(String::from_utf8_lossy(&out.stdout), "", "TYPELISP_THREADS={}", bad);
         assert!(err.contains("TYPELISP_THREADS"), "TYPELISP_THREADS={}: stderr was: {}", bad, err);
     }
+}
+
+// ---- which thread a task ran on (Phase 4) ------------------------------------
+
+/// Sixty-four tasks that each do some work and then report the OS thread they
+/// finished on. With four threads the reports name more than one thread —
+/// the language-level view of what `sched_threads_test` observes in Rust —
+/// and with one they all name the thread `main` runs on.
+///
+/// The only test here whose answer depends on the thread count, and the only
+/// one that leans on timing: sixty-four tasks, all ready at once, with three
+/// idle workers woken by the first of them, finishing on one thread would take
+/// the workers never getting the lock in the time the main thread spends on
+/// sixty-four loops of work.
+#[test]
+fn tasks_report_the_os_thread_they_ran_on() {
+    let exe = compile(
+        "threads_current_id",
+        r#"(defun work-then-report ((out Chan<int>)) ()
+             (let ((acc 0))
+               (dotimes (i 20000) (setf acc (+ acc (mod i 7))))
+               (send out (Thread::current-id))))
+           (defun main () int
+             (let ((out (the Chan<int> (Chan::new 64)))
+                   (me (Thread::current-id))
+                   (seen (the Vector<int> (Vector::new))))
+               (dotimes (i 64) (go (work-then-report out)))
+               (dotimes (i 64)
+                 (let ((id (unwrap (recv out))))
+                   (match (find id (iter seen))
+                     ((some x) ())
+                     ((none) (push seen id)))))
+               (println "~a ~a" (len seen) (if (eq (len seen) 1) (eq (get seen 0) me) true))
+               0))"#,
+    );
+    let (code, out, err) = run_on(&exe, "1");
+    assert_eq!(code, Some(0), "stderr was: {}", err);
+    assert_eq!(out, "1 true\n", "on one thread every task runs where `main` does; stderr was: {}", err);
+    let (code, out, err) = run_on(&exe, "4");
+    assert_eq!(code, Some(0), "stderr was: {}", err);
+    let distinct: usize = out.split_whitespace().next().and_then(|n| n.parse().ok()).expect("a count");
+    assert!((2..=4).contains(&distinct), "expected the tasks on 2 to 4 threads, got {:?}; stderr was: {}", out, err);
+}
+
+/// (f) A `thread` runs on an OS thread of its own: not the one `main` runs on,
+/// and none that runs `go` tasks — on one thread and on four.
+#[test]
+fn a_thread_runs_on_an_os_thread_of_its_own() {
+    same_on_one_and_four_threads(
+        "threads_own_thread",
+        r#"(defun whoami () int (Thread::current-id))
+           (defun main () int
+             (let* ((me (Thread::current-id))
+                    (th (thread (whoami)))
+                    (tasks (the Vector<Task<int>> (Vector::new))))
+               (dotimes (i 16) (push tasks (go (whoami))))
+               (let ((other (join th))
+                     (clash false))
+                 (doiter (t (iter tasks)) (if (eq (wait t) other) (setf clash true) clash))
+                 (println "~a ~a" (eq other me) clash))
+               0))"#,
+        0,
+        "false false\n",
+    );
+}
+
+/// (g) `join` answers with what the call returned, and asking again gives the
+/// same answer. `Thread::spawn` is the same thing for a closure.
+#[test]
+fn join_answers_with_the_result_every_time_it_is_asked() {
+    same_on_one_and_four_threads(
+        "threads_join",
+        r#"(defun square ((n int)) int (* n n))
+           (defun greeting ((name string)) string (format false "hello, ~a" name))
+           (defun main () int
+             (let ((a (thread (square 7)))
+                   (b (thread (greeting "thread")))
+                   (c (Thread::spawn (lambda () int (+ 40 2)))))
+               (println "~a ~a ~a" (join a) (join a) (join b))
+               (println "~a ~a" (join c) (join c))
+               (println "~a" (> (Thread::available-parallelism) 0))
+               0))"#,
+        0,
+        "49 49 hello, thread\n42 42\ntrue\n",
+    );
+}
+
+/// (h) A thread that blocks in a C call holds up only itself. While it sleeps
+/// in `usleep`, `main` and a task hand a hundred values back and forth — on
+/// one thread too, because the thread in `usleep` is not that one — and only
+/// then does the sleeper report in.
+#[test]
+fn a_thread_blocked_in_a_c_call_holds_up_no_task() {
+    same_on_one_and_four_threads(
+        "threads_blocking_ffi",
+        r#"(defffi (c-usleep "usleep") (u32) i32)
+           (defun sleeper ((done Chan<()>)) int
+             (progn (unsafe (c-usleep (as u32 500000))) (send done ()) 1))
+           (defun echo ((in Chan<int>) (out Chan<int>)) ()
+             (loop (match (recv in)
+                     ((none) (break))
+                     ((some v) (send out (+ v 1))))))
+           (defun main () int
+             (let* ((done (the Chan<()> (Chan::new 1)))
+                    (th (thread (sleeper done)))
+                    (to (the Chan<int> (Chan::new 0)))
+                    (from (the Chan<int> (Chan::new 0)))
+                    (n 0))
+               (go (echo to from))
+               (dotimes (i 100) (send to n) (setf n (unwrap (recv from))))
+               (close to)
+               (println "~a ~a" n (len done))
+               (println "~a" (join th))
+               0))"#,
+        0,
+        "100 0\n1\n",
+    );
+}
+
+/// (i) Code on a `thread` can start tasks and talk to the rest of the program
+/// over channels, as any task can.
+#[test]
+fn a_thread_can_start_tasks_and_send() {
+    same_on_one_and_four_threads(
+        "threads_go_from_thread",
+        r#"(defun double-into ((out Chan<int>) (n int)) () (send out (* 2 n)))
+           (defun fan-out ((out Chan<int>) (n int)) int
+             (progn (dotimes (i n) (go (double-into out i))) n))
+           (defun main () int
+             (let* ((out (the Chan<int> (Chan::new 0)))
+                    (th (thread (fan-out out 10)))
+                    (sum 0))
+               (dotimes (i 10) (setf sum (+ sum (unwrap (recv out)))))
+               (println "~a ~a" sum (join th))
+               0))"#,
+        0,
+        "90 10\n",
+    );
+}
+
+/// A `thread` that panics stops the program, as a task's panic does.
+#[test]
+fn a_panic_on_a_thread_stops_the_program() {
+    let err = same_on_one_and_four_threads(
+        "threads_thread_panic",
+        r#"(defun boom () int (panic "boom on a thread"))
+           (defun main () int
+             (let ((never (the Chan<int> (Chan::new 0))))
+               (thread (boom))
+               (recv never)
+               0))"#,
+        1,
+        "",
+    );
+    assert!(err.contains("panic: boom on a thread"), "stderr was: {}", err);
 }

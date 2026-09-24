@@ -2126,11 +2126,12 @@ CL がパス名指定子（文字列 or パス名）を受ける場所で、こ�
 
 ## 20. タスクとチャネル
 
-軽量スレッド（Go の goroutine 相当）の語彙。起動の `go` と多重待ちの `select` は特殊形で、
-[syntax.md §12](syntax.md#12-並行機構タスク) にある。ここはそれ以外——型とメソッドと関数。
+軽量スレッド（Go の goroutine 相当）の語彙。起動の `go`・`thread` と多重待ちの `select` は
+特殊形で、[syntax.md §12](syntax.md#12-並行機構タスク) にある。ここはそれ以外——型とメソッドと関数。
 
-**協調的・シングルスレッド**で、切り替わるのは書いた場所だけ。どこで切り替わるかと
-Go との違いは syntax.md §12.4 / §12.6。
+**協調的**で、1 つのタスクが切り替わるのは書いた場所だけ。`compile-file` の実行ファイルでは
+タスクが `TYPELISP_THREADS` 本の OS スレッドで同時に走り、`typl` では 1 本で走る。
+どこで切り替わるかと Go との違いは syntax.md §12.4 / §12.6。
 
 ### 20.1 `Task<T>` — タスクのハンドル
 
@@ -2265,6 +2266,32 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
 - **`Atomic`**。`Mutex` で足りる。
 - **タスクローカル変数**（Go にも無い）。
 - **nil チャネル**。理由と代わりの書き方は syntax.md §12.6。
+
+### 20.8 `Thread<T>` — 専用の OS スレッド
+
+`(thread (f args...))`（[syntax.md §12.1.1](syntax.md#1211-thread--専用の-os-スレッドでタスクを起動する)）が
+返すハンドル。`Task<T>` の対で、実行時の表現も同じ（スケジューラの id を持つ箱）。
+
+| 名前 | 使い方 | 型 | 意味 |
+|---|---|---|---|
+| `join` | `(join th)` | `(Thread<T>)→T` | 完了を待ち、その値を返す（呼んだ**タスク**が止まる。何度でも可、値はキャッシュ） |
+| `Thread::spawn` | `(Thread::spawn (lambda () int 42))` | `((fn () T))→Thread<T>` | `(thread (f))` の関数版（Rust の `std::thread::spawn`） |
+| `Thread::current-id` | `(Thread::current-id)` | `()→int` | 走っている OS スレッドの番号。プロセス内で一意で、「同じスレッドか」以上の意味は無い |
+| `Thread::available-parallelism` | `(Thread::available-parallelism)` | `()→int` | マシンが同時に走らせられるスレッド数（`TYPELISP_THREADS` の既定値）。OS が答えないときは panic |
+
+```lisp
+(defffi (c-usleep "usleep") (u32) i32)
+(defun sleepy ((us int)) int
+  (progn (unsafe (c-usleep (as u32 us))) us))    ; ブロックする C 関数
+(let ((th (thread (sleepy 500000))))
+  ...                                            ; 他のタスクはその間も進む
+  (join th))                                     ; => 500000
+```
+
+- ブロックする C 関数（`defffi`）を呼んでも、止まるのはそのスレッドだけ。
+- `thread` の中の `go` は通常のタスクとして他のスレッドで走る。
+- **`typl` ではまだ使えない**（`thread` は catchable な panic）。`Thread::current-id` と
+  `Thread::available-parallelism` はどちらでも使える。
 
 ## 21. ネットワーク（TCP / TLS / Unix ドメイン / UDP）
 

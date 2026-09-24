@@ -437,6 +437,14 @@ well_known_symbols! {
      translations."
     SPAWN => "spawn"
     TAG => "tag"
+
+    "Appended for `thread` (2026-09-24). `(thread (f a b))` is `go`'s shape
+     and `go`'s rule — the parts of the call are evaluated where the form
+     stands — for a task the scheduler runs on an OS thread of its own. The
+     bridge lowers it as it lowers `go`, except that the closure goes to
+     `(spawn-thread RET-R LAMBDA)`, which wakes with a `Thread<T>` handle."
+    THREAD => "thread"
+    SPAWN_THREAD => "spawn-thread"
 }
 
 

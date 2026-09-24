@@ -246,6 +246,9 @@ fn calls() {
         // The callee can be a value, in which case the wrapped node is an
         // `apply` and its callee is a form like any argument.
         "(go (apply (var g) int-any-width (int-any-width) (int-any-width 1)))",
+        // `(thread CALL)` — `go`'s shape, for a task on an OS thread of its
+        // own.
+        "(thread (call (f) () f (int-any-width) (int-any-width 1)))",
         // `(select ARM...)`. Each arm is a plain list rather than a node —
         // `("recv" VAR KEY CHAN BODY)`, `("send" KIND CHAN VALUE BODY)`,
         // `("else" BODY)` — because the fields are metadata (a tag, a bound
@@ -473,11 +476,13 @@ const SHARED_WITH_ISLAND: &[&str] = &[
 /// else. A symbol becomes an interned id, quoted data is inlined, a function
 /// reference becomes a closure construction, `go` becomes a `let` of its
 /// operands around a `spawn` of a thunk (the island only ever sees the
-/// `suspend` the thunk is handed to), and the pattern tags are consumed by
+/// `suspend` the thunk is handed to) and `thread` the same around a
+/// `spawn-thread`, and the pattern tags are consumed by
 /// `compile-match` rather than by `compile-value`.
 const EXPR_ONLY: &[&str] = &[
     "sym",
     "go",
+    "thread",
     "quote",
     "fnref",
     "methodref",

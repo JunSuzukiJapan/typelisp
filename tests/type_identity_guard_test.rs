@@ -243,6 +243,7 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
         // where there is no `Path` at all.
         (TypeKeyId::TASK, "task"),
         (TypeKeyId::CHAN, "chan"),
+        (TypeKeyId::THREAD, "thread"),
     ] {
         assert_eq!(
             BUILTIN_TYPE_KEYS[key.as_u32() as usize],

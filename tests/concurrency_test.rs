@@ -6,10 +6,9 @@
 //! `go` takes a call form rather than a thunk — a thunk would capture the
 //! arguments instead of evaluating them.
 //!
-//! Scheduling is cooperative and single-threaded: nothing preempts a task, and
-//! one OS thread runs all of them. `ACTIVE_HEAP` has to be a single
-//! thread-local and `Heap` is `!Send`, so tasks cannot be spread across threads
-//! without making the heap shareable first.
+//! Scheduling here is cooperative and single-threaded: nothing preempts a
+//! task, and the interpreter's one OS thread runs all of them. An executable
+//! runs its tasks on several threads — `tests/os_threads_test.rs`.
 
 extern crate typelisp;
 use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
@@ -188,6 +187,57 @@ fn go_refuses_a_non_call() {
 fn go_refuses_extra_arguments() {
     let e = check_err("(defun f () int 1) (go (f) (f))");
     assert!(e.contains("go"), "got: {}", e);
+}
+
+// ---- `thread` --------------------------------------------------------------
+
+/// `thread` is `go`'s shape, and its refusals name it.
+#[test]
+fn thread_refuses_what_go_refuses() {
+    let e = check_err("(thread (if true 1 2))");
+    assert!(e.contains("`thread` cannot start `if`"), "got: {}", e);
+    let e = check_err("(thread 1)");
+    assert!(e.contains("`thread` takes a call form: (thread (f args...))"), "got: {}", e);
+}
+
+/// `(thread (f))` is a `Thread<T>`, and `join` answers with the `T`.
+#[test]
+fn thread_is_a_thread_of_the_call_type() {
+    let e = check_err("(defun f () int 1) (defun g () string (join (thread (f))))");
+    assert!(e.contains("mismatch"), "got: {}", e);
+}
+
+/// `thread` is closed as a name the way `go` is: a variable by that name
+/// could be bound but never called.
+#[test]
+fn thread_cannot_be_bound() {
+    let e = check_err("(let ((thread 1)) thread)");
+    assert!(e.contains("`thread` is a reserved word"), "got: {}", e);
+}
+
+/// The interpreter drives every task from one OS thread, so a `thread` it
+/// runs is a panic a program can catch — the same one whether the form was
+/// interpreted or reached from compiled code. An executable runs it
+/// (`tests/os_threads_test.rs`).
+#[test]
+fn thread_is_refused_by_the_interpreter_interpreted_or_compiled() {
+    const REFUSAL: &str = "cannot start another yet";
+    let e = match run("(defun f () int 1) (join (thread (f)))") {
+        Ok(_) => panic!("expected the program to fail"),
+        Err(e) => e.to_string(),
+    };
+    assert!(e.contains(REFUSAL), "interpreted: {}", e);
+    let e = compile_err_at_runtime("(defun f () int 1) (defun g () int (join (thread (f)))) (compile g) (g)");
+    assert!(e.contains(REFUSAL), "compiled: {}", e);
+}
+
+/// The two static functions answer in the interpreter too — neither needs
+/// another thread — and a call to either leaves `Thread<T>`'s `T` alone.
+#[test]
+fn thread_statics_answer_in_the_interpreter() {
+    assert_eq!(int("(if (> (Thread::current-id) 0) 1 0)"), 1);
+    assert_eq!(int("(if (eq (Thread::current-id) (Thread::current-id)) 1 0)"), 1);
+    assert_eq!(int("(if (> (Thread::available-parallelism) 0) 1 0)"), 1);
 }
 
 // ---- the type ------------------------------------------------------------

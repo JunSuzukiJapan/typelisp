@@ -174,6 +174,11 @@ pub enum Waiting {
     /// The closure is rooted through the asking task's state slot while the
     /// operation is in flight, as a parked `send`'s value is.
     Spawn(Value),
+    /// `(thread ...)` — [`Waiting::Spawn`] for a task that runs on an OS
+    /// thread of its own, started for it ([`Scheduler::try_now`]), and
+    /// answered with a `Thread<T>` handle. Rooted the way `Spawn`'s closure
+    /// is.
+    SpawnThread(Value),
     /// `select` — any one of several channel operations, whichever can go
     /// first. `has_else` means the task does not wait: with nothing ready it
     /// is answered with the `else` arm instead.
@@ -307,6 +312,13 @@ pub fn chan_handle(heap: &mut Heap, id: ChanId) -> Value {
     heap.alloc_struct(TypeKeyId::CHAN, vec![Value::Int(id.0 as i64)])
 }
 
+/// The runtime value of a `Thread<T>`: a [`task_handle`] under the
+/// `thread` key. `join` reads it with [`task_id_of`], because a thread *is*
+/// a task to the scheduler — one it runs on an OS thread of its own.
+pub fn thread_handle(heap: &mut Heap, id: TaskId) -> Value {
+    heap.alloc_struct(TypeKeyId::THREAD, vec![Value::Int(id.0 as i64)])
+}
+
 /// The scheduler id inside a `Task<T>` handle.
 ///
 /// The handle is a boxed struct with the id in field 0 and nothing else — see
@@ -333,6 +345,17 @@ pub fn chan_id_of(heap: &Heap, v: Option<Value>) -> Result<ChanId, SchedError> {
     }
 }
 
+/// Why `thread` fails where tasks are driven from one OS thread — the
+/// interpreter's scheduler ([`drive`]). One message for the interpreted form
+/// and a compiled one that reaches that scheduler.
+pub fn thread_refused() -> SchedError {
+    SchedError::Panic(
+        "thread: the interpreter runs every task on one OS thread and cannot start another yet; \
+         build an executable with `compile-file` to use `thread`"
+            .to_string(),
+    )
+}
+
 /// What to call a `Waiting` in an error addressed to a programmer.
 pub fn waiting_name(w: &Waiting) -> &'static str {
     match w {
@@ -346,6 +369,7 @@ pub fn waiting_name(w: &Waiting) -> &'static str {
         // says something could not block. Neither does a spawn.
         Waiting::Chan(_) => "a channel operation",
         Waiting::Spawn(_) => "`go`",
+        Waiting::SpawnThread(_) => "`thread`",
         Waiting::Io { .. } => "a socket operation",
     }
 }
@@ -448,7 +472,16 @@ pub fn answer_now(heap: &mut Heap, w: &Waiting) -> Option<Result<Value, SchedErr
 struct TaskSlot<B> {
     task: B,
     roots: RootStackId,
+    /// Whether the task is a `thread`'s: run only by the OS thread started
+    /// for it ([`drive_pinned`]), and made ready on [`Scheduler::pinned_ready`]
+    /// rather than the queue every other thread takes from.
+    pinned: bool,
 }
+
+/// Starts the OS thread that runs a pinned task — see
+/// [`Scheduler::set_thread_starter`]. Called with the scheduler's lock held;
+/// it only starts the thread, which takes the lock itself once it runs.
+pub type ThreadStarter = std::sync::Arc<dyn Fn(TaskId) -> std::io::Result<()> + Send + Sync>;
 
 /// One position in the scheduler's table.
 ///
@@ -485,8 +518,14 @@ enum Slot<B> {
 pub struct Scheduler<B> {
     /// One entry per task position — see [`Slot`].
     slots: Vec<Slot<B>>,
-    /// Ids ready to run, oldest first.
+    /// Ids ready to run, oldest first — every task but the pinned ones.
     ready: std::collections::VecDeque<TaskId>,
+    /// The pinned tasks that are ready. Each is taken only by its own OS
+    /// thread, so the order among them means nothing.
+    pinned_ready: Vec<TaskId>,
+    /// How a `thread` gets its OS thread, or `None` for a scheduler that runs
+    /// every task from one thread ([`drive`]) and so refuses `thread`.
+    thread_starter: Option<ThreadStarter>,
     /// Where finished tasks' results are rooted: position `i` holds task `i`'s
     /// value. Created on the first `finish`, and never truncated — see
     /// [`Slot::Done`] for why a result outlives its task.
@@ -543,6 +582,8 @@ impl<B> Default for Scheduler<B> {
         Scheduler {
             slots: Vec::new(),
             ready: std::collections::VecDeque::new(),
+            pinned_ready: Vec::new(),
+            thread_starter: None,
             roots: None,
             driving: false,
             sleeping: 0,
@@ -576,6 +617,22 @@ impl<B: TaskBody> Scheduler<B> {
         self.switch_every_step = on;
     }
 
+    /// Lets `thread` start OS threads, through `start` — see
+    /// [`start_workers`], the one caller.
+    fn set_thread_starter(&mut self, start: ThreadStarter) {
+        self.thread_starter = Some(start);
+    }
+
+    /// Puts a parked task where the thread that may run it will look.
+    fn make_ready(&mut self, id: TaskId, pinned: bool) {
+        if pinned {
+            self.pinned_ready.push(id);
+        } else {
+            self.ready.push_back(id);
+        }
+        self.dirty = true;
+    }
+
     /// Adds a task and makes it ready to run.
     ///
     /// The task is built by `make` **on a root stack of its own**, which is
@@ -584,6 +641,11 @@ impl<B: TaskBody> Scheduler<B> {
     /// better be rooted in the caller's stack — the collector still walks it,
     /// so that is enough.
     pub fn admit(&mut self, heap: &mut Heap, make: impl FnOnce(&mut Heap) -> B) -> TaskId {
+        self.admit_as(heap, false, make)
+    }
+
+    /// [`Self::admit`], for a task that is pinned or not.
+    fn admit_as(&mut self, heap: &mut Heap, pinned: bool, make: impl FnOnce(&mut Heap) -> B) -> TaskId {
         let home = heap.current_root_stack();
         let roots = heap.new_root_stack();
         heap.switch_to_root_stack(roots);
@@ -596,16 +658,43 @@ impl<B: TaskBody> Scheduler<B> {
                 TaskId(self.slots.len() - 1)
             }
         };
-        self.slots[id.0] = Slot::Parked(TaskSlot { task, roots });
-        self.ready.push_back(id);
-        self.dirty = true;
+        self.slots[id.0] = Slot::Parked(TaskSlot { task, roots, pinned });
+        self.make_ready(id, pinned);
         id
+    }
+
+    /// `(thread ...)`: admits the task pinned and starts the OS thread that
+    /// will run it. A thread the system will not start is a panic in the
+    /// asking task, and the task that would have run on it never existed.
+    fn admit_thread(&mut self, heap: &mut Heap, closure: Value) -> Result<TaskId, SchedError> {
+        let Some(start) = self.thread_starter.clone() else {
+            return Err(thread_refused());
+        };
+        let id = self.admit_as(heap, true, |heap| B::start_closure(heap, closure));
+        if let Err(e) = start(id) {
+            self.pinned_ready.retain(|t| *t != id);
+            let Slot::Parked(slot) = std::mem::replace(&mut self.slots[id.0], Slot::Empty) else {
+                unreachable!("a task just admitted is parked");
+            };
+            heap.drop_root_stack(slot.roots);
+            return Err(SchedError::Panic(format!("thread: cannot start an OS thread ({})", e)));
+        }
+        Ok(id)
     }
 
     /// Takes the next ready task *out* to be stepped, reserving its position.
     /// The caller puts it back (`put_back`) or retires it.
-    fn next_ready(&mut self) -> Option<(TaskId, TaskSlot<B>)> {
-        let id = self.ready.pop_front()?;
+    ///
+    /// `pinned` names the task a pinned thread runs, and only that one is
+    /// taken; every other thread passes `None` and never sees a pinned task.
+    fn next_ready(&mut self, pinned: Option<TaskId>) -> Option<(TaskId, TaskSlot<B>)> {
+        let id = match pinned {
+            None => self.ready.pop_front()?,
+            Some(own) => {
+                let at = self.pinned_ready.iter().position(|t| *t == own)?;
+                self.pinned_ready.swap_remove(at)
+            }
+        };
         match std::mem::replace(&mut self.slots[id.0], Slot::Running) {
             Slot::Parked(slot) => {
                 self.running += 1;
@@ -618,9 +707,9 @@ impl<B: TaskBody> Scheduler<B> {
     /// Returns a task that is still running to the back of the queue.
     fn put_back(&mut self, id: TaskId, slot: TaskSlot<B>) {
         self.running -= 1;
+        let pinned = slot.pinned;
         self.slots[id.0] = Slot::Parked(slot);
-        self.ready.push_back(id);
-        self.dirty = true;
+        self.make_ready(id, pinned);
     }
 
     /// Frees a task's position entirely — for the main task, whose result goes
@@ -694,6 +783,9 @@ impl<B: TaskBody> Scheduler<B> {
                 let id = self.admit(heap, |heap| B::start_closure(heap, closure));
                 Some(Ok(task_handle(heap, id)))
             }
+            // The same, on a thread of its own — which starts now, and takes
+            // the task as soon as it gets the lock this is holding.
+            Waiting::SpawnThread(closure) => Some(self.admit_thread(heap, *closure).map(|id| thread_handle(heap, id))),
             // One descriptor, zero timeout: ready now or not. A `poll` that
             // fails (a descriptor closed under the task) is reported as
             // ready, for the reason `poll_ready` gives — the retry will fail
@@ -803,8 +895,9 @@ impl<B: TaskBody> Scheduler<B> {
         match self.try_now(heap, &w) {
             Some(answer) => {
                 deliver_to(heap, &mut slot, answer);
+                let pinned = slot.pinned;
                 self.slots[id.0] = Slot::Parked(slot);
-                self.ready.push_back(id);
+                self.make_ready(id, pinned);
             }
             None => {
                 match w {
@@ -812,8 +905,9 @@ impl<B: TaskBody> Scheduler<B> {
                     // on it.
                     Waiting::Yield => {
                         deliver_to(heap, &mut slot, Ok(Value::Empty));
+                        let pinned = slot.pinned;
                         self.slots[id.0] = Slot::Parked(slot);
-                        self.ready.push_back(id);
+                        self.make_ready(id, pinned);
                     }
                     Waiting::Until(_) => {
                         self.sleeping += 1;
@@ -823,7 +917,11 @@ impl<B: TaskBody> Scheduler<B> {
                         self.io_waiting += 1;
                         self.slots[id.0] = Slot::Blocked(slot, w);
                     }
-                    Waiting::Task(_) | Waiting::Chan(_) | Waiting::Select { .. } | Waiting::Spawn(_) => {
+                    Waiting::Task(_)
+                    | Waiting::Chan(_)
+                    | Waiting::Select { .. }
+                    | Waiting::Spawn(_)
+                    | Waiting::SpawnThread(_) => {
                         self.slots[id.0] = Slot::Blocked(slot, w);
                     }
                 }
@@ -915,9 +1013,9 @@ impl<B: TaskBody> Scheduler<B> {
             unreachable!("only a blocked task is woken");
         };
         deliver_to(heap, &mut slot, answer);
+        let pinned = slot.pinned;
         self.slots[i] = Slot::Parked(slot);
-        self.ready.push_back(TaskId(i));
-        self.dirty = true;
+        self.make_ready(TaskId(i), pinned);
     }
 
     /// Wakes a receiver with `v` (or the end of a closed channel), answering
@@ -1213,7 +1311,7 @@ pub fn drive<B: TaskBody>(
         let (id, mut slot) = loop {
             sched.borrow_mut().wake_due(heap);
             sched.borrow_mut().wake_io(heap, Some(std::time::Duration::ZERO));
-            let taken = sched.borrow_mut().next_ready();
+            let taken = sched.borrow_mut().next_ready(None);
             if let Some(t) = taken {
                 break t;
             }
@@ -1373,7 +1471,7 @@ impl<B: TaskBody> AnswerNow for SchedShared<B> {
 /// `select`'s send arms.
 fn waiting_values(w: &Waiting) -> Vec<Value> {
     match w {
-        Waiting::Chan(ChanOp::Send(_, v)) | Waiting::Spawn(v) => vec![*v],
+        Waiting::Chan(ChanOp::Send(_, v)) | Waiting::Spawn(v) | Waiting::SpawnThread(v) => vec![*v],
         Waiting::Select { ops, .. } => ops
             .iter()
             .filter_map(|op| match op {
@@ -1477,8 +1575,20 @@ enum Next<B: TaskBody> {
     Run(TaskId, TaskSlot<B>),
     /// What the main task came to — only for the thread waiting on it.
     Main(Result<Value, B::Error>),
-    /// The workers are stopped.
+    /// Nothing more for this thread: the workers are stopped, or a pinned
+    /// thread's task has finished.
     Stop,
+}
+
+/// Which thread is looking for work, and so which tasks it may take.
+#[derive(Clone, Copy)]
+enum Who {
+    /// The thread waiting on the main task: any unpinned task.
+    Main(TaskId),
+    /// A worker: any unpinned task.
+    Worker,
+    /// The OS thread a `thread` started: its own task and no other.
+    Pinned(TaskId),
 }
 
 /// Waits for something this thread can do: a ready task, or — for the
@@ -1488,11 +1598,11 @@ enum Next<B: TaskBody> {
 /// sockets are waited on and nobody is polling them yet — on the network.
 /// "Every task is blocked" is decided only by the thread that has a main
 /// task to wait for: a worker idle between two drives is not a deadlock.
-fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, main: Option<TaskId>) -> Next<B> {
+fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, who: Who) -> Next<B> {
     let mut s = shared.lock(heap);
     loop {
-        match main {
-            Some(main) => {
+        match who {
+            Who::Main(main) => {
                 if let Some((id, e)) = s.guard.failure.take() {
                     return Next::Main(Err(if id == main { e } else { B::failure_left_task(e) }));
                 }
@@ -1500,20 +1610,37 @@ fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, main: Option<Task
                     return Next::Main(Ok(v));
                 }
             }
-            None if s.guard.stopped => return Next::Stop,
-            None => {}
+            Who::Worker if s.guard.stopped => return Next::Stop,
+            Who::Worker => {}
+            // A pinned thread ends with its task: once the result is kept
+            // (`finish`) there is nothing left that this thread may run.
+            Who::Pinned(own) => {
+                if s.guard.stopped || matches!(s.slots.get(own.0), Some(Slot::Done(_)) | Some(Slot::Empty) | None) {
+                    return Next::Stop;
+                }
+            }
         }
         s.wake_due(heap);
         s.wake_io(heap, Some(std::time::Duration::ZERO));
-        if let Some((id, slot)) = s.next_ready() {
+        let own = match who {
+            Who::Pinned(own) => Some(own),
+            Who::Main(_) | Who::Worker => None,
+        };
+        if let Some((id, slot)) = s.next_ready(own) {
             return Next::Run(id, slot);
         }
         let deadline = s.earliest_deadline();
         let io_waiting = s.io_waiting > 0;
-        if main.is_some() && s.running == 0 && deadline.is_none() && !io_waiting {
-            // Nothing is out being stepped on any thread and nothing can
-            // become ready by itself: the main task is waiting on something
-            // that will never happen.
+        if matches!(who, Who::Main(_))
+            && s.running == 0
+            && s.pinned_ready.is_empty()
+            && deadline.is_none()
+            && !io_waiting
+        {
+            // Nothing is out being stepped on any thread, no pinned thread
+            // has its task ready to take, and nothing can become ready by
+            // itself: the main task is waiting on something that will never
+            // happen.
             s.guard.stopped = true;
             s.dirty = true;
             return Next::Main(Err(
@@ -1586,7 +1713,7 @@ pub fn drive_main<B: TaskBody>(
     let _driving = DrivingGuard::publish(shared);
     let home = heap.current_root_stack();
     loop {
-        match next(shared, heap, Some(main)) {
+        match next(shared, heap, Who::Main(main)) {
             Next::Run(id, slot) => run_one(shared, heap, cx, home, id, slot),
             Next::Main(r) => return r,
             Next::Stop => unreachable!("the thread waiting on the main task is not a worker"),
@@ -1600,10 +1727,27 @@ pub fn drive_worker<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, cx: &
     let _driving = DrivingGuard::publish(shared);
     let home = heap.current_root_stack();
     loop {
-        match next(shared, heap, None) {
+        match next(shared, heap, Who::Worker) {
             Next::Run(id, slot) => run_one(shared, heap, cx, home, id, slot),
             Next::Stop => return,
             Next::Main(_) => unreachable!("a worker waits on no main task"),
+        }
+    }
+}
+
+/// The loop of the OS thread a `thread` started: steps task `own` — and
+/// nothing else — whenever it is ready, and returns once it has finished
+/// (or the program has failed). While the task waits, so does the thread,
+/// natively, as an idle worker does; while it runs, it runs here and nowhere
+/// else, so a call that blocks the thread holds up no other task.
+pub fn drive_pinned<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, cx: &B::Cx, own: TaskId) {
+    let _driving = DrivingGuard::publish(shared);
+    let home = heap.current_root_stack();
+    loop {
+        match next(shared, heap, Who::Pinned(own)) {
+            Next::Run(id, slot) => run_one(shared, heap, cx, home, id, slot),
+            Next::Stop => return,
+            Next::Main(_) => unreachable!("a pinned thread waits on no main task"),
         }
     }
 }
@@ -1613,9 +1757,13 @@ pub fn drive_worker<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, cx: &
 /// — which is where it takes on whatever else the thread that started it
 /// has per thread (the runtime's and the printer's shared tables) — and
 /// then runs [`drive_worker`] until the workers are stopped.
+///
+/// It also lets `thread` start OS threads from then on, set up the same way
+/// and running [`drive_pinned`] — with no workers (`n == 0`) too, since a
+/// `thread` is not one of them.
 pub fn start_workers<B>(
     shared: &std::sync::Arc<SchedShared<B>>,
-    heap: &Heap,
+    heap: &mut Heap,
     n: usize,
     setup: impl Fn() + Send + Sync + 'static,
 ) -> std::io::Result<Vec<std::thread::JoinHandle<()>>>
@@ -1624,6 +1772,29 @@ where
     B::Error: Send,
 {
     let setup = std::sync::Arc::new(setup);
+    // A `Weak`: the scheduler holds the starter, and a strong handle in it
+    // would keep the scheduler alive forever. Upgrading it cannot fail — the
+    // starter runs on a thread holding this scheduler's lock — and the
+    // started thread keeps the strong handle for as long as it runs.
+    let starter: ThreadStarter = {
+        let weak = std::sync::Arc::downgrade(shared);
+        let heap_shared = heap.shared_handle();
+        let setup = std::sync::Arc::clone(&setup);
+        std::sync::Arc::new(move |own: TaskId| {
+            let shared = weak.upgrade().expect("a scheduler starting a thread is alive");
+            let heap_shared = heap_shared.clone();
+            let setup = std::sync::Arc::clone(&setup);
+            std::thread::Builder::new().name(format!("typelisp-thread-{}", own.0)).spawn(move || {
+                let mut view = Heap::attach(&heap_shared);
+                typelisp_abi::set_active_heap(&mut view);
+                setup();
+                drive_pinned(&shared, &mut view, &(), own);
+                typelisp_abi::set_active_heap(std::ptr::null_mut());
+            })?;
+            Ok(())
+        })
+    };
+    shared.lock(heap).set_thread_starter(starter);
     (0..n)
         .map(|i| {
             let shared = std::sync::Arc::clone(shared);
@@ -1764,6 +1935,7 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         // The closure is tagged, and the answer — the handle — comes back
         // tagged like every other typed wake value.
         cs::SUSPEND_GO => Ok((Waiting::Spawn(typelisp_abi::decode(payload)), Wake::Tagged)),
+        cs::SUSPEND_THREAD => Ok((Waiting::SpawnThread(typelisp_abi::decode(payload)), Wake::Tagged)),
         // `Wake::Tagged` for every typed answer: a wake value always crosses
         // back **tagged**, whatever its type, and the resume block decodes it
         // with the kind the bridge baked in — the same division `wait` makes.
@@ -1965,7 +2137,9 @@ impl CompiledTask {
     fn set_slots(&self, heap: &mut Heap) {
         let held = match &self.state {
             CompiledState::Start(closure) => *closure,
-            CompiledState::Blocked(Waiting::Chan(ChanOp::Send(_, v))) | CompiledState::Blocked(Waiting::Spawn(v)) => *v,
+            CompiledState::Blocked(Waiting::Chan(ChanOp::Send(_, v)))
+            | CompiledState::Blocked(Waiting::Spawn(v))
+            | CompiledState::Blocked(Waiting::SpawnThread(v)) => *v,
             _ => Value::Empty,
         };
         heap.set_root(self.sbase, held);

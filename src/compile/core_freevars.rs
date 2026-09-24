@@ -313,10 +313,11 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // name in it (callee and arguments alike) is read from the scope the
         // `go` is written in, because that is where they are evaluated. The
         // representation ahead of it is not a form.
-        wk::GO => from(1),
-        // `(spawn RET-R LAMBDA)` / `(tag R E)` — the bridge's own rewriting of
-        // a `go` (`translate_go`): one form each, past a representation.
-        wk::SPAWN | wk::TAG => from(1),
+        wk::GO | wk::THREAD => from(1),
+        // `(spawn RET-R LAMBDA)` / `(spawn-thread RET-R LAMBDA)` / `(tag R E)`
+        // — the bridge's own rewriting of a `go` or `thread`
+        // (`translate_go`): one form each, past a representation.
+        wk::SPAWN | wk::SPAWN_THREAD | wk::TAG => from(1),
         // `(step FORM)` — the form is an ordinary expression and names
         // whatever the surrounding scope holds. The three REPL tool nodes
         // beside it (`trace`/`untrace`/`disassemble-fn`) carry only resolved

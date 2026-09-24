@@ -3953,6 +3953,16 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
+    // `join` is intercepted before this, as `Task<T>::wait` is.
+    if *type_name == Path::root("thread") {
+        return match method {
+            "current-id" => Some(Ok(Value::Int(typelisp_rt::sys_builtin::thread_current_id()))),
+            "available-parallelism" => {
+                Some(typelisp_rt::sys_builtin::thread_available_parallelism().map(Value::Int).map_err(EvalError::Panic))
+            }
+            _ => None,
+        };
+    }
     if *type_name == Path::root("vector") {
         return match method {
             // type-identity-ok: the built-in `Vector`, a root name spelled in full

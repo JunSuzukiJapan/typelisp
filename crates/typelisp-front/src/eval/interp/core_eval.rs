@@ -134,6 +134,7 @@ pub(super) enum Op {
     Step,
     DisassembleFn,
     Go,
+    Thread,
     Select,
 }
 
@@ -202,6 +203,7 @@ impl Op {
             wk::STEP => Op::Step,
             wk::DISASSEMBLE_FN => Op::DisassembleFn,
             wk::GO => Op::Go,
+            wk::THREAD => Op::Thread,
             wk::SELECT => Op::Select,
             _ => return None,
         })

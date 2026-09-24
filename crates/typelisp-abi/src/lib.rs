@@ -411,6 +411,11 @@ pub mod call_state {
     /// can reach it. It always resumes at once, like `SUSPEND_CHAN_NEW`, and
     /// the answer is the `Task<T>` handle.
     pub const SUSPEND_GO: i64 = 13;
+    /// `(thread (f a b))` — start a task on an OS thread of its own. Payload:
+    /// the same closure [`SUSPEND_GO`] carries, built by the same site; only
+    /// where the scheduler runs it differs. Resumes at once with the
+    /// `Thread<T>` handle.
+    pub const SUSPEND_THREAD: i64 = 14;
 
     /// Records the arms of a `select`, as `[n, has-else, kind, chan, extra]...`
     /// with every word **tagged** — the array is a compiled frame's slots,

@@ -226,10 +226,13 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
 /// own signature says), but compiled code does: the `go` site there builds
 /// a closure that makes the call and hands the result to the scheduler
 /// **tagged**, and only the representation says how to tag a raw word.
-pub(super) fn go_form(heap: &mut Heap, ret: Value, call: Value) -> Result<Value, Error> {
+///
+/// `tag` is `"go"` or `"thread"`: `(thread RET-R CALL)` is the same node for
+/// a task that runs on an OS thread of its own.
+pub(super) fn go_form(heap: &mut Heap, tag: &str, ret: Value, call: Value) -> Result<Value, Error> {
     let call = rooted(heap, call);
     let ret = rooted(heap, ret);
-    let form = core::tagged(heap, "go", &[ret, call])?;
+    let form = core::tagged(heap, tag, &[ret, call])?;
     Ok(rooted(heap, form))
 }
 

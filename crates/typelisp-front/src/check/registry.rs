@@ -621,6 +621,7 @@ impl Registry {
         root.add_type(hashtable_def());
         root.add_type(vector_def());
         root.add_type(task_def());
+        root.add_type(thread_def());
         root.add_type(chan_def());
         root.add_type(scope_def());
         // The (typelisp-hosted) `compile`/`compile-file` compiler's view of
@@ -1875,6 +1876,56 @@ fn task_def() -> AdtDef {
     );
     AdtDef {
         name: Path::root("task"),
+        params: vec!["t".to_string()],
+        variants: vec![],
+        assoc,
+        public: true,
+        builtin: true,
+        kind: AdtKind::Struct,
+        field_names: Vec::new(),
+        impls: Vec::new(),
+        trait_assoc: BTreeMap::new(),
+    }
+}
+
+/// `Thread<T>`, the type `(thread (f ...))` yields — spelled once, here, for
+/// [`task_of`]'s reason.
+pub(super) fn thread_of(t: Type) -> Type {
+    Type::Named(Path::root("thread"), vec![t])
+}
+
+/// `Thread<T>`: a handle on a task that runs on an OS thread of its own —
+/// what `(thread (f ...))` returns. [`task_def`]'s twin: the same runtime
+/// value (a box holding the scheduler's id, under its own key) and no
+/// readable fields.
+///
+/// Two static functions ride on it, about OS threads rather than about one
+/// `Thread<T>`. Their signatures never mention `t`, so a call leaves it
+/// unconstrained — which a builtin's signature is allowed to
+/// (`Checker::check_assoc_call`).
+fn thread_def() -> AdtDef {
+    let mut assoc = BTreeMap::new();
+    // `(join th)` — the thread's result, waiting for it. `wait`'s semantics
+    // exactly: asked any number of times, it gives each asker the same value,
+    // and it stops the asking *task*, not the OS thread under it.
+    assoc.insert(
+        "join".to_string(),
+        AssocFn { sig: FnSig::builtin(vec![thread_of(tvar("t"))], tvar("t")), instance: true, builtin: true },
+    );
+    // `(Thread::current-id)` — a number naming the OS thread running the
+    // caller, unique within the process.
+    assoc.insert(
+        "current-id".to_string(),
+        AssocFn { sig: FnSig::builtin(vec![], Type::Int), instance: false, builtin: true },
+    );
+    // `(Thread::available-parallelism)` — how many threads the machine runs
+    // at once; what `TYPELISP_THREADS` defaults to.
+    assoc.insert(
+        "available-parallelism".to_string(),
+        AssocFn { sig: FnSig::builtin(vec![], Type::Int), instance: false, builtin: true },
+    );
+    AdtDef {
+        name: Path::root("thread"),
         params: vec!["t".to_string()],
         variants: vec![],
         assoc,

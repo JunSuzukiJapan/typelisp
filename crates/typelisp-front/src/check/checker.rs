@@ -341,7 +341,8 @@ impl Env {
 ///
 /// `go` is always a special form in head position, so a variable called `go`
 /// could be bound but never called — a name that silently does nothing is worse
-/// than a rejected one.
+/// than a rejected one. `thread` is `go`'s twin, closed for the same reason
+/// when it arrived.
 ///
 /// The other special forms are *not* here. `(let ((if f)) ...)` has been legal
 /// since the beginning and the prelude and tests lean on names like `list` and
@@ -349,7 +350,27 @@ impl Env {
 /// `go` is closed from the start because nothing has had the chance to depend
 /// on it.
 fn is_reserved_name(name: &str) -> bool {
-    name == "go"
+    name == "go" || name == "thread"
+}
+
+/// Which of the two task-starting forms [`Checker::check_go`] is checking.
+#[derive(Clone, Copy)]
+enum SpawnKind {
+    /// `(go ...)` — a task on the shared queue, answering `Task<T>`.
+    Go,
+    /// `(thread ...)` — a task on an OS thread of its own, answering
+    /// `Thread<T>`.
+    Thread,
+}
+
+impl SpawnKind {
+    /// The form's name, which is also its node's tag.
+    fn form_name(self) -> &'static str {
+        match self {
+            SpawnKind::Go => "go",
+            SpawnKind::Thread => "thread",
+        }
+    }
 }
 
 /// Bundles [`Checker::check_assoc_call`]'s arguments to keep its arity down.
@@ -3144,7 +3165,7 @@ impl Checker {
             "if" | "let" | "let*" | "progn" | "unsafe" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
-                | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "go" | "select"
+                | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "go" | "thread" | "select"
                 | "quote" | "quasiquote" | "format" | "print" | "println" | "source-file"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block"
@@ -10096,7 +10117,8 @@ impl Checker {
             "match" => return self.check_match(heap, interp, env, args, arg_locs, expected),
             "panic" => return self.check_panic(heap, interp, env, args, arg_locs),
             "the" => return self.check_the(heap, interp, env, args, arg_locs),
-            "go" => return self.check_go(heap, interp, env, args, arg_locs),
+            "go" => return self.check_go(heap, interp, env, args, arg_locs, SpawnKind::Go),
+            "thread" => return self.check_go(heap, interp, env, args, arg_locs, SpawnKind::Thread),
             "select" => return self.check_select(heap, interp, env, args, arg_locs, expected),
             "as" => return self.check_as(heap, interp, env, args, arg_locs, false),
             "try-as" => return self.check_as(heap, interp, env, args, arg_locs, true),
@@ -11073,12 +11095,27 @@ impl Checker {
             )?;
         }
         for p in &def.params {
-            if !subst.contains_key(p) {
-                return Err(Error::TypeError(format!(
-                    "cannot infer type argument `{}` for `{}::{}`",
-                    p, type_fq, method
-                )));
+            if subst.contains_key(p) {
+                continue;
             }
+            // A **builtin** whose signature never mentions `p` cannot be
+            // affected by it: it has no body to instantiate, and nothing
+            // the call passes or receives carries `p`. `Thread::current-id`
+            // is the case — a static function about OS threads that rides on
+            // `Thread<T>`. A written method is another matter: its body may
+            // spell `T` (`(the Vector<T> ...)`), so it still has to be told.
+            let one: HashSet<String> = std::iter::once(p.clone()).collect();
+            let mentioned = af.sig.params.iter().chain(std::iter::once(&af.sig.ret)).any(|t| type_has_param(t, &one))
+                || af.sig.optionals.iter().chain(&af.sig.keys).any(|o| type_has_param(&o.decl_ty, &one))
+                || matches!(&af.sig.rest, Some(t) if type_has_param(t, &one));
+            if af.builtin && !mentioned {
+                subst.insert(p.clone(), Type::Unit);
+                continue;
+            }
+            return Err(Error::TypeError(format!(
+                "cannot infer type argument `{}` for `{}::{}`",
+                p, type_fq, method
+            )));
         }
         // Method-side `where`-bound validation — the mirror of
         // `check_call`'s. A bounded method's bounds are keyed by the owner's
@@ -11346,6 +11383,10 @@ impl Checker {
     /// needs `T` spelled out, because `lambda` requires its return type, and a
     /// macro does not know what `(f a b)` returns. Only the checker does, which
     /// is what makes `go` a form.
+    ///
+    /// `(thread (f args...))` is the same form with the same rule, for a task
+    /// that runs on an OS thread of its own, and yields `Thread<T>` — `kind`
+    /// says which.
     fn check_go(
         &self,
         heap: &mut Heap,
@@ -11353,22 +11394,27 @@ impl Checker {
         env: &Env,
         args: &[Value],
         arg_locs: &[Option<Loc>],
+        kind: SpawnKind,
     ) -> Result<Checked, Error> {
-        const SHAPE: &str = "`go` takes a call form: (go (f args...)). \
-                             To run an arbitrary body, call a lambda: (go ((lambda () RetType body...)))";
+        let form_name = kind.form_name();
+        let shape = format!(
+            "`{0}` takes a call form: ({0} (f args...)). \
+             To run an arbitrary body, call a lambda: ({0} ((lambda () RetType body...)))",
+            form_name
+        );
         if args.len() != 1 {
-            return Err(Error::TypeError(SHAPE.to_string()));
+            return Err(Error::TypeError(shape));
         }
         // Name the real problem before checking the inner form, rather than
         // letting a special form report whatever it would complain about in a
         // position it was never going to be allowed in.
         let Ok(head) = heap.car(args[0]) else {
-            return Err(Error::TypeError(SHAPE.to_string()));
+            return Err(Error::TypeError(shape));
         };
         if let Value::Symbol(id) = head {
             let name = heap.symbol_name(id).to_string();
             if Self::is_builtin_form_head(&name) {
-                return Err(Error::TypeError(format!("`go` cannot start `{}`. {}", name, SHAPE)));
+                return Err(Error::TypeError(format!("`{}` cannot start `{}`. {}", form_name, name, shape)));
             }
         }
         // Checked as an ordinary call, so the callee resolves, the arguments
@@ -11383,11 +11429,15 @@ impl Checker {
                 if matches!(heap.symbol_name(id), "call" | "assoc" | "dyn-call" | "apply")
         );
         if !is_call {
-            return Err(Error::TypeError(format!("`go` needs a call, and this is not one. {}", SHAPE)));
+            return Err(Error::TypeError(format!("`{}` needs a call, and this is not one. {}", form_name, shape)));
         }
         let ret = self.repr_form(heap, &inner.ty)?;
-        let form = forms::go_form(heap, ret, inner.form)?;
-        Ok(Checked::new(form, super::registry::task_of(inner.ty)))
+        let form = forms::go_form(heap, form_name, ret, inner.form)?;
+        let ty = match kind {
+            SpawnKind::Go => super::registry::task_of(inner.ty),
+            SpawnKind::Thread => super::registry::thread_of(inner.ty),
+        };
+        Ok(Checked::new(form, ty))
     }
 
     /// `(select ((v (recv ch)) body...) ((send ch x) body...) (else body...))`

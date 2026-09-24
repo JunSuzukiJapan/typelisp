@@ -6405,6 +6405,16 @@ user-visible capacity."
         (progn (recv g) ()))))
 
 
+;; ---- Thread ---------------------------------------------------------------
+
+;; Rust's `std::thread::spawn`: run `f` on an OS thread of its own, and get
+;; the `Thread<T>` whose `join` answers with what it returned. `(thread (f))`
+;; spelled as a function, for a body that is a closure already.
+(pub defmethod spawn (Thread<T> (f (fn () T))) Thread<T>
+  "Run `f` on an OS thread of its own. `(join th)` waits for its result."
+  (thread (f)))
+
+
 ;; ---- Mutex --------------------------------------------------------------
 
 ;; Go's `sync.Mutex`, holding the thing it protects.

@@ -717,7 +717,9 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         // send arms hold values too: every operand of a `select` is a binding
         // of the `let` the checker wrapped around it, so the environment the
         // task's `Frame::SelectArm` roots already holds them all.
-        State::Blocked(Waiting::Chan(ChanOp::Send(_, v))) | State::Blocked(Waiting::Spawn(v)) => {
+        State::Blocked(Waiting::Chan(ChanOp::Send(_, v)))
+        | State::Blocked(Waiting::Spawn(v))
+        | State::Blocked(Waiting::SpawnThread(v)) => {
             heap.set_root(sbase, *v);
             heap.set_root(sbase + 1, Value::Empty);
         }
@@ -1137,7 +1139,10 @@ impl Interp {
         // a cooperative scheduler's promise is that a task switches where it
         // says so — a program that never blocks should not be interleaved by
         // asking a channel how full it is.
-        if let State::Blocked(w @ (Waiting::Chan(_) | Waiting::Select { .. } | Waiting::Spawn(_))) = &next {
+        if let State::Blocked(
+            w @ (Waiting::Chan(_) | Waiting::Select { .. } | Waiting::Spawn(_) | Waiting::SpawnThread(_)),
+        ) = &next
+        {
             // Rooted *first*: a parked `send`'s value lives in the state slot
             // and nowhere else, and answering the operation allocates (the
             // `some` box a waiting receiver gets).
@@ -1432,6 +1437,12 @@ impl Interp {
                     kind => self.start_args(heap, stack, call, env, kind, true, loc),
                 }
             }
+
+            // `(thread (f x))`: the interpreter's scheduler drives every task
+            // from this one OS thread, so there is no thread to start the
+            // call on — refused before any part of it is evaluated, with the
+            // words a compiled `thread` reaching this scheduler gets.
+            Op::Thread => Err(sched::thread_refused().into()),
 
             Op::If => {
                 let cond = core::field(heap, form, 0)
@@ -2172,7 +2183,10 @@ impl Interp {
         // `Task<T>::wait` cannot go through `eval_builtin_method`: it may have to
         // *suspend*, and a builtin answers with a value or an error, with no way
         // to say "not yet". Intercepted here, where a `State` can say it.
-        if method == "wait" && type_name == crate::Path::root("task") {
+        // `Thread<T>::join` is the same wait: a thread is a task.
+        if (method == "wait" && type_name == crate::Path::root("task"))
+            || (method == "join" && type_name == crate::Path::root("thread"))
+        {
             let on = task_id_of(heap, argv.first().copied())?;
             return Ok((State::Blocked(Waiting::Task(on)), None));
         }

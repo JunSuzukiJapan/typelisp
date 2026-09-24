@@ -88,9 +88,9 @@ session has changed.")
     ;; the lexical named escape (Phase 4a): `block' is the target,
     ;; `return-from' leaves it — still a *static* exit, like `break'
     "block" "return-from"
-    ;; concurrency: `go' starts a task with a call, `select' waits on several
-    ;; channels at once
-    "go" "select"
+    ;; concurrency: `go' starts a task with a call, `thread' starts one on an
+    ;; OS thread of its own, `select' waits on several channels at once
+    "go" "thread" "select"
     ;; non-local exit (§8) — `break'/`return'/`return-from' above are the
     ;; *static* exits, these are the dynamic ones
     "catch" "throw" "unwind-protect"
@@ -149,6 +149,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; the channel operations (`close'/`len' are shared with streams and
     ;; sequences and are listed with those)
     "wait" "yield"
+    ;; a `Thread<T>''s own method, and the `Thread::' functions
+    "join" "spawn" "current-id" "available-parallelism"
     "send" "recv" "cap" "after"
     ;; the `sync' layer: a wait group's three, and a mutex's two plus the
     ;; macro that pairs them (`add'/`make' are shared with other types)
@@ -400,9 +402,9 @@ with no implicit conversion to or from the fixed-width numerics
     "datagram" "NetError"
     ;; builtin generic/abstract types
     "Option" "Result" "Sexpr" "HashTable" "Vector" "Self"
-    ;; the handle `go' hands back, the channel tasks talk over, and the two
-    ;; `sync' types built on channels
-    "Task" "Chan" "WaitGroup" "Mutex"
+    ;; the handles `go' and `thread' hand back, the channel tasks talk over,
+    ;; and the two `sync' types built on channels
+    "Task" "Thread" "Chan" "WaitGroup" "Mutex"
     ;; builtin concrete error types, one per fallible builtin (§7.1).  `Error'
     ;; itself is *not* a type -- it is the prelude trait these implement, used
     ;; as `:dyn Error'.

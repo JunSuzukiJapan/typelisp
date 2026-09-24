@@ -263,6 +263,38 @@ pub fn software_type(heap: &mut Heap) -> Value {
     heap.alloc_string(std::env::consts::OS.to_string())
 }
 
+// ---- Which OS thread ----------------------------------------------------
+
+/// The next number [`thread_current_id`] hands out. Process-wide: two threads
+/// must never share one, whichever heap they run on.
+static NEXT_THREAD_ID: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+
+thread_local! {
+    /// This thread's number, taken the first time it is asked for.
+    static THREAD_ID: i64 = NEXT_THREAD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// `(Thread::current-id)`: a number naming the OS thread running the caller,
+/// distinct from every other thread's for the life of the process.
+///
+/// Its own counter rather than `std::thread::ThreadId`, which has no stable
+/// way to become a number. The numbers mean nothing beyond "same thread or
+/// not" — which is all a program can ask of them, and how a test observes
+/// that tasks ran on several threads.
+pub fn thread_current_id() -> i64 {
+    THREAD_ID.with(|id| *id)
+}
+
+/// `(Thread::available-parallelism)`: how many threads this machine can run
+/// at once — `std::thread::available_parallelism`, which is also how many
+/// threads run tasks when `TYPELISP_THREADS` is not set. The operating
+/// system may refuse to say, and that is reported as it is.
+pub fn thread_available_parallelism() -> Result<i64, String> {
+    std::thread::available_parallelism()
+        .map(|n| n.get() as i64)
+        .map_err(|e| format!("Thread::available-parallelism: the system cannot say ({})", e))
+}
+
 // ---- What only the operating system knows -----------------------------
 //
 // The four below are the ones `std` has no equivalent of, so each is one
@@ -754,6 +786,30 @@ pub unsafe extern "C" fn rt_timezone_daylight_p(args: *const i64, argc: u32) -> 
 #[no_mangle]
 pub unsafe extern "C" fn rt_heap_info(_args: *const i64, _argc: u32) -> i64 {
     encode(heap_info(active_heap()))
+}
+
+/// `(Thread::current-id)` for compiled code — a raw `int`.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary).
+#[no_mangle]
+pub unsafe extern "C" fn rt_thread_current_id(_args: *const i64, _argc: u32) -> i64 {
+    thread_current_id()
+}
+
+/// `(Thread::available-parallelism)` for compiled code — a raw `int`, or a
+/// panic the program can catch when the system cannot say.
+///
+/// # Safety
+///
+/// `args`/`argc` are unused (the builtin is nullary).
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_thread_available_parallelism(_args: *const i64, _argc: u32) -> i64 {
+    match thread_available_parallelism() {
+        Ok(n) => n,
+        Err(msg) => typelisp_abi::raise(msg),
+    }
 }
 
 /// `(dribble-start path)` for compiled code.
