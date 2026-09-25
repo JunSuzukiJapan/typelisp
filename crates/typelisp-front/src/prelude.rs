@@ -851,6 +851,42 @@ pub const SOURCE: &str = r##"
 (defun trim ((s string) &optional (bag string " \t\n\r")) string
   (right-trim (left-trim s bag) bag))
 
+;; `parse-integer`: CL's, under this language's name and with its `Result` —
+;; the text is runtime input the caller does not control, so failure is a
+;; value, not a panic. Whitespace around the number is skipped (the same bag
+;; `trim` uses), then an optional sign, then digits of `radix` read by
+;; `digit-weight`. `junk-allowed` stops at the first non-digit instead of
+;; rejecting what follows; with no digits at all the answer is still `Err`,
+;; where CL returns `nil` (the `Err` is this language's "no value"). CL's second
+;; value, the index reading stopped at, is not returned.
+;;
+;; A radix outside 2..36 is the caller's mistake, not the text's, so it panics.
+(defun parse-int ((s string) &key (radix int 10) (junk-allowed bool false)) Result<int, ParseIntError>
+  "The integer written in `s` in base `radix` (default 10), skipping
+   surrounding whitespace. `Err` unless all of `s` is that integer -- or, with
+   `:junk-allowed true`, unless it at least begins with one."
+  (progn
+    (when (or (< radix 2) (> radix 36))
+      (panic (format false "parse-int: radix ~a is not between 2 and 36" radix)))
+    (let ((n (length s)) (i 0) (neg false) (acc 0) (digits 0) (going true))
+      (progn
+        (while (and (< i n) (char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1)))
+        (when (< i n)
+          (cond ((equal (ref s i) #\-) (progn (setf neg true) (setf i (+ i 1)) ()))
+                ((equal (ref s i) #\+) (progn (setf i (+ i 1)) ()))
+                (else ())))
+        (while (and going (< i n))
+          (match (digit-weight (ref s i) radix)
+            ((some w) (progn (setf acc (+ (* acc radix) w)) (setf digits (+ digits 1)) (setf i (+ i 1)) ()))
+            ((none) (progn (setf going false) ()))))
+        (unless junk-allowed
+          (while (and (< i n) (char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1))))
+        (if (or (= digits 0) (and (not junk-allowed) (< i n)))
+            (the Result<int, ParseIntError>
+              (result::err (ParseIntError::ParseIntError
+                             (format false "parse-int: invalid integer literal: ~s" s))))
+            (result::ok (if neg (- 0 acc) acc)))))))
+
 ;; `string-capitalize`: each word's first character up, the rest down, where a
 ;; word is a maximal run of alphanumerics — CL's own definition.
 (defmethod capitalize ((self string)) string

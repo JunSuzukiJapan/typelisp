@@ -242,3 +242,73 @@ fn to_string_renders_each_scalar_the_way_tilde_a_does() {
     assert_eq!(eval_string("(to-string #\\z)"), "z");
     assert_eq!(eval_string("(to-string \"already\")"), "already");
 }
+
+/// `parse-int`'s answer as text: the integer, or `err:` and the message, so
+/// one assertion covers both arms of the `Result`.
+fn parsed(call: &str) -> String {
+    eval_string(&format!(
+        "(match {} ((ok n) (to-string n)) ((err e) (append \"err:\" (message e))))",
+        call
+    ))
+}
+
+/// CL's `parse-integer`: surrounding whitespace is skipped, one sign is read,
+/// and anything else in the string is an error.
+#[test]
+fn parse_int_skips_surrounding_whitespace_and_reads_a_sign() {
+    assert_eq!(parsed("(parse-int \"42\")"), "42");
+    assert_eq!(parsed("(parse-int \"  -17 \")"), "-17");
+    assert_eq!(parsed("(parse-int \"+8\")"), "8");
+    assert_eq!(parsed("(parse-int \"\\t\\n5\\r\")"), "5");
+    assert_eq!(parsed("(parse-int \"12x\")"), "err:parse-int: invalid integer literal: \"12x\"");
+    assert_eq!(parsed("(parse-int \"1 2\")"), "err:parse-int: invalid integer literal: \"1 2\"");
+    assert_eq!(parsed("(parse-int \"-\")"), "err:parse-int: invalid integer literal: \"-\"");
+    assert_eq!(parsed("(parse-int \"   \")"), "err:parse-int: invalid integer literal: \"   \"");
+    assert_eq!(parsed("(parse-int \"\")"), "err:parse-int: invalid integer literal: \"\"");
+}
+
+/// The answer is an `int`, so a number too wide for a fixnum comes back as
+/// one anyway rather than wrapping.
+#[test]
+fn parse_int_answers_numbers_wider_than_a_fixnum() {
+    assert_eq!(parsed("(parse-int \"123456789012345678901234567890\")"), "123456789012345678901234567890");
+    assert_eq!(parsed("(parse-int \"-123456789012345678901234567890\")"), "-123456789012345678901234567890");
+}
+
+/// `:radix` picks the digits (either case above 9); a digit too large for the
+/// radix is junk like any other character.
+#[test]
+fn parse_int_reads_the_digits_of_its_radix() {
+    assert_eq!(parsed("(parse-int \"ff\" :radix 16)"), "255");
+    assert_eq!(parsed("(parse-int \"-FF\" :radix 16)"), "-255");
+    assert_eq!(parsed("(parse-int \"101\" :radix 2)"), "5");
+    assert_eq!(parsed("(parse-int \"zz\" :radix 36)"), "1295");
+    assert_eq!(parsed("(parse-int \"12\" :radix 2)"), "err:parse-int: invalid integer literal: \"12\"");
+}
+
+/// `:junk-allowed` stops at the first non-digit instead of rejecting it, but
+/// a string with no digits at all is still an `Err` — CL's `nil`.
+#[test]
+fn parse_int_with_junk_allowed_stops_at_the_first_non_digit() {
+    assert_eq!(parsed("(parse-int \" 123abc\" :junk-allowed true)"), "123");
+    assert_eq!(parsed("(parse-int \"-4 5\" :junk-allowed true)"), "-4");
+    assert_eq!(parsed("(parse-int \"12\" :radix 2 :junk-allowed true)"), "1");
+    assert_eq!(parsed("(parse-int \"abc\" :junk-allowed true)"), "err:parse-int: invalid integer literal: \"abc\"");
+}
+
+/// A radix outside 2..36 is the caller's mistake, not the text's: a panic,
+/// not an `Err`.
+#[test]
+fn parse_int_panics_on_a_radix_outside_2_to_36() {
+    let mut h = Heap::with_capacity(1 << 18);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    for bad in ["1", "37"] {
+        let src = format!("(parse-int \"1\" :radix {})", bad);
+        let v = Reader::new().read_all(&mut h, &src).expect("read failed").remove(0);
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        let err = interp.exec(&mut h, tl).expect_err("a bad radix must panic");
+        assert!(format!("{:?}", err).contains(&format!("radix {} is not between 2 and 36", bad)), "{:?}", err);
+    }
+}

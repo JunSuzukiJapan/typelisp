@@ -1,6 +1,6 @@
 # CL 残差を埋める実装計画 — `cl-missing-classes-and-methods.md` の全行を Phase へ
 
-作成: 2026-08-20 / 状態: **未着手**（Phase 0 の検証もまだ）
+作成: 2026-08-20 / 状態: **全 Phase 完了**（2026-09-05）。完了報告から落ちていた 8 項目は 2026-09-25 に洗い出し、3 つを片付けて残り 5 つを [地図の §5](cl-missing-classes-and-methods.md) に並べた
 
 [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) は「ANSI Common Lisp に
 存在して typelisp に無いもの」の**棚卸し地図**であって TODO ではない、と自ら明記している（同 §4）。
@@ -396,6 +396,11 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 （現在は `(format false "~a" x)` で代替）、`(search s sub)` / `(mismatch a b)`（**部分文字列検索が
 無い**）、`(split s sep)`（CL 標準にも無いが実用上ほぼ必ず要る）、
 `parse-int` の `:radix`/`:junk-allowed`。
+
+**追記（2026-09-25）**: `parse-int` の `:radix`/`:junk-allowed` はこの Stage の完了時に入っておらず、
+判断の記録も無かった。2026-09-25 に実装した（prelude の `defun` へ移し、CL に合わせて前後の空白も
+読み飛ばす。[implementation-log.md](implementation-log.md) の該当節）。可変長 `concatenate` は
+まだ無い。
 
 `(setf (char s i) c)` 相当は「`string` を可変にするか」という設計判断を伴う（現在 `string` は
 不変で `Rc<str>`、`eq`/`eql` が `Rc::ptr_eq`）。**可変文字列型を別に足すか、対象外とするかを

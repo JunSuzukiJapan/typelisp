@@ -732,12 +732,11 @@ impl Registry {
         // time" figure hides. Left out until 2026-09-05 because standing in
         // real time for it would have been a lie.
         root.fns.insert("get-internal-run-time".to_string(), FnSig::builtin(vec![], internal_time()));
-        // `parse-int`/`parse-float`: untrusted-text numeric parsing
+        // `parse-float`: untrusted-text numeric parsing
         // (`docs/language-design.md` §4.1's planned conversion catalog) —
         // `Result`, not a panic, since the input is runtime text the caller
         // doesn't control (unlike a source literal, which the reader/checker
         // already validate before this code ever runs).
-        root.fns.insert("parse-int".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::Int, error_ty(PARSE_INT_ERROR))));
         root.fns.insert("parse-float".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR))));
         // `read`: parses one `Sexpr` form out of a string with the same
         // reader `typl`/the REPL use for source text

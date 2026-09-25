@@ -2277,7 +2277,6 @@ impl Interp {
                 Ok((day, sec)) => Ok(typelisp_rt::sys_builtin::timezone_daylight_p(heap, day, sec)),
                 Err(e) => Err(e),
             }),
-            "parse-int" => Some(eval_parse_int(heap, args)),
             "parse-float" => Some(eval_parse_float(heap, args)),
             // Both pass `self` as the evaluator: an interpreted `(read ...)`
             // honours `#.` and the readtable, the way CL's does. The compiled
@@ -3935,15 +3934,6 @@ fn write_stdout(heap: &mut Heap, text: &str, newline: bool) -> Result<Value, Eva
     })
     .map(|()| Value::Empty)
     .map_err(|e| EvalError::Panic(format!("print: {}", e)))
-}
-
-/// `parse-int` (`registry.rs`'s free-function entry): a decimal `i32`
-/// literal (optional leading `+`/`-`, no surrounding whitespace — plain
-/// `str::parse`), `Err` on anything else rather than a panic (unlike the
-/// reader's own integer literals, this reads *untrusted* runtime text).
-fn eval_parse_int(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    let s = expect_str(heap, &args[0])?.to_string();
-    Ok(typelisp_rt::sys_builtin::parse_int(heap, &s))
 }
 
 /// `parse-float` (`registry.rs`'s free-function entry): an `f64` literal via

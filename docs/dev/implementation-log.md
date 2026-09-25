@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-09-16 / ブランチ: `main`
+最終更新: 2026-09-25 / ブランチ: `main`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -11946,3 +11946,36 @@ interpreted な印字メソッドは panic・`typl` のワーカーは drive 1 �
 退役の説明に書いた旧名 `` `go` `` も一度巻き込まれた。
 
 関連 [[typelisp-os-threads-plan]] [[typelisp-island-regen-fixpoint]]
+
+## CL 差分の地図を見直し、`parse-int` に `:radix`/`:junk-allowed`（2026-09-25）
+
+[cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) の最終更新は 2026-08-18 で、
+[cl-parity-plan.md](cl-parity-plan.md) の全 Phase 完了（2026-09-05）も `int` 型（2026-09-17）も
+反映されていなかった。❌ の 32 行と ⚠️ の行を 1 行ずつ、コード（`registry.rs`/`prelude.rs`/
+`checker.rs`）と計画の各 Stage に書かれた判断に照らして書き直した。「入れない」と確定したものは
+⛔ に移し、凡例の ⛔ を「設計と衝突するか、計画で入れないと確定したもの」に広げた。
+
+**完了報告から落ちていたもの**: 付録 A でどこかの Phase に割り当てられ、その Phase は完了して
+いるのに、実装も「入れない」判断も無い項目が 8 つあった。完了報告が Stage の項目を 1 つずつ
+確かめていなかったので、表の上では見えなかった。うち 3 つをこの日に片付けた:
+
+- **`parse-int` の `:radix`/`:junk-allowed`**（Stage 2b）— 実装した。Rust の組み込み
+  （`sys_builtin::parse_int`・`rt_parse_int`・`eval_parse_int`・extern 表の 3 行）を消し、
+  prelude の `defun` にした。組み込みは引数が固定で `&key` を持てないため。数字は
+  `digit-weight`、空白は `trim` と同じ集合、桁は `int` の算術で積むので上限は無い。
+  CL に合わせて**前後の空白を読み飛ばす**ようになった（以前は Rust の `str::parse` そのままで
+  `" 12"` は `Err`）。`:junk-allowed` で数字が 1 つも無いときは CL の `nil` の代わりに `Err`。
+  範囲外の `radix` は panic——テキストではなく呼び出し側の誤りなので。Rust の `BigInt` の
+  パーサが受け入れていた桁区切りの `_`（`"1_000"`）は、CL も受け付けないので受け付けなくなった。
+  extern 表が変わったので島と prelude を再生成した（2 回目で両方とも不変）。
+- **`nstring-*`**（Stage 3d）— 実装しない。`string` は不変（2b で確定）なので破壊版は作れず、
+  同じ結果を新しい文字列で返す `upcase`/`downcase`/`capitalize` が既にある。
+- **`with-hash-table-iterator`**（Stage 6a）— 実装しない。`(iter h)` が `Iter` を実装する
+  `hashtable-iter<K,V>` を返すので、`doiter`/`map`/`filter` がそのまま使える。
+
+残る 5 つ（可変長の `concatenate`/`append`、任意のシーケンス上の `search`/`mismatch`、
+`mapl`/`mapcon`、`*features*` の書き換え、`*read-eval*`）は地図の §5 に並べた。
+
+テストは `char_string_catalog_test` の 5 本（空白と符号、`int` の幅を超える数、`:radix`、
+`:junk-allowed`、範囲外の `radix` の panic）。compiled 経路と AOT 経路は既存の
+`compile_test`/`compile_file_test` が `parse-int` を呼んでいる。

@@ -610,7 +610,7 @@ impl Interp {
         match self.resolve_fn_named(&home, &written, &path) {
             Some(f) => self.reify(heap, &f),
             // A free built-in's own result key is not carried: the ones that
-            // build a box (`parse-int`'s `Result`) spell it from their own
+            // build a box (`parse-float`'s `Result`) spell it from their own
             // fixed signature in `typelisp_rt`, so there is nothing for the
             // reference site to say. `""` records that absence rather than a
             // key nobody wrote.

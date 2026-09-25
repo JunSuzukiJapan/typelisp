@@ -30,7 +30,6 @@ use typelisp_mem::{Heap, TypeKeyId, Value};
 /// `Path` to derive one from), checked against the registry by the same
 /// guard test.
 pub const RESULT_KEYS: &[(&str, &str)] = &[
-    ("parse-int", "result<int,parseinterror>"),
     ("parse-float", "result<f64,parsefloaterror>"),
     ("command-line-args", "vector<string>"),
     ("getenv", "option<string>"),
@@ -66,25 +65,6 @@ fn result_err(heap: &mut Heap, name: &str, err_type_key: TypeKeyId, msg: String)
     let err_val = heap.alloc_enum(err_type_key, 0, vec![msg_val]);
     let key = heap.intern_type_key(key_of(name));
     heap.alloc_enum(key, 1, vec![err_val])
-}
-
-/// `(parse-int s)`: a decimal `int` via `BigInt`'s parser, `Err` on anything
-/// else. The `Ok` payload is an `int` — CL's `parse-integer` answers a
-/// bignum for a long enough string, and so does this, through the canonical
-/// constructor.
-pub fn parse_int(heap: &mut Heap, s: &str) -> Value {
-    match s.parse::<num_bigint::BigInt>() {
-        Ok(n) => {
-            let v = heap.int_from_bigint(n);
-            result_ok(heap, "parse-int", v)
-        }
-        Err(_) => result_err(
-            heap,
-            "parse-int",
-            TypeKeyId::PARSE_INT_ERROR,
-            format!("parse-int: invalid integer literal: {:?}", s),
-        ),
-    }
 }
 
 /// `(parse-float s)`: an `f64` via `str::parse` (which accepts `inf`/`nan`),
@@ -533,7 +513,7 @@ use crate::{active_heap, decode, encode, fatal};
 // interpreter calls too. Each converts only at the calling convention: a
 // compiled `string` arrives tagged, a compiled `i64`/`i32` arrives raw.
 
-/// `(parse-int s)` for compiled code. The result is a freshly allocated
+/// `(parse-float s)` for compiled code. The result is a freshly allocated
 /// `Result` box, as unrooted as [`rt_str_new`]'s until its caller protects
 /// it — the same contract every allocating shim here has.
 ///
@@ -541,24 +521,6 @@ use crate::{active_heap, decode, encode, fatal};
 ///
 /// `argc` must be `>= 1` and `args` must point to a valid `i64` encoding a
 /// `Value::Str`; a `Heap` must be registered on this thread.
-#[no_mangle]
-pub unsafe extern "C" fn rt_parse_int(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_parse_int: expected 1 argument");
-    }
-    let s = match decode(*args) {
-        Value::Str(id) => active_heap().string(id).to_string(),
-        other => fatal(&format!("parse-int: argument is not a string, got {:?}", other)),
-    };
-    encode(parse_int(active_heap(), &s))
-}
-
-/// `(parse-float s)` for compiled code. Same allocation contract as
-/// [`rt_parse_int`].
-///
-/// # Safety
-///
-/// Same as [`rt_parse_int`].
 #[no_mangle]
 pub unsafe extern "C" fn rt_parse_float(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {

@@ -954,8 +954,8 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `upcase` | `(upcase s)` | `string→string` | 大文字化（ASCII のみ） |
-| `downcase` | `(downcase s)` | `string→string` | 小文字化（ASCII のみ） |
+| `upcase` | `(upcase s)` | `string→string` | 大文字化（ASCII のみ）。CL の `string-upcase` と同じく新しい文字列を返す。`string` は不変なので破壊版 `nstring-upcase` は無く、これが代わりになる |
+| `downcase` | `(downcase s)` | `string→string` | 小文字化（ASCII のみ）。`nstring-downcase` の代わり（`upcase` と同じ） |
 | `length` | `(length s)` | `string→i32` | 文字数 |
 | `ref` | `(ref s i)` | `(string,i32)→char` | `i` 番目の文字。範囲外は panic |
 | `substring` | `(substring s start end)` | `(string,i32,i32)→string` | 部分文字列 `[start,end)` |
@@ -1050,7 +1050,7 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
 | `keys` | `(keys h)` | `HashTable<K,V>→Vector<K>` | キーのスナップショット |
 | `values` | `(values h)` | `HashTable<K,V>→Vector<V>` | 値のスナップショット |
 | `entries` | `(entries h)` | `HashTable<K,V>→Vector<cons-cell<K,V>>` | `(k . v)` ペアのスナップショット |
-| `iter` | `(iter h)` | `HashTable<K,V>→hashtable-iter<K,V>` | `Iter` を実装するカーソル（ライブラリ定義） |
+| `iter` | `(iter h)` | `HashTable<K,V>→hashtable-iter<K,V>` | `Iter` を実装するカーソル（ライブラリ定義）。要素は `(k . v)` の `cons-cell`。CL の `with-hash-table-iterator` に当たり、`doiter`/`map`/`filter` など `Iter` の関数がそのまま使える |
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL `maphash` |
 | `size` | `(size h)` | `HashTable<K,V>→i32` | CL `hash-table-size`。この表では占有数（＝`count`） |
 
@@ -1746,7 +1746,7 @@ CL はこれらを `let` で束縛するが、この言語の `let` は字句束
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `parse-int` | `(parse-int s)` | `string→Result<i32,ParseIntError>` | 10進整数（`+`/`-`前置可）。Rust の `str::parse::<i32>` と同じ受理範囲 |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL の `parse-integer`。前後の空白（`trim` と同じ集合）を読み飛ばし、符号 `+`/`-` を 1 つ、続けて `radix` 進（既定 10、2〜36。10 より上の桁は大文字小文字どちらでも）の数字を読む。桁数に上限は無い（`int`）。それ以外の文字が残れば `Err`。`:junk-allowed true` なら最初の非数字で読むのをやめて残りを無視する——ただし数字が 1 つも無ければ `Err`（CL の `nil` に当たる）。CL の第 2 値（読み終わり位置）は返さない。範囲外の `radix` は panic（テキストではなく呼び出し側の誤り） |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
 | `read` | `(read s)` | `string→Result<Sexpr,ReadError>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err`。CL の `read-from-string` に当たる——ストリームから読むのは `read-sexpr`（§18.5） |
 | `read-from-string` | `(read-from-string s [start])` | `(string,i32)→Result<cons-cell<Sexpr,i32>,ReadError>` | `read` に**読み終わり位置**を添えたもの。`(car r)` が値、`(cdr r)` が次に読む文字位置。`start` 省略時は 0 |

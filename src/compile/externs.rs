@@ -83,7 +83,6 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // `typelisp_rt::equality` the interpreter calls.
         "equal" => "rt_sexpr_equal",
         "equalp" => "rt_sexpr_equalp",
-        "parse-int" => "rt_parse_int",
         "parse-float" => "rt_parse_float",
         "get-universal-time" => "rt_get_universal_time",
         "get-internal-real-time" => "rt_get_internal_real_time",
@@ -508,7 +507,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 306] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 305] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
@@ -530,7 +529,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 306] {
         rt_command_line_args, rt_dribble_start, rt_dribble_stop, rt_ed_open, rt_exit,
         rt_get_internal_real_time, rt_get_internal_run_time,
         rt_get_universal_time, rt_getenv, rt_heap_info, rt_home_directory, rt_lisp_implementation_version,
-        rt_machine_instance, rt_machine_type, rt_machine_version, rt_parse_float, rt_parse_int,
+        rt_machine_instance, rt_machine_type, rt_machine_version, rt_parse_float,
         rt_software_type, rt_software_version, rt_thread_available_parallelism, rt_thread_current_id,
         rt_timezone_daylight_p, rt_timezone_offset_seconds,
     };
@@ -623,7 +622,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 306] {
         ("rt_sexpr_eql", rt_sexpr_eql as *const () as usize),
         ("rt_sexpr_equal", rt_sexpr_equal as *const () as usize),
         ("rt_sexpr_equalp", rt_sexpr_equalp as *const () as usize),
-        ("rt_parse_int", rt_parse_int as *const () as usize),
         ("rt_parse_float", rt_parse_float as *const () as usize),
         ("rt_get_universal_time", rt_get_universal_time as *const () as usize),
         ("rt_get_internal_real_time", rt_get_internal_real_time as *const () as usize),

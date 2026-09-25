@@ -290,8 +290,8 @@ fn ed_without_an_editor_variable_is_an_error() {
 /// an editor opened on line 0 of nothing.
 #[test]
 fn ed_on_a_builtin_says_there_is_no_file() {
-    let msg = check_error("(ed parse-int)");
-    assert!(msg.starts_with("ed: `parse-int` has no source location"), "{}", msg);
+    let msg = check_error("(ed parse-float)");
+    assert!(msg.starts_with("ed: `parse-float` has no source location"), "{}", msg);
 }
 
 /// A string argument is a *file*, not a name — CL's `ed` takes either, told
