@@ -227,3 +227,45 @@ fn an_ordinary_hash_form_still_reads_without_an_evaluator() {
     assert_eq!(vs[0], Value::Int(16));
     assert_eq!(vs[1], Value::Char('a'));
 }
+
+// ----------------------------------------------------------------------
+// `*read-eval*`
+// ----------------------------------------------------------------------
+
+#[test]
+fn read_eval_false_turns_a_read_time_form_into_a_read_error() {
+    // The load path runs each form before reading the next, so the `setf`
+    // is in force when the `#.` after it is read.
+    let dir = fixture(
+        "read_eval_off",
+        &[("f.typl", "(setf *read-eval* false)\n(defvar (n int) #.(+ 1 2))\n")],
+    );
+    let (mut heap, reader, mut checker, mut interp) = session();
+    let err = load_file_flat(&mut heap, &reader, &mut checker, &mut interp, &dir, "f.typl")
+        .expect_err("`#.` is switched off");
+    let err = err.to_string();
+    assert!(err.contains("`*read-eval*` is false"), "unexpected error: {}", err);
+    assert!(err.contains("f.typl:2:"), "expected the position, got {}", err);
+}
+
+#[test]
+fn read_eval_can_be_switched_back_on() {
+    let dir = fixture(
+        "read_eval_on_again",
+        &[("f.typl", "(setf *read-eval* false)\n(setf *read-eval* true)\n(defvar (n int) #.(+ 1 2))\n")],
+    );
+    let (mut heap, reader, mut checker, mut interp) = session();
+    load_file_flat(&mut heap, &reader, &mut checker, &mut interp, &dir, "f.typl").expect("load failed");
+    assert_eq!(eval_in(&mut heap, &reader, &mut checker, &mut interp, "n"), Ok(Some(Value::Int(3))));
+}
+
+#[test]
+fn with_standard_io_syntax_binds_read_eval_to_true() {
+    let (mut heap, reader, mut checker, mut interp) = session();
+    let src = "(setf *read-eval* false)
+               (format false \"~a ~a\" (with-standard-io-syntax *read-eval*) *read-eval*)";
+    match eval_in(&mut heap, &reader, &mut checker, &mut interp, src) {
+        Ok(Some(Value::Str(id))) => assert_eq!(&*heap.string(id), "true false"),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}

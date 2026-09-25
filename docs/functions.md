@@ -668,7 +668,8 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→i32` | 要素数 |
-| `append` | `(append a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | 2つのイテレータを連結 |
+| `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | イテレータを連結。3 個以上は checker が 2 引数の `append` の左畳み込みに展開する（途中の結果は `(iter ...)` で次へ渡る） |
+| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL の `concatenate`。結果の型は**引用したシンボルのリテラル**で書く（CL は実行時の型指定子）。`'vector` は 1 個以上、`'string` は 0 個以上（0 個なら `""`）。`Sexpr` のリストは対象外（`sexpr-append`） |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | 反転（非破壊） |
 | `nth` | `(nth n it)` | `(i32,Iter<A>)→Option<A>` | `n` 番目の要素（範囲外は `None`） |
 | `elt` | `(elt it n)` | `(Iter<A>,i32)→Option<A>` | `nth` の引数順違い版 |
@@ -727,6 +728,10 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 | `mapc` | `(mapc it f)` | `(Iter<A>,(fn (A) ()))→()` | 副作用のための写像 |
 | `mapcan` | `(mapcan it f)` | `(Iter<A>,(fn (A) Vector<U>))→Vector<U>` | 写像して連結 |
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | 連続する**末尾**への写像 |
+| `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | 末尾への副作用のための写像（`maplist` 版の `mapc`） |
+| `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | 末尾へ写像して連結（`maplist` 版の `mapcan`） |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | `sub` が最初に現れる位置。`string` 版（§8）の一般化で、キーワードも同じ（§6.3）。受け手が `string` なら `string` のメソッドが先に選ばれる |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | 最初に食い違う位置。等しければ `none`。`string` 版の一般化 |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | 併合。CL は整列済みを要求するが、これは連結を整列する |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | 無ければ**先頭に**足す |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | 集合演算。CL は順序を規定しないが、ここは**初出順**で安定 |
@@ -796,7 +801,7 @@ CL のシーケンス関数が取るキーワード `:key` / `:test` / `:test-no
    CL の既定は**最後**を残す。以前の挙動は `:from-end true`。
 
 破壊的な版（§6.2、`Vector<T>` の `defmethod`）と `search`/`mismatch`（`string` の
-`defmethod`）も同じキーワードを取る。`defmethod` が `&optional`/`&key` を受け付けるように
+`defmethod` と `Iter` 上の `defun` の両方）も同じキーワードを取る。`defmethod` が `&optional`/`&key` を受け付けるように
 なった（cl-parity-plan.md Phase 5b）ので、Phase 3e が残していた分を埋めたもの。
 
 | 破壊的な版 | 取るキーワード |
@@ -959,7 +964,7 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `length` | `(length s)` | `string→i32` | 文字数 |
 | `ref` | `(ref s i)` | `(string,i32)→char` | `i` 番目の文字。範囲外は panic |
 | `substring` | `(substring s start end)` | `(string,i32,i32)→string` | 部分文字列 `[start,end)` |
-| `append` | `(append s1 s2)` | `(string,string)→string` | 連結 |
+| `append` | `(append s1 s2 ...)` | `(string,string,...)→string` | 連結。3 個以上も書ける（`(concatenate 'string ...)` と同じ） |
 | `<` `<=` `>` `>=` | `(op s1 s2)` | `(string,string)→bool` | 辞書順比較（`i32` 等と同じくレシーバ型で多重定義） |
 | `lt` | `(lt s1 s2)` | `(string,string)→bool` | 辞書順の狭義小なり（`<` の旧 CL カタログ名） |
 | `eq` `eql` | `(op s1 s2)` | `(string,string)→bool` | 同一性比較（内容ではなく参照）。2026-08-18 まで compiled 側だけ内容比較になっていたのを揃えた |
@@ -1245,7 +1250,7 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | 偽なら panic。メッセージ省略時は `assertion failed: <テストを書かれたまま>`（マクロなので式そのものを名指せる）。CL の restart はこの言語に無い |
 | `warn` | `(warn control args...)` | `(string,...)→()` | `*error-output*` へ `WARNING: ` 付きで 1 行書いて**続行**する。`Result` を返しもせずプログラムを終わらせもせずに報告する唯一の手段 |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | グローバルを `body` の間だけ差し替え、抜けるときに戻す。CL はこれを `let` と書くが、この言語の `let` は常に字句束縛なので別名（Emacs Lisp の同名マクロと同じ役目）。復元は `unwind-protect` の cleanup なので、正常終了・`throw`・`panic`・`break`/`return` のどれで抜けても走る。**スレッドごとの束縛ではない** |
-| `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 印字制御変数を全部標準値に `dlet` する（§15.3） |
+| `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 印字制御変数を全部標準値に、`*read-eval*` を `true` に `dlet` する（§15.3、[syntax.md](syntax.md) §1） |
 | `exit` | `(exit code)` | `i32→!` | プロセスを終了する |
 | `dump` | `(dump path)` | `string→bool` | いまの環境（型情報 + コンパイル済み本体）を1ファイルへ書き出す。`typl --image <path>` で立ち上げ直せる。`compile`/`compile-file` と同じくインタプリタ専用（コンパイル済み関数からは呼べない） |
 

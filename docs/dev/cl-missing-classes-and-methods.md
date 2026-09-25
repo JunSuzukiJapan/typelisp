@@ -2,7 +2,7 @@
 
 作成: 2026-07-29 / 最終更新: 2026-09-25（[cl-parity-plan.md](cl-parity-plan.md) の全 Phase 完了
 （2026-09-05）と `int` 型（2026-09-17）を反映して ❌/⚠️ の全行を見直し、`parse-int` の
-`:radix`/`:junk-allowed` を反映。計画に載っていたのに判断の記録が無い項目を §5 に集めた）
+`:radix`/`:junk-allowed` を反映。計画に載っていたのに判断の記録が無かった 8 項目を §5 に集め、同日に全部片付けた）
 
 このドキュメントは **ANSI Common Lisp（CLHS）に存在して typelisp に無いもの** を、クラス（型）と
 メソッド（関数・マクロ・特殊形）に分けて網羅列挙する。「CL 同等の表現力のために何を足すか」を
@@ -192,7 +192,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | 拡張 `loop`（`for`/`in`/`across`/`collect`/`sum`/`when`/`finally` …） | ✅ | 2026-08-21（Phase 4b）、`:named` は 2026-09-05。checker の糖衣（`check/loop_dsl.rs`）。先頭がキーワードでない `(loop body...)` は従来どおりの無限ループ（[syntax.md](../syntax.md) §5.1） |
 | `do` / `do*` | ✅ | 両方 `defmacro`。`do` は並行ステップ、`do*` は `let*` 束縛と順次代入（2026-08-20、Phase 4a） |
 | `dolist` / `dotimes` | ✅ | `dolist` は `Sexpr` の cons リストを歩く（要素は `Sexpr`）。`doiter` が `Iter` 版 |
-| `mapc` / `mapcar` / `mapcan` / `mapl` / `maplist` / `mapcon` | ⚠️ | `mapcar` は `map`（`Iter` 1 本）と `map2`（2 本を並べて走査、短い方で止まる）。`mapc`/`mapcan`/`maplist` ✅（2026-08-20、Phase 3b、`Iter` 上）。**`mapl`/`mapcon` は無い**——Phase 3b の予定に入っていたが、実装も「入れない」判断も記録されていない（§5） |
+| `mapc` / `mapcar` / `mapcan` / `mapl` / `maplist` / `mapcon` | ✅ | すべて `Iter` 上。`mapcar` は `map`（1 本）と `map2`（2 本を並べて走査、短い方で止まる）。`mapc`/`mapcan`/`maplist` は 2026-08-20（Phase 3b）、`mapl`/`mapcon` は 2026-09-25。末尾は共有構造ではなく毎回新しい `Vector<A>` |
 
 ### 2.5 オブジェクト（CLHS 7、CLOS）
 
@@ -362,7 +362,7 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 | `rplaca` / `rplacd` | ✅ | `cons-cell` 上（2026-08-20、Phase 3）。(D4) は撤回（cl-parity-plan.md 付録 B）。**`Sexpr` 版は無い**——cons セルが `car` のソース位置を持つので書き換えると診断がずれる |
 | `nconc` / `nreverse` / `nbutlast` / `nsubst` 等の n 系 | ✅ | `Vector<T>` 上（2026-08-20、Phase 3）。(D4) は撤回。`nconc` は CL と違い**共有構造の書き換えではない** |
 | `revappend` / `nreconc` | ✅ | （2026-08-20、Phase 3） |
-| `append` | ⚠️ | `Iter` 版（2 引数）と `string` 版（2 引数）と `sexpr-append` がある。**CL の可変長・任意個は無い**——Phase 3a の予定に入っていたが、実装も「入れない」判断も記録されていない（§5） |
+| `append` | ✅ | `Iter` 版・`string` 版とも可変長（2026-09-25。3 個以上は checker が 2 引数の左畳み込みに展開する）。`Sexpr` のリストは `sexpr-append` |
 | `member` / `member-if` / `member-if-not` | ⚠️ | 3つとも ✅ だが**すべて `bool` を返す**（CL は残りのリスト）。イテレータに返すべき tail cons が無いため——残りが要るなら `position` + `subseq`（2026-08-20、Phase 3） |
 | `assoc` / `assoc-if` / `rassoc` / `rassoc-if` / `acons` / `pairlis` | ✅ | 6つとも（2026-08-20、Phase 3）（`:test`/`:key` は Phase 3e） |
 | `sublis` / `subst` / `subst-if` / `tree-equal` | ⛔ | `copy-tree` と同じ理由で対象外 |
@@ -406,7 +406,7 @@ prelude の `defstruct`（`Array<T>` は `Vector<T>` 2 本、`BitVector` は詰�
 | `string-capitalize` | ✅ | `capitalize`（2026-08-20、Phase 2b） |
 | `nstring-*` | ⚠️ | 破壊版は無い（`string` は不変、2b で確定）。同じ結果を新しい文字列で返す非破壊版 `upcase`/`downcase`/`capitalize` がそのまま代わりになる |
 | `string-trim` / `string-left-trim` / `string-right-trim` | ✅ | `trim`/`left-trim`/`right-trim`。`bag` 省略時は空白類（2026-08-20、Phase 2b） |
-| `concatenate` | ⚠️ | `append`（2 引数）が相当。**可変長版は無い**——Phase 2b/3b の予定に入っていたが、実装も「入れない」判断も記録されていない（§5） |
+| `concatenate` | ✅ | 2026-09-25。`(concatenate 'string s ...)` と `(concatenate 'vector seq ...)`。結果の型は引用したシンボルの**リテラル**に限る（CL の型指定子は実行時の値だが、ここでは checker が読む）。`'list` は無い（`Sexpr` のリストは `sexpr-append`） |
 | `make-string` / `string`（文字列化） | ✅ | `string::filled` と `to-string`（2026-08-20、Phase 2b）。`to-string` はスカラ 6 型に実装 |
 | `stringp` / `simple-string-p` | ⛔ | 静的型付け（D1） |
 | `search` / `mismatch`（文字列検索） | ✅ | 受け手優先の `(search s sub)`（CL は引数順が逆）と `(mismatch a b)`（2026-08-20、Phase 2b） |
@@ -424,11 +424,11 @@ prelude の `defstruct`（`Array<T>` は `Vector<T>` 2 本、`BitVector` は詰�
 | `sort` / `stable-sort` の述語引数 | ✅ | 2026-07-31 に CL 本来の `(sort sequence predicate)` へ変更。`(sort it cmp)`、`cmp` は「第1引数が第2引数より真に前」で `true`。非破壊（新しい `Vector<A>` を返す）かつ安定な挿入ソートなので `stable-sort` は同じものになる |
 | `merge` | ✅ | （2026-08-20、Phase 3）。CL は整列済みを要求するが、これは連結を整列する |
 | `copy-seq` / `fill` / `replace` / `map-into` | ✅ | `copy-seq` は `Iter` 上、残り3つは `Vector<T>` のその場書き込み（2026-08-20、Phase 3） |
-| `concatenate` | ⚠️ | `append`（2 引数）が相当。**可変長版は無い**——Phase 2b/3b の予定に入っていたが、実装も「入れない」判断も記録されていない（§5） |
+| `concatenate` | ✅ | 2026-09-25。`(concatenate 'string s ...)` と `(concatenate 'vector seq ...)`。結果の型は引用したシンボルの**リテラル**に限る（CL の型指定子は実行時の値だが、ここでは checker が読む）。`'list` は無い（`Sexpr` のリストは `sexpr-append`） |
 | `substitute` / `substitute-if` / `nsubstitute` | ✅ | `nsubstitute-if` も（2026-08-20、Phase 3） |
 | `remove` / `remove-duplicates` / `delete` / `delete-if` / `delete-duplicates` | ✅ | 全部（2026-08-20、Phase 3）。`delete-if-not` も。(D4) は撤回 |
 | `notany` / `notevery` / `count-if-not` / `find-if-not` / `remove-if-not` | ✅ | 5つとも（2026-08-20、Phase 3） |
-| `search` / `mismatch` | ⚠️ | `string` 上は ✅（Phase 2b）。**任意のシーケンス上の部分列検索は無い**——Phase 3b の予定に入っていたが、実装も「入れない」判断も記録されていない（§5） |
+| `search` / `mismatch` | ✅ | `string` 上（Phase 2b）に加え、任意の `Iter` 上の部分列検索（2026-09-25、`Eq` 境界）。キーワードは `string` 版と同じ——`search` だけ番号でなく名前（受け手が先なので CL の番号は逆の意味になる） |
 | `make-sequence` / `coerce`（シーケンス変換） | ⚠️ | `make-sequence` は `Vector::filled`（Phase 3a）。`coerce` は対象外——`Vector<T>` ↔ `Sexpr` リストの相互変換は**言語仕様上不可**と結論済み（functions.md §10） |
 | `nreverse` | ⛔ | (D4) |
 
@@ -515,8 +515,8 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | radix マクロ `#b` / `#o` / `#x` / `#NNr` | ✅ | 2026-08-22（Phase 7b の副産物）。`*print-radix*` が付ける印を読み戻すために入れた。符号は印の後ろ、`i32` を超えれば `bignum` |
 | `*read-base*` | ⛔ | 見送り（Phase 7b で判断）。`read` はコンパイル済みコードからも `rt_read` 経由で呼ばれ、そちら側に typelisp のグローバルへの経路が無い（`PrintHooks` に相当するリーダ側の表が要る）。CL 自身の落とし穴（基数 16 では `abc` が数になる）もあり、「別の基数で読む」需要は radix マクロが明示的に満たす |
 | `*read-default-float-format*` | ⛔ | 浮動小数点型が `f64` 1 つしか無い |
-| `*read-suppress*` / `*read-eval*` | ⚠️ | `*read-suppress*` は対象外（`#+`/`#-` はリーダ内部で読み飛ばしを完結させている）。**`*read-eval*` は判断が宙に浮いている**——7b で「`#.` が無いから不要」とされたが、`#.` は 2026-09-05 に入った（§5） |
-| `with-standard-io-syntax` | ✅ | 2026-08-22（Phase 7b）。印字側の変数を全部標準値に `dlet` する。CL がここで束縛するリーダ変数はこの言語に無い |
+| `*read-suppress*` / `*read-eval*` | ⚠️ | `*read-eval*` ✅（2026-09-25）。`false` なら `#.` が読み取りエラーになる。`*read-suppress*` は対象外（`#+`/`#-` はリーダ内部で読み飛ばしを完結させている） |
+| `with-standard-io-syntax` | ✅ | 2026-08-22（Phase 7b）。印字側の変数を全部標準値に、`*read-eval*` を `true` に `dlet` する。CL が束縛する他のリーダ変数はこの言語に無い |
 | `parse-integer` | ✅ | `parse-int`（`Result` を返す）。`:radix`/`:junk-allowed` と前後の空白の読み飛ばしは 2026-09-25。CL の第 2 値（読み終わり位置）は返さない |
 
 ### 2.21 システム構築（CLHS 24）・環境（CLHS 25）
@@ -525,7 +525,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 |---|---|---|
 | `load` | ✅ | ソースを読んで順に評価するフラットロード。トップレベル専用 |
 | `require` / `provide` / `*modules*` | ⛔ | 入れない（9b）。`use` が既にそれ——モジュールを探して一度だけ読み込むのが `require` の全部で、読み込み済みの表が `*modules*` に当たる |
-| `*features*` / `#+` / `#-` | ⚠️ | 2026-07-30 実装。`#+`/`#-`（`and`/`or`/`not` 合成式込み）。`*features*` は CL と違い**読み込み中に書き換えられない固定集合**で、既定はホストの OS/アーキテクチャ＋`:typelisp`、`typl` の `--feature NAME` で追加できる。書き換えを妨げていた「全フォームを読んでからチェック」は 2026-09-04 に「フォーム単位の読む→チェック→評価」へ変わったが、書き換えられるようにする Phase 8c の予定は実装も「入れない」判断も記録されていない（§5） |
+| `*features*` / `#+` / `#-` | ⚠️ | 2026-07-30 実装。`#+`/`#-`（`and`/`or`/`not` 合成式込み）。`*features*` は CL と違い**読み込み中に書き換えられない固定集合**で、既定はホストの OS/アーキテクチャ＋`:typelisp`、`typl` の `--feature NAME` で追加できる。書き換えられるようにするのは**入れない**（2026-09-25 に確定） |
 | `compile-file-pathname` / `*compile-file-pathname*` / `*load-pathname*` 等 | ⚠️ | `*load-pathname*` に当たるのは `(source-file)`（2026-09-04、Phase 9b。そのフォームが読まれたファイル名を定数として埋める）。`compile-file-pathname` 系は入れない（9b）——CL のそれは fasl の出力先を答えるもので、対応物が無い |
 | `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ✅ | 2026-07-31 実装、2026-09-05 完了。`get-internal-real-time`（`internal-time` 構造体、`second`/`microsecond`。`internal-time-units-per-second` は 1_000_000。2026-09-01 に `i64` 廃止で構造体化）と `get-internal-run-time`（CPU 時間、`getrusage`。`libc` 採用で入った）。`time` マクロは両方を1行ずつ印字して `form` の値をそのまま返す——I/O 待ちが主な処理では両者が大きく開く |
 | `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ✅ | 分解・合成を 2026-08-20 実装（Phase 9c）、2026-09-05 に地方時を追加。多値が無いので `decoded-time` という `defstruct` で返し、`libc` 採用で `daylight-p`/`zone` が加わって **CL の 9 個の返り値が全部揃った**。zone 省略時は CL と同じ**地方時**。結果の `zone` だけ `f64`——+5:30 のような offset を丸めないため |
@@ -547,7 +547,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 作成時（2026-07-29）に「足すなら効果が大きい順」で並べた 1〜7 と 9 はその順序のまま残し、
 解消したものに取り消し線を引いて、いつ何で解消したかを書き足してある（8 は 2026-08-18 の
 見直しで追加した項目）。**2026-09-25 の時点で、機構として欠けているものは 4（多値）だけ**で、
-それも非採用で確定している（cl-parity-plan.md §0）。個別の残りは §5。
+それも非採用で確定している（cl-parity-plan.md §0）。
 
 1. ~~**ストリームとファイル I/O**（§2.17/§2.18）~~ — 2026-08-02（ストリーム）と 2026-08-05
    （パス名・`read-sexpr`・`format` の出力先）で解消。CLHS 21章はトレイト階層として、
@@ -593,8 +593,8 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 ## 4. このドキュメントの位置づけ
 
 この一覧は**TODO ではない**。[TODO.md](TODO.md) の「残っている作業」は現時点で空であり、
-この一覧は「CL と比べたときの残差はどこか」を測るための地図として作った。着手する場合は §5 が
-候補になる。
+この一覧は「CL と比べたときの残差はどこか」を測るための地図として作った。2026-09-25 の時点で
+❌（判断の付いていない未実装）は 1 行も無い。⚠️ は CL との差分を理由つきで受け入れたもの。
 
 この地図は放っておくと実装より古くなる。実際、2026-08-18 の見直しでは、作成時に挙げた §3 の
 8項目のうち5項目がすでに解消済みで、そのうち3項目（1・5・6）は解消から今回まで表に反映されて
@@ -608,20 +608,19 @@ grep して確かめること。**
 機能）が一次情報。CL に同名の機能があることを理由にこれらを再検討する場合は、
 まず (D1)〜(D5) のどれと衝突するかを確認すること。
 
-## 5. 計画に載っていたのに判断の記録が無いもの（2026-09-25 の見直し）
+## 5. 計画に載っていたのに判断の記録が無かったもの（2026-09-25 の見直し）
 
 cl-parity-plan.md の付録 A でどこかの Phase に割り当てられ、その Phase は完了しているのに、
-**実装されてもおらず「入れない」判断も記録されていない**もの。完了報告が項目を 1 つずつ
-確かめていなかったので、表からは落ちたことが見えなかった。
+**実装されてもおらず「入れない」判断も記録されていなかった**もの。完了報告が項目を 1 つずつ
+確かめていなかったので、表からは落ちたことが見えなかった。**2026-09-25 に全部片付いた。**
 
-| 項目 | 割り当て | 状況 |
+| 項目 | 割り当て | 結果 |
 |---|---|---|
-| 可変長の `concatenate` / `append` | Phase 2b・3a・3b | `append` は `Iter` 版も `string` 版も 2 引数のまま。`concatenate` という名前も無い |
-| 任意のシーケンス上の `search` / `mismatch` | Phase 3b | `string` 上だけにある |
-| `mapl` / `mapcon` | Phase 3b | `mapc`/`mapcan`/`maplist` は入ったが、この 2 つは無い |
-| 読み込み中に `*features*` を書き換える | Phase 8c | 妨げていた「全フォームを読んでからチェック」は 2026-09-04 に無くなったが、集合は固定のまま |
-| `*read-eval*` | Phase 7b | 7b は「`#.` が無いから不要」としたが、`#.` は 2026-09-05 に入った |
-
-同じ見直しで、判断の記録が無かったものを 3 つ片付けた（2026-09-25）: `parse-int` の
-`:radix`/`:junk-allowed` は実装、`nstring-*` は非破壊の `upcase`/`downcase`/`capitalize` が、
-`with-hash-table-iterator` は `(iter h)` が代わりになることを確かめて表に書いた。
+| `parse-int` の `:radix`/`:junk-allowed` | Phase 2b | 実装（前後の空白の読み飛ばしも CL に合わせた） |
+| `nstring-*` | Phase 3d | 非破壊の `upcase`/`downcase`/`capitalize` が代わり（`string` は不変） |
+| `with-hash-table-iterator` | Phase 6a | `(iter h)` が代わり |
+| 可変長の `concatenate` / `append` | Phase 2b・3a・3b | 実装（checker の糖衣） |
+| 任意のシーケンス上の `search` / `mismatch` | Phase 3b | 実装（`Iter` 上の `defun`） |
+| `mapl` / `mapcon` | Phase 3b | 実装 |
+| `*read-eval*` | Phase 7b | 実装。7b の「`#.` が無いから不要」は `#.`（2026-09-05）で成り立たなくなっていた |
+| 読み込み中に `*features*` を書き換える | Phase 8c | 入れない |

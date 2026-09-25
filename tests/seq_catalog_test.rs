@@ -279,3 +279,98 @@ fn rplaca_and_rplacd_return_the_mutated_cell() {
     assert_eq!(show("(rplaca (cons 1 2) 9)"), "#<cons-cell<int,int> 9 2>");
     assert_eq!(show("(rplacd (rplaca (cons 1 2) 9) 8)"), "#<cons-cell<int,int> 9 8>");
 }
+
+// ------------------------------------------- filled in on 2026-09-25
+
+/// The check error `src` produces with the prelude loaded.
+fn check_err(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 18);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let v = Reader::new().read_all(&mut h, src).expect("read failed").remove(0);
+    match chk.check_form(&mut h, &interp, v) {
+        Ok(_) => panic!("expected a check error for {}", src),
+        Err(e) => e.to_string(),
+    }
+}
+
+#[test]
+fn append_takes_any_number_of_sequences_or_strings() {
+    assert_eq!(
+        with_fixtures("(append (iter a) (iter b) (iter a))"),
+        "#<vector<int> 1 2 2 3 2 3 4 1 2 2 3>"
+    );
+    assert_eq!(
+        with_fixtures("(append (iter b) (iter b) (iter b) (iter b))"),
+        "#<vector<int> 2 3 4 2 3 4 2 3 4 2 3 4>"
+    );
+    assert_eq!(show("(append \"ab\" \"c\" \"\" \"de\")"), "abcde");
+}
+
+#[test]
+fn concatenate_joins_into_the_named_result_type() {
+    assert_eq!(show("(concatenate 'string \"ab\" \"c\" \"de\")"), "abcde");
+    assert_eq!(show("(length (concatenate 'string))"), "0");
+    assert_eq!(show("(concatenate 'string \"only\")"), "only");
+    assert_eq!(with_fixtures("(concatenate 'vector (iter a) (iter b))"), "#<vector<int> 1 2 2 3 2 3 4>");
+    assert_eq!(with_fixtures("(concatenate 'vector (iter b))"), "#<vector<int> 2 3 4>");
+}
+
+#[test]
+fn concatenate_refuses_what_it_cannot_type() {
+    assert!(check_err("(concatenate 'list 1)").contains("unknown result type `list`"));
+    assert!(check_err("(concatenate 'vector)").contains("needs at least one sequence"));
+    assert!(check_err("(concatenate \"string\" \"a\")").contains("must be a quoted symbol"));
+    // Every operand has to fit the result type.
+    assert!(check_err("(concatenate 'string \"a\" 1)").len() > 0);
+}
+
+/// `p` = `#<vector<int> 2 3>` and `q` = `#<vector<int> 2>` alongside the
+/// usual fixtures (`a` = 1 2 2 3, `b` = 2 3 4).
+fn with_patterns(expr: &str) -> String {
+    with_fixtures(&format!(
+        "(let ((p (the Vector<int> (Vector::new))) (q (the Vector<int> (Vector::new))))
+           (progn (push p 2) (push p 3) (push q 2) {}))",
+        expr
+    ))
+}
+
+#[test]
+fn search_finds_a_subsequence_of_any_sequence() {
+    assert_eq!(with_patterns("(search (iter a) (iter p))"), "(some 2)");
+    assert_eq!(with_patterns("(search (iter a) (iter b))"), "none");
+    assert_eq!(with_patterns("(search (iter a) (iter q))"), "(some 1)");
+    assert_eq!(with_patterns("(search (iter a) (iter q) :from-end true)"), "(some 2)");
+    assert_eq!(with_patterns("(search (iter a) (iter q) :start 3)"), "none");
+    // `:key` projects both sides: the first odd element of `a` is at 0.
+    assert_eq!(with_patterns("(search (iter a) (iter b) :key (lambda ((x int)) int (mod x 2)) :sub-start 1 :sub-end 2)"), "(some 0)");
+    // A `string` receiver still reaches `string`'s own method.
+    assert_eq!(show("(search \"hello\" \"ll\")"), "(some 2)");
+}
+
+#[test]
+fn mismatch_compares_any_two_sequences() {
+    assert_eq!(with_patterns("(mismatch (iter a) (iter a))"), "none");
+    assert_eq!(with_patterns("(mismatch (iter a) (iter b))"), "(some 0)");
+    // A proper prefix mismatches at its end.
+    assert_eq!(with_patterns("(mismatch (iter p) (iter b))"), "(some 2)");
+    // Aligned at the ends: `3` against `4` is the rightmost difference.
+    assert_eq!(with_patterns("(mismatch (iter a) (iter b) :from-end true)"), "(some 4)");
+    assert_eq!(with_patterns("(mismatch (iter a) (iter p) :start1 2)"), "none");
+}
+
+#[test]
+fn mapl_and_mapcon_walk_successive_tails() {
+    assert_eq!(
+        with_fixtures(
+            "(let ((out (the Vector<int> (Vector::new))))
+               (progn (mapl (iter b) (lambda ((t Vector<int>)) () (push out (len t)))) out))"
+        ),
+        "#<vector<int> 3 2 1>"
+    );
+    assert_eq!(
+        with_fixtures("(mapcon (iter b) (lambda ((t Vector<int>)) Vector<int> t))"),
+        "#<vector<int> 2 3 4 3 4 4>"
+    );
+}

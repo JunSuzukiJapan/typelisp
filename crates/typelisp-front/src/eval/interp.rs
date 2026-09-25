@@ -2778,6 +2778,18 @@ impl Interp {
         out.map_err(|e| e.to_string())
     }
 
+    /// CL's `*read-eval*` (the prelude's global): `Err` when it is `false`,
+    /// which turns a `#.` into a read error. Asked by both implementors of
+    /// the reader's `#.` hook — this one and `read::DriverReadEval` — before
+    /// anything runs. A session without the prelude has no such global, and
+    /// `#.` is allowed, CL's default.
+    pub(crate) fn read_eval_allowed(&self, heap: &Heap) -> Result<(), String> {
+        match self.global_value(heap, &crate::Path::root("*read-eval*")) {
+            Some(Value::Bool(false)) => Err("`#.` is switched off: `*read-eval*` is false".to_string()),
+            _ => Ok(()),
+        }
+    }
+
     /// [`typelisp_read::reader::ReadEval`] for the reader's `#.`.
     ///
     /// The same act as [`Self::eval_form`] — check this datum, run it — with
@@ -2790,6 +2802,7 @@ impl Interp {
     /// is whatever the form produced, which for a definition is nothing
     /// (`()`).
     pub fn read_eval_form(&self, heap: &mut Heap, form: Value) -> Result<Value, String> {
+        self.read_eval_allowed(heap)?;
         let Some(checker) = self.checker.as_ref().map(Rc::clone) else {
             return Err("`#.` needs a checker handle, and this session has none".to_string());
         };

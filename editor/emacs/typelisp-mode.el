@@ -274,7 +274,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "first" "second" "third" "fourth" "fifth" "sixth"
     "seventh" "eighth" "ninth" "tenth"
     "acons" "adjoin" "assoc-if" "copy-seq" "count-if-not" "find-if-not"
-    "intersection" "ldiff" "map2" "mapc" "mapcan" "maplist"
+    "intersection" "ldiff" "map2" "mapc" "mapcan" "maplist" "mapl" "mapcon"
+    "concatenate"
     "member-if" "member-if-not" "merge" "notany" "notevery" "pairlis"
     "position-if-not" "rassoc" "rassoc-if" "remove-duplicates" "remove-if-not"
     "rest" "revappend"
@@ -284,7 +285,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "seq-any-core" "seq-count-core" "seq-dedup-core" "seq-edit-core"
     "seq-find-core" "seq-flag" "seq-in-bounds" "seq-limit"
     "seq-position-core" "seq-sort-core" "seq-window-start" "seq-window-end"
-    "string-window-equal"
+    "string-window-equal" "vector-window-equal"
     ;; the 28 `c*r' pair accessors (§6.1)
     "caaaar" "caaadr" "caaar" "caadar" "caaddr" "caadr"
     "caar" "cadaar" "cadadr" "cadar" "caddar" "cadddr"

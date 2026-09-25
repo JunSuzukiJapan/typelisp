@@ -35,6 +35,7 @@ impl reader::ReadEval for DriverReadEval<'_> {
         heap: &mut crate::Heap,
         form: crate::Value,
     ) -> Result<crate::Value, String> {
+        self.interp.read_eval_allowed(heap)?;
         // The same discipline `Interp::read_eval_form` follows: root the form
         // across checking (which allocates), release before `exec`.
         let mark = heap.root_count();

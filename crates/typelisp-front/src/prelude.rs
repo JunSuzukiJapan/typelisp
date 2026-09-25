@@ -2477,6 +2477,93 @@ user-visible capacity."
 (defun copy-seq<I,A> ((it I)) Vector<A> (where (Iter I (Item A)))
   (let ((out (the Vector<A> (Vector::new))))
     (progn (doiter (x it) (push out x)) out)))
+
+;; `search`/`mismatch` over any two sequences -- the `string` methods'
+;; generalisation, with the same keywords and the same receiver-first order
+;; (see the note above `string`'s `search` for why its window keywords are
+;; named rather than numbered). A `string` receiver still reaches the method:
+;; a type's own method is tried before a free function of the same name.
+;;
+;; Whether `n` elements of `a` from `ai` and of `b` from `bi` all satisfy
+;; `same`, called with `b`'s element first -- `string-window-equal` over
+;; `Vector<A>`.
+(defun vector-window-equal<A> ((a Vector<A>) (ai int) (b Vector<A>) (bi int) (n int)
+                               (same (fn (A A) bool)))
+    bool
+  (let ((k 0) (ok true))
+    (progn
+      (while (if ok (< k n) false)
+        (progn
+          (unless (same (get b (+ bi k)) (get a (+ ai k))) (setf ok false))
+          (setf k (+ k 1))))
+      ok)))
+(defun search<I,J,A> ((it I) (sub J)
+                      &key (key (fn (A) A)) (test (fn (A A) bool))
+                           (test-not (fn (A A) bool)) (from-end bool)
+                           (start int) (end int) (sub-start int) (sub-end int))
+    Option<int>
+  (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equals (proj p) (proj q))))))))
+          (hay (copy-seq it))
+          (pat (copy-seq sub)))
+      (let ((e (seq-window-end end (len hay)))
+            (ps (seq-window-start sub-start))
+            (last (seq-flag from-end))
+            (found (the Option<int> (option::none)))
+            (i (seq-window-start start)))
+        (let ((m (- (seq-window-end sub-end (len pat)) ps)))
+          (progn
+            (while (if (<= (+ i m) e) (if last true (is-none found)) false)
+              (progn
+                (when (vector-window-equal hay i pat ps m same)
+                  (setf found (option::some i)))
+                (setf i (+ i 1))))
+            found))))))
+(defun mismatch<I,J,A> ((it I) (other J)
+                        &key (key (fn (A) A)) (test (fn (A A) bool))
+                             (test-not (fn (A A) bool)) (from-end bool)
+                             (start1 int) (end1 int) (start2 int) (end2 int))
+    Option<int>
+  (where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
+    (let ((same (lambda ((p A) (q A)) bool
+                  (match test
+                    ((some f) (f (proj p) (proj q)))
+                    ((none) (match test-not
+                              ((some g) (not (g (proj p) (proj q))))
+                              ((none) (equals (proj p) (proj q))))))))
+          (a (copy-seq it))
+          (b (copy-seq other)))
+      (let ((s1 (seq-window-start start1)) (e1 (seq-window-end end1 (len a)))
+            (s2 (seq-window-start start2)) (e2 (seq-window-end end2 (len b))))
+        (let ((n (min (- e1 s1) (- e2 s2)))
+              (found (the Option<int> (option::none)))
+              (k 0))
+          (if (seq-flag from-end)
+              (progn
+                (while (if (is-none found) (< k n) false)
+                  (progn
+                    (setf k (+ k 1))
+                    (unless (same (get b (- e2 k)) (get a (- e1 k)))
+                      (setf found (option::some (+ (- e1 k) 1))))))
+                (match found
+                  ((some j) (option::some j))
+                  ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (- e1 n))))))
+              (progn
+                (while (if (is-none found) (< k n) false)
+                  (progn
+                    (unless (same (get b (+ s2 k)) (get a (+ s1 k)))
+                      (setf found (option::some (+ s1 k))))
+                    (setf k (+ k 1))))
+                (match found
+                  ((some j) (option::some j))
+                  ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (+ s1 n))))))))))))
 ;; CL's `revappend`: `a` reversed, then `b`.
 (defun revappend<I,J,A> ((a I) (b J)) Vector<A>
   (where (Iter I (Item A)) (Iter J (Item A)))
@@ -2687,6 +2774,21 @@ user-visible capacity."
     (let ((out (the Vector<U> (Vector::new))) (i 0) (n (len v)))
       (progn
         (while (< i n) (progn (push out (f (subseq (iter v) i n))) (setf i (+ i 1))))
+        out))))
+;; CL's `mapl` (`maplist` for effect) and `mapcon` (`maplist` then
+;; concatenate) -- the tail-walking pair of `mapc`/`mapcan`. Each tail is a
+;; fresh `Vector<A>`, as in `maplist`: there is no shared list structure to
+;; hand out.
+(defun mapl<I,A> ((it I) (f (fn (Vector<A>) ()))) () (where (Iter I (Item A)))
+  (let ((v (copy-seq it)))
+    (let ((i 0) (n (len v)))
+      (while (< i n) (progn (f (subseq (iter v) i n)) (setf i (+ i 1)))))))
+(defun mapcon<I,A,U> ((it I) (f (fn (Vector<A>) Vector<U>))) Vector<U> (where (Iter I (Item A)))
+  (let ((v (copy-seq it)))
+    (let ((out (the Vector<U> (Vector::new))) (i 0) (n (len v)))
+      (progn
+        (while (< i n)
+          (progn (doiter (y (iter (f (subseq (iter v) i n)))) (push out y)) (setf i (+ i 1))))
         out))))
 ;; CL's `merge`. CL requires both inputs already sorted and merges in linear
 ;; time; this sorts the concatenation, which agrees on every input CL defines
@@ -5272,6 +5374,14 @@ user-visible capacity."
    in the returned index, and so in what the next read sees."
   (read-datum-at s start true))
 
+;; CL's `*read-eval*`: whether `#.` may run code. `false` makes every `#.` a
+;; read error -- the switch for reading text that is data rather than
+;; program -- `read` evaluates `#.` too, compiled or not, whenever a session
+;; is running to evaluate it. Read by the evaluator's side of the reader hook
+;; (`Interp::read_eval_allowed`) at each `#.`, so a `setf` takes effect on the
+;; next form read.
+(pub defvar (*read-eval* bool) true)
+
 
 ;; ---------------------------------------------------------------------------
 ;; Reader macros.
@@ -6324,11 +6434,13 @@ user-visible capacity."
 ;; Two departures from CL's list. `*print-case*` is `:downcase` rather than
 ;; `:upcase` — CL's standard value means "as stored", and this reader stores
 ;; symbol names downcased (see `*print-case*`'s own note). And the reader
-;; variables CL also binds (`*read-base*`, `*read-default-float-format*`,
-;; `*read-eval*`, `*read-suppress*`) are not in this language, so there is
-;; nothing to bind; `*package*` and `*readtable*` likewise.
+;; variables CL also binds are not in this language except `*read-eval*`
+;; (`*read-base*`, `*read-default-float-format*` and `*read-suppress*` are
+;; not), so that is the one reader variable here; `*package*` and
+;; `*readtable*` are not values either.
 (pub defmacro with-standard-io-syntax (&rest body)
-  `(dlet ((*print-base* 10)
+  `(dlet ((*read-eval* true)
+          (*print-base* 10)
           (*print-radix* false)
           (*print-case* :downcase)
           (*print-circle* false)

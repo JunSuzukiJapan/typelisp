@@ -10204,6 +10204,10 @@ impl Checker {
             self.check_variadic_arith(heap, interp, env, &head, args, expected)
         } else if args.len() > 2 && matches!(head.as_str(), "<" | "<=" | ">" | ">=" | "=" | "/=") {
             self.check_variadic_cmp(heap, interp, env, &head, args)
+        } else if head == "append" && args.len() > 2 {
+            self.check_variadic_append(heap, interp, env, args, expected)
+        } else if head == "concatenate" && self.resolve_fn(&head).is_none() {
+            self.check_concatenate(heap, interp, env, args, expected)
         } else if head == "aref" && !args.is_empty() {
             self.check_aref(heap, interp, env, args[0], &args[1..], None, expected)
         } else if head == "log" && args.len() == 2 {
@@ -12958,6 +12962,108 @@ impl Checker {
         }
         heap.push_root(acc);
         let result = self.check(heap, interp, env, acc, expected);
+        heap.pop_root();
+        result
+    }
+
+    /// CL's variadic `append`: `(append a b c ...)` with 3+ operands is the
+    /// left fold of the two-argument `append`s. There are two of those — the
+    /// `string` method and the prelude's `Iter` function — and only the
+    /// second needs help between steps: it answers a `Vector<A>`, which is
+    /// not itself an `Iter`, so each intermediate result is passed on as
+    /// `(iter acc)`. Which fold to build is read off the first operand's type;
+    /// that operand is checked once more as part of the fold, which is the
+    /// price of choosing before the rewritten form exists.
+    fn check_variadic_append(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        let strings = matches!(self.check_at(heap, interp, env, args[0], None, None)?.ty, Type::Str);
+        let fold = self.append_fold(heap, args, strings)?;
+        heap.push_root(fold);
+        let result = self.check(heap, interp, env, fold, expected);
+        heap.pop_root();
+        result
+    }
+
+    /// The fold [`Self::check_variadic_append`] documents: `(append (append
+    /// a b) c)` for strings, `(append (iter (append a b)) c)` for sequences.
+    /// `args` holds at least two operands.
+    fn append_fold(&self, heap: &mut Heap, args: &[Value], strings: bool) -> Result<Value, Error> {
+        let append = heap.intern_symbol("append");
+        let iter = heap.intern_symbol("iter");
+        let mut acc = args[0];
+        for (i, next) in args[1..].iter().enumerate() {
+            if i > 0 && !strings {
+                acc = forms::list_from_vec_locs(heap, &[(iter, None), (acc, None)])?;
+            }
+            acc = forms::list_from_vec_locs(heap, &[(append, None), (acc, None), (*next, None)])?;
+        }
+        Ok(acc)
+    }
+
+    /// CL's `concatenate`: `(concatenate 'string s ...)` joins strings into a
+    /// string and `(concatenate 'vector seq ...)` joins sequences into a
+    /// `Vector<A>`. The result type is a literal quoted symbol, read here —
+    /// CL's is a type designator evaluated at run time, which a static
+    /// language answers before then. Each spelling rewrites to what already
+    /// does the job: [`Self::append_fold`] for two or more operands,
+    /// `(the string s)` / `(copy-seq seq)` for one, `""` for no strings.
+    /// `(concatenate 'vector)` has no operand to take an element type from
+    /// and is refused, as is a `Sexpr` list result (`'list`), which is not a
+    /// sequence here (`sexpr-append` joins those).
+    fn check_concatenate(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        let usage = "concatenate: (concatenate 'string s ...) or (concatenate 'vector seq ...)";
+        let result_type = args
+            .first()
+            .and_then(|&form| heap.list_to_vec(form).ok())
+            .filter(|elems| elems.len() == 2)
+            .filter(|elems| matches!(elems[0], Value::Symbol(id) if id.is(wk::QUOTE)))
+            .and_then(|elems| match elems[1] {
+                Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
+                _ => None,
+            })
+            .ok_or_else(|| Error::TypeError(format!("{} — the result type must be a quoted symbol", usage)))?;
+        let seqs = &args[1..];
+        let form = match (result_type.as_str(), seqs.len()) {
+            ("string", 0) => heap.alloc_string(String::new()),
+            ("string", 1) => {
+                let the = heap.intern_symbol("the");
+                let string = heap.intern_symbol("string");
+                forms::list_from_vec_locs(heap, &[(the, None), (string, None), (seqs[0], None)])?
+            }
+            ("string", _) => self.append_fold(heap, seqs, true)?,
+            ("vector", 0) => {
+                return Err(Error::TypeError(format!(
+                    "{} — `(concatenate 'vector)` needs at least one sequence to take the element type from",
+                    usage
+                )))
+            }
+            ("vector", 1) => {
+                let copy = heap.intern_symbol("copy-seq");
+                forms::list_from_vec_locs(heap, &[(copy, None), (seqs[0], None)])?
+            }
+            ("vector", _) => self.append_fold(heap, seqs, false)?,
+            (other, _) => {
+                return Err(Error::TypeError(format!(
+                    "{} — unknown result type `{}` (a `Sexpr` list is joined with `sexpr-append`)",
+                    usage, other
+                )))
+            }
+        };
+        heap.push_root(form);
+        let result = self.check(heap, interp, env, form, expected);
         heap.pop_root();
         result
     }

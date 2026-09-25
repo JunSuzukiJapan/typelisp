@@ -11973,9 +11973,37 @@ interpreted な印字メソッドは panic・`typl` のワーカーは drive 1 �
 - **`with-hash-table-iterator`**（Stage 6a）— 実装しない。`(iter h)` が `Iter` を実装する
   `hashtable-iter<K,V>` を返すので、`doiter`/`map`/`filter` がそのまま使える。
 
-残る 5 つ（可変長の `concatenate`/`append`、任意のシーケンス上の `search`/`mismatch`、
-`mapl`/`mapcon`、`*features*` の書き換え、`*read-eval*`）は地図の §5 に並べた。
+残る 5 つは同日に片付けた（次の節）。
 
 テストは `char_string_catalog_test` の 5 本（空白と符号、`int` の幅を超える数、`:radix`、
 `:junk-allowed`、範囲外の `radix` の panic）。compiled 経路と AOT 経路は既存の
 `compile_test`/`compile_file_test` が `parse-int` を呼んでいる。
+
+## 完了報告から落ちていた残り 5 つ（2026-09-25）
+
+前の節で洗い出した 8 項目の残り。4 つを実装し、1 つを「入れない」と決めた。
+
+- **可変長の `append` と `concatenate`** — checker の糖衣（`Checker::check_variadic_append`/
+  `check_concatenate`）。`+` の可変長と同じ左畳み込みだが、`Iter` 版の `append` は
+  `Vector<A>` を返し、それ自身は `Iter` でないので、途中の結果を `(iter acc)` で次へ渡す。
+  文字列の `append` には要らないので、**第 1 引数の型を先に一度検査して**どちらの畳み込みに
+  するかを選ぶ（その引数は畳み込みの中でもう一度検査される）。`concatenate` は CL の
+  `(concatenate 'string ...)`/`(concatenate 'vector ...)` の形で、結果の型は引用した
+  シンボルのリテラルに限る——CL の型指定子は実行時の値だが、ここでは checker が読む。
+  `(concatenate 'vector)` は要素型を取る相手が無いので拒否する。ユーザが自分で
+  `concatenate` を定義していれば糖衣は引っ込む（`resolve_fn` が先）。
+- **任意の `Iter` 上の `search`/`mismatch`** — prelude の `defun`。`string` の `defmethod` と
+  同じ名前・同じキーワードで、`string` の受け手には型のメソッドが先に選ばれるので共存する。
+  補助の `vector-window-equal` は `string-window-equal` の `Vector<A>` 版。
+- **`mapl`/`mapcon`** — `maplist` の副作用版と連結版。
+- **`*read-eval*`** — prelude の `defvar`（既定 `true`）。`#.` を評価する入口は
+  `Interp::read_eval_form`（REPL と `read`。コンパイル済みの `read` もフック経由でここに来る）と
+  `read::DriverReadEval`（ソースの読み込み）の 2 つで、両方の先頭で
+  `Interp::read_eval_allowed` が見る。`#.` のたびに読むので `setf` は次のフォームから効く。
+  `with-standard-io-syntax` は CL と同じく `true` に束縛する。
+- **`*features*` の書き換え** — 入れない（ユーザの判断）。
+
+エディタ定義（Emacs/VS Code）に `mapl`/`mapcon`/`concatenate`/`vector-window-equal` を足した。
+prelude を再生成（2 回目で不変）。テストは `seq_catalog_test` に 6 本、`read_time_eval_test` に
+3 本。
+
