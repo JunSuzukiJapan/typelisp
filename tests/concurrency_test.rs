@@ -1,9 +1,9 @@
-//! Tasks — `go` and what it hands back.
+//! Tasks — `task` and what it hands back.
 //!
-//! The rule that shapes these tests: **`(go (f a b))` evaluates `f` and every
+//! The rule that shapes these tests: **`(task (f a b))` evaluates `f` and every
 //! argument where it is written**, in that order, and only the call itself
 //! happens in the new task. That is Go's own rule for `go f(x)`, and it is why
-//! `go` takes a call form rather than a thunk — a thunk would capture the
+//! `task` takes a call form rather than a thunk — a thunk would capture the
 //! arguments instead of evaluating them.
 //!
 //! Scheduling here is cooperative and single-threaded: nothing preempts a
@@ -126,7 +126,7 @@ fn a_spawned_call_runs() {
     assert_eq!(
         int(r#"(defvar (counter int) 0)
                (defun work ((n int)) int (setf counter n))
-               (go (work 7))
+               (task (work 7))
                counter"#),
         7
     );
@@ -140,14 +140,14 @@ fn two_spawned_calls_both_run() {
                (defvar (b int) 0)
                (defun set-a ((n int)) int (setf a n))
                (defun set-b ((n int)) int (setf b n))
-               (go (set-a 3))
-               (go (set-b 4))
+               (task (set-a 3))
+               (task (set-b 4))
                (+ a b)"#),
         7
     );
 }
 
-/// The arguments are evaluated **where the `go` is written**, not inside the
+/// The arguments are evaluated **where the `task` is written**, not inside the
 /// task. A loop that spawns with its own index therefore gives each task a
 /// different one — Go's notorious capture pitfall does not exist here, because
 /// there is nothing captured to change.
@@ -156,55 +156,55 @@ fn arguments_are_evaluated_at_the_spawn() {
     assert_eq!(
         int(r#"(defvar (total int) 0)
                (defun bump ((n int)) int (setf total (+ total n)))
-               (dotimes (i 4) (go (bump i)))
+               (dotimes (i 4) (task (bump i)))
                total"#),
         6
     );
 }
 
-/// A method call is a call: `go` takes one just as happily as a free function.
+/// A method call is a call: `task` takes one just as happily as a free function.
 #[test]
 fn a_method_call_can_be_spawned() {
     assert_eq!(
         int(r#"(defvar (seen int) 0)
                (defstruct crate (v int))
                (defmethod stash ((self crate)) int (setf seen self::v))
-               (go (stash (crate::new 9)))
+               (task (stash (crate::new 9)))
                seen"#),
         9
     );
 }
 
-// ---- what `go` refuses ---------------------------------------------------
+// ---- what `task` refuses ---------------------------------------------------
 
 /// A special form is not a call. The message says so and points at the lambda
 /// that *is* the way to run an arbitrary body.
 #[test]
-fn go_refuses_a_special_form() {
-    let e = check_err("(go (if true 1 2))");
-    assert!(e.contains("`go` cannot start `if`"), "got: {}", e);
+fn task_refuses_a_special_form() {
+    let e = check_err("(task (if true 1 2))");
+    assert!(e.contains("`task` cannot start `if`"), "got: {}", e);
     assert!(e.contains("lambda"), "the message should name the way out: {}", e);
 }
 
 /// Nor a bare value.
 #[test]
-fn go_refuses_a_non_call() {
-    let e = check_err("(go 1)");
-    assert!(e.contains("go"), "got: {}", e);
+fn task_refuses_a_non_call() {
+    let e = check_err("(task 1)");
+    assert!(e.contains("task"), "got: {}", e);
 }
 
 /// One argument, not two.
 #[test]
-fn go_refuses_extra_arguments() {
-    let e = check_err("(defun f () int 1) (go (f) (f))");
-    assert!(e.contains("go"), "got: {}", e);
+fn task_refuses_extra_arguments() {
+    let e = check_err("(defun f () int 1) (task (f) (f))");
+    assert!(e.contains("task"), "got: {}", e);
 }
 
 // ---- `thread` --------------------------------------------------------------
 
-/// `thread` is `go`'s shape, and its refusals name it.
+/// `thread` is `task`'s shape, and its refusals name it.
 #[test]
-fn thread_refuses_what_go_refuses() {
+fn thread_refuses_what_task_refuses() {
     let e = check_err("(thread (if true 1 2))");
     assert!(e.contains("`thread` cannot start `if`"), "got: {}", e);
     let e = check_err("(thread 1)");
@@ -218,7 +218,7 @@ fn thread_is_a_thread_of_the_call_type() {
     assert!(e.contains("mismatch"), "got: {}", e);
 }
 
-/// `thread` is closed as a name the way `go` is: a variable by that name
+/// `thread` is closed as a name the way `task` is: a variable by that name
 /// could be bound but never called.
 #[test]
 fn thread_cannot_be_bound() {
@@ -261,24 +261,24 @@ fn thread_statics_answer_in_the_interpreter() {
 
 // ---- the type ------------------------------------------------------------
 
-/// `(go (f ...))` is a `Task<T>` where `T` is the call's own return type, so a
+/// `(task (f ...))` is a `Task<T>` where `T` is the call's own return type, so a
 /// mismatched annotation is a type error naming both.
 #[test]
 fn a_spawn_is_a_task_of_the_call_s_return_type() {
     let e = check_err(r#"(defun f () int 1)
-                         (let ((t (the Task<string> (go (f))))) ())"#);
+                         (let ((t (the Task<string> (task (f))))) ())"#);
     assert!(e.contains("mismatch"), "got: {}", e);
 }
 
 /// And the right annotation is accepted. `hit` is read in a *later* form
-/// because nothing switches tasks inside one: the `go` queues the task, and the
+/// because nothing switches tasks inside one: the `task` queues the task, and the
 /// form that queued it runs on to its own end first.
 #[test]
 fn a_task_can_be_annotated_with_its_own_type() {
     assert_eq!(
         int(r#"(defvar (hit int) 0)
                (defun f () int (setf hit 5))
-               (let ((t (the Task<int> (go (f))))) 0)
+               (let ((t (the Task<int> (task (f))))) 0)
                hit"#),
         5
     );
@@ -289,7 +289,7 @@ fn a_task_can_be_annotated_with_its_own_type() {
 /// `(wait t)` is the task's result.
 #[test]
 fn wait_answers_with_the_task_s_value() {
-    assert_eq!(int("(defun double ((n int)) int (* n 2)) (wait (go (double 21)))"), 42);
+    assert_eq!(int("(defun double ((n int)) int (* n 2)) (wait (task (double 21)))"), 42);
 }
 
 /// Waiting does not consume the handle: a `Task<T>` is an ordinary value, and
@@ -302,7 +302,7 @@ fn wait_answers_with_the_task_s_value() {
 fn a_task_can_be_waited_on_more_than_once() {
     assert_eq!(
         int(r#"(defun five () int 5)
-               (let ((t (go (five)))) (+ (wait t) (wait t)))"#),
+               (let ((t (task (five)))) (+ (wait t) (wait t)))"#),
         10
     );
 }
@@ -314,8 +314,8 @@ fn a_task_can_wait_on_another_task() {
     assert_eq!(
         int(r#"(defun double ((n int)) int (* n 2))
                (defun relay ((t Task<int>)) int (+ (wait t) 1))
-               (let ((inner (go (double 20))))
-                 (wait (go (relay inner))))"#),
+               (let ((inner (task (double 20))))
+                 (wait (task (relay inner))))"#),
         41
     );
 }
@@ -325,7 +325,7 @@ fn a_task_can_wait_on_another_task() {
 fn several_tasks_are_waited_on_in_turn() {
     assert_eq!(
         int(r#"(defun idn ((n int)) int n)
-               (let ((a (go (idn 1))) (b (go (idn 2))) (c (go (idn 4))))
+               (let ((a (task (idn 1))) (b (task (idn 2))) (c (task (idn 4))))
                  (+ (wait a) (+ (wait b) (wait c))))"#),
         7
     );
@@ -336,7 +336,7 @@ fn several_tasks_are_waited_on_in_turn() {
 #[test]
 fn a_throw_that_leaves_a_task_stops_the_program() {
     let msg = match run(r#"(defun bad () int (throw 'oops 1))
-                           (let ((t (go (bad)))) 0)
+                           (let ((t (task (bad)))) 0)
                            1"#)
     {
         Err(e) => format!("{:?}", e),
@@ -368,7 +368,7 @@ fn yield_interleaves_two_tasks() {
                   (dotimes (i n)
                     (setf trail (append trail name))
                     (yield)))
-                (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
+                (let ((a (task (tick "a" 3))) (b (task (tick "b" 3))))
                   (progn (wait a) (wait b)))
                 trail"#),
         "ababab"
@@ -383,7 +383,7 @@ fn without_yield_each_task_runs_to_its_end() {
         text(r#"(defvar (trail string) "")
                 (defun tick ((name string) (n int)) ()
                   (dotimes (i n) (setf trail (append trail name))))
-                (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
+                (let ((a (task (tick "a" 3))) (b (task (tick "b" 3))))
                   (progn (wait a) (wait b)))
                 trail"#),
         "aaabbb"
@@ -398,45 +398,45 @@ fn yield_with_nothing_else_ready_is_a_no_op() {
 
 // ---- the callee can be a value ------------------------------------------
 
-/// `go` takes a *function value* too, not only a name the checker resolved.
+/// `task` takes a *function value* too, not only a name the checker resolved.
 ///
 /// The checker turns that into an `apply` node, whose callee is a form at
 /// field 0 rather than a resolved path — so it needs its callee evaluated
 /// before there is anything to hand over. It used to type-check and then fail
-/// at run time with "(go ..) wraps Some(Apply), which is not a call".
+/// at run time with "(task ..) wraps Some(Apply), which is not a call".
 #[test]
-fn go_starts_a_task_from_a_function_value() {
+fn task_starts_a_task_from_a_function_value() {
     assert_eq!(
         int(r#"(defun twice ((n int)) int (* n 2))
                (let ((f twice))
-                 (let ((t (go (f 21))))
+                 (let ((t (task (f 21))))
                    (wait t)))"#),
         42
     );
 }
 
-/// `(go ((lambda () RetType body...)))` — the idiom `go`'s own error message
+/// `(task ((lambda () RetType body...)))` — the idiom `task`'s own error message
 /// tells you to use when the body is not already a call.
 #[test]
-fn go_runs_an_immediately_called_lambda() {
+fn task_runs_an_immediately_called_lambda() {
     assert_eq!(
         text(r#"(defvar (trail string) "")
                 (let ((n 7))
-                  (let ((t (go ((lambda () () (when true (setf trail (append trail (to-string n)))))))))
+                  (let ((t (task ((lambda () () (when true (setf trail (append trail (to-string n)))))))))
                     (progn (wait t) trail)))"#),
         "7"
     );
 }
 
 /// The lambda captures where it is *written*, so each turn of a loop starts a
-/// task over that turn's own binding — the capture trap `go`'s call-form rule
+/// task over that turn's own binding — the capture trap `task`'s call-form rule
 /// avoids for arguments, kept for a closure body too.
 #[test]
 fn each_turn_of_a_loop_starts_a_task_over_its_own_binding() {
     assert_eq!(
         text(r#"(defvar (trail string) "")
                 (dotimes (i 3)
-                  (let ((t (go ((lambda () () (when true (setf trail (append trail (to-string i)))))))))
+                  (let ((t (task ((lambda () () (when true (setf trail (append trail (to-string i)))))))))
                     (wait t)))
                 trail"#),
         "012"
@@ -449,9 +449,9 @@ fn each_turn_of_a_loop_starts_a_task_over_its_own_binding() {
 // Rust stack — so a compiled body can *start* a task but never suspend in one
 // (the plan's B6). These tests pin both halves of that line.
 
-/// `go` inside a compiled function starts a real task.
+/// `task` inside a compiled function starts a real task.
 ///
-/// Everything up to the call happens in the compiled body — that is what `go`
+/// Everything up to the call happens in the compiled body — that is what `task`
 /// promises anywhere — and only the call is handed over. The waiting is done
 /// by the interpreted caller, which is the half that can suspend.
 #[test]
@@ -461,7 +461,7 @@ fn a_compiled_body_can_start_tasks() {
                 (defun work ((name string)) ()
                   (when true (setf trail (append trail name))))
                 (defun spawn-two () Task<()>
-                  (progn (go (work "a")) (go (work "b"))))
+                  (progn (task (work "a")) (task (work "b"))))
                 (compile spawn-two)
                 (let ((t (spawn-two)))
                   (progn (wait t) trail))"#),
@@ -481,7 +481,7 @@ fn a_compiled_spawn_carries_arguments_of_every_representation() {
                   (when true
                     (setf trail (append (append (append trail (to-string n)) (to-string x)) s))))
                 (defun spawn-mixed ((n int)) Task<()>
-                  (go (mixed n 2.5 "hi")))
+                  (task (mixed n 2.5 "hi")))
                 (compile spawn-mixed)
                 (let ((t (spawn-mixed 7)))
                   (progn (wait t) trail))"#),
@@ -489,7 +489,7 @@ fn a_compiled_spawn_carries_arguments_of_every_representation() {
     );
 }
 
-/// A compiled `go` on a function *value* — an `apply` node, whose callee is a
+/// A compiled `task` on a function *value* — an `apply` node, whose callee is a
 /// form rather than a name, so it is evaluated in the compiled body and rides
 /// at the head of the argument run.
 #[test]
@@ -497,7 +497,7 @@ fn a_compiled_body_can_spawn_a_function_value() {
     assert_eq!(
         int_compiled(r#"(defun twice ((n int)) int (* n 2))
                (defun spawn-value ((n int)) Task<int>
-                 (let ((f twice)) (go (f n))))
+                 (let ((f twice)) (task (f n))))
                (compile spawn-value)
                (let ((t (spawn-value 21))) (wait t))"#),
         42
@@ -516,7 +516,7 @@ fn a_compiled_wait_answers_with_the_awaited_value() {
     assert_eq!(
         int_compiled(
             r#"(defun work ((n int)) int (* n 10))
-               (defun waiter ((n int)) int (let ((h (go (work n)))) (+ (wait h) 1)))
+               (defun waiter ((n int)) int (let ((h (task (work n)))) (+ (wait h) 1)))
                (compile waiter)
                (waiter 4)"#
         ),
@@ -533,7 +533,7 @@ fn a_compiled_wait_answers_with_a_heap_value() {
         text_compiled(
             r#"(defun greet ((name string)) string (append "hi " name))
                (defun waiter ((name string)) string
-                 (let ((h (go (greet name)))) (append (wait h) "!")))
+                 (let ((h (task (greet name)))) (append (wait h) "!")))
                (compile waiter)
                (waiter "ada")"#
         ),
@@ -562,7 +562,7 @@ fn a_compiled_yield_interleaves_two_tasks() {
                    (setf trail (append trail name))
                    (yield)))
                (compile tick)
-               (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
+               (let ((a (task (tick "a" 3))) (b (task (tick "b" 3))))
                  (progn (wait a) (wait b)))
                trail"#
         ),
@@ -609,7 +609,7 @@ fn sleep_suspends_only_the_calling_task() {
                 (defun slow ((name string) (sec f64)) ()
                   (progn (sleep sec)
                          (when true (setf trail (append trail name)))))
-                (let ((a (go (slow "a" 0.20))) (b (go (slow "b" 0.05))))
+                (let ((a (task (slow "a" 0.20))) (b (task (slow "b" 0.05))))
                   (progn (wait a) (wait b) trail))"#),
         "ba"
     );
@@ -626,7 +626,7 @@ fn sleep_zero_is_a_yield() {
                   (dotimes (i n)
                     (setf trail (append trail name))
                     (sleep 0.0)))
-                (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
+                (let ((a (task (tick "a" 3))) (b (task (tick "b" 3))))
                   (progn (wait a) (wait b)))
                 trail"#),
         "ababab"
@@ -660,7 +660,7 @@ fn a_compiled_sleep_suspends_only_the_calling_task() {
                  (progn (sleep sec)
                         (when true (setf trail (append trail name)))))
                (compile slow)
-               (let ((a (go (slow "a" 0.20))) (b (go (slow "b" 0.05))))
+               (let ((a (task (slow "a" 0.20))) (b (task (slow "b" 0.05))))
                  (progn (wait a) (wait b) trail))"#
         ),
         "ba"
@@ -703,7 +703,7 @@ fn a_compiled_yield_inside_a_catch_suspends() {
                        (yield))
                      0)))
                (compile tick)
-               (let ((a (go (tick "a" 3))) (b (go (tick "b" 3))))
+               (let ((a (task (tick "a" 3))) (b (task (tick "b" 3))))
                  (progn (wait a) (wait b)))
                trail"#
         ),
@@ -729,7 +729,7 @@ fn a_compiled_sleep_inside_an_unwind_protect_runs_the_cleanup_after() {
                    (setf trail (append trail " cleanup"))))
                (defun quick () int (progn (setf trail (append trail " b")) 2))
                (compile slow)
-               (let ((a (go (slow))) (b (go (quick))))
+               (let ((a (task (slow))) (b (task (quick))))
                  (progn (wait a) (wait b)))
                trail"#
         ),
@@ -770,7 +770,7 @@ fn a_task_switch_during_a_cleanup_does_not_corrupt_the_parked_throw() {
                      0))
                  (compile a)
                  (compile b)
-                 (let ((ta (go (a))) (tb (go (b))))
+                 (let ((ta (task (a))) (tb (task (b))))
                    (+ (wait ta) (wait tb)))"#;
     assert_eq!(int_compiled(src), 111, "a's own throw must survive b's throw running while a was parked");
     assert_eq!(text_compiled(&format!("{} trail", src)), "a1 b a2", "b must finish its own throw before a's cleanup resumes");
@@ -790,7 +790,7 @@ fn a_compiled_throw_after_a_suspension_is_still_caught() {
             r#"(defun guarded () int
                  (catch 'done (progn (yield) (throw 'done 41))))
                (compile guarded)
-               (wait (go (guarded)))"#
+               (wait (task (guarded)))"#
         ),
         41
     );
@@ -816,7 +816,7 @@ fn a_compiled_apply_of_a_compiled_value_can_suspend() {
                (defun via-value ((name string)) int
                  (let ((f tick)) (f name 3)))
                (compile via-value)
-               (let ((a (go (via-value "a"))) (b (go (via-value "b"))))
+               (let ((a (task (via-value "a"))) (b (task (via-value "b"))))
                  (progn (wait a) (wait b)))
                trail"#
         ),
@@ -840,7 +840,7 @@ fn a_compiled_apply_of_an_interpreted_closure_can_suspend() {
                (compile call-thrice)
                (let ((a (lambda () int (progn (setf trail (append trail "a")) (yield) 0)))
                      (b (lambda () int (progn (setf trail (append trail "b")) (yield) 0))))
-                 (let ((ta (go (call-thrice a))) (tb (go (call-thrice b))))
+                 (let ((ta (task (call-thrice a))) (tb (task (call-thrice b))))
                    (progn (wait ta) (wait tb))))
                trail"#
         ),
@@ -909,8 +909,8 @@ fn a_compiled_dyn_call_of_an_interpreted_method_can_suspend() {
                    (progn (dotimes (i n) (setf trail (append trail self::name)) (yield)) 0)))
                (defun drive-it ((t :dyn Ticker)) int (tick t 3))
                (compile drive-it)
-               (let ((a (go (drive-it (marker::new "a"))))
-                     (b (go (drive-it (marker::new "b")))))
+               (let ((a (task (drive-it (marker::new "a"))))
+                     (b (task (drive-it (marker::new "b")))))
                  (progn (wait a) (wait b)))
                trail"#
         ),
@@ -952,7 +952,7 @@ fn a_compiled_loop_with_no_calls_still_yields_to_another_task() {
                (defun mark () int (progn (setf trail (append trail "b")) 0))
                (compile spin-then-mark)
                (compile mark)
-               (let ((a (go (spin-then-mark 1000))) (b (go (mark))))
+               (let ((a (task (spin-then-mark 1000))) (b (task (mark))))
                  (progn (wait a) (wait b)))
                trail"#
         ),
@@ -997,8 +997,8 @@ fn a_compiled_loop_safepoint_under_a_machine_frame_driver_just_resumes() {
 
 /// **An interpreted caller applying a compiled closure value may really
 /// wait** — the boundary the previous test's revised doc comment describes.
-/// `main` is the interpreter's own task: it starts `mark` under `go`, then
-/// calls the closure `f` directly (not through `go`) and the closure
+/// `main` is the interpreter's own task: it starts `mark` under `task`, then
+/// calls the closure `f` directly (not through `task`) and the closure
 /// `sleep`s. If that call ran to completion atomically it would finish
 /// first regardless of how long it slept; `ba`, not `ab`, proves it
 /// genuinely parked the calling task and let `mark` run in the meantime —
@@ -1014,7 +1014,7 @@ fn an_interpreted_caller_applying_a_compiled_closure_may_really_wait() {
                (defun mark () int (progn (sleep 0.01) (setf trail (append trail "b")) 0))
                (compile make-worker)
                (compile mark)
-               (let ((f (make-worker)) (b (go (mark))))
+               (let ((f (make-worker)) (b (task (mark))))
                  (progn (f) (wait b)))
                trail"#
         ),
@@ -1033,7 +1033,7 @@ fn a_task_that_moves_to_the_interpreter_s_thread_keeps_its_roots_under_gc_stress
     let src = r#"(defun work ((cb (fn (int) int)) (n int)) int
                    (let ((xs (list n (+ n 1) (+ n 2))))
                      (+ (cb (sexpr-list-length xs)) (* 3 n) 3)))
-                 (defun start ((cb (fn (int) int)) (n int)) Task<int> (go (work cb n)))
+                 (defun start ((cb (fn (int) int)) (n int)) Task<int> (task (work cb n)))
                  (compile start)
                  (let ((cb (lambda ((k int)) int (sexpr-list-length (list k k k k))))
                        (tasks (the Vector<Task<int>> (Vector::new)))

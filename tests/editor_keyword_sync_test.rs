@@ -182,7 +182,7 @@ fn is_excluded(name: &str) -> bool {
         "tcp-resolve",
         "tcp-connect-one",
         "tcp-connect-addr",
-        // `after`'s body, split out only because `go` takes a call form and
+        // `after`'s body, split out only because `task` takes a call form and
         // not a thunk. A user writes `after`.
         "sleep-then-send",
         // The shared body of `WaitGroup`'s `add` and `done`: move the

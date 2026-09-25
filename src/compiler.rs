@@ -5675,10 +5675,10 @@ pub const SOURCE: &str = r#"
 ;; per `KIND` (`Repr::field_kind`): what a value takes
 ;; on its way into a struct field, as an expression.
 ;; The bridge emits it for the result of the closure a
-;; compiled `go` starts its task with, so the scheduler
+;; compiled `task` starts its task with, so the scheduler
 ;; receives a tagged word and never has to know the
-;; call's representation. A `go` itself is an ordinary
-;; `(suspend "rt_suspend_go" ...)` node, like `wait`.
+;; call's representation. A `task` itself is an ordinary
+;; `(suspend "rt_suspend_task" ...)` node, like `wait`.
 (defun compile-tag-node ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((kind (sexpr-int (sexpr-car (sexpr-cdr e))))
            (raw (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr e))))))

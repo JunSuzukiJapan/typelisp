@@ -1837,24 +1837,24 @@ fn vector_def() -> AdtDef {
     }
 }
 
-/// `Task<T>`, the type `(go (f ...))` yields.
+/// `Task<T>`, the type `(task (f ...))` yields.
 ///
-/// Spelled once, here, rather than at the checker's `go` — a type's identity is
+/// Spelled once, here, rather than at the checker's `task` — a type's identity is
 /// its whole path, and two places writing it is two places to get it wrong.
 pub(super) fn task_of(t: Type) -> Type {
     Type::Named(Path::root("task"), vec![t])
 }
 
-/// `Task<T>`: a handle on a task that is running — what `(go (f ...))` returns.
+/// `Task<T>`: a handle on a task that is running — what `(task (f ...))` returns.
 ///
-/// A builtin rather than a `defstruct` in the prelude because `go` is a core
-/// form: the checker builds this type where it checks `go`, so it has to exist
+/// A builtin rather than a `defstruct` in the prelude because `task` is a core
+/// form: the checker builds this type where it checks `task`, so it has to exist
 /// in contexts the prelude was never loaded into (the island's own tests).
 ///
 /// The runtime value is a boxed struct holding the scheduler's id for the task
 /// and **no readable fields** — the id is not a number a program may invent or
 /// forge, the same reasoning `file-stream`'s opaque handle follows. Nothing
-/// constructs one but `go`, so there is no `new` here — only `wait`.
+/// constructs one but `task`, so there is no `new` here — only `wait`.
 fn task_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
     // `(wait t)` — the task's result, waiting for it if it has not finished.

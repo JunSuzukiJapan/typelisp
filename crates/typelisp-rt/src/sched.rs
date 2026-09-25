@@ -2,7 +2,7 @@
 //! waiting for.
 //!
 //! This is the runtime's, not the interpreter's, because an ahead-of-time
-//! compiled executable has no interpreter and still has tasks: `go` starts
+//! compiled executable has no interpreter and still has tasks: `task` starts
 //! one, `sleep`/`wait`/a channel/a socket that says "not yet" puts one down.
 //! Until this moved here, the executable's `main` was one `FrameStack::run`
 //! and the first suspension was an abort.
@@ -35,7 +35,7 @@
 //! `defvar` initialiser, a compiled body the interpreter called from Rust —
 //! has no continuation stack to park a task on, but it can still ask the
 //! scheduler whether the operation needs to wait at all. Most do not: a
-//! `(recv ch)` with something buffered, a `(go ...)`, a `Chan::new`. The
+//! `(recv ch)` with something buffered, a `(task ...)`, a `Chan::new`. The
 //! borrow is registered and cleared by a guard on the drive's frame, exactly
 //! as `ACTIVE_HEAP` is registered per scope, so nothing outlives its owner.
 //!
@@ -114,7 +114,7 @@ pub trait TaskBody: Sized {
     /// The body's own error type, which the scheduler's errors fold into.
     type Error: From<SchedError>;
 
-    /// A task that applies `closure` — a compiled closure the `go` site built
+    /// A task that applies `closure` — a compiled closure the `task` site built
     /// to make the call and answer with the result tagged — to no arguments.
     /// Built on the task's own root stack (`Scheduler::admit`), with
     /// `closure` rooted by the caller until then.
@@ -156,7 +156,7 @@ pub trait TaskBody: Sized {
 
     /// What a task's failure does to the program, for a task that is not the
     /// main one — the interpreter turns an escaped `throw` into a panic here,
-    /// which is Go's rule for an unrecovered panic in a goroutine.
+    /// which is Go's rule for an unrecovered panic.
     fn failure_left_task(e: Self::Error) -> Self::Error;
 }
 
@@ -188,7 +188,7 @@ pub enum Waiting {
     Until(std::time::Instant),
     /// A `Chan<T>` operation.
     Chan(ChanOp),
-    /// `(go ...)` — start a task that applies this closure, and answer with
+    /// `(task ...)` — start a task that applies this closure, and answer with
     /// its handle. Never a wait: answered on the spot like `Chan::new`, and
     /// through the scheduler for the same reason — the table of tasks is
     /// the scheduler's, and only the driver can reach it.
@@ -385,7 +385,7 @@ pub fn waiting_name(w: &Waiting) -> &'static str {
         // The other three answer at once, so they never reach a message that
         // says something could not block. Neither does a spawn.
         Waiting::Chan(_) => "a channel operation",
-        Waiting::Spawn(_) => "`go`",
+        Waiting::Spawn(_) => "`task`",
         Waiting::SpawnThread(_) => "`thread`",
         Waiting::Main => "a call that needs the interpreter",
         Waiting::Io { .. } => "a socket operation",
@@ -501,7 +501,7 @@ pub type ThreadStarter = std::sync::Arc<dyn Fn(TaskId) -> std::io::Result<()> + 
 ///
 /// `Running` exists so a position stays **reserved** while its task is out
 /// being stepped. Without it, `admit` reuses the position of whichever task is
-/// currently running — which is exactly what a `go` inside the main task does,
+/// currently running — which is exactly what a `task` inside the main task does,
 /// and the new task then inherits main's id and is retired along with it.
 enum Slot<B> {
     /// No task here. `admit` may reuse this position.
@@ -805,7 +805,7 @@ impl<B: TaskBody> Scheduler<B> {
             Waiting::Select { ops, has_else } => self.try_select(heap, ops, *has_else),
             // Admitted and nothing is run: the starting task keeps its turn,
             // and the new one is picked up when some task yields, waits or
-            // finishes — which is what `go` promises.
+            // finishes — which is what `task` promises.
             Waiting::Spawn(closure) => {
                 let closure = *closure;
                 let id = self.admit(heap, |heap| B::start_closure(heap, closure));
@@ -1468,7 +1468,7 @@ impl<B: TaskBody> SchedShared<B> {
 
 impl<B: TaskBody> AnswerNow for SchedShared<B> {
     /// Whatever `w` carries is rooted while the lock is taken — taking it can
-    /// let another thread collect, and a `send`'s value or a `go`'s closure
+    /// let another thread collect, and a `send`'s value or a `task`'s closure
     /// is in nothing but `w` on the way here from a machine frame.
     fn answer_now(&self, heap: &mut Heap, w: &Waiting) -> Option<Result<Value, SchedError>> {
         let carried = waiting_values(w);
@@ -1483,7 +1483,7 @@ impl<B: TaskBody> AnswerNow for SchedShared<B> {
     }
 }
 
-/// The heap values a wait carries: a `send`'s value, a `go`'s closure, a
+/// The heap values a wait carries: a `send`'s value, a `task`'s closure, a
 /// `select`'s send arms.
 fn waiting_values(w: &Waiting) -> Vec<Value> {
     match w {
@@ -1804,7 +1804,7 @@ fn run_one<B: TaskBody>(
 /// ordinary evaluation's.
 ///
 /// Tasks outlive the main task: whatever is left keeps its state for the
-/// next drive — which is what makes `(go ...)` at a REPL prompt behave, and
+/// next drive — which is what makes `(task ...)` at a REPL prompt behave, and
 /// what cuts every other task off when a program's `main` returns (Go's
 /// rule). An executable's workers go on running them; a [`Crew`]'s stop
 /// here, and pick them up again with the next drive.
@@ -2123,7 +2123,7 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         cs::SUSPEND_CHAN_NEW => Ok((Waiting::Chan(ChanOp::New(payload)), Wake::Tagged)),
         // The closure is tagged, and the answer — the handle — comes back
         // tagged like every other typed wake value.
-        cs::SUSPEND_GO => Ok((Waiting::Spawn(typelisp_abi::decode(payload)), Wake::Tagged)),
+        cs::SUSPEND_TASK => Ok((Waiting::Spawn(typelisp_abi::decode(payload)), Wake::Tagged)),
         cs::SUSPEND_THREAD => Ok((Waiting::SpawnThread(typelisp_abi::decode(payload)), Wake::Tagged)),
         cs::SUSPEND_MAIN => Ok((Waiting::Main, Wake::Unit)),
         // `Wake::Tagged` for every typed answer: a wake value always crosses
@@ -2244,15 +2244,15 @@ impl std::fmt::Display for TaskFailure {
 ///
 /// Where the interpreter's task keeps a continuation stack *and* a chain,
 /// this keeps the chain alone: the executable's `main` enters a body, a task
-/// `go` started applies a closure, and from then on every step is a drive of
+/// `task` started applies a closure, and from then on every step is a drive of
 /// the standing chain. What it needs from the heap is two state slots at
 /// `sbase`, for the same reason the interpreter's task has them — a value
 /// on its way in (a wake value, the closure to apply, a parked `send`'s
 /// offer) is a Rust local until the chain takes it, and nothing else roots
 /// it.
 ///
-/// **Every answer is a tagged word.** The closure a `go` site builds tags
-/// its result before returning (`core_bridge::translate_go`), and an
+/// **Every answer is a tagged word.** The closure a `task` site builds tags
+/// its result before returning (`core_bridge::translate_spawn_call`), and an
 /// executable's `main` answers an `int` (tagged) or unit (the word `0`, a
 /// fixnum). So the task's result is `decode(word)` with no representation
 /// to consult — which is what lets this crate hold the scheduler at all.
@@ -2332,7 +2332,7 @@ pub struct HandedOff {
 enum CompiledState {
     /// Enter this body with no arguments — the executable's `main`.
     Entry(crate::coroutine::CoroutineFn),
-    /// Apply this closure to no arguments — a task `go` started. Rooted in
+    /// Apply this closure to no arguments — a task `task` started. Rooted in
     /// the first state slot.
     Start(Value),
     /// Enter this with these argument words — an interpreted `thread`'s
@@ -2644,7 +2644,7 @@ impl TaskBody for CompiledTask {
     /// A `throw` that leaves a task has no catch to reach — a tag does not
     /// cross a task boundary — and a panic is not recoverable by definition.
     /// Either way the program stops, which is Go's rule for an unrecovered
-    /// panic in a goroutine.
+    /// panic.
     /// None: a thrown value is not kept past the task (`TaskFailure::Throw`
     /// carries the tag alone).
     fn failure_values(_e: &TaskFailure) -> Vec<Value> {

@@ -88,9 +88,9 @@ session has changed.")
     ;; the lexical named escape (Phase 4a): `block' is the target,
     ;; `return-from' leaves it — still a *static* exit, like `break'
     "block" "return-from"
-    ;; concurrency: `go' starts a task with a call, `thread' starts one on an
+    ;; concurrency: `task' starts a task with a call, `thread' starts one on an
     ;; OS thread of its own, `select' waits on several channels at once
-    "go" "thread" "select"
+    "task" "thread" "select"
     ;; non-local exit (§8) — `break'/`return'/`return-from' above are the
     ;; *static* exits, these are the dynamic ones
     "catch" "throw" "unwind-protect"
@@ -402,7 +402,7 @@ with no implicit conversion to or from the fixed-width numerics
     "datagram" "NetError"
     ;; builtin generic/abstract types
     "Option" "Result" "Sexpr" "HashTable" "Vector" "Self"
-    ;; the handles `go' and `thread' hand back, the channel tasks talk over,
+    ;; the handles `task' and `thread' hand back, the channel tasks talk over,
     ;; and the two `sync' types built on channels
     "Task" "Thread" "Chan" "WaitGroup" "Mutex"
     ;; builtin concrete error types, one per fallible builtin (§7.1).  `Error'

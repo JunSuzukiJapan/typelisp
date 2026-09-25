@@ -157,7 +157,7 @@ fn without_else_it_waits() {
                (defun main () int
                  (let ((a (the Chan<int> (Chan::new 0)))
                        (b (the Chan<int> (Chan::new 0))))
-                   (go (feed a))
+                   (task (feed a))
                    (select
                      ((v (recv a)) (unwrap v))
                      ((v (recv b)) 0))))
@@ -177,7 +177,7 @@ fn the_arm_that_wakes_it_is_the_one_that_runs() {
                (defun main () string
                  (let ((a (the Chan<string> (Chan::new 0)))
                        (b (the Chan<string> (Chan::new 0))))
-                   (go (feed b))
+                   (task (feed b))
                    (select
                      ((v (recv a)) (format false "a ~a" v))
                      ((v (recv b)) (format false "b ~a" v)))))
@@ -200,7 +200,7 @@ fn a_parked_send_arm_is_taken_by_a_receiver() {
                (defun main () string
                  (let ((a (the Chan<int> (Chan::new 0)))
                        (b (the Chan<int> (Chan::new 0))))
-                   (go (taker b))
+                   (task (taker b))
                    (let ((r (select
                               ((v (recv a)) "recv")
                               ((send b 9) "sent"))))
@@ -367,7 +367,7 @@ fn compiled_select_agrees_with_the_interpreter() {
                            (b (the Chan<string> (Chan::new 0))))
                        (setf out (append out (append "|" (pick a b)))))
                      (let ((a (the Chan<int> (Chan::new 0))))
-                       (go (feed a 42))
+                       (task (feed a 42))
                        (append out (append "|" (to-string (waited a)))))))"#;
     let plain = text(&format!("{}\n(main)", src));
     assert_eq!(plain, "sent|a=(some 7)|nothing|42");
@@ -400,7 +400,7 @@ fn a_compiled_arm_body_may_suspend() {
                    (let ((a (the Chan<int> (Chan::new 1)))
                          (out (the Chan<int> (Chan::new 0))))
                      (send a 5)
-                     (go (relay a out))
+                     (task (relay a out))
                      (unwrap (recv out))))"#;
     assert_eq!(int(&format!("{}\n(main)", src)), 10);
     assert_eq!(int_compiled(&format!("{}\n(compile relay)\n(main)", src)), 10);
@@ -422,7 +422,7 @@ fn a_parked_select_holds_its_operands_through_gc_stress() {
                  (let ((a (the Chan<string> (Chan::new 0)))
                        (b (the Chan<string> (Chan::new 0)))
                        (acc ""))
-                   (go (feed a 5))
+                   (task (feed a 5))
                    (loop
                      (select
                        ((v (recv a))

@@ -80,7 +80,7 @@ fn a_mutex_counts_every_increment_from_eight_tasks() {
              (let ((m (the Mutex<int> (Mutex::make 0)))
                    (wg (the WaitGroup (WaitGroup::make))))
                (add wg 8)
-               (dotimes (i 8) (go (bump m wg 10000)))
+               (dotimes (i 8) (task (bump m wg 10000)))
                (wait wg)
                (println "~a" (with-lock (n m) n))
                0))"#,
@@ -120,7 +120,7 @@ fn tasks_allocating_on_every_thread_survive_collections() {
            (defun main () int
              (let ((before (let ((h (heap-info))) h::gc-count))
                    (results (the Chan<int> (Chan::new 8))))
-               (dotimes (i 8) (go (churn-into results 200)))
+               (dotimes (i 8) (task (churn-into results 200)))
                (let ((sum 0))
                  (dotimes (i 8) (setf sum (+ sum (unwrap (recv results)))))
                  (println "~a ~a" sum (> (let ((h (heap-info))) h::gc-count) (+ before 1))))
@@ -155,8 +155,8 @@ fn values_crossing_a_channel_survive_collections() {
              (let ((ch (the Chan<Option<Sexpr>> (Chan::new 4)))
                    (wg (the WaitGroup (WaitGroup::make))))
                (add wg 4)
-               (dotimes (i 4) (go (produce ch wg (+ 100 i))))
-               (go (close-when-done wg ch))
+               (dotimes (i 4) (task (produce ch wg (+ 100 i))))
+               (task (close-when-done wg ch))
                (let ((total 0))
                  (loop (match (recv ch)
                          ((none) (break))
@@ -189,10 +189,10 @@ fn a_pipeline_with_select_and_after_gives_the_same_answer() {
              (let ((a (the Chan<int> (Chan::new 0)))
                    (b (the Chan<int> (Chan::new 8)))
                    (wg (the WaitGroup (WaitGroup::make))))
-               (go (numbers a 1000))
+               (task (numbers a 1000))
                (add wg 3)
-               (dotimes (i 3) (go (square a b wg)))
-               (go (close-when-done wg b))
+               (dotimes (i 3) (task (square a b wg)))
+               (task (close-when-done wg b))
                (let ((sum 0) (timeouts 0))
                  (loop
                    (select
@@ -220,7 +220,7 @@ fn a_panic_in_a_task_stops_the_program_from_any_thread() {
              (progn (sleep 0.01) (if (> n 0) (panic "boom in a task") n)))
            (defun main () int
              (let ((never (the Chan<int> (Chan::new 0))))
-               (dotimes (i 8) (go (boom i)))
+               (dotimes (i 8) (task (boom i)))
                (recv never)
                0))"#,
         1,
@@ -238,7 +238,7 @@ fn a_deadlock_is_reported_with_workers_idle() {
         r#"(defun stuck ((ch Chan<int>)) int (unwrap (recv ch)))
            (defun main () int
              (let ((ch (the Chan<int> (Chan::new 0))))
-               (let ((t (go (stuck ch))))
+               (let ((t (task (stuck ch))))
                  (wait t))))"#,
         1,
         "",
@@ -254,8 +254,8 @@ fn tasks_started_by_an_initialiser_are_there_for_main() {
         "threads_defvar",
         r#"(defun count-to ((n int)) int
              (let ((acc 0)) (dotimes (i n) (setf acc (+ acc i))) acc))
-           (defvar (big Task<int>) (go (count-to 100000)))
-           (defvar (small Task<int>) (go (count-to 1000)))
+           (defvar (big Task<int>) (task (count-to 100000)))
+           (defvar (small Task<int>) (task (count-to 1000)))
            (defun main () int
              (progn (println "~a ~a" (wait big) (wait small)) 0))"#,
         0,
@@ -306,7 +306,7 @@ fn tasks_report_the_os_thread_they_ran_on() {
              (let ((out (the Chan<int> (Chan::new 64)))
                    (me (Thread::current-id))
                    (seen (the Vector<int> (Vector::new))))
-               (dotimes (i 64) (go (work-then-report out)))
+               (dotimes (i 64) (task (work-then-report out)))
                (dotimes (i 64)
                  (let ((id (unwrap (recv out))))
                    (match (find id (iter seen))
@@ -325,7 +325,7 @@ fn tasks_report_the_os_thread_they_ran_on() {
 }
 
 /// (f) A `thread` runs on an OS thread of its own: not the one `main` runs on,
-/// and none that runs `go` tasks — on one thread and on four.
+/// and none that runs `task` tasks — on one thread and on four.
 #[test]
 fn a_thread_runs_on_an_os_thread_of_its_own() {
     same_on_one_and_four_threads(
@@ -335,7 +335,7 @@ fn a_thread_runs_on_an_os_thread_of_its_own() {
              (let* ((me (Thread::current-id))
                     (th (thread (whoami)))
                     (tasks (the Vector<Task<int>> (Vector::new))))
-               (dotimes (i 16) (push tasks (go (whoami))))
+               (dotimes (i 16) (push tasks (task (whoami))))
                (let ((other (join th))
                      (clash false))
                  (doiter (t (iter tasks)) (if (eq (wait t) other) (setf clash true) clash))
@@ -388,7 +388,7 @@ fn a_thread_blocked_in_a_c_call_holds_up_no_task() {
                     (to (the Chan<int> (Chan::new 0)))
                     (from (the Chan<int> (Chan::new 0)))
                     (n 0))
-               (go (echo to from))
+               (task (echo to from))
                (dotimes (i 100) (send to n) (setf n (unwrap (recv from))))
                (close to)
                (println "~a ~a" n (len done))
@@ -404,10 +404,10 @@ fn a_thread_blocked_in_a_c_call_holds_up_no_task() {
 #[test]
 fn a_thread_can_start_tasks_and_send() {
     same_on_one_and_four_threads(
-        "threads_go_from_thread",
+        "threads_start_tasks_from_thread",
         r#"(defun double-into ((out Chan<int>) (n int)) () (send out (* 2 n)))
            (defun fan-out ((out Chan<int>) (n int)) int
-             (progn (dotimes (i n) (go (double-into out i))) n))
+             (progn (dotimes (i n) (task (double-into out i))) n))
            (defun main () int
              (let* ((out (the Chan<int> (Chan::new 0)))
                     (th (thread (fan-out out 10)))

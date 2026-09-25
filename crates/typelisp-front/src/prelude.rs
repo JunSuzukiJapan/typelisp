@@ -4121,7 +4121,7 @@ user-visible capacity."
 ;; when it gets that answer. `net-wait` parks the **task** -- like `sleep`
 ;; and `recv` -- until the scheduler's `poll` says the socket is ready, and
 ;; every other task keeps running meanwhile. Nothing in a socket operation can
-;; stop the thread, which is what lets a server `go` one task per connection.
+;; stop the thread, which is what lets a server `task` one task per connection.
 ;;
 ;; `net-wait`'s interest: 0 readable, 1 writable.
 ;;
@@ -4388,7 +4388,7 @@ user-visible capacity."
 (pub defmethod accept ((self socket-listener) &key (timeout f64)) Result<socket-stream, NetError>
   "The next connection, waiting for one -- at most `:timeout` seconds if
    given, after which the `Err` says so. The usual shape of a server is
-   `(loop (match (accept l) ((ok c) (go (serve c))) ((err e) ...)))`: one task
+   `(loop (match (accept l) ((ok c) (task (serve c))) ((err e) ...)))`: one task
    per connection, each free to wait on its own socket."
   (loop
     (match (net-accept self::h)
@@ -6318,7 +6318,7 @@ user-visible capacity."
   (type Item T)
   (next ((self Self)) Option<T> (recv self)))
 
-;; The body of `after`, split out because `go` takes a call form.
+;; The body of `after`, split out because `task` takes a call form.
 (defun sleep-then-send ((sec f64) (ch Chan<()>)) ()
   (sleep sec)
   (send ch ()))
@@ -6331,7 +6331,7 @@ user-visible capacity."
 ;; the reason Go's own `time.After` buffers one.
 (pub defun after ((sec f64)) Chan<()>
   (let ((ch (the Chan<()> (Chan::new 1))))
-    (go (sleep-then-send sec ch))
+    (task (sleep-then-send sec ch))
     ch))
 
 
@@ -6428,8 +6428,8 @@ user-visible capacity."
 ;; the grounds that a deadlock is worse for being silent, and here it is not
 ;; silent: a task parked on its own lock is a task the scheduler eventually
 ;; finds nothing can wake, and it says so. Telling *which* kind of deadlock it
-;; is would need a task to be able to name itself, and a goroutine id is a
-;; thing Go withholds on purpose.
+;; is would need a task to be able to name itself, and Go withholds that
+;; name from its own tasks on purpose.
 ;;
 ;; `unlock` puts the token back with a `select` that has an `else`: if the
 ;; channel is already full, nobody held the lock. Asking `(len gate)` first and

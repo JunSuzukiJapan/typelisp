@@ -5,7 +5,7 @@
 //! a machine rather than a walk is *where the rest of the computation lives*:
 //! a non-tail subexpression is not a recursive Rust call but a `Frame` on a
 //! `Vec`. The Rust stack stays flat and the continuation becomes data — which
-//! is what a task (goroutine) needs in order to be suspended and resumed.
+//! is what a task needs in order to be suspended and resumed.
 //!
 //! The design, and the mapping from every `Op` to the frames it needs, is in
 //! `docs/dev/cps-evaluator-design.md`.
@@ -54,8 +54,8 @@ enum State {
     /// A value is ready. Hand it to the top frame, or return it if there is none.
     Apply(Value),
     /// Begin by completing a call whose callee and arguments are already
-    /// evaluated. **Only a task `go` started starts here**: the form that ran
-    /// the `go` did the evaluating, and this is what it handed over.
+    /// evaluated. **Only a task `task` started starts here**: the form that ran
+    /// the `task` did the evaluating, and this is what it handed over.
     ///
     /// `argv` is a heap list rather than a `Vec` so the two state slots can
     /// root it — a `Vec<Value>` in a Rust local is invisible to the collector.
@@ -179,7 +179,7 @@ struct DriveStart {
 /// What a [`State::CompiledEnter`] drive is entered with.
 ///
 /// Both a named call and an `apply` of a compiled closure — including the
-/// closure a task `go` started, which used to be its own `State` — are one
+/// closure a task `task` started, which used to be its own `State` — are one
 /// task-driven crossing now: the difference is only how the chain's entry
 /// point is found. Neither carries a `Value` here — `DriveCtx` holds none,
 /// on purpose (its own doc comment) — so a `Closure` rides at the head of
@@ -208,23 +208,23 @@ enum DriveCallee {
 enum Spawn {
     /// It is made here.
     No,
-    /// `(go CALL)`: it becomes a task of its own.
-    Go,
+    /// `(task CALL)`: it becomes a task of its own.
+    Task,
     /// `(thread CALL)`: it becomes a task on an OS thread of its own, which
     /// enters the compiled callee; the answer is read back by the node's
     /// result representation.
     Thread(Repr),
 }
 
-/// The `ArgsKind` of an already-checked call node — what `(go CALL)` wraps.
+/// The `ArgsKind` of an already-checked call node — what `(task CALL)` wraps.
 ///
-/// `check_go` has already refused anything that is not one of these four, so a
+/// `check_spawn` has already refused anything that is not one of these four, so a
 /// tag arriving here that is not a call means the checker and the evaluator
-/// disagree about what `go` accepts.
+/// disagree about what `task` accepts.
 fn call_kind(heap: &Heap, call: Value) -> Result<ArgsKind, EvalError> {
     let tag = match heap.car(call) {
         Ok(Value::Symbol(id)) => id,
-        _ => return Err(EvalError::Internal("eval: (go ..) does not wrap a node".to_string())),
+        _ => return Err(EvalError::Internal("eval: (task ..) does not wrap a node".to_string())),
     };
     match Op::from_sym(tag) {
         Some(Op::Call) => Ok(ArgsKind::Call),
@@ -232,7 +232,7 @@ fn call_kind(heap: &Heap, call: Value) -> Result<ArgsKind, EvalError> {
         Some(Op::DynCall) => Ok(ArgsKind::DynCall),
         Some(Op::Apply) => Ok(ArgsKind::Apply),
         other => Err(EvalError::Internal(format!(
-            "eval: (go ..) wraps {:?}, which is not a call",
+            "eval: (task ..) wraps {:?}, which is not a call",
             other
         ))),
     }
@@ -248,7 +248,7 @@ fn call_kind(heap: &Heap, call: Value) -> Result<ArgsKind, EvalError> {
 /// `Apply` is the odd one: its callee is a *form* at field 0 rather than a name
 /// the checker resolved, so it needs its own two frames to evaluate that first.
 /// Once the callee is a value it rejoins this path with the callee riding at
-/// the head of `argv` — which is what lets `go` hand an `apply` over to a task
+/// the head of `argv` — which is what lets `task` hand an `apply` over to a task
 /// with no second `Enter` state.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ArgsKind {
@@ -321,7 +321,7 @@ enum Frame {
     /// carries the rest. An argument evaluated three ago is as collectible as
     /// the one that just arrived, so all of them stay rooted until the call
     /// itself is made.
-    /// `spawn` marks the arguments of a `(go ...)` or `(thread ...)`: when
+    /// `spawn` marks the arguments of a `(task ...)` or `(thread ...)`: when
     /// they are all in, the call is handed to a new task instead of being
     /// made here.
     Args { form: Value, done: Vec<Value>, env: Value, kind: ArgsKind, spawn: Spawn },
@@ -531,7 +531,7 @@ impl CpsStack {
 /// bottom of the roots that belong to it.
 ///
 /// [`Interp::eval_cps`] starts one and runs it straight through. A task
-/// (goroutine) is this same structure *kept across suspensions* instead — which
+/// is this same structure *kept across suspensions* instead — which
 /// is the whole reason the evaluator moved off the Rust stack, since a Rust
 /// recursion cannot be stopped between two steps and picked up later.
 ///
@@ -595,8 +595,8 @@ impl Task {
     /// callee to run first.
     ///
     /// The crossing it stands for is the one `start_closure` used to make
-    /// for a compiled `go`'s thunk: a closure applied to nothing, answering
-    /// its result tagged (`core_bridge::translate_go`), with no roots of its
+    /// for a compiled `task`'s thunk: a closure applied to nothing, answering
+    /// its result tagged (`core_bridge::translate_spawn_call`), with no roots of its
     /// own to marshal by. Builds nothing on the heap: the closure and the
     /// arguments are the chain's, in its frame slots, until the first step
     /// reads them.
@@ -663,7 +663,7 @@ impl Task {
     }
 
     /// Starts a task that completes a call whose callee and arguments have
-    /// already been evaluated — what `(go (f a b))` hands over.
+    /// already been evaluated — what `(task (f a b))` hands over.
     fn start_call(heap: &mut Heap, form: Value, argv: Value, kind: ArgsKind) -> Task {
         let sbase = heap.root_count();
         heap.push_root(argv);
@@ -699,7 +699,7 @@ impl Task {
 ///
 /// A `throw` that leaves a task has no catch to reach — a tag does not cross a
 /// task boundary — and a panic is not recoverable by definition. Either way the
-/// program stops, which is Go's rule for an unrecovered panic in a goroutine.
+/// program stops, which is Go's rule for an unrecovered panic.
 fn escaped_task_failure(e: EvalError) -> EvalError {
     match e {
         EvalError::Throw(tag, _) => EvalError::Panic(format!("`throw` of `{}` left its task", tag)),
@@ -863,10 +863,10 @@ impl Interp {
             return self.run_to_completion(heap, form, env);
         }
 
-        // The outermost evaluation is the *main task*. Tasks `go` starts
+        // The outermost evaluation is the *main task*. Tasks `task` starts
         // outlive it: `sched::drive_main` returns as soon as main is done,
         // and whatever is left keeps its state for the next time the
-        // scheduler runs — which is what makes `(go ...)` at a REPL prompt
+        // scheduler runs — which is what makes `(task ...)` at a REPL prompt
         // behave. `form` and `env` are rooted by the caller, so they survive
         // the switch to the task's own root stack that `admit` makes (and
         // the lock, where another thread may collect).
@@ -892,7 +892,7 @@ impl Interp {
     /// Runs an `eval`-carrying AOT program's own initialisers and entry
     /// point, each as the main task of one drive of *this* `Interp`'s
     /// scheduler — the shape `eval_cps` gives one evaluation, so a program
-    /// that calls `eval` and the tasks its own `(go ...)`s admit share one
+    /// that calls `eval` and the tasks its own `(task ...)`s admit share one
     /// scheduler, one queue, one clock, rather than the AOT scheduler and
     /// the `Interp`'s running as two that never see each other.
     ///
@@ -1014,7 +1014,7 @@ impl Interp {
                     Err(e) => State::Unwind(place(e, loc)),
                 }
             }
-            // A task `go` started begins here: the call's parts are in hand,
+            // A task `task` started begins here: the call's parts are in hand,
             // so there is nothing to evaluate before making it.
             State::Enter { form, argv, kind } => {
                 let loc = heap.cons_loc(form);
@@ -1411,7 +1411,7 @@ impl Interp {
             | Op::Untrace
             | Op::DisassembleFn => Ok(State::Apply(self.eval_leaf(heap, form, env)?)),
 
-            // `(go CALL)` — the call's own arguments are collected here, in
+            // `(task CALL)` — the call's own arguments are collected here, in
             // this task, and only then handed over. `arg_forms` reads them out
             // of the inner node, so the collection is the ordinary one; `spawn`
             // is the single bit that changes what happens once they are in.
@@ -1462,29 +1462,29 @@ impl Interp {
                 Ok(State::Blocked(Waiting::Select { ops, has_else }))
             }
 
-            Op::Go => {
+            Op::Task => {
                 // Field 0 is the result representation, read by the bridge and
                 // by nothing here.
                 let call = core::field(heap, form, 1)
-                    .ok_or_else(|| EvalError::Internal("eval: (go ..) has no call".to_string()))?;
+                    .ok_or_else(|| EvalError::Internal("eval: (task ..) has no call".to_string()))?;
                 match call_kind(heap, call)? {
-                    // `(go (f x))` where `f` is a *value*: the callee is a form
+                    // `(task (f x))` where `f` is a *value*: the callee is a form
                     // like any argument and is evaluated here, in the starting
-                    // task, exactly as `go`'s rule says every part of the call
+                    // task, exactly as `task`'s rule says every part of the call
                     // is. Only the application itself moves.
                     ArgsKind::Apply => {
                         let callee = core::field(heap, call, 0).ok_or_else(|| {
                             EvalError::Internal("eval: (apply ..) has no callee".to_string())
                         })?;
-                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Go }, loc.clone());
+                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Task }, loc.clone());
                         Ok(State::Eval(callee, env))
                     }
-                    kind => self.start_args(heap, stack, call, env, kind, Spawn::Go, loc),
+                    kind => self.start_args(heap, stack, call, env, kind, Spawn::Task, loc),
                 }
             }
 
             // `(thread (f x))`: the parts of the call are evaluated here, as
-            // `go`'s are, and the call itself moves to an OS thread of its
+            // `task`'s are, and the call itself moves to an OS thread of its
             // own — as compiled code, which is all that thread can run
             // (`Self::spawn_thread`). Field 0 is the result representation,
             // which reads the compiled callee's answer back.
@@ -1855,14 +1855,14 @@ impl Interp {
         kind: ArgsKind,
         spawn: Spawn,
     ) -> Result<(State, Option<Frame>), EvalError> {
-        // `go`: the call does not happen here. It becomes a task of its own,
+        // `task`: the call does not happen here. It becomes a task of its own,
         // and this form gets a handle on it instead of a result. Deciding it
-        // *before* the call is what keeps `(go (f x))` concurrent even when `f`
+        // *before* the call is what keeps `(task (f x))` concurrent even when `f`
         // is compiled — a compiled body runs to completion once entered, so
-        // entering it here would make the `go` a plain call.
+        // entering it here would make the `task` a plain call.
         match spawn {
             Spawn::No => {}
-            Spawn::Go => {
+            Spawn::Task => {
                 let handle = self.spawn_task(heap, form, argv, kind)?;
                 return Ok((State::Apply(handle), None));
             }
@@ -1887,7 +1887,7 @@ impl Interp {
     }
 
     /// The callee and every argument of an `apply` are in hand — so either the
-    /// application happens, or `go` hands it to a task.
+    /// application happens, or `task` hands it to a task.
     ///
     /// **The callee rides at the head of the argument list from here on.** That
     /// is what lets an `apply` reach `State::Enter`, whose two root slots hold

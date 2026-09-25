@@ -264,7 +264,7 @@ impl FrameStack {
     ///
     /// A driver with no continuation stack behind it cannot put the chain
     /// down, but most of what a compiled body suspends for is not a wait at
-    /// all: a `(go ...)`, a `Chan::new`, a `(recv ch)` with something
+    /// all: a `(task ...)`, a `Chan::new`, a `(recv ch)` with something
     /// buffered, a `(wait t)` on a task that has finished. The scheduler
     /// running the task this driver was reached from answers those on the
     /// spot ([`crate::sched::answer_now`]), exactly as the interpreter's own
@@ -380,14 +380,14 @@ impl FrameStack {
     }
 
     /// [`run_with_env`](Self::run_with_env) for a compiled closure value
-    /// applied to `args` — what a task `go` started runs (with no
-    /// arguments: the `go` site's own thunk takes none), and what an
+    /// applied to `args` — what a task `task` started runs (with no
+    /// arguments: the `task` site's own thunk takes none), and what an
     /// `apply` of a coroutine-ABI closure is driven as (`State::CompiledEnter`
     /// / `DriveCallee::Closure`) so it can suspend under the task exactly as
     /// a named call does.
     ///
     /// The closure must be a coroutine body under this build's ABI: the
-    /// `go` site (`translate_go`) only ever builds one, and the checker
+    /// `task` site (`translate_spawn_call`) only ever builds one, and the checker
     /// only ever routes an `apply` here after `compiled_closure_body_abi`
     /// said so. Anything else reaching here is the runtime disagreeing with
     /// itself, not a program error.
@@ -676,7 +676,7 @@ pub fn set_frame_value(heap: &mut Heap, f: Value, w: i64) {
 // `sched::CompiledTask`, or a machine-frame driver that can honour only a
 // safepoint — decides what to do with the suspension.
 
-/// `(go ...)` for compiled code: hand the scheduler a closure to run as a
+/// `(task ...)` for compiled code: hand the scheduler a closure to run as a
 /// new task. `args[0]` is the closure, tagged — a heap box, rooted by the
 /// frame slot it sits in. The answer is the `Task<T>` handle, and it arrives
 /// on the next activation like every other suspension's.
@@ -685,15 +685,15 @@ pub fn set_frame_value(heap: &mut Heap, f: Value, w: i64) {
 ///
 /// `args` must point to `argc >= 1` valid `i64`s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_go(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_suspend_task(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
-        typelisp_abi::fatal("rt_suspend_go: expected the closure to start");
+        typelisp_abi::fatal("rt_suspend_task: expected the closure to start");
     }
-    call_state::set_pending_suspend(call_state::SUSPEND_GO, *args);
+    call_state::set_pending_suspend(call_state::SUSPEND_TASK, *args);
     0
 }
 
-/// `(thread ...)` for compiled code: [`rt_suspend_go`]'s closure, for a task
+/// `(thread ...)` for compiled code: [`rt_suspend_task`]'s closure, for a task
 /// the scheduler runs on an OS thread of its own. The answer is the
 /// `Thread<T>` handle.
 ///

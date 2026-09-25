@@ -1,11 +1,13 @@
-# goroutine を OS スレッドで走らせる + `Thread<T>`（設計）
+# タスクを OS スレッドで走らせる + `Thread<T>`（設計）
 
 プランは `~/.claude/plans/goroutine-os-goroutine-os-twinkly-thacker.md`。実装が進むにつれて
 この文書は「今どうなっているか」を、プランは「フェーズの進み具合」を追う——両方が要る。
 
+> 特殊形 `go` は 2026-09-25 に `task` へ改名した（[implementation-log.md](implementation-log.md) の同日の節）。この文書は新しい名前で書いている。
+
 ## 1. なぜ
 
-軽量スレッド（`go`/`Task<T>`/`Chan<T>`/`select`/`WaitGroup`/`Mutex<T>`）と AOT スケジューラは
+軽量スレッド（`task`/`Task<T>`/`Chan<T>`/`select`/`WaitGroup`/`Mutex<T>`）と AOT スケジューラは
 完了しているが、**全タスクが 1 つの OS スレッドで協調的に動く**（`crates/typelisp-rt/src/sched.rs:42-45`）。
 2026-09-08 の B6'（`~/.claude/plans/go-gorutine-adaptive-raccoon.md`）で「A: GIL / B: 独立ヒープ /
 C: シングルスレッド」を比べて C を選び、「マルチコア並列が無い」を v1 の制限として受け入れた
@@ -37,9 +39,9 @@ front の `Task`（`typelisp-front/src/eval/interp/core_cps.rs:520-538`）は `R
 
 - **GIL 段階を置かず最初から真の並列**: stop-the-world GC を実装する。
 - 直接 OS スレッドを扱う機能は **Rust 風の spawn / join**（`thread`/`Thread<T>`/`join`）:
-  専用 OS スレッドで走り、多重化されず、中でブロックしても goroutine は止まらない。
-  `Chan<T>`/`Mutex<T>`/`go` はそのまま使える。
-- 対象は **AOT + `typl` の両方**。typl では compiled な `go` もワーカーへ出し、interpreted
+  専用 OS スレッドで走り、多重化されず、中でブロックしても他のタスクは止まらない。
+  `Chan<T>`/`Mutex<T>`/`task` はそのまま使える。
+- 対象は **AOT + `typl` の両方**。typl では compiled な `task` もワーカーへ出し、interpreted
   に触れた瞬間に `NeedsMain` で main へ移送する（戻さない）。
 
 ## 3. `Heap` を「スレッドごとのビュー」と「プロセス共有部」に分ける
@@ -305,7 +307,7 @@ enum Affinity { Any, Main, Dedicated(ThreadKey) }   // Slot ごと
   全員 native なので collector はそれを待たない）。ロック取得は GC 点になるので、
   `run_one` は **タスクのルートを手放す前に**ロックを取る（`Done` の結果は `finish` が
   スケジューラのルートに移すまでタスクのスタックにしか居ない）。`answer_now` は
-  `Waiting` が運ぶ値（`send` の値・`go` のクロージャ・`select` の送信腕）をロックの間
+  `Waiting` が運ぶ値（`send` の値・`task` のクロージャ・`select` の送信腕）をロックの間
   ルートする。
 - **起こす仕組みは `Scheduler::dirty` 1 本**。ready に積む・`finish`・新しい時計/ソケット
   待ちで立ち、`Locked` を離すとき（と Condvar で待つ直前）に `notify_all`、poller が居れば
@@ -347,7 +349,7 @@ Phase 4 に回したもの: 言語から「どのスレッドで走ったか」�
 
 `Interp` は `Rc`/`RefCell`、front の `Task` は `Rc<dyn CompiledBody>` を含む。方針は
 「main 以外のスレッドは `Interp` に触らない。触る必要が出た瞬間にタスクを main へ移送する」。
-**compiled な `go` もワーカーへ出し、`NeedsMain` 移送を作る**（ユーザ決定）。
+**compiled な `task` もワーカーへ出し、`NeedsMain` 移送を作る**（ユーザ決定）。
 
 - スケジューラの本体を `enum TyplBody { Compiled(CompiledTask), Interp(MainOnly<Task>) }` に。
   `MainOnly<T>` は `unsafe impl Send`、取り出しは main だけ（affinity `Main` を admit 時に付け、
@@ -452,7 +454,7 @@ Phase 4 に回したもの: 言語から「どのスレッドで走ったか」�
   interpreted なタスクが compiled な鎖の途中で止まっている場合と、機械フレームの上の
   ドライバ（`run_to_end`）も含まれる。数は drive の境目でだけ動く（呼び出しごとには
   動かない）。
-- **interpreted な `thread`** は引数を `go` と同じく評価し、呼び先（関数・メソッド）を
+- **interpreted な `thread`** は引数を `task` と同じく評価し、呼び先（関数・メソッド）を
   `(compile ...)` と同じ経路で推移的にコンパイルしてから、その coroutine 本体に引数付きで
   入る pinned タスク（`CompiledTask::enter_with`）を起こす。答えは `thread` ノードの結果
   表現で読む（`AnswerDecoder`、`decode_crossing_return`）。関数値は compiled な閉包だけ。
@@ -465,7 +467,7 @@ Phase 4 に回したもの: 言語から「どのスレッドで走ったか」�
 
 ## 9. `Thread<T>` — 直接 OS スレッド
 
-`go` ↔ `Task<T>`/`wait` と対にする:
+`task` ↔ `Task<T>`/`wait` と対にする:
 
 | 名前 | 使い方 | 型 | 意味 |
 |---|---|---|---|
@@ -474,22 +476,22 @@ Phase 4 に回したもの: 言語から「どのスレッドで走ったか」�
 | `Thread::available-parallelism` | `(Thread::available-parallelism)` | `()→int` | `std::thread::available_parallelism` |
 | `Thread::current-id` | `(Thread::current-id)` | `()→int` | 走っている OS スレッドの id |
 
-- 構文は `go` と同じ「呼び出し形」（`check_go` `checker.rs:11349` の SHAPE をそのまま）。
+- 構文は `task` と同じ「呼び出し形」（`check_spawn`（`checker.rs`） の SHAPE をそのまま）。
   `(fn () T)` から `T` が推論できれば prelude に
   `(pub defmethod spawn (Thread<T> (f (fn () T))) Thread<T> (thread (funcall f)))` を足して
   `(Thread::spawn (lambda () ...))` も書けるようにする（着手時に推論可否を先に確かめる）。
-- 実装は「専用 OS スレッドに pin されたタスク」: `check_go` に `kind: Go|Thread` を足し、
-  `forms::go_form`（`check/forms.rs:224` 付近）と `core_bridge::translate_go`
-  （`src/compile/core_bridge.rs:938-1018`）の thunk/tag 生成は共用、suspend だけ
-  `rt_suspend_thread`（`coroutine.rs:621` の `rt_suspend_go` の隣）→
+- 実装は「専用 OS スレッドに pin されたタスク」: `check_spawn`（当時の `check_go`）に `kind: Task|Thread` を足し、
+  `forms::spawn_form` と `core_bridge::translate_spawn_call`
+  の thunk/tag 生成は共用、suspend だけ
+  `rt_suspend_thread`（`rt_suspend_task` の隣）→
   `Waiting::SpawnThread(closure)` → `Scheduler::admit_dedicated`: `std::thread::spawn` で
   スレッドを起こし、`Heap::attach` + `RtShared`/hooks の複製 → そのスレッドは
   `drive_dedicated(key)` で自分のタスクだけを回し、ブロックしたら Condvar で待つ（native）。
   タスクが `Done` になったらスロットに値を残してスレッドは終わる。
 - `join` は `wait`（`Waiting::Task`、`sched.rs:638`）そのもの。ランタイム表現も
   `Task<T>` と同じ「スケジューラ id を持つ箱」（`sched.rs:283-310`）で、型だけ別。
-- 専用スレッドの中の `go` は共有キューへ（typl では系譜規則で `Any`）。専用スレッド上のタスク
-  panic の規則は goroutine と同じ（`failure_left_task`）。main 終了でプロセス終了（他スレッドも）。
+- 専用スレッドの中の `task` は共有キューへ（typl では系譜規則で `Any`）。専用スレッド上のタスク
+  panic の規則は `task` のタスクと同じ（`failure_left_task`）。main 終了でプロセス終了（他スレッドも）。
 
 ### 実装（Phase 4）と上の案からの差分
 
@@ -526,7 +528,7 @@ Phase 4 に回したもの: 言語から「どのスレッドで走ったか」�
 - **typl の `thread` は catchable な panic**（`sched::thread_refused`）。interpreted な
   `Op::Thread` は評価前に拒否、JIT 済みコードの `rt_suspend_thread` は starter の無い
   `RefCell` スケジューラの `admit_thread` が同じ文言で拒否する。Phase 5d で置き換える。
-- `thread` は `go` と同じく予約語（束縛不可）。
+- `thread` は `task` と同じく予約語（束縛不可）。
 
 ## 10. 既知のリスク
 
@@ -550,6 +552,6 @@ Phase 4 に回したもの: 言語から「どのスレッドで走ったか」�
 - 各フェーズ末: `scripts/test-serial.sh`（zsh の変数分割に注意）。`cargo check` の警告 0 を
   「完了」の根拠にしない（dead code 警告の数を数える）。
 - STW 導入後: 新テストは `TYPELISP_THREADS=1` と `=4` の両方で走らせ、答えが同じことを見る。
-- スケジューラ多スレッド化後: `examples/`・`projects/` の並行サンプル（`go` を使うもの）を
+- スケジューラ多スレッド化後: `examples/`・`projects/` の並行サンプル（`task` を使うもの）を
   AOT で、typl 対応後は typl でも実行し、出力が単一スレッド時と一致。
 - 時間は計測しない（`feedback-do-not-measure-runtime`）。並列性は thread id の集合で観測する。

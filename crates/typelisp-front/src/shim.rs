@@ -220,7 +220,7 @@ unsafe fn expand_shim(
 /// bare `Scheduler<CompiledTask>`.
 ///
 /// The reason this exists at all rather than reusing `rt_run_program`: an
-/// executable that calls `eval` has an `Interp`, and `(go ...)` inside an
+/// executable that calls `eval` has an `Interp`, and `(task ...)` inside an
 /// eval'd form is admitted to *that* `Interp`'s scheduler
 /// (`Interp::eval_cps`) — a second, bare `Scheduler<CompiledTask>` running
 /// the program's own initialisers and `main` would be a scheduler the

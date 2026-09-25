@@ -399,17 +399,17 @@ pub mod call_state {
     /// clock running out. Payloads: `(handle << 1) | interest` and the
     /// seconds as `f64::to_bits`. Answers with a tagged `bool`.
     pub const SUSPEND_IO_FOR: i64 = 12;
-    /// `(go (f a b))` — start a task. Payload: a **tagged** compiled closure
+    /// `(task (f a b))` — start a task. Payload: a **tagged** compiled closure
     /// that makes the call and answers with the result tagged, built by the
-    /// site that wrote the `go` (`core_bridge::translate_go`).
+    /// site that wrote the `task` (`core_bridge::translate_spawn_call`).
     ///
     /// A suspension rather than a call for the reason the channel operations
     /// are: the table of tasks belongs to the scheduler, and only the driver
     /// can reach it. It always resumes at once, like `SUSPEND_CHAN_NEW`, and
     /// the answer is the `Task<T>` handle.
-    pub const SUSPEND_GO: i64 = 13;
+    pub const SUSPEND_TASK: i64 = 13;
     /// `(thread (f a b))` — start a task on an OS thread of its own. Payload:
-    /// the same closure [`SUSPEND_GO`] carries, built by the same site; only
+    /// the same closure [`SUSPEND_TASK`] carries, built by the same site; only
     /// where the scheduler runs it differs. Resumes at once with the
     /// `Thread<T>` handle.
     pub const SUSPEND_THREAD: i64 = 14;

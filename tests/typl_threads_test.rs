@@ -48,17 +48,17 @@ fn same_on_one_and_four_threads(name: &str, source: &str, code: i32, stdout: &st
     }
 }
 
-/// (j) An interpreted `go`'s task needs the interpreter, so it runs on the
+/// (j) An interpreted `task`'s task needs the interpreter, so it runs on the
 /// thread the interpreter is on — however many threads there are.
 #[test]
 fn an_interpreted_task_runs_on_the_interpreter_s_thread() {
     same_on_one_and_four_threads(
-        "typl_interpreted_go",
+        "typl_interpreted_task",
         r#"(defun whoami () int (Thread::current-id))
            (let* ((me (Thread::current-id))
                   (tasks (the Vector<Task<int>> (Vector::new)))
                   (elsewhere 0))
-             (dotimes (i 16) (push tasks (go (whoami))))
+             (dotimes (i 16) (push tasks (task (whoami))))
              (doiter (t (iter tasks)) (if (eq (wait t) me) 0 (setf elsewhere (+ elsewhere 1))))
              (println "~a" elsewhere))"#,
         0,
@@ -66,7 +66,7 @@ fn an_interpreted_task_runs_on_the_interpreter_s_thread() {
     );
 }
 
-/// (k) A compiled `go`'s task needs no interpreter, so the workers take such
+/// (k) A compiled `task`'s task needs no interpreter, so the workers take such
 /// tasks too: with four threads they are seen on more than one, with one
 /// thread only on the interpreter's. A `thread` runs on one of its own
 /// either way. Like the executable's test of the same thing, the one here
@@ -81,7 +81,7 @@ fn compiled_tasks_run_on_workers_and_a_thread_on_its_own() {
                     (defun spread () int
                       (let ((out (the Chan<int> (Chan::new 64)))
                             (seen (the Vector<int> (Vector::new))))
-                        (dotimes (i 64) (go (work-then-report out)))
+                        (dotimes (i 64) (task (work-then-report out)))
                         (dotimes (i 64)
                           (let ((id (unwrap (recv out))))
                             (match (find id (iter seen))
@@ -93,10 +93,10 @@ fn compiled_tasks_run_on_workers_and_a_thread_on_its_own() {
                     (compile own-thread)
                     (let ((me (Thread::current-id)))
                       (println "~a ~a" (spread) (eq (own-thread) me)))"#;
-    let (code, out, err) = run_on("typl_compiled_go", source, "1");
+    let (code, out, err) = run_on("typl_compiled_task", source, "1");
     assert_eq!(code, Some(0), "stderr was: {}", err);
     assert_eq!(out, "1 false\n", "on one thread every task runs on the interpreter's; stderr was: {}", err);
-    let (code, out, err) = run_on("typl_compiled_go", source, "4");
+    let (code, out, err) = run_on("typl_compiled_task", source, "4");
     assert_eq!(code, Some(0), "stderr was: {}", err);
     let mut words = out.split_whitespace();
     let distinct: usize = words.next().and_then(|n| n.parse().ok()).expect("a count");
@@ -118,7 +118,7 @@ fn a_compiled_task_that_needs_the_interpreter_moves_to_its_thread() {
                (let* ((v (cb 41))
                       (after (Thread::current-id)))
                  (+ (* v 1000000) (if (eq after (cb 0)) 1 0)))))
-           (defun start ((cb (fn (int) int))) Task<int> (go (work cb)))
+           (defun start ((cb (fn (int) int))) Task<int> (task (work cb)))
            (compile start)
            (let* ((me (Thread::current-id))
                   (cb (lambda ((x int)) int (if (eq x 0) (Thread::current-id) (+ x (if (eq (Thread::current-id) me) 1 0)))))
@@ -142,7 +142,7 @@ fn a_dyn_call_to_an_interpreted_method_moves_the_task_too() {
            (defstruct fixed (n int))
            (impl Answer fixed (answer ((self Self)) int (+ self::n (Thread::current-id))))
            (defun ask ((a :dyn Answer)) int (- (answer a) (Thread::current-id)))
-           (defun start ((a :dyn Answer)) Task<int> (go (ask a)))
+           (defun start ((a :dyn Answer)) Task<int> (task (ask a)))
            (compile start)
            (let ((tasks (the Vector<Task<int>> (Vector::new)))
                  (right 0))
@@ -162,7 +162,7 @@ fn a_parked_task_keeps_the_body_it_is_in_across_a_recompile() {
     same_on_one_and_four_threads(
         "typl_recompile_parked",
         r#"(defun slow () int (sleep 0.2) 1)
-           (defun start () Task<int> (go (slow)))
+           (defun start () Task<int> (task (slow)))
            (compile start)
            (defvar (pending Task<int>) (start))
            (sleep 0.05)

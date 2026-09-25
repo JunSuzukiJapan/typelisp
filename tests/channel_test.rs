@@ -148,7 +148,7 @@ fn an_unbuffered_send_waits_for_a_receiver() {
                  ())
                (defun main () string
                  (let ((ch (the Chan<int> (Chan::new 0))))
-                   (go (fill ch))
+                   (task (fill ch))
                    (yield)
                    (setf trail (append trail "before"))
                    (let ((v (unwrap (recv ch))))
@@ -173,7 +173,7 @@ fn a_full_buffer_stops_the_sender_until_room_appears() {
                  ())
                (defun main () int
                  (let ((ch (the Chan<int> (Chan::new 1))))
-                   (go (fill ch))
+                   (task (fill ch))
                    (yield)
                    ;; The first send had room and ran straight on; the second
                    ;; found the buffer full and parked; the third was never
@@ -259,7 +259,7 @@ fn closing_while_a_sender_waits_panics_that_sender() {
         r#"(defun fill ((ch Chan<int>)) () (send ch 1))
            (defun main () ()
              (let ((ch (the Chan<int> (Chan::new 0))))
-               (go (fill ch))
+               (task (fill ch))
                (yield)
                (close ch)
                (yield)))
@@ -309,7 +309,7 @@ fn a_channel_is_its_own_iterator() {
                  (close ch))
                (defun main () int
                  (let ((ch (the Chan<int> (Chan::new 2))) (acc 0))
-                   (go (produce ch 5))
+                   (task (produce ch 5))
                    (doiter (v ch) (setf acc (+ acc v)))
                    acc))
                (main)"#
@@ -331,7 +331,7 @@ fn a_worker_pool_runs() {
                  (let ((jobs (the Chan<int> (Chan::new 4)))
                        (out (the Chan<int> (Chan::new 4)))
                        (acc 0))
-                   (dotimes (w 3) (go (worker jobs out)))
+                   (dotimes (w 3) (task (worker jobs out)))
                    (dotimes (j 4) (send jobs (+ j 1)))
                    (close jobs)
                    (dotimes (k 4) (setf acc (+ acc (unwrap (recv out)))))
@@ -357,8 +357,8 @@ fn a_pipeline_runs() {
                  (let ((a (the Chan<int> (Chan::new 0)))
                        (b (the Chan<int> (Chan::new 0)))
                        (acc 0))
-                   (go (gen a 4))
-                   (go (square a b))
+                   (task (gen a 4))
+                   (task (square a b))
                    (doiter (v b) (setf acc (+ acc v)))
                    acc))
                (main)"#
@@ -393,10 +393,10 @@ fn fan_in_runs_with_a_task_per_input() {
                        (out (the Chan<int> (Chan::new 2)))
                        (acc 0))
                    (setf left 2)
-                   (go (feed a 1 3))
-                   (go (feed b 10 3))
-                   (go (drain a out))
-                   (go (drain b out))
+                   (task (feed a 1 3))
+                   (task (feed b 10 3))
+                   (task (drain a out))
+                   (task (drain b out))
                    (doiter (v out) (setf acc (+ acc v)))
                    acc))
                (main)"#
@@ -406,7 +406,7 @@ fn fan_in_runs_with_a_task_per_input() {
 }
 
 /// `after` is a channel that receives once, `sec` from now — Go's
-/// `time.After`, and the prelude's first use of `go`.
+/// `time.After`, and the prelude's first use of `task`.
 #[test]
 fn after_delivers_one_value() {
     assert_eq!(
@@ -466,7 +466,7 @@ fn a_compiled_send_and_receive_agree_with_the_interpreter() {
                      acc))
                  (defun main () int
                    (let ((ch (the Chan<int> (Chan::new 0))))
-                     (go (produce ch 5))
+                     (task (produce ch 5))
                      (consume ch)))"#;
     let plain = int(&format!("{}\n(main)", src));
     assert_eq!(plain, 20);
@@ -535,7 +535,7 @@ fn a_channel_holds_its_values_through_gc_stress() {
                  (close ch))
                (defun main () string
                  (let ((ch (the Chan<string> (Chan::new 1))) (acc ""))
-                   (go (fill ch 6))
+                   (task (fill ch 6))
                    (doiter (v ch) (setf acc (append acc v)))
                    acc))
                (main)"#

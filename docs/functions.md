@@ -2126,7 +2126,7 @@ CL がパス名指定子（文字列 or パス名）を受ける場所で、こ�
 
 ## 20. タスクとチャネル
 
-軽量スレッド（Go の goroutine 相当）の語彙。起動の `go`・`thread` と多重待ちの `select` は
+タスク（軽量スレッド）の語彙。起動の `task`・`thread` と多重待ちの `select` は
 特殊形で、[syntax.md §12](syntax.md#12-並行機構タスク) にある。ここはそれ以外——型とメソッドと関数。
 
 **協調的**で、1 つのタスクが切り替わるのは書いた場所だけ。タスクは
@@ -2141,7 +2141,7 @@ CL がパス名指定子（文字列 or パス名）を受ける場所で、こ�
 | `wait` | `(wait t)` | `(Task<T>)→T` | 完了を待ち、その値を返す |
 
 ```lisp
-(let ((t1 (go (work 7))))
+(let ((t1 (task (work 7))))
   (wait t1))
 ```
 
@@ -2173,7 +2173,7 @@ CL がパス名指定子（文字列 or パス名）を受ける場所で、こ�
   (close ch))
 
 (let ((ch (the Chan<i32> (Chan::new 2))))
-  (go (produce ch 5))
+  (task (produce ch 5))
   (doiter (v ch) (println "~a" v)))       ; Go の for v := range ch
 ```
 
@@ -2257,7 +2257,7 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
   `break`/`return`/`return-from` のどれで抜けても解放される。
 - **再入するとデッドロックする**（panic ではない）。自分のロックで止まったタスクは、
   スケジューラが「どれも進めない」と報告する。どちらの種類のデッドロックかまで言うには
-  タスクが自分を名乗れる必要があり、goroutine id は Go が意図的に隠しているもの。
+  タスクが自分を名乗れる必要があり、Go も同じものを意図的に隠している。
 - **`m::v` でロックの外から中身に触れる**が、別のタスクが書き換えの途中かもしれない
   という意味で未定義。Go の `sync.Mutex` と同じ立場で、所有権も借用検査も無い言語に
   `MutexGuard` のような静的保証は作れない。
@@ -2290,7 +2290,7 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
 ```
 
 - ブロックする C 関数（`defffi`）を呼んでも、止まるのはそのスレッドだけ。
-- `thread` の中の `go` は通常のタスクとして他のスレッドで走る。
+- `thread` の中の `task` は通常のタスクとして他のスレッドで走る。
 - `typl` でも使える。interpreted な `(thread (f ...))` は `f` をその場でコンパイルしてから
   専用スレッドで走らせる（[syntax.md §12.1.1](syntax.md#1211-thread--専用の-os-スレッドでタスクを起動する)）。
 
@@ -2305,7 +2305,7 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 **待つのはタスクであってスレッドではない。** `accept`・`read-line`・`write-string`・
 `tcp-connect`（名前解決を含む）・`recv-from` のどれも、用意できていなければ *そのタスク* を
 止め（`sleep`/`recv` と同じ）、他のタスクは走り続ける。だから Go と同じ形——接続ごとに
-`(go (serve c))`——でサーバが書ける。仕組みは syntax.md §12.4。
+`(task (serve c))`——でサーバが書ける。仕組みは syntax.md §12.4。
 
 ### 21.1 型
 
@@ -2377,7 +2377,7 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 
 (let ((l (unwrap (tcp-listen "0.0.0.0" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (go (serve c)) ()))
+          ((ok c) (progn (task (serve c)) ()))
           ((err e) (println "accept: ~a" (message e))))))
 
 ;; クライアント
@@ -2398,7 +2398,7 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 ;;           -addext subjectAltName=DNS:localhost -keyout key.pem -out cert.pem）
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (go (serve c)) ()))          ; 上の serve のまま。最初の read-line が握手
+          ((ok c) (progn (task (serve c)) ()))        ; 上の serve のまま。最初の read-line が握手
           ((err e) (println "accept: ~a" (message e))))))
 ;; そのクライアント: 自分の証明書を信頼して繋ぐ
 (unwrap (tls-connect "localhost" 8443 :timeout 5.0 :ca-file "cert.pem"))

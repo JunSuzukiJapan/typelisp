@@ -905,7 +905,7 @@ fn build_main_wrapper(
     // Without this an `eval`-carrying executable would run *two* schedulers
     // that never see each other: the bare one under `rt_run_program` for the
     // program's own tasks, and the `Interp`'s own for whatever an eval'd
-    // `(go ...)` admits -- which is the AOT-scheduler work's remaining
+    // `(task ...)` admits -- which is the AOT-scheduler work's remaining
     // limit this closes.
     let coroutine_fn_ty = crate::compile::llvm_builtins::coroutine_fn_type();
     let i64_ty = ctx.i64_type();

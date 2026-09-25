@@ -81,7 +81,7 @@ fn a_wait_group_waits_for_every_counted_task() {
                (defun main () int
                  (let ((wg (the WaitGroup (WaitGroup::make))))
                    (add wg 3)
-                   (dotimes (i 3) (go (work wg)))
+                   (dotimes (i 3) (task (work wg)))
                    (wait wg)
                    done-count))
                (main)"#
@@ -125,11 +125,11 @@ fn a_finished_group_can_be_used_again() {
                (defun main () int
                  (let ((wg (the WaitGroup (WaitGroup::make))))
                    (add wg 1)
-                   (go (work wg))
+                   (task (work wg))
                    (wait wg)
                    (add wg 2)
-                   (go (work wg))
-                   (go (work wg))
+                   (task (work wg))
+                   (task (work wg))
                    (wait wg)
                    finished))
                (main)"#
@@ -151,9 +151,9 @@ fn several_tasks_can_wait_on_one_group() {
                (defun main () int
                  (let ((wg (the WaitGroup (WaitGroup::make))))
                    (add wg 1)
-                   (go (watcher wg))
-                   (go (watcher wg))
-                   (go (watcher wg))
+                   (task (watcher wg))
+                   (task (watcher wg))
+                   (task (watcher wg))
                    (yield)
                    (done wg)
                    (yield)
@@ -198,7 +198,7 @@ fn wait_is_shared_with_the_task_handle() {
             r#"(defun answer () int 42)
                (defun main () int
                  (let ((wg (the WaitGroup (WaitGroup::make)))
-                       (t1 (go (answer))))
+                       (t1 (task (answer))))
                    (wait wg)
                    (wait t1)))
                (main)"#
@@ -225,7 +225,7 @@ fn a_mutex_keeps_a_read_modify_write_whole() {
                  (let ((m (the Mutex<int> (Mutex::make 0)))
                        (wg (the WaitGroup (WaitGroup::make))))
                    (add wg 4)
-                   (dotimes (i 4) (go (bump m wg)))
+                   (dotimes (i 4) (task (bump m wg)))
                    (wait wg)
                    (with-lock (n m) n)))
                (main)"#
@@ -368,7 +368,7 @@ fn compiled_bodies_agree_with_the_interpreter() {
                    (let ((m (the Mutex<int> (Mutex::make 0)))
                          (wg (the WaitGroup (WaitGroup::make))))
                      (add wg 4)
-                     (dotimes (i 4) (go (bump m wg)))
+                     (dotimes (i 4) (task (bump m wg)))
                      (wait wg)
                      (with-lock (n m) n)))"#;
     assert_eq!(int(&format!("{}\n(main)", src)), 4);
@@ -390,7 +390,7 @@ fn the_sync_types_survive_gc_stress() {
                  (let ((m (the Mutex<string> (Mutex::make "")))
                        (wg (the WaitGroup (WaitGroup::make))))
                    (add wg 5)
-                   (dotimes (i 5) (go (bump m wg)))
+                   (dotimes (i 5) (task (bump m wg)))
                    (wait wg)
                    (with-lock (s m) (length s))))
                (main)"#

@@ -34,7 +34,7 @@
 
 ---
 
-**軽量スレッド（Go の goroutine 相当）を入れた**（2026-09-08〜09-12、プランは
+**軽量スレッド（タスク）を入れた**（2026-09-08〜09-12、プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`）。**3 つの Phase すべて完了**。
 ユーザ向けリファレンスは [syntax.md §12](../syntax.md)（`go`/`select`）と
 [functions.md §20](../functions.md)（型・メソッド）。

@@ -25,7 +25,7 @@
 (defun accept-loop ((l socket-listener)) ()
   (loop
     (match (accept l)
-      ((ok c) (progn (go (serve c)) ()))
+      ((ok c) (progn (task (serve c)) ()))
       ((err e) (println "accept failed: ~a" (message e))))))
 
 (defun heartbeat () ()
@@ -40,7 +40,7 @@
         ((err e) (println "cannot listen: ~a" (message e)))
         ((ok l)
          (println "echo server on ~a" (local-address l))
-         (go (heartbeat))
+         (task (heartbeat))
          (accept-loop l))))))
 
 (main)

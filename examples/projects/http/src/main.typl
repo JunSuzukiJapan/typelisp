@@ -51,7 +51,7 @@
      (println "~a server on ~a" scheme (local-address l))
      (loop
        (match (accept l)
-         ((ok c) (progn (go (serve-connection c)) ()))
+         ((ok c) (progn (task (serve-connection c)) ()))
          ((err e) (println "accept failed: ~a" (message e))))))))
 
 (defun serve ((port int)) ()

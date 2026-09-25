@@ -377,17 +377,15 @@ well_known_symbols! {
      the module comment."
     DEFFFI => "defffi"
 
-    "Appended for the concurrency work (2026-09-09). `go` starts a task with a
-     call: `(go (f a b))` evaluates `f` and every argument where it stands and
-     only the call itself happens in the new task, which is why it is a form
-     with a callee and arguments rather than a thunk. It cannot be a macro over
-     a function — `lambda` needs its return type written out and a macro does
-     not know what `(f a b)` returns; only the checker does."
-    GO => "go"
+    "Appended for the concurrency work (2026-09-09) as the form that starts a
+     task, then spelled `go`. Retired on 2026-09-25 when the form was renamed
+     `task` (appended as `TASK` at the end): a rename in place would change
+     what an already-compiled index resolves to. Nothing produces this tag."
+    RETIRED_GO => "go"
 
     "Appended for `select` (2026-09-12). Waiting on several channels at once, \
      and the reason it is a form rather than a macro over a function is the \
-     same as `go`'s and then some: the arms' bodies are *its* subforms, a \
+     same as `task`'s and then some: the arms' bodies are *its* subforms, a \
      receive arm binds a name whose type comes from the channel, and the whole \
      form's type is the join of the arms' — none of which a macro can spell.\n\n\
      The channel expressions and the values to send are **not** in this node. \
@@ -427,7 +425,7 @@ well_known_symbols! {
     ELSE => "else"
 
     "Appended for tasks in AOT executables (2026-09-17). Two nodes only the
-     compile bridge builds, out of a `(go RET-R CALL)`: `(spawn RET-R
+     compile bridge builds, out of a `(task RET-R CALL)`: `(spawn RET-R
      LAMBDA)` hands the scheduler a closure to run as a task and wakes with
      its handle, and `(tag R E)` is `E`'s value in its tagged form — what the
      closure answers with, so a scheduler with no representations in hand
@@ -438,13 +436,23 @@ well_known_symbols! {
     SPAWN => "spawn"
     TAG => "tag"
 
-    "Appended for `thread` (2026-09-24). `(thread (f a b))` is `go`'s shape
-     and `go`'s rule — the parts of the call are evaluated where the form
+    "Appended for `thread` (2026-09-24). `(thread (f a b))` is `task`'s shape
+     and `task`'s rule — the parts of the call are evaluated where the form
      stands — for a task the scheduler runs on an OS thread of its own. The
-     bridge lowers it as it lowers `go`, except that the closure goes to
+     bridge lowers it as it lowers `task`, except that the closure goes to
      `(spawn-thread RET-R LAMBDA)`, which wakes with a `Thread<T>` handle."
     THREAD => "thread"
     SPAWN_THREAD => "spawn-thread"
+
+    "Appended for the rename of `go` (2026-09-25), which retired `RETIRED_GO`.
+     `task` starts a task with a call: `(task (f a b))` evaluates `f` and
+     every argument where it stands and only the call itself happens in the
+     new task, which is why it is a form with a callee and arguments rather
+     than a thunk. It cannot be a macro over a function — `lambda` needs its
+     return type written out and a macro does not know what `(f a b)`
+     returns; only the checker does. `(task ...)` gives a `Task<T>` as
+     `(thread ...)` gives a `Thread<T>`."
+    TASK => "task"
 }
 
 

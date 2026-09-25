@@ -11147,7 +11147,7 @@ Mutex はトークンを 1 つ入れた容量 1 のチャネル。**チャネル
 |---|---|---|
 | `(Chan::new)` の容量は `&optional` | **必須**（`(Chan::new 0)`） | デフォルト式の無い `&optional` は `Option<i32>` になり、それを解く組み込みはこの言語に 1 つも無い。Go も `make(chan int)` と `make(chan int, 16)` を書き分ける |
 | `WaitGroup::new` / `Mutex::new` | `::make` | `defstruct` の `new` はフィールドを取るもので、この 2 つはそれと合わない（`Array<T>::make`/`BitVector::make` が同じ理由の先例） |
-| Mutex の再入は panic | **デッドロックする** | プランの理由は「黙って止まるより親切」だったが、ここでは黙っていない——自分のロックで止まったタスクはスケジューラが「どれも進めない」と報告する。どちらの種類かまで言うにはタスクが自分を名乗れる必要があり、goroutine id は Go が意図的に隠しているもの |
+| Mutex の再入は panic | **デッドロックする** | プランの理由は「黙って止まるより親切」だったが、ここでは黙っていない——自分のロックで止まったタスクはスケジューラが「どれも進めない」と報告する。どちらの種類かまで言うにはタスクが自分を名乗れる必要があり、Go も同じものを意図的に隠している |
 
 ### gc_stress が捕まえたルート漏れ 1 件
 
@@ -11804,7 +11804,7 @@ AOT の `defvar` 初期化子は `main` と同じスケジューラの下で走�
 [[typelisp-c3-compiled-suspension]] [[typelisp-dangling-active-heap]]
 [[typelisp-c6-abi-never-implicit]] [[typelisp-visibility-pub]]
 
-## goroutine を OS スレッドで走らせる + `Thread<T>`（2026-09-18〜09-24）
+## タスクを OS スレッドで走らせる + `Thread<T>`（2026-09-18〜09-24）
 
 2026-09-08 の B6' で「マルチコア並列が無い」を v1 の制限として受け入れていたのを外した。
 プランは `~/.claude/plans/goroutine-os-goroutine-os-twinkly-thacker.md`、ブランチ
@@ -11907,3 +11907,42 @@ interpreted な印字メソッドは panic・`typl` のワーカーは drive 1 �
 関連 [[typelisp-os-threads-plan]] [[typelisp-aot-scheduler]]
 [[typelisp-c7-loop-safepoint]] [[typelisp-dangling-active-heap]]
 [[typelisp-island-regen-fixpoint]]
+
+## 特殊形 `go` を `task` に改名（2026-09-25）
+
+「goroutine」は Go の用語なので、typelisp では**タスク（task）**と呼ぶことにした。ユーザ向け
+文書は元から「タスク」を主語にしていて、goroutine は Go との比較に 3 か所出るだけだった。
+呼び名だけでなく、Go 由来で一番目立つ特殊形 `go` も `task` に改名した——
+`(task (f x))` が `Task<T>` を、`(thread (f x))` が `Thread<T>` を返す、対称な形になる。
+他の候補は実装と違う含みを持つので採らなかった（fiber は自前のマシンスタック、coroutine は
+内部のコルーチン ABI と衝突、process は独立ヒープ、actor はメールボックス）。`spawn` は
+`Thread::spawn` と島の IR ノード `spawn` が既に使っている。
+
+**変えたもの**:
+- well-known シンボル表は位置で参照されるので、`GO` をその場で改名せず `RETIRED_GO`
+  （名前 `"go"` のまま、誰も生成しない）として退役させ、`TASK => "task"` を末尾に足した
+  （`RETIRED_INT` の規則）。
+- 予約語は `task` と `thread`。`go` は普通の名前になった（関数名・局所関数名に使える）。
+  改名前に `task` を識別子に使うコードが 0 件であることを確かめた。
+- 内部名: `go`/`thread` 両方を扱うものは `spawn` 系（`check_spawn`・`forms::spawn_form`・
+  `core_bridge::translate_spawn_call`）、`go` 専用だったものは `task` 系（`SpawnKind::Task`・
+  `Op::Task`・`Spawn::Task`・`rt_suspend_task`・`call_state::SUSPEND_TASK`）。core IR の
+  タグも `task`。
+- extern 名が変わったので島と prelude を再生成（島は 1 回目で不動点、prelude も 2 回目で
+  不変）。
+- エディタ定義（Emacs/VS Code）、サンプル（echo-server・http）、テスト、コメント、
+  ユーザ向け文書と設計文書。goroutine という語はコメントと文書から除いた（Go 自体を解説する
+  `GoのGMPモデル.md` とプランのファイル名は除く）。言語としての Go との比較（「Go の規則」
+  「Go の `go` 文と違い」など）は残した。
+
+**変えなかったもの**: この文書と [completed-work.md](completed-work.md) の過去の節は、
+当時の名前 `go` のまま（経緯の記録なので）。[os-threads-design.md](os-threads-design.md) と
+[compiled-cps-design.md](compiled-cps-design.md) は冒頭に改名の注記を置き、本文を新しい名前で
+書いた。
+
+**機械的な置き換えが踏んだもの**: `(go ` → `(task ` の一括置換は、局所関数の**定義**
+`(labels ((go ...)))` まで書き換えた（`core_bridge` のテストで、呼び出し側の `(var go)` は
+残ったので名前が食い違った）。束縛・定義の位置に `(task` が現れた差分を探して戻した。
+退役の説明に書いた旧名 `` `go` `` も一度巻き込まれた。
+
+関連 [[typelisp-os-threads-plan]] [[typelisp-island-regen-fixpoint]]

@@ -133,7 +133,7 @@ pub(super) enum Op {
     Untrace,
     Step,
     DisassembleFn,
-    Go,
+    Task,
     Thread,
     Select,
 }
@@ -202,7 +202,7 @@ impl Op {
             wk::UNTRACE => Op::Untrace,
             wk::STEP => Op::Step,
             wk::DISASSEMBLE_FN => Op::DisassembleFn,
-            wk::GO => Op::Go,
+            wk::TASK => Op::Task,
             wk::THREAD => Op::Thread,
             wk::SELECT => Op::Select,
             _ => return None,

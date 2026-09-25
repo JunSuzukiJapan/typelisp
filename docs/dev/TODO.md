@@ -10,9 +10,9 @@
 
 今は無い。
 
-**軽量スレッド（goroutine 相当）は完了した。** プランは
+**軽量スレッド（タスク）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
-B1/B2（スケジューラ・`go`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
+B1/B2（スケジューラ・`task`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
 （`Chan<T>`・`select`・`WaitGroup`/`Mutex<T>`/`with-lock`）、C0〜C7
 （コンパイル出力の一様コルーチン化）がすべて入っている。経緯は
 [implementation-log.md](implementation-log.md) の 3 つの節。
@@ -21,9 +21,9 @@ B1/B2（スケジューラ・`go`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
 塞いだ（2026-09-18）。** プランは `~/.claude/plans/aot-os-quizzical-graham.md`
 （2026-09-17 分）と `~/.claude/plans/buzzing-sleeping-pelican.md`（2026-09-18 分）。
 スケジューラの核は `typelisp-rt::sched` の `Scheduler<B: TaskBody>` で、
-`compile-file` した実行ファイルの `go`・`sleep`・`wait`・`Chan`・`select`・
+`compile-file` した実行ファイルの `task`・`sleep`・`wait`・`Chan`・`select`・
 ソケット待ちが `typl` と同じ意味で動く。`eval` 入り AOT でスケジューラが 2 つ並ぶ
-（`eval` 内の `go` が次の `rt_eval` まで走らない）・printer の door 内で `go`/
+（`eval` 内の `task` が次の `rt_eval` まで走らない）・printer の door 内で `task`/
 チャネル操作が fatal・インタプリタが compiled クロージャを `funcall` すると
 中断できない・`compile-file` が `use` を受理しない、の 4 つは 2026-09-18 に解消——
 機械フレームの上のドライバ（`FrameStack::run_to_end`）が駆動中のスケジューラに
@@ -65,9 +65,9 @@ B1/B2（スケジューラ・`go`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
 | 片付いた作業の一覧・横断的な教訓 | [completed-work.md](completed-work.md) |
 | 完了した実装の経緯・設計判断 | [implementation-log.md](implementation-log.md) |
 | 言語仕様の確定事項・非採用と決めた機能 | [language-design.md](language-design.md)（非採用リストは §9） |
-| goroutine を OS スレッドで走らせる設計（ヒープ 2 層・STW GC・スケジューラ・`Thread<T>`） | [os-threads-design.md](os-threads-design.md) |
+| タスクを OS スレッドで走らせる設計（ヒープ 2 層・STW GC・スケジューラ・`Thread<T>`） | [os-threads-design.md](os-threads-design.md) |
 | 評価器を CPS 化した設計（Phase A） | [cps-evaluator-design.md](cps-evaluator-design.md) |
-| 並行機構のユーザ向けリファレンス | [syntax.md §12](../syntax.md)（`go`/`select`）と [functions.md §20](../functions.md)（型・メソッド） |
+| 並行機構のユーザ向けリファレンス | [syntax.md §12](../syntax.md)（`task`/`select`）と [functions.md §20](../functions.md)（型・メソッド） |
 | コンパイル出力のコルーチン ABI（Phase C、C0〜C7） | [compiled-cps-design.md](compiled-cps-design.md) |
 | Common Lisp と比べてまだ無いクラス・メソッド | [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) |
 | それを埋める実行計画（Phase / 対象外の理由 / 完了判定） | [cl-parity-plan.md](cl-parity-plan.md) |

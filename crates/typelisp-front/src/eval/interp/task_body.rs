@@ -5,7 +5,7 @@
 //! ("typl").
 //!
 //! The line between the two is *what the task needs*, not where it started:
-//! a compiled `go`'s task is compiled, and stays so until its chain applies
+//! a compiled `task`'s task is compiled, and stays so until its chain applies
 //! an interpreted closure (or a `:dyn` method nobody compiled). From there
 //! only the interpreter can go on, so the task stops, is turned into the
 //! interpreter's kind with its chain standing ([`Task::adopt`]), and belongs
@@ -86,7 +86,7 @@ impl TaskBody for TyplBody {
     type Cx = TyplCx;
     type Error = EvalError;
 
-    /// A compiled `go`'s task — compiled, so a worker may take it.
+    /// A compiled `task`'s task — compiled, so a worker may take it.
     fn start_closure(heap: &mut Heap, closure: Value) -> TyplBody {
         TyplBody(Kind::Compiled(CompiledTask::start_closure_handing_off(heap, closure)))
     }

@@ -523,7 +523,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 306] {
     use typelisp_rt::coroutine::{
         rt_loop_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
         rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_select, rt_suspend_chan_send,
-        rt_suspend_go, rt_suspend_io, rt_suspend_io_for, rt_suspend_main, rt_suspend_sleep, rt_suspend_thread,
+        rt_suspend_task, rt_suspend_io, rt_suspend_io_for, rt_suspend_main, rt_suspend_sleep, rt_suspend_thread,
         rt_suspend_wait, rt_suspend_yield,
     };
     use typelisp_rt::sys_builtin::{
@@ -876,7 +876,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 306] {
         ("rt_net_peer_address", rt_net_peer_address as *const () as usize),
         ("rt_suspend_wait", rt_suspend_wait as *const () as usize),
         ("rt_suspend_yield", rt_suspend_yield as *const () as usize),
-        ("rt_suspend_go", rt_suspend_go as *const () as usize),
+        ("rt_suspend_task", rt_suspend_task as *const () as usize),
         ("rt_suspend_thread", rt_suspend_thread as *const () as usize),
         ("rt_suspend_main", rt_suspend_main as *const () as usize),
         ("rt_thread_current_id", rt_thread_current_id as *const () as usize),

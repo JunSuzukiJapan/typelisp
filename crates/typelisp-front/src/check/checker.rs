@@ -338,25 +338,26 @@ impl Env {
 
 /// Names no binding may take.
 ///
-/// `go` is always a special form in head position, so a variable called `go`
-/// could be bound but never called — a name that silently does nothing is worse
-/// than a rejected one. `thread` is `go`'s twin, closed for the same reason
-/// when it arrived.
+/// `task` is always a special form in head position, so a variable called
+/// `task` could be bound but never called — a name that silently does nothing
+/// is worse than a rejected one. `thread` is `task`'s twin, closed for the
+/// same reason.
 ///
 /// The other special forms are *not* here. `(let ((if f)) ...)` has been legal
 /// since the beginning and the prelude and tests lean on names like `list` and
 /// `format` being ordinary words; closing that is a separate, breaking change.
-/// `go` is closed from the start because nothing has had the chance to depend
-/// on it.
+/// `task` and `thread` were closed when they arrived, before anything had the
+/// chance to depend on them (`task` replaced `go` on 2026-09-25, when no
+/// program used `task` as a name).
 fn is_reserved_name(name: &str) -> bool {
-    name == "go" || name == "thread"
+    name == "task" || name == "thread"
 }
 
-/// Which of the two task-starting forms [`Checker::check_go`] is checking.
+/// Which of the two task-starting forms [`Checker::check_spawn`] is checking.
 #[derive(Clone, Copy)]
 enum SpawnKind {
-    /// `(go ...)` — a task on the shared queue, answering `Task<T>`.
-    Go,
+    /// `(task ...)` — a task on the shared queue, answering `Task<T>`.
+    Task,
     /// `(thread ...)` — a task on an OS thread of its own, answering
     /// `Thread<T>`.
     Thread,
@@ -366,7 +367,7 @@ impl SpawnKind {
     /// The form's name, which is also its node's tag.
     fn form_name(self) -> &'static str {
         match self {
-            SpawnKind::Go => "go",
+            SpawnKind::Task => "task",
             SpawnKind::Thread => "thread",
         }
     }
@@ -3164,7 +3165,7 @@ impl Checker {
             "if" | "let" | "let*" | "progn" | "unsafe" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
-                | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "go" | "thread" | "select"
+                | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "task" | "thread" | "select"
                 | "quote" | "quasiquote" | "format" | "print" | "println" | "source-file"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block"
@@ -10116,8 +10117,8 @@ impl Checker {
             "match" => return self.check_match(heap, interp, env, args, arg_locs, expected),
             "panic" => return self.check_panic(heap, interp, env, args, arg_locs),
             "the" => return self.check_the(heap, interp, env, args, arg_locs),
-            "go" => return self.check_go(heap, interp, env, args, arg_locs, SpawnKind::Go),
-            "thread" => return self.check_go(heap, interp, env, args, arg_locs, SpawnKind::Thread),
+            "task" => return self.check_spawn(heap, interp, env, args, arg_locs, SpawnKind::Task),
+            "thread" => return self.check_spawn(heap, interp, env, args, arg_locs, SpawnKind::Thread),
             "select" => return self.check_select(heap, interp, env, args, arg_locs, expected),
             "as" => return self.check_as(heap, interp, env, args, arg_locs, false),
             "try-as" => return self.check_as(heap, interp, env, args, arg_locs, true),
@@ -11369,24 +11370,24 @@ impl Checker {
     /// plays for a `defun` parameter or `let` binding annotation), and the
     /// returned form is exactly `expr`'s own (no node of its own; `the`
     /// vanishes after checking).
-    /// `(go (f args...))` — start a task with a call. Yields `Task<T>`, where
+    /// `(task (f args...))` — start a task with a call. Yields `Task<T>`, where
     /// `T` is what the call returns.
     ///
     /// The callee and every argument are evaluated **here**, by the task
-    /// running the `go`, in the order written; only the call itself happens in
-    /// the new task. That is Go's own rule for `go f(x)`, and it is why this
+    /// running the `task` form, in the order written; only the call itself
+    /// happens in the new task. That is Go's own rule for `go f(x)`, and it is why this
     /// takes a call form rather than a thunk — a thunk would capture the
     /// arguments instead of evaluating them.
     ///
     /// It cannot be a macro over an ordinary function: `(spawn (lambda () T ...))`
     /// needs `T` spelled out, because `lambda` requires its return type, and a
     /// macro does not know what `(f a b)` returns. Only the checker does, which
-    /// is what makes `go` a form.
+    /// is what makes `task` a form.
     ///
     /// `(thread (f args...))` is the same form with the same rule, for a task
     /// that runs on an OS thread of its own, and yields `Thread<T>` — `kind`
     /// says which.
-    fn check_go(
+    fn check_spawn(
         &self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
@@ -11418,7 +11419,7 @@ impl Checker {
         }
         // Checked as an ordinary call, so the callee resolves, the arguments
         // are checked and generics instantiate exactly as they would without
-        // the `go`.
+        // the `task`.
         let inner = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
         // A macro can expand into something that is not a call even when what
         // was written looked like one, so the node itself is the last word.
@@ -11431,9 +11432,9 @@ impl Checker {
             return Err(Error::TypeError(format!("`{}` needs a call, and this is not one. {}", form_name, shape)));
         }
         let ret = self.repr_form(heap, &inner.ty)?;
-        let form = forms::go_form(heap, form_name, ret, inner.form)?;
+        let form = forms::spawn_form(heap, form_name, ret, inner.form)?;
         let ty = match kind {
-            SpawnKind::Go => super::registry::task_of(inner.ty),
+            SpawnKind::Task => super::registry::task_of(inner.ty),
             SpawnKind::Thread => super::registry::thread_of(inner.ty),
         };
         Ok(Checked::new(form, ty))

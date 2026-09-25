@@ -239,14 +239,14 @@ fn calls() {
         "(apply (var g) int-any-width (int-any-width) (int-any-width 1))",
         "(compile-fn (fn (f) () f))",
         "(compile-fn (method point new ()))",
-        // `(go CALL)` — the call is made in a task rather than here. It wraps
+        // `(task CALL)` — the call is made in a task rather than here. It wraps
         // a whole call node, so its own shape is the thinnest in the
         // vocabulary; the bridge is what takes the wrapped node apart.
-        "(go (call (f) () f (int-any-width) (int-any-width 1)))",
+        "(task (call (f) () f (int-any-width) (int-any-width 1)))",
         // The callee can be a value, in which case the wrapped node is an
         // `apply` and its callee is a form like any argument.
-        "(go (apply (var g) int-any-width (int-any-width) (int-any-width 1)))",
-        // `(thread CALL)` — `go`'s shape, for a task on an OS thread of its
+        "(task (apply (var g) int-any-width (int-any-width) (int-any-width 1)))",
+        // `(thread CALL)` — `task`'s shape, for a task on an OS thread of its
         // own.
         "(thread (call (f) () f (int-any-width) (int-any-width 1)))",
         // `(select ARM...)`. Each arm is a plain list rather than a node —
@@ -474,14 +474,14 @@ const SHARED_WITH_ISLAND: &[&str] = &[
 
 /// Core tags with no island counterpart: the bridge turns each into something
 /// else. A symbol becomes an interned id, quoted data is inlined, a function
-/// reference becomes a closure construction, `go` becomes a `let` of its
+/// reference becomes a closure construction, `task` becomes a `let` of its
 /// operands around a `spawn` of a thunk (the island only ever sees the
 /// `suspend` the thunk is handed to) and `thread` the same around a
 /// `spawn-thread`, and the pattern tags are consumed by
 /// `compile-match` rather than by `compile-value`.
 const EXPR_ONLY: &[&str] = &[
     "sym",
-    "go",
+    "task",
     "thread",
     "quote",
     "fnref",

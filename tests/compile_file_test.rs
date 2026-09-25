@@ -1124,26 +1124,26 @@ fn an_aot_executable_keeps_definitions_made_by_an_evaluated_form() {
     );
 }
 
-/// `(go ...)` inside an eval'd form is admitted to the *same* scheduler
+/// `(task ...)` inside an eval'd form is admitted to the *same* scheduler
 /// `main` runs under — one `Interp`, not two schedulers that never see each
 /// other. `main` asks `eval` to spawn `mark` and then `sleep`s; if the
-/// program still ran two schedulers, the task `go` admitted would sit in the
+/// program still ran two schedulers, the task `task` admitted would sit in the
 /// `Interp`'s own queue until some *later* `rt_eval` call serviced it (the
 /// AOT-scheduler work's stated limitation), so `trail` would still be empty
 /// when `main` wakes. It is not: `main`'s own `sleep` blocks its task on the
 /// one shared scheduler, which is exactly the opportunity `mark` needs to
 /// run.
 #[test]
-fn an_evaluated_go_runs_while_the_program_waits() {
+fn an_evaluated_task_runs_while_the_program_waits() {
     assert_eq!(
         compile_and_run(
-            "aot_eval_go_runs_concurrently",
+            "aot_eval_task_runs_concurrently",
             r#"
             (defvar (trail string) "")
             (defun mark () int (progn (setf trail (append trail "e")) 0))
             (defun main () int
               (progn
-                (match (eval (quote (go (mark))))
+                (match (eval (quote (task (mark))))
                   ((ok _) ())
                   ((err _) ()))
                 (sleep 0.05)
@@ -1515,7 +1515,7 @@ fn local_time_decoding_runs_in_an_executable() {
 //
 // An AOT executable used to have no scheduler: its `main` was one
 // `FrameStack::run`, so the first thing that put a task down — `sleep`,
-// `wait`, a channel, a socket that said "not yet" — was an abort, and `go`
+// `wait`, a channel, a socket that said "not yet" — was an abort, and `task`
 // refused outright ("needs an interpreter to run the task in"). The runtime
 // now carries the scheduler itself (`typelisp_rt::sched`), and these are the
 // same programs `tests/concurrency_test.rs` and friends run under the
@@ -1544,17 +1544,17 @@ fn compile_only(name: &str, source: &str) -> PathBuf {
     out_path
 }
 
-/// `(go ...)` in a standalone executable starts a task, and `wait` gets its
+/// `(task ...)` in a standalone executable starts a task, and `wait` gets its
 /// answer — for an `i32` and for a `string`, because the answer crosses as
 /// one word and a raw-word delivery would pass exactly one of the two.
 #[test]
-fn go_and_wait_run_in_a_standalone_executable() {
+fn task_and_wait_run_in_a_standalone_executable() {
     let (code, err) = compile_and_capture(
-        "go_wait_aot",
+        "task_wait_aot",
         r#"(defun work ((n int)) int (* n 2))
            (defun greet ((name string)) string (append "hi " name))
            (defun main () int
-             (let ((a (go (work 21))) (b (go (greet "ada"))))
+             (let ((a (task (work 21))) (b (task (greet "ada"))))
                (if (and (= (wait a) 42) (equal (wait b) "hi ada")) 0 1)))"#,
     );
     assert_eq!(code, 0, "stderr was: {}", err);
@@ -1571,7 +1571,7 @@ fn sleep_in_a_standalone_executable_stops_only_its_task() {
            (defun slow () int (progn (sleep 0.08) (setf trail (append trail "a")) 0))
            (defun fast () int (progn (sleep 0.02) (setf trail (append trail "b")) 0))
            (defun main () int
-             (let ((a (go (slow))) (b (go (fast))))
+             (let ((a (task (slow))) (b (task (fast))))
                (progn (wait a) (wait b) (if (equal trail "ba") 0 1))))"#,
     );
     assert_eq!(code, 0, "stderr was: {}", err);
@@ -1594,7 +1594,7 @@ fn channels_and_select_run_in_a_standalone_executable() {
            (defun main () int
              (let ((r (the Chan<int> (Chan::new 0)))
                    (b (the Chan<string> (Chan::new 1))))
-               (go (producer r))
+               (task (producer r))
                (send b "x")
                (let ((sum (drain r))
                      (picked (select ((v (recv r)) "r") ((v (recv b)) (format false "b=~a" v)))))
@@ -1625,7 +1625,7 @@ fn a_long_compiled_loop_runs_in_a_standalone_executable() {
 
 /// A `defvar` initialiser is an ordinary task under the program's
 /// scheduler now, not a call on a machine frame with nowhere to put a
-/// suspension down — so it may make a channel, `go`, or `wait` exactly like
+/// suspension down — so it may make a channel, `task`, or `wait` exactly like
 /// any other code. Used to abort with "a compiled callee suspended under a
 /// call that has to return" the moment any initialiser did.
 #[test]
@@ -1642,14 +1642,14 @@ fn a_defvar_initialiser_may_make_a_channel_in_a_standalone_executable() {
     assert_eq!(code, 0, "stderr was: {}", err);
 }
 
-/// The same, for an initialiser that actually waits — `go` then `wait`,
+/// The same, for an initialiser that actually waits — `task` then `wait`,
 /// which parks the initialiser's task until the one it started finishes.
 #[test]
 fn a_defvar_initialiser_may_wait_in_a_standalone_executable() {
     let (code, err) = compile_and_capture(
         "defvar_wait_aot",
         r#"(defun answer () int 42)
-           (defvar (x int) (wait (go (answer))))
+           (defvar (x int) (wait (task (answer))))
            (defun main () int (if (= x 42) 0 1))"#,
     );
     assert_eq!(code, 0, "stderr was: {}", err);
@@ -1714,7 +1714,7 @@ fn a_deadlocked_standalone_executable_says_so() {
 }
 
 /// An echo server compiled to an executable: `accept` parks the main task on
-/// the listener, the connection is served by a task `go` started, and the
+/// the listener, the connection is served by a task `task` started, and the
 /// socket reads inside it park that task — the shape `examples/projects/
 /// echo-server` has, judged from the outside with a real TCP client.
 #[test]
@@ -1739,7 +1739,7 @@ fn an_echo_server_runs_in_a_standalone_executable() {
                    ((ok l)
                     (match (accept l)
                       ((err e) 3)
-                      ((ok c) (wait (go (serve c))))))))))"#,
+                      ((ok c) (wait (task (serve c))))))))))"#,
     );
     // A free port, found the usual racy way: bind to 0, read it back, let go.
     let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();

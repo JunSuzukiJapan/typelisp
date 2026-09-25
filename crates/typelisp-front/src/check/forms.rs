@@ -206,11 +206,11 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
     core::tagged(heap, "block", &[name, body, repr])
 }
 
-/// `(go RET-R CALL)` — run `CALL` in a new task.
+/// `(task RET-R CALL)` — run `CALL` in a new task.
 ///
 /// One field, and it is an already-checked call node (`call`/`assoc`/
 /// `dyn-call`/`apply`). The callee and the arguments inside it are evaluated by
-/// the task that runs the `go`, in the order they are written; only the call
+/// the task that runs the `task` form, in the order they are written; only the call
 /// itself happens in the new task. That is Go's rule for `go f(x)`, and it is
 /// why this wraps a call rather than a thunk — a thunk would capture the
 /// arguments instead of evaluating them.
@@ -223,13 +223,13 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
 ///
 /// `ret` is the call's result representation — what the task's `Task<T>`
 /// will answer `wait` with. The evaluator has no use for it (the callee's
-/// own signature says), but compiled code does: the `go` site there builds
+/// own signature says), but compiled code does: the `task` site there builds
 /// a closure that makes the call and hands the result to the scheduler
 /// **tagged**, and only the representation says how to tag a raw word.
 ///
-/// `tag` is `"go"` or `"thread"`: `(thread RET-R CALL)` is the same node for
+/// `tag` is `"task"` or `"thread"`: `(thread RET-R CALL)` is the same node for
 /// a task that runs on an OS thread of its own.
-pub(super) fn go_form(heap: &mut Heap, tag: &str, ret: Value, call: Value) -> Result<Value, Error> {
+pub(super) fn spawn_form(heap: &mut Heap, tag: &str, ret: Value, call: Value) -> Result<Value, Error> {
     let call = rooted(heap, call);
     let ret = rooted(heap, ret);
     let form = core::tagged(heap, tag, &[ret, call])?;

@@ -1,6 +1,9 @@
 # コンパイル出力の一様コルーチン化（設計）
 
 Phase C。プランは `~/.claude/plans/go-gorutine-adaptive-raccoon.md` の Phase C 節。
+
+> 特殊形 `go` は 2026-09-25 に `task` へ改名した（[implementation-log.md](implementation-log.md) の同日の節）。この文書は新しい名前で書いている。
+
 Phase A（評価器の CPS 化、`cps-evaluator-design.md`）の続きで、**同じことをコンパイラの
 出力にもやる**。
 
@@ -165,7 +168,7 @@ M:N でスレッド間を動かすのは後者で、前者は main スレッド�
 だけが理由で、`assert_send::<CompiledTask>()` はちょうど `*mut Cell` で落ちる——壁が
 ヒープにあってスケジューラに無いことの実証。スケジューラは Heap の持ち主が所有する値
 （`Interp` のフィールド／`rt_run_entry_driven` のフレーム）で、global にも thread_local
-にも置かない。`go` が hook（`SPAWN_TASK`）でなく suspend 種別になったので thread_local
+にも置かない。`task` が hook（`SPAWN_TASK`）でなく suspend 種別になったので thread_local
 は 1 本減った。OS を待つ場所は `wake_io` の 1 つのまま。
 
 残る穴が 1 つ: **呼び出しの無いタイトループには driver 往復が来ない**ので safepoint が
@@ -786,11 +789,11 @@ ABI の札は「誰かがその本体を呼ぶとき」にしか読まれない�
 エントリ）を渡し、初期化子 1 つにつき `admit`→`drive`、最後に `main` を
 `admit`→`drive`（REPL がフォームごとに drive するのと同じ形。前の drive が
 残したタスクは次の drive で走る）。これで `defvar` 初期化子がチャネルを作る・
-`go`/`wait` するといった「ふつうのプログラム」になり、`rt_drive_body`
+`task`/`wait` するといった「ふつうのプログラム」になり、`rt_drive_body`
 （printer の door）だけが `run_to_end` に残る。`eval` を呼ぶ実行ファイルは
 `rt_run_program_interp[_int]`（`typelisp_front::shim`）——front の `Task` で
 `main` と初期化子を回すので、`Interp::scheduler` が1つだけになり、eval の中の
-`(go ...)` が次の `rt_eval` を待たず動く。生成時（`eval_env.is_some()`）に
+`(task ...)` が次の `rt_eval` を待たず動く。生成時（`eval_env.is_some()`）に
 どちらの shim を呼ぶか決める——実行時の hook では分岐しない
 （[[typelisp-c6-abi-never-implicit]]と同じ規律）。
 
@@ -946,7 +949,7 @@ cleanup は確保する。`gc-stress` の下で、スロットは `alloca` な�
 (defun tick ((name string) (n i32)) ()
   (dotimes (i n) (setf trail (append trail name)) (yield)))
 (compile tick)
-(let ((a (go (tick "a" 3))) (b (go (tick "b" 3)))) (progn (wait a) (wait b)))
+(let ((a (task (tick "a" 3))) (b (task (tick "b" 3)))) (progn (wait a) (wait b)))
 trail                                  ; => "ababab"
 ```
 
@@ -999,7 +1002,7 @@ compiled 側へ橋渡しした。`Blocked` を太らせるより、受け手を 
 
 だから引数は marshal を跨いで生き残らなければならない。`State::CompiledEnter`
 は引数を**ヒープリスト**で運び（状態スロットが根にする。`State::Enter` が
-`go` の引数にしているのと同じ理由——`Vec<Value>` はコレクタから見えない）、
+`task` の引数にしているのと同じ理由——`Vec<Value>` はコレクタから見えない）、
 encode は切り替えの**後**で行う。`DriveStart` と `DriveCtx` が分かれているのは
 この一点のため。
 
@@ -1011,7 +1014,7 @@ encode は切り替えの**後**で行う。`DriveStart` と `DriveCtx` が分�
 `coroutine-begin` のコメントは「C3 でこの push/pop の対は成り立たなくなり、
 frame の root は `FrameStack::roots()` へ移る」と書いていた。**移らなかった。
 理由はルートスタックがタスクごとだから**——タスクが待っている間、その stack
-には誰も push しない。鎖に入る他の道（別のタスク、compiled からの `go`、
+には誰も push しない。鎖に入る他の道（別のタスク、compiled からの `task`、
 `rt_apply_any` のコールバック）はどれも自分の stack を持つか、1 活性の中で
 均衡する。だから LIFO は今も成り立ち、`FrameStack::roots()` は**答えの出て
 いる問いへの 2 つ目の答え**になった（C5 の、後ろにタスクのいないドライバの

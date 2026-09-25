@@ -1346,7 +1346,7 @@ fn emit_rt_call(
 /// nothing else pushes on *its* stack, and the only thing the interpreter puts
 /// there across a suspension is a continuation frame whose base the resume
 /// truncates back to. Every other way into a standing chain — another task, a
-/// `go` from compiled code, a callback into the interpreter on a machine
+/// `task` from compiled code, a callback into the interpreter on a machine
 /// frame — either has its own stack or balances within one
 /// activation. So LIFO still holds, and `FrameStack::roots()` is a second
 /// answer to a question that already has one.

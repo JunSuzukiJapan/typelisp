@@ -203,8 +203,8 @@ pub struct Ctx<'a> {
     /// is nothing for a cell to share.
     visible_siblings: &'a HashSet<SymRef>,
     /// Names a nested `lambda` captures **by value**, never through a cell —
-    /// the arguments a compiled `go` hoisted into a `let` so that the closure
-    /// it starts the task with can carry them ([`translate_go`]). They are
+    /// the arguments a compiled `task` hoisted into a `let` so that the closure
+    /// it starts the task with can carry them ([`translate_spawn_call`]). They are
     /// bound once and never assigned, so there is nothing for a cell to
     /// share, and the binder outside the lambda is an ordinary slot: putting
     /// them in `cell_names` on the lambda's side alone would have the closure
@@ -487,9 +487,9 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         }
 
         // ---- calls -------------------------------------------------------
-        "go" => translate_go(heap, form, "spawn", cx),
-        "thread" => translate_go(heap, form, "spawn-thread", cx),
-        "spawn" => translate_spawn(heap, form, "rt_suspend_go", cx),
+        "task" => translate_spawn_call(heap, form, "spawn", cx),
+        "thread" => translate_spawn_call(heap, form, "spawn-thread", cx),
+        "spawn" => translate_spawn(heap, form, "rt_suspend_task", cx),
         "spawn-thread" => translate_spawn(heap, form, "rt_suspend_thread", cx),
         "tag" => translate_tag(heap, form, cx),
         "call" => translate_call(heap, form, cx),
@@ -895,7 +895,7 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// The leading fields of each call node — how many there are, and where the
 /// argument representations sit among them.
 ///
-/// The *only* consumer is [`translate_go`], which takes the evaluated parts
+/// The *only* consumer is [`translate_spawn_call`], which takes the evaluated parts
 /// out of a call node and puts variables in their place. Everything else
 /// about these nodes is decided by their own translations.
 fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
@@ -912,11 +912,11 @@ fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
     }
 }
 
-/// `(go RET-R CALL)` -> `(let ((g R E)...) (spawn RET-R (lambda () RET-R
+/// `(task RET-R CALL)` -> `(let ((g R E)...) (spawn RET-R (lambda () RET-R
 /// (tag RET-R CALL'))))`, and from there to the island.
 ///
 /// **The call happens in a task, and what a task runs is a compiled
-/// closure.** So a compiled `go` does what the interpreted one does *up to*
+/// closure.** So a compiled `task` does what the interpreted one does *up to*
 /// the call: every part of it — the arguments, and the callee itself for an
 /// `apply` — is evaluated here, in the starting task, and bound in a `let`.
 /// The closure captures those bindings and makes the call; `CALL'` is `CALL`
@@ -940,12 +940,12 @@ fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
 ///
 /// `(thread RET-R CALL)` is the same rewriting with `spawn-thread` for
 /// `spawn` — `spawn` names which.
-fn translate_go(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> Result<Value, Error> {
+fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> Result<Value, Error> {
     let ret_repr = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
     let call = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
     let tag = core::op(heap, call).ok_or_else(|| malformed(heap, form))?.to_string();
     let (skip, repr_at) = call_node_shape(&tag).ok_or_else(|| {
-        Error::TypeError(format!("compile: `go` wraps a `{}`, which is not a call (internal error)", tag))
+        Error::TypeError(format!("compile: `task` wraps a `{}`, which is not a call (internal error)", tag))
     })?;
     let parts = core::fields(heap, call)?;
     if parts.len() < skip {
@@ -1022,7 +1022,7 @@ fn translate_go(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> Result<Va
     translate_let(&mut s, let_form, inner)
 }
 
-/// `(spawn RET-R LAMBDA)` -> `(suspend "rt_suspend_go" KIND -1 0 (2 .
+/// `(spawn RET-R LAMBDA)` -> `(suspend "rt_suspend_task" KIND -1 0 (2 .
 /// LAMBDA'))`: build the closure, hand it to the scheduler, and wake with the
 /// task's handle.
 ///
@@ -1032,7 +1032,7 @@ fn translate_go(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> Result<Va
 /// admits the task and resumes this frame at once with the handle. `KIND` is
 /// the handle's: a tagged box, read back unchanged.
 ///
-/// Only [`translate_go`] builds this node; the checker never does.
+/// Only [`translate_spawn_call`] builds this node; the checker never does.
 ///
 /// `(spawn-thread RET-R LAMBDA)` is the same with `rt_suspend_thread`, and
 /// wakes with a `Thread<T>` handle — `shim` names which.
@@ -1044,7 +1044,7 @@ fn translate_spawn(heap: &mut Heap, form: Value, shim: &str, cx: Ctx) -> Result<
 
 /// `(tag R E)` -> `(tag KIND E')`: `E`'s value in its tagged form, per its
 /// representation — what a value takes on its way into a struct field, made
-/// available as an expression. Only [`translate_go`] builds this node, for
+/// available as an expression. Only [`translate_spawn_call`] builds this node, for
 /// the closure's result.
 fn translate_tag(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;

@@ -82,7 +82,7 @@ const ECHO: &str = r#"
 (defun echo-serve ((l socket-listener) (n int)) ()
   (dotimes (i n)
     (match (accept l)
-      ((ok c) (go (echo-conn c)))
+      ((ok c) (task (echo-conn c)))
       ((err e) (panic (message e))))))
 "#;
 
@@ -91,7 +91,7 @@ fn a_line_is_echoed_over_the_loopback() {
     let src = format!(
         "{LISTEN}{ECHO}
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (echo-serve l 1))
+  (task (echo-serve l 1))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
     (write-line c \"hello, socket\")
     (let ((reply (unwrap (read-line c))))
@@ -116,7 +116,7 @@ fn the_compiled_wait_loop_sees_the_same_answers() {
 (compile round-trip)
 (compile echo-conn)
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (echo-serve l 1))
+  (task (echo-serve l 1))
   (let ((r (round-trip (port-of l))))
     (close l)
     r))"
@@ -139,8 +139,8 @@ fn a_task_waiting_on_accept_does_not_stop_the_others() {
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" port))))
     (close c)))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (tick 5))
-  (go (connect-later (port-of l)))
+  (task (tick 5))
+  (task (connect-later (port-of l)))
   (let ((c (unwrap (accept l))))
     (close c)
     (close l)
@@ -189,7 +189,7 @@ fn end_of_input_when_the_peer_closes_and_half_close() {
 (defun serve-one ((l socket-listener)) ()
   (match (accept l) ((ok c) (count-lines c)) ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (serve-one l))
+  (task (serve-one l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
     (write-line c \"one\")
     (write-line c \"two\")
@@ -217,7 +217,7 @@ fn the_byte_view_shares_the_connection() {
        (close b)))
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (send-bytes l))
+  (task (send-bytes l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
     (let ((h (unwrap (read-line c)))
           (b (byte-stream-of c)))
@@ -238,7 +238,7 @@ fn a_pushed_back_character_refuses_a_byte_read() {
     ((ok c) (write-string c \"ab\") (close c))
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (send-text l))
+  (task (send-text l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
     (let ((a (unwrap (read-char c))))
       (unread-char c a)
@@ -305,17 +305,17 @@ fn several_clients_are_served_at_once() {
       (close c)
       reply)))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (echo-serve l 3))
+  (task (echo-serve l 3))
   (let ((port (port-of l)))
-    (let ((a (go (client port \"a\")))
-          (b (go (client port \"b\")))
-          (c (go (client port \"c\"))))
+    (let ((a (task (client port \"a\")))
+          (b (task (client port \"b\")))
+          (c (task (client port \"c\"))))
       (let ((r (format false \"~a~a~a\" (wait a) (wait b) (wait c))))
         (close l)
         r))))"
     );
     assert_eq!(text(&src), "abc");
-    assert_eq!(text_compiled(&format!("{src}").replace("(go (echo-serve l 3))", "(compile echo-conn) (go (echo-serve l 3))")), "abc");
+    assert_eq!(text_compiled(&format!("{src}").replace("(task (echo-serve l 3))", "(compile echo-conn) (task (echo-serve l 3))")), "abc");
 }
 
 // ---- timeouts, names, UDP, TLS ---------------------------------------------
@@ -339,7 +339,7 @@ fn a_timed_wait_answers_true_when_data_arrives_first() {
     ((ok c) (sleep 0.02) (write-line c \"late\") (close c))
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (send-late l))
+  (task (send-late l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
     (let ((first (wait-readable c 0.005))
           (second (wait-readable c 2.0)))
@@ -368,7 +368,7 @@ fn a_compiled_timed_wait_answers_the_same() {
         (format false \"~a ~a ~a\" first second line)))))
 (compile client)
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (send-late l))
+  (task (send-late l))
   (let ((r (client (port-of l))))
     (close l)
     r))"
@@ -382,7 +382,7 @@ fn a_timed_wait_does_not_stop_other_tasks() {
 (defvar (ticks int) 0)
 (defun tick ((n int)) () (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
 (let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
-  (go (tick 5))
+  (task (tick 5))
   (match (accept l :timeout 0.1)
     ((ok c) (progn (close c) "accepted?!"))
     ((err e) (format false "~a ~a" (message e) (>= ticks 5)))))"#;
@@ -394,7 +394,7 @@ fn connecting_by_name_resolves_on_a_thread() {
     let src = format!(
         "{LISTEN}{ECHO}
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (echo-serve l 1))
+  (task (echo-serve l 1))
   (let ((c (unwrap (tcp-connect \"localhost\" (port-of l)))))
     (write-line c \"by name\")
     (let ((reply (unwrap (read-line c))))
@@ -410,7 +410,7 @@ fn an_unresolvable_name_is_an_error_value_and_others_keep_running() {
     let src = r#"
 (defvar (ticks int) 0)
 (defun tick ((n int)) () (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
-(go (tick 3))
+(task (tick 3))
 (match (tcp-connect "no-such-host.invalid" 80)
   ((ok c) (progn (close c) "connected?!"))
   ((err e) (if (> (length (message e)) 0) "resolve failed" "")))"#;
@@ -468,7 +468,7 @@ fn tls_against_a_plain_peer_fails_cleanly() {
     ((ok c) (write-line c \"not tls\") (close c))
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (sink l))
+  (task (sink l))
   (match (tls-connect \"localhost\" (port-of l) :timeout 5.0)
     ((ok c) (progn (close c) \"handshake succeeded?!\"))
     ((err e) (if (> (length (message e)) 0) \"tls failed\" \"\"))))"
@@ -486,7 +486,7 @@ fn a_unix_domain_socket_is_the_same_stream() {
     let src = format!(
         "{ECHO}
 (let ((l (unwrap (unix-listen \"{p}\"))))
-  (go (echo-serve l 1))
+  (task (echo-serve l 1))
   (let ((c (unwrap (unix-connect \"{p}\"))))
     (write-line c \"over unix\")
     (let ((reply (unwrap (read-line c)))
@@ -498,7 +498,7 @@ fn a_unix_domain_socket_is_the_same_stream() {
     );
     assert_eq!(text(&src), format!("over unix / {} / false", path.display()));
     let _ = std::fs::remove_file(&path);
-    assert_eq!(text_compiled(&src.replace("(go (echo-serve l 1))", "(compile echo-conn) (go (echo-serve l 1))")), format!("over unix / {} / false", path.display()));
+    assert_eq!(text_compiled(&src.replace("(task (echo-serve l 1))", "(compile echo-conn) (task (echo-serve l 1))")), format!("over unix / {} / false", path.display()));
 }
 
 #[test]
@@ -581,7 +581,7 @@ fn a_line_is_echoed_over_tls() {
     let src = format!(
         "{LISTEN}{ECHO}
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
-  (go (echo-serve l 1))
+  (task (echo-serve l 1))
   (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\"))))
     (write-line c \"hello, tls\")
     (let ((reply (unwrap (read-line c))))
@@ -590,7 +590,7 @@ fn a_line_is_echoed_over_tls() {
       reply)))"
     );
     assert_eq!(text(&src), "hello, tls");
-    assert_eq!(text_compiled(&src.replace("(go (echo-serve l 1))", "(compile echo-conn) (go (echo-serve l 1))")), "hello, tls");
+    assert_eq!(text_compiled(&src.replace("(task (echo-serve l 1))", "(compile echo-conn) (task (echo-serve l 1))")), "hello, tls");
 }
 
 #[test]
@@ -606,7 +606,7 @@ fn a_server_that_writes_first_shakes_hands_in_its_write() {
     ((ok c) (write-line c \"220 ready\") (close c))
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
-  (go (greet l))
+  (task (greet l))
   (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\"))))
     (let ((reply (unwrap (read-line c))))
       (close c)
@@ -636,7 +636,7 @@ fn an_untrusted_certificate_is_the_clients_error_and_the_servers_socket_error() 
        (close c)))
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
-  (go (serve-one l))
+  (task (serve-one l))
   (let ((outcome (match (tls-connect \"localhost\" (port-of l) :timeout 5.0)
                    ((ok c) (progn (close c) \"trusted?!\"))
                    ((err e) \"rejected\"))))
@@ -668,7 +668,7 @@ fn a_peer_that_goes_away_does_not_panic_the_server() {
      (close c))
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (talk l))
+  (task (talk l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
     (write-line c \"go\")
     (close c)
@@ -684,7 +684,7 @@ fn a_peer_that_goes_away_does_not_panic_the_server() {
     ((ok c) (read-line c) (close c))
     ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (serve-one l))
+  (task (serve-one l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
     (write-line c \"bye\")
     (let ((after (read-line c)))
@@ -718,7 +718,7 @@ fn mutual_tls_admits_a_client_with_a_certificate_and_refuses_one_without() {
     let src = format!(
         "{LISTEN}{ECHO}
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\" :client-ca \"{ca}\"))))
-  (go (echo-serve l 2))
+  (task (echo-serve l 2))
   (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\"
                                 :cert-file \"{client_cert}\" :key-file \"{client_key}\"))))
     (write-line c \"with a certificate\")
@@ -779,7 +779,7 @@ fn the_peer_subject_names_both_sides_and_sni_picks_the_certificate() {
       ((err e) (panic (message e))))))
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\" :client-ca \"{ca}\"))))
   (unwrap (tls-add-certificate l \"alt.test\" \"{alt_cert}\" \"{alt_key}\"))
-  (go (identify l 2))
+  (task (identify l 2))
   (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :ca-file \"{ca}\"
                                 :cert-file \"{client_cert}\" :key-file \"{client_key}\"))))
     (write-line c \"hello\")
@@ -822,7 +822,7 @@ fn socket_options_apply_and_plain_connections_have_no_peer_subject() {
 (defun serve-one ((l socket-listener)) ()
   (match (accept l) ((ok c) (read-line c) (close c)) ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (go (serve-one l))
+  (task (serve-one l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
     (set-nodelay c true)
     (set-keepalive c true)
@@ -834,5 +834,5 @@ fn socket_options_apply_and_plain_connections_have_no_peer_subject() {
       r)))"
     );
     assert_eq!(text(&src), "true true");
-    assert_eq!(text_compiled(&src.replace("(go (serve-one l))", "(compile serve-one) (go (serve-one l))")), "true true");
+    assert_eq!(text_compiled(&src.replace("(task (serve-one l))", "(compile serve-one) (task (serve-one l))")), "true true");
 }
